@@ -54,44 +54,44 @@ describe('event editor draft round trips', () => {
   });
   it.each([true, false] as const)(
     'preserves Tournament Automated Scheduling=%s through the editor command seam',
-    (automatedScheduling) => {
+    (isAutomatedScheduling) => {
       const fixture = eventEditorFixtures.find(
         ({ name }) => name === 'tournament with pools and playoffs',
       )!.event;
       const event = {
         ...fixture,
-        automatedScheduling,
+        isAutomatedScheduling,
       } as unknown as Event;
 
       const draft = legacyEventToEditorDraft(event);
       expect(draft.basics.eventType).toBe('TOURNAMENT');
       expect(draft.schedule.mode).toBe('FIXED_END');
-      expect(draft.schedule.automatedScheduling).toBe(automatedScheduling);
+      expect(draft.schedule.isAutomatedScheduling).toBe(isAutomatedScheduling);
 
       const projected = editorDraftToLegacyEvent(draft);
-      expect(projected.automatedScheduling).toBe(automatedScheduling);
+      expect(projected.isAutomatedScheduling).toBe(isAutomatedScheduling);
 
       const visibleFormValues = editorSnapshotToFormValues(
         emptyEditorSnapshot(draft, 'CREATE'),
       );
-      expect(visibleFormValues.automatedScheduling).toBe(automatedScheduling);
+      expect(visibleFormValues.isAutomatedScheduling).toBe(isAutomatedScheduling);
       const formDraft = eventFormValuesToEditorDraft(visibleFormValues);
-      expect(formDraft.schedule.automatedScheduling).toBe(automatedScheduling);
+      expect(formDraft.schedule.isAutomatedScheduling).toBe(isAutomatedScheduling);
 
       const parsed = createEventEditorCommandSchema.parse({
         contractVersion: 3,
-        createOperationId: `create-operation-tournament-automation-${automatedScheduling}`,
+        createOperationId: `create-operation-tournament-automation-${isAutomatedScheduling}`,
         expectedRevisions: expectedCreateRevisions,
         draft: formDraft,
         completion: {
-          mode: automatedScheduling
+          mode: isAutomatedScheduling
             ? 'CREATE_AND_BUILD_SCHEDULE'
             : 'CREATE_ONLY',
         },
       });
-      expect(parsed.draft.schedule.automatedScheduling).toBe(automatedScheduling);
+      expect(parsed.draft.schedule.isAutomatedScheduling).toBe(isAutomatedScheduling);
       expect(parsed.completion.mode).toBe(
-        automatedScheduling ? 'CREATE_AND_BUILD_SCHEDULE' : 'CREATE_ONLY',
+        isAutomatedScheduling ? 'CREATE_AND_BUILD_SCHEDULE' : 'CREATE_ONLY',
       );
     },
   );
@@ -102,7 +102,7 @@ describe('event editor draft round trips', () => {
     const sourceEvent = {
       ...fixture,
       affiliateUrl: '',
-      automatedScheduling: false,
+      isAutomatedScheduling: false,
     } as unknown as Event;
     const formValues = editorSnapshotToFormValues(
       emptyEditorSnapshot(legacyEventToEditorDraft(sourceEvent), 'CREATE'),
@@ -135,10 +135,10 @@ describe('event editor draft round trips', () => {
       sportsById: new Map(),
     });
 
-    expect(builtDraft.automatedScheduling).toBe(false);
+    expect(builtDraft.isAutomatedScheduling).toBe(false);
     const commandDraft = eventFormValuesToEditorDraft(builtDraft as EventFormValues);
-    expect(commandDraft.schedule.automatedScheduling).toBe(false);
-    expect(editorDraftToLegacyEvent(commandDraft).automatedScheduling).toBe(false);
+    expect(commandDraft.schedule.isAutomatedScheduling).toBe(false);
+    expect(editorDraftToLegacyEvent(commandDraft).isAutomatedScheduling).toBe(false);
   });
 
   it('preserves an explicit event playoff count for a multi-division league', () => {

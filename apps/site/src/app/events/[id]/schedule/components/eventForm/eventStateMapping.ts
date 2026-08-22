@@ -486,9 +486,13 @@ export const mapEventToFormState = (event: Event): EventFormState => {
     noFixedEndDateTime: isSchedulableType && event.eventType !== 'WEEKLY_EVENT'
         ? derivedNoFixedEndDateTime
         : false,
-    automatedScheduling: normalizeAutomatedSchedulingForEventType(
+    isAutomatedScheduling: normalizeAutomatedSchedulingForEventType(
         normalizedEventType,
-        (event as Event & { automatedScheduling?: unknown }).automatedScheduling,
+        (event as Event & {
+            isAutomatedScheduling?: unknown;
+            automatedScheduling?: unknown;
+        }).isAutomatedScheduling
+            ?? (event as Event & { automatedScheduling?: unknown }).automatedScheduling,
     ),
     requiredTemplateIds: Array.isArray(event.requiredTemplateIds)
         ? event.requiredTemplateIds

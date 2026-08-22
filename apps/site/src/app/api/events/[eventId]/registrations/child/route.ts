@@ -13,14 +13,11 @@ import {
   upsertRegistrationQuestionResponse,
 } from '@/server/registrationQuestions';
 import {
-  EventConfigurationChangedError,
-  EventRegistrationCapacityError,
-  EventRegistrationDivisionError,
-  EventRegistrationUnitError,
   acquireEventLockAndLoadStructure,
   findEventRegistration,
   upsertEventRegistration,
 } from '@/server/events/eventRegistrations';
+import { eventRegistrationErrorResponse } from '@/server/events/eventRegistrationErrorResponse';
 import {
   requireVerifiedEmailForEventRegistrationIfPaid,
   resolveEventRegistrationPriceCents,
@@ -266,51 +263,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ eve
       });
       return { registration, existing: false };
     });
-  } catch (error) {
-    if (error instanceof EventConfigurationChangedError) {
-      return NextResponse.json(
-        { error: error.message, code: error.code },
-        { status: error.status },
-      );
+    } catch (error) {
+      const registrationResponse = eventRegistrationErrorResponse(error);
+      if (registrationResponse) return registrationResponse;
+      throw error;
     }
-    if (error instanceof EventRegistrationCapacityError) {
-      return NextResponse.json(
-        {
-          error: error.message,
-          code: error.code,
-          capacity: error.capacity,
-          participantCount: error.participantCount,
-        },
-        { status: error.status },
-      );
-    }
-    if (error instanceof EventRegistrationDivisionError) {
-      return NextResponse.json(
-        {
-          error: error.message,
-          code: error.code,
-          divisionId: error.divisionId,
-          matchCount: error.matchCount,
-        },
-        { status: error.status },
-      );
-    }
-    if (error instanceof EventRegistrationUnitError) {
-      return NextResponse.json(
-        {
-          error: error.message,
-          code: error.code,
-          field: 'teamSignup',
-          details: {
-            eventType: error.eventType,
-            teamSignup: error.teamSignup,
-          },
-        },
-        { status: error.status },
-      );
-    }
-    throw error;
-  }
 
   const registration = registrationResult.registration;
   if (registrationResult.existing) {

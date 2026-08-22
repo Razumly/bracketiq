@@ -284,6 +284,20 @@ describe('event editor contracts', () => {
     })).toThrow();
   });
 
+  it('normalizes the legacy automated-scheduling key at the command boundary', () => {
+    const parsed = eventEditorDraftSchema.parse({
+      ...draft,
+      schedule: {
+        mode: 'FIXED_END',
+        endConstraint: '2026-09-01T18:00:00.000Z',
+        automatedScheduling: false,
+      },
+    });
+
+    expect(parsed.schedule.isAutomatedScheduling).toBe(false);
+    expect('automatedScheduling' in parsed.schedule).toBe(false);
+  });
+
   it.each([
     ['FREE', 0],
     ['ONLINE', 7500],

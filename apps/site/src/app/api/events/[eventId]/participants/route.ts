@@ -129,6 +129,7 @@ const paymentFailedRegistrationSelect = {
   registrantType: true,
   rosterRole: true,
   status: true,
+  paymentResolutionReason: true,
   parentId: true,
   eventTeamId: true,
   divisionId: true,
@@ -148,6 +149,7 @@ const toRegistrationEntry = (row: any) => ({
   registrantType: row.registrantType,
   rosterRole: row.rosterRole,
   status: row.status,
+  paymentResolutionReason: normalizeId(row.paymentResolutionReason),
   parentId: normalizeId(row.parentId),
   divisionId: normalizeId(row.divisionId),
   divisionTypeId: normalizeId(row.divisionTypeId),
@@ -207,14 +209,23 @@ const loadViewerPaymentFailedRegistrations = async ({
       { registrantType: 'TEAM', parentId: { in: viewerTeamIds } },
     );
   }
-
   const rows = await prisma.eventRegistrations.findMany({
     where: {
       eventId,
-      status: 'PAYMENT_FAILED' as any,
       slotId: slotId ?? null,
       occurrenceDate: occurrenceDate ?? null,
-      OR: or,
+      AND: [
+        {
+          OR: [
+            { status: 'PAYMENT_FAILED' as any },
+            {
+              status: 'CANCELLED' as any,
+              paymentResolutionReason: { not: null },
+            },
+          ],
+        },
+        { OR: or },
+      ],
     },
     select: paymentFailedRegistrationSelect,
     orderBy: [

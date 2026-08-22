@@ -47,3 +47,8 @@ Before adding a test, answer:
 4. Does it avoid inventing a third-party request, response, webhook, or hosted-widget interface?
 
 If the answer to the first question is not specific, do not add the test. Remove legacy tests that violate these rules when their behavior is not covered by a stronger boundary or smoke check.
+
+
+## Room cache policy
+
+Room stores local cache data. For every Room schema change, increment `MVP_DATABASE_VERSION`. Configure each platform database builder to use destructive migration. Do not add manual migration SQL, auto-migrations, or migration edges. Do not preserve Room cache data across schema versions.

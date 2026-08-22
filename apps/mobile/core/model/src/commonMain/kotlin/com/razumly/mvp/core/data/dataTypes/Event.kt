@@ -2,6 +2,7 @@
 
 package com.razumly.mvp.core.data.dataTypes
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Ignore
 import androidx.room.PrimaryKey
@@ -52,7 +53,8 @@ data class Event(
     val hostId: String = "",
     val assistantHostIds: List<String> = emptyList(),
     val noFixedEndDateTime: Boolean = false,
-    val automatedScheduling: Boolean = false,
+    @ColumnInfo(name = "automatedScheduling")
+    val isAutomatedScheduling: Boolean = false,
     val teamSignup: Boolean = true,
     val singleDivision: Boolean = true,
     val freeAgentIds: List<String> = emptyList(),

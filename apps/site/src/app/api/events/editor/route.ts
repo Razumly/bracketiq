@@ -21,11 +21,15 @@ import {
   EditorRevisionConflictError,
   EditorScheduleIntentError,
 } from "@/server/events/eventEditorSave";
-import { EventRegistrationUnitError } from "@/server/events/eventRegistrations";
+import { eventRegistrationErrorResponse } from "@/server/events/eventRegistrationErrorResponse";
 import { ScheduleError } from "@/server/scheduler/scheduleEvent";
 import { isEventFieldConfigurationError } from "@/server/repositories/events";
 import { deliverEventStaffInvitesAfterCommit } from "@/server/events/eventStaffDelivery";
 import { loadCreateEventEditorSnapshot } from "@/server/events/eventEditorSnapshot";
+import {
+  serializeEventEditorSnapshot,
+  serializeEventEditorSnapshotEnvelope,
+} from "@/server/events/eventEditorWireCompatibility";
 import {
   EventCreateOperationConflictError,
   EventCreateOperationIncompleteError,
@@ -98,20 +102,8 @@ const errorResponse = (error: unknown) => {
       { status: 400 },
     );
   }
-  if (error instanceof EventRegistrationUnitError) {
-    return NextResponse.json(
-      {
-        error: error.message,
-        code: error.code,
-        field: "teamSignup",
-        details: {
-          eventType: error.eventType,
-          teamSignup: error.teamSignup,
-        },
-      },
-      { status: error.status },
-    );
-  }
+  const registrationResponse = eventRegistrationErrorResponse(error);
+  if (registrationResponse) return registrationResponse;
   if (error instanceof EditorRevisionConflictError) {
     return NextResponse.json(
       {
@@ -264,7 +256,7 @@ export async function GET(request: NextRequest) {
       {
         contractVersion: EVENT_EDITOR_CONTRACT_VERSION,
         createOperationId: createId(),
-        snapshot,
+        snapshot: serializeEventEditorSnapshot(snapshot),
       },
       { status: 200 },
     );
@@ -336,7 +328,10 @@ export async function POST(request: NextRequest) {
         });
       },
     });
-    return NextResponse.json(result, { status: 201 });
+    return NextResponse.json(
+      serializeEventEditorSnapshotEnvelope(result),
+      { status: 201 },
+    );
   } catch (error) {
     return errorResponse(error);
   }

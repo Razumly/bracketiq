@@ -12291,6 +12291,7 @@ export const EventRegistrationsScalarFieldEnum = {
   registrantType: 'registrantType',
   rosterRole: 'rosterRole',
   status: 'status',
+  paymentResolutionReason: 'paymentResolutionReason',
   acceptedAt: 'acceptedAt',
   eventTeamId: 'eventTeamId',
   sourceTeamRegistrationId: 'sourceTeamRegistrationId',

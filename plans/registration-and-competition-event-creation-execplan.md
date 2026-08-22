@@ -101,13 +101,35 @@ Finally, run focused tests and type checks after each vertical slice. Run the fu
 
 ## Concrete Steps
 
-Run site commands from `apps/site` and mobile commands from `apps/mobile`.
+Run site commands from `apps/site`.
 
-Before implementation, capture the fixed point for review with `git rev-parse HEAD` and record it in this plan. Do not use `main` as the comparison point because the current branch contains the issue #27 dependency work.
+Run mobile commands from `apps/mobile`.
 
-During implementation, run one focused Jest file at a time with `npx jest --runInBand --runTestsByPath <path>`. Run `npx tsc --noEmit` from `apps/site` after each completed site slice. Run the relevant Gradle test class or task from `apps/mobile` after the mobile slice. Do not run Gradle tests concurrently.
+Capture the fixed point for review with `git rev-parse HEAD`.
 
-At completion, run the complete site suite with `npm run test:ci` from `apps/site`, then run `npx tsc --noEmit`. Run `./gradlew :composeApp:testDebugUnitTest` from `apps/mobile`, then run the required iOS test task when the changed Room or shared Kotlin code needs native verification. Record exact results in `Outcomes & Retrospective`.
+Record the fixed point in this plan.
+
+Do not use `main` as the comparison point.
+
+The current branch contains the issue #27 dependency work.
+
+Run one focused Jest file at a time with `npx jest --runInBand --runTestsByPath <path>`.
+
+Run `npx tsc --noEmit` from `apps/site` after each completed site slice.
+
+Run the relevant Gradle test class or task from `apps/mobile` after the mobile slice.
+
+Do not run Gradle tests concurrently.
+
+Run the complete site suite with `npm run test:ci` from `apps/site`.
+
+Run `npx tsc --noEmit` after the complete site suite.
+
+Run `./gradlew :composeApp:testDebugUnitTest` from `apps/mobile`.
+
+Run the required iOS test task when the changed Room or shared Kotlin code needs native verification.
+
+Record exact results in `Outcomes & Retrospective`.
 
 ## Validation and Acceptance
 
@@ -138,3 +160,5 @@ The stable mobile seam is the generated Event Editor DTO and repository path und
 ## Revision Note
 
 2026-08-21: Updated the living plan with completed implementation milestones, full site and mobile verification evidence, review findings and fixes, the Room authority regressions, nested detail-event precedence, and the completed commit state. This revision records the completed workstream.
+
+2026-08-21: Split compound Concrete Steps instructions. Record this update so future contributors can follow one action per instruction.

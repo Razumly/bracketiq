@@ -93,7 +93,7 @@ class EventEditorDtosTest {
                       "matchRulesOverride":null,
                       "leagueScoringConfig":null
                     },
-                    "schedule":{"mode":"FIXED_END","endConstraint":"2026-09-01T14:00:00Z"},
+                    "schedule":{"mode":"FIXED_END","endConstraint":"2026-09-01T14:00:00Z","automatedScheduling":true},
                     "resources":{"fieldIds":[],"fields":[],"timeSlotIds":[],"timeSlots":[],"requiredTemplateIds":[],"immutableFieldIds":[],"rentalBookingId":null,"rentalBookingItemId":null},
                     "staff": {
                       "staffingPriority":"BEST_AVAILABLE_COVERAGE",
@@ -122,7 +122,7 @@ class EventEditorDtosTest {
             EventEditorCreateCompletionMode.CREATE_AND_BUILD_SCHEDULE,
             command.completion.mode,
         )
-        assertEquals(true, command.draft.schedule.automatedScheduling)
+        assertEquals(true, command.draft.schedule.isAutomatedScheduling)
         assertEquals("question-client-1", command.draft.registration.questions.first().clientId)
         assertEquals("tag-1", command.draft.basics.tags.single().legacyId)
         val wire = encodeEventEditorCreateCommand(command)
@@ -132,6 +132,7 @@ class EventEditorDtosTest {
         val wireCompetition = wireDraft.getValue("competition").jsonObject
         val wireSchedule = wireDraft.getValue("schedule").jsonObject
         assertEquals(true, wireSchedule.getValue("automatedScheduling").toString().toBoolean())
+        assertFalse(wireSchedule.containsKey("isAutomatedScheduling"))
         val wireResources = wireDraft.getValue("resources").jsonObject
 
         assertEquals(JsonNull, wireBasics.getValue("parentEvent"))

@@ -3,6 +3,8 @@
 const stripeRetrieveMock = jest.fn();
 const stripeCancelMock = jest.fn();
 const stripeRefundCreateMock = jest.fn();
+const transitionEventRegistrationStatusMock = jest.fn();
+const acquireEventLockAndLoadStructureMock = jest.fn();
 const StripeMock = jest.fn(() => ({
   paymentIntents: {
     retrieve: (...args: unknown[]) => stripeRetrieveMock(...args),
@@ -23,6 +25,9 @@ const prismaMock = {
     findUnique: jest.fn(),
     update: jest.fn(),
   },
+  eventRegistrations: {
+    updateMany: jest.fn(),
+  },
   $transaction: jest.fn(),
 };
 
@@ -30,6 +35,10 @@ jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 jest.mock('stripe', () => ({
   __esModule: true,
   default: StripeMock,
+}));
+jest.mock('@/server/events/eventRegistrations', () => ({
+  acquireEventLockAndLoadStructure: acquireEventLockAndLoadStructureMock,
+  transitionEventRegistrationStatus: transitionEventRegistrationStatusMock,
 }));
 
 import {
@@ -65,6 +74,16 @@ describe('bill payment actions', () => {
       status: 'PENDING',
     });
     prismaMock.billPayments.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.eventRegistrations.updateMany.mockResolvedValue({ count: 1 });
+    acquireEventLockAndLoadStructureMock.mockResolvedValue({
+      id: 'event_1',
+      eventType: 'EVENT',
+      teamSignup: false,
+      maxParticipants: 10,
+      singleDivision: true,
+      divisionIds: [],
+    });
+    transitionEventRegistrationStatusMock.mockResolvedValue({ id: 'registration_1', status: 'ACTIVE' });
     prismaMock.$transaction.mockImplementation(async (callback: (tx: typeof prismaMock) => unknown) => callback(prismaMock));
   });
 
@@ -108,6 +127,7 @@ describe('bill payment actions', () => {
     expect(prismaMock.billPayments.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ id: 'payment_1' }),
+
         data: expect.objectContaining({
           status: 'PROCESSING',
           paymentIntentId: 'pi_pending_1',
@@ -125,6 +145,62 @@ describe('bill payment actions', () => {
         }),
       }),
     );
+  });
+  it('routes paid event-registration activation through the capacity-checked transition', async () => {
+    prismaMock.billPayments.findMany.mockResolvedValueOnce([
+      {
+        amountCents: 5000,
+        status: 'PAID',
+        dueDate: new Date('2026-05-19T00:00:00.000Z'),
+      },
+    ]);
+    prismaMock.bills.update.mockResolvedValueOnce({
+      id: 'bill_1',
+      status: 'PAID',
+    });
+
+    await markBillPaymentProcessingForAction({
+      bill: {
+        id: 'bill_1',
+        ownerType: 'USER',
+        ownerId: 'user_1',
+        organizationId: null,
+        eventId: 'event_1',
+        sourceType: 'EVENT_REGISTRATION',
+        sourceId: 'registration_1',
+        totalAmountCents: 5000,
+        status: 'OPEN',
+        paymentPlanEnabled: false,
+        lineItems: [],
+      },
+      payment: {
+        id: 'payment_1',
+        billId: 'bill_1',
+        amountCents: 5000,
+        status: 'PENDING',
+        paymentIntentId: 'pi_pending_1',
+        payerUserId: null,
+        refundedAmountCents: 0,
+      },
+      paymentIntent: 'pi_pending_1_secret_abc',
+      userId: 'user_1',
+      now: new Date('2026-05-19T12:00:00.000Z'),
+    });
+
+    expect(acquireEventLockAndLoadStructureMock).toHaveBeenCalledWith(
+      prismaMock,
+      'event_1',
+    );
+    expect(transitionEventRegistrationStatusMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        registrationId: 'registration_1',
+        eventId: 'event_1',
+        status: 'ACTIVE',
+        event: expect.objectContaining({ id: 'event_1' }),
+      }),
+      prismaMock,
+    );
+    expect(prismaMock.eventRegistrations.updateMany).not.toHaveBeenCalled();
   });
 
   it('refuses to revive an installment that was voided by a concurrent split', async () => {

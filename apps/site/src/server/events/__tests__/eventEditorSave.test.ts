@@ -651,7 +651,7 @@ describe("saveEventEditor", () => {
       ...leagueCreateDraft,
       schedule: {
         ...leagueCreateDraft.schedule,
-        automatedScheduling: false,
+        isAutomatedScheduling: false,
         mode: "FIXED_END" as const,
         endConstraint: "2026-09-01T18:00:00.000Z",
       },
@@ -963,7 +963,7 @@ describe("createEventEditor", () => {
         ...leagueCreateDraft,
         schedule: {
           ...leagueCreateDraft.schedule,
-          automatedScheduling: false,
+          isAutomatedScheduling: false,
           mode: "FIXED_END",
           endConstraint: "2026-09-01T18:00:00.000Z",
         },

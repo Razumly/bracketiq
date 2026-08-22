@@ -194,8 +194,7 @@ export const loadEventScheduleState = async (
       "end",
       "scheduleEndConstraint",
       "generatedScheduleEnd",
-      "noFixedEndDateTime",
-      "automatedScheduling",
+      "isAutomatedScheduling",
       "fieldIds",
       "timeSlotIds",
       "updatedAt",
@@ -1136,7 +1135,7 @@ const emptyEvent = (
     scheduleEndConstraint: null,
     generatedScheduleEnd: null,
     noFixedEndDateTime: !isOneTimeEvent,
-    automatedScheduling: eventType === "LEAGUE" || eventType === "TOURNAMENT" || eventType === "WEEKLY_EVENT",
+    isAutomatedScheduling: eventType === "LEAGUE" || eventType === "TOURNAMENT" || eventType === "WEEKLY_EVENT",
     location: "",
     address: "",
     coordinates: [0, 0],
@@ -1300,6 +1299,10 @@ export const buildEventEditorSnapshot = async (
       : {};
   const eventWithResources = {
     ...event,
+    isAutomatedScheduling:
+      typeof event.isAutomatedScheduling === "boolean"
+        ? event.isAutomatedScheduling
+        : event.automatedScheduling,
     ...resources,
     divisions: divisionDetails.length
       ? divisionDetails

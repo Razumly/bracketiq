@@ -1031,6 +1031,65 @@ describe('POST /api/billing/webhook', () => {
     }));
   });
 
+  it('cancels a paid registration with a resolution reason when activation hits capacity', async () => {
+    prismaMock.$queryRaw.mockResolvedValue([
+      {
+        id: 'event_1',
+        eventType: 'EVENT',
+        teamSignup: false,
+      },
+    ]);
+    prismaMock.eventRegistrations.findUnique.mockResolvedValue({
+      id: 'event_1__self__user_1',
+      eventId: 'event_1',
+      registrantId: 'user_1',
+      parentId: null,
+      eventTeamId: null,
+      registrantType: 'SELF',
+      rosterRole: 'PARTICIPANT',
+      status: 'STARTED',
+      slotId: null,
+      occurrenceDate: null,
+      divisionId: null,
+      divisionTypeId: null,
+      divisionTypeKey: null,
+      createdBy: 'user_1',
+    });
+    prismaMock.eventRegistrations.update.mockRejectedValueOnce({
+      code: 'EVENT_REGISTRATION_CAPACITY_EXCEEDED',
+    });
+    prismaMock.eventRegistrations.updateMany.mockResolvedValueOnce({ count: 1 });
+
+    const response = await POST(
+      jsonPost(buildPaymentIntentSucceededEvent({
+        intentId: 'pi_event_capacity_failure',
+        metadata: {
+          purchase_type: 'event',
+          user_id: 'user_1',
+          event_id: 'event_1',
+          registration_id: 'event_1__self__user_1',
+          amount_cents: '4500',
+        },
+        amount: 4700,
+        amountReceived: 4700,
+      })),
+    );
+
+    expect(response.status).toBe(200);
+    expect(prismaMock.eventRegistrations.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'event_1__self__user_1',
+          status: { in: ['STARTED', 'PENDING', 'PAYMENT_FAILED'] },
+        },
+        data: expect.objectContaining({
+          status: 'CANCELLED',
+          paymentResolutionReason: 'capacity_exceeded',
+        }),
+      }),
+    );
+  });
+
   it('reopens a paid bill when Stripe later reports the same payment intent failed', async () => {
     prismaMock.billPayments.findUnique.mockResolvedValueOnce({
       id: 'bill_payment_failed_late_1',

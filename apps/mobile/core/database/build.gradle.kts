@@ -42,8 +42,6 @@ kotlin {
         androidInstrumentedTest {
             dependencies {
                 implementation(libs.kotlin.test)
-                implementation("androidx.room:room-testing:2.8.4")
-                implementation("androidx.sqlite:sqlite-framework:2.6.2")
                 implementation("androidx.test:monitor:1.8.0")
                 implementation("androidx.test.ext:junit:1.2.1")
                 implementation("androidx.test:runner:1.6.2")

@@ -4,13 +4,10 @@ import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/permissions';
 import { calculateAgeOnDate } from '@/lib/age';
 import {
-  EventConfigurationChangedError,
-  EventRegistrationCapacityError,
-  EventRegistrationDivisionError,
-  EventRegistrationUnitError,
   acquireEventLockAndLoadStructure,
   transitionEventRegistrationStatus,
 } from '@/server/events/eventRegistrations';
+import { eventRegistrationErrorResponse } from '@/server/events/eventRegistrationErrorResponse';
 import { dispatchRequiredEventDocuments } from '@/lib/eventConsentDispatch';
 import {
   acceptTeamInviteWithGuardianRules,
@@ -186,48 +183,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ re
     };
     approved = await (prisma as any).$transaction((tx: any) => applyApproval(tx));
   } catch (error) {
-    if (error instanceof EventConfigurationChangedError) {
-      return NextResponse.json(
-        { error: error.message, code: error.code },
-        { status: error.status },
-      );
-    }
-    if (error instanceof EventRegistrationCapacityError) {
-      return NextResponse.json(
-        {
-          error: error.message,
-          code: error.code,
-          capacity: error.capacity,
-          participantCount: error.participantCount,
-        },
-        { status: error.status },
-      );
-    }
-    if (error instanceof EventRegistrationDivisionError) {
-      return NextResponse.json(
-        {
-          error: error.message,
-          code: error.code,
-          divisionId: error.divisionId,
-          matchCount: error.matchCount,
-        },
-        { status: error.status },
-      );
-    }
-    if (error instanceof EventRegistrationUnitError) {
-      return NextResponse.json(
-        {
-          error: error.message,
-          code: error.code,
-          field: 'teamSignup',
-          details: {
-            eventType: error.eventType,
-            teamSignup: error.teamSignup,
-          },
-        },
-        { status: error.status },
-      );
-    }
+    const registrationResponse = eventRegistrationErrorResponse(error);
+    if (registrationResponse) return registrationResponse;
     throw error;
   }
 

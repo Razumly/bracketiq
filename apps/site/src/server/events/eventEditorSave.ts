@@ -682,13 +682,13 @@ const assertCreateSchedulingIntent = (
   if (!["LEAGUE", "TOURNAMENT"].includes(eventType)) {
     return;
   }
-  const automatedScheduling = normalizeAutomatedSchedulingForEventType(
+  const isAutomatedScheduling = normalizeAutomatedSchedulingForEventType(
     eventType,
-    command.draft.schedule.automatedScheduling,
+    command.draft.schedule.isAutomatedScheduling,
   );
   if (
     command.completion.mode === "CREATE_AND_BUILD_SCHEDULE"
-    && automatedScheduling !== true
+    && isAutomatedScheduling !== true
   ) {
     throw new EditorScheduleIntentError(
       "Automated Scheduling must be enabled when Create builds a schedule.",
@@ -696,7 +696,7 @@ const assertCreateSchedulingIntent = (
   }
   if (
     command.completion.mode !== "CREATE_ONLY"
-    || automatedScheduling !== false
+    || isAutomatedScheduling !== false
   ) {
     return;
   }

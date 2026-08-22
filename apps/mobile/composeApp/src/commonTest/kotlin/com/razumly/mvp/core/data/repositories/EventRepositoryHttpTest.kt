@@ -2327,7 +2327,7 @@ class EventRepositoryHttpTest {
     }
 
     @Test
-    fun updateLocalEvent_preserves_protected_history_without_authoritative_snapshot() = runTest {
+    fun given_cached_protected_history_when_local_event_is_updated_without_authority_then_locks_are_preserved() = runTest {
         val eventDao = EventRepositoryHttp_FakeEventDao()
         val cachedEvent = makeEvent(id = "e1", hostId = "h1").copy(
             eventTypeLocked = true,

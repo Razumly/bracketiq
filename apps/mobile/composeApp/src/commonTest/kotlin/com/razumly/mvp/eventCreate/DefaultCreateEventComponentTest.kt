@@ -906,40 +906,40 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.onTypeSelected(EventType.LEAGUE)
         advance()
         assertFalse(harness.component.newEventState.value.noFixedEndDateTime)
-        assertTrue(harness.component.newEventState.value.automatedScheduling)
+        assertTrue(harness.component.newEventState.value.isAutomatedScheduling)
         assertFalse(harness.component.useManualTimeSlots.value)
 
-        harness.component.updateEventField { copy(automatedScheduling = false) }
+        harness.component.updateEventField { copy(isAutomatedScheduling = false) }
         advance()
         harness.component.onTypeSelected(EventType.TOURNAMENT)
         advance()
         assertFalse(harness.component.newEventState.value.noFixedEndDateTime)
-        assertFalse(harness.component.newEventState.value.automatedScheduling)
+        assertFalse(harness.component.newEventState.value.isAutomatedScheduling)
         assertFalse(harness.component.useManualTimeSlots.value)
 
         harness.component.onTypeSelected(EventType.EVENT)
         advance()
         assertFalse(harness.component.newEventState.value.noFixedEndDateTime)
-        assertFalse(harness.component.newEventState.value.automatedScheduling)
+        assertFalse(harness.component.newEventState.value.isAutomatedScheduling)
 
         harness.component.onTypeSelected(EventType.LEAGUE)
         advance()
-        assertTrue(harness.component.newEventState.value.automatedScheduling)
+        assertTrue(harness.component.newEventState.value.isAutomatedScheduling)
 
         harness.component.onTypeSelected(EventType.WEEKLY_EVENT)
         advance()
-        assertTrue(harness.component.newEventState.value.automatedScheduling)
+        assertTrue(harness.component.newEventState.value.isAutomatedScheduling)
         assertTrue(harness.component.useManualTimeSlots.value)
 
         harness.component.onTypeSelected(EventType.TRYOUT)
         advance()
-        assertFalse(harness.component.newEventState.value.automatedScheduling)
+        assertFalse(harness.component.newEventState.value.isAutomatedScheduling)
         assertTrue(harness.component.useManualTimeSlots.value)
 
         harness.component.onTypeSelected(EventType.EVENT)
         advance()
         assertFalse(harness.component.newEventState.value.noFixedEndDateTime)
-        assertFalse(harness.component.newEventState.value.automatedScheduling)
+        assertFalse(harness.component.newEventState.value.isAutomatedScheduling)
         assertFalse(harness.component.useManualTimeSlots.value)
     }
 

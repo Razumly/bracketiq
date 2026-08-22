@@ -6964,11 +6964,13 @@ export const upsertEventFromPayload = async (
       throw new Error("One or more selected club divisions are unavailable.");
     }
   }
-  const automatedScheduling = normalizeAutomatedSchedulingForEventType(
+  const isAutomatedScheduling = normalizeAutomatedSchedulingForEventType(
     nextEventType,
-    Object.prototype.hasOwnProperty.call(payload, "automatedScheduling")
-      ? payload.automatedScheduling
-      : existingEvent?.automatedScheduling,
+    Object.prototype.hasOwnProperty.call(payload, "isAutomatedScheduling")
+      ? payload.isAutomatedScheduling
+      : Object.prototype.hasOwnProperty.call(payload, "automatedScheduling")
+        ? payload.automatedScheduling
+        : existingEvent?.automatedScheduling,
   );
   const normalizedParentEvent =
     normalizeEntityId(payload.parentEvent) ??
@@ -7323,7 +7325,7 @@ export const upsertEventFromPayload = async (
     address: payload.address ?? null,
     rating: payload.rating ?? null,
     teamSizeLimit: payload.teamSizeLimit ?? 0,
-    automatedScheduling,
+    automatedScheduling: isAutomatedScheduling,
     maxParticipants: normalizedEventMaxParticipants,
     minAge: payload.minAge ?? null,
     maxAge: payload.maxAge ?? null,

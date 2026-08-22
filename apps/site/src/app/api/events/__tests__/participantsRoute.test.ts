@@ -254,13 +254,64 @@ describe('GET /api/events/[eventId]/participants', () => {
     expect(prismaMock.eventRegistrations.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
         eventId: 'event_1',
-        status: 'PAYMENT_FAILED',
-        OR: [
-          { registrantType: 'SELF', registrantId: 'user_1' },
-          { registrantType: 'CHILD', parentId: 'user_1' },
+        AND: [
+          {
+            OR: [
+              { status: 'PAYMENT_FAILED' },
+              {
+                status: 'CANCELLED',
+                paymentResolutionReason: { not: null },
+              },
+            ],
+          },
+
+          {
+            OR: [
+              { registrantType: 'SELF', registrantId: 'user_1' },
+              { registrantType: 'CHILD', parentId: 'user_1' },
+            ],
+          },
         ],
       }),
     }));
+  });
+  it('exposes a permanent paid-registration resolution reason to the viewer', async () => {
+    getOptionalSessionMock.mockResolvedValueOnce({ userId: 'user_1', isAdmin: false });
+    prismaMock.eventRegistrations.findMany.mockResolvedValueOnce([
+      {
+        id: 'cancelled_registration_1',
+        registrantId: 'user_1',
+        registrantType: 'SELF',
+        rosterRole: 'PARTICIPANT',
+        status: 'CANCELLED',
+        paymentResolutionReason: 'capacity_exceeded',
+        parentId: null,
+        divisionId: null,
+        divisionTypeId: null,
+        divisionTypeKey: null,
+        consentDocumentId: null,
+        consentStatus: null,
+        slotId: null,
+        occurrenceDate: null,
+        createdAt: new Date('2026-07-14T12:00:00.000Z'),
+        updatedAt: new Date('2026-07-14T12:01:00.000Z'),
+      },
+    ]);
+
+    const response = await GET(
+      new NextRequest('http://localhost/api/events/event_1/participants'),
+      { params: Promise.resolve({ eventId: 'event_1' }) },
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.registrations.users).toEqual([
+      expect.objectContaining({
+        registrationId: 'cancelled_registration_1',
+        status: 'CANCELLED',
+        paymentResolutionReason: 'capacity_exceeded',
+      }),
+    ]);
   });
 
   it('finds a failed team registration through active canonical membership and its event-team child', async () => {
@@ -315,10 +366,14 @@ describe('GET /api/events/[eventId]/participants', () => {
     });
     expect(prismaMock.eventRegistrations.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
-        OR: expect.arrayContaining([
-          { registrantType: 'TEAM', registrantId: { in: ['canonical_team_1', 'event_team_1'] } },
-          { registrantType: 'TEAM', eventTeamId: { in: ['canonical_team_1', 'event_team_1'] } },
-          { registrantType: 'TEAM', parentId: { in: ['canonical_team_1', 'event_team_1'] } },
+        AND: expect.arrayContaining([
+          expect.objectContaining({
+            OR: expect.arrayContaining([
+              { registrantType: 'TEAM', registrantId: { in: ['canonical_team_1', 'event_team_1'] } },
+              { registrantType: 'TEAM', eventTeamId: { in: ['canonical_team_1', 'event_team_1'] } },
+              { registrantType: 'TEAM', parentId: { in: ['canonical_team_1', 'event_team_1'] } },
+            ]),
+          }),
         ]),
       }),
     }));

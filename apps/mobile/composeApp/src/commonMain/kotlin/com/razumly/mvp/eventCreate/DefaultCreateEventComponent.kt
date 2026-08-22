@@ -938,7 +938,7 @@ class DefaultCreateEventComponent(
 
     override fun onTypeSelected(type: EventType) {
         val previousType = _newEventState.value.eventType
-        val previousScheduling = _newEventState.value.automatedScheduling
+        val previousScheduling = _newEventState.value.isAutomatedScheduling
         val preserveLeagueTournamentChoice =
             previousType == EventType.LEAGUE || previousType == EventType.TOURNAMENT
         _currentEventType.value = type
@@ -946,7 +946,7 @@ class DefaultCreateEventComponent(
             when (type) {
                 EventType.LEAGUE, EventType.TOURNAMENT -> copy(
                     eventType = type,
-                    automatedScheduling = if (preserveLeagueTournamentChoice) {
+                    isAutomatedScheduling = if (preserveLeagueTournamentChoice) {
                         previousScheduling
                     } else {
                         defaultAutomatedSchedulingForEventType(type)
@@ -958,14 +958,14 @@ class DefaultCreateEventComponent(
 
                 EventType.WEEKLY_EVENT -> copy(
                     eventType = type,
-                    automatedScheduling = defaultAutomatedSchedulingForEventType(type),
+                    isAutomatedScheduling = defaultAutomatedSchedulingForEventType(type),
                     noFixedEndDateTime = false,
                     end = end.takeIf { it > start } ?: defaultEventEnd(start),
                 )
 
                 EventType.TRYOUT -> copy(
                     eventType = type,
-                    automatedScheduling = defaultAutomatedSchedulingForEventType(type),
+                    isAutomatedScheduling = defaultAutomatedSchedulingForEventType(type),
                     teamSignup = false,
                     singleDivision = false,
                     noFixedEndDateTime = false,
@@ -974,7 +974,7 @@ class DefaultCreateEventComponent(
 
                 EventType.EVENT -> copy(
                     eventType = type,
-                    automatedScheduling = defaultAutomatedSchedulingForEventType(type),
+                    isAutomatedScheduling = defaultAutomatedSchedulingForEventType(type),
                     noFixedEndDateTime = false,
                     end = end.takeIf { it > start } ?: defaultEventEnd(start),
                 )
@@ -1698,7 +1698,7 @@ class DefaultCreateEventComponent(
         if (
             (submission.event.eventType == EventType.LEAGUE ||
                 submission.event.eventType == EventType.TOURNAMENT) &&
-            !submission.event.automatedScheduling &&
+            !submission.event.isAutomatedScheduling &&
             (
                 submission.event.noFixedEndDateTime ||
                     submission.event.end <= submission.event.start
@@ -2549,7 +2549,7 @@ class DefaultCreateEventComponent(
             end = defaultEventEnd(start),
             timeZone = TimeZone.currentSystemDefault().id,
             hostId = initialHostId.trim(),
-            automatedScheduling = false,
+            isAutomatedScheduling = false,
             singleDivision = false,
         )
     }

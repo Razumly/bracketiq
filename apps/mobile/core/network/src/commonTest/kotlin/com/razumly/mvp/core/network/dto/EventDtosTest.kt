@@ -26,7 +26,7 @@ import kotlin.test.assertTrue
 class EventDtosTest {
     @Test
     fun given_event_type_when_automated_scheduling_is_missing_then_dto_uses_event_type_default() {
-        fun event(type: EventType, automatedScheduling: Boolean? = null) =
+        fun event(type: EventType, isAutomatedScheduling: Boolean? = null) =
             EventApiDto(
                 id = "event-${type.name}",
                 name = type.name,
@@ -34,15 +34,15 @@ class EventDtosTest {
                 eventType = type.name,
                 start = "2026-07-13T12:00:00Z",
                 end = "2026-07-13T13:00:00Z",
-                automatedScheduling = automatedScheduling,
+                isAutomatedScheduling = isAutomatedScheduling,
             ).toEventOrNull()
 
-        assertEquals(true, event(EventType.LEAGUE)?.automatedScheduling)
-        assertEquals(true, event(EventType.TOURNAMENT)?.automatedScheduling)
-        assertEquals(true, event(EventType.WEEKLY_EVENT)?.automatedScheduling)
-        assertEquals(false, event(EventType.EVENT)?.automatedScheduling)
-        assertEquals(false, event(EventType.TRYOUT)?.automatedScheduling)
-        assertEquals(false, event(EventType.LEAGUE, automatedScheduling = false)?.automatedScheduling)
+        assertEquals(true, event(EventType.LEAGUE)?.isAutomatedScheduling)
+        assertEquals(true, event(EventType.TOURNAMENT)?.isAutomatedScheduling)
+        assertEquals(true, event(EventType.WEEKLY_EVENT)?.isAutomatedScheduling)
+        assertEquals(false, event(EventType.EVENT)?.isAutomatedScheduling)
+        assertEquals(false, event(EventType.TRYOUT)?.isAutomatedScheduling)
+        assertEquals(false, event(EventType.LEAGUE, isAutomatedScheduling = false)?.isAutomatedScheduling)
     }
 
     @Test

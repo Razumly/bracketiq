@@ -3,6 +3,7 @@ import {
     buildEmptyParticipantEventData,
     buildEventDetailsLoadKey,
     buildParticipantEventData,
+    collectPaymentFailedRegistrationState,
     collectUniqueUserIds,
     getManagedUserTeamsForEvent,
 } from '../eventDetailData';
@@ -91,6 +92,28 @@ describe('event detail data helpers', () => {
         }));
         expect(result.currentUserPaymentFailed).toBe(true);
         expect(result.paymentFailedTeamIds).toEqual(['team_1']);
+    });
+    it('treats a permanent paid-registration resolution as payment failure', () => {
+        const result = collectPaymentFailedRegistrationState({
+            users: [{
+                registrantId: 'user_1',
+                status: 'CANCELLED',
+                paymentResolutionReason: 'capacity_exceeded',
+            }],
+            teams: [{
+                registrantId: 'team_1',
+                status: 'CANCELLED',
+                paymentResolutionReason: 'invalid_registration_unit',
+            }],
+            children: [],
+            waitlist: [],
+            freeAgents: [],
+        } as any, 'user_1');
+
+        expect(result).toEqual({
+            userFailed: true,
+            teamIds: ['team_1'],
+        });
     });
 
     it('clears occurrence participants without mutating the source event', () => {

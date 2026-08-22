@@ -61,6 +61,7 @@ import com.razumly.mvp.core.data.dataTypes.daos.TeamDao
 import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
 const val MVP_DATABASE_VERSION = 103
 
+
 @Database(
     entities = [
         Event::class,

@@ -2534,7 +2534,7 @@ fun EventDetails(
                                 ) {
                                     onEditEvent {
                                         copy(
-                                            automatedScheduling = enabled,
+                                            isAutomatedScheduling = enabled,
                                             noFixedEndDateTime = if (enabled) {
                                                 noFixedEndDateTime
                                             } else {

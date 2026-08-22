@@ -180,7 +180,7 @@ fun isSimpleSetupPageComplete(
             event.long != 0.0 &&
             (
                 (!event.noFixedEndDateTime && event.end > event.start) ||
-                    (event.automatedScheduling && event.noFixedEndDateTime)
+                    (event.isAutomatedScheduling && event.noFixedEndDateTime)
             )
     }
     EventCreateSetupPageId.EVENT_DETAILS -> {
@@ -223,7 +223,7 @@ fun isSimpleSetupPageComplete(
             event.long != 0.0 &&
             (
                 (!event.noFixedEndDateTime && event.end > event.start) ||
-                    (event.automatedScheduling && event.noFixedEndDateTime)
+                    (event.isAutomatedScheduling && event.noFixedEndDateTime)
             )
     }
     else -> true

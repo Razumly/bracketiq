@@ -8,6 +8,10 @@ import { requireSession } from "@/lib/permissions";
 import { parseSaveEventEditorCommand } from "@/contracts/eventEditor";
 import { loadEventEditorSnapshot } from "@/server/events/eventEditorSnapshot";
 import {
+  serializeEventEditorSnapshot,
+  serializeEventEditorSnapshotEnvelope,
+} from "@/server/events/eventEditorWireCompatibility";
+import {
   EditorCapabilityError,
   EditorImmutableFieldError,
   EditorInputError,
@@ -16,12 +20,7 @@ import {
   EditorScheduleIntentError,
   saveEventEditor,
 } from "@/server/events/eventEditorSave";
-import {
-  EventRegistrationCapacityError,
-  EventRegistrationDivisionError,
-  EventRegistrationStructureLockedError,
-  EventRegistrationUnitError,
-} from "@/server/events/eventRegistrations";
+import { eventRegistrationErrorResponse } from "@/server/events/eventRegistrationErrorResponse";
 import {
   EventScheduleMutationError,
   EventScheduleRevisionConflictError,
@@ -72,52 +71,8 @@ const errorResponse = (error: unknown) => {
       { status: 400 },
     );
   }
-  if (error instanceof EventRegistrationStructureLockedError) {
-    return NextResponse.json(
-      {
-        error: error.message,
-        code: error.code,
-        field: error.fieldName,
-      },
-      { status: error.status },
-    );
-  }
-  if (error instanceof EventRegistrationCapacityError) {
-    return NextResponse.json(
-      {
-        error: error.message,
-        code: error.code,
-        capacity: error.capacity,
-        participantCount: error.participantCount,
-      },
-      { status: error.status },
-    );
-  }
-  if (error instanceof EventRegistrationDivisionError) {
-    return NextResponse.json(
-      {
-        error: error.message,
-        code: error.code,
-        divisionId: error.divisionId,
-        matchCount: error.matchCount,
-      },
-      { status: error.status },
-    );
-  }
-  if (error instanceof EventRegistrationUnitError) {
-    return NextResponse.json(
-      {
-        error: error.message,
-        code: error.code,
-        field: "teamSignup",
-        details: {
-          eventType: error.eventType,
-          teamSignup: error.teamSignup,
-        },
-      },
-      { status: error.status },
-    );
-  }
+  const registrationResponse = eventRegistrationErrorResponse(error);
+  if (registrationResponse) return registrationResponse;
   if (error instanceof EditorRevisionConflictError) {
     return NextResponse.json(
       {
@@ -210,7 +165,10 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     );
   try {
     const snapshot = await loadEventEditorSnapshot(eventId, { actor: session });
-    return NextResponse.json(snapshot, { status: 200 });
+    return NextResponse.json(
+      serializeEventEditorSnapshot(snapshot),
+      { status: 200 },
+    );
   } catch (error) {
     return errorResponse(error);
   }
@@ -244,7 +202,10 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
           getRequestOrigin(request),
         ),
     });
-    return NextResponse.json(result, { status: 200 });
+    return NextResponse.json(
+      serializeEventEditorSnapshotEnvelope(result),
+      { status: 200 },
+    );
   } catch (error) {
     return errorResponse(error);
   }

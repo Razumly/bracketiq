@@ -72,7 +72,7 @@ describe('useEventFormSectionsController', () => {
     });
     it.each([false, true])('hides schedule construction when automated scheduling is disabled (rental slots: %s)', (usesRentalSlots) => {
         const { result } = renderController({
-            eventData: buildEventData({ automatedScheduling: false }),
+            eventData: buildEventData({ isAutomatedScheduling: false }),
             usesRentalSlots,
         });
 

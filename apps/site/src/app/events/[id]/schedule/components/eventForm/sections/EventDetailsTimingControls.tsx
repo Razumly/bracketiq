@@ -54,33 +54,33 @@ export const EventDetailsTimingControls = ({
 }: EventDetailsTimingControlsProps) => {
   const generatedEndDateDisabled =
     eventType === "WEEKLY_EVENT" || isImmutableField("noFixedEndDateTime");
-  const automatedScheduling = useWatch({
+  const isAutomatedScheduling = useWatch({
     control,
-    name: "automatedScheduling",
+    name: "isAutomatedScheduling",
   });
   const showAutomatedSchedulingControl =
     showScheduleControls && (eventType === "LEAGUE" || eventType === "TOURNAMENT");
-  const automatedSchedulingDisablesScheduleConstruction =
+  const isAutomatedSchedulingDisablesScheduleConstruction =
     eventType === "LEAGUE" || eventType === "TOURNAMENT";
   const showScheduleConstructionControls =
     showScheduleControls &&
-    (!automatedSchedulingDisablesScheduleConstruction ||
-      automatedScheduling !== false);
+    (!isAutomatedSchedulingDisablesScheduleConstruction ||
+      isAutomatedScheduling !== false);
   return (
     <>
       {showAutomatedSchedulingControl ? (
         <div className="md:col-span-2">
           <Controller
-            name="automatedScheduling"
+            name="isAutomatedScheduling"
             control={control}
             render={({ field }) => (
               <Checkbox
                 label="Automated Scheduling"
                 description="Build the match schedule from the event setup when you create it."
                 checked={Boolean(field.value)}
-                disabled={isImmutableField("automatedScheduling")}
+                disabled={isImmutableField("isAutomatedScheduling")}
                 onChange={(event) => {
-                  if (isImmutableField("automatedScheduling")) return;
+                  if (isImmutableField("isAutomatedScheduling")) return;
                   const checked = event.currentTarget.checked;
                   field.onChange(checked);
                   if (!checked) onNoFixedEndDateTimeChange(false);

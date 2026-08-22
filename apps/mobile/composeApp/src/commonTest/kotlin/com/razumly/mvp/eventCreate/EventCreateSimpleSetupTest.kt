@@ -149,7 +149,7 @@ class EventCreateSimpleSetupTest {
     fun given_basic_division_and_schedule_pages_when_continue_is_checked_then_minimum_requirements_are_enforced() {
         val event = Event(
             eventType = EventType.LEAGUE,
-            automatedScheduling = true,
+            isAutomatedScheduling = true,
             name = "Summer League",
             imageId = "image-1",
             sportIds = listOf("basketball"),
@@ -187,7 +187,7 @@ class EventCreateSimpleSetupTest {
     fun given_basic_information_when_continue_is_checked_then_an_uploaded_event_image_is_required() {
         val event = Event(
             eventType = EventType.LEAGUE,
-            automatedScheduling = true,
+            isAutomatedScheduling = true,
             name = "Summer League",
             imageId = "",
             sportIds = listOf("basketball"),

@@ -10,27 +10,27 @@ internal fun Event.applyCreateSelectionRules(): Event {
     val typeNormalizedEvent = when (eventType) {
         EventType.LEAGUE -> copy(
             eventType = eventType,
-            automatedScheduling = normalizeAutomatedSchedulingForEventType(eventType, automatedScheduling),
+            isAutomatedScheduling = normalizeAutomatedSchedulingForEventType(eventType, isAutomatedScheduling),
             teamSignup = true,
         )
 
         EventType.TOURNAMENT -> copy(
             eventType = eventType,
-            automatedScheduling = normalizeAutomatedSchedulingForEventType(eventType, automatedScheduling),
+            isAutomatedScheduling = normalizeAutomatedSchedulingForEventType(eventType, isAutomatedScheduling),
             teamSignup = true,
             maxParticipants = maxParticipants.takeIf { count -> count != 0 } ?: MIN_BRACKET_TEAM_COUNT,
         )
 
         EventType.WEEKLY_EVENT -> copy(
             eventType = eventType,
-            automatedScheduling = normalizeAutomatedSchedulingForEventType(eventType, automatedScheduling),
+            isAutomatedScheduling = normalizeAutomatedSchedulingForEventType(eventType, isAutomatedScheduling),
             singleDivision = false,
             noFixedEndDateTime = false,
         )
 
         EventType.TRYOUT -> copy(
             eventType = eventType,
-            automatedScheduling = normalizeAutomatedSchedulingForEventType(eventType, automatedScheduling),
+            isAutomatedScheduling = normalizeAutomatedSchedulingForEventType(eventType, isAutomatedScheduling),
             teamSignup = false,
             singleDivision = false,
             noFixedEndDateTime = false,
@@ -38,7 +38,7 @@ internal fun Event.applyCreateSelectionRules(): Event {
 
         EventType.EVENT -> copy(
             eventType = eventType,
-            automatedScheduling = normalizeAutomatedSchedulingForEventType(eventType, automatedScheduling),
+            isAutomatedScheduling = normalizeAutomatedSchedulingForEventType(eventType, isAutomatedScheduling),
             noFixedEndDateTime = false,
         )
     }

@@ -5,7 +5,10 @@ import { extractStripePaymentIntentId } from '@/lib/stripeClientSecret';
 import { buildRefundCreateParamsForPaymentIntent } from '@/lib/stripeConnectAccounts';
 import type { AuthContext } from '@/lib/permissions';
 import { canManageEvent, canManageOrganization } from '@/server/accessControl';
-import { acquireEventLockAndLoadStructure } from '@/server/events/eventRegistrations';
+import {
+  acquireEventLockAndLoadStructure,
+  transitionEventRegistrationStatus,
+} from '@/server/events/eventRegistrations';
 import {
   buildTeamRegistrationId,
   cancelPendingTeamRegistration,
@@ -380,7 +383,16 @@ export const markBillPaymentProcessingForAction = async ({
   ) {
     const nextRegistrationStatus = reconciledBill?.status === 'PAID' ? 'ACTIVE' : 'PENDING';
     await prisma.$transaction(async (tx) => {
-      await acquireEventLockAndLoadStructure(tx, registrationEventId);
+      const event = await acquireEventLockAndLoadStructure(tx, registrationEventId);
+      if (nextRegistrationStatus === 'ACTIVE') {
+        await transitionEventRegistrationStatus({
+          registrationId,
+          eventId: registrationEventId,
+          status: 'ACTIVE',
+          event,
+        }, tx);
+        return;
+      }
       await tx.eventRegistrations.updateMany({
         where: {
           id: registrationId,
@@ -388,7 +400,6 @@ export const markBillPaymentProcessingForAction = async ({
         },
         data: {
           status: nextRegistrationStatus,
-          ...(nextRegistrationStatus === 'ACTIVE' ? { acceptedAt: now } : {}),
           updatedAt: now,
         },
       });

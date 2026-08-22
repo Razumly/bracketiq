@@ -119,14 +119,14 @@ internal fun LazyListScope.simpleEventDetailsOptionsSection(
                     state.editEvent.eventType == EventType.TOURNAMENT
                 if (supportsAutomatedScheduling) {
                     OptionCheckboxRow(
-                        checked = state.editEvent.automatedScheduling,
+                        checked = state.editEvent.isAutomatedScheduling,
                         label = "Automated Scheduling",
                         description = "Build the match schedule when the event is created.",
                         onCheckedChange = actions.onAutomatedSchedulingChange,
                     )
                 }
                 val supportsGeneratedEndDate =
-                    state.editEvent.automatedScheduling &&
+                    state.editEvent.isAutomatedScheduling &&
                         (
                             state.editEvent.eventType == EventType.LEAGUE ||
                                 state.editEvent.eventType == EventType.TOURNAMENT

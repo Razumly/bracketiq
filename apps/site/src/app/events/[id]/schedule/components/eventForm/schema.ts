@@ -296,7 +296,7 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
         requiredTemplateIds: z.array(z.string()).default([]),
         hostId: z.string().optional(),
         noFixedEndDateTime: z.boolean().default(false),
-        automatedScheduling: z.boolean().default(true),
+        isAutomatedScheduling: z.boolean().default(true),
         imageId: options.allowMissingEventImage
             ? z.string().trim().default('')
             : z.string().trim().min(1, 'Event image is required'),
@@ -659,7 +659,7 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
                 });
             }
         }
-        if (!isAffiliateEvent && (values.eventType === 'LEAGUE' || values.eventType === 'TOURNAMENT') && values.automatedScheduling === false) {
+        if (!isAffiliateEvent && (values.eventType === 'LEAGUE' || values.eventType === 'TOURNAMENT') && values.isAutomatedScheduling === false) {
             const plannedEnd = parseDateTimeInTimeZone(values.end, values.timeZone);
             const plannedStart = parseDateTimeInTimeZone(values.start, values.timeZone);
             if (!plannedEnd) {
@@ -677,7 +677,7 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
             }
         }
 
-        if (!isAffiliateEvent && supportsScheduleSlotsForEvent(values.eventType, values.parentEvent) && values.automatedScheduling !== false) {
+        if (!isAffiliateEvent && supportsScheduleSlotsForEvent(values.eventType, values.parentEvent) && values.isAutomatedScheduling !== false) {
             const slotDivisionLookup = buildSlotDivisionLookup(
                 values.divisionDetails,
                 values.eventType === 'LEAGUE' && values.leagueData.includePlayoffs && values.splitLeaguePlayoffDivisions

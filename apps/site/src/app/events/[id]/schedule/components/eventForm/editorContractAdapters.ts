@@ -104,9 +104,9 @@ const draftFromRecord = (
   isPersistedBracketCountNormalizationEnabled = false,
 ): EventEditorDraft => {
   const normalizedEventType = stringValue(event.eventType, 'EVENT').trim().toUpperCase();
-  const automatedScheduling = normalizeAutomatedSchedulingForEventType(
+  const isAutomatedScheduling = normalizeAutomatedSchedulingForEventType(
     normalizedEventType,
-    event.automatedScheduling,
+    event.isAutomatedScheduling ?? event.automatedScheduling,
   );
   const start = asIsoDateTime(event.start, new Date(0).toISOString());
   const explicitScheduleEndConstraint = nullableString(event.scheduleEndConstraint);
@@ -279,12 +279,12 @@ const draftFromRecord = (
         mode: 'GENERATED_END',
         endConstraint: null,
         generatedScheduleEnd: explicitGeneratedScheduleEnd ?? nullableString(event.end),
-        automatedScheduling,
+        isAutomatedScheduling,
       }
       : {
         mode: 'FIXED_END',
         endConstraint: explicitScheduleEndConstraint ?? asIsoDateTime(event.end, start),
-        automatedScheduling,
+        isAutomatedScheduling,
       },
     resources: {
       fieldIds: rawFieldIds.length > 0 ? rawFieldIds : fields.map((field) => String(field.$id ?? '')).filter(Boolean),
@@ -352,7 +352,7 @@ export const editorSnapshotToFormValues = (
       ? schedule.endConstraint
       : schedule.generatedScheduleEnd ?? (base.end as string | null | undefined) ?? null,
     noFixedEndDateTime: schedule.mode === 'GENERATED_END',
-    automatedScheduling: schedule.automatedScheduling,
+    isAutomatedScheduling: schedule.isAutomatedScheduling,
     divisions: competition.divisionIds,
     ...competition,
     ...resources,
@@ -408,7 +408,7 @@ export const editorDraftToLegacyEvent = (draft: EventEditorDraft, eventId?: stri
     scheduleEndConstraint: schedule.mode === 'FIXED_END' ? schedule.endConstraint : null,
     generatedScheduleEnd: schedule.mode === 'GENERATED_END' ? schedule.generatedScheduleEnd : null,
     noFixedEndDateTime: schedule.mode === 'GENERATED_END',
-    automatedScheduling: schedule.automatedScheduling,
+    isAutomatedScheduling: schedule.isAutomatedScheduling,
     fieldIds: resources.fieldIds,
     fields: resources.fields,
     timeSlotIds: resources.timeSlotIds,

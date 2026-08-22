@@ -679,7 +679,7 @@ const markTeamRegistrationPaymentPendingFromPurchase = async ({
   });
 };
 
-const cancelEventRegistrationFromFailedPayment = async ({
+const setEventRegistrationPaymentStatusFromPurchase = async ({
   purchaseType,
   eventId,
   teamId,
@@ -689,6 +689,9 @@ const cancelEventRegistrationFromFailedPayment = async ({
   occurrenceSlotId,
   occurrenceDate,
   now,
+  targetStatus = 'PAYMENT_FAILED',
+  paymentResolutionReason = null,
+  allowSchedulableTeamEvent = false,
 }: {
   purchaseType: string | null;
   eventId: string | null;
@@ -699,6 +702,9 @@ const cancelEventRegistrationFromFailedPayment = async ({
   occurrenceSlotId: string | null;
   occurrenceDate: string | null;
   now: Date;
+  targetStatus?: 'PAYMENT_FAILED' | 'CANCELLED';
+  paymentResolutionReason?: string | null;
+  allowSchedulableTeamEvent?: boolean;
 }): Promise<{ applied: boolean; reason?: string }> => {
   const normalizedPurchaseType = (purchaseType ?? '').trim().toLowerCase();
   if (normalizedPurchaseType !== 'event') {
@@ -742,7 +748,10 @@ const cancelEventRegistrationFromFailedPayment = async ({
           return { applied: false, reason: 'team_signup_disabled' };
         }
         const normalizedEventType = String(event.eventType ?? '').toUpperCase();
-        if (normalizedEventType === 'LEAGUE' || normalizedEventType === 'TOURNAMENT') {
+        if (
+          !allowSchedulableTeamEvent
+          && (normalizedEventType === 'LEAGUE' || normalizedEventType === 'TOURNAMENT')
+        ) {
           return { applied: false, reason: 'schedulable_team_event_requires_participant_route' };
         }
       } else if (event.teamSignup) {
@@ -764,10 +773,15 @@ const cancelEventRegistrationFromFailedPayment = async ({
       const result = await tx.eventRegistrations.updateMany({
         where: {
           id: normalizedRegistrationId ?? expectedRegistrationId,
-          status: { in: ['STARTED', 'PENDING'] },
+          status: {
+            in: targetStatus === 'CANCELLED'
+              ? ['STARTED', 'PENDING', 'PAYMENT_FAILED']
+              : ['STARTED', 'PENDING'],
+          },
         },
         data: {
-          status: 'PAYMENT_FAILED',
+          status: targetStatus,
+          paymentResolutionReason,
           updatedAt: now,
         },
       });
@@ -776,7 +790,7 @@ const cancelEventRegistrationFromFailedPayment = async ({
         : { applied: false, reason: 'reservation_not_pending' };
     });
   } catch (error) {
-    console.error('Failed to cancel webhook event registration after payment failure', {
+    console.error('Failed to update webhook event registration payment status', {
       purchaseType,
       eventId,
       teamId,
@@ -786,6 +800,10 @@ const cancelEventRegistrationFromFailedPayment = async ({
     return { applied: false, reason: 'error' };
   }
 };
+
+const isPermanentEventRegistrationFailure = (reason?: string): boolean => (
+  reason === 'capacity_exceeded' || reason === 'invalid_registration_unit'
+);
 
 const cancelTeamRegistrationFromFailedPayment = async ({
   purchaseType,
@@ -2128,7 +2146,7 @@ export async function POST(req: NextRequest) {
         resolvedBillPaymentId = failedBill.billPaymentId ?? resolvedBillPaymentId;
       }
 
-      const registrationResult = await cancelEventRegistrationFromFailedPayment({
+      const registrationResult = await setEventRegistrationPaymentStatusFromPurchase({
         purchaseType,
         eventId,
         teamId,
@@ -2414,6 +2432,35 @@ export async function POST(req: NextRequest) {
         ...receiptLogContext,
         reason: registrationResult.reason,
       });
+    }
+    if (
+      !registrationResult.applied
+      && isPermanentEventRegistrationFailure(registrationResult.reason)
+    ) {
+      const paymentResolutionResult = await setEventRegistrationPaymentStatusFromPurchase({
+        purchaseType,
+        eventId,
+        teamId,
+        userId,
+        registrantType: eventRegistrationRegistrantType,
+        registrationId,
+        occurrenceSlotId,
+        occurrenceDate,
+        now,
+        targetStatus: 'CANCELLED',
+        paymentResolutionReason: registrationResult.reason,
+        allowSchedulableTeamEvent: true,
+      });
+      if (
+        !paymentResolutionResult.applied
+        && paymentResolutionResult.reason !== 'reservation_not_pending'
+      ) {
+        console.warn('Stripe webhook could not persist paid event registration resolution state.', {
+          ...receiptLogContext,
+          reason: paymentResolutionResult.reason,
+          registrationFailureReason: registrationResult.reason,
+        });
+      }
     }
     if (registrationResult.activated && eventId && registrationResult.registrationId) {
       await sendEventRegistrationHostNotification({

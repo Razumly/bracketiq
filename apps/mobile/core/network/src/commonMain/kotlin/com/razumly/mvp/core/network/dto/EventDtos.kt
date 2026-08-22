@@ -40,6 +40,7 @@ import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toInstant
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 import kotlin.native.ObjCName
@@ -99,7 +100,8 @@ data class EventApiDto(
     val hostId: String? = null,
     val assistantHostIds: List<String>? = null,
     val noFixedEndDateTime: Boolean? = null,
-    val automatedScheduling: Boolean? = null,
+    @SerialName("automatedScheduling")
+    val isAutomatedScheduling: Boolean? = null,
     val teamSignup: Boolean? = null,
     val singleDivision: Boolean? = null,
     val registrationByDivisionType: Boolean? = null,
@@ -211,7 +213,7 @@ data class EventApiDto(
         val resolvedNoFixedEndDateTime = noFixedEndDateTime ?: false
         val resolvedAutomatedScheduling = normalizeAutomatedSchedulingForEventType(
             resolvedEventType,
-            automatedScheduling,
+            isAutomatedScheduling,
         )
         val parsedEnd = when {
             !resolvedEnd.isNullOrBlank() -> parseApiInstant(resolvedEnd, resolvedTimeZone)
@@ -448,7 +450,7 @@ data class EventApiDto(
             hostId = resolvedHostId.orEmpty(),
             assistantHostIds = assistantHostIds ?: emptyList(),
             noFixedEndDateTime = resolvedNoFixedEndDateTime,
-            automatedScheduling = resolvedAutomatedScheduling,
+            isAutomatedScheduling = resolvedAutomatedScheduling,
             teamSignup = teamSignup ?: true,
             singleDivision = singleDivision ?: true,
             freeAgentIds = freeAgentIds ?: emptyList(),

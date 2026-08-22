@@ -3550,6 +3550,7 @@ model EventRegistrations {
   registrantType           EventRegistrationsRegistrantTypeEnum
   rosterRole               EventRegistrationsRosterRoleEnum     @default(PARTICIPANT)
   status                   EventRegistrationsStatusEnum
+  paymentResolutionReason  String?
   acceptedAt               DateTime?
   eventTeamId              String?
   sourceTeamRegistrationId String?

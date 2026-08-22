@@ -165,13 +165,13 @@ export const useEventFormConfigurationActions = ({
         const enforcingTeamSettings = !isAffiliateEvent
             && (nextType === 'LEAGUE' || nextType === 'TOURNAMENT');
         const enforcingTryoutSettings = !isAffiliateEvent && nextType === 'TRYOUT';
-        const nextAutomatedScheduling =
+        const nextIsAutomatedScheduling =
             !isAffiliateEvent
             && (nextType === 'LEAGUE' || nextType === 'TOURNAMENT' || nextType === 'WEEKLY_EVENT');
         applyValue(nextType);
         setValue(
-            'automatedScheduling',
-            nextAutomatedScheduling,
+            'isAutomatedScheduling',
+            nextIsAutomatedScheduling,
             { shouldDirty: true, shouldValidate: true },
         );
         setValue(

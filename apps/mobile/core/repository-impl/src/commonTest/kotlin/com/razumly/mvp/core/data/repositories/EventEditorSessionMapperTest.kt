@@ -51,7 +51,7 @@ internal fun editorProtocolSnapshot(
     mode: String = "CREATE",
     editorRevision: String = "new",
     generatedEnd: Boolean = false,
-    automatedScheduling: Boolean = true,
+    isAutomatedScheduling: Boolean = true,
     preserveNullableValues: Boolean = false,
 ): EventEditorSnapshotDto {
     val division = EventEditorDivisionDetailDto(
@@ -175,14 +175,14 @@ internal fun editorProtocolSnapshot(
                     mode = "GENERATED_END",
                     endConstraint = null,
                     generatedScheduleEnd = "2026-09-30",
-                    automatedScheduling = automatedScheduling,
+                    isAutomatedScheduling = isAutomatedScheduling,
                 )
             } else {
                 EventEditorScheduleDto(
                     mode = "FIXED_END",
                     endConstraint = TEST_END,
                     generatedScheduleEnd = null,
-                    automatedScheduling = automatedScheduling,
+                    isAutomatedScheduling = isAutomatedScheduling,
                 )
             },
             resources = EventEditorResourcesDto(
@@ -385,21 +385,21 @@ class EventEditorSessionMapperTest {
     @Test
     fun given_automated_scheduling_when_event_and_command_are_mapped_then_value_round_trips() {
         val session = EventEditorSessionMapper.fromCreateBootstrap(
-            editorProtocolBootstrap(editorProtocolSnapshot(automatedScheduling = false)),
+            editorProtocolBootstrap(editorProtocolSnapshot(isAutomatedScheduling = false)),
         )
 
-        assertEquals(false, session.canonicalState.event.automatedScheduling)
+        assertEquals(false, session.canonicalState.event.isAutomatedScheduling)
         val command = EventEditorSessionMapper.toCreateCommand(
             session = session,
             mutation = EventEditorMutation(session.canonicalState),
         ).command
 
-        assertEquals(false, command.draft.schedule.automatedScheduling)
+        assertEquals(false, command.draft.schedule.isAutomatedScheduling)
         assertEquals(EventEditorCreateCompletionMode.CREATE_ONLY, command.completion.mode)
         val decoded = jsonMVP.decodeFromString<EventEditorCreateCommandDto>(
             jsonMVP.encodeToString(command),
         )
-        assertEquals(false, decoded.draft.schedule.automatedScheduling)
+        assertEquals(false, decoded.draft.schedule.isAutomatedScheduling)
     }
 
     @Test
@@ -408,7 +408,7 @@ class EventEditorSessionMapperTest {
             editorProtocolBootstrap(
                 editorProtocolSnapshot(
                     generatedEnd = true,
-                    automatedScheduling = false,
+                    isAutomatedScheduling = false,
                 ),
             ),
         )
@@ -467,7 +467,7 @@ class EventEditorSessionMapperTest {
                     teamSignup = false,
                     singleDivision = true,
                 ),
-                schedule = baseSnapshot.draft.schedule.copy(automatedScheduling = false),
+                schedule = baseSnapshot.draft.schedule.copy(isAutomatedScheduling = false),
                 competition = baseSnapshot.draft.competition.copy(
                     divisionDetails = baseSnapshot.draft.competition.divisionDetails.map { detail ->
                         detail.copy(
@@ -552,7 +552,7 @@ class EventEditorSessionMapperTest {
                     teamSignup = false,
                     singleDivision = true,
                 ),
-                schedule = baseSnapshot.draft.schedule.copy(automatedScheduling = false),
+                schedule = baseSnapshot.draft.schedule.copy(isAutomatedScheduling = false),
                 competition = baseSnapshot.draft.competition.copy(
                     divisionDetails = baseSnapshot.draft.competition.divisionDetails.map { detail ->
                         detail.copy(kind = "EVENT", playoffTeamCount = null)

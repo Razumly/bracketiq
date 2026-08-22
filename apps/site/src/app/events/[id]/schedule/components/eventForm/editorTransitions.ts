@@ -60,7 +60,7 @@ export const changeScheduleMode = (
       schedule: {
         mode,
         endConstraint: nextEnd,
-        automatedScheduling: draft.schedule.automatedScheduling,
+        isAutomatedScheduling: draft.schedule.isAutomatedScheduling,
       },
     });
   }
@@ -73,7 +73,7 @@ export const changeScheduleMode = (
       generatedScheduleEnd: draft.schedule.mode === 'GENERATED_END'
         ? draft.schedule.generatedScheduleEnd
         : null,
-      automatedScheduling: draft.schedule.automatedScheduling,
+      isAutomatedScheduling: draft.schedule.isAutomatedScheduling,
     },
   });
 };

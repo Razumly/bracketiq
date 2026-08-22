@@ -332,7 +332,7 @@ private fun EventEditorDraftDto.toEvent(eventId: String): Event {
     val eventType = runCatching { EventType.valueOf(basics.eventType.trim().uppercase()) }.getOrDefault(EventType.EVENT)
     val resolvedAutomatedScheduling = normalizeAutomatedSchedulingForEventType(
         eventType,
-        schedule.automatedScheduling,
+        schedule.isAutomatedScheduling,
     )
     val resolvedStaffingPriority = resolveStaffingPriority(
         staffingPriority = staff.staffingPriority,
@@ -406,7 +406,7 @@ private fun EventEditorDraftDto.toEvent(eventId: String): Event {
         hostId = basics.hostId.orEmpty(),
         assistantHostIds = staff.assistantHostIds,
         noFixedEndDateTime = schedule.mode == "GENERATED_END",
-        automatedScheduling = resolvedAutomatedScheduling,
+        isAutomatedScheduling = resolvedAutomatedScheduling,
         teamSignup = participation.teamSignup,
         singleDivision = participation.singleDivision,
         freeAgentIds = participation.freeAgentIds,
@@ -624,15 +624,15 @@ private fun Event.toScheduleDto(
 ): EventEditorScheduleDto {
     val normalizedAutomatedScheduling = normalizeAutomatedSchedulingForEventType(
         eventType,
-        automatedScheduling,
+        isAutomatedScheduling,
     )
     val modeChanged = noFixedEndDateTime != baseline.noFixedEndDateTime
     val endChanged = end != baseline.end
-    val schedulingChanged = normalizedAutomatedScheduling != existing.automatedScheduling
+    val schedulingChanged = normalizedAutomatedScheduling != existing.isAutomatedScheduling
     if (!modeChanged && !endChanged && !schedulingChanged) return existing
 
     val withAutomatedScheduling = existing.copy(
-        automatedScheduling = normalizedAutomatedScheduling,
+        isAutomatedScheduling = normalizedAutomatedScheduling,
     )
     return when {
         noFixedEndDateTime -> withAutomatedScheduling.copy(
@@ -1143,13 +1143,13 @@ object EventEditorSessionMapper {
         val draft = session.snapshot.draft.withMutation(session.baseline, mutation.canonicalState)
         val eventType = runCatching { EventType.valueOf(draft.basics.eventType.trim().uppercase()) }
             .getOrDefault(EventType.EVENT)
-        val automatedScheduling = normalizeAutomatedSchedulingForEventType(
+        val isAutomatedScheduling = normalizeAutomatedSchedulingForEventType(
             eventType,
-            draft.schedule.automatedScheduling,
+            draft.schedule.isAutomatedScheduling,
         )
         if (
             (eventType == EventType.LEAGUE || eventType == EventType.TOURNAMENT) &&
-            !automatedScheduling
+            !isAutomatedScheduling
         ) {
             val start = parseEditorInstant(
                 draft.basics.start,
@@ -1171,7 +1171,7 @@ object EventEditorSessionMapper {
         }
         val completionMode = if (
             (eventType == EventType.LEAGUE || eventType == EventType.TOURNAMENT) &&
-            automatedScheduling
+            isAutomatedScheduling
         ) {
             EventEditorCreateCompletionMode.CREATE_AND_BUILD_SCHEDULE
         } else {

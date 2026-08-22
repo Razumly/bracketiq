@@ -116,11 +116,11 @@ export const SimpleSetupPlanningPage = ({
 
   const teamChoiceDisabled = !capabilities.canChooseTeamRegistration;
   const divisionChoiceDisabled = !capabilities.canChooseDivisionMode;
-  const automatedSchedulingDisablesScheduleConstruction =
+  const isAutomatedSchedulingDisablesScheduleConstruction =
     eventData.eventType === "LEAGUE" || eventData.eventType === "TOURNAMENT";
   const showScheduleConstructionControls =
-    !automatedSchedulingDisablesScheduleConstruction ||
-    eventData.automatedScheduling !== false;
+    !isAutomatedSchedulingDisablesScheduleConstruction ||
+    eventData.isAutomatedScheduling !== false;
   const availableScheduleStyleOptions = scheduleStyleOptions.filter((option) =>
     isScheduleStyleAllowedForEventType(eventData.eventType, option.value),
   );
@@ -401,17 +401,19 @@ export const SimpleSetupPlanningPage = ({
         </div>
         {capabilities.isLeague || capabilities.isTournament ? (
           <Controller
-            name="automatedScheduling"
+            name="isAutomatedScheduling"
             control={control}
             render={({ field }) => (
               <Checkbox
                 label="Automated Scheduling"
                 description="Build the match schedule from the event setup when you create it."
                 checked={Boolean(field.value)}
-                disabled={isImmutableField("automatedScheduling")}
+                disabled={isImmutableField("isAutomatedScheduling")}
                 onChange={(event) => {
-                  if (isImmutableField("automatedScheduling")) return;
-                  field.onChange(event.currentTarget.checked);
+                  if (isImmutableField("isAutomatedScheduling")) return;
+                  const checked = event.currentTarget.checked;
+                  field.onChange(checked);
+                  if (!checked) onNoFixedEndDateTimeChange(false);
                 }}
               />
             )}

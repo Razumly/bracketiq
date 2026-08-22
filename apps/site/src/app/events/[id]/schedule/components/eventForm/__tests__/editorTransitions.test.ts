@@ -40,7 +40,7 @@ describe('editor transitions', () => {
         mode: 'GENERATED_END' as const,
         endConstraint: null,
         generatedScheduleEnd: null,
-        automatedScheduling: draft.schedule.automatedScheduling,
+        isAutomatedScheduling: draft.schedule.isAutomatedScheduling,
       },
     };
     const blocked = changeScheduleMode(generated, 'FIXED_END');
@@ -51,7 +51,7 @@ describe('editor transitions', () => {
     expect(fixed.draft.schedule).toEqual({
       mode: 'FIXED_END',
       endConstraint: '2026-09-10T20:00:00.000Z',
-      automatedScheduling: draft.schedule.automatedScheduling,
+      isAutomatedScheduling: draft.schedule.isAutomatedScheduling,
     });
   });
 

@@ -97,7 +97,8 @@ export type EventParticipantRegistrationEntry = {
   registrantId: string;
   registrantType: "SELF" | "CHILD" | "TEAM";
   rosterRole: "PARTICIPANT" | "WAITLIST" | "FREE_AGENT";
-  status: "STARTED" | "PENDING" | "PAYMENT_FAILED" | "ACTIVE" | "BLOCKED" | "CANCELLED" | "CONSENTFAILED";
+  status: "STARTED" | "PENDING" | "PAYMENT_FAILED" | "ACTIVE" | "BLOCKED" | "CONSENTFAILED" | "CANCELLED";
+  paymentResolutionReason: string | null;
   parentId: string | null;
   divisionId: string | null;
   divisionTypeId: string | null;

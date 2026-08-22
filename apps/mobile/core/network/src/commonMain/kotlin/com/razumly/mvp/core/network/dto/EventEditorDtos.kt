@@ -354,7 +354,8 @@ data class EventEditorScheduleDto(
     val mode: String,
     val endConstraint: String? = null,
     val generatedScheduleEnd: String? = null,
-    val automatedScheduling: Boolean = true,
+    @SerialName("automatedScheduling")
+    val isAutomatedScheduling: Boolean = true,
 )
 
 @Serializable

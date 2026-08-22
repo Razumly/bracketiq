@@ -4494,7 +4494,7 @@ function EventScheduleContent() {
       const completion = {
         mode: createCompletionMode ?? (
           ['LEAGUE', 'TOURNAMENT'].includes(scheduleType)
-            ? contractDraft.schedule.automatedScheduling === false
+            ? contractDraft.schedule.isAutomatedScheduling === false
               ? 'CREATE_ONLY'
               : 'CREATE_AND_BUILD_SCHEDULE'
             : 'CREATE_ONLY'

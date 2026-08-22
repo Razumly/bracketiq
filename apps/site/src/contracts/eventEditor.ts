@@ -479,11 +479,29 @@ export const registrationQuestionInputSchema = z.union([
   newRegistrationQuestionSchema,
 ]);
 
+const normalizeEditorScheduleWireInput = (input: unknown): unknown => {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return input;
+  }
+  const record = input as Record<string, unknown>;
+  const { automatedScheduling, ...withoutLegacyKey } = record;
+  if (Object.prototype.hasOwnProperty.call(record, "isAutomatedScheduling")) {
+    return withoutLegacyKey;
+  }
+  if (automatedScheduling !== undefined) {
+    return {
+      ...withoutLegacyKey,
+      isAutomatedScheduling: automatedScheduling,
+    };
+  }
+  return withoutLegacyKey;
+};
+
 const scheduleFixedSchema = z
   .object({
     mode: z.literal("FIXED_END"),
     endConstraint: isoDateTime,
-    automatedScheduling: z.boolean().default(true),
+    isAutomatedScheduling: z.boolean().default(true),
   })
   .strict();
 
@@ -492,14 +510,19 @@ const scheduleGeneratedSchema = z
     mode: z.literal("GENERATED_END"),
     endConstraint: z.null(),
     generatedScheduleEnd: optionalDateLike,
-    automatedScheduling: z.boolean().default(true),
+    isAutomatedScheduling: z.boolean().default(true),
   })
   .strict();
 
-export const editorScheduleSchema = z.discriminatedUnion("mode", [
+const editorScheduleShapeSchema = z.discriminatedUnion("mode", [
   scheduleFixedSchema,
   scheduleGeneratedSchema,
 ]);
+
+export const editorScheduleSchema = z.preprocess(
+  normalizeEditorScheduleWireInput,
+  editorScheduleShapeSchema,
+);
 
 export const editorPaymentSchema = z
   .object({
@@ -1009,9 +1032,9 @@ const normalizeEditorDraftScheduling = (
   ...draft,
   schedule: {
     ...draft.schedule,
-    automatedScheduling: normalizeAutomatedSchedulingForEventType(
+    isAutomatedScheduling: normalizeAutomatedSchedulingForEventType(
       draft.basics.eventType,
-      draft.schedule.automatedScheduling,
+      draft.schedule.isAutomatedScheduling,
     ),
   },
 });

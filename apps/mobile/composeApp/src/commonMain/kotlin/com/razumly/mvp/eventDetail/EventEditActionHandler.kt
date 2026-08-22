@@ -415,10 +415,10 @@ internal class EventEditActionHandler(
         val previous = editDraftCoordinator.editedEvent.value
         val preserveLeagueTournamentChoice =
             previous.eventType == EventType.LEAGUE || previous.eventType == EventType.TOURNAMENT
-        val automatedScheduling = when (type) {
+        val isAutomatedScheduling = when (type) {
             EventType.LEAGUE, EventType.TOURNAMENT ->
                 if (preserveLeagueTournamentChoice) {
-                    previous.automatedScheduling
+                    previous.isAutomatedScheduling
                 } else {
                     defaultAutomatedSchedulingForEventType(type)
                 }
@@ -427,8 +427,8 @@ internal class EventEditActionHandler(
         editEventField {
             copy(
                 eventType = type,
-                automatedScheduling = automatedScheduling,
-                noFixedEndDateTime = if (automatedScheduling && type != EventType.WEEKLY_EVENT) {
+                isAutomatedScheduling = isAutomatedScheduling,
+                noFixedEndDateTime = if (isAutomatedScheduling && type != EventType.WEEKLY_EVENT) {
                     noFixedEndDateTime
                 } else {
                     false

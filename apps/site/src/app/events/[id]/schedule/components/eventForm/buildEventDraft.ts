@@ -93,7 +93,7 @@ type BuildEventDraftInput = {
     sportsById: Map<string, Sport>;
 };
 export type BuiltEventDraft = Partial<Event> & {
-    automatedScheduling?: boolean;
+    isAutomatedScheduling?: boolean;
     pendingStaffInvites: PendingStaffInvite[];
 };
 
@@ -590,9 +590,9 @@ export function buildEventDraft(input: BuildEventDraftInput): BuiltEventDraft {
                 && supportsScheduleSlotsForEvent(source.eventType, source.parentEvent)
                 ? Boolean(source.noFixedEndDateTime)
                 : false,
-            automatedScheduling: normalizeAutomatedSchedulingForEventType(
+            isAutomatedScheduling: normalizeAutomatedSchedulingForEventType(
                 source.eventType,
-                source.automatedScheduling,
+                source.isAutomatedScheduling,
             ),
             state: isEditMode ? activeEditingEvent?.state ?? 'PUBLISHED' : 'UNPUBLISHED',
             sportIds,

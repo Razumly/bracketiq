@@ -77,7 +77,7 @@ const buildValues = (eventType: 'LEAGUE' | 'TOURNAMENT') => {
     requiredTemplateIds: [],
     hostId: 'host-1',
     noFixedEndDateTime: false,
-    automatedScheduling: false,
+    isAutomatedScheduling: false,
     imageId: '',
     seedColor: 0,
     waitList: [],

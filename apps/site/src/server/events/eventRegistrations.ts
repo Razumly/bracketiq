@@ -616,6 +616,7 @@ const registrationSelect = {
   occurrenceDate: true,
   createdAt: true,
   updatedAt: true,
+  paymentResolutionReason: true,
 } as const;
 
 const participantDivisionSelect = {
