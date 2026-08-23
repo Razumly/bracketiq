@@ -87,6 +87,12 @@ import {
 } from '@/server/discounts/discountCodeResolver';
 import { logBillingError } from '@/server/billing/errorLogging';
 import { getConfiguredStripeSecretKey, STRIPE_UNAVAILABLE_ERROR } from '@/server/stripeConfiguration';
+import {
+  documentSubjectIdFor,
+  documentSatisfactionScopeFor,
+  findSatisfiedDocumentTemplateIds,
+} from '@/server/documentEvidence';
+
 
 export const dynamic = 'force-dynamic';
 
@@ -227,14 +233,6 @@ const appendMetadata = (
   const normalized = normalizeString(value);
   if (!normalized) return;
   metadata[key] = normalized.slice(0, maxLength);
-};
-
-const isSignedStatus = (value: unknown): boolean => {
-  if (typeof value !== 'string') {
-    return false;
-  }
-  const normalized = value.trim().toLowerCase();
-  return normalized === 'signed' || normalized === 'completed';
 };
 
 const STARTED_REGISTRATION_TTL_MS = 10 * 60 * 1000;
@@ -1230,32 +1228,37 @@ export async function POST(req: NextRequest) {
           error: `Rental document templates not found: ${missingTemplateIds.join(', ')}`,
         }, { status: 400 });
       }
-      const unsignedTemplateLabels: string[] = [];
       for (const templateId of hostRequiredTemplateIds) {
         const template = templateById.get(templateId);
-        if (!template) {
-          continue;
-        }
-        if (!template.signOnce && !eventId) {
+        if (template && !template.signOnce && !eventId) {
           return NextResponse.json({ error: 'Event id is required to verify rental document signatures.' }, { status: 400 });
         }
-
-        const signedRows = await prisma.signedDocuments.findMany({
-          where: {
-            templateId: template.id,
-            userId,
-            signerRole: 'participant',
-            ...(template.signOnce ? {} : { eventId }),
-          },
-          orderBy: { updatedAt: 'desc' },
-          take: 20,
-          select: { status: true },
-        });
-        const hasSignedDocument = signedRows.some((row) => isSignedStatus(row.status));
-        if (!hasSignedDocument) {
-          unsignedTemplateLabels.push(template.title?.trim() || template.id);
-        }
       }
+
+      const satisfactionScopes = hostRequiredTemplateIds.flatMap((templateId) => {
+        const template = templateById.get(templateId);
+        if (!template) {
+          return [];
+        }
+        const scope = documentSatisfactionScopeFor({
+          templateDocumentId: template.id,
+          organizationId: resolvedPurchase.organizationId,
+          documentSubjectUserId: userId,
+          eventId,
+          teamId: null,
+          signOnce: template.signOnce,
+        });
+        return scope ? [scope] : [];
+      });
+      const satisfiedTemplateIds = await findSatisfiedDocumentTemplateIds({
+        documentSubjectId: documentSubjectIdFor(resolvedPurchase.organizationId, userId),
+        scopes: satisfactionScopes,
+      });
+      const unsignedTemplateLabels = hostRequiredTemplateIds
+        .map((templateId) => templateById.get(templateId))
+        .filter((template): template is NonNullable<typeof template> => Boolean(template))
+        .filter((template) => !satisfiedTemplateIds.has(template.id))
+        .map((template) => template.title?.trim() || template.id);
 
       if (unsignedTemplateLabels.length > 0) {
         return NextResponse.json({

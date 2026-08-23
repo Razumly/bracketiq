@@ -35,6 +35,9 @@ const prismaMock = {
   signedDocuments: {
     findMany: jest.fn(),
   },
+  documentRequirementSatisfactions: {
+    findMany: jest.fn(),
+  },
   eventRegistrations: {
     findMany: jest.fn(),
     findUnique: jest.fn(),
@@ -167,6 +170,7 @@ describe('POST /api/billing/purchase-intent', () => {
     prismaMock.eventRegistrations.create.mockResolvedValue({});
     prismaMock.eventRegistrations.update.mockResolvedValue({});
     prismaMock.eventRegistrations.deleteMany.mockResolvedValue({ count: 0 });
+    prismaMock.documentRequirementSatisfactions.findMany.mockResolvedValue([]);
     canManageCanonicalTeamMock.mockResolvedValue(true);
     claimOrCreateEventTeamSnapshotMock.mockResolvedValue({ id: 'event_team_1' });
     loadCanonicalTeamByIdMock.mockResolvedValue({
@@ -284,7 +288,7 @@ describe('POST /api/billing/purchase-intent', () => {
     expect(String(data.error ?? '')).toContain('must be signed');
   });
 
-  it('creates a payment intent when rental document is already signed', async () => {
+  it('creates a payment intent when an imported Satisfaction is complete', async () => {
     resolveCanonicalRentalCheckoutMock.mockResolvedValueOnce(canonicalRentalResult({
       hostRequiredTemplateIds: ['tmpl_rental_1'],
     }));
@@ -296,8 +300,13 @@ describe('POST /api/billing/purchase-intent', () => {
       },
     ]);
     prismaMock.signedDocuments.findMany.mockResolvedValue([
-      { status: 'SIGNED' },
+      { status: 'SIGNED', userId: null, signerRole: null },
     ]);
+    prismaMock.documentRequirementSatisfactions.findMany.mockResolvedValue([{
+      templateDocumentId: 'tmpl_rental_1',
+      status: 'SATISFIED',
+      isComplete: true,
+    }]);
 
     const res = await POST(jsonPost({
       user: { $id: 'user_1' },
@@ -536,9 +545,12 @@ describe('POST /api/billing/purchase-intent', () => {
         signOnce: false,
       },
     ]);
-    prismaMock.signedDocuments.findMany
-      .mockResolvedValueOnce([{ status: 'SIGNED' }])
-      .mockResolvedValueOnce([]);
+    prismaMock.signedDocuments.findMany.mockResolvedValue([]);
+    prismaMock.documentRequirementSatisfactions.findMany.mockResolvedValue([{
+      templateDocumentId: 'tmpl_rental_1',
+      status: 'SATISFIED',
+      isComplete: true,
+    }]);
 
     const res = await POST(jsonPost({
       user: { $id: 'user_1' },
