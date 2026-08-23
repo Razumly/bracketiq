@@ -228,7 +228,7 @@ describe('file routes', () => {
       expect(res.status).toBe(200);
       expect(res.headers.get('Content-Disposition')).toContain('inline');
     });
-    it('does not expose private PDF files through the generic route', async () => {
+    it('does not expose protected imported PDFs through the generic route', async () => {
       prismaMock.file.findUnique.mockResolvedValue({
         id: 'imported_file',
         path: 'path/imported.pdf',
@@ -236,6 +236,7 @@ describe('file routes', () => {
         mimeType: 'application/pdf',
         originalName: 'imported.pdf',
       });
+      assertFileReadAccessMock.mockRejectedValueOnce(new Response('Forbidden', { status: 403 }));
       const storageProvider = { getObjectStream: jest.fn() };
       getStorageProviderMock.mockReturnValue(storageProvider);
 
@@ -246,6 +247,7 @@ describe('file routes', () => {
 
       expect(response.status).toBe(403);
       expect(storageProvider.getObjectStream).not.toHaveBeenCalled();
+      expect(assertFileReadAccessMock).toHaveBeenCalledWith(expect.anything(), 'imported_file');
     });
 
     it('does not fetch protected payment proofs after access is denied', async () => {

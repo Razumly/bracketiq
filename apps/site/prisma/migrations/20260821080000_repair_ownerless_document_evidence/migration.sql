@@ -118,6 +118,27 @@ SET
     WHEN EXCLUDED."updatedAt" IS NULL THEN "DocumentSubjects"."updatedAt"
     ELSE GREATEST("DocumentSubjects"."updatedAt", EXCLUDED."updatedAt")
   END;
+-- Preserve source evidence timestamps for every repaired or existing Subject.
+WITH subject_timestamps AS (
+  SELECT
+    sd."documentSubjectId" AS document_subject_id,
+    MIN(sd."createdAt") AS created_at,
+    MAX(COALESCE(sd."updatedAt", sd."createdAt")) AS updated_at
+  FROM "SignedDocuments" sd
+  WHERE sd."documentSubjectId" IS NOT NULL
+  GROUP BY sd."documentSubjectId"
+)
+UPDATE "DocumentSubjects" subject
+SET
+  "createdAt" = COALESCE(timestamps.created_at, subject."createdAt", CURRENT_TIMESTAMP),
+  "updatedAt" = COALESCE(
+    timestamps.updated_at,
+    timestamps.created_at,
+    subject."updatedAt",
+    CURRENT_TIMESTAMP
+  )
+FROM subject_timestamps timestamps
+WHERE subject."id" = timestamps.document_subject_id;
 
 -- Backfill newly eligible owner-repaired evidence without duplicating an active
 -- Satisfaction identity. Completion still requires every normalized signer role.

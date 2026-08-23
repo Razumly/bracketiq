@@ -599,16 +599,58 @@ export const invalidateDocumentRequirementSatisfactions = async (params: {
         id: true,
         sourceEvidenceId: true,
         requiredSignerRoles: true,
+        organizationId: true,
+        documentRequirementId: true,
+        templateDocumentId: true,
+        documentSubjectId: true,
+        scopeType: true,
+        scopeId: true,
       },
     }),
   );
-  const satisfactionLinks = await readByIdChunks(
-    satisfactionIds,
-    (ids) => contributorDelegate.findMany({
-      where: { satisfactionId: { in: ids } },
-      select: { satisfactionId: true, signedDocumentId: true, completedSignerRoles: true },
-    }),
-  );
+  const satisfactionIdentities = satisfactions
+    .map((satisfaction) => ({
+      satisfactionId: satisfaction.id,
+      identity: documentSatisfactionIdentity({
+        organizationId: satisfaction.organizationId,
+        documentRequirementId: satisfaction.documentRequirementId,
+        templateDocumentId: satisfaction.templateDocumentId,
+        documentSubjectId: satisfaction.documentSubjectId,
+        scopeType: satisfaction.scopeType as DocumentSatisfactionScope,
+        scopeId: satisfaction.scopeId,
+      }),
+    }))
+    .sort((left, right) => left.identity.localeCompare(right.identity));
+  for (const { identity } of satisfactionIdentities) {
+    await acquireDocumentSatisfactionLock(database, identity);
+  }
+
+  const lockedSatisfactionIds = satisfactionIdentities.map(({ satisfactionId }) => satisfactionId);
+  const lockedSatisfactions = lockedSatisfactionIds.length > 0
+    ? await readByIdChunks(
+      lockedSatisfactionIds,
+      (ids) => satisfactionDelegate.findMany({
+        where: {
+          id: { in: ids },
+          status: { in: ['PENDING', 'SATISFIED'] },
+        },
+        select: {
+          id: true,
+          sourceEvidenceId: true,
+          requiredSignerRoles: true,
+        },
+      }),
+    )
+    : [];
+  const satisfactionLinks = lockedSatisfactionIds.length > 0
+    ? await readByIdChunks(
+      lockedSatisfactionIds,
+      (ids) => contributorDelegate.findMany({
+        where: { satisfactionId: { in: ids } },
+        select: { satisfactionId: true, signedDocumentId: true, completedSignerRoles: true },
+      }),
+    )
+    : [];
   const linkedEvidenceIds = Array.from(new Set(satisfactionLinks.map((link) => link.signedDocumentId)));
   const evidenceRows = linkedEvidenceIds.length > 0
     ? await readByIdChunks(
@@ -627,7 +669,7 @@ export const invalidateDocumentRequirementSatisfactions = async (params: {
     linksBySatisfactionId.set(link.satisfactionId, links);
   }
 
-  for (const satisfaction of satisfactions) {
+  const satisfactionUpdates = lockedSatisfactions.map((satisfaction) => {
     const links = linksBySatisfactionId.get(satisfaction.id) ?? [];
     const activeRows = links
       .map((link) => evidenceById.get(link.signedDocumentId))
@@ -667,21 +709,29 @@ export const invalidateDocumentRequirementSatisfactions = async (params: {
     const sourceEvidenceId = activeRows.some((row) => row.id === satisfaction.sourceEvidenceId)
       ? satisfaction.sourceEvidenceId
       : activeRows[0]?.id ?? satisfaction.sourceEvidenceId;
+    const status: 'INVALIDATED' | 'SATISFIED' | 'PENDING' = activeRows.length === 0
+      ? 'INVALIDATED'
+      : isComplete
+        ? 'SATISFIED'
+        : 'PENDING';
 
-    await satisfactionDelegate.update({
-      where: { id: satisfaction.id },
+    return {
+      id: satisfaction.id,
       data: {
         updatedAt: invalidatedAt,
-        status: activeRows.length === 0
-          ? 'INVALIDATED'
-          : isComplete
-            ? 'SATISFIED'
-            : 'PENDING',
+        status,
         isComplete,
         completedSignerRoles,
         sourceEvidenceId,
         invalidatedAt: activeRows.length === 0 ? invalidatedAt : null,
       },
-    });
-  }
+    };
+  });
+
+  await Promise.all(satisfactionUpdates.map(({ id, data }) => (
+    satisfactionDelegate.update({
+      where: { id },
+      data,
+    })
+  )));
 };
