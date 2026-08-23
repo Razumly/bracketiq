@@ -71,6 +71,7 @@ import com.razumly.mvp.core.data.repositories.DiscountOffer
 import com.razumly.mvp.core.data.repositories.DiscountTarget
 import com.razumly.mvp.core.data.repositories.EventTemplateSummary
 import com.razumly.mvp.core.data.repositories.ProfileDocumentCard
+import com.razumly.mvp.core.data.repositories.ProfileDocumentStatus
 import com.razumly.mvp.core.data.repositories.ProfileDocumentType
 import com.razumly.mvp.core.presentation.composables.EmbeddedWebModal
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
