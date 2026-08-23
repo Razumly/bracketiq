@@ -47,6 +47,7 @@ enum class SignerContext(val apiValue: String) {
 enum class ProfileDocumentStatus {
     UNSIGNED,
     SIGNED,
+    VOID,
 }
 
 enum class ProfileDocumentType {

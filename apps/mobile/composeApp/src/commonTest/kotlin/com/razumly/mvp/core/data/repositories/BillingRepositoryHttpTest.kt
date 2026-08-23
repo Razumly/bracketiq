@@ -3255,8 +3255,25 @@ class BillingRepositoryHttpTest {
                           "signedDocumentRecordId": "signed_1",
                           "content": "I agree."
                         }
+                      ],
+                      "voided": [
+                        {
+                          "id": "voided_1",
+                          "status": "VOID",
+                          "eventId": "event_1",
+                          "eventName": "Spring League",
+                          "organizationId": "org_1",
+                          "organizationName": "City League",
+                          "templateId": "tpl_pdf",
+                          "title": "Parent Consent",
+                          "type": "PDF",
+                          "requiredSignerType": "PARTICIPANT",
+                          "requiredSignerLabel": "Participant",
+                          "signerContext": "participant",
+                          "signerContextLabel": "Participant",
+                          "signedDocumentRecordId": "voided_1"
+                        }
                       ]
-                    }
                 """.trimIndent(),
                 status = HttpStatusCode.OK,
                 headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
@@ -3270,7 +3287,7 @@ class BillingRepositoryHttpTest {
         val documents = repo.listProfileDocuments().getOrThrow()
 
         assertEquals(1, documents.unsigned.size)
-        assertEquals(1, documents.signed.size)
+        assertEquals(2, documents.signed.size)
 
         val unsigned = documents.unsigned.first()
         assertEquals(ProfileDocumentStatus.UNSIGNED, unsigned.status)
@@ -3283,6 +3300,10 @@ class BillingRepositoryHttpTest {
         assertEquals(ProfileDocumentType.TEXT, signed.type)
         assertEquals(SignerContext.PARTICIPANT, signed.signerContext)
         assertEquals("I agree.", signed.content)
+
+        val voided = documents.signed[1]
+        assertEquals(ProfileDocumentStatus.VOID, voided.status)
+        assertEquals("voided_1", voided.id)
     }
 
     @Test

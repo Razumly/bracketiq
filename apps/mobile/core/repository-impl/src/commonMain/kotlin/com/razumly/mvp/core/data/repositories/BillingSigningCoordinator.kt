@@ -193,6 +193,8 @@ internal class BillingSigningCoordinator(
             },
             signed = response.signed.mapNotNull { document ->
                 document.toProfileDocumentCardOrNull(defaultStatus = ProfileDocumentStatus.SIGNED)
+            } + response.voided.mapNotNull { document ->
+                document.toProfileDocumentCardOrNull(defaultStatus = ProfileDocumentStatus.VOID)
             },
         )
     }

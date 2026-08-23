@@ -93,6 +93,7 @@ internal data class EventSignLinksResponseDto(
 internal data class ProfileDocumentsResponseDto(
     val unsigned: List<ProfileDocumentCardDto> = emptyList(),
     val signed: List<ProfileDocumentCardDto> = emptyList(),
+    val voided: List<ProfileDocumentCardDto> = emptyList(),
     val error: String? = null,
 )
 
@@ -167,6 +168,7 @@ internal fun parseProfileDocumentStatus(
     return when (raw?.trim()?.uppercase()) {
         "UNSIGNED" -> ProfileDocumentStatus.UNSIGNED
         "SIGNED" -> ProfileDocumentStatus.SIGNED
+        "VOID" -> ProfileDocumentStatus.VOID
         else -> defaultStatus
     }
 }
