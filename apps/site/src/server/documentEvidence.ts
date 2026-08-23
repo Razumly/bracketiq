@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { Prisma } from '@/generated/prisma/client';
 import { prisma } from '@/lib/prisma';
+import { advisoryLockId } from '@/server/repositories/locks';
 
 type DocumentEvidenceDelegateNames =
   | 'documentSubjects'
@@ -10,9 +11,20 @@ type DocumentEvidenceDelegateNames =
   | 'signedDocuments';
 
 export type DocumentEvidenceDatabase = Partial<
-  Pick<Prisma.TransactionClient, DocumentEvidenceDelegateNames>
+  Pick<Prisma.TransactionClient, DocumentEvidenceDelegateNames | '$executeRaw'>
 >;
 
+const acquireDocumentSatisfactionLock = async (
+  database: DocumentEvidenceDatabase,
+  identity: string,
+): Promise<void> => {
+  if (typeof database.$executeRaw !== 'function') {
+    return;
+  }
+  await database.$executeRaw(
+    Prisma.sql`SELECT pg_advisory_xact_lock(${advisoryLockId(identity)})`,
+  );
+};
 export const DOCUMENT_EVIDENCE_PROVENANCE = {
   BOLDSIGN: 'BOLDSIGN',
   BRACKETIQ: 'BRACKETIQ',
@@ -86,6 +98,22 @@ const readByIdChunks = async <T>(
   return rows;
 };
 
+const documentSatisfactionIdentity = (params: {
+  organizationId: string;
+  documentRequirementId: string;
+  templateDocumentId: string;
+  documentSubjectId: string;
+  scopeType: DocumentSatisfactionScope;
+  scopeId: string;
+}): string => JSON.stringify([
+  'document-requirement-satisfaction',
+  params.organizationId,
+  params.documentRequirementId,
+  params.templateDocumentId,
+  params.documentSubjectId,
+  params.scopeType,
+  params.scopeId,
+]);
 const satisfactionEvidenceId = (satisfactionId: string, evidenceId: string): string =>
   `document-satisfaction-evidence:${satisfactionId}:${evidenceId}`;
 
@@ -124,6 +152,186 @@ export const documentScopeFor = (context: EvidenceContext): {
     scopeId: eventId,
   };
 };
+export type DocumentSatisfactionPreflightScope = {
+  templateDocumentId: string;
+  scopeType: DocumentSatisfactionScope;
+  scopeId: string;
+};
+
+export const documentSatisfactionScopeFor = (params: Pick<
+  EvidenceContext,
+  'organizationId' | 'documentSubjectUserId' | 'eventId' | 'teamId' | 'signOnce'
+> & {
+  templateDocumentId: string;
+}): DocumentSatisfactionPreflightScope | null => {
+  const templateDocumentId = present(params.templateDocumentId);
+  const scope = documentScopeFor(params);
+  if (!templateDocumentId || !scope.scopeType || !scope.scopeId) {
+    return null;
+  }
+  return {
+    templateDocumentId,
+    scopeType: scope.scopeType,
+    scopeId: scope.scopeId,
+  };
+};
+
+export const findSatisfiedDocumentTemplateIds = async (params: {
+  documentSubjectId?: string | null;
+  scopes: readonly DocumentSatisfactionPreflightScope[];
+}, database: DocumentEvidenceDatabase = prisma): Promise<Set<string>> => {
+  const documentSubjectId = present(params.documentSubjectId);
+  const scopes = params.scopes.filter((scope) => (
+    Boolean(present(scope.templateDocumentId) && scope.scopeType && present(scope.scopeId))
+  ));
+  if (!documentSubjectId || scopes.length === 0) {
+    return new Set();
+  }
+
+  const delegate = requireDelegate(database, 'documentRequirementSatisfactions');
+  const rows = await delegate.findMany({
+    where: {
+      documentSubjectId,
+      status: 'SATISFIED',
+      isComplete: true,
+      OR: scopes.map((scope) => ({
+        templateDocumentId: scope.templateDocumentId,
+        scopeType: scope.scopeType,
+        scopeId: scope.scopeId,
+      })),
+    },
+    select: { templateDocumentId: true },
+  });
+  return new Set(rows.map((row) => row.templateDocumentId));
+};
+export type DocumentSatisfactionSignerState = {
+  templateDocumentId: string;
+  scopeType: DocumentSatisfactionScope;
+  scopeId: string;
+  status: string;
+  isComplete: boolean;
+  requiredSignerRoles: string[];
+  completedSignerRoles: string[];
+};
+
+export const findDocumentSatisfactionSignerStates = async (params: {
+  documentSubjectId?: string | null;
+  scopes: readonly DocumentSatisfactionPreflightScope[];
+}, database: DocumentEvidenceDatabase = prisma): Promise<DocumentSatisfactionSignerState[]> => {
+  const documentSubjectId = present(params.documentSubjectId);
+  const scopes = params.scopes.filter((scope) => (
+    Boolean(present(scope.templateDocumentId) && scope.scopeType && present(scope.scopeId))
+  ));
+  if (!documentSubjectId || scopes.length === 0) {
+    return [];
+  }
+
+  const delegate = requireDelegate(database, 'documentRequirementSatisfactions');
+  const rows = await delegate.findMany({
+    where: {
+      documentSubjectId,
+      invalidatedAt: null,
+      OR: scopes.map((scope) => ({
+        templateDocumentId: scope.templateDocumentId,
+        scopeType: scope.scopeType,
+        scopeId: scope.scopeId,
+      })),
+    },
+    select: {
+      templateDocumentId: true,
+      scopeType: true,
+      scopeId: true,
+      status: true,
+      isComplete: true,
+      requiredSignerRoles: true,
+      completedSignerRoles: true,
+    },
+  });
+  return rows.map((row) => ({
+    templateDocumentId: row.templateDocumentId,
+    scopeType: row.scopeType,
+    scopeId: row.scopeId,
+    status: String(row.status),
+    isComplete: Boolean(row.isComplete),
+    requiredSignerRoles: Array.isArray(row.requiredSignerRoles) ? row.requiredSignerRoles : [],
+    completedSignerRoles: Array.isArray(row.completedSignerRoles) ? row.completedSignerRoles : [],
+  }));
+};
+export const hasCompletedDocumentSignerRole = (
+  completedSignerRoles: readonly string[],
+  signerRole: string,
+): boolean => {
+  const normalizedSignerRole = normalizeSignerRole(signerRole);
+  return Boolean(normalizedSignerRole) && completedSignerRoles.some((role) => (
+    normalizeSignerRole(role) === normalizedSignerRole
+  ));
+};
+export type CompletedDocumentSatisfaction = {
+  documentSubjectId: string;
+  templateDocumentId: string;
+  scopeType: DocumentSatisfactionScope;
+  scopeId: string;
+  sourceEvidenceId: string;
+  signedAt: string | null;
+  updatedAt: Date | null;
+};
+
+export const findCompletedDocumentSatisfactions = async (params: {
+  documentSubjectIds: readonly string[];
+  templateDocumentIds: readonly string[];
+  scopes: readonly Pick<DocumentSatisfactionPreflightScope, 'scopeType' | 'scopeId'>[];
+}, database: DocumentEvidenceDatabase = prisma): Promise<CompletedDocumentSatisfaction[]> => {
+  const documentSubjectIds = params.documentSubjectIds
+    .map(present)
+    .filter((id): id is string => Boolean(id));
+  const templateDocumentIds = params.templateDocumentIds
+    .map(present)
+    .filter((id): id is string => Boolean(id));
+  const scopes = params.scopes.filter((scope) => Boolean(scope.scopeType && present(scope.scopeId)));
+  if (documentSubjectIds.length === 0 || templateDocumentIds.length === 0 || scopes.length === 0) {
+    return [];
+  }
+
+  const delegate = requireDelegate(database, 'documentRequirementSatisfactions');
+  const rows = await delegate.findMany({
+    where: {
+      documentSubjectId: { in: documentSubjectIds },
+      templateDocumentId: { in: templateDocumentIds },
+      status: 'SATISFIED',
+      isComplete: true,
+      OR: scopes.map((scope) => ({
+        scopeType: scope.scopeType,
+        scopeId: scope.scopeId,
+      })),
+    },
+    select: {
+      documentSubjectId: true,
+      templateDocumentId: true,
+      scopeType: true,
+      scopeId: true,
+      sourceEvidenceId: true,
+      updatedAt: true,
+    },
+  });
+  const sourceEvidenceIds = Array.from(new Set(rows.map((row) => row.sourceEvidenceId)));
+  if (sourceEvidenceIds.length === 0) {
+    return [];
+  }
+  const evidenceDelegate = requireDelegate(database, 'signedDocuments');
+  const evidenceRows = await evidenceDelegate.findMany({
+    where: { id: { in: sourceEvidenceIds } },
+    select: { id: true, signedAt: true },
+  });
+  const signedAtByEvidenceId = new Map(
+    evidenceRows.map((row) => [row.id, row.signedAt] as const),
+  );
+  return rows.map((row) => ({
+    ...row,
+    signedAt: signedAtByEvidenceId.get(row.sourceEvidenceId) ?? null,
+  }));
+};
+
+
 
 export const signedDocumentEvidenceFields = (params: EvidenceContext & {
   provenance: DocumentEvidenceProvenance;
@@ -198,8 +406,16 @@ export const createDocumentRequirementSatisfaction = async (params: {
   if (!organizationId || !documentSubjectId || !scopeType || !scopeId || !documentRequirementId || !templateDocumentId || !evidenceId) {
     throw new Error('Complete Document Requirement Satisfaction identity is required.');
   }
-
   const delegate = requireDelegate(database, 'documentRequirementSatisfactions');
+  const satisfactionIdentity = documentSatisfactionIdentity({
+    organizationId,
+    documentRequirementId,
+    templateDocumentId,
+    documentSubjectId,
+    scopeType,
+    scopeId,
+  });
+  await acquireDocumentSatisfactionLock(database, satisfactionIdentity);
   const existing = await delegate.findFirst({
     where: {
       organizationId,
@@ -381,6 +597,7 @@ export const invalidateDocumentRequirementSatisfactions = async (params: {
       },
       select: {
         id: true,
+        sourceEvidenceId: true,
         requiredSignerRoles: true,
       },
     }),
@@ -447,6 +664,9 @@ export const invalidateDocumentRequirementSatisfactions = async (params: {
             (completedRole) => normalizeSignerRole(completedRole) === normalizeSignerRole(requiredRole),
           ))
       );
+    const sourceEvidenceId = activeRows.some((row) => row.id === satisfaction.sourceEvidenceId)
+      ? satisfaction.sourceEvidenceId
+      : activeRows[0]?.id ?? satisfaction.sourceEvidenceId;
 
     await satisfactionDelegate.update({
       where: { id: satisfaction.id },
@@ -459,18 +679,9 @@ export const invalidateDocumentRequirementSatisfactions = async (params: {
             : 'PENDING',
         isComplete,
         completedSignerRoles,
+        sourceEvidenceId,
         invalidatedAt: activeRows.length === 0 ? invalidatedAt : null,
       },
     });
   }
-};
-
-export const invalidateDocumentRequirementSatisfaction = async (params: {
-  evidenceId: string;
-  invalidatedAt?: Date;
-}, database: DocumentEvidenceDatabase = prisma): Promise<void> => {
-  await invalidateDocumentRequirementSatisfactions({
-    evidenceIds: [params.evidenceId],
-    invalidatedAt: params.invalidatedAt,
-  }, database);
 };

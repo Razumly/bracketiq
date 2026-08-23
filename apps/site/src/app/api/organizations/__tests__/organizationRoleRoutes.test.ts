@@ -29,15 +29,23 @@ const prismaMock = {
 };
 
 const requireSessionMock = jest.fn();
+const hasOrgPermissionMock = jest.fn();
+const hasDocumentEvidenceOwnerAccessMock = jest.fn();
 
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 jest.mock('@/lib/permissions', () => ({ requireSession: requireSessionMock }));
-
+jest.mock('@/server/accessControl', () => ({
+  hasOrgPermission: hasOrgPermissionMock,
+  hasDocumentEvidenceOwnerAccess: hasDocumentEvidenceOwnerAccessMock,
+}));
 import { PATCH } from '@/app/api/organizations/[id]/roles/[roleId]/route';
+import { POST as POST_ROLE } from '@/app/api/organizations/[id]/roles/route';
 
 describe('/api/organizations/[id]/roles/[roleId]', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    hasOrgPermissionMock.mockResolvedValue(true);
+    hasDocumentEvidenceOwnerAccessMock.mockResolvedValue(true);
     requireSessionMock.mockResolvedValue({ userId: 'owner_1', isAdmin: false });
     prismaMock.organizations.findUnique.mockResolvedValue({
       id: 'org_1',
@@ -119,6 +127,84 @@ describe('/api/organizations/[id]/roles/[roleId]', () => {
       })],
       skipDuplicates: true,
     }));
+  });
+  it('blocks non-owners from granting document void or audit permissions', async () => {
+    requireSessionMock.mockResolvedValue({ userId: 'manager_1', isAdmin: false });
+    hasDocumentEvidenceOwnerAccessMock.mockResolvedValue(false);
+    prismaMock.organizationRoles.findFirst.mockResolvedValue({
+      id: 'role_staff',
+      organizationId: 'org_1',
+      name: 'Staff',
+      isSystem: false,
+    });
+
+    const response = await PATCH(
+      new NextRequest('http://localhost/api/organizations/org_1/roles/role_staff', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          permissions: [
+            'documents.import',
+            'documents.void',
+            'documents.audit',
+          ],
+        }),
+        headers: { 'content-type': 'application/json' },
+      }),
+      { params: Promise.resolve({ id: 'org_1', roleId: 'role_staff' }) },
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual(expect.objectContaining({
+      error: expect.stringContaining('Only the Organization owner'),
+    }));
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+  it('blocks role creation from granting document void or audit permissions', async () => {
+    requireSessionMock.mockResolvedValue({ userId: 'manager_1', isAdmin: false });
+    hasDocumentEvidenceOwnerAccessMock.mockResolvedValue(false);
+
+    const response = await POST_ROLE(
+      new NextRequest('http://localhost/api/organizations/org_1/roles', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: 'Document reviewer',
+          permissions: ['documents.audit'],
+        }),
+        headers: { 'content-type': 'application/json' },
+      }),
+      { params: Promise.resolve({ id: 'org_1' }) },
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual(expect.objectContaining({
+      error: expect.stringContaining('Only the Organization owner'),
+    }));
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+  it('blocks non-owners from revoking document void or audit permissions', async () => {
+    requireSessionMock.mockResolvedValue({ userId: 'manager_1', isAdmin: false });
+    hasDocumentEvidenceOwnerAccessMock.mockResolvedValue(false);
+    prismaMock.organizationRoles.findFirst.mockResolvedValue({
+      id: 'role_staff',
+      organizationId: 'org_1',
+      name: 'Staff',
+      isSystem: false,
+    });
+    prismaMock.organizationRolePermissions.findMany.mockResolvedValue([
+      { organizationRoleId: 'role_staff', permission: 'documents.void' },
+    ]);
+
+    const response = await PATCH(
+      new NextRequest('http://localhost/api/organizations/org_1/roles/role_staff', {
+        method: 'PATCH',
+        body: JSON.stringify({ permissions: ['documents.import'] }),
+        headers: { 'content-type': 'application/json' },
+      }),
+      { params: Promise.resolve({ id: 'org_1', roleId: 'role_staff' }) },
+    );
+
+    expect(response.status).toBe(403);
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
   });
 
   it('ignores official scheduling permission because scheduling is type-based', async () => {

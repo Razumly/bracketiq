@@ -98,6 +98,11 @@ export type EventDivisionPhaseParticipants = Prisma.EventDivisionPhaseParticipan
  */
 export type UserData = Prisma.UserDataModel
 /**
+ * Model UserNotifications
+ *
+ */
+export type UserNotifications = Prisma.UserNotificationsModel
+/**
  * Model SensitiveUserData
  *
  */

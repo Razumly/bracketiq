@@ -5,6 +5,9 @@ const mockPrisma = {
   templateDocuments: {
     findMany: jest.fn(),
   },
+  documentRequirementSatisfactions: {
+    findMany: jest.fn(),
+  },
   templateProviderQuarantines: {
     findMany: jest.fn(),
   },
@@ -36,6 +39,7 @@ import { dispatchRequiredEventDocuments } from '@/lib/eventConsentDispatch';
 describe('event consent document dispatch', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockPrisma.documentRequirementSatisfactions.findMany.mockResolvedValue([]);
     mockIsBoldSignConfigured.mockReturnValue(true);
     mockPrisma.templateProviderQuarantines.findMany.mockResolvedValue([]);
     mockPrisma.templateDocuments.findMany.mockResolvedValue([
@@ -76,4 +80,42 @@ describe('event consent document dispatch', () => {
     expect(mockCreateDocumentSendOperation).not.toHaveBeenCalled();
     expect(mockFindLatestBoldSignOperation).not.toHaveBeenCalled();
   });
+  it('does not dispatch a template already satisfied by imported evidence', async () => {
+    mockPrisma.templateProviderQuarantines.findMany.mockResolvedValue([]);
+    mockPrisma.templateDocuments.findMany.mockResolvedValue([
+      {
+        id: 'version_imported',
+        providerQuarantinedAt: null,
+        templateId: 'provider_imported',
+        title: 'Imported waiver',
+        description: null,
+        type: 'PDF',
+        signOnce: false,
+        requiredSignerType: 'PARTICIPANT',
+        roleIndex: 1,
+        roleIndexes: [1],
+        signerRoles: ['participant'],
+      },
+    ]);
+    mockPrisma.documentRequirementSatisfactions.findMany.mockResolvedValue([
+      { templateDocumentId: 'version_imported' },
+    ]);
+
+    const result = await dispatchRequiredEventDocuments({
+      eventId: 'event_1',
+      organizationId: 'org_1',
+      requiredTemplateIds: ['version_imported'],
+      participantUserId: 'user_1',
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      sentDocumentIds: [],
+      firstDocumentId: null,
+      errors: [],
+    }));
+    expect(mockGetTemplateRoles).not.toHaveBeenCalled();
+    expect(mockSendDocumentFromTemplate).not.toHaveBeenCalled();
+    expect(mockCreateDocumentSendOperation).not.toHaveBeenCalled();
+  });
+
 });

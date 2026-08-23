@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/permissions';
-import { verifyPassword } from '@/lib/authServer';
+import { signRecentAuthToken, verifyPassword } from '@/lib/authServer';
 
 const schema = z.object({
   email: z.string().email().optional(),
@@ -39,5 +39,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid credentials.' }, { status: 401 });
   }
 
-  return NextResponse.json({ ok: true }, { status: 200 });
+  return NextResponse.json({
+    ok: true,
+    recentAuthToken: signRecentAuthToken({
+      userId: session.userId,
+      purpose: 'sensitive_action',
+    }),
+  }, { status: 200 });
 }

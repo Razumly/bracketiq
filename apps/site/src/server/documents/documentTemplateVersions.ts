@@ -101,7 +101,7 @@ export class DocumentTemplateVersionProviderQuarantinedError extends Error {
     this.versionId = versionId;
   }
 }
-export const findQuarantinedProviderTemplateIds = async (
+const findQuarantinedProviderTemplateIds = async (
   client: Pick<Prisma.TransactionClient, 'templateProviderQuarantines'>,
   providerTemplateIds: Iterable<string | null | undefined>,
 ): Promise<Set<string>> => {
@@ -118,6 +118,33 @@ export const findQuarantinedProviderTemplateIds = async (
     select: { providerTemplateId: true },
   });
   return new Set(rows.map((row) => row.providerTemplateId));
+};
+type ProviderQuarantineVersion = Pick<
+  TemplateDocuments,
+  'id' | 'templateId' | 'providerQuarantinedAt'
+>;
+
+export const findQuarantinedDocumentTemplateVersionIds = async (
+  client: Pick<Prisma.TransactionClient, 'templateProviderQuarantines'>,
+  versions: Iterable<ProviderQuarantineVersion>,
+): Promise<Set<string>> => {
+  const versionRows = Array.from(versions);
+  const quarantinedProviderTemplateIds = await findQuarantinedProviderTemplateIds(
+    client,
+    versionRows.map((version) => version.templateId),
+  );
+  return new Set(
+    versionRows
+      .filter((version) => {
+        const providerTemplateId = version.templateId?.trim() ?? '';
+        return Boolean(version.providerQuarantinedAt)
+          || Boolean(
+            providerTemplateId
+            && quarantinedProviderTemplateIds.has(providerTemplateId),
+          );
+      })
+      .map((version) => version.id),
+  );
 };
 
 const DOCUMENT_REQUIREMENT_OWNERSHIP_ERROR =

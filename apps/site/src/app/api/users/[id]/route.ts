@@ -10,7 +10,7 @@ import {
   normalizeUserName,
 } from '@/server/userNames';
 import { resolveRequiredProfileFieldsCompletedAt } from '@/server/profileCompletion';
-import { normalizeNotificationSettings } from '@/lib/notificationSettings';
+import { mergeNotificationSettings } from '@/lib/notificationSettings';
 import { normalizeOnboardingIntent } from '@/lib/onboardingIntent';
 import { applyUserPrivacy, createVisibilityContext, currentUserSelect, publicUserSelect } from '@/server/userPrivacy';
 import { findPresentKeys, findUnknownKeys, parseStrictEnvelope } from '@/server/http/strictPatch';
@@ -183,6 +183,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         lastName: true,
         dateOfBirth: true,
         requiredProfileFieldsCompletedAt: true,
+        notificationSettings: true,
       },
     }),
     prisma.authUser.findUnique({
@@ -226,7 +227,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     nextData.userName = normalizedUserName;
   }
   if (Object.prototype.hasOwnProperty.call(nextData, 'notificationSettings')) {
-    nextData.notificationSettings = normalizeNotificationSettings(nextData.notificationSettings);
+    nextData.notificationSettings = mergeNotificationSettings(
+      currentUser.notificationSettings,
+      nextData.notificationSettings,
+    );
   }
   if (Object.prototype.hasOwnProperty.call(nextData, 'onboardingIntent')) {
     const rawOnboardingIntent = nextData.onboardingIntent;

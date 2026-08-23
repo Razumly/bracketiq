@@ -33,6 +33,9 @@ const prismaMock = {
   organizationRoles: {
     findFirst: jest.fn(),
   },
+  organizationRolePermissions: {
+    findMany: jest.fn(),
+  },
   events: {
     findUnique: jest.fn(),
   },
@@ -56,8 +59,10 @@ const canManageOrganizationMock = jest.fn();
 const syncCanonicalTeamRosterMock = jest.fn();
 const canManageEventMock = jest.fn();
 const hasOrgPermissionMock = jest.fn();
+const hasDocumentEvidenceOwnerAccessMock = jest.fn();
 const loadCanonicalTeamByIdMock = jest.fn();
 const acquireEventLockMock = jest.fn();
+
 
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 jest.mock('@/lib/permissions', () => ({ requireSession: requireSessionMock }));
@@ -69,6 +74,7 @@ jest.mock('@/server/accessControl', () => ({
   canManageOrganization: (...args: any[]) => canManageOrganizationMock(...args),
   canManageEvent: (...args: any[]) => canManageEventMock(...args),
   hasOrgPermission: (...args: any[]) => hasOrgPermissionMock(...args),
+  hasDocumentEvidenceOwnerAccess: (...args: any[]) => hasDocumentEvidenceOwnerAccessMock(...args),
 }));
 jest.mock('@/server/teams/teamMembership', () => ({
   syncCanonicalTeamRoster: (...args: unknown[]) => syncCanonicalTeamRosterMock(...args),
@@ -125,6 +131,7 @@ describe('/api/invites', () => {
       ownerId: 'owner_1',
     });
     prismaMock.organizationRoles.findFirst.mockResolvedValue(null);
+    prismaMock.organizationRolePermissions.findMany.mockResolvedValue([]);
     prismaMock.events.findUnique.mockResolvedValue({
       id: 'event_1',
       hostId: 'host_1',
@@ -134,6 +141,7 @@ describe('/api/invites', () => {
     });
     canManageOrganizationMock.mockResolvedValue(true);
     canManageEventMock.mockResolvedValue(true);
+    hasDocumentEvidenceOwnerAccessMock.mockResolvedValue(true);
     hasOrgPermissionMock.mockResolvedValue(true);
     loadCanonicalTeamByIdMock.mockResolvedValue(null);
   });
@@ -1015,6 +1023,32 @@ describe('/api/invites', () => {
     });
     expect(acquireEventLockMock).not.toHaveBeenCalled();
   });
+  it('requires role-management permission for explicit organization staff role selection', async () => {
+    requireSessionMock.mockResolvedValue({ userId: 'manager_1', isAdmin: false });
+    ensureAuthUserAndUserDataByEmailMock.mockResolvedValue({ userId: 'user_staff_1', authUserExisted: true });
+    hasOrgPermissionMock.mockImplementation(async (
+      _session: unknown,
+      _organization: unknown,
+      permission: string,
+    ) => permission !== 'roles.manage');
+
+    const res = await POST(
+      jsonRequest({
+        invites: [{
+          type: 'STAFF',
+          organizationId: 'org_1',
+          email: 'staff@example.com',
+          roleId: 'role_auditor',
+        }],
+      }),
+    );
+
+    expect(res.status).toBe(403);
+    expect(prismaMock.organizationRoles.findFirst).not.toHaveBeenCalled();
+    expect(prismaMock.staffMembers.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.invites.create).not.toHaveBeenCalled();
+  });
+
 
   it('replaces staff types on an existing event-scoped STAFF invite when requested', async () => {
     requireSessionMock.mockResolvedValue({ userId: 'host_1', isAdmin: false });

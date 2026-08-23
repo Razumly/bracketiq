@@ -15,26 +15,34 @@ const prismaMock = {
   signedDocuments: {
     findFirst: jest.fn(),
   },
+  documentSubjects: {
+    findUnique: jest.fn(),
+  },
   $transaction: jest.fn(),
 };
 
 const requireSessionMock = jest.fn();
-const canManageOrganizationMock = jest.fn();
+const verifyRecentAuthTokenMock = jest.fn();
 const hasOrgPermissionMock = jest.fn();
-const invalidateDocumentRequirementSatisfactionMock = jest.fn();
+const invalidateDocumentRequirementSatisfactionsMock = jest.fn();
 const appendDocumentEvidenceAuditEventMock = jest.fn();
-
+const notifyDocumentEvidenceChangeMock = jest.fn();
 jest.mock("@/lib/prisma", () => ({ prisma: prismaMock }));
+jest.mock("@/lib/authServer", () => ({
+  verifyRecentAuthToken: (...args: unknown[]) => verifyRecentAuthTokenMock(...args),
+}));
 jest.mock("@/lib/permissions", () => ({ requireSession: requireSessionMock }));
 jest.mock("@/server/accessControl", () => ({
-  canManageOrganization: canManageOrganizationMock,
   hasOrgPermission: hasOrgPermissionMock,
 }));
 jest.mock("@/server/documentEvidence", () => ({
   DOCUMENT_EVIDENCE_PROVENANCE: { IMPORTED: "IMPORTED", BOLDSIGN: "BOLDSIGN" },
-  invalidateDocumentRequirementSatisfaction:
-    invalidateDocumentRequirementSatisfactionMock,
+  invalidateDocumentRequirementSatisfactions:
+    invalidateDocumentRequirementSatisfactionsMock,
   appendDocumentEvidenceAuditEvent: appendDocumentEvidenceAuditEventMock,
+}));
+jest.mock("@/server/documentNotifications", () => ({
+  notifyDocumentEvidenceChange: notifyDocumentEvidenceChangeMock,
 }));
 
 import { POST } from "@/app/api/organizations/[id]/documents/[signedDocumentId]/void/route";
@@ -42,13 +50,21 @@ import { POST } from "@/app/api/organizations/[id]/documents/[signedDocumentId]/
 describe("POST /api/organizations/[id]/documents/[signedDocumentId]/void", () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    invalidateDocumentRequirementSatisfactionMock.mockResolvedValue(undefined);
+    verifyRecentAuthTokenMock.mockReturnValue({
+      userId: "manager_1",
+      purpose: "sensitive_action",
+      issuedAtSeconds: Math.floor(Date.now() / 1000),
+    });
+    invalidateDocumentRequirementSatisfactionsMock.mockResolvedValue(undefined);
     appendDocumentEvidenceAuditEventMock.mockResolvedValue(undefined);
+    notifyDocumentEvidenceChangeMock.mockResolvedValue(undefined);
+    txMock.signedDocuments.updateMany.mockResolvedValue({ count: 1 });
+    hasOrgPermissionMock.mockResolvedValue(true);
     requireSessionMock.mockResolvedValue({
       userId: "manager_1",
       isAdmin: false,
+      issuedAtSeconds: Math.floor(Date.now() / 1000),
     });
-    hasOrgPermissionMock.mockResolvedValue(true);
     prismaMock.organizations.findUnique.mockResolvedValue({
       id: "org_1",
       ownerId: "owner_1",
@@ -70,7 +86,7 @@ describe("POST /api/organizations/[id]/documents/[signedDocumentId]/void", () =>
         "http://localhost/api/organizations/org_1/documents/evidence_1/void",
         {
           method: "POST",
-          body: JSON.stringify({ reason: "Duplicate record." }),
+          body: JSON.stringify({ reason: "Duplicate evidence" }),
           headers: { "Content-Type": "application/json" },
         },
       ),
@@ -89,9 +105,9 @@ describe("POST /api/organizations/[id]/documents/[signedDocumentId]/void", () =>
         data: { status: "VOID", updatedAt: expect.any(Date) },
       }),
     );
-    expect(invalidateDocumentRequirementSatisfactionMock).toHaveBeenCalledWith(
+    expect(invalidateDocumentRequirementSatisfactionsMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        evidenceId: "evidence_1",
+        evidenceIds: ["evidence_1"],
       }),
       expect.anything(),
     );
@@ -99,7 +115,7 @@ describe("POST /api/organizations/[id]/documents/[signedDocumentId]/void", () =>
       expect.objectContaining({
         eventType: "VOID",
         evidenceId: "evidence_1",
-        reason: "Duplicate record.",
+        reason: "Duplicate evidence",
       }),
       expect.anything(),
     );
@@ -113,7 +129,7 @@ describe("POST /api/organizations/[id]/documents/[signedDocumentId]/void", () =>
         "http://localhost/api/organizations/org_1/documents/evidence_1/void",
         {
           method: "POST",
-          body: JSON.stringify({}),
+          body: JSON.stringify({ reason: "Duplicate evidence" }),
           headers: { "Content-Type": "application/json" },
         },
       ),
@@ -127,7 +143,7 @@ describe("POST /api/organizations/[id]/documents/[signedDocumentId]/void", () =>
 
     expect(response.status).toBe(200);
     expect(
-      invalidateDocumentRequirementSatisfactionMock,
+      invalidateDocumentRequirementSatisfactionsMock,
     ).not.toHaveBeenCalled();
     expect(appendDocumentEvidenceAuditEventMock).not.toHaveBeenCalled();
   });
@@ -144,7 +160,7 @@ describe("POST /api/organizations/[id]/documents/[signedDocumentId]/void", () =>
         "http://localhost/api/organizations/org_1/documents/evidence_1/void",
         {
           method: "POST",
-          body: JSON.stringify({ reason: "Not an import." }),
+          body: JSON.stringify({ reason: "Wrong Document Subject" }),
           headers: { "Content-Type": "application/json" },
         },
       ),
@@ -160,7 +176,7 @@ describe("POST /api/organizations/[id]/documents/[signedDocumentId]/void", () =>
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
   });
   it("returns a client error when Satisfaction invalidation fails", async () => {
-    invalidateDocumentRequirementSatisfactionMock.mockRejectedValue(
+    invalidateDocumentRequirementSatisfactionsMock.mockRejectedValue(
       new Error("Satisfaction invalidation failed."),
     );
 
@@ -169,7 +185,7 @@ describe("POST /api/organizations/[id]/documents/[signedDocumentId]/void", () =>
         "http://localhost/api/organizations/org_1/documents/evidence_1/void",
         {
           method: "POST",
-          body: JSON.stringify({ reason: "Atomic void." }),
+          body: JSON.stringify({ reason: "Replaced by corrected evidence" }),
           headers: { "Content-Type": "application/json" },
         },
       ),
@@ -198,7 +214,7 @@ describe("POST /api/organizations/[id]/documents/[signedDocumentId]/void", () =>
         "http://localhost/api/organizations/org_1/documents/evidence_1/void",
         {
           method: "POST",
-          body: JSON.stringify({ reason: "Audit failure." }),
+          body: JSON.stringify({ reason: "Other", note: "Audit failure." }),
           headers: { "Content-Type": "application/json" },
         },
       ),
@@ -214,5 +230,92 @@ describe("POST /api/organizations/[id]/documents/[signedDocumentId]/void", () =>
     expect(await response.json()).toEqual(
       expect.objectContaining({ error: "Audit append failed." }),
     );
+  });
+  it("rejects staff without document void permission", async () => {
+    hasOrgPermissionMock.mockResolvedValue(false);
+
+    const response = await POST(
+      new NextRequest(
+        "http://localhost/api/organizations/org_1/documents/evidence_1/void",
+        {
+          method: "POST",
+          body: JSON.stringify({}),
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+      {
+        params: Promise.resolve({
+          id: "org_1",
+          signedDocumentId: "evidence_1",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(403);
+    expect(prismaMock.signedDocuments.findFirst).not.toHaveBeenCalled();
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("requires a recent password proof before voiding evidence", async () => {
+    verifyRecentAuthTokenMock.mockReturnValue(null);
+
+    const response = await POST(
+      new NextRequest(
+        "http://localhost/api/organizations/org_1/documents/evidence_1/void",
+        {
+          method: "POST",
+          body: JSON.stringify({ reason: "Duplicate evidence" }),
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+      {
+        params: Promise.resolve({
+          id: "org_1",
+          signedDocumentId: "evidence_1",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(401);
+    expect(prismaMock.signedDocuments.findFirst).not.toHaveBeenCalled();
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("notifies the document subject after a successful void", async () => {
+    prismaMock.signedDocuments.findFirst.mockResolvedValue({
+      id: "evidence_1",
+      provenance: "IMPORTED",
+      status: "SIGNED",
+      documentName: "Waiver",
+      documentSubjectId: "subject_1",
+    });
+    prismaMock.documentSubjects.findUnique.mockResolvedValue({ userId: "player_1" });
+
+    const response = await POST(
+      new NextRequest(
+        "http://localhost/api/organizations/org_1/documents/evidence_1/void",
+        {
+          method: "POST",
+          body: JSON.stringify({ reason: "Wrong Document Requirement or Version" }),
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+      {
+        params: Promise.resolve({
+          id: "org_1",
+          signedDocumentId: "evidence_1",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(notifyDocumentEvidenceChangeMock).toHaveBeenCalledWith({
+      organizationId: "org_1",
+      subjectUserId: "player_1",
+      evidenceId: "evidence_1",
+      documentName: "Waiver",
+      action: "VOID",
+      actorUserId: "manager_1",
+    });
   });
 });

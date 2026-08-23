@@ -65,7 +65,7 @@ describe('/api/organizations/[id]/templates', () => {
     );
   });
 
-  it('returns every pinned Version in the legacy response for installed mobile clients', async () => {
+  it('returns every Version so pinned assignments remain addressable by default', async () => {
     mockPrisma.templateDocuments.findMany.mockResolvedValue([
       { id: 'version_2', documentRequirementId: 'requirement_1', versionSequence: 2 },
       { id: 'version_1', documentRequirementId: 'requirement_1', versionSequence: 1 },

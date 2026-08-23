@@ -123,6 +123,13 @@ describe('boldsignService', () => {
       { method: 'GET' },
     );
   });
+  it('fails loudly when the template list response is malformed', async () => {
+    apiRequestMock.mockResolvedValue({});
+
+    await expect(boldsignService.getTemplates({
+      organizationId: 'org_1',
+    })).rejects.toThrow('The template response did not include a templates array.');
+  });
 
 
 

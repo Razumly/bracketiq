@@ -67,6 +67,7 @@ export const ModelName = {
   EventDivisionPhaseSources: 'EventDivisionPhaseSources',
   EventDivisionPhaseParticipants: 'EventDivisionPhaseParticipants',
   UserData: 'UserData',
+  UserNotifications: 'UserNotifications',
   SensitiveUserData: 'SensitiveUserData',
   AuthMfaChallenges: 'AuthMfaChallenges',
   Invites: 'Invites',
@@ -572,6 +573,20 @@ export const UserDataScalarFieldEnum = {
 } as const
 
 export type UserDataScalarFieldEnum = (typeof UserDataScalarFieldEnum)[keyof typeof UserDataScalarFieldEnum]
+
+
+export const UserNotificationsScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  userId: 'userId',
+  notificationType: 'notificationType',
+  title: 'title',
+  body: 'body',
+  data: 'data',
+  readAt: 'readAt'
+} as const
+
+export type UserNotificationsScalarFieldEnum = (typeof UserNotificationsScalarFieldEnum)[keyof typeof UserNotificationsScalarFieldEnum]
 
 
 export const SensitiveUserDataScalarFieldEnum = {

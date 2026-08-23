@@ -2093,6 +2093,12 @@ fun ProfileDocumentsScreen(component: ProfileComponent) {
     val textSignaturePrompt by component.textSignaturePrompt.collectAsState()
     val webDocumentPrompt by component.webDocumentPrompt.collectAsState()
     var textPreviewDocument by remember { mutableStateOf<ProfileDocumentCard?>(null) }
+    val activeSignedDocuments = documentsState.signedDocuments.filter { document ->
+        document.status == ProfileDocumentStatus.SIGNED
+    }
+    val voidedDocuments = documentsState.signedDocuments.filter { document ->
+        document.status == ProfileDocumentStatus.VOID
+    }
 
     LaunchedEffect(component) {
         component.refreshDocuments()
@@ -2156,14 +2162,43 @@ fun ProfileDocumentsScreen(component: ProfileComponent) {
 
         SectionHeaderRow(title = "Signed documents")
 
-        if (documentsState.signedDocuments.isEmpty()) {
+        if (activeSignedDocuments.isEmpty()) {
             Text(
                 text = "No signed documents.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         } else {
-            documentsState.signedDocuments.forEach { document ->
+            activeSignedDocuments.forEach { document ->
+                val isProcessing = activeDocumentActionId == document.id
+                val actionLabel = if (document.type == ProfileDocumentType.TEXT) "Preview text" else "View document"
+                val onAction = {
+                    if (document.type == ProfileDocumentType.TEXT) {
+                        textPreviewDocument = document
+                    } else {
+                        component.openSignedDocument(document)
+                    }
+                }
+                DocumentCard(
+                    document = document,
+                    actionLabel = actionLabel,
+                    isProcessing = isProcessing,
+                    processingLabel = "Opening...",
+                    onAction = onAction,
+                )
+            }
+        }
+
+        SectionHeaderRow(title = "Voided documents")
+
+        if (voidedDocuments.isEmpty()) {
+            Text(
+                text = "No voided documents.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            voidedDocuments.forEach { document ->
                 val isProcessing = activeDocumentActionId == document.id
                 val actionLabel = if (document.type == ProfileDocumentType.TEXT) "Preview text" else "View document"
                 val onAction = {

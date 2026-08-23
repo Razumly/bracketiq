@@ -3,9 +3,17 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/permissions';
 import { getStaffMemberTypesForOrganizationRole, normalizeStaffMemberTypes } from '@/lib/staff';
-import { ORG_PERMISSIONS } from '@/lib/organizationPermissions';
-import { hasOrgPermission } from '@/server/accessControl';
+import { ORG_PERMISSIONS, type OrganizationPermission } from '@/lib/organizationPermissions';
+import { hasDocumentEvidenceOwnerAccess, hasOrgPermission } from '@/server/accessControl';
 import { resolveDefaultOrganizationRoleIdForStaffTypes } from '@/server/organizationRoles';
+
+const RESTRICTED_DOCUMENT_PERMISSIONS: OrganizationPermission[] = [
+  ORG_PERMISSIONS.DOCUMENTS_VOID,
+  ORG_PERMISSIONS.DOCUMENTS_AUDIT_VIEW,
+];
+
+const RESTRICTED_DOCUMENT_PERMISSION_ERROR =
+  'Only the Organization owner or platform administrator can grant or revoke document void or audit access.';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,6 +46,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!(await hasOrgPermission(session, org, ORG_PERMISSIONS.STAFF_MANAGE))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
+  const hasExplicitRoleSelection = Object.prototype.hasOwnProperty.call(parsed.data, 'roleId');
+  if (
+    hasExplicitRoleSelection
+    && !(await hasOrgPermission(session, org, ORG_PERMISSIONS.ROLES_MANAGE))
+  ) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+
 
   if (!Object.prototype.hasOwnProperty.call(parsed.data, 'types')
     && !Object.prototype.hasOwnProperty.call(parsed.data, 'roleId')) {
@@ -92,6 +108,33 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   } else if (!existing.roleId && Object.prototype.hasOwnProperty.call(parsed.data, 'types')) {
     data.roleId = await resolveDefaultOrganizationRoleIdForStaffTypes(prisma, id, nextTypes);
   }
+  const nextRoleId = Object.prototype.hasOwnProperty.call(data, 'roleId')
+    ? (typeof data.roleId === 'string' || data.roleId === null ? data.roleId : existing.roleId)
+    : existing.roleId;
+  if (nextRoleId !== existing.roleId) {
+    const roleIds = Array.from(new Set(
+      [existing.roleId, nextRoleId].filter((roleId): roleId is string => typeof roleId === 'string' && roleId.length > 0),
+    ));
+    if (roleIds.length > 0) {
+      const restrictedPermissions = await prisma.organizationRolePermissions.findMany({
+        where: {
+          organizationRoleId: { in: roleIds },
+          permission: { in: RESTRICTED_DOCUMENT_PERMISSIONS },
+        },
+        select: { permission: true },
+      });
+      if (
+        restrictedPermissions.length > 0
+        && !(await hasDocumentEvidenceOwnerAccess(session, org))
+      ) {
+        return NextResponse.json(
+          { error: RESTRICTED_DOCUMENT_PERMISSION_ERROR },
+          { status: 403 },
+        );
+      }
+    }
+  }
+
 
   if (parsed.data.userId !== org.ownerId && !nextTypes.includes('HOST')) {
     const delegatedEvent = await prisma.events.findFirst({
@@ -139,6 +182,34 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   if (!(await hasOrgPermission(session, org, ORG_PERMISSIONS.STAFF_MANAGE))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
+  const existing = await prisma.staffMembers.findUnique({
+    where: {
+      organizationId_userId: {
+        organizationId: id,
+        userId: parsed.data.userId,
+      },
+    },
+    select: { roleId: true },
+  });
+  if (existing?.roleId) {
+    const restrictedPermissions = await prisma.organizationRolePermissions.findMany({
+      where: {
+        organizationRoleId: existing.roleId,
+        permission: { in: RESTRICTED_DOCUMENT_PERMISSIONS },
+      },
+      select: { permission: true },
+    });
+    if (
+      restrictedPermissions.length > 0
+      && !(await hasDocumentEvidenceOwnerAccess(session, org))
+    ) {
+      return NextResponse.json(
+        { error: RESTRICTED_DOCUMENT_PERMISSION_ERROR },
+        { status: 403 },
+      );
+    }
+  }
+
 
   if (parsed.data.userId !== org.ownerId) {
     const delegatedEvent = await prisma.events.findFirst({

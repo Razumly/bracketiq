@@ -1,7 +1,6 @@
 import {
   appendDocumentEvidenceAuditEvent,
   createDocumentRequirementSatisfaction,
-  invalidateDocumentRequirementSatisfaction,
   invalidateDocumentRequirementSatisfactions,
   documentScopeFor,
   documentSubjectIdFor,
@@ -88,6 +87,39 @@ describe('document evidence storage seam', () => {
         completedSignerRoles: ['parent_guardian'],
       }),
     }));
+  });
+
+  it('acquires the Satisfaction identity lock before reading the existing row', async () => {
+    const sequence: string[] = [];
+    const documentRequirementSatisfactions = {
+      findFirst: jest.fn(async () => {
+        sequence.push('read');
+        return null;
+      }),
+      upsert: jest.fn().mockResolvedValue({}),
+    };
+    const database = {
+      $executeRaw: jest.fn(async () => {
+        sequence.push('lock');
+        return 1;
+      }),
+      documentRequirementSatisfactions,
+    };
+
+    await createDocumentRequirementSatisfaction({
+      evidenceId: 'evidence_lock',
+      templateDocumentId: 'version_1',
+      documentRequirementId: 'requirement_1',
+      organizationId: 'org_1',
+      documentSubjectId: 'document-subject:org_1:player_1',
+      scopeType: DOCUMENT_SATISFACTION_SCOPE.EVENT_PARTICIPATION,
+      scopeId: 'event_1',
+      requiredSignerRoles: ['participant'],
+      signerRole: 'participant',
+    }, database);
+
+    expect(sequence).toEqual(['lock', 'read']);
+    expect(database.$executeRaw).toHaveBeenCalledTimes(1);
   });
   it('marks a roleless imported completion as satisfied', async () => {
     const documentRequirementSatisfactions = {
@@ -198,51 +230,56 @@ describe('document evidence storage seam', () => {
       }),
     }));
   });
-  it('bounds every satisfaction lookup by a fixed evidence ID batch', async () => {
-    const evidenceIds = Array.from({ length: 501 }, (_, index) => `evidence_${index}`);
+  it('keeps a Satisfaction complete when invalidated evidence has another active contributor', async () => {
     const documentRequirementSatisfactions = {
       findMany: jest.fn().mockResolvedValue([{
         id: 'document-satisfaction:evidence_0',
+        sourceEvidenceId: 'evidence_voided',
         requiredSignerRoles: ['participant'],
       }]),
       update: jest.fn().mockResolvedValue({}),
     };
     const documentRequirementSatisfactionEvidence = {
       findMany: jest.fn()
-        .mockResolvedValueOnce([{ satisfactionId: 'document-satisfaction:evidence_0' }])
-        .mockResolvedValueOnce([])
         .mockResolvedValueOnce([{
           satisfactionId: 'document-satisfaction:evidence_0',
-          signedDocumentId: 'evidence_0',
-          completedSignerRoles: ['participant'],
-        }]),
+        }])
+        .mockResolvedValueOnce([
+          {
+            satisfactionId: 'document-satisfaction:evidence_0',
+            signedDocumentId: 'evidence_voided',
+            completedSignerRoles: ['participant'],
+          },
+          {
+            satisfactionId: 'document-satisfaction:evidence_0',
+            signedDocumentId: 'evidence_active',
+            completedSignerRoles: ['participant'],
+          },
+        ]),
     };
     const signedDocuments = {
       findMany: jest.fn().mockResolvedValue([
-        { id: 'evidence_0', status: 'SIGNED', signerRole: 'participant' },
+        { id: 'evidence_voided', status: 'VOID', signerRole: null },
+        { id: 'evidence_active', status: 'SIGNED', signerRole: 'participant' },
       ]),
     };
 
     await invalidateDocumentRequirementSatisfactions({
-      evidenceIds,
+      evidenceIds: ['evidence_voided'],
     }, {
       documentRequirementSatisfactions,
       documentRequirementSatisfactionEvidence,
       signedDocuments,
     });
 
-    const contributorQueries = documentRequirementSatisfactionEvidence.findMany.mock.calls;
-    expect(contributorQueries).toHaveLength(3);
-    expect(contributorQueries[0][0].where.signedDocumentId.in).toHaveLength(500);
-    expect(contributorQueries[1][0].where.signedDocumentId.in).toHaveLength(1);
-    expect(contributorQueries[2][0].where.satisfactionId.in).toHaveLength(1);
-    expect(signedDocuments.findMany.mock.calls[0][0].where.id.in).toHaveLength(1);
     expect(documentRequirementSatisfactions.update).toHaveBeenCalledWith({
       where: { id: 'document-satisfaction:evidence_0' },
       data: expect.objectContaining({
         status: 'SATISFIED',
         isComplete: true,
         completedSignerRoles: ['participant'],
+        sourceEvidenceId: 'evidence_active',
+        invalidatedAt: null,
       }),
     });
   });
@@ -317,11 +354,10 @@ describe('document evidence storage seam', () => {
       signerRole: 'participant',
     }, database);
 
-    await invalidateDocumentRequirementSatisfaction({
-      evidenceId: 'evidence_later',
+    await invalidateDocumentRequirementSatisfactions({
+      evidenceIds: ['evidence_later'],
       invalidatedAt: new Date('2026-08-21T00:00:00.000Z'),
     }, database);
-
     expect(documentRequirementSatisfactionEvidence.upsert).toHaveBeenCalledTimes(2);
     expect(documentRequirementSatisfactionEvidence.upsert).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -471,8 +507,8 @@ describe('document evidence storage seam', () => {
       }]),
     };
 
-    await invalidateDocumentRequirementSatisfaction({
-      evidenceId: 'evidence_roleless',
+    await invalidateDocumentRequirementSatisfactions({
+      evidenceIds: ['evidence_roleless'],
     }, {
       documentRequirementSatisfactions,
       documentRequirementSatisfactionEvidence,
@@ -496,8 +532,8 @@ describe('document evidence storage seam', () => {
     };
     const database = { documentRequirementSatisfactions };
 
-    await invalidateDocumentRequirementSatisfaction({
-      evidenceId: 'evidence_invalidated',
+    await invalidateDocumentRequirementSatisfactions({
+      evidenceIds: ['evidence_invalidated'],
       invalidatedAt: new Date('2026-08-21T00:00:00.000Z'),
     }, database);
 
@@ -585,8 +621,8 @@ describe('document evidence storage seam', () => {
       note: 'Imported from prior system.',
       createdAt,
     }, database);
-    await invalidateDocumentRequirementSatisfaction({
-      evidenceId: 'evidence_1',
+    await invalidateDocumentRequirementSatisfactions({
+      evidenceIds: ['evidence_1'],
       invalidatedAt: createdAt,
     }, database);
     await appendDocumentEvidenceAuditEvent({

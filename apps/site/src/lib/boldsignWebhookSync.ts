@@ -983,17 +983,25 @@ const quarantineProviderAndFailOperation = async (params: {
   providerTemplateId: string | null | undefined;
   operationId: string | null | undefined;
 }) => {
+  // Commit the quarantine before updating the operation. A failed operation
+  // update must not roll back the safety block for the provider template.
   await prisma.$transaction(async (tx) => {
     await quarantineBoldSignProviderVersions({
       providerTemplateId: params.providerTemplateId,
       database: tx,
     });
-    await updateOperationState(params.operationId, {
-      status: BOLDSIGN_OPERATION_STATUSES.FAILED,
-      lastError: BOLDSIGN_PROVIDER_QUARANTINE_REASON,
-      completedAt: new Date(),
-    }, tx);
   });
+  try {
+    await prisma.$transaction(async (tx) => {
+      await updateOperationState(params.operationId, {
+        status: BOLDSIGN_OPERATION_STATUSES.FAILED,
+        lastError: BOLDSIGN_PROVIDER_QUARANTINE_REASON,
+        completedAt: new Date(),
+      }, tx);
+    });
+  } catch (error) {
+    console.error('Failed to persist quarantined BoldSign operation state', error);
+  }
 };
 
 export const projectTemplateProjectionFromOperation = async (params: {
@@ -1042,6 +1050,14 @@ export const projectTemplateProjectionFromOperation = async (params: {
     && Boolean(sourceTemplateDocumentId)
     && !existing
     && (!source?.templateId || source.templateId !== params.templateId);
+  if (
+    isDeferredTemplateEdit
+    && existing
+    && !source?.frozenAt
+    && (!targetVersionId || existing.id === targetVersionId)
+  ) {
+    return existing;
+  }
   const isTemplateEdit = params.eventToken === 'templateedited';
   const frozenProviderVersion = isTemplateEdit && params.templateId
     ? await prisma.templateDocuments.findFirst({
@@ -1063,9 +1079,6 @@ export const projectTemplateProjectionFromOperation = async (params: {
       operationId: params.operation?.id,
     });
     throw new Error(BOLDSIGN_PROVIDER_QUARANTINE_REASON);
-  }
-  if (isDeferredTemplateEdit && existing && (!targetVersionId || existing.id === targetVersionId)) {
-    return existing;
   }
 
   const organizationId = pickString(
@@ -1900,8 +1913,8 @@ const createOrUpdateSignedDocumentProjection = async (params: {
         roleIndex,
       });
     }
-    // Terminal provider events update every evidence row before the
-    // Satisfaction aggregate is invalidated in this transaction.
+    // Terminal provider events update every evidence row.
+    // The transaction invalidates the Satisfaction aggregate.
 
     if (updatedRows === 0 || isTerminalFailure) {
       const existingRows = await tx.signedDocuments.findMany({

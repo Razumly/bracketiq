@@ -1,14 +1,11 @@
-import crypto from "node:crypto";
-import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
-import { prisma } from "@/lib/prisma";
-import { requireSession } from "@/lib/permissions";
-import { ORG_PERMISSIONS } from "@/lib/organizationPermissions";
-import {
-  canManageOrganization,
-  hasOrgPermission,
-} from "@/server/accessControl";
-import { resolveRequiredSignerRoles } from "@/lib/templateSignerTypes";
+import crypto from 'node:crypto';
+import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
+import { prisma } from '@/lib/prisma';
+import { requireSession } from '@/lib/permissions';
+import { ORG_PERMISSIONS } from '@/lib/organizationPermissions';
+import { hasOrgPermission } from '@/server/accessControl';
+import { resolveRequiredSignerRoles } from '@/lib/templateSignerTypes';
 import {
   appendDocumentEvidenceAuditEvent,
   createDocumentRequirementSatisfaction,
@@ -16,98 +13,195 @@ import {
   ensureDocumentSubject,
   signedDocumentEvidenceFields,
   type DocumentEvidenceDatabase,
-} from "@/server/documentEvidence";
-import { listOrganizationUsersScopeEvents } from "@/server/organizationUsersAccess";
+} from '@/server/documentEvidence';
+import { listOrganizationUsersScopeEvents } from '@/server/organizationUsersAccess';
+import { getStorageProvider } from '@/lib/storageProvider';
+import { validatePdfBuffer } from '@/lib/pdfUploadValidation';
+import { notifyDocumentEvidenceChange } from '@/server/documentNotifications';
 
-export const dynamic = "force-dynamic";
+export const dynamic = 'force-dynamic';
 export const DOCUMENT_IMPORT_ATTESTATION_TEXT =
-  "I confirm that this file is a complete signed document for the shown customer, Document Template Version, and scope. I confirm that it contains all required signatures. I understand that BracketIQ did not verify the signatures.";
-export const DOCUMENT_IMPORT_ATTESTATION_VERSION = "1";
+  'I confirm that this file is a complete signed document for the shown customer, Document Template Version, and scope. I confirm that it contains all required signatures. I understand that BracketIQ did not verify the signatures.';
+export const DOCUMENT_IMPORT_ATTESTATION_VERSION = '1';
 
+const PDF_MIME_TYPE = 'application/pdf';
+const MAX_IMPORTED_DOCUMENT_UPLOAD_BYTES = 25 * 1024 * 1024;
+const IMPORT_SCOPE_TYPES = ['ORGANIZATION', 'EVENT_PARTICIPATION', 'TEAM_MEMBERSHIP'] as const;
 
-const importSchema = z
-  .object({
-    subjectUserId: z.string().trim().min(1),
-    signerUserId: z.string().trim().min(1).optional(),
-    hostId: z.string().trim().min(1).nullable().optional(),
-    templateId: z.string().trim().min(1),
-    documentName: z.string().trim().min(1),
-    contentHash: z.string().trim().min(1),
-    importedFileId: z.string().trim().min(1),
-    historicalSigningDate: z.string().trim().min(1).nullable().optional(),
-    sourceNote: z.string().trim().max(4000).nullable().optional(),
-    attestationAccepted: z.boolean().optional(),
-    signerEmail: z.string().trim().email().nullable().optional(),
-    signerRole: z.string().trim().max(160).nullable().optional(),
-    roleIndex: z.number().int().nullable().optional(),
-    scopeType: z.enum([
-      "ORGANIZATION",
-      "EVENT_PARTICIPATION",
-      "TEAM_MEMBERSHIP",
-    ]),
-    scopeId: z.string().trim().min(1),
-  })
-  .strict();
+type ImportScopeType = (typeof IMPORT_SCOPE_TYPES)[number];
+
+type ParsedImportInput = {
+  subjectUserId: string;
+  templateId: string;
+  documentName: string;
+  historicalSigningDate?: string | null;
+  sourceNote?: string | null;
+  isAttestationAccepted: boolean;
+  scopeType: ImportScopeType;
+  scopeId: string;
+};
+
+const importSchema = z.object({
+  subjectUserId: z.string().trim().min(1),
+  templateId: z.string().trim().min(1),
+  documentName: z.string().trim().min(1).max(240),
+  historicalSigningDate: z.string().trim().min(1).nullable().optional(),
+  sourceNote: z.string().trim().max(4000).nullable().optional(),
+  attestationAccepted: z.boolean(),
+  scopeType: z.enum(IMPORT_SCOPE_TYPES),
+  scopeId: z.string().trim().min(1),
+});
+
+const textField = (form: FormData, name: string): string | undefined => {
+  const value = form.get(name);
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed.length ? trimmed : undefined;
+};
+
+const nullableTextField = (form: FormData, name: string): string | null => (
+  textField(form, name) ?? null
+);
+
+const parseBooleanField = (form: FormData, name: string): boolean => (
+  textField(form, name)?.toLowerCase() === 'true'
+);
+
+const normalizeIdList = (values: unknown): string[] => {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  return Array.from(new Set(
+    values
+      .filter((value): value is string => typeof value === 'string')
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0),
+  ));
+};
+const ISO_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 const parseHistoricalDate = (value: string | null | undefined): Date | null => {
-  if (!value) {
-    return null;
-  }
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+  if (!value) return null;
+  const match = ISO_DATE_PATTERN.exec(value.trim());
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return (
+    parsed.getUTCFullYear() === year
+    && parsed.getUTCMonth() === month - 1
+    && parsed.getUTCDate() === day
+  ) ? parsed : null;
 };
-const normalizeSignerRole = (value: string): string =>
-  value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
 
+const parseImportForm = async (
+  request: NextRequest,
+): Promise<{
+  data: ParsedImportInput;
+  file: File;
+} | {
+  response: NextResponse;
+}> => {
+  if (!request.headers.get('content-type')?.toLowerCase().includes('multipart/form-data')) {
+    return { response: NextResponse.json({ error: 'A multipart PDF upload is required.' }, { status: 400 }) };
+  }
 
+  let form: FormData;
+  try {
+    form = await request.formData();
+  } catch {
+    return { response: NextResponse.json({ error: 'Invalid multipart form data.' }, { status: 400 }) };
+  }
+
+  const fileEntry = form.get('file');
+  if (typeof File === 'undefined' || !(fileEntry instanceof File)) {
+    return { response: NextResponse.json({ error: 'file is required.' }, { status: 400 }) };
+  }
+  if (fileEntry.size > MAX_IMPORTED_DOCUMENT_UPLOAD_BYTES) {
+    return {
+      response: NextResponse.json(
+        { error: 'PDF must be 25MB or less. Choose a smaller file and try again.' },
+        { status: 413 },
+      ),
+    };
+  }
+  if (fileEntry.type.trim().toLowerCase() !== PDF_MIME_TYPE) {
+    return {
+      response: NextResponse.json(
+        { error: 'Only PDF uploads are supported for imported documents.' },
+        { status: 415 },
+      ),
+    };
+  }
+
+  const parsed = importSchema.safeParse({
+    subjectUserId: textField(form, 'subjectUserId'),
+    templateId: textField(form, 'templateId'),
+    documentName: textField(form, 'documentName'),
+    historicalSigningDate: nullableTextField(form, 'historicalSigningDate'),
+    sourceNote: nullableTextField(form, 'sourceNote'),
+    attestationAccepted: parseBooleanField(form, 'attestationAccepted'),
+    scopeType: textField(form, 'scopeType'),
+    scopeId: textField(form, 'scopeId'),
+  });
+  if (!parsed.success) {
+    return {
+      response: NextResponse.json(
+        { error: 'Invalid input.', details: parsed.error.flatten() },
+        { status: 400 },
+      ),
+    };
+  }
+
+  const { attestationAccepted, ...input } = parsed.data;
+  return {
+    data: {
+      ...input,
+      isAttestationAccepted: attestationAccepted,
+    },
+    file: fileEntry,
+  };
+};
+
+const deleteStoredObject = async (stored: { key: string; bucket?: string | null }): Promise<void> => {
+  try {
+    await getStorageProvider().deleteObject({ key: stored.key, bucket: stored.bucket });
+  } catch (error) {
+    console.error('Imported document cleanup failed.', { key: stored.key, error });
+  }
+};
 
 export async function POST(
-  req: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const session = await requireSession(req);
+  const session = await requireSession(request);
   const { id: organizationId } = await params;
   const organization = await prisma.organizations.findUnique({
     where: { id: organizationId },
     select: { id: true, ownerId: true },
   });
   if (!organization) {
-    return NextResponse.json(
-      { error: "Organization not found." },
-      { status: 404 },
-    );
+    return NextResponse.json({ error: 'Organization not found.' }, { status: 404 });
   }
-  const canManageDocuments =
-    session.isAdmin ||
-    (await canManageOrganization(session, organization)) ||
-    (await hasOrgPermission(
-      session,
-      organization,
-      ORG_PERMISSIONS.TEMPLATES_MANAGE,
-    ));
-  if (!canManageDocuments) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!(await hasOrgPermission(session, organization, ORG_PERMISSIONS.DOCUMENTS_IMPORT))) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
-  const parsed = importSchema.safeParse(await req.json().catch(() => null));
-  if (!parsed.success) {
+  const parsedForm = await parseImportForm(request);
+  if ('response' in parsedForm) return parsedForm.response;
+  const { data: parsed, file } = parsedForm;
+  const historicalSigningDate = parseHistoricalDate(parsed.historicalSigningDate);
+  if (parsed.historicalSigningDate && !historicalSigningDate) {
     return NextResponse.json(
-      { error: "Invalid input.", details: parsed.error.flatten() },
-      { status: 400 },
-    );
-  }
-  const historicalSigningDate = parseHistoricalDate(
-    parsed.data.historicalSigningDate,
-  );
-  if (parsed.data.historicalSigningDate && !historicalSigningDate) {
-    return NextResponse.json(
-      { error: "historicalSigningDate must be a valid date." },
+      { error: 'historicalSigningDate must be a valid date.' },
       { status: 400 },
     );
   }
 
   const template = await prisma.templateDocuments.findUnique({
-    where: { id: parsed.data.templateId },
+    where: { id: parsed.templateId },
     select: {
       id: true,
       organizationId: true,
@@ -118,266 +212,253 @@ export async function POST(
     },
   });
   if (!template || template.organizationId !== organizationId) {
-    return NextResponse.json(
-      { error: "Document template not found." },
-      { status: 404 },
-    );
+    return NextResponse.json({ error: 'Document template not found.' }, { status: 404 });
   }
   const requirement = await prisma.documentRequirements.findUnique({
     where: { id: template.documentRequirementId },
     select: { id: true, organizationId: true },
   });
-  if (
-    !requirement
-    || requirement.id !== template.documentRequirementId
-    || requirement.organizationId !== organizationId
-  ) {
+  if (!requirement || requirement.organizationId !== organizationId) {
+    return NextResponse.json({ error: 'Document template not found.' }, { status: 404 });
+  }
+
+  if (!parsed.isAttestationAccepted) {
     return NextResponse.json(
-      { error: "Document template not found." },
-      { status: 404 },
+      { error: 'Document Import Attestation must be accepted.' },
+      { status: 400 },
+    );
+  }
+  if (parsed.scopeType === 'ORGANIZATION' && parsed.scopeId !== organizationId) {
+    return NextResponse.json(
+      { error: 'Organization scope does not belong to this Organization.' },
+      { status: 400 },
+    );
+  }
+  if (template.signOnce && parsed.scopeType !== 'ORGANIZATION') {
+    return NextResponse.json(
+      { error: 'Sign-once Document Template Versions require Organization scope.' },
+      { status: 400 },
+    );
+  }
+  if (!template.signOnce && parsed.scopeType !== 'EVENT_PARTICIPATION') {
+    return NextResponse.json(
+      { error: 'Non-sign-once Document Template Versions require Event Participation scope.' },
+      { status: 400 },
     );
   }
 
-  const signerUserId = parsed.data.signerUserId ?? null;
-  const hostId =
-    parsed.data.hostId ?? (signerUserId ? parsed.data.subjectUserId : null);
-  if (hostId && hostId !== parsed.data.subjectUserId) {
-    return NextResponse.json(
-      { error: "hostId must match subjectUserId." },
-      { status: 400 },
-    );
-  }
-  const requiredSignerRoles = resolveRequiredSignerRoles(
-    template.signerRoles,
-    template.requiredSignerType,
-  );
-  const completedSignerRoles = requiredSignerRoles;
-  if (
-    parsed.data.signerRole
-    && !requiredSignerRoles.some(
-      (role) => normalizeSignerRole(role) === normalizeSignerRole(parsed.data.signerRole!),
-    )
-  ) {
-    return NextResponse.json(
-      { error: "Signer role is not required by this Document Template Version." },
-      { status: 400 },
-    );
-  }
-  const userIds = [
-    ...new Set(
-      [parsed.data.subjectUserId, signerUserId, hostId].filter(
-        (value): value is string => Boolean(value),
-      ),
-    ),
-  ];
-  const [users, scopedEntity, importedFile, scopeEvents, eventScopeRegistrations, organizationTeams] =
-    await Promise.all([
-      prisma.userData.findMany({
-        where: { id: { in: userIds } },
-        select: { id: true },
-      }),
-      parsed.data.scopeType === "EVENT_PARTICIPATION"
-        ? prisma.events.findUnique({
-            where: { id: parsed.data.scopeId },
-            select: { id: true, organizationId: true },
-          })
-        : parsed.data.scopeType === "TEAM_MEMBERSHIP"
-          ? prisma.canonicalTeams.findUnique({
-              where: { id: parsed.data.scopeId },
-              select: { id: true, organizationId: true },
-            })
-          : null,
-      prisma.file.findUnique({
-        where: { id: parsed.data.importedFileId },
+  const [users, scopedEntity, scopeEvents, eventScopeRegistrations, organizationTeams] = await Promise.all([
+    prisma.userData.findMany({
+      where: { id: parsed.subjectUserId },
+      select: { id: true },
+    }),
+    parsed.scopeType === 'EVENT_PARTICIPATION'
+      ? prisma.events.findUnique({
+        where: { id: parsed.scopeId },
         select: { id: true, organizationId: true },
-      }),
-      listOrganizationUsersScopeEvents(organizationId),
-      parsed.data.scopeType === "EVENT_PARTICIPATION"
-        ? prisma.eventRegistrations.findMany({
-            where: {
-              eventId: parsed.data.scopeId,
-              registrantType: "TEAM",
-              rosterRole: "PARTICIPANT",
-              status: { in: ["STARTED", "PENDING", "ACTIVE", "BLOCKED", "CONSENTFAILED"] },
-              slotId: null,
-              occurrenceDate: null,
-            },
-            select: {
-              registrantId: true,
-              parentId: true,
-              eventTeamId: true,
-            },
-          })
-        : Promise.resolve([]),
-      prisma.canonicalTeams.findMany({
-        where: { organizationId },
-        select: { id: true },
-      }),
-    ]);
-  if (users.length !== userIds.length) {
-    return NextResponse.json(
-      { error: "Document Subject or signer User was not found." },
-      { status: 400 },
-    );
+      })
+      : parsed.scopeType === 'TEAM_MEMBERSHIP'
+        ? prisma.canonicalTeams.findUnique({
+          where: { id: parsed.scopeId },
+          select: { id: true, organizationId: true },
+        })
+        : null,
+    listOrganizationUsersScopeEvents(organizationId),
+    parsed.scopeType === 'EVENT_PARTICIPATION'
+      ? prisma.eventRegistrations.findMany({
+        where: {
+          eventId: parsed.scopeId,
+          rosterRole: 'PARTICIPANT',
+          status: { in: ['STARTED', 'PENDING', 'ACTIVE', 'BLOCKED', 'CONSENTFAILED'] },
+          OR: [
+            { registrantType: 'TEAM' },
+            { eventTeamId: { not: null } },
+          ],
+        },
+        select: { registrantId: true, parentId: true, eventTeamId: true },
+      })
+      : Promise.resolve([]),
+    prisma.canonicalTeams.findMany({
+      where: { organizationId },
+      select: { id: true },
+    }),
+  ]);
+  if (!users.some((user) => user.id === parsed.subjectUserId)) {
+    return NextResponse.json({ error: 'Document Subject was not found.' }, { status: 400 });
   }
-  if (organizationTeams.some((team) => team.id === parsed.data.subjectUserId)) {
-    return NextResponse.json(
-      { error: "Document Subject must be a User, not a Team." },
-      { status: 400 },
-    );
+  if (organizationTeams.some((team) => team.id === parsed.subjectUserId)) {
+    return NextResponse.json({ error: 'Document Subject must be a User, not a Team.' }, { status: 400 });
   }
-  if (signerUserId && organizationTeams.some((team) => team.id === signerUserId)) {
-    return NextResponse.json(
-      { error: "Signer must be a User, not a Team." },
-      { status: 400 },
-    );
-  }
+
   const organizationTeamIds = organizationTeams.map((team) => team.id);
-  const scopeEvent = parsed.data.scopeType === "EVENT_PARTICIPATION"
-    ? scopeEvents.find((event) => event.id === parsed.data.scopeId)
+  const scopeEvent = parsed.scopeType === 'EVENT_PARTICIPATION'
+    ? scopeEvents.find((event) => event.id === parsed.scopeId)
     : undefined;
-  const eventTeamIds = scopeEvent?.teamIds ?? [];
   const eventCanonicalTeamIds = new Set(
     [
-      ...eventTeamIds,
+      ...(scopeEvent?.teamIds ?? []),
       ...eventScopeRegistrations.flatMap((registration) => [
         registration.parentId,
         registration.registrantId,
         registration.eventTeamId,
       ]),
-    ].filter(
-      (teamId): teamId is string => typeof teamId === "string",
-    ),
+    ].filter((teamId): teamId is string => typeof teamId === 'string' && teamId.trim().length > 0),
   );
   const membershipTeamIds = Array.from(new Set([
     ...organizationTeamIds,
     ...eventCanonicalTeamIds,
-    ...(parsed.data.scopeType === "TEAM_MEMBERSHIP" ? [parsed.data.scopeId] : []),
+    ...(parsed.scopeType === 'TEAM_MEMBERSHIP' ? [parsed.scopeId] : []),
   ]));
-  const teamRegistrations = membershipTeamIds.length > 0
-    ? await prisma.teamRegistrations.findMany({
+  const eventTeamIds = parsed.scopeType === 'EVENT_PARTICIPATION'
+    ? normalizeIdList(eventScopeRegistrations.flatMap((registration) => [
+      registration.eventTeamId,
+      registration.registrantId,
+    ]))
+    : [];
+  const eventTeamsDelegate = (prisma as any).teams;
+  const teamStaffAssignmentsDelegate = (prisma as any).teamStaffAssignments;
+  const [eventTeams, teamStaffAssignments] = await Promise.all([
+    eventTeamIds.length && typeof eventTeamsDelegate?.findMany === 'function'
+      ? eventTeamsDelegate.findMany({
+        where: {
+          id: { in: eventTeamIds },
+          OR: [{ kind: { not: 'PLACEHOLDER' } }, { kind: null }],
+        },
+        select: {
+          playerIds: true,
+          captainId: true,
+          managerId: true,
+          headCoachId: true,
+          coachIds: true,
+        },
+      })
+      : Promise.resolve([]),
+    membershipTeamIds.length && typeof teamStaffAssignmentsDelegate?.findMany === 'function'
+      ? teamStaffAssignmentsDelegate.findMany({
         where: {
           teamId: { in: membershipTeamIds },
-          userId: { in: userIds },
-          status: { in: ["STARTED", "PENDING", "ACTIVE"] },
+          status: { in: ['ACTIVE', 'PENDING', 'STARTED'] },
         },
-        select: { teamId: true, userId: true },
+        select: { userId: true },
       })
+      : Promise.resolve([]),
+  ]);
+  const teamRegistrations = membershipTeamIds.length
+    ? await prisma.teamRegistrations.findMany({
+      where: {
+        teamId: { in: membershipTeamIds },
+        userId: parsed.subjectUserId,
+        status: { in: ['STARTED', 'PENDING', 'ACTIVE'] },
+      },
+      select: { teamId: true, userId: true },
+    })
     : [];
   const customerUserIds = new Set([
-    ...scopeEvents.flatMap((event) => event.userIds),
+    ...scopeEvents.flatMap((event) => [
+      ...event.userIds,
+      ...(event.organizationId !== organizationId
+        ? [event.hostId, ...(event.assistantHostIds ?? [])]
+        : []),
+      ...(event.officialIds ?? []),
+    ]),
+    ...eventTeams.flatMap((team: Record<string, unknown>) => normalizeIdList([
+      ...(Array.isArray(team.playerIds) ? team.playerIds : []),
+      team.captainId,
+      team.managerId,
+      team.headCoachId,
+      ...(Array.isArray(team.coachIds) ? team.coachIds : []),
+    ])),
     ...teamRegistrations.map((registration) => registration.userId),
+    ...teamStaffAssignments.flatMap((assignment: Record<string, unknown>) => (
+      typeof assignment.userId === 'string' ? [assignment.userId] : []
+    )),
   ]);
-  if (!customerUserIds.has(parsed.data.subjectUserId)) {
+  if (!customerUserIds.has(parsed.subjectUserId)) {
     return NextResponse.json(
-      { error: "Document Subject is not a customer of this Organization." },
+      { error: 'Document Subject is not a customer of this Organization.' },
       { status: 400 },
     );
   }
-  if (
-    signerUserId
-    && signerUserId !== parsed.data.subjectUserId
-    && !customerUserIds.has(signerUserId)
-  ) {
+  const scopeBelongsToOrganization = parsed.scopeType === 'EVENT_PARTICIPATION'
+    ? Boolean(scopeEvent)
+    : scopedEntity?.organizationId === organizationId;
+  if (parsed.scopeType !== 'ORGANIZATION' && !scopeBelongsToOrganization) {
     return NextResponse.json(
-      { error: "Signer is not a customer of this Organization." },
+      { error: 'Document scope does not belong to this Organization.' },
       { status: 400 },
     );
   }
-  if (
-    parsed.data.scopeType === "ORGANIZATION"
-    && parsed.data.scopeId !== organizationId
-  ) {
-    return NextResponse.json(
-      { error: "Organization scope does not belong to this Organization." },
-      { status: 400 },
-    );
-  }
-  if (template.signOnce && parsed.data.scopeType !== "ORGANIZATION") {
-    return NextResponse.json(
-      { error: "Sign-once Document Template Versions require Organization scope." },
-      { status: 400 },
-    );
-  }
-  if (!template.signOnce && parsed.data.scopeType !== "EVENT_PARTICIPATION") {
-    return NextResponse.json(
-      { error: "Non-sign-once Document Template Versions require Event Participation scope." },
-      { status: 400 },
-    );
-  }
-  if (
-    parsed.data.scopeType !== "ORGANIZATION"
-    && (!scopedEntity || scopedEntity.organizationId !== organizationId)
-  ) {
-    return NextResponse.json(
-      { error: "Document scope does not belong to this Organization." },
-      { status: 400 },
-    );
-  }
-  if (parsed.data.scopeType === "EVENT_PARTICIPATION") {
-    const isDirectEventCustomer = Boolean(
-      scopeEvent?.userIds.includes(parsed.data.subjectUserId),
-    );
-    const hasTeamEventMembership = teamRegistrations.some(
-      (registration) =>
-        registration.userId === parsed.data.subjectUserId
-        && eventCanonicalTeamIds.has(registration.teamId),
-    );
+  if (parsed.scopeType === 'EVENT_PARTICIPATION') {
+    const isDirectEventCustomer = Boolean(scopeEvent?.userIds.includes(parsed.subjectUserId));
+    const hasTeamEventMembership = teamRegistrations.some((registration) => (
+      eventCanonicalTeamIds.has(registration.teamId)
+      && registration.userId === parsed.subjectUserId
+    )) || eventTeams.some((team: Record<string, unknown>) => normalizeIdList([
+      ...(Array.isArray(team.playerIds) ? team.playerIds : []),
+      team.captainId,
+      team.managerId,
+      team.headCoachId,
+      ...(Array.isArray(team.coachIds) ? team.coachIds : []),
+    ]).includes(parsed.subjectUserId));
     if (!isDirectEventCustomer && !hasTeamEventMembership) {
       return NextResponse.json(
-        { error: "Document Subject is not a participant in this Event." },
+        { error: 'Document Subject is not a participant in this Event.' },
         { status: 400 },
       );
     }
   }
-  if (parsed.data.scopeType === "TEAM_MEMBERSHIP") {
-    const hasTeamMembership = teamRegistrations.some(
-      (registration) =>
-        registration.teamId === parsed.data.scopeId
-        && registration.userId === parsed.data.subjectUserId,
-    );
-    if (!hasTeamMembership) {
-      return NextResponse.json(
-        { error: "Document Subject is not a member of this Team." },
-        { status: 400 },
-      );
-    }
-  }
-  if (!importedFile || importedFile.organizationId !== organizationId) {
-    return NextResponse.json(
-      { error: "Imported File does not belong to this Organization." },
-      { status: 400 },
-    );
-  }
-  if (parsed.data.attestationAccepted !== true) {
-    return NextResponse.json(
-      { error: "Document Import Attestation must be accepted." },
-      { status: 400 },
-    );
-  }
 
-  const evidenceScope = {
-    scopeType: parsed.data.scopeType,
-    scopeId: parsed.data.scopeId,
-    eventId: parsed.data.scopeType === "EVENT_PARTICIPATION"
-      ? parsed.data.scopeId
-      : null,
-    teamId: parsed.data.scopeType === "TEAM_MEMBERSHIP"
-      ? parsed.data.scopeId
-      : null,
-  };
-  const now = new Date();
-  const evidenceId = crypto.randomUUID();
-  const signedAt = historicalSigningDate?.toISOString() ?? now.toISOString();
-
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const validation = await validatePdfBuffer(buffer);
+  if (!validation.valid) {
+    return NextResponse.json({ error: validation.reason }, { status: 415 });
+  }
+  const contentHash = `sha256:${crypto.createHash('sha256').update(buffer).digest('hex')}`;
+  const storage = getStorageProvider();
+  let stored: { key: string; bucket?: string | null } | null = null;
   try {
+    const storedResult = await storage.putObject({
+      data: buffer,
+      originalName: file.name,
+      contentType: PDF_MIME_TYPE,
+      organizationId,
+    });
+    stored = { key: storedResult.key, bucket: storedResult.bucket };
+
+    const now = new Date();
+    const evidenceId = crypto.randomUUID();
+    const signedAt = historicalSigningDate?.toISOString() ?? null;
+    const evidenceScope = {
+      scopeType: parsed.scopeType,
+      scopeId: parsed.scopeId,
+      eventId: parsed.scopeType === 'EVENT_PARTICIPATION' ? parsed.scopeId : null,
+      teamId: parsed.scopeType === 'TEAM_MEMBERSHIP' ? parsed.scopeId : null,
+    };
+    const requiredSignerRoles = resolveRequiredSignerRoles(
+      template.signerRoles,
+      template.requiredSignerType,
+    );
+
     await prisma.$transaction(async (tx) => {
+      const importedFileId = crypto.randomUUID();
+      await tx.file.create({
+        data: {
+          id: importedFileId,
+          createdAt: now,
+          updatedAt: now,
+          organizationId,
+          uploaderId: session.userId,
+          originalName: file.name,
+          mimeType: PDF_MIME_TYPE,
+          sizeBytes: buffer.length,
+          bucket: stored?.bucket ?? null,
+          path: stored?.key ?? '',
+        },
+      });
       const documentSubjectId = await ensureDocumentSubject(
         {
           organizationId,
-          userId: signerUserId,
-          hostId,
-          documentSubjectUserId: parsed.data.subjectUserId,
+          documentSubjectUserId: parsed.subjectUserId,
         },
         tx as unknown as DocumentEvidenceDatabase,
       );
@@ -388,35 +469,34 @@ export async function POST(
           updatedAt: now,
           signedDocumentId: `imported-${evidenceId}`,
           templateId: template.id,
-          userId: signerUserId,
-          documentName: parsed.data.documentName,
-          hostId,
+          userId: null,
+          documentName: parsed.documentName,
+          hostId: null,
           organizationId,
           eventId: evidenceScope.eventId,
           teamId: evidenceScope.teamId,
           ...signedDocumentEvidenceFields({
             organizationId,
-            userId: signerUserId,
-            hostId,
-            documentSubjectUserId: parsed.data.subjectUserId,
+            documentSubjectUserId: parsed.subjectUserId,
             ...evidenceScope,
             signOnce: template.signOnce,
             provenance: DOCUMENT_EVIDENCE_PROVENANCE.IMPORTED,
           }),
           scopeType: evidenceScope.scopeType,
           scopeId: evidenceScope.scopeId,
-          importedFileId: parsed.data.importedFileId ?? null,
-          contentHash: parsed.data.contentHash,
+          importedFileId,
+          contentHash,
           historicalSigningDate,
-          sourceNote: parsed.data.sourceNote ?? null,
+          sourceNote: parsed.sourceNote ?? null,
           importedAt: now,
           uploaderId: session.userId,
           attestationText: DOCUMENT_IMPORT_ATTESTATION_TEXT,
           attestationVersion: DOCUMENT_IMPORT_ATTESTATION_VERSION,
-          status: "SIGNED",
+          status: 'SIGNED',
           signedAt,
-          signerEmail: parsed.data.signerEmail ?? null,
-          signerRole: parsed.data.signerRole ?? null,
+          signerEmail: null,
+          signerRole: null,
+          roleIndex: null,
           ipAddress: null,
           requestId: null,
         },
@@ -432,8 +512,7 @@ export async function POST(
           scopeType: evidenceScope.scopeType,
           scopeId: evidenceScope.scopeId,
           requiredSignerRoles,
-          completedSignerRoles,
-          signerRole: parsed.data.signerRole,
+          completedSignerRoles: requiredSignerRoles,
         },
         tx as unknown as DocumentEvidenceDatabase,
       );
@@ -441,43 +520,61 @@ export async function POST(
         {
           evidenceId: evidence.id,
           organizationId,
-          eventType: "IMPORT",
+          eventType: 'IMPORT',
           actorUserId: session.userId,
-          note: parsed.data.sourceNote ?? null,
+          note: parsed.sourceNote ?? null,
           payload: {
-            importedFileId: parsed.data.importedFileId ?? null,
-            contentHash: parsed.data.contentHash,
+            importedFileId,
+            contentHash,
             historicalSigningDate: historicalSigningDate?.toISOString() ?? null,
           },
         },
         tx as unknown as DocumentEvidenceDatabase,
       );
     });
+
+    try {
+      await notifyDocumentEvidenceChange({
+        organizationId,
+        subjectUserId: parsed.subjectUserId,
+        evidenceId,
+        documentName: parsed.documentName,
+        action: 'IMPORT',
+        actorUserId: session.userId,
+      });
+    } catch (error) {
+      console.error('Imported document notification failed.', {
+        organizationId,
+        evidenceId,
+        error,
+      });
+    }
+
+    return NextResponse.json(
+      {
+        evidenceId,
+        documentId: `imported-${evidenceId}`,
+        provenance: DOCUMENT_EVIDENCE_PROVENANCE.IMPORTED,
+      },
+      { status: 201 },
+    );
   } catch (error) {
+    if (stored) await deleteStoredObject(stored);
     if (
-      error &&
-      typeof error === "object" &&
-      "code" in error &&
-      error.code === "P2002"
+      error
+      && typeof error === 'object'
+      && 'code' in error
+      && error.code === 'P2002'
     ) {
       return NextResponse.json(
-        { error: "Matching imported evidence already exists." },
+        { error: 'Matching imported evidence already exists.' },
         { status: 409 },
       );
     }
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Unable to import document evidence.";
-    return NextResponse.json({ error: message }, { status: 400 });
+    console.error('Unable to import document evidence.', { organizationId, error });
+    return NextResponse.json(
+      { error: 'Unable to import document evidence.' },
+      { status: 400 },
+    );
   }
-
-  return NextResponse.json(
-    {
-      evidenceId,
-      documentId: `imported-${evidenceId}`,
-      provenance: DOCUMENT_EVIDENCE_PROVENANCE.IMPORTED,
-    },
-    { status: 201 },
-  );
 }

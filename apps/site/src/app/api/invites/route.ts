@@ -16,8 +16,13 @@ import { sendInviteEmails } from '@/server/inviteEmails';
 import { ensureAuthUserAndUserDataByEmail } from '@/server/inviteUsers';
 import { getRequestOrigin } from '@/lib/requestOrigin';
 import { buildTeamInviteShareUrl } from '@/server/teamInviteLinks';
-import { canManageEvent, canManageOrganization, hasOrgPermission } from '@/server/accessControl';
-import { ORG_PERMISSIONS } from '@/lib/organizationPermissions';
+import {
+  canManageEvent,
+  canManageOrganization,
+  hasDocumentEvidenceOwnerAccess,
+  hasOrgPermission,
+} from '@/server/accessControl';
+import { ORG_PERMISSIONS, type OrganizationPermission } from '@/lib/organizationPermissions';
 import { resolveDefaultOrganizationRoleIdForStaffTypes } from '@/server/organizationRoles';
 import {
   loadCanonicalTeamById,
@@ -52,11 +57,19 @@ const inviteSchema = z.object({
   teamId: z.string().optional(),
   userId: z.string().optional(),
   roleId: z.string().nullable().optional(),
+
   createdBy: z.string().optional(),
   firstName: z.string().optional(),
   lastName: z.string().optional(),
   replaceStaffTypes: z.boolean().optional(),
 }).passthrough();
+const RESTRICTED_DOCUMENT_PERMISSIONS: OrganizationPermission[] = [
+  ORG_PERMISSIONS.DOCUMENTS_VOID,
+  ORG_PERMISSIONS.DOCUMENTS_AUDIT_VIEW,
+];
+
+const RESTRICTED_DOCUMENT_PERMISSION_ERROR =
+  'Only the Organization owner or platform administrator can grant or revoke document void or audit access.';
 
 const createSchema = z.object({
   invites: z.array(inviteSchema).optional(),
@@ -567,6 +580,12 @@ export async function POST(req: NextRequest) {
             if (organization.ownerId && inviteUserId === organization.ownerId) {
               throw new InviteRouteError(409, 'Organization owner already has staff access');
             }
+            if (
+              Object.prototype.hasOwnProperty.call(invite, 'roleId')
+              && !(await hasOrgPermission(session, organization, ORG_PERMISSIONS.ROLES_MANAGE, tx))
+            ) {
+              throw new InviteRouteError(403, 'Forbidden');
+            }
           } else {
             if (!event) {
               throw new InviteRouteError(404, 'Event not found');
@@ -627,6 +646,30 @@ export async function POST(req: NextRequest) {
             const defaultRoleId = selectedRole?.id
               ?? existingStaffMember?.roleId
               ?? await resolveDefaultOrganizationRoleIdForStaffTypes(tx, organizationId, staffTypes);
+            const currentRoleId = existingStaffMember?.roleId ?? null;
+            if (defaultRoleId !== currentRoleId) {
+              const roleIds = Array.from(new Set(
+                [currentRoleId, defaultRoleId].filter(
+                  (roleId): roleId is string => typeof roleId === 'string' && roleId.length > 0,
+                ),
+              ));
+              if (roleIds.length > 0) {
+                const restrictedPermissions = await tx.organizationRolePermissions.findMany({
+                  where: {
+                    organizationRoleId: { in: roleIds },
+                    permission: { in: RESTRICTED_DOCUMENT_PERMISSIONS },
+                  },
+                  select: { permission: true },
+                });
+                if (
+                  restrictedPermissions.length > 0
+                  && !(await hasDocumentEvidenceOwnerAccess(session, organization, tx))
+                ) {
+                  throw new InviteRouteError(403, RESTRICTED_DOCUMENT_PERMISSION_ERROR);
+                }
+              }
+            }
+
             await tx.staffMembers.upsert({
               where: {
                 organizationId_userId: {

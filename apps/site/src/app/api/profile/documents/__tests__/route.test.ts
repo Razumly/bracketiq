@@ -3,6 +3,9 @@
 import { NextRequest } from 'next/server';
 
 const prismaMock = {
+  documentSubjects: {
+    findMany: jest.fn(),
+  },
   userData: {
     findUnique: jest.fn(),
     findMany: jest.fn(),
@@ -35,6 +38,9 @@ const prismaMock = {
   templateDocuments: {
     findMany: jest.fn(),
   },
+  documentRequirementSatisfactions: {
+    findMany: jest.fn(),
+  },
   organizations: {
     findMany: jest.fn(),
   },
@@ -55,6 +61,7 @@ describe('GET /api/profile/documents', () => {
       id: 'user_1',
       teamIds: [],
     });
+    prismaMock.documentSubjects.findMany.mockResolvedValue([]);
     prismaMock.eventRegistrations.findMany.mockResolvedValue([]);
     prismaMock.teamRegistrations.findMany.mockResolvedValue([]);
     prismaMock.teamStaffAssignments.findMany.mockResolvedValue([]);
@@ -92,9 +99,10 @@ describe('GET /api/profile/documents', () => {
         name: 'Soccer Club',
       },
     ]);
+    prismaMock.documentRequirementSatisfactions.findMany.mockResolvedValue([]);
   });
 
-  it('suppresses a scope from unsigned and signed lists when the latest status is revoked', async () => {
+  it('does not treat a revoked raw document as requirement completion', async () => {
     prismaMock.signedDocuments.findMany.mockResolvedValue([
       {
         id: 'signed_old',
@@ -126,11 +134,34 @@ describe('GET /api/profile/documents', () => {
     const json = await response.json();
 
     expect(response.status).toBe(200);
-    expect(json.unsigned).toEqual([]);
+    expect(json.unsigned).toEqual([
+      expect.objectContaining({
+        eventId: 'event_1',
+        templateId: 'tmpl_1',
+        status: 'UNSIGNED',
+      }),
+    ]);
     expect(json.signed).toEqual([]);
   });
 
   it('keeps normal signed documents visible when they are not revoked', async () => {
+    prismaMock.documentSubjects.findMany.mockResolvedValue([
+      {
+        id: 'document-subject:org_1:user_1',
+        userId: 'user_1',
+        organizationId: 'org_1',
+      },
+    ]);
+    prismaMock.documentRequirementSatisfactions.findMany.mockResolvedValue([
+      {
+        documentSubjectId: 'document-subject:org_1:user_1',
+        templateDocumentId: 'tmpl_1',
+        scopeType: 'EVENT_PARTICIPATION',
+        scopeId: 'event_1',
+        status: 'SATISFIED',
+        isComplete: true,
+      },
+    ]);
     prismaMock.signedDocuments.findMany.mockResolvedValue([
       {
         id: 'signed_1',
@@ -139,6 +170,7 @@ describe('GET /api/profile/documents', () => {
         eventId: 'event_1',
         userId: 'user_1',
         hostId: null,
+        documentSubjectId: 'document-subject:org_1:user_1',
         signerRole: 'participant',
         status: 'SIGNED',
         signedAt: '2026-03-01T12:00:00.000Z',
@@ -157,5 +189,148 @@ describe('GET /api/profile/documents', () => {
       status: 'SIGNED',
       templateId: 'tmpl_1',
     }));
+  });
+
+  it('does not treat a raw signed document as requirement completion', async () => {
+    prismaMock.signedDocuments.findMany.mockResolvedValue([
+      {
+        id: 'signed_without_satisfaction',
+        signedDocumentId: 'doc_signed_2',
+        templateId: 'tmpl_1',
+        eventId: 'event_1',
+        userId: 'user_1',
+        hostId: null,
+        signerRole: 'participant',
+        status: 'SIGNED',
+        signedAt: '2026-03-01T12:00:00.000Z',
+        createdAt: new Date('2026-03-01T12:00:00.000Z'),
+      },
+    ]);
+
+    const response = await GET(new NextRequest('http://localhost/api/profile/documents'));
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(json.unsigned).toEqual([
+      expect.objectContaining({
+        eventId: 'event_1',
+        templateId: 'tmpl_1',
+        status: 'UNSIGNED',
+      }),
+    ]);
+    expect(json.signed).toHaveLength(1);
+  });
+  it('shows a subject-only imported document through its Document Subject', async () => {
+    prismaMock.documentSubjects.findMany.mockResolvedValue([
+      { id: 'document-subject:org_1:user_1', userId: 'user_1' },
+    ]);
+    prismaMock.signedDocuments.findMany.mockResolvedValue([
+      {
+        id: 'imported_subject_only',
+        signedDocumentId: 'imported-file-1',
+        templateId: 'tmpl_1',
+        eventId: 'event_1',
+        teamId: null,
+        userId: null,
+        hostId: null,
+        documentSubjectId: 'document-subject:org_1:user_1',
+        provenance: 'IMPORTED',
+        signerRole: null,
+        status: 'SIGNED',
+        signedAt: '2026-03-01T12:00:00.000Z',
+        createdAt: new Date('2026-03-01T12:00:00.000Z'),
+      },
+    ]);
+
+    const response = await GET(new NextRequest('http://localhost/api/profile/documents'));
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(json.signed).toEqual([
+      expect.objectContaining({
+        id: 'imported_subject_only',
+        signedDocumentRecordId: 'imported_subject_only',
+        viewUrl: '/api/documents/signed/imported_subject_only/file',
+      }),
+    ]);
+  });
+
+  it('shows a guardian-signed child import to the linked guardian', async () => {
+    requireSessionMock.mockResolvedValue({ userId: 'guardian_1', isAdmin: false });
+    prismaMock.parentChildLinks.findMany
+      .mockResolvedValueOnce([{ childId: 'child_1' }])
+      .mockResolvedValueOnce([]);
+    prismaMock.userData.findMany.mockResolvedValue([
+      { id: 'child_1', firstName: 'Child', lastName: 'One' },
+    ]);
+    prismaMock.documentSubjects.findMany.mockResolvedValue([
+      { id: 'document-subject:org_1:child_1', userId: 'child_1' },
+    ]);
+    prismaMock.signedDocuments.findMany.mockResolvedValue([
+      {
+        id: 'imported_guardian_child',
+        signedDocumentId: 'imported-file-2',
+        templateId: 'tmpl_1',
+        eventId: 'event_1',
+        teamId: null,
+        userId: 'guardian_1',
+        hostId: 'child_1',
+        documentSubjectId: 'document-subject:org_1:child_1',
+        provenance: 'IMPORTED',
+        signerRole: 'parent_guardian',
+        status: 'SIGNED',
+        signedAt: '2026-03-02T12:00:00.000Z',
+        createdAt: new Date('2026-03-02T12:00:00.000Z'),
+      },
+    ]);
+
+    const response = await GET(new NextRequest('http://localhost/api/profile/documents'));
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(json.signed).toEqual([
+      expect.objectContaining({
+        id: 'imported_guardian_child',
+        childUserId: 'child_1',
+        signerContext: 'parent_guardian',
+      }),
+    ]);
+  });
+  it('returns imported void status and provenance for profile history', async () => {
+    prismaMock.documentSubjects.findMany.mockResolvedValue([
+      { id: 'document-subject:org_1:user_1', userId: 'user_1' },
+    ]);
+    prismaMock.signedDocuments.findMany.mockResolvedValue([
+      {
+        id: 'imported_void',
+        signedDocumentId: 'imported-file-void',
+        templateId: 'tmpl_1',
+        eventId: null,
+        teamId: null,
+        userId: null,
+        hostId: null,
+        documentSubjectId: 'document-subject:org_1:user_1',
+        provenance: 'IMPORTED',
+        signerRole: null,
+        status: 'VOID',
+        signedAt: null,
+        historicalSigningDate: null,
+        importedAt: new Date('2026-03-03T12:00:00.000Z'),
+        createdAt: new Date('2026-03-03T12:00:00.000Z'),
+      },
+    ]);
+
+    const response = await GET(new NextRequest('http://localhost/api/profile/documents'));
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(json.signed).toEqual([]);
+    expect(json.voided).toEqual([
+      expect.objectContaining({
+        id: 'imported_void',
+        provenance: 'IMPORTED',
+        status: 'VOID',
+      }),
+    ]);
   });
 });

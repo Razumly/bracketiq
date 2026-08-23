@@ -19,6 +19,11 @@ import {
   WEEKLY_OCCURRENCE_JOIN_CLOSED_ERROR,
 } from "@/server/events/weeklyOccurrences";
 import { dispatchRequiredEventDocuments } from "@/lib/eventConsentDispatch";
+import {
+  documentSatisfactionScopeFor,
+  documentSubjectIdFor,
+  findSatisfiedDocumentTemplateIds,
+} from "@/server/documentEvidence";
 import { normalizeRequiredSignerType } from "@/lib/templateSignerTypes";
 import {
   loadAndBuildRegistrationAnswerSnapshot,
@@ -38,14 +43,6 @@ const schema = z
     occurrenceDate: z.string().optional(),
   })
   .passthrough();
-
-const isSignedStatus = (value: unknown): boolean => {
-  if (typeof value !== "string") {
-    return false;
-  }
-  const normalized = value.trim().toLowerCase();
-  return normalized === "signed" || normalized === "completed";
-};
 
 export async function POST(
   req: NextRequest,
@@ -326,50 +323,30 @@ export async function POST(
 
   let hasAllParticipantSignatures = false;
   if (participantRequiredTemplateIds.length > 0) {
-    const signOnceTemplateIds = participantTemplates
-      .filter((template) => template.signOnce === true)
-      .map((template) => template.id);
-    const eventScopedTemplateIds = participantTemplates
-      .filter((template) => template.signOnce !== true)
-      .map((template) => template.id);
-
-    const signedRows =
-      signOnceTemplateIds.length || eventScopedTemplateIds.length
-        ? await prisma.signedDocuments.findMany({
-            where: {
-              userId: session.userId,
-              signerRole: "participant",
-              OR: [
-                ...(signOnceTemplateIds.length
-                  ? [{ templateId: { in: signOnceTemplateIds } }]
-                  : []),
-                ...(eventScopedTemplateIds.length
-                  ? [{ templateId: { in: eventScopedTemplateIds }, eventId }]
-                  : []),
-              ],
-            },
-            orderBy: { updatedAt: "desc" },
-            take: 200,
-            select: {
-              templateId: true,
-              status: true,
-            },
-          })
-        : [];
-
-    const signedTemplateIds = new Set(
-      signedRows
-        .filter((row) => isSignedStatus(row.status))
-        .map((row) => row.templateId),
-    );
+    const documentSubjectId = documentSubjectIdFor(event.organizationId, session.userId);
+    const satisfactionScopes = participantTemplates.flatMap((template) => {
+      const scope = documentSatisfactionScopeFor({
+        organizationId: event.organizationId,
+        documentSubjectUserId: session.userId,
+        eventId,
+        teamId: null,
+        signOnce: template.signOnce === true,
+        templateDocumentId: template.id,
+      });
+      return scope ? [scope] : [];
+    });
+    const satisfiedTemplateIds = await findSatisfiedDocumentTemplateIds({
+      documentSubjectId,
+      scopes: satisfactionScopes,
+    });
     hasAllParticipantSignatures = participantRequiredTemplateIds.every(
-      (templateId) => signedTemplateIds.has(templateId),
+      (templateId) => satisfiedTemplateIds.has(templateId),
     );
   }
 
-  const needsConsent =
+  const legacyNeedsConsent =
     participantRequiredTemplateIds.length > 0 && !hasAllParticipantSignatures;
-  const consentDispatch = needsConsent
+  const consentDispatch = legacyNeedsConsent
     ? await dispatchRequiredEventDocuments({
         eventId,
         organizationId: event.organizationId ?? null,
@@ -377,6 +354,8 @@ export async function POST(
         participantUserId: session.userId,
       })
     : null;
+  const needsConsent = legacyNeedsConsent
+    && consentDispatch?.allRequiredTemplatesSatisfied !== true;
   const consentStatus =
     participantRequiredTemplateIds.length === 0
       ? null

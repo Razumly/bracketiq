@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/permissions';
 import { ORG_PERMISSIONS, normalizeOrganizationPermissions } from '@/lib/organizationPermissions';
-import { hasOrgPermission } from '@/server/accessControl';
+import { hasDocumentEvidenceOwnerAccess, hasOrgPermission } from '@/server/accessControl';
 import { getOrganizationRolesWithPermissions } from '@/server/organizationRoles';
 
 export const dynamic = 'force-dynamic';
@@ -51,6 +51,49 @@ export async function PATCH(
   if (existing.isSystem && parsed.data.name && parsed.data.name !== existing.name) {
     return NextResponse.json({ error: 'System role names cannot be changed.' }, { status: 400 });
   }
+  const hasPermissionUpdate = Object.prototype.hasOwnProperty.call(parsed.data, 'permissions');
+  const existingRestrictedPermissions = hasPermissionUpdate
+    ? (await prisma.organizationRolePermissions.findMany({
+      where: {
+        organizationRoleId: existing.id,
+        permission: {
+          in: [
+            ORG_PERMISSIONS.DOCUMENTS_VOID,
+            ORG_PERMISSIONS.DOCUMENTS_AUDIT_VIEW,
+          ],
+        },
+      },
+      select: { permission: true },
+    }) ?? [])
+    : [];
+  const existingRestrictedPermissionSet = new Set(
+    existingRestrictedPermissions.map((entry) => entry.permission),
+  );
+  const requestedRestrictedPermissionSet = hasPermissionUpdate
+    ? new Set(
+      normalizeOrganizationPermissions(parsed.data.permissions).filter((permission) => (
+        permission === ORG_PERMISSIONS.DOCUMENTS_VOID
+        || permission === ORG_PERMISSIONS.DOCUMENTS_AUDIT_VIEW
+      )),
+    )
+    : null;
+  const hasRestrictedDocumentPermissionChange = requestedRestrictedPermissionSet !== null
+    && (
+      requestedRestrictedPermissionSet.size !== existingRestrictedPermissionSet.size
+      || Array.from(requestedRestrictedPermissionSet).some(
+        (permission) => !existingRestrictedPermissionSet.has(permission),
+      )
+    );
+  if (
+    hasRestrictedDocumentPermissionChange
+    && !(await hasDocumentEvidenceOwnerAccess(session, org))
+  ) {
+    return NextResponse.json(
+      { error: 'Only the Organization owner or platform administrator can grant or revoke document void or audit access.' },
+      { status: 403 },
+    );
+  }
+
 
   try {
     const role = await prisma.$transaction(async (tx) => {

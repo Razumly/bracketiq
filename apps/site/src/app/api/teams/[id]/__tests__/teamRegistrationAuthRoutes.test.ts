@@ -25,6 +25,9 @@ const prismaMock = {
   templateDocuments: {
     findMany: jest.fn(),
   },
+  documentRequirementSatisfactions: {
+    findMany: jest.fn(),
+  },
   templateProviderQuarantines: {
     findMany: jest.fn(),
   },
@@ -120,6 +123,7 @@ const templateSignerTypesMock = jest.requireMock('@/lib/templateSignerTypes') as
 describe('team registration auth route handling', () => {
   beforeEach(() => {
     prismaMock.templateProviderQuarantines.findMany.mockResolvedValue([]);
+    prismaMock.documentRequirementSatisfactions.findMany.mockResolvedValue([]);
     jest.clearAllMocks();
     requireSessionMock.mockRejectedValue(new Response('Unauthorized', { status: 401 }));
   });

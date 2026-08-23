@@ -13,13 +13,16 @@ import { BOLDSIGN_OPERATION_STATUSES, findLatestBoldSignOperation } from '@/lib/
 import { getRequiredSignerTypeLabel, normalizeRequiredSignerType } from '@/lib/templateSignerTypes';
 import { resolveBoldSignRedirectUrl } from '@/lib/signRedirect';
 import {
+  documentSatisfactionScopeFor,
+  documentSubjectIdFor,
   ensureDocumentSubject,
+  findSatisfiedDocumentTemplateIds,
   signedDocumentEvidenceFields,
   DOCUMENT_EVIDENCE_PROVENANCE,
 } from '@/server/documentEvidence';
 import {
   DocumentTemplateVersionProviderQuarantinedError,
-  findQuarantinedProviderTemplateIds,
+  findQuarantinedDocumentTemplateVersionIds,
 } from '@/server/documents/documentTemplateVersions';
 export const dynamic = 'force-dynamic';
 
@@ -203,8 +206,21 @@ export async function POST(req: NextRequest) {
 
   const templates = await prisma.templateDocuments.findMany({
     where: { id: { in: requestedTemplateIds } },
+    include: {
+      documentRequirement: {
+        select: { title: true, description: true },
+      },
+    },
   });
   const templateById = new Map(templates.map((template) => [template.id, template]));
+  const templateDisplayTitle = (template: {
+    title?: string | null;
+    documentRequirement?: { title?: string | null } | null;
+  }): string => pickString(template.documentRequirement?.title, template.title) ?? 'Required Document';
+  const templateDisplayDescription = (template: {
+    description?: string | null;
+    documentRequirement?: { description?: string | null } | null;
+  }): string | undefined => pickString(template.documentRequirement?.description, template.description);
   const missingTemplateIds = requestedTemplateIds.filter((templateId) => !templateById.has(templateId));
   if (missingTemplateIds.length > 0) {
     return NextResponse.json({
@@ -239,15 +255,39 @@ export async function POST(req: NextRequest) {
     const requiredSignerType = normalizeRequiredSignerType(template.requiredSignerType);
     if (requiredSignerType !== 'PARTICIPANT') {
       return NextResponse.json({
-        error: `Rental template "${template.title}" requires ${getRequiredSignerTypeLabel(requiredSignerType)} signatures. Rental checkout templates must use Participant signer type.`,
+        error: `Rental template "${templateDisplayTitle(template)}" requires ${getRequiredSignerTypeLabel(requiredSignerType)} signatures. Rental checkout templates must use Participant signer type.`,
       }, { status: 400 });
     }
     if (!template.signOnce && !normalizedEventId) {
       return NextResponse.json({
-        error: `eventId is required for event-scoped rental template "${template.title}".`,
+        error: `eventId is required for event-scoped rental template "${templateDisplayTitle(template)}".`,
       }, { status: 400 });
     }
   }
+  const documentSubjectId = documentSubjectIdFor(
+    normalizedOrganizationId ?? null,
+    signerUserId,
+  );
+  const satisfactionScopes = requestedTemplateIds.flatMap((templateId) => {
+    const template = templateById.get(templateId);
+    if (!template) {
+      return [];
+    }
+    const scope = documentSatisfactionScopeFor({
+      templateDocumentId: template.id,
+      organizationId: normalizedOrganizationId ?? null,
+      documentSubjectUserId: signerUserId,
+      eventId: normalizedEventId ?? null,
+      teamId: null,
+      signOnce: template.signOnce,
+    });
+    return scope ? [scope] : [];
+  });
+  const satisfiedTemplateIds = await findSatisfiedDocumentTemplateIds({
+    documentSubjectId,
+    scopes: satisfactionScopes,
+  });
+
 
   const signedTemplateRows = await prisma.signedDocuments.findMany({
     where: {
@@ -269,30 +309,19 @@ export async function POST(req: NextRequest) {
       .filter((row) => isSignedDocumentStatus(row.status))
       .map((row) => row.templateId),
   );
-  const providerTemplateIds = requestedTemplateIds
-    .map((templateId) => templateById.get(templateId))
-    .filter((template): template is NonNullable<typeof template> => (
-      template !== undefined
-      && (template.type ?? 'PDF').toUpperCase() !== 'TEXT'
-    ))
-    .map((template) => template.templateId);
-  const quarantinedProviderTemplateIds = await findQuarantinedProviderTemplateIds(
+  const quarantinedTemplateIds = await findQuarantinedDocumentTemplateVersionIds(
     prisma,
-    providerTemplateIds,
+    requestedTemplateIds.map((templateId) => templateById.get(templateId))
+      .filter((template): template is NonNullable<typeof template> => Boolean(template)),
   );
   const quarantinedTemplate = requestedTemplateIds
     .map((templateId) => templateById.get(templateId))
     .find((template) => (
       template
+      && !satisfiedTemplateIds.has(template.id)
       && !signedTemplateIds.has(template.id)
       && (template.type ?? 'PDF').toUpperCase() !== 'TEXT'
-      && (
-        Boolean(template.providerQuarantinedAt)
-        || Boolean(
-          pickString(template.templateId)
-          && quarantinedProviderTemplateIds.has(pickString(template.templateId)!),
-        )
-      )
+      && quarantinedTemplateIds.has(template.id)
     ));
   if (quarantinedTemplate) {
     return NextResponse.json(
@@ -323,6 +352,10 @@ export async function POST(req: NextRequest) {
       if (!template) {
         continue;
       }
+      if (satisfiedTemplateIds.has(template.id)) {
+        continue;
+      }
+
 
       const requiredSignerType = normalizeRequiredSignerType(template.requiredSignerType);
 
@@ -413,7 +446,7 @@ export async function POST(req: NextRequest) {
                 signedDocumentId: textDocumentId,
                 templateId: template.id,
                 userId: signerUserId,
-                documentName: template.title ?? 'Text Waiver',
+                documentName: templateDisplayTitle(template),
                 hostId: null,
                 organizationId: normalizedOrganizationId ?? null,
                 eventId: normalizedEventId ?? null,
@@ -449,11 +482,11 @@ export async function POST(req: NextRequest) {
           }
         });
 
-        const content = template.content ?? `Please acknowledge ${template.title ?? 'this document'}.`;
+        const content = template.content ?? `Please acknowledge ${templateDisplayTitle(template)}.`;
         signLinks.push({
           templateId: template.id,
           type: 'TEXT',
-          title: template.title,
+          title: templateDisplayTitle(template),
           signOnce: template.signOnce ?? false,
           documentId: textDocumentId,
           content,
@@ -463,13 +496,7 @@ export async function POST(req: NextRequest) {
         });
         continue;
       }
-      if (
-        template.providerQuarantinedAt
-        || (
-          pickString(template.templateId)
-          && quarantinedProviderTemplateIds.has(pickString(template.templateId)!)
-        )
-      ) {
+      if (quarantinedTemplateIds.has(template.id)) {
         throw new DocumentTemplateVersionProviderQuarantinedError(template.id);
       }
 
@@ -481,7 +508,7 @@ export async function POST(req: NextRequest) {
       }
       const boldSignTemplateId = pickString(template.templateId);
       if (!boldSignTemplateId) {
-        throw new Error(`Template "${template.title}" is missing a BoldSign template id.`);
+        throw new Error(`Template "${templateDisplayTitle(template)}" is missing a BoldSign template id.`);
       }
 
       let templateRoles = toRolesFromTemplateRecord(template);
@@ -505,8 +532,8 @@ export async function POST(req: NextRequest) {
           signerName,
           roleIndex: selectedRole.roleIndex,
           signerRole: selectedRole.signerRole,
-          title: template.title,
-          message: template.description ?? undefined,
+          title: templateDisplayTitle(template),
+          message: templateDisplayDescription(template),
         });
         return sent.documentId;
       };
@@ -544,7 +571,7 @@ export async function POST(req: NextRequest) {
           roleIndex: selectedRole.roleIndex,
           payload: {
             templateDocumentId: template.id,
-            templateTitle: template.title,
+            templateTitle: templateDisplayTitle(template),
             requiredSignerType,
             requiredSignerLabel,
             signOnce: template.signOnce ?? false,
@@ -580,7 +607,7 @@ export async function POST(req: NextRequest) {
           roleIndex: selectedRole.roleIndex,
           payload: {
             templateDocumentId: template.id,
-            templateTitle: template.title,
+            templateTitle: templateDisplayTitle(template),
             requiredSignerType,
             requiredSignerLabel,
             signOnce: template.signOnce ?? false,
@@ -597,7 +624,7 @@ export async function POST(req: NextRequest) {
       signLinks.push({
         templateId: template.id,
         type: 'PDF',
-        title: template.title,
+        title: templateDisplayTitle(template),
         signOnce: template.signOnce ?? false,
         documentId,
         url: embedded.signLink,

@@ -86,8 +86,13 @@ type DocumentSummary = {
   teamId?: string;
   title: string;
   type: 'PDF' | 'TEXT';
+  provenance?: string;
   status?: string;
   signedAt?: string;
+  historicalSigningDate?: string;
+  importedAt?: string;
+  scopeType?: string;
+  scopeId?: string;
   viewUrl?: string;
   content?: string;
 };
@@ -499,6 +504,27 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 	      },
 	    })
 	    : [];
+  const canonicalMemberIdsByTeamId = new Map<string, Set<string>>();
+  canonicalTeamRegistrationRows.forEach((row) => {
+    const teamId = normalizeId(row.teamId);
+    const userId = normalizeId(row.userId);
+    if (!teamId || !userId) {
+      return;
+    }
+    const memberIds = canonicalMemberIdsByTeamId.get(teamId) ?? new Set<string>();
+    memberIds.add(userId);
+    canonicalMemberIdsByTeamId.set(teamId, memberIds);
+  });
+  canonicalTeamIdByEventTeamId.forEach((canonicalTeamId, eventTeamId) => {
+    const canonicalMemberIds = canonicalMemberIdsByTeamId.get(canonicalTeamId);
+    if (!canonicalMemberIds) {
+      return;
+    }
+    const eventTeamMemberIds = new Set(teamMemberIdsByTeamId.get(eventTeamId) ?? []);
+    canonicalMemberIds.forEach((userId) => eventTeamMemberIds.add(userId));
+    teamMemberIdsByTeamId.set(eventTeamId, Array.from(eventTeamMemberIds));
+  });
+
 	  const teamStaffAssignmentsDelegate = (prisma as any).teamStaffAssignments;
 	  const canonicalTeamStaffRows: TeamStaffAssignmentRow[] = canonicalTeamIds.length && typeof teamStaffAssignmentsDelegate?.findMany === 'function'
 	    ? await teamStaffAssignmentsDelegate.findMany({
@@ -733,15 +759,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const [users, templates] = await Promise.all([
     userIds.length
       ? prisma.userData.findMany({
-      where: { id: { in: userIds } },
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        userName: true,
-        profileImageId: true,
-      },
-    })
+        where: { id: { in: userIds } },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          userName: true,
+          profileImageId: true,
+        },
+      })
       : Promise.resolve([]),
     prisma.templateDocuments.findMany({
       where: { organizationId: id },
@@ -750,6 +776,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         title: true,
         type: true,
         content: true,
+        documentRequirementId: true,
+        versionSequence: true,
       },
     }),
   ]);
@@ -794,6 +822,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         status: true,
         signedAt: true,
         createdAt: true,
+        provenance: true,
+        importedFileId: true,
+        historicalSigningDate: true,
+        importedAt: true,
+        scopeType: true,
+        scopeId: true,
       },
       orderBy: { createdAt: 'desc' },
     })
@@ -1268,6 +1302,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       status: normalizeStatus(registration.status) ?? existing?.status,
     });
   });
+
   signedDocuments.forEach((document) => {
     const subjectUserId = document.userId
       ?? (document.documentSubjectId
@@ -1278,9 +1313,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     }
     const summary = summariesByUserId.get(subjectUserId);
     const template = templateById.get(document.templateId);
-    const type: 'PDF' | 'TEXT' = template?.type === 'TEXT' ? 'TEXT' : 'PDF';
+    const type: 'PDF' | 'TEXT' = document.provenance === 'IMPORTED' && document.importedFileId
+      ? 'PDF'
+      : template?.type === 'TEXT' ? 'TEXT' : 'PDF';
     const event = document.eventId ? eventsById.get(document.eventId) : undefined;
-    const documentSummary = {
+    const documentSummary: DocumentSummary = {
       signedDocumentRecordId: document.id,
       documentId: document.signedDocumentId,
       templateId: document.templateId,
@@ -1289,22 +1326,29 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       teamId: document.teamId ?? undefined,
       title: template?.title?.trim() || document.documentName || 'Signed Document',
       type,
+      provenance: document.provenance ?? undefined,
       status: normalizeStatus(document.status),
-      signedAt: document.signedAt ?? document.createdAt?.toISOString() ?? undefined,
+      signedAt: document.provenance === 'IMPORTED'
+        ? document.historicalSigningDate?.toISOString()
+        : document.signedAt ?? document.createdAt?.toISOString() ?? undefined,
+      historicalSigningDate: document.historicalSigningDate?.toISOString(),
+      importedAt: document.importedAt?.toISOString(),
+      scopeType: document.scopeType ?? undefined,
+      scopeId: document.scopeId ?? undefined,
       viewUrl: type === 'PDF' ? `/api/documents/signed/${document.id}/file` : undefined,
       content: type === 'TEXT' ? template?.content ?? undefined : undefined,
     };
-	    if (summary) {
-	      summary.documents.push(documentSummary);
-	    }
-	    const teamId = normalizeId(document.teamId);
-	    const canonicalTeamId = teamId
-	      ? (teamSummariesByCanonicalTeamId.has(teamId) ? teamId : canonicalTeamIdByEventTeamId.get(teamId))
-	      : undefined;
-	    const teamSummary = canonicalTeamId ? teamSummariesByCanonicalTeamId.get(canonicalTeamId) : undefined;
-	    if (teamSummary) {
-	      teamSummary.documents.push(documentSummary);
-	    }
+    if (summary) {
+      summary.documents.push(documentSummary);
+    }
+    const teamId = normalizeId(document.teamId);
+    const canonicalTeamId = teamId
+      ? (teamSummariesByCanonicalTeamId.has(teamId) ? teamId : canonicalTeamIdByEventTeamId.get(teamId))
+      : undefined;
+    const teamSummary = canonicalTeamId ? teamSummariesByCanonicalTeamId.get(canonicalTeamId) : undefined;
+    if (teamSummary) {
+      teamSummary.documents.push(documentSummary);
+    }
   });
 
   const buildPersonFields = (userId: string) => {

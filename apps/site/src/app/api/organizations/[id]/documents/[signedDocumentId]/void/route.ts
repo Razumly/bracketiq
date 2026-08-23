@@ -1,24 +1,44 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { verifyRecentAuthToken } from "@/lib/authServer";
 import { requireSession } from "@/lib/permissions";
 import { ORG_PERMISSIONS } from "@/lib/organizationPermissions";
-import {
-  canManageOrganization,
-  hasOrgPermission,
-} from "@/server/accessControl";
+import { hasOrgPermission } from "@/server/accessControl";
 import {
   DOCUMENT_EVIDENCE_PROVENANCE,
   appendDocumentEvidenceAuditEvent,
-  invalidateDocumentRequirementSatisfaction,
+  invalidateDocumentRequirementSatisfactions,
   type DocumentEvidenceDatabase,
 } from "@/server/documentEvidence";
+import { notifyDocumentEvidenceChange } from "@/server/documentNotifications";
+
+export const DOCUMENT_VOID_REASONS = [
+  "Wrong Document Subject",
+  "Wrong Document Requirement or Version",
+  "Wrong scope",
+  "Duplicate evidence",
+  "Incomplete or unsigned document",
+  "Unreadable or incorrect file",
+  "Replaced by corrected evidence",
+  "Other",
+] as const;
 
 const voidSchema = z
   .object({
-    reason: z.string().trim().max(1000).nullable().optional(),
+    reason: z.enum(DOCUMENT_VOID_REASONS),
+    note: z.string().trim().max(1000).nullable().optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    if (value.reason === "Other" && !value.note) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["note"],
+        message: "A note is required when the void reason is Other.",
+      });
+    }
+  });
 
 export const dynamic = "force-dynamic";
 
@@ -38,21 +58,31 @@ export async function POST(
       { status: 404 },
     );
   }
-  const canManageDocuments =
-    session.isAdmin ||
-    (await canManageOrganization(session, organization)) ||
-    (await hasOrgPermission(
-      session,
-      organization,
-      ORG_PERMISSIONS.TEMPLATES_MANAGE,
-    ));
-  if (!canManageDocuments) {
+  if (!(await hasOrgPermission(session, organization, ORG_PERMISSIONS.DOCUMENTS_VOID))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  const recentAuth = verifyRecentAuthToken(req.headers.get("x-recent-auth-token") ?? "");
+  const ageSeconds = recentAuth
+    ? Math.floor(Date.now() / 1000) - recentAuth.issuedAtSeconds
+    : Number.POSITIVE_INFINITY;
+  if (
+    !recentAuth
+    || recentAuth.userId !== session.userId
+    || ageSeconds < -60
+    || ageSeconds > 10 * 60
+  ) {
+    return NextResponse.json(
+      {
+        error: "Recent identity verification is required before voiding document evidence.",
+        code: "RECENT_AUTH_REQUIRED",
+      },
+      { status: 401 },
+    );
   }
 
   const evidence = await prisma.signedDocuments.findFirst({
     where: { id: signedDocumentId, organizationId },
-    select: { id: true, provenance: true, status: true },
+    select: { id: true, provenance: true, status: true, documentName: true, documentSubjectId: true },
   });
   if (!evidence) {
     return NextResponse.json(
@@ -84,8 +114,10 @@ export async function POST(
       { status: 400 },
     );
   }
-  const normalizedReason = parsedBody.data.reason || null;
+  const normalizedReason = parsedBody.data.reason;
+  const normalizedNote = parsedBody.data.note || null;
   const now = new Date();
+  let isVoided = false;
 
   try {
     await prisma.$transaction(async (tx) => {
@@ -102,9 +134,10 @@ export async function POST(
       if (updateResult.count === 0) {
         return;
       }
-      await invalidateDocumentRequirementSatisfaction(
+      isVoided = true;
+      await invalidateDocumentRequirementSatisfactions(
         {
-          evidenceId: evidence.id,
+          evidenceIds: [evidence.id],
           invalidatedAt: now,
         },
         tx as unknown as DocumentEvidenceDatabase,
@@ -116,6 +149,7 @@ export async function POST(
           eventType: "VOID",
           actorUserId: session.userId,
           reason: normalizedReason,
+          note: normalizedNote,
           createdAt: now,
         },
         tx as unknown as DocumentEvidenceDatabase,
@@ -128,6 +162,31 @@ export async function POST(
         : "Unable to void document evidence.";
     return NextResponse.json({ error: message }, { status: 400 });
   }
+  if (isVoided && evidence.documentSubjectId) {
+    const subject = await prisma.documentSubjects.findUnique({
+      where: { id: evidence.documentSubjectId },
+      select: { userId: true },
+    });
+    if (subject?.userId) {
+      try {
+        await notifyDocumentEvidenceChange({
+          organizationId,
+          subjectUserId: subject.userId,
+          evidenceId: evidence.id,
+          documentName: evidence.documentName,
+          action: "VOID",
+          actorUserId: session.userId,
+        });
+      } catch (error) {
+        console.error("Document void notification failed.", {
+          organizationId,
+          evidenceId: evidence.id,
+          error,
+        });
+      }
+    }
+  }
+
 
   return NextResponse.json(
     { evidenceId: evidence.id, status: "VOID" },

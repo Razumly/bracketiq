@@ -78,6 +78,9 @@ export async function POST(
       id: true,
       organizationId: true,
       title: true,
+      documentRequirement: {
+        select: { title: true },
+      },
       type: true,
       requiredSignerType: true,
       signOnce: true,
@@ -172,7 +175,7 @@ export async function POST(
         signedDocumentId: `text-${crypto.randomUUID()}`,
         templateId: template.id,
         userId: parsed.data.userId,
-        documentName: template.title ?? 'Document',
+        documentName: template.documentRequirement?.title ?? template.title ?? 'Document',
         hostId: null,
         organizationId,
         eventId: event?.id ?? null,

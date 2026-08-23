@@ -22,6 +22,9 @@ const txMock = {
   eventTeamStaffAssignments: {
     upsert: jest.fn(),
   },
+  documentRequirementSatisfactions: {
+    findMany: jest.fn(),
+  },
   signedDocuments: {
     findMany: jest.fn(),
   },
@@ -133,6 +136,8 @@ describe('public guest event registration route', () => {
     });
     prismaMock.$transaction.mockImplementation(async (callback: (tx: typeof txMock) => Promise<unknown>) => callback(txMock));
     prismaMock.eventRegistrations.findUnique.mockResolvedValue(null);
+    txMock.documentRequirementSatisfactions.findMany.mockResolvedValue([]);
+    txMock.signedDocuments.findMany.mockResolvedValue([]);
     prismaMock.eventRegistrations.update.mockImplementation(async (params) => params.data);
     prismaMock.templateDocuments.findMany.mockResolvedValue([]);
     txMock.signedDocuments.findMany.mockResolvedValue([]);
@@ -373,7 +378,7 @@ describe('public guest event registration route', () => {
     }), txMock);
   });
 
-  it('skips the document step when a free-agent participant already signed the required template', async () => {
+  it('skips the document step when Satisfaction already completes the required template', async () => {
     assertPublicWidgetEventMock.mockResolvedValueOnce({
       organization: {
         id: 'org_1',
@@ -404,8 +409,17 @@ describe('public guest event registration route', () => {
     prismaMock.templateDocuments.findMany.mockResolvedValueOnce([
       { id: 'participant_template', requiredSignerType: 'PARTICIPANT', signOnce: true },
     ]);
-    txMock.signedDocuments.findMany.mockResolvedValueOnce([
-      { status: 'SIGNED' },
+    txMock.documentRequirementSatisfactions.findMany.mockResolvedValueOnce([
+      {
+        documentSubjectId: 'document-subject:org_1:parent_1',
+        templateDocumentId: 'participant_template',
+        scopeType: 'ORGANIZATION',
+        scopeId: 'org_1',
+        status: 'SATISFIED',
+        isComplete: true,
+        requiredSignerRoles: ['participant'],
+        completedSignerRoles: ['participant'],
+      },
     ]);
     upsertEventRegistrationMock.mockResolvedValueOnce({
       id: 'registration_1',
@@ -432,18 +446,21 @@ describe('public guest event registration route', () => {
     const payload = await response.json();
 
     expect(response.status).toBe(201);
-    expect(txMock.signedDocuments.findMany).toHaveBeenCalledWith(expect.objectContaining({
+    expect(txMock.documentRequirementSatisfactions.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
-        templateId: 'participant_template',
-        userId: 'parent_1',
-        signerRole: 'participant',
-        hostId: null,
+        documentSubjectId: { in: ['document-subject:org_1:parent_1'] },
+        templateDocumentId: { in: ['participant_template'] },
+        status: 'SATISFIED',
+        isComplete: true,
+        OR: [{
+          scopeType: 'ORGANIZATION',
+          scopeId: 'org_1',
+        }],
       }),
     }));
     expect(upsertEventRegistrationMock).toHaveBeenCalledWith(expect.objectContaining({
       eventId: 'event_1',
       registrantType: 'SELF',
-      registrantId: 'parent_1',
       status: 'STARTED',
       consentStatus: null,
     }), txMock);

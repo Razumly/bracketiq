@@ -26,6 +26,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     if (!file) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
+    if (file.mimeType?.trim().toLowerCase() === 'application/pdf') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
     await assertFileReadAccess(req, file.id);
 
     const storage = getStorageProvider();
@@ -75,14 +78,18 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       }
     }
 
-    const [users, teams, events, organizations] = await Promise.all([
+    const [users, teams, events, organizations, signedDocuments] = await Promise.all([
       prisma.userData.findMany({ where: { profileImageId: file.id }, select: { id: true } }),
       prisma.teams.findMany({ where: { profileImageId: file.id }, select: { id: true } }),
       prisma.events.findMany({ where: { imageId: file.id }, select: { id: true } }),
       prisma.organizations.findMany({ where: { logoId: file.id }, select: { id: true } }),
+      prisma.signedDocuments.findMany({
+        where: { importedFileId: file.id },
+        select: { id: true },
+      }),
     ]);
 
-    const inUse = users.length || teams.length || events.length || organizations.length;
+    const inUse = users.length || teams.length || events.length || organizations.length || signedDocuments.length;
     if (inUse) {
       return NextResponse.json(
         {
@@ -92,6 +99,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
             teams: teams.map((row) => row.id),
             events: events.map((row) => row.id),
             organizations: organizations.map((row) => row.id),
+            signedDocuments: signedDocuments.map((row) => row.id),
           },
         },
         { status: 409 },

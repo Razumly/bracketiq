@@ -2015,6 +2015,7 @@ async function updateParticipants(
 
     let consentDocumentId: string | null = null;
     let consentStatus: string | null = null;
+    let needsConsent = requiredTemplateIds.length > 0;
 
     if (requiredTemplateIds.length > 0) {
       if (registrantType === 'CHILD' && parentId) {
@@ -2030,10 +2031,13 @@ async function updateParticipants(
           parentUserId: parentId,
           childUserId: userId!,
         });
+        needsConsent = consentDispatch.allRequiredTemplatesSatisfied !== true;
         consentDocumentId = consentDispatch.firstDocumentId ?? null;
-        consentStatus = !childEmail
-          ? 'child_email_required'
-          : (consentDispatch.errors.length > 0 ? 'send_failed' : 'sent');
+        consentStatus = !needsConsent
+          ? 'completed'
+          : !childEmail
+            ? 'child_email_required'
+            : (consentDispatch.errors.length > 0 ? 'send_failed' : 'sent');
         warnings.push(...consentDispatch.errors);
       } else {
         const consentDispatch = await dispatchRequiredEventDocuments({
@@ -2042,8 +2046,11 @@ async function updateParticipants(
           requiredTemplateIds,
           participantUserId: userId!,
         });
+        needsConsent = consentDispatch.allRequiredTemplatesSatisfied !== true;
         consentDocumentId = consentDispatch.firstDocumentId ?? null;
-        consentStatus = consentDispatch.errors.length > 0 ? 'send_failed' : 'sent';
+        consentStatus = !needsConsent
+          ? 'completed'
+          : (consentDispatch.errors.length > 0 ? 'send_failed' : 'sent');
         warnings.push(...consentDispatch.errors);
       }
     }
@@ -2064,7 +2071,7 @@ async function updateParticipants(
           registrantId: userId!,
           parentId,
           rosterRole: 'PARTICIPANT',
-          status: requiredTemplateIds.length > 0
+          status: needsConsent
             ? 'STARTED'
             : isManualRegistrationPaymentMode(event.registrationPaymentMode)
               ? 'PENDING'

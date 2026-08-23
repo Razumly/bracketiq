@@ -470,6 +470,44 @@ try {
 
   await client.query(`
     INSERT INTO "DocumentRequirements" ("id", "organizationId", "title", "status")
+    VALUES ('document-requirement:version_removed', 'org_1', 'Removed assignment version', 'ACTIVE');
+    INSERT INTO "TemplateDocuments" (
+      "id",
+      "createdAt",
+      "updatedAt",
+      "documentRequirementId",
+      "versionSequence",
+      "type",
+      "organizationId",
+      "title",
+      "requiredSignerType",
+      "roleIndexes",
+      "signerRoles",
+      "content"
+    ) VALUES (
+      'version_removed',
+      '2026-08-05 09:00:00',
+      '2026-08-05 09:00:00',
+      'document-requirement:version_removed',
+      1,
+      'TEXT',
+      'org_1',
+      'Removed assignment version',
+      'PARTICIPANT',
+      ARRAY[]::INTEGER[],
+      ARRAY[]::TEXT[],
+      'Removed assignment text'
+    );
+    UPDATE "Events"
+    SET "requiredTemplateIds" = array_append("requiredTemplateIds", 'version_removed')
+    WHERE "id" = 'event_1';
+    UPDATE "Events"
+    SET "requiredTemplateIds" = array_remove("requiredTemplateIds", 'version_removed')
+    WHERE "id" = 'event_1';
+  `);
+
+  await client.query(`
+    INSERT INTO "DocumentRequirements" ("id", "organizationId", "title", "status")
     VALUES ('document-requirement:version_free', 'org_1', 'Free version', 'ACTIVE');
     INSERT INTO "TemplateDocuments" (
       "id",
@@ -554,15 +592,22 @@ try {
   const triggerFrozenVersions = await reloadClient.query(`
     SELECT "id", "frozenAt" IS NOT NULL AS "isFrozen"
     FROM "TemplateDocuments"
-    WHERE "id" IN ('version_free', 'version_team_free')
+    WHERE "id" IN ('version_free', 'version_removed', 'version_team_free')
     ORDER BY "id"
   `);
   assert.deepEqual(triggerFrozenVersions.rows, [
     { id: "version_free", isFrozen: true },
+    { id: "version_removed", isFrozen: true },
     { id: "version_team_free", isFrozen: true },
   ]);
 
   await client.query("BEGIN");
+  await expectRejectedMaterialUpdate({
+    sequence: 0,
+    id: "version_removed",
+    column: "content",
+    value: "Changed after assignment removal",
+  });
   await expectRejectedMaterialUpdate({
     sequence: 1,
     id: "version_pdf_1",

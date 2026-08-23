@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import pg from "pg";
-
 process.env.TZ = "UTC";
 const { Client } = pg;
 const connectionString =
@@ -54,6 +54,11 @@ const ownerRepairMigrationPath = path.join(
 const contributorRoleMigrationPath = path.join(
   migrationRoot,
   "20260821230000_add_satisfaction_evidence_roles",
+  "migration.sql",
+);
+const signerRoleNormalizationMigrationPath = path.join(
+  migrationRoot,
+  "20260822030000_normalize_document_satisfaction_roles",
   "migration.sql",
 );
 const client = new Client({ connectionString });
@@ -441,6 +446,7 @@ try {
       "signerRoles" = ARRAY['parent_guardian', 'child']::TEXT[]
     WHERE "id" = 'version_pdf'
   `);
+  await client.query(await readFile(signerRoleNormalizationMigrationPath, "utf8"));
   const contributorRoleColumn = await client.query(`
     SELECT "is_nullable", "column_default"
     FROM information_schema.columns
@@ -744,7 +750,7 @@ try {
     },
     {
       signedDocumentId: "evidence_boldsign_child",
-      completedSignerRoles: ["child"],
+      completedSignerRoles: ["Child"],
     },
   ]);
   const historicalContributors = await client.query(`
@@ -812,7 +818,7 @@ try {
       status: "SATISFIED",
       isComplete: true,
       requiredSignerRoles: ["Parent/Guardian", "Child"],
-      completedSignerRoles: ["Child", "Parent/Guardian", "child"],
+      completedSignerRoles: ["Child", "Parent/Guardian"],
     },
     {
       sourceEvidenceId: "evidence_incomplete_team",
@@ -821,7 +827,7 @@ try {
       status: "PENDING",
       isComplete: false,
       requiredSignerRoles: ["Parent/Guardian", "Child"],
-      completedSignerRoles: ["Parent-Guardian"],
+      completedSignerRoles: ["Parent/Guardian"],
     },
     {
       sourceEvidenceId: "evidence_text",
@@ -830,7 +836,7 @@ try {
       status: "SATISFIED",
       isComplete: true,
       requiredSignerRoles: ["Participant"],
-      completedSignerRoles: ["participant"],
+      completedSignerRoles: ["Participant"],
     },
   ]);
 
@@ -927,6 +933,112 @@ try {
     satisfactions: 0,
     auditEvents: 0,
   }]);
+
+  const concurrentClients = [
+    new Client({ connectionString }),
+    new Client({ connectionString }),
+  ];
+  try {
+    await Promise.all(concurrentClients.map(async (connection) => {
+      await connection.connect();
+      await connection.query(`SET search_path TO ${quotedFixtureSchema}`);
+    }));
+    const concurrentIdentity = JSON.stringify([
+      "document-requirement-satisfaction",
+      "org_1",
+      "requirement_text",
+      "version_text",
+      "document-subject:org_1:concurrent_player",
+      "ORGANIZATION",
+      "org_1",
+    ]);
+    const concurrentLockId = BigInt.asIntN(
+      64,
+      createHash("sha256").update(concurrentIdentity).digest().readBigInt64BE(0),
+    );
+    const writeConcurrentSatisfaction = async (connection, evidenceId, signerRole) => {
+      await connection.query("BEGIN");
+      await connection.query(
+        "SELECT pg_advisory_xact_lock($1::bigint)",
+        [concurrentLockId.toString()],
+      );
+      const existing = await connection.query(`
+        SELECT "id", "completedSignerRoles"
+        FROM "DocumentRequirementSatisfactions"
+        WHERE "organizationId" = 'org_1'
+          AND "documentRequirementId" = 'requirement_text'
+          AND "templateDocumentId" = 'version_text'
+          AND "documentSubjectId" = 'document-subject:org_1:concurrent_player'
+          AND "scopeType" = 'ORGANIZATION'
+          AND "scopeId" = 'org_1'
+          AND "status" <> 'INVALIDATED'
+        ORDER BY "updatedAt" DESC
+        LIMIT 1
+      `);
+      const createdAt = new Date();
+      if (existing.rowCount === 0) {
+        await connection.query(`
+          INSERT INTO "DocumentRequirementSatisfactions" (
+            "id", "createdAt", "updatedAt", "organizationId", "documentRequirementId",
+            "templateDocumentId", "documentSubjectId", "scopeType", "scopeId",
+            "sourceEvidenceId", "status", "isComplete", "requiredSignerRoles",
+            "completedSignerRoles"
+          ) VALUES (
+            $1, $2, $2, 'org_1', 'requirement_text', 'version_text',
+            'document-subject:org_1:concurrent_player', 'ORGANIZATION', 'org_1',
+            $3, 'PENDING', FALSE, ARRAY['Parent/Guardian', 'Participant']::TEXT[], $4::TEXT[]
+          )
+        `, [
+          `document-satisfaction:${evidenceId}`,
+          createdAt,
+          evidenceId,
+          [signerRole],
+        ]);
+      } else {
+        await connection.query(`
+          UPDATE "DocumentRequirementSatisfactions"
+          SET
+            "updatedAt" = $1,
+            "completedSignerRoles" = ARRAY(
+              SELECT DISTINCT role
+              FROM unnest("completedSignerRoles" || $2::TEXT[]) AS role
+              ORDER BY role
+            ),
+            "status" = CASE
+              WHEN ARRAY['Parent/Guardian', 'Participant']::TEXT[]
+                <@ ("completedSignerRoles" || $2::TEXT[])
+                THEN 'SATISFIED'::"DocumentRequirementSatisfactionStatusEnum"
+              ELSE 'PENDING'::"DocumentRequirementSatisfactionStatusEnum"
+            END,
+            "isComplete" = ARRAY['Parent/Guardian', 'Participant']::TEXT[]
+              <@ ("completedSignerRoles" || $2::TEXT[])
+          WHERE "id" = $3
+        `, [createdAt, [signerRole], existing.rows[0].id]);
+      }
+      await connection.query("COMMIT");
+    };
+    await Promise.all([
+      writeConcurrentSatisfaction(concurrentClients[0], "concurrency_parent", "Parent/Guardian"),
+      writeConcurrentSatisfaction(concurrentClients[1], "concurrency_child", "Participant"),
+    ]);
+    const concurrentRows = await concurrentClients[0].query(`
+      SELECT
+        COUNT(*)::INTEGER AS "count",
+        BOOL_AND("isComplete") AS "isComplete",
+        ARRAY_AGG("completedSignerRoles" ORDER BY "id") AS "completedSignerRoles"
+      FROM "DocumentRequirementSatisfactions"
+      WHERE "documentSubjectId" = 'document-subject:org_1:concurrent_player'
+    `);
+    assert.deepEqual(concurrentRows.rows, [{
+      count: 1,
+      isComplete: true,
+      completedSignerRoles: [["Parent/Guardian", "Participant"]],
+    }]);
+  } finally {
+    await Promise.all(concurrentClients.map((connection) => (
+      connection.end().catch(() => undefined)
+    )));
+  }
 
   console.log("Document Evidence migration fixture passed.");
 } finally {

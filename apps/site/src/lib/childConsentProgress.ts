@@ -1,5 +1,11 @@
 import { prisma } from '@/lib/prisma';
 import { normalizeRequiredSignerType } from '@/lib/templateSignerTypes';
+import {
+  documentSatisfactionScopeFor,
+  documentSubjectIdFor,
+  findDocumentSatisfactionSignerStates,
+  hasCompletedDocumentSignerRole,
+} from '@/server/documentEvidence';
 import { acquireEventLockAndLoadStructure } from '@/server/events/eventRegistrations';
 import { sendEventRegistrationHostNotification } from '@/server/registrationHostNotifications';
 
@@ -9,11 +15,6 @@ const normalizeText = (value: unknown): string | undefined => {
   }
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
-};
-
-const isSignedDocumentStatus = (value: unknown): boolean => {
-  const normalized = normalizeText(value)?.toLowerCase();
-  return normalized === 'signed' || normalized === 'completed';
 };
 const updateRegistrationWithEventLock = async (
   eventId: string,
@@ -70,7 +71,10 @@ export const syncChildRegistrationConsentStatus = async (params: {
 
   const event = await prisma.events.findUnique({
     where: { id: eventId },
-    select: { requiredTemplateIds: true },
+    select: {
+      organizationId: true,
+      requiredTemplateIds: true,
+    },
   });
   if (!event) {
     return;
@@ -146,67 +150,41 @@ export const syncChildRegistrationConsentStatus = async (params: {
     return;
   }
 
-  const templateScopeFilters: Array<Record<string, unknown>> = [];
-  if (signOnceTemplateIds.size > 0) {
-    templateScopeFilters.push({
-      templateId: { in: Array.from(signOnceTemplateIds) },
-    });
-  }
-  if (eventScopedTemplateIds.size > 0) {
-    templateScopeFilters.push({
-      templateId: { in: Array.from(eventScopedTemplateIds) },
+  const documentSubjectId = documentSubjectIdFor(event.organizationId, childUserId);
+  const templatesById = new Map(templates.map((template) => [template.id, template]));
+  const satisfactionScopes = relevantTemplateIds.flatMap((templateId) => {
+    const template = templatesById.get(templateId);
+    if (!template) {
+      return [];
+    }
+    const scope = documentSatisfactionScopeFor({
+      templateDocumentId: template.id,
+      organizationId: event.organizationId,
+      documentSubjectUserId: childUserId,
       eventId,
+      teamId: null,
+      signOnce: template.signOnce,
     });
-  }
-
-  const signedRowsWhere: Record<string, unknown> = {
-    OR: [
-      {
-        userId: registration.parentId,
-        signerRole: 'parent_guardian',
-        hostId: childUserId,
-      },
-      {
-        userId: childUserId,
-        signerRole: 'child',
-        hostId: childUserId,
-      },
-    ],
-  };
-  if (templateScopeFilters.length === 1) {
-    Object.assign(signedRowsWhere, templateScopeFilters[0]);
-  } else if (templateScopeFilters.length > 1) {
-    signedRowsWhere.AND = [{ OR: templateScopeFilters }];
-  } else {
-    signedRowsWhere.templateId = { in: relevantTemplateIds };
-  }
-
-  const signedRows = await prisma.signedDocuments.findMany({
-    where: signedRowsWhere,
-    select: {
-      templateId: true,
-      status: true,
-      userId: true,
-      signerRole: true,
-    },
+    return scope ? [scope] : [];
   });
-
-  const parentSignedTemplates = new Set<string>();
-  const childSignedTemplates = new Set<string>();
-  signedRows.forEach((row) => {
-    if (!isSignedDocumentStatus(row.status)) {
-      return;
-    }
-    if (row.userId === registration.parentId && row.signerRole === 'parent_guardian') {
-      parentSignedTemplates.add(row.templateId);
-    }
-    if (row.userId === childUserId && row.signerRole === 'child') {
-      childSignedTemplates.add(row.templateId);
-    }
+  const satisfactionStates = await findDocumentSatisfactionSignerStates({
+    documentSubjectId,
+    scopes: satisfactionScopes,
   });
+  const parentSignedTemplates = new Set(
+    satisfactionStates
+      .filter((state) => hasCompletedDocumentSignerRole(state.completedSignerRoles, 'parent_guardian'))
+      .map((state) => state.templateDocumentId),
+  );
+  const childSignedTemplates = new Set(
+    satisfactionStates
+      .filter((state) => hasCompletedDocumentSignerRole(state.completedSignerRoles, 'child'))
+      .map((state) => state.templateDocumentId),
+  );
 
   const parentComplete = Array.from(parentTemplateIds).every((templateId) => parentSignedTemplates.has(templateId));
   const childComplete = Array.from(childTemplateIds).every((templateId) => childSignedTemplates.has(templateId));
+
   const requiresChildSignature = childTemplateIds.size > 0;
   const requiresParentSignature = parentTemplateIds.size > 0;
 

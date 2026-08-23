@@ -121,6 +121,7 @@ import { resolveClientPublicOrigin } from "@/lib/clientPublicOrigin";
 import { withSelectedProfileImage } from "./profileImageSelection";
 import ProfileHeaderActions from "./ProfileHeaderActions";
 import { logoutProfileSession } from "./profileLogout";
+import DocumentNotificationsPanel from "@/components/profile/DocumentNotificationsPanel";
 import DiscountManager from "@/components/discounts/DiscountManager";
 import { isManualRegistrationPaymentMode } from "@/lib/manualRegistrationPayments";
 import {
@@ -2797,6 +2798,7 @@ function ProfilePageContent() {
 
   const renderNotificationsTab = () => (
     <div className="space-y-6">
+      <DocumentNotificationsPanel userId={user?.$id} />
       <Paper withBorder radius="lg" p="md" shadow="xs">
         <Group justify="space-between" align="flex-start" gap="md" mb="md">
           <div>
@@ -4157,9 +4159,20 @@ function ProfilePageContent() {
                       shadow="xs"
                     >
                       <div className="space-y-3">
-                        <Badge color="green" variant="light" radius="xl">
-                          Signed
+                        <Group gap="xs">
+                        <Badge
+                          color={document.status === "VOID" ? "red" : "green"}
+                          variant="light"
+                          radius="xl"
+                        >
+                          {document.status === "VOID" ? "Voided" : "Signed"}
                         </Badge>
+                        {document.provenance === "IMPORTED" && (
+                          <Badge color="blue" variant="light" radius="xl">
+                            Imported
+                          </Badge>
+                        )}
+                      </Group>
                         <div>
                           <Text fw={700}>{document.title}</Text>
                           <Text size="sm" c="dimmed">
@@ -4175,7 +4188,11 @@ function ProfilePageContent() {
                                 : "Source: Document"}
                           </Text>
                           <Text size="xs" c="dimmed">
-                            Signed: {formatDateTimeLabel(document.signedAt)}
+                            {document.provenance === "IMPORTED"
+                              ? `Signing date ${document.signedAt
+                                ? formatDisplayDate(document.signedAt, { timeZone: "UTC" }) || "unknown"
+                                : "unknown"}`
+                              : `${document.status === "VOID" ? "Voided" : "Signed"}: ${formatDateTimeLabel(document.signedAt)}`}
                           </Text>
                           {document.signerContext === "parent_guardian" &&
                             document.childUserId && (

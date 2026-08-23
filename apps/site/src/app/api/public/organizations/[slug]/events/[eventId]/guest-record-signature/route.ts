@@ -338,6 +338,11 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
   const template = await (prisma as any).templateDocuments.findUnique({
     where: { id: parsed.data.templateId },
+    include: {
+      documentRequirement: {
+        select: { title: true },
+      },
+    },
   });
   if (!template || !requiredTemplateIds.includes(String(template.id))) {
     return NextResponse.json({ error: 'Template not found.' }, { status: 404 });
@@ -461,7 +466,9 @@ export async function POST(req: NextRequest, context: RouteContext) {
         data: {
           id: evidenceId,
           templateId: template.id,
-          documentName: template.title ?? 'Text Waiver',
+          documentName: normalizeGuestText(template.documentRequirement?.title)
+            ?? normalizeGuestText(template.title)
+            ?? 'Text Waiver',
           teamId: null,
           ...baseData,
           createdAt: now,

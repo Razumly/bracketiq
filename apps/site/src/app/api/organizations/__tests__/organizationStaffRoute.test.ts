@@ -17,6 +17,9 @@ const prismaMock = {
   organizationRoles: {
     findFirst: jest.fn(),
   },
+  organizationRolePermissions: {
+    findMany: jest.fn(),
+  },
   invites: {
     deleteMany: jest.fn(),
   },
@@ -25,11 +28,14 @@ const prismaMock = {
 
 const requireSessionMock = jest.fn();
 const hasOrgPermissionMock = jest.fn();
+const hasDocumentEvidenceOwnerAccessMock = jest.fn();
+
 
 jest.mock("@/lib/prisma", () => ({ prisma: prismaMock }));
 jest.mock("@/lib/permissions", () => ({ requireSession: requireSessionMock }));
 jest.mock("@/server/accessControl", () => ({
   hasOrgPermission: (...args: unknown[]) => hasOrgPermissionMock(...args),
+  hasDocumentEvidenceOwnerAccess: (...args: unknown[]) => hasDocumentEvidenceOwnerAccessMock(...args),
 }));
 
 import { DELETE, PATCH } from "@/app/api/organizations/[id]/staff/route";
@@ -38,6 +44,8 @@ describe("/api/organizations/[id]/staff", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     requireSessionMock.mockResolvedValue({ userId: "owner_1", isAdmin: false });
+    hasDocumentEvidenceOwnerAccessMock.mockResolvedValue(true);
+    prismaMock.organizationRolePermissions.findMany.mockResolvedValue([]);
     hasOrgPermissionMock.mockResolvedValue(true);
     prismaMock.organizations.findUnique.mockResolvedValue({
       id: "org_1",
@@ -65,12 +73,36 @@ describe("/api/organizations/[id]/staff", () => {
         }),
         headers: { "content-type": "application/json" },
       }),
+
       { params: Promise.resolve({ id: "org_1" }) },
     );
     const payload = await response.json();
 
     expect(response.status).toBe(404);
     expect(payload.error).toBe("Role not found");
+    expect(prismaMock.staffMembers.update).not.toHaveBeenCalled();
+  });
+  it("requires role-management permission for explicit role assignment", async () => {
+    hasOrgPermissionMock.mockImplementation(async (
+      _session: unknown,
+      _organization: unknown,
+      permission: string,
+    ) => permission !== "roles.manage");
+
+    const response = await PATCH(
+      new NextRequest("http://localhost/api/organizations/org_1/staff", {
+        method: "PATCH",
+        body: JSON.stringify({
+          userId: "user_1",
+          roleId: "role_staff",
+        }),
+        headers: { "content-type": "application/json" },
+      }),
+      { params: Promise.resolve({ id: "org_1" }) },
+    );
+
+    expect(response.status).toBe(403);
+    expect(prismaMock.organizationRoles.findFirst).not.toHaveBeenCalled();
     expect(prismaMock.staffMembers.update).not.toHaveBeenCalled();
   });
 
@@ -167,4 +199,50 @@ describe("/api/organizations/[id]/staff", () => {
     );
     expect(prismaMock.staffMembers.deleteMany).not.toHaveBeenCalled();
   });
+  it("blocks a protected document permission grant during role assignment", async () => {
+    hasDocumentEvidenceOwnerAccessMock.mockResolvedValue(false);
+    prismaMock.organizationRoles.findFirst.mockResolvedValue({
+      id: "role_auditor",
+      name: "Auditor",
+      kind: "STAFF",
+      systemKey: null,
+    });
+    prismaMock.organizationRolePermissions.findMany.mockResolvedValue([
+      { permission: "documents.audit" },
+    ]);
+
+    const response = await PATCH(
+      new NextRequest("http://localhost/api/organizations/org_1/staff", {
+        method: "PATCH",
+        body: JSON.stringify({ userId: "user_1", roleId: "role_auditor" }),
+      }),
+      { params: Promise.resolve({ id: "org_1" }) },
+    );
+
+    expect(response.status).toBe(403);
+    expect(prismaMock.staffMembers.update).not.toHaveBeenCalled();
+  });
+
+  it("blocks revoking a protected document permission during staff deletion", async () => {
+    hasDocumentEvidenceOwnerAccessMock.mockResolvedValue(false);
+    prismaMock.staffMembers.findUnique.mockResolvedValue({
+      roleId: "role_auditor",
+    });
+    prismaMock.organizationRolePermissions.findMany.mockResolvedValue([
+      { permission: "documents.audit" },
+    ]);
+
+    const response = await DELETE(
+      new NextRequest("http://localhost/api/organizations/org_1/staff", {
+        method: "DELETE",
+        body: JSON.stringify({ userId: "user_1" }),
+        headers: { "content-type": "application/json" },
+      }),
+      { params: Promise.resolve({ id: "org_1" }) },
+    );
+
+    expect(response.status).toBe(403);
+    expect(prismaMock.staffMembers.deleteMany).not.toHaveBeenCalled();
+  });
+
 });

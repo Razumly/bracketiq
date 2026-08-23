@@ -21,6 +21,9 @@ const prismaMock = {
   signedDocuments: {
     findMany: jest.fn(),
   },
+  documentRequirementSatisfactions: {
+    findMany: jest.fn(),
+  },
 };
 
 const requireSessionMock = jest.fn();
@@ -109,6 +112,81 @@ describe('GET /api/events/[eventId]/users/compliance', () => {
       }),
     );
     expect(prismaMock.signedDocuments.findMany).not.toHaveBeenCalled();
+  });
+
+  it('counts a completed imported Satisfaction as signed evidence', async () => {
+    prismaMock.events.findUnique.mockResolvedValue({
+      id: 'event_1',
+      start: new Date('2026-06-01T10:00:00.000Z'),
+      teamSignup: false,
+      hostId: 'host_1',
+      assistantHostIds: [],
+      organizationId: 'org_1',
+      userIds: ['user_1'],
+      requiredTemplateIds: ['template_1'],
+    });
+    prismaMock.userData.findMany.mockResolvedValue([
+      {
+        id: 'user_1',
+        firstName: 'Casey',
+        lastName: 'Rivers',
+        userName: 'crivers',
+        dateOfBirth: new Date('2000-01-01T00:00:00.000Z'),
+      },
+    ]);
+    prismaMock.eventRegistrations.findMany.mockResolvedValue([
+      {
+        id: 'registration_1',
+        registrantId: 'user_1',
+        registrantType: 'SELF',
+        parentId: null,
+        status: 'ACTIVE',
+        createdAt: new Date('2026-03-01T10:00:00.000Z'),
+        updatedAt: new Date('2026-03-01T10:00:00.000Z'),
+      },
+    ]);
+    prismaMock.templateDocuments.findMany.mockResolvedValue([
+      {
+        id: 'template_1',
+        title: 'Event waiver',
+        type: 'PDF',
+        signOnce: false,
+        requiredSignerType: 'PARTICIPANT',
+      },
+    ]);
+    prismaMock.bills.findMany.mockResolvedValue([]);
+    prismaMock.signedDocuments.findMany.mockResolvedValue([{
+      id: 'imported_evidence_1',
+      signedAt: '2026-04-30T10:00:00.000Z',
+    }]);
+    prismaMock.documentRequirementSatisfactions.findMany.mockResolvedValue([
+      {
+        documentSubjectId: 'document-subject:org_1:user_1',
+        templateDocumentId: 'template_1',
+        scopeType: 'EVENT_PARTICIPATION',
+        scopeId: 'event_1',
+        sourceEvidenceId: 'imported_evidence_1',
+        updatedAt: new Date('2026-05-01T10:00:00.000Z'),
+      },
+    ]);
+
+    const response = await GET(requestFor(), {
+      params: Promise.resolve({ eventId: 'event_1' }),
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.users[0].documents).toEqual({
+      signedCount: 1,
+      requiredCount: 1,
+    });
+    expect(payload.users[0].requiredDocuments[0]).toEqual(
+      expect.objectContaining({
+        status: 'SIGNED',
+        signedDocumentRecordId: 'imported_evidence_1',
+        signedAt: '2026-04-30T10:00:00.000Z',
+      }),
+    );
   });
 
   it('returns an empty list when event is team-signup based', async () => {

@@ -221,7 +221,7 @@ class BoldSignService {
       { method: 'GET' },
     );
     if (!Array.isArray(result?.templates)) {
-      return [];
+      throw new Error('The template response did not include a templates array.');
     }
     return result.templates.map(toTemplateDocumentApiRow).map(mapTemplateRow);
   }

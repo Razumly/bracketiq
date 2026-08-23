@@ -971,6 +971,19 @@ model UserData {
 
   @@index([accountVisibility])
 }
+model UserNotifications {
+  id               String    @id
+  createdAt        DateTime  @default(now())
+  userId           String
+  notificationType String
+  title            String
+  body             String
+  data             Json?
+  readAt           DateTime?
+
+  @@index([userId, readAt, createdAt])
+  @@index([notificationType, createdAt])
+}
 
 model SensitiveUserData {
   id                            String    @id

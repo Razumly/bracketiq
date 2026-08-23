@@ -1,993 +1,617 @@
 /** @jest-environment node */
 
-import { NextRequest } from "next/server";
+import { NextRequest } from 'next/server';
 
 const txMock = {
-  signedDocuments: {
-    create: jest.fn(),
-  },
+  file: { create: jest.fn() },
+  signedDocuments: { create: jest.fn() },
 };
 
 const prismaMock = {
-  organizations: {
-    findUnique: jest.fn(),
-  },
-  templateDocuments: {
-    findUnique: jest.fn(),
-  },
-  documentRequirements: {
-    findUnique: jest.fn(),
-  },
-  userData: {
-    findMany: jest.fn(),
-  },
-  events: {
-    findUnique: jest.fn(),
-  },
-  canonicalTeams: {
-    findUnique: jest.fn(),
-    findMany: jest.fn(),
-  },
-  eventRegistrations: {
-    findMany: jest.fn(),
-  },
-  teamRegistrations: {
-    findFirst: jest.fn(),
-    findMany: jest.fn(),
-  },
-  file: {
-    findUnique: jest.fn(),
-  },
+  organizations: { findUnique: jest.fn() },
+  templateDocuments: { findUnique: jest.fn() },
+  documentRequirements: { findUnique: jest.fn() },
+  userData: { findMany: jest.fn() },
+  events: { findUnique: jest.fn() },
+  canonicalTeams: { findUnique: jest.fn(), findMany: jest.fn() },
+  teams: { findMany: jest.fn() },
+  teamRegistrations: { findMany: jest.fn() },
+  teamStaffAssignments: { findMany: jest.fn() },
+  eventRegistrations: { findMany: jest.fn() },
   $transaction: jest.fn(),
 };
 
 const requireSessionMock = jest.fn();
-const canManageOrganizationMock = jest.fn();
+const getStorageProviderMock = jest.fn();
 const hasOrgPermissionMock = jest.fn();
 const listOrganizationUsersScopeEventsMock = jest.fn();
 const ensureDocumentSubjectMock = jest.fn();
 const signedDocumentEvidenceFieldsMock = jest.fn();
 const createDocumentRequirementSatisfactionMock = jest.fn();
 const appendDocumentEvidenceAuditEventMock = jest.fn();
+const notifyDocumentEvidenceChangeMock = jest.fn();
+const validatePdfBufferMock = jest.fn();
 
-jest.mock("@/lib/prisma", () => ({ prisma: prismaMock }));
-jest.mock("@/lib/permissions", () => ({ requireSession: requireSessionMock }));
-jest.mock("@/server/accessControl", () => ({
-  canManageOrganization: canManageOrganizationMock,
-  hasOrgPermission: hasOrgPermissionMock,
-}));
-jest.mock("@/server/organizationUsersAccess", () => ({
+jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
+jest.mock('@/lib/permissions', () => ({ requireSession: requireSessionMock }));
+jest.mock('@/server/accessControl', () => ({ hasOrgPermission: hasOrgPermissionMock }));
+jest.mock('@/lib/storageProvider', () => ({ getStorageProvider: getStorageProviderMock }));
+jest.mock('@/server/organizationUsersAccess', () => ({
   listOrganizationUsersScopeEvents: listOrganizationUsersScopeEventsMock,
 }));
-jest.mock("@/server/documentEvidence", () => ({
-  DOCUMENT_EVIDENCE_PROVENANCE: { IMPORTED: "IMPORTED" },
+jest.mock('@/server/documentEvidence', () => ({
+  DOCUMENT_EVIDENCE_PROVENANCE: { IMPORTED: 'IMPORTED' },
   ensureDocumentSubject: ensureDocumentSubjectMock,
   signedDocumentEvidenceFields: signedDocumentEvidenceFieldsMock,
-  createDocumentRequirementSatisfaction:
-    createDocumentRequirementSatisfactionMock,
+  createDocumentRequirementSatisfaction: createDocumentRequirementSatisfactionMock,
   appendDocumentEvidenceAuditEvent: appendDocumentEvidenceAuditEventMock,
 }));
+jest.mock('@/server/documentNotifications', () => ({
+  notifyDocumentEvidenceChange: notifyDocumentEvidenceChangeMock,
+}));
+jest.mock('@/lib/pdfUploadValidation', () => ({
+  validatePdfBuffer: validatePdfBufferMock,
+}));
 
-import { POST } from "@/app/api/organizations/[id]/documents/import/route";
+import { POST } from '@/app/api/organizations/[id]/documents/import/route';
 
-describe("POST /api/organizations/[id]/documents/import", () => {
+const routeParams = { params: Promise.resolve({ id: 'org_1' }) };
+
+const buildPdfFile = (name = 'signed.pdf'): File => new File(
+  [Buffer.from('%PDF-1.7 imported')],
+  name,
+  { type: 'application/pdf' },
+);
+
+const buildRequest = (
+  values: Record<string, string> = {},
+  file: File | null = buildPdfFile(),
+): NextRequest => {
+  const form = new FormData();
+  const defaults = {
+    subjectUserId: 'player_1',
+    templateId: 'version_1',
+    documentName: 'Prior waiver',
+    historicalSigningDate: '2026-08-01',
+    sourceNote: 'Imported from the customer archive.',
+    attestationAccepted: 'true',
+    scopeType: 'ORGANIZATION',
+    scopeId: 'org_1',
+  };
+  Object.entries({ ...defaults, ...values }).forEach(([key, value]) => form.append(key, value));
+  if (file) form.append('file', file, file.name);
+  return new NextRequest('http://localhost/api/organizations/org_1/documents/import', {
+    method: 'POST',
+    body: form,
+  });
+};
+
+describe('POST /api/organizations/[id]/documents/import', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    requireSessionMock.mockResolvedValue({
-      userId: "manager_1",
-      isAdmin: false,
-    });
-    canManageOrganizationMock.mockResolvedValue(false);
+    requireSessionMock.mockResolvedValue({ userId: 'manager_1', isAdmin: false });
     hasOrgPermissionMock.mockResolvedValue(true);
-    prismaMock.organizations.findUnique.mockResolvedValue({
-      id: "org_1",
-      ownerId: "owner_1",
-    });
+    prismaMock.organizations.findUnique.mockResolvedValue({ id: 'org_1', ownerId: 'owner_1' });
     prismaMock.templateDocuments.findUnique.mockResolvedValue({
-      id: "version_1",
-      organizationId: "org_1",
-      documentRequirementId: "requirement_1",
-      requiredSignerType: "PARTICIPANT",
-      signerRoles: ["participant"],
+      id: 'version_1',
+      organizationId: 'org_1',
+      documentRequirementId: 'requirement_1',
+      requiredSignerType: 'PARTICIPANT',
+      signerRoles: ['participant'],
       signOnce: true,
     });
     prismaMock.documentRequirements.findUnique.mockResolvedValue({
-      id: "requirement_1",
-      organizationId: "org_1",
+      id: 'requirement_1',
+      organizationId: 'org_1',
     });
-    prismaMock.userData.findMany.mockResolvedValue([{ id: "player_1" }]);
-    listOrganizationUsersScopeEventsMock.mockResolvedValue([
-      { id: "event_1", userIds: ["player_1"], teamIds: [] },
-    ]);
+    prismaMock.userData.findMany.mockResolvedValue([{ id: 'player_1' }]);
     prismaMock.events.findUnique.mockResolvedValue(null);
-    prismaMock.eventRegistrations.findMany.mockResolvedValue([]);
     prismaMock.canonicalTeams.findUnique.mockResolvedValue(null);
     prismaMock.canonicalTeams.findMany.mockResolvedValue([]);
+    prismaMock.teams.findMany.mockResolvedValue([]);
+    prismaMock.eventRegistrations.findMany.mockResolvedValue([]);
     prismaMock.teamRegistrations.findMany.mockResolvedValue([]);
-    prismaMock.file.findUnique.mockResolvedValue({
-      id: "file_1",
-      organizationId: "org_1",
-    });
-    signedDocumentEvidenceFieldsMock.mockImplementation(
-      (params: { userId?: string | null }) => ({
-        provenance: "IMPORTED",
-        providerDocumentId: null,
-        signerUserId: params.userId ?? null,
-        documentSubjectId: "document-subject:org_1:player_1",
-        scopeType: "ORGANIZATION",
-        scopeId: "org_1",
+    prismaMock.teamStaffAssignments.findMany.mockResolvedValue([]);
+    listOrganizationUsersScopeEventsMock.mockResolvedValue([
+      { id: 'event_1', userIds: ['player_1'], teamIds: [] },
+    ]);
+    getStorageProviderMock.mockReturnValue({
+      putObject: jest.fn().mockResolvedValue({
+        key: 'private/org_1/signed.pdf',
+        bucket: 'private-bucket',
       }),
-    );
-    txMock.signedDocuments.create.mockResolvedValue({ id: "evidence_1" });
-    ensureDocumentSubjectMock.mockResolvedValue(
-      "document-subject:org_1:player_1",
-    );
+      deleteObject: jest.fn().mockResolvedValue(undefined),
+    });
+    validatePdfBufferMock.mockResolvedValue({ valid: true });
+    signedDocumentEvidenceFieldsMock.mockImplementation((params: {
+      documentSubjectUserId?: string | null;
+      provenance: string;
+      scopeType?: string | null;
+      scopeId?: string | null;
+    }) => ({
+      provenance: params.provenance,
+      providerDocumentId: null,
+      signerUserId: null,
+      documentSubjectId: `document-subject:org_1:${params.documentSubjectUserId}`,
+      scopeType: params.scopeType,
+      scopeId: params.scopeId,
+    }));
+    ensureDocumentSubjectMock.mockResolvedValue('document-subject:org_1:player_1');
+    txMock.file.create.mockResolvedValue({ id: 'file_1' });
+    txMock.signedDocuments.create.mockResolvedValue({ id: 'evidence_1' });
     createDocumentRequirementSatisfactionMock.mockResolvedValue(undefined);
     appendDocumentEvidenceAuditEventMock.mockResolvedValue(undefined);
-    prismaMock.$transaction.mockImplementation(async (callback) =>
-      callback(txMock),
-    );
+    notifyDocumentEvidenceChangeMock.mockResolvedValue(undefined);
+    prismaMock.$transaction.mockImplementation(async (callback: (tx: typeof txMock) => unknown) => (
+      callback(txMock)
+    ));
   });
 
-  it("stores imported evidence and records its import audit event", async () => {
-    const response = await POST(
-      new NextRequest(
-        "http://localhost/api/organizations/org_1/documents/import",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            subjectUserId: "player_1",
-            signerUserId: "player_1",
-            templateId: "version_1",
-            documentName: "Prior waiver",
-            contentHash: "sha256:abc",
-            importedFileId: "file_1",
-            scopeType: "ORGANIZATION",
-            scopeId: "org_1",
-            attestationAccepted: true,
-            historicalSigningDate: "2026-08-01T10:00:00.000Z",
-            signerRole: "participant",
-          }),
-          headers: { "Content-Type": "application/json" },
-        },
-      ),
-      { params: Promise.resolve({ id: "org_1" }) },
-    );
+  it('stores the uploaded PDF, subject-only evidence, satisfaction, and audit event in one transaction', async () => {
+    const response = await POST(buildRequest(), routeParams);
 
     expect(response.status).toBe(201);
-    expect(txMock.signedDocuments.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          provenance: "IMPORTED",
-          providerDocumentId: null,
-          contentHash: "sha256:abc",
-          documentSubjectId: "document-subject:org_1:player_1",
-          status: "SIGNED",
-          attestationText: "I confirm that this file is a complete signed document for the shown customer, Document Template Version, and scope. I confirm that it contains all required signatures. I understand that BracketIQ did not verify the signatures.",
-          attestationVersion: "1",
-        }),
+    expect(getStorageProviderMock().putObject).toHaveBeenCalledWith(expect.objectContaining({
+      originalName: 'signed.pdf',
+      contentType: 'application/pdf',
+      organizationId: 'org_1',
+    }));
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(txMock.file.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        id: expect.any(String),
+        uploaderId: 'manager_1',
+        path: 'private/org_1/signed.pdf',
+        mimeType: 'application/pdf',
       }),
-    );
+    });
+    expect(txMock.signedDocuments.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        id: expect.any(String),
+        provenance: 'IMPORTED',
+        providerDocumentId: null,
+        documentSubjectId: 'document-subject:org_1:player_1',
+        signerUserId: null,
+        userId: null,
+        status: 'SIGNED',
+        scopeType: 'ORGANIZATION',
+        scopeId: 'org_1',
+        contentHash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+        attestationVersion: '1',
+      }),
+    });
     expect(ensureDocumentSubjectMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userId: "player_1",
-        documentSubjectUserId: "player_1",
-      }),
+      { organizationId: 'org_1', documentSubjectUserId: 'player_1' },
       expect.anything(),
     );
     expect(createDocumentRequirementSatisfactionMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        evidenceId: "evidence_1",
-        templateDocumentId: "version_1",
-        requiredSignerRoles: ["participant"],
+        evidenceId: expect.any(String),
+        templateDocumentId: 'version_1',
+        documentRequirementId: 'requirement_1',
+        requiredSignerRoles: ['participant'],
+        completedSignerRoles: ['participant'],
+        scopeType: 'ORGANIZATION',
+        scopeId: 'org_1',
       }),
       expect.anything(),
     );
     expect(appendDocumentEvidenceAuditEventMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        eventType: "IMPORT",
-        evidenceId: "evidence_1",
+        eventType: 'IMPORT',
+        evidenceId: expect.any(String),
+        actorUserId: 'manager_1',
       }),
       expect.anything(),
     );
-  });
-  it("requires an accepted Document Import Attestation", async () => {
-    const response = await POST(
-      new NextRequest(
-        "http://localhost/api/organizations/org_1/documents/import",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            subjectUserId: "player_1",
-            signerUserId: "player_1",
-            templateId: "version_1",
-            documentName: "Prior waiver",
-            contentHash: "sha256:missing-attestation",
-            importedFileId: "file_1",
-            scopeType: "ORGANIZATION",
-            scopeId: "org_1",
-          }),
-          headers: { "Content-Type": "application/json" },
-        },
-      ),
-      { params: Promise.resolve({ id: "org_1" }) },
-    );
-
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({
-      error: "Document Import Attestation must be accepted.",
-    });
-    expect(prismaMock.$transaction).not.toHaveBeenCalled();
-  });
-
-  it("projects sign-once imported evidence to Organization scope", async () => {
-    prismaMock.templateDocuments.findUnique.mockResolvedValueOnce({
-      id: "version_1",
-      organizationId: "org_1",
-      documentRequirementId: "requirement_1",
-      requiredSignerType: "PARTICIPANT",
-      signerRoles: ["participant"],
-      signOnce: true,
-    });
-
-    const response = await POST(
-      new NextRequest(
-        "http://localhost/api/organizations/org_1/documents/import",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            subjectUserId: "player_1",
-            signerUserId: "player_1",
-            templateId: "version_1",
-            documentName: "Prior sign-once waiver",
-            contentHash: "sha256:sign-once",
-            importedFileId: "file_1",
-            scopeType: "ORGANIZATION",
-            scopeId: "org_1",
-            attestationAccepted: true,
-            signerRole: "participant",
-          }),
-          headers: { "Content-Type": "application/json" },
-        },
-      ),
-      { params: Promise.resolve({ id: "org_1" }) },
-    );
-
-    expect(response.status).toBe(201);
-    expect(signedDocumentEvidenceFieldsMock).toHaveBeenCalledWith(
-      expect.objectContaining({ signOnce: true }),
-    );
-    expect(txMock.signedDocuments.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          scopeType: "ORGANIZATION",
-          scopeId: "org_1",
-        }),
-      }),
-    );
-  });
-  it("rejects Organization scope for a non-sign-once Version", async () => {
-    prismaMock.templateDocuments.findUnique.mockResolvedValueOnce({
-      id: "version_1",
-      organizationId: "org_1",
-      documentRequirementId: "requirement_1",
-      requiredSignerType: "PARTICIPANT",
-      signerRoles: ["participant"],
-      signOnce: false,
-    });
-
-    const response = await POST(
-      new NextRequest("http://localhost/api/organizations/org_1/documents/import", {
-        method: "POST",
-        body: JSON.stringify({
-          subjectUserId: "player_1",
-          templateId: "version_1",
-          documentName: "Event waiver",
-          contentHash: "sha256:wrong-scope",
-          importedFileId: "file_1",
-          scopeType: "ORGANIZATION",
-          scopeId: "org_1",
-        }),
-      }),
-      { params: Promise.resolve({ id: "org_1" }) },
-    );
-
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual(expect.objectContaining({
-      error: "Non-sign-once Document Template Versions require Event Participation scope.",
+    expect(notifyDocumentEvidenceChangeMock).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'IMPORT',
+      evidenceId: expect.any(String),
+      subjectUserId: 'player_1',
     }));
+  });
+
+  it('rejects a non-PDF upload before storage', async () => {
+    const response = await POST(
+      buildRequest({}, new File([Buffer.from('not pdf')], 'not-image.png', { type: 'image/png' })),
+      routeParams,
+    );
+
+    expect(response.status).toBe(415);
+    expect(validatePdfBufferMock).not.toHaveBeenCalled();
+    expect(getStorageProviderMock().putObject).not.toHaveBeenCalled();
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
   });
 
-  it("accepts Event Participation scope for a non-sign-once Version", async () => {
+  it('rejects a malformed PDF before storage', async () => {
+    validatePdfBufferMock.mockResolvedValue({ valid: false, reason: 'The PDF is incomplete.' });
+
+    const response = await POST(buildRequest(), routeParams);
+
+    expect(response.status).toBe(415);
+    expect((await response.json()).error).toBe('The PDF is incomplete.');
+    expect(getStorageProviderMock().putObject).not.toHaveBeenCalled();
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('requires the explicit Document Import Attestation', async () => {
+    const response = await POST(
+      buildRequest({ attestationAccepted: 'false' }),
+      routeParams,
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toContain('Attestation');
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+  it('rejects impossible or non-date historical signing values', async () => {
+    const response = await POST(
+      buildRequest({ historicalSigningDate: '2024-02-30' }),
+      routeParams,
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toBe('historicalSigningDate must be a valid date.');
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+
+  it('requires multipart input and a file', async () => {
+    const jsonResponse = await POST(
+      new NextRequest('http://localhost/api/organizations/org_1/documents/import', {
+        method: 'POST',
+        body: JSON.stringify({ subjectUserId: 'player_1' }),
+        headers: { 'Content-Type': 'application/json' },
+      }),
+      routeParams,
+    );
+    expect(jsonResponse.status).toBe(400);
+
+    const form = new FormData();
+    form.append('subjectUserId', 'player_1');
+    const missingFileResponse = await POST(
+      new NextRequest('http://localhost/api/organizations/org_1/documents/import', {
+        method: 'POST',
+        body: form,
+      }),
+      routeParams,
+    );
+    expect(missingFileResponse.status).toBe(400);
+  });
+
+  it('rejects a non-sign-once version when Organization scope is selected', async () => {
     prismaMock.templateDocuments.findUnique.mockResolvedValueOnce({
-      id: "version_1",
-      organizationId: "org_1",
-      documentRequirementId: "requirement_1",
-      requiredSignerType: "PARTICIPANT",
-      signerRoles: ["participant"],
+      id: 'version_1',
+      organizationId: 'org_1',
+      documentRequirementId: 'requirement_1',
+      requiredSignerType: 'PARTICIPANT',
+      signerRoles: ['participant'],
       signOnce: false,
     });
-    prismaMock.events.findUnique.mockResolvedValueOnce({
-      id: "event_1",
-      organizationId: "org_1",
+
+    const response = await POST(buildRequest(), routeParams);
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toContain('require Event Participation scope');
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('accepts Event Participation scope for a non-sign-once version', async () => {
+    prismaMock.templateDocuments.findUnique.mockResolvedValueOnce({
+      id: 'version_1',
+      organizationId: 'org_1',
+      documentRequirementId: 'requirement_1',
+      requiredSignerType: 'PARTICIPANT',
+      signerRoles: ['participant'],
+      signOnce: false,
     });
+    prismaMock.events.findUnique.mockResolvedValue({ id: 'event_1', organizationId: 'org_1' });
 
     const response = await POST(
-      new NextRequest("http://localhost/api/organizations/org_1/documents/import", {
-        method: "POST",
-        body: JSON.stringify({
-          subjectUserId: "player_1",
-          templateId: "version_1",
-          documentName: "Event waiver",
-          contentHash: "sha256:event-scope",
-          importedFileId: "file_1",
-          scopeType: "EVENT_PARTICIPATION",
-          scopeId: "event_1",
-          attestationAccepted: true,
-        }),
-      }),
-      { params: Promise.resolve({ id: "org_1" }) },
+      buildRequest({ scopeType: 'EVENT_PARTICIPATION', scopeId: 'event_1' }),
+      routeParams,
     );
 
     expect(response.status).toBe(201);
-    expect(txMock.signedDocuments.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          scopeType: "EVENT_PARTICIPATION",
-          scopeId: "event_1",
-        }),
-      }),
-    );
+    expect(txMock.signedDocuments.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ scopeType: 'EVENT_PARTICIPATION', scopeId: 'event_1' }),
+    });
   });
-  it("accepts a registered EventTeam snapshot through its canonical Team membership", async () => {
+
+  it('accepts an EventTeam snapshot through its canonical Team membership', async () => {
     prismaMock.templateDocuments.findUnique.mockResolvedValueOnce({
-      id: "version_1",
-      organizationId: "org_1",
-      documentRequirementId: "requirement_1",
-      requiredSignerType: "PARTICIPANT",
-      signerRoles: ["participant"],
+      id: 'version_1',
+      organizationId: 'org_1',
+      documentRequirementId: 'requirement_1',
+      requiredSignerType: 'PARTICIPANT',
+      signerRoles: ['participant'],
       signOnce: false,
     });
-    prismaMock.events.findUnique.mockResolvedValueOnce({
-      id: "event_1",
-      organizationId: "org_1",
-    });
-    listOrganizationUsersScopeEventsMock.mockResolvedValueOnce([
-      { id: "event_1", userIds: [], teamIds: ["event_team_1"] },
+    prismaMock.events.findUnique.mockResolvedValue({ id: 'event_1', organizationId: 'org_1' });
+    listOrganizationUsersScopeEventsMock.mockResolvedValue([
+      { id: 'event_1', userIds: [], teamIds: ['event_team_snapshot_1'] },
     ]);
-    prismaMock.canonicalTeams.findMany.mockResolvedValueOnce([]);
-    prismaMock.eventRegistrations.findMany.mockResolvedValueOnce([
+    prismaMock.eventRegistrations.findMany.mockResolvedValue([
       {
-        eventId: "event_1",
-        registrantId: "event_team_1",
-        parentId: "canonical_team_1",
-        eventTeamId: "event_team_1",
-        registrantType: "TEAM",
-        rosterRole: "PARTICIPANT",
-        status: "ACTIVE",
+        registrantId: 'event_team_snapshot_1',
+        parentId: 'canonical_team_1',
+        eventTeamId: 'event_team_snapshot_1',
       },
     ]);
-    prismaMock.teamRegistrations.findMany.mockResolvedValueOnce([
-      { teamId: "canonical_team_1", userId: "player_1", status: "ACTIVE" },
+    prismaMock.canonicalTeams.findMany.mockResolvedValue([{ id: 'canonical_team_1' }]);
+    prismaMock.teamRegistrations.findMany.mockResolvedValue([
+      { teamId: 'canonical_team_1', userId: 'player_1' },
     ]);
 
     const response = await POST(
-      new NextRequest("http://localhost/api/organizations/org_1/documents/import", {
-        method: "POST",
-        body: JSON.stringify({
-          subjectUserId: "player_1",
-          templateId: "version_1",
-          documentName: "Team event waiver",
-          contentHash: "sha256:event-team-snapshot",
-          importedFileId: "file_1",
-          scopeType: "EVENT_PARTICIPATION",
-          scopeId: "event_1",
-          attestationAccepted: true,
-        }),
-      }),
-      { params: Promise.resolve({ id: "org_1" }) },
+      buildRequest({ scopeType: 'EVENT_PARTICIPATION', scopeId: 'event_1' }),
+      routeParams,
     );
 
     expect(response.status).toBe(201);
-    expect(txMock.signedDocuments.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          documentSubjectId: "document-subject:org_1:player_1",
-          scopeType: "EVENT_PARTICIPATION",
-          scopeId: "event_1",
-        }),
-      }),
-    );
-  });
+    expect(prismaMock.teamRegistrations.findMany).toHaveBeenCalledWith(expect.objectContaining({
 
-  it("derives combined signer roles for imported evidence", async () => {
+      where: expect.objectContaining({ teamId: { in: expect.arrayContaining(['canonical_team_1']) } }),
+    }));
+  });
+  it('accepts an EventTeam snapshot member shown as an Organization customer', async () => {
     prismaMock.templateDocuments.findUnique.mockResolvedValueOnce({
-      id: "version_1",
-      organizationId: "org_1",
-      documentRequirementId: "requirement_1",
-      requiredSignerType: "PARENT_GUARDIAN_CHILD",
-      signerRoles: [],
-      signOnce: true,
+      id: 'version_1',
+      organizationId: 'org_1',
+      documentRequirementId: 'requirement_1',
+      requiredSignerType: 'PARTICIPANT',
+      signerRoles: ['participant'],
+      signOnce: false,
     });
+    prismaMock.userData.findMany.mockResolvedValueOnce([{ id: 'snapshot_player_1' }]);
+    prismaMock.events.findUnique.mockResolvedValueOnce({ id: 'event_1', organizationId: 'org_1' });
+    prismaMock.eventRegistrations.findMany.mockResolvedValueOnce([
+      {
+        registrantId: 'event_team_snapshot_1',
+        parentId: 'canonical_team_1',
+        eventTeamId: 'event_team_snapshot_1',
+      },
+    ]);
+    prismaMock.canonicalTeams.findMany.mockResolvedValueOnce([{ id: 'canonical_team_1' }]);
+    prismaMock.teamRegistrations.findMany.mockResolvedValueOnce([]);
+    prismaMock.teams.findMany.mockResolvedValueOnce([{
+      playerIds: ['snapshot_player_1'],
+      captainId: 'snapshot_player_1',
+      managerId: '',
+      headCoachId: null,
+      coachIds: [],
+    }]);
+    listOrganizationUsersScopeEventsMock.mockResolvedValueOnce([
+      { id: 'event_1', userIds: [], teamIds: ['event_team_snapshot_1'] },
+    ]);
 
     const response = await POST(
-      new NextRequest(
-        "http://localhost/api/organizations/org_1/documents/import",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            subjectUserId: "player_1",
-            signerUserId: "player_1",
-            templateId: "version_1",
-            documentName: "Prior combined waiver",
-            contentHash: "sha256:combined",
-            importedFileId: "file_1",
-            scopeType: "ORGANIZATION",
-            scopeId: "org_1",
-            attestationAccepted: true,
-            signerRole: "Child",
-          }),
-          headers: { "Content-Type": "application/json" },
-        },
-      ),
-      { params: Promise.resolve({ id: "org_1" }) },
+      buildRequest({
+        subjectUserId: 'snapshot_player_1',
+        scopeType: 'EVENT_PARTICIPATION',
+        scopeId: 'event_1',
+      }),
+      routeParams,
     );
 
     expect(response.status).toBe(201);
-    expect(createDocumentRequirementSatisfactionMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        requiredSignerRoles: ["Parent/Guardian", "Child"],
-        completedSignerRoles: ["Parent/Guardian", "Child"],
-        signerRole: "Child",
+    expect(prismaMock.teams.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        id: { in: ['event_team_snapshot_1'] },
       }),
-      expect.anything(),
-    );
+    }));
   });
-
-  it("treats a signed import without a signer role as complete evidence for every required role", async () => {
+  it('accepts an EventTeam snapshot member registration without a team-level row', async () => {
     prismaMock.templateDocuments.findUnique.mockResolvedValueOnce({
-      id: "version_1",
-      organizationId: "org_1",
-      documentRequirementId: "requirement_1",
-      requiredSignerType: "PARENT_GUARDIAN_CHILD",
-      signerRoles: [],
-      signOnce: true,
+      id: 'version_1',
+      organizationId: 'org_1',
+      documentRequirementId: 'requirement_1',
+      requiredSignerType: 'PARTICIPANT',
+      signerRoles: ['participant'],
+      signOnce: false,
     });
+    prismaMock.userData.findMany.mockResolvedValueOnce([{ id: 'snapshot_player_1' }]);
+    prismaMock.events.findUnique.mockResolvedValueOnce({ id: 'event_1', organizationId: 'org_1' });
+    prismaMock.eventRegistrations.findMany.mockResolvedValueOnce([
+      {
+        registrantId: 'snapshot_player_1',
+        parentId: 'canonical_team_1',
+        eventTeamId: 'event_team_snapshot_1',
+      },
+    ]);
+    prismaMock.canonicalTeams.findMany.mockResolvedValueOnce([{ id: 'canonical_team_1' }]);
+    prismaMock.teamRegistrations.findMany.mockResolvedValueOnce([]);
+    prismaMock.teams.findMany.mockResolvedValueOnce([{
+      playerIds: ['snapshot_player_1'],
+      captainId: 'snapshot_player_1',
+      managerId: '',
+      headCoachId: null,
+      coachIds: [],
+    }]);
+    listOrganizationUsersScopeEventsMock.mockResolvedValueOnce([
+      { id: 'event_1', userIds: [], teamIds: ['event_team_snapshot_1'] },
+    ]);
 
     const response = await POST(
-      new NextRequest(
-        "http://localhost/api/organizations/org_1/documents/import",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            subjectUserId: "player_1",
-            templateId: "version_1",
-            documentName: "Prior combined waiver",
-            contentHash: "sha256:combined-no-role",
-            importedFileId: "file_1",
-            scopeType: "ORGANIZATION",
-            scopeId: "org_1",
-            attestationAccepted: true,
-          }),
-          headers: { "Content-Type": "application/json" },
-        },
-      ),
-      { params: Promise.resolve({ id: "org_1" }) },
+      buildRequest({
+        subjectUserId: 'snapshot_player_1',
+        scopeType: 'EVENT_PARTICIPATION',
+        scopeId: 'event_1',
+      }),
+      routeParams,
     );
 
     expect(response.status).toBe(201);
-    expect(createDocumentRequirementSatisfactionMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        requiredSignerRoles: ["Parent/Guardian", "Child"],
-        completedSignerRoles: ["Parent/Guardian", "Child"],
-        signerRole: undefined,
+    expect(prismaMock.eventRegistrations.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        OR: expect.arrayContaining([
+          { eventTeamId: { not: null } },
+        ]),
       }),
-      expect.anything(),
-    );
+    }));
   });
-
-  it("rejects an exact imported evidence duplicate", async () => {
-    txMock.signedDocuments.create.mockRejectedValue({ code: "P2002" });
+  it('accepts a canonical team staff member shown as an Organization customer', async () => {
+    prismaMock.userData.findMany.mockResolvedValueOnce([{ id: 'staff_1' }]);
+    prismaMock.canonicalTeams.findMany.mockResolvedValueOnce([{ id: 'canonical_team_1' }]);
+    prismaMock.teamStaffAssignments.findMany.mockResolvedValueOnce([
+      { userId: 'staff_1' },
+    ]);
 
     const response = await POST(
-      new NextRequest(
-        "http://localhost/api/organizations/org_1/documents/import",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            subjectUserId: "player_1",
-            templateId: "version_1",
-            documentName: "Prior waiver",
-            contentHash: "sha256:abc",
-            importedFileId: "file_1",
-            scopeType: "ORGANIZATION",
-            scopeId: "org_1",
-            attestationAccepted: true,
-          }),
-          headers: { "Content-Type": "application/json" },
-        },
-      ),
-      { params: Promise.resolve({ id: "org_1" }) },
+      buildRequest({ subjectUserId: 'staff_1' }),
+      routeParams,
     );
 
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(201);
+    expect(prismaMock.teamStaffAssignments.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        teamId: { in: ['canonical_team_1'] },
+      }),
+    }));
   });
 
-  it("rejects an import for a missing customer User before opening a transaction", async () => {
+
+  it('rejects a missing customer before opening the transaction', async () => {
     prismaMock.userData.findMany.mockResolvedValue([]);
 
-    const response = await POST(
-      new NextRequest(
-        "http://localhost/api/organizations/org_1/documents/import",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            subjectUserId: "missing_user",
-            templateId: "version_1",
-            documentName: "Prior waiver",
-            contentHash: "sha256:missing-user",
-            importedFileId: "file_1",
-            scopeType: "ORGANIZATION",
-            scopeId: "org_1",
-          }),
-          headers: { "Content-Type": "application/json" },
-        },
-      ),
-      { params: Promise.resolve({ id: "org_1" }) },
-    );
+    const response = await POST(buildRequest(), routeParams);
 
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual(
-      expect.objectContaining({
-        error: expect.stringContaining("User was not found"),
-      }),
-    );
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(getStorageProviderMock().putObject).not.toHaveBeenCalled();
+  });
+
+  it('rejects a User who is not an Organization customer', async () => {
+    listOrganizationUsersScopeEventsMock.mockResolvedValue([
+      { id: 'event_1', userIds: ['other_player'], teamIds: [] },
+    ]);
+
+    const response = await POST(buildRequest(), routeParams);
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toContain('not a customer');
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
   });
 
-  it("rejects an Event or File owned by another Organization", async () => {
-    prismaMock.templateDocuments.findUnique.mockResolvedValueOnce({
-      id: "version_1",
-      organizationId: "org_1",
-      documentRequirementId: "requirement_1",
-      requiredSignerType: "PARTICIPANT",
-      signerRoles: ["participant"],
-      signOnce: false,
-    });
-    prismaMock.events.findUnique.mockResolvedValue({
-      id: "event_2",
-      organizationId: "org_2",
-    });
-    prismaMock.file.findUnique.mockResolvedValue({
-      id: "file_2",
-      organizationId: "org_2",
-    });
+  it('accepts a rental Event host shown as an Organization customer', async () => {
+    prismaMock.userData.findMany.mockResolvedValue([{ id: 'host_1' }]);
+    listOrganizationUsersScopeEventsMock.mockResolvedValue([
+      {
+        id: 'rental_event_1',
+        organizationId: 'facility_1',
+        userIds: [],
+        teamIds: [],
+        hostId: 'host_1',
+        assistantHostIds: [],
+        officialIds: [],
+      },
+    ]);
 
     const response = await POST(
-      new NextRequest(
-        "http://localhost/api/organizations/org_1/documents/import",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            subjectUserId: "player_1",
-            templateId: "version_1",
-            documentName: "Prior waiver",
-            contentHash: "sha256:foreign-scope",
-            importedFileId: "file_2",
-            scopeType: "EVENT_PARTICIPATION",
-            scopeId: "event_2",
-          }),
-          headers: { "Content-Type": "application/json" },
-        },
-      ),
-      { params: Promise.resolve({ id: "org_1" }) },
-    );
-
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual(
-      expect.objectContaining({
-        error: "Document scope does not belong to this Organization.",
-      }),
-    );
-    expect(prismaMock.$transaction).not.toHaveBeenCalled();
-  });
-  it("stores subject-only evidence without inferring a signer", async () => {
-    const response = await POST(
-      new NextRequest(
-        "http://localhost/api/organizations/org_1/documents/import",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            subjectUserId: "player_1",
-            templateId: "version_1",
-            documentName: "Unsigned historical waiver",
-            contentHash: "sha256:subject-only",
-            importedFileId: "file_1",
-            scopeType: "ORGANIZATION",
-            scopeId: "org_1",
-            attestationAccepted: true,
-          }),
-          headers: { "Content-Type": "application/json" },
-        },
-      ),
-      { params: Promise.resolve({ id: "org_1" }) },
+      buildRequest({ subjectUserId: 'host_1' }),
+      routeParams,
     );
 
     expect(response.status).toBe(201);
-    expect(ensureDocumentSubjectMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userId: null,
-        hostId: null,
-        documentSubjectUserId: "player_1",
-      }),
-      expect.anything(),
-    );
-    expect(txMock.signedDocuments.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          userId: null,
-          signerUserId: null,
-          documentSubjectId: "document-subject:org_1:player_1",
-        }),
-      }),
-    );
-  });
-  it("rejects a User who is not an Organization customer", async () => {
-    listOrganizationUsersScopeEventsMock.mockResolvedValue([
-      { id: "event_1", userIds: ["other_player"], teamIds: [] },
-    ]);
-
-    const response = await POST(
-      new NextRequest("http://localhost/api/organizations/org_1/documents/import", {
-        method: "POST",
-        body: JSON.stringify({
-          subjectUserId: "player_1",
-          templateId: "version_1",
-          documentName: "Foreign customer",
-          contentHash: "sha256:foreign-customer",
-          importedFileId: "file_1",
-          scopeType: "ORGANIZATION",
-          scopeId: "org_1",
-        }),
-      }),
-      { params: Promise.resolve({ id: "org_1" }) },
-    );
-
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual(
-      expect.objectContaining({
-        error: "Document Subject is not a customer of this Organization.",
-      }),
-    );
-    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects a signer User who is outside the Organization customer scope", async () => {
-    prismaMock.userData.findMany.mockResolvedValue([
-      { id: "player_1" },
-      { id: "signer_2" },
-    ]);
-    listOrganizationUsersScopeEventsMock.mockResolvedValue([
-      { id: "event_1", userIds: ["player_1"], teamIds: [] },
-    ]);
-
-    const response = await POST(
-      new NextRequest("http://localhost/api/organizations/org_1/documents/import", {
-        method: "POST",
-        body: JSON.stringify({
-          subjectUserId: "player_1",
-          signerUserId: "signer_2",
-          templateId: "version_1",
-          documentName: "Foreign signer",
-          contentHash: "sha256:foreign-signer",
-          importedFileId: "file_1",
-          scopeType: "ORGANIZATION",
-          scopeId: "org_1",
-        }),
-      }),
-      { params: Promise.resolve({ id: "org_1" }) },
-    );
-
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual(
-      expect.objectContaining({
-        error: "Signer is not a customer of this Organization.",
-      }),
-    );
-    expect(prismaMock.$transaction).not.toHaveBeenCalled();
-  });
-
-  it("rejects a template whose Requirement belongs to another Organization", async () => {
-    prismaMock.documentRequirements.findUnique.mockResolvedValue({
-      id: "requirement_1",
-      organizationId: "org_2",
-    });
-
-    const response = await POST(
-      new NextRequest("http://localhost/api/organizations/org_1/documents/import", {
-        method: "POST",
-        body: JSON.stringify({
-          subjectUserId: "player_1",
-          templateId: "version_1",
-          documentName: "Foreign Requirement",
-          contentHash: "sha256:foreign-requirement",
-          importedFileId: "file_1",
-          scopeType: "ORGANIZATION",
-          scopeId: "org_1",
-        }),
-      }),
-      { params: Promise.resolve({ id: "org_1" }) },
-    );
-
-    expect(response.status).toBe(404);
-    expect(await response.json()).toEqual(
-      expect.objectContaining({ error: "Document template not found." }),
-    );
-    expect(prismaMock.$transaction).not.toHaveBeenCalled();
-  });
-
-  it("rejects Team scope for a non-sign-once Version", async () => {
+  it('rejects an Event owned by another Organization', async () => {
     prismaMock.templateDocuments.findUnique.mockResolvedValueOnce({
-      id: "version_1",
-      organizationId: "org_1",
-      documentRequirementId: "requirement_1",
-      requiredSignerType: "PARTICIPANT",
-      signerRoles: ["participant"],
+      id: 'version_1',
+      organizationId: 'org_1',
+      documentRequirementId: 'requirement_1',
+      requiredSignerType: 'PARTICIPANT',
+      signerRoles: ['participant'],
       signOnce: false,
     });
-    prismaMock.canonicalTeams.findUnique.mockResolvedValue({
-      id: "team_2",
-      organizationId: "org_2",
+    prismaMock.events.findUnique.mockResolvedValue({ id: 'event_2', organizationId: 'org_2' });
+
+    const response = await POST(
+      buildRequest({ scopeType: 'EVENT_PARTICIPATION', scopeId: 'event_2' }),
+      routeParams,
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toContain('does not belong');
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects a template whose Requirement belongs to another Organization', async () => {
+    prismaMock.documentRequirements.findUnique.mockResolvedValue({
+      id: 'requirement_1',
+      organizationId: 'org_2',
     });
 
-    const response = await POST(
-      new NextRequest("http://localhost/api/organizations/org_1/documents/import", {
-        method: "POST",
-        body: JSON.stringify({
-          subjectUserId: "player_1",
-          templateId: "version_1",
-          documentName: "Foreign team scope",
-          contentHash: "sha256:foreign-team",
-          importedFileId: "file_1",
-          scopeType: "TEAM_MEMBERSHIP",
-          scopeId: "team_2",
-        }),
-      }),
-      { params: Promise.resolve({ id: "org_1" }) },
-    );
+    const response = await POST(buildRequest(), routeParams);
 
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual(
-      expect.objectContaining({
-        error: "Non-sign-once Document Template Versions require Event Participation scope.",
-      }),
-    );
+    expect(response.status).toBe(404);
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
   });
 
-  it("rejects an import with a missing scope", async () => {
+  it('rejects a Team identifier as the Document Subject', async () => {
+    prismaMock.userData.findMany.mockResolvedValue([{ id: 'team_1' }]);
+    prismaMock.canonicalTeams.findMany.mockResolvedValue([{ id: 'team_1' }]);
+
     const response = await POST(
-      new NextRequest("http://localhost/api/organizations/org_1/documents/import", {
-        method: "POST",
-        body: JSON.stringify({
-          subjectUserId: "player_1",
-          templateId: "version_1",
-          documentName: "Missing scope",
-          contentHash: "sha256:missing-scope",
-          importedFileId: "file_1",
-        }),
-      }),
-      { params: Promise.resolve({ id: "org_1" }) },
+      buildRequest({ subjectUserId: 'team_1' }),
+      routeParams,
     );
 
     expect(response.status).toBe(400);
+    expect((await response.json()).error).toContain('must be a User');
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
   });
 
-  it("rejects a File owned by another Organization", async () => {
-    prismaMock.file.findUnique.mockResolvedValue({
-      id: "file_2",
-      organizationId: "org_2",
+  it('returns conflict and cleans up storage for an exact duplicate', async () => {
+    txMock.signedDocuments.create.mockRejectedValueOnce({ code: 'P2002' });
+
+    const response = await POST(buildRequest(), routeParams);
+
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toContain('already exists');
+    expect(getStorageProviderMock().deleteObject).toHaveBeenCalledWith({
+      key: 'private/org_1/signed.pdf',
+      bucket: 'private-bucket',
+    });
+    expect(notifyDocumentEvidenceChangeMock).not.toHaveBeenCalled();
+  });
+
+  it('rolls back the database result and cleans up storage when satisfaction fails', async () => {
+    createDocumentRequirementSatisfactionMock.mockRejectedValueOnce(new Error('Satisfaction write failed.'));
+
+    const response = await POST(buildRequest(), routeParams);
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toContain('Unable to import');
+    expect(getStorageProviderMock().deleteObject).toHaveBeenCalled();
+    expect(notifyDocumentEvidenceChangeMock).not.toHaveBeenCalled();
+  });
+  it('keeps committed evidence when notification delivery fails', async () => {
+    notifyDocumentEvidenceChangeMock.mockRejectedValueOnce(new Error('Notification delivery failed.'));
+
+    const response = await POST(buildRequest(), routeParams);
+
+    expect(response.status).toBe(201);
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(getStorageProviderMock().deleteObject).not.toHaveBeenCalled();
+  });
+
+
+  it('does not accept a signer identity from import input', async () => {
+    const form = buildRequest();
+    const body = await form.formData();
+    body.append('signerUserId', 'another_user');
+    const request = new NextRequest('http://localhost/api/organizations/org_1/documents/import', {
+      method: 'POST',
+      body,
     });
 
-    const response = await POST(
-      new NextRequest("http://localhost/api/organizations/org_1/documents/import", {
-        method: "POST",
-        body: JSON.stringify({
-          subjectUserId: "player_1",
-          templateId: "version_1",
-          documentName: "Foreign file",
-          contentHash: "sha256:foreign-file",
-          importedFileId: "file_2",
-          scopeType: "ORGANIZATION",
-          scopeId: "org_1",
-        }),
-      }),
-      { params: Promise.resolve({ id: "org_1" }) },
-    );
+    const response = await POST(request, routeParams);
 
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual(
-      expect.objectContaining({
-        error: "Imported File does not belong to this Organization.",
-      }),
-    );
-    expect(prismaMock.$transaction).not.toHaveBeenCalled();
-  });
-
-  it("rejects an import whose File is missing", async () => {
-    prismaMock.file.findUnique.mockResolvedValue(null);
-
-    const response = await POST(
-      new NextRequest("http://localhost/api/organizations/org_1/documents/import", {
-        method: "POST",
-        body: JSON.stringify({
-          subjectUserId: "player_1",
-          templateId: "version_1",
-          documentName: "Missing file",
-          contentHash: "sha256:missing-file",
-          importedFileId: "file_missing",
-          scopeType: "ORGANIZATION",
-          scopeId: "org_1",
-        }),
-      }),
-      { params: Promise.resolve({ id: "org_1" }) },
-    );
-
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual(
-      expect.objectContaining({
-        error: "Imported File does not belong to this Organization.",
-      }),
-    );
-    expect(prismaMock.$transaction).not.toHaveBeenCalled();
-  });
-
-  it("rejects a signer role that is not required by the selected Version", async () => {
-    const response = await POST(
-      new NextRequest("http://localhost/api/organizations/org_1/documents/import", {
-        method: "POST",
-        body: JSON.stringify({
-          subjectUserId: "player_1",
-          signerUserId: "player_1",
-          signerRole: "guardian",
-          templateId: "version_1",
-          documentName: "Invalid signer relationship",
-          contentHash: "sha256:invalid-signer-role",
-          importedFileId: "file_1",
-          scopeType: "ORGANIZATION",
-          scopeId: "org_1",
-        }),
-      }),
-      { params: Promise.resolve({ id: "org_1" }) },
-    );
-
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual(
-      expect.objectContaining({
-        error: "Signer role is not required by this Document Template Version.",
-      }),
-    );
-    expect(prismaMock.$transaction).not.toHaveBeenCalled();
-  });
-
-  it("rejects a host that is not the Document Subject", async () => {
-    const response = await POST(
-      new NextRequest("http://localhost/api/organizations/org_1/documents/import", {
-        method: "POST",
-        body: JSON.stringify({
-          subjectUserId: "player_1",
-          signerUserId: "player_1",
-          hostId: "other_player",
-          templateId: "version_1",
-          documentName: "Invalid host relationship",
-          contentHash: "sha256:invalid-host",
-          importedFileId: "file_1",
-          scopeType: "ORGANIZATION",
-          scopeId: "org_1",
-        }),
-      }),
-      { params: Promise.resolve({ id: "org_1" }) },
-    );
-
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual(
-      expect.objectContaining({ error: "hostId must match subjectUserId." }),
-    );
-    expect(prismaMock.$transaction).not.toHaveBeenCalled();
-  });
-
-  it("rejects a Team identifier as a Document Subject", async () => {
-    prismaMock.userData.findMany.mockResolvedValue([{ id: "team_1" }]);
-    prismaMock.canonicalTeams.findUnique.mockResolvedValue({
-      id: "team_1",
-      organizationId: "org_1",
+    expect(response.status).toBe(201);
+    expect(txMock.signedDocuments.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ signerUserId: null, userId: null }),
     });
-    prismaMock.canonicalTeams.findMany.mockResolvedValue([{ id: "team_1" }]);
-
-    const response = await POST(
-      new NextRequest("http://localhost/api/organizations/org_1/documents/import", {
-        method: "POST",
-        body: JSON.stringify({
-          subjectUserId: "team_1",
-          templateId: "version_1",
-          documentName: "Team subject",
-          contentHash: "sha256:team-subject",
-          importedFileId: "file_1",
-          scopeType: "ORGANIZATION",
-          scopeId: "org_1",
-        }),
-      }),
-      { params: Promise.resolve({ id: "org_1" }) },
-    );
-
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual(
-      expect.objectContaining({
-        error: "Document Subject must be a User, not a Team.",
-      }),
-    );
-    expect(prismaMock.$transaction).not.toHaveBeenCalled();
-  });
-
-  it("returns a client error when Satisfaction creation fails", async () => {
-    createDocumentRequirementSatisfactionMock.mockRejectedValue(
-      new Error("Satisfaction write failed."),
-    );
-
-    const response = await POST(
-      new NextRequest("http://localhost/api/organizations/org_1/documents/import", {
-        method: "POST",
-        body: JSON.stringify({
-          subjectUserId: "player_1",
-          templateId: "version_1",
-          documentName: "Atomic import",
-          contentHash: "sha256:atomic-import",
-          importedFileId: "file_1",
-          scopeType: "ORGANIZATION",
-          scopeId: "org_1",
-          attestationAccepted: true,
-        }),
-      }),
-      { params: Promise.resolve({ id: "org_1" }) },
-    );
-
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual(
-      expect.objectContaining({ error: "Satisfaction write failed." }),
-    );
-    expect(ensureDocumentSubjectMock).toHaveBeenCalled();
-    expect(txMock.signedDocuments.create).toHaveBeenCalled();
-    expect(appendDocumentEvidenceAuditEventMock).not.toHaveBeenCalled();
-  });
-  it("returns a client error when audit creation fails", async () => {
-    appendDocumentEvidenceAuditEventMock.mockRejectedValue(
-      new Error("Audit write failed."),
-    );
-
-    const response = await POST(
-      new NextRequest("http://localhost/api/organizations/org_1/documents/import", {
-        method: "POST",
-        body: JSON.stringify({
-          subjectUserId: "player_1",
-          templateId: "version_1",
-          documentName: "Atomic audit import",
-          contentHash: "sha256:atomic-audit",
-          importedFileId: "file_1",
-          scopeType: "ORGANIZATION",
-          scopeId: "org_1",
-          attestationAccepted: true,
-        }),
-      }),
-      { params: Promise.resolve({ id: "org_1" }) },
-    );
-
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual(
-      expect.objectContaining({ error: "Audit write failed." }),
-    );
-    expect(ensureDocumentSubjectMock).toHaveBeenCalled();
-    expect(txMock.signedDocuments.create).toHaveBeenCalled();
   });
 });

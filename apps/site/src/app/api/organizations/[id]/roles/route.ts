@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/permissions';
 import { ORG_PERMISSIONS, normalizeOrganizationPermissions } from '@/lib/organizationPermissions';
-import { hasOrgPermission } from '@/server/accessControl';
+import { hasDocumentEvidenceOwnerAccess, hasOrgPermission } from '@/server/accessControl';
 import { ensureDefaultOrganizationRoles, getOrganizationRolesWithPermissions } from '@/server/organizationRoles';
 
 export const dynamic = 'force-dynamic';
@@ -54,6 +54,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   const permissions = normalizeOrganizationPermissions(parsed.data.permissions);
+  if (
+    permissions.some((permission) => (
+      permission === ORG_PERMISSIONS.DOCUMENTS_VOID
+      || permission === ORG_PERMISSIONS.DOCUMENTS_AUDIT_VIEW
+    ))
+    && !(await hasDocumentEvidenceOwnerAccess(session, org))
+  ) {
+    return NextResponse.json(
+      { error: 'Only the Organization owner or platform administrator can grant document void or audit access.' },
+      { status: 403 },
+    );
+  }
   try {
     const role = await prisma.$transaction(async (tx) => {
       await ensureDefaultOrganizationRoles(tx, id);

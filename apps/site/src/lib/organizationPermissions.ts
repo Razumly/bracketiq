@@ -12,6 +12,9 @@ export const ORG_PERMISSIONS = {
   PAYMENTS_MANAGE: 'payments.manage',
   REFUNDS_MANAGE: 'refunds.manage',
   TEMPLATES_MANAGE: 'templates.manage',
+  DOCUMENTS_IMPORT: 'documents.import',
+  DOCUMENTS_VOID: 'documents.void',
+  DOCUMENTS_AUDIT_VIEW: 'documents.audit',
   USERS_VIEW: 'users.view',
 } as const;
 
@@ -47,6 +50,7 @@ const MANAGEMENT_PERMISSIONS: OrganizationPermission[] = [
   ORG_PERMISSIONS.PAYMENTS_MANAGE,
   ORG_PERMISSIONS.REFUNDS_MANAGE,
   ORG_PERMISSIONS.TEMPLATES_MANAGE,
+  ORG_PERMISSIONS.DOCUMENTS_IMPORT,
   ORG_PERMISSIONS.USERS_VIEW,
 ];
 
@@ -105,6 +109,21 @@ export const ORGANIZATION_PERMISSION_OPTIONS: OrganizationPermissionOption[] = [
     value: ORG_PERMISSIONS.TEMPLATES_MANAGE,
     label: 'Manage templates',
     description: 'Create and update organization document and event templates.',
+  },
+  {
+    value: ORG_PERMISSIONS.DOCUMENTS_IMPORT,
+    label: 'Import signed documents',
+    description: 'Attach externally completed signed documents to organization customers.',
+  },
+  {
+    value: ORG_PERMISSIONS.DOCUMENTS_VOID,
+    label: 'Void imported documents',
+    description: 'Void incorrect imported document evidence without deleting its history.',
+  },
+  {
+    value: ORG_PERMISSIONS.DOCUMENTS_AUDIT_VIEW,
+    label: 'View document audit history',
+    description: 'View private import and void audit details.',
   },
   {
     value: ORG_PERMISSIONS.USERS_VIEW,

@@ -211,6 +211,23 @@ export const hasOrgPermission = async (
 
   return false;
 };
+export const hasDocumentEvidenceOwnerAccess = async (
+  session: SessionLike,
+  organization: OrganizationAccessRecord | null | undefined,
+  client: OrganizationLookupClient = prisma,
+): Promise<boolean> => {
+  if (session.isAdmin || !organization) {
+    return Boolean(session.isAdmin);
+  }
+  if (organization.ownerId === session.userId) {
+    return true;
+  }
+  if (await hasRazumlyAdminAccess(session, client)) {
+    return true;
+  }
+  return false;
+};
+
 
 export const hasOrganizationStaffAccess = async (
   session: SessionLike,
