@@ -183,6 +183,7 @@ export const captureAffiliateApprovalLogoEvidence = async (
       data: {
         id: createId(),
         intakeId: intake.id,
+        supplySourceId: intake.supplySourceId ?? null,
         url: pageUrl,
         canonicalUrl: pageUrl,
         urlKey: pageKey,
@@ -194,6 +195,13 @@ export const captureAffiliateApprovalLogoEvidence = async (
       },
     });
   }
+  if (intake.supplySourceId && !page.supplySourceId) {
+    await pages.update({
+      where: { id: page.id },
+      data: { supplySourceId: intake.supplySourceId },
+    });
+    page = { ...page, supplySourceId: intake.supplySourceId };
+  }
 
   const runId = createId();
   const captureClient = dependencies.captureClient ?? createAffiliateSourceCaptureClient('SCRAPINGDOG');
@@ -203,6 +211,7 @@ export const captureAffiliateApprovalLogoEvidence = async (
     data: {
       id: runId,
       intakeId: intake.id,
+      supplySourceId: intake.supplySourceId ?? null,
       requestedPageIds: [page.id],
       requestedByUserId: null,
       provider: captureClient.provider,
@@ -220,7 +229,7 @@ export const captureAffiliateApprovalLogoEvidence = async (
         claimGeneration: input.claimGeneration,
         priorRunId: intake.lastRunId ?? null,
       },
-      },
+    },
     });
 
   try {
@@ -232,6 +241,7 @@ export const captureAffiliateApprovalLogoEvidence = async (
     const robotsDecision = evaluateRobotsPath(robotsText, pageUrl);
     await persistArtifact({
       intakeId: intake.id,
+      supplySourceId: intake.supplySourceId ?? null,
       pageId: page.id,
       runId,
       kind: 'ROBOTS',
@@ -289,6 +299,7 @@ export const captureAffiliateApprovalLogoEvidence = async (
     };
     const artifactBase = {
       intakeId: intake.id,
+      supplySourceId: intake.supplySourceId ?? null,
       pageId: page.id,
       runId,
       sourceUrl: pageUrl,
@@ -357,7 +368,7 @@ export const captureAffiliateApprovalLogoEvidence = async (
     }
     const logoArtifact = await persistArtifact({
       intakeId: intake.id,
-      pageId: page.id,
+      supplySourceId: intake.supplySourceId ?? null,
       runId,
       kind: 'LOGO_CANDIDATE',
       data: logo.body,

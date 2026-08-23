@@ -339,6 +339,8 @@ const queueCoverageMappingRepair = async (options: {
   finalData: Record<string, unknown>;
 }): Promise<CoverageRepairResult> => {
   const { database, intakeId, job, result, now, createIdentifier, finalData } = options;
+  const intake = await database.intakes.findUnique({ where: { id: intakeId } });
+  const supplySourceId = stringValue(intake?.supplySourceId);
   const pending = await database.mappingJobs.findFirst({
     where: { intakeId, status: { in: ['QUEUED', 'CLAIMED'] } },
     orderBy: { createdAt: 'desc' },
@@ -421,6 +423,7 @@ const queueCoverageMappingRepair = async (options: {
           data: {
             id: createIdentifier(),
             intakeId,
+            supplySourceId,
             status: 'QUEUED',
             resultSummary: {
               mappingRepairHistory: [{
@@ -1299,6 +1302,18 @@ export const storeAffiliateManualBrowserEvidence = async (input: {
   if (!intake || !page || page.intakeId !== intakeId) {
     throw new Error('Manual evidence page does not belong to the failed intake.');
   }
+  const supplySourceId = stringValue(page.supplySourceId) ?? stringValue(intake.supplySourceId);
+  if (
+    supplySourceId
+    && !page.supplySourceId
+    && typeof database.pages.update === 'function'
+  ) {
+    await database.pages.update({
+      where: { id: page.id },
+      data: { supplySourceId },
+    });
+    page.supplySourceId = supplySourceId;
+  }
   if (intake.complianceStatus !== 'ALLOWED' || page.robotsStatus === 'DISALLOWED') {
     throw new Error('Manual evidence requires an allowed intake policy and no robots prohibition.');
   }
@@ -1316,6 +1331,7 @@ export const storeAffiliateManualBrowserEvidence = async (input: {
     affiliateDiscoveryPolicyKeyForUrl(sourceUrl) !== expectedPolicyKey
     || affiliateDiscoveryPolicyKeyForUrl(finalUrl) !== expectedPolicyKey
   ) {
+    throw new Error('Manual evidence URLs must remain within the claimed source policy.');
   }
   const html = input.html.toString('utf8');
   const quality = evaluateAffiliateHtmlQuality(html, finalUrl);
@@ -1340,6 +1356,7 @@ export const storeAffiliateManualBrowserEvidence = async (input: {
       data: {
         id: manualRunId,
         intakeId,
+        supplySourceId,
         requestedPageIds: [page.id],
         requestedByUserId: `coverage-agent:${input.agentId}`,
         provider: 'MANUAL_BROWSER',
@@ -1368,6 +1385,7 @@ export const storeAffiliateManualBrowserEvidence = async (input: {
   };
   const base = {
     intakeId,
+    supplySourceId,
     pageId: page.id,
     runId: manualRunId,
     sourceUrl,

@@ -27,10 +27,14 @@ export type AggregateAffiliateScrapeSources = {
 }
 
 export type AffiliateScrapeSourcesAvgAggregateOutputType = {
+  lifecycleGeneration: number | null
+  activeSupplyContractVersion: number | null
   scrapeIntervalMinutes: number | null
 }
 
 export type AffiliateScrapeSourcesSumAggregateOutputType = {
+  lifecycleGeneration: number | null
+  activeSupplyContractVersion: number | null
   scrapeIntervalMinutes: number | null
 }
 
@@ -46,7 +50,11 @@ export type AffiliateScrapeSourcesMinAggregateOutputType = {
   targetKind: string | null
   status: string | null
   activeMappingId: string | null
+  supplySourceId: string | null
   lastScrapeRunId: string | null
+  lifecycleGeneration: number | null
+  activeSupplyContractVersion: number | null
+  activeSupplyContractHash: string | null
   lastScrapedAt: Date | null
   autoScrapeEnabled: boolean | null
   scrapeIntervalMinutes: number | null
@@ -65,7 +73,11 @@ export type AffiliateScrapeSourcesMaxAggregateOutputType = {
   targetKind: string | null
   status: string | null
   activeMappingId: string | null
+  supplySourceId: string | null
   lastScrapeRunId: string | null
+  lifecycleGeneration: number | null
+  activeSupplyContractVersion: number | null
+  activeSupplyContractHash: string | null
   lastScrapedAt: Date | null
   autoScrapeEnabled: boolean | null
   scrapeIntervalMinutes: number | null
@@ -84,7 +96,11 @@ export type AffiliateScrapeSourcesCountAggregateOutputType = {
   targetKind: number
   status: number
   activeMappingId: number
+  supplySourceId: number
   lastScrapeRunId: number
+  lifecycleGeneration: number
+  activeSupplyContractVersion: number
+  activeSupplyContractHash: number
   lastScrapedAt: number
   autoScrapeEnabled: number
   scrapeIntervalMinutes: number
@@ -95,10 +111,14 @@ export type AffiliateScrapeSourcesCountAggregateOutputType = {
 
 
 export type AffiliateScrapeSourcesAvgAggregateInputType = {
+  lifecycleGeneration?: true
+  activeSupplyContractVersion?: true
   scrapeIntervalMinutes?: true
 }
 
 export type AffiliateScrapeSourcesSumAggregateInputType = {
+  lifecycleGeneration?: true
+  activeSupplyContractVersion?: true
   scrapeIntervalMinutes?: true
 }
 
@@ -114,7 +134,11 @@ export type AffiliateScrapeSourcesMinAggregateInputType = {
   targetKind?: true
   status?: true
   activeMappingId?: true
+  supplySourceId?: true
   lastScrapeRunId?: true
+  lifecycleGeneration?: true
+  activeSupplyContractVersion?: true
+  activeSupplyContractHash?: true
   lastScrapedAt?: true
   autoScrapeEnabled?: true
   scrapeIntervalMinutes?: true
@@ -133,7 +157,11 @@ export type AffiliateScrapeSourcesMaxAggregateInputType = {
   targetKind?: true
   status?: true
   activeMappingId?: true
+  supplySourceId?: true
   lastScrapeRunId?: true
+  lifecycleGeneration?: true
+  activeSupplyContractVersion?: true
+  activeSupplyContractHash?: true
   lastScrapedAt?: true
   autoScrapeEnabled?: true
   scrapeIntervalMinutes?: true
@@ -152,7 +180,11 @@ export type AffiliateScrapeSourcesCountAggregateInputType = {
   targetKind?: true
   status?: true
   activeMappingId?: true
+  supplySourceId?: true
   lastScrapeRunId?: true
+  lifecycleGeneration?: true
+  activeSupplyContractVersion?: true
+  activeSupplyContractHash?: true
   lastScrapedAt?: true
   autoScrapeEnabled?: true
   scrapeIntervalMinutes?: true
@@ -259,7 +291,11 @@ export type AffiliateScrapeSourcesGroupByOutputType = {
   targetKind: string
   status: string
   activeMappingId: string | null
+  supplySourceId: string | null
   lastScrapeRunId: string | null
+  lifecycleGeneration: number
+  activeSupplyContractVersion: number | null
+  activeSupplyContractHash: string | null
   lastScrapedAt: Date | null
   autoScrapeEnabled: boolean
   scrapeIntervalMinutes: number
@@ -302,7 +338,11 @@ export type AffiliateScrapeSourcesWhereInput = {
   targetKind?: Prisma.StringFilter<"AffiliateScrapeSources"> | string
   status?: Prisma.StringFilter<"AffiliateScrapeSources"> | string
   activeMappingId?: Prisma.StringNullableFilter<"AffiliateScrapeSources"> | string | null
+  supplySourceId?: Prisma.StringNullableFilter<"AffiliateScrapeSources"> | string | null
   lastScrapeRunId?: Prisma.StringNullableFilter<"AffiliateScrapeSources"> | string | null
+  lifecycleGeneration?: Prisma.IntFilter<"AffiliateScrapeSources"> | number
+  activeSupplyContractVersion?: Prisma.IntNullableFilter<"AffiliateScrapeSources"> | number | null
+  activeSupplyContractHash?: Prisma.StringNullableFilter<"AffiliateScrapeSources"> | string | null
   lastScrapedAt?: Prisma.DateTimeNullableFilter<"AffiliateScrapeSources"> | Date | string | null
   autoScrapeEnabled?: Prisma.BoolFilter<"AffiliateScrapeSources"> | boolean
   scrapeIntervalMinutes?: Prisma.IntFilter<"AffiliateScrapeSources"> | number
@@ -322,7 +362,11 @@ export type AffiliateScrapeSourcesOrderByWithRelationInput = {
   targetKind?: Prisma.SortOrder
   status?: Prisma.SortOrder
   activeMappingId?: Prisma.SortOrderInput | Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrderInput | Prisma.SortOrder
   lastScrapeRunId?: Prisma.SortOrderInput | Prisma.SortOrder
+  lifecycleGeneration?: Prisma.SortOrder
+  activeSupplyContractVersion?: Prisma.SortOrderInput | Prisma.SortOrder
+  activeSupplyContractHash?: Prisma.SortOrderInput | Prisma.SortOrder
   lastScrapedAt?: Prisma.SortOrderInput | Prisma.SortOrder
   autoScrapeEnabled?: Prisma.SortOrder
   scrapeIntervalMinutes?: Prisma.SortOrder
@@ -345,7 +389,11 @@ export type AffiliateScrapeSourcesWhereUniqueInput = Prisma.AtLeast<{
   targetKind?: Prisma.StringFilter<"AffiliateScrapeSources"> | string
   status?: Prisma.StringFilter<"AffiliateScrapeSources"> | string
   activeMappingId?: Prisma.StringNullableFilter<"AffiliateScrapeSources"> | string | null
+  supplySourceId?: Prisma.StringNullableFilter<"AffiliateScrapeSources"> | string | null
   lastScrapeRunId?: Prisma.StringNullableFilter<"AffiliateScrapeSources"> | string | null
+  lifecycleGeneration?: Prisma.IntFilter<"AffiliateScrapeSources"> | number
+  activeSupplyContractVersion?: Prisma.IntNullableFilter<"AffiliateScrapeSources"> | number | null
+  activeSupplyContractHash?: Prisma.StringNullableFilter<"AffiliateScrapeSources"> | string | null
   lastScrapedAt?: Prisma.DateTimeNullableFilter<"AffiliateScrapeSources"> | Date | string | null
   autoScrapeEnabled?: Prisma.BoolFilter<"AffiliateScrapeSources"> | boolean
   scrapeIntervalMinutes?: Prisma.IntFilter<"AffiliateScrapeSources"> | number
@@ -365,7 +413,11 @@ export type AffiliateScrapeSourcesOrderByWithAggregationInput = {
   targetKind?: Prisma.SortOrder
   status?: Prisma.SortOrder
   activeMappingId?: Prisma.SortOrderInput | Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrderInput | Prisma.SortOrder
   lastScrapeRunId?: Prisma.SortOrderInput | Prisma.SortOrder
+  lifecycleGeneration?: Prisma.SortOrder
+  activeSupplyContractVersion?: Prisma.SortOrderInput | Prisma.SortOrder
+  activeSupplyContractHash?: Prisma.SortOrderInput | Prisma.SortOrder
   lastScrapedAt?: Prisma.SortOrderInput | Prisma.SortOrder
   autoScrapeEnabled?: Prisma.SortOrder
   scrapeIntervalMinutes?: Prisma.SortOrder
@@ -393,7 +445,11 @@ export type AffiliateScrapeSourcesScalarWhereWithAggregatesInput = {
   targetKind?: Prisma.StringWithAggregatesFilter<"AffiliateScrapeSources"> | string
   status?: Prisma.StringWithAggregatesFilter<"AffiliateScrapeSources"> | string
   activeMappingId?: Prisma.StringNullableWithAggregatesFilter<"AffiliateScrapeSources"> | string | null
+  supplySourceId?: Prisma.StringNullableWithAggregatesFilter<"AffiliateScrapeSources"> | string | null
   lastScrapeRunId?: Prisma.StringNullableWithAggregatesFilter<"AffiliateScrapeSources"> | string | null
+  lifecycleGeneration?: Prisma.IntWithAggregatesFilter<"AffiliateScrapeSources"> | number
+  activeSupplyContractVersion?: Prisma.IntNullableWithAggregatesFilter<"AffiliateScrapeSources"> | number | null
+  activeSupplyContractHash?: Prisma.StringNullableWithAggregatesFilter<"AffiliateScrapeSources"> | string | null
   lastScrapedAt?: Prisma.DateTimeNullableWithAggregatesFilter<"AffiliateScrapeSources"> | Date | string | null
   autoScrapeEnabled?: Prisma.BoolWithAggregatesFilter<"AffiliateScrapeSources"> | boolean
   scrapeIntervalMinutes?: Prisma.IntWithAggregatesFilter<"AffiliateScrapeSources"> | number
@@ -413,7 +469,11 @@ export type AffiliateScrapeSourcesCreateInput = {
   targetKind?: string
   status?: string
   activeMappingId?: string | null
+  supplySourceId?: string | null
   lastScrapeRunId?: string | null
+  lifecycleGeneration?: number
+  activeSupplyContractVersion?: number | null
+  activeSupplyContractHash?: string | null
   lastScrapedAt?: Date | string | null
   autoScrapeEnabled?: boolean
   scrapeIntervalMinutes?: number
@@ -433,7 +493,11 @@ export type AffiliateScrapeSourcesUncheckedCreateInput = {
   targetKind?: string
   status?: string
   activeMappingId?: string | null
+  supplySourceId?: string | null
   lastScrapeRunId?: string | null
+  lifecycleGeneration?: number
+  activeSupplyContractVersion?: number | null
+  activeSupplyContractHash?: string | null
   lastScrapedAt?: Date | string | null
   autoScrapeEnabled?: boolean
   scrapeIntervalMinutes?: number
@@ -453,7 +517,11 @@ export type AffiliateScrapeSourcesUpdateInput = {
   targetKind?: Prisma.StringFieldUpdateOperationsInput | string
   status?: Prisma.StringFieldUpdateOperationsInput | string
   activeMappingId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  supplySourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   lastScrapeRunId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  lifecycleGeneration?: Prisma.IntFieldUpdateOperationsInput | number
+  activeSupplyContractVersion?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  activeSupplyContractHash?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   lastScrapedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   autoScrapeEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
   scrapeIntervalMinutes?: Prisma.IntFieldUpdateOperationsInput | number
@@ -473,7 +541,11 @@ export type AffiliateScrapeSourcesUncheckedUpdateInput = {
   targetKind?: Prisma.StringFieldUpdateOperationsInput | string
   status?: Prisma.StringFieldUpdateOperationsInput | string
   activeMappingId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  supplySourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   lastScrapeRunId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  lifecycleGeneration?: Prisma.IntFieldUpdateOperationsInput | number
+  activeSupplyContractVersion?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  activeSupplyContractHash?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   lastScrapedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   autoScrapeEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
   scrapeIntervalMinutes?: Prisma.IntFieldUpdateOperationsInput | number
@@ -493,7 +565,11 @@ export type AffiliateScrapeSourcesCreateManyInput = {
   targetKind?: string
   status?: string
   activeMappingId?: string | null
+  supplySourceId?: string | null
   lastScrapeRunId?: string | null
+  lifecycleGeneration?: number
+  activeSupplyContractVersion?: number | null
+  activeSupplyContractHash?: string | null
   lastScrapedAt?: Date | string | null
   autoScrapeEnabled?: boolean
   scrapeIntervalMinutes?: number
@@ -513,7 +589,11 @@ export type AffiliateScrapeSourcesUpdateManyMutationInput = {
   targetKind?: Prisma.StringFieldUpdateOperationsInput | string
   status?: Prisma.StringFieldUpdateOperationsInput | string
   activeMappingId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  supplySourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   lastScrapeRunId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  lifecycleGeneration?: Prisma.IntFieldUpdateOperationsInput | number
+  activeSupplyContractVersion?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  activeSupplyContractHash?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   lastScrapedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   autoScrapeEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
   scrapeIntervalMinutes?: Prisma.IntFieldUpdateOperationsInput | number
@@ -533,7 +613,11 @@ export type AffiliateScrapeSourcesUncheckedUpdateManyInput = {
   targetKind?: Prisma.StringFieldUpdateOperationsInput | string
   status?: Prisma.StringFieldUpdateOperationsInput | string
   activeMappingId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  supplySourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   lastScrapeRunId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  lifecycleGeneration?: Prisma.IntFieldUpdateOperationsInput | number
+  activeSupplyContractVersion?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  activeSupplyContractHash?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   lastScrapedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   autoScrapeEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
   scrapeIntervalMinutes?: Prisma.IntFieldUpdateOperationsInput | number
@@ -553,7 +637,11 @@ export type AffiliateScrapeSourcesCountOrderByAggregateInput = {
   targetKind?: Prisma.SortOrder
   status?: Prisma.SortOrder
   activeMappingId?: Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrder
   lastScrapeRunId?: Prisma.SortOrder
+  lifecycleGeneration?: Prisma.SortOrder
+  activeSupplyContractVersion?: Prisma.SortOrder
+  activeSupplyContractHash?: Prisma.SortOrder
   lastScrapedAt?: Prisma.SortOrder
   autoScrapeEnabled?: Prisma.SortOrder
   scrapeIntervalMinutes?: Prisma.SortOrder
@@ -562,6 +650,8 @@ export type AffiliateScrapeSourcesCountOrderByAggregateInput = {
 }
 
 export type AffiliateScrapeSourcesAvgOrderByAggregateInput = {
+  lifecycleGeneration?: Prisma.SortOrder
+  activeSupplyContractVersion?: Prisma.SortOrder
   scrapeIntervalMinutes?: Prisma.SortOrder
 }
 
@@ -577,7 +667,11 @@ export type AffiliateScrapeSourcesMaxOrderByAggregateInput = {
   targetKind?: Prisma.SortOrder
   status?: Prisma.SortOrder
   activeMappingId?: Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrder
   lastScrapeRunId?: Prisma.SortOrder
+  lifecycleGeneration?: Prisma.SortOrder
+  activeSupplyContractVersion?: Prisma.SortOrder
+  activeSupplyContractHash?: Prisma.SortOrder
   lastScrapedAt?: Prisma.SortOrder
   autoScrapeEnabled?: Prisma.SortOrder
   scrapeIntervalMinutes?: Prisma.SortOrder
@@ -596,7 +690,11 @@ export type AffiliateScrapeSourcesMinOrderByAggregateInput = {
   targetKind?: Prisma.SortOrder
   status?: Prisma.SortOrder
   activeMappingId?: Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrder
   lastScrapeRunId?: Prisma.SortOrder
+  lifecycleGeneration?: Prisma.SortOrder
+  activeSupplyContractVersion?: Prisma.SortOrder
+  activeSupplyContractHash?: Prisma.SortOrder
   lastScrapedAt?: Prisma.SortOrder
   autoScrapeEnabled?: Prisma.SortOrder
   scrapeIntervalMinutes?: Prisma.SortOrder
@@ -604,6 +702,8 @@ export type AffiliateScrapeSourcesMinOrderByAggregateInput = {
 }
 
 export type AffiliateScrapeSourcesSumOrderByAggregateInput = {
+  lifecycleGeneration?: Prisma.SortOrder
+  activeSupplyContractVersion?: Prisma.SortOrder
   scrapeIntervalMinutes?: Prisma.SortOrder
 }
 
@@ -621,7 +721,11 @@ export type AffiliateScrapeSourcesSelect<ExtArgs extends runtime.Types.Extension
   targetKind?: boolean
   status?: boolean
   activeMappingId?: boolean
+  supplySourceId?: boolean
   lastScrapeRunId?: boolean
+  lifecycleGeneration?: boolean
+  activeSupplyContractVersion?: boolean
+  activeSupplyContractHash?: boolean
   lastScrapedAt?: boolean
   autoScrapeEnabled?: boolean
   scrapeIntervalMinutes?: boolean
@@ -641,7 +745,11 @@ export type AffiliateScrapeSourcesSelectCreateManyAndReturn<ExtArgs extends runt
   targetKind?: boolean
   status?: boolean
   activeMappingId?: boolean
+  supplySourceId?: boolean
   lastScrapeRunId?: boolean
+  lifecycleGeneration?: boolean
+  activeSupplyContractVersion?: boolean
+  activeSupplyContractHash?: boolean
   lastScrapedAt?: boolean
   autoScrapeEnabled?: boolean
   scrapeIntervalMinutes?: boolean
@@ -661,7 +769,11 @@ export type AffiliateScrapeSourcesSelectUpdateManyAndReturn<ExtArgs extends runt
   targetKind?: boolean
   status?: boolean
   activeMappingId?: boolean
+  supplySourceId?: boolean
   lastScrapeRunId?: boolean
+  lifecycleGeneration?: boolean
+  activeSupplyContractVersion?: boolean
+  activeSupplyContractHash?: boolean
   lastScrapedAt?: boolean
   autoScrapeEnabled?: boolean
   scrapeIntervalMinutes?: boolean
@@ -681,7 +793,11 @@ export type AffiliateScrapeSourcesSelectScalar = {
   targetKind?: boolean
   status?: boolean
   activeMappingId?: boolean
+  supplySourceId?: boolean
   lastScrapeRunId?: boolean
+  lifecycleGeneration?: boolean
+  activeSupplyContractVersion?: boolean
+  activeSupplyContractHash?: boolean
   lastScrapedAt?: boolean
   autoScrapeEnabled?: boolean
   scrapeIntervalMinutes?: boolean
@@ -689,7 +805,7 @@ export type AffiliateScrapeSourcesSelectScalar = {
   metadata?: boolean
 }
 
-export type AffiliateScrapeSourcesOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "name" | "sourceKey" | "organizationId" | "baseUrl" | "listUrl" | "targetKind" | "status" | "activeMappingId" | "lastScrapeRunId" | "lastScrapedAt" | "autoScrapeEnabled" | "scrapeIntervalMinutes" | "notes" | "metadata", ExtArgs["result"]["affiliateScrapeSources"]>
+export type AffiliateScrapeSourcesOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "name" | "sourceKey" | "organizationId" | "baseUrl" | "listUrl" | "targetKind" | "status" | "activeMappingId" | "supplySourceId" | "lastScrapeRunId" | "lifecycleGeneration" | "activeSupplyContractVersion" | "activeSupplyContractHash" | "lastScrapedAt" | "autoScrapeEnabled" | "scrapeIntervalMinutes" | "notes" | "metadata", ExtArgs["result"]["affiliateScrapeSources"]>
 
 export type $AffiliateScrapeSourcesPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "AffiliateScrapeSources"
@@ -706,7 +822,11 @@ export type $AffiliateScrapeSourcesPayload<ExtArgs extends runtime.Types.Extensi
     targetKind: string
     status: string
     activeMappingId: string | null
+    supplySourceId: string | null
     lastScrapeRunId: string | null
+    lifecycleGeneration: number
+    activeSupplyContractVersion: number | null
+    activeSupplyContractHash: string | null
     lastScrapedAt: Date | null
     autoScrapeEnabled: boolean
     scrapeIntervalMinutes: number
@@ -1146,7 +1266,11 @@ export interface AffiliateScrapeSourcesFieldRefs {
   readonly targetKind: Prisma.FieldRef<"AffiliateScrapeSources", 'String'>
   readonly status: Prisma.FieldRef<"AffiliateScrapeSources", 'String'>
   readonly activeMappingId: Prisma.FieldRef<"AffiliateScrapeSources", 'String'>
+  readonly supplySourceId: Prisma.FieldRef<"AffiliateScrapeSources", 'String'>
   readonly lastScrapeRunId: Prisma.FieldRef<"AffiliateScrapeSources", 'String'>
+  readonly lifecycleGeneration: Prisma.FieldRef<"AffiliateScrapeSources", 'Int'>
+  readonly activeSupplyContractVersion: Prisma.FieldRef<"AffiliateScrapeSources", 'Int'>
+  readonly activeSupplyContractHash: Prisma.FieldRef<"AffiliateScrapeSources", 'String'>
   readonly lastScrapedAt: Prisma.FieldRef<"AffiliateScrapeSources", 'DateTime'>
   readonly autoScrapeEnabled: Prisma.FieldRef<"AffiliateScrapeSources", 'Boolean'>
   readonly scrapeIntervalMinutes: Prisma.FieldRef<"AffiliateScrapeSources", 'Int'>

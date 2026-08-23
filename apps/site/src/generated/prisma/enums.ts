@@ -43,6 +43,59 @@ export const AffiliateAgentGatewayReceiptStatus = {
 export type AffiliateAgentGatewayReceiptStatus = (typeof AffiliateAgentGatewayReceiptStatus)[keyof typeof AffiliateAgentGatewayReceiptStatus]
 
 
+export const AffiliateSupplyLifecycleStage = {
+  PRE_MAPPED: 'PRE_MAPPED',
+  MAPPED: 'MAPPED',
+  APPROVED: 'APPROVED',
+  ACTIVATED: 'ACTIVATED',
+  PUBLISHED: 'PUBLISHED',
+  SOURCE_EXCLUDED: 'SOURCE_EXCLUDED',
+  HUMAN_REVIEW_REQUIRED: 'HUMAN_REVIEW_REQUIRED'
+} as const
+
+export type AffiliateSupplyLifecycleStage = (typeof AffiliateSupplyLifecycleStage)[keyof typeof AffiliateSupplyLifecycleStage]
+
+
+export const AffiliateSupplyContractManifestStatus = {
+  DRAFT: 'DRAFT',
+  ACTIVE: 'ACTIVE',
+  RETIRED: 'RETIRED'
+} as const
+
+export type AffiliateSupplyContractManifestStatus = (typeof AffiliateSupplyContractManifestStatus)[keyof typeof AffiliateSupplyContractManifestStatus]
+
+
+export const AffiliateSupplyTargetStatus = {
+  PUBLISHED: 'PUBLISHED',
+  LAST_KNOWN_GOOD: 'LAST_KNOWN_GOOD',
+  REJECTED: 'REJECTED',
+  EXPIRED: 'EXPIRED'
+} as const
+
+export type AffiliateSupplyTargetStatus = (typeof AffiliateSupplyTargetStatus)[keyof typeof AffiliateSupplyTargetStatus]
+
+
+export const AffiliateReplenishmentDemandStatus = {
+  OPEN: 'OPEN',
+  CLOSED: 'CLOSED',
+  PAUSED: 'PAUSED'
+} as const
+
+export type AffiliateReplenishmentDemandStatus = (typeof AffiliateReplenishmentDemandStatus)[keyof typeof AffiliateReplenishmentDemandStatus]
+
+
+export const AffiliateReplenishmentWaveStatus = {
+  PLANNED: 'PLANNED',
+  ACTIVE: 'ACTIVE',
+  WAITING: 'WAITING',
+  SUCCEEDED: 'SUCCEEDED',
+  FAILED: 'FAILED',
+  PAUSED: 'PAUSED'
+} as const
+
+export type AffiliateReplenishmentWaveStatus = (typeof AffiliateReplenishmentWaveStatus)[keyof typeof AffiliateReplenishmentWaveStatus]
+
+
 export const BillsOwnerTypeEnum = {
   USER: 'USER',
   TEAM: 'TEAM',

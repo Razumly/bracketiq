@@ -32,6 +32,44 @@ enum AffiliateAgentGatewayReceiptStatus {
   FAILED
   UNKNOWN
 }
+enum AffiliateSupplyLifecycleStage {
+  PRE_MAPPED
+  MAPPED
+  APPROVED
+  ACTIVATED
+  PUBLISHED
+  SOURCE_EXCLUDED
+  HUMAN_REVIEW_REQUIRED
+}
+
+enum AffiliateSupplyContractManifestStatus {
+  DRAFT
+  ACTIVE
+  RETIRED
+}
+
+enum AffiliateSupplyTargetStatus {
+  PUBLISHED
+  LAST_KNOWN_GOOD
+  REJECTED
+  EXPIRED
+}
+
+enum AffiliateReplenishmentDemandStatus {
+  OPEN
+  CLOSED
+  PAUSED
+}
+
+enum AffiliateReplenishmentWaveStatus {
+  PLANNED
+  ACTIVE
+  WAITING
+  SUCCEEDED
+  FAILED
+  PAUSED
+}
+
 
 enum BillsOwnerTypeEnum {
   USER
@@ -1935,12 +1973,18 @@ model AffiliateScrapeSources {
   targetKind            String    @default("EVENT")
   status                String    @default("ACTIVE")
   activeMappingId       String?
+  supplySourceId        String?
   lastScrapeRunId       String?
+  lifecycleGeneration   Int       @default(0)
+  activeSupplyContractVersion Int?
+  activeSupplyContractHash String?
   lastScrapedAt         DateTime?
   autoScrapeEnabled     Boolean   @default(false)
   scrapeIntervalMinutes Int       @default(1440)
   notes                 String?
   metadata              Json?
+
+  @@index([supplySourceId, status])
 
   @@index([status])
   @@index([autoScrapeEnabled, status])
@@ -1953,6 +1997,7 @@ model AffiliateScrapeMappings {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
   sourceId        String
+  supplySourceId String?
   version         Int
   isActive        Boolean   @default(false)
   mapping         Json
@@ -1961,6 +2006,8 @@ model AffiliateScrapeMappings {
   validatedAt     DateTime?
 
   @@unique([sourceId, version])
+
+  @@index([supplySourceId])
   @@index([sourceId, isActive])
 }
 
@@ -1969,6 +2016,7 @@ model AffiliateScrapeRuns {
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
   sourceId          String
+  supplySourceId     String?
   mappingId         String?
   requestedByUserId String?
   status            String    @default("PENDING")
@@ -1982,6 +2030,8 @@ model AffiliateScrapeRuns {
   errorMessage      String?
   logs              Json?
   metadata          Json?
+
+  @@index([supplySourceId, createdAt])
 
   @@index([sourceId, createdAt])
   @@index([mappingId])
@@ -2003,6 +2053,7 @@ model AffiliateSourceIntakes {
   suggestedClassification    Json?
   organizationId             String?
   affiliateSourceId          String?
+  supplySourceId             String?
   selectedLogoArtifactId     String?
   lastRunId                  String?
   createdByUserId            String?
@@ -2010,6 +2061,8 @@ model AffiliateSourceIntakes {
   complianceReviewedAt       DateTime?
   complianceTermsUrl         String?
   complianceNotes            String?
+
+  @@index([supplySourceId, status])
 
   @@index([status])
   @@index([complianceStatus])
@@ -2023,6 +2076,7 @@ model AffiliateSourceIntakePages {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
   intakeId        String
+  supplySourceId   String?
   url             String
   canonicalUrl    String
   urlKey          String    @unique
@@ -2035,6 +2089,8 @@ model AffiliateSourceIntakePages {
   robotsNotes     String?
   metadata        Json?
 
+  @@index([supplySourceId, status])
+
   @@index([intakeId, status])
   @@index([intakeId, role])
   @@index([robotsStatus])
@@ -2045,6 +2101,7 @@ model AffiliateSourceIntakeRuns {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
   intakeId           String
+  supplySourceId     String?
   requestedPageIds   String[]  @default([])
   requestedByUserId  String?
   provider           String    @default("SCRAPINGDOG")
@@ -2061,6 +2118,8 @@ model AffiliateSourceIntakeRuns {
   errorMessage       String?
   summary            Json?
 
+  @@index([supplySourceId, createdAt])
+
   @@index([intakeId, createdAt])
   @@index([status, queuedAt])
   @@index([requestedByUserId])
@@ -2071,6 +2130,7 @@ model AffiliateSourceIntakeArtifacts {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   intakeId    String
+  supplySourceId String?
   pageId      String?
   runId       String
   kind        String
@@ -2086,6 +2146,8 @@ model AffiliateSourceIntakeArtifacts {
   retainUntil DateTime?
   isPinned    Boolean   @default(false)
   metadata    Json?
+
+  @@index([supplySourceId, createdAt])
 
   @@index([intakeId, createdAt])
   @@index([runId, kind])
@@ -2488,10 +2550,13 @@ model AffiliateSourceDiscoveryResults {
   reasonDetails          Json?
   matchingIntakeId       String?
   matchingSourceId       String?
+  supplySourceId         String?
   matchingOrganizationId String?
   metadata               Json?
 
   @@unique([campaignId, urlKey])
+
+  @@index([supplySourceId, status])
   @@index([campaignId, status, score])
   @@index([policyKey, status])
   @@index([matchingIntakeId])
@@ -2521,6 +2586,7 @@ model AffiliateSourceMappingJobs {
   createdAt                       DateTime  @default(now())
   updatedAt                       DateTime  @updatedAt
   intakeId                        String
+  supplySourceId                   String?
   sourceId                        String?
   mappingId                       String?
   legacyIdentityMigrationEligible Boolean   @default(false)
@@ -2535,6 +2601,8 @@ model AffiliateSourceMappingJobs {
   errorMessage                    String?
   finishedAt                      DateTime?
 
+  @@index([supplySourceId, status, createdAt])
+
   // The partial unique index for active statuses is managed in SQL because
   // Prisma schema syntax cannot express a partial unique constraint.
   @@index([status, createdAt])
@@ -2548,6 +2616,7 @@ model AffiliateApprovalJobs {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   subjectType    String
+  supplySourceId String?
   subjectKey     String
   status         String    @default("QUEUED")
   claimedAt      DateTime?
@@ -2559,6 +2628,8 @@ model AffiliateApprovalJobs {
   finishedAt     DateTime?
 
   @@unique([subjectType, subjectKey])
+
+  @@index([supplySourceId, status])
   @@index([status, createdAt])
   @@index([leaseExpiresAt])
   @@index([subjectType, status])
@@ -2569,6 +2640,7 @@ model AffiliateImportCandidates {
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
   sourceId                 String
+  supplySourceId            String?
   runId                    String
   mappingId                String?
   listingKind              String
@@ -2605,6 +2677,8 @@ model AffiliateImportCandidates {
   publishedOrganizationId  String?
 
   @@unique([sourceId, dedupeKey])
+
+  @@index([supplySourceId, status])
   @@index([runId])
   @@index([mappingId])
   @@index([listingKind, status])
@@ -2614,6 +2688,197 @@ model AffiliateImportCandidates {
   @@index([publishedFacilityId])
   @@index([publishedOrganizationId])
 }
+model AffiliateSupplySources {
+  id                           String                       @id
+  createdAt                    DateTime                     @default(now())
+  updatedAt                    DateTime                     @updatedAt
+  identityKey                  String                       @unique
+  canonicalUrl                 String
+  origin                       String
+  pathKey                      String
+  operatorDomain               String?
+  targetKind                   String                       @default("EVENT")
+  rolloutCohort                String                       @default("DEFAULT")
+  intakeId                     String?
+  liveSourceId                 String?
+  predecessorId                String?
+  successorId                  String?
+  lifecycleGeneration          Int                          @default(0)
+  activeSupplyContractVersion  Int?
+  activeSupplyContractHash     String?
+  derivedStage                 AffiliateSupplyLifecycleStage @default(PRE_MAPPED)
+  derivedOutcome               String?
+  freshnessStatus              String                       @default("UNKNOWN")
+  targetContribution           Int                          @default(0)
+  repairPriority               Int                          @default(4)
+  isAutomationEnabled          Boolean                      @default(false)
+  isExcluded                   Boolean                      @default(false)
+  automationHoldReason         String?
+  excludedAt                   DateTime?
+  lastSuccessfulRefreshAt      DateTime?
+  lastAssessmentAt             DateTime?
+  assessmentJson               Json?
+  invariantViolations          String[]                     @default([])
+  metadata                     Json?
+
+  @@index([canonicalUrl])
+  @@index([rolloutCohort, derivedStage])
+  @@index([derivedStage, freshnessStatus])
+  @@index([intakeId])
+  @@index([liveSourceId])
+  @@index([predecessorId])
+  @@index([successorId])
+}
+
+model AffiliateSupplyContractManifests {
+  id                String                                   @id
+  createdAt         DateTime                                 @default(now())
+  updatedAt         DateTime                                 @updatedAt
+  rolloutCohort     String
+  version           Int
+  status            AffiliateSupplyContractManifestStatus    @default(DRAFT)
+  contractHash      String
+  contractJson      Json
+  componentHashes   String[]                                 @default([])
+  activatedByUserId String?
+  activatedAt       DateTime?
+  retiredAt         DateTime?
+  impactReport      Json?
+
+  @@unique([rolloutCohort, version])
+  @@index([rolloutCohort, status])
+  @@index([contractHash])
+}
+
+model AffiliateSupplyLifecycleTransitions {
+  id                String   @id
+  createdAt         DateTime @default(now())
+  supplySourceId    String
+  sequence          Int
+  generation        Int
+  fromStage         AffiliateSupplyLifecycleStage?
+  toStage           AffiliateSupplyLifecycleStage
+  outcome           String?
+  command           String
+  commandRef        String?
+  idempotencyKey    String   @unique
+  requestHash       String
+  resultHash        String
+  contractVersion   Int
+  contractHash      String
+  actorKind         String
+  actorId           String
+  executingAgentId  String?
+  reasonCodes       String[] @default([])
+  evidenceRefs      String[] @default([])
+  requestJson       Json
+  resultJson        Json
+  occurredAt        DateTime @default(now())
+  retentionClass    String   @default("INDEFINITE")
+
+  @@unique([supplySourceId, sequence])
+  @@index([supplySourceId, generation])
+  @@index([supplySourceId, commandRef])
+  @@index([contractHash])
+}
+model AffiliateAgentWorkerHealth {
+  id               String   @id
+  workerId         String
+  role             String
+  status           String   @default("HEALTHY")
+  heartbeatAt      DateTime
+  leaseExpiresAt   DateTime?
+  metadata         Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([workerId, role])
+  @@index([role, status, heartbeatAt])
+}
+
+
+model AffiliateSupplyTargets {
+  id                      String                       @id
+  createdAt               DateTime                     @default(now())
+  updatedAt               DateTime                     @updatedAt
+  supplySourceId          String
+  candidateId             String?
+  targetType              String
+  targetId                String
+  marketKey               String?
+  sportId                 String?
+  sourceProfile            String
+  status                  AffiliateSupplyTargetStatus @default(PUBLISHED)
+  publishedAt             DateTime?
+  lastSuccessfulRefreshAt DateTime?
+  freshnessExpiresAt      DateTime?
+  rejectedAt              DateTime?
+  rejectionReason         String?
+  evidenceRefs            String[]                     @default([])
+  evidenceHash            String?
+  metadata                Json?
+
+  @@unique([supplySourceId, targetType, targetId])
+  @@index([supplySourceId, status, freshnessExpiresAt])
+  @@index([marketKey, sportId, sourceProfile, status])
+  @@index([candidateId])
+}
+
+model AffiliateReplenishmentDemands {
+  id                           String                           @id
+  createdAt                    DateTime                         @default(now())
+  updatedAt                    DateTime                         @updatedAt
+  targetKey                    String
+  marketKey                    String
+  sportId                      String
+  sourceProfile                String
+  rolloutCohort                String
+  contractVersion              Int
+  contractHash                 String
+  minimumFreshPublishedSupply  Int
+  observedFreshPublishedSupply Int                              @default(0)
+  priority                     Int                              @default(4)
+  status                       AffiliateReplenishmentDemandStatus @default(OPEN)
+  openedAt                     DateTime                         @default(now())
+  closedAt                     DateTime?
+  nextEligibleAt               DateTime?
+  searchSaturatedUntil         DateTime?
+  activeWaveId                 String?
+  generation                   Int                              @default(0)
+  reasonCodes                  String[]                         @default([])
+  evidenceJson                 Json?
+
+  @@unique([rolloutCohort, targetKey, contractVersion, contractHash])
+  @@index([status, priority, nextEligibleAt])
+  @@index([rolloutCohort, marketKey, sportId, sourceProfile, status])
+  @@index([activeWaveId])
+}
+
+model AffiliateReplenishmentWaves {
+  id                   String                            @id
+  createdAt            DateTime                          @default(now())
+  updatedAt            DateTime                          @updatedAt
+  demandId             String
+  rolloutCohort        String
+  status               AffiliateReplenishmentWaveStatus @default(PLANNED)
+  campaignId           String?
+  coveragePlanningJobId String?
+  provider              String?
+  providerOperationKey String?                           @unique
+  startedAt            DateTime?
+  terminalAt           DateTime?
+  retryAt              DateTime?
+  marginalYield        Int?
+  errorCode             String?
+  resultJson            Json?
+  demandGeneration      Int
+  evidenceRefs          String[]                          @default([])
+
+  @@index([demandId, status])
+  @@index([status, retryAt, createdAt])
+  @@index([rolloutCohort, status])
+}
+
 
 model EventTags {
   id        String   @id

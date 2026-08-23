@@ -41,6 +41,7 @@ import {
 } from './sourceUrlIntake';
 import { findAffiliateIntakeIdsForPolicyKey } from './sourcePolicyIntakes';
 import { loadAffiliateCoverageCityCatalog } from './coverageCityCatalog';
+import type { AffiliateReplenishmentWaveExecutionResult } from './affiliateSupplyPersistence';
 
 const DISCOVERY_LOCK_ID = 4201072126;
 const DEFAULT_SUMMARY_RECIPIENT = 'samuel.r@razumly.com';
@@ -75,6 +76,7 @@ const db = (client: unknown = prisma) => {
     intakeRuns: dbClient.affiliateSourceIntakeRuns as any,
     sports: dbClient.sports as any,
     queryExecutions: dbClient.affiliateSourceDiscoveryQueryExecutions as any,
+    mappingJobs: dbClient.affiliateSourceMappingJobs as any,
   };
 };
 
@@ -934,6 +936,344 @@ export const processNextAffiliateSourceDiscoveryRun = async (
   });
   return { run: updated, summary };
 };
+const REPLENISHMENT_RETRY_MS = 15 * 60 * 1000;
+const ACTIVE_CAPTURE_RUN_STATUSES = new Set(['QUEUED', 'RUNNING', 'CLAIMED']);
+
+export type AffiliateReplenishmentCampaignWaveDependencies = Readonly<{
+  searchClient?: AffiliateSourceSearchClient;
+  firecrawlClient?: AffiliateFirecrawlClient;
+  captureClient?: AffiliateSourceCaptureClient;
+  fallbackCaptureClient?: AffiliateSourceCaptureClient | null;
+  fetchResource?: typeof fetchBoundedPublicResource;
+  now?: () => Date;
+  workerId?: string;
+}>;
+
+const replenishmentEvidenceRefs = (values: readonly (string | null | undefined)[]): string[] => (
+  Array.from(new Set(values.filter((value): value is string => Boolean(value && value.trim()))))
+);
+
+const latestRowsByIntakeId = (rows: readonly any[]): Map<string, any> => {
+  const latest = new Map<string, any>();
+  for (const row of rows) {
+    const intakeId = stringValue(row.intakeId);
+    if (intakeId && !latest.has(intakeId)) latest.set(intakeId, row);
+  }
+  return latest;
+};
+
+/**
+ * Execute one bounded discovery wave and wait for its capture-to-mapping handoff.
+ *
+ * The wave stores the discovery run id in its result. Later reconciliations
+ * resume that run and never create a second run for the same wave.
+ */
+export const runAffiliateReplenishmentCampaignWave = async (
+  input: Readonly<{
+    wave: any;
+    demand: any;
+    contract: unknown;
+  }>,
+  dependencies: AffiliateReplenishmentCampaignWaveDependencies = {},
+): Promise<AffiliateReplenishmentWaveExecutionResult> => {
+  const now = dependencies.now?.() ?? new Date();
+  const waveResult = recordValue(input.wave?.resultJson);
+  const evidenceRefs = replenishmentEvidenceRefs([
+    `demand:${stringValue(input.demand?.id) ?? 'unknown'}`,
+    `wave:${stringValue(input.wave?.id) ?? 'unknown'}`,
+    stringValue(input.wave?.campaignId) ? `campaign:${String(input.wave.campaignId)}` : null,
+    stringValue(waveResult.discoveryRunId) ? `discovery-run:${String(waveResult.discoveryRunId)}` : null,
+  ]);
+  let campaignId = stringValue(input.wave?.campaignId);
+  let coveragePlanningJobId = stringValue(input.wave?.coveragePlanningJobId);
+
+  if (!campaignId && coveragePlanningJobId) {
+    const coverageJob = await (prisma as any).affiliateCoverageAgentJobs?.findUnique?.({
+      where: { id: coveragePlanningJobId },
+    });
+    const coverageResult = recordValue(coverageJob?.result);
+    campaignId = stringValue(
+      coverageResult.campaignId
+      ?? coverageResult.selectedCampaignId
+      ?? recordValue(coverageResult.campaign).id,
+    );
+    if (campaignId && (prisma as any).affiliateReplenishmentWaves?.update) {
+      await (prisma as any).affiliateReplenishmentWaves.update({
+        where: { id: input.wave.id },
+        data: { campaignId },
+      });
+    }
+  }
+
+  if (!campaignId) {
+    return {
+      status: 'WAITING',
+      provider: 'COVERAGE_PLANNER',
+      providerOperationKey: coveragePlanningJobId
+        ? `affiliate-replenishment:coverage:${coveragePlanningJobId}`
+        : `affiliate-replenishment:wave:${String(input.wave?.id ?? 'unknown')}`,
+      result: {
+        coveragePlanningJobId,
+        status: String((await (prisma as any).affiliateCoverageAgentJobs?.findUnique?.({
+          where: { id: coveragePlanningJobId ?? '' },
+          select: { status: true },
+        }))?.status ?? 'QUEUED').toUpperCase(),
+      },
+      evidenceRefs,
+    };
+  }
+
+  let discoveryRunId = stringValue(waveResult.discoveryRunId);
+  if (!discoveryRunId) {
+    try {
+      const queued = await queueAffiliateSourceDiscoveryRun(
+        campaignId,
+        'affiliate-replenishment',
+      );
+      discoveryRunId = String(queued.id);
+      if (String(queued.status).toUpperCase() === 'QUEUED') {
+        await processNextAffiliateSourceDiscoveryRun(
+          { runId: discoveryRunId, workerId: dependencies.workerId },
+          {
+            ...(dependencies.searchClient ? { searchClient: dependencies.searchClient } : {}),
+            ...(dependencies.firecrawlClient ? { firecrawlClient: dependencies.firecrawlClient } : {}),
+            ...(dependencies.now ? { now: dependencies.now } : {}),
+            ...(dependencies.workerId ? { workerId: dependencies.workerId } : {}),
+          },
+        );
+      }
+    } catch (error) {
+      return {
+        status: 'FAILED',
+        provider: 'AFFILIATE_DISCOVERY',
+        providerOperationKey: `affiliate-replenishment:discovery:${discoveryRunId ?? campaignId}`,
+        retryAt: new Date(now.getTime() + REPLENISHMENT_RETRY_MS),
+        marginalYield: null,
+        errorCode: 'DISCOVERY_PROVIDER_FAILURE',
+        result: {
+          campaignId,
+          discoveryRunId,
+          errorMessage: error instanceof Error ? error.message : String(error),
+        },
+        evidenceRefs,
+      };
+    }
+  }
+
+  const discoveryRun = await db().runs.findUnique({ where: { id: discoveryRunId } });
+  const runStatus = String(discoveryRun?.status ?? '').toUpperCase();
+  const runEvidenceRefs = replenishmentEvidenceRefs([
+    ...evidenceRefs,
+    `discovery-run:${discoveryRunId}`,
+  ]);
+  if (!discoveryRun) {
+    return {
+      status: 'FAILED',
+      provider: 'AFFILIATE_DISCOVERY',
+      providerOperationKey: `affiliate-replenishment:discovery:${discoveryRunId}`,
+      retryAt: new Date(now.getTime() + REPLENISHMENT_RETRY_MS),
+      marginalYield: null,
+      errorCode: 'DISCOVERY_RUN_NOT_FOUND',
+      result: { discoveryRunId, campaignId },
+      evidenceRefs: runEvidenceRefs,
+    };
+  }
+  if (['QUEUED', 'RUNNING'].includes(runStatus)) {
+    return {
+      status: 'WAITING',
+      provider: 'AFFILIATE_DISCOVERY',
+      providerOperationKey: `affiliate-replenishment:discovery:${discoveryRunId}`,
+      result: { discoveryRunId, campaignId, status: runStatus },
+      evidenceRefs: runEvidenceRefs,
+    };
+  }
+  if (runStatus === 'FAILED') {
+    return {
+      status: 'FAILED',
+      provider: 'AFFILIATE_DISCOVERY',
+      providerOperationKey: `affiliate-replenishment:discovery:${discoveryRunId}`,
+      retryAt: new Date(now.getTime() + REPLENISHMENT_RETRY_MS),
+      marginalYield: null,
+      errorCode: 'DISCOVERY_PROVIDER_FAILURE',
+      result: { discoveryRunId, campaignId, errorMessage: discoveryRun.errorMessage ?? null },
+      evidenceRefs: runEvidenceRefs,
+    };
+  }
+
+  const resultRows = await db().results.findMany({
+    where: { latestRunId: discoveryRunId },
+    select: { matchingIntakeId: true, status: true },
+  });
+  const intakeIds: string[] = Array.from(new Set<string>(
+    resultRows
+      .map((row: any) => stringValue(row.matchingIntakeId))
+      .filter((value: string | null): value is string => Boolean(value)),
+  ));
+  const summary = recordValue(discoveryRun.summary);
+  const providerErrors = Array.isArray(summary.errors) ? summary.errors : [];
+  if (runStatus === 'PARTIAL' && providerErrors.length > 0 && intakeIds.length === 0) {
+    return {
+      status: 'FAILED',
+      provider: 'AFFILIATE_DISCOVERY',
+      providerOperationKey: `affiliate-replenishment:discovery:${discoveryRunId}`,
+      retryAt: new Date(now.getTime() + REPLENISHMENT_RETRY_MS),
+      marginalYield: null,
+      errorCode: 'DISCOVERY_PROVIDER_FAILURE',
+      result: { discoveryRunId, campaignId, errors: providerErrors },
+      evidenceRefs: runEvidenceRefs,
+    };
+  }
+
+  if (intakeIds.length === 0) {
+    return {
+      status: 'SUCCEEDED',
+      provider: 'AFFILIATE_DISCOVERY',
+      providerOperationKey: `affiliate-replenishment:discovery:${discoveryRunId}`,
+      marginalYield: 0,
+      result: { discoveryRunId, campaignId, intakeIds: [], mappingJobIds: [] },
+      evidenceRefs: runEvidenceRefs,
+    };
+  }
+
+  let [intakeRows, captureRows, mappingRows] = await Promise.all([
+    db().intakes.findMany({
+      where: { id: { in: intakeIds } },
+      select: { id: true, status: true },
+    }),
+    db().intakeRuns.findMany({
+      where: { intakeId: { in: intakeIds } },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, intakeId: true, status: true, errorMessage: true },
+    }),
+    db().mappingJobs.findMany({
+      where: { intakeId: { in: intakeIds } },
+      select: { id: true, intakeId: true, status: true },
+    }),
+  ]);
+  const queuedCapture = captureRows.find((row: any) => (
+    intakeIds.includes(String(row.intakeId))
+    && String(row.status ?? '').toUpperCase() === 'QUEUED'
+  ));
+  if (queuedCapture) {
+    try {
+      await processNextAffiliateSourceIntakeRun(
+        {
+          runId: String(queuedCapture.id),
+          ...(dependencies.workerId ? { workerId: dependencies.workerId } : {}),
+        },
+        {
+          ...(dependencies.captureClient ? { captureClient: dependencies.captureClient } : {}),
+          ...(dependencies.fallbackCaptureClient !== undefined
+            ? { fallbackCaptureClient: dependencies.fallbackCaptureClient }
+            : {}),
+          ...(dependencies.fetchResource ? { fetchResource: dependencies.fetchResource } : {}),
+          ...(dependencies.now ? { now: dependencies.now } : {}),
+          ...(dependencies.workerId ? { workerId: dependencies.workerId } : {}),
+        },
+      );
+    } catch (error) {
+      return {
+        status: 'FAILED',
+        provider: 'AFFILIATE_CAPTURE',
+        providerOperationKey: `affiliate-replenishment:capture:${queuedCapture.id}`,
+        retryAt: new Date(now.getTime() + REPLENISHMENT_RETRY_MS),
+        marginalYield: null,
+        errorCode: 'CAPTURE_PROVIDER_FAILURE',
+        result: {
+          discoveryRunId,
+          campaignId,
+          intakeIds,
+          captureRunId: queuedCapture.id,
+          errorMessage: error instanceof Error ? error.message : String(error),
+        },
+        evidenceRefs: replenishmentEvidenceRefs([
+          ...runEvidenceRefs,
+          `capture-run:${queuedCapture.id}`,
+        ]),
+      };
+    }
+    [intakeRows, captureRows, mappingRows] = await Promise.all([
+      db().intakes.findMany({
+        where: { id: { in: intakeIds } },
+        select: { id: true, status: true },
+      }),
+      db().intakeRuns.findMany({
+        where: { intakeId: { in: intakeIds } },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, intakeId: true, status: true, errorMessage: true },
+      }),
+      db().mappingJobs.findMany({
+        where: { intakeId: { in: intakeIds } },
+        select: { id: true, intakeId: true, status: true },
+      }),
+    ]);
+  }
+  const latestCaptureByIntake = latestRowsByIntakeId(captureRows);
+  const activeCapture = intakeIds.find((intakeId) => (
+    ACTIVE_CAPTURE_RUN_STATUSES.has(String(latestCaptureByIntake.get(intakeId)?.status ?? '').toUpperCase())
+    || ['QUEUED', 'CAPTURING'].includes(String(intakeRows.find((row: any) => row.id === intakeId)?.status ?? '').toUpperCase())
+  ));
+  if (activeCapture) {
+    return {
+      status: 'WAITING',
+      provider: 'AFFILIATE_DISCOVERY',
+      providerOperationKey: `affiliate-replenishment:discovery:${discoveryRunId}`,
+      result: {
+        discoveryRunId,
+        campaignId,
+        intakeIds,
+        mappingJobIds: mappingRows.map((row: any) => row.id),
+        waitingFor: `capture:${activeCapture}`,
+      },
+      evidenceRefs: replenishmentEvidenceRefs([
+        ...runEvidenceRefs,
+        `intake:${activeCapture}`,
+      ]),
+    };
+  }
+  const failedCapture = intakeIds
+    .map((intakeId) => latestCaptureByIntake.get(intakeId))
+    .find((row) => ['FAILED', 'BLOCKED'].includes(String(row?.status ?? '').toUpperCase()));
+  if (failedCapture) {
+    return {
+      status: 'FAILED',
+      provider: 'AFFILIATE_DISCOVERY',
+      providerOperationKey: `affiliate-replenishment:discovery:${discoveryRunId}`,
+      retryAt: new Date(now.getTime() + REPLENISHMENT_RETRY_MS),
+      marginalYield: null,
+      errorCode: String(failedCapture.status).toUpperCase() === 'BLOCKED'
+        ? 'CAPTURE_BLOCKED'
+        : 'CAPTURE_PROVIDER_FAILURE',
+      result: {
+        discoveryRunId,
+        campaignId,
+        intakeIds,
+        errorMessage: failedCapture.errorMessage ?? null,
+      },
+      evidenceRefs: runEvidenceRefs,
+    };
+  }
+
+  const mappingJobIds: string[] = mappingRows.map((row: any) => String(row.id));
+  return {
+    status: 'SUCCEEDED',
+    provider: 'AFFILIATE_DISCOVERY',
+    providerOperationKey: `affiliate-replenishment:discovery:${discoveryRunId}`,
+    marginalYield: mappingJobIds.length,
+    result: {
+      discoveryRunId,
+      campaignId,
+      intakeIds,
+      mappingJobIds,
+      demandId: stringValue(input.demand?.id),
+    },
+    evidenceRefs: replenishmentEvidenceRefs([
+      ...runEvidenceRefs,
+      ...intakeIds.map((intakeId) => `intake:${intakeId}`),
+      ...mappingJobIds.map((mappingJobId) => `mapping-job:${mappingJobId}`),
+    ]),
+  };
+};
 
 export const listAffiliateSourceDiscoveryResults = async (filters: {
   campaignId?: string | null;
@@ -1149,6 +1489,7 @@ export const runAffiliateIntakeAutomation = async (options: {
   discoveryLimit?: number;
   intakeLimit?: number;
   sendSummary?: boolean;
+  isDemandDriven?: boolean;
 } = {}, dependencies: DiscoveryDependencies = {}) => {
   const startedAt = dependencies.now?.() ?? new Date();
   const lock = await acquireAutomationLock();
@@ -1173,7 +1514,9 @@ export const runAffiliateIntakeAutomation = async (options: {
     let queuedCampaigns = 0;
     const discoveryRuns: any[] = [];
     for (let index = 0; index < Math.min(options.discoveryLimit ?? MAX_AUTOMATION_DISCOVERY_RUNS, 25); index += 1) {
-      queuedCampaigns += await queueDueAffiliateSourceDiscoveryRuns(dependencies.now?.() ?? new Date());
+      if (!options.isDemandDriven) {
+        queuedCampaigns += await queueDueAffiliateSourceDiscoveryRuns(dependencies.now?.() ?? new Date());
+      }
       const result = await processNextAffiliateSourceDiscoveryRun({}, dependencies);
       if (!result) break;
       discoveryRuns.push(result);

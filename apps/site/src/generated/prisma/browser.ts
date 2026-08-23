@@ -418,6 +418,41 @@ export type AffiliateApprovalJobs = Prisma.AffiliateApprovalJobsModel
  */
 export type AffiliateImportCandidates = Prisma.AffiliateImportCandidatesModel
 /**
+ * Model AffiliateSupplySources
+ *
+ */
+export type AffiliateSupplySources = Prisma.AffiliateSupplySourcesModel
+/**
+ * Model AffiliateSupplyContractManifests
+ *
+ */
+export type AffiliateSupplyContractManifests = Prisma.AffiliateSupplyContractManifestsModel
+/**
+ * Model AffiliateSupplyLifecycleTransitions
+ *
+ */
+export type AffiliateSupplyLifecycleTransitions = Prisma.AffiliateSupplyLifecycleTransitionsModel
+/**
+ * Model AffiliateAgentWorkerHealth
+ *
+ */
+export type AffiliateAgentWorkerHealth = Prisma.AffiliateAgentWorkerHealthModel
+/**
+ * Model AffiliateSupplyTargets
+ *
+ */
+export type AffiliateSupplyTargets = Prisma.AffiliateSupplyTargetsModel
+/**
+ * Model AffiliateReplenishmentDemands
+ *
+ */
+export type AffiliateReplenishmentDemands = Prisma.AffiliateReplenishmentDemandsModel
+/**
+ * Model AffiliateReplenishmentWaves
+ *
+ */
+export type AffiliateReplenishmentWaves = Prisma.AffiliateReplenishmentWavesModel
+/**
  * Model EventTags
  *
  */

@@ -422,7 +422,7 @@ describe('affiliate source mapping queue', () => {
       resultSummary: {},
     });
     prismaMock.affiliateApprovalJobs.findUnique.mockResolvedValue(null);
-
+    prismaMock.affiliateSourceIntakes.findUnique.mockResolvedValue({ id: 'intake_1', supplySourceId: 'supply-1' });
     await finishAffiliateSourceMappingClaim({
       claimHandle,
       jobId: 'job_1',
@@ -433,8 +433,16 @@ describe('affiliate source mapping queue', () => {
     });
 
     expect(prismaMock.affiliateSourceMappingJobs.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ sourceId: 'source_1', mappingId: 'mapping_1' }),
+      data: expect.objectContaining({ sourceId: 'source_1', mappingId: 'mapping_1', supplySourceId: 'supply-1' }),
     }));
+    expect(prismaMock.affiliateSourceMappingJobs.update).toHaveBeenCalledWith({
+      where: { id: 'job_1' },
+      data: { supplySourceId: 'supply-1' },
+    });
+    expect(prismaMock.affiliateSourceIntakes.update).toHaveBeenCalledWith({
+      where: { id: 'intake_1' },
+      data: { supplySourceId: 'supply-1' },
+    });
   });
 
   it('does not allow completion to replace an existing package identity', async () => {

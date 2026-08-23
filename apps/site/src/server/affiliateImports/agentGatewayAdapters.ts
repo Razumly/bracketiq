@@ -17,6 +17,10 @@ import type {
   AffiliateAgentTerminalResultEnvelope,
 } from "./agentGatewayContracts";
 import { canonicalizeAffiliateAgentValue } from "./agentGatewayContracts";
+import {
+  affiliateSupplyDatabase,
+  createAffiliateSupplyLifecycleAuthority,
+} from './affiliateSupplyPersistence';
 import type {
   AffiliateAgentClaimOperation,
   AffiliateAgentGateway,
@@ -309,6 +313,14 @@ export type AffiliateAgentGatewayDependencies = Readonly<{
   lifecycle: AffiliateAgentLifecycleAuthority;
 }>;
 
+export interface AffiliateAgentWorkerHealthWriter {
+  heartbeat(input: Readonly<{
+    workerId: string;
+    role: AffiliateAgentRole;
+    now: Date;
+  }>): Promise<void>;
+}
+
 export type AffiliateAgentSupervisorDependencies = Readonly<{
   gateway: AffiliateAgentGateway;
   invocationReconciler: AffiliateAgentInvocationReconciler;
@@ -316,6 +328,7 @@ export type AffiliateAgentSupervisorDependencies = Readonly<{
   identifiers: AffiliateAgentGatewayIdentifiers;
   processLauncher: AffiliateAgentProcessLauncher;
   workspaces: AffiliateAgentWorkspaceManager;
+  workerHealth?: AffiliateAgentWorkerHealthWriter;
 }>;
 
 const createClaimTokenCodec = (
@@ -387,23 +400,31 @@ export const createProductionAffiliateAgentGatewayDependencies = (
     terminalEffects?: AffiliateAgentTerminalEffectAdapter;
     lifecycle?: AffiliateAgentLifecycleAuthority;
   }>,
-): AffiliateAgentGatewayDependencies => ({
-  prisma: input.prisma ?? prisma,
-  clock: input.clock ?? { now: () => new Date() },
-  identifiers:
-    input.identifiers ??
-    ({
-      create: (kind) => `agw-${kind}-${randomUUID()}`,
-    } satisfies AffiliateAgentGatewayIdentifiers),
-  credentials: input.credentials,
-  workspaces: input.workspaces,
-  tokens: createClaimTokenCodec({
-    signingKey: input.tokenSigningKey,
-    keyVersion: input.tokenKeyVersion,
-  }),
-  contracts: input.contracts,
-  artifacts: input.artifacts,
-  commands: input.commands ?? { transactional: {}, external: {} },
-  terminalEffects: input.terminalEffects,
-  lifecycle: input.lifecycle ?? { kind: "UNAVAILABLE" },
-});
+): AffiliateAgentGatewayDependencies => {
+  const gatewayPrisma = input.prisma ?? prisma;
+  const clock = input.clock ?? { now: () => new Date() };
+  return {
+    prisma: gatewayPrisma,
+    clock,
+    identifiers:
+      input.identifiers ??
+      ({
+        create: (kind) => `agw-${kind}-${randomUUID()}`,
+      } satisfies AffiliateAgentGatewayIdentifiers),
+    credentials: input.credentials,
+    workspaces: input.workspaces,
+    tokens: createClaimTokenCodec({
+      signingKey: input.tokenSigningKey,
+      keyVersion: input.tokenKeyVersion,
+    }),
+    contracts: input.contracts,
+    artifacts: input.artifacts,
+    commands: input.commands ?? { transactional: {}, external: {} },
+    terminalEffects: input.terminalEffects,
+    lifecycle: input.lifecycle ?? createAffiliateSupplyLifecycleAuthority({
+      db: affiliateSupplyDatabase(gatewayPrisma),
+      clock: clock.now,
+      contractRegistry: input.contracts,
+    }),
+  };
+};

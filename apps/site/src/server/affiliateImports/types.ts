@@ -168,6 +168,13 @@ export const affiliateScrapeMappingSchema = z.object({
       fields: z.array(z.string().min(1)).min(1),
     })
     .optional(),
+  emptyState: z
+    .object({
+      textIncludes: z.array(z.string().trim().min(1)).min(1),
+      selector: z.string().trim().min(1).optional(),
+    })
+    .strict()
+    .optional(),
   manualCandidates: z.array(affiliateManualCandidateSchema).optional(),
 });
 

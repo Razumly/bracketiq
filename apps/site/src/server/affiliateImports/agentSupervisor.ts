@@ -179,6 +179,11 @@ export const runAffiliateAgentInvocation = async (
   dependencies: AffiliateAgentSupervisorDependencies,
   input: AffiliateAgentSupervisorInput,
 ): Promise<AffiliateAgentSupervisorOutcome> => {
+  await dependencies.workerHealth?.heartbeat({
+    workerId: input.workerId,
+    role: input.role,
+    now: dependencies.clock.now(),
+  });
   const workspace = await dependencies.workspaces.create({
     workerId: input.workerId,
     invocationId: input.invocationId,

@@ -39,6 +39,7 @@ export type AffiliateScrapeMappingsMinAggregateOutputType = {
   createdAt: Date | null
   updatedAt: Date | null
   sourceId: string | null
+  supplySourceId: string | null
   version: number | null
   isActive: boolean | null
   createdByUserId: string | null
@@ -51,6 +52,7 @@ export type AffiliateScrapeMappingsMaxAggregateOutputType = {
   createdAt: Date | null
   updatedAt: Date | null
   sourceId: string | null
+  supplySourceId: string | null
   version: number | null
   isActive: boolean | null
   createdByUserId: string | null
@@ -63,6 +65,7 @@ export type AffiliateScrapeMappingsCountAggregateOutputType = {
   createdAt: number
   updatedAt: number
   sourceId: number
+  supplySourceId: number
   version: number
   isActive: number
   mapping: number
@@ -86,6 +89,7 @@ export type AffiliateScrapeMappingsMinAggregateInputType = {
   createdAt?: true
   updatedAt?: true
   sourceId?: true
+  supplySourceId?: true
   version?: true
   isActive?: true
   createdByUserId?: true
@@ -98,6 +102,7 @@ export type AffiliateScrapeMappingsMaxAggregateInputType = {
   createdAt?: true
   updatedAt?: true
   sourceId?: true
+  supplySourceId?: true
   version?: true
   isActive?: true
   createdByUserId?: true
@@ -110,6 +115,7 @@ export type AffiliateScrapeMappingsCountAggregateInputType = {
   createdAt?: true
   updatedAt?: true
   sourceId?: true
+  supplySourceId?: true
   version?: true
   isActive?: true
   mapping?: true
@@ -210,6 +216,7 @@ export type AffiliateScrapeMappingsGroupByOutputType = {
   createdAt: Date
   updatedAt: Date
   sourceId: string
+  supplySourceId: string | null
   version: number
   isActive: boolean
   mapping: runtime.JsonValue
@@ -246,6 +253,7 @@ export type AffiliateScrapeMappingsWhereInput = {
   createdAt?: Prisma.DateTimeFilter<"AffiliateScrapeMappings"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"AffiliateScrapeMappings"> | Date | string
   sourceId?: Prisma.StringFilter<"AffiliateScrapeMappings"> | string
+  supplySourceId?: Prisma.StringNullableFilter<"AffiliateScrapeMappings"> | string | null
   version?: Prisma.IntFilter<"AffiliateScrapeMappings"> | number
   isActive?: Prisma.BoolFilter<"AffiliateScrapeMappings"> | boolean
   mapping?: Prisma.JsonFilter<"AffiliateScrapeMappings">
@@ -259,6 +267,7 @@ export type AffiliateScrapeMappingsOrderByWithRelationInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   sourceId?: Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrderInput | Prisma.SortOrder
   version?: Prisma.SortOrder
   isActive?: Prisma.SortOrder
   mapping?: Prisma.SortOrder
@@ -276,6 +285,7 @@ export type AffiliateScrapeMappingsWhereUniqueInput = Prisma.AtLeast<{
   createdAt?: Prisma.DateTimeFilter<"AffiliateScrapeMappings"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"AffiliateScrapeMappings"> | Date | string
   sourceId?: Prisma.StringFilter<"AffiliateScrapeMappings"> | string
+  supplySourceId?: Prisma.StringNullableFilter<"AffiliateScrapeMappings"> | string | null
   version?: Prisma.IntFilter<"AffiliateScrapeMappings"> | number
   isActive?: Prisma.BoolFilter<"AffiliateScrapeMappings"> | boolean
   mapping?: Prisma.JsonFilter<"AffiliateScrapeMappings">
@@ -289,6 +299,7 @@ export type AffiliateScrapeMappingsOrderByWithAggregationInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   sourceId?: Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrderInput | Prisma.SortOrder
   version?: Prisma.SortOrder
   isActive?: Prisma.SortOrder
   mapping?: Prisma.SortOrder
@@ -310,6 +321,7 @@ export type AffiliateScrapeMappingsScalarWhereWithAggregatesInput = {
   createdAt?: Prisma.DateTimeWithAggregatesFilter<"AffiliateScrapeMappings"> | Date | string
   updatedAt?: Prisma.DateTimeWithAggregatesFilter<"AffiliateScrapeMappings"> | Date | string
   sourceId?: Prisma.StringWithAggregatesFilter<"AffiliateScrapeMappings"> | string
+  supplySourceId?: Prisma.StringNullableWithAggregatesFilter<"AffiliateScrapeMappings"> | string | null
   version?: Prisma.IntWithAggregatesFilter<"AffiliateScrapeMappings"> | number
   isActive?: Prisma.BoolWithAggregatesFilter<"AffiliateScrapeMappings"> | boolean
   mapping?: Prisma.JsonWithAggregatesFilter<"AffiliateScrapeMappings">
@@ -323,6 +335,7 @@ export type AffiliateScrapeMappingsCreateInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   sourceId: string
+  supplySourceId?: string | null
   version: number
   isActive?: boolean
   mapping: Prisma.JsonNullValueInput | runtime.InputJsonValue
@@ -336,6 +349,7 @@ export type AffiliateScrapeMappingsUncheckedCreateInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   sourceId: string
+  supplySourceId?: string | null
   version: number
   isActive?: boolean
   mapping: Prisma.JsonNullValueInput | runtime.InputJsonValue
@@ -349,6 +363,7 @@ export type AffiliateScrapeMappingsUpdateInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   sourceId?: Prisma.StringFieldUpdateOperationsInput | string
+  supplySourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   version?: Prisma.IntFieldUpdateOperationsInput | number
   isActive?: Prisma.BoolFieldUpdateOperationsInput | boolean
   mapping?: Prisma.JsonNullValueInput | runtime.InputJsonValue
@@ -362,6 +377,7 @@ export type AffiliateScrapeMappingsUncheckedUpdateInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   sourceId?: Prisma.StringFieldUpdateOperationsInput | string
+  supplySourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   version?: Prisma.IntFieldUpdateOperationsInput | number
   isActive?: Prisma.BoolFieldUpdateOperationsInput | boolean
   mapping?: Prisma.JsonNullValueInput | runtime.InputJsonValue
@@ -375,6 +391,7 @@ export type AffiliateScrapeMappingsCreateManyInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   sourceId: string
+  supplySourceId?: string | null
   version: number
   isActive?: boolean
   mapping: Prisma.JsonNullValueInput | runtime.InputJsonValue
@@ -388,6 +405,7 @@ export type AffiliateScrapeMappingsUpdateManyMutationInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   sourceId?: Prisma.StringFieldUpdateOperationsInput | string
+  supplySourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   version?: Prisma.IntFieldUpdateOperationsInput | number
   isActive?: Prisma.BoolFieldUpdateOperationsInput | boolean
   mapping?: Prisma.JsonNullValueInput | runtime.InputJsonValue
@@ -401,6 +419,7 @@ export type AffiliateScrapeMappingsUncheckedUpdateManyInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   sourceId?: Prisma.StringFieldUpdateOperationsInput | string
+  supplySourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   version?: Prisma.IntFieldUpdateOperationsInput | number
   isActive?: Prisma.BoolFieldUpdateOperationsInput | boolean
   mapping?: Prisma.JsonNullValueInput | runtime.InputJsonValue
@@ -419,6 +438,7 @@ export type AffiliateScrapeMappingsCountOrderByAggregateInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   sourceId?: Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrder
   version?: Prisma.SortOrder
   isActive?: Prisma.SortOrder
   mapping?: Prisma.SortOrder
@@ -436,6 +456,7 @@ export type AffiliateScrapeMappingsMaxOrderByAggregateInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   sourceId?: Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrder
   version?: Prisma.SortOrder
   isActive?: Prisma.SortOrder
   createdByUserId?: Prisma.SortOrder
@@ -448,6 +469,7 @@ export type AffiliateScrapeMappingsMinOrderByAggregateInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   sourceId?: Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrder
   version?: Prisma.SortOrder
   isActive?: Prisma.SortOrder
   createdByUserId?: Prisma.SortOrder
@@ -466,6 +488,7 @@ export type AffiliateScrapeMappingsSelect<ExtArgs extends runtime.Types.Extensio
   createdAt?: boolean
   updatedAt?: boolean
   sourceId?: boolean
+  supplySourceId?: boolean
   version?: boolean
   isActive?: boolean
   mapping?: boolean
@@ -479,6 +502,7 @@ export type AffiliateScrapeMappingsSelectCreateManyAndReturn<ExtArgs extends run
   createdAt?: boolean
   updatedAt?: boolean
   sourceId?: boolean
+  supplySourceId?: boolean
   version?: boolean
   isActive?: boolean
   mapping?: boolean
@@ -492,6 +516,7 @@ export type AffiliateScrapeMappingsSelectUpdateManyAndReturn<ExtArgs extends run
   createdAt?: boolean
   updatedAt?: boolean
   sourceId?: boolean
+  supplySourceId?: boolean
   version?: boolean
   isActive?: boolean
   mapping?: boolean
@@ -505,6 +530,7 @@ export type AffiliateScrapeMappingsSelectScalar = {
   createdAt?: boolean
   updatedAt?: boolean
   sourceId?: boolean
+  supplySourceId?: boolean
   version?: boolean
   isActive?: boolean
   mapping?: boolean
@@ -513,7 +539,7 @@ export type AffiliateScrapeMappingsSelectScalar = {
   validatedAt?: boolean
 }
 
-export type AffiliateScrapeMappingsOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "sourceId" | "version" | "isActive" | "mapping" | "createdByUserId" | "notes" | "validatedAt", ExtArgs["result"]["affiliateScrapeMappings"]>
+export type AffiliateScrapeMappingsOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "sourceId" | "supplySourceId" | "version" | "isActive" | "mapping" | "createdByUserId" | "notes" | "validatedAt", ExtArgs["result"]["affiliateScrapeMappings"]>
 
 export type $AffiliateScrapeMappingsPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "AffiliateScrapeMappings"
@@ -523,6 +549,7 @@ export type $AffiliateScrapeMappingsPayload<ExtArgs extends runtime.Types.Extens
     createdAt: Date
     updatedAt: Date
     sourceId: string
+    supplySourceId: string | null
     version: number
     isActive: boolean
     mapping: runtime.JsonValue
@@ -956,6 +983,7 @@ export interface AffiliateScrapeMappingsFieldRefs {
   readonly createdAt: Prisma.FieldRef<"AffiliateScrapeMappings", 'DateTime'>
   readonly updatedAt: Prisma.FieldRef<"AffiliateScrapeMappings", 'DateTime'>
   readonly sourceId: Prisma.FieldRef<"AffiliateScrapeMappings", 'String'>
+  readonly supplySourceId: Prisma.FieldRef<"AffiliateScrapeMappings", 'String'>
   readonly version: Prisma.FieldRef<"AffiliateScrapeMappings", 'Int'>
   readonly isActive: Prisma.FieldRef<"AffiliateScrapeMappings", 'Boolean'>
   readonly mapping: Prisma.FieldRef<"AffiliateScrapeMappings", 'Json'>

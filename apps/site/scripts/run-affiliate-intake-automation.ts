@@ -38,15 +38,62 @@ applyProviderOption('--scrapingdog-timeout', 'SCRAPINGDOG_TIMEOUT_MS');
 applyProviderOption('--dynamic-wait', 'SCRAPINGDOG_DYNAMIC_WAIT_MS');
 
 const main = async () => {
+  // Load after dotenv setup so Prisma and provider clients receive the selected environment.
   const { prisma } = await import('../src/lib/prisma');
-  const { runAffiliateIntakeAutomation } = await import('../src/server/affiliateImports/sourceDiscovery');
+  const {
+    runAffiliateIntakeAutomation,
+    runAffiliateReplenishmentCampaignWave,
+  } = await import('../src/server/affiliateImports/sourceDiscovery');
+  const {
+    affiliateSupplyDatabase,
+    loadActiveAffiliateSupplyContracts,
+    reconcileAffiliateReplenishment,
+  } = await import('../src/server/affiliateImports/affiliateSupplyPersistence');
   try {
+    const supplyDatabase = affiliateSupplyDatabase(prisma);
+    let activeContracts: Awaited<ReturnType<typeof loadActiveAffiliateSupplyContracts>> = [];
+    try {
+      activeContracts = await loadActiveAffiliateSupplyContracts({ db: supplyDatabase });
+    } catch (error) {
+      console.error(
+        '[affiliate:intake:automation] Supply Contracts are not active; replenishment admission is halted.',
+        error instanceof Error ? error.message : error,
+      );
+    }
     const result = await runAffiliateIntakeAutomation({
       discoveryLimit: readInteger('--discovery-limit', 5),
       intakeLimit: readInteger('--intake-limit', 10),
       sendSummary: process.argv.includes('--send-email') && !process.argv.includes('--no-email'),
+      isDemandDriven: true,
     });
-    console.log(JSON.stringify(result, null, 2));
+    const isContractSafe = process.env.AFFILIATE_SUPPLY_CONTRACT_SAFE?.trim().toLowerCase() !== 'false';
+    const replenishments = await Promise.all(activeContracts.map((activeContract) => (
+      reconcileAffiliateReplenishment({
+        contract: activeContract.policy,
+        rolloutCohort: activeContract.policy.rolloutCohort,
+        isContractSafe,
+        db: supplyDatabase,
+        runWave: ({ wave, demand, contract }) => runAffiliateReplenishmentCampaignWave({
+          wave,
+          demand,
+          contract,
+        }, {
+          workerId: process.env.AFFILIATE_REPLENISHMENT_WORKER_ID?.trim()
+            || `affiliate-replenishment-${process.pid}`,
+        }),
+      })
+    )));
+    const replenishment = replenishments.length === 1
+      ? replenishments[0]
+      : activeContracts.length === 0
+        ? {
+            skipped: true,
+            reason: 'UNSAFE_ACTIVE_CONTRACT',
+          }
+        : {
+            cohorts: replenishments,
+          };
+    console.log(JSON.stringify({ ...result, replenishment }, null, 2));
   } finally {
     await (prisma as any).$disconnect();
   }

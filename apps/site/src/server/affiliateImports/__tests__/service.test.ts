@@ -21,11 +21,19 @@ const prismaMock = {
     findFirst: jest.fn(),
     findMany: jest.fn(),
     update: jest.fn(),
+    findUnique: jest.fn(),
   },
   affiliateScrapeSources: {
     findUnique: jest.fn(),
     findMany: jest.fn(),
     update: jest.fn(),
+  },
+  affiliateSupplySources: {
+    findUnique: jest.fn(),
+    update: jest.fn(),
+  },
+  affiliateSupplyContractManifests: {
+    findFirst: jest.fn(),
   },
   organizations: {
     findUnique: jest.fn(),
@@ -66,6 +74,7 @@ const prismaMock = {
 };
 
 let idCounter = 0;
+let completedScrapeRun: any = null;
 
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 jest.mock('@/lib/id', () => ({
@@ -90,6 +99,14 @@ jest.mock('@/server/geocoding', () => ({
 jest.mock('@/server/timeZones', () => ({
   tryResolveTimeZoneFromCoordinates: jest.fn(),
 }));
+jest.mock('@/server/affiliateImports/affiliateSupplyPersistence', () => {
+  const actual = jest.requireActual('@/server/affiliateImports/affiliateSupplyPersistence');
+  return {
+    ...actual,
+    deriveAndPersistAffiliateSupplyAssessment: jest.fn(),
+    executeAffiliateSupplyLifecycleCommand: jest.fn(),
+  };
+});
 
 import {
   affiliateStaffingPrioritySchema,
@@ -105,6 +122,11 @@ import {
 } from '@/server/affiliateImports/service';
 import { geocodeAddressToCoordinates } from '@/server/geocoding';
 import { tryResolveTimeZoneFromCoordinates } from '@/server/timeZones';
+import {
+  deriveAndPersistAffiliateSupplyAssessment,
+  executeAffiliateSupplyLifecycleCommand,
+} from '@/server/affiliateImports/affiliateSupplyPersistence';
+import { buildAffiliateSupplyContractManifest } from '../affiliateSupplyLifecycle';
 
 const geocodeAddressToCoordinatesMock = jest.mocked(geocodeAddressToCoordinates);
 const tryResolveTimeZoneFromCoordinatesMock = jest.mocked(tryResolveTimeZoneFromCoordinates);
@@ -142,7 +164,40 @@ const currentScheduledDateTimeProvenance = (timeZone: string, normalizedStartsAt
 describe('affiliate import service', () => {
   beforeEach(() => {
     jest.resetAllMocks();
+    jest.mocked(deriveAndPersistAffiliateSupplyAssessment).mockResolvedValue({
+      stage: 'PUBLISHED',
+      isAutomationEnabled: true,
+    } as any);
+    jest.mocked(executeAffiliateSupplyLifecycleCommand).mockImplementation(async (input) => {
+      if (input.request?.runId) {
+        const data = {
+          status: 'SUCCEEDED',
+          finishedAt: input.now,
+          finalUrl: input.request.finalUrl,
+          httpStatus: input.request.httpStatus,
+          itemCount: input.request.itemCount,
+          candidateCount: input.request.candidateCount,
+          logs: input.request.runLogs,
+        };
+        completedScrapeRun = { id: input.request.runId, ...data };
+        await prismaMock.affiliateScrapeRuns.update({
+          where: { id: input.request.runId },
+          data,
+        });
+      }
+      return {
+        assessment: { stage: 'PUBLISHED', isAutomationEnabled: true },
+        transition: null,
+        replayed: false,
+      } as any;
+    });
     idCounter = 0;
+    completedScrapeRun = null;
+    prismaMock.affiliateScrapeRuns.findUnique.mockImplementation(async ({ where }) => (
+      completedScrapeRun?.id === where.id
+        ? completedScrapeRun
+        : { id: where.id, status: 'SUCCEEDED' }
+    ));
     prismaMock.$transaction.mockImplementation(async (callback: (client: typeof prismaMock) => unknown) => callback(prismaMock));
     prismaMock.$executeRaw.mockResolvedValue(0);
     geocodeAddressToCoordinatesMock.mockResolvedValue([-122.6765, 45.5231]);
@@ -327,7 +382,7 @@ describe('affiliate import service', () => {
       where: { id: 'mapping_1' }, data: expect.objectContaining({ validatedAt: expect.any(Date) }),
     }));
     expect(source).toEqual(expect.objectContaining({
-      autoScrapeEnabled: true,
+      autoScrapeEnabled: false,
       metadata: expect.objectContaining({
         automationBaseline: expect.objectContaining({ mappingId: 'mapping_1', mappingVersion: 3, candidateCount: 1 }),
       }),
@@ -2526,6 +2581,59 @@ describe('affiliate import service', () => {
     });
   });
 
+  it('accepts a declared empty state only when its selector contains the evidence text', async () => {
+    prismaMock.affiliateScrapeSources.findUnique.mockResolvedValue({
+      id: 'source_empty',
+      name: 'Empty Source',
+      activeMappingId: 'mapping_empty',
+      listUrl: 'https://example.com/events',
+      organizationId: 'org_empty',
+    });
+    prismaMock.organizations.findUnique.mockResolvedValue({ id: 'org_empty' });
+    prismaMock.affiliateScrapeMappings.findUnique.mockResolvedValue({
+      id: 'mapping_empty',
+      sourceId: 'source_empty',
+      mapping: {
+        kind: 'EVENT',
+        listUrl: 'https://example.com/events',
+        itemSelector: '.event',
+        emptyState: {
+          selector: '#empty',
+          textIncludes: ['No events are scheduled'],
+        },
+        fields: {
+          title: { selector: '.title' },
+          officialActionUrl: { selector: 'a', mode: 'attribute', attribute: 'href' },
+        },
+      },
+    });
+    prismaMock.affiliateScrapeRuns.create.mockResolvedValue({ id: 'run_empty' });
+    prismaMock.affiliateScrapeRuns.update.mockImplementation(async ({ data }) => ({ id: 'run_empty', ...data }));
+    prismaMock.affiliateScrapeSources.update.mockResolvedValue({});
+
+    await runAffiliateSourceScrape('source_empty', {
+      client: {
+        fetchPage: async () => ({
+          url: 'https://example.com/events',
+          finalUrl: 'https://example.com/events',
+          statusCode: 200,
+          fetchedAt: '2026-08-22T00:00:00.000Z',
+          body: '<main><div id="empty">No events are scheduled</div></main>',
+        }),
+      },
+    });
+
+    expect(prismaMock.affiliateScrapeRuns.update).toHaveBeenLastCalledWith({
+      where: { id: 'run_empty' },
+      data: expect.objectContaining({
+        status: 'SUCCEEDED',
+        itemCount: 0,
+        candidateCount: 0,
+        logs: expect.objectContaining({ emptyStateMatched: true }),
+      }),
+    });
+  });
+
   it('reports existing scraped candidates separately from newly created candidates', async () => {
     prismaMock.affiliateScrapeSources.findUnique.mockResolvedValue({
       id: 'source_1',
@@ -2607,9 +2715,36 @@ describe('affiliate import service', () => {
   });
 
   it('automatically publishes valid candidates for scheduled imports', async () => {
+    const activeContract = buildAffiliateSupplyContractManifest({
+      version: 1,
+      rolloutCohort: 'DEFAULT',
+      supplyContract: {
+        schemaVersion: 1,
+        version: 1,
+        rolloutCohort: 'DEFAULT',
+        freshnessWindows: [{ sourceProfile: 'EVENT', maximumAgeHours: 24 }],
+        targets: [{
+          marketKey: 'portland',
+          sportId: 'soccer',
+          sourceProfile: 'EVENT',
+          minimumFreshPublishedSupply: 1,
+        }],
+        requiredMappingEvidenceKinds: ['PAGE_HTML'],
+        requiredLifecycleEvidenceKinds: ['DURABLE_SOURCE_EVIDENCE', 'VALIDATION_OUTPUT'],
+        hash: undefined,
+      },
+    });
+    prismaMock.affiliateSupplyContractManifests.findFirst.mockResolvedValue({
+      status: 'ACTIVE',
+      version: activeContract.version,
+      rolloutCohort: activeContract.rolloutCohort,
+      contractHash: activeContract.hash,
+      contractJson: activeContract.supplyContract,
+    });
     prismaMock.affiliateScrapeSources.findUnique.mockResolvedValue({
       id: 'source_automatic',
       name: 'Automatic Source',
+      supplySourceId: 'supply_automatic',
       activeMappingId: 'mapping_automatic',
       listUrl: 'https://example.com/events',
       organizationId: 'org_automatic',
@@ -2628,6 +2763,11 @@ describe('affiliate import service', () => {
         },
       },
     });
+    prismaMock.affiliateSupplySources.findUnique.mockResolvedValue({
+      id: 'supply_automatic',
+      rolloutCohort: 'DEFAULT',
+      lifecycleGeneration: 0,
+    });
     prismaMock.organizations.findUnique.mockResolvedValue({
       id: 'org_automatic',
       name: 'Automatic Source',
@@ -2638,6 +2778,7 @@ describe('affiliate import service', () => {
       sourceId: 'source_automatic',
       version: 1,
       validatedAt: new Date('2026-07-01T00:00:00.000Z'),
+      metadata: { marketKey: 'portland', sportId: 'soccer' },
       mapping: {
         kind: 'EVENT',
         listUrl: 'https://example.com/events',
@@ -2676,6 +2817,16 @@ describe('affiliate import service', () => {
         }),
       },
     });
+    expect(executeAffiliateSupplyLifecycleCommand).toHaveBeenCalledWith(expect.objectContaining({
+      request: expect.objectContaining({
+        targets: expect.arrayContaining([
+          expect.objectContaining({
+            marketKey: 'portland',
+            sportId: 'soccer',
+          }),
+        ]),
+      }),
+    }));
 
     expect(prismaMock.affiliateImportCandidates.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ status: 'DISCOVERED', title: 'Automatic league' }),
@@ -2707,6 +2858,7 @@ describe('affiliate import service', () => {
     prismaMock.affiliateScrapeSources.findUnique.mockResolvedValue({
       id: 'source_automatic_unresolved',
       name: 'Automatic Source',
+      supplySourceId: 'supply_automatic_unresolved',
       activeMappingId: 'mapping_automatic_unresolved',
       listUrl: 'https://example.com/events',
       organizationId: 'org_automatic_unresolved',
@@ -2724,6 +2876,11 @@ describe('affiliate import service', () => {
           normalizedFieldsHash: 'baseline-hash',
         },
       },
+    });
+    prismaMock.affiliateSupplySources.findUnique.mockResolvedValue({
+      id: 'supply_automatic_unresolved',
+      rolloutCohort: 'DEFAULT',
+      lifecycleGeneration: 0,
     });
     prismaMock.organizations.findUnique.mockResolvedValue({ id: 'org_automatic_unresolved' });
     prismaMock.affiliateScrapeMappings.findUnique.mockResolvedValue({
@@ -2795,6 +2952,7 @@ describe('affiliate import service', () => {
   it('holds an automatic run for review when a nonzero baseline drops to zero', async () => {
     prismaMock.affiliateScrapeSources.findUnique.mockResolvedValue({
       id: 'source_drift',
+      supplySourceId: 'supply_drift',
       name: 'Drift Source',
       activeMappingId: 'mapping_drift',
       listUrl: 'https://example.com/events',
@@ -2807,6 +2965,11 @@ describe('affiliate import service', () => {
           criticalMissingCount: 0, criticalMissingRate: 0, normalizedFieldsHash: 'baseline-hash',
         },
       },
+    });
+    prismaMock.affiliateSupplySources.findUnique.mockResolvedValue({
+      id: 'supply_drift',
+      rolloutCohort: 'DEFAULT',
+      lifecycleGeneration: 0,
     });
     prismaMock.organizations.findUnique.mockResolvedValue({ id: 'org_drift' });
     prismaMock.affiliateScrapeMappings.findUnique.mockResolvedValue({

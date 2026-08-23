@@ -131,6 +131,13 @@ export const ModelName = {
   AffiliateSourceMappingJobs: 'AffiliateSourceMappingJobs',
   AffiliateApprovalJobs: 'AffiliateApprovalJobs',
   AffiliateImportCandidates: 'AffiliateImportCandidates',
+  AffiliateSupplySources: 'AffiliateSupplySources',
+  AffiliateSupplyContractManifests: 'AffiliateSupplyContractManifests',
+  AffiliateSupplyLifecycleTransitions: 'AffiliateSupplyLifecycleTransitions',
+  AffiliateAgentWorkerHealth: 'AffiliateAgentWorkerHealth',
+  AffiliateSupplyTargets: 'AffiliateSupplyTargets',
+  AffiliateReplenishmentDemands: 'AffiliateReplenishmentDemands',
+  AffiliateReplenishmentWaves: 'AffiliateReplenishmentWaves',
   EventTags: 'EventTags',
   EventTagAssignments: 'EventTagAssignments',
   OrganizationTags: 'OrganizationTags',
@@ -1420,7 +1427,11 @@ export const AffiliateScrapeSourcesScalarFieldEnum = {
   targetKind: 'targetKind',
   status: 'status',
   activeMappingId: 'activeMappingId',
+  supplySourceId: 'supplySourceId',
   lastScrapeRunId: 'lastScrapeRunId',
+  lifecycleGeneration: 'lifecycleGeneration',
+  activeSupplyContractVersion: 'activeSupplyContractVersion',
+  activeSupplyContractHash: 'activeSupplyContractHash',
   lastScrapedAt: 'lastScrapedAt',
   autoScrapeEnabled: 'autoScrapeEnabled',
   scrapeIntervalMinutes: 'scrapeIntervalMinutes',
@@ -1436,6 +1447,7 @@ export const AffiliateScrapeMappingsScalarFieldEnum = {
   createdAt: 'createdAt',
   updatedAt: 'updatedAt',
   sourceId: 'sourceId',
+  supplySourceId: 'supplySourceId',
   version: 'version',
   isActive: 'isActive',
   mapping: 'mapping',
@@ -1452,6 +1464,7 @@ export const AffiliateScrapeRunsScalarFieldEnum = {
   createdAt: 'createdAt',
   updatedAt: 'updatedAt',
   sourceId: 'sourceId',
+  supplySourceId: 'supplySourceId',
   mappingId: 'mappingId',
   requestedByUserId: 'requestedByUserId',
   status: 'status',
@@ -1485,6 +1498,7 @@ export const AffiliateSourceIntakesScalarFieldEnum = {
   suggestedClassification: 'suggestedClassification',
   organizationId: 'organizationId',
   affiliateSourceId: 'affiliateSourceId',
+  supplySourceId: 'supplySourceId',
   selectedLogoArtifactId: 'selectedLogoArtifactId',
   lastRunId: 'lastRunId',
   createdByUserId: 'createdByUserId',
@@ -1502,6 +1516,7 @@ export const AffiliateSourceIntakePagesScalarFieldEnum = {
   createdAt: 'createdAt',
   updatedAt: 'updatedAt',
   intakeId: 'intakeId',
+  supplySourceId: 'supplySourceId',
   url: 'url',
   canonicalUrl: 'canonicalUrl',
   urlKey: 'urlKey',
@@ -1523,6 +1538,7 @@ export const AffiliateSourceIntakeRunsScalarFieldEnum = {
   createdAt: 'createdAt',
   updatedAt: 'updatedAt',
   intakeId: 'intakeId',
+  supplySourceId: 'supplySourceId',
   requestedPageIds: 'requestedPageIds',
   requestedByUserId: 'requestedByUserId',
   provider: 'provider',
@@ -1548,6 +1564,7 @@ export const AffiliateSourceIntakeArtifactsScalarFieldEnum = {
   createdAt: 'createdAt',
   updatedAt: 'updatedAt',
   intakeId: 'intakeId',
+  supplySourceId: 'supplySourceId',
   pageId: 'pageId',
   runId: 'runId',
   kind: 'kind',
@@ -1936,6 +1953,7 @@ export const AffiliateSourceDiscoveryResultsScalarFieldEnum = {
   reasonDetails: 'reasonDetails',
   matchingIntakeId: 'matchingIntakeId',
   matchingSourceId: 'matchingSourceId',
+  supplySourceId: 'supplySourceId',
   matchingOrganizationId: 'matchingOrganizationId',
   metadata: 'metadata'
 } as const
@@ -1966,6 +1984,7 @@ export const AffiliateSourceMappingJobsScalarFieldEnum = {
   createdAt: 'createdAt',
   updatedAt: 'updatedAt',
   intakeId: 'intakeId',
+  supplySourceId: 'supplySourceId',
   sourceId: 'sourceId',
   mappingId: 'mappingId',
   legacyIdentityMigrationEligible: 'legacyIdentityMigrationEligible',
@@ -1989,6 +2008,7 @@ export const AffiliateApprovalJobsScalarFieldEnum = {
   createdAt: 'createdAt',
   updatedAt: 'updatedAt',
   subjectType: 'subjectType',
+  supplySourceId: 'supplySourceId',
   subjectKey: 'subjectKey',
   status: 'status',
   claimedAt: 'claimedAt',
@@ -2008,6 +2028,7 @@ export const AffiliateImportCandidatesScalarFieldEnum = {
   createdAt: 'createdAt',
   updatedAt: 'updatedAt',
   sourceId: 'sourceId',
+  supplySourceId: 'supplySourceId',
   runId: 'runId',
   mappingId: 'mappingId',
   listingKind: 'listingKind',
@@ -2045,6 +2066,184 @@ export const AffiliateImportCandidatesScalarFieldEnum = {
 } as const
 
 export type AffiliateImportCandidatesScalarFieldEnum = (typeof AffiliateImportCandidatesScalarFieldEnum)[keyof typeof AffiliateImportCandidatesScalarFieldEnum]
+
+
+export const AffiliateSupplySourcesScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt',
+  identityKey: 'identityKey',
+  canonicalUrl: 'canonicalUrl',
+  origin: 'origin',
+  pathKey: 'pathKey',
+  operatorDomain: 'operatorDomain',
+  targetKind: 'targetKind',
+  rolloutCohort: 'rolloutCohort',
+  intakeId: 'intakeId',
+  liveSourceId: 'liveSourceId',
+  predecessorId: 'predecessorId',
+  successorId: 'successorId',
+  lifecycleGeneration: 'lifecycleGeneration',
+  activeSupplyContractVersion: 'activeSupplyContractVersion',
+  activeSupplyContractHash: 'activeSupplyContractHash',
+  derivedStage: 'derivedStage',
+  derivedOutcome: 'derivedOutcome',
+  freshnessStatus: 'freshnessStatus',
+  targetContribution: 'targetContribution',
+  repairPriority: 'repairPriority',
+  isAutomationEnabled: 'isAutomationEnabled',
+  isExcluded: 'isExcluded',
+  automationHoldReason: 'automationHoldReason',
+  excludedAt: 'excludedAt',
+  lastSuccessfulRefreshAt: 'lastSuccessfulRefreshAt',
+  lastAssessmentAt: 'lastAssessmentAt',
+  assessmentJson: 'assessmentJson',
+  invariantViolations: 'invariantViolations',
+  metadata: 'metadata'
+} as const
+
+export type AffiliateSupplySourcesScalarFieldEnum = (typeof AffiliateSupplySourcesScalarFieldEnum)[keyof typeof AffiliateSupplySourcesScalarFieldEnum]
+
+
+export const AffiliateSupplyContractManifestsScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt',
+  rolloutCohort: 'rolloutCohort',
+  version: 'version',
+  status: 'status',
+  contractHash: 'contractHash',
+  contractJson: 'contractJson',
+  componentHashes: 'componentHashes',
+  activatedByUserId: 'activatedByUserId',
+  activatedAt: 'activatedAt',
+  retiredAt: 'retiredAt',
+  impactReport: 'impactReport'
+} as const
+
+export type AffiliateSupplyContractManifestsScalarFieldEnum = (typeof AffiliateSupplyContractManifestsScalarFieldEnum)[keyof typeof AffiliateSupplyContractManifestsScalarFieldEnum]
+
+
+export const AffiliateSupplyLifecycleTransitionsScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  supplySourceId: 'supplySourceId',
+  sequence: 'sequence',
+  generation: 'generation',
+  fromStage: 'fromStage',
+  toStage: 'toStage',
+  outcome: 'outcome',
+  command: 'command',
+  commandRef: 'commandRef',
+  idempotencyKey: 'idempotencyKey',
+  requestHash: 'requestHash',
+  resultHash: 'resultHash',
+  contractVersion: 'contractVersion',
+  contractHash: 'contractHash',
+  actorKind: 'actorKind',
+  actorId: 'actorId',
+  executingAgentId: 'executingAgentId',
+  reasonCodes: 'reasonCodes',
+  evidenceRefs: 'evidenceRefs',
+  requestJson: 'requestJson',
+  resultJson: 'resultJson',
+  occurredAt: 'occurredAt',
+  retentionClass: 'retentionClass'
+} as const
+
+export type AffiliateSupplyLifecycleTransitionsScalarFieldEnum = (typeof AffiliateSupplyLifecycleTransitionsScalarFieldEnum)[keyof typeof AffiliateSupplyLifecycleTransitionsScalarFieldEnum]
+
+
+export const AffiliateAgentWorkerHealthScalarFieldEnum = {
+  id: 'id',
+  workerId: 'workerId',
+  role: 'role',
+  status: 'status',
+  heartbeatAt: 'heartbeatAt',
+  leaseExpiresAt: 'leaseExpiresAt',
+  metadata: 'metadata',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type AffiliateAgentWorkerHealthScalarFieldEnum = (typeof AffiliateAgentWorkerHealthScalarFieldEnum)[keyof typeof AffiliateAgentWorkerHealthScalarFieldEnum]
+
+
+export const AffiliateSupplyTargetsScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt',
+  supplySourceId: 'supplySourceId',
+  candidateId: 'candidateId',
+  targetType: 'targetType',
+  targetId: 'targetId',
+  marketKey: 'marketKey',
+  sportId: 'sportId',
+  sourceProfile: 'sourceProfile',
+  status: 'status',
+  publishedAt: 'publishedAt',
+  lastSuccessfulRefreshAt: 'lastSuccessfulRefreshAt',
+  freshnessExpiresAt: 'freshnessExpiresAt',
+  rejectedAt: 'rejectedAt',
+  rejectionReason: 'rejectionReason',
+  evidenceRefs: 'evidenceRefs',
+  evidenceHash: 'evidenceHash',
+  metadata: 'metadata'
+} as const
+
+export type AffiliateSupplyTargetsScalarFieldEnum = (typeof AffiliateSupplyTargetsScalarFieldEnum)[keyof typeof AffiliateSupplyTargetsScalarFieldEnum]
+
+
+export const AffiliateReplenishmentDemandsScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt',
+  targetKey: 'targetKey',
+  marketKey: 'marketKey',
+  sportId: 'sportId',
+  sourceProfile: 'sourceProfile',
+  rolloutCohort: 'rolloutCohort',
+  contractVersion: 'contractVersion',
+  contractHash: 'contractHash',
+  minimumFreshPublishedSupply: 'minimumFreshPublishedSupply',
+  observedFreshPublishedSupply: 'observedFreshPublishedSupply',
+  priority: 'priority',
+  status: 'status',
+  openedAt: 'openedAt',
+  closedAt: 'closedAt',
+  nextEligibleAt: 'nextEligibleAt',
+  searchSaturatedUntil: 'searchSaturatedUntil',
+  activeWaveId: 'activeWaveId',
+  generation: 'generation',
+  reasonCodes: 'reasonCodes',
+  evidenceJson: 'evidenceJson'
+} as const
+
+export type AffiliateReplenishmentDemandsScalarFieldEnum = (typeof AffiliateReplenishmentDemandsScalarFieldEnum)[keyof typeof AffiliateReplenishmentDemandsScalarFieldEnum]
+
+
+export const AffiliateReplenishmentWavesScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt',
+  demandId: 'demandId',
+  rolloutCohort: 'rolloutCohort',
+  status: 'status',
+  campaignId: 'campaignId',
+  coveragePlanningJobId: 'coveragePlanningJobId',
+  provider: 'provider',
+  providerOperationKey: 'providerOperationKey',
+  startedAt: 'startedAt',
+  terminalAt: 'terminalAt',
+  retryAt: 'retryAt',
+  marginalYield: 'marginalYield',
+  errorCode: 'errorCode',
+  resultJson: 'resultJson',
+  demandGeneration: 'demandGeneration',
+  evidenceRefs: 'evidenceRefs'
+} as const
+
+export type AffiliateReplenishmentWavesScalarFieldEnum = (typeof AffiliateReplenishmentWavesScalarFieldEnum)[keyof typeof AffiliateReplenishmentWavesScalarFieldEnum]
 
 
 export const EventTagsScalarFieldEnum = {

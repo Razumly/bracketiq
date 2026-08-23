@@ -1,6 +1,7 @@
 import { createHash } from "crypto";
 import path from "path";
 import sharp from "sharp";
+import { JSDOM } from "jsdom";
 import {
   buildDivisionToken,
   deriveDivisionTypeDisplayName,
@@ -61,6 +62,15 @@ import {
   calculateAffiliateAutomationRunMetrics,
   parseAffiliateAutomationBaseline,
 } from "./automationBaseline";
+import {
+  affiliateSupplyDatabase,
+  deriveAndPersistAffiliateSupplyAssessment,
+  ensureAffiliateSupplySource,
+  executeAffiliateSupplyLifecycleCommand,
+  loadActiveAffiliateSupplyContract,
+} from './affiliateSupplyPersistence';
+import { targetRuleFor } from './affiliateSupplyLifecycle';
+import { hashAffiliateAgentValue } from './agentGatewayContracts';
 import {
   type AffiliateDateDisplayMode,
   type AffiliateCandidateInput,
@@ -124,6 +134,17 @@ const affiliatePrisma = (clientInput: any = prisma) => {
     files: client.file,
   };
 };
+const withAffiliateScrapeTransaction = async <T>(
+  client: any,
+  callback: (transactionClient: any) => Promise<T>,
+): Promise<T> => (
+  typeof client?.$transaction === "function"
+    ? client.$transaction(
+        (transactionClient: any) => callback(transactionClient),
+        { isolationLevel: "Serializable" },
+      )
+    : callback(client)
+);
 
 const nullableString = (value: unknown): string | null => {
   if (typeof value !== "string") return null;
@@ -379,15 +400,22 @@ export const buildAffiliateCandidateDedupeKey = (
   ].join("|");
   return createHash("sha256").update(raw).digest("hex");
 };
-
 const candidatePersistenceData = (params: {
   sourceId: string;
+  supplySourceId?: string | null;
   runId: string;
   mappingId: string | null;
   dedupeKey: string;
   candidate: AffiliateCandidateInput;
 }) => {
-  const { sourceId, runId, mappingId, dedupeKey, candidate } = params;
+  const {
+    sourceId,
+    supplySourceId,
+    runId,
+    mappingId,
+    dedupeKey,
+    candidate,
+  } = params;
   const tagNames =
     candidate.listingKind === "EVENT"
       ? buildAffiliateEventTagNames(candidate)
@@ -406,6 +434,7 @@ const candidatePersistenceData = (params: {
   rawPayload.sportNames = candidateSportNames(candidate);
   return {
     sourceId,
+    ...(supplySourceId ? { supplySourceId } : {}),
     runId,
     mappingId,
     listingKind: candidate.listingKind,
@@ -491,8 +520,9 @@ const AFFILIATE_SPORT_REVIEW_WARNING =
 
 const quarantineAffiliateCandidateTarget = async (
   candidate: any,
+  client: any = prisma,
 ): Promise<void> => {
-  const { events, facilities, organizations } = affiliatePrisma();
+  const { events, facilities, organizations } = affiliatePrisma(client);
   const eventId = nullableString(candidate.publishedEventId);
   if (eventId) {
     await events.updateMany({
@@ -573,136 +603,272 @@ export const createAffiliateSource = async (
   input: AffiliateSourceCreateInput,
   adminUserId?: string,
 ) => {
-  const { sources, mappings } = affiliatePrisma();
-  const sourceId = createId();
-  const source = await sources.create({
-    data: {
-      id: sourceId,
-      name: input.name.trim(),
-      sourceKey: input.sourceKey.trim(),
-      organizationId: nullableString(input.organizationId),
-      baseUrl: nullableString(input.baseUrl),
-      listUrl: input.listUrl.trim(),
-      targetKind: normalizeStatus(input.targetKind, "EVENT"),
-      status: normalizeStatus(input.status, "ACTIVE"),
-      autoScrapeEnabled: input.autoScrapeEnabled === true,
-      scrapeIntervalMinutes:
-        typeof input.scrapeIntervalMinutes === "number" &&
-        Number.isInteger(input.scrapeIntervalMinutes) &&
-        input.scrapeIntervalMinutes >= 60
-          ? input.scrapeIntervalMinutes
-          : 1440,
-      notes: nullableString(input.notes),
-      metadata: input.metadata ?? null,
-    },
-  });
-
-  if (!input.mapping) {
-    return source;
-  }
-
-  const mapping = await mappings.create({
-    data: {
-      id: createId(),
-      sourceId,
-      version: 1,
-      isActive: true,
-      mapping: input.mapping,
-      createdByUserId: adminUserId ?? null,
-    },
-  });
-
-  return sources.update({
-    where: { id: sourceId },
-    data: { activeMappingId: mapping.id },
-  });
+  const execute = async (transactionClient: any) => {
+    const { sources, mappings } = affiliatePrisma(transactionClient);
+    const sourceId = createId();
+    const supplyDatabase = affiliateSupplyDatabase(transactionClient);
+    const isLifecycleReady = Boolean(supplyDatabase.supplySources?.findUnique);
+    const source = await sources.create({
+      data: {
+        id: sourceId,
+        name: input.name.trim(),
+        sourceKey: input.sourceKey.trim(),
+        organizationId: nullableString(input.organizationId),
+        baseUrl: nullableString(input.baseUrl),
+        listUrl: input.listUrl.trim(),
+        targetKind: normalizeStatus(input.targetKind, "EVENT"),
+        status: normalizeStatus(input.status, "ACTIVE"),
+        autoScrapeEnabled: isLifecycleReady ? false : input.autoScrapeEnabled === true,
+        scrapeIntervalMinutes:
+          typeof input.scrapeIntervalMinutes === "number" &&
+          Number.isInteger(input.scrapeIntervalMinutes) &&
+          input.scrapeIntervalMinutes >= 60
+            ? input.scrapeIntervalMinutes
+            : 1440,
+        notes: nullableString(input.notes),
+        metadata: input.metadata ?? null,
+      },
+    });
+    const supply = isLifecycleReady
+      ? await ensureAffiliateSupplySource({
+          requestedUrl: input.listUrl,
+          resolvedCanonicalUrl: input.listUrl,
+          redirectVerified: true,
+          targetKind: input.targetKind,
+          liveSourceId: sourceId,
+          db: supplyDatabase,
+        })
+      : null;
+    if (supply) {
+      await sources.update({
+        where: { id: sourceId },
+        data: { supplySourceId: supply.supplySource.id },
+      });
+    }
+    if (!input.mapping) {
+      return supply
+        ? { ...source, supplySourceId: supply.supplySource.id }
+        : source;
+    }
+    const mapping = await mappings.create({
+      data: {
+        id: createId(),
+        sourceId,
+        ...(supply ? { supplySourceId: supply.supplySource.id } : {}),
+        version: 1,
+        isActive: !isLifecycleReady,
+        mapping: input.mapping,
+        createdByUserId: adminUserId ?? null,
+      },
+    });
+    return sources.update({
+      where: { id: sourceId },
+      data: { activeMappingId: mapping.id },
+    });
+  };
+  const client = prisma as any;
+  return typeof client.$transaction === "function"
+    ? client.$transaction((transactionClient: any) => execute(transactionClient), {
+        isolationLevel: "Serializable",
+      })
+    : execute(client);
 };
 
 export const approveAffiliateSourceAutomation = async (
   sourceId: string,
   adminUserId: string,
 ) => {
-  const { sources, mappings, runs, candidates } = affiliatePrisma();
-  const source = await sources.findUnique({ where: { id: sourceId } });
-  if (!source) throw new Error("Affiliate scrape source not found.");
-  if (!source.activeMappingId)
-    throw new Error("No active scrape mapping is configured for this source.");
-
-  const mapping = await mappings.findUnique({
-    where: { id: source.activeMappingId },
-  });
-  if (!mapping || mapping.sourceId !== source.id) {
-    throw new Error(
-      "The active scrape mapping does not belong to this source.",
-    );
-  }
-  const latestRun = await runs.findFirst({
-    where: {
-      sourceId,
-      mappingId: mapping.id,
-      status: "SUCCEEDED",
-    },
-    orderBy: { startedAt: "desc" },
-  });
-  if (!latestRun) {
-    throw new Error(
-      "Run and review a successful first-pass scrape before enabling automatic imports.",
-    );
-  }
-  const baselineCandidates = await candidates.findMany({
-    where: { runId: latestRun.id },
-    select: {
-      listingKind: true,
-      title: true,
-      officialActionUrl: true,
-      sourceUrl: true,
-      startsAt: true,
-      dateDisplayMode: true,
-      city: true,
-      venueName: true,
-      address: true,
-      priceText: true,
-    },
-  });
-  const runLogs = recordValue(latestRun.logs);
-  const approvedAt = new Date();
-  const baseline = buildAffiliateAutomationBaseline({
-    mappingId: mapping.id,
-    mappingVersion: Number.isInteger(mapping.version) ? mapping.version : 1,
-    approvedAt,
-    candidates: baselineCandidates,
-    rejectedCount:
-      typeof runLogs.rejectedCount === "number" ? runLogs.rejectedCount : 0,
-  });
-  if (baseline.candidateCount === 0) {
-    throw new Error(
-      "The first-pass scrape must contain at least one reviewable candidate before automatic imports can be enabled.",
-    );
-  }
-
-  await mappings.update({
-    where: { id: mapping.id },
-    data: {
-      validatedAt: approvedAt,
-      notes: [
-        nullableString(mapping.notes),
-        `Automation approved by ${adminUserId} on ${approvedAt.toISOString()}`,
-      ]
-        .filter(Boolean)
-        .join("\n"),
-    },
-  });
-  return sources.update({
-    where: { id: sourceId },
-    data: {
-      autoScrapeEnabled: true,
-      metadata: {
-        ...recordValue(source.metadata),
-        [AFFILIATE_AUTOMATION_BASELINE_METADATA_KEY]: baseline,
-        [AFFILIATE_AUTOMATION_REVIEW_METADATA_KEY]: null,
+  const execute = async (transactionClient: any) => {
+    const { sources, mappings, runs, candidates } = affiliatePrisma(transactionClient);
+    const supplyDatabase = affiliateSupplyDatabase(transactionClient);
+    const source = await sources.findUnique({ where: { id: sourceId } });
+    if (!source) throw new Error("Affiliate scrape source not found.");
+    if (!source.activeMappingId) {
+      throw new Error("No active scrape mapping is configured for this source.");
+    }
+    const mapping = await mappings.findUnique({ where: { id: source.activeMappingId } });
+    if (!mapping || mapping.sourceId !== source.id) {
+      throw new Error("The active scrape mapping does not belong to this source.");
+    }
+    const latestRun = await runs.findFirst({
+      where: { sourceId, mappingId: mapping.id, status: "SUCCEEDED" },
+      orderBy: { startedAt: "desc" },
+    });
+    if (!latestRun) {
+      throw new Error("Run and review a successful first-pass scrape before enabling automatic imports.");
+    }
+    const baselineCandidates = await candidates.findMany({
+      where: { runId: latestRun.id },
+      select: {
+        listingKind: true,
+        title: true,
+        officialActionUrl: true,
+        sourceUrl: true,
+        startsAt: true,
+        dateDisplayMode: true,
+        city: true,
+        venueName: true,
+        address: true,
+        priceText: true,
       },
-    },
-  });
+    });
+    const runLogs = recordValue(latestRun.logs);
+    const approvedAt = new Date();
+    const baseline = buildAffiliateAutomationBaseline({
+      mappingId: mapping.id,
+      mappingVersion: Number.isInteger(mapping.version) ? mapping.version : 1,
+      approvedAt,
+      candidates: baselineCandidates,
+      rejectedCount: typeof runLogs.rejectedCount === "number" ? runLogs.rejectedCount : 0,
+    });
+    const mappingPackageHash = hashAffiliateAgentValue(mapping.mapping ?? {});
+    if (baseline.candidateCount === 0) {
+      throw new Error("The first-pass scrape must contain at least one reviewable candidate before automatic imports can be enabled.");
+    }
+    const isLifecycleReady = Boolean(
+      source.supplySourceId
+      && supplyDatabase.supplySources?.findUnique
+      && supplyDatabase.approvals?.upsert
+      && supplyDatabase.transitions?.create,
+    );
+    const activeContract = isLifecycleReady
+      ? await loadActiveAffiliateSupplyContract({ db: supplyDatabase })
+      : null;
+
+    let updatedSource;
+    if (isLifecycleReady && source.supplySourceId && activeContract) {
+      const currentRoot = await supplyDatabase.supplySources.findUnique({
+        where: { id: source.supplySourceId },
+      });
+      if (!currentRoot) {
+        throw new Error("Affiliate Supply Source root not found.");
+      }
+      await executeAffiliateSupplyLifecycleCommand({
+        supplySourceId: source.supplySourceId,
+        command: 'APPROVE',
+        authority: 'SUPPLY_REVIEWER',
+        expectedLifecycleGeneration: currentRoot.lifecycleGeneration,
+        idempotencyKey: `approve:${mapping.id}:${baseline.normalizedFieldsHash}`,
+        request: {
+          sourceId,
+          mappingId: mapping.id,
+          packageHash: mappingPackageHash,
+          baseline,
+          evidenceRefs: [`mapping:${mapping.id}`, `run:${latestRun.id}`],
+          lifecycleEvidenceKinds: ['DURABLE_SOURCE_EVIDENCE', 'VALIDATION_OUTPUT'],
+        },
+        actorKind: 'SUPPLY_REVIEWER',
+        actorId: adminUserId,
+        db: supplyDatabase,
+        now: approvedAt,
+      });
+      updatedSource = await sources.findUnique({ where: { id: sourceId } });
+    } else {
+      await mappings.update({
+        where: { id: mapping.id },
+        data: {
+          validatedAt: approvedAt,
+          notes: [
+            nullableString(mapping.notes),
+            `Mapping reviewed by ${adminUserId} on ${approvedAt.toISOString()}`,
+          ].filter(Boolean).join("\n"),
+        },
+      });
+      updatedSource = await sources.update({
+        where: { id: sourceId },
+        data: {
+          autoScrapeEnabled: false,
+          metadata: {
+            ...recordValue(source.metadata),
+            [AFFILIATE_AUTOMATION_BASELINE_METADATA_KEY]: baseline,
+            [AFFILIATE_AUTOMATION_REVIEW_METADATA_KEY]: {
+              hold: true,
+              reason: "SUPPLY_SOURCE_ROOT_REQUIRED",
+            },
+          },
+        },
+      });
+    }
+    return updatedSource;
+  };
+  const client = prisma as any;
+  return typeof client.$transaction === "function"
+    ? client.$transaction((transactionClient: any) => execute(transactionClient), { isolationLevel: "Serializable" })
+    : execute(client);
+};
+export type AffiliateSourceActivationInput = Readonly<{
+  reviewedCandidateIds: readonly string[];
+  candidateReviewEvidenceRefs: readonly string[];
+  targets: readonly Readonly<Record<string, unknown>>[];
+}>;
+
+export const activateAffiliateSourceAutomation = async (
+  sourceId: string,
+  adminUserId: string,
+  input: AffiliateSourceActivationInput,
+) => {
+  const execute = async (transactionClient: any) => {
+    const { sources, mappings } = affiliatePrisma(transactionClient);
+    const supplyDatabase = affiliateSupplyDatabase(transactionClient);
+    const source = await sources.findUnique({ where: { id: sourceId } });
+    if (!source?.supplySourceId) {
+      throw new Error("Affiliate source is not linked to a Supply Source root.");
+    }
+    if (!source.activeMappingId) {
+      throw new Error("No active scrape mapping is configured for this source.");
+    }
+    const mapping = await mappings.findUnique({ where: { id: source.activeMappingId } });
+    if (!mapping || mapping.sourceId !== source.id) {
+      throw new Error("The active scrape mapping does not belong to this source.");
+    }
+    const baseline = parseAffiliateAutomationBaseline(
+      recordValue(source.metadata)[AFFILIATE_AUTOMATION_BASELINE_METADATA_KEY],
+    );
+    if (!baseline) {
+      throw new Error("Affiliate source has no reviewed automation baseline.");
+    }
+    const mappingPackageHash = hashAffiliateAgentValue(mapping.mapping ?? {});
+    const root = await supplyDatabase.supplySources.findUnique({
+      where: { id: source.supplySourceId },
+    });
+    if (!root) {
+      throw new Error("Affiliate Supply Source root not found.");
+    }
+    const now = new Date();
+    await executeAffiliateSupplyLifecycleCommand({
+      supplySourceId: source.supplySourceId,
+      command: 'ACTIVATE',
+      authority: 'SUPPLY_REVIEWER',
+      expectedLifecycleGeneration: root.lifecycleGeneration,
+      idempotencyKey: `activate:${mapping.id}:${baseline.normalizedFieldsHash}:${hashAffiliateAgentValue(input)}`,
+      request: {
+        sourceId,
+        mappingId: mapping.id,
+        packageHash: mappingPackageHash,
+        baselineHash: baseline.normalizedFieldsHash,
+        reviewedCandidateIds: Array.from(input.reviewedCandidateIds),
+        candidateReviewEvidenceRefs: Array.from(input.candidateReviewEvidenceRefs),
+        targets: input.targets.map((target) => ({ ...target })),
+        evidenceRefs: [
+          `mapping:${mapping.id}`,
+          `supply-source:${source.supplySourceId}`,
+          ...input.candidateReviewEvidenceRefs,
+        ],
+      },
+      actorKind: 'SUPPLY_REVIEWER',
+      actorId: adminUserId,
+      db: supplyDatabase,
+      now,
+    });
+    return sources.findUnique({ where: { id: sourceId } });
+  };
+  const client = prisma as any;
+  return typeof client.$transaction === "function"
+    ? client.$transaction(
+        (transactionClient: any) => execute(transactionClient),
+        { isolationLevel: "Serializable" },
+      )
+    : execute(client);
 };
 
 const normalizeSourceType = (value: unknown): string | null =>
@@ -874,6 +1040,7 @@ const upsertAffiliateOrganizationLogoForCandidate = async (
   candidate: any,
   organizationId: string,
   ownerId: string,
+  client: any = prisma,
 ): Promise<string | null> => {
   const logoUrl = candidateClubLogoUrl(candidate);
   if (!logoUrl) return null;
@@ -892,8 +1059,7 @@ const upsertAffiliateOrganizationLogoForCandidate = async (
       contentType: "image/png",
       organizationId,
     });
-
-    await affiliatePrisma().files.upsert({
+    await affiliatePrisma(client).files.upsert({
       where: { id: logoId },
       create: {
         id: logoId,
@@ -2305,6 +2471,7 @@ const affiliateEventPublicationOrganizationFingerprint = (organization: {
 const prepareAffiliateEventPublicationLocations = async (
   candidate: any,
   source: { id?: string | null; organizationId?: string | null },
+  client: any = prisma,
 ): Promise<{
   eventCoordinates: [number, number] | null;
   sourceOrganizationCoordinates: [number, number] | null;
@@ -2323,9 +2490,9 @@ const prepareAffiliateEventPublicationLocations = async (
         }),
       )
     ).coordinates;
-  const sourceOrganization = await loadSourceOrganization(source);
+  const sourceOrganization = await loadSourceOrganization(source, client);
   const hasSeparatePublishedClubTarget =
-    await sourceHasSeparatePublishedClubTarget(source);
+    await sourceHasSeparatePublishedClubTarget(source, client);
   if (hasSeparatePublishedClubTarget) {
     return {
       eventCoordinates,
@@ -2364,11 +2531,12 @@ const prepareAffiliateEventPublicationLocations = async (
 const keepSourceOrganizationPrivateForPublishedClub = async (
   source: { organizationId?: string | null },
   targetOrganizationId: string,
+  client: any = prisma,
 ) => {
   const sourceOrganizationId = nullableString(source.organizationId);
   if (!sourceOrganizationId || sourceOrganizationId === targetOrganizationId)
     return;
-  const { organizations } = affiliatePrisma();
+  const { organizations } = affiliatePrisma(client);
   const sourceOrganization = await organizations.findUnique({
     where: { id: sourceOrganizationId },
     select: { status: true, publicPageEnabled: true },
@@ -2442,13 +2610,13 @@ const markSourceOrganizationListedForPublishedContent = async (
     },
   });
 };
-
 const buildAffiliateTeamData = async (
   candidate: any,
   source: { id: string; organizationId?: string | null; name?: string | null },
   visibility: "ADMIN_ONLY" | "PUBLIC" = "ADMIN_ONLY",
+  client: any = prisma,
 ) => {
-  const organization = await loadSourceOrganization(source);
+  const organization = await loadSourceOrganization(source, client);
   const sourceName = nullableString(source.name);
   const title =
     nullableString(candidate.title) ?? "Affiliate team registration";
@@ -2484,13 +2652,13 @@ const buildAffiliateTeamData = async (
     sourceUrl: nullableString(candidate.sourceUrl),
   };
 };
-
 const upsertAffiliateTeamForCandidate = async (
   candidate: any,
   source: { id: string; organizationId?: string | null; name?: string | null },
-  options: { visibility?: "ADMIN_ONLY" | "PUBLIC" } = {},
+  options: { visibility?: "ADMIN_ONLY" | "PUBLIC"; client?: any } = {},
 ) => {
-  const { teams } = affiliatePrisma();
+  const client = options.client ?? prisma;
+  const { teams } = affiliatePrisma(client);
   const existingTeamId = publishedTeamIdFromCandidate(candidate);
   if (existingTeamId) {
     const existingTeam = await teams.findUnique({
@@ -2501,6 +2669,7 @@ const upsertAffiliateTeamForCandidate = async (
         candidate,
         source,
         options.visibility ?? existingTeam.visibility ?? "ADMIN_ONLY",
+        client,
       );
       return teams.update({
         where: { id: existingTeamId },
@@ -2520,6 +2689,7 @@ const upsertAffiliateTeamForCandidate = async (
       candidate,
       source,
       options.visibility ?? existingBySource.visibility ?? "ADMIN_ONLY",
+      client,
     );
     return teams.update({
       where: { id: existingBySource.id },
@@ -2531,6 +2701,7 @@ const upsertAffiliateTeamForCandidate = async (
     candidate,
     source,
     options.visibility ?? "ADMIN_ONLY",
+    client,
   );
   return teams.create({
     data: {
@@ -2558,10 +2729,11 @@ const affiliateFacilityIdForCandidate = (
 const upsertAffiliateFacilityForCandidate = async (
   candidate: any,
   source: AffiliateScrapeSourceRow,
-  options: { status?: string | null } = {},
+  options: { status?: string | null; client?: any } = {},
 ) => {
-  await loadSourceOrganization(source);
-  const { facilities } = affiliatePrisma();
+  const client = options.client ?? prisma;
+  await loadSourceOrganization(source, client);
+  const { facilities } = affiliatePrisma(client);
   const facilityId =
     nullableString(candidate.publishedFacilityId) ??
     affiliateFacilityIdForCandidate(candidate, source);
@@ -2645,8 +2817,9 @@ const affiliateOrganizationIdForCandidate = (
 const nextAvailableOrganizationSlug = async (
   baseSlug: string,
   organizationId: string,
+  client: any = prisma,
 ): Promise<string> => {
-  const { organizations } = affiliatePrisma();
+  const { organizations } = affiliatePrisma(client);
   const base = slugifyForPublicSlug(baseSlug);
   for (let suffix = 0; suffix < 20; suffix += 1) {
     const publicSlug = suffix === 0 ? base : `${base}-${suffix + 1}`;
@@ -2674,8 +2847,9 @@ const buildAffiliateOrganizationData = async (
   organizationId: string,
   options: { status?: "LISTED" | "UNLISTED"; publicPageEnabled?: boolean } = {},
   existingOrganization: any = null,
+  client: any = prisma,
 ) => {
-  const sourceOrganization = await loadSourceOrganization(source);
+  const sourceOrganization = await loadSourceOrganization(source, client);
   const ownerId = nullableString(sourceOrganization.ownerId);
   if (!ownerId) {
     throw new Error(
@@ -2753,6 +2927,7 @@ const buildAffiliateOrganizationData = async (
       candidate,
       organizationId,
       ownerId,
+      client,
     )) ??
     nullableString(existingOrganization?.logoId) ??
     (isCanonicalSourceOrganization
@@ -2764,6 +2939,7 @@ const buildAffiliateOrganizationData = async (
     name,
     ...(logoId ? { logoId } : {}),
     ownerId,
+    coordinates,
     location,
     address,
     description,
@@ -2773,8 +2949,7 @@ const buildAffiliateOrganizationData = async (
     hasStripeAccount: false,
     verificationStatus: "UNVERIFIED",
     verificationReviewStatus: "NONE",
-    coordinates,
-    publicSlug: await nextAvailableOrganizationSlug(name, organizationId),
+    publicSlug: await nextAvailableOrganizationSlug(name, organizationId, client),
     publicPageEnabled,
     publicWidgetsEnabled: false,
     publicHeadline: name,
@@ -2782,13 +2957,13 @@ const buildAffiliateOrganizationData = async (
     operatesAthleticFacility: false,
   };
 };
-
 const upsertAffiliateOrganizationForCandidate = async (
   candidate: any,
   source: AffiliateScrapeSourceRow,
-  options: { status?: "LISTED" | "UNLISTED"; publicPageEnabled?: boolean } = {},
+  options: { status?: "LISTED" | "UNLISTED"; publicPageEnabled?: boolean; client?: any } = {},
 ) => {
-  const { organizations } = affiliatePrisma();
+  const client = options.client ?? prisma;
+  const { organizations } = affiliatePrisma(client);
   const organizationId =
     publishedOrganizationIdFromCandidate(candidate) ??
     affiliateOrganizationIdForCandidate(candidate, source);
@@ -2811,6 +2986,7 @@ const upsertAffiliateOrganizationForCandidate = async (
     organizationId,
     options,
     existingOrganization,
+    client,
   );
 
   return organizations.upsert({
@@ -3179,6 +3355,58 @@ export const enrichAffiliateCandidatesWithDetailPages = async (
 
   return enriched;
 };
+const affiliateSupplyTargetDimensions = (
+  source: Record<string, unknown>,
+  mapping: unknown,
+  candidate: AffiliateCandidateInput,
+  contract?: Parameters<typeof targetRuleFor>[0] | null,
+): Readonly<{ marketKey: string | null; sportId: string | null }> => {
+  const sourceMetadata = recordValue(source.metadata);
+  const mappingMetadata = recordValue(recordValue(mapping).metadata);
+  const candidatePayload = recordValue(candidate.rawPayload);
+  const inferredDimensions = {
+    marketKey: nullableString(candidatePayload.marketKey)
+      ?? nullableString(mappingMetadata.marketKey)
+      ?? nullableString(sourceMetadata.marketKey),
+    sportId: nullableString(candidatePayload.sportId)
+      ?? nullableString(mappingMetadata.sportId)
+      ?? nullableString(sourceMetadata.sportId),
+  };
+  const contractRule = contract
+    ? targetRuleFor(contract, {
+        sourceProfile: candidate.listingKind,
+        marketKey: inferredDimensions.marketKey,
+        sportId: inferredDimensions.sportId,
+      })
+    : null;
+  return {
+    marketKey: contractRule?.marketKey ?? inferredDimensions.marketKey,
+    sportId: contractRule?.sportId ?? inferredDimensions.sportId,
+  };
+};
+
+const matchesAffiliatePublicEmptyState = (
+  page: { body: string },
+  mapping: AffiliateScrapeMapping,
+): boolean => {
+  const condition = mapping.emptyState;
+  if (!condition) return false;
+  let bodyText = "";
+  try {
+    const document = new JSDOM(page.body).window.document;
+    if (condition.selector) {
+      const selected = document.querySelector(condition.selector);
+      if (!selected) return false;
+      bodyText = selected.textContent ?? "";
+    } else {
+      bodyText = document.body?.textContent ?? document.textContent ?? "";
+    }
+  } catch {
+    return false;
+  }
+  const normalizedBodyText = bodyText.replace(/\s+/g, " ").toLowerCase();
+  return condition.textIncludes.every((text) => normalizedBodyText.includes(text.toLowerCase()));
+};
 
 export const runAffiliateSourceScrape = async (
   sourceId: string,
@@ -3194,8 +3422,50 @@ export const runAffiliateSourceScrape = async (
     throw new Error("Affiliate scrape source not found.");
   }
 
-  const { row: mappingRow, mapping } = await resolveActiveMapping(source);
   const importMode = params.importMode ?? "REVIEW";
+  const supplyDatabase = affiliateSupplyDatabase();
+  let automaticSupplyContract: Parameters<typeof targetRuleFor>[0] | null = null;
+  if (importMode === "AUTOMATIC") {
+    if (!source.supplySourceId) {
+      throw new Error("Automatic affiliate scrape requires a Supply Source root.");
+    }
+    const supplyRoot = supplyDatabase.supplySources?.findUnique
+      ? await supplyDatabase.supplySources.findUnique({
+          where: { id: source.supplySourceId },
+          select: { rolloutCohort: true },
+        })
+      : null;
+    if (supplyDatabase.contractManifests?.findFirst) {
+      const activeManifest = await supplyDatabase.contractManifests.findFirst({
+        where: {
+          status: 'ACTIVE',
+          ...(supplyRoot?.rolloutCohort
+            ? { rolloutCohort: supplyRoot.rolloutCohort }
+            : {}),
+        },
+      });
+      if (activeManifest) {
+        automaticSupplyContract = (
+          await loadActiveAffiliateSupplyContract({
+            db: supplyDatabase,
+            rolloutCohort: supplyRoot?.rolloutCohort ?? undefined,
+          })
+        ).policy;
+      }
+    }
+    const assessment = await deriveAndPersistAffiliateSupplyAssessment({
+      supplySourceId: source.supplySourceId,
+      contract: automaticSupplyContract ?? undefined,
+      db: supplyDatabase,
+    });
+    if (!['ACTIVATED', 'PUBLISHED'].includes(assessment.stage) || !assessment.isAutomationEnabled) {
+      throw new Error(
+        `Automatic affiliate scrape is not authorized for supply stage ${assessment.stage}.`,
+      );
+    }
+  }
+
+  const { row: mappingRow, mapping } = await resolveActiveMapping(source);
   let automaticallyPublishCandidates = importMode === "AUTOMATIC";
   if (automaticallyPublishCandidates && !mappingRow.validatedAt) {
     throw new Error(
@@ -3212,6 +3482,7 @@ export const runAffiliateSourceScrape = async (
     data: {
       id: createId(),
       sourceId,
+      ...(source.supplySourceId ? { supplySourceId: source.supplySourceId } : {}),
       mappingId: mappingRow.id,
       requestedByUserId: params.requestedByUserId ?? null,
       status: "RUNNING",
@@ -3226,6 +3497,7 @@ export const runAffiliateSourceScrape = async (
       renderJavascript: mapping.renderJavascript,
       waitMs: mapping.waitMs,
     });
+    const emptyStateMatched = matchesAffiliatePublicEmptyState(page, mapping);
     const extractedListCandidates = extractAffiliateCandidatesFromPage(
       page,
       mapping,
@@ -3313,25 +3585,33 @@ export const runAffiliateSourceScrape = async (
     const automationHeld = automationDriftReasons.length > 0;
     if (automationHeld) {
       automaticallyPublishCandidates = false;
-      const heldAt = new Date();
-      await sources.update({
-        where: { id: sourceId },
-        data: {
-          autoScrapeEnabled: false,
-          metadata: {
-            ...recordValue(source.metadata),
-            [AFFILIATE_AUTOMATION_REVIEW_METADATA_KEY]: {
-              heldAt: heldAt.toISOString(),
-              runId: run.id,
-              mappingId: mappingRow.id,
-              reasons: automationDriftReasons,
-              metrics: automationMetrics,
-            },
-          },
-        },
-      });
     }
+    const transactionResult = await withAffiliateScrapeTransaction(
+      prisma,
+      async (transactionClient) => {
+        const { sources: transactionSources, runs: transactionRuns, candidates } =
+          affiliatePrisma(transactionClient);
+        if (automationHeld) {
+          const heldAt = new Date();
+          await transactionSources.update({
+            where: { id: sourceId },
+            data: {
+              autoScrapeEnabled: false,
+              metadata: {
+                ...recordValue(source.metadata),
+                [AFFILIATE_AUTOMATION_REVIEW_METADATA_KEY]: {
+                  heldAt: heldAt.toISOString(),
+                  runId: run.id,
+                  mappingId: mappingRow.id,
+                  reasons: automationDriftReasons,
+                  metrics: automationMetrics,
+                },
+              },
+            },
+          });
+        }
     const savedCandidates = [];
+    const lifecycleTargets: Array<Record<string, unknown>> = [];
     let createdCandidateCount = 0;
     let updatedCandidateCount = 0;
     let automaticallyPublishedCandidateCount = 0;
@@ -3352,7 +3632,7 @@ export const runAffiliateSourceScrape = async (
       });
       const sportNames = candidateSportNames(candidate);
       const sportIds = await Promise.all(
-        sportNames.map((sportName) => resolveAffiliateSportId(sportName)),
+        sportNames.map((sportName) => resolveAffiliateSportId(sportName, transactionClient)),
       );
       const inferredEventType =
         candidate.listingKind === "EVENT"
@@ -3378,17 +3658,18 @@ export const runAffiliateSourceScrape = async (
         (importMode === "AUTOMATIC" || existing?.status === "PUBLISHED");
       const data = candidatePersistenceData({
         sourceId,
+        supplySourceId: source.supplySourceId,
         runId: run.id,
         mappingId: mappingRow.id,
         dedupeKey,
         candidate: candidateForPersistence,
       });
       const shouldPublishCandidate =
+        !automationHeld &&
         !invalidSportMapping &&
         (automaticallyPublishCandidates || existing?.status === "PUBLISHED");
-      // Keep newly discovered candidates non-published until their backing target
-      // has passed every publication gate. Otherwise a failed automatic import
-      // can leave a PUBLISHED candidate pointing at no usable public record.
+      // Automatic runs are admitted only after the Supply lifecycle gate.
+      // Their valid candidates can therefore publish new lifecycle targets.
       const initialCandidateStatus = quarantineInvalidSport
         ? "NEEDS_REVIEW"
         : existing?.status === "PUBLISHED"
@@ -3415,7 +3696,7 @@ export const runAffiliateSourceScrape = async (
             },
           });
       if (quarantineInvalidSport) {
-        await quarantineAffiliateCandidateTarget(saved);
+        await quarantineAffiliateCandidateTarget(saved, transactionClient);
         savedCandidates.push(saved);
         if (existing) updatedCandidateCount += 1;
         else createdCandidateCount += 1;
@@ -3424,9 +3705,10 @@ export const runAffiliateSourceScrape = async (
       if (candidate.listingKind === "EVENT") {
         const event = await upsertAffiliateEventForCandidate(saved, source, {
           state: shouldPublishCandidate ? "PUBLISHED" : "UNPUBLISHED",
+          client: transactionClient,
         });
         if (shouldPublishCandidate) {
-          await markSourceOrganizationListedForPublishedContent(source);
+          await markSourceOrganizationListedForPublishedContent(source, transactionClient);
         }
         const savedWithEvent = await candidates.update({
           where: { id: saved.id },
@@ -3439,6 +3721,7 @@ export const runAffiliateSourceScrape = async (
       } else if (candidate.listingKind === "TEAM") {
         const team = await upsertAffiliateTeamForCandidate(saved, source, {
           visibility: shouldPublishCandidate ? "PUBLIC" : "ADMIN_ONLY",
+          client: transactionClient,
         });
         const savedWithTeam = await candidates.update({
           where: { id: saved.id },
@@ -3457,10 +3740,11 @@ export const runAffiliateSourceScrape = async (
           source,
           {
             status: shouldPublishCandidate ? "ACTIVE" : "DRAFT",
+            client: transactionClient,
           },
         );
         if (shouldPublishCandidate) {
-          await markSourceOrganizationListedForPublishedContent(source);
+          await markSourceOrganizationListedForPublishedContent(source, transactionClient);
         }
         const savedWithFacility = await candidates.update({
           where: { id: saved.id },
@@ -3477,6 +3761,7 @@ export const runAffiliateSourceScrape = async (
           {
             status: shouldPublishCandidate ? "LISTED" : "UNLISTED",
             publicPageEnabled: shouldPublishCandidate,
+            client: transactionClient,
           },
         );
         const savedWithOrganization = await candidates.update({
@@ -3490,6 +3775,7 @@ export const runAffiliateSourceScrape = async (
           await keepSourceOrganizationPrivateForPublishedClub(
             source,
             organization.id,
+            transactionClient,
           );
         }
         savedCandidates.push(savedWithOrganization);
@@ -3505,59 +3791,206 @@ export const runAffiliateSourceScrape = async (
           savedCandidates.push(saved);
         }
       }
+      const savedCandidate = savedCandidates[savedCandidates.length - 1];
+      if (source.supplySourceId && !automationHeld && savedCandidate?.status === "PUBLISHED") {
+        const targetId =
+          candidate.listingKind === "EVENT"
+            ? savedCandidate.publishedEventId
+            : candidate.listingKind === "TEAM"
+              ? savedCandidate.publishedTeamId
+              : candidate.listingKind === "RENTAL"
+                ? savedCandidate.publishedFacilityId
+                : candidate.listingKind === "CLUB"
+                  ? savedCandidate.publishedOrganizationId
+                  : null;
+        const targetType =
+          candidate.listingKind === "EVENT"
+            ? "EVENT"
+            : candidate.listingKind === "TEAM"
+              ? "TEAM"
+              : candidate.listingKind === "RENTAL"
+                ? "FACILITY"
+                : candidate.listingKind === "CLUB"
+                  ? "ORGANIZATION"
+                  : null;
+        if (targetId && targetType) {
+          const dimensions = affiliateSupplyTargetDimensions(
+            source,
+            mappingRow,
+            candidate,
+            automaticSupplyContract,
+          );
+          lifecycleTargets.push({
+            targetType,
+            targetId,
+            sourceProfile: candidate.listingKind,
+            candidateId: savedCandidate.id,
+            ...(dimensions.marketKey ? { marketKey: dimensions.marketKey } : {}),
+            ...(dimensions.sportId ? { sportId: dimensions.sportId } : {}),
+            evidenceRefs: [`run:${run.id}`, `candidate:${savedCandidate.id}`],
+          });
+        }
+      }
       if (existing) {
         updatedCandidateCount += 1;
       } else {
         createdCandidateCount += 1;
       }
-      if (automaticallyPublishCandidates) {
+      if (automaticallyPublishCandidates && shouldPublishCandidate) {
         automaticallyPublishedCandidateCount += 1;
       }
     }
 
-    const finishedRun = await runs.update({
-      where: { id: run.id },
-      data: {
-        status: "SUCCEEDED",
-        finishedAt: new Date(),
-        finalUrl: page.finalUrl,
-        httpStatus: page.statusCode,
-        itemCount: extractedCandidates.length,
-        candidateCount: savedCandidates.length,
-        logs: {
-          createdCandidateCount,
-          updatedCandidateCount,
-          rejectedCount: rejectedCandidates.length,
-          automaticallyPublishedCandidateCount,
-          automationHeld,
-          automationDriftReasons,
-          automationMetrics,
-          rejectionSummary,
-          rejectedCandidates: rejectedCandidates.slice(0, 25),
+    const finishedAt = new Date();
+    const runLogs = {
+      emptyStateMatched,
+      createdCandidateCount,
+      updatedCandidateCount,
+      rejectedCount: rejectedCandidates.length,
+      automaticallyPublishedCandidateCount,
+      automationHeld,
+      automationDriftReasons,
+      automationMetrics,
+      rejectionSummary,
+      rejectedCandidates: rejectedCandidates.slice(0, 25),
+    };
+    let finishedRun;
+    if (source.supplySourceId) {
+      const supplyDatabase = affiliateSupplyDatabase(transactionClient);
+      const currentRoot = await supplyDatabase.supplySources.findUnique({
+        where: { id: source.supplySourceId },
+      });
+      if (!currentRoot) {
+        throw new Error("Affiliate Supply Source not found.");
+      }
+      const automationReviewRequired = automationHeld
+        ? {
+            heldAt: finishedAt.toISOString(),
+            runId: run.id,
+            mappingId: mappingRow.id,
+            reasons: automationDriftReasons,
+            metrics: automationMetrics,
+          }
+        : undefined;
+ const command =
+ emptyStateMatched && extractedListCandidates.length === 0
+ ? "RECORD_EMPTY_REFRESH"
+ : "RECORD_REFRESH";
+      await executeAffiliateSupplyLifecycleCommand({
+        supplySourceId: source.supplySourceId,
+        rolloutCohort: currentRoot.rolloutCohort,
+        command,
+        authority: "SYSTEM",
+        expectedLifecycleGeneration: currentRoot.lifecycleGeneration,
+        idempotencyKey: `refresh:${run.id}`,
+        request: {
+          sourceId,
+          runId: run.id,
+          mappingId: mappingRow.id,
+          itemCount: extractedCandidates.length,
+          candidateCount: savedCandidates.length,
+          finalUrl: page.finalUrl,
+          httpStatus: page.statusCode,
+          emptyStateMatched,
+          runLogs,
+          targets: lifecycleTargets,
+          evidenceRefs: [
+            `run:${run.id}`,
+            `source:${sourceId}`,
+            `mapping:${mappingRow.id}`,
+          ],
+          ...(automationReviewRequired ? { automationReviewRequired } : {}),
         },
-      },
-    });
-    await sources.update({
-      where: { id: sourceId },
-      data: {
-        lastScrapeRunId: run.id,
-        lastScrapedAt: new Date(),
-      },
-    });
+        actorKind: "SYSTEM",
+        actorId: "affiliate-source-scrape",
+        db: supplyDatabase,
+        now: finishedAt,
+      });
+      finishedRun = await transactionRuns.findUnique({ where: { id: run.id } });
+    } else {
+      finishedRun = await transactionRuns.update({
+        where: { id: run.id },
+        data: {
+          status: "SUCCEEDED",
+          finishedAt,
+          finalUrl: page.finalUrl,
+          httpStatus: page.statusCode,
+          itemCount: extractedCandidates.length,
+          candidateCount: savedCandidates.length,
+          logs: runLogs,
+        },
+      });
+      await transactionSources.update({
+        where: { id: sourceId },
+        data: {
+          lastScrapeRunId: run.id,
+          lastScrapedAt: finishedAt,
+        },
+      });
+    }
+    if (!finishedRun) {
+      throw new Error("Affiliate scrape run was not found after completion.");
+    }
 
     return {
       run: finishedRun,
       candidates: savedCandidates,
     };
-  } catch (error) {
-    await runs.update({
-      where: { id: run.id },
-      data: {
-        status: "FAILED",
-        finishedAt: new Date(),
-        errorMessage: error instanceof Error ? error.message : "Scrape failed.",
       },
-    });
+    );
+    return transactionResult;
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Scrape failed.";
+    let lifecycleFailureRecorded = false;
+    let lifecycleFailureError: Error | null = null;
+    if (source.supplySourceId) {
+      try {
+        const supplyDatabase = affiliateSupplyDatabase();
+        const currentRoot = await supplyDatabase.supplySources.findUnique({
+          where: { id: source.supplySourceId },
+        });
+        if (currentRoot) {
+          await executeAffiliateSupplyLifecycleCommand({
+            supplySourceId: source.supplySourceId,
+            command: "RECORD_REFRESH_FAILURE",
+            authority: "SYSTEM",
+            expectedLifecycleGeneration: currentRoot.lifecycleGeneration,
+            idempotencyKey: `refresh-failure:${run.id}`,
+            request: {
+              sourceId,
+              runId: run.id,
+              mappingId: mappingRow.id,
+              errorMessage,
+              evidenceRefs: [`run:${run.id}`, `source:${sourceId}`],
+            },
+            actorKind: "SYSTEM",
+            actorId: "affiliate-source-scrape",
+            db: supplyDatabase,
+            now: new Date(),
+          });
+          lifecycleFailureRecorded = true;
+        }
+      } catch (failure) {
+        lifecycleFailureError = failure instanceof Error
+          ? failure
+          : new Error(String(failure));
+      }
+    }
+    if (!lifecycleFailureRecorded) {
+      await runs.update({
+        where: { id: run.id },
+        data: {
+          status: "FAILED",
+          finishedAt: new Date(),
+          errorMessage,
+        },
+      });
+    }
+    if (lifecycleFailureError) {
+      throw new Error(
+        `${errorMessage} Lifecycle failure recording failed: ${lifecycleFailureError.message}`,
+      );
+    }
     throw error;
   }
 };
@@ -3766,25 +4199,31 @@ export const reclassifyAffiliateCandidate = async (
   return { candidate: updatedCandidate, target: organization };
 };
 
-export const publishAffiliateCandidate = async (
+const publishAffiliateCandidateDirect = async (
   candidateId: string,
-  _params: { publishedByUserId?: string | null } = {},
+  params: {
+    publishedByUserId?: string | null;
+    client?: any;
+    candidate?: any;
+    source?: any;
+  } = {},
 ) => {
-  const { candidates, sources } = affiliatePrisma();
-  const candidate = await candidates.findUnique({ where: { id: candidateId } });
+  const baseClient = params.client ?? prisma;
+  const { candidates, sources } = affiliatePrisma(baseClient);
+  const candidate = params.candidate ?? await candidates.findUnique({ where: { id: candidateId } });
   if (!candidate) {
     throw new Error("Affiliate import candidate not found.");
   }
 
   if (normalizeSourceType(candidate.listingKind) === "EVENT") {
-    const source = await sources.findUnique({
+    const source = params.source ?? await sources.findUnique({
       where: { id: candidate.sourceId },
     });
     if (!source) {
       throw new Error("Affiliate scrape source not found.");
     }
     const publicationLocations =
-      await prepareAffiliateEventPublicationLocations(candidate, source);
+      await prepareAffiliateEventPublicationLocations(candidate, source, baseClient);
     const publishEvent = async (client: any) => {
       const transactionDb = affiliatePrisma(client);
       const currentCandidate = await transactionDb.candidates.findUnique({
@@ -3886,16 +4325,11 @@ export const publishAffiliateCandidate = async (
       return event;
     };
 
-    if (typeof (prisma as any).$transaction === "function") {
-      return prisma.$transaction((transaction: any) =>
-        publishEvent(transaction),
-      );
-    }
-    return publishEvent(prisma);
+    return withAffiliateScrapeTransaction(baseClient, publishEvent);
   }
 
   if (normalizeSourceType(candidate.listingKind) === "TEAM") {
-    const source = await sources.findUnique({
+    const source = params.source ?? await sources.findUnique({
       where: { id: candidate.sourceId },
     });
     if (!source) {
@@ -3903,6 +4337,7 @@ export const publishAffiliateCandidate = async (
     }
     const team = await upsertAffiliateTeamForCandidate(candidate, source, {
       visibility: "PUBLIC",
+      client: baseClient,
     });
     await candidates.update({
       where: { id: candidateId },
@@ -3914,7 +4349,7 @@ export const publishAffiliateCandidate = async (
     return team;
   }
 
-  const source = await sources.findUnique({
+  const source = params.source ?? await sources.findUnique({
     where: { id: candidate.sourceId },
   });
   if (normalizeSourceType(candidate.listingKind) === "RENTAL") {
@@ -3924,9 +4359,9 @@ export const publishAffiliateCandidate = async (
     const facility = await upsertAffiliateFacilityForCandidate(
       candidate,
       source,
-      { status: "ACTIVE" },
+      { status: "ACTIVE", client: baseClient },
     );
-    await markSourceOrganizationListedForPublishedContent(source);
+    await markSourceOrganizationListedForPublishedContent(source, baseClient);
     await candidates.update({
       where: { id: candidateId },
       data: {
@@ -3947,6 +4382,7 @@ export const publishAffiliateCandidate = async (
       {
         status: "LISTED",
         publicPageEnabled: true,
+        client: baseClient,
       },
     );
     await candidates.update({
@@ -3959,6 +4395,7 @@ export const publishAffiliateCandidate = async (
     await keepSourceOrganizationPrivateForPublishedClub(
       source,
       organization.id,
+      baseClient,
     );
     return organization;
   }
@@ -3966,4 +4403,86 @@ export const publishAffiliateCandidate = async (
   throw new Error(
     "Affiliate listing kind must be EVENT, TEAM, RENTAL, or CLUB.",
   );
+};
+export const publishAffiliateCandidate = async (
+  candidateId: string,
+  params: { publishedByUserId?: string | null } = {},
+) => {
+  const { candidates, sources } = affiliatePrisma();
+  const candidate = await candidates.findUnique({ where: { id: candidateId } });
+  if (!candidate) {
+    throw new Error("Affiliate import candidate not found.");
+  }
+  const source = await sources.findUnique({ where: { id: candidate.sourceId } });
+  const supplySourceId = source?.supplySourceId ?? candidate.supplySourceId;
+  if (!supplySourceId) {
+    return publishAffiliateCandidateDirect(candidateId, {
+      ...params,
+      candidate,
+      source,
+    });
+  }
+  const actorId = params.publishedByUserId?.trim();
+  if (!actorId) {
+    throw new Error("Supply-backed affiliate publication requires a human actor.");
+  }
+  const database = affiliateSupplyDatabase();
+  const root = await database.supplySources.findUnique({
+    where: { id: supplySourceId },
+  });
+  if (!root) {
+    throw new Error("Affiliate Supply Source not found.");
+  }
+  const rawCandidatePayload = recordValue(candidate.rawPayload);
+  const rawEvidenceRefs = Array.isArray(rawCandidatePayload.evidenceRefs)
+    ? rawCandidatePayload.evidenceRefs
+    : [];
+  const candidateEvidenceRefs = rawEvidenceRefs.filter(
+    (value: unknown): value is string => typeof value === "string",
+  );
+  const evidenceRefs = Array.from(new Set([
+    ...candidateEvidenceRefs,
+    `affiliate-candidate:${candidateId}`,
+  ]));
+  let publishedTarget: any = null;
+  const lifecycleResult = await executeAffiliateSupplyLifecycleCommand({
+    supplySourceId,
+    command: "PUBLISH_TARGET",
+    authority: "HUMAN_DIRECTED_EXECUTOR",
+    expectedLifecycleGeneration: root.lifecycleGeneration,
+    idempotencyKey: `affiliate-candidate-publication:${candidateId}`,
+    request: {
+      candidateId,
+      evidenceRefs,
+    },
+    actorKind: "HUMAN",
+    actorId,
+    rolloutCohort: root.rolloutCohort,
+    db: database,
+    targetWriter: async ({ client }) => {
+      publishedTarget = await publishAffiliateCandidateDirect(candidateId, {
+        ...params,
+        client,
+      });
+      const listingKind = normalizeSourceType(candidate.listingKind);
+      if (!listingKind) {
+        throw new Error("Affiliate listing kind is required for lifecycle publication.");
+      }
+      const targetType = listingKind === "RENTAL"
+        ? "FACILITY"
+        : listingKind === "CLUB"
+          ? "ORGANIZATION"
+          : listingKind;
+      return {
+        targetType,
+        targetId: String(publishedTarget.id),
+        sourceProfile: listingKind,
+        candidateId,
+        evidenceRefs,
+      };
+    },
+  });
+  if (publishedTarget) return publishedTarget;
+  const replayedTargetId = lifecycleResult.assessment.qualifyingTargetIds[0] ?? null;
+  return replayedTargetId ? { id: replayedTargetId } : lifecycleResult.assessment;
 };
