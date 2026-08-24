@@ -9,6 +9,7 @@ import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
+import com.razumly.mvp.core.data.dataTypes.toStaffingPriority
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.buildEventOfficialPositionId
@@ -32,12 +33,20 @@ import com.razumly.mvp.testing.MOBILE_TEST_HOST_PASSWORD
 import com.razumly.mvp.testing.MOBILE_TEST_PARTICIPANT_EMAIL
 import com.razumly.mvp.testing.MOBILE_TEST_PARTICIPANT_PASSWORD
 import com.razumly.mvp.testing.MobileApiTestSession
+import com.razumly.mvp.testing.PreparedEventEditorCreate
+import com.razumly.mvp.testing.createEventThroughEditor
+import com.razumly.mvp.testing.mobileApiBackendTestIsolationReady
 import com.razumly.mvp.testing.mobileApiLoginFixturesReady
+import com.razumly.mvp.testing.resolveCreatedEventId
 import com.razumly.mvp.testing.runBackendSeedThenCheck
 import com.razumly.mvp.testing.runTargetedBackendSeed
 import com.razumly.mvp.testing.shouldAutoSeedBackendFixtures
-import com.razumly.mvp.testing.createEventThroughEditor
+import com.razumly.mvp.testing.validateLocalTestDatabaseUrl
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assume.assumeTrue
@@ -65,15 +74,18 @@ class EventLifecycleMobileApiIntegrationTest {
 
     @Before
     fun ensureBackendFixtures() {
-        assumeTrue(
-            "Skipping mobile/backend event lifecycle integration test because MVP_TEST_BACKEND_URL is not set.",
-            !System.getenv("MVP_TEST_BACKEND_URL").isNullOrBlank(),
-        )
-        if (backendFixturesReady()) return
+        if (System.getenv("MVP_TEST_BACKEND_URL").isNullOrBlank()) {
+            assumeTrue(
+                "Skipping mobile/backend event lifecycle integration test because MVP_TEST_BACKEND_URL is not set.",
+                false,
+            )
+            return
+        }
+        if (lifecycleBackendFixturesReady()) return
         val fixturesPrepared = if (shouldAutoSeedBackendFixtures()) {
             runBackendSeedThenCheck(
                 seed = { runTargetedBackendSeed() },
-                fixturesReady = { backendFixturesReady() },
+                fixturesReady = { lifecycleBackendFixturesReady() },
             )
         } else {
             false
@@ -84,6 +96,7 @@ class EventLifecycleMobileApiIntegrationTest {
                 "Automatic backend seeding is disabled unless MVP_TEST_ALLOW_DB_SEED=1.",
             fixturesPrepared,
         )
+
     }
 
     @After
@@ -106,7 +119,6 @@ class EventLifecycleMobileApiIntegrationTest {
         createdEventIds.clear()
         createdTeamIds.clear()
     }
-
     @Test
     fun given_mobile_editor_create_command_when_sent_to_site_then_event_is_persisted() =
         runTest(timeout = 5.minutes) {
@@ -683,6 +695,219 @@ class EventLifecycleMobileApiIntegrationTest {
         }
     }
 
+
+}
+
+private fun lifecycleBackendFixturesReady(): Boolean =
+    backendFixturesReady(
+        requiredSportIds = REQUIRED_SPORT_IDS,
+        bootstrapSportId = REQUIRED_SPORT_IDS.first(),
+        credentials = listOf(
+            HOST_EMAIL to HOST_PASSWORD,
+            PARTICIPANT_EMAIL to PARTICIPANT_PASSWORD,
+        ),
+    )
+
+private fun contractBackendFixturesReady(): Boolean =
+    backendFixturesReady(
+        requiredSportIds = setOf(CONTRACT_SPORT_ID),
+        bootstrapSportId = CONTRACT_SPORT_ID,
+        credentials = listOf(HOST_EMAIL to HOST_PASSWORD),
+    )
+
+private fun backendFixturesReady(
+    requiredSportIds: Set<String>,
+    bootstrapSportId: String,
+    credentials: List<Pair<String, String>>,
+): Boolean {
+    if (System.getenv("MVP_TEST_BACKEND_URL").isNullOrBlank()) return false
+    if (!mobileApiLoginFixturesReady(*credentials.toTypedArray())) return false
+    val session = runCatching { MobileApiTestSession.create() }.getOrElse { return false }
+    return try {
+        runBlocking {
+            session.userRepository.login(HOST_EMAIL, HOST_PASSWORD).getOrThrow()
+            val sportIds = session.sportsRepository.getSports()
+                .getOrNull()
+                ?.map { sport -> sport.id }
+                ?.toSet()
+                .orEmpty()
+            if (!requiredSportIds.all(sportIds::contains)) return@runBlocking false
+
+            session.eventRepository.getEventEditorCreateBootstrap(
+                EventEditorBootstrapQueryDto(
+                    organizationId = SEEDED_ORGANIZATION_ID,
+                    eventType = EventType.EVENT.name,
+                    sportId = bootstrapSportId,
+                ),
+            ).getOrThrow()
+            true
+        }
+    } finally {
+        session.close()
+    }
+}
+
+private fun requireBackendFixturesForContract() {
+    if (System.getenv("MVP_TEST_BACKEND_URL").isNullOrBlank()) {
+        error("Required mobile/backend contract test requires MVP_TEST_BACKEND_URL.")
+    }
+    val databaseUrl = System.getenv("MVP_TEST_DATABASE_URL")
+        ?.trim()
+        ?.takeIf(String::isNotEmpty)
+        ?: error("Required mobile/backend contract test requires MVP_TEST_DATABASE_URL.")
+    runCatching { validateLocalTestDatabaseUrl(databaseUrl) }.getOrElse { failure ->
+        error(failure.message ?: "MVP_TEST_DATABASE_URL is not a safe local PostgreSQL URL.")
+    }
+    if (
+        System.getenv("MVP_TEST_DISABLE_OUTBOUND_PROVIDERS")
+            ?.trim()
+            ?.lowercase() !in setOf("1", "true", "yes")
+    ) {
+        error(
+            "Required mobile/backend contract test requires " +
+                "MVP_TEST_DISABLE_OUTBOUND_PROVIDERS=1.",
+        )
+    }
+    if (!mobileApiBackendTestIsolationReady()) {
+        error(
+            "Required mobile/backend contract test needs a reachable loopback backend " +
+                "with outbound providers disabled.",
+        )
+    }
+    val fixturesReady = contractBackendFixturesReady()
+    val fixturesPrepared = if (!fixturesReady && shouldAutoSeedBackendFixtures()) {
+        runBackendSeedThenCheck(
+            seed = { runTargetedBackendSeed() },
+            fixturesReady = { contractBackendFixturesReady() },
+        )
+    } else {
+        fixturesReady
+    }
+    if (!fixturesPrepared) {
+        error(
+            "Required mobile/backend contract test fixtures are unavailable. " +
+                "Set MVP_TEST_ALLOW_DB_SEED=1 or prepare the local backend fixtures.",
+        )
+    }
+}
+
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
+class MobileEventEditorApiContractTest {
+    private val createdEventIds = mutableListOf<String>()
+    private val preparedCreates = mutableListOf<PreparedEventEditorCreate>()
+    private var hostSession: MobileApiTestSession? = null
+    @Before
+    fun requireBackendFixtures() {
+        requireBackendFixturesForContract()
+    }
+
+    @After
+    fun closeSessions() {
+        hostSession?.close()
+        hostSession = null
+    }
+
+    @Test
+    fun given_mobile_editor_create_command_when_sent_to_site_then_event_is_persisted() =
+        runTest(timeout = 5.minutes) {
+            var primaryFailure: Throwable? = null
+            try {
+                hostSession = MobileApiTestSession.create()
+                val host = hostSession!!
+                val hostUser = host.userRepository.login(HOST_EMAIL, HOST_PASSWORD).getOrThrow()
+                val runId = "mobile_api_editor_contract_${Clock.System.now().toEpochMilliseconds()}"
+                val source = buildVariant(
+                    runId = runId,
+                    key = "contract",
+                    hostUserId = hostUser.id,
+                    eventType = EventType.EVENT,
+                    sportId = CONTRACT_SPORT_ID,
+                    singleDivision = true,
+                    includePlayoffs = false,
+                    officialCase = OfficialCase.NO_OFFICIALS,
+                    start = Instant.parse("2026-09-02T15:00:00Z"),
+                    end = Instant.parse("2026-09-03T05:00:00Z"),
+                )
+                val createdName = "${source.event.name} Contract"
+                val created = host.createEventThroughEditor(
+                    event = source.event.copy(name = createdName),
+                    fields = source.fields,
+                    timeSlots = source.timeSlots,
+                    onPrepared = { preparedCreates += it },
+                )
+                createdEventIds += created.id
+
+                assertCreatedEventShape(source, created)
+                assertEquals(createdName, created.name)
+
+                val reloaded = host.eventRepository.getEventEditor(created.id)
+                    .getOrElse { error("Failed to reload ${created.id}: ${it.backendSummary()}") }
+                    .canonicalState
+                assertEquals(created.id, reloaded.event.id)
+                assertEquals(createdName, reloaded.event.name)
+                assertCreatedEventShape(source, reloaded.event)
+                assertEquals(
+                    source.fields.map(Field::id).toSet(),
+                    reloaded.fields.map(Field::id).toSet(),
+                )
+                assertEquals(
+                    source.timeSlots.map(TimeSlot::id).toSet(),
+                    reloaded.timeSlots.map(TimeSlot::id).toSet(),
+                )
+            } catch (failure: Throwable) {
+                primaryFailure = failure
+                throw failure
+            } finally {
+                val cleanupFailures = mutableListOf<Throwable>()
+                val host = hostSession
+                withContext(NonCancellable + Dispatchers.IO) {
+                    suspend fun attemptCleanup(block: suspend () -> Unit) {
+                        try {
+                            block()
+                        } catch (failure: Throwable) {
+                            if (failure is kotlinx.coroutines.CancellationException) throw failure
+                            cleanupFailures += failure
+                        }
+                    }
+
+                    try {
+                        withTimeout(30_000L) {
+                            val cleanupEventIds = linkedSetOf<String>().apply {
+                                addAll(createdEventIds)
+                            }
+                            preparedCreates.asReversed().forEach { prepared ->
+                                attemptCleanup {
+                                    host?.resolveCreatedEventId(prepared)?.let(cleanupEventIds::add)
+                                }
+                            }
+                            cleanupEventIds.toList().asReversed().forEach { eventId ->
+                                attemptCleanup {
+                                    host?.api?.deleteNoResponse("api/events/$eventId")
+                                }
+                            }
+                        }
+                    } catch (failure: Throwable) {
+                        cleanupFailures += failure
+                    } finally {
+                        createdEventIds.clear()
+                        preparedCreates.clear()
+                    }
+                }
+                val cleanupFailure = cleanupFailures.firstOrNull()
+                if (cleanupFailure != null) {
+                    cleanupFailures.drop(1).forEach(cleanupFailure::addSuppressed)
+                    if (primaryFailure != null) {
+                        primaryFailure?.addSuppressed(cleanupFailure)
+                    } else {
+                        throw AssertionError("Mobile contract test cleanup failed.", cleanupFailure)
+                    }
+                }
+            }
+        }
+}
+
+
     private fun assertCreatedEventShape(
         variant: LifecycleVariant,
         event: Event,
@@ -690,6 +915,24 @@ class EventLifecycleMobileApiIntegrationTest {
         assertTrue(event.id.isNotBlank(), "${variant.key} should receive a server-owned event id")
         assertEquals(variant.event.eventType, event.eventType, "${variant.key} event type drifted")
         assertEquals(variant.event.singleDivision, event.singleDivision, "${variant.key} division mode drifted")
+        assertEquals(variant.event.teamSignup, event.teamSignup, "${variant.key} registration unit drifted")
+        assertEquals(
+            variant.event.registrationByDivisionType,
+            event.registrationByDivisionType,
+            "${variant.key} registration division mode drifted",
+        )
+        assertEquals(
+            variant.event.registrationPaymentMode,
+            event.registrationPaymentMode,
+            "${variant.key} payment mode drifted",
+        )
+        assertEquals(variant.event.priceCents, event.priceCents, "${variant.key} registration price drifted")
+        assertEquals(
+            variant.event.maxParticipants,
+            event.maxParticipants,
+            "${variant.key} participant limit drifted",
+        )
+
         if (variant.isTournamentPoolPlay) {
             assertTrue(
                 event.includePlayoffs ||
@@ -734,39 +977,6 @@ class EventLifecycleMobileApiIntegrationTest {
             )
         }
     }
-
-    private fun backendFixturesReady(): Boolean {
-        if (System.getenv("MVP_TEST_BACKEND_URL").isNullOrBlank()) return false
-        if (!mobileApiLoginFixturesReady(HOST_EMAIL to HOST_PASSWORD, PARTICIPANT_EMAIL to PARTICIPANT_PASSWORD)) {
-            return false
-        }
-        val session = runCatching { MobileApiTestSession.create() }.getOrElse { return false }
-        return try {
-            runBlocking {
-                session.userRepository.login(HOST_EMAIL, HOST_PASSWORD).getOrThrow()
-                val sportIds = session.sportsRepository.getSports()
-                    .getOrNull()
-                    ?.map { sport -> sport.id }
-                    ?.toSet()
-                    .orEmpty()
-                if (!REQUIRED_SPORT_IDS.all(sportIds::contains)) return@runBlocking false
-
-                session.eventRepository.getEventEditorCreateBootstrap(
-                    EventEditorBootstrapQueryDto(
-                        organizationId = SEEDED_ORGANIZATION_ID,
-                        eventType = EventType.EVENT.name,
-                        sportId = REQUIRED_SPORT_IDS.first(),
-                    ),
-                ).getOrThrow()
-                true
-            }
-        } finally {
-            session.close()
-        }
-    }
-
-    }
-
 private fun buildLifecycleVariants(
     runId: String,
     hostUserId: String,
@@ -793,8 +1003,8 @@ private fun buildLifecycleVariants(
         singleDivision = true,
         includePlayoffs = false,
         officialCase = OfficialCase.NAMED_OFFICIALS,
-        start = Instant.parse("2026-09-02T12:00:00Z"),
-        end = Instant.parse("2026-09-02T18:00:00Z"),
+        start = Instant.parse("2026-09-02T15:00:00Z"),
+        end = Instant.parse("2026-09-03T05:00:00Z"),
     ),
     buildVariant(
         runId = runId,
@@ -1010,6 +1220,7 @@ private fun buildVariant(
             SEEDED_ORGANIZATION_ID
         },
         maxParticipants = if (eventType.isSchedulable()) teamIds.size else 24,
+        registrationPaymentMode = "FREE",
         teamSizeLimit = 2,
         eventType = eventType,
         gamesPerOpponent = if (eventType == EventType.LEAGUE) 1 else null,
@@ -1029,6 +1240,7 @@ private fun buildVariant(
         restTimeMinutes = 0,
         state = "PUBLISHED",
         officialSchedulingMode = officialBundle.schedulingMode,
+        staffingPriority = officialBundle.schedulingMode.toStaffingPriority(),
         officialPositions = officialBundle.positions,
         eventOfficials = officialBundle.eventOfficials,
         officialIds = officialBundle.officialIds,
@@ -1321,6 +1533,7 @@ private const val HOST_PASSWORD = MOBILE_TEST_HOST_PASSWORD
 private const val PARTICIPANT_EMAIL = MOBILE_TEST_PARTICIPANT_EMAIL
 private const val PARTICIPANT_PASSWORD = MOBILE_TEST_PARTICIPANT_PASSWORD
 private const val SEEDED_ORGANIZATION_ID = "org_1"
+private const val CONTRACT_SPORT_ID = "Basketball"
 private const val UPLOADED_DOCUMENT_IMAGE_ID = "camka_upload_upscaled_cc_indoor_sports_024be2e8d5cdead5_jpg"
 private const val ASSISTANT_HOST_ONE_ID = "dev_user_3"
 private const val ASSISTANT_HOST_TWO_ID = "dev_user_4"

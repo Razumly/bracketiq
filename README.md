@@ -98,25 +98,30 @@ cd ..
 ./gradlew :composeApp:iosSimulatorArm64Test :core:database:iosSimulatorArm64Test --continue --stacktrace
 ```
 
-## Local mobile-to-backend work
+## Local mobile-to-site work
 
 The mobile tooling resolves the backend to the sibling `apps/site` directory. A normal monorepo clone does not need `MVP_SITE_DIR`.
 
 From `apps/mobile`, start or verify the local backend through the checked-in launcher only when that runtime change is intended:
 
 ```bash
-./scripts/ensure-local-backend.sh
+MVP_TEST_DISABLE_OUTBOUND_PROVIDERS=1 MVP_BACKEND_PORT=3100 ./scripts/ensure-local-backend.sh
 ```
 
 Set `MVP_SITE_DIR` only when you intentionally use a backend checkout outside this repository. The backend HTTP interface remains the boundary between applications. Do not share runtime TypeScript or Kotlin source across that boundary.
 
-For the real mobile API integration check, start a non-production backend first. Then run:
+For the real mobile-to-site integration check, start a non-production backend first with outbound providers disabled. The checked-in launcher derives the Compose database URL. If `POSTGRES_*` values are overridden, the launcher output remains the source of truth. Run the focused Event Editor contract test locally from `apps/mobile`:
 
 ```bash
-cd apps/mobile
-MVP_TEST_BACKEND_URL=http://127.0.0.1:3000 \
+MVP_TEST_DISABLE_OUTBOUND_PROVIDERS=1 MVP_BACKEND_PORT=3100 ./scripts/ensure-local-backend.sh
+COMPOSE_DATABASE_URL="$(./scripts/ensure-local-backend.sh --print-database-url)"
+MVP_TEST_DISABLE_OUTBOUND_PROVIDERS=1 \
+MVP_TEST_BACKEND_URL=http://127.0.0.1:3100 \
+MVP_TEST_DATABASE_URL="$COMPOSE_DATABASE_URL" \
 MVP_TEST_ALLOW_DB_SEED=true \
-  ./gradlew :composeApp:testDebugUnitTest \
-  --tests 'com.razumly.mvp.eventDetail.EventLifecycleMobileApiIntegrationTest' \
+MVP_TEST_REQUIRE_BACKEND=true \
+  ./gradlew --no-daemon :composeApp:testDebugUnitTest \
+  --rerun-tasks \
+  --tests 'com.razumly.mvp.eventDetail.MobileEventEditorApiContractTest.given_mobile_editor_create_command_when_sent_to_site_then_event_is_persisted' \
   --stacktrace
 ```

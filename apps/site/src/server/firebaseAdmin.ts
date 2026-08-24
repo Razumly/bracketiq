@@ -1,5 +1,6 @@
 import { applicationDefault, cert, getApps, initializeApp, type App, type ServiceAccount } from 'firebase-admin/app';
 import { getMessaging, type Messaging } from 'firebase-admin/messaging';
+import { isOutboundProvidersDisabled } from './outboundProviders';
 
 const parseServiceAccount = (): ServiceAccount | null => {
   const rawJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim();
@@ -40,14 +41,15 @@ const hasApplicationDefaultCredentials = (): boolean => (
   || Boolean(process.env.GCLOUD_PROJECT?.trim())
 );
 
+
 let cachedApp: App | null = null;
 let initialized = false;
 
 const getFirebaseApp = (): App | null => {
+  if (isOutboundProvidersDisabled()) return null;
   if (cachedApp) return cachedApp;
   if (initialized) return null;
   initialized = true;
-
   const serviceAccount = parseServiceAccount();
   const hasAppDefault = hasApplicationDefaultCredentials();
 

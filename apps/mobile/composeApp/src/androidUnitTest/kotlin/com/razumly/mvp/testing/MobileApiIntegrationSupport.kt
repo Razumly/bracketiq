@@ -9,9 +9,10 @@ import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Team
-import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.repositories.EventEditorMutation
+import com.razumly.mvp.core.data.repositories.EventEditorSessionMapper
 import com.razumly.mvp.core.data.repositories.EventRepository
 import com.razumly.mvp.core.data.repositories.FieldRepository
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
@@ -31,10 +32,15 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.robolectric.RuntimeEnvironment
 import java.io.File
 import java.net.Socket
 import java.net.URI
+import java.net.URLDecoder
+import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
 internal const val MOBILE_TEST_HOST_EMAIL = "host@example.com"
@@ -131,13 +137,17 @@ internal class MobileApiTestSession private constructor(
     }
 }
 
-internal suspend fun MobileApiTestSession.createEventThroughEditor(
+internal data class PreparedEventEditorCreate(
+    val command: EventEditorCreateCommandDto,
+)
+
+internal suspend fun MobileApiTestSession.prepareEventEditorCreate(
     event: Event,
     fields: List<Field> = emptyList(),
     timeSlots: List<TimeSlot> = emptyList(),
-    operationId: String = "mobile-editor-create-${event.id}",
-): Event {
-    val bootstrap = eventRepository.getEventEditorCreateBootstrap(
+    operationId: String? = null,
+): PreparedEventEditorCreate {
+    val bootstrapSession = eventRepository.getEventEditorCreateBootstrap(
         EventEditorBootstrapQueryDto(
             organizationId = event.organizationId,
             eventType = event.eventType.name,
@@ -145,231 +155,54 @@ internal suspend fun MobileApiTestSession.createEventThroughEditor(
             start = event.start.toString(),
         ),
     ).getOrThrow()
-    val draft = bootstrap.snapshot.draft.toEditorDraft(event, fields, timeSlots)
-    return eventRepository.createEventEditor(
-        EventEditorCreateCommandDto(
-            contractVersion = EVENT_EDITOR_CONTRACT_VERSION,
-            createOperationId = operationId,
-            expectedRevisions = EventEditorExpectedCreateRevisionsDto(
-                editorRevision = bootstrap.snapshot.editorRevision,
-                staffRevision = bootstrap.snapshot.staffRevision,
-                scheduleRevision = bootstrap.snapshot.scheduleState.revision,
-            ),
-            draft = draft,
-            completion = EventEditorCreateCompletionDto(
-                mode = if (event.eventType.name in setOf("LEAGUE", "TOURNAMENT")) {
-                    EventEditorCreateCompletionMode.CREATE_AND_BUILD_SCHEDULE
-                } else {
-                    EventEditorCreateCompletionMode.CREATE_ONLY
-                },
-            ),
+    val session = operationId?.let { id -> bootstrapSession.copy(createOperationId = id) } ?: bootstrapSession
+    val mutation = EventEditorMutation(
+        canonicalState = session.canonicalState.copy(
+            event = event,
+            fields = fields,
+            timeSlots = timeSlots,
+            playoffDivisionDetails = event.divisionDetails.filter { detail ->
+                detail.kind.equals("PLAYOFF", ignoreCase = true)
+            },
+            divisionFieldIds = event.divisionDetails.associate { detail -> detail.id to detail.fieldIds },
         ),
-    ).getOrThrow().session.canonicalState.event
+    )
+    return PreparedEventEditorCreate(
+        command = EventEditorSessionMapper.toCreateCommand(session, mutation).command,
+    )
 }
 
-private fun EventEditorDraftDto.toEditorDraft(
+internal suspend fun MobileApiTestSession.createEventThroughEditor(
     event: Event,
-    fields: List<Field>,
-    timeSlots: List<TimeSlot>,
-): EventEditorDraftDto {
-    fun DivisionDetail.toDto(): EventEditorDivisionDetailDto = EventEditorDivisionDetailDto(
-        id = id,
-        sourceDivisionId = sourceDivisionId,
-        key = key,
-        name = name,
-        kind = kind ?: "LEAGUE",
-        isSystemGenerated = isSystemGenerated,
-        divisionTypeId = divisionTypeId,
-        skillDivisionTypeId = skillDivisionTypeId,
-        ageDivisionTypeId = ageDivisionTypeId,
-        divisionTypeName = divisionTypeName,
-        ratingType = ratingType,
-        gender = gender,
-        price = price?.toDouble(),
-        maxParticipants = maxParticipants?.toDouble(),
-        playoffTeamCount = playoffTeamCount?.toDouble(),
-        poolCount = poolCount?.toDouble(),
-        poolTeamCount = poolTeamCount?.toDouble(),
-        allowPaymentPlans = allowPaymentPlans,
-        installmentCount = installmentCount?.toDouble(),
-        installmentDueDates = installmentDueDates,
-        installmentDueRelativeDays = installmentDueRelativeDays,
-        installmentAmounts = installmentAmounts,
-        ageCutoffDate = ageCutoffDate,
-        ageCutoffLabel = ageCutoffLabel,
-        ageCutoffSource = ageCutoffSource,
-        fieldIds = fieldIds,
-        playoffPlacementDivisionIds = playoffPlacementDivisionIds,
-        playoffConfig = null,
-        gamesPerOpponent = gamesPerOpponent?.toDouble(),
-        restTimeMinutes = restTimeMinutes?.toDouble(),
-        usesSets = usesSets,
-        matchDurationMinutes = matchDurationMinutes?.toDouble(),
-        setDurationMinutes = setDurationMinutes?.toDouble(),
-        setsPerMatch = setsPerMatch?.toDouble(),
-        pointsToVictory = pointsToVictory,
-        phaseSettings = null,
-        teamIds = teamIds,
+    fields: List<Field> = emptyList(),
+    timeSlots: List<TimeSlot> = emptyList(),
+    operationId: String? = null,
+    onPrepared: ((PreparedEventEditorCreate) -> Unit)? = null,
+): Event {
+    val prepared = prepareEventEditorCreate(
+        event = event,
+        fields = fields,
+        timeSlots = timeSlots,
+        operationId = operationId,
     )
+    onPrepared?.invoke(prepared)
+    return eventRepository.createEventEditor(prepared.command)
+        .getOrThrow().session.canonicalState.event
+}
 
-    return copy(
-        basics = basics.copy(
-            name = event.name,
-            description = event.description,
-            eventType = event.eventType.name,
-            sportIds = event.sportIds,
-            start = event.start.toString(),
-            timeZone = event.timeZone,
-            location = event.location,
-            address = event.address.orEmpty(),
-            coordinates = event.coordinates,
-            affiliateUrl = event.affiliateUrl.orEmpty(),
-            organizationId = event.organizationId,
-            hostId = event.hostId,
-            state = event.state.takeUnless { it == "DRAFT" } ?: "UNPUBLISHED",
-            imageId = event.imageId.takeIf(String::isNotBlank),
-            tags = event.tags.map { tag ->
-                EventEditorTagDto(id = tag.id, slug = tag.slug, name = tag.name)
-            },
-        ),
-        participation = participation.copy(
-            teamSignup = event.teamSignup,
-            singleDivision = event.singleDivision,
-            registrationByDivisionType = event.registrationByDivisionType,
-            teamSizeLimit = event.teamSizeLimit.takeIf { it > 0 },
-            maxParticipants = event.maxParticipants.takeIf { it > 0 },
-            minAge = event.minAge,
-            maxAge = event.maxAge,
-            cancellationRefundHours = event.cancellationRefundHours,
-            registrationCutoffHours = event.registrationCutoffHours,
-            allowTeamSplitDefault = event.allowTeamSplitDefault == true,
-            waitListIds = event.waitListIds,
-            freeAgentIds = event.freeAgentIds,
-        ),
-        registration = registration.copy(
-            payment = registration.payment.copy(
-                mode = event.registrationPaymentMode,
-                priceCents = event.priceCents,
-                manualPaymentInstructions = event.manualPaymentInstructions,
-                manualPaymentLinks = event.manualPaymentLinks.map { link ->
-                    EventEditorManualPaymentLinkDto(
-                        id = link.id.takeIf(String::isNotBlank),
-                        provider = link.provider,
-                        label = link.label,
-                        url = link.url,
-                    )
-                },
-                allowPaymentPlans = event.allowPaymentPlans == true,
-                installmentCount = event.installmentCount,
-                installmentDueDates = event.installmentDueDates,
-                installmentDueRelativeDays = event.installmentDueRelativeDays,
-                installmentAmounts = event.installmentAmounts,
-            ),
-        ),
-        competition = competition.copy(
-            divisionIds = event.divisions,
-            divisionDetails = event.divisionDetails
-                .filterNot { detail -> detail.kind.equals("PLAYOFF", ignoreCase = true) }
-                .map(DivisionDetail::toDto),
-            playoffDivisionDetails = event.divisionDetails
-                .filter { detail -> detail.kind.equals("PLAYOFF", ignoreCase = true) }
-                .map(DivisionDetail::toDto),
-            divisionFieldIds = event.divisionDetails.associate { detail -> detail.id to detail.fieldIds },
-            winnerSetCount = event.winnerSetCount,
-            loserSetCount = event.loserSetCount.takeIf { it > 0 },
-            doubleElimination = event.doubleElimination,
-            includePlayoffs = event.includePlayoffs,
-            splitLeaguePlayoffDivisions = event.splitLeaguePlayoffDivisions,
-            playoffTeamCount = event.playoffTeamCount,
-            pointsToVictory = event.pointsToVictory,
-            winnerBracketPointsToVictory = event.winnerBracketPointsToVictory,
-            loserBracketPointsToVictory = event.loserBracketPointsToVictory,
-            usesSets = event.usesSets,
-            setsPerMatch = event.setsPerMatch,
-            setDurationMinutes = event.setDurationMinutes?.toDouble(),
-            restTimeMinutes = event.restTimeMinutes?.toDouble(),
-            matchDurationMinutes = event.matchDurationMinutes?.toDouble(),
-            gamesPerOpponent = event.gamesPerOpponent,
-        matchRulesOverride = null,
-        ),
-        schedule = schedule.copy(
-            mode = if (event.noFixedEndDateTime) "GENERATED_END" else "FIXED_END",
-            endConstraint = event.end.toString().takeUnless { event.noFixedEndDateTime },
-            generatedScheduleEnd = event.end.toString().takeIf { event.noFixedEndDateTime },
-        ),
-        resources = EventEditorResourcesDto(
-            fieldIds = fields.map(Field::id),
-            fields = fields.map { field ->
-                EventEditorFieldDto(
-                    id = field.id,
-                    name = field.name,
-                    location = field.location,
-                    lat = field.lat,
-                    long = field.long,
-                    inUse = field.inUse,
-                    rentalSlotIds = field.rentalSlotIds,
-                    organizationId = field.organizationId,
-                    facilityId = field.facilityId,
-                )
-            },
-            timeSlotIds = timeSlots.map(TimeSlot::id),
-            timeSlots = timeSlots.map { slot ->
-                EventEditorTimeSlotDto(
-                    id = slot.id,
-                    dayOfWeek = slot.dayOfWeek,
-                    daysOfWeek = slot.daysOfWeek.orEmpty(),
-                    startTimeMinutes = slot.startTimeMinutes,
-                    endTimeMinutes = slot.endTimeMinutes,
-                    startDate = slot.startDate.toString(),
-                    endDate = slot.endDate?.toString(),
-                    timeZone = slot.timeZone,
-                    scheduledFieldId = slot.scheduledFieldId,
-                    scheduledFieldIds = slot.scheduledFieldIds.orEmpty(),
-                    divisions = slot.divisions.orEmpty(),
-                    requiredTemplateIds = slot.requiredTemplateIds,
-                    hostRequiredTemplateIds = slot.hostRequiredTemplateIds,
-                    repeating = slot.repeating,
-                    price = slot.price?.toDouble(),
-                    sourceType = slot.sourceType,
-                    rentalBookingId = slot.rentalBookingId,
-                    rentalBookingItemId = slot.rentalBookingItemId,
-                    rentalLocked = slot.rentalLocked,
-                )
-            },
-            requiredTemplateIds = event.requiredTemplateIds,
-            rentalBookingId = resources.rentalBookingId,
-            rentalBookingItemId = resources.rentalBookingItemId,
-        ),
-        staff = EventEditorStaffDto(
-            staffingPriority = event.staffingPriority.name,
-            doTeamsOfficiate = event.doTeamsOfficiate == true,
-            teamOfficialsMaySwap = event.teamOfficialsMaySwap == true,
-            teamCheckInMode = event.teamCheckInMode.name,
-            teamCheckInOpenMinutesBefore = event.teamCheckInOpenMinutesBefore,
-            allowMatchRosterEdits = event.allowMatchRosterEdits,
-            allowTemporaryMatchPlayers = event.allowTemporaryMatchPlayers,
-            autoCreatePointMatchIncidents = event.autoCreatePointMatchIncidents,
-            officialIds = event.officialIds,
-            officialPositions = event.officialPositions.map { position ->
-                EventEditorOfficialPositionDto(
-                    id = position.id,
-                    name = position.name,
-                    count = position.count,
-                    order = position.order,
-                )
-            },
-            eventOfficials = event.eventOfficials.map { official ->
-                EventEditorOfficialDto(
-                    id = official.id,
-                    userId = official.userId,
-                    positionIds = official.positionIds,
-                    fieldIds = official.fieldIds,
-                    isActive = official.isActive,
-                )
-            },
-            assistantHostIds = event.assistantHostIds,
-        ),
+internal suspend fun MobileApiTestSession.resolveCreatedEventId(
+    prepared: PreparedEventEditorCreate,
+): String? {
+    val response = api.post<JsonObject, JsonObject>(
+        path = "api/events/editor",
+        body = encodeEventEditorCreateCommand(prepared.command),
     )
+    return response["snapshot"]
+        ?.jsonObject
+        ?.get("eventId")
+        ?.jsonPrimitive
+        ?.content
+        ?.takeIf(String::isNotBlank)
 }
 
 internal fun mobileApiLoginFixturesReady(vararg credentials: Pair<String, String>): Boolean {
@@ -386,6 +219,40 @@ internal fun mobileApiLoginFixturesReady(vararg credentials: Pair<String, String
 
 }
 
+private fun sha256Hex(raw: String): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+        .digest(raw.toByteArray(Charsets.UTF_8))
+    val hex = "0123456789abcdef"
+    return buildString(digest.size * 2) {
+        digest.forEach { byte ->
+            val value = byte.toInt() and 0xff
+            append(hex[value ushr 4])
+            append(hex[value and 0x0f])
+        }
+    }
+}
+
+internal fun mobileApiBackendTestIsolationReady(): Boolean {
+    val databaseUrl = System.getenv("MVP_TEST_DATABASE_URL")
+        ?.trim()
+        ?.takeIf(String::isNotEmpty)
+        ?.let { raw -> runCatching { validateLocalTestDatabaseUrl(raw) }.getOrNull() }
+        ?: return false
+    val expectedDatabaseUrlHash = sha256Hex(databaseUrl)
+    val session = runCatching { MobileApiTestSession.create() }.getOrElse { return false }
+    return try {
+        runBlocking {
+            val response = session.api.getAppVersionIsolationProbe()
+            response.outboundProvidersDisabled &&
+                response.databaseUrlHash == expectedDatabaseUrlHash
+        }
+    } catch (_: Exception) {
+        false
+    } finally {
+        session.close()
+    }
+}
+
 internal fun runBackendSeedThenCheck(
     seed: () -> Unit,
     fixturesReady: () -> Boolean,
@@ -399,9 +266,9 @@ internal fun runBackendSeedThenCheck(
     return seedSucceeded && fixturesReady()
 }
 
-
 internal fun runTargetedBackendSeed() {
     val backendDir = resolveBackendDir()
+    val databaseUrl = resolveComposeDatabaseUrl(backendDir)
     val command = if (isWindows()) {
         listOf("cmd", "/c", "npm", "run", "seed:dev")
     } else {
@@ -410,6 +277,10 @@ internal fun runTargetedBackendSeed() {
     val process = ProcessBuilder(command)
         .directory(backendDir)
         .redirectErrorStream(true)
+        .apply {
+            environment()["DATABASE_URL"] = databaseUrl
+            environment()["DATABASE_URL_LIVE"] = databaseUrl
+        }
         .start()
 
     val finished = process.waitFor(2, TimeUnit.MINUTES)
@@ -424,6 +295,98 @@ internal fun runTargetedBackendSeed() {
             "Targeted backend seed failed in ${backendDir.absolutePath} with exit code ${process.exitValue()}.\n$output"
         )
     }
+}
+
+private val LOCAL_LOOPBACK_HOSTS = setOf("localhost", "127.0.0.1", "::1", "[::1]")
+private fun validateLocalBackendBaseUrl(raw: String): String {
+    val uri = runCatching { URI(raw) }.getOrNull()
+    require(uri != null) {
+        "MVP_TEST_BACKEND_URL must be a valid local HTTP URL."
+    }
+    require(uri.scheme?.lowercase() in setOf("http", "https")) {
+        "MVP_TEST_BACKEND_URL must use http or https."
+    }
+    require(uri.userInfo == null && uri.host?.lowercase() in LOCAL_LOOPBACK_HOSTS) {
+        "MVP_TEST_BACKEND_URL must use a loopback host with no credentials."
+    }
+    return raw
+}
+
+private val LOCAL_DATABASE_TARGET_OVERRIDE_PARAMETERS =
+    setOf("connectionstring", "host", "hostaddr", "port", "socket")
+
+internal fun validateLocalTestDatabaseUrl(raw: String): String {
+    val uri = runCatching { URI(raw) }.getOrNull()
+    require(uri != null) {
+        "MVP_TEST_DATABASE_URL must be a valid local PostgreSQL URL."
+    }
+    require(uri.scheme?.lowercase() in setOf("postgresql", "postgres")) {
+        "MVP_TEST_DATABASE_URL must use the PostgreSQL URL scheme."
+    }
+    require(uri.host?.lowercase() in LOCAL_LOOPBACK_HOSTS) {
+        "MVP_TEST_DATABASE_URL must use a loopback host."
+    }
+    val queryParameterNames = uri.rawQuery
+        ?.split('&')
+        ?.mapNotNull { parameter ->
+            parameter.substringBefore('=')
+                .takeIf(String::isNotBlank)
+                ?.let { URLDecoder.decode(it, "UTF-8").lowercase() }
+        }
+        ?.toSet()
+        .orEmpty()
+    require(queryParameterNames.none { it in LOCAL_DATABASE_TARGET_OVERRIDE_PARAMETERS }) {
+        "MVP_TEST_DATABASE_URL must not override its local PostgreSQL target."
+    }
+    val databaseName = uri.path?.removePrefix("/")
+    require(!databaseName.isNullOrBlank() && '/' !in databaseName) {
+        "MVP_TEST_DATABASE_URL must name one local test database."
+    }
+    val normalizedDatabaseName = databaseName.lowercase()
+    require(listOf("prod", "production", "live").none(normalizedDatabaseName::contains)) {
+        "MVP_TEST_DATABASE_URL must not target a production database."
+    }
+    require(
+        normalizedDatabaseName.startsWith("mvp") ||
+            listOf("test", "dev", "local", "e2e", "ci").any(normalizedDatabaseName::contains),
+    ) {
+        "MVP_TEST_DATABASE_URL must name an mvp, test, dev, local, e2e, or ci database."
+    }
+    return raw
+}
+
+
+private fun resolveComposeDatabaseUrl(backendDir: File): String {
+    val explicitOverride = System.getenv("MVP_TEST_DATABASE_URL")
+        ?.trim()
+        ?.takeIf(String::isNotEmpty)
+    if (explicitOverride != null) return validateLocalTestDatabaseUrl(explicitOverride)
+    if (isWindows()) {
+        error(
+            "MVP_TEST_DATABASE_URL is required on Windows when MVP_TEST_ALLOW_DB_SEED is enabled.",
+        )
+    }
+    val launcher = listOf(
+        File(System.getProperty("user.dir") ?: ".", "scripts/ensure-local-backend.sh"),
+        File(backendDir.parentFile, "mobile/scripts/ensure-local-backend.sh"),
+    ).firstOrNull(File::isFile)
+    requireNotNull(launcher) {
+        "Could not find the local backend launcher. Run the test from apps/mobile or set MVP_TEST_DATABASE_URL."
+    }
+    val process = ProcessBuilder("bash", launcher.absolutePath, "--print-database-url")
+        .directory(backendDir)
+        .redirectErrorStream(true)
+        .start()
+    val finished = process.waitFor(30, TimeUnit.SECONDS)
+    if (!finished) {
+        process.destroyForcibly()
+        error("Timed out deriving the local Compose database URL.")
+    }
+    val output = process.inputStream.bufferedReader().use { reader -> reader.readText() }
+    check(process.exitValue() == 0) {
+        "Could not derive the local Compose database URL: $output"
+    }
+    return validateLocalTestDatabaseUrl(output.trim())
 }
 
 internal fun shouldAutoSeedBackendFixtures(): Boolean {
@@ -484,8 +447,9 @@ private fun resolveReachableBackendBaseUrl(): String {
         ?.trim()
         ?.takeIf(String::isNotEmpty)
     if (explicitOverride != null) {
-        return explicitOverride.takeIf(::isReachable)
-            ?: error("Unable to connect to MVP_TEST_BACKEND_URL=$explicitOverride.")
+        val validatedOverride = validateLocalBackendBaseUrl(explicitOverride)
+        return validatedOverride.takeIf(::isReachable)
+            ?: error("Unable to connect to MVP_TEST_BACKEND_URL=$validatedOverride.")
     }
 
     val candidates = listOf(

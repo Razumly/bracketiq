@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import {
@@ -6,8 +7,19 @@ import {
   parseBuildNumber,
   type AppReleaseRow,
 } from '@/lib/appReleases';
+import {
+  appVersionIsolationProbeResponseSchema,
+  appVersionResponseSchema,
+} from '@/contracts/appVersion';
+import { isOutboundProvidersDisabled } from '@/server/outboundProviders';
 
 export const dynamic = 'force-dynamic';
+
+const getTestDatabaseUrlHash = (): string | null => {
+  const databaseUrl = process.env.DATABASE_URL?.trim();
+  if (!databaseUrl) return null;
+  return createHash('sha256').update(databaseUrl, 'utf8').digest('hex');
+};
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -32,8 +44,18 @@ export async function GET(req: NextRequest) {
     },
   });
 
-  return NextResponse.json(
+  const payload = appVersionResponseSchema.parse(
     buildAppVersionResponse(releases as AppReleaseRow[], current),
-    { status: 200 },
   );
+  const isIsolationProbe = searchParams.get('mvpTestIsolation') === '1';
+  const outboundProvidersDisabled = isOutboundProvidersDisabled();
+  const response = isIsolationProbe
+    ? appVersionIsolationProbeResponseSchema.parse({
+        ...payload,
+        outboundProvidersDisabled,
+        databaseUrlHash: outboundProvidersDisabled ? getTestDatabaseUrlHash() : null,
+      })
+    : payload;
+
+  return NextResponse.json(response, { status: 200 });
 }

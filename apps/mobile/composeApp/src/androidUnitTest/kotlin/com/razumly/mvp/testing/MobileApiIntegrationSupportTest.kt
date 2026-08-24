@@ -50,4 +50,36 @@ class MobileApiIntegrationSupportTest {
         assertTrue(prepared)
         assertTrue(fixturesChecked)
     }
+
+    @Test
+    fun given_database_url_with_target_override_when_validated_then_rejected() {
+        val overrideParameters = listOf(
+            "host",
+            "hostaddr",
+            "port",
+            "socket",
+            "connectionString",
+            "%68ost",
+        )
+
+        overrideParameters.forEach { parameter ->
+            val value = if (parameter == "connectionString") {
+                "postgresql%3A%2F%2Fu%3Ap%40remote%2Fprod"
+            } else {
+                "remote.example"
+            }
+            assertFailsWith<IllegalArgumentException> {
+                validateLocalTestDatabaseUrl(
+                    "postgresql://mvp:mvp_password@127.0.0.1:5433/mvp_test?$parameter=$value",
+                )
+            }
+        }
+    }
+
+    @Test
+    fun given_database_url_with_schema_query_when_validated_then_accepted() {
+        val raw = "postgresql://mvp:mvp_password@127.0.0.1:5433/mvp_test?schema=public"
+
+        assertEquals(raw, validateLocalTestDatabaseUrl(raw))
+    }
 }

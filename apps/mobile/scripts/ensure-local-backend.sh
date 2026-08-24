@@ -3,8 +3,26 @@
 set -euo pipefail
 
 QUIET=0
-if [[ "${1:-}" == "--quiet" ]]; then
-  QUIET=1
+PRINT_DATABASE_URL=0
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  if (( $# > 1 )); then
+    echo "[backend] ERROR: expected at most one option." >&2
+    exit 2
+  fi
+  case "${1:-}" in
+    "")
+      ;;
+    --quiet)
+      QUIET=1
+      ;;
+    --print-database-url)
+      PRINT_DATABASE_URL=1
+      ;;
+    *)
+      echo "[backend] ERROR: unsupported option: ${1}" >&2
+      exit 2
+      ;;
+  esac
 fi
 
 log() {
@@ -814,17 +832,18 @@ start_backend_server() {
       ;;
   esac
 
-  local quoted_backend quoted_log quoted_path quoted_port quoted_database_url quoted_command=""
+  local quoted_backend quoted_log quoted_path quoted_port quoted_database_url quoted_outbound_providers_disabled quoted_command=""
   quoted_backend="$(shell_quote "$backend_dir")"
   quoted_log="$(shell_quote "$log_file")"
   quoted_path="$(shell_quote "$PATH")"
   quoted_port="$(shell_quote "$port")"
   quoted_database_url="$(shell_quote "$database_url")"
+  quoted_outbound_providers_disabled="$(shell_quote "${MVP_TEST_DISABLE_OUTBOUND_PROVIDERS:-}")"
   local command_part
   for command_part in "${command_parts[@]}"; do
     quoted_command+=" $(shell_quote "$command_part")"
   done
-  local command="cd $quoted_backend && exec env PATH=$quoted_path PORT=$quoted_port DATABASE_URL=$quoted_database_url DATABASE_URL_LIVE=$quoted_database_url$quoted_command >>$quoted_log 2>&1"
+  local command="cd $quoted_backend && exec env PATH=$quoted_path PORT=$quoted_port DATABASE_URL=$quoted_database_url DATABASE_URL_LIVE=$quoted_database_url MVP_TEST_DISABLE_OUTBOUND_PROVIDERS=$quoted_outbound_providers_disabled$quoted_command >>$quoted_log 2>&1"
 
   log "Starting backend server on port $port"
   if command_exists launchctl; then
@@ -947,6 +966,12 @@ main() {
 
   local backend_dir
   backend_dir="$(resolve_backend_dir)" || fail "Could not find apps/site. Set MVP_SITE_DIR only when the backend is outside this monorepo."
+
+  if (( PRINT_DATABASE_URL == 1 )); then
+    derive_compose_database_url "$backend_dir" ||
+      fail "Could not derive the loopback Compose database URL."
+    return 0
+  fi
 
   local port
   port="$(resolve_backend_port)"

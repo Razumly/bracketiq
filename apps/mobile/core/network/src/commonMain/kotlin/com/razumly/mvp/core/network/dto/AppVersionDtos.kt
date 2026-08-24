@@ -11,6 +11,16 @@ data class AppVersionCheckResponseDto(
 )
 
 @Serializable
+data class AppVersionIsolationProbeResponseDto(
+    val updateAvailable: Boolean = false,
+    val updateRequired: Boolean = false,
+    val latestVersion: AppVersionDto? = null,
+    val releases: List<AppVersionDto> = emptyList(),
+    val outboundProvidersDisabled: Boolean = false,
+    val databaseUrlHash: String? = null,
+)
+
+@Serializable
 data class AppVersionDto(
     val platform: String = "",
     val versionName: String = "",
