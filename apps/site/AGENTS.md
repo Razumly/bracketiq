@@ -177,6 +177,7 @@ We persist raw string IDs for associations (for example `teamIds`, `friendIds`, 
 - **Bug fixes**: Include a regression test when the bug exposes a meaningful observable behavior not already covered by a stronger boundary or smoke check.
 - **Mocks**: Reset mocks and spies when they are used for internal application services, Prisma, or browser platform APIs; do not recreate a third-party provider client.
 - **Async tests**: Use `await`/`waitFor` for asynchronous application behavior.
+- **Affiliate mapping validation**: `npm run test:affiliate-mappings` runs the per-source mapping fixtures that the default Jest and CI suites skip. `npx tsc --noEmit` still checks their TypeScript contracts.
 - **Focused validation**: Do not run Jest suites concurrently from multiple agents in the same checkout; shared `.next`/cache artifacts can cause flaky results.
 
 ## Form & Scheduling Standards

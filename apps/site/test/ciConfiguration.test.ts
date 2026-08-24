@@ -35,8 +35,13 @@ describe('CI quality gates', () => {
       fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8'),
     ) as { scripts?: Record<string, string> };
     const testCiScript = packageJson.scripts?.['test:ci'];
+    const affiliateMappingScript = packageJson.scripts?.['test:affiliate-mappings'];
     expect(testCiScript).toContain('--maxWorkers=2');
     expect(testCiScript).not.toContain('--runInBand');
     expect(testCiScript).toContain('coverage:check-routes');
+    expect(jestConfig.testPathIgnorePatterns).toContain(
+      '<rootDir>/src/server/affiliateImports/__tests__/.*Source\\.test\\.ts$',
+    );
+    expect(affiliateMappingScript).toContain('--testPathPatterns');
   });
 });
