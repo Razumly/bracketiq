@@ -127,6 +127,16 @@ export async function POST(
       select: { userId: true },
     })
     : null;
+  const notificationInput = subject?.userId
+    ? {
+      organizationId,
+      subjectUserId: subject.userId,
+      evidenceId: evidence.id,
+      documentName: evidence.documentName,
+      action: "VOID" as const,
+      actorUserId: session.userId,
+    }
+    : null;
 
   try {
     await prisma.$transaction(async (tx) => {
@@ -171,16 +181,9 @@ export async function POST(
         : "Unable to void document evidence.";
     return NextResponse.json({ error: message }, { status: 400 });
   }
-  if (isVoided && subject?.userId) {
+  if (isVoided && notificationInput) {
     try {
-      await recordDocumentEvidenceInAppNotification({
-        organizationId,
-        subjectUserId: subject.userId,
-        evidenceId: evidence.id,
-        documentName: evidence.documentName,
-        action: "VOID",
-        actorUserId: session.userId,
-      });
+      await recordDocumentEvidenceInAppNotification(notificationInput);
     } catch (error) {
       console.error("Document void in-app notification failed.", {
         organizationId,
@@ -190,15 +193,8 @@ export async function POST(
     }
     try {
       await notifyDocumentEvidenceChange(
-        {
-          organizationId,
-          subjectUserId: subject.userId,
-          evidenceId: evidence.id,
-          documentName: evidence.documentName,
-          action: "VOID",
-          actorUserId: session.userId,
-        },
-        { includeInApp: false },
+        notificationInput,
+        { isInAppIncluded: false },
       );
     } catch (error) {
       console.error("Document void notification failed.", {

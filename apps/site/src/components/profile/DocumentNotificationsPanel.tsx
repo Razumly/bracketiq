@@ -19,10 +19,10 @@ const getNotificationDate = (value: string): string => (
 export default function DocumentNotificationsPanel({ userId }: DocumentNotificationsPanelProps) {
   const [notifications, setNotifications] = useState<UserNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [loading, setLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
-  const [markingAllRead, setMarkingAllRead] = useState(false);
+  const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
 
   const loadNotifications = useCallback(async () => {
     if (!userId) {
@@ -30,16 +30,16 @@ export default function DocumentNotificationsPanel({ userId }: DocumentNotificat
       setUnreadCount(0);
       return;
     }
-    setLoading(true);
+    setIsLoading(true);
     setError(null);
     try {
-      const result = await userNotificationService.listDocumentNotifications();
+      const result = await userNotificationService.getDocumentNotifications();
       setNotifications(result.notifications);
       setUnreadCount(result.unreadCount);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Failed to load document notifications.");
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   }, [userId]);
 
@@ -51,7 +51,7 @@ export default function DocumentNotificationsPanel({ userId }: DocumentNotificat
     if (notification.readAt) return;
     setUpdatingId(notification.id);
     try {
-      await userNotificationService.markRead(notification.id);
+      await userNotificationService.updateDocumentNotificationRead(notification.id);
       const readAt = new Date().toISOString();
       setNotifications((current) => current.map((entry) => (
         entry.id === notification.id ? { ...entry, readAt } : entry
@@ -66,16 +66,16 @@ export default function DocumentNotificationsPanel({ userId }: DocumentNotificat
 
   const markAllRead = async () => {
     if (unreadCount === 0) return;
-    setMarkingAllRead(true);
+    setIsMarkingAllRead(true);
     try {
-      await userNotificationService.markAllDocumentsRead();
+      await userNotificationService.updateDocumentNotificationsRead();
       const readAt = new Date().toISOString();
       setNotifications((current) => current.map((entry) => ({ ...entry, readAt: entry.readAt ?? readAt })));
       setUnreadCount(0);
     } catch (updateError) {
       setError(updateError instanceof Error ? updateError.message : "Failed to mark notifications as read.");
     } finally {
-      setMarkingAllRead(false);
+      setIsMarkingAllRead(false);
     }
   };
 
@@ -95,14 +95,14 @@ export default function DocumentNotificationsPanel({ userId }: DocumentNotificat
           size="xs"
           variant="light"
           onClick={() => void markAllRead()}
-          loading={markingAllRead}
+          loading={isMarkingAllRead}
           disabled={unreadCount === 0}
         >
           Mark all read
         </Button>
       </Group>
       {error && <Alert color="red" mb="md">{error}</Alert>}
-      {loading ? (
+      {isLoading ? (
         <Text size="sm" c="dimmed">Loading document notifications...</Text>
       ) : notifications.length === 0 ? (
         <Text size="sm" c="dimmed">No document notifications.</Text>

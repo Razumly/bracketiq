@@ -241,7 +241,7 @@ const buildConsentStatus = (
   if (!consent) {
     return 'pending_send';
   }
-  if (consent.allRequiredTemplatesSatisfied) {
+  if (consent.isAllRequiredTemplatesSatisfied) {
     return 'completed';
   }
   if (consent.missingChildEmail) {
@@ -418,7 +418,7 @@ const dispatchAndPersistConsent = async (
       missingChildEmail: false,
       errors: [],
       satisfiedTemplateIds: [],
-      allRequiredTemplatesSatisfied: false,
+      isAllRequiredTemplatesSatisfied: false,
     };
     applied.push({ ...task, consent });
     await (prisma as any).eventRegistrations.update({

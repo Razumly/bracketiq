@@ -415,7 +415,7 @@ export async function POST(
 
   const buffer = Buffer.from(await file.arrayBuffer());
   const validation = await validatePdfBuffer(buffer);
-  if (!validation.valid) {
+  if (!validation.isValid) {
     return NextResponse.json({ error: validation.reason }, { status: 415 });
   }
   const contentHash = `sha256:${crypto.createHash('sha256').update(buffer).digest('hex')}`;

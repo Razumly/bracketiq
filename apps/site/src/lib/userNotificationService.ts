@@ -20,7 +20,7 @@ type UserNotificationMutationResponse = {
 };
 
 class UserNotificationService {
-  async listDocumentNotifications(limit = 50): Promise<{
+  async getDocumentNotifications(limit = 50): Promise<{
     notifications: UserNotification[];
     unreadCount: number;
   }> {
@@ -36,17 +36,17 @@ class UserNotificationService {
     };
   }
 
-  async markRead(notificationId: string): Promise<void> {
+  async updateDocumentNotificationRead(notificationId: string): Promise<void> {
     await apiRequest<UserNotificationMutationResponse>('/api/notifications', {
       method: 'PATCH',
       body: { notificationId },
     });
   }
 
-  async markAllDocumentsRead(): Promise<void> {
+  async updateDocumentNotificationsRead(): Promise<void> {
     await apiRequest<UserNotificationMutationResponse>('/api/notifications', {
       method: 'PATCH',
-      body: { markAllRead: true, type: 'documents' },
+      body: { isMarkAllRead: true, type: 'documents' },
     });
   }
 }

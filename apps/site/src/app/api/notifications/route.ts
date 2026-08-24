@@ -12,10 +12,10 @@ const querySchema = z.object({
 
 const updateSchema = z.object({
   notificationId: z.string().trim().min(1).optional(),
-  markAllRead: z.boolean().optional(),
+  isMarkAllRead: z.boolean().optional(),
   type: z.literal('documents').default('documents'),
-}).refine((value) => Boolean(value.notificationId) || value.markAllRead === true, {
-  message: 'notificationId or markAllRead is required',
+}).refine((value) => Boolean(value.notificationId) || value.isMarkAllRead === true, {
+  message: 'notificationId or isMarkAllRead is required',
 });
 
 const documentNotificationWhere = (userId: string) => ({

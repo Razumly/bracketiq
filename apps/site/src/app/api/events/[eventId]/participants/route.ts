@@ -2031,7 +2031,7 @@ async function updateParticipants(
           parentUserId: parentId,
           childUserId: userId!,
         });
-        needsConsent = consentDispatch.allRequiredTemplatesSatisfied !== true;
+        needsConsent = consentDispatch.isAllRequiredTemplatesSatisfied !== true;
         consentDocumentId = consentDispatch.firstDocumentId ?? null;
         consentStatus = !needsConsent
           ? 'completed'
@@ -2046,7 +2046,7 @@ async function updateParticipants(
           requiredTemplateIds,
           participantUserId: userId!,
         });
-        needsConsent = consentDispatch.allRequiredTemplatesSatisfied !== true;
+        needsConsent = consentDispatch.isAllRequiredTemplatesSatisfied !== true;
         consentDocumentId = consentDispatch.firstDocumentId ?? null;
         consentStatus = !needsConsent
           ? 'completed'

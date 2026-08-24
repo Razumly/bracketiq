@@ -174,7 +174,7 @@ const sendDocumentEmails = async (
 };
 
 export type DocumentNotificationDeliveryOptions = {
-  includeInApp?: boolean;
+  isInAppIncluded?: boolean;
 };
 
 export const notifyDocumentEvidenceChange = async (
@@ -195,7 +195,7 @@ export const notifyDocumentEvidenceChange = async (
   }
 
   const deliveries: Array<[string, Promise<void>]> = [];
-  if (options.includeInApp !== false) {
+  if (options.isInAppIncluded !== false) {
     deliveries.push(['in-app', recordInAppNotifications(
       recipients,
       input,

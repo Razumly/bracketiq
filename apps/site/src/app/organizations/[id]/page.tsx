@@ -1332,7 +1332,7 @@ function OrganizationDetailContent() {
 
   const loadOrg = useCallback(async (
     orgId: string,
-    options?: { silent?: boolean; includeRelations?: boolean },
+    options?: { silent?: boolean; isRelationsIncluded?: boolean },
   ) => {
     const silent = Boolean(options?.silent);
     if (!silent) {
@@ -1341,7 +1341,7 @@ function OrganizationDetailContent() {
     try {
       const data = await organizationService.getOrganizationById(
         orgId,
-        options?.includeRelations ?? requestedTab !== 'users',
+        options?.isRelationsIncluded ?? requestedTab !== 'users',
       );
       if (data) setOrg(data);
     } catch (e) {
@@ -3264,8 +3264,8 @@ function OrganizationDetailContent() {
     }
     setIsVoidingCustomerDocument(true);
     try {
-      const recentAuthToken = await signedDocumentService.confirmPassword(customerDocumentVoidPassword);
-      await signedDocumentService.voidImportedDocument(
+      const recentAuthToken = await signedDocumentService.createRecentAuthToken(customerDocumentVoidPassword);
+      await signedDocumentService.updateImportedDocumentStatus(
         org.$id,
         customerDocumentToVoid.signedDocumentRecordId,
         customerDocumentVoidReason,
@@ -3544,7 +3544,7 @@ function OrganizationDetailContent() {
       formData.append('scopeType', 'ORGANIZATION');
       formData.append('scopeId', scopeId);
       formData.append('file', customerImportFile, customerImportFile.name);
-      await signedDocumentService.importSignedDocument(org.$id, formData);
+      await signedDocumentService.createImportedSignedDocument(org.$id, formData);
       notifications.show({ color: 'green', message: 'Signed document imported.' });
       closeCustomerImportModal(true);
       await refreshOrganizationCustomers();

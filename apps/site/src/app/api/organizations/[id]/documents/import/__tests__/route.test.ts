@@ -135,7 +135,7 @@ describe('POST /api/organizations/[id]/documents/import', () => {
       }),
       deleteObject: jest.fn().mockResolvedValue(undefined),
     });
-    validatePdfBufferMock.mockResolvedValue({ valid: true });
+    validatePdfBufferMock.mockResolvedValue({ isValid: true });
     signedDocumentEvidenceFieldsMock.mockImplementation((params: {
       documentSubjectUserId?: string | null;
       provenance: string;
@@ -329,7 +329,7 @@ describe('POST /api/organizations/[id]/documents/import', () => {
   });
 
   it('rejects a malformed PDF before storage', async () => {
-    validatePdfBufferMock.mockResolvedValue({ valid: false, reason: 'The PDF is incomplete.' });
+    validatePdfBufferMock.mockResolvedValue({ isValid: false, reason: 'The PDF is incomplete.' });
 
     const response = await POST(buildRequest(), routeParams);
 
@@ -340,10 +340,9 @@ describe('POST /api/organizations/[id]/documents/import', () => {
   });
   it('rejects encrypted or password-protected PDFs before storage', async () => {
     validatePdfBufferMock.mockResolvedValue({
-      valid: false,
+      isValid: false,
       reason: 'Encrypted or password-protected PDFs are not supported.',
     });
-
     const response = await POST(buildRequest(), routeParams);
 
     expect(response.status).toBe(415);

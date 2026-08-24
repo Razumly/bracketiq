@@ -327,7 +327,7 @@ describe("POST /api/organizations/[id]/documents/[signedDocumentId]/void", () =>
         action: "VOID",
         actorUserId: "manager_1",
       },
-      { includeInApp: false },
+      { isInAppIncluded: false },
     );
   });
   it("keeps a committed void when in-app notification recording fails", async () => {
@@ -364,7 +364,7 @@ describe("POST /api/organizations/[id]/documents/[signedDocumentId]/void", () =>
     expect(txMock.signedDocuments.updateMany).toHaveBeenCalled();
     expect(notifyDocumentEvidenceChangeMock).toHaveBeenCalledWith(
       expect.objectContaining({ action: "VOID" }),
-      { includeInApp: false },
+      { isInAppIncluded: false },
     );
   });
 });

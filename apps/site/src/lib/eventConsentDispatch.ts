@@ -55,7 +55,7 @@ export type DispatchRequiredEventDocumentsResult = {
   missingChildEmail: boolean;
   errors: string[];
   satisfiedTemplateIds: string[];
-  allRequiredTemplatesSatisfied: boolean;
+  isAllRequiredTemplatesSatisfied: boolean;
 };
 
 const normalizeText = (value: unknown): string | null => {
@@ -246,7 +246,7 @@ export const dispatchRequiredEventDocuments = async (
       missingChildEmail: false,
       errors: [],
       satisfiedTemplateIds: [],
-      allRequiredTemplatesSatisfied: true,
+      isAllRequiredTemplatesSatisfied: true,
     };
   }
 
@@ -326,16 +326,16 @@ export const dispatchRequiredEventDocuments = async (
       ? requiredSignerType !== 'PARTICIPANT'
       : requiredSignerType === 'PARTICIPANT';
   });
-  const allRequiredTemplatesSatisfied = applicableRequiredTemplateIds.every((templateId) =>
+  const isAllRequiredTemplatesSatisfied = applicableRequiredTemplateIds.every((templateId) =>
     satisfiedTemplateIds.has(templateId));
-  if (allRequiredTemplatesSatisfied) {
+  if (isAllRequiredTemplatesSatisfied) {
     return {
       sentDocumentIds: [],
       firstDocumentId: null,
       missingChildEmail: false,
       errors: [],
       satisfiedTemplateIds: satisfiedTemplateIdList,
-      allRequiredTemplatesSatisfied: true,
+      isAllRequiredTemplatesSatisfied: true,
     };
   }
   if (!isBoldSignConfigured()) {
@@ -345,7 +345,7 @@ export const dispatchRequiredEventDocuments = async (
       missingChildEmail: false,
       errors: ['BoldSign is not configured on the server. Set BOLDSIGN_API_KEY.'],
       satisfiedTemplateIds: satisfiedTemplateIdList,
-      allRequiredTemplatesSatisfied: false,
+      isAllRequiredTemplatesSatisfied: false,
     };
   }
   const quarantinedTemplateIds = await findQuarantinedDocumentTemplateVersionIds(
@@ -555,6 +555,6 @@ export const dispatchRequiredEventDocuments = async (
     missingChildEmail,
     errors,
     satisfiedTemplateIds: satisfiedTemplateIdList,
-    allRequiredTemplatesSatisfied,
+    isAllRequiredTemplatesSatisfied,
   };
 };

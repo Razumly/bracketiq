@@ -78,7 +78,7 @@ describe('/api/notifications', () => {
 
     const response = await PATCH(new NextRequest('http://localhost/api/notifications', {
       method: 'PATCH',
-      body: JSON.stringify({ markAllRead: true, type: 'documents' }),
+      body: JSON.stringify({ isMarkAllRead: true, type: 'documents' }),
       headers: { 'content-type': 'application/json' },
     }));
 

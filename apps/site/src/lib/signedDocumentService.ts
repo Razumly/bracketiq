@@ -20,7 +20,7 @@ export type DocumentAuditEvent = {
 };
 
 class SignedDocumentService {
-  async importSignedDocument(
+  async createImportedSignedDocument(
     organizationId: string,
     formData: FormData,
   ): Promise<ImportedSignedDocumentResponse> {
@@ -36,7 +36,7 @@ class SignedDocumentService {
     }
     return response;
   }
-  async confirmPassword(password: string): Promise<string> {
+  async createRecentAuthToken(password: string): Promise<string> {
     const response = await apiRequest<{ recentAuthToken?: string; error?: string }>(
       '/api/documents/confirm-password',
       {
@@ -53,7 +53,7 @@ class SignedDocumentService {
     return response.recentAuthToken;
   }
 
-  async voidImportedDocument(
+  async updateImportedDocumentStatus(
     organizationId: string,
     signedDocumentId: string,
     reason: string,

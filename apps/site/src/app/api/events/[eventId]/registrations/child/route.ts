@@ -189,7 +189,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ eve
     })
     : null;
   const needsConsent = hasRequiredConsent
-    && consentDispatch?.allRequiredTemplatesSatisfied !== true;
+    && consentDispatch?.isAllRequiredTemplatesSatisfied !== true;
   const consentDocumentId = consentDispatch?.firstDocumentId ?? null;
   const consentStatus = !hasRequiredConsent || !needsConsent
     ? (hasRequiredConsent ? 'completed' : null)

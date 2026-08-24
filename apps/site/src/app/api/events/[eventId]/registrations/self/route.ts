@@ -355,7 +355,7 @@ export async function POST(
       })
     : null;
   const needsConsent = legacyNeedsConsent
-    && consentDispatch?.allRequiredTemplatesSatisfied !== true;
+    && consentDispatch?.isAllRequiredTemplatesSatisfied !== true;
   const consentStatus =
     participantRequiredTemplateIds.length === 0
       ? null
