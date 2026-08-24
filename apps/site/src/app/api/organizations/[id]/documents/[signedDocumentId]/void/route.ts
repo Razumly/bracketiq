@@ -11,7 +11,10 @@ import {
   invalidateDocumentRequirementSatisfactions,
   type DocumentEvidenceDatabase,
 } from "@/server/documentEvidence";
-import { notifyDocumentEvidenceChange } from "@/server/documentNotifications";
+import {
+  notifyDocumentEvidenceChange,
+  recordDocumentEvidenceInAppNotification,
+} from "@/server/documentNotifications";
 
 export const DOCUMENT_VOID_REASONS = [
   "Wrong Document Subject",
@@ -118,6 +121,12 @@ export async function POST(
   const normalizedNote = parsedBody.data.note || null;
   const now = new Date();
   let isVoided = false;
+  const subject = evidence.documentSubjectId
+    ? await prisma.documentSubjects.findUnique({
+      where: { id: evidence.documentSubjectId },
+      select: { userId: true },
+    })
+    : null;
 
   try {
     await prisma.$transaction(async (tx) => {
@@ -162,28 +171,41 @@ export async function POST(
         : "Unable to void document evidence.";
     return NextResponse.json({ error: message }, { status: 400 });
   }
-  if (isVoided && evidence.documentSubjectId) {
-    const subject = await prisma.documentSubjects.findUnique({
-      where: { id: evidence.documentSubjectId },
-      select: { userId: true },
-    });
-    if (subject?.userId) {
-      try {
-        await notifyDocumentEvidenceChange({
+  if (isVoided && subject?.userId) {
+    try {
+      await recordDocumentEvidenceInAppNotification({
+        organizationId,
+        subjectUserId: subject.userId,
+        evidenceId: evidence.id,
+        documentName: evidence.documentName,
+        action: "VOID",
+        actorUserId: session.userId,
+      });
+    } catch (error) {
+      console.error("Document void in-app notification failed.", {
+        organizationId,
+        evidenceId: evidence.id,
+        error,
+      });
+    }
+    try {
+      await notifyDocumentEvidenceChange(
+        {
           organizationId,
           subjectUserId: subject.userId,
           evidenceId: evidence.id,
           documentName: evidence.documentName,
           action: "VOID",
           actorUserId: session.userId,
-        });
-      } catch (error) {
-        console.error("Document void notification failed.", {
-          organizationId,
-          evidenceId: evidence.id,
-          error,
-        });
-      }
+        },
+        { includeInApp: false },
+      );
+    } catch (error) {
+      console.error("Document void notification failed.", {
+        organizationId,
+        evidenceId: evidence.id,
+        error,
+      });
     }
   }
 

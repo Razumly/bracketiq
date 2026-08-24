@@ -11,6 +11,7 @@ import {
   normalizeRequiredSignerType,
   type SignerContext,
 } from '@/lib/templateSignerTypes';
+import { findCompletedDocumentSatisfactions } from '@/server/documentEvidence';
 import { getCanonicalTeamIdsByUserIds } from '@/server/teams/teamMembership';
 
 export const dynamic = 'force-dynamic';
@@ -831,34 +832,18 @@ export async function GET(_req: NextRequest) {
   const organizationsById = new Map(
     organizations.map((organization) => [organization.id, normalizeText(organization.name) ?? 'Organization']),
   );
-  const satisfactionScopeFilters = [
-    ...(organizationIds.length
-      ? [{ scopeType: 'ORGANIZATION' as const, scopeId: { in: organizationIds } }]
-      : []),
-    ...(discoverableEventIds.length
-      ? [{ scopeType: 'EVENT_PARTICIPATION' as const, scopeId: { in: discoverableEventIds } }]
-      : []),
-    ...(relevantProfileTeamIds.length
-      ? [{ scopeType: 'TEAM_MEMBERSHIP' as const, scopeId: { in: relevantProfileTeamIds } }]
-      : []),
+  const satisfactionScopes = [
+    ...organizationIds.map((scopeId) => ({ scopeType: 'ORGANIZATION' as const, scopeId })),
+    ...discoverableEventIds.map((scopeId) => ({ scopeType: 'EVENT_PARTICIPATION' as const, scopeId })),
+    ...relevantProfileTeamIds.map((scopeId) => ({ scopeType: 'TEAM_MEMBERSHIP' as const, scopeId })),
   ];
   const satisfactionRows = documentSubjectIds.length
     && templateIdsToLoad.length
-    && satisfactionScopeFilters.length
-    ? await prisma.documentRequirementSatisfactions.findMany({
-      where: {
-        documentSubjectId: { in: documentSubjectIds },
-        templateDocumentId: { in: templateIdsToLoad },
-        status: 'SATISFIED',
-        isComplete: true,
-        OR: satisfactionScopeFilters,
-      },
-      select: {
-        documentSubjectId: true,
-        templateDocumentId: true,
-        scopeType: true,
-        scopeId: true,
-      },
+    && satisfactionScopes.length
+    ? await findCompletedDocumentSatisfactions({
+      documentSubjectIds,
+      templateDocumentIds: templateIdsToLoad,
+      scopes: satisfactionScopes,
     })
     : [];
   const completeSatisfactionKeys = new Set(

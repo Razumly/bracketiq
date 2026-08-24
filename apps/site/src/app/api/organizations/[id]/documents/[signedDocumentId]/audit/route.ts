@@ -65,7 +65,7 @@ export async function GET(
         .filter((value): value is string => Boolean(value?.trim()))
         .join(' ')
         .trim();
-      return [profile.id, fullName || profile.userName?.trim() || null] as const;
+      return [profile.id, fullName || null] as const;
     }),
   );
 

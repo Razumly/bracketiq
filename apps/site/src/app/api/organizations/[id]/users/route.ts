@@ -81,6 +81,7 @@ type DocumentSummary = {
   signedDocumentRecordId: string;
   documentId: string;
   templateId: string;
+  versionSequence?: number;
   eventId?: string;
   eventName?: string;
   teamId?: string;
@@ -329,15 +330,21 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const rentalEventIdSet = new Set(rentalEventIds);
   const registrations = eventIds.length
     ? await prisma.eventRegistrations.findMany({
-      where: { eventId: { in: eventIds } },
-	      select: {
-	        eventId: true,
-	        registrantId: true,
-	        parentId: true,
-	        registrantType: true,
-	        eventTeamId: true,
-	        status: true,
-	      },
+      where: {
+        eventId: { in: eventIds },
+        rosterRole: 'PARTICIPANT',
+        status: { in: ['STARTED', 'PENDING', 'ACTIVE', 'BLOCKED', 'CONSENTFAILED'] },
+        slotId: null,
+        occurrenceDate: null,
+      },
+      select: {
+        eventId: true,
+        registrantId: true,
+        parentId: true,
+        registrantType: true,
+        eventTeamId: true,
+        status: true,
+      },
       orderBy: { updatedAt: 'desc' },
     })
     : [];
@@ -1321,6 +1328,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       signedDocumentRecordId: document.id,
       documentId: document.signedDocumentId,
       templateId: document.templateId,
+      versionSequence: typeof template?.versionSequence === 'number' ? template.versionSequence : undefined,
       eventId: document.eventId ?? undefined,
       eventName: event?.name,
       teamId: document.teamId ?? undefined,

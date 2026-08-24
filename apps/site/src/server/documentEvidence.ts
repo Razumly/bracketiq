@@ -293,35 +293,51 @@ export const findCompletedDocumentSatisfactions = async (params: {
   }
 
   const delegate = requireDelegate(database, 'documentRequirementSatisfactions');
-  const rows = await delegate.findMany({
-    where: {
-      documentSubjectId: { in: documentSubjectIds },
-      templateDocumentId: { in: templateDocumentIds },
-      status: 'SATISFIED',
-      isComplete: true,
-      OR: scopes.map((scope) => ({
-        scopeType: scope.scopeType,
-        scopeId: scope.scopeId,
-      })),
-    },
-    select: {
-      documentSubjectId: true,
-      templateDocumentId: true,
-      scopeType: true,
-      scopeId: true,
-      sourceEvidenceId: true,
-      updatedAt: true,
-    },
+  const rows = await readByIdChunks(documentSubjectIds, async (subjectIds) => {
+    const subjectRows: Array<Omit<CompletedDocumentSatisfaction, 'signedAt'>> = [];
+    for (let templateOffset = 0; templateOffset < templateDocumentIds.length; templateOffset += DOCUMENT_EVIDENCE_QUERY_CHUNK_SIZE) {
+      const templateIds = templateDocumentIds.slice(
+        templateOffset,
+        templateOffset + DOCUMENT_EVIDENCE_QUERY_CHUNK_SIZE,
+      );
+      for (let scopeOffset = 0; scopeOffset < scopes.length; scopeOffset += DOCUMENT_EVIDENCE_QUERY_CHUNK_SIZE) {
+        const scopeChunk = scopes.slice(scopeOffset, scopeOffset + DOCUMENT_EVIDENCE_QUERY_CHUNK_SIZE);
+        subjectRows.push(...await delegate.findMany({
+          where: {
+            documentSubjectId: { in: subjectIds },
+            templateDocumentId: { in: templateIds },
+            status: 'SATISFIED',
+            isComplete: true,
+            OR: scopeChunk.map((scope) => ({
+              scopeType: scope.scopeType,
+              scopeId: scope.scopeId,
+            })),
+          },
+          select: {
+            documentSubjectId: true,
+            templateDocumentId: true,
+            scopeType: true,
+            scopeId: true,
+            sourceEvidenceId: true,
+            updatedAt: true,
+          },
+        }));
+      }
+    }
+    return subjectRows;
   });
   const sourceEvidenceIds = Array.from(new Set(rows.map((row) => row.sourceEvidenceId)));
   if (sourceEvidenceIds.length === 0) {
     return [];
   }
   const evidenceDelegate = requireDelegate(database, 'signedDocuments');
-  const evidenceRows = await evidenceDelegate.findMany({
-    where: { id: { in: sourceEvidenceIds } },
-    select: { id: true, signedAt: true },
-  });
+  const evidenceRows = await readByIdChunks(
+    sourceEvidenceIds,
+    (ids) => evidenceDelegate.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, signedAt: true },
+    }),
+  );
   const signedAtByEvidenceId = new Map(
     evidenceRows.map((row) => [row.id, row.signedAt] as const),
   );

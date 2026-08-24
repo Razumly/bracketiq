@@ -78,6 +78,25 @@ describe('GET /api/organizations/[id]/documents/[signedDocumentId]/audit', () =>
       select: { id: true, firstName: true, lastName: true, userName: true },
     });
   });
+  it('does not expose a username when an actor has no display name', async () => {
+    prismaMock.userData.findMany.mockResolvedValueOnce([
+      {
+        id: 'owner_1',
+        firstName: null,
+        lastName: null,
+        userName: 'alex',
+      },
+    ]);
+
+    const response = await GET(
+      new NextRequest('http://localhost/api/organizations/org_1/documents/evidence_1/audit'),
+      { params: Promise.resolve({ id: 'org_1', signedDocumentId: 'evidence_1' }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).auditEvents[0].actorDisplayName).toBeNull();
+  });
+
 
   it('does not read audit history for an unauthorized staff member', async () => {
     hasOrgPermissionMock.mockResolvedValue(false);

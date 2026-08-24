@@ -42,8 +42,11 @@ const getNotificationCopy = (input: DocumentEvidenceNotificationInput): {
   };
 };
 
-const loadRecipients = async (subjectUserId: string): Promise<NotificationRecipient[]> => {
-  const parentRows = await prisma.parentChildLinks.findMany({
+const loadRecipients = async (
+  subjectUserId: string,
+  database: DocumentNotificationDatabase,
+): Promise<NotificationRecipient[]> => {
+  const parentRows = await database.parentChildLinks.findMany({
     where: {
       childId: subjectUserId,
       status: 'ACTIVE',
@@ -57,7 +60,7 @@ const loadRecipients = async (subjectUserId: string): Promise<NotificationRecipi
   if (!recipientIds.length) return [];
 
   const emailRows = isEmailEnabled()
-    ? await prisma.sensitiveUserData.findMany({
+    ? await database.sensitiveUserData.findMany({
       where: { userId: { in: recipientIds } },
       select: { userId: true, email: true },
     })
@@ -66,13 +69,44 @@ const loadRecipients = async (subjectUserId: string): Promise<NotificationRecipi
   return recipientIds.map((id) => ({ id, email: emailByUserId.get(id) ?? null }));
 };
 
+type InAppNotificationRow = {
+  id: string;
+  createdAt: Date;
+  userId: string;
+  notificationType: string;
+  title: string;
+  body: string;
+  data: Record<string, string>;
+};
+
+export type DocumentNotificationDatabase = {
+  parentChildLinks: {
+    findMany: (args: {
+      where: { childId: string; status: 'ACTIVE' };
+      select: { parentId: true };
+    }) => Promise<Array<{ parentId: string }>>;
+  };
+  sensitiveUserData: {
+    findMany: (args: {
+      where: { userId: { in: string[] } };
+      select: { userId: true; email: true };
+    }) => Promise<Array<{ userId: string; email: string | null }>>;
+  };
+  userNotifications: {
+    createMany: (args: { data: InAppNotificationRow[] }) => Promise<unknown>;
+  };
+};
+
+const defaultDocumentNotificationDatabase = prisma as unknown as DocumentNotificationDatabase;
+
 const recordInAppNotifications = async (
   recipients: NotificationRecipient[],
   input: DocumentEvidenceNotificationInput,
   copy: { title: string; body: string },
+  database: DocumentNotificationDatabase,
 ): Promise<void> => {
   if (!recipients.length) return;
-  await prisma.userNotifications.createMany({
+  await database.userNotifications.createMany({
     data: recipients.map((recipient) => ({
       id: crypto.randomUUID(),
       createdAt: new Date(),
@@ -87,6 +121,14 @@ const recordInAppNotifications = async (
       },
     })),
   });
+};
+
+export const recordDocumentEvidenceInAppNotification = async (
+  input: DocumentEvidenceNotificationInput,
+  database: DocumentNotificationDatabase = defaultDocumentNotificationDatabase,
+): Promise<void> => {
+  const recipients = await loadRecipients(input.subjectUserId, database);
+  await recordInAppNotifications(recipients, input, getNotificationCopy(input), database);
 };
 
 const sendDocumentPush = async (
@@ -131,13 +173,18 @@ const sendDocumentEmails = async (
   );
 };
 
+export type DocumentNotificationDeliveryOptions = {
+  includeInApp?: boolean;
+};
+
 export const notifyDocumentEvidenceChange = async (
   input: DocumentEvidenceNotificationInput,
+  options: DocumentNotificationDeliveryOptions = {},
 ): Promise<void> => {
   const copy = getNotificationCopy(input);
   let recipients: NotificationRecipient[];
   try {
-    recipients = await loadRecipients(input.subjectUserId);
+    recipients = await loadRecipients(input.subjectUserId, defaultDocumentNotificationDatabase);
   } catch (error) {
     console.error('Document notification recipient lookup failed.', {
       action: input.action,
@@ -147,11 +194,17 @@ export const notifyDocumentEvidenceChange = async (
     return;
   }
 
-  const deliveries = [
-    ['in-app', recordInAppNotifications(recipients, input, copy)],
-    ['push', sendDocumentPush(recipients, input, copy)],
-    ['email', sendDocumentEmails(recipients, input, copy)],
-  ] as const;
+  const deliveries: Array<[string, Promise<void>]> = [];
+  if (options.includeInApp !== false) {
+    deliveries.push(['in-app', recordInAppNotifications(
+      recipients,
+      input,
+      copy,
+      defaultDocumentNotificationDatabase,
+    )]);
+  }
+  deliveries.push(['push', sendDocumentPush(recipients, input, copy)]);
+  deliveries.push(['email', sendDocumentEmails(recipients, input, copy)]);
   const results = await Promise.allSettled(deliveries.map(([, delivery]) => delivery));
   results.forEach((result, index) => {
     if (result.status === 'rejected') {

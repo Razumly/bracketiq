@@ -1,3 +1,5 @@
+BEGIN;
+
 -- Track every evidence row that contributes to an aggregate Satisfaction.
 CREATE TABLE "DocumentRequirementSatisfactionEvidence" (
   "id" TEXT NOT NULL,
@@ -17,7 +19,7 @@ CREATE INDEX "DocumentRequirementSatisfactionEvidence_signedDocumentId_idx"
 
 -- Recover an Organization only when every available owner agrees. Template,
 -- Event, and Team ownership are independent evidence sources.
-CREATE TEMP TABLE "_document_evidence_owner_repair" ON COMMIT DROP AS
+CREATE TEMP TABLE "_document_evidence_owner_repair" AS
 WITH candidate_owners AS (
   SELECT sd."id", td."organizationId"
   FROM "SignedDocuments" sd
@@ -353,3 +355,5 @@ JOIN "SignedDocuments" evidence
   AND evidence."scopeId" = satisfaction."scopeId"
 WHERE UPPER(COALESCE(evidence."status", '')) IN ('SIGNED', 'COMPLETED')
 ON CONFLICT ("satisfactionId", "signedDocumentId") DO NOTHING;
+
+COMMIT;

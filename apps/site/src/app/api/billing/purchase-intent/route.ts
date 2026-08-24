@@ -1228,6 +1228,12 @@ export async function POST(req: NextRequest) {
           error: `Rental document templates not found: ${missingTemplateIds.join(', ')}`,
         }, { status: 400 });
       }
+      const unnamedTemplate = templates.find((template) => !template.title?.trim());
+      if (unnamedTemplate) {
+        return NextResponse.json({
+          error: 'Rental document template is missing a title.',
+        }, { status: 400 });
+      }
       for (const templateId of hostRequiredTemplateIds) {
         const template = templateById.get(templateId);
         if (template && !template.signOnce && !eventId) {
@@ -1258,7 +1264,7 @@ export async function POST(req: NextRequest) {
         .map((templateId) => templateById.get(templateId))
         .filter((template): template is NonNullable<typeof template> => Boolean(template))
         .filter((template) => !satisfiedTemplateIds.has(template.id))
-        .map((template) => template.title?.trim() || template.id);
+        .map((template) => template.title?.trim() ?? '');
 
       if (unsignedTemplateLabels.length > 0) {
         return NextResponse.json({

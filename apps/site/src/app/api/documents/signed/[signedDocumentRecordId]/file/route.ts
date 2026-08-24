@@ -21,13 +21,40 @@ const sanitizeFileName = (value: string): string => {
   return cleaned.toLowerCase().endsWith('.pdf') ? cleaned : `${cleaned}.pdf`;
 };
 
-const streamToBuffer = async (stream: Readable): Promise<Buffer> => {
-  const chunks: Buffer[] = [];
-  return new Promise((resolve, reject) => {
-    stream.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
-    stream.on('error', reject);
-    stream.on('end', () => resolve(Buffer.concat(chunks)));
-  });
+const readPdfPrefixAndCreateBody = async (
+  stream: Readable,
+): Promise<{ body: ReadableStream<Uint8Array> | null; isPdf: boolean }> => {
+  const iterator = stream[Symbol.asyncIterator]();
+  const prefixChunks: Buffer[] = [];
+  let prefixLength = 0;
+  while (prefixLength < 5) {
+    const result = await iterator.next();
+    if (result.done) break;
+    const chunk = Buffer.isBuffer(result.value) ? result.value : Buffer.from(result.value);
+    prefixChunks.push(chunk);
+    prefixLength += chunk.length;
+  }
+
+  const prefix = Buffer.concat(prefixChunks, prefixLength).subarray(0, 5);
+  if (prefix.toString('ascii') !== '%PDF-') {
+    stream.destroy();
+    return { body: null, isPdf: false };
+  }
+
+  const responseStream = Readable.from((async function* () {
+    for (const chunk of prefixChunks) {
+      yield chunk;
+    }
+    while (true) {
+      const result = await iterator.next();
+      if (result.done) return;
+      yield Buffer.isBuffer(result.value) ? result.value : Buffer.from(result.value);
+    }
+  })());
+  return {
+    body: Readable.toWeb(responseStream) as ReadableStream<Uint8Array>,
+    isPdf: true,
+  };
 };
 const isMissingStorageObjectError = (error: unknown): boolean => {
   if (error instanceof Error && error.message === 'FILE_MISSING') {
@@ -325,24 +352,27 @@ export async function GET(
       }
       throw error;
     }
-    const data = await streamToBuffer(streamResult.stream);
-    if (data.subarray(0, 5).toString('ascii') !== '%PDF-') {
+    const streamedPdf = await readPdfPrefixAndCreateBody(streamResult.stream);
+    if (!streamedPdf.isPdf || !streamedPdf.body) {
       return NextResponse.json(
         { error: 'Imported document file is not a PDF.' },
         { status: 415 },
       );
     }
     const fileName = sanitizeFileName(storedFile.originalName || signedDocument.documentName || 'signed-document');
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/pdf',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Disposition': `inline; filename="${fileName}"`,
+      'Cache-Control': 'no-store',
+    };
+    if (typeof streamResult.sizeBytes === 'number') {
+      headers['Content-Length'] = streamResult.sizeBytes.toString();
+    }
 
-    return new NextResponse(new Uint8Array(data), {
+    return new NextResponse(streamedPdf.body, {
       status: 200,
-      headers: {
-        'Content-Type': 'application/pdf',
-        'X-Content-Type-Options': 'nosniff',
-        'Content-Length': data.byteLength.toString(),
-        'Content-Disposition': `inline; filename="${fileName}"`,
-        'Cache-Control': 'no-store',
-      },
+      headers,
     });
   }
 

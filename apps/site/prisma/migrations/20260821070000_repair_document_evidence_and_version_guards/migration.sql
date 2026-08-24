@@ -56,7 +56,7 @@ WHERE subject."id" = timestamps.document_subject_id;
 -- created one row per signer and marked every row complete. Keep one evidence
 -- row per requirement, Subject, and scope, then compute completion from all
 -- preserved signer rows.
-CREATE TEMP TABLE "_document_evidence_repair" ON COMMIT DROP AS
+CREATE TEMP TABLE "_document_evidence_repair" AS
 WITH eligible AS (
   SELECT
     sd."id" AS evidence_id,

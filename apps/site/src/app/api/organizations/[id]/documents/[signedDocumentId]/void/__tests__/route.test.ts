@@ -27,6 +27,7 @@ const hasOrgPermissionMock = jest.fn();
 const invalidateDocumentRequirementSatisfactionsMock = jest.fn();
 const appendDocumentEvidenceAuditEventMock = jest.fn();
 const notifyDocumentEvidenceChangeMock = jest.fn();
+const recordDocumentEvidenceInAppNotificationMock = jest.fn();
 jest.mock("@/lib/prisma", () => ({ prisma: prismaMock }));
 jest.mock("@/lib/authServer", () => ({
   verifyRecentAuthToken: (...args: unknown[]) => verifyRecentAuthTokenMock(...args),
@@ -43,6 +44,7 @@ jest.mock("@/server/documentEvidence", () => ({
 }));
 jest.mock("@/server/documentNotifications", () => ({
   notifyDocumentEvidenceChange: notifyDocumentEvidenceChangeMock,
+  recordDocumentEvidenceInAppNotification: recordDocumentEvidenceInAppNotificationMock,
 }));
 
 import { POST } from "@/app/api/organizations/[id]/documents/[signedDocumentId]/void/route";
@@ -308,8 +310,7 @@ describe("POST /api/organizations/[id]/documents/[signedDocumentId]/void", () =>
       },
     );
 
-    expect(response.status).toBe(200);
-    expect(notifyDocumentEvidenceChangeMock).toHaveBeenCalledWith({
+    expect(recordDocumentEvidenceInAppNotificationMock).toHaveBeenCalledWith({
       organizationId: "org_1",
       subjectUserId: "player_1",
       evidenceId: "evidence_1",
@@ -317,5 +318,53 @@ describe("POST /api/organizations/[id]/documents/[signedDocumentId]/void", () =>
       action: "VOID",
       actorUserId: "manager_1",
     });
+    expect(notifyDocumentEvidenceChangeMock).toHaveBeenCalledWith(
+      {
+        organizationId: "org_1",
+        subjectUserId: "player_1",
+        evidenceId: "evidence_1",
+        documentName: "Waiver",
+        action: "VOID",
+        actorUserId: "manager_1",
+      },
+      { includeInApp: false },
+    );
+  });
+  it("keeps a committed void when in-app notification recording fails", async () => {
+    recordDocumentEvidenceInAppNotificationMock.mockRejectedValueOnce(
+      new Error("In-app notification storage failed."),
+    );
+    prismaMock.signedDocuments.findFirst.mockResolvedValue({
+      id: "evidence_1",
+      provenance: "IMPORTED",
+      status: "SIGNED",
+      documentName: "Waiver",
+      documentSubjectId: "subject_1",
+    });
+    prismaMock.documentSubjects.findUnique.mockResolvedValue({ userId: "player_1" });
+
+    const response = await POST(
+      new NextRequest(
+        "http://localhost/api/organizations/org_1/documents/evidence_1/void",
+        {
+          method: "POST",
+          body: JSON.stringify({ reason: "Duplicate evidence" }),
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+      {
+        params: Promise.resolve({
+          id: "org_1",
+          signedDocumentId: "evidence_1",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(txMock.signedDocuments.updateMany).toHaveBeenCalled();
+    expect(notifyDocumentEvidenceChangeMock).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "VOID" }),
+      { includeInApp: false },
+    );
   });
 });

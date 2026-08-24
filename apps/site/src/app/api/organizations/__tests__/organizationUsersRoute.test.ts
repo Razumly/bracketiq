@@ -174,12 +174,14 @@ describe('GET /api/organizations/[id]/users', () => {
         id: 'tmpl_pdf',
         title: 'Liability Waiver',
         type: 'PDF',
+        versionSequence: 3,
         content: null,
       },
       {
         id: 'tmpl_text',
         title: 'Code of Conduct',
         type: 'TEXT',
+        versionSequence: 1,
         content: 'I agree to follow the code of conduct.',
       },
     ]);
@@ -217,6 +219,21 @@ describe('GET /api/organizations/[id]/users', () => {
         status: 'SIGNED',
         signedAt: '2026-02-20T18:30:00.000Z',
         createdAt: new Date('2026-02-20T18:30:00.000Z'),
+      },
+      {
+        id: 'signed_imported_text_1',
+        signedDocumentId: 'doc_imported_text_1',
+        templateId: 'tmpl_text',
+        userId: null,
+        documentSubjectId: 'document-subject:org_1:player_1',
+        documentName: 'Imported text evidence',
+        eventId: null,
+        status: 'SIGNED',
+        signedAt: '2026-02-21T18:30:00.000Z',
+        createdAt: new Date('2026-02-21T18:30:00.000Z'),
+        importedFileId: 'file_imported_text',
+        provenance: 'IMPORTED',
+        historicalSigningDate: null,
       },
     ]);
     prismaMock.bills.findMany.mockResolvedValueOnce([
@@ -280,11 +297,19 @@ describe('GET /api/organizations/[id]/users', () => {
         signedDocumentRecordId: 'signed_subject_only_1',
         title: 'Liability Waiver',
         type: 'PDF',
+        versionSequence: 3,
       }),
       expect.objectContaining({
         signedDocumentRecordId: 'signed_text_1',
         type: 'TEXT',
         content: 'I agree to follow the code of conduct.',
+      }),
+      expect.objectContaining({
+        signedDocumentRecordId: 'signed_imported_text_1',
+        title: 'Code of Conduct',
+        type: 'PDF',
+        versionSequence: 1,
+        viewUrl: '/api/documents/signed/signed_imported_text_1/file',
       }),
     ]));
     expect(payload.users[0].bills).toEqual(expect.arrayContaining([

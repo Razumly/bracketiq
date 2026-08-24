@@ -243,6 +243,54 @@ const clearSeedRecords = async (prisma: PrismaClient): Promise<void> => {
     await prisma.divisions.deleteMany({ where: { id: SEED_DIVISION.id } });
     await prisma.teams.deleteMany({ where: { id: { in: [...SEED_TEAM_IDS] } } });
   }
+  const documentEvidenceRows = await prisma.signedDocuments.findMany({
+    where: { organizationId: SEED_ORG.id },
+    select: { id: true, documentSubjectId: true },
+  });
+  const documentEvidenceIds = documentEvidenceRows.map((row) => row.id);
+  const satisfactionRows = await prisma.documentRequirementSatisfactions.findMany({
+    where: { organizationId: SEED_ORG.id },
+    select: { id: true },
+  });
+  const satisfactionIds = satisfactionRows.map((row) => row.id);
+  if (documentEvidenceIds.length > 0 || satisfactionIds.length > 0) {
+    await prisma.documentRequirementSatisfactionEvidence.deleteMany({
+      where: {
+        OR: [
+          ...(documentEvidenceIds.length > 0 ? [{ signedDocumentId: { in: documentEvidenceIds } }] : []),
+          ...(satisfactionIds.length > 0 ? [{ satisfactionId: { in: satisfactionIds } }] : []),
+        ],
+      },
+    });
+  }
+  await prisma.documentEvidenceAuditEvents.deleteMany({
+    where: { organizationId: SEED_ORG.id },
+  });
+  await prisma.documentRequirementSatisfactions.deleteMany({
+    where: { organizationId: SEED_ORG.id },
+  });
+  await prisma.signedDocuments.deleteMany({
+    where: { organizationId: SEED_ORG.id },
+  });
+  await prisma.documentSubjects.deleteMany({
+    where: { organizationId: SEED_ORG.id },
+  });
+  // Imported evidence freezes its Version, so teardown temporarily bypasses only the delete guard.
+  await prisma.$executeRaw(
+    Prisma.sql`ALTER TABLE "TemplateDocuments" DISABLE TRIGGER "TemplateDocuments_reject_frozen_delete"`,
+  );
+  try {
+    await prisma.templateDocuments.deleteMany({
+      where: { organizationId: SEED_ORG.id },
+    });
+  } finally {
+    await prisma.$executeRaw(
+      Prisma.sql`ALTER TABLE "TemplateDocuments" ENABLE TRIGGER "TemplateDocuments_reject_frozen_delete"`,
+    );
+  }
+  await prisma.documentRequirements.deleteMany({
+    where: { organizationId: SEED_ORG.id },
+  });
   await prisma.timeSlots.deleteMany({ where: { id: { in: targetedTimeSlotIds } } });
   await prisma.fields.deleteMany({ where: { id: { in: targetedFieldIds } } });
   await prisma.organizations.deleteMany({ where: { id: SEED_ORG.id } });

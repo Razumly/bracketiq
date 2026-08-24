@@ -234,6 +234,7 @@ type OrganizationUserDocumentSummary = {
   signedDocumentRecordId: string;
   documentId: string;
   templateId: string;
+  versionSequence?: number;
   eventId?: string;
   eventName?: string;
   teamId?: string;
@@ -248,6 +249,26 @@ type OrganizationUserDocumentSummary = {
   scopeId?: string;
   viewUrl?: string;
   content?: string;
+};
+type OrganizationUserDocumentApiRow = {
+  signedDocumentRecordId?: string | null;
+  documentId?: string | null;
+  templateId?: string | null;
+  versionSequence?: number | null;
+  eventId?: string | null;
+  eventName?: string | null;
+  teamId?: string | null;
+  title?: string | null;
+  type?: string | null;
+  provenance?: string | null;
+  status?: string | null;
+  signedAt?: string | null;
+  historicalSigningDate?: string | null;
+  importedAt?: string | null;
+  scopeType?: string | null;
+  scopeId?: string | null;
+  viewUrl?: string | null;
+  content?: string | null;
 };
 type OrganizationDocumentAuditEvent = {
   id: string;
@@ -406,11 +427,14 @@ type OrganizationCustomerRow = {
   team?: OrganizationTeamCustomerSummary;
 };
 const mapOrganizationUserDocumentSummary = (
-  documentRow: Record<string, any>,
+  documentRow: OrganizationUserDocumentApiRow,
 ): OrganizationUserDocumentSummary => ({
   signedDocumentRecordId: String(documentRow?.signedDocumentRecordId ?? ''),
   documentId: String(documentRow?.documentId ?? ''),
   templateId: String(documentRow?.templateId ?? ''),
+  versionSequence: typeof documentRow?.versionSequence === 'number'
+    ? documentRow.versionSequence
+    : undefined,
   eventId: typeof documentRow?.eventId === 'string' ? documentRow.eventId : undefined,
   eventName: typeof documentRow?.eventName === 'string' ? documentRow.eventName : undefined,
   teamId: typeof documentRow?.teamId === 'string' ? documentRow.teamId : undefined,
@@ -844,7 +868,7 @@ function OrganizationDetailContent() {
     || viewerHasPermission(ORG_PERMISSIONS.PAYMENTS_MANAGE);
   const canManageDiscounts = canManageEvents || canManageProducts || canManageTeams || canManageFinance;
   const canManageTemplates = viewerHasPermission(ORG_PERMISSIONS.TEMPLATES_MANAGE);
-  const canImportDocuments = viewerHasPermission(ORG_PERMISSIONS.DOCUMENTS_IMPORT);
+  const canImportDocuments = viewerPermissions.includes(ORG_PERMISSIONS.DOCUMENTS_IMPORT);
   const canVoidDocuments = viewerHasPermission(ORG_PERMISSIONS.DOCUMENTS_VOID);
   const canViewDocumentAudit = viewerHasPermission(ORG_PERMISSIONS.DOCUMENTS_AUDIT_VIEW);
   const canManagePublicPage = viewerHasPermission(ORG_PERMISSIONS.ORGANIZATION_MANAGE);
@@ -1245,11 +1269,10 @@ function OrganizationDetailContent() {
   const [sendingCustomerDocument, setSendingCustomerDocument] = useState(false);
   const [isCustomerImportModalOpen, setIsCustomerImportModalOpen] = useState(false);
   const [selectedCustomerImportTemplateId, setSelectedCustomerImportTemplateId] = useState<string | null>(null);
-  const [selectedCustomerImportScopeType, setSelectedCustomerImportScopeType] = useState<'ORGANIZATION' | 'EVENT_PARTICIPATION'>('ORGANIZATION');
   const [selectedCustomerImportScopeId, setSelectedCustomerImportScopeId] = useState<string | null>(null);
   const [customerImportFile, setCustomerImportFile] = useState<File | null>(null);
   const [isCustomerImportPreviewReady, setIsCustomerImportPreviewReady] = useState(false);
-  const [customerImportDocumentName, setCustomerImportDocumentName] = useState('');
+  const customerImportPreviewFrameRef = useRef<HTMLIFrameElement | null>(null);
   const [customerImportHistoricalSigningDate, setCustomerImportHistoricalSigningDate] = useState('');
   const [customerImportSourceNote, setCustomerImportSourceNote] = useState('');
   const [isCustomerImportAttestationAccepted, setIsCustomerImportAttestationAccepted] = useState(false);
@@ -1307,13 +1330,19 @@ function OrganizationDetailContent() {
     setPreviewSignComplete(false);
   }, []);
 
-  const loadOrg = useCallback(async (orgId: string, options?: { silent?: boolean }) => {
+  const loadOrg = useCallback(async (
+    orgId: string,
+    options?: { silent?: boolean; includeRelations?: boolean },
+  ) => {
     const silent = Boolean(options?.silent);
     if (!silent) {
       setLoading(true);
     }
     try {
-      const data = await organizationService.getOrganizationById(orgId, true);
+      const data = await organizationService.getOrganizationById(
+        orgId,
+        options?.includeRelations ?? requestedTab !== 'users',
+      );
       if (data) setOrg(data);
     } catch (e) {
       console.error('Failed to load organization', e);
@@ -1322,7 +1351,7 @@ function OrganizationDetailContent() {
         setLoading(false);
       }
     }
-  }, []);
+  }, [requestedTab]);
 
   const syncOrganizationVerification = useCallback(async (orgId: string) => {
     setSyncingOrganizationVerification(true);
@@ -1871,7 +1900,7 @@ function OrganizationDetailContent() {
     if (!authLoading) {
       if (id) loadOrg(id);
     }
-  }, [authLoading, id, loadOrg]);
+  }, [activeTab, authLoading, id, loadOrg]);
 
   useEffect(() => {
     if (authLoading || !isAuthenticated || !user || !id) {
@@ -3210,8 +3239,8 @@ function OrganizationDetailContent() {
     setCustomerDocumentVoidNote('');
   }, []);
 
-  const closeCustomerDocumentVoidModal = useCallback((force = false) => {
-    if (isVoidingCustomerDocument && !force) {
+  const closeCustomerDocumentVoidModal = useCallback((isForced = false) => {
+    if (isVoidingCustomerDocument && !isForced) {
       return;
     }
     setCustomerDocumentToVoid(null);
@@ -3406,22 +3435,25 @@ function OrganizationDetailContent() {
       .filter((template) => template.value.length > 0),
     [templateDocuments],
   );
-
   const selectedCustomerDocumentTemplate = templateDocuments.find(
     (template) => template.$id === selectedCustomerDocumentTemplateId,
   );
   const selectedCustomerDocumentRequiresEvent = selectedCustomerDocumentTemplate?.type === 'PDF';
+
   const customerImportTemplateOptions = useMemo(
     () => templateDocuments
-      .filter((template) => (
-        typeof template.documentRequirementId === 'string'
-        && template.documentRequirementId.trim().length > 0
-        && Number.isInteger(template.versionSequence)
-        && (template.versionSequence ?? 0) > 0
-      ))
+      .filter((template) => {
+        const displayName = template.requirementTitle?.trim() || template.title?.trim();
+        return template.signOnce === true
+          && typeof template.documentRequirementId === 'string'
+          && template.documentRequirementId.trim().length > 0
+          && Number.isInteger(template.versionSequence)
+          && (template.versionSequence ?? 0) > 0
+          && Boolean(displayName);
+      })
       .map((template) => ({
         value: template.$id,
-        label: `${template.requirementTitle?.trim() || template.title?.trim() || 'Untitled requirement'} • Version ${template.versionSequence}`,
+        label: `${template.requirementTitle?.trim() || template.title?.trim()} • Version ${template.versionSequence}`,
       }))
       .filter((template) => template.value.length > 0),
     [templateDocuments],
@@ -3429,32 +3461,16 @@ function OrganizationDetailContent() {
   const selectedCustomerImportTemplate = templateDocuments.find(
     (template) => template.$id === selectedCustomerImportTemplateId,
   );
-  const customerImportScopeOptions = useMemo(() => {
-    const customer = selectedOrganizationCustomer?.user;
-    if (selectedCustomerImportTemplate?.signOnce) {
-      return org?.$id
-        ? [{ value: org.$id, label: 'Organization-wide' }]
-        : [];
-    }
-    return customer?.events.map((event) => ({
-      value: event.eventId,
-      label: `${event.eventName} • ${formatSummaryDateTime(event.start)}`,
-    })) ?? [];
-  }, [org?.$id, selectedCustomerImportTemplate?.signOnce, selectedOrganizationCustomer]);
+  const customerImportScopeOptions = useMemo(
+    () => (org?.$id ? [{ value: org.$id, label: 'Organization-wide' }] : []),
+    [org?.$id],
+  );
   const customerImportPreviewUrl = useMemo(
     () => (customerImportFile ? URL.createObjectURL(customerImportFile) : null),
     [customerImportFile],
   );
-
-  useEffect(() => {
-    if (!customerImportPreviewUrl) {
-      return undefined;
-    }
-    return () => URL.revokeObjectURL(customerImportPreviewUrl);
-  }, [customerImportPreviewUrl]);
-
-  const closeCustomerImportModal = useCallback((force = false) => {
-    if (isImportingCustomerDocument && !force) {
+  const closeCustomerImportModal = useCallback((isForced = false) => {
+    if (isImportingCustomerDocument && !isForced) {
       return;
     }
     setIsCustomerImportModalOpen(false);
@@ -3462,12 +3478,10 @@ function OrganizationDetailContent() {
     setSelectedCustomerImportScopeId(null);
     setCustomerImportFile(null);
     setIsCustomerImportPreviewReady(false);
-    setCustomerImportDocumentName('');
     setCustomerImportHistoricalSigningDate('');
     setCustomerImportSourceNote('');
     setIsCustomerImportAttestationAccepted(false);
   }, [isImportingCustomerDocument]);
-
   const openCustomerImportModal = useCallback(() => {
     const customer = selectedOrganizationCustomer?.user;
     const firstTemplate = customerImportTemplateOptions[0];
@@ -3475,63 +3489,44 @@ function OrganizationDetailContent() {
       return;
     }
     if (!firstTemplate) {
-      notifications.show({ color: 'red', message: 'Create a document requirement version before importing a document.' });
+      notifications.show({ color: 'red', message: 'Create a sign-once document requirement version before importing a document.' });
       return;
     }
-    const template = templateDocuments.find((entry) => entry.$id === firstTemplate.value);
-    const scopeType = template?.signOnce ? 'ORGANIZATION' : 'EVENT_PARTICIPATION';
     setSelectedCustomerImportTemplateId(firstTemplate.value);
-    setSelectedCustomerImportScopeType(scopeType);
-    setSelectedCustomerImportScopeId(template?.signOnce ? org.$id : customer.events[0]?.eventId ?? null);
+    setSelectedCustomerImportScopeId(org.$id);
     setCustomerImportFile(null);
     setIsCustomerImportPreviewReady(false);
-    setCustomerImportDocumentName('');
     setCustomerImportHistoricalSigningDate('');
     setCustomerImportSourceNote('');
     setIsCustomerImportAttestationAccepted(false);
     setIsCustomerImportModalOpen(true);
-  }, [customerImportTemplateOptions, org?.$id, selectedOrganizationCustomer, templateDocuments]);
+  }, [customerImportTemplateOptions, org?.$id, selectedOrganizationCustomer]);
 
   const handleCustomerImportTemplateChange = useCallback((value: string | null) => {
-    const customer = selectedOrganizationCustomer?.user;
-    const template = templateDocuments.find((entry) => entry.$id === value);
     setIsCustomerImportAttestationAccepted(false);
-    if (!value || !template) {
+    if (!value) {
       setSelectedCustomerImportTemplateId(null);
       setSelectedCustomerImportScopeId(null);
       return;
     }
-    const scopeType = template.signOnce ? 'ORGANIZATION' : 'EVENT_PARTICIPATION';
     setSelectedCustomerImportTemplateId(value);
-    setSelectedCustomerImportScopeType(scopeType);
-    setSelectedCustomerImportScopeId(
-      template.signOnce ? org?.$id ?? null : customer?.events[0]?.eventId ?? null,
-    );
-  }, [org?.$id, selectedOrganizationCustomer, templateDocuments]);
-
-  const handleCustomerImportScopeChange = useCallback((value: string | null) => {
-    setIsCustomerImportAttestationAccepted(false);
-    setSelectedCustomerImportScopeId(value);
-  }, []);
+    setSelectedCustomerImportScopeId(org?.$id ?? null);
+  }, [org?.$id]);
 
   const handleCustomerImportFileChange = useCallback((file: File | null) => {
     setCustomerImportFile(file);
     setIsCustomerImportPreviewReady(false);
     setIsCustomerImportAttestationAccepted(false);
-    if (file && !customerImportDocumentName.trim()) {
-      setCustomerImportDocumentName(file.name.replace(/\.pdf$/i, ''));
-    }
-  }, [customerImportDocumentName]);
-
+  }, []);
   const handleImportCustomerDocument = useCallback(async () => {
     const customer = selectedOrganizationCustomer?.user;
     const template = selectedCustomerImportTemplate;
+    const scopeId = selectedCustomerImportScopeId;
     if (!org?.$id || !customer || !template || !customerImportFile) {
       return;
     }
-    const scopeId = selectedCustomerImportScopeId;
-    if (!scopeId || !customerImportDocumentName.trim()) {
-      notifications.show({ color: 'red', message: 'Choose a scope and enter a document name.' });
+    if (!scopeId) {
+      notifications.show({ color: 'red', message: 'Choose the Organization scope before saving.' });
       return;
     }
     if (!isCustomerImportAttestationAccepted) {
@@ -3543,11 +3538,10 @@ function OrganizationDetailContent() {
       const formData = new FormData();
       formData.append('subjectUserId', customer.userId);
       formData.append('templateId', template.$id);
-      formData.append('documentName', customerImportDocumentName.trim());
       formData.append('historicalSigningDate', customerImportHistoricalSigningDate);
       formData.append('sourceNote', customerImportSourceNote.trim());
       formData.append('attestationAccepted', 'true');
-      formData.append('scopeType', selectedCustomerImportScopeType);
+      formData.append('scopeType', 'ORGANIZATION');
       formData.append('scopeId', scopeId);
       formData.append('file', customerImportFile, customerImportFile.name);
       await signedDocumentService.importSignedDocument(org.$id, formData);
@@ -3565,17 +3559,46 @@ function OrganizationDetailContent() {
   }, [
     closeCustomerImportModal,
     isCustomerImportAttestationAccepted,
-    customerImportDocumentName,
     customerImportFile,
     customerImportHistoricalSigningDate,
     customerImportSourceNote,
     org?.$id,
     refreshOrganizationCustomers,
     selectedCustomerImportScopeId,
-    selectedCustomerImportScopeType,
     selectedCustomerImportTemplate,
     selectedOrganizationCustomer,
   ]);
+
+  useEffect(() => {
+    setIsCustomerImportPreviewReady(false);
+    if (!customerImportPreviewUrl) {
+      return undefined;
+    }
+
+    let isCancelled = false;
+    let timer: number | undefined;
+    const markReadyWhenLoaded = () => {
+      if (isCancelled) {
+        return;
+      }
+      const frame = customerImportPreviewFrameRef.current;
+      if (frame?.contentDocument?.readyState === 'complete') {
+        setIsCustomerImportPreviewReady(true);
+        return;
+      }
+      timer = window.setTimeout(markReadyWhenLoaded, 50);
+    };
+    markReadyWhenLoaded();
+
+    return () => {
+      isCancelled = true;
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
+      URL.revokeObjectURL(customerImportPreviewUrl);
+    };
+  }, [customerImportPreviewUrl]);
+
 
   const closeCustomerDocumentModal = useCallback(() => {
     if (sendingCustomerDocument) {
@@ -4023,28 +4046,41 @@ function OrganizationDetailContent() {
   const renderCustomerDocuments = (documents: OrganizationUserDocumentSummary[], emptyText = 'No documents.') => (
     documents.length > 0 ? (
       <Stack gap={8}>
-        {documents.map((documentSummary) => (
+        {documents.map((documentSummary) => {
+          const canViewDocument = documentSummary.provenance !== 'IMPORTED' || canImportDocuments;
+          const canViewDocumentPdf = canViewDocument
+            && documentSummary.type === 'PDF'
+            && Boolean(documentSummary.viewUrl);
+          return (
           <Paper
             key={documentSummary.signedDocumentRecordId}
             withBorder
             radius="md"
             p="sm"
             className="org-customer-detail-item org-customer-document-card"
-            onClick={() => openSignedDocumentPreview(documentSummary)}
-            onKeyDown={(event) => {
+            onClick={canViewDocument ? () => openSignedDocumentPreview(documentSummary) : undefined}
+            onKeyDown={canViewDocument ? (event) => {
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();
                 openSignedDocumentPreview(documentSummary);
               }
-            }}
-            role="button"
-            tabIndex={0}
+            } : undefined}
+            role={canViewDocument ? 'button' : undefined}
+            tabIndex={canViewDocument ? 0 : undefined}
           >
             <Stack gap={2} className="min-w-0">
               <Group gap={6} wrap="wrap">
                 <Text size="sm" fw={700}>{documentSummary.title}</Text>
                 {documentSummary.provenance === 'IMPORTED' && (
                   <Badge size="xs" variant="light" color="teal">Imported</Badge>
+                )}
+                {typeof documentSummary.versionSequence === 'number' && (
+                  <Badge size="xs" variant="light">Version {documentSummary.versionSequence}</Badge>
+                )}
+                {documentSummary.provenance === 'IMPORTED'
+                  && documentSummary.status
+                  && documentSummary.status.toUpperCase() !== 'VOID' && (
+                  <Badge size="xs" variant="light" color="blue">{documentSummary.status}</Badge>
                 )}
                 {documentSummary.status?.toUpperCase() === 'VOID' && (
                   <Badge size="xs" variant="light" color="red">Voided</Badge>
@@ -4058,8 +4094,25 @@ function OrganizationDetailContent() {
                   : `Signed ${formatSummaryDate(documentSummary.signedAt)}`}
               </Text>
             </Stack>
-            {(documentSummary.provenance === 'IMPORTED' && canVoidDocuments || canViewDocumentAudit) && (
+            {(
+              canViewDocumentPdf
+              || (documentSummary.provenance === 'IMPORTED' && canVoidDocuments)
+              || canViewDocumentAudit
+            ) && (
               <Group gap={6} mt={4}>
+                {canViewDocumentPdf && documentSummary.viewUrl && (
+                  <Button
+                    size="compact-xs"
+                    variant="subtle"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      openSignedDocumentPreview(documentSummary);
+                    }}
+                    onKeyDown={(event) => event.stopPropagation()}
+                  >
+                    View PDF
+                  </Button>
+                )}
                 {documentSummary.provenance === 'IMPORTED' && canVoidDocuments && (
                   <Button
                     size="compact-xs"
@@ -4091,7 +4144,8 @@ function OrganizationDetailContent() {
               </Group>
             )}
           </Paper>
-        ))}
+          );
+        })}
       </Stack>
     ) : (
       <Text size="xs" c="dimmed">{emptyText}</Text>
@@ -5667,19 +5721,17 @@ function OrganizationDetailContent() {
             />
             {selectedCustomerImportTemplate && (
               <Text size="xs" c="dimmed">
-                {selectedCustomerImportTemplate.signOnce
-                  ? 'This version applies at Organization scope.'
-                  : 'This version applies to one Event Participation.'}
+                This sign-once version applies at Organization scope.
               </Text>
             )}
             <Select
-              label={selectedCustomerImportTemplate?.signOnce ? 'Scope' : 'Event Participation scope'}
+              label="Scope"
               data={customerImportScopeOptions}
               value={selectedCustomerImportScopeId}
-              onChange={handleCustomerImportScopeChange}
+              onChange={setSelectedCustomerImportScopeId}
               searchable
               allowDeselect={false}
-              nothingFoundMessage="No valid customer scopes found"
+              nothingFoundMessage="No Organization scope found"
               required
             />
             <FileInput
@@ -5694,6 +5746,7 @@ function OrganizationDetailContent() {
             {customerImportPreviewUrl ? (
               <Paper withBorder p="xs" radius="md">
                 <iframe
+                  ref={customerImportPreviewFrameRef}
                   title="Imported signed document preview"
                   src={customerImportPreviewUrl}
                   onLoad={() => setIsCustomerImportPreviewReady(true)}
@@ -5705,12 +5758,6 @@ function OrganizationDetailContent() {
                 Choose a PDF to review the complete file here.
               </Text>
             )}
-            <TextInput
-              label="Document name"
-              value={customerImportDocumentName}
-              onChange={(event) => setCustomerImportDocumentName(event.currentTarget.value)}
-              required
-            />
             <TextInput
               label="Historical signing date (optional)"
               type="date"
@@ -5745,7 +5792,6 @@ function OrganizationDetailContent() {
                   || !selectedCustomerImportScopeId
                   || !customerImportFile
                   || !isCustomerImportPreviewReady
-                  || !customerImportDocumentName.trim()
                   || !isCustomerImportAttestationAccepted
                 }
               >

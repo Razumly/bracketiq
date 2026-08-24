@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import { Prisma } from '@/generated/prisma/client';
 import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/permissions';
 import { ORG_PERMISSIONS } from '@/lib/organizationPermissions';
@@ -17,12 +18,11 @@ import {
 import { listOrganizationUsersScopeEvents } from '@/server/organizationUsersAccess';
 import { getStorageProvider } from '@/lib/storageProvider';
 import { validatePdfBuffer } from '@/lib/pdfUploadValidation';
-import { notifyDocumentEvidenceChange } from '@/server/documentNotifications';
 
 export const dynamic = 'force-dynamic';
-export const DOCUMENT_IMPORT_ATTESTATION_TEXT =
+const DOCUMENT_IMPORT_ATTESTATION_TEXT =
   'I confirm that this file is a complete signed document for the shown customer, Document Template Version, and scope. I confirm that it contains all required signatures. I understand that BracketIQ did not verify the signatures.';
-export const DOCUMENT_IMPORT_ATTESTATION_VERSION = '1';
+const DOCUMENT_IMPORT_ATTESTATION_VERSION = '1';
 
 const PDF_MIME_TYPE = 'application/pdf';
 const MAX_IMPORTED_DOCUMENT_UPLOAD_BYTES = 25 * 1024 * 1024;
@@ -33,7 +33,6 @@ type ImportScopeType = (typeof IMPORT_SCOPE_TYPES)[number];
 type ParsedImportInput = {
   subjectUserId: string;
   templateId: string;
-  documentName: string;
   historicalSigningDate?: string | null;
   sourceNote?: string | null;
   isAttestationAccepted: boolean;
@@ -41,10 +40,19 @@ type ParsedImportInput = {
   scopeId: string;
 };
 
+type LockedImportTemplate = {
+  id: string;
+  title: string;
+  organizationId: string;
+  documentRequirementId: string;
+  requiredSignerType: unknown;
+  signerRoles: unknown;
+  signOnce: boolean;
+};
+
 const importSchema = z.object({
   subjectUserId: z.string().trim().min(1),
   templateId: z.string().trim().min(1),
-  documentName: z.string().trim().min(1).max(240),
   historicalSigningDate: z.string().trim().min(1).nullable().optional(),
   sourceNote: z.string().trim().max(4000).nullable().optional(),
   attestationAccepted: z.boolean(),
@@ -78,6 +86,35 @@ const normalizeIdList = (values: unknown): string[] => {
       .filter((value) => value.length > 0),
   ));
 };
+type ImportedTeamMemberFields = {
+  playerIds: readonly string[] | null;
+  captainId: string | null;
+  managerId: string | null;
+  headCoachId: string | null;
+  coachIds: readonly string[] | null;
+};
+
+const IMPORT_QUERY_CHUNK_SIZE = 500;
+
+const readInChunks = async <T>(
+  ids: string[],
+  read: (chunk: string[]) => Promise<T[]>,
+): Promise<T[]> => {
+  const rows: T[] = [];
+  for (let offset = 0; offset < ids.length; offset += IMPORT_QUERY_CHUNK_SIZE) {
+    rows.push(...await read(ids.slice(offset, offset + IMPORT_QUERY_CHUNK_SIZE)));
+  }
+  return rows;
+};
+
+const teamMemberIds = (team: ImportedTeamMemberFields): string[] => normalizeIdList([
+  ...(team.playerIds ?? []),
+  team.captainId,
+  team.managerId,
+  team.headCoachId,
+  ...(team.coachIds ?? []),
+]);
+
 const ISO_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 const parseHistoricalDate = (value: string | null | undefined): Date | null => {
@@ -138,7 +175,6 @@ const parseImportForm = async (
   const parsed = importSchema.safeParse({
     subjectUserId: textField(form, 'subjectUserId'),
     templateId: textField(form, 'templateId'),
-    documentName: textField(form, 'documentName'),
     historicalSigningDate: nullableTextField(form, 'historicalSigningDate'),
     sourceNote: nullableTextField(form, 'sourceNote'),
     attestationAccepted: parseBooleanField(form, 'attestationAccepted'),
@@ -165,11 +201,18 @@ const parseImportForm = async (
 };
 
 const deleteStoredObject = async (stored: { key: string; bucket?: string | null }): Promise<void> => {
-  try {
-    await getStorageProvider().deleteObject({ key: stored.key, bucket: stored.bucket });
-  } catch (error) {
-    console.error('Imported document cleanup failed.', { key: stored.key, error });
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await getStorageProvider().deleteObject({ key: stored.key, bucket: stored.bucket });
+      return;
+    } catch (error) {
+      lastError = error;
+    }
   }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error('Imported document cleanup failed.');
 };
 
 export async function POST(
@@ -200,10 +243,18 @@ export async function POST(
     );
   }
 
+  if (!parsed.isAttestationAccepted) {
+    return NextResponse.json(
+      { error: 'Document Import Attestation must be accepted.' },
+      { status: 400 },
+    );
+  }
+
   const template = await prisma.templateDocuments.findUnique({
     where: { id: parsed.templateId },
     select: {
       id: true,
+      title: true,
       organizationId: true,
       documentRequirementId: true,
       requiredSignerType: true,
@@ -216,15 +267,28 @@ export async function POST(
   }
   const requirement = await prisma.documentRequirements.findUnique({
     where: { id: template.documentRequirementId },
-    select: { id: true, organizationId: true },
+    select: { id: true, title: true, organizationId: true },
   });
   if (!requirement || requirement.organizationId !== organizationId) {
     return NextResponse.json({ error: 'Document template not found.' }, { status: 404 });
   }
-
-  if (!parsed.isAttestationAccepted) {
+  const templateDisplayName = template.title?.trim() || requirement.title?.trim();
+  if (!templateDisplayName) {
     return NextResponse.json(
-      { error: 'Document Import Attestation must be accepted.' },
+      { error: 'Document Template Version title is required.' },
+      { status: 400 },
+    );
+  }
+
+  if (!template.signOnce) {
+    return NextResponse.json(
+      { error: 'Only sign-once Document Template Versions can be imported.' },
+      { status: 400 },
+    );
+  }
+  if (parsed.scopeType !== 'ORGANIZATION') {
+    return NextResponse.json(
+      { error: 'Sign-once Document Template Versions require Organization scope.' },
       { status: 400 },
     );
   }
@@ -234,50 +298,14 @@ export async function POST(
       { status: 400 },
     );
   }
-  if (template.signOnce && parsed.scopeType !== 'ORGANIZATION') {
-    return NextResponse.json(
-      { error: 'Sign-once Document Template Versions require Organization scope.' },
-      { status: 400 },
-    );
-  }
-  if (!template.signOnce && parsed.scopeType !== 'EVENT_PARTICIPATION') {
-    return NextResponse.json(
-      { error: 'Non-sign-once Document Template Versions require Event Participation scope.' },
-      { status: 400 },
-    );
-  }
 
-  const [users, scopedEntity, scopeEvents, eventScopeRegistrations, organizationTeams] = await Promise.all([
+
+  const [users, scopeEvents, organizationTeams] = await Promise.all([
     prisma.userData.findMany({
       where: { id: parsed.subjectUserId },
       select: { id: true },
     }),
-    parsed.scopeType === 'EVENT_PARTICIPATION'
-      ? prisma.events.findUnique({
-        where: { id: parsed.scopeId },
-        select: { id: true, organizationId: true },
-      })
-      : parsed.scopeType === 'TEAM_MEMBERSHIP'
-        ? prisma.canonicalTeams.findUnique({
-          where: { id: parsed.scopeId },
-          select: { id: true, organizationId: true },
-        })
-        : null,
     listOrganizationUsersScopeEvents(organizationId),
-    parsed.scopeType === 'EVENT_PARTICIPATION'
-      ? prisma.eventRegistrations.findMany({
-        where: {
-          eventId: parsed.scopeId,
-          rosterRole: 'PARTICIPANT',
-          status: { in: ['STARTED', 'PENDING', 'ACTIVE', 'BLOCKED', 'CONSENTFAILED'] },
-          OR: [
-            { registrantType: 'TEAM' },
-            { eventTeamId: { not: null } },
-          ],
-        },
-        select: { registrantId: true, parentId: true, eventTeamId: true },
-      })
-      : Promise.resolve([]),
     prisma.canonicalTeams.findMany({
       where: { organizationId },
       select: { id: true },
@@ -289,69 +317,82 @@ export async function POST(
   if (organizationTeams.some((team) => team.id === parsed.subjectUserId)) {
     return NextResponse.json({ error: 'Document Subject must be a User, not a Team.' }, { status: 400 });
   }
+  const organizationEventIds = normalizeIdList(scopeEvents.map((event) => event.id));
+  const organizationEventRegistrations = organizationEventIds.length
+    ? await readInChunks(organizationEventIds, (eventIds) => prisma.eventRegistrations.findMany({
+      where: {
+        eventId: { in: eventIds },
+        rosterRole: 'PARTICIPANT',
+        status: { in: ['STARTED', 'PENDING', 'ACTIVE', 'BLOCKED', 'CONSENTFAILED'] },
+        slotId: null,
+        occurrenceDate: null,
+        OR: [
+          { registrantType: 'TEAM' },
+          { eventTeamId: { not: null } },
+        ],
+      },
+      select: {
+        eventId: true,
+        registrantId: true,
+        parentId: true,
+        registrantType: true,
+        eventTeamId: true,
+      },
+    }))
+    : [];
+  const organizationEventTeamIds = normalizeIdList([
+    ...scopeEvents.flatMap((event) => event.teamIds),
+    ...organizationEventRegistrations.flatMap((registration) => {
+      const registrantType = typeof registration.registrantType === 'string'
+        ? registration.registrantType.toUpperCase()
+        : '';
+      if (registrantType !== 'TEAM' && typeof registration.eventTeamId !== 'string') {
+        return [];
+      }
+      return [registration.eventTeamId, registration.registrantId, registration.parentId];
+    }),
+  ]);
+  const organizationEventTeams = organizationEventTeamIds.length
+    ? await readInChunks(organizationEventTeamIds, (teamIds) => prisma.teams.findMany({
+      where: {
+        id: { in: teamIds },
+        OR: [{ kind: { not: 'PLACEHOLDER' } }, { kind: null }],
+      },
+      select: {
+        id: true,
+        playerIds: true,
+        captainId: true,
+        managerId: true,
+        headCoachId: true,
+        coachIds: true,
+      },
+    }))
+    : [];
+  const organizationEventTeamMemberIds = organizationEventTeams.flatMap(teamMemberIds);
 
   const organizationTeamIds = organizationTeams.map((team) => team.id);
-  const scopeEvent = parsed.scopeType === 'EVENT_PARTICIPATION'
-    ? scopeEvents.find((event) => event.id === parsed.scopeId)
-    : undefined;
-  const eventCanonicalTeamIds = new Set(
-    [
-      ...(scopeEvent?.teamIds ?? []),
-      ...eventScopeRegistrations.flatMap((registration) => [
-        registration.parentId,
-        registration.registrantId,
-        registration.eventTeamId,
-      ]),
-    ].filter((teamId): teamId is string => typeof teamId === 'string' && teamId.trim().length > 0),
-  );
   const membershipTeamIds = Array.from(new Set([
     ...organizationTeamIds,
-    ...eventCanonicalTeamIds,
-    ...(parsed.scopeType === 'TEAM_MEMBERSHIP' ? [parsed.scopeId] : []),
+    ...organizationEventTeamIds,
   ]));
-  const eventTeamIds = parsed.scopeType === 'EVENT_PARTICIPATION'
-    ? normalizeIdList(eventScopeRegistrations.flatMap((registration) => [
-      registration.eventTeamId,
-      registration.registrantId,
-    ]))
-    : [];
-  const eventTeamsDelegate = (prisma as any).teams;
-  const teamStaffAssignmentsDelegate = (prisma as any).teamStaffAssignments;
-  const [eventTeams, teamStaffAssignments] = await Promise.all([
-    eventTeamIds.length && typeof eventTeamsDelegate?.findMany === 'function'
-      ? eventTeamsDelegate.findMany({
-        where: {
-          id: { in: eventTeamIds },
-          OR: [{ kind: { not: 'PLACEHOLDER' } }, { kind: null }],
-        },
-        select: {
-          playerIds: true,
-          captainId: true,
-          managerId: true,
-          headCoachId: true,
-          coachIds: true,
-        },
-      })
-      : Promise.resolve([]),
-    membershipTeamIds.length && typeof teamStaffAssignmentsDelegate?.findMany === 'function'
-      ? teamStaffAssignmentsDelegate.findMany({
-        where: {
-          teamId: { in: membershipTeamIds },
-          status: { in: ['ACTIVE', 'PENDING', 'STARTED'] },
-        },
-        select: { userId: true },
-      })
-      : Promise.resolve([]),
-  ]);
-  const teamRegistrations = membershipTeamIds.length
-    ? await prisma.teamRegistrations.findMany({
+  const teamStaffAssignments = membershipTeamIds.length
+    ? await readInChunks(membershipTeamIds, (teamIds) => prisma.teamStaffAssignments.findMany({
       where: {
-        teamId: { in: membershipTeamIds },
+        teamId: { in: teamIds },
+        status: { in: ['ACTIVE', 'PENDING', 'STARTED'] },
+      },
+      select: { userId: true },
+    }))
+    : [];
+  const teamRegistrations = membershipTeamIds.length
+    ? await readInChunks(membershipTeamIds, (teamIds) => prisma.teamRegistrations.findMany({
+      where: {
+        teamId: { in: teamIds },
         userId: parsed.subjectUserId,
         status: { in: ['STARTED', 'PENDING', 'ACTIVE'] },
       },
       select: { teamId: true, userId: true },
-    })
+    }))
     : [];
   const customerUserIds = new Set([
     ...scopeEvents.flatMap((event) => [
@@ -361,51 +402,15 @@ export async function POST(
         : []),
       ...(event.officialIds ?? []),
     ]),
-    ...eventTeams.flatMap((team: Record<string, unknown>) => normalizeIdList([
-      ...(Array.isArray(team.playerIds) ? team.playerIds : []),
-      team.captainId,
-      team.managerId,
-      team.headCoachId,
-      ...(Array.isArray(team.coachIds) ? team.coachIds : []),
-    ])),
+    ...organizationEventTeamMemberIds,
     ...teamRegistrations.map((registration) => registration.userId),
-    ...teamStaffAssignments.flatMap((assignment: Record<string, unknown>) => (
-      typeof assignment.userId === 'string' ? [assignment.userId] : []
-    )),
+    ...teamStaffAssignments.map((assignment) => assignment.userId),
   ]);
   if (!customerUserIds.has(parsed.subjectUserId)) {
     return NextResponse.json(
       { error: 'Document Subject is not a customer of this Organization.' },
       { status: 400 },
     );
-  }
-  const scopeBelongsToOrganization = parsed.scopeType === 'EVENT_PARTICIPATION'
-    ? Boolean(scopeEvent)
-    : scopedEntity?.organizationId === organizationId;
-  if (parsed.scopeType !== 'ORGANIZATION' && !scopeBelongsToOrganization) {
-    return NextResponse.json(
-      { error: 'Document scope does not belong to this Organization.' },
-      { status: 400 },
-    );
-  }
-  if (parsed.scopeType === 'EVENT_PARTICIPATION') {
-    const isDirectEventCustomer = Boolean(scopeEvent?.userIds.includes(parsed.subjectUserId));
-    const hasTeamEventMembership = teamRegistrations.some((registration) => (
-      eventCanonicalTeamIds.has(registration.teamId)
-      && registration.userId === parsed.subjectUserId
-    )) || eventTeams.some((team: Record<string, unknown>) => normalizeIdList([
-      ...(Array.isArray(team.playerIds) ? team.playerIds : []),
-      team.captainId,
-      team.managerId,
-      team.headCoachId,
-      ...(Array.isArray(team.coachIds) ? team.coachIds : []),
-    ]).includes(parsed.subjectUserId));
-    if (!isDirectEventCustomer && !hasTeamEventMembership) {
-      return NextResponse.json(
-        { error: 'Document Subject is not a participant in this Event.' },
-        { status: 400 },
-      );
-    }
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());
@@ -424,22 +429,51 @@ export async function POST(
       organizationId,
     });
     stored = { key: storedResult.key, bucket: storedResult.bucket };
-
+    const signedAt = historicalSigningDate?.toISOString() ?? null;
     const now = new Date();
     const evidenceId = crypto.randomUUID();
-    const signedAt = historicalSigningDate?.toISOString() ?? null;
     const evidenceScope = {
       scopeType: parsed.scopeType,
       scopeId: parsed.scopeId,
-      eventId: parsed.scopeType === 'EVENT_PARTICIPATION' ? parsed.scopeId : null,
-      teamId: parsed.scopeType === 'TEAM_MEMBERSHIP' ? parsed.scopeId : null,
+      eventId: null,
+      teamId: null,
     };
-    const requiredSignerRoles = resolveRequiredSignerRoles(
-      template.signerRoles,
-      template.requiredSignerType,
-    );
-
     await prisma.$transaction(async (tx) => {
+      const lockedTemplates = await tx.$queryRaw<LockedImportTemplate[]>(Prisma.sql`
+        SELECT
+          "id",
+          "title",
+          "organizationId",
+          "documentRequirementId",
+          "requiredSignerType",
+          "signerRoles",
+          "signOnce"
+        FROM "TemplateDocuments"
+        WHERE "id" = ${parsed.templateId}
+        FOR UPDATE
+      `);
+      const lockedTemplate = lockedTemplates[0];
+      if (!lockedTemplate || lockedTemplate.organizationId !== organizationId) {
+        throw new Error('Document template changed during import.');
+      }
+      const lockedRequirement = await tx.documentRequirements.findUnique({
+        where: { id: lockedTemplate.documentRequirementId },
+        select: { id: true, title: true, organizationId: true },
+      });
+      if (!lockedRequirement || lockedRequirement.organizationId !== organizationId) {
+        throw new Error('Document template changed during import.');
+      }
+      const documentName = lockedTemplate.title?.trim() || lockedRequirement.title?.trim();
+      if (!documentName) {
+        throw new Error('Document Template Version title is required.');
+      }
+      if (!lockedTemplate.signOnce) {
+        throw new Error('Only sign-once Document Template Versions can be imported.');
+      }
+      const requiredSignerRoles = resolveRequiredSignerRoles(
+        lockedTemplate.signerRoles,
+        lockedTemplate.requiredSignerType,
+      );
       const importedFileId = crypto.randomUUID();
       await tx.file.create({
         data: {
@@ -468,9 +502,9 @@ export async function POST(
           createdAt: now,
           updatedAt: now,
           signedDocumentId: `imported-${evidenceId}`,
-          templateId: template.id,
+          templateId: lockedTemplate.id,
           userId: null,
-          documentName: parsed.documentName,
+          documentName,
           hostId: null,
           organizationId,
           eventId: evidenceScope.eventId,
@@ -479,7 +513,7 @@ export async function POST(
             organizationId,
             documentSubjectUserId: parsed.subjectUserId,
             ...evidenceScope,
-            signOnce: template.signOnce,
+            signOnce: lockedTemplate.signOnce,
             provenance: DOCUMENT_EVIDENCE_PROVENANCE.IMPORTED,
           }),
           scopeType: evidenceScope.scopeType,
@@ -505,8 +539,8 @@ export async function POST(
       await createDocumentRequirementSatisfaction(
         {
           evidenceId: evidence.id,
-          templateDocumentId: template.id,
-          documentRequirementId: template.documentRequirementId,
+          templateDocumentId: lockedTemplate.id,
+          documentRequirementId: lockedTemplate.documentRequirementId,
           organizationId,
           documentSubjectId,
           scopeType: evidenceScope.scopeType,
@@ -532,24 +566,6 @@ export async function POST(
         tx as unknown as DocumentEvidenceDatabase,
       );
     });
-
-    try {
-      await notifyDocumentEvidenceChange({
-        organizationId,
-        subjectUserId: parsed.subjectUserId,
-        evidenceId,
-        documentName: parsed.documentName,
-        action: 'IMPORT',
-        actorUserId: session.userId,
-      });
-    } catch (error) {
-      console.error('Imported document notification failed.', {
-        organizationId,
-        evidenceId,
-        error,
-      });
-    }
-
     return NextResponse.json(
       {
         evidenceId,
@@ -558,8 +574,27 @@ export async function POST(
       },
       { status: 201 },
     );
+
   } catch (error) {
-    if (stored) await deleteStoredObject(stored);
+    let cleanupError: unknown = null;
+    if (stored) {
+      try {
+        await deleteStoredObject(stored);
+      } catch (deleteError) {
+        cleanupError = deleteError;
+        console.error('Imported document cleanup failed.', {
+          organizationId,
+          key: stored.key,
+          error: deleteError,
+        });
+      }
+    }
+    if (cleanupError) {
+      return NextResponse.json(
+        { error: 'Unable to import document evidence. Stored file cleanup failed.' },
+        { status: 500 },
+      );
+    }
     if (
       error
       && typeof error === 'object'
