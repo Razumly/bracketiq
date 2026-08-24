@@ -56,6 +56,49 @@ export const AffiliateSupplyLifecycleStage = {
 export type AffiliateSupplyLifecycleStage = (typeof AffiliateSupplyLifecycleStage)[keyof typeof AffiliateSupplyLifecycleStage]
 
 
+export const AffiliateSupplyLifecycleCommand = {
+  CREATE_ROOT: 'CREATE_ROOT',
+  RECORD_MAPPING: 'RECORD_MAPPING',
+  APPROVE: 'APPROVE',
+  ACTIVATE: 'ACTIVATE',
+  PUBLISH_TARGET: 'PUBLISH_TARGET',
+  RECORD_REFRESH: 'RECORD_REFRESH',
+  RECORD_EMPTY_REFRESH: 'RECORD_EMPTY_REFRESH',
+  RECORD_REFRESH_FAILURE: 'RECORD_REFRESH_FAILURE',
+  REVALIDATE_IDENTITY: 'REVALIDATE_IDENTITY',
+  EXCLUDE_SOURCE: 'EXCLUDE_SOURCE',
+  REJECT_TARGET: 'REJECT_TARGET',
+  CREATE_SUCCESSOR: 'CREATE_SUCCESSOR',
+  RECONCILE: 'RECONCILE'
+} as const
+
+export type AffiliateSupplyLifecycleCommand = (typeof AffiliateSupplyLifecycleCommand)[keyof typeof AffiliateSupplyLifecycleCommand]
+
+
+export const AffiliateSupplyLifecycleOutcome = {
+  SOURCE_EXCLUDED: 'SOURCE_EXCLUDED',
+  HUMAN_REVIEW_REQUIRED: 'HUMAN_REVIEW_REQUIRED',
+  TARGET_REJECTED: 'TARGET_REJECTED',
+  AUTOMATION_HOLD: 'AUTOMATION_HOLD',
+  REPAIR_REQUIRED: 'REPAIR_REQUIRED',
+  NATURAL_EXPIRY: 'NATURAL_EXPIRY',
+  VALID_EMPTY_REFRESH: 'VALID_EMPTY_REFRESH'
+} as const
+
+export type AffiliateSupplyLifecycleOutcome = (typeof AffiliateSupplyLifecycleOutcome)[keyof typeof AffiliateSupplyLifecycleOutcome]
+
+
+export const AffiliateSupplyLifecycleActorKind = {
+  MAPPING_PRODUCER: 'MAPPING_PRODUCER',
+  SUPPLY_REVIEWER: 'SUPPLY_REVIEWER',
+  HUMAN_DIRECTED_EXECUTOR: 'HUMAN_DIRECTED_EXECUTOR',
+  SYSTEM: 'SYSTEM',
+  HUMAN: 'HUMAN'
+} as const
+
+export type AffiliateSupplyLifecycleActorKind = (typeof AffiliateSupplyLifecycleActorKind)[keyof typeof AffiliateSupplyLifecycleActorKind]
+
+
 export const AffiliateSupplyContractManifestStatus = {
   DRAFT: 'DRAFT',
   ACTIVE: 'ACTIVE',

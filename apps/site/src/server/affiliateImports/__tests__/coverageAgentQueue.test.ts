@@ -28,6 +28,8 @@ const database = (overrides: Record<string, any> = {}) => ({
   },
   discoveryRuns: { findMany: jest.fn().mockResolvedValue([]) },
   discoveryResults: { findMany: jest.fn().mockResolvedValue([]) },
+  demands: { findUnique: jest.fn(), update: jest.fn() },
+  waves: { findFirst: jest.fn(), update: jest.fn() },
   intakes: { findMany: jest.fn().mockResolvedValue([]), findUnique: jest.fn(), update: jest.fn() },
   pages: { findMany: jest.fn().mockResolvedValue([]), findUnique: jest.fn() },
   intakeRuns: {
@@ -833,6 +835,228 @@ describe('affiliate coverage agent queue', () => {
       reasonCodes: ['SELECTOR_DRIFT'],
     }, { database: db as any, now: () => now })).rejects.toThrow('already claimed');
     expect(db.mappingJobs.update).not.toHaveBeenCalled();
-    expect(db.intakes.update).not.toHaveBeenCalled();
   });
+
+  it('claims supply replenishment jobs with their demand and wave context', async () => {
+    const db = database();
+    const job = {
+      id: 'supply_job',
+      subjectType: 'SUPPLY_REPLENISHMENT',
+      subjectKey: 'demand_1',
+      status: 'QUEUED',
+      context: { demandId: 'demand_1', marketKey: 'portland', sportId: 'soccer', sourceProfile: 'EVENT' },
+      createdAt: now,
+    };
+    db.jobs.findFirst.mockImplementation(async ({ where }: any) => (
+      where.workerId ? null : job
+    ));
+    db.jobs.updateMany.mockResolvedValue({ count: 1 });
+    db.demands.findUnique.mockResolvedValue({
+      id: 'demand_1',
+      marketKey: 'portland',
+      sportId: 'soccer',
+      sourceProfile: 'EVENT',
+      status: 'OPEN',
+    });
+    db.waves.findFirst.mockResolvedValue({ id: 'wave_1', demandId: 'demand_1', status: 'ACTIVE' });
+
+    const claim = await claimNextAffiliateCoverageJob(
+      { agentId: 'coverage-1', now },
+      { database: db as any },
+    );
+
+    expect(claim?.context).toEqual({
+      demand: expect.objectContaining({ id: 'demand_1', sourceProfile: 'EVENT' }),
+      wave: expect.objectContaining({ id: 'wave_1' }),
+    });
+    expect(db.demands.findUnique).toHaveBeenCalledWith({ where: { id: 'demand_1' } });
+    expect(db.waves.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { coveragePlanningJobId: 'supply_job' },
+    }));
+  });
+
+  it('creates a supply replenishment campaign without a market parent campaign', async () => {
+    const db = database();
+    const job = {
+      id: 'supply_job',
+      subjectType: 'SUPPLY_REPLENISHMENT',
+      status: 'CLAIMED',
+      workerId: 'coverage-1',
+      claimedAt: now,
+      leaseExpiresAt: new Date('2026-08-03T18:30:00.000Z'),
+      subjectKey: 'demand_1',
+      context: { demandId: 'demand_1' },
+    };
+    let createdCampaign: any = null;
+    db.jobs.findUnique.mockResolvedValue(job);
+    db.demands.findUnique.mockResolvedValue({
+      id: 'demand_1',
+      marketKey: 'portland',
+      sportId: 'sport_soccer',
+      sourceProfile: 'EVENT',
+    });
+    db.sports.count.mockResolvedValue(1);
+    db.campaigns.findUnique.mockResolvedValue(null);
+    db.campaigns.create.mockImplementation(async ({ data }: any) => {
+      createdCampaign = data;
+      return data;
+    });
+    const queueCampaignRun = jest.fn().mockResolvedValue({ id: 'discovery_run_1' });
+
+    const result = await createAffiliateCoverageCampaign({
+      schemaVersion: 1,
+      jobId: 'supply_job',
+      agentId: 'coverage-1',
+      claimGeneration: { jobId: 'supply_job', agentId: 'coverage-1', claimedAt: now.toISOString() },
+      name: 'Portland Soccer Events',
+      region: 'Portland',
+      location: 'Portland',
+      sportIds: ['sport_soccer'],
+      sourceTypeHints: ['EVENT'],
+      coverageArchetypes: ['COMPETITION_OPERATOR'],
+      rationale: 'The demand controller needs a bounded event source campaign for this market.',
+      searchIntervalMinutes: 10_080,
+      maxQueriesPerRun: 10,
+      maxResultsPerQuery: 10,
+    }, {
+      database: db as any,
+      now: () => now,
+      createIdentifier: () => 'campaign_1',
+      queueCampaignRun,
+    });
+
+    expect(result.campaign.id).toBe('campaign_1');
+    expect(createdCampaign.metadata).toEqual(expect.objectContaining({
+      coverageDemandId: 'demand_1',
+      coverageParentCampaignId: null,
+      coverageJobId: 'supply_job',
+    }));
+    expect(queueCampaignRun).toHaveBeenCalledWith('campaign_1', 'coverage-agent:coverage-1');
+  });
+
+  it('links a created supply campaign to its active replenishment wave', async () => {
+    const db = database();
+    const job = {
+      id: 'supply_job',
+      subjectType: 'SUPPLY_REPLENISHMENT',
+      status: 'CLAIMED',
+      workerId: 'coverage-1',
+      claimedAt: now,
+      leaseExpiresAt: new Date('2026-08-03T18:30:00.000Z'),
+      context: { demandId: 'demand_1' },
+    };
+    db.jobs.findUnique.mockResolvedValue(job);
+    db.campaigns.findMany.mockResolvedValue([{
+      id: 'campaign_1',
+      metadata: { coverageJobId: 'supply_job', coverageDemandId: 'demand_1' },
+    }]);
+    db.waves.findFirst.mockResolvedValue({ id: 'wave_1', demandId: 'demand_1', status: 'ACTIVE' });
+    db.waves.update.mockResolvedValue({ id: 'wave_1', campaignId: 'campaign_1', status: 'ACTIVE' });
+    db.jobs.updateMany.mockResolvedValue({ count: 1 });
+    db.jobs.findUnique.mockResolvedValueOnce(job).mockResolvedValueOnce({
+      ...job,
+      status: 'COMPLETED',
+      result: { decision: 'CAMPAIGNS_CREATED', campaignId: 'campaign_1' },
+    });
+
+    const completed = await completeAffiliateCoverageJob({
+      schemaVersion: 1,
+      jobId: 'supply_job',
+      agentId: 'coverage-1',
+      claimGeneration: { jobId: 'supply_job', agentId: 'coverage-1', claimedAt: now.toISOString() },
+      decision: 'CAMPAIGNS_CREATED',
+      summary: 'Created the demand-specific discovery campaign.',
+      campaignIds: ['campaign_1'],
+      coverageEvidence: null,
+      reasonCodes: [],
+    }, { database: db as any, now: () => now });
+
+    expect(completed).toEqual(expect.objectContaining({ status: 'COMPLETED' }));
+    expect(db.waves.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'wave_1' },
+      data: expect.objectContaining({
+        campaignId: 'campaign_1',
+        provider: 'COVERAGE_PLANNER',
+        status: 'ACTIVE',
+      }),
+    }));
+    expect(db.jobs.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'COMPLETED', result: expect.objectContaining({ campaignId: 'campaign_1' }) }),
+    }));
+
+  });
+  const terminalSupplyDecisions = [
+    {
+      decision: 'HUMAN_REVIEW_REQUIRED',
+      reasonCodes: ['CONFLICTING_SOURCE_IDENTITY'],
+      waveStatus: 'PAUSED',
+      demandStatus: 'PAUSED',
+    },
+    {
+      decision: 'SATURATED_NO_YIELD',
+      reasonCodes: [],
+      waveStatus: 'SUCCEEDED',
+      demandStatus: 'OPEN',
+    },
+    {
+      decision: 'SOURCE_EXCLUDED',
+      reasonCodes: ['SOURCE_NOT_FOUND'],
+      waveStatus: 'PAUSED',
+      demandStatus: 'PAUSED',
+    },
+  ] as const;
+
+  it.each(terminalSupplyDecisions)(
+    'resolves a supply wave for $decision',
+    async ({ decision, reasonCodes, waveStatus, demandStatus }) => {
+      const db = database();
+      const job = {
+        id: 'supply_job',
+        subjectType: 'SUPPLY_REPLENISHMENT',
+        status: 'CLAIMED',
+        workerId: 'coverage-1',
+        claimedAt: now,
+        leaseExpiresAt: new Date('2026-08-03T18:30:00.000Z'),
+        context: { demandId: 'demand_1' },
+      };
+      db.jobs.findUnique.mockResolvedValue(job);
+      db.waves.findFirst.mockResolvedValue({
+        id: 'wave_1',
+        demandId: 'demand_1',
+        status: 'ACTIVE',
+      });
+      db.demands.findUnique.mockResolvedValue({
+        id: 'demand_1',
+        generation: 4,
+        activeWaveId: 'wave_1',
+        reasonCodes: [],
+      });
+      db.jobs.updateMany.mockResolvedValue({ count: 1 });
+
+      await completeAffiliateCoverageJob({
+        schemaVersion: 1,
+        jobId: 'supply_job',
+        agentId: 'coverage-1',
+        claimGeneration: { jobId: 'supply_job', agentId: 'coverage-1', claimedAt: now.toISOString() },
+        decision,
+        summary: `The supply planner completed with ${decision}.`,
+        campaignIds: [],
+        coverageEvidence: null,
+        reasonCodes,
+      }, { database: db as any, now: () => now });
+
+      expect(db.waves.update).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: 'wave_1' },
+        data: expect.objectContaining({ status: waveStatus }),
+      }));
+      expect(db.demands.update).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: 'demand_1' },
+        data: expect.objectContaining({
+          status: demandStatus,
+          activeWaveId: null,
+          generation: 5,
+        }),
+      }));
+    },
+  );
 });

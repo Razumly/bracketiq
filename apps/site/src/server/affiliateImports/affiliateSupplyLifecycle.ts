@@ -40,6 +40,7 @@ export const AFFILIATE_SUPPLY_OUTCOMES = [
 ] as const;
 
 export type AffiliateSupplyOutcome = (typeof AFFILIATE_SUPPLY_OUTCOMES)[number];
+export type AffiliateSupplyLifecycleOutcome = AffiliateSupplyOutcome;
 
 export type AffiliateSupplyFreshnessStatus = 'FRESH' | 'STALE' | 'UNKNOWN' | 'NOT_APPLICABLE';
 
@@ -56,7 +57,7 @@ export type AffiliateSupplyTargetEvidence = Readonly<{
   freshnessExpiresAt?: Date | string | null;
   rejectedAt?: Date | string | null;
   evidenceRefs?: readonly string[];
-  reviewed?: boolean;
+  isReviewed?: boolean;
   metadata?: Record<string, unknown> | null;
 }>;
 
@@ -167,7 +168,7 @@ export type AffiliateSupplySourceEvidence = Readonly<{
   activeMappingId?: string | null;
   lifecycleGeneration: number;
   operatorDomain?: string | null;
-  automationHold?: boolean;
+  isAutomationOnHold?: boolean;
   automationHoldReason?: string | null;
   isExcluded?: boolean;
   metadata?: Record<string, unknown> | null;
@@ -184,7 +185,7 @@ export type AffiliateSupplyMappingEvidence = Readonly<{
   version: number;
   isActive: boolean;
   validatedAt?: Date | string | null;
-  schemaValid: boolean;
+  isSchemaValid: boolean;
   packageHash?: string | null;
   evidenceRefs?: readonly string[];
   evidenceKinds?: readonly string[];
@@ -205,7 +206,7 @@ export type AffiliateSupplyApprovalEvidence = Readonly<{
   id: string;
   status: string;
   decision?: string | null;
-  independent: boolean;
+  isIndependent: boolean;
   reviewerId?: string | null;
   reviewedPackageHash?: string | null;
   evidenceRefs?: readonly string[];
@@ -221,7 +222,7 @@ export type AffiliateSupplyRefreshEvidence = Readonly<{
   httpStatus?: number | null;
   itemCount: number;
   candidateCount: number;
-  emptyStateMatched?: boolean;
+  isEmptyStateMatched?: boolean;
   errorCode?: string | null;
   errorMessage?: string | null;
   evidenceRefs?: readonly string[];
@@ -231,6 +232,7 @@ export type AffiliateSupplyRefreshEvidence = Readonly<{
 export type AffiliateSupplyEvidenceSnapshot = Readonly<{
   now: Date;
   contract: AffiliateSupplyContractPolicy;
+  supplySourceId?: string;
   source: AffiliateSupplySourceEvidence;
   intake?: AffiliateSupplyIntakeEvidence | null;
   mapping?: AffiliateSupplyMappingEvidence | null;
@@ -268,7 +270,7 @@ export type AffiliateSupplyAssessment = Readonly<{
 export type AffiliateSupplyIdentityInput = Readonly<{
   requestedUrl: string;
   resolvedCanonicalUrl?: string | null;
-  redirectVerified?: boolean;
+  isRedirectVerified?: boolean;
   operatorDomain?: string | null;
   prior?: Readonly<{
     canonicalUrl: string;
@@ -283,10 +285,12 @@ export type AffiliateSupplyIdentity = Readonly<{
   pathKey: string;
   identityKey: string;
   rootDecision: 'NEW_ROOT' | 'SAME_ROOT' | 'SUCCESSOR_REQUIRED' | 'REVIEW_REQUIRED';
+  isRevalidationRequired: boolean;
   reasonCodes: readonly string[];
 }>;
 
 export type AffiliateSupplyLifecycleCommand =
+  | 'CREATE_ROOT'
   | 'RECORD_MAPPING'
   | 'APPROVE'
   | 'ACTIVATE'
@@ -294,15 +298,22 @@ export type AffiliateSupplyLifecycleCommand =
   | 'RECORD_REFRESH'
   | 'RECORD_EMPTY_REFRESH'
   | 'RECORD_REFRESH_FAILURE'
+  | 'REVALIDATE_IDENTITY'
   | 'EXCLUDE_SOURCE'
   | 'REJECT_TARGET'
   | 'CREATE_SUCCESSOR'
   | 'RECONCILE';
 
 export type AffiliateSupplyCommandAuthority = 'MAPPING_PRODUCER' | 'SUPPLY_REVIEWER' | 'HUMAN_DIRECTED_EXECUTOR' | 'SYSTEM';
+export type AffiliateSupplyLifecycleActorKind =
+  | 'MAPPING_PRODUCER'
+  | 'SUPPLY_REVIEWER'
+  | 'HUMAN_DIRECTED_EXECUTOR'
+  | 'SYSTEM'
+  | 'HUMAN';
 
 export type AffiliateSupplyCommandDecision = Readonly<{
-  accepted: boolean;
+  isAccepted: boolean;
   reasonCodes: readonly string[];
   nextStage: AffiliateSupplyLifecycleStage | null;
 }>;
@@ -374,7 +385,7 @@ export type AffiliateReplenishmentDemandEvidence = Readonly<{
 
 export type AffiliateReplenishmentCampaignEvidence = Readonly<{
   id: string;
-  eligible: boolean;
+  isEligible: boolean;
   priority: number;
   nextEligibleAt: Date | null;
   marketKey?: string | null;
@@ -451,6 +462,37 @@ const normalizeSupplyUrl = (value: string): string => {
   const httpsValue = trimmed.replace(/^http:/i, 'https:');
   return canonicalizeAffiliateIntakeUrl(httpsValue);
 };
+const NORMALIZED_TRACKING_QUERY_KEYS: Record<string, true> = {
+  fbclid: true,
+  gclid: true,
+  mc_cid: true,
+  mc_eid: true,
+  msclkid: true,
+  srsltid: true,
+  dclid: true,
+  twclid: true,
+  ttclid: true,
+  igshid: true,
+  _ga: true,
+  _gl: true,
+};
+const hasRawSupplyUrlNormalizationVariant = (value: string): boolean => {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol.toLowerCase() === 'http:' || parsed.hash) return true;
+  return [...parsed.searchParams.keys()].some((key) => {
+    const normalizedKey = key.toLowerCase();
+    return normalizedKey.startsWith('utm_') || Object.prototype.hasOwnProperty.call(
+      NORMALIZED_TRACKING_QUERY_KEYS,
+      normalizedKey,
+    );
+  });
+};
+
 
 const identityHash = (value: string): string => createHash('sha256').update(value).digest('hex');
 
@@ -514,7 +556,7 @@ export const mappingPackageValid = (
   snapshot: AffiliateSupplyEvidenceSnapshot,
 ): boolean => {
   const mapping = snapshot.mapping;
-  if (!mapping || !mapping.schemaValid || !mapping.id || !mapping.packageHash) return false;
+  if (!mapping || !mapping.isSchemaValid || !mapping.id || !mapping.packageHash) return false;
   if (!affiliateScrapeMappingSchema.safeParse(mapping.mapping).success) return false;
   if (snapshot.source.activeMappingId && snapshot.source.activeMappingId !== mapping.id) return false;
   if (mapping.validationOutput && mapping.validationOutput.isValid !== true) return false;
@@ -539,7 +581,7 @@ const approvalValid = (snapshot: AffiliateSupplyEvidenceSnapshot): boolean => {
     approval
     && uppercase(approval.status) === 'APPROVED'
     && uppercase(approval.decision) === 'APPROVE'
-    && approval.independent
+    && approval.isIndependent
     && approval.reviewerId
     && approval.evidenceRefs?.length
     && (!approval.reviewedPackageHash || approval.reviewedPackageHash === snapshot.mapping?.packageHash),
@@ -586,6 +628,17 @@ export const deriveAffiliateSupplyAssessment = (
   const baselineProvided = snapshot.baseline !== null && snapshot.baseline !== undefined;
   const parsedBaseline = parseAffiliateAutomationBaseline(snapshot.baseline);
   const lifecycleEvidenceSatisfied = lifecycleEvidenceValid(snapshot);
+  const sourceAutomationEnabled = snapshot.source.autoScrapeEnabled === true;
+  const isBaselineRequired = sourceAutomationEnabled;
+  const hasInvalidBaseline = !parsedBaseline && (isBaselineRequired || baselineProvided);
+  const hasBaselineMappingMismatch = Boolean(
+    parsedBaseline
+    && snapshot.mapping
+    && (
+      parsedBaseline.mappingId !== snapshot.mapping.id
+      || parsedBaseline.mappingVersion !== snapshot.mapping.version
+    ),
+  );
   const violations = sortedUnique([
     ...(snapshot.identityViolations ?? []),
     ...(snapshot.source.activeMappingId && !snapshot.mapping
@@ -597,7 +650,8 @@ export const deriveAffiliateSupplyAssessment = (
     ...(snapshot.mappingJob?.sourceId && snapshot.mappingJob.sourceId !== snapshot.source.id
       ? ['MAPPING_JOB_SOURCE_MISMATCH']
       : []),
-    ...(snapshot.mappingJob?.mappingId && snapshot.mapping?.id && snapshot.mappingJob.mappingId !== snapshot.mapping.id
+    ...(snapshot.mappingJob?.mappingId && snapshot.mapping?.id
+      && snapshot.mappingJob.mappingId !== snapshot.mapping.id
       ? ['MAPPING_JOB_MAPPING_MISMATCH']
       : []),
     ...(snapshot.latestRun?.mappingId && snapshot.source.activeMappingId
@@ -608,7 +662,8 @@ export const deriveAffiliateSupplyAssessment = (
       && snapshot.latestRun.mappingId !== snapshot.mapping.id
       ? ['LATEST_RUN_MAPPING_MISMATCH']
       : []),
-    ...(baselineProvided && !parsedBaseline ? ['INVALID_AUTOMATION_BASELINE'] : []),
+    ...(hasInvalidBaseline ? ['INVALID_AUTOMATION_BASELINE'] : []),
+    ...(hasBaselineMappingMismatch ? ['AUTOMATION_BASELINE_MAPPING_MISMATCH'] : []),
     ...(snapshot.approval && !lifecycleEvidenceSatisfied ? ['REQUIRED_LIFECYCLE_EVIDENCE_MISSING'] : []),
   ]);
   const normalizedTargets = normalizeTargets(snapshot.targets);
@@ -626,15 +681,19 @@ export const deriveAffiliateSupplyAssessment = (
   const potentialTargetContribution = isExcluded(snapshot) ? 0 : qualifyingFreshTargets.length;
   const latestRun = snapshot.latestRun;
   const latestRunStatus = uppercase(latestRun?.status);
+  const isTerminalRefreshFailure = Boolean(
+    latestRun
+    && latestRun.finishedAt
+    && ['FAILED', 'PARTIAL', 'ERROR', 'CANCELLED', 'ABORTED'].includes(latestRunStatus),
+  );
   const mappingValid = mappingPackageValid(snapshot);
   const approved = approvalValid(snapshot);
   const validated = hasValidatedMapping(snapshot);
   if (approved) reasons.push('INDEPENDENT_REVIEW_APPROVED');
-  if (baselineProvided && !parsedBaseline) reasons.push('INVALID_AUTOMATION_BASELINE');
+  if (hasInvalidBaseline) reasons.push('INVALID_AUTOMATION_BASELINE');
   if (!lifecycleEvidenceSatisfied) reasons.push('REQUIRED_LIFECYCLE_EVIDENCE_MISSING');
 
-  const sourceAutomationEnabled = snapshot.source.autoScrapeEnabled === true;
-  const activeHold = snapshot.source.automationHold === true || Boolean(snapshot.holds?.length);
+  const activeHold = snapshot.source.isAutomationOnHold === true || Boolean(snapshot.holds?.length);
   const automationHoldReason = activeHold
     ? snapshot.source.automationHoldReason ?? 'AUTOMATION_HOLD'
     : null;
@@ -677,7 +736,7 @@ export const deriveAffiliateSupplyAssessment = (
     outcome = 'AUTOMATION_HOLD';
     reasons.push('AUTOMATION_HOLD');
     repairPriority = AFFILIATE_REPLENISHMENT_PRIORITY.REPAIR_MAPPED_APPROVED;
-  } else if (latestRunStatus && !['SUCCEEDED', 'SUCCESS', 'COMPLETED'].includes(latestRunStatus)) {
+  } else if (isTerminalRefreshFailure) {
     stage = 'APPROVED';
     outcome = 'REPAIR_REQUIRED';
     reasons.push('REFRESH_FAILED');
@@ -687,7 +746,7 @@ export const deriveAffiliateSupplyAssessment = (
     reasons.push(!validated ? 'MAPPING_NOT_VALIDATED' : 'AUTOMATION_DISABLED');
     repairPriority = AFFILIATE_REPLENISHMENT_PRIORITY.ACTIVATION_REVIEW;
   } else if (latestRun && latestRunStatus === 'SUCCEEDED' && latestRun.candidateCount === 0) {
-    if (latestRun.emptyStateMatched === true && mappingHasEmptyState(snapshot)) {
+    if (latestRun.isEmptyStateMatched === true && mappingHasEmptyState(snapshot)) {
       stage = 'ACTIVATED';
       outcome = 'VALID_EMPTY_REFRESH';
       reasons.push('VALID_EMPTY_REFRESH');
@@ -746,7 +805,7 @@ export const deriveAffiliateSupplyAssessment = (
   const isTargetMet = targetMinimum > 0 && targetContribution >= targetMinimum;
 
   return {
-    supplySourceId: snapshot.source.id,
+    supplySourceId: snapshot.supplySourceId ?? snapshot.source.id,
     lifecycleGeneration: snapshot.source.lifecycleGeneration,
     stage,
     outcome,
@@ -790,7 +849,7 @@ export const normalizeAffiliateSupplyIdentity = (
     ) {
       rootDecision = 'SUCCESSOR_REQUIRED';
       reasonCodes.push('ORIGIN_OR_OPERATOR_CHANGED');
-    } else if (canonicalUrl === priorCanonicalUrl || input.redirectVerified === true) {
+    } else if (canonicalUrl === priorCanonicalUrl || input.isRedirectVerified === true) {
       rootDecision = 'SAME_ROOT';
       if (canonicalUrl !== priorCanonicalUrl) reasonCodes.push('VERIFIED_SAME_ORIGIN_CANONICAL_REDIRECT');
     } else {
@@ -798,6 +857,19 @@ export const normalizeAffiliateSupplyIdentity = (
       reasonCodes.push('CANONICAL_CHANGE_NOT_VERIFIED');
     }
   }
+  const isRevalidationRequired = Boolean(
+    input.prior
+    && rootDecision === 'SAME_ROOT'
+    && (
+      canonicalUrl !== priorCanonicalUrl
+      || hasRawSupplyUrlNormalizationVariant(input.requestedUrl)
+      || (
+        input.resolvedCanonicalUrl
+        && hasRawSupplyUrlNormalizationVariant(input.resolvedCanonicalUrl)
+      )
+    ),
+  );
+  if (isRevalidationRequired) reasonCodes.push('RAW_URL_NORMALIZATION_VARIANT');
   if (requestedUrl !== canonicalUrl) reasonCodes.push('CANONICAL_URL_NORMALIZED');
   const pathKey = `${parsed.origin}${parsed.pathname}`;
   const identityKey = rootDecision === 'SAME_ROOT' && input.prior?.identityKey
@@ -809,6 +881,7 @@ export const normalizeAffiliateSupplyIdentity = (
     pathKey,
     identityKey,
     rootDecision,
+    isRevalidationRequired,
     reasonCodes: sortedUnique(reasonCodes),
   };
 };
@@ -970,7 +1043,6 @@ export const buildAffiliateSupplyContractImpactReport = (input: Readonly<{
   let stageRegressions = 0;
   let repairWork = 0;
   let automationStops = 0;
-  let targetMetChanges = 0;
   const currentMinimum = Math.max(...currentPolicy.targets.map((target) => target.minimumFreshPublishedSupply), 0);
   const nextMinimum = Math.max(...input.nextPolicy.targets.map((target) => target.minimumFreshPublishedSupply), 0);
   const minimumForSource = (
@@ -1036,6 +1108,20 @@ export const buildAffiliateSupplyContractImpactReport = (input: Readonly<{
     const nextOpen = (nextFreshSupplyByCell.get(key) ?? 0) < nextRule.minimumFreshPublishedSupply;
     return nextOpen && !currentOpen;
   }).length;
+  let targetMetChanges = 0;
+  for (const key of new Set([...currentRuleByCell.keys(), ...nextRuleByCell.keys()])) {
+    const currentRule = currentRuleByCell.get(key);
+    const nextRule = nextRuleByCell.get(key);
+    const isCurrentTargetMet = Boolean(
+      currentRule
+      && (currentFreshSupplyByCell.get(key) ?? 0) >= currentRule.minimumFreshPublishedSupply,
+    );
+    const isNextTargetMet = Boolean(
+      nextRule
+      && (nextFreshSupplyByCell.get(key) ?? 0) >= nextRule.minimumFreshPublishedSupply,
+    );
+    if (isCurrentTargetMet !== isNextTargetMet) targetMetChanges += 1;
+  }
   input.sources.forEach((source) => {
     const sourceCellKeys = source.targetCells?.map(targetCellKey) ?? [];
     const sourceHasImpactedCell = sourceCellKeys.some((key) => impactedCellKeys.has(key));
@@ -1061,13 +1147,15 @@ export const buildAffiliateSupplyContractImpactReport = (input: Readonly<{
     const nextRepairPriority = shouldEvaluateSource
       ? source.nextRepairPriority ?? source.repairPriority
       : source.repairPriority;
-    const currentTargetMet = shouldEvaluateSource
+    const currentSupplyCount = source.currentFreshTargetCells?.length ?? source.targetContribution;
+    const nextSupplyCount = source.nextFreshTargetCells?.length ?? nextTargetContribution;
+    const isCurrentTargetMet = shouldEvaluateSource
       && sourceCurrentMinimum > 0
-      && source.targetContribution >= sourceCurrentMinimum;
-    const nextTargetMet = shouldEvaluateSource
+      && currentSupplyCount >= sourceCurrentMinimum;
+    const isNextTargetMet = shouldEvaluateSource
       && sourceNextMinimum > 0
-      && nextTargetContribution >= sourceNextMinimum;
-    if (shouldEvaluateSource && (nextStage !== source.stage || currentTargetMet !== nextTargetMet)) {
+      && nextSupplyCount >= sourceNextMinimum;
+    if (shouldEvaluateSource && (nextStage !== source.stage || isCurrentTargetMet !== isNextTargetMet)) {
       affectedSourceIds.push(source.id);
     }
     if (source.stage === 'PUBLISHED' && nextStage !== 'PUBLISHED') stageRegressions += 1;
@@ -1077,7 +1165,6 @@ export const buildAffiliateSupplyContractImpactReport = (input: Readonly<{
       && nextStage === 'ACTIVATED'
     ) repairWork += 1;
     if (source.isAutomationEnabled && !nextIsAutomationEnabled) automationStops += 1;
-    if (currentTargetMet !== nextTargetMet) targetMetChanges += 1;
   });
   return {
     rolloutCohort: input.currentManifest.rolloutCohort,
@@ -1103,6 +1190,7 @@ export const validateAffiliateSupplyCommand = (
 ): AffiliateSupplyCommandDecision => {
   const reasons: string[] = [];
   const authorityByCommand: Record<AffiliateSupplyLifecycleCommand, AffiliateSupplyCommandAuthority[]> = {
+    CREATE_ROOT: ['SYSTEM'],
     RECORD_MAPPING: ['MAPPING_PRODUCER', 'SYSTEM'],
     APPROVE: ['SUPPLY_REVIEWER', 'HUMAN_DIRECTED_EXECUTOR'],
     ACTIVATE: ['SUPPLY_REVIEWER', 'HUMAN_DIRECTED_EXECUTOR'],
@@ -1110,6 +1198,7 @@ export const validateAffiliateSupplyCommand = (
     RECORD_REFRESH: ['SYSTEM'],
     RECORD_EMPTY_REFRESH: ['SYSTEM'],
     RECORD_REFRESH_FAILURE: ['SYSTEM'],
+    REVALIDATE_IDENTITY: ['SYSTEM'],
     EXCLUDE_SOURCE: ['SUPPLY_REVIEWER', 'HUMAN_DIRECTED_EXECUTOR'],
     REJECT_TARGET: ['SUPPLY_REVIEWER', 'HUMAN_DIRECTED_EXECUTOR'],
     CREATE_SUCCESSOR: ['SYSTEM', 'SUPPLY_REVIEWER'],
@@ -1118,7 +1207,7 @@ export const validateAffiliateSupplyCommand = (
   if (input.expectedLifecycleGeneration !== input.currentLifecycleGeneration) reasons.push('LIFECYCLE_GENERATION_STALE');
   if (input.activeContractVersion !== input.commandContractVersion || input.activeContractHash !== input.commandContractHash) reasons.push('SUPPLY_CONTRACT_STALE');
   if (!authorityByCommand[input.command].includes(input.authority)) reasons.push('COMMAND_AUTHORITY_NOT_PERMITTED');
-  if (input.command !== 'RECONCILE' && input.command !== 'RECORD_REFRESH_FAILURE' && input.evidenceRefs.length === 0) reasons.push('EVIDENCE_REQUIRED');
+  if (input.evidenceRefs.length === 0) reasons.push('EVIDENCE_REQUIRED');
   const stage = input.assessment.stage;
   const canRecordNonAutomatedRefresh = (
     !input.assessment.isAutomationEnabled
@@ -1145,11 +1234,11 @@ export const validateAffiliateSupplyCommand = (
     && !canRecordNonAutomatedRefresh
     && !(stage === 'APPROVED' && input.assessment.outcome === 'AUTOMATION_HOLD')
   ) reasons.push('EMPTY_REFRESH_PRECONDITION_FAILED');
-  const accepted = reasons.length === 0;
+  const isAccepted = reasons.length === 0;
   return {
-    accepted,
+    isAccepted,
     reasonCodes: sortedUnique(reasons),
-    nextStage: accepted ? input.assessment.stage : null,
+    nextStage: isAccepted ? input.assessment.stage : null,
   };
 };
 
@@ -1253,7 +1342,7 @@ export const planAffiliateReplenishment = (
     return !candidate || (demand !== null && candidate.toUpperCase() === demand.toUpperCase());
   };
   const campaign = input.campaigns
-    .filter((candidate) => candidate.eligible && (!candidate.nextEligibleAt || candidate.nextEligibleAt.getTime() <= input.now.getTime()))
+    .filter((candidate) => candidate.isEligible)
     .filter((candidate) => (
       dimensionMatches(candidate.marketKey, selectedDemand.marketKey)
       && dimensionMatches(candidate.sportId, selectedDemand.sportId)

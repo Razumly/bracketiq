@@ -78,6 +78,8 @@ const coverageDatabaseForClient = (client: any) => ({
   coverageCells: client.affiliateCoverageCells,
   coverageAssessments: client.affiliateCoverageCellAssessments,
   queryExecutions: client.affiliateSourceDiscoveryQueryExecutions,
+  demands: client.affiliateReplenishmentDemands,
+  waves: client.affiliateReplenishmentWaves,
 });
 
 const coverageDatabase = () => {
@@ -981,6 +983,25 @@ const failedCaptureContext = async (database: CoverageDatabase, job: any) => {
   return { intake, run, pages, artifacts };
 };
 
+const supplyReplenishmentContext = async (database: CoverageDatabase, job: any) => {
+  const demandId = stringValue(recordValue(job.context).demandId) ?? job.subjectKey;
+  const demand = await database.demands.findUnique({ where: { id: demandId } });
+  if (!demand) throw new Error('Supply replenishment demand was not found.');
+  const wave = database.waves?.findFirst
+    ? await database.waves.findFirst({
+      where: { coveragePlanningJobId: job.id },
+      orderBy: { createdAt: 'desc' },
+    })
+    : null;
+  return { demand, wave };
+};
+
+const contextForAffiliateCoverageJob = async (database: CoverageDatabase, job: any) => {
+  if (job.subjectType === 'MARKET_COVERAGE') return marketCoverageContext(database, job);
+  if (job.subjectType === 'SUPPLY_REPLENISHMENT') return supplyReplenishmentContext(database, job);
+  return failedCaptureContext(database, job);
+};
+
 export const claimNextAffiliateCoverageJob = async (
   options: { agentId: string; now?: Date; leaseMs?: number },
   dependencies: CoverageDependencies = {},
@@ -1022,9 +1043,7 @@ export const claimNextAffiliateCoverageJob = async (
         job: { ...active, leaseExpiresAt, claimedAt },
         claimGeneration,
         resumed: true,
-        context: active.subjectType === 'FAILED_INTAKE_CAPTURE'
-          ? await failedCaptureContext(database, active)
-          : await marketCoverageContext(database, active),
+        context: await contextForAffiliateCoverageJob(database, active),
       };
     }
   }
@@ -1074,9 +1093,7 @@ export const claimNextAffiliateCoverageJob = async (
       job: claimedJob,
       claimGeneration,
       resumed: false,
-      context: job.subjectType === 'FAILED_INTAKE_CAPTURE'
-        ? await failedCaptureContext(database, claimedJob)
-        : await marketCoverageContext(database, claimedJob),
+      context: await contextForAffiliateCoverageJob(database, claimedJob),
     };
   }
   return null;
@@ -1129,28 +1146,51 @@ export const createAffiliateCoverageCampaign = async (
     data: { errorMessage: null },
   });
   if (campaignClaim.count !== 1) throw new Error('STALE_COVERAGE_CLAIM');
-  if (job.subjectType !== 'MARKET_COVERAGE') {
-    throw new Error('Only a market coverage job can create discovery campaigns.');
+  const isSupplyReplenishment = job.subjectType === 'SUPPLY_REPLENISHMENT';
+  if (job.subjectType !== 'MARKET_COVERAGE' && !isSupplyReplenishment) {
+    throw new Error('Only a market coverage or supply replenishment job can create discovery campaigns.');
   }
-  const parentCampaignId = stringValue(recordValue(job.context).campaignId);
-  if (!parentCampaignId) throw new Error('Coverage job has no parent campaign.');
-  const parent = await database.campaigns.findUnique({ where: { id: parentCampaignId } });
-  if (!parent) throw new Error('Parent discovery campaign was not found.');
-  const parentMetadata = recordValue(parent.metadata);
+  const replenishmentDemand = isSupplyReplenishment
+    ? await database.demands.findUnique({
+      where: { id: stringValue(recordValue(job.context).demandId) ?? job.subjectKey },
+    })
+    : null;
+  if (isSupplyReplenishment && !replenishmentDemand) {
+    throw new Error('Supply replenishment demand was not found.');
+  }
+  const parentCampaignId = stringValue(recordValue(job.context).campaignId)
+    ?? (replenishmentDemand ? `demand:${replenishmentDemand.id}` : null);
+  if (!parentCampaignId) throw new Error('Coverage job has no parent campaign or replenishment demand.');
+  const parent = parentCampaignId.startsWith('demand:')
+    ? null
+    : await database.campaigns.findUnique({ where: { id: parentCampaignId } });
+  if (!parent && !replenishmentDemand) throw new Error('Parent discovery campaign was not found.');
+  const parentMetadata = recordValue(parent?.metadata);
   const coveredCities = Array.isArray(parentMetadata.coveredCities) ? parentMetadata.coveredCities : [];
   const allowedRegions = new Set<string>([
     stringValue(parentMetadata.anchorState),
     ...coveredCities.map((entry: unknown) => stringValue(recordValue(entry).state)),
-    stringValue(parent.location),
-    stringValue(parent.region),
+    stringValue(parent?.location),
+    stringValue(parent?.region),
   ].filter((value): value is string => Boolean(value)).map((value) => value.toLowerCase()));
   const proposedScope = `${proposal.region} ${proposal.location ?? ''}`.toLowerCase();
-  if (!Array.from(allowedRegions).some((value) => proposedScope.includes(value))) {
+  if (parent && !Array.from(allowedRegions).some((value) => proposedScope.includes(value))) {
     throw new Error('Coverage campaign region must remain within the claimed market or state.');
   }
   const sportIds = [...new Set(proposal.sportIds)];
-  if (sportIds.some((sportId) => !parent.sportIds.includes(sportId))) {
+  if (parent && sportIds.some((sportId) => !parent.sportIds.includes(sportId))) {
     throw new Error('Coverage campaign sports must belong to the claimed market campaign.');
+  }
+  if (replenishmentDemand && !sportIds.includes(replenishmentDemand.sportId)) {
+    throw new Error('Coverage campaign sports must include the replenishment demand sport.');
+  }
+  if (
+    replenishmentDemand
+    && replenishmentDemand.sourceProfile
+    && proposal.sourceTypeHints.length > 0
+    && !proposal.sourceTypeHints.includes(replenishmentDemand.sourceProfile)
+  ) {
+    throw new Error('Coverage campaign source types must include the replenishment demand profile.');
   }
   const sportCount = await database.sports.count({ where: { id: { in: sportIds } } });
   if (sportCount !== sportIds.length) throw new Error('One or more coverage campaign sports do not exist.');
@@ -1188,11 +1228,14 @@ export const createAffiliateCoverageCampaign = async (
       const city = cityByGeoid.get(cell.cityId);
       const profile = getAffiliateCoverageProfile(String(cell.profileKey));
       if (!city || !profile) throw new Error('Every proposed coverage cell must resolve to an active catalog city and profile.');
-      if (parentMetadata.marketKey && cell.marketKey !== parentMetadata.marketKey) {
+      if (parent && parentMetadata.marketKey && cell.marketKey !== parentMetadata.marketKey) {
         throw new Error('Every proposed coverage cell must belong to the claimed market.');
       }
-      if (!parentMetadata.marketKey && !coveredCityKeys.has(`${city.city.toLowerCase()}, ${city.state.toLowerCase()}`)) {
+      if (parent && !parentMetadata.marketKey && !coveredCityKeys.has(`${city.city.toLowerCase()}, ${city.state.toLowerCase()}`)) {
         throw new Error('Every proposed coverage cell must belong to the claimed market.');
+      }
+      if (replenishmentDemand && cell.marketKey !== replenishmentDemand.marketKey) {
+        throw new Error('Every proposed coverage cell must belong to the replenishment demand market.');
       }
       if (
         ['WAITING_FOR_PIPELINE', 'SATURATED'].includes(String(cell.searchStatus))
@@ -1247,7 +1290,8 @@ export const createAffiliateCoverageCampaign = async (
         createdByUserId: `coverage-agent:${proposal.agentId}`,
         metadata: {
           coverageAgent: true,
-          coverageParentCampaignId: parentCampaignId,
+          coverageParentCampaignId: parent?.id ?? null,
+          coverageDemandId: replenishmentDemand?.id ?? null,
           coverageJobId: job.id,
           coverageArchetypes: proposal.coverageArchetypes,
           coverageCellIds: proposal.coverageCellIds,
@@ -1599,7 +1643,7 @@ export const completeAffiliateCoverageJob = async (
   const job = await database.jobs.findUnique({ where: { id: result.jobId } });
   assertActiveClaim(job, result.claimGeneration, now);
   await validateFocusedCoverageEvidence(database, job, result);
-  if (job.subjectType === 'MARKET_COVERAGE') {
+  if (job.subjectType === 'MARKET_COVERAGE' || job.subjectType === 'SUPPLY_REPLENISHMENT') {
     if (result.decision === 'CAMPAIGNS_CREATED' && result.campaignIds.length === 0) {
       throw new Error('CAMPAIGNS_CREATED requires at least one campaign id.');
     }
@@ -1616,26 +1660,28 @@ export const completeAffiliateCoverageJob = async (
       ))) {
         throw new Error('Created campaigns must belong to the claimed coverage job.');
       }
-      const terminalRuns = await database.discoveryRuns.findMany({
-        where: {
-          campaignId: { in: result.campaignIds },
-        },
-        select: { campaignId: true, status: true },
-        orderBy: { createdAt: 'desc' },
-      });
-      const latestStatusByCampaign = new Map<string, string>();
-      for (const run of terminalRuns) {
-        if (!latestStatusByCampaign.has(run.campaignId)) {
-          latestStatusByCampaign.set(run.campaignId, run.status);
+      if (job.subjectType === 'MARKET_COVERAGE') {
+        const terminalRuns = await database.discoveryRuns.findMany({
+          where: {
+            campaignId: { in: result.campaignIds },
+          },
+          select: { campaignId: true, status: true },
+          orderBy: { createdAt: 'desc' },
+        });
+        const latestStatusByCampaign = new Map<string, string>();
+        for (const run of terminalRuns) {
+          if (!latestStatusByCampaign.has(run.campaignId)) {
+            latestStatusByCampaign.set(run.campaignId, run.status);
+          }
+        }
+        if (result.campaignIds.some((campaignId) => (
+          !['SUCCEEDED', 'PARTIAL', 'FAILED'].includes(latestStatusByCampaign.get(campaignId) ?? '')
+        ))) {
+          throw new Error('Run each created campaign before returning the market job to the queue.');
         }
       }
-      if (result.campaignIds.some((campaignId) => (
-        !['SUCCEEDED', 'PARTIAL', 'FAILED'].includes(latestStatusByCampaign.get(campaignId) ?? '')
-      ))) {
-        throw new Error('Run each created campaign before returning the market job to the queue.');
-      }
     }
-    if (result.decision === 'COVERED') {
+    if (job.subjectType === 'MARKET_COVERAGE' && result.decision === 'COVERED') {
       const evidence = result.coverageEvidence;
       if (
         !evidence
@@ -1688,7 +1734,7 @@ export const completeAffiliateCoverageJob = async (
         throw new Error(`COVERED cites query profiles with no successful run evidence: ${unsupportedProfiles.join(', ')}.`);
       }
     }
-    if (result.decision === 'WAITING_FOR_PIPELINE') {
+    if (job.subjectType === 'MARKET_COVERAGE' && result.decision === 'WAITING_FOR_PIPELINE') {
       const currentUnresolvedLeadCount = await currentMarketUnresolvedLeadCount(database, job);
       if (
         !result.coverageEvidence
@@ -1698,8 +1744,17 @@ export const completeAffiliateCoverageJob = async (
         throw new Error('WAITING_FOR_PIPELINE requires the current nonzero unresolved automatic lead count.');
       }
     }
-    if (['CAPTURE_RECOVERED', 'MAPPER_REPAIR_REQUIRED', 'RETRY_LATER', 'SOURCE_EXCLUDED'].includes(result.decision)) {
+    if (
+      job.subjectType === 'MARKET_COVERAGE'
+      && ['CAPTURE_RECOVERED', 'MAPPER_REPAIR_REQUIRED', 'RETRY_LATER', 'SOURCE_EXCLUDED'].includes(result.decision)
+    ) {
       throw new Error('Market coverage jobs cannot use a capture repair decision.');
+    }
+    if (
+      job.subjectType === 'SUPPLY_REPLENISHMENT'
+      && !['CAMPAIGNS_CREATED', 'HUMAN_REVIEW_REQUIRED', 'RETRY_LATER', 'SATURATED_NO_YIELD', 'SOURCE_EXCLUDED'].includes(result.decision)
+    ) {
+      throw new Error('Supply replenishment jobs require a campaign, retry, exclusion, or human review decision.');
     }
   } else {
     if (result.decision === 'CAPTURE_RECOVERED') {
@@ -1727,8 +1782,9 @@ export const completeAffiliateCoverageJob = async (
   ) {
     throw new Error('HUMAN_REVIEW_REQUIRED requires conflicting identity, contradictory evidence, or replacement-domain approval.');
   }
+  const retryBudget = MAX_CAPTURE_ATTEMPTS;
   const retryExhausted = result.decision === 'RETRY_LATER'
-    && Number(job.attemptCount ?? 0) >= MAX_CAPTURE_ATTEMPTS;
+    && Number(job.attemptCount ?? 0) >= retryBudget;
   const retryAt = result.decision === 'RETRY_LATER' && !retryExhausted
     ? retryAtForAttempt(now, Number(job.attemptCount ?? 1))
     : null;
@@ -1736,15 +1792,23 @@ export const completeAffiliateCoverageJob = async (
     ? {
         ...result,
         decision: 'SOURCE_EXCLUDED',
-        summary: `${result.summary} The bounded capture retry budget is exhausted.`,
+        summary: `${result.summary} The bounded coverage retry budget is exhausted.`,
         reasonCodes: Array.from(new Set([...result.reasonCodes, 'RETRY_EXHAUSTED'])),
       }
     : retryAt
       ? { ...result, retryAt: retryAt.toISOString() }
       : result;
+  const persistedResult = (
+    job.subjectType === 'SUPPLY_REPLENISHMENT'
+    && result.decision === 'CAMPAIGNS_CREATED'
+  )
+    ? { ...storedResult, campaignId: result.campaignIds[0] }
+    : storedResult;
   let status = 'COMPLETED';
   if (result.decision === 'HUMAN_REVIEW_REQUIRED') status = 'HUMAN_REVIEW_REQUIRED';
-  if (result.decision === 'CAMPAIGNS_CREATED') status = 'QUEUED';
+  if (result.decision === 'CAMPAIGNS_CREATED') {
+    status = job.subjectType === 'SUPPLY_REPLENISHMENT' ? 'COMPLETED' : 'QUEUED';
+  }
   if (result.decision === 'WAITING_FOR_PIPELINE') status = 'WAITING_FOR_PIPELINE';
   if (result.decision === 'RETRY_LATER') {
     status = retryExhausted ? 'EXCLUDED' : 'RETRY_SCHEDULED';
@@ -1753,7 +1817,7 @@ export const completeAffiliateCoverageJob = async (
   const releasesClaim = ['QUEUED', 'WAITING_FOR_PIPELINE', 'RETRY_SCHEDULED'].includes(status);
   const finalData: Record<string, unknown> = {
     status,
-    result: storedResult,
+    result: persistedResult,
     errorMessage: status === 'HUMAN_REVIEW_REQUIRED' ? result.summary : null,
     finishedAt: releasesClaim ? null : now,
     claimedAt: releasesClaim ? null : job.claimedAt,
@@ -1775,6 +1839,85 @@ export const completeAffiliateCoverageJob = async (
     return repair.coverageJob;
   }
   return withCoverageTransaction(database, async (transactionDatabase) => {
+    const isSupplyReplenishment = job.subjectType === 'SUPPLY_REPLENISHMENT';
+    if (
+      isSupplyReplenishment
+      && transactionDatabase.waves?.findFirst
+      && transactionDatabase.waves?.update
+    ) {
+      const wave = await transactionDatabase.waves.findFirst({
+        where: { coveragePlanningJobId: job.id },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (wave) {
+        const effectiveDecision = String(persistedResult.decision).toUpperCase();
+        const isHumanReview = effectiveDecision === 'HUMAN_REVIEW_REQUIRED';
+        const isSourceExcluded = effectiveDecision === 'SOURCE_EXCLUDED';
+        const isSaturated = effectiveDecision === 'SATURATED_NO_YIELD';
+        const isRetry = effectiveDecision === 'RETRY_LATER';
+        const saturationUntil = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+        const waveData: Record<string, unknown> = {
+          resultJson: persistedResult,
+          evidenceRefs: [`coverage-job:${job.id}`],
+        };
+        if (effectiveDecision === 'CAMPAIGNS_CREATED') {
+          waveData.campaignId = result.campaignIds[0];
+          waveData.status = 'ACTIVE';
+          waveData.provider = 'COVERAGE_PLANNER';
+          waveData.evidenceRefs = [`coverage-job:${job.id}`, `campaign:${result.campaignIds[0]}`];
+        } else if (isHumanReview || isSourceExcluded) {
+          waveData.status = 'PAUSED';
+          waveData.terminalAt = now;
+          waveData.retryAt = null;
+          waveData.marginalYield = null;
+          waveData.errorCode = isHumanReview
+            ? 'COVERAGE_PLANNING_HUMAN_REVIEW_REQUIRED'
+            : 'COVERAGE_PLANNING_SOURCE_EXCLUDED';
+        } else if (isSaturated) {
+          waveData.status = 'SUCCEEDED';
+          waveData.terminalAt = now;
+          waveData.retryAt = saturationUntil;
+          waveData.marginalYield = 0;
+          waveData.errorCode = null;
+        } else if (isRetry) {
+          waveData.status = 'WAITING';
+          waveData.terminalAt = null;
+          waveData.retryAt = retryAt ?? new Date(now.getTime() + DEFAULT_CAPTURE_RETRY_DELAY_MS);
+          waveData.marginalYield = null;
+          waveData.errorCode = 'COVERAGE_PLANNING_RETRY';
+        }
+        await transactionDatabase.waves.update({
+          where: { id: wave.id },
+          data: waveData,
+        });
+        if (isHumanReview || isSourceExcluded || isSaturated) {
+          const demand = await transactionDatabase.demands.findUnique({
+            where: { id: wave.demandId },
+          });
+          if (demand) {
+            const reasonCode = isHumanReview
+              ? 'COVERAGE_PLANNING_HUMAN_REVIEW_REQUIRED'
+              : isSourceExcluded
+                ? 'COVERAGE_PLANNING_SOURCE_EXCLUDED'
+                : 'SEARCH_SATURATION';
+            await transactionDatabase.demands.update({
+              where: { id: demand.id },
+              data: {
+                ...(isHumanReview || isSourceExcluded ? { status: 'PAUSED' } : { status: 'OPEN' }),
+                activeWaveId: null,
+                nextEligibleAt: isSaturated ? saturationUntil : null,
+                ...(isSaturated ? { searchSaturatedUntil: saturationUntil } : {}),
+                generation: Number(demand.generation ?? 0) + 1,
+                reasonCodes: Array.from(new Set([
+                  ...(Array.isArray(demand.reasonCodes) ? demand.reasonCodes : []),
+                  reasonCode,
+                ])),
+              },
+            });
+          }
+        }
+      }
+    }
     const completed = await transactionDatabase.jobs.updateMany({
       where: coverageClaimWhere(result.claimGeneration, now),
       data: finalData,

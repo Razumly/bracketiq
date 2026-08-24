@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import type { AffiliateSourceIntakes } from '@/generated/prisma/client';
 import { createId } from '@/lib/id';
 import { prisma } from '@/lib/prisma';
 import {
@@ -201,37 +202,67 @@ const linkAffiliateIntakeEvidence = async (input: Readonly<{
   intakeId: string;
   pageId: string;
   supplySourceId: string;
-  linkIntake: boolean;
+  expectedSupplySourceId?: string | null;
+  isIntakeLinkPending: boolean;
   client?: any;
-}>): Promise<void> => {
+}>): Promise<string> => {
   const database = affiliateSupplyDatabase(input.client ?? prisma);
-  if (input.linkIntake && database.intakes?.updateMany) {
-    await database.intakes.updateMany({
-      where: { id: input.intakeId, supplySourceId: null },
+  let linkedSupplySourceId = input.supplySourceId;
+  if (input.isIntakeLinkPending && database.intakes?.updateMany) {
+    const updated = await database.intakes.updateMany({
+      where: {
+        id: input.intakeId,
+        supplySourceId: input.expectedSupplySourceId ?? null,
+      },
       data: { supplySourceId: input.supplySourceId },
     });
+    if (updated.count !== 1 && database.intakes.findUnique) {
+      const current = await database.intakes.findUnique({
+        where: { id: input.intakeId },
+        select: { supplySourceId: true },
+      });
+      const currentSupplySourceId = stringValue(current?.supplySourceId);
+      if (currentSupplySourceId && currentSupplySourceId !== input.supplySourceId) {
+        linkedSupplySourceId = currentSupplySourceId;
+      } else if (!currentSupplySourceId) {
+        const retried = await database.intakes.updateMany({
+          where: { id: input.intakeId, supplySourceId: null },
+          data: { supplySourceId: input.supplySourceId },
+        });
+        if (retried.count !== 1) {
+          const afterRetry = await database.intakes.findUnique({
+            where: { id: input.intakeId },
+            select: { supplySourceId: true },
+          });
+          linkedSupplySourceId = stringValue(afterRetry?.supplySourceId) ?? input.supplySourceId;
+        }
+      }
+    }
   }
   if (database.pages?.update) {
     await database.pages.update({
       where: { id: input.pageId },
-      data: { supplySourceId: input.supplySourceId },
+      data: { supplySourceId: linkedSupplySourceId },
     });
   }
   if (database.artifacts?.updateMany) {
     await database.artifacts.updateMany({
       where: { pageId: input.pageId, supplySourceId: null },
-      data: { supplySourceId: input.supplySourceId },
+      data: { supplySourceId: linkedSupplySourceId },
     });
   }
+  return linkedSupplySourceId;
 };
 
 const ensureAffiliateIntakeSupplySource = async (input: Readonly<{
   intakeId: string;
   pageId: string;
   existingSupplySourceId?: string | null;
+  expectedIntakeSupplySourceId?: string | null;
   pageUrl: string;
   targetKindHints?: string[] | null;
-  linkIntake?: boolean;
+  isIntakeLinkPending?: boolean;
+  isRedirectVerified?: boolean;
   db?: any;
 }>): Promise<string | null> => {
   const database = affiliateSupplyDatabase(input.db ?? prisma);
@@ -239,7 +270,7 @@ const ensureAffiliateIntakeSupplySource = async (input: Readonly<{
 
   const canonicalUrl = canonicalizeAffiliateIntakeUrl(input.pageUrl);
   const operatorDomain = new URL(canonicalUrl).hostname;
-  const linkIntake = input.linkIntake === true;
+  const isIntakeLinkPending = input.isIntakeLinkPending === true;
   let supplySource;
   if (input.existingSupplySourceId) {
     const existing = await database.supplySources.findUnique({
@@ -249,7 +280,7 @@ const ensureAffiliateIntakeSupplySource = async (input: Readonly<{
       const identity = normalizeAffiliateSupplyIdentity({
         requestedUrl: input.pageUrl,
         resolvedCanonicalUrl: canonicalUrl,
-        redirectVerified: true,
+        isRedirectVerified: input.isRedirectVerified === true,
         operatorDomain,
         prior: {
           canonicalUrl: existing.canonicalUrl,
@@ -259,6 +290,7 @@ const ensureAffiliateIntakeSupplySource = async (input: Readonly<{
       });
       if (
         identity.rootDecision === 'SAME_ROOT'
+        && !identity.isRevalidationRequired
         && identity.canonicalUrl === canonicalizeAffiliateIntakeUrl(String(existing.canonicalUrl))
       ) {
         supplySource = existing;
@@ -266,10 +298,13 @@ const ensureAffiliateIntakeSupplySource = async (input: Readonly<{
         const successor = await ensureAffiliateSupplySource({
           requestedUrl: input.pageUrl,
           resolvedCanonicalUrl: canonicalUrl,
-          redirectVerified: true,
+          isRedirectVerified: input.isRedirectVerified === true,
           operatorDomain,
           targetKind: input.targetKindHints?.[0] ?? 'EVENT',
-          intakeId: linkIntake ? input.intakeId : null,
+          intakeId: isIntakeLinkPending ? input.intakeId : null,
+          expectedIntakeSupplySourceId: isIntakeLinkPending
+            ? input.expectedIntakeSupplySourceId
+            : undefined,
           priorSupplySourceId: existing.id,
           metadata: { sourceKey: affiliateIntakeUrlKey(canonicalUrl) },
           db: database,
@@ -282,23 +317,50 @@ const ensureAffiliateIntakeSupplySource = async (input: Readonly<{
     const created = await ensureAffiliateSupplySource({
       requestedUrl: input.pageUrl,
       resolvedCanonicalUrl: canonicalUrl,
-      redirectVerified: true,
+      isRedirectVerified: input.isRedirectVerified === true,
       operatorDomain,
       targetKind: input.targetKindHints?.[0] ?? 'EVENT',
-      intakeId: linkIntake ? input.intakeId : null,
+      intakeId: isIntakeLinkPending ? input.intakeId : null,
+      expectedIntakeSupplySourceId: isIntakeLinkPending
+        ? input.expectedIntakeSupplySourceId
+        : undefined,
       metadata: { sourceKey: affiliateIntakeUrlKey(canonicalUrl) },
       db: database,
     });
     supplySource = created.supplySource;
   }
-  await linkAffiliateIntakeEvidence({
+  const linkedSupplySourceId = await linkAffiliateIntakeEvidence({
     intakeId: input.intakeId,
     pageId: input.pageId,
     supplySourceId: supplySource.id,
-    linkIntake,
+    expectedSupplySourceId: isIntakeLinkPending
+      ? input.expectedIntakeSupplySourceId
+      : undefined,
+    isIntakeLinkPending,
     client: input.db ?? prisma,
   });
-  return supplySource.id;
+  return linkedSupplySourceId;
+};
+const reconcileCapturedAffiliateSupplySource = async (
+  intake: any,
+  page: any,
+  capture: AffiliateSourcePageCapture,
+): Promise<string | null> => {
+  const currentSupplySourceId = page.supplySourceId ?? intake.supplySourceId ?? null;
+  const finalUrl = stringValue(capture.finalUrl);
+  if (!finalUrl || finalUrl === String(page.url).trim()) return currentSupplySourceId;
+  const targetKindHints = normalizedTargetKinds(intake.targetKindHints);
+  return ensureAffiliateIntakeSupplySource({
+    intakeId: intake.id,
+    pageId: page.id,
+    existingSupplySourceId: currentSupplySourceId,
+    expectedIntakeSupplySourceId: intake.supplySourceId ?? null,
+    pageUrl: finalUrl,
+    targetKindHints: targetKindHints.length ? targetKindHints : null,
+    isIntakeLinkPending: true,
+    isRedirectVerified: true,
+    db: prisma,
+  });
 };
 
 const stringValue = (value: unknown): string | null => (
@@ -374,11 +436,40 @@ const upsertIntakePage = async (
   }
   return pages.create({ data: { id: createId(), intakeId, ...data } });
 };
+const upsertAffiliateIntakePages = async (input: Readonly<{
+  intakeId: string;
+  pages: readonly AffiliateSourceIntakePageInput[];
+  targetKindHints: string[] | null;
+  initialSupplySourceId?: string | null;
+  isIntakeLinkPending: boolean;
+  client: any;
+}>): Promise<string | null> => {
+  let supplySourceId = input.initialSupplySourceId ?? null;
+  let isIntakeLinkPending = input.isIntakeLinkPending;
+  for (const pageInput of input.pages) {
+    const page = await upsertIntakePage(input.intakeId, pageInput, 'MANUAL', input.client);
+    const pageSupplySourceId = await ensureAffiliateIntakeSupplySource({
+      intakeId: input.intakeId,
+      pageId: page.id,
+      existingSupplySourceId: page.supplySourceId,
+      expectedIntakeSupplySourceId: isIntakeLinkPending
+        ? input.initialSupplySourceId ?? null
+        : undefined,
+      pageUrl: pageInput.url,
+      targetKindHints: input.targetKindHints,
+      isIntakeLinkPending,
+      db: input.client,
+    });
+    if (!supplySourceId && pageSupplySourceId) supplySourceId = pageSupplySourceId;
+    isIntakeLinkPending = false;
+  }
+  return supplySourceId;
+};
 
 export const createAffiliateSourceIntake = async (
   input: AffiliateSourceIntakeCreateInput,
   userId: string,
-): Promise<any> => {
+): Promise<AffiliateSourceIntakes> => {
   const name = stringValue(input.name);
   if (!name) throw new Error('Affiliate source intake name is required.');
   if (!input.pages?.length) throw new Error('Affiliate source intake requires at least one page URL.');
@@ -387,22 +478,14 @@ export const createAffiliateSourceIntake = async (
     const { intakes } = intakePrisma(transactionClient);
     const existing = await intakes.findUnique({ where: { sourceKey } });
     if (existing) {
-      let supplySourceId = existing.supplySourceId ?? null;
-      let linkIntake = existing.supplySourceId === null;
-      for (const pageInput of input.pages) {
-        const page = await upsertIntakePage(existing.id, pageInput, 'MANUAL', transactionClient);
-        const pageSupplySourceId = await ensureAffiliateIntakeSupplySource({
-          intakeId: existing.id,
-          pageId: page.id,
-          existingSupplySourceId: page.supplySourceId,
-          pageUrl: pageInput.url,
-          targetKindHints: normalizedTargetKinds(input.targetKindHints),
-          linkIntake,
-          db: transactionClient,
-        });
-        if (!supplySourceId && pageSupplySourceId) supplySourceId = pageSupplySourceId;
-        linkIntake = false;
-      }
+      const supplySourceId = await upsertAffiliateIntakePages({
+        intakeId: existing.id,
+        pages: input.pages,
+        targetKindHints: normalizedTargetKinds(input.targetKindHints),
+        initialSupplySourceId: existing.supplySourceId,
+        isIntakeLinkPending: existing.supplySourceId === null,
+        client: transactionClient,
+      });
       const updated = await intakes.update({
         where: { id: existing.id },
         data: {
@@ -431,22 +514,13 @@ export const createAffiliateSourceIntake = async (
         createdByUserId: userId,
       },
     });
-    let supplySourceId: string | null = null;
-    let linkIntake = true;
-    for (const pageInput of input.pages) {
-      const page = await upsertIntakePage(intake.id, pageInput, 'MANUAL', transactionClient);
-      const pageSupplySourceId = await ensureAffiliateIntakeSupplySource({
-        intakeId: intake.id,
-        pageId: page.id,
-        existingSupplySourceId: page.supplySourceId,
-        pageUrl: pageInput.url,
-        targetKindHints: normalizedTargetKinds(input.targetKindHints),
-        linkIntake,
-        db: transactionClient,
-      });
-      if (!supplySourceId && pageSupplySourceId) supplySourceId = pageSupplySourceId;
-      linkIntake = false;
-    }
+    const supplySourceId = await upsertAffiliateIntakePages({
+      intakeId: intake.id,
+      pages: input.pages,
+      targetKindHints: normalizedTargetKinds(input.targetKindHints),
+      isIntakeLinkPending: true,
+      client: transactionClient,
+    });
     return supplySourceId ? { ...intake, supplySourceId } : intake;
   });
 };
@@ -497,9 +571,10 @@ export const addAffiliateSourceIntakePage = async (intakeId: string, input: Affi
       intakeId,
       pageId: page.id,
       existingSupplySourceId: page.supplySourceId,
+      expectedIntakeSupplySourceId: intake.supplySourceId ?? null,
       pageUrl: input.url,
       targetKindHints: input.targetKindHints ?? intake.targetKindHints,
-      linkIntake: intake.supplySourceId === null,
+      isIntakeLinkPending: intake.supplySourceId === null,
       db: transactionClient,
     });
     return page;
@@ -1275,6 +1350,7 @@ const processCapturePage = async (
   try {
     const captured = await captureWithFallback(primaryClient, fallbackClient, page.url, state);
     const { capture } = captured;
+    const capturedSupplySourceId = await reconcileCapturedAffiliateSupplySource(intake, page, capture);
     const artifacts = deriveAffiliateHtmlArtifacts(capture.rawHtml, capture.finalUrl || page.url);
     const provider = capture.provider;
     const artifactMetadata = {
@@ -1287,7 +1363,7 @@ const processCapturePage = async (
     };
     const baseArtifact = {
       intakeId: intake.id,
-      supplySourceId: page.supplySourceId ?? intake.supplySourceId ?? null,
+      supplySourceId: capturedSupplySourceId,
       pageId: page.id,
       runId: run.id,
       sourceUrl: page.url,

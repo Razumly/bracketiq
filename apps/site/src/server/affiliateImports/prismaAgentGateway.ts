@@ -69,6 +69,7 @@ import {
   AffiliateAgentClaimRaceError,
   recordInvocationFailureTransition,
 } from "./prismaAgentGatewayFailureTransitions";
+import { affiliateSupplyDatabase } from "./affiliateSupplyPersistence";
 const SERIALIZABLE_TRANSACTION_ATTEMPTS = 3;
 
 const gatewayError = (
@@ -1846,6 +1847,13 @@ const performHeartbeat = async (
               "The heartbeat lost the active claim compare-and-set.",
             );
           }
+          await dependencies.workerHealth?.heartbeat({
+            workerId: authorized.claim.workerId,
+            role: authorized.claim.role as AffiliateAgentRole,
+            now,
+            leaseExpiresAt,
+            database: affiliateSupplyDatabase(transaction),
+          });
           const jobUpdated =
             await transaction.affiliateAgentGatewayJobs.updateMany({
               where: {
@@ -3182,6 +3190,8 @@ const performLifecycleCommand = async (
           jobId: authorized.job.id,
           claimGeneration: authorized.claim.claimGeneration,
           expectedGeneration: authorized.claim.lifecycleGeneration,
+          supplyContractVersion: authorized.envelope.supplyContractVersion,
+          supplyContractHash: authorized.envelope.supplyContractHash,
           inputHash: hashAffiliateAgentValue(command),
           identity: lifecycleIdentity,
           commandRef: command.data.lifecycleCommandRef,
@@ -3371,6 +3381,8 @@ const performLifecycleCommand = async (
         jobId: authorized.job.id,
         claimGeneration: authorized.claim.claimGeneration,
         expectedGeneration: authorized.claim.lifecycleGeneration,
+        supplyContractVersion: authorized.envelope.supplyContractVersion,
+        supplyContractHash: authorized.envelope.supplyContractHash,
         inputHash: hashAffiliateAgentValue(command),
         identity: lifecycleIdentity,
         commandRef: command.data.lifecycleCommandRef,
@@ -3393,8 +3405,11 @@ const performLifecycleCommand = async (
       : await authority.execute({
           receiptId: reserved.receiptId,
           expectedGeneration: reserved.expectedGeneration,
+          supplyContractVersion: reserved.supplyContractVersion,
+          supplyContractHash: reserved.supplyContractHash,
           inputHash: reserved.inputHash,
           identity: reserved.identity,
+          invocationId: reserved.invocationId,
         });
   } catch {
     throw gatewayError(
@@ -7195,6 +7210,11 @@ export function createPrismaAffiliateAgentGateway(
           await dependencies.contracts.loadActiveBundle(),
         );
         const roleContract = activeRoleContract(bundle, input.role);
+        await dependencies.workerHealth?.heartbeat({
+          workerId: input.workerId,
+          role: input.role,
+          now: dependencies.clock.now(),
+        });
         return await claimAffiliateAgentJob(
           dependencies,
           input,

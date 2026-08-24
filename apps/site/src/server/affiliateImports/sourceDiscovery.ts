@@ -3,6 +3,13 @@ import { createId } from '@/lib/id';
 import { Client } from 'pg';
 import { prisma } from '@/lib/prisma';
 import { resolvePrismaPgPoolConfig } from '@/lib/prismaConfig';
+import type {
+  AffiliateReplenishmentWaves,
+  AffiliateReplenishmentDemands,
+  AffiliateSourceIntakes,
+  AffiliateSourceIntakeRuns,
+  AffiliateSourceMappingJobs,
+} from '@/generated/prisma/client';
 import { isEmailEnabled, sendEmail } from '@/server/email';
 import type {
   AffiliateSourceCaptureClient,
@@ -86,6 +93,11 @@ const stringValue = (value: unknown): string | null => (
 
 const recordValue = (value: unknown): JsonRecord => (
   value && typeof value === 'object' && !Array.isArray(value) ? value as JsonRecord : {}
+);
+const stringValues = (value: unknown): string[] => (
+  Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    : []
 );
 
 const nextRunAt = (from: Date, intervalMinutes: number): Date => (
@@ -306,25 +318,45 @@ export const listAffiliateSourceDiscoveryCampaigns = async () => {
 export const queueAffiliateSourceDiscoveryRun = async (
   campaignId: string,
   userId?: string | null,
+  requestedRunId?: string | null,
 ) => {
   const campaign = await db().campaigns.findUnique({ where: { id: campaignId } });
   if (!campaign || campaign.status === 'ARCHIVED') {
     throw new Error('Affiliate source discovery campaign not found or archived.');
   }
-  const active = await db().runs.findFirst({
-    where: { campaignId, status: { in: ['QUEUED', 'RUNNING'] } },
-    orderBy: { queuedAt: 'asc' },
-  });
-  if (active) return active;
-  return db().runs.create({
-    data: {
-      id: createId(),
-      campaignId,
-      requestedByUserId: userId ?? null,
-      status: 'QUEUED',
-      queuedAt: new Date(),
-    },
-  });
+  const runId = stringValue(requestedRunId);
+  if (runId) {
+    const existing = await db().runs.findUnique({ where: { id: runId } });
+    if (existing) {
+      if (existing.campaignId !== campaignId) {
+        throw new Error('Affiliate source discovery run id belongs to another campaign.');
+      }
+      return existing;
+    }
+  } else {
+    const active = await db().runs.findFirst({
+      where: { campaignId, status: { in: ['QUEUED', 'RUNNING'] } },
+      orderBy: { queuedAt: 'asc' },
+    });
+    if (active) return active;
+  }
+  try {
+    return await db().runs.create({
+      data: {
+        id: runId ?? createId(),
+        campaignId,
+        requestedByUserId: userId ?? null,
+        status: 'QUEUED',
+        queuedAt: new Date(),
+      },
+    });
+  } catch (error) {
+    if (runId) {
+      const existing = await db().runs.findUnique({ where: { id: runId } });
+      if (existing?.campaignId === campaignId) return existing;
+    }
+    throw error;
+  }
 };
 
 const claimDiscoveryRun = async (runId: string | undefined, workerId: string, now: Date) => {
@@ -962,6 +994,36 @@ const latestRowsByIntakeId = (rows: readonly any[]): Map<string, any> => {
   return latest;
 };
 
+type AffiliateReplenishmentHandoffRows = Readonly<{
+  intakeRows: Array<Pick<AffiliateSourceIntakes, 'id' | 'status'>>;
+  captureRows: Array<Pick<AffiliateSourceIntakeRuns, 'id' | 'intakeId' | 'status' | 'errorMessage'>>;
+  mappingRows: Array<Pick<AffiliateSourceMappingJobs, 'id' | 'intakeId' | 'status'>>;
+}>;
+
+const loadAffiliateReplenishmentHandoffRows = async (
+  intakeIds: readonly string[],
+): Promise<AffiliateReplenishmentHandoffRows> => {
+  const [intakeRows, captureRows, mappingRows] = await Promise.all([
+    db().intakes.findMany({
+      where: { id: { in: intakeIds } },
+      select: { id: true, status: true },
+    }),
+    db().intakeRuns.findMany({
+      where: { intakeId: { in: intakeIds } },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, intakeId: true, status: true, errorMessage: true },
+    }),
+    db().mappingJobs.findMany({
+      where: { intakeId: { in: intakeIds } },
+      select: { id: true, intakeId: true, status: true },
+    }),
+  ]);
+  return {
+    intakeRows,
+    captureRows,
+    mappingRows,
+  };
+};
 /**
  * Execute one bounded discovery wave and wait for its capture-to-mapping handoff.
  *
@@ -970,8 +1032,8 @@ const latestRowsByIntakeId = (rows: readonly any[]): Map<string, any> => {
  */
 export const runAffiliateReplenishmentCampaignWave = async (
   input: Readonly<{
-    wave: any;
-    demand: any;
+    wave: AffiliateReplenishmentWaves;
+    demand: AffiliateReplenishmentDemands;
     contract: unknown;
   }>,
   dependencies: AffiliateReplenishmentCampaignWaveDependencies = {},
@@ -985,13 +1047,18 @@ export const runAffiliateReplenishmentCampaignWave = async (
     stringValue(waveResult.discoveryRunId) ? `discovery-run:${String(waveResult.discoveryRunId)}` : null,
   ]);
   let campaignId = stringValue(input.wave?.campaignId);
+  let coveragePlanningJob: {
+    status?: string | null;
+    result?: unknown;
+    errorMessage?: string | null;
+  } | null = null;
   let coveragePlanningJobId = stringValue(input.wave?.coveragePlanningJobId);
 
   if (!campaignId && coveragePlanningJobId) {
-    const coverageJob = await (prisma as any).affiliateCoverageAgentJobs?.findUnique?.({
+    coveragePlanningJob = await (prisma as any).affiliateCoverageAgentJobs?.findUnique?.({
       where: { id: coveragePlanningJobId },
     });
-    const coverageResult = recordValue(coverageJob?.result);
+    const coverageResult = recordValue(coveragePlanningJob?.result);
     campaignId = stringValue(
       coverageResult.campaignId
       ?? coverageResult.selectedCampaignId
@@ -1006,31 +1073,133 @@ export const runAffiliateReplenishmentCampaignWave = async (
   }
 
   if (!campaignId) {
+    const coverageStatus = coveragePlanningJob
+      ? String(coveragePlanningJob.status ?? 'QUEUED').toUpperCase()
+      : 'MISSING';
+    const coverageResult = recordValue(coveragePlanningJob?.result);
+    const coverageDecision = String(coverageResult.decision ?? '').toUpperCase();
+    const coverageRetryValue = coverageResult.retryAt ?? coverageResult.nextEligibleAt;
+    const parsedRetryAt = coverageRetryValue instanceof Date
+      ? coverageRetryValue
+      : typeof coverageRetryValue === 'string'
+        ? new Date(coverageRetryValue)
+        : null;
+    const retryAt = parsedRetryAt && !Number.isNaN(parsedRetryAt.getTime())
+      ? parsedRetryAt
+      : null;
+    const coverageEvidenceRefs = replenishmentEvidenceRefs([
+      ...evidenceRefs,
+      coveragePlanningJobId ? `coverage-job:${coveragePlanningJobId}` : null,
+      ...stringValues(coverageResult.evidenceRefs),
+    ]);
+    const baseResult = {
+      coveragePlanningJobId,
+      status: coverageStatus,
+      decision: coverageDecision || null,
+      errorMessage: coveragePlanningJob?.errorMessage ?? null,
+    };
+    if (['QUEUED', 'RUNNING', 'CLAIMED'].includes(coverageStatus)) {
+      return {
+        status: 'WAITING',
+        provider: 'COVERAGE_PLANNER',
+        providerOperationKey: coveragePlanningJobId
+          ? `affiliate-replenishment:coverage:${coveragePlanningJobId}`
+          : `affiliate-replenishment:wave:${String(input.wave?.id ?? 'unknown')}`,
+        retryAt,
+        result: baseResult,
+        evidenceRefs: coverageEvidenceRefs,
+      };
+    }
+    if (
+      ['FAILED', 'RETRY_SCHEDULED'].includes(coverageStatus)
+      || coverageDecision === 'RETRY_LATER'
+    ) {
+      return {
+        status: 'FAILED',
+        provider: 'COVERAGE_PLANNER',
+        providerOperationKey: coveragePlanningJobId
+          ? `affiliate-replenishment:coverage:${coveragePlanningJobId}`
+          : `affiliate-replenishment:wave:${String(input.wave?.id ?? 'unknown')}`,
+        retryAt: retryAt ?? new Date(now.getTime() + REPLENISHMENT_RETRY_MS),
+        marginalYield: null,
+        errorCode: 'COVERAGE_PLANNING_RETRY',
+        result: baseResult,
+        evidenceRefs: coverageEvidenceRefs,
+      };
+    }
+    if (coverageDecision === 'SATURATED_NO_YIELD') {
+      return {
+        status: 'SUCCEEDED',
+        provider: 'COVERAGE_PLANNER',
+        providerOperationKey: coveragePlanningJobId
+          ? `affiliate-replenishment:coverage:${coveragePlanningJobId}`
+          : `affiliate-replenishment:wave:${String(input.wave?.id ?? 'unknown')}`,
+        searchSaturatedUntil: retryAt ?? new Date(now.getTime() + 24 * 60 * 60 * 1000),
+        marginalYield: 0,
+        result: baseResult,
+        evidenceRefs: coverageEvidenceRefs,
+      };
+    }
+    if (coverageDecision === 'WAITING_FOR_PIPELINE') {
+      return {
+        status: 'WAITING',
+        provider: 'COVERAGE_PLANNER',
+        providerOperationKey: coveragePlanningJobId
+          ? `affiliate-replenishment:coverage:${coveragePlanningJobId}`
+          : `affiliate-replenishment:wave:${String(input.wave?.id ?? 'unknown')}`,
+        retryAt: retryAt ?? new Date(now.getTime() + REPLENISHMENT_RETRY_MS),
+        result: baseResult,
+        evidenceRefs: coverageEvidenceRefs,
+      };
+    }
     return {
-      status: 'WAITING',
+      status: 'PAUSED',
       provider: 'COVERAGE_PLANNER',
       providerOperationKey: coveragePlanningJobId
         ? `affiliate-replenishment:coverage:${coveragePlanningJobId}`
         : `affiliate-replenishment:wave:${String(input.wave?.id ?? 'unknown')}`,
-      result: {
-        coveragePlanningJobId,
-        status: String((await (prisma as any).affiliateCoverageAgentJobs?.findUnique?.({
-          where: { id: coveragePlanningJobId ?? '' },
-          select: { status: true },
-        }))?.status ?? 'QUEUED').toUpperCase(),
-      },
-      evidenceRefs,
+      errorCode: coverageDecision === 'HUMAN_REVIEW_REQUIRED'
+        ? 'COVERAGE_PLANNING_HUMAN_REVIEW_REQUIRED'
+        : coverageDecision === 'SOURCE_EXCLUDED' || coverageStatus === 'EXCLUDED'
+          ? 'COVERAGE_PLANNING_SOURCE_EXCLUDED'
+          : 'COVERAGE_PLANNING_NO_CAMPAIGN',
+      result: baseResult,
+      evidenceRefs: coverageEvidenceRefs,
     };
   }
 
   let discoveryRunId = stringValue(waveResult.discoveryRunId);
   if (!discoveryRunId) {
     try {
+      const deterministicRunId = `affiliate-replenishment-discovery-${input.wave.id}`;
       const queued = await queueAffiliateSourceDiscoveryRun(
         campaignId,
         'affiliate-replenishment',
+        deterministicRunId,
       );
       discoveryRunId = String(queued.id);
+      const waves = (prisma as any).affiliateReplenishmentWaves;
+      if (waves?.updateMany) {
+        const persisted = await waves.updateMany({
+          where: { id: input.wave.id, providerOperationKey: null },
+          data: {
+            providerOperationKey: `affiliate-replenishment:wave:${input.wave.id}:discovery`,
+            resultJson: { ...waveResult, discoveryRunId },
+          },
+        });
+        if (persisted.count !== 1 && waves.findUnique) {
+          const currentWave = await waves.findUnique({ where: { id: input.wave.id } });
+          const currentDiscoveryRunId = stringValue(
+            recordValue(currentWave?.resultJson).discoveryRunId,
+          );
+          if (currentDiscoveryRunId) discoveryRunId = currentDiscoveryRunId;
+        }
+      } else if (waves?.update) {
+        await waves.update({
+          where: { id: input.wave.id },
+          data: { resultJson: { ...waveResult, discoveryRunId } },
+        });
+      }
       if (String(queued.status).toUpperCase() === 'QUEUED') {
         await processNextAffiliateSourceDiscoveryRun(
           { runId: discoveryRunId, workerId: dependencies.workerId },
@@ -1135,21 +1304,7 @@ export const runAffiliateReplenishmentCampaignWave = async (
     };
   }
 
-  let [intakeRows, captureRows, mappingRows] = await Promise.all([
-    db().intakes.findMany({
-      where: { id: { in: intakeIds } },
-      select: { id: true, status: true },
-    }),
-    db().intakeRuns.findMany({
-      where: { intakeId: { in: intakeIds } },
-      orderBy: { createdAt: 'desc' },
-      select: { id: true, intakeId: true, status: true, errorMessage: true },
-    }),
-    db().mappingJobs.findMany({
-      where: { intakeId: { in: intakeIds } },
-      select: { id: true, intakeId: true, status: true },
-    }),
-  ]);
+  let { intakeRows, captureRows, mappingRows } = await loadAffiliateReplenishmentHandoffRows(intakeIds);
   const queuedCapture = captureRows.find((row: any) => (
     intakeIds.includes(String(row.intakeId))
     && String(row.status ?? '').toUpperCase() === 'QUEUED'
@@ -1192,21 +1347,10 @@ export const runAffiliateReplenishmentCampaignWave = async (
         ]),
       };
     }
-    [intakeRows, captureRows, mappingRows] = await Promise.all([
-      db().intakes.findMany({
-        where: { id: { in: intakeIds } },
-        select: { id: true, status: true },
-      }),
-      db().intakeRuns.findMany({
-        where: { intakeId: { in: intakeIds } },
-        orderBy: { createdAt: 'desc' },
-        select: { id: true, intakeId: true, status: true, errorMessage: true },
-      }),
-      db().mappingJobs.findMany({
-        where: { intakeId: { in: intakeIds } },
-        select: { id: true, intakeId: true, status: true },
-      }),
-    ]);
+    const refreshedHandoffRows = await loadAffiliateReplenishmentHandoffRows(intakeIds);
+    intakeRows = refreshedHandoffRows.intakeRows;
+    captureRows = refreshedHandoffRows.captureRows;
+    mappingRows = refreshedHandoffRows.mappingRows;
   }
   const latestCaptureByIntake = latestRowsByIntakeId(captureRows);
   const activeCapture = intakeIds.find((intakeId) => (

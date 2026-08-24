@@ -20,7 +20,9 @@ import { canonicalizeAffiliateAgentValue } from "./agentGatewayContracts";
 import {
   affiliateSupplyDatabase,
   createAffiliateSupplyLifecycleAuthority,
+  recordAffiliateAgentWorkerHeartbeat,
 } from './affiliateSupplyPersistence';
+import type { AffiliateSupplyDatabase } from './affiliateSupplyPersistence';
 import type {
   AffiliateAgentClaimOperation,
   AffiliateAgentGateway,
@@ -228,6 +230,9 @@ export type AffiliateAgentLifecycleAuthority =
           expectedGeneration: number;
           inputHash: string;
           identity: AffiliateAgentLifecycleCommandIdentity;
+          invocationId: string;
+          supplyContractVersion?: number;
+          supplyContractHash?: string;
         }>,
       ): Promise<Readonly<Record<string, unknown>>>;
       recover(
@@ -311,6 +316,7 @@ export type AffiliateAgentGatewayDependencies = Readonly<{
   commands: AffiliateAgentCommandAdapters;
   terminalEffects?: AffiliateAgentTerminalEffectAdapter;
   lifecycle: AffiliateAgentLifecycleAuthority;
+  workerHealth?: AffiliateAgentWorkerHealthWriter;
 }>;
 
 export interface AffiliateAgentWorkerHealthWriter {
@@ -318,8 +324,23 @@ export interface AffiliateAgentWorkerHealthWriter {
     workerId: string;
     role: AffiliateAgentRole;
     now: Date;
+    leaseExpiresAt?: Date;
+    database?: AffiliateSupplyDatabase;
   }>): Promise<void>;
 }
+export const createAffiliateAgentWorkerHealthWriter = (
+  input: Readonly<{ db?: AffiliateSupplyDatabase }> = {},
+): AffiliateAgentWorkerHealthWriter => {
+  const database = input.db ?? affiliateSupplyDatabase();
+  return {
+    async heartbeat({ workerId, role, now, leaseExpiresAt, database: transactionDatabase }) {
+      await recordAffiliateAgentWorkerHeartbeat(
+        { workerId, role, now, leaseExpiresAt },
+        transactionDatabase ?? database,
+      );
+    },
+  };
+};
 
 export type AffiliateAgentSupervisorDependencies = Readonly<{
   gateway: AffiliateAgentGateway;
@@ -399,6 +420,7 @@ export const createProductionAffiliateAgentGatewayDependencies = (
     commands?: AffiliateAgentCommandAdapters;
     terminalEffects?: AffiliateAgentTerminalEffectAdapter;
     lifecycle?: AffiliateAgentLifecycleAuthority;
+    workerHealth?: AffiliateAgentWorkerHealthWriter;
   }>,
 ): AffiliateAgentGatewayDependencies => {
   const gatewayPrisma = input.prisma ?? prisma;
@@ -426,5 +448,10 @@ export const createProductionAffiliateAgentGatewayDependencies = (
       clock: clock.now,
       contractRegistry: input.contracts,
     }),
+    workerHealth:
+      input.workerHealth ??
+      createAffiliateAgentWorkerHealthWriter({
+        db: affiliateSupplyDatabase(gatewayPrisma),
+      }),
   };
 };

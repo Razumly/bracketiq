@@ -409,9 +409,9 @@ export default function AdminAffiliateImportsPanel({ active, refreshKey }: Admin
     void runQueuedScrapes();
   }, [runQueuedScrapes]);
 
-  const approveSourceAutomation = useCallback(async (source: AdminAffiliateSourceRow) => {
+  const approveSourceBaseline = useCallback(async (source: AdminAffiliateSourceRow) => {
     const confirmed = window.confirm(
-      `Approve the latest reviewed scrape for "${source.name}" and enable automatic imports?`,
+      `Approve the latest reviewed scrape for "${source.name}" as the automation baseline? Recurring automation stays disabled until a reviewed target is activated.`,
     );
     if (!confirmed) return;
     setApprovingSourceId(source.$id);
@@ -427,8 +427,8 @@ export default function AdminAffiliateImportsPanel({ active, refreshKey }: Admin
       }
       setActionMessage({
         color: 'teal',
-        title: 'Automatic imports enabled',
-        body: `${source.name} now has a validated baseline. Future drift will be held for review.`,
+        title: 'Automation baseline approved',
+        body: `${source.name} now has a reviewed baseline. Activate a reviewed target before enabling automatic imports.`,
       });
       await loadData();
     } catch (approvalError) {
@@ -796,9 +796,9 @@ export default function AdminAffiliateImportsPanel({ active, refreshKey }: Admin
                       leftSection={<ShieldCheck size={14} />}
                       disabled={!source.activeMappingId || sourceNeedsOrganization(source)}
                       loading={approvingSourceId === source.$id}
-                      onClick={() => void approveSourceAutomation(source)}
+                      onClick={() => void approveSourceBaseline(source)}
                     >
-                      Approve automation
+                      Approve baseline
                     </Button>
                     <Button
                       size="xs"

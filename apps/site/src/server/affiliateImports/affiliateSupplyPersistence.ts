@@ -1,3 +1,21 @@
+import { Prisma } from '@/generated/prisma/client';
+import type {
+  AffiliateScrapeSources,
+  AffiliateScrapeMappings,
+  AffiliateScrapeRuns,
+  AffiliateSourceIntakes,
+  AffiliateSourceMappingJobs,
+  AffiliateApprovalJobs,
+  AffiliateImportCandidates,
+  AffiliateSupplySources,
+  AffiliateSupplyTargets,
+  AffiliateSupplyContractManifests,
+  AffiliateSupplyLifecycleTransitions,
+  AffiliateReplenishmentDemands,
+  AffiliateReplenishmentWaves,
+  PrismaClient,
+  AffiliateAgentWorkerHealth,
+} from '@/generated/prisma/client';
 import { createId } from '@/lib/id';
 import { prisma } from '@/lib/prisma';
 import {
@@ -15,6 +33,7 @@ import {
   planAffiliateReplenishment,
   targetRuleFor,
   validateAffiliateSupplyCommand,
+  type AffiliateReplenishmentDemandEvidence,
   type AffiliateReplenishmentPlan,
   type AffiliateSupplyAssessment,
   type AffiliateSupplyCommandAuthority,
@@ -24,7 +43,10 @@ import {
   type AffiliateSupplyContractImpactCell,
   type AffiliateSupplyEvidenceSnapshot,
   type AffiliateSupplyIdentity,
+  type AffiliateSupplyFreshnessStatus,
+  type AffiliateSupplyLifecycleActorKind,
   type AffiliateSupplyLifecycleCommand,
+  type AffiliateSupplyLifecycleOutcome,
   type AffiliateSupplyLifecycleStage,
 } from './affiliateSupplyLifecycle';
 import type {
@@ -33,37 +55,91 @@ import type {
 } from './agentGatewayAdapters';
 import { hashAffiliateAgentValue } from './agentGatewayContracts';
 import { affiliateScrapeMappingSchema } from './types';
-export type AffiliateSupplyDatabase = Readonly<{
-  supplySources: any;
-  contractManifests: any;
-  transitions: any;
-  targets: any;
-  demands: any;
-  waves: any;
-  sources: any;
-  organizations: any;
-  events: any;
-  teams: any;
-  facilities: any;
-  mappings: any;
-  runs: any;
-  intakes: any;
-  pages: any;
-  intakeRuns: any;
-  artifacts: any;
-  mappingJobs: any;
-  approvals: any;
-  candidates: any;
-  gatewayClaims: any;
-  gatewayJobs: any;
-  coverageJobs: any;
-  campaigns: any;
-  workerHealth: any;
-  rawClient?: any;
-  transaction?: (callback: (transaction: AffiliateSupplyDatabase) => Promise<unknown>, options?: unknown) => Promise<unknown>;
+export type AffiliateSupplyClient = PrismaClient | Prisma.TransactionClient;
+type AffiliateSupplyDelegate<Name extends keyof PrismaClient> = PrismaClient[Name];
+type AffiliateSupplyDemandSourceRow = Pick<
+  AffiliateSupplySources,
+  'id' | 'isExcluded' | 'derivedOutcome' | 'derivedStage' | 'repairPriority' | 'targetKind' | 'metadata'
+>;
+type AffiliateSupplyContractImpactSourceRow = Pick<
+  AffiliateSupplySources,
+  'id' | 'derivedStage' | 'targetContribution' | 'isAutomationEnabled' | 'repairPriority' | 'freshnessStatus'
+>;
+type AffiliateSupplyContractImpactTargetRow = Pick<
+  AffiliateSupplyTargets,
+  'supplySourceId' | 'marketKey' | 'sportId' | 'sourceProfile'
+>;
+type AffiliateSupplyDemandTargetRow = Pick<
+  AffiliateSupplyTargets,
+  'supplySourceId' | 'marketKey' | 'sportId' | 'sourceProfile' | 'status'
+  | 'rejectedAt' | 'freshnessExpiresAt' | 'lastSuccessfulRefreshAt' | 'metadata'
+>;
+type AffiliateSupplyLegacyCandidateRow = Pick<
+  AffiliateImportCandidates,
+  'id' | 'sourceId' | 'listingKind' | 'status'
+  | 'publishedEventId' | 'publishedTeamId' | 'publishedFacilityId' | 'publishedOrganizationId'
+>;
+type AffiliateSupplyLegacyTargetRow = Pick<
+  AffiliateSupplyTargets,
+  'id' | 'candidateId' | 'targetType' | 'targetId' | 'status' | 'evidenceRefs'
+>;
+type AffiliateReplenishmentDemandResultRow = Readonly<{
+  id: string;
+  targetKey: string;
+  marketKey: string;
+  sportId: string;
+  sourceProfile: string;
+  rolloutCohort: string;
+  contractVersion: number;
+  contractHash: string;
+  minimumFreshPublishedSupply: number;
+  observedFreshPublishedSupply: number;
+  priority: number;
+  status: 'OPEN' | 'CLOSED' | 'PAUSED';
+  openedAt: Date;
+  closedAt: Date | null;
+  nextEligibleAt: Date | null;
+  searchSaturatedUntil: Date | null;
+  activeWaveId: string | null;
+  generation: number;
+  reasonCodes: readonly string[];
+  evidenceJson: unknown;
 }>;
 
-const supplyDatabaseForClient = (client: any): AffiliateSupplyDatabase => {
+export type AffiliateSupplyDatabase = Readonly<{
+  supplySources: AffiliateSupplyDelegate<'affiliateSupplySources'>;
+  contractManifests: AffiliateSupplyDelegate<'affiliateSupplyContractManifests'>;
+  transitions: AffiliateSupplyDelegate<'affiliateSupplyLifecycleTransitions'>;
+  targets: AffiliateSupplyDelegate<'affiliateSupplyTargets'>;
+  demands: AffiliateSupplyDelegate<'affiliateReplenishmentDemands'>;
+  waves: AffiliateSupplyDelegate<'affiliateReplenishmentWaves'>;
+  sources: AffiliateSupplyDelegate<'affiliateScrapeSources'>;
+  organizations: AffiliateSupplyDelegate<'organizations'>;
+  events: AffiliateSupplyDelegate<'events'>;
+  teams: AffiliateSupplyDelegate<'canonicalTeams'>;
+  facilities: AffiliateSupplyDelegate<'facilities'>;
+  mappings: AffiliateSupplyDelegate<'affiliateScrapeMappings'>;
+  runs: AffiliateSupplyDelegate<'affiliateScrapeRuns'>;
+  intakes: AffiliateSupplyDelegate<'affiliateSourceIntakes'>;
+  pages: AffiliateSupplyDelegate<'affiliateSourceIntakePages'>;
+  intakeRuns: AffiliateSupplyDelegate<'affiliateSourceIntakeRuns'>;
+  artifacts: AffiliateSupplyDelegate<'affiliateSourceIntakeArtifacts'>;
+  mappingJobs: AffiliateSupplyDelegate<'affiliateSourceMappingJobs'>;
+  approvals: AffiliateSupplyDelegate<'affiliateApprovalJobs'>;
+  candidates: AffiliateSupplyDelegate<'affiliateImportCandidates'>;
+  gatewayClaims: AffiliateSupplyDelegate<'affiliateAgentGatewayClaims'>;
+  gatewayJobs: AffiliateSupplyDelegate<'affiliateAgentGatewayJobs'>;
+  coverageJobs: AffiliateSupplyDelegate<'affiliateCoverageAgentJobs'>;
+  campaigns: AffiliateSupplyDelegate<'affiliateSourceDiscoveryCampaigns'>;
+  workerHealth: AffiliateSupplyDelegate<'affiliateAgentWorkerHealth'>;
+  rawClient?: AffiliateSupplyClient;
+  transaction?: (
+    callback: (transaction: AffiliateSupplyDatabase) => Promise<unknown>,
+    options?: unknown,
+  ) => Promise<unknown>;
+}>;
+
+const supplyDatabaseForClient = (client: AffiliateSupplyClient): AffiliateSupplyDatabase => {
   const modelNames = {
     supplySources: 'affiliateSupplySources',
     contractManifests: 'affiliateSupplyContractManifests',
@@ -92,17 +168,20 @@ const supplyDatabaseForClient = (client: any): AffiliateSupplyDatabase => {
     workerHealth: 'affiliateAgentWorkerHealth',
   } as const;
 
+  const modelClient = client as unknown as Record<string, unknown>;
   return Object.defineProperties({}, Object.fromEntries(
     Object.entries(modelNames).map(([name, modelName]) => [
       name,
       {
         enumerable: true,
-        get: () => client[modelName],
+        get: () => modelClient[modelName],
       },
     ]),
   )) as AffiliateSupplyDatabase;
 };
-export const affiliateSupplyDatabase = (client: any = prisma): AffiliateSupplyDatabase => {
+export const affiliateSupplyDatabase = (
+  client: AffiliateSupplyClient = prisma,
+): AffiliateSupplyDatabase => {
   const database = supplyDatabaseForClient(client);
   Object.defineProperty(database, 'rawClient', {
     enumerable: false,
@@ -110,12 +189,21 @@ export const affiliateSupplyDatabase = (client: any = prisma): AffiliateSupplyDa
   });
   Object.defineProperty(database, 'transaction', {
     enumerable: true,
-    get: () => typeof client.$transaction === 'function'
-      ? (callback: (database: AffiliateSupplyDatabase) => Promise<unknown>, options: unknown) => client.$transaction(
-          (transactionClient: any) => callback(affiliateSupplyDatabase(transactionClient)),
+    get: () => {
+      const transaction = (client as unknown as {
+        $transaction?: (
+          callback: (transactionClient: AffiliateSupplyClient) => Promise<unknown>,
+          options?: unknown,
+        ) => Promise<unknown>;
+      }).$transaction;
+      return typeof transaction === 'function'
+        ? (callback: (database: AffiliateSupplyDatabase) => Promise<unknown>, options: unknown) => transaction.call(
+          client,
+          (transactionClient) => callback(affiliateSupplyDatabase(transactionClient)),
           options,
         )
-      : undefined,
+        : undefined;
+    },
   });
   return database;
 };
@@ -125,6 +213,7 @@ export type AffiliateAgentWorkerHeartbeatInput = Readonly<{
   role: string;
   status?: string;
   now?: Date;
+  leaseExpiresAt?: Date;
   leaseDurationMs?: number;
   metadata?: Record<string, unknown> | null;
 }>;
@@ -132,13 +221,15 @@ export type AffiliateAgentWorkerHeartbeatInput = Readonly<{
 export const recordAffiliateAgentWorkerHeartbeat = async (
   input: AffiliateAgentWorkerHeartbeatInput,
   database: AffiliateSupplyDatabase = affiliateSupplyDatabase(),
-): Promise<any | null> => {
+): Promise<AffiliateAgentWorkerHealth | null> => {
   if (!database.workerHealth?.upsert) return null;
   const workerId = input.workerId.trim();
   const role = input.role.trim().toUpperCase();
   if (!workerId || !role) throw new Error('Affiliate worker heartbeats require a worker ID and role.');
   const now = input.now ?? new Date();
-  const leaseDurationMs = Math.max(15_000, input.leaseDurationMs ?? 90_000);
+  const leaseExpiresAt = input.leaseExpiresAt ?? new Date(
+    now.getTime() + Math.max(15_000, input.leaseDurationMs ?? 90_000),
+  );
   const status = input.status?.trim().toUpperCase() || 'HEALTHY';
   return database.workerHealth.upsert({
     where: { workerId_role: { workerId, role } },
@@ -148,14 +239,14 @@ export const recordAffiliateAgentWorkerHeartbeat = async (
       role,
       status,
       heartbeatAt: now,
-      leaseExpiresAt: new Date(now.getTime() + leaseDurationMs),
-      metadata: input.metadata ?? null,
+      leaseExpiresAt,
+      metadata: prismaNullableJsonValue(input.metadata),
     },
     update: {
       status,
       heartbeatAt: now,
-      leaseExpiresAt: new Date(now.getTime() + leaseDurationMs),
-      metadata: input.metadata ?? undefined,
+      leaseExpiresAt,
+      metadata: input.metadata == null ? undefined : prismaJsonValue(input.metadata),
     },
   });
 };
@@ -176,7 +267,7 @@ const withSupplyTransaction = async <T>(
       const errorCode = error && typeof error === 'object' && 'code' in error
         ? String((error as { code?: unknown }).code)
         : '';
-      if (errorCode !== 'P2034' || attempt >= 2) throw error;
+      if (!['P2002', 'P2034'].includes(errorCode) || attempt >= 2) throw error;
       attempt += 1;
     }
   }
@@ -187,6 +278,32 @@ const recordValue = (value: unknown): Record<string, unknown> => (
     ? value as Record<string, unknown>
     : {}
 );
+
+const prismaJsonValue = (value: unknown): Prisma.InputJsonValue => (
+  value as Prisma.InputJsonValue
+);
+const prismaNullableJsonValue = (
+  value: unknown,
+): Prisma.NullableJsonNullValueInput | Prisma.InputJsonValue => (
+  value == null ? Prisma.JsonNull : prismaJsonValue(value)
+);
+const normalizeAffiliateLifecycleJson = (value: unknown): unknown => {
+  if (value instanceof Date) return value.toISOString();
+  if (Array.isArray(value)) {
+    return value.map((entry) => (
+      entry === undefined ? null : normalizeAffiliateLifecycleJson(entry)
+    ));
+  }
+  if (!value || typeof value !== 'object') return value;
+  if (Object.getPrototypeOf(value) !== Object.prototype) {
+    throw new TypeError('Affiliate lifecycle values must use plain JSON objects.');
+  }
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([, entry]) => entry !== undefined)
+      .map(([key, entry]) => [key, normalizeAffiliateLifecycleJson(entry)]),
+  );
+};
 
 const stringValue = (value: unknown): string | null => (
   typeof value === 'string' && value.trim() ? value.trim() : null
@@ -219,22 +336,118 @@ const currentSupplySource = async (
 ) => database.supplySources.findUnique({ where: { id: supplySourceId } });
 
 const linkSupplySource = async (
-  model: any,
+  model: {
+    update?: (args: {
+      where: { id: string };
+      data: { supplySourceId: string };
+    }) => Promise<unknown>;
+    updateMany?: (args: {
+      where: { id: string; supplySourceId: string | null };
+      data: { supplySourceId: string };
+    }) => Promise<{ count: number }>;
+  } | null | undefined,
   id: string | null | undefined,
   supplySourceId: string,
-): Promise<void> => {
-  if (!id || !model?.update) return;
+  expectedSupplySourceId?: string | null,
+): Promise<boolean> => {
+  if (!id) return false;
+  if (expectedSupplySourceId !== undefined && model?.updateMany) {
+    const result = await model.updateMany({
+      where: { id, supplySourceId: expectedSupplySourceId },
+      data: { supplySourceId },
+    });
+    return result.count === 1;
+  }
+  if (!model?.update) return false;
   await model.update({ where: { id }, data: { supplySourceId } });
+  return true;
+};
+type CreateAffiliateSupplySourceInput = Readonly<{
+  database: AffiliateSupplyDatabase;
+  identity: AffiliateSupplyIdentity;
+  targetKind?: string | null;
+  operatorDomain?: string | null;
+  rolloutCohort?: string;
+  intakeId?: string | null;
+  expectedIntakeSupplySourceId?: string | null;
+  liveSourceId?: string | null;
+  predecessorId?: string | null;
+  metadata?: Record<string, unknown> | null;
+  now: Date;
+}>;
+const createAffiliateSupplySource = async (
+  input: CreateAffiliateSupplySourceInput,
+) => {
+  const supplySourceId = createId();
+  const created = await input.database.supplySources.create({
+    data: {
+      id: supplySourceId,
+      identityKey: input.identity.identityKey,
+      canonicalUrl: input.identity.canonicalUrl,
+      origin: input.identity.origin,
+      pathKey: input.identity.pathKey,
+      operatorDomain: input.operatorDomain ?? null,
+      targetKind: input.targetKind?.trim().toUpperCase() || 'EVENT',
+      rolloutCohort: input.rolloutCohort?.trim() || 'DEFAULT',
+      intakeId: input.intakeId ?? null,
+      liveSourceId: input.liveSourceId ?? null,
+      predecessorId: input.predecessorId ?? null,
+      metadata: prismaNullableJsonValue(input.metadata),
+      createdAt: input.now,
+      updatedAt: input.now,
+    },
+  });
+  if (input.predecessorId) {
+    await input.database.supplySources.update({
+      where: { id: input.predecessorId },
+      data: { successorId: created.id, updatedAt: input.now },
+    });
+  }
+  await Promise.all([
+    linkSupplySource(
+      input.database.intakes,
+      input.intakeId,
+      created.id,
+      input.expectedIntakeSupplySourceId,
+    ),
+    linkSupplySource(input.database.sources, input.liveSourceId, created.id),
+  ]);
+  if (
+    input.predecessorId
+    && input.liveSourceId
+    && input.database.sources?.findUnique
+    && input.database.sources?.update
+  ) {
+    const successorSource = await input.database.sources.findUnique({ where: { id: input.liveSourceId } });
+    if (successorSource) {
+      await input.database.sources.update({
+        where: { id: input.liveSourceId },
+        data: {
+          activeMappingId: null,
+          autoScrapeEnabled: false,
+          metadata: {
+            ...recordValue(successorSource.metadata),
+            automationReviewRequired: {
+              hold: true,
+              reason: 'SUCCESSOR_REVALIDATION_REQUIRED',
+            },
+          },
+        },
+      });
+    }
+  }
+  return created;
 };
 
 export type EnsureAffiliateSupplySourceInput = Readonly<{
   requestedUrl: string;
   resolvedCanonicalUrl?: string | null;
-  redirectVerified?: boolean;
+  isRedirectVerified?: boolean;
   operatorDomain?: string | null;
   targetKind?: string | null;
   rolloutCohort?: string;
   intakeId?: string | null;
+  expectedIntakeSupplySourceId?: string | null;
   liveSourceId?: string | null;
   priorSupplySourceId?: string | null;
   metadata?: Record<string, unknown> | null;
@@ -243,10 +456,10 @@ export type EnsureAffiliateSupplySourceInput = Readonly<{
 }>;
 
 export type EnsureAffiliateSupplySourceResult = Readonly<{
-  supplySource: any;
+  supplySource: AffiliateSupplySources;
   identity: AffiliateSupplyIdentity;
-  created: boolean;
-  successorCreated: boolean;
+  isCreated: boolean;
+  isSuccessorCreated: boolean;
   predecessorId: string | null;
 }>;
 
@@ -258,14 +471,19 @@ export const ensureAffiliateSupplySource = async (
   if (!database.supplySources?.findUnique || !database.supplySources?.create) {
     throw new Error('Affiliate Supply Source persistence is not available. Apply the lifecycle migration first.');
   }
-  return withSupplyTransaction(database, async (transactionDatabase) => {
+  const persisted = await withSupplyTransaction<EnsureAffiliateSupplySourceResult & {
+    isRevalidationRequired?: boolean;
+    isSuccessorCommandRequired?: boolean;
+  }>(
+    database,
+    async (transactionDatabase) => {
     const prior = input.priorSupplySourceId
       ? await currentSupplySource(transactionDatabase, input.priorSupplySourceId)
       : null;
     const initialIdentity = normalizeAffiliateSupplyIdentity({
       requestedUrl: input.requestedUrl,
       resolvedCanonicalUrl: input.resolvedCanonicalUrl,
-      redirectVerified: input.redirectVerified,
+      isRedirectVerified: input.isRedirectVerified,
       operatorDomain: input.operatorDomain,
       prior: prior
         ? { canonicalUrl: prior.canonicalUrl, operatorDomain: prior.operatorDomain, identityKey: prior.identityKey }
@@ -284,15 +502,16 @@ export const ensureAffiliateSupplySource = async (
       ? await currentSupplySource(transactionDatabase, prior.successorId)
       : null;
     if (prior?.successorId && (!linkedSuccessor || linkedSuccessor.identityKey !== initialIdentity.identityKey)) {
+      const linkedSupplySource = linkedSuccessor ?? prior;
       return {
-        supplySource: linkedSuccessor ?? prior,
+        supplySource: linkedSupplySource,
         identity: {
           ...initialIdentity,
           rootDecision: 'REVIEW_REQUIRED',
           reasonCodes: [...initialIdentity.reasonCodes, linkedSuccessor ? 'SUCCESSOR_ALREADY_LINKED' : 'SUCCESSOR_LINK_MISSING'],
         },
-        created: false,
-        successorCreated: false,
+        isCreated: false,
+        isSuccessorCreated: false,
         predecessorId: prior.id,
       };
     }
@@ -302,7 +521,7 @@ export const ensureAffiliateSupplySource = async (
       ? normalizeAffiliateSupplyIdentity({
           requestedUrl: input.requestedUrl,
           resolvedCanonicalUrl: input.resolvedCanonicalUrl,
-          redirectVerified: input.redirectVerified,
+          isRedirectVerified: input.isRedirectVerified,
           operatorDomain: input.operatorDomain,
           prior: { canonicalUrl: current.canonicalUrl, operatorDomain: current.operatorDomain, identityKey: current.identityKey },
         })
@@ -321,51 +540,52 @@ export const ensureAffiliateSupplySource = async (
           rootDecision: 'REVIEW_REQUIRED',
           reasonCodes: [...identity.reasonCodes, 'SUCCESSOR_PREDECESSOR_MISMATCH'],
         },
-        created: false,
-        successorCreated: false,
+        isCreated: false,
+        isSuccessorCreated: false,
         predecessorId,
       };
     }
-    if (existingSuccessor && predecessorId) {
-      const successor = await transactionDatabase.supplySources.update({
-        where: { id: existingSuccessor.id },
-        data: {
-          predecessorId: existingSuccessor.predecessorId ?? predecessorId,
-          intakeId: input.intakeId ?? existingSuccessor.intakeId ?? null,
-          liveSourceId: input.liveSourceId ?? existingSuccessor.liveSourceId ?? null,
-          updatedAt: now,
-        },
-      });
-      if (prior && !prior.successorId) {
-        await transactionDatabase.supplySources.update({
-          where: { id: prior.id },
-          data: { successorId: successor.id, updatedAt: now },
-        });
+    if (predecessorId) {
+      const predecessorSource = current ?? existingSuccessor ?? prior;
+      if (!predecessorSource) {
+        throw new Error('Affiliate Supply Source successor command requires a persisted predecessor.');
       }
-      await Promise.all([
-        linkSupplySource(transactionDatabase.intakes, input.intakeId, successor.id),
-        linkSupplySource(transactionDatabase.sources, input.liveSourceId ?? successor.liveSourceId, successor.id),
-      ]);
       return {
-        supplySource: successor,
-        identity: { ...identity, identityKey: successor.identityKey, rootDecision: 'SUCCESSOR_REQUIRED' },
-        created: false,
-        successorCreated: false,
+        supplySource: predecessorSource,
+        identity,
+        isCreated: false,
+        isSuccessorCreated: false,
         predecessorId,
+        isSuccessorCommandRequired: true,
       };
     }
     if (current && identity.rootDecision === 'REVIEW_REQUIRED') {
       return {
         supplySource: current,
         identity,
-        created: false,
-        successorCreated: false,
+        isCreated: false,
+        isSuccessorCreated: false,
         predecessorId: null,
       };
     }
     if (current && !predecessorId) {
-      const canonicalChanged = current.canonicalUrl !== identity.canonicalUrl;
-      const liveSourceId = input.liveSourceId ?? current.liveSourceId ?? null;
+      const hasExistingRevalidationHold = current.canonicalUrl === identity.canonicalUrl
+        && current.automationHoldReason === 'CANONICAL_REVALIDATION_REQUIRED'
+        && current.isAutomationEnabled !== true;
+      const isRevalidationRequired = (
+        current.canonicalUrl !== identity.canonicalUrl
+        || identity.isRevalidationRequired
+      ) && !hasExistingRevalidationHold;
+      if (isRevalidationRequired) {
+        return {
+          supplySource: current,
+          identity: { ...identity, identityKey: current.identityKey, rootDecision: 'SAME_ROOT' },
+          isCreated: false,
+          isSuccessorCreated: false,
+          predecessorId: null,
+          isRevalidationRequired: true,
+        };
+      }
       const updated = await transactionDatabase.supplySources.update({
         where: { id: current.id },
         data: {
@@ -376,155 +596,184 @@ export const ensureAffiliateSupplySource = async (
           targetKind: input.targetKind?.trim().toUpperCase() || current.targetKind || 'EVENT',
           rolloutCohort: input.rolloutCohort?.trim() || current.rolloutCohort || 'DEFAULT',
           intakeId: input.intakeId ?? current.intakeId ?? null,
-          liveSourceId,
-          ...(canonicalChanged ? {
-            lifecycleGeneration: Number(current.lifecycleGeneration ?? 0) + 1,
-            derivedStage: 'PRE_MAPPED',
-            derivedOutcome: null,
-            freshnessStatus: 'UNKNOWN',
-            targetContribution: 0,
-            isAutomationEnabled: false,
-            automationHoldReason: 'CANONICAL_REVALIDATION_REQUIRED',
-            lastAssessmentAt: null,
-          } : {}),
-          metadata: input.metadata ?? current.metadata ?? null,
+          liveSourceId: input.liveSourceId ?? current.liveSourceId ?? null,
+          metadata: prismaNullableJsonValue(input.metadata ?? current.metadata),
           updatedAt: now,
         },
       });
       await Promise.all([
-        linkSupplySource(transactionDatabase.intakes, input.intakeId, current.id),
-        linkSupplySource(transactionDatabase.sources, liveSourceId, current.id),
+        linkSupplySource(
+          transactionDatabase.intakes,
+          input.intakeId,
+          current.id,
+          input.expectedIntakeSupplySourceId,
+        ),
+        linkSupplySource(transactionDatabase.sources, input.liveSourceId, current.id),
       ]);
-      if (canonicalChanged && liveSourceId && transactionDatabase.sources?.update) {
-        const liveSource = await transactionDatabase.sources.findUnique({ where: { id: liveSourceId } });
-        if (liveSource) {
-          await transactionDatabase.sources.update({
-            where: { id: liveSourceId },
-            data: {
-              autoScrapeEnabled: false,
-              metadata: {
-                ...recordValue(liveSource.metadata),
-                automationReviewRequired: {
-                  hold: true,
-                  reason: 'CANONICAL_REVALIDATION_REQUIRED',
-                },
-              },
-            },
-          });
-        }
-      }
       return {
         supplySource: updated,
         identity: { ...identity, identityKey: current.identityKey, rootDecision: 'SAME_ROOT' },
-        created: false,
-        successorCreated: false,
+        isCreated: false,
+        isSuccessorCreated: false,
         predecessorId: null,
       };
     }
 
-    const supplySourceId = createId();
-    const createData = {
-      id: supplySourceId,
-      identityKey: identity.identityKey,
-      canonicalUrl: identity.canonicalUrl,
-      origin: identity.origin,
-      pathKey: identity.pathKey,
+    const created = await createAffiliateSupplySource({
+      database: transactionDatabase,
+      identity,
+      targetKind: input.targetKind,
+      operatorDomain: input.operatorDomain,
+      rolloutCohort: input.rolloutCohort,
+      intakeId: input.intakeId,
+      expectedIntakeSupplySourceId: input.expectedIntakeSupplySourceId,
+      liveSourceId: input.liveSourceId,
+      predecessorId: null,
+      metadata: input.metadata,
+      now,
+    });
+    const rootEvidenceRefs = [
+      `identity:${identity.identityKey}`,
+      `canonical-url:${hashAffiliateAgentValue({
+        requestedUrl: input.requestedUrl,
+        resolvedCanonicalUrl: input.resolvedCanonicalUrl ?? input.requestedUrl,
+      })}`,
+    ];
+    await executeAffiliateSupplyLifecycleCommand({
+      supplySourceId: created.id,
+      command: 'CREATE_ROOT',
+      authority: 'SYSTEM',
+      expectedLifecycleGeneration: 0,
+      idempotencyKey: `root-creation:${identity.identityKey}`,
+      request: {
+        requestedUrl: input.requestedUrl,
+        resolvedCanonicalUrl: input.resolvedCanonicalUrl ?? input.requestedUrl,
+        isRedirectVerified: input.isRedirectVerified === true,
+        operatorDomain: input.operatorDomain ?? null,
+        targetKind: input.targetKind ?? null,
+        intakeId: input.intakeId ?? null,
+        liveSourceId: input.liveSourceId ?? null,
+        identityKey: identity.identityKey,
+        evidenceRefs: rootEvidenceRefs,
+      },
+      actorKind: 'SYSTEM',
+      actorId: 'affiliate-supply-identity',
+      rolloutCohort: created.rolloutCohort,
+      db: transactionDatabase,
+      now,
+    });
+    const assessed = await transactionDatabase.supplySources.findUnique({
+      where: { id: created.id },
+    });
+    return {
+      supplySource: assessed ?? created,
+      identity,
+      isCreated: true,
+      isSuccessorCreated: false,
+      predecessorId: null,
+    };
+    },
+  );
+  if (persisted.isSuccessorCommandRequired) {
+    const successorEvidenceRefs = [
+      `supply-source:${persisted.supplySource.id}`,
+      `identity:${persisted.identity.identityKey}`,
+      `canonical-url:${hashAffiliateAgentValue({
+        requestedUrl: input.requestedUrl,
+        resolvedCanonicalUrl: input.resolvedCanonicalUrl ?? input.requestedUrl,
+      })}`,
+    ];
+    await executeAffiliateSupplyLifecycleCommand({
+      supplySourceId: String(persisted.supplySource.id),
+      command: 'CREATE_SUCCESSOR',
+      authority: 'SYSTEM',
+      expectedLifecycleGeneration: Number(persisted.supplySource.lifecycleGeneration ?? 0),
+      idempotencyKey: `successor-creation:${persisted.supplySource.id}:${hashAffiliateAgentValue({
+        requestedUrl: input.requestedUrl,
+        resolvedCanonicalUrl: input.resolvedCanonicalUrl ?? input.requestedUrl,
+      })}`,
+      request: {
+        requestedUrl: input.requestedUrl,
+        resolvedCanonicalUrl: input.resolvedCanonicalUrl ?? input.requestedUrl,
+        isRedirectVerified: input.isRedirectVerified === true,
+        operatorDomain: input.operatorDomain ?? null,
+        targetKind: input.targetKind ?? null,
+        intakeId: input.intakeId ?? null,
+        liveSourceId: input.liveSourceId ?? null,
+        ...(input.expectedIntakeSupplySourceId !== undefined
+          ? { expectedIntakeSupplySourceId: input.expectedIntakeSupplySourceId }
+          : {}),
+        evidenceRefs: successorEvidenceRefs,
+      },
+      actorKind: 'SYSTEM',
+      actorId: 'affiliate-supply-identity',
+      rolloutCohort: input.rolloutCohort ?? persisted.supplySource.rolloutCohort,
+      db: database,
+      now,
+    });
+    const predecessor = await database.supplySources.findUnique({
+      where: { id: persisted.supplySource.id },
+    });
+    const successorId = stringValue(predecessor?.successorId);
+    if (!successorId) {
+      throw new Error('Affiliate successor creation did not produce a linked successor root.');
+    }
+    const successor = await database.supplySources.findUnique({ where: { id: successorId } });
+    if (!successor) {
+      throw new Error('Affiliate successor creation produced a missing successor root.');
+    }
+    return {
+      ...persisted,
+      supplySource: successor,
+      identity: { ...persisted.identity, identityKey: successor.identityKey, rootDecision: 'SUCCESSOR_REQUIRED' },
+      isCreated: false,
+      isSuccessorCreated: true,
+      predecessorId: persisted.supplySource.id,
+    };
+  }
+  if (!persisted.isRevalidationRequired) return persisted;
+  const identityEvidenceRefs = [
+    `supply-source:${persisted.supplySource.id}`,
+    `identity:${persisted.identity.identityKey}`,
+    `canonical-url:${hashAffiliateAgentValue({
+      requestedUrl: input.requestedUrl,
+      resolvedCanonicalUrl: input.resolvedCanonicalUrl ?? input.requestedUrl,
+    })}`,
+  ];
+  await executeAffiliateSupplyLifecycleCommand({
+    supplySourceId: String(persisted.supplySource.id),
+    command: 'REVALIDATE_IDENTITY',
+    authority: 'SYSTEM',
+    expectedLifecycleGeneration: Number(persisted.supplySource.lifecycleGeneration ?? 0),
+    idempotencyKey: `identity-revalidation:${persisted.supplySource.id}:${hashAffiliateAgentValue({
+      requestedUrl: input.requestedUrl,
+      resolvedCanonicalUrl: input.resolvedCanonicalUrl ?? input.requestedUrl,
+    })}`,
+    request: {
+      requestedUrl: input.requestedUrl,
+      resolvedCanonicalUrl: input.resolvedCanonicalUrl ?? input.requestedUrl,
+      isRedirectVerified: input.isRedirectVerified === true,
       operatorDomain: input.operatorDomain ?? null,
-      targetKind: input.targetKind?.trim().toUpperCase() || 'EVENT',
-      rolloutCohort: input.rolloutCohort?.trim() || 'DEFAULT',
       intakeId: input.intakeId ?? null,
       liveSourceId: input.liveSourceId ?? null,
-      predecessorId,
-      metadata: input.metadata ?? null,
-      createdAt: now,
-      updatedAt: now,
-    };
-    let created: any;
-    try {
-      created = await transactionDatabase.supplySources.create({ data: createData });
-    } catch (error) {
-      if (!isUniqueConstraintError(error)) throw error;
-      const concurrent = await transactionDatabase.supplySources.findUnique({ where: { identityKey: identity.identityKey } });
-      if (!concurrent) throw error;
-      if (
-        predecessorId
-        && concurrent.predecessorId
-        && concurrent.predecessorId !== predecessorId
-      ) {
-        return {
-          supplySource: concurrent,
-          identity: {
-            ...identity,
-            identityKey: concurrent.identityKey,
-            rootDecision: 'REVIEW_REQUIRED',
-            reasonCodes: [...identity.reasonCodes, 'SUCCESSOR_PREDECESSOR_MISMATCH'],
-          },
-          created: false,
-          successorCreated: false,
-          predecessorId,
-        };
-      }
-      const resolved = predecessorId
-        ? await transactionDatabase.supplySources.update({
-          where: { id: concurrent.id },
-          data: {
-            predecessorId,
-            intakeId: input.intakeId ?? concurrent.intakeId ?? null,
-            liveSourceId: input.liveSourceId ?? concurrent.liveSourceId ?? null,
-            updatedAt: now,
-          },
-        })
-        : concurrent;
-      if (predecessorId && !prior?.successorId) {
-        await transactionDatabase.supplySources.update({
-          where: { id: predecessorId },
-          data: { successorId: resolved.id, updatedAt: now },
-        });
-      }
-      await Promise.all([
-        linkSupplySource(transactionDatabase.intakes, input.intakeId, resolved.id),
-        linkSupplySource(transactionDatabase.sources, input.liveSourceId ?? resolved.liveSourceId, resolved.id),
-      ]);
-      return {
-        supplySource: resolved,
-        identity: {
-          ...identity,
-          identityKey: resolved.identityKey,
-          rootDecision: predecessorId ? 'SUCCESSOR_REQUIRED' : 'SAME_ROOT',
-        },
-        created: false,
-        successorCreated: false,
-        predecessorId: predecessorId ?? null,
-      };
-    }
-    if (predecessorId) {
-      await transactionDatabase.supplySources.update({ where: { id: predecessorId }, data: { successorId: created.id, updatedAt: now } });
-    }
-    await Promise.all([
-      linkSupplySource(transactionDatabase.intakes, input.intakeId, created.id),
-      linkSupplySource(transactionDatabase.sources, input.liveSourceId, created.id),
-    ]);
-    if (predecessorId && input.liveSourceId && transactionDatabase.sources?.findUnique && transactionDatabase.sources?.update) {
-      const successorSource = await transactionDatabase.sources.findUnique({ where: { id: input.liveSourceId } });
-      if (successorSource) {
-        await transactionDatabase.sources.update({
-          where: { id: input.liveSourceId },
-          data: {
-            activeMappingId: null,
-            autoScrapeEnabled: false,
-            metadata: {
-              ...recordValue(successorSource.metadata),
-              automationReviewRequired: {
-                hold: true,
-                reason: 'SUCCESSOR_REVALIDATION_REQUIRED',
-              },
-            },
-          },
-        });
-      }
-    }
-    return { supplySource: created, identity, created: true, successorCreated: Boolean(predecessorId), predecessorId };
+      ...(input.expectedIntakeSupplySourceId !== undefined
+        ? { expectedIntakeSupplySourceId: input.expectedIntakeSupplySourceId }
+        : {}),
+      evidenceRefs: identityEvidenceRefs,
+    },
+    actorKind: 'SYSTEM',
+    actorId: 'affiliate-supply-identity',
+    rolloutCohort: input.rolloutCohort ?? persisted.supplySource.rolloutCohort,
+    db: database,
+    now,
   });
+  const refreshedSupplySource = await database.supplySources.findUnique({
+    where: { id: persisted.supplySource.id },
+  });
+  return {
+    ...persisted,
+    supplySource: refreshedSupplySource ?? persisted.supplySource,
+  };
 };
 
 export const linkAffiliateSupplyRecord = async (input: Readonly<{
@@ -562,7 +811,7 @@ export type ActiveAffiliateSupplyContractResult = Readonly<{
   manifest: AffiliateSupplyContractManifest;
   policy: AffiliateSupplyContractPolicy;
 }>;
-const parseActiveAffiliateSupplyContractRow = (row: any): ActiveAffiliateSupplyContractResult => {
+const parseActiveAffiliateSupplyContractRow = (row: AffiliateSupplyContractManifests): ActiveAffiliateSupplyContractResult => {
   const preimage = {
     schemaVersion: 1 as const,
     version: row.version,
@@ -596,7 +845,7 @@ export const loadActiveAffiliateSupplyContracts = async (input: Readonly<{
   });
   const seenCohorts = new Set<string>();
   return rows
-    .filter((row: any) => {
+    .filter((row) => {
       const cohort = String(row.rolloutCohort);
       if (seenCohorts.has(cohort)) return false;
       seenCohorts.add(cohort);
@@ -672,19 +921,15 @@ const buildAffiliateSupplyContractActivationImpact = async (input: Readonly<{
   const sources = input.database.supplySources?.findMany
     ? await input.database.supplySources.findMany({
         where: { rolloutCohort: input.rolloutCohort },
-        select: {
-          id: true,
-          derivedStage: true,
-          targetContribution: true,
-          isAutomationEnabled: true,
-          repairPriority: true,
-          freshnessStatus: true,
-        },
       })
     : [];
-  const targetRows = input.database.targets?.findMany && sources.length > 0
+  const currentPolicy = normalizeAffiliateSupplyContractPolicy(
+    currentManifest.supplyContract,
+    currentManifest.rolloutCohort,
+  );
+  const targetRows = typeof input.database.targets?.findMany === 'function' && sources.length > 0
     ? await input.database.targets.findMany({
-        where: { supplySourceId: { in: sources.map((source: any) => source.id) } },
+        where: { supplySourceId: { in: sources.map((source) => source.id) } },
         select: { supplySourceId: true, marketKey: true, sportId: true, sourceProfile: true },
       })
     : [];
@@ -698,47 +943,73 @@ const buildAffiliateSupplyContractActivationImpact = async (input: Readonly<{
     });
     targetCellsBySource.set(target.supplySourceId, cells);
   }
+  const currentAssessments = new Map<string, AffiliateSupplyAssessment>();
   const nextAssessments = new Map<string, AffiliateSupplyAssessment>();
-  if (
+  const hasAssessmentLoaders = Boolean(
     sources.length
-    && input.database.sources?.findFirst
-    && input.database.intakes?.findFirst
-    && input.database.mappings?.findFirst
-    && input.database.mappingJobs?.findFirst
-    && input.database.approvals?.findFirst
-    && input.database.runs?.findFirst
-    && input.database.candidates?.findMany
-    && input.database.targets?.findMany
-  ) {
+    && typeof input.database.sources?.findMany === 'function'
+    && typeof input.database.intakes?.findMany === 'function'
+    && typeof input.database.mappings?.findMany === 'function'
+    && typeof input.database.mappingJobs?.findMany === 'function'
+    && typeof input.database.approvals?.findMany === 'function'
+    && typeof input.database.runs?.findMany === 'function'
+    && typeof input.database.candidates?.findMany === 'function'
+    && typeof input.database.targets?.findMany === 'function'
+    && typeof input.database.supplySources?.findMany === 'function',
+  );
+  if (hasAssessmentLoaders) {
+    const now = input.now ?? new Date();
+    const roots = sources as AffiliateSupplySources[];
+    const [currentSnapshots, nextSnapshots] = await Promise.all([
+      loadSnapshots(input.database, roots, currentPolicy, now),
+      loadSnapshots(input.database, roots, input.nextPolicy, now),
+    ]);
     for (const source of sources) {
-      const snapshot = await loadSnapshot(
-        input.database,
-        source.id,
-        input.nextPolicy,
-        input.now ?? new Date(),
-      );
-      nextAssessments.set(source.id, deriveAffiliateSupplyAssessment(snapshot));
+      const currentSnapshot = currentSnapshots.get(source.id);
+      const nextSnapshot = nextSnapshots.get(source.id);
+      if (currentSnapshot) {
+        currentAssessments.set(source.id, deriveAffiliateSupplyAssessment(currentSnapshot));
+      }
+      if (nextSnapshot) {
+        nextAssessments.set(source.id, deriveAffiliateSupplyAssessment(nextSnapshot));
+      }
     }
   }
   return buildAffiliateSupplyContractImpactReport({
     currentManifest,
-    sources: sources.map((source: any) => ({
-      id: source.id,
-      stage: source.derivedStage,
-      targetContribution: source.targetContribution,
-      isAutomationEnabled: source.isAutomationEnabled,
-      repairPriority: source.repairPriority,
-      freshnessStatus: source.freshnessStatus,
-      ...(nextAssessments.get(source.id)
-        ? {
-          nextStage: nextAssessments.get(source.id)!.stage,
-          nextTargetContribution: nextAssessments.get(source.id)!.targetContribution,
-          nextIsAutomationEnabled: nextAssessments.get(source.id)!.isAutomationEnabled,
-          nextRepairPriority: nextAssessments.get(source.id)!.repairPriority,
-        }
-        : {}),
-      targetCells: targetCellsBySource.get(source.id) ?? [],
-    })),
+    sources: sources.map((source) => {
+      const currentAssessment = currentAssessments.get(source.id);
+      const nextAssessment = nextAssessments.get(source.id);
+      const currentFreshnessStatus = currentAssessment?.freshnessStatus
+        ?? (['FRESH', 'STALE', 'UNKNOWN', 'NOT_APPLICABLE'].includes(source.freshnessStatus)
+          ? source.freshnessStatus as AffiliateSupplyFreshnessStatus
+          : 'UNKNOWN');
+      return {
+        id: source.id,
+        stage: currentAssessment?.stage ?? source.derivedStage,
+        targetContribution: currentAssessment?.targetContribution ?? source.targetContribution,
+        isAutomationEnabled: currentAssessment?.isAutomationEnabled ?? source.isAutomationEnabled,
+        repairPriority: currentAssessment?.repairPriority ?? source.repairPriority,
+        freshnessStatus: currentFreshnessStatus,
+        ...(nextAssessment
+          ? {
+            nextStage: nextAssessment.stage,
+            nextTargetContribution: nextAssessment.targetContribution,
+            nextIsAutomationEnabled: nextAssessment.isAutomationEnabled,
+            nextRepairPriority: nextAssessment.repairPriority,
+          }
+          : {}),
+        targetCells: currentAssessment
+          ? targetCellsForAssessment(currentAssessment)
+          : targetCellsBySource.get(source.id) ?? [],
+        ...(currentAssessment
+          ? { currentFreshTargetCells: freshTargetCellsForAssessment(currentAssessment) }
+          : {}),
+        ...(nextAssessment
+          ? { nextFreshTargetCells: freshTargetCellsForAssessment(nextAssessment) }
+          : {}),
+      };
+    }),
     nextPolicy: input.nextPolicy,
   });
 };
@@ -750,7 +1021,7 @@ export const activateAffiliateSupplyContract = async (input: Readonly<{
   impactReport?: Record<string, unknown> | null;
   db?: AffiliateSupplyDatabase;
   now?: Date;
-}>): Promise<any> => {
+}>): Promise<AffiliateSupplyContractManifests> => {
   const database = input.db ?? affiliateSupplyDatabase();
   const parsed = affiliateSupplyContractManifestSchema.parse(input.manifest);
   const now = input.now ?? new Date();
@@ -803,21 +1074,23 @@ export const activateAffiliateSupplyContract = async (input: Readonly<{
           : [],
         activatedByUserId: input.userId,
         activatedAt: now,
-        impactReport: input.impactReport ?? null,
+        impactReport: prismaJsonValue(input.impactReport),
       },
     });
   });
 };
 type AffiliateSupplySnapshotRows = Readonly<{
-  root: any;
-  source: any;
-  intake: any;
-  mapping: any;
-  mappingJob: any;
-  approval: any;
-  latestRun: any;
-  candidates: any[];
-  targets: any[];
+  root: AffiliateSupplySources;
+  source: AffiliateScrapeSources | null;
+  intake: AffiliateSourceIntakes | null;
+  predecessor?: AffiliateSupplySources | null;
+  successor?: AffiliateSupplySources | null;
+  mapping: AffiliateScrapeMappings | null;
+  mappingJob: AffiliateSourceMappingJobs | null;
+  approval: AffiliateApprovalJobs | null;
+  latestRun: AffiliateScrapeRuns | null;
+  candidates: AffiliateImportCandidates[];
+  targets: AffiliateSupplyTargets[];
   contract: AffiliateSupplyContractPolicy;
   now: Date;
 }>;
@@ -827,6 +1100,8 @@ const buildAffiliateSupplySnapshot = (input: AffiliateSupplySnapshotRows): Affil
     root,
     source,
     intake,
+    predecessor,
+    successor,
     mapping,
     mappingJob,
     approval,
@@ -837,7 +1112,7 @@ const buildAffiliateSupplySnapshot = (input: AffiliateSupplySnapshotRows): Affil
     now,
   } = input;
   const mappingJson = recordValue(mapping?.mapping);
-  const mappingMetadata = recordValue(mapping?.metadata);
+  const mappingMetadata = recordValue(mappingJson.metadata);
   const mappingEvidence = recordValue(mappingJson.evidence);
   const mappingJobSummary = recordValue(mappingJob?.resultSummary);
   const approvalDecision = recordValue(approval?.decision);
@@ -857,19 +1132,29 @@ const buildAffiliateSupplySnapshot = (input: AffiliateSupplySnapshotRows): Affil
   const sourceId = source?.id ?? root.liveSourceId ?? `supply-source:${supplySourceId}`;
   const identityViolations = [
     ...(root.liveSourceId && !source ? ['ROOT_LIVE_SOURCE_MISSING'] : []),
+    ...(root.intakeId && !intake ? ['ROOT_INTAKE_MISSING'] : []),
     ...(root.liveSourceId && source && source.supplySourceId !== supplySourceId ? ['SOURCE_SUPPLY_ROOT_MISMATCH'] : []),
     ...(root.intakeId && intake && intake.supplySourceId !== supplySourceId ? ['INTAKE_SUPPLY_ROOT_MISMATCH'] : []),
+    ...(root.predecessorId && !predecessor ? ['PREDECESSOR_MISSING'] : []),
+    ...(root.predecessorId && predecessor && String(predecessor.successorId ?? '') !== supplySourceId
+      ? ['PREDECESSOR_LINK_MISMATCH']
+      : []),
+    ...(root.successorId && !successor ? ['SUCCESSOR_MISSING'] : []),
+    ...(root.successorId && successor && String(successor.predecessorId ?? '') !== supplySourceId
+      ? ['SUCCESSOR_LINK_MISMATCH']
+      : []),
     ...(mapping?.supplySourceId && mapping.supplySourceId !== supplySourceId ? ['MAPPING_SUPPLY_ROOT_MISMATCH'] : []),
     ...(mapping?.sourceId && source?.id && mapping.sourceId !== source.id ? ['MAPPING_SOURCE_MISMATCH'] : []),
     ...(mappingJob?.supplySourceId && mappingJob.supplySourceId !== supplySourceId ? ['MAPPING_JOB_SUPPLY_ROOT_MISMATCH'] : []),
     ...(latestRun?.supplySourceId && latestRun.supplySourceId !== supplySourceId ? ['RUN_SUPPLY_ROOT_MISMATCH'] : []),
     ...candidates
-      .filter((candidate: any) => candidate.supplySourceId && candidate.supplySourceId !== supplySourceId)
+      .filter((candidate) => candidate.supplySourceId && candidate.supplySourceId !== supplySourceId)
       .map(() => 'CANDIDATE_SUPPLY_ROOT_MISMATCH'),
   ];
   return {
     now,
     contract,
+    supplySourceId,
     source: {
       id: sourceId,
       canonicalUrl: root.canonicalUrl,
@@ -879,7 +1164,7 @@ const buildAffiliateSupplySnapshot = (input: AffiliateSupplySnapshotRows): Affil
       activeMappingId: source?.activeMappingId ?? mapping?.id ?? null,
       lifecycleGeneration: root.lifecycleGeneration,
       operatorDomain: root.operatorDomain,
-      automationHold: Boolean(recordValue(sourceMetadata.automationReviewRequired).hold),
+      isAutomationOnHold: Boolean(recordValue(sourceMetadata.automationReviewRequired).hold),
       automationHoldReason: stringValue(recordValue(sourceMetadata.automationReviewRequired).reason),
       isExcluded: root.isExcluded,
       metadata: sourceMetadata,
@@ -890,7 +1175,7 @@ const buildAffiliateSupplySnapshot = (input: AffiliateSupplySnapshotRows): Affil
       version: mapping.version,
       isActive: mapping.isActive,
       validatedAt: mapping.validatedAt,
-      schemaValid: affiliateScrapeMappingSchema.safeParse(mappingJson).success,
+      isSchemaValid: affiliateScrapeMappingSchema.safeParse(mappingJson).success,
       packageHash: stringValue(mappingMetadata.packageHash)
         ?? stringValue(mappingJson.packageHash)
         ?? hashAffiliateAgentValue(mappingJson),
@@ -914,8 +1199,11 @@ const buildAffiliateSupplySnapshot = (input: AffiliateSupplySnapshotRows): Affil
     approval: approval ? {
       id: approval.id,
       status: approval.status,
-      decision: recordValue(approval.decision).decision ?? approval.decision,
-      independent: recordValue(approval.decision).independent === true,
+      decision: typeof (recordValue(approval.decision).decision ?? approval.decision) === 'string'
+        ? (recordValue(approval.decision).decision ?? approval.decision) as string
+        : null,
+      isIndependent: recordValue(approval.decision).isIndependent === true
+        || recordValue(approval.decision).independent === true,
       reviewerId: approval.reviewerId,
       reviewedPackageHash: stringValue(recordValue(approval.decision).packageHash),
       evidenceRefs: stringArray(recordValue(approval.decision).evidenceRefs),
@@ -930,7 +1218,8 @@ const buildAffiliateSupplySnapshot = (input: AffiliateSupplySnapshotRows): Affil
       httpStatus: latestRun.httpStatus,
       itemCount: latestRun.itemCount ?? 0,
       candidateCount: latestRun.candidateCount ?? 0,
-      emptyStateMatched: runLogs.emptyStateMatched === true,
+      isEmptyStateMatched: runLogs.isEmptyStateMatched === true
+        || runLogs.emptyStateMatched === true,
       errorCode: stringValue(runLogs.errorCode),
       errorMessage: latestRun.errorMessage,
       evidenceRefs: stringArray(runLogs.evidenceRefs),
@@ -939,7 +1228,7 @@ const buildAffiliateSupplySnapshot = (input: AffiliateSupplySnapshotRows): Affil
     baseline: sourceMetadata[AFFILIATE_AUTOMATION_BASELINE_METADATA_KEY] ?? null,
     lifecycleEvidenceKinds,
     identityViolations,
-    candidates: candidates.map((candidate: any) => ({
+    candidates: candidates.map((candidate) => ({
       id: candidate.id,
       status: candidate.status,
       listingKind: candidate.listingKind,
@@ -952,7 +1241,7 @@ const buildAffiliateSupplySnapshot = (input: AffiliateSupplySnapshotRows): Affil
       sourceProfile: candidate.listingKind,
       evidenceRefs: stringArray(recordValue(candidate.rawPayload).evidenceRefs),
     })),
-    targets: targets.map((target: any) => ({
+    targets: targets.map((target) => ({
       id: target.id,
       targetType: target.targetType,
       targetId: target.targetId,
@@ -960,14 +1249,35 @@ const buildAffiliateSupplySnapshot = (input: AffiliateSupplySnapshotRows): Affil
       status: target.status,
       marketKey: target.marketKey,
       sportId: target.sportId,
-      publishedAt: target.publishedAt,
-      lastSuccessfulRefreshAt: target.lastSuccessfulRefreshAt,
-      freshnessExpiresAt: target.freshnessExpiresAt,
-      rejectedAt: target.rejectedAt,
+      publishedAt: target.publishedAt?.toISOString?.() ?? target.publishedAt,
+      lastSuccessfulRefreshAt: target.lastSuccessfulRefreshAt?.toISOString?.() ?? target.lastSuccessfulRefreshAt,
+      freshnessExpiresAt: target.freshnessExpiresAt?.toISOString?.() ?? target.freshnessExpiresAt,
+      rejectedAt: target.rejectedAt?.toISOString?.() ?? target.rejectedAt,
       evidenceRefs: target.evidenceRefs,
       metadata: recordValue(target.metadata),
     })),
   };
+};
+const targetCellsForAssessment = (
+  assessment: AffiliateSupplyAssessment,
+): AffiliateSupplyContractImpactCell[] => assessment.targets.map((target) => ({
+  marketKey: target.marketKey ?? null,
+  sportId: target.sportId ?? null,
+  sourceProfile: String(target.sourceProfile ?? ''),
+}));
+
+const freshTargetCellsForAssessment = (
+  assessment: AffiliateSupplyAssessment,
+): AffiliateSupplyContractImpactCell[] => {
+  if (assessment.stage !== 'PUBLISHED') return [];
+  const qualifyingTargetIds = new Set(assessment.qualifyingTargetIds);
+  return assessment.targets
+    .filter((target) => qualifyingTargetIds.has(target.targetId))
+    .map((target) => ({
+      marketKey: target.marketKey ?? null,
+      sportId: target.sportId ?? null,
+      sourceProfile: String(target.sourceProfile ?? ''),
+    }));
 };
 
 const loadSnapshot = async (
@@ -979,9 +1289,15 @@ const loadSnapshot = async (
 ): Promise<AffiliateSupplyEvidenceSnapshot> => {
   const root = await database.supplySources.findUnique({ where: { id: supplySourceId } });
   if (!root) throw new Error('Affiliate Supply Source not found.');
-  const [source, intake] = await Promise.all([
+  const [source, intake, predecessor, successor] = await Promise.all([
     root.liveSourceId ? database.sources.findUnique({ where: { id: root.liveSourceId } }) : database.sources.findFirst({ where: { supplySourceId }, orderBy: { createdAt: 'asc' } }),
     root.intakeId ? database.intakes.findUnique({ where: { id: root.intakeId } }) : database.intakes.findFirst({ where: { supplySourceId }, orderBy: { createdAt: 'asc' } }),
+    root.predecessorId
+      ? database.supplySources.findUnique({ where: { id: root.predecessorId } })
+      : Promise.resolve(null),
+    root.successorId
+      ? database.supplySources.findUnique({ where: { id: root.successorId } })
+      : Promise.resolve(null),
   ]);
   const sourceId = source?.id ?? root.liveSourceId ?? `supply-source:${supplySourceId}`;
   const [mapping, mappingJob, approval, latestRun, candidates, targets] = await Promise.all([
@@ -998,7 +1314,7 @@ const loadSnapshot = async (
           ...(excludeRunId ? [{ NOT: { id: excludeRunId } }] : []),
         ],
       },
-      orderBy: [{ finishedAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
+      orderBy: { createdAt: 'desc' },
     }),
     database.candidates.findMany({ where: { OR: [{ supplySourceId }, { sourceId }] }, orderBy: { createdAt: 'asc' } }),
     database.targets.findMany({ where: { supplySourceId }, orderBy: { targetId: 'asc' } }),
@@ -1007,6 +1323,8 @@ const loadSnapshot = async (
     root,
     source,
     intake,
+    predecessor,
+    successor,
     mapping,
     mappingJob,
     approval,
@@ -1019,7 +1337,7 @@ const loadSnapshot = async (
 };
 const loadSnapshots = async (
   database: AffiliateSupplyDatabase,
-  roots: any[],
+  roots: readonly AffiliateSupplySources[],
   contract: AffiliateSupplyContractPolicy,
   now: Date,
 ): Promise<Map<string, AffiliateSupplyEvidenceSnapshot>> => {
@@ -1032,7 +1350,7 @@ const loadSnapshots = async (
     || !database.approvals?.findMany
     || !database.runs?.findMany
     || !database.candidates?.findMany
-    || !database.targets?.findMany
+    || !database.supplySources?.findMany
   ) {
     const snapshots = await Promise.all(roots.map((root) => loadSnapshot(database, root.id, contract, now)));
     return new Map(roots.map((root, index) => [String(root.id), snapshots[index]]));
@@ -1044,7 +1362,13 @@ const loadSnapshots = async (
   const intakeIds = roots
     .map((root) => root.intakeId)
     .filter((id): id is string => typeof id === 'string' && id.length > 0);
-  const [sources, intakes, mappings, mappingJobs, approvals, runs, candidates, targets] = await Promise.all([
+  const predecessorIds = roots
+    .map((root) => root.predecessorId)
+    .filter((id): id is string => typeof id === 'string' && id.length > 0);
+  const successorIds = roots
+    .map((root) => root.successorId)
+    .filter((id): id is string => typeof id === 'string' && id.length > 0);
+  const [sources, intakes, mappings, mappingJobs, approvals, runs, candidates, targets, linkedRoots] = await Promise.all([
     database.sources.findMany({
       where: {
         OR: [
@@ -1094,7 +1418,7 @@ const loadSnapshots = async (
           },
         ],
       },
-      orderBy: [{ finishedAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
+      orderBy: { createdAt: 'desc' },
     }),
     database.candidates.findMany({
       where: {
@@ -1109,11 +1433,25 @@ const loadSnapshots = async (
       where: { supplySourceId: { in: supplySourceIds } },
       orderBy: { targetId: 'asc' },
     }),
+    database.supplySources.findMany({
+      where: { id: { in: Array.from(new Set([...predecessorIds, ...successorIds])) } },
+    }),
   ]);
-  const firstFor = (rows: any[], predicate: (row: any) => boolean): any => rows.find(predicate) ?? null;
-  const sortDateDesc = (left: any, right: any, field: string): number => {
-    const leftTime = left?.[field] instanceof Date ? left[field].getTime() : (left?.[field] ? new Date(left[field]).getTime() : Number.NEGATIVE_INFINITY);
-    const rightTime = right?.[field] instanceof Date ? right[field].getTime() : (right?.[field] ? new Date(right[field]).getTime() : Number.NEGATIVE_INFINITY);
+  const firstFor = <T>(rows: readonly T[], predicate: (row: T) => boolean): T | null => rows.find(predicate) ?? null;
+  const valueAt = (row: unknown, field: string): unknown => (
+    row && typeof row === 'object' && field in row
+      ? (row as Record<string, unknown>)[field]
+      : undefined
+  );
+  const sortDateDesc = (left: unknown, right: unknown, field: string): number => {
+    const leftValue = valueAt(left, field);
+    const rightValue = valueAt(right, field);
+    const leftTime = leftValue instanceof Date
+      ? leftValue.getTime()
+      : leftValue ? new Date(String(leftValue)).getTime() : Number.NEGATIVE_INFINITY;
+    const rightTime = rightValue instanceof Date
+      ? rightValue.getTime()
+      : rightValue ? new Date(String(rightValue)).getTime() : Number.NEGATIVE_INFINITY;
     return rightTime - leftTime;
   };
   return new Map(roots.map((root) => {
@@ -1124,39 +1462,45 @@ const loadSnapshots = async (
     const intake = root.intakeId
       ? firstFor(intakes, (row) => row.id === root.intakeId)
       : firstFor(intakes, (row) => row.supplySourceId === rootId);
+    const predecessor = root.predecessorId
+      ? firstFor(linkedRoots, (row) => row.id === root.predecessorId)
+      : null;
+    const successor = root.successorId
+      ? firstFor(linkedRoots, (row) => row.id === root.successorId)
+      : null;
     const sourceId = source?.id ?? root.liveSourceId ?? `supply-source:${rootId}`;
     const rootMappings = mappings
-      .filter((row: any) => row.supplySourceId === rootId || row.sourceId === sourceId)
-      .sort((left: any, right: any) => Number(right.isActive) - Number(left.isActive) || Number(right.version ?? 0) - Number(left.version ?? 0));
+      .filter((row) => row.supplySourceId === rootId || row.sourceId === sourceId)
+      .sort((left, right) => Number(right.isActive) - Number(left.isActive) || Number(right.version ?? 0) - Number(left.version ?? 0));
     const mapping = source?.activeMappingId
       ? firstFor(rootMappings, (row) => row.id === source.activeMappingId)
       : rootMappings[0] ?? null;
     const rootMappingJobs = mappingJobs
-      .filter((row: any) => row.supplySourceId === rootId || row.sourceId === sourceId)
-      .sort((left: any, right: any) => sortDateDesc(left, right, 'createdAt'));
+      .filter((row) => row.supplySourceId === rootId || row.sourceId === sourceId)
+      .sort((left, right) => sortDateDesc(left, right, 'createdAt'));
     const rootApprovals = approvals
-      .filter((row: any) => row.supplySourceId === rootId && row.subjectType === 'MAPPING_PACKAGE')
-      .sort((left: any, right: any) => sortDateDesc(left, right, 'updatedAt'));
+      .filter((row) => row.supplySourceId === rootId && row.subjectType === 'MAPPING_PACKAGE')
+      .sort((left, right) => sortDateDesc(left, right, 'updatedAt'));
     const rootRuns = runs
-      .filter((row: any) => (
+      .filter((row) => (
         (row.supplySourceId === rootId || row.sourceId === sourceId)
         && row.id !== undefined
       ))
-      .sort((left: any, right: any) => (
-        sortDateDesc(left, right, 'finishedAt') || sortDateDesc(left, right, 'createdAt')
-      ));
+      .sort((left, right) => sortDateDesc(left, right, 'createdAt'));
     return [
       rootId,
       buildAffiliateSupplySnapshot({
         root,
         source,
         intake,
+        predecessor,
+        successor,
         mapping,
         mappingJob: rootMappingJobs[0] ?? null,
         approval: rootApprovals[0] ?? null,
         latestRun: rootRuns[0] ?? null,
-        candidates: candidates.filter((row: any) => row.supplySourceId === rootId || row.sourceId === sourceId),
-        targets: targets.filter((row: any) => row.supplySourceId === rootId),
+        candidates: candidates.filter((row) => row.supplySourceId === rootId || row.sourceId === sourceId),
+        targets: targets.filter((row) => row.supplySourceId === rootId),
         contract,
         now,
       }),
@@ -1201,8 +1545,8 @@ export const deriveAndPersistAffiliateSupplyAssessment = async (input: Readonly<
       automationHoldReason: assessment.automationHoldReason,
       lastSuccessfulRefreshAt: snapshot.latestRun && isSuccessStatus(snapshot.latestRun.status) ? toDate(snapshot.latestRun.finishedAt) : undefined,
       lastAssessmentAt: now,
-      assessmentJson: assessment,
-      invariantViolations: assessment.invariantViolations,
+      assessmentJson: prismaJsonValue(assessment),
+      invariantViolations: [...assessment.invariantViolations],
       activeSupplyContractVersion: contractResult.policy.version,
       activeSupplyContractHash: contractResult.policy.hash,
     },
@@ -1227,7 +1571,7 @@ export const upsertAffiliateSupplyTarget = async (input: Readonly<{
   metadata?: Record<string, unknown> | null;
   contract?: AffiliateSupplyContractPolicy;
   db?: AffiliateSupplyDatabase;
-}>): Promise<any> => {
+}>): Promise<AffiliateSupplyTargets | null> => {
   const database = input.db ?? affiliateSupplyDatabase();
   if (!database.targets?.upsert) return null;
   const refreshedAt = input.refreshedAt ?? new Date();
@@ -1251,7 +1595,7 @@ export const upsertAffiliateSupplyTarget = async (input: Readonly<{
       rejectedAt: status === 'REJECTED' ? refreshedAt : null,
       rejectionReason: input.rejectionReason ?? null,
       evidenceRefs: Array.from(new Set(input.evidenceRefs ?? [])),
-      metadata: input.metadata ?? null,
+      metadata: prismaNullableJsonValue(input.metadata),
     },
     update: {
       candidateId: input.candidateId ?? undefined,
@@ -1264,49 +1608,66 @@ export const upsertAffiliateSupplyTarget = async (input: Readonly<{
       rejectedAt: status === 'REJECTED' ? refreshedAt : undefined,
       rejectionReason: input.rejectionReason ?? undefined,
       evidenceRefs: Array.from(new Set(input.evidenceRefs ?? [])),
-      metadata: input.metadata ?? undefined,
+      metadata: input.metadata == null ? undefined : prismaJsonValue(input.metadata),
     },
   });
 };
 
 export type AffiliateSupplyTransitionInput = Readonly<{
   supplySourceId: string;
-  command: string;
+  command: AffiliateSupplyLifecycleCommand;
   idempotencyKey: string;
   request: Record<string, unknown>;
   result: Record<string, unknown>;
   expectedGeneration: number;
   contractVersion: number;
   contractHash: string;
-  actorKind: string;
+  actorKind: AffiliateSupplyLifecycleActorKind;
   actorId: string;
   executingAgentId?: string | null;
-  fromStage?: string | null;
-  toStage: string;
-  outcome?: string | null;
+  fromStage?: AffiliateSupplyLifecycleStage | null;
+  toStage: AffiliateSupplyLifecycleStage;
+  outcome?: AffiliateSupplyLifecycleOutcome | null;
   reasonCodes?: readonly string[];
   evidenceRefs?: readonly string[];
   db?: AffiliateSupplyDatabase;
   now?: Date;
 }>;
+const affiliateLifecycleRequestHash = (input: Readonly<{
+  supplySourceId: string;
+  command: AffiliateSupplyLifecycleCommand;
+  contractVersion: number;
+  contractHash: string;
+  request: Record<string, unknown>;
+}>): string => hashAffiliateAgentValue({
+  supplySourceId: input.supplySourceId,
+  command: input.command,
+  contractVersion: input.contractVersion,
+  contractHash: input.contractHash,
+  request: normalizeAffiliateLifecycleJson(input.request),
+});
 export const recordAffiliateSupplyLifecycleTransition = async (
   input: AffiliateSupplyTransitionInput,
-): Promise<{ transition: any; replayed: boolean }> => {
+): Promise<{ transition: AffiliateSupplyLifecycleTransitions; isReplayed: boolean }> => {
   const database = input.db ?? affiliateSupplyDatabase();
   const now = input.now ?? new Date();
-  const requestHash = hashAffiliateAgentValue({
-    supplySourceId: input.supplySourceId,
-    command: input.command,
-    expectedGeneration: input.expectedGeneration,
-    contractVersion: input.contractVersion,
-    contractHash: input.contractHash,
-    request: input.request,
-  });
-  const resultHash = hashAffiliateAgentValue(input.result);
+  const request = normalizeAffiliateLifecycleJson(input.request) as Record<string, unknown>;
+  const result = normalizeAffiliateLifecycleJson(input.result) as Record<string, unknown>;
+  const requestHash = affiliateLifecycleRequestHash({ ...input, request });
+  const resultHash = hashAffiliateAgentValue(result);
   const existing = await database.transitions.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
   if (existing) {
-    if (existing.requestHash !== requestHash || existing.resultHash !== resultHash) throw new Error('Affiliate lifecycle idempotency key was reused with a different request or result.');
-    return { transition: existing, replayed: true };
+    const storedRequestHash = affiliateLifecycleRequestHash({
+      supplySourceId: String(existing.supplySourceId ?? input.supplySourceId),
+      command: String(existing.command ?? input.command) as AffiliateSupplyLifecycleCommand,
+      contractVersion: Number(existing.contractVersion ?? input.contractVersion),
+      contractHash: String(existing.contractHash ?? input.contractHash),
+      request: recordValue(existing.requestJson),
+    });
+    if (storedRequestHash !== requestHash || existing.resultHash !== resultHash) {
+      throw new Error('Affiliate lifecycle idempotency key was reused with a different request or result.');
+    }
+    return { transition: existing, isReplayed: true };
   }
   return withSupplyTransaction(database, async (transactionDatabase) => {
     const source = await transactionDatabase.supplySources.findUnique({ where: { id: input.supplySourceId } });
@@ -1322,9 +1683,9 @@ export const recordAffiliateSupplyLifecycleTransition = async (
       contractVersion: input.contractVersion,
       resultHash,
       outcome: input.outcome ?? null,
-      fromStage: input.fromStage ?? source.derivedStage,
-      toStage: input.toStage,
-      commandRef: stringValue(input.request.commandRef),
+      fromStage: (input.fromStage ?? source.derivedStage) as AffiliateSupplyLifecycleStage,
+      toStage: input.toStage as AffiliateSupplyLifecycleStage,
+      commandRef: stringValue(request.commandRef),
       idempotencyKey: input.idempotencyKey,
       requestHash,
       contractHash: input.contractHash,
@@ -1333,32 +1694,24 @@ export const recordAffiliateSupplyLifecycleTransition = async (
       executingAgentId: input.executingAgentId ?? null,
       reasonCodes: Array.from(new Set(input.reasonCodes ?? [])),
       evidenceRefs: Array.from(new Set(input.evidenceRefs ?? [])),
-      requestJson: input.request,
-      resultJson: input.result,
+      requestJson: prismaJsonValue(request),
+      resultJson: prismaJsonValue(result),
       occurredAt: now,
     };
-    let transition: any;
-    try {
-      transition = await transactionDatabase.transitions.create({ data: transitionData });
-    } catch (error) {
-      if (!isUniqueConstraintError(error)) throw error;
-      const replay = await transactionDatabase.transitions.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
-      if (replay && replay.requestHash === requestHash && replay.resultHash === resultHash) return { transition: replay, replayed: true };
-      throw error;
-    }
+    const transition = await transactionDatabase.transitions.create({ data: transitionData });
     await transactionDatabase.supplySources.update({
       where: { id: input.supplySourceId },
       data: {
         lifecycleGeneration: source.lifecycleGeneration + 1,
-        derivedStage: input.toStage,
+        derivedStage: input.toStage as AffiliateSupplyLifecycleStage,
         derivedOutcome: input.outcome ?? null,
         lastAssessmentAt: now,
         activeSupplyContractVersion: input.contractVersion,
         activeSupplyContractHash: input.contractHash,
-        assessmentJson: input.result,
+        assessmentJson: prismaJsonValue(result),
       },
     });
-    return { transition, replayed: false };
+    return { transition, isReplayed: false };
   });
 };
 export type AffiliateSupplyLifecycleTargetWrite = Readonly<{
@@ -1377,34 +1730,35 @@ export type ExecuteAffiliateSupplyLifecycleCommandInput = Readonly<{
   expectedLifecycleGeneration: number;
   idempotencyKey: string;
   request?: Record<string, unknown>;
-  actorKind: string;
+  actorKind: AffiliateSupplyLifecycleActorKind;
   actorId: string;
   executingAgentId?: string | null;
+  supplyContractVersion?: number;
+  supplyContractHash?: string;
   rolloutCohort?: string;
   db?: AffiliateSupplyDatabase;
   now?: Date;
   targetWriter?: (input: Readonly<{
     database: AffiliateSupplyDatabase;
-    client: any;
+    client: AffiliateSupplyClient;
     contract: AffiliateSupplyContractPolicy;
     request: Record<string, unknown>;
     now: Date;
   }>) => Promise<AffiliateSupplyLifecycleTargetWrite>;
   activationTargetWriter?: (input: Readonly<{
     database: AffiliateSupplyDatabase;
-    client: any;
+    client: AffiliateSupplyClient;
     contract: AffiliateSupplyContractPolicy;
     request: Record<string, unknown>;
     target: Record<string, unknown>;
-    candidate: AffiliateSupplyCandidateEvidence;
+    candidate: Record<string, unknown>;
     now: Date;
   }>) => Promise<AffiliateSupplyLifecycleTargetWrite>;
 }>;
-
 export type AffiliateSupplyLifecycleCommandResult = Readonly<{
   assessment: AffiliateSupplyAssessment;
-  transition: any | null;
-  replayed: boolean;
+  transition: AffiliateSupplyLifecycleTransitions;
+  isReplayed: boolean;
 }>;
 
 const commandTargets = (request: Record<string, unknown>): Record<string, unknown>[] => (
@@ -1508,6 +1862,39 @@ const publishAffiliateDomainTarget = async (
     });
   }
 };
+const rejectAffiliateDomainTarget = async (
+  database: AffiliateSupplyDatabase,
+  target: Record<string, unknown>,
+): Promise<void> => {
+  const targetType = stringValue(target.targetType)?.toUpperCase();
+  const targetId = stringValue(target.targetId);
+  if (!targetType || !targetId) return;
+  if (targetType === 'EVENT' && database.events?.update) {
+    await database.events.update({
+      where: { id: targetId },
+      data: { state: 'UNPUBLISHED' },
+    });
+  } else if (targetType === 'TEAM' && database.teams?.update) {
+    await database.teams.update({
+      where: { id: targetId },
+      data: { visibility: 'ADMIN_ONLY' },
+    });
+  } else if (targetType === 'FACILITY' && database.facilities?.update) {
+    await database.facilities.update({
+      where: { id: targetId },
+      data: { status: 'DRAFT' },
+    });
+  } else if (targetType === 'ORGANIZATION' && database.organizations?.update) {
+    await database.organizations.update({
+      where: { id: targetId },
+      data: {
+        status: 'UNLISTED',
+        publicPageEnabled: false,
+        publicWidgetsEnabled: false,
+      },
+    });
+  }
+};
 
 export type AffiliateCandidateReviewInput = Readonly<{
   supplySourceId: string;
@@ -1524,7 +1911,7 @@ export type AffiliateCandidateReviewInput = Readonly<{
 
 export const recordAffiliateCandidateReview = async (
   input: AffiliateCandidateReviewInput,
-): Promise<any> => {
+): Promise<AffiliateApprovalJobs> => {
   const database = input.db ?? affiliateSupplyDatabase();
   const now = input.now ?? new Date();
   const reviewedCandidateIds = Array.from(new Set(input.reviewedCandidateIds));
@@ -1570,10 +1957,10 @@ export const recordAffiliateCandidateReview = async (
         supplySourceId: input.supplySourceId,
         status: 'APPROVED',
         reviewerId: input.reviewerId,
-        decision: {
+        decision: prismaJsonValue({
           ...decisionPayload,
           decisionHash,
-        },
+        }),
         finishedAt: now,
       },
     });
@@ -1584,44 +1971,98 @@ export const executeAffiliateSupplyLifecycleCommand = async (
   input: ExecuteAffiliateSupplyLifecycleCommandInput,
 ): Promise<AffiliateSupplyLifecycleCommandResult> => {
   const database = input.db ?? affiliateSupplyDatabase();
-  const request = input.request ?? {};
+  const request: Record<string, unknown> = {
+    ...(input.request ?? {}),
+    ...(input.supplyContractVersion === undefined
+      ? {}
+      : { supplyContractVersion: input.supplyContractVersion }),
+    ...(input.supplyContractHash === undefined
+      ? {}
+      : { supplyContractHash: input.supplyContractHash }),
+  };
   const now = input.now ?? new Date();
   return withSupplyTransaction(database, async (transactionDatabase) => {
     const existing = await transactionDatabase.transitions.findUnique({
       where: { idempotencyKey: input.idempotencyKey },
     });
     if (existing) {
-      const replayHash = hashAffiliateAgentValue({
+      const replayHash = affiliateLifecycleRequestHash({
+        supplySourceId: String(existing.supplySourceId ?? input.supplySourceId),
+        command: String(existing.command ?? input.command) as AffiliateSupplyLifecycleCommand,
+        contractVersion: Number(existing.contractVersion),
+        contractHash: String(existing.contractHash),
+        request: recordValue(existing.requestJson),
+      });
+      const currentRequestHash = affiliateLifecycleRequestHash({
         supplySourceId: input.supplySourceId,
         command: input.command,
-        expectedGeneration: input.expectedLifecycleGeneration,
-        contractVersion: existing.contractVersion,
-        contractHash: existing.contractHash,
+        contractVersion: Number(existing.contractVersion),
+        contractHash: String(existing.contractHash),
         request,
       });
-      if (existing.requestHash !== replayHash) {
+      if (replayHash !== currentRequestHash) {
         throw new Error('Affiliate lifecycle idempotency key was reused with a different request.');
       }
       return {
-        assessment: existing.resultJson as AffiliateSupplyAssessment,
+        assessment: existing.resultJson as unknown as AffiliateSupplyAssessment,
         transition: existing,
-        replayed: true,
+        isReplayed: true,
       };
     }
     const root = await transactionDatabase.supplySources.findUnique({ where: { id: input.supplySourceId } });
     if (!root) throw new Error('Affiliate Supply Source not found.');
+    if (input.command === 'CREATE_ROOT') {
+      const latestTransition = transactionDatabase.transitions.findFirst
+        ? await transactionDatabase.transitions.findFirst({
+            where: { supplySourceId: input.supplySourceId },
+            orderBy: { sequence: 'desc' },
+          })
+        : null;
+      if (Number(root.lifecycleGeneration ?? 0) !== 0 || latestTransition) {
+        throw new Error('Affiliate Supply Source root creation requires an uninitialized lifecycle.');
+      }
+      const requestedIdentityKey = stringValue(request.identityKey);
+      if (requestedIdentityKey && requestedIdentityKey !== root.identityKey) {
+        throw new Error('Affiliate Supply Source root creation identity does not match the root.');
+      }
+    }
+    const refreshFailureRunId = input.command === 'RECORD_REFRESH_FAILURE'
+      ? stringValue(request.runId)
+      : null;
+    const refreshFailureRun = refreshFailureRunId && transactionDatabase.runs?.findUnique
+      ? await transactionDatabase.runs.findUnique({ where: { id: refreshFailureRunId } })
+      : null;
+    if (input.command === 'RECORD_REFRESH_FAILURE') {
+      if (!refreshFailureRunId || !refreshFailureRun) {
+        throw new Error('Affiliate refresh failure requires a durable scrape invocation.');
+      }
+      const runStatus = String(refreshFailureRun.status ?? '').toUpperCase();
+      if (['SUCCEEDED', 'SUCCESS', 'COMPLETED'].includes(runStatus)) {
+        throw new Error('Affiliate refresh failure cannot replace a successful scrape invocation.');
+      }
+      const runMatchesRoot = (
+        refreshFailureRun.supplySourceId === input.supplySourceId
+        || (root.liveSourceId && refreshFailureRun.sourceId === root.liveSourceId)
+      );
+      if (!runMatchesRoot) {
+        throw new Error('Affiliate refresh failure invocation does not belong to the Supply Source.');
+      }
+    }
     const contract = await loadActiveAffiliateSupplyContract({
       db: transactionDatabase,
       rolloutCohort: input.rolloutCohort ?? root.rolloutCohort,
     });
-    const requestHash = hashAffiliateAgentValue({
-      supplySourceId: input.supplySourceId,
-      command: input.command,
-      expectedGeneration: input.expectedLifecycleGeneration,
-      contractVersion: contract.policy.version,
-      contractHash: contract.policy.hash,
-      request,
-    });
+    const requestedContractVersion = typeof request.supplyContractVersion === 'number'
+      && Number.isInteger(request.supplyContractVersion)
+      ? request.supplyContractVersion
+      : null;
+    const requestedContractHash = stringValue(request.supplyContractHash);
+    const commandContractVersion = input.supplyContractVersion
+      ?? requestedContractVersion
+      ?? contract.policy.version;
+    const commandContractHash = input.supplyContractHash
+      ?? requestedContractHash
+      ?? contract.policy.hash;
     const snapshotBefore = await loadSnapshot(
       transactionDatabase,
       input.supplySourceId,
@@ -1639,12 +2080,12 @@ export const executeAffiliateSupplyLifecycleCommand = async (
       currentLifecycleGeneration: root.lifecycleGeneration,
       activeContractVersion: contract.policy.version,
       activeContractHash: contract.policy.hash,
-      commandContractVersion: contract.policy.version,
-      commandContractHash: contract.policy.hash,
+      commandContractVersion,
+      commandContractHash,
       evidenceRefs: stringArray(request.evidenceRefs),
       assessment: assessmentBefore,
     });
-    if (!commandDecision.accepted) {
+    if (!commandDecision.isAccepted) {
       throw new Error(`Affiliate lifecycle command rejected: ${commandDecision.reasonCodes.join(', ')}`);
     }
 
@@ -1654,10 +2095,19 @@ export const executeAffiliateSupplyLifecycleCommand = async (
     const mappingId = stringValue(request.mappingId);
     const evidenceRefs = [
       ...stringArray(request.evidenceRefs),
+      ...(refreshFailureRunId ? [`scrape-run:${refreshFailureRunId}`] : []),
       `supply-source:${input.supplySourceId}`,
     ];
     if (input.command === 'CREATE_SUCCESSOR') {
       const successorRequest = recordValue(request.successor);
+      const expectedIntakeSupplySourceId = Object.prototype.hasOwnProperty.call(
+        successorRequest,
+        'expectedIntakeSupplySourceId',
+      )
+        ? stringValue(successorRequest.expectedIntakeSupplySourceId)
+        : Object.prototype.hasOwnProperty.call(request, 'expectedIntakeSupplySourceId')
+          ? stringValue(request.expectedIntakeSupplySourceId)
+          : undefined;
       const requestedUrl = stringValue(successorRequest.requestedUrl ?? request.requestedUrl);
       if (!requestedUrl) {
         throw new Error('Affiliate successor creation requires a requested URL.');
@@ -1674,7 +2124,7 @@ export const executeAffiliateSupplyLifecycleCommand = async (
       const successorIdentity = normalizeAffiliateSupplyIdentity({
         requestedUrl,
         resolvedCanonicalUrl,
-        redirectVerified: successorRequest.redirectVerified === true || request.redirectVerified === true,
+        isRedirectVerified: successorRequest.isRedirectVerified === true || request.isRedirectVerified === true,
         operatorDomain,
       });
       if (root.successorId) {
@@ -1685,23 +2135,133 @@ export const executeAffiliateSupplyLifecycleCommand = async (
           throw new Error('Affiliate Supply Source already has a different successor.');
         }
       } else {
-        const successor = await ensureAffiliateSupplySource({
-          requestedUrl,
-          resolvedCanonicalUrl,
-          redirectVerified: successorRequest.redirectVerified === true
-            || request.redirectVerified === true,
-          operatorDomain,
-          targetKind: stringValue(successorRequest.targetKind ?? request.targetKind) ?? root.targetKind,
-          rolloutCohort: root.rolloutCohort,
-          intakeId: stringValue(successorRequest.intakeId ?? request.intakeId) ?? root.intakeId,
-          liveSourceId: stringValue(successorRequest.liveSourceId ?? request.liveSourceId),
-          priorSupplySourceId: root.id,
-          db: transactionDatabase,
-          now,
+        const existingSuccessor = await transactionDatabase.supplySources.findUnique({
+          where: { identityKey: successorIdentity.identityKey },
         });
-        if (!successor.successorCreated || successor.predecessorId !== root.id) {
-          throw new Error('Affiliate successor creation did not produce a linked successor root.');
+        if (existingSuccessor && existingSuccessor.id === root.id) {
+          throw new Error('Affiliate successor identity resolves to its predecessor root.');
         }
+        if (existingSuccessor?.predecessorId && existingSuccessor.predecessorId !== root.id) {
+          throw new Error('Affiliate successor identity is already linked to another predecessor.');
+        }
+        const successor = existingSuccessor
+          ? await transactionDatabase.supplySources.update({
+              where: { id: existingSuccessor.id },
+              data: {
+                predecessorId: root.id,
+                intakeId: stringValue(successorRequest.intakeId ?? request.intakeId)
+                  ?? existingSuccessor.intakeId
+                  ?? null,
+                liveSourceId: stringValue(successorRequest.liveSourceId ?? request.liveSourceId)
+                  ?? existingSuccessor.liveSourceId
+                  ?? null,
+                updatedAt: now,
+              },
+            })
+          : await createAffiliateSupplySource({
+              database: transactionDatabase,
+              identity: successorIdentity,
+              targetKind: stringValue(successorRequest.targetKind ?? request.targetKind) ?? root.targetKind,
+              operatorDomain,
+              rolloutCohort: root.rolloutCohort,
+              intakeId: stringValue(successorRequest.intakeId ?? request.intakeId) ?? root.intakeId,
+              expectedIntakeSupplySourceId,
+              liveSourceId: stringValue(successorRequest.liveSourceId ?? request.liveSourceId),
+              predecessorId: root.id,
+              metadata: recordValue(successorRequest.metadata ?? request.metadata),
+              now,
+            });
+        if (!root.successorId) {
+          await transactionDatabase.supplySources.update({
+            where: { id: root.id },
+            data: { successorId: successor.id, updatedAt: now },
+          });
+        }
+        await Promise.all([
+          linkSupplySource(
+            transactionDatabase.intakes,
+            stringValue(successorRequest.intakeId ?? request.intakeId) ?? successor.intakeId,
+            successor.id,
+            expectedIntakeSupplySourceId,
+          ),
+          linkSupplySource(
+            transactionDatabase.sources,
+            stringValue(successorRequest.liveSourceId ?? request.liveSourceId),
+            successor.id,
+          ),
+        ]);
+      }
+    }
+    if (input.command === 'REVALIDATE_IDENTITY') {
+      const expectedIntakeSupplySourceId = Object.prototype.hasOwnProperty.call(
+        request,
+        'expectedIntakeSupplySourceId',
+      )
+        ? stringValue(request.expectedIntakeSupplySourceId)
+        : undefined;
+      const requestedUrl = stringValue(request.requestedUrl);
+      const resolvedCanonicalUrl = stringValue(request.resolvedCanonicalUrl) ?? requestedUrl;
+      if (!requestedUrl || !resolvedCanonicalUrl) {
+        throw new Error('Affiliate identity revalidation requires requested and resolved URLs.');
+      }
+      const identity = normalizeAffiliateSupplyIdentity({
+        requestedUrl,
+        resolvedCanonicalUrl,
+        isRedirectVerified: request.isRedirectVerified === true,
+        operatorDomain: stringValue(request.operatorDomain) ?? root.operatorDomain,
+        prior: {
+          canonicalUrl: root.canonicalUrl,
+          operatorDomain: root.operatorDomain,
+          identityKey: root.identityKey,
+        },
+      });
+      if (
+        identity.rootDecision !== 'SAME_ROOT'
+        || (identity.canonicalUrl === normalizeAffiliateSupplyIdentity({
+          requestedUrl: root.canonicalUrl,
+          resolvedCanonicalUrl: root.canonicalUrl,
+          operatorDomain: root.operatorDomain,
+        }).canonicalUrl && !identity.isRevalidationRequired)
+      ) {
+        throw new Error('Affiliate identity revalidation requires a verified same-root change.');
+      }
+      await transactionDatabase.supplySources.update({
+        where: { id: input.supplySourceId },
+        data: {
+          canonicalUrl: identity.canonicalUrl,
+          origin: identity.origin,
+          pathKey: identity.pathKey,
+          operatorDomain: stringValue(request.operatorDomain) ?? root.operatorDomain ?? null,
+          intakeId: stringValue(request.intakeId) ?? root.intakeId ?? null,
+          liveSourceId: stringValue(request.liveSourceId) ?? root.liveSourceId ?? null,
+          isAutomationEnabled: false,
+          automationHoldReason: 'CANONICAL_REVALIDATION_REQUIRED',
+          updatedAt: now,
+        },
+      });
+      await Promise.all([
+        linkSupplySource(
+          transactionDatabase.intakes,
+          stringValue(request.intakeId),
+          input.supplySourceId,
+          expectedIntakeSupplySourceId,
+        ),
+        linkSupplySource(transactionDatabase.sources, stringValue(request.liveSourceId), input.supplySourceId),
+      ]);
+      if (source?.id) {
+        await transactionDatabase.sources.update({
+          where: { id: source.id },
+          data: {
+            autoScrapeEnabled: false,
+            metadata: prismaJsonValue({
+              ...recordValue(source.metadata),
+              automationReviewRequired: {
+                hold: true,
+                reason: 'CANONICAL_REVALIDATION_REQUIRED',
+              },
+            }),
+          },
+        });
       }
     }
     if (input.command === 'RECORD_MAPPING') {
@@ -1715,7 +2275,7 @@ export const executeAffiliateSupplyLifecycleCommand = async (
         throw new Error('Affiliate mapping lifecycle command requires an existing mapping package.');
       }
       const mappingJson = recordValue(mapping.mapping);
-      const mappingMetadata = recordValue(mapping.metadata);
+      const mappingMetadata = recordValue(mappingJson.metadata);
       const mappingEvidenceKinds = new Set(stringArray(
         mappingMetadata.evidenceKinds
         ?? mappingJson.evidenceKinds
@@ -1766,7 +2326,7 @@ export const executeAffiliateSupplyLifecycleCommand = async (
         ? await transactionDatabase.mappings.findUnique({ where: { id: approvalMappingId } })
         : null;
       const approvalMappingJson = recordValue(approvalMapping?.mapping);
-      const approvalMappingMetadata = recordValue(approvalMapping?.metadata);
+      const approvalMappingMetadata = recordValue(approvalMappingJson.metadata);
       const approvalPackageHash = stringValue(approvalMappingMetadata.packageHash)
         ?? stringValue(approvalMappingJson.packageHash)
         ?? hashAffiliateAgentValue(approvalMappingJson);
@@ -1781,7 +2341,7 @@ export const executeAffiliateSupplyLifecycleCommand = async (
       const lifecycleEvidenceKinds = stringArray(request.lifecycleEvidenceKinds);
       const decision = {
         decision: 'APPROVE',
-        independent: true,
+        isIndependent: true,
         reviewerId: input.actorId,
         packageHash: stringValue(request.packageHash),
         evidenceRefs,
@@ -1946,7 +2506,7 @@ export const executeAffiliateSupplyLifecycleCommand = async (
           }
           const createdTarget = await input.activationTargetWriter({
             database: transactionDatabase,
-            client: transactionDatabase.rawClient ?? transactionDatabase,
+            client: transactionDatabase.rawClient ?? database.rawClient ?? prisma,
             contract: contract.policy,
             request,
             target,
@@ -1959,88 +2519,94 @@ export const executeAffiliateSupplyLifecycleCommand = async (
           if (createdTarget.targetType.toUpperCase() !== targetType) {
             throw new Error('Affiliate lifecycle activation target writer returned the wrong target type.');
           }
-          resolvedTarget = {
-            ...resolvedTarget,
-            ...createdTarget,
-            status: 'PUBLISHED',
-          };
-        }
-        if (!stringValue(resolvedTarget.targetId)) {
-          throw new Error('Affiliate lifecycle activation requires a reviewed target identity.');
-        }
-        resolvedTargetRows.push(resolvedTarget);
+        resolvedTarget = {
+          ...resolvedTarget,
+          ...createdTarget,
+          status: 'PUBLISHED',
+        };
       }
-      if (!resolvedTargetRows.some((target) => stringValue(target.status)?.toUpperCase() === 'PUBLISHED')) {
-        throw new Error('Affiliate lifecycle activation requires one published reviewed target.');
+      if (!stringValue(resolvedTarget.targetId)) {
+        throw new Error('Affiliate lifecycle activation requires a reviewed target identity.');
       }
-      for (const candidateId of reviewedCandidateIds) {
-        await transactionDatabase.candidates.update({
-          where: { id: candidateId },
-          data: { status: 'PUBLISHED' },
-        });
-      }
-      for (const target of resolvedTargetRows) {
-        await applyCommandTarget(
-          transactionDatabase,
-          input.supplySourceId,
-          {
-            ...target,
-            evidenceRefs: [...candidateReviewEvidenceRefs, ...stringArray(target.evidenceRefs)],
-          },
-          now,
-          evidenceRefs,
-          contract.policy,
-        );
-        if ((stringValue(target.status)?.toUpperCase() ?? 'PUBLISHED') === 'PUBLISHED') {
-          await publishAffiliateDomainTarget(transactionDatabase, target);
-        }
-      }
-      await transactionDatabase.mappings.update({
-        where: { id: mapping.id },
-        data: { isActive: true, validatedAt: now },
-      });
-      await transactionDatabase.sources.update({
-        where: { id: source.id },
-        data: { autoScrapeEnabled: true, status: 'ACTIVE' },
+      resolvedTargetRows.push(resolvedTarget);
+    }
+    if (!resolvedTargetRows.some((target) => stringValue(target.status)?.toUpperCase() === 'PUBLISHED')) {
+      throw new Error('Affiliate lifecycle activation requires one published reviewed target.');
+    }
+    const publishedCandidateIds = new Set(
+      resolvedTargetRows
+        .filter((target) => stringValue(target.status)?.toUpperCase() === 'PUBLISHED')
+        .map((target) => stringValue(target.candidateId))
+        .filter((candidateId): candidateId is string => Boolean(candidateId)),
+    );
+    for (const candidateId of publishedCandidateIds) {
+      await transactionDatabase.candidates.update({
+        where: { id: candidateId },
+        data: { status: 'PUBLISHED' },
       });
     }
-    if (input.command === 'PUBLISH_TARGET') {
-      const candidateId = stringValue(request.candidateId);
-      const candidate = candidateId
-        ? snapshotBefore.candidates.find((row) => row.id === candidateId)
-        : null;
-      if (!candidateId || !candidate || candidate.status.toUpperCase() === 'REJECTED') {
-        throw new Error('Affiliate lifecycle publication requires an eligible candidate.');
-      }
-      if (!input.targetWriter) {
-        throw new Error('Affiliate lifecycle publication requires an admitted target writer.');
-      }
-      const target = await input.targetWriter({
-        database: transactionDatabase,
-        client: transactionDatabase.rawClient ?? transactionDatabase,
-        contract: contract.policy,
-        request,
-        now,
-      });
-      if (target.candidateId !== candidateId) {
-        throw new Error('Affiliate lifecycle publication target does not match the candidate.');
-      }
+    for (const target of resolvedTargetRows) {
       await applyCommandTarget(
         transactionDatabase,
         input.supplySourceId,
         {
           ...target,
-          status: 'PUBLISHED',
-          evidenceRefs: [
-            ...(candidate.evidenceRefs ?? []),
-            ...stringArray(target.evidenceRefs),
-          ],
+          evidenceRefs: [...candidateReviewEvidenceRefs, ...stringArray(target.evidenceRefs)],
         },
         now,
         evidenceRefs,
         contract.policy,
       );
+      if ((stringValue(target.status)?.toUpperCase() ?? 'PUBLISHED') === 'PUBLISHED') {
+        await publishAffiliateDomainTarget(transactionDatabase, target);
+      }
     }
+    await transactionDatabase.mappings.update({
+      where: { id: mapping.id },
+      data: { isActive: true, validatedAt: now },
+    });
+    await transactionDatabase.sources.update({
+      where: { id: source.id },
+      data: { autoScrapeEnabled: true, status: 'ACTIVE' },
+    });
+  }
+  if (input.command === 'PUBLISH_TARGET') {
+    const candidateId = stringValue(request.candidateId);
+    const candidate = candidateId
+      ? snapshotBefore.candidates.find((row) => row.id === candidateId)
+      : null;
+    if (!candidateId || !candidate || candidate.status.toUpperCase() === 'REJECTED') {
+      throw new Error('Affiliate lifecycle publication requires an eligible candidate.');
+    }
+    if (!input.targetWriter) {
+      throw new Error('Affiliate lifecycle publication requires an admitted target writer.');
+    }
+    const target = await input.targetWriter({
+      database: transactionDatabase,
+      client: transactionDatabase.rawClient ?? database.rawClient ?? prisma,
+      contract: contract.policy,
+      request,
+      now,
+    });
+    if (target.candidateId !== candidateId) {
+      throw new Error('Affiliate lifecycle publication target does not match the candidate.');
+    }
+    await applyCommandTarget(
+      transactionDatabase,
+      input.supplySourceId,
+      {
+        ...target,
+        status: 'PUBLISHED',
+        evidenceRefs: [
+          ...(candidate.evidenceRefs ?? []),
+          ...stringArray(target.evidenceRefs),
+        ],
+      },
+      now,
+      evidenceRefs,
+      contract.policy,
+    );
+  }
     if (['RECORD_REFRESH', 'RECORD_EMPTY_REFRESH', 'RECORD_REFRESH_FAILURE'].includes(input.command)) {
       const runId = stringValue(request.runId);
       const runStatus = input.command === 'RECORD_REFRESH_FAILURE'
@@ -2067,7 +2633,7 @@ export const executeAffiliateSupplyLifecycleCommand = async (
             logs: {
               ...recordValue(run?.logs),
               ...recordValue(request.runLogs),
-              emptyStateMatched: request.emptyStateMatched === true
+              isEmptyStateMatched: request.isEmptyStateMatched === true
                 || input.command === 'RECORD_EMPTY_REFRESH',
               evidenceRefs,
             },
@@ -2095,7 +2661,7 @@ export const executeAffiliateSupplyLifecycleCommand = async (
             autoScrapeEnabled: shouldHoldAutomation
               ? false
               : source.autoScrapeEnabled,
-            metadata: {
+            metadata: prismaJsonValue({
               ...recordValue(source.metadata),
               automationReviewRequired: shouldHoldAutomation
                 ? (hasRequestedAutomationHold
@@ -2107,7 +2673,7 @@ export const executeAffiliateSupplyLifecycleCommand = async (
                         : 'UNEXPLAINED_ZERO_RESULT',
                     })
                 : null,
-            },
+            }),
           },
         });
       }
@@ -2129,7 +2695,6 @@ export const executeAffiliateSupplyLifecycleCommand = async (
       if (!Object.keys(target).length) {
         target.targetType = stringValue(request.targetType) ?? '';
         target.targetId = stringValue(request.targetId) ?? '';
-        target.sourceProfile = stringValue(request.sourceProfile) ?? target.targetType;
       }
       const targetType = stringValue(target.targetType);
       const targetId = stringValue(target.targetId);
@@ -2153,6 +2718,7 @@ export const executeAffiliateSupplyLifecycleCommand = async (
       target.status = 'REJECTED';
       target.rejectedAt = now.toISOString();
       await applyCommandTarget(transactionDatabase, input.supplySourceId, target, now, evidenceRefs, contract.policy);
+      await rejectAffiliateDomainTarget(transactionDatabase, target);
     }
 
     let assessment = await deriveAndPersistAffiliateSupplyAssessment({
@@ -2174,6 +2740,9 @@ export const executeAffiliateSupplyLifecycleCommand = async (
       });
     }
     const current = await transactionDatabase.supplySources.findUnique({ where: { id: input.supplySourceId } });
+    if (!current) {
+      throw new Error('Affiliate Supply Source not found after lifecycle command.');
+    }
     const result: AffiliateSupplyAssessment = {
       ...assessment,
       lifecycleGeneration: current.lifecycleGeneration + 1,
@@ -2185,8 +2754,8 @@ export const executeAffiliateSupplyLifecycleCommand = async (
       request,
       result,
       expectedGeneration: input.expectedLifecycleGeneration,
-      contractVersion: contract.policy.version,
-      contractHash: contract.policy.hash,
+      contractVersion: commandContractVersion,
+      contractHash: commandContractHash,
       actorKind: input.actorKind,
       actorId: input.actorId,
       executingAgentId: input.executingAgentId,
@@ -2198,24 +2767,33 @@ export const executeAffiliateSupplyLifecycleCommand = async (
       db: transactionDatabase,
       now,
     });
+    await transactionDatabase.supplySources.update({
+      where: { id: input.supplySourceId },
+      data: {
+        lifecycleGeneration: result.lifecycleGeneration,
+        activeSupplyContractVersion: commandContractVersion,
+        activeSupplyContractHash: commandContractHash,
+      },
+    });
     if (source?.id && transactionDatabase.sources?.update) {
       await transactionDatabase.sources.update({
         where: { id: source.id },
         data: {
           lifecycleGeneration: result.lifecycleGeneration,
-          activeSupplyContractVersion: contract.policy.version,
-          activeSupplyContractHash: contract.policy.hash,
+          activeSupplyContractVersion: commandContractVersion,
+          activeSupplyContractHash: commandContractHash,
         },
       });
     }
     return {
       assessment: result,
       transition: transitionResult.transition,
-      replayed: transitionResult.replayed,
+      isReplayed: transitionResult.isReplayed,
     };
   });
 };
 const AFFILIATE_LIFECYCLE_COMMANDS: readonly AffiliateSupplyLifecycleCommand[] = [
+  'CREATE_ROOT',
   'RECORD_MAPPING',
   'APPROVE',
   'ACTIVATE',
@@ -2223,6 +2801,7 @@ const AFFILIATE_LIFECYCLE_COMMANDS: readonly AffiliateSupplyLifecycleCommand[] =
   'RECORD_REFRESH',
   'RECORD_EMPTY_REFRESH',
   'RECORD_REFRESH_FAILURE',
+  'REVALIDATE_IDENTITY',
   'EXCLUDE_SOURCE',
   'REJECT_TARGET',
   'CREATE_SUCCESSOR',
@@ -2271,7 +2850,10 @@ export const createAffiliateSupplyLifecycleAuthority = (input: Readonly<{
       recordedHumanActorId: string;
       commandRef: string;
     }>,
-  ): Promise<Readonly<{ decision: Record<string, unknown>; transition?: any }> | null> => {
+  ): Promise<Readonly<{
+    decision: Record<string, unknown>;
+    transition?: AffiliateSupplyLifecycleTransitions;
+  }> | null> => {
     const approvalJob = database.approvals?.findUnique
       ? await database.approvals.findUnique({ where: { id: identity.commandRef } })
       : database.approvals?.findFirst
@@ -2318,7 +2900,7 @@ export const createAffiliateSupplyLifecycleAuthority = (input: Readonly<{
     };
   };
 
-  const findTransitionByReceipt = async (receiptId: string): Promise<any | null> => (
+  const findTransitionByReceipt = async (receiptId: string): Promise<AffiliateSupplyLifecycleTransitions | null> => (
     database.transitions?.findUnique
       ? database.transitions.findUnique({ where: { idempotencyKey: receiptId } })
       : null
@@ -2372,9 +2954,11 @@ export const createAffiliateSupplyLifecycleAuthority = (input: Readonly<{
         command,
         authority: 'HUMAN_DIRECTED_EXECUTOR',
         expectedLifecycleGeneration: execution.expectedGeneration,
+        supplyContractVersion: execution.supplyContractVersion,
+        supplyContractHash: execution.supplyContractHash,
         actorKind: 'HUMAN_DIRECTED_EXECUTOR',
         actorId: execution.identity.recordedHumanActorId,
-        executingAgentId: execution.identity.commandRef,
+        executingAgentId: execution.invocationId,
         idempotencyKey: execution.receiptId,
         request: {
           ...decisionRequest,
@@ -2412,11 +2996,10 @@ export const reconcileAffiliateSupplyContractImpact = async (input: Readonly<{
   const active = await loadActiveAffiliateSupplyContract({ db: database, rolloutCohort: input.rolloutCohort });
   const sources = await database.supplySources.findMany({
     where: { rolloutCohort: input.rolloutCohort ?? active.manifest.rolloutCohort },
-    select: { id: true, derivedStage: true, targetContribution: true, isAutomationEnabled: true, repairPriority: true, freshnessStatus: true },
   });
-  const targetRows = database.targets?.findMany && sources.length > 0
+  const targetRows: AffiliateSupplyContractImpactTargetRow[] = typeof database.targets?.findMany === 'function' && sources.length > 0
     ? await database.targets.findMany({
-        where: { supplySourceId: { in: sources.map((source: any) => source.id) } },
+        where: { supplySourceId: { in: sources.map((source) => source.id) } },
         select: { supplySourceId: true, marketKey: true, sportId: true, sourceProfile: true },
       })
     : [];
@@ -2430,17 +3013,77 @@ export const reconcileAffiliateSupplyContractImpact = async (input: Readonly<{
     });
     targetCellsBySource.set(target.supplySourceId, sourceCells);
   }
+  const currentPolicy = normalizeAffiliateSupplyContractPolicy(
+    active.manifest.supplyContract,
+    active.manifest.rolloutCohort,
+  );
+  const currentAssessments = new Map<string, AffiliateSupplyAssessment>();
+  const nextAssessments = new Map<string, AffiliateSupplyAssessment>();
+  const hasAssessmentLoaders = Boolean(
+    sources.length
+    && typeof database.sources?.findMany === 'function'
+    && typeof database.intakes?.findMany === 'function'
+    && typeof database.mappings?.findMany === 'function'
+    && typeof database.mappingJobs?.findMany === 'function'
+    && typeof database.approvals?.findMany === 'function'
+    && typeof database.runs?.findMany === 'function'
+    && typeof database.candidates?.findMany === 'function'
+    && typeof database.targets?.findMany === 'function'
+    && typeof database.supplySources?.findMany === 'function',
+  );
+  if (hasAssessmentLoaders) {
+    const now = new Date();
+    const roots = sources as AffiliateSupplySources[];
+    const [currentSnapshots, nextSnapshots] = await Promise.all([
+      loadSnapshots(database, roots, currentPolicy, now),
+      loadSnapshots(database, roots, input.nextPolicy, now),
+    ]);
+    for (const source of sources) {
+      const currentSnapshot = currentSnapshots.get(source.id);
+      const nextSnapshot = nextSnapshots.get(source.id);
+      if (currentSnapshot) {
+        currentAssessments.set(source.id, deriveAffiliateSupplyAssessment(currentSnapshot));
+      }
+      if (nextSnapshot) {
+        nextAssessments.set(source.id, deriveAffiliateSupplyAssessment(nextSnapshot));
+      }
+    }
+  }
   return buildAffiliateSupplyContractImpactReport({
     currentManifest: active.manifest,
-    sources: sources.map((source: any) => ({
-      id: source.id,
-      stage: source.derivedStage,
-      targetContribution: source.targetContribution,
-      isAutomationEnabled: source.isAutomationEnabled,
-      repairPriority: source.repairPriority,
-      freshnessStatus: source.freshnessStatus,
-      targetCells: targetCellsBySource.get(source.id) ?? [],
-    })),
+    sources: sources.map((source) => {
+      const currentAssessment = currentAssessments.get(source.id);
+      const nextAssessment = nextAssessments.get(source.id);
+      const currentFreshnessStatus = currentAssessment?.freshnessStatus
+        ?? (['FRESH', 'STALE', 'UNKNOWN', 'NOT_APPLICABLE'].includes(source.freshnessStatus)
+          ? source.freshnessStatus as AffiliateSupplyFreshnessStatus
+          : 'UNKNOWN');
+      return {
+        id: source.id,
+        stage: currentAssessment?.stage ?? source.derivedStage,
+        targetContribution: currentAssessment?.targetContribution ?? source.targetContribution,
+        isAutomationEnabled: currentAssessment?.isAutomationEnabled ?? source.isAutomationEnabled,
+        repairPriority: currentAssessment?.repairPriority ?? source.repairPriority,
+        freshnessStatus: currentFreshnessStatus,
+        ...(nextAssessment
+          ? {
+            nextStage: nextAssessment.stage,
+            nextTargetContribution: nextAssessment.targetContribution,
+            nextIsAutomationEnabled: nextAssessment.isAutomationEnabled,
+            nextRepairPriority: nextAssessment.repairPriority,
+          }
+          : {}),
+        targetCells: currentAssessment
+          ? targetCellsForAssessment(currentAssessment)
+          : targetCellsBySource.get(source.id) ?? [],
+        ...(currentAssessment
+          ? { currentFreshTargetCells: freshTargetCellsForAssessment(currentAssessment) }
+          : {}),
+        ...(nextAssessment
+          ? { nextFreshTargetCells: freshTargetCellsForAssessment(nextAssessment) }
+          : {}),
+      };
+    }),
     nextPolicy: input.nextPolicy,
   });
 };
@@ -2448,7 +3091,14 @@ export const reconcileAffiliateSupplyContractImpact = async (input: Readonly<{
 const targetKeyFor = (target: Readonly<{ marketKey: string; sportId: string; sourceProfile: string }>): string => `${target.marketKey}:${target.sportId}:${target.sourceProfile}`.toLowerCase();
 
 const isFreshTargetForDemand = (
-  target: Record<string, unknown>,
+  target: Readonly<{
+    status?: unknown;
+    rejectedAt?: Date | string | null;
+    freshnessExpiresAt?: Date | string | null;
+    lastSuccessfulRefreshAt?: Date | string | null;
+    metadata?: unknown;
+    sourceProfile?: string | null;
+  }>,
   contract: AffiliateSupplyContractPolicy,
   now: Date,
 ): boolean => {
@@ -2460,11 +3110,11 @@ const isFreshTargetForDemand = (
     ?? metadata.startsAt,
   );
   if (naturalExpiry && naturalExpiry.getTime() <= now.getTime()) return false;
-  const rejectedAt = toDate(target.rejectedAt as Date | string | null | undefined);
+  const rejectedAt = toDate(target.rejectedAt);
   if (rejectedAt) return false;
-  const expiresAt = toDate(target.freshnessExpiresAt as Date | string | null | undefined);
+  const expiresAt = toDate(target.freshnessExpiresAt);
   if (expiresAt) return expiresAt.getTime() > now.getTime();
-  const refreshedAt = toDate(target.lastSuccessfulRefreshAt as Date | string | null | undefined);
+  const refreshedAt = toDate(target.lastSuccessfulRefreshAt);
   if (!refreshedAt) return false;
   const maximumAgeHours = contract.freshnessWindows.find((window) => (
     window.sourceProfile.toUpperCase() === String(target.sourceProfile ?? '').toUpperCase()
@@ -2479,12 +3129,12 @@ export const reconcileAffiliateReplenishmentDemands = async (input: Readonly<{
   now?: Date;
   dryRun?: boolean;
   assessments?: readonly AffiliateSupplyAssessment[];
-}>): Promise<{ opened: number; closed: number; demands: any[] }> => {
+}>): Promise<{ opened: number; closed: number; demands: AffiliateReplenishmentDemandResultRow[] }> => {
   const database = input.db ?? affiliateSupplyDatabase();
   const now = input.now ?? new Date();
   if (!database.demands?.upsert) return { opened: 0, closed: 0, demands: [] };
   const rolloutCohort = input.rolloutCohort ?? input.contract.rolloutCohort;
-  const sourceRows = database.supplySources?.findMany
+  const sourceRows: AffiliateSupplyDemandSourceRow[] = database.supplySources?.findMany
     ? await database.supplySources.findMany({
         where: { rolloutCohort },
         select: {
@@ -2498,25 +3148,25 @@ export const reconcileAffiliateReplenishmentDemands = async (input: Readonly<{
         },
       })
     : [];
-  const sourcesById = new Map<string, Record<string, unknown>>(
-    sourceRows.map((source: Record<string, unknown>) => [String(source.id), source]),
+  const sourcesById = new Map<string, AffiliateSupplyDemandSourceRow>(
+    sourceRows.map((source) => [String(source.id), source]),
   );
-  const targets = input.assessments
+  const targets: AffiliateSupplyDemandTargetRow[] = input.assessments
     ? []
     : await database.targets.findMany({
-      where: { status: 'PUBLISHED' },
-      select: {
-        supplySourceId: true,
-        marketKey: true,
-        sportId: true,
-        sourceProfile: true,
-        status: true,
-        rejectedAt: true,
-        freshnessExpiresAt: true,
-        lastSuccessfulRefreshAt: true,
-        metadata: true,
-      },
-    });
+        where: { status: 'PUBLISHED' },
+        select: {
+          supplySourceId: true,
+          marketKey: true,
+          sportId: true,
+          sourceProfile: true,
+          status: true,
+          rejectedAt: true,
+          freshnessExpiresAt: true,
+          lastSuccessfulRefreshAt: true,
+          metadata: true,
+        },
+      });
   const observed = new Map<string, number>();
   const priorityByTargetKey = new Map<string, number>();
   const recordPriority = (key: string, priority: unknown): void => {
@@ -2553,15 +3203,16 @@ export const reconcileAffiliateReplenishmentDemands = async (input: Readonly<{
       marketKey?: string | null;
       sportId?: string | null;
       sourceProfile?: string | null;
-      status?: string | null;
+      status?: unknown;
       rejectedAt?: Date | string | null;
       freshnessExpiresAt?: Date | string | null;
       lastSuccessfulRefreshAt?: Date | string | null;
+      metadata?: unknown;
     }>,
     priority: unknown,
   ): void => {
     const source = sourcesById.get(sourceId);
-    if (!source || !isFreshTargetForDemand(target as Record<string, unknown>, input.contract, now)) return;
+    if (!source || !isFreshTargetForDemand(target, input.contract, now)) return;
     const matchingTarget = targetRuleFor(input.contract, {
       marketKey: target.marketKey ?? null,
       sportId: target.sportId ?? null,
@@ -2615,7 +3266,7 @@ export const reconcileAffiliateReplenishmentDemands = async (input: Readonly<{
         }), source.repairPriority);
       }
     }
-    targets.forEach((target: Record<string, unknown>) => {
+    targets.forEach((target) => {
       const sourceId = target.supplySourceId ? String(target.supplySourceId) : null;
       const source = sourceId ? sourcesById.get(sourceId) : undefined;
       if (
@@ -2628,7 +3279,55 @@ export const reconcileAffiliateReplenishmentDemands = async (input: Readonly<{
       observeTarget(sourceId, target, source.repairPriority);
     });
   }
-  const rows: any[] = [];
+  const targetKeys = input.contract.targets.map((target) => targetKeyFor({
+    marketKey: target.marketKey ?? 'DEFAULT',
+    sportId: target.sportId ?? 'ALL',
+    sourceProfile: target.sourceProfile.toUpperCase(),
+  }));
+  const canBatchLoadExistingDemands = typeof database.demands?.findMany === 'function';
+  const existingDemands = canBatchLoadExistingDemands && targetKeys.length
+    ? await database.demands.findMany({
+        where: {
+          rolloutCohort,
+          contractVersion: input.contract.version,
+          contractHash: input.contract.hash,
+          targetKey: { in: targetKeys },
+        },
+      })
+    : [];
+  const existingDemandsByTargetKey = new Map(
+    existingDemands.map((demand) => [demand.targetKey, demand]),
+  );
+  const resultRow = (row: unknown): AffiliateReplenishmentDemandResultRow => {
+    const value = recordValue(row);
+    const statusValue = String(value.status ?? 'OPEN').toUpperCase();
+    const status: AffiliateReplenishmentDemandResultRow['status'] = statusValue === 'CLOSED' || statusValue === 'PAUSED'
+      ? statusValue
+      : 'OPEN';
+    return {
+      id: String(value.id ?? ''),
+      targetKey: String(value.targetKey ?? ''),
+      marketKey: String(value.marketKey ?? ''),
+      sportId: String(value.sportId ?? ''),
+      sourceProfile: String(value.sourceProfile ?? ''),
+      rolloutCohort: String(value.rolloutCohort ?? rolloutCohort),
+      contractVersion: Number(value.contractVersion ?? input.contract.version),
+      contractHash: String(value.contractHash ?? input.contract.hash),
+      minimumFreshPublishedSupply: Number(value.minimumFreshPublishedSupply ?? 0),
+      observedFreshPublishedSupply: Number(value.observedFreshPublishedSupply ?? 0),
+      priority: Number(value.priority ?? AFFILIATE_REPLENISHMENT_PRIORITY.NEW_DISCOVERY),
+      status,
+      openedAt: toDate(value.openedAt) ?? now,
+      closedAt: toDate(value.closedAt),
+      nextEligibleAt: toDate(value.nextEligibleAt),
+      searchSaturatedUntil: toDate(value.searchSaturatedUntil),
+      activeWaveId: stringValue(value.activeWaveId),
+      generation: Number(value.generation ?? 0),
+      reasonCodes: stringArray(value.reasonCodes),
+      evidenceJson: value.evidenceJson ?? null,
+    };
+  };
+  const rows: AffiliateReplenishmentDemandResultRow[] = [];
   let opened = 0;
   let closed = 0;
   for (const target of input.contract.targets) {
@@ -2640,17 +3339,25 @@ export const reconcileAffiliateReplenishmentDemands = async (input: Readonly<{
     const demandPriority = priorityByTargetKey.get(targetKey)
       ?? AFFILIATE_REPLENISHMENT_PRIORITY.NEW_DISCOVERY;
     const satisfied = count >= target.minimumFreshPublishedSupply;
-    const existing = await database.demands.findUnique({
-      where: {
-        rolloutCohort_targetKey_contractVersion_contractHash: {
-          rolloutCohort,
-          targetKey,
-          contractVersion: input.contract.version,
-          contractHash: input.contract.hash,
-        },
-      },
-    });
-    const status = satisfied ? 'CLOSED' : 'OPEN';
+    const existing = existingDemandsByTargetKey.get(targetKey)
+      ?? (!canBatchLoadExistingDemands && database.demands.findUnique
+        ? await database.demands.findUnique({
+            where: {
+              rolloutCohort_targetKey_contractVersion_contractHash: {
+                rolloutCohort,
+                targetKey,
+                contractVersion: input.contract.version,
+                contractHash: input.contract.hash,
+              },
+            },
+          })
+        : null);
+    const pauseResumeAt = toDate(existing?.nextEligibleAt) ?? toDate(existing?.searchSaturatedUntil);
+    const pausedUntilResume = existing?.status === 'PAUSED'
+      && (!pauseResumeAt || pauseResumeAt.getTime() > now.getTime());
+    const status: 'OPEN' | 'CLOSED' | 'PAUSED' = satisfied
+      ? 'CLOSED'
+      : pausedUntilResume ? 'PAUSED' : 'OPEN';
     if (existing?.status !== status) {
       if (status === 'OPEN') opened += 1;
       else closed += 1;
@@ -2666,7 +3373,11 @@ export const reconcileAffiliateReplenishmentDemands = async (input: Readonly<{
     const nextClosedAt = status === 'CLOSED'
       ? stateUnchanged ? existing?.closedAt ?? now : now
       : null;
-    const nextReasonCodes = satisfied ? ['TARGET_MET'] : ['TARGET_SHORTFALL'];
+    const nextReasonCodes = satisfied
+      ? ['TARGET_MET']
+      : status === 'PAUSED'
+        ? stringArray(existing?.reasonCodes)
+        : ['TARGET_SHORTFALL'];
     const nextEvidenceJson = stateUnchanged
       ? existing?.evidenceJson ?? { observedAt: now.toISOString(), observedFreshPublishedSupply: count }
       : { observedAt: now.toISOString(), observedFreshPublishedSupply: count };
@@ -2690,8 +3401,9 @@ export const reconcileAffiliateReplenishmentDemands = async (input: Readonly<{
       status,
       openedAt: nextOpenedAt,
       closedAt: nextClosedAt,
+      activeWaveId: status === 'CLOSED' ? null : existing?.activeWaveId ?? null,
       reasonCodes: nextReasonCodes,
-      evidenceJson: nextEvidenceJson,
+      evidenceJson: prismaNullableJsonValue(nextEvidenceJson),
       generation: nextGeneration,
     };
     const updateData = {
@@ -2708,8 +3420,9 @@ export const reconcileAffiliateReplenishmentDemands = async (input: Readonly<{
       status,
       openedAt: nextOpenedAt,
       closedAt: nextClosedAt,
+      activeWaveId: status === 'CLOSED' ? null : existing?.activeWaveId ?? null,
       reasonCodes: nextReasonCodes,
-      evidenceJson: nextEvidenceJson,
+      evidenceJson: prismaNullableJsonValue(nextEvidenceJson),
       generation: nextGeneration,
     };
     const where = {
@@ -2720,12 +3433,16 @@ export const reconcileAffiliateReplenishmentDemands = async (input: Readonly<{
         contractHash: input.contract.hash,
       },
     };
+    if (!input.dryRun && stateUnchanged && existing) {
+      rows.push(existing as AffiliateReplenishmentDemandResultRow);
+      continue;
+    }
     const row = input.dryRun
       ? { ...(existing ?? {}), ...createData, ...updateData, id: existing?.id ?? createData.id }
       : stateUnchanged
         ? existing
         : await database.demands.upsert({ where, create: createData, update: updateData });
-    rows.push(row);
+    rows.push(resultRow(row));
   }
   return { opened, closed, demands: rows };
 };
@@ -2736,14 +3453,14 @@ export const planAffiliateReplenishmentFromDatabase = async (input: Readonly<{
   rolloutCohort?: string;
   db?: AffiliateSupplyDatabase;
   now?: Date;
-  demands?: readonly any[];
+  demands?: readonly AffiliateReplenishmentDemandEvidence[];
 }> = {}): Promise<AffiliateReplenishmentPlan> => {
   const database = input.db ?? affiliateSupplyDatabase();
   const contract = input.contract;
   const demandRolloutCohort = input.rolloutCohort ?? contract?.rolloutCohort;
   const now = input.now ?? new Date();
   const [waitingMapping, activeMapping, waitingReview, activeReviewerClaims, activeProducerClaims, demands, activeWaves, campaigns, healthyWorkers] = await Promise.all([
-    database.mappingJobs.count({ where: { status: { in: ['QUEUED', 'REVIEW_REQUIRED'] } } }),
+    database.mappingJobs.count({ where: { status: 'QUEUED' } }),
     database.mappingJobs.count({ where: { status: 'CLAIMED' } }),
     database.approvals.count({ where: { status: { in: ['QUEUED', 'DEFERRED', 'REVIEW_REQUIRED'] } } }),
     database.gatewayClaims.count({ where: { role: 'SUPPLY_REVIEWER', status: 'ACTIVE', leaseExpiresAt: { gt: now } } }),
@@ -2776,15 +3493,15 @@ export const planAffiliateReplenishmentFromDatabase = async (input: Readonly<{
       })
       : Promise.resolve(null),
   ]);
+  const workerHealthAvailable = typeof database.workerHealth?.findMany === 'function';
   const workerRows = Array.isArray(healthyWorkers) ? healthyWorkers : [];
-  const hasCurrentWorkerHealth = workerRows.length > 0;
-  const healthyProducerCount = hasCurrentWorkerHealth
-    ? workerRows.filter((worker: { role: string; status?: string }) => (
+  const healthyProducerCount = workerHealthAvailable
+    ? workerRows.filter((worker) => (
       worker.role === 'MAPPING_PRODUCER' && worker.status === 'HEALTHY'
     )).length
     : activeProducerClaims;
-  const healthyReviewerCount = hasCurrentWorkerHealth
-    ? workerRows.filter((worker: { role: string; status?: string }) => (
+  const healthyReviewerCount = workerHealthAvailable
+    ? workerRows.filter((worker) => (
       worker.role === 'SUPPLY_REVIEWER' && worker.status === 'HEALTHY'
     )).length
     : activeReviewerClaims;
@@ -2798,7 +3515,7 @@ export const planAffiliateReplenishmentFromDatabase = async (input: Readonly<{
       activeReviewerCount: healthyReviewerCount,
       healthyReviewerCount,
     },
-    demands: demands.map((demand: any) => ({
+    demands: demands.map((demand) => ({
       id: demand.id,
       status: demand.status,
       priority: demand.priority,
@@ -2809,21 +3526,40 @@ export const planAffiliateReplenishmentFromDatabase = async (input: Readonly<{
       sportId: demand.sportId,
       sourceProfile: demand.sourceProfile,
     })),
-    activeWaves: activeWaves.map((wave: any) => ({
+    activeWaves: activeWaves.map((wave) => ({
       id: wave.id,
       status: wave.status,
       demandId: wave.demandId,
     })),
-    campaigns: (campaigns ?? []).map((campaign: any) => ({
+    campaigns: (campaigns ?? []).map((campaign) => ({
       id: campaign.id,
-      eligible: !campaign.nextRunAt || campaign.nextRunAt <= now,
+      // Demand retry and Search Saturation timestamps are the only admission clocks.
+      isEligible: true,
       priority: Number(recordValue(campaign.metadata).priority ?? 2),
-      nextEligibleAt: campaign.nextRunAt,
-      marketKey: recordValue(campaign.metadata).marketKey,
-      sportId: recordValue(campaign.metadata).sportId,
-      sourceProfile: recordValue(campaign.metadata).sourceProfile,
+      nextEligibleAt: null,
+      marketKey: stringValue(recordValue(campaign.metadata).marketKey),
+      sportId: stringValue(recordValue(campaign.metadata).sportId),
+      sourceProfile: stringValue(recordValue(campaign.metadata).sourceProfile),
     })),
   });
+};
+
+const isReplenishmentWaveCohortUniqueConflict = (error: unknown): boolean => {
+  if (!isUniqueConstraintError(error) || !error || typeof error !== 'object' || !('meta' in error)) {
+    return false;
+  }
+  const meta = error.meta;
+  if (!meta || typeof meta !== 'object' || !('target' in meta)) return false;
+  const target = meta.target;
+  const targets = typeof target === 'string'
+    ? [target]
+    : Array.isArray(target)
+      ? target.filter((value): value is string => typeof value === 'string')
+      : [];
+  return targets.some((value) => (
+    value === 'rolloutCohort'
+    || value === 'AffiliateReplenishmentWaves_one_live_per_cohort'
+  ));
 };
 
 export const startAffiliateReplenishmentWave = async (input: Readonly<{
@@ -2832,70 +3568,88 @@ export const startAffiliateReplenishmentWave = async (input: Readonly<{
   contract: AffiliateSupplyContractPolicy;
   db?: AffiliateSupplyDatabase;
   now?: Date;
-}>): Promise<any | null> => {
-  if (input.plan.action === 'NONE' || !input.plan.selectedDemandId) return null;
+}>): Promise<AffiliateReplenishmentWaves | null> => {
+  const selectedDemandId = input.plan.selectedDemandId;
+  if (input.plan.action === 'NONE' || !selectedDemandId) return null;
   const database = input.db ?? affiliateSupplyDatabase();
   const now = input.now ?? new Date();
   const rolloutCohort = input.rolloutCohort ?? input.contract.rolloutCohort;
   if (!database.waves?.create) return null;
-  return withSupplyTransaction(database, async (transactionDatabase) => {
-    const demand = await transactionDatabase.demands.findUnique({ where: { id: input.plan.selectedDemandId } });
-    if (
-      !demand
-      || demand.status !== 'OPEN'
-      || demand.rolloutCohort !== rolloutCohort
-      || demand.contractVersion !== input.contract.version
-      || demand.contractHash !== input.contract.hash
-    ) return null;
-    const existingWave = await transactionDatabase.waves.findFirst({
-      where: { demandId: demand.id, status: { in: ['PLANNED', 'ACTIVE', 'WAITING'] } },
-    });
-    if (existingWave) return existingWave;
-    let coveragePlanningJobId: string | null = null;
-    if (input.plan.action === 'REQUEST_COVERAGE_PLANNING_JOB' && transactionDatabase.coverageJobs?.upsert) {
-      const job = await transactionDatabase.coverageJobs.upsert({
-        where: { subjectType_subjectKey: { subjectType: 'SUPPLY_REPLENISHMENT', subjectKey: demand.id } },
-        create: {
-          id: createId(),
-          subjectType: 'SUPPLY_REPLENISHMENT',
-          subjectKey: demand.id,
-          status: 'QUEUED',
-          context: {
-            demandId: demand.id,
-            marketKey: demand.marketKey,
-            sportId: demand.sportId,
-            sourceProfile: demand.sourceProfile,
-            rolloutCohort,
-            contractVersion: input.contract.version,
-            contractHash: input.contract.hash,
-          },
-          cohortPriority: 0,
-          priorityScore: Number(demand.priority),
-          isBlockingCoverage: true,
-        },
-        update: { status: 'QUEUED', errorMessage: null, finishedAt: null },
+  const liveWaveWhere = {
+    rolloutCohort,
+    status: { in: ['PLANNED', 'ACTIVE', 'WAITING'] },
+  } as Prisma.AffiliateReplenishmentWavesWhereInput;
+  try {
+    return await withSupplyTransaction(database, async (transactionDatabase) => {
+      const demand = await transactionDatabase.demands.findUnique({ where: { id: selectedDemandId } });
+      if (
+        !demand
+        || demand.status !== 'OPEN'
+        || demand.rolloutCohort !== rolloutCohort
+        || demand.contractVersion !== input.contract.version
+        || demand.contractHash !== input.contract.hash
+      ) return null;
+      const existingWave = await transactionDatabase.waves.findFirst({
+        where: liveWaveWhere,
+        orderBy: { createdAt: 'asc' },
       });
-      coveragePlanningJobId = job.id;
-    }
-    const wave = await transactionDatabase.waves.create({
-      data: {
-        id: createId(),
-        demandId: demand.id,
-        rolloutCohort,
-        status: 'ACTIVE',
-        campaignId: input.plan.selectedCampaignId,
-        coveragePlanningJobId,
-        startedAt: now,
-        demandGeneration: demand.generation,
-        evidenceRefs: [`demand:${demand.id}`],
-      },
+      if (existingWave) return existingWave;
+      let coveragePlanningJobId: string | null = null;
+      if (input.plan.action === 'REQUEST_COVERAGE_PLANNING_JOB' && transactionDatabase.coverageJobs?.upsert) {
+        const job = await transactionDatabase.coverageJobs.upsert({
+          where: { subjectType_subjectKey: { subjectType: 'SUPPLY_REPLENISHMENT', subjectKey: demand.id } },
+          create: {
+            id: createId(),
+            subjectType: 'SUPPLY_REPLENISHMENT',
+            subjectKey: demand.id,
+            status: 'QUEUED',
+            context: prismaJsonValue({
+              demandId: demand.id,
+              marketKey: demand.marketKey,
+              sportId: demand.sportId,
+              sourceProfile: demand.sourceProfile,
+              rolloutCohort,
+              contractVersion: input.contract.version,
+              contractHash: input.contract.hash,
+            }),
+            cohortPriority: 0,
+            priorityScore: Number(demand.priority),
+            isBlockingCoverage: true,
+          },
+          update: { status: 'QUEUED', errorMessage: null, finishedAt: null },
+        });
+        coveragePlanningJobId = job.id;
+      }
+      const wave = await transactionDatabase.waves.create({
+        data: {
+          id: createId(),
+          demandId: demand.id,
+          rolloutCohort,
+          status: 'ACTIVE',
+          campaignId: input.plan.selectedCampaignId ?? undefined,
+          coveragePlanningJobId,
+          startedAt: now,
+          demandGeneration: Number(demand.generation ?? 0) + 1,
+          evidenceRefs: [`demand:${demand.id}`],
+        },
+      });
+      await transactionDatabase.demands.update({
+        where: { id: demand.id },
+        data: { activeWaveId: wave.id, generation: demand.generation + 1 },
+      });
+      return wave;
     });
-    await transactionDatabase.demands.update({
-      where: { id: demand.id },
-      data: { activeWaveId: wave.id, generation: demand.generation + 1 },
-    });
-    return wave;
-  });
+  } catch (error) {
+    if (!isReplenishmentWaveCohortUniqueConflict(error)) throw error;
+    const concurrentWave = await withSupplyTransaction(database, async (transactionDatabase) => (
+      transactionDatabase.waves.findFirst({
+        where: liveWaveWhere,
+        orderBy: { createdAt: 'asc' },
+      })
+    ));
+    if (concurrentWave) return concurrentWave;
+    throw error;
+  }
 };
 export type AffiliateLegacySupplyTargetProjection = Readonly<{
   candidateId: string;
@@ -2939,12 +3693,13 @@ export const reconcileLegacyAffiliateSupply = async (input: Readonly<{
         orderBy: { id: 'asc' },
       })
     : [];
-  const sourceIds = sources.map((source: any) => source.id);
-  const candidates = database.candidates?.findMany && sourceIds.length
+  const sourceIds = sources.map((source) => source.id);
+  const candidates = typeof database.candidates?.findMany === 'function' && sourceIds.length
     ? await database.candidates.findMany({
         where: {
           sourceId: { in: sourceIds },
           OR: [
+            { status: 'PUBLISHED' },
             { publishedEventId: { not: null } },
             { publishedTeamId: { not: null } },
             { publishedFacilityId: { not: null } },
@@ -2963,8 +3718,8 @@ export const reconcileLegacyAffiliateSupply = async (input: Readonly<{
         },
       })
     : [];
-  const candidateIds = candidates.map((candidate: any) => candidate.id);
-  const targets = database.targets?.findMany && candidateIds.length
+  const candidateIds = candidates.map((candidate) => candidate.id);
+  const targets = typeof database.targets?.findMany === 'function' && candidateIds.length
     ? await database.targets.findMany({
         where: { candidateId: { in: candidateIds } },
         select: {
@@ -2977,19 +3732,22 @@ export const reconcileLegacyAffiliateSupply = async (input: Readonly<{
         },
       })
     : [];
-  const targetsByCandidateId = new Map<string, any[]>();
+  const targetsByCandidateId = new Map<string, AffiliateSupplyLegacyTargetRow[]>();
   for (const target of targets) {
     const candidateTargets = targetsByCandidateId.get(String(target.candidateId)) ?? [];
     candidateTargets.push(target);
     targetsByCandidateId.set(String(target.candidateId), candidateTargets);
   }
-  const candidatesBySourceId = new Map<string, any[]>();
+  const candidatesBySourceId = new Map<string, AffiliateSupplyLegacyCandidateRow[]>();
   for (const candidate of candidates) {
     const sourceCandidates = candidatesBySourceId.get(String(candidate.sourceId)) ?? [];
     sourceCandidates.push(candidate);
     candidatesBySourceId.set(String(candidate.sourceId), sourceCandidates);
   }
-  const publicTargetsForCandidate = (candidate: Record<string, unknown>): Array<{
+  const publicTargetsForCandidate = (
+    candidate: AffiliateSupplyLegacyCandidateRow,
+    candidateTargets: readonly AffiliateSupplyLegacyTargetRow[],
+  ): Array<{
     targetType: string;
     targetId: string;
   }> => {
@@ -2999,25 +3757,42 @@ export const reconcileLegacyAffiliateSupply = async (input: Readonly<{
       : listingKind === 'CLUB'
         ? 'ORGANIZATION'
         : listingKind;
-    const targetId = targetType === 'EVENT'
-      ? candidate.publishedEventId
-      : targetType === 'TEAM'
-        ? candidate.publishedTeamId
-        : targetType === 'FACILITY'
-          ? candidate.publishedFacilityId
-          : targetType === 'ORGANIZATION'
-            ? candidate.publishedOrganizationId
-            : null;
-    return typeof targetId === 'string' && targetId.trim()
-      ? [{ targetType, targetId: targetId.trim() }]
-      : [];
+    const identities = new Map<string, { targetType: string; targetId: string }>();
+    const addTarget = (rawTargetType: unknown, rawTargetId: unknown): void => {
+      const rawType = String(rawTargetType ?? '').toUpperCase();
+      const normalizedType = rawType === 'RENTAL'
+        ? 'FACILITY'
+        : rawType === 'CLUB'
+          ? 'ORGANIZATION'
+          : rawType;
+      const targetId = typeof rawTargetId === 'string' ? rawTargetId.trim() : '';
+      if (!normalizedType || !targetId) return;
+      identities.set(`${normalizedType}:${targetId}`, { targetType: normalizedType, targetId });
+    };
+    addTarget(
+      targetType,
+      targetType === 'EVENT'
+        ? candidate.publishedEventId
+        : targetType === 'TEAM'
+          ? candidate.publishedTeamId
+          : targetType === 'FACILITY'
+            ? candidate.publishedFacilityId
+            : targetType === 'ORGANIZATION'
+              ? candidate.publishedOrganizationId
+              : null,
+    );
+    for (const target of candidateTargets) {
+      if (!['PUBLISHED', 'LAST_KNOWN_GOOD'].includes(String(target.status ?? '').toUpperCase())) continue;
+      addTarget(target.targetType, target.targetId);
+    }
+    return Array.from(identities.values());
   };
   const rows: AffiliateLegacySupplyReconciliationRow[] = [];
   for (const source of sources) {
     const identity = normalizeAffiliateSupplyIdentity({
       requestedUrl: String(source.listUrl),
       resolvedCanonicalUrl: String(source.listUrl),
-      redirectVerified: false,
+      isRedirectVerified: false,
     });
     const existingRoot = database.supplySources?.findFirst
       ? await database.supplySources.findFirst({
@@ -3030,8 +3805,8 @@ export const reconcileLegacyAffiliateSupply = async (input: Readonly<{
     let unverifiableTargetCount = 0;
     for (const candidate of sourceCandidates) {
       const candidateTargets = targetsByCandidateId.get(String(candidate.id)) ?? [];
-      for (const publicTarget of publicTargetsForCandidate(candidate)) {
-        const existingTarget = candidateTargets.find((target: any) => (
+      for (const publicTarget of publicTargetsForCandidate(candidate, candidateTargets)) {
+        const existingTarget = candidateTargets.find((target) => (
           String(target.targetType).toUpperCase() === publicTarget.targetType
           && String(target.targetId) === publicTarget.targetId
         ));
@@ -3076,83 +3851,174 @@ export const reconcileLegacyAffiliateSupply = async (input: Readonly<{
   };
 };
 
-const persistReconciledAffiliateSupplyAssessment = async (input: Readonly<{
+const persistAffiliateSupplyReconciliationBatch = async (input: Readonly<{
   database: AffiliateSupplyDatabase;
-  root: Record<string, any>;
-  snapshot: AffiliateSupplyEvidenceSnapshot;
-  assessment: AffiliateSupplyAssessment;
+  roots: readonly AffiliateSupplySources[];
+  snapshots: ReadonlyMap<string, AffiliateSupplyEvidenceSnapshot>;
+  assessments: readonly AffiliateSupplyAssessment[];
   contract: AffiliateSupplyContractPolicy;
   now: Date;
-}>): Promise<AffiliateSupplyAssessment> => {
-  const { database, root, snapshot, assessment, contract, now } = input;
-  const persistedInvariantViolations = Array.from(new Set(
-    (Array.isArray(root.invariantViolations) ? root.invariantViolations : [])
-      .filter((value): value is string => typeof value === 'string'),
-  )).sort();
-  const invariantViolationsMatch = JSON.stringify(persistedInvariantViolations)
-    === JSON.stringify([...assessment.invariantViolations].sort());
-  const projectionMatches = (
-    root.derivedStage === assessment.stage
-    && root.derivedOutcome === assessment.outcome
-    && root.freshnessStatus === assessment.freshnessStatus
-    && root.targetContribution === assessment.targetContribution
-    && root.repairPriority === assessment.repairPriority
-    && root.isAutomationEnabled === assessment.isAutomationEnabled
-    && root.automationHoldReason === assessment.automationHoldReason
-    && root.isExcluded === (assessment.stage === 'SOURCE_EXCLUDED')
-    && invariantViolationsMatch
+}>): Promise<AffiliateSupplyAssessment[]> => {
+  const { database, roots, snapshots, assessments, contract, now } = input;
+  const rootIds = roots.map((root) => root.id);
+  const transitionDelegate = database.transitions as unknown as {
+    findMany?: unknown;
+    create?: unknown;
+  } | undefined;
+  const sourceDelegate = database.supplySources as unknown as { update?: unknown } | undefined;
+  const canPersistTransitions = (
+    typeof transitionDelegate?.findMany === 'function'
+    && typeof transitionDelegate.create === 'function'
+    && typeof sourceDelegate?.update === 'function'
   );
-  if (
-    projectionMatches
-    || !database.transitions?.create
-    || !database.transitions?.findUnique
-    || !database.contractManifests?.findFirst
-  ) {
-    if (!projectionMatches && database.supplySources?.update) {
-      await database.supplySources.update({
-        where: { id: root.id },
+  const transitionRows: AffiliateSupplyLifecycleTransitions[] = canPersistTransitions
+    ? await database.transitions.findMany({
+        where: { supplySourceId: { in: rootIds } },
+        orderBy: { sequence: 'desc' },
+      })
+    : [];
+  const transitionsByIdempotencyKey = new Map(
+    transitionRows.map((transition) => [transition.idempotencyKey, transition]),
+  );
+  const latestSequenceBySource = new Map<string, number>();
+  for (const transition of transitionRows) {
+    const current = latestSequenceBySource.get(transition.supplySourceId);
+    if (current === undefined || transition.sequence > current) {
+      latestSequenceBySource.set(transition.supplySourceId, transition.sequence);
+    }
+  }
+  const persistProjection = async (
+    root: AffiliateSupplySources,
+    snapshot: AffiliateSupplyEvidenceSnapshot,
+    assessment: AffiliateSupplyAssessment,
+    lifecycleGeneration: number,
+  ): Promise<void> => {
+    await database.supplySources.update({
+      where: { id: root.id },
+      data: {
+        lifecycleGeneration,
+        derivedStage: assessment.stage,
+        derivedOutcome: assessment.outcome,
+        freshnessStatus: assessment.freshnessStatus,
+        targetContribution: assessment.targetContribution,
+        repairPriority: assessment.repairPriority,
+        isAutomationEnabled: assessment.isAutomationEnabled,
+        isExcluded: assessment.stage === 'SOURCE_EXCLUDED',
+        automationHoldReason: assessment.automationHoldReason,
+        lastSuccessfulRefreshAt: snapshot.latestRun && isSuccessStatus(snapshot.latestRun.status)
+          ? toDate(snapshot.latestRun.finishedAt)
+          : undefined,
+        lastAssessmentAt: now,
+        assessmentJson: prismaJsonValue(assessment),
+        invariantViolations: [...assessment.invariantViolations],
+        activeSupplyContractVersion: contract.version,
+        activeSupplyContractHash: contract.hash,
+      },
+    });
+    if (root.liveSourceId && database.sources?.update) {
+      await database.sources.update({
+        where: { id: root.liveSourceId },
         data: {
-          derivedStage: assessment.stage,
-          derivedOutcome: assessment.outcome,
-          freshnessStatus: assessment.freshnessStatus,
-          targetContribution: assessment.targetContribution,
-          repairPriority: assessment.repairPriority,
-          isAutomationEnabled: assessment.isAutomationEnabled,
-          isExcluded: assessment.stage === 'SOURCE_EXCLUDED',
-          automationHoldReason: assessment.automationHoldReason,
-          lastSuccessfulRefreshAt: snapshot.latestRun && isSuccessStatus(snapshot.latestRun.status)
-            ? toDate(snapshot.latestRun.finishedAt)
-            : undefined,
-          lastAssessmentAt: now,
-          assessmentJson: assessment,
-          invariantViolations: assessment.invariantViolations,
+          lifecycleGeneration,
           activeSupplyContractVersion: contract.version,
           activeSupplyContractHash: contract.hash,
+          ...(assessment.isAutomationEnabled ? {} : { autoScrapeEnabled: false }),
         },
       });
     }
-    return assessment;
-  }
-  const result = await executeAffiliateSupplyLifecycleCommand({
-    supplySourceId: root.id,
-    command: 'RECONCILE',
-    authority: 'SYSTEM',
-    expectedLifecycleGeneration: Number(root.lifecycleGeneration ?? 0),
-    idempotencyKey: `reconcile:${root.id}:${root.lifecycleGeneration}:${contract.version}:${contract.hash}`,
-    request: {
+  };
+  return Promise.all(roots.map(async (root, index) => {
+    const snapshot = snapshots.get(root.id);
+    if (!snapshot) throw new Error(`Affiliate Supply Source snapshot is missing: ${root.id}.`);
+    const assessment = assessments[index];
+    const persistedInvariantViolations = Array.from(new Set(root.invariantViolations)).sort();
+    const projectionMatches = (
+      root.derivedStage === assessment.stage
+      && root.derivedOutcome === assessment.outcome
+      && root.freshnessStatus === assessment.freshnessStatus
+      && root.targetContribution === assessment.targetContribution
+      && root.repairPriority === assessment.repairPriority
+      && root.isAutomationEnabled === assessment.isAutomationEnabled
+      && root.automationHoldReason === assessment.automationHoldReason
+      && root.isExcluded === (assessment.stage === 'SOURCE_EXCLUDED')
+      && root.activeSupplyContractVersion === contract.version
+      && root.activeSupplyContractHash === contract.hash
+      && JSON.stringify(persistedInvariantViolations)
+        === JSON.stringify([...assessment.invariantViolations].sort())
+    );
+    if (projectionMatches) return assessment;
+    const idempotencyKey = `reconcile:${root.id}:${root.lifecycleGeneration}:${contract.version}:${contract.hash}`;
+    const request = {
       evidenceRefs: [
         `supply-source:${root.id}`,
         ...assessment.evidenceRefs,
       ],
       assessedAt: assessment.assessedAt,
-    },
-    actorKind: 'SYSTEM',
-    actorId: 'affiliate-supply-reconciliation',
-    rolloutCohort: contract.rolloutCohort,
-    db: database,
-    now,
-  });
-  return result.assessment;
+    };
+    const requestHash = affiliateLifecycleRequestHash({
+      supplySourceId: root.id,
+      command: 'RECONCILE',
+      contractVersion: contract.version,
+      contractHash: contract.hash,
+      request,
+    });
+    const existingTransition = transitionsByIdempotencyKey.get(idempotencyKey);
+    if (existingTransition) {
+      const storedRequestHash = affiliateLifecycleRequestHash({
+        supplySourceId: existingTransition.supplySourceId,
+        command: existingTransition.command,
+        contractVersion: existingTransition.contractVersion,
+        contractHash: existingTransition.contractHash,
+        request: recordValue(existingTransition.requestJson),
+      });
+      if (storedRequestHash !== requestHash) {
+        throw new Error('Affiliate lifecycle reconciliation idempotency key was reused with a different request.');
+      }
+      return existingTransition.resultJson as unknown as AffiliateSupplyAssessment;
+    }
+    const result: AffiliateSupplyAssessment = {
+      ...assessment,
+      lifecycleGeneration: root.lifecycleGeneration + 1,
+    };
+    if (!canPersistTransitions) {
+      await persistProjection(root, snapshot, assessment, root.lifecycleGeneration);
+      return assessment;
+    }
+    const resultHash = hashAffiliateAgentValue(result);
+    const sequence = (latestSequenceBySource.get(root.id) ?? root.lifecycleGeneration) + 1;
+    const transition = await database.transitions.create({
+      data: {
+        id: createId(),
+        supplySourceId: root.id,
+        sequence,
+        generation: result.lifecycleGeneration,
+        command: 'RECONCILE',
+        contractVersion: contract.version,
+        resultHash,
+        outcome: result.outcome,
+        fromStage: root.derivedStage,
+        toStage: result.stage,
+        commandRef: null,
+        idempotencyKey,
+        requestHash,
+        contractHash: contract.hash,
+        actorKind: 'SYSTEM',
+        actorId: 'affiliate-supply-reconciliation',
+        executingAgentId: null,
+        reasonCodes: Array.from(new Set(result.reasonCodes)),
+        evidenceRefs: Array.from(new Set([
+          ...result.evidenceRefs,
+          ...request.evidenceRefs,
+        ])),
+        requestJson: prismaJsonValue(request),
+        resultJson: prismaJsonValue(result),
+        occurredAt: now,
+      },
+    });
+    await persistProjection(root, snapshot, result, result.lifecycleGeneration);
+    latestSequenceBySource.set(root.id, transition.sequence);
+    return result;
+  }));
 };
 
 export const reconcileAffiliateSupplySources = async (input: Readonly<{
@@ -3171,24 +4037,24 @@ export const reconcileAffiliateSupplySources = async (input: Readonly<{
       orderBy: { id: 'asc' },
     });
     const snapshots = await loadSnapshots(transactionDatabase, roots, contract, now);
-    const assessments = await Promise.all(roots.map(async (root: any) => {
-      const snapshot = snapshots.get(String(root.id));
+    const derivedAssessments = roots.map((root) => {
+      const snapshot = snapshots.get(root.id);
       if (!snapshot) throw new Error(`Affiliate Supply Source snapshot is missing: ${root.id}.`);
-      const assessment = deriveAffiliateSupplyAssessment(snapshot);
-      return persistReconciledAffiliateSupplyAssessment({
-        database: transactionDatabase,
-        root,
-        snapshot,
-        assessment,
-        contract,
-        now,
-      });
-    }));
+      return deriveAffiliateSupplyAssessment(snapshot);
+    });
+    const assessments = await persistAffiliateSupplyReconciliationBatch({
+      database: transactionDatabase,
+      roots,
+      snapshots,
+      assessments: derivedAssessments,
+      contract,
+      now,
+    });
     return { assessed: assessments.length, assessments };
   });
 };
 export type AffiliateReplenishmentWaveExecutionResult = Readonly<{
-  status: 'WAITING' | 'SUCCEEDED' | 'FAILED';
+  status: 'WAITING' | 'SUCCEEDED' | 'FAILED' | 'PAUSED';
   provider?: string | null;
   providerOperationKey?: string | null;
   retryAt?: Date | null;
@@ -3203,10 +4069,10 @@ export type AffiliateReplenishmentReconciliationResult = Readonly<{
   assessed: number;
   opened: number;
   closed: number;
-  demands: readonly any[];
+  demands: readonly AffiliateReplenishmentDemandResultRow[];
   assessments: readonly AffiliateSupplyAssessment[];
   plan: AffiliateReplenishmentPlan;
-  wave: any | null;
+  wave: AffiliateReplenishmentWaves | null;
   providerResult: AffiliateReplenishmentWaveExecutionResult | null;
   dryRun: boolean;
 }>;
@@ -3219,8 +4085,8 @@ export const reconcileAffiliateReplenishment = async (input: Readonly<{
   now?: Date;
   dryRun?: boolean;
   runWave?: (input: Readonly<{
-    wave: any;
-    demand: any;
+    wave: AffiliateReplenishmentWaves;
+    demand: AffiliateReplenishmentDemands;
     contract: AffiliateSupplyContractPolicy;
   }>) => Promise<AffiliateReplenishmentWaveExecutionResult>;
 }> = {}): Promise<AffiliateReplenishmentReconciliationResult> => {
@@ -3235,23 +4101,21 @@ export const reconcileAffiliateReplenishment = async (input: Readonly<{
       orderBy: { id: 'asc' },
     });
     const snapshots = await loadSnapshots(transactionDatabase, roots, contract, now);
-    const derivedAssessments = roots.map((root: any) => (
-      deriveAffiliateSupplyAssessment(snapshots.get(String(root.id))!)
-    ));
+    const derivedAssessments = roots.map((root) => {
+      const snapshot = snapshots.get(root.id);
+      if (!snapshot) throw new Error(`Affiliate Supply Source snapshot is missing: ${root.id}.`);
+      return deriveAffiliateSupplyAssessment(snapshot);
+    });
     const assessments = input.dryRun
       ? derivedAssessments
-      : await Promise.all(roots.map(async (root: any, index: number) => {
-        const snapshot = snapshots.get(String(root.id));
-        if (!snapshot) throw new Error(`Affiliate Supply Source snapshot is missing: ${root.id}.`);
-        return persistReconciledAffiliateSupplyAssessment({
-          database: transactionDatabase,
-          root,
-          snapshot,
-          assessment: derivedAssessments[index],
-          contract,
-          now,
-        });
-      }));
+      : await persistAffiliateSupplyReconciliationBatch({
+        database: transactionDatabase,
+        roots,
+        snapshots,
+        assessments: derivedAssessments,
+        contract,
+        now,
+      });
     const demandResult = await reconcileAffiliateReplenishmentDemands({
       contract,
       rolloutCohort,
@@ -3271,7 +4135,10 @@ export const reconcileAffiliateReplenishment = async (input: Readonly<{
     now,
     demands: demandResult.demands,
   });
-  const baseResult = (wave: any | null, providerResult: AffiliateReplenishmentWaveExecutionResult | null): AffiliateReplenishmentReconciliationResult => ({
+  const baseResult = (
+    wave: AffiliateReplenishmentWaves | null,
+    providerResult: AffiliateReplenishmentWaveExecutionResult | null,
+  ): AffiliateReplenishmentReconciliationResult => ({
     assessed: assessments.length,
     opened: demandResult.opened,
     closed: demandResult.closed,
@@ -3283,11 +4150,123 @@ export const reconcileAffiliateReplenishment = async (input: Readonly<{
     dryRun: input.dryRun === true,
   });
   const executeWave = async (
-    wave: any,
+    wave: AffiliateReplenishmentWaves,
   ): Promise<AffiliateReplenishmentWaveExecutionResult | null> => {
     if (!input.runWave) return null;
     const demand = await database.demands.findUnique({ where: { id: wave.demandId } });
     if (!demand) throw new Error('Affiliate replenishment wave demand not found.');
+    const demandOpen = String(demand.status ?? '').toUpperCase() === 'OPEN';
+    const generationMatches = Number.isFinite(Number(wave.demandGeneration))
+      && Number(demand.generation ?? 0) === Number(wave.demandGeneration);
+    const activeWaveMatches = demand.activeWaveId === wave.id;
+    if (!demandOpen || !generationMatches || !activeWaveMatches) {
+      const reason = !demandOpen
+        ? 'DEMAND_NOT_OPEN'
+        : !generationMatches
+          ? 'STALE_DEMAND_GENERATION'
+          : 'WAVE_NOT_ATTACHED';
+      const evidenceRefs = Array.from(new Set([
+        ...(Array.isArray(wave.evidenceRefs) ? wave.evidenceRefs : []),
+        `demand:${demand.id}`,
+        `wave:${wave.id}`,
+        `demand-status:${String(demand.status ?? '')}`,
+        `demand-generation:${String(demand.generation ?? '')}`,
+        `wave-demand-generation:${String(wave.demandGeneration ?? '')}`,
+      ]));
+      const staleWaveResult: AffiliateReplenishmentWaveExecutionResult = {
+        status: 'PAUSED',
+        provider: null,
+        providerOperationKey: null,
+        retryAt: null,
+        marginalYield: null,
+        errorCode: reason,
+        result: {
+          demandId: demand.id,
+          demandStatus: demand.status,
+          demandGeneration: demand.generation,
+          waveDemandGeneration: wave.demandGeneration,
+        },
+        evidenceRefs,
+      };
+      await withSupplyTransaction(database, async (transactionDatabase) => {
+        await transactionDatabase.waves.update({
+          where: { id: wave.id },
+          data: {
+            status: 'PAUSED',
+            terminalAt: now,
+            retryAt: null,
+            marginalYield: null,
+            errorCode: staleWaveResult.errorCode,
+            resultJson: prismaNullableJsonValue(staleWaveResult.result),
+            evidenceRefs,
+          },
+        });
+        if (activeWaveMatches) {
+          await transactionDatabase.demands.update({
+            where: { id: demand.id },
+            data: {
+              activeWaveId: null,
+              generation: Number(demand.generation ?? 0) + 1,
+            },
+          });
+        }
+      });
+      return staleWaveResult;
+    }
+    const demandContractMatches = demand.rolloutCohort === contract.rolloutCohort
+      && Number(demand.contractVersion) === contract.version
+      && demand.contractHash === contract.hash;
+    if (!demandContractMatches) {
+      const evidenceRefs = Array.from(new Set([
+        ...(Array.isArray(wave.evidenceRefs) ? wave.evidenceRefs : []),
+        `demand:${demand.id}`,
+        `contract:${String(demand.contractVersion)}:${String(demand.contractHash)}`,
+        `active-contract:${contract.version}:${contract.hash}`,
+      ]));
+      const rolloverResult: AffiliateReplenishmentWaveExecutionResult = {
+        status: 'PAUSED',
+        provider: null,
+        providerOperationKey: null,
+        retryAt: null,
+        marginalYield: null,
+        errorCode: 'CONTRACT_ROLLOVER',
+        result: {
+          demandContractVersion: demand.contractVersion,
+          demandContractHash: demand.contractHash,
+          activeContractVersion: contract.version,
+          activeContractHash: contract.hash,
+        },
+        evidenceRefs,
+      };
+      await withSupplyTransaction(database, async (transactionDatabase) => {
+        await transactionDatabase.waves.update({
+          where: { id: wave.id },
+          data: {
+            status: 'PAUSED',
+            terminalAt: now,
+            retryAt: null,
+            marginalYield: null,
+            errorCode: rolloverResult.errorCode,
+            resultJson: prismaNullableJsonValue(rolloverResult.result),
+            evidenceRefs,
+          },
+        });
+        await transactionDatabase.demands.update({
+          where: { id: demand.id },
+          data: {
+            status: 'PAUSED',
+            activeWaveId: null,
+            nextEligibleAt: null,
+            generation: Number(demand.generation ?? 0) + 1,
+            reasonCodes: Array.from(new Set([
+              ...(Array.isArray(demand.reasonCodes) ? demand.reasonCodes : []),
+              'CONTRACT_ROLLOVER',
+            ])),
+          },
+        });
+      });
+      return rolloverResult;
+    }
     let providerResult: AffiliateReplenishmentWaveExecutionResult;
     try {
       providerResult = await input.runWave({ wave, demand, contract });
@@ -3321,7 +4300,7 @@ export const reconcileAffiliateReplenishment = async (input: Readonly<{
         select: { searchIntervalMinutes: true, metadata: true },
       })
       : null;
-    const campaignMetadata = recordValue(campaign?.metadata ?? wave.metadata);
+    const campaignMetadata = recordValue(campaign?.metadata);
     const campaignIntervalMinutes = Number(
       campaign?.searchIntervalMinutes
       ?? campaignMetadata.searchIntervalMinutes
@@ -3352,7 +4331,7 @@ export const reconcileAffiliateReplenishment = async (input: Readonly<{
           terminalAt: terminal ? now : null,
           marginalYield: providerResult.marginalYield ?? null,
           errorCode: providerResult.errorCode ?? null,
-          resultJson: providerResult.result ?? null,
+          resultJson: prismaNullableJsonValue(providerResult.result),
           evidenceRefs: Array.from(new Set([
             ...(wave.evidenceRefs ?? []),
             ...(providerResult.evidenceRefs ?? []),
@@ -3367,6 +4346,9 @@ export const reconcileAffiliateReplenishment = async (input: Readonly<{
             nextEligibleAt: retryAt,
             generation: currentDemand.generation + 1,
           };
+          if (providerResult.status === 'PAUSED') {
+            demandUpdate.status = 'PAUSED';
+          }
           if (providerResult.status === 'SUCCEEDED') {
             demandUpdate.searchSaturatedUntil = searchSaturatedUntil;
           }
@@ -3393,6 +4375,14 @@ export const reconcileAffiliateReplenishment = async (input: Readonly<{
     : null;
   const contractAdmissionHalted = plan.reasonCodes.includes('UNSAFE_ACTIVE_CONTRACT');
   if (activeWave && !contractAdmissionHalted) {
+    const retryAt = toDate(activeWave.retryAt);
+    if (
+      String(activeWave.status ?? '').toUpperCase() === 'WAITING'
+      && retryAt
+      && retryAt.getTime() > now.getTime()
+    ) {
+      return baseResult(activeWave, null);
+    }
     const providerResult = await executeWave(activeWave);
     return baseResult(activeWave, providerResult);
   }

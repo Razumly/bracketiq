@@ -66,7 +66,7 @@ const mappedSnapshot = (overrides: Partial<AffiliateSupplyEvidenceSnapshot> = {}
     version: 1,
     isActive: false,
     validatedAt: null,
-    schemaValid: true,
+    isSchemaValid: true,
     packageHash: 'package-hash',
     evidenceRefs: ['page-html'],
     evidenceKinds: ['PAGE_HTML'],
@@ -125,7 +125,7 @@ describe('affiliate supply lifecycle assessment', () => {
         id: 'approval-1',
         status: 'APPROVED',
         decision: 'APPROVE',
-        independent: true,
+        isIndependent: true,
         reviewerId: 'reviewer-1',
         reviewedPackageHash: 'package-hash',
         evidenceRefs: ['review-1'],
@@ -144,7 +144,7 @@ describe('affiliate supply lifecycle assessment', () => {
         id: 'approval-1',
         status: 'APPROVED',
         decision: 'APPROVE',
-        independent: true,
+        isIndependent: true,
         reviewerId: 'reviewer-1',
         reviewedPackageHash: 'package-hash',
         evidenceRefs: ['review-1'],
@@ -165,7 +165,7 @@ describe('affiliate supply lifecycle assessment', () => {
         finishedAt: new Date('2026-08-22T08:00:00.000Z'),
         candidateCount: 1,
         itemCount: 1,
-        emptyStateMatched: false,
+        isEmptyStateMatched: false,
       },
       baseline,
       candidates: [{ id: 'candidate-1', status: 'PUBLISHED', listingKind: 'EVENT', publishedTargetId: 'event-1' }],
@@ -192,12 +192,12 @@ describe('affiliate supply lifecycle assessment', () => {
   it('returns Activated Supply after natural expiry without disabling automation', () => {
     const assessment = deriveAffiliateSupplyAssessment(mappedSnapshot({
       approval: {
-        id: 'approval-1', status: 'APPROVED', decision: 'APPROVE', independent: true,
+        id: 'approval-1', status: 'APPROVED', decision: 'APPROVE', isIndependent: true,
         reviewerId: 'reviewer-1', reviewedPackageHash: 'package-hash', evidenceRefs: ['review-1'],
       },
       mapping: { ...mappedSnapshot().mapping!, isActive: true, validatedAt: new Date('2026-08-20T12:00:00.000Z') },
       source: { ...mappedSnapshot().source, autoScrapeEnabled: true },
-      latestRun: { id: 'run-1', status: 'SUCCEEDED', mappingId: 'mapping-1', finishedAt: new Date('2026-08-20T08:00:00.000Z'), candidateCount: 1, itemCount: 1, emptyStateMatched: false },
+      latestRun: { id: 'run-1', status: 'SUCCEEDED', mappingId: 'mapping-1', finishedAt: new Date('2026-08-20T08:00:00.000Z'), candidateCount: 1, itemCount: 1, isEmptyStateMatched: false },
       baseline,
       targets: [{
         id: 'target-1', targetType: 'EVENT', targetId: 'event-1', sourceProfile: 'EVENT',
@@ -218,18 +218,18 @@ describe('affiliate supply lifecycle assessment', () => {
       textIncludes: ['No events are scheduled'],
     };
     const base = mappedSnapshot({
-      approval: { id: 'approval-1', status: 'APPROVED', decision: 'APPROVE', independent: true, reviewerId: 'reviewer-1', reviewedPackageHash: 'package-hash', evidenceRefs: ['review-1'] },
+      approval: { id: 'approval-1', status: 'APPROVED', decision: 'APPROVE', isIndependent: true, reviewerId: 'reviewer-1', reviewedPackageHash: 'package-hash', evidenceRefs: ['review-1'] },
       mapping: { ...mappedSnapshot().mapping!, isActive: true, validatedAt: new Date('2026-08-21T12:00:00.000Z'), mapping: { ...mappedSnapshot().mapping!.mapping, emptyState } },
       source: { ...mappedSnapshot().source, autoScrapeEnabled: true },
       baseline,
     });
     const valid = deriveAffiliateSupplyAssessment({
       ...base,
-      latestRun: { id: 'run-empty', status: 'SUCCEEDED', mappingId: 'mapping-1', finishedAt: NOW, candidateCount: 0, itemCount: 0, emptyStateMatched: true, evidenceRefs: ['run-empty', 'page-empty'] },
+      latestRun: { id: 'run-empty', status: 'SUCCEEDED', mappingId: 'mapping-1', finishedAt: NOW, candidateCount: 0, itemCount: 0, isEmptyStateMatched: true, evidenceRefs: ['run-empty', 'page-empty'] },
     });
     const invalid = deriveAffiliateSupplyAssessment({
       ...base,
-      latestRun: { id: 'run-zero', status: 'SUCCEEDED', mappingId: 'mapping-1', finishedAt: NOW, candidateCount: 0, itemCount: 0, emptyStateMatched: false, evidenceRefs: ['run-zero'] },
+      latestRun: { id: 'run-zero', status: 'SUCCEEDED', mappingId: 'mapping-1', finishedAt: NOW, candidateCount: 0, itemCount: 0, isEmptyStateMatched: false, evidenceRefs: ['run-zero'] },
     });
 
     expect(valid.stage).toBe('ACTIVATED');
@@ -241,7 +241,7 @@ describe('affiliate supply lifecycle assessment', () => {
 
   it('moves drift and failed refreshes to Approved Supply with repair priority', () => {
     const assessment = deriveAffiliateSupplyAssessment(mappedSnapshot({
-      approval: { id: 'approval-1', status: 'APPROVED', decision: 'APPROVE', independent: true, reviewerId: 'reviewer-1', reviewedPackageHash: 'package-hash', evidenceRefs: ['review-1'] },
+      approval: { id: 'approval-1', status: 'APPROVED', decision: 'APPROVE', isIndependent: true, reviewerId: 'reviewer-1', reviewedPackageHash: 'package-hash', evidenceRefs: ['review-1'] },
       mapping: { ...mappedSnapshot().mapping!, isActive: true, validatedAt: new Date('2026-08-21T12:00:00.000Z') },
       source: { ...mappedSnapshot().source, autoScrapeEnabled: true },
       latestRun: { id: 'run-failed', status: 'FAILED', mappingId: 'mapping-1', finishedAt: NOW, candidateCount: 0, itemCount: 0, errorCode: 'CAPTURE_FAILED', evidenceRefs: ['run-failed'] },
@@ -251,6 +251,31 @@ describe('affiliate supply lifecycle assessment', () => {
     expect(assessment.stage).toBe('APPROVED');
     expect(assessment.repairPriority).toBe(1);
     expect(assessment.reasonCodes).toContain('REFRESH_FAILED');
+  });
+  it('does not treat an in-flight refresh as a failure', () => {
+    const assessment = deriveAffiliateSupplyAssessment(mappedSnapshot({
+      approval: { id: 'approval-1', status: 'APPROVED', decision: 'APPROVE', isIndependent: true, reviewerId: 'reviewer-1', reviewedPackageHash: 'package-hash', evidenceRefs: ['review-1'] },
+      mapping: { ...mappedSnapshot().mapping!, isActive: true, validatedAt: new Date('2026-08-21T12:00:00.000Z') },
+      source: { ...mappedSnapshot().source, autoScrapeEnabled: true },
+      latestRun: { id: 'run-running', status: 'RUNNING', mappingId: 'mapping-1', startedAt: NOW, finishedAt: null, candidateCount: 0, itemCount: 0, evidenceRefs: ['run-running'] },
+      baseline,
+    }));
+
+    expect(assessment.isAutomationEnabled).toBe(true);
+    expect(assessment.stage).toBe('ACTIVATED');
+    expect(assessment.reasonCodes).not.toContain('REFRESH_FAILED');
+  });
+  it('moves operational evidence invariant failures to Approved repair state', () => {
+    const assessment = deriveAffiliateSupplyAssessment(mappedSnapshot({
+      source: { ...mappedSnapshot().source, activeMappingId: 'mapping-current', autoScrapeEnabled: true },
+      baseline: { malformed: true },
+    }));
+
+    expect(assessment.stage).toBe('APPROVED');
+    expect(assessment.outcome).toBe('REPAIR_REQUIRED');
+    expect(assessment.isAutomationEnabled).toBe(false);
+    expect(assessment.repairPriority).toBe(AFFILIATE_REPLENISHMENT_PRIORITY.REPAIR_MAPPED_APPROVED);
+    expect(assessment.reasonCodes).toContain('INVARIANT_REPAIR_REQUIRED');
   });
   it('keeps source exclusion and target rejection scoped', () => {
     const excluded = deriveAffiliateSupplyAssessment(mappedSnapshot({
@@ -268,10 +293,10 @@ describe('affiliate supply lifecycle assessment', () => {
       }],
     }));
     const rejected = deriveAffiliateSupplyAssessment(mappedSnapshot({
-      approval: { id: 'approval-1', status: 'APPROVED', decision: 'APPROVE', independent: true, reviewerId: 'reviewer-1', reviewedPackageHash: 'package-hash', evidenceRefs: ['review-1'] },
+      approval: { id: 'approval-1', status: 'APPROVED', decision: 'APPROVE', isIndependent: true, reviewerId: 'reviewer-1', reviewedPackageHash: 'package-hash', evidenceRefs: ['review-1'] },
       mapping: { ...mappedSnapshot().mapping!, isActive: true, validatedAt: new Date('2026-08-21T12:00:00.000Z') },
       source: { ...mappedSnapshot().source, autoScrapeEnabled: true },
-      latestRun: { id: 'run-1', status: 'SUCCEEDED', mappingId: 'mapping-1', finishedAt: NOW, candidateCount: 2, itemCount: 2, emptyStateMatched: false },
+      latestRun: { id: 'run-1', status: 'SUCCEEDED', mappingId: 'mapping-1', finishedAt: NOW, candidateCount: 2, itemCount: 2, isEmptyStateMatched: false },
       baseline: { ...baseline, candidateCount: 2 },
       targets: [
         { id: 'target-1', targetType: 'EVENT', targetId: 'event-1', sourceProfile: 'EVENT', marketKey: 'portland', sportId: 'soccer', status: 'REJECTED', freshnessExpiresAt: new Date('2026-08-23T00:00:00.000Z'), evidenceRefs: ['rejection-1'] },
@@ -307,7 +332,7 @@ describe('affiliate supply commands and contracts', () => {
       currentManifest: manifest,
       sources: [
         { id: 'source-1', stage: 'PUBLISHED', targetContribution: 1, isAutomationEnabled: true, repairPriority: 4, freshnessStatus: 'FRESH' },
-        { id: 'source-2', stage: 'APPROVED', targetContribution: 2, isAutomationEnabled: true, repairPriority: 1, freshnessStatus: 'STALE' },
+        { id: 'source-2', stage: 'APPROVED', targetContribution: 1, isAutomationEnabled: true, repairPriority: 1, freshnessStatus: 'STALE' },
       ],
       nextPolicy: { ...contract, version: 4, hash: 'next-contract-hash', targets: [{ ...contract.targets[0], minimumFreshPublishedSupply: 3 }] },
     });
@@ -332,7 +357,7 @@ describe('affiliate supply commands and contracts', () => {
       assessment: deriveAffiliateSupplyAssessment(mappedSnapshot()),
     });
 
-    expect(decision.accepted).toBe(false);
+    expect(decision.isAccepted).toBe(false);
     expect(decision.reasonCodes).toEqual(expect.arrayContaining(['LIFECYCLE_GENERATION_STALE', 'EVIDENCE_REQUIRED', 'ACTIVATION_PRECONDITION_FAILED']));
   });
   it('blocks target publication until the source is Activated or Published', () => {
@@ -349,7 +374,7 @@ describe('affiliate supply commands and contracts', () => {
       assessment: deriveAffiliateSupplyAssessment(mappedSnapshot()),
     });
 
-    expect(decision.accepted).toBe(false);
+    expect(decision.isAccepted).toBe(false);
     expect(decision.reasonCodes).toContain('PUBLICATION_PRECONDITION_FAILED');
   });
   it('allows exact target rejection after freshness loss', () => {
@@ -375,7 +400,7 @@ describe('affiliate supply commands and contracts', () => {
       })),
     });
 
-    expect(decision.accepted).toBe(true);
+    expect(decision.isAccepted).toBe(true);
     expect(decision.reasonCodes).not.toContain('TARGET_REJECTION_PRECONDITION_FAILED');
   });
 
@@ -384,19 +409,19 @@ describe('affiliate supply commands and contracts', () => {
     const same = normalizeAffiliateSupplyIdentity({
       requestedUrl: 'HTTP://Example.com/events/?utm_source=x#today',
       resolvedCanonicalUrl: 'https://example.com/events',
-      redirectVerified: true,
+      isRedirectVerified: true,
       prior: { canonicalUrl: 'https://example.com/events', operatorDomain: 'example.com' },
     });
     const successor = normalizeAffiliateSupplyIdentity({
       requestedUrl: 'https://example.com/events',
       resolvedCanonicalUrl: 'https://new-operator.example/events',
-      redirectVerified: true,
+      isRedirectVerified: true,
       prior: { canonicalUrl: 'https://example.com/events', operatorDomain: 'example.com' },
     });
     const operatorChanged = normalizeAffiliateSupplyIdentity({
       requestedUrl: 'https://example.com/events',
       resolvedCanonicalUrl: 'https://example.com/events',
-      redirectVerified: true,
+      isRedirectVerified: true,
       operatorDomain: 'new-operator.example',
       prior: { canonicalUrl: 'https://example.com/events', operatorDomain: null },
     });
@@ -417,7 +442,7 @@ describe('affiliate replenishment planning', () => {
     mapping: { waiting: 1, active: 2, activeProducerCount: 2 },
     review: { waiting: 1, active: 1, activeReviewerCount: 2, healthyReviewerCount: 2 },
     activeWaves: [],
-    campaigns: [{ id: 'campaign-1', eligible: true, priority: 2, nextEligibleAt: new Date('2026-08-22T11:00:00.000Z') }],
+    campaigns: [{ id: 'campaign-1', isEligible: true, priority: 2, nextEligibleAt: new Date('2026-08-22T11:00:00.000Z') }],
   };
 
   it('targets two waiting jobs per producer and chooses restore demand first', () => {

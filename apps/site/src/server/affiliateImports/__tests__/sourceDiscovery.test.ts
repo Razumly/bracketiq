@@ -136,6 +136,9 @@ const prismaMock = {
   affiliateSourceMappingJobs: {
     findMany: jest.fn(async () => []),
   },
+  affiliateCoverageAgentJobs: {
+    findUnique: jest.fn(async () => null),
+  },
   affiliateScrapeSources: { findFirst: jest.fn(async () => null) },
   organizations: { findFirst: jest.fn(async () => null) },
   sports: { findMany: jest.fn(async () => [{ id: 'sport_soccer', name: 'Soccer' }]) },
@@ -178,6 +181,7 @@ import {
   applyAffiliateSourceDomainPolicy,
   listAffiliateSourceDiscoveryCampaigns,
   processNextAffiliateSourceDiscoveryRun,
+  queueAffiliateSourceDiscoveryRun,
   queueDueAffiliateSourceDiscoveryRuns,
   runAffiliateIntakeAutomation,
   runAffiliateReplenishmentCampaignWave,
@@ -209,6 +213,28 @@ describe('affiliate source discovery orchestration', () => {
     );
   });
 
+  it('reuses a deterministic replenishment discovery run reservation', async () => {
+    queuedRuns.splice(0, queuedRuns.length);
+
+    const first = await queueAffiliateSourceDiscoveryRun(
+      campaign.id,
+      'affiliate-replenishment',
+      'affiliate-replenishment-discovery-wave_1',
+    );
+    const second = await queueAffiliateSourceDiscoveryRun(
+      campaign.id,
+      'affiliate-replenishment',
+      'affiliate-replenishment-discovery-wave_1',
+    );
+
+    expect(second).toBe(first);
+    expect(first).toEqual(expect.objectContaining({
+      id: 'affiliate-replenishment-discovery-wave_1',
+      campaignId: campaign.id,
+      status: 'QUEUED',
+    }));
+    expect(prismaMock.affiliateSourceDiscoveryRuns.create).toHaveBeenCalledTimes(1);
+  });
   it('aggregates campaign result counts in the database', async () => {
     prismaMock.affiliateSourceDiscoveryCampaigns.findMany.mockResolvedValue([
       { ...campaign, id: 'campaign_1' },
@@ -670,6 +696,37 @@ describe('affiliate source discovery orchestration', () => {
       'AUTO_PROMOTION_ELIGIBLE',
     ]));
   });
+  it('pauses a wave when terminal coverage planning has no campaign', async () => {
+    prismaMock.affiliateCoverageAgentJobs.findUnique.mockResolvedValueOnce({
+      id: 'coverage_1',
+      status: 'SUCCEEDED',
+      result: {},
+      errorMessage: null,
+    });
+
+    const result = await runAffiliateReplenishmentCampaignWave({
+      wave: {
+        id: 'wave_1',
+        campaignId: null,
+        coveragePlanningJobId: 'coverage_1',
+        resultJson: {},
+      },
+      demand: { id: 'demand_1' },
+      contract: { version: 1, hash: 'contract-hash' },
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      status: 'PAUSED',
+      provider: 'COVERAGE_PLANNER',
+      providerOperationKey: 'affiliate-replenishment:coverage:coverage_1',
+      errorCode: 'COVERAGE_PLANNING_NO_CAMPAIGN',
+    }));
+    expect(result.result).toEqual(expect.objectContaining({
+      coveragePlanningJobId: 'coverage_1',
+      status: 'SUCCEEDED',
+    }));
+    expect(prismaMock.affiliateSourceDiscoveryRuns.findFirst).not.toHaveBeenCalled();
+  });
   it('keeps a replenishment wave open while capture is still active', async () => {
     queuedRuns.splice(0, queuedRuns.length, {
       id: 'wave-discovery-run',
@@ -707,6 +764,44 @@ describe('affiliate source discovery orchestration', () => {
     expect(result.result).toEqual(expect.objectContaining({
       discoveryRunId: 'wave-discovery-run',
       waitingFor: 'capture:intake_1',
+    }));
+  });
+  it('retries partial discovery results with provider errors without zero yield', async () => {
+    queuedRuns.splice(0, queuedRuns.length, {
+      id: 'wave-discovery-run',
+      campaignId: campaign.id,
+      status: 'PARTIAL',
+      summary: { errors: [{ query: 'Portland soccer', message: 'provider timeout' }] },
+      errorMessage: null,
+    });
+    currentResult = {
+      id: 'result_1',
+      campaignId: campaign.id,
+      latestRunId: 'wave-discovery-run',
+      matchingIntakeId: 'intake_1',
+      status: 'INTAKE_CREATED',
+    };
+
+    const result = await runAffiliateReplenishmentCampaignWave({
+      wave: {
+        id: 'wave_1',
+        campaignId: campaign.id,
+        resultJson: { discoveryRunId: 'wave-discovery-run' },
+      },
+      demand: { id: 'demand_1' },
+      contract: { version: 1, hash: 'contract-hash' },
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      status: 'FAILED',
+      provider: 'AFFILIATE_DISCOVERY',
+      marginalYield: null,
+      errorCode: 'DISCOVERY_PROVIDER_FAILURE',
+      retryAt: expect.any(Date),
+    }));
+    expect(result.result).toEqual(expect.objectContaining({
+      discoveryRunId: 'wave-discovery-run',
+      intakeIds: ['intake_1'],
     }));
   });
   it('executes one queued capture before reporting replenishment yield', async () => {

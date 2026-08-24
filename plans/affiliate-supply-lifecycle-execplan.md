@@ -16,16 +16,23 @@ The change is visible through focused unit tests for lifecycle matrices, immutab
 
 - [x] (2026-08-22 19:32Z) Read issue #68, issue #67, the parent specification, repository rules, ADRs 0005–0007, the existing gateway contracts, current affiliate intake, mapping, scrape, publication, and coverage modules, and the test commands.
 - [x] (2026-08-22 19:32Z) Claimed issue #68 and set the BracketIQ project item to `In progress` on the current workstream branch.
-- [x] Add the durable Supply Source, Supply Contract manifest, lifecycle transition, target, Replenishment Demand, and wave persistence models and migration.
-- [x] Add pure contract parsing, identity normalization, lifecycle assessment, transition planning, contract impact reporting, and replenishment planning.
-- [x] Add the Prisma-backed lifecycle command authority and reconciliation controller. Keep the gateway as the authority seam for agent execution.
-- [x] Link existing intake, capture, mapping, source, mapping, run, candidate, and target records to Supply Source identities without fabricating legacy approval or scrape evidence.
-- [x] Add focused unit coverage for reachable lifecycle and replenishment scenarios.
-- [x] Run typechecking and focused tests during implementation.
-- [ ] Add PostgreSQL integration coverage for all reachable issue acceptance scenarios.
-- [ ] Run the full site suite once after implementation and review.
-- [ ] Run the two-axis code review against the issue specification and address every finding.
-- [ ] Commit the completed issue on the current branch.
+- [x] (2026-08-22) Add the durable Supply Source, Supply Contract manifest, lifecycle transition, target, Replenishment Demand, and wave persistence models and migration.
+- [x] (2026-08-22) Add pure contract parsing, identity normalization, lifecycle assessment, transition planning, contract impact reporting, and replenishment planning.
+- [x] (2026-08-22) Add the Prisma-backed lifecycle command authority and reconciliation controller. Keep the gateway as the authority seam for agent execution.
+- [x] (2026-08-22) Link existing intake, capture, mapping, source, mapping, run, candidate, and target records to Supply Source identities without fabricating legacy approval or scrape evidence.
+- [x] (2026-08-22) Add focused unit coverage for reachable lifecycle and replenishment scenarios.
+- [x] (2026-08-22) Run typechecking, focused tests, Prisma validation and generation, and migration checks during implementation.
+- [x] (2026-08-22) Add PostgreSQL integration coverage for generation compare-and-set, rollback, active-contract uniqueness, and durable demand state.
+- [x] (2026-08-22) Apply review repairs for immutable transitions, evidence-backed failure and expiry handling, identity revalidation, demand admission, worker health, legacy preservation, and lifecycle boolean naming.
+- [x] (2026-08-24) Run the final two-axis code review against the issue specification and resolve every finding.
+- [x] (2026-08-24) Commit the completed issue on the current branch.
+- [x] (2026-08-22) Run the initial Standards review and record its eight findings.
+- [x] (2026-08-24) Complete the final Standards and specification reviews with no unresolved findings.
+- [x] (2026-08-24) Resolve verification findings for nonterminal refresh runs, paused demand status, replenishment completion, and initial Supply Source lifecycle recording.
+- [x] (2026-08-24) Add focused regression coverage for in-flight refreshes, paused demands, replenishment completion, and initial root creation.
+
+- [x] (2026-08-24) Preserve legacy approval and empty-refresh evidence with dual-read compatibility.
+- [x] (2026-08-24) Reopen paused demands only after their resume time and clean the exact displaced logo object after commit.
 
 ## Surprises & Discoveries
 
@@ -41,8 +48,8 @@ The change is visible through focused unit tests for lifecycle matrices, immutab
 - Observation: The current declarative agent mapping package has no empty-state declaration.
   Evidence: `agentGatewayContracts.ts` defines listing kind, selectors, fields, and evidence references only. The lifecycle package extension will be optional so existing package hashes remain valid.
 
-- Observation: A fresh issue-isolated PostgreSQL database could not reach the lifecycle migration because the existing `20260821070000_repair_document_evidence_and_version_guards` migration references `_document_evidence_repair` after its temporary table is unavailable.
-  Evidence: `npm run migrate:deploy` against `bracketiq_e2e_68_main` failed with PostgreSQL `42P01` before `20260822120000_add_affiliate_supply_lifecycle`; PostgreSQL integration coverage remains unrun.
+- Observation: The first isolated integration database could not reach the lifecycle migration because the existing `20260821070000_repair_document_evidence_and_version_guards` migration referenced `_document_evidence_repair` after its temporary table was unavailable.
+- Resolution: Added the forward migration repair, applied all 204 migrations to `bracketiq_e2e_68_lifecycle`, and confirmed no migrations are pending.
 
 ## Decision Log
 
@@ -50,8 +57,8 @@ The change is visible through focused unit tests for lifecycle matrices, immutab
   Rationale: Pure decisions must be testable without Prisma, clocks, provider clients, or network access. This prevents business state from leaking back into job status code.
   Date/Author: 2026-08-22 / Codex
 
-- Decision: Add one Prisma-backed `prismaAffiliateSupplyLifecycle.ts` module for transactions, generation compare-and-set, immutable transitions, Supply Contract activation, target refresh, and demand reconciliation.
-  Rationale: The gateway already separates pure contracts from transactional authority. Keeping persistence in one module gives every lifecycle command one atomic seam and leaves existing provider-specific mapping code usable as an injected effect.
+- Decision: Add the Prisma-backed lifecycle authority and reconciliation controller to `affiliateSupplyPersistence.ts`.
+- Rationale: The gateway already separates pure contracts from transactional authority. Keeping persistence in one module gives every lifecycle command one atomic seam and leaves existing provider-specific mapping code usable as an injected effect.
   Date/Author: 2026-08-22 / Codex
 
 - Decision: Store immutable Supply Contract manifests as canonical JSON with component versions and hashes, plus one partial unique active index per rollout cohort.
@@ -72,7 +79,7 @@ The change is visible through focused unit tests for lifecycle matrices, immutab
 
 - Decision: Use the active contract's target, freshness, and search component payloads as the only inputs to demand priority and eligibility. Provider failures are explicit retry outcomes and never zero Marginal Yield.
   Rationale: Queue completion and raw provider result counts are not product outcomes. Contract-driven inputs make reconciliation deterministic and auditable.
-
+  Date/Author: 2026-08-22 / Codex
 - Decision: Route supply-backed manual target publication through the lifecycle command seam.
   Rationale: Publication must validate the active contract, generation, evidence, authority, and stage before it writes the domain target. The target writer runs inside the lifecycle transaction and the command records the resulting target evidence and transition.
   Date/Author: 2026-08-22 / Codex
@@ -84,11 +91,34 @@ The change is visible through focused unit tests for lifecycle matrices, immutab
 - Decision: Keep replenishment provider execution behind the injected bounded-wave callback.
   Rationale: The issue assigns provider-specific mapping content to deterministic injected code. The existing #67 gateway remains the authority seam for agent lifecycle commands and is not copied into provider-specific mapping code.
   Date/Author: 2026-08-22 / Codex
-  Date/Author: 2026-08-22 / Codex
 
 ## Outcomes & Retrospective
 
-Implementation is not complete. Add an entry here after each major milestone and at completion. The final entry must compare the delivered behavior with every issue acceptance criterion and name any criterion deferred to issue #70 or #69.
+- The focused affiliate suites passed: 6 suites passed, 235 tests passed, 1 suite skipped, and 3 tests skipped.
+- The site TypeScript check passed.
+- Prisma validation, generation, and generated-client checks passed with the test database URL.
+- The full site suite passed.
+- Route coverage passed for 330 files.
+- The final Standards review passed.
+- The final specification review passed.
+- Migration SQL checks passed for nullable root request values and demand-aware wave repair.
+- A commit was created on the current branch.
+
+## Review Findings
+
+These comments came from the completed Standards review on 2026-08-22.
+
+1. **P1 — Move object-storage writes outside lifecycle transactions.** `activationTargetWriter` receives the open serializable transaction client and calls `publishAffiliateCandidateDirect`. For a `CLUB` candidate, that helper uploads the logo before the lifecycle transaction commits. A later target or transition failure can roll back database writes while leaving the object behind. The review cited `apps/site/src/server/affiliateImports/service.ts:875-878` and the repository atomic-save rule. Stage the upload outside the transaction or add rollback compensation.
+2. **P2 — Batch existing-demand reads before reconciliation.** Reconciliation performs one `findUnique` call for every Supply Contract target. Fetch the cohort, version, and hash demands with one `findMany` call, then index them by `targetKey`. The review cited `apps/site/src/server/affiliateImports/affiliateSupplyPersistence.ts:3024-3033`.
+3. **P2 — Avoid per-root snapshot reloads in batch reconciliation.** The batch path calls `executeAffiliateSupplyLifecycleCommand` for each changed root. That command reloads the root, active contract, transition, and full snapshot for each root. Add a batch reconciliation authority that consumes the locked snapshots and bulk-loaded idempotency rows. The review cited `apps/site/src/server/affiliateImports/affiliateSupplyPersistence.ts:3615-3624`.
+4. **P2 — Type lifecycle persistence rows.** The batch loader accepts `roots: any[]`, and related persistence paths use `any` for transitions, demand arrays, and row callbacks. Use generated Prisma row types or explicit selected-payload interfaces. The review cited `apps/site/src/server/affiliateImports/affiliateSupplyPersistence.ts:1191-1195`.
+5. **P3 — Use `is*` names for identity decision flags.** Rename `requiresRevalidation` to `isRevalidationRequired` and `requiresSuccessorCommand` to `isSuccessorCommandRequired`. The review cited `apps/site/src/server/affiliateImports/affiliateSupplyPersistence.ts:377-380`.
+6. **P3 — Rename the replay state to `isReplayed`.** Update the lifecycle command result, transition helper, tests, and gateway callers. The review cited `apps/site/src/server/affiliateImports/affiliateSupplyPersistence.ts:1584-1587`.
+7. **P3 — Rename the automation-hold boolean.** Rename `automationHold` to an `is*` state such as `isAutomationOnHold`, then update assessment construction and consumers. The review cited `apps/site/src/server/affiliateImports/affiliateSupplyLifecycle.ts:167-174`.
+8. **P3 — Update the ExecPlan outcomes.** The review cited `plans/affiliate-supply-lifecycle-execplan.md:89-92`. This update records the completed verification, review status, unresolved findings, and commit status.
+- Resolution (2026-08-24): Findings 1–8 were addressed in the implementation. The final review found no remaining standards or specification issue.
+- Resolution (2026-08-24): The wave admission migration now preserves the surviving wave, repoints only same-demand loser links, and clears different-demand loser links before it creates the unique index.
+- Resolution (2026-08-24): The root backfill migration records generation 1, uses runtime-compatible SHA-256 canonical hashes, stores a complete replay assessment, and updates root and linked live-source projections.
 
 ## Context and Orientation
 
@@ -163,11 +193,11 @@ The expected artifacts are:
 
     plans/affiliate-supply-lifecycle-execplan.md
     apps/site/src/server/affiliateImports/affiliateSupplyLifecycle.ts
-    apps/site/src/server/affiliateImports/prismaAffiliateSupplyLifecycle.ts
+    apps/site/src/server/affiliateImports/affiliateSupplyPersistence.ts
     apps/site/src/server/affiliateImports/__tests__/affiliateSupplyLifecycle.test.ts
     apps/site/src/server/affiliateImports/__tests__/affiliateSupplyLifecycle.database.integration.test.ts
     apps/site/prisma/schema.prisma
-    apps/site/prisma/migrations/<timestamp>_add_affiliate_supply_lifecycle/migration.sql
+    apps/site/prisma/migrations/20260822120000_add_affiliate_supply_lifecycle/migration.sql
 
 Keep test output concise in this plan. Record only lines that prove a gate passed or failed.
 
@@ -183,12 +213,12 @@ The pure module must export stage, outcome, contract, assessment, command, and r
 
 The Prisma module must export:
 
-    createPrismaAffiliateSupplyLifecycleAuthority(input?: { db?: unknown; clock?: AffiliateSupplyClock }): AffiliateSupplyLifecycleAuthority
-    ensureAffiliateSupplySource(input: EnsureAffiliateSupplySourceInput): Promise<AffiliateSupplySourceRecord>
+    createAffiliateSupplyLifecycleAuthority(input?: { db?: AffiliateSupplyDatabase; clock?: AffiliateSupplyClock }): AffiliateAgentLifecycleAuthority
+    ensureAffiliateSupplySource(input: EnsureAffiliateSupplySourceInput): Promise<EnsureAffiliateSupplySourceResult>
     executeAffiliateSupplyLifecycleCommand(input: ExecuteAffiliateSupplyLifecycleCommandInput): Promise<AffiliateSupplyLifecycleCommandResult>
     activateAffiliateSupplyContract(input: ActivateAffiliateSupplyContractInput): Promise<AffiliateSupplyContractImpactReport>
     reconcileAffiliateReplenishment(input?: ReconcileAffiliateReplenishmentInput): Promise<AffiliateReplenishmentReconciliationResult>
 
 Use the existing `AffiliateAgentLifecycleAuthority` shape from `agentGatewayAdapters.ts` for the gateway adapter. Use the existing Prisma singleton from `src/lib/prisma.ts` by default. Inject `db`, clock, provider, and gateway dependencies in tests. Do not import Prisma or runtime services into the pure module.
 
-Plan revision note (2026-08-22): Created this plan after reading issue #68, the parent specification, blocker issue #67, repository guidance, current affiliate persistence and queue modules, and the existing gateway lifecycle seam. The plan records the initial implementation boundary and will be updated with evidence as each milestone changes.
+- Plan revision note (2026-08-22): Updated the initial plan after implementation. The persistence authority lives in `affiliateSupplyPersistence.ts`; the completed checks include focused unit tests, PostgreSQL integration tests, typechecking, Prisma validation and generation, migration deployment, the full site suite, and route coverage. The final review and completion evidence remain to be recorded.

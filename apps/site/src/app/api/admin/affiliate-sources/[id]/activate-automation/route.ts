@@ -8,6 +8,9 @@ import {
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const session = await requireRazumlyAdmin(req);
+    if (!session.isAdmin) {
+      throw new Response('Forbidden', { status: 403 });
+    }
     const { id } = await params;
     const sourceId = id.trim();
     if (!sourceId) {

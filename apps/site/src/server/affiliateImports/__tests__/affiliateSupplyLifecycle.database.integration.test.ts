@@ -152,13 +152,22 @@ describeDatabase("Affiliate Supply lifecycle PostgreSQL authority", () => {
     const rolloutCohort = `${TEST_PREFIX}-cas`;
     const manifest = await activateContract(rolloutCohort, 1);
     const supplySourceId = await createRoot(rolloutCohort, "cas");
+    const runId = newId("run-cas");
+    await prisma.affiliateScrapeRuns.create({
+      data: {
+        id: runId,
+        sourceId: newId("source-cas"),
+        supplySourceId,
+        status: "RUNNING",
+      },
+    });
     const firstInput = {
       supplySourceId,
       command: "RECORD_REFRESH_FAILURE" as const,
       authority: "SYSTEM" as const,
       expectedLifecycleGeneration: 0,
       idempotencyKey: newId("cas-first"),
-      request: { evidenceRefs: ["integration:cas"], errorMessage: "provider unavailable" },
+      request: { runId, evidenceRefs: ["integration:cas"], errorMessage: "provider unavailable" },
       actorKind: "SYSTEM",
       actorId: "integration-cas",
       rolloutCohort,
@@ -184,7 +193,7 @@ describeDatabase("Affiliate Supply lifecycle PostgreSQL authority", () => {
     }));
     const winningInput = transition?.idempotencyKey === firstInput.idempotencyKey ? firstInput : secondInput;
     await expect(executeAffiliateSupplyLifecycleCommand(winningInput)).resolves.toEqual(
-      expect.objectContaining({ replayed: true }),
+      expect.objectContaining({ isReplayed: true }),
     );
     await expect(prisma.affiliateSupplyLifecycleTransitions.update({
       where: { id: transition?.id },

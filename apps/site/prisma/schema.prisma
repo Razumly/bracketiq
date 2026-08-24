@@ -41,6 +41,39 @@ enum AffiliateSupplyLifecycleStage {
   SOURCE_EXCLUDED
   HUMAN_REVIEW_REQUIRED
 }
+enum AffiliateSupplyLifecycleCommand {
+  CREATE_ROOT
+  RECORD_MAPPING
+  APPROVE
+  ACTIVATE
+  PUBLISH_TARGET
+  RECORD_REFRESH
+  RECORD_EMPTY_REFRESH
+  RECORD_REFRESH_FAILURE
+  REVALIDATE_IDENTITY
+  EXCLUDE_SOURCE
+  REJECT_TARGET
+  CREATE_SUCCESSOR
+  RECONCILE
+}
+
+enum AffiliateSupplyLifecycleOutcome {
+  SOURCE_EXCLUDED
+  HUMAN_REVIEW_REQUIRED
+  TARGET_REJECTED
+  AUTOMATION_HOLD
+  REPAIR_REQUIRED
+  NATURAL_EXPIRY
+  VALID_EMPTY_REFRESH
+}
+
+enum AffiliateSupplyLifecycleActorKind {
+  MAPPING_PRODUCER
+  SUPPLY_REVIEWER
+  HUMAN_DIRECTED_EXECUTOR
+  SYSTEM
+  HUMAN
+}
 
 enum AffiliateSupplyContractManifestStatus {
   DRAFT
@@ -2751,30 +2784,30 @@ model AffiliateSupplyContractManifests {
 }
 
 model AffiliateSupplyLifecycleTransitions {
-  id                String   @id
-  createdAt         DateTime @default(now())
+  id                String                             @id
+  createdAt         DateTime                           @default(now())
   supplySourceId    String
   sequence          Int
   generation        Int
   fromStage         AffiliateSupplyLifecycleStage?
   toStage           AffiliateSupplyLifecycleStage
-  outcome           String?
-  command           String
+  outcome           AffiliateSupplyLifecycleOutcome?
+  command           AffiliateSupplyLifecycleCommand
   commandRef        String?
-  idempotencyKey    String   @unique
+  idempotencyKey    String                             @unique
   requestHash       String
   resultHash        String
   contractVersion   Int
   contractHash      String
-  actorKind         String
+  actorKind         AffiliateSupplyLifecycleActorKind
   actorId           String
   executingAgentId  String?
-  reasonCodes       String[] @default([])
-  evidenceRefs      String[] @default([])
+  reasonCodes       String[]                           @default([])
+  evidenceRefs      String[]                           @default([])
   requestJson       Json
   resultJson        Json
-  occurredAt        DateTime @default(now())
-  retentionClass    String   @default("INDEFINITE")
+  occurredAt        DateTime                           @default(now())
+  retentionClass    String                             @default("INDEFINITE")
 
   @@unique([supplySourceId, sequence])
   @@index([supplySourceId, generation])

@@ -105,6 +105,7 @@ jest.mock('@/server/affiliateImports/affiliateSupplyPersistence', () => {
   return {
     ...actual,
     deriveAndPersistAffiliateSupplyAssessment: jest.fn(),
+    ensureAffiliateSupplySource: jest.fn(),
     executeAffiliateSupplyLifecycleCommand: jest.fn(),
   };
 });
@@ -125,6 +126,7 @@ import { geocodeAddressToCoordinates } from '@/server/geocoding';
 import { tryResolveTimeZoneFromCoordinates } from '@/server/timeZones';
 import {
   deriveAndPersistAffiliateSupplyAssessment,
+  ensureAffiliateSupplySource,
   executeAffiliateSupplyLifecycleCommand,
 } from '@/server/affiliateImports/affiliateSupplyPersistence';
 import { buildAffiliateSupplyContractManifest } from '../affiliateSupplyLifecycle';
@@ -169,6 +171,25 @@ describe('affiliate import service', () => {
       stage: 'PUBLISHED',
       isAutomationEnabled: true,
     } as any);
+    jest.mocked(ensureAffiliateSupplySource).mockImplementation(async (input) => {
+      const canonicalUrl = input.resolvedCanonicalUrl ?? input.requestedUrl;
+      const parsed = new URL(canonicalUrl);
+      return {
+        supplySource: { id: input.priorSupplySourceId ?? input.liveSourceId ?? 'supply-source' },
+        identity: {
+          canonicalUrl,
+          origin: parsed.origin,
+          pathKey: `${parsed.origin}${parsed.pathname}`,
+          identityKey: 'identity-key',
+          rootDecision: 'SAME_ROOT',
+          isRevalidationRequired: false,
+          reasonCodes: [],
+        },
+        created: false,
+        successorCreated: false,
+        predecessorId: null,
+      } as any;
+    });
     jest.mocked(executeAffiliateSupplyLifecycleCommand).mockImplementation(async (input) => {
       if (input.request?.runId) {
         const data = {
@@ -189,7 +210,7 @@ describe('affiliate import service', () => {
       return {
         assessment: { stage: 'PUBLISHED', isAutomationEnabled: true },
         transition: null,
-        replayed: false,
+        isReplayed: false,
       } as any;
     });
     idCounter = 0;
@@ -2630,7 +2651,7 @@ describe('affiliate import service', () => {
         status: 'SUCCEEDED',
         itemCount: 0,
         candidateCount: 0,
-        logs: expect.objectContaining({ emptyStateMatched: true }),
+        logs: expect.objectContaining({ isEmptyStateMatched: true }),
       }),
     });
   });
@@ -2865,6 +2886,93 @@ describe('affiliate import service', () => {
         logs: expect.objectContaining({ automaticallyPublishedCandidateCount: 1 }),
       }),
     });
+  });
+
+  it('stops a refresh after a verified same-origin canonical change', async () => {
+    const source = {
+      id: 'source_identity',
+      name: 'Identity Source',
+      supplySourceId: 'supply_identity',
+      activeMappingId: 'mapping_identity',
+      listUrl: 'https://example.com/events',
+      organizationId: 'org_identity',
+      metadata: {},
+    };
+    const mapping = {
+      id: 'mapping_identity',
+      sourceId: source.id,
+      version: 1,
+      mapping: {
+        kind: 'EVENT',
+        listUrl: source.listUrl,
+        itemSelector: 'body',
+        fields: {
+          title: { selector: 'body', mode: 'literal', value: 'Identity event' },
+          officialActionUrl: { selector: 'body', mode: 'literal', value: 'https://example.com/event' },
+        },
+      },
+    };
+    const root = {
+      id: 'supply_identity',
+      identityKey: 'identity-key',
+      canonicalUrl: source.listUrl,
+      origin: 'https://example.com',
+      pathKey: 'https://example.com/events',
+      operatorDomain: 'example.com',
+      targetKind: 'EVENT',
+      rolloutCohort: 'DEFAULT',
+      lifecycleGeneration: 3,
+    };
+    prismaMock.affiliateScrapeSources.findUnique.mockResolvedValue(source);
+    prismaMock.affiliateScrapeMappings.findUnique.mockResolvedValue(mapping);
+    prismaMock.organizations.findUnique.mockResolvedValue({
+      id: 'org_identity',
+      ownerId: 'owner_identity',
+      name: 'Identity Source',
+      location: 'Portland, OR',
+    });
+    prismaMock.affiliateScrapeRuns.create.mockResolvedValue({ id: 'run_identity' });
+    prismaMock.affiliateSupplySources.findUnique.mockResolvedValue(root);
+    jest.mocked(ensureAffiliateSupplySource).mockResolvedValue({
+      supplySource: root,
+      identity: {
+        canonicalUrl: 'https://example.com/events-canonical',
+        origin: 'https://example.com',
+        pathKey: 'https://example.com/events-canonical',
+        identityKey: 'identity-key',
+        rootDecision: 'SAME_ROOT',
+        isRevalidationRequired: true,
+        reasonCodes: ['VERIFIED_SAME_ORIGIN_CANONICAL_REDIRECT'],
+      },
+      created: false,
+      successorCreated: false,
+      predecessorId: null,
+    });
+    prismaMock.affiliateScrapeRuns.update.mockResolvedValue({ id: 'run_identity', status: 'FAILED' });
+
+    await expect(runAffiliateSourceScrape('source_identity', {
+      client: {
+        fetchPage: async () => ({
+          url: source.listUrl,
+          finalUrl: 'https://example.com/events-canonical',
+          statusCode: 200,
+          fetchedAt: '2026-08-22T12:00:00.000Z',
+          body: '<body>Identity event</body>',
+        }),
+      },
+    })).rejects.toThrow('requires revalidation');
+
+    expect(ensureAffiliateSupplySource).toHaveBeenCalledWith(expect.objectContaining({
+      requestedUrl: source.listUrl,
+      resolvedCanonicalUrl: 'https://example.com/events-canonical',
+      priorSupplySourceId: 'supply_identity',
+      isRedirectVerified: true,
+    }));
+    expect(executeAffiliateSupplyLifecycleCommand).toHaveBeenCalledWith(expect.objectContaining({
+      command: 'RECORD_REFRESH_FAILURE',
+      request: expect.objectContaining({ runId: 'run_identity' }),
+    }));
+    expect(prismaMock.affiliateImportCandidates.create).not.toHaveBeenCalled();
   });
 
   it('does not mark a new automatic candidate published when location resolution fails', async () => {

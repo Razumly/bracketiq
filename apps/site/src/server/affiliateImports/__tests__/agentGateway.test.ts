@@ -1243,6 +1243,13 @@ type GatewayClaimTestPrisma = {
       data: GatewayTestRow;
     }): Promise<{ count: number }>;
   };
+  affiliateAgentWorkerHealth: {
+    upsert(input: {
+      where: GatewayTestRow;
+      create: GatewayTestRow;
+      update: GatewayTestRow;
+    }): Promise<GatewayTestRow>;
+  };
   affiliateAgentGatewayArtifacts: {
     createMany(input: {
       data: readonly GatewayTestRow[];
@@ -1289,6 +1296,7 @@ type GatewayClaimHarness = Readonly<{
     claims: GatewayTestRow[];
     artifacts: GatewayTestRow[];
     receipts: GatewayTestRow[];
+    workerHealth: GatewayTestRow[];
     events: GatewayTestRow[];
     lifecycleCalls: GatewayTestRow[];
     reviewerEffectCalls: string[];
@@ -1474,6 +1482,7 @@ const createGatewayClaimHarness = (
     artifacts: [] as GatewayTestRow[],
     receipts: [] as GatewayTestRow[],
     events: [] as GatewayTestRow[],
+    workerHealth: [] as GatewayTestRow[],
     lifecycleCalls: [] as GatewayTestRow[],
     reviewerEffectCalls: [] as string[],
     lifecycleRecoverReceiptIds: [] as string[],
@@ -1558,6 +1567,21 @@ const createGatewayClaimHarness = (
         if (!claim) return { count: 0 };
         Object.assign(claim, data);
         return { count: 1 };
+      },
+    },
+    affiliateAgentWorkerHealth: {
+      upsert: async ({ where, create, update }) => {
+        const key = where.workerId_role as GatewayTestRow;
+        const existing = state.workerHealth.find(
+          (worker) =>
+            worker.workerId === key.workerId && worker.role === key.role,
+        );
+        if (existing) {
+          Object.assign(existing, update);
+          return existing;
+        }
+        state.workerHealth.push(create);
+        return create;
       },
     },
     affiliateAgentGatewayArtifacts: {
@@ -2354,6 +2378,21 @@ describe("Prisma affiliate Agent Gateway", () => {
     expect(grant?.prompt).toContain('"role":"COVERAGE_PLANNER"');
     expect(state.claims[0]?.tokenHash).toMatch(/^[a-f0-9]{64}$/);
     expect(JSON.stringify(state)).not.toContain(grant?.token);
+  });
+  it("records a healthy worker heartbeat through the production claim boundary", async () => {
+    const { gateway, request, state } = createGatewayClaimHarness();
+
+    await gateway.claim(request);
+
+    expect(state.workerHealth).toHaveLength(1);
+    expect(state.workerHealth[0]).toMatchObject({
+      workerId: request.workerId,
+      role: request.role,
+      status: "HEALTHY",
+    });
+    expect(state.workerHealth[0]?.heartbeatAt).toEqual(
+      new Date("2026-08-20T18:00:00.000Z"),
+    );
   });
 
   it("replays only an identical claim request", async () => {
@@ -3518,6 +3557,9 @@ describe("Prisma affiliate Agent Gateway", () => {
     });
     expect(await harness.gateway.perform(lifecycleOperation)).toEqual(executed);
     expect(harness.state.lifecycleCalls).toHaveLength(1);
+    expect(harness.state.lifecycleCalls[0]).toEqual(
+      expect.objectContaining({ invocationId: "human-invocation-1" }),
+    );
 
     const humanTerminal = {
       kind: "SUBMIT_RESULT" as const,
@@ -3778,7 +3820,7 @@ describe("Prisma affiliate Agent Gateway", () => {
   });
 
   it("extends an active lease to five minutes after a heartbeat", async () => {
-    const { gateway, request, setNow } = createGatewayClaimHarness();
+    const { gateway, request, setNow, state } = createGatewayClaimHarness();
     const grant = await gateway.claim(request);
     if (!grant) throw new Error("Expected one Coverage Planner claim.");
     setNow("2026-08-20T18:01:00.000Z");
@@ -3803,6 +3845,12 @@ describe("Prisma affiliate Agent Gateway", () => {
       kind: "HEARTBEAT_ACCEPTED",
       heartbeatAt: "2026-08-20T18:01:00.000Z",
       leaseExpiresAt: "2026-08-20T18:06:00.000Z",
+    });
+    expect(state.workerHealth[0]).toMatchObject({
+      workerId: request.workerId,
+      role: request.role,
+      heartbeatAt: new Date("2026-08-20T18:01:00.000Z"),
+      leaseExpiresAt: new Date("2026-08-20T18:06:00.000Z"),
     });
   });
 

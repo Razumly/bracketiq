@@ -46,15 +46,15 @@ export type AffiliateSupplyLifecycleTransitionsMinAggregateOutputType = {
   generation: number | null
   fromStage: $Enums.AffiliateSupplyLifecycleStage | null
   toStage: $Enums.AffiliateSupplyLifecycleStage | null
-  outcome: string | null
-  command: string | null
+  outcome: $Enums.AffiliateSupplyLifecycleOutcome | null
+  command: $Enums.AffiliateSupplyLifecycleCommand | null
   commandRef: string | null
   idempotencyKey: string | null
   requestHash: string | null
   resultHash: string | null
   contractVersion: number | null
   contractHash: string | null
-  actorKind: string | null
+  actorKind: $Enums.AffiliateSupplyLifecycleActorKind | null
   actorId: string | null
   executingAgentId: string | null
   occurredAt: Date | null
@@ -69,15 +69,15 @@ export type AffiliateSupplyLifecycleTransitionsMaxAggregateOutputType = {
   generation: number | null
   fromStage: $Enums.AffiliateSupplyLifecycleStage | null
   toStage: $Enums.AffiliateSupplyLifecycleStage | null
-  outcome: string | null
-  command: string | null
+  outcome: $Enums.AffiliateSupplyLifecycleOutcome | null
+  command: $Enums.AffiliateSupplyLifecycleCommand | null
   commandRef: string | null
   idempotencyKey: string | null
   requestHash: string | null
   resultHash: string | null
   contractVersion: number | null
   contractHash: string | null
-  actorKind: string | null
+  actorKind: $Enums.AffiliateSupplyLifecycleActorKind | null
   actorId: string | null
   executingAgentId: string | null
   occurredAt: Date | null
@@ -293,15 +293,15 @@ export type AffiliateSupplyLifecycleTransitionsGroupByOutputType = {
   generation: number
   fromStage: $Enums.AffiliateSupplyLifecycleStage | null
   toStage: $Enums.AffiliateSupplyLifecycleStage
-  outcome: string | null
-  command: string
+  outcome: $Enums.AffiliateSupplyLifecycleOutcome | null
+  command: $Enums.AffiliateSupplyLifecycleCommand
   commandRef: string | null
   idempotencyKey: string
   requestHash: string
   resultHash: string
   contractVersion: number
   contractHash: string
-  actorKind: string
+  actorKind: $Enums.AffiliateSupplyLifecycleActorKind
   actorId: string
   executingAgentId: string | null
   reasonCodes: string[]
@@ -343,15 +343,15 @@ export type AffiliateSupplyLifecycleTransitionsWhereInput = {
   generation?: Prisma.IntFilter<"AffiliateSupplyLifecycleTransitions"> | number
   fromStage?: Prisma.EnumAffiliateSupplyLifecycleStageNullableFilter<"AffiliateSupplyLifecycleTransitions"> | $Enums.AffiliateSupplyLifecycleStage | null
   toStage?: Prisma.EnumAffiliateSupplyLifecycleStageFilter<"AffiliateSupplyLifecycleTransitions"> | $Enums.AffiliateSupplyLifecycleStage
-  outcome?: Prisma.StringNullableFilter<"AffiliateSupplyLifecycleTransitions"> | string | null
-  command?: Prisma.StringFilter<"AffiliateSupplyLifecycleTransitions"> | string
+  outcome?: Prisma.EnumAffiliateSupplyLifecycleOutcomeNullableFilter<"AffiliateSupplyLifecycleTransitions"> | $Enums.AffiliateSupplyLifecycleOutcome | null
+  command?: Prisma.EnumAffiliateSupplyLifecycleCommandFilter<"AffiliateSupplyLifecycleTransitions"> | $Enums.AffiliateSupplyLifecycleCommand
   commandRef?: Prisma.StringNullableFilter<"AffiliateSupplyLifecycleTransitions"> | string | null
   idempotencyKey?: Prisma.StringFilter<"AffiliateSupplyLifecycleTransitions"> | string
   requestHash?: Prisma.StringFilter<"AffiliateSupplyLifecycleTransitions"> | string
   resultHash?: Prisma.StringFilter<"AffiliateSupplyLifecycleTransitions"> | string
   contractVersion?: Prisma.IntFilter<"AffiliateSupplyLifecycleTransitions"> | number
   contractHash?: Prisma.StringFilter<"AffiliateSupplyLifecycleTransitions"> | string
-  actorKind?: Prisma.StringFilter<"AffiliateSupplyLifecycleTransitions"> | string
+  actorKind?: Prisma.EnumAffiliateSupplyLifecycleActorKindFilter<"AffiliateSupplyLifecycleTransitions"> | $Enums.AffiliateSupplyLifecycleActorKind
   actorId?: Prisma.StringFilter<"AffiliateSupplyLifecycleTransitions"> | string
   executingAgentId?: Prisma.StringNullableFilter<"AffiliateSupplyLifecycleTransitions"> | string | null
   reasonCodes?: Prisma.StringNullableListFilter<"AffiliateSupplyLifecycleTransitions">
@@ -402,14 +402,14 @@ export type AffiliateSupplyLifecycleTransitionsWhereUniqueInput = Prisma.AtLeast
   generation?: Prisma.IntFilter<"AffiliateSupplyLifecycleTransitions"> | number
   fromStage?: Prisma.EnumAffiliateSupplyLifecycleStageNullableFilter<"AffiliateSupplyLifecycleTransitions"> | $Enums.AffiliateSupplyLifecycleStage | null
   toStage?: Prisma.EnumAffiliateSupplyLifecycleStageFilter<"AffiliateSupplyLifecycleTransitions"> | $Enums.AffiliateSupplyLifecycleStage
-  outcome?: Prisma.StringNullableFilter<"AffiliateSupplyLifecycleTransitions"> | string | null
-  command?: Prisma.StringFilter<"AffiliateSupplyLifecycleTransitions"> | string
+  outcome?: Prisma.EnumAffiliateSupplyLifecycleOutcomeNullableFilter<"AffiliateSupplyLifecycleTransitions"> | $Enums.AffiliateSupplyLifecycleOutcome | null
+  command?: Prisma.EnumAffiliateSupplyLifecycleCommandFilter<"AffiliateSupplyLifecycleTransitions"> | $Enums.AffiliateSupplyLifecycleCommand
   commandRef?: Prisma.StringNullableFilter<"AffiliateSupplyLifecycleTransitions"> | string | null
   requestHash?: Prisma.StringFilter<"AffiliateSupplyLifecycleTransitions"> | string
   resultHash?: Prisma.StringFilter<"AffiliateSupplyLifecycleTransitions"> | string
   contractVersion?: Prisma.IntFilter<"AffiliateSupplyLifecycleTransitions"> | number
   contractHash?: Prisma.StringFilter<"AffiliateSupplyLifecycleTransitions"> | string
-  actorKind?: Prisma.StringFilter<"AffiliateSupplyLifecycleTransitions"> | string
+  actorKind?: Prisma.EnumAffiliateSupplyLifecycleActorKindFilter<"AffiliateSupplyLifecycleTransitions"> | $Enums.AffiliateSupplyLifecycleActorKind
   actorId?: Prisma.StringFilter<"AffiliateSupplyLifecycleTransitions"> | string
   executingAgentId?: Prisma.StringNullableFilter<"AffiliateSupplyLifecycleTransitions"> | string | null
   reasonCodes?: Prisma.StringNullableListFilter<"AffiliateSupplyLifecycleTransitions">
@@ -463,15 +463,15 @@ export type AffiliateSupplyLifecycleTransitionsScalarWhereWithAggregatesInput = 
   generation?: Prisma.IntWithAggregatesFilter<"AffiliateSupplyLifecycleTransitions"> | number
   fromStage?: Prisma.EnumAffiliateSupplyLifecycleStageNullableWithAggregatesFilter<"AffiliateSupplyLifecycleTransitions"> | $Enums.AffiliateSupplyLifecycleStage | null
   toStage?: Prisma.EnumAffiliateSupplyLifecycleStageWithAggregatesFilter<"AffiliateSupplyLifecycleTransitions"> | $Enums.AffiliateSupplyLifecycleStage
-  outcome?: Prisma.StringNullableWithAggregatesFilter<"AffiliateSupplyLifecycleTransitions"> | string | null
-  command?: Prisma.StringWithAggregatesFilter<"AffiliateSupplyLifecycleTransitions"> | string
+  outcome?: Prisma.EnumAffiliateSupplyLifecycleOutcomeNullableWithAggregatesFilter<"AffiliateSupplyLifecycleTransitions"> | $Enums.AffiliateSupplyLifecycleOutcome | null
+  command?: Prisma.EnumAffiliateSupplyLifecycleCommandWithAggregatesFilter<"AffiliateSupplyLifecycleTransitions"> | $Enums.AffiliateSupplyLifecycleCommand
   commandRef?: Prisma.StringNullableWithAggregatesFilter<"AffiliateSupplyLifecycleTransitions"> | string | null
   idempotencyKey?: Prisma.StringWithAggregatesFilter<"AffiliateSupplyLifecycleTransitions"> | string
   requestHash?: Prisma.StringWithAggregatesFilter<"AffiliateSupplyLifecycleTransitions"> | string
   resultHash?: Prisma.StringWithAggregatesFilter<"AffiliateSupplyLifecycleTransitions"> | string
   contractVersion?: Prisma.IntWithAggregatesFilter<"AffiliateSupplyLifecycleTransitions"> | number
   contractHash?: Prisma.StringWithAggregatesFilter<"AffiliateSupplyLifecycleTransitions"> | string
-  actorKind?: Prisma.StringWithAggregatesFilter<"AffiliateSupplyLifecycleTransitions"> | string
+  actorKind?: Prisma.EnumAffiliateSupplyLifecycleActorKindWithAggregatesFilter<"AffiliateSupplyLifecycleTransitions"> | $Enums.AffiliateSupplyLifecycleActorKind
   actorId?: Prisma.StringWithAggregatesFilter<"AffiliateSupplyLifecycleTransitions"> | string
   executingAgentId?: Prisma.StringNullableWithAggregatesFilter<"AffiliateSupplyLifecycleTransitions"> | string | null
   reasonCodes?: Prisma.StringNullableListFilter<"AffiliateSupplyLifecycleTransitions">
@@ -490,15 +490,15 @@ export type AffiliateSupplyLifecycleTransitionsCreateInput = {
   generation: number
   fromStage?: $Enums.AffiliateSupplyLifecycleStage | null
   toStage: $Enums.AffiliateSupplyLifecycleStage
-  outcome?: string | null
-  command: string
+  outcome?: $Enums.AffiliateSupplyLifecycleOutcome | null
+  command: $Enums.AffiliateSupplyLifecycleCommand
   commandRef?: string | null
   idempotencyKey: string
   requestHash: string
   resultHash: string
   contractVersion: number
   contractHash: string
-  actorKind: string
+  actorKind: $Enums.AffiliateSupplyLifecycleActorKind
   actorId: string
   executingAgentId?: string | null
   reasonCodes?: Prisma.AffiliateSupplyLifecycleTransitionsCreatereasonCodesInput | string[]
@@ -517,15 +517,15 @@ export type AffiliateSupplyLifecycleTransitionsUncheckedCreateInput = {
   generation: number
   fromStage?: $Enums.AffiliateSupplyLifecycleStage | null
   toStage: $Enums.AffiliateSupplyLifecycleStage
-  outcome?: string | null
-  command: string
+  outcome?: $Enums.AffiliateSupplyLifecycleOutcome | null
+  command: $Enums.AffiliateSupplyLifecycleCommand
   commandRef?: string | null
   idempotencyKey: string
   requestHash: string
   resultHash: string
   contractVersion: number
   contractHash: string
-  actorKind: string
+  actorKind: $Enums.AffiliateSupplyLifecycleActorKind
   actorId: string
   executingAgentId?: string | null
   reasonCodes?: Prisma.AffiliateSupplyLifecycleTransitionsCreatereasonCodesInput | string[]
@@ -544,15 +544,15 @@ export type AffiliateSupplyLifecycleTransitionsUpdateInput = {
   generation?: Prisma.IntFieldUpdateOperationsInput | number
   fromStage?: Prisma.NullableEnumAffiliateSupplyLifecycleStageFieldUpdateOperationsInput | $Enums.AffiliateSupplyLifecycleStage | null
   toStage?: Prisma.EnumAffiliateSupplyLifecycleStageFieldUpdateOperationsInput | $Enums.AffiliateSupplyLifecycleStage
-  outcome?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  command?: Prisma.StringFieldUpdateOperationsInput | string
+  outcome?: Prisma.NullableEnumAffiliateSupplyLifecycleOutcomeFieldUpdateOperationsInput | $Enums.AffiliateSupplyLifecycleOutcome | null
+  command?: Prisma.EnumAffiliateSupplyLifecycleCommandFieldUpdateOperationsInput | $Enums.AffiliateSupplyLifecycleCommand
   commandRef?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   idempotencyKey?: Prisma.StringFieldUpdateOperationsInput | string
   requestHash?: Prisma.StringFieldUpdateOperationsInput | string
   resultHash?: Prisma.StringFieldUpdateOperationsInput | string
   contractVersion?: Prisma.IntFieldUpdateOperationsInput | number
   contractHash?: Prisma.StringFieldUpdateOperationsInput | string
-  actorKind?: Prisma.StringFieldUpdateOperationsInput | string
+  actorKind?: Prisma.EnumAffiliateSupplyLifecycleActorKindFieldUpdateOperationsInput | $Enums.AffiliateSupplyLifecycleActorKind
   actorId?: Prisma.StringFieldUpdateOperationsInput | string
   executingAgentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   reasonCodes?: Prisma.AffiliateSupplyLifecycleTransitionsUpdatereasonCodesInput | string[]
@@ -571,15 +571,15 @@ export type AffiliateSupplyLifecycleTransitionsUncheckedUpdateInput = {
   generation?: Prisma.IntFieldUpdateOperationsInput | number
   fromStage?: Prisma.NullableEnumAffiliateSupplyLifecycleStageFieldUpdateOperationsInput | $Enums.AffiliateSupplyLifecycleStage | null
   toStage?: Prisma.EnumAffiliateSupplyLifecycleStageFieldUpdateOperationsInput | $Enums.AffiliateSupplyLifecycleStage
-  outcome?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  command?: Prisma.StringFieldUpdateOperationsInput | string
+  outcome?: Prisma.NullableEnumAffiliateSupplyLifecycleOutcomeFieldUpdateOperationsInput | $Enums.AffiliateSupplyLifecycleOutcome | null
+  command?: Prisma.EnumAffiliateSupplyLifecycleCommandFieldUpdateOperationsInput | $Enums.AffiliateSupplyLifecycleCommand
   commandRef?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   idempotencyKey?: Prisma.StringFieldUpdateOperationsInput | string
   requestHash?: Prisma.StringFieldUpdateOperationsInput | string
   resultHash?: Prisma.StringFieldUpdateOperationsInput | string
   contractVersion?: Prisma.IntFieldUpdateOperationsInput | number
   contractHash?: Prisma.StringFieldUpdateOperationsInput | string
-  actorKind?: Prisma.StringFieldUpdateOperationsInput | string
+  actorKind?: Prisma.EnumAffiliateSupplyLifecycleActorKindFieldUpdateOperationsInput | $Enums.AffiliateSupplyLifecycleActorKind
   actorId?: Prisma.StringFieldUpdateOperationsInput | string
   executingAgentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   reasonCodes?: Prisma.AffiliateSupplyLifecycleTransitionsUpdatereasonCodesInput | string[]
@@ -598,15 +598,15 @@ export type AffiliateSupplyLifecycleTransitionsCreateManyInput = {
   generation: number
   fromStage?: $Enums.AffiliateSupplyLifecycleStage | null
   toStage: $Enums.AffiliateSupplyLifecycleStage
-  outcome?: string | null
-  command: string
+  outcome?: $Enums.AffiliateSupplyLifecycleOutcome | null
+  command: $Enums.AffiliateSupplyLifecycleCommand
   commandRef?: string | null
   idempotencyKey: string
   requestHash: string
   resultHash: string
   contractVersion: number
   contractHash: string
-  actorKind: string
+  actorKind: $Enums.AffiliateSupplyLifecycleActorKind
   actorId: string
   executingAgentId?: string | null
   reasonCodes?: Prisma.AffiliateSupplyLifecycleTransitionsCreatereasonCodesInput | string[]
@@ -625,15 +625,15 @@ export type AffiliateSupplyLifecycleTransitionsUpdateManyMutationInput = {
   generation?: Prisma.IntFieldUpdateOperationsInput | number
   fromStage?: Prisma.NullableEnumAffiliateSupplyLifecycleStageFieldUpdateOperationsInput | $Enums.AffiliateSupplyLifecycleStage | null
   toStage?: Prisma.EnumAffiliateSupplyLifecycleStageFieldUpdateOperationsInput | $Enums.AffiliateSupplyLifecycleStage
-  outcome?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  command?: Prisma.StringFieldUpdateOperationsInput | string
+  outcome?: Prisma.NullableEnumAffiliateSupplyLifecycleOutcomeFieldUpdateOperationsInput | $Enums.AffiliateSupplyLifecycleOutcome | null
+  command?: Prisma.EnumAffiliateSupplyLifecycleCommandFieldUpdateOperationsInput | $Enums.AffiliateSupplyLifecycleCommand
   commandRef?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   idempotencyKey?: Prisma.StringFieldUpdateOperationsInput | string
   requestHash?: Prisma.StringFieldUpdateOperationsInput | string
   resultHash?: Prisma.StringFieldUpdateOperationsInput | string
   contractVersion?: Prisma.IntFieldUpdateOperationsInput | number
   contractHash?: Prisma.StringFieldUpdateOperationsInput | string
-  actorKind?: Prisma.StringFieldUpdateOperationsInput | string
+  actorKind?: Prisma.EnumAffiliateSupplyLifecycleActorKindFieldUpdateOperationsInput | $Enums.AffiliateSupplyLifecycleActorKind
   actorId?: Prisma.StringFieldUpdateOperationsInput | string
   executingAgentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   reasonCodes?: Prisma.AffiliateSupplyLifecycleTransitionsUpdatereasonCodesInput | string[]
@@ -652,15 +652,15 @@ export type AffiliateSupplyLifecycleTransitionsUncheckedUpdateManyInput = {
   generation?: Prisma.IntFieldUpdateOperationsInput | number
   fromStage?: Prisma.NullableEnumAffiliateSupplyLifecycleStageFieldUpdateOperationsInput | $Enums.AffiliateSupplyLifecycleStage | null
   toStage?: Prisma.EnumAffiliateSupplyLifecycleStageFieldUpdateOperationsInput | $Enums.AffiliateSupplyLifecycleStage
-  outcome?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  command?: Prisma.StringFieldUpdateOperationsInput | string
+  outcome?: Prisma.NullableEnumAffiliateSupplyLifecycleOutcomeFieldUpdateOperationsInput | $Enums.AffiliateSupplyLifecycleOutcome | null
+  command?: Prisma.EnumAffiliateSupplyLifecycleCommandFieldUpdateOperationsInput | $Enums.AffiliateSupplyLifecycleCommand
   commandRef?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   idempotencyKey?: Prisma.StringFieldUpdateOperationsInput | string
   requestHash?: Prisma.StringFieldUpdateOperationsInput | string
   resultHash?: Prisma.StringFieldUpdateOperationsInput | string
   contractVersion?: Prisma.IntFieldUpdateOperationsInput | number
   contractHash?: Prisma.StringFieldUpdateOperationsInput | string
-  actorKind?: Prisma.StringFieldUpdateOperationsInput | string
+  actorKind?: Prisma.EnumAffiliateSupplyLifecycleActorKindFieldUpdateOperationsInput | $Enums.AffiliateSupplyLifecycleActorKind
   actorId?: Prisma.StringFieldUpdateOperationsInput | string
   executingAgentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   reasonCodes?: Prisma.AffiliateSupplyLifecycleTransitionsUpdatereasonCodesInput | string[]
@@ -771,6 +771,18 @@ export type AffiliateSupplyLifecycleTransitionsCreateevidenceRefsInput = {
 
 export type NullableEnumAffiliateSupplyLifecycleStageFieldUpdateOperationsInput = {
   set?: $Enums.AffiliateSupplyLifecycleStage | null
+}
+
+export type NullableEnumAffiliateSupplyLifecycleOutcomeFieldUpdateOperationsInput = {
+  set?: $Enums.AffiliateSupplyLifecycleOutcome | null
+}
+
+export type EnumAffiliateSupplyLifecycleCommandFieldUpdateOperationsInput = {
+  set?: $Enums.AffiliateSupplyLifecycleCommand
+}
+
+export type EnumAffiliateSupplyLifecycleActorKindFieldUpdateOperationsInput = {
+  set?: $Enums.AffiliateSupplyLifecycleActorKind
 }
 
 export type AffiliateSupplyLifecycleTransitionsUpdatereasonCodesInput = {
@@ -906,15 +918,15 @@ export type $AffiliateSupplyLifecycleTransitionsPayload<ExtArgs extends runtime.
     generation: number
     fromStage: $Enums.AffiliateSupplyLifecycleStage | null
     toStage: $Enums.AffiliateSupplyLifecycleStage
-    outcome: string | null
-    command: string
+    outcome: $Enums.AffiliateSupplyLifecycleOutcome | null
+    command: $Enums.AffiliateSupplyLifecycleCommand
     commandRef: string | null
     idempotencyKey: string
     requestHash: string
     resultHash: string
     contractVersion: number
     contractHash: string
-    actorKind: string
+    actorKind: $Enums.AffiliateSupplyLifecycleActorKind
     actorId: string
     executingAgentId: string | null
     reasonCodes: string[]
@@ -1353,15 +1365,15 @@ export interface AffiliateSupplyLifecycleTransitionsFieldRefs {
   readonly generation: Prisma.FieldRef<"AffiliateSupplyLifecycleTransitions", 'Int'>
   readonly fromStage: Prisma.FieldRef<"AffiliateSupplyLifecycleTransitions", 'AffiliateSupplyLifecycleStage'>
   readonly toStage: Prisma.FieldRef<"AffiliateSupplyLifecycleTransitions", 'AffiliateSupplyLifecycleStage'>
-  readonly outcome: Prisma.FieldRef<"AffiliateSupplyLifecycleTransitions", 'String'>
-  readonly command: Prisma.FieldRef<"AffiliateSupplyLifecycleTransitions", 'String'>
+  readonly outcome: Prisma.FieldRef<"AffiliateSupplyLifecycleTransitions", 'AffiliateSupplyLifecycleOutcome'>
+  readonly command: Prisma.FieldRef<"AffiliateSupplyLifecycleTransitions", 'AffiliateSupplyLifecycleCommand'>
   readonly commandRef: Prisma.FieldRef<"AffiliateSupplyLifecycleTransitions", 'String'>
   readonly idempotencyKey: Prisma.FieldRef<"AffiliateSupplyLifecycleTransitions", 'String'>
   readonly requestHash: Prisma.FieldRef<"AffiliateSupplyLifecycleTransitions", 'String'>
   readonly resultHash: Prisma.FieldRef<"AffiliateSupplyLifecycleTransitions", 'String'>
   readonly contractVersion: Prisma.FieldRef<"AffiliateSupplyLifecycleTransitions", 'Int'>
   readonly contractHash: Prisma.FieldRef<"AffiliateSupplyLifecycleTransitions", 'String'>
-  readonly actorKind: Prisma.FieldRef<"AffiliateSupplyLifecycleTransitions", 'String'>
+  readonly actorKind: Prisma.FieldRef<"AffiliateSupplyLifecycleTransitions", 'AffiliateSupplyLifecycleActorKind'>
   readonly actorId: Prisma.FieldRef<"AffiliateSupplyLifecycleTransitions", 'String'>
   readonly executingAgentId: Prisma.FieldRef<"AffiliateSupplyLifecycleTransitions", 'String'>
   readonly reasonCodes: Prisma.FieldRef<"AffiliateSupplyLifecycleTransitions", 'String[]'>

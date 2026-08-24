@@ -1,3 +1,7 @@
+import type {
+  AffiliateSupplyClient,
+  AffiliateSupplyDatabase,
+} from './affiliateSupplyPersistence';
 import { createId } from '@/lib/id';
 import { prisma } from '@/lib/prisma';
 import {
@@ -158,24 +162,24 @@ const isUniqueConstraintError = (error: unknown): boolean => (
   Boolean(error && typeof error === 'object' && 'code' in error
     && (error as { code?: unknown }).code === 'P2002')
 );
-const supplyDatabaseForOptions = (client: unknown): any => {
+const supplyDatabaseForOptions = (client: unknown): AffiliateSupplyDatabase => {
   const candidate = client as Record<string, unknown> | undefined;
   return candidate?.supplySources
-    ? candidate
-    : affiliateSupplyDatabase(client);
+    ? candidate as unknown as AffiliateSupplyDatabase
+    : affiliateSupplyDatabase(client as AffiliateSupplyClient | undefined);
 };
 
 const mappingAdmissionPaused = async (options: { db?: unknown; now: Date }): Promise<boolean> => {
   const database = supplyDatabaseForOptions(options.db);
   if (
-    !database.supplySources?.findMany
-    || !database.contractManifests?.findFirst
-    || !database.mappingJobs?.count
-    || !database.approvals?.count
-    || !database.gatewayClaims?.count
-    || !database.demands?.findMany
-    || !database.waves?.findMany
-    || !database.campaigns?.findMany
+    typeof database.supplySources?.findMany !== 'function'
+    || typeof database.contractManifests?.findFirst !== 'function'
+    || typeof database.mappingJobs?.count !== 'function'
+    || typeof database.approvals?.count !== 'function'
+    || typeof database.gatewayClaims?.count !== 'function'
+    || typeof database.demands?.findMany !== 'function'
+    || typeof database.waves?.findMany !== 'function'
+    || typeof database.campaigns?.findMany !== 'function'
   ) return false;
   try {
     const roots = await database.supplySources.findMany({
@@ -231,13 +235,25 @@ const ensureIntakeSupplySource = async (intake: any, options: { db?: unknown; no
   return ensureAffiliateSupplySource({
     requestedUrl,
     resolvedCanonicalUrl: requestedUrl,
-    redirectVerified: true,
+    isRedirectVerified: true,
     operatorDomain: parsed.hostname,
     targetKind: Array.isArray(intake.targetKindHints) ? intake.targetKindHints[0] : null,
     intakeId: intake.id,
     db: database,
     now: options.now,
   });
+};
+const withMappingTransaction = async <T>(
+  client: unknown,
+  callback: (transactionClient: unknown) => Promise<T>,
+): Promise<T> => {
+  const database = supplyDatabaseForOptions(client);
+  if (database.transaction) {
+    return database.transaction(async (transactionDatabase) => (
+      callback(transactionDatabase.rawClient ?? transactionDatabase)
+    )) as Promise<T>;
+  }
+  return callback(client ?? prisma);
 };
 
 
@@ -331,25 +347,31 @@ export const claimNextAffiliateSourceIntakeForMapping = async (options: {
     && activeJob.leaseExpiresAt instanceof Date
     && activeJob.leaseExpiresAt.getTime() >= now.getTime()
   ) {
-    const renewed = await jobs.updateMany({
-      where: {
-        id: activeJob.id,
-        status: 'CLAIMED',
-        workerId,
-        leaseExpiresAt: { gte: now },
-      },
-      data: { leaseExpiresAt },
-    });
-    if (renewed.count === 1) {
-      const intake = await intakes.findUnique({ where: { id: activeJob.intakeId } });
+    const resumedClaim = await withMappingTransaction(options.db, async (transactionClient) => {
+      const transactionMappingDb = mappingDb(transactionClient);
+      const renewed = await transactionMappingDb.jobs.updateMany({
+        where: {
+          id: activeJob.id,
+          status: 'CLAIMED',
+          workerId,
+          leaseExpiresAt: { gte: now },
+        },
+        data: { leaseExpiresAt },
+      });
+      if (renewed.count !== 1) return null;
+      const intake = await transactionMappingDb.intakes.findUnique({ where: { id: activeJob.intakeId } });
       if (!intake) throw new Error('Claimed affiliate source intake not found.');
-      const ensuredSupply = await ensureIntakeSupplySource(intake, { db: options.db, now });
-      if (ensuredSupply?.supplySource?.id && jobs.update) {
-        await jobs.update({
+      const ensuredSupply = await ensureIntakeSupplySource(intake, { db: transactionClient, now });
+      if (ensuredSupply?.supplySource?.id && transactionMappingDb.jobs.update) {
+        await transactionMappingDb.jobs.update({
           where: { id: activeJob.id },
           data: { supplySourceId: ensuredSupply.supplySource.id },
         });
       }
+      return { intake };
+    });
+    if (resumedClaim) {
+      const intake = resumedClaim.intake;
       const claimHandle = claimHandleFromJob({
         ...activeJob,
         workerId,
@@ -412,44 +434,50 @@ export const claimNextAffiliateSourceIntakeForMapping = async (options: {
       }
     }
     if (!job) return null;
-    const claimed = await jobs.updateMany({
-      where: {
-        id: job.id,
-        OR: [
-          { status: 'QUEUED' },
-          { status: 'CLAIMED', leaseExpiresAt: { lt: now } },
-        ],
-      },
-      data: {
-        status: 'CLAIMED',
-        claimedAt: now,
-        leaseExpiresAt,
-        workerId,
-        attemptCount: { increment: 1 },
-        resultSummary: archiveClaimEvidenceContext(
-          job.resultSummary,
-          'Previous mapping claim generation expired or was replaced.',
-          now,
-        ),
-        errorMessage: null,
-      },
+    const claimedJob = await withMappingTransaction(options.db, async (transactionClient) => {
+      const transactionMappingDb = mappingDb(transactionClient);
+      const claimed = await transactionMappingDb.jobs.updateMany({
+        where: {
+          id: job.id,
+          OR: [
+            { status: 'QUEUED' },
+            { status: 'CLAIMED', leaseExpiresAt: { lt: now } },
+          ],
+        },
+        data: {
+          status: 'CLAIMED',
+          claimedAt: now,
+          leaseExpiresAt,
+          workerId,
+          attemptCount: { increment: 1 },
+          resultSummary: archiveClaimEvidenceContext(
+            job.resultSummary,
+            'Previous mapping claim generation expired or was replaced.',
+            now,
+          ),
+          errorMessage: null,
+        },
+      });
+      if (claimed.count !== 1) return null;
+      const intake = await transactionMappingDb.intakes.findUnique({ where: { id: job.intakeId } });
+      if (!intake) {
+        await transactionMappingDb.jobs.update({
+          where: { id: job.id },
+          data: { status: 'FAILED', finishedAt: now, errorMessage: 'Affiliate source intake not found.' },
+        });
+        return null;
+      }
+      const ensuredSupply = await ensureIntakeSupplySource(intake, { db: transactionClient, now });
+      if (ensuredSupply?.supplySource?.id && transactionMappingDb.jobs.update) {
+        await transactionMappingDb.jobs.update({
+          where: { id: job.id },
+          data: { supplySourceId: ensuredSupply.supplySource.id },
+        });
+      }
+      return { intake };
     });
-    if (claimed.count !== 1) continue;
-    const intake = await intakes.findUnique({ where: { id: job.intakeId } });
-    if (!intake) {
-      await jobs.update({
-        where: { id: job.id },
-        data: { status: 'FAILED', finishedAt: now, errorMessage: 'Affiliate source intake not found.' },
-      });
-      continue;
-    }
-    const ensuredSupply = await ensureIntakeSupplySource(intake, { db: options.db, now });
-    if (ensuredSupply?.supplySource?.id && jobs.update) {
-      await jobs.update({
-        where: { id: job.id },
-        data: { supplySourceId: ensuredSupply.supplySource.id },
-      });
-    }
+    if (!claimedJob) continue;
+    const intake = claimedJob.intake;
     const claimHandle: AffiliateSourceMappingClaimHandle = {
       jobId: job.id,
       workerId,
@@ -651,7 +679,7 @@ export const finishAffiliateSourceMappingClaim = async (input: {
   const submittedEnvelope = recordValue(input.resultSummary);
   const finalize = async (tx: unknown) => {
     const { intakes: transactionIntakes, jobs: transactionJobs, approvals: transactionApprovals } = mappingDb(tx);
-    const supplyDatabase = affiliateSupplyDatabase(tx);
+    const supplyDatabase = affiliateSupplyDatabase(tx as AffiliateSupplyClient);
     const transactionJob = await transactionJobs.findUnique({ where: { id: input.claimHandle.jobId } });
     if (!transactionJob) throw new Error('Affiliate source mapping job not found.');
     const transactionIntake = supplyDatabase.intakes?.findUnique
@@ -808,11 +836,11 @@ export const finishAffiliateSourceMappingClaim = async (input: {
       supplySourceId
       && mappingId
       && ['EXPANDED', 'REVIEW_REQUIRED', 'APPROVED'].includes(input.status)
-      && supplyDatabase.supplySources?.findUnique
-      && supplyDatabase.contractManifests?.findFirst
-      && supplyDatabase.transitions?.findUnique
-      && supplyDatabase.transitions?.findFirst
-      && supplyDatabase.transitions?.create
+      && typeof supplyDatabase.supplySources?.findUnique === 'function'
+      && typeof supplyDatabase.contractManifests?.findFirst === 'function'
+      && typeof supplyDatabase.transitions?.findUnique === 'function'
+      && typeof supplyDatabase.transitions?.findFirst === 'function'
+      && typeof supplyDatabase.transitions?.create === 'function'
     ) {
       const lifecycleRoot = await supplyDatabase.supplySources.findUnique({
         where: { id: supplySourceId },

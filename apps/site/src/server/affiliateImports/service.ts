@@ -131,6 +131,7 @@ const affiliatePrisma = (clientInput: any = prisma) => {
     facilities: client.facilities,
     divisions: client.divisions,
     organizations: client.organizations,
+    approvals: client.affiliateApprovalJobs,
     sports: client.sports,
     files: client.file,
   };
@@ -634,7 +635,7 @@ export const createAffiliateSource = async (
       ? await ensureAffiliateSupplySource({
           requestedUrl: input.listUrl,
           resolvedCanonicalUrl: input.listUrl,
-          redirectVerified: true,
+          isRedirectVerified: true,
           targetKind: input.targetKind,
           liveSourceId: sourceId,
           db: supplyDatabase,
@@ -728,9 +729,9 @@ export const approveAffiliateSourceAutomation = async (
     }
     const isLifecycleReady = Boolean(
       source.supplySourceId
-      && supplyDatabase.supplySources?.findUnique
-      && supplyDatabase.approvals?.upsert
-      && supplyDatabase.transitions?.create,
+      && typeof supplyDatabase.supplySources.findUnique === "function"
+      && typeof supplyDatabase.approvals.upsert === "function"
+      && typeof supplyDatabase.transitions.create === "function"
     );
     const activeContract = isLifecycleReady
       ? await loadActiveAffiliateSupplyContract({ db: supplyDatabase })
@@ -835,6 +836,10 @@ export const activateAffiliateSourceAutomation = async (
       throw new Error("Affiliate Supply Source root not found.");
     }
     const now = new Date();
+    const deferredOrganizationLogos: Array<{
+      candidateId: string;
+      organizationId: string;
+    }> = [];
     await executeAffiliateSupplyLifecycleCommand({
       supplySourceId: source.supplySourceId,
       command: 'ACTIVATE',
@@ -867,27 +872,29 @@ export const activateAffiliateSourceAutomation = async (
         if (!candidate) {
           throw new Error("Affiliate import candidate not found.");
         }
-        const listingKind = normalizeSourceType(candidate.listingKind);
-        const targetType = listingKind === "RENTAL"
-          ? "FACILITY"
-          : listingKind === "CLUB"
-            ? "ORGANIZATION"
-            : listingKind;
-        if (!targetType) {
+        const targetRoute = affiliateTargetRouteForCandidate(candidate);
+        if (!targetRoute) {
           throw new Error("Affiliate listing kind is required for lifecycle activation.");
         }
         const publishedTarget = await publishAffiliateCandidateDirect(candidateId, {
           publishedByUserId: adminUserId,
+          deferOrganizationLogo: targetRoute.targetType === 'ORGANIZATION',
           client,
           candidate,
         });
         if (!publishedTarget?.id) {
           throw new Error("Affiliate lifecycle activation did not publish a target.");
         }
+        if (targetRoute.targetType === 'ORGANIZATION') {
+          deferredOrganizationLogos.push({
+            candidateId,
+            organizationId: String(publishedTarget.id),
+          });
+        }
         return {
-          targetType,
+          targetType: targetRoute.targetType,
           targetId: String(publishedTarget.id),
-          sourceProfile: nullableString(target.sourceProfile) ?? listingKind ?? targetType,
+          sourceProfile: nullableString(target.sourceProfile) ?? targetRoute.listingKind,
           candidateId,
           marketKey: nullableString(target.marketKey),
           sportId: nullableString(target.sportId),
@@ -898,15 +905,69 @@ export const activateAffiliateSourceAutomation = async (
       },
       now,
     });
-    return sources.findUnique({ where: { id: sourceId } });
+    const committedSource = await sources.findUnique({ where: { id: sourceId } });
+    if (!committedSource) {
+      throw new Error("Affiliate source disappeared after lifecycle activation.");
+    }
+    return { source: committedSource, deferredOrganizationLogos };
   };
   const client = prisma as any;
-  return typeof client.$transaction === "function"
-    ? client.$transaction(
+  const committed = typeof client.$transaction === "function"
+    ? await client.$transaction(
         (transactionClient: any) => execute(transactionClient),
         { isolationLevel: "Serializable" },
       )
-    : execute(client);
+    : await execute(client);
+  const { candidates, approvals } = affiliatePrisma();
+  const candidateReview = typeof approvals?.findUnique === 'function'
+    ? await approvals.findUnique({ where: { id: input.candidateReviewId } })
+    : null;
+  const reviewDecision = recordValue(candidateReview?.decision);
+  const reviewTargets = Array.isArray(reviewDecision.targets)
+    ? reviewDecision.targets.filter(
+      (target): target is Record<string, unknown> => (
+        Boolean(target) && typeof target === 'object' && !Array.isArray(target)
+      ),
+    )
+    : [];
+  const replayOrganizationCandidateIds = new Set(
+    reviewTargets
+      .filter((target) => (
+        nullableString(target.targetType)?.toUpperCase() === 'ORGANIZATION'
+        && (nullableString(target.status)?.toUpperCase() ?? 'PUBLISHED') === 'PUBLISHED'
+      ))
+      .map((target) => nullableString(target.candidateId))
+      .filter((candidateId): candidateId is string => Boolean(candidateId)),
+  );
+  const deferredOrganizationLogos: Array<{
+    candidateId: string;
+    organizationId: string;
+  }> = committed.deferredOrganizationLogos;
+  const deferredOrganizationLogoByCandidate = new Map(
+    deferredOrganizationLogos.map((logo) => [logo.candidateId, logo.organizationId]),
+  );
+  const candidateIds = Array.from(new Set([
+    ...deferredOrganizationLogos.map((logo) => logo.candidateId),
+    ...replayOrganizationCandidateIds,
+  ]));
+  if (candidateIds.length && typeof candidates.findMany === 'function') {
+    const candidateRows = await candidates.findMany({ where: { id: { in: candidateIds } } }) as Array<Record<string, unknown>>;
+    for (const candidate of candidateRows) {
+      const candidateId = nullableString(candidate?.id);
+      if (!candidateId) continue;
+      const organizationId = deferredOrganizationLogoByCandidate.get(candidateId)
+        ?? nullableString(candidate.publishedOrganizationId);
+      if (!organizationId) continue;
+      await upsertAffiliateOrganizationLogoForCandidate(
+        candidate,
+        organizationId,
+        adminUserId,
+        prisma,
+        { assignOrganizationLogo: true },
+      );
+    }
+  }
+  return committed.source;
 };
 
 const normalizeSourceType = (value: unknown): string | null =>
@@ -925,6 +986,49 @@ const normalizeListingKind = (value: unknown): AffiliateListingKind => {
   throw new Error(
     "Affiliate listing kind must be EVENT, TEAM, RENTAL, or CLUB.",
   );
+};
+type AffiliatePublishedTargetType =
+  | "EVENT"
+  | "TEAM"
+  | "FACILITY"
+  | "ORGANIZATION";
+
+type AffiliateTargetRoute = Readonly<{
+  listingKind: AffiliateListingKind;
+  targetType: AffiliatePublishedTargetType;
+  publishedIdField:
+    | "publishedEventId"
+    | "publishedTeamId"
+    | "publishedFacilityId"
+    | "publishedOrganizationId";
+}>;
+
+const affiliateTargetRouteForListingKind = (
+  listingKind: unknown,
+): AffiliateTargetRoute | null => {
+  const normalized = normalizeSourceType(listingKind);
+  if (normalized === "EVENT") {
+    return { listingKind: "EVENT", targetType: "EVENT", publishedIdField: "publishedEventId" };
+  }
+  if (normalized === "TEAM") {
+    return { listingKind: "TEAM", targetType: "TEAM", publishedIdField: "publishedTeamId" };
+  }
+  if (normalized === "RENTAL") {
+    return { listingKind: "RENTAL", targetType: "FACILITY", publishedIdField: "publishedFacilityId" };
+  }
+  if (normalized === "CLUB") {
+    return { listingKind: "CLUB", targetType: "ORGANIZATION", publishedIdField: "publishedOrganizationId" };
+  }
+  return null;
+};
+
+const affiliateTargetRouteForCandidate = (
+  candidate: any,
+): (AffiliateTargetRoute & { targetId: string | null }) | null => {
+  const route = affiliateTargetRouteForListingKind(candidate?.listingKind);
+  return route
+    ? { ...route, targetId: nullableString(candidate?.[route.publishedIdField]) }
+    : null;
 };
 
 const publishedEventIdFromCandidate = (candidate: any): string | null =>
@@ -1074,56 +1178,164 @@ const candidateClubLogoUrl = (candidate: any): string | null => {
   );
 };
 
+type AffiliateOrganizationLogoOptions = Readonly<{
+  assignOrganizationLogo?: boolean;
+}>;
+
 const upsertAffiliateOrganizationLogoForCandidate = async (
   candidate: any,
   organizationId: string,
   ownerId: string,
   client: any = prisma,
+  options: AffiliateOrganizationLogoOptions = {},
 ): Promise<string | null> => {
   const logoUrl = candidateClubLogoUrl(candidate);
   if (!logoUrl) return null;
-
+  const storage = getStorageProvider();
+  const shouldAssignOrganizationLogo = options.assignOrganizationLogo === true;
+  const logoId = affiliateOrganizationLogoId(organizationId);
+  let previousObject: { key: string; bucket?: string } | null = null;
+  let storedObject: {
+    key: string;
+    sizeBytes: number;
+    contentType?: string;
+    bucket?: string;
+  } | null = null;
+  let createdObject = false;
+  let stagedKey: string | null = null;
+  let persistenceCommitted = false;
   try {
     const normalized = await normalizeAffiliateOrganizationLogo(
       await downloadPublicRemoteImage(logoUrl),
     );
-    const logoId = affiliateOrganizationLogoId(organizationId);
     const originalName =
       nullableString(rawExtractedCandidateFields(candidate).logoOriginalName) ??
       filenameFromUrl(logoUrl, `${slugifyForId(organizationId)}-logo.png`);
-    const stored = await getStorageProvider().putObject({
+    const key = shouldAssignOrganizationLogo
+      ? `affiliate-organizations/${organizationId}/logo-${createId()}.png`
+      : `affiliate-organizations/${organizationId}/logo.png`;
+    stagedKey = shouldAssignOrganizationLogo ? key : null;
+    if (!shouldAssignOrganizationLogo) {
+      const existingObject = await storage.headObject({ key });
+      createdObject = !existingObject.exists;
+    }
+    storedObject = await storage.putObject({
       data: normalized,
       originalName,
       contentType: "image/png",
       organizationId,
+      key,
     });
-    await affiliatePrisma(client).files.upsert({
-      where: { id: logoId },
-      create: {
-        id: logoId,
+    const persist = async (persistenceClient: any): Promise<void> => {
+      const now = new Date();
+      const persistence = affiliatePrisma(persistenceClient);
+      if (!persistence.files) {
+        throw new Error("Affiliate organization logo file persistence is unavailable.");
+      }
+      previousObject = null;
+      if (typeof persistence.files.findUnique === "function") {
+        const existingFile = await persistence.files.findUnique({
+          where: { id: logoId },
+          select: { path: true, bucket: true },
+        });
+        if (existingFile?.path) {
+          previousObject = {
+            key: String(existingFile.path),
+            bucket: existingFile.bucket ?? undefined,
+          };
+        }
+      }
+      const fileData = {
         uploaderId: ownerId,
         organizationId,
-        bucket: stored.bucket ?? null,
+        bucket: storedObject?.bucket ?? null,
         originalName,
         mimeType: "image/png",
-        sizeBytes: stored.sizeBytes,
-        path: stored.key,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      },
-      update: {
-        uploaderId: ownerId,
-        organizationId,
-        bucket: stored.bucket ?? null,
-        originalName,
-        mimeType: "image/png",
-        sizeBytes: stored.sizeBytes,
-        path: stored.key,
-        updatedAt: new Date(),
-      },
-    });
+        sizeBytes: storedObject?.sizeBytes ?? normalized.length,
+        path: storedObject?.key ?? key,
+        updatedAt: now,
+      };
+      if (previousObject) {
+        if (typeof persistence.files.updateMany !== "function") {
+          throw new Error("Affiliate organization logo compare-and-set is unavailable.");
+        }
+        const updated = await persistence.files.updateMany({
+          where: { id: logoId, path: previousObject.key },
+          data: fileData,
+        });
+        if (updated.count !== 1) {
+          throw new Error("Affiliate organization logo replacement lost a compare-and-set race.");
+        }
+      } else {
+        if (typeof persistence.files.create !== "function") {
+          throw new Error("Affiliate organization logo file creation is unavailable.");
+        }
+        await persistence.files.create({
+          data: {
+            id: logoId,
+            ...fileData,
+            createdAt: now,
+          },
+        });
+      }
+      if (shouldAssignOrganizationLogo) {
+        if (!persistence.organizations?.update) {
+          throw new Error("Affiliate organization logo assignment is unavailable.");
+        }
+        await persistence.organizations.update({
+          where: { id: organizationId },
+          data: { logoId },
+        });
+      }
+    };
+    const transaction = (client as { $transaction?: unknown }).$transaction;
+    if (shouldAssignOrganizationLogo && typeof transaction === "function") {
+      await (transaction as Function).call(
+        client,
+        (transactionClient: any) => persist(transactionClient),
+        { isolationLevel: "Serializable" },
+      );
+    } else {
+      await persist(client);
+    }
+    persistenceCommitted = true;
+    const committedPreviousKey = (previousObject as { key: string; bucket?: string } | null)?.key ?? null;
+    const committedPreviousBucket = (previousObject as { key: string; bucket?: string } | null)?.bucket;
+    const committedStoredKey = (storedObject as { key: string } | null)?.key ?? null;
+    if (
+      shouldAssignOrganizationLogo
+      && committedPreviousKey
+      && committedStoredKey
+      && committedPreviousKey !== committedStoredKey
+    ) {
+      try {
+        await storage.deleteObject({
+          key: committedPreviousKey,
+          bucket: committedPreviousBucket,
+        });
+      } catch {
+        // Old logo cleanup is best effort after the new logo is committed.
+      }
+    }
     return logoId;
   } catch {
+    if (!persistenceCommitted) {
+      const cleanupKey = stagedKey ?? (
+        createdObject && storedObject
+          ? storedObject.key
+          : null
+      );
+      if (cleanupKey) {
+        try {
+          await storage.deleteObject({
+            key: cleanupKey,
+            bucket: storedObject?.bucket,
+          });
+        } catch {
+          // Storage cleanup is best effort after a failed logo save.
+        }
+      }
+    }
     return null;
   }
 };
@@ -2883,7 +3095,11 @@ const buildAffiliateOrganizationData = async (
   candidate: any,
   source: AffiliateScrapeSourceRow,
   organizationId: string,
-  options: { status?: "LISTED" | "UNLISTED"; publicPageEnabled?: boolean } = {},
+  options: {
+    status?: "LISTED" | "UNLISTED";
+    publicPageEnabled?: boolean;
+    deferLogoUpload?: boolean;
+  } = {},
   existingOrganization: any = null,
   client: any = prisma,
 ) => {
@@ -2960,17 +3176,21 @@ const buildAffiliateOrganizationData = async (
     nullableString(candidate.officialActionUrl) ??
     nullableString(candidate.sourceUrl) ??
     nullableString(source.baseUrl);
-  const logoId =
-    (await upsertAffiliateOrganizationLogoForCandidate(
+  const logoId = options.deferLogoUpload
+    ? nullableString(existingOrganization?.logoId)
+      ?? (isCanonicalSourceOrganization
+        ? nullableString(sourceOrganization.logoId)
+        : null)
+    : (await upsertAffiliateOrganizationLogoForCandidate(
       candidate,
       organizationId,
       ownerId,
       client,
     )) ??
-    nullableString(existingOrganization?.logoId) ??
-    (isCanonicalSourceOrganization
-      ? nullableString(sourceOrganization.logoId)
-      : null);
+      nullableString(existingOrganization?.logoId) ??
+      (isCanonicalSourceOrganization
+        ? nullableString(sourceOrganization.logoId)
+        : null);
 
   return {
     updatedAt: new Date(),
@@ -2998,7 +3218,12 @@ const buildAffiliateOrganizationData = async (
 const upsertAffiliateOrganizationForCandidate = async (
   candidate: any,
   source: AffiliateScrapeSourceRow,
-  options: { status?: "LISTED" | "UNLISTED"; publicPageEnabled?: boolean; client?: any } = {},
+  options: {
+    status?: "LISTED" | "UNLISTED";
+    publicPageEnabled?: boolean;
+    deferLogoUpload?: boolean;
+    client?: any;
+  } = {},
 ) => {
   const client = options.client ?? prisma;
   const { organizations } = affiliatePrisma(client);
@@ -3550,7 +3775,7 @@ export const runAffiliateSourceScrape = async (
       const identity = normalizeAffiliateSupplyIdentity({
         requestedUrl: currentRoot.canonicalUrl,
         resolvedCanonicalUrl: page.finalUrl,
-        redirectVerified: true,
+        isRedirectVerified: true,
         operatorDomain: currentRoot.operatorDomain,
         prior: {
           canonicalUrl: currentRoot.canonicalUrl,
@@ -3562,7 +3787,7 @@ export const runAffiliateSourceScrape = async (
       const identityResult = await ensureAffiliateSupplySource({
         requestedUrl: currentRoot.canonicalUrl,
         resolvedCanonicalUrl: page.finalUrl,
-        redirectVerified: true,
+        isRedirectVerified: true,
         operatorDomain: currentRoot.operatorDomain,
         targetKind: currentRoot.targetKind,
         rolloutCohort: currentRoot.rolloutCohort,
@@ -3580,12 +3805,12 @@ export const runAffiliateSourceScrape = async (
       activeSupplySourceId = String(identityResult.supplySource.id);
       if (
         identityResult.identity.rootDecision === "SAME_ROOT"
-        && identityResult.identity.canonicalUrl !== currentRoot.canonicalUrl
+        && identityResult.identity.isRevalidationRequired
       ) {
-        automaticallyPublishCandidates = false;
+        throw new Error("Affiliate scrape final URL changed the Supply Source identity and requires revalidation.");
       }
     }
-    const emptyStateMatched = matchesAffiliatePublicEmptyState(page, mapping);
+    const isEmptyStateMatched = matchesAffiliatePublicEmptyState(page, mapping);
     const extractedListCandidates = extractAffiliateCandidatesFromPage(
       page,
       mapping,
@@ -3881,26 +4106,11 @@ export const runAffiliateSourceScrape = async (
       }
       const savedCandidate = savedCandidates[savedCandidates.length - 1];
       if (activeSupplySourceId && !automationHeld && savedCandidate?.status === "PUBLISHED") {
-        const targetId =
-          candidate.listingKind === "EVENT"
-            ? savedCandidate.publishedEventId
-            : candidate.listingKind === "TEAM"
-              ? savedCandidate.publishedTeamId
-              : candidate.listingKind === "RENTAL"
-                ? savedCandidate.publishedFacilityId
-                : candidate.listingKind === "CLUB"
-                  ? savedCandidate.publishedOrganizationId
-                  : null;
-        const targetType =
-          candidate.listingKind === "EVENT"
-            ? "EVENT"
-            : candidate.listingKind === "TEAM"
-              ? "TEAM"
-              : candidate.listingKind === "RENTAL"
-                ? "FACILITY"
-                : candidate.listingKind === "CLUB"
-                  ? "ORGANIZATION"
-                  : null;
+        const targetRoute = affiliateTargetRouteForListingKind(candidate.listingKind);
+        const targetId = targetRoute
+          ? nullableString(savedCandidate[targetRoute.publishedIdField])
+          : null;
+        const targetType = targetRoute?.targetType ?? null;
         if (targetId && targetType) {
           const dimensions = affiliateSupplyTargetDimensions(
             source,
@@ -3911,7 +4121,7 @@ export const runAffiliateSourceScrape = async (
           lifecycleTargets.push({
             targetType,
             targetId,
-            sourceProfile: candidate.listingKind,
+            sourceProfile: targetRoute?.listingKind ?? candidate.listingKind,
             candidateId: savedCandidate.id,
             ...(dimensions.marketKey ? { marketKey: dimensions.marketKey } : {}),
             ...(dimensions.sportId ? { sportId: dimensions.sportId } : {}),
@@ -3934,7 +4144,7 @@ export const runAffiliateSourceScrape = async (
 
     const finishedAt = new Date();
     const runLogs = {
-      emptyStateMatched,
+      isEmptyStateMatched,
       createdCandidateCount,
       updatedCandidateCount,
       rejectedCount: rejectedCandidates.length,
@@ -3964,7 +4174,7 @@ export const runAffiliateSourceScrape = async (
           }
         : undefined;
  const command =
- emptyStateMatched && extractedListCandidates.length === 0
+ isEmptyStateMatched && extractedListCandidates.length === 0
  ? "RECORD_EMPTY_REFRESH"
  : "RECORD_REFRESH";
       await executeAffiliateSupplyLifecycleCommand({
@@ -3982,7 +4192,7 @@ export const runAffiliateSourceScrape = async (
           candidateCount: savedCandidates.length,
           finalUrl: page.finalUrl,
           httpStatus: page.statusCode,
-          emptyStateMatched,
+          isEmptyStateMatched,
           runLogs,
           targets: lifecycleTargets,
           evidenceRefs: [
@@ -4032,7 +4242,7 @@ export const runAffiliateSourceScrape = async (
     return transactionResult;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Scrape failed.";
-    let lifecycleFailureRecorded = false;
+    let isLifecycleFailureRecorded = false;
     let lifecycleFailureError: Error | null = null;
     if (activeSupplySourceId) {
       try {
@@ -4059,7 +4269,7 @@ export const runAffiliateSourceScrape = async (
             db: supplyDatabase,
             now: new Date(),
           });
-          lifecycleFailureRecorded = true;
+          isLifecycleFailureRecorded = true;
         }
       } catch (failure) {
         lifecycleFailureError = failure instanceof Error
@@ -4067,7 +4277,7 @@ export const runAffiliateSourceScrape = async (
           : new Error(String(failure));
       }
     }
-    if (!lifecycleFailureRecorded) {
+    if (!isLifecycleFailureRecorded) {
       await runs.update({
         where: { id: run.id },
         data: {
@@ -4294,6 +4504,7 @@ const publishAffiliateCandidateDirect = async (
   candidateId: string,
   params: {
     publishedByUserId?: string | null;
+    deferOrganizationLogo?: boolean;
     client?: any;
     candidate?: any;
     source?: any;
@@ -4473,6 +4684,7 @@ const publishAffiliateCandidateDirect = async (
       {
         status: "LISTED",
         publicPageEnabled: true,
+        deferLogoUpload: params.deferOrganizationLogo === true,
         client: baseClient,
       },
     );
@@ -4536,6 +4748,7 @@ export const publishAffiliateCandidate = async (
     `affiliate-candidate:${candidateId}`,
   ]));
   let publishedTarget: any = null;
+  let deferredOrganizationId: string | null = null;
   const lifecycleResult = await executeAffiliateSupplyLifecycleCommand({
     supplySourceId,
     command: "PUBLISH_TARGET",
@@ -4551,28 +4764,42 @@ export const publishAffiliateCandidate = async (
     rolloutCohort: root.rolloutCohort,
     db: database,
     targetWriter: async ({ client }) => {
-      publishedTarget = await publishAffiliateCandidateDirect(candidateId, {
-        ...params,
-        client,
-      });
-      const listingKind = normalizeSourceType(candidate.listingKind);
-      if (!listingKind) {
+      const targetRoute = affiliateTargetRouteForCandidate(candidate);
+      if (!targetRoute) {
         throw new Error("Affiliate listing kind is required for lifecycle publication.");
       }
-      const targetType = listingKind === "RENTAL"
-        ? "FACILITY"
-        : listingKind === "CLUB"
-          ? "ORGANIZATION"
-          : listingKind;
+      publishedTarget = await publishAffiliateCandidateDirect(candidateId, {
+        ...params,
+        deferOrganizationLogo: targetRoute.targetType === 'ORGANIZATION',
+        client,
+      });
+      if (targetRoute.targetType === 'ORGANIZATION' && publishedTarget?.id) {
+        deferredOrganizationId = String(publishedTarget.id);
+      }
       return {
-        targetType,
+        targetType: targetRoute.targetType,
         targetId: String(publishedTarget.id),
-        sourceProfile: listingKind,
+        sourceProfile: targetRoute.listingKind,
         candidateId,
         evidenceRefs,
       };
     },
   });
+  const committedCandidate = await candidates.findUnique({ where: { id: candidateId } });
+  const organizationId = deferredOrganizationId
+    ?? nullableString(committedCandidate?.publishedOrganizationId);
+  if (
+    organizationId
+    && normalizeSourceType(committedCandidate?.listingKind) === 'CLUB'
+  ) {
+    await upsertAffiliateOrganizationLogoForCandidate(
+      committedCandidate,
+      organizationId,
+      actorId,
+      prisma,
+      { assignOrganizationLogo: true },
+    );
+  }
   if (publishedTarget) return publishedTarget;
   const replayedTargetId = lifecycleResult.assessment.qualifyingTargetIds[0] ?? null;
   return replayedTargetId ? { id: replayedTargetId } : lifecycleResult.assessment;

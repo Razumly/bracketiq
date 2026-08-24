@@ -4,6 +4,7 @@ import { AFFILIATE_DISCOVERY_SOURCE_TYPES } from './sourceDiscoveryTypes';
 export const AFFILIATE_COVERAGE_JOB_TYPES = [
   'FAILED_INTAKE_CAPTURE',
   'MARKET_COVERAGE',
+  'SUPPLY_REPLENISHMENT',
 ] as const;
 
 export const AFFILIATE_COVERAGE_JOB_STATUSES = [

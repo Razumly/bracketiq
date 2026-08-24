@@ -7,6 +7,7 @@ import {
 import {
   activateAffiliateSupplyContract,
   createAffiliateSupplyLifecycleAuthority,
+  ensureAffiliateSupplySource,
   executeAffiliateSupplyLifecycleCommand,
   loadActiveAffiliateSupplyContract,
   loadActiveAffiliateSupplyContracts,
@@ -14,6 +15,7 @@ import {
   reconcileAffiliateReplenishment,
   reconcileAffiliateReplenishmentDemands,
   reconcileLegacyAffiliateSupply,
+  startAffiliateReplenishmentWave,
   type AffiliateSupplyDatabase,
 } from '../affiliateSupplyPersistence';
 
@@ -162,7 +164,7 @@ describe('affiliate supply persistence seams', () => {
     expect(result.selectedDemandId).toBe('demand-idle-worker');
   });
 
-  it('uses active claims until current worker health is available', async () => {
+  it('pauses admission when worker health is unavailable', async () => {
     const now = new Date('2026-08-22T12:00:00.000Z');
     const database = {
       mappingJobs: {
@@ -201,8 +203,9 @@ describe('affiliate supply persistence seams', () => {
       now,
     });
 
-    expect(result.reasonCodes).not.toContain('NO_HEALTHY_REVIEWER');
-    expect(result.selectedDemandId).toBe('demand-health-fallback');
+    expect(result.reasonCodes).toContain('NO_HEALTHY_REVIEWER');
+    expect(result.selectedDemandId).toBeNull();
+    expect(result.action).toBe('NONE');
   });
 
   it('activates one immutable contract version and replays the same hash', async () => {
@@ -265,6 +268,140 @@ describe('affiliate supply persistence seams', () => {
 
     expect(attempts).toBe(2);
   });
+  it('converges concurrent admissions for different demands on one cohort wave', async () => {
+    const now = new Date('2026-08-22T12:00:00.000Z');
+    const demandsById = new Map([
+      ['demand-a', {
+        id: 'demand-a',
+        status: 'OPEN',
+        rolloutCohort: policy.rolloutCohort,
+        contractVersion: policy.version,
+        contractHash: policy.hash,
+        generation: 0,
+      }],
+      ['demand-b', {
+        id: 'demand-b',
+        status: 'OPEN',
+        rolloutCohort: policy.rolloutCohort,
+        contractVersion: policy.version,
+        contractHash: policy.hash,
+        generation: 0,
+      }],
+    ]);
+    type TestWave = {
+      id: string;
+      demandId: string;
+      rolloutCohort: string;
+      status: string;
+      createdAt: Date;
+      [key: string]: unknown;
+    };
+    const liveWaves: TestWave[] = [];
+    let guardReads = 0;
+    let releaseGuardReads = () => {};
+    const guardsReady = new Promise<void>((resolve) => {
+      releaseGuardReads = resolve;
+    });
+    const demands = {
+      findUnique: jest.fn(async ({ where }: { where: { id: string } }) => demandsById.get(where.id) ?? null),
+      update: jest.fn(async ({ where, data }: {
+        where: { id: string };
+        data: Record<string, unknown>;
+      }) => {
+        const demand = demandsById.get(where.id);
+        if (!demand) throw new Error(`Demand not found: ${where.id}`);
+        Object.assign(demand, data);
+        return demand;
+      }),
+    };
+    const waves = {
+      findFirst: jest.fn(async (query: {
+        where: {
+          rolloutCohort?: string;
+          demandId?: string;
+          status?: { in?: readonly string[] };
+        };
+      }) => {
+        const { where } = query;
+        if (where.rolloutCohort === policy.rolloutCohort && where.demandId === undefined && guardReads < 2) {
+          guardReads += 1;
+          if (guardReads === 2) releaseGuardReads();
+          if (guardReads < 2) await guardsReady;
+        }
+        const statuses = where.status?.in ?? [];
+        return liveWaves.find((wave) => (
+          wave.rolloutCohort === where.rolloutCohort
+          && statuses.includes(wave.status)
+        )) ?? null;
+      }),
+      create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        if (liveWaves.some((wave) => (
+          wave.rolloutCohort === data.rolloutCohort
+          && ['PLANNED', 'ACTIVE', 'WAITING'].includes(wave.status)
+        ))) {
+          throw Object.assign(new Error('Unique constraint failed'), {
+            code: 'P2002',
+            meta: { target: ['rolloutCohort'] },
+          });
+        }
+        const wave: TestWave = {
+          ...data,
+          id: String(data.id),
+          demandId: String(data.demandId),
+          rolloutCohort: String(data.rolloutCohort),
+          status: String(data.status),
+          createdAt: now,
+        };
+        liveWaves.push(wave);
+        return wave;
+      }),
+    };
+    let database: AffiliateSupplyDatabase;
+    database = {
+      demands,
+      waves,
+      coverageJobs: {},
+      transaction: async (callback: (db: AffiliateSupplyDatabase) => Promise<unknown>) => callback(database),
+    } as unknown as AffiliateSupplyDatabase;
+    const planFor = (selectedDemandId: string) => ({
+      targetWaitingMapping: 0,
+      targetWaitingReview: 0,
+      isAdmissionHalted: false,
+      isMappingPaused: false,
+      isCampaignPaused: false,
+      action: 'REUSE_CAMPAIGN' as const,
+      selectedDemandId,
+      selectedCampaignId: null,
+      reasonCodes: [],
+    });
+
+    const [firstWave, secondWave] = await Promise.all([
+      startAffiliateReplenishmentWave({
+        plan: planFor('demand-a'),
+        rolloutCohort: policy.rolloutCohort,
+        contract: policy,
+        db: database,
+        now,
+      }),
+      startAffiliateReplenishmentWave({
+        plan: planFor('demand-b'),
+        rolloutCohort: policy.rolloutCohort,
+        contract: policy,
+        db: database,
+        now,
+      }),
+    ]);
+
+    expect(firstWave?.id).toBe(secondWave?.id);
+    expect(liveWaves).toHaveLength(1);
+    expect(liveWaves[0]).toEqual(expect.objectContaining({
+      rolloutCohort: policy.rolloutCohort,
+      status: 'ACTIVE',
+    }));
+    expect(waves.create).toHaveBeenCalledTimes(2);
+    expect(demands.update).toHaveBeenCalledTimes(1);
+  });
+
 
   it('rejects an active contract row whose stored hash is not its content hash', async () => {
     const { database, contractManifests } = createManifestDatabase();
@@ -348,7 +485,7 @@ describe('affiliate supply persistence seams', () => {
       reviewerId: 'reviewer-1',
       decision: {
         decision: 'APPROVE',
-        independent: true,
+        isIndependent: true,
         reviewerId: 'reviewer-1',
         packageHash: hashAffiliateAgentValue(mapping.mapping),
         evidenceRefs: ['run:1'],
@@ -503,7 +640,7 @@ describe('affiliate supply persistence seams', () => {
       version: 1,
       isActive: false,
       validatedAt: null,
-      schemaValid: true,
+      isSchemaValid: true,
       packageHash: hashAffiliateAgentValue(mappingPackage),
       mapping: mappingPackage,
     };
@@ -674,15 +811,14 @@ describe('affiliate supply persistence seams', () => {
     const waves = {
       findMany: jest.fn(async () => []),
       findFirst: jest.fn(async () => null),
-      create: jest.fn(async () => ({
+      create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+        ...data,
         id: 'wave-1',
-        demandId: demand.id,
-        status: 'ACTIVE',
-        demandGeneration: demand.generation,
         evidenceRefs: [`demand:${demand.id}`],
       })),
       update: jest.fn(),
     };
+
     const supplySources = {
       findMany: jest.fn(async () => [root]),
       findUnique: jest.fn(async () => root),
@@ -780,12 +916,10 @@ describe('affiliate supply persistence seams', () => {
     const waves = {
       findMany: jest.fn(async () => []),
       findFirst: jest.fn(async () => null),
-      create: jest.fn(async () => ({
+      create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+        ...data,
         id: 'wave-saturation',
-        demandId: demand.id,
         campaignId: null,
-        status: 'ACTIVE',
-        demandGeneration: demand.generation,
         evidenceRefs: [`demand:${demand.id}`],
       })),
       update: jest.fn(),
@@ -846,6 +980,82 @@ describe('affiliate supply persistence seams', () => {
         searchSaturatedUntil: new Date('2026-08-24T12:00:00.000Z'),
       }),
     }));
+  });
+  it('does not rerun a waiting wave before its retry time', async () => {
+    const now = new Date('2026-08-22T12:00:00.000Z');
+    const demand = {
+      id: 'demand-waiting-wave',
+      targetKey: 'portland:soccer:event',
+      marketKey: 'portland',
+      sportId: 'soccer',
+      sourceProfile: 'EVENT',
+      rolloutCohort: 'DEFAULT',
+      contractVersion: policy.version,
+      contractHash: policy.hash,
+      minimumFreshPublishedSupply: 1,
+      observedFreshPublishedSupply: 0,
+      reasonCodes: ['TARGET_SHORTFALL'],
+      evidenceJson: { observedAt: now.toISOString(), observedFreshPublishedSupply: 0 },
+      closedAt: null,
+      generation: 1,
+      activeWaveId: 'wave-waiting',
+    };
+    const waitingWave = {
+      id: 'wave-waiting',
+      demandId: demand.id,
+      rolloutCohort: 'DEFAULT',
+      status: 'WAITING',
+      demandGeneration: demand.generation,
+      retryAt: new Date('2026-08-22T12:15:00.000Z'),
+      evidenceRefs: [`demand:${demand.id}`],
+    };
+    const waves = {
+      findMany: jest.fn(async () => [waitingWave]),
+      findFirst: jest.fn(async () => waitingWave),
+      update: jest.fn(),
+    };
+    const demands = {
+      findUnique: jest.fn(async () => demand),
+      findMany: jest.fn(async () => [demand]),
+      upsert: jest.fn(async ({ create, update }: {
+        create: Record<string, unknown>;
+        update: Record<string, unknown>;
+      }) => ({ ...demand, ...create, ...update })),
+      update: jest.fn(),
+    };
+    const database = {
+      supplySources: { findMany: jest.fn(async () => []) },
+      targets: { findMany: jest.fn(async () => []) },
+      demands,
+      mappingJobs: { count: jest.fn(async () => 0) },
+      approvals: { count: jest.fn(async () => 0) },
+      gatewayClaims: {
+        count: jest.fn()
+          .mockResolvedValueOnce(0)
+          .mockResolvedValueOnce(1),
+      },
+      waves,
+      campaigns: { findMany: jest.fn(async () => []) },
+      transaction: async (callback: (db: AffiliateSupplyDatabase) => Promise<unknown>) => callback(database as AffiliateSupplyDatabase),
+    } as unknown as AffiliateSupplyDatabase;
+    const runWave = jest.fn(async () => ({
+      status: 'SUCCEEDED' as const,
+      provider: 'AFFILIATE_DISCOVERY',
+      marginalYield: 1,
+    }));
+
+    const result = await reconcileAffiliateReplenishment({
+      contract: policy,
+      isContractSafe: true,
+      db: database,
+      now,
+      runWave,
+    });
+
+    expect(result.wave).toEqual(waitingWave);
+    expect(result.providerResult).toBeNull();
+    expect(runWave).not.toHaveBeenCalled();
+    expect(waves.update).not.toHaveBeenCalled();
   });
   it('projects dry-run demand decisions without persistence writes', async () => {
     const now = new Date('2026-08-22T12:00:00.000Z');
@@ -1008,6 +1218,105 @@ describe('affiliate supply persistence seams', () => {
     expect(result.demands[0]).toBe(existing);
     expect(demands.upsert).not.toHaveBeenCalled();
   });
+  it('preserves a paused demand during target shortfall reconciliation', async () => {
+    const now = new Date('2026-08-22T12:00:00.000Z');
+    const existing = {
+      id: 'demand-paused',
+      targetKey: 'portland:soccer:event',
+      marketKey: 'portland',
+      sportId: 'soccer',
+      sourceProfile: 'EVENT',
+      rolloutCohort: policy.rolloutCohort,
+      contractVersion: policy.version,
+      contractHash: policy.hash,
+      minimumFreshPublishedSupply: 2,
+      observedFreshPublishedSupply: 0,
+      priority: 4,
+      status: 'PAUSED',
+      openedAt: now,
+      closedAt: null,
+      nextEligibleAt: new Date('2026-08-23T12:00:00.000Z'),
+      searchSaturatedUntil: new Date('2026-08-24T12:00:00.000Z'),
+      activeWaveId: null,
+      reasonCodes: ['REVIEW_CAPACITY_REACHED'],
+      evidenceJson: { observedAt: now.toISOString(), observedFreshPublishedSupply: 0 },
+      generation: 3,
+    };
+    const demands = {
+      findUnique: jest.fn(async () => existing),
+      upsert: jest.fn(),
+    };
+    const database = {
+      supplySources: { findMany: jest.fn(async () => []) },
+      targets: { findMany: jest.fn(async () => []) },
+      demands,
+    } as unknown as AffiliateSupplyDatabase;
+
+    const result = await reconcileAffiliateReplenishmentDemands({
+      contract: policy,
+      db: database,
+      now,
+    });
+
+    expect(result.demands[0]).toBe(existing);
+    expect(demands.upsert).not.toHaveBeenCalled();
+  });
+  it('reopens a paused demand after its resume time', async () => {
+    const now = new Date('2026-08-24T12:00:00.000Z');
+    const existing = {
+      id: 'demand-paused-due',
+      targetKey: 'portland:soccer:event',
+      marketKey: 'portland',
+      sportId: 'soccer',
+      sourceProfile: 'EVENT',
+      rolloutCohort: policy.rolloutCohort,
+      contractVersion: policy.version,
+      contractHash: policy.hash,
+      minimumFreshPublishedSupply: 2,
+      observedFreshPublishedSupply: 0,
+      priority: 4,
+      status: 'PAUSED',
+      openedAt: new Date('2026-08-22T12:00:00.000Z'),
+      closedAt: null,
+      nextEligibleAt: new Date('2026-08-23T12:00:00.000Z'),
+      searchSaturatedUntil: new Date('2026-08-23T12:00:00.000Z'),
+      activeWaveId: null,
+      reasonCodes: ['SEARCH_SATURATION'],
+      evidenceJson: { observedAt: '2026-08-22T12:00:00.000Z', observedFreshPublishedSupply: 0 },
+      generation: 3,
+    };
+    const demands = {
+      findUnique: jest.fn(async () => existing),
+      upsert: jest.fn(async ({ create, update }: { create: Record<string, unknown>; update: Record<string, unknown> }) => ({
+        ...existing,
+        ...create,
+        ...update,
+      })),
+    };
+    const database = {
+      supplySources: { findMany: jest.fn(async () => []) },
+      targets: { findMany: jest.fn(async () => []) },
+      demands,
+    } as unknown as AffiliateSupplyDatabase;
+
+    const result = await reconcileAffiliateReplenishmentDemands({
+      contract: policy,
+      db: database,
+      now,
+    });
+
+    expect(result.demands[0]).toEqual(expect.objectContaining({
+      status: 'OPEN',
+      reasonCodes: ['TARGET_SHORTFALL'],
+      generation: 4,
+    }));
+    expect(demands.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({
+        status: 'OPEN',
+        reasonCodes: ['TARGET_SHORTFALL'],
+      }),
+    }));
+  });
 
   it('projects every legacy public target as Last-Known-Good when evidence is missing', async () => {
     const database = {
@@ -1157,14 +1466,40 @@ describe('affiliate supply persistence seams', () => {
       activeMappingId: 'mapping-publish-1',
       status: 'ACTIVE',
       autoScrapeEnabled: true,
-      metadata: {},
+      metadata: {
+        automationBaseline: {
+          schemaVersion: 1,
+          mappingId: 'mapping-publish-1',
+          mappingVersion: 1,
+          approvedAt: now.toISOString(),
+          candidateCount: 1,
+          rejectedCount: 0,
+          listingKinds: ['EVENT'],
+          criticalMissingCount: 0,
+          criticalMissingRate: 0,
+          normalizedFieldsHash: 'baseline-hash',
+        },
+      },
       targetKind: 'EVENT',
     };
     const mapping = {
       id: 'mapping-publish-1',
       version: 1,
       isActive: true,
+      isSchemaValid: true,
       validatedAt: now,
+      packageHash: hashAffiliateAgentValue({
+        kind: 'EVENT',
+        listUrl: 'https://club.example/events',
+        itemSelector: '.event',
+        fields: {
+          title: { selector: '.title' },
+          officialActionUrl: { selector: 'a', mode: 'attribute', attribute: 'href' },
+        },
+        evidenceKinds: ['PAGE_HTML'],
+      }),
+      evidenceKinds: ['PAGE_HTML'],
+      validationOutput: { isValid: true },
       mapping: {
         kind: 'EVENT',
         listUrl: 'https://club.example/events',
@@ -1182,7 +1517,7 @@ describe('affiliate supply persistence seams', () => {
       reviewerId: 'reviewer-1',
       decision: {
         decision: 'APPROVE',
-        independent: true,
+        isIndependent: true,
         packageHash: hashAffiliateAgentValue(mapping.mapping),
         evidenceRefs: ['review:evidence-1'],
         lifecycleEvidenceKinds: ['DURABLE_SOURCE_EVIDENCE', 'VALIDATION_OUTPUT'],
@@ -1212,6 +1547,7 @@ describe('affiliate supply persistence seams', () => {
       sourceProfile: 'EVENT',
       evidenceRefs: ['target:evidence-1'],
     }));
+    let persistedTransition: Record<string, unknown> | null = null;
     const database = {
       supplySources: {
         findUnique: jest.fn(async () => root),
@@ -1227,7 +1563,7 @@ describe('affiliate supply persistence seams', () => {
         })),
       },
       transitions: {
-        findUnique: jest.fn(async () => null),
+        findUnique: jest.fn(async () => persistedTransition),
         findFirst: jest.fn(async () => null),
         create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => data),
       },
@@ -1240,7 +1576,17 @@ describe('affiliate supply persistence seams', () => {
       mappings: { findUnique: jest.fn(async () => mapping), findFirst: jest.fn(async () => mapping) },
       mappingJobs: { findFirst: jest.fn(async () => null) },
       approvals: { findFirst: jest.fn(async () => approval) },
-      runs: { findFirst: jest.fn(async () => null) },
+      runs: {
+        findFirst: jest.fn(async () => ({
+          id: 'run-publish-1',
+          status: 'SUCCEEDED',
+          mappingId: mapping.id,
+          finishedAt: now,
+          candidateCount: 1,
+          itemCount: 1,
+          isEmptyStateMatched: false,
+        })),
+      },
       intakes: { findUnique: jest.fn(async () => null), findFirst: jest.fn(async () => null) },
       candidates: {
         findMany: jest.fn(async () => [candidate]),
@@ -1249,7 +1595,7 @@ describe('affiliate supply persistence seams', () => {
       transaction: async (callback: (db: AffiliateSupplyDatabase) => Promise<unknown>) => callback(database as AffiliateSupplyDatabase),
     } as unknown as AffiliateSupplyDatabase;
 
-    const result = await executeAffiliateSupplyLifecycleCommand({
+    const commandInput = {
       supplySourceId: root.id,
       command: 'PUBLISH_TARGET',
       authority: 'HUMAN_DIRECTED_EXECUTOR',
@@ -1264,7 +1610,10 @@ describe('affiliate supply persistence seams', () => {
       targetWriter,
       db: database,
       now,
-    });
+    } as const;
+    const result = await executeAffiliateSupplyLifecycleCommand(commandInput);
+    persistedTransition = result.transition;
+    const replay = await executeAffiliateSupplyLifecycleCommand(commandInput);
 
     expect(targetWriter).toHaveBeenCalledWith(expect.objectContaining({
       contract: manifest.supplyContract,
@@ -1280,7 +1629,577 @@ describe('affiliate supply persistence seams', () => {
         status: 'PUBLISHED',
       }),
     }));
+    expect(replay.isReplayed).toBe(true);
+    expect(replay.transition).toEqual(result.transition);
     expect(result.transition.command).toBe('PUBLISH_TARGET');
+  });
+  it('hides the exact public domain target when lifecycle rejection is recorded', async () => {
+    const now = new Date('2026-08-22T12:00:00.000Z');
+    const root: Record<string, unknown> = {
+      id: 'supply-reject-1',
+      canonicalUrl: 'https://club.example/events',
+      targetKind: 'EVENT',
+      rolloutCohort: policy.rolloutCohort,
+      liveSourceId: 'source-reject-1',
+      intakeId: null,
+      lifecycleGeneration: 4,
+      derivedStage: 'PUBLISHED',
+      isExcluded: false,
+      operatorDomain: 'club.example',
+      predecessorId: null,
+      successorId: null,
+    };
+    const source: Record<string, unknown> = {
+      id: 'source-reject-1',
+      supplySourceId: root.id,
+      activeMappingId: null,
+      status: 'ACTIVE',
+      autoScrapeEnabled: true,
+      metadata: {},
+      targetKind: 'EVENT',
+    };
+    let target: Record<string, unknown> = {
+      id: 'supply-target-reject-1',
+      supplySourceId: root.id,
+      candidateId: 'candidate-reject-1',
+      targetType: 'EVENT',
+      targetId: 'event-reject-1',
+      sourceProfile: 'EVENT',
+      marketKey: 'portland',
+      sportId: 'soccer',
+      status: 'PUBLISHED',
+      publishedAt: now,
+      lastSuccessfulRefreshAt: now,
+      freshnessExpiresAt: new Date('2026-08-23T12:00:00.000Z'),
+      rejectedAt: null,
+      evidenceRefs: ['publication:evidence-1'],
+      metadata: {},
+    };
+    const events = { update: jest.fn(async () => ({ id: 'event-reject-1', state: 'UNPUBLISHED' })) };
+    const targets = {
+      findMany: jest.fn(async () => [target]),
+      findFirst: jest.fn(async () => target),
+      upsert: jest.fn(async ({
+        update,
+      }: {
+        update: Record<string, unknown>;
+      }) => {
+        target = { ...target, ...update };
+        return target;
+      }),
+    };
+    const transitions = {
+      findUnique: jest.fn(async () => null),
+      findFirst: jest.fn(async () => null),
+      create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+    };
+    const emptyCollection = () => ({
+      findUnique: jest.fn(async () => null),
+      findFirst: jest.fn(async () => null),
+      findMany: jest.fn(async () => []),
+    });
+    const supplySources = {
+      findUnique: jest.fn(async () => root),
+      update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        Object.assign(root, data);
+        return root;
+      }),
+    };
+    const sources = {
+      findUnique: jest.fn(async () => source),
+      findFirst: jest.fn(async () => source),
+      update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        Object.assign(source, data);
+        return source;
+      }),
+    };
+    const database = {
+      supplySources,
+      sources,
+      targets,
+      events,
+      teams: emptyCollection(),
+      facilities: emptyCollection(),
+      organizations: emptyCollection(),
+      contractManifests: {
+        findFirst: jest.fn(async () => ({
+          status: 'ACTIVE',
+          version: manifest.version,
+          rolloutCohort: manifest.rolloutCohort,
+          contractHash: manifest.hash,
+          contractJson: manifest.supplyContract,
+        })),
+      },
+      transitions,
+      intakes: emptyCollection(),
+      mappings: emptyCollection(),
+      mappingJobs: emptyCollection(),
+      approvals: emptyCollection(),
+      runs: emptyCollection(),
+      candidates: emptyCollection(),
+      transaction: async (callback: (db: AffiliateSupplyDatabase) => Promise<unknown>) => callback(database as AffiliateSupplyDatabase),
+    } as unknown as AffiliateSupplyDatabase;
+
+    const result = await executeAffiliateSupplyLifecycleCommand({
+      supplySourceId: root.id as string,
+      command: 'REJECT_TARGET',
+      authority: 'SUPPLY_REVIEWER',
+      actorKind: 'SUPPLY_REVIEWER',
+      actorId: 'reviewer-1',
+      expectedLifecycleGeneration: 4,
+      idempotencyKey: 'reject-target-1',
+      request: {
+        target: {
+          targetType: 'EVENT',
+          targetId: 'event-reject-1',
+          sourceProfile: 'EVENT',
+          marketKey: 'portland',
+          sportId: 'soccer',
+        },
+        evidenceRefs: ['rejection:evidence-1'],
+      },
+      db: database,
+      now,
+    });
+
+    expect(events.update).toHaveBeenCalledWith({
+      where: { id: 'event-reject-1' },
+      data: { state: 'UNPUBLISHED' },
+    });
+    expect(targets.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({ status: 'REJECTED' }),
+    }));
+    expect(result.assessment.targets[0]).toEqual(expect.objectContaining({ status: 'REJECTED' }));
+  });
+  it.each([
+    ['FACILITY', 'RENTAL'],
+    ['ORGANIZATION', 'CLUB'],
+  ] as const)('uses the existing %s profile for top-level target rejection payloads', async (targetType, sourceProfile) => {
+    const now = new Date('2026-08-22T12:00:00.000Z');
+    const rejectionPolicy: AffiliateSupplyContractPolicy = {
+      ...policy,
+      freshnessWindows: [
+        ...policy.freshnessWindows,
+        { sourceProfile, maximumAgeHours: 24 },
+      ],
+      targets: [
+        ...policy.targets,
+        {
+          marketKey: 'portland',
+          sportId: 'soccer',
+          sourceProfile,
+          minimumFreshPublishedSupply: 1,
+        },
+      ],
+    };
+    const rejectionManifest = buildAffiliateSupplyContractManifest({
+      version: rejectionPolicy.version,
+      rolloutCohort: rejectionPolicy.rolloutCohort,
+      supplyContract: { ...rejectionPolicy, hash: undefined },
+    });
+    const root: Record<string, unknown> = {
+      id: `supply-reject-${targetType.toLowerCase()}`,
+      canonicalUrl: 'https://club.example/public',
+      targetKind: targetType,
+      rolloutCohort: rejectionPolicy.rolloutCohort,
+      liveSourceId: `source-reject-${targetType.toLowerCase()}`,
+      intakeId: null,
+      lifecycleGeneration: 4,
+      derivedStage: 'PUBLISHED',
+      isExcluded: false,
+      operatorDomain: 'club.example',
+      predecessorId: null,
+      successorId: null,
+    };
+    const source: Record<string, unknown> = {
+      id: root.liveSourceId,
+      supplySourceId: root.id,
+      activeMappingId: null,
+      status: 'ACTIVE',
+      autoScrapeEnabled: true,
+      metadata: {},
+      targetKind: targetType,
+    };
+    let target: Record<string, unknown> = {
+      id: `supply-target-reject-${targetType.toLowerCase()}`,
+      supplySourceId: root.id,
+      candidateId: null,
+      targetType,
+      targetId: `${targetType.toLowerCase()}-reject-1`,
+      sourceProfile,
+      marketKey: 'portland',
+      sportId: 'soccer',
+      status: 'PUBLISHED',
+      publishedAt: now,
+      lastSuccessfulRefreshAt: now,
+      freshnessExpiresAt: new Date('2026-08-23T12:00:00.000Z'),
+      rejectedAt: null,
+      evidenceRefs: ['publication:evidence-1'],
+      metadata: {},
+    };
+    const domainUpdate = jest.fn(async () => ({ id: target.targetId }));
+    const emptyCollection = () => ({
+      findUnique: jest.fn(async () => null),
+      findFirst: jest.fn(async () => null),
+      findMany: jest.fn(async () => []),
+    });
+    const targets = {
+      findMany: jest.fn(async () => [target]),
+      findFirst: jest.fn(async () => target),
+      upsert: jest.fn(async ({
+        update,
+      }: {
+        update: Record<string, unknown>;
+      }) => {
+        target = { ...target, ...update };
+        return target;
+      }),
+    };
+    const supplySources = {
+      findUnique: jest.fn(async () => root),
+      update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        Object.assign(root, data);
+        return root;
+      }),
+    };
+    const sources = {
+      findUnique: jest.fn(async () => source),
+      findFirst: jest.fn(async () => source),
+      update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        Object.assign(source, data);
+        return source;
+      }),
+    };
+    const database = {
+      supplySources,
+      sources,
+      targets,
+      events: emptyCollection(),
+      teams: emptyCollection(),
+      facilities: { update: domainUpdate },
+      organizations: { update: domainUpdate },
+      contractManifests: {
+        findFirst: jest.fn(async () => ({
+          status: 'ACTIVE',
+          version: rejectionManifest.version,
+          rolloutCohort: rejectionManifest.rolloutCohort,
+          contractHash: rejectionManifest.hash,
+          contractJson: rejectionManifest.supplyContract,
+        })),
+      },
+      transitions: {
+        findUnique: jest.fn(async () => null),
+        findFirst: jest.fn(async () => null),
+        create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+      },
+      intakes: emptyCollection(),
+      mappings: emptyCollection(),
+      mappingJobs: emptyCollection(),
+      approvals: emptyCollection(),
+      runs: emptyCollection(),
+      candidates: emptyCollection(),
+      transaction: async (callback: (db: AffiliateSupplyDatabase) => Promise<unknown>) => callback(database as AffiliateSupplyDatabase),
+    } as unknown as AffiliateSupplyDatabase;
+
+    await executeAffiliateSupplyLifecycleCommand({
+      supplySourceId: root.id as string,
+      command: 'REJECT_TARGET',
+      authority: 'SUPPLY_REVIEWER',
+      actorKind: 'SUPPLY_REVIEWER',
+      actorId: 'reviewer-1',
+      expectedLifecycleGeneration: 4,
+      idempotencyKey: `reject-target-${targetType.toLowerCase()}-1`,
+      request: {
+        targetType,
+        targetId: target.targetId,
+        evidenceRefs: ['rejection:evidence-1'],
+      },
+      db: database,
+      now,
+    });
+
+    expect(domainUpdate).toHaveBeenCalledWith({
+      where: { id: target.targetId },
+      data: targetType === 'FACILITY'
+        ? { status: 'DRAFT' }
+        : {
+            status: 'UNLISTED',
+            publicPageEnabled: false,
+            publicWidgetsEnabled: false,
+          },
+    });
+    expect(targets.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        status: 'REJECTED',
+        sourceProfile,
+      }),
+    }));
+  });
+  it('records initial Supply Source creation through the lifecycle command', async () => {
+    const now = new Date('2026-08-22T12:00:00.000Z');
+    const source = {
+      id: 'source-root-1',
+      supplySourceId: null,
+      targetKind: 'EVENT',
+      status: 'ACTIVE',
+      autoScrapeEnabled: false,
+      activeMappingId: null,
+      metadata: {},
+    };
+    let root: Record<string, unknown> | null = null;
+    const supplySources = {
+      findUnique: jest.fn(async ({ where }: { where: Record<string, unknown> }) => {
+        if (typeof where.id === 'string') return root;
+        if (typeof where.identityKey === 'string' && root?.identityKey === where.identityKey) return root;
+        return null;
+      }),
+      findFirst: jest.fn(async () => null),
+      create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        root = {
+          ...data,
+          lifecycleGeneration: 0,
+          derivedStage: 'PRE_MAPPED',
+          derivedOutcome: null,
+          freshnessStatus: 'UNKNOWN',
+          targetContribution: 0,
+          repairPriority: 4,
+          isAutomationEnabled: false,
+          isExcluded: false,
+          automationHoldReason: null,
+          predecessorId: null,
+          successorId: null,
+        };
+        return root;
+      }),
+      update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        Object.assign(root ?? {}, data);
+        return root;
+      }),
+    };
+    const transitions = {
+      findUnique: jest.fn(async () => null),
+      findFirst: jest.fn(async () => null),
+      create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+    };
+    const contractManifests = {
+      findFirst: jest.fn(async () => ({
+        status: 'ACTIVE',
+        version: manifest.version,
+        rolloutCohort: manifest.rolloutCohort,
+        contractHash: manifest.hash,
+        contractJson: manifest.supplyContract,
+      })),
+    };
+    const emptyCollection = () => ({
+      findUnique: jest.fn(async () => null),
+      findFirst: jest.fn(async () => null),
+      findMany: jest.fn(async () => []),
+    });
+    const sources = {
+      findUnique: jest.fn(async () => source),
+      findFirst: jest.fn(async () => source),
+      update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        Object.assign(source, data);
+        return source;
+      }),
+    };
+    const database = {
+      supplySources,
+      contractManifests,
+      transitions,
+      sources,
+      intakes: emptyCollection(),
+      mappings: emptyCollection(),
+      mappingJobs: emptyCollection(),
+      approvals: emptyCollection(),
+      runs: emptyCollection(),
+      candidates: emptyCollection(),
+      targets: emptyCollection(),
+      transaction: async (callback: (db: AffiliateSupplyDatabase) => Promise<unknown>) => callback(database as AffiliateSupplyDatabase),
+    } as unknown as AffiliateSupplyDatabase;
+
+    const result = await ensureAffiliateSupplySource({
+      requestedUrl: 'https://club.example/events',
+      resolvedCanonicalUrl: 'https://club.example/events',
+      isRedirectVerified: true,
+      targetKind: 'EVENT',
+      liveSourceId: source.id,
+      db: database,
+      now,
+    });
+
+    expect(result.isCreated).toBe(true);
+    expect(result.identity.rootDecision).toBe('NEW_ROOT');
+    expect(root).toEqual(expect.objectContaining({
+      lifecycleGeneration: 1,
+      derivedStage: 'PRE_MAPPED',
+    }));
+    expect(transitions.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        command: 'CREATE_ROOT',
+        actorKind: 'SYSTEM',
+        generation: 1,
+        evidenceRefs: expect.arrayContaining([
+          `identity:${result.identity.identityKey}`,
+        ]),
+      }),
+    }));
+  });
+  it('revalidates a same-root raw URL normalization variant once', async () => {
+    const now = new Date('2026-08-22T12:00:00.000Z');
+    const root = {
+      id: 'supply-revalidation-1',
+      identityKey: 'identity-revalidation-1',
+      canonicalUrl: 'https://club.example/events',
+      origin: 'https://club.example',
+      pathKey: 'https://club.example/events',
+      operatorDomain: 'club.example',
+      targetKind: 'EVENT',
+      rolloutCohort: 'DEFAULT',
+      lifecycleGeneration: 3,
+      isAutomationEnabled: true,
+      automationHoldReason: null,
+      metadata: {},
+    };
+    const source = {
+      id: 'source-revalidation-1',
+      supplySourceId: root.id,
+      lifecycleGeneration: 3,
+      derivedStage: 'ACTIVATED',
+      autoScrapeEnabled: true,
+      metadata: {},
+    };
+    const supplySources = {
+      findUnique: jest.fn(async ({ where }: { where: Record<string, unknown> }) => (
+        where.id === root.id ? root : null
+      )),
+      findFirst: jest.fn(async () => null),
+      update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        Object.assign(root, data);
+        return root;
+      }),
+      create: jest.fn(),
+    };
+    const sources = {
+      findUnique: jest.fn(async () => source),
+      findFirst: jest.fn(async () => source),
+      update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        Object.assign(source, data);
+        return source;
+      }),
+    };
+    const contractManifests = {
+      findFirst: jest.fn(async () => ({
+        status: 'ACTIVE',
+        version: manifest.version,
+        rolloutCohort: manifest.rolloutCohort,
+        contractHash: manifest.hash,
+        contractJson: manifest.supplyContract,
+      })),
+    };
+    const transitions = {
+      findUnique: jest.fn(async () => null),
+      findFirst: jest.fn(async () => null),
+      create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+    };
+    const emptyCollection = () => ({
+      findUnique: jest.fn(async () => null),
+      findFirst: jest.fn(async () => null),
+      findMany: jest.fn(async () => []),
+    });
+    const intakes = emptyCollection();
+    const mappings = emptyCollection();
+    const mappingJobs = emptyCollection();
+    const approvals = emptyCollection();
+    const runs = emptyCollection();
+    const candidates = emptyCollection();
+    const targets = emptyCollection();
+    const database = {
+      supplySources,
+      sources,
+      contractManifests,
+      transitions,
+      intakes,
+      mappings,
+      mappingJobs,
+      approvals,
+      runs,
+      candidates,
+      targets,
+      transaction: async (callback: (db: AffiliateSupplyDatabase) => Promise<unknown>) => callback(database as AffiliateSupplyDatabase),
+    } as unknown as AffiliateSupplyDatabase;
+
+    const result = await ensureAffiliateSupplySource({
+      requestedUrl: 'http://club.example/events?utm_source=affiliate#section',
+      resolvedCanonicalUrl: 'https://club.example/events',
+      isRedirectVerified: true,
+      priorSupplySourceId: root.id,
+      liveSourceId: source.id,
+      db: database,
+      now,
+    });
+
+    expect(result.identity.rootDecision).toBe('SAME_ROOT');
+    expect(result.identity.isRevalidationRequired).toBe(true);
+    expect(root.lifecycleGeneration).toBe(4);
+    expect(root.isAutomationEnabled).toBe(false);
+    expect(root.automationHoldReason).toBe('CANONICAL_REVALIDATION_REQUIRED');
+    expect(supplySources.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: root.id },
+      data: expect.objectContaining({
+        isAutomationEnabled: false,
+        automationHoldReason: 'CANONICAL_REVALIDATION_REQUIRED',
+      }),
+    }));
+    expect(sources.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: source.id },
+      data: expect.objectContaining({ autoScrapeEnabled: false }),
+    }));
+  });
+
+  it('does not revalidate an equivalent reordered query URL', async () => {
+    const root = {
+      id: 'supply-equivalent-1',
+      identityKey: 'identity-equivalent-1',
+      canonicalUrl: 'https://club.example/events?a=1&b=2',
+      origin: 'https://club.example',
+      pathKey: 'https://club.example/events',
+      operatorDomain: 'club.example',
+      targetKind: 'EVENT',
+      rolloutCohort: 'DEFAULT',
+      lifecycleGeneration: 3,
+      isAutomationEnabled: true,
+      automationHoldReason: null,
+      metadata: {},
+    };
+    const supplySources = {
+      findUnique: jest.fn(async ({ where }: { where: Record<string, unknown> }) => (
+        where.id === root.id ? root : null
+      )),
+      findFirst: jest.fn(async () => null),
+      update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => ({ ...root, ...data })),
+      create: jest.fn(),
+    };
+    const database = {
+      supplySources,
+      transaction: async (callback: (db: AffiliateSupplyDatabase) => Promise<unknown>) => callback(database as AffiliateSupplyDatabase),
+    } as unknown as AffiliateSupplyDatabase;
+
+    const result = await ensureAffiliateSupplySource({
+      requestedUrl: 'https://club.example/events?b=2&a=1',
+      priorSupplySourceId: root.id,
+      db: database,
+    });
+
+    expect(result.identity.rootDecision).toBe('SAME_ROOT');
+    expect(result.identity.isRevalidationRequired).toBe(false);
+    expect(supplySources.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: root.id },
+      data: expect.not.objectContaining({
+        lifecycleGeneration: 4,
+        automationHoldReason: 'CANONICAL_REVALIDATION_REQUIRED',
+      }),
+    }));
   });
 
 });

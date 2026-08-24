@@ -14045,6 +14045,48 @@ export type ListEnumAffiliateSupplyContractManifestStatusFieldRefInput<$PrismaMo
 
 
 /**
+ * Reference to a field of type 'AffiliateSupplyLifecycleOutcome'
+ */
+export type EnumAffiliateSupplyLifecycleOutcomeFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'AffiliateSupplyLifecycleOutcome'>
+
+
+
+/**
+ * Reference to a field of type 'AffiliateSupplyLifecycleOutcome[]'
+ */
+export type ListEnumAffiliateSupplyLifecycleOutcomeFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'AffiliateSupplyLifecycleOutcome[]'>
+
+
+
+/**
+ * Reference to a field of type 'AffiliateSupplyLifecycleCommand'
+ */
+export type EnumAffiliateSupplyLifecycleCommandFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'AffiliateSupplyLifecycleCommand'>
+
+
+
+/**
+ * Reference to a field of type 'AffiliateSupplyLifecycleCommand[]'
+ */
+export type ListEnumAffiliateSupplyLifecycleCommandFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'AffiliateSupplyLifecycleCommand[]'>
+
+
+
+/**
+ * Reference to a field of type 'AffiliateSupplyLifecycleActorKind'
+ */
+export type EnumAffiliateSupplyLifecycleActorKindFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'AffiliateSupplyLifecycleActorKind'>
+
+
+
+/**
+ * Reference to a field of type 'AffiliateSupplyLifecycleActorKind[]'
+ */
+export type ListEnumAffiliateSupplyLifecycleActorKindFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'AffiliateSupplyLifecycleActorKind[]'>
+
+
+
+/**
  * Reference to a field of type 'AffiliateSupplyTargetStatus'
  */
 export type EnumAffiliateSupplyTargetStatusFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'AffiliateSupplyTargetStatus'>
