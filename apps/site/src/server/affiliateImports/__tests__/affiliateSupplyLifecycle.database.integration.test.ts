@@ -98,27 +98,34 @@ const createRoot = async (rolloutCohort: string, label: string): Promise<string>
 
 const cleanup = async (): Promise<void> => {
   await prisma.$transaction(async (transaction) => {
-    await transaction.affiliateReplenishmentWaves.deleteMany({
-      where: { demandId: { startsWith: TEST_PREFIX } },
-    });
-    await transaction.affiliateReplenishmentDemands.deleteMany({
-      where: { rolloutCohort: { startsWith: TEST_PREFIX } },
-    });
-    await transaction.affiliateSupplyLifecycleTransitions.deleteMany({
-      where: { supplySourceId: { startsWith: TEST_PREFIX } },
-    });
-    await transaction.affiliateSupplyTargets.deleteMany({
-      where: { supplySourceId: { startsWith: TEST_PREFIX } },
-    });
-    await transaction.affiliateScrapeRuns.deleteMany({
-      where: { supplySourceId: { startsWith: TEST_PREFIX } },
-    });
-    await transaction.affiliateSupplySources.deleteMany({
-      where: { id: { startsWith: TEST_PREFIX } },
-    });
-    await transaction.affiliateSupplyContractManifests.deleteMany({
-      where: { rolloutCohort: { startsWith: TEST_PREFIX } },
-    });
+    await transaction.$executeRaw`ALTER TABLE "AffiliateSupplyLifecycleTransitions" DISABLE TRIGGER "AffiliateSupplyLifecycleTransitions_immutable"`;
+    await transaction.$executeRaw`ALTER TABLE "AffiliateSupplyContractManifests" DISABLE TRIGGER "AffiliateSupplyContractManifests_immutable_content"`;
+    try {
+      await transaction.affiliateReplenishmentWaves.deleteMany({
+        where: { demandId: { startsWith: TEST_PREFIX } },
+      });
+      await transaction.affiliateReplenishmentDemands.deleteMany({
+        where: { rolloutCohort: { startsWith: TEST_PREFIX } },
+      });
+      await transaction.affiliateSupplyLifecycleTransitions.deleteMany({
+        where: { supplySourceId: { startsWith: TEST_PREFIX } },
+      });
+      await transaction.affiliateSupplyTargets.deleteMany({
+        where: { supplySourceId: { startsWith: TEST_PREFIX } },
+      });
+      await transaction.affiliateScrapeRuns.deleteMany({
+        where: { supplySourceId: { startsWith: TEST_PREFIX } },
+      });
+      await transaction.affiliateSupplySources.deleteMany({
+        where: { id: { startsWith: TEST_PREFIX } },
+      });
+      await transaction.affiliateSupplyContractManifests.deleteMany({
+        where: { rolloutCohort: { startsWith: TEST_PREFIX } },
+      });
+    } finally {
+      await transaction.$executeRaw`ALTER TABLE "AffiliateSupplyLifecycleTransitions" ENABLE TRIGGER "AffiliateSupplyLifecycleTransitions_immutable"`;
+      await transaction.$executeRaw`ALTER TABLE "AffiliateSupplyContractManifests" ENABLE TRIGGER "AffiliateSupplyContractManifests_immutable_content"`;
+    }
   });
 };
 

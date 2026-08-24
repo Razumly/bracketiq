@@ -14,23 +14,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: 'Source id is required.' }, { status: 400 });
     }
     const body = await req.json() as Partial<AffiliateSourceActivationInput>;
-    const reviewedCandidateIds = Array.isArray(body.reviewedCandidateIds)
-      ? body.reviewedCandidateIds.filter((value): value is string => typeof value === 'string')
-      : [];
-    const candidateReviewEvidenceRefs = Array.isArray(body.candidateReviewEvidenceRefs)
-      ? body.candidateReviewEvidenceRefs.filter((value): value is string => typeof value === 'string')
-      : [];
-    const targets = Array.isArray(body.targets)
-      ? body.targets.filter(
-          (value): value is Readonly<Record<string, unknown>> => (
-            Boolean(value && typeof value === 'object' && !Array.isArray(value))
-          ),
-        )
-      : [];
+    const candidateReviewId = typeof body.candidateReviewId === 'string'
+      ? body.candidateReviewId.trim()
+      : '';
+    if (!candidateReviewId) {
+      return NextResponse.json({ error: 'Candidate review id is required.' }, { status: 400 });
+    }
     const source = await activateAffiliateSourceAutomation(sourceId, session.userId, {
-      reviewedCandidateIds,
-      candidateReviewEvidenceRefs,
-      targets,
+      candidateReviewId,
     });
     return NextResponse.json({ source }, { status: 200 });
   } catch (error) {

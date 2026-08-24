@@ -20,6 +20,7 @@ import {
   type AffiliateSupplyCommandAuthority,
   type AffiliateSupplyContractManifest,
   type AffiliateSupplyContractPolicy,
+  type AffiliateSupplyCandidateEvidence,
   type AffiliateSupplyContractImpactCell,
   type AffiliateSupplyEvidenceSnapshot,
   type AffiliateSupplyIdentity,
@@ -31,6 +32,7 @@ import type {
   AffiliateAgentLifecycleAuthority,
 } from './agentGatewayAdapters';
 import { hashAffiliateAgentValue } from './agentGatewayContracts';
+import { affiliateScrapeMappingSchema } from './types';
 export type AffiliateSupplyDatabase = Readonly<{
   supplySources: any;
   contractManifests: any;
@@ -305,7 +307,7 @@ export const ensureAffiliateSupplySource = async (
           prior: { canonicalUrl: current.canonicalUrl, operatorDomain: current.operatorDomain, identityKey: current.identityKey },
         })
       : initialIdentity;
-    const predecessorId = identity.rootDecision === 'SUCCESSOR_REQUIRED' ? prior?.id ?? null : null;
+    const predecessorId = identity.rootDecision === 'SUCCESSOR_REQUIRED' ? prior?.id ?? current?.id ?? null : null;
     if (
       existingSuccessor
       && predecessorId
@@ -888,7 +890,7 @@ const buildAffiliateSupplySnapshot = (input: AffiliateSupplySnapshotRows): Affil
       version: mapping.version,
       isActive: mapping.isActive,
       validatedAt: mapping.validatedAt,
-      schemaValid: Boolean(mappingJson.kind || mappingJson.itemSelector || mappingJson.listUrl),
+      schemaValid: affiliateScrapeMappingSchema.safeParse(mappingJson).success,
       packageHash: stringValue(mappingMetadata.packageHash)
         ?? stringValue(mappingJson.packageHash)
         ?? hashAffiliateAgentValue(mappingJson),
@@ -985,7 +987,10 @@ const loadSnapshot = async (
   const [mapping, mappingJob, approval, latestRun, candidates, targets] = await Promise.all([
     source?.activeMappingId ? database.mappings.findUnique({ where: { id: source.activeMappingId } }) : database.mappings.findFirst({ where: { supplySourceId }, orderBy: [{ isActive: 'desc' }, { version: 'desc' }] }),
     database.mappingJobs.findFirst({ where: { OR: [{ supplySourceId }, { sourceId }] }, orderBy: { createdAt: 'desc' } }),
-    database.approvals.findFirst({ where: { supplySourceId }, orderBy: { updatedAt: 'desc' } }),
+    database.approvals.findFirst({
+      where: { supplySourceId, subjectType: 'MAPPING_PACKAGE' },
+      orderBy: { updatedAt: 'desc' },
+    }),
     database.runs.findFirst({
       where: {
         AND: [
@@ -1075,7 +1080,7 @@ const loadSnapshots = async (
       orderBy: { createdAt: 'desc' },
     }),
     database.approvals.findMany({
-      where: { supplySourceId: { in: supplySourceIds } },
+      where: { supplySourceId: { in: supplySourceIds }, subjectType: 'MAPPING_PACKAGE' },
       orderBy: { updatedAt: 'desc' },
     }),
     database.runs.findMany({
@@ -1130,7 +1135,7 @@ const loadSnapshots = async (
       .filter((row: any) => row.supplySourceId === rootId || row.sourceId === sourceId)
       .sort((left: any, right: any) => sortDateDesc(left, right, 'createdAt'));
     const rootApprovals = approvals
-      .filter((row: any) => row.supplySourceId === rootId)
+      .filter((row: any) => row.supplySourceId === rootId && row.subjectType === 'MAPPING_PACKAGE')
       .sort((left: any, right: any) => sortDateDesc(left, right, 'updatedAt'));
     const rootRuns = runs
       .filter((row: any) => (
@@ -1219,6 +1224,7 @@ export const upsertAffiliateSupplyTarget = async (input: Readonly<{
   refreshedAt?: Date | null;
   evidenceRefs?: readonly string[];
   rejectionReason?: string | null;
+  metadata?: Record<string, unknown> | null;
   contract?: AffiliateSupplyContractPolicy;
   db?: AffiliateSupplyDatabase;
 }>): Promise<any> => {
@@ -1245,6 +1251,7 @@ export const upsertAffiliateSupplyTarget = async (input: Readonly<{
       rejectedAt: status === 'REJECTED' ? refreshedAt : null,
       rejectionReason: input.rejectionReason ?? null,
       evidenceRefs: Array.from(new Set(input.evidenceRefs ?? [])),
+      metadata: input.metadata ?? null,
     },
     update: {
       candidateId: input.candidateId ?? undefined,
@@ -1257,6 +1264,7 @@ export const upsertAffiliateSupplyTarget = async (input: Readonly<{
       rejectedAt: status === 'REJECTED' ? refreshedAt : undefined,
       rejectionReason: input.rejectionReason ?? undefined,
       evidenceRefs: Array.from(new Set(input.evidenceRefs ?? [])),
+      metadata: input.metadata ?? undefined,
     },
   });
 };
@@ -1382,6 +1390,15 @@ export type ExecuteAffiliateSupplyLifecycleCommandInput = Readonly<{
     request: Record<string, unknown>;
     now: Date;
   }>) => Promise<AffiliateSupplyLifecycleTargetWrite>;
+  activationTargetWriter?: (input: Readonly<{
+    database: AffiliateSupplyDatabase;
+    client: any;
+    contract: AffiliateSupplyContractPolicy;
+    request: Record<string, unknown>;
+    target: Record<string, unknown>;
+    candidate: AffiliateSupplyCandidateEvidence;
+    now: Date;
+  }>) => Promise<AffiliateSupplyLifecycleTargetWrite>;
 }>;
 
 export type AffiliateSupplyLifecycleCommandResult = Readonly<{
@@ -1452,6 +1469,7 @@ const applyCommandTarget = async (
       ...stringArray(target.evidenceRefs),
     ],
     rejectionReason: stringValue(target.rejectionReason),
+    metadata: recordValue(target.metadata),
     contract,
     db: database,
   });
@@ -1489,6 +1507,77 @@ const publishAffiliateDomainTarget = async (
       },
     });
   }
+};
+
+export type AffiliateCandidateReviewInput = Readonly<{
+  supplySourceId: string;
+  mappingId: string;
+  packageHash: string;
+  baselineHash: string;
+  reviewedCandidateIds: readonly string[];
+  candidateReviewEvidenceRefs: readonly string[];
+  targets: readonly Readonly<Record<string, unknown>>[];
+  reviewerId: string;
+  db?: AffiliateSupplyDatabase;
+  now?: Date;
+}>;
+
+export const recordAffiliateCandidateReview = async (
+  input: AffiliateCandidateReviewInput,
+): Promise<any> => {
+  const database = input.db ?? affiliateSupplyDatabase();
+  const now = input.now ?? new Date();
+  const reviewedCandidateIds = Array.from(new Set(input.reviewedCandidateIds));
+  const candidateReviewEvidenceRefs = Array.from(new Set(input.candidateReviewEvidenceRefs));
+  if (!reviewedCandidateIds.length || !candidateReviewEvidenceRefs.length || !input.targets.length) {
+    throw new Error('Affiliate candidate review requires candidates, targets, and evidence.');
+  }
+  if (!database.approvals?.create || !database.approvals?.findUnique) {
+    throw new Error('Affiliate candidate review persistence is not available.');
+  }
+  return withSupplyTransaction(database, async (transactionDatabase) => {
+    const decisionPayload = {
+      schemaVersion: 1,
+      decision: 'APPROVE',
+      supplySourceId: input.supplySourceId,
+      mappingId: input.mappingId,
+      packageHash: input.packageHash,
+      baselineHash: input.baselineHash,
+      reviewedCandidateIds,
+      candidateReviewEvidenceRefs,
+      targets: input.targets.map((target) => ({ ...target })),
+      reviewerId: input.reviewerId,
+      reviewedAt: now.toISOString(),
+    };
+    const decisionHash = hashAffiliateAgentValue(decisionPayload);
+    const subjectKey = `${input.supplySourceId}:${decisionHash}`;
+    const existing = await transactionDatabase.approvals.findUnique({
+      where: {
+        subjectType_subjectKey: {
+          subjectType: 'CANDIDATE_REVIEW',
+          subjectKey,
+        },
+      },
+    });
+    if (existing) {
+      return existing;
+    }
+    return transactionDatabase.approvals.create({
+      data: {
+        id: createId(),
+        subjectType: 'CANDIDATE_REVIEW',
+        subjectKey,
+        supplySourceId: input.supplySourceId,
+        status: 'APPROVED',
+        reviewerId: input.reviewerId,
+        decision: {
+          ...decisionPayload,
+          decisionHash,
+        },
+        finishedAt: now,
+      },
+    });
+  });
 };
 
 export const executeAffiliateSupplyLifecycleCommand = async (
@@ -1632,7 +1721,7 @@ export const executeAffiliateSupplyLifecycleCommand = async (
         ?? mappingJson.evidenceKinds
         ?? recordValue(mappingJson.evidence).evidenceKinds,
       ).map((kind) => kind.toUpperCase()));
-      if (!mappingJson.kind && !mappingJson.itemSelector && !mappingJson.listUrl) {
+      if (!affiliateScrapeMappingSchema.safeParse(mappingJson).success) {
         throw new Error('Affiliate mapping lifecycle command requires a schema-valid declarative package.');
       }
       if (contract.policy.requiredMappingEvidenceKinds.some((kind) => !mappingEvidenceKinds.has(kind.toUpperCase()))) {
@@ -1775,51 +1864,114 @@ export const executeAffiliateSupplyLifecycleCommand = async (
       ) {
         throw new Error('Affiliate lifecycle activation requires the exact reviewed automation baseline.');
       }
-      const reviewedCandidateIds = stringArray(request.reviewedCandidateIds);
+      const candidateReviewId = stringValue(request.candidateReviewId);
+      const candidateReview = candidateReviewId && transactionDatabase.approvals?.findUnique
+        ? await transactionDatabase.approvals.findUnique({ where: { id: candidateReviewId } })
+        : null;
+      const reviewDecision = recordValue(candidateReview?.decision);
+      const reviewPayload = { ...reviewDecision };
+      delete reviewPayload.decisionHash;
+      const candidateReviewDecisionHash = stringValue(reviewDecision.decisionHash);
+      const candidateReviewMappingId = stringValue(reviewDecision.mappingId);
+      const candidateReviewPackageHash = stringValue(reviewDecision.packageHash);
+      const candidateReviewBaselineHash = stringValue(reviewDecision.baselineHash);
+      if (
+        !candidateReview
+        || candidateReview.subjectType !== 'CANDIDATE_REVIEW'
+        || !String(candidateReview.subjectKey ?? '').startsWith(`${input.supplySourceId}:`)
+        || candidateReview.supplySourceId !== input.supplySourceId
+        || !['APPROVED', 'COMPLETED'].includes(String(candidateReview.status).toUpperCase())
+        || !candidateReview.finishedAt
+        || reviewDecision.decision !== 'APPROVE'
+        || candidateReviewDecisionHash !== hashAffiliateAgentValue(reviewPayload)
+      ) {
+        throw new Error('Affiliate lifecycle activation requires a completed independent candidate review.');
+      }
+      if (
+        candidateReviewMappingId !== mapping.id
+        || candidateReviewPackageHash !== packageHash
+        || candidateReviewBaselineHash !== baseline.normalizedFieldsHash
+      ) {
+        throw new Error('Affiliate lifecycle activation candidate review is stale.');
+      }
+      const candidateReviewEvidenceRefs = stringArray(reviewDecision.candidateReviewEvidenceRefs);
+      const reviewedCandidateIds = stringArray(reviewDecision.reviewedCandidateIds);
       const reviewedCandidateIdSet = new Set(reviewedCandidateIds);
       const reviewedCandidates = snapshotBefore.candidates.filter((candidate) => (
         reviewedCandidateIdSet.has(candidate.id) && candidate.status.toUpperCase() !== 'REJECTED'
       ));
-      if (!reviewedCandidateIds.length || reviewedCandidates.length !== reviewedCandidateIds.length) {
-        throw new Error('Affiliate lifecycle activation requires reviewed candidate identities.');
+      if (
+        !candidateReviewEvidenceRefs.length
+        || !reviewedCandidateIds.length
+        || reviewedCandidates.length !== reviewedCandidateIds.length
+      ) {
+        throw new Error('Affiliate lifecycle activation requires reviewed candidate identities and evidence.');
       }
       const candidateById = new Map(reviewedCandidates.map((candidate) => [candidate.id, candidate]));
-      const candidateTargetsMatch = commandTargets(request).every((target) => {
-        const candidateId = stringValue(target.candidateId);
-        const candidate = candidateId ? candidateById.get(candidateId) : undefined;
-        const targetId = stringValue(target.targetId);
-        const targetType = stringValue(target.targetType)?.toUpperCase();
-        return Boolean(
-          candidate
-          && targetId
-          && targetType
-          && candidate.publishedTargetId === targetId
-          && candidate.targetType?.toUpperCase() === targetType,
-        );
-      });
-      if (!candidateTargetsMatch) {
-        throw new Error('Affiliate lifecycle activation targets must match reviewed candidate targets.');
-      }
-      const candidateReviewEvidenceRefs = stringArray(request.candidateReviewEvidenceRefs);
-      if (!candidateReviewEvidenceRefs.length) {
-        throw new Error('Affiliate lifecycle activation requires candidate review evidence.');
-      }
-      const targetRows = commandTargets(request);
+      const targetRows = commandTargets(reviewDecision);
       if (!targetRows.length) {
         throw new Error('Affiliate lifecycle activation requires reviewed target rows.');
       }
       const supportedTargetTypes = new Set(['EVENT', 'TEAM', 'FACILITY', 'ORGANIZATION']);
-      if (targetRows.some((target) => !supportedTargetTypes.has(stringValue(target.targetType)?.toUpperCase() ?? ''))) {
-        throw new Error('Affiliate lifecycle activation requires a supported target type.');
+      const resolvedTargetRows: Record<string, unknown>[] = [];
+      for (const target of targetRows) {
+        const candidateId = stringValue(target.candidateId);
+        const candidate = candidateId ? candidateById.get(candidateId) : undefined;
+        const targetType = stringValue(target.targetType)?.toUpperCase();
+        const requestedTargetId = stringValue(target.targetId);
+        const targetStatus = stringValue(target.status)?.toUpperCase() ?? 'PUBLISHED';
+        if (!candidate || !candidateId || !targetType || candidate.targetType?.toUpperCase() !== targetType) {
+          throw new Error('Affiliate lifecycle activation targets must match reviewed candidate targets.');
+        }
+        if (!supportedTargetTypes.has(targetType)) {
+          throw new Error('Affiliate lifecycle activation requires a supported target type.');
+        }
+        if (!['PUBLISHED', 'LAST_KNOWN_GOOD', 'REJECTED', 'EXPIRED'].includes(targetStatus)) {
+          throw new Error('Affiliate lifecycle activation requires a supported target status.');
+        }
+        if (candidate.publishedTargetId && requestedTargetId && candidate.publishedTargetId !== requestedTargetId) {
+          throw new Error('Affiliate lifecycle activation targets must match reviewed candidate targets.');
+        }
+        let resolvedTarget: Record<string, unknown> = {
+          ...target,
+          targetId: requestedTargetId ?? candidate.publishedTargetId,
+          status: targetStatus,
+        };
+        if (!candidate.publishedTargetId) {
+          if (targetStatus !== 'PUBLISHED') {
+            throw new Error('Affiliate lifecycle activation requires a published reviewed target.');
+          }
+          if (!input.activationTargetWriter) {
+            throw new Error('Affiliate lifecycle activation requires an admitted target writer for quarantined candidates.');
+          }
+          const createdTarget = await input.activationTargetWriter({
+            database: transactionDatabase,
+            client: transactionDatabase.rawClient ?? transactionDatabase,
+            contract: contract.policy,
+            request,
+            target,
+            candidate,
+            now,
+          });
+          if (createdTarget.candidateId !== candidateId || !createdTarget.targetId) {
+            throw new Error('Affiliate lifecycle activation target writer returned an invalid target.');
+          }
+          if (createdTarget.targetType.toUpperCase() !== targetType) {
+            throw new Error('Affiliate lifecycle activation target writer returned the wrong target type.');
+          }
+          resolvedTarget = {
+            ...resolvedTarget,
+            ...createdTarget,
+            status: 'PUBLISHED',
+          };
+        }
+        if (!stringValue(resolvedTarget.targetId)) {
+          throw new Error('Affiliate lifecycle activation requires a reviewed target identity.');
+        }
+        resolvedTargetRows.push(resolvedTarget);
       }
-      if (!targetRows.some((target) => (stringValue(target.status)?.toUpperCase() ?? 'PUBLISHED') === 'PUBLISHED')) {
+      if (!resolvedTargetRows.some((target) => stringValue(target.status)?.toUpperCase() === 'PUBLISHED')) {
         throw new Error('Affiliate lifecycle activation requires one published reviewed target.');
-      }
-      if (!targetRows.some((target) => (
-        (stringValue(target.status)?.toUpperCase() ?? 'PUBLISHED') === 'PUBLISHED'
-        && candidateById.has(stringValue(target.candidateId) ?? '')
-      ))) {
-        throw new Error('Affiliate lifecycle activation requires a published reviewed candidate target.');
       }
       for (const candidateId of reviewedCandidateIds) {
         await transactionDatabase.candidates.update({
@@ -1827,7 +1979,7 @@ export const executeAffiliateSupplyLifecycleCommand = async (
           data: { status: 'PUBLISHED' },
         });
       }
-      for (const target of targetRows) {
+      for (const target of resolvedTargetRows) {
         await applyCommandTarget(
           transactionDatabase,
           input.supplySourceId,
@@ -2301,6 +2453,13 @@ const isFreshTargetForDemand = (
   now: Date,
 ): boolean => {
   if (String(target.status ?? '').toUpperCase() !== 'PUBLISHED') return false;
+  const metadata = recordValue(target.metadata);
+  const naturalExpiry = toDate(
+    metadata.naturalExpiryAt
+    ?? metadata.endsAt
+    ?? metadata.startsAt,
+  );
+  if (naturalExpiry && naturalExpiry.getTime() <= now.getTime()) return false;
   const rejectedAt = toDate(target.rejectedAt as Date | string | null | undefined);
   if (rejectedAt) return false;
   const expiresAt = toDate(target.freshnessExpiresAt as Date | string | null | undefined);
@@ -2319,6 +2478,7 @@ export const reconcileAffiliateReplenishmentDemands = async (input: Readonly<{
   db?: AffiliateSupplyDatabase;
   now?: Date;
   dryRun?: boolean;
+  assessments?: readonly AffiliateSupplyAssessment[];
 }>): Promise<{ opened: number; closed: number; demands: any[] }> => {
   const database = input.db ?? affiliateSupplyDatabase();
   const now = input.now ?? new Date();
@@ -2341,67 +2501,72 @@ export const reconcileAffiliateReplenishmentDemands = async (input: Readonly<{
   const sourcesById = new Map<string, Record<string, unknown>>(
     sourceRows.map((source: Record<string, unknown>) => [String(source.id), source]),
   );
-  const targets = await database.targets.findMany({
-    where: { status: 'PUBLISHED' },
-    select: {
-      supplySourceId: true,
-      marketKey: true,
-      sportId: true,
-      sourceProfile: true,
-      status: true,
-      rejectedAt: true,
-      freshnessExpiresAt: true,
-      lastSuccessfulRefreshAt: true,
-    },
-  });
+  const targets = input.assessments
+    ? []
+    : await database.targets.findMany({
+      where: { status: 'PUBLISHED' },
+      select: {
+        supplySourceId: true,
+        marketKey: true,
+        sportId: true,
+        sourceProfile: true,
+        status: true,
+        rejectedAt: true,
+        freshnessExpiresAt: true,
+        lastSuccessfulRefreshAt: true,
+        metadata: true,
+      },
+    });
   const observed = new Map<string, number>();
   const priorityByTargetKey = new Map<string, number>();
-  for (const source of sourceRows) {
-    if (source.isExcluded === true || source.derivedOutcome === 'SOURCE_EXCLUDED') continue;
-    const metadata = recordValue(source.metadata);
-    const sourceProfile = stringValue(source.targetKind ?? metadata.sourceProfile);
-    const targetRule = sourceProfile
-      ? targetRuleFor(input.contract, {
-          sourceProfile,
-          marketKey: stringValue(metadata.marketKey),
-          sportId: stringValue(metadata.sportId),
-        })
-      : null;
-    const sourcePriority = Number(source.repairPriority);
-    if (targetRule && Number.isFinite(sourcePriority)) {
-      const key = targetKeyFor({
-        marketKey: targetRule.marketKey ?? 'DEFAULT',
-        sportId: targetRule.sportId ?? 'ALL',
-        sourceProfile: targetRule.sourceProfile,
-      });
-      const currentPriority = priorityByTargetKey.get(key);
-      if (currentPriority === undefined || sourcePriority < currentPriority) {
-        priorityByTargetKey.set(key, sourcePriority);
-      }
+  const recordPriority = (key: string, priority: unknown): void => {
+    const sourcePriority = Number(priority);
+    if (!Number.isFinite(sourcePriority)) return;
+    const currentPriority = priorityByTargetKey.get(key);
+    if (currentPriority === undefined || sourcePriority < currentPriority) {
+      priorityByTargetKey.set(key, sourcePriority);
     }
-  }
-  targets.forEach((target: Record<string, unknown>) => {
-    const source = target.supplySourceId ? sourcesById.get(String(target.supplySourceId)) : undefined;
-    if (!source) return;
-    if (
-      source.isExcluded === true
-      || source.derivedOutcome === 'SOURCE_EXCLUDED'
-      || String(source.derivedStage ?? '').toUpperCase() !== 'PUBLISHED'
-    ) return;
-    if (!isFreshTargetForDemand(target, input.contract, now)) return;
-    const marketKey = String(target.marketKey ?? 'DEFAULT');
-    const sportId = String(target.sportId ?? 'ALL');
-    const sourceProfile = String(target.sourceProfile ?? '').toUpperCase();
-    const matchingTarget = input.contract.targets
-      .filter((rule) => (
-        rule.sourceProfile.toUpperCase() === sourceProfile
-        && (rule.marketKey === null || String(rule.marketKey).toUpperCase() === marketKey.toUpperCase())
-        && (rule.sportId === null || String(rule.sportId).toUpperCase() === sportId.toUpperCase())
-      ))
-      .sort((left, right) => (
-        Number(right.marketKey !== null) + Number(right.sportId !== null)
-        - Number(left.marketKey !== null) - Number(left.sportId !== null)
-      ))[0];
+  };
+  const recordTargetPriority = (
+    target: Readonly<{
+      marketKey?: string | null;
+      sportId?: string | null;
+      sourceProfile?: string | null;
+    }>,
+    priority: unknown,
+  ): void => {
+    const matchingTarget = targetRuleFor(input.contract, {
+      marketKey: target.marketKey ?? null,
+      sportId: target.sportId ?? null,
+      sourceProfile: target.sourceProfile ?? '',
+    });
+    if (!matchingTarget) return;
+    recordPriority(targetKeyFor({
+      marketKey: matchingTarget.marketKey ?? 'DEFAULT',
+      sportId: matchingTarget.sportId ?? 'ALL',
+      sourceProfile: matchingTarget.sourceProfile,
+    }), priority);
+  };
+  const observeTarget = (
+    sourceId: string,
+    target: Readonly<{
+      marketKey?: string | null;
+      sportId?: string | null;
+      sourceProfile?: string | null;
+      status?: string | null;
+      rejectedAt?: Date | string | null;
+      freshnessExpiresAt?: Date | string | null;
+      lastSuccessfulRefreshAt?: Date | string | null;
+    }>,
+    priority: unknown,
+  ): void => {
+    const source = sourcesById.get(sourceId);
+    if (!source || !isFreshTargetForDemand(target as Record<string, unknown>, input.contract, now)) return;
+    const matchingTarget = targetRuleFor(input.contract, {
+      marketKey: target.marketKey ?? null,
+      sportId: target.sportId ?? null,
+      sourceProfile: target.sourceProfile ?? '',
+    });
     if (!matchingTarget) return;
     const key = targetKeyFor({
       marketKey: matchingTarget.marketKey ?? 'DEFAULT',
@@ -2409,14 +2574,60 @@ export const reconcileAffiliateReplenishmentDemands = async (input: Readonly<{
       sourceProfile: matchingTarget.sourceProfile,
     });
     observed.set(key, (observed.get(key) ?? 0) + 1);
-    const sourcePriority = Number(source.repairPriority);
-    if (Number.isFinite(sourcePriority)) {
-      const currentPriority = priorityByTargetKey.get(key);
-      if (currentPriority === undefined || sourcePriority < currentPriority) {
-        priorityByTargetKey.set(key, sourcePriority);
+    recordPriority(key, priority);
+  };
+  if (input.assessments) {
+    for (const assessment of input.assessments) {
+      const sourceId = String(assessment.supplySourceId);
+      const source = sourcesById.get(sourceId);
+      if (!source || source.isExcluded === true || assessment.outcome === 'SOURCE_EXCLUDED') continue;
+      if (assessment.targets.length) {
+        assessment.targets.forEach((target) => {
+          recordTargetPriority(target, assessment.repairPriority);
+          if (assessment.stage === 'PUBLISHED') observeTarget(sourceId, target, assessment.repairPriority);
+        });
+      } else {
+        const metadata = recordValue(source.metadata);
+        recordTargetPriority({
+          sourceProfile: stringValue(source.targetKind ?? metadata.sourceProfile),
+          marketKey: stringValue(metadata.marketKey),
+          sportId: stringValue(metadata.sportId),
+        }, assessment.repairPriority);
       }
     }
-  });
+  } else {
+    for (const source of sourceRows) {
+      if (source.isExcluded === true || source.derivedOutcome === 'SOURCE_EXCLUDED') continue;
+      const metadata = recordValue(source.metadata);
+      const sourceProfile = stringValue(source.targetKind ?? metadata.sourceProfile);
+      const targetRule = sourceProfile
+        ? targetRuleFor(input.contract, {
+            sourceProfile,
+            marketKey: stringValue(metadata.marketKey),
+            sportId: stringValue(metadata.sportId),
+          })
+        : null;
+      if (targetRule) {
+        recordPriority(targetKeyFor({
+          marketKey: targetRule.marketKey ?? 'DEFAULT',
+          sportId: targetRule.sportId ?? 'ALL',
+          sourceProfile: targetRule.sourceProfile,
+        }), source.repairPriority);
+      }
+    }
+    targets.forEach((target: Record<string, unknown>) => {
+      const sourceId = target.supplySourceId ? String(target.supplySourceId) : null;
+      const source = sourceId ? sourcesById.get(sourceId) : undefined;
+      if (
+        !sourceId
+        || !source
+        || source.isExcluded === true
+        || source.derivedOutcome === 'SOURCE_EXCLUDED'
+        || String(source.derivedStage ?? '').toUpperCase() !== 'PUBLISHED'
+      ) return;
+      observeTarget(sourceId, target, source.repairPriority);
+    });
+  }
   const rows: any[] = [];
   let opened = 0;
   let closed = 0;
@@ -2444,14 +2655,24 @@ export const reconcileAffiliateReplenishmentDemands = async (input: Readonly<{
       if (status === 'OPEN') opened += 1;
       else closed += 1;
     }
-    const where = {
-      rolloutCohort_targetKey_contractVersion_contractHash: {
-        rolloutCohort,
-        targetKey,
-        contractVersion: input.contract.version,
-        contractHash: input.contract.hash,
-      },
-    };
+    const stateUnchanged = Boolean(
+      existing
+      && existing.status === status
+      && Number(existing.minimumFreshPublishedSupply) === target.minimumFreshPublishedSupply
+      && Number(existing.observedFreshPublishedSupply) === count
+      && Number(existing.priority) === demandPriority
+    );
+    const nextOpenedAt = existing?.status === status ? existing.openedAt : now;
+    const nextClosedAt = status === 'CLOSED'
+      ? stateUnchanged ? existing?.closedAt ?? now : now
+      : null;
+    const nextReasonCodes = satisfied ? ['TARGET_MET'] : ['TARGET_SHORTFALL'];
+    const nextEvidenceJson = stateUnchanged
+      ? existing?.evidenceJson ?? { observedAt: now.toISOString(), observedFreshPublishedSupply: count }
+      : { observedAt: now.toISOString(), observedFreshPublishedSupply: count };
+    const nextGeneration = stateUnchanged
+      ? existing?.generation ?? 0
+      : (existing?.generation ?? 0) + 1;
     const createData = {
       id: input.dryRun
         ? `dry-run-demand-${hashAffiliateAgentValue({ rolloutCohort, targetKey, contractVersion: input.contract.version, contractHash: input.contract.hash })}`
@@ -2467,11 +2688,11 @@ export const reconcileAffiliateReplenishmentDemands = async (input: Readonly<{
       observedFreshPublishedSupply: count,
       priority: demandPriority,
       status,
-      openedAt: existing?.status === status ? existing.openedAt : now,
-      closedAt: satisfied ? now : null,
-      reasonCodes: satisfied ? ['TARGET_MET'] : ['TARGET_SHORTFALL'],
-      evidenceJson: { observedAt: now.toISOString(), observedFreshPublishedSupply: count },
-      generation: existing?.status === status ? existing.generation : (existing?.generation ?? 0) + 1,
+      openedAt: nextOpenedAt,
+      closedAt: nextClosedAt,
+      reasonCodes: nextReasonCodes,
+      evidenceJson: nextEvidenceJson,
+      generation: nextGeneration,
     };
     const updateData = {
       targetKey,
@@ -2481,18 +2702,29 @@ export const reconcileAffiliateReplenishmentDemands = async (input: Readonly<{
       rolloutCohort,
       contractVersion: input.contract.version,
       contractHash: input.contract.hash,
+      minimumFreshPublishedSupply: target.minimumFreshPublishedSupply,
       observedFreshPublishedSupply: count,
       priority: demandPriority,
       status,
-      openedAt: existing?.status === status ? existing.openedAt : now,
-      closedAt: satisfied ? now : null,
-      reasonCodes: satisfied ? ['TARGET_MET'] : ['TARGET_SHORTFALL'],
-      evidenceJson: { observedAt: now.toISOString(), observedFreshPublishedSupply: count },
-      generation: existing?.status === status ? existing.generation : (existing?.generation ?? 0) + 1,
+      openedAt: nextOpenedAt,
+      closedAt: nextClosedAt,
+      reasonCodes: nextReasonCodes,
+      evidenceJson: nextEvidenceJson,
+      generation: nextGeneration,
+    };
+    const where = {
+      rolloutCohort_targetKey_contractVersion_contractHash: {
+        rolloutCohort,
+        targetKey,
+        contractVersion: input.contract.version,
+        contractHash: input.contract.hash,
+      },
     };
     const row = input.dryRun
       ? { ...(existing ?? {}), ...createData, ...updateData, id: existing?.id ?? createData.id }
-      : await database.demands.upsert({ where, create: createData, update: updateData });
+      : stateUnchanged
+        ? existing
+        : await database.demands.upsert({ where, create: createData, update: updateData });
     rows.push(row);
   }
   return { opened, closed, demands: rows };
@@ -2665,6 +2897,15 @@ export const startAffiliateReplenishmentWave = async (input: Readonly<{
     return wave;
   });
 };
+export type AffiliateLegacySupplyTargetProjection = Readonly<{
+  candidateId: string;
+  targetType: string;
+  targetId: string;
+  status: 'PUBLISHED' | 'LAST_KNOWN_GOOD';
+  action: 'PRESERVE_PUBLIC_TARGET' | 'MARK_LAST_KNOWN_GOOD';
+  evidenceRefs: readonly string[];
+}>;
+
 export type AffiliateLegacySupplyReconciliationRow = Readonly<{
   sourceId: string;
   identityKey: string;
@@ -2672,6 +2913,7 @@ export type AffiliateLegacySupplyReconciliationRow = Readonly<{
   publishedCandidateCount: number;
   preservedTargetCount: number;
   unverifiableTargetCount: number;
+  targetProjections: readonly AffiliateLegacySupplyTargetProjection[];
   evidenceRefs: readonly string[];
 }>;
 
@@ -2700,10 +2942,20 @@ export const reconcileLegacyAffiliateSupply = async (input: Readonly<{
   const sourceIds = sources.map((source: any) => source.id);
   const candidates = database.candidates?.findMany && sourceIds.length
     ? await database.candidates.findMany({
-        where: { sourceId: { in: sourceIds }, status: 'PUBLISHED' },
+        where: {
+          sourceId: { in: sourceIds },
+          OR: [
+            { publishedEventId: { not: null } },
+            { publishedTeamId: { not: null } },
+            { publishedFacilityId: { not: null } },
+            { publishedOrganizationId: { not: null } },
+          ],
+        },
         select: {
           id: true,
           sourceId: true,
+          listingKind: true,
+          status: true,
           publishedEventId: true,
           publishedTeamId: true,
           publishedFacilityId: true,
@@ -2715,19 +2967,51 @@ export const reconcileLegacyAffiliateSupply = async (input: Readonly<{
   const targets = database.targets?.findMany && candidateIds.length
     ? await database.targets.findMany({
         where: { candidateId: { in: candidateIds } },
-        select: { candidateId: true, status: true },
+        select: {
+          id: true,
+          candidateId: true,
+          targetType: true,
+          targetId: true,
+          status: true,
+          evidenceRefs: true,
+        },
       })
     : [];
-  const targetByCandidateId = new Map<string, any>(
-    targets.map((target: any) => [String(target.candidateId), target]),
-  );
+  const targetsByCandidateId = new Map<string, any[]>();
+  for (const target of targets) {
+    const candidateTargets = targetsByCandidateId.get(String(target.candidateId)) ?? [];
+    candidateTargets.push(target);
+    targetsByCandidateId.set(String(target.candidateId), candidateTargets);
+  }
   const candidatesBySourceId = new Map<string, any[]>();
   for (const candidate of candidates) {
-
-    const sourceCandidates = candidatesBySourceId.get(candidate.sourceId) ?? [];
+    const sourceCandidates = candidatesBySourceId.get(String(candidate.sourceId)) ?? [];
     sourceCandidates.push(candidate);
-    candidatesBySourceId.set(candidate.sourceId, sourceCandidates);
+    candidatesBySourceId.set(String(candidate.sourceId), sourceCandidates);
   }
+  const publicTargetsForCandidate = (candidate: Record<string, unknown>): Array<{
+    targetType: string;
+    targetId: string;
+  }> => {
+    const listingKind = String(candidate.listingKind ?? '').toUpperCase();
+    const targetType = listingKind === 'RENTAL'
+      ? 'FACILITY'
+      : listingKind === 'CLUB'
+        ? 'ORGANIZATION'
+        : listingKind;
+    const targetId = targetType === 'EVENT'
+      ? candidate.publishedEventId
+      : targetType === 'TEAM'
+        ? candidate.publishedTeamId
+        : targetType === 'FACILITY'
+          ? candidate.publishedFacilityId
+          : targetType === 'ORGANIZATION'
+            ? candidate.publishedOrganizationId
+            : null;
+    return typeof targetId === 'string' && targetId.trim()
+      ? [{ targetType, targetId: targetId.trim() }]
+      : [];
+  };
   const rows: AffiliateLegacySupplyReconciliationRow[] = [];
   for (const source of sources) {
     const identity = normalizeAffiliateSupplyIdentity({
@@ -2741,22 +3025,46 @@ export const reconcileLegacyAffiliateSupply = async (input: Readonly<{
           orderBy: { createdAt: 'asc' },
         })
       : null;
-    const sourceCandidates = candidatesBySourceId.get(source.id) ?? [];
-    const preservedTargetCount = sourceCandidates.filter((candidate) => {
-      const target = targetByCandidateId.get(candidate.id);
-      return target && ['PUBLISHED', 'LAST_KNOWN_GOOD'].includes(String(target.status).toUpperCase());
-    }).length;
-    const unverifiableTargetCount = sourceCandidates.length - preservedTargetCount;
+    const sourceCandidates = candidatesBySourceId.get(String(source.id)) ?? [];
+    const targetProjections: AffiliateLegacySupplyTargetProjection[] = [];
+    let unverifiableTargetCount = 0;
+    for (const candidate of sourceCandidates) {
+      const candidateTargets = targetsByCandidateId.get(String(candidate.id)) ?? [];
+      for (const publicTarget of publicTargetsForCandidate(candidate)) {
+        const existingTarget = candidateTargets.find((target: any) => (
+          String(target.targetType).toUpperCase() === publicTarget.targetType
+          && String(target.targetId) === publicTarget.targetId
+        ));
+        const existingStatus = String(existingTarget?.status ?? '').toUpperCase();
+        const isVerifiable = ['PUBLISHED', 'LAST_KNOWN_GOOD'].includes(existingStatus);
+        if (!isVerifiable) unverifiableTargetCount += 1;
+        targetProjections.push({
+          candidateId: String(candidate.id),
+          targetType: publicTarget.targetType,
+          targetId: publicTarget.targetId,
+          status: isVerifiable ? existingStatus as 'PUBLISHED' | 'LAST_KNOWN_GOOD' : 'LAST_KNOWN_GOOD',
+          action: isVerifiable ? 'PRESERVE_PUBLIC_TARGET' : 'MARK_LAST_KNOWN_GOOD',
+          evidenceRefs: Array.from(new Set([
+            `source:${source.id}`,
+            `candidate:${candidate.id}`,
+            `target:${publicTarget.targetType}:${publicTarget.targetId}`,
+            ...stringArray(existingTarget?.evidenceRefs),
+          ])),
+        });
+      }
+    }
     rows.push({
-      sourceId: source.id,
+      sourceId: String(source.id),
       identityKey: existingRoot?.identityKey ?? identity.identityKey,
       action: existingRoot ? 'REUSE_ROOT' : 'CREATE_ROOT',
       publishedCandidateCount: sourceCandidates.length,
-      preservedTargetCount,
+      preservedTargetCount: targetProjections.length,
       unverifiableTargetCount,
+      targetProjections,
       evidenceRefs: [
         `source:${source.id}`,
         ...sourceCandidates.map((candidate) => `candidate:${candidate.id}`),
+        ...targetProjections.flatMap((target) => target.evidenceRefs),
       ],
     });
   }
@@ -2777,6 +3085,12 @@ const persistReconciledAffiliateSupplyAssessment = async (input: Readonly<{
   now: Date;
 }>): Promise<AffiliateSupplyAssessment> => {
   const { database, root, snapshot, assessment, contract, now } = input;
+  const persistedInvariantViolations = Array.from(new Set(
+    (Array.isArray(root.invariantViolations) ? root.invariantViolations : [])
+      .filter((value): value is string => typeof value === 'string'),
+  )).sort();
+  const invariantViolationsMatch = JSON.stringify(persistedInvariantViolations)
+    === JSON.stringify([...assessment.invariantViolations].sort());
   const projectionMatches = (
     root.derivedStage === assessment.stage
     && root.derivedOutcome === assessment.outcome
@@ -2786,6 +3100,7 @@ const persistReconciledAffiliateSupplyAssessment = async (input: Readonly<{
     && root.isAutomationEnabled === assessment.isAutomationEnabled
     && root.automationHoldReason === assessment.automationHoldReason
     && root.isExcluded === (assessment.stage === 'SOURCE_EXCLUDED')
+    && invariantViolationsMatch
   );
   if (
     projectionMatches
@@ -2877,11 +3192,11 @@ export type AffiliateReplenishmentWaveExecutionResult = Readonly<{
   provider?: string | null;
   providerOperationKey?: string | null;
   retryAt?: Date | null;
+  searchSaturatedUntil?: Date | null;
   marginalYield?: number | null;
   errorCode?: string | null;
   result?: Record<string, unknown> | null;
   evidenceRefs?: readonly string[];
-
 }>;
 
 export type AffiliateReplenishmentReconciliationResult = Readonly<{
@@ -2943,6 +3258,7 @@ export const reconcileAffiliateReplenishment = async (input: Readonly<{
       db: transactionDatabase,
       now,
       dryRun: input.dryRun === true,
+      assessments,
     });
     return { assessments, demandResult };
   });
@@ -2988,12 +3304,41 @@ export const reconcileAffiliateReplenishment = async (input: Readonly<{
         },
       };
     }
-    if (providerResult.status === 'FAILED' && !providerResult.retryAt) {
+    if (providerResult.status === 'FAILED') {
       providerResult = {
         ...providerResult,
-        retryAt: new Date(now.getTime() + 15 * 60 * 1000),
+        marginalYield: null,
+        ...(providerResult.retryAt ? {} : { retryAt: new Date(now.getTime() + 15 * 60 * 1000) }),
       };
     }
+    const saturationFromResult = toDate(
+      providerResult.searchSaturatedUntil
+      ?? recordValue(providerResult.result).searchSaturatedUntil,
+    );
+    const campaign = wave.campaignId && database.campaigns?.findUnique
+      ? await database.campaigns.findUnique({
+        where: { id: wave.campaignId },
+        select: { searchIntervalMinutes: true, metadata: true },
+      })
+      : null;
+    const campaignMetadata = recordValue(campaign?.metadata ?? wave.metadata);
+    const campaignIntervalMinutes = Number(
+      campaign?.searchIntervalMinutes
+      ?? campaignMetadata.searchIntervalMinutes
+      ?? 24 * 60,
+    );
+    const saturationCycles = Math.max(1, Math.trunc(contract.searchSaturationMinimumCycles ?? 1));
+    const calculatedSaturation = providerResult.status === 'SUCCEEDED'
+      && providerResult.marginalYield === 0
+      ? new Date(now.getTime() + (
+        Number.isFinite(campaignIntervalMinutes) && campaignIntervalMinutes > 0
+          ? campaignIntervalMinutes
+          : 24 * 60
+      ) * saturationCycles * 60_000)
+      : null;
+    const searchSaturatedUntil = saturationFromResult && saturationFromResult.getTime() > now.getTime()
+      ? saturationFromResult
+      : calculatedSaturation;
     await withSupplyTransaction(database, async (transactionDatabase) => {
       const terminal = providerResult.status !== 'WAITING';
       const retryAt = providerResult.retryAt ?? null;
@@ -3017,13 +3362,17 @@ export const reconcileAffiliateReplenishment = async (input: Readonly<{
       if (terminal) {
         const currentDemand = await transactionDatabase.demands.findUnique({ where: { id: demand.id } });
         if (currentDemand) {
+          const demandUpdate: Record<string, unknown> = {
+            activeWaveId: null,
+            nextEligibleAt: retryAt,
+            generation: currentDemand.generation + 1,
+          };
+          if (providerResult.status === 'SUCCEEDED') {
+            demandUpdate.searchSaturatedUntil = searchSaturatedUntil;
+          }
           await transactionDatabase.demands.update({
             where: { id: demand.id },
-            data: {
-              activeWaveId: null,
-              nextEligibleAt: retryAt,
-              generation: currentDemand.generation + 1,
-            },
+            data: demandUpdate,
           });
         }
       }

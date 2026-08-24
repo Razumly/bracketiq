@@ -1111,7 +1111,7 @@ export const runAffiliateReplenishmentCampaignWave = async (
   ));
   const summary = recordValue(discoveryRun.summary);
   const providerErrors = Array.isArray(summary.errors) ? summary.errors : [];
-  if (runStatus === 'PARTIAL' && providerErrors.length > 0 && intakeIds.length === 0) {
+  if (runStatus === 'PARTIAL' && providerErrors.length > 0) {
     return {
       status: 'FAILED',
       provider: 'AFFILIATE_DISCOVERY',
@@ -1119,7 +1119,7 @@ export const runAffiliateReplenishmentCampaignWave = async (
       retryAt: new Date(now.getTime() + REPLENISHMENT_RETRY_MS),
       marginalYield: null,
       errorCode: 'DISCOVERY_PROVIDER_FAILURE',
-      result: { discoveryRunId, campaignId, errors: providerErrors },
+      result: { discoveryRunId, campaignId, intakeIds, errors: providerErrors },
       evidenceRefs: runEvidenceRefs,
     };
   }

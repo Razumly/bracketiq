@@ -8,6 +8,9 @@ import {
   type AffiliateAgentSupplyContract,
 } from './agentGatewayContracts';
 import {
+  affiliateScrapeMappingSchema,
+} from './types';
+import {
   canonicalizeAffiliateIntakeUrl,
 } from './sourceIntakeUrlSafety';
 import {
@@ -331,6 +334,8 @@ export type AffiliateSupplyContractImpactSource = Readonly<{
   repairPriority: number;
   freshnessStatus: AffiliateSupplyFreshnessStatus;
   targetCells?: readonly AffiliateSupplyContractImpactCell[];
+  currentFreshTargetCells?: readonly AffiliateSupplyContractImpactCell[];
+  nextFreshTargetCells?: readonly AffiliateSupplyContractImpactCell[];
   nextStage?: AffiliateSupplyLifecycleStage;
   nextTargetContribution?: number;
   nextIsAutomationEnabled?: boolean;
@@ -483,12 +488,21 @@ const freshnessWindowHoursFor = (contract: AffiliateSupplyContractPolicy, source
   ?? 24
 );
 
+const naturalTargetExpiry = (target: AffiliateSupplyTargetEvidence): Date | null => {
+  const value = target.metadata?.naturalExpiryAt
+    ?? target.metadata?.endsAt
+    ?? target.metadata?.startsAt;
+  return asDate(value instanceof Date || typeof value === 'string' ? value : null);
+};
+
 const targetFreshness = (
   target: AffiliateSupplyTargetEvidence,
   contract: AffiliateSupplyContractPolicy,
   now: Date,
 ): boolean => {
   if (uppercase(target.status) !== 'PUBLISHED' || target.rejectedAt) return false;
+  const naturalExpiry = naturalTargetExpiry(target);
+  if (naturalExpiry && naturalExpiry.getTime() <= now.getTime()) return false;
   const expiry = asDate(target.freshnessExpiresAt);
   if (expiry) return expiry.getTime() > now.getTime();
   const refreshed = asDate(target.lastSuccessfulRefreshAt);
@@ -501,6 +515,7 @@ export const mappingPackageValid = (
 ): boolean => {
   const mapping = snapshot.mapping;
   if (!mapping || !mapping.schemaValid || !mapping.id || !mapping.packageHash) return false;
+  if (!affiliateScrapeMappingSchema.safeParse(mapping.mapping).success) return false;
   if (snapshot.source.activeMappingId && snapshot.source.activeMappingId !== mapping.id) return false;
   if (mapping.validationOutput && mapping.validationOutput.isValid !== true) return false;
   const requiredKinds = snapshot.contract.requiredMappingEvidenceKinds.map(uppercase);
@@ -620,10 +635,9 @@ export const deriveAffiliateSupplyAssessment = (
 
   const sourceAutomationEnabled = snapshot.source.autoScrapeEnabled === true;
   const activeHold = snapshot.source.automationHold === true || Boolean(snapshot.holds?.length);
-  const automationHoldReason = snapshot.source.automationHoldReason
-    ?? snapshot.holds?.[0]
-    ?? null;
-
+  const automationHoldReason = activeHold
+    ? snapshot.source.automationHoldReason ?? 'AUTOMATION_HOLD'
+    : null;
   let stage: AffiliateSupplyLifecycleStage = 'PRE_MAPPED';
   let outcome: AffiliateSupplyOutcome | null = null;
   let freshnessStatus: AffiliateSupplyFreshnessStatus = 'UNKNOWN';
@@ -631,9 +645,10 @@ export const deriveAffiliateSupplyAssessment = (
   let repairPriority: AffiliateReplenishmentPriority = AFFILIATE_REPLENISHMENT_PRIORITY.NEW_DISCOVERY;
 
   if (violations.length) {
-    stage = 'HUMAN_REVIEW_REQUIRED';
-    outcome = 'HUMAN_REVIEW_REQUIRED';
-    reasons.push('IMPOSSIBLE_SUPPLY_ROOT');
+    const impossibleIdentity = (snapshot.identityViolations?.length ?? 0) > 0;
+    stage = impossibleIdentity ? 'HUMAN_REVIEW_REQUIRED' : 'APPROVED';
+    outcome = impossibleIdentity ? 'HUMAN_REVIEW_REQUIRED' : 'REPAIR_REQUIRED';
+    reasons.push(impossibleIdentity ? 'IMPOSSIBLE_SUPPLY_ROOT' : 'INVARIANT_REPAIR_REQUIRED');
     repairPriority = AFFILIATE_REPLENISHMENT_PRIORITY.REPAIR_MAPPED_APPROVED;
   } else if (isExcluded(snapshot)) {
     stage = 'SOURCE_EXCLUDED';
@@ -648,6 +663,11 @@ export const deriveAffiliateSupplyAssessment = (
   } else if (!mappingValid) {
     stage = 'PRE_MAPPED';
     reasons.push('MAPPING_PACKAGE_MISSING_OR_INVALID');
+    if (snapshot.mapping?.id || snapshot.approval?.id) {
+      repairPriority = AFFILIATE_REPLENISHMENT_PRIORITY.REPAIR_MAPPED_APPROVED;
+    } else if (snapshot.mappingJob?.id || snapshot.intake?.id) {
+      repairPriority = AFFILIATE_REPLENISHMENT_PRIORITY.CAPTURED_MAPPING;
+    }
   } else if (!approved) {
     stage = 'MAPPED';
     reasons.push('MAPPING_PACKAGE_VALID');
@@ -761,7 +781,13 @@ export const normalizeAffiliateSupplyIdentity = (
   const reasonCodes: string[] = [];
 
   if (input.prior) {
-    if (priorOrigin !== parsed.origin || (priorOperatorDomain && operatorDomain && priorOperatorDomain !== operatorDomain)) {
+    if (
+      priorOrigin !== parsed.origin
+      || (
+        operatorDomain !== null
+        && priorOperatorDomain !== operatorDomain
+      )
+    ) {
       rootDecision = 'SUCCESSOR_REQUIRED';
       reasonCodes.push('ORIGIN_OR_OPERATOR_CHANGED');
     } else if (canonicalUrl === priorCanonicalUrl || input.redirectVerified === true) {
@@ -829,6 +855,18 @@ export const normalizeAffiliateSupplyContractPolicy = (
       ? value as Record<string, unknown>
       : {}
   );
+  const applicabilityByProfile = new Map<string, string[]>();
+  const applicability = readPayload(componentByName.get('COVERAGE_APPLICABILITY')).applicability;
+  if (Array.isArray(applicability)) {
+    for (const value of applicability) {
+      const record = readRecord(value);
+      const sourceProfile = String(record.sourceProfile ?? '').trim().toUpperCase();
+      const sportIds = Array.isArray(record.sportIds)
+        ? sortedUnique(record.sportIds.map(String))
+        : [];
+      if (sourceProfile) applicabilityByProfile.set(sourceProfile, sportIds);
+    }
+  }
   const freshnessWindows = (Array.isArray(readPayload(componentByName.get('FRESHNESS')).windows)
     ? readPayload(componentByName.get('FRESHNESS')).windows as unknown[]
     : []
@@ -843,19 +881,37 @@ export const normalizeAffiliateSupplyContractPolicy = (
     ? readPayload(componentByName.get('SUPPLY_TARGETS_AND_MARKET_TIERS')).tiers as unknown[]
     : []
   );
-  const targetRules = targetTiers.flatMap((tier) => {
+  const targets = targetTiers.flatMap((tier) => {
     const tierRecord = readRecord(tier);
-    const targets = Array.isArray(tierRecord.targets) ? tierRecord.targets as unknown[] : [];
-    return targets.map((target) => {
+    const marketKey = String(tierRecord.tier ?? '');
+    const tierTargets = Array.isArray(tierRecord.targets) ? tierRecord.targets as unknown[] : [];
+    return tierTargets.flatMap((target) => {
       const targetRecord = readRecord(target);
-      return {
-        sourceProfile: String(targetRecord.sourceProfile ?? ''),
+      const sourceProfile = String(targetRecord.sourceProfile ?? '');
+      const applicableSportIds = applicabilityByProfile.get(sourceProfile.toUpperCase()) ?? [];
+      const sportIds: readonly (string | null)[] = applicableSportIds.length
+        ? applicableSportIds
+        : [null];
+      return sportIds.map((sportId) => ({
+        sourceProfile,
         minimumFreshPublishedSupply: Number(targetRecord.minimumFreshPublishedSupply ?? 0),
-        marketKey: String(tierRecord.tier ?? ''),
-        sportId: null,
-      };
+        marketKey,
+        sportId,
+      }));
     });
-  });
+  }).sort((left, right) => (
+    `${left.marketKey ?? ''}\u0000${left.sportId ?? ''}\u0000${left.sourceProfile}`
+      .localeCompare(`${right.marketKey ?? ''}\u0000${right.sportId ?? ''}\u0000${right.sourceProfile}`)
+  ));
+  const searchFamilies = (
+    Array.isArray(readPayload(componentByName.get('SEARCH_STRATEGIES')).families)
+      ? readPayload(componentByName.get('SEARCH_STRATEGIES')).families as unknown[]
+      : []
+  ).map(readRecord);
+  const searchSaturationMinimumCycles = Math.max(
+    ...searchFamilies.map((family) => Number(family.minimumDistinctCycles ?? 0)),
+    1,
+  );
   const readStringArray = (componentName: 'MAPPING_EVIDENCE' | 'LIFECYCLE_EVIDENCE'): string[] => {
     const values = readPayload(componentByName.get(componentName)).requiredEvidenceKinds;
     return Array.isArray(values) ? values.map(String) : [];
@@ -866,9 +922,10 @@ export const normalizeAffiliateSupplyContractPolicy = (
     rolloutCohort,
     hash: input.hash,
     freshnessWindows,
-    targets: targetRules,
+    targets,
     requiredMappingEvidenceKinds: readStringArray('MAPPING_EVIDENCE'),
     requiredLifecycleEvidenceKinds: readStringArray('LIFECYCLE_EVIDENCE'),
+    searchSaturationMinimumCycles,
   };
 };
 
@@ -930,10 +987,59 @@ export const buildAffiliateSupplyContractImpactReport = (input: Readonly<{
       0,
     );
   };
+  const contractChanged = currentPolicy.version !== input.nextPolicy.version
+    || currentPolicy.hash !== input.nextPolicy.hash;
+  const currentRuleByCell = new Map(
+    currentPolicy.targets.map((target) => [targetCellKey(target), target]),
+  );
+  const nextRuleByCell = new Map(
+    input.nextPolicy.targets.map((target) => [targetCellKey(target), target]),
+  );
+  const currentFreshSupplyByCell = new Map<string, number>();
+  const nextFreshSupplyByCell = new Map<string, number>();
+  const addFreshSupply = (
+    counts: Map<string, number>,
+    cells: readonly AffiliateSupplyContractImpactCell[],
+  ): void => {
+    cells.forEach((cell) => {
+      const key = targetCellKey(cell);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    });
+  };
+  input.sources.forEach((source) => {
+    if (source.currentFreshTargetCells) {
+      addFreshSupply(currentFreshSupplyByCell, source.currentFreshTargetCells);
+    } else if (!source.targetCells?.length && currentPolicy.targets.length === 1) {
+      const key = targetCellKey(currentPolicy.targets[0]);
+      currentFreshSupplyByCell.set(
+        key,
+        (currentFreshSupplyByCell.get(key) ?? 0) + Math.max(0, source.targetContribution),
+      );
+    }
+    if (source.nextFreshTargetCells) {
+      addFreshSupply(nextFreshSupplyByCell, source.nextFreshTargetCells);
+    } else if (source.currentFreshTargetCells) {
+      addFreshSupply(nextFreshSupplyByCell, source.currentFreshTargetCells);
+    } else if (!source.targetCells?.length && input.nextPolicy.targets.length === 1) {
+      const key = targetCellKey(input.nextPolicy.targets[0]);
+      nextFreshSupplyByCell.set(
+        key,
+        (nextFreshSupplyByCell.get(key) ?? 0) + Math.max(0, source.targetContribution),
+      );
+    }
+  });
+  const newlyDueSearches = Array.from(nextRuleByCell.entries()).filter(([key, nextRule]) => {
+    const currentRule = currentRuleByCell.get(key);
+    const currentOpen = currentRule
+      ? (currentFreshSupplyByCell.get(key) ?? 0) < currentRule.minimumFreshPublishedSupply
+      : false;
+    const nextOpen = (nextFreshSupplyByCell.get(key) ?? 0) < nextRule.minimumFreshPublishedSupply;
+    return nextOpen && !currentOpen;
+  }).length;
   input.sources.forEach((source) => {
     const sourceCellKeys = source.targetCells?.map(targetCellKey) ?? [];
     const sourceHasImpactedCell = sourceCellKeys.some((key) => impactedCellKeys.has(key));
-    const shouldEvaluateSource = !source.targetCells?.length || sourceHasImpactedCell;
+    const shouldEvaluateSource = contractChanged || !source.targetCells?.length || sourceHasImpactedCell;
     const sourceCurrentMinimum = minimumForSource(source, currentPolicy, currentMinimum);
     const sourceNextMinimum = minimumForSource(source, input.nextPolicy, nextMinimum);
     const nextStage = shouldEvaluateSource
@@ -984,7 +1090,7 @@ export const buildAffiliateSupplyContractImpactReport = (input: Readonly<{
     impactedCellCount: impactedTargetCells.length,
     impactedTargetCells,
     stageRegressions,
-    newlyDueSearches: input.nextPolicy.version === input.currentManifest.version ? 0 : input.sources.filter((source) => source.freshnessStatus !== 'FRESH').length,
+    newlyDueSearches,
     repairWork,
     automationStops,
     targetMetChanges,
@@ -1023,7 +1129,10 @@ export const validateAffiliateSupplyCommand = (
   if (input.command === 'PUBLISH_TARGET' && !['ACTIVATED', 'PUBLISHED'].includes(stage)) {
     reasons.push('PUBLICATION_PRECONDITION_FAILED');
   }
-  if (input.command === 'REJECT_TARGET' && !input.assessment.qualifyingTargetIds.length && stage !== 'PUBLISHED') reasons.push('TARGET_REJECTION_PRECONDITION_FAILED');
+  const hasRejectableTarget = input.assessment.targets.some((target) => (
+    ['PUBLISHED', 'LAST_KNOWN_GOOD'].includes(target.status.toUpperCase())
+  ));
+  if (input.command === 'REJECT_TARGET' && !hasRejectableTarget) reasons.push('TARGET_REJECTION_PRECONDITION_FAILED');
   if (
     input.command === 'RECORD_REFRESH'
     && !['ACTIVATED', 'PUBLISHED'].includes(stage)

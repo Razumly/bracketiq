@@ -68,8 +68,9 @@ import {
   ensureAffiliateSupplySource,
   executeAffiliateSupplyLifecycleCommand,
   loadActiveAffiliateSupplyContract,
+  recordAffiliateCandidateReview,
 } from './affiliateSupplyPersistence';
-import { targetRuleFor } from './affiliateSupplyLifecycle';
+import { normalizeAffiliateSupplyIdentity, targetRuleFor } from './affiliateSupplyLifecycle';
 import { hashAffiliateAgentValue } from './agentGatewayContracts';
 import {
   type AffiliateDateDisplayMode,
@@ -797,10 +798,9 @@ export const approveAffiliateSourceAutomation = async (
     : execute(client);
 };
 export type AffiliateSourceActivationInput = Readonly<{
-  reviewedCandidateIds: readonly string[];
-  candidateReviewEvidenceRefs: readonly string[];
-  targets: readonly Readonly<Record<string, unknown>>[];
+  candidateReviewId: string;
 }>;
+export const recordAffiliateSourceCandidateReview = recordAffiliateCandidateReview;
 
 export const activateAffiliateSourceAutomation = async (
   sourceId: string,
@@ -846,18 +846,56 @@ export const activateAffiliateSourceAutomation = async (
         mappingId: mapping.id,
         packageHash: mappingPackageHash,
         baselineHash: baseline.normalizedFieldsHash,
-        reviewedCandidateIds: Array.from(input.reviewedCandidateIds),
-        candidateReviewEvidenceRefs: Array.from(input.candidateReviewEvidenceRefs),
-        targets: input.targets.map((target) => ({ ...target })),
+        candidateReviewId: input.candidateReviewId,
         evidenceRefs: [
           `mapping:${mapping.id}`,
           `supply-source:${source.supplySourceId}`,
-          ...input.candidateReviewEvidenceRefs,
+          `candidate-review:${input.candidateReviewId}`,
         ],
       },
       actorKind: 'SUPPLY_REVIEWER',
       actorId: adminUserId,
       db: supplyDatabase,
+      activationTargetWriter: async ({ client, target }) => {
+        const candidateId = nullableString(target.candidateId);
+        if (!candidateId) {
+          throw new Error("Affiliate activation target requires a candidate.");
+        }
+        const candidate = await affiliatePrisma(client).candidates.findUnique({
+          where: { id: candidateId },
+        });
+        if (!candidate) {
+          throw new Error("Affiliate import candidate not found.");
+        }
+        const listingKind = normalizeSourceType(candidate.listingKind);
+        const targetType = listingKind === "RENTAL"
+          ? "FACILITY"
+          : listingKind === "CLUB"
+            ? "ORGANIZATION"
+            : listingKind;
+        if (!targetType) {
+          throw new Error("Affiliate listing kind is required for lifecycle activation.");
+        }
+        const publishedTarget = await publishAffiliateCandidateDirect(candidateId, {
+          publishedByUserId: adminUserId,
+          client,
+          candidate,
+        });
+        if (!publishedTarget?.id) {
+          throw new Error("Affiliate lifecycle activation did not publish a target.");
+        }
+        return {
+          targetType,
+          targetId: String(publishedTarget.id),
+          sourceProfile: nullableString(target.sourceProfile) ?? listingKind ?? targetType,
+          candidateId,
+          marketKey: nullableString(target.marketKey),
+          sportId: nullableString(target.sportId),
+          evidenceRefs: Array.isArray(target.evidenceRefs)
+            ? target.evidenceRefs.filter((value): value is string => typeof value === "string")
+            : [],
+        };
+      },
       now,
     });
     return sources.findUnique({ where: { id: sourceId } });
@@ -3424,6 +3462,7 @@ export const runAffiliateSourceScrape = async (
 
   const importMode = params.importMode ?? "REVIEW";
   const supplyDatabase = affiliateSupplyDatabase();
+  let activeSupplySourceId = source.supplySourceId;
   let automaticSupplyContract: Parameters<typeof targetRuleFor>[0] | null = null;
   if (importMode === "AUTOMATIC") {
     if (!source.supplySourceId) {
@@ -3497,6 +3536,55 @@ export const runAffiliateSourceScrape = async (
       renderJavascript: mapping.renderJavascript,
       waitMs: mapping.waitMs,
     });
+    if (
+      activeSupplySourceId
+      && page.finalUrl
+      && supplyDatabase.supplySources?.findUnique
+    ) {
+      const currentRoot = await supplyDatabase.supplySources.findUnique({
+        where: { id: activeSupplySourceId },
+      });
+      if (!currentRoot) {
+        throw new Error("Affiliate Supply Source root not found.");
+      }
+      const identity = normalizeAffiliateSupplyIdentity({
+        requestedUrl: currentRoot.canonicalUrl,
+        resolvedCanonicalUrl: page.finalUrl,
+        redirectVerified: true,
+        operatorDomain: currentRoot.operatorDomain,
+        prior: {
+          canonicalUrl: currentRoot.canonicalUrl,
+          operatorDomain: currentRoot.operatorDomain,
+          identityKey: currentRoot.identityKey,
+        },
+      });
+      const successorRequired = identity.rootDecision === "SUCCESSOR_REQUIRED";
+      const identityResult = await ensureAffiliateSupplySource({
+        requestedUrl: currentRoot.canonicalUrl,
+        resolvedCanonicalUrl: page.finalUrl,
+        redirectVerified: true,
+        operatorDomain: currentRoot.operatorDomain,
+        targetKind: currentRoot.targetKind,
+        rolloutCohort: currentRoot.rolloutCohort,
+        priorSupplySourceId: currentRoot.id,
+        liveSourceId: successorRequired ? null : source.id,
+        db: supplyDatabase,
+        now: new Date(),
+      });
+      if (identityResult.identity.rootDecision === "REVIEW_REQUIRED") {
+        throw new Error("Affiliate scrape final URL requires Supply Source identity review.");
+      }
+      if (successorRequired || identityResult.identity.rootDecision === "SUCCESSOR_REQUIRED") {
+        throw new Error("Affiliate scrape final URL created a successor Supply Source and requires revalidation.");
+      }
+      activeSupplySourceId = String(identityResult.supplySource.id);
+      if (
+        identityResult.identity.rootDecision === "SAME_ROOT"
+        && identityResult.identity.canonicalUrl !== currentRoot.canonicalUrl
+      ) {
+        automaticallyPublishCandidates = false;
+      }
+    }
     const emptyStateMatched = matchesAffiliatePublicEmptyState(page, mapping);
     const extractedListCandidates = extractAffiliateCandidatesFromPage(
       page,
@@ -3658,7 +3746,7 @@ export const runAffiliateSourceScrape = async (
         (importMode === "AUTOMATIC" || existing?.status === "PUBLISHED");
       const data = candidatePersistenceData({
         sourceId,
-        supplySourceId: source.supplySourceId,
+        supplySourceId: activeSupplySourceId,
         runId: run.id,
         mappingId: mappingRow.id,
         dedupeKey,
@@ -3792,7 +3880,7 @@ export const runAffiliateSourceScrape = async (
         }
       }
       const savedCandidate = savedCandidates[savedCandidates.length - 1];
-      if (source.supplySourceId && !automationHeld && savedCandidate?.status === "PUBLISHED") {
+      if (activeSupplySourceId && !automationHeld && savedCandidate?.status === "PUBLISHED") {
         const targetId =
           candidate.listingKind === "EVENT"
             ? savedCandidate.publishedEventId
@@ -3827,6 +3915,9 @@ export const runAffiliateSourceScrape = async (
             candidateId: savedCandidate.id,
             ...(dimensions.marketKey ? { marketKey: dimensions.marketKey } : {}),
             ...(dimensions.sportId ? { sportId: dimensions.sportId } : {}),
+            ...((candidate.endsAt ?? candidate.startsAt)
+              ? { metadata: { naturalExpiryAt: candidate.endsAt ?? candidate.startsAt } }
+              : {}),
             evidenceRefs: [`run:${run.id}`, `candidate:${savedCandidate.id}`],
           });
         }
@@ -3855,10 +3946,10 @@ export const runAffiliateSourceScrape = async (
       rejectedCandidates: rejectedCandidates.slice(0, 25),
     };
     let finishedRun;
-    if (source.supplySourceId) {
+    if (activeSupplySourceId) {
       const supplyDatabase = affiliateSupplyDatabase(transactionClient);
       const currentRoot = await supplyDatabase.supplySources.findUnique({
-        where: { id: source.supplySourceId },
+        where: { id: activeSupplySourceId },
       });
       if (!currentRoot) {
         throw new Error("Affiliate Supply Source not found.");
@@ -3877,7 +3968,7 @@ export const runAffiliateSourceScrape = async (
  ? "RECORD_EMPTY_REFRESH"
  : "RECORD_REFRESH";
       await executeAffiliateSupplyLifecycleCommand({
-        supplySourceId: source.supplySourceId,
+        supplySourceId: activeSupplySourceId,
         rolloutCohort: currentRoot.rolloutCohort,
         command,
         authority: "SYSTEM",
@@ -3943,15 +4034,15 @@ export const runAffiliateSourceScrape = async (
     const errorMessage = error instanceof Error ? error.message : "Scrape failed.";
     let lifecycleFailureRecorded = false;
     let lifecycleFailureError: Error | null = null;
-    if (source.supplySourceId) {
+    if (activeSupplySourceId) {
       try {
         const supplyDatabase = affiliateSupplyDatabase();
         const currentRoot = await supplyDatabase.supplySources.findUnique({
-          where: { id: source.supplySourceId },
+          where: { id: activeSupplySourceId },
         });
         if (currentRoot) {
           await executeAffiliateSupplyLifecycleCommand({
-            supplySourceId: source.supplySourceId,
+            supplySourceId: activeSupplySourceId,
             command: "RECORD_REFRESH_FAILURE",
             authority: "SYSTEM",
             expectedLifecycleGeneration: currentRoot.lifecycleGeneration,

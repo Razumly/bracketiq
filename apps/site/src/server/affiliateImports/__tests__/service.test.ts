@@ -30,6 +30,7 @@ const prismaMock = {
   },
   affiliateSupplySources: {
     findUnique: jest.fn(),
+    create: jest.fn(),
     update: jest.fn(),
   },
   affiliateSupplyContractManifests: {
@@ -2765,9 +2766,21 @@ describe('affiliate import service', () => {
     });
     prismaMock.affiliateSupplySources.findUnique.mockResolvedValue({
       id: 'supply_automatic',
+      canonicalUrl: 'https://example.com/events',
+      operatorDomain: 'example.com',
+      targetKind: 'EVENT',
       rolloutCohort: 'DEFAULT',
       lifecycleGeneration: 0,
     });
+    prismaMock.affiliateSupplySources.update.mockImplementation(async ({ data }) => ({
+      id: 'supply_automatic',
+      canonicalUrl: 'https://example.com/events',
+      operatorDomain: 'example.com',
+      targetKind: 'EVENT',
+      rolloutCohort: 'DEFAULT',
+      lifecycleGeneration: 0,
+      ...data,
+    }));
     prismaMock.organizations.findUnique.mockResolvedValue({
       id: 'org_automatic',
       name: 'Automatic Source',
@@ -2879,9 +2892,21 @@ describe('affiliate import service', () => {
     });
     prismaMock.affiliateSupplySources.findUnique.mockResolvedValue({
       id: 'supply_automatic_unresolved',
+      canonicalUrl: 'https://example.com/events',
+      operatorDomain: 'example.com',
+      targetKind: 'EVENT',
       rolloutCohort: 'DEFAULT',
       lifecycleGeneration: 0,
     });
+    prismaMock.affiliateSupplySources.update.mockImplementation(async ({ data }) => ({
+      id: 'supply_automatic_unresolved',
+      canonicalUrl: 'https://example.com/events',
+      operatorDomain: 'example.com',
+      targetKind: 'EVENT',
+      rolloutCohort: 'DEFAULT',
+      lifecycleGeneration: 0,
+      ...data,
+    }));
     prismaMock.organizations.findUnique.mockResolvedValue({ id: 'org_automatic_unresolved' });
     prismaMock.affiliateScrapeMappings.findUnique.mockResolvedValue({
       id: 'mapping_automatic_unresolved',
@@ -2960,17 +2985,35 @@ describe('affiliate import service', () => {
       metadata: {
         automationBaseline: {
           schemaVersion: 1,
-          mappingId: 'mapping_drift', mappingVersion: 1, approvedAt: '2026-07-01T00:00:00.000Z',
-          candidateCount: 10, rejectedCount: 0, listingKinds: ['EVENT'],
-          criticalMissingCount: 0, criticalMissingRate: 0, normalizedFieldsHash: 'baseline-hash',
+          mappingId: 'mapping_drift',
+          mappingVersion: 1,
+          approvedAt: '2026-07-01T00:00:00.000Z',
+          candidateCount: 10,
+          rejectedCount: 0,
+          listingKinds: ['EVENT'],
+          criticalMissingCount: 0,
+          criticalMissingRate: 0,
+          normalizedFieldsHash: 'baseline-hash',
         },
       },
     });
     prismaMock.affiliateSupplySources.findUnique.mockResolvedValue({
       id: 'supply_drift',
+      canonicalUrl: 'https://example.com/events',
+      operatorDomain: 'example.com',
+      targetKind: 'EVENT',
       rolloutCohort: 'DEFAULT',
       lifecycleGeneration: 0,
     });
+    prismaMock.affiliateSupplySources.update.mockImplementation(async ({ data }) => ({
+      id: 'supply_drift',
+      canonicalUrl: 'https://example.com/events',
+      operatorDomain: 'example.com',
+      targetKind: 'EVENT',
+      rolloutCohort: 'DEFAULT',
+      lifecycleGeneration: 0,
+      ...data,
+    }));
     prismaMock.organizations.findUnique.mockResolvedValue({ id: 'org_drift' });
     prismaMock.affiliateScrapeMappings.findUnique.mockResolvedValue({
       id: 'mapping_drift', sourceId: 'source_drift', version: 1,

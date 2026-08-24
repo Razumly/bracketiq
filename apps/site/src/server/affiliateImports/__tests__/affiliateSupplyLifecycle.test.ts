@@ -70,7 +70,15 @@ const mappedSnapshot = (overrides: Partial<AffiliateSupplyEvidenceSnapshot> = {}
     packageHash: 'package-hash',
     evidenceRefs: ['page-html'],
     evidenceKinds: ['PAGE_HTML'],
-    mapping: { kind: 'EVENT', listUrl: 'https://club.example/events', itemSelector: '.event' },
+    mapping: {
+      kind: 'EVENT',
+      listUrl: 'https://club.example/events',
+      itemSelector: '.event',
+      fields: {
+        title: { selector: '.title' },
+        officialActionUrl: { selector: 'a', mode: 'attribute', attribute: 'href' },
+      },
+    },
   },
   mappingJob: {
     id: 'mapping-job-1',
@@ -96,6 +104,19 @@ describe('affiliate supply lifecycle assessment', () => {
     expect(assessment.targetContribution).toBe(0);
     expect(assessment.isAutomationEnabled).toBe(false);
     expect(assessment.reasonCodes).toEqual(expect.arrayContaining(['MAPPING_PACKAGE_VALID']));
+  });
+
+  it('does not promote a malformed mapping package', () => {
+    const assessment = deriveAffiliateSupplyAssessment(mappedSnapshot({
+      mapping: {
+        ...mappedSnapshot().mapping!,
+        mapping: { kind: 'EVENT' },
+      },
+    }));
+
+    expect(assessment.stage).toBe('PRE_MAPPED');
+    expect(assessment.reasonCodes).toContain('MAPPING_PACKAGE_MISSING_OR_INVALID');
+    expect(assessment.isAutomationEnabled).toBe(false);
   });
 
   it('derives Approved Supply without publishing or enabling automation', () => {
@@ -331,6 +352,32 @@ describe('affiliate supply commands and contracts', () => {
     expect(decision.accepted).toBe(false);
     expect(decision.reasonCodes).toContain('PUBLICATION_PRECONDITION_FAILED');
   });
+  it('allows exact target rejection after freshness loss', () => {
+    const decision = validateAffiliateSupplyCommand({
+      command: 'REJECT_TARGET',
+      authority: 'SUPPLY_REVIEWER',
+      expectedLifecycleGeneration: 4,
+      currentLifecycleGeneration: 4,
+      activeContractVersion: contract.version,
+      activeContractHash: contract.hash,
+      commandContractVersion: contract.version,
+      commandContractHash: contract.hash,
+      evidenceRefs: ['rejection:target-1'],
+      assessment: deriveAffiliateSupplyAssessment(mappedSnapshot({
+        targets: [{
+          id: 'target-1',
+          targetType: 'EVENT',
+          targetId: 'event-1',
+          sourceProfile: 'EVENT',
+          status: 'LAST_KNOWN_GOOD',
+          evidenceRefs: ['target:target-1'],
+        }],
+      })),
+    });
+
+    expect(decision.accepted).toBe(true);
+    expect(decision.reasonCodes).not.toContain('TARGET_REJECTION_PRECONDITION_FAILED');
+  });
 
 
   it('normalizes one same-origin root and creates a successor for a domain change', () => {
@@ -346,12 +393,20 @@ describe('affiliate supply commands and contracts', () => {
       redirectVerified: true,
       prior: { canonicalUrl: 'https://example.com/events', operatorDomain: 'example.com' },
     });
+    const operatorChanged = normalizeAffiliateSupplyIdentity({
+      requestedUrl: 'https://example.com/events',
+      resolvedCanonicalUrl: 'https://example.com/events',
+      redirectVerified: true,
+      operatorDomain: 'new-operator.example',
+      prior: { canonicalUrl: 'https://example.com/events', operatorDomain: null },
+    });
 
     expect(same.canonicalUrl).toBe('https://example.com/events');
     expect(successor.canonicalUrl).toBe('https://new-operator.example/events');
     expect(successor.identityKey).not.toBe(same.identityKey);
     expect(same.rootDecision).toBe('SAME_ROOT');
     expect(successor.rootDecision).toBe('SUCCESSOR_REQUIRED');
+    expect(operatorChanged.rootDecision).toBe('SUCCESSOR_REQUIRED');
   });
 });
 

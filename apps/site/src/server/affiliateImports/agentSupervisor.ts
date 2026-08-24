@@ -350,6 +350,11 @@ export const runAffiliateAgentInvocation = async (
           AFFILIATE_AGENT_HEARTBEAT_INTERVAL_SECONDS * 1_000,
           { kind: "HEARTBEAT" } as const,
         );
+        await dependencies.workerHealth?.heartbeat({
+          workerId: input.workerId,
+          role: input.role,
+          now: dependencies.clock.now(),
+        });
         const heartbeatOperation = {
           kind: "HEARTBEAT" as const,
           idempotencyKey: dependencies.identifiers.create("receipt"),

@@ -13,6 +13,7 @@ import {
   planAffiliateReplenishmentFromDatabase,
   reconcileAffiliateReplenishment,
   reconcileAffiliateReplenishmentDemands,
+  reconcileLegacyAffiliateSupply,
   type AffiliateSupplyDatabase,
 } from '../affiliateSupplyPersistence';
 
@@ -53,7 +54,7 @@ const impactReport = {
     sourceProfile: policy.targets[0].sourceProfile,
   }],
   stageRegressions: 0,
-  newlyDueSearches: 0,
+  newlyDueSearches: 1,
   repairWork: 0,
   automationStops: 0,
   targetMetChanges: 0,
@@ -300,6 +301,10 @@ describe('affiliate supply persistence seams', () => {
         kind: 'EVENT',
         listUrl: 'https://club.example/events',
         itemSelector: '.event',
+        fields: {
+          title: { selector: '.title' },
+          officialActionUrl: { selector: 'a', mode: 'attribute', attribute: 'href' },
+        },
         evidenceKinds: ['PAGE_HTML'],
       },
     };
@@ -350,6 +355,38 @@ describe('affiliate supply persistence seams', () => {
         lifecycleEvidenceKinds: ['DURABLE_SOURCE_EVIDENCE', 'VALIDATION_OUTPUT'],
       },
     };
+    const candidateReviewDecisionPayload = {
+      schemaVersion: 1,
+      decision: 'APPROVE',
+      supplySourceId: root.id,
+      mappingId: mapping.id,
+      packageHash: hashAffiliateAgentValue(mapping.mapping),
+      baselineHash: 'baseline-hash',
+      reviewedCandidateIds: ['candidate-1'],
+      candidateReviewEvidenceRefs: ['candidate-review:1'],
+      targets: [{
+        candidateId: 'candidate-1',
+        targetType: 'EVENT',
+        targetId: 'unrelated-event',
+        sourceProfile: 'EVENT',
+        marketKey: 'portland',
+        sportId: 'soccer',
+      }],
+      reviewerId: 'reviewer-1',
+      reviewedAt: '2026-08-22T10:00:00.000Z',
+    };
+    const candidateReview = {
+      id: 'candidate-review-1',
+      subjectType: 'CANDIDATE_REVIEW',
+      subjectKey: `${root.id}:${hashAffiliateAgentValue(candidateReviewDecisionPayload)}`,
+      supplySourceId: root.id,
+      status: 'APPROVED',
+      finishedAt: new Date('2026-08-22T10:00:00.000Z'),
+      decision: {
+        ...candidateReviewDecisionPayload,
+        decisionHash: hashAffiliateAgentValue(candidateReviewDecisionPayload),
+      },
+    };
     const candidates = {
       findMany: jest.fn(async () => [{ id: 'candidate-1', status: 'DISCOVERED', listingKind: 'EVENT', publishedEventId: 'event-1' }]),
       update: jest.fn(),
@@ -388,13 +425,18 @@ describe('affiliate supply persistence seams', () => {
         findFirst: jest.fn(async () => null),
         create: jest.fn(),
       },
+      approvals: {
+        findFirst: jest.fn(async () => approval),
+        findUnique: jest.fn(async ({ where }: { where: { id?: string } }) => (
+          where.id === candidateReview.id ? candidateReview : null
+        )),
+      },
       targets,
       sources,
       mappings,
       candidates,
       intakes: { findUnique: jest.fn(async () => null), findFirst: jest.fn(async () => null) },
       mappingJobs: { findFirst: jest.fn(async () => null) },
-      approvals: { findFirst: jest.fn(async () => approval) },
       runs: { findFirst: jest.fn(async () => null) },
       transaction: async (callback: (db: AffiliateSupplyDatabase) => Promise<unknown>) => callback(database as AffiliateSupplyDatabase),
     } as unknown as AffiliateSupplyDatabase;
@@ -408,19 +450,12 @@ describe('affiliate supply persistence seams', () => {
       actorId: 'reviewer-1',
       idempotencyKey: 'activate-1',
       request: {
+        sourceId: source.id,
+        mappingId: mapping.id,
         packageHash: hashAffiliateAgentValue(mapping.mapping),
         baselineHash: 'wrong-baseline-hash',
-        reviewedCandidateIds: ['candidate-1'],
-        candidateReviewEvidenceRefs: ['candidate-review:1'],
+        candidateReviewId: candidateReview.id,
         evidenceRefs: ['review:1'],
-        targets: [{
-          candidateId: 'candidate-1',
-          targetType: 'EVENT',
-          targetId: 'event-1',
-          sourceProfile: 'EVENT',
-          marketKey: 'portland',
-          sportId: 'soccer',
-        }],
       },
       db: database,
     })).rejects.toThrow('exact reviewed automation baseline');
@@ -438,31 +473,27 @@ describe('affiliate supply persistence seams', () => {
       actorId: 'reviewer-1',
       idempotencyKey: 'activate-target-mismatch',
       request: {
+        sourceId: source.id,
+        mappingId: mapping.id,
         packageHash: hashAffiliateAgentValue(mapping.mapping),
         baselineHash: 'baseline-hash',
-        reviewedCandidateIds: ['candidate-1'],
-        candidateReviewEvidenceRefs: ['candidate-review:1'],
+        candidateReviewId: candidateReview.id,
         evidenceRefs: ['review:1'],
-        targets: [{
-          candidateId: 'candidate-1',
-          targetType: 'EVENT',
-          targetId: 'unrelated-event',
-          sourceProfile: 'EVENT',
-          marketKey: 'portland',
-          sportId: 'soccer',
-        }],
       },
       db: database,
     })).rejects.toThrow('must match reviewed candidate targets');
     expect(candidates.update).not.toHaveBeenCalled();
     expect(targets.upsert).not.toHaveBeenCalled();
   });
-
   it('keeps approval quarantined until activation', async () => {
     const mappingPackage = {
       kind: 'EVENT',
       listUrl: 'https://club.example/events',
       itemSelector: '.event',
+      fields: {
+        title: { selector: '.title' },
+        officialActionUrl: { selector: 'a', mode: 'attribute', attribute: 'href' },
+      },
       evidenceKinds: ['PAGE_HTML'],
     };
     const mapping = {
@@ -629,6 +660,9 @@ describe('affiliate supply persistence seams', () => {
       sportId: 'soccer',
       sourceProfile: 'EVENT',
       rolloutCohort: 'DEFAULT',
+      contractVersion: policy.version,
+      contractHash: policy.hash,
+      minimumFreshPublishedSupply: 2,
       status: 'OPEN',
       priority: 4,
       openedAt: now,
@@ -721,6 +755,95 @@ describe('affiliate supply persistence seams', () => {
       data: expect.objectContaining({
         activeWaveId: null,
         nextEligibleAt: new Date('2026-08-22T12:15:00.000Z'),
+      }),
+    }));
+  });
+  it('persists search saturation after a successful zero-yield wave', async () => {
+    const now = new Date('2026-08-22T12:00:00.000Z');
+    const demand = {
+      id: 'demand-saturation',
+      targetKey: 'portland:soccer:event',
+      marketKey: 'portland',
+      sportId: 'soccer',
+      sourceProfile: 'EVENT',
+      rolloutCohort: 'DEFAULT',
+      contractVersion: policy.version,
+      contractHash: policy.hash,
+      status: 'OPEN',
+      priority: 4,
+      openedAt: now,
+      nextEligibleAt: null,
+      searchSaturatedUntil: null,
+      generation: 0,
+      activeWaveId: null,
+    };
+    const waves = {
+      findMany: jest.fn(async () => []),
+      findFirst: jest.fn(async () => null),
+      create: jest.fn(async () => ({
+        id: 'wave-saturation',
+        demandId: demand.id,
+        campaignId: null,
+        status: 'ACTIVE',
+        demandGeneration: demand.generation,
+        evidenceRefs: [`demand:${demand.id}`],
+      })),
+      update: jest.fn(),
+    };
+    const demands = {
+      findUnique: jest.fn(async () => demand),
+      findMany: jest.fn(async () => []),
+      upsert: jest.fn(async ({ create, update }: {
+        create: Record<string, unknown>;
+        update: Record<string, unknown>;
+      }) => Object.assign(demand, update ?? create)),
+      update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => Object.assign(demand, data)),
+    };
+    const database = {
+      supplySources: { findMany: jest.fn(async () => []) },
+      targets: { findMany: jest.fn(async () => []) },
+      demands,
+      mappingJobs: {
+        count: jest.fn()
+          .mockResolvedValueOnce(0)
+          .mockResolvedValueOnce(0),
+      },
+      approvals: { count: jest.fn(async () => 0) },
+      gatewayClaims: {
+        count: jest.fn()
+          .mockResolvedValueOnce(2)
+          .mockResolvedValueOnce(1),
+      },
+      waves,
+      campaigns: { findMany: jest.fn(async () => []) },
+      coverageJobs: {
+        upsert: jest.fn(async () => ({ id: 'coverage-job-saturation' })),
+      },
+      transaction: async (callback: (db: AffiliateSupplyDatabase) => Promise<unknown>) => callback(database as AffiliateSupplyDatabase),
+    } as unknown as AffiliateSupplyDatabase;
+
+    const result = await reconcileAffiliateReplenishment({
+      contract: { ...policy, searchSaturationMinimumCycles: 2 },
+      isContractSafe: true,
+      db: database,
+      now,
+      runWave: async () => ({
+        status: 'SUCCEEDED',
+        provider: 'AFFILIATE_DISCOVERY',
+        marginalYield: 0,
+      }),
+    });
+
+    expect(result.providerResult).toEqual(expect.objectContaining({
+      status: 'SUCCEEDED',
+      marginalYield: 0,
+    }));
+    expect(demands.update).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: { id: demand.id },
+      data: expect.objectContaining({
+        activeWaveId: null,
+        nextEligibleAt: null,
+        searchSaturatedUntil: new Date('2026-08-24T12:00:00.000Z'),
       }),
     }));
   });
@@ -845,6 +968,85 @@ describe('affiliate supply persistence seams', () => {
       }),
     }));
   });
+  it('does not write an unchanged replenishment demand', async () => {
+    const now = new Date('2026-08-22T12:00:00.000Z');
+    const existing = {
+      id: 'demand-unchanged',
+      targetKey: 'portland:soccer:event',
+      marketKey: 'portland',
+      sportId: 'soccer',
+      sourceProfile: 'EVENT',
+      rolloutCohort: policy.rolloutCohort,
+      contractVersion: policy.version,
+      contractHash: policy.hash,
+      minimumFreshPublishedSupply: 2,
+      observedFreshPublishedSupply: 0,
+      priority: 4,
+      status: 'OPEN',
+      openedAt: now,
+      closedAt: null,
+      reasonCodes: ['TARGET_SHORTFALL'],
+      evidenceJson: { observedAt: now.toISOString(), observedFreshPublishedSupply: 0 },
+      generation: 1,
+    };
+    const demands = {
+      findUnique: jest.fn(async () => existing),
+      upsert: jest.fn(),
+    };
+    const database = {
+      supplySources: { findMany: jest.fn(async () => []) },
+      targets: { findMany: jest.fn(async () => []) },
+      demands,
+    } as unknown as AffiliateSupplyDatabase;
+
+    const result = await reconcileAffiliateReplenishmentDemands({
+      contract: policy,
+      db: database,
+      now,
+    });
+
+    expect(result.demands[0]).toBe(existing);
+    expect(demands.upsert).not.toHaveBeenCalled();
+  });
+
+  it('projects every legacy public target as Last-Known-Good when evidence is missing', async () => {
+    const database = {
+      sources: {
+        findMany: jest.fn(async () => [{
+          id: 'legacy-source',
+          listUrl: 'https://legacy.example/events',
+          targetKind: 'EVENT',
+        }]),
+      },
+      candidates: {
+        findMany: jest.fn(async () => [{
+          id: 'legacy-candidate',
+          sourceId: 'legacy-source',
+          listingKind: 'EVENT',
+          status: 'PUBLISHED',
+          publishedEventId: 'event-legacy',
+          publishedTeamId: null,
+          publishedFacilityId: null,
+          publishedOrganizationId: null,
+        }]),
+      },
+      targets: { findMany: jest.fn(async () => []) },
+      supplySources: { findFirst: jest.fn(async () => null) },
+    } as unknown as AffiliateSupplyDatabase;
+
+    const result = await reconcileLegacyAffiliateSupply({ db: database });
+
+    expect(result.dryRun).toBe(true);
+    expect(result.preservedTargetCount).toBe(1);
+    expect(result.unverifiableTargetCount).toBe(1);
+    expect(result.rows[0].targetProjections).toEqual([expect.objectContaining({
+      candidateId: 'legacy-candidate',
+      targetType: 'EVENT',
+      targetId: 'event-legacy',
+      status: 'LAST_KNOWN_GOOD',
+      action: 'MARK_LAST_KNOWN_GOOD',
+    })]);
+  });
 
   it('does not count stale published targets toward replenishment demand', async () => {
     const now = new Date('2026-08-22T12:00:00.000Z');
@@ -967,6 +1169,10 @@ describe('affiliate supply persistence seams', () => {
         kind: 'EVENT',
         listUrl: 'https://club.example/events',
         itemSelector: '.event',
+        fields: {
+          title: { selector: '.title' },
+          officialActionUrl: { selector: 'a', mode: 'attribute', attribute: 'href' },
+        },
         evidenceKinds: ['PAGE_HTML'],
       },
     };
