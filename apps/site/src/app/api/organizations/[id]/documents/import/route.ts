@@ -15,6 +15,7 @@ import {
   signedDocumentEvidenceFields,
   type DocumentEvidenceDatabase,
 } from '@/server/documentEvidence';
+import { notifyDocumentEvidenceChange } from '@/server/documentNotifications';
 import { listOrganizationUsersScopeEvents } from '@/server/organizationUsersAccess';
 import { getStorageProvider } from '@/lib/storageProvider';
 import { validatePdfBuffer } from '@/lib/pdfUploadValidation';
@@ -441,7 +442,7 @@ export async function POST(
       eventId: null,
       teamId: null,
     };
-    await prisma.$transaction(async (tx) => {
+    const importedEvidence = await prisma.$transaction(async (tx) => {
       const lockedTemplates = await tx.$queryRaw<LockedImportTemplate[]>(Prisma.sql`
         SELECT
           "id",
@@ -568,7 +569,26 @@ export async function POST(
         },
         tx as unknown as DocumentEvidenceDatabase,
       );
+      return { documentName };
+
     });
+    try {
+      await notifyDocumentEvidenceChange({
+        organizationId,
+        subjectUserId: parsed.subjectUserId,
+        evidenceId,
+        documentName: importedEvidence.documentName,
+        action: 'IMPORT',
+        actorUserId: session.userId,
+      });
+    } catch (notificationError) {
+      console.error('Document import notification failed.', {
+        organizationId,
+        evidenceId,
+        error: notificationError,
+      });
+    }
+
     return NextResponse.json(
       {
         evidenceId,

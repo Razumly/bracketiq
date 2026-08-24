@@ -31,6 +31,7 @@ const ensureDocumentSubjectMock = jest.fn();
 const signedDocumentEvidenceFieldsMock = jest.fn();
 const createDocumentRequirementSatisfactionMock = jest.fn();
 const appendDocumentEvidenceAuditEventMock = jest.fn();
+const notifyDocumentEvidenceChangeMock = jest.fn();
 const validatePdfBufferMock = jest.fn();
 
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
@@ -46,6 +47,9 @@ jest.mock('@/server/documentEvidence', () => ({
   signedDocumentEvidenceFields: signedDocumentEvidenceFieldsMock,
   createDocumentRequirementSatisfaction: createDocumentRequirementSatisfactionMock,
   appendDocumentEvidenceAuditEvent: appendDocumentEvidenceAuditEventMock,
+}));
+jest.mock('@/server/documentNotifications', () => ({
+  notifyDocumentEvidenceChange: (...args: unknown[]) => notifyDocumentEvidenceChangeMock(...args),
 }));
 jest.mock('@/lib/pdfUploadValidation', () => ({
   validatePdfBuffer: validatePdfBufferMock,
@@ -154,6 +158,7 @@ describe('POST /api/organizations/[id]/documents/import', () => {
     txMock.signedDocuments.create.mockResolvedValue({ id: 'evidence_1' });
     createDocumentRequirementSatisfactionMock.mockResolvedValue(undefined);
     appendDocumentEvidenceAuditEventMock.mockResolvedValue(undefined);
+    notifyDocumentEvidenceChangeMock.mockResolvedValue(undefined);
     prismaMock.$transaction.mockImplementation(async (callback: (tx: typeof txMock) => unknown) => (
       callback(txMock)
     ));
@@ -227,7 +232,25 @@ describe('POST /api/organizations/[id]/documents/import', () => {
       }),
       expect.anything(),
     );
+    expect(notifyDocumentEvidenceChangeMock).toHaveBeenCalledWith({
+      organizationId: 'org_1',
+      subjectUserId: 'player_1',
+      evidenceId: expect.any(String),
+      documentName: 'Imported Waiver',
+      action: 'IMPORT',
+      actorUserId: 'manager_1',
+    });
   });
+  it('keeps a committed import when notification delivery fails', async () => {
+    notifyDocumentEvidenceChangeMock.mockRejectedValueOnce(new Error('Notification failed.'));
+
+    const response = await POST(buildRequest(), routeParams);
+
+    expect(response.status).toBe(201);
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(notifyDocumentEvidenceChangeMock).toHaveBeenCalled();
+  });
+
   it('completes every signer role required by the selected version', async () => {
     prismaMock.templateDocuments.findUnique.mockResolvedValueOnce({
       id: 'version_1',
