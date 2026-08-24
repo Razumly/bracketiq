@@ -496,9 +496,17 @@ data class EventEditorTagDto(
 )
 
 @Serializable
+data class EventEditorExpectedCreateRevisionsDto(
+    val editorRevision: String,
+    val staffRevision: String?,
+    val scheduleRevision: String,
+)
+
+@Serializable
 data class EventEditorCreateCommandDto(
     val contractVersion: Int,
     val createOperationId: String,
+    val expectedRevisions: EventEditorExpectedCreateRevisionsDto,
     val draft: EventEditorDraftDto,
     val completion: EventEditorCreateCompletionDto,
 )

@@ -37,6 +37,14 @@ These doubles encode a vendor interface in the test suite. A provider can change
 
 Test our application at a provider-independent boundary instead. It is acceptable to mock internal application services, Prisma, and browser platform APIs when that isolates application behavior. Do not recreate a vendor client or provider response in order to test the vendor itself.
 
+## Cross-application HTTP contracts
+
+`apps/site` owns the HTTP contract consumed by `apps/mobile`. When a request or response changes, update the server schema, every mobile DTO and mapper, and the contract version or compatibility parser in one change.
+
+Before making a field required, either increase the contract version or keep the parser compatible with older clients. Never keep a version while changing its required shape.
+
+Every cross-application contract change needs a focused client-to-site integration check. The check must use the client serializer and send the request to the site parser or API. A mocked client transport does not prove contract compatibility.
+
 ## Test review checklist
 
 Before adding a test, answer:

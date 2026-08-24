@@ -6,6 +6,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -20,8 +21,13 @@ class EventEditorDtosTest {
                 {
                   "contractVersion": 3,
                   "createOperationId": "create-operation-1",
+                  "expectedRevisions": {
+                    "editorRevision": "editor-revision-1",
+                    "staffRevision": null,
+                    "scheduleRevision": "schedule-revision-1"
+                  },
                   "draft": {
-                    "basics": {
+                      "basics": {
                       "name": "Canonical event",
                       "description": "Description",
                       "eventType": "LEAGUE",
@@ -118,6 +124,9 @@ class EventEditorDtosTest {
 
         assertEquals(EVENT_EDITOR_CONTRACT_VERSION, command.contractVersion)
         assertEquals("create-operation-1", command.createOperationId)
+        assertEquals("editor-revision-1", command.expectedRevisions.editorRevision)
+        assertEquals(null, command.expectedRevisions.staffRevision)
+        assertEquals("schedule-revision-1", command.expectedRevisions.scheduleRevision)
         assertEquals(
             EventEditorCreateCompletionMode.CREATE_AND_BUILD_SCHEDULE,
             command.completion.mode,
@@ -126,6 +135,10 @@ class EventEditorDtosTest {
         assertEquals("question-client-1", command.draft.registration.questions.first().clientId)
         assertEquals("tag-1", command.draft.basics.tags.single().legacyId)
         val wire = encodeEventEditorCreateCommand(command)
+        val wireExpectedRevisions = wire.getValue("expectedRevisions").jsonObject
+        assertEquals("editor-revision-1", wireExpectedRevisions.getValue("editorRevision").jsonPrimitive.content)
+        assertEquals(JsonNull, wireExpectedRevisions.getValue("staffRevision"))
+        assertEquals("schedule-revision-1", wireExpectedRevisions.getValue("scheduleRevision").jsonPrimitive.content)
         val wireDraft = wire.getValue("draft").jsonObject
         val wireBasics = wireDraft.getValue("basics").jsonObject
         val wireRegistration = wireDraft.getValue("registration").jsonObject

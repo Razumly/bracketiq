@@ -21,6 +21,19 @@ Use the organization [BracketIQ Project](https://github.com/orgs/Razumly/project
 - **Delivery gate**: require push, merge, or release before closing only when the issue's acceptance criteria explicitly require that step. Otherwise, delivery is separate from issue resolution.
 - **Close with context**: add a comment summarizing the outcome and verification, with commit, PR, or deployment references when available.
 
+## Cross-application contract issues
+
+When an issue changes an HTTP request or response, an API path, or a site/mobile workflow:
+
+- Classify it as `Shared` when both `apps/site` and `apps/mobile` must change.
+- Name `apps/site` as the contract owner.
+- List every client DTO, encoder, mapper, and API caller that must change.
+- State whether the contract version stays compatible or must increase.
+- Add an acceptance criterion that sends a client-produced request to the backend parser or API.
+- Do not close the issue until the client-to-site check runs. A mocked transport test is not enough.
+
+Do not add a required field under an unchanged contract version unless every supported client is updated in the same workstream. Do not write that an issue has no API impact without checking the current server schema and every client serializer.
+
 ## Pull requests as a triage surface
 
 **PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature requests; `/triage` reads this flag.)_

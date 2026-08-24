@@ -30,7 +30,10 @@
 - Use batch APIs for collection reads. Do not issue one request per item when a batch endpoint can serve the data.
 - Use one server transaction for a save that changes related records.
 - Roll back the complete save when one write fails.
-- Update the backend route and the mobile caller together when a contract changes.
+- Update the backend route and every mobile caller together when an HTTP contract changes.
+- Treat `apps/site` contract schemas as the source of truth. List every request and response field that changes.
+- Bump the contract version or preserve a backward-compatible parser before making a field required. Do not keep a version while changing its required shape.
+- Add and run a client-to-site API integration test. A mocked transport test does not prove compatibility.
 
 ## Application rules
 

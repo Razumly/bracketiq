@@ -150,6 +150,11 @@ internal suspend fun MobileApiTestSession.createEventThroughEditor(
         EventEditorCreateCommandDto(
             contractVersion = EVENT_EDITOR_CONTRACT_VERSION,
             createOperationId = operationId,
+            expectedRevisions = EventEditorExpectedCreateRevisionsDto(
+                editorRevision = bootstrap.snapshot.editorRevision,
+                staffRevision = bootstrap.snapshot.staffRevision,
+                scheduleRevision = bootstrap.snapshot.scheduleState.revision,
+            ),
             draft = draft,
             completion = EventEditorCreateCompletionDto(
                 mode = if (event.eventType.name in setOf("LEAGUE", "TOURNAMENT")) {

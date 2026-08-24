@@ -108,6 +108,26 @@ class EventLifecycleMobileApiIntegrationTest {
     }
 
     @Test
+    fun given_mobile_editor_create_command_when_sent_to_site_then_event_is_persisted() =
+        runTest(timeout = 5.minutes) {
+            hostSession = MobileApiTestSession.create()
+            val host = hostSession!!
+            val hostUser = host.userRepository.login(HOST_EMAIL, HOST_PASSWORD).getOrThrow()
+            val runId = "mobile_api_editor_contract_${Clock.System.now().toEpochMilliseconds()}"
+            val source = buildLifecycleVariants(runId = runId, hostUserId = hostUser.id)
+                .first { variant -> variant.key == "normal" }
+            val created = host.createEventThroughEditor(
+                event = source.event.copy(name = "${source.event.name} Contract"),
+                fields = source.fields,
+                timeSlots = source.timeSlots,
+                operationId = "mobile-editor-contract-$runId",
+            )
+            createdEventIds += created.id
+
+            assertCreatedEventShape(source, created)
+        }
+
+    @Test
     fun mobile_editor_can_edit_and_publish_a_draft_without_dropping_resources() =
         runTest(timeout = 5.minutes) {
             hostSession = MobileApiTestSession.create()

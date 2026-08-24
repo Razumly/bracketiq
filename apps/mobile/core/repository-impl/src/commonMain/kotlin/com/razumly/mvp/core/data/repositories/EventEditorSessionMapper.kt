@@ -30,6 +30,7 @@ import com.razumly.mvp.core.network.dto.EventEditorCompetitionDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateBootstrapDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateCommandDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateCompletionMode
+import com.razumly.mvp.core.network.dto.EventEditorExpectedCreateRevisionsDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateCompletionDto
 import com.razumly.mvp.core.network.dto.EventEditorDivisionDetailDto
 import com.razumly.mvp.core.network.dto.EventEditorDraftDto
@@ -1180,6 +1181,11 @@ object EventEditorSessionMapper {
         val command = EventEditorCreateCommandDto(
             contractVersion = EVENT_EDITOR_CONTRACT_VERSION,
             createOperationId = operationId,
+            expectedRevisions = EventEditorExpectedCreateRevisionsDto(
+                editorRevision = session.snapshot.editorRevision,
+                staffRevision = session.snapshot.staffRevision,
+                scheduleRevision = session.snapshot.scheduleState.revision,
+            ),
             draft = draft,
             completion = EventEditorCreateCompletionDto(mode = completionMode),
         )

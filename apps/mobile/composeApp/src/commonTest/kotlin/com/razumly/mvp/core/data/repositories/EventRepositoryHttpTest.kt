@@ -45,6 +45,7 @@ import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.configureMvpHttpClient
 import com.razumly.mvp.core.network.dto.EventEditorCreateCommandDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateCompletionDto
+import com.razumly.mvp.core.network.dto.EventEditorExpectedCreateRevisionsDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateCompletionMode
 import com.razumly.mvp.core.network.dto.EventEditorCapabilitiesDto
 import com.razumly.mvp.core.network.dto.EventEditorCatalogsDto
@@ -5261,6 +5262,11 @@ class EventRepositoryHttpTest {
         val command = EventEditorCreateCommandDto(
             contractVersion = 3,
             createOperationId = "operation-1",
+            expectedRevisions = EventEditorExpectedCreateRevisionsDto(
+                editorRevision = "revision-1",
+                staffRevision = null,
+                scheduleRevision = "schedule-1",
+            ),
             draft = draft,
             completion = EventEditorCreateCompletionDto(EventEditorCreateCompletionMode.CREATE_ONLY),
         )
@@ -5320,6 +5326,11 @@ class EventRepositoryHttpTest {
         val command = EventEditorCreateCommandDto(
             contractVersion = 3,
             createOperationId = "failed-operation",
+            expectedRevisions = EventEditorExpectedCreateRevisionsDto(
+                editorRevision = "revision-1",
+                staffRevision = null,
+                scheduleRevision = "schedule-1",
+            ),
             draft = EventEditorDraftDto(
                 basics = EventEditorBasicsDto(
                     name = "Failed event",

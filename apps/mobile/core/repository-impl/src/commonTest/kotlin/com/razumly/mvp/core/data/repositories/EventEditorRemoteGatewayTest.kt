@@ -10,6 +10,7 @@ import com.razumly.mvp.core.network.dto.EventEditorCompetitionDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateCompletionDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateCompletionMode
 import com.razumly.mvp.core.network.dto.EventEditorCreateCommandDto
+import com.razumly.mvp.core.network.dto.EventEditorExpectedCreateRevisionsDto
 import com.razumly.mvp.core.network.dto.EventEditorDivisionDetailDto
 import com.razumly.mvp.core.network.dto.EventEditorDraftDto
 import com.razumly.mvp.core.network.dto.EventEditorFieldDto
@@ -78,6 +79,10 @@ class EventEditorRemoteGatewayTest {
 
         val result = EventEditorRemoteGateway(api).create(command)
         val body = jsonMVP.parseToJsonElement(requestBody ?: "").jsonObject
+        val wireExpectedRevisions = body.getValue("expectedRevisions").jsonObject
+        assertEquals("editor-revision-1", wireExpectedRevisions.getValue("editorRevision").jsonPrimitive.content)
+        assertEquals("staff-revision-1", wireExpectedRevisions.getValue("staffRevision").jsonPrimitive.content)
+        assertEquals("schedule-revision-1", wireExpectedRevisions.getValue("scheduleRevision").jsonPrimitive.content)
         val draft = body.getValue("draft").jsonObject
         val basics = draft.getValue("basics").jsonObject
         val payment = draft.getValue("registration").jsonObject.getValue("payment").jsonObject
@@ -151,6 +156,11 @@ private object GatewayTestTokenStore : AuthTokenStore {
 private fun editorCreateCommand(): EventEditorCreateCommandDto = EventEditorCreateCommandDto(
     contractVersion = 3,
     createOperationId = "create-operation-1",
+    expectedRevisions = EventEditorExpectedCreateRevisionsDto(
+        editorRevision = "editor-revision-1",
+        staffRevision = "staff-revision-1",
+        scheduleRevision = "schedule-revision-1",
+    ),
     draft = EventEditorDraftDto(
         basics = EventEditorBasicsDto(
             name = "Canonical event",

@@ -396,6 +396,9 @@ class EventEditorSessionMapperTest {
 
         assertEquals(false, command.draft.schedule.isAutomatedScheduling)
         assertEquals(EventEditorCreateCompletionMode.CREATE_ONLY, command.completion.mode)
+        assertEquals("new", command.expectedRevisions.editorRevision)
+        assertEquals("staff-revision-1", command.expectedRevisions.staffRevision)
+        assertEquals("new", command.expectedRevisions.scheduleRevision)
         val decoded = jsonMVP.decodeFromString<EventEditorCreateCommandDto>(
             jsonMVP.encodeToString(command),
         )
