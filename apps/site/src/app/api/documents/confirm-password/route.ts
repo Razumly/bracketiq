@@ -19,18 +19,14 @@ export async function POST(request: NextRequest) {
   }
 
   const requestedEmail = parsed.data.email?.trim().toLowerCase();
-  const authUser = session.isAdmin
-    ? await prisma.authUser.findUnique({
-      where: requestedEmail
-        ? { email: requestedEmail }
-        : { id: session.userId },
-    })
-    : await prisma.authUser.findUnique({ where: { id: session.userId } });
+  const authUser = await prisma.authUser.findUnique({
+    where: { id: session.userId },
+  });
   if (!authUser) {
     return NextResponse.json({ error: 'Invalid credentials.' }, { status: 401 });
   }
 
-  if (!session.isAdmin && authUser.id !== session.userId) {
+  if (requestedEmail && authUser.email.trim().toLowerCase() !== requestedEmail) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 

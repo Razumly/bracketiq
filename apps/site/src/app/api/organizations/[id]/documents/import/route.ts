@@ -398,9 +398,12 @@ export async function POST(
     ...scopeEvents.flatMap((event) => [
       ...event.userIds,
       ...(event.organizationId !== organizationId
-        ? [event.hostId, ...(event.assistantHostIds ?? [])]
+        ? [
+          event.hostId,
+          ...(event.assistantHostIds ?? []),
+          ...(event.officialIds ?? []),
+        ]
         : []),
-      ...(event.officialIds ?? []),
     ]),
     ...organizationEventTeamMemberIds,
     ...teamRegistrations.map((registration) => registration.userId),

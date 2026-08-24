@@ -496,6 +496,30 @@ describe('POST /api/organizations/[id]/documents/import', () => {
     expect((await response.json()).error).toContain('not a customer');
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
   });
+
+  it('rejects an official from an Organization-owned Event who is not a customer', async () => {
+    prismaMock.userData.findMany.mockResolvedValue([{ id: 'official_1' }]);
+    listOrganizationUsersScopeEventsMock.mockResolvedValue([
+      {
+        id: 'organization_event_1',
+        organizationId: 'org_1',
+        userIds: [],
+        teamIds: [],
+        hostId: null,
+        assistantHostIds: [],
+        officialIds: ['official_1'],
+      },
+    ]);
+
+    const response = await POST(
+      buildRequest({ subjectUserId: 'official_1' }),
+      routeParams,
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toContain('not a customer');
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
   it('accepts a rental Event host shown as an Organization customer', async () => {
     prismaMock.userData.findMany.mockResolvedValue([{ id: 'host_1' }]);
     listOrganizationUsersScopeEventsMock.mockResolvedValue([
