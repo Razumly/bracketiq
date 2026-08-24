@@ -586,7 +586,7 @@ export const loadFieldBlockerCatalog = async (
     where: {
       fieldId: { in: fieldIds },
       status: { in: ["PENDING_PAYMENT", "CONFIRMED"] },
-      end: { not: null, gt: lowerBound },
+      end: { gt: lowerBound },
       ...(excludeEventId
         ? { OR: [{ eventId: null }, { eventId: { not: excludeEventId } }] }
         : {}),
