@@ -145,39 +145,19 @@ export const loadEventScheduleState = async (
     protectedMatchIds,
   } = protectedHistory;
 
-  const matchRows = matches.filter(
-    (row): row is Record<string, unknown> =>
-      Boolean(row) && typeof row === "object",
-  );
+  const matchRows = matches;
   const segmentRows = segments;
-  const dependentRows = [
-    ...incidents,
-    ...receipts,
-    ...checkIns,
-    ...rosters,
-    ...broadcastActions,
-  ];
   const demandDivisions = divisionRows
-    .filter(
-      (row): row is Record<string, unknown> =>
-        Boolean(row) && typeof row === "object",
-    )
     .map((row) => ({
-      id: typeof row.id === "string" ? row.id : "",
+      id: row.id,
       phase: typeof row.phase === "string" ? row.phase : null,
     }))
     .filter((division) => division.id.length > 0);
   const matchDemand = matchDemandFromPersistedGraph(
     matchRows.map((row) => ({
-      divisionId:
-        typeof row.division === "string"
-          ? row.division
-          : typeof row.divisionId === "string"
-            ? row.divisionId
-            : null,
-      placementState:
-        typeof row.placementState === "string" ? row.placementState : null,
-      fieldId: typeof row.fieldId === "string" ? row.fieldId : null,
+      divisionId: row.division,
+      placementState: row.placementState,
+      fieldId: row.fieldId,
     })),
     demandDivisions,
   );
@@ -199,49 +179,32 @@ export const loadEventScheduleState = async (
       "timeSlotIds",
       "updatedAt",
     ]),
-    matches: matchRows.sort((left, right) =>
-      String(left.id ?? "").localeCompare(String(right.id ?? "")),
+    matches: [...matchRows].sort((left, right) =>
+      left.id.localeCompare(right.id),
     ),
-    segments: segmentRows.sort((left, right) =>
-      `${String(left.matchId ?? "")}:${String(left.sequence ?? "")}`.localeCompare(
-        `${String(right.matchId ?? "")}:${String(right.sequence ?? "")}`,
+    segments: [...segmentRows].sort((left, right) =>
+      `${left.matchId}:${left.sequence}`.localeCompare(
+        `${right.matchId}:${right.sequence}`,
       ),
     ),
-    incidents: dependentRows
-      .filter((row) => incidents.includes(row))
-      .sort((left, right) =>
-        String(left.id ?? "").localeCompare(String(right.id ?? "")),
-      ),
-    receipts: dependentRows
-      .filter((row) => receipts.includes(row))
-      .sort((left, right) =>
-        String(left.clientOperationId ?? "").localeCompare(
-          String(right.clientOperationId ?? ""),
-        ),
-      ),
-    checkIns: dependentRows
-      .filter((row) => checkIns.includes(row))
-      .sort((left, right) =>
-        String(left.id ?? "").localeCompare(String(right.id ?? "")),
-      ),
-    rosters: dependentRows
-      .filter((row) => rosters.includes(row))
-      .sort((left, right) =>
-        String(left.id ?? "").localeCompare(String(right.id ?? "")),
-      ),
-    broadcastActions: dependentRows
-      .filter((row) => broadcastActions.includes(row))
-      .sort((left, right) =>
-        String(left.id ?? "").localeCompare(String(right.id ?? "")),
-      ),
-    broadcastStates: broadcastStates
-      .filter(
-        (row): row is Record<string, unknown> =>
-          Boolean(row) && typeof row === "object",
-      )
-      .sort((left, right) =>
-        String(left.id ?? "").localeCompare(String(right.id ?? "")),
-      ),
+    incidents: [...incidents].sort((left, right) =>
+      left.id.localeCompare(right.id),
+    ),
+    receipts: [...receipts].sort((left, right) =>
+      left.clientOperationId.localeCompare(right.clientOperationId),
+    ),
+    checkIns: [...checkIns].sort((left, right) =>
+      left.id.localeCompare(right.id),
+    ),
+    rosters: [...rosters].sort((left, right) =>
+      left.id.localeCompare(right.id),
+    ),
+    broadcastActions: [...broadcastActions].sort((left, right) =>
+      left.id.localeCompare(right.id),
+    ),
+    broadcastStates: [...broadcastStates].sort((left, right) =>
+      left.id.localeCompare(right.id),
+    ),
   });
   return {
     sourceType: normalizedSourceType,
