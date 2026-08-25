@@ -756,8 +756,11 @@ export type AffiliateCutoverPreflightReport = Readonly<{
   isReady: boolean;
   inputHash: string;
   reportHash: string;
+  supplyContractVersion: number;
+  supplyContractHash: string;
   deploymentContractVersion: number;
   deploymentContractHash: string;
+  gatewayVersion: number;
   blockingFindings: readonly AffiliateCutoverFinding[];
   warnings: readonly AffiliateCutoverFinding[];
   resolutions: readonly AffiliateCutoverFinding[];
@@ -812,7 +815,10 @@ export const inspectAffiliateAgentContainer = (
   const user = stringValue(input.user);
   const isRoot = user === '0' || user === '0:0' || user?.startsWith('root:') === true;
   const hasAllCapabilitiesDropped = (input.capDrop ?? []).some((capability) => upper(capability) === 'ALL');
-  const hasNoNewPrivileges = (input.securityOptions ?? []).some((option) => upper(option).replace(/[-_]/g, '') === 'NO_NEW_PRIVILEGES');
+  const hasNoNewPrivileges = (input.securityOptions ?? []).some((option) => {
+    const [name, value] = upper(option).split(':', 2);
+    return name.replace(/[-_]/g, '') === 'NONEWPRIVILEGES' && value === 'TRUE';
+  });
   if (isRoot || input.readonlyRootFilesystem !== true || !hasAllCapabilitiesDropped || !hasNoNewPrivileges) {
     findings.push(finding(
       'CONTAINER_PRIVILEGE',
@@ -1003,20 +1009,64 @@ export const buildAffiliateCutoverPreflightReport = (
     liveLegacyClaims: liveClaims.length,
     unsafeContainers: unsafeContainers.length,
   } as const;
-  const reportHash = canonicalHash({ schemaVersion: 1, inputHash, counts, blockingFindings, warnings, resolutions });
+  const reportHash = canonicalHash({
+    schemaVersion: 1,
+    inputHash,
+    supplyContractVersion: input.observed.supplyContractVersion,
+    supplyContractHash: input.observed.supplyContractHash,
+    deploymentContractVersion: input.observed.deploymentContractVersion,
+    deploymentContractHash: input.observed.deploymentContractHash,
+    gatewayVersion: input.observed.gatewayVersion,
+    counts,
+    blockingFindings,
+    warnings,
+    resolutions,
+  });
   return {
     schemaVersion: 1,
     evaluatedAt: input.now.toISOString(),
     isReady: blockingFindings.length === 0,
     inputHash,
     reportHash,
+    supplyContractVersion: input.observed.supplyContractVersion,
+    supplyContractHash: input.observed.supplyContractHash,
     deploymentContractVersion: input.observed.deploymentContractVersion,
     deploymentContractHash: input.observed.deploymentContractHash,
+    gatewayVersion: input.observed.gatewayVersion,
     blockingFindings,
     warnings,
     resolutions,
     counts,
   };
+};
+
+export const isAffiliateCutoverPreflightReportIntact = (
+  report: AffiliateCutoverPreflightReport,
+): boolean => {
+  if (
+    report.schemaVersion !== 1
+    || !Array.isArray(report.blockingFindings)
+    || !Array.isArray(report.warnings)
+    || !Array.isArray(report.resolutions)
+    || !report.counts
+    || typeof report.counts !== 'object'
+  ) {
+    return false;
+  }
+  return report.isReady === (report.blockingFindings.length === 0)
+    && report.reportHash === canonicalHash({
+      schemaVersion: report.schemaVersion,
+      inputHash: report.inputHash,
+      supplyContractVersion: report.supplyContractVersion,
+      supplyContractHash: report.supplyContractHash,
+      deploymentContractVersion: report.deploymentContractVersion,
+      deploymentContractHash: report.deploymentContractHash,
+      gatewayVersion: report.gatewayVersion,
+      counts: report.counts,
+      blockingFindings: report.blockingFindings,
+      warnings: report.warnings,
+      resolutions: report.resolutions,
+    });
 };
 
 export type AffiliateCutoverRollbackInput = Readonly<{

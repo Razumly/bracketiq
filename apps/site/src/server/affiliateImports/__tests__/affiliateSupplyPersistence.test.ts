@@ -21,6 +21,7 @@ import {
 } from '../affiliateSupplyPersistence';
 
 import { hashAffiliateAgentValue } from '../agentGatewayContracts';
+import type { AffiliateCutoverPreflightReport } from '../affiliateFleetCutover';
 const policy: AffiliateSupplyContractPolicy = {
   schemaVersion: 1,
   version: 3,
@@ -42,6 +43,35 @@ const manifest = buildAffiliateSupplyContractManifest({
   rolloutCohort: policy.rolloutCohort,
   supplyContract: { ...policy, hash: undefined },
 });
+
+const preflightCounts = {
+  mappingProducers: 2,
+  supplyReviewers: 2,
+  coveragePlanners: 1,
+  stoppedLegacyProcesses: 2,
+  runningLegacyProcesses: 0,
+  liveLegacyClaims: 0,
+  unsafeContainers: 0,
+} as const;
+const preflightHashInput = {
+  schemaVersion: 1 as const,
+  inputHash: 'preflight-input-hash',
+  supplyContractVersion: manifest.version,
+  supplyContractHash: manifest.supplyContract.hash,
+  deploymentContractVersion: 2,
+  deploymentContractHash: 'b'.repeat(64),
+  gatewayVersion: 9,
+  counts: preflightCounts,
+  blockingFindings: [],
+  warnings: [],
+  resolutions: [],
+};
+const readyPreflight = {
+  ...preflightHashInput,
+  evaluatedAt: '2026-08-25T12:00:00.000Z',
+  isReady: true,
+  reportHash: hashAffiliateAgentValue(preflightHashInput),
+} satisfies AffiliateCutoverPreflightReport;
 const impactReport = {
   rolloutCohort: manifest.rolloutCohort,
   currentContractVersion: 0,
@@ -1426,6 +1456,7 @@ describe('affiliate supply persistence seams', () => {
       operatorId: 'operator-1',
       applyNonce: 'nonce-1',
       expectedReportHash: 'wrong-report-hash',
+      preflight: readyPreflight,
     })).rejects.toThrow('report hash does not match');
   });
 
@@ -1461,6 +1492,15 @@ describe('affiliate supply persistence seams', () => {
       targets: { findMany: jest.fn(async () => []) },
       supplySources: { findMany: jest.fn(async () => []) },
       reconciliationRuns,
+      contractManifests: {
+        findFirst: jest.fn(async () => ({
+          status: 'ACTIVE',
+          version: manifest.version,
+          rolloutCohort: manifest.rolloutCohort,
+          contractHash: manifest.hash,
+          contractJson: manifest.supplyContract,
+        })),
+      },
     } as unknown as AffiliateSupplyDatabase;
 
     const dryRun = await reconcileLegacyAffiliateSupply({
@@ -1481,8 +1521,8 @@ describe('affiliate supply persistence seams', () => {
       expectedReportHash: dryRun.reportHash,
       expectedInputHash: dryRun.inputHash,
       expectedCountsHash: hashAffiliateAgentValue(dryRun.report.counts),
+      preflight: readyPreflight,
     });
-
     expect(replay.applied).toBe(true);
     expect(replay.report).toEqual(dryRun.report);
   });
@@ -1640,11 +1680,7 @@ describe('affiliate supply persistence seams', () => {
       expectedReportHash: dryRun.reportHash,
       expectedInputHash: dryRun.inputHash,
       expectedCountsHash: hashAffiliateAgentValue(dryRun.report.counts),
-      preflight: {
-        isReady: true,
-        deploymentContractVersion: 2,
-        deploymentContractHash: 'b'.repeat(64),
-      },
+      preflight: readyPreflight,
     });
     const replay = await reconcileLegacyAffiliateSupply({
       db: database,
@@ -1655,6 +1691,7 @@ describe('affiliate supply persistence seams', () => {
       expectedReportHash: dryRun.reportHash,
       expectedInputHash: dryRun.inputHash,
       expectedCountsHash: hashAffiliateAgentValue(dryRun.report.counts),
+      preflight: readyPreflight,
     });
 
     expect(dryRun.report.isApplySafe).toBe(true);
@@ -1713,6 +1750,85 @@ describe('affiliate supply persistence seams', () => {
       status: 'LAST_KNOWN_GOOD',
       action: 'MARK_LAST_KNOWN_GOOD',
     })]);
+  });
+  it('collects affiliate-backed organizations, events, teams, and facilities as public targets', async () => {
+    const database = {
+      sources: {
+        findMany: jest.fn(async () => [{
+          id: 'legacy-source',
+          listUrl: 'https://legacy.example/events',
+          organizationId: 'organization-1',
+          targetKind: 'EVENT',
+        }]),
+      },
+      organizations: {
+        findMany: jest.fn(async () => [{
+          id: 'organization-1',
+          originType: 'AFFILIATE_IMPORTED',
+        }]),
+      },
+      events: {
+        findMany: jest.fn(async () => [{
+          id: 'event-1',
+          sourceId: 'legacy-source',
+          sourceType: 'AFFILIATE',
+        }]),
+      },
+      teams: {
+        findMany: jest.fn(async () => [{
+          id: 'team-1',
+          sourceId: 'legacy-source',
+          sourceType: 'AFFILIATE',
+        }]),
+      },
+      facilities: {
+        findMany: jest.fn(async () => [{
+          id: 'facility-1',
+          organizationId: 'organization-1',
+          affiliateUrl: 'https://legacy.example/facility',
+        }]),
+      },
+      targets: { findMany: jest.fn(async () => []) },
+      supplySources: { findMany: jest.fn(async () => []) },
+    } as unknown as AffiliateSupplyDatabase;
+
+    const result = await reconcileLegacyAffiliateSupply({
+      db: database,
+      now: new Date('2026-08-25T12:00:00.000Z'),
+    });
+
+    expect(result.report.counts.recordsByKind).toEqual(expect.objectContaining({
+      ORGANIZATION: 1,
+      EVENT: 1,
+      TEAM: 1,
+      FACILITY: 1,
+    }));
+    expect(result.rows[0].targetProjections).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        targetType: 'ORGANIZATION',
+        targetId: 'organization-1',
+        status: 'LAST_KNOWN_GOOD',
+        action: 'MARK_LAST_KNOWN_GOOD',
+      }),
+      expect.objectContaining({
+        targetType: 'EVENT',
+        targetId: 'event-1',
+        status: 'LAST_KNOWN_GOOD',
+        action: 'MARK_LAST_KNOWN_GOOD',
+      }),
+      expect.objectContaining({
+        targetType: 'TEAM',
+        targetId: 'team-1',
+        status: 'LAST_KNOWN_GOOD',
+        action: 'MARK_LAST_KNOWN_GOOD',
+      }),
+      expect.objectContaining({
+        targetType: 'FACILITY',
+        targetId: 'facility-1',
+        status: 'LAST_KNOWN_GOOD',
+        action: 'MARK_LAST_KNOWN_GOOD',
+      }),
+    ]));
   });
 
   it('does not count stale published targets toward replenishment demand', async () => {

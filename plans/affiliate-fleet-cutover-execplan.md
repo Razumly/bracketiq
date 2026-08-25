@@ -16,6 +16,8 @@ The implementation does not start or stop a production process. The repository p
 - [x] (2026-08-25) Add durable reconciliation-run persistence and the guarded dry-run/apply workflow.
 - [x] (2026-08-25) Add operator scripts and the governed five-supervisor deployment manifest.
 - [x] (2026-08-25) Run focused checks and the full site suite.
+- [x] (2026-08-25 20:45Z) Include affiliate-backed Organization, Event, Team, and Facility rows in the stopped-fleet inventory and Last-Known-Good target projection.
+- [x] (2026-08-25 21:07Z) Bind APPLY to a complete, hash-checked preflight report and the active Supply Contract. Normalize the governed Compose security anchor.
 - [ ] Run the two-axis code review and commit the completed issue slice.
 
 ## Surprises & Discoveries
@@ -45,9 +47,11 @@ The implementation does not start or stop a production process. The repository p
 
 ## Outcomes & Retrospective
 
-The implementation is complete. Focused cutover and persistence tests pass, with 38 tests passing. TypeScript passes. The full site CI passes with 866 suites and 5,260 tests. Route coverage passes its configured floors.
+The implementation is complete. Focused cutover and persistence tests pass, with 41 tests passing. TypeScript passes. The full site CI passes with 866 suites and 5,263 tests, with 28 tests skipped. Route coverage passes its configured floors.
 
-The apply path now re-reads and hashes the reviewed snapshot, persists the report, links legacy rows, preserves public targets, records observed `LEGACY_RECONCILED` evidence, and performs all mutable work in one transaction. A repeated apply replays the durable report without new writes. Deployment hashes and preflight evidence persist with the run.
+The apply path re-reads and hashes the reviewed snapshot, persists the report, links legacy rows, preserves public targets, records observed `LEGACY_RECONCILED` evidence, and performs all mutable work in one transaction. A repeated apply replays the durable report without new writes. Deployment hashes and preflight evidence persist with the run.
+
+The preflight CLI rejects incomplete or tampered reports. The apply path verifies the complete preflight hash and matches its Supply Contract version and hash to the active contract. Agent services inherit the reviewed internal gateway environment from the governed Compose anchor.
 
 Lint reports only pre-existing warnings outside the changed cutover files. The final two-axis review and commit remain.
 
@@ -90,10 +94,46 @@ Run all site commands from `apps/site`.
 4. Run cutover preflight against the saved inventory. The command must exit non-zero when a legacy process is running, an active lease exists, a hash differs, a forbidden credential is present, or the topology is not exactly two/two/one.
 
        npm run affiliate:cutover:preflight -- --inventory=/path/to/inventory.json
+   The inventory file is a JSON object with these fields. The contract snapshots contain the expected and observed version and hash values.
+
+       {
+         "now": "2026-08-25T12:00:00.000Z",
+         "expected": {
+           "supplyContractVersion": 1,
+           "supplyContractHash": "<sha256>",
+           "deploymentContractVersion": 2,
+           "deploymentContractHash": "<sha256>",
+           "gatewayVersion": 1,
+           "roleContractHashes": {"MAPPING_PRODUCER": "<sha256>", "SUPPLY_REVIEWER": "<sha256>", "COVERAGE_PLANNER": "<sha256>"},
+           "promptTemplateHashes": {"MAPPING_PRODUCER": "<sha256>", "SUPPLY_REVIEWER": "<sha256>", "COVERAGE_PLANNER": "<sha256>"}
+         },
+         "observed": {
+           "supplyContractVersion": 1,
+           "supplyContractHash": "<sha256>",
+           "deploymentContractVersion": 2,
+           "deploymentContractHash": "<sha256>",
+           "gatewayVersion": 1,
+           "roleContractHashes": {"MAPPING_PRODUCER": "<sha256>", "SUPPLY_REVIEWER": "<sha256>", "COVERAGE_PLANNER": "<sha256>"},
+           "promptTemplateHashes": {"MAPPING_PRODUCER": "<sha256>", "SUPPLY_REVIEWER": "<sha256>", "COVERAGE_PLANNER": "<sha256>"}
+         },
+         "processInventory": [],
+         "legacyClaims": [],
+         "databasePermissions": {
+           "agentCanConnectProductionDatabase": false,
+           "agentCanWriteProductionDatabase": false,
+           "agentCanReadObjectStorage": false,
+           "agentCanWriteObjectStorage": false,
+           "agentCanCallProviders": false,
+           "gatewayCanWriteProductionDatabase": true
+         },
+         "containers": []
+       }
+
+   Replace each placeholder with the reviewed value. Add stopped legacy processes and governed workers to `processInventory`, and add the observed legacy claims and container inspections before running preflight.
 
 5. Apply only the reviewed report. The operator supplies the exact report hash, reviewed counts, operator ID, apply nonce, and a clean preflight report.
 
-       npm run affiliate:cutover:reconcile -- --apply --report-hash=<sha256> --operator=<operator-id> --apply-nonce=<nonce> --preflight=/path/to/preflight.json
+       npm run affiliate:cutover:reconcile -- --apply --report-hash=<sha256> --input-hash=<sha256> --counts-hash=<sha256> --counts-json=/path/to/reviewed-counts.json --operator=<operator-id> --apply-nonce=<nonce> --preflight=/path/to/preflight.json
 
 6. Run the focused affiliate suites, then the full site suite once at the end.
 

@@ -1,5 +1,12 @@
 name: ${AFFILIATE_GOVERNED_PROJECT_NAME:-bracketiq-affiliate-governed}
 
+x-agent-environment: &agent-environment
+   AFFILIATE_AGENT_GATEWAY_ADDRESS: ${AFFILIATE_AGENT_GATEWAY_ADDRESS:?Set AFFILIATE_AGENT_GATEWAY_ADDRESS}
+   AFFILIATE_AGENT_MODEL_ADDRESS: ${AFFILIATE_AGENT_MODEL_ADDRESS:?Set AFFILIATE_AGENT_MODEL_ADDRESS}
+   AFFILIATE_AGENT_WORKSPACE_ROOT: /workspaces
+   AFFILIATE_AGENT_MODEL_CREDENTIAL: ${AFFILIATE_AGENT_MODEL_CREDENTIAL:?Set the model credential}
+   AFFILIATE_AGENT_EXTERNAL_NETWORK: "false"
+   AFFILIATE_AGENT_ARTIFACT_ACCESS: "gateway-only"
 x-agent-common: &agent-common
   image: ${AFFILIATE_AGENT_IMAGE:?Set AFFILIATE_AGENT_IMAGE}
   working_dir: /workspace/apps/site
@@ -16,12 +23,7 @@ x-agent-common: &agent-common
   networks:
     - gateway_internal
   environment:
-    AFFILIATE_AGENT_GATEWAY_ADDRESS: ${AFFILIATE_AGENT_GATEWAY_ADDRESS:?Set AFFILIATE_AGENT_GATEWAY_ADDRESS}
-    AFFILIATE_AGENT_MODEL_ADDRESS: ${AFFILIATE_AGENT_MODEL_ADDRESS:?Set AFFILIATE_AGENT_MODEL_ADDRESS}
-    AFFILIATE_AGENT_WORKSPACE_ROOT: /workspaces
-    AFFILIATE_AGENT_MODEL_CREDENTIAL: ${AFFILIATE_AGENT_MODEL_CREDENTIAL:?Set the model credential}
-    AFFILIATE_AGENT_EXTERNAL_NETWORK: "false"
-    AFFILIATE_AGENT_ARTIFACT_ACCESS: "gateway-only"
+    <<: *agent-environment
   volumes:
     - type: bind
       source: ${AFFILIATE_AGENT_WORKSPACE_ROOT:?Set AFFILIATE_AGENT_WORKSPACE_ROOT}
@@ -31,6 +33,7 @@ services:
   mapping-producer-1:
     <<: *agent-common
     environment:
+      <<: *agent-environment
       AFFILIATE_AGENT_ROLE: MAPPING_PRODUCER
       AFFILIATE_AGENT_WORKER_ID: mapping-producer-1
       AFFILIATE_AGENT_ROLE_CREDENTIAL: ${AFFILIATE_MAPPING_PRODUCER_1_CREDENTIAL:?Set mapping producer 1 credential}
@@ -39,6 +42,7 @@ services:
   mapping-producer-2:
     <<: *agent-common
     environment:
+      <<: *agent-environment
       AFFILIATE_AGENT_ROLE: MAPPING_PRODUCER
       AFFILIATE_AGENT_WORKER_ID: mapping-producer-2
       AFFILIATE_AGENT_ROLE_CREDENTIAL: ${AFFILIATE_MAPPING_PRODUCER_2_CREDENTIAL:?Set mapping producer 2 credential}
@@ -47,6 +51,7 @@ services:
   supply-reviewer-1:
     <<: *agent-common
     environment:
+      <<: *agent-environment
       AFFILIATE_AGENT_ROLE: SUPPLY_REVIEWER
       AFFILIATE_AGENT_WORKER_ID: supply-reviewer-1
       AFFILIATE_AGENT_ROLE_CREDENTIAL: ${AFFILIATE_SUPPLY_REVIEWER_1_CREDENTIAL:?Set supply reviewer 1 credential}
@@ -55,6 +60,7 @@ services:
   supply-reviewer-2:
     <<: *agent-common
     environment:
+      <<: *agent-environment
       AFFILIATE_AGENT_ROLE: SUPPLY_REVIEWER
       AFFILIATE_AGENT_WORKER_ID: supply-reviewer-2
       AFFILIATE_AGENT_ROLE_CREDENTIAL: ${AFFILIATE_SUPPLY_REVIEWER_2_CREDENTIAL:?Set supply reviewer 2 credential}
@@ -63,6 +69,7 @@ services:
   coverage-planner:
     <<: *agent-common
     environment:
+      <<: *agent-environment
       AFFILIATE_AGENT_ROLE: COVERAGE_PLANNER
       AFFILIATE_AGENT_WORKER_ID: coverage-planner
       AFFILIATE_AGENT_ROLE_CREDENTIAL: ${AFFILIATE_COVERAGE_PLANNER_CREDENTIAL:?Set coverage planner credential}

@@ -2,6 +2,7 @@
 
 import {
   buildAffiliateCutoverPreflightReport,
+  isAffiliateCutoverPreflightReportIntact,
   buildAffiliateLegacyReconciliationReport,
   decideAffiliateCutoverRollback,
   inspectAffiliateAgentContainer,
@@ -177,6 +178,16 @@ describe('affiliate fleet cutover contracts', () => {
     ]));
   });
 
+  it('binds preflight readiness to the reviewed contract snapshot', () => {
+    const report = buildAffiliateCutoverPreflightReport(preflightInput({ observed: contractSnapshot }));
+
+    expect(isAffiliateCutoverPreflightReportIntact(report)).toBe(true);
+    expect(isAffiliateCutoverPreflightReportIntact({
+      ...report,
+      supplyContractHash: 'f'.repeat(64),
+    })).toBe(false);
+  });
+
   it('rejects agent container credentials and production network access', () => {
     const inspection = inspectAffiliateAgentContainer({
       id: 'agent-1',
@@ -199,6 +210,24 @@ describe('affiliate fleet cutover contracts', () => {
       'PRODUCTION_NETWORK_ACCESS',
       'CONTAINER_PRIVILEGE',
     ]));
+  });
+  it('accepts the governed no-new-privileges security option', () => {
+    const inspection = inspectAffiliateAgentContainer({
+      id: 'agent-safe',
+      name: 'mapping-1',
+      user: '1001:1001',
+      readonlyRootFilesystem: true,
+      environment: [
+        'AFFILIATE_AGENT_GATEWAY_ADDRESS=http://gateway:8080',
+        'AFFILIATE_AGENT_MODEL_ADDRESS=http://model:8080',
+      ],
+      networks: ['affiliate_gateway_internal'],
+      capDrop: ['ALL'],
+      securityOptions: ['no-new-privileges:true'],
+    });
+
+    expect(inspection.isSafe).toBe(true);
+    expect(inspection.findings).toEqual([]);
   });
 
   it('permits binary rollback before governed writes and forces forward-only recovery after one receipt', () => {

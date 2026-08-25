@@ -53,6 +53,8 @@ import {
 } from './affiliateSupplyLifecycle';
 import {
   buildAffiliateLegacyReconciliationReport,
+  isAffiliateCutoverPreflightReportIntact,
+  type AffiliateCutoverPreflightReport,
   type AffiliateLegacyClaimEvidence,
   type AffiliateLegacyLineageRecord,
   type AffiliateLegacyRecordKind,
@@ -4040,11 +4042,7 @@ export type AffiliateLegacySupplyReconciliationInput = Readonly<{
   expectedCounts?: AffiliateLegacyReconciliationReport['counts'] | null;
   expectedCountsHash?: string | null;
   applyNonce?: string | null;
-  preflight?: Readonly<{
-    isReady: boolean;
-    deploymentContractVersion?: number | null;
-    deploymentContractHash?: string | null;
-  }> | null;
+  preflight?: AffiliateCutoverPreflightReport | null;
 }>;
 
 export const reconcileLegacyAffiliateSupply = async (
@@ -4069,6 +4067,10 @@ export const reconcileLegacyAffiliateSupply = async (
   const gatewayClaimRows = await readAffiliateLegacyRows(database.gatewayClaims);
   const rootRows = await readAffiliateLegacyRows(database.supplySources);
   const targetRows = await readAffiliateLegacyRows(database.targets);
+  const organizationRows = await readAffiliateLegacyRows(database.organizations);
+  const eventRows = await readAffiliateLegacyRows(database.events);
+  const teamRows = await readAffiliateLegacyRows(database.teams);
+  const facilityRows = await readAffiliateLegacyRows(database.facilities);
 
   const intakeSourceIds = new Map<string, string>();
   for (const intake of intakeRows) {
@@ -4115,6 +4117,62 @@ export const reconcileLegacyAffiliateSupply = async (
     derivedStage: affiliateLegacyRowString(root, 'derivedStage'),
     isAutomationEnabled: root.isAutomationEnabled === true,
   }));
+  const publicEntitySourceIds = new Map<string, string>();
+  const mapPublicEntitySource = (targetType: string, targetId: string | null, sourceId: string | null): void => {
+    if (!targetId || !sourceId) return;
+    const key = `${targetType}:${targetId}`;
+    const existingSourceId = publicEntitySourceIds.get(key);
+    if (!existingSourceId || sourceId < existingSourceId) {
+      publicEntitySourceIds.set(key, sourceId);
+    }
+  };
+  for (const source of sourceRows) {
+    mapPublicEntitySource(
+      'ORGANIZATION',
+      affiliateLegacyRowString(source, 'organizationId'),
+      source.id,
+    );
+  }
+  for (const intake of intakeRows) {
+    mapPublicEntitySource(
+      'ORGANIZATION',
+      affiliateLegacyRowString(intake, 'organizationId'),
+      affiliateLegacyRowString(intake, 'affiliateSourceId', 'sourceId') ?? `intake:${intake.id}`,
+    );
+  }
+  for (const facility of facilityRows) {
+    const organizationId = affiliateLegacyRowString(facility, 'organizationId');
+    mapPublicEntitySource(
+      'FACILITY',
+      facility.id,
+      organizationId ? publicEntitySourceIds.get(`ORGANIZATION:${organizationId}`) ?? null : null,
+    );
+  }
+  for (const result of discoveryResultRows) {
+    const sourceId = affiliateLegacyRowString(result, 'matchingSourceId')
+      ?? intakeSourceIds.get(affiliateLegacyRowString(result, 'matchingIntakeId') ?? '')
+      ?? null;
+    mapPublicEntitySource(
+      'ORGANIZATION',
+      affiliateLegacyRowString(result, 'matchingOrganizationId'),
+      sourceId,
+    );
+  }
+  for (const candidate of candidateRows) {
+    const targetType = affiliateLegacyTargetTypeForListing(candidate.listingKind);
+    if (!targetType) continue;
+    const publishedIdFields: Record<string, string> = {
+      EVENT: 'publishedEventId',
+      TEAM: 'publishedTeamId',
+      FACILITY: 'publishedFacilityId',
+      ORGANIZATION: 'publishedOrganizationId',
+    };
+    mapPublicEntitySource(
+      targetType,
+      affiliateLegacyRowString(candidate, publishedIdFields[targetType]),
+      affiliateLegacyRowString(candidate, 'sourceId'),
+    );
+  }
 
   const records: AffiliateLegacyLineageRecord[] = [];
   const addRecord = (
@@ -4156,6 +4214,27 @@ export const reconcileLegacyAffiliateSupply = async (
     );
   }
   for (const candidate of candidateRows) addRecord('CANDIDATE', candidate);
+  const addCanonicalPublicRecord = (
+    kind: Extract<AffiliateLegacyRecordKind, 'ORGANIZATION' | 'EVENT' | 'TEAM' | 'FACILITY'>,
+    targetType: string,
+    row: AffiliateLegacyReconciliationRowData,
+  ): void => {
+    const sourceId = affiliateLegacyRowString(row, 'sourceId')
+      ?? publicEntitySourceIds.get(`${targetType}:${row.id}`)
+      ?? null;
+    const supplySourceId = affiliateLegacyRowString(row, 'supplySourceId');
+    const isAffiliateEntity = String(row.originType ?? '').trim().toUpperCase() === 'AFFILIATE_IMPORTED'
+      || String(row.sourceType ?? '').trim().toUpperCase().includes('AFFILIATE')
+      || Boolean(stringValue(row.affiliateUrl));
+    if (!sourceId && !supplySourceId && !isAffiliateEntity) return;
+    addRecord(kind, row, sourceId, supplySourceId);
+  };
+  for (const organization of organizationRows) {
+    addCanonicalPublicRecord('ORGANIZATION', 'ORGANIZATION', organization);
+  }
+  for (const event of eventRows) addCanonicalPublicRecord('EVENT', 'EVENT', event);
+  for (const team of teamRows) addCanonicalPublicRecord('TEAM', 'TEAM', team);
+  for (const facility of facilityRows) addCanonicalPublicRecord('FACILITY', 'FACILITY', facility);
 
   const targets: AffiliateLegacyTargetEvidence[] = targetRows.map((target) => ({
     id: target.id,
@@ -4172,9 +4251,42 @@ export const reconcileLegacyAffiliateSupply = async (
       String(target.status ?? '').toUpperCase(),
     ),
   }));
+  const publicTargetKey = (targetType: unknown, targetId: unknown): string => (
+    `${affiliateLegacyTargetTypeForListing(targetType) ?? String(targetType ?? '').trim().toUpperCase()}:${String(targetId ?? '')}`
+  );
   const existingTargetKeys = new Set(targets.map((target) => (
-    `${target.candidateId ?? ''}:${String(target.targetType).toUpperCase()}:${target.targetId ?? ''}`
+    publicTargetKey(target.targetType, target.targetId)
   )));
+  const addCanonicalPublicTarget = (
+    targetType: string,
+    row: AffiliateLegacyReconciliationRowData,
+  ): void => {
+    const sourceId = affiliateLegacyRowString(row, 'sourceId')
+      ?? publicEntitySourceIds.get(`${targetType}:${row.id}`)
+      ?? null;
+    if (!sourceId) return;
+    const key = publicTargetKey(targetType, row.id);
+    if (existingTargetKeys.has(key)) return;
+    targets.push({
+      id: `canonical-public:${targetType}:${row.id}`,
+      sourceId,
+      candidateId: null,
+      targetType,
+      targetId: row.id,
+      status: 'OBSERVED',
+      evidenceRefs: [
+        `canonical:${targetType}:${row.id}`,
+        `source:${sourceId}`,
+        `public-target:${targetType}:${row.id}`,
+      ],
+      isEvidenceVerifiable: false,
+    });
+    existingTargetKeys.add(key);
+  };
+  for (const organization of organizationRows) addCanonicalPublicTarget('ORGANIZATION', organization);
+  for (const event of eventRows) addCanonicalPublicTarget('EVENT', event);
+  for (const team of teamRows) addCanonicalPublicTarget('TEAM', team);
+  for (const facility of facilityRows) addCanonicalPublicTarget('FACILITY', facility);
   for (const candidate of candidateRows) {
     const sourceId = affiliateLegacyRowString(candidate, 'sourceId');
     const listingTargetType = affiliateLegacyTargetTypeForListing(candidate.listingKind);
@@ -4187,7 +4299,7 @@ export const reconcileLegacyAffiliateSupply = async (
     };
     const targetId = affiliateLegacyRowString(candidate, publishedIdFields[listingTargetType]);
     if (!targetId) continue;
-    const key = `${candidate.id}:${listingTargetType}:${targetId}`;
+    const key = publicTargetKey(listingTargetType, targetId);
     if (existingTargetKeys.has(key)) continue;
     targets.push({
       id: `candidate-public:${candidate.id}:${listingTargetType}:${targetId}`,
@@ -4202,6 +4314,7 @@ export const reconcileLegacyAffiliateSupply = async (
       ],
       isEvidenceVerifiable: false,
     });
+    existingTargetKeys.add(key);
   }
 
   const claims: AffiliateLegacyClaimEvidence[] = [];
@@ -4264,6 +4377,26 @@ export const reconcileLegacyAffiliateSupply = async (
     targets,
     claims,
   });
+  const contract = mode === 'APPLY'
+    ? await loadActiveAffiliateSupplyContract({
+        rolloutCohort: input.rolloutCohort,
+        db: database,
+      })
+    : null;
+  const rolloutCohort = input.rolloutCohort ?? contract?.policy.rolloutCohort ?? 'DEFAULT';
+  if (mode === 'APPLY') {
+    const preflight = input.preflight;
+    if (
+      !contract
+      || !preflight
+      || !isAffiliateCutoverPreflightReportIntact(preflight)
+      || preflight.isReady !== true
+      || preflight.supplyContractVersion !== contract.policy.version
+      || preflight.supplyContractHash !== contract.policy.hash
+    ) {
+      throw new Error('Legacy Affiliate Supply reconciliation requires a verified preflight for the active Supply Contract.');
+    }
+  }
   if (mode === 'APPLY' && input.expectedReportHash) {
     const replayReport = await readAppliedAffiliateLegacyReconciliationReport(
       database,
@@ -4298,13 +4431,6 @@ export const reconcileLegacyAffiliateSupply = async (
       });
     }
   }
-  const contract = mode === 'APPLY'
-    ? await loadActiveAffiliateSupplyContract({
-        rolloutCohort: input.rolloutCohort,
-        db: database,
-      })
-    : null;
-  const rolloutCohort = input.rolloutCohort ?? contract?.policy.rolloutCohort ?? 'DEFAULT';
 
   if (mode === 'DRY_RUN') {
     await persistAffiliateLegacyReconciliationRun({
@@ -4340,14 +4466,8 @@ export const reconcileLegacyAffiliateSupply = async (
     if (input.expectedCounts && hashAffiliateAgentValue(input.expectedCounts) !== hashAffiliateAgentValue(report.counts)) {
       throw new Error('Legacy Affiliate Supply reconciliation counts do not match the reviewed selection.');
     }
-    if (!input.preflight || input.preflight.isReady !== true) {
-      throw new Error('Legacy Affiliate Supply reconciliation requires a ready cutover preflight.');
-    }
-    if (!report.isApplySafe) {
-      throw new Error(`Legacy Affiliate Supply reconciliation is blocked: ${report.blockingFindings.map((finding) => finding.code).join(', ')}`);
-    }
-    if (!contract) throw new Error('Legacy Affiliate Supply reconciliation requires an active Supply Contract.');
 
+    if (!contract) throw new Error('Legacy Affiliate Supply reconciliation requires an active Supply Contract.');
     await withSupplyTransaction(database, async (transactionDatabase) => {
       const atomicDatabase = {
         ...transactionDatabase,

@@ -3,7 +3,10 @@ import dotenv from 'dotenv';
 import { affiliateSupplyDatabase, reconcileLegacyAffiliateSupply } from '../src/server/affiliateImports/affiliateSupplyPersistence';
 import { hashAffiliateAgentValue } from '../src/server/affiliateImports/agentGatewayContracts';
 import { prisma } from '../src/lib/prisma';
-import type { AffiliateCutoverPreflightReport } from '../src/server/affiliateImports/affiliateFleetCutover';
+import {
+  isAffiliateCutoverPreflightReportIntact,
+  type AffiliateCutoverPreflightReport,
+} from '../src/server/affiliateImports/affiliateFleetCutover';
 
 dotenv.config({ quiet: true });
 dotenv.config({ path: '.env.local', override: false, quiet: true });
@@ -16,30 +19,48 @@ const option = (name: string): string | undefined => {
 
 const hasFlag = (name: string): boolean => process.argv.includes(`--${name}`);
 
-const readPreflight = async (): Promise<Pick<AffiliateCutoverPreflightReport, 'isReady'> & Partial<Pick<AffiliateCutoverPreflightReport, 'deploymentContractVersion' | 'deploymentContractHash'>> | undefined> => {
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+);
+
+type ReconciliationPreflight = AffiliateCutoverPreflightReport;
+
+const readPreflight = async (): Promise<ReconciliationPreflight | undefined> => {
   const path = option('preflight');
   if (!path) return undefined;
   const parsed: unknown = JSON.parse(await readFile(path, 'utf8'));
-  if (!parsed || typeof parsed !== 'object' || !('isReady' in parsed) || typeof parsed.isReady !== 'boolean') {
-    throw new Error('The preflight file must contain an isReady boolean.');
+  if (!isRecord(parsed)) {
+    throw new Error('The preflight file must contain a report object.');
   }
-  const record = parsed as Record<string, unknown>;
-  const report = record.report && typeof record.report === 'object' && !Array.isArray(record.report)
-    ? record.report as Record<string, unknown>
-    : {};
-  const deploymentContractVersion = record.deploymentContractVersion ?? report.deploymentContractVersion;
-  const deploymentContractHash = record.deploymentContractHash ?? report.deploymentContractHash;
-  if (deploymentContractVersion !== undefined && typeof deploymentContractVersion !== 'number') {
-    throw new Error('The preflight deployment contract version must be a number.');
+  if (parsed.report !== undefined && !isRecord(parsed.report)) {
+    throw new Error('The preflight report field must be an object.');
   }
-  if (deploymentContractHash !== undefined && typeof deploymentContractHash !== 'string') {
-    throw new Error('The preflight deployment contract hash must be a string.');
+  const candidate = (parsed.report as Record<string, unknown> | undefined) ?? parsed;
+  const requiredArrays = ['blockingFindings', 'warnings', 'resolutions'];
+  if (
+    candidate.schemaVersion !== 1
+    || typeof candidate.evaluatedAt !== 'string'
+    || typeof candidate.isReady !== 'boolean'
+    || typeof candidate.inputHash !== 'string'
+    || typeof candidate.reportHash !== 'string'
+    || !Number.isInteger(candidate.supplyContractVersion)
+    || typeof candidate.supplyContractHash !== 'string'
+    || !Number.isInteger(candidate.deploymentContractVersion)
+    || typeof candidate.deploymentContractHash !== 'string'
+    || !Number.isInteger(candidate.gatewayVersion)
+    || !isRecord(candidate.counts)
+    || requiredArrays.some((key) => !Array.isArray(candidate[key]))
+  ) {
+    throw new Error('The preflight file must contain a complete preflight report.');
   }
-  return {
-    isReady: parsed.isReady,
-    deploymentContractVersion: deploymentContractVersion as number | undefined,
-    deploymentContractHash: deploymentContractHash as string | undefined,
-  };
+  if (parsed.report !== undefined && parsed.isReady !== undefined && parsed.isReady !== candidate.isReady) {
+    throw new Error('The preflight wrapper and report readiness values must match.');
+  }
+  const report = candidate as unknown as AffiliateCutoverPreflightReport;
+  if (!isAffiliateCutoverPreflightReportIntact(report)) {
+    throw new Error('The preflight report hash is invalid.');
+  }
+  return report;
 };
 
 const main = async (): Promise<void> => {
