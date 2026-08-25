@@ -32,7 +32,7 @@ import { isStripeConnectMfaRequiredError, paymentService } from '@/lib/paymentSe
 import { userService } from '@/lib/userService';
 import { apiRequest, isApiRequestError } from '@/lib/apiClient';
 import { productService } from '@/lib/productService';
-import { signedDocumentService } from '@/lib/signedDocumentService';
+import { signedDocumentService, type DocumentAuditTrail } from '@/lib/signedDocumentService';
 import { formatDocumentScopeLabel } from '@/lib/profileDocumentService';
 import { boldsignService } from '@/lib/boldsignService';
 import PaymentModal from '@/components/ui/PaymentModal';
@@ -251,7 +251,6 @@ type OrganizationUserDocumentSummary = {
   status?: string;
   signedAt?: string;
   historicalSigningDate?: string;
-  importedAt?: string;
   scopeType?: string;
   scopeId?: string;
   viewUrl?: string;
@@ -272,21 +271,10 @@ type OrganizationUserDocumentApiRow = {
   status?: string | null;
   signedAt?: string | null;
   historicalSigningDate?: string | null;
-  importedAt?: string | null;
   scopeType?: string | null;
   scopeId?: string | null;
   viewUrl?: string | null;
   content?: string | null;
-};
-type OrganizationDocumentAuditEvent = {
-  id: string;
-  createdAt: string;
-  eventType: string;
-  actorUserId?: string | null;
-  actorDisplayName?: string | null;
-  reason?: string | null;
-  note?: string | null;
-  payload?: unknown;
 };
 
 type OrganizationTeamMembershipSummary = {
@@ -460,7 +448,6 @@ const mapOrganizationUserDocumentSummary = (
   historicalSigningDate: typeof documentRow?.historicalSigningDate === 'string'
     ? documentRow.historicalSigningDate
     : undefined,
-  importedAt: typeof documentRow?.importedAt === 'string' ? documentRow.importedAt : undefined,
   scopeType: typeof documentRow?.scopeType === 'string' ? documentRow.scopeType : undefined,
   scopeId: typeof documentRow?.scopeId === 'string' ? documentRow.scopeId : undefined,
   viewUrl: typeof documentRow?.viewUrl === 'string' ? documentRow.viewUrl : undefined,
@@ -883,7 +870,7 @@ function OrganizationDetailContent() {
   const canManageTemplates = viewerHasPermission(ORG_PERMISSIONS.TEMPLATES_MANAGE);
   const canImportDocuments = viewerHasPermission(ORG_PERMISSIONS.DOCUMENTS_IMPORT);
   const canVoidDocuments = viewerHasPermission(ORG_PERMISSIONS.DOCUMENTS_VOID);
-  const canViewDocumentAudit = viewerHasPermission(ORG_PERMISSIONS.DOCUMENTS_AUDIT_VIEW);
+  const canViewDocumentAudit = viewerPermissions.includes(ORG_PERMISSIONS.DOCUMENTS_AUDIT_VIEW);
   const canViewImportedDocuments = IMPORTED_DOCUMENT_VIEW_PERMISSIONS.some(viewerHasPermission);
   const canManagePublicPage = viewerHasPermission(ORG_PERMISSIONS.ORGANIZATION_MANAGE);
   const isOwner = Boolean(
@@ -1268,7 +1255,7 @@ function OrganizationDetailContent() {
   const [customerDocumentVoidNote, setCustomerDocumentVoidNote] = useState('');
   const [isVoidingCustomerDocument, setIsVoidingCustomerDocument] = useState(false);
   const [customerDocumentAuditTarget, setCustomerDocumentAuditTarget] = useState<OrganizationUserDocumentSummary | null>(null);
-  const [customerDocumentAuditEvents, setCustomerDocumentAuditEvents] = useState<OrganizationDocumentAuditEvent[]>([]);
+  const [customerDocumentAuditTrail, setCustomerDocumentAuditTrail] = useState<DocumentAuditTrail | null>(null);
   const [isLoadingCustomerDocumentAudit, setIsLoadingCustomerDocumentAudit] = useState(false);
   const [previewSignedTextDocument, setPreviewSignedTextDocument] = useState<OrganizationUserDocumentSummary | null>(null);
   const [customerBillModalOpen, setCustomerBillModalOpen] = useState(false);
@@ -3322,19 +3309,19 @@ function OrganizationDetailContent() {
       return;
     }
     setCustomerDocumentAuditTarget(document);
-    setCustomerDocumentAuditEvents([]);
+    setCustomerDocumentAuditTrail(null);
     setIsLoadingCustomerDocumentAudit(true);
     try {
-      const events = await signedDocumentService.getDocumentAuditHistory(
+      const auditTrail = await signedDocumentService.getDocumentAuditTrail(
         org.$id,
         document.signedDocumentRecordId,
       );
-      setCustomerDocumentAuditEvents(events);
+      setCustomerDocumentAuditTrail(auditTrail);
     } catch (error) {
       setCustomerDocumentAuditTarget(null);
       notifications.show({
         color: 'red',
-        message: error instanceof Error ? error.message : 'Failed to load document audit history.',
+        message: error instanceof Error ? error.message : 'Failed to load document audit trail.',
       });
     } finally {
       setIsLoadingCustomerDocumentAudit(false);
@@ -4159,7 +4146,7 @@ function OrganizationDetailContent() {
             {(
               canViewDocumentPdf
               || (documentSummary.provenance === 'IMPORTED' && canVoidDocuments)
-              || canViewDocumentAudit
+              || (documentSummary.provenance === 'IMPORTED' && canViewDocumentAudit)
             ) && (
               <Group gap={6} mt={4}>
                 {canViewDocumentPdf && documentSummary.viewUrl && (
@@ -4190,7 +4177,7 @@ function OrganizationDetailContent() {
                     Void
                   </Button>
                 )}
-                {canViewDocumentAudit && (
+                {documentSummary.provenance === 'IMPORTED' && canViewDocumentAudit && (
                   <Button
                     size="compact-xs"
                     variant="subtle"
@@ -4200,7 +4187,7 @@ function OrganizationDetailContent() {
                     }}
                     onKeyDown={(event) => event.stopPropagation()}
                   >
-                    Audit history
+                    Audit trail
                   </Button>
                 )}
               </Group>
@@ -5585,7 +5572,7 @@ function OrganizationDetailContent() {
         {customerDocumentToVoid ? (
           <Stack gap="sm">
             <Text size="sm" c="dimmed">
-              Voiding removes this evidence from requirement completion. It keeps the document and its audit history.
+              Voiding removes this evidence from requirement completion. It keeps the document and its audit trail.
             </Text>
             <PasswordInput
               label="Confirm your password"
@@ -5657,51 +5644,106 @@ function OrganizationDetailContent() {
         onClose={() => {
           if (!isLoadingCustomerDocumentAudit) {
             setCustomerDocumentAuditTarget(null);
-            setCustomerDocumentAuditEvents([]);
+            setCustomerDocumentAuditTrail(null);
           }
         }}
         centered
         size="lg"
         title={customerDocumentAuditTarget
-          ? `Audit history: ${customerDocumentAuditTarget.title}`
-          : 'Document audit history'}
+          ? `Audit trail: ${customerDocumentAuditTarget.title}`
+          : 'Document audit trail'}
       >
         {isLoadingCustomerDocumentAudit ? (
           <Group justify="center" py="xl">
             <Loader size="sm" />
-            <Text size="sm" c="dimmed">Loading audit history...</Text>
+            <Text size="sm" c="dimmed">Loading audit trail...</Text>
           </Group>
-        ) : customerDocumentAuditEvents.length > 0 ? (
-          <Stack gap="sm">
-            {customerDocumentAuditEvents.map((event) => (
-              <Paper key={event.id} withBorder p="sm" radius="md">
-                <Stack gap={4}>
-                  <Group justify="space-between" align="flex-start" wrap="wrap">
-                    <Badge size="sm" variant="light">{event.eventType}</Badge>
-                    <Text size="xs" c="dimmed">{formatSummaryDateTime(event.createdAt)}</Text>
-                  </Group>
-                  {event.actorUserId && (
-                    <Text size="xs" c="dimmed">
-                      Actor: {event.actorDisplayName || 'Former user'}
-                    </Text>
-                  )}
-                  {event.reason && <Text size="sm">Reason: {event.reason}</Text>}
-                  {event.note && <Text size="sm">Note: {event.note}</Text>}
-                  {event.payload !== undefined && event.payload !== null && (
-                    <Text
-                      size="xs"
-                      component="pre"
-                      style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
-                    >
-                      {JSON.stringify(event.payload, null, 2)}
-                    </Text>
-                  )}
-                </Stack>
-              </Paper>
-            ))}
+        ) : customerDocumentAuditTrail ? (
+          <Stack gap="md">
+            <Text size="sm" c="dimmed">
+              {customerDocumentAuditTrail.description}
+            </Text>
+            <Paper withBorder p="sm" radius="md">
+              <Stack gap={4}>
+                <Text fw={600}>Imported evidence</Text>
+                <Text size="sm">Document: {customerDocumentAuditTrail.evidence.documentName}</Text>
+                <Text size="sm">Provenance: {customerDocumentAuditTrail.evidence.provenance}</Text>
+                <Text size="sm">Lifecycle status: {customerDocumentAuditTrail.evidence.status || 'Unknown'}</Text>
+                <Text size="sm">
+                  Historical signing date:{' '}
+                  {customerDocumentAuditTrail.evidence.historicalSigningDate
+                    ? formatSummaryDateTime(customerDocumentAuditTrail.evidence.historicalSigningDate)
+                    : 'Signing date unknown'}
+                </Text>
+                <Text size="sm">
+                  Imported: {formatSummaryDateTime(customerDocumentAuditTrail.evidence.importedAt ?? undefined)}
+                </Text>
+                <Text size="sm">
+                  Uploader:{' '}
+                  {customerDocumentAuditTrail.evidence.uploader?.displayName || 'Former user'}
+                </Text>
+                <Text size="sm">
+                  Attestation version: {customerDocumentAuditTrail.evidence.attestationVersion || 'Not recorded'}
+                </Text>
+                <Text size="sm">
+                  Content identity: {customerDocumentAuditTrail.evidence.contentHash || 'Not recorded'}
+                </Text>
+                {customerDocumentAuditTrail.evidence.attestationText ? (
+                  <Text
+                    size="sm"
+                    component="pre"
+                    style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
+                  >
+                    Attestation: {customerDocumentAuditTrail.evidence.attestationText}
+                  </Text>
+                ) : null}
+                {customerDocumentAuditTrail.evidence.sourceNote ? (
+                  <Text
+                    size="sm"
+                    component="pre"
+                    style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
+                  >
+                    Source note: {customerDocumentAuditTrail.evidence.sourceNote}
+                  </Text>
+                ) : null}
+              </Stack>
+            </Paper>
+            <Text fw={600}>Audit trail events</Text>
+            {customerDocumentAuditTrail.events.length > 0 ? (
+              <Stack gap="sm">
+                {customerDocumentAuditTrail.events.map((event) => (
+                  <Paper key={event.id} withBorder p="sm" radius="md">
+                    <Stack gap={4}>
+                      <Group justify="space-between" align="flex-start" wrap="wrap">
+                        <Badge size="sm" variant="light">{event.eventType}</Badge>
+                        <Text size="xs" c="dimmed">{formatSummaryDateTime(event.createdAt ?? undefined)}</Text>
+                      </Group>
+                      {event.actorUserId && (
+                        <Text size="xs" c="dimmed">
+                          Actor: {event.actorDisplayName || 'Former user'}
+                        </Text>
+                      )}
+                      {event.reason && <Text size="sm">Reason: {event.reason}</Text>}
+                      {event.note && <Text size="sm">Note: {event.note}</Text>}
+                      {event.payload !== undefined && event.payload !== null && (
+                        <Text
+                          size="xs"
+                          component="pre"
+                          style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
+                        >
+                          {JSON.stringify(event.payload, null, 2)}
+                        </Text>
+                      )}
+                    </Stack>
+                  </Paper>
+                ))}
+              </Stack>
+            ) : (
+              <Text size="sm" c="dimmed">No audit events found.</Text>
+            )}
           </Stack>
         ) : (
-          <Text size="sm" c="dimmed">No audit events found.</Text>
+          <Text size="sm" c="dimmed">No audit trail found.</Text>
         )}
       </Modal>
       <Modal

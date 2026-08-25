@@ -3317,9 +3317,9 @@ class BillingRepositoryHttpTest {
                           "viewUrl": "/api/documents/signed/voided_1/file",
                           "sourceNote": "private migration note",
                           "attestationText": "private attestation",
-                          "uploaderUserId": "private_uploader",
-                          "contentIdentity": "private-content-hash",
-                          "auditEvents": [{"action": "IMPORTED"}]
+                          "uploaderId": "private_uploader",
+                          "contentHash": "private-content-hash",
+                          "auditTrail": {"events": [{"eventType": "IMPORTED"}]}
                         }
                       ]
                     }
@@ -3366,6 +3366,11 @@ class BillingRepositoryHttpTest {
         assertEquals(ProfileDocumentType.PDF, voided.type)
         assertEquals(null, voided.content)
         assertEquals(null, voided.statusNote)
+        assertFalse(voided.toString().contains("private migration note"))
+        assertFalse(voided.toString().contains("private attestation"))
+        assertFalse(voided.toString().contains("private_uploader"))
+        assertFalse(voided.toString().contains("private-content-hash"))
+        assertFalse(voided.toString().contains("auditTrail"))
         assertEquals(3, db.profileDocumentDao.storedDocuments.size)
         assertTrue(db.profileDocumentDao.storedDocuments.all { entry -> entry.viewerKey == "server_user" })
         val cachedVoided = db.profileDocumentDao.storedDocuments.first { entry -> entry.id == "voided_1" }
@@ -3467,9 +3472,9 @@ class BillingRepositoryHttpTest {
                         "viewUrl": "/api/documents/signed/guardian_imported/file",
                         "sourceNote": "private migration note",
                         "attestationText": "private attestation",
-                        "uploaderUserId": "private_uploader",
-                        "contentIdentity": "private-content-hash",
-                        "auditEvents": [{"action": "IMPORTED"}]
+                        "uploaderId": "private_uploader",
+                        "contentHash": "private-content-hash",
+                        "auditTrail": {"events": [{"eventType": "IMPORTED"}]}
                       }],
                       "voided": []
                     }

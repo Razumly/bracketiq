@@ -99,7 +99,6 @@ type DocumentSummary = {
   status?: string;
   signedAt?: string;
   historicalSigningDate?: string;
-  importedAt?: string;
   scopeType?: string;
   scopeId?: string;
   viewUrl?: string;
@@ -850,7 +849,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         provenance: true,
         importedFileId: true,
         historicalSigningDate: true,
-        importedAt: true,
         scopeType: true,
         scopeId: true,
       },
@@ -1385,7 +1383,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         ? document.historicalSigningDate?.toISOString()
         : document.signedAt ?? document.createdAt?.toISOString() ?? undefined,
       historicalSigningDate: document.historicalSigningDate?.toISOString(),
-      importedAt: document.importedAt?.toISOString(),
       scopeType: document.scopeType ?? undefined,
       scopeId: document.scopeId ?? undefined,
       viewUrl: type === 'PDF' ? `/api/documents/signed/${document.id}/file` : undefined,

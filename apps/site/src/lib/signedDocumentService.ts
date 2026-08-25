@@ -10,13 +10,34 @@ type ImportedSignedDocumentResponse = {
 
 export type DocumentAuditEvent = {
   id: string;
-  createdAt: string;
+  createdAt: string | null;
   eventType: string;
   actorUserId?: string | null;
   actorDisplayName?: string | null;
   reason?: string | null;
   note?: string | null;
   payload?: unknown;
+};
+
+export type DocumentAuditTrail = {
+  description: string;
+  evidence: {
+    id: string;
+    documentName: string;
+    provenance: 'IMPORTED';
+    status?: string | null;
+    historicalSigningDate?: string | null;
+    importedAt?: string | null;
+    sourceNote?: string | null;
+    attestationText?: string | null;
+    attestationVersion?: string | null;
+    contentHash?: string | null;
+    uploader?: {
+      userId: string;
+      displayName?: string | null;
+    } | null;
+  };
+  events: DocumentAuditEvent[];
 };
 
 class SignedDocumentService {
@@ -79,20 +100,20 @@ class SignedDocumentService {
     return response;
   }
 
-  async getDocumentAuditHistory(
+  async getDocumentAuditTrail(
     organizationId: string,
     signedDocumentId: string,
-  ): Promise<DocumentAuditEvent[]> {
-    const response = await apiRequest<{ auditEvents: DocumentAuditEvent[]; error?: string }>(
+  ): Promise<DocumentAuditTrail> {
+    const response = await apiRequest<{ auditTrail?: DocumentAuditTrail; error?: string }>(
       `/api/organizations/${encodeURIComponent(organizationId)}/documents/${encodeURIComponent(signedDocumentId)}/audit`,
     );
     if (response?.error) {
       throw new Error(response.error);
     }
-    if (!Array.isArray(response?.auditEvents)) {
+    if (!response?.auditTrail || !Array.isArray(response.auditTrail.events)) {
       throw new Error('Invalid document audit response.');
     }
-    return response.auditEvents;
+    return response.auditTrail;
   }
 
   async getSignedDocument(

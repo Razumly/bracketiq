@@ -136,7 +136,7 @@ export const ORGANIZATION_PERMISSION_OPTIONS: OrganizationPermissionOption[] = [
   },
   {
     value: ORG_PERMISSIONS.DOCUMENTS_AUDIT_VIEW,
-    label: 'View document audit history',
+    label: 'View document audit trail',
     description: 'View private import and void audit details.',
   },
   {

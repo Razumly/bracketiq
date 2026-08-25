@@ -393,6 +393,12 @@ describe('GET /api/organizations/[id]/users', () => {
         status: 'SIGNED',
         provenance: 'IMPORTED',
         importedFileId: 'file_1',
+        importedAt: new Date('2026-02-01T01:00:00.000Z'),
+        sourceNote: 'Private migration note',
+        attestationText: 'Private attestation',
+        attestationVersion: 'private-version',
+        uploaderId: 'private-uploader',
+        contentHash: 'private-content-hash',
         historicalSigningDate: null,
         createdAt: new Date('2026-02-01T00:00:00.000Z'),
       },
@@ -427,7 +433,12 @@ describe('GET /api/organizations/[id]/users', () => {
     ]));
     expect(payload.users[0].documents[0]).not.toHaveProperty('sourceNote');
     expect(payload.users[0].documents[0]).not.toHaveProperty('attestationText');
-    expect(payload.users[0].documents[0]).not.toHaveProperty('auditEvents');
+    expect(payload.users[0].documents[0]).not.toHaveProperty('auditTrail');
+    expect(payload.users[0].documents[0]).not.toHaveProperty('attestationVersion');
+    expect(payload.users[0].documents[0]).not.toHaveProperty('uploaderId');
+    expect(payload.users[0].documents[0]).not.toHaveProperty('importedFileId');
+    expect(payload.users[0].documents[0]).not.toHaveProperty('contentHash');
+    expect(payload.users[0].documents[0]).not.toHaveProperty('importedAt');
   });
 
   it('includes users from teams registered for organization events', async () => {

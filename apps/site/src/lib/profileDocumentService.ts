@@ -33,7 +33,6 @@ export type ProfileDocumentCard = {
   scopeType?: string;
   scopeId?: string;
   historicalSigningDate?: string;
-  importedAt?: string;
   requiredSignerType: string;
   requiredSignerLabel: string;
   signerContext: SignerContext;

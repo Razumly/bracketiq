@@ -65,6 +65,9 @@ test("imports, previews, voids, and preserves a signed customer PDF", async ({
     mimeType: "application/pdf",
     buffer: Buffer.from(pdfBytes),
   });
+  await importDialog
+    .getByLabel("Private source note (optional)")
+    .fill("browser-private-source-note");
 
   const attestation = importDialog.getByRole("checkbox", { name: "Document Import Attestation" });
   await expect(attestation).toBeEnabled();
@@ -88,6 +91,20 @@ test("imports, previews, voids, and preserves a signed customer PDF", async ({
   await expect(documentCard.getByText("Version 1", { exact: true })).toBeVisible();
   await expect(documentCard.getByText("SIGNED", { exact: true })).toBeVisible();
   await expect(documentCard.getByText("Signing date unknown", { exact: true })).toBeVisible();
+  const auditButton = documentCard.getByRole("button", { name: "Audit trail", exact: true });
+  await expect(auditButton).toBeVisible();
+  await auditButton.focus();
+  await page.keyboard.press("Enter");
+  const auditDialog = page.getByRole("dialog", {
+    name: new RegExp(`Audit trail: ${documentTitle}`),
+  });
+  await expect(auditDialog).toBeVisible();
+  await expect(
+    auditDialog.getByText("Source note: browser-private-source-note", { exact: true }),
+  ).toBeVisible();
+  await expect(auditDialog.getByText("Imported evidence", { exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(auditDialog).toBeHidden();
 
   const viewPdfButton = documentCard.getByRole("button", { name: "View PDF", exact: true });
   const fileResponsePromise = new Promise<{
@@ -137,14 +154,53 @@ test("imports, previews, voids, and preserves a signed customer PDF", async ({
   });
   const participantPage = await participantContext.newPage();
   try {
+    const subjectDocumentsResponse = await participantPage.request.get("/api/profile/documents");
+    expect(subjectDocumentsResponse.status()).toBe(200);
+    const subjectDocumentsBody = await subjectDocumentsResponse.text();
+    const subjectDocuments = JSON.parse(subjectDocumentsBody) as {
+      signed?: Array<{ title?: string; viewUrl?: string; [key: string]: unknown }>;
+      voided?: Array<{ title?: string; viewUrl?: string; [key: string]: unknown }>;
+      unsigned?: Array<{ title?: string; [key: string]: unknown }>;
+    };
+    const subjectDocument = [
+      ...(subjectDocuments.signed ?? []),
+      ...(subjectDocuments.voided ?? []),
+      ...(subjectDocuments.unsigned ?? []),
+    ].find((document) => document.title === documentTitle);
+    expect(subjectDocument).toBeDefined();
+    expect(subjectDocument?.viewUrl).toMatch(/\/api\/documents\/signed\/.+\/file$/);
+    if (!subjectDocument?.viewUrl) {
+      throw new Error("Subject document response did not include an authorized file URL.");
+    }
+    expect(subjectDocumentsBody).not.toContain("browser-private-source-note");
+    expect(subjectDocumentsBody).not.toContain(
+      "I confirm that this file is a complete signed document",
+    );
+    expect(subjectDocumentsBody).not.toContain("auditTrail");
+    expect(subjectDocumentsBody).not.toContain("attestationText");
+    expect(subjectDocumentsBody).not.toContain("contentHash");
+    expect(subjectDocument).not.toHaveProperty("sourceNote");
+    expect(subjectDocument).not.toHaveProperty("attestationText");
+    expect(subjectDocument).not.toHaveProperty("uploaderId");
+    expect(subjectDocument).not.toHaveProperty("contentHash");
+    expect(subjectDocument).not.toHaveProperty("auditTrail");
+
     await participantPage.goto(`${resolveBaseUrl()}/profile?tab=documents`, {
       waitUntil: "domcontentloaded",
     });
-    await expect(participantPage.getByText(documentTitle, { exact: true })).toBeVisible();
+    await participantPage.getByRole("button", { name: /Documents/ }).click();
+    await expect(participantPage.getByText(documentTitle, { exact: true })).toBeVisible({
+      timeout: 120_000,
+    });
     await expect(participantPage.getByText("Imported", { exact: true })).toBeVisible();
     await expect(
       participantPage.getByText("Signing date unknown", { exact: true }),
     ).toBeVisible();
+    const subjectPageText = await participantPage.locator("body").innerText();
+    expect(subjectPageText).not.toContain("browser-private-source-note");
+    expect(subjectPageText).not.toContain(
+      "I confirm that this file is a complete signed document",
+    );
 
     const participantDocumentCard = participantPage
       .getByText(documentTitle, { exact: true })
@@ -153,13 +209,39 @@ test("imports, previews, voids, and preserves a signed customer PDF", async ({
       "button",
       { name: "View document", exact: true },
     );
+    const subjectViewUrl = new URL(subjectDocument.viewUrl, resolveBaseUrl()).toString();
+    const subjectFileResponsePromise = new Promise<{
+      status: number;
+      contentType: string | undefined;
+      url: string;
+    }>((resolve) => {
+      const context = participantPage.context();
+      const responseListener = (response: Parameters<typeof context.on>[1]) => {
+        if (
+          response.url() === subjectViewUrl
+          && response.request().method() === "GET"
+        ) {
+          context.off("response", responseListener);
+          resolve({
+            status: response.status(),
+            contentType: response.headers()["content-type"],
+            url: response.url(),
+          });
+        }
+      };
+      context.on("response", responseListener);
+    });
     const subjectPopupPromise = participantPage.waitForEvent("popup");
     await subjectViewButton.focus();
     await participantPage.keyboard.press("Enter");
     const subjectPopup = await subjectPopupPromise;
-    await subjectPopup.waitForLoadState("domcontentloaded");
-    expect(subjectPopup.url()).toContain("/api/documents/signed/");
-    expect(subjectPopup.url()).toMatch(/\/file$/);
+    const subjectFileResponse = await subjectFileResponsePromise;
+    expect(subjectPopup).toBeTruthy();
+    await expect.poll(() => subjectPopup.url(), { timeout: 60_000 }).toBe(subjectViewUrl);
+    expect(subjectFileResponse.url).toBe(subjectPopup.url());
+    expect(subjectPopup.isClosed()).toBe(false);
+    expect(subjectFileResponse.status).toBe(200);
+    expect(subjectFileResponse.contentType).toContain("application/pdf");
     const subjectFile = await participantPage.request.get(subjectPopup.url());
     expect(subjectFile.status()).toBe(200);
     expect(subjectFile.headers()["content-type"]).toContain("application/pdf");
@@ -167,8 +249,9 @@ test("imports, previews, voids, and preserves a signed customer PDF", async ({
     await participantPage.goto(`${resolveBaseUrl()}/profile?tab=notifications`, {
       waitUntil: "domcontentloaded",
     });
+    await participantPage.getByRole("button", { name: /Notifications/ }).click();
     await expect(participantPage.getByText("Document notifications", { exact: true })).toBeVisible();
-    await expect(participantPage.getByText("Signed document added", { exact: true })).toBeVisible();
+    await expect(participantPage.getByText("Signed document added", { exact: true }).first()).toBeVisible();
     await expect(participantPage.getByText("1 unread", { exact: true })).toBeVisible();
     await participantPage.getByRole("button", { name: "Mark read", exact: true }).click();
     await expect(participantPage.getByText("1 unread", { exact: true })).toBeHidden();

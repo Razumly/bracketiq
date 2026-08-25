@@ -299,8 +299,11 @@ describe('GET /api/profile/documents', () => {
         documentSubjectId: 'document-subject:org_1:user_1',
         organizationId: 'org_1',
         importedFileId: 'file_imported_subject_only',
+        importedAt: new Date('2026-03-02T12:00:00.000Z'),
         provenance: 'IMPORTED',
         sourceNote: 'Private migration note',
+        attestationVersion: 'private-version',
+        uploaderId: 'private-uploader',
         attestationText: 'Private attestation',
         contentHash: 'private-content-hash',
         importedBy: 'staff_1',
@@ -326,7 +329,11 @@ describe('GET /api/profile/documents', () => {
     expect(json.signed[0]).not.toHaveProperty('attestationText');
     expect(json.signed[0]).not.toHaveProperty('contentHash');
     expect(json.signed[0]).not.toHaveProperty('importedBy');
-    expect(json.signed[0]).not.toHaveProperty('auditEvents');
+    expect(json.signed[0]).not.toHaveProperty('importedFileId');
+    expect(json.signed[0]).not.toHaveProperty('attestationVersion');
+    expect(json.signed[0]).not.toHaveProperty('uploaderId');
+    expect(json.signed[0]).not.toHaveProperty('importedAt');
+    expect(json.signed[0]).not.toHaveProperty('auditTrail');
   });
   it('hides imported metadata when the subject belongs to another organization', async () => {
     prismaMock.documentSubjects.findMany.mockResolvedValue([
@@ -442,7 +449,7 @@ describe('GET /api/profile/documents', () => {
       }),
     ]);
   });
-  it('returns imported void status and provenance for profile history', async () => {
+  it('returns imported void status, provenance, and stable import-order history', async () => {
     prismaMock.documentSubjects.findMany.mockResolvedValue([
       { id: 'document-subject:org_1:user_1', userId: 'user_1', organizationId: 'org_1' },
     ]);
@@ -466,6 +473,44 @@ describe('GET /api/profile/documents', () => {
         importedAt: new Date('2026-03-03T12:00:00.000Z'),
         createdAt: new Date('2026-03-03T12:00:00.000Z'),
       },
+      {
+        id: 'imported_void_without_import_time',
+        signedDocumentId: 'imported-file-void-without-import-time',
+        templateId: 'tmpl_1',
+        eventId: null,
+        teamId: null,
+        userId: null,
+        hostId: null,
+        documentSubjectId: 'document-subject:org_1:user_1',
+        organizationId: 'org_1',
+        importedFileId: 'file_imported_void_without_import_time',
+        provenance: 'IMPORTED',
+        signerRole: null,
+        status: 'VOID',
+        signedAt: null,
+        historicalSigningDate: new Date('2026-03-05T12:00:00.000Z'),
+        importedAt: null,
+        createdAt: new Date('2026-03-05T12:00:00.000Z'),
+      },
+      {
+        id: 'imported_void_older_history',
+        signedDocumentId: 'imported-file-void-older-history',
+        templateId: 'tmpl_1',
+        eventId: null,
+        teamId: null,
+        userId: null,
+        hostId: null,
+        documentSubjectId: 'document-subject:org_1:user_1',
+        organizationId: 'org_1',
+        importedFileId: 'file_imported_void_older_history',
+        provenance: 'IMPORTED',
+        signerRole: null,
+        status: 'VOID',
+        signedAt: null,
+        historicalSigningDate: new Date('2024-01-01T12:00:00.000Z'),
+        importedAt: new Date('2026-03-04T12:00:00.000Z'),
+        createdAt: new Date('2026-03-04T12:00:00.000Z'),
+      },
     ]);
 
     const response = await GET(new NextRequest('http://localhost/api/profile/documents'));
@@ -473,13 +518,12 @@ describe('GET /api/profile/documents', () => {
 
     expect(response.status).toBe(200);
     expect(json.signed).toEqual([]);
-    expect(json.voided).toEqual([
-      expect.objectContaining({
-        id: 'imported_void',
-        provenance: 'IMPORTED',
-        status: 'VOID',
-      }),
+    expect(json.voided.map((document: { id: string }) => document.id)).toEqual([
+      'imported_void_without_import_time',
+      'imported_void_older_history',
+      'imported_void',
     ]);
+    expect(json.voided[0]).not.toHaveProperty('importedAt');
   });
   it('fails when an imported document has no stored file relation', async () => {
     prismaMock.documentSubjects.findMany.mockResolvedValue([

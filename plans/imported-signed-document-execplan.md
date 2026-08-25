@@ -32,6 +32,14 @@ The implementation began with the data expansion required for this behavior. The
 - [x] (2026-08-24) Complete issue #109 Imported evidence voiding with owner and platform-admin defaults, fresh identity proof, private notes, Satisfaction invalidation, and preserved history.
 - [x] (2026-08-24) Add transactional in-app document notifications and post-commit push and email delivery for import and void changes.
 - [x] (2026-08-24) Add focused web and mobile tests for Imported visibility, private-field filtering, VOID history, Room persistence, card state, and local PDF opening.
+- [x] (2026-08-24) Complete issue #110 restricted imported-evidence audit access, customer-safe response filtering, web audit rendering, and mobile contract verification.
+- [x] (2026-08-24) Restore the subject-facing profile and notification navigation in the imported-document browser smoke and verify the authorized subject PDF response after the UI action.
+- [x] (2026-08-24) Extend the restricted audit route and service response.
+- [x] (2026-08-24) Render the authorized audit trail in the Organization customer view.
+- [x] (2026-08-24) Remove private import time from customer-facing document responses.
+- [x] (2026-08-24) Add server, web, mobile, and browser contract tests for audit access and private-field filtering.
+- [x] (2026-08-24) Run typecheck, focused tests, lint, browser smoke, full site and mobile suites, and the two-axis code review.
+- [x] (2026-08-24) Re-run typecheck, focused tests, full site suite, full mobile suite, and browser smoke after the final audit actor and subject PDF assertion fixes.
 
 ## Surprises & Discoveries
 
@@ -59,6 +67,9 @@ The implementation began with the data expansion required for this behavior. The
 
 - Observation: Aggregate Satisfaction completion is not enough for multi-signer document cards. A partial Satisfaction can already contain the current signer role.
   Evidence: Profile document aggregation now checks `completedSignerRoles` for the current signer context before it emits an unsigned card.
+
+- Observation: Private imported-document audit data needs a separate response from the customer document list.
+  Evidence: The audit route selects source note, attestation, uploader, import time, content hash, and append-only events only after `documents.audit`; the profile and Organization customer routes omit those fields.
 
 ## Decision Log
 
@@ -116,6 +127,10 @@ The implementation began with the data expansion required for this behavior. The
   Rationale: Child issues state the mobile impact for each current capability and shared contract. Historical installed mobile versions are not a compatibility target.
   Date/Author: 2026-08-24 / User and Codex
 
+- Decision: Return private imported-evidence fields through `auditTrail` and keep them out of customer document responses.
+  Rationale: The existing subject, guardian, and Organization customer lists serve non-auditor users. A dedicated permission and response keep the private seam explicit.
+  Date/Author: 2026-08-24 / Codex
+
 ## Outcomes & Retrospective
 
 Issue #98 delivered the additive Requirement and immutable Version storage contract. Existing template IDs, assignment arrays, signing behavior, and provider identifiers remain unchanged. Schema validation, generated-client validation, migration fixture coverage, focused route tests, and the site checks passed. The parent feature then consumed this lineage for Version enforcement and document evidence.
@@ -123,6 +138,8 @@ Issue #98 delivered the additive Requirement and immutable Version storage contr
 The completed parent feature repairs ownerless evidence before Satisfaction backfill, preserves historical evidence timestamps, records every contributing evidence row, handles roleless and imported completion, centralizes required-role derivation and provider quarantine eligibility, batches invalidation reads, and invalidates active Satisfaction after terminal provider failures. It requires explicit import attestation acceptance, stores server-derived attestation text and version, keeps pinned Versions addressable, resolves EventTeam snapshots to canonical teams, uses Satisfaction in signing preflight, persists assignment freezing, and blocks every signing and dispatch path before provider use.
 
 Issues #108 and #109 complete the customer and guardian document experience. Imported evidence appears in the existing subject and guardian lists with customer-safe provenance and metadata. Authorized staff retain the private import and audit paths. Voiding changes lifecycle state and derived Satisfaction without changing or deleting historical evidence. Mobile maps the response into Room before it renders cards, keeps VOID history, removes voided completion from active state, and opens authorized local PDFs through the existing flow.
+
+Issue #110 adds the restricted Organization audit trail. Authorized auditors can inspect the imported evidence snapshot and append-only import and void events. The response states that the application history is not tamper-proof. Customer document responses omit private audit fields, and mobile continues to map only the customer-safe DTO into Room.
 
 
 ## Context and Orientation
@@ -466,3 +483,15 @@ Verification passed:
 - Full site suite: 871 suites passed, 2 skipped; 5,211 tests passed, 4 skipped.
 - Full mobile debug unit suite: `:composeApp:testDebugUnitTest` passed.
 - Final concurrency review passed for organization assignment, staff member, and role lock ordering.
+
+### 2026-08-24 issue #110 audit follow-up
+
+Issue #110 extends the imported-document staff surface. The customer document responses stay customer-safe. The organization audit endpoint returns a restricted audit trail only after the `documents.audit` permission check. The audit trail includes imported evidence provenance, lifecycle status, source note, canonical attestation, attestation version, uploader, import time, and content hash. It also includes the append-only import and void events with actor, time, controlled reason, and private note.
+
+The API response will name the result `auditTrail` and state that the application history is not tamper-proof. The audit route will accept only imported evidence in the requested Organization. The ordinary customer-document routes will not return the private import time. Mobile keeps its current customer-safe DTO and Room model. Unknown private response keys remain ignored by the mobile serializer.
+
+Implementation and verification are complete. The `Progress` section is the only checklist. Verification passed with `npx tsc --noEmit`, three focused site suites covering 23 tests, two focused mobile document contract tests, the full site suite with 871 suites passed and 2 skipped (5,211 tests passed and 4 skipped), and the full mobile debug unit suite. Browser smoke rendered the authorized Organization audit view, rendered the subject imported card without private sentinels, and returned `200 application/pdf` for the subject PDF request after the UI action.
+
+### 2026-08-24 change note
+
+Added the issue #110 audit response, Organization customer audit UI, private-field filtering, and contract verification. The change uses a dedicated `documents.audit` permission so subjects, guardians, and ordinary staff do not receive source notes, attestation data, uploader data, import time, content identity, or internal audit events.

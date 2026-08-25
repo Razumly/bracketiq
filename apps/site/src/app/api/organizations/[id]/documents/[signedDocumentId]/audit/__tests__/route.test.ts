@@ -26,7 +26,19 @@ describe('GET /api/organizations/[id]/documents/[signedDocumentId]/audit', () =>
     requireSessionMock.mockResolvedValue({ userId: 'owner_1', isAdmin: false });
     hasOrgPermissionMock.mockResolvedValue(true);
     prismaMock.organizations.findUnique.mockResolvedValue({ id: 'org_1', ownerId: 'owner_1' });
-    prismaMock.signedDocuments.findFirst.mockResolvedValue({ id: 'evidence_1' });
+    prismaMock.signedDocuments.findFirst.mockResolvedValue({
+      id: 'evidence_1',
+      documentName: 'Imported Waiver',
+      provenance: 'IMPORTED',
+      status: 'SIGNED',
+      historicalSigningDate: new Date('2026-08-20T12:00:00.000Z'),
+      importedAt: new Date('2026-08-22T09:00:00.000Z'),
+      sourceNote: 'Private source note.',
+      attestationText: 'Private attestation.',
+      attestationVersion: '2026-08-01',
+      contentHash: 'sha256:abc',
+      uploaderId: 'owner_1',
+    });
     prismaMock.documentEvidenceAuditEvents.findMany.mockResolvedValue([
       {
         id: 'audit_1',
@@ -48,7 +60,7 @@ describe('GET /api/organizations/[id]/documents/[signedDocumentId]/audit', () =>
     ]);
   });
 
-  it('returns audit history only after the owner or platform-admin check', async () => {
+  it('returns a restricted audit trail after the permission check', async () => {
     const response = await GET(
       new NextRequest('http://localhost/api/organizations/org_1/documents/evidence_1/audit'),
       { params: Promise.resolve({ id: 'org_1', signedDocumentId: 'evidence_1' }) },
@@ -56,13 +68,32 @@ describe('GET /api/organizations/[id]/documents/[signedDocumentId]/audit', () =>
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      auditEvents: [expect.objectContaining({
-        id: 'audit_1',
-        eventType: 'IMPORT',
-        actorDisplayName: 'Alex Owner',
-        note: 'Private archive note.',
-        payload: { importedFileId: 'file_1' },
-      })],
+      auditTrail: {
+        description: 'This audit trail records application events. It is not tamper-proof.',
+        evidence: {
+          id: 'evidence_1',
+          documentName: 'Imported Waiver',
+          provenance: 'IMPORTED',
+          status: 'SIGNED',
+          historicalSigningDate: '2026-08-20T12:00:00.000Z',
+          importedAt: '2026-08-22T09:00:00.000Z',
+          sourceNote: 'Private source note.',
+          attestationText: 'Private attestation.',
+          attestationVersion: '2026-08-01',
+          contentHash: 'sha256:abc',
+          uploader: { userId: 'owner_1', displayName: 'Alex Owner' },
+        },
+        events: [{
+          id: 'audit_1',
+          createdAt: '2026-08-22T10:00:00.000Z',
+          eventType: 'IMPORT',
+          actorUserId: 'owner_1',
+          actorDisplayName: 'Alex Owner',
+          reason: null,
+          note: 'Private archive note.',
+          payload: { importedFileId: 'file_1' },
+        }],
+      },
     });
     expect(hasOrgPermissionMock).toHaveBeenCalledWith(
       { userId: 'owner_1', isAdmin: false },
@@ -75,10 +106,11 @@ describe('GET /api/organizations/[id]/documents/[signedDocumentId]/audit', () =>
     }));
     expect(prismaMock.userData.findMany).toHaveBeenCalledWith({
       where: { id: { in: ['owner_1'] } },
-      select: { id: true, firstName: true, lastName: true, userName: true },
+      select: { id: true, firstName: true, lastName: true },
     });
   });
-  it('does not expose a username when an actor has no display name', async () => {
+
+  it('uses an explicit label when an actor has no display name', async () => {
     prismaMock.userData.findMany.mockResolvedValueOnce([
       {
         id: 'owner_1',
@@ -94,7 +126,9 @@ describe('GET /api/organizations/[id]/documents/[signedDocumentId]/audit', () =>
     );
 
     expect(response.status).toBe(200);
-    expect((await response.json()).auditEvents[0].actorDisplayName).toBeNull();
+    const payload = await response.json();
+    expect(payload.auditTrail.events[0].actorDisplayName).toBe('Name unavailable');
+    expect(payload.auditTrail.evidence.uploader.displayName).toBe('Name unavailable');
   });
 
 
@@ -109,6 +143,42 @@ describe('GET /api/organizations/[id]/documents/[signedDocumentId]/audit', () =>
     expect(response.status).toBe(403);
     expect(prismaMock.signedDocuments.findFirst).not.toHaveBeenCalled();
     expect(prismaMock.documentEvidenceAuditEvents.findMany).not.toHaveBeenCalled();
+  });
+
+  it('denies audit history to a document subject', async () => {
+    requireSessionMock.mockResolvedValue({ userId: 'subject_1', isAdmin: false });
+    hasOrgPermissionMock.mockResolvedValue(false);
+
+    const response = await GET(
+      new NextRequest('http://localhost/api/organizations/org_1/documents/evidence_1/audit'),
+      { params: Promise.resolve({ id: 'org_1', signedDocumentId: 'evidence_1' }) },
+    );
+
+    expect(response.status).toBe(403);
+    expect(hasOrgPermissionMock).toHaveBeenCalledWith(
+      { userId: 'subject_1', isAdmin: false },
+      { id: 'org_1', ownerId: 'owner_1' },
+      ORG_PERMISSIONS.DOCUMENTS_AUDIT_VIEW,
+    );
+    expect(prismaMock.signedDocuments.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('denies audit history to a linked guardian', async () => {
+    requireSessionMock.mockResolvedValue({ userId: 'guardian_1', isAdmin: false });
+    hasOrgPermissionMock.mockResolvedValue(false);
+
+    const response = await GET(
+      new NextRequest('http://localhost/api/organizations/org_1/documents/evidence_1/audit'),
+      { params: Promise.resolve({ id: 'org_1', signedDocumentId: 'evidence_1' }) },
+    );
+
+    expect(response.status).toBe(403);
+    expect(hasOrgPermissionMock).toHaveBeenCalledWith(
+      { userId: 'guardian_1', isAdmin: false },
+      { id: 'org_1', ownerId: 'owner_1' },
+      ORG_PERMISSIONS.DOCUMENTS_AUDIT_VIEW,
+    );
+    expect(prismaMock.signedDocuments.findFirst).not.toHaveBeenCalled();
   });
 
   it('does not cross organization boundaries', async () => {

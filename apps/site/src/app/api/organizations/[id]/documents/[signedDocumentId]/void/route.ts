@@ -17,7 +17,7 @@ import {
   type DocumentNotificationDatabase,
 } from "@/server/documentNotifications";
 
-export const DOCUMENT_VOID_REASONS = [
+const DOCUMENT_VOID_REASONS = [
   "Wrong Document Subject",
   "Wrong Document Requirement or Version",
   "Wrong scope",

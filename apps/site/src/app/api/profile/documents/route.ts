@@ -39,7 +39,6 @@ type ProfileDocumentCard = {
   scopeType?: string;
   scopeId?: string;
   historicalSigningDate?: string;
-  importedAt?: string;
   requiredSignerType: string;
   requiredSignerLabel: string;
   signerContext: SignerContext;
@@ -411,8 +410,8 @@ export async function GET(_req: NextRequest) {
         signedAt: true,
         createdAt: true,
         historicalSigningDate: true,
-        importedAt: true,
         scopeType: true,
+        importedAt: true,
         scopeId: true,
       },
     })
@@ -1445,7 +1444,11 @@ export async function GET(_req: NextRequest) {
   });
 
   const signedCards: ProfileDocumentCard[] = [];
-  const voidedCards: ProfileDocumentCard[] = [];
+  const voidedCardEntries: Array<{
+    card: ProfileDocumentCard;
+    importedAt?: Date | null;
+    signedAt?: string | Date | null;
+  }> = [];
   signedDocuments
     .filter((document) => isSignedStatus(document.status) || (
       document.provenance === 'IMPORTED'
@@ -1543,7 +1546,6 @@ export async function GET(_req: NextRequest) {
         scopeType: normalizeText(document.scopeType),
         scopeId: normalizeText(document.scopeId),
         historicalSigningDate: document.historicalSigningDate?.toISOString(),
-        importedAt: document.importedAt?.toISOString(),
         requiredSignerType,
         requiredSignerLabel: getRequiredSignerTypeLabel(requiredSignerType),
         signerContext,
@@ -1557,14 +1559,22 @@ export async function GET(_req: NextRequest) {
         content: type === 'TEXT' ? normalizeText(template?.content) : undefined,
       };
       if (card.status === 'VOID') {
-        voidedCards.push(card);
+        voidedCardEntries.push({
+          card,
+          importedAt: document.importedAt,
+          signedAt: card.signedAt,
+        });
       } else {
         signedCards.push(card);
       }
     });
 
   signedCards.sort((left, right) => toTimestamp(right.signedAt) - toTimestamp(left.signedAt));
-  voidedCards.sort((left, right) => toTimestamp(right.importedAt ?? right.signedAt) - toTimestamp(left.importedAt ?? left.signedAt));
+  voidedCardEntries.sort((left, right) => (
+    toTimestamp(right.importedAt ?? right.signedAt)
+    - toTimestamp(left.importedAt ?? left.signedAt)
+  ));
+  const voidedCards = voidedCardEntries.map(({ card }) => card);
 
   return NextResponse.json({
     viewerUserId: userId,
