@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -38,6 +39,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -74,6 +76,7 @@ import com.razumly.mvp.core.data.repositories.ProfileDocumentCard
 import com.razumly.mvp.core.data.repositories.ProfileDocumentStatus
 import com.razumly.mvp.core.data.repositories.ProfileDocumentType
 import com.razumly.mvp.core.presentation.composables.EmbeddedWebModal
+import com.razumly.mvp.core.presentation.composables.PlatformPdfViewer
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.NoScaffoldContentInsets
 import com.razumly.mvp.core.util.EmbeddedWebUrlPolicy
@@ -2087,18 +2090,31 @@ fun ProfileConnectionsScreen(component: ProfileComponent) {
     }
 }
 
+internal fun activeProfileDocuments(documents: List<ProfileDocumentCard>): List<ProfileDocumentCard> =
+    documents.filter { document -> document.status == ProfileDocumentStatus.SIGNED }
+
+internal fun voidedProfileDocuments(documents: List<ProfileDocumentCard>): List<ProfileDocumentCard> =
+    documents.filter { document -> document.status == ProfileDocumentStatus.VOID }
+@OptIn(ExperimentalMaterial3Api::class)
+
 @Composable
 fun ProfileDocumentsScreen(component: ProfileComponent) {
     val documentsState by component.documentsState.collectAsState()
     val activeDocumentActionId by component.activeDocumentActionId.collectAsState()
     val textSignaturePrompt by component.textSignaturePrompt.collectAsState()
     val webDocumentPrompt by component.webDocumentPrompt.collectAsState()
+    val pdfDocumentPrompt by component.pdfDocumentPrompt.collectAsState()
     var textPreviewDocument by remember { mutableStateOf<ProfileDocumentCard?>(null) }
-    val activeSignedDocuments = documentsState.signedDocuments.filter { document ->
-        document.status == ProfileDocumentStatus.SIGNED
-    }
-    val voidedDocuments = documentsState.signedDocuments.filter { document ->
-        document.status == ProfileDocumentStatus.VOID
+    val activeSignedDocuments = activeProfileDocuments(documentsState.signedDocuments)
+    val voidedDocuments = voidedProfileDocuments(documentsState.signedDocuments)
+    fun documentViewAction(document: ProfileDocumentCard): Pair<String, () -> Unit> {
+        val opensTextPreview = document.type == ProfileDocumentType.TEXT
+            && !document.provenance.equals("IMPORTED", ignoreCase = true)
+        return if (opensTextPreview) {
+            "Preview text" to { textPreviewDocument = document }
+        } else {
+            "View document" to { component.openDocument(document) }
+        }
     }
 
     LaunchedEffect(component) {
@@ -2172,14 +2188,7 @@ fun ProfileDocumentsScreen(component: ProfileComponent) {
         } else {
             activeSignedDocuments.forEach { document ->
                 val isProcessing = activeDocumentActionId == document.id
-                val actionLabel = if (document.type == ProfileDocumentType.TEXT) "Preview text" else "View document"
-                val onAction = {
-                    if (document.type == ProfileDocumentType.TEXT) {
-                        textPreviewDocument = document
-                    } else {
-                        component.openSignedDocument(document)
-                    }
-                }
+                val (actionLabel, onAction) = documentViewAction(document)
                 DocumentCard(
                     document = document,
                     actionLabel = actionLabel,
@@ -2201,14 +2210,7 @@ fun ProfileDocumentsScreen(component: ProfileComponent) {
         } else {
             voidedDocuments.forEach { document ->
                 val isProcessing = activeDocumentActionId == document.id
-                val actionLabel = if (document.type == ProfileDocumentType.TEXT) "Preview text" else "View document"
-                val onAction = {
-                    if (document.type == ProfileDocumentType.TEXT) {
-                        textPreviewDocument = document
-                    } else {
-                        component.openSignedDocument(document)
-                    }
-                }
+                val (actionLabel, onAction) = documentViewAction(document)
                 DocumentCard(
                     document = document,
                     actionLabel = actionLabel,
@@ -2280,6 +2282,37 @@ fun ProfileDocumentsScreen(component: ProfileComponent) {
             onDismiss = component::dismissWebDocumentPrompt,
         )
     }
+    pdfDocumentPrompt?.let { prompt ->
+        ModalBottomSheet(
+            onDismissRequest = component::dismissPdfDocumentPrompt,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.9f)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = prompt.title,
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                ) {
+                    PlatformPdfViewer(
+                        bytes = prompt.bytes,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+                TextButton(onClick = component::dismissPdfDocumentPrompt) {
+                    Text("Close")
+                }
+            }
+        }
+    }
 
     textPreviewDocument?.let { document ->
         AlertDialog(
@@ -2310,8 +2343,20 @@ fun ProfileDocumentsScreen(component: ProfileComponent) {
     }
 }
 
+internal fun profileDocumentSigningLabel(document: ProfileDocumentCard): String? {
+    val isImported = document.provenance.equals("IMPORTED", ignoreCase = true)
+    if (isImported) {
+        return document.historicalSigningDate
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?.let { "Signing date: ${formatDateForDisplay(it)}" }
+            ?: "Signing date unknown"
+    }
+    return document.signedAt?.let { "Signed: ${formatDateForDisplay(it)}" }
+}
+
 @Composable
-private fun DocumentCard(
+internal fun DocumentCard(
     document: ProfileDocumentCard,
     actionLabel: String,
     isProcessing: Boolean,
@@ -2320,7 +2365,19 @@ private fun DocumentCard(
     onAction: () -> Unit,
 ) {
     val eventName = document.eventName?.trim()?.takeIf(String::isNotBlank) ?: "Event document"
-    val signedLabel = document.signedAt?.let { "Signed: ${formatDateForDisplay(it)}" }
+    val isImported = document.provenance.equals("IMPORTED", ignoreCase = true)
+    val requirementLabel = document.documentRequirementTitle
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?: "Unavailable"
+    val scopeLabel = when (document.scopeType?.trim()?.uppercase()) {
+        "ORGANIZATION" -> "Organization"
+        "EVENT_PARTICIPATION" -> "Event participation"
+        "TEAM_MEMBERSHIP" -> "Team membership"
+        else -> document.scopeType?.trim()?.takeIf(String::isNotBlank) ?: "Unknown"
+    }
+    val lifecycleLabel = document.status.name
+    val signedLabel = profileDocumentSigningLabel(document)
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -2337,6 +2394,13 @@ private fun DocumentCard(
                 text = document.title,
                 style = MaterialTheme.typography.titleMedium,
             )
+            if (isImported) {
+                Text(
+                    text = "Provenance: Imported",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Text(
                 text = eventName,
                 style = MaterialTheme.typography.bodySmall,
@@ -2347,6 +2411,28 @@ private fun DocumentCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (isImported) {
+                Text(
+                    text = "Document requirement: $requirementLabel",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = "Version: ${document.versionSequence ?: "Unavailable"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = "Scope: $scopeLabel",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = "Lifecycle: $lifecycleLabel",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Text(
                 text = "Type: ${if (document.type == ProfileDocumentType.TEXT) "Text" else "PDF"}",
                 style = MaterialTheme.typography.bodySmall,

@@ -36,12 +36,12 @@ class SignedDocumentService {
     }
     return response;
   }
-  async createRecentAuthToken(password: string): Promise<string> {
+  async createRecentAuthToken(password?: string): Promise<string> {
     const response = await apiRequest<{ recentAuthToken?: string; error?: string }>(
       '/api/documents/confirm-password',
       {
         method: 'POST',
-        body: { password },
+        body: password?.trim() ? { password } : {},
       },
     );
     if (response?.error) {

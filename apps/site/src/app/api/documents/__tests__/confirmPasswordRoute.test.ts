@@ -74,4 +74,58 @@ describe('POST /api/documents/confirm-password', () => {
       purpose: 'sensitive_action',
     });
   });
+  it('issues a token for a recently authenticated provider account without a password', async () => {
+    requireSessionMock.mockResolvedValue({
+      userId: 'admin_1',
+      isAdmin: true,
+      issuedAtSeconds: Math.floor(Date.now() / 1000),
+    });
+    prismaMock.authUser.findUnique.mockResolvedValue({
+      id: 'admin_1',
+      email: 'admin@example.com',
+      passwordHash: 'random-provider-password-hash',
+      googleSubject: 'google-subject',
+    });
+
+    const response = await POST(
+      new NextRequest('http://localhost/api/documents/confirm-password', {
+        method: 'POST',
+        body: JSON.stringify({}),
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ok: true,
+      recentAuthToken: 'recent-auth-token',
+    });
+    expect(verifyPasswordMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects provider identity proof outside the ten-minute window', async () => {
+    requireSessionMock.mockResolvedValue({
+      userId: 'admin_1',
+      isAdmin: true,
+      issuedAtSeconds: Math.floor(Date.now() / 1000) - 601,
+    });
+    prismaMock.authUser.findUnique.mockResolvedValue({
+      id: 'admin_1',
+      email: 'admin@example.com',
+      passwordHash: 'random-provider-password-hash',
+      googleSubject: 'google-subject',
+    });
+
+    const response = await POST(
+      new NextRequest('http://localhost/api/documents/confirm-password', {
+        method: 'POST',
+        body: JSON.stringify({}),
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toMatchObject({ code: 'RECENT_AUTH_REQUIRED' });
+    expect(signRecentAuthTokenMock).not.toHaveBeenCalled();
+  });
 });

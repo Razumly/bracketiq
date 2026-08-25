@@ -28,6 +28,10 @@ The implementation began with the data expansion required for this behavior. The
 - [x] (2026-08-22) Complete the issue #97 import behavior and issue #99 immutable-Version behavior, including team-snapshot scope resolution and durable provider quarantine.
 - [x] (2026-08-22) Complete the final review remediation for Satisfaction-based dispatch, naming, service boundaries, invalidation seams, assignment freezing, and plan accuracy.
 - [x] (2026-08-22) Add a post-migration signer-role normalization migration. Keep applied migration checksums unchanged. Run the evidence fixture through the new migration.
+- [x] (2026-08-24) Complete issue #108 subject and eligible guardian access for Imported evidence, including customer-safe web and mobile document presentation.
+- [x] (2026-08-24) Complete issue #109 Imported evidence voiding with owner and platform-admin defaults, fresh identity proof, private notes, Satisfaction invalidation, and preserved history.
+- [x] (2026-08-24) Add transactional in-app document notifications and post-commit push and email delivery for import and void changes.
+- [x] (2026-08-24) Add focused web and mobile tests for Imported visibility, private-field filtering, VOID history, Room persistence, card state, and local PDF opening.
 
 ## Surprises & Discoveries
 
@@ -50,6 +54,11 @@ The implementation began with the data expansion required for this behavior. The
 
 - Observation: Satisfaction invalidation can recompute several aggregates from one terminal evidence transition. Per-Satisfaction collection reads created avoidable database round trips.
   Evidence: `invalidateDocumentRequirementSatisfactions` now loads contributor links and evidence rows with one query per collection.
+- Observation: In-app document notifications are part of the evidence transaction. Push and email delivery runs after commit so a provider delivery failure does not roll back customer data.
+  Evidence: Import and void route tests reject the transaction when in-app recording fails and keep the committed change when post-commit delivery fails.
+
+- Observation: Aggregate Satisfaction completion is not enough for multi-signer document cards. A partial Satisfaction can already contain the current signer role.
+  Evidence: Profile document aggregation now checks `completedSignerRoles` for the current signer context before it emits an unsigned card.
 
 ## Decision Log
 
@@ -79,6 +88,13 @@ The implementation began with the data expansion required for this behavior. The
 - Decision: Expose one plural Satisfaction invalidation seam.
   Rationale: Webhook fallback rows can share one provider document. One batch read preserves aggregate recomputation and avoids a singular wrapper that adds no separate behavior.
   Date/Author: 2026-08-22 / Codex
+- Decision: Record customer-safe in-app notifications inside the import and void transactions, then deliver push and email after commit.
+  Rationale: In-app history must commit or roll back with the document state. External delivery is best effort and must not undo a committed evidence change.
+  Date/Author: 2026-08-24 / Codex
+
+- Decision: Suppress an unsigned card when the current signer role already appears in Satisfaction evidence, even when another required role remains incomplete.
+  Rationale: The existing signing routes reject a completed signer role. The profile list must not offer an action that cannot succeed.
+  Date/Author: 2026-08-24 / Codex
 
 - Decision: Treat imported evidence as complete for every required signer role and reject non-Organization scope for sign-once Versions.
   Rationale: An imported PDF is attested as a complete external artifact. A sign-once Version has Organization-wide scope by definition; accepting an Event or Team scope would create a second completion identity.
@@ -96,11 +112,17 @@ The implementation began with the data expansion required for this behavior. The
   Rationale: A mutable or deleted Version row must not make a previously edited provider template usable again. A registry preserves the block across Version replacement and deletion.
   Date/Author: 2026-08-22 / Codex
 
+- Decision: Remove the parent feature's installed-mobile compatibility requirement.
+  Rationale: Child issues state the mobile impact for each current capability and shared contract. Historical installed mobile versions are not a compatibility target.
+  Date/Author: 2026-08-24 / User and Codex
+
 ## Outcomes & Retrospective
 
 Issue #98 delivered the additive Requirement and immutable Version storage contract. Existing template IDs, assignment arrays, signing behavior, and provider identifiers remain unchanged. Schema validation, generated-client validation, migration fixture coverage, focused route tests, and the site checks passed. The parent feature then consumed this lineage for Version enforcement and document evidence.
 
 The completed parent feature repairs ownerless evidence before Satisfaction backfill, preserves historical evidence timestamps, records every contributing evidence row, handles roleless and imported completion, centralizes required-role derivation and provider quarantine eligibility, batches invalidation reads, and invalidates active Satisfaction after terminal provider failures. It requires explicit import attestation acceptance, stores server-derived attestation text and version, keeps pinned Versions addressable, resolves EventTeam snapshots to canonical teams, uses Satisfaction in signing preflight, persists assignment freezing, and blocks every signing and dispatch path before provider use.
+
+Issues #108 and #109 complete the customer and guardian document experience. Imported evidence appears in the existing subject and guardian lists with customer-safe provenance and metadata. Authorized staff retain the private import and audit paths. Voiding changes lifecycle state and derived Satisfaction without changing or deleting historical evidence. Mobile maps the response into Room before it renders cards, keeps VOID history, removes voided completion from active state, and opens authorized local PDFs through the existing flow.
 
 
 ## Context and Orientation
@@ -233,7 +255,7 @@ The import request must include the external `attestationAccepted: true` field. 
 
 The parent feature enforces frozen Version writes and keeps existing assignments pinned. It stores evidence provenance, Document Subject identity, audit fields, and Document Requirement Satisfaction data. It projects existing BoldSign and BracketIQ text completions into Satisfaction. It moves Event and child compliance to Satisfaction. It moves Team and remaining compliance to Satisfaction and removes direct signed-document inference. It adds an Organization-scoped imported PDF flow with private storage, attestation, duplicate protection, and local file access. It adds Event Participation imports for direct and Team-based participation. It adds subject and guardian access, Imported presentation, voiding, restricted audit access, and transactional notifications.
 
-Each milestone keeps the backend HTTP interface compatible with installed mobile clients and does not create Team customers as Document Subjects.
+No milestone creates Team customers as Document Subjects.
 
 ## Change Note
 
@@ -312,7 +334,7 @@ The follow-up review found residual findings after the earlier remediation. The 
 
 - **#97 P1:** `src/app/api/organizations/[id]/documents/import/route.ts:261-266` rejects invalid scope only for sign-once Versions. Non-sign-once imports must require Event Participation scope.
 - **#99 P1:** `src/lib/boldsignWebhookSync.ts:978-982` can treat a later provider edit for a detached Version as safe after the first detached edit creates V2. A later edit can mutate content referenced by a frozen Version.
-- **#99 P1:** `src/app/api/organizations/[id]/templates/route.ts:136-145` returns only the newest Version. Pinned Versions must remain addressable to installed mobile clients.
+- **#99 P1:** `src/app/api/organizations/[id]/templates/route.ts:136-145` returns only the newest Version. Pinned Versions must remain addressable to current callers.
 - **#100 P1:** `prisma/migrations/20260821080000_repair_ownerless_document_evidence/migration.sql:109-112` can replace an existing Subject timestamp with a repaired-row timestamp. Merge existing and repaired values with the earliest `createdAt` and latest `updatedAt`.
 - **#101 P1:** `src/lib/boldsignWebhookSync.ts:1837-1848` writes `signedAt` during terminal bulk updates. `resolveDocumentSignedAtIso` at lines 488-506 can use the terminal webhook time. Omit `signedAt` from this update so the historical signing time remains unchanged.
 
@@ -426,3 +448,21 @@ Verification passed:
 - `DOCUMENT_VERSION_MIGRATION_TEST_DATABASE_URL=postgresql://mvp:mvp_password@127.0.0.1:5433/mvp npm run test:document-version-migration`.
 - `DOCUMENT_EVIDENCE_MIGRATION_TEST_DATABASE_URL=postgresql://mvp:mvp_password@127.0.0.1:5433/mvp npm run test:document-evidence-migration`.
 - `npm test -- --runInBand`: 866 suites passed, 2 skipped; 5,119 tests passed, 4 skipped.
+
+## Plan Revision 2026-08-24
+
+Removed the installed-mobile compatibility requirement from issue #97 and this plan. Child issues continue to state the required mobile parity for current capabilities and shared contracts.
+ 
+### 2026-08-24 issue #108 and #109 verification
+
+Issues #108 and #109 are complete. Imported evidence is visible to the subject and eligible linked guardian. Private source, attestation, uploader, content identity, and audit fields remain staff-only. Authorized staff can void imported evidence with the required permission and recent identity proof. Voiding preserves evidence history and removes active Satisfaction completion.
+
+Web and mobile document tests cover response mapping, private-field filtering, subject and guardian access, VOID history, Room persistence, card state, and authorized local PDF opening. The notification panel test covers loading an unread document notification, marking it read, and updating the unread state.
+
+Verification passed:
+
+- `npx tsc --noEmit`.
+- Profile document route test: 7 tests passed.
+- Full site suite: 871 suites passed, 2 skipped; 5,211 tests passed, 4 skipped.
+- Full mobile debug unit suite: `:composeApp:testDebugUnitTest` passed.
+- Final concurrency review passed for organization assignment, staff member, and role lock ordering.

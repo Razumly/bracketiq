@@ -108,6 +108,7 @@ import { boldsignService, SignStep } from "@/lib/boldsignService";
 import { signedDocumentService } from "@/lib/signedDocumentService";
 import {
   profileDocumentService,
+  formatDocumentScopeLabel,
   type ChildUnsignedDocumentCount,
   type ProfileDocumentCard,
 } from "@/lib/profileDocumentService";
@@ -4160,19 +4161,19 @@ function ProfilePageContent() {
                     >
                       <div className="space-y-3">
                         <Group gap="xs">
-                        <Badge
-                          color={document.status === "VOID" ? "red" : "green"}
-                          variant="light"
-                          radius="xl"
-                        >
-                          {document.status === "VOID" ? "Voided" : "Signed"}
-                        </Badge>
-                        {document.provenance === "IMPORTED" && (
-                          <Badge color="blue" variant="light" radius="xl">
-                            Imported
+                          <Badge
+                            color={document.status === "VOID" ? "red" : "green"}
+                            variant="light"
+                            radius="xl"
+                          >
+                            {document.status === "VOID" ? "Voided" : "Signed"}
                           </Badge>
-                        )}
-                      </Group>
+                          {document.provenance === "IMPORTED" && (
+                            <Badge color="blue" variant="light" radius="xl">
+                              Imported
+                            </Badge>
+                          )}
+                        </Group>
                         <div>
                           <Text fw={700}>{document.title}</Text>
                           <Text size="sm" c="dimmed">
@@ -4180,6 +4181,22 @@ function ProfilePageContent() {
                           </Text>
                         </div>
                         <div className="space-y-1">
+                          <Text size="xs" c="dimmed">
+                            Document requirement: {document.provenance === "IMPORTED"
+                              ? document.documentRequirementTitle || "Unavailable"
+                              : document.documentRequirementTitle || document.title}
+                          </Text>
+                          <Text size="xs" c="dimmed">
+                            Version: {typeof document.versionSequence === "number"
+                              ? document.versionSequence
+                              : "Unknown"}
+                          </Text>
+                          <Text size="xs" c="dimmed">
+                            Scope: {formatDocumentScopeLabel(document.scopeType)}
+                          </Text>
+                          <Text size="xs" c="dimmed">
+                            Lifecycle: {document.status || "SIGNED"}
+                          </Text>
                           <Text size="xs" c="dimmed">
                             {document.eventName
                               ? `Event: ${document.eventName}`
@@ -4189,8 +4206,11 @@ function ProfilePageContent() {
                           </Text>
                           <Text size="xs" c="dimmed">
                             {document.provenance === "IMPORTED"
-                              ? `Signing date ${document.signedAt
-                                ? formatDisplayDate(document.signedAt, { timeZone: "UTC" }) || "unknown"
+                              ? `Signing date ${document.historicalSigningDate
+                                ? formatDisplayDate(
+                                  document.historicalSigningDate,
+                                  { timeZone: "UTC" },
+                                ) || "unknown"
                                 : "unknown"}`
                               : `${document.status === "VOID" ? "Voided" : "Signed"}: ${formatDateTimeLabel(document.signedAt)}`}
                           </Text>

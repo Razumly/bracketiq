@@ -22,8 +22,19 @@ import {
   hasDocumentEvidenceOwnerAccess,
   hasOrgPermission,
 } from '@/server/accessControl';
-import { ORG_PERMISSIONS, type OrganizationPermission } from '@/lib/organizationPermissions';
-import { resolveDefaultOrganizationRoleIdForStaffTypes } from '@/server/organizationRoles';
+import {
+  ORG_PERMISSIONS,
+  RESTRICTED_DOCUMENT_PERMISSION_ERROR,
+  RESTRICTED_DOCUMENT_PERMISSIONS,
+} from '@/lib/organizationPermissions';
+import {
+  orderOrganizationRoleIdsForLock,
+  resolveDefaultOrganizationRoleIdForStaffTypes,
+} from '@/server/organizationRoles';
+import {
+  acquireOrganizationStaffAssignmentLock,
+  acquireOrganizationStaffMemberLock,
+} from '@/server/repositories/locks';
 import {
   loadCanonicalTeamById,
   normalizeId,
@@ -63,13 +74,6 @@ const inviteSchema = z.object({
   lastName: z.string().optional(),
   replaceStaffTypes: z.boolean().optional(),
 }).passthrough();
-const RESTRICTED_DOCUMENT_PERMISSIONS: OrganizationPermission[] = [
-  ORG_PERMISSIONS.DOCUMENTS_VOID,
-  ORG_PERMISSIONS.DOCUMENTS_AUDIT_VIEW,
-];
-
-const RESTRICTED_DOCUMENT_PERMISSION_ERROR =
-  'Only the Organization owner or platform administrator can grant or revoke document void or audit access.';
 
 const createSchema = z.object({
   invites: z.array(inviteSchema).optional(),
@@ -503,6 +507,14 @@ export async function POST(req: NextRequest) {
     singletonBatchKeys.add(key);
   }
 
+  const organizationStaffAssignmentLockIds = Array.from(new Set<string>(invitesInput.flatMap((inviteInput): string[] => {
+    const parsedInvite = inviteSchema.safeParse(inviteInput);
+    if (!parsedInvite.success || normalizeInviteType(parsedInvite.data.type) !== 'STAFF') {
+      return [];
+    }
+    const organizationId = normalizeId(parsedInvite.data.organizationId);
+    return organizationId ? [organizationId] : [];
+  }))).sort();
 
   const eventStaffLockIds = Array.from(new Set<string>(invitesInput.flatMap((inviteInput): string[] => {
     const parsedInvite = inviteSchema.safeParse(inviteInput);
@@ -516,6 +528,9 @@ export async function POST(req: NextRequest) {
   const now = new Date();
   try {
     const { created, toEmail } = await prisma.$transaction(async (tx) => {
+      for (const organizationId of organizationStaffAssignmentLockIds) {
+        await acquireOrganizationStaffAssignmentLock(tx, organizationId);
+      }
       for (const eventId of eventStaffLockIds) {
         await acquireEventLock(tx, eventId);
       }
@@ -634,6 +649,7 @@ export async function POST(req: NextRequest) {
           const replaceStaffTypes = invite.replaceStaffTypes === true;
 
           if (organizationId) {
+            await acquireOrganizationStaffMemberLock(tx, organizationId, inviteUserId);
             const existingStaffMember = await tx.staffMembers.findUnique({
               where: {
                 organizationId_userId: {
@@ -643,20 +659,40 @@ export async function POST(req: NextRequest) {
               },
               select: { roleId: true, types: true },
             });
+            const lockedStaffMember = existingStaffMember
+              ? await tx.staffMembers.update({
+                where: {
+                  organizationId_userId: {
+                    organizationId,
+                    userId: inviteUserId,
+                  },
+                },
+                data: { updatedAt: now },
+                select: { roleId: true, types: true },
+              })
+              : null;
+            const currentStaffMember = lockedStaffMember ?? existingStaffMember;
+            const currentRoleId = currentStaffMember?.roleId ?? null;
             const defaultRoleId = selectedRole?.id
-              ?? existingStaffMember?.roleId
+              ?? currentRoleId
               ?? await resolveDefaultOrganizationRoleIdForStaffTypes(tx, organizationId, staffTypes);
-            const currentRoleId = existingStaffMember?.roleId ?? null;
             if (defaultRoleId !== currentRoleId) {
               const roleIds = Array.from(new Set(
                 [currentRoleId, defaultRoleId].filter(
                   (roleId): roleId is string => typeof roleId === 'string' && roleId.length > 0,
                 ),
               ));
-              if (roleIds.length > 0) {
+              const orderedRoleIds = await orderOrganizationRoleIdsForLock(tx, roleIds);
+              for (const roleId of orderedRoleIds) {
+                await tx.organizationRoles.update({
+                  where: { id: roleId },
+                  data: { updatedAt: now },
+                });
+              }
+              if (orderedRoleIds.length > 0) {
                 const restrictedPermissions = await tx.organizationRolePermissions.findMany({
                   where: {
-                    organizationRoleId: { in: roleIds },
+                    organizationRoleId: { in: orderedRoleIds },
                     permission: { in: RESTRICTED_DOCUMENT_PERMISSIONS },
                   },
                   select: { permission: true },
@@ -688,7 +724,7 @@ export async function POST(req: NextRequest) {
               },
               update: {
                 types: {
-                  set: replaceStaffTypes ? staffTypes : unionStrings(staffTypes, existingStaffMember?.types ?? []),
+                  set: replaceStaffTypes ? staffTypes : unionStrings(staffTypes, currentStaffMember?.types ?? []),
                 },
                 roleId: defaultRoleId,
                 updatedAt: now,

@@ -11,7 +11,10 @@ import {
   normalizeRequiredSignerType,
   type SignerContext,
 } from '@/lib/templateSignerTypes';
-import { findCompletedDocumentSatisfactions } from '@/server/documentEvidence';
+import {
+  findCompletedDocumentSatisfactions,
+  hasCompletedDocumentSignerRole,
+} from '@/server/documentEvidence';
 import { getCanonicalTeamIdsByUserIds } from '@/server/teams/teamMembership';
 
 export const dynamic = 'force-dynamic';
@@ -31,6 +34,8 @@ type ProfileDocumentCard = {
   title: string;
   type: 'PDF' | 'TEXT';
   provenance?: ProfileDocumentProvenance;
+  documentRequirementTitle?: string;
+  versionSequence?: number;
   scopeType?: string;
   scopeId?: string;
   historicalSigningDate?: string;
@@ -351,15 +356,30 @@ export async function GET(_req: NextRequest) {
   const documentSubjectUserIdById = new Map(
     documentSubjectRows.map((subject) => [subject.id, subject.userId]),
   );
+  const documentSubjectOrganizationIdById = new Map(
+    documentSubjectRows.map((subject) => [subject.id, subject.organizationId]),
+  );
 
   const isImportedSubjectVisibleToViewer = (document: {
     provenance: unknown;
     documentSubjectId: string | null;
+    organizationId: string | null | undefined;
   }): boolean => {
     if (document.provenance !== 'IMPORTED' || !document.documentSubjectId) {
       return false;
     }
     const subjectUserId = documentSubjectUserIdById.get(document.documentSubjectId);
+    const subjectOrganizationId = normalizeText(
+      documentSubjectOrganizationIdById.get(document.documentSubjectId),
+    );
+    const documentOrganizationId = normalizeText(document.organizationId);
+    if (
+      !documentOrganizationId
+      || !subjectOrganizationId
+      || documentOrganizationId !== subjectOrganizationId
+    ) {
+      return false;
+    }
     return subjectUserId === userId || (
       typeof subjectUserId === 'string'
       && linkedChildIds.includes(subjectUserId)
@@ -380,6 +400,7 @@ export async function GET(_req: NextRequest) {
         templateId: true,
         eventId: true,
         teamId: true,
+        organizationId: true,
         userId: true,
         hostId: true,
         signerRole: true,
@@ -546,6 +567,12 @@ export async function GET(_req: NextRequest) {
         organizationId: true,
         title: true,
         type: true,
+        versionSequence: true,
+        documentRequirement: {
+          select: {
+            title: true,
+          },
+        },
         signOnce: true,
         requiredSignerType: true,
         content: true,
@@ -554,6 +581,24 @@ export async function GET(_req: NextRequest) {
     : [];
 
   const templateById = new Map(templates.map((template) => [template.id, template]));
+  const incompleteImportedMetadata = signedDocuments.find((document) => {
+    if (document.provenance !== 'IMPORTED') {
+      return false;
+    }
+    const template = templateById.get(document.templateId);
+    return !normalizeText(document.importedFileId)
+      || !template
+      || !normalizeText(template.title)
+      || !Number.isInteger(template.versionSequence)
+      || !template.documentRequirement
+      || !normalizeText(template.documentRequirement.title);
+  });
+  if (incompleteImportedMetadata) {
+    return NextResponse.json(
+      { error: 'Imported document metadata is incomplete.' },
+      { status: 500 },
+    );
+  }
 
   const childRegistrationRows = registrations.filter(
     (registration) =>
@@ -846,18 +891,50 @@ export async function GET(_req: NextRequest) {
       scopes: satisfactionScopes,
     })
     : [];
-  const completeSatisfactionKeys = new Set(
-    satisfactionRows.map((row) =>
-      `${row.documentSubjectId}::${row.templateDocumentId}::${row.scopeType}::${row.scopeId}`),
+  const signerStateRows = documentSubjectIds.length
+    && templateIdsToLoad.length
+    && satisfactionScopes.length
+    ? await prisma.documentRequirementSatisfactions.findMany({
+      where: {
+        documentSubjectId: { in: documentSubjectIds },
+        templateDocumentId: { in: templateIdsToLoad },
+        invalidatedAt: null,
+        OR: satisfactionScopes.map((scope) => ({
+          scopeType: scope.scopeType,
+          scopeId: scope.scopeId,
+        })),
+      },
+      select: {
+        documentSubjectId: true,
+        templateDocumentId: true,
+        scopeType: true,
+        scopeId: true,
+        completedSignerRoles: true,
+      },
+    })
+    : [];
+  const completedSignerRolesBySatisfactionKey = new Map<string, string[]>(
+    signerStateRows.map((row) => {
+      const completedSignerRoles = Array.isArray(row.completedSignerRoles)
+        ? row.completedSignerRoles.filter((role): role is string => typeof role === 'string')
+        : [];
+      return [
+        `${row.documentSubjectId}::${row.templateDocumentId}::${row.scopeType}::${row.scopeId}`,
+        completedSignerRoles,
+      ];
+    }),
   );
-  const hasCompleteDocumentSatisfaction = (params: {
+  type DocumentSatisfactionCardContext = {
     template: { id: string; signOnce: boolean; organizationId: string | null };
     signerContext: SignerContext;
     childUserId?: string;
     scopeType: 'EVENT_PARTICIPATION' | 'TEAM_MEMBERSHIP';
     scopeId: string;
     organizationId?: string | null;
-  }): boolean => {
+  };
+  const getDocumentSatisfactionKey = (
+    params: DocumentSatisfactionCardContext,
+  ): string | undefined => {
     const organizationId = normalizeText(params.organizationId ?? params.template.organizationId);
     const subjectUserId = params.signerContext === 'participant'
       ? userId
@@ -868,11 +945,31 @@ export async function GET(_req: NextRequest) {
     const scopeType = params.template.signOnce ? 'ORGANIZATION' : params.scopeType;
     const scopeId = params.template.signOnce ? organizationId : params.scopeId;
     if (!documentSubjectId || !scopeId) {
+      return undefined;
+    }
+    return `${documentSubjectId}::${params.template.id}::${scopeType}::${scopeId}`;
+  };
+  const hasCompletedDocumentSigner = (
+    params: DocumentSatisfactionCardContext,
+  ): boolean => {
+    const satisfactionKey = getDocumentSatisfactionKey(params);
+    if (!satisfactionKey) {
       return false;
     }
-    return completeSatisfactionKeys.has(
-      `${documentSubjectId}::${params.template.id}::${scopeType}::${scopeId}`,
-    );
+    const completedSignerRoles = completedSignerRolesBySatisfactionKey.get(satisfactionKey);
+    return completedSignerRoles
+      ? hasCompletedDocumentSignerRole(completedSignerRoles, params.signerContext)
+      : false;
+  };
+  const completeSatisfactionKeys = new Set<string>(
+    satisfactionRows.map((row) =>
+      `${row.documentSubjectId}::${row.templateDocumentId}::${row.scopeType}::${row.scopeId}`),
+  );
+  const hasCompleteDocumentSatisfaction = (
+    params: DocumentSatisfactionCardContext,
+  ): boolean => {
+    const satisfactionKey = getDocumentSatisfactionKey(params);
+    return satisfactionKey ? completeSatisfactionKeys.has(satisfactionKey) : false;
   };
   const discoverableEventsSorted = [...discoverableEvents].sort(
     (left, right) => toTimestamp(right.start) - toTimestamp(left.start),
@@ -1050,17 +1147,30 @@ export async function GET(_req: NextRequest) {
           }
           signOnceUnsignedScopeKeys.add(templateScopeKey);
         }
-        if (hasCompleteDocumentSatisfaction({
-          template: {
-            ...template,
-            signOnce: template.signOnce ?? false,
-          },
-          signerContext: context.signerContext,
-          childUserId: scopedChildUserId,
-          scopeType: 'EVENT_PARTICIPATION',
-          scopeId: event.id,
-          organizationId: event.organizationId,
-        })) {
+        if (
+          hasCompleteDocumentSatisfaction({
+            template: {
+              ...template,
+              signOnce: template.signOnce ?? false,
+            },
+            signerContext: context.signerContext,
+            childUserId: scopedChildUserId,
+            scopeType: 'EVENT_PARTICIPATION',
+            scopeId: event.id,
+            organizationId: event.organizationId,
+          })
+          || hasCompletedDocumentSigner({
+            template: {
+              ...template,
+              signOnce: template.signOnce ?? false,
+            },
+            signerContext: context.signerContext,
+            childUserId: scopedChildUserId,
+            scopeType: 'EVENT_PARTICIPATION',
+            scopeId: event.id,
+            organizationId: event.organizationId,
+          })
+        ) {
           return;
         }
 
@@ -1126,6 +1236,8 @@ export async function GET(_req: NextRequest) {
           templateId: template.id,
           title: normalizeText(template.title) ?? 'Required Document',
           type: normalizeTemplateType(template.type),
+          documentRequirementTitle: normalizeText(template.documentRequirement?.title) ?? normalizeText(template.title),
+          versionSequence: template.versionSequence,
           requiredSignerType,
           requiredSignerLabel: getRequiredSignerTypeLabel(requiredSignerType),
           signerContext: context.signerContext,
@@ -1211,17 +1323,30 @@ export async function GET(_req: NextRequest) {
           }
           signOnceUnsignedScopeKeys.add(templateScopeKey);
         }
-        if (hasCompleteDocumentSatisfaction({
-          template: {
-            ...template,
-            signOnce: template.signOnce ?? false,
-          },
-          signerContext: context.signerContext,
-          childUserId: scopedChildUserId,
-          scopeType: 'TEAM_MEMBERSHIP',
-          scopeId: team.id,
-          organizationId: team.organizationId,
-        })) {
+        if (
+          hasCompleteDocumentSatisfaction({
+            template: {
+              ...template,
+              signOnce: template.signOnce ?? false,
+            },
+            signerContext: context.signerContext,
+            childUserId: scopedChildUserId,
+            scopeType: 'TEAM_MEMBERSHIP',
+            scopeId: team.id,
+            organizationId: team.organizationId,
+          })
+          || hasCompletedDocumentSigner({
+            template: {
+              ...template,
+              signOnce: template.signOnce ?? false,
+            },
+            signerContext: context.signerContext,
+            childUserId: scopedChildUserId,
+            scopeType: 'TEAM_MEMBERSHIP',
+            scopeId: team.id,
+            organizationId: team.organizationId,
+          })
+        ) {
           return;
         }
 
@@ -1285,6 +1410,8 @@ export async function GET(_req: NextRequest) {
           organizationId: organizationDisplay.organizationId,
           organizationName: organizationDisplay.organizationName,
           templateId: template.id,
+          documentRequirementTitle: normalizeText(template.documentRequirement?.title) ?? normalizeText(template.title),
+          versionSequence: template.versionSequence,
           title: normalizeText(template.title) ?? 'Required Document',
           type: normalizeTemplateType(template.type),
           requiredSignerType,
@@ -1336,7 +1463,14 @@ export async function GET(_req: NextRequest) {
             ? 'child'
             : 'participant'
       );
-      const childUserId = signerContext === 'participant' ? undefined : normalizeText(document.hostId);
+      const documentSubjectUserId = document.documentSubjectId
+        ? documentSubjectUserIdById.get(document.documentSubjectId)
+        : undefined;
+      const childUserId = signerContext === 'participant'
+        ? undefined
+        : document.provenance === 'IMPORTED'
+          ? documentSubjectUserId
+          : normalizeText(document.hostId);
       const latestTemplateScopeStatus = signedByTemplateScope.get(buildTemplateScopeKey({
         templateId: document.templateId,
         signerContext,
@@ -1383,7 +1517,7 @@ export async function GET(_req: NextRequest) {
         templateOrganizationId: template?.organizationId,
         organizationsById,
       });
-      const type = document.provenance === 'IMPORTED' && document.importedFileId
+      const type = document.provenance === 'IMPORTED'
         ? 'PDF'
         : normalizeTemplateType(template?.type);
       const childName = childUserId ? childNameById.get(childUserId) : undefined;
@@ -1399,6 +1533,8 @@ export async function GET(_req: NextRequest) {
         teamId: team?.id ?? normalizeText(document.teamId),
         teamName: normalizeText(team?.name) ?? undefined,
         organizationId: organizationDisplay.organizationId,
+        documentRequirementTitle: normalizeText(template?.documentRequirement?.title) ?? normalizeText(template?.title),
+        versionSequence: template?.versionSequence,
         organizationName: organizationDisplay.organizationName,
         templateId: normalizeText(document.templateId) ?? '',
         title: normalizeText(template?.title) ?? 'Signed Document',
@@ -1431,6 +1567,7 @@ export async function GET(_req: NextRequest) {
   voidedCards.sort((left, right) => toTimestamp(right.importedAt ?? right.signedAt) - toTimestamp(left.importedAt ?? left.signedAt));
 
   return NextResponse.json({
+    viewerUserId: userId,
     unsigned: unsignedCards,
     voided: voidedCards,
     signed: signedCards,

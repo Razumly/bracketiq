@@ -5,6 +5,11 @@ import { NextRequest } from 'next/server';
 const txMock = {
   $queryRaw: jest.fn(),
   documentRequirements: { findUnique: jest.fn() },
+  events: { findUnique: jest.fn() },
+  eventRegistrations: { findMany: jest.fn() },
+  teams: { findMany: jest.fn() },
+  canonicalTeams: { findMany: jest.fn() },
+  teamRegistrations: { findMany: jest.fn() },
   file: { create: jest.fn() },
   signedDocuments: { create: jest.fn() },
 };
@@ -31,7 +36,12 @@ const ensureDocumentSubjectMock = jest.fn();
 const signedDocumentEvidenceFieldsMock = jest.fn();
 const createDocumentRequirementSatisfactionMock = jest.fn();
 const appendDocumentEvidenceAuditEventMock = jest.fn();
+const recordDocumentEvidenceInAppNotificationMock = jest.fn();
 const notifyDocumentEvidenceChangeMock = jest.fn();
+const readByIdChunksMock = <T>(
+  ids: string[],
+  read: (chunk: string[]) => Promise<T[]>,
+): Promise<T[]> => read(ids);
 const validatePdfBufferMock = jest.fn();
 
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
@@ -47,9 +57,13 @@ jest.mock('@/server/documentEvidence', () => ({
   signedDocumentEvidenceFields: signedDocumentEvidenceFieldsMock,
   createDocumentRequirementSatisfaction: createDocumentRequirementSatisfactionMock,
   appendDocumentEvidenceAuditEvent: appendDocumentEvidenceAuditEventMock,
+  readByIdChunks: readByIdChunksMock,
 }));
 jest.mock('@/server/documentNotifications', () => ({
   notifyDocumentEvidenceChange: (...args: unknown[]) => notifyDocumentEvidenceChangeMock(...args),
+  recordDocumentEvidenceInAppNotification: (...args: unknown[]) => (
+    recordDocumentEvidenceInAppNotificationMock(...args)
+  ),
 }));
 jest.mock('@/lib/pdfUploadValidation', () => ({
   validatePdfBuffer: validatePdfBufferMock,
@@ -121,6 +135,11 @@ describe('POST /api/organizations/[id]/documents/import', () => {
       title: 'Imported Waiver',
       organizationId: 'org_1',
     });
+    txMock.events.findUnique.mockResolvedValue(null);
+    txMock.eventRegistrations.findMany.mockResolvedValue([]);
+    txMock.teams.findMany.mockResolvedValue([]);
+    txMock.canonicalTeams.findMany.mockResolvedValue([]);
+    txMock.teamRegistrations.findMany.mockResolvedValue([]);
     prismaMock.canonicalTeams.findMany.mockResolvedValue([]);
     prismaMock.userData.findMany.mockResolvedValue([{ id: 'player_1' }]);
     prismaMock.events.findUnique.mockResolvedValue(null);
@@ -158,6 +177,7 @@ describe('POST /api/organizations/[id]/documents/import', () => {
     txMock.signedDocuments.create.mockResolvedValue({ id: 'evidence_1' });
     createDocumentRequirementSatisfactionMock.mockResolvedValue(undefined);
     appendDocumentEvidenceAuditEventMock.mockResolvedValue(undefined);
+    recordDocumentEvidenceInAppNotificationMock.mockResolvedValue(undefined);
     notifyDocumentEvidenceChangeMock.mockResolvedValue(undefined);
     prismaMock.$transaction.mockImplementation(async (callback: (tx: typeof txMock) => unknown) => (
       callback(txMock)
@@ -232,14 +252,28 @@ describe('POST /api/organizations/[id]/documents/import', () => {
       }),
       expect.anything(),
     );
-    expect(notifyDocumentEvidenceChangeMock).toHaveBeenCalledWith({
-      organizationId: 'org_1',
-      subjectUserId: 'player_1',
-      evidenceId: expect.any(String),
-      documentName: 'Imported Waiver',
-      action: 'IMPORT',
-      actorUserId: 'manager_1',
-    });
+    expect(recordDocumentEvidenceInAppNotificationMock).toHaveBeenCalledWith(
+      {
+        organizationId: 'org_1',
+        subjectUserId: 'player_1',
+        evidenceId: expect.any(String),
+        documentName: 'Imported Waiver',
+        action: 'IMPORT',
+        actorUserId: 'manager_1',
+      },
+      expect.anything(),
+    );
+    expect(notifyDocumentEvidenceChangeMock).toHaveBeenCalledWith(
+      {
+        organizationId: 'org_1',
+        subjectUserId: 'player_1',
+        evidenceId: expect.any(String),
+        documentName: 'Imported Waiver',
+        action: 'IMPORT',
+        actorUserId: 'manager_1',
+      },
+      { isInAppIncluded: false },
+    );
   });
   it('keeps a committed import when notification delivery fails', async () => {
     notifyDocumentEvidenceChangeMock.mockRejectedValueOnce(new Error('Notification failed.'));
@@ -421,15 +455,97 @@ describe('POST /api/organizations/[id]/documents/import', () => {
     expect(missingFileResponse.status).toBe(400);
   });
 
-  it('rejects every non-sign-once version before scope or customer checks', async () => {
+  it.each(['STARTED', 'PENDING', 'ACTIVE', 'BLOCKED', 'CONSENTFAILED'])('accepts a non-sign-once version for an eligible, ended Event Participation in %s status', async (status) => {
     prismaMock.templateDocuments.findUnique.mockResolvedValueOnce({
       id: 'version_1',
+      title: 'Imported Event Waiver',
       organizationId: 'org_1',
       documentRequirementId: 'requirement_1',
       requiredSignerType: 'PARTICIPANT',
       signerRoles: ['participant'],
       signOnce: false,
     });
+    txMock.$queryRaw.mockResolvedValueOnce([{
+      id: 'version_1',
+      title: 'Imported Event Waiver',
+      organizationId: 'org_1',
+      documentRequirementId: 'requirement_1',
+      requiredSignerType: 'PARTICIPANT',
+      signerRoles: ['participant'],
+      signOnce: false,
+    }]);
+    prismaMock.events.findUnique.mockResolvedValueOnce({
+      id: 'event_1',
+      organizationId: 'org_1',
+      end: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    txMock.events.findUnique.mockResolvedValueOnce({
+      id: 'event_1',
+      organizationId: 'org_1',
+      end: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    const participation = {
+      id: 'registration_1',
+      eventId: 'event_1',
+      registrantId: 'player_1',
+      parentId: null,
+      registrantType: 'SELF',
+      status,
+      eventTeamId: null,
+      sourceTeamRegistrationId: null,
+    };
+    prismaMock.eventRegistrations.findMany.mockResolvedValueOnce([participation]);
+    txMock.eventRegistrations.findMany.mockResolvedValueOnce([participation]);
+    listOrganizationUsersScopeEventsMock.mockResolvedValueOnce([
+      { id: 'event_1', organizationId: 'org_1', userIds: [], teamIds: [] },
+    ]);
+
+    const response = await POST(
+      buildRequest({ scopeType: 'EVENT_PARTICIPATION', scopeId: 'event_1' }),
+      routeParams,
+    );
+
+    expect(response.status).toBe(201);
+    expect(txMock.signedDocuments.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        documentName: 'Imported Event Waiver',
+        eventId: 'event_1',
+        scopeType: 'EVENT_PARTICIPATION',
+        scopeId: 'event_1',
+      }),
+    });
+    expect(createDocumentRequirementSatisfactionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scopeType: 'EVENT_PARTICIPATION',
+        scopeId: 'event_1',
+      }),
+      expect.anything(),
+    );
+  });
+  it.each(['CANCELLED', 'PAYMENT_FAILED', 'LEFT', 'REMOVED'])('rejects %s Event Participation status', async (status) => {
+    prismaMock.templateDocuments.findUnique.mockResolvedValueOnce({
+      id: 'version_1',
+      title: 'Imported Event Waiver',
+      organizationId: 'org_1',
+      documentRequirementId: 'requirement_1',
+      requiredSignerType: 'PARTICIPANT',
+      signerRoles: ['participant'],
+      signOnce: false,
+    });
+    prismaMock.events.findUnique.mockResolvedValueOnce({ id: 'event_1', organizationId: 'org_1' });
+    prismaMock.eventRegistrations.findMany.mockResolvedValueOnce([{
+      id: 'registration_1',
+      eventId: 'event_1',
+      registrantId: 'player_1',
+      parentId: null,
+      registrantType: 'SELF',
+      status,
+      eventTeamId: null,
+      sourceTeamRegistrationId: null,
+    }]);
+    listOrganizationUsersScopeEventsMock.mockResolvedValueOnce([
+      { id: 'event_1', organizationId: 'org_1', userIds: ['player_1'], teamIds: [] },
+    ]);
 
     const response = await POST(
       buildRequest({ scopeType: 'EVENT_PARTICIPATION', scopeId: 'event_1' }),
@@ -437,8 +553,329 @@ describe('POST /api/organizations/[id]/documents/import', () => {
     );
 
     expect(response.status).toBe(400);
-    expect((await response.json()).error).toContain('Only sign-once');
-    expect(listOrganizationUsersScopeEventsMock).not.toHaveBeenCalled();
+    expect((await response.json()).error).toContain('eligible participation');
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+  it('rejects an Event Participation scope outside the Organization event list', async () => {
+    prismaMock.templateDocuments.findUnique.mockResolvedValueOnce({
+      id: 'version_1',
+      title: 'Imported Event Waiver',
+      organizationId: 'org_1',
+      documentRequirementId: 'requirement_1',
+      requiredSignerType: 'PARTICIPANT',
+      signerRoles: ['participant'],
+      signOnce: false,
+    });
+    prismaMock.events.findUnique.mockResolvedValueOnce({ id: 'event_2', organizationId: 'org_1' });
+    listOrganizationUsersScopeEventsMock.mockResolvedValueOnce([
+      { id: 'event_1', organizationId: 'org_1', userIds: ['player_1'], teamIds: [] },
+    ]);
+
+    const response = await POST(
+      buildRequest({ scopeType: 'EVENT_PARTICIPATION', scopeId: 'event_2' }),
+      routeParams,
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toContain('eligible participation');
+    expect(prismaMock.eventRegistrations.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects an Event Participation when the selected customer differs from the event registration', async () => {
+    prismaMock.userData.findMany.mockResolvedValueOnce([{ id: 'player_2' }]);
+    prismaMock.templateDocuments.findUnique.mockResolvedValueOnce({
+      id: 'version_1',
+      title: 'Imported Event Waiver',
+      organizationId: 'org_1',
+      documentRequirementId: 'requirement_1',
+      requiredSignerType: 'PARTICIPANT',
+      signerRoles: ['participant'],
+      signOnce: false,
+    });
+    prismaMock.events.findUnique.mockResolvedValueOnce({ id: 'event_1', organizationId: 'org_1' });
+    listOrganizationUsersScopeEventsMock.mockResolvedValueOnce([
+      { id: 'event_1', organizationId: 'org_1', userIds: ['player_2'], teamIds: [] },
+    ]);
+    prismaMock.eventRegistrations.findMany.mockResolvedValueOnce([{
+      id: 'registration_1',
+      eventId: 'event_1',
+      registrantId: 'player_1',
+      parentId: null,
+      registrantType: 'SELF',
+      status: 'ACTIVE',
+      eventTeamId: null,
+      sourceTeamRegistrationId: null,
+    }]);
+
+    const response = await POST(
+      buildRequest({ subjectUserId: 'player_2', scopeType: 'EVENT_PARTICIPATION', scopeId: 'event_1' }),
+      routeParams,
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toContain('eligible participation');
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+
+  it('accepts a player whose eligible participation comes from a registered Team', async () => {
+    prismaMock.templateDocuments.findUnique.mockResolvedValueOnce({
+      id: 'version_1',
+      title: 'Imported Team Waiver',
+      organizationId: 'org_1',
+      documentRequirementId: 'requirement_1',
+      requiredSignerType: 'PARTICIPANT',
+      signerRoles: ['participant'],
+      signOnce: false,
+    });
+    txMock.$queryRaw.mockResolvedValueOnce([{
+      id: 'version_1',
+      title: 'Imported Team Waiver',
+      organizationId: 'org_1',
+      documentRequirementId: 'requirement_1',
+      requiredSignerType: 'PARTICIPANT',
+      signerRoles: ['participant'],
+      signOnce: false,
+    }]);
+    listOrganizationUsersScopeEventsMock.mockResolvedValueOnce([
+      { id: 'event_1', organizationId: 'org_1', userIds: [], teamIds: ['event_team_1', 'event_team_2'] },
+    ]);
+    prismaMock.events.findUnique.mockResolvedValueOnce({
+      id: 'event_1',
+      organizationId: 'org_1',
+      end: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    txMock.events.findUnique.mockResolvedValueOnce({
+      id: 'event_1',
+      organizationId: 'org_1',
+      end: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    prismaMock.canonicalTeams.findMany
+      .mockResolvedValueOnce([])
+      .mockImplementationOnce((args) => Promise.resolve(
+        args.where.id.in.includes('canonical_team_1')
+          ? [{ id: 'canonical_team_1' }, { id: 'canonical_team_2' }]
+          : [],
+      ));
+    txMock.canonicalTeams.findMany.mockResolvedValueOnce([
+      { id: 'canonical_team_1' },
+      { id: 'canonical_team_2' },
+    ]);
+    const teamRegistration = {
+      id: 'event_team_registration_1',
+      eventId: 'event_1',
+      registrantId: 'event_team_1',
+      parentId: 'canonical_team_1',
+      registrantType: 'TEAM',
+      status: 'ACTIVE',
+      eventTeamId: 'event_team_1',
+      sourceTeamRegistrationId: null,
+    };
+    const playerRegistration = {
+      id: 'event_player_registration_1',
+      eventId: 'event_1',
+      registrantId: 'player_1',
+      parentId: 'canonical_team_1',
+      registrantType: 'SELF',
+      status: 'CONSENTFAILED',
+      eventTeamId: 'event_team_1',
+      sourceTeamRegistrationId: 'team_membership_1',
+    };
+    const eventTeam = {
+      id: 'event_team_1',
+      eventId: 'event_1',
+      parentTeamId: null,
+      kind: 'REGISTERED',
+      playerIds: ['player_1'],
+      captainId: null,
+      managerId: null,
+      headCoachId: null,
+      coachIds: [],
+    };
+    const secondTeamRegistration = {
+      ...teamRegistration,
+      id: 'event_team_registration_2',
+      registrantId: 'event_team_2',
+      parentId: 'canonical_team_2',
+      eventTeamId: 'event_team_2',
+    };
+    prismaMock.eventRegistrations.findMany.mockResolvedValueOnce([
+      teamRegistration,
+      secondTeamRegistration,
+      playerRegistration,
+    ]);
+    txMock.eventRegistrations.findMany.mockResolvedValueOnce([
+      teamRegistration,
+      secondTeamRegistration,
+      playerRegistration,
+    ]);
+    const secondEventTeam = {
+      ...eventTeam,
+      parentTeamId: null,
+      playerIds: ['player_2'],
+    };
+    prismaMock.teams.findMany.mockResolvedValueOnce([eventTeam, secondEventTeam]);
+    txMock.teams.findMany.mockResolvedValueOnce([eventTeam, secondEventTeam]);
+    prismaMock.teamRegistrations.findMany.mockResolvedValueOnce([{
+      id: 'team_membership_1',
+      teamId: 'canonical_team_1',
+      userId: 'player_1',
+      status: 'ACTIVE',
+    }]);
+    txMock.teamRegistrations.findMany.mockResolvedValueOnce([{
+      id: 'team_membership_1',
+      teamId: 'canonical_team_1',
+      userId: 'player_1',
+      status: 'ACTIVE',
+    }]);
+
+    const response = await POST(
+      buildRequest({ scopeType: 'EVENT_PARTICIPATION', scopeId: 'event_1' }),
+      routeParams,
+    );
+
+    expect(prismaMock.eventRegistrations.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        status: { in: ['STARTED', 'PENDING', 'ACTIVE', 'BLOCKED', 'CONSENTFAILED'] },
+      }),
+    }));
+    expect(response.status).toBe(201);
+    expect(txMock.signedDocuments.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        documentSubjectId: 'document-subject:org_1:player_1',
+        eventId: 'event_1',
+        scopeType: 'EVENT_PARTICIPATION',
+        scopeId: 'event_1',
+      }),
+    });
+    expect(createDocumentRequirementSatisfactionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentSubjectId: 'document-subject:org_1:player_1',
+        scopeType: 'EVENT_PARTICIPATION',
+        scopeId: 'event_1',
+      }),
+      expect.anything(),
+    );
+  });
+  it('rejects a teammate who is not in the selected Team event roster', async () => {
+    prismaMock.templateDocuments.findUnique.mockResolvedValueOnce({
+      id: 'version_1',
+      title: 'Imported Team Waiver',
+      organizationId: 'org_1',
+      documentRequirementId: 'requirement_1',
+      requiredSignerType: 'PARTICIPANT',
+      signerRoles: ['participant'],
+      signOnce: false,
+    });
+    listOrganizationUsersScopeEventsMock.mockResolvedValueOnce([
+      { id: 'event_1', organizationId: 'org_1', userIds: [], teamIds: ['event_team_1'] },
+    ]);
+    prismaMock.events.findUnique.mockResolvedValueOnce({ id: 'event_1', organizationId: 'org_1' });
+    prismaMock.canonicalTeams.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: 'canonical_team_1' }]);
+    prismaMock.eventRegistrations.findMany.mockResolvedValueOnce([{
+      id: 'event_team_registration_1',
+      eventId: 'event_1',
+      registrantId: 'event_team_1',
+      parentId: 'canonical_team_1',
+      registrantType: 'TEAM',
+      status: 'ACTIVE',
+      eventTeamId: 'event_team_1',
+      sourceTeamRegistrationId: null,
+    }]);
+    prismaMock.teams.findMany.mockResolvedValueOnce([{
+      id: 'event_team_1',
+      eventId: 'event_1',
+      parentTeamId: 'canonical_team_1',
+      kind: 'REGISTERED',
+      playerIds: ['teammate_1'],
+      captainId: null,
+      managerId: null,
+      headCoachId: null,
+      coachIds: [],
+    }]);
+    prismaMock.teamRegistrations.findMany.mockResolvedValueOnce([{
+      id: 'team_membership_1',
+      teamId: 'canonical_team_1',
+      userId: 'player_1',
+    }]);
+
+    const response = await POST(
+      buildRequest({ scopeType: 'EVENT_PARTICIPATION', scopeId: 'event_1' }),
+      routeParams,
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toContain('eligible participation');
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(getStorageProviderMock().putObject).not.toHaveBeenCalled();
+  });
+  it('rejects removed Team membership for a new Event Participation import', async () => {
+    prismaMock.templateDocuments.findUnique.mockResolvedValueOnce({
+      id: 'version_1',
+      title: 'Imported Team Waiver',
+      organizationId: 'org_1',
+      documentRequirementId: 'requirement_1',
+      requiredSignerType: 'PARTICIPANT',
+      signerRoles: ['participant'],
+      signOnce: false,
+    });
+    listOrganizationUsersScopeEventsMock.mockResolvedValueOnce([
+      { id: 'event_1', organizationId: 'org_1', userIds: [], teamIds: ['event_team_1'] },
+    ]);
+    prismaMock.events.findUnique.mockResolvedValueOnce({ id: 'event_1', organizationId: 'org_1' });
+    prismaMock.canonicalTeams.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: 'canonical_team_1' }]);
+    prismaMock.eventRegistrations.findMany.mockResolvedValueOnce([
+      {
+        id: 'event_team_registration_1',
+        eventId: 'event_1',
+        registrantId: 'event_team_1',
+        parentId: 'canonical_team_1',
+        registrantType: 'TEAM',
+        status: 'ACTIVE',
+        eventTeamId: 'event_team_1',
+        sourceTeamRegistrationId: null,
+      },
+      {
+        id: 'event_player_registration_1',
+        eventId: 'event_1',
+        registrantId: 'player_1',
+        parentId: 'canonical_team_1',
+        registrantType: 'SELF',
+        status: 'ACTIVE',
+        eventTeamId: 'event_team_1',
+        sourceTeamRegistrationId: 'membership_removed',
+      },
+    ]);
+    prismaMock.teams.findMany.mockResolvedValueOnce([{
+      id: 'event_team_1',
+      eventId: 'event_1',
+      parentTeamId: 'canonical_team_1',
+      kind: 'REGISTERED',
+      playerIds: ['player_1'],
+      captainId: null,
+      managerId: null,
+      headCoachId: null,
+      coachIds: [],
+    }]);
+    prismaMock.teamRegistrations.findMany.mockResolvedValueOnce([{
+      id: 'membership_removed',
+      teamId: 'canonical_team_1',
+      userId: 'player_1',
+      status: 'REMOVED',
+    }]);
+
+    const response = await POST(
+      buildRequest({ scopeType: 'EVENT_PARTICIPATION', scopeId: 'event_1' }),
+      routeParams,
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toContain('eligible participation');
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
   });
   it('locks and revalidates the selected version inside the transaction', async () => {

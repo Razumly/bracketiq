@@ -47,7 +47,7 @@ class RoomMigrationsIosTest {
                 "INSERT INTO `MatchOperationOutboxEntry` (`id`, `payloadJson`) VALUES ('outbox-1', '{\"score\":1}')",
             )
 
-            val migrations = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V100.take(4)
+            val migrations = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V101.take(4)
             assertEquals(listOf(32, 33, 34, 35), migrations.map { it.startVersion })
             assertEquals(listOf(33, 34, 35, 90), migrations.map { it.endVersion })
 
@@ -123,7 +123,7 @@ class RoomMigrationsIosTest {
                 """.trimIndent(),
             )
 
-            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V100.first { it.startVersion == 90 }
+            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V101.first { it.startVersion == 90 }
             assertEquals(90, migration.startVersion)
             assertEquals(91, migration.endVersion)
             migration.migrate(connection)
@@ -140,7 +140,7 @@ class RoomMigrationsIosTest {
     @Test
     fun v91CatalogMigration_createsViewerScopedExactQueryCacheTables() {
         BundledSQLiteDriver().open(":memory:").use { connection ->
-            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V100.first { it.startVersion == 91 }
+            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V101.first { it.startVersion == 91 }
             assertEquals(91, migration.startVersion)
             assertEquals(92, migration.endVersion)
             migration.migrate(connection)
@@ -195,7 +195,7 @@ class RoomMigrationsIosTest {
             connection.execute("INSERT INTO `team_user_cross_ref` VALUES ('team-array', 'existing_user')")
             connection.execute("INSERT INTO `chat_user_cross_ref` VALUES ('chat-array', 'existing_user')")
 
-            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V100.first { it.startVersion == 92 }
+            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V101.first { it.startVersion == 92 }
             assertEquals(92, migration.startVersion)
             assertEquals(93, migration.endVersion)
             migration.migrate(connection)
@@ -241,7 +241,7 @@ class RoomMigrationsIosTest {
             connection.execute("CREATE TABLE `Field` (`id` TEXT NOT NULL, PRIMARY KEY(`id`))")
             connection.execute("INSERT INTO `Field` (`id`) VALUES ('field-existing')")
 
-            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V100.first { it.startVersion == 96 }
+            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V101.first { it.startVersion == 96 }
             assertEquals(97, migration.endVersion)
             migration.migrate(connection)
 
@@ -273,7 +273,7 @@ class RoomMigrationsIosTest {
                 """.trimIndent(),
             )
 
-            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V100.first {
+            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V101.first {
                 it.startVersion == 97
             }
             assertEquals(98, migration.endVersion)
@@ -327,7 +327,7 @@ class RoomMigrationsIosTest {
                 """.trimIndent(),
             )
 
-            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V100.first {
+            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V101.first {
                 it.startVersion == 98
             }
             assertEquals(99, migration.endVersion)
@@ -372,7 +372,7 @@ class RoomMigrationsIosTest {
                 """.trimIndent(),
             )
 
-            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V100.first {
+            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V101.first {
                 it.startVersion == 99
             }
             assertEquals(100, migration.endVersion)
@@ -386,7 +386,47 @@ class RoomMigrationsIosTest {
             ) { statement -> assertTrue(statement.isNull(0)) }
         }
     }
+    @Test
+    fun givenV100DatabaseWithoutProfileDocuments_whenMigratedToV101_thenCreatesDocumentCacheWithVersionColumns() {
+        BundledSQLiteDriver().open(":memory:").use { connection ->
+            val migration = IOS_MVP_DATABASE_MIGRATIONS_V32_TO_V101.first {
+                it.startVersion == 100
+            }
+            assertEquals(101, migration.endVersion)
+            migration.migrate(connection)
+            connection.assertSingleRow(
+                "SELECT `name` FROM `sqlite_master` WHERE `type` = 'table' AND `name` = 'profile_document_cache'",
+            ) { statement -> assertEquals("profile_document_cache", statement.getText(0)) }
 
+            connection.execute(
+                """
+                INSERT INTO `profile_document_cache` (
+                    `viewerKey`, `id`, `sortOrder`, `status`, `organizationName`,
+                    `templateId`, `documentRequirementTitle`, `versionSequence`,
+                    `title`, `type`, `requiredSignerType`, `requiredSignerLabel`,
+                    `signerContext`, `signerContextLabel`, `requiresChildEmail`,
+                    `signedDocumentRecordId`
+                ) VALUES (
+                    'viewer-1', 'imported-1', 0, 'SIGNED', 'City League',
+                    'template-1', 'Imported waiver requirement', 2,
+                    'Imported waiver', 'PDF', 'PARTICIPANT', 'Participant',
+                    'participant', 'Participant', 0, 'imported-1'
+                )
+                """.trimIndent(),
+            )
+            connection.assertSingleRow(
+                """
+                SELECT `id`, `documentRequirementTitle`, `versionSequence`
+                FROM `profile_document_cache`
+                WHERE `viewerKey` = 'viewer-1' AND `id` = 'imported-1'
+                """.trimIndent(),
+            ) { statement ->
+                assertEquals("imported-1", statement.getText(0))
+                assertEquals("Imported waiver requirement", statement.getText(1))
+                assertEquals(2, statement.getInt(2))
+            }
+        }
+    }
 }
 
 private fun SQLiteConnection.execute(sql: String) {

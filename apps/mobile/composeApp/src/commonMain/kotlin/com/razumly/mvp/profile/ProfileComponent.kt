@@ -81,6 +81,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
@@ -575,6 +576,10 @@ data class ProfileWebDocumentPromptState(
     @property:ObjCName(swiftName = "promptDescription")
     val description: String? = null,
 )
+data class ProfilePdfDocumentPromptState(
+    val title: String,
+    val bytes: ByteArray,
+)
 
 interface ProfileComponent : IPaymentProcessor {
     val childStack: Value<ChildStack<*, Child>>
@@ -597,6 +602,7 @@ interface ProfileComponent : IPaymentProcessor {
     val activeDocumentActionId: StateFlow<String?>
     val textSignaturePrompt: StateFlow<ProfileTextSignaturePromptState?>
     val webDocumentPrompt: StateFlow<ProfileWebDocumentPromptState?>
+    val pdfDocumentPrompt: StateFlow<ProfilePdfDocumentPromptState?>
     val billingAddressPrompt: StateFlow<BillingAddressDraft?>
     val discountCodePrompt: StateFlow<DiscountCodePromptState?>
     val isStripeAccountConnected: StateFlow<Boolean>
@@ -672,9 +678,10 @@ interface ProfileComponent : IPaymentProcessor {
     fun acceptInvite(invite: Invite)
     fun declineInvite(invite: Invite)
     fun openInviteEvent(eventId: String)
-    fun signDocument(document: ProfileDocumentCard)
-    fun openSignedDocument(document: ProfileDocumentCard)
     fun openScheduleEvent(eventId: String)
+    fun signDocument(document: ProfileDocumentCard)
+    fun openDocument(document: ProfileDocumentCard)
+    fun dismissPdfDocumentPrompt()
     fun openScheduleMatch(match: MatchWithRelations)
     fun confirmTextSignature()
     fun dismissTextSignature()
@@ -852,6 +859,8 @@ class DefaultProfileComponent(
 
     private val _webDocumentPrompt = MutableStateFlow<ProfileWebDocumentPromptState?>(null)
     override val webDocumentPrompt = _webDocumentPrompt.asStateFlow()
+    private val _pdfDocumentPrompt = MutableStateFlow<ProfilePdfDocumentPromptState?>(null)
+    override val pdfDocumentPrompt = _pdfDocumentPrompt.asStateFlow()
 
     private val _isStripeAccountConnected = MutableStateFlow(false)
     override val isStripeAccountConnected = _isStripeAccountConnected.asStateFlow()
@@ -888,6 +897,16 @@ class DefaultProfileComponent(
         scope.launch {
             billingRepository.observeDiscounts(ownerType = "USER").collect { discounts ->
                 _discountsState.value = _discountsState.value.copy(discounts = discounts)
+            }
+        }
+        scope.launch {
+            billingRepository.observeProfileDocuments().collect { bundle ->
+                _documentsState.value = _documentsState.value.copy(
+                    isLoading = false,
+                    unsignedDocuments = bundle.unsigned,
+                    signedDocuments = bundle.signed,
+                    error = null,
+                )
             }
         }
         startDiscountTargetsObserver(_discountsState.value.itemType)
@@ -2456,11 +2475,9 @@ class DefaultProfileComponent(
             )
 
             billingRepository.listProfileDocuments()
-                .onSuccess { bundle ->
-                    _documentsState.value = ProfileDocumentsState(
+                .onSuccess {
+                    _documentsState.value = _documentsState.value.copy(
                         isLoading = false,
-                        unsignedDocuments = bundle.unsigned,
-                        signedDocuments = bundle.signed,
                         error = null,
                     )
                 }
@@ -2821,8 +2838,9 @@ class DefaultProfileComponent(
         }
     }
 
-    override fun openSignedDocument(document: ProfileDocumentCard) {
-        if (document.type == ProfileDocumentType.TEXT) {
+    override fun openDocument(document: ProfileDocumentCard) {
+        val isImported = document.provenance.equals("IMPORTED", ignoreCase = true)
+        if (document.type == ProfileDocumentType.TEXT && !isImported) {
             return
         }
 
@@ -2836,21 +2854,40 @@ class DefaultProfileComponent(
             _activeDocumentActionId.value = document.id
             try {
                 withProfileLoading("Opening document ...") {
-                    val resolvedUrl = if (
-                        viewUrl.startsWith("http://", ignoreCase = true) ||
-                        viewUrl.startsWith("https://", ignoreCase = true)
-                    ) {
-                        viewUrl
-                    } else {
-                        "${apiBaseUrl.trimEnd('/')}/${viewUrl.trimStart('/')}"
-                    }
+                    if (!isImported) {
+                        val resolvedUrl = if (
+                            viewUrl.startsWith("http://", ignoreCase = true) ||
+                            viewUrl.startsWith("https://", ignoreCase = true)
+                        ) {
+                            viewUrl
+                        } else {
+                            "${apiBaseUrl.trimEnd('/')}/${viewUrl.trimStart('/')}"
+                        }
 
-                    _webDocumentPrompt.value = ProfileWebDocumentPromptState(
-                        title = document.title,
-                        url = resolvedUrl,
-                        mode = ProfileWebDocumentPromptMode.VIEW,
-                        description = document.organizationName,
-                    )
+                        _webDocumentPrompt.value = ProfileWebDocumentPromptState(
+                            title = document.title,
+                            url = resolvedUrl,
+                            mode = ProfileWebDocumentPromptMode.VIEW,
+                            description = document.organizationName,
+                        )
+                    } else {
+                        billingRepository.getProfileDocumentPdf(viewUrl)
+                            .onSuccess { bytes ->
+                                if (bytes.isEmpty()) {
+                                    _errorState.value = ErrorMessage("This document has no PDF content.")
+                                } else {
+                                    _pdfDocumentPrompt.value = ProfilePdfDocumentPromptState(
+                                        title = document.title,
+                                        bytes = bytes,
+                                    )
+                                }
+                            }
+                            .onFailure { throwable ->
+                                _errorState.value = ErrorMessage(
+                                    throwable.userMessage("Unable to open document."),
+                                )
+                            }
+                    }
                 }
             } finally {
                 _activeDocumentActionId.value = null
@@ -2922,6 +2959,9 @@ class DefaultProfileComponent(
         if (mode == ProfileWebDocumentPromptMode.SIGN) {
             _errorState.value = ErrorMessage("Document signing canceled.")
         }
+    }
+    override fun dismissPdfDocumentPrompt() {
+        _pdfDocumentPrompt.value = null
     }
 
     override fun submitBillingAddress(address: BillingAddressDraft) {

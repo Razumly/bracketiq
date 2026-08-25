@@ -534,7 +534,12 @@ const hardDeleteUnreferencedEvent = async ({
     await tx.divisions.deleteMany({ where: { eventId } });
     await tx.eventRegistrations.deleteMany({ where: { eventId } });
     await tx.refundRequests.deleteMany({ where: { eventId } });
-    await tx.signedDocuments.deleteMany({ where: { eventId } });
+    await tx.signedDocuments.deleteMany({
+      where: {
+        eventId,
+        provenance: { not: 'IMPORTED' },
+      },
+    });
     await tx.invites.deleteMany({ where: { eventId } });
     await tx.paymentIntents.deleteMany({ where: { eventId } });
     await tx.templateDocuments.deleteMany({ where: { templateId: eventId } });

@@ -18,6 +18,7 @@ jest.mock('@/server/billing/billPaymentActions', () => ({
 }));
 jest.mock('@/server/accessControl', () => ({
   hasOrgPermission: jest.fn(),
+  hasAnyOrgPermission: jest.fn(),
 }));
 
 import { assertFileReadAccess } from '@/server/fileAccess';
@@ -38,6 +39,7 @@ const billingActionsMock = jest.requireMock('@/server/billing/billPaymentActions
 };
 const organizationAccessMock = jest.requireMock('@/server/accessControl') as {
   hasOrgPermission: jest.Mock;
+  hasAnyOrgPermission: jest.Mock;
 };
 describe('assertFileReadAccess', () => {
   beforeEach(() => {
@@ -113,7 +115,7 @@ describe('assertFileReadAccess', () => {
       id: 'org_1',
       ownerId: 'owner_1',
     });
-    organizationAccessMock.hasOrgPermission.mockResolvedValueOnce(false);
+    organizationAccessMock.hasAnyOrgPermission.mockResolvedValueOnce(false);
     await expect(assertFileReadAccess(fileRequest('imported_file'), 'imported_file'))
       .rejects.toMatchObject({ status: 403 });
   });
@@ -128,5 +130,52 @@ describe('assertFileReadAccess', () => {
 
     await expect(assertFileReadAccess(fileRequest('imported_file'), 'imported_file'))
       .resolves.toBeUndefined();
+  });
+  it('rejects a subject whose imported document subject belongs to another organization', async () => {
+    prismaMock.signedDocuments.findFirst.mockResolvedValueOnce({
+      userId: null,
+      documentSubjectId: 'document-subject:org_2:subject_1',
+      organizationId: 'org_1',
+    });
+    requireSessionMock.mockResolvedValueOnce({ userId: 'subject_1', isAdmin: false });
+    prismaMock.documentSubjects.findUnique.mockResolvedValueOnce({
+      userId: 'subject_1',
+      organizationId: 'org_2',
+    });
+
+    await expect(assertFileReadAccess(fileRequest('imported_file'), 'imported_file'))
+      .rejects.toMatchObject({ status: 403 });
+    expect(prismaMock.parentChildLinks.findFirst).not.toHaveBeenCalled();
+  });
+  it.each([
+    'documents.import',
+    'documents.void',
+    'documents.audit',
+  ])('allows organization staff with %s to read an imported document file', async (permission) => {
+    prismaMock.signedDocuments.findFirst.mockResolvedValueOnce({
+      userId: 'subject_1',
+      documentSubjectId: null,
+      organizationId: 'org_1',
+    });
+    requireSessionMock.mockResolvedValueOnce({ userId: 'staff_1', isAdmin: false });
+    prismaMock.organizations.findUnique.mockResolvedValueOnce({
+      id: 'org_1',
+      ownerId: 'owner_1',
+    });
+    organizationAccessMock.hasAnyOrgPermission.mockImplementation(
+      async (
+        _session: unknown,
+        _organization: unknown,
+        requestedPermissions: string[],
+      ) => requestedPermissions.includes(permission),
+    );
+
+    await expect(assertFileReadAccess(fileRequest('imported_file'), 'imported_file'))
+      .resolves.toBeUndefined();
+    expect(organizationAccessMock.hasAnyOrgPermission).toHaveBeenCalledWith(
+      { userId: 'staff_1', isAdmin: false },
+      { id: 'org_1', ownerId: 'owner_1' },
+      ['documents.import', 'documents.void', 'documents.audit'],
+    );
   });
 });

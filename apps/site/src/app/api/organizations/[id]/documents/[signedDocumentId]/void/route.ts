@@ -14,6 +14,7 @@ import {
 import {
   notifyDocumentEvidenceChange,
   recordDocumentEvidenceInAppNotification,
+  type DocumentNotificationDatabase,
 } from "@/server/documentNotifications";
 
 export const DOCUMENT_VOID_REASONS = [
@@ -173,6 +174,12 @@ export async function POST(
         },
         tx as unknown as DocumentEvidenceDatabase,
       );
+      if (notificationInput) {
+        await recordDocumentEvidenceInAppNotification(
+          notificationInput,
+          tx as unknown as DocumentNotificationDatabase,
+        );
+      }
     });
   } catch (error) {
     const message =
@@ -182,15 +189,6 @@ export async function POST(
     return NextResponse.json({ error: message }, { status: 400 });
   }
   if (isVoided && notificationInput) {
-    try {
-      await recordDocumentEvidenceInAppNotification(notificationInput);
-    } catch (error) {
-      console.error("Document void in-app notification failed.", {
-        organizationId,
-        evidenceId: evidence.id,
-        error,
-      });
-    }
     try {
       await notifyDocumentEvidenceChange(
         notificationInput,

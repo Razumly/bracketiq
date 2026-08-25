@@ -9,6 +9,7 @@ const prismaMock = {
   parentChildLinks: { findFirst: jest.fn() },
   file: { findUnique: jest.fn() },
   organizations: { findUnique: jest.fn() },
+  templateDocuments: { findUnique: jest.fn() },
   events: { findUnique: jest.fn() },
   eventRegistrations: { findFirst: jest.fn() },
   canonicalTeams: { findUnique: jest.fn() },
@@ -16,21 +17,24 @@ const prismaMock = {
   teamStaffAssignments: { findFirst: jest.fn() },
 };
 const requireSessionMock = jest.fn();
+const downloadSignedDocumentPdfMock = jest.fn();
+const isBoldSignConfiguredMock = jest.fn();
 const getStorageProviderMock = jest.fn();
 const canManageOrganizationMock = jest.fn();
 const canOfficialOrganizationMock = jest.fn();
 const hasOrgPermissionMock = jest.fn();
-
+const hasAnyOrgPermissionMock = jest.fn();
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 jest.mock('@/lib/permissions', () => ({ requireSession: requireSessionMock }));
 jest.mock('@/lib/storageProvider', () => ({ getStorageProvider: getStorageProviderMock }));
 jest.mock('@/lib/boldsignServer', () => ({
-  downloadSignedDocumentPdf: jest.fn(),
-  isBoldSignConfigured: jest.fn(),
+  downloadSignedDocumentPdf: (...args: unknown[]) => downloadSignedDocumentPdfMock(...args),
+  isBoldSignConfigured: (...args: unknown[]) => isBoldSignConfiguredMock(...args),
 }));
 jest.mock('@/server/accessControl', () => ({
   canManageOrganization: (...args: unknown[]) => canManageOrganizationMock(...args),
   canOfficialOrganization: (...args: unknown[]) => canOfficialOrganizationMock(...args),
+  hasAnyOrgPermission: (...args: unknown[]) => hasAnyOrgPermissionMock(...args),
   hasOrgPermission: (...args: unknown[]) => hasOrgPermissionMock(...args),
 }));
 
@@ -77,9 +81,19 @@ describe('GET /api/documents/signed/[signedDocumentRecordId]/file', () => {
         contentType: 'application/pdf',
       }),
     });
-    canManageOrganizationMock.mockResolvedValue(false);
+    isBoldSignConfiguredMock.mockReturnValue(true);
+    downloadSignedDocumentPdfMock.mockResolvedValue({
+      data: Buffer.from('%PDF-1.7 boldsign'),
+      contentType: 'application/pdf',
+    });
+    prismaMock.templateDocuments.findUnique.mockResolvedValue({
+      type: 'PDF',
+      title: 'Historical waiver',
+    });
     hasOrgPermissionMock.mockResolvedValue(false);
+    canManageOrganizationMock.mockResolvedValue(false);
     canOfficialOrganizationMock.mockResolvedValue(false);
+    hasAnyOrgPermissionMock.mockResolvedValue(false);
   });
 
   it('serves the stored imported PDF to its document subject', async () => {
@@ -156,25 +170,48 @@ describe('GET /api/documents/signed/[signedDocumentRecordId]/file', () => {
     });
   });
 
-  it('allows organization staff with document import permission to view the imported PDF', async () => {
+  it('allows organization staff with an imported-document view permission to view the imported PDF', async () => {
     requireSessionMock.mockResolvedValue({ userId: 'staff_1', isAdmin: false });
     prismaMock.organizations.findUnique.mockResolvedValue({ id: 'org_1', ownerId: 'owner_1' });
-    hasOrgPermissionMock.mockResolvedValue(true);
+    hasAnyOrgPermissionMock.mockResolvedValue(true);
 
     const response = await GET(request(), routeParams);
 
     expect(response.status).toBe(200);
-    expect(hasOrgPermissionMock).toHaveBeenCalledWith(
+    expect(hasAnyOrgPermissionMock).toHaveBeenCalledWith(
       { userId: 'staff_1', isAdmin: false },
       { id: 'org_1', ownerId: 'owner_1' },
-      'documents.import',
+      ['documents.import', 'documents.void', 'documents.audit'],
+    );
+  });
+  it.each([
+    ['documents.void', 'document void permission'],
+    ['documents.audit', 'document audit permission'],
+  ])('allows organization staff with %s to view the imported PDF', async (permission) => {
+    requireSessionMock.mockResolvedValue({ userId: 'staff_1', isAdmin: false });
+    prismaMock.organizations.findUnique.mockResolvedValue({ id: 'org_1', ownerId: 'owner_1' });
+    hasAnyOrgPermissionMock.mockImplementation(
+      async (
+        _session: unknown,
+        _organization: unknown,
+        requestedPermissions: string[],
+      ) => requestedPermissions.includes(permission),
+    );
+
+    const response = await GET(request(), routeParams);
+
+    expect(response.status).toBe(200);
+    expect(hasAnyOrgPermissionMock).toHaveBeenCalledWith(
+      { userId: 'staff_1', isAdmin: false },
+      { id: 'org_1', ownerId: 'owner_1' },
+      ['documents.import', 'documents.void', 'documents.audit'],
     );
   });
 
-  it('rejects organization staff without document import permission', async () => {
+  it('rejects organization staff without an imported-document view permission', async () => {
     requireSessionMock.mockResolvedValue({ userId: 'staff_1', isAdmin: false });
     prismaMock.organizations.findUnique.mockResolvedValue({ id: 'org_1', ownerId: 'owner_1' });
-    hasOrgPermissionMock.mockResolvedValue(false);
+    hasAnyOrgPermissionMock.mockResolvedValue(false);
 
     const response = await GET(request(), routeParams);
 
@@ -202,5 +239,73 @@ describe('GET /api/documents/signed/[signedDocumentRecordId]/file', () => {
 
     expect(response.status).toBe(403);
     expect(getStorageProviderMock).not.toHaveBeenCalled();
+  });
+  it('rejects a document subject linked to another organization before reading private storage', async () => {
+    prismaMock.documentSubjects.findUnique.mockResolvedValue({
+      userId: 'subject_1',
+      organizationId: 'org_2',
+    });
+
+    const response = await GET(request(), routeParams);
+
+    expect(response.status).toBe(403);
+    expect(prismaMock.file.findUnique).not.toHaveBeenCalled();
+    expect(getStorageProviderMock).not.toHaveBeenCalled();
+  });
+  it('rejects a staff user from another organization before reading private storage', async () => {
+    requireSessionMock.mockResolvedValue({ userId: 'staff_org_2', isAdmin: false });
+    prismaMock.organizations.findUnique.mockResolvedValue({
+      id: 'org_1',
+      ownerId: 'owner_1',
+    });
+
+    const response = await GET(request(), routeParams);
+
+    expect(response.status).toBe(403);
+    expect(prismaMock.file.findUnique).not.toHaveBeenCalled();
+    expect(getStorageProviderMock).not.toHaveBeenCalled();
+  });
+  it('rejects a stored imported file owned by another organization', async () => {
+    prismaMock.file.findUnique.mockResolvedValue({
+      id: 'file_1',
+      organizationId: 'org_2',
+      bucket: 'private-bucket',
+      originalName: 'historical waiver.pdf',
+      mimeType: 'application/pdf',
+      path: 'private/org_2/file_1.pdf',
+    });
+
+    const response = await GET(request(), routeParams);
+
+    expect(response.status).toBe(404);
+    expect(getStorageProviderMock).not.toHaveBeenCalled();
+  });
+
+
+
+  it('preserves organization manager access to BoldSign PDFs', async () => {
+    requireSessionMock.mockResolvedValue({ userId: 'manager_1', isAdmin: false });
+    prismaMock.signedDocuments.findUnique.mockResolvedValueOnce({
+      id: 'signed_boldsign_1',
+      signedDocumentId: 'boldsign-file-record',
+      provenance: 'BOLDSIGN',
+      templateId: 'version_pdf',
+      userId: null,
+      documentSubjectId: null,
+      importedFileId: null,
+      documentName: 'Signed waiver',
+      organizationId: 'org_1',
+      eventId: null,
+      teamId: null,
+    });
+    prismaMock.organizations.findUnique.mockResolvedValue({ id: 'org_1', ownerId: 'owner_1' });
+    hasOrgPermissionMock.mockResolvedValue(true);
+
+    const response = await GET(request(), routeParams);
+
+    expect(response.status).toBe(200);
+    expect(downloadSignedDocumentPdfMock).toHaveBeenCalledWith({
+      documentId: 'boldsign-file-record',
+    });
   });
 });

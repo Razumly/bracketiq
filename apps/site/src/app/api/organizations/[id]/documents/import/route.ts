@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { Prisma } from '@/generated/prisma/client';
+import type { PrismaClient } from '@/generated/prisma/client';
 import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/permissions';
 import { ORG_PERMISSIONS } from '@/lib/organizationPermissions';
@@ -12,11 +13,19 @@ import {
   createDocumentRequirementSatisfaction,
   DOCUMENT_EVIDENCE_PROVENANCE,
   ensureDocumentSubject,
+  readByIdChunks,
   signedDocumentEvidenceFields,
   type DocumentEvidenceDatabase,
 } from '@/server/documentEvidence';
-import { notifyDocumentEvidenceChange } from '@/server/documentNotifications';
-import { listOrganizationUsersScopeEvents } from '@/server/organizationUsersAccess';
+import {
+  notifyDocumentEvidenceChange,
+  recordDocumentEvidenceInAppNotification,
+  type DocumentNotificationDatabase,
+} from '@/server/documentNotifications';
+import {
+  listOrganizationUsersScopeEvents,
+  type OrganizationUsersScopeEvent,
+} from '@/server/organizationUsersAccess';
 import { getStorageProvider } from '@/lib/storageProvider';
 import { validatePdfBuffer } from '@/lib/pdfUploadValidation';
 
@@ -27,7 +36,7 @@ const DOCUMENT_IMPORT_ATTESTATION_VERSION = '1';
 
 const PDF_MIME_TYPE = 'application/pdf';
 const MAX_IMPORTED_DOCUMENT_UPLOAD_BYTES = 25 * 1024 * 1024;
-const IMPORT_SCOPE_TYPES = ['ORGANIZATION', 'EVENT_PARTICIPATION', 'TEAM_MEMBERSHIP'] as const;
+const IMPORT_SCOPE_TYPES = ['ORGANIZATION', 'EVENT_PARTICIPATION'] as const;
 
 type ImportScopeType = (typeof IMPORT_SCOPE_TYPES)[number];
 
@@ -95,18 +104,6 @@ type ImportedTeamMemberFields = {
   coachIds: readonly string[] | null;
 };
 
-const IMPORT_QUERY_CHUNK_SIZE = 500;
-
-const readInChunks = async <T>(
-  ids: string[],
-  read: (chunk: string[]) => Promise<T[]>,
-): Promise<T[]> => {
-  const rows: T[] = [];
-  for (let offset = 0; offset < ids.length; offset += IMPORT_QUERY_CHUNK_SIZE) {
-    rows.push(...await read(ids.slice(offset, offset + IMPORT_QUERY_CHUNK_SIZE)));
-  }
-  return rows;
-};
 
 const teamMemberIds = (team: ImportedTeamMemberFields): string[] => normalizeIdList([
   ...(team.playerIds ?? []),
@@ -115,6 +112,266 @@ const teamMemberIds = (team: ImportedTeamMemberFields): string[] => normalizeIdL
   team.headCoachId,
   ...(team.coachIds ?? []),
 ]);
+const IMPORT_EVENT_PARTICIPATION_STATUSES = [
+  'STARTED',
+  'PENDING',
+  'ACTIVE',
+  'BLOCKED',
+  'CONSENTFAILED',
+] as const;
+const IMPORT_TEAM_MEMBERSHIP_STATUSES = ['STARTED', 'PENDING', 'ACTIVE'] as const;
+
+type ImportDatabase = Pick<
+  PrismaClient | Prisma.TransactionClient,
+  'events' | 'eventRegistrations' | 'teams' | 'canonicalTeams' | 'teamRegistrations'
+>;
+
+type ImportEventRegistration = {
+  id: string;
+  eventId: string;
+  registrantId: string;
+  parentId: string | null;
+  registrantType: string;
+  status: string | null;
+  eventTeamId: string | null;
+  sourceTeamRegistrationId: string | null;
+};
+
+type ImportEventTeam = ImportedTeamMemberFields & {
+  id: string;
+  eventId: string | null;
+  parentTeamId: string | null;
+  kind: string | null;
+};
+
+type ImportTeamMembership = {
+  id: string;
+  teamId: string;
+  userId: string;
+  status: string | null;
+};
+
+type ImportEventParticipation = {
+  eventId: string;
+};
+
+const normalizeId = (value: unknown): string | null => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+};
+
+const validateEventParticipation = async (params: {
+  organizationId: string;
+  subjectUserId: string;
+  eventId: string;
+  scopeEvents?: readonly OrganizationUsersScopeEvent[];
+}, client: ImportDatabase): Promise<ImportEventParticipation | null> => {
+  const event = await client.events.findUnique({
+    where: { id: params.eventId },
+    select: { id: true, organizationId: true },
+  });
+  if (!event || event.organizationId !== params.organizationId) {
+    return null;
+  }
+  if (
+    params.scopeEvents
+    && !params.scopeEvents.some((scopeEvent) => (
+      scopeEvent.id === params.eventId
+      && scopeEvent.organizationId === params.organizationId
+    ))
+  ) {
+    return null;
+  }
+
+  const registrations = await client.eventRegistrations.findMany({
+    where: {
+      eventId: params.eventId,
+      rosterRole: 'PARTICIPANT',
+      status: { in: [...IMPORT_EVENT_PARTICIPATION_STATUSES] },
+      slotId: null,
+      occurrenceDate: null,
+      OR: [
+        {
+          registrantType: { in: ['SELF', 'CHILD'] },
+          registrantId: params.subjectUserId,
+        },
+        { registrantType: 'TEAM' },
+      ],
+    },
+    select: {
+      id: true,
+      eventId: true,
+      registrantId: true,
+      parentId: true,
+      registrantType: true,
+      status: true,
+      eventTeamId: true,
+      sourceTeamRegistrationId: true,
+    },
+  }) as ImportEventRegistration[];
+  const eligibleStatusSet = new Set<string>(IMPORT_EVENT_PARTICIPATION_STATUSES);
+  const eligibleRegistrations = registrations.filter((registration) => (
+    eligibleStatusSet.has(String(registration.status ?? '').trim().toUpperCase())
+  ));
+
+  const personRegistrations = eligibleRegistrations.filter((registration) => (
+    ['SELF', 'CHILD'].includes(registration.registrantType)
+    && registration.registrantId === params.subjectUserId
+  ));
+  const hasDirectParticipation = personRegistrations.some((registration) => (
+    !normalizeId(registration.eventTeamId)
+    && !normalizeId(registration.sourceTeamRegistrationId)
+  ));
+  const teamIds = normalizeIdList(
+    eligibleRegistrations.flatMap((registration) => (
+      registration.registrantType === 'TEAM'
+        ? [registration.eventTeamId, registration.registrantId]
+        : [registration.eventTeamId]
+    )),
+  );
+  if (!teamIds.length) {
+    return hasDirectParticipation ? { eventId: params.eventId } : null;
+  }
+
+  const eventTeams = await client.teams.findMany({
+    where: {
+      id: { in: teamIds },
+      eventId: params.eventId,
+      OR: [{ kind: { not: 'PLACEHOLDER' } }, { kind: null }],
+    },
+    select: {
+      id: true,
+      eventId: true,
+      parentTeamId: true,
+      kind: true,
+      playerIds: true,
+      captainId: true,
+      managerId: true,
+      headCoachId: true,
+      coachIds: true,
+    },
+  }) as ImportEventTeam[];
+  const canonicalTeamIdsByEventTeamId = new Map<string, Set<string>>();
+  eventTeams.forEach((team) => {
+    const eventTeamId = normalizeId(team.id);
+    const canonicalTeamId = normalizeId(team.parentTeamId);
+    if (!eventTeamId || !canonicalTeamId) {
+      return;
+    }
+    canonicalTeamIdsByEventTeamId.set(eventTeamId, new Set([canonicalTeamId]));
+  });
+  eligibleRegistrations
+    .filter((registration) => registration.registrantType === 'TEAM')
+    .forEach((registration) => {
+      const eventTeamId = normalizeId(registration.eventTeamId)
+        ?? normalizeId(registration.registrantId);
+      const canonicalTeamId = normalizeId(registration.parentId);
+      if (!eventTeamId || !canonicalTeamId) {
+        return;
+      }
+      const canonicalTeamIdsForEventTeam = canonicalTeamIdsByEventTeamId.get(eventTeamId) ?? new Set<string>();
+      canonicalTeamIdsForEventTeam.add(canonicalTeamId);
+      canonicalTeamIdsByEventTeamId.set(eventTeamId, canonicalTeamIdsForEventTeam);
+    });
+  eventTeams.forEach((team) => {
+    const eventTeamId = normalizeId(team.id);
+    if (!eventTeamId || canonicalTeamIdsByEventTeamId.has(eventTeamId)) {
+      return;
+    }
+    canonicalTeamIdsByEventTeamId.set(eventTeamId, new Set([eventTeamId]));
+  });
+  const canonicalTeamIds = normalizeIdList(
+    Array.from(canonicalTeamIdsByEventTeamId.values()).flatMap((teamIds) => Array.from(teamIds)),
+  );
+  if (!canonicalTeamIds.length) {
+    return hasDirectParticipation ? { eventId: params.eventId } : null;
+  }
+
+  const canonicalTeams = await client.canonicalTeams.findMany({
+    where: {
+      id: { in: canonicalTeamIds },
+      organizationId: params.organizationId,
+    },
+    select: { id: true },
+  });
+  const organizationCanonicalTeamIds = new Set(canonicalTeams.map((team) => team.id));
+  if (!organizationCanonicalTeamIds.size) {
+    return hasDirectParticipation ? { eventId: params.eventId } : null;
+  }
+
+  const memberships = await client.teamRegistrations.findMany({
+    where: {
+      teamId: { in: Array.from(organizationCanonicalTeamIds) },
+      userId: params.subjectUserId,
+      rosterRole: 'PARTICIPANT',
+      status: { in: [...IMPORT_TEAM_MEMBERSHIP_STATUSES] },
+    },
+    select: { id: true, teamId: true, userId: true, status: true },
+  }) as ImportTeamMembership[];
+  const eligibleMembershipStatusSet = new Set<string>(IMPORT_TEAM_MEMBERSHIP_STATUSES);
+  const eligibleMemberships = memberships.filter((membership) => (
+    eligibleMembershipStatusSet.has(String(membership.status ?? '').trim().toUpperCase())
+  ));
+  const membershipsByTeamId = new Map(
+    eligibleMemberships.map((membership) => [membership.teamId, membership]),
+  );
+  const canonicalTeamIdByEventTeamId = new Map<string, string>();
+  canonicalTeamIdsByEventTeamId.forEach((teamIds, eventTeamId) => {
+    const [canonicalTeamId] = Array.from(teamIds);
+    if (
+      teamIds.size === 1
+      && canonicalTeamId
+      && organizationCanonicalTeamIds.has(canonicalTeamId)
+    ) {
+      canonicalTeamIdByEventTeamId.set(eventTeamId, canonicalTeamId);
+    }
+  });
+  const validEventTeamIds = new Set(
+    eventTeams
+      .filter((team) => {
+        const eventTeamId = normalizeId(team.id);
+        const canonicalTeamId = eventTeamId
+          ? canonicalTeamIdByEventTeamId.get(eventTeamId)
+          : undefined;
+        const membership = canonicalTeamId
+          ? membershipsByTeamId.get(canonicalTeamId)
+          : undefined;
+        if (!eventTeamId || !canonicalTeamId || !membership) {
+          return false;
+        }
+        const isInEventTeamSnapshot = teamMemberIds(team).includes(params.subjectUserId);
+        const hasLinkedRosterRegistration = personRegistrations.some((registration) => (
+          normalizeId(registration.eventTeamId) === eventTeamId
+          && normalizeId(registration.sourceTeamRegistrationId) === membership.id
+        ));
+        return isInEventTeamSnapshot || hasLinkedRosterRegistration;
+      })
+      .map((team) => team.id),
+  );
+  const hasTeamParticipation = personRegistrations.some((registration) => {
+    const eventTeamId = normalizeId(registration.eventTeamId);
+    return Boolean(eventTeamId && validEventTeamIds.has(eventTeamId));
+  }) || eligibleRegistrations.some((registration) => {
+    if (registration.registrantType !== 'TEAM') {
+      return false;
+    }
+    const eventTeamId = normalizeId(registration.eventTeamId) ?? normalizeId(registration.registrantId);
+    const eventTeam = eventTeams.find((team) => team.id === eventTeamId);
+    return Boolean(
+      eventTeamId
+      && eventTeam
+      && validEventTeamIds.has(eventTeamId)
+      && teamMemberIds(eventTeam).includes(params.subjectUserId),
+    );
+  });
+
+  return hasDirectParticipation || hasTeamParticipation
+    ? { eventId: params.eventId }
+    : null;
+};
 
 const ISO_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 
@@ -281,15 +538,15 @@ export async function POST(
     );
   }
 
-  if (!template.signOnce) {
+  if (template.signOnce && parsed.scopeType !== 'ORGANIZATION') {
     return NextResponse.json(
-      { error: 'Only sign-once Document Template Versions can be imported.' },
+      { error: 'Sign-once Document Template Versions require Organization scope.' },
       { status: 400 },
     );
   }
-  if (parsed.scopeType !== 'ORGANIZATION') {
+  if (!template.signOnce && parsed.scopeType !== 'EVENT_PARTICIPATION') {
     return NextResponse.json(
-      { error: 'Sign-once Document Template Versions require Organization scope.' },
+      { error: 'Non-sign-once Document Template Versions require Event Participation scope.' },
       { status: 400 },
     );
   }
@@ -299,7 +556,6 @@ export async function POST(
       { status: 400 },
     );
   }
-
 
   const [users, scopeEvents, organizationTeams] = await Promise.all([
     prisma.userData.findMany({
@@ -318,103 +574,121 @@ export async function POST(
   if (organizationTeams.some((team) => team.id === parsed.subjectUserId)) {
     return NextResponse.json({ error: 'Document Subject must be a User, not a Team.' }, { status: 400 });
   }
-  const organizationEventIds = normalizeIdList(scopeEvents.map((event) => event.id));
-  const organizationEventRegistrations = organizationEventIds.length
-    ? await readInChunks(organizationEventIds, (eventIds) => prisma.eventRegistrations.findMany({
-      where: {
-        eventId: { in: eventIds },
-        rosterRole: 'PARTICIPANT',
-        status: { in: ['STARTED', 'PENDING', 'ACTIVE', 'BLOCKED', 'CONSENTFAILED'] },
-        slotId: null,
-        occurrenceDate: null,
-        OR: [
-          { registrantType: 'TEAM' },
-          { eventTeamId: { not: null } },
-        ],
+  if (parsed.scopeType === 'EVENT_PARTICIPATION') {
+    const eventParticipation = await validateEventParticipation(
+      {
+        organizationId,
+        subjectUserId: parsed.subjectUserId,
+        eventId: parsed.scopeId,
+        scopeEvents,
       },
-      select: {
-        eventId: true,
-        registrantId: true,
-        parentId: true,
-        registrantType: true,
-        eventTeamId: true,
-      },
-    }))
-    : [];
-  const organizationEventTeamIds = normalizeIdList([
-    ...scopeEvents.flatMap((event) => event.teamIds),
-    ...organizationEventRegistrations.flatMap((registration) => {
-      const registrantType = typeof registration.registrantType === 'string'
-        ? registration.registrantType.toUpperCase()
-        : '';
-      if (registrantType !== 'TEAM' && typeof registration.eventTeamId !== 'string') {
-        return [];
-      }
-      return [registration.eventTeamId, registration.registrantId, registration.parentId];
-    }),
-  ]);
-  const organizationEventTeams = organizationEventTeamIds.length
-    ? await readInChunks(organizationEventTeamIds, (teamIds) => prisma.teams.findMany({
-      where: {
-        id: { in: teamIds },
-        OR: [{ kind: { not: 'PLACEHOLDER' } }, { kind: null }],
-      },
-      select: {
-        id: true,
-        playerIds: true,
-        captainId: true,
-        managerId: true,
-        headCoachId: true,
-        coachIds: true,
-      },
-    }))
-    : [];
-  const organizationEventTeamMemberIds = organizationEventTeams.flatMap(teamMemberIds);
-
-  const organizationTeamIds = organizationTeams.map((team) => team.id);
-  const membershipTeamIds = Array.from(new Set([
-    ...organizationTeamIds,
-    ...organizationEventTeamIds,
-  ]));
-  const teamStaffAssignments = membershipTeamIds.length
-    ? await readInChunks(membershipTeamIds, (teamIds) => prisma.teamStaffAssignments.findMany({
-      where: {
-        teamId: { in: teamIds },
-        status: { in: ['ACTIVE', 'PENDING', 'STARTED'] },
-      },
-      select: { userId: true },
-    }))
-    : [];
-  const teamRegistrations = membershipTeamIds.length
-    ? await readInChunks(membershipTeamIds, (teamIds) => prisma.teamRegistrations.findMany({
-      where: {
-        teamId: { in: teamIds },
-        userId: parsed.subjectUserId,
-        status: { in: ['STARTED', 'PENDING', 'ACTIVE'] },
-      },
-      select: { teamId: true, userId: true },
-    }))
-    : [];
-  const customerUserIds = new Set([
-    ...scopeEvents.flatMap((event) => [
-      ...event.userIds,
-      ...(event.organizationId !== organizationId
-        ? [
-          event.hostId,
-          ...(event.assistantHostIds ?? []),
-          ...(event.officialIds ?? []),
-        ]
-        : []),
-    ]),
-    ...organizationEventTeamMemberIds,
-    ...teamRegistrations.map((registration) => registration.userId),
-    ...teamStaffAssignments.map((assignment) => assignment.userId),
-  ]);
-  if (!customerUserIds.has(parsed.subjectUserId)) {
-    return NextResponse.json(
-      { error: 'Document Subject is not a customer of this Organization.' },
-      { status: 400 },
+      prisma,
     );
+    if (!eventParticipation) {
+      return NextResponse.json(
+        { error: 'Document Subject does not have eligible participation in this Organization Event.' },
+        { status: 400 },
+      );
+    }
+  } else {
+    const organizationEventIds = normalizeIdList(scopeEvents.map((event) => event.id));
+    const organizationEventRegistrations = organizationEventIds.length
+      ? await readByIdChunks(organizationEventIds, (eventIds) => prisma.eventRegistrations.findMany({
+        where: {
+          eventId: { in: eventIds },
+          rosterRole: 'PARTICIPANT',
+          status: { in: ['STARTED', 'PENDING', 'ACTIVE', 'BLOCKED', 'CONSENTFAILED'] },
+          slotId: null,
+          occurrenceDate: null,
+          OR: [
+            { registrantType: 'TEAM' },
+            { eventTeamId: { not: null } },
+          ],
+        },
+        select: {
+          eventId: true,
+          registrantId: true,
+          parentId: true,
+          registrantType: true,
+          eventTeamId: true,
+        },
+      }))
+      : [];
+    const organizationEventTeamIds = normalizeIdList([
+      ...scopeEvents.flatMap((event) => event.teamIds),
+      ...organizationEventRegistrations.flatMap((registration) => {
+        const registrantType = typeof registration.registrantType === 'string'
+          ? registration.registrantType.toUpperCase()
+          : '';
+        if (registrantType !== 'TEAM' && typeof registration.eventTeamId !== 'string') {
+          return [];
+        }
+        return [registration.eventTeamId, registration.registrantId, registration.parentId];
+      }),
+    ]);
+    const organizationEventTeams = organizationEventTeamIds.length
+      ? await readByIdChunks(organizationEventTeamIds, (teamIds) => prisma.teams.findMany({
+        where: {
+          id: { in: teamIds },
+          OR: [{ kind: { not: 'PLACEHOLDER' } }, { kind: null }],
+        },
+        select: {
+          id: true,
+          playerIds: true,
+          captainId: true,
+          managerId: true,
+          headCoachId: true,
+          coachIds: true,
+        },
+      }))
+      : [];
+    const organizationEventTeamMemberIds = organizationEventTeams.flatMap(teamMemberIds);
+
+    const organizationTeamIds = organizationTeams.map((team) => team.id);
+    const membershipTeamIds = Array.from(new Set([
+      ...organizationTeamIds,
+      ...organizationEventTeamIds,
+    ]));
+    const teamStaffAssignments = membershipTeamIds.length
+      ? await readByIdChunks(membershipTeamIds, (teamIds) => prisma.teamStaffAssignments.findMany({
+        where: {
+          teamId: { in: teamIds },
+          status: { in: ['ACTIVE', 'PENDING', 'STARTED'] },
+        },
+        select: { userId: true },
+      }))
+      : [];
+    const teamRegistrations = membershipTeamIds.length
+      ? await readByIdChunks(membershipTeamIds, (teamIds) => prisma.teamRegistrations.findMany({
+        where: {
+          teamId: { in: teamIds },
+          userId: parsed.subjectUserId,
+          status: { in: ['STARTED', 'PENDING', 'ACTIVE'] },
+        },
+        select: { teamId: true, userId: true },
+      }))
+      : [];
+    const customerUserIds = new Set([
+      ...scopeEvents.flatMap((event) => [
+        ...event.userIds,
+        ...(event.organizationId !== organizationId
+          ? [
+            event.hostId,
+            ...(event.assistantHostIds ?? []),
+            ...(event.officialIds ?? []),
+          ]
+          : []),
+      ]),
+      ...organizationEventTeamMemberIds,
+      ...teamRegistrations.map((registration) => registration.userId),
+      ...teamStaffAssignments.map((assignment) => assignment.userId),
+    ]);
+    if (!customerUserIds.has(parsed.subjectUserId)) {
+      return NextResponse.json(
+        { error: 'Document Subject is not a customer of this Organization.' },
+        { status: 400 },
+      );
+    }
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());
@@ -439,7 +713,7 @@ export async function POST(
     const evidenceScope = {
       scopeType: parsed.scopeType,
       scopeId: parsed.scopeId,
-      eventId: null,
+      eventId: parsed.scopeType === 'EVENT_PARTICIPATION' ? parsed.scopeId : null,
       teamId: null,
     };
     const importedEvidence = await prisma.$transaction(async (tx) => {
@@ -471,8 +745,21 @@ export async function POST(
       if (!documentName) {
         throw new Error('Document Template Version title is required.');
       }
-      if (!lockedTemplate.signOnce) {
-        throw new Error('Only sign-once Document Template Versions can be imported.');
+      if (lockedTemplate.signOnce !== (parsed.scopeType === 'ORGANIZATION')) {
+        throw new Error('Document Template Version scope changed during import.');
+      }
+      if (parsed.scopeType === 'EVENT_PARTICIPATION') {
+        const eventParticipation = await validateEventParticipation(
+          {
+            organizationId,
+            subjectUserId: parsed.subjectUserId,
+            eventId: parsed.scopeId,
+          },
+          tx,
+        );
+        if (!eventParticipation) {
+          throw new Error('Document Subject participation changed during import.');
+        }
       }
       const requiredSignerRoles = resolveRequiredSignerRoles(
         lockedTemplate.signerRoles,
@@ -569,18 +856,33 @@ export async function POST(
         },
         tx as unknown as DocumentEvidenceDatabase,
       );
+      await recordDocumentEvidenceInAppNotification(
+        {
+          organizationId,
+          subjectUserId: parsed.subjectUserId,
+          evidenceId: evidence.id,
+          documentName,
+          action: 'IMPORT',
+          actorUserId: session.userId,
+        },
+        tx as unknown as DocumentNotificationDatabase,
+      );
       return { documentName };
 
     });
+    const notificationInput = {
+      organizationId,
+      subjectUserId: parsed.subjectUserId,
+      evidenceId,
+      documentName: importedEvidence.documentName,
+      action: 'IMPORT' as const,
+      actorUserId: session.userId,
+    };
     try {
-      await notifyDocumentEvidenceChange({
-        organizationId,
-        subjectUserId: parsed.subjectUserId,
-        evidenceId,
-        documentName: importedEvidence.documentName,
-        action: 'IMPORT',
-        actorUserId: session.userId,
-      });
+      await notifyDocumentEvidenceChange(
+        notificationInput,
+        { isInAppIncluded: false },
+      );
     } catch (notificationError) {
       console.error('Document import notification failed.', {
         organizationId,

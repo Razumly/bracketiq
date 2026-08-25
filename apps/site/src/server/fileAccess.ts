@@ -1,8 +1,8 @@
 import type { NextRequest } from 'next/server';
 import { requireSession } from '@/lib/permissions';
 import { prisma } from '@/lib/prisma';
-import { ORG_PERMISSIONS } from '@/lib/organizationPermissions';
-import { hasOrgPermission } from '@/server/accessControl';
+import { IMPORTED_DOCUMENT_VIEW_PERMISSIONS } from '@/lib/organizationPermissions';
+import { hasAnyOrgPermission } from '@/server/accessControl';
 import { canManageBillPayment, loadBillForAction } from '@/server/billing/billPaymentActions';
 /**
  * Most image files are intentionally public (event, organization, and profile
@@ -49,6 +49,9 @@ export const assertFileReadAccess = async (req: NextRequest, fileId: string): Pr
       select: { userId: true, organizationId: true },
     })
     : null;
+  if (subject && subject.organizationId !== importedDocument.organizationId) {
+    throw new Response('Forbidden', { status: 403 });
+  }
   const subjectUserId = subject?.userId ?? importedDocument.userId;
   if (subjectUserId === session.userId) return;
 
@@ -73,7 +76,7 @@ export const assertFileReadAccess = async (req: NextRequest, fileId: string): Pr
     : null;
   if (
     organization
-    && await hasOrgPermission(session, organization, ORG_PERMISSIONS.DOCUMENTS_IMPORT)
+    && await hasAnyOrgPermission(session, organization, IMPORTED_DOCUMENT_VIEW_PERMISSIONS)
   ) {
     return;
   }

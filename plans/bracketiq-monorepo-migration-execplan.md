@@ -6,7 +6,7 @@ This ExecPlan is a living document. Keep `Progress`, `Surprises & Discoveries`, 
 
 Consolidate `Razumly/mvp-site` and `Razumly/mvp-app` into one GitHub repository named `Razumly/bracketiq`. A developer must be able to clone one repository, inspect the web application, backend, mobile application, shared product documentation, and issues, and submit one pull request for a change that spans the backend and mobile client.
 
-The site and mobile application keep separate build tools and release processes. The site remains a Next.js and Prisma application. The mobile application remains a Kotlin Multiplatform, Android, iOS, Wear OS, and watchOS application. A monorepo is one source-control repository. It is not one runtime or one release. The backend HTTP interface remains the seam between the two applications. Backend changes must remain compatible with installed mobile versions.
+The site and mobile application keep separate build tools and release processes. The site remains a Next.js and Prisma application. The mobile application remains a Kotlin Multiplatform, Android, iOS, Wear OS, and watchOS application. A monorepo is one source-control repository. It is not one runtime or one release. The backend HTTP interface remains the seam between the two applications. The current site and mobile code define the supported HTTP contract. Contract changes use one clean cutover across both applications.
 
 The migration must not change product behavior, database data, public URLs, or production runtime state. A fresh monorepo clone must pass the existing site and mobile checks. The GitHub Project named `BracketIQ` must receive issues from the new repository through its one GitHub Free auto-add workflow.
 
@@ -102,6 +102,10 @@ The migration must not change product behavior, database data, public URLs, or p
 - Decision: Archive `Razumly/mvp-app` instead of deleting it.
   Rationale: GitHub pull requests, closed issues, releases, discussions, and original commit identifiers cannot all be merged into another repository. Archival keeps that evidence read-only and gives users a clear link to the monorepo.
   Date/Author: 2026-08-17 / Codex
+
+- Decision: Treat the current site and mobile code as the supported backend HTTP contract.
+  Rationale: Product policy uses coordinated clean cutovers at this stage. Historical installed mobile versions are not a compatibility target.
+  Date/Author: 2026-08-24 / User and Codex
 
 ## Outcomes & Retrospective
 
@@ -421,7 +425,7 @@ Record the final target tree and the following identifiers in this section durin
 
 The monorepo source interface consists of `apps/site` for web and backend code, `apps/mobile` for all mobile code, root `docs` for product-wide documentation, root `plans` for every new ExecPlan, and root `.github/workflows` for all repository automation. Callers and tests must use these paths directly. Do not add compatibility symlinks named `mvp-site` or `mvp-app`.
 
-The backend HTTP interface remains authoritative. Next.js route handlers and Prisma live in `apps/site`. Kotlin DTOs and Ktor callers live in `apps/mobile/core/network` and `apps/mobile/core/repository-impl`. Co-location does not permit the mobile implementation to import server TypeScript or Prisma types. Contract changes still require compatible server behavior and mobile serialization tests.
+The backend HTTP interface remains authoritative. Next.js route handlers and Prisma live in `apps/site`. Kotlin DTOs and Ktor callers live in `apps/mobile/core/network` and `apps/mobile/core/repository-impl`. Co-location does not permit the mobile implementation to import server TypeScript or Prisma types. Contract changes update server behavior and current mobile serialization in one clean cutover. Cross-application tests must prove the resulting contract.
 
 Use Git 2.22 or newer and `git-filter-repo==2.47.0` only in a disposable Python virtual environment. Use Node.js 20 or the version already required by `apps/site` development metadata, JDK 17 for Gradle and CocoaPods-triggered Gradle tasks, the checked-in Gradle wrapper under `apps/mobile`, and the existing CocoaPods workspace under `apps/mobile/iosApp`.
 
@@ -430,3 +434,5 @@ The site release interface remains an immutable image tagged with a full monorep
 The issue interface is GitHub Issues in `Razumly/bracketiq`. The `BracketIQ` GitHub Project is the shared planning view. The five triage labels remain `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`.
 
 Revision note (2026-08-17): created the initial history-preserving monorepo migration plan after inspecting both source repositories, their active worktree risks, GitHub Free Project limit, path-sensitive mobile integration, CI split, production image paths, agent configuration, and current organization ownership. No migration action was performed.
+
+Revision note (2026-08-24): changed the mobile contract policy to one current site-and-mobile contract with a clean cutover. Historical installed mobile versions no longer constrain contract changes.

@@ -71,6 +71,9 @@ type OrganizationLookupClient = {
     findFirst: (args: any) => Promise<{
       permission: string;
     } | null>;
+    findMany?: (args: any) => Promise<Array<{
+      permission: string;
+    }>>;
   } | undefined;
   invites?: {
     findMany: (args: any) => Promise<Array<{
@@ -111,10 +114,10 @@ const isManagementTypeCheck = (allowedTypes: readonly StaffMemberType[]): boolea
   allowedTypes.includes('HOST') || allowedTypes.includes('STAFF')
 );
 
-export const hasOrgPermission = async (
+const hasOrganizationPermissions = async (
   session: SessionLike,
   organization: OrganizationAccessRecord | null | undefined,
-  permission: OrganizationPermission,
+  permissions: readonly OrganizationPermission[],
   client: OrganizationLookupClient = prisma,
 ): Promise<boolean> => {
   if (session.isAdmin) {
@@ -125,6 +128,10 @@ export const hasOrgPermission = async (
   }
   if (organization.ownerId === session.userId) {
     return true;
+  }
+  const requestedPermissions = Array.from(new Set(permissions));
+  if (requestedPermissions.length === 0) {
+    return false;
   }
   const organizationId = typeof organization.id === 'string' ? organization.id : null;
   if (!organizationId) {
@@ -193,24 +200,52 @@ export const hasOrgPermission = async (
     if (!role) {
       return false;
     }
-    const rolePermission = await client.organizationRolePermissions?.findFirst({
-      where: {
-        organizationRoleId: role.id,
-        permission,
-      },
-      select: {
-        permission: true,
-      },
-    });
-    return Boolean(rolePermission);
+    if (client.organizationRolePermissions?.findMany) {
+      const rolePermissions = await client.organizationRolePermissions.findMany({
+        where: {
+          organizationRoleId: role.id,
+          permission: { in: requestedPermissions },
+        },
+        select: {
+          permission: true,
+        },
+      });
+      return rolePermissions.length > 0;
+    }
+    for (const permission of requestedPermissions) {
+      const rolePermission = await client.organizationRolePermissions?.findFirst({
+        where: {
+          organizationRoleId: role.id,
+          permission,
+        },
+        select: {
+          permission: true,
+        },
+      });
+      if (rolePermission) {
+        return true;
+      }
+    }
+    return false;
   }
 
-  if (permission === ORG_PERMISSIONS.ORGANIZATION_MANAGE) {
-    return hasLegacyStaffTypeAccess(staffMember, STAFF_ACCESS_TYPES);
-  }
-
-  return false;
+  return requestedPermissions.includes(ORG_PERMISSIONS.ORGANIZATION_MANAGE)
+    && hasLegacyStaffTypeAccess(staffMember, STAFF_ACCESS_TYPES);
 };
+
+export const hasOrgPermission = async (
+  session: SessionLike,
+  organization: OrganizationAccessRecord | null | undefined,
+  permission: OrganizationPermission,
+  client: OrganizationLookupClient = prisma,
+): Promise<boolean> => hasOrganizationPermissions(session, organization, [permission], client);
+
+export const hasAnyOrgPermission = async (
+  session: SessionLike,
+  organization: OrganizationAccessRecord | null | undefined,
+  permissions: readonly OrganizationPermission[],
+  client: OrganizationLookupClient = prisma,
+): Promise<boolean> => hasOrganizationPermissions(session, organization, permissions, client);
 export const hasDocumentEvidenceOwnerAccess = async (
   session: SessionLike,
   organization: OrganizationAccessRecord | null | undefined,

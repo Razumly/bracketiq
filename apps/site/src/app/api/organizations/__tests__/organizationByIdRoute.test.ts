@@ -257,6 +257,11 @@ describe('/api/organizations/[id]', () => {
         ? { permission: where.permission }
         : null
     ));
+    prismaMock.organizationRolePermissions.findMany.mockImplementation(async ({ where }: any) => (
+      (where.permission?.in ?? [])
+        .filter((permission: string) => ['staff.manage', 'events.manage'].includes(permission))
+        .map((permission: string) => ({ permission }))
+    ));
 
     const response = await GET(
       new NextRequest('http://localhost/api/organizations/org_1'),

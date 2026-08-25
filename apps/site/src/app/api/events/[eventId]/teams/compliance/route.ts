@@ -139,7 +139,13 @@ const toPaymentSummary = (bill: {
   };
 };
 
-const ACTIVE_EVENT_TEAM_REGISTRATION_STATUSES = ['STARTED', 'PENDING', 'ACTIVE', 'BLOCKED'] as const;
+const ACTIVE_EVENT_TEAM_REGISTRATION_STATUSES = ['STARTED', 'PENDING', 'ACTIVE', 'BLOCKED', 'CONSENTFAILED'] as const;
+const INELIGIBLE_EVENT_PERSON_REGISTRATION_STATUSES = new Set(['CANCELLED', 'PAYMENT_FAILED']);
+
+const isEligibleEventPersonRegistration = (status: unknown): boolean => {
+  const normalizedStatus = typeof status === 'string' ? status.trim().toUpperCase() : '';
+  return !normalizedStatus || !INELIGIBLE_EVENT_PERSON_REGISTRATION_STATUSES.has(normalizedStatus);
+};
 
 const buildOccurrenceWhere = (req: NextRequest) => {
   const slotId = normalizeId(req.nextUrl.searchParams.get('slotId'));
@@ -340,13 +346,18 @@ export async function GET(
       ? prisma.eventRegistrations.findMany({
         where: {
           eventId,
+          eventTeamId: { in: teamIds },
           registrantId: { in: playerIds },
+          registrantType: { in: ['SELF', 'CHILD'] },
         },
         select: {
+          eventTeamId: true,
           registrantId: true,
           registrantType: true,
           parentId: true,
+          status: true,
           updatedAt: true,
+          createdAt: true,
         },
       })
       : Promise.resolve([]),
@@ -390,24 +401,30 @@ export async function GET(
       });
     })(),
   ]);
-  const latestRegistrationByUserId = new Map<string, {
+  const latestRegistrationByEventTeamAndUserId = new Map<string, {
     registrantType: string | null;
     parentId: string | null;
+    status: string | null;
     updatedAt: Date | null;
+    createdAt: Date | null;
   }>();
   registrations.forEach((registration) => {
+    const eventTeamId = normalizeId(registration.eventTeamId);
     const userId = normalizeId(registration.registrantId);
-    if (!userId) {
+    if (!eventTeamId || !userId) {
       return;
     }
-    const existing = latestRegistrationByUserId.get(userId);
-    const existingTs = toTimestamp(existing?.updatedAt);
-    const nextTs = toTimestamp(registration.updatedAt);
+    const key = `${eventTeamId}::${userId}`;
+    const existing = latestRegistrationByEventTeamAndUserId.get(key);
+    const existingTs = Math.max(toTimestamp(existing?.updatedAt), toTimestamp(existing?.createdAt));
+    const nextTs = Math.max(toTimestamp(registration.updatedAt), toTimestamp(registration.createdAt));
     if (!existing || nextTs >= existingTs) {
-      latestRegistrationByUserId.set(userId, {
+      latestRegistrationByEventTeamAndUserId.set(key, {
         registrantType: registration.registrantType ? String(registration.registrantType) : null,
         parentId: normalizeId(registration.parentId),
+        status: registration.status ? String(registration.status) : null,
         updatedAt: registration.updatedAt ?? null,
+        createdAt: registration.createdAt ?? null,
       });
     }
   });
@@ -572,12 +589,16 @@ export async function GET(
       const orderedPlayerIds = normalizeIdList(team.playerIds);
 
       const usersForTeam: TeamComplianceUserSummary[] = orderedPlayerIds
+        .filter((playerId) => {
+          const registration = latestRegistrationByEventTeamAndUserId.get(`${team.id}::${playerId}`);
+          return !registration || isEligibleEventPersonRegistration(registration.status);
+        })
         .map((playerId) => {
           const user = usersById.get(playerId);
           if (!user) {
             return null;
           }
-          const registration = latestRegistrationByUserId.get(playerId);
+          const registration = latestRegistrationByEventTeamAndUserId.get(`${team.id}::${playerId}`);
           const ageAtEvent = calculateAgeOnDate(user.dateOfBirth, event.start);
           const isMinorAtEvent = Number.isFinite(ageAtEvent) && ageAtEvent < 18;
           const isChildRegistration = registration?.registrantType === 'CHILD' || isMinorAtEvent;

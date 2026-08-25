@@ -282,6 +282,33 @@ describe("POST /api/organizations/[id]/documents/[signedDocumentId]/void", () =>
     expect(prismaMock.signedDocuments.findFirst).not.toHaveBeenCalled();
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
   });
+  it("rejects identity proof older than ten minutes", async () => {
+    verifyRecentAuthTokenMock.mockReturnValue({
+      userId: "manager_1",
+      purpose: "sensitive_action",
+      issuedAtSeconds: Math.floor(Date.now() / 1000) - 601,
+    });
+
+    const response = await POST(
+      new NextRequest(
+        "http://localhost/api/organizations/org_1/documents/evidence_1/void",
+        {
+          method: "POST",
+          body: JSON.stringify({ reason: "Duplicate evidence" }),
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+      {
+        params: Promise.resolve({
+          id: "org_1",
+          signedDocumentId: "evidence_1",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(401);
+    expect(prismaMock.signedDocuments.findFirst).not.toHaveBeenCalled();
+  });
 
   it("notifies the document subject after a successful void", async () => {
     prismaMock.signedDocuments.findFirst.mockResolvedValue({
@@ -310,14 +337,17 @@ describe("POST /api/organizations/[id]/documents/[signedDocumentId]/void", () =>
       },
     );
 
-    expect(recordDocumentEvidenceInAppNotificationMock).toHaveBeenCalledWith({
-      organizationId: "org_1",
-      subjectUserId: "player_1",
-      evidenceId: "evidence_1",
-      documentName: "Waiver",
-      action: "VOID",
-      actorUserId: "manager_1",
-    });
+    expect(recordDocumentEvidenceInAppNotificationMock).toHaveBeenCalledWith(
+      {
+        organizationId: "org_1",
+        subjectUserId: "player_1",
+        evidenceId: "evidence_1",
+        documentName: "Waiver",
+        action: "VOID",
+        actorUserId: "manager_1",
+      },
+      expect.anything(),
+    );
     expect(notifyDocumentEvidenceChangeMock).toHaveBeenCalledWith(
       {
         organizationId: "org_1",
@@ -330,7 +360,7 @@ describe("POST /api/organizations/[id]/documents/[signedDocumentId]/void", () =>
       { isInAppIncluded: false },
     );
   });
-  it("keeps a committed void when in-app notification recording fails", async () => {
+  it("rolls back a void when in-app notification recording fails", async () => {
     recordDocumentEvidenceInAppNotificationMock.mockRejectedValueOnce(
       new Error("In-app notification storage failed."),
     );
@@ -360,11 +390,108 @@ describe("POST /api/organizations/[id]/documents/[signedDocumentId]/void", () =>
       },
     );
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(400);
     expect(txMock.signedDocuments.updateMany).toHaveBeenCalled();
-    expect(notifyDocumentEvidenceChangeMock).toHaveBeenCalledWith(
-      expect.objectContaining({ action: "VOID" }),
-      { isInAppIncluded: false },
+    expect(notifyDocumentEvidenceChangeMock).not.toHaveBeenCalled();
+  });
+  it.each([
+    "Wrong Document Subject",
+    "Wrong Document Requirement or Version",
+    "Wrong scope",
+    "Duplicate evidence",
+    "Incomplete or unsigned document",
+    "Unreadable or incorrect file",
+    "Replaced by corrected evidence",
+  ])("accepts controlled reason %s", async (reason) => {
+    const response = await POST(
+      new NextRequest(
+        "http://localhost/api/organizations/org_1/documents/evidence_1/void",
+        {
+          method: "POST",
+          body: JSON.stringify({ reason }),
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+      {
+        params: Promise.resolve({
+          id: "org_1",
+          signedDocumentId: "evidence_1",
+        }),
+      },
     );
+
+    expect(response.status).toBe(200);
+  });
+
+  it("requires a private note for the Other reason", async () => {
+    const response = await POST(
+      new NextRequest(
+        "http://localhost/api/organizations/org_1/documents/evidence_1/void",
+        {
+          method: "POST",
+          body: JSON.stringify({ reason: "Other" }),
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+      {
+        params: Promise.resolve({
+          id: "org_1",
+          signedDocumentId: "evidence_1",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(400);
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("stores the Other note only in the audit event", async () => {
+    const response = await POST(
+      new NextRequest(
+        "http://localhost/api/organizations/org_1/documents/evidence_1/void",
+        {
+          method: "POST",
+          body: JSON.stringify({ reason: "Other", note: "Duplicate source file." }),
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+      {
+        params: Promise.resolve({
+          id: "org_1",
+          signedDocumentId: "evidence_1",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(appendDocumentEvidenceAuditEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: "Other",
+        note: "Duplicate source file.",
+      }),
+      expect.anything(),
+    );
+  });
+
+  it("rejects an uncontrolled reason before opening a transaction", async () => {
+    const response = await POST(
+      new NextRequest(
+        "http://localhost/api/organizations/org_1/documents/evidence_1/void",
+        {
+          method: "POST",
+          body: JSON.stringify({ reason: "Not a controlled reason" }),
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+      {
+        params: Promise.resolve({
+          id: "org_1",
+          signedDocumentId: "evidence_1",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(400);
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
   });
 });

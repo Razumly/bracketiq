@@ -16,6 +16,7 @@ const prismaMock = {
   },
   organizationRoles: {
     findFirst: jest.fn(),
+    update: jest.fn(),
   },
   organizationRolePermissions: {
     findMany: jest.fn(),
@@ -29,13 +30,18 @@ const prismaMock = {
 const requireSessionMock = jest.fn();
 const hasOrgPermissionMock = jest.fn();
 const hasDocumentEvidenceOwnerAccessMock = jest.fn();
-
+const acquireOrganizationStaffMemberLockMock = jest.fn();
+const acquireOrganizationStaffAssignmentLockMock = jest.fn();
 
 jest.mock("@/lib/prisma", () => ({ prisma: prismaMock }));
 jest.mock("@/lib/permissions", () => ({ requireSession: requireSessionMock }));
 jest.mock("@/server/accessControl", () => ({
   hasOrgPermission: (...args: unknown[]) => hasOrgPermissionMock(...args),
   hasDocumentEvidenceOwnerAccess: (...args: unknown[]) => hasDocumentEvidenceOwnerAccessMock(...args),
+}));
+jest.mock("@/server/repositories/locks", () => ({
+  acquireOrganizationStaffMemberLock: (...args: unknown[]) => acquireOrganizationStaffMemberLockMock(...args),
+  acquireOrganizationStaffAssignmentLock: (...args: unknown[]) => acquireOrganizationStaffAssignmentLockMock(...args),
 }));
 
 import { DELETE, PATCH } from "@/app/api/organizations/[id]/staff/route";
@@ -52,6 +58,9 @@ describe("/api/organizations/[id]/staff", () => {
       ownerId: "owner_1",
     });
     prismaMock.events.findFirst.mockResolvedValue(null);
+    prismaMock.$transaction.mockImplementation(
+      (callback: (tx: typeof prismaMock) => unknown) => callback(prismaMock),
+    );
     prismaMock.staffMembers.findUnique.mockResolvedValue({
       id: "staff_1",
       organizationId: "org_1",
@@ -59,6 +68,7 @@ describe("/api/organizations/[id]/staff", () => {
       types: ["STAFF"],
       roleId: null,
     });
+    prismaMock.staffMembers.update.mockResolvedValue({ roleId: null });
   });
 
   it("rejects assigning a role that does not belong to the organization", async () => {
@@ -113,13 +123,15 @@ describe("/api/organizations/[id]/staff", () => {
       kind: "OFFICIAL",
       systemKey: "OFFICIAL",
     });
-    prismaMock.staffMembers.update.mockResolvedValue({
-      id: "staff_1",
-      organizationId: "org_1",
-      userId: "user_1",
-      types: ["OFFICIAL"],
-      roleId: "role_official",
-    });
+    prismaMock.staffMembers.update
+      .mockResolvedValueOnce({ roleId: null })
+      .mockResolvedValueOnce({
+        id: "staff_1",
+        organizationId: "org_1",
+        userId: "user_1",
+        types: ["OFFICIAL"],
+        roleId: "role_official",
+      });
 
     const response = await PATCH(
       new NextRequest("http://localhost/api/organizations/org_1/staff", {
@@ -220,12 +232,61 @@ describe("/api/organizations/[id]/staff", () => {
     );
 
     expect(response.status).toBe(403);
-    expect(prismaMock.staffMembers.update).not.toHaveBeenCalled();
+    expect(prismaMock.staffMembers.update).toHaveBeenCalledTimes(1);
   });
+  it("rejects a role assignment when restricted permissions change during the transaction", async () => {
+    hasDocumentEvidenceOwnerAccessMock.mockResolvedValue(false);
+    prismaMock.organizationRoles.findFirst.mockResolvedValue({
+      id: "role_auditor",
+      name: "Auditor",
+      kind: "STAFF",
+      systemKey: null,
+    });
+    prismaMock.organizationRolePermissions.findMany.mockResolvedValue([
+      { permission: "documents.void" },
+    ]);
+
+    const response = await PATCH(
+      new NextRequest("http://localhost/api/organizations/org_1/staff", {
+        method: "PATCH",
+        body: JSON.stringify({ userId: "user_1", roleId: "role_auditor" }),
+      }),
+      { params: Promise.resolve({ id: "org_1" }) },
+    );
+
+    expect(response.status).toBe(403);
+    expect(prismaMock.staffMembers.update).toHaveBeenCalledTimes(1);
+  });
+  it("rechecks the current staff role after locking the staff row", async () => {
+    hasDocumentEvidenceOwnerAccessMock.mockResolvedValue(false);
+    prismaMock.organizationRoles.findFirst.mockResolvedValue({
+      id: "role_official",
+      name: "Official",
+      kind: "OFFICIAL",
+      systemKey: "OFFICIAL",
+    });
+    prismaMock.staffMembers.update.mockResolvedValueOnce({ roleId: "role_auditor" });
+    prismaMock.organizationRolePermissions.findMany.mockResolvedValue([
+      { permission: "documents.void" },
+    ]);
+
+    const response = await PATCH(
+      new NextRequest("http://localhost/api/organizations/org_1/staff", {
+        method: "PATCH",
+        body: JSON.stringify({ userId: "user_1", roleId: "role_official" }),
+      }),
+      { params: Promise.resolve({ id: "org_1" }) },
+    );
+
+    expect(response.status).toBe(403);
+    expect(prismaMock.staffMembers.update).toHaveBeenCalledTimes(1);
+  });
+
 
   it("blocks revoking a protected document permission during staff deletion", async () => {
     hasDocumentEvidenceOwnerAccessMock.mockResolvedValue(false);
     prismaMock.staffMembers.findUnique.mockResolvedValue({
+      id: "staff_1",
       roleId: "role_auditor",
     });
     prismaMock.organizationRolePermissions.findMany.mockResolvedValue([
@@ -244,5 +305,29 @@ describe("/api/organizations/[id]/staff", () => {
     expect(response.status).toBe(403);
     expect(prismaMock.staffMembers.deleteMany).not.toHaveBeenCalled();
   });
+  it("rejects staff deletion when restricted permissions change during the transaction", async () => {
+    hasDocumentEvidenceOwnerAccessMock.mockResolvedValue(false);
+    prismaMock.staffMembers.findUnique.mockResolvedValue({
+      id: "staff_1",
+      roleId: "role_auditor",
+    });
+    prismaMock.staffMembers.update.mockResolvedValueOnce({ roleId: "role_auditor" });
+    prismaMock.organizationRolePermissions.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ permission: "documents.audit" }]);
+
+    const response = await DELETE(
+      new NextRequest("http://localhost/api/organizations/org_1/staff", {
+        method: "DELETE",
+        body: JSON.stringify({ userId: "user_1" }),
+        headers: { "content-type": "application/json" },
+      }),
+      { params: Promise.resolve({ id: "org_1" }) },
+    );
+
+    expect(response.status).toBe(403);
+    expect(prismaMock.staffMembers.deleteMany).not.toHaveBeenCalled();
+  });
+
 
 });

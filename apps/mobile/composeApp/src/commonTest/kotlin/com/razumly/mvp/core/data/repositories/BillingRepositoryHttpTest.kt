@@ -28,6 +28,8 @@ import com.razumly.mvp.core.data.dataTypes.daos.MessageDao
 import com.razumly.mvp.core.data.dataTypes.daos.PendingRentalOrderDao
 import com.razumly.mvp.core.data.dataTypes.daos.RefundRequestDao
 import com.razumly.mvp.core.data.dataTypes.daos.TeamDao
+import com.razumly.mvp.core.data.dataTypes.ProfileDocumentCacheEntry
+import com.razumly.mvp.core.data.dataTypes.daos.ProfileDocumentDao
 import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.network.AuthTokenStore
@@ -46,12 +48,17 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.http.content.OutgoingContent
 import io.ktor.serialization.kotlinx.json.json
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -178,10 +185,32 @@ private class BillingRepositoryHttp_FakePendingRentalOrderDao : PendingRentalOrd
         }
     }
 }
+private class BillingRepositoryHttp_FakeProfileDocumentDao : ProfileDocumentDao {
+    private val storedDocumentsFlow = MutableStateFlow<List<ProfileDocumentCacheEntry>>(emptyList())
+    val storedDocuments: List<ProfileDocumentCacheEntry>
+        get() = storedDocumentsFlow.value
+
+    override fun observeDocuments(viewerKey: String): Flow<List<ProfileDocumentCacheEntry>> =
+        storedDocumentsFlow.map { documents ->
+            documents.filter { entry -> entry.viewerKey == viewerKey }
+        }
+
+    override suspend fun deleteForViewer(viewerKey: String) {
+        storedDocumentsFlow.value = storedDocuments.filterNot { entry -> entry.viewerKey == viewerKey }
+    }
+
+    override suspend fun upsertDocuments(entries: List<ProfileDocumentCacheEntry>) {
+        val entriesByKey = storedDocuments.associateBy { entry -> entry.viewerKey to entry.id }.toMutableMap()
+        entries.forEach { entry -> entriesByKey[entry.viewerKey to entry.id] = entry }
+        storedDocumentsFlow.value = entriesByKey.values.toList()
+    }
+}
+
 
 private class BillingRepositoryHttp_FakeDatabaseService(
     private val refundRequestDao: RefundRequestDao = BillingRepositoryHttp_FakeRefundRequestDao(),
     private val pendingRentalOrderDao: PendingRentalOrderDao = BillingRepositoryHttp_FakePendingRentalOrderDao(),
+    val profileDocumentDao: BillingRepositoryHttp_FakeProfileDocumentDao = BillingRepositoryHttp_FakeProfileDocumentDao(),
     override val getCatalogCacheDao: CatalogCacheDao = InMemoryCatalogCacheDao(),
 ) : DatabaseService {
     override val getMatchDao: MatchDao get() = error("unused")
@@ -194,6 +223,7 @@ private class BillingRepositoryHttp_FakeDatabaseService(
     override val getMessageDao: MessageDao get() = error("unused")
     override val getRefundRequestDao: RefundRequestDao get() = refundRequestDao
     override val getPendingRentalOrderDao: PendingRentalOrderDao get() = pendingRentalOrderDao
+    override val getProfileDocumentDao: ProfileDocumentDao get() = profileDocumentDao
 }
 
 private class BillingRepositoryHttp_FakeUserRepository(
@@ -201,9 +231,13 @@ private class BillingRepositoryHttp_FakeUserRepository(
     currentAccount: AuthAccount,
     private val getUsersHandler: ((List<String>) -> Result<List<UserData>>)? = null,
 ) : IUserRepository {
-    override val currentUser: StateFlow<Result<UserData>> = MutableStateFlow(Result.success(currentUser))
+    private val currentUserState = MutableStateFlow(Result.success(currentUser))
+    override val currentUser: StateFlow<Result<UserData>> = currentUserState
     override val currentAccount: StateFlow<Result<AuthAccount>> = MutableStateFlow(Result.success(currentAccount))
 
+    fun switchCurrentUser(user: UserData) {
+        currentUserState.value = Result.success(user)
+    }
     override suspend fun getUsers(
         userIds: List<String>,
         visibilityContext: UserVisibilityContext,
@@ -3201,11 +3235,11 @@ class BillingRepositoryHttpTest {
     }
 
     @Test
-    fun listProfileDocuments_gets_and_maps_response() = runTest {
+    fun givenProfileDocumentsResponse_whenListingDocuments_thenMapsAndCachesResponse() = runTest {
         val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
         val userRepo = BillingRepositoryHttp_FakeUserRepository(
-            currentUser = billingMakeUser("u1"),
-            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+            currentUser = billingMakeUser("server_user"),
+            currentAccount = AuthAccount(id = "server_user", email = "server@example.test", name = "Test User"),
         )
         val db = BillingRepositoryHttp_FakeDatabaseService()
 
@@ -3217,6 +3251,7 @@ class BillingRepositoryHttpTest {
             respond(
                 content = """
                     {
+                      "viewerUserId": "server_user",
                       "unsigned": [
                         {
                           "id": "event_1:tpl_pdf:parent_guardian:child_1",
@@ -3266,14 +3301,28 @@ class BillingRepositoryHttpTest {
                           "organizationName": "City League",
                           "templateId": "tpl_pdf",
                           "title": "Parent Consent",
-                          "type": "PDF",
-                          "requiredSignerType": "PARTICIPANT",
-                          "requiredSignerLabel": "Participant",
-                          "signerContext": "participant",
-                          "signerContextLabel": "Participant",
-                          "signedDocumentRecordId": "voided_1"
+                          "type": "TEXT",
+                          "provenance": "IMPORTED",
+                          "documentRequirementTitle": "Parent Consent Requirement",
+                          "versionSequence": 2,
+                          "scopeType": "EVENT_PARTICIPATION",
+                          "scopeId": "event_1",
+                          "requiredSignerType": "PARENT_GUARDIAN",
+                          "requiredSignerLabel": "Parent/Guardian",
+                          "signerContext": "parent_guardian",
+                          "signerContextLabel": "Parent/Guardian",
+                          "childUserId": "child_1",
+                          "childEmail": "child@example.test",
+                          "signedDocumentRecordId": "voided_1",
+                          "viewUrl": "/api/documents/signed/voided_1/file",
+                          "sourceNote": "private migration note",
+                          "attestationText": "private attestation",
+                          "uploaderUserId": "private_uploader",
+                          "contentIdentity": "private-content-hash",
+                          "auditEvents": [{"action": "IMPORTED"}]
                         }
                       ]
+                    }
                 """.trimIndent(),
                 status = HttpStatusCode.OK,
                 headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
@@ -3285,6 +3334,10 @@ class BillingRepositoryHttpTest {
         val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
 
         val documents = repo.listProfileDocuments().getOrThrow()
+        val observed = repo.observeProfileDocuments().first { bundle ->
+            bundle.signed.any { document -> document.id == "voided_1" }
+        }
+        assertEquals(2, observed.signed.size)
 
         assertEquals(1, documents.unsigned.size)
         assertEquals(2, documents.signed.size)
@@ -3304,6 +3357,173 @@ class BillingRepositoryHttpTest {
         val voided = documents.signed[1]
         assertEquals(ProfileDocumentStatus.VOID, voided.status)
         assertEquals("voided_1", voided.id)
+        assertEquals("IMPORTED", voided.provenance)
+        assertEquals("Parent Consent Requirement", voided.documentRequirementTitle)
+        assertEquals(2, voided.versionSequence)
+        assertEquals("EVENT_PARTICIPATION", voided.scopeType)
+        assertEquals(null, voided.historicalSigningDate)
+        assertEquals("/api/documents/signed/voided_1/file", voided.viewUrl)
+        assertEquals(ProfileDocumentType.PDF, voided.type)
+        assertEquals(null, voided.content)
+        assertEquals(null, voided.statusNote)
+        assertEquals(3, db.profileDocumentDao.storedDocuments.size)
+        assertTrue(db.profileDocumentDao.storedDocuments.all { entry -> entry.viewerKey == "server_user" })
+        val cachedVoided = db.profileDocumentDao.storedDocuments.first { entry -> entry.id == "voided_1" }
+        assertEquals("IMPORTED", cachedVoided.provenance)
+        assertEquals(ProfileDocumentType.PDF, voided.type)
+        assertEquals(SignerContext.PARENT_GUARDIAN, voided.signerContext)
+        assertEquals("child_1", voided.childUserId)
+        assertEquals("child@example.test", voided.childEmail)
+        assertEquals(2, cachedVoided.versionSequence)
+        assertEquals("EVENT_PARTICIPATION", cachedVoided.scopeType)
+    }
+
+    @Test
+    fun givenProfileDocumentsResponseAfterAccountSwitch_whenListingDocuments_thenDoesNotExposeStaleCache() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("user_a"),
+            currentAccount = AuthAccount(id = "user_a", email = "a@example.test", name = "User A"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+        val responseGate = CompletableDeferred<Unit>()
+        val engine = MockEngine {
+            responseGate.await()
+            respond(
+                content = """
+                    {
+                      "viewerUserId": "user_a",
+                      "unsigned": [],
+                      "signed": [{
+                        "id": "stale_document",
+                        "status": "SIGNED",
+                        "organizationName": "City League",
+                        "templateId": "template_1",
+                        "title": "Stale document",
+                        "type": "TEXT",
+                        "requiredSignerType": "PARTICIPANT",
+                        "requiredSignerLabel": "Participant",
+                        "signerContext": "participant",
+                        "signerContextLabel": "Participant"
+                      }],
+                      "voided": []
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
+
+        val request = async { repo.listProfileDocuments() }
+        userRepo.switchCurrentUser(billingMakeUser("user_b"))
+        responseGate.complete(Unit)
+
+        assertTrue(request.await().isSuccess)
+        val observed = repo.observeProfileDocuments().first()
+        assertTrue(observed.unsigned.isEmpty())
+        assertTrue(observed.signed.isEmpty())
+        assertTrue(db.profileDocumentDao.storedDocuments.all { entry -> entry.viewerKey == "user_a" })
+    }
+    @Test
+    fun givenGuardianImportedDocumentResponse_whenListingDocuments_thenMapsChildAccessWithoutPrivateFields() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("guardian_1"),
+            currentAccount = AuthAccount(
+                id = "guardian_1",
+                email = "guardian@example.test",
+                name = "Guardian User",
+            ),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+        val engine = MockEngine {
+            respond(
+                content = """
+                    {
+                      "viewerUserId": "guardian_1",
+                      "unsigned": [],
+                      "signed": [{
+                        "id": "guardian_imported",
+                        "status": "SIGNED",
+                        "organizationName": "City League",
+                        "templateId": "version_2",
+                        "title": "Imported guardian waiver",
+                        "type": "TEXT",
+                        "provenance": "IMPORTED",
+                        "documentRequirementTitle": "Guardian waiver requirement",
+                        "versionSequence": 2,
+                        "scopeType": "EVENT_PARTICIPATION",
+                        "scopeId": "event_1",
+                        "requiredSignerType": "PARENT_GUARDIAN",
+                        "requiredSignerLabel": "Parent/Guardian",
+                        "signerContext": "parent_guardian",
+                        "signerContextLabel": "Parent/Guardian",
+                        "childUserId": "child_1",
+                        "childEmail": "child@example.test",
+                        "signedDocumentRecordId": "guardian_imported",
+                        "viewUrl": "/api/documents/signed/guardian_imported/file",
+                        "sourceNote": "private migration note",
+                        "attestationText": "private attestation",
+                        "uploaderUserId": "private_uploader",
+                        "contentIdentity": "private-content-hash",
+                        "auditEvents": [{"action": "IMPORTED"}]
+                      }],
+                      "voided": []
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
+
+        val document = repo.listProfileDocuments().getOrThrow().signed.single()
+
+        assertEquals(ProfileDocumentStatus.SIGNED, document.status)
+        assertEquals(ProfileDocumentType.PDF, document.type)
+        assertEquals(SignerContext.PARENT_GUARDIAN, document.signerContext)
+        assertEquals("child_1", document.childUserId)
+        assertEquals("2", document.versionSequence?.toString())
+        assertFalse(document.toString().contains("private migration note"))
+        assertFalse(document.toString().contains("private-content-hash"))
+        assertEquals(1, db.profileDocumentDao.storedDocuments.size)
+    }
+    @Test
+    fun givenAuthorizedPdf_whenProfileDocumentPdfRequested_thenDownloadsAuthorizedPdfBytes() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+        val expectedPdf = "%PDF-1.7 imported".encodeToByteArray()
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/documents/signed/imported_1/file", request.url.encodedPath)
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+
+            respond(
+                content = expectedPdf,
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Pdf.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
+
+        val actualPdf = repo.getProfileDocumentPdf(
+            "/api/documents/signed/imported_1/file",
+        ).getOrThrow()
+
+        assertContentEquals(expectedPdf, actualPdf)
     }
 
     @Test

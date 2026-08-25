@@ -5,10 +5,15 @@ import { requireSession } from '@/lib/permissions';
 import { getStorageProvider } from '@/lib/storageProvider';
 import { downloadSignedDocumentPdf, isBoldSignConfigured } from '@/lib/boldsignServer';
 import {
+  IMPORTED_DOCUMENT_VIEW_PERMISSIONS,
+  ORG_PERMISSIONS,
+} from '@/lib/organizationPermissions';
+import {
+  canManageOrganization,
+  canOfficialOrganization,
+  hasAnyOrgPermission,
   hasOrgPermission,
 } from '@/server/accessControl';
-import { ORG_PERMISSIONS } from '@/lib/organizationPermissions';
-export const dynamic = 'force-dynamic';
 
 const sanitizeFileName = (value: string): string => {
   const cleaned = value
@@ -88,7 +93,7 @@ const isMissingStorageObjectError = (error: unknown): boolean => {
     || httpStatusCode === 404;
 };
 
-const hasOrganizationStaffAccess = async (params: {
+const hasImportedDocumentStaffAccess = async (params: {
   sessionUserId: string;
   isAdmin: boolean;
   organizationId?: string | null;
@@ -107,10 +112,10 @@ const hasOrganizationStaffAccess = async (params: {
   if (!organization) {
     return false;
   }
-  return hasOrgPermission(
+  return hasAnyOrgPermission(
     { userId: params.sessionUserId, isAdmin: params.isAdmin },
     organization,
-    ORG_PERMISSIONS.DOCUMENTS_IMPORT,
+    IMPORTED_DOCUMENT_VIEW_PERMISSIONS,
   );
 };
 const hasImportedDocumentAccess = async (params: {
@@ -135,6 +140,9 @@ const hasImportedDocumentAccess = async (params: {
     })
     : null;
   const subjectUserId = subject?.userId ?? params.signedDocument.userId;
+  if (subject && subject.organizationId !== params.signedDocument.organizationId) {
+    return false;
+  }
 
   if (subjectUserId === params.sessionUserId) {
     return true;
@@ -154,10 +162,10 @@ const hasImportedDocumentAccess = async (params: {
     }
   }
 
-  return hasOrganizationStaffAccess({
+  return hasImportedDocumentStaffAccess({
     sessionUserId: params.sessionUserId,
     isAdmin: params.isAdmin,
-    organizationId: subject?.organizationId ?? params.signedDocument.organizationId,
+    organizationId: params.signedDocument.organizationId,
   });
 };
 
@@ -167,14 +175,15 @@ const hasOrganizationDocumentAccess = async (params: {
   organizationId?: string | null;
   eventId?: string | null;
   teamId?: string | null;
+  documentSubjectId?: string | null;
 }): Promise<boolean> => {
   if (params.isAdmin) {
     return true;
   }
 
   let organizationId = params.organizationId ?? null;
-  let eventId = params.eventId ?? null;
-  let teamId = params.teamId ?? null;
+  const eventId = params.eventId ?? null;
+  const teamId = params.teamId ?? null;
 
   if (!organizationId && eventId) {
     const event = await prisma.events.findUnique({
@@ -209,11 +218,52 @@ const hasOrganizationDocumentAccess = async (params: {
     organizationId = team.organizationId;
   }
 
-  if (await hasOrganizationStaffAccess({
-    sessionUserId: params.sessionUserId,
-    isAdmin: params.isAdmin,
-    organizationId,
-  })) {
+  if (organizationId && params.documentSubjectId) {
+    const documentSubject = await prisma.documentSubjects.findUnique({
+      where: { id: params.documentSubjectId },
+      select: { userId: true, organizationId: true },
+    });
+    if (documentSubject?.organizationId === organizationId) {
+      if (documentSubject.userId === params.sessionUserId) {
+        return true;
+      }
+      const guardianLink = await prisma.parentChildLinks.findFirst({
+        where: {
+          parentId: params.sessionUserId,
+          childId: documentSubject.userId,
+          status: 'ACTIVE',
+        },
+        select: { id: true },
+      });
+      if (guardianLink) {
+        return true;
+      }
+    }
+  }
+
+  if (!organizationId) {
+    return false;
+  }
+
+  const organization = await prisma.organizations.findUnique({
+    where: { id: organizationId },
+    select: { id: true, ownerId: true },
+  });
+  if (!organization) {
+    return false;
+  }
+
+  if (await canManageOrganization(
+    { userId: params.sessionUserId, isAdmin: params.isAdmin },
+    organization,
+  )) {
+    return true;
+  }
+
+  if (await canOfficialOrganization(
+    { userId: params.sessionUserId, isAdmin: params.isAdmin },
+    organization,
+  )) {
     return true;
   }
 
@@ -263,6 +313,14 @@ const hasOrganizationDocumentAccess = async (params: {
     }
   }
 
+  if (await hasOrgPermission(
+    { userId: params.sessionUserId, isAdmin: params.isAdmin },
+    organization,
+    ORG_PERMISSIONS.DOCUMENTS_IMPORT,
+  )) {
+    return true;
+  }
+
   return false;
 };
 
@@ -305,6 +363,7 @@ export async function GET(
       organizationId: signedDocument.organizationId,
       eventId: signedDocument.eventId,
       teamId: signedDocument.teamId,
+      documentSubjectId: signedDocument.documentSubjectId,
     });
   if (!canAccess) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });

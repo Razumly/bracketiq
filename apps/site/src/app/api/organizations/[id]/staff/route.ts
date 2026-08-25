@@ -3,17 +3,21 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/permissions';
 import { getStaffMemberTypesForOrganizationRole, normalizeStaffMemberTypes } from '@/lib/staff';
-import { ORG_PERMISSIONS, type OrganizationPermission } from '@/lib/organizationPermissions';
+import {
+  ORG_PERMISSIONS,
+  RESTRICTED_DOCUMENT_PERMISSION_ERROR,
+  RESTRICTED_DOCUMENT_PERMISSIONS,
+} from '@/lib/organizationPermissions';
 import { hasDocumentEvidenceOwnerAccess, hasOrgPermission } from '@/server/accessControl';
-import { resolveDefaultOrganizationRoleIdForStaffTypes } from '@/server/organizationRoles';
+import {
+  acquireOrganizationStaffAssignmentLock,
+  acquireOrganizationStaffMemberLock,
+} from '@/server/repositories/locks';
+import {
+  orderOrganizationRoleIdsForLock,
+  resolveDefaultOrganizationRoleIdForStaffTypes,
+} from '@/server/organizationRoles';
 
-const RESTRICTED_DOCUMENT_PERMISSIONS: OrganizationPermission[] = [
-  ORG_PERMISSIONS.DOCUMENTS_VOID,
-  ORG_PERMISSIONS.DOCUMENTS_AUDIT_VIEW,
-];
-
-const RESTRICTED_DOCUMENT_PERMISSION_ERROR =
-  'Only the Organization owner or platform administrator can grant or revoke document void or audit access.';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,6 +30,8 @@ const updateSchema = z.object({
 const deleteSchema = z.object({
   userId: z.string(),
 }).passthrough();
+class RestrictedDocumentPermissionConflict extends Error {}
+
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await requireSession(req);
@@ -108,32 +114,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   } else if (!existing.roleId && Object.prototype.hasOwnProperty.call(parsed.data, 'types')) {
     data.roleId = await resolveDefaultOrganizationRoleIdForStaffTypes(prisma, id, nextTypes);
   }
-  const nextRoleId = Object.prototype.hasOwnProperty.call(data, 'roleId')
-    ? (typeof data.roleId === 'string' || data.roleId === null ? data.roleId : existing.roleId)
-    : existing.roleId;
-  if (nextRoleId !== existing.roleId) {
-    const roleIds = Array.from(new Set(
-      [existing.roleId, nextRoleId].filter((roleId): roleId is string => typeof roleId === 'string' && roleId.length > 0),
-    ));
-    if (roleIds.length > 0) {
-      const restrictedPermissions = await prisma.organizationRolePermissions.findMany({
-        where: {
-          organizationRoleId: { in: roleIds },
-          permission: { in: RESTRICTED_DOCUMENT_PERMISSIONS },
-        },
-        select: { permission: true },
-      });
-      if (
-        restrictedPermissions.length > 0
-        && !(await hasDocumentEvidenceOwnerAccess(session, org))
-      ) {
-        return NextResponse.json(
-          { error: RESTRICTED_DOCUMENT_PERMISSION_ERROR },
-          { status: 403 },
-        );
-      }
-    }
-  }
 
 
   if (parsed.data.userId !== org.ownerId && !nextTypes.includes('HOST')) {
@@ -155,12 +135,64 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
   }
 
-  const updated = await prisma.staffMembers.update({
-    where: { id: existing.id },
-    data,
-  });
+  try {
+    const updated = await prisma.$transaction(async (tx) => {
+      await acquireOrganizationStaffAssignmentLock(tx, id);
+      await acquireOrganizationStaffMemberLock(tx, id, parsed.data.userId);
+      const lockedStaffMember = await tx.staffMembers.update({
+        where: { id: existing.id },
+        data: { updatedAt: new Date() },
+        select: { roleId: true },
+      });
+      const nextRoleId = Object.prototype.hasOwnProperty.call(data, 'roleId')
+        ? (typeof data.roleId === 'string' || data.roleId === null
+          ? data.roleId
+          : lockedStaffMember.roleId)
+        : lockedStaffMember.roleId;
+      const roleIds = nextRoleId !== lockedStaffMember.roleId
+        ? Array.from(new Set(
+          [lockedStaffMember.roleId, nextRoleId]
+            .filter((roleId): roleId is string => typeof roleId === 'string' && roleId.length > 0),
+        ))
+        : [];
+      const orderedRoleIds = await orderOrganizationRoleIdsForLock(tx, roleIds);
+      for (const roleId of orderedRoleIds) {
+        await tx.organizationRoles.update({
+          where: { id: roleId },
+          data: { updatedAt: new Date() },
+        });
+      }
+      if (orderedRoleIds.length > 0) {
+        const restrictedPermissions = await tx.organizationRolePermissions.findMany({
+          where: {
+            organizationRoleId: { in: orderedRoleIds },
+            permission: { in: RESTRICTED_DOCUMENT_PERMISSIONS },
+          },
+          select: { permission: true },
+        });
+        if (
+          restrictedPermissions.length > 0
+          && !(await hasDocumentEvidenceOwnerAccess(session, org, tx))
+        ) {
+          throw new RestrictedDocumentPermissionConflict(RESTRICTED_DOCUMENT_PERMISSION_ERROR);
+        }
+      }
+      return tx.staffMembers.update({
+        where: { id: existing.id },
+        data,
+      });
+    });
 
-  return NextResponse.json({ staffMember: updated }, { status: 200 });
+    return NextResponse.json({ staffMember: updated }, { status: 200 });
+  } catch (error) {
+    if (error instanceof RestrictedDocumentPermissionConflict) {
+      return NextResponse.json(
+        { error: RESTRICTED_DOCUMENT_PERMISSION_ERROR },
+        { status: 403 },
+      );
+    }
+    throw error;
+  }
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -189,8 +221,11 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
         userId: parsed.data.userId,
       },
     },
-    select: { roleId: true },
+    select: { id: true, roleId: true },
   });
+  const canManageRestrictedDocumentPermissions = existing?.roleId
+    ? await hasDocumentEvidenceOwnerAccess(session, org)
+    : false;
   if (existing?.roleId) {
     const restrictedPermissions = await prisma.organizationRolePermissions.findMany({
       where: {
@@ -201,7 +236,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     });
     if (
       restrictedPermissions.length > 0
-      && !(await hasDocumentEvidenceOwnerAccess(session, org))
+      && !canManageRestrictedDocumentPermissions
     ) {
       return NextResponse.json(
         { error: RESTRICTED_DOCUMENT_PERMISSION_ERROR },
@@ -230,21 +265,71 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     }
   }
 
-  await prisma.$transaction(async (tx) => {
-    await tx.staffMembers.deleteMany({
-      where: {
-        organizationId: id,
-        userId: parsed.data.userId,
-      },
+  try {
+    await prisma.$transaction(async (tx) => {
+      await acquireOrganizationStaffAssignmentLock(tx, id);
+      await acquireOrganizationStaffMemberLock(tx, id, parsed.data.userId);
+      const currentStaffMember = await tx.staffMembers.findUnique({
+        where: {
+          organizationId_userId: {
+            organizationId: id,
+            userId: parsed.data.userId,
+          },
+        },
+        select: { id: true, roleId: true },
+      });
+      const lockedStaffMember = currentStaffMember?.id
+        ? await tx.staffMembers.update({
+          where: { id: currentStaffMember.id },
+          data: { updatedAt: new Date() },
+          select: { roleId: true },
+        })
+        : null;
+      if (lockedStaffMember?.roleId) {
+        const orderedRoleIds = await orderOrganizationRoleIdsForLock(tx, [lockedStaffMember.roleId]);
+        for (const roleId of orderedRoleIds) {
+          await tx.organizationRoles.update({
+            where: { id: roleId },
+            data: { updatedAt: new Date() },
+          });
+        }
+        const restrictedPermissions = await tx.organizationRolePermissions.findMany({
+          where: {
+            organizationRoleId: { in: orderedRoleIds },
+            permission: { in: RESTRICTED_DOCUMENT_PERMISSIONS },
+          },
+          select: { permission: true },
+        });
+        if (
+          restrictedPermissions.length > 0
+          && !(await hasDocumentEvidenceOwnerAccess(session, org, tx))
+        ) {
+          throw new RestrictedDocumentPermissionConflict(RESTRICTED_DOCUMENT_PERMISSION_ERROR);
+        }
+      }
+      await tx.staffMembers.deleteMany({
+        where: {
+          organizationId: id,
+          userId: parsed.data.userId,
+        },
+      });
+      await tx.invites.deleteMany({
+        where: {
+          organizationId: id,
+          userId: parsed.data.userId,
+          type: 'STAFF',
+        },
+      });
     });
-    await tx.invites.deleteMany({
-      where: {
-        organizationId: id,
-        userId: parsed.data.userId,
-        type: 'STAFF',
-      },
-    });
-  });
+  } catch (error) {
+    if (error instanceof RestrictedDocumentPermissionConflict) {
+      return NextResponse.json(
+        { error: RESTRICTED_DOCUMENT_PERMISSION_ERROR },
+        { status: 403 },
+      );
+    }
+    throw error;
+  }
 
   return NextResponse.json({ deleted: true }, { status: 200 });
 }

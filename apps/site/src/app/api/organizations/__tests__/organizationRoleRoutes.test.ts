@@ -206,6 +206,38 @@ describe('/api/organizations/[id]/roles/[roleId]', () => {
     expect(response.status).toBe(403);
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
   });
+  it('rejects a non-owner update when restricted permissions change during the write', async () => {
+    requireSessionMock.mockResolvedValue({ userId: 'manager_1', isAdmin: false });
+    hasDocumentEvidenceOwnerAccessMock.mockResolvedValue(false);
+    prismaMock.organizationRoles.findFirst.mockResolvedValue({
+      id: 'role_staff',
+      organizationId: 'org_1',
+      name: 'Staff',
+      isSystem: false,
+    });
+    prismaMock.organizationRolePermissions.findMany
+      .mockResolvedValueOnce([{ permission: 'documents.void' }])
+      .mockResolvedValueOnce([]);
+
+    const response = await PATCH(
+      new NextRequest('http://localhost/api/organizations/org_1/roles/role_staff', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          permissions: ['documents.import', 'documents.void'],
+        }),
+        headers: { 'content-type': 'application/json' },
+      }),
+      { params: Promise.resolve({ id: 'org_1', roleId: 'role_staff' }) },
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual(expect.objectContaining({
+      error: expect.stringContaining('Only the Organization owner'),
+    }));
+    expect(prismaMock.organizationRolePermissions.deleteMany).not.toHaveBeenCalled();
+    expect(prismaMock.organizationRolePermissions.createMany).not.toHaveBeenCalled();
+  });
+
 
   it('ignores official scheduling permission because scheduling is type-based', async () => {
     prismaMock.organizationRoles.findFirst.mockResolvedValue({

@@ -34,6 +34,7 @@ class BillingRepository(
     private val signingCoordinator = BillingSigningCoordinator(
         api = api,
         userRepository = userRepository,
+        databaseService = databaseService,
     )
     private val rentalOrderCoordinator = BillingRentalOrderCoordinator(
         api = api,
@@ -282,6 +283,10 @@ class BillingRepository(
 
     override suspend fun listProfileDocuments(): Result<ProfileDocumentsBundle> =
         signingCoordinator.listProfileDocuments()
+    override fun observeProfileDocuments(): Flow<ProfileDocumentsBundle> =
+        signingCoordinator.observeProfileDocuments()
+    override suspend fun getProfileDocumentPdf(viewUrl: String): Result<ByteArray> =
+        signingCoordinator.getProfileDocumentPdf(viewUrl)
 
     override suspend fun createAccount(): Result<String> = signingCoordinator.createAccount()
 

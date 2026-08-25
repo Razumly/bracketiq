@@ -87,7 +87,7 @@ const isActiveEvidenceStatus = (value: unknown): boolean => {
 };
 const DOCUMENT_EVIDENCE_QUERY_CHUNK_SIZE = 500;
 
-const readByIdChunks = async <T>(
+export const readByIdChunks = async <T>(
   ids: string[],
   read: (idChunk: string[]) => Promise<T[]>,
 ): Promise<T[]> => {

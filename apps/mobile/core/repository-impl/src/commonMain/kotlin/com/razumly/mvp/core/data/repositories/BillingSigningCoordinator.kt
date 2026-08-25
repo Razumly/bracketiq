@@ -1,18 +1,35 @@
 package com.razumly.mvp.core.data.repositories
 
+import com.razumly.mvp.core.data.DatabaseService
+import com.razumly.mvp.core.data.dataTypes.ProfileDocumentCacheEntry
 import com.razumly.mvp.core.network.MvpApiClient
+import com.razumly.mvp.core.network.dto.AuthResponseDto
 import com.razumly.mvp.core.network.dto.BillingUserRefDto
 import com.razumly.mvp.core.network.dto.StripeHostLinkRequestDto
 import com.razumly.mvp.core.network.stripeRedirectBaseUrl
 import io.github.aakira.napier.Napier
 import io.ktor.http.encodeURLQueryComponent
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.delay
 
 /** Owns document-signing workflows, profile documents, and Stripe host onboarding links. */
 internal class BillingSigningCoordinator(
     private val api: MvpApiClient,
     private val userRepository: IUserRepository,
+    private val databaseService: DatabaseService,
 ) {
+    private data class ProfileDocumentViewerKey(
+        val authenticatedUserId: String,
+        val viewerKey: String,
+    )
+
+    private val profileDocumentViewerKey = MutableStateFlow<ProfileDocumentViewerKey?>(null)
     suspend fun getRequiredEventSignLinks(
         eventId: String,
         signerContext: SignerContext,
@@ -184,19 +201,74 @@ internal class BillingSigningCoordinator(
         throw Exception("Document synchronization is delayed. Please try again shortly.")
     }
 
-    suspend fun listProfileDocuments(): Result<ProfileDocumentsBundle> = runCatching {
-        val response = api.get<ProfileDocumentsResponseDto>("api/profile/documents")
-        response.error?.takeIf(String::isNotBlank)?.let { throw Exception(it) }
-        ProfileDocumentsBundle(
-            unsigned = response.unsigned.mapNotNull { document ->
-                document.toProfileDocumentCardOrNull(defaultStatus = ProfileDocumentStatus.UNSIGNED)
+    fun observeProfileDocuments(): Flow<ProfileDocumentsBundle> =
+        combine(
+            userRepository.currentUser.map { result ->
+                result.getOrNull()?.id?.trim()?.takeIf(String::isNotBlank)
             },
-            signed = response.signed.mapNotNull { document ->
+            profileDocumentViewerKey,
+        ) { authenticatedUserId, serverViewerKey ->
+            serverViewerKey
+                ?.takeIf { key -> key.authenticatedUserId == authenticatedUserId }
+                ?.viewerKey
+                ?: authenticatedUserId
+        }
+            .distinctUntilChanged()
+            .flatMapLatest { viewerKey ->
+                if (viewerKey == null) {
+                    flowOf(ProfileDocumentsBundle())
+                } else {
+                    databaseService.getProfileDocumentDao
+                        .observeDocuments(viewerKey)
+                        .map { entries ->
+                            val documents = entries.map(ProfileDocumentCacheEntry::toProfileDocumentCard)
+                            ProfileDocumentsBundle(
+                                unsigned = documents.filter { document ->
+                                    document.status == ProfileDocumentStatus.UNSIGNED
+                                },
+                                signed = documents.filter { document ->
+                                    document.status != ProfileDocumentStatus.UNSIGNED
+                                },
+                            )
+                        }
+                }
+            }
+
+    suspend fun listProfileDocuments(): Result<ProfileDocumentsBundle> = runCatching {
+        val session = api.openSession()
+        val response = session.get<ProfileDocumentsResponseDto>("api/profile/documents")
+        response.error?.takeIf(String::isNotBlank)?.let { throw Exception(it) }
+        val viewerKey = response.viewerUserId.trim()
+        if (viewerKey.isBlank()) {
+            throw IllegalStateException("Authenticated profile document viewer id is required.")
+        }
+        val unsigned = response.unsigned.mapNotNull { document ->
+            document.toProfileDocumentCardOrNull(defaultStatus = ProfileDocumentStatus.UNSIGNED)
+        }
+        val signed = (
+            response.signed.mapNotNull { document ->
                 document.toProfileDocumentCardOrNull(defaultStatus = ProfileDocumentStatus.SIGNED)
             } + response.voided.mapNotNull { document ->
                 document.toProfileDocumentCardOrNull(defaultStatus = ProfileDocumentStatus.VOID)
+            }
+        )
+        val bundle = ProfileDocumentsBundle(unsigned = unsigned, signed = signed)
+        databaseService.getProfileDocumentDao.replaceDocuments(
+            viewerKey = viewerKey,
+            entries = (unsigned + signed).mapIndexed { index, document ->
+                document.toProfileDocumentCacheEntry(viewerKey = viewerKey, sortOrder = index)
             },
         )
+        profileDocumentViewerKey.value = ProfileDocumentViewerKey(
+            authenticatedUserId = viewerKey,
+            viewerKey = viewerKey,
+        )
+        bundle
+    }
+    suspend fun getProfileDocumentPdf(viewUrl: String): Result<ByteArray> = runCatching {
+        val normalizedUrl = viewUrl.trim().takeIf(String::isNotBlank)
+            ?: throw IllegalArgumentException("Profile document view URL is required.")
+        api.getBytes(normalizedUrl)
     }
 
     suspend fun createAccount(): Result<String> = runCatching {

@@ -126,7 +126,7 @@ const toPaymentSummary = (bill: {
   };
 };
 
-const ACTIVE_EVENT_USER_REGISTRATION_STATUSES = ['STARTED', 'PENDING', 'ACTIVE', 'BLOCKED'] as const;
+const ACTIVE_EVENT_USER_REGISTRATION_STATUSES = ['STARTED', 'PENDING', 'ACTIVE', 'BLOCKED', 'CONSENTFAILED'] as const;
 
 const buildOccurrenceWhere = (req: NextRequest) => {
   const slotId = normalizeId(req.nextUrl.searchParams.get('slotId'));

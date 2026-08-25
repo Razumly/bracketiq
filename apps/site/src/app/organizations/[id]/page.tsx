@@ -33,6 +33,7 @@ import { userService } from '@/lib/userService';
 import { apiRequest, isApiRequestError } from '@/lib/apiClient';
 import { productService } from '@/lib/productService';
 import { signedDocumentService } from '@/lib/signedDocumentService';
+import { formatDocumentScopeLabel } from '@/lib/profileDocumentService';
 import { boldsignService } from '@/lib/boldsignService';
 import PaymentModal from '@/components/ui/PaymentModal';
 import FieldsTabContent from './FieldsTabContent';
@@ -75,7 +76,11 @@ import {
 } from './organizationTabs';
 import { buildOrganizationUsersSubtitle } from './organizationUsersCopy';
 import OrganizationPublicSettingsPanel from './OrganizationPublicSettingsPanel';
-import { ORG_PERMISSIONS, type OrganizationPermission } from '@/lib/organizationPermissions';
+import {
+  IMPORTED_DOCUMENT_VIEW_PERMISSIONS,
+  ORG_PERMISSIONS,
+  type OrganizationPermission,
+} from '@/lib/organizationPermissions';
 import { buildTeamManagementPath } from '@/app/teams/teamRoutes';
 import DiscountManager from '@/components/discounts/DiscountManager';
 import { describeDeleteOutcome } from '@/lib/deleteOutcome';
@@ -228,12 +233,14 @@ type OrganizationUserEventSummary = {
   start?: string;
   end?: string;
   status?: string;
+  organizationId?: string | null;
 };
 
 type OrganizationUserDocumentSummary = {
   signedDocumentRecordId: string;
   documentId: string;
   templateId: string;
+  documentRequirementTitle?: string;
   versionSequence?: number;
   eventId?: string;
   eventName?: string;
@@ -254,6 +261,7 @@ type OrganizationUserDocumentApiRow = {
   signedDocumentRecordId?: string | null;
   documentId?: string | null;
   templateId?: string | null;
+  documentRequirementTitle?: string | null;
   versionSequence?: number | null;
   eventId?: string | null;
   eventName?: string | null;
@@ -430,6 +438,10 @@ const mapOrganizationUserDocumentSummary = (
   documentRow: OrganizationUserDocumentApiRow,
 ): OrganizationUserDocumentSummary => ({
   signedDocumentRecordId: String(documentRow?.signedDocumentRecordId ?? ''),
+  documentRequirementTitle: typeof documentRow?.documentRequirementTitle === 'string'
+    && documentRow.documentRequirementTitle.trim()
+    ? documentRow.documentRequirementTitle.trim()
+    : undefined,
   documentId: String(documentRow?.documentId ?? ''),
   templateId: String(documentRow?.templateId ?? ''),
   versionSequence: typeof documentRow?.versionSequence === 'number'
@@ -470,6 +482,7 @@ const mapOrganizationUserRow = (row: Record<string, any>): OrganizationUserSumma
       start: typeof eventRow?.start === 'string' ? eventRow.start : undefined,
       end: typeof eventRow?.end === 'string' ? eventRow.end : undefined,
       status: typeof eventRow?.status === 'string' ? eventRow.status : undefined,
+      organizationId: typeof eventRow?.organizationId === 'string' ? eventRow.organizationId : null,
     }))
     .filter((eventRow) => Boolean(eventRow.eventId));
 
@@ -868,9 +881,10 @@ function OrganizationDetailContent() {
     || viewerHasPermission(ORG_PERMISSIONS.PAYMENTS_MANAGE);
   const canManageDiscounts = canManageEvents || canManageProducts || canManageTeams || canManageFinance;
   const canManageTemplates = viewerHasPermission(ORG_PERMISSIONS.TEMPLATES_MANAGE);
-  const canImportDocuments = viewerPermissions.includes(ORG_PERMISSIONS.DOCUMENTS_IMPORT);
+  const canImportDocuments = viewerHasPermission(ORG_PERMISSIONS.DOCUMENTS_IMPORT);
   const canVoidDocuments = viewerHasPermission(ORG_PERMISSIONS.DOCUMENTS_VOID);
   const canViewDocumentAudit = viewerHasPermission(ORG_PERMISSIONS.DOCUMENTS_AUDIT_VIEW);
+  const canViewImportedDocuments = IMPORTED_DOCUMENT_VIEW_PERMISSIONS.some(viewerHasPermission);
   const canManagePublicPage = viewerHasPermission(ORG_PERMISSIONS.ORGANIZATION_MANAGE);
   const isOwner = Boolean(
     viewerCanManageOrganization
@@ -1250,6 +1264,7 @@ function OrganizationDetailContent() {
   const [customerDocumentToVoid, setCustomerDocumentToVoid] = useState<OrganizationUserDocumentSummary | null>(null);
   const [customerDocumentVoidReason, setCustomerDocumentVoidReason] = useState<string | null>(null);
   const [customerDocumentVoidPassword, setCustomerDocumentVoidPassword] = useState('');
+  const [isRecentProviderAuthUsed, setIsRecentProviderAuthUsed] = useState(false);
   const [customerDocumentVoidNote, setCustomerDocumentVoidNote] = useState('');
   const [isVoidingCustomerDocument, setIsVoidingCustomerDocument] = useState(false);
   const [customerDocumentAuditTarget, setCustomerDocumentAuditTarget] = useState<OrganizationUserDocumentSummary | null>(null);
@@ -3229,6 +3244,7 @@ function OrganizationDetailContent() {
     }
     await loadOrganizationUsers(org.$id, { silent: true });
   }, [loadOrganizationUsers, org?.$id]);
+
   const openCustomerDocumentVoidModal = useCallback((document: OrganizationUserDocumentSummary) => {
     if (document.provenance !== 'IMPORTED' || document.status?.toUpperCase() === 'VOID') {
       return;
@@ -3236,6 +3252,7 @@ function OrganizationDetailContent() {
     setCustomerDocumentToVoid(document);
     setCustomerDocumentVoidReason(null);
     setCustomerDocumentVoidPassword('');
+    setIsRecentProviderAuthUsed(false);
     setCustomerDocumentVoidNote('');
   }, []);
 
@@ -3246,6 +3263,7 @@ function OrganizationDetailContent() {
     setCustomerDocumentToVoid(null);
     setCustomerDocumentVoidReason(null);
     setCustomerDocumentVoidPassword('');
+    setIsRecentProviderAuthUsed(false);
     setCustomerDocumentVoidNote('');
   }, [isVoidingCustomerDocument]);
 
@@ -3254,8 +3272,11 @@ function OrganizationDetailContent() {
       notifications.show({ color: 'red', message: 'Choose a reason before voiding the imported document.' });
       return;
     }
-    if (!customerDocumentVoidPassword.trim()) {
-      notifications.show({ color: 'red', message: 'Enter your password before voiding the imported document.' });
+    if (!customerDocumentVoidPassword.trim() && !isRecentProviderAuthUsed) {
+      notifications.show({
+        color: 'red',
+        message: 'Enter your password or use a recent provider sign-in before voiding the imported document.',
+      });
       return;
     }
     if (customerDocumentVoidReason === 'Other' && !customerDocumentVoidNote.trim()) {
@@ -3264,7 +3285,9 @@ function OrganizationDetailContent() {
     }
     setIsVoidingCustomerDocument(true);
     try {
-      const recentAuthToken = await signedDocumentService.createRecentAuthToken(customerDocumentVoidPassword);
+      const recentAuthToken = await signedDocumentService.createRecentAuthToken(
+        customerDocumentVoidPassword.trim() || undefined,
+      );
       await signedDocumentService.updateImportedDocumentStatus(
         org.$id,
         customerDocumentToVoid.signedDocumentRecordId,
@@ -3288,6 +3311,7 @@ function OrganizationDetailContent() {
     customerDocumentToVoid,
     customerDocumentVoidNote,
     customerDocumentVoidPassword,
+    isRecentProviderAuthUsed,
     customerDocumentVoidReason,
     org?.$id,
     refreshOrganizationCustomers,
@@ -3444,8 +3468,7 @@ function OrganizationDetailContent() {
     () => templateDocuments
       .filter((template) => {
         const displayName = template.requirementTitle?.trim() || template.title?.trim();
-        return template.signOnce === true
-          && typeof template.documentRequirementId === 'string'
+        return typeof template.documentRequirementId === 'string'
           && template.documentRequirementId.trim().length > 0
           && Number.isInteger(template.versionSequence)
           && (template.versionSequence ?? 0) > 0
@@ -3461,10 +3484,20 @@ function OrganizationDetailContent() {
   const selectedCustomerImportTemplate = templateDocuments.find(
     (template) => template.$id === selectedCustomerImportTemplateId,
   );
-  const customerImportScopeOptions = useMemo(
-    () => (org?.$id ? [{ value: org.$id, label: 'Organization-wide' }] : []),
-    [org?.$id],
-  );
+  const customerImportScopeOptions = useMemo(() => {
+    if (!org?.$id || !selectedCustomerImportTemplate) {
+      return [];
+    }
+    if (selectedCustomerImportTemplate.signOnce) {
+      return [{ value: org.$id, label: 'Organization-wide' }];
+    }
+    return (selectedOrganizationCustomer?.user?.events ?? [])
+      .filter((event) => event.organizationId === org.$id)
+      .map((event) => ({
+        value: event.eventId,
+        label: `${event.eventName} • ${formatSummaryDateTime(event.start)}`,
+      }));
+  }, [org?.$id, selectedCustomerImportTemplate, selectedOrganizationCustomer]);
   const customerImportPreviewUrl = useMemo(
     () => (customerImportFile ? URL.createObjectURL(customerImportFile) : null),
     [customerImportFile],
@@ -3489,18 +3522,20 @@ function OrganizationDetailContent() {
       return;
     }
     if (!firstTemplate) {
-      notifications.show({ color: 'red', message: 'Create a sign-once document requirement version before importing a document.' });
+      notifications.show({ color: 'red', message: 'Create a document requirement version before importing a document.' });
       return;
     }
+    const firstTemplateRecord = templateDocuments.find((template) => template.$id === firstTemplate.value);
+    const firstEventId = customer.events.find((event) => event.organizationId === org.$id)?.eventId ?? null;
     setSelectedCustomerImportTemplateId(firstTemplate.value);
-    setSelectedCustomerImportScopeId(org.$id);
+    setSelectedCustomerImportScopeId(firstTemplateRecord?.signOnce ? org.$id : firstEventId);
     setCustomerImportFile(null);
     setIsCustomerImportPreviewReady(false);
     setCustomerImportHistoricalSigningDate('');
     setCustomerImportSourceNote('');
     setIsCustomerImportAttestationAccepted(false);
     setIsCustomerImportModalOpen(true);
-  }, [customerImportTemplateOptions, org?.$id, selectedOrganizationCustomer]);
+  }, [customerImportTemplateOptions, org?.$id, selectedOrganizationCustomer, templateDocuments]);
 
   const handleCustomerImportTemplateChange = useCallback((value: string | null) => {
     setIsCustomerImportAttestationAccepted(false);
@@ -3509,9 +3544,13 @@ function OrganizationDetailContent() {
       setSelectedCustomerImportScopeId(null);
       return;
     }
+    const nextTemplate = templateDocuments.find((template) => template.$id === value);
+    const firstEventId = selectedOrganizationCustomer?.user?.events
+      .find((event) => event.organizationId === org?.$id)?.eventId ?? null;
     setSelectedCustomerImportTemplateId(value);
-    setSelectedCustomerImportScopeId(org?.$id ?? null);
-  }, [org?.$id]);
+    setSelectedCustomerImportScopeId(nextTemplate?.signOnce ? org?.$id ?? null : firstEventId);
+  }, [org?.$id, selectedOrganizationCustomer, templateDocuments]);
+
 
   const handleCustomerImportFileChange = useCallback((file: File | null) => {
     setCustomerImportFile(file);
@@ -3526,7 +3565,12 @@ function OrganizationDetailContent() {
       return;
     }
     if (!scopeId) {
-      notifications.show({ color: 'red', message: 'Choose the Organization scope before saving.' });
+      notifications.show({
+        color: 'red',
+        message: template.signOnce
+          ? 'Choose the Organization scope before saving.'
+          : 'Choose the Event Participation scope before saving.',
+      });
       return;
     }
     if (!isCustomerImportAttestationAccepted) {
@@ -3541,7 +3585,7 @@ function OrganizationDetailContent() {
       formData.append('historicalSigningDate', customerImportHistoricalSigningDate);
       formData.append('sourceNote', customerImportSourceNote.trim());
       formData.append('attestationAccepted', 'true');
-      formData.append('scopeType', 'ORGANIZATION');
+      formData.append('scopeType', template.signOnce ? 'ORGANIZATION' : 'EVENT_PARTICIPATION');
       formData.append('scopeId', scopeId);
       formData.append('file', customerImportFile, customerImportFile.name);
       await signedDocumentService.createImportedSignedDocument(org.$id, formData);
@@ -4047,10 +4091,11 @@ function OrganizationDetailContent() {
     documents.length > 0 ? (
       <Stack gap={8}>
         {documents.map((documentSummary) => {
-          const canViewDocument = documentSummary.provenance !== 'IMPORTED' || canImportDocuments;
+          const canViewDocument = documentSummary.provenance !== 'IMPORTED' || canViewImportedDocuments;
           const canViewDocumentPdf = canViewDocument
             && documentSummary.type === 'PDF'
             && Boolean(documentSummary.viewUrl);
+          const importedSigningDate = documentSummary.historicalSigningDate;
           return (
           <Paper
             key={documentSummary.signedDocumentRecordId}
@@ -4074,22 +4119,39 @@ function OrganizationDetailContent() {
                 {documentSummary.provenance === 'IMPORTED' && (
                   <Badge size="xs" variant="light" color="teal">Imported</Badge>
                 )}
-                {typeof documentSummary.versionSequence === 'number' && (
-                  <Badge size="xs" variant="light">Version {documentSummary.versionSequence}</Badge>
+                {(documentSummary.provenance === 'IMPORTED'
+                  || typeof documentSummary.versionSequence === 'number') && (
+                  <Badge size="xs" variant="light">
+                    Version {typeof documentSummary.versionSequence === 'number'
+                      ? documentSummary.versionSequence
+                      : 'Unknown'}
+                  </Badge>
                 )}
-                {documentSummary.provenance === 'IMPORTED'
-                  && documentSummary.status
-                  && documentSummary.status.toUpperCase() !== 'VOID' && (
-                  <Badge size="xs" variant="light" color="blue">{documentSummary.status}</Badge>
-                )}
-                {documentSummary.status?.toUpperCase() === 'VOID' && (
-                  <Badge size="xs" variant="light" color="red">Voided</Badge>
+                {documentSummary.status && (
+                  <Badge
+                    size="xs"
+                    variant="light"
+                    color={documentSummary.status.toUpperCase() === 'VOID' ? 'red' : 'blue'}
+                  >
+                    {documentSummary.status.toUpperCase()}
+                  </Badge>
                 )}
               </Group>
               <Text size="xs" c="dimmed">
+                Requirement: {documentSummary.provenance === 'IMPORTED'
+                  ? documentSummary.documentRequirementTitle || 'Unavailable'
+                  : documentSummary.documentRequirementTitle || documentSummary.title}
+              </Text>
+              <Text size="xs" c="dimmed">
+                Scope: {formatDocumentScopeLabel(documentSummary.scopeType)}
+              </Text>
+              <Text size="xs" c="dimmed">
+                Lifecycle: {documentSummary.status?.toUpperCase() || 'SIGNED'}
+              </Text>
+              <Text size="xs" c="dimmed">
                 {documentSummary.provenance === 'IMPORTED'
-                  ? `Signing date ${documentSummary.signedAt
-                    ? formatDisplayDate(documentSummary.signedAt, { timeZone: 'UTC' }) || 'unknown'
+                  ? `Signing date ${importedSigningDate
+                    ? formatDisplayDate(importedSigningDate, { timeZone: 'UTC' }) || 'unknown'
                     : 'unknown'}`
                   : `Signed ${formatSummaryDate(documentSummary.signedAt)}`}
               </Text>
@@ -5527,11 +5589,29 @@ function OrganizationDetailContent() {
             </Text>
             <PasswordInput
               label="Confirm your password"
-              description="Recent identity proof is required for this action."
+              description="Enter a password or use a recent provider sign-in."
               value={customerDocumentVoidPassword}
-              onChange={(event) => setCustomerDocumentVoidPassword(event.currentTarget.value)}
-              required
+              onChange={(event) => {
+                setCustomerDocumentVoidPassword(event.currentTarget.value);
+                setIsRecentProviderAuthUsed(false);
+              }}
             />
+            <Button
+              variant="subtle"
+              size="xs"
+              onClick={() => {
+                setCustomerDocumentVoidPassword('');
+                setIsRecentProviderAuthUsed(true);
+              }}
+              disabled={isVoidingCustomerDocument}
+            >
+              Use recent provider sign-in
+            </Button>
+            {isRecentProviderAuthUsed ? (
+              <Text size="xs" c="dimmed">
+                This uses a provider login from the last ten minutes.
+              </Text>
+            ) : null}
             <Select
               label="Void reason"
               data={DOCUMENT_VOID_REASON_OPTIONS.map((reason) => ({ value: reason, label: reason }))}
@@ -5561,7 +5641,10 @@ function OrganizationDetailContent() {
                 color="red"
                 onClick={() => void handleVoidCustomerDocument()}
                 loading={isVoidingCustomerDocument}
-                disabled={!customerDocumentVoidReason || !customerDocumentVoidPassword.trim()}
+                disabled={
+                  !customerDocumentVoidReason
+                  || (!customerDocumentVoidPassword.trim() && !isRecentProviderAuthUsed)
+                }
               >
                 Void document
               </Button>
@@ -5721,17 +5804,21 @@ function OrganizationDetailContent() {
             />
             {selectedCustomerImportTemplate && (
               <Text size="xs" c="dimmed">
-                This sign-once version applies at Organization scope.
+                {selectedCustomerImportTemplate.signOnce
+                  ? 'This sign-once version applies at Organization scope.'
+                  : 'This version applies to an Event Participation for the selected customer.'}
               </Text>
             )}
             <Select
-              label="Scope"
+              label={selectedCustomerImportTemplate?.signOnce ? 'Scope' : 'Event Participation'}
               data={customerImportScopeOptions}
               value={selectedCustomerImportScopeId}
               onChange={setSelectedCustomerImportScopeId}
               searchable
               allowDeselect={false}
-              nothingFoundMessage="No Organization scope found"
+              nothingFoundMessage={selectedCustomerImportTemplate?.signOnce
+                ? 'No Organization scope found'
+                : 'No eligible Event Participation found'}
               required
             />
             <FileInput

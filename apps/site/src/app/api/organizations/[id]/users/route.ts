@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/permissions';
 import {
+  IMPORTED_DOCUMENT_VIEW_PERMISSIONS,
+} from '@/lib/organizationPermissions';
+import {
+  hasAnyOrgPermission,
+} from '@/server/accessControl';
+import {
   canAccessOrganizationUsers,
   listOrganizationUsersScopeEvents,
   type OrganizationUsersScopeEvent,
@@ -18,6 +24,7 @@ type EventSummary = {
   start: string;
   end: string;
   status?: string;
+  organizationId?: string | null;
 };
 
 type TeamRegistrationSummary = EventSummary & {
@@ -81,6 +88,7 @@ type DocumentSummary = {
   signedDocumentRecordId: string;
   documentId: string;
   templateId: string;
+  documentRequirementTitle?: string;
   versionSequence?: number;
   eventId?: string;
   eventName?: string;
@@ -322,6 +330,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!canAccess) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
+  const canViewImportedDocuments = await hasAnyOrgPermission(
+    session,
+    org,
+    IMPORTED_DOCUMENT_VIEW_PERMISSIONS,
+  );
 
   const eventIds = eventRows.map((event) => event.id);
   const rentalEventIds = eventRows
@@ -785,6 +798,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         content: true,
         documentRequirementId: true,
         versionSequence: true,
+        documentRequirement: {
+          select: {
+            title: true,
+          },
+        },
       },
     }),
   ]);
@@ -839,6 +857,24 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       orderBy: { createdAt: 'desc' },
     })
     : [];
+  const incompleteImportedMetadata = signedDocuments.find((document) => {
+    if (document.provenance !== 'IMPORTED' || !canViewImportedDocuments) {
+      return false;
+    }
+    const template = templateById.get(document.templateId);
+    return !normalizeId(document.importedFileId)
+      || !template
+      || !template.title?.trim()
+      || !Number.isInteger(template.versionSequence)
+      || !template.documentRequirement
+      || !template.documentRequirement.title?.trim();
+  });
+  if (incompleteImportedMetadata) {
+    return NextResponse.json(
+      { error: 'Imported document metadata is incomplete.' },
+      { status: 500 },
+    );
+  }
 
   const eventsById = new Map(eventRows.map((event) => [event.id, event]));
   const summariesByUserId = new Map<string, UserSummaryInternal>();
@@ -1161,6 +1197,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
           imageId: event.imageId,
           start: event.start.toISOString(),
           end: event.end.toISOString(),
+          organizationId: event.organizationId,
         });
       }
     });
@@ -1186,6 +1223,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
           imageId: event.imageId,
           start: event.start.toISOString(),
           end: event.end.toISOString(),
+          organizationId: event.organizationId,
         });
       }
     });
@@ -1211,6 +1249,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         imageId: event.imageId,
         start: event.start.toISOString(),
         end: event.end.toISOString(),
+        organizationId: event.organizationId,
       });
     }
   });
@@ -1281,6 +1320,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
           imageId: event.imageId,
           start: event.start.toISOString(),
           end: event.end.toISOString(),
+          organizationId: event.organizationId,
           status: teamStatus ?? existing?.status,
         });
       });
@@ -1306,11 +1346,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       imageId: event.imageId,
       start: event.start.toISOString(),
       end: event.end.toISOString(),
+      organizationId: event.organizationId,
       status: normalizeStatus(registration.status) ?? existing?.status,
     });
   });
 
   signedDocuments.forEach((document) => {
+    if (document.provenance === 'IMPORTED' && !canViewImportedDocuments) {
+      return;
+    }
     const subjectUserId = document.userId
       ?? (document.documentSubjectId
         ? documentSubjectUserIdById.get(document.documentSubjectId)
@@ -1320,7 +1364,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     }
     const summary = summariesByUserId.get(subjectUserId);
     const template = templateById.get(document.templateId);
-    const type: 'PDF' | 'TEXT' = document.provenance === 'IMPORTED' && document.importedFileId
+    const type: 'PDF' | 'TEXT' = document.provenance === 'IMPORTED'
       ? 'PDF'
       : template?.type === 'TEXT' ? 'TEXT' : 'PDF';
     const event = document.eventId ? eventsById.get(document.eventId) : undefined;
@@ -1330,6 +1374,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       templateId: document.templateId,
       versionSequence: typeof template?.versionSequence === 'number' ? template.versionSequence : undefined,
       eventId: document.eventId ?? undefined,
+      documentRequirementTitle: template?.documentRequirement?.title?.trim() || template?.title?.trim() || 'Signed Document',
       eventName: event?.name,
       teamId: document.teamId ?? undefined,
       title: template?.title?.trim() || document.documentName || 'Signed Document',

@@ -61,15 +61,27 @@ const prismaMock = {
 };
 
 const requireSessionMock = jest.fn();
+const hasOrgPermissionMock = jest.fn();
+const hasAnyOrgPermissionMock = jest.fn();
 
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 jest.mock('@/lib/permissions', () => ({ requireSession: requireSessionMock }));
+jest.mock('@/server/accessControl', () => {
+  const actual = jest.requireActual('@/server/accessControl');
+  return {
+    ...actual,
+    hasAnyOrgPermission: (...args: unknown[]) => hasAnyOrgPermissionMock(...args),
+    hasOrgPermission: (...args: unknown[]) => hasOrgPermissionMock(...args),
+  };
+});
 
 import { GET } from '@/app/api/organizations/[id]/users/route';
 
 describe('GET /api/organizations/[id]/users', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    hasOrgPermissionMock.mockResolvedValue(false);
+    hasAnyOrgPermissionMock.mockResolvedValue(false);
     prismaMock.authUser.findUnique.mockResolvedValue(null);
     prismaMock.staffMembers.findUnique.mockResolvedValue(null);
     prismaMock.invites.findMany.mockResolvedValue([]);
@@ -284,7 +296,12 @@ describe('GET /api/organizations/[id]/users', () => {
       userName: 'plee',
     }));
     expect(payload.users[0].events).toEqual(expect.arrayContaining([
-      expect.objectContaining({ eventId: 'event_1', eventName: 'League Night', status: 'ACTIVE' }),
+      expect.objectContaining({
+        eventId: 'event_1',
+        eventName: 'League Night',
+        organizationId: 'org_1',
+        status: 'ACTIVE',
+      }),
       expect.objectContaining({ eventId: 'event_2', eventName: 'Weekend Ladder', status: 'STARTED' }),
     ]));
     expect(payload.users[0].documents).toEqual(expect.arrayContaining([
@@ -304,12 +321,10 @@ describe('GET /api/organizations/[id]/users', () => {
         type: 'TEXT',
         content: 'I agree to follow the code of conduct.',
       }),
+    ]));
+    expect(payload.users[0].documents).not.toEqual(expect.arrayContaining([
       expect.objectContaining({
         signedDocumentRecordId: 'signed_imported_text_1',
-        title: 'Code of Conduct',
-        type: 'PDF',
-        versionSequence: 1,
-        viewUrl: '/api/documents/signed/signed_imported_text_1/file',
       }),
     ]));
     expect(payload.users[0].bills).toEqual(expect.arrayContaining([
@@ -321,6 +336,98 @@ describe('GET /api/organizations/[id]/users', () => {
         totalAmountCents: 4500,
       }),
     ]));
+  });
+  it('includes imported evidence for a staff role with void permission', async () => {
+    requireSessionMock.mockResolvedValue({ userId: 'staff_1', isAdmin: false });
+    prismaMock.organizations.findUnique.mockResolvedValue({
+      id: 'org_1',
+      ownerId: 'owner_1',
+    });
+    prismaMock.events.findMany.mockResolvedValue([
+      {
+        id: 'event_1',
+        name: 'League Night',
+        start: new Date('2026-01-10T18:00:00.000Z'),
+        end: new Date('2026-01-10T20:00:00.000Z'),
+        organizationId: 'org_1',
+        userIds: ['player_1'],
+      },
+    ]);
+    prismaMock.eventRegistrations.findMany.mockResolvedValue([
+      {
+        eventId: 'event_1',
+        registrantId: 'player_1',
+        registrantType: 'SELF',
+        status: 'ACTIVE',
+      },
+    ]);
+    prismaMock.userData.findMany.mockResolvedValue([
+      {
+        id: 'player_1',
+        firstName: 'Pat',
+        lastName: 'Lee',
+        userName: 'plee',
+      },
+    ]);
+    prismaMock.templateDocuments.findMany.mockResolvedValue([
+      {
+        id: 'version_1',
+        title: 'Imported Waiver',
+        type: 'TEXT',
+        versionSequence: 2,
+        content: 'Customer-facing text.',
+        documentRequirement: {
+          title: 'Imported Waiver Requirement',
+        },
+      },
+    ]);
+    prismaMock.signedDocuments.findMany.mockResolvedValue([
+      {
+        id: 'imported_1',
+        signedDocumentId: 'imported_1',
+        templateId: 'version_1',
+        userId: 'player_1',
+        documentSubjectId: 'document-subject:org_1:player_1',
+        organizationId: 'org_1',
+        documentName: 'Imported Waiver',
+        status: 'SIGNED',
+        provenance: 'IMPORTED',
+        importedFileId: 'file_1',
+        historicalSigningDate: null,
+        createdAt: new Date('2026-02-01T00:00:00.000Z'),
+      },
+    ]);
+    hasOrgPermissionMock.mockImplementation(
+      async (_session: unknown, _organization: unknown, permission: string) => (
+        permission === 'users.view'
+      ),
+    );
+    hasAnyOrgPermissionMock.mockImplementation(
+      async (
+        _session: unknown,
+        _organization: unknown,
+        permissions: string[],
+      ) => permissions.includes('documents.void'),
+    );
+
+    const response = await GET(
+      new NextRequest('http://localhost/api/organizations/org_1/users'),
+      { params: Promise.resolve({ id: 'org_1' }) },
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.users[0].documents).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        signedDocumentRecordId: 'imported_1',
+        provenance: 'IMPORTED',
+        type: 'PDF',
+        versionSequence: 2,
+      }),
+    ]));
+    expect(payload.users[0].documents[0]).not.toHaveProperty('sourceNote');
+    expect(payload.users[0].documents[0]).not.toHaveProperty('attestationText');
+    expect(payload.users[0].documents[0]).not.toHaveProperty('auditEvents');
   });
 
   it('includes users from teams registered for organization events', async () => {
@@ -390,6 +497,7 @@ describe('GET /api/organizations/[id]/users', () => {
         expect.objectContaining({
           eventId: 'event_1',
           status: 'ACTIVE',
+          organizationId: 'org_1',
         }),
       ]));
     });

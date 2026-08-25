@@ -1286,6 +1286,19 @@ val MIGRATION_99_100_MATCH_GRAPH_PHASE_OWNER = migration(
     MATCH_GRAPH_PHASE_OWNER_MIGRATION_STATEMENTS,
 )
 
+val MIGRATION_100_101_PROFILE_DOCUMENT_CACHE = migration(
+    100,
+    101,
+    listOf(
+        profileDocumentCacheCreateTableSql(includeVersionColumns = false)
+            .replace("CREATE TABLE ", "CREATE TABLE IF NOT EXISTS "),
+        "ALTER TABLE `profile_document_cache` ADD COLUMN `documentRequirementTitle` TEXT",
+        "ALTER TABLE `profile_document_cache` ADD COLUMN `versionSequence` INTEGER",
+        "CREATE INDEX `index_profile_document_cache_viewerKey` ON `profile_document_cache` (`viewerKey`)",
+        "CREATE INDEX `index_profile_document_cache_viewerKey_status` ON `profile_document_cache` (`viewerKey`, `status`)",
+    ),
+)
+
 
 
 val MVP_DATABASE_MIGRATIONS: Array<Migration> = arrayOf(
@@ -1306,4 +1319,5 @@ val MVP_DATABASE_MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_97_98_CANONICAL_STAFFING_PRIORITY,
     MIGRATION_98_99_MATCH_GRAPH_OWNERSHIP,
     MIGRATION_99_100_MATCH_GRAPH_PHASE_OWNER,
+    MIGRATION_100_101_PROFILE_DOCUMENT_CACHE,
 )

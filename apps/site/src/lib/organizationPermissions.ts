@@ -22,6 +22,20 @@ export type OrganizationPermission = typeof ORG_PERMISSIONS[keyof typeof ORG_PER
 export type OrganizationRoleKind = 'OWNER' | 'STAFF' | 'HOST' | 'OFFICIAL';
 export type DefaultOrganizationRoleKey = 'STAFF' | 'HOST' | 'OFFICIAL';
 
+export const RESTRICTED_DOCUMENT_PERMISSIONS: OrganizationPermission[] = [
+  ORG_PERMISSIONS.DOCUMENTS_VOID,
+  ORG_PERMISSIONS.DOCUMENTS_AUDIT_VIEW,
+];
+export const IMPORTED_DOCUMENT_VIEW_PERMISSIONS: OrganizationPermission[] = [
+  ORG_PERMISSIONS.DOCUMENTS_IMPORT,
+  ORG_PERMISSIONS.DOCUMENTS_VOID,
+  ORG_PERMISSIONS.DOCUMENTS_AUDIT_VIEW,
+];
+
+export const RESTRICTED_DOCUMENT_PERMISSION_ERROR =
+  'Only the Organization owner or platform administrator can grant or revoke document void or audit access.';
+
+
 export type OrganizationPermissionOption = {
   value: OrganizationPermission;
   label: string;

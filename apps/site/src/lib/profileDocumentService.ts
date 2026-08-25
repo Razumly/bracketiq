@@ -2,6 +2,18 @@ import { apiRequest } from '@/lib/apiClient';
 import type { SignerContext } from '@/lib/templateSignerTypes';
 
 export type ProfileDocumentProvenance = 'BOLDSIGN' | 'BRACKETIQ' | 'IMPORTED';
+export const formatDocumentScopeLabel = (scopeType?: string): string => {
+  switch (scopeType?.trim().toUpperCase()) {
+    case 'ORGANIZATION':
+      return 'Organization';
+    case 'EVENT_PARTICIPATION':
+      return 'Event participation';
+    case 'TEAM_MEMBERSHIP':
+      return 'Team membership';
+    default:
+      return scopeType?.trim() || 'Unknown';
+  }
+};
 
 export type ProfileDocumentCard = {
   id: string;
@@ -16,6 +28,8 @@ export type ProfileDocumentCard = {
   title: string;
   type: 'PDF' | 'TEXT';
   provenance?: ProfileDocumentProvenance;
+  documentRequirementTitle?: string;
+  versionSequence?: number;
   scopeType?: string;
   scopeId?: string;
   historicalSigningDate?: string;
@@ -42,11 +56,18 @@ export type ChildUnsignedDocumentCount = {
 };
 
 type ProfileDocumentsResponse = {
-  unsigned?: ProfileDocumentCard[];
-  signed?: ProfileDocumentCard[];
-  voided?: ProfileDocumentCard[];
-  childUnsignedCounts?: ChildUnsignedDocumentCount[];
+  unsigned: ProfileDocumentCard[];
+  signed: ProfileDocumentCard[];
+  voided: ProfileDocumentCard[];
+  childUnsignedCounts: ChildUnsignedDocumentCount[];
   error?: string;
+};
+
+const requireProfileDocumentArray = <T>(value: unknown, field: string): T[] => {
+  if (!Array.isArray(value)) {
+    throw new Error(`Invalid profile documents response: ${field} must be an array.`);
+  }
+  return value as T[];
 };
 
 class ProfileDocumentService {
@@ -61,12 +82,26 @@ class ProfileDocumentService {
     if (response?.error) {
       throw new Error(response.error);
     }
-    const signed = Array.isArray(response?.signed) ? response.signed : [];
-    const voided = Array.isArray(response?.voided) ? response.voided : [];
+    const unsigned = requireProfileDocumentArray<ProfileDocumentCard>(
+      response?.unsigned,
+      'unsigned',
+    );
+    const signed = requireProfileDocumentArray<ProfileDocumentCard>(
+      response?.signed,
+      'signed',
+    );
+    const voided = requireProfileDocumentArray<ProfileDocumentCard>(
+      response?.voided,
+      'voided',
+    );
+    const childUnsignedCounts = requireProfileDocumentArray<ChildUnsignedDocumentCount>(
+      response?.childUnsignedCounts,
+      'childUnsignedCounts',
+    );
     return {
-      unsigned: Array.isArray(response?.unsigned) ? response.unsigned : [],
+      unsigned,
       signed: [...signed, ...voided],
-      childUnsignedCounts: Array.isArray(response?.childUnsignedCounts) ? response.childUnsignedCounts : [],
+      childUnsignedCounts,
     };
   }
 }

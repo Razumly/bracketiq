@@ -20,7 +20,7 @@
 
 - `apps/site` is the source of truth for backend behavior, database definitions, API paths, and request and response contracts.
 - The backend HTTP interface is the seam between the applications.
-- Keep backend changes compatible with installed mobile versions.
+- Treat the current site and mobile code as the supported HTTP contract. Use a clean cutover when that contract changes.
 - Do not import server TypeScript or Prisma types into the mobile application.
 - Room is the mobile application's local source of truth for fetched API data.
 - Write remote results to Room before UI code observes them, unless a transient flow is explicitly documented.

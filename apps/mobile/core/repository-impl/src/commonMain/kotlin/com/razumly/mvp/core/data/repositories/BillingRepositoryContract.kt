@@ -346,6 +346,10 @@ interface IBillingRepository : IMVPRepository {
     suspend fun leaveAndRefundEvent(event: Event, reason: String, targetUserId: String? = null): Result<Unit>
     suspend fun deleteAndRefundEvent(event: Event): Result<Unit>
     suspend fun listProfileDocuments(): Result<ProfileDocumentsBundle>
+    fun observeProfileDocuments(): Flow<ProfileDocumentsBundle> =
+        flowOf(ProfileDocumentsBundle())
+    suspend fun getProfileDocumentPdf(viewUrl: String): Result<ByteArray> =
+        Result.failure(UnsupportedOperationException("Profile document PDF loading is not supported."))
 
     suspend fun getRefundsWithRelations(): Result<List<RefundRequestWithRelations>>
     suspend fun getRefunds(): Result<List<RefundRequest>>

@@ -163,3 +163,37 @@ export const resolveDefaultOrganizationRoleIdForStaffTypes = async (
   const role = await findDefaultOrganizationRole(client, organizationId, key);
   return role?.id ?? null;
 };
+
+const DEFAULT_ROLE_LOCK_RANK: Record<string, number> = {
+  HOST: 1,
+  OFFICIAL: 2,
+};
+
+const organizationRoleLockRank = (role: OrganizationRoleRow | undefined): number => {
+  if (role?.systemKey === null && role.name === 'Staff') {
+    return 0;
+  }
+  if (role?.systemKey && DEFAULT_ROLE_LOCK_RANK[role.systemKey] !== undefined) {
+    return DEFAULT_ROLE_LOCK_RANK[role.systemKey];
+  }
+  return 3;
+};
+
+export const orderOrganizationRoleIdsForLock = async (
+  client: OrganizationRoleClient,
+  roleIds: readonly string[],
+): Promise<string[]> => {
+  const uniqueRoleIds = Array.from(new Set(roleIds));
+  if (uniqueRoleIds.length < 2 || !client.organizationRoles?.findMany) {
+    return uniqueRoleIds;
+  }
+  const roles = await client.organizationRoles.findMany({
+    where: { id: { in: uniqueRoleIds } },
+    select: { id: true, name: true, systemKey: true },
+  }) ?? [];
+  const roleById = new Map(roles.map((role) => [role.id, role]));
+  return uniqueRoleIds.sort((left, right) => (
+    organizationRoleLockRank(roleById.get(left)) - organizationRoleLockRank(roleById.get(right))
+    || left.localeCompare(right)
+  ));
+};

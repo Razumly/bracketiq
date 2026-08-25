@@ -92,6 +92,11 @@ describe('GET /api/events/[eventId]/users/compliance', () => {
     });
     const payload = await response.json();
 
+    expect(prismaMock.eventRegistrations.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        status: { in: ['STARTED', 'PENDING', 'ACTIVE', 'BLOCKED', 'CONSENTFAILED'] },
+      }),
+    }));
     expect(response.status).toBe(200);
     expect(payload.users).toHaveLength(1);
     expect(payload.users[0]).toEqual(
@@ -140,7 +145,7 @@ describe('GET /api/events/[eventId]/users/compliance', () => {
         registrantId: 'user_1',
         registrantType: 'SELF',
         parentId: null,
-        status: 'ACTIVE',
+        status: 'CONSENTFAILED',
         createdAt: new Date('2026-03-01T10:00:00.000Z'),
         updatedAt: new Date('2026-03-01T10:00:00.000Z'),
       },
