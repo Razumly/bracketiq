@@ -16,7 +16,6 @@ const main = async () => {
   const result = await runDueAffiliateScrapes({
     dryRun,
     limit: parseLimit(),
-    sendSummary: !process.argv.includes('--no-email'),
   });
   console.log(JSON.stringify({
     startedAt: result.startedAt.toISOString(),
@@ -26,9 +25,6 @@ const main = async () => {
     reconciledSourceOrganizationCount: result.reconciledSourceOrganizationCount,
     dueSourceCount: result.dueSourceCount,
     lightweightSourceCount: result.lightweightSourceCount,
-    emailSent: result.emailSent,
-    emailError: result.emailError,
-    intakeDigest: result.intakeDigest,
     results: result.results,
     lightweightResults: result.lightweightResults,
   }, null, 2));

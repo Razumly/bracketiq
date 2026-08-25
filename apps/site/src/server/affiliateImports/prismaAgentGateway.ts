@@ -85,6 +85,48 @@ const gatewayError = (
     receiptId,
   });
 
+const reportInvocationFailure = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  authorization: AffiliateAgentClaimAuthorization,
+  result: AffiliateAgentInvocationFailedResult,
+  failureCode: string | null,
+  safeSummary: string | null,
+): Promise<void> => {
+  if (!dependencies.operationalAlert) return;
+  try {
+    const job = await dependencies.prisma.affiliateAgentGatewayJobs.findUnique({
+      where: { id: authorization.jobId },
+      select: { queue: true },
+    });
+    await dependencies.operationalAlert({
+      eventKey: `affiliate-agent-invocation-failed:${result.receiptId}`,
+      category: "AGENT_INVOCATION_FAILURE",
+      severity: result.isPipelineBlocked ? "critical" : "warning",
+      title: result.isPipelineBlocked
+        ? "Affiliate agent pipeline blocked"
+        : "Affiliate agent invocation failed",
+      detail: safeSummary ?? failureCode ?? "No failure summary recorded",
+      subjectType: "AGENT_JOB",
+      subjectId: authorization.jobId,
+      queue: job?.queue ?? null,
+      lifecycleGeneration: authorization.lifecycleGeneration,
+      claimGeneration: authorization.claimGeneration,
+      workerId: authorization.workerId,
+      attempt: result.invocationFailureCount,
+      previousState: 'CLAIMED',
+      nextState: result.isPipelineBlocked ? 'PIPELINE_BLOCKED' : 'RETRY_WAIT',
+      reasonCodes: failureCode ? [failureCode] : ['AGENT_INVOCATION_FAILED'],
+      evidenceRefs: [],
+      payload: {
+        claimId: authorization.claimId,
+        invocationId: authorization.invocationId,
+        nextAttemptAt: result.nextAttemptAt,
+      },
+    });
+  } catch (error) {
+    console.error('[affiliate:gateway] failed to persist operational alert', error);
+  }
+};
 const prismaErrorCode = (error: unknown): string | null => {
   if (
     error === null ||
@@ -7254,16 +7296,30 @@ export function createPrismaAffiliateAgentGateway(
         )) as AffiliateAgentClaimOperationResult<T>;
       }
       if (input.kind === "SUBMIT_RESULT") {
-        return (await performTerminalResult(
-          dependencies,
-          input,
-        )) as AffiliateAgentClaimOperationResult<T>;
+        const result = await performTerminalResult(dependencies, input);
+        if (result.kind === "INVOCATION_FAILED") {
+          await reportInvocationFailure(
+            dependencies,
+            input.authorization,
+            result,
+            result.failureCode,
+            null,
+          );
+        }
+        return result as AffiliateAgentClaimOperationResult<T>;
       }
       if (input.kind === "RECORD_FAILURE") {
-        return (await performFailure(
-          dependencies,
-          input,
-        )) as AffiliateAgentClaimOperationResult<T>;
+        const result = await performFailure(dependencies, input);
+        if (result.kind === "INVOCATION_FAILED") {
+          await reportInvocationFailure(
+            dependencies,
+            input.authorization,
+            result,
+            input.failure.code,
+            input.failure.safeSummary,
+          );
+        }
+        return result as AffiliateAgentClaimOperationResult<T>;
       }
       throw gatewayError(
         "ROLE_NOT_ALLOWED",

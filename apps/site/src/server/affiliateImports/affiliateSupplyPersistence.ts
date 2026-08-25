@@ -55,7 +55,14 @@ import type {
 } from './agentGatewayAdapters';
 import { hashAffiliateAgentValue } from './agentGatewayContracts';
 import { affiliateScrapeMappingSchema } from './types';
+import {
+  emitAffiliateOperationalAlerts,
+  type AffiliateOperationalAlertInput,
+} from './affiliateOperationalAlerts';
 export type AffiliateSupplyClient = PrismaClient | Prisma.TransactionClient;
+export type AffiliateSupplyOperationalAlertWriter = (
+  inputs: readonly AffiliateOperationalAlertInput[],
+) => Promise<void>;
 type AffiliateSupplyDelegate<Name extends keyof PrismaClient> = PrismaClient[Name];
 type AffiliateSupplyDemandSourceRow = Pick<
   AffiliateSupplySources,
@@ -1501,11 +1508,44 @@ const loadSnapshots = async (
         latestRun: rootRuns[0] ?? null,
         candidates: candidates.filter((row) => row.supplySourceId === rootId || row.sourceId === sourceId),
         targets: targets.filter((row) => row.supplySourceId === rootId),
+
         contract,
         now,
       }),
     ] as const;
   }));
+};
+const invariantAlertInputsFor = (
+  assessment: AffiliateSupplyAssessment,
+  contract: AffiliateSupplyContractPolicy,
+): AffiliateOperationalAlertInput[] => assessment.invariantViolations.map((reason) => ({
+  eventKey: `affiliate-supply-invariant:${assessment.supplySourceId}:${assessment.lifecycleGeneration}:${reason}`,
+  category: 'SUPPLY_SOURCE_INVARIANT',
+  severity: 'critical',
+  title: 'Affiliate Supply Source invariant violation',
+  detail: `Supply Source ${assessment.supplySourceId} recorded invariant violation: ${reason}`,
+  subjectType: 'AFFILIATE_SUPPLY_SOURCE',
+  subjectId: assessment.supplySourceId,
+  rolloutCohort: contract.rolloutCohort,
+  contractVersion: contract.version,
+  lifecycleGeneration: assessment.lifecycleGeneration,
+  reasonCodes: [reason],
+  evidenceRefs: assessment.evidenceRefs,
+  payload: {
+    contractHash: contract.hash,
+    assessedAt: assessment.assessedAt,
+    invariantViolation: reason,
+  },
+}));
+
+const emitPersistedInvariantAlerts = async (
+  assessment: AffiliateSupplyAssessment,
+  contract: AffiliateSupplyContractPolicy,
+  writer: AffiliateSupplyOperationalAlertWriter | undefined,
+): Promise<void> => {
+  const inputs = invariantAlertInputsFor(assessment, contract);
+  if (inputs.length === 0) return;
+  await (writer ?? emitAffiliateOperationalAlerts)(inputs);
 };
 
 export const deriveAndPersistAffiliateSupplyAssessment = async (input: Readonly<{
@@ -1513,6 +1553,8 @@ export const deriveAndPersistAffiliateSupplyAssessment = async (input: Readonly<
   contract?: AffiliateSupplyContractPolicy;
   db?: AffiliateSupplyDatabase;
   now?: Date;
+  emitOperationalAlerts?: boolean;
+  operationalAlert?: AffiliateSupplyOperationalAlertWriter;
 }>): Promise<AffiliateSupplyAssessment> => {
   const database = input.db ?? affiliateSupplyDatabase();
   const now = input.now ?? new Date();
@@ -1551,6 +1593,13 @@ export const deriveAndPersistAffiliateSupplyAssessment = async (input: Readonly<
       activeSupplyContractHash: contractResult.policy.hash,
     },
   });
+  if (input.emitOperationalAlerts !== false) {
+    await emitPersistedInvariantAlerts(
+      assessment,
+      contractResult.policy,
+      input.operationalAlert,
+    );
+  }
   return assessment;
 };
 
@@ -1682,12 +1731,12 @@ export const recordAffiliateSupplyLifecycleTransition = async (
       command: input.command,
       contractVersion: input.contractVersion,
       resultHash,
+      requestHash,
       outcome: input.outcome ?? null,
       fromStage: (input.fromStage ?? source.derivedStage) as AffiliateSupplyLifecycleStage,
       toStage: input.toStage as AffiliateSupplyLifecycleStage,
       commandRef: stringValue(request.commandRef),
       idempotencyKey: input.idempotencyKey,
-      requestHash,
       contractHash: input.contractHash,
       actorKind: input.actorKind,
       actorId: input.actorId,
@@ -1738,6 +1787,7 @@ export type ExecuteAffiliateSupplyLifecycleCommandInput = Readonly<{
   rolloutCohort?: string;
   db?: AffiliateSupplyDatabase;
   now?: Date;
+  operationalAlert?: AffiliateSupplyOperationalAlertWriter;
   targetWriter?: (input: Readonly<{
     database: AffiliateSupplyDatabase;
     client: AffiliateSupplyClient;
@@ -1981,7 +2031,8 @@ export const executeAffiliateSupplyLifecycleCommand = async (
       : { supplyContractHash: input.supplyContractHash }),
   };
   const now = input.now ?? new Date();
-  return withSupplyTransaction(database, async (transactionDatabase) => {
+  let alertContract: AffiliateSupplyContractPolicy | null = null;
+  const result = await withSupplyTransaction(database, async (transactionDatabase) => {
     const existing = await transactionDatabase.transitions.findUnique({
       where: { idempotencyKey: input.idempotencyKey },
     });
@@ -2052,6 +2103,7 @@ export const executeAffiliateSupplyLifecycleCommand = async (
       db: transactionDatabase,
       rolloutCohort: input.rolloutCohort ?? root.rolloutCohort,
     });
+    alertContract = contract.policy;
     const requestedContractVersion = typeof request.supplyContractVersion === 'number'
       && Number.isInteger(request.supplyContractVersion)
       ? request.supplyContractVersion
@@ -2726,6 +2778,7 @@ export const executeAffiliateSupplyLifecycleCommand = async (
       contract: contract.policy,
       db: transactionDatabase,
       now,
+      emitOperationalAlerts: false,
     });
     if (!assessment.isAutomationEnabled && source?.autoScrapeEnabled === true && source.id) {
       await transactionDatabase.sources.update({
@@ -2737,6 +2790,7 @@ export const executeAffiliateSupplyLifecycleCommand = async (
         contract: contract.policy,
         db: transactionDatabase,
         now,
+        emitOperationalAlerts: false,
       });
     }
     const current = await transactionDatabase.supplySources.findUnique({ where: { id: input.supplySourceId } });
@@ -2791,6 +2845,14 @@ export const executeAffiliateSupplyLifecycleCommand = async (
       isReplayed: transitionResult.isReplayed,
     };
   });
+  if (alertContract) {
+    await emitPersistedInvariantAlerts(
+      result.assessment,
+      alertContract,
+      input.operationalAlert,
+    );
+  }
+  return result;
 };
 const AFFILIATE_LIFECYCLE_COMMANDS: readonly AffiliateSupplyLifecycleCommand[] = [
   'CREATE_ROOT',

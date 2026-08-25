@@ -10,7 +10,11 @@ import type {
   AffiliateSourceIntakeRuns,
   AffiliateSourceMappingJobs,
 } from '@/generated/prisma/client';
-import { isEmailEnabled, sendEmail } from '@/server/email';
+import {
+  emitAffiliateOperationalAlert,
+  emitAffiliateOperationalAlerts,
+  type AffiliateOperationalAlertInput,
+} from './affiliateOperationalAlerts';
 import type {
   AffiliateSourceCaptureClient,
   AffiliateSourceSearchClient,
@@ -51,14 +55,14 @@ import { loadAffiliateCoverageCityCatalog } from './coverageCityCatalog';
 import type { AffiliateReplenishmentWaveExecutionResult } from './affiliateSupplyPersistence';
 
 const DISCOVERY_LOCK_ID = 4201072126;
-const DEFAULT_SUMMARY_RECIPIENT = 'samuel.r@razumly.com';
-const DEFAULT_ADMIN_URL = 'https://bracket-iq.com/admin';
 const MAX_AUTOMATION_DISCOVERY_RUNS = 5;
 const MAX_AUTOMATION_INTAKE_RUNS = 10;
 const POLICY_EXPIRY_DAYS = 180;
 const DEFAULT_STALE_DISCOVERY_RUN_AGE_MS = 60 * 60 * 1000;
 const MIN_STALE_DISCOVERY_RUN_AGE_MS = 20 * 60 * 1000;
 const MAX_STALE_DISCOVERY_RUNS_PER_PASS = 25;
+const SUPERVISOR_HEARTBEAT_LEASE_MS = 20 * 60 * 1000;
+const DEFAULT_SUPERVISOR_WORKER_ID = 'affiliate-intake-supervisor';
 
 type JsonRecord = Record<string, unknown>;
 type DiscoveryDependencies = {
@@ -84,6 +88,7 @@ const db = (client: unknown = prisma) => {
     sports: dbClient.sports as any,
     queryExecutions: dbClient.affiliateSourceDiscoveryQueryExecutions as any,
     mappingJobs: dbClient.affiliateSourceMappingJobs as any,
+    workerHealth: dbClient.affiliateAgentWorkerHealth as any,
   };
 };
 
@@ -1624,18 +1629,14 @@ const acquireAutomationLock = async (): Promise<AutomationLock | null> => {
   };
 };
 
-const automationAdminUrl = (): string => {
-  const base = (process.env.NEXT_PUBLIC_APP_URL?.trim() || process.env.APP_BASE_URL?.trim() || DEFAULT_ADMIN_URL.replace(/\/admin$/, '')).replace(/\/$/, '');
-  return `${base}/admin`;
-};
-
 export const runAffiliateIntakeAutomation = async (options: {
   discoveryLimit?: number;
   intakeLimit?: number;
-  sendSummary?: boolean;
   isDemandDriven?: boolean;
 } = {}, dependencies: DiscoveryDependencies = {}) => {
   const startedAt = dependencies.now?.() ?? new Date();
+  const supervisorWorkerId = process.env.AFFILIATE_AUTOMATION_SUPERVISOR_ID?.trim()
+    || DEFAULT_SUPERVISOR_WORKER_ID;
   const lock = await acquireAutomationLock();
   if (!lock) return {
     lockAcquired: false,
@@ -1646,9 +1647,53 @@ export const runAffiliateIntakeAutomation = async (options: {
     recoveredIntakeRuns: [],
     discoveryRuns: [],
     intakeRuns: [],
-    emailSent: false,
+    alertCount: 0,
   };
   try {
+  const supervisorHealth = db().workerHealth;
+  let isSupervisorHeartbeatLost = false;
+  if (supervisorHealth?.findUnique && supervisorHealth?.upsert) {
+    const previous = await supervisorHealth.findUnique({
+      where: {
+        workerId_role: {
+          workerId: supervisorWorkerId,
+          role: 'AUTOMATION_SUPERVISOR',
+        },
+      },
+    });
+    isSupervisorHeartbeatLost = Boolean(
+      previous
+      && (
+        String(previous.status).toUpperCase() !== 'HEALTHY'
+        || !previous.leaseExpiresAt
+        || new Date(previous.leaseExpiresAt).getTime() <= startedAt.getTime()
+      ),
+    );
+    const leaseExpiresAt = new Date(startedAt.getTime() + SUPERVISOR_HEARTBEAT_LEASE_MS);
+    await supervisorHealth.upsert({
+      where: {
+        workerId_role: {
+          workerId: supervisorWorkerId,
+          role: 'AUTOMATION_SUPERVISOR',
+        },
+      },
+      create: {
+        id: createId(),
+        workerId: supervisorWorkerId,
+        role: 'AUTOMATION_SUPERVISOR',
+        status: 'HEALTHY',
+        heartbeatAt: startedAt,
+        leaseExpiresAt,
+        metadata: { cadence: '15m', component: 'affiliate-intake-automation' },
+      },
+      update: {
+        status: 'HEALTHY',
+        heartbeatAt: startedAt,
+        leaseExpiresAt,
+        metadata: { cadence: '15m', component: 'affiliate-intake-automation' },
+      },
+    });
+  }
     const recoveredDiscoveryRuns = await recoverStaleAffiliateSourceDiscoveryRuns({
       now: dependencies.now?.() ?? new Date(),
     });
@@ -1681,7 +1726,73 @@ export const runAffiliateIntakeAutomation = async (options: {
       intakeRuns.push(result);
     }
     const finishedAt = dependencies.now?.() ?? new Date();
-    const summary = {
+    const failedRuns = [
+      ...discoveryRuns.map((entry) => ({ entry, kind: 'DISCOVERY' })),
+      ...intakeRuns.map((entry) => ({ entry, kind: 'INTAKE' })),
+    ].filter(({ entry }) => {
+      const status = String(entry.run?.status ?? entry.status ?? '').toUpperCase();
+      return ['FAILED', 'PARTIAL', 'BLOCKED'].includes(status);
+    });
+    const alertInputs: AffiliateOperationalAlertInput[] = failedRuns.map(({ entry, kind }) => {
+      const run = entry.run ?? entry;
+      const runId = String(run.id ?? entry.id ?? 'unknown');
+      const status = String(run.status ?? entry.status ?? 'FAILED').toUpperCase();
+      const errorMessage = String(run.errorMessage ?? entry.errorMessage ?? 'No error recorded');
+      const lowerError = errorMessage.toLowerCase();
+      const category = lowerError.includes('out of memory') || lowerError.includes('oom')
+        ? 'WORKER_OOM'
+        : lowerError.includes('sigterm') || lowerError.includes('terminated')
+          ? 'WORKER_TERMINATION'
+          : lowerError.includes('disk') || lowerError.includes('memory')
+            ? 'RESOURCE_THRESHOLD'
+            : kind === 'DISCOVERY'
+              ? 'DISCOVERY_PROVIDER_FAILURE'
+              : 'AUTOMATIC_CAPTURE_FAILURE';
+      return {
+        eventKey: `affiliate-intake-automation:${kind.toLowerCase()}:${runId}:${status}`,
+        category,
+        severity: status === 'BLOCKED' ? 'critical' as const : 'warning' as const,
+        title: `${kind} automation ${status.toLowerCase()}`,
+        detail: errorMessage,
+        subjectType: `${kind}_RUN`,
+        subjectId: runId,
+        reasonCodes: [status, category],
+        payload: { runId, kind, status, errorMessage },
+      };
+    });
+    if (isSupervisorHeartbeatLost) {
+      alertInputs.push({
+        eventKey: `affiliate-intake-automation:supervisor-heartbeat-loss:${startedAt.toISOString()}`,
+        category: 'SUPERVISOR_HEARTBEAT_LOSS',
+        severity: 'critical' as const,
+        title: 'Affiliate automation supervisor heartbeat lost',
+        detail: 'The prior supervisor lease expired before this automation run.',
+        subjectType: 'AUTOMATION_SUPERVISOR',
+        subjectId: supervisorWorkerId,
+        reasonCodes: ['HEARTBEAT_LOST', 'LEASE_EXPIRED'],
+        payload: { workerId: supervisorWorkerId, startedAt },
+      });
+    }
+    if (recoveredDiscoveryRuns.length > 0 || recoveredIntakeRuns.length > 0) {
+      alertInputs.push({
+        eventKey: `affiliate-intake-automation:stale-recovery:${finishedAt.toISOString()}`,
+        category: 'STALE_WORK_RECOVERY',
+        severity: 'warning' as const,
+        title: 'Affiliate automation recovered stale work',
+        detail: `${recoveredDiscoveryRuns.length} discovery and ${recoveredIntakeRuns.length} intake runs were recovered after lease expiry.`,
+        subjectType: 'AUTOMATION_SUPERVISOR',
+        reasonCodes: ['STALE_RUN_RECOVERED'],
+        payload: { recoveredDiscoveryRuns, recoveredIntakeRuns },
+      });
+    }
+    if (alertInputs.length > 0) {
+      try {
+        await emitAffiliateOperationalAlerts(alertInputs, { now: () => finishedAt });
+      } catch (error) {
+        console.error('[affiliate:intake:automation] failed to emit operational alert', error);
+      }
+    }
+    return {
       lockAcquired: true,
       startedAt,
       finishedAt,
@@ -1690,34 +1801,31 @@ export const runAffiliateIntakeAutomation = async (options: {
       recoveredIntakeRuns,
       discoveryRuns,
       intakeRuns,
-      emailSent: false,
+      alertCount: alertInputs.length,
     };
-    const needsEmail = queuedCampaigns > 0
-      || recoveredDiscoveryRuns.length > 0
-      || recoveredIntakeRuns.length > 0
-      || discoveryRuns.length > 0
-      || intakeRuns.length > 0
-      || discoveryRuns.some((entry) => ['FAILED', 'PARTIAL'].includes(entry.run?.status))
-      || intakeRuns.some((entry) => ['FAILED', 'PARTIAL', 'BLOCKED'].includes(entry.run?.status ?? entry.status));
-    if (options.sendSummary === true && needsEmail && isEmailEnabled()) {
-      await sendEmail({
-        to: process.env.AFFILIATE_SCRAPE_SUMMARY_EMAIL_TO?.trim() || DEFAULT_SUMMARY_RECIPIENT,
-        subject: `[BracketIQ] Affiliate intake automation: ${discoveryRuns.length} discovery, ${intakeRuns.length} capture runs`,
-        text: [
-          'BracketIQ affiliate intake automation summary',
-          `Started: ${startedAt.toISOString()}`,
-          `Finished: ${finishedAt.toISOString()}`,
-          `Campaigns queued: ${queuedCampaigns}`,
-          `Stale discovery runs recovered: ${recoveredDiscoveryRuns.length}`,
-          `Stale intake runs recovered: ${recoveredIntakeRuns.length}`,
-          `Discovery runs processed: ${discoveryRuns.length}`,
-          `Intake captures processed: ${intakeRuns.length}`,
-          `Review: ${automationAdminUrl()}`,
-        ].join('\n'),
+  } catch (error) {
+    try {
+      const errorName = error instanceof Error ? error.name : 'UnknownError';
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      await emitAffiliateOperationalAlert({
+        eventKey: `affiliate-intake-automation:orchestration-failure:${startedAt.toISOString()}`,
+        category: 'AUTOMATION_ORCHESTRATION_FAILURE',
+        severity: 'critical',
+        title: 'Affiliate intake automation failed',
+        detail: errorMessage,
+        subjectType: 'AUTOMATION_SUPERVISOR',
+        subjectId: supervisorWorkerId,
+        reasonCodes: ['AUTOMATION_ORCHESTRATION_FAILURE'],
+        payload: {
+          errorName,
+          errorMessage,
+          startedAt: startedAt.toISOString(),
+        },
       });
-      summary.emailSent = true;
+    } catch (alertError) {
+      console.error('[affiliate:intake:automation] failed to persist top-level operational alert', alertError);
     }
-    return summary;
+    throw error;
   } finally {
     await lock.release();
   }

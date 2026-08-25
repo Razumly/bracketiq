@@ -530,15 +530,25 @@ const freshnessWindowHoursFor = (contract: AffiliateSupplyContractPolicy, source
   ?? 24
 );
 
-const naturalTargetExpiry = (target: AffiliateSupplyTargetEvidence): Date | null => {
+type AffiliateSupplyTargetFreshnessInput = Pick<
+  AffiliateSupplyTargetEvidence,
+  | 'sourceProfile'
+  | 'status'
+  | 'lastSuccessfulRefreshAt'
+  | 'freshnessExpiresAt'
+  | 'rejectedAt'
+  | 'metadata'
+>;
+
+const naturalTargetExpiry = (target: AffiliateSupplyTargetFreshnessInput): Date | null => {
   const value = target.metadata?.naturalExpiryAt
     ?? target.metadata?.endsAt
     ?? target.metadata?.startsAt;
   return asDate(value instanceof Date || typeof value === 'string' ? value : null);
 };
 
-const targetFreshness = (
-  target: AffiliateSupplyTargetEvidence,
+export const isAffiliateSupplyTargetFresh = (
+  target: AffiliateSupplyTargetFreshnessInput,
   contract: AffiliateSupplyContractPolicy,
   now: Date,
 ): boolean => {
@@ -667,7 +677,7 @@ export const deriveAffiliateSupplyAssessment = (
     ...(snapshot.approval && !lifecycleEvidenceSatisfied ? ['REQUIRED_LIFECYCLE_EVIDENCE_MISSING'] : []),
   ]);
   const normalizedTargets = normalizeTargets(snapshot.targets);
-  const freshTargets = normalizedTargets.filter((target) => targetFreshness(target, snapshot.contract, now));
+  const freshTargets = normalizedTargets.filter((target) => isAffiliateSupplyTargetFresh(target, snapshot.contract, now));
   const qualifyingTargets = normalizedTargets.filter((target) => Boolean(targetRuleFor(snapshot.contract, target)));
   const qualifyingFreshTargets = freshTargets.filter((target) => Boolean(targetRuleFor(snapshot.contract, target)));
   const matchingRules = normalizedTargets

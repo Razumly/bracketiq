@@ -23,6 +23,10 @@ import {
   recordAffiliateAgentWorkerHeartbeat,
 } from './affiliateSupplyPersistence';
 import type { AffiliateSupplyDatabase } from './affiliateSupplyPersistence';
+import {
+  emitAffiliateOperationalAlert,
+  type AffiliateOperationalAlertWriter,
+} from './affiliateOperationalAlerts';
 import type {
   AffiliateAgentClaimOperation,
   AffiliateAgentGateway,
@@ -317,6 +321,7 @@ export type AffiliateAgentGatewayDependencies = Readonly<{
   terminalEffects?: AffiliateAgentTerminalEffectAdapter;
   lifecycle: AffiliateAgentLifecycleAuthority;
   workerHealth?: AffiliateAgentWorkerHealthWriter;
+  operationalAlert?: AffiliateOperationalAlertWriter;
 }>;
 
 export interface AffiliateAgentWorkerHealthWriter {
@@ -421,10 +426,22 @@ export const createProductionAffiliateAgentGatewayDependencies = (
     terminalEffects?: AffiliateAgentTerminalEffectAdapter;
     lifecycle?: AffiliateAgentLifecycleAuthority;
     workerHealth?: AffiliateAgentWorkerHealthWriter;
+    operationalAlert?: AffiliateOperationalAlertWriter;
   }>,
 ): AffiliateAgentGatewayDependencies => {
   const gatewayPrisma = input.prisma ?? prisma;
   const clock = input.clock ?? { now: () => new Date() };
+  const hasOperationalAlertModels =
+    "affiliateOperationalAlerts" in gatewayPrisma &&
+    "affiliateOperationalAlertDeliveries" in gatewayPrisma;
+  const defaultOperationalAlert: AffiliateOperationalAlertWriter | undefined =
+    hasOperationalAlertModels
+      ? async (alert, dependencies) =>
+          emitAffiliateOperationalAlert(alert, {
+            ...(dependencies ?? {}),
+            db: dependencies?.db ?? gatewayPrisma,
+          })
+      : undefined;
   return {
     prisma: gatewayPrisma,
     clock,
@@ -453,5 +470,6 @@ export const createProductionAffiliateAgentGatewayDependencies = (
       createAffiliateAgentWorkerHealthWriter({
         db: affiliateSupplyDatabase(gatewayPrisma),
       }),
+    operationalAlert: input.operationalAlert ?? defaultOperationalAlert,
   };
 };

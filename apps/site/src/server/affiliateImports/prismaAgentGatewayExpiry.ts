@@ -291,14 +291,59 @@ export const reconcileExpiredClaims = async (
     }
     if (outcome === "EXPIRED") {
       expired += 1;
+      if (dependencies.operationalAlert) {
+        try {
+          await dependencies.operationalAlert({
+            eventKey: `affiliate-agent-claim-expired:${selectedClaim.id}`,
+            category: "AGENT_LEASE_EXPIRED",
+            severity: "critical",
+            title: "Affiliate agent claim expired",
+            detail: "The gateway expired an active claim after its lease or hard deadline.",
+            subjectType: "AGENT_JOB",
+            subjectId: selectedClaim.jobId,
+            queue: selectedClaim.queue,
+            claimGeneration: selectedClaim.claimGeneration,
+            workerId: selectedClaim.workerId,
+            previousState: "CLAIMED",
+            nextState: "RETRY_WAIT",
+            reasonCodes: ["LEASE_EXPIRED"],
+            payload: { claimId: selectedClaim.id },
+          });
+        } catch (error) {
+          console.error("[affiliate:gateway] failed to persist claim expiry alert", error);
+        }
+      }
       continue;
     }
     if (outcome === "IMPOSSIBLE") {
-      isAdmissionHalted ||= await markImpossibleExpiredClaim(
+      const halted = await markImpossibleExpiredClaim(
         dependencies,
         selectedClaim,
         dependencies.clock.now(),
       );
+      isAdmissionHalted ||= halted;
+      if (halted && dependencies.operationalAlert) {
+        try {
+          await dependencies.operationalAlert({
+            eventKey: `affiliate-agent-admission-halted:${selectedClaim.jobId}`,
+            category: "AGENT_ADMISSION_HALTED",
+            severity: "critical",
+            title: "Affiliate agent admission halted",
+            detail: "The gateway could not safely reconcile an expired claim.",
+            subjectType: "AGENT_JOB",
+            subjectId: selectedClaim.jobId,
+            queue: selectedClaim.queue,
+            claimGeneration: selectedClaim.claimGeneration,
+            workerId: selectedClaim.workerId,
+            previousState: "CLAIMED",
+            nextState: "RECONCILIATION_REQUIRED",
+            reasonCodes: ["GATEWAY_ADMISSION_HALTED", "LEASE_EXPIRED"],
+            payload: { claimId: selectedClaim.id },
+          });
+        } catch (error) {
+          console.error("[affiliate:gateway] failed to persist admission halt alert", error);
+        }
+      }
     }
   }
   return {

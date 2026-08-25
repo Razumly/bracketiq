@@ -120,6 +120,8 @@ export const ModelName = {
   AffiliateAgentGatewayArtifacts: 'AffiliateAgentGatewayArtifacts',
   AffiliateAgentGatewayOperationReceipts: 'AffiliateAgentGatewayOperationReceipts',
   AffiliateAgentGatewayEvents: 'AffiliateAgentGatewayEvents',
+  AffiliateOperationalAlerts: 'AffiliateOperationalAlerts',
+  AffiliateOperationalAlertDeliveries: 'AffiliateOperationalAlertDeliveries',
   AffiliateCoverageAgentJobs: 'AffiliateCoverageAgentJobs',
   AffiliateCoverageCities: 'AffiliateCoverageCities',
   AffiliateCoverageCells: 'AffiliateCoverageCells',
@@ -1766,6 +1768,57 @@ export const AffiliateAgentGatewayEventsScalarFieldEnum = {
 } as const
 
 export type AffiliateAgentGatewayEventsScalarFieldEnum = (typeof AffiliateAgentGatewayEventsScalarFieldEnum)[keyof typeof AffiliateAgentGatewayEventsScalarFieldEnum]
+
+
+export const AffiliateOperationalAlertsScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  eventKey: 'eventKey',
+  category: 'category',
+  severity: 'severity',
+  title: 'title',
+  detail: 'detail',
+  subjectType: 'subjectType',
+  subjectId: 'subjectId',
+  rolloutCohort: 'rolloutCohort',
+  contractVersion: 'contractVersion',
+  supplySourceId: 'supplySourceId',
+  coverageCellId: 'coverageCellId',
+  demandId: 'demandId',
+  waveId: 'waveId',
+  queue: 'queue',
+  lifecycleGeneration: 'lifecycleGeneration',
+  claimGeneration: 'claimGeneration',
+  workerId: 'workerId',
+  attempt: 'attempt',
+  previousState: 'previousState',
+  nextState: 'nextState',
+  reasonCodes: 'reasonCodes',
+  evidenceRefs: 'evidenceRefs',
+  inputHash: 'inputHash',
+  outputHash: 'outputHash',
+  payload: 'payload',
+  retentionClass: 'retentionClass',
+  retentionDeadline: 'retentionDeadline'
+} as const
+
+export type AffiliateOperationalAlertsScalarFieldEnum = (typeof AffiliateOperationalAlertsScalarFieldEnum)[keyof typeof AffiliateOperationalAlertsScalarFieldEnum]
+
+
+export const AffiliateOperationalAlertDeliveriesScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  alertId: 'alertId',
+  channel: 'channel',
+  status: 'status',
+  attempt: 'attempt',
+  deliveredAt: 'deliveredAt',
+  responseCode: 'responseCode',
+  responseBody: 'responseBody',
+  errorMessage: 'errorMessage'
+} as const
+
+export type AffiliateOperationalAlertDeliveriesScalarFieldEnum = (typeof AffiliateOperationalAlertDeliveriesScalarFieldEnum)[keyof typeof AffiliateOperationalAlertDeliveriesScalarFieldEnum]
 
 
 export const AffiliateCoverageAgentJobsScalarFieldEnum = {

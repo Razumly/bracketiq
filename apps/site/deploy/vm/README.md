@@ -146,7 +146,19 @@ remain recorded in `../../../../docs/ovh-vps-migration-execplan.md`.
 
 ## Affiliate source discovery and intake automation
 
-The application image includes the provider-neutral automation command. Before enabling its timer, configure `SCRAPINGDOG_API_KEY`, email credentials, database access, and storage credentials in `app.env`; deploy the discovery and intake migrations; create paused campaign templates with `npm run affiliate:discovery:setup -- --live`; and review campaign limits in Admin > Affiliate Imports > Source Intake. New discovery and intake runs default to ScrapingDog. `FIRECRAWL_API_KEY` is optional unless `AFFILIATE_DISCOVERY_PROVIDER=FIRECRAWL`, `AFFILIATE_INTAKE_PROVIDER=FIRECRAWL`, or `AFFILIATE_PROVIDER_FALLBACK=FIRECRAWL` is configured.
+The application image includes the provider-neutral automation command.
+Before you enable its timer, complete these steps:
+
+- Set `SCRAPINGDOG_API_KEY` in `app.env`.
+- Set `AFFILIATE_OPERATIONAL_ALERT_WEBHOOK_URL` or `AFFILIATE_OPERATIONAL_ALERT_EMAIL_TO`.
+- Set email credentials when you use email alerts.
+- Set database and storage credentials.
+- Deploy the discovery and intake migrations.
+- Create paused campaign templates with `npm run affiliate:discovery:setup -- --live`.
+- Review campaign limits in Admin > Affiliate Operations > Source Intake.
+
+New discovery and intake runs use ScrapingDog by default.
+Set `FIRECRAWL_API_KEY` when you select Firecrawl.
 
 ScrapingDog provider controls:
 
@@ -157,7 +169,12 @@ ScrapingDog provider controls:
 - `SCRAPINGDOG_TIMEOUT_MS=300000`
 - `SCRAPINGDOG_DYNAMIC_WAIT_MS=2500`
 
-The intake worker first requests static HTML and retries once with JavaScript rendering only when the local quality gate rejects the static response. It converts raw HTML to Markdown and discovers sitemap/link pages locally. Operational summaries estimate ScrapingDog usage at 1 credit for static capture, 5 for JavaScript capture, 5 for Google Search, and 5 for a screenshot; the provider dashboard remains the billing authority.
+The intake worker first requests static HTML.
+It retries once with JavaScript rendering when the local quality gate rejects the static response.
+It converts raw HTML to Markdown.
+It discovers sitemap and link pages locally.
+Operational summaries estimate ScrapingDog usage at 1 credit for static capture, 5 for JavaScript capture, 5 for Google Search, and 5 for a screenshot.
+The provider dashboard remains the billing authority.
 
 Install the tracked units and start one manual run before enabling the timer:
 
@@ -168,7 +185,13 @@ Install the tracked units and start one manual run before enabling the timer:
     sudo journalctl -u bracketiq-affiliate-intake-automation.service -n 200 --no-pager
     sudo systemctl enable --now bracketiq-affiliate-intake-automation.timer
 
-The timer invokes the lock-protected job every 15 minutes. Each invocation processes up to five sequential discovery slices so an incomplete location search can continue without waiting for another timer interval. Campaign cadence controls whether the selected discovery provider actually runs, while the frequent invocation drains approved intake captures promptly. These frequent runs use `--no-email`; discovery, capture, mapping, and human-review totals are included in the single daily affiliate operations email sent by the mapped-source job. Inspect current and historical execution with:
+The timer invokes the lock-protected job every 15 minutes.
+Each invocation processes up to five sequential discovery slices.
+An incomplete location search can continue without waiting for another timer interval.
+Campaign cadence controls whether the selected discovery provider runs.
+The frequent invocation drains approved intake captures promptly.
+These runs do not send a daily digest.
+Inspect current and historical execution, immutable gateway history, and the read-only Affiliate Operations Control Room with:
 
     systemctl status bracketiq-affiliate-intake-automation.timer
     systemctl list-timers bracketiq-affiliate-intake-automation.timer
@@ -178,7 +201,10 @@ Pause automation without changing web traffic or deleting stored evidence:
 
     sudo systemctl disable --now bracketiq-affiliate-intake-automation.timer
 
-Rollback consists of leaving the timer disabled and pausing active discovery campaigns in Admin. Existing organizations, approved scrape sources, intakes, artifacts, and candidates remain intact. Re-enable with `sudo systemctl enable --now bracketiq-affiliate-intake-automation.timer` after the issue is corrected.
+Keep the timer disabled during rollback.
+Pause active discovery campaigns in Admin.
+Existing organizations, approved scrape sources, intakes, artifacts, and candidates remain intact.
+Re-enable with `sudo systemctl enable --now bracketiq-affiliate-intake-automation.timer` after you correct the issue.
 
 ## Daily mapped-source scraping
 
@@ -188,9 +214,7 @@ timer runs validated mappings whose source rows have `autoScrapeEnabled=true`;
 each source's `scrapeIntervalMinutes` determines whether the daily invocation
 performs a full scrape or a lightweight change check.
 
-The daily email includes the preceding 24 hours of discovery runs, newly created
-intakes, capture results, captured page totals, mapping-job transitions, and the
-current human-review backlog. The 15-minute intake worker does not send email.
+The daily mapped-source job emits immediate operational alerts for failed refreshes and other configured fault conditions. It records each alert and delivery result in immutable operational history. It does not send a daily digest. The 15-minute intake worker also uses the same immediate alert path.
 
 Install and enable the daily mapped-source timer only when explicitly requested:
 

@@ -187,5 +187,43 @@ export const recordInvocationFailureTransition = async (
       retentionClass: "INDEFINITE",
     },
   });
+  if (input.dependencies.operationalAlert) {
+    const isClaimExpired = input.eventType === "CLAIM_EXPIRED";
+    await input.dependencies.operationalAlert(
+      {
+        eventKey: isClaimExpired
+          ? `affiliate-agent-claim-expired:${input.claim.id}`
+          : `affiliate-agent-invocation-failed:${receiptId}`,
+        category: isClaimExpired
+          ? "AGENT_LEASE_EXPIRED"
+          : "AGENT_INVOCATION_FAILURE",
+        severity: isClaimExpired || isPipelineBlocked ? "critical" : "warning",
+        title: isClaimExpired
+          ? "Affiliate agent claim expired"
+          : isPipelineBlocked
+            ? "Affiliate agent pipeline blocked"
+            : "Affiliate agent invocation failed",
+        detail: input.safeSummary,
+        subjectType: "AGENT_JOB",
+        subjectId: input.job.id,
+        queue: input.job.queue,
+        lifecycleGeneration: input.claim.lifecycleGeneration,
+        claimGeneration: input.claim.claimGeneration,
+        workerId: input.claim.workerId,
+        attempt: invocationFailureCount,
+        previousState: "CLAIMED",
+        nextState: isPipelineBlocked ? "PIPELINE_BLOCKED" : "RETRY_WAIT",
+        reasonCodes: [input.failureCode],
+        evidenceRefs: [...input.evidenceRefs],
+        payload: {
+          claimId: input.claim.id,
+          invocationId: input.claim.invocationId,
+          receiptId,
+          eventType: input.eventType,
+        },
+      },
+      { db: input.transaction, isDeliveryEnabled: false },
+    );
+  }
   return response;
 };

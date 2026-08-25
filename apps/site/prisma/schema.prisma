@@ -2387,6 +2387,60 @@ model AffiliateAgentGatewayEvents {
   @@index([eventType, createdAt])
   @@index([retentionClass, retentionDeadline])
 }
+model AffiliateOperationalAlerts {
+  id                   String                              @id
+  createdAt            DateTime                            @default(now())
+  eventKey             String                              @unique
+  category             String
+  severity             String
+  title                String
+  detail               String
+  subjectType          String?
+  subjectId            String?
+  rolloutCohort        String?
+  contractVersion      Int?
+  supplySourceId       String?
+  coverageCellId       String?
+  demandId             String?
+  waveId               String?
+  queue                String?
+  lifecycleGeneration  Int?
+  claimGeneration      Int?
+  workerId             String?
+  attempt              Int?
+  previousState        String?
+  nextState             String?
+  reasonCodes          String[]                            @default([])
+  evidenceRefs         String[]                            @default([])
+  inputHash            String?
+  outputHash           String?
+  payload              Json                                @default("{}")
+  retentionClass       String                              @default("INDEFINITE")
+  retentionDeadline    DateTime?
+  deliveries           AffiliateOperationalAlertDeliveries[]
+
+  @@index([category, createdAt])
+  @@index([severity, createdAt])
+  @@index([rolloutCohort, contractVersion, createdAt])
+  @@index([supplySourceId, createdAt])
+}
+
+model AffiliateOperationalAlertDeliveries {
+  id             String                    @id
+  createdAt      DateTime                  @default(now())
+  alertId        String
+  channel        String
+  status         String
+  attempt        Int                       @default(1)
+  deliveredAt    DateTime?
+  responseCode   Int?
+  responseBody   String?
+  errorMessage   String?
+  alert          AffiliateOperationalAlerts @relation(fields: [alertId], references: [id], onDelete: Restrict)
+
+  @@index([alertId, createdAt])
+  @@index([status, createdAt])
+}
 
 model AffiliateCoverageAgentJobs {
   id                 String    @id

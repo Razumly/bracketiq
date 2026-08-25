@@ -363,6 +363,16 @@ export type AffiliateAgentGatewayOperationReceipts = Prisma.AffiliateAgentGatewa
  */
 export type AffiliateAgentGatewayEvents = Prisma.AffiliateAgentGatewayEventsModel
 /**
+ * Model AffiliateOperationalAlerts
+ *
+ */
+export type AffiliateOperationalAlerts = Prisma.AffiliateOperationalAlertsModel
+/**
+ * Model AffiliateOperationalAlertDeliveries
+ *
+ */
+export type AffiliateOperationalAlertDeliveries = Prisma.AffiliateOperationalAlertDeliveriesModel
+/**
  * Model AffiliateCoverageAgentJobs
  *
  */

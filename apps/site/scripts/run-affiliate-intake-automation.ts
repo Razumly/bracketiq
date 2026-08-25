@@ -63,7 +63,6 @@ const main = async () => {
     const result = await runAffiliateIntakeAutomation({
       discoveryLimit: readInteger('--discovery-limit', 5),
       intakeLimit: readInteger('--intake-limit', 10),
-      sendSummary: process.argv.includes('--send-email') && !process.argv.includes('--no-email'),
       isDemandDriven: true,
     });
     const isContractSafe = process.env.AFFILIATE_SUPPLY_CONTRACT_SAFE?.trim().toLowerCase() !== 'false';
