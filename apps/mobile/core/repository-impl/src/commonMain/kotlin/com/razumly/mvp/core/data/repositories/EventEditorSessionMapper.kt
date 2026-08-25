@@ -1188,6 +1188,7 @@ object EventEditorSessionMapper {
             ),
             draft = draft,
             completion = EventEditorCreateCompletionDto(mode = completionMode),
+            hasScheduleProposalSupport = completionMode == EventEditorCreateCompletionMode.CREATE_AND_BUILD_SCHEDULE,
         )
         return PendingEventCreate(command = command, bootstrapSnapshot = session.snapshot)
     }

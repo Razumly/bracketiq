@@ -2,12 +2,14 @@ import { createHash } from 'crypto';
 import { createId } from '@/lib/id';
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import {
+  eventEditorCreateProposalSchema,
   eventEditorCreateResultSchema,
   type CreateEventEditorCommand,
+  type EventEditorCreateProposal,
   type EventEditorCreateResult,
 } from '@/contracts/eventEditor';
-
 type PrismaLike = PrismaClient | Prisma.TransactionClient;
+
 
 type CreateOperationRow = {
   createOperationId: string;
@@ -16,6 +18,9 @@ type CreateOperationRow = {
   eventId: string;
   responseStatus: number;
   responseJson: unknown;
+  proposalJson: unknown;
+  proposalRevision: string | null;
+  proposalStatus: string;
   emailDelivery: string;
 };
 
@@ -23,6 +28,15 @@ type CreateOperationDelegate = {
   findUnique: (args: Record<string, unknown>) => Promise<CreateOperationRow | null>;
   createMany: (args: Record<string, unknown>) => Promise<{ count: number }>;
   update: (args: Record<string, unknown>) => Promise<unknown>;
+  delete: (args: Record<string, unknown>) => Promise<unknown>;
+};
+export type EventCreateOperationProposal = {
+  createOperationId: string;
+  eventId: string;
+  requestHash: string;
+  proposal: EventEditorCreateProposal;
+  result: EventEditorCreateResult | null;
+  proposalStatus: string;
 };
 
 type EventCreateOperationClaimBase = {
@@ -84,14 +98,26 @@ const stableJsonSafe = (value: unknown): unknown => {
   return value;
 };
 
-export const eventEditorCreateRequestHash = (command: CreateEventEditorCommand): string => (
+export const eventEditorCreateRequestHash = (
+  command: CreateEventEditorCommand,
+): string => (
   createHash('sha256')
     .update(JSON.stringify(stableJsonSafe({
       contractVersion: command.contractVersion,
+      hasScheduleProposalSupport:
+        command.hasScheduleProposalSupport === true ? true : undefined,
       expectedRevisions: command.expectedRevisions,
       draft: command.draft,
       completion: command.completion,
     })))
+    .digest('hex')
+);
+
+export const eventEditorProposalRevision = (
+  proposal: Omit<EventEditorCreateProposal, 'proposalRevision'>,
+): string => (
+  createHash('sha256')
+    .update(JSON.stringify(stableJsonSafe(proposal)))
     .digest('hex')
 );
 
@@ -102,6 +128,9 @@ const selectOperation = {
   eventId: true,
   responseStatus: true,
   responseJson: true,
+  proposalJson: true,
+  proposalRevision: true,
+  proposalStatus: true,
   emailDelivery: true,
 };
 
@@ -119,6 +148,15 @@ const parseStoredResult = (row: CreateOperationRow): EventEditorCreateResult => 
   }
   return eventEditorCreateResultSchema.parse(row.responseJson);
 };
+const parseStoredProposal = (
+  row: CreateOperationRow,
+): EventEditorCreateProposal => {
+  if (row.proposalJson == null) {
+    throw new EventCreateOperationIncompleteError();
+  }
+  return eventEditorCreateProposalSchema.parse(row.proposalJson);
+};
+
 
 const assertReplayIdentity = (
   row: CreateOperationRow,
@@ -195,6 +233,7 @@ export const completeEventEditorCreateOperation = async (params: {
   createOperationId: string;
   result: EventEditorCreateResult;
   emailDelivery: string;
+  proposalStatus?: string;
 }): Promise<void> => {
   const parsed = eventEditorCreateResultSchema.parse(params.result);
   await operationsFor(params.client).update({
@@ -202,10 +241,29 @@ export const completeEventEditorCreateOperation = async (params: {
     data: {
       responseStatus: 201,
       responseJson: stableJsonSafe(parsed),
+      proposalStatus: params.proposalStatus ?? "NONE",
       emailDelivery: params.emailDelivery,
     },
   });
 };
+export const completeEventEditorCreateProposal = async (params: {
+  client: PrismaLike;
+  createOperationId: string;
+  proposal: EventEditorCreateProposal;
+}): Promise<void> => {
+  const parsed = eventEditorCreateProposalSchema.parse(params.proposal);
+  await operationsFor(params.client).update({
+    where: { createOperationId: params.createOperationId },
+    data: {
+      responseStatus: 202,
+      proposalJson: stableJsonSafe(parsed),
+      proposalRevision: parsed.proposalRevision,
+      proposalStatus: "PENDING",
+      emailDelivery: "PROPOSED",
+    },
+  });
+};
+
 
 /**
  * Waits for the first claimant to finish writing the canonical result and
@@ -263,4 +321,88 @@ export const readEventEditorCreateOperation = async (params: {
 }): Promise<EventCreateOperationClaim | null> => {
   const row = await loadOperation(params.client, params.createOperationId);
   return row ? claimFor(row, params.actorUserId, params.requestHash) : null;
+};
+
+export const waitForEventEditorCreateProposal = async (params: {
+  client: PrismaLike;
+  createOperationId: string;
+  actorUserId: string;
+  requestHash: string;
+  timeoutMs?: number;
+}): Promise<EventCreateOperationProposal> => {
+  const deadline = Date.now() + (params.timeoutMs ?? 30_000);
+  while (Date.now() <= deadline) {
+    const row = await loadOperation(params.client, params.createOperationId);
+    if (!row) throw new EventCreateOperationIncompleteError();
+    assertReplayIdentity(row, params.actorUserId, params.requestHash);
+    if (row.proposalJson != null) {
+      return {
+        createOperationId: row.createOperationId,
+        eventId: row.eventId,
+        requestHash: row.requestHash,
+        proposal: parseStoredProposal(row),
+        result: row.responseJson == null ? null : parseStoredResult(row),
+        proposalStatus: row.proposalStatus,
+      };
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+  throw new EventCreateOperationIncompleteError();
+};
+
+export const readEventEditorCreateProposal = async (params: {
+  client: PrismaLike;
+  createOperationId: string;
+  actorUserId: string;
+  requestHash: string;
+}): Promise<EventCreateOperationProposal | null> => {
+  const row = await loadOperation(params.client, params.createOperationId);
+  if (!row) return null;
+  assertReplayIdentity(row, params.actorUserId, params.requestHash);
+  return row.proposalJson == null
+    ? null
+    : {
+        createOperationId: row.createOperationId,
+        eventId: row.eventId,
+        requestHash: row.requestHash,
+        proposal: parseStoredProposal(row),
+        result: row.responseJson == null ? null : parseStoredResult(row),
+        proposalStatus: row.proposalStatus,
+      };
+};
+
+export const deleteEventEditorCreateOperation = async (params: {
+  client: PrismaLike;
+  createOperationId: string;
+  actorUserId: string;
+  requestHash: string;
+}): Promise<void> => {
+  const row = await loadOperation(params.client, params.createOperationId);
+  if (!row) return;
+  assertReplayIdentity(row, params.actorUserId, params.requestHash);
+  await operationsFor(params.client).delete({
+    where: { createOperationId: params.createOperationId },
+  });
+};
+
+export const readEventEditorCreateProposalForActor = async (params: {
+  client: PrismaLike;
+  createOperationId: string;
+  actorUserId: string;
+}): Promise<EventCreateOperationProposal | null> => {
+  const row = await loadOperation(params.client, params.createOperationId);
+  if (!row) return null;
+  if (row.actorUserId !== params.actorUserId) {
+    throw new EventCreateOperationConflictError();
+  }
+  return row.proposalJson == null
+    ? null
+    : {
+        createOperationId: row.createOperationId,
+        eventId: row.eventId,
+        requestHash: row.requestHash,
+        proposal: parseStoredProposal(row),
+        result: row.responseJson == null ? null : parseStoredResult(row),
+        proposalStatus: row.proposalStatus,
+      };
 };

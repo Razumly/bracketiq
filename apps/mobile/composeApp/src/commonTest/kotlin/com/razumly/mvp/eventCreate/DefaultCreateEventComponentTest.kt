@@ -577,6 +577,116 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
+    fun given_scheduled_league_create_when_proposal_is_returned_then_acceptance_uses_the_exact_proposal() =
+        runTest(testDispatcher) {
+            val harness = CreateEventHarness(
+                bootstrapSession = createEventEditorSession(
+                    event = com.razumly.mvp.core.data.dataTypes.Event(
+                        id = "bootstrap-league",
+                        name = "Scheduled League",
+                        hostId = "user-1",
+                        eventType = EventType.LEAGUE,
+                        sportIds = listOf("Indoor Volleyball"),
+                        start = Instant.parse("2026-07-01T00:00:00Z"),
+                        end = Instant.parse("2026-07-01T02:00:00Z"),
+                        divisions = listOf("Open"),
+                        isAutomatedScheduling = true,
+                    ),
+                ),
+            )
+            harness.eventRepository.createEditorOutcomeFactory = { command, session ->
+                com.razumly.mvp.core.data.repositories.EventEditorSaveOutcome(
+                    session = session,
+                    staffEmailDelivery = "NOT_REQUESTED",
+                    scheduleOutcome = createEventEditorScheduleOutcome(
+                        eventId = session.canonicalState.event.id,
+                    ),
+                    proposal = createEventEditorScheduleProposal(command, session),
+                )
+            }
+            advance()
+
+            harness.component.createEvent()
+            advance()
+
+            val command = harness.eventRepository.createEventEditorCalls.single()
+            assertTrue(command.hasScheduleProposalSupport)
+            assertEquals(
+                com.razumly.mvp.core.network.dto.EventEditorCreateCompletionMode.CREATE_AND_BUILD_SCHEDULE,
+                command.completion.mode,
+            )
+            assertEquals(
+                1,
+                harness.component.pendingScheduleProposal.value
+                    ?.proposal
+                    ?.scheduleOutcome
+                    ?.matchCount,
+            )
+            assertEquals(0, harness.onEventCreatedCount)
+
+            harness.component.acceptScheduleProposal()
+            advance()
+
+            val accepted = harness.eventRepository.acceptedEventEditorProposals.single()
+            assertEquals(command.createOperationId, accepted.createOperationId)
+            assertEquals(command.draft, accepted.draft)
+            assertEquals("proposal-revision", accepted.proposalRevision)
+            assertEquals(1, harness.onEventCreatedCount)
+            assertTrue(harness.component.pendingScheduleProposal.value == null)
+        }
+
+    @Test
+    fun given_changed_create_setup_when_proposal_is_accepted_then_it_is_stale_and_rejection_creates_nothing() =
+        runTest(testDispatcher) {
+            val harness = CreateEventHarness(
+                bootstrapSession = createEventEditorSession(
+                    event = com.razumly.mvp.core.data.dataTypes.Event(
+                        id = "bootstrap-league",
+                        name = "Scheduled League",
+                        hostId = "user-1",
+                        eventType = EventType.LEAGUE,
+                        sportIds = listOf("Indoor Volleyball"),
+                        start = Instant.parse("2026-07-01T00:00:00Z"),
+                        end = Instant.parse("2026-07-01T02:00:00Z"),
+                        divisions = listOf("Open"),
+                        isAutomatedScheduling = true,
+                    ),
+                ),
+            )
+            harness.eventRepository.createEditorOutcomeFactory = { command, session ->
+                com.razumly.mvp.core.data.repositories.EventEditorSaveOutcome(
+                    session = session,
+                    staffEmailDelivery = "NOT_REQUESTED",
+                    scheduleOutcome = createEventEditorScheduleOutcome(
+                        eventId = session.canonicalState.event.id,
+                    ),
+                    proposal = createEventEditorScheduleProposal(command, session),
+                )
+            }
+            advance()
+
+            harness.component.createEvent()
+            advance()
+            assertEquals(0, harness.onEventCreatedCount)
+
+            harness.component.updateEventField { copy(name = "Changed after proposal") }
+            advance()
+            harness.component.acceptScheduleProposal()
+            advance()
+
+            assertTrue(harness.eventRepository.acceptedEventEditorProposals.isEmpty())
+            assertTrue(harness.component.errorState.value?.message?.contains("stale") == true)
+            assertEquals(0, harness.onEventCreatedCount)
+
+            harness.component.rejectScheduleProposal()
+            advance()
+
+            assertEquals(1, harness.eventRepository.rejectedEventEditorProposals.size)
+            assertTrue(harness.component.pendingScheduleProposal.value == null)
+            assertEquals(0, harness.onEventCreatedCount)
+        }
+
+    @Test
     fun given_invalid_pending_staff_when_event_is_created_then_post_is_rejected() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()

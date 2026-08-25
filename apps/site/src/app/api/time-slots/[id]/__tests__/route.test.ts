@@ -17,6 +17,8 @@ const requireSessionMock = jest.fn();
 const canManageTimeSlotMock = jest.fn();
 const canManageScheduledFieldsMock = jest.fn();
 const acquireEventLockMock = jest.fn();
+const acquireFieldLocksMock = jest.fn();
+const acquireTimeSlotLocksMock = jest.fn();
 
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 jest.mock('@/lib/permissions', () => ({ requireSession: requireSessionMock }));
@@ -26,6 +28,8 @@ jest.mock('@/server/timeSlotAccess', () => ({
 }));
 jest.mock('@/server/repositories/locks', () => ({
   acquireEventLock: (...args: unknown[]) => acquireEventLockMock(...args),
+  acquireFieldLocks: (...args: unknown[]) => acquireFieldLocksMock(...args),
+  acquireTimeSlotLocks: (...args: unknown[]) => acquireTimeSlotLocksMock(...args),
 }));
 
 import { PATCH } from '@/app/api/time-slots/[id]/route';
@@ -71,8 +75,10 @@ beforeEach(() => {
   jest.clearAllMocks();
   requireSessionMock.mockResolvedValue({ userId: 'manager_1', isAdmin: false });
   canManageTimeSlotMock.mockResolvedValue(true);
+  acquireTimeSlotLocksMock.mockResolvedValue(undefined);
   canManageScheduledFieldsMock.mockResolvedValue(true);
   acquireEventLockMock.mockResolvedValue(undefined);
+  acquireFieldLocksMock.mockResolvedValue(undefined);
   prismaMock.timeSlots.findUnique.mockResolvedValue(target);
   prismaMock.fields.findMany.mockResolvedValue([{ id: 'resource_1', lat: null, long: null, organizationId: null }]);
   prismaMock.organizations.findUnique.mockResolvedValue(null);
@@ -100,6 +106,7 @@ describe('PATCH /api/time-slots/[id]', () => {
       error: expect.stringMatching(/Resource "resource_1".*disjoint Division scopes/),
     }));
     expect(acquireEventLockMock).toHaveBeenCalledWith(txMock, 'event_1');
+    expect(acquireFieldLocksMock).toHaveBeenCalledWith(txMock, ['resource_1']);
     expect(txMock.timeSlots.update).not.toHaveBeenCalled();
   });
 

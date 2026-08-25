@@ -1,5 +1,6 @@
 import {
   createEventEditorCommandSchema,
+  eventEditorAcceptProposalCommandSchema,
   eventEditorCreateResultSchema,
   eventEditorCreateBootstrapSchema,
   eventEditorDraftSchema,
@@ -137,6 +138,16 @@ describe('event editor contracts', () => {
     });
     expect(parsed.draft.registration.questions[0]).toEqual(expect.objectContaining({ clientId: 'question-client-1' }));
   });
+  it('requires the reviewed draft when accepting a schedule proposal', () => {
+    const parsed = eventEditorAcceptProposalCommandSchema.safeParse({
+      contractVersion: 3,
+      createOperationId: 'proposal-operation-1',
+      proposalRevision: 'proposal-revision-1',
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
   it('maps a version-3 legacy same-type BUILD_IF_MISSING Save to PRESERVE', () => {
     const parsed = parseSaveEventEditorCommand({
       contractVersion: 3,

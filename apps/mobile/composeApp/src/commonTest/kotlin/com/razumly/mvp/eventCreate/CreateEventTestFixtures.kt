@@ -481,7 +481,48 @@ internal fun createEventEditorSession(
         ),
     )
 }
+internal fun createEventEditorScheduleProposal(
+    command: EventEditorCreateCommandDto,
+    session: EventEditorSession,
+    matchCount: Int = 1,
+): EventEditorCreateProposalDto = EventEditorCreateProposalDto(
+    status = "PROPOSED",
+    createOperationId = command.createOperationId,
+    eventId = session.canonicalState.event.id,
+    proposalRevision = "proposal-revision",
+    expectedRevisions = command.expectedRevisions,
+    completion = command.completion,
+    snapshot = session.snapshot,
+    revisionBinding = EventEditorRevisionBindingDto(
+        editorRevision = command.expectedRevisions.editorRevision,
+        staffRevision = command.expectedRevisions.staffRevision,
+        scheduleRevision = command.expectedRevisions.scheduleRevision,
+        availabilityRevision = "availability-revision",
+    ),
+    scheduleOutcome = createEventEditorScheduleOutcome(
+        eventId = session.canonicalState.event.id,
+        matchCount = matchCount,
+    ),
+    graph = EventEditorCreateProposalGraphDto(
+        event = com.razumly.mvp.core.network.dto.EventApiDto(),
+    ),
+)
 
+
+internal fun createEventEditorScheduleOutcome(
+    eventId: String,
+    matchCount: Int = 1,
+): EventEditorScheduleOutcomeDto = EventEditorScheduleOutcomeDto(
+    status = EventEditorScheduleOutcomeStatus.BUILT,
+    matchCount = matchCount,
+    matches = List(matchCount) { index ->
+        EventEditorMatchProjectionDto(
+            id = "match-proposed-$index",
+            matchId = index + 1,
+            eventId = eventId,
+        )
+    },
+)
 
 internal fun createSport(id: String, usePointsPerSetWin: Boolean): Sport =
     SportDTO(
@@ -690,10 +731,15 @@ internal class CreateEvent_FakeEventRepository(
     val createEventEditorCalls = mutableListOf<EventEditorCreateCommandDto>()
     val attemptedCreateEventEditorCommands = mutableListOf<EventEditorCreateCommandDto>()
     val createBootstrapQueries = mutableListOf<EventEditorBootstrapQueryDto>()
+    val acceptedEventEditorProposals = mutableListOf<EventEditorAcceptProposalCommandDto>()
+    val rejectedEventEditorProposals = mutableListOf<Pair<String, String>>()
     var createBootstrapSession: EventEditorSession? = null
     var createEditorFailure: Throwable? = null
+    var createEditorOutcomeFactory: ((EventEditorCreateCommandDto, EventEditorSession) -> EventEditorSaveOutcome)? = null
+    var acceptEditorFailure: Throwable? = null
+    var acceptEditorOutcome: EventEditorSaveOutcome? = null
+    var lastCreateSession: EventEditorSession? = null
     var staffEmailDelivery: String = "NOT_REQUESTED"
-
     override fun getCachedEventsFlow(): Flow<Result<List<Event>>> =
         flowOf(Result.success(emptyList()))
 
@@ -727,6 +773,7 @@ internal class CreateEvent_FakeEventRepository(
                 snapshot = snapshot,
             ),
         )
+        lastCreateSession = session
         val canonical = session.canonicalState
         createEditorCalls += CreateEditorCall(
             command = command,
@@ -737,6 +784,9 @@ internal class CreateEvent_FakeEventRepository(
             timeSlots = canonical.timeSlots,
         )
         createEventEditorCalls += command
+        createEditorOutcomeFactory?.invoke(command, session)?.let { outcome ->
+            return Result.success(outcome)
+        }
         return Result.success(
             EventEditorSaveOutcome(
                 session = session,
@@ -747,6 +797,39 @@ internal class CreateEvent_FakeEventRepository(
                 ),
             ),
         )
+    }
+    override suspend fun acceptEventEditorProposal(
+        createOperationId: String,
+        proposalRevision: String,
+        draft: EventEditorDraftDto,
+    ): Result<EventEditorSaveOutcome> {
+        val command = EventEditorAcceptProposalCommandDto(
+            contractVersion = EVENT_EDITOR_CONTRACT_VERSION,
+            createOperationId = createOperationId,
+            proposalRevision = proposalRevision,
+            draft = draft,
+        )
+        acceptedEventEditorProposals += command
+        acceptEditorFailure?.let { failure -> return Result.failure(failure) }
+        val session = lastCreateSession
+            ?: return Result.failure(IllegalStateException("missing create session"))
+        return Result.success(
+            acceptEditorOutcome ?: EventEditorSaveOutcome(
+                session = session,
+                staffEmailDelivery = staffEmailDelivery,
+                scheduleOutcome = createEventEditorScheduleOutcome(
+                    eventId = session.canonicalState.event.id,
+                ),
+            ),
+        )
+    }
+
+    override suspend fun rejectEventEditorProposal(
+        createOperationId: String,
+        proposalRevision: String,
+    ): Result<Unit> {
+        rejectedEventEditorProposals += createOperationId to proposalRevision
+        return Result.success(Unit)
     }
     override suspend fun getEventsByIds(eventIds: List<String>): Result<List<Event>> = Result.success(emptyList())
 

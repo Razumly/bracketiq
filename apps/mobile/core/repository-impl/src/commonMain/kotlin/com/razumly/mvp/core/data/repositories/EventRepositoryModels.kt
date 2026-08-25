@@ -10,6 +10,7 @@ import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.network.dto.EventEditorCreateCommandDto
+import com.razumly.mvp.core.network.dto.EventEditorCreateProposalDto
 import com.razumly.mvp.core.network.dto.EventEditorSaveCommandDto
 import com.razumly.mvp.core.network.dto.EventEditorSaveResultDto
 import com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeDto
@@ -49,11 +50,13 @@ data class EventEditorSession(
 data class EventEditorMutation(
     val canonicalState: EventEditorCanonicalState,
 )
+
 data class EventEditorSaveOutcome(
     val session: EventEditorSession,
     val questionIdMap: Map<String, String> = emptyMap(),
     val staffEmailDelivery: String,
     val scheduleOutcome: EventEditorScheduleOutcomeDto,
+    val proposal: EventEditorCreateProposalDto? = null,
 )
 
 data class EventScheduleOutcome(

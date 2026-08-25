@@ -12,6 +12,7 @@ import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.network.dto.EventEditorBootstrapQueryDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateCommandDto
+import com.razumly.mvp.core.network.dto.EventEditorDraftDto
 import com.razumly.mvp.core.network.dto.EventEditorSaveCommandDto
 import com.razumly.mvp.core.network.dto.EventEditorScheduleRequestDto
 import dev.icerock.moko.geo.LatLng
@@ -43,6 +44,17 @@ interface IEventRepository : IMVPRepository {
         command: EventEditorCreateCommandDto,
     ): Result<EventEditorSaveOutcome> =
         Result.failure(UnsupportedOperationException("Event editor create is not supported."))
+    suspend fun acceptEventEditorProposal(
+        createOperationId: String,
+        proposalRevision: String,
+        draft: EventEditorDraftDto,
+    ): Result<EventEditorSaveOutcome> =
+        Result.failure(UnsupportedOperationException("Event editor proposal acceptance is not supported."))
+    suspend fun rejectEventEditorProposal(
+        createOperationId: String,
+        proposalRevision: String,
+    ): Result<Unit> =
+        Result.failure(UnsupportedOperationException("Event editor proposal rejection is not supported."))
     suspend fun getEventEditor(eventId: String): Result<EventEditorSession> =
         Result.failure(UnsupportedOperationException("Event editor loading is not supported."))
     suspend fun saveEventEditor(

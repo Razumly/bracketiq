@@ -5,6 +5,10 @@ import {
   persistScheduledRosterTeams,
   saveEventSchedule,
   saveMatches,
+  type EventSchedulePersistenceInput,
+  type MatchPersistenceInput,
+  type ScheduledRosterInput,
+  type ScheduledRosterTeamInput,
 } from "@/server/repositories/events";
 import {
   findFieldConflictsForInterval,
@@ -49,10 +53,12 @@ import {
   ScheduleError,
 } from "./scheduleEvent";
 import type {
+  EventEditorCreateProposalGraph,
   EventEditorMatchProjection,
   EventEditorScheduleWarning,
 } from "@/contracts/eventEditor";
 import { serializeMatches } from "./serialize";
+import type { EventOfficialPosition } from "@/server/officials/config";
 export type EventScheduleMutationMode =
   | "BUILD"
   | "REBUILD"
@@ -128,6 +134,273 @@ export class EventScheduleInputError extends EventScheduleMutationError {
     this.name = "EventScheduleInputError";
   }
 }
+export class EventScheduleProposalGraphError extends Error {
+  constructor(message: string) {
+    super(`The reviewed schedule proposal graph is invalid: ${message}`);
+    this.name = "EventScheduleProposalGraphError";
+  }
+}
+
+const proposalGraphError = (message: string): never => {
+  throw new EventScheduleProposalGraphError(message);
+};
+
+export const validateAndNormalizeSerializedGraph = (
+  eventId: string,
+  graph: EventEditorCreateProposalGraph,
+): EventEditorCreateProposalGraph => {
+  const normalizedEventId = eventId.trim();
+  if (!normalizedEventId || graph.event.id !== normalizedEventId) {
+    return proposalGraphError("the graph event does not match the create operation.");
+  }
+  const eventType = graph.event.eventType.trim().toUpperCase();
+  if (!["LEAGUE", "TOURNAMENT"].includes(eventType)) {
+    return proposalGraphError("the graph event type is not schedulable.");
+  }
+  if (graph.matches.length === 0) {
+    return proposalGraphError("the Match Graph is empty.");
+  }
+
+  const matchIds = new Set<string>();
+  for (const match of graph.matches) {
+    const matchId = match.id.trim();
+    if (!matchId) {
+      return proposalGraphError("a Match Graph node has no identity.");
+    }
+    if (matchIds.has(matchId)) {
+      return proposalGraphError(`the Match Graph contains duplicate node ${matchId}.`);
+    }
+    if (match.eventId !== normalizedEventId) {
+      return proposalGraphError(`Match ${matchId} belongs to another event.`);
+    }
+    matchIds.add(matchId);
+  }
+
+  const divisionDetails = [
+    ...graph.event.divisionDetails,
+    ...graph.event.playoffDivisionDetails,
+  ];
+  const divisionIds = new Set([
+    ...graph.event.divisions,
+    ...divisionDetails.flatMap((division) => [
+      division.id,
+      ...(division.sourceDivisionId ? [division.sourceDivisionId] : []),
+    ]),
+  ]);
+  const fieldIds = new Set(graph.event.fields.map((field) => field.id));
+  const teamIds = new Set(graph.event.teams.map((team) => team.id));
+  const officialIds = new Set(graph.event.officials.map((official) => official.id));
+  const eventOfficialIds = new Set(
+    graph.event.eventOfficials.map((official) => official.id),
+  );
+  const eventOfficialUserIds = new Set(
+    graph.event.eventOfficials.map((official) => official.userId),
+  );
+  const knownOfficialUserIds = new Set([
+    ...officialIds,
+    ...eventOfficialUserIds,
+  ]);
+  const knownPlayerIds = new Set(
+    graph.event.teams.flatMap((team) => [
+      ...team.playerIds,
+      ...team.players.map((player) => player.id),
+      ...team.playerRegistrations.map((registration) => registration.userId),
+    ]),
+  );
+  const officialPositionIds = new Set([
+    ...graph.event.officialPositions.map((position) => position.id),
+    ...divisionDetails.flatMap((division) =>
+      Object.values(division.phaseSettings).flatMap(
+        (settings) => settings.officialPositions?.map((position) => position.id) ?? [],
+      ),
+    ),
+  ]);
+
+  const phaseSettingsForMatch = (
+    match: typeof graph.matches[number],
+  ) => {
+    const division = divisionDetails.find(
+      (candidate) =>
+        candidate.id === match.division
+        || candidate.id === match.phaseDivisionId
+        || candidate.id === match.sourceDivisionId,
+    );
+    const phase = (match.phase ?? division?.phase ?? "").trim().toUpperCase();
+    return Object.entries(division?.phaseSettings ?? {}).find(
+      ([key]) => key.trim().toUpperCase() === phase,
+    )?.[1];
+  };
+
+  const officialPositionsForMatch = (
+    match: typeof graph.matches[number],
+  ) => phaseSettingsForMatch(match)?.officialPositions
+    ?? graph.event.officialPositions;
+
+  const assertCompletePlacement = (
+    match: typeof graph.matches[number],
+    label: string,
+  ): void => {
+    if (!match.fieldId) {
+      proposalGraphError(`${label} has no proposed resource.`);
+    }
+    if (!match.start || !match.end) {
+      proposalGraphError(`${label} has no proposed time.`);
+    }
+    const start = Date.parse(match.start ?? "");
+    const end = Date.parse(match.end ?? "");
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start >= end) {
+      proposalGraphError(`${label} has an invalid proposed time.`);
+    }
+    if (String(match.placementState ?? "").trim().toUpperCase() !== "PLACED") {
+      proposalGraphError(`${label} is not placed.`);
+    }
+    const requiresTeamOfficial =
+      phaseSettingsForMatch(match)?.doTeamsOfficiate
+      ?? graph.event.doTeamsOfficiate === true;
+    if (requiresTeamOfficial && !match.teamOfficialId) {
+      proposalGraphError(`${label} has no proposed team official.`);
+    }
+  };
+
+  const assertCompleteOfficiating = (
+    match: typeof graph.matches[number],
+    label: string,
+  ): void => {
+    const positions = officialPositionsForMatch(match);
+    if (positions.length === 0) {
+      return;
+    }
+    const assignmentsBySlot = new Map(
+      match.officialAssignments.map((assignment) => [
+        `${assignment.positionId}:${assignment.slotIndex}`,
+        assignment,
+      ]),
+    );
+    positions.forEach((position) => {
+      Array.from({ length: position.count }, (_, slotIndex) => {
+        const assignment = assignmentsBySlot.get(`${position.id}:${slotIndex}`);
+        if (!assignment || (!assignment.userId && !assignment.eventOfficialId)) {
+          proposalGraphError(
+            `${label} has an unresolved officiating slot for ${position.name} ${slotIndex + 1}.`,
+          );
+        }
+      });
+    });
+  };
+
+  const assertKnown = (
+    value: string | null,
+    known: Set<string>,
+    label: string,
+  ): void => {
+    if (value !== null && !known.has(value)) {
+      proposalGraphError(`${label} ${value} is not present in the proposal.`);
+    }
+  };
+  const assertNestedIdentity = (
+    value: { id: string } | null,
+    id: string | null,
+    label: string,
+  ): void => {
+    if ((value?.id ?? null) !== id) {
+      proposalGraphError(`${label} does not match its serialized identifier.`);
+    }
+  };
+  const assertAssignments = (
+    assignments: typeof graph.matches[number]["officialAssignments"],
+    label: string,
+  ): void => {
+    assignments.forEach((assignment, index) => {
+      const holderType = assignment.holderType.trim().toUpperCase();
+      if (holderType !== "OFFICIAL" && holderType !== "PLAYER") {
+        proposalGraphError(
+          `${label} has an unsupported officiating holder at slot ${index + 1}.`,
+        );
+      }
+      assertKnown(
+        assignment.positionId,
+        officialPositionIds,
+        `${label} officiating position at slot ${index + 1}`,
+      );
+      assertKnown(
+        assignment.userId,
+        holderType === "PLAYER" ? knownPlayerIds : knownOfficialUserIds,
+        `${label} ${holderType === "PLAYER" ? "player" : "official"} at slot ${index + 1}`,
+      );
+      assertKnown(
+        assignment.eventOfficialId,
+        eventOfficialIds,
+        `${label} event official at slot ${index + 1}`,
+      );
+      if (holderType === "PLAYER" && assignment.eventOfficialId) {
+        proposalGraphError(
+          `${label} player assignment has an event official at slot ${index + 1}.`,
+        );
+      }
+      if (assignment.userId && assignment.eventOfficialId) {
+        const eventOfficial = graph.event.eventOfficials.find(
+          (candidate) => candidate.id === assignment.eventOfficialId,
+        );
+        if (eventOfficial?.userId !== assignment.userId) {
+          proposalGraphError(
+            `${label} event official does not match its user at slot ${index + 1}.`,
+          );
+        }
+      }
+      if (!assignment.userId && !assignment.eventOfficialId) {
+        proposalGraphError(
+          `${label} has an unresolved officiating slot at slot ${index + 1}.`,
+        );
+      }
+    });
+  };
+
+  graph.matches.forEach((match) => {
+    const label = `Match ${match.id}`;
+    assertCompletePlacement(match, label);
+    if (!match.division) {
+      proposalGraphError(`${label} has no division.`);
+    }
+    assertKnown(match.division, divisionIds, `${label} division`);
+    assertKnown(match.sourceDivisionId, divisionIds, `${label} source division`);
+    assertKnown(match.phaseDivisionId, divisionIds, `${label} phase division`);
+    assertKnown(match.fieldId, fieldIds, `${label} resource`);
+    assertKnown(match.team1Id, teamIds, `${label} first team`);
+    assertKnown(match.team2Id, teamIds, `${label} second team`);
+    assertKnown(match.teamOfficialId, teamIds, `${label} team official`);
+    assertKnown(match.winnerEventTeamId, teamIds, `${label} winner team`);
+    if (match.official && !knownOfficialUserIds.has(match.official.id)) {
+      proposalGraphError(`${label} official is not present in the proposal.`);
+    }
+    assertNestedIdentity(match.team1, match.team1Id, `${label} first team`);
+    assertNestedIdentity(match.team2, match.team2Id, `${label} second team`);
+    if (match.teamOfficial !== null) {
+      assertNestedIdentity(
+        match.teamOfficial,
+        match.teamOfficialId,
+        `${label} team official`,
+      );
+    }
+    assertCompleteOfficiating(match, label);
+    assertNestedIdentity(match.field, match.fieldId, `${label} resource`);
+    assertAssignments(match.officialAssignments, label);
+    assertAssignments(match.officialIds, `${label} filtered officiating`);
+    [
+      ["winner", match.winnerNextMatchId],
+      ["loser", match.loserNextMatchId],
+      ["left predecessor", match.previousLeftId],
+      ["right predecessor", match.previousRightId],
+    ].forEach(([relationship, reference]) => {
+      if (reference !== null && !matchIds.has(reference)) {
+        proposalGraphError(
+          `${label} has a dangling ${relationship} Match Graph reference.`,
+        );
+      }
+    });
+  });
+
+  return graph;
+};
 
 const buildContext = (): SchedulerContext => {
   const debug = process.env.SCHEDULER_DEBUG === "true";
@@ -339,6 +612,188 @@ export const persistCreateOnlyMatchGraph = async (
   };
 };
 
+const serializedDate = (value: unknown): Date | null => {
+  if (value instanceof Date) return value;
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date : null;
+};
+
+/**
+ * Persists a previously reviewed graph without invoking EventBuilder or the
+ * scheduler. The graph must come from a revision-bound create proposal.
+ */
+export const persistSerializedScheduleGraph = async (options: {
+  tx: Prisma.TransactionClient;
+  eventId: string;
+  graph: EventEditorCreateProposalGraph;
+}): Promise<void> => {
+  const eventRecord = options.graph.event;
+  type ProposalDivision =
+    EventEditorCreateProposalGraph["event"]["divisionDetails"][number];
+  type ProposalTeam = EventEditorCreateProposalGraph["event"]["teams"][number];
+  type ProposalMatch = EventEditorCreateProposalGraph["matches"][number];
+
+  const divisionRows: ProposalDivision[] = [
+    ...eventRecord.divisionDetails,
+    ...eventRecord.playoffDivisionDetails,
+  ];
+  const divisionById = new Map(
+    divisionRows.map((division) => [division.id, division] as const),
+  );
+  const teamsById = new Map<string, ScheduledRosterTeamInput>(
+    eventRecord.teams.map((team: ProposalTeam) => [
+      team.id,
+      {
+        id: team.id,
+        captainId: team.captainId,
+        playerIds: team.playerIds,
+        division: team.division ? { id: team.division } : null,
+        name: team.name,
+      },
+    ]),
+  );
+  const scheduled: ScheduledRosterInput = {
+    id: options.eventId,
+    hostId: eventRecord.hostId,
+    eventType: eventRecord.eventType,
+    includePlayoffs: eventRecord.includePlayoffs,
+    includePlayoffsOrPools: eventRecord.includePlayoffs,
+    singleDivision: eventRecord.singleDivision,
+    teamSizeLimit: eventRecord.teamSizeLimit,
+    divisions: eventRecord.divisionDetails,
+    playoffDivisions: eventRecord.playoffDivisionDetails,
+    teams: Object.fromEntries(teamsById),
+  };
+  await persistScheduledRosterTeams(
+    {
+      eventId: options.eventId,
+      scheduled,
+    },
+    options.tx,
+  );
+
+  const matchRows = options.graph.matches;
+  const matchById = new Map(
+    matchRows.map((match) => [match.id, match] as const),
+  );
+  const matchReference = (
+    id: string | null | undefined,
+  ): { id: string } | null => {
+    if (id == null) return null;
+    if (!matchById.has(id)) {
+      throw new EventScheduleInputError(
+        `The reviewed Match Graph references unknown match ${id}.`,
+      );
+    }
+    return { id };
+  };
+  const teamReference = (
+    id: string | null | undefined,
+  ): { id: string } | null => {
+    if (id == null) return null;
+    if (!teamsById.has(id)) {
+      throw new EventScheduleInputError(
+        `The reviewed Match Graph references unknown team ${id}.`,
+      );
+    }
+    return { id };
+  };
+  const fieldReference = (
+    id: string | null | undefined,
+  ): { id: string } | null => (id == null ? null : { id });
+  const divisionForMatch = (
+    row: ProposalMatch,
+  ): MatchPersistenceInput["division"] => {
+    const divisionId = row.phaseDivisionId ?? row.division ?? row.sourceDivisionId;
+    if (!divisionId) {
+      throw new EventScheduleInputError(
+        `Match ${row.id} has no division in the reviewed Match Graph.`,
+      );
+    }
+    const sourceDivision = row.sourceDivisionId
+      ? divisionById.get(row.sourceDivisionId)
+      : undefined;
+    const division = divisionById.get(divisionId);
+    if (!division && !sourceDivision) {
+      throw new EventScheduleInputError(
+        `Match ${row.id} references unknown division ${divisionId}.`,
+      );
+    }
+    const source = division ?? sourceDivision;
+    if (!source) {
+      throw new EventScheduleInputError(
+        `Match ${row.id} has no source division.`,
+      );
+    }
+    return {
+      id: division?.id ?? divisionId,
+      kind: division?.kind ?? source.kind,
+      role: division?.role ?? (row.phaseDivisionId ? "PHASE" : null),
+      phase: division?.phase ?? row.phase ?? source.phase,
+      sourceDivisionId:
+        division?.sourceDivisionId ?? row.sourceDivisionId ?? null,
+      phaseSettings: Object.fromEntries(
+        Object.entries(source.phaseSettings).map(([phase, settings]) => [
+          phase,
+          { officialPositions: settings.officialPositions },
+        ]),
+      ),
+    };
+  };
+  const matches: MatchPersistenceInput[] = matchRows.map(
+    (row: ProposalMatch, index) => ({
+      id: row.id,
+      eventId: options.eventId,
+      matchId: row.matchId ?? index + 1,
+      locked: row.locked,
+      placementState: row.placementState,
+      team1Seed: row.team1Seed,
+      team2Seed: row.team2Seed,
+      team1Points: row.team1Points,
+      team2Points: row.team2Points,
+      start: serializedDate(row.start),
+      end: serializedDate(row.end),
+      division: divisionForMatch(row),
+      field: fieldReference(row.fieldId),
+      team1: teamReference(row.team1Id),
+      team2: teamReference(row.team2Id),
+      official: row.official ? { id: row.official.id } : null,
+      teamOfficial: teamReference(row.teamOfficialId),
+      officialCheckedIn: row.officialCheckedIn,
+      officialAssignments: row.officialAssignments,
+      winnerEventTeamId: row.winnerEventTeamId,
+      matchRulesSnapshot: row.matchRulesSnapshot,
+      resolvedMatchRules: row.resolvedMatchRules,
+      status: row.status,
+      resultStatus: row.resultStatus,
+      resultType: row.resultType,
+      actualStart: serializedDate(row.actualStart),
+      actualEnd: serializedDate(row.actualEnd),
+      statusReason: row.statusReason,
+      segments: row.segments,
+      incidents: row.incidents,
+      side: row.side,
+      losersBracket: row.losersBracket,
+      winnerNextMatch: matchReference(row.winnerNextMatchId),
+      loserNextMatch: matchReference(row.loserNextMatchId),
+      previousLeftMatch: matchReference(row.previousLeftId),
+      previousRightMatch: matchReference(row.previousRightId),
+    }),
+  );
+  await saveMatches(options.eventId, matches, options.tx);
+
+  const eventSchedule: EventSchedulePersistenceInput = {
+    id: options.eventId,
+    end: serializedDate(eventRecord.end) ?? new Date(eventRecord.end),
+    generatedScheduleEnd: serializedDate(eventRecord.generatedScheduleEnd),
+    noFixedEndDateTime: eventRecord.noFixedEndDateTime,
+    scheduleEndConstraint: serializedDate(eventRecord.scheduleEndConstraint),
+  };
+  await saveEventSchedule(eventSchedule, options.tx);
+};
+
+
 const isLeagueEvent = (event: { eventType?: unknown }): event is League =>
   typeof event.eventType === "string" &&
   event.eventType.toUpperCase() === "LEAGUE";
@@ -494,8 +949,10 @@ const recordsFrom = (value: unknown): Record<string, unknown>[] =>
 
 const editorMatchProjectionsFor = (
   matches: Match[],
+  officialPositions?: EventOfficialPosition[],
+  eventType?: string,
 ): EventEditorMatchProjection[] => {
-  const serialized = serializeMatches(matches);
+  const serialized = serializeMatches(matches, officialPositions, eventType);
   return serialized.map((serializedMatch) => {
     const match = serializedMatch as Record<string, unknown>;
     const id = typeof match.id === "string" ? match.id : "";

@@ -33,6 +33,7 @@ const validate = (
     fields,
     organization,
     slots: [slot],
+    now: new Date("2026-08-23T00:00:00.000Z"),
   });
 
 describe("rental repeating slot validation", () => {

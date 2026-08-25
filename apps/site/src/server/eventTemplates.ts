@@ -8,6 +8,7 @@ import { formatLocalDateTime, parseLocalDateTime } from '@/lib/dateUtils';
 import { stripEventTemplateSuffix } from '@/lib/eventTemplates';
 import type { Event, Field, TimeSlot } from '@/types';
 import { normalizeStaffingPriority } from '@/server/officials/config';
+import { acquireEventTemplateLocks } from '@/server/repositories/locks';
 
 type PrismaClientLike = typeof prisma;
 
@@ -744,13 +745,15 @@ const serializeSeedValue = (value: unknown): unknown => {
 export const serializeSeedEvent = (event: Event): Record<string, unknown> => (
   serializeSeedValue(event) as Record<string, unknown>
 );
-
 export const archiveEventTemplate = async (
   templateId: string,
   client: PrismaClientLike = prisma,
 ) => {
-  await (client as any).eventTemplates.update({
-    where: { id: templateId },
-    data: { archivedAt: new Date() },
+  await client.$transaction(async (tx) => {
+    await acquireEventTemplateLocks(tx, [templateId]);
+    await (tx as any).eventTemplates.update({
+      where: { id: templateId },
+      data: { archivedAt: new Date() },
+    });
   });
 };

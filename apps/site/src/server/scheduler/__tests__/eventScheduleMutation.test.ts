@@ -25,9 +25,13 @@ jest.mock("@/server/matchScheduleNotifications", () => ({
   snapshotMatchScheduleState: jest.fn(() => []),
 }));
 
+import type { EventEditorCreateProposalGraph } from "@/contracts/eventEditor";
 import {
+  EventScheduleProposalGraphError,
   persistCreateOnlyMatchGraph,
+  persistSerializedScheduleGraph,
   reconcileEventSchedule,
+  validateAndNormalizeSerializedGraph,
 } from "@/server/scheduler/eventScheduleMutation";
 import {
   Division,
@@ -186,6 +190,49 @@ const buildReadinessGraphLeague = () => {
   );
   return { event, openingMatches, downstream };
 };
+const buildProposalValidationGraph = (): EventEditorCreateProposalGraph => ({
+  event: {
+    id: "event_1",
+    eventType: "LEAGUE",
+    divisions: ["division_1"],
+    divisionDetails: [],
+    playoffDivisionDetails: [],
+    fields: [{ id: "field_1" }],
+    teams: [],
+    officials: [],
+    eventOfficials: [],
+    officialPositions: [],
+  },
+  matches: [
+    {
+      id: "match_1",
+      eventId: "event_1",
+      start: "2026-08-24T08:00:00.000Z",
+      end: "2026-08-24T09:00:00.000Z",
+      placementState: "PLACED",
+      division: "division_1",
+      sourceDivisionId: null,
+      phaseDivisionId: null,
+      fieldId: "field_1",
+      team1Id: null,
+      team2Id: null,
+      teamOfficialId: null,
+      winnerEventTeamId: null,
+      officialAssignments: [],
+      officialIds: [],
+      team1: null,
+      team2: null,
+      teamOfficial: null,
+      official: null,
+      field: { id: "field_1" },
+      winnerNextMatchId: null,
+      loserNextMatchId: null,
+      previousLeftId: null,
+      previousRightId: null,
+    },
+  ],
+}) as unknown as EventEditorCreateProposalGraph;
+
 
 describe("event schedule Match Graph persistence", () => {
   beforeEach(() => {
@@ -199,6 +246,210 @@ describe("event schedule Match Graph persistence", () => {
       hasProtectedHistory: false,
     });
   });
+  it("rejects dangling Match Graph references before persistence", () => {
+    const graph = buildProposalValidationGraph();
+    graph.matches[0]!.winnerNextMatchId = "missing-match";
+
+    expect(() =>
+      validateAndNormalizeSerializedGraph("event_1", graph),
+    ).toThrow(EventScheduleProposalGraphError);
+  });
+  it("accepts a placed phase match with its source division identity", () => {
+    const graph = buildProposalValidationGraph();
+    graph.event.divisions = ["phase_pool"];
+    graph.event.divisionDetails = [{
+      id: "phase_pool",
+      name: "Pool",
+      kind: "LEAGUE",
+      role: "PHASE",
+      phase: "POOL",
+      sourceDivisionId: "entry",
+      isSystemGenerated: true,
+      phaseSettings: {},
+      teamIds: [],
+      playoffTeamCount: null,
+      playoffPlacementDivisionIds: [],
+      standingsOverrides: null,
+      standingsConfirmedAt: null,
+      standingsConfirmedBy: null,
+      playoffConfig: null,
+      leagueConfig: null,
+    }];
+    graph.matches[0]!.division = "entry";
+    graph.matches[0]!.sourceDivisionId = "entry";
+    graph.matches[0]!.phaseDivisionId = "phase_pool";
+    graph.matches[0]!.phase = "POOL";
+
+    expect(() =>
+      validateAndNormalizeSerializedGraph("event_1", graph),
+    ).not.toThrow();
+  });
+  it("rejects an incomplete proposal match with no proposed resource", () => {
+    const graph = buildProposalValidationGraph();
+    graph.matches[0]!.fieldId = null;
+
+    expect(() =>
+      validateAndNormalizeSerializedGraph("event_1", graph),
+    ).toThrow(EventScheduleProposalGraphError);
+    expect(() =>
+      validateAndNormalizeSerializedGraph("event_1", graph),
+    ).toThrow(/has no proposed resource/);
+  });
+  it("rejects an incomplete proposal match with no proposed time", () => {
+    const graph = buildProposalValidationGraph();
+    graph.matches[0]!.start = null;
+
+    expect(() =>
+      validateAndNormalizeSerializedGraph("event_1", graph),
+    ).toThrow(EventScheduleProposalGraphError);
+    expect(() =>
+      validateAndNormalizeSerializedGraph("event_1", graph),
+    ).toThrow(/has no proposed time/);
+  });
+  it("rejects a proposal match whose placement is not placed", () => {
+    const graph = buildProposalValidationGraph();
+    graph.matches[0]!.placementState = "UNPLACED";
+
+    expect(() =>
+      validateAndNormalizeSerializedGraph("event_1", graph),
+    ).toThrow(EventScheduleProposalGraphError);
+    expect(() =>
+      validateAndNormalizeSerializedGraph("event_1", graph),
+    ).toThrow(/is not placed/);
+  });
+  it("rejects an unresolved officiating slot for a configured official position", () => {
+    const graph = buildProposalValidationGraph();
+    graph.event.officialPositions = [
+      { id: "referee", name: "Referee", count: 1, order: 0 },
+    ];
+
+    expect(() =>
+      validateAndNormalizeSerializedGraph("event_1", graph),
+    ).toThrow(EventScheduleProposalGraphError);
+    expect(() =>
+      validateAndNormalizeSerializedGraph("event_1", graph),
+    ).toThrow(/has an unresolved officiating slot for Referee 1/);
+  });
+  it("accepts a player as a team-officiating assignment holder", () => {
+    const graph = buildProposalValidationGraph();
+    const assignment = {
+      positionId: "team_official",
+      slotIndex: 0,
+      holderType: "PLAYER",
+      userId: "player_1",
+      eventOfficialId: null,
+      checkedIn: false,
+      hasConflict: false,
+    };
+    graph.event.officialPositions = [
+      { id: "team_official", name: "Team official", count: 1, order: 0 },
+    ];
+    graph.event.teams = [{
+      id: "team_1",
+      captainId: null,
+      division: "division_1",
+      kind: "TEAM",
+      name: "Team 1",
+      playerIds: ["player_1"],
+      players: [],
+      playerRegistrations: [],
+    }];
+    graph.matches[0]!.teamOfficialId = "team_1";
+    graph.matches[0]!.officialAssignments = [assignment];
+    graph.matches[0]!.officialIds = [assignment];
+
+    expect(() =>
+      validateAndNormalizeSerializedGraph("event_1", graph),
+    ).not.toThrow();
+  });
+  it("persists phase-owned serialized matches to their phase division", async () => {
+    const tx = {};
+
+    await persistSerializedScheduleGraph({
+      tx: tx as any,
+      eventId: "event_1",
+      graph: {
+        event: {
+          eventType: "LEAGUE",
+          start: "2026-08-24T08:00:00.000Z",
+          end: "2026-08-24T17:00:00.000Z",
+          divisionDetails: [
+            {
+              id: "entry",
+              kind: "LEAGUE",
+              role: "ENTRY",
+              phase: "LEAGUE",
+              phaseSettings: {},
+            },
+          ],
+          playoffDivisionDetails: [],
+          teams: [],
+        },
+        matches: [
+          {
+            id: "match_phase",
+            matchId: 1,
+            phase: "POOL",
+            sourceDivisionId: "entry",
+            phaseDivisionId: "phase_pool",
+            division: "entry",
+            placementState: "UNPLACED",
+          },
+        ],
+      },
+    });
+    expect(persistScheduledRosterTeams).toHaveBeenCalledWith(
+      {
+        eventId: "event_1",
+        scheduled: expect.objectContaining({
+          id: "event_1",
+          teams: {},
+        }),
+      },
+      tx,
+    );
+
+    const [, matches] = (saveMatches as jest.Mock).mock.calls[0] ?? [];
+    expect(matches).toEqual([
+      expect.objectContaining({
+        division: expect.objectContaining({
+          id: "phase_pool",
+          role: "PHASE",
+          sourceDivisionId: "entry",
+          phase: "POOL",
+        }),
+      }),
+    ]);
+  });
+  it("persists the proposed generated end without rebuilding the graph", async () => {
+    await persistSerializedScheduleGraph({
+      tx: {} as any,
+      eventId: "event_1",
+      graph: {
+        event: {
+          id: "event_1",
+          eventType: "LEAGUE",
+          noFixedEndDateTime: true,
+          start: "2026-08-24T08:00:00.000Z",
+          end: "2026-08-24T17:00:00.000Z",
+          generatedScheduleEnd: "2026-08-24T16:30:00.000Z",
+          divisionDetails: [],
+          playoffDivisionDetails: [],
+          teams: [],
+        },
+        matches: [],
+      },
+    });
+
+    expect(saveEventSchedule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "event_1",
+        generatedScheduleEnd: new Date("2026-08-24T16:30:00.000Z"),
+      }),
+      expect.anything(),
+    );
+  });
+
 
   it("persists stable unplaced graph IDs, dependencies, and synthetic roster teams", async () => {
     const event = buildLeague();

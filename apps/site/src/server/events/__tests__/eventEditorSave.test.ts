@@ -1,6 +1,10 @@
 jest.mock("@/lib/prisma", () => ({ prisma: {} }));
 jest.mock("@/server/repositories/locks", () => ({
   acquireEventLock: jest.fn(),
+  acquireFieldLocks: jest.fn(),
+  acquireTimeSlotLocks: jest.fn(),
+  acquireEventTemplateLocks: jest.fn(),
+  acquireRentalBookingLocks: jest.fn(),
 }));
 jest.mock("@/server/repositories/events", () => ({
   upsertEventFromPayload: jest.fn(),
@@ -27,6 +31,7 @@ jest.mock("../eventEditorSnapshot", () => ({
   buildEventEditorSnapshot: jest.fn(),
   loadEventEditorSnapshot: jest.fn(),
   loadCreateEventEditorSnapshot: jest.fn(),
+  computeEventEditorRevision: jest.fn().mockReturnValue("revision"),
 }));
 jest.mock("../eventStaffReconciliation", () => ({
   EVENT_STAFF_CONTRACT_VERSION: 1,
@@ -34,6 +39,10 @@ jest.mock("../eventStaffReconciliation", () => ({
   reconcileEventStaffDesiredState: jest
     .fn()
     .mockResolvedValue({ emailCandidates: [] }),
+}));
+jest.mock("@/server/scheduler/serialize", () => ({
+  serializeEvent: jest.fn((event: Record<string, unknown>) => event),
+  serializeMatches: jest.fn((matches: Array<Record<string, unknown>>) => matches),
 }));
 jest.mock("@/server/scheduler/eventScheduleMutation", () => {
   class EventScheduleMutationError extends Error {
@@ -58,9 +67,14 @@ jest.mock("@/server/scheduler/eventScheduleMutation", () => {
 
   return {
     EventScheduleMutationError,
+    EventScheduleProposalGraphError: class EventScheduleProposalGraphError extends Error {},
     EventScheduleRevisionConflictError,
     persistCreateOnlyMatchGraph: jest.fn(),
+    persistSerializedScheduleGraph: jest.fn(),
     reconcileEventSchedule: jest.fn(),
+    validateAndNormalizeSerializedGraph: jest.fn(
+      (_eventId: string, graph: unknown) => graph,
+    ),
     editorMatchProjectionsFor: jest.fn(
       (matches: Array<Record<string, unknown>>) =>
         matches.map((match) => ({
@@ -123,26 +137,39 @@ import {
   buildEventEditorSnapshot,
   loadCreateEventEditorSnapshot,
   loadEventEditorSnapshot,
+  computeEventEditorRevision,
 } from "../eventEditorSnapshot";
 import {
   EventStaffInputError,
   reconcileEventStaffDesiredState,
 } from "../eventStaffReconciliation";
 import {
+  EventScheduleProposalGraphError,
   persistCreateOnlyMatchGraph,
+  persistSerializedScheduleGraph,
   reconcileEventSchedule,
+  validateAndNormalizeSerializedGraph,
 } from "@/server/scheduler/eventScheduleMutation";
 import {
+  createScheduleProposalFromEditor,
+  acceptScheduleProposalFromEditor,
+  rejectScheduleProposalFromEditor,
   createEventEditor,
   EditorInputError,
   EditorPermissionError,
+  EventEditorProposalInvalidError,
   EditorRevisionConflictError,
+  EventEditorProposalStaleError,
   saveEventEditor,
 } from "../eventEditorSave";
 
+const mockedPersistSerializedScheduleGraph =
+  persistSerializedScheduleGraph as jest.Mock;
 const mockedPersistCreateOnlyMatchGraph =
   persistCreateOnlyMatchGraph as jest.Mock;
 const mockedReconcileEventSchedule = reconcileEventSchedule as jest.Mock;
+const mockedValidateAndNormalizeSerializedGraph =
+  validateAndNormalizeSerializedGraph as jest.Mock;
 
 const txFor = (questionRows: Array<{ id: string }> = []) => {
   const tx: any = {
@@ -274,8 +301,125 @@ const createSnapshot = (mode: "CREATE" | "EDIT", eventId: string | null) => ({
     hasProtectedHistory: false,
   },
 });
+const serializedProposalEvent = (eventId: string) => ({
+  id: eventId,
+  name: "Proposal Event",
+  description: "",
+  start: "2026-08-24T09:00:00.000Z",
+  end: "2026-08-24T17:00:00.000Z",
+  location: "Fixture",
+  coordinates: null,
+  price: null,
+  minAge: null,
+  maxAge: null,
+  rating: null,
+  imageId: "",
+  hostId: "host_1",
+  noFixedEndDateTime: false,
+  scheduleEndConstraint: null,
+  generatedScheduleEnd: null,
+  state: "UNPUBLISHED",
+  maxParticipants: 16,
+  teamSizeLimit: 2,
+  restTimeMinutes: 10,
+  teamSignup: true,
+  singleDivision: true,
+  waitListIds: [],
+  freeAgentIds: [],
+  teamIds: [],
+  userIds: [],
+  fieldIds: [],
+  timeSlotIds: [],
+  officialIds: [],
+  officialSchedulingMode: "SCHEDULE",
+  staffingPriority: "BEST_AVAILABLE_COVERAGE",
+  officialPositions: [],
+  eventOfficials: [],
+  matchRulesOverride: null,
+  autoCreatePointMatchIncidents: false,
+  resolvedMatchRules: null,
+  cancellationRefundHours: null,
+  registrationCutoffHours: null,
+  seedColor: null,
+  eventType: "LEAGUE",
+  sportIds: [],
+  leagueScoringConfigId: null,
+  organizationId: null,
+  requiredTemplateIds: [],
+  allowPaymentPlans: false,
+  installmentCount: 0,
+  installmentDueDates: [],
+  installmentDueRelativeDays: [],
+  installmentAmounts: [],
+  allowTeamSplitDefault: false,
+  splitLeaguePlayoffDivisions: false,
+  divisions: [],
+  divisionDetails: [],
+  playoffDivisionDetails: [],
+  fields: [],
+  teams: [],
+  timeSlots: [],
+  officials: [],
+  gamesPerOpponent: 1,
+  includePlayoffs: false,
+  playoffTeamCount: 0,
+  pointsToVictory: [],
+});
 
-const createEventEditorTxFor = () => {
+const serializedProposalMatch = (eventId: string) => ({
+  id: "match-created",
+  matchId: 1,
+  eventId,
+  start: "2026-08-24T09:00:00.000Z",
+  end: "2026-08-24T10:00:00.000Z",
+  locked: false,
+  placementState: "PLACED",
+  phase: null,
+  sourceDivisionId: null,
+  phaseDivisionId: null,
+  division: null,
+  fieldId: null,
+  team1Id: "team-fixture",
+  team2Id: null,
+  team1Seed: null,
+  team2Seed: null,
+  status: null,
+  resultStatus: null,
+  resultType: null,
+  actualStart: null,
+  actualEnd: null,
+  statusReason: null,
+  winnerEventTeamId: null,
+  matchRulesSnapshot: null,
+  resolvedMatchRules: null,
+  segments: [],
+  incidents: [],
+  officialIds: [],
+  officialAssignments: [],
+  teamOfficialId: null,
+  teamOfficialSeed: null,
+  team1Points: [],
+  team2Points: [],
+  losersBracket: false,
+  winnerNextMatchId: null,
+  loserNextMatchId: null,
+  previousLeftId: null,
+  previousRightId: null,
+  side: null,
+  officialCheckedIn: false,
+  team1: null,
+  team2: null,
+  teamOfficial: null,
+  official: null,
+  field: null,
+});
+
+const createEventEditorTxFor = (
+  resources: {
+    fields?: Array<Record<string, unknown>>;
+    timeSlots?: Array<Record<string, unknown>>;
+  } = {},
+) => {
   const rows = new Map<string, any>();
   const operations = {
     findUnique: jest.fn(
@@ -294,7 +438,12 @@ const createEventEditorTxFor = () => {
       Object.assign(row, data);
       return row;
     }),
+    delete: jest.fn(async ({ where }: any) => {
+      rows.delete(String(where.createOperationId));
+    }),
   };
+  const fieldRows = resources.fields ?? [];
+  const timeSlotRows = resources.timeSlots ?? [];
   const questionRows: Array<{ id: string }> = [];
   const tx: any = {
     eventEditorCreateOperations: operations,
@@ -321,10 +470,28 @@ const createEventEditorTxFor = () => {
       update: jest.fn().mockResolvedValue({}),
       updateMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
+    fields: {
+      findMany: jest.fn().mockImplementation(async () =>
+        fieldRows.map((row) => ({ ...row })),
+      ),
+    },
+    timeSlots: {
+      findMany: jest.fn().mockImplementation(async () =>
+        timeSlotRows.map((row) => ({ ...row })),
+      ),
+    },
+    rentalBookings: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
+    rentalBookingItems: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
   };
   (prisma as any).eventEditorCreateOperations = operations;
   (prisma as any).$transaction = jest.fn(
     async (callback: (client: unknown) => unknown) => {
+      const fieldRowsBefore = fieldRows.map((row) => ({ ...row }));
+      const timeSlotRowsBefore = timeSlotRows.map((row) => ({ ...row }));
       const rowsBefore = new Map(
         Array.from(rows.entries()).map(([key, value]) => [key, { ...value }]),
       );
@@ -332,6 +499,8 @@ const createEventEditorTxFor = () => {
       try {
         return await callback(tx);
       } catch (error) {
+        fieldRows.splice(0, fieldRows.length, ...fieldRowsBefore);
+        timeSlotRows.splice(0, timeSlotRows.length, ...timeSlotRowsBefore);
         rows.clear();
         rowsBefore.forEach((value, key) => rows.set(key, value));
         questionRows.splice(0, questionRows.length, ...questionsBefore);
@@ -346,7 +515,19 @@ describe("saveEventEditor", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (buildEventEditorSnapshot as jest.Mock).mockResolvedValue(snapshot());
+    (computeEventEditorRevision as jest.Mock).mockReturnValue("revision");
     (loadEventEditorSnapshot as jest.Mock).mockResolvedValue(snapshot());
+  });
+  it("treats a retry of an already completed rejection as a no-op", async () => {
+    createEventEditorTxFor();
+
+    await expect(
+      rejectScheduleProposalFromEditor(
+        { userId: "user_fixture_host" },
+        "missing-proposal-operation",
+        "proposal-revision",
+      ),
+    ).resolves.toBeUndefined();
   });
 
   it("rejects a stale editor revision before any configuration write", async () => {
@@ -609,6 +790,294 @@ describe("saveEventEditor", () => {
         matchCount: 1,
         warnings: [],
       }),
+    );
+  });
+  it("rejects an invalid schedule proposal before storing a receipt", async () => {
+    const fieldRows = [
+      { id: "field_fixture", updatedAt: new Date("2026-08-24T08:00:00.000Z") },
+    ];
+    const timeSlotRows = [
+      { id: "slot_fixture", updatedAt: new Date("2026-08-24T08:00:00.000Z") },
+    ];
+    const { operations, rows } = createEventEditorTxFor({
+      fields: fieldRows,
+      timeSlots: timeSlotRows,
+    });
+    (loadCreateEventEditorSnapshot as jest.Mock).mockReset();
+    (loadCreateEventEditorSnapshot as jest.Mock).mockResolvedValue(
+      createSnapshot("CREATE", null),
+    );
+    (loadEventEditorSnapshot as jest.Mock).mockReset();
+    (loadEventEditorSnapshot as jest.Mock).mockResolvedValue(
+      createSnapshot("EDIT", "event-created"),
+    );
+    (upsertEventFromPayload as jest.Mock).mockReset();
+    (upsertEventFromPayload as jest.Mock).mockResolvedValue("event-created");
+    mockedReconcileEventSchedule.mockReset();
+    mockedReconcileEventSchedule.mockResolvedValue({
+      event: serializedProposalEvent("event-created"),
+      matches: [serializedProposalMatch("event-created")],
+      warnings: [],
+      previousMatchCount: 0,
+      notification: null,
+    });
+    mockedValidateAndNormalizeSerializedGraph.mockImplementationOnce(() => {
+      throw new EventScheduleProposalGraphError("unresolved officiating slot");
+    });
+
+    const command = {
+      contractVersion: 3,
+      createOperationId: "invalid-proposal-operation",
+      expectedRevisions: expectedCreateRevisions,
+      draft: leagueCreateDraft,
+      completion: { mode: "CREATE_AND_BUILD_SCHEDULE" },
+    } satisfies CreateEventEditorCommand;
+
+    await expect(
+      createScheduleProposalFromEditor(
+        { userId: "user_fixture_host" },
+        command,
+      ),
+    ).rejects.toBeInstanceOf(EventEditorProposalInvalidError);
+    expect(rows.has(command.createOperationId)).toBe(false);
+    expect(operations.delete).toHaveBeenCalledWith({
+      where: { createOperationId: command.createOperationId },
+    });
+    expect(mockedPersistSerializedScheduleGraph).not.toHaveBeenCalled();
+  });
+  it("returns a revision-bound proposal and accepts it without rebuilding", async () => {
+    const fieldRows = [
+      { id: "field_fixture", updatedAt: new Date("2026-08-24T08:00:00.000Z") },
+    ];
+    const timeSlotRows = [
+      { id: "slot_fixture", updatedAt: new Date("2026-08-24T08:00:00.000Z") },
+    ];
+    const { operations, rows, tx } = createEventEditorTxFor({
+      fields: fieldRows,
+      timeSlots: timeSlotRows,
+    });
+    (loadCreateEventEditorSnapshot as jest.Mock).mockReset();
+    (loadCreateEventEditorSnapshot as jest.Mock).mockResolvedValue(
+      createSnapshot("CREATE", null),
+    );
+    (loadEventEditorSnapshot as jest.Mock).mockReset();
+    (loadEventEditorSnapshot as jest.Mock).mockResolvedValue(
+      createSnapshot("EDIT", "event-created"),
+    );
+    (upsertEventFromPayload as jest.Mock).mockReset();
+    (upsertEventFromPayload as jest.Mock).mockImplementation(async () => {
+      const provisionalRevision = new Date("2026-08-24T09:00:00.000Z");
+      fieldRows[0].updatedAt = provisionalRevision;
+      timeSlotRows[0].updatedAt = provisionalRevision;
+      return "event-created";
+    });
+    (reconcileEventStaffDesiredState as jest.Mock).mockReset();
+    (reconcileEventStaffDesiredState as jest.Mock).mockResolvedValue({
+      emailCandidates: [],
+    });
+    mockedReconcileEventSchedule.mockReset();
+    mockedReconcileEventSchedule.mockResolvedValue({
+      event: serializedProposalEvent("event-created"),
+      matches: [serializedProposalMatch("event-created")],
+      warnings: [],
+      previousMatchCount: 0,
+      notification: null,
+    });
+    mockedPersistSerializedScheduleGraph.mockReset();
+    mockedPersistSerializedScheduleGraph.mockResolvedValue(undefined);
+
+    const command = {
+      contractVersion: 3,
+      createOperationId: "proposal-operation",
+      expectedRevisions: expectedCreateRevisions,
+      draft: leagueCreateDraft,
+      completion: { mode: "CREATE_AND_BUILD_SCHEDULE" },
+    } satisfies CreateEventEditorCommand;
+    const actor = { userId: "user_fixture_host" };
+
+    const proposal = await createScheduleProposalFromEditor(actor, command);
+    expect(mockedValidateAndNormalizeSerializedGraph).toHaveBeenCalledWith(
+      proposal.eventId,
+      proposal.graph,
+    );
+
+    expect(proposal.status).toBe("PROPOSED");
+    if (proposal.status !== "PROPOSED") {
+      throw new Error("Expected a schedule proposal.");
+    }
+    expect(proposal.eventId).toBeTruthy();
+    expect(proposal.graph.matches).toHaveLength(1);
+    expect(proposal.snapshot).toEqual(
+      expect.objectContaining({
+        mode: "CREATE",
+        eventId: null,
+        draft: leagueCreateDraft,
+      }),
+    );
+    expect(proposal.revisionBinding).toEqual(
+      expect.objectContaining({
+        editorRevision: expectedCreateRevisions.editorRevision,
+        staffRevision: expectedCreateRevisions.staffRevision,
+        scheduleRevision: expectedCreateRevisions.scheduleRevision,
+        fieldRevisions: {
+          field_fixture: expect.any(String),
+        },
+        timeSlotRevisions: {
+          slot_fixture: expect.any(String),
+        },
+        rentalBookingRevisions: {},
+        rentalBookingItemRevisions: {},
+      }),
+    );
+    expect(rows.get(command.createOperationId)).toEqual(
+      expect.objectContaining({
+        proposalStatus: "PENDING",
+        eventId: proposal.eventId,
+      }),
+    );
+    expect(upsertEventFromPayload).toHaveBeenCalledTimes(1);
+    const storedProposal = rows.get(command.createOperationId).proposalJson;
+    rows.get(command.createOperationId).proposalJson = {
+      ...storedProposal,
+      revisionBinding: Object.fromEntries(
+        Object.entries(storedProposal.revisionBinding).reverse(),
+      ),
+    };
+
+    tx.events.findUnique.mockResolvedValue(null);
+    mockedValidateAndNormalizeSerializedGraph.mockImplementationOnce(() => {
+      throw new EventScheduleProposalGraphError("dangling reference");
+    });
+    await expect(
+      acceptScheduleProposalFromEditor(
+        actor,
+        command.createOperationId,
+        proposal.proposalRevision,
+        command.draft,
+      ),
+    ).rejects.toBeInstanceOf(EventEditorProposalInvalidError);
+    expect(upsertEventFromPayload).toHaveBeenCalledTimes(1);
+    expect(mockedPersistSerializedScheduleGraph).not.toHaveBeenCalled();
+
+    const onScheduleChanged = jest.fn();
+    const accepted = await acceptScheduleProposalFromEditor(
+      actor,
+      command.createOperationId,
+      proposal.proposalRevision,
+      command.draft,
+      { onScheduleChanged },
+    );
+
+
+    expect(accepted.status).toBe("SAVED");
+    expect(upsertEventFromPayload).toHaveBeenCalledTimes(2);
+    expect(mockedReconcileEventSchedule).toHaveBeenCalledTimes(1);
+    expect(mockedPersistSerializedScheduleGraph).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventId: proposal.eventId,
+        graph: proposal.graph,
+      }),
+    );
+    expect(onScheduleChanged).toHaveBeenCalledTimes(1);
+    expect(onScheduleChanged).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventId: accepted.snapshot.eventId,
+        eventName: "Proposal Event",
+        forceBatch: true,
+        changes: [
+          expect.objectContaining({
+            matchId: "match-created",
+            teamIds: ["team-fixture"],
+            scheduleChanged: true,
+            teamAdded: true,
+            deleted: false,
+          }),
+        ],
+      }),
+    );
+    expect(operations.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { createOperationId: command.createOperationId },
+        data: expect.objectContaining({
+          proposalStatus: "ACCEPTED",
+        }),
+      }),
+    );
+    const replay = await createScheduleProposalFromEditor(actor, command);
+    expect(replay).toEqual(accepted);
+    expect(mockedReconcileEventSchedule).toHaveBeenCalledTimes(1);
+  });
+  it("rejects proposal acceptance when authoritative availability changes", async () => {
+    const fieldRows = [
+      { id: "field_fixture", updatedAt: new Date("2026-08-24T08:00:00.000Z") },
+    ];
+    const { rows, tx } = createEventEditorTxFor({ fields: fieldRows });
+    (loadCreateEventEditorSnapshot as jest.Mock).mockReset();
+    (loadCreateEventEditorSnapshot as jest.Mock).mockResolvedValue(
+      createSnapshot("CREATE", null),
+    );
+    (loadEventEditorSnapshot as jest.Mock).mockReset();
+    (loadEventEditorSnapshot as jest.Mock).mockResolvedValue(
+      createSnapshot("EDIT", "event-created"),
+    );
+    (upsertEventFromPayload as jest.Mock).mockReset();
+    (upsertEventFromPayload as jest.Mock).mockResolvedValue("event-created");
+    (reconcileEventStaffDesiredState as jest.Mock).mockReset();
+    (reconcileEventStaffDesiredState as jest.Mock).mockResolvedValue({
+      emailCandidates: [],
+    });
+    mockedReconcileEventSchedule.mockReset();
+    mockedReconcileEventSchedule.mockResolvedValue({
+      event: serializedProposalEvent("event-created"),
+      matches: [serializedProposalMatch("event-created")],
+      warnings: [],
+      previousMatchCount: 0,
+      notification: null,
+    });
+
+    const command = {
+      contractVersion: 3,
+      createOperationId: "stale-availability-proposal",
+      expectedRevisions: expectedCreateRevisions,
+      draft: leagueCreateDraft,
+      completion: { mode: "CREATE_AND_BUILD_SCHEDULE" },
+    } satisfies CreateEventEditorCommand;
+    const actor = { userId: "user_fixture_host" };
+    (computeEventEditorRevision as jest.Mock).mockImplementation((input: unknown) =>
+      JSON.stringify(input),
+    );
+    const proposal = await createScheduleProposalFromEditor(actor, command);
+    if (proposal.status !== "PROPOSED") {
+      throw new Error("Expected a schedule proposal.");
+    }
+
+    await expect(
+      acceptScheduleProposalFromEditor(
+        actor,
+        command.createOperationId,
+        proposal.proposalRevision,
+        {
+          ...command.draft,
+          basics: { ...command.draft.basics, name: "Changed after review" },
+        },
+      ),
+    ).rejects.toBeInstanceOf(EventEditorProposalStaleError);
+
+    fieldRows[0].updatedAt = new Date("2026-08-24T09:00:00.000Z");
+    tx.events.findUnique.mockResolvedValue(null);
+
+    await expect(
+      acceptScheduleProposalFromEditor(
+        actor,
+        command.createOperationId,
+        proposal.proposalRevision,
+        command.draft,
+      ),
+    ).rejects.toBeInstanceOf(EventEditorProposalStaleError);
+    expect(upsertEventFromPayload).toHaveBeenCalledTimes(1);
+    expect(mockedPersistSerializedScheduleGraph).not.toHaveBeenCalled();
+    expect(rows.get(command.createOperationId)).toEqual(
+      expect.objectContaining({ proposalStatus: "PENDING" }),
     );
   });
   it("persists an unplaced Match Graph when Automated Scheduling is off", async () => {

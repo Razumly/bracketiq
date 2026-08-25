@@ -1,13 +1,23 @@
+@file:OptIn(ExperimentalTime::class)
+
 package com.razumly.mvp.eventCreate
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -45,6 +55,7 @@ import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
 import com.razumly.mvp.core.presentation.composables.TermsConsentDialog
 import com.razumly.mvp.core.presentation.util.backAnimation
 import com.razumly.mvp.core.presentation.util.CircularRevealUnderlay
+import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.eventCreate.steps.Preview
@@ -53,6 +64,11 @@ import com.razumly.mvp.eventDetail.toEventWithFullRelations
 import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
 import dev.icerock.moko.geo.LatLng
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.format
+import kotlinx.datetime.toLocalDateTime
+import kotlin.time.ExperimentalTime
+import kotlin.time.Instant
 
 internal fun createEventPrimaryActionLabel(
     isEventInfoStep: Boolean,
@@ -119,6 +135,7 @@ fun CreateEventScreen(
     val isEditorReady by component.isEditorReady.collectAsState()
     val editorBootstrapError by component.editorBootstrapError.collectAsState()
     val termsConsentLoading by component.termsConsentLoading.collectAsState()
+    val pendingScheduleProposal by component.pendingScheduleProposal.collectAsState()
     val showMap by mapComponent.showMap.collectAsState()
     val isEditing = true
     val currentUser by component.currentUser.collectAsState()
@@ -135,6 +152,14 @@ fun CreateEventScreen(
             onAccept = component::acceptTermsConsent,
             onDismiss = null,
             intro = "Creating an event in Bracket IQ requires agreement to the Terms and EULA.",
+        )
+    }
+
+    pendingScheduleProposal?.proposal?.let { proposal ->
+        ScheduleProposalDialog(
+            proposal = proposal,
+            onAccept = component::acceptScheduleProposal,
+            onReject = component::rejectScheduleProposal,
         )
     }
 
@@ -666,6 +691,7 @@ fun CreateEventScreen(
                                         "advanced"
                                     },
                                     joinButton = {},
+
                                 )
                         }
 
@@ -678,6 +704,384 @@ fun CreateEventScreen(
             }
         }
     }
+}
+
+@Composable
+internal fun ScheduleProposalDialog(
+    proposal: com.razumly.mvp.core.network.dto.EventEditorCreateProposalDto,
+    onAccept: () -> Unit,
+    onReject: () -> Unit,
+) {
+    val schedule = proposal.scheduleOutcome
+    val graphEvent = proposal.graph.event
+    val eventTimeZone = remember(proposal.snapshot.draft.basics.timeZone) {
+        runCatching { TimeZone.of(proposal.snapshot.draft.basics.timeZone) }.getOrNull()
+    }
+    val teamNames = proposalTeamNames(graphEvent)
+    val fieldNames = proposalFieldNames(graphEvent)
+    val officialNames = proposalOfficialNames(graphEvent)
+    val officialPositionNames = proposalOfficialPositionNames(graphEvent)
+    val matchLabels = proposalMatchLabels(proposal.graph.matches)
+    val assignedFields = proposal.graph.matches.count { match -> !match.fieldId.isNullOrBlank() }
+    val assignedOfficials = proposal.graph.matches.sumOf { match ->
+        val assignments = match.officialAssignments.orEmpty()
+            .ifEmpty { match.officialIds.orEmpty() }
+        val assignedHolderIds = assignments
+            .flatMap { assignment ->
+                listOfNotNull(assignment.userId, assignment.eventOfficialId)
+            }
+            .mapNotNull { it.trim().takeIf(String::isNotBlank) }
+            .toSet()
+        assignedHolderIds.size + listOfNotNull(match.officialId, match.teamOfficialId)
+            .count { id ->
+                id.trim().isNotBlank() && id !in assignedHolderIds
+            }
+    }
+    val displayIssues = proposalDisplayIssues(
+        proposal = proposal,
+        eventTimeZone = eventTimeZone,
+        teamNames = teamNames,
+        fieldNames = fieldNames,
+        officialNames = officialNames,
+        officialPositionNames = officialPositionNames,
+    )
+    val displayErrors = displayIssues.errors
+    val displayWarnings = displayIssues.warnings
+    AlertDialog(
+        onDismissRequest = {},
+        title = { Text("Review schedule proposal") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 440.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                Text(proposal.snapshot.draft.basics.name)
+                Spacer(Modifier.height(8.dp))
+                Text("Complete match graph: ${proposal.graph.matches.size} matches")
+                Text("Proposed schedule: ${schedule.matchCount} matches")
+                Text("Resource assignments: $assignedFields")
+                Text("Officiating assignments: $assignedOfficials")
+                Spacer(Modifier.height(8.dp))
+                proposal.graph.matches.forEachIndexed { index, match ->
+                    val team1 = match.team1Id?.let { teamNames[it] }
+                        ?: if (match.team1Id == null) "TBD" else "Team unavailable"
+                    val team2 = match.team2Id?.let { teamNames[it] }
+                        ?: if (match.team2Id == null) "TBD" else "Team unavailable"
+                    val field = match.fieldId?.let { fieldNames[it] }
+                        ?: if (match.fieldId == null) {
+                            "Unassigned Resource"
+                        } else {
+                            "Resource unavailable"
+                        }
+                    Text("Match ${index + 1}: $team1 vs $team2")
+                    Text("Resource: $field")
+                    Text(
+                        "Time: ${
+                            eventTimeZone?.let { timeZone ->
+                                proposalMatchTime(match, timeZone)
+                            } ?: "Time unavailable"
+                        }",
+                    )
+                    val dependencies = buildList {
+                        match.previousLeftId?.let { add("after ${matchLabels[it] ?: "unavailable match"}") }
+                        match.previousRightId?.let { add("after ${matchLabels[it] ?: "unavailable match"}") }
+                        match.winnerNextMatchId?.let { add("winner -> ${matchLabels[it] ?: "unavailable match"}") }
+                        match.loserNextMatchId?.let { add("loser -> ${matchLabels[it] ?: "unavailable match"}") }
+                    }
+                    if (dependencies.isNotEmpty()) {
+                        Text("  Depends on: ${dependencies.joinToString(", ")}")
+                    }
+                    val assignments = match.officialAssignments.orEmpty().ifEmpty {
+                        match.officialIds.orEmpty()
+                    }
+                    val assignmentLabels = buildList {
+                        assignments.forEach { assignment ->
+                            val holderId = assignment.userId ?: assignment.eventOfficialId
+                            val holder = holderId?.let { officialNames[it] }
+                                ?: "Official unavailable"
+                            val position = officialPositionNames[assignment.positionId]
+                            val holderLabel = if (position != null) {
+                                "$position (slot ${assignment.slotIndex})"
+                            } else {
+                                "Slot ${assignment.slotIndex}"
+                            }
+                            add("$holderLabel: $holder")
+                        }
+                        match.officialId?.let { officialId ->
+                            add("Official: ${officialNames[officialId] ?: "Official unavailable"}")
+                        }
+                        match.teamOfficialId?.let { teamId ->
+                            add("Team official: ${teamNames[teamId] ?: "Team unavailable"}")
+                        }
+                    }
+                    if (assignmentLabels.isNotEmpty()) {
+                        Text("  Officials: ${assignmentLabels.joinToString(", ")}")
+                    }
+                    }
+                if (displayErrors.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text("Cannot accept: ${displayErrors.take(3).joinToString("; ")}")
+                }
+                if (displayWarnings.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text("Review warnings: ${displayWarnings.take(3).joinToString("; ")}")
+                }
+                if (schedule.warnings.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    schedule.warnings.forEach { warning ->
+                        Text(warning.message)
+                    }
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onReject) {
+                Text("Reject")
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onAccept,
+                enabled = displayErrors.isEmpty(),
+            ) {
+                Text("Accept and create")
+            }
+        },
+    )
+}
+
+private fun proposalTeamNames(
+    event: com.razumly.mvp.core.network.dto.EventApiDto,
+): Map<String, String> = event.teams.mapNotNull { team ->
+    team.id
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?.let { id ->
+            team.name.trim().takeIf(String::isNotBlank)?.let { name -> id to name }
+        }
+}.toMap()
+
+private fun proposalFieldNames(
+    event: com.razumly.mvp.core.network.dto.EventApiDto,
+): Map<String, String> = event.fields.mapNotNull { field ->
+    field.id.trim()
+        .takeIf(String::isNotBlank)
+        ?.let { id ->
+            field.name?.trim()?.takeIf(String::isNotBlank)?.let { name -> id to name }
+        }
+}.toMap()
+
+private fun proposalUserDisplayName(
+    user: com.razumly.mvp.core.network.dto.EventEditorProposalGraphUserDto,
+): String? = listOf(user.firstName, user.lastName)
+    .map(String::trim)
+    .filter(String::isNotBlank)
+    .joinToString(" ")
+    .takeIf(String::isNotBlank)
+
+private fun proposalOfficialNames(
+    event: com.razumly.mvp.core.network.dto.EventApiDto,
+): Map<String, String> {
+    val userNames = event.officials.mapNotNull { user ->
+        proposalUserDisplayName(user)?.let { name ->
+            user.id.trim().takeIf(String::isNotBlank)?.let { it to name }
+        }
+    }.toMap()
+    val eventOfficialNames = event.eventOfficials.orEmpty().mapNotNull { official ->
+        userNames[official.userId]?.let { name ->
+            official.id.trim().takeIf(String::isNotBlank)?.let { it to name }
+        }
+    }
+    val playerNames = event.teams.orEmpty().flatMap { team ->
+        team.players.orEmpty().mapNotNull { player ->
+            proposalUserDisplayName(player)?.let { name ->
+                player.id.trim().takeIf(String::isNotBlank)?.let { it to name }
+            }
+        }
+    }.toMap()
+    return playerNames + userNames + eventOfficialNames
+}
+
+private fun proposalPhaseSettingsForMatch(
+    event: com.razumly.mvp.core.network.dto.EventApiDto,
+    match: com.razumly.mvp.core.network.dto.MatchApiDto,
+): com.razumly.mvp.core.data.dataTypes.DivisionPhaseSettingsMVP? {
+    val division = (
+        event.divisionDetails.orEmpty() + event.playoffDivisionDetails.orEmpty()
+        ).firstOrNull { detail ->
+        detail.id == match.division
+            || detail.id == match.phaseDivisionId
+            || detail.id == match.sourceDivisionId
+    }
+    val phase = match.phase?.trim()?.takeIf(String::isNotBlank) ?: return null
+    return division?.phaseSettings?.entries
+        ?.firstOrNull { (key) -> key.equals(phase, ignoreCase = true) }
+        ?.value
+}
+
+private fun proposalOfficialPositionsForMatch(
+    event: com.razumly.mvp.core.network.dto.EventApiDto,
+    match: com.razumly.mvp.core.network.dto.MatchApiDto,
+) = proposalPhaseSettingsForMatch(event, match)?.officialPositions
+    ?: event.officialPositions.orEmpty()
+
+private fun proposalOfficialPositionNames(
+    event: com.razumly.mvp.core.network.dto.EventApiDto,
+): Map<String, String> = (
+    event.officialPositions.orEmpty()
+        + event.divisionDetails.orEmpty().flatMap { detail ->
+        detail.phaseSettings.values.flatMap { it.officialPositions.orEmpty() }
+    }
+        + event.playoffDivisionDetails.orEmpty().flatMap { detail ->
+        detail.phaseSettings.values.flatMap { it.officialPositions.orEmpty() }
+    }
+    ).distinctBy { it.id }.mapNotNull { position ->
+    position.id.trim()
+        .takeIf(String::isNotBlank)
+        ?.let { id ->
+            position.name.trim().takeIf(String::isNotBlank)?.let { name -> id to name }
+        }
+    }.toMap()
+
+private fun proposalMatchLabels(
+    matches: List<com.razumly.mvp.core.network.dto.MatchApiDto>,
+): Map<String, String> = matches.flatMapIndexed { index, match ->
+    listOfNotNull(match.id, match.matchId?.toString())
+        .map { it to "Match ${index + 1}" }
+}.toMap()
+
+@OptIn(ExperimentalTime::class)
+private fun proposalMatchTime(
+    match: com.razumly.mvp.core.network.dto.MatchApiDto,
+    timeZone: TimeZone,
+): String {
+    fun format(value: String?): String? = value
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?.let { normalized ->
+            runCatching { Instant.parse(normalized) }.getOrNull()
+        }
+        ?.toLocalDateTime(timeZone)
+        ?.format(dateTimeFormat)
+
+    val start = format(match.start) ?: return "Time pending"
+    val end = format(match.end)
+    return end?.let { "$start - $it" } ?: start
+}
+
+private data class ProposalDisplayIssues(
+    val errors: List<String>,
+    val warnings: List<String>,
+)
+
+private fun proposalDisplayIssues(
+    proposal: com.razumly.mvp.core.network.dto.EventEditorCreateProposalDto,
+    eventTimeZone: TimeZone?,
+    teamNames: Map<String, String>,
+    fieldNames: Map<String, String>,
+    officialNames: Map<String, String>,
+    officialPositionNames: Map<String, String>,
+): ProposalDisplayIssues {
+    val errors = mutableListOf<String>()
+    val warnings = mutableListOf<String>()
+    val matchKeys = proposal.graph.matches.flatMap { match ->
+        listOfNotNull(match.id, match.matchId?.toString())
+    }.toSet()
+    if (proposal.graph.matches.isEmpty() && proposal.scheduleOutcome.matchCount > 0) {
+        errors += "The proposal has no matches."
+    }
+    if (
+        proposal.graph.matches.size != proposal.scheduleOutcome.matchCount
+        || proposal.scheduleOutcome.matches.size != proposal.graph.matches.size
+    ) {
+        errors += "The proposal Match Graph count does not match its schedule."
+    }
+    if (eventTimeZone == null) {
+        warnings += "The proposal time zone is unavailable."
+    }
+    proposal.graph.matches.forEachIndexed { index, match ->
+        val matchLabel = "Match ${index + 1}"
+        if (match.team1Id != null && !teamNames.containsKey(match.team1Id)) {
+            errors += "$matchLabel has an unavailable first team."
+        }
+        if (match.team2Id != null && !teamNames.containsKey(match.team2Id)) {
+            errors += "$matchLabel has an unavailable second team."
+        }
+        if (match.fieldId == null) {
+            errors += "$matchLabel has no resource assignment."
+        } else if (!fieldNames.containsKey(match.fieldId)) {
+            errors += "$matchLabel has an unavailable resource."
+        }
+        val time = eventTimeZone?.let { proposalMatchTime(match, it) }
+        val hasRawTime = !match.start.isNullOrBlank() && !match.end.isNullOrBlank()
+        if (!hasRawTime || (eventTimeZone != null && time == "Time pending")) {
+            errors += "$matchLabel has no proposed time."
+        }
+        if (!match.placementState.orEmpty().trim().equals("PLACED", ignoreCase = true)) {
+            errors += "$matchLabel is not placed."
+        }
+        val phaseSettings = proposalPhaseSettingsForMatch(proposal.graph.event, match)
+        val assignments = match.officialAssignments.orEmpty().ifEmpty {
+            match.officialIds.orEmpty()
+        }
+        val configuredPositions = phaseSettings?.officialPositions
+            ?: proposal.graph.event.officialPositions.orEmpty()
+        configuredPositions.forEach { position ->
+            repeat(position.count) { slotIndex ->
+                val assignment = assignments.firstOrNull {
+                    it.positionId == position.id && it.slotIndex == slotIndex
+                }
+                val holderId = assignment?.userId?.trim()?.takeIf(String::isNotBlank)
+                    ?: assignment?.eventOfficialId?.trim()?.takeIf(String::isNotBlank)
+                if (holderId == null) {
+                    errors += "$matchLabel has an unassigned officiating slot."
+                }
+            }
+        }
+        assignments.forEach { assignment ->
+            if (!officialPositionNames.containsKey(assignment.positionId)) {
+                errors += "$matchLabel has an unavailable officiating position."
+            }
+            val holderId = assignment.userId?.trim()?.takeIf(String::isNotBlank)
+                ?: assignment.eventOfficialId?.trim()?.takeIf(String::isNotBlank)
+            if (holderId == null) {
+                errors += "$matchLabel has an unassigned officiating slot."
+            } else if (!officialNames.containsKey(holderId)) {
+                errors += "$matchLabel has an unavailable official."
+            }
+        }
+        match.officialId?.let { officialId ->
+            if (!officialNames.containsKey(officialId)) {
+                errors += "$matchLabel has an unavailable official."
+            }
+        }
+        val requiresTeamOfficial =
+            phaseSettings?.doTeamsOfficiate ?: proposal.graph.event.doTeamsOfficiate == true
+        if (requiresTeamOfficial && match.teamOfficialId.isNullOrBlank()) {
+            errors += "$matchLabel has no proposed team official."
+        } else {
+            match.teamOfficialId?.let { teamId ->
+                if (!teamNames.containsKey(teamId)) {
+                    errors += "$matchLabel has an unavailable team official."
+                }
+            }
+        }
+        listOf(
+            match.previousLeftId,
+            match.previousRightId,
+            match.winnerNextMatchId,
+            match.loserNextMatchId,
+        ).filterNotNull().forEach { link ->
+            if (link !in matchKeys) {
+                errors += "$matchLabel has an unresolved Match Graph link."
+            }
+        }
+    }
+    return ProposalDisplayIssues(
+        errors = errors.distinct(),
+        warnings = warnings.distinct(),
+    )
 }
 
 private fun buildValidationPopupMessage(errors: List<String>): String {

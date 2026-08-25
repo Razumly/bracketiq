@@ -1,9 +1,17 @@
 jest.mock('@/server/realtime/broadcastOverlayRealtime', () => ({
   publishBroadcastOverlayRevocation: jest.fn(),
 }));
+jest.mock('@/server/repositories/locks', () => ({
+  acquireFieldLocks: jest.fn().mockResolvedValue(undefined),
+  acquireTimeSlotLocks: jest.fn().mockResolvedValue(undefined),
+}));
 
 import { deleteOrArchiveEvent } from '../archivePolicy';
 import { publishBroadcastOverlayRevocation } from '@/server/realtime/broadcastOverlayRealtime';
+import {
+  acquireFieldLocks,
+  acquireTimeSlotLocks,
+} from '@/server/repositories/locks';
 
 const mockedPublishBroadcastOverlayRevocation = publishBroadcastOverlayRevocation as jest.MockedFunction<
   typeof publishBroadcastOverlayRevocation
@@ -34,6 +42,72 @@ const createArchiveClient = () => {
   client.$transaction = jest.fn(async (callback: (tx: typeof client) => Promise<unknown>) => callback(client));
   return client;
 };
+const createHardDeleteClient = () => {
+  const deleteMany = jest.fn().mockResolvedValue({ count: 1 });
+  const count = jest.fn().mockResolvedValue(0);
+  const client: Record<string, any> = {
+    events: {
+      count,
+      delete: jest.fn().mockResolvedValue({ id: 'event_1' }),
+    },
+    matches: { count, deleteMany },
+    divisions: { count, deleteMany },
+    eventRegistrations: { count, deleteMany },
+    refundRequests: { count, deleteMany },
+    signedDocuments: { count, deleteMany },
+    invites: { count, deleteMany },
+    paymentIntents: { count, deleteMany },
+    templateDocuments: { deleteMany },
+    broadcastOverlays: {
+      count,
+      findMany: jest.fn().mockResolvedValue([]),
+      deleteMany,
+    },
+    timeSlots: { count, deleteMany },
+    fields: {
+      findMany: jest.fn().mockResolvedValue([{ id: 'field_1' }]),
+      deleteMany,
+    },
+  };
+  client.$transaction = jest.fn(async (callback: (tx: typeof client) => Promise<unknown>) => callback(client));
+  return client;
+};
+
+describe('event hard deletion resource locks', () => {
+  beforeEach(() => {
+    (acquireFieldLocks as jest.Mock).mockClear();
+    (acquireTimeSlotLocks as jest.Mock).mockClear();
+  });
+
+  it('locks event fields and time slots before deleting the event', async () => {
+    const client = createHardDeleteClient();
+    const event = {
+      id: 'event_1',
+      fieldIds: ['field_1'],
+      timeSlotIds: ['slot_1'],
+      state: 'EVENT',
+    };
+
+    await expect(deleteOrArchiveEvent({
+      client,
+      event,
+      actorUserId: 'user_1',
+    })).resolves.toMatchObject({
+      action: 'deleted',
+      entityId: 'event_1',
+    });
+
+    expect(acquireFieldLocks).toHaveBeenCalledWith(client, ['field_1']);
+    expect(acquireTimeSlotLocks).toHaveBeenCalledWith(client, ['slot_1']);
+    expect(
+      (acquireFieldLocks as jest.Mock).mock.invocationCallOrder[0],
+    ).toBeLessThan(client.events.delete.mock.invocationCallOrder[0]);
+    expect(
+      (acquireTimeSlotLocks as jest.Mock).mock.invocationCallOrder[0],
+    ).toBeLessThan(client.events.delete.mock.invocationCallOrder[0]);
+  });
+});
+
 
 describe('event broadcast overlay archival', () => {
   beforeEach(() => {

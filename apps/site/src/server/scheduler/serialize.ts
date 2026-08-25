@@ -11,6 +11,7 @@ const serializeDivision = (division: Division) => ({
   kind: division.kind,
   role: division.role,
   phase: division.phase,
+  sourceDivisionId: division.sourceDivisionId,
   isSystemGenerated: division.isSystemGenerated,
   phaseSettings: Object.fromEntries(
     Object.entries(division.phaseSettings ?? {}).map(([phase, settings]) => [
@@ -362,4 +363,5 @@ export const serializeEvent = (event: Tournament | League) => {
 export const serializeMatches = (
   matches: Match[],
   officialPositions?: EventOfficialPosition[],
-) => matches.map((match) => serializeMatch(match, officialPositions));
+  eventType?: string,
+) => matches.map((match) => serializeMatch(match, officialPositions, eventType));

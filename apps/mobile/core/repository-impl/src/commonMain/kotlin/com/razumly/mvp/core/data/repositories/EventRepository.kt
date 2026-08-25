@@ -3,6 +3,7 @@ package com.razumly.mvp.core.data.repositories
 import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.Bounds
+import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.EventTag
@@ -16,20 +17,24 @@ import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.analytics.AnalyticsEvent
 import com.razumly.mvp.core.analytics.AnalyticsTracker
 import dev.icerock.moko.geo.LatLng
 import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.MvpApiClient
+import com.razumly.mvp.core.network.dto.EventApiDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateCommandDto
+import com.razumly.mvp.core.network.dto.EventEditorDraftDto
+import com.razumly.mvp.core.network.dto.EventEditorCreateProposalGraphDto
 import com.razumly.mvp.core.network.dto.EventEditorSaveCommandDto
 import com.razumly.mvp.core.network.dto.EventEditorScheduleRequestDto
 import com.razumly.mvp.core.network.dto.EventEditorBootstrapQueryDto
 import com.razumly.mvp.core.network.dto.EventEditorMatchProjectionDto
 import com.razumly.mvp.core.network.dto.MatchSegmentApiDto
 import com.razumly.mvp.core.network.dto.MatchApiDto
-
+import com.razumly.mvp.core.network.dto.TeamApiDto
 import com.razumly.mvp.core.network.dto.CreateEventTemplateRequestDto
 import com.razumly.mvp.core.network.dto.EventParticipantsSnapshotResponseDto
 import com.razumly.mvp.core.network.dto.EventTemplateResponseDto
@@ -138,6 +143,84 @@ private fun EventEditorMatchProjectionDto.toMatchOrThrow(): MatchMVP =
         locked = locked,
     ).toMatchOrNull()
         ?: error("Editor schedule response contained a match without canonical identity: $id")
+
+private data class DecodedProposalGraph(
+    val event: Event,
+    val teams: List<Team>,
+    val fields: List<Field>,
+    val timeSlots: List<TimeSlot>,
+    val matches: List<MatchMVP>,
+)
+
+internal fun mergeAcceptedGraphDivisionDetails(
+    canonical: List<DivisionDetail>,
+    graph: List<DivisionDetail>,
+): List<DivisionDetail> {
+    if (graph.isEmpty()) return canonical
+    val knownIds = canonical
+        .map { detail -> detail.id.normalizeDivisionIdentifier() }
+        .filter(String::isNotBlank)
+        .toMutableSet()
+    return buildList {
+        addAll(canonical)
+        graph.forEach { detail ->
+            val normalizedId = detail.id.normalizeDivisionIdentifier()
+            if (normalizedId.isNotBlank() && knownIds.add(normalizedId)) {
+                add(detail)
+            }
+        }
+    }
+}
+
+internal fun mergeAcceptedGraphDivisionIds(
+    canonical: List<String>,
+    graph: List<String>,
+): List<String> = buildList {
+    val knownIds = mutableSetOf<String>()
+    (canonical + graph).forEach { rawId ->
+        val id = rawId.trim()
+        if (id.isNotBlank() && knownIds.add(id.normalizeDivisionIdentifier())) {
+            add(id)
+        }
+    }
+}
+
+private fun EventEditorCreateProposalGraphDto.decodeOrThrow(
+    expectedEventId: String,
+): DecodedProposalGraph {
+    val graphEvent = event.toEventOrNull()
+        ?: error("Accepted schedule proposal contained an invalid Event graph.")
+    require(graphEvent.id == expectedEventId) {
+        "Accepted schedule proposal contained the wrong Event id."
+    }
+    val graphTeams = event.teams.map { teamDto ->
+        teamDto.toTeamOrNull()
+            ?: error("Accepted schedule proposal contained an invalid Team graph.")
+    }
+    val graphFields = event.fields
+    val graphTimeSlots = event.timeSlots.map { slotDto ->
+        val slotId = slotDto.id?.trim()?.takeIf(String::isNotBlank)
+            ?: error("Accepted schedule proposal contained a time slot without an id.")
+        slotDto.toTimeSlot(slotId)
+    }
+    val graphMatches = matches.map { matchDto ->
+        matchDto.toMatchOrNull()
+            ?: error("Accepted schedule proposal contained an invalid Match graph.")
+    }
+    require(graphMatches.isNotEmpty()) {
+        "Accepted schedule proposal contained no Match Graph nodes."
+    }
+    require(graphMatches.all { match -> match.eventId == expectedEventId }) {
+        "Accepted schedule proposal contained a Match Graph for the wrong Event."
+    }
+    return DecodedProposalGraph(
+        event = graphEvent,
+        teams = graphTeams,
+        fields = graphFields,
+        timeSlots = graphTimeSlots,
+        matches = graphMatches,
+    )
+}
 
 private inline fun <reified T> JsonObject.decodeJsonOrThrow(): T =
     jsonMVP.decodeFromJsonElement<T>(this)
@@ -310,43 +393,157 @@ class EventRepository(
     override suspend fun createEventEditor(
         command: EventEditorCreateCommandDto,
     ): Result<EventEditorSaveOutcome> = runCatching {
-        val response = editorRemoteGateway.create(command)
-        val canonical = EventEditorSessionMapper.canonicalState(
-            snapshot = response.snapshot,
-            operationId = command.createOperationId,
+        when (val response = editorRemoteGateway.create(command)) {
+            is com.razumly.mvp.core.network.dto.EventEditorCreateResponseDto.Saved ->
+                persistCreatedEventEditor(
+                    result = response.result,
+                    operationId = command.createOperationId,
+                )
+            is com.razumly.mvp.core.network.dto.EventEditorCreateResponseDto.Proposed -> {
+                val canonical = EventEditorSessionMapper.canonicalState(
+                    snapshot = response.proposal.snapshot,
+                    operationId = command.createOperationId,
+                )
+                EventEditorSaveOutcome(
+                    session = EventEditorSession(
+                        snapshot = response.proposal.snapshot,
+                        canonicalState = canonical,
+                        baseline = canonical,
+                        createOperationId = command.createOperationId,
+                    ),
+                    questionIdMap = emptyMap(),
+                    staffEmailDelivery = "NOT_REQUESTED",
+                    scheduleOutcome = response.proposal.scheduleOutcome,
+                    proposal = response.proposal,
+                )
+            }
+        }
+    }
+
+    override suspend fun acceptEventEditorProposal(
+        createOperationId: String,
+        proposalRevision: String,
+        draft: EventEditorDraftDto,
+    ): Result<EventEditorSaveOutcome> = runCatching {
+        persistCreatedEventEditor(
+            result = editorRemoteGateway.acceptProposal(
+                createOperationId = createOperationId,
+                proposalRevision = proposalRevision,
+                draft = draft,
+            ),
+            operationId = createOperationId,
+            requireCompleteGraph = true,
         )
-        databaseService.withTransaction {
+    }
+
+    override suspend fun rejectEventEditorProposal(
+        createOperationId: String,
+        proposalRevision: String,
+    ): Result<Unit> = runCatching {
+        editorRemoteGateway.rejectProposal(createOperationId, proposalRevision)
+    }
+
+    private suspend fun persistCreatedEventEditor(
+        result: com.razumly.mvp.core.network.dto.EventEditorSaveResultDto,
+        operationId: String,
+        requireCompleteGraph: Boolean = false,
+    ): EventEditorSaveOutcome {
+        val canonical = EventEditorSessionMapper.canonicalState(
+            snapshot = result.snapshot,
+            operationId = operationId,
+        )
+        val proposalGraph = result.graph?.decodeOrThrow(canonical.event.id)
+        if (requireCompleteGraph && proposalGraph == null) {
+            error("Accepted schedule proposal did not include a complete Match Graph.")
+        }
+        val eventToPersist = when {
+            proposalGraph == null -> canonical.event
+            requireCompleteGraph -> {
+                val graphEvent = proposalGraph.event
+                canonical.event.copy(
+                    divisions = mergeAcceptedGraphDivisionIds(
+                        canonical = canonical.event.divisions,
+                        graph = graphEvent.divisions,
+                    ),
+                    divisionDetails = mergeAcceptedGraphDivisionDetails(
+                        canonical = canonical.event.divisionDetails,
+                        graph = graphEvent.divisionDetails,
+                    ),
+                    teamIds = proposalGraph.teams
+                        .map(Team::id)
+                        .ifEmpty { graphEvent.teamIds.orEmpty() }
+                        .ifEmpty { canonical.event.teamIds },
+                    fieldIds = graphEvent.fieldIds.ifEmpty { canonical.event.fieldIds },
+                    timeSlotIds = graphEvent.timeSlotIds.ifEmpty { canonical.event.timeSlotIds },
+                    officialPositions = canonical.event.officialPositions,
+                    eventOfficials = canonical.event.eventOfficials,
+                )
+            }
+            else -> proposalGraph.event.let { graphEvent ->
+                canonical.event.copy(
+                    divisions = mergeAcceptedGraphDivisionIds(
+                        canonical = canonical.event.divisions,
+                        graph = graphEvent.divisions,
+                    ),
+                    divisionDetails = mergeAcceptedGraphDivisionDetails(
+                        canonical = canonical.event.divisionDetails,
+                        graph = graphEvent.divisionDetails,
+                    ),
+                    teamIds = proposalGraph.teams
+                        .map(Team::id)
+                        .ifEmpty { graphEvent.teamIds }
+                        .ifEmpty { canonical.event.teamIds },
+                    fieldIds = graphEvent.fieldIds.ifEmpty { canonical.event.fieldIds },
+                    timeSlotIds = graphEvent.timeSlotIds.ifEmpty { canonical.event.timeSlotIds },
+                    officialIds = graphEvent.officialIds.ifEmpty { canonical.event.officialIds },
+                    officialPositions = graphEvent.officialPositions.ifEmpty {
+                        canonical.event.officialPositions
+                    },
+                    eventOfficials = graphEvent.eventOfficials.ifEmpty {
+                        canonical.event.eventOfficials
+                    },
+                )
+            }
+        }
+        val timeSlotsToPersist = canonical.timeSlots
+        val fieldsToPersist = canonical.fields
+        return databaseService.withTransaction {
             val persistedEvent = roomStore.cacheAndReadEvent(
-                event = canonical.event,
-                expectedEventId = canonical.event.id,
+                event = eventToPersist,
+                expectedEventId = eventToPersist.id,
                 protectedHistoryAuthoritative = true,
             )
             roomStore.cacheEventTimeSlots(
                 eventId = persistedEvent.id,
-                timeSlots = canonical.timeSlots,
+                timeSlots = timeSlotsToPersist,
             )
+            if (proposalGraph?.teams?.isNotEmpty() == true) {
+                databaseService.getTeamDao.upsertTeamsWithRelations(proposalGraph.teams)
+            }
             participantSyncCoordinator.persistEventRelations(
                 event = persistedEvent,
                 allowWeeklyParticipantRoster = true,
+                preloadedTeams = proposalGraph?.teams.orEmpty(),
             )
-            if (canonical.fields.isNotEmpty()) {
-                databaseService.getFieldDao.upsertFields(canonical.fields)
+            if (fieldsToPersist.isNotEmpty()) {
+                databaseService.getFieldDao.upsertFields(fieldsToPersist)
             }
             persistBootstrapMatches(
                 eventId = persistedEvent.id,
-                matches = response.scheduleOutcome.matches.map { dto -> dto.toMatchOrThrow() },
+                matches = proposalGraph?.matches
+                    ?: result.scheduleOutcome.matches.map { dto -> dto.toMatchOrThrow() },
             )
             val persistedCanonical = canonical.copy(event = persistedEvent)
             EventEditorSaveOutcome(
                 session = EventEditorSession(
-                    snapshot = response.snapshot,
+                    snapshot = result.snapshot,
                     canonicalState = persistedCanonical,
                     baseline = persistedCanonical,
-                    createOperationId = command.createOperationId,
+                    createOperationId = operationId,
                 ),
-                questionIdMap = response.questionIdMap,
-                staffEmailDelivery = response.staffEmailDelivery,
-                scheduleOutcome = response.scheduleOutcome,
+                questionIdMap = result.questionIdMap,
+                staffEmailDelivery = result.staffEmailDelivery,
+                scheduleOutcome = result.scheduleOutcome,
             )
         }
     }

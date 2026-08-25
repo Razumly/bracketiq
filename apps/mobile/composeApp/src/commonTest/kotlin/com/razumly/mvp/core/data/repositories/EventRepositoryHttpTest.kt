@@ -43,6 +43,11 @@ import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
 import com.razumly.mvp.core.network.AuthTokenStore
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.configureMvpHttpClient
+import com.razumly.mvp.core.network.dto.EventEditorCreateProposalDto
+import com.razumly.mvp.core.network.dto.EventApiDto
+import com.razumly.mvp.core.network.dto.EventEditorCreateProposalGraphDto
+import com.razumly.mvp.core.network.dto.EventEditorRevisionBindingDto
+import com.razumly.mvp.core.network.dto.MatchApiDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateCommandDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateCompletionDto
 import com.razumly.mvp.core.network.dto.EventEditorExpectedCreateRevisionsDto
@@ -5291,6 +5296,273 @@ class EventRepositoryHttpTest {
             timeSlotDao.getTimeSlotsByEventId("event-created").map(EventTimeSlotCacheEntry::slotId),
         )
     }
+    @Test
+    fun given_schedule_proposal_when_accepted_then_room_writes_graph_only_after_acceptance() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val fieldDao = EventRepositoryHttp_FakeFieldDao()
+        val matchDao = EventRepositoryHttp_FakeMatchDao()
+        val timeSlotDao = EventRepositoryHttp_FakeEventTimeSlotDao()
+        val database = EventRepositoryHttp_FakeDatabaseService(
+            getEventDao = eventDao,
+            getUserDataDao = EventRepositoryHttp_FakeUserDataDao(),
+            getTeamDao = EventRepositoryHttp_FakeTeamDao(),
+            getMatchDao = matchDao,
+            getFieldDao = fieldDao,
+            getEventTimeSlotDao = timeSlotDao,
+        )
+        val start = "2026-09-01T10:00:00Z"
+        val end = "2026-09-01T12:00:00Z"
+        val timeSlot = EventEditorTimeSlotDto(
+            id = "slot-proposed",
+            eventId = "event-proposed",
+            dayOfWeek = 2,
+            daysOfWeek = listOf(2),
+            startTimeMinutes = 600,
+            endTimeMinutes = 660,
+            startDate = start,
+            endDate = end,
+            timeZone = "UTC",
+            scheduledFieldId = "field-proposed",
+            scheduledFieldIds = listOf("field-proposed"),
+        )
+        val draft = EventEditorDraftDto(
+            basics = EventEditorBasicsDto(
+                name = "Scheduled League",
+                description = "Proposal fixture",
+                eventType = "LEAGUE",
+                sportIds = listOf("sport-1"),
+                start = start,
+                timeZone = "America/New_York",
+                location = "Gym",
+                address = "1 Main Street",
+                affiliateUrl = "",
+                hostId = "host-1",
+                state = "UNPUBLISHED",
+            ),
+            participation = EventEditorParticipationDto(
+                teamSignup = true,
+                singleDivision = true,
+                registrationByDivisionType = true,
+                registrationCutoffHours = 0,
+                allowTeamSplitDefault = false,
+            ),
+            registration = EventEditorRegistrationDto(
+                payment = EventEditorPaymentDto(
+                    mode = "FREE",
+                    priceCents = 0,
+                    taxHandling = "NONE",
+                    organizerManualTaxRateBps = 0,
+                    allowPaymentPlans = false,
+                ),
+            ),
+            competition = EventEditorCompetitionDto(
+                divisionIds = listOf("division-1"),
+                doubleElimination = false,
+                includePlayoffs = false,
+                splitLeaguePlayoffDivisions = false,
+                usesSets = false,
+            ),
+            schedule = EventEditorScheduleDto(
+                mode = "FIXED_END",
+                endConstraint = end,
+                isAutomatedScheduling = true,
+            ),
+            resources = EventEditorResourcesDto(
+                fieldIds = listOf("field-proposed"),
+                fields = listOf(EventEditorFieldDto(id = "field-proposed", name = "Court 1")),
+                timeSlotIds = listOf("slot-proposed"),
+                timeSlots = listOf(timeSlot),
+            ),
+            staff = EventEditorStaffDto(
+                teamCheckInMode = "OFF",
+                teamCheckInOpenMinutesBefore = 0,
+                allowMatchRosterEdits = false,
+                allowTemporaryMatchPlayers = false,
+                autoCreatePointMatchIncidents = false,
+            ),
+        )
+        val command = EventEditorCreateCommandDto(
+            contractVersion = 3,
+            createOperationId = "proposal-operation",
+            expectedRevisions = EventEditorExpectedCreateRevisionsDto(
+                editorRevision = "editor-1",
+                staffRevision = null,
+                scheduleRevision = "schedule-1",
+            ),
+            draft = draft,
+            completion = EventEditorCreateCompletionDto(
+                EventEditorCreateCompletionMode.CREATE_AND_BUILD_SCHEDULE,
+            ),
+            hasScheduleProposalSupport = true,
+        )
+
+        val graph = EventEditorCreateProposalGraphDto(
+            event = EventApiDto(
+                id = "event-proposed",
+                name = "Scheduled League",
+                hostId = "host-1",
+                start = start,
+                end = end,
+                timeZone = null,
+                eventType = "LEAGUE",
+                divisions = listOf("division-1"),
+                fieldIds = listOf("field-proposed"),
+                timeSlotIds = listOf("slot-proposed"),
+                fields = listOf(
+                    Field(
+                        id = "field-proposed",
+                        name = "Court 1",
+                        fieldNumber = 1,
+                    ),
+                ),
+                timeSlots = listOf(
+                    com.razumly.mvp.core.data.dataTypes.TimeSlotDTO(
+                        id = "slot-proposed",
+                        dayOfWeek = 2,
+                        startDate = start,
+                        timeZone = "UTC",
+                        scheduledFieldId = "field-proposed",
+                    ),
+                ),
+                officialIds = listOf("official-1"),
+            ),
+            matches = listOf(
+                MatchApiDto(
+                    id = "match-proposed",
+                    matchId = 1,
+                    eventId = "event-proposed",
+                    officialId = "official-1",
+                    fieldId = "field-proposed",
+                    start = start,
+                    end = end,
+                    placementState = "PLACED",
+                    phase = "POOL",
+                    division = "division-1",
+                ),
+            ),
+        )
+        val snapshot = EventEditorSnapshotDto(
+            contractVersion = 3,
+            draft = draft,
+            mode = "CREATE",
+            eventId = "event-proposed",
+            editorRevision = "editor-1",
+            capabilities = EventEditorCapabilitiesDto(
+                canUseOnlinePayments = false,
+                canManageStaff = true,
+                canEdit = true,
+                supportsTeamStaffing = true,
+            ),
+            catalogs = EventEditorCatalogsDto(),
+            immutable = EventEditorImmutableDto(),
+            scheduleState = EventEditorScheduleStateDto(
+                matchCount = 1,
+                revision = "schedule-1",
+                hasProtectedHistory = false,
+            ),
+        )
+        val scheduleOutcome = EventEditorScheduleOutcomeDto(
+            status = EventEditorScheduleOutcomeStatus.BUILT,
+            matchCount = 1,
+            matches = listOf(
+                EventEditorMatchProjectionDto(
+                    id = "match-proposed",
+                    matchId = 1,
+                    eventId = "event-proposed",
+                    officialId = "official-1",
+                    fieldId = "field-proposed",
+                    start = start,
+                    end = end,
+                    placementState = "PLACED",
+                    phase = "POOL",
+                    division = "division-1",
+                ),
+            ),
+        )
+        val proposal = EventEditorCreateProposalDto(
+            status = "PROPOSED",
+            createOperationId = command.createOperationId,
+            eventId = "event-proposed",
+            proposalRevision = "proposal-revision",
+            expectedRevisions = command.expectedRevisions,
+            completion = command.completion,
+            snapshot = snapshot,
+            revisionBinding = EventEditorRevisionBindingDto(
+                editorRevision = "editor-1",
+                scheduleRevision = "schedule-1",
+                fieldRevisions = mapOf("field-proposed" to "field-1"),
+                timeSlotRevisions = mapOf("slot-proposed" to "slot-1"),
+                availabilityRevision = "availability-1",
+            ),
+            scheduleOutcome = scheduleOutcome,
+            graph = graph,
+        )
+        val accepted = EventEditorSaveResultDto(
+            status = "SAVED",
+            snapshot = snapshot,
+            staffEmailDelivery = "NOT_REQUESTED",
+            scheduleOutcome = scheduleOutcome,
+            graph = graph,
+        )
+        var requestCount = 0
+        val engine = MockEngine { request ->
+            assertEquals("/api/events/editor", request.url.encodedPath)
+            requestCount += 1
+            if (request.method == HttpMethod.Post) {
+                respond(
+                    content = jsonMVP.encodeToString(proposal),
+                    status = HttpStatusCode.Accepted,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            } else {
+                assertEquals(HttpMethod.Put, request.method)
+                respond(
+                    content = jsonMVP.encodeToString(accepted),
+                    status = HttpStatusCode.Created,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            }
+        }
+        val repository = EventRepository(
+            database,
+            MvpApiClient(
+                HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } },
+                "http://example.test",
+                tokenStore,
+            ),
+            EventRepositoryHttp_UnusedTeamRepository,
+            EventRepositoryHttp_FakeUserRepository(makeUser("host-1")),
+        )
+
+        val proposalOutcome = repository.createEventEditor(command).getOrThrow()
+        assertTrue(proposalOutcome.proposal != null)
+        assertEquals(null, eventDao.getEventById("event-proposed"))
+        assertTrue(fieldDao.fields.isEmpty())
+        assertTrue(matchDao.matches.isEmpty())
+        assertTrue(timeSlotDao.getTimeSlotsByEventId("event-proposed").isEmpty())
+
+        val acceptedOutcome = repository.acceptEventEditorProposal(
+            createOperationId = command.createOperationId,
+            proposalRevision = proposalOutcome.proposal!!.proposalRevision,
+            draft = draft,
+        ).getOrThrow()
+
+        assertEquals(2, requestCount)
+        assertEquals("event-proposed", acceptedOutcome.session.canonicalState.event.id)
+        assertEquals("America/New_York", acceptedOutcome.session.canonicalState.event.timeZone)
+        assertEquals("1 Main Street", acceptedOutcome.session.canonicalState.event.address)
+        assertEquals("Scheduled League", eventDao.getEventById("event-proposed")?.name)
+        assertEquals("Court 1", fieldDao.fields["field-proposed"]?.name)
+        assertEquals("match-proposed", matchDao.matches["match-proposed"]?.id)
+        assertEquals("official-1", matchDao.matches["match-proposed"]?.officialId)
+        assertEquals(
+            listOf("slot-proposed"),
+            timeSlotDao.getTimeSlotsByEventId("event-proposed")
+                .map(EventTimeSlotCacheEntry::slotId),
+        )
+    }
+
 
     @Test
     fun given_remote_editor_create_failure_when_repository_submits_then_no_rows_are_cached() = runTest {

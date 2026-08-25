@@ -1,3 +1,5 @@
+import { acquireFieldLocks, acquireTimeSlotLocks } from '@/server/repositories/locks';
+
 type PrismaLike = Record<string, any>;
 
 export type DeleteOrArchiveAction = 'deleted' | 'archived' | 'deactivated';
@@ -460,6 +462,14 @@ const hardDeleteUnreferencedEvent = async ({
   const leagueScoringConfigId = normalizeId(event.leagueScoringConfigId);
 
   await client.$transaction(async (tx: PrismaLike) => {
+    await acquireFieldLocks(
+      tx as Parameters<typeof acquireFieldLocks>[0],
+      eventFieldIds,
+    );
+    await acquireTimeSlotLocks(
+      tx as Parameters<typeof acquireTimeSlotLocks>[0],
+      eventTimeSlotIds,
+    );
     if (eventState === 'TEMPLATE') {
       const [eventsUsingTemplate, timeSlotsUsingTemplate] = await Promise.all([
         tx.events.findMany({
@@ -605,7 +615,10 @@ export const deleteOrArchiveField = async (input: EntityDeleteInput): Promise<De
       references: [{ type: 'invalid_field_id', count: 1 }],
     };
   }
-
+  await acquireFieldLocks(
+    input.client as Parameters<typeof acquireFieldLocks>[0],
+    [fieldId],
+  );
   const references = await countFieldReferences(input.client, input.entity);
   if (references.length > 0 || input.entity.archivedAt) {
     const now = new Date();
@@ -645,7 +658,10 @@ export const deleteOrArchiveTimeSlot = async (input: EntityDeleteInput): Promise
       references: [{ type: 'invalid_time_slot_id', count: 1 }],
     };
   }
-
+  await acquireTimeSlotLocks(
+    input.client as Parameters<typeof acquireTimeSlotLocks>[0],
+    [timeSlotId],
+  );
   const references = await countTimeSlotReferences(input.client, input.entity);
   if (references.length > 0 || input.entity.archivedAt) {
     const now = new Date();
@@ -666,7 +682,7 @@ export const deleteOrArchiveTimeSlot = async (input: EntityDeleteInput): Promise
     };
   }
 
-  await input.client.$transaction(async (tx: PrismaLike) => {
+  const deleteTimeSlot = async (tx: PrismaLike) => {
     const fieldsWithSlot = typeof tx.fields?.findMany === 'function'
       ? await tx.fields.findMany({
           where: { rentalSlotIds: { has: timeSlotId } },
@@ -685,7 +701,12 @@ export const deleteOrArchiveTimeSlot = async (input: EntityDeleteInput): Promise
     }
 
     await tx.timeSlots.delete({ where: { id: timeSlotId } });
-  });
+  };
+  if (typeof input.client.$transaction === 'function') {
+    await input.client.$transaction(deleteTimeSlot);
+  } else {
+    await deleteTimeSlot(input.client);
+  }
 
   return {
     action: 'deleted',

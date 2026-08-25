@@ -439,6 +439,9 @@ export const EventEditorCreateOperationsScalarFieldEnum = {
   eventId: 'eventId',
   responseStatus: 'responseStatus',
   responseJson: 'responseJson',
+  proposalJson: 'proposalJson',
+  proposalRevision: 'proposalRevision',
+  proposalStatus: 'proposalStatus',
   emailDelivery: 'emailDelivery',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'

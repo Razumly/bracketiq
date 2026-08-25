@@ -1,5 +1,6 @@
 import { serializeEvent, serializeMatches } from '../serialize';
 import { Division, Match, Team, Tournament, UserData } from '../types';
+import { eventEditorCreateProposalGraphSchema } from "@/contracts/eventEditor";
 
 describe('scheduler API serialization', () => {
   it('includes roster players and registrations for match scoring dialogs', () => {
@@ -233,6 +234,25 @@ describe('scheduler API serialization', () => {
     });
 
     const serialized = serializeEvent(event);
+    const proposalGraph = eventEditorCreateProposalGraphSchema.parse({
+      event: serialized,
+      matches: serializeMatches([match], officialPositions),
+    });
+    expect(proposalGraph.matches[0]).toEqual(
+      expect.objectContaining({
+        id: match.id,
+        start: match.start.toISOString(),
+        fieldId: null,
+        officialAssignments: expect.arrayContaining([
+          expect.objectContaining({
+            positionId: "line_judge",
+            slotIndex: 1,
+            holderType: "PLAYER",
+            userId: "player_1",
+          }),
+        ]),
+      }),
+    );
 
     expect(serialized.teams).toEqual([
       expect.objectContaining({ id: placeholder.id, kind: 'PLACEHOLDER' }),

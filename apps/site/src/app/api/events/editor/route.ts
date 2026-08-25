@@ -8,19 +8,31 @@ import { hasOrgPermission } from "@/server/accessControl";
 import { ORG_PERMISSIONS } from "@/lib/organizationPermissions";
 import {
   EVENT_EDITOR_CONTRACT_VERSION,
+  eventEditorAcceptProposalCommandSchema,
   eventEditorBootstrapQuerySchema,
   parseCreateEventEditorCommand,
+  parseEventEditorAcceptProposalCommand,
+  parseEventEditorRejectProposalCommand,
   type CreateEventEditorCommand,
 } from "@/contracts/eventEditor";
 import {
+  acceptScheduleProposalFromEditor,
   createEventEditor,
+  createScheduleProposalFromEditor,
+  rejectScheduleProposalFromEditor,
   EditorCapabilityError,
   EditorImmutableFieldError,
   EditorInputError,
   EditorPermissionError,
   EditorRevisionConflictError,
   EditorScheduleIntentError,
+  EventEditorProposalInvalidError,
+  EventEditorProposalStaleError,
 } from "@/server/events/eventEditorSave";
+import {
+  notifyTeamsOfMatchScheduleUpdate,
+  type MatchScheduleNotificationPlan,
+} from "@/server/matchScheduleNotifications";
 import { eventRegistrationErrorResponse } from "@/server/events/eventRegistrationErrorResponse";
 import { ScheduleError } from "@/server/scheduler/scheduleEvent";
 import { isEventFieldConfigurationError } from "@/server/repositories/events";
@@ -183,7 +195,11 @@ const errorResponse = (error: unknown) => {
   }
   if (error instanceof TimeSlotValidationError) {
     return NextResponse.json(
-      { error: error.message, code: "INVALID_TIME_SLOT", slotIds: error.slotIds },
+      {
+        error: error.message,
+        code: "INVALID_TIME_SLOT",
+        slotIds: error.slotIds,
+      },
       { status: 400 },
     );
   }
@@ -197,6 +213,18 @@ const errorResponse = (error: unknown) => {
     return NextResponse.json(
       { error: error.message, code: "EDITOR_CAPABILITY_REQUIRED" },
       { status: 400 },
+    );
+  }
+  if (error instanceof EventEditorProposalInvalidError) {
+    return NextResponse.json(
+      { error: error.message, code: "EDITOR_PROPOSAL_INVALID" },
+      { status: 409 },
+    );
+  }
+  if (error instanceof EventEditorProposalStaleError) {
+    return NextResponse.json(
+      { error: error.message, code: "EDITOR_PROPOSAL_STALE" },
+      { status: 409 },
     );
   }
   const requestId = createId();
@@ -264,6 +292,45 @@ export async function GET(request: NextRequest) {
     return errorResponse(error);
   }
 }
+const buildEventCreatedHandler =
+  (request: NextRequest, hostUserId: string) =>
+  async (eventId: string, draft: CreateEventEditorCommand["draft"]) => {
+    const eventStart = new Date(draft.basics.start);
+    const end =
+      draft.schedule.mode === "FIXED_END"
+        ? draft.schedule.endConstraint
+        : draft.schedule.generatedScheduleEnd;
+    const baseUrl = getRequestOrigin(request);
+    await notifySocialAudienceOfEventCreation({
+      eventId,
+      hostId: draft.basics.hostId ?? hostUserId,
+      eventName: draft.basics.name,
+      eventStart,
+      location: draft.basics.location,
+      baseUrl,
+    });
+    await sendAdminEventCreatedNotification({
+      event: {
+        id: eventId,
+        name: draft.basics.name,
+        eventType: draft.basics.eventType,
+        state: draft.basics.state,
+        hostId: draft.basics.hostId ?? hostUserId,
+        organizationId: draft.basics.organizationId,
+        sportIds: draft.basics.sportIds,
+        start: draft.basics.start,
+        end,
+        timeZone: draft.basics.timeZone,
+        location: draft.basics.location,
+        address: draft.basics.address,
+        teamSignup: draft.participation.teamSignup,
+        price: draft.registration.payment.priceCents,
+        maxParticipants: draft.participation.maxParticipants,
+        createdAt: new Date(),
+      },
+      baseUrl,
+    });
+  };
 
 export async function POST(request: NextRequest) {
   const session = await requireSession(request);
@@ -282,8 +349,16 @@ export async function POST(request: NextRequest) {
     );
   }
   try {
-    const result = await createEventEditor(session, command, {
-      sendStaffInvites: (candidates, eventId) =>
+    const eventType =
+      typeof command.draft?.basics?.eventType === "string"
+        ? command.draft.basics.eventType.trim().toUpperCase()
+        : "";
+    const isScheduledProposal =
+      ["LEAGUE", "TOURNAMENT"].includes(eventType) &&
+      command.completion?.mode === "CREATE_AND_BUILD_SCHEDULE" &&
+      command.hasScheduleProposalSupport === true;
+    const createOptions = {
+      sendStaffInvites: (candidates: unknown[], eventId: string) =>
         deliverEventStaffInvitesAfterCommit(
           eventId,
           candidates as Parameters<
@@ -291,47 +366,90 @@ export async function POST(request: NextRequest) {
           >[1],
           getRequestOrigin(request),
         ),
-      onEventCreated: async (eventId, draft) => {
-        const eventStart = new Date(draft.basics.start);
-        const end =
-          draft.schedule.mode === "FIXED_END"
-            ? draft.schedule.endConstraint
-            : draft.schedule.generatedScheduleEnd;
-        await notifySocialAudienceOfEventCreation({
-          eventId,
-          hostId: draft.basics.hostId ?? session.userId,
-          eventName: draft.basics.name,
-          eventStart,
-          location: draft.basics.location,
-          baseUrl: getRequestOrigin(request),
-        });
-        await sendAdminEventCreatedNotification({
-          event: {
-            id: eventId,
-            name: draft.basics.name,
-            eventType: draft.basics.eventType,
-            state: draft.basics.state,
-            hostId: draft.basics.hostId ?? session.userId,
-            organizationId: draft.basics.organizationId,
-            sportIds: draft.basics.sportIds,
-            start: draft.basics.start,
-            end,
-            timeZone: draft.basics.timeZone,
-            location: draft.basics.location,
-            address: draft.basics.address,
-            teamSignup: draft.participation.teamSignup,
-            price: draft.registration.payment.priceCents,
-            maxParticipants: draft.participation.maxParticipants,
-            createdAt: new Date(),
-          },
-          baseUrl: getRequestOrigin(request),
-        });
+      onEventCreated: buildEventCreatedHandler(request, session.userId),
+      onScheduleChanged: async (notification: MatchScheduleNotificationPlan) => {
+        await notifyTeamsOfMatchScheduleUpdate(notification);
       },
+    };
+    const result = isScheduledProposal
+      ? await createScheduleProposalFromEditor(session, command, createOptions)
+      : await createEventEditor(session, command, createOptions);
+    return NextResponse.json(serializeEventEditorSnapshotEnvelope(result), {
+      status: result.status === "PROPOSED" ? 202 : 201,
     });
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+export async function PUT(request: NextRequest) {
+  const session = await requireSession(request);
+  const body = await request.json().catch(() => null);
+  let command;
+  try {
+    command = parseEventEditorAcceptProposalCommand(body);
+  } catch (error) {
     return NextResponse.json(
-      serializeEventEditorSnapshotEnvelope(result),
-      { status: 201 },
+      {
+        error: "Invalid schedule proposal acceptance command.",
+        code: "INVALID_EDITOR_COMMAND",
+        details: error instanceof Error ? error.message : error,
+      },
+      { status: 400 },
     );
+  }
+  try {
+    const result = await acceptScheduleProposalFromEditor(
+      session,
+      command.createOperationId,
+      command.proposalRevision,
+      command.draft,
+      {
+        sendStaffInvites: (candidates, eventId) =>
+          deliverEventStaffInvitesAfterCommit(
+            eventId,
+            candidates as Parameters<
+              typeof deliverEventStaffInvitesAfterCommit
+            >[1],
+            getRequestOrigin(request),
+          ),
+        onEventCreated: buildEventCreatedHandler(request, session.userId),
+        onScheduleChanged: async (notification: MatchScheduleNotificationPlan) => {
+          await notifyTeamsOfMatchScheduleUpdate(notification);
+        },
+      },
+    );
+    return NextResponse.json(serializeEventEditorSnapshotEnvelope(result), {
+      status: 201,
+    });
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  const session = await requireSession(request);
+  const body = await request.json().catch(() => null);
+  let command;
+  try {
+    command = parseEventEditorRejectProposalCommand(body);
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error: "Invalid schedule proposal rejection command.",
+        code: "INVALID_EDITOR_COMMAND",
+        details: error instanceof Error ? error.message : error,
+      },
+      { status: 400 },
+    );
+  }
+  try {
+    await rejectScheduleProposalFromEditor(
+      session,
+      command.createOperationId,
+      command.proposalRevision,
+    );
+    return new NextResponse(null, { status: 204 });
   } catch (error) {
     return errorResponse(error);
   }

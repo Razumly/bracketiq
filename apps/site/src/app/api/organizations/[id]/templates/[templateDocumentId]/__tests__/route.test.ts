@@ -17,11 +17,13 @@ const transactionPrisma = {
     findFirst: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
+    delete: jest.fn(),
   },
   templateProviderQuarantines: {
     findUnique: jest.fn(),
   },
   $queryRaw: jest.fn(),
+  $executeRaw: jest.fn(),
   events: {
     findMany: jest.fn(),
     update: jest.fn(),
@@ -250,5 +252,27 @@ describe('Document Template Version item routes', () => {
     expect(transactionPrisma.events.update).not.toHaveBeenCalled();
     expect(transactionPrisma.canonicalTeams.update).not.toHaveBeenCalled();
     expect(transactionPrisma.timeSlots.update).not.toHaveBeenCalled();
+  });
+  it('locks the template before deleting an unreferenced TEXT Version', async () => {
+    const current = { ...baseTemplate, frozenAt: null };
+    mockPrisma.templateDocuments.findUnique.mockResolvedValue(current);
+    transactionPrisma.events.findMany.mockResolvedValue([]);
+    transactionPrisma.canonicalTeams.findMany.mockResolvedValue([]);
+    transactionPrisma.timeSlots.findMany.mockResolvedValue([]);
+    transactionPrisma.templateDocuments.delete.mockResolvedValue(current);
+    transactionPrisma.$queryRaw
+      .mockResolvedValueOnce([current])
+      .mockResolvedValueOnce([]);
+
+    const response = await DELETE(request('DELETE'), {
+      params: Promise.resolve({ id: 'org_1', templateDocumentId: 'version_1' }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ deleted: true });
+    expect(transactionPrisma.$executeRaw).toHaveBeenCalledTimes(1);
+    expect(transactionPrisma.templateDocuments.delete).toHaveBeenCalledWith({
+      where: { id: 'version_1' },
+    });
   });
 });

@@ -186,8 +186,19 @@ internal suspend fun MobileApiTestSession.createEventThroughEditor(
         operationId = operationId,
     )
     onPrepared?.invoke(prepared)
-    return eventRepository.createEventEditor(prepared.command)
-        .getOrThrow().session.canonicalState.event
+    val outcome = eventRepository.createEventEditor(prepared.command)
+        .getOrThrow()
+    val accepted = outcome.proposal?.let { proposal ->
+        check(database.getEventDao.getEventById(proposal.eventId) == null) {
+            "A schedule proposal must not write an Event to Room before acceptance."
+        }
+        eventRepository.acceptEventEditorProposal(
+            createOperationId = proposal.createOperationId,
+            proposalRevision = proposal.proposalRevision,
+            draft = proposal.snapshot.draft,
+        ).getOrThrow()
+    } ?: outcome
+    return accepted.session.canonicalState.event
 }
 
 internal suspend fun MobileApiTestSession.resolveCreatedEventId(

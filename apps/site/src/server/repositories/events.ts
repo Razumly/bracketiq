@@ -114,6 +114,7 @@ import {
   persistPhaseParticipantAssignments,
   syncEventDivisionPhases,
   type PhasePersistenceClient,
+  type PhaseDivisionCandidate,
 } from "./eventDivisionPhases";
 import {
   fieldSchedulingConflictDetails,
@@ -143,6 +144,122 @@ import {
   validateEventSportIds,
   validateEventSportIdsExist,
 } from "@/server/eventSports";
+export type EventSchedulePersistenceInput = {
+  id: string;
+  end: Date;
+  generatedScheduleEnd?: Date | null;
+  noFixedEndDateTime?: boolean | null;
+  scheduleEndConstraint?: Date | null;
+};
+
+export type ScheduledRosterTeamInput = {
+  id?: string | null;
+  captainId?: string | null;
+  playerIds?: readonly string[] | null;
+  division?: { id?: string | null } | null;
+  name?: string | null;
+};
+
+export type ScheduledRosterInput = {
+  id?: string;
+  hostId?: string | null;
+  eventType?: unknown;
+  includePlayoffs?: unknown;
+  includePlayoffsOrPools?: unknown;
+  singleDivision?: boolean | null;
+  teamSizeLimit?: number | null;
+  divisions?: readonly PhaseDivisionCandidate[] | null;
+  playoffDivisions?: readonly PhaseDivisionCandidate[] | null;
+  teams: Record<string, ScheduledRosterTeamInput>;
+};
+type MatchPersistenceRelation = { id: string } | null;
+type MatchPersistenceDivision = {
+  id: string;
+  kind?: string | null;
+  role?: string | null;
+  phase?: string | null;
+  sourceDivisionId?: string | null;
+  phaseSettings?: Record<
+    string,
+    { officialPositions?: EventOfficialPosition[] }
+  >;
+};
+type MatchPersistenceOfficialAssignment = {
+  positionId: string;
+  slotIndex: number;
+  holderType: string;
+  userId: string | null;
+  eventOfficialId: string | null;
+  checkedIn: boolean;
+  hasConflict: boolean;
+};
+type MatchPersistenceSegment = {
+  id?: string | null;
+  sequence: number;
+  status?: string | null;
+  scores?: Record<string, number>;
+  winnerEventTeamId?: string | null;
+  startedAt?: string | Date | null;
+  endedAt?: string | Date | null;
+  resultType?: string | null;
+  statusReason?: string | null;
+  metadata?: Record<string, unknown> | null;
+};
+type MatchPersistenceIncident = {
+  id?: string | null;
+  sequence: number;
+  segmentId?: string | null;
+  eventTeamId?: string | null;
+  eventRegistrationId?: string | null;
+  participantUserId?: string | null;
+  officialUserId?: string | null;
+  incidentType: string;
+  minute?: number | null;
+  clock?: string | null;
+  clockSeconds?: number | null;
+  linkedPointDelta?: number | null;
+  note?: string | null;
+  metadata?: Record<string, unknown> | null;
+};
+
+export type MatchPersistenceInput = {
+  id: string;
+  matchId?: number | null;
+  locked?: boolean;
+  placementState?: string | null;
+  team1Seed?: number | null;
+  team2Seed?: number | null;
+  team1Points?: number[];
+  team2Points?: number[];
+  start?: Date | null;
+  end?: Date | null;
+  division?: MatchPersistenceDivision | null;
+  field?: MatchPersistenceRelation;
+  team1?: MatchPersistenceRelation;
+  team2?: MatchPersistenceRelation;
+  official?: MatchPersistenceRelation;
+  teamOfficial?: MatchPersistenceRelation;
+  eventId?: string;
+  officialCheckedIn?: boolean | null;
+  officialAssignments?: readonly MatchPersistenceOfficialAssignment[];
+  winnerEventTeamId?: string | null;
+  matchRulesSnapshot?: unknown;
+  resolvedMatchRules?: unknown;
+  status?: string | null;
+  resultStatus?: string | null;
+  resultType?: string | null;
+  actualStart?: Date | null;
+  actualEnd?: Date | null;
+  statusReason?: string | null;
+  segments?: readonly MatchPersistenceSegment[];
+  incidents?: readonly MatchPersistenceIncident[];
+  side?: string | null;
+  losersBracket?: boolean | null;
+  winnerNextMatch?: MatchPersistenceRelation;
+  loserNextMatch?: MatchPersistenceRelation;
+  previousLeftMatch?: MatchPersistenceRelation;
+  previousRightMatch?: MatchPersistenceRelation;
+};
 
 type PrismaLike = PrismaClient | any;
 
@@ -3731,6 +3848,10 @@ const buildMatches = (
 
 const hydratedMatchSegmentsSymbol = Symbol("hydratedMatchSegments");
 const hydratedMatchIncidentsSymbol = Symbol("hydratedMatchIncidents");
+type HydratedMatchPersistenceInput = MatchPersistenceInput & {
+  [hydratedMatchSegmentsSymbol]?: boolean;
+  [hydratedMatchIncidentsSymbol]?: boolean;
+};
 
 type LoadEventWithRelationsOptions = {
   hydratedMatchDetailIds?: string[] | null;
@@ -3738,16 +3859,15 @@ type LoadEventWithRelationsOptions = {
   includeTeamRegistrations?: boolean;
 };
 
-const shouldPersistHydratedMatchSegments = (match: Match): boolean =>
-  ((match as Match & { [hydratedMatchSegmentsSymbol]?: boolean })[
-    hydratedMatchSegmentsSymbol
-  ] ?? true) !== false;
+const shouldPersistHydratedMatchSegments = (
+  match: HydratedMatchPersistenceInput,
+): boolean =>
+  match[hydratedMatchSegmentsSymbol] !== false;
 
-const shouldPersistHydratedMatchIncidents = (match: Match): boolean =>
-  ((match as Match & { [hydratedMatchIncidentsSymbol]?: boolean })[
-    hydratedMatchIncidentsSymbol
-  ] ?? true) !== false;
-
+const shouldPersistHydratedMatchIncidents = (
+  match: HydratedMatchPersistenceInput,
+): boolean =>
+  match[hydratedMatchIncidentsSymbol] !== false;
 export const loadEventWithRelations = async (
   eventId: string,
   client: PrismaLike = prisma,
@@ -4631,9 +4751,9 @@ export const loadEventForMatchMutation = async (
 
 export const saveMatches = async (
   eventId: string,
-  matches: Match[],
+  matches: MatchPersistenceInput[],
   client: PrismaLike = prisma,
-) => {
+): Promise<void> => {
   const now = new Date();
   const segmentMatchIds = new Set<string>();
   const incidentMatchIds = new Set<string>();
@@ -4883,7 +5003,7 @@ export const saveMatches = async (
 export const persistScheduledRosterTeams = async (
   params: {
     eventId: string;
-    scheduled: League | Tournament;
+    scheduled: ScheduledRosterInput;
     removeOmittedPlaceholderTeams?: boolean;
   },
   client: PrismaLike = prisma,
@@ -4994,7 +5114,9 @@ export const persistScheduledRosterTeams = async (
   }
   const fallbackDivisionId =
     scheduledLeagueDivisionIds[0] ?? DEFAULT_DIVISION_KEY;
-  const resolveScheduledTeamDivisionId = (team: Team | undefined): string => {
+  const resolveScheduledTeamDivisionId = (
+    team: ScheduledRosterTeamInput | undefined,
+  ): string => {
     const explicitDivisionId = normalizeDivisionKey(team?.division?.id);
     if (explicitDivisionId) {
       const mappedFromId = scheduledDivisionAliasToId.get(explicitDivisionId);
@@ -5243,13 +5365,13 @@ export const deleteMatchesByEvent = async (
 };
 
 export const saveEventSchedule = async (
-  event: League | Tournament,
+  event: EventSchedulePersistenceInput,
   client: PrismaLike = prisma,
-) => {
+): Promise<void> => {
   const scheduleEndData = event.noFixedEndDateTime
     ? {
         end: event.end,
-        generatedScheduleEnd: event.end,
+        generatedScheduleEnd: event.generatedScheduleEnd ?? event.end,
       }
     : event.scheduleEndConstraint
       ? { scheduleEndConstraint: event.scheduleEndConstraint }

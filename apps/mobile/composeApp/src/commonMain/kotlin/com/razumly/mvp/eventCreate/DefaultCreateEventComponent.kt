@@ -142,6 +142,10 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     val pendingStaffInvites: StateFlow<List<PendingStaffInviteDraft>>
     val termsConsentState: StateFlow<ChatTermsConsentState>
     val termsConsentLoading: StateFlow<Boolean>
+    val pendingScheduleProposal: StateFlow<com.razumly.mvp.core.data.repositories.EventEditorSaveOutcome?>
+
+    fun acceptScheduleProposal()
+    fun rejectScheduleProposal()
 
     fun onBackClicked()
     fun updateEventField(update: Event.() -> Event)
@@ -239,6 +243,9 @@ class DefaultCreateEventComponent(
     private val _editorSession = MutableStateFlow<EventEditorSession?>(null)
     private val _isEditorReady = MutableStateFlow(false)
     override val isEditorReady = _isEditorReady.asStateFlow()
+    private val _pendingScheduleProposal =
+        MutableStateFlow<com.razumly.mvp.core.data.repositories.EventEditorSaveOutcome?>(null)
+    override val pendingScheduleProposal = _pendingScheduleProposal.asStateFlow()
     private val _editorBootstrapError = MutableStateFlow<String?>(null)
     override val editorBootstrapError = _editorBootstrapError.asStateFlow()
     private var pendingCreateCommand: EventEditorCreateCommandDto? = null
@@ -502,6 +509,87 @@ class DefaultCreateEventComponent(
                 return@launch
             }
             createEventAfterPayment(submission)
+        }
+    }
+
+    override fun acceptScheduleProposal() {
+        scope.launch {
+            val pending = _pendingScheduleProposal.value
+            val proposal = pending?.proposal
+            val pendingCommand = pendingCreateCommand
+            if (proposal == null) {
+                _errorState.value = ErrorMessage("There is no schedule proposal to accept.")
+                return@launch
+            }
+            val currentSubmission = currentCreateSubmissionSnapshot()
+            if (
+                pendingCommand == null ||
+                pendingCreateSubmission == null ||
+                currentSubmission == null ||
+                currentSubmission != pendingCreateSubmission
+            ) {
+                _errorState.value = ErrorMessage(
+                    "The event configuration changed. The schedule proposal is stale.",
+                )
+                return@launch
+            }
+            val loadingOperation = loadingHandler.newOperation()
+            loadingOperation.showLoading("Accepting schedule proposal...")
+            try {
+                eventRepository.acceptEventEditorProposal(
+                    createOperationId = proposal.createOperationId,
+                    proposalRevision = proposal.proposalRevision,
+                    draft = pendingCommand.draft,
+                ).onSuccess { outcome ->
+                    _pendingScheduleProposal.value = null
+                    pendingCreateCommand = null
+                    pendingCreateSubmission = null
+                    applyEditorSession(outcome.session)
+                    val notices = buildList {
+                        if (
+                            outcome.staffEmailDelivery.isNotBlank() &&
+                            outcome.staffEmailDelivery.uppercase() !in setOf("SENT", "NOT_REQUESTED")
+                        ) {
+                            add("Event created, but staff invite delivery needs attention.")
+                        }
+                        addAll(outcome.scheduleOutcome.warnings.map { warning -> warning.message })
+                    }
+                    if (notices.isNotEmpty()) {
+                        _errorState.value = ErrorMessage(notices.joinToString("\n"))
+                    }
+                    onEventCreated(
+                        outcome.session.canonicalState.event,
+                        outcome.scheduleOutcome.status ==
+                            com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeStatus.BUILT,
+                    )
+                }.onFailure { error ->
+                    _errorState.value = ErrorMessage(
+                        error.userMessage("The schedule proposal is no longer valid."),
+                    )
+                }
+            } finally {
+                loadingOperation.hideLoading()
+            }
+        }
+    }
+
+    override fun rejectScheduleProposal() {
+        scope.launch {
+            val proposal = _pendingScheduleProposal.value?.proposal
+            if (proposal == null) {
+                _errorState.value = ErrorMessage("There is no schedule proposal to reject.")
+                return@launch
+            }
+            eventRepository.rejectEventEditorProposal(
+                createOperationId = proposal.createOperationId,
+                proposalRevision = proposal.proposalRevision,
+            ).onSuccess {
+                _pendingScheduleProposal.value = null
+            }.onFailure { error ->
+                _errorState.value = ErrorMessage(
+                    error.userMessage("The schedule proposal could not be rejected."),
+                )
+            }
         }
     }
 
@@ -1448,6 +1536,28 @@ class DefaultCreateEventComponent(
             }
     }
 
+    private fun currentCreateSubmissionSnapshot(): CreateEventSubmissionSnapshot? {
+        val session = _editorSession.value ?: return null
+        val currentUserId = resolveCurrentUserId()
+        if (currentUserId.isBlank()) return null
+        val event = newEventState.value
+            .withRequiredHost(currentUserId)
+            .applyCreateSelectionRules()
+        return CreateEventSubmissionSnapshot(
+            session = session,
+            event = event,
+            localFields = _localFields.value.toList(),
+            leagueSlots = _leagueSlots.value.toList(),
+            fieldCount = _fieldCount.value,
+            useManualTimeSlots = _useManualTimeSlots.value,
+            availableRentalResources = _availableRentalResources.value.toList(),
+            selectedRentalResourceIds = _selectedRentalResourceIds.value.toSet(),
+            leagueScoringConfig = _leagueScoringConfig.value,
+            registrationQuestions = _registrationQuestionDrafts.value.toList(),
+            pendingStaffInvites = _pendingStaffInvites.value.toList(),
+        )
+    }
+
     private suspend fun createEventAfterPayment(submission: CreateEventSubmissionSnapshot) {
         pendingCreateCommand
             ?.takeIf { pendingCreateSubmission == submission }
@@ -1501,6 +1611,10 @@ class DefaultCreateEventComponent(
         try {
             eventRepository.createEventEditor(command)
                 .onSuccess { outcome ->
+                    if (outcome.proposal != null) {
+                        _pendingScheduleProposal.value = outcome
+                        return@onSuccess
+                    }
                     pendingCreateCommand = null
                     pendingCreateSubmission = null
                     _editorSession.value = outcome.session

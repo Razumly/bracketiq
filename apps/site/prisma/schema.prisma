@@ -819,7 +819,8 @@ model MatchOperationReceipts {
   @@index([matchId, actorUserId, clientDeviceId, clientSequence])
 }
 // Durable receipts for idempotent event-editor creates. Rows are retained so
-// delayed retries cannot create a second event after the original response is lost.
+// delayed retries cannot create a second event after the original response is
+// lost. A pending proposal reserves the Event ID but does not create the Event.
 model EventEditorCreateOperations {
   createOperationId String   @id
   actorUserId       String
@@ -827,11 +828,15 @@ model EventEditorCreateOperations {
   eventId           String   @unique
   responseStatus    Int      @default(201)
   responseJson      Json?
+  proposalJson      Json?
+  proposalRevision  String?
+  proposalStatus    String   @default("NONE")
   emailDelivery     String   @default("NOT_REQUESTED")
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
   @@index([actorUserId, createdAt])
+  @@index([proposalStatus, updatedAt])
 }
 model Divisions {
   id                                  String             @id

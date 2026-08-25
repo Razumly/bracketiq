@@ -107,6 +107,21 @@ const reorderObjectKeys = (value: any): any => {
 };
 
 describe('event editor create operation replay', () => {
+  it('keeps legacy request hashes stable when proposal support is absent or disabled', () => {
+    expect(eventEditorCreateRequestHash(command)).toBe(
+      eventEditorCreateRequestHash({
+        ...command,
+        hasScheduleProposalSupport: false,
+      }),
+    );
+    expect(eventEditorCreateRequestHash(command)).not.toBe(
+      eventEditorCreateRequestHash({
+        ...command,
+        hasScheduleProposalSupport: true,
+      }),
+    );
+  });
+
   it('hashes semantically identical object key order identically but preserves array order', () => {
     const reordered = {
       ...command,

@@ -509,6 +509,21 @@ data class EventEditorCreateCommandDto(
     val expectedRevisions: EventEditorExpectedCreateRevisionsDto,
     val draft: EventEditorDraftDto,
     val completion: EventEditorCreateCompletionDto,
+    val hasScheduleProposalSupport: Boolean = false,
+)
+@Serializable
+data class EventEditorAcceptProposalCommandDto(
+    val contractVersion: Int,
+    val createOperationId: String,
+    val proposalRevision: String,
+    val draft: EventEditorDraftDto,
+)
+
+@Serializable
+data class EventEditorRejectProposalCommandDto(
+    val contractVersion: Int,
+    val createOperationId: String,
+    val proposalRevision: String,
 )
 
 @Serializable
@@ -527,7 +542,53 @@ data class EventEditorSaveResultDto(
     val questionIdMap: Map<String, String> = emptyMap(),
     val staffEmailDelivery: String,
     val scheduleOutcome: EventEditorScheduleOutcomeDto,
+    val graph: EventEditorCreateProposalGraphDto? = null,
 )
+@Serializable
+data class EventEditorRevisionBindingDto(
+    val editorRevision: String,
+    val staffRevision: String? = null,
+    val scheduleRevision: String,
+    val fieldRevisions: Map<String, String> = emptyMap(),
+    val timeSlotRevisions: Map<String, String> = emptyMap(),
+    val rentalBookingRevision: String? = null,
+    val rentalBookingRevisions: Map<String, String> = emptyMap(),
+    val rentalBookingItemRevisions: Map<String, String> = emptyMap(),
+    val availabilityRevision: String,
+)
+
+@Serializable
+data class EventEditorProposalGraphUserDto(
+    val id: String,
+    val firstName: String = "",
+    val lastName: String = "",
+    val userName: String = "",
+)
+
+@Serializable
+data class EventEditorCreateProposalGraphDto(
+    val event: EventApiDto,
+    val matches: List<MatchApiDto> = emptyList(),
+)
+
+@Serializable
+data class EventEditorCreateProposalDto(
+    val status: String,
+    val createOperationId: String,
+    val eventId: String,
+    val proposalRevision: String,
+    val expectedRevisions: EventEditorExpectedCreateRevisionsDto,
+    val completion: EventEditorCreateCompletionDto,
+    val snapshot: EventEditorSnapshotDto,
+    val revisionBinding: EventEditorRevisionBindingDto,
+    val scheduleOutcome: EventEditorScheduleOutcomeDto,
+    val graph: EventEditorCreateProposalGraphDto,
+)
+
+sealed interface EventEditorCreateResponseDto {
+    data class Saved(val result: EventEditorSaveResultDto) : EventEditorCreateResponseDto
+    data class Proposed(val proposal: EventEditorCreateProposalDto) : EventEditorCreateResponseDto
+}
 
 @Serializable
 data class EventEditorErrorDto(
@@ -584,6 +645,15 @@ private val eventEditorCommandJson = Json {
 fun encodeEventEditorCreateCommand(command: EventEditorCreateCommandDto): JsonObject =
     eventEditorCommandJson.encodeToJsonElement(
         EventEditorCreateCommandDto.serializer(),
+        command,
+    ).jsonObject.toEventEditorCommandWire()
+
+/** Encodes proposal acceptance with the same strict editor draft projection as create. */
+fun encodeEventEditorAcceptProposalCommand(
+    command: EventEditorAcceptProposalCommandDto,
+): JsonObject =
+    eventEditorCommandJson.encodeToJsonElement(
+        EventEditorAcceptProposalCommandDto.serializer(),
         command,
     ).jsonObject.toEventEditorCommandWire()
 

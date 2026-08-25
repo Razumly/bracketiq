@@ -10,6 +10,10 @@ import com.razumly.mvp.core.network.dto.EventEditorCompetitionDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateCompletionDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateCompletionMode
 import com.razumly.mvp.core.network.dto.EventEditorCreateCommandDto
+import com.razumly.mvp.core.network.dto.EventEditorCreateProposalDto
+import com.razumly.mvp.core.network.dto.EventEditorCreateResponseDto
+import com.razumly.mvp.core.network.dto.EventEditorCreateProposalGraphDto
+import com.razumly.mvp.core.network.dto.EventApiDto
 import com.razumly.mvp.core.network.dto.EventEditorExpectedCreateRevisionsDto
 import com.razumly.mvp.core.network.dto.EventEditorDivisionDetailDto
 import com.razumly.mvp.core.network.dto.EventEditorDraftDto
@@ -23,9 +27,11 @@ import com.razumly.mvp.core.network.dto.EventEditorQuestionDto
 import com.razumly.mvp.core.network.dto.EventEditorRegistrationDto
 import com.razumly.mvp.core.network.dto.EventEditorResourcesDto
 import com.razumly.mvp.core.network.dto.EventEditorErrorDto
+import com.razumly.mvp.core.network.dto.EventEditorRevisionBindingDto
 import com.razumly.mvp.core.network.dto.EventEditorSaveResultDto
 import com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeDto
 import com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeStatus
+import com.razumly.mvp.core.network.dto.MatchApiDto
 import com.razumly.mvp.core.network.dto.EventEditorScheduleStateDto
 import com.razumly.mvp.core.network.dto.EventEditorScheduleDto
 import com.razumly.mvp.core.network.dto.EventEditorSnapshotDto
@@ -33,6 +39,7 @@ import com.razumly.mvp.core.network.dto.EventEditorStaffDto
 import com.razumly.mvp.core.network.dto.EventEditorStaffInviteDto
 import com.razumly.mvp.core.network.dto.EventEditorTagDto
 import com.razumly.mvp.core.network.dto.EventEditorTimeSlotDto
+import com.razumly.mvp.core.network.dto.EventEditorMatchProjectionDto
 import com.razumly.mvp.core.util.jsonMVP
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
@@ -45,10 +52,14 @@ import io.ktor.http.headersOf
 import io.ktor.http.content.TextContent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlin.test.assertTrue
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -98,20 +109,154 @@ class EventEditorRemoteGatewayTest {
         val question = draft.getValue("registration").jsonObject
             .getValue("questions").jsonArray.single().jsonObject
 
-        assertEquals("SAVED", result.status)
+        assertTrue(result is EventEditorCreateResponseDto.Saved)
+        assertEquals(true, body.getValue("hasScheduleProposalSupport").jsonPrimitive.booleanOrNull)
         assertEquals("create-operation-1", body.getValue("createOperationId").jsonPrimitive.content)
-        assertEquals(JsonNull, basics.getValue("parentEvent"))
         assertEquals(JsonNull, payment.getValue("manualPaymentInstructions"))
         assertEquals(JsonNull, draft.getValue("resources").jsonObject.getValue("rentalBookingId"))
         assertFalse(schedule.containsKey("generatedScheduleEnd"))
         assertFalse(field.containsValue(JsonNull))
         assertFalse(timeSlot.containsValue(JsonNull))
         assertFalse(division.containsValue(JsonNull))
+
         assertFalse(invite.containsValue(JsonNull))
         assertEquals("question-client-1", question.getValue("clientId").jsonPrimitive.content)
         assertFalse(question.containsKey("id"))
         assertNotNull(body.getValue("draft"))
     }
+    @Test
+    fun given_schedule_proposal_when_created_then_proposal_graph_and_revision_binding_are_decoded() = runTest {
+        val command = editorCreateCommand()
+        val proposal = scheduleProposal(command)
+        val engine = MockEngine {
+            respond(
+                content = jsonMVP.encodeToString(proposal),
+                status = HttpStatusCode.Accepted,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val api = MvpApiClient(
+            http = HttpClient(engine) { configureMvpHttpClient() },
+            baseUrl = "http://example.test",
+            tokenStore = GatewayTestTokenStore,
+        )
+
+        val result = EventEditorRemoteGateway(api).create(command)
+
+        assertTrue(result is EventEditorCreateResponseDto.Proposed)
+        val decoded = (result as EventEditorCreateResponseDto.Proposed).proposal
+        assertEquals("proposal-operation-1", decoded.createOperationId)
+        assertEquals("proposal-revision-1", decoded.proposalRevision)
+        assertEquals("field-revision-1", decoded.revisionBinding.fieldRevisions.getValue("field-1"))
+        assertEquals(1, decoded.graph.matches.size)
+        assertEquals(1, decoded.scheduleOutcome.matchCount)
+    }
+    @Test
+    fun given_proposal_when_accepted_and_rejected_then_wire_bodies_match_contract() = runTest {
+        val command = editorCreateCommand()
+        val requestBodies = mutableListOf<Pair<HttpMethod, String>>()
+        val engine = MockEngine { request ->
+            val body = (request.body as TextContent).text
+            requestBodies += request.method to body
+            if (request.method == HttpMethod.Put) {
+                respond(
+                    content = jsonMVP.encodeToString(savedResult(command)),
+                    status = HttpStatusCode.Created,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            } else {
+                respond(content = "", status = HttpStatusCode.NoContent)
+            }
+        }
+        val api = MvpApiClient(
+            http = HttpClient(engine) { configureMvpHttpClient() },
+            baseUrl = "http://example.test",
+            tokenStore = GatewayTestTokenStore,
+        )
+        val gateway = EventEditorRemoteGateway(api)
+
+        gateway.acceptProposal(
+            createOperationId = "proposal-operation-1",
+            proposalRevision = "proposal-revision-1",
+            draft = command.draft,
+        )
+        gateway.rejectProposal(
+            createOperationId = "proposal-operation-1",
+            proposalRevision = "proposal-revision-1",
+        )
+
+        assertEquals(2, requestBodies.size)
+        val accept = requestBodies[0]
+        assertEquals(HttpMethod.Put, accept.first)
+        val acceptBody = jsonMVP.parseToJsonElement(accept.second).jsonObject
+        val acceptDraft = acceptBody.getValue("draft").jsonObject
+        val acceptBasics = acceptDraft.getValue("basics").jsonObject
+        listOf("parentEvent", "organizationId", "hostId", "imageId").forEach { key ->
+            assertEquals(JsonNull, acceptBasics.getValue(key))
+        }
+        val acceptParticipation = acceptDraft.getValue("participation").jsonObject
+        listOf(
+            "teamSizeLimit",
+            "maxParticipants",
+            "minAge",
+            "maxAge",
+            "cancellationRefundHours",
+        ).forEach { key ->
+            assertEquals(JsonNull, acceptParticipation.getValue(key))
+        }
+        val acceptPayment = acceptDraft.getValue("registration")
+            .jsonObject.getValue("payment").jsonObject
+        assertEquals(JsonNull, acceptPayment.getValue("manualPaymentInstructions"))
+        assertEquals(JsonNull, acceptPayment.getValue("installmentCount"))
+        val acceptCompetition = acceptDraft.getValue("competition").jsonObject
+        listOf(
+            "winnerSetCount",
+            "loserSetCount",
+            "playoffTeamCount",
+            "setsPerMatch",
+            "setDurationMinutes",
+            "restTimeMinutes",
+            "gamesPerOpponent",
+            "matchRulesOverride",
+            "leagueScoringConfig",
+        ).forEach { key ->
+            assertEquals(JsonNull, acceptCompetition.getValue(key))
+        }
+        val acceptResources = acceptDraft.getValue("resources").jsonObject
+        assertEquals(JsonNull, acceptResources.getValue("rentalBookingId"))
+        assertEquals(JsonNull, acceptResources.getValue("rentalBookingItemId"))
+
+        assertEquals(
+            command.draft,
+            jsonMVP.decodeFromJsonElement(
+                EventEditorDraftDto.serializer(),
+                acceptDraft,
+            ),
+        )
+        assertEquals("3", acceptBody.getValue("contractVersion").jsonPrimitive.content)
+        assertEquals(
+            "proposal-operation-1",
+            acceptBody.getValue("createOperationId").jsonPrimitive.content,
+        )
+        assertEquals(
+            "proposal-revision-1",
+            acceptBody.getValue("proposalRevision").jsonPrimitive.content,
+        )
+
+        val reject = requestBodies[1]
+        assertEquals(HttpMethod.Delete, reject.first)
+        val rejectBody = jsonMVP.parseToJsonElement(reject.second).jsonObject
+        assertEquals("3", rejectBody.getValue("contractVersion").jsonPrimitive.content)
+        assertEquals(
+            "proposal-operation-1",
+            rejectBody.getValue("createOperationId").jsonPrimitive.content,
+        )
+        assertEquals(
+            "proposal-revision-1",
+            rejectBody.getValue("proposalRevision").jsonPrimitive.content,
+        )
+    }
+
 
     @Test
     fun given_invalid_registration_unit_when_api_fails_then_code_field_and_details_are_preserved() = runTest {
@@ -255,7 +400,49 @@ private fun editorCreateCommand(): EventEditorCreateCommandDto = EventEditorCrea
             ),
         ),
     ),
+
     completion = EventEditorCreateCompletionDto(EventEditorCreateCompletionMode.CREATE_AND_BUILD_SCHEDULE),
+    hasScheduleProposalSupport = true,
+)
+private fun scheduleProposal(command: EventEditorCreateCommandDto) = EventEditorCreateProposalDto(
+    status = "PROPOSED",
+    createOperationId = "proposal-operation-1",
+    eventId = "event-1",
+    proposalRevision = "proposal-revision-1",
+    expectedRevisions = command.expectedRevisions,
+    completion = command.completion,
+    snapshot = savedResult(command).snapshot,
+    revisionBinding = EventEditorRevisionBindingDto(
+        editorRevision = "revision-1",
+        staffRevision = "staff-revision-1",
+        scheduleRevision = "schedule-revision-1",
+        fieldRevisions = mapOf("field-1" to "field-revision-1"),
+        timeSlotRevisions = mapOf("slot-1" to "slot-revision-1"),
+        availabilityRevision = "availability-revision-1",
+    ),
+    scheduleOutcome = EventEditorScheduleOutcomeDto(
+        status = EventEditorScheduleOutcomeStatus.BUILT,
+        matchCount = 1,
+        matches = listOf(
+            EventEditorMatchProjectionDto(
+                id = "match-1",
+                eventId = "event-1",
+                fieldId = "field-1",
+                officialId = "official-1",
+            ),
+        ),
+    ),
+    graph = EventEditorCreateProposalGraphDto(
+        event = EventApiDto(
+            id = "event-1",
+            name = "Proposal",
+            hostId = "host-1",
+            start = "2026-08-24T10:00:00Z",
+            end = "2026-08-24T11:00:00Z",
+            eventType = "LEAGUE",
+        ),
+        matches = listOf(MatchApiDto(id = "match-1")),
+    ),
 )
 
 private fun savedResult(command: EventEditorCreateCommandDto) = EventEditorSaveResultDto(

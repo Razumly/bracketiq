@@ -67,6 +67,7 @@ data class TeamApiDto(
     val registrationPriceCents: Int? = null,
     val affiliateUrl: String? = null,
     val requiredTemplateIds: List<String>? = null,
+    val players: List<EventEditorProposalGraphUserDto>? = null,
     val playerRegistrations: List<TeamPlayerRegistrationApiDto>? = null,
     val staffAssignments: List<TeamStaffAssignmentApiDto>? = null,
 ) {

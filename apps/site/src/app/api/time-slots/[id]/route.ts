@@ -21,7 +21,7 @@ import {
 } from '@/server/timeZones';
 import { deleteOrArchiveTimeSlot, toDeleteOrArchiveResponse } from '@/server/deletion/archivePolicy';
 import { canManageScheduledFields, canManageTimeSlot } from '@/server/timeSlotAccess';
-import { acquireEventLock } from '@/server/repositories/locks';
+import { acquireEventLock, acquireFieldLocks, acquireTimeSlotLocks } from '@/server/repositories/locks';
 
 export const dynamic = 'force-dynamic';
 
@@ -388,6 +388,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           timeSlotIds: true,
         },
       });
+      const fieldIdsToLock = new Set<string>([
+        ...normalizeFieldIds(existingSlot.scheduledFieldIds ?? (
+          existingSlot.scheduledFieldId ? [existingSlot.scheduledFieldId] : []
+        )),
+        ...effectiveScheduledFieldIds,
+        ...referencingEvents.flatMap((event) => event.fieldIds),
+      ]);
+      await acquireFieldLocks(tx, Array.from(fieldIdsToLock).sort());
+      await acquireTimeSlotLocks(tx, [id]);
       if (referencingEvents.length) {
         const allSlotIds = Array.from(new Set(
           referencingEvents.flatMap((event) => event.timeSlotIds),
@@ -530,12 +539,11 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   if (!(await canManageTimeSlot(session, existing))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
-
-  const result = await deleteOrArchiveTimeSlot({
-    client: prisma,
+  const result = await prisma.$transaction((tx) => deleteOrArchiveTimeSlot({
+    client: tx,
     entity: existing,
     actorUserId: session.userId,
     reason: 'delete_requested',
-  });
+  }));
   return NextResponse.json(toDeleteOrArchiveResponse(result), { status: 200 });
 }

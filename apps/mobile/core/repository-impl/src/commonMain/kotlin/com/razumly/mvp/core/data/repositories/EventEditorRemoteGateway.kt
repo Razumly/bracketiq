@@ -6,19 +6,26 @@ import com.razumly.mvp.core.network.dto.EVENT_EDITOR_CONTRACT_VERSION
 import com.razumly.mvp.core.network.dto.EventEditorBootstrapQueryDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateBootstrapDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateCommandDto
+import com.razumly.mvp.core.network.dto.EventEditorCreateProposalDto
+import com.razumly.mvp.core.network.dto.EventEditorCreateResponseDto
 import com.razumly.mvp.core.network.dto.EventEditorErrorDto
+import com.razumly.mvp.core.network.dto.EventEditorAcceptProposalCommandDto
+import com.razumly.mvp.core.network.dto.EventEditorDraftDto
+import com.razumly.mvp.core.network.dto.EventEditorRejectProposalCommandDto
 import com.razumly.mvp.core.network.dto.EventEditorSaveCommandDto
 import com.razumly.mvp.core.network.dto.EventEditorSaveResultDto
 import com.razumly.mvp.core.network.dto.EventEditorScheduleRequestDto
 import com.razumly.mvp.core.network.dto.EventEditorScheduleResponseDto
 import com.razumly.mvp.core.network.dto.EventEditorSnapshotDto
+import com.razumly.mvp.core.network.dto.encodeEventEditorAcceptProposalCommand
 import com.razumly.mvp.core.network.dto.encodeEventEditorCreateCommand
 import com.razumly.mvp.core.network.dto.encodeEventEditorSaveCommand
 import com.razumly.mvp.core.util.jsonMVP
-import io.ktor.http.encodeURLQueryComponent
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.JsonObject
-
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.jsonPrimitive
+import io.ktor.http.encodeURLQueryComponent
 class EventEditorApiException(
     val statusCode: Int,
     val url: String,
@@ -64,12 +71,57 @@ internal class EventEditorRemoteGateway(
         }
     }
 
-    suspend fun create(command: EventEditorCreateCommandDto): EventEditorSaveResultDto = request {
-        api.post<JsonObject, EventEditorSaveResultDto>(
+    suspend fun create(command: EventEditorCreateCommandDto): EventEditorCreateResponseDto = request {
+        val response = api.post<JsonObject, JsonObject>(
             path = "api/events/editor",
             body = encodeEventEditorCreateCommand(command),
         )
+        when (response["status"]?.jsonPrimitive?.content) {
+            "SAVED" -> EventEditorCreateResponseDto.Saved(
+                jsonMVP.decodeFromJsonElement<EventEditorSaveResultDto>(response),
+            ).also { validateSaveResult(it.result) }
+            "PROPOSED" -> EventEditorCreateResponseDto.Proposed(
+                jsonMVP.decodeFromJsonElement<EventEditorCreateProposalDto>(response),
+            ).also { validateProposal(it.proposal) }
+            else -> throw EventEditorContractException(
+                "Event editor returned unsupported result status ${response["status"]}.",
+            )
+        }
+    }
+
+    suspend fun acceptProposal(
+        createOperationId: String,
+        proposalRevision: String,
+        draft: EventEditorDraftDto,
+    ): EventEditorSaveResultDto = request {
+        api.put<JsonObject, EventEditorSaveResultDto>(
+            path = "api/events/editor",
+            body = encodeEventEditorAcceptProposalCommand(
+                EventEditorAcceptProposalCommandDto(
+                    contractVersion = EVENT_EDITOR_CONTRACT_VERSION,
+                    createOperationId = createOperationId,
+                    proposalRevision = proposalRevision,
+                    draft = draft,
+                ),
+            ),
+        )
     }.also(::validateSaveResult)
+
+    suspend fun rejectProposal(
+        createOperationId: String,
+        proposalRevision: String,
+    ) {
+        request {
+            api.deleteNoResponse(
+                path = "api/events/editor",
+                body = EventEditorRejectProposalCommandDto(
+                    contractVersion = EVENT_EDITOR_CONTRACT_VERSION,
+                    createOperationId = createOperationId,
+                    proposalRevision = proposalRevision,
+                ),
+            )
+        }
+    }
 
     suspend fun save(eventId: String, command: EventEditorSaveCommandDto): EventEditorSaveResultDto {
         val normalizedEventId = requireEventId(eventId)
@@ -131,6 +183,24 @@ internal class EventEditorRemoteGateway(
             throw EventEditorContractException("Event editor returned unsupported result status ${result.status}.")
         }
         requireVersion(result.snapshot.contractVersion)
+    }
+
+    private fun validateProposal(proposal: EventEditorCreateProposalDto) {
+        if (proposal.status != "PROPOSED") {
+            throw EventEditorContractException(
+                "Event editor returned unsupported proposal status ${proposal.status}.",
+            )
+        }
+        requireVersion(proposal.snapshot.contractVersion)
+        if (proposal.createOperationId.isBlank() || proposal.eventId.isBlank()) {
+            throw EventEditorContractException("Event editor returned an incomplete schedule proposal.")
+        }
+        if (
+            proposal.scheduleOutcome.status !=
+            com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeStatus.BUILT
+        ) {
+            throw EventEditorContractException("Event editor returned an incomplete schedule proposal.")
+        }
     }
 
     private suspend inline fun <T> request(crossinline block: suspend () -> T): T = try {

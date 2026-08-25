@@ -1,4 +1,10 @@
 import type { Prisma } from "@/generated/prisma/client";
+import type {
+  Fields,
+  RentalBookingItems,
+  RentalBookings,
+  TimeSlots,
+} from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { createId } from "@/lib/id";
 import {
@@ -6,7 +12,13 @@ import {
   isBracketTeamCountEnabled,
   MIN_BRACKET_TEAM_COUNT,
 } from "@/lib/divisionTypes";
-import { acquireEventLock } from "@/server/repositories/locks";
+import {
+  acquireEventLock,
+  acquireEventTemplateLocks,
+  acquireFieldLocks,
+  acquireRentalBookingLocks,
+  acquireTimeSlotLocks,
+} from "@/server/repositories/locks";
 import { upsertEventFromPayload } from "@/server/repositories/events";
 import { hasOrgPermission, canManageEvent } from "@/server/accessControl";
 import { ORG_PERMISSIONS } from "@/lib/organizationPermissions";
@@ -25,6 +37,7 @@ import {
 import { isGeneratedTournamentPoolRecord } from "./tournamentPools";
 import {
   buildEventEditorSnapshot,
+  computeEventEditorRevision,
   loadCreateEventEditorSnapshot,
   loadEventEditorSnapshot,
   type EditorActor,
@@ -38,8 +51,14 @@ import { editorDraftToLegacyEvent } from "@/app/events/[id]/schedule/components/
 import {
   claimEventEditorCreateOperation,
   completeEventEditorCreateOperation,
+  completeEventEditorCreateProposal,
+  deleteEventEditorCreateOperation,
   eventEditorCreateRequestHash,
+  eventEditorProposalRevision,
+  readEventEditorCreateProposal,
+  readEventEditorCreateProposalForActor,
   waitForEventEditorCreateOperation,
+  waitForEventEditorCreateProposal,
   type EventCreateOperationClaim,
 } from "./eventCreateOperationReplay";
 import { resolveMatchTimingPolicy } from "@/server/scheduler/matchTimingPolicy";
@@ -47,22 +66,39 @@ import { normalizeAutomatedSchedulingForEventType } from "@/lib/automatedSchedul
 import {
   editorMatchProjectionsFor,
   EventScheduleMutationError,
+  EventScheduleProposalGraphError,
   EventScheduleRevisionConflictError,
   persistCreateOnlyMatchGraph,
+  persistSerializedScheduleGraph,
   reconcileEventSchedule,
+  validateAndNormalizeSerializedGraph,
 } from "@/server/scheduler/eventScheduleMutation";
+import {
+  loadFieldBlockerCatalog,
+  type FieldBlockerCatalog,
+  type FieldBlockerInterval,
+  type FieldBlockerRecurrence,
+  type FieldSchedulingConflictSource,
+  type PrismaLike as FieldBlockerPrismaLike,
+} from "@/server/repositories/fieldSchedulingConflicts";
+import { serializeEvent, serializeMatches } from "@/server/scheduler/serialize";
 import {
   type CreateEventEditorCommand,
   type EventEditorBootstrapQuery,
-  type EventEditorDraft,
+  type EventEditorCreateProposal,
   type EventEditorCreateResult,
+  type EventEditorDraft,
+  type EventEditorRevisionBinding,
   type EventEditorSaveResult,
   type EventEditorScheduleOutcome,
   type EventEditorSnapshot,
   type SaveEventEditorCommand,
 } from "@/contracts/eventEditor";
 
-import type { MatchScheduleNotificationPlan } from "@/server/matchScheduleNotifications";
+import {
+  snapshotMatchScheduleState,
+  type MatchScheduleNotificationPlan,
+} from "@/server/matchScheduleNotifications";
 export class EditorPermissionError extends Error {
   constructor(message = "You do not have permission to edit this event.") {
     super(message);
@@ -177,9 +213,32 @@ export class EditorScheduleIntentError extends Error {
 }
 
 export class EditorCapabilityError extends Error {
+
   constructor(message: string) {
     super(message);
     this.name = "EditorCapabilityError";
+  }
+}
+class EventEditorCreateProposalRollback extends Error {
+  readonly proposal: EventEditorCreateProposal;
+
+  constructor(proposal: EventEditorCreateProposal) {
+    super("The schedule proposal transaction must roll back.");
+    this.name = "EventEditorCreateProposalRollback";
+    this.proposal = proposal;
+  }
+}
+export class EventEditorProposalInvalidError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "EventEditorProposalInvalidError";
+  }
+}
+
+export class EventEditorProposalStaleError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "EventEditorProposalStaleError";
   }
 }
 
@@ -194,6 +253,11 @@ export type EditorSaveOptions = {
     notification: MatchScheduleNotificationPlan,
   ) => Promise<void>;
 };
+type CreateEventEditorOptions = EditorSaveOptions & {
+  shouldReturnScheduleProposal?: boolean;
+  preclaimedOperation?: EventCreateOperationClaim;
+};
+
 
 type QuestionRow = {
   id: string;
@@ -248,6 +312,34 @@ const staffInputFor = (
           : undefined,
     })),
 });
+
+const scheduleNotificationForAcceptedProposal = (
+  graph: EventEditorCreateProposal["graph"] | null | undefined,
+): MatchScheduleNotificationPlan | null => {
+  if (!graph) {
+    return null;
+  }
+  const changes = Array.from(snapshotMatchScheduleState(graph.matches).values())
+    .filter((match) => match.teamIds.length > 0)
+    .map((match) => ({
+      matchId: match.id,
+      matchNumber: match.matchNumber,
+      teamIds: match.teamIds,
+      teamNames: match.teamNames,
+      scheduleChanged: Boolean(match.start || match.end || match.fieldId),
+      teamAdded: true,
+      deleted: false,
+    }));
+  if (!changes.length) {
+    return null;
+  }
+  return {
+    eventId: graph.event.id,
+    eventName: graph.event.name,
+    forceBatch: true,
+    changes,
+  };
+};
 
 const reconcileQuestions = async (
   tx: Prisma.TransactionClient,
@@ -433,6 +525,14 @@ const saveWithinTransaction = async (
   eventPayload.registrationPaymentMode =
     draft.registration.payment.mode === "MANUAL" ? "MANUAL" : "ONLINE";
   eventPayload.price = draft.registration.payment.priceCents;
+  await acquireFieldLocks(tx, draft.resources.fieldIds);
+  await acquireTimeSlotLocks(tx, draft.resources.timeSlotIds);
+  const rentalResourceIds = rentalResourceIdsForDraft(draft);
+  await acquireRentalBookingLocks(
+    tx,
+    rentalResourceIds.bookingIds,
+    rentalResourceIds.bookingItemIds,
+  );
   try {
     await upsertEventFromPayload(
       {
@@ -626,7 +726,11 @@ export const saveEventEditor = async (
         scheduleOutcome = {
           status: scheduleMode === "REBUILD" ? "REBUILT" : "BUILT",
           matchCount: mutation.matches.length,
-          matches: editorMatchProjectionsFor(mutation.matches),
+          matches: editorMatchProjectionsFor(
+            mutation.matches,
+            mutation.event.officialPositions,
+            mutation.event.eventType,
+          ),
           warnings: mutation.warnings,
         };
       }
@@ -674,6 +778,94 @@ export const saveEventEditor = async (
 
 const draftOrganizationId = (draft: EventEditorDraft): string | null =>
   draft.basics.organizationId?.trim() || null;
+const assertCreateAccess = async (
+  tx: Prisma.TransactionClient,
+  actor: EditorActor,
+  draft: EventEditorDraft,
+): Promise<string> => {
+  const organizationId = draftOrganizationId(draft);
+  const requestedHostId = normalizeEntityId(draft.basics.hostId);
+  if (!organizationId) {
+    if (
+      !actor.isAdmin &&
+      requestedHostId &&
+      requestedHostId !== actor.userId
+    ) {
+      throw new EditorPermissionError(
+        "The selected event host cannot create this event.",
+      );
+    }
+    return requestedHostId ?? actor.userId;
+  }
+  const [organization, staffMembers, staffInvites] = await Promise.all([
+    tx.organizations.findUnique({
+      where: { id: organizationId },
+      select: {
+        id: true,
+        ownerId: true,
+        ownershipStatus: true,
+        enabledFeatures: true,
+      },
+    }),
+    tx.staffMembers.findMany({
+      where: { organizationId },
+      select: { organizationId: true, userId: true, types: true },
+    }),
+    tx.invites.findMany({
+      where: { organizationId, type: "STAFF" },
+      select: {
+        organizationId: true,
+        userId: true,
+        type: true,
+        status: true,
+      },
+    }),
+  ]);
+  if (!organization) throw new EditorCapabilityError("Organization not found.");
+  if (organization.ownershipStatus?.trim().toUpperCase() !== "CLAIMED") {
+    throw new EditorPermissionError(
+      "The Organization must be claimed before creating Events.",
+    );
+  }
+  if (
+    !actor.isAdmin &&
+    !(await hasOrgPermission(
+      { ...actor, isAdmin: Boolean(actor.isAdmin) },
+      organization,
+      ORG_PERMISSIONS.EVENTS_MANAGE,
+      tx,
+    ))
+  ) {
+    throw new EditorPermissionError();
+  }
+  const requiredFeature =
+    draft.basics.eventType.toUpperCase() === "TRYOUT"
+      ? "CLUB_TEAMS"
+      : "EVENT_MANAGEMENT";
+  if (!organization.enabledFeatures.includes(requiredFeature)) {
+    throw new EditorCapabilityError(
+      "Enable event management tools before creating events.",
+    );
+  }
+  const eligibleHostIds = new Set(
+    collectOrganizationHostIds({
+      ownerId: organization.ownerId,
+      staffMembers,
+      staffInvites,
+    }),
+  );
+  const resolvedHostId =
+    requestedHostId ??
+    normalizeEntityId(organization.ownerId) ??
+    actor.userId;
+  if (!eligibleHostIds.has(resolvedHostId)) {
+    throw new EditorPermissionError(
+      "The selected Event Host is not an eligible Organization Host.",
+    );
+  }
+  return resolvedHostId;
+};
+
 
 const assertCreateSchedulingIntent = (
   command: CreateEventEditorCommand,
@@ -705,6 +897,7 @@ const assertCreateSchedulingIntent = (
       "A finite Planned End is required when Automated Scheduling is off.",
     );
   }
+
   const plannedEnd = new Date(command.draft.schedule.endConstraint);
   if (!Number.isFinite(plannedEnd.getTime())) {
     throw new EditorInputError(
@@ -712,11 +905,378 @@ const assertCreateSchedulingIntent = (
     );
   }
 };
-export const createEventEditor = async (
+type RevisionModel = "fields" | "timeSlots" | "rentalBookings" | "rentalBookingItems";
+type RevisionRow = Fields | TimeSlots | RentalBookings | RentalBookingItems;
+
+const readRevisionRows = async <T extends RevisionRow>(
+  ids: string[],
+  read: (ids: string[]) => Promise<T[]>,
+): Promise<T[]> => {
+  if (!ids.length) return [];
+  return read(ids);
+};
+
+const readFieldRevisionRows = (
+  client: EditorSnapshotClient,
+  ids: string[],
+): Promise<Fields[]> =>
+  client.fields.findMany({
+    where: { id: { in: ids } },
+  });
+
+const readTimeSlotRevisionRows = (
+  client: EditorSnapshotClient,
+  ids: string[],
+): Promise<TimeSlots[]> =>
+  client.timeSlots.findMany({
+    where: { id: { in: ids } },
+  });
+
+const readRentalBookingRevisionRows = (
+  client: EditorSnapshotClient,
+  ids: string[],
+): Promise<RentalBookings[]> =>
+  client.rentalBookings.findMany({
+    where: { id: { in: ids } },
+  });
+
+const readRentalBookingItemRevisionRows = (
+  client: EditorSnapshotClient,
+  ids: string[],
+): Promise<RentalBookingItems[]> =>
+  client.rentalBookingItems.findMany({
+    where: { id: { in: ids } },
+  });
+
+const rowRevision = (
+  model: RevisionModel,
+  id: string,
+  row: RevisionRow | null,
+): string =>
+  computeEventEditorRevision({
+    model,
+    id,
+    row,
+  });
+
+
+const scheduleWindowFor = (
+  snapshot: EventEditorSnapshot,
+): { start: Date; end: Date } => {
+  const start = new Date(snapshot.draft.basics.start);
+  if (!Number.isFinite(start.getTime())) {
+    throw new EditorInputError("The schedule proposal has an invalid start time.");
+  }
+  const endCandidates = [
+    snapshot.draft.schedule.endConstraint,
+    "generatedScheduleEnd" in snapshot.draft.schedule
+      ? snapshot.draft.schedule.generatedScheduleEnd
+      : null,
+  ]
+    .map((value) => (value ? new Date(value) : null))
+    .filter((value): value is Date => Boolean(value && Number.isFinite(value.getTime())));
+  const end = endCandidates.reduce(
+    (latest, candidate) =>
+      candidate.getTime() > latest.getTime() ? candidate : latest,
+    new Date(start.getTime() + 24 * 60 * 60 * 1000),
+  );
+  return {
+    start,
+    end: end.getTime() > start.getTime()
+      ? end
+      : new Date(start.getTime() + 24 * 60 * 60 * 1000),
+  };
+};
+
+const fieldBlockerSourceKey = (
+  source: FieldSchedulingConflictSource,
+): string =>
+  JSON.stringify({
+    ...source,
+    daysOfWeek: [...source.daysOfWeek].sort((left, right) => left - right),
+    scheduledFieldIds: [...source.scheduledFieldIds].sort(),
+  });
+
+const fieldBlockerIntervalKey = (
+  interval: FieldBlockerInterval,
+): string =>
+  [
+    interval.start.toISOString(),
+    interval.end.toISOString(),
+    fieldBlockerSourceKey(interval.source),
+  ].join("\u0000");
+
+const fieldBlockerRecurrenceKey = (
+  recurrence: FieldBlockerRecurrence,
+): string => {
+  const daysOfWeek = Array.isArray(recurrence.slot.daysOfWeek)
+    ? recurrence.slot.daysOfWeek.map(Number).sort((left, right) => left - right)
+    : [];
+  const scheduledFieldIds = Array.isArray(recurrence.slot.scheduledFieldIds)
+    ? recurrence.slot.scheduledFieldIds.map(String).sort()
+    : [];
+  return [
+    fieldBlockerSourceKey(recurrence.source),
+    JSON.stringify({
+      ...recurrence.slot,
+      daysOfWeek,
+      scheduledFieldIds,
+    }),
+  ].join("\u0000");
+};
+
+const serializeFieldBlockerCatalog = (
+  catalog: FieldBlockerCatalog,
+): Record<string, unknown> => ({
+  lowerBound: catalog.lowerBound.toISOString(),
+  intervalsByFieldId: Array.from(catalog.intervalsByFieldId.entries())
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([fieldId, intervals]) => ({
+      fieldId,
+      intervals: [...intervals]
+        .sort((left, right) =>
+          fieldBlockerIntervalKey(left).localeCompare(
+            fieldBlockerIntervalKey(right),
+          ),
+        )
+        .map((interval) => ({
+          start: interval.start.toISOString(),
+          end: interval.end.toISOString(),
+          source: interval.source,
+        })),
+    })),
+  recurringByFieldId: Array.from(catalog.recurringByFieldId.entries())
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([fieldId, recurrences]) => ({
+      fieldId,
+      recurrences: [...recurrences]
+        .sort((left, right) =>
+          fieldBlockerRecurrenceKey(left).localeCompare(
+            fieldBlockerRecurrenceKey(right),
+          ),
+        )
+        .map((recurrence) => ({
+          source: recurrence.source,
+          slot: recurrence.slot,
+        })),
+    })),
+});
+
+const rentalResourceIdsForDraft = (
+  draft: EventEditorDraft,
+): { bookingIds: string[]; bookingItemIds: string[] } => {
+  const bookingIds = new Set<string>();
+  const bookingItemIds = new Set<string>();
+  const add = (target: Set<string>, value: unknown) => {
+    const normalized = normalizeEntityId(value);
+    if (normalized) target.add(normalized);
+  };
+  add(bookingIds, draft.resources.rentalBookingId);
+  add(bookingItemIds, draft.resources.rentalBookingItemId);
+  draft.resources.timeSlots.forEach((slot) => {
+    add(bookingIds, slot.rentalBookingId);
+    add(bookingItemIds, slot.rentalBookingItemId);
+  });
+  return {
+    bookingIds: Array.from(bookingIds).sort(),
+    bookingItemIds: Array.from(bookingItemIds).sort(),
+  };
+};
+
+const revisionBindingResourceIds = (
+  draft: EventEditorDraft,
+): { fieldIds: string[]; timeSlotIds: string[] } => {
+  const fieldIds = new Set<string>();
+  const timeSlotIds = new Set<string>();
+  const add = (target: Set<string>, value: unknown) => {
+    const normalized = normalizeEntityId(value);
+    if (normalized) target.add(normalized);
+  };
+  const addMany = (target: Set<string>, values: unknown) => {
+    if (!Array.isArray(values)) return;
+    values.forEach((value) => add(target, value));
+  };
+
+  addMany(fieldIds, draft.resources.fieldIds);
+  addMany(timeSlotIds, draft.resources.timeSlotIds);
+  draft.resources.fields.forEach((field) => {
+    add(fieldIds, field.id ?? field.$id);
+  });
+  draft.resources.timeSlots.forEach((slot) => {
+    add(timeSlotIds, slot.id ?? slot.$id);
+    add(fieldIds, slot.scheduledFieldId);
+    add(fieldIds, slot.fieldId);
+    addMany(fieldIds, slot.scheduledFieldIds);
+    addMany(fieldIds, slot.fieldIds);
+  });
+  return {
+    fieldIds: Array.from(fieldIds).sort(),
+    timeSlotIds: Array.from(timeSlotIds).sort(),
+  };
+};
+const templateIdsForDraft = (draft: EventEditorDraft): string[] =>
+  Array.from(
+    new Set(
+      draft.resources.requiredTemplateIds
+        .map((templateId) => normalizeEntityId(templateId))
+        .filter((templateId): templateId is string => Boolean(templateId)),
+    ),
+  ).sort();
+
+const revisionBindingFor = async (
+  snapshot: EventEditorSnapshot,
+  expected: CreateEventEditorCommand["expectedRevisions"] | undefined,
+  client: EditorSnapshotClient,
+): Promise<EventEditorRevisionBinding> => {
+  const { fieldIds, timeSlotIds } = revisionBindingResourceIds(snapshot.draft);
+  const rentalResourceIds = rentalResourceIdsForDraft(snapshot.draft);
+  const rentalBookingId =
+    normalizeEntityId(snapshot.draft.resources.rentalBookingId) ??
+    rentalResourceIds.bookingIds[0] ??
+    null;
+  const { start: scheduleWindowStart, end: scheduleWindowEnd } =
+    scheduleWindowFor(snapshot);
+  const [
+    fieldRows,
+    timeSlotRows,
+    rentalBookingRows,
+    rentalBookingItemRows,
+    blockerCatalog,
+  ] = await Promise.all([
+    readRevisionRows(fieldIds, (ids) => readFieldRevisionRows(client, ids)),
+    readRevisionRows(timeSlotIds, (ids) =>
+      readTimeSlotRevisionRows(client, ids),
+    ),
+    readRevisionRows(rentalResourceIds.bookingIds, (ids) =>
+      readRentalBookingRevisionRows(client, ids),
+    ),
+    readRevisionRows(rentalResourceIds.bookingItemIds, (ids) =>
+      readRentalBookingItemRevisionRows(client, ids),
+    ),
+    loadFieldBlockerCatalog({
+      client: client as unknown as FieldBlockerPrismaLike,
+      fieldIds,
+      lowerBound: scheduleWindowStart,
+      excludeEventId: snapshot.eventId,
+    }),
+  ]);
+  const fieldRowsById = new Map(fieldRows.map((row) => [row.id, row]));
+  const timeSlotRowsById = new Map(timeSlotRows.map((row) => [row.id, row]));
+  const rentalBookingRowsById = new Map(
+    rentalBookingRows.map((row) => [row.id, row]),
+  );
+  const rentalBookingItemRowsById = new Map(
+    rentalBookingItemRows.map((row) => [row.id, row]),
+  );
+  const fieldRevisions = Object.fromEntries(
+    fieldIds.map((fieldId) => [
+      fieldId,
+      rowRevision("fields", fieldId, fieldRowsById.get(fieldId) ?? null),
+    ]),
+  );
+  const timeSlotRevisions = Object.fromEntries(
+    timeSlotIds.map((timeSlotId) => [
+      timeSlotId,
+      rowRevision(
+        "timeSlots",
+        timeSlotId,
+        timeSlotRowsById.get(timeSlotId) ?? null,
+      ),
+    ]),
+  );
+  const rentalBookingRevisions = Object.fromEntries(
+    rentalResourceIds.bookingIds.map((bookingId) => [
+      bookingId,
+      rowRevision(
+        "rentalBookings",
+        bookingId,
+        rentalBookingRowsById.get(bookingId) ?? null,
+      ),
+    ]),
+  );
+  const rentalBookingRevision = rentalBookingId
+    ? rentalBookingRevisions[rentalBookingId] ?? null
+    : null;
+  const rentalBookingItemRevisions = Object.fromEntries(
+    rentalResourceIds.bookingItemIds.map((bookingItemId) => [
+      bookingItemId,
+      rowRevision(
+        "rentalBookingItems",
+        bookingItemId,
+        rentalBookingItemRowsById.get(bookingItemId) ?? null,
+      ),
+    ]),
+  );
+  const scheduleRevision =
+    expected?.scheduleRevision ?? snapshot.scheduleState.revision;
+  const availabilityRevision = computeEventEditorRevision({
+    scheduleRevision,
+    windowStart: scheduleWindowStart.toISOString(),
+    windowEnd: scheduleWindowEnd.toISOString(),
+    fields: fieldRows
+      .map((row) => ({ id: row.id, row }))
+      .sort((left, right) => left.id.localeCompare(right.id)),
+    timeSlots: timeSlotRows
+      .map((row) => ({ id: row.id, row }))
+      .sort((left, right) => left.id.localeCompare(right.id)),
+    rentalBookings: rentalBookingRows
+      .map((row) => ({ id: row.id, row }))
+      .sort((left, right) => left.id.localeCompare(right.id)),
+    rentalBookingItems: rentalBookingItemRows
+      .map((row) => ({ id: row.id, row }))
+      .sort((left, right) => left.id.localeCompare(right.id)),
+    blockers: serializeFieldBlockerCatalog(blockerCatalog),
+  });
+  return {
+    editorRevision: snapshot.editorRevision,
+    staffRevision: expected?.staffRevision ?? snapshot.staffRevision,
+    scheduleRevision,
+    fieldRevisions,
+    timeSlotRevisions,
+    rentalBookingRevision,
+    rentalBookingRevisions,
+    rentalBookingItemRevisions,
+    availabilityRevision,
+  };
+};
+
+const scheduleProposalFor = (params: {
+  command: CreateEventEditorCommand;
+  eventId: string;
+  snapshot: EventEditorSnapshot;
+  revisionBinding: EventEditorRevisionBinding;
+  event: Parameters<typeof serializeEvent>[0];
+  matches: Parameters<typeof serializeMatches>[0];
+  scheduleOutcome: EventEditorCreateProposal["scheduleOutcome"];
+}): EventEditorCreateProposal => {
+  const proposalWithoutRevision = {
+    status: "PROPOSED" as const,
+    createOperationId: params.command.createOperationId,
+    eventId: params.eventId,
+    expectedRevisions: params.command.expectedRevisions,
+    completion: params.command.completion,
+    snapshot: params.snapshot,
+    revisionBinding: params.revisionBinding,
+    scheduleOutcome: params.scheduleOutcome,
+    graph: {
+      event: serializeEvent(params.event),
+      matches: serializeMatches(
+        params.matches,
+        params.event.officialPositions,
+        params.event.eventType,
+      ),
+    },
+  };
+  return {
+    ...proposalWithoutRevision,
+    proposalRevision: eventEditorProposalRevision(proposalWithoutRevision),
+  };
+};
+const createEventEditorInternal = async (
   actor: EditorActor,
   command: CreateEventEditorCommand,
-  options: EditorSaveOptions = {},
-): Promise<EventEditorCreateResult> => {
+  options: CreateEventEditorOptions = {},
+): Promise<EventEditorCreateResult | EventEditorCreateProposal> => {
   const client = options.client ?? prisma;
   assertCreateSchedulingIntent(command);
   const requestHash = eventEditorCreateRequestHash(command);
@@ -729,15 +1289,23 @@ export const createEventEditor = async (
     matchCount: 0,
     warnings: [],
   };
+  let proposalRevisionBinding: EventEditorRevisionBinding | null = null;
   let scheduleNotification: MatchScheduleNotificationPlan | null = null;
+  let proposalGraph: {
+    event: Parameters<typeof serializeEvent>[0];
+    matches: Parameters<typeof serializeMatches>[0];
+  } | null = null;
 
-  await client.$transaction(async (tx: Prisma.TransactionClient) => {
-    const claimed = await claimEventEditorCreateOperation({
-      client: tx,
-      createOperationId: command.createOperationId,
-      actorUserId: actor.userId,
-      requestHash,
-    });
+  try {
+    await client.$transaction(async (tx: Prisma.TransactionClient) => {
+    const claimed =
+      options.preclaimedOperation ??
+      (await claimEventEditorCreateOperation({
+        client: tx,
+        createOperationId: command.createOperationId,
+        actorUserId: actor.userId,
+        requestHash,
+      }));
     claim = claimed;
     if (!claimed.firstClaim) return;
 
@@ -857,10 +1425,38 @@ export const createEventEditor = async (
       command.draft.basics.eventType,
       draftTeamSignup,
     );
-    assertImmutableFields(command.draft, claimed.eventId, createSnapshot);
     await assertPaymentCapability(command.draft, createSnapshot);
+    assertImmutableFields(command.draft, claimed.eventId, createSnapshot);
 
     await acquireEventLock(tx, claimed.eventId);
+    if (options.shouldReturnScheduleProposal) {
+      await acquireEventTemplateLocks(tx, templateIdsForDraft(command.draft));
+      const resourceIds = revisionBindingResourceIds(command.draft);
+      await acquireFieldLocks(tx, resourceIds.fieldIds);
+      await acquireTimeSlotLocks(tx, resourceIds.timeSlotIds);
+      const rentalResourceIds = rentalResourceIdsForDraft(command.draft);
+      await acquireRentalBookingLocks(
+        tx,
+        rentalResourceIds.bookingIds,
+        rentalResourceIds.bookingItemIds,
+      );
+    }
+    if (options.shouldReturnScheduleProposal) {
+      const bindingSnapshot = {
+        ...createSnapshot,
+        draft: {
+          ...createSnapshot.draft,
+          basics: command.draft.basics,
+          schedule: command.draft.schedule,
+          resources: command.draft.resources,
+        },
+      } as EventEditorSnapshot;
+      proposalRevisionBinding = await revisionBindingFor(
+        bindingSnapshot,
+        command.expectedRevisions,
+        tx,
+      );
+    }
     ({ questionIdMap, emailCandidates } = await saveWithinTransaction(
       tx,
       actor,
@@ -880,7 +1476,11 @@ export const createEventEditor = async (
         scheduleOutcome = {
           status: "NOT_REQUESTED",
           matchCount: graph.matches.length,
-          matches: editorMatchProjectionsFor(graph.matches),
+          matches: editorMatchProjectionsFor(
+            graph.matches,
+            graph.event.officialPositions,
+            graph.event.eventType,
+          ),
           warnings: [],
         };
       }
@@ -908,14 +1508,63 @@ export const createEventEditor = async (
       scheduleOutcome = {
         status: "BUILT",
         matchCount: mutation.matches.length,
-        matches: editorMatchProjectionsFor(mutation.matches),
+        matches: editorMatchProjectionsFor(
+          mutation.matches,
+          mutation.event.officialPositions,
+          mutation.event.eventType,
+        ),
         warnings: mutation.warnings,
+      };
+      proposalGraph = {
+        event: mutation.event,
+        matches: mutation.matches,
       };
     }
     const snapshot = await loadEventEditorSnapshot(claimed.eventId, {
       actor,
       client: tx,
     });
+    if (options.shouldReturnScheduleProposal) {
+      const builtScheduleOutcome =
+        scheduleOutcome.status === "BUILT" || scheduleOutcome.status === "REBUILT"
+          ? {
+              ...scheduleOutcome,
+              status: "BUILT" as const,
+            }
+          : null;
+      if (!builtScheduleOutcome || !proposalGraph) {
+        throw new EditorScheduleIntentError(
+          "A complete schedule proposal requires a built schedule.",
+        );
+      }
+      if (!proposalRevisionBinding) {
+        throw new Error("The schedule proposal revision was not captured.");
+      }
+      const proposalSnapshot: EventEditorSnapshot = {
+        ...createSnapshot,
+        mode: "CREATE",
+        eventId: null,
+        draft: command.draft,
+      };
+      const proposal = scheduleProposalFor({
+        command,
+        eventId: claimed.eventId,
+        snapshot: proposalSnapshot,
+        revisionBinding: proposalRevisionBinding,
+        event: proposalGraph.event,
+        matches: proposalGraph.matches,
+        scheduleOutcome: builtScheduleOutcome,
+      });
+      try {
+        validateAndNormalizeSerializedGraph(claimed.eventId, proposal.graph);
+      } catch (error) {
+        if (error instanceof EventScheduleProposalGraphError) {
+          throw new EventEditorProposalInvalidError(error.message);
+        }
+        throw error;
+      }
+      throw new EventEditorCreateProposalRollback(proposal);
+    }
     firstClaimResult = {
       status: "SAVED",
       createOperationId: command.createOperationId,
@@ -936,6 +1585,51 @@ export const createEventEditor = async (
       emailDelivery: "PROCESSING",
     });
   });
+  } catch (error) {
+    if (error instanceof EventEditorCreateProposalRollback) {
+      try {
+        await completeEventEditorCreateProposal({
+          client,
+          createOperationId: command.createOperationId,
+          proposal: error.proposal,
+        });
+        return error.proposal;
+      } catch (completionError) {
+        if (options.preclaimedOperation?.firstClaim) {
+          try {
+            await deleteEventEditorCreateOperation({
+              client,
+              createOperationId: command.createOperationId,
+              actorUserId: actor.userId,
+              requestHash,
+            });
+          } catch (cleanupError) {
+            console.error(
+              "[event-editor] failed proposal receipt cleanup",
+              cleanupError,
+            );
+          }
+        }
+        throw completionError;
+      }
+    }
+    if (options.preclaimedOperation?.firstClaim) {
+      try {
+        await deleteEventEditorCreateOperation({
+          client,
+          createOperationId: command.createOperationId,
+          actorUserId: actor.userId,
+          requestHash,
+        });
+      } catch (cleanupError) {
+        console.error(
+          "[event-editor] proposal operation cleanup failed",
+          cleanupError,
+        );
+      }
+    }
+    throw error;
+  }
 
   const operationClaim: EventCreateOperationClaim | null =
     claim as EventCreateOperationClaim | null;
@@ -1014,6 +1708,400 @@ export const createEventEditor = async (
   }
   return finalResult;
 };
+export const createEventEditor = async (
+  actor: EditorActor,
+  command: CreateEventEditorCommand,
+  options: EditorSaveOptions = {},
+): Promise<EventEditorCreateResult> => {
+  const result = await createEventEditorInternal(actor, command, options);
+  if (result.status !== "SAVED") {
+    throw new Error("A schedule proposal requires the proposal-specific create path.");
+  }
+  return result;
+};
+
+export const createScheduleProposalFromEditor = async (
+  actor: EditorActor,
+  command: CreateEventEditorCommand,
+  options: EditorSaveOptions = {},
+): Promise<EventEditorCreateProposal | EventEditorCreateResult> => {
+  const eventType = command.draft.basics.eventType.trim().toUpperCase();
+  if (!["LEAGUE", "TOURNAMENT"].includes(eventType)) {
+    throw new EditorScheduleIntentError(
+      "Schedule proposals are only supported for League and Tournament events.",
+    );
+  }
+  if (command.completion.mode !== "CREATE_AND_BUILD_SCHEDULE") {
+    throw new EditorScheduleIntentError(
+      "A schedule proposal requires Create-and-build.",
+    );
+  }
+  assertCreateSchedulingIntent(command);
+  const client = options.client ?? prisma;
+  const requestHash = eventEditorCreateRequestHash(command);
+  const claim = await client.$transaction((tx: Prisma.TransactionClient) =>
+    claimEventEditorCreateOperation({
+      client: tx,
+      createOperationId: command.createOperationId,
+      actorUserId: actor.userId,
+      requestHash,
+    }),
+  );
+  if (!claim.firstClaim) {
+    const existing = await readEventEditorCreateProposal({
+      client,
+      createOperationId: command.createOperationId,
+      actorUserId: actor.userId,
+      requestHash,
+    });
+    if (existing) return existing.result ?? existing.proposal;
+    const waited = await waitForEventEditorCreateProposal({
+      client,
+      createOperationId: command.createOperationId,
+      actorUserId: actor.userId,
+      requestHash,
+    });
+    return waited.result ?? waited.proposal;
+  }
+  const result = await createEventEditorInternal(actor, command, {
+    shouldReturnScheduleProposal: true,
+    preclaimedOperation: claim,
+  });
+  if (result.status !== "PROPOSED") {
+    throw new Error("The create operation did not return a schedule proposal.");
+  }
+  return result;
+};
+
+export const acceptScheduleProposalFromEditor = async (
+  actor: EditorActor,
+  createOperationId: string,
+  proposalRevision: string,
+  draft: EventEditorDraft,
+  options: EditorSaveOptions = {},
+): Promise<EventEditorCreateResult> => {
+  const client = options.client ?? prisma;
+  const stored = await readEventEditorCreateProposalForActor({
+    client,
+    createOperationId,
+    actorUserId: actor.userId,
+  });
+  if (!stored) {
+    throw new EventEditorProposalInvalidError(
+      "The schedule proposal was not found.",
+    );
+  }
+  const proposal = stored.proposal;
+  if (!proposal) {
+    throw new EventEditorProposalInvalidError(
+      "The schedule proposal was not found.",
+    );
+  }
+  const { proposalRevision: _storedRevision, ...proposalWithoutRevision } =
+    proposal;
+  if (
+    proposal.proposalRevision !== proposalRevision ||
+    eventEditorProposalRevision(proposalWithoutRevision) !== proposalRevision
+  ) {
+    throw new EventEditorProposalInvalidError(
+      "The schedule proposal revision is invalid.",
+    );
+  }
+  if (stored.result) return stored.result;
+  if (
+    computeEventEditorRevision(draft) !==
+    computeEventEditorRevision(proposal.snapshot.draft)
+  ) {
+    throw new EventEditorProposalStaleError(
+      "The event configuration changed before proposal acceptance.",
+    );
+  }
+  if (proposal.status !== "PROPOSED") {
+    throw new EventEditorProposalInvalidError(
+      "The schedule proposal is not pending review.",
+    );
+  }
+  const result = await client.$transaction(
+    async (tx: Prisma.TransactionClient) => {
+      await acquireEventLock(tx, stored.eventId);
+      await acquireEventTemplateLocks(
+        tx,
+        templateIdsForDraft(proposal.snapshot.draft),
+      );
+      const currentStored = await readEventEditorCreateProposalForActor({
+        client: tx,
+        createOperationId,
+        actorUserId: actor.userId,
+      });
+      if (currentStored?.result) {
+        return {
+          accepted: currentStored.result,
+          emailCandidates: [] as unknown[],
+          replayed: true as const,
+        };
+      }
+      if (
+        !currentStored?.proposal ||
+        currentStored.proposal.proposalRevision !== proposalRevision
+      ) {
+        throw new EventEditorProposalStaleError(
+          "The schedule proposal changed before acceptance.",
+        );
+      }
+      const resourceIds = revisionBindingResourceIds(proposal.snapshot.draft);
+      await acquireFieldLocks(
+        tx,
+        [
+          ...resourceIds.fieldIds,
+          ...proposal.graph.matches
+            .map((match) => match.fieldId)
+            .filter((fieldId): fieldId is string => Boolean(fieldId)),
+        ],
+      );
+      await acquireTimeSlotLocks(tx, resourceIds.timeSlotIds);
+      const rentalResourceIds = rentalResourceIdsForDraft(
+        proposal.snapshot.draft,
+      );
+      await acquireRentalBookingLocks(
+        tx,
+        rentalResourceIds.bookingIds,
+        rentalResourceIds.bookingItemIds,
+      );
+      const existingEvent = await tx.events.findUnique({
+        where: { id: stored.eventId },
+        select: { id: true },
+      });
+      if (existingEvent) {
+        throw new EventEditorProposalInvalidError(
+          "The schedule proposal was already accepted.",
+        );
+      }
+      const current = await loadCreateEventEditorSnapshot(
+        {
+          organizationId:
+            proposal.snapshot.draft.basics.organizationId ?? undefined,
+          eventType: proposal.snapshot.draft.basics.eventType,
+          sportId: proposal.snapshot.draft.basics.sportIds[0],
+          parentEventId:
+            proposal.snapshot.draft.basics.parentEvent ?? undefined,
+          templateId:
+            proposal.snapshot.draft.resources.requiredTemplateIds[0],
+          rentalBookingId:
+            proposal.snapshot.draft.resources.rentalBookingId ?? undefined,
+          start: proposal.snapshot.draft.basics.start,
+        },
+        { actor, client: tx },
+      );
+      const expectedBindingSnapshot = {
+        ...current,
+        draft: proposal.snapshot.draft,
+      } as EventEditorSnapshot;
+      const expectedBinding = await revisionBindingFor(
+        expectedBindingSnapshot,
+        undefined,
+        tx,
+      );
+      if (
+        computeEventEditorRevision(expectedBinding)
+        !== computeEventEditorRevision(proposal.revisionBinding)
+      ) {
+        throw new EventEditorProposalStaleError(
+          "The Event Configuration or authoritative availability changed.",
+        );
+      }
+      const resolvedHostId = await assertCreateAccess(
+        tx,
+        actor,
+        proposal.snapshot.draft,
+      );
+      assertMinimumBracketTeamCounts(proposal.snapshot.draft);
+      const draftTeamSignup =
+        typeof proposal.snapshot.draft.participation?.teamSignup === "boolean"
+          ? proposal.snapshot.draft.participation.teamSignup
+          : ["LEAGUE", "TOURNAMENT"].includes(
+              proposal.snapshot.draft.basics.eventType.trim().toUpperCase(),
+            );
+      assertEventTypeRegistrationUnit(
+        proposal.snapshot.draft.basics.eventType,
+        draftTeamSignup,
+      );
+      assertImmutableFields(
+        proposal.snapshot.draft,
+        stored.eventId,
+        current,
+      );
+      await assertPaymentCapability(proposal.snapshot.draft, current);
+      let validatedProposalGraph: EventEditorCreateProposal["graph"];
+      try {
+        validatedProposalGraph = validateAndNormalizeSerializedGraph(
+          stored.eventId,
+          proposal.graph,
+        );
+      } catch (error) {
+        if (error instanceof EventScheduleProposalGraphError) {
+          throw new EventEditorProposalInvalidError(error.message);
+        }
+        throw error;
+      }
+      const { questionIdMap, emailCandidates } = await saveWithinTransaction(
+        tx,
+        actor,
+        proposal.snapshot.draft,
+        stored.eventId,
+        current,
+        resolvedHostId,
+      );
+      await persistSerializedScheduleGraph({
+        tx,
+        eventId: stored.eventId,
+        graph: validatedProposalGraph,
+      });
+      const snapshot = await loadEventEditorSnapshot(stored.eventId, {
+        actor,
+        client: tx,
+      });
+      const accepted: EventEditorCreateResult = {
+        status: "SAVED",
+        createOperationId,
+        editorRevision: snapshot.editorRevision,
+        staffRevision: snapshot.staffRevision,
+        scheduleRevision: snapshot.scheduleState.revision,
+        snapshot,
+        questionIdMap,
+        staffEmailDelivery: "NOT_REQUESTED",
+        scheduleOutcome: proposal.scheduleOutcome,
+        graph: proposal.graph,
+      };
+      await completeEventEditorCreateOperation({
+        client: tx,
+        createOperationId,
+        result: accepted,
+        emailDelivery: "PROCESSING",
+        proposalStatus: "ACCEPTED",
+      });
+      return { accepted, emailCandidates, replayed: false as const };
+    },
+  );
+  if (result.replayed) return result.accepted;
+  let staffEmailDelivery: EventEditorCreateResult["staffEmailDelivery"] =
+    "NOT_REQUESTED";
+  if (result.emailCandidates.length && options.sendStaffInvites) {
+    try {
+      staffEmailDelivery = await options.sendStaffInvites(
+        result.emailCandidates,
+        result.accepted.snapshot.eventId ?? stored.eventId,
+      );
+    } catch (error) {
+      staffEmailDelivery = "FAILED";
+      console.error(
+        "[event-editor] staff invite delivery failed after proposal acceptance",
+        error,
+      );
+    }
+  }
+  if (options.onEventCreated) {
+    try {
+      await options.onEventCreated(stored.eventId, proposal.snapshot.draft);
+    } catch (error) {
+      console.error(
+        "[event-editor] create notification failed after proposal acceptance",
+        error,
+      );
+    }
+  }
+  const scheduleNotification = scheduleNotificationForAcceptedProposal(
+    result.accepted.graph ?? proposal.graph,
+  );
+  if (scheduleNotification && options.onScheduleChanged) {
+    try {
+      await options.onScheduleChanged(scheduleNotification);
+    } catch (error) {
+      console.error(
+        "[event-editor] schedule notification failed after proposal acceptance",
+        error,
+      );
+    }
+  }
+  const finalResult = {
+    ...result.accepted,
+    staffEmailDelivery,
+  };
+  try {
+    await completeEventEditorCreateOperation({
+      client,
+      createOperationId,
+      result: finalResult,
+      emailDelivery: staffEmailDelivery,
+      proposalStatus: "ACCEPTED",
+    });
+  } catch (error) {
+    console.error(
+      "[event-editor] proposal acceptance metadata update failed",
+      error,
+    );
+  }
+  return finalResult;
+};
+
+export const rejectScheduleProposalFromEditor = async (
+  actor: EditorActor,
+  createOperationId: string,
+  proposalRevision: string,
+  options: EditorSaveOptions = {},
+): Promise<void> => {
+  const client = options.client ?? prisma;
+  const storedForLock = await readEventEditorCreateProposalForActor({
+    client,
+    createOperationId,
+    actorUserId: actor.userId,
+  });
+  if (!storedForLock) return;
+  if (!storedForLock.proposal || storedForLock.result) {
+    throw new EventEditorProposalInvalidError(
+      "The schedule proposal is not pending review.",
+    );
+  }
+  await client.$transaction(async (tx: Prisma.TransactionClient) => {
+    await acquireEventLock(tx, storedForLock.eventId);
+    const stored = await readEventEditorCreateProposalForActor({
+      client: tx,
+      createOperationId,
+      actorUserId: actor.userId,
+    });
+    if (!stored) return;
+    if (!stored.proposal || stored.result) {
+      throw new EventEditorProposalInvalidError(
+        "The schedule proposal is not pending review.",
+      );
+    }
+    const { proposalRevision: _storedRevision, ...proposalWithoutRevision } =
+      stored.proposal;
+    if (
+      stored.proposal.proposalRevision !== proposalRevision ||
+      eventEditorProposalRevision(proposalWithoutRevision) !== proposalRevision
+    ) {
+      throw new EventEditorProposalInvalidError(
+        "The schedule proposal revision is invalid.",
+      );
+    }
+    const existingEvent = await tx.events.findUnique({
+      where: { id: stored.eventId },
+      select: { id: true },
+    });
+    if (existingEvent) {
+      throw new EventEditorProposalInvalidError(
+        "The schedule proposal was already accepted.",
+      );
+    }
+    await deleteEventEditorCreateOperation({
+      client: tx,
+      createOperationId,
+      actorUserId: actor.userId,
+      requestHash: stored.requestHash,
+    });
+  });
+};
+
 export const createEventFromEditor = async (
   command: CreateEventEditorCommand,
   actor: EditorActor,

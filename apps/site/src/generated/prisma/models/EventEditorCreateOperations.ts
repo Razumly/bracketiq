@@ -40,6 +40,8 @@ export type EventEditorCreateOperationsMinAggregateOutputType = {
   requestHash: string | null
   eventId: string | null
   responseStatus: number | null
+  proposalRevision: string | null
+  proposalStatus: string | null
   emailDelivery: string | null
   createdAt: Date | null
   updatedAt: Date | null
@@ -51,6 +53,8 @@ export type EventEditorCreateOperationsMaxAggregateOutputType = {
   requestHash: string | null
   eventId: string | null
   responseStatus: number | null
+  proposalRevision: string | null
+  proposalStatus: string | null
   emailDelivery: string | null
   createdAt: Date | null
   updatedAt: Date | null
@@ -63,6 +67,9 @@ export type EventEditorCreateOperationsCountAggregateOutputType = {
   eventId: number
   responseStatus: number
   responseJson: number
+  proposalJson: number
+  proposalRevision: number
+  proposalStatus: number
   emailDelivery: number
   createdAt: number
   updatedAt: number
@@ -84,6 +91,8 @@ export type EventEditorCreateOperationsMinAggregateInputType = {
   requestHash?: true
   eventId?: true
   responseStatus?: true
+  proposalRevision?: true
+  proposalStatus?: true
   emailDelivery?: true
   createdAt?: true
   updatedAt?: true
@@ -95,6 +104,8 @@ export type EventEditorCreateOperationsMaxAggregateInputType = {
   requestHash?: true
   eventId?: true
   responseStatus?: true
+  proposalRevision?: true
+  proposalStatus?: true
   emailDelivery?: true
   createdAt?: true
   updatedAt?: true
@@ -107,6 +118,9 @@ export type EventEditorCreateOperationsCountAggregateInputType = {
   eventId?: true
   responseStatus?: true
   responseJson?: true
+  proposalJson?: true
+  proposalRevision?: true
+  proposalStatus?: true
   emailDelivery?: true
   createdAt?: true
   updatedAt?: true
@@ -206,6 +220,9 @@ export type EventEditorCreateOperationsGroupByOutputType = {
   eventId: string
   responseStatus: number
   responseJson: runtime.JsonValue | null
+  proposalJson: runtime.JsonValue | null
+  proposalRevision: string | null
+  proposalStatus: string
   emailDelivery: string
   createdAt: Date
   updatedAt: Date
@@ -241,6 +258,9 @@ export type EventEditorCreateOperationsWhereInput = {
   eventId?: Prisma.StringFilter<"EventEditorCreateOperations"> | string
   responseStatus?: Prisma.IntFilter<"EventEditorCreateOperations"> | number
   responseJson?: Prisma.JsonNullableFilter<"EventEditorCreateOperations">
+  proposalJson?: Prisma.JsonNullableFilter<"EventEditorCreateOperations">
+  proposalRevision?: Prisma.StringNullableFilter<"EventEditorCreateOperations"> | string | null
+  proposalStatus?: Prisma.StringFilter<"EventEditorCreateOperations"> | string
   emailDelivery?: Prisma.StringFilter<"EventEditorCreateOperations"> | string
   createdAt?: Prisma.DateTimeFilter<"EventEditorCreateOperations"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"EventEditorCreateOperations"> | Date | string
@@ -253,6 +273,9 @@ export type EventEditorCreateOperationsOrderByWithRelationInput = {
   eventId?: Prisma.SortOrder
   responseStatus?: Prisma.SortOrder
   responseJson?: Prisma.SortOrderInput | Prisma.SortOrder
+  proposalJson?: Prisma.SortOrderInput | Prisma.SortOrder
+  proposalRevision?: Prisma.SortOrderInput | Prisma.SortOrder
+  proposalStatus?: Prisma.SortOrder
   emailDelivery?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
@@ -268,6 +291,9 @@ export type EventEditorCreateOperationsWhereUniqueInput = Prisma.AtLeast<{
   requestHash?: Prisma.StringFilter<"EventEditorCreateOperations"> | string
   responseStatus?: Prisma.IntFilter<"EventEditorCreateOperations"> | number
   responseJson?: Prisma.JsonNullableFilter<"EventEditorCreateOperations">
+  proposalJson?: Prisma.JsonNullableFilter<"EventEditorCreateOperations">
+  proposalRevision?: Prisma.StringNullableFilter<"EventEditorCreateOperations"> | string | null
+  proposalStatus?: Prisma.StringFilter<"EventEditorCreateOperations"> | string
   emailDelivery?: Prisma.StringFilter<"EventEditorCreateOperations"> | string
   createdAt?: Prisma.DateTimeFilter<"EventEditorCreateOperations"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"EventEditorCreateOperations"> | Date | string
@@ -280,6 +306,9 @@ export type EventEditorCreateOperationsOrderByWithAggregationInput = {
   eventId?: Prisma.SortOrder
   responseStatus?: Prisma.SortOrder
   responseJson?: Prisma.SortOrderInput | Prisma.SortOrder
+  proposalJson?: Prisma.SortOrderInput | Prisma.SortOrder
+  proposalRevision?: Prisma.SortOrderInput | Prisma.SortOrder
+  proposalStatus?: Prisma.SortOrder
   emailDelivery?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
@@ -300,6 +329,9 @@ export type EventEditorCreateOperationsScalarWhereWithAggregatesInput = {
   eventId?: Prisma.StringWithAggregatesFilter<"EventEditorCreateOperations"> | string
   responseStatus?: Prisma.IntWithAggregatesFilter<"EventEditorCreateOperations"> | number
   responseJson?: Prisma.JsonNullableWithAggregatesFilter<"EventEditorCreateOperations">
+  proposalJson?: Prisma.JsonNullableWithAggregatesFilter<"EventEditorCreateOperations">
+  proposalRevision?: Prisma.StringNullableWithAggregatesFilter<"EventEditorCreateOperations"> | string | null
+  proposalStatus?: Prisma.StringWithAggregatesFilter<"EventEditorCreateOperations"> | string
   emailDelivery?: Prisma.StringWithAggregatesFilter<"EventEditorCreateOperations"> | string
   createdAt?: Prisma.DateTimeWithAggregatesFilter<"EventEditorCreateOperations"> | Date | string
   updatedAt?: Prisma.DateTimeWithAggregatesFilter<"EventEditorCreateOperations"> | Date | string
@@ -312,6 +344,9 @@ export type EventEditorCreateOperationsCreateInput = {
   eventId: string
   responseStatus?: number
   responseJson?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  proposalJson?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  proposalRevision?: string | null
+  proposalStatus?: string
   emailDelivery?: string
   createdAt?: Date | string
   updatedAt?: Date | string
@@ -324,6 +359,9 @@ export type EventEditorCreateOperationsUncheckedCreateInput = {
   eventId: string
   responseStatus?: number
   responseJson?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  proposalJson?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  proposalRevision?: string | null
+  proposalStatus?: string
   emailDelivery?: string
   createdAt?: Date | string
   updatedAt?: Date | string
@@ -336,6 +374,9 @@ export type EventEditorCreateOperationsUpdateInput = {
   eventId?: Prisma.StringFieldUpdateOperationsInput | string
   responseStatus?: Prisma.IntFieldUpdateOperationsInput | number
   responseJson?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  proposalJson?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  proposalRevision?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  proposalStatus?: Prisma.StringFieldUpdateOperationsInput | string
   emailDelivery?: Prisma.StringFieldUpdateOperationsInput | string
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -348,6 +389,9 @@ export type EventEditorCreateOperationsUncheckedUpdateInput = {
   eventId?: Prisma.StringFieldUpdateOperationsInput | string
   responseStatus?: Prisma.IntFieldUpdateOperationsInput | number
   responseJson?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  proposalJson?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  proposalRevision?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  proposalStatus?: Prisma.StringFieldUpdateOperationsInput | string
   emailDelivery?: Prisma.StringFieldUpdateOperationsInput | string
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -360,6 +404,9 @@ export type EventEditorCreateOperationsCreateManyInput = {
   eventId: string
   responseStatus?: number
   responseJson?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  proposalJson?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  proposalRevision?: string | null
+  proposalStatus?: string
   emailDelivery?: string
   createdAt?: Date | string
   updatedAt?: Date | string
@@ -372,6 +419,9 @@ export type EventEditorCreateOperationsUpdateManyMutationInput = {
   eventId?: Prisma.StringFieldUpdateOperationsInput | string
   responseStatus?: Prisma.IntFieldUpdateOperationsInput | number
   responseJson?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  proposalJson?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  proposalRevision?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  proposalStatus?: Prisma.StringFieldUpdateOperationsInput | string
   emailDelivery?: Prisma.StringFieldUpdateOperationsInput | string
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -384,6 +434,9 @@ export type EventEditorCreateOperationsUncheckedUpdateManyInput = {
   eventId?: Prisma.StringFieldUpdateOperationsInput | string
   responseStatus?: Prisma.IntFieldUpdateOperationsInput | number
   responseJson?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  proposalJson?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  proposalRevision?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  proposalStatus?: Prisma.StringFieldUpdateOperationsInput | string
   emailDelivery?: Prisma.StringFieldUpdateOperationsInput | string
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -396,6 +449,9 @@ export type EventEditorCreateOperationsCountOrderByAggregateInput = {
   eventId?: Prisma.SortOrder
   responseStatus?: Prisma.SortOrder
   responseJson?: Prisma.SortOrder
+  proposalJson?: Prisma.SortOrder
+  proposalRevision?: Prisma.SortOrder
+  proposalStatus?: Prisma.SortOrder
   emailDelivery?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
@@ -411,6 +467,8 @@ export type EventEditorCreateOperationsMaxOrderByAggregateInput = {
   requestHash?: Prisma.SortOrder
   eventId?: Prisma.SortOrder
   responseStatus?: Prisma.SortOrder
+  proposalRevision?: Prisma.SortOrder
+  proposalStatus?: Prisma.SortOrder
   emailDelivery?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
@@ -422,6 +480,8 @@ export type EventEditorCreateOperationsMinOrderByAggregateInput = {
   requestHash?: Prisma.SortOrder
   eventId?: Prisma.SortOrder
   responseStatus?: Prisma.SortOrder
+  proposalRevision?: Prisma.SortOrder
+  proposalStatus?: Prisma.SortOrder
   emailDelivery?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
@@ -440,6 +500,9 @@ export type EventEditorCreateOperationsSelect<ExtArgs extends runtime.Types.Exte
   eventId?: boolean
   responseStatus?: boolean
   responseJson?: boolean
+  proposalJson?: boolean
+  proposalRevision?: boolean
+  proposalStatus?: boolean
   emailDelivery?: boolean
   createdAt?: boolean
   updatedAt?: boolean
@@ -452,6 +515,9 @@ export type EventEditorCreateOperationsSelectCreateManyAndReturn<ExtArgs extends
   eventId?: boolean
   responseStatus?: boolean
   responseJson?: boolean
+  proposalJson?: boolean
+  proposalRevision?: boolean
+  proposalStatus?: boolean
   emailDelivery?: boolean
   createdAt?: boolean
   updatedAt?: boolean
@@ -464,6 +530,9 @@ export type EventEditorCreateOperationsSelectUpdateManyAndReturn<ExtArgs extends
   eventId?: boolean
   responseStatus?: boolean
   responseJson?: boolean
+  proposalJson?: boolean
+  proposalRevision?: boolean
+  proposalStatus?: boolean
   emailDelivery?: boolean
   createdAt?: boolean
   updatedAt?: boolean
@@ -476,12 +545,15 @@ export type EventEditorCreateOperationsSelectScalar = {
   eventId?: boolean
   responseStatus?: boolean
   responseJson?: boolean
+  proposalJson?: boolean
+  proposalRevision?: boolean
+  proposalStatus?: boolean
   emailDelivery?: boolean
   createdAt?: boolean
   updatedAt?: boolean
 }
 
-export type EventEditorCreateOperationsOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"createOperationId" | "actorUserId" | "requestHash" | "eventId" | "responseStatus" | "responseJson" | "emailDelivery" | "createdAt" | "updatedAt", ExtArgs["result"]["eventEditorCreateOperations"]>
+export type EventEditorCreateOperationsOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"createOperationId" | "actorUserId" | "requestHash" | "eventId" | "responseStatus" | "responseJson" | "proposalJson" | "proposalRevision" | "proposalStatus" | "emailDelivery" | "createdAt" | "updatedAt", ExtArgs["result"]["eventEditorCreateOperations"]>
 
 export type $EventEditorCreateOperationsPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "EventEditorCreateOperations"
@@ -493,6 +565,9 @@ export type $EventEditorCreateOperationsPayload<ExtArgs extends runtime.Types.Ex
     eventId: string
     responseStatus: number
     responseJson: runtime.JsonValue | null
+    proposalJson: runtime.JsonValue | null
+    proposalRevision: string | null
+    proposalStatus: string
     emailDelivery: string
     createdAt: Date
     updatedAt: Date
@@ -925,6 +1000,9 @@ export interface EventEditorCreateOperationsFieldRefs {
   readonly eventId: Prisma.FieldRef<"EventEditorCreateOperations", 'String'>
   readonly responseStatus: Prisma.FieldRef<"EventEditorCreateOperations", 'Int'>
   readonly responseJson: Prisma.FieldRef<"EventEditorCreateOperations", 'Json'>
+  readonly proposalJson: Prisma.FieldRef<"EventEditorCreateOperations", 'Json'>
+  readonly proposalRevision: Prisma.FieldRef<"EventEditorCreateOperations", 'String'>
+  readonly proposalStatus: Prisma.FieldRef<"EventEditorCreateOperations", 'String'>
   readonly emailDelivery: Prisma.FieldRef<"EventEditorCreateOperations", 'String'>
   readonly createdAt: Prisma.FieldRef<"EventEditorCreateOperations", 'DateTime'>
   readonly updatedAt: Prisma.FieldRef<"EventEditorCreateOperations", 'DateTime'>

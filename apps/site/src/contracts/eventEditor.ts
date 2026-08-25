@@ -840,6 +840,24 @@ export const eventEditorScheduleOutcomeSchema = z.discriminatedUnion("status", [
     })
     .strict(),
 ]);
+export const eventEditorRevisionBindingSchema = z
+  .object({
+    editorRevision: id,
+    staffRevision: z.string().nullable(),
+    scheduleRevision: id,
+    fieldRevisions: z.record(z.string(), id),
+    timeSlotRevisions: z.record(z.string(), id),
+    rentalBookingRevision: id.nullable(),
+    rentalBookingRevisions: z.record(z.string(), id),
+    rentalBookingItemRevisions: z.record(z.string(), id),
+    availabilityRevision: id,
+  })
+  .strict();
+
+export type EventEditorRevisionBinding = z.infer<
+  typeof eventEditorRevisionBindingSchema
+>;
+
 
 export const eventEditorSnapshotSchema = z
   .object({
@@ -935,6 +953,346 @@ export const createEventEditorCommandSchema = z
     expectedRevisions: eventEditorExpectedCreateRevisionsSchema,
     draft: eventEditorDraftSchema,
     completion: eventEditorCreateCompletionSchema,
+    hasScheduleProposalSupport: z.boolean().optional(),
+  })
+  .strict();
+
+const proposalGraphUserSchema = z
+  .object({
+    id,
+    firstName: z.string(),
+    lastName: z.string(),
+    userName: z.string(),
+  })
+  .strict();
+
+const proposalGraphPlayerRegistrationSchema = z
+  .object({
+    id,
+    teamId: nullableId,
+    userId: id,
+    status: z.string(),
+    jerseyNumber: z.string().nullable(),
+    position: z.string().nullable(),
+    isCaptain: z.boolean(),
+  })
+  .strict();
+
+const proposalGraphTeamSchema = z
+  .object({
+    id,
+    captainId: z.string().nullable(),
+    division: nullableId,
+    kind: z.string().nullable(),
+    name: z.string(),
+    playerIds: z.array(id),
+    players: z.array(proposalGraphUserSchema),
+    playerRegistrations: z.array(proposalGraphPlayerRegistrationSchema),
+  })
+  .strict();
+
+const proposalGraphFieldSchema = z
+  .object({
+    id,
+    organizationId: nullableId,
+    divisions: z.array(id),
+    name: z.string(),
+  })
+  .strict();
+
+const proposalGraphTimeSlotSchema = z
+  .object({
+    id,
+    dayOfWeek: integer.nonnegative().max(6),
+    daysOfWeek: z.array(integer.nonnegative().max(6)),
+    startDate: isoDateTime.optional(),
+    endDate: isoDateTime.nullable(),
+    repeating: z.boolean(),
+    startTimeMinutes: integer.nonnegative(),
+    endTimeMinutes: integer.nonnegative(),
+    price: z.number().nullable(),
+    scheduledFieldId: nullableId,
+    scheduledFieldIds: z.array(id),
+    divisions: z.array(id),
+  })
+  .strict();
+
+const proposalGraphOfficialPositionSchema = z
+  .object({
+    id,
+    name: z.string(),
+    count: integer.nonnegative(),
+    order: integer.nonnegative(),
+  })
+  .strict();
+
+const proposalGraphEventOfficialSchema = z
+  .object({
+    id,
+    userId: id,
+    positionIds: z.array(id),
+    fieldIds: z.array(id),
+    isActive: z.boolean(),
+  })
+  .strict();
+
+const proposalGraphDivisionPhaseSettingsSchema = z
+  .object({
+    matchRulesOverride: z.unknown().nullable().optional(),
+    autoCreatePointMatchIncidents: z.boolean().optional(),
+    segmentLengthMinutes: integer.nonnegative().nullable().optional(),
+    segmentBreakMinutes: integer.nonnegative().nullable().optional(),
+    doTeamsOfficiate: z.boolean().optional(),
+    officialPositions: z.array(proposalGraphOfficialPositionSchema).optional(),
+  })
+  .strict();
+
+const proposalGraphPlayoffConfigSchema = z
+  .object({
+    doubleElimination: z.boolean(),
+    winnerSetCount: integer.nonnegative(),
+    loserSetCount: integer.nonnegative(),
+    winnerBracketPointsToVictory: z.array(z.number()),
+    loserBracketPointsToVictory: z.array(z.number()),
+    prize: z.string(),
+    fieldCount: integer.nonnegative(),
+    restTimeMinutes: integer.nonnegative(),
+    matchDurationMinutes: integer.nonnegative().nullable().optional(),
+    setDurationMinutes: integer.nonnegative().nullable().optional(),
+  })
+  .strict();
+
+const proposalGraphLeagueConfigSchema = z
+  .object({
+    gamesPerOpponent: integer.nonnegative().optional(),
+    includePlayoffs: z.boolean().optional(),
+    playoffTeamCount: integer.nonnegative().optional(),
+    usesSets: z.boolean().optional(),
+    matchDurationMinutes: integer.nonnegative().nullable().optional(),
+    setDurationMinutes: integer.nonnegative().nullable().optional(),
+    setsPerMatch: integer.nonnegative().optional(),
+    pointsToVictory: z.array(z.number()).optional(),
+    restTimeMinutes: integer.nonnegative().optional(),
+  })
+  .strict();
+
+const proposalGraphDivisionSchema = z
+  .object({
+    id,
+    name: z.string(),
+    kind: z.string(),
+    role: z.string(),
+    phase: z.string().nullable(),
+    sourceDivisionId: nullableId,
+    isSystemGenerated: z.boolean(),
+    phaseSettings: z.record(
+      z.string(),
+      proposalGraphDivisionPhaseSettingsSchema,
+    ),
+    teamIds: z.array(id),
+    playoffTeamCount: integer.nonnegative().nullable(),
+    playoffPlacementDivisionIds: z.array(id),
+    standingsOverrides: z.record(z.string(), z.number()).nullable(),
+    standingsConfirmedAt: isoDateTime.nullable(),
+    standingsConfirmedBy: nullableId,
+    playoffConfig: proposalGraphPlayoffConfigSchema.nullable(),
+    leagueConfig: proposalGraphLeagueConfigSchema.nullable(),
+  })
+  .strict();
+
+const proposalGraphSegmentSchema = z
+  .object({
+    id,
+    eventId: nullableId.optional(),
+    matchId: id,
+    sequence: integer.nonnegative(),
+    status: z.string(),
+    scores: z.record(z.string(), z.number()),
+    winnerEventTeamId: nullableId.optional(),
+    startedAt: isoDateTime.nullable().optional(),
+    endedAt: isoDateTime.nullable().optional(),
+    resultType: z.string().nullable().optional(),
+    statusReason: z.string().nullable().optional(),
+    metadata: z.record(z.string(), z.unknown()).nullable().optional(),
+    createdAt: isoDateTime.nullable().optional(),
+    updatedAt: isoDateTime.nullable().optional(),
+  })
+  .strict();
+
+const proposalGraphIncidentSchema = z
+  .object({
+    id,
+    eventId: nullableId.optional(),
+    matchId: id,
+    segmentId: nullableId.optional(),
+    eventTeamId: nullableId.optional(),
+    eventRegistrationId: nullableId.optional(),
+    participantUserId: nullableId.optional(),
+    officialUserId: nullableId.optional(),
+    incidentType: z.string(),
+    sequence: integer.nonnegative(),
+    minute: integer.nonnegative().nullable().optional(),
+    clock: z.string().nullable().optional(),
+    clockSeconds: integer.nonnegative().nullable().optional(),
+    linkedPointDelta: z.number().nullable().optional(),
+    note: z.string().nullable().optional(),
+    metadata: z.record(z.string(), z.unknown()).nullable().optional(),
+    createdAt: isoDateTime.nullable().optional(),
+    updatedAt: isoDateTime.nullable().optional(),
+  })
+  .strict();
+
+const proposalGraphOfficialAssignmentSchema = z
+  .object({
+    positionId: id,
+    slotIndex: integer.nonnegative(),
+    holderType: z.string(),
+    userId: nullableId,
+    eventOfficialId: nullableId,
+    checkedIn: z.boolean(),
+    hasConflict: z.boolean(),
+  })
+  .strict();
+
+const eventEditorProposalGraphMatchSchema = z
+  .object({
+    id,
+    matchId: z.number().int().nullable(),
+    eventId: id,
+    start: isoDateTime.nullable(),
+    end: isoDateTime.nullable(),
+    locked: z.boolean(),
+    placementState: z.string(),
+    phase: z.string().nullable(),
+    sourceDivisionId: nullableId,
+    phaseDivisionId: nullableId,
+    division: nullableId,
+    fieldId: nullableId,
+    team1Id: nullableId,
+    team2Id: nullableId,
+    team1Seed: z.number().int().nullable(),
+    team2Seed: z.number().int().nullable(),
+    status: z.string().nullable(),
+    resultStatus: z.string().nullable(),
+    resultType: z.string().nullable(),
+    actualStart: isoDateTime.nullable(),
+    actualEnd: isoDateTime.nullable(),
+    statusReason: z.string().nullable(),
+    winnerEventTeamId: nullableId,
+    segments: z.array(proposalGraphSegmentSchema),
+    incidents: z.array(proposalGraphIncidentSchema),
+    officialIds: z.array(proposalGraphOfficialAssignmentSchema),
+    officialAssignments: z.array(proposalGraphOfficialAssignmentSchema),
+    teamOfficialId: nullableId,
+    teamOfficialSeed: z.null(),
+    matchRulesSnapshot: z.unknown().nullable(),
+    resolvedMatchRules: z.unknown().nullable(),
+    team1Points: z.array(z.number()),
+    team2Points: z.array(z.number()),
+    losersBracket: z.boolean(),
+    winnerNextMatchId: nullableId,
+    loserNextMatchId: nullableId,
+    previousLeftId: nullableId,
+    previousRightId: nullableId,
+    side: z.string().nullable(),
+    officialCheckedIn: z.boolean(),
+    team1: proposalGraphTeamSchema.nullable(),
+    team2: proposalGraphTeamSchema.nullable(),
+    teamOfficial: proposalGraphTeamSchema.nullable(),
+    official: proposalGraphUserSchema.nullable(),
+    field: proposalGraphFieldSchema.nullable(),
+  })
+  .strict();
+
+const eventEditorProposalGraphEventSchema = z
+  .object({
+    id,
+    name: z.string(),
+    description: z.string(),
+    start: isoDateTime,
+    end: isoDateTime,
+    location: z.string(),
+    coordinates: z.array(z.number()).nullable(),
+    price: z.number().nullable(),
+    minAge: z.number().int().nullable(),
+    maxAge: z.number().int().nullable(),
+    rating: z.number().nullable(),
+    imageId: z.string().nullable(),
+    hostId: z.string().nullable(),
+    noFixedEndDateTime: z.boolean(),
+    scheduleEndConstraint: isoDateTime.nullable(),
+    generatedScheduleEnd: isoDateTime.nullable(),
+    state: z.string(),
+    maxParticipants: z.number().int(),
+    teamSizeLimit: z.number().int().nullable(),
+    restTimeMinutes: z.number().int().nullable(),
+    teamSignup: z.boolean(),
+    singleDivision: z.boolean(),
+    waitListIds: z.array(id),
+    freeAgentIds: z.array(id),
+    teamIds: z.array(id),
+    userIds: z.array(id),
+    fieldIds: z.array(id),
+    timeSlotIds: z.array(id),
+    officialIds: z.array(id),
+    officialSchedulingMode: z.string(),
+    staffingPriority: z.string(),
+    officialPositions: z.array(proposalGraphOfficialPositionSchema),
+    eventOfficials: z.array(proposalGraphEventOfficialSchema),
+    matchRulesOverride: z.unknown().nullable(),
+    autoCreatePointMatchIncidents: z.boolean(),
+    resolvedMatchRules: z.unknown().nullable(),
+    cancellationRefundHours: z.number().int().nullable(),
+    registrationCutoffHours: z.number().int().nullable(),
+    seedColor: z.number().int().nullable(),
+    eventType: z.string(),
+    sportIds: z.array(id),
+    leagueScoringConfigId: nullableId,
+    organizationId: nullableId,
+    requiredTemplateIds: z.array(id),
+    allowPaymentPlans: z.boolean(),
+    installmentCount: z.number().int(),
+    installmentDueDates: z.array(isoDateTime),
+    installmentDueRelativeDays: z.array(z.number().int()),
+    installmentAmounts: z.array(z.number()),
+    allowTeamSplitDefault: z.boolean(),
+    splitLeaguePlayoffDivisions: z.boolean(),
+    divisions: z.array(id),
+    divisionDetails: z.array(proposalGraphDivisionSchema),
+    playoffDivisionDetails: z.array(proposalGraphDivisionSchema),
+    fields: z.array(proposalGraphFieldSchema),
+    teams: z.array(proposalGraphTeamSchema),
+    timeSlots: z.array(proposalGraphTimeSlotSchema),
+    officials: z.array(proposalGraphUserSchema),
+    doubleElimination: z.boolean().optional(),
+    winnerSetCount: z.number().int().nullable().optional(),
+    loserSetCount: z.number().int().nullable().optional(),
+    winnerBracketPointsToVictory: z.array(z.number()).optional(),
+    loserBracketPointsToVictory: z.array(z.number()).optional(),
+    prize: z.string().nullable().optional(),
+    fieldCount: z.number().int().nullable().optional(),
+    matches: z.array(eventEditorProposalGraphMatchSchema).optional(),
+    usesSets: z.boolean().optional(),
+    matchDurationMinutes: z.number().int().nullable().optional(),
+    setDurationMinutes: z.number().int().nullable().optional(),
+    setsPerMatch: z.number().int().nullable().optional(),
+    doTeamsOfficiate: z.boolean().optional(),
+    teamOfficialsMaySwap: z.boolean().optional(),
+    teamCheckInMode: z.string().optional(),
+    teamCheckInOpenMinutesBefore: z.number().int().optional(),
+    allowMatchRosterEdits: z.boolean().optional(),
+    allowTemporaryMatchPlayers: z.boolean().optional(),
+    gamesPerOpponent: z.number().int().optional(),
+    includePlayoffs: z.boolean().optional(),
+    playoffTeamCount: z.number().int().optional(),
+    pointsToVictory: z.array(z.number()).optional(),
+  })
+  .strict();
+
+export const eventEditorCreateProposalGraphSchema = z
+  .object({
+    event: eventEditorProposalGraphEventSchema,
+    matches: z.array(eventEditorProposalGraphMatchSchema),
   })
   .strict();
 
@@ -945,6 +1303,7 @@ export const eventEditorSaveResultSchema = z
     questionIdMap: z.record(z.string(), id),
     staffEmailDelivery: z.enum(["QUEUED", "FAILED", "NOT_REQUESTED"]),
     scheduleOutcome: eventEditorScheduleOutcomeSchema,
+    graph: eventEditorCreateProposalGraphSchema.optional(),
   })
   .strict();
 
@@ -956,6 +1315,72 @@ export const eventEditorCreateResultSchema = eventEditorSaveResultSchema
     scheduleRevision: id,
   })
   .strict();
+export const eventEditorCreateProposalScheduleOutcomeSchema = z
+  .object({
+    status: z.literal("BUILT"),
+    matchCount: z.number().int().positive(),
+    matches: z.array(editorMatchProjectionSchema),
+    warnings: z.array(eventEditorScheduleWarningSchema),
+  })
+  .strict();
+
+export const eventEditorCreateProposalSchema = z
+  .object({
+    status: z.literal("PROPOSED"),
+    createOperationId: id,
+    eventId: id,
+    proposalRevision: id,
+    expectedRevisions: eventEditorExpectedCreateRevisionsSchema,
+    completion: eventEditorCreateCompletionSchema,
+    snapshot: eventEditorSnapshotSchema,
+    revisionBinding: eventEditorRevisionBindingSchema,
+    scheduleOutcome: eventEditorCreateProposalScheduleOutcomeSchema,
+    graph: eventEditorCreateProposalGraphSchema,
+  })
+  .strict();
+export const eventEditorProposalReferenceSchema = z
+  .object({
+    contractVersion: z.literal(EVENT_EDITOR_CONTRACT_VERSION),
+    createOperationId: id,
+    proposalRevision: id,
+  })
+  .strict();
+
+
+export const eventEditorAcceptProposalCommandSchema =
+  eventEditorProposalReferenceSchema.extend({
+    draft: eventEditorDraftSchema,
+  });
+
+export const eventEditorRejectProposalCommandSchema =
+  eventEditorProposalReferenceSchema;
+export const eventEditorCreateResponseSchema = z.discriminatedUnion("status", [
+  eventEditorCreateResultSchema,
+  eventEditorCreateProposalSchema,
+]);
+
+export type EventEditorCreateProposalScheduleOutcome = z.infer<
+  typeof eventEditorCreateProposalScheduleOutcomeSchema
+>;
+export type EventEditorCreateProposalGraph = z.infer<
+  typeof eventEditorCreateProposalGraphSchema
+>;
+export type EventEditorCreateProposal = z.infer<
+  typeof eventEditorCreateProposalSchema
+>;
+export type EventEditorProposalReference = z.infer<
+  typeof eventEditorProposalReferenceSchema
+>;
+export type EventEditorAcceptProposalCommand = z.infer<
+  typeof eventEditorAcceptProposalCommandSchema
+>;
+export type EventEditorRejectProposalCommand = z.infer<
+  typeof eventEditorRejectProposalCommandSchema
+>;
+export type EventEditorCreateResponse = z.infer<
+  typeof eventEditorCreateResponseSchema
+>;
+
 
 export const eventEditorErrorSchema = z
   .object({
@@ -982,6 +1407,9 @@ export const eventEditorErrorSchema = z
       "EDITOR_SCHEDULE_UNSUPPORTED",
       "EDITOR_SCHEDULE_INPUT_INVALID",
       "EDITOR_SCHEDULE_FAILED",
+      "EDITOR_PROPOSAL_INVALID",
+      "EDITOR_PROPOSAL_STALE",
+      "EDITOR_PROPOSAL_NOT_FOUND",
       "INVALID_TIME_SLOT",
     ]),
     field: z.string().nullable().optional(),
@@ -1093,3 +1521,31 @@ export const parseEventEditorCreateResult = (
     snapshot: normalizeEditorSnapshotScheduling(result.snapshot),
   };
 };
+export const parseEventEditorCreateProposal = (
+  input: unknown,
+): EventEditorCreateProposal => {
+  const proposal = eventEditorCreateProposalSchema.parse(input);
+  return {
+    ...proposal,
+    snapshot: normalizeEditorSnapshotScheduling(proposal.snapshot),
+  };
+};
+export const parseEventEditorCreateResponse = (
+  input: unknown,
+): EventEditorCreateResponse => {
+  const response = eventEditorCreateResponseSchema.parse(input);
+  return response.status === "PROPOSED"
+    ? parseEventEditorCreateProposal(response)
+    : {
+        ...response,
+        snapshot: normalizeEditorSnapshotScheduling(response.snapshot),
+      };
+};
+export const parseEventEditorAcceptProposalCommand = (
+  input: unknown,
+): EventEditorAcceptProposalCommand =>
+  eventEditorAcceptProposalCommandSchema.parse(input);
+export const parseEventEditorRejectProposalCommand = (
+  input: unknown,
+): EventEditorRejectProposalCommand =>
+  eventEditorRejectProposalCommandSchema.parse(input);
