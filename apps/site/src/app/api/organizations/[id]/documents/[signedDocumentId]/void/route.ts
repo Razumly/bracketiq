@@ -13,8 +13,6 @@ import {
 } from "@/server/documentEvidence";
 import {
   notifyDocumentEvidenceChange,
-  recordDocumentEvidenceInAppNotification,
-  type DocumentNotificationDatabase,
 } from "@/server/documentNotifications";
 
 const DOCUMENT_VOID_REASONS = [
@@ -54,7 +52,7 @@ export async function POST(
   const { id: organizationId, signedDocumentId } = await params;
   const organization = await prisma.organizations.findUnique({
     where: { id: organizationId },
-    select: { id: true, ownerId: true },
+    select: { id: true, ownerId: true, name: true },
   });
   if (!organization) {
     return NextResponse.json(
@@ -122,22 +120,6 @@ export async function POST(
   const normalizedNote = parsedBody.data.note || null;
   const now = new Date();
   let isVoided = false;
-  const subject = evidence.documentSubjectId
-    ? await prisma.documentSubjects.findUnique({
-      where: { id: evidence.documentSubjectId },
-      select: { userId: true },
-    })
-    : null;
-  const notificationInput = subject?.userId
-    ? {
-      organizationId,
-      subjectUserId: subject.userId,
-      evidenceId: evidence.id,
-      documentName: evidence.documentName,
-      action: "VOID" as const,
-      actorUserId: session.userId,
-    }
-    : null;
 
   try {
     await prisma.$transaction(async (tx) => {
@@ -174,12 +156,6 @@ export async function POST(
         },
         tx as unknown as DocumentEvidenceDatabase,
       );
-      if (notificationInput) {
-        await recordDocumentEvidenceInAppNotification(
-          notificationInput,
-          tx as unknown as DocumentNotificationDatabase,
-        );
-      }
     });
   } catch (error) {
     const message =
@@ -188,12 +164,23 @@ export async function POST(
         : "Unable to void document evidence.";
     return NextResponse.json({ error: message }, { status: 400 });
   }
-  if (isVoided && notificationInput) {
+  if (isVoided && evidence.documentSubjectId) {
     try {
-      await notifyDocumentEvidenceChange(
-        notificationInput,
-        { isInAppIncluded: false },
-      );
+      const subject = await prisma.documentSubjects.findUnique({
+        where: { id: evidence.documentSubjectId },
+        select: { userId: true },
+      });
+      if (subject?.userId) {
+        await notifyDocumentEvidenceChange({
+          organizationId,
+          organizationName: organization.name,
+          subjectUserId: subject.userId,
+          evidenceId: evidence.id,
+          documentName: evidence.documentName,
+          action: "VOID",
+          actorUserId: session.userId,
+        });
+      }
     } catch (error) {
       console.error("Document void notification failed.", {
         organizationId,

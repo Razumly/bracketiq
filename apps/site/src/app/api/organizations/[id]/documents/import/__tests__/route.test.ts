@@ -36,7 +36,6 @@ const ensureDocumentSubjectMock = jest.fn();
 const signedDocumentEvidenceFieldsMock = jest.fn();
 const createDocumentRequirementSatisfactionMock = jest.fn();
 const appendDocumentEvidenceAuditEventMock = jest.fn();
-const recordDocumentEvidenceInAppNotificationMock = jest.fn();
 const notifyDocumentEvidenceChangeMock = jest.fn();
 const readByIdChunksMock = <T>(
   ids: string[],
@@ -61,9 +60,6 @@ jest.mock('@/server/documentEvidence', () => ({
 }));
 jest.mock('@/server/documentNotifications', () => ({
   notifyDocumentEvidenceChange: (...args: unknown[]) => notifyDocumentEvidenceChangeMock(...args),
-  recordDocumentEvidenceInAppNotification: (...args: unknown[]) => (
-    recordDocumentEvidenceInAppNotificationMock(...args)
-  ),
 }));
 jest.mock('@/lib/pdfUploadValidation', () => ({
   validatePdfBuffer: validatePdfBufferMock,
@@ -106,7 +102,11 @@ describe('POST /api/organizations/[id]/documents/import', () => {
     jest.clearAllMocks();
     requireSessionMock.mockResolvedValue({ userId: 'manager_1', isAdmin: false });
     hasOrgPermissionMock.mockResolvedValue(true);
-    prismaMock.organizations.findUnique.mockResolvedValue({ id: 'org_1', ownerId: 'owner_1' });
+    prismaMock.organizations.findUnique.mockResolvedValue({
+      id: 'org_1',
+      ownerId: 'owner_1',
+      name: 'City League',
+    });
     prismaMock.templateDocuments.findUnique.mockResolvedValue({
       id: 'version_1',
       title: 'Imported Waiver',
@@ -177,7 +177,6 @@ describe('POST /api/organizations/[id]/documents/import', () => {
     txMock.signedDocuments.create.mockResolvedValue({ id: 'evidence_1' });
     createDocumentRequirementSatisfactionMock.mockResolvedValue(undefined);
     appendDocumentEvidenceAuditEventMock.mockResolvedValue(undefined);
-    recordDocumentEvidenceInAppNotificationMock.mockResolvedValue(undefined);
     notifyDocumentEvidenceChangeMock.mockResolvedValue(undefined);
     prismaMock.$transaction.mockImplementation(async (callback: (tx: typeof txMock) => unknown) => (
       callback(txMock)
@@ -252,28 +251,15 @@ describe('POST /api/organizations/[id]/documents/import', () => {
       }),
       expect.anything(),
     );
-    expect(recordDocumentEvidenceInAppNotificationMock).toHaveBeenCalledWith(
-      {
-        organizationId: 'org_1',
-        subjectUserId: 'player_1',
-        evidenceId: expect.any(String),
-        documentName: 'Imported Waiver',
-        action: 'IMPORT',
-        actorUserId: 'manager_1',
-      },
-      expect.anything(),
-    );
-    expect(notifyDocumentEvidenceChangeMock).toHaveBeenCalledWith(
-      {
-        organizationId: 'org_1',
-        subjectUserId: 'player_1',
-        evidenceId: expect.any(String),
-        documentName: 'Imported Waiver',
-        action: 'IMPORT',
-        actorUserId: 'manager_1',
-      },
-      { isInAppIncluded: false },
-    );
+    expect(notifyDocumentEvidenceChangeMock).toHaveBeenCalledWith({
+      organizationId: 'org_1',
+      organizationName: 'City League',
+      subjectUserId: 'player_1',
+      evidenceId: expect.any(String),
+      documentName: 'Imported Waiver',
+      action: 'IMPORT',
+      actorUserId: 'manager_1',
+    });
   });
   it('keeps a committed import when notification delivery fails', async () => {
     notifyDocumentEvidenceChangeMock.mockRejectedValueOnce(new Error('Notification failed.'));
@@ -1074,6 +1060,7 @@ describe('POST /api/organizations/[id]/documents/import', () => {
       key: 'private/org_1/signed.pdf',
       bucket: 'private-bucket',
     });
+    expect(notifyDocumentEvidenceChangeMock).not.toHaveBeenCalled();
   });
 
   it('rolls back the database result and cleans up storage when satisfaction fails', async () => {

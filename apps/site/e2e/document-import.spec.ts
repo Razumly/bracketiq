@@ -251,8 +251,34 @@ test("imports, previews, voids, and preserves a signed customer PDF", async ({
     });
     await participantPage.getByRole("button", { name: /Notifications/ }).click();
     await expect(participantPage.getByText("Document notifications", { exact: true })).toBeVisible();
-    await expect(participantPage.getByText("Signed document added", { exact: true }).first()).toBeVisible();
+    await expect(participantPage.getByText("Document imported", { exact: true }).first()).toBeVisible();
+    await expect(
+      participantPage.getByText(
+        `City League added "${documentTitle}" as imported signed-document evidence. Status: Imported.`,
+        { exact: true },
+      ),
+    ).toBeVisible();
     await expect(participantPage.getByText("1 unread", { exact: true })).toBeVisible();
+    const importedNotificationLink = participantPage
+      .getByRole("link", { name: "View document", exact: true })
+      .first();
+    const importedNotificationUrl = await importedNotificationLink.getAttribute("href");
+    expect(importedNotificationUrl).toMatch(/\/api\/documents\/signed\/.+\/file$/);
+    const importedResponsePromise = participantContext.waitForEvent("response", {
+      predicate: (response) => response.url().includes("/api/documents/signed/")
+        && response.url().endsWith("/file")
+        && response.request().method() === "GET",
+    });
+    const importedPopupPromise = participantPage.waitForEvent("popup");
+    await importedNotificationLink.click();
+    const importedPopup = await importedPopupPromise;
+    const importedResponse = await importedResponsePromise;
+    await expect.poll(() => importedPopup.url()).toBe(
+      new URL(importedNotificationUrl!, resolveBaseUrl()).toString(),
+    );
+    expect(importedResponse.status()).toBe(200);
+    expect(importedResponse.headers()["content-type"]).toContain("application/pdf");
+    await importedPopup.close();
     await participantPage.getByRole("button", { name: "Mark read", exact: true }).click();
     await expect(participantPage.getByText("1 unread", { exact: true })).toBeHidden();
     await expect(
@@ -287,5 +313,47 @@ test("imports, previews, voids, and preserves a signed customer PDF", async ({
   expect(preservedFile.status()).toBe(200);
   expect(preservedFile.headers()["content-type"]).toContain("application/pdf");
   expect((await preservedFile.body()).subarray(0, 5).toString("ascii")).toBe("%PDF-");
+  const voidParticipantContext = await browser.newContext({
+    storageState: storageStatePath("participant"),
+  });
+  const voidParticipantPage = await voidParticipantContext.newPage();
+  try {
+    await voidParticipantPage.goto(`${resolveBaseUrl()}/profile?tab=notifications`, {
+      waitUntil: "domcontentloaded",
+    });
+    await voidParticipantPage.getByRole("button", { name: /Notifications/ }).click();
+    await expect(voidParticipantPage.getByText("Document notifications", { exact: true })).toBeVisible();
+    await expect(
+      voidParticipantPage.getByText("Document evidence voided", { exact: true }).first(),
+    ).toBeVisible();
+    await expect(
+      voidParticipantPage.getByText(
+        `City League voided imported signed-document evidence for "${documentTitle}". Status: Voided.`,
+        { exact: true },
+      ),
+    ).toBeVisible();
+    const voidNotificationLink = voidParticipantPage
+      .getByRole("link", { name: "View document", exact: true })
+      .first();
+    const voidNotificationUrl = await voidNotificationLink.getAttribute("href");
+    expect(voidNotificationUrl).toMatch(/\/api\/documents\/signed\/.+\/file$/);
+    const voidResponsePromise = voidParticipantContext.waitForEvent("response", {
+      predicate: (response) => response.url().includes("/api/documents/signed/")
+        && response.url().endsWith("/file")
+        && response.request().method() === "GET",
+    });
+    const voidPopupPromise = voidParticipantPage.waitForEvent("popup");
+    await voidNotificationLink.click();
+    const voidPopup = await voidPopupPromise;
+    const voidResponse = await voidResponsePromise;
+    await expect.poll(() => voidPopup.url()).toBe(
+      new URL(voidNotificationUrl!, resolveBaseUrl()).toString(),
+    );
+    expect(voidResponse.status()).toBe(200);
+    expect(voidResponse.headers()["content-type"]).toContain("application/pdf");
+    await voidPopup.close();
+  } finally {
+    await voidParticipantContext.close();
+  }
   expect([...consoleErrors, ...previewConsoleErrors]).toEqual([]);
 });

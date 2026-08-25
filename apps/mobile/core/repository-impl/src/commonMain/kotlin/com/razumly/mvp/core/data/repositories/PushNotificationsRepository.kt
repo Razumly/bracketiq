@@ -86,6 +86,7 @@ interface IPushNotificationsRepository {
     suspend fun addDeviceAsTarget(): Result<Unit>
     suspend fun removeDeviceAsTarget(): Result<Unit>
     suspend fun getDeviceTargetDebugStatus(syncBeforeCheck: Boolean = false): Result<PushDeviceTargetDebugStatus>
+    fun setNotificationPayloadHandler(handler: ((Map<String, String>) -> Unit)?) {}
     fun handleNotificationPayload(data: Map<String, String>) {}
 }
 
@@ -115,6 +116,7 @@ class PushNotificationsRepository(
     private val pushTokenState =
         userDataSource.getPushToken().stateIn(scope, SharingStarted.Eagerly, "")
     private var deferredTokenSyncJob: Job? = null
+    private var notificationPayloadHandler: ((Map<String, String>) -> Unit)? = null
     private var activeChatId: String? = null
     private val invitePushInvalidationRefresher = InvitePushInvalidationRefresher(
         userDataSource = userDataSource,
@@ -145,8 +147,10 @@ class PushNotificationsRepository(
         }
 
         override fun onNotificationClicked(data: PayloadData) {
+            val payloadData = data.toStringPayloadMap()
+            notificationPayloadHandler?.invoke(payloadData)
             scope.launch {
-                refreshInviteNotificationFromPayloadIfNeeded(data.toStringPayloadMap())
+                refreshInviteNotificationFromPayloadIfNeeded(payloadData)
                 Napier.d(
                     tag = "PushNotificationsRepository",
                     message = "Notification clicked: $data"
@@ -333,6 +337,9 @@ class PushNotificationsRepository(
         if (activeChatId == expectedChatId) {
             activeChatId = null
         }
+    }
+    override fun setNotificationPayloadHandler(handler: ((Map<String, String>) -> Unit)?) {
+        notificationPayloadHandler = handler
     }
 
     override fun handleNotificationPayload(data: Map<String, String>) {

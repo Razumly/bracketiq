@@ -27,7 +27,6 @@ const hasOrgPermissionMock = jest.fn();
 const invalidateDocumentRequirementSatisfactionsMock = jest.fn();
 const appendDocumentEvidenceAuditEventMock = jest.fn();
 const notifyDocumentEvidenceChangeMock = jest.fn();
-const recordDocumentEvidenceInAppNotificationMock = jest.fn();
 jest.mock("@/lib/prisma", () => ({ prisma: prismaMock }));
 jest.mock("@/lib/authServer", () => ({
   verifyRecentAuthToken: (...args: unknown[]) => verifyRecentAuthTokenMock(...args),
@@ -44,7 +43,6 @@ jest.mock("@/server/documentEvidence", () => ({
 }));
 jest.mock("@/server/documentNotifications", () => ({
   notifyDocumentEvidenceChange: notifyDocumentEvidenceChangeMock,
-  recordDocumentEvidenceInAppNotification: recordDocumentEvidenceInAppNotificationMock,
 }));
 
 import { POST } from "@/app/api/organizations/[id]/documents/[signedDocumentId]/void/route";
@@ -70,6 +68,7 @@ describe("POST /api/organizations/[id]/documents/[signedDocumentId]/void", () =>
     prismaMock.organizations.findUnique.mockResolvedValue({
       id: "org_1",
       ownerId: "owner_1",
+      name: "City League",
     });
     prismaMock.signedDocuments.findFirst.mockResolvedValue({
       id: "evidence_1",
@@ -148,6 +147,7 @@ describe("POST /api/organizations/[id]/documents/[signedDocumentId]/void", () =>
       invalidateDocumentRequirementSatisfactionsMock,
     ).not.toHaveBeenCalled();
     expect(appendDocumentEvidenceAuditEventMock).not.toHaveBeenCalled();
+    expect(notifyDocumentEvidenceChangeMock).not.toHaveBeenCalled();
   });
 
   it("rejects voiding provider evidence", async () => {
@@ -337,32 +337,19 @@ describe("POST /api/organizations/[id]/documents/[signedDocumentId]/void", () =>
       },
     );
 
-    expect(recordDocumentEvidenceInAppNotificationMock).toHaveBeenCalledWith(
-      {
-        organizationId: "org_1",
-        subjectUserId: "player_1",
-        evidenceId: "evidence_1",
-        documentName: "Waiver",
-        action: "VOID",
-        actorUserId: "manager_1",
-      },
-      expect.anything(),
-    );
-    expect(notifyDocumentEvidenceChangeMock).toHaveBeenCalledWith(
-      {
-        organizationId: "org_1",
-        subjectUserId: "player_1",
-        evidenceId: "evidence_1",
-        documentName: "Waiver",
-        action: "VOID",
-        actorUserId: "manager_1",
-      },
-      { isInAppIncluded: false },
-    );
+    expect(notifyDocumentEvidenceChangeMock).toHaveBeenCalledWith({
+      organizationId: "org_1",
+      organizationName: "City League",
+      subjectUserId: "player_1",
+      evidenceId: "evidence_1",
+      documentName: "Waiver",
+      action: "VOID",
+      actorUserId: "manager_1",
+    });
   });
-  it("rolls back a void when in-app notification recording fails", async () => {
-    recordDocumentEvidenceInAppNotificationMock.mockRejectedValueOnce(
-      new Error("In-app notification storage failed."),
+  it("keeps a committed void when notification delivery fails", async () => {
+    notifyDocumentEvidenceChangeMock.mockRejectedValueOnce(
+      new Error("Notification delivery failed."),
     );
     prismaMock.signedDocuments.findFirst.mockResolvedValue({
       id: "evidence_1",
@@ -390,9 +377,9 @@ describe("POST /api/organizations/[id]/documents/[signedDocumentId]/void", () =>
       },
     );
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(200);
     expect(txMock.signedDocuments.updateMany).toHaveBeenCalled();
-    expect(notifyDocumentEvidenceChangeMock).not.toHaveBeenCalled();
+    expect(notifyDocumentEvidenceChangeMock).toHaveBeenCalled();
   });
   it.each([
     "Wrong Document Subject",

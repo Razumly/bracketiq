@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Badge, Button, Group, Paper, Stack, Text } from "@mantine/core";
+import { Anchor, Alert, Badge, Button, Group, Paper, Stack, Text } from "@mantine/core";
 import { formatDisplayDateTime } from "@/lib/dateUtils";
 import {
   userNotificationService,
@@ -15,6 +15,14 @@ type DocumentNotificationsPanelProps = {
 const getNotificationDate = (value: string): string => (
   formatDisplayDateTime(value) || "Unknown date"
 );
+
+const getDocumentViewUrl = (notification: UserNotification): string | null => {
+  const value = notification.data?.viewUrl;
+  if (typeof value !== "string" || !/^\/api\/documents\/signed\/[^/?#]+\/file$/.test(value)) {
+    return null;
+  }
+  return value;
+};
 
 export default function DocumentNotificationsPanel({ userId }: DocumentNotificationsPanelProps) {
   const [notifications, setNotifications] = useState<UserNotification[]>([]);
@@ -114,6 +122,17 @@ export default function DocumentNotificationsPanel({ userId }: DocumentNotificat
                 <div>
                   <Text fw={notification.readAt ? 500 : 700}>{notification.title}</Text>
                   <Text size="sm" mt={2}>{notification.body}</Text>
+                  {getDocumentViewUrl(notification) && (
+                    <Anchor
+                      href={getDocumentViewUrl(notification) as string}
+                      target="_blank"
+                      rel="noreferrer"
+                      size="sm"
+                      mt={4}
+                    >
+                      View document
+                    </Anchor>
+                  )}
                   <Text size="xs" c="dimmed" mt={4}>{getNotificationDate(notification.createdAt)}</Text>
                 </div>
                 {!notification.readAt && (

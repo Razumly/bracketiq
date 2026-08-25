@@ -47,10 +47,11 @@ import com.razumly.mvp.core.data.repositories.EventTemplateSummary
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IImagesRepository
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
-import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.PushDeviceTargetDebugStatus
+import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.ProfileDocumentCard
 import com.razumly.mvp.core.data.repositories.ProfileDocumentType
+import com.razumly.mvp.core.data.repositories.ProfileDocumentsBundle
 import com.razumly.mvp.core.data.repositories.RepositoryPage
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.SignerContext
@@ -360,6 +361,15 @@ data class ProfileDocumentsState(
     val error: String? = null,
 )
 
+internal fun findProfileDocumentById(
+    documentId: String?,
+    documents: ProfileDocumentsBundle,
+): ProfileDocumentCard? {
+    val normalizedId = documentId?.trim()?.takeIf(String::isNotBlank) ?: return null
+    return documents.unsigned.firstOrNull { document -> document.id == normalizedId }
+        ?: documents.signed.firstOrNull { document -> document.id == normalizedId }
+}
+
 data class ProfileDiscountsState(
     val isLoading: Boolean = false,
     val discounts: List<DiscountOffer> = emptyList(),
@@ -557,6 +567,7 @@ enum class ProfileStartDestination {
     HOME,
     MY_SCHEDULE,
     INVITES,
+    DOCUMENTS,
 }
 
 data class ProfileTextSignaturePromptState(
@@ -777,6 +788,7 @@ private fun ProfileStartDestination.toProfileConfig(): ProfileConfig = when (thi
     ProfileStartDestination.HOME -> ProfileConfig.Home
     ProfileStartDestination.MY_SCHEDULE -> ProfileConfig.MySchedule
     ProfileStartDestination.INVITES -> ProfileConfig.Invites
+    ProfileStartDestination.DOCUMENTS -> ProfileConfig.Documents
 }
 
 class DefaultProfileComponent(
@@ -790,11 +802,13 @@ class DefaultProfileComponent(
     private val currentUserDataSource: CurrentUserDataSource,
     private val navigationHandler: INavigationHandler,
     initialDestination: ProfileStartDestination = ProfileStartDestination.HOME,
+    initialDocumentId: String? = null,
 ) : ProfileComponent, PaymentProcessor(), ComponentContext by componentContext {
 
     private val navigation = StackNavigation<ProfileConfig>()
     private val koin = getKoin()
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
+    private var pendingDocumentId = initialDocumentId?.trim()?.takeIf(String::isNotBlank)
 
     private val _errorState = MutableStateFlow<ErrorMessage?>(null)
     override val errorState = _errorState.asStateFlow()
@@ -907,6 +921,10 @@ class DefaultProfileComponent(
                     signedDocuments = bundle.signed,
                     error = null,
                 )
+                findProfileDocumentById(pendingDocumentId, bundle)?.let { document ->
+                    pendingDocumentId = null
+                    openDocument(document)
+                }
             }
         }
         startDiscountTargetsObserver(_discountsState.value.itemType)

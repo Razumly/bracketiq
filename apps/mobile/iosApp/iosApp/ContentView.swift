@@ -63,6 +63,12 @@ extension URL {
             return RootComponent.DeepLinkNavInvites()
         }
 
+        if let documentId = DocumentNotificationNavigationKt.documentIdFromDeepLinkPath(
+            path: effectiveSegments.joined(separator: "/")
+        ) {
+            return RootComponent.DeepLinkNavDocument.init(documentId: documentId)
+        }
+
         let queryEventId = queryItems?
             .first(where: { $0.name == "eventId" })?
             .value?

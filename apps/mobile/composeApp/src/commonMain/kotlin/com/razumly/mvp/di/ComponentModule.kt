@@ -165,6 +165,7 @@ val componentModule = module {
         val navHandler: INavigationHandler = params.get()
         val startDestination = runCatching { params.get<ProfileStartDestination>() }
             .getOrDefault(ProfileStartDestination.HOME)
+        val initialDocumentId = runCatching { params.get<String>() }.getOrNull()
 
         DefaultProfileComponent(
             componentContext = componentContext,
@@ -177,6 +178,7 @@ val componentModule = module {
             currentUserDataSource = get(),
             navigationHandler = navHandler,
             initialDestination = startDestination,
+            initialDocumentId = initialDocumentId,
         )
     }
 

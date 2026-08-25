@@ -30,18 +30,22 @@ describe('DocumentNotificationsPanel', () => {
       notifications: [{
         id: 'notification_1',
         createdAt: '2026-08-24T12:00:00.000Z',
-        notificationType: 'DOCUMENT_IMPORTED',
+        notificationType: 'documents',
         title: 'Document imported',
         body: 'Your document is ready.',
+        data: { viewUrl: '/api/documents/signed/evidence_1/file' },
         readAt: null,
       }],
       unreadCount: 1,
     });
-    userNotificationServiceMock.updateDocumentNotificationRead.mockResolvedValue(undefined);
 
     renderWithMantine(<DocumentNotificationsPanel userId="user_1" />);
 
     expect(await screen.findByText('Document imported')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'View document' })).toHaveAttribute(
+      'href',
+      '/api/documents/signed/evidence_1/file',
+    );
     expect(screen.getByText('1 unread')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Mark read' }));

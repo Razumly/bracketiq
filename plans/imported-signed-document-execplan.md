@@ -40,6 +40,7 @@ The implementation began with the data expansion required for this behavior. The
 - [x] (2026-08-24) Add server, web, mobile, and browser contract tests for audit access and private-field filtering.
 - [x] (2026-08-24) Run typecheck, focused tests, lint, browser smoke, full site and mobile suites, and the two-axis code review.
 - [x] (2026-08-24) Re-run typecheck, focused tests, full site suite, full mobile suite, and browser smoke after the final audit actor and subject PDF assertion fixes.
+- [x] (2026-08-25) Complete issue #111 customer-safe import and void notifications across in-app, transactional email, optional push, browser links, and mobile document navigation.
 
 ## Surprises & Discoveries
 
@@ -62,8 +63,8 @@ The implementation began with the data expansion required for this behavior. The
 
 - Observation: Satisfaction invalidation can recompute several aggregates from one terminal evidence transition. Per-Satisfaction collection reads created avoidable database round trips.
   Evidence: `invalidateDocumentRequirementSatisfactions` now loads contributor links and evidence rows with one query per collection.
-- Observation: In-app document notifications are part of the evidence transaction. Push and email delivery runs after commit so a provider delivery failure does not roll back customer data.
-  Evidence: Import and void route tests reject the transaction when in-app recording fails and keep the committed change when post-commit delivery fails.
+- Observation: Customer-safe in-app notifications are recorded after the evidence transaction commits. Push and transactional email delivery also run after commit, so delivery failure does not roll back customer data.
+  Evidence: Import and void route tests reject notification delivery failures without changing the committed evidence or Satisfaction state.
 
 - Observation: Aggregate Satisfaction completion is not enough for multi-signer document cards. A partial Satisfaction can already contain the current signer role.
   Evidence: Profile document aggregation now checks `completedSignerRoles` for the current signer context before it emits an unsigned card.
@@ -99,9 +100,9 @@ The implementation began with the data expansion required for this behavior. The
 - Decision: Expose one plural Satisfaction invalidation seam.
   Rationale: Webhook fallback rows can share one provider document. One batch read preserves aggregate recomputation and avoids a singular wrapper that adds no separate behavior.
   Date/Author: 2026-08-22 / Codex
-- Decision: Record customer-safe in-app notifications inside the import and void transactions, then deliver push and email after commit.
-  Rationale: In-app history must commit or roll back with the document state. External delivery is best effort and must not undo a committed evidence change.
-  Date/Author: 2026-08-24 / Codex
+- Decision: Deliver in-app, transactional email, and optional push notifications after the import or void transaction commits.
+  Rationale: Customer notification delivery must not change committed evidence, audit events, or Satisfaction state. Stable notification IDs keep retry delivery idempotent, and the push channel applies the recipient's supported-device preference.
+  Date/Author: 2026-08-25 / Codex
 
 - Decision: Suppress an unsigned card when the current signer role already appears in Satisfaction evidence, even when another required role remains incomplete.
   Rationale: The existing signing routes reject a completed signer role. The profile list must not offer an action that cannot succeed.

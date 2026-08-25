@@ -19,8 +19,6 @@ import {
 } from '@/server/documentEvidence';
 import {
   notifyDocumentEvidenceChange,
-  recordDocumentEvidenceInAppNotification,
-  type DocumentNotificationDatabase,
 } from '@/server/documentNotifications';
 import {
   listOrganizationUsersScopeEvents,
@@ -481,7 +479,7 @@ export async function POST(
   const { id: organizationId } = await params;
   const organization = await prisma.organizations.findUnique({
     where: { id: organizationId },
-    select: { id: true, ownerId: true },
+    select: { id: true, ownerId: true, name: true },
   });
   if (!organization) {
     return NextResponse.json({ error: 'Organization not found.' }, { status: 404 });
@@ -856,22 +854,12 @@ export async function POST(
         },
         tx as unknown as DocumentEvidenceDatabase,
       );
-      await recordDocumentEvidenceInAppNotification(
-        {
-          organizationId,
-          subjectUserId: parsed.subjectUserId,
-          evidenceId: evidence.id,
-          documentName,
-          action: 'IMPORT',
-          actorUserId: session.userId,
-        },
-        tx as unknown as DocumentNotificationDatabase,
-      );
       return { documentName };
 
     });
     const notificationInput = {
       organizationId,
+      organizationName: organization.name,
       subjectUserId: parsed.subjectUserId,
       evidenceId,
       documentName: importedEvidence.documentName,
@@ -879,10 +867,7 @@ export async function POST(
       actorUserId: session.userId,
     };
     try {
-      await notifyDocumentEvidenceChange(
-        notificationInput,
-        { isInAppIncluded: false },
-      );
+      await notifyDocumentEvidenceChange(notificationInput);
     } catch (notificationError) {
       console.error('Document import notification failed.', {
         organizationId,
