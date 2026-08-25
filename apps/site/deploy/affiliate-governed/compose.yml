@@ -1,0 +1,74 @@
+name: ${AFFILIATE_GOVERNED_PROJECT_NAME:-bracketiq-affiliate-governed}
+
+x-agent-common: &agent-common
+  image: ${AFFILIATE_AGENT_IMAGE:?Set AFFILIATE_AGENT_IMAGE}
+  working_dir: /workspace/apps/site
+  user: "${AFFILIATE_AGENT_UID:-1001}:${AFFILIATE_AGENT_GID:-1001}"
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=256m
+  restart: "${AFFILIATE_AGENT_RESTART_POLICY:-no}"
+  init: true
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  networks:
+    - gateway_internal
+  environment:
+    AFFILIATE_AGENT_GATEWAY_ADDRESS: ${AFFILIATE_AGENT_GATEWAY_ADDRESS:?Set AFFILIATE_AGENT_GATEWAY_ADDRESS}
+    AFFILIATE_AGENT_MODEL_ADDRESS: ${AFFILIATE_AGENT_MODEL_ADDRESS:?Set AFFILIATE_AGENT_MODEL_ADDRESS}
+    AFFILIATE_AGENT_WORKSPACE_ROOT: /workspaces
+    AFFILIATE_AGENT_MODEL_CREDENTIAL: ${AFFILIATE_AGENT_MODEL_CREDENTIAL:?Set the model credential}
+    AFFILIATE_AGENT_EXTERNAL_NETWORK: "false"
+    AFFILIATE_AGENT_ARTIFACT_ACCESS: "gateway-only"
+  volumes:
+    - type: bind
+      source: ${AFFILIATE_AGENT_WORKSPACE_ROOT:?Set AFFILIATE_AGENT_WORKSPACE_ROOT}
+      target: /workspaces
+
+services:
+  mapping-producer-1:
+    <<: *agent-common
+    environment:
+      AFFILIATE_AGENT_ROLE: MAPPING_PRODUCER
+      AFFILIATE_AGENT_WORKER_ID: mapping-producer-1
+      AFFILIATE_AGENT_ROLE_CREDENTIAL: ${AFFILIATE_MAPPING_PRODUCER_1_CREDENTIAL:?Set mapping producer 1 credential}
+    command: ["/usr/local/bin/affiliate-agent-supervisor", "--role=MAPPING_PRODUCER", "--worker-id=mapping-producer-1"]
+
+  mapping-producer-2:
+    <<: *agent-common
+    environment:
+      AFFILIATE_AGENT_ROLE: MAPPING_PRODUCER
+      AFFILIATE_AGENT_WORKER_ID: mapping-producer-2
+      AFFILIATE_AGENT_ROLE_CREDENTIAL: ${AFFILIATE_MAPPING_PRODUCER_2_CREDENTIAL:?Set mapping producer 2 credential}
+    command: ["/usr/local/bin/affiliate-agent-supervisor", "--role=MAPPING_PRODUCER", "--worker-id=mapping-producer-2"]
+
+  supply-reviewer-1:
+    <<: *agent-common
+    environment:
+      AFFILIATE_AGENT_ROLE: SUPPLY_REVIEWER
+      AFFILIATE_AGENT_WORKER_ID: supply-reviewer-1
+      AFFILIATE_AGENT_ROLE_CREDENTIAL: ${AFFILIATE_SUPPLY_REVIEWER_1_CREDENTIAL:?Set supply reviewer 1 credential}
+    command: ["/usr/local/bin/affiliate-agent-supervisor", "--role=SUPPLY_REVIEWER", "--worker-id=supply-reviewer-1"]
+
+  supply-reviewer-2:
+    <<: *agent-common
+    environment:
+      AFFILIATE_AGENT_ROLE: SUPPLY_REVIEWER
+      AFFILIATE_AGENT_WORKER_ID: supply-reviewer-2
+      AFFILIATE_AGENT_ROLE_CREDENTIAL: ${AFFILIATE_SUPPLY_REVIEWER_2_CREDENTIAL:?Set supply reviewer 2 credential}
+    command: ["/usr/local/bin/affiliate-agent-supervisor", "--role=SUPPLY_REVIEWER", "--worker-id=supply-reviewer-2"]
+
+  coverage-planner:
+    <<: *agent-common
+    environment:
+      AFFILIATE_AGENT_ROLE: COVERAGE_PLANNER
+      AFFILIATE_AGENT_WORKER_ID: coverage-planner
+      AFFILIATE_AGENT_ROLE_CREDENTIAL: ${AFFILIATE_COVERAGE_PLANNER_CREDENTIAL:?Set coverage planner credential}
+    command: ["/usr/local/bin/affiliate-agent-supervisor", "--role=COVERAGE_PLANNER", "--worker-id=coverage-planner"]
+
+networks:
+  gateway_internal:
+    name: ${AFFILIATE_AGENT_GATEWAY_NETWORK:-bracketiq_affiliate_gateway_internal}
+    internal: true

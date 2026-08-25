@@ -102,6 +102,8 @@
     "affiliate:coverage:codex-goal": "tsx scripts/run-affiliate-coverage-codex-goal.ts",
     "affiliate:coverage:codex-goal:dry-run": "tsx scripts/run-affiliate-coverage-codex-goal.ts --dry-run",
     "affiliate:coverage:loop": "tsx scripts/run-affiliate-coverage-loop.ts",
+    "affiliate:cutover:reconcile": "tsx scripts/reconcile-affiliate-legacy-supply.ts",
+    "affiliate:cutover:preflight": "tsx scripts/preflight-affiliate-cutover.ts",
     "affiliate:mapping:sft-release": "tsx scripts/build-affiliate-mapping-sft-release.ts",
     "affiliate:mapping:training-acquisition-plan": "tsx scripts/plan-affiliate-mapping-training-acquisition.ts",
     "affiliate:mapping:training-acquisition-approve": "tsx scripts/approve-affiliate-mapping-training-acquisition.ts",

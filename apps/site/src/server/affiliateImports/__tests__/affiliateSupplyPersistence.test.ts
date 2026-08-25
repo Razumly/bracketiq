@@ -2,6 +2,7 @@
 
 import {
   buildAffiliateSupplyContractManifest,
+  normalizeAffiliateSupplyIdentity,
   type AffiliateSupplyContractPolicy,
 } from '../affiliateSupplyLifecycle';
 import {
@@ -1317,6 +1318,363 @@ describe('affiliate supply persistence seams', () => {
       }),
     }));
   });
+
+  it('persists a dry-run report without changing legacy rows', async () => {
+    const reconciliationRuns = { upsert: jest.fn(async ({ create }: { create: Record<string, unknown> }) => create) };
+    const database = {
+      sources: {
+        findMany: jest.fn(async () => [{
+          id: 'legacy-source',
+          listUrl: 'https://legacy.example/events',
+          targetKind: 'EVENT',
+        }]),
+      },
+      candidates: {
+        findMany: jest.fn(async () => [{
+          id: 'legacy-candidate',
+          sourceId: 'legacy-source',
+          listingKind: 'EVENT',
+          status: 'PUBLISHED',
+          publishedEventId: 'event-legacy',
+        }]),
+      },
+      targets: { findMany: jest.fn(async () => []) },
+      supplySources: { findMany: jest.fn(async () => []) },
+      reconciliationRuns,
+    } as unknown as AffiliateSupplyDatabase;
+
+    const result = await reconcileLegacyAffiliateSupply({
+      db: database,
+      now: new Date('2026-08-25T12:00:00.000Z'),
+    });
+
+    expect(result.mode).toBe('DRY_RUN');
+    expect(result.applied).toBe(false);
+    expect(result.report.isApplySafe).toBe(true);
+    expect(reconciliationRuns.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { reportHash: result.reportHash },
+      create: expect.objectContaining({
+        mode: 'DRY_RUN',
+        inputHash: result.inputHash,
+        outputHash: result.outputHash,
+      }),
+    }));
+  });
+
+  it('marks expired legacy claims for revocation without blocking the report', async () => {
+    const database = {
+      sources: {
+        findMany: jest.fn(async () => [{
+          id: 'legacy-source',
+          listUrl: 'https://legacy.example/events',
+          targetKind: 'EVENT',
+        }]),
+      },
+      mappingJobs: {
+        findMany: jest.fn(async () => [{
+          id: 'mapping-job',
+          sourceId: 'legacy-source',
+          status: 'CLAIMED',
+          workerId: 'legacy-worker',
+          leaseExpiresAt: new Date('2026-08-25T11:00:00.000Z'),
+        }]),
+      },
+      supplySources: { findMany: jest.fn(async () => []) },
+      targets: { findMany: jest.fn(async () => []) },
+    } as unknown as AffiliateSupplyDatabase;
+
+    const result = await reconcileLegacyAffiliateSupply({
+      db: database,
+      now: new Date('2026-08-25T12:00:00.000Z'),
+    });
+
+    expect(result.report.counts.expiredClaims).toBe(1);
+    expect(result.claimsToRevoke).toBe(1);
+    expect(result.report.claimActions).toEqual([expect.objectContaining({
+      id: 'mapping-job',
+      action: 'REVOKE_EXPIRED',
+    })]);
+    expect(result.report.isApplySafe).toBe(true);
+  });
+
+  it('rejects apply when the reviewed report hash changed', async () => {
+    const database = {
+      sources: {
+        findMany: jest.fn(async () => [{
+          id: 'legacy-source',
+          listUrl: 'https://legacy.example/events',
+          targetKind: 'EVENT',
+        }]),
+      },
+      supplySources: { findMany: jest.fn(async () => []) },
+      targets: { findMany: jest.fn(async () => []) },
+      contractManifests: {
+        findFirst: jest.fn(async () => ({
+          status: 'ACTIVE',
+          version: manifest.version,
+          rolloutCohort: manifest.rolloutCohort,
+          contractHash: manifest.hash,
+          contractJson: manifest.supplyContract,
+        })),
+      },
+    } as unknown as AffiliateSupplyDatabase;
+
+    await expect(reconcileLegacyAffiliateSupply({
+      db: database,
+      dryRun: false,
+      now: new Date('2026-08-25T12:00:00.000Z'),
+      operatorId: 'operator-1',
+      applyNonce: 'nonce-1',
+      expectedReportHash: 'wrong-report-hash',
+    })).rejects.toThrow('report hash does not match');
+  });
+
+  it('replays an applied report without reapplying writes', async () => {
+    let persistedRun: { status: string; reportJson: unknown } | null = null;
+    const reconciliationRuns = {
+      upsert: jest.fn(async ({ create }: { create: Record<string, unknown> }) => {
+        persistedRun = {
+          status: String(create.status),
+          reportJson: create.reportJson,
+        };
+        return create;
+      }),
+      findUnique: jest.fn(async () => persistedRun),
+    };
+    const database = {
+      sources: {
+        findMany: jest.fn(async () => [{
+          id: 'legacy-source',
+          listUrl: 'https://legacy.example/events',
+          targetKind: 'EVENT',
+        }]),
+      },
+      candidates: {
+        findMany: jest.fn(async () => [{
+          id: 'legacy-candidate',
+          sourceId: 'legacy-source',
+          listingKind: 'EVENT',
+          status: 'PUBLISHED',
+          publishedEventId: 'event-legacy',
+        }]),
+      },
+      targets: { findMany: jest.fn(async () => []) },
+      supplySources: { findMany: jest.fn(async () => []) },
+      reconciliationRuns,
+    } as unknown as AffiliateSupplyDatabase;
+
+    const dryRun = await reconcileLegacyAffiliateSupply({
+      db: database,
+      now: new Date('2026-08-25T12:00:00.000Z'),
+    });
+    persistedRun = {
+      status: 'APPLIED',
+      reportJson: dryRun.report,
+    };
+
+    const replay = await reconcileLegacyAffiliateSupply({
+      db: database,
+      dryRun: false,
+      now: new Date('2026-08-26T12:00:00.000Z'),
+      operatorId: 'operator-1',
+      applyNonce: 'nonce-1',
+      expectedReportHash: dryRun.reportHash,
+      expectedInputHash: dryRun.inputHash,
+      expectedCountsHash: hashAffiliateAgentValue(dryRun.report.counts),
+    });
+
+    expect(replay.applied).toBe(true);
+    expect(replay.report).toEqual(dryRun.report);
+  });
+  it('applies the reviewed report in one transaction and replays it idempotently', async () => {
+    const now = new Date('2026-08-25T12:00:00.000Z');
+    const identity = normalizeAffiliateSupplyIdentity({
+      requestedUrl: 'https://legacy.example/events',
+      resolvedCanonicalUrl: 'https://legacy.example/events',
+      isRedirectVerified: true,
+    });
+    let root: Record<string, unknown> = {
+      id: 'root-1',
+      identityKey: identity.identityKey,
+      canonicalUrl: identity.canonicalUrl,
+      origin: identity.origin,
+      pathKey: identity.pathKey,
+      predecessorId: null,
+      successorId: null,
+      derivedStage: 'SOURCE_EXCLUDED',
+      derivedOutcome: null,
+      lifecycleGeneration: 0,
+      isAutomationEnabled: false,
+      targetKind: 'EVENT',
+      rolloutCohort: 'DEFAULT',
+      intakeId: null,
+      liveSourceId: 'legacy-source',
+      operatorDomain: 'legacy.example',
+      metadata: null,
+    };
+    let source: Record<string, unknown> = {
+      id: 'legacy-source',
+      listUrl: 'https://legacy.example/events',
+      canonicalUrl: 'https://legacy.example/events',
+      targetKind: 'EVENT',
+      supplySourceId: 'root-1',
+    };
+    let candidate: Record<string, unknown> = {
+      id: 'legacy-candidate',
+      sourceId: 'legacy-source',
+      listingKind: 'EVENT',
+      status: 'PUBLISHED',
+      publishedEventId: 'event-legacy',
+      supplySourceId: null,
+    };
+    let target: Record<string, unknown> | null = null;
+    let persistedRun: { status: string; reportJson: unknown } | null = null;
+    const emptyDelegate = () => ({
+      findMany: jest.fn(async () => []),
+    });
+    const sources = {
+      findMany: jest.fn(async () => [source]),
+      update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        source = { ...source, ...data };
+        return source;
+      }),
+      updateMany: jest.fn(async () => ({ count: 0 })),
+    };
+    const candidates = {
+      findMany: jest.fn(async () => [candidate]),
+      updateMany: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        if (candidate.supplySourceId !== null) return { count: 0 };
+        candidate = { ...candidate, ...data };
+        return { count: 1 };
+      }),
+    };
+    const targets = {
+      findMany: jest.fn(async () => (target ? [target] : [])),
+      upsert: jest.fn(async ({ create }: { create: Record<string, unknown> }) => {
+        target = { ...create };
+        return target;
+      }),
+    };
+    const supplySources = {
+      findMany: jest.fn(async () => [root]),
+      findUnique: jest.fn(async () => root),
+      findFirst: jest.fn(async () => null),
+      create: jest.fn(async () => root),
+      update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        root = { ...root, ...data };
+        return root;
+      }),
+    };
+    const transitions = {
+      findUnique: jest.fn(async () => null),
+      findFirst: jest.fn(async () => null),
+      create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+    };
+    const contractManifests = {
+      findFirst: jest.fn(async () => ({
+        status: 'ACTIVE',
+        version: manifest.version,
+        rolloutCohort: manifest.rolloutCohort,
+        contractHash: manifest.hash,
+        contractJson: manifest.supplyContract,
+      })),
+    };
+    const reconciliationRuns = {
+      findUnique: jest.fn(async () => persistedRun),
+      upsert: jest.fn(async ({
+        create,
+        update,
+      }: {
+        create: Record<string, unknown>;
+        update: Record<string, unknown>;
+      }) => {
+        const payload = persistedRun ? update : create;
+        persistedRun = {
+          status: String(payload.status),
+          reportJson: payload.reportJson,
+        };
+        return payload;
+      }),
+    };
+    let database: AffiliateSupplyDatabase;
+    const transaction = jest.fn(async (callback: (transactionDatabase: AffiliateSupplyDatabase) => Promise<unknown>) => (
+      callback(database)
+    ));
+    database = {
+      sources,
+      candidates,
+      targets,
+      supplySources,
+      transitions,
+      contractManifests,
+      reconciliationRuns,
+      intakes: emptyDelegate(),
+      pages: emptyDelegate(),
+      intakeRuns: emptyDelegate(),
+      artifacts: emptyDelegate(),
+      discoveryResults: emptyDelegate(),
+      mappings: emptyDelegate(),
+      runs: emptyDelegate(),
+      mappingJobs: emptyDelegate(),
+      approvals: emptyDelegate(),
+      discoveryRuns: emptyDelegate(),
+      coverageJobs: emptyDelegate(),
+      gatewayClaims: emptyDelegate(),
+      gatewayJobs: emptyDelegate(),
+      campaigns: emptyDelegate(),
+      organizations: emptyDelegate(),
+      events: emptyDelegate(),
+      teams: emptyDelegate(),
+      facilities: emptyDelegate(),
+      workerHealth: emptyDelegate(),
+      transaction,
+    } as unknown as AffiliateSupplyDatabase;
+
+    const dryRun = await reconcileLegacyAffiliateSupply({ db: database, now });
+    const applied = await reconcileLegacyAffiliateSupply({
+      db: database,
+      dryRun: false,
+      now,
+      operatorId: 'operator-1',
+      applyNonce: 'nonce-1',
+      expectedReportHash: dryRun.reportHash,
+      expectedInputHash: dryRun.inputHash,
+      expectedCountsHash: hashAffiliateAgentValue(dryRun.report.counts),
+      preflight: {
+        isReady: true,
+        deploymentContractVersion: 2,
+        deploymentContractHash: 'b'.repeat(64),
+      },
+    });
+    const replay = await reconcileLegacyAffiliateSupply({
+      db: database,
+      dryRun: false,
+      now: new Date('2026-08-26T12:00:00.000Z'),
+      operatorId: 'operator-1',
+      applyNonce: 'nonce-2',
+      expectedReportHash: dryRun.reportHash,
+      expectedInputHash: dryRun.inputHash,
+      expectedCountsHash: hashAffiliateAgentValue(dryRun.report.counts),
+    });
+
+    expect(dryRun.report.isApplySafe).toBe(true);
+    expect(applied.applied).toBe(true);
+    expect(replay.reportHash).toBe(applied.reportHash);
+    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(candidates.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: { supplySourceId: 'root-1' },
+    }));
+    expect(targets.upsert).toHaveBeenCalledTimes(1);
+    expect(transitions.create).toHaveBeenCalledTimes(1);
+    expect(reconciliationRuns.upsert).toHaveBeenCalledTimes(2);
+    expect(reconciliationRuns.upsert).toHaveBeenLastCalledWith(expect.objectContaining({
+      update: expect.objectContaining({
+        deploymentContractVersion: 2,
+        deploymentContractHash: 'b'.repeat(64),
+      }),
+    }));
+  });
+
 
   it('projects every legacy public target as Last-Known-Good when evidence is missing', async () => {
     const database = {

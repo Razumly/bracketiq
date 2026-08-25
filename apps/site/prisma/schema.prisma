@@ -55,6 +55,7 @@ enum AffiliateSupplyLifecycleCommand {
   REJECT_TARGET
   CREATE_SUCCESSOR
   RECONCILE
+  LEGACY_RECONCILED
 }
 
 enum AffiliateSupplyLifecycleOutcome {
@@ -2867,6 +2868,34 @@ model AffiliateSupplyLifecycleTransitions {
   @@index([supplySourceId, generation])
   @@index([supplySourceId, commandRef])
   @@index([contractHash])
+}
+
+model AffiliateSupplyReconciliationRuns {
+  id                       String   @id
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+  mode                     String
+  status                   String   @default("DRY_RUN")
+  operatorId               String?
+  rolloutCohort            String
+  supplyContractVersion    Int?
+  supplyContractHash       String?
+  deploymentContractVersion Int?
+  deploymentContractHash   String?
+  inputHash                String
+  outputHash               String
+  reportHash               String   @unique
+  counts                   Json
+  failedInvariants         String[] @default([])
+  resolutionRefs           String[] @default([])
+  reportJson               Json
+  appliedAt                DateTime?
+  appliedBy                String?
+  applyNonceHash           String?
+
+  @@index([mode, status, createdAt])
+  @@index([rolloutCohort, createdAt])
+  @@index([inputHash])
 }
 model AffiliateAgentWorkerHealth {
   id               String   @id

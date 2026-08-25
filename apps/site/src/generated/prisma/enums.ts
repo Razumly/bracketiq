@@ -69,7 +69,8 @@ export const AffiliateSupplyLifecycleCommand = {
   EXCLUDE_SOURCE: 'EXCLUDE_SOURCE',
   REJECT_TARGET: 'REJECT_TARGET',
   CREATE_SUCCESSOR: 'CREATE_SUCCESSOR',
-  RECONCILE: 'RECONCILE'
+  RECONCILE: 'RECONCILE',
+  LEGACY_RECONCILED: 'LEGACY_RECONCILED'
 } as const
 
 export type AffiliateSupplyLifecycleCommand = (typeof AffiliateSupplyLifecycleCommand)[keyof typeof AffiliateSupplyLifecycleCommand]

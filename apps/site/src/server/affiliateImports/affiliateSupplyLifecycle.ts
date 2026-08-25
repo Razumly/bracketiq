@@ -302,7 +302,8 @@ export type AffiliateSupplyLifecycleCommand =
   | 'EXCLUDE_SOURCE'
   | 'REJECT_TARGET'
   | 'CREATE_SUCCESSOR'
-  | 'RECONCILE';
+  | 'RECONCILE'
+  | 'LEGACY_RECONCILED';
 
 export type AffiliateSupplyCommandAuthority = 'MAPPING_PRODUCER' | 'SUPPLY_REVIEWER' | 'HUMAN_DIRECTED_EXECUTOR' | 'SYSTEM';
 export type AffiliateSupplyLifecycleActorKind =
@@ -1213,6 +1214,7 @@ export const validateAffiliateSupplyCommand = (
     REJECT_TARGET: ['SUPPLY_REVIEWER', 'HUMAN_DIRECTED_EXECUTOR'],
     CREATE_SUCCESSOR: ['SYSTEM', 'SUPPLY_REVIEWER'],
     RECONCILE: ['SYSTEM'],
+    LEGACY_RECONCILED: ['SYSTEM'],
   };
   if (input.expectedLifecycleGeneration !== input.currentLifecycleGeneration) reasons.push('LIFECYCLE_GENERATION_STALE');
   if (input.activeContractVersion !== input.commandContractVersion || input.activeContractHash !== input.commandContractHash) reasons.push('SUPPLY_CONTRACT_STALE');

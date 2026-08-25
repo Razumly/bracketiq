@@ -9,10 +9,11 @@ import type {
   AffiliateImportCandidates,
   AffiliateSupplySources,
   AffiliateSupplyTargets,
-  AffiliateSupplyContractManifests,
   AffiliateSupplyLifecycleTransitions,
   AffiliateReplenishmentDemands,
   AffiliateReplenishmentWaves,
+  AffiliateSupplyReconciliationRuns,
+  AffiliateSupplyContractManifests,
   PrismaClient,
   AffiliateAgentWorkerHealth,
 } from '@/generated/prisma/client';
@@ -37,18 +38,30 @@ import {
   type AffiliateReplenishmentPlan,
   type AffiliateSupplyAssessment,
   type AffiliateSupplyCommandAuthority,
+  type AffiliateSupplyContractImpactCell,
   type AffiliateSupplyContractManifest,
   type AffiliateSupplyContractPolicy,
-  type AffiliateSupplyCandidateEvidence,
-  type AffiliateSupplyContractImpactCell,
   type AffiliateSupplyEvidenceSnapshot,
-  type AffiliateSupplyIdentity,
   type AffiliateSupplyFreshnessStatus,
+  type AffiliateSupplyIdentity,
   type AffiliateSupplyLifecycleActorKind,
   type AffiliateSupplyLifecycleCommand,
   type AffiliateSupplyLifecycleOutcome,
   type AffiliateSupplyLifecycleStage,
+  AFFILIATE_SUPPLY_LIFECYCLE_STAGES,
+  AFFILIATE_SUPPLY_OUTCOMES,
 } from './affiliateSupplyLifecycle';
+import {
+  buildAffiliateLegacyReconciliationReport,
+  type AffiliateLegacyClaimEvidence,
+  type AffiliateLegacyLineageRecord,
+  type AffiliateLegacyRecordKind,
+  type AffiliateLegacyReconciliationInput,
+  type AffiliateLegacyReconciliationReport,
+  type AffiliateLegacyRootEvidence,
+  type AffiliateLegacySourceEvidence,
+  type AffiliateLegacyTargetEvidence,
+} from './affiliateFleetCutover';
 import type {
   AffiliateAgentActiveContractRegistry,
   AffiliateAgentLifecycleAuthority,
@@ -117,6 +130,7 @@ export type AffiliateSupplyDatabase = Readonly<{
   supplySources: AffiliateSupplyDelegate<'affiliateSupplySources'>;
   contractManifests: AffiliateSupplyDelegate<'affiliateSupplyContractManifests'>;
   transitions: AffiliateSupplyDelegate<'affiliateSupplyLifecycleTransitions'>;
+  reconciliationRuns: AffiliateSupplyDelegate<'affiliateSupplyReconciliationRuns'>;
   targets: AffiliateSupplyDelegate<'affiliateSupplyTargets'>;
   demands: AffiliateSupplyDelegate<'affiliateReplenishmentDemands'>;
   waves: AffiliateSupplyDelegate<'affiliateReplenishmentWaves'>;
@@ -131,6 +145,8 @@ export type AffiliateSupplyDatabase = Readonly<{
   pages: AffiliateSupplyDelegate<'affiliateSourceIntakePages'>;
   intakeRuns: AffiliateSupplyDelegate<'affiliateSourceIntakeRuns'>;
   artifacts: AffiliateSupplyDelegate<'affiliateSourceIntakeArtifacts'>;
+  discoveryRuns: AffiliateSupplyDelegate<'affiliateSourceDiscoveryRuns'>;
+  discoveryResults: AffiliateSupplyDelegate<'affiliateSourceDiscoveryResults'>;
   mappingJobs: AffiliateSupplyDelegate<'affiliateSourceMappingJobs'>;
   approvals: AffiliateSupplyDelegate<'affiliateApprovalJobs'>;
   candidates: AffiliateSupplyDelegate<'affiliateImportCandidates'>;
@@ -141,7 +157,7 @@ export type AffiliateSupplyDatabase = Readonly<{
   workerHealth: AffiliateSupplyDelegate<'affiliateAgentWorkerHealth'>;
   rawClient?: AffiliateSupplyClient;
   transaction?: (
-    callback: (transaction: AffiliateSupplyDatabase) => Promise<unknown>,
+    callback: (transactionDatabase: AffiliateSupplyDatabase) => Promise<unknown>,
     options?: unknown,
   ) => Promise<unknown>;
 }>;
@@ -151,6 +167,7 @@ const supplyDatabaseForClient = (client: AffiliateSupplyClient): AffiliateSupply
     supplySources: 'affiliateSupplySources',
     contractManifests: 'affiliateSupplyContractManifests',
     transitions: 'affiliateSupplyLifecycleTransitions',
+    reconciliationRuns: 'affiliateSupplyReconciliationRuns',
     targets: 'affiliateSupplyTargets',
     demands: 'affiliateReplenishmentDemands',
     waves: 'affiliateReplenishmentWaves',
@@ -165,6 +182,8 @@ const supplyDatabaseForClient = (client: AffiliateSupplyClient): AffiliateSupply
     pages: 'affiliateSourceIntakePages',
     intakeRuns: 'affiliateSourceIntakeRuns',
     artifacts: 'affiliateSourceIntakeArtifacts',
+    discoveryRuns: 'affiliateSourceDiscoveryRuns',
+    discoveryResults: 'affiliateSourceDiscoveryResults',
     mappingJobs: 'affiliateSourceMappingJobs',
     approvals: 'affiliateApprovalJobs',
     candidates: 'affiliateImportCandidates',
@@ -1606,6 +1625,7 @@ export const deriveAndPersistAffiliateSupplyAssessment = async (input: Readonly<
 export const reconcileAffiliateSupplySource = deriveAndPersistAffiliateSupplyAssessment;
 
 export const upsertAffiliateSupplyTarget = async (input: Readonly<{
+  id?: string;
   supplySourceId: string;
   targetType: string;
   targetId: string;
@@ -1629,7 +1649,7 @@ export const upsertAffiliateSupplyTarget = async (input: Readonly<{
   return database.targets.upsert({
     where: { supplySourceId_targetType_targetId: { supplySourceId: input.supplySourceId, targetType: input.targetType, targetId: input.targetId } },
     create: {
-      id: createId(),
+      id: input.id ?? createId(),
       supplySourceId: input.supplySourceId,
       candidateId: input.candidateId ?? null,
       targetType: input.targetType,
@@ -3713,19 +3733,21 @@ export const startAffiliateReplenishmentWave = async (input: Readonly<{
     throw error;
   }
 };
+
 export type AffiliateLegacySupplyTargetProjection = Readonly<{
-  candidateId: string;
+  sourceTargetId: string;
+  candidateId: string | null;
   targetType: string;
   targetId: string;
-  status: 'PUBLISHED' | 'LAST_KNOWN_GOOD';
-  action: 'PRESERVE_PUBLIC_TARGET' | 'MARK_LAST_KNOWN_GOOD';
+  status: 'PUBLISHED' | 'LAST_KNOWN_GOOD' | 'REJECTED';
+  action: 'PRESERVE_PUBLIC_TARGET' | 'MARK_LAST_KNOWN_GOOD' | 'PRESERVE_REJECTED_TARGET';
   evidenceRefs: readonly string[];
 }>;
 
 export type AffiliateLegacySupplyReconciliationRow = Readonly<{
   sourceId: string;
   identityKey: string;
-  action: 'CREATE_ROOT' | 'REUSE_ROOT';
+  action: 'CREATE_ROOT' | 'REUSE_ROOT' | 'CREATE_SUCCESSOR' | 'REVIEW_REQUIRED';
   publishedCandidateCount: number;
   preservedTargetCount: number;
   unverifiableTargetCount: number;
@@ -3735,182 +3757,833 @@ export type AffiliateLegacySupplyReconciliationRow = Readonly<{
 
 export type AffiliateLegacySupplyReconciliationResult = Readonly<{
   dryRun: boolean;
+  mode: 'DRY_RUN' | 'APPLY';
+  applied: boolean;
+  report: AffiliateLegacyReconciliationReport;
+  counts: AffiliateLegacyReconciliationReport['counts'];
+  failedInvariants: readonly string[];
+  resolutions: AffiliateLegacyReconciliationReport['resolutions'];
   rows: readonly AffiliateLegacySupplyReconciliationRow[];
   preservedTargetCount: number;
   unverifiableTargetCount: number;
+  claimsToRevoke: number;
+  inputHash: string;
+  outputHash: string;
+  reportHash: string;
 }>;
+type AffiliateLegacyReconciliationRowData = Record<string, unknown> & { id: string };
 
-export const reconcileLegacyAffiliateSupply = async (input: Readonly<{
+
+const hasAffiliateLegacyRowId = (
+  value: unknown,
+): value is AffiliateLegacyReconciliationRowData => (
+  Boolean(
+    value
+    && typeof value === 'object'
+    && 'id' in value
+    && typeof value.id === 'string',
+  )
+);
+
+const readAffiliateLegacyRows = async (delegate: unknown): Promise<AffiliateLegacyReconciliationRowData[]> => {
+  const findMany = delegate && typeof delegate === 'object' && 'findMany' in delegate
+    ? (delegate as { findMany?: (args?: unknown) => Promise<unknown> }).findMany
+    : undefined;
+  if (typeof findMany !== 'function') return [];
+  const result = await findMany.call(delegate, {});
+  return Array.isArray(result) ? result.filter(hasAffiliateLegacyRowId) : [];
+};
+
+const affiliateLegacyRowString = (
+  row: Record<string, unknown>,
+  ...keys: readonly string[]
+): string | null => {
+  for (const key of keys) {
+    const value = stringValue(row[key]);
+    if (value) return value;
+  }
+  return null;
+};
+
+const affiliateLegacyRowEvidenceRefs = (
+  kind: AffiliateLegacyRecordKind,
+  row: AffiliateLegacyReconciliationRowData,
+): string[] => [
+  `legacy:${kind}:${row.id}`,
+  ...stringArray(row.evidenceRefs),
+];
+
+const affiliateLegacyRecord = (
+  kind: AffiliateLegacyRecordKind,
+  row: AffiliateLegacyReconciliationRowData,
+  sourceId?: string | null,
+  supplySourceId?: string | null,
+): AffiliateLegacyLineageRecord => ({
+  kind,
+  id: row.id,
+  sourceId: sourceId ?? affiliateLegacyRowString(row, 'sourceId'),
+  supplySourceId: supplySourceId ?? affiliateLegacyRowString(row, 'supplySourceId'),
+  evidenceRefs: affiliateLegacyRowEvidenceRefs(kind, row),
+});
+
+const affiliateLegacyTargetTypeForListing = (value: unknown): string | null => {
+  const kind = String(value ?? '').trim().toUpperCase();
+  const normalized = kind === 'RENTAL'
+    ? 'FACILITY'
+    : kind === 'CLUB'
+      ? 'ORGANIZATION'
+      : kind;
+  return ['EVENT', 'TEAM', 'FACILITY', 'ORGANIZATION'].includes(normalized) ? normalized : null;
+};
+
+const affiliateLegacyClaimStatus = (row: AffiliateLegacyReconciliationRowData): string => (
+  affiliateLegacyRowString(row, 'status') ?? 'TERMINAL'
+);
+
+const affiliateLegacyJsonObject = (value: unknown): Record<string, unknown> => (
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+);
+
+const affiliateLegacyRunStatus = (
+  mode: 'DRY_RUN' | 'APPLY',
+  report: AffiliateLegacyReconciliationReport,
+): string => {
+  if (!report.isApplySafe) return 'BLOCKED';
+  return mode === 'APPLY' ? 'APPLIED' : 'READY';
+};
+
+const persistAffiliateLegacyReconciliationRun = async (input: Readonly<{
+  database: AffiliateSupplyDatabase;
+  report: AffiliateLegacyReconciliationReport;
+  mode: 'DRY_RUN' | 'APPLY';
+  rolloutCohort: string;
+  operatorId?: string | null;
+  contract?: ActiveAffiliateSupplyContractResult | null;
+  applyNonce?: string | null;
+  deploymentContractVersion?: number | null;
+  deploymentContractHash?: string | null;
+  now: Date;
+}>): Promise<void> => {
+  const delegate = input.database.reconciliationRuns as unknown as {
+    upsert?: (args: unknown) => Promise<unknown>;
+  };
+  if (typeof delegate?.upsert !== 'function') return;
+  const status = affiliateLegacyRunStatus(input.mode, input.report);
+  const common = {
+    mode: input.mode,
+    status,
+    operatorId: input.operatorId ?? null,
+    rolloutCohort: input.rolloutCohort,
+    supplyContractVersion: input.contract?.policy.version ?? null,
+    supplyContractHash: input.contract?.policy.hash ?? null,
+    deploymentContractVersion: input.deploymentContractVersion ?? null,
+    deploymentContractHash: input.deploymentContractHash ?? null,
+    inputHash: input.report.inputHash,
+    outputHash: input.report.outputHash,
+    reportHash: input.report.reportHash,
+    counts: prismaJsonValue(input.report.counts),
+    failedInvariants: input.report.blockingFindings.map((finding) => finding.code),
+    resolutionRefs: input.report.resolutions.map((finding) => (
+      `${finding.code}:${finding.recordIds.join(',')}`
+    )),
+    reportJson: prismaJsonValue(input.report),
+  };
+  await delegate.upsert({
+    where: { reportHash: input.report.reportHash },
+    create: {
+      id: createId(),
+      ...common,
+      appliedAt: input.mode === 'APPLY' ? input.now : null,
+      appliedBy: input.mode === 'APPLY' ? input.operatorId ?? null : null,
+      applyNonceHash: input.mode === 'APPLY' && input.applyNonce
+        ? hashAffiliateAgentValue(input.applyNonce)
+        : null,
+    },
+    update: {
+      ...common,
+      appliedAt: input.mode === 'APPLY' ? input.now : undefined,
+      appliedBy: input.mode === 'APPLY' ? input.operatorId ?? null : undefined,
+      applyNonceHash: input.mode === 'APPLY' && input.applyNonce
+        ? hashAffiliateAgentValue(input.applyNonce)
+        : undefined,
+    },
+  });
+};
+const readAppliedAffiliateLegacyReconciliationReport = async (
+  database: AffiliateSupplyDatabase,
+  reportHash: string,
+): Promise<AffiliateLegacyReconciliationReport | null> => {
+  const delegate = database.reconciliationRuns as unknown as {
+    findUnique?: (args: unknown) => Promise<unknown>;
+  };
+  if (typeof delegate?.findUnique !== 'function') return null;
+  const row = affiliateLegacyJsonObject(await delegate.findUnique({
+    where: { reportHash },
+  }));
+  if (String(row.status ?? '').toUpperCase() !== 'APPLIED') return null;
+  const report = affiliateLegacyJsonObject(row.reportJson);
+  if (
+    report.schemaVersion !== 1
+    || typeof report.reportHash !== 'string'
+    || !Array.isArray(report.roots)
+    || !Array.isArray(report.claimActions)
+  ) return null;
+  return report as unknown as AffiliateLegacyReconciliationReport;
+};
+
+const buildAffiliateLegacySupplyReconciliationResult = (input: Readonly<{
+  mode: 'DRY_RUN' | 'APPLY';
+  report: AffiliateLegacyReconciliationReport;
+  records: readonly AffiliateLegacyLineageRecord[];
+}>): AffiliateLegacySupplyReconciliationResult => {
+  const rows: AffiliateLegacySupplyReconciliationRow[] = input.report.roots.flatMap((plan) => (
+    plan.sourceIds.map((sourceId) => ({
+      sourceId,
+      identityKey: plan.identityKey ?? '',
+      action: plan.action,
+      publishedCandidateCount: input.records.filter((record) => (
+        record.kind === 'CANDIDATE' && record.sourceId === sourceId
+      )).length,
+      preservedTargetCount: plan.targetProjections.length,
+      unverifiableTargetCount: plan.targetProjections.filter((target) => (
+        target.action === 'MARK_LAST_KNOWN_GOOD'
+      )).length,
+      targetProjections: plan.targetProjections.map((target) => ({
+        sourceTargetId: target.sourceTargetId,
+        candidateId: target.candidateId,
+        targetType: target.targetType,
+        targetId: target.targetId,
+        status: target.status,
+        action: target.action,
+        evidenceRefs: target.evidenceRefs,
+      })),
+      evidenceRefs: plan.evidenceRefs,
+    }))
+  ));
+  return {
+    dryRun: input.mode === 'DRY_RUN',
+    mode: input.mode,
+    applied: input.mode === 'APPLY',
+    report: input.report,
+    counts: input.report.counts,
+    failedInvariants: input.report.blockingFindings.map((finding) => finding.code),
+    resolutions: input.report.resolutions,
+    rows,
+    preservedTargetCount: input.report.counts.preservedPublicTargets,
+    unverifiableTargetCount: input.report.counts.lastKnownGoodTargets,
+    claimsToRevoke: input.report.counts.claimsToRevoke,
+    inputHash: input.report.inputHash,
+    outputHash: input.report.outputHash,
+    reportHash: input.report.reportHash,
+  };
+};
+const affiliateLegacyReplayTarget = (target: AffiliateLegacySupplyReconciliationRow['targetProjections'][number]): unknown => ({
+  sourceTargetId: target.sourceTargetId,
+  candidateId: target.candidateId,
+  targetType: target.targetType,
+  targetId: target.targetId,
+  status: target.status,
+  evidenceRefs: target.evidenceRefs.filter((ref) => !ref.startsWith('legacy-target:')).sort(),
+});
+
+const affiliateLegacyReplayRoot = (root: AffiliateLegacySupplyReconciliationResult['report']['roots'][number]): unknown => ({
+  sourceIds: [...root.sourceIds].sort(),
+  identityKey: root.identityKey,
+  canonicalUrl: root.canonicalUrl,
+  origin: root.origin,
+  pathKey: root.pathKey,
+  recordIds: [...root.recordIds].sort(),
+  targetProjections: root.targetProjections.map(affiliateLegacyReplayTarget).sort((a, b) => (
+    JSON.stringify(a).localeCompare(JSON.stringify(b))
+  )),
+  evidenceRefs: root.evidenceRefs.filter((ref) => !ref.startsWith('legacy-target:')).sort(),
+});
+
+const isAffiliateLegacyReconciliationReplaySafe = (
+  appliedReport: AffiliateLegacySupplyReconciliationResult['report'],
+  currentReport: AffiliateLegacySupplyReconciliationResult['report'],
+): boolean => {
+  if (!appliedReport.isApplySafe || !currentReport.isApplySafe) return false;
+  const stableCounts = (report: AffiliateLegacySupplyReconciliationResult['report']) => ({
+    sources: report.counts.sources,
+    roots: report.counts.roots,
+    lineageRecords: report.counts.lineageRecords,
+    unresolvedRecords: report.counts.unresolvedRecords,
+    preservedPublicTargets: report.counts.preservedPublicTargets,
+    lastKnownGoodTargets: report.counts.lastKnownGoodTargets,
+    rejectedTargets: report.counts.rejectedTargets,
+    claims: report.counts.claims,
+    recordsByKind: report.counts.recordsByKind,
+  });
+  if (hashAffiliateAgentValue(stableCounts(appliedReport)) !== hashAffiliateAgentValue(stableCounts(currentReport))) {
+    return false;
+  }
+  if (hashAffiliateAgentValue(appliedReport.roots.map(affiliateLegacyReplayRoot)) !== hashAffiliateAgentValue(currentReport.roots.map(affiliateLegacyReplayRoot))) {
+    return false;
+  }
+  const appliedClaimIds = appliedReport.claimActions.map((claim) => claim.id).sort();
+  const currentClaimIds = currentReport.claimActions.map((claim) => claim.id).sort();
+  if (hashAffiliateAgentValue(appliedClaimIds) !== hashAffiliateAgentValue(currentClaimIds)) return false;
+  return currentReport.claimActions.every((claim) => claim.action !== 'BLOCK_APPLY');
+};
+
+export type AffiliateLegacySupplyReconciliationInput = Readonly<{
   db?: AffiliateSupplyDatabase;
   dryRun?: boolean;
-}> = {}): Promise<AffiliateLegacySupplyReconciliationResult> => {
-  if (input.dryRun === false) {
-    throw new Error('Legacy Affiliate Supply reconciliation writes require the authorized cutover workflow.');
-  }
+  now?: Date;
+  rolloutCohort?: string;
+  operatorId?: string | null;
+  expectedReportHash?: string | null;
+  expectedInputHash?: string | null;
+  expectedCounts?: AffiliateLegacyReconciliationReport['counts'] | null;
+  expectedCountsHash?: string | null;
+  applyNonce?: string | null;
+  preflight?: Readonly<{
+    isReady: boolean;
+    deploymentContractVersion?: number | null;
+    deploymentContractHash?: string | null;
+  }> | null;
+}>;
+
+export const reconcileLegacyAffiliateSupply = async (
+  input: AffiliateLegacySupplyReconciliationInput = {},
+): Promise<AffiliateLegacySupplyReconciliationResult> => {
   const database = input.db ?? affiliateSupplyDatabase();
-  const sources = database.sources?.findMany
-    ? await database.sources.findMany({
-        where: { supplySourceId: null },
-        select: { id: true, listUrl: true, targetKind: true },
-        orderBy: { id: 'asc' },
-      })
-    : [];
-  const sourceIds = sources.map((source) => source.id);
-  const candidates = typeof database.candidates?.findMany === 'function' && sourceIds.length
-    ? await database.candidates.findMany({
-        where: {
-          sourceId: { in: sourceIds },
-          OR: [
-            { status: 'PUBLISHED' },
-            { publishedEventId: { not: null } },
-            { publishedTeamId: { not: null } },
-            { publishedFacilityId: { not: null } },
-            { publishedOrganizationId: { not: null } },
-          ],
-        },
-        select: {
-          id: true,
-          sourceId: true,
-          listingKind: true,
-          status: true,
-          publishedEventId: true,
-          publishedTeamId: true,
-          publishedFacilityId: true,
-          publishedOrganizationId: true,
-        },
-      })
-    : [];
-  const candidateIds = candidates.map((candidate) => candidate.id);
-  const targets = typeof database.targets?.findMany === 'function' && candidateIds.length
-    ? await database.targets.findMany({
-        where: { candidateId: { in: candidateIds } },
-        select: {
-          id: true,
-          candidateId: true,
-          targetType: true,
-          targetId: true,
-          status: true,
-          evidenceRefs: true,
-        },
-      })
-    : [];
-  const targetsByCandidateId = new Map<string, AffiliateSupplyLegacyTargetRow[]>();
-  for (const target of targets) {
-    const candidateTargets = targetsByCandidateId.get(String(target.candidateId)) ?? [];
-    candidateTargets.push(target);
-    targetsByCandidateId.set(String(target.candidateId), candidateTargets);
+  const now = input.now ?? new Date();
+  const mode: 'DRY_RUN' | 'APPLY' = input.dryRun === false ? 'APPLY' : 'DRY_RUN';
+  const sourceRows = await readAffiliateLegacyRows(database.sources);
+  const intakeRows = await readAffiliateLegacyRows(database.intakes);
+  const pageRows = await readAffiliateLegacyRows(database.pages);
+  const intakeRunRows = await readAffiliateLegacyRows(database.intakeRuns);
+  const artifactRows = await readAffiliateLegacyRows(database.artifacts);
+  const discoveryResultRows = await readAffiliateLegacyRows(database.discoveryResults);
+  const mappingRows = await readAffiliateLegacyRows(database.mappings);
+  const scrapeRunRows = await readAffiliateLegacyRows(database.runs);
+  const mappingJobRows = await readAffiliateLegacyRows(database.mappingJobs);
+  const approvalRows = await readAffiliateLegacyRows(database.approvals);
+  const candidateRows = await readAffiliateLegacyRows(database.candidates);
+  const discoveryRunRows = await readAffiliateLegacyRows(database.discoveryRuns);
+  const coverageJobRows = await readAffiliateLegacyRows(database.coverageJobs);
+  const gatewayClaimRows = await readAffiliateLegacyRows(database.gatewayClaims);
+  const rootRows = await readAffiliateLegacyRows(database.supplySources);
+  const targetRows = await readAffiliateLegacyRows(database.targets);
+
+  const intakeSourceIds = new Map<string, string>();
+  for (const intake of intakeRows) {
+    const linkedSourceId = affiliateLegacyRowString(intake, 'affiliateSourceId', 'sourceId');
+    intakeSourceIds.set(intake.id, linkedSourceId ?? `intake:${intake.id}`);
   }
-  const candidatesBySourceId = new Map<string, AffiliateSupplyLegacyCandidateRow[]>();
-  for (const candidate of candidates) {
-    const sourceCandidates = candidatesBySourceId.get(String(candidate.sourceId)) ?? [];
-    sourceCandidates.push(candidate);
-    candidatesBySourceId.set(String(candidate.sourceId), sourceCandidates);
-  }
-  const publicTargetsForCandidate = (
-    candidate: AffiliateSupplyLegacyCandidateRow,
-    candidateTargets: readonly AffiliateSupplyLegacyTargetRow[],
-  ): Array<{
-    targetType: string;
-    targetId: string;
-  }> => {
-    const listingKind = String(candidate.listingKind ?? '').toUpperCase();
-    const targetType = listingKind === 'RENTAL'
-      ? 'FACILITY'
-      : listingKind === 'CLUB'
-        ? 'ORGANIZATION'
-        : listingKind;
-    const identities = new Map<string, { targetType: string; targetId: string }>();
-    const addTarget = (rawTargetType: unknown, rawTargetId: unknown): void => {
-      const rawType = String(rawTargetType ?? '').toUpperCase();
-      const normalizedType = rawType === 'RENTAL'
-        ? 'FACILITY'
-        : rawType === 'CLUB'
-          ? 'ORGANIZATION'
-          : rawType;
-      const targetId = typeof rawTargetId === 'string' ? rawTargetId.trim() : '';
-      if (!normalizedType || !targetId) return;
-      identities.set(`${normalizedType}:${targetId}`, { targetType: normalizedType, targetId });
-    };
-    addTarget(
-      targetType,
-      targetType === 'EVENT'
-        ? candidate.publishedEventId
-        : targetType === 'TEAM'
-          ? candidate.publishedTeamId
-          : targetType === 'FACILITY'
-            ? candidate.publishedFacilityId
-            : targetType === 'ORGANIZATION'
-              ? candidate.publishedOrganizationId
-              : null,
-    );
-    for (const target of candidateTargets) {
-      if (!['PUBLISHED', 'LAST_KNOWN_GOOD'].includes(String(target.status ?? '').toUpperCase())) continue;
-      addTarget(target.targetType, target.targetId);
-    }
-    return Array.from(identities.values());
-  };
-  const rows: AffiliateLegacySupplyReconciliationRow[] = [];
-  for (const source of sources) {
-    const identity = normalizeAffiliateSupplyIdentity({
-      requestedUrl: String(source.listUrl),
-      resolvedCanonicalUrl: String(source.listUrl),
+
+  const sourceEvidence: AffiliateLegacySourceEvidence[] = sourceRows.map((source) => ({
+    id: source.id,
+    requestedUrl: affiliateLegacyRowString(source, 'listUrl', 'baseUrl', 'url'),
+    resolvedCanonicalUrl: affiliateLegacyRowString(source, 'canonicalUrl', 'listUrl', 'baseUrl', 'url'),
+    isRedirectVerified: affiliateLegacyRowString(source, 'canonicalUrl') !== null,
+    operatorDomain: affiliateLegacyRowString(source, 'operatorDomain'),
+    targetKind: affiliateLegacyRowString(source, 'targetKind', 'listingKind'),
+    existingSupplySourceId: affiliateLegacyRowString(source, 'supplySourceId'),
+    liveSourceId: source.id,
+    evidenceRefs: [`source:${source.id}`],
+  }));
+  for (const intake of intakeRows) {
+    const requestedUrl = affiliateLegacyRowString(intake, 'baseUrl', 'url');
+    if (!requestedUrl) continue;
+    const liveSourceId = affiliateLegacyRowString(intake, 'affiliateSourceId', 'sourceId');
+    sourceEvidence.push({
+      id: intakeSourceIds.get(intake.id) ?? `intake:${intake.id}`,
+      requestedUrl,
+      resolvedCanonicalUrl: requestedUrl,
       isRedirectVerified: false,
+      targetKind: affiliateLegacyRowString(intake, 'targetKind', 'targetKindHint', 'suggestedClassification'),
+      existingSupplySourceId: affiliateLegacyRowString(intake, 'supplySourceId'),
+      intakeId: intake.id,
+      liveSourceId,
+      evidenceRefs: [`intake:${intake.id}`],
     });
-    const existingRoot = database.supplySources?.findFirst
-      ? await database.supplySources.findFirst({
-          where: { pathKey: identity.pathKey },
-          orderBy: { createdAt: 'asc' },
-        })
-      : null;
-    const sourceCandidates = candidatesBySourceId.get(String(source.id)) ?? [];
-    const targetProjections: AffiliateLegacySupplyTargetProjection[] = [];
-    let unverifiableTargetCount = 0;
-    for (const candidate of sourceCandidates) {
-      const candidateTargets = targetsByCandidateId.get(String(candidate.id)) ?? [];
-      for (const publicTarget of publicTargetsForCandidate(candidate, candidateTargets)) {
-        const existingTarget = candidateTargets.find((target) => (
-          String(target.targetType).toUpperCase() === publicTarget.targetType
-          && String(target.targetId) === publicTarget.targetId
-        ));
-        const existingStatus = String(existingTarget?.status ?? '').toUpperCase();
-        const isVerifiable = ['PUBLISHED', 'LAST_KNOWN_GOOD'].includes(existingStatus);
-        if (!isVerifiable) unverifiableTargetCount += 1;
-        targetProjections.push({
-          candidateId: String(candidate.id),
-          targetType: publicTarget.targetType,
-          targetId: publicTarget.targetId,
-          status: isVerifiable ? existingStatus as 'PUBLISHED' | 'LAST_KNOWN_GOOD' : 'LAST_KNOWN_GOOD',
-          action: isVerifiable ? 'PRESERVE_PUBLIC_TARGET' : 'MARK_LAST_KNOWN_GOOD',
-          evidenceRefs: Array.from(new Set([
-            `source:${source.id}`,
-            `candidate:${candidate.id}`,
-            `target:${publicTarget.targetType}:${publicTarget.targetId}`,
-            ...stringArray(existingTarget?.evidenceRefs),
-          ])),
+  }
+
+  const roots: AffiliateLegacyRootEvidence[] = rootRows.map((root) => ({
+    id: root.id,
+    identityKey: affiliateLegacyRowString(root, 'identityKey') ?? '',
+    canonicalUrl: affiliateLegacyRowString(root, 'canonicalUrl') ?? '',
+    origin: affiliateLegacyRowString(root, 'origin') ?? '',
+    pathKey: affiliateLegacyRowString(root, 'pathKey') ?? '',
+    predecessorId: affiliateLegacyRowString(root, 'predecessorId'),
+    successorId: affiliateLegacyRowString(root, 'successorId'),
+    derivedStage: affiliateLegacyRowString(root, 'derivedStage'),
+    isAutomationEnabled: root.isAutomationEnabled === true,
+  }));
+
+  const records: AffiliateLegacyLineageRecord[] = [];
+  const addRecord = (
+    kind: AffiliateLegacyRecordKind,
+    row: AffiliateLegacyReconciliationRowData,
+    sourceId?: string | null,
+    supplySourceId?: string | null,
+  ): void => {
+    records.push(affiliateLegacyRecord(kind, row, sourceId, supplySourceId));
+  };
+  for (const source of sourceRows) addRecord('SOURCE', source, source.id);
+  for (const intake of intakeRows) {
+    addRecord('INTAKE', intake, intakeSourceIds.get(intake.id), affiliateLegacyRowString(intake, 'supplySourceId'));
+  }
+  for (const page of pageRows) {
+    addRecord('CAPTURE_PAGE', page, intakeSourceIds.get(affiliateLegacyRowString(page, 'intakeId') ?? ''));
+  }
+  for (const run of intakeRunRows) {
+    addRecord('CAPTURE_RUN', run, intakeSourceIds.get(affiliateLegacyRowString(run, 'intakeId') ?? ''), affiliateLegacyRowString(run, 'supplySourceId'));
+  }
+  for (const artifact of artifactRows) {
+    addRecord('CAPTURE_ARTIFACT', artifact, intakeSourceIds.get(affiliateLegacyRowString(artifact, 'intakeId') ?? ''), affiliateLegacyRowString(artifact, 'supplySourceId'));
+  }
+  for (const result of discoveryResultRows) {
+    const sourceId = affiliateLegacyRowString(result, 'matchingSourceId')
+      ?? intakeSourceIds.get(affiliateLegacyRowString(result, 'matchingIntakeId') ?? '');
+    if (sourceId || affiliateLegacyRowString(result, 'supplySourceId')) {
+      addRecord('DISCOVERY_RESULT', result, sourceId, affiliateLegacyRowString(result, 'supplySourceId'));
+    }
+  }
+  for (const mapping of mappingRows) addRecord('MAPPING', mapping);
+  for (const run of scrapeRunRows) addRecord('SCRAPE_RUN', run);
+  for (const job of mappingJobRows) {
+    addRecord(
+      'MAPPING_JOB',
+      job,
+      affiliateLegacyRowString(job, 'sourceId') ?? intakeSourceIds.get(affiliateLegacyRowString(job, 'intakeId') ?? ''),
+      affiliateLegacyRowString(job, 'supplySourceId'),
+    );
+  }
+  for (const candidate of candidateRows) addRecord('CANDIDATE', candidate);
+
+  const targets: AffiliateLegacyTargetEvidence[] = targetRows.map((target) => ({
+    id: target.id,
+    supplySourceId: affiliateLegacyRowString(target, 'supplySourceId'),
+    candidateId: affiliateLegacyRowString(target, 'candidateId'),
+    targetType: affiliateLegacyRowString(target, 'targetType') ?? '',
+    targetId: affiliateLegacyRowString(target, 'targetId'),
+    status: affiliateLegacyRowString(target, 'status'),
+    evidenceRefs: [
+      ...stringArray(target.evidenceRefs),
+      `legacy-target:${target.id}`,
+    ],
+    isEvidenceVerifiable: ['PUBLISHED', 'LAST_KNOWN_GOOD'].includes(
+      String(target.status ?? '').toUpperCase(),
+    ),
+  }));
+  const existingTargetKeys = new Set(targets.map((target) => (
+    `${target.candidateId ?? ''}:${String(target.targetType).toUpperCase()}:${target.targetId ?? ''}`
+  )));
+  for (const candidate of candidateRows) {
+    const sourceId = affiliateLegacyRowString(candidate, 'sourceId');
+    const listingTargetType = affiliateLegacyTargetTypeForListing(candidate.listingKind);
+    if (!sourceId || !listingTargetType) continue;
+    const publishedIdFields: Record<string, string> = {
+      EVENT: 'publishedEventId',
+      TEAM: 'publishedTeamId',
+      FACILITY: 'publishedFacilityId',
+      ORGANIZATION: 'publishedOrganizationId',
+    };
+    const targetId = affiliateLegacyRowString(candidate, publishedIdFields[listingTargetType]);
+    if (!targetId) continue;
+    const key = `${candidate.id}:${listingTargetType}:${targetId}`;
+    if (existingTargetKeys.has(key)) continue;
+    targets.push({
+      id: `candidate-public:${candidate.id}:${listingTargetType}:${targetId}`,
+      sourceId,
+      candidateId: candidate.id,
+      targetType: listingTargetType,
+      targetId,
+      status: 'OBSERVED',
+      evidenceRefs: [
+        `candidate:${candidate.id}`,
+        `public-target:${listingTargetType}:${targetId}`,
+      ],
+      isEvidenceVerifiable: false,
+    });
+  }
+
+  const claims: AffiliateLegacyClaimEvidence[] = [];
+  const addClaim = (
+    kind: AffiliateLegacyClaimEvidence['kind'],
+    row: AffiliateLegacyReconciliationRowData,
+    sourceId?: string | null,
+    supplySourceId?: string | null,
+    subjectId?: string | null,
+  ): void => {
+    claims.push({
+      kind,
+      id: row.id,
+      sourceId: sourceId ?? affiliateLegacyRowString(row, 'sourceId'),
+      supplySourceId: supplySourceId ?? affiliateLegacyRowString(row, 'supplySourceId'),
+      subjectId: subjectId ?? affiliateLegacyRowString(row, 'jobId', 'subjectId'),
+      role: affiliateLegacyRowString(row, 'role', 'reviewerRole'),
+      workerId: affiliateLegacyRowString(row, 'workerId', 'reviewerId'),
+      status: affiliateLegacyClaimStatus(row),
+      leaseExpiresAt: row.leaseExpiresAt as Date | string | null | undefined,
+      tokenExpiresAt: row.tokenExpiresAt as Date | string | null | undefined,
+    });
+  };
+  for (const job of mappingJobRows) {
+    addClaim(
+      'MAPPING_JOB',
+      job,
+      affiliateLegacyRowString(job, 'sourceId') ?? intakeSourceIds.get(affiliateLegacyRowString(job, 'intakeId') ?? ''),
+      affiliateLegacyRowString(job, 'supplySourceId'),
+    );
+  }
+  for (const approval of approvalRows) addClaim('APPROVAL_JOB', approval);
+  for (const run of intakeRunRows) {
+    addClaim(
+      'INTAKE_RUN',
+      run,
+      intakeSourceIds.get(affiliateLegacyRowString(run, 'intakeId') ?? ''),
+      affiliateLegacyRowString(run, 'supplySourceId'),
+    );
+  }
+  for (const run of discoveryRunRows) addClaim('DISCOVERY_RUN', run);
+  for (const job of coverageJobRows) addClaim('COVERAGE_JOB', job);
+  for (const claim of gatewayClaimRows) {
+    const envelope = affiliateLegacyJsonObject(claim.claimEnvelopeJson);
+    const subject = affiliateLegacyJsonObject(envelope.subject);
+    addClaim(
+      'GATEWAY_CLAIM',
+      claim,
+      affiliateLegacyRowString(claim, 'sourceId') ?? affiliateLegacyRowString(envelope, 'sourceId') ?? affiliateLegacyRowString(subject, 'sourceId'),
+      affiliateLegacyRowString(claim, 'supplySourceId') ?? affiliateLegacyRowString(envelope, 'supplySourceId') ?? affiliateLegacyRowString(subject, 'supplySourceId'),
+      affiliateLegacyRowString(claim, 'jobId'),
+    );
+  }
+
+  const report = buildAffiliateLegacyReconciliationReport({
+    now,
+    sources: sourceEvidence,
+    roots,
+    records,
+    targets,
+    claims,
+  });
+  if (mode === 'APPLY' && input.expectedReportHash) {
+    const replayReport = await readAppliedAffiliateLegacyReconciliationReport(
+      database,
+      input.expectedReportHash,
+    );
+    if (replayReport) {
+      if (!input.operatorId?.trim() || !input.applyNonce?.trim()) {
+        throw new Error('Legacy Affiliate Supply reconciliation writes require an operator ID and apply nonce.');
+      }
+      if (!input.expectedInputHash) {
+        throw new Error('Legacy Affiliate Supply reconciliation replay requires the reviewed input hash.');
+      }
+      if (input.expectedInputHash !== replayReport.inputHash) {
+        throw new Error('Legacy Affiliate Supply reconciliation input hash does not match the reviewed selection.');
+      }
+      if (!input.expectedCountsHash && !input.expectedCounts) {
+        throw new Error('Legacy Affiliate Supply reconciliation replay requires reviewed counts.');
+      }
+      if (input.expectedCountsHash && input.expectedCountsHash !== hashAffiliateAgentValue(replayReport.counts)) {
+        throw new Error('Legacy Affiliate Supply reconciliation counts do not match the reviewed selection.');
+      }
+      if (input.expectedCounts && hashAffiliateAgentValue(input.expectedCounts) !== hashAffiliateAgentValue(replayReport.counts)) {
+        throw new Error('Legacy Affiliate Supply reconciliation counts do not match the reviewed selection.');
+      }
+      if (!isAffiliateLegacyReconciliationReplaySafe(replayReport, report)) {
+        throw new Error('Legacy Affiliate Supply reconciliation snapshot changed after the report was applied.');
+      }
+      return buildAffiliateLegacySupplyReconciliationResult({
+        mode,
+        report: replayReport,
+        records,
+      });
+    }
+  }
+  const contract = mode === 'APPLY'
+    ? await loadActiveAffiliateSupplyContract({
+        rolloutCohort: input.rolloutCohort,
+        db: database,
+      })
+    : null;
+  const rolloutCohort = input.rolloutCohort ?? contract?.policy.rolloutCohort ?? 'DEFAULT';
+
+  if (mode === 'DRY_RUN') {
+    await persistAffiliateLegacyReconciliationRun({
+      database,
+      report,
+      mode,
+      rolloutCohort,
+      operatorId: input.operatorId,
+      contract,
+      deploymentContractVersion: input.preflight?.deploymentContractVersion,
+      deploymentContractHash: input.preflight?.deploymentContractHash,
+      now,
+    });
+  } else {
+    if (!input.operatorId?.trim() || !input.applyNonce?.trim()) {
+      throw new Error('Legacy Affiliate Supply reconciliation writes require an operator ID and apply nonce.');
+    }
+    if (!input.expectedReportHash?.trim()) {
+      throw new Error('Legacy Affiliate Supply reconciliation apply requires the reviewed report hash.');
+    }
+    if (input.expectedReportHash !== report.reportHash) {
+      throw new Error('Legacy Affiliate Supply reconciliation report hash does not match the reviewed report.');
+    }
+    if (input.expectedInputHash && input.expectedInputHash !== report.inputHash) {
+      throw new Error('Legacy Affiliate Supply reconciliation input hash does not match the reviewed selection.');
+    }
+    if (!input.expectedCountsHash && !input.expectedCounts) {
+      throw new Error('Legacy Affiliate Supply reconciliation apply requires reviewed counts.');
+    }
+    if (input.expectedCountsHash && input.expectedCountsHash !== hashAffiliateAgentValue(report.counts)) {
+      throw new Error('Legacy Affiliate Supply reconciliation counts do not match the reviewed selection.');
+    }
+    if (input.expectedCounts && hashAffiliateAgentValue(input.expectedCounts) !== hashAffiliateAgentValue(report.counts)) {
+      throw new Error('Legacy Affiliate Supply reconciliation counts do not match the reviewed selection.');
+    }
+    if (!input.preflight || input.preflight.isReady !== true) {
+      throw new Error('Legacy Affiliate Supply reconciliation requires a ready cutover preflight.');
+    }
+    if (!report.isApplySafe) {
+      throw new Error(`Legacy Affiliate Supply reconciliation is blocked: ${report.blockingFindings.map((finding) => finding.code).join(', ')}`);
+    }
+    if (!contract) throw new Error('Legacy Affiliate Supply reconciliation requires an active Supply Contract.');
+
+    await withSupplyTransaction(database, async (transactionDatabase) => {
+      const atomicDatabase = {
+        ...transactionDatabase,
+        transaction: undefined,
+      } as AffiliateSupplyDatabase;
+      const sourceToRoot = new Map<string, string>();
+      const planToRoot = new Map<string, string>();
+      const sourceById = new Map(sourceEvidence.map((source) => [source.id, source]));
+      for (const plan of report.roots) {
+        const firstSource = plan.sourceIds.map((sourceId) => sourceById.get(sourceId)).find(Boolean);
+        if (!firstSource) throw new Error(`Legacy reconciliation root plan ${plan.identityKey ?? plan.sourceIds[0]} has no source evidence.`);
+        let persistedRoot: AffiliateSupplySources | null = null;
+        for (const sourceId of plan.sourceIds) {
+          const source = sourceById.get(sourceId);
+          if (!source) continue;
+          const ensured = await ensureAffiliateSupplySource({
+            requestedUrl: source.requestedUrl ?? source.resolvedCanonicalUrl ?? '',
+            resolvedCanonicalUrl: source.resolvedCanonicalUrl ?? source.requestedUrl ?? '',
+            isRedirectVerified: source.isRedirectVerified === true,
+            operatorDomain: source.operatorDomain,
+            targetKind: source.targetKind,
+            rolloutCohort,
+            intakeId: source.intakeId,
+            liveSourceId: source.liveSourceId,
+            priorSupplySourceId: source.predecessorSupplySourceId ?? source.existingSupplySourceId,
+            db: atomicDatabase,
+            now,
+          });
+          persistedRoot = ensured.supplySource;
+          sourceToRoot.set(sourceId, persistedRoot.id);
+        }
+        if (!persistedRoot) throw new Error(`Legacy reconciliation root plan ${plan.identityKey ?? plan.sourceIds[0]} was not persisted.`);
+        planToRoot.set(plan.identityKey ?? plan.sourceIds[0], persistedRoot.id);
+      }
+
+      const recordDelegates: Partial<Record<AffiliateLegacyRecordKind, unknown>> = {
+        SOURCE: atomicDatabase.sources,
+        INTAKE: atomicDatabase.intakes,
+        CAPTURE_PAGE: atomicDatabase.pages,
+        CAPTURE_RUN: atomicDatabase.intakeRuns,
+        CAPTURE_ARTIFACT: atomicDatabase.artifacts,
+        DISCOVERY_RESULT: atomicDatabase.discoveryResults,
+        MAPPING: atomicDatabase.mappings,
+        SCRAPE_RUN: atomicDatabase.runs,
+        MAPPING_JOB: atomicDatabase.mappingJobs,
+        CANDIDATE: atomicDatabase.candidates,
+      };
+      const recordsByRootAndKind = new Map<string, string[]>();
+      for (const record of records) {
+        const rootId = record.supplySourceId ?? (record.sourceId ? sourceToRoot.get(record.sourceId) : undefined);
+        const delegate = recordDelegates[record.kind];
+        if (!rootId || !delegate) continue;
+        const key = `${record.kind}:${rootId}`;
+        const ids = recordsByRootAndKind.get(key) ?? [];
+        ids.push(record.id);
+        recordsByRootAndKind.set(key, ids);
+      }
+      for (const [key, ids] of recordsByRootAndKind) {
+        const [kind, rootId] = key.split(':');
+        const delegate = recordDelegates[kind as AffiliateLegacyRecordKind] as {
+          updateMany?: (args: unknown) => Promise<unknown>;
+        };
+        if (typeof delegate?.updateMany !== 'function') continue;
+        await delegate.updateMany({
+          where: { id: { in: ids }, supplySourceId: null },
+          data: { supplySourceId: rootId },
         });
       }
-    }
-    rows.push({
-      sourceId: String(source.id),
-      identityKey: existingRoot?.identityKey ?? identity.identityKey,
-      action: existingRoot ? 'REUSE_ROOT' : 'CREATE_ROOT',
-      publishedCandidateCount: sourceCandidates.length,
-      preservedTargetCount: targetProjections.length,
-      unverifiableTargetCount,
-      targetProjections,
-      evidenceRefs: [
-        `source:${source.id}`,
-        ...sourceCandidates.map((candidate) => `candidate:${candidate.id}`),
-        ...targetProjections.flatMap((target) => target.evidenceRefs),
-      ],
+
+      const targetById = new Map(targetRows.map((target) => [target.id, target]));
+      for (const plan of report.roots) {
+        const rootId = planToRoot.get(plan.identityKey ?? plan.sourceIds[0]);
+        if (!rootId) continue;
+        for (const target of plan.targetProjections) {
+          if (target.action !== 'MARK_LAST_KNOWN_GOOD') continue;
+          const existing = targetById.get(target.sourceTargetId);
+          await upsertAffiliateSupplyTarget({
+            db: atomicDatabase,
+            id: existing ? undefined : target.sourceTargetId.startsWith('candidate-public:')
+              ? target.sourceTargetId
+              : undefined,
+            supplySourceId: rootId,
+            targetType: target.targetType,
+            targetId: target.targetId,
+            sourceProfile: target.targetType,
+            candidateId: target.candidateId,
+            status: 'LAST_KNOWN_GOOD',
+            evidenceRefs: target.evidenceRefs,
+            refreshedAt: now,
+            metadata: {
+              migration: 'affiliate-legacy-reconciliation',
+              previousTargetId: existing?.id ?? null,
+            },
+          });
+        }
+      }
+
+      const claimRowsByKind = new Map<string, AffiliateLegacyReconciliationRowData[]>();
+      for (const claim of claims) {
+        const action = report.claimActions.find((candidate) => (
+          candidate.id === claim.id && candidate.kind === claim.kind
+        ));
+        if (!action || action.action !== 'REVOKE_EXPIRED') continue;
+        const rows = claimRowsByKind.get(claim.kind) ?? [];
+        const row = (
+          claim.kind === 'MAPPING_JOB' ? mappingJobRows
+            : claim.kind === 'APPROVAL_JOB' ? approvalRows
+              : claim.kind === 'INTAKE_RUN' ? intakeRunRows
+                : claim.kind === 'DISCOVERY_RUN' ? discoveryRunRows
+                  : claim.kind === 'COVERAGE_JOB' ? coverageJobRows
+                    : gatewayClaimRows
+        ).find((candidate) => candidate.id === claim.id);
+        if (row) rows.push(row);
+        claimRowsByKind.set(claim.kind, rows);
+      }
+      const resetQueue = async (
+        delegate: unknown,
+        rows: readonly AffiliateLegacyReconciliationRowData[],
+        data: Record<string, unknown>,
+      ): Promise<void> => {
+        const updateMany = delegate && typeof delegate === 'object' && 'updateMany' in delegate
+          ? (delegate as { updateMany?: (args: unknown) => Promise<unknown> }).updateMany
+          : undefined;
+        if (typeof updateMany !== 'function' || rows.length === 0) return;
+        await updateMany.call(delegate, {
+          where: { id: { in: rows.map((row) => row.id) } },
+          data,
+        });
+      };
+      await resetQueue(atomicDatabase.mappingJobs, claimRowsByKind.get('MAPPING_JOB') ?? [], {
+        status: 'QUEUED',
+        claimedAt: null,
+        leaseExpiresAt: null,
+        workerId: null,
+      });
+      await resetQueue(atomicDatabase.approvals, claimRowsByKind.get('APPROVAL_JOB') ?? [], {
+        status: 'QUEUED',
+        claimedAt: null,
+        leaseExpiresAt: null,
+        reviewerId: null,
+      });
+      await resetQueue(atomicDatabase.intakeRuns, claimRowsByKind.get('INTAKE_RUN') ?? [], {
+        status: 'QUEUED',
+        claimedAt: null,
+        workerId: null,
+      });
+      await resetQueue(atomicDatabase.discoveryRuns, claimRowsByKind.get('DISCOVERY_RUN') ?? [], {
+        status: 'QUEUED',
+        claimedAt: null,
+        workerId: null,
+      });
+      await resetQueue(atomicDatabase.coverageJobs, claimRowsByKind.get('COVERAGE_JOB') ?? [], {
+        status: 'QUEUED',
+        claimedAt: null,
+        leaseExpiresAt: null,
+        workerId: null,
+      });
+      const gatewayClaimsToRevoke = claimRowsByKind.get('GATEWAY_CLAIM') ?? [];
+      await resetQueue(atomicDatabase.gatewayClaims, gatewayClaimsToRevoke, {
+        status: 'REVOKED',
+        endedAt: now,
+        tokenInvalidatedAt: now,
+        safeFailureCode: 'LEGACY_RECONCILED',
+        safeFailureSummary: 'Expired legacy gateway claim revoked during governed fleet cutover.',
+      });
+      await resetQueue(atomicDatabase.gatewayJobs, gatewayClaimsToRevoke
+        .map((row) => affiliateLegacyRowString(row, 'jobId'))
+        .filter((id): id is string => Boolean(id))
+        .map((id) => ({ id })), {
+        status: 'QUEUED',
+        activeClaimId: null,
+        nextAttemptAt: now,
+        terminalDisposition: null,
+      });
+
+      for (const plan of report.roots) {
+        const rootId = planToRoot.get(plan.identityKey ?? plan.sourceIds[0]);
+        if (!rootId || !atomicDatabase.transitions?.findUnique || !atomicDatabase.transitions?.create) continue;
+        const root = await atomicDatabase.supplySources.findUnique({ where: { id: rootId } });
+        if (!root) throw new Error(`Legacy reconciliation root ${rootId} disappeared during apply.`);
+        const stage = AFFILIATE_SUPPLY_LIFECYCLE_STAGES.includes(root.derivedStage as AffiliateSupplyLifecycleStage)
+          ? root.derivedStage as AffiliateSupplyLifecycleStage
+          : 'HUMAN_REVIEW_REQUIRED';
+        const outcome = AFFILIATE_SUPPLY_OUTCOMES.includes(root.derivedOutcome as AffiliateSupplyLifecycleOutcome)
+          ? root.derivedOutcome as AffiliateSupplyLifecycleOutcome
+          : null;
+        await recordAffiliateSupplyLifecycleTransition({
+          db: atomicDatabase,
+          supplySourceId: rootId,
+          command: 'LEGACY_RECONCILED',
+          idempotencyKey: `legacy-reconciled:${report.reportHash}:${rootId}`,
+          request: {
+            reportHash: report.reportHash,
+            sourceIds: plan.sourceIds,
+            recordIds: plan.recordIds,
+            targetCount: plan.targetProjections.length,
+          },
+          result: {
+            reportHash: report.reportHash,
+            action: plan.action,
+            observedStage: stage,
+            observedOutcome: outcome,
+          },
+          expectedGeneration: Number(root.lifecycleGeneration ?? 0),
+          contractVersion: contract.policy.version,
+          contractHash: contract.policy.hash,
+          actorKind: 'SYSTEM',
+          actorId: input.operatorId ?? 'affiliate-legacy-reconciliation',
+          fromStage: stage,
+          toStage: stage,
+          outcome,
+          reasonCodes: ['LEGACY_RECONCILED'],
+          evidenceRefs: plan.evidenceRefs,
+          now,
+        });
+      }
+      await persistAffiliateLegacyReconciliationRun({
+        database: atomicDatabase,
+        report,
+        mode,
+        rolloutCohort,
+        operatorId: input.operatorId,
+        contract,
+        applyNonce: input.applyNonce,
+        deploymentContractVersion: input.preflight?.deploymentContractVersion,
+        deploymentContractHash: input.preflight?.deploymentContractHash,
+        now,
+      });
     });
   }
-  return {
-    dryRun: true,
-    rows,
-    preservedTargetCount: rows.reduce((sum, row) => sum + row.preservedTargetCount, 0),
-    unverifiableTargetCount: rows.reduce((sum, row) => sum + row.unverifiableTargetCount, 0),
-  };
+
+  return buildAffiliateLegacySupplyReconciliationResult({
+    mode,
+    report,
+    records,
+  });
 };
 
 const persistAffiliateSupplyReconciliationBatch = async (input: Readonly<{

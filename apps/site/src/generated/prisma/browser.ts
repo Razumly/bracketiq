@@ -443,6 +443,11 @@ export type AffiliateSupplyContractManifests = Prisma.AffiliateSupplyContractMan
  */
 export type AffiliateSupplyLifecycleTransitions = Prisma.AffiliateSupplyLifecycleTransitionsModel
 /**
+ * Model AffiliateSupplyReconciliationRuns
+ *
+ */
+export type AffiliateSupplyReconciliationRuns = Prisma.AffiliateSupplyReconciliationRunsModel
+/**
  * Model AffiliateAgentWorkerHealth
  *
  */

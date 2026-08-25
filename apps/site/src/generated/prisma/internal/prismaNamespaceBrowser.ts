@@ -136,6 +136,7 @@ export const ModelName = {
   AffiliateSupplySources: 'AffiliateSupplySources',
   AffiliateSupplyContractManifests: 'AffiliateSupplyContractManifests',
   AffiliateSupplyLifecycleTransitions: 'AffiliateSupplyLifecycleTransitions',
+  AffiliateSupplyReconciliationRuns: 'AffiliateSupplyReconciliationRuns',
   AffiliateAgentWorkerHealth: 'AffiliateAgentWorkerHealth',
   AffiliateSupplyTargets: 'AffiliateSupplyTargets',
   AffiliateReplenishmentDemands: 'AffiliateReplenishmentDemands',
@@ -2205,6 +2206,33 @@ export const AffiliateSupplyLifecycleTransitionsScalarFieldEnum = {
 } as const
 
 export type AffiliateSupplyLifecycleTransitionsScalarFieldEnum = (typeof AffiliateSupplyLifecycleTransitionsScalarFieldEnum)[keyof typeof AffiliateSupplyLifecycleTransitionsScalarFieldEnum]
+
+
+export const AffiliateSupplyReconciliationRunsScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt',
+  mode: 'mode',
+  status: 'status',
+  operatorId: 'operatorId',
+  rolloutCohort: 'rolloutCohort',
+  supplyContractVersion: 'supplyContractVersion',
+  supplyContractHash: 'supplyContractHash',
+  deploymentContractVersion: 'deploymentContractVersion',
+  deploymentContractHash: 'deploymentContractHash',
+  inputHash: 'inputHash',
+  outputHash: 'outputHash',
+  reportHash: 'reportHash',
+  counts: 'counts',
+  failedInvariants: 'failedInvariants',
+  resolutionRefs: 'resolutionRefs',
+  reportJson: 'reportJson',
+  appliedAt: 'appliedAt',
+  appliedBy: 'appliedBy',
+  applyNonceHash: 'applyNonceHash'
+} as const
+
+export type AffiliateSupplyReconciliationRunsScalarFieldEnum = (typeof AffiliateSupplyReconciliationRunsScalarFieldEnum)[keyof typeof AffiliateSupplyReconciliationRunsScalarFieldEnum]
 
 
 export const AffiliateAgentWorkerHealthScalarFieldEnum = {
