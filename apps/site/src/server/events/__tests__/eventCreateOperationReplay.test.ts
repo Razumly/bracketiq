@@ -37,6 +37,12 @@ const createClient = (initialRows: Array<Record<string, unknown>> = []) => {
       Object.assign(row, data);
       return row;
     }),
+    updateMany: jest.fn(async ({ where, data }: any) => {
+      const row = rows.get(String(where.createOperationId));
+      if (!row || row.updatedAt !== where.updatedAt) return { count: 0 };
+      Object.assign(row, data);
+      return { count: 1 };
+    }),
   };
   return { eventEditorCreateOperations: operations, rows } as any;
 };
@@ -181,6 +187,30 @@ describe('event editor create operation replay', () => {
     expect(replay.firstClaim).toBe(false);
     expect(replay.result).toEqual(storedResult);
     expect(client.eventEditorCreateOperations.createMany).toHaveBeenCalledTimes(1);
+  });
+  it('reclaims an abandoned processing claim for the same request', async () => {
+    const requestHash = eventEditorCreateRequestHash(command);
+    const updatedAt = new Date(0);
+    const client = createClient([
+      operationRow({
+        requestHash,
+        updatedAt,
+        proposalStatus: 'NONE',
+      }),
+    ]);
+    const claim = await claimEventEditorCreateOperation({
+      client,
+      createOperationId: command.createOperationId,
+      actorUserId: 'user-1',
+      requestHash,
+    });
+
+    expect(claim).toEqual(expect.objectContaining({
+      firstClaim: true,
+      eventId: 'event-1',
+      requestHash,
+    }));
+    expect(client.eventEditorCreateOperations.updateMany).toHaveBeenCalledTimes(1);
   });
   it('waits for terminal delivery metadata before replaying a committed result', async () => {
     jest.useFakeTimers();

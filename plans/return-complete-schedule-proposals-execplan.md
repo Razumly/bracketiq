@@ -10,17 +10,27 @@ The site and mobile applications use the same HTTP proposal and accept seam. Mob
 
 ## Progress
 
-- [x] (2026-08-24) Read issue #37, parent issue #14, dependencies #31 and #33, repository rules, and the existing Event Editor paths.
-- [x] (2026-08-24) Map the Event Editor contract, create operation receipt, scheduler, graph persistence, web submit flow, and mobile create flow.
-- [x] (2026-08-24) Add proposal and accept contracts with revision bindings.
-- [x] (2026-08-24) Persist pending proposals without persisting Events.
-- [x] (2026-08-24) Accept the exact stored graph with atomic Event persistence.
-- [x] (2026-08-24) Add site and mobile review and accept flows.
-- [x] (2026-08-24) Add focused regression tests.
-- [x] (2026-08-24) Run focused type checks and tests.
-- [x] (2026-08-24) Run the complete site and mobile suites once.
-- [ ] Run the required two-axis code review.
-- [ ] Address review findings and commit the work on the current branch.
+- [x] (2026-08-25 15:42Z) Read issue #37, parent issue #14, dependencies #31 and #33, repository rules, and the existing Event Editor paths.
+- [x] (2026-08-25 15:42Z) Map the Event Editor contract, create operation receipt, scheduler, graph persistence, web submit flow, and mobile create flow.
+- [x] (2026-08-25 15:42Z) Add proposal and accept contracts with revision bindings.
+- [x] (2026-08-25 15:42Z) Persist pending proposals without persisting Events.
+- [x] (2026-08-25 15:42Z) Accept the exact stored graph with atomic Event persistence.
+- [x] (2026-08-25 15:42Z) Add site and mobile review and accept flows.
+- [x] (2026-08-25 15:42Z) Add focused regression tests.
+- [x] (2026-08-25 15:42Z) Run focused type checks and tests.
+- [x] (2026-08-25 15:42Z) Run the complete site and mobile suites once.
+- [x] (2026-08-25 16:25Z) Run the required two-axis code review.
+- [x] (2026-08-25 16:25Z) Address the review finding for stale accepted-proposal replay and recover abandoned create-operation claims.
+- [x] (2026-08-25 16:27Z) Commit the work on the current branch.
+## Milestones
+
+The first milestone establishes the wire contract and durable proposal storage. It adds the `PROPOSED` result, the accept and reject commands, revision bindings, and the operation-receipt columns. Run `npx tsc --noEmit` from `apps/site` and the focused Event Editor contract tests from `apps/site`; the expected result is a passing type check and passing contract tests that show a proposal response can be parsed and accepted.
+
+The second milestone makes proposal computation and acceptance transactional. A scheduled League or Tournament create computes the complete graph and placements, then stores the proposal without leaving an Event row. Acceptance reads that stored graph, rechecks revisions, and persists the Event and graph without calling the scheduler again. Run the focused `eventEditorSave` and scheduler tests from `apps/site`; the expected result is a proposed response, an accepted response, and stale or rejected requests with no persisted Event.
+
+The third milestone exposes review on web and mobile. The web page keeps the draft while it shows proposal assignments, and mobile keeps the proposal outside Room until acceptance. Run the proposal display Jest test and the mobile proposal dialog and repository tests; the expected result is a complete review, a disabled accept action for missing labels, and Room rows only after acceptance.
+
+The final milestone proves the integrated contract and records review results. Run the exact site and mobile commands in Concrete Steps, then run the two-axis review. The expected result is passing suites, a clean worktree, and a committed implementation with any remaining findings recorded here.
 
 ## Surprises & Discoveries
 
@@ -30,6 +40,10 @@ The site and mobile applications use the same HTTP proposal and accept seam. Mob
 - The current mobile repository writes the Event and Match rows when the create response arrives. It needs a proposal branch that does not write Room until accept.
 - The proposal review UI must show explicit unavailable states when authoritative display names are absent. It must format proposal times in the Event time zone.
 - The persistence seam accepts the typed `EventEditorCreateProposalGraph` contract and does not invoke the scheduler during acceptance.
+- A fresh isolated integration database hit migration `20260821070000_repair_document_evidence_and_version_guards` because its temporary repair table used `ON COMMIT DROP` before later statements. The verification database applied the same SQL without that drop clause and marked only that test migration applied; no production migration file changed.
+- The first real mobile check found that the seeded fixture set was absent. Running `npm run seed:dev` against the isolated database prepared the host and Basketball fixtures, and the rerun passed one test without a skip.
+- An accepted proposal retry must validate the submitted draft before it returns the stored result. Otherwise a changed editor state can receive a successful replay.
+- A persisted `PROCESSING` operation with no result can block the same request forever after a process interruption. Reclaim only rows older than the lease and compare the full operation identity and state in one conditional update.
 
 ## Decision Log
 
@@ -55,6 +69,8 @@ The backend source of truth is under `apps/site`. The strict Event Editor contra
 
 The site create screen is `apps/site/src/app/events/[id]/schedule/page.tsx`. The shared mobile DTOs are under `apps/mobile/core/network/src/commonMain/kotlin/com/razumly/mvp/core/network/dto/EventEditorDtos.kt`. The mobile HTTP gateway is `apps/mobile/core/repository-impl/src/commonMain/kotlin/com/razumly/mvp/core/data/repositories/EventEditorRemoteGateway.kt`. The Room write path is `EventRepository.createEventEditor`.
 
+In this plan, a discriminated response is a JSON response whose `status` selects one complete shape, either `SAVED` or `PROPOSED`; the parser is `eventEditorCreateResultSchema`. An operation receipt is the durable `EventEditorCreateOperations` row keyed by `createOperationId`; it stores the request hash and canonical result so retries do not recompute or duplicate effects. A rollback-only transaction is a database transaction used to build a proposal while deliberately discarding temporary Event and graph rows. A sentinel rollback is the private exception that carries the serialized proposal out of that transaction so the caller can return it after the database rolls back.
+
 ## Plan of Work
 
 First, add strict proposal, revision-binding, accept, and reject shapes to the shared server contract. Add the proposal fields to the operation receipt model and create a migration. Extend the mobile DTOs with the same wire fields.
@@ -71,23 +87,23 @@ Finally, add backend, contract, route, web, mobile gateway, repository, and Room
 
 ## Concrete Steps
 
-Run site commands from `apps/site`.
+From `apps/site`, run `npx jest --runInBand --runTestsByPath 'src/app/events/[id]/schedule/__tests__/proposalDisplay.test.ts'`. Expect all proposal display tests to pass.
 
-Run mobile commands from `apps/mobile`.
+From `apps/site`, run `npx jest --runInBand --runTestsByPath 'src/app/api/events/__tests__/editorContractRoutes.test.ts'`. Expect the route tests to pass and the proposal route to return `202`.
 
-Run one focused Jest file at a time with `npx jest --runInBand --runTestsByPath <path>`.
+From `apps/site`, run `npx jest --runInBand --runTestsByPath 'src/server/events/__tests__/eventEditorSave.test.ts'`. Expect proposal, accept, stale, reject, and rollback tests to pass.
 
-Run `npx tsc --noEmit` after each backend or site slice.
+From `apps/site`, run `npx tsc --noEmit`. Expect the command to exit with status 0.
 
-Run the relevant Gradle unit test task after each mobile slice. Do not run Gradle tests concurrently.
+From `apps/site`, run `npm run test:ci`. Expect the site suite to report 874 suites and 5,218 tests passed, followed by API route coverage for 330 files.
 
-Run `npm run test:ci` once after all site changes.
+From `apps/mobile`, run `ANDROID_HOME=/Users/elesesy/Library/Android/sdk ./gradlew --no-daemon :composeApp:testDebugUnitTest --tests 'com.razumly.mvp.eventCreate.ScheduleProposalDialogUiTest'`. Expect the proposal review UI tests to pass.
 
-Run `npx tsc --noEmit` after the complete site suite.
+From `apps/mobile`, run `ANDROID_HOME=/Users/elesesy/Library/Android/sdk ./gradlew --no-daemon :composeApp:testDebugUnitTest`. Expect the task to finish with `BUILD SUCCESSFUL` and no failed tests.
 
-Run `./gradlew :composeApp:testDebugUnitTest` once after all mobile changes.
+From `apps/mobile`, run `./gradlew --no-daemon :composeApp:iosSimulatorArm64Test`. Expect the shared Kotlin test task to finish with `BUILD SUCCESSFUL`.
 
-Run the iOS simulator test task when shared Kotlin code changes need native verification.
+For the real mobile-to-site check, set `MVP_TEST_BACKEND_URL`, `MVP_TEST_DATABASE_URL`, `MVP_TEST_ALLOW_DB_SEED=true`, `MVP_TEST_REQUIRE_BACKEND=true`, and `MVP_TEST_DISABLE_OUTBOUND_PROVIDERS=1`, then run `./gradlew --no-daemon :composeApp:testDebugUnitTest --tests 'com.razumly.mvp.eventDetail.MobileEventEditorApiContractTest.given_mobile_editor_create_command_when_sent_to_site_then_event_is_persisted'` from `apps/mobile`. Expect one test to pass without a skip.
 
 Record exact results in Outcomes & Retrospective.
 
@@ -111,13 +127,18 @@ Do not run a production migration or change a live runtime. Inspect generated Pr
 
 ## Outcomes & Retrospective
 
-- `apps/site`: `npx tsc --noEmit` passed.
-- `apps/site`: `npm run test:ci` passed: 874 suites, 5,218 tests, and API route coverage for 330 files.
-- `apps/mobile`: `ANDROID_HOME=/Users/elesesy/Library/Android/sdk ./gradlew :composeApp:testDebugUnitTest` passed: 154 actionable tasks, 10 executed, 144 up to date.
-- Focused proposal, route, scheduler, template, and mobile UI checks passed.
-- The first full site run exposed one validator fixture mismatch and two load-sensitive UI failures. The validator now allows an ID-only team-official relationship while still rejecting a conflicting nested identity. The focused regressions and the complete site suite pass on the rerun.
-- Template-backed proposals now lock the template revision during proposal computation and acceptance. Template archive uses the same transaction-scoped lock.
-
+- `apps/site`: `npx tsc --noEmit` passed after the final changes.
+- `apps/site`: focused Event Editor and operation replay tests passed: 33 tests.
+- `apps/site`: proposal route and display tests passed: 25 tests.
+- `apps/site`: full `npm run test:ci` passed: 874 suites passed, 5,216 tests passed, 4 skipped tests, and API route coverage for 330 files.
+- `apps/mobile`: full Android unit suite passed with `BUILD SUCCESSFUL`.
+- `apps/mobile`: full iOS simulator suite passed with `BUILD SUCCESSFUL`.
+- `apps/mobile`: mobile-to-site contract test passed with the isolated seeded backend and database.
+- The first full site invocation used extra Jest arguments. The test suite passed, but the appended arguments reached route coverage and caused a false coverage-parser failure. The final unparameterized `npm run test:ci` passed.
+- Accepted proposal replay now checks the submitted draft revision before returning its canonical result.
+- Stale `PROCESSING` operation claims now use a conditional lease reclaim so an interrupted same-request retry can continue without allowing a different request to reuse the receipt.
 ## Revision Note
 
 2026-08-24: Created for issue #37. The plan records the rollback-only proposal computation, durable operation receipt, exact accept path, authoritative revision binding, and site/mobile review flows.
+
+2026-08-25: Added stale accepted-replay validation and conditional abandoned operation-claim recovery after the two-axis review. Recorded final site, mobile, and mobile-to-site verification.

@@ -22,14 +22,17 @@ type CreateOperationRow = {
   proposalRevision: string | null;
   proposalStatus: string;
   emailDelivery: string;
+  updatedAt: Date;
 };
 
 type CreateOperationDelegate = {
   findUnique: (args: Record<string, unknown>) => Promise<CreateOperationRow | null>;
   createMany: (args: Record<string, unknown>) => Promise<{ count: number }>;
   update: (args: Record<string, unknown>) => Promise<unknown>;
+  updateMany: (args: Record<string, unknown>) => Promise<{ count: number }>;
   delete: (args: Record<string, unknown>) => Promise<unknown>;
 };
+
 export type EventCreateOperationProposal = {
   createOperationId: string;
   eventId: string;
@@ -121,6 +124,8 @@ export const eventEditorProposalRevision = (
     .digest('hex')
 );
 
+
+const CREATE_OPERATION_CLAIM_LEASE_MS = 30_000;
 const selectOperation = {
   createOperationId: true,
   actorUserId: true,
@@ -132,6 +137,7 @@ const selectOperation = {
   proposalRevision: true,
   proposalStatus: true,
   emailDelivery: true,
+  updatedAt: true,
 };
 
 const loadOperation = async (
@@ -184,6 +190,59 @@ const claimFor = (
     result: replayReady ? parseStoredResult(row) : null,
   };
 };
+const isAbandonedClaim = (row: CreateOperationRow): boolean => {
+  const updatedAt = row.updatedAt instanceof Date
+    ? row.updatedAt.getTime()
+    : Date.parse(String(row.updatedAt ?? ""));
+  return (
+    row.responseJson == null &&
+    row.proposalJson == null &&
+    row.proposalStatus === "NONE" &&
+    row.emailDelivery === "PROCESSING" &&
+    Number.isFinite(updatedAt) &&
+    Date.now() - updatedAt >= CREATE_OPERATION_CLAIM_LEASE_MS
+  );
+};
+
+const reclaimAbandonedClaim = async (params: {
+  client: PrismaLike;
+  row: CreateOperationRow;
+  actorUserId: string;
+  requestHash: string;
+}): Promise<EventCreateOperationClaim | null> => {
+  assertReplayIdentity(params.row, params.actorUserId, params.requestHash);
+  if (!isAbandonedClaim(params.row)) return null;
+  const reclaimed = await operationsFor(params.client).updateMany({
+    where: {
+      createOperationId: params.row.createOperationId,
+      actorUserId: params.actorUserId,
+      requestHash: params.requestHash,
+      responseJson: null,
+      proposalJson: null,
+      proposalStatus: "NONE",
+      emailDelivery: "PROCESSING",
+      updatedAt: params.row.updatedAt,
+    },
+    data: { updatedAt: new Date() },
+  });
+  if (reclaimed.count !== 1) {
+    const winner = await loadOperation(
+      params.client,
+      params.row.createOperationId,
+    );
+    if (!winner) throw new EventCreateOperationIncompleteError();
+    return claimFor(winner, params.actorUserId, params.requestHash);
+  }
+  return {
+    firstClaim: true,
+    createOperationId: params.row.createOperationId,
+    eventId: params.row.eventId,
+    requestHash: params.requestHash,
+    responseStatus: params.row.responseStatus,
+    emailDelivery: "PROCESSING",
+    result: null,
+  };
+};
 
 /**
  * Atomically claims one create operation. The operation row is created in the
@@ -196,7 +255,13 @@ export const claimEventEditorCreateOperation = async (params: {
   requestHash: string;
 }): Promise<EventCreateOperationClaim> => {
   const existing = await loadOperation(params.client, params.createOperationId);
-  if (existing) return claimFor(existing, params.actorUserId, params.requestHash);
+  if (existing) {
+    const reclaimed = await reclaimAbandonedClaim({
+      ...params,
+      row: existing,
+    });
+    return reclaimed ?? claimFor(existing, params.actorUserId, params.requestHash);
+  }
 
   const eventId = createId();
   const inserted = await operationsFor(params.client).createMany({
@@ -207,7 +272,7 @@ export const claimEventEditorCreateOperation = async (params: {
       eventId,
       responseStatus: 201,
       responseJson: null,
-      emailDelivery: 'PROCESSING',
+      emailDelivery: "PROCESSING",
     },
     skipDuplicates: true,
   });
@@ -218,14 +283,18 @@ export const claimEventEditorCreateOperation = async (params: {
       eventId,
       requestHash: params.requestHash,
       responseStatus: 201,
-      emailDelivery: 'PROCESSING',
+      emailDelivery: "PROCESSING",
       result: null,
     };
   }
 
   const winner = await loadOperation(params.client, params.createOperationId);
   if (!winner) throw new EventCreateOperationIncompleteError();
-  return claimFor(winner, params.actorUserId, params.requestHash);
+  const reclaimed = await reclaimAbandonedClaim({
+    ...params,
+    row: winner,
+  });
+  return reclaimed ?? claimFor(winner, params.actorUserId, params.requestHash);
 };
 
 export const completeEventEditorCreateOperation = async (params: {

@@ -108,8 +108,7 @@ import {
 import {
   formatProposalTime,
   proposalAssignmentLabels,
-  proposalDisplayErrors,
-  proposalDisplayWarnings,
+  proposalDisplayIssues,
   proposalFieldLabel,
   proposalRecordLabel,
 } from "./proposalDisplay";
@@ -7308,14 +7307,15 @@ function EventScheduleContent() {
     ];
   }, [standingsDivisionData]);
 
-  const scheduleProposalDisplayErrors = useMemo(
-    () => (scheduleProposal ? proposalDisplayErrors(scheduleProposal) : []),
+  const scheduleProposalDisplay = useMemo(
+    () =>
+      scheduleProposal
+        ? proposalDisplayIssues(scheduleProposal)
+        : { errors: [], warnings: [] },
     [scheduleProposal],
   );
-  const scheduleProposalDisplayWarnings = useMemo(
-    () => (scheduleProposal ? proposalDisplayWarnings(scheduleProposal) : []),
-    [scheduleProposal],
-  );
+  const scheduleProposalDisplayErrors = scheduleProposalDisplay.errors;
+  const scheduleProposalDisplayWarnings = scheduleProposalDisplay.warnings;
 
   const handleStandingsSortChange = useCallback((field: StandingsSortField) => {
     setStandingsSort((prev) => {

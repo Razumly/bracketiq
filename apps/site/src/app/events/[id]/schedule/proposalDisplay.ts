@@ -84,6 +84,24 @@ const proposalRecordsById = (
     }),
   );
 };
+const proposalOfficialResolver = (
+  event: Record<string, unknown>,
+): ((candidate: unknown) => unknown) => {
+  const officialsById = proposalRecordsById(event.officials);
+  const eventOfficialsById = proposalRecordsById(event.eventOfficials);
+  return (candidate: unknown): unknown => {
+    if (candidate && typeof candidate === "object") return candidate;
+    if (typeof candidate !== "string") return undefined;
+    const directOfficial = officialsById.get(candidate);
+    if (directOfficial) return directOfficial;
+    const eventOfficial = eventOfficialsById.get(candidate);
+    const userId =
+      typeof eventOfficial?.userId === "string"
+        ? eventOfficial.userId
+        : undefined;
+    return userId ? officialsById.get(userId) : undefined;
+  };
+};
 const proposalPhaseSettingsForMatch = (
   event: Record<string, unknown>,
   match: Record<string, unknown>,
@@ -140,21 +158,8 @@ export const proposalAssignmentLabels = (
   const positionsById = proposalRecordsById(
     proposalOfficialPositionsForMatch(event, record),
   );
-  const officialsById = proposalRecordsById(event.officials);
-  const eventOfficialsById = proposalRecordsById(event.eventOfficials);
+  const resolveOfficial = proposalOfficialResolver(event);
   const teamsById = proposalRecordsById(event.teams);
-  const resolveOfficial = (candidate: unknown): unknown => {
-    if (candidate && typeof candidate === "object") return candidate;
-    if (typeof candidate !== "string") return undefined;
-    const directOfficial = officialsById.get(candidate);
-    if (directOfficial) return directOfficial;
-    const eventOfficial = eventOfficialsById.get(candidate);
-    const userId =
-      typeof eventOfficial?.userId === "string"
-        ? eventOfficial.userId
-        : undefined;
-    return userId ? officialsById.get(userId) : undefined;
-  };
   const assignments = Array.isArray(record.officialAssignments)
     ? record.officialAssignments
     : Array.isArray(record.officialIds)
@@ -207,7 +212,7 @@ const proposalMatchKey = (match: Record<string, unknown>): string[] =>
     typeof match.matchId === "number" ? String(match.matchId) : null,
   ].filter((value): value is string => Boolean(value));
 
-const proposalDisplayIssues = (
+export const proposalDisplayIssues = (
   proposal: EventEditorCreateProposal,
 ): { errors: string[]; warnings: string[] } => {
   const errors: string[] = [];
@@ -226,18 +231,7 @@ const proposalDisplayIssues = (
     ? (graphEvent.fields as Array<Record<string, unknown>>)
     : [];
   const teams = proposalRecordsById(graphEvent.teams);
-  const officials = proposalRecordsById(graphEvent.officials);
-  const eventOfficials = proposalRecordsById(graphEvent.eventOfficials);
-  const resolveOfficial = (candidate: unknown): unknown => {
-    if (candidate && typeof candidate === "object") return candidate;
-    if (typeof candidate !== "string") return undefined;
-    const official = officials.get(candidate);
-    if (official) return official;
-    const eventOfficial = eventOfficials.get(candidate);
-    return typeof eventOfficial?.userId === "string"
-      ? officials.get(eventOfficial.userId)
-      : undefined;
-  };
+  const resolveOfficial = proposalOfficialResolver(graphEvent);
 
   if (!proposal.snapshot.draft.basics.timeZone.trim()) {
     warnings.push("The proposal time zone is unavailable.");
@@ -399,11 +393,3 @@ const proposalDisplayIssues = (
     warnings: [...new Set(warnings)],
   };
 };
-
-export const proposalDisplayErrors = (
-  proposal: EventEditorCreateProposal,
-): string[] => proposalDisplayIssues(proposal).errors;
-
-export const proposalDisplayWarnings = (
-  proposal: EventEditorCreateProposal,
-): string[] => proposalDisplayIssues(proposal).warnings;

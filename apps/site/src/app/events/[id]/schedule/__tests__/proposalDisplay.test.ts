@@ -1,8 +1,7 @@
 import {
   formatProposalTime,
   proposalAssignmentLabels,
-  proposalDisplayErrors,
-  proposalDisplayWarnings,
+  proposalDisplayIssues,
 } from "../proposalDisplay";
 
 describe("schedule proposal display", () => {
@@ -74,12 +73,12 @@ describe("schedule proposal display", () => {
           },
         ],
       },
-    } as unknown as Parameters<typeof proposalDisplayWarnings>[0];
+    } as unknown as Parameters<typeof proposalDisplayIssues>[0];
 
-    expect(proposalDisplayErrors(proposal)).not.toContain(
+    expect(proposalDisplayIssues(proposal).errors).not.toContain(
       "Match 1 has an unavailable official label.",
     );
-    expect(proposalDisplayErrors(proposal)).toContain(
+    expect(proposalDisplayIssues(proposal).errors).toContain(
       "Match 1 has an unassigned officiating slot.",
     );
   });
@@ -147,9 +146,9 @@ describe("schedule proposal display", () => {
           },
         ],
       },
-    } as unknown as Parameters<typeof proposalDisplayWarnings>[0];
+    } as unknown as Parameters<typeof proposalDisplayIssues>[0];
 
-    expect(proposalDisplayErrors(proposal)).not.toEqual(
+    expect(proposalDisplayIssues(proposal).errors).not.toEqual(
       expect.arrayContaining([
         "Match 1 has an unavailable officiating position.",
         "Match 1 has no proposed team official.",
@@ -192,9 +191,9 @@ describe("schedule proposal display", () => {
           },
         ],
       },
-    } as unknown as Parameters<typeof proposalDisplayErrors>[0];
+    } as unknown as Parameters<typeof proposalDisplayIssues>[0];
 
-    expect(proposalDisplayErrors(proposal)).toEqual(
+    expect(proposalDisplayIssues(proposal).errors).toEqual(
       expect.arrayContaining([
         "Match 1 has an unavailable team label.",
         "Match 1 has an unavailable resource label.",

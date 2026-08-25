@@ -1399,6 +1399,19 @@ const createEventEditorInternal = async (
       rentalBookingId: command.draft.resources.rentalBookingId ?? undefined,
       start: command.draft.basics.start,
     };
+    await acquireEventLock(tx, claimed.eventId);
+    if (options.shouldReturnScheduleProposal) {
+      await acquireEventTemplateLocks(tx, templateIdsForDraft(command.draft));
+      const resourceIds = revisionBindingResourceIds(command.draft);
+      await acquireFieldLocks(tx, resourceIds.fieldIds);
+      await acquireTimeSlotLocks(tx, resourceIds.timeSlotIds);
+      const rentalResourceIds = rentalResourceIdsForDraft(command.draft);
+      await acquireRentalBookingLocks(
+        tx,
+        rentalResourceIds.bookingIds,
+        rentalResourceIds.bookingItemIds,
+      );
+    }
     const createSnapshot = await loadCreateEventEditorSnapshot(createQuery, {
       actor,
       client: tx,
@@ -1428,19 +1441,6 @@ const createEventEditorInternal = async (
     await assertPaymentCapability(command.draft, createSnapshot);
     assertImmutableFields(command.draft, claimed.eventId, createSnapshot);
 
-    await acquireEventLock(tx, claimed.eventId);
-    if (options.shouldReturnScheduleProposal) {
-      await acquireEventTemplateLocks(tx, templateIdsForDraft(command.draft));
-      const resourceIds = revisionBindingResourceIds(command.draft);
-      await acquireFieldLocks(tx, resourceIds.fieldIds);
-      await acquireTimeSlotLocks(tx, resourceIds.timeSlotIds);
-      const rentalResourceIds = rentalResourceIdsForDraft(command.draft);
-      await acquireRentalBookingLocks(
-        tx,
-        rentalResourceIds.bookingIds,
-        rentalResourceIds.bookingItemIds,
-      );
-    }
     if (options.shouldReturnScheduleProposal) {
       const bindingSnapshot = {
         ...createSnapshot,
@@ -1807,7 +1807,6 @@ export const acceptScheduleProposalFromEditor = async (
       "The schedule proposal revision is invalid.",
     );
   }
-  if (stored.result) return stored.result;
   if (
     computeEventEditorRevision(draft) !==
     computeEventEditorRevision(proposal.snapshot.draft)
@@ -1816,6 +1815,7 @@ export const acceptScheduleProposalFromEditor = async (
       "The event configuration changed before proposal acceptance.",
     );
   }
+  if (stored.result) return stored.result;
   if (proposal.status !== "PROPOSED") {
     throw new EventEditorProposalInvalidError(
       "The schedule proposal is not pending review.",

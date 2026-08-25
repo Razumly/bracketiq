@@ -1006,6 +1006,23 @@ describe("saveEventEditor", () => {
     const replay = await createScheduleProposalFromEditor(actor, command);
     expect(replay).toEqual(accepted);
     expect(mockedReconcileEventSchedule).toHaveBeenCalledTimes(1);
+    (computeEventEditorRevision as jest.Mock).mockImplementation(
+      (input: { basics?: { name?: string } }) =>
+        input.basics?.name === command.draft.basics.name
+          ? "original-revision"
+          : "changed-revision",
+    );
+    await expect(
+      acceptScheduleProposalFromEditor(
+        actor,
+        command.createOperationId,
+        proposal.proposalRevision,
+        {
+          ...command.draft,
+          basics: { ...command.draft.basics, name: "Changed after acceptance" },
+        },
+      ),
+    ).rejects.toBeInstanceOf(EventEditorProposalStaleError);
   });
   it("rejects proposal acceptance when authoritative availability changes", async () => {
     const fieldRows = [

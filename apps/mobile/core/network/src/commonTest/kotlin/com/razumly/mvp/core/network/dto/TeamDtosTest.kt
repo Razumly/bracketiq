@@ -270,7 +270,7 @@ class TeamDtosTest {
         assertEquals("parent-1", registration?.createdBy)
     }
     @Test
-    fun team_api_dto_preserves_proposal_player_records() {
+    fun given_team_api_dto_json_when_decoded_then_proposal_player_records_are_preserved() {
         val dto = jsonMVP.decodeFromString<TeamApiDto>(
             """
             {
