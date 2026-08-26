@@ -591,7 +591,10 @@ export async function GET(
       const usersForTeam: TeamComplianceUserSummary[] = orderedPlayerIds
         .filter((playerId) => {
           const registration = latestRegistrationByEventTeamAndUserId.get(`${team.id}::${playerId}`);
-          return !registration || isEligibleEventPersonRegistration(registration.status);
+          if (!registration) {
+            return false;
+          }
+          return isEligibleEventPersonRegistration(registration.status);
         })
         .map((playerId) => {
           const user = usersById.get(playerId);

@@ -386,16 +386,13 @@ const validateEventParticipation = async (params: {
         const latestPersonRegistration = latestRegistration(
           personRegistrationsByEventTeamId.get(eventTeamId) ?? [],
         );
-        if (latestPersonRegistration && !eligibleStatusSet.has(
-          String(latestPersonRegistration.status ?? '').trim().toUpperCase(),
-        )) {
+        if (
+          !latestPersonRegistration
+          || !eligibleStatusSet.has(String(latestPersonRegistration.status ?? '').trim().toUpperCase())
+        ) {
           return false;
         }
-        const isInEventTeamSnapshot = teamMemberIds(team).includes(params.subjectUserId);
-        const hasLinkedRosterRegistration = latestPersonRegistration
-          ? normalizeId(latestPersonRegistration.sourceTeamRegistrationId) === membership.id
-          : isInEventTeamSnapshot;
-        return hasLinkedRosterRegistration;
+        return normalizeId(latestPersonRegistration.sourceTeamRegistrationId) === membership.id;
       })
       .map((team) => team.id),
   );
@@ -407,13 +404,7 @@ const validateEventParticipation = async (params: {
       return false;
     }
     const eventTeamId = normalizeId(registration.eventTeamId) ?? normalizeId(registration.registrantId);
-    const eventTeam = eventTeams.find((team) => team.id === eventTeamId);
-    return Boolean(
-      eventTeamId
-      && eventTeam
-      && validEventTeamIds.has(eventTeamId)
-      && teamMemberIds(eventTeam).includes(params.subjectUserId),
-    );
+    return Boolean(eventTeamId && validEventTeamIds.has(eventTeamId));
   });
 
   return hasDirectParticipation || hasTeamParticipation

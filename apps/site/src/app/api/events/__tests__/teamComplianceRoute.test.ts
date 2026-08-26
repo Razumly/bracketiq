@@ -208,7 +208,15 @@ describe('GET /api/events/[eventId]/teams/compliance', () => {
         createdAt: new Date('2026-07-01T12:00:00.000Z'),
         updatedAt: new Date('2026-07-01T12:00:00.000Z'),
       }])
-      .mockResolvedValueOnce([]);
+      .mockResolvedValueOnce([{
+        eventTeamId: 'event_team_1',
+        registrantId: 'player_1',
+        registrantType: 'SELF',
+        parentId: null,
+        status: 'ACTIVE',
+        createdAt: new Date('2026-07-01T12:00:00.000Z'),
+        updatedAt: new Date('2026-07-01T12:00:00.000Z'),
+      }]);
     prismaMock.templateDocuments.findMany.mockResolvedValue([{
       id: 'template_1',
       title: 'Team waiver',
@@ -262,6 +270,64 @@ describe('GET /api/events/[eventId]/teams/compliance', () => {
         }),
       }),
     );
+  });
+
+  it('hides a snapshot-only team player without an individual registration', async () => {
+    prismaMock.events.findUnique.mockResolvedValue({
+      id: 'event_1',
+      name: 'Team League',
+      start: new Date('2026-08-01T12:00:00.000Z'),
+      teamSignup: true,
+      hostId: 'host_1',
+      assistantHostIds: [],
+      organizationId: 'org_1',
+      requiredTemplateIds: ['template_1'],
+    });
+    prismaMock.teams.findMany.mockResolvedValue([{
+      id: 'event_team_1',
+      name: 'Event Team',
+      playerIds: ['player_1'],
+      parentTeamId: 'team_canonical',
+    }]);
+    prismaMock.eventRegistrations.findMany
+      .mockReset()
+      .mockResolvedValueOnce([{
+        id: 'event_registration_1',
+        eventId: 'event_1',
+        registrantId: 'event_team_1',
+        registrantType: 'TEAM',
+        rosterRole: 'PARTICIPANT',
+        status: 'ACTIVE',
+        createdAt: new Date('2026-07-01T12:00:00.000Z'),
+        updatedAt: new Date('2026-07-01T12:00:00.000Z'),
+      }])
+      .mockResolvedValueOnce([]);
+    prismaMock.templateDocuments.findMany.mockResolvedValue([{
+      id: 'template_1',
+      title: 'Team waiver',
+      type: 'PDF',
+      signOnce: false,
+      requiredSignerType: 'PARTICIPANT',
+    }]);
+    prismaMock.userData.findMany.mockResolvedValue([{
+      id: 'player_1',
+      firstName: 'Player',
+      lastName: 'One',
+      userName: 'player1',
+      dateOfBirth: new Date('2000-01-01T00:00:00.000Z'),
+    }]);
+    prismaMock.bills.findMany.mockResolvedValue([]);
+    prismaMock.documentRequirementSatisfactions.findMany.mockResolvedValue([]);
+    prismaMock.signedDocuments.findMany.mockResolvedValue([]);
+
+    const response = await GET(
+      new NextRequest('http://localhost/api/events/event_1/teams/compliance'),
+      { params: Promise.resolve({ eventId: 'event_1' }) },
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.teams[0].users).toEqual([]);
   });
   it('hides a cancelled team player and reuses satisfaction after restore', async () => {
     prismaMock.events.findUnique.mockResolvedValue({

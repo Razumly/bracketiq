@@ -44,6 +44,7 @@ The implementation began with the data expansion required for this behavior. The
 - [x] (2026-08-25) Fix Event Participation import validation to inspect the latest subject registration for each EventTeam and reject terminal player registrations.
 - [x] (2026-08-25) Update the document import browser test to select a non-sign-once Version, select Event Participation, and assert the PDF preview before attestation.
 - [x] (2026-08-25) Update the browser smoke to drive the Version and Event selectors from keyboard focus and assert their selected values.
+- [x] (2026-08-25) Remove snapshot-only Event Participation eligibility and require an individual player registration linked to the current team membership.
 - [x] (2026-08-25) Run the focused import route tests, site typecheck, Prisma check, migration fixtures, focused mobile document tests, and the full site suite.
 - [ ] (2026-08-25) Run the complete document import browser smoke against an authorized site runtime.
 
@@ -139,9 +140,9 @@ The implementation began with the data expansion required for this behavior. The
 - Decision: Return private imported-evidence fields through `auditTrail` and keep them out of customer document responses.
   Rationale: The existing subject, guardian, and Organization customer lists serve non-auditor users. A dedicated permission and response keep the private seam explicit.
   Date/Author: 2026-08-24 / Codex
-- Decision: Reject terminal individual EventTeam registrations before applying EventTeam snapshot fallback.
-  Rationale: The latest `PAYMENT_FAILED` or `CANCELLED` registration for the subject and EventTeam is authoritative. Snapshot membership is used only when no individual registration exists, so a stale snapshot cannot restore eligibility.
-  Date/Author: 2026-08-25 / Codex
+- Decision: Require an individual EventTeam player registration for new Event Participation imports and compliance reads.
+  Rationale: The current data model must be migrated to explicit player registrations. A team roster snapshot alone is not sufficient evidence for a new eligibility decision. Missing registrations fail closed until migration supplies the required row.
+  Date/Author: 2026-08-25 / User and Codex
 
 ## Outcomes & Retrospective
 
@@ -153,7 +154,7 @@ Issues #108 and #109 complete the customer and guardian document experience. Imp
 
 Issue #110 adds the restricted Organization audit trail. Authorized auditors can inspect the imported evidence snapshot and append-only import and void events. The response states that the application history is not tamper-proof. Customer document responses omit private audit fields, and mobile continues to map only the customer-safe DTO into Room.
 
-The 2026-08-25 remediation rejects terminal individual EventTeam registrations while preserving snapshot fallback for legacy team registrations without an individual row. The focused import route suite passed with 42 tests. The final site suite passed with 871 suites and 5,221 tests; 2 suites and 4 tests remained skipped. The browser test now covers the required non-sign-once and Event Participation selections, but execution remains pending because no site runtime was running and repository rules prohibit starting one without explicit authorization. The customer-billing authorization correction remains in the separate commit `cf8802b87`.
+The 2026-08-25 remediation rejects terminal individual EventTeam registrations and rejects snapshot-only Event Participation when no individual player registration exists. The focused import route suite and team compliance suite now cover both cases. The final site suite previously passed with 871 suites and 5,221 tests; 2 suites and 4 tests remained skipped. The browser test covers the required non-sign-once and Event Participation selections, but execution remains pending because no site runtime was running and repository rules prohibit starting one without explicit authorization. The customer-billing authorization correction remains in the separate commit `cf8802b87`.
 
 
 ## Context and Orientation
@@ -394,7 +395,7 @@ The review findings in this historical section were resolved by the subsequent r
 
 The two amended specification findings are fixed.
 
-- #97 now resolves Event Participation imports through the canonical team ID from an EventTeam snapshot. The route test covers the snapshot case.
+- #97 now resolves Event Participation imports through the canonical team ID and requires an individual player registration linked to that team's membership. Snapshot-only players fail closed.
 - #99 now quarantines provider edits that reuse a frozen provider ID. Event, public guest, rental, and team dispatch signing paths reject quarantined Versions.
 - The P2 customer billing scope finding remains intentionally separate from this document behavior work.
 
@@ -512,6 +513,6 @@ Added the issue #110 audit response, Organization customer audit UI, private-fie
 
 ## Plan Revision 2026-08-25
 
-The specification review found a terminal EventTeam participation bypass and incomplete browser interaction coverage. The route now reads `PAYMENT_FAILED` and `CANCELLED` registrations, selects the latest subject registration per EventTeam, rejects terminal status, and uses EventTeam snapshot membership only when no subject registration exists. The browser test now selects a non-sign-once Version and Event Participation, uploads the PDF, asserts the preview frame, and continues through import, access, audit, notification, void, and preserved-file checks.
+The specification review found a terminal EventTeam participation bypass and incomplete browser interaction coverage. The route now reads `PAYMENT_FAILED` and `CANCELLED` registrations, selects the latest subject registration per EventTeam, rejects terminal status, and rejects EventTeam participation when no individual player registration links the subject to the current team membership. The browser test now selects a non-sign-once Version and Event Participation, uploads the PDF, asserts the preview frame, and continues through import, access, audit, notification, void, and preserved-file checks.
 
-Verification passed with `npx tsc --noEmit`, `npm run prisma:check`, 42 import-route tests, both document migration fixtures, focused mobile document tests, and the final site suite with 871 suites and 5,221 tests passed; 2 suites and 4 tests were skipped. Browser smoke remains pending because no site runtime was running and repository rules prohibit starting one without explicit authorization.
+Verification passed with `npx tsc --noEmit`, `npm run prisma:check`, 42 import-route tests, both document migration fixtures, focused mobile document tests, and the final site suite with 871 suites and 5,223 tests passed; 2 suites and 4 tests were skipped. Browser smoke remains pending because no site runtime was running and repository rules prohibit starting one without explicit authorization.
