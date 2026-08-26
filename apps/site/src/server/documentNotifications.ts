@@ -48,7 +48,7 @@ const getNotificationCopy = (input: DocumentEvidenceNotificationInput): {
   }
   return {
     title: 'Document imported',
-    body: `${organizationName} added "${documentName}" as imported signed-document evidence. Status: Imported.`,
+    body: `"${documentName}" from ${organizationName} is ready to view.`,
   };
 };
 

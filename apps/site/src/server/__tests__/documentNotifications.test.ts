@@ -88,7 +88,7 @@ describe('document evidence notifications', () => {
         expect.objectContaining({
           userId: 'parent_1',
           title: 'Document imported',
-          body: 'City League added "Waiver" as imported signed-document evidence. Status: Imported.',
+          body: '"Waiver" from City League is ready to view.',
         }),
       ]),
       select: { userId: true },
@@ -128,7 +128,7 @@ describe('document evidence notifications', () => {
     expect(sendPushToUsersMock).toHaveBeenCalledWith({
       userIds: ['subject_1', 'parent_1'],
       title: 'Document imported',
-      body: 'City League added "Waiver" as imported signed-document evidence. Status: Imported.',
+      body: '"Waiver" from City League is ready to view.',
       notificationType: 'documents',
       data: {
         action: 'IMPORT',
