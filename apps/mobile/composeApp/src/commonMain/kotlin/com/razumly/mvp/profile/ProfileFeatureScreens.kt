@@ -2371,12 +2371,16 @@ internal fun DocumentCard(
         ?.takeIf(String::isNotBlank)
         ?: "Unavailable"
     val scopeLabel = when (document.scopeType?.trim()?.uppercase()) {
-        "ORGANIZATION" -> "Organization"
+        "ORGANIZATION" -> "This Organization"
         "EVENT_PARTICIPATION" -> "Event participation"
         "TEAM_MEMBERSHIP" -> "Team membership"
         else -> document.scopeType?.trim()?.takeIf(String::isNotBlank) ?: "Unknown"
     }
-    val lifecycleLabel = document.status.name
+    val statusLabel = when (document.status) {
+        ProfileDocumentStatus.UNSIGNED -> "Unsigned"
+        ProfileDocumentStatus.SIGNED -> "Signed"
+        ProfileDocumentStatus.VOID -> "Voided"
+    }
     val signedLabel = profileDocumentSigningLabel(document)
 
     Card(
@@ -2423,12 +2427,12 @@ internal fun DocumentCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
-                    text = "Scope: $scopeLabel",
+                    text = "Applies to: $scopeLabel",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
-                    text = "Lifecycle: $lifecycleLabel",
+                    text = "Status: $statusLabel",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

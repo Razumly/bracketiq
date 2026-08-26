@@ -37,7 +37,7 @@ class ProfileDocumentCardUiTest {
                         provenance = "IMPORTED",
                         documentRequirementTitle = "Waiver Requirement",
                         versionSequence = 2,
-                        scopeType = "EVENT_PARTICIPATION",
+                        scopeType = "ORGANIZATION",
                         requiredSignerType = "PARTICIPANT",
                         requiredSignerLabel = "Participant",
                         signerContext = SignerContext.PARTICIPANT,
@@ -55,8 +55,8 @@ class ProfileDocumentCardUiTest {
         composeRule.onNodeWithText("Provenance: Imported").assertIsDisplayed()
         composeRule.onNodeWithText("Document requirement: Waiver Requirement").assertIsDisplayed()
         composeRule.onNodeWithText("Version: 2").assertIsDisplayed()
-        composeRule.onNodeWithText("Scope: Event participation").assertIsDisplayed()
-        composeRule.onNodeWithText("Lifecycle: SIGNED").assertIsDisplayed()
+        composeRule.onNodeWithText("Applies to: This Organization").assertIsDisplayed()
+        composeRule.onNodeWithText("Status: Signed").assertIsDisplayed()
         composeRule.onNodeWithText("Signing date unknown").assertIsDisplayed()
         composeRule.onNodeWithText("Type: PDF").assertIsDisplayed()
         composeRule.onNodeWithText("View document").fetchSemanticsNode()
@@ -92,8 +92,8 @@ class ProfileDocumentCardUiTest {
         }
 
         composeRule.onNodeWithText("Voided waiver").assertIsDisplayed()
-        composeRule.onNodeWithText("Provenance: Imported").assertIsDisplayed()
-        composeRule.onNodeWithText("Lifecycle: VOID").assertIsDisplayed()
+        composeRule.onNodeWithText("Applies to: Event participation").assertIsDisplayed()
+        composeRule.onNodeWithText("Status: Voided").assertIsDisplayed()
         composeRule.onNodeWithText("Signing date unknown").assertIsDisplayed()
         composeRule.onNodeWithText("View document").assertIsEnabled()
     }

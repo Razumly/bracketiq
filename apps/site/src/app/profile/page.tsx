@@ -109,6 +109,7 @@ import { signedDocumentService } from "@/lib/signedDocumentService";
 import {
   profileDocumentService,
   formatDocumentScopeLabel,
+  formatDocumentStatusLabel,
   type ChildUnsignedDocumentCount,
   type ProfileDocumentCard,
 } from "@/lib/profileDocumentService";
@@ -4192,10 +4193,10 @@ function ProfilePageContent() {
                               : "Unknown"}
                           </Text>
                           <Text size="xs" c="dimmed">
-                            Scope: {formatDocumentScopeLabel(document.scopeType)}
+                            Applies to: {formatDocumentScopeLabel(document.scopeType)}
                           </Text>
                           <Text size="xs" c="dimmed">
-                            Lifecycle: {document.status || "SIGNED"}
+                            Status: {formatDocumentStatusLabel(document.status)}
                           </Text>
                           <Text size="xs" c="dimmed">
                             {document.eventName

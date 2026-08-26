@@ -75,7 +75,7 @@ test("imports, previews, voids, and preserves a signed customer PDF", async ({
   await versionSelect.press("Enter");
   await expect(versionSelect).toHaveValue(new RegExp(`${documentTitle}.*Version 1`));
 
-  const eventSelect = importDialog.getByRole("textbox", { name: "Event Participation" });
+  const eventSelect = importDialog.getByRole("textbox", { name: "Event" });
   await eventSelect.focus();
   await eventSelect.pressSequentially("Free Pickup Night");
   const eventOptions = page.getByRole("listbox");
@@ -118,7 +118,7 @@ test("imports, previews, voids, and preserves a signed customer PDF", async ({
   await expect(documentCard).toBeVisible();
   await expect(documentCard.getByText("Imported", { exact: true })).toBeVisible();
   await expect(documentCard.getByText("Version 1", { exact: true })).toBeVisible();
-  await expect(documentCard.getByText("SIGNED", { exact: true })).toBeVisible();
+  await expect(documentCard.getByText("Signed", { exact: true })).toBeVisible();
   await expect(documentCard.getByText("Signing date unknown", { exact: true })).toBeVisible();
   const auditButton = documentCard.getByRole("button", { name: "Audit trail", exact: true });
   await expect(auditButton).toBeVisible();
@@ -283,7 +283,7 @@ test("imports, previews, voids, and preserves a signed customer PDF", async ({
     await expect(participantPage.getByText("Document imported", { exact: true }).first()).toBeVisible();
     await expect(
       participantPage.getByText(
-        `City League added "${documentTitle}" as imported signed-document evidence. Status: Imported.`,
+        `"${documentTitle}" from City League is ready to view.`,
         { exact: true },
       ),
     ).toBeVisible();
@@ -336,7 +336,7 @@ test("imports, previews, voids, and preserves a signed customer PDF", async ({
   await page.keyboard.press("Enter");
   expect((await voidResponsePromise).status()).toBe(200);
   await expect(voidDialog).toBeHidden();
-  await expect(documentCard.getByText("VOID", { exact: true })).toBeVisible();
+  await expect(documentCard.getByText("Voided", { exact: true })).toBeVisible();
   await expect(documentCard.getByRole("button", { name: "View PDF", exact: true })).toBeVisible();
   const preservedFile = await page.request.get(fileResponse.url);
   expect(preservedFile.status()).toBe(200);

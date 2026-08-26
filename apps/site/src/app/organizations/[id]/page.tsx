@@ -33,7 +33,7 @@ import { userService } from '@/lib/userService';
 import { apiRequest, isApiRequestError } from '@/lib/apiClient';
 import { productService } from '@/lib/productService';
 import { signedDocumentService, type DocumentAuditTrail } from '@/lib/signedDocumentService';
-import { formatDocumentScopeLabel } from '@/lib/profileDocumentService';
+import { formatDocumentScopeLabel, formatDocumentStatusLabel } from '@/lib/profileDocumentService';
 import { boldsignService } from '@/lib/boldsignService';
 import PaymentModal from '@/components/ui/PaymentModal';
 import FieldsTabContent from './FieldsTabContent';
@@ -3472,11 +3472,8 @@ function OrganizationDetailContent() {
     (template) => template.$id === selectedCustomerImportTemplateId,
   );
   const customerImportScopeOptions = useMemo(() => {
-    if (!org?.$id || !selectedCustomerImportTemplate) {
+    if (!org?.$id || !selectedCustomerImportTemplate || selectedCustomerImportTemplate.signOnce) {
       return [];
-    }
-    if (selectedCustomerImportTemplate.signOnce) {
-      return [{ value: org.$id, label: 'Organization-wide' }];
     }
     return (selectedOrganizationCustomer?.user?.events ?? [])
       .filter((event) => event.organizationId === org.$id)
@@ -3547,16 +3544,14 @@ function OrganizationDetailContent() {
   const handleImportCustomerDocument = useCallback(async () => {
     const customer = selectedOrganizationCustomer?.user;
     const template = selectedCustomerImportTemplate;
-    const scopeId = selectedCustomerImportScopeId;
+    const scopeId = template?.signOnce ? org?.$id ?? null : selectedCustomerImportScopeId;
     if (!org?.$id || !customer || !template || !customerImportFile) {
       return;
     }
     if (!scopeId) {
       notifications.show({
         color: 'red',
-        message: template.signOnce
-          ? 'Choose the Organization scope before saving.'
-          : 'Choose the Event Participation scope before saving.',
+        message: 'Choose an event before saving.',
       });
       return;
     }
@@ -4120,7 +4115,7 @@ function OrganizationDetailContent() {
                     variant="light"
                     color={documentSummary.status.toUpperCase() === 'VOID' ? 'red' : 'blue'}
                   >
-                    {documentSummary.status.toUpperCase()}
+                    {formatDocumentStatusLabel(documentSummary.status)}
                   </Badge>
                 )}
               </Group>
@@ -4130,10 +4125,10 @@ function OrganizationDetailContent() {
                   : documentSummary.documentRequirementTitle || documentSummary.title}
               </Text>
               <Text size="xs" c="dimmed">
-                Scope: {formatDocumentScopeLabel(documentSummary.scopeType)}
+                Applies to: {formatDocumentScopeLabel(documentSummary.scopeType)}
               </Text>
               <Text size="xs" c="dimmed">
-                Lifecycle: {documentSummary.status?.toUpperCase() || 'SIGNED'}
+                Status: {formatDocumentStatusLabel(documentSummary.status)}
               </Text>
               <Text size="xs" c="dimmed">
                 {documentSummary.provenance === 'IMPORTED'
@@ -5844,25 +5839,22 @@ function OrganizationDetailContent() {
               nothingFoundMessage="No document requirement versions found"
               required
             />
-            {selectedCustomerImportTemplate && (
-              <Text size="xs" c="dimmed">
-                {selectedCustomerImportTemplate.signOnce
-                  ? 'This sign-once version applies at Organization scope.'
-                  : 'This version applies to an Event Participation for the selected customer.'}
+            {selectedCustomerImportTemplate?.signOnce ? (
+              <Text size="sm" c="dimmed">
+                Applies to: This Organization
               </Text>
+            ) : (
+              <Select
+                label="Event"
+                data={customerImportScopeOptions}
+                value={selectedCustomerImportScopeId}
+                onChange={setSelectedCustomerImportScopeId}
+                searchable
+                allowDeselect={false}
+                nothingFoundMessage="No eligible events found"
+                required
+              />
             )}
-            <Select
-              label={selectedCustomerImportTemplate?.signOnce ? 'Scope' : 'Event Participation'}
-              data={customerImportScopeOptions}
-              value={selectedCustomerImportScopeId}
-              onChange={setSelectedCustomerImportScopeId}
-              searchable
-              allowDeselect={false}
-              nothingFoundMessage={selectedCustomerImportTemplate?.signOnce
-                ? 'No Organization scope found'
-                : 'No eligible Event Participation found'}
-              required
-            />
             <FileInput
               label="Signed PDF"
               placeholder="Choose a PDF"

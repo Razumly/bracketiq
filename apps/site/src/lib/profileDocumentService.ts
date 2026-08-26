@@ -5,13 +5,26 @@ export type ProfileDocumentProvenance = 'BOLDSIGN' | 'BRACKETIQ' | 'IMPORTED';
 export const formatDocumentScopeLabel = (scopeType?: string): string => {
   switch (scopeType?.trim().toUpperCase()) {
     case 'ORGANIZATION':
-      return 'Organization';
+      return 'This Organization';
     case 'EVENT_PARTICIPATION':
       return 'Event participation';
     case 'TEAM_MEMBERSHIP':
       return 'Team membership';
     default:
       return scopeType?.trim() || 'Unknown';
+  }
+};
+
+export const formatDocumentStatusLabel = (status?: string): string => {
+  switch (status?.trim().toUpperCase()) {
+    case 'UNSIGNED':
+      return 'Unsigned';
+    case 'SIGNED':
+      return 'Signed';
+    case 'VOID':
+      return 'Voided';
+    default:
+      return status?.trim() || 'Signed';
   }
 };
 
