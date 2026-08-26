@@ -203,23 +203,37 @@ describe('public remote image downloads', () => {
   });
 
   it('times out a stalled response body and destroys the connection', async () => {
-    const stalledResponse: PublicRemoteImageResponse & { destroy: jest.Mock } = {
-      statusCode: 200,
-      headers: { 'content-type': 'image/png' },
-      body: {
-        [Symbol.asyncIterator]: () => ({
-          next: () => new Promise(() => undefined),
-        }),
-      },
-      destroy: jest.fn(),
-    };
-    const deps = dependencies({ request: jest.fn(async () => stalledResponse) });
-    const download = createPublicRemoteImageDownloader(deps);
+    jest.useFakeTimers();
+    try {
+      const stalledResponse: PublicRemoteImageResponse & { destroy: jest.Mock } = {
+        statusCode: 200,
+        headers: { 'content-type': 'image/png' },
+        body: {
+          [Symbol.asyncIterator]: () => ({
+            next: () => new Promise(() => undefined),
+          }),
+        },
+        destroy: jest.fn(),
+      };
+      const request = jest.fn(async () => stalledResponse);
+      const deps = dependencies({ request });
+      const download = createPublicRemoteImageDownloader(deps);
+      const downloadPromise = download('https://example.com/logo', { timeoutMs: 100 });
 
-    await expect(download('https://example.com/logo', { timeoutMs: 5 })).rejects.toThrow(
-      'Remote image request timed out.',
-    );
-    expect(stalledResponse.destroy).toHaveBeenCalledTimes(1);
+      for (let attempt = 0; attempt < 10 && request.mock.calls.length === 0; attempt += 1) {
+        await Promise.resolve();
+      }
+      expect(request).toHaveBeenCalledTimes(1);
+
+      const rejection = expect(downloadPromise).rejects.toThrow(
+        'Remote image request timed out.',
+      );
+      await jest.advanceTimersByTimeAsync(100);
+      await rejection;
+      expect(stalledResponse.destroy).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('parses an ordinary public image URL without changing its identity', () => {

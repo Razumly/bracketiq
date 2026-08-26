@@ -1364,7 +1364,10 @@ describe('EventForm dirty state', () => {
 
     fireEvent.click(screen.getByLabelText('Advanced Setup'));
     const cashAppInput = await screen.findByLabelText('Cash App username');
-    fireEvent.change(cashAppInput, { target: { value: '$' } });
+    const user = userEvent.setup();
+    await user.clear(cashAppInput);
+    await waitFor(() => expect(screen.getByLabelText('Cash App username')).toHaveValue(''));
+    await user.type(cashAppInput, '$');
     await waitFor(() => expect(screen.getByLabelText('Cash App username')).toHaveValue('$'));
     fireEvent.click(screen.getByLabelText('Simple Setup'));
     expect(screen.queryByRole('button', { name: 'Review event' })).not.toBeInTheDocument();
