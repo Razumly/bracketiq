@@ -117,6 +117,14 @@ const IMPORT_EVENT_PARTICIPATION_STATUSES = [
   'BLOCKED',
   'CONSENTFAILED',
 ] as const;
+const IMPORT_EVENT_PARTICIPATION_TERMINAL_STATUSES = [
+  'PAYMENT_FAILED',
+  'CANCELLED',
+] as const;
+const IMPORT_EVENT_PARTICIPATION_QUERY_STATUSES = [
+  ...IMPORT_EVENT_PARTICIPATION_STATUSES,
+  ...IMPORT_EVENT_PARTICIPATION_TERMINAL_STATUSES,
+] as const;
 const IMPORT_TEAM_MEMBERSHIP_STATUSES = ['STARTED', 'PENDING', 'ACTIVE'] as const;
 
 type ImportDatabase = Pick<
@@ -133,6 +141,8 @@ type ImportEventRegistration = {
   status: string | null;
   eventTeamId: string | null;
   sourceTeamRegistrationId: string | null;
+  createdAt: Date | null;
+  updatedAt: Date | null;
 };
 
 type ImportEventTeam = ImportedTeamMemberFields & {
@@ -161,6 +171,23 @@ const normalizeId = (value: unknown): string | null => {
   return normalized.length > 0 ? normalized : null;
 };
 
+const registrationTime = (registration: ImportEventRegistration): number => (
+  registration.updatedAt?.getTime()
+  ?? registration.createdAt?.getTime()
+  ?? 0
+);
+
+const latestRegistration = (
+  registrations: readonly ImportEventRegistration[],
+): ImportEventRegistration | null => (
+  [...registrations]
+    .sort((left, right) => (
+      registrationTime(right) - registrationTime(left)
+      || right.id.localeCompare(left.id)
+    ))
+    [0] ?? null
+);
+
 const validateEventParticipation = async (params: {
   organizationId: string;
   subjectUserId: string;
@@ -188,7 +215,7 @@ const validateEventParticipation = async (params: {
     where: {
       eventId: params.eventId,
       rosterRole: 'PARTICIPANT',
-      status: { in: [...IMPORT_EVENT_PARTICIPATION_STATUSES] },
+      status: { in: [...IMPORT_EVENT_PARTICIPATION_QUERY_STATUSES] },
       slotId: null,
       occurrenceDate: null,
       OR: [
@@ -208,6 +235,8 @@ const validateEventParticipation = async (params: {
       status: true,
       eventTeamId: true,
       sourceTeamRegistrationId: true,
+      createdAt: true,
+      updatedAt: true,
     },
   }) as ImportEventRegistration[];
   const eligibleStatusSet = new Set<string>(IMPORT_EVENT_PARTICIPATION_STATUSES);
@@ -215,11 +244,14 @@ const validateEventParticipation = async (params: {
     eligibleStatusSet.has(String(registration.status ?? '').trim().toUpperCase())
   ));
 
-  const personRegistrations = eligibleRegistrations.filter((registration) => (
+  const personRegistrations = registrations.filter((registration) => (
     ['SELF', 'CHILD'].includes(registration.registrantType)
     && registration.registrantId === params.subjectUserId
   ));
-  const hasDirectParticipation = personRegistrations.some((registration) => (
+  const eligiblePersonRegistrations = personRegistrations.filter((registration) => (
+    eligibleStatusSet.has(String(registration.status ?? '').trim().toUpperCase())
+  ));
+  const hasDirectParticipation = eligiblePersonRegistrations.some((registration) => (
     !normalizeId(registration.eventTeamId)
     && !normalizeId(registration.sourceTeamRegistrationId)
   ));
@@ -327,6 +359,17 @@ const validateEventParticipation = async (params: {
       canonicalTeamIdByEventTeamId.set(eventTeamId, canonicalTeamId);
     }
   });
+  const personRegistrationsByEventTeamId = new Map<string, ImportEventRegistration[]>();
+  personRegistrations.forEach((registration) => {
+    const eventTeamId = normalizeId(registration.eventTeamId);
+    if (!eventTeamId) {
+      return;
+    }
+    const registrationsForEventTeam = personRegistrationsByEventTeamId.get(eventTeamId) ?? [];
+    registrationsForEventTeam.push(registration);
+    personRegistrationsByEventTeamId.set(eventTeamId, registrationsForEventTeam);
+  });
+
   const validEventTeamIds = new Set(
     eventTeams
       .filter((team) => {
@@ -340,12 +383,19 @@ const validateEventParticipation = async (params: {
         if (!eventTeamId || !canonicalTeamId || !membership) {
           return false;
         }
+        const latestPersonRegistration = latestRegistration(
+          personRegistrationsByEventTeamId.get(eventTeamId) ?? [],
+        );
+        if (latestPersonRegistration && !eligibleStatusSet.has(
+          String(latestPersonRegistration.status ?? '').trim().toUpperCase(),
+        )) {
+          return false;
+        }
         const isInEventTeamSnapshot = teamMemberIds(team).includes(params.subjectUserId);
-        const hasLinkedRosterRegistration = personRegistrations.some((registration) => (
-          normalizeId(registration.eventTeamId) === eventTeamId
-          && normalizeId(registration.sourceTeamRegistrationId) === membership.id
-        ));
-        return isInEventTeamSnapshot || hasLinkedRosterRegistration;
+        const hasLinkedRosterRegistration = latestPersonRegistration
+          ? normalizeId(latestPersonRegistration.sourceTeamRegistrationId) === membership.id
+          : isInEventTeamSnapshot;
+        return hasLinkedRosterRegistration;
       })
       .map((team) => team.id),
   );

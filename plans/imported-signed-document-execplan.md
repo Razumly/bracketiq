@@ -41,6 +41,12 @@ The implementation began with the data expansion required for this behavior. The
 - [x] (2026-08-24) Run typecheck, focused tests, lint, browser smoke, full site and mobile suites, and the two-axis code review.
 - [x] (2026-08-24) Re-run typecheck, focused tests, full site suite, full mobile suite, and browser smoke after the final audit actor and subject PDF assertion fixes.
 - [x] (2026-08-25) Complete issue #111 customer-safe import and void notifications across in-app, transactional email, optional push, browser links, and mobile document navigation.
+- [x] (2026-08-25) Fix Event Participation import validation to inspect the latest subject registration for each EventTeam and reject terminal player registrations.
+- [x] (2026-08-25) Update the document import browser test to select a non-sign-once Version, select Event Participation, and assert the PDF preview before attestation.
+- [x] (2026-08-25) Update the browser smoke to drive the Version and Event selectors from keyboard focus and assert their selected values.
+- [x] (2026-08-25) Run the focused import route tests, site typecheck, Prisma check, migration fixtures, focused mobile document tests, and the full site suite.
+- [ ] (2026-08-25) Run the complete document import browser smoke against an authorized site runtime.
+
 
 ## Surprises & Discoveries
 
@@ -71,6 +77,8 @@ The implementation began with the data expansion required for this behavior. The
 
 - Observation: Private imported-document audit data needs a separate response from the customer document list.
   Evidence: The audit route selects source note, attestation, uploader, import time, content hash, and append-only events only after `documents.audit`; the profile and Organization customer routes omit those fields.
+- Observation: Filtering Event Registrations to only eligible statuses allowed an active Team registration and EventTeam snapshot to bypass a terminal individual registration for the same player.
+  Evidence: The new route regression failed before the query included `PAYMENT_FAILED` and `CANCELLED`; it passed after the latest per-EventTeam registration check was added.
 
 ## Decision Log
 
@@ -131,6 +139,9 @@ The implementation began with the data expansion required for this behavior. The
 - Decision: Return private imported-evidence fields through `auditTrail` and keep them out of customer document responses.
   Rationale: The existing subject, guardian, and Organization customer lists serve non-auditor users. A dedicated permission and response keep the private seam explicit.
   Date/Author: 2026-08-24 / Codex
+- Decision: Reject terminal individual EventTeam registrations before applying EventTeam snapshot fallback.
+  Rationale: The latest `PAYMENT_FAILED` or `CANCELLED` registration for the subject and EventTeam is authoritative. Snapshot membership is used only when no individual registration exists, so a stale snapshot cannot restore eligibility.
+  Date/Author: 2026-08-25 / Codex
 
 ## Outcomes & Retrospective
 
@@ -141,6 +152,8 @@ The completed parent feature repairs ownerless evidence before Satisfaction back
 Issues #108 and #109 complete the customer and guardian document experience. Imported evidence appears in the existing subject and guardian lists with customer-safe provenance and metadata. Authorized staff retain the private import and audit paths. Voiding changes lifecycle state and derived Satisfaction without changing or deleting historical evidence. Mobile maps the response into Room before it renders cards, keeps VOID history, removes voided completion from active state, and opens authorized local PDFs through the existing flow.
 
 Issue #110 adds the restricted Organization audit trail. Authorized auditors can inspect the imported evidence snapshot and append-only import and void events. The response states that the application history is not tamper-proof. Customer document responses omit private audit fields, and mobile continues to map only the customer-safe DTO into Room.
+
+The 2026-08-25 remediation rejects terminal individual EventTeam registrations while preserving snapshot fallback for legacy team registrations without an individual row. The focused import route suite passed with 42 tests. The final site suite passed with 871 suites and 5,221 tests; 2 suites and 4 tests remained skipped. The browser test now covers the required non-sign-once and Event Participation selections, but execution remains pending because no site runtime was running and repository rules prohibit starting one without explicit authorization. The customer-billing authorization correction remains in the separate commit `cf8802b87`.
 
 
 ## Context and Orientation
@@ -496,3 +509,9 @@ Implementation and verification are complete. The `Progress` section is the only
 ### 2026-08-24 change note
 
 Added the issue #110 audit response, Organization customer audit UI, private-field filtering, and contract verification. The change uses a dedicated `documents.audit` permission so subjects, guardians, and ordinary staff do not receive source notes, attestation data, uploader data, import time, content identity, or internal audit events.
+
+## Plan Revision 2026-08-25
+
+The specification review found a terminal EventTeam participation bypass and incomplete browser interaction coverage. The route now reads `PAYMENT_FAILED` and `CANCELLED` registrations, selects the latest subject registration per EventTeam, rejects terminal status, and uses EventTeam snapshot membership only when no subject registration exists. The browser test now selects a non-sign-once Version and Event Participation, uploads the PDF, asserts the preview frame, and continues through import, access, audit, notification, void, and preserved-file checks.
+
+Verification passed with `npx tsc --noEmit`, `npm run prisma:check`, 42 import-route tests, both document migration fixtures, focused mobile document tests, and the final site suite with 871 suites and 5,221 tests passed; 2 suites and 4 tests were skipped. Browser smoke remains pending because no site runtime was running and repository rules prohibit starting one without explicit authorization.

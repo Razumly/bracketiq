@@ -723,7 +723,7 @@ describe('POST /api/organizations/[id]/documents/import', () => {
 
     expect(prismaMock.eventRegistrations.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
-        status: { in: ['STARTED', 'PENDING', 'ACTIVE', 'BLOCKED', 'CONSENTFAILED'] },
+        status: { in: ['STARTED', 'PENDING', 'ACTIVE', 'BLOCKED', 'CONSENTFAILED', 'PAYMENT_FAILED', 'CANCELLED'] },
       }),
     }));
     expect(response.status).toBe(201);
@@ -743,6 +743,73 @@ describe('POST /api/organizations/[id]/documents/import', () => {
       }),
       expect.anything(),
     );
+  });
+  it('rejects a terminal player registration even when the EventTeam snapshot still lists the player', async () => {
+    prismaMock.templateDocuments.findUnique.mockResolvedValueOnce({
+      id: 'version_1',
+      title: 'Imported Team Waiver',
+      organizationId: 'org_1',
+      documentRequirementId: 'requirement_1',
+      requiredSignerType: 'PARTICIPANT',
+      signerRoles: ['participant'],
+      signOnce: false,
+    });
+    listOrganizationUsersScopeEventsMock.mockResolvedValueOnce([
+      { id: 'event_1', organizationId: 'org_1', userIds: [], teamIds: ['event_team_1'] },
+    ]);
+    prismaMock.events.findUnique.mockResolvedValueOnce({ id: 'event_1', organizationId: 'org_1' });
+    prismaMock.canonicalTeams.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: 'canonical_team_1' }]);
+    prismaMock.eventRegistrations.findMany.mockResolvedValueOnce([
+      {
+        id: 'event_team_registration_1',
+        eventId: 'event_1',
+        registrantId: 'event_team_1',
+        parentId: 'canonical_team_1',
+        registrantType: 'TEAM',
+        status: 'ACTIVE',
+        eventTeamId: 'event_team_1',
+        sourceTeamRegistrationId: null,
+      },
+      {
+        id: 'event_player_registration_1',
+        eventId: 'event_1',
+        registrantId: 'player_1',
+        parentId: 'canonical_team_1',
+        registrantType: 'SELF',
+        status: 'CANCELLED',
+        eventTeamId: 'event_team_1',
+        sourceTeamRegistrationId: 'membership_1',
+      },
+    ]);
+    prismaMock.teams.findMany.mockResolvedValueOnce([{
+      id: 'event_team_1',
+      eventId: 'event_1',
+      parentTeamId: 'canonical_team_1',
+      kind: 'REGISTERED',
+      playerIds: ['player_1'],
+      captainId: null,
+      managerId: null,
+      headCoachId: null,
+      coachIds: [],
+    }]);
+    prismaMock.teamRegistrations.findMany.mockResolvedValueOnce([{
+      id: 'membership_1',
+      teamId: 'canonical_team_1',
+      userId: 'player_1',
+      status: 'ACTIVE',
+    }]);
+
+    const response = await POST(
+      buildRequest({ scopeType: 'EVENT_PARTICIPATION', scopeId: 'event_1' }),
+      routeParams,
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toContain('eligible participation');
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(getStorageProviderMock().putObject).not.toHaveBeenCalled();
   });
   it('rejects a teammate who is not in the selected Team event roster', async () => {
     prismaMock.templateDocuments.findUnique.mockResolvedValueOnce({

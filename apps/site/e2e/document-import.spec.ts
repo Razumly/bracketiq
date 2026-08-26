@@ -33,8 +33,8 @@ test("imports, previews, voids, and preserves a signed customer PDF", async ({
     data: {
       template: {
         title: documentTitle,
-        description: "A text-backed sign-once version for the import smoke.",
-        signOnce: true,
+        description: "A text-backed Event Participation version for the import smoke.",
+        signOnce: false,
         type: "TEXT",
         content: "I agree to the E2E imported waiver.",
         requiredSignerType: "PARTICIPANT",
@@ -60,11 +60,40 @@ test("imports, previews, voids, and preserves a signed customer PDF", async ({
 
   const importDialog = page.getByRole("dialog", { name: /Import signed document for Player User/i });
   await expect(importDialog).toBeVisible();
+  const versionSelect = importDialog.getByRole("textbox", {
+    name: "Document Requirement and Template Version",
+  });
+  await versionSelect.focus();
+  await versionSelect.pressSequentially(documentTitle);
+  const versionOptions = page.getByRole("listbox");
+  await expect(versionOptions).toBeVisible();
+  const versionOption = versionOptions.getByRole("option", {
+    name: new RegExp(`${documentTitle}.*Version 1`),
+  });
+  await expect(versionOption).toBeVisible();
+  await versionSelect.press("ArrowDown");
+  await versionSelect.press("Enter");
+  await expect(versionSelect).toHaveValue(new RegExp(`${documentTitle}.*Version 1`));
+
+  const eventSelect = importDialog.getByRole("textbox", { name: "Event Participation" });
+  await eventSelect.focus();
+  await eventSelect.pressSequentially("Free Pickup Night");
+  const eventOptions = page.getByRole("listbox");
+  await expect(eventOptions).toBeVisible();
+  const eventOption = eventOptions.getByRole("option", { name: /Free Pickup Night/ });
+  await expect(eventOption).toBeVisible();
+  await eventSelect.press("ArrowDown");
+  await eventSelect.press("Enter");
+  await expect(eventSelect).toHaveValue("Free Pickup Night");
+
   await importDialog.locator('input[type="file"]').setInputFiles({
     name: "historical-waiver.pdf",
     mimeType: "application/pdf",
     buffer: Buffer.from(pdfBytes),
   });
+  const previewFrame = importDialog.getByTitle("Imported signed document preview");
+  await expect(previewFrame).toBeVisible();
+
   await importDialog
     .getByLabel("Private source note (optional)")
     .fill("browser-private-source-note");
