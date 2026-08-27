@@ -42,6 +42,19 @@
 - Run site commands from `apps/site`.
 - Run Gradle and CocoaPods commands from `apps/mobile` or `apps/mobile/iosApp` as documented.
 - Use `MVP_SITE_DIR` only to override the default in-repository backend path.
+- Treat this file as the parent policy. Read it once per task. Child guidance adds rules and does not point back to this file.
+
+## Context boundaries
+
+Use the smallest context set that can prove the requested behavior.
+
+- Start with the issue body, its comments, and the files named by its acceptance criteria.
+- Mobile-only UI or state work uses this file, `apps/mobile/AGENTS.md`, and the named mobile files and tests.
+- Mobile contract work first confirms that an API path, request or response field, DTO, encoder, mapper, or caller changes. If one changes, read the exact site route or contract schema and the affected mobile files. If none changes, keep the work mobile-only.
+- Site, backend, database, or deployment work reads `apps/site/AGENTS.md` and the named site files.
+- Domain work reads relevant `CONTEXT.md` entries and named ADRs.
+- Issue workflow work reads the complete issue body and comments. Read parent or blocker issues only when an unresolved acceptance criterion or contract requires them.
+- ExecPlan work reads `PLANS.md` and the active plan. Read historical plans only when the active plan names one.
 
 ## ExecPlans
 
