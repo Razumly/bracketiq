@@ -305,6 +305,7 @@ class EventEditorSessionMapperTest {
 
         assertEquals(TEST_OPERATION_ID, session.createOperationId)
         assertEquals("Canonical event", canonical.event.name)
+        assertEquals("image-1", canonical.event.imageId)
         assertEquals("MANUAL", canonical.event.registrationPaymentMode)
         assertEquals(listOf("field-1"), canonical.event.fieldIds)
         assertEquals("field-1", assertNotNull(canonical.fields.singleOrNull()).id)

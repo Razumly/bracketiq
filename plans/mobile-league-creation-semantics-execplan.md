@@ -25,12 +25,18 @@ The result is visible in the shared Compose Event Editor and in the mobile-to-si
 - [x] (2026-08-27) Resolve the reopened S04-SP-002 parity finding. The shared non-default League draft now has a complete web command and Match Demand golden. Web and Android tests consume the same golden.
 - [x] (2026-08-27) Run the final focused, full mobile, and full site verification checks.
 
+- [x] (2026-08-26) Resolve the post-review phase-placeholder retry finding. Identical claims preserve the existing phase division and the focused membership suite asserts returned, stored, and registration identity.
+- [x] (2026-08-26) Resolve the public-detail bootstrap finding. Non-manager detail decoding accepts the ownerless site projection, persists returned metadata to Room, and keeps managed decoding strict.
+- [x] (2026-08-26) Complete the post-review standards and spec re-review. Mapper, fixture, server retry, and public-detail findings returned correct with no open findings.
+- [x] (2026-08-26) Run the final focused, full mobile, and client-to-site checks. Android unit tests, iOS simulator tests, site tests, the membership suite, and the isolated mobile-to-site League integration passed.
+
 ## Surprises & Discoveries
 
 - The Simple Setup already exposed `Automated Scheduling` before the generated-end and playoff options in `SimpleEventDetailsOptionsSection.kt`.
 - Advanced Setup did not expose that control. The shared schedule section is the correct advanced insertion point because `EventDetailsSimpleSectionDispatch.kt` routes Simple Setup to a separate renderer.
 - The existing simple callback already clears `noFixedEndDateTime` when scheduling is disabled. The new advanced callback uses the same rule.
 - The mobile Android unit test task completed successfully after the first control edit: `:composeApp:testDebugUnitTest --tests 'com.razumly.mvp.eventCreate.CreateEventSelectionRulesTest'`.
+- The public site event-detail projection omits `hostId` and `affiliateUrl` for non-manager callers. The mobile detail decoder must relax only the ownership check for `manage=false`; strict collection and managed paths must remain unchanged.
 
 ## Decision Log
 
@@ -51,6 +57,10 @@ The shared Compose editor now exposes the League Automated Scheduling control in
 - Decision: Store cross-application parity fixtures under `test-fixtures/event-editor`.
   Rationale: The site remains the web contract owner. Android tests consume the same neutral files without making the site test depend on an Android source set.
   Date/Author: 2026-08-27 / Codex.
+
+- Decision: Bind public event ownership validation to the detail request mode.
+  Rationale: A public detail event is valid without owner identity. Managed detail still needs owner identity. Passing `requireOwnerIdentity = manage` preserves this boundary without weakening shared event-field validation.
+  Date/Author: 2026-08-26 / Codex.
 
 ## Context and Orientation
 
@@ -132,6 +142,9 @@ Plan update note (2026-08-26): The scheduled-to-unscheduled mapper test now chan
 
 Review fixed point: commit `57cfcbca245ef904f1639d79caf77369cfba4bac` with the Issue 32 working tree diff, reviewed on 2026-08-27.
 
+Post-review fixed point: commit `4430921a7c4c61b2e4ed55264938825f30cfd6a9` with the Issue 32 correction diff, reviewed on 2026-08-26.
+
+
 | Section | Changed paths | Standards | Spec | Finding IDs |
 | --- | --- | --- | --- | --- |
 | S01 | `eventCreate/CreateEventSelectionRules.kt`, `eventCreate/DefaultCreateEventComponent.kt`, and create tests | fixed; focused checks passed | verified; no open finding | S01-ST-001, S01-ST-002, S01-ST-003 |
@@ -152,10 +165,18 @@ Review fixed point: commit `57cfcbca245ef904f1639d79caf77369cfba4bac` with the I
 - `S04-SP-003` — Derive completion mode from a current scheduled-to-unscheduled snapshot edit. Priority P1. Status: fixed; final spec re-review passed.
 - `S03-ST-001` — Centralize schedule-construction cleanup across create and edit flows. Priority P3. Status: fixed; final standards re-review passed.
 - `Issue32-ST-001` — Keep the canonical parity fixture outside an Android-owned resource directory. Priority P2. Status: fixed; focused web and Android parity checks passed.
+- `S04-ST-001` — Add a direct mapper assertion for the image projection. Priority P3. Status: fixed; focused mapper test passed.
+- `S04-ST-002` — Use response-derived League divisions and retain participant detail coverage. Priority P2. Status: fixed; focused mobile-to-site integration passed.
+- `S05-SP-001` — Preserve a phase placeholder division on an identical retry. Priority P1. Status: fixed; focused membership suite and final spec re-review passed.
+- `S05-SP-002` — Decode ownerless public detail event metadata without weakening managed or collection validation. Priority P1. Status: fixed; focused repository test and final spec re-review passed.
 
 Plan update note (2026-08-27): Recorded the completed S01 standards review. The working tree uses one computed automated-scheduling normalization and performs type-transition slot initialization inside the update coroutine after schedule cleanup. The focused tests passed.
 
 Plan update note (2026-08-27): Reworked S04-SP-002 after re-review. The web parity test now parses a complete shared command golden, derives Match Demand from that canonical command, and compares the mobile mapper's serialized command with the same golden.
+
+### Post-review re-review
+
+The re-review found the mapper assertion, response-derived League division fixture, participant detail sync, phase retry preservation, and public detail decoder correct. The phase retry correction preserves the existing division in both the returned and stored event team. The public detail correction accepts the ownerless site projection only for `manage=false`. No findings remain open.
 
 ## Outcomes & Retrospective
 
@@ -169,15 +190,20 @@ Focused checks passed:
 - `:core:repository-impl:testDebugUnitTest --tests ...EventEditorSessionMapperTest`
 - `:core:repository-impl:testDebugUnitTest --tests ...EventEditorLeagueParityAndroidTest`
 - `npm test -- --runInBand src/server/scheduler/__tests__/leagueEditorParity.test.ts`
+- `npm test -- --runInBand src/server/teams/__tests__/teamMembership.test.ts` — 27 tests passed.
+- `:composeApp:testDebugUnitTest --tests 'com.razumly.mvp.core.data.repositories.EventRepositoryHttpTest.getEventDetailBootstrap_persists_detail_payload_and_management_cache'` — passed.
 
 Full checks passed:
 
 - `:composeApp:testDebugUnitTest`
+- `:composeApp:testDebugUnitTest --tests 'com.razumly.mvp.eventDetail.LeaguePlayoffMobileApiIntegrationTest.league_playoff_mobile_api_flow_loads_staff_invites_periphery_join_and_schedule_data'` — passed against the isolated backend at `127.0.0.1:3010`.
 - `:composeApp:iosSimulatorArm64Test`
 - `npm test -- --runInBand` with 875 suites passed and 2 skipped.
 
-The real mobile-to-site integration smoke was not run. The ready process on port 3000 did not expose the required test-isolation probe. Runtime policy prevented replacing it or starting another backend for this check. The integration test remains gated by `MVP_TEST_BACKEND_URL` and a local isolated database.
+The first mobile-to-site contract check against the existing backend on port 3000 failed with HTTP 400 `INVALID_EDITOR_COMMAND` because that backend rejected `hasScheduleProposalSupport`. The final selector against the compatible isolated backend on port 3010 passed. The Issue Tracker cross-application closure gate now has a passing client-to-site check.
 
 Plan update note (2026-08-27): Final standards review fixed `Issue32-ST-001` by moving both parity fixtures to the neutral root fixture directory. The site and Android parity checks passed after the move.
 
 Plan update note (2026-08-27): Final spec and standards re-reviews returned correct with no open findings. Full Android, iOS simulator, and site checks passed.
+
+Plan update note (2026-08-26): The post-commit client-to-site check first failed against port 3000 because that backend rejected `hasScheduleProposalSupport`. The compatible isolated backend on port 3010 accepted the current mobile command after the retry and public-detail corrections.

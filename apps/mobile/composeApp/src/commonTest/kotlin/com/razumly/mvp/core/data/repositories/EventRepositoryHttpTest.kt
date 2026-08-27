@@ -2575,6 +2575,36 @@ class EventRepositoryHttpTest {
         assertEquals(1, managementDao.entries.size)
         assertEquals(1, complianceDao.teamSummaries.size)
         assertEquals(1, db.transactionCalls)
+        val publicEngine = MockEngine { request ->
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("/api/events/e1/detail", request.url.encodedPath)
+            assertEquals(null, request.url.parameters["manage"])
+            respond(
+                content = """
+                    {
+                      "event": {
+                        "id": "e1",
+                        "name": "Public Event",
+                        "start": "2026-02-10T00:00:00Z",
+                        "end": "2026-02-10T01:00:00Z"
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val publicApi = MvpApiClient(
+            HttpClient(publicEngine) { configureMvpHttpClient() },
+            "http://example.test",
+            tokenStore,
+        )
+        val publicRepo = EventRepository(db, publicApi, teamRepository, userRepo)
+
+        val publicDetail = publicRepo.syncEventDetail(detail.event, manage = false).getOrThrow()
+        assertEquals("Public Event", publicDetail.event.name)
+        assertEquals("Public Event", eventDao.getEventById("e1")?.name)
+        assertEquals(2, db.transactionCalls)
     }
 
     @Test

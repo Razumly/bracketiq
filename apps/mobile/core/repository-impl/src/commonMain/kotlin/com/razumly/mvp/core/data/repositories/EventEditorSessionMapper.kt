@@ -450,12 +450,12 @@ private fun EventEditorDraftDto.toEvent(eventId: String): Event {
             TeamCheckInMode.valueOf(staff.teamCheckInMode.trim().uppercase())
         }.getOrDefault(TeamCheckInMode.OFF),
         teamCheckInOpenMinutesBefore = staff.teamCheckInOpenMinutesBefore,
-        allowMatchRosterEdits = staff.allowMatchRosterEdits,
-        allowTemporaryMatchPlayers = staff.allowTemporaryMatchPlayers,
-        autoCreatePointMatchIncidents = staff.autoCreatePointMatchIncidents,
         restTimeMinutes = competition.restTimeMinutes?.roundToInt(),
         state = basics.state,
         pointsToVictory = competition.pointsToVictory,
+        allowMatchRosterEdits = staff.allowMatchRosterEdits,
+        allowTemporaryMatchPlayers = staff.allowTemporaryMatchPlayers,
+        autoCreatePointMatchIncidents = staff.autoCreatePointMatchIncidents,
         staffingPriority = resolvedStaffingPriority,
         officialPositions = staff.officialPositions.map(EventEditorOfficialPositionDto::toDomain),
         eventOfficials = staff.eventOfficials.map { official -> official.toDomain(eventId) },
@@ -468,6 +468,7 @@ private fun EventEditorDraftDto.toEvent(eventId: String): Event {
         allowTeamSplitDefault = participation.allowTeamSplitDefault,
         requiredTemplateIds = resources.requiredTemplateIds,
         tags = basics.tags.map(EventEditorTagDto::toDomain),
+        imageId = basics.imageId.orEmpty(),
     )
 }
 

@@ -639,7 +639,7 @@ class EventRepository(
         )
         val cachedEvent = roomStore.getEvent(normalizedEventId)
         val bootstrapEvent = bootstrap.event
-            ?.toEventOrNull()
+            ?.toEventOrNull(requireOwnerIdentity = manage)
         val baseEvent = bootstrapEvent ?: cachedEvent ?: event
         val protectedHistoryAuthoritative = bootstrap.event?.eventTypeHasProtectedHistory != null
         val participantSnapshot = bootstrap.participantSnapshot

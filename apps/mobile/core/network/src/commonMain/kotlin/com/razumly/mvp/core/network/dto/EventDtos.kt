@@ -196,7 +196,7 @@ data class EventApiDto(
     val prizeTitle: String? = null, // legacy/unused; ignore if present
 ) {
     @OptIn(ExperimentalTime::class)
-    fun toEventOrNull(): Event? {
+    fun toEventOrNull(requireOwnerIdentity: Boolean = true): Event? {
         val resolvedId = id
         val resolvedName = name
         val resolvedHostId = hostId
@@ -207,7 +207,7 @@ data class EventApiDto(
         val resolvedDateDisplayMode = dateDisplayMode?.trim()?.takeIf(String::isNotBlank)
         val resolvedDateDisplayText = dateDisplayText?.trim()?.takeIf(String::isNotBlank)
         if (resolvedId.isNullOrBlank() || resolvedName.isNullOrBlank()) return null
-        if (resolvedHostId.isNullOrBlank() && resolvedAffiliateUrl == null) return null
+        if (requireOwnerIdentity && resolvedHostId.isNullOrBlank() && resolvedAffiliateUrl == null) return null
         if (resolvedStart.isNullOrBlank()) return null
         val resolvedTimeZone = timeZone?.trim()?.takeIf(String::isNotBlank) ?: "UTC"
         val parsedStart = parseApiInstant(resolvedStart, resolvedTimeZone) ?: return null
@@ -548,10 +548,17 @@ data class EventApiDto(
  * Convert an API event at a repository boundary where dropping a row would make the server page
  * look complete. Nullable conversion remains available for explicitly optional embedded records,
  * but collection responses must fail as a unit so callers can surface and retry the same page.
+ *
+ * Public event detail responses intentionally omit ownership fields. Detail callers can disable
+ * the ownership requirement while collection callers keep the strict default.
  */
-fun EventApiDto.toEventOrThrow(context: String = "event response"): Event =
-    toEventOrNull() ?: throw IllegalArgumentException(
-        "$context contains a malformed event (${eventPayloadIdentity()}): ${eventPayloadValidationFailure()}",
+fun EventApiDto.toEventOrThrow(
+    context: String = "event response",
+    requireOwnerIdentity: Boolean = true,
+): Event =
+    toEventOrNull(requireOwnerIdentity) ?: throw IllegalArgumentException(
+        "$context contains a malformed event (${eventPayloadIdentity()}): " +
+            eventPayloadValidationFailure(requireOwnerIdentity),
     )
 
 fun List<EventApiDto>.toEventsOrThrow(context: String): List<Event> =
@@ -564,11 +571,11 @@ private fun EventApiDto.eventPayloadIdentity(): String {
     return resolvedId?.let { "id=$it" } ?: "missing id"
 }
 
-private fun EventApiDto.eventPayloadValidationFailure(): String {
+private fun EventApiDto.eventPayloadValidationFailure(requireOwnerIdentity: Boolean): String {
     val resolvedId = id?.trim()?.takeIf(String::isNotBlank)
     if (resolvedId == null) return "id is required"
     if (name.isNullOrBlank()) return "name is required"
-    if (hostId.isNullOrBlank() && affiliateUrl.isNullOrBlank()) {
+    if (requireOwnerIdentity && hostId.isNullOrBlank() && affiliateUrl.isNullOrBlank()) {
         return "hostId or affiliateUrl is required"
     }
     val resolvedStart = start?.trim()?.takeIf(String::isNotBlank)

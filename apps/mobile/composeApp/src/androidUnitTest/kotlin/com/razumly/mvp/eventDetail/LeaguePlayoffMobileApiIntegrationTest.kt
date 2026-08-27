@@ -50,6 +50,7 @@ import kotlin.time.Instant
 class LeaguePlayoffMobileApiIntegrationTest {
     private val testRunId = Clock.System.now().toEpochMilliseconds()
     private val testEventId = "mobile_api_league_playoff_$testRunId"
+    private val testDivisionId = "${testEventId}__division__open"
     private val testFieldId = "${testEventId}_field"
     private val testSlotId = "${testEventId}_slot"
     private var createdEventId: String? = null
@@ -140,6 +141,9 @@ class LeaguePlayoffMobileApiIntegrationTest {
         } else {
             createdEvent
         }
+        assertEquals(1, publishedEvent.divisions.size)
+        val divisionId = publishedEvent.divisions.single()
+        assertTrue(divisionId.isNotBlank())
 
         registerSeededTeams(host = host, event = publishedEvent)
 
@@ -175,22 +179,36 @@ class LeaguePlayoffMobileApiIntegrationTest {
 
         participant.userRepository.login(PARTICIPANT_EMAIL, PARTICIPANT_PASSWORD).getOrThrow()
         val loadedEvent = participant.eventRepository.getEvent(publishedEvent.id).getOrThrow()
+        assertEquals(1, loadedEvent.divisions.size)
+        val participantDivisionId = loadedEvent.divisions.single()
+        assertTrue(participantDivisionId.isNotBlank())
+        assertEquals(divisionId, participantDivisionId)
         val joinResult = participant.eventRepository.addCurrentUserToEvent(
             event = loadedEvent,
-            preferredDivisionId = SEEDED_DIVISION_ID,
+            preferredDivisionId = participantDivisionId,
         ).getOrThrow()
 
         assertFalse(joinResult.requiresParentApproval)
         assertFalse(joinResult.joinedWaitlist)
+        val loadedParticipantDetail = participant.eventRepository.syncEventDetail(
+            event = loadedEvent,
+            manage = false,
+        ).getOrThrow()
 
-        val loadedDetail = participant.eventRepository.syncEventDetail(loadedEvent).getOrThrow()
-        val loadedInvites = loadedDetail.staffInvites
+        val loadedHostDetail = host.eventRepository.syncEventDetail(
+            event = publishedEvent,
+            manage = true,
+        ).getOrThrow()
+        val loadedInvites = loadedHostDetail.staffInvites
         val loadedFields = participant.fieldRepository.getFields(loadedEvent.fieldIds).getOrThrow()
         val loadedTimeSlots = participant.fieldRepository.getTimeSlots(loadedEvent.timeSlotIds).getOrThrow()
         val loadedMatches = participant.matchRepository.getMatchesOfTournament(publishedEvent.id).getOrThrow()
-        val loadedTeamIds = loadedEvent.teamIds
+        val loadedTeamIds = loadedParticipantDetail.event.teamIds
             .ifEmpty {
-                loadedEvent.divisionDetails
+                loadedParticipantDetail.event.divisionDetails
+                    .filterNot { detail ->
+                        detail.kind?.trim()?.equals("PLAYOFF", ignoreCase = true) == true
+                    }
                     .flatMap(DivisionDetail::teamIds)
                     .distinct()
             }
@@ -201,19 +219,26 @@ class LeaguePlayoffMobileApiIntegrationTest {
             }
         val loadedSports = participant.sportsRepository.getSports().getOrThrow()
 
-        assertEquals(UPLOADED_DOCUMENT_IMAGE_ID, loadedEvent.imageId)
-        assertEquals(listOf(SEEDED_SPORT_ID), loadedEvent.sportIds)
-        assertTrue(loadedEvent.includePlayoffs)
-        assertEquals(TEST_PLAYOFF_TEAM_COUNT, loadedEvent.playoffTeamCount)
+        assertEquals(publishedEvent.id, loadedParticipantDetail.event.id)
+        assertEquals(UPLOADED_DOCUMENT_IMAGE_ID, loadedParticipantDetail.event.imageId)
+        assertEquals(listOf(SEEDED_SPORT_ID), loadedParticipantDetail.event.sportIds)
+        assertTrue(loadedParticipantDetail.event.includePlayoffs)
+        assertEquals(TEST_PLAYOFF_TEAM_COUNT, loadedParticipantDetail.event.playoffTeamCount)
         assertTrue(
-            scheduledMatches.any { match -> match.hasBracketLink() },
+            loadedParticipantDetail.matches.any { match -> match.hasBracketLink() },
             "Expected the schedule response to include bracket-linked playoff matches.",
         )
         assertEquals(setOf(testFieldId), loadedFields.map(Field::id).toSet())
         assertEquals(setOf(testSlotId), loadedTimeSlots.map(TimeSlot::id).toSet())
+        assertEquals(setOf(testFieldId), loadedParticipantDetail.fields.map(Field::id).toSet())
+        assertEquals(setOf(testSlotId), loadedParticipantDetail.timeSlots.map(TimeSlot::id).toSet())
         assertEquals(SEEDED_TEAM_IDS.size, loadedTeamIds.size)
         assertTrue(loadedTeamIds.all(String::isNotBlank))
         assertEquals(scheduledMatches.map { it.id }.toSet(), loadedMatches.map { it.id }.toSet())
+        assertEquals(
+            scheduledMatches.map { it.id }.toSet(),
+            loadedParticipantDetail.matches.map { it.id }.toSet(),
+        )
         assertEquals(STAFF_INVITE_EMAILS, loadedInvites.mapNotNull { it.email }.toSet())
         assertTrue(loadedSports.isNotEmpty(), "Expected sports catalog API to return at least one sport.")
 
@@ -241,13 +266,16 @@ class LeaguePlayoffMobileApiIntegrationTest {
         host: MobileApiTestSession,
         event: Event,
     ) {
+        assertEquals(1, event.divisions.size)
+        val divisionId = event.divisions.single()
+        assertTrue(divisionId.isNotBlank())
         SEEDED_TEAM_IDS.forEach { teamId ->
             val response = runCatching {
                 host.api.post<EventParticipantsRequestDto, EventParticipantsResponseDto>(
                     path = "api/events/${event.id}/participants",
                     body = EventParticipantsRequestDto(
                         teamId = teamId,
-                        divisionId = SEEDED_DIVISION_ID,
+                        divisionId = divisionId,
                     ),
                 )
             }.getOrElse { error ->
@@ -268,10 +296,10 @@ class LeaguePlayoffMobileApiIntegrationTest {
             id = testEventId,
             name = "Mobile API League Playoff Regression",
             description = "Native mobile repository coverage for playoff league load and join flows.",
-            divisions = listOf(SEEDED_DIVISION_ID),
+            divisions = listOf(testDivisionId),
             divisionDetails = listOf(
                 DivisionDetail(
-                    id = SEEDED_DIVISION_ID,
+                    id = testDivisionId,
                     key = "open",
                     name = "Open",
                     playoffTeamCount = TEST_PLAYOFF_TEAM_COUNT,
@@ -309,7 +337,7 @@ class LeaguePlayoffMobileApiIntegrationTest {
             id = testFieldId,
             fieldNumber = 1,
             name = "Integration Court",
-            divisions = listOf(SEEDED_DIVISION_ID),
+            divisions = listOf(testDivisionId),
             rentalSlotIds = listOf(testSlotId),
             location = "Local Sports Complex",
         )
@@ -320,7 +348,7 @@ class LeaguePlayoffMobileApiIntegrationTest {
             id = testSlotId,
             dayOfWeek = 0,
             daysOfWeek = listOf(0),
-            divisions = listOf(SEEDED_DIVISION_ID),
+            divisions = listOf(testDivisionId),
             startTimeMinutes = 8 * 60,
             endTimeMinutes = 23 * 60,
             startDate = TEST_EVENT_START,
@@ -389,7 +417,6 @@ private const val HOST_EMAIL = MOBILE_TEST_HOST_EMAIL
 private const val HOST_PASSWORD = MOBILE_TEST_HOST_PASSWORD
 private const val PARTICIPANT_EMAIL = MOBILE_TEST_PARTICIPANT_EMAIL
 private const val PARTICIPANT_PASSWORD = MOBILE_TEST_PARTICIPANT_PASSWORD
-private const val SEEDED_DIVISION_ID = "division_open"
 private const val SEEDED_SPORT_ID = "Indoor Volleyball"
 private const val UPLOADED_DOCUMENT_IMAGE_ID = "camka_upload_upscaled_cc_indoor_sports_024be2e8d5cdead5_jpg"
 private const val TEST_PLAYOFF_TEAM_COUNT = 4

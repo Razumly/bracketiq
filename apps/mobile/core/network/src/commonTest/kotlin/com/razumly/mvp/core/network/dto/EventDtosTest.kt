@@ -65,6 +65,37 @@ class EventDtosTest {
     }
 
     @Test
+    fun given_public_event_detail_without_owner_identity_when_explicitly_allowed_then_event_is_decoded() {
+        val event = EventApiDto(
+            id = "public-event",
+            name = "Public Event",
+            eventType = EventType.LEAGUE.name,
+            start = "2026-07-13T12:00:00Z",
+            end = "2026-07-13T13:00:00Z",
+        ).toEventOrThrow(
+            context = "Public event detail",
+            requireOwnerIdentity = false,
+        )
+
+        assertEquals("public-event", event.id)
+        assertEquals("", event.hostId)
+    }
+
+    @Test
+    fun given_event_without_owner_identity_when_strict_conversion_is_requested_then_conversion_fails() {
+        val failure = assertFailsWith<IllegalArgumentException> {
+            EventApiDto(
+                id = "ownerless-event",
+                name = "Ownerless Event",
+                start = "2026-07-13T12:00:00Z",
+                end = "2026-07-13T13:00:00Z",
+            ).toEventOrThrow("Strict event detail")
+        }
+
+        assertTrue(failure.message.orEmpty().contains("hostId or affiliateUrl is required"))
+    }
+
+    @Test
     fun given_malformed_event_page_when_converted_then_the_row_is_reported_instead_of_dropped() {
         val failure = assertFailsWith<IllegalArgumentException> {
             listOf(
