@@ -5,8 +5,11 @@ import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.withAutomatedScheduling
+
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 import kotlin.time.Instant
 
 class EventEditDraftCoordinatorTest {
@@ -97,6 +100,47 @@ class EventEditDraftCoordinatorTest {
     }
 
     @Test
+    fun given_league_field_divisions_when_field_count_is_applied_then_scheduler_eligibility_is_preserved() {
+        val coordinator = EventEditDraftCoordinator(
+            initialEvent = leagueEvent(
+                divisions = listOf("division-a"),
+                fieldIds = listOf("field-1"),
+            ),
+            canEditInitial = true,
+        )
+        val field = field(
+            id = "field-1",
+            divisions = listOf("division-a"),
+        )
+        val slot = slot(
+            id = "slot-1",
+            scheduledFieldIds = listOf("field-1"),
+        ).copy(divisions = listOf("division-a"))
+
+        coordinator.seedDraftForEditing(
+            event = leagueEvent(
+                divisions = listOf("division-a"),
+                fieldIds = listOf("field-1"),
+            ),
+            sourceFields = listOf(field),
+            timeSlots = listOf(slot),
+            leagueScoringConfig = LeagueScoringConfigDTO(),
+        )
+        coordinator.selectFieldCount(1)
+
+        assertEquals(listOf("division_a"), coordinator.editableFields.value.single().divisions)
+        assertEquals(
+            emptyMap(),
+            computeLeagueSlotErrors(
+                slots = coordinator.editableLeagueTimeSlots.value,
+                singleDivision = true,
+                selectedDivisionIds = listOf("division-a"),
+            ),
+        )
+    }
+
+
+    @Test
     fun given_edited_event_when_updated_then_field_defaults_and_slot_boundaries_are_synced() {
         val coordinator = EventEditDraftCoordinator(
             initialEvent = leagueEvent(location = "Old Park"),
@@ -131,6 +175,145 @@ class EventEditDraftCoordinatorTest {
         assertEquals("New Park", coordinator.editableFields.value.single().location)
         assertEquals(Instant.DISTANT_PAST, coordinator.editableLeagueTimeSlots.value.single().startDate)
         assertEquals(Instant.parse("2026-05-20T00:00:00Z"), coordinator.editableLeagueTimeSlots.value.single().endDate)
+    }
+
+    @Test
+    fun given_league_automation_is_disabled_then_only_rental_slots_remain() {
+        val coordinator = EventEditDraftCoordinator(
+            initialEvent = leagueEvent().copy(isAutomatedScheduling = true),
+            canEditInitial = true,
+        )
+        val rentalSlot = slot("rental-slot").copy(
+            sourceType = "RENTAL_BOOKING",
+            rentalBookingId = "booking-1",
+            rentalLocked = true,
+        )
+        coordinator.seedDraftForEditing(
+            event = leagueEvent().copy(
+                isAutomatedScheduling = true,
+                timeSlotIds = listOf("manual-slot", rentalSlot.id),
+            ),
+            sourceFields = listOf(field(id = "field-1")),
+            timeSlots = listOf(slot("manual-slot"), rentalSlot),
+            leagueScoringConfig = LeagueScoringConfigDTO(),
+        )
+
+        coordinator.updateEditedEvent { current ->
+            current.withAutomatedScheduling(false)
+        }
+
+        assertEquals(false, coordinator.editedEvent.value.isAutomatedScheduling)
+        assertEquals(listOf(rentalSlot.id), coordinator.editedEvent.value.timeSlotIds)
+        assertEquals(listOf(rentalSlot), coordinator.editableLeagueTimeSlots.value)
+    }
+
+    @Test
+    fun given_automated_scheduling_lock_when_updated_then_current_value_is_preserved() {
+        val coordinator = EventEditDraftCoordinator(
+            initialEvent = leagueEvent().copy(
+                isAutomatedScheduling = true,
+                noFixedEndDateTime = true,
+            ),
+            canEditInitial = true,
+        )
+        coordinator.setControlLocks(
+            immutableFieldNames = setOf("isAutomatedScheduling"),
+            fallbackEvent = leagueEvent().copy(
+                isAutomatedScheduling = true,
+                noFixedEndDateTime = true,
+            ),
+        )
+
+        coordinator.updateEditedEvent { current ->
+            current.withAutomatedScheduling(false)
+        }
+
+        assertEquals(true, coordinator.controlLocks.value.automatedScheduling)
+        assertEquals(true, coordinator.editedEvent.value.isAutomatedScheduling)
+        assertEquals(true, coordinator.editedEvent.value.noFixedEndDateTime)
+    }
+
+    @Test
+    fun given_automated_scheduling_lock_when_incompatible_event_type_is_selected_then_event_type_is_preserved() {
+        val coordinator = EventEditDraftCoordinator(
+            initialEvent = leagueEvent().copy(
+                eventType = EventType.LEAGUE,
+                isAutomatedScheduling = true,
+                noFixedEndDateTime = true,
+            ),
+            canEditInitial = true,
+        )
+        coordinator.setControlLocks(
+            immutableFieldNames = setOf("isAutomatedScheduling"),
+        )
+
+        coordinator.updateEditedEvent { current ->
+            current.copy(eventType = EventType.EVENT)
+        }
+
+        assertEquals(EventType.LEAGUE, coordinator.editedEvent.value.eventType)
+        assertTrue(coordinator.editedEvent.value.isAutomatedScheduling)
+        assertTrue(coordinator.editedEvent.value.noFixedEndDateTime)
+    }
+
+    @Test
+    fun given_unscheduled_league_update_when_generated_end_is_still_set_then_it_is_cleared() {
+        val coordinator = EventEditDraftCoordinator(
+            initialEvent = leagueEvent().copy(
+                isAutomatedScheduling = true,
+                noFixedEndDateTime = true,
+            ),
+            canEditInitial = true,
+        )
+        coordinator.seedDraftForEditing(
+            event = leagueEvent().copy(
+                isAutomatedScheduling = true,
+                noFixedEndDateTime = true,
+            ),
+            sourceFields = listOf(field(id = "field-1")),
+            timeSlots = emptyList(),
+            leagueScoringConfig = LeagueScoringConfigDTO(),
+        )
+
+        coordinator.updateEditedEvent { current ->
+            current.copy(isAutomatedScheduling = false)
+        }
+
+        assertEquals(false, coordinator.editedEvent.value.isAutomatedScheduling)
+        assertEquals(false, coordinator.editedEvent.value.noFixedEndDateTime)
+    }
+
+    @Test
+    fun given_generated_end_when_start_moves_past_end_then_disabling_automation_repairs_fixed_end() {
+        val storedEnd = Instant.parse("2026-05-13T12:00:00Z")
+        val coordinator = EventEditDraftCoordinator(
+            initialEvent = leagueEvent(
+                start = Instant.parse("2026-04-13T12:00:00Z"),
+                end = storedEnd,
+            ).copy(noFixedEndDateTime = true),
+            canEditInitial = true,
+        )
+        coordinator.seedDraftForEditing(
+            event = leagueEvent(
+                start = Instant.parse("2026-04-13T12:00:00Z"),
+                end = storedEnd,
+            ).copy(noFixedEndDateTime = true),
+            sourceFields = listOf(field(id = "field-1")),
+            timeSlots = emptyList(),
+            leagueScoringConfig = LeagueScoringConfigDTO(),
+        )
+
+        coordinator.updateEditedEvent {
+            it.copy(start = Instant.parse("2026-05-14T12:00:00Z"))
+        }
+        coordinator.updateEditedEvent { it.withAutomatedScheduling(false) }
+
+        assertEquals(false, coordinator.editedEvent.value.isAutomatedScheduling)
+        assertEquals(false, coordinator.editedEvent.value.noFixedEndDateTime)
+        assertEquals(
+            Instant.parse("2026-05-14T13:00:00Z"),
+            coordinator.editedEvent.value.end,
+        )
     }
 
     @Test
@@ -243,6 +426,7 @@ class EventEditDraftCoordinatorTest {
 
     private fun leagueEvent(
         eventType: EventType = EventType.LEAGUE,
+        isAutomatedScheduling: Boolean = true,
         divisions: List<String> = listOf("open"),
         fieldIds: List<String> = listOf("field-1"),
         location: String = "Main Park",
@@ -259,6 +443,7 @@ class EventEditDraftCoordinatorTest {
             start = start,
             end = end,
             timeZone = "UTC",
+            isAutomatedScheduling = isAutomatedScheduling,
             singleDivision = true,
         )
     }

@@ -73,6 +73,7 @@ import com.razumly.mvp.core.data.dataTypes.resolveEventResourceLabels
 import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.dataTypes.isRentalBacked
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.displayPriceRangeLabel
 import com.razumly.mvp.core.data.dataTypes.evergreenDateDisplayLabel
@@ -84,6 +85,7 @@ import com.razumly.mvp.core.data.dataTypes.toLeagueConfig
 import com.razumly.mvp.core.data.dataTypes.toTournamentConfig
 import com.razumly.mvp.core.data.dataTypes.usesManualRegistrationPayments
 import com.razumly.mvp.core.data.dataTypes.withLeagueConfig
+import com.razumly.mvp.core.data.dataTypes.withAutomatedScheduling
 import com.razumly.mvp.core.data.dataTypes.withTournamentConfig
 import com.razumly.mvp.core.data.dataTypes.withSimplePlayoffsOrPoolPlay
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
@@ -243,6 +245,7 @@ fun EventDetails(
     eventTypeLocked: Boolean = false,
     eventTypeHasProtectedHistory: Boolean = false,
     teamSignupLocked: Boolean = false,
+    automatedSchedulingLocked: Boolean = false,
     onHostCreateAccount: () -> Unit,
     onOpenLocationMap: () -> Unit,
     onPlaceSelected: (MVPPlace?) -> Unit,
@@ -1561,13 +1564,14 @@ fun EventDetails(
         isNewEvent,
         scheduleTimeLocked,
         editEvent.eventType,
+        editEvent.isAutomatedScheduling,
         editEvent.noFixedEndDateTime,
         editEvent.end,
         editEvent.start,
     ) {
         isNewEvent &&
             !scheduleTimeLocked &&
-            !editEvent.noFixedEndDateTime &&
+            !(editEvent.isAutomatedScheduling && editEvent.noFixedEndDateTime) &&
             editEvent.end > editEvent.start &&
             (
                 editEvent.eventType == EventType.LEAGUE ||
@@ -2513,6 +2517,7 @@ fun EventDetails(
                             eventTypeLocked = eventTypeLocked,
                             eventTypeHasProtectedHistory = eventTypeHasProtectedHistory,
                             teamSignupLocked = teamSignupLocked,
+                            automatedSchedulingLocked = automatedSchedulingLocked,
                         ),
                         actions = SimpleEventDetailsOptionsActions(
                             onEventTypeSelected = onEventTypeSelected,
@@ -2532,16 +2537,7 @@ fun EventDetails(
                                     editEvent.eventType == EventType.LEAGUE ||
                                     editEvent.eventType == EventType.TOURNAMENT
                                 ) {
-                                    onEditEvent {
-                                        copy(
-                                            isAutomatedScheduling = enabled,
-                                            noFixedEndDateTime = if (enabled) {
-                                                noFixedEndDateTime
-                                            } else {
-                                                false
-                                            },
-                                        )
-                                    }
+                                    onEditEvent { withAutomatedScheduling(enabled) }
                                 }
                             },
                             onNoFixedEndDateChange = { enabled ->
@@ -3037,9 +3033,13 @@ fun EventDetails(
                         isLeagueSlotsValid = isLeagueSlotsValid,
                         showValidationErrors = showValidationErrors,
                         scheduleTimeLocked = scheduleTimeLocked,
+                        automatedSchedulingLocked = automatedSchedulingLocked,
                     ),
                     actions = EventDetailsScheduleActions(
                         onDisabledClick = ::showSelectSportMessage,
+                        onAutomatedSchedulingChange = { enabled ->
+                            onEditEvent { withAutomatedScheduling(enabled) }
+                        },
                         onRentalResourceSelectionChange = onRentalResourceSelectionChange,
                         onFieldCountChange = { count ->
                             fieldCount = count
@@ -3077,7 +3077,7 @@ fun EventDetails(
                 )
                 copy(
                     start = selected,
-                    end = if (!noFixedEndDateTime && end <= selected) minimumEnd else end,
+                    end = if (!(isAutomatedScheduling && noFixedEndDateTime) && end <= selected) minimumEnd else end,
                 )
             }
             showStartPicker = false
@@ -3097,7 +3097,9 @@ fun EventDetails(
             showEndPicker = false
         },
         onDismissRequest = { showEndPicker = false },
-        showPicker = showEndPicker && !scheduleTimeLocked && !editEvent.noFixedEndDateTime,
+        showPicker = showEndPicker &&
+            !scheduleTimeLocked &&
+            !(editEvent.isAutomatedScheduling && editEvent.noFixedEndDateTime),
         getTime = true,
         canSelectPast = false,
         initialDate = editEvent.end.asSystemLocalPickerInstant(editEventTimeZone),

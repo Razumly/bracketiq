@@ -209,6 +209,8 @@ internal fun LazyListScope.simpleEventDetailsBasicInfoSection(
                 state.editEvent.eventType == EventType.LEAGUE ||
                     state.editEvent.eventType == EventType.TOURNAMENT ||
                     state.editEvent.eventType == EventType.WEEKLY_EVENT
+            val usesGeneratedEnd = state.editEvent.isAutomatedScheduling &&
+                state.editEvent.noFixedEndDateTime
 
             if (state.editEvent.eventType == EventType.EVENT || supportsNoFixedEndDateTime) {
                 Row(
@@ -241,12 +243,12 @@ internal fun LazyListScope.simpleEventDetailsBasicInfoSection(
                             ""
                         },
                         enabled = !state.scheduleTimeLocked &&
-                            !(supportsNoFixedEndDateTime && state.editEvent.noFixedEndDateTime),
+                            !usesGeneratedEnd,
                         readOnly = true,
                         onTap = {
                             if (
                                 !state.scheduleTimeLocked &&
-                                !(supportsNoFixedEndDateTime && state.editEvent.noFixedEndDateTime)
+                                !usesGeneratedEnd
                             ) {
                                 actions.onShowEndPicker()
                             }

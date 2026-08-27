@@ -36,12 +36,16 @@ import com.razumly.mvp.core.data.dataTypes.addOfficialUser
 import com.razumly.mvp.core.data.dataTypes.removeOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.removeOfficialUser
 import com.razumly.mvp.core.data.dataTypes.shouldReplaceOfficialPositionsWithSportDefaults
+import com.razumly.mvp.core.data.dataTypes.showsScheduleConstructionControls
 import com.razumly.mvp.core.data.dataTypes.syncEventTypeTagsForEventType
 import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
 import com.razumly.mvp.core.data.dataTypes.usesTeamOfficialScheduling
 import com.razumly.mvp.core.data.dataTypes.withDoTeamsOfficiate
 import com.razumly.mvp.core.data.dataTypes.withDefaultPlayoffTeamCounts
+import com.razumly.mvp.core.data.dataTypes.isRentalBacked
+import com.razumly.mvp.core.data.dataTypes.normalizeScheduleConstructionTimeSlots
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.enums.isScheduleConstructionAutomationType
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
 import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
@@ -173,7 +177,6 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     fun setLoadingHandler(loadingHandler: LoadingHandler)
     fun retryEditorBootstrap()
     fun createEvent()
-    fun saveAsDraftWithoutSchedule()
     fun nextStep()
     fun previousStep()
     fun onTypeSelected(type: EventType)
@@ -372,7 +375,17 @@ class DefaultCreateEventComponent(
 
     private fun applyEditorSession(session: EventEditorSession) {
         val canonical = session.canonicalState
-        val normalizedEvent = canonical.event.withDefaultPlayoffTeamCounts()
+        val baseEvent = canonical.event.withDefaultPlayoffTeamCounts()
+        val scheduleConstructionVisible = baseEvent.showsScheduleConstructionControls()
+        val normalizedTimeSlots = normalizeScheduleConstructionTimeSlots(
+            event = baseEvent,
+            slots = canonical.timeSlots,
+        )
+        val normalizedEvent = if (scheduleConstructionVisible) {
+            baseEvent
+        } else {
+            baseEvent.copy(timeSlotIds = normalizedTimeSlots.map(TimeSlot::id))
+        }
         _editorSession.value = session
         _newEventState.value = normalizedEvent
         _currentEventType.value = normalizedEvent.eventType
@@ -380,8 +393,8 @@ class DefaultCreateEventComponent(
             event = normalizedEvent,
         )
         _localFields.value = canonical.fields
-        _leagueSlots.value = canonical.timeSlots
-        _useManualTimeSlots.value = canonical.timeSlots.isNotEmpty()
+        _leagueSlots.value = normalizedTimeSlots
+        _useManualTimeSlots.value = scheduleConstructionVisible && normalizedTimeSlots.isNotEmpty()
         _fieldCount.value = canonical.fields.size
         canonical.leagueScoringConfig?.let { config ->
             _leagueScoringConfig.value = config
@@ -593,22 +606,6 @@ class DefaultCreateEventComponent(
         }
     }
 
-    override fun saveAsDraftWithoutSchedule() {
-        scope.launch {
-            val pending = pendingCreateCommand
-            if (pending?.completion?.mode != com.razumly.mvp.core.network.dto.EventEditorCreateCompletionMode.CREATE_AND_BUILD_SCHEDULE) {
-                _errorState.value = ErrorMessage("Retry event creation before saving without a schedule.")
-                return@launch
-            }
-            val createOnlyCommand = pending.copy(
-                createOperationId = newId(),
-                completion = com.razumly.mvp.core.network.dto.EventEditorCreateCompletionDto(
-                    mode = com.razumly.mvp.core.network.dto.EventEditorCreateCompletionMode.CREATE_ONLY,
-                ),
-            )
-            submitCreateCommand(createOnlyCommand)
-        }
-    }
 
     override fun createAccount() {
         scope.launch {
@@ -623,6 +620,17 @@ class DefaultCreateEventComponent(
     }
 
     override fun updateEventField(update: Event.() -> Event) {
+        updateEventField(
+            update = update,
+            synchronizeTypeSelection = false,
+        )
+    }
+
+    private fun updateEventField(
+        update: Event.() -> Event,
+        synchronizeTypeSelection: Boolean,
+        afterUpdate: (() -> Unit)? = null,
+    ) {
         scope.launch {
             val previous = _newEventState.value
             val candidate = previous
@@ -639,6 +647,13 @@ class DefaultCreateEventComponent(
             val sportChanged = previous.sportIds.firstOrNull() != normalized.sportIds.firstOrNull()
 
             _newEventState.value = normalized
+            clearScheduleConstructionState(
+                previousEvent = previous,
+                updatedEvent = normalized,
+            )
+            if (synchronizeTypeSelection) {
+                synchronizeTypeSelection(updatedEvent = normalized)
+            }
             if (sportChanged) {
                 initializeLeagueScoringConfig(normalized.sportIds.firstOrNull())
             } else if (!leagueScoringConfigInitialized && normalized.eventType == EventType.LEAGUE) {
@@ -647,6 +662,7 @@ class DefaultCreateEventComponent(
             syncLeagueSlotDefaultStartDates(previousEvent = previous, updatedEvent = normalized)
             syncLeagueSlotDefaultEndDates(previousEvent = previous, updatedEvent = normalized)
             syncLocalFieldsForEvent(previous, normalized)
+            afterUpdate?.invoke()
         }
     }
 
@@ -1030,44 +1046,6 @@ class DefaultCreateEventComponent(
         val preserveLeagueTournamentChoice =
             previousType == EventType.LEAGUE || previousType == EventType.TOURNAMENT
         _currentEventType.value = type
-        updateEventField {
-            when (type) {
-                EventType.LEAGUE, EventType.TOURNAMENT -> copy(
-                    eventType = type,
-                    isAutomatedScheduling = if (preserveLeagueTournamentChoice) {
-                        previousScheduling
-                    } else {
-                        defaultAutomatedSchedulingForEventType(type)
-                    },
-                    teamSignup = true,
-                    noFixedEndDateTime = false,
-                    end = end.takeIf { it > start } ?: defaultEventEnd(start),
-                )
-
-                EventType.WEEKLY_EVENT -> copy(
-                    eventType = type,
-                    isAutomatedScheduling = defaultAutomatedSchedulingForEventType(type),
-                    noFixedEndDateTime = false,
-                    end = end.takeIf { it > start } ?: defaultEventEnd(start),
-                )
-
-                EventType.TRYOUT -> copy(
-                    eventType = type,
-                    isAutomatedScheduling = defaultAutomatedSchedulingForEventType(type),
-                    teamSignup = false,
-                    singleDivision = false,
-                    noFixedEndDateTime = false,
-                    end = end.takeIf { it > start } ?: defaultEventEnd(start),
-                )
-
-                EventType.EVENT -> copy(
-                    eventType = type,
-                    isAutomatedScheduling = defaultAutomatedSchedulingForEventType(type),
-                    noFixedEndDateTime = false,
-                    end = end.takeIf { it > start } ?: defaultEventEnd(start),
-                )
-            }.syncEventTypeTagsForEventType()
-        }
         when (type) {
             EventType.LEAGUE, EventType.TOURNAMENT -> {
                 if (previousType != EventType.LEAGUE && previousType != EventType.TOURNAMENT) {
@@ -1078,30 +1056,65 @@ class DefaultCreateEventComponent(
             EventType.WEEKLY_EVENT, EventType.TRYOUT -> _useManualTimeSlots.value = true
             EventType.EVENT -> _useManualTimeSlots.value = false
         }
-        if (
-            type == EventType.LEAGUE ||
-            type == EventType.TOURNAMENT ||
-            type == EventType.WEEKLY_EVENT ||
-            type == EventType.TRYOUT
-        ) {
-            if (_fieldCount.value <= 0) {
-                val selectedCount = when {
-                    _localFields.value.isNotEmpty() -> _localFields.value.size
-                    newEventState.value.fieldIds.isNotEmpty() -> newEventState.value.fieldIds.size
-                    else -> 1
-                }.coerceAtLeast(1)
-                selectFieldCount(selectedCount)
-            }
-        }
-        if (
-            (type == EventType.LEAGUE ||
-                type == EventType.TOURNAMENT ||
-                type == EventType.WEEKLY_EVENT ||
-                type == EventType.TRYOUT) &&
-            _leagueSlots.value.isEmpty()
-        ) {
-            _leagueSlots.value = listOf(createDefaultLeagueSlot())
-        }
+        ensureTypeSelectionTimeSlot(type)
+        updateEventField(
+            update = {
+                when (type) {
+                    EventType.LEAGUE, EventType.TOURNAMENT -> copy(
+                        eventType = type,
+                        isAutomatedScheduling = if (preserveLeagueTournamentChoice) {
+                            previousScheduling
+                        } else {
+                            defaultAutomatedSchedulingForEventType(type)
+                        },
+                        teamSignup = true,
+                        noFixedEndDateTime = false,
+                        end = end.takeIf { it > start } ?: defaultEventEnd(start),
+                    )
+
+                    EventType.WEEKLY_EVENT -> copy(
+                        eventType = type,
+                        isAutomatedScheduling = defaultAutomatedSchedulingForEventType(type),
+                        noFixedEndDateTime = false,
+                        end = end.takeIf { it > start } ?: defaultEventEnd(start),
+                    )
+
+                    EventType.TRYOUT -> copy(
+                        eventType = type,
+                        isAutomatedScheduling = defaultAutomatedSchedulingForEventType(type),
+                        teamSignup = false,
+                        singleDivision = false,
+                        noFixedEndDateTime = false,
+                        end = end.takeIf { it > start } ?: defaultEventEnd(start),
+                    )
+
+                    EventType.EVENT -> copy(
+                        eventType = type,
+                        isAutomatedScheduling = defaultAutomatedSchedulingForEventType(type),
+                        noFixedEndDateTime = false,
+                        end = end.takeIf { it > start } ?: defaultEventEnd(start),
+                    )
+                }.syncEventTypeTagsForEventType()
+            },
+            synchronizeTypeSelection = true,
+            afterUpdate = {
+                if (
+                    type == EventType.LEAGUE ||
+                    type == EventType.TOURNAMENT ||
+                    type == EventType.WEEKLY_EVENT ||
+                    type == EventType.TRYOUT
+                ) {
+                    if (_fieldCount.value <= 0) {
+                        val selectedCount = when {
+                            _localFields.value.isNotEmpty() -> _localFields.value.size
+                            newEventState.value.fieldIds.isNotEmpty() -> newEventState.value.fieldIds.size
+                            else -> 1
+                        }.coerceAtLeast(1)
+                        selectFieldCount(selectedCount)
+                    }
+                }
+            },
+        )
     }
 
     override fun setUseManualTimeSlots(enabled: Boolean) {
@@ -1557,7 +1570,6 @@ class DefaultCreateEventComponent(
             pendingStaffInvites = _pendingStaffInvites.value.toList(),
         )
     }
-
     private suspend fun createEventAfterPayment(submission: CreateEventSubmissionSnapshot) {
         pendingCreateCommand
             ?.takeIf { pendingCreateSubmission == submission }
@@ -1566,32 +1578,35 @@ class DefaultCreateEventComponent(
                 return
             }
 
-        val nextCommand = runCatching {
-            val prepared = prepareEventForCreation(submission).getOrThrow()
-            validatePendingStaffInviteDrafts(submission.pendingStaffInvites).getOrThrow()
-            val mutation = EventEditorMutation(
-                canonicalState = EventEditorCanonicalState(
-                    event = prepared.event,
-                    fields = prepared.fields,
-                    timeSlots = prepared.timeSlots,
-                    leagueScoringConfig = submission.leagueScoringConfig
-                        .takeIf { prepared.event.eventType == EventType.LEAGUE },
-                    questions = submission.registrationQuestions,
-                    pendingStaffInvites = submission.pendingStaffInvites.toCanonicalInvites(
-                        eventId = prepared.event.id,
-                    ),
-                    playoffDivisionDetails = submission.session.canonicalState.playoffDivisionDetails,
-                    divisionFieldIds = submission.session.canonicalState.divisionFieldIds,
-                ),
-            )
-            EventEditorSessionMapper.toCreateCommand(submission.session, mutation).command
-        }.getOrElse { error ->
+        val command = buildCreateCommandForSubmission(submission).getOrElse { error ->
             _errorState.value = ErrorMessage(error.userMessage("Failed to create event."))
             return
-        }
-        val command = nextCommand.copy(createOperationId = newId())
+        }.copy(createOperationId = newId())
         pendingCreateSubmission = submission
         submitCreateCommand(command)
+    }
+
+    private suspend fun buildCreateCommandForSubmission(
+        submission: CreateEventSubmissionSnapshot,
+    ): Result<EventEditorCreateCommandDto> = runCatching {
+        val prepared = prepareEventForCreation(submission).getOrThrow()
+        validatePendingStaffInviteDrafts(submission.pendingStaffInvites).getOrThrow()
+        val mutation = EventEditorMutation(
+            canonicalState = EventEditorCanonicalState(
+                event = prepared.event,
+                fields = prepared.fields,
+                timeSlots = prepared.timeSlots,
+                leagueScoringConfig = submission.leagueScoringConfig
+                    .takeIf { prepared.event.eventType == EventType.LEAGUE },
+                questions = submission.registrationQuestions,
+                pendingStaffInvites = submission.pendingStaffInvites.toCanonicalInvites(
+                    eventId = prepared.event.id,
+                ),
+                playoffDivisionDetails = submission.session.canonicalState.playoffDivisionDetails,
+                divisionFieldIds = submission.session.canonicalState.divisionFieldIds,
+            ),
+        )
+        EventEditorSessionMapper.toCreateCommand(submission.session, mutation).command
     }
 
     private suspend fun submitCreateCommand(command: EventEditorCreateCommandDto) {
@@ -1644,10 +1659,10 @@ class DefaultCreateEventComponent(
                     )
                 }
                 .onFailure { error ->
-                    deferredError = createEventFailureMessage(error, command)
+                    deferredError = createEventFailureMessage(error)
                 }
         } catch (error: Throwable) {
-            deferredError = createEventFailureMessage(error, command)
+            deferredError = createEventFailureMessage(error)
         } finally {
             loadingOperation.hideLoading()
             deferredError?.let { error -> _errorState.value = error }
@@ -1656,28 +1671,8 @@ class DefaultCreateEventComponent(
 
     private fun createEventFailureMessage(
         error: Throwable,
-        command: EventEditorCreateCommandDto,
     ): ErrorMessage {
-        val canSaveWithoutSchedule =
-            command.completion.mode ==
-                com.razumly.mvp.core.network.dto.EventEditorCreateCompletionMode.CREATE_AND_BUILD_SCHEDULE &&
-                (error as? com.razumly.mvp.core.data.repositories.EventEditorApiException)
-                    ?.payload
-                    ?.code in setOf(
-                        "EDITOR_SCHEDULE_UNSUPPORTED",
-                        "EDITOR_SCHEDULE_INPUT_INVALID",
-                        "EDITOR_SCHEDULE_FAILED",
-                    )
-        return if (canSaveWithoutSchedule) {
-            ErrorMessage(
-                message = error.userMessage("The schedule could not be built. Nothing was saved."),
-                actionLabel = "Save without schedule",
-                action = ::saveAsDraftWithoutSchedule,
-                duration = androidx.compose.material3.SnackbarDuration.Indefinite,
-            )
-        } else {
-            ErrorMessage(error.userMessage("Failed to create event."))
-        }
+        return ErrorMessage(error.userMessage("Failed to create event."))
     }
 
     private fun List<PendingStaffInviteDraft>.toCanonicalInvites(eventId: String): List<Invite> =
@@ -1771,9 +1766,11 @@ class DefaultCreateEventComponent(
                 preparedEvent.eventType == EventType.TOURNAMENT ||
                 preparedEvent.eventType == EventType.WEEKLY_EVENT
         } else {
-            preparedEvent.eventType == EventType.LEAGUE ||
-                preparedEvent.eventType == EventType.TOURNAMENT ||
-                preparedEvent.eventType == EventType.WEEKLY_EVENT
+            (
+                preparedEvent.eventType == EventType.LEAGUE ||
+                    preparedEvent.eventType == EventType.TOURNAMENT ||
+                    preparedEvent.eventType == EventType.WEEKLY_EVENT
+                ) && preparedEvent.showsScheduleConstructionControls()
         }
         if (shouldPersistManagedSlots) {
             preparedTimeSlots = if (
@@ -1797,8 +1794,16 @@ class DefaultCreateEventComponent(
             }
 
             preparedEvent = preparedEvent.copy(timeSlotIds = preparedTimeSlots.map { it.id })
+        } else if (
+            !hasRentalBackedSlots &&
+                (
+                    preparedEvent.eventType == EventType.LEAGUE ||
+                        preparedEvent.eventType == EventType.TOURNAMENT
+                    )
+        ) {
+            preparedTimeSlots = emptyList()
+            preparedEvent = preparedEvent.copy(timeSlotIds = emptyList())
         }
-
         requireCompletedRentalSlots(preparedTimeSlots, selectedRentalOptions)
 
         PreparedEventForCreation(
@@ -2238,16 +2243,55 @@ class DefaultCreateEventComponent(
         )
     }
 
-    private fun TimeSlot.isRentalBacked(): Boolean {
-        return rentalLocked == true ||
-            !rentalBookingId.isNullOrBlank() ||
-            sourceType?.trim()?.equals("RENTAL_BOOKING", ignoreCase = true) == true
+
+    private fun clearScheduleConstructionState(
+        previousEvent: Event,
+        updatedEvent: Event,
+    ) {
+        if (
+            !previousEvent.isAutomatedScheduling ||
+            updatedEvent.isAutomatedScheduling ||
+            !previousEvent.eventType.isScheduleConstructionAutomationType()
+        ) {
+            return
+        }
+        val retainedSlots = normalizeScheduleConstructionTimeSlots(
+            event = updatedEvent,
+            slots = _leagueSlots.value,
+        )
+        _leagueSlots.value = retainedSlots
+        when (updatedEvent.eventType) {
+            EventType.LEAGUE, EventType.TOURNAMENT -> _useManualTimeSlots.value = false
+            EventType.WEEKLY_EVENT, EventType.TRYOUT -> _useManualTimeSlots.value = true
+            EventType.EVENT -> _useManualTimeSlots.value = false
+        }
+        _newEventState.value = _newEventState.value.copy(
+            timeSlotIds = retainedSlots.map(TimeSlot::id),
+        )
+    }
+    private fun synchronizeTypeSelection(updatedEvent: Event) {
+        ensureTypeSelectionTimeSlot(updatedEvent.eventType)
+    }
+
+    private fun ensureTypeSelectionTimeSlot(eventType: EventType) {
+        if (
+            eventType == EventType.LEAGUE ||
+            eventType == EventType.TOURNAMENT ||
+            eventType == EventType.WEEKLY_EVENT ||
+            eventType == EventType.TRYOUT
+        ) {
+            if (_leagueSlots.value.isEmpty()) {
+                _leagueSlots.value = listOf(createDefaultLeagueSlot())
+            }
+        }
     }
 
     private fun syncLeagueSlotDefaultStartDates(previousEvent: Event, updatedEvent: Event) {
         if (
             !_useManualTimeSlots.value &&
-            (updatedEvent.eventType == EventType.LEAGUE || updatedEvent.eventType == EventType.TOURNAMENT)
+            updatedEvent.isAutomatedScheduling &&
+            updatedEvent.eventType.isScheduleConstructionAutomationType() &&
+            _leagueSlots.value.none { slot -> slot.isRentalBacked() }
         ) {
             val existingId = _leagueSlots.value.singleOrNull()?.id
             _leagueSlots.value = listOf(
@@ -2268,6 +2312,7 @@ class DefaultCreateEventComponent(
             }
         }
     }
+
 
     private fun syncLeagueSlotDefaultEndDates(
         previousEvent: Event,

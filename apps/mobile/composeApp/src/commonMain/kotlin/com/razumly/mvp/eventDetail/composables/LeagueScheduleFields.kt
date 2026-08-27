@@ -46,6 +46,7 @@ import com.razumly.mvp.core.data.dataTypes.SportResourceLabels
 import com.razumly.mvp.core.data.dataTypes.inDiagnostic
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.hasOvernightWindow
+import com.razumly.mvp.core.data.dataTypes.isRentalBacked
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
 import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
@@ -221,10 +222,6 @@ private fun buildFacilityRentalResourceGroups(
         .sortedBy { group -> group.label.lowercase() }
 }
 
-private fun TimeSlot.isRentalBacked(): Boolean =
-    rentalLocked == true ||
-        !rentalBookingId.isNullOrBlank() ||
-        sourceType?.trim()?.equals("RENTAL_BOOKING", ignoreCase = true) == true
 
 private fun TimeSlot.matchesRentalWindow(option: RentalResourceOption): Boolean =
     !repeating &&

@@ -4,6 +4,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.RepeatingTimeSlotValidationException
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.dataTypes.isRentalBacked
 import com.razumly.mvp.core.data.dataTypes.enumerateRepeatingTimeSlotOccurrences
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
@@ -65,16 +66,13 @@ internal fun isScheduleEditingLocked(
         }
 }
 
-internal fun TimeSlot.isRentalBacked(): Boolean =
-    rentalLocked == true ||
-        !rentalBookingId.isNullOrBlank() ||
-        sourceType?.trim()?.equals("RENTAL_BOOKING", ignoreCase = true) == true
 
 internal fun requiresScheduleInputValidation(
     eventType: EventType,
     isNewEvent: Boolean,
     scheduleTimeLocked: Boolean,
     slotEditorEnabled: Boolean = true,
+    isAutomatedScheduling: Boolean,
 ): Boolean {
     return !scheduleTimeLocked &&
         isNewEvent &&
@@ -82,6 +80,7 @@ internal fun requiresScheduleInputValidation(
             eventType == EventType.WEEKLY_EVENT ||
                 (
                     slotEditorEnabled &&
+                        isAutomatedScheduling &&
                         (
                             eventType == EventType.LEAGUE ||
                                 eventType == EventType.TOURNAMENT
@@ -93,12 +92,18 @@ internal fun requiresScheduleInputValidation(
 internal fun requiresFieldCountValidation(
     eventType: EventType,
     scheduleTimeLocked: Boolean,
+    isAutomatedScheduling: Boolean = true,
 ): Boolean {
     return !scheduleTimeLocked &&
         (
-            eventType == EventType.LEAGUE ||
-                eventType == EventType.TOURNAMENT ||
-                eventType == EventType.WEEKLY_EVENT
+            eventType == EventType.WEEKLY_EVENT ||
+                (
+                    isAutomatedScheduling &&
+                        (
+                            eventType == EventType.LEAGUE ||
+                                eventType == EventType.TOURNAMENT
+                            )
+                    )
             )
 }
 
@@ -106,8 +111,9 @@ internal fun requiresFixedEndRangeValidation(
     event: Event,
     scheduleTimeLocked: Boolean,
 ): Boolean {
+    val usesGeneratedEnd = event.isAutomatedScheduling && event.noFixedEndDateTime
     return !scheduleTimeLocked &&
-        !event.noFixedEndDateTime &&
+        !usesGeneratedEnd &&
         (
             event.eventType == EventType.LEAGUE ||
                 event.eventType == EventType.TOURNAMENT ||

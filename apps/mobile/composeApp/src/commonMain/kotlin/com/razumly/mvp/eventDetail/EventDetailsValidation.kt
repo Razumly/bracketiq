@@ -309,6 +309,7 @@ internal fun computeEventValidationResult(
             isNewEvent = isNewEvent,
             scheduleTimeLocked = scheduleTimeLocked,
             slotEditorEnabled = slotEditorEnabled,
+            isAutomatedScheduling = editEvent.isAutomatedScheduling,
         )
     ) {
         leagueTimeSlots.isNotEmpty() &&
@@ -325,6 +326,7 @@ internal fun computeEventValidationResult(
         requiresFieldCountValidation(
             eventType = editEvent.eventType,
             scheduleTimeLocked = scheduleTimeLocked,
+            isAutomatedScheduling = editEvent.isAutomatedScheduling,
         )
     ) {
         fieldCount > 0

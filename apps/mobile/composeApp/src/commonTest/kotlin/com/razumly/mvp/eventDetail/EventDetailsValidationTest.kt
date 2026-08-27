@@ -56,6 +56,34 @@ class EventDetailsValidationTest {
     }
 
     @Test
+    fun unscheduled_league_does_not_require_resources_or_timeslots() {
+        val event = baseLeagueEvent(maxParticipants = 2).copy(
+            sportIds = listOf("sport-1"),
+            isAutomatedScheduling = false,
+            noFixedEndDateTime = false,
+            start = kotlinx.datetime.Instant.parse("2026-04-13T12:00:00Z"),
+            end = kotlinx.datetime.Instant.parse("2026-04-13T15:00:00Z"),
+        )
+
+        val result = computeEventValidationResult(
+            editEvent = event,
+            isNewEvent = true,
+            fieldCount = 0,
+            leagueTimeSlots = emptyList(),
+            leagueSlotErrors = emptyMap(),
+            slotEditorEnabled = false,
+            divisionDetailsForSettings = emptyList(),
+            isColorLoaded = true,
+            scheduleTimeLocked = false,
+            requiresPositiveRegistrationPrice = false,
+        )
+
+        assertTrue(result.isFieldCountValid)
+        assertTrue(result.isLeagueSlotsValid)
+        assertTrue(result.isValid)
+    }
+
+    @Test
     fun online_event_edits_require_a_confirmed_price_quote_when_registration_is_paid() {
         assertFalse(
             isEventInclusivePriceReady(

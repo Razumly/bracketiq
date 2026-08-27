@@ -26,6 +26,9 @@ fun defaultAutomatedSchedulingForEventType(eventType: EventType): Boolean = when
     EventType.TRYOUT -> false
 }
 
+fun EventType.isScheduleConstructionAutomationType(): Boolean =
+    this == EventType.LEAGUE || this == EventType.TOURNAMENT
+
 fun normalizeAutomatedSchedulingForEventType(
     eventType: EventType,
     value: Boolean?,

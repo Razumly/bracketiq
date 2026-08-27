@@ -12,6 +12,7 @@ import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.dataTypes.showsScheduleConstructionControls
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.RentalResourceOption
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
@@ -123,6 +124,9 @@ internal fun LazyListScope.simpleEventDetailsScheduleSection(
             )
         },
         editContent = {
+            val showScheduleConstructionControls = state.editEvent.showsScheduleConstructionControls()
+            val usesGeneratedEnd = state.editEvent.isAutomatedScheduling &&
+                state.editEvent.noFixedEndDateTime
             LeagueScheduleFields(
                 fieldCount = state.fieldCount,
                 fields = state.fields,
@@ -133,7 +137,7 @@ internal fun LazyListScope.simpleEventDetailsScheduleSection(
                 rentalResourceSelectionLocked = state.rentalResourceSelectionLocked,
                 onRentalResourceSelectionChange = actions.onRentalResourceSelectionChange,
                 eventStart = state.editEvent.start,
-                eventEnd = if (state.editEvent.noFixedEndDateTime) {
+                eventEnd = if (usesGeneratedEnd) {
                     null
                 } else {
                     state.editEvent.end.takeIf { it > state.editEvent.start }
@@ -145,8 +149,9 @@ internal fun LazyListScope.simpleEventDetailsScheduleSection(
                 onUpdateSlot = actions.onUpdateSlot,
                 onRemoveSlot = actions.onRemoveSlot,
                 slotErrors = state.slotErrors,
-                showSlotEditor = state.slotEditorEnabled,
-                showUseManualTimeSlotsToggle = state.showUseManualTimeSlotsToggle,
+                showSlotEditor = state.slotEditorEnabled && showScheduleConstructionControls,
+                showUseManualTimeSlotsToggle =
+                    state.showUseManualTimeSlotsToggle && showScheduleConstructionControls,
                 useManualTimeSlots = state.useManualTimeSlots,
                 onUseManualTimeSlotsChange = actions.onUseManualTimeSlotsChange,
                 slotDivisionOptions = state.slotDivisionOptions,
@@ -165,16 +170,17 @@ internal fun LazyListScope.simpleEventDetailsScheduleSection(
             if (
                 state.showValidationErrors &&
                     !state.isLeagueSlotsValid &&
-                (
-                    state.editEvent.eventType == EventType.LEAGUE ||
-                        state.editEvent.eventType == EventType.TOURNAMENT ||
-                        state.editEvent.eventType == EventType.WEEKLY_EVENT
-                    )
+                    showScheduleConstructionControls &&
+                    (
+                        state.editEvent.eventType == EventType.LEAGUE ||
+                            state.editEvent.eventType == EventType.TOURNAMENT ||
+                            state.editEvent.eventType == EventType.WEEKLY_EVENT
+                        )
             ) {
                 Text(
                     text = if (
                         state.editEvent.eventType == EventType.WEEKLY_EVENT &&
-                        state.leagueTimeSlots.none { slot -> slot.repeating }
+                            state.leagueTimeSlots.none { slot -> slot.repeating }
                     ) {
                         "Add at least one weekly repeating timeslot."
                     } else {

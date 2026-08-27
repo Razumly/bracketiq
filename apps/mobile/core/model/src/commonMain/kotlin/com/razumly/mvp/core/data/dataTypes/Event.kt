@@ -8,6 +8,7 @@ import androidx.room.Ignore
 import androidx.room.PrimaryKey
 import androidx.room.TypeConverters
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.enums.isScheduleConstructionAutomationType
 import com.razumly.mvp.core.data.util.DivisionConverters
 import com.razumly.mvp.core.data.util.DivisionDetailConverters
 import com.razumly.mvp.core.data.util.findDivisionDetailByIdentifier
@@ -21,6 +22,7 @@ import kotlinx.serialization.Transient
 import kotlin.native.ObjCName
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
+import kotlin.time.Duration.Companion.hours
 import kotlin.time.Instant
 
 @Entity
@@ -170,6 +172,39 @@ fun Event.usableLatitudeLongitude(): Pair<Double, Double>? {
 }
 
 fun Event.hasUsableCoordinates(): Boolean = usableLatitudeLongitude() != null
+
+fun Event.withAutomatedScheduling(enabled: Boolean): Event {
+    val fixedEnd = if (!enabled && noFixedEndDateTime && end <= start) {
+        start + 1.hours
+    } else {
+        end
+    }
+    return copy(
+        isAutomatedScheduling = enabled,
+        noFixedEndDateTime = if (enabled) noFixedEndDateTime else false,
+        end = fixedEnd,
+    )
+}
+
+fun Event.showsScheduleConstructionControls(): Boolean =
+    !eventType.isScheduleConstructionAutomationType() || isAutomatedScheduling
+
+fun Event.showsGeneratedEndDateControl(): Boolean = when (eventType) {
+    EventType.LEAGUE,
+    EventType.TOURNAMENT -> isAutomatedScheduling
+    EventType.WEEKLY_EVENT -> true
+    EventType.EVENT,
+    EventType.TRYOUT -> false
+}
+
+fun normalizeScheduleConstructionTimeSlots(
+    event: Event,
+    slots: List<TimeSlot>,
+): List<TimeSlot> = if (event.showsScheduleConstructionControls()) {
+    slots
+} else {
+    slots.filter(TimeSlot::isRentalBacked)
+}
 
 @Serializable
 enum class TeamCheckInMode {

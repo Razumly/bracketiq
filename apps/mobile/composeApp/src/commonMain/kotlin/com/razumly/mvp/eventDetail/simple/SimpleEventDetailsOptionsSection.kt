@@ -27,6 +27,8 @@ import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.enums.displayLabel
+import com.razumly.mvp.core.data.dataTypes.enums.isScheduleConstructionAutomationType
+import com.razumly.mvp.core.data.dataTypes.showsGeneratedEndDateControl
 import com.razumly.mvp.eventCreate.mobileCreateEventTypes
 
 internal data class SimpleEventDetailsOptionsState(
@@ -36,6 +38,7 @@ internal data class SimpleEventDetailsOptionsState(
     val eventTypeLocked: Boolean = false,
     val eventTypeHasProtectedHistory: Boolean = false,
     val teamSignupLocked: Boolean = false,
+    val automatedSchedulingLocked: Boolean = false,
 )
 
 internal data class SimpleEventDetailsOptionsActions(
@@ -115,24 +118,25 @@ internal fun LazyListScope.simpleEventDetailsOptionsSection(
             }
 
             OptionsCategory(title = "Schedule & competition") {
-                val supportsAutomatedScheduling = state.editEvent.eventType == EventType.LEAGUE ||
-                    state.editEvent.eventType == EventType.TOURNAMENT
+                val supportsAutomatedScheduling =
+                    state.editEvent.eventType.isScheduleConstructionAutomationType()
                 if (supportsAutomatedScheduling) {
                     OptionCheckboxRow(
                         checked = state.editEvent.isAutomatedScheduling,
                         label = "Automated Scheduling",
-                        description = "Build the match schedule when the event is created.",
+                        description = if (state.automatedSchedulingLocked) {
+                            "Automated Scheduling is locked for this event."
+                        } else {
+                            "Build the match schedule when the event is created."
+                        },
+                        enabled = !state.automatedSchedulingLocked,
                         onCheckedChange = actions.onAutomatedSchedulingChange,
                     )
                 }
                 val supportsGeneratedEndDate =
                     state.editEvent.isAutomatedScheduling &&
-                        (
-                            state.editEvent.eventType == EventType.LEAGUE ||
-                                state.editEvent.eventType == EventType.TOURNAMENT
-                            )
-                val showsGeneratedEndDate = supportsGeneratedEndDate ||
-                    state.editEvent.eventType == EventType.WEEKLY_EVENT
+                        state.editEvent.eventType.isScheduleConstructionAutomationType()
+                val showsGeneratedEndDate = state.editEvent.showsGeneratedEndDateControl()
                 if (showsGeneratedEndDate) {
                     OptionCheckboxRow(
                         checked = supportsGeneratedEndDate && state.editEvent.noFixedEndDateTime,
@@ -142,9 +146,7 @@ internal fun LazyListScope.simpleEventDetailsOptionsSection(
                         onCheckedChange = actions.onNoFixedEndDateChange,
                     )
                 }
-                if (state.editEvent.eventType == EventType.LEAGUE ||
-                    state.editEvent.eventType == EventType.TOURNAMENT
-                ) {
+                if (state.editEvent.eventType.isScheduleConstructionAutomationType()) {
                     OptionCheckboxRow(
                         checked = state.editEvent.includePlayoffs,
                         label = if (state.editEvent.eventType == EventType.TOURNAMENT) {

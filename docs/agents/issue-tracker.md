@@ -18,9 +18,9 @@ Use the organization [BracketIQ Project](https://github.com/orgs/Razumly/project
 ## Issue completion
 
 - **Close an issue** when its scoped work or answer is resolved and its acceptance criteria are satisfied.
+- **Reconcile completion** after implementation or review. If the evidence shows that scoped work is already complete, mark the requirement complete in the durable progress record and close the issue when its acceptance criteria are satisfied. Do not leave completed work in a reviewed-only state.
 - **Delivery gate**: require push, merge, or release before closing only when the issue's acceptance criteria explicitly require that step. Otherwise, delivery is separate from issue resolution.
 - **Close with context**: add a comment summarizing the outcome and verification, with commit, PR, or deployment references when available.
-
 ## Cross-application contract issues
 
 When an issue changes an HTTP request or response, an API path, or a site/mobile workflow:

@@ -240,6 +240,8 @@ internal fun LazyListScope.eventDetailsBasicInfoSection(
                 state.editEvent.eventType == EventType.LEAGUE ||
                     state.editEvent.eventType == EventType.TOURNAMENT ||
                     state.editEvent.eventType == EventType.WEEKLY_EVENT
+            val usesGeneratedEnd = state.editEvent.isAutomatedScheduling &&
+                state.editEvent.noFixedEndDateTime
             val canEditNoFixedEndDateTime = supportsNoFixedEndDateTime &&
                 state.editEvent.eventType != EventType.WEEKLY_EVENT
 
@@ -274,12 +276,12 @@ internal fun LazyListScope.eventDetailsBasicInfoSection(
                             ""
                         },
                         enabled = !state.scheduleTimeLocked &&
-                            !(supportsNoFixedEndDateTime && state.editEvent.noFixedEndDateTime),
+                            !usesGeneratedEnd,
                         readOnly = true,
                         onTap = {
                             if (
                                 !state.scheduleTimeLocked &&
-                                !(supportsNoFixedEndDateTime && state.editEvent.noFixedEndDateTime)
+                                !usesGeneratedEnd
                             ) {
                                 actions.onShowEndPicker()
                             }
@@ -302,7 +304,13 @@ internal fun LazyListScope.eventDetailsBasicInfoSection(
                 )
             }
 
-            if (supportsNoFixedEndDateTime) {
+            if (
+                supportsNoFixedEndDateTime &&
+                    (
+                        state.editEvent.eventType == EventType.WEEKLY_EVENT ||
+                            state.editEvent.isAutomatedScheduling
+                        )
+            ) {
                 val minimumFixedEnd = Instant.fromEpochMilliseconds(
                     state.editEvent.start.toEpochMilliseconds() + 60L * 60L * 1000L,
                 )
@@ -312,7 +320,7 @@ internal fun LazyListScope.eventDetailsBasicInfoSection(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Checkbox(
-                        checked = canEditNoFixedEndDateTime && state.editEvent.noFixedEndDateTime,
+                        checked = canEditNoFixedEndDateTime && usesGeneratedEnd,
                         enabled = canEditNoFixedEndDateTime && !state.scheduleTimeLocked,
                         onCheckedChange = { checked ->
                             if (canEditNoFixedEndDateTime) {
@@ -334,7 +342,7 @@ internal fun LazyListScope.eventDetailsBasicInfoSection(
                         color = Color(localImageScheme.current.onSurface),
                     )
                 }
-                if (state.editEvent.noFixedEndDateTime) {
+                if (usesGeneratedEnd) {
                     Text(
                         text = "Scheduling can extend past the displayed end date/time. Turn this off to enforce the end date/time.",
                         style = MaterialTheme.typography.bodySmall,

@@ -323,6 +323,7 @@ internal fun EventDetailOverviewEditHost(
         eventTypeHasProtectedHistory =
             state.eventEditorControlLocks.eventTypeHasProtectedHistory,
         teamSignupLocked = state.eventEditorControlLocks.teamSignup,
+        automatedSchedulingLocked = state.eventEditorControlLocks.automatedScheduling,
         showOfficialsPanel = state.showOfficialsPanel,
         isNewEvent = false,
         onOpenLocationMap = actions.onOpenLocationMap,

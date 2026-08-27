@@ -19,7 +19,11 @@ The result is visible in the shared Compose Event Editor and in the mobile-to-si
 - [x] (2026-08-26) Run focused mobile tests and targeted Android/iOS compilation.
 - [x] (2026-08-26) Run the full mobile suite. Android `:composeApp:testDebugUnitTest` and iOS `:composeApp:iosSimulatorArm64Test` both passed.
 - [x] (2026-08-26) Fix the current-snapshot regression test to start from a scheduled League and prove a scheduled-to-unscheduled mutation selects `CREATE_ONLY` with a fixed end. Focused mapper test passed in `:core:repository-impl:testDebugUnitTest`.
-- [ ] Complete the review, fix every finding, and record final status.
+- [x] (2026-08-26) Resolve S01 standards findings. Shared scheduling normalization and atomic type-transition slot handling are present; the focused selection and Tryout transition tests pass. S01-ST-003 was rejected as not independently actionable.
+- [x] (2026-08-26) Prove the scheduled-to-unscheduled current-value transition. The mapper test starts from automated scheduling, changes only the submitted snapshot, and asserts `CREATE_ONLY` with a fixed end.
+- [x] (2026-08-27) Complete the standards and spec re-review. Fix the final fixture-ownership finding and re-run its focused checks.
+- [x] (2026-08-27) Resolve the reopened S04-SP-002 parity finding. The shared non-default League draft now has a complete web command and Match Demand golden. Web and Android tests consume the same golden.
+- [x] (2026-08-27) Run the final focused, full mobile, and full site verification checks.
 
 ## Surprises & Discoveries
 
@@ -42,7 +46,11 @@ The result is visible in the shared Compose Event Editor and in the mobile-to-si
   Rationale: An unscheduled League needs a planned end. Only the schedule-construction policy is removed.
   Date/Author: 2026-08-26 / Codex.
 
-The shared Compose editor now exposes the League Automated Scheduling control in Advanced Setup, keeps Simple Setup behavior, and removes generated-end state when scheduling is disabled. The mapper and create component retain the current-snapshot and retry contract. Focused Android tests, targeted Android/iOS compilation, the full Android unit suite, and the full iOS simulator suite pass. Review findings remain open until the final review and focused re-checks complete.
+The shared Compose editor now exposes the League Automated Scheduling control in Advanced Setup, keeps Simple Setup behavior, and removes generated-end state when scheduling is disabled. The mapper and create component retain the current-snapshot and retry contract. Focused Android tests, targeted Android/iOS compilation, the full Android unit suite, the full iOS simulator suite, and the full site suite pass. Standards and spec review found no open findings.
+
+- Decision: Store cross-application parity fixtures under `test-fixtures/event-editor`.
+  Rationale: The site remains the web contract owner. Android tests consume the same neutral files without making the site test depend on an Android source set.
+  Date/Author: 2026-08-27 / Codex.
 
 ## Context and Orientation
 
@@ -122,24 +130,54 @@ Plan update note (2026-08-26): The scheduled-to-unscheduled mapper test now chan
 
 ## Review
 
-Review fixed point: the current `HEAD` with the Issue 32 working tree diff on 2026-08-26.
+Review fixed point: commit `57cfcbca245ef904f1639d79caf77369cfba4bac` with the Issue 32 working tree diff, reviewed on 2026-08-27.
 
 | Section | Changed paths | Standards | Spec | Finding IDs |
 | --- | --- | --- | --- | --- |
-| S01 | `eventCreate/CreateEventSelectionRules.kt`, `eventCreate/DefaultCreateEventComponent.kt`, and create tests | findings recorded | pending | S01-ST-001, S01-ST-002, S01-ST-003 |
-| S02 | `eventDetail/EventDetails*.kt`, `eventDetail/EventScheduleRules.kt`, and simple setup files | findings recorded | pending | S02-ST-001, S02-ST-002 |
-| S03 | `eventDetail/EventEditDraftCoordinator.kt` and its test | findings recorded | pending | S03-ST-001 |
-| S04 | `core/repository-impl/.../EventEditorSessionMapperTest.kt` and `core/model/.../Event.kt` | verified | pending | — |
+| S01 | `eventCreate/CreateEventSelectionRules.kt`, `eventCreate/DefaultCreateEventComponent.kt`, and create tests | fixed; focused checks passed | verified; no open finding | S01-ST-001, S01-ST-002, S01-ST-003 |
+| S02 | `eventDetail/EventDetails*.kt`, `eventDetail/EventScheduleRules.kt`, and simple setup files | fixed or rejected; focused checks passed | verified; no open finding | S02-ST-001, S02-ST-002 |
+| S03 | `eventDetail/EventEditDraftCoordinator.kt` and its test | fixed; focused checks passed | fixed; focused check passed | S03-SP-001, S03-ST-001 |
+| S04 | `core/repository-impl/.../EventEditorSessionMapperTest.kt`, `core/model/.../Event.kt`, and parity fixtures | fixed; focused checks passed | fixed; focused checks passed | S04-SP-001, S04-SP-002, S04-SP-003 |
 
 ### Finding register
 
-- `S01-ST-001` — Share the computed scheduling normalization across event-type branches. Priority P3. Status: open.
-- `S01-ST-002` — Centralize hidden schedule-slot normalization for bootstrap and transition paths. Priority P3. Status: open.
-- `S01-ST-003` — Use shared predicates for automated competition types and managed slots. Priority P3. Status: open.
-- `S02-ST-001` — Share schedule-construction visibility wiring across Simple and Advanced Setup. Priority P3. Status: open.
-- `S02-ST-002` — Add visual snapshot coverage for enabled, disabled, and locked schedule states. Priority P3. Status: open.
-- `S03-SP-001` — Preserve `noFixedEndDateTime` when a locked automation toggle is rejected. Priority P2. Status: open.
-- `S04-SP-001` — Round-trip the complete League draft through command serialization and decoding. Priority P1. Status: open.
-- `S04-SP-002` — Compare one shared League fixture with web canonical output and Match Demand. Priority P1. Status: open.
-- `S04-SP-003` — Derive completion mode from a current scheduled-to-unscheduled snapshot edit. Priority P1. Status: open.
-- `S03-ST-001` — Centralize schedule-construction cleanup across create and edit flows. Priority P3. Status: open.
+- `S01-ST-001` — Share the computed scheduling normalization across event-type branches. Priority P3. Status: fixed; focused selection normalization test passed.
+- `S01-ST-002` — Centralize hidden schedule-slot normalization for bootstrap and transition paths. Priority P3. Status: fixed; focused Tryout transition test passed.
+- `S01-ST-003` — Use shared predicates for automated competition types and managed slots. Priority P3. Status: rejected; the review found no independent defect because the type sets govern distinct policies.
+- `S02-ST-001` — Share schedule-construction visibility wiring across Simple and Advanced Setup. Priority P3. Status: fixed; final standards re-review passed.
+- `S02-ST-002` — Add visual snapshot coverage for enabled, disabled, and locked schedule states. Priority P3. Status: rejected; interaction tests cover the bounded observable contract.
+- `S03-SP-001` — Preserve `noFixedEndDateTime` when a locked automation toggle is rejected. Priority P2. Status: fixed; final spec re-review passed.
+- `S04-SP-001` — Round-trip the complete League draft through the command wire shape. Priority P1. Status: fixed; final spec re-review passed.
+- `S04-SP-002` — Compare the shared League command with the Match Demand oracle. Priority P1. Status: fixed; final spec re-review passed.
+- `S04-SP-003` — Derive completion mode from a current scheduled-to-unscheduled snapshot edit. Priority P1. Status: fixed; final spec re-review passed.
+- `S03-ST-001` — Centralize schedule-construction cleanup across create and edit flows. Priority P3. Status: fixed; final standards re-review passed.
+- `Issue32-ST-001` — Keep the canonical parity fixture outside an Android-owned resource directory. Priority P2. Status: fixed; focused web and Android parity checks passed.
+
+Plan update note (2026-08-27): Recorded the completed S01 standards review. The working tree uses one computed automated-scheduling normalization and performs type-transition slot initialization inside the update coroutine after schedule cleanup. The focused tests passed.
+
+Plan update note (2026-08-27): Reworked S04-SP-002 after re-review. The web parity test now parses a complete shared command golden, derives Match Demand from that canonical command, and compares the mobile mapper's serialized command with the same golden.
+
+## Outcomes & Retrospective
+
+The mobile League editor now matches the shared Event Editor contract for scheduling, end policy, competition, resources, registration, staffing, current-value submission, and retry identity. Automated scheduling defaults on for new League drafts. Disabling it retains meaningful event values and removes schedule-construction state.
+
+The final parity fixture is neutral and consumed by the web and Android checks. The site test derives Match Demand from the canonical command. The Android test compares the complete serialized command with that same golden.
+
+Focused checks passed:
+
+- `:composeApp:testDebugUnitTest` selected League and editor regressions.
+- `:core:repository-impl:testDebugUnitTest --tests ...EventEditorSessionMapperTest`
+- `:core:repository-impl:testDebugUnitTest --tests ...EventEditorLeagueParityAndroidTest`
+- `npm test -- --runInBand src/server/scheduler/__tests__/leagueEditorParity.test.ts`
+
+Full checks passed:
+
+- `:composeApp:testDebugUnitTest`
+- `:composeApp:iosSimulatorArm64Test`
+- `npm test -- --runInBand` with 875 suites passed and 2 skipped.
+
+The real mobile-to-site integration smoke was not run. The ready process on port 3000 did not expose the required test-isolation probe. Runtime policy prevented replacing it or starting another backend for this check. The integration test remains gated by `MVP_TEST_BACKEND_URL` and a local isolated database.
+
+Plan update note (2026-08-27): Final standards review fixed `Issue32-ST-001` by moving both parity fixtures to the neutral root fixture directory. The site and Android parity checks passed after the move.
+
+Plan update note (2026-08-27): Final spec and standards re-reviews returned correct with no open findings. Full Android, iOS simulator, and site checks passed.

@@ -406,7 +406,124 @@ class EventEditorSessionMapperTest {
     }
 
     @Test
-    fun given_unscheduled_league_when_create_command_is_built_then_fixed_end_is_required() {
+    fun given_complete_league_fixture_when_create_command_is_built_then_representative_values_survive() {
+        val session = EventEditorSessionMapper.fromCreateBootstrap(
+            editorProtocolBootstrap(editorProtocolSnapshot(isAutomatedScheduling = true)),
+        )
+
+        val command = EventEditorSessionMapper.toCreateCommand(
+            session = session,
+            mutation = EventEditorMutation(session.canonicalState),
+        ).command
+
+        assertEquals(EventEditorCreateCompletionMode.CREATE_AND_BUILD_SCHEDULE, command.completion.mode)
+        assertEquals("LEAGUE", command.draft.basics.eventType)
+        assertEquals(listOf("division-1"), command.draft.competition.divisionIds)
+        assertEquals("Open", command.draft.competition.divisionDetails.single().name)
+        assertEquals("Playoff", command.draft.competition.playoffDivisionDetails.single().name)
+        assertEquals(2, command.draft.competition.gamesPerOpponent)
+        assertEquals(3, command.draft.competition.setsPerMatch)
+        assertEquals(60.0, command.draft.competition.matchDurationMinutes)
+        assertEquals(10.0, command.draft.competition.restTimeMinutes)
+        assertEquals(listOf("field-1"), command.draft.resources.fieldIds)
+        assertEquals(listOf("slot-1"), command.draft.resources.timeSlotIds)
+        assertEquals("MANUAL", command.draft.registration.payment.mode)
+        assertEquals("question-client-1", command.draft.registration.questions.single().clientId)
+        assertEquals("OFFICIAL_COVERAGE_REQUIRED", command.draft.staff.staffingPriority)
+        assertEquals(listOf("official-1"), command.draft.staff.officialIds)
+        assertEquals("FIXED_END", command.draft.schedule.mode)
+
+        val decoded = jsonMVP.decodeFromString<EventEditorCreateCommandDto>(
+            jsonMVP.encodeToString(command),
+        )
+        val expectedDraft = editorProtocolSnapshot().draft.copy(
+            competition = editorProtocolSnapshot().draft.competition.copy(
+                divisionDetails = editorProtocolSnapshot().draft.competition.divisionDetails.map {
+                    it.copy(playoffTeamCount = 3.0)
+                },
+                playoffDivisionDetails = editorProtocolSnapshot().draft.competition.playoffDivisionDetails.map {
+                    it.copy(playoffTeamCount = 3.0)
+                },
+            ),
+        )
+        assertEquals(expectedDraft, decoded.draft)
+    }
+
+    @Test
+    fun given_shared_league_fixture_when_command_is_built_then_canonical_values_match_expected_contract() {
+        val baseDraft = editorProtocolSnapshot().draft
+        val fixture = baseDraft.copy(
+            participation = baseDraft.participation.copy(maxParticipants = 4),
+            competition = baseDraft.competition.copy(
+                playoffTeamCount = 4,
+                divisionDetails = baseDraft.competition.divisionDetails.map { detail ->
+                    detail.copy(maxParticipants = 4.0, playoffTeamCount = 4.0)
+                },
+                playoffDivisionDetails = baseDraft.competition.playoffDivisionDetails.map { detail ->
+                    detail.copy(maxParticipants = 4.0, playoffTeamCount = 4.0)
+                },
+            ),
+        )
+        val session = EventEditorSessionMapper.fromCreateBootstrap(
+            editorProtocolBootstrap(editorProtocolSnapshot().copy(draft = fixture)),
+        )
+
+        val command = EventEditorSessionMapper.toCreateCommand(
+            session = session,
+            mutation = EventEditorMutation(session.canonicalState),
+        ).command
+        val decoded = jsonMVP.decodeFromString<EventEditorCreateCommandDto>(
+            jsonMVP.encodeToString(command),
+        )
+
+        assertEquals(EventEditorCreateCompletionMode.CREATE_AND_BUILD_SCHEDULE, decoded.completion.mode)
+        assertEquals(4, decoded.draft.participation.maxParticipants)
+        assertEquals(4, decoded.draft.competition.playoffTeamCount)
+        assertEquals(2, decoded.draft.competition.gamesPerOpponent)
+        assertEquals(listOf(4.0), decoded.draft.competition.divisionDetails.map { it.maxParticipants })
+        assertEquals(listOf(4.0), decoded.draft.competition.playoffDivisionDetails.map { it.maxParticipants })
+        assertEquals(listOf("field-1"), decoded.draft.resources.fieldIds)
+        assertEquals(listOf("slot-1"), decoded.draft.resources.timeSlotIds)
+        assertEquals("OFFICIAL_COVERAGE_REQUIRED", decoded.draft.staff.staffingPriority)
+        assertEquals(listOf("division-1"), decoded.draft.competition.divisionDetails.map { it.id })
+    }
+
+    @Test
+    fun given_unscheduled_league_current_values_when_create_command_is_built_then_fixed_end_and_graph_values_are_mapped() {
+        val session = EventEditorSessionMapper.fromCreateBootstrap(
+            editorProtocolBootstrap(
+                editorProtocolSnapshot(isAutomatedScheduling = true),
+            ),
+        )
+        val currentState = session.canonicalState.copy(
+            event = session.canonicalState.event.copy(
+                gamesPerOpponent = 4,
+                isAutomatedScheduling = false,
+                noFixedEndDateTime = false,
+                timeSlotIds = emptyList(),
+            ),
+            timeSlots = emptyList(),
+        )
+
+        val command = EventEditorSessionMapper.toCreateCommand(
+            session = session,
+            mutation = EventEditorMutation(currentState),
+        ).command
+
+        assertEquals(EventEditorCreateCompletionMode.CREATE_ONLY, command.completion.mode)
+        assertFalse(command.draft.schedule.isAutomatedScheduling)
+        assertEquals("FIXED_END", command.draft.schedule.mode)
+        assertEquals(TEST_END, command.draft.schedule.endConstraint)
+        assertEquals(4, command.draft.competition.gamesPerOpponent)
+        assertEquals(listOf("division-1"), command.draft.competition.divisionIds)
+        assertEquals(emptyList(), command.draft.resources.timeSlotIds)
+        assertTrue(command.draft.resources.timeSlots.isEmpty())
+        assertEquals("question-client-1", command.draft.registration.questions.single().clientId)
+        assertEquals("OFFICIAL_COVERAGE_REQUIRED", command.draft.staff.staffingPriority)
+    }
+
+    @Test
+    fun given_unscheduled_league_generated_end_bootstrap_when_create_command_is_built_then_generated_end_is_normalized_to_fixed_end() {
         val session = EventEditorSessionMapper.fromCreateBootstrap(
             editorProtocolBootstrap(
                 editorProtocolSnapshot(
@@ -416,17 +533,19 @@ class EventEditorSessionMapperTest {
             ),
         )
 
-        val failure = assertFailsWith<IllegalArgumentException> {
-            EventEditorSessionMapper.toCreateCommand(
-                session = session,
-                mutation = EventEditorMutation(session.canonicalState),
-            )
-        }
+        assertFalse(session.canonicalState.event.isAutomatedScheduling)
+        assertFalse(session.canonicalState.event.noFixedEndDateTime)
 
-        assertEquals(
-            "Unscheduled League/Tournament creation requires a planned fixed end.",
-            failure.message,
-        )
+        val command = EventEditorSessionMapper.toCreateCommand(
+            session = session,
+            mutation = EventEditorMutation(session.canonicalState),
+        ).command
+
+        assertEquals(EventEditorCreateCompletionMode.CREATE_ONLY, command.completion.mode)
+        assertFalse(command.draft.schedule.isAutomatedScheduling)
+        assertEquals("FIXED_END", command.draft.schedule.mode)
+        assertEquals("2026-09-30T00:00:00Z", command.draft.schedule.endConstraint)
+        assertNull(command.draft.schedule.generatedScheduleEnd)
     }
 
     @Test

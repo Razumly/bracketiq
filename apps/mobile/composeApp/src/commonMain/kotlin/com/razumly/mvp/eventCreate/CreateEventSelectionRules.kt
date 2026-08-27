@@ -5,42 +5,32 @@ import com.razumly.mvp.core.data.dataTypes.MIN_BRACKET_TEAM_COUNT
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.enums.normalizeAutomatedSchedulingForEventType
 import com.razumly.mvp.core.data.dataTypes.syncEventTypeTagsForEventType
+import com.razumly.mvp.core.data.dataTypes.withAutomatedScheduling
 
 internal fun Event.applyCreateSelectionRules(): Event {
-    val typeNormalizedEvent = when (eventType) {
-        EventType.LEAGUE -> copy(
-            eventType = eventType,
-            isAutomatedScheduling = normalizeAutomatedSchedulingForEventType(eventType, isAutomatedScheduling),
+    val normalizedEvent = withAutomatedScheduling(
+        normalizeAutomatedSchedulingForEventType(eventType, isAutomatedScheduling),
+    )
+    return when (eventType) {
+        EventType.LEAGUE -> normalizedEvent.copy(
             teamSignup = true,
         )
 
-        EventType.TOURNAMENT -> copy(
-            eventType = eventType,
-            isAutomatedScheduling = normalizeAutomatedSchedulingForEventType(eventType, isAutomatedScheduling),
+        EventType.TOURNAMENT -> normalizedEvent.copy(
             teamSignup = true,
             maxParticipants = maxParticipants.takeIf { count -> count != 0 } ?: MIN_BRACKET_TEAM_COUNT,
         )
 
-        EventType.WEEKLY_EVENT -> copy(
-            eventType = eventType,
-            isAutomatedScheduling = normalizeAutomatedSchedulingForEventType(eventType, isAutomatedScheduling),
+        EventType.WEEKLY_EVENT -> normalizedEvent.copy(
             singleDivision = false,
             noFixedEndDateTime = false,
         )
 
-        EventType.TRYOUT -> copy(
-            eventType = eventType,
-            isAutomatedScheduling = normalizeAutomatedSchedulingForEventType(eventType, isAutomatedScheduling),
+        EventType.TRYOUT -> normalizedEvent.copy(
             teamSignup = false,
             singleDivision = false,
-            noFixedEndDateTime = false,
         )
 
-        EventType.EVENT -> copy(
-            eventType = eventType,
-            isAutomatedScheduling = normalizeAutomatedSchedulingForEventType(eventType, isAutomatedScheduling),
-            noFixedEndDateTime = false,
-        )
-    }
-    return typeNormalizedEvent.syncEventTypeTagsForEventType()
+        EventType.EVENT -> normalizedEvent
+    }.syncEventTypeTagsForEventType()
 }

@@ -146,6 +146,11 @@ fun TimeSlot.normalizedScheduledFieldIds(): List<String> {
         .distinct()
 }
 
+fun TimeSlot.isRentalBacked(): Boolean =
+    rentalLocked == true ||
+        !rentalBookingId.isNullOrBlank() ||
+        sourceType?.trim()?.equals("RENTAL_BOOKING", ignoreCase = true) == true
+
 fun TimeSlot.normalizedDivisionIds(): List<String> {
     return (divisions ?: emptyList())
         .map(String::trim)

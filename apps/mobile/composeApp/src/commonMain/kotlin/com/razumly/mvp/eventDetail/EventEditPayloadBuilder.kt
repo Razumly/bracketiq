@@ -5,6 +5,8 @@ import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfig
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.dataTypes.isRentalBacked
+import com.razumly.mvp.core.data.dataTypes.normalizeScheduleConstructionTimeSlots
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
@@ -271,9 +273,13 @@ internal fun editableLeagueTimeSlotsForEvent(
     event: Event,
     timeSlots: List<TimeSlot>,
 ): List<TimeSlot> {
-    return timeSlots
+    val normalizedSlots = timeSlots
         .map { slot -> normalizeEditableLeagueTimeSlotForEvent(event, slot) }
         .sortedBy { slot -> slot.startTimeMinutes ?: Int.MAX_VALUE }
+    return normalizeScheduleConstructionTimeSlots(
+        event = event,
+        slots = normalizedSlots,
+    )
 }
 
 internal fun syncEditableLeagueSlotBoundaries(

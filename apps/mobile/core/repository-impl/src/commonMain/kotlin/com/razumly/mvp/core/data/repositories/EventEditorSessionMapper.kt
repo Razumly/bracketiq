@@ -406,7 +406,8 @@ private fun EventEditorDraftDto.toEvent(eventId: String): Event {
         coordinates = basics.coordinates,
         hostId = basics.hostId.orEmpty(),
         assistantHostIds = staff.assistantHostIds,
-        noFixedEndDateTime = schedule.mode == "GENERATED_END",
+        noFixedEndDateTime = resolvedAutomatedScheduling &&
+            schedule.mode.trim().uppercase() == "GENERATED_END",
         isAutomatedScheduling = resolvedAutomatedScheduling,
         teamSignup = participation.teamSignup,
         singleDivision = participation.singleDivision,
@@ -627,16 +628,20 @@ private fun Event.toScheduleDto(
         eventType,
         isAutomatedScheduling,
     )
-    val modeChanged = noFixedEndDateTime != baseline.noFixedEndDateTime
+    val effectiveNoFixedEndDateTime = normalizedAutomatedScheduling && noFixedEndDateTime
+    val generatedEndMustBeCleared =
+        existing.mode.trim().uppercase() == "GENERATED_END" &&
+            !effectiveNoFixedEndDateTime
+    val modeChanged = effectiveNoFixedEndDateTime != baseline.noFixedEndDateTime
     val endChanged = end != baseline.end
     val schedulingChanged = normalizedAutomatedScheduling != existing.isAutomatedScheduling
-    if (!modeChanged && !endChanged && !schedulingChanged) return existing
+    if (!modeChanged && !endChanged && !schedulingChanged && !generatedEndMustBeCleared) return existing
 
     val withAutomatedScheduling = existing.copy(
         isAutomatedScheduling = normalizedAutomatedScheduling,
     )
     return when {
-        noFixedEndDateTime -> withAutomatedScheduling.copy(
+        effectiveNoFixedEndDateTime -> withAutomatedScheduling.copy(
             mode = "GENERATED_END",
             endConstraint = null,
             generatedScheduleEnd = end.toString(),

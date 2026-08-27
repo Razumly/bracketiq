@@ -132,6 +132,7 @@ class EventDetailsScheduleLockingTest {
             eventType = EventType.TOURNAMENT,
             isNewEvent = true,
             scheduleTimeLocked = true,
+            isAutomatedScheduling = true,
         )
 
         assertFalse(shouldValidate)
@@ -144,6 +145,20 @@ class EventDetailsScheduleLockingTest {
             isNewEvent = true,
             scheduleTimeLocked = false,
             slotEditorEnabled = false,
+            isAutomatedScheduling = true,
+        )
+
+
+        assertFalse(shouldValidate)
+    }
+
+    @Test
+    fun given_league_automation_is_off_when_schedule_input_validation_is_checked_then_validation_is_skipped() {
+        val shouldValidate = requiresScheduleInputValidation(
+            eventType = EventType.LEAGUE,
+            isNewEvent = true,
+            scheduleTimeLocked = false,
+            isAutomatedScheduling = false,
         )
 
         assertFalse(shouldValidate)
@@ -183,6 +198,24 @@ class EventDetailsScheduleLockingTest {
             requiresFieldCountValidation(
                 eventType = EventType.WEEKLY_EVENT,
                 scheduleTimeLocked = false,
+            ),
+        )
+    }
+
+    @Test
+    fun field_count_validation_is_skipped_when_league_automation_is_off() {
+        assertFalse(
+            requiresFieldCountValidation(
+                eventType = EventType.LEAGUE,
+                scheduleTimeLocked = false,
+                isAutomatedScheduling = false,
+            ),
+        )
+        assertFalse(
+            requiresFieldCountValidation(
+                eventType = EventType.TOURNAMENT,
+                scheduleTimeLocked = false,
+                isAutomatedScheduling = false,
             ),
         )
     }
