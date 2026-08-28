@@ -58,6 +58,7 @@ Return an issue with a missing decision to triage. Apply `needs-info` or `needs-
    - Run focused type checks during implementation.
    - Run focused tests during implementation.
    - Keep commits and changed files traceable to the issue that owns them.
+   - For site JavaScript or TypeScript changes, run `npm run lint:changed` from `apps/site` before each commit.
 6. **Workstream synchronization**
    1. The coordinator confirms that `main` is clean.
    2. The coordinator confirms that `main` is current.

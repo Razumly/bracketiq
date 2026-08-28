@@ -168,9 +168,12 @@ We persist raw string IDs for associations (for example `teamIds`, `friendIds`, 
 - **Run quickly during development**: `npm run test:watch`
 - **CI quality checks**: `npm run test:ci`
 - **Type checks**: `npx tsc --noEmit`
+- **Changed-file complexity check**: `npm run lint:changed`
+- **Full site lint**: `npm run lint`
 - **Prisma-backed tests and E2E seeding**: Against the test database, run `npm run migrate:deploy`, then `npx prisma migrate status`; proceed with Prisma-backed tests or `npm run seed:e2e` only when the status reports no pending migrations.
 
 - **Test selection**: Follow [`CODING_STANDARDS.md`](CODING_STANDARDS.md). Add Jest coverage when it proves an observable behavior that typechecking or the build cannot prove, such as a state transition, output transformation, authorization decision, persistence effect, failure path, race, or complete user workflow.
+- **Complexity gate**: For site JavaScript or TypeScript changes, run `npm run lint:changed` after each coherent implementation slice and again before completion. Follow the touched-file policy in [`CODING_STANDARDS.md`](CODING_STANDARDS.md).
 - **Do not add redundant tests**: Do not add presence-only tests, static-page copy/link tests, tests that only restate TypeScript relationships, or tests that assert implementation details without an observable outcome.
 - **Do not simulate providers**: Do not mock or hand-build third-party SDKs, HTTP responses, OAuth/token exchanges, hosted widgets, maps, payment flows, or webhook payloads. Validate provider integrations through explicit sandbox, manual smoke, or separately owned contract checks instead.
 - **UI tests**: Exercise the interaction and assert the resulting state, output, or side effect. Do not retain a test only to satisfy coverage.

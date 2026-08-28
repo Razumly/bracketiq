@@ -2,6 +2,8 @@
 
 ## Testing standard
 
+Tautological tests are considered harmful.
+
 Tests must prove observable behavior that the compiler, linter, or build cannot prove.
 Prefer tests for state transitions, output transformations, authorization decisions, persistence, failure handling, race/ordering behavior, and complete user workflows.
 
@@ -13,6 +15,15 @@ Do not add tests that only:
 - assert an implementation detail without an observable outcome.
 
 A UI test should perform the relevant interaction and assert the resulting state, output, or side effect. A static page, metadata, or route-presence check belongs in browser or deployment smoke validation when it is an externally important contract. Do not preserve a unit test only to satisfy a coverage number.
+
+## Complexity standard
+
+Changed site JavaScript and TypeScript files must pass `npm run lint:changed`.
+Cyclomatic complexity must not exceed 10. Control-flow nesting must not exceed four levels.
+
+The check analyzes each complete changed file. If a legacy file violates a limit, reduce the file until it passes before commit. Do not add rule suppressions, disable comments, or path exceptions. Extract cohesive logic into focused functions or modules.
+
+The local command includes staged, unstaged, and untracked files. The pre-commit hook and CI apply the same strict rules to their changed files.
 
 ## Failure and fallback standard
 
