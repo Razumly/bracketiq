@@ -1527,6 +1527,8 @@ test -n "$(cut -f2 "$SCHEMA_MIGRATION_DATABASE_IDENTITY_OUTPUT")"
 test -n "$(cut -f3 "$SCHEMA_MIGRATION_DATABASE_IDENTITY_OUTPUT")"
 test "$(cut -f1 "$SCHEMA_MIGRATION_DATABASE_IDENTITY_OUTPUT")" = \
   "$(cut -f1 "$DATABASE_URL_IDENTITY_OUTPUT")"
+test "$(cut -f3 "$SCHEMA_MIGRATION_DATABASE_IDENTITY_OUTPUT")" = \
+  "$(cut -f3 "$DATABASE_URL_IDENTITY_OUTPUT")"
 test "$(cut -f2 "$SCHEMA_MIGRATION_DATABASE_IDENTITY_OUTPUT")" != \
   "$(cut -f2 "$DATABASE_URL_IDENTITY_OUTPUT")"
 test "$(cut -f2 "$SCHEMA_MIGRATION_DATABASE_IDENTITY_OUTPUT")" != \
@@ -4782,10 +4784,8 @@ $SUPERVISOR_CONTAINER_IDS
 EOF
 ```
 
-The socket owner must be root UID `0`; the socket group must be the agent GID.
-Mode `0660` gives the supervisors read and write access through that group,
-while the `0710` shared-root parent prevents the child from unlinking it. Stop
-if any check fails.
+The runner socket must be owned by supervisor UID `1001`, root GID `0`, and
+mode `0600`. Supervisors connect as the owner; stop if any socket check fails.
 
 4. Wait for the gateway readiness endpoint to observe all four downstream
    worker identities with healthy, unexpired leases. The profiled helper must
