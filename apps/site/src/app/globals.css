@@ -2399,6 +2399,12 @@ summary::-webkit-details-marker {
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  --font-sans: var(--font-roboto-flex);
+  --breakpoint-sm: 40rem;
+  --breakpoint-md: 48rem;
+  --breakpoint-lg: 64rem;
+  --breakpoint-xl: 80rem;
+  --breakpoint-2xl: 96rem;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -2407,6 +2413,7 @@ summary::-webkit-details-marker {
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-action-hover: var(--action-hover);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
@@ -2414,9 +2421,13 @@ summary::-webkit-details-marker {
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-danger-hover: var(--danger-hover);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-control-outline: var(--control-outline);
+  --color-control-track: var(--control-track);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
@@ -2628,37 +2639,97 @@ summary::-webkit-details-marker {
   --discover-badge-tournament-bg: var(--mvp-primary-200);
   --discover-badge-tournament-text: var(--mvp-primary-900);
 
-  --background: var(--mvp-bg);
-  --foreground: var(--mvp-text);
-  --card: var(--mvp-surface);
-  --card-foreground: var(--mvp-text);
-  --popover: var(--mvp-surface);
-  --popover-foreground: var(--mvp-text);
-  --primary: var(--mvp-primary);
-  --primary-foreground: var(--mvp-primary-foreground);
-  --secondary: var(--mvp-surface-muted);
-  --secondary-foreground: var(--mvp-text);
-  --muted: var(--mvp-surface-muted);
-  --muted-foreground: var(--mvp-text-muted);
-  --accent: var(--mvp-primary-soft);
-  --accent-foreground: var(--mvp-primary-foreground);
-  --destructive: var(--mvp-danger);
-  --border: var(--mvp-border);
-  --input: var(--mvp-input-border);
-  --ring: var(--mvp-primary-300);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: var(--mvp-surface);
-  --sidebar-foreground: var(--mvp-text);
-  --sidebar-primary: var(--mvp-primary);
-  --sidebar-primary-foreground: var(--mvp-primary-foreground);
-  --sidebar-accent: var(--mvp-surface-muted);
-  --sidebar-accent-foreground: var(--mvp-text);
-  --sidebar-border: var(--mvp-border);
-  --sidebar-ring: var(--mvp-primary-300);
+  /* BracketIQ light-theme anchors */
+  --bq-canvas: oklch(0.997 0 0);
+  --bq-surface: oklch(1 0 0);
+  --bq-surface-muted: oklch(0.979 0.003 264.5);
+  --bq-ink: oklch(0.174 0.061 256.7);
+  --bq-ink-muted: oklch(0.455 0.035 270.5);
+  --bq-border: oklch(0.894 0.008 260.7);
+  --bq-control-outline: oklch(0.65 0.015 260.7);
+  --bq-control-track: oklch(0.65 0.015 260.7);
+  --bq-focus: oklch(0.174 0.061 256.7);
+  --bq-brand: oklch(0.674 0.200 31.2);
+  --bq-brand-strong: oklch(0.656 0.226 32.3);
+  --bq-action: oklch(0.565 0.178 31.2);
+  --bq-action-hover: oklch(0.53 0.178 31.2);
+  --bq-teal: oklch(0.549 0.094 208.2);
+  --bq-violet: oklch(0.675 0.183 291.1);
+  --bq-yellow: oklch(0.825 0.169 81.1);
+  --bq-success: oklch(0.568 0.113 162.9);
+  --bq-danger: oklch(0.571 0.174 16.8);
+  --bq-danger-hover: oklch(0.53 0.174 16.8);
+  --bq-on-action: oklch(1 0 0);
+
+  /* BracketIQ light-theme semantic roles */
+  --bq-background: var(--bq-canvas);
+  --bq-foreground: var(--bq-ink);
+  --bq-card: var(--bq-surface);
+  --bq-card-foreground: var(--bq-ink);
+  --bq-popover: var(--bq-surface);
+  --bq-popover-foreground: var(--bq-ink);
+  --bq-primary: var(--bq-action);
+  --bq-primary-foreground: var(--bq-on-action);
+  --bq-secondary: var(--bq-surface-muted);
+  --bq-secondary-foreground: var(--bq-ink);
+  --bq-muted: var(--bq-surface-muted);
+  --bq-muted-foreground: var(--bq-ink-muted);
+  --bq-accent: var(--bq-brand);
+  --bq-accent-foreground: var(--bq-ink);
+  --bq-destructive: var(--bq-danger);
+  --bq-destructive-foreground: var(--bq-on-action);
+  --bq-input: var(--bq-control-outline);
+  --bq-ring: var(--bq-focus);
+  --bq-chart-1: var(--bq-brand);
+  --bq-chart-2: var(--bq-teal);
+  --bq-chart-3: var(--bq-violet);
+  --bq-chart-4: var(--bq-yellow);
+  --bq-chart-5: var(--bq-success);
+  --bq-sidebar: var(--bq-surface);
+  --bq-sidebar-foreground: var(--bq-ink);
+  --bq-sidebar-primary: var(--bq-action);
+  --bq-sidebar-primary-foreground: var(--bq-on-action);
+  --bq-sidebar-accent: var(--bq-surface-muted);
+  --bq-sidebar-accent-foreground: var(--bq-ink);
+  --bq-sidebar-border: var(--bq-border);
+  --bq-sidebar-ring: var(--bq-action);
+
+  --background: var(--bq-background);
+  --foreground: var(--bq-foreground);
+  --card: var(--bq-card);
+  --card-foreground: var(--bq-card-foreground);
+  --popover: var(--bq-popover);
+  --popover-foreground: var(--bq-popover-foreground);
+  --primary: var(--bq-primary);
+  --primary-foreground: var(--bq-primary-foreground);
+  --action-hover: var(--bq-action-hover);
+  --secondary: var(--bq-secondary);
+  --secondary-foreground: var(--bq-secondary-foreground);
+  --muted: var(--bq-muted);
+  --muted-foreground: var(--bq-muted-foreground);
+  --accent: var(--bq-accent);
+  --accent-foreground: var(--bq-accent-foreground);
+  --destructive: var(--bq-destructive);
+  --destructive-foreground: var(--bq-destructive-foreground);
+  --danger-hover: var(--bq-danger-hover);
+  --border: var(--bq-border);
+  --input: var(--bq-input);
+  --ring: var(--bq-ring);
+  --control-outline: var(--bq-control-outline);
+  --control-track: var(--bq-control-track);
+  --chart-1: var(--bq-chart-1);
+  --chart-2: var(--bq-chart-2);
+  --chart-3: var(--bq-chart-3);
+  --chart-4: var(--bq-chart-4);
+  --chart-5: var(--bq-chart-5);
+  --sidebar: var(--bq-sidebar);
+  --sidebar-foreground: var(--bq-sidebar-foreground);
+  --sidebar-primary: var(--bq-sidebar-primary);
+  --sidebar-primary-foreground: var(--bq-sidebar-primary-foreground);
+  --sidebar-accent: var(--bq-sidebar-accent);
+  --sidebar-accent-foreground: var(--bq-sidebar-accent-foreground);
+  --sidebar-border: var(--bq-sidebar-border);
+  --sidebar-ring: var(--bq-sidebar-ring);
 
   --ocean-bg: var(--mvp-bg);
   --ocean-surface: var(--mvp-surface);
@@ -2671,6 +2742,20 @@ summary::-webkit-details-marker {
   --ocean-focus: var(--mvp-primary-300);
   --ocean-accent: var(--mvp-primary-700);
   --ocean-accent-soft: var(--mvp-primary-soft);
+}
+
+[data-sonner-toaster].toaster
+  [data-sonner-toast][data-styled="true"]
+  [data-button]:focus-visible {
+  box-shadow: 0 0 0 3px var(--ring) !important;
+}
+
+[data-sonner-toaster].toaster
+  [data-sonner-toast][data-styled="true"]
+  [data-close-button]:focus-visible {
+  box-shadow:
+    0 4px 12px rgb(0 0 0 / 10%),
+    0 0 0 3px var(--ring) !important;
 }
 
 .dark {
@@ -2722,6 +2807,7 @@ summary::-webkit-details-marker {
   --popover-foreground: var(--mvp-text);
   --primary: var(--mvp-primary);
   --primary-foreground: var(--mvp-primary-foreground);
+  --action-hover: var(--mvp-primary-hover);
   --secondary: var(--mvp-surface-muted);
   --secondary-foreground: var(--mvp-text);
   --muted: var(--mvp-surface-muted);
