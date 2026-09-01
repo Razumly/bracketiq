@@ -2,7 +2,7 @@
 
 ## Fixed point
 
-- Commit: `f113f0463`
+- Commit: `0336a881a`
 - Base: `cb287f97d`
 - Specification: GitHub Issue #70
 
@@ -42,7 +42,7 @@ Status: `verified` for reviewed findings.
 Evidence:
 
 - Governance spec re-review: two residual findings were fixed by `cb287f97d` and passed the focused persistence suite.
-- Deployment spec re-review: six residual findings were fixed by `f113f0463` and the preceding review-fix commits. Final deployment re-review is pending at record creation.
+- Deployment spec re-review: six residual findings were fixed by `f113f0463` and `0336a881a`. Final deployment re-review confirmed no remaining concrete findings.
 
 ## Finding lifecycle
 
