@@ -22,6 +22,7 @@ import {
   persistAffiliateCutoverRollbackDecision,
   persistAffiliateCutoverSession,
   startAffiliateReplenishmentWave,
+  type AffiliateLegacySupplyReconciliationResult,
   type AffiliateSupplyDatabase,
 } from '../affiliateSupplyPersistence';
 import {
@@ -3300,6 +3301,158 @@ describe('affiliate supply persistence seams', () => {
     expect(replay.isApplied).toBe(true);
     expect(replay.report).toEqual(dryRun.report);
   });
+  const createReplayLifecycleFixture = async (
+    rootOverrides: Record<string, unknown>,
+  ): Promise<{
+    database: AffiliateSupplyDatabase;
+    dryRun: AffiliateLegacySupplyReconciliationResult;
+  }> => {
+    const identity = normalizeAffiliateSupplyIdentity({
+      requestedUrl: 'https://legacy.example/events',
+      resolvedCanonicalUrl: 'https://legacy.example/events',
+      isRedirectVerified: true,
+    });
+    const root = {
+      id: 'root-replay-guard',
+      identityKey: identity.identityKey,
+      canonicalUrl: identity.canonicalUrl,
+      origin: identity.origin,
+      pathKey: identity.pathKey,
+      predecessorId: null,
+      successorId: null,
+      derivedStage: 'PRE_MAPPED',
+      derivedOutcome: null,
+      lifecycleGeneration: 0,
+      isAutomationEnabled: false,
+      targetKind: 'EVENT',
+      intakeId: null,
+      liveSourceId: 'legacy-source',
+      operatorDomain: 'legacy.example',
+      metadata: null,
+      ...rootOverrides,
+    };
+    let persistedRun: Record<string, unknown> | null = null;
+    const transitions = {
+      findMany: jest.fn(async () => []),
+      create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+    };
+    const supplySources = {
+      findMany: jest.fn(async () => [root]),
+      update: jest.fn(async () => root),
+      create: jest.fn(async () => root),
+    };
+    const reconciliationRuns = {
+      findUnique: jest.fn(async ({
+        where,
+      }: {
+        where: Record<string, unknown>;
+      }) => {
+        if (where.id === durableCutoverSessionId) return durableCutoverSessionRow();
+        if (where.reportHash === persistedRun?.reportHash) return persistedRun;
+        return null;
+      }),
+      upsert: jest.fn(async ({ create }: { create: Record<string, unknown> }) => {
+        persistedRun = { ...create };
+        return create;
+      }),
+    };
+    const database = {
+      contractManifests: createActiveContractManifestDelegate(),
+      sources: {
+        findMany: jest.fn(async () => [{
+          id: 'legacy-source',
+          listUrl: 'https://legacy.example/events',
+          canonicalUrl: 'https://legacy.example/events',
+          targetKind: 'EVENT',
+          status: 'ACTIVE',
+          supplySourceId: root.id,
+        }]),
+      },
+      candidates: { findMany: jest.fn(async () => []) },
+      targets: { findMany: jest.fn(async () => []) },
+      supplySources,
+      transitions,
+      reconciliationRuns,
+    } as unknown as AffiliateSupplyDatabase;
+    const dryRun = await reconcileLegacyAffiliateSupply({
+      db: database,
+      now: new Date('2026-08-25T12:00:00.000Z'),
+    });
+    persistedRun = {
+      mode: 'APPLY',
+      status: 'APPLIED',
+      reportJson: {
+        ...dryRun.report,
+        postApplyLegacySnapshotHash: dryRun.report.legacySnapshotHash,
+        cutoverSessionId: durableCutoverSessionId,
+        cutoverSessionHash: durableCutoverSessionHash,
+      },
+      inputHash: dryRun.inputHash,
+      outputHash: dryRun.outputHash,
+      reportHash: dryRun.reportHash,
+      counts: dryRun.report.counts,
+      failedInvariants: [],
+      resolutionRefs: [],
+      operatorId: 'operator-1',
+      rolloutCohort: manifest.rolloutCohort,
+      supplyContractVersion: manifest.version,
+      supplyContractHash: manifest.supplyContract.hash,
+      deploymentContractVersion: readyPreflight.deploymentContractVersion,
+      deploymentContractHash: readyPreflight.deploymentContractHash,
+      applyNonceHash: hashAffiliateAgentValue('nonce-1'),
+      appliedAt: new Date('2026-08-25T12:00:00.000Z'),
+      appliedBy: 'operator-1',
+    };
+    supplySources.update.mockClear();
+    supplySources.create.mockClear();
+    transitions.create.mockClear();
+    reconciliationRuns.upsert.mockClear();
+    return { database, dryRun };
+  };
+
+  it('rejects applied replay when the stored lifecycle assessment has invariant violations', async () => {
+    const { database, dryRun } = await createReplayLifecycleFixture({
+      invariantViolations: ['MAPPING_JOB_MAPPING_MISMATCH'],
+    });
+    await expect(reconcileLegacyAffiliateSupply({
+      db: database,
+      isDryRun: false,
+      now: new Date('2026-08-26T12:00:00.000Z'),
+      operatorId: 'operator-1',
+      applyNonce: 'nonce-1',
+      expectedReportHash: dryRun.reportHash,
+      expectedInputHash: dryRun.inputHash,
+      expectedCountsHash: hashAffiliateAgentValue(dryRun.report.counts),
+      cutoverSessionId: durableCutoverSessionId,
+      cutoverSessionHash: durableCutoverSessionHash,
+      preflight: readyPreflight,
+    })).rejects.toThrow('invariant violations');
+    expect(database.supplySources.update).not.toHaveBeenCalled();
+    expect(database.transitions.create).not.toHaveBeenCalled();
+    expect(database.reconciliationRuns.upsert).not.toHaveBeenCalled();
+  });
+
+  it('rejects applied replay when a nonzero lifecycle generation has no transition history', async () => {
+    const { database, dryRun } = await createReplayLifecycleFixture({
+      lifecycleGeneration: 3,
+    });
+    await expect(reconcileLegacyAffiliateSupply({
+      db: database,
+      isDryRun: false,
+      now: new Date('2026-08-26T12:00:00.000Z'),
+      operatorId: 'operator-1',
+      applyNonce: 'nonce-1',
+      expectedReportHash: dryRun.reportHash,
+      expectedInputHash: dryRun.inputHash,
+      expectedCountsHash: hashAffiliateAgentValue(dryRun.report.counts),
+      cutoverSessionId: durableCutoverSessionId,
+      cutoverSessionHash: durableCutoverSessionHash,
+      preflight: readyPreflight,
+    })).rejects.toThrow('missing transition history');
+    expect(database.supplySources.update).not.toHaveBeenCalled();
+    expect(database.transitions.create).not.toHaveBeenCalled();
+    expect(database.reconciliationRuns.upsert).not.toHaveBeenCalled();
+  });
   it('applies the reviewed report in one transaction and replays it idempotently', async () => {
     const now = new Date('2026-08-25T12:00:00.000Z');
     const identity = normalizeAffiliateSupplyIdentity({
@@ -3472,10 +3625,15 @@ describe('affiliate supply persistence seams', () => {
         return root;
       }),
     };
+    const transitionRows: Record<string, unknown>[] = [];
     const transitions = {
       findUnique: jest.fn(async () => null),
       findFirst: jest.fn(async () => null),
-      create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+      findMany: jest.fn(async () => transitionRows),
+      create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        transitionRows.push(data);
+        return data;
+      }),
     };
     const contractManifests = {
       findFirst: jest.fn(async () => ({

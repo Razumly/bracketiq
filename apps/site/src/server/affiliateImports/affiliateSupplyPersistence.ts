@@ -11719,7 +11719,7 @@ type AffiliateLegacyTransitionRow = Readonly<{
   idempotencyKey?: unknown;
   supplySourceId?: unknown;
   sequence?: unknown;
-  command?: unknown;
+  generation?: unknown;
   contractVersion?: unknown;
   contractHash?: unknown;
   requestJson?: unknown;
@@ -12105,30 +12105,54 @@ const assertLegacyLifecycleWritesMatchExisting = (
     if (existing) assertLegacyLifecycleWriteMatchesExisting(input, write, existing);
   }
 };
+const assertLegacyLifecycleRootTransitionHistory = (
+  rootId: string,
+  rootGeneration: number,
+  latest: AffiliateLegacyTransitionRow | undefined,
+): void => {
+  if (!Number.isInteger(rootGeneration) || rootGeneration < 0) {
+    throw new Error(
+      `Legacy reconciliation lifecycle generation drift for root ${rootId}: root=${rootGeneration}.`,
+    );
+  }
+  if (!latest) {
+    if (rootGeneration > 0) {
+      throw new Error(
+        `Legacy reconciliation lifecycle missing transition history for root ${rootId} at generation ${rootGeneration}.`,
+      );
+    }
+    return;
+  }
+  const latestSequence = typeof latest.sequence === 'number' ? latest.sequence : NaN;
+  const latestGeneration = typeof latest.generation === 'number' ? latest.generation : NaN;
+  if (
+    !Number.isInteger(rootGeneration)
+    || rootGeneration < 0
+    || !Number.isInteger(latestSequence)
+    || !Number.isInteger(latestGeneration)
+    || latestSequence !== rootGeneration
+    || latestGeneration !== rootGeneration
+  ) {
+    throw new Error(
+      `Legacy reconciliation lifecycle generation drift for root ${rootId}: `
+      + `root=${rootGeneration}, latest sequence=${latestSequence}, latest generation=${latestGeneration}.`,
+    );
+  }
+};
+
 const assertLegacyLifecycleTransitionsMatchRoots = (
   input: AffiliateLegacyLifecyclePersistenceInput,
   writes: readonly AffiliateLegacyLifecycleWrite[],
   latestByRoot: ReadonlyMap<string, AffiliateLegacyTransitionRow>,
 ): void => {
   for (const write of writes) {
-    const latest = latestByRoot.get(write.rootId);
-    if (!latest) continue;
     const root = input.rootsById.get(write.rootId);
     const rootGeneration = Number(root?.lifecycleGeneration ?? 0);
-    const latestSequence = typeof latest.sequence === 'number' ? latest.sequence : NaN;
-    const latestGeneration = typeof latest.generation === 'number' ? latest.generation : NaN;
-    if (
-      !Number.isInteger(rootGeneration)
-      || !Number.isInteger(latestSequence)
-      || !Number.isInteger(latestGeneration)
-      || latestSequence !== rootGeneration
-      || latestGeneration !== rootGeneration
-    ) {
-      throw new Error(
-        `Legacy reconciliation lifecycle generation drift for root ${write.rootId}: `
-        + `root=${rootGeneration}, latest sequence=${latestSequence}, latest generation=${latestGeneration}.`,
-      );
-    }
+    assertLegacyLifecycleRootTransitionHistory(
+      write.rootId,
+      rootGeneration,
+      latestByRoot.get(write.rootId),
+    );
   }
 };
 
@@ -14953,6 +14977,103 @@ const isLegacyReplayMetadataMatch = (
     appliedRun.cutoverSessionHash === preparation.cutoverSessionHash,
   ].every(Boolean);
 };
+const assertLegacyLifecycleSnapshotSafety = async (
+  database: AffiliateSupplyDatabase,
+  roots: readonly AffiliateLegacySupplySourceRow[],
+): Promise<void> => {
+  for (const root of roots) {
+    const rootId = String(root.id);
+    const rootGeneration = Number(affiliateLegacyRowValue(root, 'lifecycleGeneration') ?? 0);
+    if (!Number.isInteger(rootGeneration) || rootGeneration < 0) {
+      throw new Error(
+        `Legacy reconciliation lifecycle generation drift for root ${rootId}: root=${rootGeneration}.`,
+      );
+    }
+    const rootInvariantViolations = affiliateLegacyRowValue(root, 'invariantViolations');
+    if (
+      rootInvariantViolations !== undefined
+      && rootInvariantViolations !== null
+      && !Array.isArray(rootInvariantViolations)
+    ) {
+      throw new Error(`Legacy reconciliation root ${rootId} has a malformed lifecycle assessment.`);
+    }
+    if (Array.isArray(rootInvariantViolations) && rootInvariantViolations.length > 0) {
+      throw new Error(
+        `Legacy reconciliation root ${rootId} has invariant violations in the stored lifecycle assessment.`,
+      );
+    }
+    const assessment = recordValue(affiliateLegacyRowValue(root, 'assessmentJson'));
+    const assessmentInvariantViolations = assessment.invariantViolations;
+    if (
+      assessmentInvariantViolations !== undefined
+      && assessmentInvariantViolations !== null
+      && !Array.isArray(assessmentInvariantViolations)
+    ) {
+      throw new Error(`Legacy reconciliation root ${rootId} has a malformed lifecycle assessment.`);
+    }
+    if (Array.isArray(assessmentInvariantViolations) && assessmentInvariantViolations.length > 0) {
+      throw new Error(
+        `Legacy reconciliation root ${rootId} has invariant violations in the stored lifecycle assessment.`,
+      );
+    }
+    const assessmentGeneration = assessment.lifecycleGeneration;
+    if (
+      assessmentGeneration !== undefined
+      && (
+        typeof assessmentGeneration !== 'number'
+        || !Number.isInteger(assessmentGeneration)
+        || assessmentGeneration !== rootGeneration
+      )
+    ) {
+      throw new Error(
+        `Legacy reconciliation lifecycle generation drift for root ${rootId}: `
+        + `root=${rootGeneration}, assessment=${String(assessmentGeneration)}.`,
+      );
+    }
+    const assessmentSourceId = stringValue(assessment.supplySourceId);
+    if (assessmentSourceId && assessmentSourceId !== rootId) {
+      throw new Error(
+        `Legacy reconciliation lifecycle assessment is bound to the wrong root ${rootId}.`,
+      );
+    }
+    const assessmentStage = stringValue(assessment.stage ?? assessment.observedStage);
+    const rootStage = stringValue(affiliateLegacyRowValue(root, 'derivedStage'));
+    if (assessmentStage && rootStage && assessmentStage !== rootStage) {
+      throw new Error(
+        `Legacy reconciliation lifecycle assessment stage drift for root ${rootId}: `
+        + `root=${rootStage}, assessment=${assessmentStage}.`,
+      );
+    }
+  }
+
+  if (roots.length === 0) return;
+  const transitions = database.transitions as unknown as {
+    findMany?: (args: unknown) => Promise<unknown>;
+  } | undefined;
+  if (typeof transitions?.findMany !== 'function') {
+    throw new Error('Legacy reconciliation lifecycle transition history lookup is unavailable.');
+  }
+  const preloaded = await preloadLegacyLifecycleTransitions(
+    database,
+    roots.map((root) => String(root.id)),
+  );
+  for (const root of roots) {
+    assertLegacyLifecycleRootTransitionHistory(
+      String(root.id),
+      Number(affiliateLegacyRowValue(root, 'lifecycleGeneration') ?? 0),
+      preloaded.latestByRoot.get(String(root.id)),
+    );
+  }
+};
+
+const assertLegacyReplayLifecycleSafety = async (
+  preparation: AffiliateLegacyReconciliationPreparation,
+): Promise<void> => {
+  await assertLegacyLifecycleSnapshotSafety(
+    preparation.database,
+    preparation.legacySnapshot.supplySources,
+  );
+};
 
 const assertLegacyReplayReview = (
   preparation: AffiliateLegacyReconciliationPreparation,
@@ -14973,15 +15094,16 @@ const assertLegacyReplayReview = (
   }
 };
 
-const replayLegacyReconciliation = (
+const replayLegacyReconciliation = async (
   preparation: AffiliateLegacyReconciliationPreparation,
   input: AffiliateLegacySupplyReconciliationInternalInput,
-): AffiliateLegacySupplyReconciliationResult => {
+): Promise<AffiliateLegacySupplyReconciliationResult> => {
   const replayReport = preparation.appliedRun?.report;
   if (!replayReport) {
     throw new Error('Legacy Affiliate Supply reconciliation replay report is missing.');
   }
   assertLegacyReplayReview(preparation, input);
+  await assertLegacyReplayLifecycleSafety(preparation);
   if (!isAffiliateLegacyReconciliationReplaySafe(replayReport, preparation.report)) {
     throw new Error('Legacy Affiliate Supply reconciliation snapshot changed after the report was applied.');
   }
@@ -15649,6 +15771,10 @@ const applyLegacyReconciliationTransaction = async (
     expected: preparation.contract,
     actual: transactionContract,
   });
+  await assertLegacyLifecycleSnapshotSafety(
+    atomicDatabase,
+    transactionSnapshot.supplySources,
+  );
   const rootPersistence = await persistLegacyReconciliationRoots(input);
   const publicRecordIdsByRoot = await persistLegacyReconciliationRecords({
     database: atomicDatabase,

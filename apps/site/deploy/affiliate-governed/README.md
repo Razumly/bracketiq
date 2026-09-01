@@ -155,12 +155,12 @@ host bind mount or write workspace data outside this volume. The root-only
 runner control process writes `/workspaces/.runner.sock`; supervisors use that
 socket.
 
-The runner's control UID is `0`. The socket is owned by the supervisor UID and
-root group with mode `0600`, so supervisors can connect as the owner while the
-Codex child UID/GID `1002:1001` cannot read, write, create, replace, or unlink
-it. The runner drops every capability except `CHOWN`, `DAC_OVERRIDE`, `FOWNER`,
-`KILL`, `SETGID`, and `SETUID` and receives only the reviewed agent GID as a
-supplementary group. It does not receive `SYS_ADMIN` or `NET_ADMIN`.
+The runner's control UID is `0`. The socket is owned by `1001:0` with mode
+`0600`, so supervisors can connect as the owner while the Codex child UID/GID
+`1002:1001` cannot read, write, create, replace, or unlink it. The runner drops
+every capability except `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `KILL`, `SETGID`, and
+`SETUID` and receives only the reviewed agent GID as a supplementary group. It
+does not receive `SYS_ADMIN` or `NET_ADMIN`.
 
 ```text
 export HOST_WORKSPACE_AGENT_UID=1001
@@ -198,10 +198,10 @@ unsettled late cleanup halts admission. Verify ownership/mode normalization,
 supervisor destruction, and late-cleanup settlement in the reviewed evidence.
 
 The runner creates the socket only after its singleton startup gate. It chowns
-the socket to supervisor UID `1001`, root GID `0`, and mode `0600` before
-supervisors connect. Before starting supervisors, inspect the created volume
-and assert its driver and bounded mount options. Do not create a host socket
-file or make the shared root world-writable.
+the socket to `1001:0` and mode `0600` before supervisors connect. Before
+starting supervisors, inspect the created volume and assert its driver and
+bounded mount options. Do not create a host socket file or make the shared
+root world-writable.
 
 2. Copy the example with a private file mode. The creation is exclusive. It
    must fail when the destination already exists:
@@ -602,6 +602,7 @@ jq -e '
       and any(. == "AFFILIATE_AGENT_SUPERVISOR_HALT_CREDENTIAL=<redacted>")
     end
 ' /path/to/affiliate-governed-private/governed-compose.redacted.json
+```
 ```text
 jq -e '
   .services as $services
@@ -1498,6 +1499,38 @@ test -s "$SCHEMA_MIGRATION_DATABASE_URL_FILE"
 export SCHEMA_MIGRATION_DATABASE_URL="$(cat "$SCHEMA_MIGRATION_DATABASE_URL_FILE")"
 test -n "$SCHEMA_MIGRATION_DATABASE_URL"
 test "$SCHEMA_MIGRATION_DATABASE_URL" != "$DATABASE_URL"
+assert_reviewed_database_identity
+export SCHEMA_MIGRATION_DATABASE_IDENTITY_OUTPUT=/path/to/affiliate-governed-private/schema-migration-database-identity.tsv
+test ! -e "$SCHEMA_MIGRATION_DATABASE_IDENTITY_OUTPUT"
+install -m 0600 /dev/null "$SCHEMA_MIGRATION_DATABASE_IDENTITY_OUTPUT"
+(
+  cd "$OPERATOR_CLI_DIR"
+  DATABASE_URL="$SCHEMA_MIGRATION_DATABASE_URL" \
+    ./node_modules/.bin/tsx -e '
+      import { prisma } from "./src/lib/prisma";
+      (async () => {
+        const rows = await prisma.$queryRaw`select current_database() as database_name, current_user as role_name, coalesce(inet_server_addr()::text, $$local$$) as server_address`;
+        const row = rows[0] as Record<string, unknown> | undefined;
+        if (!row) throw new Error("SCHEMA_MIGRATION_DATABASE_URL identity query returned no row.");
+        process.stdout.write(`${row.database_name}\t${row.role_name}\t${row.server_address}\n`);
+      })().catch((error) => {
+        console.error(error);
+        process.exitCode = 1;
+      }).finally(async () => {
+        await prisma.$disconnect();
+      });
+    '
+) > "$SCHEMA_MIGRATION_DATABASE_IDENTITY_OUTPUT"
+test "$(wc -l < "$SCHEMA_MIGRATION_DATABASE_IDENTITY_OUTPUT" | tr -d '[:space:]')" = "1"
+test -n "$(cut -f1 "$SCHEMA_MIGRATION_DATABASE_IDENTITY_OUTPUT")"
+test -n "$(cut -f2 "$SCHEMA_MIGRATION_DATABASE_IDENTITY_OUTPUT")"
+test -n "$(cut -f3 "$SCHEMA_MIGRATION_DATABASE_IDENTITY_OUTPUT")"
+test "$(cut -f1 "$SCHEMA_MIGRATION_DATABASE_IDENTITY_OUTPUT")" = \
+  "$(cut -f1 "$DATABASE_URL_IDENTITY_OUTPUT")"
+test "$(cut -f2 "$SCHEMA_MIGRATION_DATABASE_IDENTITY_OUTPUT")" != \
+  "$(cut -f2 "$DATABASE_URL_IDENTITY_OUTPUT")"
+test "$(cut -f2 "$SCHEMA_MIGRATION_DATABASE_IDENTITY_OUTPUT")" != \
+  "$REVIEWED_DATABASE_ROLE"
 export SCHEMA_MIGRATION_DEPLOY_OUTPUT=/path/to/affiliate-governed-private/schema-migration-deploy.txt
 export SCHEMA_MIGRATION_STATUS_OUTPUT=/path/to/affiliate-governed-private/schema-migration-status.txt
 install -m 0600 /dev/null "$SCHEMA_MIGRATION_DEPLOY_OUTPUT"
@@ -3350,14 +3383,17 @@ startup manifest artifact from the startup inventory. Rerun startup preflight
 with the matching startup manifest, the evidence hash block, and this
 verification and export:
 
-For this refresh, inspect four disjoint expected container sets: exactly one
-`affiliate-gateway`, exactly one `affiliate-agent-runner`, exactly five
-supervisors (`mapping-producer-1`, `mapping-producer-2`, `supply-reviewer-1`,
-`supply-reviewer-2`, and `coverage-planner`), and exactly two auxiliary/control
-plane services (`affiliate-agent-downstream-ready` and
-`affiliate-replenishment-controller`). The seven reviewed worker rows are not a
-source for any other set; the runner and both auxiliary rows are captured from
-their own inspections, then projected into their dedicated inventory fields.
+For this pre-create refresh, the gateway set is intentionally empty because
+the gateway container does not exist yet. Inspect three disjoint non-gateway
+sets: exactly one `affiliate-agent-runner`, exactly five supervisors
+(`mapping-producer-1`, `mapping-producer-2`, `supply-reviewer-1`,
+`supply-reviewer-2`, and `coverage-planner`), and exactly two
+auxiliary/control-plane services (`affiliate-agent-downstream-ready` and
+`affiliate-replenishment-controller`). The seven reviewed worker rows are not
+a source for any other set; the runner and both auxiliary rows are captured
+from their own inspections, then projected into their dedicated inventory
+fields. The absent gateway is represented as a STOPPED control-plane process,
+not as a container row.
 
 
 ```text
@@ -3670,10 +3706,8 @@ CROSS JOIN (VALUES
 ORDER BY 1, 2, 3, 4;
 SQL
 test -s "$GATEWAY_REFRESH_PERMISSION_OUTPUT"
-GATEWAY_REFRESH_GATEWAY_CONTAINER_ID="$(
-  docker compose --env-file /path/to/affiliate-governed-private/deployment.env \
-    -f compose.yml ps -aq affiliate-gateway
-)"
+export GATEWAY_REFRESH_GATEWAY_CONTAINER_IDS=""
+test -z "$GATEWAY_REFRESH_GATEWAY_CONTAINER_IDS"
 GATEWAY_REFRESH_RUNNER_CONTAINER_ID="$(
   docker compose --env-file /path/to/affiliate-governed-private/deployment.env \
     -f compose.yml ps -aq affiliate-agent-runner
@@ -3690,6 +3724,10 @@ GATEWAY_REFRESH_AUXILIARY_CONTAINER_IDS="$(
     affiliate-agent-downstream-ready affiliate-replenishment-controller
 )"
 gateway_refresh_assert_ids() {
+  if test "$2" = "0"; then
+    test -z "$1"
+    return
+  fi
   printf '%s\n' "$1" | awk -v expected="$2" '
     NF != 1 || length($1) != 64 || $1 !~ /^[a-fA-F0-9]+$/ || seen[$1]++ {
       exit 1
@@ -3698,17 +3736,24 @@ gateway_refresh_assert_ids() {
     END { exit count == expected ? 0 : 1 }
   '
 }
-gateway_refresh_assert_ids "$GATEWAY_REFRESH_GATEWAY_CONTAINER_ID" 1
+gateway_refresh_assert_ids "$GATEWAY_REFRESH_GATEWAY_CONTAINER_IDS" 0
 gateway_refresh_assert_ids "$GATEWAY_REFRESH_RUNNER_CONTAINER_ID" 1
 gateway_refresh_assert_ids "$GATEWAY_REFRESH_SUPERVISOR_CONTAINER_IDS" 5
 gateway_refresh_assert_ids "$GATEWAY_REFRESH_AUXILIARY_CONTAINER_IDS" 2
 if test "$(printf '%s\n' \
-  "$GATEWAY_REFRESH_GATEWAY_CONTAINER_ID" \
   "$GATEWAY_REFRESH_RUNNER_CONTAINER_ID" \
   "$GATEWAY_REFRESH_SUPERVISOR_CONTAINER_IDS" \
   "$GATEWAY_REFRESH_AUXILIARY_CONTAINER_IDS" |
-  sort -u | wc -l | tr -d '[:space:]')" != "9"; then
-  printf '%s\n' "gateway, runner, supervisor, and auxiliary container identities must be distinct." >&2
+  sort -u | wc -l | tr -d '[:space:]')" != "8"; then
+  printf '%s\n' "runner, supervisor, and auxiliary container identities must be distinct." >&2
+  exit 1
+fi
+if ! (
+  umask 077
+  set -o noclobber
+  printf '%s\n' '[]' > "$GATEWAY_REFRESH_GATEWAY_CONTAINER_OUTPUT"
+); then
+  rm -f "$GATEWAY_REFRESH_GATEWAY_CONTAINER_OUTPUT"
   exit 1
 fi
 gateway_refresh_inspect_set() {
@@ -3791,8 +3836,6 @@ gateway_refresh_inspect_set() {
   rm -f "$image_evidence"
   return "$inspect_status"
 }
-gateway_refresh_inspect_set "$GATEWAY_REFRESH_GATEWAY_CONTAINER_ID" \
-  > "$GATEWAY_REFRESH_GATEWAY_CONTAINER_OUTPUT"
 gateway_refresh_inspect_set "$GATEWAY_REFRESH_RUNNER_CONTAINER_ID" \
   > "$GATEWAY_REFRESH_RUNNER_CONTAINER_OUTPUT"
 gateway_refresh_inspect_set $GATEWAY_REFRESH_SUPERVISOR_CONTAINER_IDS \
@@ -3801,14 +3844,8 @@ gateway_refresh_inspect_set $GATEWAY_REFRESH_AUXILIARY_CONTAINER_IDS \
   > "$GATEWAY_REFRESH_AUXILIARY_CONTAINER_OUTPUT"
 unset -f gateway_refresh_inspect_set gateway_refresh_assert_ids
 test -s "$GATEWAY_REFRESH_GATEWAY_CONTAINER_OUTPUT"
-test -s "$GATEWAY_REFRESH_RUNNER_CONTAINER_OUTPUT"
-test -s "$GATEWAY_REFRESH_SUPERVISOR_CONTAINER_OUTPUT"
-test -s "$GATEWAY_REFRESH_AUXILIARY_CONTAINER_OUTPUT"
-jq -e '
-  length == 1
-  and .[0].service == "affiliate-gateway"
-  and (.[0].status | type == "string" and length > 0)
-' "$GATEWAY_REFRESH_GATEWAY_CONTAINER_OUTPUT"
+jq -e 'type == "array" and length == 0' \
+  "$GATEWAY_REFRESH_GATEWAY_CONTAINER_OUTPUT"
 jq -e '
   length == 1
   and .[0].service == "affiliate-agent-runner"
@@ -3833,21 +3870,6 @@ jq -e '
   ]
   and all(.[].status; type == "string" and length > 0)
 ' "$GATEWAY_REFRESH_AUXILIARY_CONTAINER_OUTPUT"
-jq -e \
-  --arg expected "$REVIEWED_GATEWAY_IMAGE" \
-  --arg expectedId "$REVIEWED_GATEWAY_IMAGE_ID" \
-  --arg expectedRepoDigest "$REVIEWED_GATEWAY_REPO_DIGEST" '
-  length == 1
-  and all(.[];
-    .service == "affiliate-gateway"
-    and .image == $expected
-    and .imageId == $expectedId
-    and (.repoDigests | type == "array")
-    and (.repoDigests | index($expectedRepoDigest) != null)
-    and .hasReadonlyRootFilesystem == true
-    and .privileged == false
-  )
-' "$GATEWAY_REFRESH_GATEWAY_CONTAINER_OUTPUT"
 jq -e \
   --arg expected "$REVIEWED_AGENT_IMAGE" \
   --arg expectedId "$REVIEWED_AGENT_IMAGE_ID" \
@@ -4075,6 +4097,12 @@ if ! (
     --slurpfile auxiliary "$GATEWAY_REFRESH_AUXILIARY_CONTAINER_OUTPUT" \
     --slurpfile permission_flags "$GATEWAY_REFRESH_PERMISSION_FLAGS_OUTPUT" \
     '
+    def control_plane_status:
+      if . == "created" then "STOPPED"
+      elif . == "exited" then "INACTIVE"
+      elif . == "running" then "RUNNING"
+      else error("unsupported Docker state: \(.)")
+      end;
     ($runner[0]
       | map({
           id, name, user, privileged, hasReadonlyRootFilesystem,
@@ -4085,12 +4113,15 @@ if ! (
       | .[0]) as $freshRunner
     | ($auxiliary[0]
       | map({
-          id, name, user, privileged, hasReadonlyRootFilesystem,
+          id: .service, name, user, privileged, hasReadonlyRootFilesystem,
           cgroupNamespace, ipcMode, tmpfs, isNetworkInternal,
           environment, networks, capDrop, capAdd, groupAdd, securityOptions
         } | with_entries(select(.value != null)))) as $freshAuxiliaryContainers
-    | ([$gateway[0][], $runner[0][], $auxiliary[0][]]
-      | map({id: .service, status})) as $freshControlPlaneProcesses
+    | ([
+        {id: "affiliate-gateway", status: "STOPPED"},
+        ($runner[0][] | {id: .service, status: (.status | control_plane_status)}),
+        ($auxiliary[0][] | {id: .service, status: (.status | control_plane_status)})
+      ]) as $freshControlPlaneProcesses
     | ($supervisors[0]) as $freshContainers
     | .now = $now
     | .processInventoryArtifactId = $process_artifact
@@ -4238,6 +4269,7 @@ docker image inspect $REVIEWED_CONTAINER_IMAGE_IDS |
     then .
     else error("invalid image evidence")
     end' \
+  > "$REVIEWED_CONTAINER_IMAGE_EVIDENCE"
 test -s "$REVIEWED_CONTAINER_IMAGE_EVIDENCE"
 export REVIEWED_CONTAINERS_OUTPUT=/path/to/affiliate-governed-private/reviewed-affiliate-containers.redacted.json
 test ! -e "$REVIEWED_CONTAINERS_OUTPUT"

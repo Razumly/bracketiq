@@ -329,6 +329,12 @@ export const validateAffiliateGatewayCredentialCollisions = (
   if (operatorToken === supervisorHaltCredential) {
     throw new Error('AFFILIATE_GATEWAY_OPERATOR_TOKEN must be distinct from AFFILIATE_AGENT_SUPERVISOR_HALT_CREDENTIAL.');
   }
+  if (workerCredentials.some((credential) => credential === replenishmentToken)) {
+    throw new Error('AFFILIATE_GATEWAY_REPLENISHMENT_TOKEN must be distinct from every worker credential.');
+  }
+  if (replenishmentToken === supervisorHaltCredential) {
+    throw new Error('AFFILIATE_GATEWAY_REPLENISHMENT_TOKEN must be distinct from AFFILIATE_AGENT_SUPERVISOR_HALT_CREDENTIAL.');
+  }
 };
 
 const readJson = async (request: IncomingMessage): Promise<unknown> => {
@@ -1128,7 +1134,8 @@ const isAuthorityHealthFailure = (error: unknown): boolean => {
     return true;
   }
   if (!(error instanceof Error)) return false;
-  return error.name === 'ZodError'
+  return error.message === 'No active Affiliate Supply Contract is published for this rollout cohort.'
+    || error.name === 'ZodError'
     || /\b(?:contract|bundle)\b.*\b(?:mismatch|stale|invalid|failed)\b/i.test(error.message)
     || /\b(?:mismatch|stale|invalid|failed)\b.*\b(?:contract|bundle)\b/i.test(error.message)
     || /\b(?:database\s+)?authorization\b.*\b(?:failed|denied|invalid|lost)\b/i.test(

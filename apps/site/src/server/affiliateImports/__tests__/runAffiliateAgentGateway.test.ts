@@ -221,6 +221,51 @@ describe("affiliate agent gateway credential collision startup validation", () =
       expect((error as Error).message).not.toContain(collision);
     }
   });
+  it("rejects replenishment and worker credential collisions without echoing credentials", () => {
+    const collision = workerCredentials[0];
+    expect(() => validateAffiliateGatewayCredentialCollisions(
+      "reviewed-operator-token-4f3a9e7c",
+      collision,
+      "reviewed-supervisor-halt-credential-4f3a9e7c",
+      workerCredentials,
+    )).toThrow(
+      "AFFILIATE_GATEWAY_REPLENISHMENT_TOKEN must be distinct from every worker credential.",
+    );
+    try {
+      validateAffiliateGatewayCredentialCollisions(
+        "reviewed-operator-token-4f3a9e7c",
+        collision,
+        "reviewed-supervisor-halt-credential-4f3a9e7c",
+        workerCredentials,
+      );
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).not.toContain(collision);
+    }
+  });
+
+  it("rejects replenishment and supervisor-halt credential collisions without echoing credentials", () => {
+    const collision = "replenishment-supervisor-collision-4f3a9e7c";
+    expect(() => validateAffiliateGatewayCredentialCollisions(
+      "reviewed-operator-token-4f3a9e7c",
+      collision,
+      collision,
+      workerCredentials,
+    )).toThrow(
+      "AFFILIATE_GATEWAY_REPLENISHMENT_TOKEN must be distinct from AFFILIATE_AGENT_SUPERVISOR_HALT_CREDENTIAL.",
+    );
+    try {
+      validateAffiliateGatewayCredentialCollisions(
+        "reviewed-operator-token-4f3a9e7c",
+        collision,
+        collision,
+        workerCredentials,
+      );
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).not.toContain(collision);
+    }
+  });
 });
 
 describe("affiliate agent gateway admission HTTP boundary", () => {
@@ -773,6 +818,28 @@ describe("affiliate agent gateway admission HTTP boundary", () => {
     readinessValue = true;
     const reopenResponse = await request("/admission/open", OPERATOR_TOKEN, "POST", leaseRequest);
     expect(reopenResponse.status).toBe(200);
+    expect(admission.isOpen()).toBe(true);
+  });
+
+  it("closes admission for an unpublished active supply contract and requires explicit reopen", async () => {
+    await admission.open();
+    health.mockRejectedValueOnce(new Error(
+      "No active Affiliate Supply Contract is published for this rollout cohort.",
+    ));
+
+    let response = await request("/healthz");
+
+    expect(response.status).toBe(503);
+    expect(admission.isOpen()).toBe(false);
+
+    health.mockResolvedValueOnce(undefined);
+    response = await request("/healthz");
+    expect(response.status).toBe(200);
+    expect(admission.isOpen()).toBe(false);
+
+    readinessValue = true;
+    response = await request("/admission/open", OPERATOR_TOKEN, "POST", leaseRequest);
+    expect(response.status).toBe(200);
     expect(admission.isOpen()).toBe(true);
   });
 
