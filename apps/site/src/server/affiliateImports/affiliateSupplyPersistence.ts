@@ -11720,6 +11720,7 @@ type AffiliateLegacyTransitionRow = Readonly<{
   supplySourceId?: unknown;
   sequence?: unknown;
   generation?: unknown;
+  command?: unknown;
   contractVersion?: unknown;
   contractHash?: unknown;
   requestJson?: unknown;

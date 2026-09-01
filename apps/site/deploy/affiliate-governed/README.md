@@ -2934,6 +2934,7 @@ if ! (
     governed-compose.redacted.json \
     schema-migration-deploy.txt \
     schema-migration-status.txt \
+    schema-migration-database-identity.tsv \
     active-supply-contract.json \
     reviewed-supply-contract-manifest.json \
     reviewed-supply-contract-impact-report.json \
@@ -3372,11 +3373,13 @@ It does not read a file path. The shell export overrides the placeholder in
 Do not enable shell tracing. The session-bound `preflight-report.json` is not
 overwritten. If the gateway-startup report is older than 15 minutes before
 startup, do not rerun only the preflight command. Recapture process, unit,
-claim, permission, and gateway/worker/auxiliary container evidence into uniquely
-named supplemental files. Have the second operator rebuild a fresh strict inventory
-from those captures using only the accepted schema fields; the supplemental
-captures must not be embedded as extra inventory keys. Never modify the
-session-bound `cutover-inventory.json`. Set the startup inventory `now` to the
+claim, permission, and gateway-set/worker/auxiliary container evidence into
+uniquely named supplemental files. Before gateway creation, the gateway set is
+the explicitly empty set described below. Have the second operator rebuild a
+fresh strict inventory from those captures using only the accepted schema
+fields; the supplemental captures must not be embedded as extra inventory
+keys. Never modify the session-bound `cutover-inventory.json`. Set the startup
+inventory `now` to the
 current UTC capture time and recompute the process hash and count. If process
 facts changed, update the reviewed manifest source and generate a separate
 startup manifest artifact from the startup inventory. Rerun startup preflight
