@@ -1,0 +1,82 @@
+name: Publish governed affiliate images
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: publish-affiliate-governed-images
+  cancel-in-progress: false
+
+jobs:
+  verify-ci:
+    name: Verify successful site CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Require the main branch
+        run: |
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "Governed images can only be published from main." >&2
+            exit 1
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Verify site CI passed for this commit
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_WORKFLOW_FILE: site-ci.yml
+        run: apps/site/deploy/vm/bin/verify-ci.sh "$GITHUB_SHA"
+
+  publish:
+    name: Build and publish governed images
+    needs: verify-ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: production
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Sign in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish governed worker image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./apps/site
+          file: ./apps/site/deploy/affiliate-governed/Dockerfile
+          push: true
+          tags: ghcr.io/razumly/bracketiq-affiliate-governed:${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=affiliate-governed
+          cache-to: type=gha,mode=max,scope=affiliate-governed
+
+      - name: Build and publish governed gateway image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./apps/site
+          file: ./apps/site/deploy/affiliate-governed/Dockerfile.gateway
+          push: true
+          tags: ghcr.io/razumly/bracketiq-affiliate-gateway:${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=affiliate-gateway
+          cache-to: type=gha,mode=max,scope=affiliate-gateway
