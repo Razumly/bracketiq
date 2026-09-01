@@ -29,7 +29,6 @@ import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchOperationOutboxEntry
 import com.razumly.mvp.core.data.dataTypes.PendingRentalOrder
 import com.razumly.mvp.core.data.dataTypes.MessageMVP
-import com.razumly.mvp.core.data.dataTypes.ProfileDocumentCacheEntry
 import com.razumly.mvp.core.data.dataTypes.RefundRequest
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.UserData
@@ -52,13 +51,12 @@ import com.razumly.mvp.core.data.dataTypes.daos.MatchOperationOutboxDao
 import com.razumly.mvp.core.data.dataTypes.daos.MatchOperationTransactionDao
 import com.razumly.mvp.core.data.dataTypes.daos.MessageDao
 import com.razumly.mvp.core.data.dataTypes.daos.PendingRentalOrderDao
-import com.razumly.mvp.core.data.dataTypes.daos.ProfileDocumentDao
 import com.razumly.mvp.core.data.dataTypes.daos.RefundRequestDao
 import com.razumly.mvp.core.data.dataTypes.daos.TeamDao
 import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
 import com.razumly.mvp.core.data.util.Converters
 
-const val MVP_DATABASE_VERSION = 101
+const val MVP_DATABASE_VERSION = 100
 
 @Database(
     entities = [
@@ -91,7 +89,6 @@ const val MVP_DATABASE_VERSION = 101
         TimeSlotCacheEntry::class,
         CatalogCacheViewerEntry::class,
         CatalogQueryCacheEntry::class,
-        ProfileDocumentCacheEntry::class,
     ],
     version = MVP_DATABASE_VERSION,
 )
@@ -118,7 +115,6 @@ abstract class MVPDatabaseService : RoomDatabase(), DatabaseService {
     abstract override val getMessageDao: MessageDao
     abstract override val getRefundRequestDao: RefundRequestDao
     abstract override val getPendingRentalOrderDao: PendingRentalOrderDao
-    abstract override val getProfileDocumentDao: ProfileDocumentDao
     abstract override val getDiscountDao: DiscountDao
     abstract override val getInviteDao: InviteDao
 }

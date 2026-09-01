@@ -29,8 +29,6 @@ import com.mmk.kmpnotifier.notification.NotifierManager
 import com.razumly.mvp.app.App
 import com.razumly.mvp.app.RootComponent
 import com.razumly.mvp.app.RootComponent.DeepLinkNav
-import com.razumly.mvp.core.notifications.documentIdFromDeepLinkPath
-import com.razumly.mvp.core.notifications.documentNotificationEvidenceId
 import com.razumly.mvp.core.presentation.MVPTheme
 import dev.icerock.moko.geo.compose.BindLocationTrackerEffect
 import dev.icerock.moko.permissions.compose.BindEffect
@@ -107,20 +105,15 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         NotifierManager.onCreateOrOnNewIntent(intent)
         Napier.d(tag = "intent", message = intent.data.toString())
-        val notificationPayload = intent.extractNotificationPayload()
-        rootComponent.handleNotificationPayload(notificationPayload)
+        rootComponent.handleNotificationPayload(intent.extractNotificationPayload())
 
-        // Handle deep links when the app is already open.
-        val deepLinkNav = if (notificationPayload.documentNotificationEvidenceId() == null) {
-            intent.extractDeepLinkNav()
-        } else {
-            null
-        }
+        // Handle deep links when app is already open
+        val deepLinkNav = intent.extractDeepLinkNav()
         if (deepLinkNav != null) {
             Napier.d(tag = "DeepLink", message = "Extracted DeepLinkNav from intent: $deepLinkNav")
             rootComponent.handleDeepLink(deepLinkNav)
         } else {
-            Napier.d(tag = "DeepLink", message = "No additional deep link data in intent")
+            Napier.d(tag = "DeepLink", message = "No deep link data in intent")
         }
     }
 
@@ -175,9 +168,6 @@ class MainActivity : ComponentActivity() {
         data?.extractDeepLinkNav()?.let { return it }
 
         val payload = extractNotificationPayload()
-        payload.documentNotificationEvidenceId()?.let { evidenceId ->
-            return DeepLinkNav.Document(evidenceId)
-        }
         val deepLink = payload.normalizedPayloadValue("deepLink")
             ?: payload.normalizedPayloadValue("url")
             ?: payload.normalizedPayloadValue("link")
@@ -229,10 +219,6 @@ class MainActivity : ComponentActivity() {
             segmentsWithHost
         }
         Napier.d(tag = "DeepLink", message = "Effective segments: $effectiveSegments")
-        documentIdFromDeepLinkPath(effectiveSegments.joinToString("/"))?.let { documentId ->
-            Napier.d(tag = "DeepLink", message = "Navigating to Document: $documentId")
-            return DeepLinkNav.Document(documentId)
-        }
 
         if (
             effectiveSegments.isInviteRoute() ||

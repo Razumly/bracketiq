@@ -78,4 +78,4 @@ Store secrets in `secrets.properties` with fallbacks in `local.defaults.properti
 
 ## Shared agent rules
 
-Read the root `../../AGENTS.md` for the issue tracker, triage labels, domain documents, current HTTP-contract rules, and operational boundaries.
+Read the root `../../AGENTS.md` for the issue tracker, triage labels, domain documents, backend compatibility rules, and operational boundaries.

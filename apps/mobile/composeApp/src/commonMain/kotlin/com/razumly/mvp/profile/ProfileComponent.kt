@@ -47,11 +47,10 @@ import com.razumly.mvp.core.data.repositories.EventTemplateSummary
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IImagesRepository
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
-import com.razumly.mvp.core.data.repositories.PushDeviceTargetDebugStatus
 import com.razumly.mvp.core.data.repositories.ITeamRepository
+import com.razumly.mvp.core.data.repositories.PushDeviceTargetDebugStatus
 import com.razumly.mvp.core.data.repositories.ProfileDocumentCard
 import com.razumly.mvp.core.data.repositories.ProfileDocumentType
-import com.razumly.mvp.core.data.repositories.ProfileDocumentsBundle
 import com.razumly.mvp.core.data.repositories.RepositoryPage
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.SignerContext
@@ -82,7 +81,6 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collect
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
@@ -361,15 +359,6 @@ data class ProfileDocumentsState(
     val error: String? = null,
 )
 
-internal fun findProfileDocumentById(
-    documentId: String?,
-    documents: ProfileDocumentsBundle,
-): ProfileDocumentCard? {
-    val normalizedId = documentId?.trim()?.takeIf(String::isNotBlank) ?: return null
-    return documents.unsigned.firstOrNull { document -> document.id == normalizedId }
-        ?: documents.signed.firstOrNull { document -> document.id == normalizedId }
-}
-
 data class ProfileDiscountsState(
     val isLoading: Boolean = false,
     val discounts: List<DiscountOffer> = emptyList(),
@@ -567,7 +556,6 @@ enum class ProfileStartDestination {
     HOME,
     MY_SCHEDULE,
     INVITES,
-    DOCUMENTS,
 }
 
 data class ProfileTextSignaturePromptState(
@@ -586,10 +574,6 @@ data class ProfileWebDocumentPromptState(
     val mode: ProfileWebDocumentPromptMode,
     @property:ObjCName(swiftName = "promptDescription")
     val description: String? = null,
-)
-data class ProfilePdfDocumentPromptState(
-    val title: String,
-    val bytes: ByteArray,
 )
 
 interface ProfileComponent : IPaymentProcessor {
@@ -613,7 +597,6 @@ interface ProfileComponent : IPaymentProcessor {
     val activeDocumentActionId: StateFlow<String?>
     val textSignaturePrompt: StateFlow<ProfileTextSignaturePromptState?>
     val webDocumentPrompt: StateFlow<ProfileWebDocumentPromptState?>
-    val pdfDocumentPrompt: StateFlow<ProfilePdfDocumentPromptState?>
     val billingAddressPrompt: StateFlow<BillingAddressDraft?>
     val discountCodePrompt: StateFlow<DiscountCodePromptState?>
     val isStripeAccountConnected: StateFlow<Boolean>
@@ -689,10 +672,9 @@ interface ProfileComponent : IPaymentProcessor {
     fun acceptInvite(invite: Invite)
     fun declineInvite(invite: Invite)
     fun openInviteEvent(eventId: String)
-    fun openScheduleEvent(eventId: String)
     fun signDocument(document: ProfileDocumentCard)
-    fun openDocument(document: ProfileDocumentCard)
-    fun dismissPdfDocumentPrompt()
+    fun openSignedDocument(document: ProfileDocumentCard)
+    fun openScheduleEvent(eventId: String)
     fun openScheduleMatch(match: MatchWithRelations)
     fun confirmTextSignature()
     fun dismissTextSignature()
@@ -788,7 +770,6 @@ private fun ProfileStartDestination.toProfileConfig(): ProfileConfig = when (thi
     ProfileStartDestination.HOME -> ProfileConfig.Home
     ProfileStartDestination.MY_SCHEDULE -> ProfileConfig.MySchedule
     ProfileStartDestination.INVITES -> ProfileConfig.Invites
-    ProfileStartDestination.DOCUMENTS -> ProfileConfig.Documents
 }
 
 class DefaultProfileComponent(
@@ -802,13 +783,11 @@ class DefaultProfileComponent(
     private val currentUserDataSource: CurrentUserDataSource,
     private val navigationHandler: INavigationHandler,
     initialDestination: ProfileStartDestination = ProfileStartDestination.HOME,
-    initialDocumentId: String? = null,
 ) : ProfileComponent, PaymentProcessor(), ComponentContext by componentContext {
 
     private val navigation = StackNavigation<ProfileConfig>()
     private val koin = getKoin()
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
-    private var pendingDocumentId = initialDocumentId?.trim()?.takeIf(String::isNotBlank)
 
     private val _errorState = MutableStateFlow<ErrorMessage?>(null)
     override val errorState = _errorState.asStateFlow()
@@ -873,8 +852,6 @@ class DefaultProfileComponent(
 
     private val _webDocumentPrompt = MutableStateFlow<ProfileWebDocumentPromptState?>(null)
     override val webDocumentPrompt = _webDocumentPrompt.asStateFlow()
-    private val _pdfDocumentPrompt = MutableStateFlow<ProfilePdfDocumentPromptState?>(null)
-    override val pdfDocumentPrompt = _pdfDocumentPrompt.asStateFlow()
 
     private val _isStripeAccountConnected = MutableStateFlow(false)
     override val isStripeAccountConnected = _isStripeAccountConnected.asStateFlow()
@@ -911,20 +888,6 @@ class DefaultProfileComponent(
         scope.launch {
             billingRepository.observeDiscounts(ownerType = "USER").collect { discounts ->
                 _discountsState.value = _discountsState.value.copy(discounts = discounts)
-            }
-        }
-        scope.launch {
-            billingRepository.observeProfileDocuments().collect { bundle ->
-                _documentsState.value = _documentsState.value.copy(
-                    isLoading = false,
-                    unsignedDocuments = bundle.unsigned,
-                    signedDocuments = bundle.signed,
-                    error = null,
-                )
-                findProfileDocumentById(pendingDocumentId, bundle)?.let { document ->
-                    pendingDocumentId = null
-                    openDocument(document)
-                }
             }
         }
         startDiscountTargetsObserver(_discountsState.value.itemType)
@@ -2493,9 +2456,11 @@ class DefaultProfileComponent(
             )
 
             billingRepository.listProfileDocuments()
-                .onSuccess {
-                    _documentsState.value = _documentsState.value.copy(
+                .onSuccess { bundle ->
+                    _documentsState.value = ProfileDocumentsState(
                         isLoading = false,
+                        unsignedDocuments = bundle.unsigned,
+                        signedDocuments = bundle.signed,
                         error = null,
                     )
                 }
@@ -2856,9 +2821,8 @@ class DefaultProfileComponent(
         }
     }
 
-    override fun openDocument(document: ProfileDocumentCard) {
-        val isImported = document.provenance.equals("IMPORTED", ignoreCase = true)
-        if (document.type == ProfileDocumentType.TEXT && !isImported) {
+    override fun openSignedDocument(document: ProfileDocumentCard) {
+        if (document.type == ProfileDocumentType.TEXT) {
             return
         }
 
@@ -2872,40 +2836,21 @@ class DefaultProfileComponent(
             _activeDocumentActionId.value = document.id
             try {
                 withProfileLoading("Opening document ...") {
-                    if (!isImported) {
-                        val resolvedUrl = if (
-                            viewUrl.startsWith("http://", ignoreCase = true) ||
-                            viewUrl.startsWith("https://", ignoreCase = true)
-                        ) {
-                            viewUrl
-                        } else {
-                            "${apiBaseUrl.trimEnd('/')}/${viewUrl.trimStart('/')}"
-                        }
-
-                        _webDocumentPrompt.value = ProfileWebDocumentPromptState(
-                            title = document.title,
-                            url = resolvedUrl,
-                            mode = ProfileWebDocumentPromptMode.VIEW,
-                            description = document.organizationName,
-                        )
+                    val resolvedUrl = if (
+                        viewUrl.startsWith("http://", ignoreCase = true) ||
+                        viewUrl.startsWith("https://", ignoreCase = true)
+                    ) {
+                        viewUrl
                     } else {
-                        billingRepository.getProfileDocumentPdf(viewUrl)
-                            .onSuccess { bytes ->
-                                if (bytes.isEmpty()) {
-                                    _errorState.value = ErrorMessage("This document has no PDF content.")
-                                } else {
-                                    _pdfDocumentPrompt.value = ProfilePdfDocumentPromptState(
-                                        title = document.title,
-                                        bytes = bytes,
-                                    )
-                                }
-                            }
-                            .onFailure { throwable ->
-                                _errorState.value = ErrorMessage(
-                                    throwable.userMessage("Unable to open document."),
-                                )
-                            }
+                        "${apiBaseUrl.trimEnd('/')}/${viewUrl.trimStart('/')}"
                     }
+
+                    _webDocumentPrompt.value = ProfileWebDocumentPromptState(
+                        title = document.title,
+                        url = resolvedUrl,
+                        mode = ProfileWebDocumentPromptMode.VIEW,
+                        description = document.organizationName,
+                    )
                 }
             } finally {
                 _activeDocumentActionId.value = null
@@ -2977,9 +2922,6 @@ class DefaultProfileComponent(
         if (mode == ProfileWebDocumentPromptMode.SIGN) {
             _errorState.value = ErrorMessage("Document signing canceled.")
         }
-    }
-    override fun dismissPdfDocumentPrompt() {
-        _pdfDocumentPrompt.value = null
     }
 
     override fun submitBillingAddress(address: BillingAddressDraft) {

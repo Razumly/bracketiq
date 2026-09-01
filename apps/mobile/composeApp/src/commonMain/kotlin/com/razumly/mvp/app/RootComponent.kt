@@ -36,7 +36,6 @@ import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.presentation.AppConfig
 import com.razumly.mvp.core.presentation.CenterNavAction
 import com.razumly.mvp.core.presentation.EventDetailInitialTab
-import com.razumly.mvp.core.notifications.documentNotificationEvidenceId
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.OrganizationDetailTab
 import com.razumly.mvp.core.presentation.toCenterNavAction
@@ -288,7 +287,6 @@ class RootComponent(
     )
 
     init {
-        pushNotificationsRepository.setNotificationPayloadHandler(::handleNotificationClickPayload)
         checkForAppUpdate()
 
         scope.launch {
@@ -505,7 +503,6 @@ class RootComponent(
         when (deepLinkNavVal) {
             is DeepLinkNav.Event -> navigateToDeepLinkedEvent(deepLinkNavVal.eventId)
             is DeepLinkNav.Match -> navigateToDeepLinkedMatch(deepLinkNavVal.eventId, deepLinkNavVal.matchId)
-            is DeepLinkNav.Document -> navigateToDeepLinkedDocument(deepLinkNavVal.documentId)
             is DeepLinkNav.Invites -> navigateToDeepLinkedInvites()
             is DeepLinkNav.Refresh -> {
                 setDefaultNavigationDirection()
@@ -527,13 +524,6 @@ class RootComponent(
         }
     }
 
-
-    private fun navigateToDeepLinkedDocument(rawDocumentId: String) {
-        val documentId = rawDocumentId.trim().takeIf(String::isNotBlank) ?: return
-        setDefaultNavigationDirection()
-        navigation.replaceAll(AppConfig.ProfileDocument(documentId))
-        _selectedPage.value = AppConfig.ProfileHome
-    }
     private fun navigateToDeepLinkedInvites() {
         setDefaultNavigationDirection()
         navigation.replaceAll(AppConfig.ProfileInvites)
@@ -639,16 +629,6 @@ class RootComponent(
                 handleDeepLinkOrDefault()
             }
         }
-    }
-
-    private fun handleDocumentNotificationPayload(data: Map<String, String>) {
-        val evidenceId = data.documentNotificationEvidenceId() ?: return
-        if ((deepLinkNav.value as? DeepLinkNav.Document)?.documentId == evidenceId) return
-        handleDeepLink(DeepLinkNav.Document(evidenceId))
-    }
-
-    private fun handleNotificationClickPayload(data: Map<String, String>) {
-        handleDocumentNotificationPayload(data)
     }
 
     fun handleNotificationPayload(data: Map<String, String>) {
@@ -1214,17 +1194,6 @@ class RootComponent(
             }
         )
 
-        is AppConfig.ProfileDocument -> Child.Profile(
-            _koin.get {
-                parametersOf(
-                    componentContext,
-                    this@RootComponent,
-                    ProfileStartDestination.DOCUMENTS,
-                    config.documentId,
-                )
-            }
-        )
-
         AppConfig.ProfileInvites -> Child.Profile(
             _koin.get {
                 parametersOf(
@@ -1298,7 +1267,6 @@ class RootComponent(
     sealed class DeepLinkNav {
         data class Event(val eventId: String) : DeepLinkNav()
         data class Match(val eventId: String, val matchId: String) : DeepLinkNav()
-        data class Document(val documentId: String) : DeepLinkNav()
         data object Invites : DeepLinkNav()
         data object Refresh : DeepLinkNav()
         data object Return : DeepLinkNav()
