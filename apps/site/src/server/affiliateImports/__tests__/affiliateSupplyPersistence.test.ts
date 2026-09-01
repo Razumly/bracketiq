@@ -5365,10 +5365,10 @@ describe('affiliate supply persistence seams', () => {
       processInventoryCount: rollbackProcessInventory.length,
       processInventory: rollbackProcessInventory,
       controlPlaneProcesses: [
-        { id: 'affiliate-gateway', status: 'RUNNING' },
+        { id: 'affiliate-gateway', status: 'STOPPED' },
         { id: 'affiliate-agent-runner', status: 'RUNNING' },
         { id: 'affiliate-agent-downstream-ready', status: 'COMPLETED' },
-        { id: 'affiliate-replenishment-controller', status: 'RUNNING' },
+        { id: 'affiliate-replenishment-controller', status: 'STOPPED' },
       ],
 
       legacyServiceUnits: rollbackLegacyServiceUnits,

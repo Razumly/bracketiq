@@ -498,6 +498,23 @@ install -m 0600 /dev/null \
   /path/to/affiliate-governed-private/governed-compose.redacted.json
 set -o pipefail
 if ! docker compose --env-file /path/to/affiliate-governed-private/deployment.env \
+  -f compose.yml --profile coverage-planner config --format json |
+  jq -e '
+    .services["affiliate-replenishment-controller"].environment as $environment
+    | if ($environment | type) == "object" then
+        $environment.AFFILIATE_REPLENISHMENT_INTERVAL_SECONDS == "900"
+      elif ($environment | type) == "array" then
+        any($environment[];
+          . == "AFFILIATE_REPLENISHMENT_INTERVAL_SECONDS=900")
+      else false
+      end
+  ' >/dev/null
+then
+  printf '%s\n' "Resolved replenishment interval is not the reviewed 900 seconds." >&2
+  set +o pipefail
+  exit 1
+fi
+if ! docker compose --env-file /path/to/affiliate-governed-private/deployment.env \
   -f compose.yml --profile coverage-planner config --format json \
   | jq '{
     name: .name,
@@ -585,6 +602,7 @@ jq -e '
       and any(. == "AFFILIATE_AGENT_SUPERVISOR_HALT_CREDENTIAL=<redacted>")
     end
 ' /path/to/affiliate-governed-private/governed-compose.redacted.json
+```text
 jq -e '
   .services as $services
   | (
@@ -608,6 +626,7 @@ jq -e '
       | all(.[]; (($services[.].environment // [])
         | index("AFFILIATE_AGENT_SUPERVISOR_HALT_CREDENTIAL=<redacted>")) == null)
     )
+' /path/to/affiliate-governed-private/governed-compose.redacted.json
 jq -e --arg runner_group "$HOST_WORKSPACE_GID" '
   .services["affiliate-agent-runner"] as $runner
   | $runner.cgroup == "private"
@@ -633,6 +652,7 @@ jq -e --arg runner_group "$HOST_WORKSPACE_GID" '
       and .source == "affiliate-governed-workspaces"
       and .target == "/workspaces"
       and .read_only == false))
+' /path/to/affiliate-governed-private/governed-compose.redacted.json
 jq -e --arg reviewed_volume "$(
   sed -n 's/^AFFILIATE_GOVERNED_WORKSPACE_VOLUME=//p' \
     /path/to/affiliate-governed-private/deployment.env
@@ -647,15 +667,13 @@ jq -e --arg reviewed_volume "$(
     "rw", "noexec", "nosuid", "nodev", "size=2g", "uid=1001", "gid=1001", "mode=0710"
   ] | sort))
   and all([
-    "affiliate-gateway",
     "affiliate-agent-runner",
     "mapping-producer-1",
     "mapping-producer-2",
     "supply-reviewer-1",
     "supply-reviewer-2",
-    "coverage-planner",
     "affiliate-agent-downstream-ready",
-    "affiliate-replenishment-controller"
+    "coverage-planner"
   ][]; any(($services[.].volumes // [])[];
     .type == "volume"
     and .source == "affiliate-governed-workspaces"
@@ -783,15 +801,9 @@ jq -e '
 ```
 The replenishment token is a dedicated, replenishment-only credential. It is
 not the gateway operator token and must never be accepted in its place.
-The redacted artifact intentionally hides the interval value. Verify the
-resolved value before redaction as well; any override other than the reviewed
-900-second cadence blocks creation:
-```text
-jq -e '
-  .services["affiliate-replenishment-controller"].environment
-    .AFFILIATE_REPLENISHMENT_INTERVAL_SECONDS == "900"
-' /path/to/affiliate-governed-private/governed-compose.redacted.json
-```
+The redacted artifact intentionally hides the interval value. The pre-redaction
+Compose check above resolves and validates it; any override other than the
+reviewed 900-second cadence blocks creation.
 
 The controller uses the gateway image only as a protected cadence client. The
 shell loop starts one authenticated gateway request per protected interval and
@@ -823,6 +835,60 @@ binds worker ID `human-directed-executor` to
 private deployment environment and never print it, put it in a command
 argument, or include it in a redacted artifact.
 
+The human-directed supervisor has its own runner protocol key pair. Never reuse
+`AFFILIATE_MAPPING_PRODUCER_1_RUNNER_PROTOCOL_PRIVATE_KEY`. Generate the pair
+before the runner starts, and add only the public key to the reviewed runner
+key map through the approved private deployment-environment procedure. The map
+must retain the five always-on worker entries and also contain
+`"human-directed-executor"` with this public key. If the runner is already
+running without that entry, stop and recreate it only after the reviewed map
+has been updated and separately authorized.
+
+```text
+export HUMAN_EXECUTOR_RUNNER_KEY_DIR=/path/to/affiliate-governed-private/human-executor-runner-key
+test ! -e "$HUMAN_EXECUTOR_RUNNER_KEY_DIR"
+install -d -m 0700 "$HUMAN_EXECUTOR_RUNNER_KEY_DIR"
+export HUMAN_EXECUTOR_RUNNER_PRIVATE_DER="$HUMAN_EXECUTOR_RUNNER_KEY_DIR/private.der"
+export HUMAN_EXECUTOR_RUNNER_PUBLIC_DER="$HUMAN_EXECUTOR_RUNNER_KEY_DIR/public.der"
+openssl genpkey -algorithm Ed25519 -outform DER \
+  -out "$HUMAN_EXECUTOR_RUNNER_PRIVATE_DER"
+openssl pkey -inform DER -in "$HUMAN_EXECUTOR_RUNNER_PRIVATE_DER" \
+  -pubout -outform DER -out "$HUMAN_EXECUTOR_RUNNER_PUBLIC_DER"
+chmod 0600 "$HUMAN_EXECUTOR_RUNNER_PRIVATE_DER"
+chmod 0644 "$HUMAN_EXECUTOR_RUNNER_PUBLIC_DER"
+export AFFILIATE_HUMAN_DIRECTED_EXECUTOR_RUNNER_PROTOCOL_PRIVATE_KEY="$(
+  base64 -w 0 "$HUMAN_EXECUTOR_RUNNER_PRIVATE_DER"
+)"
+export AFFILIATE_HUMAN_DIRECTED_EXECUTOR_RUNNER_PROTOCOL_PUBLIC_KEY="$(
+  base64 -w 0 "$HUMAN_EXECUTOR_RUNNER_PUBLIC_DER"
+)"
+test -n "$AFFILIATE_HUMAN_DIRECTED_EXECUTOR_RUNNER_PROTOCOL_PRIVATE_KEY"
+test -n "$AFFILIATE_HUMAN_DIRECTED_EXECUTOR_RUNNER_PROTOCOL_PUBLIC_KEY"
+```
+
+Set the reviewed map through the approved private deployment-environment
+procedure before starting the runner. For a protected shell that already has
+the reviewed five-entry map loaded, this produces the six-entry map without
+printing either key:
+
+```text
+export AFFILIATE_AGENT_RUNNER_PROTOCOL_PUBLIC_KEYS="$(
+  jq -ce --arg public \
+    "$AFFILIATE_HUMAN_DIRECTED_EXECUTOR_RUNNER_PROTOCOL_PUBLIC_KEY" '
+    if type == "object" and .["human-directed-executor"]? == null
+    then . + {"human-directed-executor": $public}
+    else error("runner public-key map already contains human-directed-executor or is not an object")
+    end
+  ' <<< "$AFFILIATE_AGENT_RUNNER_PROTOCOL_PUBLIC_KEYS"
+)"
+jq -e --arg public \
+  "$AFFILIATE_HUMAN_DIRECTED_EXECUTOR_RUNNER_PROTOCOL_PUBLIC_KEY" '
+  type == "object"
+  and (.["human-directed-executor"] // "") == $public
+  and (keys | length) == 6
+' <<< "$AFFILIATE_AGENT_RUNNER_PROTOCOL_PUBLIC_KEYS" >/dev/null
+```
+
 Start the supervisor in a separate protected terminal while global admission is
 closed. It uses the existing agent image and workspace/runner boundary as an
 ephemeral `--rm` container; the only changed role values are the safe role and
@@ -832,16 +898,18 @@ echoing it:
 ```text
 : "${AFFILIATE_HUMAN_DIRECTED_EXECUTOR_CREDENTIAL:?Load the reviewed human-directed executor credential into the protected shell}"
 export AFFILIATE_AGENT_ROLE_CREDENTIAL="$AFFILIATE_HUMAN_DIRECTED_EXECUTOR_CREDENTIAL"
+export AFFILIATE_AGENT_RUNNER_PROTOCOL_PRIVATE_KEY="$AFFILIATE_HUMAN_DIRECTED_EXECUTOR_RUNNER_PROTOCOL_PRIVATE_KEY"
 docker compose --env-file /path/to/affiliate-governed-private/deployment.env \
   -f compose.yml run --rm --no-deps \
   -e AFFILIATE_AGENT_ROLE=HUMAN_DIRECTED_EXECUTOR \
   -e AFFILIATE_AGENT_WORKER_ID=human-directed-executor \
+  -e AFFILIATE_AGENT_RUNNER_PROTOCOL_PRIVATE_KEY \
   -e AFFILIATE_AGENT_ROLE_CREDENTIAL \
   mapping-producer-1 \
   /usr/local/bin/affiliate-agent-supervisor \
   --role=HUMAN_DIRECTED_EXECUTOR \
   --worker-id=human-directed-executor
-unset AFFILIATE_AGENT_ROLE_CREDENTIAL
+unset AFFILIATE_AGENT_ROLE_CREDENTIAL AFFILIATE_AGENT_RUNNER_PROTOCOL_PRIVATE_KEY
 ```
 
 The on-demand supervisor startup calls the worker-authenticated
@@ -1355,8 +1423,29 @@ BEGIN
       );
     END IF;
   END LOOP;
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'bracketiq_app') THEN
-    RAISE EXCEPTION 'The reviewed runtime role bracketiq_app is missing.';
+  IF EXISTS (
+    SELECT 1
+    FROM pg_roles
+    WHERE rolname IN (
+      'bracketiq_affiliate_gateway',
+      'bracketiq_affiliate_lifecycle',
+      'bracketiq_affiliate_agent'
+    )
+    AND (rolcanlogin OR rolsuper OR rolcreatedb OR rolcreaterole OR rolinherit)
+  ) THEN
+    RAISE EXCEPTION 'A governed group role has unsafe role attributes.';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_roles
+    WHERE rolname = 'bracketiq_app'
+      AND rolcanlogin
+      AND NOT rolsuper
+      AND NOT rolcreatedb
+      AND NOT rolcreaterole
+      AND rolinherit
+  ) THEN
+    RAISE EXCEPTION 'The reviewed runtime role bracketiq_app is missing or unsafe.';
   END IF;
   GRANT bracketiq_affiliate_gateway TO bracketiq_app;
 END
@@ -1386,20 +1475,42 @@ strict cutover inventory. If the role check fails, stop before migration or
 any conditional grant. Capture the artifact hash with the other database
 evidence.
 Before the schema migration, obtain separate current authorization for this
-production state change. Use the protected `DATABASE_URL` in the reviewed
-operator shell:
+production state change. Provision an owner-only migration credential through
+the approved secret procedure. Use it only in the temporary
+`SCHEMA_MIGRATION_DATABASE_URL` environment below; never reuse the gateway
+runtime `bracketiq_app` URL and never print either credential:
 
 ```text
+export SCHEMA_MIGRATION_DATABASE_URL_FILE=/path/to/affiliate-governed-private/schema-migration-database-url
+test ! -e "$SCHEMA_MIGRATION_DATABASE_URL_FILE"
+if ! (
+  umask 077
+  set -o noclobber
+  : > "$SCHEMA_MIGRATION_DATABASE_URL_FILE"
+); then
+  printf '%s\n' "Refusing to overwrite the schema migration credential file." >&2
+  exit 1
+fi
+chmod 0600 "$SCHEMA_MIGRATION_DATABASE_URL_FILE"
+test ! -L "$SCHEMA_MIGRATION_DATABASE_URL_FILE"
+# Write the reviewed owner-only migration DATABASE_URL with the approved secret procedure.
+test -s "$SCHEMA_MIGRATION_DATABASE_URL_FILE"
+export SCHEMA_MIGRATION_DATABASE_URL="$(cat "$SCHEMA_MIGRATION_DATABASE_URL_FILE")"
+test -n "$SCHEMA_MIGRATION_DATABASE_URL"
+test "$SCHEMA_MIGRATION_DATABASE_URL" != "$DATABASE_URL"
 export SCHEMA_MIGRATION_DEPLOY_OUTPUT=/path/to/affiliate-governed-private/schema-migration-deploy.txt
 export SCHEMA_MIGRATION_STATUS_OUTPUT=/path/to/affiliate-governed-private/schema-migration-status.txt
 install -m 0600 /dev/null "$SCHEMA_MIGRATION_DEPLOY_OUTPUT"
-assert_reviewed_database_identity
-npm run --silent migrate:deploy > "$SCHEMA_MIGRATION_DEPLOY_OUTPUT"
+install -m 0600 /dev/null "$SCHEMA_MIGRATION_STATUS_OUTPUT"
+DATABASE_URL="$SCHEMA_MIGRATION_DATABASE_URL" npm run --silent migrate:deploy \
+  > "$SCHEMA_MIGRATION_DEPLOY_OUTPUT"
 test -s "$SCHEMA_MIGRATION_DEPLOY_OUTPUT"
-npx prisma migrate status --schema prisma/schema.prisma \
+DATABASE_URL="$SCHEMA_MIGRATION_DATABASE_URL" \
+  npx prisma migrate status --schema prisma/schema.prisma \
   > "$SCHEMA_MIGRATION_STATUS_OUTPUT"
 test -s "$SCHEMA_MIGRATION_STATUS_OUTPUT"
 grep -Fq "Database schema is up to date" "$SCHEMA_MIGRATION_STATUS_OUTPUT"
+unset SCHEMA_MIGRATION_DATABASE_URL
 ```
 
 Stop if the migration command fails or the status output does not confirm that
@@ -1514,7 +1625,7 @@ Review this artifact before APPLY. It is a read-only projection, not proof of
 deployment. Do not use a write route or a caller-selected projection as the
 cutover evidence.
 
-3. Create a separate reviewed manifest file. It must list every old writer:
+3. Create a separate reviewed manifest file. The open-weight controller remains an offline/evaluation-only process; it must never be enabled or used as a production queue writer. The manifest must list every old writer:
 
 ```json
 {
@@ -1525,8 +1636,8 @@ cutover evidence.
   "processes": [
     {"id": "legacy-goal", "processClass": "GOAL"},
     {"id": "legacy-loop", "processClass": "MAPPING"},
-    {"id": "legacy-open-weight-controller-service", "processClass": "OPEN_WEIGHT_QUEUE_WRITER"},
-    {"id": "legacy-open-weight-controller-timer", "processClass": "OPEN_WEIGHT_QUEUE_WRITER"}
+    {"id": "legacy-open-weight-controller-service", "processClass": "CONTROLLER"},
+    {"id": "legacy-open-weight-controller-timer", "processClass": "CONTROLLER"}
   ],
   "systemdUnits": [
     {
@@ -1644,17 +1755,38 @@ printf '%s\n' "$REVIEWED_WORKER_CONTAINER_IDS" | awk '
 '
 install -m 0600 /dev/null \
   /path/to/affiliate-governed-private/reviewed-affiliate-workers.redacted.json
+export REVIEWED_WORKER_IMAGE_EVIDENCE=/path/to/affiliate-governed-private/reviewed-affiliate-worker-images.json
+test ! -e "$REVIEWED_WORKER_IMAGE_EVIDENCE"
+REVIEWED_WORKER_IMAGE_IDS="$(
+  docker inspect $REVIEWED_WORKER_CONTAINER_IDS |
+    jq -r '.[].Image' | sort -u | paste -sd' '
+)"
+printf '%s\n' "$REVIEWED_WORKER_IMAGE_IDS" | awk '
+  {
+    for (field_index = 1; field_index <= NF; field_index += 1) {
+      if ($field_index !~ /^sha256:[a-fA-F0-9]{64}$/) exit 1
+      count += 1
+    }
+  }
+  END { exit count == 1 ? 0 : 1 }
+'
+docker image inspect $REVIEWED_WORKER_IMAGE_IDS |
+  jq -e 'map({imageId: .Id, repoDigests: (.RepoDigests // [])})' \
+  > "$REVIEWED_WORKER_IMAGE_EVIDENCE"
+test -s "$REVIEWED_WORKER_IMAGE_EVIDENCE"
 docker inspect $REVIEWED_WORKER_CONTAINER_IDS |
-jq --arg reviewed_network "$(
+jq --slurpfile image_evidence "$REVIEWED_WORKER_IMAGE_EVIDENCE" \
+  --arg reviewed_network "$(
   sed -n 's/^AFFILIATE_AGENT_GATEWAY_NETWORK=//p' \
     /path/to/affiliate-governed-private/deployment.env
-)" 'map({
+)" '($image_evidence[0] | map({key: .imageId, value: .repoDigests}) | from_entries) as $repoDigestsByImageId
+| map({
   id: .Id,
   name: (.Name | ltrimstr("/")),
   service: .Config.Labels["com.docker.compose.service"],
   image: .Config.Image,
   imageId: .Image,
-  repoDigests: (.RepoDigests // []),
+  repoDigests: ($repoDigestsByImageId[.Image] // []),
   hasReadonlyRootFilesystem: .HostConfig.ReadonlyRootfs,
   privileged: (.HostConfig.Privileged // false),
   user: (.Config.User // null),
@@ -1781,23 +1913,51 @@ printf '%s\n' "$REPLENISHMENT_CONTAINER_ID" | awk '
   { count++ }
   END { exit count == 1 ? 0 : 1 }
 '
+export AFFILIATE_AGENT_GATEWAY_NETWORK="$(
+  jq -er '.networks.gateway_internal.name // empty' \
+    /path/to/affiliate-governed-private/governed-compose.redacted.json
+)"
+test -n "$AFFILIATE_AGENT_GATEWAY_NETWORK"
+export REPLENISHMENT_IMAGE_OBJECT_ID="$(docker inspect -f '{{.Image}}' "$REPLENISHMENT_CONTAINER_ID")"
+printf '%s\n' "$REPLENISHMENT_IMAGE_OBJECT_ID" \
+  | grep -Eq '^sha256:[a-fA-F0-9]{64}$'
+export REPLENISHMENT_IMAGE_EVIDENCE=/path/to/affiliate-governed-private/replenishment-image.json
+test ! -e "$REPLENISHMENT_IMAGE_EVIDENCE"
+docker image inspect "$REPLENISHMENT_IMAGE_OBJECT_ID" |
+  jq -e --arg expectedId "$REVIEWED_GATEWAY_IMAGE_ID" \
+    --arg expectedDigest "$REVIEWED_GATEWAY_REPO_DIGEST" '
+    if length == 1
+      and .[0].Id == $expectedId
+      and ((.[0].RepoDigests // []) | index($expectedDigest) != null)
+    then
+      [{imageId: .[0].Id, repoDigests: (.[0].RepoDigests // [])}]
+    else
+      error("invalid replenishment image evidence")
+    end
+  ' \
+  > "$REPLENISHMENT_IMAGE_EVIDENCE"
+test -s "$REPLENISHMENT_IMAGE_EVIDENCE"
 docker inspect "$REPLENISHMENT_CONTAINER_ID" |
-  jq -e --arg id "$REPLENISHMENT_CONTAINER_ID" \
+  jq -e --slurpfile image_evidence "$REPLENISHMENT_IMAGE_EVIDENCE" \
+    --arg id "$REPLENISHMENT_CONTAINER_ID" \
+    --arg expected_network "$AFFILIATE_AGENT_GATEWAY_NETWORK" \
     --arg image "$REVIEWED_GATEWAY_IMAGE" \
     --arg image_id "$REVIEWED_GATEWAY_IMAGE_ID" \
     --arg digest "$REVIEWED_GATEWAY_REPO_DIGEST" \
     --arg expected_user "$REVIEWED_GATEWAY_USER" '
     map(select(
-      .Id == $id
+      ($image_evidence[0][0]) as $image_object
+      | .Id == $id
       and .Config.Labels["com.docker.compose.service"] == "affiliate-replenishment-controller"
       and .Config.User == $expected_user
       and .Config.Image == $image
       and .Image == $image_id
-      and (.RepoDigests | type == "array")
-      and (.RepoDigests | index($digest) != null)
+      and ($image_object.imageId == .Image)
+      and (($image_object.repoDigests | type) == "array")
+      and (($image_object.repoDigests | index($digest)) != null)
       and .HostConfig.ReadonlyRootfs == true
       and (.HostConfig.RestartPolicy.Name // "no") == "no"
-      and ((.NetworkSettings.Networks // {}) | keys) == ["gateway_internal"]
+      and ((.NetworkSettings.Networks // {}) | keys) == [$expected_network]
       and ((.Config.Env // []) | any(startswith("AFFILIATE_AGENT_GATEWAY_ADDRESS=")))
       and ((.Config.Env // []) | any(startswith("AFFILIATE_AGENT_GATEWAY_PATH_PREFIX=")))
       and ((.Config.Env // []) | any(startswith("AFFILIATE_GATEWAY_REPLENISHMENT_TOKEN=")))
@@ -2746,6 +2906,7 @@ if ! (
     reviewed-supply-contract-impact-report.json \
     affiliate-operations-dashboard.json \
     reviewed-affiliate-workers.redacted.json \
+    reviewed-affiliate-worker-images.json \
     reviewed-affiliate-worker-container-ids.txt \
     reviewed-agent-network.json \
     affiliate-legacy-units.txt \
@@ -3178,8 +3339,8 @@ It does not read a file path. The shell export overrides the placeholder in
 Do not enable shell tracing. The session-bound `preflight-report.json` is not
 overwritten. If the gateway-startup report is older than 15 minutes before
 startup, do not rerun only the preflight command. Recapture process, unit,
-claim, permission, and non-gateway container evidence into uniquely named
-supplemental files. Have the second operator rebuild a fresh strict inventory
+claim, permission, and gateway/worker/auxiliary container evidence into uniquely
+named supplemental files. Have the second operator rebuild a fresh strict inventory
 from those captures using only the accepted schema fields; the supplemental
 captures must not be embedded as extra inventory keys. Never modify the
 session-bound `cutover-inventory.json`. Set the startup inventory `now` to the
@@ -3188,6 +3349,16 @@ facts changed, update the reviewed manifest source and generate a separate
 startup manifest artifact from the startup inventory. Rerun startup preflight
 with the matching startup manifest, the evidence hash block, and this
 verification and export:
+
+For this refresh, inspect four disjoint expected container sets: exactly one
+`affiliate-gateway`, exactly one `affiliate-agent-runner`, exactly five
+supervisors (`mapping-producer-1`, `mapping-producer-2`, `supply-reviewer-1`,
+`supply-reviewer-2`, and `coverage-planner`), and exactly two auxiliary/control
+plane services (`affiliate-agent-downstream-ready` and
+`affiliate-replenishment-controller`). The seven reviewed worker rows are not a
+source for any other set; the runner and both auxiliary rows are captured from
+their own inspections, then projected into their dedicated inventory fields.
+
 
 ```text
 export GATEWAY_REFRESH_TAG="$(date -u '+%Y%m%dT%H%M%SZ')-$$"
@@ -3203,6 +3374,10 @@ export GATEWAY_REFRESH_LEGACY_CLAIMS_SOURCE="/path/to/affiliate-governed-private
 export GATEWAY_REFRESH_PERMISSION_OUTPUT="/path/to/affiliate-governed-private/gateway-refresh-permissions.${GATEWAY_REFRESH_TAG}.tsv"
 export GATEWAY_REFRESH_UNITS_OUTPUT="/path/to/affiliate-governed-private/gateway-refresh-units.${GATEWAY_REFRESH_TAG}.txt"
 export GATEWAY_REFRESH_PERMISSION_FLAGS_OUTPUT="/path/to/affiliate-governed-private/gateway-refresh-permission-flags.${GATEWAY_REFRESH_TAG}.json"
+export GATEWAY_REFRESH_GATEWAY_CONTAINER_OUTPUT="/path/to/affiliate-governed-private/gateway-refresh-gateway-container.${GATEWAY_REFRESH_TAG}.redacted.json"
+export GATEWAY_REFRESH_RUNNER_CONTAINER_OUTPUT="/path/to/affiliate-governed-private/gateway-refresh-runner-container.${GATEWAY_REFRESH_TAG}.redacted.json"
+export GATEWAY_REFRESH_SUPERVISOR_CONTAINER_OUTPUT="/path/to/affiliate-governed-private/gateway-refresh-supervisor-containers.${GATEWAY_REFRESH_TAG}.redacted.json"
+export GATEWAY_REFRESH_AUXILIARY_CONTAINER_OUTPUT="/path/to/affiliate-governed-private/gateway-refresh-auxiliary-containers.${GATEWAY_REFRESH_TAG}.redacted.json"
 export GATEWAY_REFRESH_CONTAINERS_OUTPUT="/path/to/affiliate-governed-private/gateway-refresh-containers.${GATEWAY_REFRESH_TAG}.redacted.json"
 for startup_path in \
   "$GATEWAY_REFRESH_INVENTORY" \
@@ -3215,6 +3390,10 @@ for startup_path in \
   "$GATEWAY_REFRESH_UNITS_OUTPUT" \
   "$GATEWAY_REFRESH_PROCESS_INVENTORY_OUTPUT" \
   "$GATEWAY_REFRESH_UNIT_VALUES_OUTPUT" \
+  "$GATEWAY_REFRESH_GATEWAY_CONTAINER_OUTPUT" \
+  "$GATEWAY_REFRESH_RUNNER_CONTAINER_OUTPUT" \
+  "$GATEWAY_REFRESH_SUPERVISOR_CONTAINER_OUTPUT" \
+  "$GATEWAY_REFRESH_AUXILIARY_CONTAINER_OUTPUT" \
   "$GATEWAY_REFRESH_CONTAINERS_OUTPUT"; do
   test ! -e "$startup_path"
   test ! -L "$startup_path"
@@ -3491,53 +3670,228 @@ CROSS JOIN (VALUES
 ORDER BY 1, 2, 3, 4;
 SQL
 test -s "$GATEWAY_REFRESH_PERMISSION_OUTPUT"
-docker inspect $REVIEWED_WORKER_CONTAINER_IDS |
-  jq --arg reviewed_network "$(
-    sed -n 's/^AFFILIATE_AGENT_GATEWAY_NETWORK=//p' \
-      /path/to/affiliate-governed-private/deployment.env
-  )" 'map({
-    id: .Id,
-    name: (.Name | ltrimstr("/")),
-    service: .Config.Labels["com.docker.compose.service"],
-    image: .Config.Image,
-    imageId: .Image,
-    repoDigests: (.RepoDigests // []),
-    hasReadonlyRootFilesystem: .HostConfig.ReadonlyRootfs,
-    privileged: (.HostConfig.Privileged // false),
-    user: (.Config.User // null),
-    cgroupNamespace: (.HostConfig.CgroupnsMode // null),
-    tmpfs: (.HostConfig.Tmpfs // {}),
-    restartPolicy: (.HostConfig.RestartPolicy.Name // "no"),
-    environment: ([.Config.Env[]? | (split("=")[0] + "=<redacted>")]),
-    childUid: ([.Config.Env[]?
-      | select(startswith("AFFILIATE_AGENT_RUNNER_CHILD_UID="))
-      | split("=")[1] | tonumber] | .[0] // null),
-    childGid: ([.Config.Env[]?
-      | select(startswith("AFFILIATE_AGENT_RUNNER_CHILD_GID="))
-      | split("=")[1] | tonumber] | .[0] // null),
-    supervisorUid: ([.Config.Env[]?
-      | select(startswith("AFFILIATE_AGENT_UID="))
-      | split("=")[1] | tonumber] | .[0] // null),
-    cgroupRelativePath: ([.Config.Env[]?
-      | select(startswith("AFFILIATE_AGENT_RUNNER_CGROUP_RELATIVE_PATH="))
-      | split("=")[1]] | .[0] // null),
-    ipcMode: (.HostConfig.IpcMode // null),
-    networks: ([.NetworkSettings.Networks // {} | keys[]]),
-    isNetworkInternal: (([.NetworkSettings.Networks // {} | keys[]] | sort)
-      == [$reviewed_network]),
-    capDrop: (.HostConfig.CapDrop // []),
-    capAdd: (.HostConfig.CapAdd // []),
-    groupAdd: (.HostConfig.GroupAdd // []),
-    securityOptions: (.HostConfig.SecurityOpt // [])
-    } | if .service == "affiliate-agent-runner"
-        then .
-        else del(.childUid, .childGid, .supervisorUid, .cgroupRelativePath)
-        end)' > "$GATEWAY_REFRESH_CONTAINERS_OUTPUT"
+GATEWAY_REFRESH_GATEWAY_CONTAINER_ID="$(
+  docker compose --env-file /path/to/affiliate-governed-private/deployment.env \
+    -f compose.yml ps -aq affiliate-gateway
+)"
+GATEWAY_REFRESH_RUNNER_CONTAINER_ID="$(
+  docker compose --env-file /path/to/affiliate-governed-private/deployment.env \
+    -f compose.yml ps -aq affiliate-agent-runner
+)"
+GATEWAY_REFRESH_SUPERVISOR_CONTAINER_IDS="$(
+  docker compose --env-file /path/to/affiliate-governed-private/deployment.env \
+    -f compose.yml --profile coverage-planner ps -aq \
+    mapping-producer-1 mapping-producer-2 supply-reviewer-1 supply-reviewer-2 \
+    coverage-planner
+)"
+GATEWAY_REFRESH_AUXILIARY_CONTAINER_IDS="$(
+  docker compose --env-file /path/to/affiliate-governed-private/deployment.env \
+    -f compose.yml --profile coverage-planner ps -aq \
+    affiliate-agent-downstream-ready affiliate-replenishment-controller
+)"
+gateway_refresh_assert_ids() {
+  printf '%s\n' "$1" | awk -v expected="$2" '
+    NF != 1 || length($1) != 64 || $1 !~ /^[a-fA-F0-9]+$/ || seen[$1]++ {
+      exit 1
+    }
+    { count++ }
+    END { exit count == expected ? 0 : 1 }
+  '
+}
+gateway_refresh_assert_ids "$GATEWAY_REFRESH_GATEWAY_CONTAINER_ID" 1
+gateway_refresh_assert_ids "$GATEWAY_REFRESH_RUNNER_CONTAINER_ID" 1
+gateway_refresh_assert_ids "$GATEWAY_REFRESH_SUPERVISOR_CONTAINER_IDS" 5
+gateway_refresh_assert_ids "$GATEWAY_REFRESH_AUXILIARY_CONTAINER_IDS" 2
+if test "$(printf '%s\n' \
+  "$GATEWAY_REFRESH_GATEWAY_CONTAINER_ID" \
+  "$GATEWAY_REFRESH_RUNNER_CONTAINER_ID" \
+  "$GATEWAY_REFRESH_SUPERVISOR_CONTAINER_IDS" \
+  "$GATEWAY_REFRESH_AUXILIARY_CONTAINER_IDS" |
+  sort -u | wc -l | tr -d '[:space:]')" != "9"; then
+  printf '%s\n' "gateway, runner, supervisor, and auxiliary container identities must be distinct." >&2
+  exit 1
+fi
+gateway_refresh_inspect_set() {
+  local image_ids image_evidence inspect_status
+  image_ids="$(
+    docker inspect "$@" |
+      jq -r '.[].Image' | sort -u | paste -sd' '
+  )"
+  printf '%s\n' "$image_ids" | awk '
+    {
+      for (field_index = 1; field_index <= NF; field_index += 1) {
+        if ($field_index !~ /^sha256:[a-fA-F0-9]{64}$/) exit 1
+        count += 1
+      }
+    }
+    END { exit count > 0 ? 0 : 1 }
+  '
+  image_evidence="$(mktemp)"
+  chmod 0600 "$image_evidence"
+  if ! docker image inspect $image_ids |
+    jq -e 'map({
+      imageId: .Id,
+      repoDigests: (.RepoDigests // [])
+    }) | if all(.[]; (.imageId | test("^sha256:[a-fA-F0-9]{64}$"))
+      and (.repoDigests | type == "array")) then . else error("invalid image evidence") end' \
+    > "$image_evidence"; then
+    rm -f "$image_evidence"
+    return 1
+  fi
+  if docker inspect "$@" |
+    jq --slurpfile image_evidence "$image_evidence" \
+      --arg reviewed_network "$(
+        sed -n 's/^AFFILIATE_AGENT_GATEWAY_NETWORK=//p' \
+          /path/to/affiliate-governed-private/deployment.env
+      )" '($image_evidence[0] | map({key: .imageId, value: .repoDigests}) | from_entries) as $repoDigestsByImageId
+      | map({
+        id: .Id,
+        name: (.Name | ltrimstr("/")),
+        service: .Config.Labels["com.docker.compose.service"],
+        status: (.State.Status // "unknown"),
+        image: .Config.Image,
+        imageId: .Image,
+        repoDigests: ($repoDigestsByImageId[.Image] // []),
+        hasReadonlyRootFilesystem: .HostConfig.ReadonlyRootfs,
+        privileged: (.HostConfig.Privileged // false),
+        user: (.Config.User // null),
+        cgroupNamespace: (.HostConfig.CgroupnsMode // null),
+        tmpfs: (.HostConfig.Tmpfs // {}),
+        restartPolicy: (.HostConfig.RestartPolicy.Name // "no"),
+        environment: ([.Config.Env[]? | (split("=")[0] + "=<redacted>")]),
+        childUid: ([.Config.Env[]?
+          | select(startswith("AFFILIATE_AGENT_RUNNER_CHILD_UID="))
+          | split("=")[1] | tonumber] | .[0] // null),
+        childGid: ([.Config.Env[]?
+          | select(startswith("AFFILIATE_AGENT_RUNNER_CHILD_GID="))
+          | split("=")[1] | tonumber] | .[0] // null),
+        supervisorUid: ([.Config.Env[]?
+          | select(startswith("AFFILIATE_AGENT_UID="))
+          | split("=")[1] | tonumber] | .[0] // null),
+        cgroupRelativePath: ([.Config.Env[]?
+          | select(startswith("AFFILIATE_AGENT_RUNNER_CGROUP_RELATIVE_PATH="))
+          | split("=")[1]] | .[0] // null),
+        ipcMode: (.HostConfig.IpcMode // null),
+        networks: ([.NetworkSettings.Networks // {} | keys[]]),
+        isNetworkInternal: (([.NetworkSettings.Networks // {} | keys[]] | sort)
+          == [$reviewed_network]),
+        capDrop: (.HostConfig.CapDrop // []),
+        capAdd: (.HostConfig.CapAdd // []),
+        groupAdd: (.HostConfig.GroupAdd // []),
+        securityOptions: (.HostConfig.SecurityOpt // [])
+        } | if .service == "affiliate-agent-runner"
+            then .
+            else del(.childUid, .childGid, .supervisorUid, .cgroupRelativePath)
+            end)'
+    then
+    inspect_status=0
+  else
+    inspect_status=$?
+  fi
+  rm -f "$image_evidence"
+  return "$inspect_status"
+}
+gateway_refresh_inspect_set "$GATEWAY_REFRESH_GATEWAY_CONTAINER_ID" \
+  > "$GATEWAY_REFRESH_GATEWAY_CONTAINER_OUTPUT"
+gateway_refresh_inspect_set "$GATEWAY_REFRESH_RUNNER_CONTAINER_ID" \
+  > "$GATEWAY_REFRESH_RUNNER_CONTAINER_OUTPUT"
+gateway_refresh_inspect_set $GATEWAY_REFRESH_SUPERVISOR_CONTAINER_IDS \
+  > "$GATEWAY_REFRESH_SUPERVISOR_CONTAINER_OUTPUT"
+gateway_refresh_inspect_set $GATEWAY_REFRESH_AUXILIARY_CONTAINER_IDS \
+  > "$GATEWAY_REFRESH_AUXILIARY_CONTAINER_OUTPUT"
+unset -f gateway_refresh_inspect_set gateway_refresh_assert_ids
+test -s "$GATEWAY_REFRESH_GATEWAY_CONTAINER_OUTPUT"
+test -s "$GATEWAY_REFRESH_RUNNER_CONTAINER_OUTPUT"
+test -s "$GATEWAY_REFRESH_SUPERVISOR_CONTAINER_OUTPUT"
+test -s "$GATEWAY_REFRESH_AUXILIARY_CONTAINER_OUTPUT"
+jq -e '
+  length == 1
+  and .[0].service == "affiliate-gateway"
+  and (.[0].status | type == "string" and length > 0)
+' "$GATEWAY_REFRESH_GATEWAY_CONTAINER_OUTPUT"
+jq -e '
+  length == 1
+  and .[0].service == "affiliate-agent-runner"
+  and (.[0].status | type == "string" and length > 0)
+' "$GATEWAY_REFRESH_RUNNER_CONTAINER_OUTPUT"
+jq -e '
+  length == 5
+  and ([.[].service] | sort) == [
+    "coverage-planner",
+    "mapping-producer-1",
+    "mapping-producer-2",
+    "supply-reviewer-1",
+    "supply-reviewer-2"
+  ]
+  and all(.[].status; type == "string" and length > 0)
+' "$GATEWAY_REFRESH_SUPERVISOR_CONTAINER_OUTPUT"
+jq -e '
+  length == 2
+  and ([.[].service] | sort) == [
+    "affiliate-agent-downstream-ready",
+    "affiliate-replenishment-controller"
+  ]
+  and all(.[].status; type == "string" and length > 0)
+' "$GATEWAY_REFRESH_AUXILIARY_CONTAINER_OUTPUT"
+jq -e \
+  --arg expected "$REVIEWED_GATEWAY_IMAGE" \
+  --arg expectedId "$REVIEWED_GATEWAY_IMAGE_ID" \
+  --arg expectedRepoDigest "$REVIEWED_GATEWAY_REPO_DIGEST" '
+  length == 1
+  and all(.[];
+    .service == "affiliate-gateway"
+    and .image == $expected
+    and .imageId == $expectedId
+    and (.repoDigests | type == "array")
+    and (.repoDigests | index($expectedRepoDigest) != null)
+    and .hasReadonlyRootFilesystem == true
+    and .privileged == false
+  )
+' "$GATEWAY_REFRESH_GATEWAY_CONTAINER_OUTPUT"
 jq -e \
   --arg expected "$REVIEWED_AGENT_IMAGE" \
   --arg expectedId "$REVIEWED_AGENT_IMAGE_ID" \
   --arg expectedRepoDigest "$REVIEWED_AGENT_REPO_DIGEST" '
-  length == 7
+  length == 1
+  and all(.[];
+    .service == "affiliate-agent-runner"
+    and .image == $expected
+    and .imageId == $expectedId
+    and (.repoDigests | type == "array")
+    and (.repoDigests | index($expectedRepoDigest) != null)
+    and .hasReadonlyRootFilesystem == true
+    and .privileged == false
+  )
+' "$GATEWAY_REFRESH_RUNNER_CONTAINER_OUTPUT"
+jq -e \
+  --arg agent "$REVIEWED_AGENT_IMAGE" \
+  --arg agentId "$REVIEWED_AGENT_IMAGE_ID" \
+  --arg agentDigest "$REVIEWED_AGENT_REPO_DIGEST" \
+  --arg gateway "$REVIEWED_GATEWAY_IMAGE" \
+  --arg gatewayId "$REVIEWED_GATEWAY_IMAGE_ID" \
+  --arg gatewayDigest "$REVIEWED_GATEWAY_REPO_DIGEST" '
+  length == 2
+  and all(.[];
+    if .service == "affiliate-replenishment-controller" then
+      .image == $gateway
+      and .imageId == $gatewayId
+      and (.repoDigests | type == "array")
+      and (.repoDigests | index($gatewayDigest) != null)
+    else
+      .image == $agent
+      and .imageId == $agentId
+      and (.repoDigests | type == "array")
+      and (.repoDigests | index($agentDigest) != null)
+    end
+    and .hasReadonlyRootFilesystem == true
+    and .privileged == false
+  )
+' "$GATEWAY_REFRESH_AUXILIARY_CONTAINER_OUTPUT"
+jq -e \
+  --arg expected "$REVIEWED_AGENT_IMAGE" \
+  --arg expectedId "$REVIEWED_AGENT_IMAGE_ID" \
+  --arg expectedRepoDigest "$REVIEWED_AGENT_REPO_DIGEST" '
+  length == 5
   and all(.[];
     .image == $expected
     and .imageId == $expectedId
@@ -3548,18 +3902,27 @@ jq -e \
     and (.capDrop | type) == "array"
     and (.capAdd | type) == "array"
     and (.groupAdd | type) == "array"
-' "$GATEWAY_REFRESH_CONTAINERS_OUTPUT"
+  )
+' "$GATEWAY_REFRESH_SUPERVISOR_CONTAINER_OUTPUT"
 jq -e '
 def exact_tmpfs($path; $options):
   ((.tmpfs[$path] // "")
     | split(",")
     | map((gsub("^\\s+|\\s+$"; "") | ascii_downcase | sub("^mode=0+"; "mode=")))
     | sort) == ($options | sort);
-.[] | select(.service == "affiliate-agent-runner")
+.[] | .service == "affiliate-agent-runner"
 | .ipcMode == "none"
   and exact_tmpfs("/tmp"; ["mode=755", "nodev", "noexec", "nosuid", "rw", "size=256m", "uid=0", "gid=0"])
   and exact_tmpfs("/dev/shm"; ["mode=755", "nodev", "noexec", "nosuid", "rw", "size=64m", "uid=0", "gid=0"])
-' "$GATEWAY_REFRESH_CONTAINERS_OUTPUT"
+' "$GATEWAY_REFRESH_RUNNER_CONTAINER_OUTPUT"
+jq 'map({
+  id, name, user, privileged, hasReadonlyRootFilesystem,
+  cgroupNamespace, ipcMode, tmpfs, isNetworkInternal,
+  environment, networks, capDrop, capAdd, groupAdd, securityOptions
+} | with_entries(select(.value != null)))' \
+  "$GATEWAY_REFRESH_SUPERVISOR_CONTAINER_OUTPUT" \
+  > "$GATEWAY_REFRESH_CONTAINERS_OUTPUT"
+test -s "$GATEWAY_REFRESH_CONTAINERS_OUTPUT"
 export GATEWAY_REFRESH_AGENT_CONNECT_ALLOWED="$(
   awk -F '\t' '
     $1 == "database" &&
@@ -3706,45 +4069,29 @@ if ! (
     --slurpfile process_inventory "$GATEWAY_REFRESH_PROCESS_INVENTORY_OUTPUT" \
     --slurpfile unit_values "$GATEWAY_REFRESH_UNIT_VALUES_OUTPUT" \
     --slurpfile claims "$GATEWAY_REFRESH_CLAIMS_OUTPUT" \
-    --slurpfile containers "$GATEWAY_REFRESH_CONTAINERS_OUTPUT" \
+    --slurpfile gateway "$GATEWAY_REFRESH_GATEWAY_CONTAINER_OUTPUT" \
+    --slurpfile runner "$GATEWAY_REFRESH_RUNNER_CONTAINER_OUTPUT" \
+    --slurpfile supervisors "$GATEWAY_REFRESH_CONTAINERS_OUTPUT" \
+    --slurpfile auxiliary "$GATEWAY_REFRESH_AUXILIARY_CONTAINER_OUTPUT" \
     --slurpfile permission_flags "$GATEWAY_REFRESH_PERMISSION_FLAGS_OUTPUT" \
     '
-    ($containers[0]
-      | map(select(.service == "affiliate-agent-runner") | {
+    ($runner[0]
+      | map({
           id, name, user, privileged, hasReadonlyRootFilesystem,
           cgroupNamespace, ipcMode, tmpfs, isNetworkInternal,
           childUid, childGid, supervisorUid, environment, networks,
           capDrop, capAdd, groupAdd, securityOptions
         } | with_entries(select(.value != null)))
       | .[0]) as $freshRunner
-    | ($containers[0]
-      | map(select(
-          .service == "affiliate-agent-downstream-ready"
-          or .service == "affiliate-replenishment-controller"
-        ) | {
+    | ($auxiliary[0]
+      | map({
           id, name, user, privileged, hasReadonlyRootFilesystem,
           cgroupNamespace, ipcMode, tmpfs, isNetworkInternal,
           environment, networks, capDrop, capAdd, groupAdd, securityOptions
-        } | with_entries(select(.value != null))) ) as $freshAuxiliaryContainers
-    | ($containers[0]
-      | map(select(
-          .service == "affiliate-gateway"
-          or .service == "affiliate-agent-runner"
-          or .service == "affiliate-agent-downstream-ready"
-          or .service == "affiliate-replenishment-controller"
-        ) | {id: .service, status})) as $freshControlPlaneProcesses
-    | ($containers[0]
-      | map(select(
-          .service != "affiliate-agent-runner"
-          and .service != "affiliate-agent-downstream-ready"
-          and .service != "affiliate-gateway"
-          and .service != "affiliate-replenishment-controller"
-        ) | {
-          id, name, user, privileged, hasReadonlyRootFilesystem,
-          cgroupNamespace, ipcMode, tmpfs, isNetworkInternal,
-          childUid, childGid, supervisorUid, environment, networks,
-          capDrop, capAdd, groupAdd, securityOptions
-        } | with_entries(select(.value != null)))) as $freshContainers
+        } | with_entries(select(.value != null)))) as $freshAuxiliaryContainers
+    | ([$gateway[0][], $runner[0][], $auxiliary[0][]]
+      | map({id: .service, status})) as $freshControlPlaneProcesses
+    | ($supervisors[0]) as $freshContainers
     | .now = $now
     | .processInventoryArtifactId = $process_artifact
     | .processInventoryHash = $process_hash
@@ -3786,6 +4133,10 @@ export GATEWAY_STARTUP_PREFLIGHT="$GATEWAY_REFRESH_PREFLIGHT"
     "$GATEWAY_REFRESH_PERMISSION_OUTPUT" \
     "$GATEWAY_REFRESH_PERMISSION_FLAGS_OUTPUT" \
     "$GATEWAY_REFRESH_UNITS_OUTPUT" \
+    "$GATEWAY_REFRESH_GATEWAY_CONTAINER_OUTPUT" \
+    "$GATEWAY_REFRESH_RUNNER_CONTAINER_OUTPUT" \
+    "$GATEWAY_REFRESH_SUPERVISOR_CONTAINER_OUTPUT" \
+    "$GATEWAY_REFRESH_AUXILIARY_CONTAINER_OUTPUT" \
     "$GATEWAY_REFRESH_CONTAINERS_OUTPUT" \
     "$GATEWAY_STARTUP_INVENTORY" \
     "$GATEWAY_STARTUP_MANIFEST" \
@@ -3861,22 +4212,51 @@ printf '%s\n' "$REVIEWED_CONTAINER_IDS" | awk '
   END { exit count == 9 ? 0 : 1 }
 '
 test "$(sort -u "$REVIEWED_CONTAINER_IDS_FILE" | wc -l | tr -d '[:space:]')" = "9"
+export REVIEWED_CONTAINER_IMAGE_EVIDENCE=/path/to/affiliate-governed-private/reviewed-affiliate-container-images.json
+test ! -e "$REVIEWED_CONTAINER_IMAGE_EVIDENCE"
+test ! -L "$REVIEWED_CONTAINER_IMAGE_EVIDENCE"
+REVIEWED_CONTAINER_IMAGE_IDS="$(
+  docker inspect $REVIEWED_CONTAINER_IDS |
+    jq -r '.[].Image' | sort -u | paste -sd' '
+)"
+printf '%s\n' "$REVIEWED_CONTAINER_IMAGE_IDS" | awk '
+  {
+    for (field_index = 1; field_index <= NF; field_index += 1) {
+      if (length($field_index) != 71 || $field_index !~ /^sha256:[a-fA-F0-9]{64}$/) exit 1
+      count += 1
+    }
+  }
+  END { exit count == 2 ? 0 : 1 }
+'
+docker image inspect $REVIEWED_CONTAINER_IMAGE_IDS |
+  jq -e 'map({
+    imageId: .Id,
+    repoDigests: (.RepoDigests // [])
+  }) | if length == 2
+    and all(.[]; (.imageId | test("^sha256:[a-fA-F0-9]{64}$"))
+      and (.repoDigests | type == "array"))
+    then .
+    else error("invalid image evidence")
+    end' \
+test -s "$REVIEWED_CONTAINER_IMAGE_EVIDENCE"
 export REVIEWED_CONTAINERS_OUTPUT=/path/to/affiliate-governed-private/reviewed-affiliate-containers.redacted.json
 test ! -e "$REVIEWED_CONTAINERS_OUTPUT"
 test ! -L "$REVIEWED_CONTAINERS_OUTPUT"
 install -m 0600 /dev/null "$REVIEWED_CONTAINERS_OUTPUT"
 docker inspect $REVIEWED_CONTAINER_IDS |
-jq --arg reviewed_network "$(
+jq --slurpfile image_evidence "$REVIEWED_CONTAINER_IMAGE_EVIDENCE" \
+  --arg reviewed_network "$(
   sed -n 's/^AFFILIATE_AGENT_GATEWAY_NETWORK=//p' \
     /path/to/affiliate-governed-private/deployment.env
-)" 'map({
+)" '($image_evidence[0] | map({key: .imageId, value: .repoDigests}) | from_entries) as $repoDigestsByImageId
+| map({
   id: .Id,
   name: (.Name | ltrimstr("/")),
   service: .Config.Labels["com.docker.compose.service"],
   status: (.State.Status // "unknown"),
   image: .Config.Image,
   imageId: .Image,
-  repoDigests: (.RepoDigests // []),
+  repoDigests: ($repoDigestsByImageId[.Image] // []),
   command: (.Config.Cmd // []),
   cgroupNamespace: (.HostConfig.CgroupnsMode // "default"),
   ipcMode: (.HostConfig.IpcMode // "private"),
@@ -3958,13 +4338,14 @@ jq -e \
   )
 ' "$REVIEWED_CONTAINERS_OUTPUT"
 jq -e --arg id "$REPLENISHMENT_CONTAINER_ID" \
-  --arg expectedUser "$REVIEWED_GATEWAY_USER" '
+  --arg expectedUser "$REVIEWED_GATEWAY_USER" \
+  --arg expectedNetwork "$AFFILIATE_AGENT_GATEWAY_NETWORK" '
   .[]
   | select(.id == $id)
   | .service == "affiliate-replenishment-controller"
     and .user == $expectedUser
     and .restartPolicy == "no"
-    and .networks == ["gateway_internal"]
+    and .networks == [$expectedNetwork]
     and (.environment
       | index("AFFILIATE_AGENT_GATEWAY_ADDRESS=<redacted>") != null)
     and (.environment
@@ -4002,21 +4383,24 @@ if ! (
   umask 077
   set -o noclobber
   docker inspect "$GATEWAY_CONTAINER_ID" |
-    jq -e --arg id "$GATEWAY_CONTAINER_ID" \
+    jq -e --slurpfile image_evidence "$REVIEWED_CONTAINER_IMAGE_EVIDENCE" \
+      --arg id "$GATEWAY_CONTAINER_ID" \
       --arg expected "$AFFILIATE_AGENT_PREFLIGHT_REPORT_JSON" \
       --arg image "$REVIEWED_GATEWAY_IMAGE" \
       --arg image_id "$REVIEWED_GATEWAY_IMAGE_ID" \
       --arg image_digest "$REVIEWED_GATEWAY_REPO_DIGEST" \
       --arg expected_user "$REVIEWED_GATEWAY_USER" \
       --arg preflight_hash "$GATEWAY_PREFLIGHT_REPORT_HASH" '
-      map(select(
+      ($image_evidence[0][] | select(.imageId == $image_id)) as $image_object
+      | map(select(
         .Id == $id
         and ((.Config.Env // [])
           | index("AFFILIATE_AGENT_PREFLIGHT_REPORT_JSON=" + $expected) != null)
         and .Config.Image == $image
         and .Image == $image_id
-        and (.RepoDigests | type == "array")
-        and (.RepoDigests | index($image_digest) != null)
+        and ($image_object.imageId == .Image)
+        and (($image_object.repoDigests | type) == "array")
+        and (($image_object.repoDigests | index($image_digest)) != null)
         and .Config.User == $expected_user
         and .HostConfig.ReadonlyRootfs == true
       ))
@@ -4026,7 +4410,7 @@ if ! (
           service: .Config.Labels["com.docker.compose.service"],
           image: .Config.Image,
           imageId: .Image,
-          repoDigests: (.RepoDigests // []),
+          repoDigests: $image_object.repoDigests,
           hasReadonlyRootFilesystem: .HostConfig.ReadonlyRootfs,
           preflightReportHash: $preflight_hash
         } end
@@ -4040,7 +4424,9 @@ fi
   shasum -a 256 \
     "$REVIEWED_CONTAINER_IDS_FILE" \
     "$REVIEWED_REPLENISHMENT_CONTAINER_ID_FILE" \
+    "$REPLENISHMENT_IMAGE_EVIDENCE" \
     "$REVIEWED_CONTAINERS_OUTPUT" \
+    "$REVIEWED_CONTAINER_IMAGE_EVIDENCE" \
     "$GATEWAY_STARTUP_PREFLIGHT" \
     "$GATEWAY_STARTUP_CONTAINER_OUTPUT"
 ) >> "$DEPLOYMENT_EVIDENCE_HASH"
@@ -4338,8 +4724,8 @@ for runner_socket_attempt in $(seq 1 30); do
     && test -r "$HOST_RUNNER_SOCKET" \
     && test -w "$HOST_RUNNER_SOCKET" \
     && test "$(stat -c '%u:%g' "$HOST_RUNNER_SOCKET")" = \
-      "0:$HOST_WORKSPACE_GID" \
-    && test "$(stat -c '%a' "$HOST_RUNNER_SOCKET")" = "660"; then
+      "1001:0" \
+    && test "$(stat -c '%a' "$HOST_RUNNER_SOCKET")" = "600"; then
     export RUNNER_SOCKET_READY=1
     break
   fi
@@ -4349,8 +4735,8 @@ test "$RUNNER_SOCKET_READY" = "1"
 sudo -n -u "#$HOST_WORKSPACE_RUNNER_UID" -g "#$HOST_WORKSPACE_GID" -- \
   sh -ceu '
     test -S "$1/.runner.sock"
-    test "$(stat -c "%u:%g" "$1/.runner.sock")" = "0:$2"
-    test "$(stat -c "%a" "$1/.runner.sock")" = "660"
+    test "$(stat -c "%u:%g" "$1/.runner.sock")" = "1001:0"
+    test "$(stat -c "%a" "$1/.runner.sock")" = "600"
     ! rm "$1/.runner.sock" 2>/dev/null
   ' -- "$HOST_WORKSPACE_ROOT" "$HOST_WORKSPACE_GID"
 while IFS= read -r container_id; do

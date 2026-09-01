@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import { assertAffiliateLegacyLocalDatabase } from '../src/server/affiliateImports/agentRepository';
 
 dotenv.config({ quiet: true });
 dotenv.config({ path: '.env.local', override: false, quiet: true });
@@ -8,6 +9,7 @@ if (process.env.NODE_ENV === 'production' || process.argv.includes('--live')) {
   console.error(LEGACY_RETIREMENT_MESSAGE);
   process.exit(78);
 }
+assertAffiliateLegacyLocalDatabase();
 
 if (process.argv.includes('--live')) {
   if (!process.env.DATABASE_URL_LIVE?.trim()) {

@@ -2635,7 +2635,6 @@ type ProductionProducerRepairContext = Readonly<{
   >;
   producerEnvelope: AffiliateAgentClaimEnvelope;
   mappingJobId: string;
-  lifecycleGeneration: number;
 }>;
 
 const assertProductionProducerRepairEnvelope = (
@@ -2707,31 +2706,24 @@ const productionProducerRepairContext = async (
   if (!source || source.supplySourceId !== reviewerSubject.supplySourceId) {
     throw new Error("The producer repair source lineage is invalid.");
   }
-  const supplySource = await input.prisma.affiliateSupplySources.findUnique({
-    where: { id: reviewerSubject.supplySourceId },
-  });
-  if (!supplySource) {
-    throw new Error("The producer repair Supply Source was not found.");
-  }
   return {
     reviewerSubject: { ...reviewerSubject, reviewPass: repairPass },
     producerEnvelope,
     mappingJobId: producerSubject.mappingJobId,
-    lifecycleGeneration: supplySource.lifecycleGeneration,
   };
 };
-
 const enqueueProducerRepairJob = async (
   input: ProductionAdapterInput,
   effectInput: AffiliateAgentTerminalEffectAdapterInput<"PRODUCER_REPAIR_REQUIRED">,
   repairIssues: readonly string[],
+  lifecycleGeneration: number,
 ): Promise<Readonly<{
   repairJobId: string;
   repairPass: number;
   lifecycleGeneration: number;
 }> > => {
   const context = await productionProducerRepairContext(input, effectInput);
-  const { reviewerSubject, producerEnvelope, mappingJobId, lifecycleGeneration } = context;
+  const { reviewerSubject, producerEnvelope, mappingJobId } = context;
   const packageHash = productionString(
     productionRecord(effectInput.result.payload).committedPackageHash,
   ) ?? reviewerSubject.committedPackageHash;
@@ -2782,6 +2774,7 @@ const enqueueProducerRepairJob = async (
   };
 };
 
+
 const productionProducerRepairEffect = (
   input: ProductionAdapterInput,
 ) => async (
@@ -2807,7 +2800,12 @@ const productionProducerRepairEffect = (
         : [],
     }),
   )(effectInput);
-  const repair = await enqueueProducerRepairJob(input, effectInput, repairIssues);
+  const repair = await enqueueProducerRepairJob(
+    input,
+    effectInput,
+    repairIssues,
+    lifecycleResult.lifecycleGeneration,
+  );
   return {
     ...lifecycleResult,
     ...repair,

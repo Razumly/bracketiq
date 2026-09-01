@@ -11927,6 +11927,11 @@ const buildLegacyLifecycleWrite = (
     snapshots: input.assessmentSnapshots,
   });
   const assessment = assessmentData?.assessment ?? null;
+  if (assessment && assessment.invariantViolations.length > 0) {
+    throw new Error(
+      `Legacy reconciliation root ${rootId} has invariant violations: ${assessment.invariantViolations.join('; ')}`,
+    );
+  }
   const observedOutcome = assessment?.outcome ?? null;
   const request = legacyLifecycleRequest(input, plan, rootId, observedStage, observedOutcome);
   const result = legacyLifecycleResult(input, plan, observedStage, observedOutcome);
@@ -12100,6 +12105,33 @@ const assertLegacyLifecycleWritesMatchExisting = (
     if (existing) assertLegacyLifecycleWriteMatchesExisting(input, write, existing);
   }
 };
+const assertLegacyLifecycleTransitionsMatchRoots = (
+  input: AffiliateLegacyLifecyclePersistenceInput,
+  writes: readonly AffiliateLegacyLifecycleWrite[],
+  latestByRoot: ReadonlyMap<string, AffiliateLegacyTransitionRow>,
+): void => {
+  for (const write of writes) {
+    const latest = latestByRoot.get(write.rootId);
+    if (!latest) continue;
+    const root = input.rootsById.get(write.rootId);
+    const rootGeneration = Number(root?.lifecycleGeneration ?? 0);
+    const latestSequence = typeof latest.sequence === 'number' ? latest.sequence : NaN;
+    const latestGeneration = typeof latest.generation === 'number' ? latest.generation : NaN;
+    if (
+      !Number.isInteger(rootGeneration)
+      || !Number.isInteger(latestSequence)
+      || !Number.isInteger(latestGeneration)
+      || latestSequence !== rootGeneration
+      || latestGeneration !== rootGeneration
+    ) {
+      throw new Error(
+        `Legacy reconciliation lifecycle generation drift for root ${write.rootId}: `
+        + `root=${rootGeneration}, latest sequence=${latestSequence}, latest generation=${latestGeneration}.`,
+      );
+    }
+  }
+};
+
 
 const persistLegacyLifecycleBatch = async (
   input: AffiliateLegacyLifecyclePersistenceInput,
@@ -12162,6 +12194,7 @@ const persistLegacyReconciledLifecycles = async (
   const rootIds = Array.from(new Set(input.planToRoot.values()));
   const preloaded = await preloadLegacyLifecycleTransitions(input.database, rootIds);
   const writes = buildLegacyLifecycleWrites(input);
+  assertLegacyLifecycleTransitionsMatchRoots(input, writes, preloaded.latestByRoot);
   assertLegacyLifecycleWritesMatchExisting(input, writes, preloaded.existingByKey);
   if (await persistLegacyLifecycleBatch(
     input,
@@ -14882,6 +14915,7 @@ const assertLegacyApplyPreflight = (
     || !isLegacySafePreflight(preflight)
     || preflight.isReady !== true
     || preflight.supplyContractVersion !== preparation.contract.policy.version
+    || preflight.supplyContractHash !== preparation.contract.policy.hash
     || !isLegacyApplySessionBound(preparation, preflight)
     || (!preparation.appliedRun && !isLegacyFreshStoppedPreflight(preflight, preparation.now))
   ) {

@@ -123,10 +123,10 @@ const processInventory = [
   { id: 'coverage-1', kind: 'GOVERNED', role: 'COVERAGE_PLANNER', workerId: 'coverage-1', command: 'affiliate:agent:supervisor', status: 'STOPPED' },
 ] as const;
 const controlPlaneProcesses = [
-  { id: 'affiliate-gateway', status: 'RUNNING' },
+  { id: 'affiliate-gateway', status: 'STOPPED' },
   { id: 'affiliate-agent-runner', status: 'RUNNING' },
   { id: 'affiliate-agent-downstream-ready', status: 'COMPLETED' },
-  { id: 'affiliate-replenishment-controller', status: 'RUNNING' },
+  { id: 'affiliate-replenishment-controller', status: 'STOPPED' },
 ] as const;
 const auxiliaryContainers = [
   governedContainer('affiliate-agent-downstream-ready'),
@@ -1012,6 +1012,42 @@ describe('affiliate fleet cutover contracts', () => {
       }),
     ]));
   });
+  it('blocks running control-plane writers', () => {
+    const report = buildAffiliateCutoverPreflightReport(preflightInput({
+      controlPlaneProcesses: controlPlaneProcesses.map((process) => (
+        process.id === 'affiliate-gateway'
+          || process.id === 'affiliate-replenishment-controller'
+          ? { ...process, status: 'RUNNING' }
+          : process
+      )),
+    }));
+
+    expect(report.isReady).toBe(false);
+    expect(report.blockingFindings).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'CONTROL_PLANE_WRITER_RUNNING',
+        recordIds: ['affiliate-gateway', 'affiliate-replenishment-controller'],
+      }),
+    ]));
+  });
+
+  it('blocks unsafe database permissions', () => {
+    const report = buildAffiliateCutoverPreflightReport(preflightInput({
+      databasePermissions: {
+        isAgentAllowedToConnectProductionDatabase: true,
+        isAgentAllowedToWriteProductionDatabase: true,
+        isAgentAllowedToReadObjectStorage: true,
+        isAgentAllowedToWriteObjectStorage: true,
+        isAgentAllowedToCallProviders: true,
+        isGatewayAllowedToWriteProductionDatabase: false,
+      },
+    }));
+
+    expect(report.isReady).toBe(false);
+    expect(report.blockingFindings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'DATABASE_PERMISSION_BOUNDARY_FAILED' }),
+    ]));
+  });
 
 
   it('keeps governed writers stopped during reconciliation preflight', () => {
@@ -1539,6 +1575,38 @@ describe('affiliate fleet cutover contracts', () => {
       }),
     ]));
   });
+  it('rejects arbitrary environment names carrying production connection URLs without exposing the value', () => {
+    const inspection = inspectAffiliateAgentContainer({
+      ...governedContainer('agent-arbitrary-database'),
+      environment: [
+        ...governedContainer('agent-arbitrary-database').environment,
+        'INTERNAL_BACKEND=postgresql://prod',
+      ],
+    });
+
+    expect(inspection.isSafe).toBe(false);
+    expect(inspection.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'FORBIDDEN_AGENT_CREDENTIAL',
+        recordIds: expect.arrayContaining(['agent-arbitrary-database', 'INTERNAL_BACKEND']),
+        detail: expect.not.stringContaining('postgresql://prod'),
+      }),
+    ]));
+  });
+
+  it('accepts reviewed redacted environment entries', () => {
+    const inspection = inspectAffiliateAgentContainer({
+      ...governedContainer('agent-reviewed-redacted-environment'),
+      environment: [
+        ...governedContainer('agent-reviewed-redacted-environment').environment,
+        'AFFILIATE_AGENT_RUNNER_PROTOCOL_PRIVATE_KEY=redacted',
+      ],
+    });
+
+    expect(inspection.isSafe).toBe(true);
+    expect(inspection.findings).toEqual([]);
+  });
+
 
   it('accepts the governed no-new-privileges security option', () => {
     const inspection = inspectAffiliateAgentContainer({

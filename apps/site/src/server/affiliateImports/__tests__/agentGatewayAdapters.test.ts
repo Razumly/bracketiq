@@ -7,6 +7,7 @@ import type { StorageProvider } from "@/lib/storageProvider";
 
 import {
   canonicalizeAffiliateAgentValue,
+  hashAffiliateAgentValue,
   type AffiliateAgentClaimEnvelope,
 } from "../agentGatewayContracts";
 import {
@@ -18,6 +19,7 @@ import {
 import * as affiliateSupplyPersistence from "../affiliateSupplyPersistence";
 import type {
   AffiliateSupplyDatabase,
+  AffiliateSupplyLifecycleCommandResult,
 } from "../affiliateSupplyPersistence";
 type StoredObject = Readonly<{
   bytes: Buffer;
@@ -341,6 +343,142 @@ describe("production Affiliate Agent activation effect", () => {
         reviewerWorkerId: "reviewer-worker-1",
       }),
     }));
+  });
+  it("binds producer repair jobs to the committing lifecycle generation", async () => {
+    const packageHash = "a".repeat(64);
+    const producerManifestPreimage = { schemaVersion: 1 as const, entries: [] as const };
+    const producerEnvelope = {
+      schemaVersion: 1,
+      jobId: "producer-job-1",
+      claimId: "producer-claim-1",
+      supplySourceId: "supply-source-1",
+      claimGeneration: 1,
+      lifecycleGeneration: 8,
+      deploymentContractVersion: 1,
+      deploymentContractHash: "b".repeat(64),
+      supplyContractVersion: 1,
+      supplyContractHash: "c".repeat(64),
+      roleContractVersion: 1,
+      roleContractHash: "d".repeat(64),
+      promptTemplateVersion: 1,
+      promptTemplateHash: "e".repeat(64),
+      executionClass: "PRODUCTION_CODEX" as const,
+      workerId: "producer-worker-1",
+      invocationId: "producer-invocation-1",
+      workspaceId: "producer-workspace-1",
+      claimedAt: "2026-08-22T10:00:00.000Z",
+      expiresAt: "2026-08-22T11:00:00.000Z",
+      evidenceManifest: {
+        ...producerManifestPreimage,
+        hash: hashAffiliateAgentValue(producerManifestPreimage),
+      },
+      role: "MAPPING_PRODUCER" as const,
+      queue: "AFFILIATE_MAPPING" as const,
+      lane: "MAPPING_PRODUCTION" as const,
+      subject: {
+        type: "MAPPING_PRODUCER" as const,
+        supplySourceId: "supply-source-1",
+        mappingJobId: "mapping-job-1",
+        pass: 1,
+      },
+      permittedCommands: [
+        "CAPTURE_CLAIM_URL",
+        "COMMIT_DECLARATIVE_PACKAGE",
+        "SUBMIT_TERMINAL_RESULT",
+        "VALIDATE_DECLARATIVE_PACKAGE",
+      ],
+    };
+    const lifecycleCommand = jest
+      .spyOn(affiliateSupplyPersistence, "executeAffiliateSupplyLifecycleCommand")
+      .mockResolvedValue({
+        assessment: {},
+        transition: { generation: 9 },
+        isReplayed: false,
+      } as unknown as AffiliateSupplyLifecycleCommandResult);
+    const supplySourceFindUnique = jest.fn()
+      .mockResolvedValueOnce({ id: "supply-source-1", lifecycleGeneration: 8 })
+      .mockResolvedValueOnce({ id: "supply-source-1", lifecycleGeneration: 10 });
+    const repairJobUpsert = jest.fn(async () => ({ id: "repair-job-1" }));
+    const prisma = {
+      affiliateSupplySources: { findUnique: supplySourceFindUnique },
+      affiliateAgentGatewayClaims: {
+        findUnique: jest.fn(async () => ({ claimEnvelopeJson: producerEnvelope })),
+      },
+      affiliateSourceMappingJobs: {
+        findUnique: jest.fn(async () => ({
+          sourceId: "scrape-source-1",
+          supplySourceId: "supply-source-1",
+        })),
+      },
+      affiliateScrapeSources: {
+        findUnique: jest.fn(async () => ({ supplySourceId: "supply-source-1" })),
+      },
+      affiliateAgentGatewayJobs: { upsert: repairJobUpsert },
+    } as unknown as PrismaClient;
+    const adapters = createProductionAffiliateAgentGatewayAdapters({
+      prisma,
+      artifacts: { readImmutable: jest.fn() },
+      storage: {} as StorageProvider,
+    });
+    const claim = {
+      claimId: "reviewer-claim-1",
+      claimGeneration: 2,
+      invocationId: "reviewer-invocation-1",
+      workerId: "reviewer-worker-1",
+      workspaceId: "reviewer-workspace-1",
+      supplySourceId: "supply-source-1",
+      lifecycleGeneration: 8,
+      role: "SUPPLY_REVIEWER",
+      subject: {
+        type: "SUPPLY_REVIEWER",
+        supplySourceId: "supply-source-1",
+        producerClaimId: "producer-claim-1",
+        producerWorkerId: "producer-worker-1",
+        producerInvocationId: "producer-invocation-1",
+        producerWorkspaceId: "producer-workspace-1",
+        committedPackageHash: packageHash,
+        targetId: "target-1",
+        targetType: "EVENT",
+        reviewPass: 1,
+      },
+      evidenceManifest: {
+        schemaVersion: 1,
+        hash: "f".repeat(64),
+        entries: [],
+      },
+    } as unknown as AffiliateAgentClaimEnvelope;
+    const result = {
+      claimId: claim.claimId,
+      claimGeneration: claim.claimGeneration,
+      invocationId: claim.invocationId,
+      workerId: claim.workerId,
+      role: "SUPPLY_REVIEWER",
+      disposition: "PRODUCER_REPAIR_REQUIRED",
+      payload: {
+        committedPackageHash: packageHash,
+        repairIssues: ["MISSING_REQUIRED_FIELD"],
+      },
+      evidenceRefs: [],
+      supplyContractVersion: 1,
+      supplyContractHash: "g".repeat(64),
+    } as unknown as AffiliateAgentReviewerTerminalResult;
+
+    await expect(adapters.terminalEffects.PRODUCER_REPAIR_REQUIRED.execute({
+      receiptId: "repair-receipt-1",
+      claim,
+      result,
+    })).resolves.toEqual(expect.objectContaining({
+      lifecycleGeneration: 9,
+      repairJobId: "repair-job-1",
+      repairPass: 2,
+    }));
+    expect(lifecycleCommand).toHaveBeenCalledTimes(1);
+    expect(repairJobUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        expectedLifecycleGeneration: 9,
+      }),
+    }));
+    expect(supplySourceFindUnique).toHaveBeenCalledTimes(1);
   });
   it("persists approval evidence and queues a lineage-bound activation job", async () => {
     const lifecycleCommand = jest

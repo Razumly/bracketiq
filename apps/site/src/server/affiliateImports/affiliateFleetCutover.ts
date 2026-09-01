@@ -2267,6 +2267,7 @@ const forbiddenContainerEnvironmentFindings = (
           options.allowReviewedRunnerProtocolPrivateKey === true
           && key.toUpperCase() === 'AFFILIATE_AGENT_RUNNER_PROTOCOL_PRIVATE_KEY'
         ))
+      || forbiddenEnvironment.test(entry)
       || (
         upper(key) === AFFILIATE_REPLENISHMENT_TOKEN_KEY
         && options.allowReviewedReplenishmentToken !== true
@@ -3551,18 +3552,55 @@ const controlPlaneInventoryFindings = (
   const missingStatus = rows
     .filter((process) => !stringValue(process?.status))
     .map((process) => stringValue(process?.id) ?? '(empty)');
-  return missingStatus.length
-    ? [
-        ...findings,
-        finding(
-          'CONTROL_PLANE_EVIDENCE_MISSING',
-          'BLOCKING',
-          'Every control-plane process row must include a non-empty observed status.',
-          sortedUnique(missingStatus),
-          'Capture the exact observed status for every gateway, runner, readiness-helper, and replenishment-controller process.',
-        ),
-      ]
-    : findings;
+  const writerRows = rows.filter((process) => (
+    process?.id === 'affiliate-gateway'
+    || process?.id === 'affiliate-replenishment-controller'
+  ));
+  const runningWriters = writerRows.filter((process) => (
+    LEGACY_PROCESS_STATUSES.has(upper(process.status))
+  ));
+  const unverifiedWriters = writerRows.filter((process) => (
+    stringValue(process.status) !== null
+    && upper(process.status) !== 'STOPPED'
+    && upper(process.status) !== 'INACTIVE'
+    && !LEGACY_PROCESS_STATUSES.has(upper(process.status))
+  ));
+  return [
+    ...findings,
+    ...(missingStatus.length
+      ? [
+          finding(
+            'CONTROL_PLANE_EVIDENCE_MISSING',
+            'BLOCKING',
+            'Every control-plane process row must include a non-empty observed status.',
+            sortedUnique(missingStatus),
+            'Capture the exact observed status for every gateway, runner, readiness-helper, and replenishment-controller process.',
+          ),
+        ]
+      : []),
+    ...(runningWriters.length
+      ? [
+          finding(
+            'CONTROL_PLANE_WRITER_RUNNING',
+            'BLOCKING',
+            'The gateway and replenishment-controller writer identities must be stopped before cutover.',
+            runningWriters.map((process) => process.id),
+            'Stop the gateway and replenishment-controller writers and capture their STOPPED or INACTIVE status.',
+          ),
+        ]
+      : []),
+    ...(unverifiedWriters.length
+      ? [
+          finding(
+            'CONTROL_PLANE_WRITER_STATE_UNVERIFIED',
+            'BLOCKING',
+            'The gateway and replenishment-controller writer identities must have an explicit STOPPED or INACTIVE status.',
+            unverifiedWriters.map((process) => process.id),
+            'Capture an explicit STOPPED or INACTIVE status for the gateway and replenishment-controller writers.',
+          ),
+        ]
+      : []),
+  ];
 };
 
 const auxiliaryContainerInventoryFindings = (
@@ -3691,6 +3729,7 @@ const preflightBaseFindings = (
   ...legacyServiceUnitFindings(data.reviewedSystemdUnits, input.legacyServiceUnits),
   ...legacyProcessFindings(data),
   ...governedProcessFindings(data.governed),
+  ...preflightPermissionFinding(input.databasePermissions),
   ...liveLegacyClaimFinding(input.legacyClaims, input.now),
   ...controlPlaneInventoryFindings(input.controlPlaneProcesses),
   ...auxiliaryContainerInventoryFindings(input.auxiliaryContainers),

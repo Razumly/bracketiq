@@ -16,6 +16,7 @@ import {
   createAffiliateAgentGatewayRequestHandler,
   isAdmissionRoleReady,
   validateAffiliateAgentSupervisorHaltCredential,
+  validateAffiliateGatewayCredentialCollisions,
   validateAffiliateGatewayOperatorToken,
   validateAffiliateGatewayReplenishmentToken,
   AFFILIATE_GATEWAY_OPERATOR_TOKEN_SENTINEL,
@@ -179,6 +180,46 @@ describe("affiliate agent supervisor halt credential startup validation", () => 
   it("accepts a reviewed non-placeholder credential", () => {
     const credential = "reviewed-supervisor-halt-credential-4f3a9e7c";
     expect(validateAffiliateAgentSupervisorHaltCredential(credential)).toBe(credential);
+  });
+});
+describe("affiliate agent gateway credential collision startup validation", () => {
+  const workerCredentials = [
+    "mapping-producer-credential-4f3a9e7c",
+    "mapping-producer-credential-5f3a9e7c",
+  ];
+
+  it("rejects operator and worker credential collisions", () => {
+    expect(() => validateAffiliateGatewayCredentialCollisions(
+      workerCredentials[0],
+      "reviewed-replenishment-token-4f3a9e7c",
+      "reviewed-supervisor-halt-credential-4f3a9e7c",
+      workerCredentials,
+    )).toThrow(
+      "AFFILIATE_GATEWAY_OPERATOR_TOKEN must be distinct from every worker credential.",
+    );
+  });
+
+  it("rejects operator and supervisor-halt credential collisions without echoing credentials", () => {
+    const collision = workerCredentials[0];
+    expect(() => validateAffiliateGatewayCredentialCollisions(
+      collision,
+      "reviewed-replenishment-token-4f3a9e7c",
+      collision,
+      workerCredentials.slice(1),
+    )).toThrow(
+      "AFFILIATE_GATEWAY_OPERATOR_TOKEN must be distinct from AFFILIATE_AGENT_SUPERVISOR_HALT_CREDENTIAL.",
+    );
+    try {
+      validateAffiliateGatewayCredentialCollisions(
+        collision,
+        "reviewed-replenishment-token-4f3a9e7c",
+        collision,
+        workerCredentials.slice(1),
+      );
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).not.toContain(collision);
+    }
   });
 });
 
@@ -672,6 +713,23 @@ describe("affiliate agent gateway admission HTTP boundary", () => {
     expect(gateway.reconcile).toHaveBeenCalledWith({});
     expect(admission.isOpen()).toBe(false);
   });
+  it("closes admission when reconciliation fails before generic service unavailable", async () => {
+    await admission.open();
+    gateway.reconcile.mockRejectedValueOnce(new Error("reconciliation health failed."));
+
+    const response = await request("/reconcile", OPERATOR_TOKEN, "POST", {});
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INTERNAL_ERROR",
+        safeMessage: "Gateway request failed.",
+        isRetryable: true,
+      },
+    });
+    expect(admission.isOpen()).toBe(false);
+  });
+
   it("closes in-memory admission when invocation reconciliation discovers a global halt", async () => {
     const haltError = new AffiliateAgentGatewayError({
       code: "GATEWAY_ADMISSION_HALTED",
@@ -692,6 +750,40 @@ describe("affiliate agent gateway admission HTTP boundary", () => {
       },
     });
     expect(admission.isOpen()).toBe(false);
+  });
+
+  it("closes admission when live contract health fails", async () => {
+    await admission.open();
+    const failure = new Error("active contract bundle mismatch.");
+    failure.name = "ZodError";
+    health.mockRejectedValueOnce(failure);
+
+    const response = await request("/healthz");
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INTERNAL_ERROR",
+        safeMessage: "Gateway request failed.",
+        isRetryable: true,
+      },
+    });
+    expect(admission.isOpen()).toBe(false);
+
+    readinessValue = true;
+    const reopenResponse = await request("/admission/open", OPERATOR_TOKEN, "POST", leaseRequest);
+    expect(reopenResponse.status).toBe(200);
+    expect(admission.isOpen()).toBe(true);
+  });
+
+  it("keeps admission open for non-authority liveness failures", async () => {
+    await admission.open();
+    health.mockRejectedValueOnce(new Error("transient liveness failure."));
+
+    const response = await request("/healthz");
+
+    expect(response.status).toBe(503);
+    expect(admission.isOpen()).toBe(true);
   });
 
   it("rejects child or random halt requests without mutating global admission", async () => {

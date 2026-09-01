@@ -1,5 +1,8 @@
 import dotenv from 'dotenv';
-import { configureAffiliateLiveDatabaseEnvironment } from '../src/server/affiliateImports/agentRepository';
+import {
+  assertAffiliateLegacyLocalDatabase,
+  configureAffiliateLiveDatabaseEnvironment,
+} from '../src/server/affiliateImports/agentRepository';
 
 dotenv.config({ quiet: true });
 dotenv.config({ path: '.env.local', override: false, quiet: true });
@@ -9,6 +12,7 @@ if (process.env.NODE_ENV === 'production' || process.argv.includes('--live')) {
   console.error(LEGACY_RETIREMENT_MESSAGE);
   process.exit(78);
 }
+assertAffiliateLegacyLocalDatabase();
 
 const readOption = (name: string): string | undefined => {
   const equals = process.argv.find((argument) => argument.startsWith(`${name}=`));

@@ -301,15 +301,33 @@ const verifyRoleCredential = async (input: Readonly<{
   const expected = Buffer.from(requiredEnvironment(worker.environment));
   return hasEqualBytes(Buffer.from(input.roleCredential), expected);
 };
-const validateConfiguredWorkerCredentials = (): void => {
-  const values = Object.values(WORKER_CREDENTIAL_ENV).map(({ environment }) => (
-    requiredEnvironment(environment)
-  ));
+const configuredAffiliateAgentWorkerCredentials = (): readonly string[] => (
+  Object.values(WORKER_CREDENTIAL_ENV).map(({ environment }) => requiredEnvironment(environment))
+);
+const validateConfiguredWorkerCredentials = (): readonly string[] => {
+  const values = configuredAffiliateAgentWorkerCredentials();
   if (values.some((value) => Buffer.byteLength(value, 'utf8') < 32)) {
     throw new Error('Every configured Affiliate Agent worker credential must be at least 32 bytes.');
   }
   if (new Set(values).size !== values.length) {
     throw new Error('Affiliate Agent worker credentials must be pairwise distinct.');
+  }
+  return values;
+};
+export const validateAffiliateGatewayCredentialCollisions = (
+  operatorToken: string,
+  replenishmentToken: string,
+  supervisorHaltCredential: string,
+  workerCredentials: readonly string[],
+): void => {
+  if (operatorToken === replenishmentToken) {
+    throw new Error('AFFILIATE_GATEWAY_OPERATOR_TOKEN and AFFILIATE_GATEWAY_REPLENISHMENT_TOKEN must be distinct.');
+  }
+  if (workerCredentials.some((credential) => credential === operatorToken)) {
+    throw new Error('AFFILIATE_GATEWAY_OPERATOR_TOKEN must be distinct from every worker credential.');
+  }
+  if (operatorToken === supervisorHaltCredential) {
+    throw new Error('AFFILIATE_GATEWAY_OPERATOR_TOKEN must be distinct from AFFILIATE_AGENT_SUPERVISOR_HALT_CREDENTIAL.');
   }
 };
 
@@ -589,9 +607,14 @@ const reconcileGatewayWithAdmission = async (
   admission: AffiliateAgentGatewayAdmission,
   input?: AffiliateAgentReconcileRequest,
 ): Promise<AffiliateAgentReconcileReport> => {
-  const report = await gateway.reconcile(input);
-  if (report.isAdmissionHalted) await admission.close();
-  return report;
+  try {
+    const report = await gateway.reconcile(input);
+    if (report.isAdmissionHalted) await admission.close();
+    return report;
+  } catch (error) {
+    await admission.close();
+    throw error;
+  }
 };
 
 
@@ -667,7 +690,12 @@ const handleHealthRequest = async (
   input: AffiliateAgentGatewayHttpDependencies,
 ): Promise<boolean> => {
   if (!matchesGatewayRequest(request, 'GET', '/healthz')) return false;
-  await input.health();
+  try {
+    await input.health();
+  } catch (error) {
+    if (isAuthorityHealthFailure(error)) await input.admission.close();
+    throw error;
+  }
   sendJson(response, 200, { status: 'ok' });
   return true;
 };
@@ -1090,6 +1118,24 @@ const isDatabaseAuthorizationFailure = (error: unknown): boolean => (
   prismaErrorCodesFrom(error).some((code) => databaseAuthorizationCodes.has(code))
 );
 
+const isAuthorityHealthFailure = (error: unknown): boolean => {
+  if (isDatabaseAuthorizationFailure(error)) return true;
+  if (
+    error instanceof AffiliateAgentGatewayError
+    && (error.code === 'SUPPLY_CONTRACT_STALE'
+      || error.code === 'DEPLOYMENT_CONTRACT_STALE')
+  ) {
+    return true;
+  }
+  if (!(error instanceof Error)) return false;
+  return error.name === 'ZodError'
+    || /\b(?:contract|bundle)\b.*\b(?:mismatch|stale|invalid|failed)\b/i.test(error.message)
+    || /\b(?:mismatch|stale|invalid|failed)\b.*\b(?:contract|bundle)\b/i.test(error.message)
+    || /\b(?:database\s+)?authorization\b.*\b(?:failed|denied|invalid|lost)\b/i.test(
+      error.message,
+    );
+};
+
 const handleGatewayRequestError = async (
   response: ServerResponse,
   error: unknown,
@@ -1402,9 +1448,14 @@ const registerAffiliateAgentGatewayShutdown = (
 const run = async (): Promise<void> => {
   const operatorToken = requiredAffiliateGatewayOperatorToken();
   const replenishmentToken = requiredAffiliateGatewayReplenishmentToken();
-  if (operatorToken === replenishmentToken) {
-    throw new Error('AFFILIATE_GATEWAY_OPERATOR_TOKEN and AFFILIATE_GATEWAY_REPLENISHMENT_TOKEN must be distinct.');
-  }
+  const supervisorHaltCredential = requiredAffiliateAgentSupervisorHaltCredential();
+  const workerCredentials = validateConfiguredWorkerCredentials();
+  validateAffiliateGatewayCredentialCollisions(
+    operatorToken,
+    replenishmentToken,
+    supervisorHaltCredential,
+    workerCredentials,
+  );
   const runtime = await createGateway();
   let reconciliationInFlight: Promise<void> | null = null;
   const reconcile = (): Promise<void> => {

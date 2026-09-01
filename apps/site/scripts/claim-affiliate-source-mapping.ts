@@ -1,6 +1,9 @@
 import dotenv from 'dotenv';
 import path from 'path';
-import { configureAffiliateLiveDatabaseEnvironment } from '../src/server/affiliateImports/agentRepository';
+import {
+  assertAffiliateLegacyLocalDatabase,
+  configureAffiliateLiveDatabaseEnvironment,
+} from '../src/server/affiliateImports/agentRepository';
 import type { AffiliateSourceMappingClaimHandle } from '../src/server/affiliateImports/sourceMappingQueue';
 
 dotenv.config({ quiet: true });
@@ -11,6 +14,7 @@ if (process.env.NODE_ENV === 'production' || process.argv.includes('--live')) {
   console.error(LEGACY_RETIREMENT_MESSAGE);
   process.exit(78);
 }
+assertAffiliateLegacyLocalDatabase();
 
 const useLive = process.argv.includes('--live');
 if (useLive) {
