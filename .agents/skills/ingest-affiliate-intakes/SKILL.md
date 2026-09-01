@@ -1,6 +1,6 @@
 ---
 name: ingest-affiliate-intakes
-description: Process BracketIQ AffiliateSourceIntakes into complete, review-ready affiliate organization packages. Use when a Codex goal or operator asks to drain the affiliate mapping queue, ingest indexed sites, create or repair organization/source/mapping setup code, select and normalize official logos, validate stored HTML or Markdown evidence, or prepare approved input/output examples for later affiliate-mapping training.
+description: Process BracketIQ AffiliateSourceIntakes into complete, review-ready affiliate organization packages through the governed Agent Gateway. Use when an operator asks to drain the affiliate mapping queue, ingest indexed sites, create or repair organization/source/mapping setup code, select and normalize official logos, validate stored HTML or Markdown evidence, or prepare approved input/output examples for later affiliate-mapping training.
 ---
 
 # Ingest Affiliate Intakes
@@ -14,7 +14,7 @@ Before processing the first intake, read:
 - `../../docs/affiliate-source-rollout-agent-goal.md`
 - `../../docs/admin-affiliate-scrape-sources.md`
 - `../../docs/admin-affiliate-scraping-execplan.md`
-- `src/server/affiliateImports/codexIngestionResult.ts`
+- `src/server/affiliateImports/affiliateIngestionSchemas.ts`
 - `references/completion-contract.md` in this skill
 
 Also read `/Users/elesesy/.codex/skills/affiliate-scrape-source-builder/SKILL.md` and its `references/import-contract.md` when they exist on the machine. The completion contract in this skill remains authoritative on a VM where that user-level skill is absent.
@@ -23,25 +23,43 @@ The agent starts in `apps/site`. Report generated package paths relative to the 
 
 ## Run the queue
 
-1. Use the exact queue-status, claim, URL-enqueue, capture-processing, and complete commands in the active goal. Keep `--live` only when the goal supplied it; otherwise use the local commands and do not add live access.
-2. Stop successfully only when `claimableJobs`, `eligibleReadyIntakesWithoutJob`, `claimedWithoutLease`, `queuedCaptureRuns`, and `runningCaptureRuns` are all zero.
-3. Claim exactly one intake with the goal's stable worker ID. If the claim
+1. This legacy Codex queue workflow is retired. For governed work, use the
+   Agent Gateway's bounded admission, claim, and completion APIs; this skill
+   must not invoke a removed direct-writer command or write production rows
+   outside that gateway.
+2. Stop successfully only when the read-only queue report proves no eligible
+   work remains: `claimableJobs`, `eligibleReadyIntakesWithoutJob`,
+   `claimedWithoutLease`, `queuedCaptureRuns`, and `runningCaptureRuns` are all
+   zero.
+3. Claim exactly one intake with the approved stable worker ID. If the claim
    includes `repairContext`, treat every `repairReasons` entry, blocking issue,
    and reviewer rationale as required producer work and create a new
    source-scoped commit before resubmitting.
 4. Work only from the exported stored evidence. Do not make a new public-site request when the intake already answers the question.
 5. Complete the entire intake checkpoint before claiming another.
-6. Record the result using the goal's exact completion command and a JSON artifact that passes `codexAffiliateIngestionResultSchema`.
+6. Record the result at the governed completion boundary using a JSON artifact
+   that passes `codexAffiliateIngestionResultSchema`.
 7. Re-run the queue status and continue.
 
-The claim command is the only job-assignment tool. Do not select a queued row
-directly. Its conditional database lease is the race boundary for concurrent
-mappers. Another mapper may finish or claim a different job while this worker
-is active. Never use another worker's active lease. When the claim returns
-`resumed: true`, continue that worker's existing job and workspace instead of
-starting or claiming another package.
+The Agent Gateway claim endpoint is the only job-assignment tool. Do not select
+a queued row directly. Its conditional database lease is the race boundary for
+concurrent mappers. Another mapper may finish or claim a different job while
+this worker is active.
+Never use another worker's active lease. When the claim returns `resumed: true`,
+continue that worker's existing job and workspace instead of starting or
+claiming another package.
 
-When the stored intake is an aggregator or club directory, do not create a scraper package for the directory merely to end the claim. Inspect its stored HTML, Markdown, and link artifacts and identify the evidenced official organization websites. Write a proposal JSON using the exact batch contract in `references/completion-contract.md`, submit it through the goal's `affiliate:intakes:enqueue-urls` command, and pass the schema-validated result JSON written by that command to the normal completion command to record the parent job as `EXPANDED`. Do not visit those child sites directly: the shared intake service will deduplicate them, apply the existing policy gate, and queue ScrapingDog for current allowed domains. Run the goal's `affiliate:intakes:process` command while allowed captures are queued, then map the child intakes produced by successful captures.
+When the stored intake is an aggregator or club directory, do not create a
+scraper package for the directory merely to end the claim. Inspect its stored
+HTML, Markdown, and link artifacts and identify the evidenced official
+organization websites. Write a proposal JSON using the exact batch contract in
+`references/completion-contract.md`, submit it through the governed URL-enqueue
+API, and pass the schema-validated result to the bounded mapping completion
+boundary to record the parent job as `EXPANDED`. Do not visit those child sites
+directly: the shared intake service will deduplicate them, apply the existing
+policy gate, and queue allowed captures. Use the governed source-intake service
+while captures are queued, then map the child intakes produced by successful
+captures.
 
 Expand at most two directory levels. Reject links back to the parent intake, unsupported `TEAM` targets, intermediary/search URLs presented as official sites, and URLs not evidenced by a stored parent page. New or expired domain policies remain review-required; never auto-approve them. Blocked policies never enter capture.
 

@@ -1,6 +1,121 @@
 import { apiRequest } from '@/lib/apiClient';
 
+type ImportedSignedDocumentResponse = {
+  evidenceId?: string;
+  documentId?: string;
+  provenance?: 'IMPORTED';
+  status?: 'SIGNED' | 'VOID';
+  error?: string;
+};
+
+export type DocumentAuditEvent = {
+  id: string;
+  createdAt: string | null;
+  eventType: string;
+  actorUserId?: string | null;
+  actorDisplayName?: string | null;
+  reason?: string | null;
+  note?: string | null;
+  payload?: unknown;
+};
+
+export type DocumentAuditTrail = {
+  description: string;
+  evidence: {
+    id: string;
+    documentName: string;
+    provenance: 'IMPORTED';
+    status?: string | null;
+    historicalSigningDate?: string | null;
+    importedAt?: string | null;
+    sourceNote?: string | null;
+    attestationText?: string | null;
+    attestationVersion?: string | null;
+    contentHash?: string | null;
+    uploader?: {
+      userId: string;
+      displayName?: string | null;
+    } | null;
+  };
+  events: DocumentAuditEvent[];
+};
+
 class SignedDocumentService {
+  async createImportedSignedDocument(
+    organizationId: string,
+    formData: FormData,
+  ): Promise<ImportedSignedDocumentResponse> {
+    const response = await apiRequest<ImportedSignedDocumentResponse>(
+      `/api/organizations/${encodeURIComponent(organizationId)}/documents/import`,
+      {
+        method: 'POST',
+        body: formData,
+      },
+    );
+    if (response?.error) {
+      throw new Error(response.error);
+    }
+    return response;
+  }
+  async createRecentAuthToken(password?: string): Promise<string> {
+    const response = await apiRequest<{ recentAuthToken?: string; error?: string }>(
+      '/api/documents/confirm-password',
+      {
+        method: 'POST',
+        body: password?.trim() ? { password } : {},
+      },
+    );
+    if (response?.error) {
+      throw new Error(response.error);
+    }
+    if (!response?.recentAuthToken) {
+      throw new Error('Recent identity proof was not returned.');
+    }
+    return response.recentAuthToken;
+  }
+
+  async updateImportedDocumentStatus(
+    organizationId: string,
+    signedDocumentId: string,
+    reason: string,
+    note?: string | null,
+    recentAuthToken?: string,
+  ): Promise<{ evidenceId?: string; status?: 'VOID'; error?: string }> {
+    const response = await apiRequest<{ evidenceId?: string; status?: 'VOID'; error?: string }>(
+      `/api/organizations/${encodeURIComponent(organizationId)}/documents/${encodeURIComponent(signedDocumentId)}/void`,
+      {
+        method: 'POST',
+        headers: recentAuthToken
+          ? { 'x-recent-auth-token': recentAuthToken }
+          : undefined,
+        body: {
+          reason,
+          note: note?.trim() || null,
+        },
+      },
+    );
+    if (response?.error) {
+      throw new Error(response.error);
+    }
+    return response;
+  }
+
+  async getDocumentAuditTrail(
+    organizationId: string,
+    signedDocumentId: string,
+  ): Promise<DocumentAuditTrail> {
+    const response = await apiRequest<{ auditTrail?: DocumentAuditTrail; error?: string }>(
+      `/api/organizations/${encodeURIComponent(organizationId)}/documents/${encodeURIComponent(signedDocumentId)}/audit`,
+    );
+    if (response?.error) {
+      throw new Error(response.error);
+    }
+    if (!response?.auditTrail || !Array.isArray(response.auditTrail.events)) {
+      throw new Error('Invalid document audit response.');
+    }
+    return response.auditTrail;
+  }
+
   async getSignedDocument(
     documentId: string,
     userId?: string,

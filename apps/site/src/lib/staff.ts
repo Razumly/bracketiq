@@ -1,4 +1,4 @@
-import type { Invite, InviteStatus, InviteType, StaffMember, StaffMemberType } from '@/types';
+import type { Invite, InviteStatus, InviteType, StaffMember, StaffMemberType, TeamInviteRole } from '@/types';
 
 export const STAFF_MEMBER_TYPES = ['HOST', 'OFFICIAL', 'STAFF'] as const;
 export const STAFF_ACCESS_TYPES = ['HOST', 'STAFF'] as const;
@@ -104,6 +104,49 @@ export const getLegacyTeamInviteRole = (value: unknown): 'player' | 'manager' | 
       return 'headCoach';
     case 'TEAM_ASSISTANT_COACH':
       return 'assistantCoach';
+    default:
+      return null;
+  }
+};
+
+export const normalizeTeamInviteRole = (value: unknown): TeamInviteRole | null => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  switch (value.trim().toLowerCase()) {
+    case 'player':
+      return 'player';
+    case 'team_manager':
+    case 'manager':
+      return 'team_manager';
+    case 'team_head_coach':
+    case 'head_coach':
+    case 'headcoach':
+      return 'team_head_coach';
+    case 'team_assistant_coach':
+    case 'assistant_coach':
+    case 'assistantcoach':
+      return 'team_assistant_coach';
+    default:
+      return null;
+  }
+};
+
+export const getTeamInviteRole = (role: unknown, legacyType?: unknown): TeamInviteRole | null => {
+  const explicitRole = normalizeTeamInviteRole(role);
+  if (explicitRole) {
+    return explicitRole;
+  }
+  const legacyRole = getLegacyTeamInviteRole(legacyType);
+  switch (legacyRole) {
+    case 'player':
+      return 'player';
+    case 'manager':
+      return 'team_manager';
+    case 'headCoach':
+      return 'team_head_coach';
+    case 'assistantCoach':
+      return 'team_assistant_coach';
     default:
       return null;
   }

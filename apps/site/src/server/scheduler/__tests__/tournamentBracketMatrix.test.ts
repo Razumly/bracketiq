@@ -175,7 +175,7 @@ const buildPoolTournament = (scenario: PoolScenario) => {
     setDurationMinutes: scenario.isSetBased ? 15 : null,
   };
   const poolA = new Division(
-    `${suffix}_pool_a`,
+    `${suffix}_pool_z`,
     'Pool A',
     [],
     null,
@@ -185,7 +185,7 @@ const buildPoolTournament = (scenario: PoolScenario) => {
     [bracketDivision.id, bracketDivision.id],
   );
   const poolB = new Division(
-    `${suffix}_pool_b`,
+    `${suffix}_pool_a`,
     'Pool B',
     [],
     null,
@@ -206,10 +206,11 @@ const buildPoolTournament = (scenario: PoolScenario) => {
   poolA.leagueConfig = { ...poolConfig };
   poolB.leagueConfig = { ...poolConfig };
 
-  const divisions = [poolA, poolB, bracketDivision];
+  const eventDivisions = [poolA, poolB];
+  const resourceDivisions = [bracketDivision, poolB, poolA];
   const field = new PlayingField({
     id: 'field_1',
-    divisions,
+    divisions: resourceDivisions,
     matches: [],
     events: [],
     rentalSlots: [],
@@ -221,11 +222,11 @@ const buildPoolTournament = (scenario: PoolScenario) => {
   };
   const officials = scenario.officiating === 'STAFF'
     ? [
-      new UserData({ id: 'official_r1', divisions, matches: [] }),
-      new UserData({ id: 'official_scorekeeper', divisions, matches: [] }),
+      new UserData({ id: 'official_r1', divisions: resourceDivisions, matches: [] }),
+      new UserData({ id: 'official_scorekeeper', divisions: resourceDivisions, matches: [] }),
     ]
     : [];
-  const timeSlots = buildTimeSlots([bracketDivision]);
+  const timeSlots = buildTimeSlots(resourceDivisions);
   const tournament = new Tournament({
     id: `pool_tournament_${suffix}`,
     name: `Pool Tournament ${scenario.label}`,
@@ -240,7 +241,7 @@ const buildPoolTournament = (scenario: PoolScenario) => {
     eventType: 'TOURNAMENT',
     registeredTeamIds: Object.keys(teams),
     teams,
-    divisions: [poolA, poolB],
+    divisions: eventDivisions,
     playoffDivisions: [bracketDivision],
     includePlayoffs: true,
     playoffTeamCount: 4,
@@ -308,6 +309,27 @@ describe('tournament bracket matrix', () => {
     const bracketMatches = scheduled.matches.filter((match) => (
       match.division.id === bracketDivision.id
     ));
+    const poolAMatches = poolMatches.filter((match) => (
+      match.division.id === poolDivisions[0]?.id
+    ));
+    const poolBMatches = poolMatches.filter((match) => (
+      match.division.id === poolDivisions[1]?.id
+    ));
+    const earliestBracketStart = Math.min(
+      ...bracketMatches.map((match) => match.start.getTime()),
+    );
+
+    expect(Math.max(...poolAMatches.map((match) => match.end.getTime())))
+      .toBeLessThanOrEqual(
+        Math.min(...poolBMatches.map((match) => match.start.getTime())),
+      );
+    for (const poolDivision of poolDivisions) {
+      const divisionMatches = poolMatches.filter((match) => (
+        match.division.id === poolDivision.id
+      ));
+      expect(Math.max(...divisionMatches.map((match) => match.end.getTime())))
+        .toBeLessThanOrEqual(earliestBracketStart);
+    }
 
     expect(new Set(poolMatches.map((match) => match.division.id))).toEqual(poolDivisionIds);
     expect(poolMatches).toHaveLength(

@@ -4,8 +4,10 @@ import jwt, { JwtPayload } from 'jsonwebtoken';
 import {
   WATCH_SETUP_TOKEN_TTL_SECONDS,
   shouldUseSecureAuthCookie,
+  signRecentAuthToken,
   signSessionToken,
   signWatchSetupToken,
+  verifyRecentAuthToken,
   verifySessionToken,
   verifyWatchSetupToken,
 } from '@/lib/authServer';
@@ -58,6 +60,21 @@ describe('authServer token helpers', () => {
     }));
   });
 
+  it('preserves the original identity-proof time when refreshing a session token', () => {
+    const issuedAtSeconds = Math.floor(Date.now() / 1000) - 60;
+    const token = signSessionToken({
+      userId: 'user_1',
+      isAdmin: false,
+      sessionVersion: 0,
+      issuedAtSeconds,
+    });
+
+    const decoded = jwt.decode(token) as JwtPayload;
+
+    expect(decoded.iat).toBe(issuedAtSeconds);
+    expect(verifySessionToken(token)?.issuedAtSeconds).toBe(issuedAtSeconds);
+  });
+
   it('signs short-lived watch setup tokens that cannot be verified as another purpose', () => {
     const token = signWatchSetupToken({
       userId: 'user_1',
@@ -81,7 +98,24 @@ describe('authServer token helpers', () => {
       issuedAtSeconds: decoded.iat,
     });
     expect(verifyWatchSetupToken(sessionToken)).toBeNull();
+
     expect(verifySessionToken(token)).toBeNull();
+  });
+  it('signs and verifies a scoped recent-auth token', () => {
+    const token = signRecentAuthToken({
+      userId: 'user_1',
+      purpose: 'sensitive_action',
+    });
+
+    expect(verifyRecentAuthToken(token)).toEqual(expect.objectContaining({
+      userId: 'user_1',
+      purpose: 'sensitive_action',
+      issuedAtSeconds: expect.any(Number),
+    }));
+    expect(verifyRecentAuthToken(signWatchSetupToken({
+      userId: 'user_1',
+      sessionVersion: 0,
+    }))).toBeNull();
   });
 
   it('rejects a correctly signed scoped token as an application session', () => {

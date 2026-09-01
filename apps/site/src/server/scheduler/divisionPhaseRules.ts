@@ -1,25 +1,22 @@
-import { calculateTimedMatchDurationMinutes, resolveDivisionCompetitionPhase } from '@/lib/divisionPhaseSettings';
+import { calculateTimedMatchDurationMinutes } from '@/lib/divisionPhaseSettings';
 import {
   resolveMatchRulesForContext,
   resolveMatchRulesForDivisionPhase,
 } from '@/server/matches/matchOperations';
 import { resolveMatchTimingPolicy } from './matchTimingPolicy';
+import {
+  classifyMatchPhase,
+  type ScheduledMatchPhase,
+} from './matchSchedulingOrder';
 import type { Division, League, Match, Tournament } from './types';
 
 type SchedulerEvent = League | Tournament;
 
-const hasBracketLinks = (match: Match): boolean => Boolean(
-  match.losersBracket
-  || match.previousLeftMatch
-  || match.previousRightMatch
-  || match.winnerNextMatch
-  || match.loserNextMatch
-);
 
 const durationMinutesFromSnapshot = (
   event: SchedulerEvent,
   match: Match,
-  phase: ReturnType<typeof resolveDivisionCompetitionPhase>,
+  phase: ScheduledMatchPhase,
 ): number | null => {
   const snapshot = match.matchRulesSnapshot;
   if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
@@ -30,8 +27,11 @@ const durationMinutesFromSnapshot = (
     segmentCount?: unknown;
   };
   const division = match.division;
-  const bracketMatch = hasBracketLinks(match);
-  const divisionConfig = bracketMatch || division.kind === 'PLAYOFF'
+  const bracketMatch =
+    phase === 'PLAYOFF'
+    || phase === 'BRACKET'
+    || division.kind === 'PLAYOFF';
+  const divisionConfig = bracketMatch
     ? division.playoffConfig
     : division.leagueConfig;
   const phaseSettings = division.phaseSettings?.[phase] ?? {};
@@ -80,14 +80,11 @@ export const applyDivisionPhaseRulesToMatch = (
   match: Match,
 ): number | null => {
   const division = match.division;
-  const bracketMatch = hasBracketLinks(match);
-  const phase =
-    division.phase ??
-    resolveDivisionCompetitionPhase({
-      eventType: event.eventType,
-      divisionKind: division.kind,
-      hasBracketLinks: bracketMatch,
-    });
+  const phase = classifyMatchPhase(event, match);
+  const bracketMatch =
+    phase === 'PLAYOFF'
+    || phase === 'BRACKET'
+    || division.kind === 'PLAYOFF';
 
   if (match.matchRulesSnapshot) {
     match.resolvedMatchRules = match.matchRulesSnapshot as NonNullable<typeof match.resolvedMatchRules>;

@@ -13,6 +13,7 @@ import {
   loadCanonicalTeamById,
   normalizeId,
   normalizeIdList,
+  replaceSingletonTeamStaffAssignment,
   syncCanonicalTeamRoster,
 } from '@/server/teams/teamMembership';
 import {
@@ -121,7 +122,13 @@ const resolveInviteUser = async (
   client: any,
   input: z.infer<typeof memberInviteSchema>,
   now: Date,
-): Promise<{ userId: string | null; email: string | null; shouldSendEmail: boolean; isUserIdInvite: boolean }> => {
+): Promise<{
+  userId: string | null;
+  email: string | null;
+  shouldSendEmail: boolean;
+  isUserIdInvite: boolean;
+  isPersonInvite: boolean;
+}> => {
   const inviteUserId = normalizeId(input.userId);
   let email = typeof input.email === 'string' ? input.email.trim().toLowerCase() : '';
 
@@ -156,6 +163,7 @@ const resolveInviteUser = async (
       email,
       shouldSendEmail: isInvitePlaceholderAuthUser(authUser),
       isUserIdInvite: true,
+      isPersonInvite: false,
     };
   }
 
@@ -178,6 +186,7 @@ const resolveInviteUser = async (
       email: email || null,
       shouldSendEmail: Boolean(email),
       isUserIdInvite: false,
+      isPersonInvite: true,
     };
   }
 
@@ -194,6 +203,7 @@ const resolveInviteUser = async (
     email,
     shouldSendEmail: !ensured.authUserExisted,
     isUserIdInvite: false,
+    isPersonInvite: false,
   };
 };
 
@@ -273,6 +283,50 @@ const updateStaffInviteAssignment = async (
     },
   });
 };
+const reconcileTeamInviteRoleTransition = async (
+  tx: any,
+  teamId: string,
+  userId: string,
+  previousRole: InviteRole | null,
+  nextRole: InviteRole,
+  now: Date,
+) => {
+  if (!previousRole || previousRole === nextRole) {
+    return;
+  }
+
+  if (tx.teamRegistrations?.updateMany) {
+    await tx.teamRegistrations.updateMany({
+      where: {
+        teamId,
+        userId,
+        status: { in: ['PENDING', 'INVITED'] },
+      },
+      data: {
+        status: 'REMOVED',
+        isCaptain: false,
+        updatedAt: now,
+      },
+    });
+  }
+
+  if (tx.teamStaffAssignments?.updateMany) {
+    const nextStaffRole = roleToStaffType(nextRole);
+    await tx.teamStaffAssignments.updateMany({
+      where: {
+        teamId,
+        userId,
+        status: { in: ['PENDING', 'INVITED'] },
+        ...(nextStaffRole ? { role: { not: nextStaffRole } } : {}),
+      },
+      data: {
+        status: 'REMOVED',
+        updatedAt: now,
+      },
+    });
+  }
+};
+
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await requireSession(req);
@@ -325,6 +379,27 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             },
           })
           : null;
+      if (staffType === 'MANAGER' || staffType === 'HEAD_COACH') {
+        await replaceSingletonTeamStaffAssignment({
+          tx,
+          teamId: canonicalTeamId,
+          role: staffType,
+          replacementInviteId: existingInvite?.id ?? null,
+          replacementUserId: userId,
+          now,
+        });
+      }
+      await reconcileTeamInviteRoleTransition(
+        tx,
+        canonicalTeamId,
+        userId ?? '',
+        existingInvite && ['player', 'team_manager', 'team_head_coach', 'team_assistant_coach'].includes(String(existingInvite.role))
+          ? existingInvite.role as InviteRole
+          : null,
+        parsed.data.role,
+        now,
+      );
+
       if (parsed.data.role === 'player') {
         if (userId && activePlayerIdsForInvite.includes(userId)) {
           throw new Error('User is already on this team');
@@ -336,6 +411,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
               teamId: canonicalTeamId,
               status: 'PENDING',
               userId: null,
+              role: 'player',
               ...(existingInvite ? { id: { not: existingInvite.id } } : {}),
             },
           })
@@ -351,6 +427,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             email: resolvedUser.email,
             phone: normalizedPhone,
             status: 'PENDING',
+            role: parsed.data.role,
+            isAssigned: resolvedUser.isPersonInvite,
             createdBy: session.userId,
             firstName: normalizeOptionalName(parsed.data.firstName) ?? existingInvite.firstName,
             lastName: normalizeOptionalName(parsed.data.lastName) ?? existingInvite.lastName,
@@ -367,6 +445,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             email: resolvedUser.email,
             phone: normalizedPhone,
             status: 'PENDING',
+            role: parsed.data.role,
+            isAssigned: resolvedUser.isPersonInvite,
             teamId: canonicalTeamId,
             userId,
             createdBy: session.userId,

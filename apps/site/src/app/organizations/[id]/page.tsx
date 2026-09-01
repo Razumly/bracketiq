@@ -8,7 +8,7 @@ import Loading from '@/components/ui/Loading';
 import OrganizationVerificationBadge from '@/components/ui/OrganizationVerificationBadge';
 import OrganizationOwnershipBadges from '@/components/ui/OrganizationOwnershipBadges';
 import { OrganizationClaimButton } from '@/components/ui/OrganizationClaimCallout';
-import { Avatar, Badge, Checkbox, Chip, Container, Group, Title, Text, Button, Paper, ScrollArea, SegmentedControl, SimpleGrid, Stack, TextInput, Select, NumberInput, Modal, Textarea, Switch, FileInput, Table, Loader } from '@mantine/core';
+import { Avatar, Badge, Checkbox, Chip, Container, Group, Title, Text, Button, Paper, ScrollArea, SegmentedControl, SimpleGrid, Stack, TextInput, PasswordInput, Select, NumberInput, Modal, Textarea, Switch, FileInput, Table, Loader } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import EventCard from '@/components/ui/EventCard';
 import ResponsiveCardGrid from '@/components/ui/ResponsiveCardGrid';
@@ -32,6 +32,8 @@ import { isStripeConnectMfaRequiredError, paymentService } from '@/lib/paymentSe
 import { userService } from '@/lib/userService';
 import { apiRequest, isApiRequestError } from '@/lib/apiClient';
 import { productService } from '@/lib/productService';
+import { signedDocumentService, type DocumentAuditTrail } from '@/lib/signedDocumentService';
+import { formatDocumentScopeLabel, formatDocumentStatusLabel } from '@/lib/profileDocumentService';
 import { boldsignService } from '@/lib/boldsignService';
 import PaymentModal from '@/components/ui/PaymentModal';
 import FieldsTabContent from './FieldsTabContent';
@@ -40,7 +42,7 @@ import RentalReservationCheckout from '@/components/rentals/RentalReservationChe
 import OrganizationFinancePanel from './OrganizationFinancePanel';
 import RoleRosterManager, { type RoleInviteRow, type RoleRosterEntry } from './RoleRosterManager';
 import OrganizationReviewsPanel from './OrganizationReviewsPanel';
-import { formatDisplayDateTime } from '@/lib/dateUtils';
+import { formatDisplayDate, formatDisplayDateTime } from '@/lib/dateUtils';
 import { useLocation } from '@/app/hooks/useLocation';
 import { useDebounce } from '@/app/hooks/useDebounce';
 import { useSports } from '@/app/hooks/useSports';
@@ -74,7 +76,11 @@ import {
 } from './organizationTabs';
 import { buildOrganizationUsersSubtitle } from './organizationUsersCopy';
 import OrganizationPublicSettingsPanel from './OrganizationPublicSettingsPanel';
-import { ORG_PERMISSIONS, type OrganizationPermission } from '@/lib/organizationPermissions';
+import {
+  IMPORTED_DOCUMENT_VIEW_PERMISSIONS,
+  ORG_PERMISSIONS,
+  type OrganizationPermission,
+} from '@/lib/organizationPermissions';
 import { buildTeamManagementPath } from '@/app/teams/teamRoutes';
 import DiscountManager from '@/components/discounts/DiscountManager';
 import { describeDeleteOutcome } from '@/lib/deleteOutcome';
@@ -100,6 +106,16 @@ const PRODUCT_PERIOD_OPTIONS: Array<{ label: string; value: Product['period'] }>
   { label: 'Week', value: 'week' },
   { label: 'Year', value: 'year' },
 ];
+const DOCUMENT_VOID_REASON_OPTIONS = [
+  'Wrong Document Subject',
+  'Wrong Document Requirement or Version',
+  'Wrong scope',
+  'Duplicate evidence',
+  'Incomplete or unsigned document',
+  'Unreadable or incorrect file',
+  'Replaced by corrected evidence',
+  'Other',
+] as const;
 type OrganizationEventTypeFilter = (typeof ORG_EVENT_TYPE_OPTIONS)[number];
 
 const isSinglePurchasePeriod = (period: Product['period'] | string | null | undefined): boolean =>
@@ -170,48 +186,32 @@ const resolveProductCheckoutLabel = (product: Product, isOwner: boolean): string
 const isProductTypeTaxable = (productType: ProductType | null | undefined): boolean =>
   productType !== 'NON_TAXABLE_ITEM';
 
-const normalizeTemplateType = (value: unknown): TemplateDocument['type'] => {
-  if (typeof value === 'string' && value.toUpperCase() === 'TEXT') {
-    return 'TEXT';
-  }
-  return 'PDF';
+
+
+
+type TemplateDocumentWithVersionState = TemplateDocument & {
+  documentRequirementId: string;
+  versionSequence: number;
 };
 
-const mapTemplateRow = (row: Record<string, any>): TemplateDocument => {
-  const roleIndexRaw = row?.roleIndex;
-  const roleIndex = typeof roleIndexRaw === 'number' ? roleIndexRaw : Number(roleIndexRaw);
-  const roleIndexesRaw = Array.isArray(row?.roleIndexes) ? row.roleIndexes : undefined;
-  const roleIndexes = roleIndexesRaw
-    ? roleIndexesRaw
-        .map((entry: unknown) => Number(entry))
-        .filter((value: number) => Number.isFinite(value))
-    : undefined;
-  const signerRolesRaw = Array.isArray(row?.signerRoles) ? row.signerRoles : undefined;
-  const signerRoles = signerRolesRaw
-    ? signerRolesRaw
-        .filter((entry: unknown): entry is string => typeof entry === 'string' && Boolean(entry.trim()))
-        .map((entry: string) => entry.trim())
-    : undefined;
-  const signOnceRaw = row?.signOnce;
-  const requiredSignerType = normalizeRequiredSignerType(row?.requiredSignerType);
-
+const requireTemplateVersionState = (
+  template: TemplateDocument,
+): TemplateDocumentWithVersionState => {
+  const documentRequirementId = template.documentRequirementId?.trim();
+  const versionSequence = template.versionSequence;
+  if (!documentRequirementId) {
+    throw new Error('Template selection is missing documentRequirementId.');
+  }
+  if (typeof versionSequence !== 'number' || !Number.isInteger(versionSequence) || versionSequence < 1) {
+    throw new Error('Template selection is missing a valid versionSequence.');
+  }
   return {
-    $id: String(row?.$id ?? ''),
-    templateId: row?.templateId ?? undefined,
-    organizationId: row?.organizationId ?? '',
-    title: row?.title ?? 'Untitled Template',
-    description: row?.description ?? undefined,
-    signOnce: typeof signOnceRaw === 'boolean' ? signOnceRaw : signOnceRaw == null ? true : Boolean(signOnceRaw),
-    status: row?.status ?? undefined,
-    roleIndex: Number.isFinite(roleIndex) ? roleIndex : undefined,
-    roleIndexes: roleIndexes && roleIndexes.length ? roleIndexes : undefined,
-    signerRoles: signerRoles && signerRoles.length ? signerRoles : undefined,
-    requiredSignerType,
-    type: normalizeTemplateType(row?.type),
-    content: row?.content ?? undefined,
-    $createdAt: row?.$createdAt ?? undefined,
+    ...template,
+    documentRequirementId,
+    versionSequence,
   };
 };
+
 
 type PendingTemplateCreateCard = {
   localId: string;
@@ -233,21 +233,48 @@ type OrganizationUserEventSummary = {
   start?: string;
   end?: string;
   status?: string;
+  organizationId?: string | null;
 };
 
 type OrganizationUserDocumentSummary = {
   signedDocumentRecordId: string;
   documentId: string;
   templateId: string;
+  documentRequirementTitle?: string;
+  versionSequence?: number;
   eventId?: string;
   eventName?: string;
   teamId?: string;
   title: string;
   type: 'PDF' | 'TEXT';
+  provenance?: string;
   status?: string;
   signedAt?: string;
+  historicalSigningDate?: string;
+  scopeType?: string;
+  scopeId?: string;
   viewUrl?: string;
   content?: string;
+};
+type OrganizationUserDocumentApiRow = {
+  signedDocumentRecordId?: string | null;
+  documentId?: string | null;
+  templateId?: string | null;
+  documentRequirementTitle?: string | null;
+  versionSequence?: number | null;
+  eventId?: string | null;
+  eventName?: string | null;
+  teamId?: string | null;
+  title?: string | null;
+  type?: string | null;
+  provenance?: string | null;
+  status?: string | null;
+  signedAt?: string | null;
+  historicalSigningDate?: string | null;
+  scopeType?: string | null;
+  scopeId?: string | null;
+  viewUrl?: string | null;
+  content?: string | null;
 };
 
 type OrganizationTeamMembershipSummary = {
@@ -297,6 +324,7 @@ type OrganizationBillPaymentSummary = {
   sequence: number;
   dueDate?: string;
   amountCents: number;
+  paidAmountCents: number;
   status?: string;
   paidAt?: string;
   paymentIntentId?: string | null;
@@ -312,6 +340,8 @@ type OrganizationBillSummary = {
   ownerId: string;
   ownerName: string;
   eventId?: string | null;
+  sourceType?: string | null;
+  label?: string;
   eventName?: string;
   parentBillId?: string | null;
   totalAmountCents: number;
@@ -392,6 +422,38 @@ type OrganizationCustomerRow = {
   user?: OrganizationUserSummary;
   team?: OrganizationTeamCustomerSummary;
 };
+const mapOrganizationUserDocumentSummary = (
+  documentRow: OrganizationUserDocumentApiRow,
+): OrganizationUserDocumentSummary => ({
+  signedDocumentRecordId: String(documentRow?.signedDocumentRecordId ?? ''),
+  documentRequirementTitle: typeof documentRow?.documentRequirementTitle === 'string'
+    && documentRow.documentRequirementTitle.trim()
+    ? documentRow.documentRequirementTitle.trim()
+    : undefined,
+  documentId: String(documentRow?.documentId ?? ''),
+  templateId: String(documentRow?.templateId ?? ''),
+  versionSequence: typeof documentRow?.versionSequence === 'number'
+    ? documentRow.versionSequence
+    : undefined,
+  eventId: typeof documentRow?.eventId === 'string' ? documentRow.eventId : undefined,
+  eventName: typeof documentRow?.eventName === 'string' ? documentRow.eventName : undefined,
+  teamId: typeof documentRow?.teamId === 'string' ? documentRow.teamId : undefined,
+  title: typeof documentRow?.title === 'string' && documentRow.title.trim()
+    ? documentRow.title.trim()
+    : 'Signed Document',
+  type: documentRow?.type === 'TEXT' ? 'TEXT' : 'PDF',
+  provenance: typeof documentRow?.provenance === 'string' ? documentRow.provenance : undefined,
+  status: typeof documentRow?.status === 'string' ? documentRow.status : undefined,
+  signedAt: typeof documentRow?.signedAt === 'string' ? documentRow.signedAt : undefined,
+  historicalSigningDate: typeof documentRow?.historicalSigningDate === 'string'
+    ? documentRow.historicalSigningDate
+    : undefined,
+  scopeType: typeof documentRow?.scopeType === 'string' ? documentRow.scopeType : undefined,
+  scopeId: typeof documentRow?.scopeId === 'string' ? documentRow.scopeId : undefined,
+  viewUrl: typeof documentRow?.viewUrl === 'string' ? documentRow.viewUrl : undefined,
+  content: typeof documentRow?.content === 'string' ? documentRow.content : undefined,
+});
+
 
 const mapOrganizationUserRow = (row: Record<string, any>): OrganizationUserSummary => {
   const eventsRaw = Array.isArray(row?.events) ? row.events : [];
@@ -407,26 +469,12 @@ const mapOrganizationUserRow = (row: Record<string, any>): OrganizationUserSumma
       start: typeof eventRow?.start === 'string' ? eventRow.start : undefined,
       end: typeof eventRow?.end === 'string' ? eventRow.end : undefined,
       status: typeof eventRow?.status === 'string' ? eventRow.status : undefined,
+      organizationId: typeof eventRow?.organizationId === 'string' ? eventRow.organizationId : null,
     }))
     .filter((eventRow) => Boolean(eventRow.eventId));
 
   const documents = documentsRaw
-    .map((documentRow: Record<string, any>): OrganizationUserDocumentSummary => ({
-      signedDocumentRecordId: String(documentRow?.signedDocumentRecordId ?? ''),
-      documentId: String(documentRow?.documentId ?? ''),
-      templateId: String(documentRow?.templateId ?? ''),
-      eventId: typeof documentRow?.eventId === 'string' ? documentRow.eventId : undefined,
-      eventName: typeof documentRow?.eventName === 'string' ? documentRow.eventName : undefined,
-      teamId: typeof documentRow?.teamId === 'string' ? documentRow.teamId : undefined,
-      title: typeof documentRow?.title === 'string' && documentRow.title.trim()
-        ? documentRow.title.trim()
-        : 'Signed Document',
-      type: documentRow?.type === 'TEXT' ? 'TEXT' : 'PDF',
-      status: typeof documentRow?.status === 'string' ? documentRow.status : undefined,
-      signedAt: typeof documentRow?.signedAt === 'string' ? documentRow.signedAt : undefined,
-      viewUrl: typeof documentRow?.viewUrl === 'string' ? documentRow.viewUrl : undefined,
-      content: typeof documentRow?.content === 'string' ? documentRow.content : undefined,
-    }))
+    .map(mapOrganizationUserDocumentSummary)
     .filter((documentRow) => Boolean(documentRow.signedDocumentRecordId));
 
   return {
@@ -489,20 +537,7 @@ const mapOrganizationTeamMemberRow = (row: Record<string, any>): OrganizationTea
     : [],
   documents: Array.isArray(row?.documents)
     ? row.documents
-      .map((documentRow: Record<string, any>): OrganizationUserDocumentSummary => ({
-        signedDocumentRecordId: String(documentRow?.signedDocumentRecordId ?? ''),
-        documentId: String(documentRow?.documentId ?? ''),
-        templateId: String(documentRow?.templateId ?? ''),
-        eventId: typeof documentRow?.eventId === 'string' ? documentRow.eventId : undefined,
-        eventName: typeof documentRow?.eventName === 'string' ? documentRow.eventName : undefined,
-        teamId: typeof documentRow?.teamId === 'string' ? documentRow.teamId : undefined,
-        title: typeof documentRow?.title === 'string' && documentRow.title.trim() ? documentRow.title.trim() : 'Signed Document',
-        type: documentRow?.type === 'TEXT' ? 'TEXT' : 'PDF',
-        status: typeof documentRow?.status === 'string' ? documentRow.status : undefined,
-        signedAt: typeof documentRow?.signedAt === 'string' ? documentRow.signedAt : undefined,
-        viewUrl: typeof documentRow?.viewUrl === 'string' ? documentRow.viewUrl : undefined,
-        content: typeof documentRow?.content === 'string' ? documentRow.content : undefined,
-      }))
+      .map(mapOrganizationUserDocumentSummary)
       .filter((document) => Boolean(document.signedDocumentRecordId))
     : [],
 });
@@ -516,6 +551,11 @@ const mapOrganizationBillRow = (row: Record<string, any>): OrganizationBillSumma
       sequence: Number.isFinite(Number(paymentRow?.sequence)) ? Number(paymentRow.sequence) : 0,
       dueDate: typeof paymentRow?.dueDate === 'string' ? paymentRow.dueDate : undefined,
       amountCents: Number.isFinite(Number(paymentRow?.amountCents)) ? Math.max(0, Math.round(Number(paymentRow.amountCents))) : 0,
+      paidAmountCents: Number.isFinite(Number(paymentRow?.paidAmountCents))
+        ? Math.max(0, Math.round(Number(paymentRow.paidAmountCents)))
+        : paymentRow?.status === 'PAID'
+          ? Number.isFinite(Number(paymentRow?.amountCents)) ? Math.max(0, Math.round(Number(paymentRow.amountCents))) : 0
+          : 0,
       status: typeof paymentRow?.status === 'string' ? paymentRow.status : undefined,
       paidAt: typeof paymentRow?.paidAt === 'string' ? paymentRow.paidAt : undefined,
       paymentIntentId: typeof paymentRow?.paymentIntentId === 'string' ? paymentRow.paymentIntentId : null,
@@ -551,7 +591,9 @@ const mapOrganizationBillRow = (row: Record<string, any>): OrganizationBillSumma
     ownerId: String(row?.ownerId ?? ''),
     ownerName: typeof row?.ownerName === 'string' && row.ownerName.trim() ? row.ownerName.trim() : String(row?.ownerId ?? ''),
     eventId: typeof row?.eventId === 'string' ? row.eventId : null,
+    sourceType: typeof row?.sourceType === 'string' ? row.sourceType : null,
     eventName: typeof row?.eventName === 'string' ? row.eventName : undefined,
+    label: typeof row?.label === 'string' && row.label.trim() ? row.label.trim() : undefined,
     parentBillId: typeof row?.parentBillId === 'string' ? row.parentBillId : null,
     totalAmountCents,
     paidAmountCents: Number.isFinite(Number(row?.paidAmountCents)) ? Math.max(0, Math.round(Number(row.paidAmountCents))) : 0,
@@ -601,20 +643,7 @@ const mapOrganizationTeamCustomerRow = (row: Record<string, any>): OrganizationT
     .filter((registration) => Boolean(registration.eventTeamId));
 
   const documents = documentsRaw
-    .map((documentRow: Record<string, any>): OrganizationUserDocumentSummary => ({
-      signedDocumentRecordId: String(documentRow?.signedDocumentRecordId ?? ''),
-      documentId: String(documentRow?.documentId ?? ''),
-      templateId: String(documentRow?.templateId ?? ''),
-      eventId: typeof documentRow?.eventId === 'string' ? documentRow.eventId : undefined,
-      eventName: typeof documentRow?.eventName === 'string' ? documentRow.eventName : undefined,
-      teamId: typeof documentRow?.teamId === 'string' ? documentRow.teamId : undefined,
-      title: typeof documentRow?.title === 'string' && documentRow.title.trim() ? documentRow.title.trim() : 'Signed Document',
-      type: documentRow?.type === 'TEXT' ? 'TEXT' : 'PDF',
-      status: typeof documentRow?.status === 'string' ? documentRow.status : undefined,
-      signedAt: typeof documentRow?.signedAt === 'string' ? documentRow.signedAt : undefined,
-      viewUrl: typeof documentRow?.viewUrl === 'string' ? documentRow.viewUrl : undefined,
-      content: typeof documentRow?.content === 'string' ? documentRow.content : undefined,
-    }))
+    .map(mapOrganizationUserDocumentSummary)
     .filter((document) => Boolean(document.signedDocumentRecordId));
   const bills = billsRaw
     .map((billRow: Record<string, any>) => mapOrganizationBillRow(billRow))
@@ -833,12 +862,16 @@ function OrganizationDetailContent() {
   const canManageStaff = viewerHasPermission(ORG_PERMISSIONS.STAFF_MANAGE);
   const canManageRoles = viewerHasPermission(ORG_PERMISSIONS.ROLES_MANAGE);
   const canManageStaffSurface = canManageStaff || canManageRoles;
+  const canManageRefunds = viewerHasPermission(ORG_PERMISSIONS.REFUNDS_MANAGE);
   const canManageStaffCompensation = canManageStaff && viewerHasPermission(ORG_PERMISSIONS.BILLING_MANAGE);
   const canManageFinance = viewerHasPermission(ORG_PERMISSIONS.BILLING_MANAGE)
     || viewerHasPermission(ORG_PERMISSIONS.PAYMENTS_MANAGE);
   const canManageDiscounts = canManageEvents || canManageProducts || canManageTeams || canManageFinance;
   const canManageTemplates = viewerHasPermission(ORG_PERMISSIONS.TEMPLATES_MANAGE);
-  const canManageRefunds = viewerHasPermission(ORG_PERMISSIONS.REFUNDS_MANAGE);
+  const canImportDocuments = viewerHasPermission(ORG_PERMISSIONS.DOCUMENTS_IMPORT);
+  const canVoidDocuments = viewerHasPermission(ORG_PERMISSIONS.DOCUMENTS_VOID);
+  const canViewDocumentAudit = viewerPermissions.includes(ORG_PERMISSIONS.DOCUMENTS_AUDIT_VIEW);
+  const canViewImportedDocuments = IMPORTED_DOCUMENT_VIEW_PERMISSIONS.some(viewerHasPermission);
   const canManagePublicPage = viewerHasPermission(ORG_PERMISSIONS.ORGANIZATION_MANAGE);
   const isOwner = Boolean(
     viewerCanManageOrganization
@@ -1184,6 +1217,17 @@ function OrganizationDetailContent() {
   const [templateEmbedUrl, setTemplateEmbedUrl] = useState<string | null>(null);
   const [templateBuilderOpen, setTemplateBuilderOpen] = useState(false);
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
+  const [templateEditContext, setTemplateEditContext] = useState<{
+    requirementId: string;
+    selectedVersion: number;
+    nextVersionSequence?: number;
+    isNewVersionRequired: boolean;
+  } | null>(null);
+  const [editingTextTemplate, setEditingTextTemplate] = useState<TemplateDocument | null>(null);
+  const [textEditTitle, setTextEditTitle] = useState('');
+  const [textEditDescription, setTextEditDescription] = useState('');
+  const [textEditContent, setTextEditContent] = useState('');
+  const [savingTemplateVersion, setSavingTemplateVersion] = useState(false);
   const [deletingTemplateId, setDeletingTemplateId] = useState<string | null>(null);
   const [pendingTemplateCreates, setPendingTemplateCreates] = useState<PendingTemplateCreateCard[]>([]);
   const [previewTemplate, setPreviewTemplate] = useState<TemplateDocument | null>(null);
@@ -1204,11 +1248,61 @@ function OrganizationDetailContent() {
   const [refundingCustomerPaymentId, setRefundingCustomerPaymentId] = useState<string | null>(null);
   const [cancellingCustomerPaymentId, setCancellingCustomerPaymentId] = useState<string | null>(null);
   const [cancellingCustomerPlanBillId, setCancellingCustomerPlanBillId] = useState<string | null>(null);
+  const [customerDocumentToVoid, setCustomerDocumentToVoid] = useState<OrganizationUserDocumentSummary | null>(null);
+  const [customerDocumentVoidReason, setCustomerDocumentVoidReason] = useState<string | null>(null);
+  const [customerDocumentVoidPassword, setCustomerDocumentVoidPassword] = useState('');
+  const [isRecentProviderAuthUsed, setIsRecentProviderAuthUsed] = useState(false);
+  const [customerDocumentVoidNote, setCustomerDocumentVoidNote] = useState('');
+  const [isVoidingCustomerDocument, setIsVoidingCustomerDocument] = useState(false);
+  const [customerDocumentAuditTarget, setCustomerDocumentAuditTarget] = useState<OrganizationUserDocumentSummary | null>(null);
+  const [customerDocumentAuditTrail, setCustomerDocumentAuditTrail] = useState<DocumentAuditTrail | null>(null);
+  const [isLoadingCustomerDocumentAudit, setIsLoadingCustomerDocumentAudit] = useState(false);
   const [previewSignedTextDocument, setPreviewSignedTextDocument] = useState<OrganizationUserDocumentSummary | null>(null);
+  const [customerBillModalOpen, setCustomerBillModalOpen] = useState(false);
+  const [editingCustomerBill, setEditingCustomerBill] = useState<OrganizationBillSummary | null>(null);
+  const [creatingCustomerBill, setCreatingCustomerBill] = useState(false);
+  const [customerBillLabel, setCustomerBillLabel] = useState('');
+  const [customerBillAmount, setCustomerBillAmount] = useState<string | number>('');
+  const [customerBillPaidAmount, setCustomerBillPaidAmount] = useState<string | number>(0);
+  const [customerBillDueDate, setCustomerBillDueDate] = useState('');
+  const [customerDocumentModalOpen, setCustomerDocumentModalOpen] = useState(false);
+  const [selectedCustomerDocumentTemplateId, setSelectedCustomerDocumentTemplateId] = useState<string | null>(null);
+  const [selectedCustomerDocumentEventId, setSelectedCustomerDocumentEventId] = useState<string | null>(null);
+  const [sendingCustomerDocument, setSendingCustomerDocument] = useState(false);
+  const [isCustomerImportModalOpen, setIsCustomerImportModalOpen] = useState(false);
+  const [selectedCustomerImportTemplateId, setSelectedCustomerImportTemplateId] = useState<string | null>(null);
+  const [selectedCustomerImportScopeId, setSelectedCustomerImportScopeId] = useState<string | null>(null);
+  const [customerImportFile, setCustomerImportFile] = useState<File | null>(null);
+  const [isCustomerImportPreviewReady, setIsCustomerImportPreviewReady] = useState(false);
+  const customerImportPreviewFrameRef = useRef<HTMLIFrameElement | null>(null);
+  const [customerImportHistoricalSigningDate, setCustomerImportHistoricalSigningDate] = useState('');
+  const [customerImportSourceNote, setCustomerImportSourceNote] = useState('');
+  const [isCustomerImportAttestationAccepted, setIsCustomerImportAttestationAccepted] = useState(false);
+  const [isImportingCustomerDocument, setIsImportingCustomerDocument] = useState(false);
+  const selectedTemplateVersionByRequirement = useMemo(() => {
+    const selectedRows = new Map<string, TemplateDocumentWithVersionState>();
+    templateDocuments.forEach((template) => {
+      const templateWithVersionState = requireTemplateVersionState(template);
+      const current = selectedRows.get(templateWithVersionState.documentRequirementId);
+      if (
+        !current
+        || current.versionSequence < templateWithVersionState.versionSequence
+      ) {
+        selectedRows.set(
+          templateWithVersionState.documentRequirementId,
+          templateWithVersionState,
+        );
+      }
+    });
+    return new Map(
+      Array.from(selectedRows.entries()).map(([requirementId, template]) => [requirementId, template.$id]),
+    );
+  }, [templateDocuments]);
 
   const closeTemplateBuilder = useCallback(() => {
     setTemplateBuilderOpen(false);
     setTemplateEmbedUrl(null);
+    setTemplateEditContext(null);
   }, []);
 
   const pollBoldSignOperation = useCallback(async (operationId: string) => {
@@ -1238,13 +1332,19 @@ function OrganizationDetailContent() {
     setPreviewSignComplete(false);
   }, []);
 
-  const loadOrg = useCallback(async (orgId: string, options?: { silent?: boolean }) => {
+  const loadOrg = useCallback(async (
+    orgId: string,
+    options?: { silent?: boolean; isRelationsIncluded?: boolean },
+  ) => {
     const silent = Boolean(options?.silent);
     if (!silent) {
       setLoading(true);
     }
     try {
-      const data = await organizationService.getOrganizationById(orgId, true);
+      const data = await organizationService.getOrganizationById(
+        orgId,
+        options?.isRelationsIncluded ?? requestedTab !== 'users',
+      );
       if (data) setOrg(data);
     } catch (e) {
       console.error('Failed to load organization', e);
@@ -1253,7 +1353,7 @@ function OrganizationDetailContent() {
         setLoading(false);
       }
     }
-  }, []);
+  }, [requestedTab]);
 
   const syncOrganizationVerification = useCallback(async (orgId: string) => {
     setSyncingOrganizationVerification(true);
@@ -1576,15 +1676,10 @@ function OrganizationDetailContent() {
       if (!user?.$id) {
         return [];
       }
-      const response = await fetch(`/api/organizations/${orgId}/templates`, {
-        credentials: 'include',
+      const mappedRows = await boldsignService.getTemplates({
+        organizationId: orgId,
+        isVersionHistoryIncluded: true,
       });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(payload?.error || 'Failed to load templates');
-      }
-      const rows = Array.isArray(payload?.templates) ? payload.templates : [];
-      const mappedRows = rows.map((row: any) => mapTemplateRow(row));
       setTemplateDocuments(mappedRows);
       if (!silent) {
         setTemplatesError(null);
@@ -1757,27 +1852,57 @@ function OrganizationDetailContent() {
         return;
       }
 
+      const editContext = templateEditContext;
       closeTemplateBuilder();
-      notifications.show({
-        color: 'green',
-        message: 'Template saved successfully.',
-      });
       if (org?.$id) {
-        void loadTemplates(org.$id, { silent: true });
+        void (async () => {
+          const templates = await loadTemplates(org.$id, { silent: true });
+          const isNewVersionRequired = Boolean(editContext?.isNewVersionRequired);
+          const newVersion = isNewVersionRequired && editContext
+            ? templates
+              .map(requireTemplateVersionState)
+              .filter((template) => (
+                template.documentRequirementId === editContext.requirementId
+                && template.versionSequence > editContext.selectedVersion
+              ))
+              .sort((left, right) => right.versionSequence - left.versionSequence)[0]
+            : undefined;
+          if (isNewVersionRequired && editContext) {
+            const createdVersionSequence = newVersion?.versionSequence;
+            if (!Number.isInteger(createdVersionSequence)) {
+              notifications.show({
+                color: 'red',
+                message: 'Version state is missing. Refresh the template list before continuing.',
+              });
+              return;
+            }
+            notifications.show({
+              color: 'green',
+              message: `Created Version ${createdVersionSequence}; existing assignments remain pinned to Version ${editContext.selectedVersion}.`,
+            });
+            return;
+          }
+          notifications.show({
+            color: 'green',
+            message: 'Template saved successfully.',
+          });
+        })();
+        return;
       }
+      notifications.show({ color: 'green', message: 'Template saved successfully.' });
     };
 
     window.addEventListener('message', handleMessage);
     return () => {
       window.removeEventListener('message', handleMessage);
     };
-  }, [templateBuilderOpen, closeTemplateBuilder, org?.$id, loadTemplates]);
+  }, [templateBuilderOpen, templateEditContext, closeTemplateBuilder, org?.$id, loadTemplates]);
 
   useEffect(() => {
     if (!authLoading) {
       if (id) loadOrg(id);
     }
-  }, [authLoading, id, loadOrg]);
+  }, [activeTab, authLoading, id, loadOrg]);
 
   useEffect(() => {
     if (authLoading || !isAuthenticated || !user || !id) {
@@ -1936,13 +2061,15 @@ function OrganizationDetailContent() {
   }, [org?.products]);
 
   useEffect(() => {
-    if (!org || !canManageTemplates || !user) {
+    if (!org || !(canManageTemplates || canImportDocuments) || !user) {
       setTemplateDocuments([]);
-      setPendingTemplateCreates([]);
+      if (!canManageTemplates) {
+        setPendingTemplateCreates([]);
+      }
       return;
     }
     loadTemplates(org.$id);
-  }, [org, canManageTemplates, user, loadTemplates]);
+  }, [canImportDocuments, canManageTemplates, org, user, loadTemplates]);
 
   useEffect(() => {
     if (pendingTemplateCreates.length === 0 || templateDocuments.length === 0) {
@@ -2171,13 +2298,38 @@ function OrganizationDetailContent() {
       return;
     }
     try {
+      const templateVersionState = requireTemplateVersionState(template);
       setEditingTemplateId(template.$id);
       setTemplatesError(null);
-      const editUrl = await boldsignService.getTemplateEditUrl({
+      const session = await boldsignService.getTemplateEditSession({
         organizationId: org.$id,
         templateDocumentId: template.$id,
       });
-      setTemplateEmbedUrl(editUrl);
+      const isNewVersionRequired = Boolean(session.willCreateNewVersion);
+      const selectedVersion = session.selectedVersion ?? templateVersionState.versionSequence;
+      if (!Number.isInteger(selectedVersion) || selectedVersion < 1) {
+        throw new Error('Cannot open the template editor because Version state is missing.');
+      }
+      if (isNewVersionRequired && (
+        typeof session.nextVersionSequence !== 'number'
+        || !Number.isInteger(session.nextVersionSequence)
+        || session.nextVersionSequence < 1
+      )) {
+        throw new Error('Cannot open the template editor because the next Version is missing.');
+      }
+      setTemplateEditContext({
+        requirementId: templateVersionState.documentRequirementId,
+        selectedVersion,
+        nextVersionSequence: session.nextVersionSequence,
+        isNewVersionRequired,
+      });
+      if (isNewVersionRequired) {
+        notifications.show({
+          color: 'blue',
+          message: `You are editing Version ${selectedVersion}; saving will create Version ${session.nextVersionSequence} and keep existing assignments pinned.`,
+        });
+      }
+      setTemplateEmbedUrl(session.editUrl);
       setTemplateBuilderOpen(true);
     } catch (error) {
       setTemplatesError(
@@ -2188,6 +2340,82 @@ function OrganizationDetailContent() {
     }
   }, [org]);
 
+  const handleEditTextTemplate = useCallback((template: TemplateDocument) => {
+    if (template.type !== 'TEXT') {
+      return;
+    }
+    try {
+      requireTemplateVersionState(template);
+    } catch (error) {
+      const message = error instanceof Error
+        ? error.message
+        : 'Cannot edit the template because Version state is missing.';
+      setTemplatesError(message);
+      notifications.show({ color: 'red', message });
+      return;
+    }
+    setEditingTextTemplate(template);
+    setTextEditTitle(template.requirementTitle ?? template.title);
+    setTextEditDescription(template.requirementDescription ?? template.description ?? '');
+    setTextEditContent(template.content ?? '');
+    setTemplatesError(null);
+  }, []);
+  const handleSaveTextTemplate = useCallback(async () => {
+    if (!org || !editingTextTemplate) {
+      return;
+    }
+    let templateVersionState: TemplateDocumentWithVersionState;
+    try {
+      templateVersionState = requireTemplateVersionState(editingTextTemplate);
+    } catch (error) {
+      const message = error instanceof Error
+        ? error.message
+        : 'Cannot save the template because Version state is missing.';
+      setTemplatesError(message);
+      notifications.show({ color: 'red', message });
+      return;
+    }
+    if (!textEditContent.trim()) {
+      setTemplatesError('Template text is required.');
+      return;
+    }
+    try {
+      setSavingTemplateVersion(true);
+      setTemplatesError(null);
+      const result = await boldsignService.updateTemplate({
+        organizationId: org.$id,
+        templateDocumentId: editingTextTemplate.$id,
+        title: textEditTitle.trim(),
+        description: textEditDescription.trim() || null,
+        content: textEditContent.trim(),
+      });
+      const isNewVersionCreated = Boolean(result.newVersionCreated);
+      if (isNewVersionCreated && !Number.isInteger(result.newVersionSequence)) {
+        throw new Error('Template save returned incomplete Version state.');
+      }
+      setEditingTextTemplate(null);
+      await loadTemplates(org.$id, { silent: true });
+      notifications.show({
+        color: 'green',
+        message: isNewVersionCreated
+          ? `Created Version ${result.newVersionSequence}; existing assignments remain pinned to Version ${templateVersionState.versionSequence}.`
+          : 'Template Version updated.',
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to save template.';
+      setTemplatesError(message);
+      notifications.show({ color: 'red', message });
+    } finally {
+      setSavingTemplateVersion(false);
+    }
+  }, [
+    editingTextTemplate,
+    loadTemplates,
+    org,
+    textEditContent,
+    textEditDescription,
+    textEditTitle,
+  ]);
   const handleDeleteTemplate = useCallback(async (template: TemplateDocument) => {
     if (!org) return;
 
@@ -3004,6 +3232,471 @@ function OrganizationDetailContent() {
     await loadOrganizationUsers(org.$id, { silent: true });
   }, [loadOrganizationUsers, org?.$id]);
 
+  const openCustomerDocumentVoidModal = useCallback((document: OrganizationUserDocumentSummary) => {
+    if (document.provenance !== 'IMPORTED' || document.status?.toUpperCase() === 'VOID') {
+      return;
+    }
+    setCustomerDocumentToVoid(document);
+    setCustomerDocumentVoidReason(null);
+    setCustomerDocumentVoidPassword('');
+    setIsRecentProviderAuthUsed(false);
+    setCustomerDocumentVoidNote('');
+  }, []);
+
+  const closeCustomerDocumentVoidModal = useCallback((isForced = false) => {
+    if (isVoidingCustomerDocument && !isForced) {
+      return;
+    }
+    setCustomerDocumentToVoid(null);
+    setCustomerDocumentVoidReason(null);
+    setCustomerDocumentVoidPassword('');
+    setIsRecentProviderAuthUsed(false);
+    setCustomerDocumentVoidNote('');
+  }, [isVoidingCustomerDocument]);
+
+  const handleVoidCustomerDocument = useCallback(async () => {
+    if (!org?.$id || !customerDocumentToVoid || !customerDocumentVoidReason) {
+      notifications.show({ color: 'red', message: 'Choose a reason before voiding the imported document.' });
+      return;
+    }
+    if (!customerDocumentVoidPassword.trim() && !isRecentProviderAuthUsed) {
+      notifications.show({
+        color: 'red',
+        message: 'Enter your password or use a recent provider sign-in before voiding the imported document.',
+      });
+      return;
+    }
+    if (customerDocumentVoidReason === 'Other' && !customerDocumentVoidNote.trim()) {
+      notifications.show({ color: 'red', message: 'Enter a note when the void reason is Other.' });
+      return;
+    }
+    setIsVoidingCustomerDocument(true);
+    try {
+      const recentAuthToken = await signedDocumentService.createRecentAuthToken(
+        customerDocumentVoidPassword.trim() || undefined,
+      );
+      await signedDocumentService.updateImportedDocumentStatus(
+        org.$id,
+        customerDocumentToVoid.signedDocumentRecordId,
+        customerDocumentVoidReason,
+        customerDocumentVoidNote,
+        recentAuthToken,
+      );
+      notifications.show({ color: 'green', message: 'Imported document voided.' });
+      closeCustomerDocumentVoidModal(true);
+      await refreshOrganizationCustomers();
+    } catch (error) {
+      notifications.show({
+        color: 'red',
+        message: error instanceof Error ? error.message : 'Failed to void imported document.',
+      });
+    } finally {
+      setIsVoidingCustomerDocument(false);
+    }
+  }, [
+    closeCustomerDocumentVoidModal,
+    customerDocumentToVoid,
+    customerDocumentVoidNote,
+    customerDocumentVoidPassword,
+    isRecentProviderAuthUsed,
+    customerDocumentVoidReason,
+    org?.$id,
+    refreshOrganizationCustomers,
+  ]);
+
+  const openCustomerDocumentAuditModal = useCallback(async (document: OrganizationUserDocumentSummary) => {
+    if (!org?.$id) {
+      return;
+    }
+    setCustomerDocumentAuditTarget(document);
+    setCustomerDocumentAuditTrail(null);
+    setIsLoadingCustomerDocumentAudit(true);
+    try {
+      const auditTrail = await signedDocumentService.getDocumentAuditTrail(
+        org.$id,
+        document.signedDocumentRecordId,
+      );
+      setCustomerDocumentAuditTrail(auditTrail);
+    } catch (error) {
+      setCustomerDocumentAuditTarget(null);
+      notifications.show({
+        color: 'red',
+        message: error instanceof Error ? error.message : 'Failed to load document audit trail.',
+      });
+    } finally {
+      setIsLoadingCustomerDocumentAudit(false);
+    }
+  }, [org?.$id]);
+
+  const closeCustomerBillModal = useCallback(() => {
+    if (creatingCustomerBill) {
+      return;
+    }
+    setCustomerBillModalOpen(false);
+    setEditingCustomerBill(null);
+  }, [creatingCustomerBill]);
+
+  const openCustomerBillModal = useCallback(() => {
+    if (!selectedOrganizationCustomer) {
+      return;
+    }
+    setEditingCustomerBill(null);
+    setCustomerBillLabel(`${selectedOrganizationCustomer.name} bill`);
+    setCustomerBillAmount('');
+    setCustomerBillPaidAmount(0);
+    setCustomerBillDueDate(new Date().toISOString().slice(0, 10));
+    setCustomerBillModalOpen(true);
+  }, [selectedOrganizationCustomer]);
+
+  const openCustomerBillEditModal = useCallback((bill: OrganizationBillSummary) => {
+    if (!selectedOrganizationCustomer) {
+      return;
+    }
+    const dueDate = bill.payments
+      .slice()
+      .sort((a, b) => a.sequence - b.sequence)[0]?.dueDate;
+    const parsedDueDate = dueDate ? new Date(dueDate) : null;
+    setEditingCustomerBill(bill);
+    setCustomerBillLabel(bill.label ?? `${selectedOrganizationCustomer.name} bill`);
+    setCustomerBillAmount(bill.totalAmountCents / 100);
+    setCustomerBillPaidAmount(bill.paidAmountCents / 100);
+    setCustomerBillDueDate(
+      parsedDueDate && !Number.isNaN(parsedDueDate.getTime())
+        ? parsedDueDate.toISOString().slice(0, 10)
+        : new Date().toISOString().slice(0, 10),
+    );
+    setCustomerBillModalOpen(true);
+  }, [selectedOrganizationCustomer]);
+
+  const handleCreateCustomerBill = useCallback(async () => {
+    if (!org?.$id || !selectedOrganizationCustomer) {
+      return;
+    }
+
+    const totalAmountCents = Math.round(Number(customerBillAmount) * 100);
+    const paidAmountCents = Math.round(Number(customerBillPaidAmount) * 100);
+    if (!Number.isFinite(totalAmountCents) || totalAmountCents <= 0) {
+      notifications.show({ color: 'red', message: 'Enter a bill amount greater than zero.' });
+      return;
+    }
+    if (!Number.isFinite(paidAmountCents) || paidAmountCents < 0 || paidAmountCents > totalAmountCents) {
+      notifications.show({ color: 'red', message: 'Paid amount must be between zero and the bill amount.' });
+      return;
+    }
+    if (!customerBillDueDate) {
+      notifications.show({ color: 'red', message: 'Choose a due date.' });
+      return;
+    }
+
+    const isEditing = Boolean(editingCustomerBill);
+    setCreatingCustomerBill(true);
+    try {
+      await apiRequest(
+        editingCustomerBill
+          ? `/api/organizations/${encodeURIComponent(org.$id)}/bills/${encodeURIComponent(editingCustomerBill.billId)}`
+          : `/api/organizations/${encodeURIComponent(org.$id)}/bills`,
+        {
+          method: editingCustomerBill ? 'PATCH' : 'POST',
+          body: editingCustomerBill
+            ? {
+              label: customerBillLabel.trim() || 'Manual bill',
+              totalAmountCents,
+              paidAmountCents,
+              dueDate: customerBillDueDate,
+            }
+            : {
+              ownerType: selectedOrganizationCustomer.type === 'teams' ? 'TEAM' : 'USER',
+              ownerId: selectedOrganizationCustomer.id,
+              label: customerBillLabel.trim() || 'Manual bill',
+              totalAmountCents,
+              paidAmountCents,
+              dueDate: customerBillDueDate,
+            },
+        },
+      );
+      notifications.show({ color: 'green', message: isEditing ? 'Bill updated.' : 'Bill added.' });
+      setCustomerBillModalOpen(false);
+      setEditingCustomerBill(null);
+      await refreshOrganizationCustomers();
+    } catch (error) {
+      notifications.show({
+        color: 'red',
+        message: error instanceof Error ? error.message : (isEditing ? 'Failed to update bill.' : 'Failed to add bill.'),
+      });
+    } finally {
+      setCreatingCustomerBill(false);
+    }
+  }, [
+    customerBillAmount,
+    customerBillDueDate,
+    customerBillLabel,
+    customerBillPaidAmount,
+    editingCustomerBill,
+    org?.$id,
+    refreshOrganizationCustomers,
+    selectedOrganizationCustomer,
+  ]);
+  const customerDocumentTemplateOptions = useMemo(
+    () => templateDocuments
+      .filter((template) => normalizeRequiredSignerType(template.requiredSignerType) === 'PARTICIPANT')
+      .map((template) => ({
+        value: template.$id,
+        label: template.title?.trim() || 'Untitled document',
+      }))
+      .filter((template) => template.value.length > 0),
+    [templateDocuments],
+  );
+  const selectedCustomerDocumentTemplate = templateDocuments.find(
+    (template) => template.$id === selectedCustomerDocumentTemplateId,
+  );
+  const selectedCustomerDocumentRequiresEvent = selectedCustomerDocumentTemplate?.type === 'PDF';
+
+  const customerImportTemplateOptions = useMemo(
+    () => templateDocuments
+      .filter((template) => {
+        const displayName = template.requirementTitle?.trim() || template.title?.trim();
+        return typeof template.documentRequirementId === 'string'
+          && template.documentRequirementId.trim().length > 0
+          && Number.isInteger(template.versionSequence)
+          && (template.versionSequence ?? 0) > 0
+          && Boolean(displayName);
+      })
+      .map((template) => ({
+        value: template.$id,
+        label: `${template.requirementTitle?.trim() || template.title?.trim()} • Version ${template.versionSequence}`,
+      }))
+      .filter((template) => template.value.length > 0),
+    [templateDocuments],
+  );
+  const selectedCustomerImportTemplate = templateDocuments.find(
+    (template) => template.$id === selectedCustomerImportTemplateId,
+  );
+  const customerImportScopeOptions = useMemo(() => {
+    if (!org?.$id || !selectedCustomerImportTemplate || selectedCustomerImportTemplate.signOnce) {
+      return [];
+    }
+    return (selectedOrganizationCustomer?.user?.events ?? [])
+      .filter((event) => event.organizationId === org.$id)
+      .map((event) => ({
+        value: event.eventId,
+        label: `${event.eventName} • ${formatSummaryDateTime(event.start)}`,
+      }));
+  }, [org?.$id, selectedCustomerImportTemplate, selectedOrganizationCustomer]);
+  const customerImportPreviewUrl = useMemo(
+    () => (customerImportFile ? URL.createObjectURL(customerImportFile) : null),
+    [customerImportFile],
+  );
+  const closeCustomerImportModal = useCallback((isForced = false) => {
+    if (isImportingCustomerDocument && !isForced) {
+      return;
+    }
+    setIsCustomerImportModalOpen(false);
+    setSelectedCustomerImportTemplateId(null);
+    setSelectedCustomerImportScopeId(null);
+    setCustomerImportFile(null);
+    setIsCustomerImportPreviewReady(false);
+    setCustomerImportHistoricalSigningDate('');
+    setCustomerImportSourceNote('');
+    setIsCustomerImportAttestationAccepted(false);
+  }, [isImportingCustomerDocument]);
+  const openCustomerImportModal = useCallback(() => {
+    const customer = selectedOrganizationCustomer?.user;
+    const firstTemplate = customerImportTemplateOptions[0];
+    if (!customer || !org?.$id) {
+      return;
+    }
+    if (!firstTemplate) {
+      notifications.show({ color: 'red', message: 'Create a document requirement version before importing a document.' });
+      return;
+    }
+    const firstTemplateRecord = templateDocuments.find((template) => template.$id === firstTemplate.value);
+    const firstEventId = customer.events.find((event) => event.organizationId === org.$id)?.eventId ?? null;
+    setSelectedCustomerImportTemplateId(firstTemplate.value);
+    setSelectedCustomerImportScopeId(firstTemplateRecord?.signOnce ? org.$id : firstEventId);
+    setCustomerImportFile(null);
+    setIsCustomerImportPreviewReady(false);
+    setCustomerImportHistoricalSigningDate('');
+    setCustomerImportSourceNote('');
+    setIsCustomerImportAttestationAccepted(false);
+    setIsCustomerImportModalOpen(true);
+  }, [customerImportTemplateOptions, org?.$id, selectedOrganizationCustomer, templateDocuments]);
+
+  const handleCustomerImportTemplateChange = useCallback((value: string | null) => {
+    setIsCustomerImportAttestationAccepted(false);
+    if (!value) {
+      setSelectedCustomerImportTemplateId(null);
+      setSelectedCustomerImportScopeId(null);
+      return;
+    }
+    const nextTemplate = templateDocuments.find((template) => template.$id === value);
+    const firstEventId = selectedOrganizationCustomer?.user?.events
+      .find((event) => event.organizationId === org?.$id)?.eventId ?? null;
+    setSelectedCustomerImportTemplateId(value);
+    setSelectedCustomerImportScopeId(nextTemplate?.signOnce ? org?.$id ?? null : firstEventId);
+  }, [org?.$id, selectedOrganizationCustomer, templateDocuments]);
+
+
+  const handleCustomerImportFileChange = useCallback((file: File | null) => {
+    setCustomerImportFile(file);
+    setIsCustomerImportPreviewReady(false);
+    setIsCustomerImportAttestationAccepted(false);
+  }, []);
+  const handleImportCustomerDocument = useCallback(async () => {
+    const customer = selectedOrganizationCustomer?.user;
+    const template = selectedCustomerImportTemplate;
+    const scopeId = template?.signOnce ? org?.$id ?? null : selectedCustomerImportScopeId;
+    if (!org?.$id || !customer || !template || !customerImportFile) {
+      return;
+    }
+    if (!scopeId) {
+      notifications.show({
+        color: 'red',
+        message: 'Choose an event before saving.',
+      });
+      return;
+    }
+    if (!isCustomerImportAttestationAccepted) {
+      notifications.show({ color: 'red', message: 'Accept the Document Import Attestation before saving.' });
+      return;
+    }
+    setIsImportingCustomerDocument(true);
+    try {
+      const formData = new FormData();
+      formData.append('subjectUserId', customer.userId);
+      formData.append('templateId', template.$id);
+      formData.append('historicalSigningDate', customerImportHistoricalSigningDate);
+      formData.append('sourceNote', customerImportSourceNote.trim());
+      formData.append('attestationAccepted', 'true');
+      formData.append('scopeType', template.signOnce ? 'ORGANIZATION' : 'EVENT_PARTICIPATION');
+      formData.append('scopeId', scopeId);
+      formData.append('file', customerImportFile, customerImportFile.name);
+      await signedDocumentService.createImportedSignedDocument(org.$id, formData);
+      notifications.show({ color: 'green', message: 'Signed document imported.' });
+      closeCustomerImportModal(true);
+      await refreshOrganizationCustomers();
+    } catch (error) {
+      notifications.show({
+        color: 'red',
+        message: error instanceof Error ? error.message : 'Failed to import signed document.',
+      });
+    } finally {
+      setIsImportingCustomerDocument(false);
+    }
+  }, [
+    closeCustomerImportModal,
+    isCustomerImportAttestationAccepted,
+    customerImportFile,
+    customerImportHistoricalSigningDate,
+    customerImportSourceNote,
+    org?.$id,
+    refreshOrganizationCustomers,
+    selectedCustomerImportScopeId,
+    selectedCustomerImportTemplate,
+    selectedOrganizationCustomer,
+  ]);
+
+  useEffect(() => {
+    setIsCustomerImportPreviewReady(false);
+    if (!customerImportPreviewUrl) {
+      return undefined;
+    }
+
+    let isCancelled = false;
+    let timer: number | undefined;
+    const markReadyWhenLoaded = () => {
+      if (isCancelled) {
+        return;
+      }
+      const frame = customerImportPreviewFrameRef.current;
+      if (frame?.contentDocument?.readyState === 'complete') {
+        setIsCustomerImportPreviewReady(true);
+        return;
+      }
+      timer = window.setTimeout(markReadyWhenLoaded, 50);
+    };
+    markReadyWhenLoaded();
+
+    return () => {
+      isCancelled = true;
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
+      URL.revokeObjectURL(customerImportPreviewUrl);
+    };
+  }, [customerImportPreviewUrl]);
+
+
+  const closeCustomerDocumentModal = useCallback(() => {
+    if (sendingCustomerDocument) {
+      return;
+    }
+    setCustomerDocumentModalOpen(false);
+  }, [sendingCustomerDocument]);
+
+  const openCustomerDocumentModal = useCallback(() => {
+    const customer = selectedOrganizationCustomer?.user;
+    if (!customer) {
+      return;
+    }
+    if (customerDocumentTemplateOptions.length === 0) {
+      notifications.show({ color: 'red', message: 'Create a participant document template before adding a document.' });
+      return;
+    }
+    setSelectedCustomerDocumentTemplateId(customerDocumentTemplateOptions[0].value);
+    setSelectedCustomerDocumentEventId(customer.events[0]?.eventId ?? null);
+    setCustomerDocumentModalOpen(true);
+  }, [customerDocumentTemplateOptions, selectedOrganizationCustomer]);
+
+  const handleAddCustomerDocument = useCallback(async () => {
+    const customer = selectedOrganizationCustomer?.user;
+    if (!org?.$id || !customer || !selectedCustomerDocumentTemplateId) {
+      return;
+    }
+    if (selectedCustomerDocumentRequiresEvent && !selectedCustomerDocumentEventId) {
+      notifications.show({ color: 'red', message: 'Select an event for a PDF document.' });
+      return;
+    }
+
+    setSendingCustomerDocument(true);
+    try {
+      await apiRequest(`/api/organizations/${encodeURIComponent(org.$id)}/documents`, {
+        method: 'POST',
+        body: {
+          userId: customer.userId,
+          eventId: selectedCustomerDocumentEventId,
+          templateId: selectedCustomerDocumentTemplateId,
+        },
+      });
+      notifications.show({ color: 'green', message: 'Document added.' });
+      setCustomerDocumentModalOpen(false);
+      await refreshOrganizationCustomers();
+    } catch (error) {
+      notifications.show({
+        color: 'red',
+        message: error instanceof Error ? error.message : 'Failed to add document.',
+      });
+    } finally {
+      setSendingCustomerDocument(false);
+    }
+  }, [
+    org?.$id,
+    refreshOrganizationCustomers,
+    selectedCustomerDocumentEventId,
+    selectedCustomerDocumentRequiresEvent,
+    selectedCustomerDocumentTemplateId,
+    selectedOrganizationCustomer,
+  ]);
+
+  const customerBillAmountCents = Math.round(Number(customerBillAmount) * 100);
+  const customerBillPaidAmountCents = Math.round(Number(customerBillPaidAmount) * 100);
+  const customerBillPaidAmountError = (
+    Number.isFinite(customerBillAmountCents)
+    && Number.isFinite(customerBillPaidAmountCents)
+    && customerBillPaidAmountCents > customerBillAmountCents
+      ? 'Paid amount cannot exceed the bill amount.'
+      : undefined
+  );
+
   const handleRefundCustomerBillPayment = useCallback(async (
     bill: OrganizationBillSummary,
     payment: OrganizationBillPaymentSummary,
@@ -3207,6 +3900,7 @@ function OrganizationDetailContent() {
           const paymentSummary = formatBillPaidProgress(bill);
           const paymentLine = [
             paymentSummary,
+            payments[0]?.dueDate ? `Due ${formatSummaryDate(payments[0].dueDate)}` : null,
             bill.refundedAmountCents > 0 ? `${formatPrice(bill.refundedAmountCents)} refunded` : null,
             bill.refundableAmountCents > 0 ? `${formatPrice(bill.refundableAmountCents)} refundable` : null,
           ].filter(Boolean);
@@ -3219,6 +3913,11 @@ function OrganizationDetailContent() {
               && bill.status !== 'CANCELLED'
               && hasUnpaidPlanPayments,
           );
+          const canEditCustomerBill = Boolean(
+            canManageFinance
+            && !bill.eventId
+            && (!bill.sourceType || bill.sourceType === 'MANUAL_CUSTOMER_BILL'),
+          );
 
           return (
             <Paper
@@ -3227,10 +3926,31 @@ function OrganizationDetailContent() {
               radius="md"
               p="sm"
               className="org-customer-detail-item org-customer-bill-card"
+              onClick={canEditCustomerBill ? (event) => {
+                const target = event.target as HTMLElement;
+                if (target.closest('button, input, [role="button"]')) {
+                  return;
+                }
+                openCustomerBillEditModal(bill);
+              } : undefined}
+              onKeyDown={canEditCustomerBill ? (event) => {
+                const target = event.target as HTMLElement;
+                if (target.closest('button, input, [role="button"]')) {
+                  return;
+                }
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  openCustomerBillEditModal(bill);
+                }
+              } : undefined}
+              role={canEditCustomerBill ? 'button' : undefined}
+              tabIndex={canEditCustomerBill ? 0 : undefined}
+              aria-label={canEditCustomerBill ? `Edit bill ${bill.label ?? bill.eventName ?? bill.billId}` : undefined}
+              style={canEditCustomerBill ? { cursor: 'pointer' } : undefined}
             >
               <Group justify="space-between" align="flex-start" gap="xs" wrap="wrap">
                 <Stack gap={0} className="min-w-0">
-                  <Text size="sm" fw={500}>{bill.eventName ?? 'Event bill'}</Text>
+                  <Text size="sm" fw={500}>{bill.eventName ?? bill.label ?? 'Customer bill'}</Text>
                   <Text size="xs" c="dimmed">{billMeta.join(' • ')}</Text>
                   {paymentLine.length > 0 && (
                     <Text size="xs" c="dimmed">{paymentLine.join(' • ')}</Text>
@@ -3352,23 +4072,124 @@ function OrganizationDetailContent() {
   const renderCustomerDocuments = (documents: OrganizationUserDocumentSummary[], emptyText = 'No documents.') => (
     documents.length > 0 ? (
       <Stack gap={8}>
-        {documents.map((documentSummary) => (
+        {documents.map((documentSummary) => {
+          const canViewDocument = documentSummary.provenance !== 'IMPORTED' || canViewImportedDocuments;
+          const canViewDocumentPdf = canViewDocument
+            && documentSummary.type === 'PDF'
+            && Boolean(documentSummary.viewUrl);
+          const importedSigningDate = documentSummary.historicalSigningDate;
+          return (
           <Paper
             key={documentSummary.signedDocumentRecordId}
             withBorder
             radius="md"
             p="sm"
             className="org-customer-detail-item org-customer-document-card"
-            onClick={() => openSignedDocumentPreview(documentSummary)}
+            onClick={canViewDocument ? () => openSignedDocumentPreview(documentSummary) : undefined}
+            onKeyDown={canViewDocument ? (event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                openSignedDocumentPreview(documentSummary);
+              }
+            } : undefined}
+            role={canViewDocument ? 'button' : undefined}
+            tabIndex={canViewDocument ? 0 : undefined}
           >
-            <Stack gap={0} className="min-w-0">
-              <Text size="sm" fw={700}>{documentSummary.title}</Text>
+            <Stack gap={2} className="min-w-0">
+              <Group gap={6} wrap="wrap">
+                <Text size="sm" fw={700}>{documentSummary.title}</Text>
+                {documentSummary.provenance === 'IMPORTED' && (
+                  <Badge size="xs" variant="light" color="teal">Imported</Badge>
+                )}
+                {(documentSummary.provenance === 'IMPORTED'
+                  || typeof documentSummary.versionSequence === 'number') && (
+                  <Badge size="xs" variant="light">
+                    Version {typeof documentSummary.versionSequence === 'number'
+                      ? documentSummary.versionSequence
+                      : 'Unknown'}
+                  </Badge>
+                )}
+                {documentSummary.status && (
+                  <Badge
+                    size="xs"
+                    variant="light"
+                    color={documentSummary.status.toUpperCase() === 'VOID' ? 'red' : 'blue'}
+                  >
+                    {formatDocumentStatusLabel(documentSummary.status)}
+                  </Badge>
+                )}
+              </Group>
               <Text size="xs" c="dimmed">
-                Signed {formatSummaryDate(documentSummary.signedAt)}
+                Requirement: {documentSummary.provenance === 'IMPORTED'
+                  ? documentSummary.documentRequirementTitle || 'Unavailable'
+                  : documentSummary.documentRequirementTitle || documentSummary.title}
+              </Text>
+              <Text size="xs" c="dimmed">
+                Applies to: {formatDocumentScopeLabel(documentSummary.scopeType)}
+              </Text>
+              <Text size="xs" c="dimmed">
+                Status: {formatDocumentStatusLabel(documentSummary.status)}
+              </Text>
+              <Text size="xs" c="dimmed">
+                {documentSummary.provenance === 'IMPORTED'
+                  ? `Signing date ${importedSigningDate
+                    ? formatDisplayDate(importedSigningDate, { timeZone: 'UTC' }) || 'unknown'
+                    : 'unknown'}`
+                  : `Signed ${formatSummaryDate(documentSummary.signedAt)}`}
               </Text>
             </Stack>
+            {(
+              canViewDocumentPdf
+              || (documentSummary.provenance === 'IMPORTED' && canVoidDocuments)
+              || (documentSummary.provenance === 'IMPORTED' && canViewDocumentAudit)
+            ) && (
+              <Group gap={6} mt={4}>
+                {canViewDocumentPdf && documentSummary.viewUrl && (
+                  <Button
+                    size="compact-xs"
+                    variant="subtle"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      openSignedDocumentPreview(documentSummary);
+                    }}
+                    onKeyDown={(event) => event.stopPropagation()}
+                  >
+                    View PDF
+                  </Button>
+                )}
+                {documentSummary.provenance === 'IMPORTED' && canVoidDocuments && (
+                  <Button
+                    size="compact-xs"
+                    variant="light"
+                    color="red"
+                    disabled={documentSummary.status?.toUpperCase() === 'VOID'}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      openCustomerDocumentVoidModal(documentSummary);
+                    }}
+                    onKeyDown={(event) => event.stopPropagation()}
+                  >
+                    Void
+                  </Button>
+                )}
+                {documentSummary.provenance === 'IMPORTED' && canViewDocumentAudit && (
+                  <Button
+                    size="compact-xs"
+                    variant="subtle"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void openCustomerDocumentAuditModal(documentSummary);
+                    }}
+                    onKeyDown={(event) => event.stopPropagation()}
+                  >
+                    Audit trail
+                  </Button>
+                )}
+              </Group>
+            )}
           </Paper>
-        ))}
+          );
+        })}
       </Stack>
     ) : (
       <Text size="xs" c="dimmed">{emptyText}</Text>
@@ -3429,11 +4250,22 @@ function OrganizationDetailContent() {
                 {summary.userName && <Text size="sm" c="dimmed">@{summary.userName}</Text>}
               </Stack>
             </Group>
-            <Group gap={6}>
-              <Badge variant="light" color="blue">{summary.events.length} events</Badge>
-              <Badge variant="light" color="gray">{summary.teams.length} org teams</Badge>
-              <Badge variant="light" color="green">{summary.bills.length} bills</Badge>
-              <Badge variant="light" color="grape">{summary.documents.length} documents</Badge>
+            <Group gap="xs">
+              {canManageFinance && (
+                <Button size="xs" onClick={openCustomerBillModal}>
+                  Add bill
+                </Button>
+              )}
+              {canManageTemplates && (
+                <Button size="xs" variant="light" onClick={openCustomerDocumentModal}>
+                  Add document
+                </Button>
+              )}
+              {canImportDocuments && (
+                <Button size="xs" variant="outline" onClick={openCustomerImportModal}>
+                  Import signed document
+                </Button>
+              )}
             </Group>
           </Group>
           <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="md">
@@ -3470,10 +4302,12 @@ function OrganizationDetailContent() {
               </Text>
             </Stack>
           </Group>
-          <Group gap={6}>
-            <Badge variant="light" color="blue">{summary.registrations.length} events</Badge>
-            <Badge variant="light" color="green">{summary.bills.length} bills</Badge>
-            <Badge variant="light" color="grape">{summary.documents.length} documents</Badge>
+          <Group gap="xs">
+            {canManageFinance && (
+              <Button size="xs" onClick={openCustomerBillModal}>
+                Add bill
+              </Button>
+            )}
           </Group>
         </Group>
         <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="md">
@@ -3542,7 +4376,6 @@ function OrganizationDetailContent() {
         ))}
         <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="md">
           {renderCustomerDetailSection('Team bills', renderCustomerBills(summary.bills))}
-          {renderCustomerDetailSection('Team documents', renderCustomerDocuments(summary.documents))}
         </SimpleGrid>
       </Stack>
     );
@@ -4130,6 +4963,16 @@ function OrganizationDetailContent() {
                     {templateDocuments.map((template) => (
                       <Paper key={template.$id} withBorder p="sm" radius="md" className="org-tab-item">
                         <Text fw={600}>{template.title || 'Untitled Template'}</Text>
+                        <Text size="xs" c="dimmed">
+                          {`Version ${template.versionSequence}`}
+                          {template.documentRequirementId
+                            && selectedTemplateVersionByRequirement.get(template.documentRequirementId) === template.$id
+                            ? ' · Selected version'
+                            : ''}
+                        </Text>
+                        <Text size="xs" c={template.frozenAt ? 'orange' : 'green'}>
+                          {template.frozenAt ? 'Frozen: existing assignments stay pinned' : 'Editable until assigned or signed'}
+                        </Text>
                         <Text size="sm" c="dimmed">
                           {template.signOnce ? 'Sign once per participant' : 'Sign for every event'}
                         </Text>
@@ -4145,6 +4988,16 @@ function OrganizationDetailContent() {
                           </Text>
                         )}
                         <Group justify="flex-end" mt="sm">
+                          {template.type === 'TEXT' && (
+                            <Button
+                              size="xs"
+                              variant="light"
+                              onClick={() => handleEditTextTemplate(template)}
+                              disabled={deletingTemplateId === template.$id || savingTemplateVersion}
+                            >
+                              Edit
+                            </Button>
+                          )}
                           {template.type === 'TEXT' && (
                             <Button
                               size="xs"
@@ -4629,6 +5482,47 @@ function OrganizationDetailContent() {
         ) : null}
       </Modal>
       <Modal
+        opened={Boolean(editingTextTemplate)}
+        onClose={() => setEditingTextTemplate(null)}
+        centered
+        size="lg"
+        title={editingTextTemplate
+          ? `Edit Version ${editingTextTemplate.versionSequence}`
+          : 'Edit text template'}
+      >
+        {editingTextTemplate ? (
+          <Stack gap="sm">
+            {editingTextTemplate.frozenAt && (
+              <Text size="sm" c="orange">
+                This Version is frozen. Saving text changes creates the next Version and keeps existing assignments pinned.
+              </Text>
+            )}
+            <TextInput label="Requirement title" value={textEditTitle} onChange={(event) => setTextEditTitle(event.currentTarget.value)} />
+            <Textarea
+              label="Requirement description"
+              value={textEditDescription}
+              onChange={(event) => setTextEditDescription(event.currentTarget.value)}
+              minRows={2}
+            />
+            <Textarea
+              label="Text content"
+              value={textEditContent}
+              onChange={(event) => setTextEditContent(event.currentTarget.value)}
+              minRows={10}
+              required
+            />
+            <Group justify="flex-end">
+              <Button variant="default" onClick={() => setEditingTextTemplate(null)} disabled={savingTemplateVersion}>
+                Cancel
+              </Button>
+              <Button onClick={() => void handleSaveTextTemplate()} loading={savingTemplateVersion}>
+                Save Version
+              </Button>
+            </Group>
+          </Stack>
+        ) : null}
+      </Modal>
+      <Modal
         opened={Boolean(previewSignedTextDocument)}
         onClose={() => setPreviewSignedTextDocument(null)}
         centered
@@ -4663,6 +5557,428 @@ function OrganizationDetailContent() {
             </Paper>
           </Stack>
         ) : null}
+      </Modal>
+      <Modal
+        opened={Boolean(customerDocumentToVoid)}
+        onClose={closeCustomerDocumentVoidModal}
+        centered
+        title={customerDocumentToVoid ? `Void ${customerDocumentToVoid.title}` : 'Void imported document'}
+      >
+        {customerDocumentToVoid ? (
+          <Stack gap="sm">
+            <Text size="sm" c="dimmed">
+              Voiding removes this evidence from requirement completion. It keeps the document and its audit trail.
+            </Text>
+            <PasswordInput
+              label="Confirm your password"
+              description="Enter a password or use a recent provider sign-in."
+              value={customerDocumentVoidPassword}
+              onChange={(event) => {
+                setCustomerDocumentVoidPassword(event.currentTarget.value);
+                setIsRecentProviderAuthUsed(false);
+              }}
+            />
+            <Button
+              variant="subtle"
+              size="xs"
+              onClick={() => {
+                setCustomerDocumentVoidPassword('');
+                setIsRecentProviderAuthUsed(true);
+              }}
+              disabled={isVoidingCustomerDocument}
+            >
+              Use recent provider sign-in
+            </Button>
+            {isRecentProviderAuthUsed ? (
+              <Text size="xs" c="dimmed">
+                This uses a provider login from the last ten minutes.
+              </Text>
+            ) : null}
+            <Select
+              label="Void reason"
+              data={DOCUMENT_VOID_REASON_OPTIONS.map((reason) => ({ value: reason, label: reason }))}
+              value={customerDocumentVoidReason}
+              onChange={setCustomerDocumentVoidReason}
+              allowDeselect={false}
+              searchable
+              required
+            />
+            <Textarea
+              label="Note"
+              description="A note is required for Other."
+              value={customerDocumentVoidNote}
+              onChange={(event) => setCustomerDocumentVoidNote(event.currentTarget.value)}
+              minRows={3}
+              maxLength={1000}
+            />
+            <Group justify="flex-end">
+              <Button
+                variant="default"
+                onClick={() => closeCustomerDocumentVoidModal()}
+                disabled={isVoidingCustomerDocument}
+              >
+                Cancel
+              </Button>
+              <Button
+                color="red"
+                onClick={() => void handleVoidCustomerDocument()}
+                loading={isVoidingCustomerDocument}
+                disabled={
+                  !customerDocumentVoidReason
+                  || (!customerDocumentVoidPassword.trim() && !isRecentProviderAuthUsed)
+                }
+              >
+                Void document
+              </Button>
+            </Group>
+          </Stack>
+        ) : null}
+      </Modal>
+      <Modal
+        opened={Boolean(customerDocumentAuditTarget)}
+        onClose={() => {
+          if (!isLoadingCustomerDocumentAudit) {
+            setCustomerDocumentAuditTarget(null);
+            setCustomerDocumentAuditTrail(null);
+          }
+        }}
+        centered
+        size="lg"
+        title={customerDocumentAuditTarget
+          ? `Audit trail: ${customerDocumentAuditTarget.title}`
+          : 'Document audit trail'}
+      >
+        {isLoadingCustomerDocumentAudit ? (
+          <Group justify="center" py="xl">
+            <Loader size="sm" />
+            <Text size="sm" c="dimmed">Loading audit trail...</Text>
+          </Group>
+        ) : customerDocumentAuditTrail ? (
+          <Stack gap="md">
+            <Text size="sm" c="dimmed">
+              {customerDocumentAuditTrail.description}
+            </Text>
+            <Paper withBorder p="sm" radius="md">
+              <Stack gap={4}>
+                <Text fw={600}>Imported evidence</Text>
+                <Text size="sm">Document: {customerDocumentAuditTrail.evidence.documentName}</Text>
+                <Text size="sm">Provenance: {customerDocumentAuditTrail.evidence.provenance}</Text>
+                <Text size="sm">Lifecycle status: {customerDocumentAuditTrail.evidence.status || 'Unknown'}</Text>
+                <Text size="sm">
+                  Historical signing date:{' '}
+                  {customerDocumentAuditTrail.evidence.historicalSigningDate
+                    ? formatSummaryDateTime(customerDocumentAuditTrail.evidence.historicalSigningDate)
+                    : 'Signing date unknown'}
+                </Text>
+                <Text size="sm">
+                  Imported: {formatSummaryDateTime(customerDocumentAuditTrail.evidence.importedAt ?? undefined)}
+                </Text>
+                <Text size="sm">
+                  Uploader:{' '}
+                  {customerDocumentAuditTrail.evidence.uploader?.displayName || 'Former user'}
+                </Text>
+                <Text size="sm">
+                  Attestation version: {customerDocumentAuditTrail.evidence.attestationVersion || 'Not recorded'}
+                </Text>
+                <Text size="sm">
+                  Content identity: {customerDocumentAuditTrail.evidence.contentHash || 'Not recorded'}
+                </Text>
+                {customerDocumentAuditTrail.evidence.attestationText ? (
+                  <Text
+                    size="sm"
+                    component="pre"
+                    style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
+                  >
+                    Attestation: {customerDocumentAuditTrail.evidence.attestationText}
+                  </Text>
+                ) : null}
+                {customerDocumentAuditTrail.evidence.sourceNote ? (
+                  <Text
+                    size="sm"
+                    component="pre"
+                    style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
+                  >
+                    Source note: {customerDocumentAuditTrail.evidence.sourceNote}
+                  </Text>
+                ) : null}
+              </Stack>
+            </Paper>
+            <Text fw={600}>Audit trail events</Text>
+            {customerDocumentAuditTrail.events.length > 0 ? (
+              <Stack gap="sm">
+                {customerDocumentAuditTrail.events.map((event) => (
+                  <Paper key={event.id} withBorder p="sm" radius="md">
+                    <Stack gap={4}>
+                      <Group justify="space-between" align="flex-start" wrap="wrap">
+                        <Badge size="sm" variant="light">{event.eventType}</Badge>
+                        <Text size="xs" c="dimmed">{formatSummaryDateTime(event.createdAt ?? undefined)}</Text>
+                      </Group>
+                      {event.actorUserId && (
+                        <Text size="xs" c="dimmed">
+                          Actor: {event.actorDisplayName || 'Former user'}
+                        </Text>
+                      )}
+                      {event.reason && <Text size="sm">Reason: {event.reason}</Text>}
+                      {event.note && <Text size="sm">Note: {event.note}</Text>}
+                      {event.payload !== undefined && event.payload !== null && (
+                        <Text
+                          size="xs"
+                          component="pre"
+                          style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
+                        >
+                          {JSON.stringify(event.payload, null, 2)}
+                        </Text>
+                      )}
+                    </Stack>
+                  </Paper>
+                ))}
+              </Stack>
+            ) : (
+              <Text size="sm" c="dimmed">No audit events found.</Text>
+            )}
+          </Stack>
+        ) : (
+          <Text size="sm" c="dimmed">No audit trail found.</Text>
+        )}
+      </Modal>
+      <Modal
+        opened={customerBillModalOpen}
+        onClose={closeCustomerBillModal}
+        title={selectedOrganizationCustomer
+          ? `${editingCustomerBill ? 'Edit' : 'Add'} bill for ${selectedOrganizationCustomer.name}`
+          : `${editingCustomerBill ? 'Edit' : 'Add'} bill`}
+        centered
+      >
+        <Stack gap="sm">
+          <Text size="sm" c="dimmed">
+            Record the bill amount, paid amount, and due date for this customer.
+          </Text>
+          <TextInput
+            label="Bill description"
+            value={customerBillLabel}
+            onChange={(event) => setCustomerBillLabel(event.currentTarget.value)}
+            required
+          />
+          <Group grow align="flex-start">
+            <NumberInput
+              label="Bill amount"
+              prefix="$"
+              min={0}
+              decimalScale={2}
+              fixedDecimalScale
+              value={customerBillAmount}
+              onChange={setCustomerBillAmount}
+              required
+            />
+            <NumberInput
+              label="Paid amount"
+              prefix="$"
+              min={0}
+              max={customerBillAmountCents > 0 ? customerBillAmountCents / 100 : undefined}
+              decimalScale={2}
+              fixedDecimalScale
+              value={customerBillPaidAmount}
+              onChange={setCustomerBillPaidAmount}
+              error={customerBillPaidAmountError}
+              required
+            />
+          </Group>
+          <TextInput
+            label="Due date"
+            type="date"
+            value={customerBillDueDate}
+            onChange={(event) => setCustomerBillDueDate(event.currentTarget.value)}
+            required
+          />
+          <Text size="xs" c="dimmed">
+            Remaining balance: {formatPrice(Math.max(0, customerBillAmountCents - customerBillPaidAmountCents))}
+          </Text>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={closeCustomerBillModal} disabled={creatingCustomerBill}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleCreateCustomerBill}
+              loading={creatingCustomerBill}
+              disabled={
+                !customerBillLabel.trim()
+                || !customerBillDueDate
+                || !Number.isFinite(customerBillAmountCents)
+                || customerBillAmountCents <= 0
+                || !Number.isFinite(customerBillPaidAmountCents)
+                || customerBillPaidAmountCents < 0
+                || customerBillPaidAmountCents > customerBillAmountCents
+              }
+            >
+              {editingCustomerBill ? 'Save changes' : 'Add bill'}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+      <Modal
+        opened={isCustomerImportModalOpen}
+        onClose={closeCustomerImportModal}
+        title={selectedOrganizationCustomer
+          ? `Import signed document for ${selectedOrganizationCustomer.name}`
+          : 'Import signed document'}
+        centered
+        size="lg"
+      >
+        {selectedOrganizationCustomer?.user ? (
+          <Stack gap="sm">
+            <Text size="sm" c="dimmed">
+              Upload a complete PDF that the customer signed outside BracketIQ. Review the full file before you attest to it.
+            </Text>
+            <Select
+              label="Document Requirement and Template Version"
+              data={customerImportTemplateOptions}
+              value={selectedCustomerImportTemplateId}
+              onChange={handleCustomerImportTemplateChange}
+              searchable
+              allowDeselect={false}
+              nothingFoundMessage="No document requirement versions found"
+              required
+            />
+            {selectedCustomerImportTemplate?.signOnce ? (
+              <Text size="sm" c="dimmed">
+                Applies to: This Organization
+              </Text>
+            ) : (
+              <Select
+                label="Event"
+                data={customerImportScopeOptions}
+                value={selectedCustomerImportScopeId}
+                onChange={setSelectedCustomerImportScopeId}
+                searchable
+                allowDeselect={false}
+                nothingFoundMessage="No eligible events found"
+                required
+              />
+            )}
+            <FileInput
+              label="Signed PDF"
+              placeholder="Choose a PDF"
+              accept="application/pdf"
+              value={customerImportFile}
+              onChange={handleCustomerImportFileChange}
+              clearable
+              required
+            />
+            {customerImportPreviewUrl ? (
+              <Paper withBorder p="xs" radius="md">
+                <iframe
+                  ref={customerImportPreviewFrameRef}
+                  title="Imported signed document preview"
+                  src={customerImportPreviewUrl}
+                  onLoad={() => setIsCustomerImportPreviewReady(true)}
+                  style={{ width: '100%', height: '52vh', border: 0 }}
+                />
+              </Paper>
+            ) : (
+              <Text size="xs" c="dimmed">
+                Choose a PDF to review the complete file here.
+              </Text>
+            )}
+            <TextInput
+              label="Historical signing date (optional)"
+              type="date"
+              value={customerImportHistoricalSigningDate}
+              onChange={(event) => setCustomerImportHistoricalSigningDate(event.currentTarget.value)}
+            />
+            <Textarea
+              label="Private source note (optional)"
+              description="Only authorized staff can view this note."
+              value={customerImportSourceNote}
+              onChange={(event) => setCustomerImportSourceNote(event.currentTarget.value)}
+              minRows={2}
+              maxRows={5}
+              autosize
+            />
+            <Checkbox
+              checked={isCustomerImportAttestationAccepted}
+              onChange={(event) => setIsCustomerImportAttestationAccepted(event.currentTarget.checked)}
+              disabled={!isCustomerImportPreviewReady}
+              label="Document Import Attestation"
+              description="I confirm that this file is a complete signed document for the shown customer, Document Template Version, and scope. I confirm that it contains all required signatures. I understand that BracketIQ did not verify the signatures."
+            />
+            <Group justify="flex-end">
+              <Button variant="default" onClick={() => closeCustomerImportModal()} disabled={isImportingCustomerDocument}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleImportCustomerDocument}
+                loading={isImportingCustomerDocument}
+                disabled={
+                  !selectedCustomerImportTemplateId
+                  || !selectedCustomerImportScopeId
+                  || !customerImportFile
+                  || !isCustomerImportPreviewReady
+                  || !isCustomerImportAttestationAccepted
+                }
+              >
+                Import signed document
+              </Button>
+            </Group>
+          </Stack>
+        ) : (
+          <Text size="sm" c="dimmed">Select a User customer before importing a document.</Text>
+        )}
+      </Modal>
+      <Modal
+        opened={customerDocumentModalOpen}
+        onClose={closeCustomerDocumentModal}
+        title={selectedOrganizationCustomer ? `Add document for ${selectedOrganizationCustomer.name}` : 'Add document'}
+        centered
+      >
+        {selectedOrganizationCustomer?.user ? (
+          <Stack gap="sm">
+            <Text size="sm" c="dimmed">
+              Choose a participant document template. An event is optional for text documents.
+            </Text>
+            <Select
+              label="Document template"
+              data={customerDocumentTemplateOptions}
+              value={selectedCustomerDocumentTemplateId}
+              onChange={setSelectedCustomerDocumentTemplateId}
+              searchable
+              allowDeselect={false}
+              nothingFoundMessage="No participant templates found"
+            />
+            <Select
+              label={selectedCustomerDocumentRequiresEvent ? 'Event' : 'Event (optional for text documents)'}
+              data={selectedOrganizationCustomer.user.events.map((event) => ({
+                value: event.eventId,
+                label: `${event.eventName} • ${formatSummaryDateTime(event.start)}`,
+              }))}
+              value={selectedCustomerDocumentEventId}
+              onChange={setSelectedCustomerDocumentEventId}
+              searchable
+              clearable
+              allowDeselect
+              nothingFoundMessage="No organization events found"
+            />
+            {selectedCustomerDocumentRequiresEvent && !selectedCustomerDocumentEventId && (
+              <Text size="xs" c="dimmed">PDF documents use BoldSign and require an event.</Text>
+            )}
+            <Group justify="flex-end">
+              <Button variant="default" onClick={closeCustomerDocumentModal} disabled={sendingCustomerDocument}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleAddCustomerDocument}
+                loading={sendingCustomerDocument}
+                disabled={
+                  !selectedCustomerDocumentTemplateId
+                  || (selectedCustomerDocumentRequiresEvent && !selectedCustomerDocumentEventId)
+                }
+              >
+                Add document
+              </Button>
+            </Group>
+          </Stack>
+        ) : (
+          <Text size="sm" c="dimmed">Select a player before adding a document.</Text>
+        )}
       </Modal>
       <Modal
         opened={templateModalOpen}

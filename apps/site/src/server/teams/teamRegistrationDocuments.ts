@@ -10,7 +10,16 @@ import {
   BOLDSIGN_OPERATION_STATUSES,
   findLatestBoldSignOperation,
 } from '@/lib/boldsignSyncOperations';
+import {
+  documentSatisfactionScopeFor,
+  documentSubjectIdFor,
+  findSatisfiedDocumentTemplateIds,
+} from '@/server/documentEvidence';
 import { normalizeRequiredSignerType, type SignerContext } from '@/lib/templateSignerTypes';
+import {
+  DocumentTemplateVersionProviderQuarantinedError,
+  findQuarantinedDocumentTemplateVersionIds,
+} from '@/server/documents/documentTemplateVersions';
 
 type PrismaLike = any;
 
@@ -21,6 +30,10 @@ type TeamTemplateRecord = {
   organizationId?: string | null;
   title?: string | null;
   description?: string | null;
+  documentRequirement?: {
+    title?: string | null;
+    description?: string | null;
+  } | null;
   type?: string | null;
   signOnce?: boolean | null;
   requiredSignerType?: string | null;
@@ -28,6 +41,7 @@ type TeamTemplateRecord = {
   roleIndex?: number | null;
   roleIndexes?: number[] | null;
   signerRoles?: string[] | null;
+  providerQuarantinedAt?: Date | null;
   content?: string | null;
 };
 
@@ -91,11 +105,16 @@ const normalizeEmail = (value: unknown): string | null => {
   }
   return normalized;
 };
+const templateDisplayTitle = (template: TeamTemplateRecord): string =>
+  normalizeText(template.documentRequirement?.title)
+  ?? normalizeText(template.title)
+  ?? 'Required Document';
 
-const isSignedDocumentStatus = (value: unknown): boolean => {
-  const normalized = normalizeText(value)?.toLowerCase();
-  return normalized === 'signed' || normalized === 'completed';
-};
+const templateDisplayDescription = (template: TeamTemplateRecord): string | undefined =>
+  normalizeText(template.documentRequirement?.description)
+  ?? normalizeText(template.description)
+  ?? undefined;
+
 
 const normalizeRoleToken = (value: string | undefined): string => {
   return (value ?? '').trim().toLowerCase().replace(/[^a-z]/g, '');
@@ -254,6 +273,37 @@ const filterEligibleTemplateIds = (
     return requiredSignerType === 'PARTICIPANT';
   });
 };
+const findSatisfiedTeamTemplateIds = async (params: {
+  organizationId: string | null;
+  teamId: string;
+  subjectUserId: string | null;
+  templates: TeamTemplateRecord[];
+  client?: PrismaLike;
+}): Promise<Set<string>> => {
+  const documentSubjectId = documentSubjectIdFor(
+    params.organizationId,
+    params.subjectUserId,
+  );
+  const satisfactionScopes = params.templates.flatMap((template) => {
+    const scope = documentSatisfactionScopeFor({
+      templateDocumentId: template.id,
+      organizationId: params.organizationId,
+      documentSubjectUserId: params.subjectUserId,
+      eventId: null,
+      teamId: params.teamId,
+      signOnce: template.signOnce,
+    });
+    return scope ? [scope] : [];
+  });
+  return findSatisfiedDocumentTemplateIds(
+    {
+      documentSubjectId,
+      scopes: satisfactionScopes,
+    },
+    params.client ?? prisma,
+  );
+};
+
 
 export const loadRequiredTeamTemplates = async (
   teamId: string,
@@ -288,6 +338,9 @@ export const loadRequiredTeamTemplates = async (
         organizationId: true,
         title: true,
         description: true,
+        documentRequirement: {
+          select: { title: true, description: true },
+        },
         type: true,
         signOnce: true,
         requiredSignerType: true,
@@ -319,7 +372,6 @@ export const getTeamRegistrationSignatureState = async (params: {
 }): Promise<TeamRegistrationSignatureState> => {
   const client = params.client ?? prisma;
   const registrantId = normalizeText(params.registrantId);
-  const parentId = normalizeText(params.parentId);
   if (!registrantId) {
     throw new Error('Registrant id is required.');
   }
@@ -345,45 +397,21 @@ export const getTeamRegistrationSignatureState = async (params: {
       consentStatus: null,
     };
   }
+  const satisfiedTemplateIds = await findSatisfiedTeamTemplateIds({
+    organizationId: teamTemplates.organizationId,
+    teamId: params.teamId,
+    subjectUserId: registrantId,
+    templates: eligibleTemplateIds
+      .map((templateId) => teamTemplates.templatesById.get(templateId))
+      .filter((template): template is TeamTemplateRecord => Boolean(template)),
+    client,
+  });
+
 
   if (params.registrantType === 'SELF') {
-    const participantTemplates = eligibleTemplateIds
-      .map((templateId) => teamTemplates.templatesById.get(templateId))
-      .filter((template): template is TeamTemplateRecord => Boolean(template));
-    const signOnceTemplateIds = participantTemplates
-      .filter((template) => template.signOnce === true)
-      .map((template) => template.id);
-    const teamScopedTemplateIds = participantTemplates
-      .filter((template) => template.signOnce !== true)
-      .map((template) => template.id);
-
-    const signedRows = (signOnceTemplateIds.length || teamScopedTemplateIds.length)
-      ? await client.signedDocuments.findMany({
-        where: {
-          userId: registrantId,
-          signerRole: 'participant',
-          OR: [
-            ...(signOnceTemplateIds.length
-              ? [{ templateId: { in: signOnceTemplateIds } }]
-              : []),
-            ...(teamScopedTemplateIds.length
-              ? [{ templateId: { in: teamScopedTemplateIds }, teamId: params.teamId }]
-              : []),
-          ],
-        },
-        select: {
-          templateId: true,
-          status: true,
-        },
-      })
-      : [];
-
-    const signedTemplateIds = new Set(
-      signedRows
-        .filter((row: { status?: string | null }) => isSignedDocumentStatus(row.status))
-        .map((row: { templateId: string }) => row.templateId),
+    const missingTemplateIds = eligibleTemplateIds.filter(
+      (templateId) => !satisfiedTemplateIds.has(templateId),
     );
-    const missingTemplateIds = eligibleTemplateIds.filter((templateId) => !signedTemplateIds.has(templateId));
     return {
       teamId: teamTemplates.teamId,
       organizationId: teamTemplates.organizationId,
@@ -402,8 +430,6 @@ export const getTeamRegistrationSignatureState = async (params: {
 
   const parentTemplateIds = new Set<string>();
   const childTemplateIds = new Set<string>();
-  const signOnceTemplateIds = new Set<string>();
-  const teamScopedTemplateIds = new Set<string>();
 
   eligibleTemplateIds.forEach((templateId) => {
     const template = teamTemplates.templatesById.get(templateId);
@@ -417,11 +443,6 @@ export const getTeamRegistrationSignatureState = async (params: {
     if (signerType === 'CHILD' || signerType === 'PARENT_GUARDIAN_CHILD') {
       childTemplateIds.add(template.id);
     }
-    if (template.signOnce) {
-      signOnceTemplateIds.add(template.id);
-    } else {
-      teamScopedTemplateIds.add(template.id);
-    }
   });
 
   let childEmail: string | undefined;
@@ -433,64 +454,13 @@ export const getTeamRegistrationSignatureState = async (params: {
     childEmail = normalizeEmail(childSensitive?.email) ?? undefined;
   }
 
-  const templateScopeFilters: Array<Record<string, unknown>> = [];
-  if (signOnceTemplateIds.size > 0) {
-    templateScopeFilters.push({
-      templateId: { in: Array.from(signOnceTemplateIds) },
-    });
-  }
-  if (teamScopedTemplateIds.size > 0) {
-    templateScopeFilters.push({
-      templateId: { in: Array.from(teamScopedTemplateIds) },
-      teamId: params.teamId,
-    });
-  }
-
-  const signedRowsWhere: Record<string, unknown> = {
-    OR: [
-      ...(parentId ? [{
-        userId: parentId,
-        signerRole: 'parent_guardian',
-        hostId: registrantId,
-      }] : []),
-      {
-        userId: registrantId,
-        signerRole: 'child',
-        hostId: registrantId,
-      },
-    ],
-  };
-  if (templateScopeFilters.length === 1) {
-    Object.assign(signedRowsWhere, templateScopeFilters[0]);
-  } else if (templateScopeFilters.length > 1) {
-    signedRowsWhere.AND = [{ OR: templateScopeFilters }];
-  } else {
-    signedRowsWhere.templateId = { in: eligibleTemplateIds };
-  }
-
-  const signedRows = await client.signedDocuments.findMany({
-    where: signedRowsWhere,
-    select: {
-      templateId: true,
-      status: true,
-      userId: true,
-      signerRole: true,
-    },
-  });
-
   const parentSignedTemplates = new Set<string>();
   const childSignedTemplates = new Set<string>();
-  signedRows.forEach((row: { templateId: string; status?: string | null; userId?: string | null; signerRole?: string | null }) => {
-    if (!isSignedDocumentStatus(row.status)) {
-      return;
-    }
-    if (parentId && row.userId === parentId && row.signerRole === 'parent_guardian') {
-      parentSignedTemplates.add(row.templateId);
-    }
-    if (row.userId === registrantId && row.signerRole === 'child') {
-      childSignedTemplates.add(row.templateId);
-    }
+  satisfiedTemplateIds.forEach((templateId) => {
+    parentSignedTemplates.add(templateId);
+    childSignedTemplates.add(templateId);
   });
+
 
   const missingTemplateIds = eligibleTemplateIds.filter((templateId) => {
     if (parentTemplateIds.has(templateId) && !parentSignedTemplates.has(templateId)) {
@@ -532,7 +502,7 @@ export const getTeamRegistrationSignatureState = async (params: {
     eligibleTemplateIds,
     missingTemplateIds,
     missingTemplateLabels: missingTemplateIds.map((templateId) => (
-      normalizeText(teamTemplates.templatesById.get(templateId)?.title) ?? templateId
+      templateDisplayTitle(teamTemplates.templatesById.get(templateId) ?? { id: templateId })
     )),
     missingChildEmail: childTemplateIds.size > 0 && !childEmail,
     hasCompletedRequiredSignatures: consentComplete,
@@ -593,10 +563,15 @@ export const dispatchRequiredTeamDocuments = async (
   const templates = await prisma.templateDocuments.findMany({
     where: { id: { in: requiredTemplateIds } },
     select: {
+      signOnce: true,
       id: true,
       templateId: true,
+      providerQuarantinedAt: true,
       title: true,
       description: true,
+      documentRequirement: {
+        select: { title: true, description: true },
+      },
       type: true,
       requiredSignerType: true,
       roleIndex: true,
@@ -605,21 +580,39 @@ export const dispatchRequiredTeamDocuments = async (
     },
   });
   const templateById = new Map(templates.map((template) => [template.id, template]));
+  const satisfiedTemplateIds = await findSatisfiedTeamTemplateIds({
+    organizationId: normalizeText(params.organizationId) ?? null,
+    teamId: params.teamId,
+    subjectUserId: childUserId ?? participantUserId,
+    templates,
+  });
+
+  const quarantinedTemplateIds = await findQuarantinedDocumentTemplateVersionIds(
+    prisma,
+    templates.filter((template) => !satisfiedTemplateIds.has(template.id)),
+  );
 
   for (const templateId of requiredTemplateIds) {
     const template = templateById.get(templateId);
     if (!template) {
       continue;
     }
+    if (satisfiedTemplateIds.has(template.id)) {
+      continue;
+    }
 
     const templateType = normalizeText(template.type)?.toUpperCase();
-    if (templateType !== 'PDF') {
+    if (templateType === 'TEXT') {
+      continue;
+    }
+    if (quarantinedTemplateIds.has(template.id)) {
+      errors.push(new DocumentTemplateVersionProviderQuarantinedError(template.id).message);
       continue;
     }
 
     const boldSignTemplateId = normalizeText(template.templateId);
     if (!boldSignTemplateId) {
-      errors.push(`Template "${template.title}" is missing a BoldSign template id.`);
+      errors.push(`Template "${templateDisplayTitle(template)}" is missing a BoldSign template id.`);
       continue;
     }
 
@@ -642,7 +635,7 @@ export const dispatchRequiredTeamDocuments = async (
           ? parentUserId
           : childUserId;
       if (!targetUserId) {
-        identityError = `Missing ${signerContext.replace('_', '/')} signer user id for template "${template.title}".`;
+        identityError = `Missing ${signerContext.replace('_', '/')} signer user id for template "${templateDisplayTitle(template)}".`;
         break;
       }
 
@@ -653,7 +646,7 @@ export const dispatchRequiredTeamDocuments = async (
           identityError = null;
           break;
         }
-        identityError = `Missing ${signerContext.replace('_', '/')} signer email for template "${template.title}".`;
+        identityError = `Missing ${signerContext.replace('_', '/')} signer email for template "${templateDisplayTitle(template)}".`;
         break;
       }
       identitiesByContext.set(signerContext, signerIdentity);
@@ -735,7 +728,7 @@ export const dispatchRequiredTeamDocuments = async (
       ?? roleAssignmentsForSend[0];
 
     if (!selectedRoleAssignment) {
-      errors.push(`Failed to resolve signer assignments for template "${template.title}".`);
+      errors.push(`Failed to resolve signer assignments for template "${templateDisplayTitle(template)}".`);
       continue;
     }
 
@@ -754,8 +747,8 @@ export const dispatchRequiredTeamDocuments = async (
           signerOrder: row.signerOrder,
         })),
         enableSigningOrder: hasDuplicateSignerEmails,
-        title: normalizeText(template.title) ?? 'Signature request',
-        message: normalizeText(template.description) ?? undefined,
+        title: templateDisplayTitle(template),
+        message: templateDisplayDescription(template),
       });
 
       await createDocumentSendOperation({
@@ -772,7 +765,7 @@ export const dispatchRequiredTeamDocuments = async (
         roleIndex: selectedRoleAssignment.roleIndex,
         payload: {
           templateDocumentId: template.id,
-          templateTitle: template.title,
+          templateTitle: templateDisplayTitle(template),
           requiredSignerType,
           dispatchSource: 'team_registration',
           roleAssignments: roleAssignmentsForSend.map((row) => ({
@@ -790,7 +783,7 @@ export const dispatchRequiredTeamDocuments = async (
       sentDocumentIds.push(sent.documentId);
     } catch (error) {
       errors.push(
-        `Failed to send "${template.title}": ${error instanceof Error ? error.message : 'Unknown error'}`,
+        `Failed to send "${templateDisplayTitle(template)}": ${error instanceof Error ? error.message : 'Unknown error'}`,
       );
     }
   }

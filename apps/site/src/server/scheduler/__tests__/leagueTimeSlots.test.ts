@@ -1111,24 +1111,28 @@ describe('league scheduling (time slots)', () => {
     expect(divisionCounts.get('advanced')).toBe(1);
   });
 
-  it('schedules split divisions in parallel from the same season start', () => {
+  it('schedules complete regular-season Division batches in stable order while using eligible fields concurrently', () => {
     const rec = new Division('rec', 'Rec');
     const open = new Division('open', 'Open');
 
-    const fieldRec = buildFieldById('field_rec_parallel', rec);
-    const fieldOpen = buildFieldById('field_open_parallel', open);
+    const recFieldA = buildFieldById('field_rec_a', rec);
+    const recFieldB = buildFieldById('field_rec_b', rec);
+    const openFieldA = buildFieldById('field_open_a', open);
+    const openFieldB = buildFieldById('field_open_b', open);
 
     const teams = {
       ...buildTeamsForDivision('rec', 4, rec),
       ...buildTeamsForDivision('open', 4, open),
     };
 
-    const start = new Date(2026, 0, 5, 8, 0, 0); // Monday
-    const end = new Date(2026, 2, 30, 20, 0, 0);
+    const start = new Date('2026-01-05T08:00:00.000Z');
+    const end = new Date('2026-01-05T20:00:00.000Z');
+    const slotStart = new Date('2026-01-05T09:00:00.000Z');
+    const slotEnd = new Date('2026-01-05T18:00:00.000Z');
 
     const league = new League({
-      id: 'league_split_divisions_parallel_start',
-      name: 'Split Divisions Parallel Start',
+      id: 'league_complete_division_sequence',
+      name: 'Complete Division Sequence',
       start,
       end,
       maxParticipants: 8,
@@ -1138,27 +1142,36 @@ describe('league scheduling (time slots)', () => {
       teams,
       divisions: [rec, open],
       officials: [],
-      fields: { [fieldRec.id]: fieldRec, [fieldOpen.id]: fieldOpen },
+      fields: {
+        [recFieldA.id]: recFieldA,
+        [recFieldB.id]: recFieldB,
+        [openFieldA.id]: openFieldA,
+        [openFieldB.id]: openFieldB,
+      },
       timeSlots: [
         new TimeSlot({
-          id: 'slot_rec_parallel',
-          dayOfWeek: 0, // Monday
-          startDate: new Date(2026, 0, 5),
-          repeating: true,
+          id: 'slot_rec_complete_division',
+          dayOfWeek: 0,
+          startDate: slotStart,
+          endDate: slotEnd,
+          repeating: false,
           startTimeMinutes: 9 * 60,
-          endTimeMinutes: 10 * 60,
-          field: fieldRec.id,
+          endTimeMinutes: 18 * 60,
+          fieldIds: [recFieldA.id, recFieldB.id],
           divisions: [rec],
+          timeZone: 'UTC',
         }),
         new TimeSlot({
-          id: 'slot_open_parallel',
-          dayOfWeek: 1, // Tuesday
-          startDate: new Date(2026, 0, 5),
-          repeating: true,
+          id: 'slot_open_complete_division',
+          dayOfWeek: 0,
+          startDate: slotStart,
+          endDate: slotEnd,
+          repeating: false,
           startTimeMinutes: 9 * 60,
-          endTimeMinutes: 10 * 60,
-          field: fieldOpen.id,
+          endTimeMinutes: 18 * 60,
+          fieldIds: [openFieldA.id, openFieldB.id],
           divisions: [open],
+          timeZone: 'UTC',
         }),
       ],
       doTeamsOfficiate: false,
@@ -1172,22 +1185,26 @@ describe('league scheduling (time slots)', () => {
     });
 
     const scheduled = scheduleEvent({ event: league }, context);
-    const recStarts = scheduled.matches
-      .filter((match) => match.division.id === rec.id)
-      .map((match) => match.start.getTime());
-    const openStarts = scheduled.matches
-      .filter((match) => match.division.id === open.id)
-      .map((match) => match.start.getTime());
+    const recMatches = scheduled.matches.filter((match) => match.division.id === rec.id);
+    const openMatches = scheduled.matches.filter((match) => match.division.id === open.id);
 
-    expect(recStarts.length).toBeGreaterThan(0);
-    expect(openStarts.length).toBeGreaterThan(0);
+    expect(scheduled.matches).toHaveLength(12);
+    expect(recMatches).toHaveLength(6);
+    expect(openMatches).toHaveLength(6);
 
-    const firstRecStart = Math.min(...recStarts);
-    const firstOpenStart = Math.min(...openStarts);
-    const firstWeekEnd = start.getTime() + 7 * 24 * 60 * 60 * 1000;
+    const latestRecEnd = Math.max(...recMatches.map((match) => match.end.getTime()));
+    const earliestOpenStart = Math.min(...openMatches.map((match) => match.start.getTime()));
+    expect(latestRecEnd).toBeLessThanOrEqual(earliestOpenStart);
 
-    expect(firstRecStart).toBeLessThan(firstWeekEnd);
-    expect(firstOpenStart).toBeLessThan(firstWeekEnd);
+    const fieldsByRecStart = new Map<number, Set<string>>();
+    for (const match of recMatches) {
+      const fieldId = match.field?.id;
+      if (!fieldId) continue;
+      const fieldsAtStart = fieldsByRecStart.get(match.start.getTime()) ?? new Set<string>();
+      fieldsAtStart.add(fieldId);
+      fieldsByRecStart.set(match.start.getTime(), fieldsAtStart);
+    }
+    expect([...fieldsByRecStart.values()].some((fieldIds) => fieldIds.size > 1)).toBe(true);
   });
 
   it('distributes placeholder teams across divisions when singleDivision is disabled', () => {
@@ -1667,7 +1684,7 @@ describe('league scheduling (time slots)', () => {
     expect(scheduled.matches.every((match) => match.division.id === 'rec' || match.division.id === 'open')).toBe(true);
   });
 
-  it('places split playoff divisions without a phase-wide placement barrier', () => {
+  it('places split playoff matches after the regular-season Division batch completes', () => {
     const mixedAge = new Division(
       'mixed_age',
       'Mixed Age',
@@ -1745,7 +1762,7 @@ describe('league scheduling (time slots)', () => {
     expect(playoffMatches.every((match) => match.field?.id === fieldPlayoff.id)).toBe(true);
     const latestRegularEnd = Math.max(...regularMatches.map((match) => match.end.getTime()));
     const earliestPlayoffStart = Math.min(...playoffMatches.map((match) => match.start.getTime()));
-    expect(earliestPlayoffStart).toBeLessThan(latestRegularEnd);
+    expect(earliestPlayoffStart).toBeGreaterThanOrEqual(latestRegularEnd);
   });
 
   it('reuses mapped regular-season slots for split playoffs when explicit playoff slots are missing', () => {
@@ -2012,9 +2029,9 @@ describe('league scheduling (time slots)', () => {
     );
   });
 
-  it('schedules split playoff divisions in parallel when they share the same playoff window', () => {
+  it('schedules split playoff divisions in stable order when they share the same playoff window', () => {
     const mixedAge = new Division(
-      'mixed_age_parallel',
+      'mixed_age_sequence',
       'Mixed Age',
       [],
       null,
@@ -2034,14 +2051,14 @@ describe('league scheduling (time slots)', () => {
     );
     const playoffA = new Division('mixed_age_playoff_a', 'Mixed Age Playoff A', [], null, 4, null, 'PLAYOFF');
     const playoffB = new Division('mixed_age_playoff_b', 'Mixed Age Playoff B', [], null, 4, null, 'PLAYOFF');
-    const fieldRegular = buildFieldById('field_mixed_age_regular_parallel', mixedAge);
-    const fieldPlayoffA = buildFieldById('field_mixed_age_playoff_a_parallel', playoffA);
-    const fieldPlayoffB = buildFieldById('field_mixed_age_playoff_b_parallel', playoffB);
+    const fieldRegular = buildFieldById('field_mixed_age_regular_sequence', mixedAge);
+    const fieldPlayoffA = buildFieldById('field_mixed_age_playoff_a_sequence', playoffA);
+    const fieldPlayoffB = buildFieldById('field_mixed_age_playoff_b_sequence', playoffB);
     const teams = buildTeams(8, mixedAge);
 
     const league = new League({
-      id: 'league_split_playoff_parallel_start',
-      name: 'Split Playoff Parallel Start',
+      id: 'league_split_playoff_sequence',
+      name: 'Split Playoff Stable Sequence',
       start: new Date(2026, 0, 5, 8, 0, 0),
       end: new Date(2026, 2, 30, 22, 0, 0),
       noFixedEndDateTime: false,
@@ -2061,7 +2078,7 @@ describe('league scheduling (time slots)', () => {
       },
       timeSlots: [
         new TimeSlot({
-          id: 'slot_mixed_age_regular_parallel',
+          id: 'slot_mixed_age_regular_sequence',
           dayOfWeek: 0, // Monday
           startDate: new Date(2026, 0, 5),
           repeating: true,
@@ -2071,7 +2088,7 @@ describe('league scheduling (time slots)', () => {
           divisions: [mixedAge],
         }),
         new TimeSlot({
-          id: 'slot_mixed_age_playoff_a_parallel',
+          id: 'slot_mixed_age_playoff_a_sequence',
           dayOfWeek: 1, // Tuesday
           startDate: new Date(2026, 0, 5),
           repeating: true,
@@ -2081,7 +2098,7 @@ describe('league scheduling (time slots)', () => {
           divisions: [playoffA],
         }),
         new TimeSlot({
-          id: 'slot_mixed_age_playoff_b_parallel',
+          id: 'slot_mixed_age_playoff_b_sequence',
           dayOfWeek: 1, // Tuesday
           startDate: new Date(2026, 0, 5),
           repeating: true,
@@ -2109,9 +2126,9 @@ describe('league scheduling (time slots)', () => {
     expect(playoffAMatches.length).toBeGreaterThan(0);
     expect(playoffBMatches.length).toBeGreaterThan(0);
 
-    const firstPlayoffAStart = Math.min(...playoffAMatches.map((match) => match.start.getTime()));
     const firstPlayoffBStart = Math.min(...playoffBMatches.map((match) => match.start.getTime()));
-    expect(firstPlayoffAStart).toBe(firstPlayoffBStart);
+    const latestPlayoffAEnd = Math.max(...playoffAMatches.map((match) => match.end.getTime()));
+    expect(latestPlayoffAEnd).toBeLessThanOrEqual(firstPlayoffBStart);
   });
 
   it('surfaces a configuration error when selected divisions have no available fields', () => {

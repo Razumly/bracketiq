@@ -21,6 +21,7 @@ const getTeamChatBaseMemberIdsMock = jest.fn();
 const syncTeamChatInTxMock = jest.fn();
 const loadCanonicalTeamByIdMock = jest.fn();
 const syncCanonicalTeamRosterMock = jest.fn();
+const replaceSingletonTeamStaffAssignmentMock = jest.fn();
 const reserveChildTeamRegistrationForGuardianMock = jest.fn();
 const acquireEventLockMock = jest.fn();
 
@@ -39,6 +40,7 @@ jest.mock('@/server/teams/teamMembership', () => ({
       ? Array.from(new Set(value.map((entry) => (typeof entry === 'string' ? entry.trim() : '')).filter(Boolean)))
       : []
   ),
+  replaceSingletonTeamStaffAssignment: (...args: unknown[]) => replaceSingletonTeamStaffAssignmentMock(...args),
   syncCanonicalTeamRoster: (...args: unknown[]) => syncCanonicalTeamRosterMock(...args),
 }));
 jest.mock('@/server/teams/teamChildRegistration', () => ({
@@ -66,6 +68,9 @@ describe('POST /api/invites/[id]/accept', () => {
     },
     userData: {
       update: jest.fn(),
+      updateMany: jest.fn(),
+    },
+    teamStaffAssignments: {
       updateMany: jest.fn(),
     },
   };
@@ -201,6 +206,113 @@ describe('POST /api/invites/[id]/accept', () => {
     expect(txMock.userData.updateMany).not.toHaveBeenCalled();
     expect(txMock.invites.delete).toHaveBeenCalledWith({ where: { id: 'invite_1' } });
   });
+
+  it('accepts a TEAM staff invite by activating its explicit role assignment', async () => {
+    prismaMock.invites.findUnique.mockResolvedValue({
+      id: 'invite_1',
+      type: 'TEAM',
+      role: 'team_manager',
+      teamId: 'team_1',
+      userId: 'user_1',
+    });
+    loadCanonicalTeamByIdMock.mockResolvedValue({
+      id: 'team_1',
+      captainId: 'captain_1',
+      managerId: '',
+      headCoachId: null,
+      coachIds: [],
+      playerIds: ['captain_1'],
+      pending: [],
+      staffAssignments: [{
+        id: 'assignment_1',
+        teamId: 'team_1',
+        userId: 'user_1',
+        role: 'MANAGER',
+        status: 'INVITED',
+      }],
+    });
+
+    const response = await POST(
+      postRequest(),
+      { params: Promise.resolve({ id: 'invite_1' }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(txMock.teamStaffAssignments.updateMany).toHaveBeenNthCalledWith(1, {
+      where: {
+        teamId: 'team_1',
+        role: 'MANAGER',
+        status: 'ACTIVE',
+        userId: { not: 'user_1' },
+      },
+      data: { status: 'REMOVED', updatedAt: expect.any(Date) },
+    });
+    expect(txMock.teamStaffAssignments.updateMany).toHaveBeenNthCalledWith(2, {
+      where: {
+        teamId: 'team_1',
+        userId: 'user_1',
+        role: 'MANAGER',
+        status: 'INVITED',
+      },
+      data: { status: 'ACTIVE', updatedAt: expect.any(Date) },
+    });
+    expect(txMock.invites.delete).toHaveBeenCalledWith({ where: { id: 'invite_1' } });
+  });
+  it('dispatches the transaction-read role when a TEAM invite changes before acceptance', async () => {
+    const staleInvite = {
+      id: 'invite_1',
+      type: 'TEAM',
+      role: 'team_manager',
+      teamId: 'team_1',
+      userId: 'user_1',
+    };
+    const currentInvite = {
+      ...staleInvite,
+      role: 'team_head_coach',
+      status: 'PENDING',
+    };
+    prismaMock.invites.findUnique
+      .mockResolvedValueOnce(staleInvite)
+      .mockResolvedValueOnce(currentInvite);
+    loadCanonicalTeamByIdMock.mockResolvedValue({
+      id: 'team_1',
+      captainId: 'captain_1',
+      managerId: '',
+      headCoachId: null,
+      coachIds: [],
+      playerIds: ['captain_1'],
+      pending: [],
+      staffAssignments: [{
+        id: 'assignment_1',
+        teamId: 'team_1',
+        userId: 'user_1',
+        role: 'HEAD_COACH',
+        status: 'INVITED',
+      }],
+    });
+
+    const response = await POST(
+      postRequest(),
+      { params: Promise.resolve({ id: 'invite_1' }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(replaceSingletonTeamStaffAssignmentMock).toHaveBeenCalledWith(expect.objectContaining({
+      role: 'HEAD_COACH',
+      replacementInviteId: 'invite_1',
+    }));
+    expect(txMock.teamStaffAssignments.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        role: 'HEAD_COACH',
+      }),
+    }));
+    expect(txMock.teamStaffAssignments.updateMany).not.toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        role: 'MANAGER',
+      }),
+    }));
+  });
+
 
   it('does not touch legacy profile teamIds when canonical membership is the source of truth', async () => {
     prismaMock.invites.findUnique.mockResolvedValue({

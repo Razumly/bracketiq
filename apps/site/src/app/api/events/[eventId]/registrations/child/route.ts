@@ -178,8 +178,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ eve
   }
   const childAgeAtEvent = childAgeCheck.ageAtEvent;
 
-  const needsConsent = Array.isArray(event.requiredTemplateIds) && event.requiredTemplateIds.length > 0;
-  const consentDispatch = needsConsent
+  const hasRequiredConsent = Array.isArray(event.requiredTemplateIds) && event.requiredTemplateIds.length > 0;
+  const consentDispatch = hasRequiredConsent
     ? await dispatchRequiredEventDocuments({
       eventId,
       organizationId: event.organizationId ?? null,
@@ -188,15 +188,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ eve
       childUserId: childId,
     })
     : null;
+  const needsConsent = hasRequiredConsent
+    && consentDispatch?.isAllRequiredTemplatesSatisfied !== true;
   const consentDocumentId = consentDispatch?.firstDocumentId ?? null;
-  const consentStatus = !needsConsent
-    ? null
+  const consentStatus = !hasRequiredConsent || !needsConsent
+    ? (hasRequiredConsent ? 'completed' : null)
     : consentDispatch?.missingChildEmail
       ? 'child_email_required'
       : (consentDispatch?.errors.length ?? 0) > 0
         ? 'send_failed'
         : 'sent';
-
   let registrationResult: {
     registration: Awaited<ReturnType<typeof upsertEventRegistration>>;
     existing: boolean;

@@ -3,7 +3,6 @@
 import {
   createEmbeddedTemplateFromPdf,
   getEmbeddedSignLink,
-  getEmbeddedTemplateEditUrl,
   getTemplateRoles,
   sendDocumentFromTemplate,
 } from '@/lib/boldsignServer';
@@ -87,6 +86,7 @@ describe('boldsignServer', () => {
       { Name: 'Child', Index: 2 },
     ]);
   });
+
 
   it('falls back to default role when template properties response has no roles', async () => {
     fetchMock.mockResolvedValueOnce(
@@ -228,23 +228,5 @@ describe('boldsignServer', () => {
         SignerOrder: 2,
       }),
     ]);
-  });
-
-  it('fetches embedded template edit url', async () => {
-    fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ editUrl: 'https://app.boldsign.com/template/edit/tmpl_123' }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    );
-
-    const result = await getEmbeddedTemplateEditUrl({
-      templateId: 'tmpl_123',
-    });
-
-    expect(result.editUrl).toContain('/template/edit/tmpl_123');
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url] = fetchMock.mock.calls[0];
-    expect(String(url)).toContain('/v1/template/getEmbeddedTemplateEditUrl');
   });
 });

@@ -15,11 +15,19 @@ import {
   UserData,
 } from './types';
 import {
+  PROTECTED_DIVISION_ORDER_MESSAGE,
+  buildMatchSchedulingBatches,
+  validateMatchBatchBoundaries,
+} from './matchSchedulingOrder';
+import {
   collectUnresolvedStaffingDiagnostics,
   isTeamDutyCandidatePoolEnabled,
   OfficialStaffingPlanner,
   type StaffingDiagnostic,
 } from './officialStaffing';
+import { ensureSplitPlayoffTimeSlotCoverage } from './timeSlotCoverage';
+import { ScheduleError } from './scheduleErrors';
+import { captureSchedulerState, restoreSchedulerState } from './schedulerState';
 
 type SchedulerEvent = League | Tournament;
 
@@ -29,24 +37,7 @@ const isLeagueEvent = (event: SchedulerEvent): event is League => (
   event instanceof League || event.eventType === 'LEAGUE'
 );
 
-const isSplitPlayoffLeague = (event: SchedulerEvent): event is League => (
-  isLeagueEvent(event)
-  && Boolean(event.splitLeaguePlayoffDivisions)
-  && Array.isArray(event.playoffDivisions)
-  && event.playoffDivisions.length > 0
-);
 
-const isTournamentPoolPlayEvent = (event: SchedulerEvent): boolean => (
-  !isLeagueEvent(event)
-  && String(event.eventType ?? '').toUpperCase() === 'TOURNAMENT'
-  && event.includePlayoffs === true
-  && Array.isArray(event.playoffDivisions)
-  && event.playoffDivisions.length > 0
-);
-
-const usesMappedPlayoffDivisions = (event: SchedulerEvent): boolean => (
-  isSplitPlayoffLeague(event) || isTournamentPoolPlayEvent(event)
-);
 
 const normalizeDivisionId = (value: unknown): string | null => {
   if (typeof value !== 'string') {
@@ -58,9 +49,6 @@ const normalizeDivisionId = (value: unknown): string | null => {
 
 const schedulingDivisionsForEvent = (event: SchedulerEvent): Division[] => {
   const divisions: Division[] = [...event.divisions];
-  if (!usesMappedPlayoffDivisions(event)) {
-    return divisions;
-  }
   const seenIds = new Set(divisions.map((division) => division.id));
   for (const playoffDivision of event.playoffDivisions ?? []) {
     if (seenIds.has(playoffDivision.id)) {
@@ -72,176 +60,6 @@ const schedulingDivisionsForEvent = (event: SchedulerEvent): Division[] => {
   return divisions;
 };
 
-const ensureTournamentPoolTimeSlotCoverage = (event: SchedulerEvent): void => {
-  if (!isTournamentPoolPlayEvent(event) || !event.timeSlots.length) {
-    return;
-  }
-
-  const playoffDivisionById = new Map<string, Division>();
-  for (const playoffDivision of event.playoffDivisions ?? []) {
-    const normalizedId = normalizeDivisionId(playoffDivision.id);
-    if (!normalizedId) {
-      continue;
-    }
-    playoffDivisionById.set(normalizedId, playoffDivision);
-  }
-  if (!playoffDivisionById.size) {
-    return;
-  }
-
-  const poolDivisionsByPlayoffId = new Map<string, Division[]>();
-  const seenPoolIdsByPlayoffId = new Map<string, Set<string>>();
-  for (const poolDivision of event.divisions) {
-    const poolDivisionId = normalizeDivisionId(poolDivision.id);
-    if (!poolDivisionId) {
-      continue;
-    }
-    for (const mappedPlayoffDivisionIdRaw of poolDivision.playoffPlacementDivisionIds ?? []) {
-      const mappedPlayoffDivisionId = normalizeDivisionId(mappedPlayoffDivisionIdRaw);
-      if (!mappedPlayoffDivisionId || !playoffDivisionById.has(mappedPlayoffDivisionId)) {
-        continue;
-      }
-      const seenPoolIds = seenPoolIdsByPlayoffId.get(mappedPlayoffDivisionId) ?? new Set<string>();
-      if (seenPoolIds.has(poolDivisionId)) {
-        continue;
-      }
-      seenPoolIds.add(poolDivisionId);
-      seenPoolIdsByPlayoffId.set(mappedPlayoffDivisionId, seenPoolIds);
-
-      const bucket = poolDivisionsByPlayoffId.get(mappedPlayoffDivisionId) ?? [];
-      bucket.push(poolDivision);
-      poolDivisionsByPlayoffId.set(mappedPlayoffDivisionId, bucket);
-    }
-  }
-
-  if (!poolDivisionsByPlayoffId.size) {
-    return;
-  }
-
-  for (const slot of event.timeSlots) {
-    const existingDivisions = Array.isArray(slot.divisions) ? slot.divisions : [];
-    if (!existingDivisions.length) {
-      continue;
-    }
-    const normalizedSlotDivisionIds = new Set<string>();
-    for (const division of existingDivisions) {
-      const normalizedId = normalizeDivisionId(division?.id);
-      if (normalizedId) {
-        normalizedSlotDivisionIds.add(normalizedId);
-      }
-    }
-    if (!normalizedSlotDivisionIds.size) {
-      continue;
-    }
-
-    const nextDivisions: Division[] = [...existingDivisions];
-    let changed = false;
-    for (const divisionId of Array.from(normalizedSlotDivisionIds)) {
-      const poolDivisions = poolDivisionsByPlayoffId.get(divisionId);
-      if (!poolDivisions) {
-        continue;
-      }
-      for (const poolDivision of poolDivisions) {
-        const poolDivisionId = normalizeDivisionId(poolDivision.id);
-        if (!poolDivisionId || normalizedSlotDivisionIds.has(poolDivisionId)) {
-          continue;
-        }
-        nextDivisions.push(poolDivision);
-        normalizedSlotDivisionIds.add(poolDivisionId);
-        changed = true;
-      }
-    }
-
-    if (changed) {
-      slot.divisions = nextDivisions;
-    }
-  }
-};
-
-const ensureSplitPlayoffTimeSlotCoverage = (event: SchedulerEvent): void => {
-  if (isTournamentPoolPlayEvent(event)) {
-    ensureTournamentPoolTimeSlotCoverage(event);
-    return;
-  }
-  if (!isSplitPlayoffLeague(event) || !event.timeSlots.length) {
-    return;
-  }
-
-  const playoffDivisionById = new Map<string, Division>();
-  for (const playoffDivision of event.playoffDivisions ?? []) {
-    const normalizedId = normalizeDivisionId(playoffDivision.id);
-    if (!normalizedId) {
-      continue;
-    }
-    playoffDivisionById.set(normalizedId, playoffDivision);
-  }
-  if (!playoffDivisionById.size) {
-    return;
-  }
-
-  const mappedPlayoffIdsByDivisionId = new Map<string, Set<string>>();
-  for (const division of event.divisions) {
-    const sourceDivisionId = normalizeDivisionId(division.id);
-    if (!sourceDivisionId) {
-      continue;
-    }
-    for (const mappedPlayoffDivisionIdRaw of division.playoffPlacementDivisionIds ?? []) {
-      const mappedPlayoffDivisionId = normalizeDivisionId(mappedPlayoffDivisionIdRaw);
-      if (!mappedPlayoffDivisionId || !playoffDivisionById.has(mappedPlayoffDivisionId)) {
-        continue;
-      }
-      const bucket = mappedPlayoffIdsByDivisionId.get(sourceDivisionId) ?? new Set<string>();
-      bucket.add(mappedPlayoffDivisionId);
-      mappedPlayoffIdsByDivisionId.set(sourceDivisionId, bucket);
-    }
-  }
-
-  if (!mappedPlayoffIdsByDivisionId.size) {
-    return;
-  }
-
-  for (const slot of event.timeSlots) {
-    const existingDivisions = Array.isArray(slot.divisions) ? slot.divisions : [];
-    if (!existingDivisions.length) {
-      continue;
-    }
-    const normalizedSlotDivisionIds = new Set<string>();
-    for (const division of existingDivisions) {
-      const normalizedId = normalizeDivisionId(division?.id);
-      if (normalizedId) {
-        normalizedSlotDivisionIds.add(normalizedId);
-      }
-    }
-    if (!normalizedSlotDivisionIds.size) {
-      continue;
-    }
-
-    const nextDivisions: Division[] = [...existingDivisions];
-    let changed = false;
-    for (const divisionId of normalizedSlotDivisionIds) {
-      const mappedPlayoffIds = mappedPlayoffIdsByDivisionId.get(divisionId);
-      if (!mappedPlayoffIds) {
-        continue;
-      }
-      for (const playoffDivisionId of mappedPlayoffIds) {
-        if (normalizedSlotDivisionIds.has(playoffDivisionId)) {
-          continue;
-        }
-        const playoffDivision = playoffDivisionById.get(playoffDivisionId);
-        if (!playoffDivision) {
-          continue;
-        }
-        nextDivisions.push(playoffDivision);
-        normalizedSlotDivisionIds.add(playoffDivisionId);
-        changed = true;
-      }
-    }
-
-    if (changed) {
-      slot.divisions = nextDivisions;
-    }
-  }
-};
 
 export type LockedScheduleWarning = {
   code: 'LOCKED_MATCH_OUTSIDE_WINDOW';
@@ -932,91 +750,48 @@ export const rescheduleEventMatchesPreservingLocks = (
     return { event, matches: [], warnings: [] };
   }
   const shouldReflowTeamDuties = teamDutyReflowContext !== EMPTY_TEAM_DUTY_REFLOW_CONTEXT;
-  const teamDutyReflowSnapshot = shouldReflowTeamDuties
-    ? {
-        eventEnd: event.end,
-        eventGeneratedScheduleEnd: event.generatedScheduleEnd,
-        timeSlotDivisions: event.timeSlots.map((slot) => [slot, slot.divisions] as const),
-        fieldMatches: Object.values(event.fields).map((field) => [field, field.matches] as const),
-        teamMatches: Object.values(event.teams).map((team) => [team, team.matches] as const),
-        officialStates: event.officials.map((official) => [
-          official,
-          { matches: official.matches, divisions: official.divisions },
-        ] as const),
-        matchStates: allMatches.map((match) => [
-          match,
-          {
-            start: match.start,
-            end: match.end,
-            field: match.field,
-            placementState: match.placementState,
-            team1: match.team1,
-            team2: match.team2,
-            team1Seed: match.team1Seed,
-            team2Seed: match.team2Seed,
-            teamOfficial: match.teamOfficial,
-            requiresTeamOfficial: match.requiresTeamOfficial,
-            reservesTeamOfficial: match.reservesTeamOfficial,
-            official: match.official,
-            officialAssignments: match.officialAssignments,
-            officialCheckedIn: match.officialCheckedIn,
-            matchRulesSnapshot: match.matchRulesSnapshot,
-            resolvedMatchRules: match.resolvedMatchRules,
-          },
-        ] as const),
-      }
-    : null;
-  const restoreTeamDutyReflowSnapshot = (): void => {
-    if (!teamDutyReflowSnapshot) {
-      return;
-    }
-    event.end = teamDutyReflowSnapshot.eventEnd;
-    event.generatedScheduleEnd = teamDutyReflowSnapshot.eventGeneratedScheduleEnd;
-    for (const [slot, divisions] of teamDutyReflowSnapshot.timeSlotDivisions) {
-      slot.divisions = divisions;
-    }
-    for (const [match, state] of teamDutyReflowSnapshot.matchStates) {
-      Object.assign(match, state);
-    }
-    for (const [field, matches] of teamDutyReflowSnapshot.fieldMatches) {
-      field.matches = matches;
-    }
-    for (const [team, matches] of teamDutyReflowSnapshot.teamMatches) {
-      team.matches = matches;
-    }
-    for (const [official, state] of teamDutyReflowSnapshot.officialStates) {
-      official.matches = state.matches;
-      official.divisions = state.divisions;
-    }
-  };
+  const unlockedMatches = allMatches
+    .filter((match) => !match.locked)
+    .sort(compareMatches);
+  const unlockedMatchIds = new Set(unlockedMatches.map((match) => match.id));
+  const schedulerStateSnapshot = captureSchedulerState(event);
 
   try {
     ensureSplitPlayoffTimeSlotCoverage(event);
     const isOpenEndedSchedule = prepareSchedulePlacementWindow(event, false);
     const schedulingDivisions = schedulingDivisionsForEvent(event);
     const rescheduleEndTime = event.end;
-  const lockedMatches = allMatches.filter((match) => match.locked);
-  const warnings = collectWarnings(event, lockedMatches, rescheduleEndTime);
-  resetScheduleCollections(event);
-  const staffingPlanner = new OfficialStaffingPlanner(event);
-  const plannerHasRequiredSlots = allMatches.some((match) => (
-    staffingPlanner.hasRequiredSlots(match)
-  ));
-  for (const match of allMatches) {
-    match.requiresTeamOfficial = staffingPlanner.isTeamDutyRequired(match);
-    match.reservesTeamOfficial =
-      match.requiresTeamOfficial && staffingPlanner.isTeamDutySlotReserved(match);
-  }
-
-  for (const match of lockedMatches) {
-    attachLockedMatchToField(event, match);
-  }
-  if (plannerHasRequiredSlots) {
-    staffingPlanner.seedCommittedMatches([...lockedMatches].sort(compareScheduledOrder));
-  }
-  for (const match of lockedMatches) {
-    attachMatchToParticipants(match);
-  }
+    const lockedMatches = allMatches.filter((match) => match.locked);
+    const lockedMatchIds = new Set(lockedMatches.map((match) => match.id));
+    const batches = buildMatchSchedulingBatches(
+      event,
+      allMatches,
+      schedulingDivisions,
+      {
+        lockedMatchIds,
+        affectedMatchIds: unlockedMatchIds,
+      },
+    );
+    const warnings = collectWarnings(event, lockedMatches, rescheduleEndTime);
+    resetScheduleCollections(event);
+    const staffingPlanner = new OfficialStaffingPlanner(event);
+    const plannerHasRequiredSlots = allMatches.some((match) => (
+      staffingPlanner.hasRequiredSlots(match)
+    ));
+    for (const match of allMatches) {
+      match.requiresTeamOfficial = staffingPlanner.isTeamDutyRequired(match);
+      match.reservesTeamOfficial =
+        match.requiresTeamOfficial && staffingPlanner.isTeamDutySlotReserved(match);
+    }
+    for (const match of lockedMatches) {
+      attachLockedMatchToField(event, match);
+    }
+    if (plannerHasRequiredSlots) {
+      staffingPlanner.seedCommittedMatches([...lockedMatches].sort(compareScheduledOrder));
+    }
+    for (const match of lockedMatches) {
+      attachMatchToParticipants(match);
+    }
 
   const participants = buildScheduleParticipants(event, schedulingDivisions);
   const schedule = new Schedule<Match, PlayingField, Team | UserData, Division>(
@@ -1027,16 +802,48 @@ export const rescheduleEventMatchesPreservingLocks = (
     event.start,
     { endTime: rescheduleEndTime, timeSlots: event.timeSlots },
   );
+  const probeCanPlaceWithoutProtectedHistory = (
+    match: Match,
+    durationMs: number,
+    cursorFloor: Date,
+  ): boolean => {
+    const probeSnapshot = captureSchedulerState(event);
+    try {
+      for (const field of Object.values(event.fields)) {
+        field.matches = field.matches.filter((scheduledMatch) => (
+          !lockedMatchIds.has(scheduledMatch.id)
+        ));
+      }
+      const probeSchedule = new Schedule<Match, PlayingField, Team | UserData, Division>(
+        event.start,
+        event.fields,
+        participants,
+        schedulingDivisions,
+        cursorFloor,
+        { endTime: rescheduleEndTime, timeSlots: event.timeSlots },
+      );
+      if (staffingPlanner.hasStaffingRequirement(match)) {
+        probeSchedule.scheduleEventWithOptions(match, durationMs, {
+          canUseCandidate: ({ resource, start, end }) => (
+            staffingPlanner.previewSchedulingCandidate(match, resource, start, end)
+          ),
+        });
+      } else {
+        probeSchedule.scheduleEvent(match, durationMs);
+      }
+      return true;
+    } catch {
+      return false;
+    } finally {
+      restoreSchedulerState(probeSnapshot);
+    }
+  };
 
-  const unlockedMatches = allMatches
-    .filter((match) => !match.locked)
-    .sort(compareMatches);
   if (plannerHasRequiredSlots) {
     for (const match of unlockedMatches) {
       clearUserOfficialAssignments(match);
     }
   }
-  const unlockedById = new Map(unlockedMatches.map((match) => [match.id, match]));
   const pendingIds = new Set(unlockedMatches.map((match) => match.id));
   const detachedPendingAssignments: PendingDependencyAssignment[] = [];
 
@@ -1049,31 +856,89 @@ export const rescheduleEventMatchesPreservingLocks = (
   }
 
   try {
-    while (pendingIds.size > 0) {
-      const readyMatches = unlockedMatches
-        .filter((match) => pendingIds.has(match.id) && dependenciesAreScheduled(match, pendingIds))
-        .sort(compareMatches);
+    let cursorWasProtectedDerived = false;
+    let protectedCursorFloor: Date | null = null;
+    for (const batch of batches) {
+      const pendingBatchIds = new Set(
+        batch.matches
+          .filter((match) => !match.locked)
+          .map((match) => match.id),
+      );
+      while (pendingBatchIds.size > 0) {
+        const readyMatches = batch.matches.filter((match) => (
+          pendingBatchIds.has(match.id)
+          && dependenciesAreScheduled(match, pendingIds)
+        ));
+        const fallbackMatch = batch.matches.find((match) => (
+          pendingBatchIds.has(match.id)
+        ));
+        const nextBatch = readyMatches.length
+          ? readyMatches
+          : fallbackMatch
+            ? [fallbackMatch]
+            : [];
 
-      const nextBatch = readyMatches.length
-        ? readyMatches
-        : [unlockedById.get(Array.from(pendingIds.values())[0]) as Match];
-
-      for (const match of nextBatch) {
-        const matchDuration = durationForReschedule(match);
-        if (staffingPlanner.hasStaffingRequirement(match)) {
-          schedule.scheduleEventWithOptions(match, matchDuration, {
-            canUseCandidate: ({ resource, start, end }) => (
-              staffingPlanner.previewSchedulingCandidate(match, resource, start, end)
-            ),
-          });
-          staffingPlanner.commitScheduledMatch(match);
-        } else {
-          schedule.scheduleEvent(match, matchDuration);
+        for (const match of nextBatch) {
+          const matchDuration = durationForReschedule(match);
+          try {
+            if (staffingPlanner.hasStaffingRequirement(match)) {
+              schedule.scheduleEventWithOptions(match, matchDuration, {
+                canUseCandidate: ({ resource, start, end }) => (
+                  staffingPlanner.previewSchedulingCandidate(match, resource, start, end)
+                ),
+              });
+              staffingPlanner.commitScheduledMatch(match);
+            } else {
+              schedule.scheduleEvent(match, matchDuration);
+            }
+          } catch (error) {
+            if (
+              error instanceof ScheduleError
+              && error.restrictingFactor === 'RESOURCE'
+              && cursorWasProtectedDerived
+              && protectedCursorFloor !== null
+              && probeCanPlaceWithoutProtectedHistory(match, matchDuration, event.start)
+            ) {
+              throw new ScheduleError(PROTECTED_DIVISION_ORDER_MESSAGE, 'DIVISION_ORDER');
+            }
+            throw error;
+          }
+          attachMatchToParticipants(match);
+          pendingIds.delete(match.id);
+          pendingBatchIds.delete(match.id);
         }
-        attachMatchToParticipants(match);
-        pendingIds.delete(match.id);
       }
+
+      const cursorBeforeBatchMs = schedule.currentTime.getTime();
+      let maxEndMs = Number.NEGATIVE_INFINITY;
+      let maxNonLockedEndMs = Number.NEGATIVE_INFINITY;
+      for (const match of batch.matches) {
+        const endMs = match.end.getTime();
+        maxEndMs = Math.max(maxEndMs, endMs);
+        if (!match.locked) {
+          maxNonLockedEndMs = Math.max(maxNonLockedEndMs, endMs);
+        }
+      }
+      cursorWasProtectedDerived = (
+        Number.isFinite(maxEndMs)
+        && maxEndMs > cursorBeforeBatchMs
+        && maxEndMs > maxNonLockedEndMs
+      );
+      protectedCursorFloor = cursorWasProtectedDerived
+        ? new Date(
+            Math.max(
+              cursorBeforeBatchMs,
+              Number.isFinite(maxNonLockedEndMs)
+                ? maxNonLockedEndMs
+                : cursorBeforeBatchMs,
+            ),
+          )
+        : null;
+      schedule.advanceTo(
+        Number.isFinite(maxEndMs) ? new Date(maxEndMs) : event.start,
+      );
     }
+
   } finally {
     detachedPendingAssignments.forEach(restorePendingDependencyAssignments);
   }
@@ -1087,7 +952,11 @@ export const rescheduleEventMatchesPreservingLocks = (
     staffingPlanner.assignMatches(matchesForPostScheduleStaffing);
   }
   if (shouldReflowTeamDuties) {
-    assignMissingCheckedInTeamOfficials(event, allMatches, teamDutyReflowContext);
+    assignMissingCheckedInTeamOfficials(
+      event,
+      allMatches,
+      teamDutyReflowContext,
+    );
   }
   if (
     shouldReflowTeamDuties
@@ -1118,6 +987,10 @@ export const rescheduleEventMatchesPreservingLocks = (
     throw new Error('Scheduled matches exceed the fixed event end date/time. Increase the end date/time or enable "No fixed end datetime scheduling".');
   }
   finalizeOpenEndedSchedule(event, allMatches);
+  validateMatchBatchBoundaries(batches, {
+    lockedMatchIds,
+    affectedMatchIds: unlockedMatchIds,
+  });
 
   return {
     event,
@@ -1125,7 +998,7 @@ export const rescheduleEventMatchesPreservingLocks = (
     warnings: [...warnings, ...collectUnresolvedStaffingDiagnostics(allMatches)],
   };
   } catch (error) {
-    restoreTeamDutyReflowSnapshot();
+    restoreSchedulerState(schedulerStateSnapshot);
     throw error;
   }
 };

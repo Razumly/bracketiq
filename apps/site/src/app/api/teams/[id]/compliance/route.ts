@@ -7,15 +7,17 @@ import { canManageCanonicalTeam } from '@/server/teams/teamMembership';
 import {
   buildRequiredSignatureTasks,
   buildSignatureCompletionKey,
-  isSignedDocumentStatus,
   normalizeRegistrationAnswersSnapshot,
-  normalizeSignerRoleContext,
   type ComplianceTemplate,
   type TeamCompliancePaymentSummary,
   type TeamComplianceRequiredDocument,
   type TeamComplianceUserSummary,
   type TeamMemberComplianceResponse,
 } from '@/lib/eventTeamCompliance';
+import {
+  documentSubjectIdFor,
+  findCompletedDocumentSatisfactions,
+} from '@/server/documentEvidence';
 
 export const dynamic = 'force-dynamic';
 
@@ -260,57 +262,28 @@ export async function GET(
   );
 
   const signerUserIds = Array.from(new Set([...userIds, ...parentUserIds]));
-  const signedDocuments = templates.length
-    ? await prisma.signedDocuments.findMany({
-      where: {
-        templateId: { in: templates.map((template) => template.id) },
-        OR: [
-          ...(signerUserIds.length ? [{ userId: { in: signerUserIds } }] : []),
-          ...(userIds.length ? [{ hostId: { in: userIds } }] : []),
-        ],
-        AND: [{
-          OR: [
-            { teamId: team.id },
-            { teamId: null },
-          ],
-        }],
+  const documentSubjectIds = signerUserIds
+    .map((signerUserId) => documentSubjectIdFor(team.organizationId, signerUserId))
+    .filter((subjectId): subjectId is string => Boolean(subjectId));
+  const satisfactionRows = await findCompletedDocumentSatisfactions({
+    documentSubjectIds,
+    templateDocumentIds: templates.map((template) => template.id),
+    scopes: [
+      ...(team.organizationId
+        ? [{ scopeType: 'ORGANIZATION' as const, scopeId: team.organizationId }]
+        : []),
+      { scopeType: 'TEAM_MEMBERSHIP' as const, scopeId: team.id },
+    ],
+  });
+  const completedSatisfactionByKey = new Map<string, { id: string; signedAt?: string }>();
+  satisfactionRows.forEach((row) => {
+    completedSatisfactionByKey.set(
+      `${row.documentSubjectId}::${row.templateDocumentId}::${row.scopeType}::${row.scopeId}`,
+      {
+        id: row.sourceEvidenceId,
+        signedAt: row.signedAt ?? undefined,
       },
-      select: {
-        id: true,
-        templateId: true,
-        userId: true,
-        hostId: true,
-        signerRole: true,
-        status: true,
-        teamId: true,
-        signedAt: true,
-        createdAt: true,
-      },
-    })
-    : [];
-
-  const templatesById = new Map(templates.map((template) => [template.id, template]));
-  const signedDocumentByCompletionKey = new Map<string, { id: string; signedAt?: string }>();
-  signedDocuments.forEach((document) => {
-    if (!isSignedDocumentStatus(document.status)) return;
-    const template = templatesById.get(document.templateId);
-    if (!template) return;
-    if (!template.signOnce && normalizeId(document.teamId) !== team.id) return;
-
-    const signerContext = normalizeSignerRoleContext(document.signerRole);
-    const hostUserId = signerContext === 'participant' ? null : normalizeId(document.hostId);
-    if (signerContext !== 'participant' && !hostUserId) return;
-    const completionKey = buildSignatureCompletionKey({
-      scopeKey: template.signOnce ? 'once' : `team:${team.id}`,
-      templateId: template.id,
-      signerContext,
-      hostUserId,
-    });
-    const existing = signedDocumentByCompletionKey.get(completionKey);
-    const nextSignedAt = document.signedAt ?? document.createdAt?.toISOString();
-    if (!existing || toTimestamp(nextSignedAt) > toTimestamp(existing.signedAt)) {
-      signedDocumentByCompletionKey.set(completionKey, { id: document.id, signedAt: nextSignedAt });
-    }
+    );
   });
 
   const usersById = new Map(users.map((user) => [user.id, user]));
@@ -339,7 +312,14 @@ export async function GET(
           signerContext: task.signerContext,
           hostUserId: task.hostUserId,
         });
-        const signed = signedDocumentByCompletionKey.get(completionKey);
+        const scopeType = task.signOnce ? 'ORGANIZATION' : 'TEAM_MEMBERSHIP';
+        const scopeId = task.signOnce ? normalizeId(team.organizationId) : team.id;
+        const signerSubjectId = documentSubjectIdFor(team.organizationId, task.signerUserId);
+        const satisfaction = signerSubjectId && scopeId
+          ? completedSatisfactionByKey.get(
+            `${signerSubjectId}::${task.templateId}::${scopeType}::${scopeId}`,
+          )
+          : undefined;
         return {
           key: completionKey,
           templateId: task.templateId,
@@ -348,9 +328,9 @@ export async function GET(
           signerContext: task.signerContext,
           signerLabel: task.signerLabel,
           signOnce: task.signOnce,
-          status: signed ? 'SIGNED' : 'UNSIGNED',
-          signedDocumentRecordId: signed?.id,
-          signedAt: signed?.signedAt,
+          status: satisfaction ? 'SIGNED' : 'UNSIGNED',
+          signedDocumentRecordId: satisfaction?.id,
+          signedAt: satisfaction?.signedAt,
         };
       });
       const paymentPending = String(registration.status ?? '').toUpperCase() === 'PENDING'

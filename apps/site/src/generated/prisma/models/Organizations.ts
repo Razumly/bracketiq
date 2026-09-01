@@ -474,6 +474,8 @@ export type OrganizationsWhereInput = {
   taxResponsibilityAcceptedAt?: Prisma.DateTimeNullableFilter<"Organizations"> | Date | string | null
   taxResponsibilityAcceptedByUserId?: Prisma.StringNullableFilter<"Organizations"> | string | null
   taxResponsibilityAgreementVersion?: Prisma.StringNullableFilter<"Organizations"> | string | null
+  documentRequirements?: Prisma.DocumentRequirementsListRelationFilter
+  templateDocuments?: Prisma.TemplateDocumentsListRelationFilter
 }
 
 export type OrganizationsOrderByWithRelationInput = {
@@ -521,6 +523,8 @@ export type OrganizationsOrderByWithRelationInput = {
   taxResponsibilityAcceptedAt?: Prisma.SortOrderInput | Prisma.SortOrder
   taxResponsibilityAcceptedByUserId?: Prisma.SortOrderInput | Prisma.SortOrder
   taxResponsibilityAgreementVersion?: Prisma.SortOrderInput | Prisma.SortOrder
+  documentRequirements?: Prisma.DocumentRequirementsOrderByRelationAggregateInput
+  templateDocuments?: Prisma.TemplateDocumentsOrderByRelationAggregateInput
 }
 
 export type OrganizationsWhereUniqueInput = Prisma.AtLeast<{
@@ -571,6 +575,8 @@ export type OrganizationsWhereUniqueInput = Prisma.AtLeast<{
   taxResponsibilityAcceptedAt?: Prisma.DateTimeNullableFilter<"Organizations"> | Date | string | null
   taxResponsibilityAcceptedByUserId?: Prisma.StringNullableFilter<"Organizations"> | string | null
   taxResponsibilityAgreementVersion?: Prisma.StringNullableFilter<"Organizations"> | string | null
+  documentRequirements?: Prisma.DocumentRequirementsListRelationFilter
+  templateDocuments?: Prisma.TemplateDocumentsListRelationFilter
 }, "id" | "publicSlug">
 
 export type OrganizationsOrderByWithAggregationInput = {
@@ -718,6 +724,8 @@ export type OrganizationsCreateInput = {
   taxResponsibilityAcceptedAt?: Date | string | null
   taxResponsibilityAcceptedByUserId?: string | null
   taxResponsibilityAgreementVersion?: string | null
+  documentRequirements?: Prisma.DocumentRequirementsCreateNestedManyWithoutOrganizationInput
+  templateDocuments?: Prisma.TemplateDocumentsCreateNestedManyWithoutOrganizationInput
 }
 
 export type OrganizationsUncheckedCreateInput = {
@@ -765,6 +773,8 @@ export type OrganizationsUncheckedCreateInput = {
   taxResponsibilityAcceptedAt?: Date | string | null
   taxResponsibilityAcceptedByUserId?: string | null
   taxResponsibilityAgreementVersion?: string | null
+  documentRequirements?: Prisma.DocumentRequirementsUncheckedCreateNestedManyWithoutOrganizationInput
+  templateDocuments?: Prisma.TemplateDocumentsUncheckedCreateNestedManyWithoutOrganizationInput
 }
 
 export type OrganizationsUpdateInput = {
@@ -812,6 +822,8 @@ export type OrganizationsUpdateInput = {
   taxResponsibilityAcceptedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   taxResponsibilityAcceptedByUserId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   taxResponsibilityAgreementVersion?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  documentRequirements?: Prisma.DocumentRequirementsUpdateManyWithoutOrganizationNestedInput
+  templateDocuments?: Prisma.TemplateDocumentsUpdateManyWithoutOrganizationNestedInput
 }
 
 export type OrganizationsUncheckedUpdateInput = {
@@ -859,6 +871,8 @@ export type OrganizationsUncheckedUpdateInput = {
   taxResponsibilityAcceptedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   taxResponsibilityAcceptedByUserId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   taxResponsibilityAgreementVersion?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  documentRequirements?: Prisma.DocumentRequirementsUncheckedUpdateManyWithoutOrganizationNestedInput
+  templateDocuments?: Prisma.TemplateDocumentsUncheckedUpdateManyWithoutOrganizationNestedInput
 }
 
 export type OrganizationsCreateManyInput = {
@@ -1141,6 +1155,11 @@ export type OrganizationsMinOrderByAggregateInput = {
   taxResponsibilityAgreementVersion?: Prisma.SortOrder
 }
 
+export type OrganizationsScalarRelationFilter = {
+  is?: Prisma.OrganizationsWhereInput
+  isNot?: Prisma.OrganizationsWhereInput
+}
+
 export type OrganizationsCreatesportsInput = {
   set: string[]
 }
@@ -1201,6 +1220,488 @@ export type OrganizationsUpdateembedAllowedDomainsInput = {
   push?: string | string[]
 }
 
+export type OrganizationsCreateNestedOneWithoutDocumentRequirementsInput = {
+  create?: Prisma.XOR<Prisma.OrganizationsCreateWithoutDocumentRequirementsInput, Prisma.OrganizationsUncheckedCreateWithoutDocumentRequirementsInput>
+  connectOrCreate?: Prisma.OrganizationsCreateOrConnectWithoutDocumentRequirementsInput
+  connect?: Prisma.OrganizationsWhereUniqueInput
+}
+
+export type OrganizationsUpdateOneRequiredWithoutDocumentRequirementsNestedInput = {
+  create?: Prisma.XOR<Prisma.OrganizationsCreateWithoutDocumentRequirementsInput, Prisma.OrganizationsUncheckedCreateWithoutDocumentRequirementsInput>
+  connectOrCreate?: Prisma.OrganizationsCreateOrConnectWithoutDocumentRequirementsInput
+  upsert?: Prisma.OrganizationsUpsertWithoutDocumentRequirementsInput
+  connect?: Prisma.OrganizationsWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.OrganizationsUpdateToOneWithWhereWithoutDocumentRequirementsInput, Prisma.OrganizationsUpdateWithoutDocumentRequirementsInput>, Prisma.OrganizationsUncheckedUpdateWithoutDocumentRequirementsInput>
+}
+
+export type OrganizationsCreateNestedOneWithoutTemplateDocumentsInput = {
+  create?: Prisma.XOR<Prisma.OrganizationsCreateWithoutTemplateDocumentsInput, Prisma.OrganizationsUncheckedCreateWithoutTemplateDocumentsInput>
+  connectOrCreate?: Prisma.OrganizationsCreateOrConnectWithoutTemplateDocumentsInput
+  connect?: Prisma.OrganizationsWhereUniqueInput
+}
+
+export type OrganizationsUpdateOneRequiredWithoutTemplateDocumentsNestedInput = {
+  create?: Prisma.XOR<Prisma.OrganizationsCreateWithoutTemplateDocumentsInput, Prisma.OrganizationsUncheckedCreateWithoutTemplateDocumentsInput>
+  connectOrCreate?: Prisma.OrganizationsCreateOrConnectWithoutTemplateDocumentsInput
+  upsert?: Prisma.OrganizationsUpsertWithoutTemplateDocumentsInput
+  connect?: Prisma.OrganizationsWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.OrganizationsUpdateToOneWithWhereWithoutTemplateDocumentsInput, Prisma.OrganizationsUpdateWithoutTemplateDocumentsInput>, Prisma.OrganizationsUncheckedUpdateWithoutTemplateDocumentsInput>
+}
+
+export type OrganizationsCreateWithoutDocumentRequirementsInput = {
+  id: string
+  createdAt?: Date | string | null
+  updatedAt?: Date | string | null
+  name: string
+  location?: string | null
+  address?: string | null
+  description?: string | null
+  logoId?: string | null
+  ownerId: string
+  website?: string | null
+  sports?: Prisma.OrganizationsCreatesportsInput | string[]
+  enabledFeatures?: Prisma.OrganizationsCreateenabledFeaturesInput | $Enums.OrganizationFeatureEnum[]
+  status?: $Enums.OrganizationsStatusEnum
+  hasStripeAccount?: boolean | null
+  verificationStatus?: $Enums.OrganizationsVerificationStatusEnum
+  verifiedAt?: Date | string | null
+  verificationReviewStatus?: $Enums.OrganizationsVerificationReviewStatusEnum
+  verificationReviewNotes?: string | null
+  verificationReviewUpdatedAt?: Date | string | null
+  originType?: $Enums.OrganizationOriginTypeEnum
+  ownershipStatus?: $Enums.OrganizationOwnershipStatusEnum
+  claimedAt?: Date | string | null
+  claimedByUserId?: string | null
+  claimVerificationLevel?: $Enums.OrganizationClaimVerificationLevelEnum
+  ownershipVerifiedAt?: Date | string | null
+  ownershipVerificationLastCheckedAt?: Date | string | null
+  coordinates?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  productIds?: Prisma.OrganizationsCreateproductIdsInput | string[]
+  publicSlug?: string | null
+  publicPageEnabled?: boolean
+  publicWidgetsEnabled?: boolean
+  brandPrimaryColor?: string | null
+  brandAccentColor?: string | null
+  publicHeadline?: string | null
+  publicIntroText?: string | null
+  embedAllowedDomains?: Prisma.OrganizationsCreateembedAllowedDomainsInput | string[]
+  publicCompletionRedirectUrl?: string | null
+  taxOrganizationType?: string
+  operatesAthleticFacility?: boolean
+  defaultEventTaxHandling?: string
+  defaultRentalTaxHandling?: string
+  taxResponsibilityAcceptedAt?: Date | string | null
+  taxResponsibilityAcceptedByUserId?: string | null
+  taxResponsibilityAgreementVersion?: string | null
+  templateDocuments?: Prisma.TemplateDocumentsCreateNestedManyWithoutOrganizationInput
+}
+
+export type OrganizationsUncheckedCreateWithoutDocumentRequirementsInput = {
+  id: string
+  createdAt?: Date | string | null
+  updatedAt?: Date | string | null
+  name: string
+  location?: string | null
+  address?: string | null
+  description?: string | null
+  logoId?: string | null
+  ownerId: string
+  website?: string | null
+  sports?: Prisma.OrganizationsCreatesportsInput | string[]
+  enabledFeatures?: Prisma.OrganizationsCreateenabledFeaturesInput | $Enums.OrganizationFeatureEnum[]
+  status?: $Enums.OrganizationsStatusEnum
+  hasStripeAccount?: boolean | null
+  verificationStatus?: $Enums.OrganizationsVerificationStatusEnum
+  verifiedAt?: Date | string | null
+  verificationReviewStatus?: $Enums.OrganizationsVerificationReviewStatusEnum
+  verificationReviewNotes?: string | null
+  verificationReviewUpdatedAt?: Date | string | null
+  originType?: $Enums.OrganizationOriginTypeEnum
+  ownershipStatus?: $Enums.OrganizationOwnershipStatusEnum
+  claimedAt?: Date | string | null
+  claimedByUserId?: string | null
+  claimVerificationLevel?: $Enums.OrganizationClaimVerificationLevelEnum
+  ownershipVerifiedAt?: Date | string | null
+  ownershipVerificationLastCheckedAt?: Date | string | null
+  coordinates?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  productIds?: Prisma.OrganizationsCreateproductIdsInput | string[]
+  publicSlug?: string | null
+  publicPageEnabled?: boolean
+  publicWidgetsEnabled?: boolean
+  brandPrimaryColor?: string | null
+  brandAccentColor?: string | null
+  publicHeadline?: string | null
+  publicIntroText?: string | null
+  embedAllowedDomains?: Prisma.OrganizationsCreateembedAllowedDomainsInput | string[]
+  publicCompletionRedirectUrl?: string | null
+  taxOrganizationType?: string
+  operatesAthleticFacility?: boolean
+  defaultEventTaxHandling?: string
+  defaultRentalTaxHandling?: string
+  taxResponsibilityAcceptedAt?: Date | string | null
+  taxResponsibilityAcceptedByUserId?: string | null
+  taxResponsibilityAgreementVersion?: string | null
+  templateDocuments?: Prisma.TemplateDocumentsUncheckedCreateNestedManyWithoutOrganizationInput
+}
+
+export type OrganizationsCreateOrConnectWithoutDocumentRequirementsInput = {
+  where: Prisma.OrganizationsWhereUniqueInput
+  create: Prisma.XOR<Prisma.OrganizationsCreateWithoutDocumentRequirementsInput, Prisma.OrganizationsUncheckedCreateWithoutDocumentRequirementsInput>
+}
+
+export type OrganizationsUpsertWithoutDocumentRequirementsInput = {
+  update: Prisma.XOR<Prisma.OrganizationsUpdateWithoutDocumentRequirementsInput, Prisma.OrganizationsUncheckedUpdateWithoutDocumentRequirementsInput>
+  create: Prisma.XOR<Prisma.OrganizationsCreateWithoutDocumentRequirementsInput, Prisma.OrganizationsUncheckedCreateWithoutDocumentRequirementsInput>
+  where?: Prisma.OrganizationsWhereInput
+}
+
+export type OrganizationsUpdateToOneWithWhereWithoutDocumentRequirementsInput = {
+  where?: Prisma.OrganizationsWhereInput
+  data: Prisma.XOR<Prisma.OrganizationsUpdateWithoutDocumentRequirementsInput, Prisma.OrganizationsUncheckedUpdateWithoutDocumentRequirementsInput>
+}
+
+export type OrganizationsUpdateWithoutDocumentRequirementsInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  createdAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  updatedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  name?: Prisma.StringFieldUpdateOperationsInput | string
+  location?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  address?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  description?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  logoId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  ownerId?: Prisma.StringFieldUpdateOperationsInput | string
+  website?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  sports?: Prisma.OrganizationsUpdatesportsInput | string[]
+  enabledFeatures?: Prisma.OrganizationsUpdateenabledFeaturesInput | $Enums.OrganizationFeatureEnum[]
+  status?: Prisma.EnumOrganizationsStatusEnumFieldUpdateOperationsInput | $Enums.OrganizationsStatusEnum
+  hasStripeAccount?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
+  verificationStatus?: Prisma.EnumOrganizationsVerificationStatusEnumFieldUpdateOperationsInput | $Enums.OrganizationsVerificationStatusEnum
+  verifiedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  verificationReviewStatus?: Prisma.EnumOrganizationsVerificationReviewStatusEnumFieldUpdateOperationsInput | $Enums.OrganizationsVerificationReviewStatusEnum
+  verificationReviewNotes?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  verificationReviewUpdatedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  originType?: Prisma.EnumOrganizationOriginTypeEnumFieldUpdateOperationsInput | $Enums.OrganizationOriginTypeEnum
+  ownershipStatus?: Prisma.EnumOrganizationOwnershipStatusEnumFieldUpdateOperationsInput | $Enums.OrganizationOwnershipStatusEnum
+  claimedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  claimedByUserId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  claimVerificationLevel?: Prisma.EnumOrganizationClaimVerificationLevelEnumFieldUpdateOperationsInput | $Enums.OrganizationClaimVerificationLevelEnum
+  ownershipVerifiedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  ownershipVerificationLastCheckedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  coordinates?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  productIds?: Prisma.OrganizationsUpdateproductIdsInput | string[]
+  publicSlug?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  publicPageEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  publicWidgetsEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  brandPrimaryColor?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  brandAccentColor?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  publicHeadline?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  publicIntroText?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  embedAllowedDomains?: Prisma.OrganizationsUpdateembedAllowedDomainsInput | string[]
+  publicCompletionRedirectUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  taxOrganizationType?: Prisma.StringFieldUpdateOperationsInput | string
+  operatesAthleticFacility?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  defaultEventTaxHandling?: Prisma.StringFieldUpdateOperationsInput | string
+  defaultRentalTaxHandling?: Prisma.StringFieldUpdateOperationsInput | string
+  taxResponsibilityAcceptedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  taxResponsibilityAcceptedByUserId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  taxResponsibilityAgreementVersion?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  templateDocuments?: Prisma.TemplateDocumentsUpdateManyWithoutOrganizationNestedInput
+}
+
+export type OrganizationsUncheckedUpdateWithoutDocumentRequirementsInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  createdAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  updatedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  name?: Prisma.StringFieldUpdateOperationsInput | string
+  location?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  address?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  description?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  logoId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  ownerId?: Prisma.StringFieldUpdateOperationsInput | string
+  website?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  sports?: Prisma.OrganizationsUpdatesportsInput | string[]
+  enabledFeatures?: Prisma.OrganizationsUpdateenabledFeaturesInput | $Enums.OrganizationFeatureEnum[]
+  status?: Prisma.EnumOrganizationsStatusEnumFieldUpdateOperationsInput | $Enums.OrganizationsStatusEnum
+  hasStripeAccount?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
+  verificationStatus?: Prisma.EnumOrganizationsVerificationStatusEnumFieldUpdateOperationsInput | $Enums.OrganizationsVerificationStatusEnum
+  verifiedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  verificationReviewStatus?: Prisma.EnumOrganizationsVerificationReviewStatusEnumFieldUpdateOperationsInput | $Enums.OrganizationsVerificationReviewStatusEnum
+  verificationReviewNotes?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  verificationReviewUpdatedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  originType?: Prisma.EnumOrganizationOriginTypeEnumFieldUpdateOperationsInput | $Enums.OrganizationOriginTypeEnum
+  ownershipStatus?: Prisma.EnumOrganizationOwnershipStatusEnumFieldUpdateOperationsInput | $Enums.OrganizationOwnershipStatusEnum
+  claimedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  claimedByUserId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  claimVerificationLevel?: Prisma.EnumOrganizationClaimVerificationLevelEnumFieldUpdateOperationsInput | $Enums.OrganizationClaimVerificationLevelEnum
+  ownershipVerifiedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  ownershipVerificationLastCheckedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  coordinates?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  productIds?: Prisma.OrganizationsUpdateproductIdsInput | string[]
+  publicSlug?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  publicPageEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  publicWidgetsEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  brandPrimaryColor?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  brandAccentColor?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  publicHeadline?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  publicIntroText?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  embedAllowedDomains?: Prisma.OrganizationsUpdateembedAllowedDomainsInput | string[]
+  publicCompletionRedirectUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  taxOrganizationType?: Prisma.StringFieldUpdateOperationsInput | string
+  operatesAthleticFacility?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  defaultEventTaxHandling?: Prisma.StringFieldUpdateOperationsInput | string
+  defaultRentalTaxHandling?: Prisma.StringFieldUpdateOperationsInput | string
+  taxResponsibilityAcceptedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  taxResponsibilityAcceptedByUserId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  taxResponsibilityAgreementVersion?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  templateDocuments?: Prisma.TemplateDocumentsUncheckedUpdateManyWithoutOrganizationNestedInput
+}
+
+export type OrganizationsCreateWithoutTemplateDocumentsInput = {
+  id: string
+  createdAt?: Date | string | null
+  updatedAt?: Date | string | null
+  name: string
+  location?: string | null
+  address?: string | null
+  description?: string | null
+  logoId?: string | null
+  ownerId: string
+  website?: string | null
+  sports?: Prisma.OrganizationsCreatesportsInput | string[]
+  enabledFeatures?: Prisma.OrganizationsCreateenabledFeaturesInput | $Enums.OrganizationFeatureEnum[]
+  status?: $Enums.OrganizationsStatusEnum
+  hasStripeAccount?: boolean | null
+  verificationStatus?: $Enums.OrganizationsVerificationStatusEnum
+  verifiedAt?: Date | string | null
+  verificationReviewStatus?: $Enums.OrganizationsVerificationReviewStatusEnum
+  verificationReviewNotes?: string | null
+  verificationReviewUpdatedAt?: Date | string | null
+  originType?: $Enums.OrganizationOriginTypeEnum
+  ownershipStatus?: $Enums.OrganizationOwnershipStatusEnum
+  claimedAt?: Date | string | null
+  claimedByUserId?: string | null
+  claimVerificationLevel?: $Enums.OrganizationClaimVerificationLevelEnum
+  ownershipVerifiedAt?: Date | string | null
+  ownershipVerificationLastCheckedAt?: Date | string | null
+  coordinates?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  productIds?: Prisma.OrganizationsCreateproductIdsInput | string[]
+  publicSlug?: string | null
+  publicPageEnabled?: boolean
+  publicWidgetsEnabled?: boolean
+  brandPrimaryColor?: string | null
+  brandAccentColor?: string | null
+  publicHeadline?: string | null
+  publicIntroText?: string | null
+  embedAllowedDomains?: Prisma.OrganizationsCreateembedAllowedDomainsInput | string[]
+  publicCompletionRedirectUrl?: string | null
+  taxOrganizationType?: string
+  operatesAthleticFacility?: boolean
+  defaultEventTaxHandling?: string
+  defaultRentalTaxHandling?: string
+  taxResponsibilityAcceptedAt?: Date | string | null
+  taxResponsibilityAcceptedByUserId?: string | null
+  taxResponsibilityAgreementVersion?: string | null
+  documentRequirements?: Prisma.DocumentRequirementsCreateNestedManyWithoutOrganizationInput
+}
+
+export type OrganizationsUncheckedCreateWithoutTemplateDocumentsInput = {
+  id: string
+  createdAt?: Date | string | null
+  updatedAt?: Date | string | null
+  name: string
+  location?: string | null
+  address?: string | null
+  description?: string | null
+  logoId?: string | null
+  ownerId: string
+  website?: string | null
+  sports?: Prisma.OrganizationsCreatesportsInput | string[]
+  enabledFeatures?: Prisma.OrganizationsCreateenabledFeaturesInput | $Enums.OrganizationFeatureEnum[]
+  status?: $Enums.OrganizationsStatusEnum
+  hasStripeAccount?: boolean | null
+  verificationStatus?: $Enums.OrganizationsVerificationStatusEnum
+  verifiedAt?: Date | string | null
+  verificationReviewStatus?: $Enums.OrganizationsVerificationReviewStatusEnum
+  verificationReviewNotes?: string | null
+  verificationReviewUpdatedAt?: Date | string | null
+  originType?: $Enums.OrganizationOriginTypeEnum
+  ownershipStatus?: $Enums.OrganizationOwnershipStatusEnum
+  claimedAt?: Date | string | null
+  claimedByUserId?: string | null
+  claimVerificationLevel?: $Enums.OrganizationClaimVerificationLevelEnum
+  ownershipVerifiedAt?: Date | string | null
+  ownershipVerificationLastCheckedAt?: Date | string | null
+  coordinates?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  productIds?: Prisma.OrganizationsCreateproductIdsInput | string[]
+  publicSlug?: string | null
+  publicPageEnabled?: boolean
+  publicWidgetsEnabled?: boolean
+  brandPrimaryColor?: string | null
+  brandAccentColor?: string | null
+  publicHeadline?: string | null
+  publicIntroText?: string | null
+  embedAllowedDomains?: Prisma.OrganizationsCreateembedAllowedDomainsInput | string[]
+  publicCompletionRedirectUrl?: string | null
+  taxOrganizationType?: string
+  operatesAthleticFacility?: boolean
+  defaultEventTaxHandling?: string
+  defaultRentalTaxHandling?: string
+  taxResponsibilityAcceptedAt?: Date | string | null
+  taxResponsibilityAcceptedByUserId?: string | null
+  taxResponsibilityAgreementVersion?: string | null
+  documentRequirements?: Prisma.DocumentRequirementsUncheckedCreateNestedManyWithoutOrganizationInput
+}
+
+export type OrganizationsCreateOrConnectWithoutTemplateDocumentsInput = {
+  where: Prisma.OrganizationsWhereUniqueInput
+  create: Prisma.XOR<Prisma.OrganizationsCreateWithoutTemplateDocumentsInput, Prisma.OrganizationsUncheckedCreateWithoutTemplateDocumentsInput>
+}
+
+export type OrganizationsUpsertWithoutTemplateDocumentsInput = {
+  update: Prisma.XOR<Prisma.OrganizationsUpdateWithoutTemplateDocumentsInput, Prisma.OrganizationsUncheckedUpdateWithoutTemplateDocumentsInput>
+  create: Prisma.XOR<Prisma.OrganizationsCreateWithoutTemplateDocumentsInput, Prisma.OrganizationsUncheckedCreateWithoutTemplateDocumentsInput>
+  where?: Prisma.OrganizationsWhereInput
+}
+
+export type OrganizationsUpdateToOneWithWhereWithoutTemplateDocumentsInput = {
+  where?: Prisma.OrganizationsWhereInput
+  data: Prisma.XOR<Prisma.OrganizationsUpdateWithoutTemplateDocumentsInput, Prisma.OrganizationsUncheckedUpdateWithoutTemplateDocumentsInput>
+}
+
+export type OrganizationsUpdateWithoutTemplateDocumentsInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  createdAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  updatedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  name?: Prisma.StringFieldUpdateOperationsInput | string
+  location?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  address?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  description?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  logoId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  ownerId?: Prisma.StringFieldUpdateOperationsInput | string
+  website?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  sports?: Prisma.OrganizationsUpdatesportsInput | string[]
+  enabledFeatures?: Prisma.OrganizationsUpdateenabledFeaturesInput | $Enums.OrganizationFeatureEnum[]
+  status?: Prisma.EnumOrganizationsStatusEnumFieldUpdateOperationsInput | $Enums.OrganizationsStatusEnum
+  hasStripeAccount?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
+  verificationStatus?: Prisma.EnumOrganizationsVerificationStatusEnumFieldUpdateOperationsInput | $Enums.OrganizationsVerificationStatusEnum
+  verifiedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  verificationReviewStatus?: Prisma.EnumOrganizationsVerificationReviewStatusEnumFieldUpdateOperationsInput | $Enums.OrganizationsVerificationReviewStatusEnum
+  verificationReviewNotes?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  verificationReviewUpdatedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  originType?: Prisma.EnumOrganizationOriginTypeEnumFieldUpdateOperationsInput | $Enums.OrganizationOriginTypeEnum
+  ownershipStatus?: Prisma.EnumOrganizationOwnershipStatusEnumFieldUpdateOperationsInput | $Enums.OrganizationOwnershipStatusEnum
+  claimedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  claimedByUserId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  claimVerificationLevel?: Prisma.EnumOrganizationClaimVerificationLevelEnumFieldUpdateOperationsInput | $Enums.OrganizationClaimVerificationLevelEnum
+  ownershipVerifiedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  ownershipVerificationLastCheckedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  coordinates?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  productIds?: Prisma.OrganizationsUpdateproductIdsInput | string[]
+  publicSlug?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  publicPageEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  publicWidgetsEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  brandPrimaryColor?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  brandAccentColor?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  publicHeadline?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  publicIntroText?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  embedAllowedDomains?: Prisma.OrganizationsUpdateembedAllowedDomainsInput | string[]
+  publicCompletionRedirectUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  taxOrganizationType?: Prisma.StringFieldUpdateOperationsInput | string
+  operatesAthleticFacility?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  defaultEventTaxHandling?: Prisma.StringFieldUpdateOperationsInput | string
+  defaultRentalTaxHandling?: Prisma.StringFieldUpdateOperationsInput | string
+  taxResponsibilityAcceptedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  taxResponsibilityAcceptedByUserId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  taxResponsibilityAgreementVersion?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  documentRequirements?: Prisma.DocumentRequirementsUpdateManyWithoutOrganizationNestedInput
+}
+
+export type OrganizationsUncheckedUpdateWithoutTemplateDocumentsInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  createdAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  updatedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  name?: Prisma.StringFieldUpdateOperationsInput | string
+  location?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  address?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  description?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  logoId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  ownerId?: Prisma.StringFieldUpdateOperationsInput | string
+  website?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  sports?: Prisma.OrganizationsUpdatesportsInput | string[]
+  enabledFeatures?: Prisma.OrganizationsUpdateenabledFeaturesInput | $Enums.OrganizationFeatureEnum[]
+  status?: Prisma.EnumOrganizationsStatusEnumFieldUpdateOperationsInput | $Enums.OrganizationsStatusEnum
+  hasStripeAccount?: Prisma.NullableBoolFieldUpdateOperationsInput | boolean | null
+  verificationStatus?: Prisma.EnumOrganizationsVerificationStatusEnumFieldUpdateOperationsInput | $Enums.OrganizationsVerificationStatusEnum
+  verifiedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  verificationReviewStatus?: Prisma.EnumOrganizationsVerificationReviewStatusEnumFieldUpdateOperationsInput | $Enums.OrganizationsVerificationReviewStatusEnum
+  verificationReviewNotes?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  verificationReviewUpdatedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  originType?: Prisma.EnumOrganizationOriginTypeEnumFieldUpdateOperationsInput | $Enums.OrganizationOriginTypeEnum
+  ownershipStatus?: Prisma.EnumOrganizationOwnershipStatusEnumFieldUpdateOperationsInput | $Enums.OrganizationOwnershipStatusEnum
+  claimedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  claimedByUserId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  claimVerificationLevel?: Prisma.EnumOrganizationClaimVerificationLevelEnumFieldUpdateOperationsInput | $Enums.OrganizationClaimVerificationLevelEnum
+  ownershipVerifiedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  ownershipVerificationLastCheckedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  coordinates?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  productIds?: Prisma.OrganizationsUpdateproductIdsInput | string[]
+  publicSlug?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  publicPageEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  publicWidgetsEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  brandPrimaryColor?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  brandAccentColor?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  publicHeadline?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  publicIntroText?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  embedAllowedDomains?: Prisma.OrganizationsUpdateembedAllowedDomainsInput | string[]
+  publicCompletionRedirectUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  taxOrganizationType?: Prisma.StringFieldUpdateOperationsInput | string
+  operatesAthleticFacility?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  defaultEventTaxHandling?: Prisma.StringFieldUpdateOperationsInput | string
+  defaultRentalTaxHandling?: Prisma.StringFieldUpdateOperationsInput | string
+  taxResponsibilityAcceptedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  taxResponsibilityAcceptedByUserId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  taxResponsibilityAgreementVersion?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  documentRequirements?: Prisma.DocumentRequirementsUncheckedUpdateManyWithoutOrganizationNestedInput
+}
+
+
+/**
+ * Count Type OrganizationsCountOutputType
+ */
+
+export type OrganizationsCountOutputType = {
+  documentRequirements: number
+  templateDocuments: number
+}
+
+export type OrganizationsCountOutputTypeSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  documentRequirements?: boolean | OrganizationsCountOutputTypeCountDocumentRequirementsArgs
+  templateDocuments?: boolean | OrganizationsCountOutputTypeCountTemplateDocumentsArgs
+}
+
+/**
+ * OrganizationsCountOutputType without action
+ */
+export type OrganizationsCountOutputTypeDefaultArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the OrganizationsCountOutputType
+   */
+  select?: Prisma.OrganizationsCountOutputTypeSelect<ExtArgs> | null
+}
+
+/**
+ * OrganizationsCountOutputType without action
+ */
+export type OrganizationsCountOutputTypeCountDocumentRequirementsArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  where?: Prisma.DocumentRequirementsWhereInput
+}
+
+/**
+ * OrganizationsCountOutputType without action
+ */
+export type OrganizationsCountOutputTypeCountTemplateDocumentsArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  where?: Prisma.TemplateDocumentsWhereInput
+}
 
 
 export type OrganizationsSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
@@ -1248,6 +1749,9 @@ export type OrganizationsSelect<ExtArgs extends runtime.Types.Extensions.Interna
   taxResponsibilityAcceptedAt?: boolean
   taxResponsibilityAcceptedByUserId?: boolean
   taxResponsibilityAgreementVersion?: boolean
+  documentRequirements?: boolean | Prisma.Organizations$documentRequirementsArgs<ExtArgs>
+  templateDocuments?: boolean | Prisma.Organizations$templateDocumentsArgs<ExtArgs>
+  _count?: boolean | Prisma.OrganizationsCountOutputTypeDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["organizations"]>
 
 export type OrganizationsSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
@@ -1392,10 +1896,20 @@ export type OrganizationsSelectScalar = {
 }
 
 export type OrganizationsOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "name" | "location" | "address" | "description" | "logoId" | "ownerId" | "website" | "sports" | "enabledFeatures" | "status" | "hasStripeAccount" | "verificationStatus" | "verifiedAt" | "verificationReviewStatus" | "verificationReviewNotes" | "verificationReviewUpdatedAt" | "originType" | "ownershipStatus" | "claimedAt" | "claimedByUserId" | "claimVerificationLevel" | "ownershipVerifiedAt" | "ownershipVerificationLastCheckedAt" | "coordinates" | "productIds" | "publicSlug" | "publicPageEnabled" | "publicWidgetsEnabled" | "brandPrimaryColor" | "brandAccentColor" | "publicHeadline" | "publicIntroText" | "embedAllowedDomains" | "publicCompletionRedirectUrl" | "taxOrganizationType" | "operatesAthleticFacility" | "defaultEventTaxHandling" | "defaultRentalTaxHandling" | "taxResponsibilityAcceptedAt" | "taxResponsibilityAcceptedByUserId" | "taxResponsibilityAgreementVersion", ExtArgs["result"]["organizations"]>
+export type OrganizationsInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  documentRequirements?: boolean | Prisma.Organizations$documentRequirementsArgs<ExtArgs>
+  templateDocuments?: boolean | Prisma.Organizations$templateDocumentsArgs<ExtArgs>
+  _count?: boolean | Prisma.OrganizationsCountOutputTypeDefaultArgs<ExtArgs>
+}
+export type OrganizationsIncludeCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {}
+export type OrganizationsIncludeUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {}
 
 export type $OrganizationsPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "Organizations"
-  objects: {}
+  objects: {
+    documentRequirements: Prisma.$DocumentRequirementsPayload<ExtArgs>[]
+    templateDocuments: Prisma.$TemplateDocumentsPayload<ExtArgs>[]
+  }
   scalars: runtime.Types.Extensions.GetPayloadResult<{
     id: string
     createdAt: Date | null
@@ -1835,6 +2349,8 @@ readonly fields: OrganizationsFieldRefs;
  */
 export interface Prisma__OrganizationsClient<T, Null = never, ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs, GlobalOmitOptions = {}> extends Prisma.PrismaPromise<T> {
   readonly [Symbol.toStringTag]: "PrismaPromise"
+  documentRequirements<T extends Prisma.Organizations$documentRequirementsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Organizations$documentRequirementsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$DocumentRequirementsPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
+  templateDocuments<T extends Prisma.Organizations$templateDocumentsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Organizations$templateDocumentsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$TemplateDocumentsPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   /**
    * Attaches callbacks for the resolution and/or rejection of the Promise.
    * @param onfulfilled The callback to execute when the Promise is resolved.
@@ -1925,6 +2441,10 @@ export type OrganizationsFindUniqueArgs<ExtArgs extends runtime.Types.Extensions
    */
   omit?: Prisma.OrganizationsOmit<ExtArgs> | null
   /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.OrganizationsInclude<ExtArgs> | null
+  /**
    * Filter, which Organizations to fetch.
    */
   where: Prisma.OrganizationsWhereUniqueInput
@@ -1943,6 +2463,10 @@ export type OrganizationsFindUniqueOrThrowArgs<ExtArgs extends runtime.Types.Ext
    */
   omit?: Prisma.OrganizationsOmit<ExtArgs> | null
   /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.OrganizationsInclude<ExtArgs> | null
+  /**
    * Filter, which Organizations to fetch.
    */
   where: Prisma.OrganizationsWhereUniqueInput
@@ -1960,6 +2484,10 @@ export type OrganizationsFindFirstArgs<ExtArgs extends runtime.Types.Extensions.
    * Omit specific fields from the Organizations
    */
   omit?: Prisma.OrganizationsOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.OrganizationsInclude<ExtArgs> | null
   /**
    * Filter, which Organizations to fetch.
    */
@@ -2009,6 +2537,10 @@ export type OrganizationsFindFirstOrThrowArgs<ExtArgs extends runtime.Types.Exte
    */
   omit?: Prisma.OrganizationsOmit<ExtArgs> | null
   /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.OrganizationsInclude<ExtArgs> | null
+  /**
    * Filter, which Organizations to fetch.
    */
   where?: Prisma.OrganizationsWhereInput
@@ -2056,6 +2588,10 @@ export type OrganizationsFindManyArgs<ExtArgs extends runtime.Types.Extensions.I
    * Omit specific fields from the Organizations
    */
   omit?: Prisma.OrganizationsOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.OrganizationsInclude<ExtArgs> | null
   /**
    * Filter, which Organizations to fetch.
    */
@@ -2105,6 +2641,10 @@ export type OrganizationsCreateArgs<ExtArgs extends runtime.Types.Extensions.Int
    */
   omit?: Prisma.OrganizationsOmit<ExtArgs> | null
   /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.OrganizationsInclude<ExtArgs> | null
+  /**
    * The data needed to create a Organizations.
    */
   data: Prisma.XOR<Prisma.OrganizationsCreateInput, Prisma.OrganizationsUncheckedCreateInput>
@@ -2152,6 +2692,10 @@ export type OrganizationsUpdateArgs<ExtArgs extends runtime.Types.Extensions.Int
    * Omit specific fields from the Organizations
    */
   omit?: Prisma.OrganizationsOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.OrganizationsInclude<ExtArgs> | null
   /**
    * The data needed to update a Organizations.
    */
@@ -2219,6 +2763,10 @@ export type OrganizationsUpsertArgs<ExtArgs extends runtime.Types.Extensions.Int
    */
   omit?: Prisma.OrganizationsOmit<ExtArgs> | null
   /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.OrganizationsInclude<ExtArgs> | null
+  /**
    * The filter to search for the Organizations to update in case it exists.
    */
   where: Prisma.OrganizationsWhereUniqueInput
@@ -2245,6 +2793,10 @@ export type OrganizationsDeleteArgs<ExtArgs extends runtime.Types.Extensions.Int
    */
   omit?: Prisma.OrganizationsOmit<ExtArgs> | null
   /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.OrganizationsInclude<ExtArgs> | null
+  /**
    * Filter which Organizations to delete.
    */
   where: Prisma.OrganizationsWhereUniqueInput
@@ -2265,6 +2817,54 @@ export type OrganizationsDeleteManyArgs<ExtArgs extends runtime.Types.Extensions
 }
 
 /**
+ * Organizations.documentRequirements
+ */
+export type Organizations$documentRequirementsArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the DocumentRequirements
+   */
+  select?: Prisma.DocumentRequirementsSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the DocumentRequirements
+   */
+  omit?: Prisma.DocumentRequirementsOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.DocumentRequirementsInclude<ExtArgs> | null
+  where?: Prisma.DocumentRequirementsWhereInput
+  orderBy?: Prisma.DocumentRequirementsOrderByWithRelationInput | Prisma.DocumentRequirementsOrderByWithRelationInput[]
+  cursor?: Prisma.DocumentRequirementsWhereUniqueInput
+  take?: number
+  skip?: number
+  distinct?: Prisma.DocumentRequirementsScalarFieldEnum | Prisma.DocumentRequirementsScalarFieldEnum[]
+}
+
+/**
+ * Organizations.templateDocuments
+ */
+export type Organizations$templateDocumentsArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the TemplateDocuments
+   */
+  select?: Prisma.TemplateDocumentsSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the TemplateDocuments
+   */
+  omit?: Prisma.TemplateDocumentsOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.TemplateDocumentsInclude<ExtArgs> | null
+  where?: Prisma.TemplateDocumentsWhereInput
+  orderBy?: Prisma.TemplateDocumentsOrderByWithRelationInput | Prisma.TemplateDocumentsOrderByWithRelationInput[]
+  cursor?: Prisma.TemplateDocumentsWhereUniqueInput
+  take?: number
+  skip?: number
+  distinct?: Prisma.TemplateDocumentsScalarFieldEnum | Prisma.TemplateDocumentsScalarFieldEnum[]
+}
+
+/**
  * Organizations without action
  */
 export type OrganizationsDefaultArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
@@ -2276,4 +2876,8 @@ export type OrganizationsDefaultArgs<ExtArgs extends runtime.Types.Extensions.In
    * Omit specific fields from the Organizations
    */
   omit?: Prisma.OrganizationsOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.OrganizationsInclude<ExtArgs> | null
 }

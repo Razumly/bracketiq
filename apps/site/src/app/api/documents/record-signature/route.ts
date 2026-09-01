@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/permissions';
-import { normalizeSignerContext, type SignerContext } from '@/lib/templateSignerTypes';
+import {
+  normalizeSignerContext,
+  resolveRequiredSignerRoles,
+  type SignerContext,
+} from '@/lib/templateSignerTypes';
 import { syncChildRegistrationConsentStatus } from '@/lib/childConsentProgress';
 import {
   syncAllTeamRegistrationConsentStatusesForRegistrant,
@@ -13,7 +17,12 @@ import {
   findLatestBoldSignOperation,
   updateBoldSignOperationById,
 } from '@/lib/boldsignSyncOperations';
-
+import {
+  ensureDocumentSubject,
+  signedDocumentEvidenceFields,
+  createDocumentRequirementSatisfaction,
+  DOCUMENT_EVIDENCE_PROVENANCE,
+} from '@/server/documentEvidence';
 const schema = z.object({
   templateId: z.string(),
   documentId: z.string(),
@@ -180,7 +189,7 @@ export async function POST(request: NextRequest) {
   const event = eventId
     ? await prisma.events.findUnique({
       where: { id: eventId },
-      select: { organizationId: true },
+      select: { id: true, organizationId: true },
     })
     : null;
   if (eventId && !event) {
@@ -190,7 +199,7 @@ export async function POST(request: NextRequest) {
   const team = teamId
     ? await prisma.canonicalTeams.findUnique({
       where: { id: teamId },
-      select: { organizationId: true },
+      select: { id: true, organizationId: true },
     })
     : null;
   if (teamId && !team) {
@@ -198,10 +207,45 @@ export async function POST(request: NextRequest) {
   }
   const signedTemplate = await prisma.templateDocuments.findUnique({
     where: { id: parsed.data.templateId },
-    select: { signOnce: true, type: true },
+    select: {
+      id: true,
+      organizationId: true,
+      signOnce: true,
+      type: true,
+      documentRequirementId: true,
+      signerRoles: true,
+      requiredSignerType: true,
+    },
   });
   if (!signedTemplate) {
     return NextResponse.json({ error: 'Template not found.' }, { status: 404 });
+  }
+  const requirement = await prisma.documentRequirements.findUnique({
+    where: { id: signedTemplate.documentRequirementId },
+    select: { id: true, organizationId: true },
+  });
+  if (
+    !requirement
+    || requirement.id !== signedTemplate.documentRequirementId
+    || requirement.organizationId !== signedTemplate.organizationId
+  ) {
+    return NextResponse.json({ error: 'Template Requirement not found.' }, { status: 404 });
+  }
+  const requiredSignerRoles = resolveRequiredSignerRoles(
+    signedTemplate.signerRoles,
+    signedTemplate.requiredSignerType,
+  );
+  const templateOrganizationId = signedTemplate.organizationId;
+  if (
+    !templateOrganizationId
+    || (eventId && event?.organizationId !== templateOrganizationId)
+    || (teamId && team?.organizationId !== templateOrganizationId)
+    || (event && team && event.organizationId !== team.organizationId)
+  ) {
+    return NextResponse.json(
+      { error: 'Signature scope does not belong to the selected Template Organization.' },
+      { status: 403 },
+    );
   }
 
   const scopedChildUserId = childUserId ?? (signerContext === 'child' ? userId : null);
@@ -241,27 +285,35 @@ export async function POST(request: NextRequest) {
       syncStatus: operation.status,
     }, { status: 200 });
   }
-
-  // Text acknowledgements are issued as UNSIGNED rows by the scoped event,
-  // team, rental, or profile signing endpoints. This legacy acknowledgement
-  // endpoint may only transition that exact server-issued row; it can never
-  // create a caller-defined waiver or broaden its event/team scope.
   const existing = await prisma.signedDocuments.findFirst({
     where: {
       signedDocumentId: parsed.data.documentId,
-      templateId: parsed.data.templateId,
+      templateId: signedTemplate.id,
       userId,
-      signerRole: signerContext,
-      hostId: scopedChildUserId,
+      signerUserId: userId,
+      hostId: scopedChildUserId ?? null,
       eventId: eventId ?? null,
       teamId: teamId ?? null,
+      signerRole: signerContext,
       status: { in: ['UNSIGNED', 'SIGNED'] },
     },
     orderBy: { updatedAt: 'desc' },
     select: {
       id: true,
+      signedDocumentId: true,
+      templateId: true,
+      organizationId: true,
+      userId: true,
+      signerUserId: true,
+      documentSubjectId: true,
+      hostId: true,
+      eventId: true,
+      teamId: true,
+      scopeType: true,
+      scopeId: true,
       status: true,
       signedAt: true,
+      signerRole: true,
     },
   });
 
@@ -271,20 +323,112 @@ export async function POST(request: NextRequest) {
       { status: 403 },
     );
   }
-
+  const existingEventId = existing.eventId ?? null;
+  const existingTeamId = existing.teamId ?? null;
+  if (
+    existing.templateId !== signedTemplate.id
+    || (existing.userId ?? null) !== userId
+    || (existing.signerUserId ?? null) !== userId
+    || (existing.hostId ?? null) !== scopedChildUserId
+    || existingEventId !== (eventId ?? null)
+    || existingTeamId !== (teamId ?? null)
+    || (existing.signerRole != null && existing.signerRole !== signerContext)
+  ) {
+    return NextResponse.json(
+      { error: 'Signature confirmation does not match the server-issued evidence scope.' },
+      { status: 403 },
+    );
+  }
+  const candidateOrganizations = Array.from(new Set([
+    templateOrganizationId,
+    event?.organizationId ?? null,
+    team?.organizationId ?? null,
+    existing.organizationId ?? null,
+  ].filter((value): value is string => Boolean(value))));
+  if (candidateOrganizations.length !== 1) {
+    return NextResponse.json(
+      { error: 'Signature scope does not have one owning Organization.' },
+      { status: 403 },
+    );
+  }
+  const organizationId = candidateOrganizations[0]!;
+  if (
+    !existing.organizationId
+    && (!eventId && !teamId)
+  ) {
+    return NextResponse.json(
+      { error: 'Unable to derive Organization ownership for this evidence.' },
+      { status: 400 },
+    );
+  }
+  if (
+    existing.organizationId
+    && existing.organizationId !== organizationId
+  ) {
+    return NextResponse.json(
+      { error: 'Signature evidence belongs to another Organization.' },
+      { status: 403 },
+    );
+  }
+  const evidenceFields = signedDocumentEvidenceFields({
+    organizationId,
+    userId,
+    hostId: scopedChildUserId,
+    eventId,
+    teamId,
+    signOnce: signedTemplate.signOnce,
+    provenance: DOCUMENT_EVIDENCE_PROVENANCE.BRACKETIQ,
+  });
+  if (
+    (existing.documentSubjectId ?? null) !== (evidenceFields.documentSubjectId ?? null)
+    || (existing.scopeType ?? null) !== (evidenceFields.scopeType ?? null)
+    || (existing.scopeId ?? null) !== (evidenceFields.scopeId ?? null)
+  ) {
+    return NextResponse.json(
+      { error: 'Signature confirmation does not match the server-issued evidence identity.' },
+      { status: 403 },
+    );
+  }
   const existingIsSigned = isSignedStatus(existing.status);
-  if (!existingIsSigned) {
-    const now = new Date();
-    await prisma.signedDocuments.update({
-      where: { id: existing.id },
-      data: {
-        updatedAt: now,
-        status: 'SIGNED',
-        signedAt: new Date().toISOString(),
-        ipAddress: resolveIpAddress(request),
-        requestId: request.headers.get('x-request-id') ?? null,
-      },
+  const now = new Date();
+  try {
+    await prisma.$transaction(async (tx) => {
+      await ensureDocumentSubject({
+        organizationId,
+        userId,
+        hostId: scopedChildUserId,
+      }, tx);
+      if (!existingIsSigned) {
+        await tx.signedDocuments.update({
+          where: { id: existing.id },
+          data: {
+            ...(existing.organizationId ? {} : { organizationId }),
+            updatedAt: now,
+            ...evidenceFields,
+            status: 'SIGNED',
+            signedAt: now.toISOString(),
+            ipAddress: resolveIpAddress(request),
+            requestId: request.headers.get('x-request-id') ?? null,
+          },
+        });
+      }
+      await createDocumentRequirementSatisfaction({
+        evidenceId: existing.id,
+        templateDocumentId: parsed.data.templateId,
+        documentRequirementId: signedTemplate.documentRequirementId,
+        organizationId,
+        documentSubjectId: evidenceFields.documentSubjectId,
+        scopeType: evidenceFields.scopeType,
+        scopeId: evidenceFields.scopeId,
+        requiredSignerRoles,
+        signerRole: signerContext,
+      }, tx);
     });
+  } catch (error) {
+    const message = error instanceof Error
+      ? error.message
+      : 'Unable to record signature.';
+    return NextResponse.json({ error: message }, { status: 400 });
   }
 
   if (scopedChildUserId && signedTemplate?.signOnce) {

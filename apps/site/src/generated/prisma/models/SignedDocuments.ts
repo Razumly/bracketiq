@@ -39,13 +39,27 @@ export type SignedDocumentsMinAggregateOutputType = {
   createdAt: Date | null
   updatedAt: Date | null
   signedDocumentId: string | null
+  providerDocumentId: string | null
+  provenance: $Enums.SignedDocumentProvenanceEnum | null
   templateId: string | null
   userId: string | null
+  signerUserId: string | null
+  documentSubjectId: string | null
   documentName: string | null
   hostId: string | null
   organizationId: string | null
   eventId: string | null
   teamId: string | null
+  scopeType: $Enums.DocumentRequirementSatisfactionScopeTypeEnum | null
+  scopeId: string | null
+  importedFileId: string | null
+  contentHash: string | null
+  historicalSigningDate: Date | null
+  sourceNote: string | null
+  importedAt: Date | null
+  uploaderId: string | null
+  attestationText: string | null
+  attestationVersion: string | null
   status: string | null
   signedAt: string | null
   signerEmail: string | null
@@ -60,13 +74,27 @@ export type SignedDocumentsMaxAggregateOutputType = {
   createdAt: Date | null
   updatedAt: Date | null
   signedDocumentId: string | null
+  providerDocumentId: string | null
+  provenance: $Enums.SignedDocumentProvenanceEnum | null
   templateId: string | null
   userId: string | null
+  signerUserId: string | null
+  documentSubjectId: string | null
   documentName: string | null
   hostId: string | null
   organizationId: string | null
   eventId: string | null
   teamId: string | null
+  scopeType: $Enums.DocumentRequirementSatisfactionScopeTypeEnum | null
+  scopeId: string | null
+  importedFileId: string | null
+  contentHash: string | null
+  historicalSigningDate: Date | null
+  sourceNote: string | null
+  importedAt: Date | null
+  uploaderId: string | null
+  attestationText: string | null
+  attestationVersion: string | null
   status: string | null
   signedAt: string | null
   signerEmail: string | null
@@ -81,13 +109,27 @@ export type SignedDocumentsCountAggregateOutputType = {
   createdAt: number
   updatedAt: number
   signedDocumentId: number
+  providerDocumentId: number
+  provenance: number
   templateId: number
   userId: number
+  signerUserId: number
+  documentSubjectId: number
   documentName: number
   hostId: number
   organizationId: number
   eventId: number
   teamId: number
+  scopeType: number
+  scopeId: number
+  importedFileId: number
+  contentHash: number
+  historicalSigningDate: number
+  sourceNote: number
+  importedAt: number
+  uploaderId: number
+  attestationText: number
+  attestationVersion: number
   status: number
   signedAt: number
   signerEmail: number
@@ -112,13 +154,27 @@ export type SignedDocumentsMinAggregateInputType = {
   createdAt?: true
   updatedAt?: true
   signedDocumentId?: true
+  providerDocumentId?: true
+  provenance?: true
   templateId?: true
   userId?: true
+  signerUserId?: true
+  documentSubjectId?: true
   documentName?: true
   hostId?: true
   organizationId?: true
   eventId?: true
   teamId?: true
+  scopeType?: true
+  scopeId?: true
+  importedFileId?: true
+  contentHash?: true
+  historicalSigningDate?: true
+  sourceNote?: true
+  importedAt?: true
+  uploaderId?: true
+  attestationText?: true
+  attestationVersion?: true
   status?: true
   signedAt?: true
   signerEmail?: true
@@ -133,13 +189,27 @@ export type SignedDocumentsMaxAggregateInputType = {
   createdAt?: true
   updatedAt?: true
   signedDocumentId?: true
+  providerDocumentId?: true
+  provenance?: true
   templateId?: true
   userId?: true
+  signerUserId?: true
+  documentSubjectId?: true
   documentName?: true
   hostId?: true
   organizationId?: true
   eventId?: true
   teamId?: true
+  scopeType?: true
+  scopeId?: true
+  importedFileId?: true
+  contentHash?: true
+  historicalSigningDate?: true
+  sourceNote?: true
+  importedAt?: true
+  uploaderId?: true
+  attestationText?: true
+  attestationVersion?: true
   status?: true
   signedAt?: true
   signerEmail?: true
@@ -154,13 +224,27 @@ export type SignedDocumentsCountAggregateInputType = {
   createdAt?: true
   updatedAt?: true
   signedDocumentId?: true
+  providerDocumentId?: true
+  provenance?: true
   templateId?: true
   userId?: true
+  signerUserId?: true
+  documentSubjectId?: true
   documentName?: true
   hostId?: true
   organizationId?: true
   eventId?: true
   teamId?: true
+  scopeType?: true
+  scopeId?: true
+  importedFileId?: true
+  contentHash?: true
+  historicalSigningDate?: true
+  sourceNote?: true
+  importedAt?: true
+  uploaderId?: true
+  attestationText?: true
+  attestationVersion?: true
   status?: true
   signedAt?: true
   signerEmail?: true
@@ -262,13 +346,27 @@ export type SignedDocumentsGroupByOutputType = {
   createdAt: Date | null
   updatedAt: Date | null
   signedDocumentId: string
+  providerDocumentId: string | null
+  provenance: $Enums.SignedDocumentProvenanceEnum
   templateId: string
-  userId: string
+  userId: string | null
+  signerUserId: string | null
+  documentSubjectId: string | null
   documentName: string
   hostId: string | null
   organizationId: string | null
   eventId: string | null
   teamId: string | null
+  scopeType: $Enums.DocumentRequirementSatisfactionScopeTypeEnum | null
+  scopeId: string | null
+  importedFileId: string | null
+  contentHash: string | null
+  historicalSigningDate: Date | null
+  sourceNote: string | null
+  importedAt: Date | null
+  uploaderId: string | null
+  attestationText: string | null
+  attestationVersion: string | null
   status: string | null
   signedAt: string | null
   signerEmail: string | null
@@ -306,13 +404,27 @@ export type SignedDocumentsWhereInput = {
   createdAt?: Prisma.DateTimeNullableFilter<"SignedDocuments"> | Date | string | null
   updatedAt?: Prisma.DateTimeNullableFilter<"SignedDocuments"> | Date | string | null
   signedDocumentId?: Prisma.StringFilter<"SignedDocuments"> | string
+  providerDocumentId?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
+  provenance?: Prisma.EnumSignedDocumentProvenanceEnumFilter<"SignedDocuments"> | $Enums.SignedDocumentProvenanceEnum
   templateId?: Prisma.StringFilter<"SignedDocuments"> | string
-  userId?: Prisma.StringFilter<"SignedDocuments"> | string
+  userId?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
+  signerUserId?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
+  documentSubjectId?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
   documentName?: Prisma.StringFilter<"SignedDocuments"> | string
   hostId?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
   organizationId?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
   eventId?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
   teamId?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
+  scopeType?: Prisma.EnumDocumentRequirementSatisfactionScopeTypeEnumNullableFilter<"SignedDocuments"> | $Enums.DocumentRequirementSatisfactionScopeTypeEnum | null
+  scopeId?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
+  importedFileId?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
+  contentHash?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
+  historicalSigningDate?: Prisma.DateTimeNullableFilter<"SignedDocuments"> | Date | string | null
+  sourceNote?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
+  importedAt?: Prisma.DateTimeNullableFilter<"SignedDocuments"> | Date | string | null
+  uploaderId?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
+  attestationText?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
+  attestationVersion?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
   status?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
   signedAt?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
   signerEmail?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
@@ -327,13 +439,27 @@ export type SignedDocumentsOrderByWithRelationInput = {
   createdAt?: Prisma.SortOrderInput | Prisma.SortOrder
   updatedAt?: Prisma.SortOrderInput | Prisma.SortOrder
   signedDocumentId?: Prisma.SortOrder
+  providerDocumentId?: Prisma.SortOrderInput | Prisma.SortOrder
+  provenance?: Prisma.SortOrder
   templateId?: Prisma.SortOrder
-  userId?: Prisma.SortOrder
+  userId?: Prisma.SortOrderInput | Prisma.SortOrder
+  signerUserId?: Prisma.SortOrderInput | Prisma.SortOrder
+  documentSubjectId?: Prisma.SortOrderInput | Prisma.SortOrder
   documentName?: Prisma.SortOrder
   hostId?: Prisma.SortOrderInput | Prisma.SortOrder
   organizationId?: Prisma.SortOrderInput | Prisma.SortOrder
   eventId?: Prisma.SortOrderInput | Prisma.SortOrder
   teamId?: Prisma.SortOrderInput | Prisma.SortOrder
+  scopeType?: Prisma.SortOrderInput | Prisma.SortOrder
+  scopeId?: Prisma.SortOrderInput | Prisma.SortOrder
+  importedFileId?: Prisma.SortOrderInput | Prisma.SortOrder
+  contentHash?: Prisma.SortOrderInput | Prisma.SortOrder
+  historicalSigningDate?: Prisma.SortOrderInput | Prisma.SortOrder
+  sourceNote?: Prisma.SortOrderInput | Prisma.SortOrder
+  importedAt?: Prisma.SortOrderInput | Prisma.SortOrder
+  uploaderId?: Prisma.SortOrderInput | Prisma.SortOrder
+  attestationText?: Prisma.SortOrderInput | Prisma.SortOrder
+  attestationVersion?: Prisma.SortOrderInput | Prisma.SortOrder
   status?: Prisma.SortOrderInput | Prisma.SortOrder
   signedAt?: Prisma.SortOrderInput | Prisma.SortOrder
   signerEmail?: Prisma.SortOrderInput | Prisma.SortOrder
@@ -345,19 +471,34 @@ export type SignedDocumentsOrderByWithRelationInput = {
 
 export type SignedDocumentsWhereUniqueInput = Prisma.AtLeast<{
   id?: string
+  organizationId_contentHash_documentSubjectId_templateId_scopeType_scopeId?: Prisma.SignedDocumentsOrganizationIdContentHashDocumentSubjectIdTemplateIdScopeTypeScopeIdCompoundUniqueInput
   AND?: Prisma.SignedDocumentsWhereInput | Prisma.SignedDocumentsWhereInput[]
   OR?: Prisma.SignedDocumentsWhereInput[]
   NOT?: Prisma.SignedDocumentsWhereInput | Prisma.SignedDocumentsWhereInput[]
   createdAt?: Prisma.DateTimeNullableFilter<"SignedDocuments"> | Date | string | null
   updatedAt?: Prisma.DateTimeNullableFilter<"SignedDocuments"> | Date | string | null
   signedDocumentId?: Prisma.StringFilter<"SignedDocuments"> | string
+  providerDocumentId?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
+  provenance?: Prisma.EnumSignedDocumentProvenanceEnumFilter<"SignedDocuments"> | $Enums.SignedDocumentProvenanceEnum
   templateId?: Prisma.StringFilter<"SignedDocuments"> | string
-  userId?: Prisma.StringFilter<"SignedDocuments"> | string
+  userId?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
+  signerUserId?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
+  documentSubjectId?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
   documentName?: Prisma.StringFilter<"SignedDocuments"> | string
   hostId?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
   organizationId?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
   eventId?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
   teamId?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
+  scopeType?: Prisma.EnumDocumentRequirementSatisfactionScopeTypeEnumNullableFilter<"SignedDocuments"> | $Enums.DocumentRequirementSatisfactionScopeTypeEnum | null
+  scopeId?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
+  importedFileId?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
+  contentHash?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
+  historicalSigningDate?: Prisma.DateTimeNullableFilter<"SignedDocuments"> | Date | string | null
+  sourceNote?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
+  importedAt?: Prisma.DateTimeNullableFilter<"SignedDocuments"> | Date | string | null
+  uploaderId?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
+  attestationText?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
+  attestationVersion?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
   status?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
   signedAt?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
   signerEmail?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
@@ -365,20 +506,34 @@ export type SignedDocumentsWhereUniqueInput = Prisma.AtLeast<{
   signerRole?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
   ipAddress?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
   requestId?: Prisma.StringNullableFilter<"SignedDocuments"> | string | null
-}, "id">
+}, "id" | "organizationId_contentHash_documentSubjectId_templateId_scopeType_scopeId">
 
 export type SignedDocumentsOrderByWithAggregationInput = {
   id?: Prisma.SortOrder
   createdAt?: Prisma.SortOrderInput | Prisma.SortOrder
   updatedAt?: Prisma.SortOrderInput | Prisma.SortOrder
   signedDocumentId?: Prisma.SortOrder
+  providerDocumentId?: Prisma.SortOrderInput | Prisma.SortOrder
+  provenance?: Prisma.SortOrder
   templateId?: Prisma.SortOrder
-  userId?: Prisma.SortOrder
+  userId?: Prisma.SortOrderInput | Prisma.SortOrder
+  signerUserId?: Prisma.SortOrderInput | Prisma.SortOrder
+  documentSubjectId?: Prisma.SortOrderInput | Prisma.SortOrder
   documentName?: Prisma.SortOrder
   hostId?: Prisma.SortOrderInput | Prisma.SortOrder
   organizationId?: Prisma.SortOrderInput | Prisma.SortOrder
   eventId?: Prisma.SortOrderInput | Prisma.SortOrder
   teamId?: Prisma.SortOrderInput | Prisma.SortOrder
+  scopeType?: Prisma.SortOrderInput | Prisma.SortOrder
+  scopeId?: Prisma.SortOrderInput | Prisma.SortOrder
+  importedFileId?: Prisma.SortOrderInput | Prisma.SortOrder
+  contentHash?: Prisma.SortOrderInput | Prisma.SortOrder
+  historicalSigningDate?: Prisma.SortOrderInput | Prisma.SortOrder
+  sourceNote?: Prisma.SortOrderInput | Prisma.SortOrder
+  importedAt?: Prisma.SortOrderInput | Prisma.SortOrder
+  uploaderId?: Prisma.SortOrderInput | Prisma.SortOrder
+  attestationText?: Prisma.SortOrderInput | Prisma.SortOrder
+  attestationVersion?: Prisma.SortOrderInput | Prisma.SortOrder
   status?: Prisma.SortOrderInput | Prisma.SortOrder
   signedAt?: Prisma.SortOrderInput | Prisma.SortOrder
   signerEmail?: Prisma.SortOrderInput | Prisma.SortOrder
@@ -401,13 +556,27 @@ export type SignedDocumentsScalarWhereWithAggregatesInput = {
   createdAt?: Prisma.DateTimeNullableWithAggregatesFilter<"SignedDocuments"> | Date | string | null
   updatedAt?: Prisma.DateTimeNullableWithAggregatesFilter<"SignedDocuments"> | Date | string | null
   signedDocumentId?: Prisma.StringWithAggregatesFilter<"SignedDocuments"> | string
+  providerDocumentId?: Prisma.StringNullableWithAggregatesFilter<"SignedDocuments"> | string | null
+  provenance?: Prisma.EnumSignedDocumentProvenanceEnumWithAggregatesFilter<"SignedDocuments"> | $Enums.SignedDocumentProvenanceEnum
   templateId?: Prisma.StringWithAggregatesFilter<"SignedDocuments"> | string
-  userId?: Prisma.StringWithAggregatesFilter<"SignedDocuments"> | string
+  userId?: Prisma.StringNullableWithAggregatesFilter<"SignedDocuments"> | string | null
+  signerUserId?: Prisma.StringNullableWithAggregatesFilter<"SignedDocuments"> | string | null
+  documentSubjectId?: Prisma.StringNullableWithAggregatesFilter<"SignedDocuments"> | string | null
   documentName?: Prisma.StringWithAggregatesFilter<"SignedDocuments"> | string
   hostId?: Prisma.StringNullableWithAggregatesFilter<"SignedDocuments"> | string | null
   organizationId?: Prisma.StringNullableWithAggregatesFilter<"SignedDocuments"> | string | null
   eventId?: Prisma.StringNullableWithAggregatesFilter<"SignedDocuments"> | string | null
   teamId?: Prisma.StringNullableWithAggregatesFilter<"SignedDocuments"> | string | null
+  scopeType?: Prisma.EnumDocumentRequirementSatisfactionScopeTypeEnumNullableWithAggregatesFilter<"SignedDocuments"> | $Enums.DocumentRequirementSatisfactionScopeTypeEnum | null
+  scopeId?: Prisma.StringNullableWithAggregatesFilter<"SignedDocuments"> | string | null
+  importedFileId?: Prisma.StringNullableWithAggregatesFilter<"SignedDocuments"> | string | null
+  contentHash?: Prisma.StringNullableWithAggregatesFilter<"SignedDocuments"> | string | null
+  historicalSigningDate?: Prisma.DateTimeNullableWithAggregatesFilter<"SignedDocuments"> | Date | string | null
+  sourceNote?: Prisma.StringNullableWithAggregatesFilter<"SignedDocuments"> | string | null
+  importedAt?: Prisma.DateTimeNullableWithAggregatesFilter<"SignedDocuments"> | Date | string | null
+  uploaderId?: Prisma.StringNullableWithAggregatesFilter<"SignedDocuments"> | string | null
+  attestationText?: Prisma.StringNullableWithAggregatesFilter<"SignedDocuments"> | string | null
+  attestationVersion?: Prisma.StringNullableWithAggregatesFilter<"SignedDocuments"> | string | null
   status?: Prisma.StringNullableWithAggregatesFilter<"SignedDocuments"> | string | null
   signedAt?: Prisma.StringNullableWithAggregatesFilter<"SignedDocuments"> | string | null
   signerEmail?: Prisma.StringNullableWithAggregatesFilter<"SignedDocuments"> | string | null
@@ -422,13 +591,27 @@ export type SignedDocumentsCreateInput = {
   createdAt?: Date | string | null
   updatedAt?: Date | string | null
   signedDocumentId: string
+  providerDocumentId?: string | null
+  provenance?: $Enums.SignedDocumentProvenanceEnum
   templateId: string
-  userId: string
+  userId?: string | null
+  signerUserId?: string | null
+  documentSubjectId?: string | null
   documentName: string
   hostId?: string | null
   organizationId?: string | null
   eventId?: string | null
   teamId?: string | null
+  scopeType?: $Enums.DocumentRequirementSatisfactionScopeTypeEnum | null
+  scopeId?: string | null
+  importedFileId?: string | null
+  contentHash?: string | null
+  historicalSigningDate?: Date | string | null
+  sourceNote?: string | null
+  importedAt?: Date | string | null
+  uploaderId?: string | null
+  attestationText?: string | null
+  attestationVersion?: string | null
   status?: string | null
   signedAt?: string | null
   signerEmail?: string | null
@@ -443,13 +626,27 @@ export type SignedDocumentsUncheckedCreateInput = {
   createdAt?: Date | string | null
   updatedAt?: Date | string | null
   signedDocumentId: string
+  providerDocumentId?: string | null
+  provenance?: $Enums.SignedDocumentProvenanceEnum
   templateId: string
-  userId: string
+  userId?: string | null
+  signerUserId?: string | null
+  documentSubjectId?: string | null
   documentName: string
   hostId?: string | null
   organizationId?: string | null
   eventId?: string | null
   teamId?: string | null
+  scopeType?: $Enums.DocumentRequirementSatisfactionScopeTypeEnum | null
+  scopeId?: string | null
+  importedFileId?: string | null
+  contentHash?: string | null
+  historicalSigningDate?: Date | string | null
+  sourceNote?: string | null
+  importedAt?: Date | string | null
+  uploaderId?: string | null
+  attestationText?: string | null
+  attestationVersion?: string | null
   status?: string | null
   signedAt?: string | null
   signerEmail?: string | null
@@ -464,13 +661,27 @@ export type SignedDocumentsUpdateInput = {
   createdAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   updatedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   signedDocumentId?: Prisma.StringFieldUpdateOperationsInput | string
+  providerDocumentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  provenance?: Prisma.EnumSignedDocumentProvenanceEnumFieldUpdateOperationsInput | $Enums.SignedDocumentProvenanceEnum
   templateId?: Prisma.StringFieldUpdateOperationsInput | string
-  userId?: Prisma.StringFieldUpdateOperationsInput | string
+  userId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  signerUserId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  documentSubjectId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   documentName?: Prisma.StringFieldUpdateOperationsInput | string
   hostId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   organizationId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   eventId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   teamId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  scopeType?: Prisma.NullableEnumDocumentRequirementSatisfactionScopeTypeEnumFieldUpdateOperationsInput | $Enums.DocumentRequirementSatisfactionScopeTypeEnum | null
+  scopeId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  importedFileId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  contentHash?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  historicalSigningDate?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  sourceNote?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  importedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  uploaderId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  attestationText?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  attestationVersion?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   status?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   signedAt?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   signerEmail?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -485,13 +696,27 @@ export type SignedDocumentsUncheckedUpdateInput = {
   createdAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   updatedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   signedDocumentId?: Prisma.StringFieldUpdateOperationsInput | string
+  providerDocumentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  provenance?: Prisma.EnumSignedDocumentProvenanceEnumFieldUpdateOperationsInput | $Enums.SignedDocumentProvenanceEnum
   templateId?: Prisma.StringFieldUpdateOperationsInput | string
-  userId?: Prisma.StringFieldUpdateOperationsInput | string
+  userId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  signerUserId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  documentSubjectId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   documentName?: Prisma.StringFieldUpdateOperationsInput | string
   hostId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   organizationId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   eventId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   teamId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  scopeType?: Prisma.NullableEnumDocumentRequirementSatisfactionScopeTypeEnumFieldUpdateOperationsInput | $Enums.DocumentRequirementSatisfactionScopeTypeEnum | null
+  scopeId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  importedFileId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  contentHash?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  historicalSigningDate?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  sourceNote?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  importedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  uploaderId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  attestationText?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  attestationVersion?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   status?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   signedAt?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   signerEmail?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -506,13 +731,27 @@ export type SignedDocumentsCreateManyInput = {
   createdAt?: Date | string | null
   updatedAt?: Date | string | null
   signedDocumentId: string
+  providerDocumentId?: string | null
+  provenance?: $Enums.SignedDocumentProvenanceEnum
   templateId: string
-  userId: string
+  userId?: string | null
+  signerUserId?: string | null
+  documentSubjectId?: string | null
   documentName: string
   hostId?: string | null
   organizationId?: string | null
   eventId?: string | null
   teamId?: string | null
+  scopeType?: $Enums.DocumentRequirementSatisfactionScopeTypeEnum | null
+  scopeId?: string | null
+  importedFileId?: string | null
+  contentHash?: string | null
+  historicalSigningDate?: Date | string | null
+  sourceNote?: string | null
+  importedAt?: Date | string | null
+  uploaderId?: string | null
+  attestationText?: string | null
+  attestationVersion?: string | null
   status?: string | null
   signedAt?: string | null
   signerEmail?: string | null
@@ -527,13 +766,27 @@ export type SignedDocumentsUpdateManyMutationInput = {
   createdAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   updatedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   signedDocumentId?: Prisma.StringFieldUpdateOperationsInput | string
+  providerDocumentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  provenance?: Prisma.EnumSignedDocumentProvenanceEnumFieldUpdateOperationsInput | $Enums.SignedDocumentProvenanceEnum
   templateId?: Prisma.StringFieldUpdateOperationsInput | string
-  userId?: Prisma.StringFieldUpdateOperationsInput | string
+  userId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  signerUserId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  documentSubjectId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   documentName?: Prisma.StringFieldUpdateOperationsInput | string
   hostId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   organizationId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   eventId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   teamId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  scopeType?: Prisma.NullableEnumDocumentRequirementSatisfactionScopeTypeEnumFieldUpdateOperationsInput | $Enums.DocumentRequirementSatisfactionScopeTypeEnum | null
+  scopeId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  importedFileId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  contentHash?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  historicalSigningDate?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  sourceNote?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  importedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  uploaderId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  attestationText?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  attestationVersion?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   status?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   signedAt?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   signerEmail?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -548,13 +801,27 @@ export type SignedDocumentsUncheckedUpdateManyInput = {
   createdAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   updatedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   signedDocumentId?: Prisma.StringFieldUpdateOperationsInput | string
+  providerDocumentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  provenance?: Prisma.EnumSignedDocumentProvenanceEnumFieldUpdateOperationsInput | $Enums.SignedDocumentProvenanceEnum
   templateId?: Prisma.StringFieldUpdateOperationsInput | string
-  userId?: Prisma.StringFieldUpdateOperationsInput | string
+  userId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  signerUserId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  documentSubjectId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   documentName?: Prisma.StringFieldUpdateOperationsInput | string
   hostId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   organizationId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   eventId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   teamId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  scopeType?: Prisma.NullableEnumDocumentRequirementSatisfactionScopeTypeEnumFieldUpdateOperationsInput | $Enums.DocumentRequirementSatisfactionScopeTypeEnum | null
+  scopeId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  importedFileId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  contentHash?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  historicalSigningDate?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  sourceNote?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  importedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  uploaderId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  attestationText?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  attestationVersion?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   status?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   signedAt?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   signerEmail?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -564,18 +831,41 @@ export type SignedDocumentsUncheckedUpdateManyInput = {
   requestId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
 }
 
+export type SignedDocumentsOrganizationIdContentHashDocumentSubjectIdTemplateIdScopeTypeScopeIdCompoundUniqueInput = {
+  organizationId: string
+  contentHash: string
+  documentSubjectId: string
+  templateId: string
+  scopeType: $Enums.DocumentRequirementSatisfactionScopeTypeEnum
+  scopeId: string
+}
+
 export type SignedDocumentsCountOrderByAggregateInput = {
   id?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   signedDocumentId?: Prisma.SortOrder
+  providerDocumentId?: Prisma.SortOrder
+  provenance?: Prisma.SortOrder
   templateId?: Prisma.SortOrder
   userId?: Prisma.SortOrder
+  signerUserId?: Prisma.SortOrder
+  documentSubjectId?: Prisma.SortOrder
   documentName?: Prisma.SortOrder
   hostId?: Prisma.SortOrder
   organizationId?: Prisma.SortOrder
   eventId?: Prisma.SortOrder
   teamId?: Prisma.SortOrder
+  scopeType?: Prisma.SortOrder
+  scopeId?: Prisma.SortOrder
+  importedFileId?: Prisma.SortOrder
+  contentHash?: Prisma.SortOrder
+  historicalSigningDate?: Prisma.SortOrder
+  sourceNote?: Prisma.SortOrder
+  importedAt?: Prisma.SortOrder
+  uploaderId?: Prisma.SortOrder
+  attestationText?: Prisma.SortOrder
+  attestationVersion?: Prisma.SortOrder
   status?: Prisma.SortOrder
   signedAt?: Prisma.SortOrder
   signerEmail?: Prisma.SortOrder
@@ -594,13 +884,27 @@ export type SignedDocumentsMaxOrderByAggregateInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   signedDocumentId?: Prisma.SortOrder
+  providerDocumentId?: Prisma.SortOrder
+  provenance?: Prisma.SortOrder
   templateId?: Prisma.SortOrder
   userId?: Prisma.SortOrder
+  signerUserId?: Prisma.SortOrder
+  documentSubjectId?: Prisma.SortOrder
   documentName?: Prisma.SortOrder
   hostId?: Prisma.SortOrder
   organizationId?: Prisma.SortOrder
   eventId?: Prisma.SortOrder
   teamId?: Prisma.SortOrder
+  scopeType?: Prisma.SortOrder
+  scopeId?: Prisma.SortOrder
+  importedFileId?: Prisma.SortOrder
+  contentHash?: Prisma.SortOrder
+  historicalSigningDate?: Prisma.SortOrder
+  sourceNote?: Prisma.SortOrder
+  importedAt?: Prisma.SortOrder
+  uploaderId?: Prisma.SortOrder
+  attestationText?: Prisma.SortOrder
+  attestationVersion?: Prisma.SortOrder
   status?: Prisma.SortOrder
   signedAt?: Prisma.SortOrder
   signerEmail?: Prisma.SortOrder
@@ -615,13 +919,27 @@ export type SignedDocumentsMinOrderByAggregateInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   signedDocumentId?: Prisma.SortOrder
+  providerDocumentId?: Prisma.SortOrder
+  provenance?: Prisma.SortOrder
   templateId?: Prisma.SortOrder
   userId?: Prisma.SortOrder
+  signerUserId?: Prisma.SortOrder
+  documentSubjectId?: Prisma.SortOrder
   documentName?: Prisma.SortOrder
   hostId?: Prisma.SortOrder
   organizationId?: Prisma.SortOrder
   eventId?: Prisma.SortOrder
   teamId?: Prisma.SortOrder
+  scopeType?: Prisma.SortOrder
+  scopeId?: Prisma.SortOrder
+  importedFileId?: Prisma.SortOrder
+  contentHash?: Prisma.SortOrder
+  historicalSigningDate?: Prisma.SortOrder
+  sourceNote?: Prisma.SortOrder
+  importedAt?: Prisma.SortOrder
+  uploaderId?: Prisma.SortOrder
+  attestationText?: Prisma.SortOrder
+  attestationVersion?: Prisma.SortOrder
   status?: Prisma.SortOrder
   signedAt?: Prisma.SortOrder
   signerEmail?: Prisma.SortOrder
@@ -635,6 +953,14 @@ export type SignedDocumentsSumOrderByAggregateInput = {
   roleIndex?: Prisma.SortOrder
 }
 
+export type EnumSignedDocumentProvenanceEnumFieldUpdateOperationsInput = {
+  set?: $Enums.SignedDocumentProvenanceEnum
+}
+
+export type NullableEnumDocumentRequirementSatisfactionScopeTypeEnumFieldUpdateOperationsInput = {
+  set?: $Enums.DocumentRequirementSatisfactionScopeTypeEnum | null
+}
+
 
 
 export type SignedDocumentsSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
@@ -642,13 +968,27 @@ export type SignedDocumentsSelect<ExtArgs extends runtime.Types.Extensions.Inter
   createdAt?: boolean
   updatedAt?: boolean
   signedDocumentId?: boolean
+  providerDocumentId?: boolean
+  provenance?: boolean
   templateId?: boolean
   userId?: boolean
+  signerUserId?: boolean
+  documentSubjectId?: boolean
   documentName?: boolean
   hostId?: boolean
   organizationId?: boolean
   eventId?: boolean
   teamId?: boolean
+  scopeType?: boolean
+  scopeId?: boolean
+  importedFileId?: boolean
+  contentHash?: boolean
+  historicalSigningDate?: boolean
+  sourceNote?: boolean
+  importedAt?: boolean
+  uploaderId?: boolean
+  attestationText?: boolean
+  attestationVersion?: boolean
   status?: boolean
   signedAt?: boolean
   signerEmail?: boolean
@@ -663,13 +1003,27 @@ export type SignedDocumentsSelectCreateManyAndReturn<ExtArgs extends runtime.Typ
   createdAt?: boolean
   updatedAt?: boolean
   signedDocumentId?: boolean
+  providerDocumentId?: boolean
+  provenance?: boolean
   templateId?: boolean
   userId?: boolean
+  signerUserId?: boolean
+  documentSubjectId?: boolean
   documentName?: boolean
   hostId?: boolean
   organizationId?: boolean
   eventId?: boolean
   teamId?: boolean
+  scopeType?: boolean
+  scopeId?: boolean
+  importedFileId?: boolean
+  contentHash?: boolean
+  historicalSigningDate?: boolean
+  sourceNote?: boolean
+  importedAt?: boolean
+  uploaderId?: boolean
+  attestationText?: boolean
+  attestationVersion?: boolean
   status?: boolean
   signedAt?: boolean
   signerEmail?: boolean
@@ -684,13 +1038,27 @@ export type SignedDocumentsSelectUpdateManyAndReturn<ExtArgs extends runtime.Typ
   createdAt?: boolean
   updatedAt?: boolean
   signedDocumentId?: boolean
+  providerDocumentId?: boolean
+  provenance?: boolean
   templateId?: boolean
   userId?: boolean
+  signerUserId?: boolean
+  documentSubjectId?: boolean
   documentName?: boolean
   hostId?: boolean
   organizationId?: boolean
   eventId?: boolean
   teamId?: boolean
+  scopeType?: boolean
+  scopeId?: boolean
+  importedFileId?: boolean
+  contentHash?: boolean
+  historicalSigningDate?: boolean
+  sourceNote?: boolean
+  importedAt?: boolean
+  uploaderId?: boolean
+  attestationText?: boolean
+  attestationVersion?: boolean
   status?: boolean
   signedAt?: boolean
   signerEmail?: boolean
@@ -705,13 +1073,27 @@ export type SignedDocumentsSelectScalar = {
   createdAt?: boolean
   updatedAt?: boolean
   signedDocumentId?: boolean
+  providerDocumentId?: boolean
+  provenance?: boolean
   templateId?: boolean
   userId?: boolean
+  signerUserId?: boolean
+  documentSubjectId?: boolean
   documentName?: boolean
   hostId?: boolean
   organizationId?: boolean
   eventId?: boolean
   teamId?: boolean
+  scopeType?: boolean
+  scopeId?: boolean
+  importedFileId?: boolean
+  contentHash?: boolean
+  historicalSigningDate?: boolean
+  sourceNote?: boolean
+  importedAt?: boolean
+  uploaderId?: boolean
+  attestationText?: boolean
+  attestationVersion?: boolean
   status?: boolean
   signedAt?: boolean
   signerEmail?: boolean
@@ -721,7 +1103,7 @@ export type SignedDocumentsSelectScalar = {
   requestId?: boolean
 }
 
-export type SignedDocumentsOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "signedDocumentId" | "templateId" | "userId" | "documentName" | "hostId" | "organizationId" | "eventId" | "teamId" | "status" | "signedAt" | "signerEmail" | "roleIndex" | "signerRole" | "ipAddress" | "requestId", ExtArgs["result"]["signedDocuments"]>
+export type SignedDocumentsOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "signedDocumentId" | "providerDocumentId" | "provenance" | "templateId" | "userId" | "signerUserId" | "documentSubjectId" | "documentName" | "hostId" | "organizationId" | "eventId" | "teamId" | "scopeType" | "scopeId" | "importedFileId" | "contentHash" | "historicalSigningDate" | "sourceNote" | "importedAt" | "uploaderId" | "attestationText" | "attestationVersion" | "status" | "signedAt" | "signerEmail" | "roleIndex" | "signerRole" | "ipAddress" | "requestId", ExtArgs["result"]["signedDocuments"]>
 
 export type $SignedDocumentsPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "SignedDocuments"
@@ -731,13 +1113,27 @@ export type $SignedDocumentsPayload<ExtArgs extends runtime.Types.Extensions.Int
     createdAt: Date | null
     updatedAt: Date | null
     signedDocumentId: string
+    providerDocumentId: string | null
+    provenance: $Enums.SignedDocumentProvenanceEnum
     templateId: string
-    userId: string
+    userId: string | null
+    signerUserId: string | null
+    documentSubjectId: string | null
     documentName: string
     hostId: string | null
     organizationId: string | null
     eventId: string | null
     teamId: string | null
+    scopeType: $Enums.DocumentRequirementSatisfactionScopeTypeEnum | null
+    scopeId: string | null
+    importedFileId: string | null
+    contentHash: string | null
+    historicalSigningDate: Date | null
+    sourceNote: string | null
+    importedAt: Date | null
+    uploaderId: string | null
+    attestationText: string | null
+    attestationVersion: string | null
     status: string | null
     signedAt: string | null
     signerEmail: string | null
@@ -1172,13 +1568,27 @@ export interface SignedDocumentsFieldRefs {
   readonly createdAt: Prisma.FieldRef<"SignedDocuments", 'DateTime'>
   readonly updatedAt: Prisma.FieldRef<"SignedDocuments", 'DateTime'>
   readonly signedDocumentId: Prisma.FieldRef<"SignedDocuments", 'String'>
+  readonly providerDocumentId: Prisma.FieldRef<"SignedDocuments", 'String'>
+  readonly provenance: Prisma.FieldRef<"SignedDocuments", 'SignedDocumentProvenanceEnum'>
   readonly templateId: Prisma.FieldRef<"SignedDocuments", 'String'>
   readonly userId: Prisma.FieldRef<"SignedDocuments", 'String'>
+  readonly signerUserId: Prisma.FieldRef<"SignedDocuments", 'String'>
+  readonly documentSubjectId: Prisma.FieldRef<"SignedDocuments", 'String'>
   readonly documentName: Prisma.FieldRef<"SignedDocuments", 'String'>
   readonly hostId: Prisma.FieldRef<"SignedDocuments", 'String'>
   readonly organizationId: Prisma.FieldRef<"SignedDocuments", 'String'>
   readonly eventId: Prisma.FieldRef<"SignedDocuments", 'String'>
   readonly teamId: Prisma.FieldRef<"SignedDocuments", 'String'>
+  readonly scopeType: Prisma.FieldRef<"SignedDocuments", 'DocumentRequirementSatisfactionScopeTypeEnum'>
+  readonly scopeId: Prisma.FieldRef<"SignedDocuments", 'String'>
+  readonly importedFileId: Prisma.FieldRef<"SignedDocuments", 'String'>
+  readonly contentHash: Prisma.FieldRef<"SignedDocuments", 'String'>
+  readonly historicalSigningDate: Prisma.FieldRef<"SignedDocuments", 'DateTime'>
+  readonly sourceNote: Prisma.FieldRef<"SignedDocuments", 'String'>
+  readonly importedAt: Prisma.FieldRef<"SignedDocuments", 'DateTime'>
+  readonly uploaderId: Prisma.FieldRef<"SignedDocuments", 'String'>
+  readonly attestationText: Prisma.FieldRef<"SignedDocuments", 'String'>
+  readonly attestationVersion: Prisma.FieldRef<"SignedDocuments", 'String'>
   readonly status: Prisma.FieldRef<"SignedDocuments", 'String'>
   readonly signedAt: Prisma.FieldRef<"SignedDocuments", 'String'>
   readonly signerEmail: Prisma.FieldRef<"SignedDocuments", 'String'>

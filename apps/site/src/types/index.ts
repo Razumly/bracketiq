@@ -665,6 +665,7 @@ export interface UserData {
 export type StaffMemberType = 'HOST' | 'OFFICIAL' | 'STAFF';
 export type InviteType = 'STAFF' | 'TEAM' | 'EVENT';
 export type InviteStatus = 'PENDING' | 'DECLINED' | 'FAILED';
+export type TeamInviteRole = 'player' | 'team_manager' | 'team_head_coach' | 'team_assistant_coach';
 export type OrganizationRoleKind = 'OWNER' | 'STAFF' | 'HOST' | 'OFFICIAL';
 
 export interface OrganizationRole {
@@ -692,11 +693,13 @@ export interface StaffMember {
   $createdAt?: string;
   $updatedAt?: string;
 }
-
 export interface Invite {
   $id: string;
   type: InviteType;
+  role?: TeamInviteRole | null;
   email?: string;
+  phone?: string;
+  shareUrl?: string;
   status?: InviteStatus;
   staffTypes?: StaffMemberType[];
   userId?: string | null;
@@ -1141,6 +1144,11 @@ export interface TemplateDocument {
   $id: string;
   templateId?: string;
   organizationId: string;
+  documentRequirementId?: string;
+  versionSequence?: number;
+  frozenAt?: string;
+  requirementTitle?: string;
+  requirementDescription?: string;
   title: string;
   description?: string;
   signOnce: boolean;

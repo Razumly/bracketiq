@@ -86,11 +86,16 @@ const prismaMock = {
       };
       return currentResult;
     }),
-    findMany: jest.fn(async ({ where }) => (
-      currentResult?.policyKey === where.policyKey && currentResult?.matchingIntakeId
+    findMany: jest.fn(async ({ where }) => {
+      if (where?.latestRunId) {
+        return currentResult?.latestRunId === where.latestRunId && currentResult?.matchingIntakeId
+          ? [{ matchingIntakeId: currentResult.matchingIntakeId, status: currentResult.status }]
+          : [];
+      }
+      return currentResult?.policyKey === where.policyKey && currentResult?.matchingIntakeId
         ? [{ id: currentResult.id, matchingIntakeId: currentResult.matchingIntakeId }]
-        : []
-    )),
+        : [];
+    }),
     updateMany: jest.fn(async ({ where, data }) => {
       if (currentResult?.policyKey !== where.policyKey) return { count: 0 };
       if (where.status?.in && !where.status.in.includes(currentResult.status)) return { count: 0 };
@@ -124,8 +129,29 @@ const prismaMock = {
     findUnique: jest.fn(async () => null),
     findMany: jest.fn(async () => []),
   },
-  affiliateSourceIntakeRuns: { findFirst: jest.fn(async () => null) },
+  affiliateSourceIntakeRuns: {
+    findFirst: jest.fn(async () => null),
+    findMany: jest.fn(async () => []),
+  },
+  affiliateSourceMappingJobs: {
+    findMany: jest.fn(async () => []),
+  },
+  affiliateCoverageAgentJobs: {
+    findUnique: jest.fn(async () => null),
+  },
   affiliateScrapeSources: { findFirst: jest.fn(async () => null) },
+  affiliateOperationalAlerts: {
+    findUnique: jest.fn(async () => null),
+    create: jest.fn(async ({ data }) => data),
+  },
+  affiliateAgentWorkerHealth: {
+    findUnique: jest.fn(async () => null),
+    upsert: jest.fn(async ({ create }) => create),
+  },
+  affiliateOperationalAlertDeliveries: {
+    findMany: jest.fn(async () => []),
+    create: jest.fn(async ({ data }) => data),
+  },
   organizations: { findFirst: jest.fn(async () => null) },
   sports: { findMany: jest.fn(async () => [{ id: 'sport_soccer', name: 'Soccer' }]) },
 };
@@ -167,8 +193,10 @@ import {
   applyAffiliateSourceDomainPolicy,
   listAffiliateSourceDiscoveryCampaigns,
   processNextAffiliateSourceDiscoveryRun,
+  queueAffiliateSourceDiscoveryRun,
   queueDueAffiliateSourceDiscoveryRuns,
   runAffiliateIntakeAutomation,
+  runAffiliateReplenishmentCampaignWave,
 } from '@/server/affiliateImports/sourceDiscovery';
 
 describe('affiliate source discovery orchestration', () => {
@@ -197,6 +225,28 @@ describe('affiliate source discovery orchestration', () => {
     );
   });
 
+  it('reuses a deterministic replenishment discovery run reservation', async () => {
+    queuedRuns.splice(0, queuedRuns.length);
+
+    const first = await queueAffiliateSourceDiscoveryRun(
+      campaign.id,
+      'affiliate-replenishment',
+      'affiliate-replenishment-discovery-wave_1',
+    );
+    const second = await queueAffiliateSourceDiscoveryRun(
+      campaign.id,
+      'affiliate-replenishment',
+      'affiliate-replenishment-discovery-wave_1',
+    );
+
+    expect(second).toBe(first);
+    expect(first).toEqual(expect.objectContaining({
+      id: 'affiliate-replenishment-discovery-wave_1',
+      campaignId: campaign.id,
+      status: 'QUEUED',
+    }));
+    expect(prismaMock.affiliateSourceDiscoveryRuns.create).toHaveBeenCalledTimes(1);
+  });
   it('aggregates campaign result counts in the database', async () => {
     prismaMock.affiliateSourceDiscoveryCampaigns.findMany.mockResolvedValue([
       { ...campaign, id: 'campaign_1' },
@@ -511,52 +561,177 @@ describe('affiliate source discovery orchestration', () => {
   it('continues an incomplete due campaign within the same automation run', async () => {
     queuedRuns.splice(0, queuedRuns.length);
     prismaMock.affiliateSourceDiscoveryCampaigns.findMany.mockResolvedValue([campaign]);
-    const firecrawlClient = {
+    const searchClient = {
+      provider: 'SCRAPINGDOG' as const,
       searchSources: jest.fn(async () => ({
+        provider: 'SCRAPINGDOG' as const,
         request: {},
         response: {},
         rows: [],
         providerJobId: null,
+        estimatedCredits: null,
       })),
-      mapSourceUrls: jest.fn(),
-      scrapeSourcePage: jest.fn(),
     };
     const now = new Date('2026-07-21T12:00:00Z');
 
     const result = await runAffiliateIntakeAutomation(
-      { discoveryLimit: 3, intakeLimit: 1, sendSummary: false },
-      { firecrawlClient, now: () => now },
+      { discoveryLimit: 3, intakeLimit: 1 },
+      { searchClient, now: () => now },
     );
 
     expect(result.queuedCampaigns).toBe(3);
     expect(result.discoveryRuns).toHaveLength(3);
-    expect(firecrawlClient.searchSources).toHaveBeenCalledTimes(3);
+    expect(searchClient.searchSources).toHaveBeenCalledTimes(3);
   });
 
-  it('does not email from the frequent intake worker unless explicitly requested', async () => {
+  it('does not create daily discovery quota work in demand-driven mode', async () => {
     queuedRuns.splice(0, queuedRuns.length);
     prismaMock.affiliateSourceDiscoveryCampaigns.findMany.mockResolvedValue([campaign]);
-    const firecrawlClient = {
-      searchSources: jest.fn(async () => ({
-        request: {},
-        response: {},
-        rows: [],
-        providerJobId: null,
-      })),
-      mapSourceUrls: jest.fn(),
-      scrapeSourcePage: jest.fn(),
+
+    const result = await runAffiliateIntakeAutomation(
+      { discoveryLimit: 1, intakeLimit: 1, isDemandDriven: true },
+      { now: () => new Date('2026-07-21T12:00:00Z') },
+    );
+
+    expect(result.queuedCampaigns).toBe(0);
+    expect(result.discoveryRuns).toHaveLength(0);
+    expect(queuedRuns).toHaveLength(0);
+  });
+  it('records operational alerts for a failed discovery without sending a daily digest', async () => {
+    queuedRuns.splice(0, queuedRuns.length);
+    prismaMock.affiliateSourceDiscoveryCampaigns.findMany.mockResolvedValue([campaign]);
+    const searchClient = {
+      provider: 'SCRAPINGDOG' as const,
+      searchSources: jest.fn(async () => {
+        throw new Error('Provider timeout');
+      }),
     };
 
     const result = await runAffiliateIntakeAutomation(
       { discoveryLimit: 1, intakeLimit: 1 },
-      { firecrawlClient, now: () => new Date('2026-07-21T12:00:00Z') },
+      { searchClient, now: () => new Date('2026-07-21T12:00:00Z') },
     );
 
     expect(result.discoveryRuns).toHaveLength(1);
-    expect(result.emailSent).toBe(false);
+    expect(result.alertCount).toBe(1);
+    expect(prismaMock.affiliateOperationalAlerts.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        category: 'DISCOVERY_PROVIDER_FAILURE',
+        subjectType: 'DISCOVERY_RUN',
+      }),
+    }));
+    expect(prismaMock.affiliateOperationalAlertDeliveries.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'NOT_CONFIGURED' }),
+    }));
     expect(sendEmailMock).not.toHaveBeenCalled();
   });
+  it('persists a top-level automation failure before rethrowing and releases the lock', async () => {
+    queuedRuns.splice(0, queuedRuns.length);
+    const failure = new Error('Recovery database unavailable');
+    const now = new Date('2026-08-24T12:00:00.000Z');
+    recoverStaleIntakesMock.mockRejectedValueOnce(failure);
 
+    await expect(runAffiliateIntakeAutomation(
+      { discoveryLimit: 1, intakeLimit: 1 },
+      { now: () => now },
+    )).rejects.toBe(failure);
+
+    expect(prismaMock.affiliateOperationalAlerts.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        eventKey: `affiliate-intake-automation:orchestration-failure:${now.toISOString()}`,
+        category: 'AUTOMATION_ORCHESTRATION_FAILURE',
+        severity: 'critical',
+        subjectType: 'AUTOMATION_SUPERVISOR',
+        subjectId: 'affiliate-intake-supervisor',
+        detail: 'Recovery database unavailable',
+        payload: expect.objectContaining({
+          errorName: 'Error',
+          errorMessage: 'Recovery database unavailable',
+          startedAt: now.toISOString(),
+        }),
+      }),
+    }));
+    expect(prismaMock.affiliateOperationalAlertDeliveries.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: 'NOT_CONFIGURED',
+      }),
+    }));
+    expect(mockPgClient.query).toHaveBeenCalledWith(
+      'SELECT pg_advisory_unlock($1)',
+      [4201072126],
+    );
+    expect(mockPgClient.end).toHaveBeenCalled();
+  });
+
+  it('keeps the original automation failure when top-level alert delivery persistence fails', async () => {
+    queuedRuns.splice(0, queuedRuns.length);
+    const failure = new Error('Queue database unavailable');
+    recoverStaleIntakesMock.mockRejectedValueOnce(failure);
+    prismaMock.affiliateOperationalAlertDeliveries.create.mockRejectedValueOnce(
+      new Error('Alert delivery history unavailable'),
+    );
+    const consoleError = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    try {
+      await expect(runAffiliateIntakeAutomation(
+        { discoveryLimit: 1, intakeLimit: 1 },
+        { now: () => new Date('2026-08-24T12:00:00.000Z') },
+      )).rejects.toBe(failure);
+    } finally {
+      consoleError.mockRestore();
+    }
+
+    expect(prismaMock.affiliateOperationalAlerts.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        category: 'AUTOMATION_ORCHESTRATION_FAILURE',
+      }),
+    }));
+    expect(prismaMock.affiliateOperationalAlertDeliveries.create).toHaveBeenCalled();
+    expect(mockPgClient.query).toHaveBeenCalledWith(
+      'SELECT pg_advisory_unlock($1)',
+      [4201072126],
+    );
+    expect(mockPgClient.end).toHaveBeenCalled();
+  });
+
+
+  it('records the supervisor heartbeat and alerts when the prior lease expired', async () => {
+    queuedRuns.splice(0, queuedRuns.length);
+    const now = new Date('2026-08-02T01:30:00.000Z');
+    prismaMock.affiliateAgentWorkerHealth.findUnique.mockResolvedValueOnce({
+      status: 'HEALTHY',
+      leaseExpiresAt: new Date(now.getTime() - 1),
+    });
+
+    const result = await runAffiliateIntakeAutomation(
+      { discoveryLimit: 1, intakeLimit: 1, isDemandDriven: true },
+      { now: () => now },
+    );
+    const secondResult = await runAffiliateIntakeAutomation(
+      { discoveryLimit: 1, intakeLimit: 1, isDemandDriven: true },
+      { now: () => new Date(now.getTime() + 60_000) },
+    );
+
+    expect(prismaMock.affiliateAgentWorkerHealth.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        workerId: 'affiliate-intake-supervisor',
+        role: 'AUTOMATION_SUPERVISOR',
+        heartbeatAt: now,
+        leaseExpiresAt: new Date(now.getTime() + 20 * 60 * 1000),
+      }),
+    }));
+    expect(prismaMock.affiliateAgentWorkerHealth.upsert.mock.calls[1][0]).toEqual(expect.objectContaining({
+      where: { workerId_role: { workerId: 'affiliate-intake-supervisor', role: 'AUTOMATION_SUPERVISOR' } },
+    }));
+    expect(prismaMock.affiliateOperationalAlerts.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        category: 'SUPERVISOR_HEARTBEAT_LOSS',
+        subjectType: 'AUTOMATION_SUPERVISOR',
+      }),
+    }));
+    expect(result.alertCount).toBe(1);
+    expect(secondResult.alertCount).toBe(0);
+  });
   it('recovers stale capture leases before processing the normal intake queue', async () => {
     queuedRuns.splice(0, queuedRuns.length);
     recoverStaleIntakesMock.mockResolvedValue([{
@@ -567,7 +742,7 @@ describe('affiliate source discovery orchestration', () => {
     processIntakeMock.mockResolvedValue(null);
 
     const result = await runAffiliateIntakeAutomation(
-      { discoveryLimit: 1, intakeLimit: 1, sendSummary: false },
+      { discoveryLimit: 1, intakeLimit: 1 },
       { now: () => new Date('2026-08-02T01:30:00.000Z') },
     );
 
@@ -643,5 +818,177 @@ describe('affiliate source discovery orchestration', () => {
       'PROFILE_ALIGNED',
       'AUTO_PROMOTION_ELIGIBLE',
     ]));
+  });
+  it('pauses a wave when terminal coverage planning has no campaign', async () => {
+    prismaMock.affiliateCoverageAgentJobs.findUnique.mockResolvedValueOnce({
+      id: 'coverage_1',
+      status: 'SUCCEEDED',
+      result: {},
+      errorMessage: null,
+    });
+
+    const result = await runAffiliateReplenishmentCampaignWave({
+      wave: {
+        id: 'wave_1',
+        campaignId: null,
+        coveragePlanningJobId: 'coverage_1',
+        resultJson: {},
+      },
+      demand: { id: 'demand_1' },
+      contract: { version: 1, hash: 'contract-hash' },
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      status: 'PAUSED',
+      provider: 'COVERAGE_PLANNER',
+      providerOperationKey: 'affiliate-replenishment:coverage:coverage_1',
+      errorCode: 'COVERAGE_PLANNING_NO_CAMPAIGN',
+    }));
+    expect(result.result).toEqual(expect.objectContaining({
+      coveragePlanningJobId: 'coverage_1',
+      status: 'SUCCEEDED',
+    }));
+    expect(prismaMock.affiliateSourceDiscoveryRuns.findFirst).not.toHaveBeenCalled();
+  });
+  it('keeps a replenishment wave open while capture is still active', async () => {
+    queuedRuns.splice(0, queuedRuns.length, {
+      id: 'wave-discovery-run',
+      campaignId: campaign.id,
+      status: 'SUCCEEDED',
+      summary: {},
+      errorMessage: null,
+    });
+    prismaMock.affiliateSourceDiscoveryResults.findMany.mockResolvedValue([
+      { matchingIntakeId: 'intake_1', status: 'INTAKE_CREATED' },
+    ]);
+    prismaMock.affiliateSourceIntakes.findMany.mockResolvedValue([
+      { id: 'intake_1', status: 'CAPTURED' },
+    ]);
+    prismaMock.affiliateSourceIntakeRuns.findMany.mockResolvedValue([
+      { id: 'capture_1', intakeId: 'intake_1', status: 'RUNNING', errorMessage: null },
+    ]);
+    prismaMock.affiliateSourceMappingJobs.findMany.mockResolvedValue([]);
+
+    const result = await runAffiliateReplenishmentCampaignWave({
+      wave: {
+        id: 'wave_1',
+        campaignId: campaign.id,
+        resultJson: { discoveryRunId: 'wave-discovery-run' },
+      },
+      demand: { id: 'demand_1' },
+      contract: { version: 1, hash: 'contract-hash' },
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      status: 'WAITING',
+      provider: 'AFFILIATE_DISCOVERY',
+      providerOperationKey: 'affiliate-replenishment:discovery:wave-discovery-run',
+    }));
+    expect(result.result).toEqual(expect.objectContaining({
+      discoveryRunId: 'wave-discovery-run',
+      waitingFor: 'capture:intake_1',
+    }));
+  });
+  it('retries partial discovery results with provider errors without zero yield', async () => {
+    queuedRuns.splice(0, queuedRuns.length, {
+      id: 'wave-discovery-run',
+      campaignId: campaign.id,
+      status: 'PARTIAL',
+      summary: { errors: [{ query: 'Portland soccer', message: 'provider timeout' }] },
+      errorMessage: null,
+    });
+    currentResult = {
+      id: 'result_1',
+      campaignId: campaign.id,
+      latestRunId: 'wave-discovery-run',
+      matchingIntakeId: 'intake_1',
+      status: 'INTAKE_CREATED',
+    };
+
+    const result = await runAffiliateReplenishmentCampaignWave({
+      wave: {
+        id: 'wave_1',
+        campaignId: campaign.id,
+        resultJson: { discoveryRunId: 'wave-discovery-run' },
+      },
+      demand: { id: 'demand_1' },
+      contract: { version: 1, hash: 'contract-hash' },
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      status: 'FAILED',
+      provider: 'AFFILIATE_DISCOVERY',
+      marginalYield: null,
+      errorCode: 'DISCOVERY_PROVIDER_FAILURE',
+      retryAt: expect.any(Date),
+    }));
+    expect(result.result).toEqual(expect.objectContaining({
+      discoveryRunId: 'wave-discovery-run',
+      intakeIds: ['intake_1'],
+    }));
+  });
+  it('executes one queued capture before reporting replenishment yield', async () => {
+    queuedRuns.splice(0, queuedRuns.length, {
+      id: 'wave-discovery-run',
+      campaignId: campaign.id,
+      status: 'SUCCEEDED',
+      summary: {},
+      errorMessage: null,
+    });
+    currentResult = {
+      id: 'result_1',
+      campaignId: campaign.id,
+      latestRunId: 'wave-discovery-run',
+      matchingIntakeId: 'intake_1',
+      policyKey: 'example.test',
+    };
+    prismaMock.affiliateSourceDiscoveryResults.findMany.mockResolvedValue([
+      { matchingIntakeId: 'intake_1', status: 'INTAKE_CREATED' },
+    ]);
+    prismaMock.affiliateSourceIntakes.findMany.mockResolvedValue([
+      { id: 'intake_1', status: 'CAPTURED' },
+    ]);
+    prismaMock.affiliateSourceIntakeRuns.findMany
+      .mockResolvedValueOnce([
+        { id: 'capture_1', intakeId: 'intake_1', status: 'QUEUED', errorMessage: null },
+      ])
+      .mockResolvedValueOnce([
+        { id: 'capture_1', intakeId: 'intake_1', status: 'SUCCEEDED', errorMessage: null },
+      ]);
+    prismaMock.affiliateSourceMappingJobs.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { id: 'mapping_1', intakeId: 'intake_1', status: 'QUEUED' },
+      ]);
+    processIntakeMock.mockResolvedValueOnce({
+      run: { id: 'capture_1', status: 'SUCCEEDED' },
+    });
+
+    const result = await runAffiliateReplenishmentCampaignWave({
+      wave: {
+        id: 'wave_1',
+        campaignId: campaign.id,
+        resultJson: { discoveryRunId: 'wave-discovery-run' },
+      },
+      demand: { id: 'demand_1' },
+      contract: { version: 1, hash: 'contract-hash' },
+    }, {
+      workerId: 'replenishment-worker',
+    });
+
+    expect(processIntakeMock).toHaveBeenCalledWith(
+      { runId: 'capture_1', workerId: 'replenishment-worker' },
+      { workerId: 'replenishment-worker' },
+    );
+
+    expect(result).toEqual(expect.objectContaining({
+      status: 'SUCCEEDED',
+      marginalYield: 1,
+      provider: 'AFFILIATE_DISCOVERY',
+    }));
+    expect(result.result).toEqual(expect.objectContaining({
+      discoveryRunId: 'wave-discovery-run',
+      mappingJobIds: ['mapping_1'],
+    }));
   });
 });

@@ -90,23 +90,78 @@ describe('boldsignService', () => {
       }),
     );
   });
-
-  it('fetches edit url for existing PDF templates', async () => {
+  it('loads and maps every template Version through the service seam', async () => {
     apiRequestMock.mockResolvedValue({
-      editUrl: 'https://app.boldsign.com/template/edit/tmpl_pdf',
+      templates: [{
+        $id: 'version_2',
+        organizationId: 'org_1',
+        documentRequirementId: 'requirement_1',
+        versionSequence: 2,
+        title: 'Current waiver',
+        requiredSignerType: 'PARENT_GUARDIAN_CHILD',
+        type: 'TEXT',
+        content: 'Waiver content',
+      }],
     });
 
-    const editUrl = await boldsignService.getTemplateEditUrl({
+    const templates = await boldsignService.getTemplates({
+      organizationId: 'org_1',
+      isVersionHistoryIncluded: true,
+    });
+
+    expect(templates).toEqual([
+      expect.objectContaining({
+        $id: 'version_2',
+        documentRequirementId: 'requirement_1',
+        versionSequence: 2,
+        requiredSignerType: 'PARENT_GUARDIAN_CHILD',
+        type: 'TEXT',
+      }),
+    ]);
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      '/api/organizations/org_1/templates?includeVersions=true',
+      { method: 'GET' },
+    );
+  });
+  it('fails loudly when the template list response is malformed', async () => {
+    apiRequestMock.mockResolvedValue({});
+
+    await expect(boldsignService.getTemplates({
+      organizationId: 'org_1',
+    })).rejects.toThrow('The template response did not include a templates array.');
+  });
+
+
+
+  it('updates a text template through the organization template service', async () => {
+    apiRequestMock.mockResolvedValue({
+      newVersionCreated: true,
+      newVersionSequence: 2,
+      previousVersionId: 'tmpl_doc_1',
+    });
+
+    const result = await boldsignService.updateTemplate({
       organizationId: 'org_1',
       templateDocumentId: 'tmpl_doc_1',
+      title: 'Updated waiver',
+      description: null,
+      content: 'Updated waiver content',
     });
 
-    expect(editUrl).toBe('https://app.boldsign.com/template/edit/tmpl_pdf');
+    expect(result).toEqual(expect.objectContaining({
+      newVersionCreated: true,
+      newVersionSequence: 2,
+    }));
     expect(apiRequestMock).toHaveBeenCalledWith(
-      '/api/organizations/org_1/templates/tmpl_doc_1/edit-url',
-      expect.objectContaining({
-        method: 'GET',
-      }),
+      '/api/organizations/org_1/templates/tmpl_doc_1',
+      {
+        method: 'PATCH',
+        body: {
+          title: 'Updated waiver',
+          description: null,
+          content: 'Updated waiver content',
+        },
+      },
     );
   });
 });

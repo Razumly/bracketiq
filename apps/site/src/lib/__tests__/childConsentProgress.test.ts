@@ -11,6 +11,9 @@ const prismaMock = {
   templateDocuments: {
     findMany: jest.fn(),
   },
+  documentRequirementSatisfactions: {
+    findMany: jest.fn(),
+  },
   signedDocuments: {
     findMany: jest.fn(),
   },
@@ -31,8 +34,11 @@ describe('syncChildRegistrationConsentStatus', () => {
       parentId: 'parent_1',
     });
     prismaMock.events.findUnique.mockResolvedValue({
+      organizationId: 'org_1',
       requiredTemplateIds: ['template_1'],
     });
+    prismaMock.documentRequirementSatisfactions.findMany.mockResolvedValue([]);
+    prismaMock.signedDocuments.findMany.mockResolvedValue([]);
     prismaMock.sensitiveUserData.findFirst.mockResolvedValue({
       email: 'child@example.com',
     });
@@ -46,18 +52,16 @@ describe('syncChildRegistrationConsentStatus', () => {
         signOnce: true,
       },
     ]);
-    prismaMock.signedDocuments.findMany.mockResolvedValue([
+    prismaMock.documentRequirementSatisfactions.findMany.mockResolvedValue([
       {
-        templateId: 'template_1',
-        status: 'SIGNED',
-        userId: 'parent_1',
-        signerRole: 'parent_guardian',
-      },
-      {
-        templateId: 'template_1',
-        status: 'SIGNED',
-        userId: 'child_1',
-        signerRole: 'child',
+        documentSubjectId: 'document-subject:org_1:child_1',
+        templateDocumentId: 'template_1',
+        scopeType: 'ORGANIZATION',
+        scopeId: 'org_1',
+        status: 'SATISFIED',
+        isComplete: true,
+        requiredSignerRoles: ['parent_guardian', 'child'],
+        completedSignerRoles: ['parent_guardian', 'child'],
       },
     ]);
 
@@ -66,11 +70,17 @@ describe('syncChildRegistrationConsentStatus', () => {
       childUserId: 'child_1',
     });
 
-    const where = prismaMock.signedDocuments.findMany.mock.calls[0][0]?.where ?? {};
-    expect(where).toEqual(expect.objectContaining({
-      templateId: { in: ['template_1'] },
+    expect(prismaMock.documentRequirementSatisfactions.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        documentSubjectId: 'document-subject:org_1:child_1',
+        invalidatedAt: null,
+        OR: [{
+          scopeType: 'ORGANIZATION',
+          scopeId: 'org_1',
+          templateDocumentId: 'template_1',
+        }],
+      }),
     }));
-    expect(where).not.toHaveProperty('eventId');
 
     expect(prismaMock.eventRegistrations.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 'registration_1' },
@@ -89,31 +99,30 @@ describe('syncChildRegistrationConsentStatus', () => {
         signOnce: false,
       },
     ]);
-    prismaMock.signedDocuments.findMany.mockResolvedValue([
-      {
-        templateId: 'template_1',
-        status: 'SIGNED',
-        userId: 'parent_1',
-        signerRole: 'parent_guardian',
-      },
-    ]);
+    prismaMock.documentRequirementSatisfactions.findMany.mockResolvedValue([]);
 
     await syncChildRegistrationConsentStatus({
       eventId: 'event_1',
       childUserId: 'child_1',
     });
 
-    const where = prismaMock.signedDocuments.findMany.mock.calls[0][0]?.where ?? {};
-    expect(where).toEqual(expect.objectContaining({
-      templateId: { in: ['template_1'] },
-      eventId: 'event_1',
+    expect(prismaMock.documentRequirementSatisfactions.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        documentSubjectId: 'document-subject:org_1:child_1',
+        invalidatedAt: null,
+        OR: [{
+          scopeType: 'EVENT_PARTICIPATION',
+          scopeId: 'event_1',
+          templateDocumentId: 'template_1',
+        }],
+      }),
     }));
 
     expect(prismaMock.eventRegistrations.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 'registration_1' },
       data: expect.objectContaining({
         status: 'STARTED',
-        consentStatus: 'parentSigned',
+        consentStatus: 'guardian_approval_required',
       }),
     }));
   });

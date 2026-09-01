@@ -104,7 +104,9 @@ When running in WSL, the dev wrapper also attempts to resolve Windows-installed 
 - `npm start` — run built app
 - `npm run start:tunnel` — run built app with ngrok and Stripe webhook forwarding
 - `npm run test` — Jest suite
-- `npm run lint` — Next.js lint
+- `npm run lint` — run the full site ESLint check
+- `npm run lint:changed` — enforce complexity limits on changed and untracked site files
+- `npm run lint:complexity -- <files>` — enforce complexity limits on explicit files
 
 - `npm run gmail:oauth:url` - print the Google consent URL for the Gmail API sender account
 - `npm run gmail:oauth:token -- --code "<code>"` - exchange a Google OAuth callback code for `GMAIL_OAUTH_REFRESH_TOKEN`

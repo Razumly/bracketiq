@@ -1,15 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { normalizeTeamInviteRole } from '@/lib/staff';
 import { verifyTeamInviteShareLink } from '@/server/teamInviteLinks';
 
 export const dynamic = 'force-dynamic';
 
-const inviteRole = (staffTypes: unknown): 'PLAYER' | 'MANAGER' | 'HEAD_COACH' | 'ASSISTANT_COACH' => {
+const inviteRole = (role: unknown, staffTypes: unknown): 'PLAYER' | 'MANAGER' | 'HEAD_COACH' | 'ASSISTANT_COACH' => {
+  const explicitRole = normalizeTeamInviteRole(role);
+  if (explicitRole === 'team_manager') return 'MANAGER';
+  if (explicitRole === 'team_head_coach') return 'HEAD_COACH';
+  if (explicitRole === 'team_assistant_coach') return 'ASSISTANT_COACH';
+  if (explicitRole === 'player') return 'PLAYER';
   if (!Array.isArray(staffTypes)) return 'PLAYER';
-  const role = staffTypes
+  const legacyRole = staffTypes
     .map((value) => String(value ?? '').trim().toUpperCase())
     .find((value) => ['MANAGER', 'HEAD_COACH', 'ASSISTANT_COACH'].includes(value));
-  return (role as 'MANAGER' | 'HEAD_COACH' | 'ASSISTANT_COACH' | undefined) ?? 'PLAYER';
+  return (legacyRole as 'MANAGER' | 'HEAD_COACH' | 'ASSISTANT_COACH' | undefined) ?? 'PLAYER';
 };
 
 const unavailable = () => NextResponse.json({ available: false }, { status: 404 });
@@ -40,7 +46,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       id: invite.id,
       firstName: invite.firstName,
       expiresAt: invite.linkExpiresAt,
-      role: inviteRole(invite.staffTypes),
+      isAssigned: invite.isAssigned,
+      role: inviteRole(invite.role, invite.staffTypes),
     },
     team,
   });

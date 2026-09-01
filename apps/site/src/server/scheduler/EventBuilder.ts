@@ -9,7 +9,10 @@ import {
   resolveScheduledMatchDurationMs,
 } from "./divisionPhaseRules";
 import { resolveMatchTimingPolicy } from "./matchTimingPolicy";
-import { topologicallySortMatchGraph } from "./matchGraph";
+import {
+  buildMatchSchedulingBatches,
+  validateMatchBatchBoundaries,
+} from "./matchSchedulingOrder";
 import {
   Division,
   League,
@@ -231,7 +234,7 @@ export class EventBuilder {
       return this.event;
     }
     const canonicalDivisions = new Map(
-      this.schedulingDivisions().map((division) => [division.id, division]),
+      this.placementDivisions().map((division) => [division.id, division]),
     );
     for (const match of matches) {
       const canonicalDivision = canonicalDivisions.get(match.division.id);
@@ -261,11 +264,26 @@ export class EventBuilder {
     );
     this.officialStaffingPlanner = new OfficialStaffingPlanner(this.event);
 
-    const orderedMatches = this.orderMatchesForPlacement(matches);
-    for (const match of orderedMatches) {
-      this.placeGraphMatch(match);
+    const batches = buildMatchSchedulingBatches(
+      this.event,
+      matches,
+      this.placementDivisions(),
+    );
+    const orderedMatches = batches.flatMap((batch) => batch.matches);
+    for (const batch of batches) {
+      for (const match of batch.matches) {
+        this.placeGraphMatch(match);
+      }
+      const maxEnd = batch.matches.reduce(
+        (latest, match) => (
+          match.end.getTime() > latest.getTime() ? match.end : latest
+        ),
+        batch.matches[0]?.end ?? this.event.start,
+      );
+      this.schedule.advanceTo(maxEnd);
     }
 
+    validateMatchBatchBoundaries(batches);
     if (!options.preserveMatchIds) {
       this.assignChronologicalMatchIds(orderedMatches);
     }
@@ -300,10 +318,6 @@ export class EventBuilder {
 
 
 
-  private orderMatchesForPlacement(matches: Match[]): Match[] {
-    return topologicallySortMatchGraph(matches);
-  }
-
   private placeGraphMatch(match: Match): void {
     const durationMs = resolveScheduledMatchDurationMs(
       this.event,
@@ -335,6 +349,7 @@ export class EventBuilder {
     }
     this.attachMatchToParticipants(match);
   }
+
 
 
   private leagueHasPlayoffs(participantCount: number): boolean {

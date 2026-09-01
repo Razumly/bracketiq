@@ -204,7 +204,7 @@ export const listOrganizationUsersScopeEvents = async (
       ? client.eventRegistrations.findMany({
         where: {
           eventId: { in: eventIds },
-          status: { in: ['STARTED', 'PENDING', 'ACTIVE', 'BLOCKED'] },
+          status: { in: ['STARTED', 'PENDING', 'ACTIVE', 'BLOCKED', 'CONSENTFAILED'] },
           slotId: null,
           occurrenceDate: null,
         },

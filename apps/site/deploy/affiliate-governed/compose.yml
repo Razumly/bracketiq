@@ -1,0 +1,375 @@
+name: ${AFFILIATE_GOVERNED_PROJECT_NAME:-bracketiq-affiliate-governed}
+
+x-agent-environment: &agent-environment
+  AFFILIATE_AGENT_GATEWAY_ADDRESS: ${AFFILIATE_AGENT_GATEWAY_ADDRESS:?Set AFFILIATE_AGENT_GATEWAY_ADDRESS}
+  AFFILIATE_AGENT_GATEWAY_PATH_PREFIX: ${AFFILIATE_AGENT_GATEWAY_PATH_PREFIX:-/v1/affiliate-agent}
+  AFFILIATE_AGENT_RUNNER_SOCKET: /workspaces/.runner.sock
+  AFFILIATE_AGENT_WORKSPACE_ROOT: /workspaces
+  AFFILIATE_AGENT_EXTERNAL_NETWORK: "false"
+  AFFILIATE_AGENT_ARTIFACT_ACCESS: "gateway-only"
+  # Keep one Codex child per runner. Shared runner users cannot be siblings.
+  AFFILIATE_AGENT_MAX_CONCURRENT_INVOCATIONS: "1"
+  HOME: /tmp/codex
+  CODEX_HOME: /tmp/codex
+x-agent-supervisor-environment: &agent-supervisor-environment
+  <<: *agent-environment
+  AFFILIATE_AGENT_WORKSPACE_SIGNING_KEY: ${AFFILIATE_AGENT_WORKSPACE_SIGNING_KEY:?Set the workspace signing key}
+  AFFILIATE_AGENT_SUPERVISOR_HALT_CREDENTIAL: ${AFFILIATE_AGENT_SUPERVISOR_HALT_CREDENTIAL:?Set the supervisor halt credential}
+x-agent-restart-policy: &agent-restart-policy
+  # Keep the safe stopped-creation value until the reviewed startup gates pass.
+  # The private deployment.env may change this to unless-stopped only after
+  # separate authorization.
+  restart: "${AFFILIATE_AGENT_RESTART_POLICY:-no}"
+
+x-agent-workspace-volume: &agent-workspace-volume
+  type: volume
+  source: affiliate-governed-workspaces
+  target: /workspaces
+  volume:
+    nocopy: true
+x-agent-common: &agent-common
+  <<: *agent-restart-policy
+  image: ${AFFILIATE_AGENT_IMAGE:?Set AFFILIATE_AGENT_IMAGE}
+  working_dir: /workspace/apps/site
+  user: "${AFFILIATE_AGENT_UID:-1001}:${AFFILIATE_AGENT_GID:-1001}"
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=256m
+  init: true
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  cpus: 1.0
+  mem_limit: 2g
+  memswap_limit: 2g
+  pids_limit: 512
+  networks:
+    - gateway_internal
+  depends_on:
+    affiliate-gateway:
+      condition: service_healthy
+  volumes:
+    - *agent-workspace-volume
+    # This is the bounded tmpfs-backed named volume declared below. Per-role
+    # workspaces remain isolated by the runner and supervisor ownership checks.
+x-agent-worker-common: &agent-worker-common
+  <<: *agent-common
+  depends_on:
+    affiliate-gateway:
+      condition: service_healthy
+    affiliate-agent-runner:
+      condition: service_healthy
+
+
+services:
+  affiliate-gateway:
+    <<: *agent-restart-policy
+    image: ${AFFILIATE_GATEWAY_IMAGE:?Set AFFILIATE_GATEWAY_IMAGE}
+    working_dir: /workspace/apps/site
+    user: "${AFFILIATE_GATEWAY_UID:?Set AFFILIATE_GATEWAY_UID}:${AFFILIATE_GATEWAY_GID:?Set AFFILIATE_GATEWAY_GID}"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cpus: 1.0
+    mem_limit: 2g
+    memswap_limit: 2g
+    pids_limit: 512
+    expose:
+      - "8080"
+    networks:
+      gateway_internal:
+        aliases:
+          - affiliate-gateway.internal
+      production_backend:
+      gateway_egress:
+    environment:
+      AFFILIATE_GATEWAY_PORT: "8080"
+      AFFILIATE_GATEWAY_DATABASE_URL: ${AFFILIATE_GATEWAY_DATABASE_URL:?Set the gateway database URL}
+      AFFILIATE_AGENT_GATEWAY_PATH_PREFIX: ${AFFILIATE_AGENT_GATEWAY_PATH_PREFIX:-/v1/affiliate-agent}
+      AFFILIATE_GATEWAY_OPERATOR_TOKEN: ${AFFILIATE_GATEWAY_OPERATOR_TOKEN:?Set the gateway operator token}
+      AFFILIATE_GATEWAY_REPLENISHMENT_TOKEN: ${AFFILIATE_GATEWAY_REPLENISHMENT_TOKEN:?Set the gateway replenishment token}
+      AFFILIATE_AGENT_SUPERVISOR_HALT_CREDENTIAL: ${AFFILIATE_AGENT_SUPERVISOR_HALT_CREDENTIAL:?Set the supervisor halt credential}
+      # Keep the reviewed alert URL in private deployment.env; never commit it.
+      AFFILIATE_OPERATIONAL_ALERT_WEBHOOK_URL: ${AFFILIATE_OPERATIONAL_ALERT_WEBHOOK_URL:?Set the operational alert webhook URL}
+      AFFILIATE_SUPPLY_ROLLOUT_COHORT: ${AFFILIATE_SUPPLY_ROLLOUT_COHORT:?Set the Supply Contract rollout cohort}
+      AFFILIATE_AGENT_DEPLOYMENT_CONTRACT_JSON: ${AFFILIATE_AGENT_DEPLOYMENT_CONTRACT_JSON:?Set the reviewed deployment contract JSON}
+      AFFILIATE_AGENT_TOKEN_SIGNING_KEY: ${AFFILIATE_AGENT_TOKEN_SIGNING_KEY:?Set the token signing key}
+      AFFILIATE_AGENT_PREFLIGHT_REPORT_JSON: ${AFFILIATE_AGENT_PREFLIGHT_REPORT_JSON:-REPLACE_WITH_GATEWAY_PREFLIGHT_REPORT_JSON}
+      AFFILIATE_AGENT_TOKEN_KEY_VERSION: ${AFFILIATE_AGENT_TOKEN_KEY_VERSION:?Set the token key version}
+      AFFILIATE_AGENT_WORKSPACE_SIGNING_KEY: ${AFFILIATE_AGENT_WORKSPACE_SIGNING_KEY:?Set the workspace signing key}
+      AFFILIATE_MAPPING_PRODUCER_1_CREDENTIAL: ${AFFILIATE_MAPPING_PRODUCER_1_CREDENTIAL:?Set mapping producer 1 credential}
+      AFFILIATE_MAPPING_PRODUCER_2_CREDENTIAL: ${AFFILIATE_MAPPING_PRODUCER_2_CREDENTIAL:?Set mapping producer 2 credential}
+      AFFILIATE_SUPPLY_REVIEWER_1_CREDENTIAL: ${AFFILIATE_SUPPLY_REVIEWER_1_CREDENTIAL:?Set supply reviewer 1 credential}
+      AFFILIATE_SUPPLY_REVIEWER_2_CREDENTIAL: ${AFFILIATE_SUPPLY_REVIEWER_2_CREDENTIAL:?Set supply reviewer 2 credential}
+      AFFILIATE_COVERAGE_PLANNER_CREDENTIAL: ${AFFILIATE_COVERAGE_PLANNER_CREDENTIAL:?Set coverage planner credential}
+      AFFILIATE_HUMAN_DIRECTED_EXECUTOR_CREDENTIAL: ${AFFILIATE_HUMAN_DIRECTED_EXECUTOR_CREDENTIAL:?Set human-directed executor credential}
+      STORAGE_PROVIDER: ${AFFILIATE_GATEWAY_STORAGE_PROVIDER:-spaces}
+      DO_SPACES_ENDPOINT: ${AFFILIATE_GATEWAY_SPACES_ENDPOINT:?Set the gateway object storage endpoint}
+      DO_SPACES_REGION: ${AFFILIATE_GATEWAY_SPACES_REGION:?Set the gateway object storage region}
+      DO_SPACES_BUCKET: ${AFFILIATE_GATEWAY_SPACES_BUCKET:?Set the gateway object storage bucket}
+      DO_SPACES_KEY: ${AFFILIATE_GATEWAY_SPACES_KEY:?Set the gateway object storage key}
+      DO_SPACES_SECRET: ${AFFILIATE_GATEWAY_SPACES_SECRET:?Set the gateway object storage secret}
+      SCRAPINGDOG_API_KEY: ${AFFILIATE_SCRAPINGDOG_API_KEY:?Set the ScrapingDog provider key}
+      FIRECRAWL_API_KEY: ${AFFILIATE_FIRECRAWL_API_KEY:?Set the Firecrawl provider key}
+    healthcheck:
+      test: ["CMD", "node", "-e", "let prefix = (process.env.AFFILIATE_AGENT_GATEWAY_PATH_PREFIX || '/v1/affiliate-agent').trim(); while (prefix.length > 1 && prefix.endsWith('/')) prefix = prefix.slice(0, -1); const healthPath = prefix === '/' ? '/healthz' : prefix + '/healthz'; fetch('http://127.0.0.1:8080' + healthPath).then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+  affiliate-replenishment-controller:
+    <<: *agent-restart-policy
+    image: ${AFFILIATE_GATEWAY_IMAGE:?Set AFFILIATE_GATEWAY_IMAGE}
+    working_dir: /workspace/apps/site
+    user: "${AFFILIATE_GATEWAY_UID:?Set AFFILIATE_GATEWAY_UID}:${AFFILIATE_GATEWAY_GID:?Set AFFILIATE_GATEWAY_GID}"
+    profiles: ["coverage-planner"]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cpus: 1.0
+    mem_limit: 2g
+    memswap_limit: 2g
+    pids_limit: 512
+    depends_on:
+      affiliate-gateway:
+        condition: service_healthy
+      affiliate-agent-downstream-ready:
+        condition: service_completed_successfully
+      coverage-planner:
+        condition: service_started
+    networks:
+      - gateway_internal
+    environment:
+      AFFILIATE_AGENT_GATEWAY_ADDRESS: ${AFFILIATE_AGENT_GATEWAY_ADDRESS:?Set AFFILIATE_AGENT_GATEWAY_ADDRESS}
+      AFFILIATE_AGENT_GATEWAY_PATH_PREFIX: ${AFFILIATE_AGENT_GATEWAY_PATH_PREFIX:-/v1/affiliate-agent}
+      AFFILIATE_GATEWAY_REPLENISHMENT_TOKEN: ${AFFILIATE_GATEWAY_REPLENISHMENT_TOKEN:?Set the gateway replenishment token}
+      AFFILIATE_REPLENISHMENT_INTERVAL_SECONDS: "900"
+      HOME: /tmp/gateway
+      NODE_ENV: production
+    command:
+      - /bin/sh
+      - -eu
+      - -c
+      - |
+        test "$$AFFILIATE_REPLENISHMENT_INTERVAL_SECONDS" = "900"
+        INTERVAL_SECONDS=900
+        trap 'exit 0' TERM INT
+        while :; do
+          npm run affiliate:replenishment:controller
+          sleep "$$INTERVAL_SECONDS"
+        done
+    stop_grace_period: 30m
+  affiliate-agent-runner:
+    <<: *agent-common
+    user: "0:0"
+    group_add:
+      - "${AFFILIATE_AGENT_GID:?Set reviewed agent group}"
+    cgroup: private
+    ipc: none
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=256m,uid=0,gid=0,mode=0755
+      - /dev/shm:rw,noexec,nosuid,nodev,size=64m,uid=0,gid=0,mode=0755
+    security_opt:
+      - no-new-privileges:true
+      - writable-cgroups=true
+    cap_add:
+      - SETUID
+      - SETGID
+      - CHOWN
+      - KILL
+      - DAC_OVERRIDE
+      - FOWNER
+    environment:
+      <<: *agent-environment
+      AFFILIATE_AGENT_UID: ${AFFILIATE_AGENT_UID:?Set the supervisor workspace UID}
+      AFFILIATE_AGENT_RUNNER_CHILD_UID: ${AFFILIATE_AGENT_RUNNER_CHILD_UID:?Set the runner child UID}
+      AFFILIATE_AGENT_RUNNER_CHILD_GID: ${AFFILIATE_AGENT_RUNNER_CHILD_GID:?Set the runner child GID}
+      AFFILIATE_AGENT_RUNNER_PROTOCOL_PUBLIC_KEYS: ${AFFILIATE_AGENT_RUNNER_PROTOCOL_PUBLIC_KEYS:?Set the runner worker public-key map}
+      AFFILIATE_AGENT_MODEL_ADDRESS: ${AFFILIATE_AGENT_MODEL_ADDRESS:?Set AFFILIATE_AGENT_MODEL_ADDRESS}
+      AFFILIATE_AGENT_MODEL_CREDENTIAL: ${AFFILIATE_AGENT_MODEL_CREDENTIAL:?Set the model credential}
+      AFFILIATE_AGENT_RUNNER_CGROUP_RELATIVE_PATH: ${AFFILIATE_AGENT_RUNNER_CGROUP_RELATIVE_PATH:?Set the runner relative cgroup path}
+    command: ["/usr/local/bin/affiliate-agent-runner"]
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          const net = require('node:net'); const socket =
+          net.createConnection('/workspaces/.runner.sock'); let data = ''; let
+          settled = false; const finish = (code) => { if (settled) return;
+          settled = true; clearTimeout(timer); socket.destroy(); process.exit(code);
+          }; const timer = setTimeout(() => finish(1), 1500); socket.setEncoding('utf8');
+          socket.on('error', () => finish(1)); socket.on('close', () => {
+          if (!data.includes('"kind":"ERROR"')) finish(1); }); socket.on('data',
+          (chunk) => { data += chunk; if (data.includes('"kind":"ERROR"')) finish(0); });
+          socket.on('connect', () => socket.write('{}\n'));
+      interval: 5s
+      timeout: 2s
+      retries: 12
+    stop_grace_period: 30m
+  mapping-producer-1:
+    <<: *agent-worker-common
+    environment:
+      <<: *agent-supervisor-environment
+      AFFILIATE_AGENT_ROLE: MAPPING_PRODUCER
+      AFFILIATE_AGENT_WORKER_ID: mapping-producer-1
+      AFFILIATE_AGENT_RUNNER_PROTOCOL_PRIVATE_KEY: ${AFFILIATE_MAPPING_PRODUCER_1_RUNNER_PROTOCOL_PRIVATE_KEY:?Set mapping producer 1 runner protocol private key}
+      AFFILIATE_AGENT_ROLE_CREDENTIAL: ${AFFILIATE_MAPPING_PRODUCER_1_CREDENTIAL:?Set mapping producer 1 credential}
+    command: ["/usr/local/bin/affiliate-agent-supervisor", "--role=MAPPING_PRODUCER", "--worker-id=mapping-producer-1"]
+    stop_grace_period: 30m
+
+  mapping-producer-2:
+    <<: *agent-worker-common
+    environment:
+      <<: *agent-supervisor-environment
+      AFFILIATE_AGENT_ROLE: MAPPING_PRODUCER
+      AFFILIATE_AGENT_WORKER_ID: mapping-producer-2
+      AFFILIATE_AGENT_RUNNER_PROTOCOL_PRIVATE_KEY: ${AFFILIATE_MAPPING_PRODUCER_2_RUNNER_PROTOCOL_PRIVATE_KEY:?Set mapping producer 2 runner protocol private key}
+      AFFILIATE_AGENT_ROLE_CREDENTIAL: ${AFFILIATE_MAPPING_PRODUCER_2_CREDENTIAL:?Set mapping producer 2 credential}
+    command: ["/usr/local/bin/affiliate-agent-supervisor", "--role=MAPPING_PRODUCER", "--worker-id=mapping-producer-2"]
+    stop_grace_period: 30m
+  supply-reviewer-1:
+    <<: *agent-worker-common
+    environment:
+      <<: *agent-supervisor-environment
+      AFFILIATE_AGENT_ROLE: SUPPLY_REVIEWER
+      AFFILIATE_AGENT_WORKER_ID: supply-reviewer-1
+      AFFILIATE_AGENT_ROLE_CREDENTIAL: ${AFFILIATE_SUPPLY_REVIEWER_1_CREDENTIAL:?Set supply reviewer 1 credential}
+      AFFILIATE_AGENT_RUNNER_PROTOCOL_PRIVATE_KEY: ${AFFILIATE_SUPPLY_REVIEWER_1_RUNNER_PROTOCOL_PRIVATE_KEY:?Set supply reviewer 1 runner protocol private key}
+    command: ["/usr/local/bin/affiliate-agent-supervisor", "--role=SUPPLY_REVIEWER", "--worker-id=supply-reviewer-1"]
+    stop_grace_period: 30m
+  supply-reviewer-2:
+    <<: *agent-worker-common
+    environment:
+      <<: *agent-supervisor-environment
+      AFFILIATE_AGENT_ROLE: SUPPLY_REVIEWER
+      AFFILIATE_AGENT_WORKER_ID: supply-reviewer-2
+      AFFILIATE_AGENT_ROLE_CREDENTIAL: ${AFFILIATE_SUPPLY_REVIEWER_2_CREDENTIAL:?Set supply reviewer 2 credential}
+      AFFILIATE_AGENT_RUNNER_PROTOCOL_PRIVATE_KEY: ${AFFILIATE_SUPPLY_REVIEWER_2_RUNNER_PROTOCOL_PRIVATE_KEY:?Set supply reviewer 2 runner protocol private key}
+    command: ["/usr/local/bin/affiliate-agent-supervisor", "--role=SUPPLY_REVIEWER", "--worker-id=supply-reviewer-2"]
+    stop_grace_period: 30m
+  affiliate-agent-downstream-ready:
+    <<: *agent-common
+    profiles: ["coverage-planner"]
+    # The readiness helper is a one-shot gate and must not restart after exit.
+    restart: "no"
+    environment:
+      <<: *agent-environment
+    depends_on:
+      affiliate-gateway:
+        condition: service_healthy
+      affiliate-agent-runner:
+        condition: service_healthy
+      mapping-producer-1:
+        condition: service_started
+      mapping-producer-2:
+        condition: service_started
+      supply-reviewer-1:
+        condition: service_started
+      supply-reviewer-2:
+        condition: service_started
+    command:
+      - node
+      - -e
+      - |
+          (async () => {
+            const address = process.env.AFFILIATE_AGENT_GATEWAY_ADDRESS;
+            let prefix = process.env.AFFILIATE_AGENT_GATEWAY_PATH_PREFIX || "/v1/affiliate-agent";
+            while (prefix.length > 1 && prefix.endsWith("/")) prefix = prefix.slice(0, -1);
+            const workers = [
+              ["MAPPING_PRODUCER", "mapping-producer-1"],
+              ["MAPPING_PRODUCER", "mapping-producer-2"],
+              ["SUPPLY_REVIEWER", "supply-reviewer-1"],
+              ["SUPPLY_REVIEWER", "supply-reviewer-2"],
+            ];
+            const deadline = Date.now() + 900_000;
+            const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+            while (Date.now() < deadline) {
+              const remainingMs = deadline - Date.now();
+              if (remainingMs <= 0) break;
+              let isReady = true;
+              for (const [role, workerId] of workers) {
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), remainingMs);
+                try {
+                  const readinessUrl = address + prefix + "/readiness?role="
+                    + encodeURIComponent(role) + "&workerId=" + encodeURIComponent(workerId);
+                  const response = await fetch(readinessUrl, {
+                    signal: controller.signal,
+                  });
+                  const body = await response.json();
+                  if (
+                    !response.ok
+                    || body.status !== "ready"
+                    || body.ready !== true
+                    || Object.keys(body).sort().join(",") !== "ready,status"
+                  ) {
+                    isReady = false;
+                    break;
+                  }
+                } catch {
+                  isReady = false;
+                  break;
+                } finally {
+                  clearTimeout(timeout);
+                }
+              }
+              if (isReady) process.exit(0);
+              const sleepMs = Math.min(5_000, deadline - Date.now());
+              if (sleepMs > 0) await sleep(sleepMs);
+            }
+            console.error("Timed out waiting for exact downstream worker readiness.");
+            process.exit(1);
+          })();
+
+  coverage-planner:
+    <<: *agent-worker-common
+    profiles: ["coverage-planner"]
+    depends_on:
+      affiliate-gateway:
+        condition: service_healthy
+      affiliate-agent-runner:
+        condition: service_healthy
+      affiliate-agent-downstream-ready:
+        condition: service_completed_successfully
+    environment:
+      <<: *agent-supervisor-environment
+      AFFILIATE_AGENT_ROLE: COVERAGE_PLANNER
+      AFFILIATE_AGENT_WORKER_ID: coverage-planner
+      AFFILIATE_AGENT_ROLE_CREDENTIAL: ${AFFILIATE_COVERAGE_PLANNER_CREDENTIAL:?Set coverage planner credential}
+      AFFILIATE_AGENT_RUNNER_PROTOCOL_PRIVATE_KEY: ${AFFILIATE_COVERAGE_PLANNER_RUNNER_PROTOCOL_PRIVATE_KEY:?Set coverage planner runner protocol private key}
+    command: ["/usr/local/bin/affiliate-agent-supervisor", "--role=COVERAGE_PLANNER", "--worker-id=coverage-planner"]
+    stop_grace_period: 30m
+
+
+volumes:
+  affiliate-governed-workspaces:
+    name: ${AFFILIATE_GOVERNED_WORKSPACE_VOLUME:?Set the reviewed workspace volume name}
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "rw,noexec,nosuid,nodev,size=2g,uid=1001,gid=1001,mode=0710"
+
+networks:
+  gateway_internal:
+    name: ${AFFILIATE_AGENT_GATEWAY_NETWORK:-bracketiq_affiliate_gateway_internal}
+    internal: true
+  gateway_egress:
+    name: ${AFFILIATE_AGENT_GATEWAY_EGRESS_NETWORK:-bracketiq_affiliate_gateway_egress}
+# The production Compose project creates this private internal network for
+# postgres; this project joins it without creating a second database service.
+  production_backend:
+    external: true
+    name: ${AFFILIATE_AGENT_PRODUCTION_BACKEND_NETWORK:-bracketiq-production_backend}

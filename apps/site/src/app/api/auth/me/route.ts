@@ -79,6 +79,7 @@ export async function GET(req: NextRequest) {
     userId: user.id,
     isAdmin: decoded.isAdmin,
     sessionVersion: user.sessionVersion ?? 0,
+    issuedAtSeconds: decoded.issuedAtSeconds,
   });
   const res = NextResponse.json(
     {

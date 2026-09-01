@@ -26,7 +26,8 @@ Every successful checkpoint must contain:
 7. Two review scrapes proving stable, duplicate-safe accepted output and stable
    candidate-level rejection summaries.
 8. A source registry note and a source-scoped commit.
-9. A compact result JSON suitable for `affiliate:mapping:complete`.
+9. A compact result JSON submitted through the governed mapping completion
+   boundary.
 
 For a source-only package, validation means focused source tests, targeted
 ESLint for authored TypeScript, two successful disposable review scrapes,

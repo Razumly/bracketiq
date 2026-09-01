@@ -4,7 +4,13 @@ jest.mock('@/lib/prisma', () => ({
   prisma: {},
 }));
 
-import { assertNoEventFieldSchedulingConflicts, loadEventWithRelations, saveEventSchedule } from '@/server/repositories/events';
+import {
+  assertNoEventFieldSchedulingConflicts,
+  loadEventWithRelations,
+  saveEventSchedule,
+} from '@/server/repositories/events';
+import { ensureSplitPlayoffTimeSlotCoverage } from '@/server/scheduler/timeSlotCoverage';
+import { getTimeSlotExplicitDivisionIds } from '@/server/scheduler/types';
 
 type LoadClient = {
   events: {
@@ -322,6 +328,117 @@ describe('loadEventWithRelations field conflict hydration', () => {
       'entry_b__phase__pool',
     ]);
   });
+
+  it('keeps hydrated regular scope narrow when an explicit Playoff slot exists', async () => {
+    const client = createClient({
+      eventType: 'LEAGUE',
+      includePlayoffs: true,
+      splitLeaguePlayoffDivisions: true,
+      divisions: ['entry_a'],
+      timeSlotIds: ['slot_regular', 'slot_playoff'],
+    });
+    client.divisions.findMany.mockResolvedValue([
+      {
+        id: 'entry_a',
+        key: 'entry_a',
+        name: 'Entry A',
+        kind: 'LEAGUE',
+        role: 'ENTRY',
+        fieldIds: ['field_1'],
+        teamIds: [],
+      },
+      {
+        id: 'entry_a__phase__league',
+        key: 'entry_a__phase__league',
+        name: 'Entry A League',
+        kind: 'LEAGUE',
+        role: 'PHASE',
+        phase: 'LEAGUE',
+        sourceDivisionId: 'entry_a',
+        fieldIds: ['field_1'],
+        playoffPlacementDivisionIds: ['bracket_open'],
+        teamIds: [],
+      },
+      {
+        id: 'bracket_open',
+        key: 'bracket_open',
+        name: 'Open Bracket',
+        kind: 'PLAYOFF',
+        role: 'PHASE',
+        phase: 'PLAYOFF',
+        sourceDivisionId: 'entry_a',
+        fieldIds: [],
+        teamIds: [],
+      },
+    ]);
+    client.eventDivisionPhaseSources = {
+      findMany: jest.fn().mockResolvedValue([
+        { phaseDivisionId: 'entry_a__phase__league', entryDivisionId: 'entry_a' },
+        { phaseDivisionId: 'bracket_open', entryDivisionId: 'entry_a' },
+      ]),
+    };
+    client.fields.findMany.mockResolvedValue([
+      {
+        id: 'field_1',
+        organizationId: null,
+        divisions: ['entry_a'],
+        name: 'Court A',
+        createdAt: null,
+        updatedAt: null,
+      },
+    ]);
+    client.timeSlots.findMany.mockResolvedValue([
+      {
+        id: 'slot_regular',
+        dayOfWeek: 5,
+        daysOfWeek: [5],
+        startTimeMinutes: 9 * 60,
+        endTimeMinutes: 17 * 60,
+        startDate: new Date('2026-08-29T09:00:00.000Z'),
+        endDate: new Date('2026-08-29T17:00:00.000Z'),
+        repeating: true,
+        scheduledFieldId: 'field_1',
+        scheduledFieldIds: ['field_1'],
+        divisions: ['entry_a'],
+        timeZone: 'UTC',
+      },
+      {
+        id: 'slot_playoff',
+        dayOfWeek: 6,
+        daysOfWeek: [6],
+        startTimeMinutes: 9 * 60,
+        endTimeMinutes: 17 * 60,
+        startDate: new Date('2026-08-30T09:00:00.000Z'),
+        endDate: new Date('2026-08-30T17:00:00.000Z'),
+        repeating: true,
+        scheduledFieldId: 'field_1',
+        scheduledFieldIds: ['field_1'],
+        divisions: ['bracket_open'],
+        timeZone: 'UTC',
+      },
+    ]);
+
+    const loaded = await loadEventWithRelations(
+      'event_sched',
+      client as unknown as Parameters<typeof loadEventWithRelations>[1],
+    );
+    const regularSlot = loaded.timeSlots.find((slot) => slot.id === 'slot_regular');
+    const playoffSlot = loaded.timeSlots.find((slot) => slot.id === 'slot_playoff');
+    expect(getTimeSlotExplicitDivisionIds(regularSlot)).toEqual(['entry_a']);
+    expect(getTimeSlotExplicitDivisionIds(playoffSlot)).toEqual(['bracket_open']);
+    expect(regularSlot?.divisions.map((division) => division.id)).toContain('bracket_open');
+    expect(loaded.fields.field_1.divisions.map((division) => division.id)).toContain('bracket_open');
+
+    ensureSplitPlayoffTimeSlotCoverage(loaded);
+
+    expect(regularSlot?.divisions.map((division) => division.id)).not.toContain('bracket_open');
+    expect(regularSlot?.divisions.map((division) => division.id)).toEqual(['entry_a__phase__league']);
+    expect(loaded.fields.field_1.divisions.map((division) => division.id)).toEqual(['entry_a__phase__league']);
+    expect(playoffSlot?.divisions.map((division) => division.id)).toContain('bracket_open');
+    expect(playoffSlot?.divisions.map((division) => division.id)).not.toContain('entry_a__phase__league');
+    expect(loaded.fields.field_1.divisions.map((division) => division.id)).not.toContain('bracket_open');
+  });
+
 
   it('hydrates field blocking windows from external regular events and matches', async () => {
     const client = createClient();

@@ -5,6 +5,7 @@ import { acceptTeamInviteWithGuardianRules } from '@/server/teams/teamGuardianIn
 import {
   loadCanonicalTeamById,
   normalizeIdList,
+  replaceSingletonTeamStaffAssignment,
   syncCanonicalTeamRoster,
 } from '@/server/teams/teamMembership';
 import { verifyTeamInviteShareLink } from '@/server/teamInviteLinks';
@@ -20,6 +21,28 @@ const inviteStaffRoles = (value: unknown): TeamStaffRole[] => {
     .filter((entry): entry is TeamStaffRole => (
       entry === 'MANAGER' || entry === 'HEAD_COACH' || entry === 'ASSISTANT_COACH'
     ))));
+};
+
+const inviteStaffRoleFromRole = (value: unknown): TeamStaffRole | 'PLAYER' | null => {
+  const role = String(value ?? '').trim().toUpperCase();
+  switch (role) {
+    case 'MANAGER':
+    case 'TEAM_MANAGER':
+      return 'MANAGER';
+    case 'HEAD_COACH':
+    case 'TEAM_HEAD_COACH':
+    case 'HEADCOACH':
+      return 'HEAD_COACH';
+    case 'ASSISTANT_COACH':
+    case 'TEAM_ASSISTANT_COACH':
+    case 'ASSISTANTCOACH':
+      return 'ASSISTANT_COACH';
+    case 'PLAYER':
+    case 'TEAM_PLAYER':
+      return 'PLAYER';
+    default:
+      return null;
+  }
 };
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -45,7 +68,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!invite.userId) {
     try {
       invite = await prisma.$transaction(async (tx) => {
-        const staffRoles = inviteStaffRoles(invite!.staffTypes);
+        const explicitStaffRole = inviteStaffRoleFromRole(invite!.role);
+        const staffRoles = explicitStaffRole === 'PLAYER'
+          ? []
+          : explicitStaffRole
+            ? [explicitStaffRole]
+            : inviteStaffRoles(invite!.staffTypes);
         const claimed = await tx.invites.updateMany({
           where: { id: invite!.id, userId: null, status: { in: ['PENDING', 'FAILED'] } },
           data: { userId: session.userId, claimedBy: session.userId, status: 'PENDING', updatedAt: now },
@@ -54,6 +82,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
         const team = await loadCanonicalTeamById(invite!.teamId!, tx);
         if (!team) throw new Error('Team not found');
+        for (const role of staffRoles) {
+          if (role === 'MANAGER' || role === 'HEAD_COACH') {
+            await replaceSingletonTeamStaffAssignment({
+              tx,
+              teamId: invite!.teamId!,
+              role,
+              replacementInviteId: invite!.id,
+              replacementUserId: session.userId,
+              now,
+            });
+          }
+        }
         if (staffRoles.length > 0) {
           await Promise.all(staffRoles.map((role) => tx.teamStaffAssignments.upsert({
             where: {

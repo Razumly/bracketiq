@@ -3,10 +3,20 @@
 import { NextRequest } from 'next/server';
 
 const prismaMock = {
+  $transaction: jest.fn(),
+  documentSubjects: {
+    upsert: jest.fn(),
+  },
   events: {
     findUnique: jest.fn(),
   },
   templateDocuments: {
+    findMany: jest.fn(),
+  },
+  templateProviderQuarantines: {
+    findMany: jest.fn(),
+  },
+  documentRequirementSatisfactions: {
     findMany: jest.fn(),
   },
   signedDocuments: {
@@ -76,14 +86,19 @@ const jsonPost = (url: string, body: unknown) =>
 describe('POST /api/events/[eventId]/sign', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    prismaMock.$transaction.mockImplementation(async (callback: (tx: typeof prismaMock) => Promise<unknown>) => callback(prismaMock));
+    prismaMock.documentSubjects.upsert.mockResolvedValue({});
     delete process.env.BOLDSIGN_DEV_REDIRECT_BASE_URL;
     requireSessionMock.mockResolvedValue({ userId: 'user_1', isAdmin: false });
     prismaMock.events.findUnique.mockResolvedValue({
       id: 'event_1',
+      organizationId: 'org_1',
       requiredTemplateIds: ['tmpl_1'],
       name: 'Weekend Open',
     });
     prismaMock.signedDocuments.findMany.mockResolvedValue([]);
+    prismaMock.documentRequirementSatisfactions.findMany.mockResolvedValue([]);
+    prismaMock.templateProviderQuarantines.findMany.mockResolvedValue([]);
     prismaMock.signedDocuments.create.mockResolvedValue({
       id: 'signed_doc_1',
       signedDocumentId: 'doc_1',
@@ -135,6 +150,72 @@ describe('POST /api/events/[eventId]/sign', () => {
         content: 'I agree to the waiver.',
       }),
     ]);
+  });
+  it('skips a template with complete Document Requirement Satisfaction', async () => {
+    prismaMock.templateDocuments.findMany.mockResolvedValue([
+      {
+        id: 'tmpl_1',
+        type: 'TEXT',
+        title: 'Text Waiver',
+        content: 'I agree to the waiver.',
+        signOnce: false,
+      },
+    ]);
+    prismaMock.documentRequirementSatisfactions.findMany.mockResolvedValue([
+      { templateDocumentId: 'tmpl_1' },
+    ]);
+
+    const res = await POST(
+      jsonPost('http://localhost/api/events/event_1/sign', {
+        userId: 'user_1',
+      }),
+      { params: Promise.resolve({ eventId: 'event_1' }) },
+    );
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).signLinks).toEqual([]);
+    expect(prismaMock.signedDocuments.create).not.toHaveBeenCalled();
+    expect(createDocumentSendOperationMock).not.toHaveBeenCalled();
+  });
+
+  it('does not treat a signed document row as Document Requirement Satisfaction', async () => {
+    prismaMock.templateDocuments.findMany.mockResolvedValue([
+      {
+        id: 'tmpl_1',
+        type: 'TEXT',
+        title: 'Text Waiver',
+        content: 'I agree to the waiver.',
+        signOnce: false,
+      },
+    ]);
+    prismaMock.signedDocuments.findMany.mockResolvedValue([
+      {
+        id: 'signed_row_1',
+        signedDocumentId: 'completed_doc_1',
+        status: 'SIGNED',
+      },
+    ]);
+
+    const res = await POST(
+      jsonPost('http://localhost/api/events/event_1/sign', {
+        userId: 'user_1',
+      }),
+      { params: Promise.resolve({ eventId: 'event_1' }) },
+    );
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).signLinks).toEqual([
+      expect.objectContaining({ templateId: 'tmpl_1', type: 'TEXT' }),
+    ]);
+    expect(prismaMock.signedDocuments.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'UNSIGNED',
+          templateId: 'tmpl_1',
+        }),
+      }),
+    );
+    expect(prismaMock.signedDocuments.update).not.toHaveBeenCalled();
   });
 
   it('returns embedded pdf sign step for PDF templates', async () => {
@@ -188,6 +269,40 @@ describe('POST /api/events/[eventId]/sign', () => {
         redirectUrl: 'https://mvp-dev.ngrok-free.app/discover',
       }),
     );
+  });
+  it('rejects a PDF Version whose provider is quarantined', async () => {
+    prismaMock.templateDocuments.findMany.mockResolvedValue([
+      {
+        id: 'tmpl_1',
+        templateId: 'bold_tmpl_1',
+        type: 'PDF',
+        title: 'PDF Waiver',
+        description: 'Please sign this waiver.',
+        signOnce: false,
+        providerQuarantinedAt: null,
+        providerQuarantineReason: null,
+        roleIndex: 1,
+        roleIndexes: [1],
+        signerRoles: ['Participant'],
+      },
+    ]);
+    prismaMock.templateProviderQuarantines.findMany.mockResolvedValue([
+      { providerTemplateId: 'bold_tmpl_1' },
+    ]);
+    isBoldSignConfiguredMock.mockReturnValue(true);
+
+    const res = await POST(
+      jsonPost('http://localhost/api/events/event_1/sign', {
+        userId: 'user_1',
+      }),
+      { params: Promise.resolve({ eventId: 'event_1' }) },
+    );
+    const data = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(data.error).toContain('quarantined provider');
+    expect(sendDocumentFromTemplateMock).not.toHaveBeenCalled();
+    expect(getEmbeddedSignLinkMock).not.toHaveBeenCalled();
   });
 
   it('does not force a redirect URL when the client did not request one', async () => {
@@ -257,6 +372,7 @@ describe('POST /api/events/[eventId]/sign', () => {
     ]);
     prismaMock.events.findUnique.mockResolvedValue({
       id: 'event_1',
+      organizationId: 'org_1',
       requiredTemplateIds: ['tmpl_participant', 'tmpl_parent'],
       name: 'Weekend Open',
     });
@@ -299,6 +415,7 @@ describe('POST /api/events/[eventId]/sign', () => {
     ]);
     prismaMock.events.findUnique.mockResolvedValue({
       id: 'event_1',
+      organizationId: 'org_1',
       requiredTemplateIds: ['tmpl_parent', 'tmpl_child'],
       name: 'Weekend Open',
     });
@@ -322,7 +439,7 @@ describe('POST /api/events/[eventId]/sign', () => {
     }));
   });
 
-  it('returns no sign links when the parent has already signed for the same child context', async () => {
+  it('returns no sign links when Document Requirement Satisfaction exists for the same child context', async () => {
     prismaMock.templateDocuments.findMany.mockResolvedValue([
       {
         id: 'tmpl_parent',
@@ -339,16 +456,13 @@ describe('POST /api/events/[eventId]/sign', () => {
     ]);
     prismaMock.events.findUnique.mockResolvedValue({
       id: 'event_1',
+      organizationId: 'org_1',
       requiredTemplateIds: ['tmpl_parent'],
       name: 'Weekend Open',
     });
     prismaMock.parentChildLinks.findFirst.mockResolvedValue({ id: 'link_1' });
-    prismaMock.signedDocuments.findMany.mockResolvedValue([
-      {
-        id: 'signed_doc_parent_1',
-        signedDocumentId: 'doc_parent_1',
-        status: 'SIGNED',
-      },
+    prismaMock.documentRequirementSatisfactions.findMany.mockResolvedValue([
+      { templateDocumentId: 'tmpl_parent' },
     ]);
     isBoldSignConfiguredMock.mockReturnValue(true);
 
@@ -379,6 +493,7 @@ describe('POST /api/events/[eventId]/sign', () => {
     ]);
     prismaMock.events.findUnique.mockResolvedValue({
       id: 'event_1',
+      organizationId: 'org_1',
       requiredTemplateIds: ['tmpl_parent_child'],
       name: 'Weekend Open',
     });
@@ -526,7 +641,7 @@ describe('POST /api/events/[eventId]/sign', () => {
     );
   });
 
-  it('reuses the shared parent+child document when child signs after parent', async () => {
+  it('reuses the shared parent+child document while it is in flight', async () => {
     requireSessionMock.mockResolvedValue({ userId: 'child_1', isAdmin: false });
     prismaMock.templateDocuments.findMany.mockResolvedValue([
       {
@@ -544,6 +659,7 @@ describe('POST /api/events/[eventId]/sign', () => {
     ]);
     prismaMock.events.findUnique.mockResolvedValue({
       id: 'event_1',
+      organizationId: 'org_1',
       requiredTemplateIds: ['tmpl_parent_child_pdf'],
       name: 'Weekend Open',
     });
@@ -559,8 +675,12 @@ describe('POST /api/events/[eventId]/sign', () => {
       .mockResolvedValueOnce([
         {
           id: 'signed_doc_parent_1',
+          userId: 'user_1',
           signedDocumentId: 'doc_parent_child_1',
-          status: 'SIGNED',
+          status: 'UNSIGNED',
+          signerRole: 'parent_guardian',
+          signerEmail: 'parent@example.com',
+          roleIndex: 1,
         },
       ]);
     isBoldSignConfiguredMock.mockReturnValue(true);

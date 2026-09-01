@@ -2,6 +2,8 @@
 
 ## Testing standard
 
+Tautological tests are considered harmful.
+
 Tests must prove observable behavior that the compiler, linter, or build cannot prove.
 Prefer tests for state transitions, output transformations, authorization decisions, persistence, failure handling, race/ordering behavior, and complete user workflows.
 
@@ -13,6 +15,7 @@ Do not add tests that only:
 - assert an implementation detail without an observable outcome.
 
 A UI test should perform the relevant interaction and assert the resulting state, output, or side effect. A static page, metadata, or route-presence check belongs in browser or deployment smoke validation when it is an externally important contract. Do not preserve a unit test only to satisfy a coverage number.
+
 
 ## Failure and fallback standard
 

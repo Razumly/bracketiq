@@ -12,8 +12,21 @@ import { createDocumentSendOperation } from '@/lib/boldsignWebhookSync';
 import { BOLDSIGN_OPERATION_STATUSES, findLatestBoldSignOperation } from '@/lib/boldsignSyncOperations';
 import { getRequiredSignerTypeLabel, normalizeRequiredSignerType } from '@/lib/templateSignerTypes';
 import { resolveBoldSignRedirectUrl } from '@/lib/signRedirect';
-
+import {
+  documentSatisfactionScopeFor,
+  documentSubjectIdFor,
+  ensureDocumentSubject,
+  findSatisfiedDocumentTemplateIds,
+  signedDocumentEvidenceFields,
+  DOCUMENT_EVIDENCE_PROVENANCE,
+} from '@/server/documentEvidence';
+import {
+  DocumentTemplateVersionProviderQuarantinedError,
+  findQuarantinedDocumentTemplateVersionIds,
+} from '@/server/documents/documentTemplateVersions';
 export const dynamic = 'force-dynamic';
+
+
 
 const schema = z.object({
   userId: z.string().optional(),
@@ -193,8 +206,21 @@ export async function POST(req: NextRequest) {
 
   const templates = await prisma.templateDocuments.findMany({
     where: { id: { in: requestedTemplateIds } },
+    include: {
+      documentRequirement: {
+        select: { title: true, description: true },
+      },
+    },
   });
   const templateById = new Map(templates.map((template) => [template.id, template]));
+  const templateDisplayTitle = (template: {
+    title?: string | null;
+    documentRequirement?: { title?: string | null } | null;
+  }): string => pickString(template.documentRequirement?.title, template.title) ?? 'Required Document';
+  const templateDisplayDescription = (template: {
+    description?: string | null;
+    documentRequirement?: { description?: string | null } | null;
+  }): string | undefined => pickString(template.documentRequirement?.description, template.description);
   const missingTemplateIds = requestedTemplateIds.filter((templateId) => !templateById.has(templateId));
   if (missingTemplateIds.length > 0) {
     return NextResponse.json({
@@ -221,6 +247,89 @@ export async function POST(req: NextRequest) {
     userId: signerUserId,
     profile,
   });
+  for (const templateId of requestedTemplateIds) {
+    const template = templateById.get(templateId);
+    if (!template) {
+      continue;
+    }
+    const requiredSignerType = normalizeRequiredSignerType(template.requiredSignerType);
+    if (requiredSignerType !== 'PARTICIPANT') {
+      return NextResponse.json({
+        error: `Rental template "${templateDisplayTitle(template)}" requires ${getRequiredSignerTypeLabel(requiredSignerType)} signatures. Rental checkout templates must use Participant signer type.`,
+      }, { status: 400 });
+    }
+    if (!template.signOnce && !normalizedEventId) {
+      return NextResponse.json({
+        error: `eventId is required for event-scoped rental template "${templateDisplayTitle(template)}".`,
+      }, { status: 400 });
+    }
+  }
+  const documentSubjectId = documentSubjectIdFor(
+    normalizedOrganizationId ?? null,
+    signerUserId,
+  );
+  const satisfactionScopes = requestedTemplateIds.flatMap((templateId) => {
+    const template = templateById.get(templateId);
+    if (!template) {
+      return [];
+    }
+    const scope = documentSatisfactionScopeFor({
+      templateDocumentId: template.id,
+      organizationId: normalizedOrganizationId ?? null,
+      documentSubjectUserId: signerUserId,
+      eventId: normalizedEventId ?? null,
+      teamId: null,
+      signOnce: template.signOnce,
+    });
+    return scope ? [scope] : [];
+  });
+  const satisfiedTemplateIds = await findSatisfiedDocumentTemplateIds({
+    documentSubjectId,
+    scopes: satisfactionScopes,
+  });
+
+
+  const signedTemplateRows = await prisma.signedDocuments.findMany({
+    where: {
+      userId: signerUserId,
+      signerRole: 'participant',
+      OR: requestedTemplateIds.map((templateId) => {
+        const template = templateById.get(templateId);
+        return {
+          templateId,
+          hostId: null,
+          ...(template?.signOnce ? {} : { eventId: normalizedEventId }),
+        };
+      }),
+    },
+    select: { templateId: true, status: true },
+  });
+  const signedTemplateIds = new Set(
+    signedTemplateRows
+      .filter((row) => isSignedDocumentStatus(row.status))
+      .map((row) => row.templateId),
+  );
+  const quarantinedTemplateIds = await findQuarantinedDocumentTemplateVersionIds(
+    prisma,
+    requestedTemplateIds.map((templateId) => templateById.get(templateId))
+      .filter((template): template is NonNullable<typeof template> => Boolean(template)),
+  );
+  const quarantinedTemplate = requestedTemplateIds
+    .map((templateId) => templateById.get(templateId))
+    .find((template) => (
+      template
+      && !satisfiedTemplateIds.has(template.id)
+      && !signedTemplateIds.has(template.id)
+      && (template.type ?? 'PDF').toUpperCase() !== 'TEXT'
+      && quarantinedTemplateIds.has(template.id)
+    ));
+  if (quarantinedTemplate) {
+    return NextResponse.json(
+      { error: new DocumentTemplateVersionProviderQuarantinedError(quarantinedTemplate.id).message },
+      { status: 409 },
+    );
+  }
+
 
   const signLinks: Array<{
     templateId: string;
@@ -243,19 +352,12 @@ export async function POST(req: NextRequest) {
       if (!template) {
         continue;
       }
+      if (satisfiedTemplateIds.has(template.id)) {
+        continue;
+      }
+
 
       const requiredSignerType = normalizeRequiredSignerType(template.requiredSignerType);
-      if (requiredSignerType !== 'PARTICIPANT') {
-        return NextResponse.json({
-          error: `Rental template "${template.title}" requires ${getRequiredSignerTypeLabel(requiredSignerType)} signatures. Rental checkout templates must use Participant signer type.`,
-        }, { status: 400 });
-      }
-
-      if (!template.signOnce && !normalizedEventId) {
-        return NextResponse.json({
-          error: `eventId is required for event-scoped rental template "${template.title}".`,
-        }, { status: 400 });
-      }
 
       const requiredSignerLabel = getRequiredSignerTypeLabel(requiredSignerType);
       const sharedScopeWhere = {
@@ -320,51 +422,71 @@ export async function POST(req: NextRequest) {
       if (templateType === 'TEXT') {
         const textDocumentId = pendingDocumentId ?? `text-${crypto.randomUUID()}`;
         const now = new Date();
-        if (!signerRowToReuse) {
-          await prisma.signedDocuments.create({
-            data: {
-              id: crypto.randomUUID(),
-              createdAt: now,
-              updatedAt: now,
-              signedDocumentId: textDocumentId,
-              templateId: template.id,
-              userId: signerUserId,
-              documentName: template.title ?? 'Text Waiver',
-              hostId: null,
-              organizationId: normalizedOrganizationId ?? null,
-              eventId: normalizedEventId ?? null,
-              status: 'UNSIGNED',
-              signedAt: null,
-              signerEmail: signerEmail ?? null,
-              roleIndex: null,
-              signerRole: 'participant',
-              ipAddress: null,
-              requestId: null,
-            },
-          });
-        } else {
-          await prisma.signedDocuments.update({
-            where: { id: signerRowToReuse.id },
-            data: {
-              updatedAt: now,
-              signedDocumentId: textDocumentId,
-              status: 'UNSIGNED',
-              userId: signerUserId,
-              hostId: null,
-              organizationId: normalizedOrganizationId ?? null,
-              eventId: normalizedEventId ?? null,
-              signerEmail: signerEmail ?? null,
-              roleIndex: null,
-              signerRole: 'participant',
-            },
-          });
-        }
+        const evidenceContext = {
+          organizationId: normalizedOrganizationId ?? null,
+          userId: signerUserId,
+          hostId: null,
+          eventId: normalizedEventId ?? null,
+          teamId: null,
+          signOnce: template.signOnce,
+          provenance: DOCUMENT_EVIDENCE_PROVENANCE.BRACKETIQ,
+        } as const;
+        await prisma.$transaction(async (tx) => {
+          await ensureDocumentSubject({
+            organizationId: evidenceContext.organizationId,
+            userId: evidenceContext.userId,
+            hostId: evidenceContext.hostId,
+          }, tx);
+          if (!signerRowToReuse) {
+            await tx.signedDocuments.create({
+              data: {
+                id: crypto.randomUUID(),
+                createdAt: now,
+                updatedAt: now,
+                signedDocumentId: textDocumentId,
+                templateId: template.id,
+                userId: signerUserId,
+                documentName: templateDisplayTitle(template),
+                hostId: null,
+                organizationId: normalizedOrganizationId ?? null,
+                eventId: normalizedEventId ?? null,
+                teamId: null,
+                ...signedDocumentEvidenceFields(evidenceContext),
+                status: 'UNSIGNED',
+                signedAt: null,
+                signerEmail: signerEmail ?? null,
+                roleIndex: null,
+                signerRole: 'participant',
+                ipAddress: null,
+                requestId: null,
+              },
+            });
+          } else {
+            await tx.signedDocuments.update({
+              where: { id: signerRowToReuse.id },
+              data: {
+                updatedAt: now,
+                signedDocumentId: textDocumentId,
+                status: 'UNSIGNED',
+                userId: signerUserId,
+                hostId: null,
+                organizationId: normalizedOrganizationId ?? null,
+                eventId: normalizedEventId ?? null,
+                teamId: null,
+                ...signedDocumentEvidenceFields(evidenceContext),
+                signerEmail: signerEmail ?? null,
+                roleIndex: null,
+                signerRole: 'participant',
+              },
+            });
+          }
+        });
 
-        const content = template.content ?? `Please acknowledge ${template.title ?? 'this document'}.`;
+        const content = template.content ?? `Please acknowledge ${templateDisplayTitle(template)}.`;
         signLinks.push({
           templateId: template.id,
           type: 'TEXT',
-          title: template.title,
+          title: templateDisplayTitle(template),
           signOnce: template.signOnce ?? false,
           documentId: textDocumentId,
           content,
@@ -373,6 +495,9 @@ export async function POST(req: NextRequest) {
           signerContext: 'participant',
         });
         continue;
+      }
+      if (quarantinedTemplateIds.has(template.id)) {
+        throw new DocumentTemplateVersionProviderQuarantinedError(template.id);
       }
 
       if (!isBoldSignConfigured()) {
@@ -383,7 +508,7 @@ export async function POST(req: NextRequest) {
       }
       const boldSignTemplateId = pickString(template.templateId);
       if (!boldSignTemplateId) {
-        throw new Error(`Template "${template.title}" is missing a BoldSign template id.`);
+        throw new Error(`Template "${templateDisplayTitle(template)}" is missing a BoldSign template id.`);
       }
 
       let templateRoles = toRolesFromTemplateRecord(template);
@@ -407,8 +532,8 @@ export async function POST(req: NextRequest) {
           signerName,
           roleIndex: selectedRole.roleIndex,
           signerRole: selectedRole.signerRole,
-          title: template.title,
-          message: template.description ?? undefined,
+          title: templateDisplayTitle(template),
+          message: templateDisplayDescription(template),
         });
         return sent.documentId;
       };
@@ -446,7 +571,7 @@ export async function POST(req: NextRequest) {
           roleIndex: selectedRole.roleIndex,
           payload: {
             templateDocumentId: template.id,
-            templateTitle: template.title,
+            templateTitle: templateDisplayTitle(template),
             requiredSignerType,
             requiredSignerLabel,
             signOnce: template.signOnce ?? false,
@@ -482,7 +607,7 @@ export async function POST(req: NextRequest) {
           roleIndex: selectedRole.roleIndex,
           payload: {
             templateDocumentId: template.id,
-            templateTitle: template.title,
+            templateTitle: templateDisplayTitle(template),
             requiredSignerType,
             requiredSignerLabel,
             signOnce: template.signOnce ?? false,
@@ -499,7 +624,7 @@ export async function POST(req: NextRequest) {
       signLinks.push({
         templateId: template.id,
         type: 'PDF',
-        title: template.title,
+        title: templateDisplayTitle(template),
         signOnce: template.signOnce ?? false,
         documentId,
         url: embedded.signLink,
@@ -512,7 +637,9 @@ export async function POST(req: NextRequest) {
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to create rental signing links.';
-    const status = message.includes('not configured') ? 503 : 400;
+    const status = error instanceof DocumentTemplateVersionProviderQuarantinedError
+      ? 409
+      : message.includes('not configured') ? 503 : 400;
     return NextResponse.json({ error: message }, { status });
   }
 

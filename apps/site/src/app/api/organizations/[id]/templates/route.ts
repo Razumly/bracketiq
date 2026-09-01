@@ -18,6 +18,7 @@ import {
   normalizeRequiredSignerType,
   type TemplateRequiredSignerType,
 } from '@/lib/templateSignerTypes';
+import { createDocumentRequirementWithVersion } from '@/server/documents/documentTemplateVersions';
 
 export const dynamic = 'force-dynamic';
 
@@ -113,13 +114,26 @@ const parseTemplateInput = async (request: NextRequest): Promise<{
   };
 };
 
-export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const templates = await prisma.templateDocuments.findMany({
     where: { organizationId: id },
-    orderBy: { createdAt: 'desc' },
+    include: {
+      documentRequirement: {
+        select: {
+          id: true,
+          title: true,
+          description: true,
+          status: true,
+        },
+      },
+    },
+    orderBy: [
+      { documentRequirementId: 'asc' },
+      { versionSequence: 'desc' },
+    ],
   });
-  return NextResponse.json({ templates: templates }, { status: 200 });
+  return NextResponse.json({ templates }, { status: 200 });
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -168,12 +182,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: 'Template text is required for TEXT templates.' }, { status: 400 });
     }
 
-    const record = await prisma.templateDocuments.create({
-      data: {
-        id: crypto.randomUUID(),
+    const documentRequirementId = crypto.randomUUID();
+    const templateDocumentId = crypto.randomUUID();
+    const record = await prisma.$transaction((tx) => createDocumentRequirementWithVersion(tx, {
+      requirement: {
+        id: documentRequirementId,
+        organizationId: id,
+        title,
+        description,
+        createdBy,
+        status: 'ACTIVE',
+        createdAt: now,
+        updatedAt: now,
+      },
+      version: {
+        id: templateDocumentId,
         templateId: null,
         type: 'TEXT',
-        organizationId: id,
         title,
         description,
         signOnce,
@@ -187,7 +212,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         createdAt: now,
         updatedAt: now,
       },
-    });
+    }));
 
     return NextResponse.json({ template: record }, { status: 201 });
   }
@@ -229,6 +254,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     : presetRoles;
 
   const projectedTemplateDocumentId = crypto.randomUUID();
+  const documentRequirementId = crypto.randomUUID();
   const operation = await createOrUpdateBoldSignOperation({
     operationType: BOLDSIGN_OPERATION_TYPES.TEMPLATE_CREATE,
     status: BOLDSIGN_OPERATION_STATUSES.PENDING_WEBHOOK,
@@ -239,6 +265,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     userId: session.userId,
     payload: {
       templateDocumentId: projectedTemplateDocumentId,
+      documentRequirementId,
       organizationId: id,
       title,
       description,

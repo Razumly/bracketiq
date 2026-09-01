@@ -14,7 +14,11 @@ const config: Config = {
   // tighter timeout where that is part of their contract.
   testTimeout: 20_000,
   testMatch: ['**/?(*.)+(spec|test).[tj]s?(x)'],
-  testPathIgnorePatterns: ['<rootDir>/e2e/'],
+  // Per-source affiliate mappings run through focused validation.
+  testPathIgnorePatterns: [
+    '<rootDir>/e2e/',
+    '<rootDir>/src/server/affiliateImports/__tests__/.*Source\\.test\\.ts$',
+  ],
   transform: {
     '^.+\\.(ts|tsx)$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.jest.json' }],
   },

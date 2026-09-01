@@ -6,10 +6,24 @@ const prismaMock = {
   templateDocuments: {
     findMany: jest.fn(),
   },
+  templateProviderQuarantines: {
+    findMany: jest.fn(),
+  },
   signedDocuments: {
     findMany: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
+  },
+  documentSubjects: {
+    upsert: jest.fn(),
+  },
+  documentRequirementSatisfactions: {
+    findMany: jest.fn(),
+    findFirst: jest.fn(),
+    upsert: jest.fn(),
+  },
+  documentEvidenceAuditEvents: {
+    create: jest.fn(),
   },
   userData: {
     findUnique: jest.fn(),
@@ -23,6 +37,7 @@ const prismaMock = {
   boldSignSyncOperations: {
     findFirst: jest.fn(),
   },
+  $transaction: jest.fn(),
 };
 
 const requireSessionMock = jest.fn();
@@ -72,10 +87,17 @@ describe('POST /api/rentals/sign', () => {
     });
     prismaMock.sensitiveUserData.findFirst.mockResolvedValue({ email: 'player@example.com' });
     prismaMock.authUser.findUnique.mockResolvedValue(null);
+    prismaMock.templateProviderQuarantines.findMany.mockResolvedValue([]);
     prismaMock.signedDocuments.findMany.mockResolvedValue([]);
     prismaMock.signedDocuments.create.mockResolvedValue({ id: 'signed_1' });
     prismaMock.signedDocuments.update.mockResolvedValue({ id: 'signed_1' });
+    prismaMock.documentRequirementSatisfactions.findMany.mockResolvedValue([]);
+    prismaMock.documentSubjects.upsert.mockResolvedValue({ id: 'subject_1' });
+    prismaMock.documentRequirementSatisfactions.findFirst.mockResolvedValue(null);
+    prismaMock.documentRequirementSatisfactions.upsert.mockResolvedValue({ id: 'satisfaction_1' });
+    prismaMock.documentEvidenceAuditEvents.create.mockResolvedValue({ id: 'audit_1' });
     prismaMock.boldSignSyncOperations.findFirst.mockResolvedValue(null);
+    prismaMock.$transaction.mockImplementation(async (callback: (tx: typeof prismaMock) => unknown) => callback(prismaMock));
     createDocumentSendOperationMock.mockResolvedValue({ id: 'op_1', status: 'PENDING_WEBHOOK' });
     findLatestBoldSignOperationMock.mockResolvedValue(null);
   });
@@ -184,4 +206,32 @@ describe('POST /api/rentals/sign', () => {
       }),
     );
   });
+  it('skips a rental template already satisfied by imported evidence', async () => {
+    prismaMock.templateDocuments.findMany.mockResolvedValue([
+      {
+        id: 'tmpl_imported_rental',
+        type: 'TEXT',
+        title: 'Imported Rental Waiver',
+        content: 'I accept the rental terms.',
+        signOnce: false,
+        requiredSignerType: 'PARTICIPANT',
+      },
+    ]);
+    prismaMock.documentRequirementSatisfactions.findMany.mockResolvedValue([
+      { templateDocumentId: 'tmpl_imported_rental' },
+    ]);
+
+    const res = await POST(jsonPost('http://localhost/api/rentals/sign', {
+      templateId: 'tmpl_imported_rental',
+      eventId: 'event_imported_rental',
+      organizationId: 'org_1',
+      userId: 'user_1',
+    }));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.signLinks).toEqual([]);
+    expect(prismaMock.signedDocuments.create).not.toHaveBeenCalled();
+  });
+
 });

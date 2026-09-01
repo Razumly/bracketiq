@@ -11,6 +11,7 @@ import {
   TEAM_JOIN_POLICY_CLOSED,
   resolveSerializedTeamJoinPolicy,
 } from '@/server/teams/teamJoinPolicy';
+import { acquireTeamStaffRoleLock } from '@/server/repositories/locks';
 
 type PrismaLike = PrismaClient | Prisma.TransactionClient | any;
 
@@ -169,6 +170,63 @@ export const getEventTeamsDelegate = (client: PrismaLike) => client?.teams ?? nu
 const getTeamRegistrationsDelegate = (client: PrismaLike) => client?.teamRegistrations ?? null;
 const getTeamStaffAssignmentsDelegate = (client: PrismaLike) => client?.teamStaffAssignments ?? null;
 const getEventTeamStaffAssignmentsDelegate = (client: PrismaLike) => client?.eventTeamStaffAssignments ?? null;
+export type SingletonTeamStaffRole = 'MANAGER' | 'HEAD_COACH';
+
+export const replaceSingletonTeamStaffAssignment = async ({
+  tx,
+  teamId,
+  role,
+  replacementInviteId = null,
+  replacementUserId = null,
+  now = new Date(),
+}: {
+  tx: PrismaLike;
+  teamId: string;
+  role: SingletonTeamStaffRole;
+  replacementInviteId?: string | null;
+  replacementUserId?: string | null;
+  now?: Date;
+}): Promise<void> => {
+  const inviteRole = role === 'MANAGER' ? 'team_manager' : 'team_head_coach';
+  const inviteRoles = [role, inviteRole];
+  // Hold the role lock for the full transaction. Test doubles may omit $executeRaw.
+  if (typeof tx?.$executeRaw === 'function') {
+    await acquireTeamStaffRoleLock(tx, teamId, role);
+  }
+  const invites = tx?.invites;
+  if (invites?.updateMany) {
+    await invites.updateMany({
+      where: {
+        type: 'TEAM',
+        teamId,
+        role: { in: inviteRoles },
+        status: { in: ['PENDING', 'INVITED'] },
+        ...(replacementInviteId ? { id: { not: replacementInviteId } } : {}),
+      },
+      data: {
+        status: 'CANCELLED',
+        updatedAt: now,
+      },
+    });
+  }
+
+  const assignments = getTeamStaffAssignmentsDelegate(tx);
+  if (assignments?.updateMany) {
+    await assignments.updateMany({
+      where: {
+        teamId,
+        role,
+        status: { in: ['ACTIVE', 'INVITED'] },
+        ...(replacementUserId ? { userId: { not: replacementUserId } } : {}),
+      },
+      data: {
+        status: 'REMOVED',
+        updatedAt: now,
+      },
+    });
+  }
+};
+
 
 const isActiveRegistration = (row: { status?: string | null }) => ACTIVE_TEAM_MEMBER_STATUSES.has(String(row.status ?? '').toUpperCase());
 const isInvitedRegistration = (row: { status?: string | null }) => INVITED_TEAM_MEMBER_STATUSES.has(String(row.status ?? '').toUpperCase());

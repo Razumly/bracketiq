@@ -59,6 +59,7 @@ export type AffiliateSourceDiscoveryResultsMinAggregateOutputType = {
   status: string | null
   matchingIntakeId: string | null
   matchingSourceId: string | null
+  supplySourceId: string | null
   matchingOrganizationId: string | null
 }
 
@@ -83,6 +84,7 @@ export type AffiliateSourceDiscoveryResultsMaxAggregateOutputType = {
   status: string | null
   matchingIntakeId: string | null
   matchingSourceId: string | null
+  supplySourceId: string | null
   matchingOrganizationId: string | null
 }
 
@@ -111,6 +113,7 @@ export type AffiliateSourceDiscoveryResultsCountAggregateOutputType = {
   reasonDetails: number
   matchingIntakeId: number
   matchingSourceId: number
+  supplySourceId: number
   matchingOrganizationId: number
   metadata: number
   _all: number
@@ -150,6 +153,7 @@ export type AffiliateSourceDiscoveryResultsMinAggregateInputType = {
   status?: true
   matchingIntakeId?: true
   matchingSourceId?: true
+  supplySourceId?: true
   matchingOrganizationId?: true
 }
 
@@ -174,6 +178,7 @@ export type AffiliateSourceDiscoveryResultsMaxAggregateInputType = {
   status?: true
   matchingIntakeId?: true
   matchingSourceId?: true
+  supplySourceId?: true
   matchingOrganizationId?: true
 }
 
@@ -202,6 +207,7 @@ export type AffiliateSourceDiscoveryResultsCountAggregateInputType = {
   reasonDetails?: true
   matchingIntakeId?: true
   matchingSourceId?: true
+  supplySourceId?: true
   matchingOrganizationId?: true
   metadata?: true
   _all?: true
@@ -318,6 +324,7 @@ export type AffiliateSourceDiscoveryResultsGroupByOutputType = {
   reasonDetails: runtime.JsonValue | null
   matchingIntakeId: string | null
   matchingSourceId: string | null
+  supplySourceId: string | null
   matchingOrganizationId: string | null
   metadata: runtime.JsonValue | null
   _count: AffiliateSourceDiscoveryResultsCountAggregateOutputType | null
@@ -370,6 +377,7 @@ export type AffiliateSourceDiscoveryResultsWhereInput = {
   reasonDetails?: Prisma.JsonNullableFilter<"AffiliateSourceDiscoveryResults">
   matchingIntakeId?: Prisma.StringNullableFilter<"AffiliateSourceDiscoveryResults"> | string | null
   matchingSourceId?: Prisma.StringNullableFilter<"AffiliateSourceDiscoveryResults"> | string | null
+  supplySourceId?: Prisma.StringNullableFilter<"AffiliateSourceDiscoveryResults"> | string | null
   matchingOrganizationId?: Prisma.StringNullableFilter<"AffiliateSourceDiscoveryResults"> | string | null
   metadata?: Prisma.JsonNullableFilter<"AffiliateSourceDiscoveryResults">
 }
@@ -399,6 +407,7 @@ export type AffiliateSourceDiscoveryResultsOrderByWithRelationInput = {
   reasonDetails?: Prisma.SortOrderInput | Prisma.SortOrder
   matchingIntakeId?: Prisma.SortOrderInput | Prisma.SortOrder
   matchingSourceId?: Prisma.SortOrderInput | Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrderInput | Prisma.SortOrder
   matchingOrganizationId?: Prisma.SortOrderInput | Prisma.SortOrder
   metadata?: Prisma.SortOrderInput | Prisma.SortOrder
 }
@@ -432,6 +441,7 @@ export type AffiliateSourceDiscoveryResultsWhereUniqueInput = Prisma.AtLeast<{
   reasonDetails?: Prisma.JsonNullableFilter<"AffiliateSourceDiscoveryResults">
   matchingIntakeId?: Prisma.StringNullableFilter<"AffiliateSourceDiscoveryResults"> | string | null
   matchingSourceId?: Prisma.StringNullableFilter<"AffiliateSourceDiscoveryResults"> | string | null
+  supplySourceId?: Prisma.StringNullableFilter<"AffiliateSourceDiscoveryResults"> | string | null
   matchingOrganizationId?: Prisma.StringNullableFilter<"AffiliateSourceDiscoveryResults"> | string | null
   metadata?: Prisma.JsonNullableFilter<"AffiliateSourceDiscoveryResults">
 }, "id" | "campaignId_urlKey">
@@ -461,6 +471,7 @@ export type AffiliateSourceDiscoveryResultsOrderByWithAggregationInput = {
   reasonDetails?: Prisma.SortOrderInput | Prisma.SortOrder
   matchingIntakeId?: Prisma.SortOrderInput | Prisma.SortOrder
   matchingSourceId?: Prisma.SortOrderInput | Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrderInput | Prisma.SortOrder
   matchingOrganizationId?: Prisma.SortOrderInput | Prisma.SortOrder
   metadata?: Prisma.SortOrderInput | Prisma.SortOrder
   _count?: Prisma.AffiliateSourceDiscoveryResultsCountOrderByAggregateInput
@@ -498,6 +509,7 @@ export type AffiliateSourceDiscoveryResultsScalarWhereWithAggregatesInput = {
   reasonDetails?: Prisma.JsonNullableWithAggregatesFilter<"AffiliateSourceDiscoveryResults">
   matchingIntakeId?: Prisma.StringNullableWithAggregatesFilter<"AffiliateSourceDiscoveryResults"> | string | null
   matchingSourceId?: Prisma.StringNullableWithAggregatesFilter<"AffiliateSourceDiscoveryResults"> | string | null
+  supplySourceId?: Prisma.StringNullableWithAggregatesFilter<"AffiliateSourceDiscoveryResults"> | string | null
   matchingOrganizationId?: Prisma.StringNullableWithAggregatesFilter<"AffiliateSourceDiscoveryResults"> | string | null
   metadata?: Prisma.JsonNullableWithAggregatesFilter<"AffiliateSourceDiscoveryResults">
 }
@@ -527,6 +539,7 @@ export type AffiliateSourceDiscoveryResultsCreateInput = {
   reasonDetails?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   matchingIntakeId?: string | null
   matchingSourceId?: string | null
+  supplySourceId?: string | null
   matchingOrganizationId?: string | null
   metadata?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
 }
@@ -556,6 +569,7 @@ export type AffiliateSourceDiscoveryResultsUncheckedCreateInput = {
   reasonDetails?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   matchingIntakeId?: string | null
   matchingSourceId?: string | null
+  supplySourceId?: string | null
   matchingOrganizationId?: string | null
   metadata?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
 }
@@ -585,6 +599,7 @@ export type AffiliateSourceDiscoveryResultsUpdateInput = {
   reasonDetails?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   matchingIntakeId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   matchingSourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  supplySourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   matchingOrganizationId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   metadata?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
 }
@@ -614,6 +629,7 @@ export type AffiliateSourceDiscoveryResultsUncheckedUpdateInput = {
   reasonDetails?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   matchingIntakeId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   matchingSourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  supplySourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   matchingOrganizationId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   metadata?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
 }
@@ -643,6 +659,7 @@ export type AffiliateSourceDiscoveryResultsCreateManyInput = {
   reasonDetails?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   matchingIntakeId?: string | null
   matchingSourceId?: string | null
+  supplySourceId?: string | null
   matchingOrganizationId?: string | null
   metadata?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
 }
@@ -672,6 +689,7 @@ export type AffiliateSourceDiscoveryResultsUpdateManyMutationInput = {
   reasonDetails?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   matchingIntakeId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   matchingSourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  supplySourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   matchingOrganizationId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   metadata?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
 }
@@ -701,6 +719,7 @@ export type AffiliateSourceDiscoveryResultsUncheckedUpdateManyInput = {
   reasonDetails?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   matchingIntakeId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   matchingSourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  supplySourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   matchingOrganizationId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   metadata?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
 }
@@ -735,6 +754,7 @@ export type AffiliateSourceDiscoveryResultsCountOrderByAggregateInput = {
   reasonDetails?: Prisma.SortOrder
   matchingIntakeId?: Prisma.SortOrder
   matchingSourceId?: Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrder
   matchingOrganizationId?: Prisma.SortOrder
   metadata?: Prisma.SortOrder
 }
@@ -766,6 +786,7 @@ export type AffiliateSourceDiscoveryResultsMaxOrderByAggregateInput = {
   status?: Prisma.SortOrder
   matchingIntakeId?: Prisma.SortOrder
   matchingSourceId?: Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrder
   matchingOrganizationId?: Prisma.SortOrder
 }
 
@@ -790,6 +811,7 @@ export type AffiliateSourceDiscoveryResultsMinOrderByAggregateInput = {
   status?: Prisma.SortOrder
   matchingIntakeId?: Prisma.SortOrder
   matchingSourceId?: Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrder
   matchingOrganizationId?: Prisma.SortOrder
 }
 
@@ -853,6 +875,7 @@ export type AffiliateSourceDiscoveryResultsSelect<ExtArgs extends runtime.Types.
   reasonDetails?: boolean
   matchingIntakeId?: boolean
   matchingSourceId?: boolean
+  supplySourceId?: boolean
   matchingOrganizationId?: boolean
   metadata?: boolean
 }, ExtArgs["result"]["affiliateSourceDiscoveryResults"]>
@@ -882,6 +905,7 @@ export type AffiliateSourceDiscoveryResultsSelectCreateManyAndReturn<ExtArgs ext
   reasonDetails?: boolean
   matchingIntakeId?: boolean
   matchingSourceId?: boolean
+  supplySourceId?: boolean
   matchingOrganizationId?: boolean
   metadata?: boolean
 }, ExtArgs["result"]["affiliateSourceDiscoveryResults"]>
@@ -911,6 +935,7 @@ export type AffiliateSourceDiscoveryResultsSelectUpdateManyAndReturn<ExtArgs ext
   reasonDetails?: boolean
   matchingIntakeId?: boolean
   matchingSourceId?: boolean
+  supplySourceId?: boolean
   matchingOrganizationId?: boolean
   metadata?: boolean
 }, ExtArgs["result"]["affiliateSourceDiscoveryResults"]>
@@ -940,11 +965,12 @@ export type AffiliateSourceDiscoveryResultsSelectScalar = {
   reasonDetails?: boolean
   matchingIntakeId?: boolean
   matchingSourceId?: boolean
+  supplySourceId?: boolean
   matchingOrganizationId?: boolean
   metadata?: boolean
 }
 
-export type AffiliateSourceDiscoveryResultsOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "campaignId" | "latestRunId" | "originalUrl" | "canonicalUrl" | "urlKey" | "policyKey" | "title" | "description" | "latestQuery" | "latestRank" | "firstSeenAt" | "lastSeenAt" | "seenCount" | "score" | "sourceTypeHints" | "sportHints" | "status" | "reasonCodes" | "reasonDetails" | "matchingIntakeId" | "matchingSourceId" | "matchingOrganizationId" | "metadata", ExtArgs["result"]["affiliateSourceDiscoveryResults"]>
+export type AffiliateSourceDiscoveryResultsOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "campaignId" | "latestRunId" | "originalUrl" | "canonicalUrl" | "urlKey" | "policyKey" | "title" | "description" | "latestQuery" | "latestRank" | "firstSeenAt" | "lastSeenAt" | "seenCount" | "score" | "sourceTypeHints" | "sportHints" | "status" | "reasonCodes" | "reasonDetails" | "matchingIntakeId" | "matchingSourceId" | "supplySourceId" | "matchingOrganizationId" | "metadata", ExtArgs["result"]["affiliateSourceDiscoveryResults"]>
 
 export type $AffiliateSourceDiscoveryResultsPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "AffiliateSourceDiscoveryResults"
@@ -974,6 +1000,7 @@ export type $AffiliateSourceDiscoveryResultsPayload<ExtArgs extends runtime.Type
     reasonDetails: runtime.JsonValue | null
     matchingIntakeId: string | null
     matchingSourceId: string | null
+    supplySourceId: string | null
     matchingOrganizationId: string | null
     metadata: runtime.JsonValue | null
   }, ExtArgs["result"]["affiliateSourceDiscoveryResults"]>
@@ -1423,6 +1450,7 @@ export interface AffiliateSourceDiscoveryResultsFieldRefs {
   readonly reasonDetails: Prisma.FieldRef<"AffiliateSourceDiscoveryResults", 'Json'>
   readonly matchingIntakeId: Prisma.FieldRef<"AffiliateSourceDiscoveryResults", 'String'>
   readonly matchingSourceId: Prisma.FieldRef<"AffiliateSourceDiscoveryResults", 'String'>
+  readonly supplySourceId: Prisma.FieldRef<"AffiliateSourceDiscoveryResults", 'String'>
   readonly matchingOrganizationId: Prisma.FieldRef<"AffiliateSourceDiscoveryResults", 'String'>
   readonly metadata: Prisma.FieldRef<"AffiliateSourceDiscoveryResults", 'Json'>
 }

@@ -2,6 +2,7 @@ import {
   rescheduleEventMatchesPreservingLocks,
   type TeamDutyReflowContext,
 } from '../reschedulePreservingLocks';
+import { ScheduleError } from '../scheduleErrors';
 import {
   Division,
   League,
@@ -267,6 +268,149 @@ const addTeamHistoryMatch = (
   fixture.tournament.matches[match.id] = match;
   return match;
 };
+type DivisionOrderReflowFixture = {
+  event: League;
+  field: PlayingField;
+  firstDivision: Division;
+  secondDivision: Division;
+  teams: Record<string, Team>;
+  firstMatch: Match;
+  secondMatch: Match;
+};
+
+const createDivisionOrderReflowFixture = (params: {
+  firstLocked?: boolean;
+  secondLocked?: boolean;
+  firstStart?: string;
+  secondStart?: string;
+  slotEndMinutes?: number;
+  reverseMatchInsertion?: boolean;
+  secondDivisionEligible?: boolean;
+} = {}): DivisionOrderReflowFixture => {
+  const eventId = 'division_order_reflow_fixture';
+  const eventStart = new Date('2026-03-02T10:00:00.000Z');
+  const eventEnd = new Date('2026-03-02T18:00:00.000Z');
+  const firstDivision = new Division('division_order_first', 'First');
+  const secondDivision = new Division('division_order_second', 'Second');
+  firstDivision.phase = 'POOL';
+  secondDivision.phase = 'POOL';
+  const fieldDivisions = params.secondDivisionEligible === false
+    ? [firstDivision]
+    : [firstDivision, secondDivision];
+  const field = new PlayingField({
+    id: 'division_order_field',
+    divisions: fieldDivisions,
+    events: [],
+    rentalSlots: [],
+    name: 'Division Order Court',
+  });
+  const makeTeam = (id: string, division: Division): Team => new Team({
+    id,
+    captainId: `captain_${id}`,
+    division,
+    name: id,
+    matches: [],
+    playerIds: [],
+  });
+  const teams = {
+    first_one: makeTeam('division_order_first_one', firstDivision),
+    first_two: makeTeam('division_order_first_two', firstDivision),
+    first_three: makeTeam('division_order_first_three', firstDivision),
+    second_one: makeTeam('division_order_second_one', secondDivision),
+    second_two: makeTeam('division_order_second_two', secondDivision),
+    second_three: makeTeam('division_order_second_three', secondDivision),
+  };
+  const matchStart = (value: string | undefined): Date => new Date(
+    value ?? '2026-03-02T10:00:00.000Z',
+  );
+  const firstStart = matchStart(params.firstStart);
+  const secondStart = matchStart(params.secondStart);
+  const firstMatch = createMatch({
+    id: 'division_order_first_match',
+    matchId: 1,
+    start: firstStart,
+    end: new Date(firstStart.getTime() + 60 * MINUTE_MS),
+    locked: params.firstLocked ?? true,
+    field,
+    division: firstDivision,
+    team1: teams.first_one,
+    team2: teams.first_two,
+    eventId,
+  });
+  const secondMatch = createMatch({
+    id: 'division_order_second_match',
+    matchId: 2,
+    start: secondStart,
+    end: new Date(secondStart.getTime() + 60 * MINUTE_MS),
+    locked: params.secondLocked ?? false,
+    field,
+    division: secondDivision,
+    team1: teams.second_one,
+    team2: teams.second_two,
+    eventId,
+  });
+  const matches = params.reverseMatchInsertion
+    ? [secondMatch, firstMatch]
+    : [firstMatch, secondMatch];
+  const event = new League({
+    id: eventId,
+    name: 'Division Order Reflow Fixture',
+    description: '',
+    start: eventStart,
+    end: eventEnd,
+    location: '',
+    organizationId: null,
+    teams,
+    players: [],
+    waitListIds: [],
+    freeAgentIds: [],
+    maxParticipants: Object.keys(teams).length,
+    teamSignup: true,
+    divisions: [firstDivision, secondDivision],
+    fields: { [field.id]: field },
+    matches: Object.fromEntries(matches.map((match) => [match.id, match])),
+    officials: [],
+    eventType: 'LEAGUE',
+    doubleElimination: false,
+    winnerSetCount: null,
+    loserSetCount: null,
+    matchDurationMinutes: 60,
+    usesSets: false,
+    setDurationMinutes: 0,
+    setsPerMatch: 3,
+    pointsToVictory: [],
+    gamesPerOpponent: 1,
+    includePlayoffs: false,
+    playoffTeamCount: 0,
+    doTeamsOfficiate: false,
+    staffingPriority: 'OFFICIAL_COVERAGE_REQUIRED',
+    noFixedEndDateTime: false,
+    restTimeMinutes: 5,
+    timeSlots: [
+      new TimeSlot({
+        id: 'division_order_slot',
+        dayOfWeek: 0,
+        startDate: eventStart,
+        endDate: eventEnd,
+        repeating: true,
+        startTimeMinutes: 10 * 60,
+        endTimeMinutes: params.slotEndMinutes ?? 18 * 60,
+        field: field.id,
+        divisions: fieldDivisions,
+      }),
+    ],
+  });
+  return {
+    event,
+    field,
+    firstDivision,
+    secondDivision,
+    teams,
+    firstMatch,
+    secondMatch,
+  };
+};
+
 
 describe('rescheduleEventMatchesPreservingLocks', () => {
   it('keeps locked matches fixed and warns when they are outside the updated window', () => {
@@ -982,6 +1126,34 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
     expect(scheduled?.start.getTime()).toBeGreaterThanOrEqual(eventStart.getTime());
     expect(result.warnings).toHaveLength(0);
     expect(event.timeSlots[0]?.divisions.some((division) => division.id === playoffDivisionId)).toBe(true);
+    const explicitField = new PlayingField({
+      id: 'field_split_playoff_explicit',
+      divisions: [playoffDivision, regularDivision],
+      explicitDivisionIds: [playoffDivision.id],
+      matches: [],
+      events: [],
+      rentalSlots: [],
+      name: 'Court Split Explicit',
+    });
+    event.fields[explicitField.id] = explicitField;
+    event.timeSlots.push(new TimeSlot({
+      id: 'slot_explicit_playoff',
+      dayOfWeek: 1,
+      startDate: eventStart,
+      endDate: eventEnd,
+      repeating: true,
+      startTimeMinutes: 10 * 60,
+      endTimeMinutes: 20 * 60,
+      field: explicitField.id,
+      divisions: [playoffDivision],
+    }));
+    const explicitResult = rescheduleEventMatchesPreservingLocks(event);
+    expect(explicitResult.warnings).toHaveLength(0);
+    expect(event.timeSlots[0]?.divisions.some((division) => division.id === playoffDivisionId)).toBe(false);
+    expect(event.timeSlots[1]?.divisions.some((division) => division.id === playoffDivisionId)).toBe(true);
+    expect(event.fields[explicitField.id]?.divisions.map((division) => division.id)).toEqual([
+      playoffDivision.id,
+    ]);
   });
 
   it('reschedules tournament pool and bracket matches using bracket division slots', () => {
@@ -1132,6 +1304,393 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
       bracketDivision.id,
       poolDivision.id,
     ]);
+  });
+  it('reflows unlocked tournament Matches in complete preliminary Division order before elimination Matches', () => {
+    const firstPoolDivision = new Division(
+      'tournament_reflow_pool_z',
+      'Pool Z',
+      [],
+      null,
+      4,
+      2,
+      'LEAGUE',
+    );
+    firstPoolDivision.phase = 'POOL';
+    const secondPoolDivision = new Division(
+      'tournament_reflow_pool_a',
+      'Pool A',
+      [],
+      null,
+      4,
+      2,
+      'LEAGUE',
+    );
+    secondPoolDivision.phase = 'POOL';
+    const bracketDivision = new Division(
+      'tournament_reflow_bracket',
+      'Bracket',
+      [],
+      null,
+      4,
+      4,
+      'PLAYOFF',
+    );
+    bracketDivision.phase = 'BRACKET';
+
+    const fieldOne = new PlayingField({
+      id: 'field_tournament_reflow_one',
+      divisions: [firstPoolDivision, secondPoolDivision, bracketDivision],
+      matches: [],
+      events: [],
+      rentalSlots: [],
+      name: 'Court One',
+    });
+    const fieldTwo = new PlayingField({
+      id: 'field_tournament_reflow_two',
+      divisions: [firstPoolDivision, secondPoolDivision, bracketDivision],
+      matches: [],
+      events: [],
+      rentalSlots: [],
+      name: 'Court Two',
+    });
+    const makeTeam = (id: string, division: Division) => new Team({
+      id,
+      captainId: `captain_${id}`,
+      division,
+      name: id,
+      matches: [],
+      playerIds: [],
+    });
+    const firstPoolTeams = [
+      makeTeam('pool_z_team_1', firstPoolDivision),
+      makeTeam('pool_z_team_2', firstPoolDivision),
+      makeTeam('pool_z_team_3', firstPoolDivision),
+      makeTeam('pool_z_team_4', firstPoolDivision),
+    ];
+    const secondPoolTeams = [
+      makeTeam('pool_a_team_1', secondPoolDivision),
+      makeTeam('pool_a_team_2', secondPoolDivision),
+      makeTeam('pool_a_team_3', secondPoolDivision),
+      makeTeam('pool_a_team_4', secondPoolDivision),
+    ];
+    const bracketTeams = [
+      makeTeam('bracket_team_1', bracketDivision),
+      makeTeam('bracket_team_2', bracketDivision),
+    ];
+    const teams = Object.fromEntries(
+      [...firstPoolTeams, ...secondPoolTeams, ...bracketTeams].map((team) => [team.id, team]),
+    );
+    const eventStart = new Date('2026-03-02T10:00:00.000Z');
+    const eventEnd = new Date('2026-03-02T18:00:00.000Z');
+    const makeReflowMatch = (
+      id: string,
+      matchId: number,
+      division: Division,
+      team1: Team,
+      team2: Team,
+    ) => createMatch({
+      id,
+      matchId,
+      start: eventStart,
+      end: new Date(eventStart.getTime() + 60 * MINUTE_MS),
+      field: fieldOne,
+      division,
+      team1,
+      team2,
+      eventId: 'event_tournament_reflow_division_order',
+    });
+
+    // Keep the later phase first in both Match IDs and object insertion order.
+    const bracketMatch = makeReflowMatch(
+      'match_tournament_reflow_bracket',
+      1,
+      bracketDivision,
+      bracketTeams[0]!,
+      bracketTeams[1]!,
+    );
+    const secondPoolMatchOne = makeReflowMatch(
+      'match_tournament_reflow_pool_a_one',
+      2,
+      secondPoolDivision,
+      secondPoolTeams[0]!,
+      secondPoolTeams[1]!,
+    );
+    const secondPoolMatchTwo = makeReflowMatch(
+      'match_tournament_reflow_pool_a_two',
+      3,
+      secondPoolDivision,
+      secondPoolTeams[2]!,
+      secondPoolTeams[3]!,
+    );
+    const firstPoolMatchOne = makeReflowMatch(
+      'match_tournament_reflow_pool_z_one',
+      4,
+      firstPoolDivision,
+      firstPoolTeams[0]!,
+      firstPoolTeams[1]!,
+    );
+    const firstPoolMatchTwo = makeReflowMatch(
+      'match_tournament_reflow_pool_z_two',
+      5,
+      firstPoolDivision,
+      firstPoolTeams[2]!,
+      firstPoolTeams[3]!,
+    );
+    const matches = [
+      bracketMatch,
+      secondPoolMatchOne,
+      secondPoolMatchTwo,
+      firstPoolMatchOne,
+      firstPoolMatchTwo,
+    ];
+    const originalMatchState = new Map(
+      matches.map((match) => [
+        match.id,
+        { matchId: match.matchId, divisionId: match.division.id },
+      ]),
+    );
+
+    const event = new Tournament({
+      id: 'event_tournament_reflow_division_order',
+      name: 'Tournament Reflow Division Order',
+      description: '',
+      start: eventStart,
+      end: eventEnd,
+      location: '',
+      organizationId: null,
+      teams,
+      players: [],
+      waitListIds: [],
+      freeAgentIds: [],
+      maxParticipants: Object.keys(teams).length,
+      teamSignup: true,
+      divisions: [firstPoolDivision, secondPoolDivision],
+      playoffDivisions: [bracketDivision],
+      fields: {
+        [fieldOne.id]: fieldOne,
+        [fieldTwo.id]: fieldTwo,
+      },
+      matches: Object.fromEntries(matches.map((match) => [match.id, match])),
+      officials: [],
+      eventType: 'TOURNAMENT',
+      doubleElimination: false,
+      winnerSetCount: null,
+      loserSetCount: null,
+      matchDurationMinutes: 60,
+      usesSets: false,
+      setDurationMinutes: 0,
+      includePlayoffs: true,
+      playoffTeamCount: 4,
+      doTeamsOfficiate: false,
+      staffingPriority: 'OFFICIAL_COVERAGE_REQUIRED',
+      noFixedEndDateTime: false,
+      restTimeMinutes: 5,
+      timeSlots: [
+        new TimeSlot({
+          id: 'slot_tournament_reflow_division_order',
+          dayOfWeek: 0,
+          startDate: eventStart,
+          endDate: eventEnd,
+          repeating: true,
+          startTimeMinutes: 10 * 60,
+          endTimeMinutes: 18 * 60,
+          fieldIds: [fieldOne.id, fieldTwo.id],
+          divisions: [firstPoolDivision, secondPoolDivision, bracketDivision],
+        }),
+      ],
+    });
+
+    const result = rescheduleEventMatchesPreservingLocks(event);
+    const resultMatchState = new Map(
+      result.matches.map((match) => [
+        match.id,
+        { matchId: match.matchId, divisionId: match.division.id },
+      ]),
+    );
+
+    expect(resultMatchState).toEqual(originalMatchState);
+    expect(result.matches.map((match) => match.id).sort()).toEqual(
+      matches.map((match) => match.id).sort(),
+    );
+
+    const firstPoolMatches = result.matches.filter(
+      (match) => match.division.id === firstPoolDivision.id,
+    );
+    const secondPoolMatches = result.matches.filter(
+      (match) => match.division.id === secondPoolDivision.id,
+    );
+    const bracketMatches = result.matches.filter(
+      (match) => match.division.id === bracketDivision.id,
+    );
+    expect(firstPoolMatches).toHaveLength(2);
+    expect(secondPoolMatches).toHaveLength(2);
+    expect(bracketMatches).toHaveLength(1);
+
+    const firstPoolEnd = Math.max(...firstPoolMatches.map((match) => match.end.getTime()));
+    const secondPoolStart = Math.min(...secondPoolMatches.map((match) => match.start.getTime()));
+    const secondPoolEnd = Math.max(...secondPoolMatches.map((match) => match.end.getTime()));
+    const bracketStart = Math.min(...bracketMatches.map((match) => match.start.getTime()));
+    expect(firstPoolEnd).toBeLessThanOrEqual(secondPoolStart);
+    expect(secondPoolEnd).toBeLessThanOrEqual(bracketStart);
+    expect(Math.max(firstPoolEnd, secondPoolEnd)).toBeLessThanOrEqual(bracketStart);
+  });
+
+  it('throws when a protected later-phase Match blocks preliminary Division ordering during Schedule Reflow', () => {
+    const poolDivision = new Division(
+      'tournament_reflow_protected_pool',
+      'Protected Pool',
+      [],
+      null,
+      4,
+      2,
+      'LEAGUE',
+    );
+    poolDivision.phase = 'POOL';
+    const bracketDivision = new Division(
+      'tournament_reflow_protected_bracket',
+      'Protected Bracket',
+      [],
+      null,
+      4,
+      4,
+      'PLAYOFF',
+    );
+    bracketDivision.phase = 'BRACKET';
+    const field = new PlayingField({
+      id: 'field_tournament_reflow_protected',
+      divisions: [poolDivision, bracketDivision],
+      matches: [],
+      events: [],
+      rentalSlots: [],
+      name: 'Protected Court',
+    });
+    const makeTeam = (id: string, division: Division) => new Team({
+      id,
+      captainId: `captain_${id}`,
+      division,
+      name: id,
+      matches: [],
+      playerIds: [],
+    });
+    const poolTeamOne = makeTeam('protected_pool_team_1', poolDivision);
+    const poolTeamTwo = makeTeam('protected_pool_team_2', poolDivision);
+    const poolTeamThree = makeTeam('protected_pool_team_3', poolDivision);
+    const poolTeamFour = makeTeam('protected_pool_team_4', poolDivision);
+    const bracketTeamOne = makeTeam('protected_bracket_team_1', bracketDivision);
+    const bracketTeamTwo = makeTeam('protected_bracket_team_2', bracketDivision);
+    const eventStart = new Date('2026-03-02T10:00:00.000Z');
+    const eventEnd = new Date('2026-03-02T14:00:00.000Z');
+    const protectedStart = new Date('2026-03-02T10:00:00.000Z');
+    const protectedEnd = new Date('2026-03-02T11:00:00.000Z');
+    const protectedMatch = createMatch({
+      id: 'match_tournament_reflow_protected_bracket',
+      matchId: 1,
+      start: protectedStart,
+      end: protectedEnd,
+      locked: true,
+      field,
+      division: bracketDivision,
+      team1: bracketTeamOne,
+      team2: bracketTeamTwo,
+      eventId: 'event_tournament_reflow_protected',
+    });
+    const preliminaryMatchOne = createMatch({
+      id: 'match_tournament_reflow_protected_pool_one',
+      matchId: 2,
+      start: eventStart,
+      end: new Date(eventStart.getTime() + 60 * MINUTE_MS),
+      locked: false,
+      field,
+      division: poolDivision,
+      team1: poolTeamOne,
+      team2: poolTeamTwo,
+      eventId: 'event_tournament_reflow_protected',
+    });
+    const preliminaryMatchTwo = createMatch({
+      id: 'match_tournament_reflow_protected_pool_two',
+      matchId: 3,
+      start: new Date(eventStart.getTime() + 60 * MINUTE_MS),
+      end: new Date(eventStart.getTime() + 2 * 60 * MINUTE_MS),
+      locked: false,
+      field,
+      division: poolDivision,
+      team1: poolTeamThree,
+      team2: poolTeamFour,
+      eventId: 'event_tournament_reflow_protected',
+    });
+    const event = new Tournament({
+      id: 'event_tournament_reflow_protected',
+      name: 'Protected Tournament Reflow',
+      description: '',
+      start: eventStart,
+      end: eventEnd,
+      location: '',
+      organizationId: null,
+      teams: {
+        [poolTeamOne.id]: poolTeamOne,
+        [poolTeamTwo.id]: poolTeamTwo,
+        [poolTeamThree.id]: poolTeamThree,
+        [poolTeamFour.id]: poolTeamFour,
+        [bracketTeamOne.id]: bracketTeamOne,
+        [bracketTeamTwo.id]: bracketTeamTwo,
+      },
+      players: [],
+      waitListIds: [],
+      freeAgentIds: [],
+      maxParticipants: 6,
+      teamSignup: true,
+      divisions: [poolDivision],
+      playoffDivisions: [bracketDivision],
+      fields: { [field.id]: field },
+      matches: {
+        [protectedMatch.id]: protectedMatch,
+        [preliminaryMatchOne.id]: preliminaryMatchOne,
+        [preliminaryMatchTwo.id]: preliminaryMatchTwo,
+      },
+      officials: [],
+      eventType: 'TOURNAMENT',
+      doubleElimination: false,
+      winnerSetCount: null,
+      loserSetCount: null,
+      matchDurationMinutes: 60,
+      usesSets: false,
+      setDurationMinutes: 0,
+      includePlayoffs: true,
+      playoffTeamCount: 4,
+      doTeamsOfficiate: false,
+      staffingPriority: 'OFFICIAL_COVERAGE_REQUIRED',
+      noFixedEndDateTime: false,
+      restTimeMinutes: 5,
+      timeSlots: [
+        new TimeSlot({
+          id: 'slot_tournament_reflow_protected',
+          dayOfWeek: 0,
+          startDate: eventStart,
+          endDate: eventEnd,
+          repeating: true,
+          startTimeMinutes: 10 * 60,
+          endTimeMinutes: 14 * 60,
+          field: field.id,
+          divisions: [poolDivision, bracketDivision],
+        }),
+      ],
+    });
+    const protectedPlacement = {
+      start: protectedMatch.start.getTime(),
+      end: protectedMatch.end.getTime(),
+      fieldId: protectedMatch.field?.id,
+    };
+
+    expect(() => rescheduleEventMatchesPreservingLocks(event)).toThrow(
+      /Protected Matches conflict with Division scheduling order/,
+    );
+    expect({
+      start: protectedMatch.start.getTime(),
+      end: protectedMatch.end.getTime(),
+      fieldId: protectedMatch.field?.id,
+    }).toEqual(protectedPlacement);
+    expect(protectedMatch.locked).toBe(true);
+    expect(protectedMatch.division.id).toBe(bracketDivision.id);
   });
 
   it('preserves dependent assignments when upstream winners are unresolved', () => {
@@ -2757,5 +3316,225 @@ describe('rescheduleEventMatchesPreservingLocks', () => {
     });
     expect(stableIdResult.matches.find((match) => match.id === stableIdFixture.target.id)?.teamOfficial?.id)
       .toBe('eligible_mapped');
+  });
+  it('ignores protected-only reversed history when it is unaffected by Reflow', () => {
+    const fixture = createDivisionOrderReflowFixture({
+      firstLocked: true,
+      secondLocked: true,
+      firstStart: '2026-03-02T11:00:00.000Z',
+      secondStart: '2026-03-02T10:00:00.000Z',
+      slotEndMinutes: 14 * 60,
+      reverseMatchInsertion: true,
+    });
+    const firstStart = fixture.firstMatch.start;
+    const firstEnd = fixture.firstMatch.end;
+    const secondStart = fixture.secondMatch.start;
+    const secondEnd = fixture.secondMatch.end;
+
+    const result = rescheduleEventMatchesPreservingLocks(fixture.event);
+
+    expect(result.matches).toHaveLength(2);
+    expect(fixture.firstMatch.start).toBe(firstStart);
+    expect(fixture.firstMatch.end).toBe(firstEnd);
+    expect(fixture.secondMatch.start).toBe(secondStart);
+    expect(fixture.secondMatch.end).toBe(secondEnd);
+  });
+
+  it('reports protected-derived cursor exhaustion as DIVISION_ORDER and restores scheduler state', () => {
+    const fixture = createDivisionOrderReflowFixture({
+      firstLocked: true,
+      secondLocked: false,
+      slotEndMinutes: 11 * 60,
+    });
+    const originalEventMatches = fixture.event.matches;
+    const originalEventFields = fixture.event.fields;
+    const originalEventTeams = fixture.event.teams;
+    const originalEventOfficials = fixture.event.officials;
+    const originalEventEnd = fixture.event.end;
+    const originalFieldMatches = fixture.field.matches;
+    const originalTeamMatches = new Map(
+      Object.values(fixture.teams).map((team) => [team.id, team.matches]),
+    );
+    const originalMatchStates = [fixture.firstMatch, fixture.secondMatch].map((match) => ({
+      match,
+      state: { ...match },
+    }));
+    let thrown: unknown;
+    try {
+      rescheduleEventMatchesPreservingLocks(fixture.event);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ScheduleError);
+    expect((thrown as ScheduleError).restrictingFactor).toBe('DIVISION_ORDER');
+    expect((thrown as Error).message).toBe(
+      'Protected Matches conflict with Division scheduling order.',
+    );
+    expect(fixture.event.matches).toBe(originalEventMatches);
+    expect(fixture.event.fields).toBe(originalEventFields);
+    expect(fixture.event.teams).toBe(originalEventTeams);
+    expect(fixture.event.officials).toBe(originalEventOfficials);
+    expect(fixture.event.end).toBe(originalEventEnd);
+    expect(fixture.field.matches).toBe(originalFieldMatches);
+    for (const team of Object.values(fixture.teams)) {
+      expect(team.matches).toBe(originalTeamMatches.get(team.id));
+    }
+    for (const original of originalMatchStates) {
+      expect({ ...original.match }).toEqual(original.state);
+    }
+  });
+
+  it('keeps a no-lock cursor exhaustion as RESOURCE', () => {
+    const fixture = createDivisionOrderReflowFixture({
+      firstLocked: false,
+      secondLocked: false,
+      slotEndMinutes: 11 * 60,
+    });
+    let thrown: unknown;
+    try {
+      rescheduleEventMatchesPreservingLocks(fixture.event);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ScheduleError);
+    expect((thrown as ScheduleError).restrictingFactor).toBe('RESOURCE');
+    expect((thrown as Error).message).not.toBe(
+      'Protected Matches conflict with Division scheduling order.',
+    );
+  });
+
+  it('keeps a protected-derived cursor failure as RESOURCE when no eligible field exists', () => {
+    const fixture = createDivisionOrderReflowFixture({
+      firstLocked: true,
+      secondLocked: false,
+      slotEndMinutes: 11 * 60,
+      secondDivisionEligible: false,
+    });
+    let thrown: unknown;
+    try {
+      rescheduleEventMatchesPreservingLocks(fixture.event);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ScheduleError);
+    expect((thrown as ScheduleError).restrictingFactor).toBe('RESOURCE');
+  });
+
+  it('restores Matches, fields, Teams, participants, officials, and Team-duty assignments after failed RESOURCE Reflow', () => {
+    const fixture = createDivisionOrderReflowFixture({
+      firstLocked: true,
+      secondLocked: false,
+      slotEndMinutes: 11 * 60,
+    });
+    const official = new UserData({
+      id: 'division_order_official',
+      firstName: 'Division',
+      lastName: 'Official',
+      matches: [],
+      divisions: [fixture.firstDivision, fixture.secondDivision],
+    });
+    fixture.event.officials = [official];
+    fixture.firstMatch.official = official;
+    fixture.secondMatch.official = official;
+    fixture.firstMatch.officialAssignments = [{
+      positionId: 'r1',
+      slotIndex: 0,
+      holderType: 'OFFICIAL',
+      userId: official.id,
+      eventOfficialId: 'division_order_event_official',
+      checkedIn: false,
+      hasConflict: false,
+    }];
+    fixture.secondMatch.officialAssignments = [{
+      positionId: 'r1',
+      slotIndex: 0,
+      holderType: 'OFFICIAL',
+      userId: official.id,
+      eventOfficialId: 'division_order_event_official',
+      checkedIn: false,
+      hasConflict: false,
+    }];
+    fixture.firstMatch.requiresTeamOfficial = true;
+    fixture.firstMatch.reservesTeamOfficial = true;
+    fixture.firstMatch.teamOfficial = fixture.teams.second_three;
+    fixture.secondMatch.requiresTeamOfficial = true;
+    fixture.secondMatch.reservesTeamOfficial = true;
+    fixture.secondMatch.teamOfficial = fixture.teams.first_three;
+    fixture.field.matches = [fixture.firstMatch, fixture.secondMatch];
+    fixture.teams.first_one.matches = [fixture.firstMatch, fixture.secondMatch];
+    fixture.teams.first_two.matches = [fixture.firstMatch];
+    fixture.teams.first_three.matches = [fixture.secondMatch];
+    fixture.teams.second_one.matches = [fixture.firstMatch, fixture.secondMatch];
+    fixture.teams.second_two.matches = [fixture.secondMatch];
+    fixture.teams.second_three.matches = [fixture.firstMatch];
+    official.matches = [fixture.firstMatch, fixture.secondMatch];
+
+    const originalEventMatches = fixture.event.matches;
+    const originalEventOfficials = fixture.event.officials;
+    const originalEventEnd = fixture.event.end;
+    const originalFieldMatches = fixture.field.matches;
+    const originalTeamMatches = new Map(
+      Object.values(fixture.teams).map((team) => [team.id, team.matches]),
+    );
+    const originalOfficialMatches = official.matches;
+    const originalOfficialDivisions = official.divisions;
+    const originalMatchStates = [fixture.firstMatch, fixture.secondMatch].map((match) => ({
+      match,
+      start: match.start,
+      end: match.end,
+      field: match.field,
+      placementState: match.placementState,
+      team1: match.team1,
+      team2: match.team2,
+      teamOfficial: match.teamOfficial,
+      requiresTeamOfficial: match.requiresTeamOfficial,
+      reservesTeamOfficial: match.reservesTeamOfficial,
+      official: match.official,
+      officialAssignments: match.officialAssignments,
+    }));
+    const checkedInTeamIds = new Set([
+      fixture.teams.first_three.id,
+      fixture.teams.second_three.id,
+    ]);
+    let thrown: unknown;
+    try {
+      rescheduleEventMatchesPreservingLocks(fixture.event, {
+        eventCheckedInTeamIds: checkedInTeamIds,
+        checkedInTeamIdsByMatch: new Map([[fixture.firstMatch.id, checkedInTeamIds]]),
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ScheduleError);
+    expect((thrown as ScheduleError).restrictingFactor).toBe('RESOURCE');
+    expect((thrown as Error).message).not.toBe(
+      'Protected Matches conflict with Division scheduling order.',
+    );
+    expect(fixture.event.matches).toBe(originalEventMatches);
+    expect(fixture.event.officials).toBe(originalEventOfficials);
+    expect(fixture.event.end).toBe(originalEventEnd);
+    expect(fixture.field.matches).toBe(originalFieldMatches);
+    expect(official.matches).toBe(originalOfficialMatches);
+    expect(official.divisions).toBe(originalOfficialDivisions);
+    for (const team of Object.values(fixture.teams)) {
+      expect(team.matches).toBe(originalTeamMatches.get(team.id));
+    }
+    for (const original of originalMatchStates) {
+      expect(original.match.start).toBe(original.start);
+      expect(original.match.end).toBe(original.end);
+      expect(original.match.field).toBe(original.field);
+      expect(original.match.placementState).toBe(original.placementState);
+      expect(original.match.team1).toBe(original.team1);
+      expect(original.match.team2).toBe(original.team2);
+      expect(original.match.teamOfficial).toBe(original.teamOfficial);
+      expect(original.match.requiresTeamOfficial).toBe(original.requiresTeamOfficial);
+      expect(original.match.reservesTeamOfficial).toBe(original.reservesTeamOfficial);
+      expect(original.match.official).toBe(original.official);
+      expect(original.match.officialAssignments).toBe(original.officialAssignments);
+    }
   });
 });

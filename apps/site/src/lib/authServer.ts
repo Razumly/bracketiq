@@ -8,8 +8,10 @@ const AUTH_COOKIE_NAME = 'auth_token';
 const SESSION_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 400; // Browser-friendly persistent session cap.
 const AUTH_TOKEN_ISSUER = 'bracket-iq';
 const SESSION_TOKEN_AUDIENCE = 'bracket-iq-session';
+const RECENT_AUTH_TOKEN_AUDIENCE = 'bracket-iq-recent-auth';
 const WATCH_SETUP_TOKEN_AUDIENCE = 'bracket-iq-watch-setup';
 const JWT_ALGORITHM = 'HS256' as const;
+export const RECENT_AUTH_TOKEN_TTL_SECONDS = 10 * 60;
 export const WATCH_SETUP_TOKEN_TTL_SECONDS = 60 * 5;
 
 export type SessionDevice = 'web' | 'mobile' | 'watch';
@@ -19,6 +21,7 @@ export type SessionToken = {
   isAdmin: boolean;
   sessionVersion: number;
   device?: SessionDevice;
+  issuedAtSeconds?: number | null;
 };
 
 export type VerifiedSessionToken = SessionToken & {
@@ -30,6 +33,12 @@ export type WatchSetupToken = {
   sessionVersion: number;
   purpose: 'watch_setup';
   issuedAtSeconds: number | null;
+};
+
+export type RecentAuthToken = {
+  userId: string;
+  purpose: 'sensitive_action';
+  issuedAtSeconds: number;
 };
 
 export const getAuthSecret = (): string => {
@@ -70,8 +79,14 @@ export const verifyPassword = async (plain: string, stored: string): Promise<boo
 };
 
 export const signSessionToken = (payload: SessionToken): string => {
+  const { issuedAtSeconds, ...session } = payload;
+  const preserveIssuedAt = Number.isInteger(issuedAtSeconds);
   return jwt.sign(
-    { ...payload, tokenType: 'session' },
+    {
+      ...session,
+      ...(preserveIssuedAt ? { iat: issuedAtSeconds } : {}),
+      tokenType: 'session',
+    },
     getAuthSecret(),
     {
       algorithm: JWT_ALGORITHM,
@@ -113,6 +128,58 @@ export const verifySessionToken = (token: string): VerifiedSessionToken | null =
     return null;
   }
 };
+export const signRecentAuthToken = (
+  payload: Pick<RecentAuthToken, 'userId' | 'purpose'>,
+): string => {
+  return jwt.sign(
+    {
+      userId: payload.userId,
+      purpose: payload.purpose,
+      tokenType: 'recent_auth',
+    },
+    getAuthSecret(),
+    {
+      algorithm: JWT_ALGORITHM,
+      issuer: AUTH_TOKEN_ISSUER,
+      audience: RECENT_AUTH_TOKEN_AUDIENCE,
+      expiresIn: RECENT_AUTH_TOKEN_TTL_SECONDS,
+    },
+  );
+};
+
+export const verifyRecentAuthToken = (token: string): RecentAuthToken | null => {
+  try {
+    const decoded = jwt.verify(token, getAuthSecret(), {
+      algorithms: [JWT_ALGORITHM],
+      issuer: AUTH_TOKEN_ISSUER,
+      audience: RECENT_AUTH_TOKEN_AUDIENCE,
+    }) as JwtPayload;
+    if (decoded.purpose !== 'sensitive_action' || decoded.tokenType !== 'recent_auth') {
+      return null;
+    }
+    const issuedAt = decoded.iat;
+    const expiresAt = decoded.exp;
+    if (
+      typeof decoded.userId !== 'string'
+      || decoded.userId.trim().length === 0
+      || typeof issuedAt !== 'number'
+      || !Number.isInteger(issuedAt)
+      || typeof expiresAt !== 'number'
+      || !Number.isInteger(expiresAt)
+      || expiresAt <= issuedAt
+    ) {
+      return null;
+    }
+    return {
+      userId: decoded.userId,
+      purpose: 'sensitive_action',
+      issuedAtSeconds: Number(decoded.iat),
+    };
+  } catch {
+    return null;
+  }
+};
+
 
 export const signWatchSetupToken = (payload: Pick<SessionToken, 'userId' | 'sessionVersion'>): string => {
   return jwt.sign(

@@ -2,11 +2,8 @@ import { createHash } from 'crypto';
 import { Client } from 'pg';
 import { prisma } from '@/lib/prisma';
 import { resolvePrismaPgPoolConfig } from '@/lib/prismaConfig';
-import { isEmailEnabled, sendEmail } from '@/server/email';
 import { runAffiliateSourceScrape } from './service';
-
-const DEFAULT_SUMMARY_RECIPIENT = 'samuel.r@razumly.com';
-const DEFAULT_ADMIN_URL = 'https://bracket-iq.com/admin';
+import { emitAffiliateOperationalAlerts, type AffiliateOperationalAlertInput } from './affiliateOperationalAlerts';
 const MIN_INTERVAL_MINUTES = 60;
 const DAILY_INTERVAL_MINUTES = 1440;
 const DEFAULT_LIGHTWEIGHT_CHECK_TIMEOUT_MS = 10_000;
@@ -86,6 +83,16 @@ export type LightweightSourceCheckResult = {
   errorMessage?: string;
 };
 
+
+
+type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
+
+type RunDueAffiliateScrapesOptions = {
+  now?: Date;
+  dryRun?: boolean;
+  limit?: number;
+  fetchImpl?: FetchLike;
+};
 export type RunDueAffiliateScrapesResult = {
   startedAt: Date;
   finishedAt: Date;
@@ -94,36 +101,8 @@ export type RunDueAffiliateScrapesResult = {
   lightweightSourceCount: number;
   results: ScheduledScrapeResultRow[];
   lightweightResults: LightweightSourceCheckResult[];
-  intakeDigest: AffiliateIntakeDailyDigest;
-  emailSent: boolean;
-  emailError: string | null;
   lockAcquired: boolean;
   dryRun: boolean;
-};
-
-export type AffiliateIntakeDailyDigest = {
-  windowStartedAt: Date;
-  windowFinishedAt: Date;
-  discoveryRunCount: number;
-  discoveryStatusCounts: Record<string, number>;
-  newDiscoveryResultCount: number;
-  createdIntakeCount: number;
-  intakeRunCount: number;
-  intakeStatusCounts: Record<string, number>;
-  capturedPageCount: number;
-  mappingJobUpdateCount: number;
-  mappingStatusCounts: Record<string, number>;
-  humanReviewRequiredJobs: number;
-};
-
-type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
-
-type RunDueAffiliateScrapesOptions = {
-  now?: Date;
-  dryRun?: boolean;
-  sendSummary?: boolean;
-  limit?: number;
-  fetchImpl?: FetchLike;
 };
 
 type LightweightCheckMetadata = {
@@ -171,84 +150,7 @@ const readString = (value: unknown): string | undefined => (
   typeof value === 'string' && value.trim() ? value.trim() : undefined
 );
 
-const countStatuses = (rows: Array<{ status?: string | null }>): Record<string, number> => {
-  const counts: Record<string, number> = {};
-  rows.forEach((row) => {
-    const status = readString(row.status)?.toUpperCase() ?? 'UNKNOWN';
-    counts[status] = (counts[status] ?? 0) + 1;
-  });
-  return Object.fromEntries(Object.entries(counts).sort(([left], [right]) => left.localeCompare(right)));
-};
 
-const emptyIntakeDigest = (windowFinishedAt: Date): AffiliateIntakeDailyDigest => ({
-  windowStartedAt: new Date(windowFinishedAt.getTime() - 86_400_000),
-  windowFinishedAt,
-  discoveryRunCount: 0,
-  discoveryStatusCounts: {},
-  newDiscoveryResultCount: 0,
-  createdIntakeCount: 0,
-  intakeRunCount: 0,
-  intakeStatusCounts: {},
-  capturedPageCount: 0,
-  mappingJobUpdateCount: 0,
-  mappingStatusCounts: {},
-  humanReviewRequiredJobs: 0,
-});
-
-const loadIntakeDailyDigest = async (windowFinishedAt: Date): Promise<AffiliateIntakeDailyDigest> => {
-  const digest = emptyIntakeDigest(windowFinishedAt);
-  const finishedWindow = {
-    gte: digest.windowStartedAt,
-    lt: digest.windowFinishedAt,
-  };
-  const [discoveryRuns, intakeRuns, mappingJobs, humanReviewRequiredJobs] = await Promise.all([
-    (prisma as any).affiliateSourceDiscoveryRuns.findMany({
-      where: { finishedAt: finishedWindow },
-      select: {
-        status: true,
-        newResultCount: true,
-        createdIntakeCount: true,
-      },
-    }),
-    (prisma as any).affiliateSourceIntakeRuns.findMany({
-      where: { finishedAt: finishedWindow },
-      select: {
-        status: true,
-        capturedPageCount: true,
-      },
-    }),
-    (prisma as any).affiliateSourceMappingJobs.findMany({
-      where: { updatedAt: finishedWindow },
-      select: { status: true },
-    }),
-    (prisma as any).affiliateSourceMappingJobs.count({
-      where: { status: 'HUMAN_REVIEW_REQUIRED' },
-    }),
-  ]);
-
-  return {
-    ...digest,
-    discoveryRunCount: discoveryRuns.length,
-    discoveryStatusCounts: countStatuses(discoveryRuns),
-    newDiscoveryResultCount: discoveryRuns.reduce(
-      (total: number, run: { newResultCount?: number | null }) => total + readNumber(run.newResultCount),
-      0,
-    ),
-    createdIntakeCount: discoveryRuns.reduce(
-      (total: number, run: { createdIntakeCount?: number | null }) => total + readNumber(run.createdIntakeCount),
-      0,
-    ),
-    intakeRunCount: intakeRuns.length,
-    intakeStatusCounts: countStatuses(intakeRuns),
-    capturedPageCount: intakeRuns.reduce(
-      (total: number, run: { capturedPageCount?: number | null }) => total + readNumber(run.capturedPageCount),
-      0,
-    ),
-    mappingJobUpdateCount: mappingJobs.length,
-    mappingStatusCounts: countStatuses(mappingJobs),
-    humanReviewRequiredJobs: readNumber(humanReviewRequiredJobs),
-  };
-};
 
 const lightweightCheckTimeoutMs = (): number => {
   const configured = Number.parseInt(process.env.AFFILIATE_LIGHTWEIGHT_CHECK_TIMEOUT_MS ?? '', 10);
@@ -257,20 +159,6 @@ const lightweightCheckTimeoutMs = (): number => {
     : DEFAULT_LIGHTWEIGHT_CHECK_TIMEOUT_MS;
 };
 
-const summaryRecipient = (): string => (
-  process.env.AFFILIATE_SCRAPE_SUMMARY_EMAIL_TO?.trim()
-  || process.env.ADMIN_NOTIFICATION_EMAIL_TO?.trim()
-  || DEFAULT_SUMMARY_RECIPIENT
-);
-
-const adminUrl = (): string => {
-  const base = (
-    process.env.NEXT_PUBLIC_APP_URL?.trim()
-    || process.env.APP_BASE_URL?.trim()
-    || DEFAULT_ADMIN_URL.replace(/\/admin$/, '')
-  ).replace(/\/$/, '');
-  return `${base}/admin`;
-};
 
 export const isAffiliateSourceDue = (
   source: Pick<AffiliateSourceScheduleRow, 'scrapeIntervalMinutes'>,
@@ -659,131 +547,28 @@ const summarizeRunResult = async (
   };
 };
 
-const resultLine = (result: ScheduledScrapeResultRow): string => {
-  if (result.status === 'SUCCEEDED') {
-    return [
-      `- ${result.sourceName}: succeeded`,
-      `${result.createdCandidateCount} created`,
-      `${result.updatedCandidateCount} updated`,
-      `${result.automaticallyPublishedCandidateCount} automatically published`,
-      `${result.rejectedCount} rejected`,
-      `${result.pendingApprovalCandidateCount} pending approval`,
-    ].join(', ');
-  }
-  if (result.status === 'SKIPPED') {
-    return `- ${result.sourceName}: skipped (${result.reason})`;
-  }
-  return `- ${result.sourceName}: failed (${result.errorMessage})`;
+const alertInputForScrapeFailure = (
+  result: ScheduledScrapeResultRow | LightweightSourceCheckResult,
+  now: Date,
+): AffiliateOperationalAlertInput | null => {
+  if (result.status !== 'FAILED') return null;
+  return {
+    eventKey: `affiliate-source-refresh-failed:${result.sourceId}:${now.toISOString()}`,
+    category: 'AUTOMATIC_REFRESH_FAILURE',
+    severity: 'warning',
+    title: 'Affiliate source refresh failed',
+    detail: `${result.sourceName} (${result.sourceKey}): ${result.errorMessage ?? 'No error recorded'}`,
+    subjectType: 'AFFILIATE_SOURCE',
+    subjectId: result.sourceId,
+    reasonCodes: ['SOURCE_REFRESH_FAILED'],
+    payload: {
+      sourceId: result.sourceId,
+      sourceKey: result.sourceKey,
+      status: result.status,
+    },
+  };
 };
 
-const lightweightResultLine = (result: LightweightSourceCheckResult): string => {
-  if (result.status === 'FAILED') {
-    return `- ${result.sourceName}: check failed (${result.errorMessage ?? 'Unknown failure'})`;
-  }
-  return `- ${result.sourceName}: ${result.status.toLowerCase()}`;
-};
-
-const statusCountsLine = (counts: Record<string, number>): string => {
-  const entries = Object.entries(counts);
-  return entries.length
-    ? entries.map(([status, count]) => `${status.toLowerCase()} ${count}`).join(', ')
-    : 'none';
-};
-
-const buildSummaryText = (result: RunDueAffiliateScrapesResult): string => {
-  const succeeded = result.results.filter((row) => row.status === 'SUCCEEDED').length;
-  const failed = result.results.filter((row) => row.status === 'FAILED').length;
-  const skipped = result.results.filter((row) => row.status === 'SKIPPED').length;
-  const pendingApproval = result.results.reduce((total, row) => (
-    row.status === 'SUCCEEDED' ? total + row.pendingApprovalCandidateCount : total
-  ), 0);
-  const created = result.results.reduce((total, row) => (
-    row.status === 'SUCCEEDED' ? total + row.createdCandidateCount : total
-  ), 0);
-  const updated = result.results.reduce((total, row) => (
-    row.status === 'SUCCEEDED' ? total + row.updatedCandidateCount : total
-  ), 0);
-  const automaticallyPublished = result.results.reduce((total, row) => (
-    row.status === 'SUCCEEDED' ? total + row.automaticallyPublishedCandidateCount : total
-  ), 0);
-  const rejected = result.results.reduce((total, row) => (
-    row.status === 'SUCCEEDED' ? total + row.rejectedCount : total
-  ), 0);
-  const changed = result.lightweightResults.filter((row) => row.status === 'CHANGED').length;
-  const unchanged = result.lightweightResults.filter((row) => row.status === 'UNCHANGED').length;
-  const baselined = result.lightweightResults.filter((row) => row.status === 'BASELINED').length;
-  const checkFailed = result.lightweightResults.filter((row) => row.status === 'FAILED').length;
-  const noteworthyChecks = result.lightweightResults.filter((row) => (
-    row.status === 'CHANGED' || row.status === 'FAILED'
-  ));
-
-  return [
-    'BracketIQ daily affiliate operations summary',
-    '',
-    `Started: ${result.startedAt.toISOString()}`,
-    `Finished: ${result.finishedAt.toISOString()}`,
-    `Published source organizations reconciled for search: ${result.reconciledSourceOrganizationCount}`,
-    `Full scrapes due: ${result.dueSourceCount}`,
-    `Full scrapes succeeded: ${succeeded}`,
-    `Full scrapes failed: ${failed}`,
-    `Full scrapes skipped: ${skipped}`,
-    `New candidates: ${created}`,
-    `Updated candidates: ${updated}`,
-    `Automatically published: ${automaticallyPublished}`,
-    `Rejected rows: ${rejected}`,
-    `Pending approval: ${pendingApproval}`,
-    `Lightweight checks: ${result.lightweightSourceCount}`,
-    `Sources changed: ${changed}`,
-    `Sources unchanged: ${unchanged}`,
-    `Sources baselined: ${baselined}`,
-    `Lightweight check failures: ${checkFailed}`,
-    '',
-    'Intake activity (previous 24 hours):',
-    `Window: ${result.intakeDigest.windowStartedAt.toISOString()} to ${result.intakeDigest.windowFinishedAt.toISOString()}`,
-    `Discovery runs: ${result.intakeDigest.discoveryRunCount} (${statusCountsLine(result.intakeDigest.discoveryStatusCounts)})`,
-    `New discovery results: ${result.intakeDigest.newDiscoveryResultCount}`,
-    `Intakes created: ${result.intakeDigest.createdIntakeCount}`,
-    `Capture runs: ${result.intakeDigest.intakeRunCount} (${statusCountsLine(result.intakeDigest.intakeStatusCounts)})`,
-    `Pages captured: ${result.intakeDigest.capturedPageCount}`,
-    `Mapping jobs updated: ${result.intakeDigest.mappingJobUpdateCount} (${statusCountsLine(result.intakeDigest.mappingStatusCounts)})`,
-    `Current human-review backlog: ${result.intakeDigest.humanReviewRequiredJobs}`,
-    '',
-    'Full scrape results:',
-    ...(result.results.length ? result.results.map(resultLine) : ['- No full scrapes were due.']),
-    '',
-    'Lightweight changes and failures:',
-    ...(noteworthyChecks.length
-      ? noteworthyChecks.map(lightweightResultLine)
-      : ['- No source changes or lightweight check failures detected.']),
-    '',
-    `Review candidates: ${adminUrl()}`,
-  ].join('\n');
-};
-
-const sendSummaryEmail = async (result: RunDueAffiliateScrapesResult): Promise<boolean> => {
-  if (!isEmailEnabled()) {
-    return false;
-  }
-  const failed = result.results.filter((row) => row.status === 'FAILED').length;
-  const checkFailed = result.lightweightResults.filter((row) => row.status === 'FAILED').length;
-  const changed = result.lightweightResults.filter((row) => row.status === 'CHANGED').length;
-  const pendingApproval = result.results.reduce((total, row) => (
-    row.status === 'SUCCEEDED' ? total + row.pendingApprovalCandidateCount : total
-  ), 0);
-  await sendEmail({
-    to: summaryRecipient(),
-    subject: [
-      '[BracketIQ] Daily affiliate scrapes:',
-      `${result.intakeDigest.intakeRunCount} intake captures,`,
-      `${result.intakeDigest.humanReviewRequiredJobs} human review,`,
-      `${changed} source changes,`,
-      `${pendingApproval} pending approval,`,
-      `${failed + checkFailed} failed`,
-    ].join(' '),
-    text: buildSummaryText(result),
-  });
-  return true;
-};
 
 export const runDueAffiliateScrapes = async (
   options: RunDueAffiliateScrapesOptions = {},
@@ -800,9 +585,6 @@ export const runDueAffiliateScrapes = async (
       lightweightSourceCount: 0,
       results: [],
       lightweightResults: [],
-      intakeDigest: emptyIntakeDigest(startedAt),
-      emailSent: false,
-      emailError: null,
       lockAcquired: false,
       dryRun: options.dryRun === true,
     };
@@ -850,9 +632,16 @@ export const runDueAffiliateScrapes = async (
         options.fetchImpl ?? globalThis.fetch.bind(globalThis),
       );
 
-    const intakeDigest = options.dryRun
-      ? emptyIntakeDigest(startedAt)
-      : await loadIntakeDailyDigest(startedAt);
+    const alertInputs = [...results, ...lightweightResults]
+      .map((result) => alertInputForScrapeFailure(result, startedAt))
+      .filter((input): input is AffiliateOperationalAlertInput => input !== null);
+    if (alertInputs.length > 0) {
+      try {
+        await emitAffiliateOperationalAlerts(alertInputs);
+      } catch (error) {
+        console.error('[affiliate:scrape] failed to persist operational alerts', error);
+      }
+    }
     const finishedAt = new Date();
     const result: RunDueAffiliateScrapesResult = {
       startedAt,
@@ -862,20 +651,9 @@ export const runDueAffiliateScrapes = async (
       lightweightSourceCount: lightweightSources.length,
       results,
       lightweightResults,
-      intakeDigest,
-      emailSent: false,
-      emailError: null,
       lockAcquired: true,
       dryRun: options.dryRun === true,
     };
-    if (options.sendSummary !== false && !options.dryRun) {
-      try {
-        result.emailSent = await sendSummaryEmail(result);
-      } catch (error) {
-        result.emailError = error instanceof Error ? error.message : String(error);
-        console.error('[affiliate:scrape:due] summary email failed', result.emailError);
-      }
-    }
     return result;
   } finally {
     await schedulerLock.release();

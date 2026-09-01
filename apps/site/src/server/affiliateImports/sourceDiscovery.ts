@@ -3,7 +3,18 @@ import { createId } from '@/lib/id';
 import { Client } from 'pg';
 import { prisma } from '@/lib/prisma';
 import { resolvePrismaPgPoolConfig } from '@/lib/prismaConfig';
-import { isEmailEnabled, sendEmail } from '@/server/email';
+import type {
+  AffiliateReplenishmentWaves,
+  AffiliateReplenishmentDemands,
+  AffiliateSourceIntakes,
+  AffiliateSourceIntakeRuns,
+  AffiliateSourceMappingJobs,
+} from '@/generated/prisma/client';
+import {
+  emitAffiliateOperationalAlert,
+  emitAffiliateOperationalAlerts,
+  type AffiliateOperationalAlertInput,
+} from './affiliateOperationalAlerts';
 import type {
   AffiliateSourceCaptureClient,
   AffiliateSourceSearchClient,
@@ -41,16 +52,17 @@ import {
 } from './sourceUrlIntake';
 import { findAffiliateIntakeIdsForPolicyKey } from './sourcePolicyIntakes';
 import { loadAffiliateCoverageCityCatalog } from './coverageCityCatalog';
+import type { AffiliateReplenishmentWaveExecutionResult } from './affiliateSupplyPersistence';
 
 const DISCOVERY_LOCK_ID = 4201072126;
-const DEFAULT_SUMMARY_RECIPIENT = 'samuel.r@razumly.com';
-const DEFAULT_ADMIN_URL = 'https://bracket-iq.com/admin';
 const MAX_AUTOMATION_DISCOVERY_RUNS = 5;
 const MAX_AUTOMATION_INTAKE_RUNS = 10;
 const POLICY_EXPIRY_DAYS = 180;
 const DEFAULT_STALE_DISCOVERY_RUN_AGE_MS = 60 * 60 * 1000;
 const MIN_STALE_DISCOVERY_RUN_AGE_MS = 20 * 60 * 1000;
 const MAX_STALE_DISCOVERY_RUNS_PER_PASS = 25;
+const SUPERVISOR_HEARTBEAT_LEASE_MS = 20 * 60 * 1000;
+const DEFAULT_SUPERVISOR_WORKER_ID = 'affiliate-intake-supervisor';
 
 type JsonRecord = Record<string, unknown>;
 type DiscoveryDependencies = {
@@ -75,6 +87,8 @@ const db = (client: unknown = prisma) => {
     intakeRuns: dbClient.affiliateSourceIntakeRuns as any,
     sports: dbClient.sports as any,
     queryExecutions: dbClient.affiliateSourceDiscoveryQueryExecutions as any,
+    mappingJobs: dbClient.affiliateSourceMappingJobs as any,
+    workerHealth: dbClient.affiliateAgentWorkerHealth as any,
   };
 };
 
@@ -84,6 +98,11 @@ const stringValue = (value: unknown): string | null => (
 
 const recordValue = (value: unknown): JsonRecord => (
   value && typeof value === 'object' && !Array.isArray(value) ? value as JsonRecord : {}
+);
+const stringValues = (value: unknown): string[] => (
+  Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    : []
 );
 
 const nextRunAt = (from: Date, intervalMinutes: number): Date => (
@@ -304,25 +323,45 @@ export const listAffiliateSourceDiscoveryCampaigns = async () => {
 export const queueAffiliateSourceDiscoveryRun = async (
   campaignId: string,
   userId?: string | null,
+  requestedRunId?: string | null,
 ) => {
   const campaign = await db().campaigns.findUnique({ where: { id: campaignId } });
   if (!campaign || campaign.status === 'ARCHIVED') {
     throw new Error('Affiliate source discovery campaign not found or archived.');
   }
-  const active = await db().runs.findFirst({
-    where: { campaignId, status: { in: ['QUEUED', 'RUNNING'] } },
-    orderBy: { queuedAt: 'asc' },
-  });
-  if (active) return active;
-  return db().runs.create({
-    data: {
-      id: createId(),
-      campaignId,
-      requestedByUserId: userId ?? null,
-      status: 'QUEUED',
-      queuedAt: new Date(),
-    },
-  });
+  const runId = stringValue(requestedRunId);
+  if (runId) {
+    const existing = await db().runs.findUnique({ where: { id: runId } });
+    if (existing) {
+      if (existing.campaignId !== campaignId) {
+        throw new Error('Affiliate source discovery run id belongs to another campaign.');
+      }
+      return existing;
+    }
+  } else {
+    const active = await db().runs.findFirst({
+      where: { campaignId, status: { in: ['QUEUED', 'RUNNING'] } },
+      orderBy: { queuedAt: 'asc' },
+    });
+    if (active) return active;
+  }
+  try {
+    return await db().runs.create({
+      data: {
+        id: runId ?? createId(),
+        campaignId,
+        requestedByUserId: userId ?? null,
+        status: 'QUEUED',
+        queuedAt: new Date(),
+      },
+    });
+  } catch (error) {
+    if (runId) {
+      const existing = await db().runs.findUnique({ where: { id: runId } });
+      if (existing?.campaignId === campaignId) return existing;
+    }
+    throw error;
+  }
 };
 
 const claimDiscoveryRun = async (runId: string | undefined, workerId: string, now: Date) => {
@@ -934,6 +973,456 @@ export const processNextAffiliateSourceDiscoveryRun = async (
   });
   return { run: updated, summary };
 };
+const REPLENISHMENT_RETRY_MS = 15 * 60 * 1000;
+const ACTIVE_CAPTURE_RUN_STATUSES = new Set(['QUEUED', 'RUNNING', 'CLAIMED']);
+
+export type AffiliateReplenishmentCampaignWaveDependencies = Readonly<{
+  searchClient?: AffiliateSourceSearchClient;
+  firecrawlClient?: AffiliateFirecrawlClient;
+  captureClient?: AffiliateSourceCaptureClient;
+  fallbackCaptureClient?: AffiliateSourceCaptureClient | null;
+  fetchResource?: typeof fetchBoundedPublicResource;
+  now?: () => Date;
+  workerId?: string;
+}>;
+
+const replenishmentEvidenceRefs = (values: readonly (string | null | undefined)[]): string[] => (
+  Array.from(new Set(values.filter((value): value is string => Boolean(value && value.trim()))))
+);
+
+const latestRowsByIntakeId = (rows: readonly any[]): Map<string, any> => {
+  const latest = new Map<string, any>();
+  for (const row of rows) {
+    const intakeId = stringValue(row.intakeId);
+    if (intakeId && !latest.has(intakeId)) latest.set(intakeId, row);
+  }
+  return latest;
+};
+
+type AffiliateReplenishmentHandoffRows = Readonly<{
+  intakeRows: Array<Pick<AffiliateSourceIntakes, 'id' | 'status'>>;
+  captureRows: Array<Pick<AffiliateSourceIntakeRuns, 'id' | 'intakeId' | 'status' | 'errorMessage'>>;
+  mappingRows: Array<Pick<AffiliateSourceMappingJobs, 'id' | 'intakeId' | 'status'>>;
+}>;
+
+const loadAffiliateReplenishmentHandoffRows = async (
+  intakeIds: readonly string[],
+): Promise<AffiliateReplenishmentHandoffRows> => {
+  const [intakeRows, captureRows, mappingRows] = await Promise.all([
+    db().intakes.findMany({
+      where: { id: { in: intakeIds } },
+      select: { id: true, status: true },
+    }),
+    db().intakeRuns.findMany({
+      where: { intakeId: { in: intakeIds } },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, intakeId: true, status: true, errorMessage: true },
+    }),
+    db().mappingJobs.findMany({
+      where: { intakeId: { in: intakeIds } },
+      select: { id: true, intakeId: true, status: true },
+    }),
+  ]);
+  return {
+    intakeRows,
+    captureRows,
+    mappingRows,
+  };
+};
+/**
+ * Execute one bounded discovery wave and wait for its capture-to-mapping handoff.
+ *
+ * The wave stores the discovery run id in its result. Later reconciliations
+ * resume that run and never create a second run for the same wave.
+ */
+export const runAffiliateReplenishmentCampaignWave = async (
+  input: Readonly<{
+    wave: AffiliateReplenishmentWaves;
+    demand: AffiliateReplenishmentDemands;
+    contract: unknown;
+  }>,
+  dependencies: AffiliateReplenishmentCampaignWaveDependencies = {},
+): Promise<AffiliateReplenishmentWaveExecutionResult> => {
+  const now = dependencies.now?.() ?? new Date();
+  const waveResult = recordValue(input.wave?.resultJson);
+  const evidenceRefs = replenishmentEvidenceRefs([
+    `demand:${stringValue(input.demand?.id) ?? 'unknown'}`,
+    `wave:${stringValue(input.wave?.id) ?? 'unknown'}`,
+    stringValue(input.wave?.campaignId) ? `campaign:${String(input.wave.campaignId)}` : null,
+    stringValue(waveResult.discoveryRunId) ? `discovery-run:${String(waveResult.discoveryRunId)}` : null,
+  ]);
+  let campaignId = stringValue(input.wave?.campaignId);
+  let coveragePlanningJob: {
+    status?: string | null;
+    result?: unknown;
+    errorMessage?: string | null;
+  } | null = null;
+  let coveragePlanningJobId = stringValue(input.wave?.coveragePlanningJobId);
+
+  if (!campaignId && coveragePlanningJobId) {
+    coveragePlanningJob = await (prisma as any).affiliateCoverageAgentJobs?.findUnique?.({
+      where: { id: coveragePlanningJobId },
+    });
+    const coverageResult = recordValue(coveragePlanningJob?.result);
+    campaignId = stringValue(
+      coverageResult.campaignId
+      ?? coverageResult.selectedCampaignId
+      ?? recordValue(coverageResult.campaign).id,
+    );
+    if (campaignId && (prisma as any).affiliateReplenishmentWaves?.update) {
+      await (prisma as any).affiliateReplenishmentWaves.update({
+        where: { id: input.wave.id },
+        data: { campaignId },
+      });
+    }
+  }
+
+  if (!campaignId) {
+    const coverageStatus = coveragePlanningJob
+      ? String(coveragePlanningJob.status ?? 'QUEUED').toUpperCase()
+      : 'MISSING';
+    const coverageResult = recordValue(coveragePlanningJob?.result);
+    const coverageDecision = String(coverageResult.decision ?? '').toUpperCase();
+    const coverageRetryValue = coverageResult.retryAt ?? coverageResult.nextEligibleAt;
+    const parsedRetryAt = coverageRetryValue instanceof Date
+      ? coverageRetryValue
+      : typeof coverageRetryValue === 'string'
+        ? new Date(coverageRetryValue)
+        : null;
+    const retryAt = parsedRetryAt && !Number.isNaN(parsedRetryAt.getTime())
+      ? parsedRetryAt
+      : null;
+    const coverageEvidenceRefs = replenishmentEvidenceRefs([
+      ...evidenceRefs,
+      coveragePlanningJobId ? `coverage-job:${coveragePlanningJobId}` : null,
+      ...stringValues(coverageResult.evidenceRefs),
+    ]);
+    const baseResult = {
+      coveragePlanningJobId,
+      status: coverageStatus,
+      decision: coverageDecision || null,
+      errorMessage: coveragePlanningJob?.errorMessage ?? null,
+    };
+    if (['QUEUED', 'RUNNING', 'CLAIMED'].includes(coverageStatus)) {
+      return {
+        status: 'WAITING',
+        provider: 'COVERAGE_PLANNER',
+        providerOperationKey: coveragePlanningJobId
+          ? `affiliate-replenishment:coverage:${coveragePlanningJobId}`
+          : `affiliate-replenishment:wave:${String(input.wave?.id ?? 'unknown')}`,
+        retryAt,
+        result: baseResult,
+        evidenceRefs: coverageEvidenceRefs,
+      };
+    }
+    if (
+      ['FAILED', 'RETRY_SCHEDULED'].includes(coverageStatus)
+      || coverageDecision === 'RETRY_LATER'
+    ) {
+      return {
+        status: 'FAILED',
+        provider: 'COVERAGE_PLANNER',
+        providerOperationKey: coveragePlanningJobId
+          ? `affiliate-replenishment:coverage:${coveragePlanningJobId}`
+          : `affiliate-replenishment:wave:${String(input.wave?.id ?? 'unknown')}`,
+        retryAt: retryAt ?? new Date(now.getTime() + REPLENISHMENT_RETRY_MS),
+        marginalYield: null,
+        errorCode: 'COVERAGE_PLANNING_RETRY',
+        result: baseResult,
+        evidenceRefs: coverageEvidenceRefs,
+      };
+    }
+    if (coverageDecision === 'SATURATED_NO_YIELD') {
+      return {
+        status: 'SUCCEEDED',
+        provider: 'COVERAGE_PLANNER',
+        providerOperationKey: coveragePlanningJobId
+          ? `affiliate-replenishment:coverage:${coveragePlanningJobId}`
+          : `affiliate-replenishment:wave:${String(input.wave?.id ?? 'unknown')}`,
+        searchSaturatedUntil: retryAt ?? new Date(now.getTime() + 24 * 60 * 60 * 1000),
+        marginalYield: 0,
+        result: baseResult,
+        evidenceRefs: coverageEvidenceRefs,
+      };
+    }
+    if (coverageDecision === 'WAITING_FOR_PIPELINE') {
+      return {
+        status: 'WAITING',
+        provider: 'COVERAGE_PLANNER',
+        providerOperationKey: coveragePlanningJobId
+          ? `affiliate-replenishment:coverage:${coveragePlanningJobId}`
+          : `affiliate-replenishment:wave:${String(input.wave?.id ?? 'unknown')}`,
+        retryAt: retryAt ?? new Date(now.getTime() + REPLENISHMENT_RETRY_MS),
+        result: baseResult,
+        evidenceRefs: coverageEvidenceRefs,
+      };
+    }
+    return {
+      status: 'PAUSED',
+      provider: 'COVERAGE_PLANNER',
+      providerOperationKey: coveragePlanningJobId
+        ? `affiliate-replenishment:coverage:${coveragePlanningJobId}`
+        : `affiliate-replenishment:wave:${String(input.wave?.id ?? 'unknown')}`,
+      errorCode: coverageDecision === 'HUMAN_REVIEW_REQUIRED'
+        ? 'COVERAGE_PLANNING_HUMAN_REVIEW_REQUIRED'
+        : coverageDecision === 'SOURCE_EXCLUDED' || coverageStatus === 'EXCLUDED'
+          ? 'COVERAGE_PLANNING_SOURCE_EXCLUDED'
+          : 'COVERAGE_PLANNING_NO_CAMPAIGN',
+      result: baseResult,
+      evidenceRefs: coverageEvidenceRefs,
+    };
+  }
+
+  let discoveryRunId = stringValue(waveResult.discoveryRunId);
+  if (!discoveryRunId) {
+    try {
+      const deterministicRunId = `affiliate-replenishment-discovery-${input.wave.id}`;
+      const queued = await queueAffiliateSourceDiscoveryRun(
+        campaignId,
+        'affiliate-replenishment',
+        deterministicRunId,
+      );
+      discoveryRunId = String(queued.id);
+      const waves = (prisma as any).affiliateReplenishmentWaves;
+      if (waves?.updateMany) {
+        const persisted = await waves.updateMany({
+          where: { id: input.wave.id, providerOperationKey: null },
+          data: {
+            providerOperationKey: `affiliate-replenishment:wave:${input.wave.id}:discovery`,
+            resultJson: { ...waveResult, discoveryRunId },
+          },
+        });
+        if (persisted.count !== 1 && waves.findUnique) {
+          const currentWave = await waves.findUnique({ where: { id: input.wave.id } });
+          const currentDiscoveryRunId = stringValue(
+            recordValue(currentWave?.resultJson).discoveryRunId,
+          );
+          if (currentDiscoveryRunId) discoveryRunId = currentDiscoveryRunId;
+        }
+      } else if (waves?.update) {
+        await waves.update({
+          where: { id: input.wave.id },
+          data: { resultJson: { ...waveResult, discoveryRunId } },
+        });
+      }
+      if (String(queued.status).toUpperCase() === 'QUEUED') {
+        await processNextAffiliateSourceDiscoveryRun(
+          { runId: discoveryRunId, workerId: dependencies.workerId },
+          {
+            ...(dependencies.searchClient ? { searchClient: dependencies.searchClient } : {}),
+            ...(dependencies.firecrawlClient ? { firecrawlClient: dependencies.firecrawlClient } : {}),
+            ...(dependencies.now ? { now: dependencies.now } : {}),
+            ...(dependencies.workerId ? { workerId: dependencies.workerId } : {}),
+          },
+        );
+      }
+    } catch (error) {
+      return {
+        status: 'FAILED',
+        provider: 'AFFILIATE_DISCOVERY',
+        providerOperationKey: `affiliate-replenishment:discovery:${discoveryRunId ?? campaignId}`,
+        retryAt: new Date(now.getTime() + REPLENISHMENT_RETRY_MS),
+        marginalYield: null,
+        errorCode: 'DISCOVERY_PROVIDER_FAILURE',
+        result: {
+          campaignId,
+          discoveryRunId,
+          errorMessage: error instanceof Error ? error.message : String(error),
+        },
+        evidenceRefs,
+      };
+    }
+  }
+
+  const discoveryRun = await db().runs.findUnique({ where: { id: discoveryRunId } });
+  const runStatus = String(discoveryRun?.status ?? '').toUpperCase();
+  const runEvidenceRefs = replenishmentEvidenceRefs([
+    ...evidenceRefs,
+    `discovery-run:${discoveryRunId}`,
+  ]);
+  if (!discoveryRun) {
+    return {
+      status: 'FAILED',
+      provider: 'AFFILIATE_DISCOVERY',
+      providerOperationKey: `affiliate-replenishment:discovery:${discoveryRunId}`,
+      retryAt: new Date(now.getTime() + REPLENISHMENT_RETRY_MS),
+      marginalYield: null,
+      errorCode: 'DISCOVERY_RUN_NOT_FOUND',
+      result: { discoveryRunId, campaignId },
+      evidenceRefs: runEvidenceRefs,
+    };
+  }
+  if (['QUEUED', 'RUNNING'].includes(runStatus)) {
+    return {
+      status: 'WAITING',
+      provider: 'AFFILIATE_DISCOVERY',
+      providerOperationKey: `affiliate-replenishment:discovery:${discoveryRunId}`,
+      result: { discoveryRunId, campaignId, status: runStatus },
+      evidenceRefs: runEvidenceRefs,
+    };
+  }
+  if (runStatus === 'FAILED') {
+    return {
+      status: 'FAILED',
+      provider: 'AFFILIATE_DISCOVERY',
+      providerOperationKey: `affiliate-replenishment:discovery:${discoveryRunId}`,
+      retryAt: new Date(now.getTime() + REPLENISHMENT_RETRY_MS),
+      marginalYield: null,
+      errorCode: 'DISCOVERY_PROVIDER_FAILURE',
+      result: { discoveryRunId, campaignId, errorMessage: discoveryRun.errorMessage ?? null },
+      evidenceRefs: runEvidenceRefs,
+    };
+  }
+
+  const resultRows = await db().results.findMany({
+    where: { latestRunId: discoveryRunId },
+    select: { matchingIntakeId: true, status: true },
+  });
+  const intakeIds: string[] = Array.from(new Set<string>(
+    resultRows
+      .map((row: any) => stringValue(row.matchingIntakeId))
+      .filter((value: string | null): value is string => Boolean(value)),
+  ));
+  const summary = recordValue(discoveryRun.summary);
+  const providerErrors = Array.isArray(summary.errors) ? summary.errors : [];
+  if (runStatus === 'PARTIAL' && providerErrors.length > 0) {
+    return {
+      status: 'FAILED',
+      provider: 'AFFILIATE_DISCOVERY',
+      providerOperationKey: `affiliate-replenishment:discovery:${discoveryRunId}`,
+      retryAt: new Date(now.getTime() + REPLENISHMENT_RETRY_MS),
+      marginalYield: null,
+      errorCode: 'DISCOVERY_PROVIDER_FAILURE',
+      result: { discoveryRunId, campaignId, intakeIds, errors: providerErrors },
+      evidenceRefs: runEvidenceRefs,
+    };
+  }
+
+  if (intakeIds.length === 0) {
+    return {
+      status: 'SUCCEEDED',
+      provider: 'AFFILIATE_DISCOVERY',
+      providerOperationKey: `affiliate-replenishment:discovery:${discoveryRunId}`,
+      marginalYield: 0,
+      result: { discoveryRunId, campaignId, intakeIds: [], mappingJobIds: [] },
+      evidenceRefs: runEvidenceRefs,
+    };
+  }
+
+  let { intakeRows, captureRows, mappingRows } = await loadAffiliateReplenishmentHandoffRows(intakeIds);
+  const queuedCapture = captureRows.find((row: any) => (
+    intakeIds.includes(String(row.intakeId))
+    && String(row.status ?? '').toUpperCase() === 'QUEUED'
+  ));
+  if (queuedCapture) {
+    try {
+      await processNextAffiliateSourceIntakeRun(
+        {
+          runId: String(queuedCapture.id),
+          ...(dependencies.workerId ? { workerId: dependencies.workerId } : {}),
+        },
+        {
+          ...(dependencies.captureClient ? { captureClient: dependencies.captureClient } : {}),
+          ...(dependencies.fallbackCaptureClient !== undefined
+            ? { fallbackCaptureClient: dependencies.fallbackCaptureClient }
+            : {}),
+          ...(dependencies.fetchResource ? { fetchResource: dependencies.fetchResource } : {}),
+          ...(dependencies.now ? { now: dependencies.now } : {}),
+          ...(dependencies.workerId ? { workerId: dependencies.workerId } : {}),
+        },
+      );
+    } catch (error) {
+      return {
+        status: 'FAILED',
+        provider: 'AFFILIATE_CAPTURE',
+        providerOperationKey: `affiliate-replenishment:capture:${queuedCapture.id}`,
+        retryAt: new Date(now.getTime() + REPLENISHMENT_RETRY_MS),
+        marginalYield: null,
+        errorCode: 'CAPTURE_PROVIDER_FAILURE',
+        result: {
+          discoveryRunId,
+          campaignId,
+          intakeIds,
+          captureRunId: queuedCapture.id,
+          errorMessage: error instanceof Error ? error.message : String(error),
+        },
+        evidenceRefs: replenishmentEvidenceRefs([
+          ...runEvidenceRefs,
+          `capture-run:${queuedCapture.id}`,
+        ]),
+      };
+    }
+    const refreshedHandoffRows = await loadAffiliateReplenishmentHandoffRows(intakeIds);
+    intakeRows = refreshedHandoffRows.intakeRows;
+    captureRows = refreshedHandoffRows.captureRows;
+    mappingRows = refreshedHandoffRows.mappingRows;
+  }
+  const latestCaptureByIntake = latestRowsByIntakeId(captureRows);
+  const activeCapture = intakeIds.find((intakeId) => (
+    ACTIVE_CAPTURE_RUN_STATUSES.has(String(latestCaptureByIntake.get(intakeId)?.status ?? '').toUpperCase())
+    || ['QUEUED', 'CAPTURING'].includes(String(intakeRows.find((row: any) => row.id === intakeId)?.status ?? '').toUpperCase())
+  ));
+  if (activeCapture) {
+    return {
+      status: 'WAITING',
+      provider: 'AFFILIATE_DISCOVERY',
+      providerOperationKey: `affiliate-replenishment:discovery:${discoveryRunId}`,
+      result: {
+        discoveryRunId,
+        campaignId,
+        intakeIds,
+        mappingJobIds: mappingRows.map((row: any) => row.id),
+        waitingFor: `capture:${activeCapture}`,
+      },
+      evidenceRefs: replenishmentEvidenceRefs([
+        ...runEvidenceRefs,
+        `intake:${activeCapture}`,
+      ]),
+    };
+  }
+  const failedCapture = intakeIds
+    .map((intakeId) => latestCaptureByIntake.get(intakeId))
+    .find((row) => ['FAILED', 'BLOCKED'].includes(String(row?.status ?? '').toUpperCase()));
+  if (failedCapture) {
+    return {
+      status: 'FAILED',
+      provider: 'AFFILIATE_DISCOVERY',
+      providerOperationKey: `affiliate-replenishment:discovery:${discoveryRunId}`,
+      retryAt: new Date(now.getTime() + REPLENISHMENT_RETRY_MS),
+      marginalYield: null,
+      errorCode: String(failedCapture.status).toUpperCase() === 'BLOCKED'
+        ? 'CAPTURE_BLOCKED'
+        : 'CAPTURE_PROVIDER_FAILURE',
+      result: {
+        discoveryRunId,
+        campaignId,
+        intakeIds,
+        errorMessage: failedCapture.errorMessage ?? null,
+      },
+      evidenceRefs: runEvidenceRefs,
+    };
+  }
+
+  const mappingJobIds: string[] = mappingRows.map((row: any) => String(row.id));
+  return {
+    status: 'SUCCEEDED',
+    provider: 'AFFILIATE_DISCOVERY',
+    providerOperationKey: `affiliate-replenishment:discovery:${discoveryRunId}`,
+    marginalYield: mappingJobIds.length,
+    result: {
+      discoveryRunId,
+      campaignId,
+      intakeIds,
+      mappingJobIds,
+      demandId: stringValue(input.demand?.id),
+    },
+    evidenceRefs: replenishmentEvidenceRefs([
+      ...runEvidenceRefs,
+      ...intakeIds.map((intakeId) => `intake:${intakeId}`),
+      ...mappingJobIds.map((mappingJobId) => `mapping-job:${mappingJobId}`),
+    ]),
+  };
+};
 
 export const listAffiliateSourceDiscoveryResults = async (filters: {
   campaignId?: string | null;
@@ -1140,17 +1629,14 @@ const acquireAutomationLock = async (): Promise<AutomationLock | null> => {
   };
 };
 
-const automationAdminUrl = (): string => {
-  const base = (process.env.NEXT_PUBLIC_APP_URL?.trim() || process.env.APP_BASE_URL?.trim() || DEFAULT_ADMIN_URL.replace(/\/admin$/, '')).replace(/\/$/, '');
-  return `${base}/admin`;
-};
-
 export const runAffiliateIntakeAutomation = async (options: {
   discoveryLimit?: number;
   intakeLimit?: number;
-  sendSummary?: boolean;
+  isDemandDriven?: boolean;
 } = {}, dependencies: DiscoveryDependencies = {}) => {
   const startedAt = dependencies.now?.() ?? new Date();
+  const supervisorWorkerId = process.env.AFFILIATE_AUTOMATION_SUPERVISOR_ID?.trim()
+    || DEFAULT_SUPERVISOR_WORKER_ID;
   const lock = await acquireAutomationLock();
   if (!lock) return {
     lockAcquired: false,
@@ -1161,9 +1647,53 @@ export const runAffiliateIntakeAutomation = async (options: {
     recoveredIntakeRuns: [],
     discoveryRuns: [],
     intakeRuns: [],
-    emailSent: false,
+    alertCount: 0,
   };
   try {
+  const supervisorHealth = db().workerHealth;
+  let isSupervisorHeartbeatLost = false;
+  if (supervisorHealth?.findUnique && supervisorHealth?.upsert) {
+    const previous = await supervisorHealth.findUnique({
+      where: {
+        workerId_role: {
+          workerId: supervisorWorkerId,
+          role: 'AUTOMATION_SUPERVISOR',
+        },
+      },
+    });
+    isSupervisorHeartbeatLost = Boolean(
+      previous
+      && (
+        String(previous.status).toUpperCase() !== 'HEALTHY'
+        || !previous.leaseExpiresAt
+        || new Date(previous.leaseExpiresAt).getTime() <= startedAt.getTime()
+      ),
+    );
+    const leaseExpiresAt = new Date(startedAt.getTime() + SUPERVISOR_HEARTBEAT_LEASE_MS);
+    await supervisorHealth.upsert({
+      where: {
+        workerId_role: {
+          workerId: supervisorWorkerId,
+          role: 'AUTOMATION_SUPERVISOR',
+        },
+      },
+      create: {
+        id: createId(),
+        workerId: supervisorWorkerId,
+        role: 'AUTOMATION_SUPERVISOR',
+        status: 'HEALTHY',
+        heartbeatAt: startedAt,
+        leaseExpiresAt,
+        metadata: { cadence: '15m', component: 'affiliate-intake-automation' },
+      },
+      update: {
+        status: 'HEALTHY',
+        heartbeatAt: startedAt,
+        leaseExpiresAt,
+        metadata: { cadence: '15m', component: 'affiliate-intake-automation' },
+      },
+    });
+  }
     const recoveredDiscoveryRuns = await recoverStaleAffiliateSourceDiscoveryRuns({
       now: dependencies.now?.() ?? new Date(),
     });
@@ -1173,7 +1703,9 @@ export const runAffiliateIntakeAutomation = async (options: {
     let queuedCampaigns = 0;
     const discoveryRuns: any[] = [];
     for (let index = 0; index < Math.min(options.discoveryLimit ?? MAX_AUTOMATION_DISCOVERY_RUNS, 25); index += 1) {
-      queuedCampaigns += await queueDueAffiliateSourceDiscoveryRuns(dependencies.now?.() ?? new Date());
+      if (!options.isDemandDriven) {
+        queuedCampaigns += await queueDueAffiliateSourceDiscoveryRuns(dependencies.now?.() ?? new Date());
+      }
       const result = await processNextAffiliateSourceDiscoveryRun({}, dependencies);
       if (!result) break;
       discoveryRuns.push(result);
@@ -1194,7 +1726,73 @@ export const runAffiliateIntakeAutomation = async (options: {
       intakeRuns.push(result);
     }
     const finishedAt = dependencies.now?.() ?? new Date();
-    const summary = {
+    const failedRuns = [
+      ...discoveryRuns.map((entry) => ({ entry, kind: 'DISCOVERY' })),
+      ...intakeRuns.map((entry) => ({ entry, kind: 'INTAKE' })),
+    ].filter(({ entry }) => {
+      const status = String(entry.run?.status ?? entry.status ?? '').toUpperCase();
+      return ['FAILED', 'PARTIAL', 'BLOCKED'].includes(status);
+    });
+    const alertInputs: AffiliateOperationalAlertInput[] = failedRuns.map(({ entry, kind }) => {
+      const run = entry.run ?? entry;
+      const runId = String(run.id ?? entry.id ?? 'unknown');
+      const status = String(run.status ?? entry.status ?? 'FAILED').toUpperCase();
+      const errorMessage = String(run.errorMessage ?? entry.errorMessage ?? 'No error recorded');
+      const lowerError = errorMessage.toLowerCase();
+      const category = lowerError.includes('out of memory') || lowerError.includes('oom')
+        ? 'WORKER_OOM'
+        : lowerError.includes('sigterm') || lowerError.includes('terminated')
+          ? 'WORKER_TERMINATION'
+          : lowerError.includes('disk') || lowerError.includes('memory')
+            ? 'RESOURCE_THRESHOLD'
+            : kind === 'DISCOVERY'
+              ? 'DISCOVERY_PROVIDER_FAILURE'
+              : 'AUTOMATIC_CAPTURE_FAILURE';
+      return {
+        eventKey: `affiliate-intake-automation:${kind.toLowerCase()}:${runId}:${status}`,
+        category,
+        severity: status === 'BLOCKED' ? 'critical' as const : 'warning' as const,
+        title: `${kind} automation ${status.toLowerCase()}`,
+        detail: errorMessage,
+        subjectType: `${kind}_RUN`,
+        subjectId: runId,
+        reasonCodes: [status, category],
+        payload: { runId, kind, status, errorMessage },
+      };
+    });
+    if (isSupervisorHeartbeatLost) {
+      alertInputs.push({
+        eventKey: `affiliate-intake-automation:supervisor-heartbeat-loss:${startedAt.toISOString()}`,
+        category: 'SUPERVISOR_HEARTBEAT_LOSS',
+        severity: 'critical' as const,
+        title: 'Affiliate automation supervisor heartbeat lost',
+        detail: 'The prior supervisor lease expired before this automation run.',
+        subjectType: 'AUTOMATION_SUPERVISOR',
+        subjectId: supervisorWorkerId,
+        reasonCodes: ['HEARTBEAT_LOST', 'LEASE_EXPIRED'],
+        payload: { workerId: supervisorWorkerId, startedAt },
+      });
+    }
+    if (recoveredDiscoveryRuns.length > 0 || recoveredIntakeRuns.length > 0) {
+      alertInputs.push({
+        eventKey: `affiliate-intake-automation:stale-recovery:${finishedAt.toISOString()}`,
+        category: 'STALE_WORK_RECOVERY',
+        severity: 'warning' as const,
+        title: 'Affiliate automation recovered stale work',
+        detail: `${recoveredDiscoveryRuns.length} discovery and ${recoveredIntakeRuns.length} intake runs were recovered after lease expiry.`,
+        subjectType: 'AUTOMATION_SUPERVISOR',
+        reasonCodes: ['STALE_RUN_RECOVERED'],
+        payload: { recoveredDiscoveryRuns, recoveredIntakeRuns },
+      });
+    }
+    if (alertInputs.length > 0) {
+      try {
+        await emitAffiliateOperationalAlerts(alertInputs, { now: () => finishedAt });
+      } catch (error) {
+        console.error('[affiliate:intake:automation] failed to emit operational alert', error);
+      }
+    }
+    return {
       lockAcquired: true,
       startedAt,
       finishedAt,
@@ -1203,34 +1801,31 @@ export const runAffiliateIntakeAutomation = async (options: {
       recoveredIntakeRuns,
       discoveryRuns,
       intakeRuns,
-      emailSent: false,
+      alertCount: alertInputs.length,
     };
-    const needsEmail = queuedCampaigns > 0
-      || recoveredDiscoveryRuns.length > 0
-      || recoveredIntakeRuns.length > 0
-      || discoveryRuns.length > 0
-      || intakeRuns.length > 0
-      || discoveryRuns.some((entry) => ['FAILED', 'PARTIAL'].includes(entry.run?.status))
-      || intakeRuns.some((entry) => ['FAILED', 'PARTIAL', 'BLOCKED'].includes(entry.run?.status ?? entry.status));
-    if (options.sendSummary === true && needsEmail && isEmailEnabled()) {
-      await sendEmail({
-        to: process.env.AFFILIATE_SCRAPE_SUMMARY_EMAIL_TO?.trim() || DEFAULT_SUMMARY_RECIPIENT,
-        subject: `[BracketIQ] Affiliate intake automation: ${discoveryRuns.length} discovery, ${intakeRuns.length} capture runs`,
-        text: [
-          'BracketIQ affiliate intake automation summary',
-          `Started: ${startedAt.toISOString()}`,
-          `Finished: ${finishedAt.toISOString()}`,
-          `Campaigns queued: ${queuedCampaigns}`,
-          `Stale discovery runs recovered: ${recoveredDiscoveryRuns.length}`,
-          `Stale intake runs recovered: ${recoveredIntakeRuns.length}`,
-          `Discovery runs processed: ${discoveryRuns.length}`,
-          `Intake captures processed: ${intakeRuns.length}`,
-          `Review: ${automationAdminUrl()}`,
-        ].join('\n'),
+  } catch (error) {
+    try {
+      const errorName = error instanceof Error ? error.name : 'UnknownError';
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      await emitAffiliateOperationalAlert({
+        eventKey: `affiliate-intake-automation:orchestration-failure:${startedAt.toISOString()}`,
+        category: 'AUTOMATION_ORCHESTRATION_FAILURE',
+        severity: 'critical',
+        title: 'Affiliate intake automation failed',
+        detail: errorMessage,
+        subjectType: 'AUTOMATION_SUPERVISOR',
+        subjectId: supervisorWorkerId,
+        reasonCodes: ['AUTOMATION_ORCHESTRATION_FAILURE'],
+        payload: {
+          errorName,
+          errorMessage,
+          startedAt: startedAt.toISOString(),
+        },
       });
-      summary.emailSent = true;
+    } catch (alertError) {
+      console.error('[affiliate:intake:automation] failed to persist top-level operational alert', alertError);
     }
-    return summary;
+    throw error;
   } finally {
     await lock.release();
   }

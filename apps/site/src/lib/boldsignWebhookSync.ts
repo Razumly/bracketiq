@@ -12,6 +12,7 @@ import {
   listBoldSignOperationsForReconcile,
   type BoldSignSyncOperation,
   type BoldSignOperationStatus,
+  type BoldSignOperationDatabase,
   updateBoldSignOperationById,
 } from '@/lib/boldsignSyncOperations';
 import {
@@ -21,8 +22,24 @@ import {
   isBoldSignInvalidTemplateIdError,
   isBoldSignNotFoundError,
 } from '@/lib/boldsignServer';
-import { normalizeRequiredSignerType } from '@/lib/templateSignerTypes';
+import {
+  normalizeRequiredSignerType,
+  resolveRequiredSignerRoles,
+} from '@/lib/templateSignerTypes';
 import { acquireEventLockAndLoadStructure } from '@/server/events/eventRegistrations';
+import {
+  createDocumentTemplateVersion,
+  editDocumentTemplateVersion,
+  ensureDocumentRequirement,
+  isDocumentTemplateVersionFrozen,
+} from '@/server/documents/documentTemplateVersions';
+import {
+  ensureDocumentSubject,
+  createDocumentRequirementSatisfaction,
+  signedDocumentEvidenceFields,
+  invalidateDocumentRequirementSatisfactions,
+  DOCUMENT_EVIDENCE_PROVENANCE,
+} from '@/server/documentEvidence';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -519,13 +536,18 @@ const mapConsentStatusUpdate = (eventToken: string): {
   };
 };
 
-const maybeResolveUserIdFromSignerEmail = async (email: string | null): Promise<string | null> => {
+type DocumentProjectionUserDatabase = Pick<typeof prisma, 'sensitiveUserData' | 'authUser'>;
+
+const maybeResolveUserIdFromSignerEmail = async (
+  email: string | null,
+  database: DocumentProjectionUserDatabase = prisma,
+): Promise<string | null> => {
   const normalizedEmail = normalizeText(email)?.toLowerCase();
   if (!normalizedEmail) {
     return null;
   }
 
-  const sensitive = await prisma.sensitiveUserData.findFirst({
+  const sensitive = await database.sensitiveUserData.findFirst({
     where: { email: normalizedEmail },
     select: { userId: true },
   });
@@ -533,7 +555,7 @@ const maybeResolveUserIdFromSignerEmail = async (email: string | null): Promise<
     return sensitive.userId;
   }
 
-  const auth = await prisma.authUser.findUnique({
+  const auth = await database.authUser.findUnique({
     where: { email: normalizedEmail },
     select: { id: true },
   });
@@ -576,7 +598,7 @@ const toIsoDateFromValue = (value: unknown): string | null => {
   return toIsoTimestamp(seconds);
 };
 
-type EventSignerProjection = {
+export type DocumentSignerProjection = {
   signerEmail: string | null;
   signerRole: string | null;
   roleIndex: number | null;
@@ -585,11 +607,25 @@ type EventSignerProjection = {
   userId: string | null;
 };
 
+export type SignedDocumentProjectionCommand = {
+  documentId: string;
+  eventToken: string;
+  status: string | null;
+  signedAt: string | null;
+  templateId: string | null;
+  templateDocumentId: string | null;
+  documentName: string | null;
+  organizationId: string | null;
+  eventId: string | null;
+  teamId: string | null;
+  signers: DocumentSignerProjection[];
+};
+
 const extractSignerProjectionsFromEvent = (params: {
   event: ParsedBoldSignWebhookEvent;
   operation: BoldSignSyncOperation | null;
   operationPayload: JsonRecord;
-}): EventSignerProjection[] => {
+}): DocumentSignerProjection[] => {
   const payloadData = asRecord(params.event.payload.data) ?? asRecord(params.event.payload.Data) ?? null;
   const payloadDocument = asRecord(params.event.payload.document) ?? asRecord(params.event.payload.Document) ?? null;
 
@@ -721,6 +757,11 @@ const resolveSignerDocumentStatus = (params: {
   return params.fallbackStatus;
 };
 
+type DocumentProjectionContextDatabase = Pick<
+  typeof prisma,
+  'canonicalTeams' | 'events' | 'eventRegistrations'
+>;
+
 const inferEventContextForDocumentProjection = async (params: {
   explicitEventId: string | null;
   explicitTeamId: string | null;
@@ -728,12 +769,37 @@ const inferEventContextForDocumentProjection = async (params: {
   templateDocumentId: string | null;
   childUserId: string | null;
   representativeUserId: string | null;
+  database?: DocumentProjectionContextDatabase;
 }): Promise<{ eventId: string | null; teamId: string | null; organizationId: string | null }> => {
+  const database = params.database ?? prisma;
+
   if (params.explicitTeamId) {
-    const team = await prisma.canonicalTeams.findUnique({
+    const team = await database.canonicalTeams.findUnique({
       where: { id: params.explicitTeamId },
       select: { organizationId: true },
     });
+    if (
+      team?.organizationId
+      && params.explicitOrganizationId
+      && team.organizationId !== params.explicitOrganizationId
+    ) {
+      throw new Error('BoldSign document projection team Organization ownership mismatch.');
+    }
+    if (params.explicitEventId) {
+      const eventRows = await database.events.findMany({
+        where: { id: params.explicitEventId },
+        select: { id: true, organizationId: true },
+        take: 1,
+      });
+      const event = eventRows[0];
+      if (
+        event?.organizationId
+        && params.explicitOrganizationId
+        && event.organizationId !== params.explicitOrganizationId
+      ) {
+        throw new Error('BoldSign document projection event Organization ownership mismatch.');
+      }
+    }
     return {
       eventId: params.explicitEventId,
       teamId: params.explicitTeamId,
@@ -749,7 +815,7 @@ const inferEventContextForDocumentProjection = async (params: {
     };
   }
 
-  const candidateEvents = await prisma.events.findMany({
+  let candidateEvents = await database.events.findMany({
     where: { requiredTemplateIds: { has: params.templateDocumentId } },
     select: {
       id: true,
@@ -758,6 +824,29 @@ const inferEventContextForDocumentProjection = async (params: {
     orderBy: { updatedAt: 'desc' },
     take: 25,
   });
+
+  if (params.explicitEventId && !candidateEvents.some((row) => row.id === params.explicitEventId)) {
+    const explicitEvents = await database.events.findMany({
+      where: { id: params.explicitEventId },
+      select: {
+        id: true,
+        organizationId: true,
+      },
+      take: 1,
+    });
+    candidateEvents = [...candidateEvents, ...explicitEvents];
+  }
+
+  const explicitEvent = params.explicitEventId
+    ? candidateEvents.find((row) => row.id === params.explicitEventId)
+    : null;
+  if (
+    explicitEvent?.organizationId
+    && params.explicitOrganizationId
+    && explicitEvent.organizationId !== params.explicitOrganizationId
+  ) {
+    throw new Error('BoldSign document projection event Organization ownership mismatch.');
+  }
 
   if (candidateEvents.length === 0) {
     return {
@@ -772,6 +861,13 @@ const inferEventContextForDocumentProjection = async (params: {
     const selected = eventId
       ? candidateEvents.find((row) => row.id === eventId)
       : candidateEvents[0];
+    if (
+      selected?.organizationId
+      && params.explicitOrganizationId
+      && selected.organizationId !== params.explicitOrganizationId
+    ) {
+      throw new Error('BoldSign document projection event Organization ownership mismatch.');
+    }
     return {
       eventId: selected?.id ?? eventId,
       teamId: null,
@@ -784,7 +880,7 @@ const inferEventContextForDocumentProjection = async (params: {
   }
 
   if (params.childUserId) {
-    const childRegistration = await prisma.eventRegistrations.findFirst({
+    const childRegistration = await database.eventRegistrations.findFirst({
       where: {
         eventId: { in: candidateEventIds },
         registrantType: 'CHILD',
@@ -800,7 +896,7 @@ const inferEventContextForDocumentProjection = async (params: {
   }
 
   if (params.representativeUserId) {
-    const userRegistration = await prisma.eventRegistrations.findFirst({
+    const userRegistration = await database.eventRegistrations.findFirst({
       where: {
         eventId: { in: candidateEventIds },
         status: { in: ['STARTED', 'PENDING', 'ACTIVE'] },
@@ -826,112 +922,298 @@ const getOperationPayload = (operation: BoldSignSyncOperation | null): JsonRecor
   }
   return operation.payload;
 };
+type ProviderQuarantineDatabase = Pick<
+  typeof prisma,
+  'templateDocuments' | 'templateProviderQuarantines'
+> & BoldSignOperationDatabase;
+
 
 const updateOperationState = async (
   operationId: string | null | undefined,
   patch: Partial<Parameters<typeof updateBoldSignOperationById>[1]>,
+  database?: BoldSignOperationDatabase,
 ) => {
   const normalizedId = normalizeText(operationId);
   if (!normalizedId) {
     return;
   }
+  if (database) {
+    await updateBoldSignOperationById(normalizedId, patch, database);
+    return;
+  }
   await updateBoldSignOperationById(normalizedId, patch);
 };
+const BOLDSIGN_PROVIDER_QUARANTINE_REASON =
+  'BoldSign provider edit was quarantined because the Document Template Version is frozen.';
 
-const createOrUpdateTemplateProjectionFromOperation = async (params: {
-  event: ParsedBoldSignWebhookEvent;
+const quarantineBoldSignProviderVersions = async (params: {
+  providerTemplateId: string | null | undefined;
+  database?: ProviderQuarantineDatabase;
+}) => {
+  const providerTemplateId = normalizeText(params.providerTemplateId);
+  if (!providerTemplateId) {
+    return;
+  }
+  const now = new Date();
+  const database = params.database ?? prisma;
+  await database.templateProviderQuarantines.upsert({
+    where: { providerTemplateId },
+    create: {
+      providerTemplateId,
+      quarantinedAt: now,
+      reason: BOLDSIGN_PROVIDER_QUARANTINE_REASON,
+      createdAt: now,
+      updatedAt: now,
+    },
+    update: { updatedAt: now },
+  });
+  await database.templateDocuments.updateMany({
+    where: {
+      templateId: providerTemplateId,
+      providerQuarantinedAt: null,
+    },
+    data: {
+      providerQuarantinedAt: now,
+      providerQuarantineReason: BOLDSIGN_PROVIDER_QUARANTINE_REASON,
+      updatedAt: now,
+    },
+  });
+};
+const quarantineProviderAndFailOperation = async (params: {
+  providerTemplateId: string | null | undefined;
+  operationId: string | null | undefined;
+}) => {
+  // Commit the quarantine before updating the operation. A failed operation
+  // update must not roll back the safety block for the provider template.
+  await prisma.$transaction(async (tx) => {
+    await quarantineBoldSignProviderVersions({
+      providerTemplateId: params.providerTemplateId,
+      database: tx,
+    });
+  });
+  try {
+    await prisma.$transaction(async (tx) => {
+      await updateOperationState(params.operationId, {
+        status: BOLDSIGN_OPERATION_STATUSES.FAILED,
+        lastError: BOLDSIGN_PROVIDER_QUARANTINE_REASON,
+        completedAt: new Date(),
+      }, tx);
+    });
+  } catch (error) {
+    console.error('Failed to persist quarantined BoldSign operation state', error);
+  }
+};
+
+export const projectTemplateProjectionFromOperation = async (params: {
+  templateId: string | null;
+  dataObject?: JsonRecord | null;
+  payload?: JsonRecord;
   operation: BoldSignSyncOperation | null;
   status: string;
+  eventToken?: string;
 }) => {
   const operationPayload = getOperationPayload(params.operation);
-  const payloadRoles = parseRoles(operationPayload.roles ?? params.event.dataObject?.roles ?? params.event.dataObject?.Roles);
+  const deferProjectionUntilEdit = parseBoolean(operationPayload.deferProjectionUntilEdit) === true;
+  const isDeferredTemplateEdit = deferProjectionUntilEdit && params.eventToken === 'templateedited';
+  const targetVersionId = pickString(
+    params.operation?.templateDocumentId,
+    operationPayload.templateDocumentId,
+  );
+  if (deferProjectionUntilEdit && params.eventToken !== 'templateedited') {
+    return null;
+  }
+  const eventRoles = parseRoles(
+    params.dataObject?.roles
+      ?? params.dataObject?.Roles,
+  );
+  const operationRoles = parseRoles(operationPayload.roles);
+  const payloadRoles = params.eventToken === 'templateedited' && eventRoles.length > 0
+    ? eventRoles
+    : operationRoles.length > 0
+      ? operationRoles
+      : eventRoles;
 
-  const existing = params.event.templateId
+  const existing = params.templateId
     ? await prisma.templateDocuments.findFirst({
-      where: { templateId: params.event.templateId },
+      where: { templateId: params.templateId },
       orderBy: { updatedAt: 'desc' },
     })
     : null;
+  const sourceTemplateDocumentId = pickString(operationPayload.sourceTemplateDocumentId);
+  const source = sourceTemplateDocumentId
+    ? await prisma.templateDocuments.findUnique({
+      where: { id: sourceTemplateDocumentId },
+    })
+    : null;
+  const baseTemplate = existing ?? source;
+  const isDetachedTemplateEdit = isDeferredTemplateEdit
+    && Boolean(sourceTemplateDocumentId)
+    && !existing
+    && (!source?.templateId || source.templateId !== params.templateId);
+  if (
+    isDeferredTemplateEdit
+    && existing
+    && !source?.frozenAt
+    && (!targetVersionId || existing.id === targetVersionId)
+  ) {
+    return existing;
+  }
+  const isTemplateEdit = params.eventToken === 'templateedited';
+  const frozenProviderVersion = isTemplateEdit && params.templateId
+    ? await prisma.templateDocuments.findFirst({
+      where: {
+        templateId: params.templateId,
+        frozenAt: { not: null },
+      },
+      select: { id: true },
+    })
+    : null;
+  const isFrozenReferencedVersion =
+    Boolean(existing?.frozenAt) || Boolean(source?.frozenAt) || Boolean(frozenProviderVersion);
+  const isFrozenProviderEditQuarantined = isTemplateEdit
+    && isFrozenReferencedVersion
+    && !isDetachedTemplateEdit;
+  if (isFrozenProviderEditQuarantined) {
+    await quarantineProviderAndFailOperation({
+      providerTemplateId: params.templateId,
+      operationId: params.operation?.id,
+    });
+    throw new Error(BOLDSIGN_PROVIDER_QUARANTINE_REASON);
+  }
 
   const organizationId = pickString(
     params.operation?.organizationId,
     operationPayload.organizationId,
     existing?.organizationId,
+    source?.organizationId,
   );
 
   const title = pickString(
-    operationPayload.title,
-    params.event.dataObject?.title,
-    params.event.dataObject?.Title,
-    params.event.payload.title,
-    existing?.title,
+    ...(isTemplateEdit
+      ? [
+        params.dataObject?.title,
+        params.dataObject?.Title,
+        operationPayload.title,
+        params.payload?.title,
+        baseTemplate?.title,
+      ]
+      : [
+        operationPayload.title,
+        params.dataObject?.title,
+        params.dataObject?.Title,
+        params.payload?.title,
+        baseTemplate?.title,
+      ]),
   );
 
-  if (!organizationId || !title || !params.event.templateId) {
+  if (!organizationId || !title || !params.templateId) {
     return null;
   }
 
   const requiredSignerType = normalizeRequiredSignerType(
     operationPayload.requiredSignerType
-      ?? existing?.requiredSignerType
+      ?? baseTemplate?.requiredSignerType
       ?? 'PARTICIPANT',
   );
 
-  const signOnce = parseBoolean(operationPayload.signOnce) ?? existing?.signOnce ?? false;
+  const signOnce = parseBoolean(operationPayload.signOnce) ?? baseTemplate?.signOnce ?? false;
   const description = pickString(
-    operationPayload.description,
-    params.event.dataObject?.description,
-    params.event.dataObject?.Description,
-    existing?.description,
+    ...(isTemplateEdit
+      ? [
+        params.dataObject?.description,
+        params.dataObject?.Description,
+        operationPayload.description,
+        baseTemplate?.description,
+      ]
+      : [
+        operationPayload.description,
+        params.dataObject?.description,
+        params.dataObject?.Description,
+        baseTemplate?.description,
+      ]),
   );
-
   const now = new Date();
+  const documentRequirementId = baseTemplate?.documentRequirementId
+    ?? pickString(operationPayload.documentRequirementId)
+    ?? `document-requirement:boldsign:${params.templateId}`;
+  const requirementData = {
+    id: documentRequirementId,
+    createdAt: now,
+    updatedAt: now,
+    organizationId,
+    title,
+    description,
+    createdBy: pickString(params.operation?.userId, operationPayload.createdBy) ?? null,
+    status: 'ACTIVE',
+  };
 
-  if (existing) {
-    const updated = await prisma.templateDocuments.update({
-      where: { id: existing.id },
-      data: {
-        updatedAt: now,
-        templateId: params.event.templateId,
-        type: 'PDF',
+  try {
+    return await prisma.$transaction(async (tx) => {
+    const requirement = await ensureDocumentRequirement(tx, requirementData);
+    const projectionVersionId = existing?.id ?? source?.id;
+    if (projectionVersionId) {
+      const editResult = await editDocumentTemplateVersion(tx, {
+        versionId: projectionVersionId,
         organizationId,
+        isFrozenRejectionRequired: !isDetachedTemplateEdit,
+        isNewVersionRequired: isDeferredTemplateEdit,
+        newVersionId: targetVersionId ?? undefined,
+        display: {
+          title,
+          description: description ?? null,
+        },
+        material: {
+          templateId: params.templateId,
+          type: 'PDF',
+          roleIndex: payloadRoles[0]?.roleIndex ?? baseTemplate?.roleIndex ?? null,
+          roleIndexes: payloadRoles.length > 0
+            ? payloadRoles.map((entry) => entry.roleIndex)
+            : baseTemplate?.roleIndexes,
+          signerRoles: payloadRoles.length > 0
+            ? payloadRoles.map((entry) => entry.signerRole)
+            : baseTemplate?.signerRoles,
+          content: null,
+        },
+      });
+      return editResult.template;
+    }
+
+    return createDocumentTemplateVersion(tx, {
+      requirement,
+      version: {
+        id: targetVersionId ?? crypto.randomUUID(),
+        createdAt: now,
+        updatedAt: now,
+        templateId: params.templateId,
+        type: 'PDF',
         title,
         description,
         signOnce,
         requiredSignerType,
         status: params.status,
-        createdBy: pickString(params.operation?.userId, operationPayload.createdBy, existing.createdBy) ?? null,
-        roleIndex: payloadRoles[0]?.roleIndex ?? existing.roleIndex ?? null,
+        createdBy: pickString(params.operation?.userId, operationPayload.createdBy) ?? null,
+        roleIndex: payloadRoles[0]?.roleIndex ?? null,
         roleIndexes: payloadRoles.map((entry) => entry.roleIndex),
         signerRoles: payloadRoles.map((entry) => entry.signerRole),
         content: null,
       },
     });
-    return updated;
-  }
-
-  const created = await prisma.templateDocuments.create({
-    data: {
-      id: pickString(params.operation?.templateDocumentId, operationPayload.templateDocumentId) ?? crypto.randomUUID(),
-      createdAt: now,
-      updatedAt: now,
-      templateId: params.event.templateId,
-      type: 'PDF',
-      organizationId,
-      title,
-      description,
-      signOnce,
-      requiredSignerType,
-      status: params.status,
-      createdBy: pickString(params.operation?.userId, operationPayload.createdBy) ?? null,
-      roleIndex: payloadRoles[0]?.roleIndex ?? null,
-      roleIndexes: payloadRoles.map((entry) => entry.roleIndex),
-      signerRoles: payloadRoles.map((entry) => entry.signerRole),
-      content: null,
-    },
   });
-
-  return created;
+  } catch (error) {
+    if (
+      error instanceof Error
+      && error.name === 'DocumentTemplateVersionFrozenError'
+      && isTemplateEdit
+      && !isDetachedTemplateEdit
+    ) {
+      await quarantineProviderAndFailOperation({
+        providerTemplateId: params.templateId,
+        operationId: params.operation?.id,
+      });
+      throw new Error(BOLDSIGN_PROVIDER_QUARANTINE_REASON);
+    }
+    throw error;
+  }
 };
 
 const projectTemplateEvent = async (event: ParsedBoldSignWebhookEvent): Promise<void> => {
@@ -967,17 +1249,34 @@ const projectTemplateEvent = async (event: ParsedBoldSignWebhookEvent): Promise<
     return;
   }
 
+  const operationPayload = getOperationPayload(operation);
+  const deferProjectionUntilEdit = parseBoolean(operationPayload.deferProjectionUntilEdit) === true;
+  if (deferProjectionUntilEdit && event.eventToken !== 'templateedited') {
+    return;
+  }
+
   let templateStatus = 'ACTIVE';
   if (event.eventToken === 'templatedraftcreated') {
     templateStatus = 'DRAFT';
   }
 
-  const projectedTemplate = await createOrUpdateTemplateProjectionFromOperation({
-    event,
+  const projectedTemplate = await projectTemplateProjectionFromOperation({
+    templateId: event.templateId,
+    dataObject: event.dataObject,
+    payload: event.payload,
     operation,
     status: templateStatus,
+    eventToken: event.eventToken,
   });
 
+  if (deferProjectionUntilEdit && !projectedTemplate) {
+    await updateOperationState(operation?.id, {
+      status: BOLDSIGN_OPERATION_STATUSES.FAILED,
+      lastError: 'BoldSign template edit did not produce a Document Template Version.',
+      completedAt: new Date(),
+    });
+    return;
+  }
   if (event.eventToken === 'templateedited' && event.templateId && !projectedTemplate) {
     const existing = await prisma.templateDocuments.findFirst({
       where: { templateId: event.templateId },
@@ -985,22 +1284,31 @@ const projectTemplateEvent = async (event: ParsedBoldSignWebhookEvent): Promise<
     });
     if (existing) {
       const roles = parseRoles(event.dataObject?.roles ?? event.dataObject?.Roles);
-      await prisma.templateDocuments.update({
-        where: { id: existing.id },
-        data: {
-          title: pickString(event.dataObject?.title, event.dataObject?.Title, existing.title) ?? existing.title,
-          description: pickString(
-            event.dataObject?.description,
-            event.dataObject?.Description,
-            existing.description,
-          ),
+      await prisma.$transaction((tx) => editDocumentTemplateVersion(tx, {
+        versionId: existing.id,
+        organizationId: existing.organizationId,
+        isFrozenRejectionRequired: true,
+        display: {
+          ...(pickString(event.dataObject?.title, event.dataObject?.Title)
+            ? { title: pickString(event.dataObject?.title, event.dataObject?.Title) ?? undefined }
+            : {}),
+          ...(pickString(event.dataObject?.description, event.dataObject?.Description) !== undefined
+            ? {
+              description: pickString(
+                event.dataObject?.description,
+                event.dataObject?.Description,
+                existing.description,
+              ) ?? null,
+            }
+            : {}),
+        },
+        material: {
           roleIndex: roles[0]?.roleIndex ?? existing.roleIndex,
           roleIndexes: roles.length > 0 ? roles.map((entry) => entry.roleIndex) : existing.roleIndexes,
           signerRoles: roles.length > 0 ? roles.map((entry) => entry.signerRole) : existing.signerRoles,
           status: templateStatus,
-          updatedAt: new Date(),
         },
-      });
+      }));
     }
   }
 
@@ -1136,7 +1444,7 @@ const syncTeamConsentFromRows = async (rows: Array<{
 };
 
 const createOrUpdateSignedDocumentProjection = async (params: {
-  event: ParsedBoldSignWebhookEvent;
+  command: SignedDocumentProjectionCommand;
   operation: BoldSignSyncOperation | null;
 }): Promise<{
   rowId: string | null;
@@ -1154,10 +1462,10 @@ const createOrUpdateSignedDocumentProjection = async (params: {
     roleIndex: number | null;
   };
 }> => {
-  const { event, operation } = params;
+  const { command, operation } = params;
   const operationPayload = getOperationPayload(operation);
 
-  if (!event.documentId) {
+  if (!command.documentId) {
     return {
       rowId: null,
       updatedRows: 0,
@@ -1176,19 +1484,17 @@ const createOrUpdateSignedDocumentProjection = async (params: {
     };
   }
 
-  const fallbackStatus = resolveDocumentStatusFromEventToken(event.eventToken, event.status);
-  const eventSignedAt = resolveDocumentSignedAtIso(event);
-  const payloadData = asRecord(event.payload.data) ?? asRecord(event.payload.Data) ?? null;
-  const payloadDocument = asRecord(event.payload.document) ?? asRecord(event.payload.Document) ?? null;
+  const fallbackStatus = resolveDocumentStatusFromEventToken(command.eventToken, command.status);
+  const eventSignedAt = command.signedAt;
 
   let templateId = pickString(
     operation?.templateId,
     operationPayload.templateId,
-    event.templateId,
+    command.templateId,
   );
   if (!templateId) {
     try {
-      const remoteDocument = await getDocumentProperties({ documentId: event.documentId });
+      const remoteDocument = await getDocumentProperties({ documentId: command.documentId });
       templateId = pickString(remoteDocument.templateId);
     } catch {
       templateId = null;
@@ -1202,78 +1508,105 @@ const createOrUpdateSignedDocumentProjection = async (params: {
       select: {
         id: true,
         organizationId: true,
+        documentRequirementId: true,
         title: true,
+        requiredSignerType: true,
+        signOnce: true,
+        signerRoles: true,
       },
     })
     : null;
 
+  let projectionTemplateRow = templateRow;
   const templateDocumentId = pickString(
     operation?.templateDocumentId,
     operationPayload.templateDocumentId,
+    command.templateDocumentId,
     templateRow?.id,
   );
-  const documentName = pickString(
-    operationPayload.templateTitle,
-    event.dataObject?.title,
-    event.dataObject?.Title,
-    payloadData?.messageTitle,
-    payloadData?.MessageTitle,
-    payloadDocument?.messageTitle,
-    payloadDocument?.MessageTitle,
-    event.payload.title,
-    event.payload.Title,
-    templateRow?.title,
-  ) ?? 'Signed Document';
-
-  const signerRows = extractSignerProjectionsFromEvent({
-    event,
-    operation,
-    operationPayload,
-  });
-  for (const signerRow of signerRows) {
-    let resolvedUserId = pickString(signerRow.userId);
-    if (!resolvedUserId && signerRow.signerEmail) {
-      const sameAsOperationSigner = Boolean(
-        operation?.signerEmail
-        && signerRow.signerEmail.toLowerCase() === operation.signerEmail.toLowerCase(),
-      );
-      if (sameAsOperationSigner) {
-        resolvedUserId = pickString(operation?.userId, operationPayload.userId);
-      }
-      if (!resolvedUserId) {
-        resolvedUserId = await maybeResolveUserIdFromSignerEmail(signerRow.signerEmail);
-      }
+  const declaredOrganizationId = pickString(
+    operation?.organizationId,
+    operationPayload.organizationId,
+    command.organizationId,
+  );
+  if (
+    templateRow?.organizationId
+    && declaredOrganizationId
+    && templateRow.organizationId !== declaredOrganizationId
+  ) {
+    throw new Error('BoldSign document projection template Organization ownership mismatch.');
+  }
+  if (templateDocumentId && (!templateRow || templateRow.id !== templateDocumentId)) {
+    const versionRow = await prisma.templateDocuments.findUnique({
+      where: { id: templateDocumentId },
+      select: {
+        id: true,
+        organizationId: true,
+        documentRequirementId: true,
+        title: true,
+        requiredSignerType: true,
+        signOnce: true,
+        signerRoles: true,
+      },
+    });
+    if (!versionRow) {
+      throw new Error('BoldSign document projection template Version was not found.');
     }
-    if (!resolvedUserId && signerRows.length === 1) {
-      resolvedUserId = pickString(operation?.userId, operationPayload.userId);
-    }
-    signerRow.userId = resolvedUserId;
+    projectionTemplateRow = versionRow;
+  }
+  if (
+    templateRow?.organizationId
+    && projectionTemplateRow?.organizationId
+    && templateRow.organizationId !== projectionTemplateRow.organizationId
+  ) {
+    throw new Error('BoldSign document projection template Version Organization ownership mismatch.');
+  }
+  if (
+    projectionTemplateRow?.organizationId
+    && declaredOrganizationId
+    && projectionTemplateRow.organizationId !== declaredOrganizationId
+  ) {
+    throw new Error('BoldSign document projection template Version Organization ownership mismatch.');
   }
 
-  const childSignerRow = signerRows.find((row) => normalizeSignerRoleForProjection(row.signerRole) === 'child');
-  const childUserId = pickString(
-    operation?.childUserId,
-    operationPayload.childUserId,
-    childSignerRow?.userId,
-  );
-  const representativeUserId = pickString(
-    operation?.userId,
-    operationPayload.userId,
-    signerRows.find((row) => pickString(row.userId))?.userId,
+  const documentName = pickString(
+    operationPayload.templateTitle,
+    command.documentName,
+    projectionTemplateRow?.title,
+  ) ?? 'Signed Document';
+  const requiredSignerRoles = resolveRequiredSignerRoles(
+    projectionTemplateRow?.signerRoles,
+    projectionTemplateRow?.requiredSignerType,
   );
 
-  const inferredContext = await inferEventContextForDocumentProjection({
-    explicitEventId: pickString(operation?.eventId, operationPayload.eventId),
-    explicitTeamId: pickString(operation?.teamId, operationPayload.teamId),
-    explicitOrganizationId: pickString(
+  const signerRows = command.signers;
+  const explicitEventId = pickString(
+    operation?.eventId,
+    operationPayload.eventId,
+    command.eventId,
+  );
+  const explicitTeamId = pickString(
+    operation?.teamId,
+    operationPayload.teamId,
+    command.teamId,
+  );
+  const providerDocumentId = pickString(command.documentId);
+  let childUserId: string | null = null;
+  let representativeUserId: string | null = null;
+  let inferredContext: {
+    eventId: string | null;
+    teamId: string | null;
+    organizationId: string | null;
+  } = {
+    eventId: explicitEventId,
+    teamId: explicitTeamId,
+    organizationId: pickString(
       operation?.organizationId,
       operationPayload.organizationId,
-      templateRow?.organizationId,
+      command.organizationId,
+      projectionTemplateRow?.organizationId,
     ),
-    templateDocumentId,
-    childUserId,
-    representativeUserId,
-  });
+  };
 
   let updatedRows = 0;
   const projectedRows: Array<{
@@ -1283,57 +1616,122 @@ const createOrUpdateSignedDocumentProjection = async (params: {
     signerEmail: string | null;
     roleIndex: number | null;
   }> = [];
+  let primaryRowId = pickString(operation?.signedDocumentRecordId);
+  const isTerminalFailure = TERMINAL_FAILURE_STATUS_TOKENS.has(command.eventToken);
 
-  for (const signerRow of signerRows) {
-    const signerRole = normalizeSignerRoleForProjection(
-      pickString(signerRow.signerRole),
-    ) ?? normalizeSignerRoleForProjection(pickString(operation?.signerRole, operationPayload.signerRole))
-      ?? 'participant';
-    const signerEmail = pickString(signerRow.signerEmail, operation?.signerEmail, operationPayload.signerEmail)?.toLowerCase() ?? null;
-    const userId = pickString(signerRow.userId);
-    const roleIndex = parseNumber(
-      signerRow.roleIndex
-      ?? operation?.roleIndex
-      ?? operationPayload.roleIndex,
+  await prisma.$transaction(async (tx) => {
+    for (const signerRow of signerRows) {
+      let resolvedUserId = pickString(signerRow.userId);
+      if (!resolvedUserId && signerRow.signerEmail) {
+        const sameAsOperationSigner = Boolean(
+          operation?.signerEmail
+          && signerRow.signerEmail.toLowerCase() === operation.signerEmail.toLowerCase(),
+        );
+        if (sameAsOperationSigner) {
+          resolvedUserId = pickString(operation?.userId, operationPayload.userId);
+        }
+        if (!resolvedUserId) {
+          resolvedUserId = await maybeResolveUserIdFromSignerEmail(signerRow.signerEmail, tx);
+        }
+      }
+      signerRow.userId = resolvedUserId;
+    }
+
+    const childSignerRow = signerRows.find((row) => normalizeSignerRoleForProjection(row.signerRole) === 'child');
+    childUserId = pickString(
+      operation?.childUserId,
+      operationPayload.childUserId,
+      childSignerRow?.userId,
     );
-    const hostId = signerRole === 'child'
-      ? (childUserId ?? userId)
-      : signerRole === 'parent_guardian'
-        ? childUserId
-        : pickString(operation?.childUserId, operationPayload.childUserId);
+    representativeUserId = pickString(
+      operation?.userId,
+      operationPayload.userId,
+      signerRows.find((row) => pickString(row.userId))?.userId,
+    );
 
-    const signerStatus = resolveSignerDocumentStatus({
-      eventToken: event.eventToken,
-      fallbackStatus,
-      signerStatusToken: signerRow.signerStatusToken,
-    });
-    const defaultSignedAt = signerStatus === 'SIGNED'
-      ? (signerRow.signedAt ?? eventSignedAt)
-      : null;
-
-    let existing = await prisma.signedDocuments.findFirst({
-      where: {
-        signedDocumentId: event.documentId,
-        ...(templateDocumentId ? { templateId: templateDocumentId } : {}),
-        ...(userId ? { userId } : {}),
-        ...(signerRole ? { signerRole } : {}),
-        ...(hostId ? { hostId } : {}),
-      },
-      orderBy: { updatedAt: 'desc' },
-      select: {
-        id: true,
-        status: true,
-        signedAt: true,
-      },
+    inferredContext = await inferEventContextForDocumentProjection({
+      explicitEventId,
+      explicitTeamId,
+      explicitOrganizationId: pickString(
+        operation?.organizationId,
+        operationPayload.organizationId,
+        command.organizationId,
+        projectionTemplateRow?.organizationId,
+      ),
+      templateDocumentId,
+      childUserId,
+      representativeUserId,
+      database: tx,
     });
 
-    if (!existing && signerEmail) {
-      existing = await prisma.signedDocuments.findFirst({
+    if (!providerDocumentId || !templateDocumentId || !inferredContext.organizationId) {
+      return;
+    }
+    if (
+      projectionTemplateRow?.organizationId
+      && projectionTemplateRow.organizationId !== inferredContext.organizationId
+    ) {
+      throw new Error('BoldSign document projection context Organization ownership mismatch.');
+    }
+
+    const existingEvidenceRows = await tx.signedDocuments.findMany({
+      where: { signedDocumentId: providerDocumentId },
+      select: { id: true, organizationId: true },
+    });
+    const foreignEvidence = existingEvidenceRows.find((row) =>
+      row.organizationId !== null
+      && row.organizationId !== inferredContext.organizationId);
+    if (foreignEvidence) {
+      throw new Error('BoldSign document projection evidence Organization ownership mismatch.');
+    }
+
+    for (const signerRow of signerRows) {
+      const signerRole = normalizeSignerRoleForProjection(
+        pickString(signerRow.signerRole),
+      ) ?? normalizeSignerRoleForProjection(pickString(operation?.signerRole, operationPayload.signerRole))
+        ?? 'participant';
+      const signerEmail = pickString(signerRow.signerEmail, operation?.signerEmail, operationPayload.signerEmail)?.toLowerCase() ?? null;
+      const userId = pickString(signerRow.userId);
+      const roleIndex = parseNumber(
+        signerRow.roleIndex
+        ?? operation?.roleIndex
+        ?? operationPayload.roleIndex,
+      );
+      const hostId = signerRole === 'child'
+        ? (childUserId ?? userId)
+        : signerRole === 'parent_guardian'
+          ? childUserId
+          : pickString(operation?.childUserId, operationPayload.childUserId);
+      const subjectHostId = userId ? hostId : null;
+
+      const signerStatus = resolveSignerDocumentStatus({
+        eventToken: command.eventToken,
+        fallbackStatus,
+        signerStatusToken: signerRow.signerStatusToken,
+      });
+      const defaultSignedAt = signerStatus === 'SIGNED'
+        ? (signerRow.signedAt ?? eventSignedAt)
+        : null;
+
+      let existing: {
+        id: string;
+        status: string | null;
+        signedAt: Date | string | null;
+      } | null = await tx.signedDocuments.findFirst({
         where: {
-          signedDocumentId: event.documentId,
+          signedDocumentId: providerDocumentId,
+          OR: [
+            { organizationId: inferredContext.organizationId },
+            { organizationId: null },
+          ],
           ...(templateDocumentId ? { templateId: templateDocumentId } : {}),
-          signerEmail,
+          ...(userId
+            ? { userId }
+            : signerEmail
+              ? { signerEmail }
+              : { id: '__unmatched-signer__' }),
           ...(signerRole ? { signerRole } : {}),
+          ...(subjectHostId ? { hostId: subjectHostId } : {}),
         },
         orderBy: { updatedAt: 'desc' },
         select: {
@@ -1342,116 +1740,234 @@ const createOrUpdateSignedDocumentProjection = async (params: {
           signedAt: true,
         },
       });
-    }
 
-    const preserveSignedState = Boolean(
-      existing
-      && isSignedStatus(existing.status)
-      && !isSignedStatus(signerStatus)
-      && !TERMINAL_FAILURE_STATUS_TOKENS.has(event.eventToken),
-    );
-    const nextStatus = preserveSignedState ? 'SIGNED' : signerStatus;
-    const nextSignedAt = nextStatus === 'SIGNED'
-      ? (normalizeText(existing?.signedAt) ?? defaultSignedAt)
-      : null;
+      if (!existing && signerEmail) {
+        existing = await tx.signedDocuments.findFirst({
+          where: {
+            signedDocumentId: providerDocumentId,
+            OR: [
+              { organizationId: inferredContext.organizationId },
+              { organizationId: null },
+            ],
+            ...(templateDocumentId ? { templateId: templateDocumentId } : {}),
+            signerEmail,
+            ...(signerRole ? { signerRole } : {}),
+          },
+          orderBy: { updatedAt: 'desc' },
+          select: {
+            id: true,
+            status: true,
+            signedAt: true,
+          },
+        });
+      }
 
-    if (existing) {
-      await prisma.signedDocuments.update({
-        where: { id: existing.id },
-        data: {
-          updatedAt: new Date(),
-          signedDocumentId: event.documentId,
-          templateId: templateDocumentId ?? undefined,
-          userId: userId ?? undefined,
-          documentName,
-          hostId,
-          organizationId: inferredContext.organizationId,
-          eventId: inferredContext.eventId,
-          teamId: inferredContext.teamId,
-          status: nextStatus,
-          signedAt: nextSignedAt ?? undefined,
-          signerEmail,
-          roleIndex,
-          signerRole,
-        },
-      });
-      updatedRows += 1;
-      projectedRows.push({
-        id: existing.id,
-        userId: userId ?? null,
-        signerRole,
-        signerEmail,
-        roleIndex,
-      });
-      continue;
-    }
-
-    if (!userId || !templateDocumentId) {
-      continue;
-    }
-
-    const created = await prisma.signedDocuments.create({
-      data: {
-        id: crypto.randomUUID(),
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        signedDocumentId: event.documentId,
-        templateId: templateDocumentId,
-        userId,
-        documentName,
-        hostId,
+      const isSignedStatePreserved = Boolean(
+        existing
+        && isSignedStatus(existing.status)
+        && !isSignedStatus(signerStatus)
+        && !TERMINAL_FAILURE_STATUS_TOKENS.has(command.eventToken)
+      );
+      const nextStatus = isSignedStatePreserved ? 'SIGNED' : signerStatus;
+      const nextSignedAt = nextStatus === 'SIGNED'
+        ? (normalizeText(existing?.signedAt) ?? defaultSignedAt)
+        : null;
+      const evidenceFields = signedDocumentEvidenceFields({
         organizationId: inferredContext.organizationId,
+        userId,
+        hostId: subjectHostId,
         eventId: inferredContext.eventId,
         teamId: inferredContext.teamId,
-        status: nextStatus,
-        signedAt: nextSignedAt,
+        signOnce: projectionTemplateRow?.signOnce,
+        provenance: DOCUMENT_EVIDENCE_PROVENANCE.BOLDSIGN,
+        providerDocumentId,
+      });
+      const isSatisfactionReady = nextStatus === 'SIGNED'
+        && Boolean(
+          projectionTemplateRow?.documentRequirementId
+          && evidenceFields.documentSubjectId
+          && evidenceFields.scopeType
+          && evidenceFields.scopeId,
+        );
+      let projectedRowId = existing?.id ?? null;
+
+      if (evidenceFields.documentSubjectId) {
+        await ensureDocumentSubject({
+          organizationId: inferredContext.organizationId,
+          userId,
+          hostId: subjectHostId,
+        }, tx);
+      }
+
+      if (existing) {
+        await tx.signedDocuments.update({
+          where: { id: existing.id },
+          data: {
+            updatedAt: new Date(),
+            signedDocumentId: providerDocumentId,
+            templateId: templateDocumentId,
+            userId,
+            documentName,
+            hostId: subjectHostId,
+            organizationId: inferredContext.organizationId,
+            eventId: inferredContext.eventId,
+            teamId: inferredContext.teamId,
+            ...evidenceFields,
+            status: nextStatus,
+            ...(nextSignedAt !== null ? { signedAt: nextSignedAt } : {}),
+            signerEmail,
+            roleIndex,
+            signerRole,
+          },
+        });
+        if (isSatisfactionReady) {
+          const existingSatisfaction: { organizationId: string } | null =
+            await tx.documentRequirementSatisfactions.findFirst({
+              where: { id: `document-satisfaction:${existing.id}` },
+              select: { organizationId: true },
+            });
+          if (
+            existingSatisfaction
+            && existingSatisfaction.organizationId !== inferredContext.organizationId
+          ) {
+            throw new Error('BoldSign document projection Satisfaction Organization ownership mismatch.');
+          }
+          await createDocumentRequirementSatisfaction({
+            evidenceId: existing.id,
+            templateDocumentId,
+            documentRequirementId: projectionTemplateRow?.documentRequirementId,
+            organizationId: inferredContext.organizationId,
+            documentSubjectId: evidenceFields.documentSubjectId,
+            scopeType: evidenceFields.scopeType,
+            scopeId: evidenceFields.scopeId,
+            requiredSignerRoles,
+            completedSignerRoles: [signerRole],
+            signerRole,
+          }, tx);
+        }
+      } else if (isTerminalFailure && existingEvidenceRows.length > 0) {
+        continue;
+      } else {
+        const createdAt = new Date();
+        const created: { id: string } = await tx.signedDocuments.create({
+          data: {
+            id: crypto.randomUUID(),
+            createdAt,
+            updatedAt: createdAt,
+            signedDocumentId: providerDocumentId,
+            templateId: templateDocumentId,
+            userId,
+            documentName,
+            hostId: subjectHostId,
+            organizationId: inferredContext.organizationId,
+            eventId: inferredContext.eventId,
+            teamId: inferredContext.teamId,
+            ...evidenceFields,
+            status: nextStatus,
+            signedAt: nextSignedAt,
+            signerEmail,
+            roleIndex,
+            signerRole,
+            ipAddress: null,
+            requestId: null,
+          },
+          select: { id: true },
+        });
+        projectedRowId = created.id;
+        if (isSatisfactionReady) {
+          const existingSatisfaction: { organizationId: string } | null =
+            await tx.documentRequirementSatisfactions.findFirst({
+              where: { id: `document-satisfaction:${created.id}` },
+              select: { organizationId: true },
+            });
+          if (
+            existingSatisfaction
+            && existingSatisfaction.organizationId !== inferredContext.organizationId
+          ) {
+            throw new Error('BoldSign document projection Satisfaction Organization ownership mismatch.');
+          }
+          await createDocumentRequirementSatisfaction({
+            evidenceId: created.id,
+            templateDocumentId,
+            documentRequirementId: projectionTemplateRow?.documentRequirementId,
+            organizationId: inferredContext.organizationId,
+            documentSubjectId: evidenceFields.documentSubjectId,
+            scopeType: evidenceFields.scopeType,
+            scopeId: evidenceFields.scopeId,
+            requiredSignerRoles,
+            completedSignerRoles: [signerRole],
+            signerRole,
+          }, tx);
+        }
+      }
+
+      if (!projectedRowId) {
+        continue;
+      }
+      updatedRows += 1;
+      projectedRows.push({
+        id: projectedRowId,
+        userId,
+        signerRole,
         signerEmail,
         roleIndex,
-        signerRole,
-        ipAddress: null,
-        requestId: null,
-      },
-      select: { id: true },
-    });
-    updatedRows += 1;
-    projectedRows.push({
-      id: created.id,
-      userId,
-      signerRole,
-      signerEmail,
-      roleIndex,
-    });
-  }
+      });
+    }
+    // Terminal provider events update every evidence row.
+    // The transaction invalidates the Satisfaction aggregate.
 
-  let primaryRowId = pickString(operation?.signedDocumentRecordId);
+    if (updatedRows === 0 || isTerminalFailure) {
+      const existingRows = await tx.signedDocuments.findMany({
+        where: {
+          signedDocumentId: providerDocumentId,
+          organizationId: inferredContext.organizationId,
+        },
+        orderBy: { updatedAt: 'desc' },
+        select: { id: true },
+      });
+
+      if (existingRows.length > 0) {
+        const ids = existingRows.map((row) => row.id);
+        await tx.signedDocuments.updateMany({
+          where: {
+            id: { in: ids },
+            organizationId: inferredContext.organizationId,
+          },
+          data: {
+            updatedAt: new Date(),
+            provenance: DOCUMENT_EVIDENCE_PROVENANCE.BOLDSIGN,
+            providerDocumentId: providerDocumentId,
+            status: fallbackStatus,
+          },
+        });
+        if (!isTerminalFailure && fallbackStatus === 'SIGNED' && eventSignedAt !== null) {
+          await tx.signedDocuments.updateMany({
+            where: {
+              id: { in: ids },
+              organizationId: inferredContext.organizationId,
+              signedAt: null,
+            },
+            data: { signedAt: eventSignedAt },
+          });
+        }
+        if (isTerminalFailure) {
+          await invalidateDocumentRequirementSatisfactions({
+            evidenceIds: ids,
+            isForceInvalidation: true,
+          }, tx);
+        }
+        primaryRowId = existingRows[0]?.id ?? null;
+        updatedRows = existingRows.length;
+      }
+    }
+  });
+
   if (!primaryRowId && projectedRows.length > 0) {
     const preferred = projectedRows.find((row) =>
       (operation?.userId && row.userId === operation.userId)
       || (operation?.signerRole && row.signerRole === normalizeSignerRoleForProjection(operation.signerRole)),
     );
     primaryRowId = preferred?.id ?? projectedRows[0]?.id ?? null;
-  }
-
-  if (updatedRows === 0) {
-    const existingRows = await prisma.signedDocuments.findMany({
-      where: { signedDocumentId: event.documentId },
-      orderBy: { updatedAt: 'desc' },
-      select: { id: true },
-    });
-
-    if (existingRows.length > 0) {
-      const ids = existingRows.map((row) => row.id);
-      await prisma.signedDocuments.updateMany({
-        where: { id: { in: ids } },
-        data: {
-          updatedAt: new Date(),
-          status: fallbackStatus,
-          signedAt: eventSignedAt ?? undefined,
-        },
-      });
-      primaryRowId = existingRows[0]?.id ?? primaryRowId ?? null;
-      updatedRows = existingRows.length;
-    }
   }
 
   const preferredProjection = projectedRows.find((row) => row.id === primaryRowId) ?? projectedRows[0] ?? null;
@@ -1482,6 +1998,53 @@ const createOrUpdateSignedDocumentProjection = async (params: {
   };
 };
 
+export const projectSignedDocumentEvidence = async (params: {
+  command: SignedDocumentProjectionCommand;
+  operation?: BoldSignSyncOperation | null;
+}) => createOrUpdateSignedDocumentProjection({
+  command: params.command,
+  operation: params.operation ?? null,
+});
+
+const buildSignedDocumentProjectionCommand = (
+  event: ParsedBoldSignWebhookEvent,
+  operation: BoldSignSyncOperation | null,
+): SignedDocumentProjectionCommand => {
+  const operationPayload = getOperationPayload(operation);
+  const payloadData = asRecord(event.payload.data) ?? asRecord(event.payload.Data) ?? null;
+  const payloadDocument = asRecord(event.payload.document) ?? asRecord(event.payload.Document) ?? null;
+  return {
+    documentId: event.documentId ?? '',
+    eventToken: event.eventToken,
+    status: event.status,
+    signedAt: resolveDocumentSignedAtIso(event),
+    templateId: pickString(operation?.templateId, operationPayload.templateId, event.templateId),
+    templateDocumentId: pickString(
+      operation?.templateDocumentId,
+      operationPayload.templateDocumentId,
+    ),
+    documentName: pickString(
+      operationPayload.templateTitle,
+      event.dataObject?.title,
+      event.dataObject?.Title,
+      payloadData?.messageTitle,
+      payloadData?.MessageTitle,
+      payloadDocument?.messageTitle,
+      payloadDocument?.MessageTitle,
+      event.payload.title,
+      event.payload.Title,
+    ),
+    organizationId: pickString(operation?.organizationId, operationPayload.organizationId),
+    eventId: pickString(operation?.eventId, operationPayload.eventId),
+    teamId: pickString(operation?.teamId, operationPayload.teamId),
+    signers: extractSignerProjectionsFromEvent({
+      event,
+      operation,
+      operationPayload,
+    }),
+  };
+};
+
 const projectDocumentEvent = async (event: ParsedBoldSignWebhookEvent): Promise<void> => {
   if (!event.documentId) {
     return;
@@ -1489,8 +2052,9 @@ const projectDocumentEvent = async (event: ParsedBoldSignWebhookEvent): Promise<
 
   let operation = await resolveDocumentOperation(event);
   const hadOperation = Boolean(operation);
-  const projection = await createOrUpdateSignedDocumentProjection({
-    event,
+  const command = buildSignedDocumentProjectionCommand(event, operation);
+  const projection = await projectSignedDocumentEvidence({
+    command,
     operation,
   });
 
@@ -1729,6 +2293,19 @@ const reconcileTemplateDeleteOperation = async (operation: BoldSignSyncOperation
   }
 
   const now = new Date();
+  const localTemplate = await prisma.templateDocuments.findUnique({
+    where: { id: templateDocumentId },
+  });
+  if (localTemplate && (
+    localTemplate.frozenAt
+    || await prisma.$transaction((tx) => isDocumentTemplateVersionFrozen(tx, templateDocumentId))
+  )) {
+    await updateBoldSignOperationById(operation.id, {
+      status: BOLDSIGN_OPERATION_STATUSES.FAILED_RETRYABLE,
+      lastError: 'Frozen Document Template Versions cannot be deleted.',
+    });
+    return;
+  }
   const [eventsToUpdate, timeSlotsToUpdate] = await Promise.all([
     prisma.events.findMany({
       where: { requiredTemplateIds: { has: templateDocumentId } },

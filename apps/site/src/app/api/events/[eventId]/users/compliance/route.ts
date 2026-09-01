@@ -6,9 +6,7 @@ import { calculateAgeOnDate } from '@/lib/age';
 import {
   buildRequiredSignatureTasks,
   buildSignatureCompletionKey,
-  isSignedDocumentStatus,
   normalizeRegistrationAnswersSnapshot,
-  normalizeSignerRoleContext,
   pickPrimaryBill,
   type ComplianceTemplate,
   type EventUserComplianceResponse,
@@ -16,6 +14,10 @@ import {
   type TeamComplianceRequiredDocument,
   type TeamComplianceUserSummary,
 } from '@/lib/eventTeamCompliance';
+import {
+  documentSubjectIdFor,
+  findCompletedDocumentSatisfactions,
+} from '@/server/documentEvidence';
 import { loadBillDiscountSummaries, withBillDiscountAmounts } from '@/server/billing/billDiscountSummaries';
 
 export const dynamic = 'force-dynamic';
@@ -41,17 +43,6 @@ const normalizeIdList = (value: unknown): string[] => {
   );
 };
 
-const toTimestamp = (value: unknown): number => {
-  if (!value) return 0;
-  if (value instanceof Date) {
-    return Number.isNaN(value.getTime()) ? 0 : value.getTime();
-  }
-  if (typeof value === 'string') {
-    const parsed = Date.parse(value);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-  return 0;
-};
 
 const toDisplayName = (user: {
   id: string;
@@ -135,7 +126,7 @@ const toPaymentSummary = (bill: {
   };
 };
 
-const ACTIVE_EVENT_USER_REGISTRATION_STATUSES = ['STARTED', 'PENDING', 'ACTIVE', 'BLOCKED'] as const;
+const ACTIVE_EVENT_USER_REGISTRATION_STATUSES = ['STARTED', 'PENDING', 'ACTIVE', 'BLOCKED', 'CONSENTFAILED'] as const;
 
 const buildOccurrenceWhere = (req: NextRequest) => {
   const slotId = normalizeId(req.nextUrl.searchParams.get('slotId'));
@@ -350,83 +341,49 @@ export async function GET(
       normalizeRegistrationAnswersSnapshot(response.answersSnapshot),
     ]),
   );
-  const canQuerySignedDocuments = templates.length > 0 && (signerUserIds.length > 0 || participantUserIds.length > 0);
-  const signOnceTemplateIds = templates
-    .filter((template) => Boolean(template.signOnce))
-    .map((template) => template.id);
-  const eventScopedTemplateIds = templates
-    .filter((template) => !template.signOnce)
-    .map((template) => template.id);
-
-  const signedDocuments = canQuerySignedDocuments
-    ? await prisma.signedDocuments.findMany({
-      where: {
-        templateId: { in: templates.map((template) => template.id) },
-        OR: [
-          ...(signerUserIds.length ? [{ userId: { in: signerUserIds } }] : []),
-          ...(participantUserIds.length ? [{ hostId: { in: participantUserIds } }] : []),
-        ],
-        ...(signOnceTemplateIds.length || eventScopedTemplateIds.length
-          ? {
-            AND: [{
-              OR: [
-                ...(signOnceTemplateIds.length ? [{ templateId: { in: signOnceTemplateIds } }] : []),
-                ...(eventScopedTemplateIds.length ? [{ templateId: { in: eventScopedTemplateIds }, eventId }] : []),
-              ],
-            }],
-          }
-          : {}),
-      },
-      select: {
-        id: true,
-        templateId: true,
-        userId: true,
-        hostId: true,
-        signerRole: true,
-        status: true,
-        eventId: true,
-        signedAt: true,
-        createdAt: true,
-      },
-    })
-    : [];
-
-  const templatesById = new Map(templates.map((template) => [template.id, template]));
-  const signedDocumentByCompletionKey = new Map<string, { id: string; signedAt?: string }>();
-  signedDocuments.forEach((document) => {
-    if (!isSignedDocumentStatus(document.status)) {
-      return;
-    }
-    const template = templatesById.get(document.templateId);
-    if (!template) {
-      return;
-    }
-    const signerContext = normalizeSignerRoleContext(document.signerRole);
-    const hostUserId = signerContext === 'participant' ? null : normalizeId(document.hostId);
-    if (signerContext !== 'participant' && !hostUserId) {
-      return;
-    }
-    if (!template.signOnce && normalizeId(document.eventId) !== eventId) {
-      return;
-    }
-    const completionKey = buildSignatureCompletionKey({
-      scopeKey: template.signOnce ? 'once' : `event:${eventId}`,
-      templateId: template.id,
-      signerContext,
-      hostUserId,
-    });
-    const existing = signedDocumentByCompletionKey.get(completionKey);
-    const existingTs = existing ? toTimestamp(existing.signedAt) : 0;
-    const nextSignedAt = document.signedAt
-      ?? (document.createdAt ? document.createdAt.toISOString() : undefined);
-    const nextTs = toTimestamp(nextSignedAt);
-    if (!existing || nextTs > existingTs) {
-      signedDocumentByCompletionKey.set(completionKey, {
-        id: document.id,
-        signedAt: nextSignedAt,
-      });
-    }
+  const documentSubjectIdByUserId = new Map(
+    participantUserIds
+      .map((participantUserId) => [
+        participantUserId,
+        documentSubjectIdFor(event.organizationId, participantUserId),
+      ] as const)
+      .filter((entry): entry is readonly [string, string] => Boolean(entry[1])),
+  );
+  const satisfactionRows = await findCompletedDocumentSatisfactions({
+    documentSubjectIds: Array.from(documentSubjectIdByUserId.values()),
+    templateDocumentIds: templates.map((template) => template.id),
+    scopes: [
+      ...(event.organizationId
+        ? [{ scopeType: 'ORGANIZATION' as const, scopeId: event.organizationId }]
+        : []),
+      { scopeType: 'EVENT_PARTICIPATION' as const, scopeId: eventId },
+    ],
   });
+  const completeDocumentSatisfactionByKey = new Map<string, { id: string; signedAt?: string }>();
+  satisfactionRows.forEach((row) => {
+    const signedAt = row.signedAt ?? undefined;
+    completeDocumentSatisfactionByKey.set(
+      `${row.documentSubjectId}::${row.templateDocumentId}::${row.scopeType}::${row.scopeId}`,
+      { id: row.sourceEvidenceId, signedAt },
+    );
+  });
+  const getSatisfiedDocument = (task: {
+    templateId: string;
+    signOnce: boolean;
+    signerUserId?: string | null;
+    hostUserId?: string | null;
+  }) => {
+    const subjectUserId = normalizeId(task.hostUserId) ?? normalizeId(task.signerUserId);
+    const subjectId = subjectUserId ? documentSubjectIdByUserId.get(subjectUserId) : undefined;
+    const scopeType = task.signOnce ? 'ORGANIZATION' : 'EVENT_PARTICIPATION';
+    const scopeId = task.signOnce ? normalizeId(event.organizationId) : eventId;
+    if (!subjectId || !scopeId) {
+      return undefined;
+    }
+    return completeDocumentSatisfactionByKey.get(
+      `${subjectId}::${task.templateId}::${scopeType}::${scopeId}`,
+    );
+  };
 
   const usersById = new Map(users.map((user) => [user.id, user]));
   const userBillsByOwnerId = new Map<string, Array<(typeof userBills)[number]>>();
@@ -468,7 +425,7 @@ export async function GET(
           signerContext: task.signerContext,
           hostUserId: task.hostUserId,
         });
-        const signed = signedDocumentByCompletionKey.get(completionKey);
+        const completion = getSatisfiedDocument(task);
         return {
           key: completionKey,
           templateId: task.templateId,
@@ -477,9 +434,9 @@ export async function GET(
           signerContext: task.signerContext,
           signerLabel: task.signerLabel,
           signOnce: task.signOnce,
-          status: signed ? 'SIGNED' : 'UNSIGNED',
-          signedDocumentRecordId: signed?.id,
-          signedAt: signed?.signedAt,
+          status: completion ? 'SIGNED' : 'UNSIGNED',
+          signedDocumentRecordId: completion?.id,
+          signedAt: completion?.signedAt,
         };
       });
 

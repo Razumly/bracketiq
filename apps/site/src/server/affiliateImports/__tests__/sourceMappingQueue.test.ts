@@ -17,10 +17,31 @@ const prismaMock = {
     findUnique: jest.fn(),
     update: jest.fn(),
   },
+  affiliateScrapeSources: {
+    findUnique: jest.fn(),
+  },
+  affiliateSupplySources: {
+    findUnique: jest.fn(),
+  },
+  affiliateSupplyContractManifests: {
+    findFirst: jest.fn(),
+  },
+  affiliateSupplyLifecycleTransitions: {
+    findUnique: jest.fn(),
+    findFirst: jest.fn(),
+    create: jest.fn(),
+  },
 };
 
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 jest.mock('@/lib/id', () => ({ createId: () => 'generated_job' }));
+const mockExecuteAffiliateSupplyLifecycleCommand = jest.fn();
+jest.mock('@/server/affiliateImports/affiliateSupplyPersistence', () => ({
+  ...jest.requireActual('@/server/affiliateImports/affiliateSupplyPersistence'),
+  executeAffiliateSupplyLifecycleCommand: (...args: unknown[]) => (
+    mockExecuteAffiliateSupplyLifecycleCommand(...args)
+  ),
+}));
 
 import {
   claimNextAffiliateSourceIntakeForMapping,
@@ -60,6 +81,7 @@ describe('affiliate source mapping queue', () => {
     jest.clearAllMocks();
     jest.useFakeTimers().setSystemTime(new Date('2026-08-02T12:00:00Z'));
     prismaMock.affiliateSourceMappingJobs.updateMany.mockResolvedValue({ count: 1 });
+    mockExecuteAffiliateSupplyLifecycleCommand.mockReset();
   });
   afterEach(() => jest.useRealTimers());
 
@@ -305,6 +327,95 @@ describe('affiliate source mapping queue', () => {
       data: { status: 'EXPANDED' },
     });
   });
+  it('replays a terminal lifecycle completion after post-commit alert delivery fails', async () => {
+    let mappingJob: Record<string, unknown> = {
+      id: 'job_1',
+      intakeId: 'intake_1',
+      sourceId: 'source_1',
+      mappingId: 'mapping_1',
+      supplySourceId: 'root_1',
+      status: 'CLAIMED',
+      workerId: claimHandle.workerId,
+      claimedAt: new Date(claimHandle.claimedAt),
+      leaseExpiresAt: new Date('2026-08-02T13:00:00Z'),
+      resultSummary: {},
+    };
+    const mappingJobs = {
+      findUnique: jest.fn(async () => mappingJob),
+      updateMany: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        mappingJob = { ...mappingJob, ...data };
+        return { count: 1 };
+      }),
+    };
+    const intakes = {
+      findUnique: jest.fn(async () => ({ id: 'intake_1', supplySourceId: 'root_1' })),
+      update: jest.fn(async () => ({})),
+    };
+    const sources = {
+      findUnique: jest.fn(async () => ({ id: 'source_1', supplySourceId: 'root_1' })),
+      update: jest.fn(async () => ({})),
+    };
+    const approvals = {
+      findUnique: jest.fn(async () => null),
+    };
+    const supplySources = {
+      findUnique: jest.fn(async () => ({ id: 'root_1', lifecycleGeneration: 2 })),
+    };
+    const contractManifests = {
+      findFirst: jest.fn(async () => ({ status: 'ACTIVE' })),
+    };
+    const transitions = {
+      findUnique: jest.fn(async () => null),
+      findFirst: jest.fn(async () => null),
+      create: jest.fn(async () => ({})),
+    };
+    let database: Record<string, unknown>;
+    database = {
+      affiliateSourceMappingJobs: mappingJobs,
+      affiliateSourceIntakes: intakes,
+      affiliateApprovalJobs: approvals,
+      affiliateSources: sources,
+      affiliateScrapeSources: sources,
+      affiliateSupplySources: supplySources,
+      affiliateSupplyContractManifests: contractManifests,
+      affiliateSupplyLifecycleTransitions: transitions,
+      intakes,
+      sources,
+      supplySources,
+      contractManifests,
+      transitions,
+      transaction: async (callback: (transactionDatabase: unknown) => Promise<unknown>) => (
+        callback(database)
+      ),
+    };
+    mockExecuteAffiliateSupplyLifecycleCommand
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('alert delivery unavailable'))
+      .mockResolvedValueOnce(undefined);
+
+    await expect(finishAffiliateSourceMappingClaim({
+      claimHandle,
+      status: 'EXPANDED',
+      sourceId: 'source_1',
+      mappingId: 'mapping_1',
+      resultSummary: { evidenceRefs: ['mapping-evidence'] },
+      db: database,
+    })).rejects.toThrow('alert delivery unavailable');
+    expect(mappingJob).toEqual(expect.objectContaining({ status: 'EXPANDED' }));
+
+    await expect(finishAffiliateSourceMappingClaim({
+      claimHandle,
+      status: 'EXPANDED',
+      sourceId: 'source_1',
+      mappingId: 'mapping_1',
+      db: database,
+    })).resolves.toEqual(expect.objectContaining({ status: 'EXPANDED' }));
+    expect(mockExecuteAffiliateSupplyLifecycleCommand).toHaveBeenCalledTimes(3);
+    expect(mockExecuteAffiliateSupplyLifecycleCommand).toHaveBeenLastCalledWith(expect.objectContaining({
+      idempotencyKey: 'mapping:job_1:2026-08-02T10:00:00.000Z:EXPANDED',
+      supplySourceId: 'root_1',
+    }));
+  });
 
   it('records unsupported sports as terminal human review without creating or reopening approval', async () => {
     prismaMock.affiliateSourceMappingJobs.findUnique.mockResolvedValue({
@@ -422,7 +533,15 @@ describe('affiliate source mapping queue', () => {
       resultSummary: {},
     });
     prismaMock.affiliateApprovalJobs.findUnique.mockResolvedValue(null);
-
+    prismaMock.affiliateSourceIntakes.findUnique.mockResolvedValue({ id: 'intake_1', supplySourceId: 'supply-1' });
+    prismaMock.affiliateSupplySources.findUnique.mockResolvedValue({
+      id: 'supply-1',
+      lifecycleGeneration: 0,
+    });
+    prismaMock.affiliateScrapeSources.findUnique.mockResolvedValue({
+      id: 'source_1',
+      supplySourceId: 'supply-1',
+    });
     await finishAffiliateSourceMappingClaim({
       claimHandle,
       jobId: 'job_1',
@@ -433,8 +552,16 @@ describe('affiliate source mapping queue', () => {
     });
 
     expect(prismaMock.affiliateSourceMappingJobs.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ sourceId: 'source_1', mappingId: 'mapping_1' }),
+      data: expect.objectContaining({ sourceId: 'source_1', mappingId: 'mapping_1', supplySourceId: 'supply-1' }),
     }));
+    expect(prismaMock.affiliateSourceMappingJobs.update).toHaveBeenCalledWith({
+      where: { id: 'job_1' },
+      data: { supplySourceId: 'supply-1' },
+    });
+    expect(prismaMock.affiliateSourceIntakes.update).toHaveBeenCalledWith({
+      where: { id: 'intake_1' },
+      data: { supplySourceId: 'supply-1' },
+    });
   });
 
   it('does not allow completion to replace an existing package identity', async () => {

@@ -33,7 +33,10 @@ describe('OrganizationDivisionsPanel loading', () => {
   });
 
   it('does not reload catalogs and uses the latest callback when only its identity changes', async () => {
-    const { promise: divisionsPromise, resolve: resolveDivisions } = Promise.withResolvers<never[]>();
+    let resolveDivisions!: (value: never[]) => void;
+    const divisionsPromise = new Promise<never[]>((resolve) => {
+      resolveDivisions = resolve;
+    });
     listOrganizationDivisionsMock.mockReturnValue(divisionsPromise);
     const firstOnChanged = jest.fn();
     const latestOnChanged = jest.fn();

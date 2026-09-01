@@ -30,6 +30,7 @@ export type AffiliateSourceIntakeArtifactKind =
 
 export type PersistAffiliateSourceIntakeArtifactInput = {
   intakeId: string;
+  supplySourceId?: string | null;
   pageId?: string | null;
   runId: string;
   kind: AffiliateSourceIntakeArtifactKind;
@@ -43,10 +44,10 @@ export type PersistAffiliateSourceIntakeArtifactInput = {
   originalName?: string | null;
   now?: Date;
 };
-
 type IntakeArtifactRow = {
   id: string;
   intakeId: string;
+  supplySourceId?: string | null;
   pageId?: string | null;
   runId: string;
   kind: string;
@@ -176,11 +177,11 @@ export const persistAffiliateSourceIntakeArtifact = async (
       },
     });
   }
-
   return artifacts.create({
     data: {
       id: createId(),
       intakeId: input.intakeId,
+      supplySourceId: input.supplySourceId ?? null,
       pageId: input.pageId ?? null,
       runId: input.runId,
       kind: input.kind,

@@ -168,6 +168,7 @@ We persist raw string IDs for associations (for example `teamIds`, `friendIds`, 
 - **Run quickly during development**: `npm run test:watch`
 - **CI quality checks**: `npm run test:ci`
 - **Type checks**: `npx tsc --noEmit`
+- **Full site lint**: `npm run lint`
 - **Prisma-backed tests and E2E seeding**: Against the test database, run `npm run migrate:deploy`, then `npx prisma migrate status`; proceed with Prisma-backed tests or `npm run seed:e2e` only when the status reports no pending migrations.
 
 - **Test selection**: Follow [`CODING_STANDARDS.md`](CODING_STANDARDS.md). Add Jest coverage when it proves an observable behavior that typechecking or the build cannot prove, such as a state transition, output transformation, authorization decision, persistence effect, failure path, race, or complete user workflow.
@@ -177,6 +178,7 @@ We persist raw string IDs for associations (for example `teamIds`, `friendIds`, 
 - **Bug fixes**: Include a regression test when the bug exposes a meaningful observable behavior not already covered by a stronger boundary or smoke check.
 - **Mocks**: Reset mocks and spies when they are used for internal application services, Prisma, or browser platform APIs; do not recreate a third-party provider client.
 - **Async tests**: Use `await`/`waitFor` for asynchronous application behavior.
+- **Affiliate mapping validation**: `npm run test:affiliate-mappings` runs the per-source mapping fixtures that the default Jest and CI suites skip. `npx tsc --noEmit` still checks their TypeScript contracts.
 - **Focused validation**: Do not run Jest suites concurrently from multiple agents in the same checkout; shared `.next`/cache artifacts can cause flaky results.
 
 ## Form & Scheduling Standards
@@ -213,4 +215,4 @@ We persist raw string IDs for associations (for example `teamIds`, `friendIds`, 
 
 ## Shared agent rules
 
-Read the root `../../AGENTS.md` for the issue tracker, triage labels, domain documents, backend compatibility rules, and operational boundaries.
+Read the root `../../AGENTS.md` for the issue tracker, triage labels, domain documents, current HTTP-contract rules, and operational boundaries.

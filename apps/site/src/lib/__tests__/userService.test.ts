@@ -50,7 +50,7 @@ describe('userService.listInvites', () => {
         ok: true,
         json: async () => ({
           invites: [
-            { id: 'invite_1', type: 'TEAM', status: 'PENDING' },
+            { id: 'invite_1', type: 'TEAM', role: 'team_manager', isAssigned: true, status: 'PENDING' },
             { id: 'invite_2', type: 'TEAM', status: 'PENDING' },
           ],
           nextCursor: 'cursor_page_2',
@@ -70,6 +70,8 @@ describe('userService.listInvites', () => {
     const invites = await userService.listInvites({ userId: 'user_1', type: 'TEAM' });
 
     expect(invites.map((invite) => invite.$id)).toEqual(['invite_1', 'invite_2', 'invite_3']);
+    expect(invites[0].role).toBe('team_manager');
+    expect(invites[0].isAssigned).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const firstUrl = new URL(String(fetchMock.mock.calls[0][0]), 'http://localhost');
     const secondUrl = new URL(String(fetchMock.mock.calls[1][0]), 'http://localhost');

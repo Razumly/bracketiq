@@ -2662,6 +2662,7 @@ const buildFields = (
   divisionMap: Map<string, Division>,
   fallbackDivisionIds: string[],
   divisionFieldIds: Map<string, string[]>,
+  explicitDivisionIdsByFieldId: Map<string, string[]> = new Map(),
 ) => {
   const fields: Record<string, PlayingField> = {};
   for (const row of rows) {
@@ -2685,6 +2686,7 @@ const buildFields = (
       id: row.id,
       organizationId: row.organizationId ?? null,
       divisions,
+      explicitDivisionIds: explicitDivisionIdsByFieldId.get(row.id) ?? [],
       matches: [],
       events: [],
       rentalSlots: [],
@@ -2750,6 +2752,7 @@ const buildTimeSlots = (
       field: normalizedFieldIds[0] ?? null,
       fieldIds: normalizedFieldIds,
       divisions: [...slotDivisions],
+      explicitDivisionIds: slotDivisionIds,
       timeZone: slotTimeZone,
     });
   });
@@ -4314,11 +4317,26 @@ export const loadEventWithRelations = async (
   const fallbackFieldDivisionIds = allDivisions.length
     ? allDivisions.map((division) => division.id)
     : [DEFAULT_DIVISION_KEY];
+  const rawFieldDivisionIdsByFieldId = new Map<string, string[]>();
+  for (const row of hydratedDivisionRows as any[]) {
+    const rawDivisionId = normalizeDivisionKey(row.id);
+    if (!rawDivisionId) {
+      continue;
+    }
+    for (const fieldId of ensureStringArray(row.fieldIds)) {
+      const scopedDivisionIds = rawFieldDivisionIdsByFieldId.get(fieldId) ?? [];
+      if (!scopedDivisionIds.includes(rawDivisionId)) {
+        scopedDivisionIds.push(rawDivisionId);
+      }
+      rawFieldDivisionIdsByFieldId.set(fieldId, scopedDivisionIds);
+    }
+  }
   const fields = buildFields(
     fieldRows,
     divisionMap,
     fallbackFieldDivisionIds,
     fieldIdsByDivision,
+    rawFieldDivisionIdsByFieldId,
   );
   const teamRosterSet = new Set(teamIdsToLoad);
   const divisionByTeamId = new Map<string, Division>();

@@ -12,6 +12,10 @@ import {
   dispatchRequiredEventDocuments,
   type DispatchRequiredEventDocumentsResult,
 } from '@/lib/eventConsentDispatch';
+import {
+  documentSubjectIdFor,
+  findCompletedDocumentSatisfactions,
+} from '@/server/documentEvidence';
 import { normalizeRequiredSignerType } from '@/lib/templateSignerTypes';
 import {
   buildEventParticipantSnapshot,
@@ -237,6 +241,9 @@ const buildConsentStatus = (
   if (!consent) {
     return 'pending_send';
   }
+  if (consent.isAllRequiredTemplatesSatisfied) {
+    return 'completed';
+  }
   if (consent.missingChildEmail) {
     return 'child_email_required';
   }
@@ -246,112 +253,64 @@ const buildConsentStatus = (
   return consent.sentDocumentIds.length > 0 ? 'sent' : 'pending_signature';
 };
 
-const isSignedDocumentStatus = (value: unknown): boolean => {
-  const normalized = normalizeGuestText(value)?.toLowerCase();
-  return normalized === 'signed' || normalized === 'completed';
-};
-
-const hasSignedDocumentForSigner = async (params: {
-  client: any;
-  eventId: string;
-  template: RequiredTemplateRecord;
-  userId: string | null | undefined;
-  signerRole: 'participant' | 'parent_guardian' | 'child';
-  hostId?: string | null;
-}): Promise<boolean> => {
-  const userId = normalizeGuestText(params.userId);
-  if (!userId) {
-    return false;
-  }
-  const rows = await params.client.signedDocuments.findMany({
-    where: {
-      templateId: params.template.id,
-      userId,
-      signerRole: params.signerRole,
-      hostId: normalizeGuestText(params.hostId) ?? null,
-      ...(params.template.signOnce ? {} : { eventId: params.eventId }),
-    },
-    select: {
-      status: true,
-    },
-    take: 20,
-  });
-  return rows.some((row: { status?: unknown }) => isSignedDocumentStatus(row.status));
-};
-
 const filterUnsignedTemplateIds = async (params: {
   client: any;
   eventId: string;
+  organizationId: string;
   templateIds: string[];
   templatesById: Map<string, RequiredTemplateRecord>;
   participantUserId?: string | null;
   parentUserId?: string | null;
   childUserId?: string | null;
 }): Promise<string[]> => {
-  const unsignedTemplateIds: string[] = [];
-  for (const templateId of params.templateIds) {
+  const participantSubjectId = documentSubjectIdFor(
+    params.organizationId,
+    params.participantUserId,
+  );
+  const childSubjectId = documentSubjectIdFor(
+    params.organizationId,
+    params.childUserId,
+  );
+  const subjectIds = Array.from(new Set(
+    [participantSubjectId, childSubjectId].filter((id): id is string => Boolean(id)),
+  ));
+  const signOnceTemplateIds = params.templateIds.filter((templateId) => (
+    params.templatesById.get(templateId)?.signOnce === true
+  ));
+  const eventTemplateIds = params.templateIds.filter((templateId) => (
+    params.templatesById.get(templateId)?.signOnce !== true
+  ));
+  const [organizationRows, eventRows] = await Promise.all([
+    findCompletedDocumentSatisfactions({
+      documentSubjectIds: subjectIds,
+      templateDocumentIds: signOnceTemplateIds,
+      scopes: [{ scopeType: 'ORGANIZATION' as const, scopeId: params.organizationId }],
+    }, params.client),
+    findCompletedDocumentSatisfactions({
+      documentSubjectIds: subjectIds,
+      templateDocumentIds: eventTemplateIds,
+      scopes: [{ scopeType: 'EVENT_PARTICIPATION' as const, scopeId: params.eventId }],
+    }, params.client),
+  ]);
+  const satisfied = new Set(
+    [...organizationRows, ...eventRows]
+      .map((row) => `${row.documentSubjectId}:${row.templateDocumentId}`),
+  );
+
+  return params.templateIds.filter((templateId) => {
     const template = params.templatesById.get(templateId);
     if (!template) {
-      continue;
+      return false;
     }
     const requiredSignerType = normalizeRequiredSignerType(template.requiredSignerType);
-    const signedChecks: Array<Promise<boolean>> = [];
-    if (requiredSignerType === 'PARTICIPANT') {
-      signedChecks.push(hasSignedDocumentForSigner({
-        client: params.client,
-        eventId: params.eventId,
-        template,
-        userId: params.participantUserId,
-        signerRole: 'participant',
-        hostId: null,
-      }));
-    } else if (requiredSignerType === 'PARENT_GUARDIAN') {
-      signedChecks.push(hasSignedDocumentForSigner({
-        client: params.client,
-        eventId: params.eventId,
-        template,
-        userId: params.parentUserId,
-        signerRole: 'parent_guardian',
-        hostId: params.childUserId ?? null,
-      }));
-    } else if (requiredSignerType === 'CHILD') {
-      signedChecks.push(hasSignedDocumentForSigner({
-        client: params.client,
-        eventId: params.eventId,
-        template,
-        userId: params.childUserId,
-        signerRole: 'child',
-        hostId: params.childUserId ?? null,
-      }));
-    } else if (requiredSignerType === 'PARENT_GUARDIAN_CHILD') {
-      signedChecks.push(hasSignedDocumentForSigner({
-        client: params.client,
-        eventId: params.eventId,
-        template,
-        userId: params.parentUserId,
-        signerRole: 'parent_guardian',
-        hostId: params.childUserId ?? null,
-      }));
-      signedChecks.push(hasSignedDocumentForSigner({
-        client: params.client,
-        eventId: params.eventId,
-        template,
-        userId: params.childUserId,
-        signerRole: 'child',
-        hostId: params.childUserId ?? null,
-      }));
+    const subjectId = requiredSignerType === 'PARTICIPANT'
+      ? participantSubjectId
+      : childSubjectId;
+    if (!subjectId) {
+      return true;
     }
-
-    if (!signedChecks.length) {
-      unsignedTemplateIds.push(templateId);
-      continue;
-    }
-    const signedResults = await Promise.all(signedChecks);
-    if (!signedResults.every(Boolean)) {
-      unsignedTemplateIds.push(templateId);
-    }
-  }
-  return unsignedTemplateIds;
+    return !satisfied.has(`${subjectId}:${templateId}`);
+  });
 };
 
 const resolveOccurrenceForPayload = async (
@@ -458,6 +417,8 @@ const dispatchAndPersistConsent = async (
       firstDocumentId: null,
       missingChildEmail: false,
       errors: [],
+      satisfiedTemplateIds: [],
+      isAllRequiredTemplatesSatisfied: false,
     };
     applied.push({ ...task, consent });
     await (prisma as any).eventRegistrations.update({
@@ -650,6 +611,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
         const eligibleTemplateIds = await filterUnsignedTemplateIds({
           client: tx,
+          organizationId: organization.id,
           eventId: event.id,
           templateIds: filterRequiredTemplateIdsForRegistrantType(
             requiredTemplateIds,
@@ -820,6 +782,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
         const playerRequiredTemplateIds = await filterUnsignedTemplateIds({
           client: tx,
+          organizationId: organization.id,
           eventId: event.id,
           templateIds: filterRequiredTemplateIdsForRegistrantType(
             requiredTemplateIds,
@@ -847,6 +810,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
       const parentAsPlayerRequiredTemplateIds = includeParentAsPlayer
         ? await filterUnsignedTemplateIds({
           client: tx,
+          organizationId: organization.id,
           eventId: event.id,
           templateIds: filterRequiredTemplateIdsForRegistrantType(
             requiredTemplateIds,

@@ -10,6 +10,9 @@ const prismaMock = {
     findUnique: jest.fn(),
     delete: jest.fn(),
   },
+  signedDocuments: {
+    findMany: jest.fn(),
+  },
   userData: {
     findMany: jest.fn(),
     update: jest.fn(),
@@ -46,11 +49,11 @@ const buildFormRequest = (file: File): NextRequest => {
     body: form,
   });
 };
-
 describe('file routes', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     assertFileReadAccessMock.mockResolvedValue(undefined);
+    prismaMock.signedDocuments.findMany.mockResolvedValue([]);
   });
 
   describe('POST /api/files/upload', () => {
@@ -225,6 +228,27 @@ describe('file routes', () => {
       expect(res.status).toBe(200);
       expect(res.headers.get('Content-Disposition')).toContain('inline');
     });
+    it('does not expose protected imported PDFs through the generic route', async () => {
+      prismaMock.file.findUnique.mockResolvedValue({
+        id: 'imported_file',
+        path: 'path/imported.pdf',
+        bucket: 'private-bucket',
+        mimeType: 'application/pdf',
+        originalName: 'imported.pdf',
+      });
+      assertFileReadAccessMock.mockRejectedValueOnce(new Response('Forbidden', { status: 403 }));
+      const storageProvider = { getObjectStream: jest.fn() };
+      getStorageProviderMock.mockReturnValue(storageProvider);
+
+      const response = await GET(
+        new NextRequest('http://localhost/api/files/imported_file'),
+        { params: Promise.resolve({ id: 'imported_file' }) },
+      );
+
+      expect(response.status).toBe(403);
+      expect(storageProvider.getObjectStream).not.toHaveBeenCalled();
+      expect(assertFileReadAccessMock).toHaveBeenCalledWith(expect.anything(), 'imported_file');
+    });
 
     it('does not fetch protected payment proofs after access is denied', async () => {
       prismaMock.file.findUnique.mockResolvedValue({
@@ -247,6 +271,26 @@ describe('file routes', () => {
   });
 
   describe('GET /api/files/:id/preview', () => {
+    it('does not preview private PDF files through the generic route', async () => {
+      prismaMock.file.findUnique.mockResolvedValue({
+        id: 'imported_file',
+        path: 'path/imported.pdf',
+        bucket: 'private-bucket',
+        mimeType: 'application/pdf',
+        originalName: 'imported.pdf',
+        sizeBytes: 128,
+      });
+      const storageProvider = { getObjectStream: jest.fn() };
+      getStorageProviderMock.mockReturnValue(storageProvider);
+
+      const response = await PREVIEW_GET(
+        new NextRequest('http://localhost/api/files/imported_file/preview'),
+        { params: Promise.resolve({ id: 'imported_file' }) },
+      );
+
+      expect(response.status).toBe(403);
+      expect(storageProvider.getObjectStream).not.toHaveBeenCalled();
+    });
     it('rejects oversized or malformed resize dimensions before reading storage', async () => {
       prismaMock.file.findUnique.mockResolvedValue({
         id: 'file_preview_limits',

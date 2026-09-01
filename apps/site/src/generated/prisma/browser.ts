@@ -98,6 +98,11 @@ export type EventDivisionPhaseParticipants = Prisma.EventDivisionPhaseParticipan
  */
 export type UserData = Prisma.UserDataModel
 /**
+ * Model UserNotifications
+ *
+ */
+export type UserNotifications = Prisma.UserNotificationsModel
+/**
  * Model SensitiveUserData
  *
  */
@@ -333,6 +338,41 @@ export type AffiliateSourceIntakeArtifacts = Prisma.AffiliateSourceIntakeArtifac
  */
 export type AffiliateSourceDiscoveryCampaigns = Prisma.AffiliateSourceDiscoveryCampaignsModel
 /**
+ * Model AffiliateAgentGatewayJobs
+ *
+ */
+export type AffiliateAgentGatewayJobs = Prisma.AffiliateAgentGatewayJobsModel
+/**
+ * Model AffiliateAgentGatewayClaims
+ *
+ */
+export type AffiliateAgentGatewayClaims = Prisma.AffiliateAgentGatewayClaimsModel
+/**
+ * Model AffiliateAgentGatewayArtifacts
+ *
+ */
+export type AffiliateAgentGatewayArtifacts = Prisma.AffiliateAgentGatewayArtifactsModel
+/**
+ * Model AffiliateAgentGatewayOperationReceipts
+ *
+ */
+export type AffiliateAgentGatewayOperationReceipts = Prisma.AffiliateAgentGatewayOperationReceiptsModel
+/**
+ * Model AffiliateAgentGatewayEvents
+ *
+ */
+export type AffiliateAgentGatewayEvents = Prisma.AffiliateAgentGatewayEventsModel
+/**
+ * Model AffiliateOperationalAlerts
+ *
+ */
+export type AffiliateOperationalAlerts = Prisma.AffiliateOperationalAlertsModel
+/**
+ * Model AffiliateOperationalAlertDeliveries
+ *
+ */
+export type AffiliateOperationalAlertDeliveries = Prisma.AffiliateOperationalAlertDeliveriesModel
+/**
  * Model AffiliateCoverageAgentJobs
  *
  */
@@ -387,6 +427,46 @@ export type AffiliateApprovalJobs = Prisma.AffiliateApprovalJobsModel
  *
  */
 export type AffiliateImportCandidates = Prisma.AffiliateImportCandidatesModel
+/**
+ * Model AffiliateSupplySources
+ *
+ */
+export type AffiliateSupplySources = Prisma.AffiliateSupplySourcesModel
+/**
+ * Model AffiliateSupplyContractManifests
+ *
+ */
+export type AffiliateSupplyContractManifests = Prisma.AffiliateSupplyContractManifestsModel
+/**
+ * Model AffiliateSupplyLifecycleTransitions
+ *
+ */
+export type AffiliateSupplyLifecycleTransitions = Prisma.AffiliateSupplyLifecycleTransitionsModel
+/**
+ * Model AffiliateSupplyReconciliationRuns
+ *
+ */
+export type AffiliateSupplyReconciliationRuns = Prisma.AffiliateSupplyReconciliationRunsModel
+/**
+ * Model AffiliateAgentWorkerHealth
+ *
+ */
+export type AffiliateAgentWorkerHealth = Prisma.AffiliateAgentWorkerHealthModel
+/**
+ * Model AffiliateSupplyTargets
+ *
+ */
+export type AffiliateSupplyTargets = Prisma.AffiliateSupplyTargetsModel
+/**
+ * Model AffiliateReplenishmentDemands
+ *
+ */
+export type AffiliateReplenishmentDemands = Prisma.AffiliateReplenishmentDemandsModel
+/**
+ * Model AffiliateReplenishmentWaves
+ *
+ */
+export type AffiliateReplenishmentWaves = Prisma.AffiliateReplenishmentWavesModel
 /**
  * Model EventTags
  *
@@ -543,15 +623,45 @@ export type EventTemplateLeagueScoringConfigs = Prisma.EventTemplateLeagueScorin
  */
 export type Sports = Prisma.SportsModel
 /**
+ * Model DocumentRequirements
+ *
+ */
+export type DocumentRequirements = Prisma.DocumentRequirementsModel
+/**
  * Model TemplateDocuments
  *
  */
 export type TemplateDocuments = Prisma.TemplateDocumentsModel
 /**
+ * Model TemplateProviderQuarantines
+ *
+ */
+export type TemplateProviderQuarantines = Prisma.TemplateProviderQuarantinesModel
+/**
  * Model SignedDocuments
  *
  */
 export type SignedDocuments = Prisma.SignedDocumentsModel
+/**
+ * Model DocumentSubjects
+ *
+ */
+export type DocumentSubjects = Prisma.DocumentSubjectsModel
+/**
+ * Model DocumentRequirementSatisfactions
+ *
+ */
+export type DocumentRequirementSatisfactions = Prisma.DocumentRequirementSatisfactionsModel
+/**
+ * Model DocumentRequirementSatisfactionEvidence
+ *
+ */
+export type DocumentRequirementSatisfactionEvidence = Prisma.DocumentRequirementSatisfactionEvidenceModel
+/**
+ * Model DocumentEvidenceAuditEvents
+ *
+ */
+export type DocumentEvidenceAuditEvents = Prisma.DocumentEvidenceAuditEventsModel
 /**
  * Model BoldSignWebhookEvents
  *

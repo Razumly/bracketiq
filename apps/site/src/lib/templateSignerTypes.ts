@@ -99,6 +99,20 @@ export const getBoldSignRolesForRequiredSignerType = (
     signerRole: SIGNER_CONTEXT_TO_BOLDSIGN_ROLE[signerContext],
   }));
 };
+export const resolveRequiredSignerRoles = (
+  configuredRoles: unknown,
+  requiredSignerType: unknown,
+): string[] => {
+  const roles = Array.isArray(configuredRoles)
+    ? configuredRoles
+      .filter((role): role is string => typeof role === 'string')
+      .map((role) => role.trim())
+      .filter((role) => role.length > 0)
+    : [];
+  return roles.length > 0
+    ? roles
+    : getBoldSignRolesForRequiredSignerType(requiredSignerType).map((role) => role.signerRole);
+};
 
 export const normalizeSignerContext = (
   value: unknown,

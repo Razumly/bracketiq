@@ -10,7 +10,17 @@ import {
   BOLDSIGN_OPERATION_STATUSES,
   findLatestBoldSignOperation,
 } from '@/lib/boldsignSyncOperations';
+import {
+  documentSatisfactionScopeFor,
+  documentSubjectIdFor,
+  findSatisfiedDocumentTemplateIds,
+} from '@/server/documentEvidence';
 import { normalizeRequiredSignerType } from '@/lib/templateSignerTypes';
+import {
+  DocumentTemplateVersionProviderQuarantinedError,
+  findQuarantinedDocumentTemplateVersionIds,
+} from '@/server/documents/documentTemplateVersions';
+
 
 type SignerContext = 'participant' | 'parent_guardian' | 'child';
 
@@ -44,6 +54,8 @@ export type DispatchRequiredEventDocumentsResult = {
   firstDocumentId: string | null;
   missingChildEmail: boolean;
   errors: string[];
+  satisfiedTemplateIds: string[];
+  isAllRequiredTemplatesSatisfied: boolean;
 };
 
 const normalizeText = (value: unknown): string | null => {
@@ -233,17 +245,11 @@ export const dispatchRequiredEventDocuments = async (
       firstDocumentId: null,
       missingChildEmail: false,
       errors: [],
+      satisfiedTemplateIds: [],
+      isAllRequiredTemplatesSatisfied: true,
     };
   }
 
-  if (!isBoldSignConfigured()) {
-    return {
-      sentDocumentIds: [],
-      firstDocumentId: null,
-      missingChildEmail: false,
-      errors: ['BoldSign is not configured on the server. Set BOLDSIGN_API_KEY.'],
-    };
-  }
 
   const isChildRegistration = Boolean(normalizeText(params.childUserId));
   const participantUserId = normalizeText(params.participantUserId) ?? null;
@@ -258,32 +264,116 @@ export const dispatchRequiredEventDocuments = async (
     where: { id: { in: requiredTemplateIds } },
     select: {
       id: true,
+      providerQuarantinedAt: true,
       templateId: true,
       title: true,
       description: true,
+      documentRequirement: {
+        select: { title: true, description: true },
+      },
       type: true,
+      signOnce: true,
       requiredSignerType: true,
       roleIndex: true,
       roleIndexes: true,
       signerRoles: true,
     },
   });
+  const templateDisplayTitle = (template: {
+    title?: string | null;
+    documentRequirement?: { title?: string | null } | null;
+  }): string => normalizeText(template.documentRequirement?.title)
+    ?? normalizeText(template.title)
+    ?? 'Required Document';
+  const templateDisplayDescription = (template: {
+    description?: string | null;
+    documentRequirement?: { description?: string | null } | null;
+  }): string | undefined => normalizeText(template.documentRequirement?.description)
+    ?? normalizeText(template.description)
+    ?? undefined;
   const templateById = new Map(templates.map((template) => [template.id, template]));
+  const documentSubjectId = documentSubjectIdFor(
+    params.organizationId ?? null,
+    childUserId ?? participantUserId,
+  );
+  const satisfactionScopes = requiredTemplateIds.flatMap((templateId) => {
+    const template = templateById.get(templateId);
+    if (!template) {
+      return [];
+    }
+    const scope = documentSatisfactionScopeFor({
+      templateDocumentId: template.id,
+      organizationId: params.organizationId ?? null,
+      documentSubjectUserId: childUserId ?? participantUserId,
+      eventId: params.eventId,
+      teamId: null,
+      signOnce: template.signOnce,
+    });
+    return scope ? [scope] : [];
+  });
+  const satisfiedTemplateIds = await findSatisfiedDocumentTemplateIds({
+    documentSubjectId,
+    scopes: satisfactionScopes,
+  });
+  const satisfiedTemplateIdList = Array.from(satisfiedTemplateIds);
+  const applicableRequiredTemplateIds = requiredTemplateIds.filter((templateId) => {
+    const template = templateById.get(templateId);
+    if (!template) {
+      return true;
+    }
+    const requiredSignerType = normalizeRequiredSignerType(template.requiredSignerType);
+    return isChildRegistration
+      ? requiredSignerType !== 'PARTICIPANT'
+      : requiredSignerType === 'PARTICIPANT';
+  });
+  const isAllRequiredTemplatesSatisfied = applicableRequiredTemplateIds.every((templateId) =>
+    satisfiedTemplateIds.has(templateId));
+  if (isAllRequiredTemplatesSatisfied) {
+    return {
+      sentDocumentIds: [],
+      firstDocumentId: null,
+      missingChildEmail: false,
+      errors: [],
+      satisfiedTemplateIds: satisfiedTemplateIdList,
+      isAllRequiredTemplatesSatisfied: true,
+    };
+  }
+  if (!isBoldSignConfigured()) {
+    return {
+      sentDocumentIds: [],
+      firstDocumentId: null,
+      missingChildEmail: false,
+      errors: ['BoldSign is not configured on the server. Set BOLDSIGN_API_KEY.'],
+      satisfiedTemplateIds: satisfiedTemplateIdList,
+      isAllRequiredTemplatesSatisfied: false,
+    };
+  }
+  const quarantinedTemplateIds = await findQuarantinedDocumentTemplateVersionIds(
+    prisma,
+    templates,
+  );
 
   for (const templateId of requiredTemplateIds) {
     const template = templateById.get(templateId);
     if (!template) {
       continue;
     }
-
     const templateType = normalizeText(template.type)?.toUpperCase();
-    if (templateType !== 'PDF') {
+    if (satisfiedTemplateIds.has(template.id)) {
+      continue;
+    }
+
+    if (templateType === 'TEXT') {
+      continue;
+    }
+    if (quarantinedTemplateIds.has(template.id)) {
+      errors.push(new DocumentTemplateVersionProviderQuarantinedError(template.id).message);
       continue;
     }
 
     const boldSignTemplateId = normalizeText(template.templateId);
     if (!boldSignTemplateId) {
-      errors.push(`Template "${template.title}" is missing a BoldSign template id.`);
+      errors.push(`Template "${templateDisplayTitle(template)}" is missing a BoldSign template id.`);
       continue;
     }
 
@@ -306,7 +396,7 @@ export const dispatchRequiredEventDocuments = async (
           ? parentUserId
           : childUserId;
       if (!targetUserId) {
-        identityError = `Missing ${signerContext.replace('_', '/')} signer user id for template "${template.title}".`;
+        identityError = `Missing ${signerContext.replace('_', '/')} signer user id for template "${templateDisplayTitle(template)}".`;
         break;
       }
 
@@ -317,7 +407,7 @@ export const dispatchRequiredEventDocuments = async (
           identityError = null;
           break;
         }
-        identityError = `Missing ${signerContext.replace('_', '/')} signer email for template "${template.title}".`;
+        identityError = `Missing ${signerContext.replace('_', '/')} signer email for template "${templateDisplayTitle(template)}".`;
         break;
       }
       identitiesByContext.set(signerContext, signerIdentity);
@@ -399,7 +489,7 @@ export const dispatchRequiredEventDocuments = async (
       ?? roleAssignmentsForSend[0];
 
     if (!selectedRoleAssignment) {
-      errors.push(`Failed to resolve signer assignments for template "${template.title}".`);
+      errors.push(`Failed to resolve signer assignments for template "${templateDisplayTitle(template)}".`);
       continue;
     }
 
@@ -418,8 +508,8 @@ export const dispatchRequiredEventDocuments = async (
           signerOrder: row.signerOrder,
         })),
         enableSigningOrder: hasDuplicateSignerEmails,
-        title: normalizeText(template.title) ?? 'Signature request',
-        message: normalizeText(template.description) ?? undefined,
+        title: templateDisplayTitle(template),
+        message: templateDisplayDescription(template),
       });
 
       await createDocumentSendOperation({
@@ -436,7 +526,7 @@ export const dispatchRequiredEventDocuments = async (
         roleIndex: selectedRoleAssignment.roleIndex,
         payload: {
           templateDocumentId: template.id,
-          templateTitle: template.title,
+          templateTitle: templateDisplayTitle(template),
           requiredSignerType,
           dispatchSource: 'registration',
           roleAssignments: roleAssignmentsForSend.map((row) => ({
@@ -454,7 +544,7 @@ export const dispatchRequiredEventDocuments = async (
       sentDocumentIds.push(sent.documentId);
     } catch (error) {
       errors.push(
-        `Failed to send "${template.title}": ${error instanceof Error ? error.message : 'Unknown error'}`,
+        `Failed to send "${templateDisplayTitle(template)}": ${error instanceof Error ? error.message : 'Unknown error'}`,
       );
     }
   }
@@ -464,5 +554,7 @@ export const dispatchRequiredEventDocuments = async (
     firstDocumentId: sentDocumentIds[0] ?? null,
     missingChildEmail,
     errors,
+    satisfiedTemplateIds: satisfiedTemplateIdList,
+    isAllRequiredTemplatesSatisfied,
   };
 };

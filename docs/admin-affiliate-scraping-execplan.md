@@ -74,9 +74,14 @@ The first visible outcome is an admin-only import surface where an admin chooses
 - Observation: `Events.eventType` already supports `AFFILIATE`, but `Events.hostId` is currently required.
   Evidence: `prisma/schema.prisma` has `AFFILIATE` in `EventsEventTypeEnum`, while `model Events` defines `hostId String`.
 - Observation: DigitalOcean App Platform scheduled jobs can run a command in the app environment on a cron expression, so the scraper does not need a public endpoint for automation.
-  Evidence: The scheduled runner is exposed as `npm run affiliate:scrape:due`, which can run inside the same deployed app environment that already has the database, ScrapingDog, and email environment variables.
+  Evidence: Before the governed cutover, the scheduled runner was exposed as the
+  legacy due-scrape command inside the same deployed app environment that had
+  the database, ScrapingDog, and email environment variables.
 - Observation: The live `mvp-site` App Platform spec did not contain a scheduled job component when inspected on 2026-07-13.
-  Evidence: DigitalOcean returned the production app spec with the `mvp-site` web service and database only; no `jobs` entry invokes `npm run affiliate:scrape:due`. The daily email and lightweight checks will not run in production until that component is configured and the scheduler changes are deployed.
+  Evidence: DigitalOcean returned the production app spec with the `mvp-site`
+  web service and database only; no `jobs` entry invoked the legacy due-scrape
+  runner. The daily email and lightweight checks were not enabled in production
+  until the governed cutover replaced that writer.
 
 ## Decision Log
 
@@ -197,7 +202,9 @@ Next update public UI semantics. Any published affiliate event or rental must vi
 
 Then add admin APIs. Add endpoints under `src/app/api/admin/affiliate-sources` for listing and manually creating/updating scrape sources, `src/app/api/admin/affiliate-sources/[id]/scrape` for running a scrape, `src/app/api/admin/affiliate-discoveries` for listing candidates, `src/app/api/admin/affiliate-discoveries/[id]` for full candidate detail, and `src/app/api/admin/affiliate-discoveries/[id]/publish` for publishing. Every route must call `requireRazumlyAdmin`. Publishing an event candidate should create or update an `Events` row; publishing should fail with a clear admin-facing error when the source does not have a private organization association.
 
-Add scheduled scraping after the manual scrape flow is working. `AffiliateScrapeSources` stores `autoScrapeEnabled` and `scrapeIntervalMinutes`. The command `npm run affiliate:scrape:due` loads enabled active sources with an active mapping, checks their latest scrape run start time against the interval, acquires a Postgres advisory lock so two scheduled jobs cannot run together, and calls `runAffiliateSourceScrape` for each due source. On days when a weekly or monthly source is not due, the same command performs one bounded conditional HTTP read against its list URL and stores a normalized content fingerprint under `metadata.dailyLightweightCheck`. The first read establishes a baseline; later changes and check failures are reported without creating or updating candidates. The job continues after individual source failures and sends one completion email after every successful scheduler invocation to `samuel.r@razumly.com` or `AFFILIATE_SCRAPE_SUMMARY_EMAIL_TO` if that environment variable is set. The DigitalOcean App Platform scheduled job should run this command daily; source intervals decide which rows receive a full scrape.
+The legacy scheduled-scraping design is retired. Production capture and
+replenishment now use the governed Agent Gateway and its reviewed runbook; do
+not restore a due-scrape writer or timer from this plan.
 
 Then add the admin UI. Add an `affiliateImports` tab to `AdminDashboardClient`. The first version should show configured sources, status, last run time, last candidate count, and a "Scrape" button. After a run returns, show discovered candidates in a table or dense card list with title, kind, source, date/range, city, venue, sport, price/status, confidence, duplicate status, and actions to view detail or publish. Candidate detail should show the normalized fields, source URL, official action URL, raw extracted snippets, and warnings.
 
@@ -242,17 +249,10 @@ Work from `/Users/elesesy/StudioProjects/mvp-site`.
        npm test -- --runInBand <focused test file>
        npx tsc --noEmit
 
-9. Configure scheduled scraping cadence for local or live rows after the scheduling migration is applied:
-
-       npm run affiliate:scrape:schedules
-
-   Preview which sources are due without scraping or emailing:
-
-       npm run affiliate:scrape:due:dry-run
-
-   Run the same command DigitalOcean should execute:
-
-       npm run affiliate:scrape:due
+9. The legacy scheduled scrape cadence and due-runner commands are retired. Do
+   not run a production writer from this plan. Follow
+   `apps/site/deploy/affiliate-governed/README.md` for the governed capture,
+   replenishment, and observation workflow.
 
 10. Before committing implementation work, run:
 

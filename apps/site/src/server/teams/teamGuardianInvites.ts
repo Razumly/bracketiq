@@ -1,10 +1,12 @@
 import { prisma } from '@/lib/prisma';
 import { getTeamChatBaseMemberIds, syncTeamChatInTx } from '@/server/teamChatSync';
 import { isMinorAtUtcDate } from '@/server/userPrivacy';
+import { getTeamInviteRole } from '@/lib/staff';
 import {
   loadCanonicalTeamById,
   normalizeId,
   normalizeIdList,
+  replaceSingletonTeamStaffAssignment,
   syncCanonicalTeamRoster,
 } from '@/server/teams/teamMembership';
 import {
@@ -25,6 +27,7 @@ type TeamInviteRecord = {
   id: string;
   type?: string | null;
   teamId?: string | null;
+  role?: string | null;
   userId?: string | null;
   createdBy?: string | null;
 };
@@ -52,6 +55,18 @@ export const TEAM_INVITE_PARENT_REQUIRED_MESSAGE = 'A parent or guardian must ac
 const uniqueStrings = (values: unknown[]): string[] => Array.from(
   new Set(values.map((value) => normalizeId(value)).filter((value): value is string => Boolean(value))),
 );
+const teamInviteStaffRole = (role: unknown): 'MANAGER' | 'HEAD_COACH' | 'ASSISTANT_COACH' | null => {
+  switch (getTeamInviteRole(role)) {
+    case 'team_manager':
+      return 'MANAGER';
+    case 'team_head_coach':
+      return 'HEAD_COACH';
+    case 'team_assistant_coach':
+      return 'ASSISTANT_COACH';
+    default:
+      return null;
+  }
+};
 
 export const listActiveChildIdsForParent = async (
   client: PrismaLike,
@@ -229,14 +244,58 @@ export const acceptTeamInviteWithGuardianRules = async ({
       return false;
     }
 
+    let transactionInvite: TeamInviteRecord = invite;
+    let transactionInviteRole = getTeamInviteRole(invite.role, invite.type);
+    if (tx.invites?.findUnique) {
+      const currentInvite = await tx.invites.findUnique({ where: { id: invite.id } });
+      const currentStatus = String(currentInvite?.status ?? '').toUpperCase();
+      if (!currentInvite || (currentStatus && !['PENDING', 'FAILED'].includes(currentStatus))) {
+        return false;
+      }
+      transactionInvite = {
+        ...invite,
+        ...currentInvite,
+        role: currentInvite.role ?? invite.role,
+        type: currentInvite.type ?? invite.type,
+      };
+      transactionInviteRole = getTeamInviteRole(currentInvite.role, currentInvite.type)
+        ?? transactionInviteRole;
+    }
+
     const previousMemberIds = getTeamChatBaseMemberIds(txTeam);
     const txPending = normalizeIdList((txTeam as any).pending);
-    const txIsPlayerInvite = txPending.includes(auth.targetUserId);
+    const txIsPlayerInvite = transactionInviteRole === 'player'
+      || (!transactionInviteRole && txPending.includes(auth.targetUserId));
     const invitedStaffAssignments = (Array.isArray((txTeam as any).staffAssignments) ? (txTeam as any).staffAssignments : [])
       .filter((assignment: any) => (
         normalizeId(assignment.userId) === auth.targetUserId
         && String(assignment.status ?? '').toUpperCase() === 'INVITED'
       ));
+    const explicitStaffRole = teamInviteStaffRole(transactionInviteRole);
+    const invitedStaffAssignmentsForCurrentRole = transactionInviteRole === 'player'
+      ? []
+      : explicitStaffRole
+        ? invitedStaffAssignments.filter(
+          (assignment: { role?: unknown }) => String(assignment.role ?? '').toUpperCase() === explicitStaffRole,
+        )
+        : invitedStaffAssignments;
+    const invitedSingletonRole = invitedStaffAssignmentsForCurrentRole
+      .map((assignment: { role?: unknown }) => String(assignment.role ?? '').toUpperCase())
+      .find((role: string): role is 'MANAGER' | 'HEAD_COACH' => role === 'MANAGER' || role === 'HEAD_COACH')
+      ?? null;
+    const singletonReplacementRole = explicitStaffRole === 'MANAGER' || explicitStaffRole === 'HEAD_COACH'
+      ? explicitStaffRole
+      : invitedSingletonRole;
+    if (!txIsPlayerInvite && singletonReplacementRole) {
+      await replaceSingletonTeamStaffAssignment({
+        tx,
+        teamId: auth.teamId,
+        role: singletonReplacementRole,
+        replacementInviteId: transactionInvite.id,
+        replacementUserId: auth.targetUserId,
+        now,
+      });
+    }
 
     if (txIsPlayerInvite) {
       await syncCanonicalTeamRoster({
@@ -268,7 +327,7 @@ export const acceptTeamInviteWithGuardianRules = async ({
       }
     }
 
-    for (const assignment of invitedStaffAssignments) {
+    for (const assignment of invitedStaffAssignmentsForCurrentRole) {
       const role = String(assignment.role ?? '').toUpperCase();
       if ((role === 'MANAGER' || role === 'HEAD_COACH') && tx.teamStaffAssignments?.updateMany) {
         await tx.teamStaffAssignments.updateMany({
@@ -291,18 +350,57 @@ export const acceptTeamInviteWithGuardianRules = async ({
         data: { status: 'ACTIVE', updatedAt: now },
       });
     }
+    const hasExplicitStaffAssignment = invitedStaffAssignmentsForCurrentRole.some(
+      (assignment: { role?: unknown }) => String(assignment.role ?? '').toUpperCase() === explicitStaffRole,
+    );
+    if (!txIsPlayerInvite && explicitStaffRole && !hasExplicitStaffAssignment) {
+      if ((explicitStaffRole === 'MANAGER' || explicitStaffRole === 'HEAD_COACH') && tx.teamStaffAssignments?.updateMany) {
+        await tx.teamStaffAssignments.updateMany({
+          where: {
+            teamId: auth.teamId,
+            role: explicitStaffRole,
+            status: 'ACTIVE',
+            userId: { not: auth.targetUserId },
+          },
+          data: { status: 'REMOVED', updatedAt: now },
+        });
+      }
+      await tx.teamStaffAssignments?.upsert?.({
+        where: {
+          teamId_userId_role: {
+            teamId: auth.teamId,
+            userId: auth.targetUserId,
+            role: explicitStaffRole,
+          },
+        },
+        create: {
+          id: `${auth.teamId}__${explicitStaffRole}__${auth.targetUserId}`,
+          teamId: auth.teamId,
+          userId: auth.targetUserId,
+          role: explicitStaffRole,
+          status: 'ACTIVE',
+          createdBy: session.userId,
+          createdAt: now,
+          updatedAt: now,
+        },
+        update: {
+          status: 'ACTIVE',
+          updatedAt: now,
+        },
+      });
+    }
 
     await syncTeamChatInTx(tx, auth.teamId, {
       previousMemberIds,
     });
-    await acceptTeamInviteEventSyncs(tx, invite, now, {
+    await acceptTeamInviteEventSyncs(tx, transactionInvite, now, {
       propagateToLinkedEventTeams: txIsPlayerInvite,
     });
 
     if (tx.invites?.deleteMany) {
-      await tx.invites.deleteMany({ where: { id: invite.id } });
+      await tx.invites.deleteMany({ where: { id: transactionInvite.id } });
     } else {
-      await tx.invites.delete({ where: { id: invite.id } });
+      await tx.invites.delete({ where: { id: transactionInvite.id } });
     }
     return true;
   });

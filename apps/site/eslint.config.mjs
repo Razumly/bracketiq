@@ -1,8 +1,15 @@
-import nextConfig from 'eslint-config-next';
+import nextConfig from "eslint-config-next";
 
 const config = [
   {
-    ignores: ['.next/**', 'node_modules/**', 'dist/**', 'coverage/**', 'generated/**', 'src/generated/**'],
+    ignores: [
+      ".next/**",
+      "node_modules/**",
+      "dist/**",
+      "coverage/**",
+      "generated/**",
+      "src/generated/**",
+    ],
   },
   ...nextConfig,
 ];

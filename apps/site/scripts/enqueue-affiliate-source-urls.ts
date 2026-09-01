@@ -86,7 +86,7 @@ const main = async () => {
     const summary = await enqueueAffiliateSourceUrlProposals(batch, userId);
     const absoluteResultPath = path.resolve(resultPath);
     const { buildCodexAffiliateDirectoryExpansionResult } = await import(
-      '../src/server/affiliateImports/codexIngestionResult'
+      '../src/server/affiliateImports/affiliateIngestionSchemas'
     );
     const completionResult = buildCodexAffiliateDirectoryExpansionResult({
       jobId,

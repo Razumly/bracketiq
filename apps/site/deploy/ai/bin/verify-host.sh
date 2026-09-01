@@ -30,7 +30,7 @@ require_digest_image() {
 }
 
 require_digest_image "LLAMA_CPP_IMAGE" "${LLAMA_CPP_IMAGE:-}"
-require_digest_image "CONTROLLER_IMAGE" "${CONTROLLER_IMAGE:-}"
+require_digest_image "EVALUATOR_IMAGE" "${EVALUATOR_IMAGE:-}"
 
 cores="$(getconf _NPROCESSORS_ONLN)"
 memory_kib="$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)"

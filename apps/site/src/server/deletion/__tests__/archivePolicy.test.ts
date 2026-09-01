@@ -99,4 +99,38 @@ describe('event broadcast overlay archival', () => {
 
     expect(mockedPublishBroadcastOverlayRevocation).not.toHaveBeenCalled();
   });
+  it('preserves imported evidence during hard event deletion', async () => {
+    const deleteMany = jest.fn().mockResolvedValue({ count: 0 });
+    const client: Record<string, any> = {
+      $transaction: jest.fn(async (callback: (tx: Record<string, any>) => Promise<unknown>) => callback(client)),
+      events: { delete: jest.fn().mockResolvedValue({ id: 'event_1' }) },
+      matches: { deleteMany },
+      divisions: { deleteMany },
+      eventRegistrations: { deleteMany },
+      refundRequests: { deleteMany },
+      signedDocuments: { deleteMany },
+      invites: { deleteMany },
+      paymentIntents: { deleteMany },
+      templateDocuments: { deleteMany },
+    };
+
+    await expect(deleteOrArchiveEvent({
+      client,
+      event: { id: 'event_1' },
+      actorUserId: 'user_1',
+      reason: 'delete_requested',
+    })).resolves.toMatchObject({
+      action: 'deleted',
+      entityType: 'event',
+      entityId: 'event_1',
+    });
+
+    expect(client.signedDocuments.deleteMany).toHaveBeenCalledWith({
+      where: {
+        eventId: 'event_1',
+        provenance: { not: 'IMPORTED' },
+      },
+    });
+  });
 });
+

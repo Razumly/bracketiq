@@ -6,9 +6,7 @@ import { calculateAgeOnDate } from '@/lib/age';
 import {
   buildRequiredSignatureTasks,
   buildSignatureCompletionKey,
-  isSignedDocumentStatus,
   normalizeRegistrationAnswersSnapshot,
-  normalizeSignerRoleContext,
   pickPrimaryBill,
   type ComplianceTemplate,
   type EventTeamComplianceResponse,
@@ -16,6 +14,10 @@ import {
   type TeamComplianceRequiredDocument,
   type TeamComplianceUserSummary,
 } from '@/lib/eventTeamCompliance';
+import {
+  documentSubjectIdFor,
+  findCompletedDocumentSatisfactions,
+} from '@/server/documentEvidence';
 import { loadBillDiscountSummaries, withBillDiscountAmounts } from '@/server/billing/billDiscountSummaries';
 
 export const dynamic = 'force-dynamic';
@@ -137,7 +139,13 @@ const toPaymentSummary = (bill: {
   };
 };
 
-const ACTIVE_EVENT_TEAM_REGISTRATION_STATUSES = ['STARTED', 'PENDING', 'ACTIVE', 'BLOCKED'] as const;
+const ACTIVE_EVENT_TEAM_REGISTRATION_STATUSES = ['STARTED', 'PENDING', 'ACTIVE', 'BLOCKED', 'CONSENTFAILED'] as const;
+const INELIGIBLE_EVENT_PERSON_REGISTRATION_STATUSES = new Set(['CANCELLED', 'PAYMENT_FAILED']);
+
+const isEligibleEventPersonRegistration = (status: unknown): boolean => {
+  const normalizedStatus = typeof status === 'string' ? status.trim().toUpperCase() : '';
+  return !normalizedStatus || !INELIGIBLE_EVENT_PERSON_REGISTRATION_STATUSES.has(normalizedStatus);
+};
 
 const buildOccurrenceWhere = (req: NextRequest) => {
   const slotId = normalizeId(req.nextUrl.searchParams.get('slotId'));
@@ -338,13 +346,18 @@ export async function GET(
       ? prisma.eventRegistrations.findMany({
         where: {
           eventId,
+          eventTeamId: { in: teamIds },
           registrantId: { in: playerIds },
+          registrantType: { in: ['SELF', 'CHILD'] },
         },
         select: {
+          eventTeamId: true,
           registrantId: true,
           registrantType: true,
           parentId: true,
+          status: true,
           updatedAt: true,
+          createdAt: true,
         },
       })
       : Promise.resolve([]),
@@ -388,6 +401,33 @@ export async function GET(
       });
     })(),
   ]);
+  const latestRegistrationByEventTeamAndUserId = new Map<string, {
+    registrantType: string | null;
+    parentId: string | null;
+    status: string | null;
+    updatedAt: Date | null;
+    createdAt: Date | null;
+  }>();
+  registrations.forEach((registration) => {
+    const eventTeamId = normalizeId(registration.eventTeamId);
+    const userId = normalizeId(registration.registrantId);
+    if (!eventTeamId || !userId) {
+      return;
+    }
+    const key = `${eventTeamId}::${userId}`;
+    const existing = latestRegistrationByEventTeamAndUserId.get(key);
+    const existingTs = Math.max(toTimestamp(existing?.updatedAt), toTimestamp(existing?.createdAt));
+    const nextTs = Math.max(toTimestamp(registration.updatedAt), toTimestamp(registration.createdAt));
+    if (!existing || nextTs >= existingTs) {
+      latestRegistrationByEventTeamAndUserId.set(key, {
+        registrantType: registration.registrantType ? String(registration.registrantType) : null,
+        parentId: normalizeId(registration.parentId),
+        status: registration.status ? String(registration.status) : null,
+        updatedAt: registration.updatedAt ?? null,
+        createdAt: registration.createdAt ?? null,
+      });
+    }
+  });
 
   const allBillIdsForProofs = [...teamBills, ...userBills].map((bill) => bill.id);
   const proofRows = allBillIdsForProofs.length && typeof (prisma as any).billPaymentProofs?.findMany === 'function'
@@ -416,120 +456,88 @@ export async function GET(
     Object.assign(bill as any, withBillDiscountAmounts(bill, discountAmountsByBillId));
   });
 
-  const templatesById = new Map(templates.map((template) => [template.id, template]));
-  const signOnceTemplateIds = templates
-    .filter((template) => Boolean(template.signOnce))
-    .map((template) => template.id);
-  const eventScopedTemplateIds = templates
-    .filter((template) => !template.signOnce)
-    .map((template) => template.id);
-
-  const latestRegistrationByUserId = new Map<
-  string,
-  {
-    registrantType: string;
-    parentId: string | null;
-    updatedAt: Date;
-  }
-  >();
-  registrations.forEach((registration) => {
-    const userId = normalizeId(registration.registrantId);
-    if (!userId) {
+  const teamMembershipScopeIdsByUserId = new Map<string, Set<string>>();
+  teams.forEach((team) => {
+    const scopeId = normalizeId(team.parentTeamId) ?? normalizeId(team.id);
+    if (!scopeId) {
       return;
     }
-    const registrationUpdatedAt = registration.updatedAt ?? new Date(0);
-    const existing = latestRegistrationByUserId.get(userId);
-    if (existing && existing.updatedAt >= registrationUpdatedAt) {
-      return;
-    }
-    latestRegistrationByUserId.set(userId, {
-      registrantType: registration.registrantType,
-      parentId: normalizeId(registration.parentId),
-      updatedAt: registrationUpdatedAt,
+    normalizeIdList(team.playerIds).forEach((playerId) => {
+      const scopeIds = teamMembershipScopeIdsByUserId.get(playerId) ?? new Set<string>();
+      scopeIds.add(scopeId);
+      teamMembershipScopeIdsByUserId.set(playerId, scopeIds);
     });
   });
-
-  const parentUserIds = Array.from(
-    new Set(
-      Array.from(latestRegistrationByUserId.values())
-        .map((registration) => normalizeId(registration.parentId))
-        .filter((value): value is string => Boolean(value)),
-    ),
+  const teamMembershipScopeIds = Array.from(new Set(
+    Array.from(teamMembershipScopeIdsByUserId.values()).flatMap((scopeIds) => Array.from(scopeIds)),
+  ));
+  const documentSubjectIdByUserId = new Map(
+    playerIds
+      .map((playerId) => [
+        playerId,
+        documentSubjectIdFor(event.organizationId, playerId),
+      ] as const)
+      .filter((entry): entry is readonly [string, string] => Boolean(entry[1])),
   );
-  const signerUserIds = Array.from(new Set([...playerIds, ...parentUserIds]));
-  const canQuerySignedDocuments = templates.length > 0 && (signerUserIds.length > 0 || playerIds.length > 0);
-
-  const signedDocuments = canQuerySignedDocuments
-    ? await prisma.signedDocuments.findMany({
-      where: {
-        templateId: { in: templates.map((template) => template.id) },
-        OR: [
-          ...(signerUserIds.length ? [{ userId: { in: signerUserIds } }] : []),
-          ...(playerIds.length ? [{ hostId: { in: playerIds } }] : []),
-        ],
-        ...(signOnceTemplateIds.length || eventScopedTemplateIds.length
-          ? {
-            AND: [{
-              OR: [
-                ...(signOnceTemplateIds.length ? [{ templateId: { in: signOnceTemplateIds } }] : []),
-                ...(eventScopedTemplateIds.length ? [{ templateId: { in: eventScopedTemplateIds }, eventId }] : []),
-              ],
-            }],
-          }
-          : {}),
-      },
-      select: {
-        id: true,
-        templateId: true,
-        userId: true,
-        hostId: true,
-        signerRole: true,
-        status: true,
-        eventId: true,
-        signedAt: true,
-        createdAt: true,
-      },
-    })
-    : [];
-
-  const signedDocumentByCompletionKey = new Map<string, { id: string; signedAt?: string }>();
-  signedDocuments.forEach((document) => {
-    if (!isSignedDocumentStatus(document.status)) {
-      return;
-    }
-    const template = templatesById.get(document.templateId);
-    if (!template) {
-      return;
-    }
-
-    const signerContext = normalizeSignerRoleContext(document.signerRole);
-    const hostUserId = signerContext === 'participant' ? null : normalizeId(document.hostId);
-    if (signerContext !== 'participant' && !hostUserId) {
-      return;
-    }
-
-    if (!template.signOnce && normalizeId(document.eventId) !== eventId) {
-      return;
-    }
-
-    const completionKey = buildSignatureCompletionKey({
-      scopeKey: template.signOnce ? 'once' : `event:${eventId}`,
-      templateId: template.id,
-      signerContext,
-      hostUserId,
-    });
-    const existing = signedDocumentByCompletionKey.get(completionKey);
-    const existingTs = existing ? toTimestamp(existing.signedAt) : 0;
-    const nextSignedAt = document.signedAt
-      ?? (document.createdAt ? document.createdAt.toISOString() : undefined);
-    const nextTs = toTimestamp(nextSignedAt);
-    if (!existing || nextTs > existingTs) {
-      signedDocumentByCompletionKey.set(completionKey, {
-        id: document.id,
-        signedAt: nextSignedAt,
-      });
-    }
+  const satisfactionRows = await findCompletedDocumentSatisfactions({
+    documentSubjectIds: Array.from(documentSubjectIdByUserId.values()),
+    templateDocumentIds: templates.map((template) => template.id),
+    scopes: [
+      ...(event.organizationId
+        ? [{ scopeType: 'ORGANIZATION' as const, scopeId: event.organizationId }]
+        : []),
+      ...teamMembershipScopeIds.map((scopeId) => ({
+        scopeType: 'TEAM_MEMBERSHIP' as const,
+        scopeId,
+      })),
+      { scopeType: 'EVENT_PARTICIPATION' as const, scopeId: eventId },
+    ],
   });
+  const completeDocumentSatisfactionByKey = new Map<string, { id: string; signedAt?: string }>();
+  satisfactionRows.forEach((row) => {
+    const signedAt = row.signedAt ?? undefined;
+    completeDocumentSatisfactionByKey.set(
+      `${row.documentSubjectId}::${row.templateDocumentId}::${row.scopeType}::${row.scopeId}`,
+      { id: row.sourceEvidenceId, signedAt },
+    );
+  });
+  const getSatisfiedDocument = (task: {
+    templateId: string;
+    signOnce: boolean;
+    signerUserId?: string | null;
+    hostUserId?: string | null;
+  }) => {
+    const subjectUserId = normalizeId(task.hostUserId) ?? normalizeId(task.signerUserId);
+    const subjectId = subjectUserId ? documentSubjectIdByUserId.get(subjectUserId) : undefined;
+    if (!subjectId) {
+      return undefined;
+    }
+    const teamScopeIds = subjectUserId
+      ? teamMembershipScopeIdsByUserId.get(subjectUserId)
+      : undefined;
+    const scopeCandidates = task.signOnce
+      ? (event.organizationId
+        ? [{ scopeType: 'ORGANIZATION' as const, scopeId: event.organizationId }]
+        : [])
+      : [
+        ...(teamScopeIds
+          ? Array.from(teamScopeIds).map((scopeId) => ({
+            scopeType: 'TEAM_MEMBERSHIP' as const,
+            scopeId,
+          }))
+          : []),
+        { scopeType: 'EVENT_PARTICIPATION' as const, scopeId: eventId },
+      ];
+    for (const scope of scopeCandidates) {
+      const completion = completeDocumentSatisfactionByKey.get(
+        `${subjectId}::${task.templateId}::${scope.scopeType}::${scope.scopeId}`,
+      );
+      if (completion) {
+        return completion;
+      }
+    }
+    return undefined;
+  };
 
   const usersById = new Map(users.map((user) => [user.id, user]));
 
@@ -581,12 +589,19 @@ export async function GET(
       const orderedPlayerIds = normalizeIdList(team.playerIds);
 
       const usersForTeam: TeamComplianceUserSummary[] = orderedPlayerIds
+        .filter((playerId) => {
+          const registration = latestRegistrationByEventTeamAndUserId.get(`${team.id}::${playerId}`);
+          if (!registration) {
+            return false;
+          }
+          return isEligibleEventPersonRegistration(registration.status);
+        })
         .map((playerId) => {
           const user = usersById.get(playerId);
           if (!user) {
             return null;
           }
-          const registration = latestRegistrationByUserId.get(playerId);
+          const registration = latestRegistrationByEventTeamAndUserId.get(`${team.id}::${playerId}`);
           const ageAtEvent = calculateAgeOnDate(user.dateOfBirth, event.start);
           const isMinorAtEvent = Number.isFinite(ageAtEvent) && ageAtEvent < 18;
           const isChildRegistration = registration?.registrantType === 'CHILD' || isMinorAtEvent;
@@ -608,7 +623,7 @@ export async function GET(
               signerContext: task.signerContext,
               hostUserId: task.hostUserId,
             });
-            const signed = signedDocumentByCompletionKey.get(completionKey);
+            const completion = getSatisfiedDocument(task);
             return {
               key: completionKey,
               templateId: task.templateId,
@@ -617,9 +632,9 @@ export async function GET(
               signerContext: task.signerContext,
               signerLabel: task.signerLabel,
               signOnce: task.signOnce,
-              status: signed ? 'SIGNED' : 'UNSIGNED',
-              signedDocumentRecordId: signed?.id,
-              signedAt: signed?.signedAt,
+              status: completion ? 'SIGNED' : 'UNSIGNED',
+              signedDocumentRecordId: completion?.id,
+              signedAt: completion?.signedAt,
             };
           });
 

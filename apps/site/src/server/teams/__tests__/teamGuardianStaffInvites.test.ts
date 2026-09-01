@@ -5,6 +5,7 @@ const updateManyMock = jest.fn();
 const inviteDeleteManyMock = jest.fn();
 const inviteUpdateMock = jest.fn();
 const syncCanonicalTeamRosterMock = jest.fn();
+const replaceSingletonTeamStaffAssignmentMock = jest.fn();
 
 const txMock: any = {
   teamStaffAssignments: { updateMany: (...args: any[]) => updateManyMock(...args) },
@@ -26,6 +27,7 @@ jest.mock('@/server/teams/teamMembership', () => ({
   normalizeId: (value: unknown) => typeof value === 'string' && value.trim() ? value.trim() : null,
   normalizeIdList: (value: unknown) => Array.isArray(value) ? value.filter((item) => typeof item === 'string' && item) : [],
   syncCanonicalTeamRoster: (...args: any[]) => syncCanonicalTeamRosterMock(...args),
+  replaceSingletonTeamStaffAssignment: (...args: any[]) => replaceSingletonTeamStaffAssignmentMock(...args),
 }));
 jest.mock('@/server/teamChatSync', () => ({
   getTeamChatBaseMemberIds: jest.fn(() => []),

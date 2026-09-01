@@ -11,7 +11,7 @@ import {
 import {
   codexAffiliateIngestionResultSchema,
   codexAffiliateIngestionResultV2Schema,
-} from './codexIngestionResult';
+} from './affiliateIngestionSchemas';
 import { applyAffiliateSourceDomainPolicy } from './sourceDiscovery';
 import { findAffiliateIntakeIdsForPolicyKey } from './sourcePolicyIntakes';
 import {

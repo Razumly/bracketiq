@@ -901,6 +901,12 @@ describe('auth routes', () => {
       expect(res.status).toBe(200);
       expect(json.user.id).toBe('user_1');
       expect(authServerMock.setAuthCookie).toHaveBeenCalledWith(res, 'refreshed-token');
+      expect(authServerMock.signSessionToken).toHaveBeenCalledWith({
+        userId: 'user_1',
+        isAdmin: false,
+        sessionVersion: 0,
+        issuedAtSeconds: 1,
+      });
     });
 
     it('clears a pre-verification cookie instead of restoring a session', async () => {

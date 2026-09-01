@@ -21,6 +21,9 @@ const prismaMock = {
   signedDocuments: {
     findMany: jest.fn(),
   },
+  documentRequirementSatisfactions: {
+    findMany: jest.fn(),
+  },
   divisions: {
     findMany: jest.fn(),
   },
@@ -100,6 +103,7 @@ describe('POST /api/events/[eventId]/registrations/self', () => {
     });
     prismaMock.templateDocuments.findMany.mockResolvedValue([]);
     prismaMock.signedDocuments.findMany.mockResolvedValue([]);
+    prismaMock.documentRequirementSatisfactions.findMany.mockResolvedValue([]);
     prismaMock.timeSlots.findUnique.mockResolvedValue(null);
     prismaMock.invites.deleteMany.mockResolvedValue({ count: 0 });
     prismaMock.authUser.findUnique.mockResolvedValue({ emailVerifiedAt: new Date('2026-01-01T00:00:00.000Z') });
@@ -551,7 +555,7 @@ describe('POST /api/events/[eventId]/registrations/self', () => {
       registrationByDivisionType: true,
       divisions: ['div_a'],
       requiredTemplateIds: ['tmpl_participant'],
-      organizationId: null,
+      organizationId: 'org_1',
     });
     prismaMock.divisions.findMany.mockResolvedValue([
       {
@@ -575,11 +579,8 @@ describe('POST /api/events/[eventId]/registrations/self', () => {
         signOnce: true,
       },
     ]);
-    prismaMock.signedDocuments.findMany.mockResolvedValue([
-      {
-        templateId: 'tmpl_participant',
-        status: 'SIGNED',
-      },
+    prismaMock.documentRequirementSatisfactions.findMany.mockResolvedValue([
+      { templateDocumentId: 'tmpl_participant' },
     ]);
     prismaMock.eventRegistrations.upsert.mockResolvedValue({
       id: 'event_1__self__user_1',
@@ -610,6 +611,7 @@ describe('POST /api/events/[eventId]/registrations/self', () => {
     );
 
     expect(response.status).toBe(200);
+    expect(prismaMock.signedDocuments.findMany).not.toHaveBeenCalled();
     expect(dispatchRequiredEventDocumentsMock).not.toHaveBeenCalled();
     expect(prismaMock.eventRegistrations.upsert).toHaveBeenCalledWith(
       expect.objectContaining({

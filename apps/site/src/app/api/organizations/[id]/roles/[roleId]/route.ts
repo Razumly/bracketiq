@@ -2,8 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/permissions';
-import { ORG_PERMISSIONS, normalizeOrganizationPermissions } from '@/lib/organizationPermissions';
-import { hasOrgPermission } from '@/server/accessControl';
+import {
+  ORG_PERMISSIONS,
+  RESTRICTED_DOCUMENT_PERMISSION_ERROR,
+  RESTRICTED_DOCUMENT_PERMISSIONS,
+  normalizeOrganizationPermissions,
+  type OrganizationPermission,
+} from '@/lib/organizationPermissions';
+import { hasDocumentEvidenceOwnerAccess, hasOrgPermission } from '@/server/accessControl';
 import { getOrganizationRolesWithPermissions } from '@/server/organizationRoles';
 
 export const dynamic = 'force-dynamic';
@@ -12,6 +18,16 @@ const updateSchema = z.object({
   name: z.string().trim().min(2).max(80).optional(),
   permissions: z.array(z.string()).optional(),
 }).passthrough();
+
+class RestrictedDocumentPermissionConflict extends Error {}
+
+const permissionSetsEqual = (
+  left: ReadonlySet<string>,
+  right: ReadonlySet<string>,
+): boolean => (
+  left.size === right.size
+  && Array.from(left).every((permission) => right.has(permission))
+);
 
 const createId = (prefix: string): string => `${prefix}_${crypto.randomUUID()}`;
 
@@ -51,6 +67,43 @@ export async function PATCH(
   if (existing.isSystem && parsed.data.name && parsed.data.name !== existing.name) {
     return NextResponse.json({ error: 'System role names cannot be changed.' }, { status: 400 });
   }
+  const hasPermissionUpdate = Object.prototype.hasOwnProperty.call(parsed.data, 'permissions');
+  const existingRestrictedPermissions = hasPermissionUpdate
+    ? (await prisma.organizationRolePermissions.findMany({
+      where: {
+        organizationRoleId: existing.id,
+        permission: {
+          in: RESTRICTED_DOCUMENT_PERMISSIONS,
+        },
+      },
+      select: { permission: true },
+    }) ?? [])
+    : [];
+  const existingRestrictedPermissionSet = new Set(
+    existingRestrictedPermissions.map((entry) => entry.permission),
+  );
+  const requestedRestrictedPermissionSet = hasPermissionUpdate
+    ? new Set(
+      normalizeOrganizationPermissions(parsed.data.permissions).filter((permission) => (
+        RESTRICTED_DOCUMENT_PERMISSIONS.includes(permission)
+      )),
+    )
+    : null;
+  const canManageRestrictedDocumentPermissions = hasPermissionUpdate
+    ? await hasDocumentEvidenceOwnerAccess(session, org)
+    : false;
+  const hasRestrictedDocumentPermissionChange = requestedRestrictedPermissionSet !== null
+    && !permissionSetsEqual(requestedRestrictedPermissionSet, existingRestrictedPermissionSet);
+  if (
+    hasRestrictedDocumentPermissionChange
+    && !canManageRestrictedDocumentPermissions
+  ) {
+    return NextResponse.json(
+      { error: RESTRICTED_DOCUMENT_PERMISSION_ERROR },
+      { status: 403 },
+    );
+  }
+
 
   try {
     const role = await prisma.$transaction(async (tx) => {
@@ -64,12 +117,44 @@ export async function PATCH(
 
       if (Object.prototype.hasOwnProperty.call(parsed.data, 'permissions')) {
         const permissions = normalizeOrganizationPermissions(parsed.data.permissions);
+        let permissionsToWrite = permissions;
+        if (!canManageRestrictedDocumentPermissions) {
+          const currentRestrictedPermissions = await tx.organizationRolePermissions.findMany({
+            where: {
+              organizationRoleId: existing.id,
+              permission: {
+                in: RESTRICTED_DOCUMENT_PERMISSIONS,
+              },
+            },
+            select: { permission: true },
+          });
+          const currentRestrictedPermissionSet = new Set(
+            currentRestrictedPermissions.map((entry) => entry.permission),
+          );
+          if (
+            !permissionSetsEqual(
+              currentRestrictedPermissionSet,
+              requestedRestrictedPermissionSet ?? new Set(),
+            )
+          ) {
+            throw new RestrictedDocumentPermissionConflict(RESTRICTED_DOCUMENT_PERMISSION_ERROR);
+          }
+          const currentRestrictedPermissionsToWrite = currentRestrictedPermissions
+            .map((entry) => entry.permission)
+            .filter((permission): permission is OrganizationPermission => (
+              RESTRICTED_DOCUMENT_PERMISSIONS.includes(permission as OrganizationPermission)
+            ));
+          permissionsToWrite = [
+            ...permissions.filter((permission) => !RESTRICTED_DOCUMENT_PERMISSIONS.includes(permission)),
+            ...currentRestrictedPermissionsToWrite,
+          ];
+        }
         await tx.organizationRolePermissions.deleteMany({
           where: { organizationRoleId: existing.id },
         });
-        if (permissions.length > 0) {
+        if (permissionsToWrite.length > 0) {
           await tx.organizationRolePermissions.createMany({
-            data: permissions.map((permission) => ({
+            data: permissionsToWrite.map((permission) => ({
               id: createId('org_role_permission'),
               organizationRoleId: existing.id,
               permission,
@@ -87,6 +172,12 @@ export async function PATCH(
 
     return NextResponse.json({ role }, { status: 200 });
   } catch (error) {
+    if (error instanceof RestrictedDocumentPermissionConflict) {
+      return NextResponse.json(
+        { error: RESTRICTED_DOCUMENT_PERMISSION_ERROR },
+        { status: 403 },
+      );
+    }
     const message = error instanceof Error ? error.message : String(error ?? '');
     if (message.includes('Unique constraint')) {
       return NextResponse.json({ error: 'A role with that name already exists.' }, { status: 409 });

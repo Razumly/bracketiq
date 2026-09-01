@@ -25,10 +25,19 @@ const prismaMock = {
   templateDocuments: {
     findMany: jest.fn(),
   },
+  documentRequirementSatisfactions: {
+    findMany: jest.fn(),
+  },
+  templateProviderQuarantines: {
+    findMany: jest.fn(),
+  },
   signedDocuments: {
     findMany: jest.fn(),
     update: jest.fn(),
     create: jest.fn(),
+  },
+  boldSignSyncOperations: {
+    findFirst: jest.fn(),
   },
   teamRegistrations: {
     findFirst: jest.fn(),
@@ -100,9 +109,21 @@ const teamMembershipMock = jest.requireMock('@/server/teams/teamMembership') as 
 const teamOpenRegistrationMock = jest.requireMock('@/server/teams/teamOpenRegistration') as {
   reserveTeamRegistrationSlot: jest.Mock;
 };
+const boldSignServerMock = jest.requireMock('@/lib/boldsignServer') as {
+  getEmbeddedSignLink: jest.Mock;
+  isBoldSignConfigured: jest.Mock;
+  sendDocumentFromTemplate: jest.Mock;
+};
+const templateSignerTypesMock = jest.requireMock('@/lib/templateSignerTypes') as {
+  getRequiredSignerTypeLabel: jest.Mock;
+  normalizeRequiredSignerType: jest.Mock;
+  templateMatchesSignerContext: jest.Mock;
+};
 
 describe('team registration auth route handling', () => {
   beforeEach(() => {
+    prismaMock.templateProviderQuarantines.findMany.mockResolvedValue([]);
+    prismaMock.documentRequirementSatisfactions.findMany.mockResolvedValue([]);
     jest.clearAllMocks();
     requireSessionMock.mockRejectedValue(new Response('Unauthorized', { status: 401 }));
   });
@@ -154,6 +175,64 @@ describe('team registration auth route handling', () => {
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toEqual({ error: 'Unauthorized' });
   });
+  it('rejects a quarantined PDF Version before reusing an existing team operation', async () => {
+    requireSessionMock.mockResolvedValue({ userId: 'user_1', isAdmin: false });
+    prismaMock.canonicalTeams.findUnique.mockResolvedValue({
+      id: 'team_1',
+      organizationId: 'org_1',
+      requiredTemplateIds: ['version_quarantined'],
+    });
+    prismaMock.templateDocuments.findMany.mockResolvedValue([
+      {
+        id: 'version_quarantined',
+        providerQuarantinedAt: new Date('2026-08-22T00:00:00.000Z'),
+        title: 'Quarantined waiver',
+        description: null,
+        type: 'PDF',
+        signOnce: false,
+        requiredSignerType: 'PARTICIPANT',
+        content: null,
+      },
+    ]);
+    prismaMock.signedDocuments.findMany.mockResolvedValue([]);
+    prismaMock.boldSignSyncOperations.findFirst.mockResolvedValue({
+      id: 'operation_1',
+      documentId: 'document_1',
+      status: 'CONFIRMED',
+      payload: {
+        roleAssignments: [{
+          signerContext: 'participant',
+          signerEmail: 'player@example.com',
+          signerName: 'Player One',
+        }],
+      },
+    });
+    templateSignerTypesMock.normalizeRequiredSignerType.mockReturnValue('PARTICIPANT');
+    templateSignerTypesMock.templateMatchesSignerContext.mockReturnValue(true);
+    templateSignerTypesMock.getRequiredSignerTypeLabel.mockReturnValue('Participant');
+    boldSignServerMock.isBoldSignConfigured.mockReturnValue(true);
+
+    const response = await postSign(
+      new NextRequest('http://localhost/api/teams/team_1/sign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          signerContext: 'participant',
+          userEmail: 'player@example.com',
+        }),
+      }),
+      { params: Promise.resolve({ id: 'team_1' }) },
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: expect.stringContaining('quarantined'),
+    });
+    expect(prismaMock.boldSignSyncOperations.findFirst).not.toHaveBeenCalled();
+    expect(boldSignServerMock.getEmbeddedSignLink).not.toHaveBeenCalled();
+    expect(boldSignServerMock.sendDocumentFromTemplate).not.toHaveBeenCalled();
+  });
+
 
   it('creates a parent approval request for minor self team registration without reserving a slot', async () => {
     requireSessionMock.mockResolvedValue({ userId: 'child_1', isAdmin: false });

@@ -20,7 +20,7 @@
 
 - `apps/site` is the source of truth for backend behavior, database definitions, API paths, and request and response contracts.
 - The backend HTTP interface is the seam between the applications.
-- Keep backend changes compatible with installed mobile versions.
+- Treat the current site and mobile code as the supported HTTP contract. Use a clean cutover when that contract changes.
 - Do not import server TypeScript or Prisma types into the mobile application.
 - Room is the mobile application's local source of truth for fetched API data.
 - Write remote results to Room before UI code observes them, unless a transient flow is explicitly documented.
@@ -49,6 +49,15 @@ Use an ExecPlan for complex features and significant refactors. Follow `PLANS.md
 - Do not start, stop, restart, enable, disable, deploy, or reconfigure a runtime unless the user explicitly requests that exact state change.
 - Inspection, debugging, status checks, database access, and log review do not authorize a runtime state change.
 - Limit an authorized operation to the named runtime.
+## Production VPS access
+
+- Use the SSH alias `bracketiq-prod` for the production VPS.
+- The alias resolves to `15.204.81.193` and user `bracketiq`.
+- The alias selects `~/.ssh/id_ed25519_bracketiq_prod` with `IdentitiesOnly yes`.
+- Keep the private key outside the repository and never expose its contents.
+- Use `ssh bracketiq-prod` for inspection, debugging, status checks, and log review.
+- Do not add a public PostgreSQL port. Production PostgreSQL uses the private Docker network.
+
 
 ## GitHub and release boundaries
 

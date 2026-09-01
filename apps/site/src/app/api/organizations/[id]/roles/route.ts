@@ -2,8 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/permissions';
-import { ORG_PERMISSIONS, normalizeOrganizationPermissions } from '@/lib/organizationPermissions';
-import { hasOrgPermission } from '@/server/accessControl';
+import {
+  ORG_PERMISSIONS,
+  RESTRICTED_DOCUMENT_PERMISSION_ERROR,
+  RESTRICTED_DOCUMENT_PERMISSIONS,
+  normalizeOrganizationPermissions,
+} from '@/lib/organizationPermissions';
+import { hasDocumentEvidenceOwnerAccess, hasOrgPermission } from '@/server/accessControl';
 import { ensureDefaultOrganizationRoles, getOrganizationRolesWithPermissions } from '@/server/organizationRoles';
 
 export const dynamic = 'force-dynamic';
@@ -54,6 +59,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   const permissions = normalizeOrganizationPermissions(parsed.data.permissions);
+  if (
+    permissions.some((permission) => RESTRICTED_DOCUMENT_PERMISSIONS.includes(permission))
+    && !(await hasDocumentEvidenceOwnerAccess(session, org))
+  ) {
+    return NextResponse.json(
+      { error: RESTRICTED_DOCUMENT_PERMISSION_ERROR },
+      { status: 403 },
+    );
+  }
   try {
     const role = await prisma.$transaction(async (tx) => {
       await ensureDefaultOrganizationRoles(tx, id);

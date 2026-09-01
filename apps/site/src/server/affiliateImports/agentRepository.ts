@@ -24,6 +24,60 @@ export const configureAffiliateLiveDatabaseEnvironment = (
   return normalizedUrl;
 };
 
+export const assertAffiliateLegacyLocalDatabase = (
+  env: NodeJS.ProcessEnv = process.env,
+): string => {
+  if (env.AFFILIATE_LEGACY_LOCAL_ONLY?.trim() !== '1') {
+    throw new Error(
+      'AFFILIATE_LEGACY_LOCAL_ONLY=1 is required before a legacy affiliate launcher can write.',
+    );
+  }
+
+  const databaseUrl = env.DATABASE_URL?.trim();
+  if (!databaseUrl) {
+    throw new Error(
+      'DATABASE_URL is required and must identify a verified local database.',
+    );
+  }
+
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(databaseUrl);
+  } catch {
+    throw new Error(
+      'DATABASE_URL must be a valid PostgreSQL URL for a verified local database.',
+    );
+  }
+
+  if (!['postgres:', 'postgresql:'].includes(parsedUrl.protocol)) {
+    throw new Error(
+      'DATABASE_URL must use the PostgreSQL protocol for a verified local database.',
+    );
+  }
+
+  const hostname = parsedUrl.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (!['localhost', '127.0.0.1', '::1'].includes(hostname)) {
+    throw new Error(
+      'Legacy affiliate launchers require a verified local database; operator or production DATABASE_URL is rejected.',
+    );
+  }
+  const databaseName = decodeURIComponent(
+    parsedUrl.pathname.replace(/^\/+/, ''),
+  ).trim().toLowerCase();
+  if (!databaseName) {
+    throw new Error(
+      'DATABASE_URL must identify a named verified local database.',
+    );
+  }
+  if (['bracketiq', 'production'].includes(databaseName)) {
+    throw new Error(
+      `Legacy affiliate launchers reject the production database "${databaseName}".`,
+    );
+  }
+
+  return databaseUrl;
+};
+
 export const resolveAffiliateDatasetEnvironment = (input: {
   explicitEnvironment?: string;
   useLiveDatabase: boolean;

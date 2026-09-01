@@ -27,8 +27,58 @@ import {
   canManageEvent,
   canManageOrganization,
   canOfficialOrganization,
+  hasDocumentEvidenceOwnerAccess,
   projectEventAuthorityCapabilities,
 } from '@/server/accessControl';
+
+describe('hasDocumentEvidenceOwnerAccess', () => {
+  it('allows the organization owner', async () => {
+    const allowed = await hasDocumentEvidenceOwnerAccess(
+      { userId: 'owner_1', isAdmin: false },
+      { id: 'org_1', ownerId: 'owner_1' },
+    );
+
+    expect(allowed).toBe(true);
+  });
+
+  it('allows a verified platform administrator', async () => {
+    const allowed = await hasDocumentEvidenceOwnerAccess(
+      { userId: 'admin_1', isAdmin: false },
+      { id: 'org_1', ownerId: 'owner_1' },
+      {
+        authUser: {
+          findUnique: jest.fn().mockResolvedValue({
+            email: 'admin@razumly.com',
+            emailVerifiedAt: new Date('2026-01-01T00:00:00.000Z'),
+            sessionVersion: null,
+          }),
+        },
+        organizations: {
+          findUnique: jest.fn(),
+        },
+      },
+    );
+
+    expect(allowed).toBe(true);
+  });
+
+  it('rejects organization managers', async () => {
+    const allowed = await hasDocumentEvidenceOwnerAccess(
+      { userId: 'manager_1', isAdmin: false },
+      { id: 'org_1', ownerId: 'owner_1' },
+      {
+        authUser: {
+          findUnique: jest.fn().mockResolvedValue(null),
+        },
+        organizations: {
+          findUnique: jest.fn(),
+        },
+      },
+    );
+
+    expect(allowed).toBe(false);
+  });
+});
 
 describe('canManageOrganization', () => {
   it('allows verified razumly admins to manage any organization', async () => {

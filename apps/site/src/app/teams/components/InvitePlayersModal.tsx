@@ -16,6 +16,7 @@ import {
   TextInput,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
+import { isApiRequestError } from '@/lib/apiClient';
 import {
   type Invite,
   type Team,
@@ -33,6 +34,7 @@ import { userService } from '@/lib/userService';
 import { formatPhoneInput } from '@/lib/phoneInput';
 
 const EMAIL_REGEX = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+const PLAYER_INVITE_CAPACITY_ERROR_MESSAGE = 'Team is full. Player invite was not sent.';
 
 const EMPTY_INVITE_CONTEXT: TeamInviteFreeAgentContext = {
   users: [],
@@ -85,10 +87,21 @@ interface InvitePlayersModalProps {
   onInvitesSent?: () => void | Promise<void>;
 }
 
+const isTeamInviteRole = (value: unknown): value is TeamInviteRoleType => (
+  value === 'player'
+  || value === 'team_manager'
+  || value === 'team_head_coach'
+  || value === 'team_assistant_coach'
+);
+
 const getPendingInviteRole = (
   team: Team,
   invite: Invite,
 ): TeamInviteRoleType => {
+  const explicitRole = (invite as Invite & { role?: unknown }).role;
+  if (isTeamInviteRole(explicitRole)) {
+    return explicitRole;
+  }
   if (invite.userId && Array.isArray(team.pending) && team.pending.includes(invite.userId)) {
     return 'player';
   }
@@ -113,6 +126,27 @@ const getRoleLabel = (role: TeamInviteRoleType): string => {
       return 'Player';
   }
 };
+const isAssignedInvite = (invite: Invite): boolean => (
+  (invite as Invite & { isAssigned?: boolean }).isAssigned === true
+);
+type LocalEmailPlayerInvite = {
+  inviteId?: string;
+  identityKey: string;
+};
+
+const normalizeInviteIdentityValue = (value: unknown): string => (
+  typeof value === 'string' ? value.trim().toLowerCase() : ''
+);
+
+const getInviteIdentityKey = (invite: {
+  email?: unknown;
+  firstName?: unknown;
+  lastName?: unknown;
+}): string => [
+  normalizeInviteIdentityValue(invite.email),
+  normalizeInviteIdentityValue(invite.firstName),
+  normalizeInviteIdentityValue(invite.lastName),
+].join('|');
 
 const inviteKey = (role: TeamInviteRoleType, userId: string): string => `${role}:${userId}`;
 
@@ -139,7 +173,7 @@ export default function InvitePlayersModal({
   const [invitingUserKeys, setInvitingUserKeys] = useState<Set<string>>(new Set());
   const [invitingPerson, setInvitingPerson] = useState(false);
   const [localInvitedPlayerIds, setLocalInvitedPlayerIds] = useState<Set<string>>(new Set());
-  const [localEmailPlayerInviteCount, setLocalEmailPlayerInviteCount] = useState(0);
+  const [localEmailPlayerInvites, setLocalEmailPlayerInvites] = useState<LocalEmailPlayerInvite[]>([]);
   const [localInvitedRoleKeys, setLocalInvitedRoleKeys] = useState<Set<string>>(new Set());
 
   const normalizedInviteEmail = personInvite.email.trim().toLowerCase();
@@ -179,8 +213,31 @@ export default function InvitePlayersModal({
     localInvitedPlayerIds.forEach((userId) => userIds.add(userId));
     return userIds;
   }, [localInvitedPlayerIds, team.pending, team.playerIds, team.playerRegistrations]);
+  const assignedPlayerInvites = useMemo(
+    () => pendingRoleInvites.filter(
+      (entry) => isAssignedInvite(entry.invite)
+        && getPendingInviteRole(team, entry.invite) === 'player',
+    ),
+    [pendingRoleInvites, team],
+  );
+  const unrefreshedLocalPlayerInviteCount = useMemo(() => {
+    const unmatchedAssignedInvites = [...assignedPlayerInvites];
+    return localEmailPlayerInvites.reduce((unrefreshedCount, localInvite) => {
+      const matchIndex = unmatchedAssignedInvites.findIndex(({ invite }) => (
+        (localInvite.inviteId && invite.$id === localInvite.inviteId)
+        || getInviteIdentityKey(invite) === localInvite.identityKey
+      ));
+      if (matchIndex >= 0) {
+        unmatchedAssignedInvites.splice(matchIndex, 1);
+        return unrefreshedCount;
+      }
+      return unrefreshedCount + 1;
+    }, 0);
+  }, [assignedPlayerInvites, localEmailPlayerInvites]);
 
-  const playerInviteCapacityCount = playerInviteCapacityUserIds.size + localEmailPlayerInviteCount;
+  const playerInviteCapacityCount = playerInviteCapacityUserIds.size
+    + assignedPlayerInvites.length
+    + unrefreshedLocalPlayerInviteCount;
   const playerInviteLimit = Math.max(0, Math.trunc(team.teamSize || 0));
   const canInviteAnotherPlayer = playerInviteLimit <= 0 || playerInviteCapacityCount < playerInviteLimit;
   const playerInviteCapacityMessage = playerInviteLimit > 0
@@ -208,8 +265,8 @@ export default function InvitePlayersModal({
     return localInvitedRoleKeys.has(inviteKey(roleType, userId))
       || pendingRoleInvites.some(
         (entry) => getPendingInviteRole(team, entry.invite) === roleType
-          && entry.invite.userId === userId
-          && entry.invite.status === 'PENDING',
+          && entry.invite.status === 'PENDING'
+          && entry.invite.userId === userId,
       );
   }, [localInvitedPlayerIds, localInvitedRoleKeys, pendingRoleInvites, team]);
 
@@ -345,6 +402,7 @@ export default function InvitePlayersModal({
       setCreatedShareInvite(null);
       setInvitingUserKeys(new Set());
       setInvitingPerson(false);
+      setLocalEmailPlayerInvites([]);
     }
   }, [isOpen]);
 
@@ -399,7 +457,12 @@ export default function InvitePlayersModal({
       notifications.show({ color: 'green', message: `${selectedRoleLabel} invite sent to ${getUserFullName(invitee)}.` });
     } catch (error) {
       console.error('Failed to invite user:', error);
-      notifications.show({ color: 'red', message: 'Failed to send invite.' });
+      const message = isApiRequestError(error)
+        && error.status === 409
+        && error.message === PLAYER_INVITE_CAPACITY_ERROR_MESSAGE
+        ? error.message
+        : 'Failed to send invite.';
+      notifications.show({ color: 'red', message });
     } finally {
       removeInvitingUserKey(key);
     }
@@ -431,7 +494,22 @@ export default function InvitePlayersModal({
       const fullName = `${personInvite.firstName.trim()} ${personInvite.lastName.trim()}`;
 
       if (selectedInviteRole === 'player') {
-        setLocalEmailPlayerInviteCount((count) => count + 1);
+        const inviteId = result.invite?.$id?.trim() || undefined;
+        const identityKey = getInviteIdentityKey({
+          email: normalizedInviteEmail,
+          firstName: personInvite.firstName,
+          lastName: personInvite.lastName,
+        });
+        setLocalEmailPlayerInvites((current) => {
+          const alreadyTracked = current.some((localInvite) => (
+            (inviteId && localInvite.inviteId === inviteId)
+            || (!inviteId && localInvite.identityKey === identityKey)
+          ));
+          if (alreadyTracked) {
+            return current;
+          }
+          return [...current, { inviteId, identityKey }];
+        });
         const updatedTeam = await teamService.getTeamById(team.$id, true, { teamId: team.$id });
         if (updatedTeam) {
           onTeamUpdated?.(updatedTeam);

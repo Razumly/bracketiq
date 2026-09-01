@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/permissions';
 import {
+  IMPORTED_DOCUMENT_VIEW_PERMISSIONS,
+} from '@/lib/organizationPermissions';
+import {
+  hasAnyOrgPermission,
+} from '@/server/accessControl';
+import {
   canAccessOrganizationUsers,
   listOrganizationUsersScopeEvents,
   type OrganizationUsersScopeEvent,
@@ -18,6 +24,7 @@ type EventSummary = {
   start: string;
   end: string;
   status?: string;
+  organizationId?: string | null;
 };
 
 type TeamRegistrationSummary = EventSummary & {
@@ -40,6 +47,7 @@ type BillPaymentSummary = {
   sequence: number;
   dueDate?: string;
   amountCents: number;
+  paidAmountCents: number;
   status?: string;
   paidAt?: string;
   paymentIntentId?: string | null;
@@ -55,6 +63,8 @@ type BillSummary = {
   ownerId: string;
   ownerName: string;
   eventId?: string | null;
+  sourceType?: string | null;
+  label?: string;
   eventName?: string;
   parentBillId?: string | null;
   totalAmountCents: number;
@@ -78,13 +88,19 @@ type DocumentSummary = {
   signedDocumentRecordId: string;
   documentId: string;
   templateId: string;
+  documentRequirementTitle?: string;
+  versionSequence?: number;
   eventId?: string;
   eventName?: string;
   teamId?: string;
   title: string;
   type: 'PDF' | 'TEXT';
+  provenance?: string;
   status?: string;
   signedAt?: string;
+  historicalSigningDate?: string;
+  scopeType?: string;
+  scopeId?: string;
   viewUrl?: string;
   content?: string;
 };
@@ -313,6 +329,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!canAccess) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
+  const canViewImportedDocuments = await hasAnyOrgPermission(
+    session,
+    org,
+    IMPORTED_DOCUMENT_VIEW_PERMISSIONS,
+  );
 
   const eventIds = eventRows.map((event) => event.id);
   const rentalEventIds = eventRows
@@ -321,15 +342,21 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const rentalEventIdSet = new Set(rentalEventIds);
   const registrations = eventIds.length
     ? await prisma.eventRegistrations.findMany({
-      where: { eventId: { in: eventIds } },
-	      select: {
-	        eventId: true,
-	        registrantId: true,
-	        parentId: true,
-	        registrantType: true,
-	        eventTeamId: true,
-	        status: true,
-	      },
+      where: {
+        eventId: { in: eventIds },
+        rosterRole: 'PARTICIPANT',
+        status: { in: ['STARTED', 'PENDING', 'ACTIVE', 'BLOCKED', 'CONSENTFAILED'] },
+        slotId: null,
+        occurrenceDate: null,
+      },
+      select: {
+        eventId: true,
+        registrantId: true,
+        parentId: true,
+        registrantType: true,
+        eventTeamId: true,
+        status: true,
+      },
       orderBy: { updatedAt: 'desc' },
     })
     : [];
@@ -496,6 +523,27 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 	      },
 	    })
 	    : [];
+  const canonicalMemberIdsByTeamId = new Map<string, Set<string>>();
+  canonicalTeamRegistrationRows.forEach((row) => {
+    const teamId = normalizeId(row.teamId);
+    const userId = normalizeId(row.userId);
+    if (!teamId || !userId) {
+      return;
+    }
+    const memberIds = canonicalMemberIdsByTeamId.get(teamId) ?? new Set<string>();
+    memberIds.add(userId);
+    canonicalMemberIdsByTeamId.set(teamId, memberIds);
+  });
+  canonicalTeamIdByEventTeamId.forEach((canonicalTeamId, eventTeamId) => {
+    const canonicalMemberIds = canonicalMemberIdsByTeamId.get(canonicalTeamId);
+    if (!canonicalMemberIds) {
+      return;
+    }
+    const eventTeamMemberIds = new Set(teamMemberIdsByTeamId.get(eventTeamId) ?? []);
+    canonicalMemberIds.forEach((userId) => eventTeamMemberIds.add(userId));
+    teamMemberIdsByTeamId.set(eventTeamId, Array.from(eventTeamMemberIds));
+  });
+
 	  const teamStaffAssignmentsDelegate = (prisma as any).teamStaffAssignments;
 	  const canonicalTeamStaffRows: TeamStaffAssignmentRow[] = canonicalTeamIds.length && typeof teamStaffAssignmentsDelegate?.findMany === 'function'
 	    ? await teamStaffAssignmentsDelegate.findMany({
@@ -730,15 +778,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const [users, templates] = await Promise.all([
     userIds.length
       ? prisma.userData.findMany({
-      where: { id: { in: userIds } },
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        userName: true,
-        profileImageId: true,
-      },
-    })
+        where: { id: { in: userIds } },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          userName: true,
+          profileImageId: true,
+        },
+      })
       : Promise.resolve([]),
     prisma.templateDocuments.findMany({
       where: { organizationId: id },
@@ -747,18 +795,30 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         title: true,
         type: true,
         content: true,
+        documentRequirementId: true,
+        versionSequence: true,
+        documentRequirement: {
+          select: {
+            title: true,
+          },
+        },
       },
     }),
   ]);
 
   const templateById = new Map(templates.map((template) => [template.id, template]));
   const templateIds = templates.map((template) => template.id);
-		  const documentParticipantScopes = [
-		    ...(userIds.length ? [{ userId: { in: userIds } }] : []),
-		    ...(activeEventTeamIds.length || canonicalTeamIds.length
-		      ? [{ teamId: { in: Array.from(new Set([...activeEventTeamIds, ...canonicalTeamIds])) } }]
-		      : []),
-		  ];
+  const documentSubjectIds = userIds.map((userId) => `document-subject:${id}:${userId}`);
+  const documentSubjectUserIdById = new Map(
+    documentSubjectIds.map((subjectId, index) => [subjectId, userIds[index]] as const),
+  );
+  const documentParticipantScopes = [
+    ...(userIds.length ? [{ userId: { in: userIds } }] : []),
+    ...(documentSubjectIds.length ? [{ documentSubjectId: { in: documentSubjectIds } }] : []),
+    ...(activeEventTeamIds.length || canonicalTeamIds.length
+      ? [{ teamId: { in: Array.from(new Set([...activeEventTeamIds, ...canonicalTeamIds])) } }]
+      : []),
+  ];
   const documentEventOrTemplateScopes = [
     ...(eventIds.length ? [{ eventId: { in: eventIds } }] : []),
     ...(templateIds.length ? [{ templateId: { in: templateIds } }] : []),
@@ -779,16 +839,40 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         signedDocumentId: true,
         templateId: true,
         userId: true,
+        documentSubjectId: true,
         teamId: true,
         documentName: true,
         eventId: true,
         status: true,
         signedAt: true,
         createdAt: true,
+        provenance: true,
+        importedFileId: true,
+        historicalSigningDate: true,
+        scopeType: true,
+        scopeId: true,
       },
       orderBy: { createdAt: 'desc' },
     })
     : [];
+  const incompleteImportedMetadata = signedDocuments.find((document) => {
+    if (document.provenance !== 'IMPORTED' || !canViewImportedDocuments) {
+      return false;
+    }
+    const template = templateById.get(document.templateId);
+    return !normalizeId(document.importedFileId)
+      || !template
+      || !template.title?.trim()
+      || !Number.isInteger(template.versionSequence)
+      || !template.documentRequirement
+      || !template.documentRequirement.title?.trim();
+  });
+  if (incompleteImportedMetadata) {
+    return NextResponse.json(
+      { error: 'Imported document metadata is incomplete.' },
+      { status: 500 },
+    );
+  }
 
   const eventsById = new Map(eventRows.map((event) => [event.id, event]));
   const summariesByUserId = new Map<string, UserSummaryInternal>();
@@ -872,11 +956,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 	  });
 
 		  const teamBillOwnerIds = Array.from(new Set([...canonicalTeamIds, ...activeEventTeamIds]));
-	  const teamBills = eventIds.length && teamBillOwnerIds.length
+  const teamBills = teamBillOwnerIds.length
 	    ? await prisma.bills.findMany({
 	      where: {
 	        organizationId: id,
-	        eventId: { in: eventIds },
 	        ownerType: 'TEAM',
 	        ownerId: { in: teamBillOwnerIds },
 	      },
@@ -907,11 +990,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 	    ...(userIds.length ? [{ ownerId: { in: userIds } }] : []),
 	    ...(parentBillIds.length ? [{ parentBillId: { in: parentBillIds } }] : []),
 	  ];
-	  const userBills = eventIds.length && userBillFilters.length
+  const userBills = userBillFilters.length
 	    ? await prisma.bills.findMany({
 	      where: {
 	        organizationId: id,
-	        eventId: { in: eventIds },
 	        ownerType: 'USER',
 	        OR: userBillFilters,
 	      },
@@ -948,6 +1030,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 	        sequence: true,
 	        dueDate: true,
 	        amountCents: true,
+        paidAmountCents: true,
 	        status: true,
 	        paidAt: true,
 	        paymentIntentId: true,
@@ -990,17 +1073,29 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 	  });
 	  const billSummariesById = new Map<string, BillSummary>();
 	  allBills.forEach((bill) => {
+	    const firstLineItem = Array.isArray(bill.lineItems) ? bill.lineItems[0] : null;
+	    const label = firstLineItem
+	      && typeof firstLineItem === 'object'
+	      && 'label' in firstLineItem
+	      && typeof firstLineItem.label === 'string'
+	      && firstLineItem.label.trim().length > 0
+	      ? firstLineItem.label.trim()
+	      : undefined;
 	    const discountAmounts = withBillDiscountAmounts(bill, discountAmountsByBillId);
 	    const payments = (paymentsByBillId.get(bill.id) ?? []).map((payment): BillPaymentSummary => {
 	      const refundedAmountCents = normalizeAmountCents(payment.refundedAmountCents);
 	      const amountCents = normalizeAmountCents(payment.amountCents);
 	      const refundableAmountCents = Math.max(0, amountCents - refundedAmountCents);
 	      const status = normalizeStatus(payment.status) ?? undefined;
+	      const paidAmountCents = Number.isFinite(Number(payment.paidAmountCents))
+	        ? normalizeAmountCents(payment.paidAmountCents)
+	        : status === 'PAID' ? amountCents : 0;
 	      return {
 	        paymentId: payment.id,
 	        billId: payment.billId,
 	        sequence: Number.isFinite(Number(payment.sequence)) ? Number(payment.sequence) : 0,
 	        dueDate: toIsoString(payment.dueDate),
+	        paidAmountCents,
 	        amountCents,
 	        status,
 	        paidAt: toIsoString(payment.paidAt),
@@ -1011,9 +1106,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 	        isRefundable: refundableAmountCents > 0 && status === 'PAID',
 	      };
 	    });
-	    const paidAmountCents = payments.reduce((sum, payment) => (
-	      payment.status === 'PAID' ? sum + payment.amountCents : sum
-	    ), 0);
+    const paidAmountCents = payments.reduce((sum, payment) => sum + payment.paidAmountCents, 0);
 	    const refundedAmountCents = payments.reduce((sum, payment) => sum + payment.refundedAmountCents, 0);
 	    const ownerName = bill.ownerType === 'TEAM'
 	      ? (
@@ -1030,12 +1123,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 	      billId: bill.id,
 	      ownerType: bill.ownerType,
 	      ownerId: bill.ownerId,
-	      ownerName,
-	      eventId: bill.eventId,
-	      eventName: event?.name,
-	      parentBillId: bill.parentBillId ?? null,
-	      totalAmountCents: normalizeAmountCents(bill.totalAmountCents),
-	      paidAmountCents,
+      label,
+      ownerName,
+      eventId: bill.eventId,
+      sourceType: bill.sourceType ?? null,
+      eventName: event?.name,
+      parentBillId: bill.parentBillId ?? null,
+      totalAmountCents: normalizeAmountCents(bill.totalAmountCents),
+      paidAmountCents,
 	      originalAmountCents: discountAmounts.originalAmountCents,
 	      discountAmountCents: discountAmounts.discountAmountCents,
 	      discountedAmountCents: discountAmounts.discountedAmountCents,
@@ -1100,6 +1195,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
           imageId: event.imageId,
           start: event.start.toISOString(),
           end: event.end.toISOString(),
+          organizationId: event.organizationId,
         });
       }
     });
@@ -1125,6 +1221,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
           imageId: event.imageId,
           start: event.start.toISOString(),
           end: event.end.toISOString(),
+          organizationId: event.organizationId,
         });
       }
     });
@@ -1150,6 +1247,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         imageId: event.imageId,
         start: event.start.toISOString(),
         end: event.end.toISOString(),
+        organizationId: event.organizationId,
       });
     }
   });
@@ -1220,6 +1318,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
           imageId: event.imageId,
           start: event.start.toISOString(),
           end: event.end.toISOString(),
+          organizationId: event.organizationId,
           status: teamStatus ?? existing?.status,
         });
       });
@@ -1245,40 +1344,61 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       imageId: event.imageId,
       start: event.start.toISOString(),
       end: event.end.toISOString(),
+      organizationId: event.organizationId,
       status: normalizeStatus(registration.status) ?? existing?.status,
     });
   });
 
   signedDocuments.forEach((document) => {
-    const summary = summariesByUserId.get(document.userId);
+    if (document.provenance === 'IMPORTED' && !canViewImportedDocuments) {
+      return;
+    }
+    const subjectUserId = document.userId
+      ?? (document.documentSubjectId
+        ? documentSubjectUserIdById.get(document.documentSubjectId)
+        : undefined);
+    if (!subjectUserId) {
+      return;
+    }
+    const summary = summariesByUserId.get(subjectUserId);
     const template = templateById.get(document.templateId);
-    const type: 'PDF' | 'TEXT' = template?.type === 'TEXT' ? 'TEXT' : 'PDF';
+    const type: 'PDF' | 'TEXT' = document.provenance === 'IMPORTED'
+      ? 'PDF'
+      : template?.type === 'TEXT' ? 'TEXT' : 'PDF';
     const event = document.eventId ? eventsById.get(document.eventId) : undefined;
-    const documentSummary = {
+    const documentSummary: DocumentSummary = {
       signedDocumentRecordId: document.id,
       documentId: document.signedDocumentId,
       templateId: document.templateId,
+      versionSequence: typeof template?.versionSequence === 'number' ? template.versionSequence : undefined,
       eventId: document.eventId ?? undefined,
+      documentRequirementTitle: template?.documentRequirement?.title?.trim() || template?.title?.trim() || 'Signed Document',
       eventName: event?.name,
       teamId: document.teamId ?? undefined,
       title: template?.title?.trim() || document.documentName || 'Signed Document',
       type,
+      provenance: document.provenance ?? undefined,
       status: normalizeStatus(document.status),
-      signedAt: document.signedAt ?? document.createdAt?.toISOString() ?? undefined,
+      signedAt: document.provenance === 'IMPORTED'
+        ? document.historicalSigningDate?.toISOString()
+        : document.signedAt ?? document.createdAt?.toISOString() ?? undefined,
+      historicalSigningDate: document.historicalSigningDate?.toISOString(),
+      scopeType: document.scopeType ?? undefined,
+      scopeId: document.scopeId ?? undefined,
       viewUrl: type === 'PDF' ? `/api/documents/signed/${document.id}/file` : undefined,
       content: type === 'TEXT' ? template?.content ?? undefined : undefined,
     };
-	    if (summary) {
-	      summary.documents.push(documentSummary);
-	    }
-	    const teamId = normalizeId(document.teamId);
-	    const canonicalTeamId = teamId
-	      ? (teamSummariesByCanonicalTeamId.has(teamId) ? teamId : canonicalTeamIdByEventTeamId.get(teamId))
-	      : undefined;
-	    const teamSummary = canonicalTeamId ? teamSummariesByCanonicalTeamId.get(canonicalTeamId) : undefined;
-	    if (teamSummary) {
-	      teamSummary.documents.push(documentSummary);
-	    }
+    if (summary) {
+      summary.documents.push(documentSummary);
+    }
+    const teamId = normalizeId(document.teamId);
+    const canonicalTeamId = teamId
+      ? (teamSummariesByCanonicalTeamId.has(teamId) ? teamId : canonicalTeamIdByEventTeamId.get(teamId))
+      : undefined;
+    const teamSummary = canonicalTeamId ? teamSummariesByCanonicalTeamId.get(canonicalTeamId) : undefined;
+    if (teamSummary) {
+      teamSummary.documents.push(documentSummary);
+    }
   });
 
   const buildPersonFields = (userId: string) => {

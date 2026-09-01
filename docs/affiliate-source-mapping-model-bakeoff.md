@@ -21,9 +21,9 @@ For each candidate:
 1. Complete `OpenWeightModelManifest` with exact repository revision, weight and
    license hashes, notices, commercial/modification/derivative review, runtime
    revision, quantization provenance, and verified offline cold start.
-2. Run `affiliate:mapping:evaluate` with `--worker=llama`. The private suite
-   contains expected drafts, but only each example's context is sent to the
-   model endpoint.
+2. From `apps/site`, run `npx tsx scripts/evaluate-affiliate-mapping-agent.ts`
+   with `--worker=llama`. The private suite contains expected drafts, but only
+   each example's context is sent to the model endpoint.
 3. Record the exact OVH order/region/image/price, CPU flags, RAM/disk, pinned
    runtime image, cold-start time, peak resident memory, peak swap, minimum
    available memory, representative job wall time, and llama.cpp throughput in

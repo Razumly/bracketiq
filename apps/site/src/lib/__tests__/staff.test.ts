@@ -2,7 +2,9 @@ import {
   deriveOrganizationRoleIds,
   deriveStaffInviteTypes,
   getBlockingStaffInvite,
+  getTeamInviteRole,
   normalizeStaffMemberTypes,
+  normalizeTeamInviteRole,
 } from '@/lib/staff';
 
 describe('staff helpers', () => {
@@ -30,5 +32,12 @@ describe('staff helpers', () => {
   it('falls back to legacy single-type invites when staffTypes are absent', () => {
     expect(deriveStaffInviteTypes({ staffTypes: [] }, 'host')).toEqual(['HOST']);
     expect(deriveStaffInviteTypes({ staffTypes: ['staff', 'official'] }, 'host')).toEqual(['STAFF', 'OFFICIAL']);
+  });
+
+  it('prefers explicit team invite roles and falls back to legacy invite types', () => {
+    expect(normalizeTeamInviteRole('team_assistant_coach')).toBe('team_assistant_coach');
+    expect(getTeamInviteRole('player', 'TEAM_MANAGER')).toBe('player');
+    expect(getTeamInviteRole(null, 'TEAM_MANAGER')).toBe('team_manager');
+    expect(getTeamInviteRole(null, 'TEAM')).toBeNull();
   });
 });

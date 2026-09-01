@@ -9,6 +9,7 @@ export const NOTIFICATION_TYPES = [
   'chatMessages',
   'newEventsFromConnections',
   'hostActionRequired',
+  'documents',
 ] as const;
 
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
@@ -66,6 +67,12 @@ export const NOTIFICATION_SETTING_ROWS: NotificationSettingRow[] = [
     description: 'Operational event alerts that need host review.',
     channels: { email: true, push: true },
   },
+  {
+    id: 'documents',
+    label: 'Document evidence',
+    description: 'Imported and voided document evidence updates.',
+    channels: { email: true, push: true },
+  },
 ];
 
 const rowsById = new Map(NOTIFICATION_SETTING_ROWS.map((row) => [row.id, row]));
@@ -109,6 +116,32 @@ export const normalizeNotificationSettings = (
     }, {} as Record<NotificationChannel, boolean>);
     return settings;
   }, {} as NormalizedNotificationSettings);
+};
+export const mergeNotificationSettings = (
+  currentValue: unknown,
+  patchValue: unknown,
+): Record<string, unknown> => {
+  const current = isRecord(currentValue) ? currentValue : {};
+  const patch = isRecord(patchValue) ? patchValue : {};
+  const merged: Record<string, unknown> = { ...current, ...patch };
+
+  for (const type of NOTIFICATION_TYPES) {
+    const currentType = isRecord(current[type]) ? current[type] : {};
+    const patchType = isRecord(patch[type]) ? patch[type] : {};
+    const channels: Record<string, unknown> = { ...currentType, ...patchType };
+    for (const channel of NOTIFICATION_CHANNELS) {
+      const patchChannel = patchType[channel];
+      const currentChannel = currentType[channel];
+      channels[channel] = typeof patchChannel === 'boolean'
+        ? patchChannel
+        : typeof currentChannel === 'boolean'
+          ? currentChannel
+          : DEFAULT_NOTIFICATION_SETTINGS[type][channel];
+    }
+    merged[type] = channels;
+  }
+
+  return merged;
 };
 
 export const isNotificationChannelEnabled = (

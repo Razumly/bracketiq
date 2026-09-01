@@ -11,6 +11,29 @@ const prismaMock = {
   },
   templateDocuments: {
     findFirst: jest.fn(),
+    findUnique: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+    updateMany: jest.fn(),
+  },
+  templateProviderQuarantines: {
+    findUnique: jest.fn(),
+    upsert: jest.fn(),
+  },
+  documentRequirements: {
+    upsert: jest.fn(),
+    findUnique: jest.fn(),
+    update: jest.fn(),
+  },
+  documentSubjects: {
+    upsert: jest.fn(),
+  },
+  documentRequirementSatisfactions: {
+    findFirst: jest.fn(),
+    upsert: jest.fn(),
+  },
+  documentEvidenceAuditEvents: {
+    create: jest.fn(),
   },
   eventRegistrations: {
     findFirst: jest.fn(),
@@ -30,6 +53,7 @@ const prismaMock = {
     findUnique: jest.fn(),
   },
   $transaction: jest.fn(),
+  $queryRaw: jest.fn(),
 };
 
 const findLatestBoldSignOperationMock = jest.fn();
@@ -77,6 +101,7 @@ jest.mock('@/lib/boldsignSyncOperations', () => ({
 import {
   parseBoldSignWebhookEvent,
   processBoldSignWebhookEvent,
+  projectTemplateProjectionFromOperation,
 } from '@/lib/boldsignWebhookSync';
 
 describe('boldsignWebhookSync operation status projection', () => {
@@ -87,7 +112,9 @@ describe('boldsignWebhookSync operation status projection', () => {
       operationType: 'DOCUMENT_SEND',
       status: 'PENDING_WEBHOOK',
       documentId: 'doc_1',
+      templateId: 'bold_template_1',
       templateDocumentId: 'template_1',
+      organizationId: 'org_1',
       userId: 'parent_1',
       childUserId: 'child_1',
       signerRole: 'parent_guardian',
@@ -98,6 +125,18 @@ describe('boldsignWebhookSync operation status projection', () => {
     prismaMock.signedDocuments.findFirst.mockResolvedValue(null);
     prismaMock.signedDocuments.findMany.mockResolvedValue([]);
     prismaMock.signedDocuments.create.mockResolvedValue({ id: 'signed_row_1' });
+    prismaMock.documentSubjects.upsert.mockResolvedValue({ id: 'subject_1' });
+    prismaMock.documentRequirementSatisfactions.findFirst.mockResolvedValue(null);
+    prismaMock.documentRequirementSatisfactions.upsert.mockResolvedValue({ id: 'satisfaction_1' });
+    prismaMock.documentEvidenceAuditEvents.create.mockResolvedValue({ id: 'audit_1' });
+    prismaMock.templateDocuments.findFirst.mockResolvedValue({
+      id: 'template_1',
+      organizationId: 'org_1',
+      title: 'Child Consent',
+      type: 'TEXT',
+      documentRequirementId: 'requirement_1',
+      signerRoles: ['parent_guardian'],
+    });
     prismaMock.events.findMany.mockResolvedValue([]);
     prismaMock.eventRegistrations.findFirst.mockResolvedValue(null);
     prismaMock.eventRegistrations.findMany.mockResolvedValue([]);
@@ -182,7 +221,9 @@ describe('boldsignWebhookSync operation status projection', () => {
       operationType: 'DOCUMENT_SEND',
       status: 'CONFIRMED',
       documentId: 'doc_1',
+      templateId: 'bold_template_1',
       templateDocumentId: 'template_1',
+      organizationId: 'org_1',
       userId: 'parent_1',
       childUserId: 'child_1',
       signerRole: 'parent_guardian',
@@ -190,7 +231,6 @@ describe('boldsignWebhookSync operation status projection', () => {
       payload: {},
       signedDocumentRecordId: 'signed_row_1',
     });
-
     const event = parseBoldSignWebhookEvent({
       payload: {
         eventType: 'Sent',
@@ -202,6 +242,7 @@ describe('boldsignWebhookSync operation status projection', () => {
     });
 
     await processBoldSignWebhookEvent(event);
+
 
     expect(updateBoldSignOperationByIdMock).toHaveBeenCalledWith(
       'op_1',
@@ -316,8 +357,8 @@ describe('boldsignWebhookSync operation status projection', () => {
 
   it('locks each event before applying signature-driven registration activation', async () => {
     prismaMock.eventRegistrations.findMany.mockResolvedValue([
-      { id: 'registration_2', eventId: 'event_2' },
       { id: 'registration_1', eventId: 'event_1' },
+      { id: 'registration_2', eventId: 'event_2' },
       { id: 'registration_3', eventId: 'event_2' },
     ]);
 
@@ -333,7 +374,7 @@ describe('boldsignWebhookSync operation status projection', () => {
 
     await processBoldSignWebhookEvent(event);
 
-    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(2);
     expect(acquireEventLockAndLoadStructureMock).toHaveBeenNthCalledWith(1, prismaMock, 'event_1');
     expect(acquireEventLockAndLoadStructureMock).toHaveBeenNthCalledWith(2, prismaMock, 'event_2');
     expect(prismaMock.eventRegistrations.updateMany).toHaveBeenNthCalledWith(
@@ -356,5 +397,116 @@ describe('boldsignWebhookSync operation status projection', () => {
         data: expect.objectContaining({ status: 'ACTIVE' }),
       }),
     );
+  });
+
+  it('projects the operation Requirement ID through the normalized template projection seam', async () => {
+    const operation = {
+      id: 'op_template_1',
+      operationType: 'TEMPLATE_CREATE',
+      status: 'PENDING_WEBHOOK',
+      organizationId: 'org_1',
+      templateDocumentId: 'version_1',
+      templateId: 'bold_template_1',
+      userId: 'staff_1',
+      payload: {
+        documentRequirementId: 'requirement_1',
+        organizationId: 'org_1',
+        title: 'Photo waiver',
+        description: 'Event photography consent',
+        type: 'PDF',
+        roles: [{ roleIndex: 1, signerRole: 'participant' }],
+      },
+    };
+    prismaMock.documentRequirements.upsert.mockResolvedValue({
+      id: 'requirement_1',
+      organizationId: 'org_1',
+    });
+    prismaMock.$queryRaw.mockResolvedValue([{ id: 'requirement_1' }]);
+    prismaMock.templateDocuments.findFirst.mockResolvedValue(null);
+    prismaMock.templateDocuments.create.mockResolvedValue({ id: 'version_1' });
+
+    const projectedTemplate = await projectTemplateProjectionFromOperation({
+      templateId: 'bold_template_1',
+      operation,
+      status: 'ACTIVE',
+    });
+
+    expect(projectedTemplate).toEqual({ id: 'version_1' });
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(prismaMock.documentRequirements.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'requirement_1' },
+        create: expect.objectContaining({
+          id: 'requirement_1',
+          organizationId: 'org_1',
+          title: 'Photo waiver',
+        }),
+      }),
+    );
+    expect(prismaMock.templateDocuments.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          id: 'version_1',
+          documentRequirementId: 'requirement_1',
+          organizationId: 'org_1',
+          versionSequence: 1,
+        }),
+      }),
+    );
+  });
+  it('rejects a provider edit that reuses a referenced Version provider id', async () => {
+    const current = {
+      id: 'version_1',
+      documentRequirementId: 'requirement_1',
+      versionSequence: 1,
+      frozenAt: null,
+      organizationId: 'org_1',
+      templateId: 'bold_template_1',
+      type: 'PDF',
+      title: 'Photo waiver',
+      description: 'Event photography consent',
+      signOnce: false,
+      requiredSignerType: 'PARTICIPANT',
+      status: 'ACTIVE',
+      createdBy: 'staff_1',
+      roleIndex: 1,
+      roleIndexes: [1],
+      signerRoles: ['participant'],
+      content: null,
+    };
+    const operation = {
+      id: 'op_template_edit',
+      operationType: 'TEMPLATE_CREATE',
+      status: 'PENDING_WEBHOOK',
+      organizationId: 'org_1',
+      templateDocumentId: 'version_2',
+      templateId: 'bold_template_1',
+      userId: 'staff_1',
+      payload: {
+        documentRequirementId: 'requirement_1',
+        organizationId: 'org_1',
+        title: 'Updated consent',
+        type: 'PDF',
+        roles: [{ roleIndex: 2, signerRole: 'guardian' }],
+      },
+    };
+    prismaMock.documentRequirements.upsert.mockResolvedValue({
+      id: 'requirement_1',
+      organizationId: 'org_1',
+    });
+    prismaMock.templateDocuments.findFirst.mockResolvedValue(current);
+    prismaMock.$queryRaw
+      .mockResolvedValueOnce([current])
+      .mockResolvedValueOnce([{ id: 'event_1' }]);
+
+    await expect(projectTemplateProjectionFromOperation({
+      templateId: 'bold_template_1',
+      operation,
+      status: 'ACTIVE',
+      eventToken: 'templateedited',
+    })).rejects.toThrow(/frozen/i);
+
+    expect(prismaMock.templateDocuments.create).not.toHaveBeenCalled();
+    expect(prismaMock.templateDocuments.update).not.toHaveBeenCalled();
   });
 });

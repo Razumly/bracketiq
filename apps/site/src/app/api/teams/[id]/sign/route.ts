@@ -18,6 +18,20 @@ import {
   templateMatchesSignerContext,
   type SignerContext,
 } from '@/lib/templateSignerTypes';
+import {
+  ensureDocumentSubject,
+  documentSubjectIdFor,
+  documentSatisfactionScopeFor,
+  findDocumentSatisfactionSignerStates,
+  findSatisfiedDocumentTemplateIds,
+  hasCompletedDocumentSignerRole,
+  signedDocumentEvidenceFields,
+  DOCUMENT_EVIDENCE_PROVENANCE,
+} from '@/server/documentEvidence';
+import {
+  DocumentTemplateVersionProviderQuarantinedError,
+  findQuarantinedDocumentTemplateVersionIds,
+} from '@/server/documents/documentTemplateVersions';
 import { dispatchRequiredTeamDocuments } from '@/server/teams/teamRegistrationDocuments';
 
 export const dynamic = 'force-dynamic';
@@ -36,10 +50,6 @@ const normalizeEmail = (value: unknown): string | undefined => {
   return normalized;
 };
 
-const isSignedStatus = (value: unknown): boolean => {
-  const normalized = normalizeText(value)?.toLowerCase();
-  return normalized === 'signed' || normalized === 'completed';
-};
 
 const resolveSignerContext = (raw: unknown): SignerContext => normalizeSignerContext(raw, 'participant');
 
@@ -273,7 +283,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       where: { id: { in: requiredTemplateIds } },
       select: {
         id: true,
+        templateId: true,
         title: true,
+        documentRequirement: {
+          select: { title: true, description: true },
+        },
+        providerQuarantinedAt: true,
         description: true,
         type: true,
         signOnce: true,
@@ -282,6 +297,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       },
     });
     const templateById = new Map(templates.map((template) => [template.id, template]));
+    const templateDisplayTitle = (template: {
+      title?: string | null;
+      documentRequirement?: { title?: string | null } | null;
+    }): string => normalizeText(template.documentRequirement?.title)
+      ?? normalizeText(template.title)
+      ?? 'Required Document';
     const eligibleTemplateIds = requiredTemplateIds.filter((templateId) => {
       const template = templateById.get(templateId);
       if (!template) {
@@ -301,6 +322,56 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const templateIdsToSign = requestedTemplateId
       ? eligibleTemplateIds.filter((templateId) => templateId === requestedTemplateId)
       : eligibleTemplateIds;
+    const documentSubjectId = documentSubjectIdFor(
+      team.organizationId,
+      isChildRegistration ? childUserId : signerUserId,
+    );
+    const satisfactionScopes = templateIdsToSign.flatMap((templateId) => {
+      const template = templateById.get(templateId);
+      const scope = template
+        ? documentSatisfactionScopeFor({
+          templateDocumentId: template.id,
+          organizationId: team.organizationId,
+          documentSubjectUserId: isChildRegistration ? childUserId : signerUserId,
+          eventId: null,
+          teamId,
+          signOnce: template.signOnce,
+        })
+        : null;
+      return scope ? [scope] : [];
+    });
+    const satisfiedTemplateIds = await findSatisfiedDocumentTemplateIds({
+      documentSubjectId,
+      scopes: satisfactionScopes,
+    });
+    const satisfactionStates = await findDocumentSatisfactionSignerStates({
+      documentSubjectId,
+      scopes: satisfactionScopes,
+    });
+    const currentSignerCompletedTemplateIds = new Set(
+      satisfactionStates
+        .filter((state) => hasCompletedDocumentSignerRole(state.completedSignerRoles, signerContext))
+        .map((state) => state.templateDocumentId),
+    );
+    const quarantinedTemplateIds = await findQuarantinedDocumentTemplateVersionIds(
+      prisma,
+      templateIdsToSign.map((templateId) => templateById.get(templateId))
+        .filter((template): template is NonNullable<typeof template> => Boolean(template)),
+    );
+    const quarantinedTemplate = templateIdsToSign
+      .map((templateId) => templateById.get(templateId))
+      .find((template) => (
+        template
+        && !satisfiedTemplateIds.has(template.id)
+        && !currentSignerCompletedTemplateIds.has(template.id)
+        && quarantinedTemplateIds.has(template.id)
+      ));
+    if (quarantinedTemplate) {
+      return NextResponse.json(
+        { error: new DocumentTemplateVersionProviderQuarantinedError(quarantinedTemplate.id).message },
+        { status: 409 },
+      );
+    }
     if (requestedTemplateId && !templateIdsToSign.length) {
       return NextResponse.json({ error: 'Template is not available for this signer context.' }, { status: 400 });
     }
@@ -349,6 +420,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       if (!template) {
         continue;
       }
+      if (
+        satisfiedTemplateIds.has(templateId)
+        || currentSignerCompletedTemplateIds.has(templateId)
+      ) {
+        continue;
+      }
 
       const requiredSignerType = normalizeRequiredSignerType(template.requiredSignerType);
       const requiredSignerLabel = getRequiredSignerTypeLabel(requiredSignerType);
@@ -373,67 +450,86 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         },
       });
 
-      const signedRow = existingSignerRows.find((row) => isSignedStatus(row.status));
-      if (signedRow) {
-        continue;
-      }
+      const existingPendingRow = existingSignerRows.find((row) => (
+        normalizeText(row.status)?.toLowerCase() === 'unsigned'
+      ));
 
       if ((template.type ?? 'PDF').toUpperCase() === 'TEXT') {
-        const documentId = normalizeText(existingSignerRows[0]?.signedDocumentId) ?? `text-${crypto.randomUUID()}`;
+        const documentId = normalizeText(existingPendingRow?.signedDocumentId) ?? `text-${crypto.randomUUID()}`;
         const signerEmail = await resolveUserEmail(
           signerUserId,
           signerContext === 'child'
             ? normalizeText(payload.childEmail) ?? normalizeText(payload.userEmail)
             : normalizeText(payload.userEmail),
         );
-        const existingRow = existingSignerRows[0];
-        if (existingRow) {
-          await prisma.signedDocuments.update({
-            where: { id: existingRow.id },
-            data: {
-              updatedAt: new Date(),
-              signedDocumentId: documentId,
-              status: 'UNSIGNED',
-              userId: signerUserId,
-              hostId: scopedChildUserId,
-              organizationId: team.organizationId ?? null,
-              teamId,
-              signerEmail: signerEmail ?? null,
-              signerRole: signerContext,
-            },
-          });
-        } else {
-          await prisma.signedDocuments.create({
-            data: {
-              id: crypto.randomUUID(),
-              createdAt: new Date(),
-              updatedAt: new Date(),
-              signedDocumentId: documentId,
-              templateId: template.id,
-              userId: signerUserId,
-              documentName: template.title ?? 'Text Waiver',
-              hostId: scopedChildUserId,
-              organizationId: team.organizationId ?? null,
-              eventId: null,
-              teamId,
-              status: 'UNSIGNED',
-              signedAt: null,
-              signerEmail: signerEmail ?? null,
-              roleIndex: null,
-              signerRole: signerContext,
-              ipAddress: null,
-              requestId: null,
-            },
-          });
-        }
+        const existingRow = existingPendingRow;
+        const now = new Date();
+        const evidenceContext = {
+          organizationId: team.organizationId ?? null,
+          userId: signerUserId,
+          hostId: scopedChildUserId,
+          eventId: null,
+          teamId,
+          signOnce: template.signOnce,
+          provenance: DOCUMENT_EVIDENCE_PROVENANCE.BRACKETIQ,
+        } as const;
+        await prisma.$transaction(async (tx) => {
+          await ensureDocumentSubject({
+            organizationId: evidenceContext.organizationId,
+            userId: evidenceContext.userId,
+            hostId: evidenceContext.hostId,
+          }, tx);
+          if (existingRow) {
+            await tx.signedDocuments.update({
+              where: { id: existingRow.id },
+              data: {
+                updatedAt: now,
+                signedDocumentId: documentId,
+                status: 'UNSIGNED',
+                userId: signerUserId,
+                hostId: scopedChildUserId,
+                organizationId: team.organizationId ?? null,
+                eventId: null,
+                teamId,
+                ...signedDocumentEvidenceFields(evidenceContext),
+                signerEmail: signerEmail ?? null,
+                signerRole: signerContext,
+              },
+            });
+          } else {
+            await tx.signedDocuments.create({
+              data: {
+                id: crypto.randomUUID(),
+                createdAt: now,
+                updatedAt: now,
+                signedDocumentId: documentId,
+                templateId: template.id,
+                userId: signerUserId,
+                documentName: templateDisplayTitle(template),
+                hostId: scopedChildUserId,
+                organizationId: team.organizationId ?? null,
+                eventId: null,
+                teamId,
+                ...signedDocumentEvidenceFields(evidenceContext),
+                status: 'UNSIGNED',
+                signedAt: null,
+                signerEmail: signerEmail ?? null,
+                roleIndex: null,
+                signerRole: signerContext,
+                ipAddress: null,
+                requestId: null,
+              },
+            });
+          }
+        });
 
         signLinks.push({
           templateId: template.id,
           type: 'TEXT',
-          title: template.title ?? 'Required Document',
+          title: templateDisplayTitle(template),
           signOnce: template.signOnce ?? false,
           documentId,
-          content: template.content ?? `Please acknowledge ${template.title ?? 'this document'}.`,
+          content: template.content ?? `Please acknowledge ${templateDisplayTitle(template)}.`,
           requiredSignerType,
           requiredSignerLabel,
           signerContext,
@@ -491,7 +587,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       const documentId = normalizeText(operation?.documentId);
       if (!documentId) {
         return NextResponse.json(
-          { error: `Failed to create signing request for "${template.title ?? template.id}".` },
+          { error: `Failed to create signing request for "${templateDisplayTitle(template)}".` },
           { status: 400 },
         );
       }
@@ -519,7 +615,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       signLinks.push({
         templateId: template.id,
         type: 'PDF',
-        title: template.title ?? 'Required Document',
+        title: templateDisplayTitle(template),
         signOnce: template.signOnce ?? false,
         documentId,
         url: embedded.signLink,
