@@ -24,6 +24,7 @@ The visible proof is a real browser walkthrough at `/admin?tab=affiliateOperatio
 - [x] (2026-08-24) Resolve review repairs for bounded history truncation, polling overlap, projection cache size, invalid contract data, review execution history, and legacy Admin API compatibility. The control-room test passed with 14 tests.
 - [ ] (2026-08-24) Complete the real-browser walkthrough. The available local runtime redirects to login, and no test administrator credentials are authorized for this session.
 - [x] (2026-08-24) Complete the final two-axis review and commit the final changes. Standards review and Spec review returned no remaining findings. Commit `0519a4264` contains the implementation.
+- [x] (2026-08-25) Reconcile the control-room plan with the cutover branch. The old mutation panel file is deleted, the Admin shell uses `affiliateOperations`, and the current full site run has one unrelated `ScheduleCalendarPanel` failure; the control-room focused tests and TypeScript check remain passing.
 
 ## Surprises & Discoveries
 
@@ -40,10 +41,9 @@ The visible proof is a real browser walkthrough at `/admin?tab=affiliateOperatio
 
 ## Decision Log
 
-- Decision: Replace the mounted affiliate imports tab with a new `affiliateOperations` tab, while leaving the old panel files unmounted.
-  Rationale: The existing files are covered by focused tests and may be used as historical implementation references. Unmounting them removes mutation controls from the Admin surface without deleting user-owned code.
+- Decision: Replace the mounted affiliate imports tab with a new `affiliateOperations` tab and delete the old mutation panel file.
+  Rationale: The old panel exposed mutation controls. Deleting it removes the obsolete Admin surface after the read-only control room is wired. The new tab keeps the Admin shell read-only.
   Date/Author: 2026-08-24 / Codex.
-
 - Decision: Use one GET route, `/api/admin/affiliate-operations`, for all seven views and detail data.
   Rationale: The issue requires one server-side projection and no browser-side joins. A single route gives one authorization boundary and one response snapshot. The `view`, filter, page, and selected-record query parameters choose the bounded part of the projection.
   Date/Author: 2026-08-24 / Codex.
@@ -65,7 +65,9 @@ The visible proof is a real browser walkthrough at `/admin?tab=affiliateOperatio
 
 ## Outcomes & Retrospective
 
-_To be completed after focused verification, browser walkthrough, final review, and commit._
+The control-room implementation is complete. The projection, GET-only route, Admin shell wiring, seven views, bounded lists, URL state, stale handling, polling rules, and focused regression tests are in place. The old mutation panel file is deleted, so the Admin shell has one read-only affiliate control plane.
+
+Focused route, control-room, operational-alert, source-discovery, TypeScript, and prior full-suite checks passed at the control-room commit `0519a4264`. The current Issue #70 branch also passes the affiliate control-room focused tests and TypeScript. Its full site run reports 865 suites passed, one unrelated `ScheduleCalendarPanel` suite failed, four suites skipped, 5,273 tests passed, one test failed, and 28 tests skipped. The real-browser walkthrough remains pending because the local runtime redirects to `/login` and no authorized test administrator credentials are available.
 
 ## Context and Orientation
 
@@ -93,15 +95,23 @@ Add focused tests under `apps/site/src/app/api/admin/affiliate-operations/__test
 
 Run commands from `/Users/elesesy/StudioProjects/bracketiq-affiliate-collection/apps/site`.
 
-1. Add the projection module and focused route test. Run `npx jest src/app/api/admin/affiliate-operations/__tests__/route.test.ts --runInBand`.
-2. Add the control-room component and focused component test. Run `npx jest src/app/admin/__tests__/AdminAffiliateOperationsControlRoom.test.tsx --runInBand`.
-3. Update the Admin shell. Run `npx tsc --noEmit`.
-4. Run changed affiliate and Admin tests in one serial command. Run `npx jest src/app/api/admin/affiliate-operations/__tests__/route.test.ts src/app/admin/__tests__/AdminAffiliateOperationsControlRoom.test.tsx --runInBand`.
-5. Start the existing site development server only if needed for the browser walkthrough. Starting a server is an explicit verification action, not a production state change. Use the repository's documented `npm run dev:plain` command and stop it after the walkthrough.
-6. Walk through `/admin?tab=affiliateOperations&view=overview`, each other view, a source or job detail, Back/Forward state restoration, keyboard focus, desktop/tablet/mobile widths, hidden-tab polling, and a failed-refresh fixture.
-7. Run `npx tsc --noEmit`, `npm run prisma:check`, and the focused tests again after review repairs.
-8. Run `npm run test:ci` once from `apps/site`.
-9. Run the two-axis code review against the branch base and issue #69. Resolve every finding. Commit the final changes on the current branch.
+1. Add the projection module and focused route test.
+2. Run `npx jest src/app/api/admin/affiliate-operations/__tests__/route.test.ts --runInBand`.
+3. Add the control-room component and focused component test.
+4. Run `npx jest src/app/admin/__tests__/AdminAffiliateOperationsControlRoom.test.tsx --runInBand`.
+5. Update the Admin shell.
+6. Run `npx tsc --noEmit`.
+7. Run the changed affiliate and Admin tests in one serial command.
+8. Run `npx jest src/app/api/admin/affiliate-operations/__tests__/route.test.ts src/app/admin/__tests__/AdminAffiliateOperationsControlRoom.test.tsx --runInBand`.
+9. Run the browser walkthrough against an already running site runtime.
+10. Walk through the control-room views and detail states.
+11. Run `npx tsc --noEmit`.
+12. Run `npm run prisma:check`.
+13. Run the focused tests again after review repairs.
+14. Run `npm run test:ci` once from `apps/site`.
+15. Run the two-axis code review against the branch base and issue #69.
+16. Resolve every review finding.
+17. Commit the final changes on the current branch.
 
 ## Validation and Acceptance
 
@@ -113,7 +123,7 @@ A failed GET leaves the last successful response visible, displays `Stale`, and 
 
 ## Idempotence and Recovery
 
-The projection is read-only and safe to refresh repeatedly. It does not write Prisma records. If one batch query fails, the route returns an error and the client retains its last-good response. A later manual Refresh or visibility change retries the same GET. The old affiliate panel files remain available for their existing tests but are not reachable from the Admin shell.
+The projection is read-only and safe to refresh repeatedly. It does not write Prisma records. If one batch query fails, the route returns an error and the client retains its last-good response. A later manual Refresh or visibility change retries the same GET. Hidden tabs do not issue polling requests. The old mutation panel is deleted and is no longer reachable from the Admin shell.
 
 ## Artifacts and Notes
 
@@ -145,3 +155,4 @@ The client control room receives `active` and `refreshKey` props from the Admin 
 ## Revision Notes
 
 - 2026-08-24: Created the issue #69 plan after reading the issue, completed prerequisite work, current Admin shell, affiliate schema, and repository rules. Chose one transactional GET projection and query-addressable read-only views.
+- 2026-08-25: Split implementation, validation, browser, review, and commit actions into separate steps. Keep runtime start and stop outside the plan because those operations require explicit authorization.

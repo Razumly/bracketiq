@@ -40,7 +40,7 @@ const querySchema = z.object({
 
 export async function GET(req: NextRequest) {
   try {
-    await requireRazumlyAdmin(req);
+    const session = await requireRazumlyAdmin(req);
     const parsed = querySchema.safeParse(Object.fromEntries(req.nextUrl.searchParams.entries()));
     if (!parsed.success) {
       return NextResponse.json({ error: 'Invalid affiliate operations query.', details: parsed.error.flatten() }, { status: 400 });

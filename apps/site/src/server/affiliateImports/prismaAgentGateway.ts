@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { createId } from "@/lib/id";
 import { z } from "zod";
 import type {
   AffiliateAgentGatewayClaims,
@@ -12,6 +13,7 @@ import {
   AFFILIATE_AGENT_HEARTBEAT_INTERVAL_SECONDS,
   AFFILIATE_AGENT_LEASE_SECONDS,
   AFFILIATE_AGENT_MAX_SCHEMA_CORRECTIONS,
+  AFFILIATE_AGENT_WORKSPACE_ATTESTATION_ADMISSION_MARGIN_SECONDS,
   AffiliateAgentGatewayError,
   type AffiliateAgentClaimGrant,
   type AffiliateAgentArtifactReadResult,
@@ -31,14 +33,20 @@ import {
   type AffiliateAgentTerminalAcceptedResult,
 } from "./agentGateway";
 import type {
+  AffiliateAgentClaimAdmission,
+  AffiliateAgentClaimAdmissionContext,
+  AffiliateAgentBoundedAdmissionLease,
+  AffiliateAgentBoundedAdmissionLeaseRequest,
   AffiliateAgentClaimTokenScope,
   AffiliateAgentGatewayDependencies,
   AffiliateAgentInvocationReconciler,
   AffiliateAgentInvocationReconciliationRequest,
   AffiliateAgentInvocationReconciliationResult,
   AffiliateAgentReviewerTerminalResult,
+  AffiliateAgentReviewerTerminalDisposition,
   AffiliateAgentTerminalEffectAdapter,
   AffiliateAgentTerminalEffectAdapterInput,
+  AffiliateAgentTerminalEffectHandler,
 } from "./agentGatewayAdapters";
 import {
   AFFILIATE_AGENT_PROMPT_TEMPLATES,
@@ -53,7 +61,9 @@ import {
   affiliateAgentSubjectSchema,
   affiliateAgentTerminalResultEnvelopeSchema,
   canonicalizeAffiliateAgentValue,
+  parseAffiliateAgentCaptureMetadata,
   hashAffiliateAgentValue,
+  type AffiliateAgentCaptureMetadata,
   renderAffiliateAgentPrompt,
   type AffiliateAgentClaimEnvelope,
   type AffiliateAgentCommand,
@@ -64,13 +74,178 @@ import {
   type AffiliateAgentTerminalResultEnvelope,
 } from "./agentGatewayContracts";
 
+import type {
+  AffiliateOperationalAlertInput,
+  AffiliateOperationalAlertWriter,
+} from "./affiliateOperationalAlerts";
+
 import { reconcileExpiredClaims } from "./prismaAgentGatewayExpiry";
+import {
+  affiliateSupplyDatabase,
+  emitAffiliateSupplyLifecycleTransitionAlerts,
+  materializeAffiliateCoverageDiscoveryResult,
+} from "./affiliateSupplyPersistence";
 import {
   AffiliateAgentClaimRaceError,
   recordInvocationFailureTransition,
 } from "./prismaAgentGatewayFailureTransitions";
-import { affiliateSupplyDatabase } from "./affiliateSupplyPersistence";
 const SERIALIZABLE_TRANSACTION_ATTEMPTS = 3;
+export type AffiliateAgentClaimAdmissionController =
+  AffiliateAgentClaimAdmission & Readonly<{
+    open(): Promise<void>;
+    close(): Promise<void>;
+    openBoundedLease(
+      request: AffiliateAgentBoundedAdmissionLeaseRequest,
+    ): Promise<AffiliateAgentBoundedAdmissionLease>;
+  }>;
+
+type ActiveBoundedAdmissionLease = Readonly<{
+  role: AffiliateAgentBoundedAdmissionLeaseRequest["role"];
+  workerId: string;
+  expiresAt: Date;
+  remainingClaims: number;
+}>;
+
+const isClaimedAdmissionResult = (value: unknown): boolean => (
+  value !== null
+  && typeof value === "object"
+  && !Array.isArray(value)
+  && "kind" in value
+  && value.kind === "CLAIMED"
+);
+
+const normalizedBoundedAdmissionWorkerId = (
+  request: AffiliateAgentBoundedAdmissionLeaseRequest,
+): string => {
+  const workerId = request.workerId.trim();
+  if (
+    !workerId
+    || !Number.isSafeInteger(request.leaseSeconds)
+    || request.leaseSeconds < 1
+    || request.leaseSeconds > 1_200
+  ) {
+    throw new Error("The bounded admission lease is invalid.");
+  }
+  return workerId;
+};
+
+const activeBoundedAdmissionLeaseResult = (
+  lease: ActiveBoundedAdmissionLease,
+  request: AffiliateAgentBoundedAdmissionLeaseRequest,
+  workerId: string,
+): AffiliateAgentBoundedAdmissionLease => {
+  if (lease.role === request.role && lease.workerId === workerId) {
+    return {
+      ...lease,
+      expiresAt: lease.expiresAt.toISOString(),
+    };
+  }
+  throw new Error("A bounded admission lease is already active.");
+};
+
+export const createAffiliateAgentClaimAdmission = (
+  initiallyOpen = false,
+): AffiliateAgentClaimAdmissionController => {
+  let open = initiallyOpen;
+  let boundedAdmissionLease: ActiveBoundedAdmissionLease | null = null;
+  let queue: Promise<void> = Promise.resolve();
+  const expireBoundedAdmissionLease = (): void => {
+    if (
+      boundedAdmissionLease !== null
+      && boundedAdmissionLease.expiresAt.getTime() <= Date.now()
+    ) {
+      open = false;
+      boundedAdmissionLease = null;
+    }
+  };
+  const isAdmissionOpen = (): boolean => {
+    expireBoundedAdmissionLease();
+    return open && (
+      boundedAdmissionLease === null
+      || boundedAdmissionLease.remainingClaims > 0
+    );
+  };
+  const isAdmissionOpenFor = (
+    context: AffiliateAgentClaimAdmissionContext,
+  ): boolean => {
+    if (!isAdmissionOpen()) return false;
+    if (boundedAdmissionLease === null) return true;
+    return (
+      context.role === boundedAdmissionLease.role
+      && context.workerId === boundedAdmissionLease.workerId
+    );
+  };
+  const enqueue = <T>(operation: () => Promise<T>): Promise<T> => {
+    const result = queue.then(operation, operation);
+    queue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  };
+  return {
+    isOpen: isAdmissionOpen,
+    isOpenFor: isAdmissionOpenFor,
+    withClaim: (operation, context) => enqueue(async () => {
+      const result = await operation();
+      if (
+        boundedAdmissionLease !== null
+        && context?.role === boundedAdmissionLease.role
+        && context.workerId === boundedAdmissionLease.workerId
+        && isClaimedAdmissionResult(result)
+      ) {
+        boundedAdmissionLease = {
+          ...boundedAdmissionLease,
+          remainingClaims: 0,
+        };
+        open = false;
+      }
+      return result;
+    }),
+    open: () =>
+      enqueue(async () => {
+        boundedAdmissionLease = null;
+        open = true;
+      }),
+    openBoundedLease: (request) =>
+      enqueue(async () => {
+        const workerId = normalizedBoundedAdmissionWorkerId(request);
+        expireBoundedAdmissionLease();
+        if (
+          boundedAdmissionLease !== null
+          && boundedAdmissionLease.remainingClaims > 0
+        ) {
+          return activeBoundedAdmissionLeaseResult(
+            boundedAdmissionLease,
+            request,
+            workerId,
+          );
+        }
+        if (open && boundedAdmissionLease === null) {
+          throw new Error("The global admission must be closed before a bounded lease opens.");
+        }
+        const expiresAt = new Date(Date.now() + request.leaseSeconds * 1_000);
+        boundedAdmissionLease = {
+          role: request.role,
+          workerId,
+          expiresAt,
+          remainingClaims: 1,
+        };
+        open = true;
+        return {
+          role: request.role,
+          workerId,
+          expiresAt: expiresAt.toISOString(),
+          remainingClaims: 1,
+        };
+      }),
+    close: () =>
+      enqueue(async () => {
+        boundedAdmissionLease = null;
+        open = false;
+      }),
+  };
+};
 
 const gatewayError = (
   code: ConstructorParameters<typeof AffiliateAgentGatewayError>[0]["code"],
@@ -84,6 +259,257 @@ const gatewayError = (
     isRetryable,
     receiptId,
   });
+const assertReplayClaimRequestHash = (
+  claim: ReplayableClaim,
+  requestHash: string,
+): void => {
+  if (claim.claimRequestHash !== requestHash) {
+    throw gatewayError(
+      "IDEMPOTENCY_KEY_REUSED",
+      "The claim idempotency key was used for different input.",
+    );
+  }
+};
+
+const assertReplayClaimSupplyContract = (
+  envelope: AffiliateAgentClaimEnvelope,
+  bundle: AffiliateAgentContractBundle,
+): void => {
+  if (
+    envelope.supplyContractVersion !== bundle.supplyContract.version ||
+    envelope.supplyContractHash !== bundle.supplyContract.hash
+  ) {
+    throw gatewayError(
+      "SUPPLY_CONTRACT_STALE",
+      "The active Supply Contract changed after the claim.",
+    );
+  }
+};
+
+const assertReplayClaimDeploymentContract = (
+  envelope: AffiliateAgentClaimEnvelope,
+  bundle: AffiliateAgentContractBundle,
+  roleContract: AffiliateAgentRoleContract,
+): void => {
+  if (
+    envelope.deploymentContractVersion !== bundle.deploymentContract.version ||
+    envelope.deploymentContractHash !== bundle.deploymentContract.hash ||
+    envelope.roleContractVersion !== roleContract.version ||
+    envelope.roleContractHash !== roleContract.hash ||
+    envelope.promptTemplateVersion !== roleContract.promptTemplateVersion ||
+    envelope.promptTemplateHash !== roleContract.promptTemplateHash
+  ) {
+    throw gatewayError(
+      "DEPLOYMENT_CONTRACT_STALE",
+      "The active deployment, role, or prompt contract changed after the claim.",
+    );
+  }
+};
+
+const replayClaimGrant = (
+  dependencies: AffiliateAgentGatewayDependencies,
+  claim: ReplayableClaim,
+  requestHash: string,
+  bundle: AffiliateAgentContractBundle,
+  roleContract: AffiliateAgentRoleContract,
+): AffiliateAgentClaimGrant => {
+  assertReplayClaimRequestHash(claim, requestHash);
+  if (claim.tokenKeyVersion !== dependencies.tokens.keyVersion) {
+    throw gatewayError(
+      "TOKEN_INVALID",
+      "The claim token key version is not available.",
+    );
+  }
+  const envelope = affiliateAgentClaimEnvelopeSchema.parse(
+    claim.claimEnvelopeJson,
+  );
+  assertReplayClaimSupplyContract(envelope, bundle);
+  assertReplayClaimDeploymentContract(envelope, bundle, roleContract);
+  return {
+    envelope,
+    prompt: renderAffiliateAgentPrompt(roleContract, envelope),
+    token: dependencies.tokens.issue(
+      tokenScopeForEnvelope(envelope),
+      claim.tokenNonce,
+    ),
+    heartbeatIntervalSeconds: AFFILIATE_AGENT_HEARTBEAT_INTERVAL_SECONDS,
+    leaseExpiresAt: claim.leaseExpiresAt.toISOString(),
+    hardDeadlineAt: claim.hardDeadlineAt.toISOString(),
+  };
+};
+
+type InvocationFailureAlertContext = Readonly<{
+  jobId: string;
+  claimId: string;
+  invocationId: string;
+  workerId: string;
+  lifecycleGeneration: number | null;
+  claimGeneration: number;
+  queue: string | null;
+}>;
+
+const invocationFailureAlertInput = (
+  context: InvocationFailureAlertContext,
+  result: AffiliateAgentInvocationFailedResult,
+  failureCode: string | null,
+  safeSummary: string | null,
+): AffiliateOperationalAlertInput => ({
+  eventKey: `affiliate-agent-invocation-failed:${result.receiptId}`,
+  category: "AGENT_INVOCATION_FAILURE",
+  severity: result.isPipelineBlocked ? "critical" : "warning",
+  title: result.isPipelineBlocked
+    ? "Affiliate agent pipeline blocked"
+    : "Affiliate agent invocation failed",
+  detail: safeSummary ?? failureCode ?? "No failure summary recorded",
+  subjectType: "AGENT_JOB",
+  subjectId: context.jobId,
+  queue: context.queue,
+  lifecycleGeneration: context.lifecycleGeneration,
+  claimGeneration: context.claimGeneration,
+  workerId: context.workerId,
+  attempt: result.invocationFailureCount,
+  previousState: "CLAIMED",
+  nextState: result.isPipelineBlocked ? "PIPELINE_BLOCKED" : "RETRY_WAIT",
+  reasonCodes: failureCode ? [failureCode] : ["AGENT_INVOCATION_FAILED"],
+  evidenceRefs: [],
+  payload: {
+    claimId: context.claimId,
+    invocationId: context.invocationId,
+    nextAttemptAt: result.nextAttemptAt,
+  },
+});
+
+const normalizeInvocationAlertValue = <T>(
+  value: T | null | undefined,
+): T | null => value ?? null;
+
+const normalizeInvocationAlertList = (
+  values: readonly string[] | undefined,
+): string[] => (values ? [...values] : []);
+
+const normalizeInvocationAlertPayload = (
+  payload: Record<string, unknown> | undefined,
+): Prisma.InputJsonValue => asPrismaJson(payload ?? {});
+
+const invocationFailureAlertCreateData = (
+  input: AffiliateOperationalAlertInput,
+) => ({
+  id: createId(),
+  eventKey: input.eventKey,
+  category: input.category,
+  severity: input.severity,
+  title: input.title,
+  detail: input.detail,
+  subjectType: normalizeInvocationAlertValue(input.subjectType),
+  subjectId: normalizeInvocationAlertValue(input.subjectId),
+  rolloutCohort: normalizeInvocationAlertValue(input.rolloutCohort),
+  contractVersion: normalizeInvocationAlertValue(input.contractVersion),
+  supplySourceId: normalizeInvocationAlertValue(input.supplySourceId),
+  coverageCellId: normalizeInvocationAlertValue(input.coverageCellId),
+  demandId: normalizeInvocationAlertValue(input.demandId),
+  waveId: normalizeInvocationAlertValue(input.waveId),
+  queue: normalizeInvocationAlertValue(input.queue),
+  lifecycleGeneration: normalizeInvocationAlertValue(input.lifecycleGeneration),
+  claimGeneration: normalizeInvocationAlertValue(input.claimGeneration),
+  workerId: normalizeInvocationAlertValue(input.workerId),
+  attempt: normalizeInvocationAlertValue(input.attempt),
+  previousState: normalizeInvocationAlertValue(input.previousState),
+  nextState: normalizeInvocationAlertValue(input.nextState),
+  reasonCodes: normalizeInvocationAlertList(input.reasonCodes),
+  evidenceRefs: normalizeInvocationAlertList(input.evidenceRefs),
+  inputHash: normalizeInvocationAlertValue(input.inputHash),
+  outputHash: normalizeInvocationAlertValue(input.outputHash),
+  payload: normalizeInvocationAlertPayload(input.payload),
+});
+
+const persistInvocationFailureAlertIntent = async (
+  transaction: Prisma.TransactionClient,
+  dependencies: AffiliateAgentGatewayDependencies,
+  context: InvocationFailureAlertContext,
+  result: AffiliateAgentInvocationFailedResult,
+  failureCode: string | null,
+  safeSummary: string | null,
+): Promise<void> => {
+  if (
+    !dependencies.operationalAlert ||
+    !transaction.affiliateOperationalAlerts
+  ) {
+    return;
+  }
+  const input = invocationFailureAlertInput(
+    context,
+    result,
+    failureCode,
+    safeSummary,
+  );
+  const existing =
+    await transaction.affiliateOperationalAlerts.findUnique({
+      where: { eventKey: input.eventKey },
+    });
+  if (existing) return;
+  try {
+    await transaction.affiliateOperationalAlerts.create({
+      data: invocationFailureAlertCreateData(input),
+    });
+  } catch (error) {
+    const raced =
+      await transaction.affiliateOperationalAlerts.findUnique({
+        where: { eventKey: input.eventKey },
+      });
+    if (!raced) throw error;
+  }
+};
+
+const invocationFailureAlertContextFor = (
+  authorization: AffiliateAgentClaimAuthorization,
+  queue: string | null,
+): InvocationFailureAlertContext => ({
+  jobId: authorization.jobId,
+  claimId: authorization.claimId,
+  invocationId: authorization.invocationId,
+  workerId: authorization.workerId,
+  lifecycleGeneration: authorization.lifecycleGeneration,
+  claimGeneration: authorization.claimGeneration,
+  queue,
+});
+const invocationFailureAlertContextForAuthorizedClaim = (
+  authorized: AuthorizedClaim,
+): InvocationFailureAlertContext => ({
+  jobId: authorized.job.id,
+  claimId: authorized.claim.id,
+  invocationId: authorized.claim.invocationId,
+  workerId: authorized.claim.workerId,
+  lifecycleGeneration: authorized.claim.lifecycleGeneration,
+  claimGeneration: authorized.claim.claimGeneration,
+  queue: authorized.job.queue,
+});
+
+
+
+const deliverInvocationFailureAlert = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  authorization: AffiliateAgentClaimAuthorization,
+  result: AffiliateAgentInvocationFailedResult,
+  failureCode: string | null,
+  safeSummary: string | null,
+): Promise<void> => {
+  if (!dependencies.operationalAlert) return;
+  const job = await dependencies.prisma.affiliateAgentGatewayJobs.findUnique({
+    where: { id: authorization.jobId },
+    select: { queue: true },
+  });
+  await dependencies.operationalAlert(
+    invocationFailureAlertInput(
+      invocationFailureAlertContextFor(
+        authorization,
+        job?.queue ?? null,
+      ),
+      result,
+      failureCode,
+      safeSummary,
+    ),
+  );
+};
 
 const reportInvocationFailure = async (
   dependencies: AffiliateAgentGatewayDependencies,
@@ -92,39 +518,20 @@ const reportInvocationFailure = async (
   failureCode: string | null,
   safeSummary: string | null,
 ): Promise<void> => {
-  if (!dependencies.operationalAlert) return;
   try {
-    const job = await dependencies.prisma.affiliateAgentGatewayJobs.findUnique({
-      where: { id: authorization.jobId },
-      select: { queue: true },
-    });
-    await dependencies.operationalAlert({
-      eventKey: `affiliate-agent-invocation-failed:${result.receiptId}`,
-      category: "AGENT_INVOCATION_FAILURE",
-      severity: result.isPipelineBlocked ? "critical" : "warning",
-      title: result.isPipelineBlocked
-        ? "Affiliate agent pipeline blocked"
-        : "Affiliate agent invocation failed",
-      detail: safeSummary ?? failureCode ?? "No failure summary recorded",
-      subjectType: "AGENT_JOB",
-      subjectId: authorization.jobId,
-      queue: job?.queue ?? null,
-      lifecycleGeneration: authorization.lifecycleGeneration,
-      claimGeneration: authorization.claimGeneration,
-      workerId: authorization.workerId,
-      attempt: result.invocationFailureCount,
-      previousState: 'CLAIMED',
-      nextState: result.isPipelineBlocked ? 'PIPELINE_BLOCKED' : 'RETRY_WAIT',
-      reasonCodes: failureCode ? [failureCode] : ['AGENT_INVOCATION_FAILED'],
-      evidenceRefs: [],
-      payload: {
-        claimId: authorization.claimId,
-        invocationId: authorization.invocationId,
-        nextAttemptAt: result.nextAttemptAt,
-      },
-    });
+    await deliverInvocationFailureAlert(
+      dependencies,
+      authorization,
+      result,
+      failureCode,
+      safeSummary,
+    );
   } catch (error) {
-    console.error('[affiliate:gateway] failed to persist operational alert', error);
+    assertDatabaseAuthorizationFailure(error);
+    console.error(
+      "[affiliate:gateway] failed to report invocation failure alert",
+      error,
+    );
   }
 };
 const prismaErrorCode = (error: unknown): string | null => {
@@ -138,6 +545,109 @@ const prismaErrorCode = (error: unknown): string | null => {
   }
   return error.code;
 };
+const stringProperty = (
+  value: unknown,
+  property: string,
+): string | null => {
+  if (value === null || typeof value !== "object" || !(property in value)) {
+    return null;
+  }
+  const propertyValue = (value as Record<string, unknown>)[property];
+  return typeof propertyValue === "string" ? propertyValue : null;
+};
+
+const nestedPrismaErrorMetaValue = (value: object): unknown => {
+  if ("driverAdapterError" in value) {
+    return value.driverAdapterError;
+  }
+  if ("cause" in value) return value.cause;
+  return null;
+};
+
+const prismaErrorMetaCodeFromValue = (value: unknown): string | null => {
+  for (let depth = 0; depth < 3; depth += 1) {
+    if (value === null || typeof value !== "object") return null;
+    const code = stringProperty(value, "code")
+      ?? stringProperty(value, "originalCode");
+    if (code) return code;
+    value = nestedPrismaErrorMetaValue(value);
+    if (value === null) return null;
+  }
+  return null;
+};
+
+const prismaErrorMetaCode = (error: unknown): string | null => {
+  if (error === null || typeof error !== "object" || !("meta" in error)) {
+    return null;
+  }
+  return prismaErrorMetaCodeFromValue(error.meta);
+};
+
+const isSerializableTransactionConflict = (error: unknown): boolean => {
+  if (prismaErrorCode(error) === "P2034") return true;
+  if (prismaErrorCode(error) !== "P2010") return false;
+  if (prismaErrorMetaCode(error) === "40001") return true;
+  if (
+    typeof error !== "object" ||
+    error === null ||
+    !("message" in error) ||
+    typeof error.message !== "string"
+  ) {
+    return false;
+  }
+  return (
+    error.message.includes("40001") ||
+    error.message.toLowerCase().includes("write conflict") ||
+    error.message.toLowerCase().includes("deadlock")
+  );
+};
+const databaseAuthorizationCodes = new Set([
+  "P1000",
+  "P1010",
+  "28P01",
+  "42501",
+  "28000",
+]);
+
+const prismaErrorCodesFromValue = (
+  value: unknown,
+  depth = 0,
+): readonly string[] => {
+  if (value === null || typeof value !== "object" || depth > 2) return [];
+  const record = value as Record<string, unknown>;
+  const codes: string[] = [];
+  for (const property of ["code", "originalCode", "sqlState", "sqlstate"]) {
+    const code = record[property];
+    if (typeof code === "string") codes.push(code.toUpperCase());
+  }
+  for (const nested of [record.driverAdapterError, record.cause, record.meta]) {
+    codes.push(...prismaErrorCodesFromValue(nested, depth + 1));
+  }
+  return codes;
+};
+
+const isDatabaseAuthorizationFailure = (error: unknown): boolean => (
+  prismaErrorCodesFromValue(error).some((code) =>
+    databaseAuthorizationCodes.has(code),
+  )
+);
+
+const GATEWAY_DATABASE_AUTHORIZATION_FAILURE_MESSAGE =
+  "Gateway admission is halted because gateway database authorization failed.";
+
+const gatewayErrorForPersistenceFailure = (
+  error: unknown,
+  code: ConstructorParameters<typeof AffiliateAgentGatewayError>[0]["code"],
+  safeMessage: string,
+  isRetryable = false,
+  receiptId?: string,
+): AffiliateAgentGatewayError => isDatabaseAuthorizationFailure(error)
+  ? gatewayError(
+    "GATEWAY_ADMISSION_HALTED",
+    GATEWAY_DATABASE_AUTHORIZATION_FAILURE_MESSAGE,
+  )
+  : gatewayError(code, safeMessage, isRetryable, receiptId);
+
 
 const prismaUniqueTarget = (error: unknown): readonly string[] => {
   if (
@@ -157,22 +667,6 @@ const prismaUniqueTarget = (error: unknown): readonly string[] => {
     : [];
 };
 
-const isClaimIdentityUniqueConflict = (error: unknown): boolean => {
-  if (prismaErrorCode(error) !== "P2002") return false;
-  const target = prismaUniqueTarget(error);
-  const identityFields = new Set([
-    "claimRequestId",
-    "idempotencyKey",
-    "invocationId",
-    "workspaceId",
-  ]);
-  return target.some(
-    (value) =>
-      identityFields.has(value) ||
-      [...identityFields].some((field) => value.includes(field)),
-  );
-};
-
 const isClaimJobRaceUniqueConflict = (error: unknown): boolean => {
   if (prismaErrorCode(error) !== "P2002") return false;
   const target = prismaUniqueTarget(error);
@@ -185,10 +679,18 @@ const isClaimJobRaceUniqueConflict = (error: unknown): boolean => {
 };
 const isOperationReceiptUniqueConflict = (error: unknown): boolean => {
   if (prismaErrorCode(error) !== "P2002") return false;
-  return prismaUniqueTarget(error).some(
-    (value) =>
-      value.includes("claimId_idempotencyKey") ||
-      (value.includes("claimId") && value.includes("idempotencyKey")),
+  const target = prismaUniqueTarget(error);
+  const hasSeparateCompositeFields =
+    target.length === 2 &&
+    target.includes("claimId") &&
+    target.includes("idempotencyKey");
+  return (
+    hasSeparateCompositeFields ||
+    target.some(
+      (value) =>
+        value.includes("claimId_idempotencyKey") ||
+        (value.includes("claimId") && value.includes("idempotencyKey")),
+    )
   );
 };
 
@@ -215,18 +717,28 @@ const runSerializableEffectTransaction = async <T>(
         isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
       });
     } catch (cause) {
+      assertDatabaseAuthorizationFailure(cause);
       const retryableConflict =
         cause instanceof AffiliateAgentClaimRaceError ||
-        prismaErrorCode(cause) === "P2034" ||
+        isSerializableTransactionConflict(cause) ||
         isOperationReceiptUniqueConflict(cause);
-      if (retryableConflict && attempt < SERIALIZABLE_TRANSACTION_ATTEMPTS) {
-        continue;
+      if (retryableConflict) {
+        if (attempt < SERIALIZABLE_TRANSACTION_ATTEMPTS) {
+          continue;
+        }
+        throw gatewayError(
+          error.code,
+          error.safeMessage,
+          true,
+          error.receiptId,
+        );
       }
       if (cause instanceof AffiliateAgentGatewayError) throw cause;
-      throw gatewayError(
+      throw gatewayErrorForPersistenceFailure(
+        cause,
         error.code,
         error.safeMessage,
-        retryableConflict,
+        true,
         error.receiptId,
       );
     }
@@ -254,63 +766,88 @@ const assertIdentifier = (value: string, name: string): void => {
   }
 };
 
+type BoundedGatewayInputNode = Readonly<{
+  value: unknown;
+  depth: number;
+}>;
+
+const inspectBoundedGatewayObject = (
+  currentValue: object,
+  depth: number,
+  pending: BoundedGatewayInputNode[],
+  seen: Set<object>,
+): number => {
+  if (depth >= MAX_GATEWAY_INPUT_DEPTH) {
+    throw gatewayError(
+      "COMMAND_NOT_PERMITTED",
+      "The gateway input is too deeply nested.",
+    );
+  }
+  if (seen.has(currentValue)) {
+    throw gatewayError(
+      "COMMAND_NOT_PERMITTED",
+      "The gateway input contains a repeated object.",
+    );
+  }
+  seen.add(currentValue);
+  const keys = Object.keys(currentValue);
+  if (keys.length > MAX_GATEWAY_INPUT_KEYS) {
+    throw gatewayError(
+      "COMMAND_NOT_PERMITTED",
+      "The gateway input contains too many fields.",
+    );
+  }
+  let byteSize = 0;
+  for (const [key, nestedValue] of Object.entries(currentValue)) {
+    byteSize += Buffer.byteLength(key, "utf8") + 2;
+    pending.push({ value: nestedValue, depth: depth + 1 });
+  }
+  return byteSize;
+};
+
+const inspectBoundedGatewayInputValue = (
+  currentValue: unknown,
+  depth: number,
+  pending: BoundedGatewayInputNode[],
+  seen: Set<object>,
+): number => {
+  if (currentValue === null) return 4;
+  if (typeof currentValue === "string") {
+    const byteSize = Buffer.byteLength(currentValue, "utf8");
+    if (currentValue.length > MAX_GATEWAY_INPUT_STRING_LENGTH) {
+      throw gatewayError(
+        "COMMAND_NOT_PERMITTED",
+        "The gateway input string exceeds the allowed limit.",
+      );
+    }
+    return byteSize;
+  }
+  if (typeof currentValue === "number" || typeof currentValue === "boolean") {
+    return 8;
+  }
+  if (typeof currentValue !== "object") {
+    throw gatewayError(
+      "COMMAND_NOT_PERMITTED",
+      "The gateway input contains an unsupported value.",
+    );
+  }
+  return inspectBoundedGatewayObject(currentValue, depth, pending, seen);
+};
+
 const assertBoundedGatewayInput = (value: unknown): void => {
-  const pending: Array<{ value: unknown; depth: number }> = [
-    { value, depth: 0 },
-  ];
+  const pending: BoundedGatewayInputNode[] = [{ value, depth: 0 }];
   const seen = new Set<object>();
   let byteSize = 0;
 
   while (pending.length > 0) {
     const current = pending.pop();
     if (!current) continue;
-    const { value: currentValue, depth } = current;
-    if (currentValue === null) {
-      byteSize += 4;
-    } else if (typeof currentValue === "string") {
-      byteSize += Buffer.byteLength(currentValue, "utf8");
-      if (currentValue.length > MAX_GATEWAY_INPUT_STRING_LENGTH) {
-        throw gatewayError(
-          "COMMAND_NOT_PERMITTED",
-          "The gateway input string exceeds the allowed limit.",
-        );
-      }
-    } else if (
-      typeof currentValue === "number" ||
-      typeof currentValue === "boolean"
-    ) {
-      byteSize += 8;
-    } else if (typeof currentValue === "object") {
-      if (depth >= MAX_GATEWAY_INPUT_DEPTH) {
-        throw gatewayError(
-          "COMMAND_NOT_PERMITTED",
-          "The gateway input is too deeply nested.",
-        );
-      }
-      if (seen.has(currentValue)) {
-        throw gatewayError(
-          "COMMAND_NOT_PERMITTED",
-          "The gateway input contains a repeated object.",
-        );
-      }
-      seen.add(currentValue);
-      const keys = Object.keys(currentValue);
-      if (keys.length > MAX_GATEWAY_INPUT_KEYS) {
-        throw gatewayError(
-          "COMMAND_NOT_PERMITTED",
-          "The gateway input contains too many fields.",
-        );
-      }
-      for (const [key, nestedValue] of Object.entries(currentValue)) {
-        byteSize += Buffer.byteLength(key, "utf8") + 2;
-        pending.push({ value: nestedValue, depth: depth + 1 });
-      }
-    } else {
-      throw gatewayError(
-        "COMMAND_NOT_PERMITTED",
-        "The gateway input contains an unsupported value.",
-      );
-    }
+    byteSize += inspectBoundedGatewayInputValue(
+      current.value,
+      current.depth,
+      pending,
+      seen,
+    );
     if (byteSize > MAX_GATEWAY_INPUT_BYTES) {
       throw gatewayError(
         "COMMAND_NOT_PERMITTED",
@@ -436,34 +973,36 @@ const claimOperationInputSchema = z.discriminatedUnion("kind", [
     .strict(),
 ]);
 
+const assertClaimRequestSemanticHints = (
+  value: Record<string, unknown>,
+): void => {
+  if (
+    "role" in value &&
+    typeof value.role === "string" &&
+    !AFFILIATE_AGENT_ROLES.some((role) => role === value.role)
+  ) {
+    throw gatewayError("ROLE_NOT_ALLOWED", "The claim role is not allowed.");
+  }
+  const attestation = value.workspaceAttestation;
+  if (
+    isGatewayRecord(attestation) &&
+    "executionClass" in attestation &&
+    attestation.executionClass !== "PRODUCTION_CODEX"
+  ) {
+    throw gatewayError(
+      "ROLE_NOT_ALLOWED",
+      "Offline evaluation cannot claim production Affiliate Agent work.",
+    );
+  }
+};
+
 function assertClaimRequestInput(
   value: unknown,
 ): asserts value is AffiliateAgentClaimRequest {
   assertBoundedGatewayInput(value);
   const parsed = claimRequestInputSchema.safeParse(value);
   if (parsed.success) return;
-  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
-    if (
-      "role" in value &&
-      typeof value.role === "string" &&
-      !AFFILIATE_AGENT_ROLES.includes(value.role as AffiliateAgentRole)
-    ) {
-      throw gatewayError("ROLE_NOT_ALLOWED", "The claim role is not allowed.");
-    }
-    if (
-      "workspaceAttestation" in value &&
-      value.workspaceAttestation !== null &&
-      typeof value.workspaceAttestation === "object" &&
-      !Array.isArray(value.workspaceAttestation) &&
-      "executionClass" in value.workspaceAttestation &&
-      value.workspaceAttestation.executionClass !== "PRODUCTION_CODEX"
-    ) {
-      throw gatewayError(
-        "ROLE_NOT_ALLOWED",
-        "Offline evaluation cannot claim production Affiliate Agent work.",
-      );
-    }
-  }
+  if (isGatewayRecord(value)) assertClaimRequestSemanticHints(value);
   rejectMalformedGatewayInput("The claim request is invalid.");
 }
 
@@ -489,6 +1028,18 @@ function assertClaimOperationInput(
     !affiliateAgentCommandSchema.safeParse(parsed.data.command).success
   ) {
     rejectMalformedCommandInput();
+  }
+}
+
+function assertInvocationReconciliationInput(
+  value: unknown,
+): asserts value is AffiliateAgentInvocationReconciliationRequest {
+  assertBoundedGatewayInput(value);
+  const parsed = claimOperationInputSchema.safeParse(value);
+  if (!parsed.success || parsed.data.kind !== "RECORD_FAILURE") {
+    rejectMalformedGatewayInput(
+      "The invocation reconciliation request is invalid.",
+    );
   }
 }
 
@@ -579,73 +1130,11 @@ type ReplayableClaim = Readonly<{
   hardDeadlineAt: Date;
 }>;
 
-const replayClaimGrant = (
-  dependencies: AffiliateAgentGatewayDependencies,
-  claim: ReplayableClaim,
-  requestHash: string,
-  bundle: AffiliateAgentContractBundle,
-  roleContract: AffiliateAgentRoleContract,
-): AffiliateAgentClaimGrant => {
-  if (claim.claimRequestHash !== requestHash) {
-    throw gatewayError(
-      "IDEMPOTENCY_KEY_REUSED",
-      "The claim idempotency key was used for different input.",
-    );
-  }
-  if (claim.tokenKeyVersion !== dependencies.tokens.keyVersion) {
-    throw gatewayError(
-      "TOKEN_INVALID",
-      "The claim token key version is not available.",
-    );
-  }
-  const envelope = affiliateAgentClaimEnvelopeSchema.parse(
-    claim.claimEnvelopeJson,
-  );
-  if (
-    envelope.supplyContractVersion !== bundle.supplyContract.version ||
-    envelope.supplyContractHash !== bundle.supplyContract.hash
-  ) {
-    throw gatewayError(
-      "SUPPLY_CONTRACT_STALE",
-      "The active Supply Contract changed after the claim.",
-    );
-  }
-  if (
-    envelope.deploymentContractVersion !== bundle.deploymentContract.version ||
-    envelope.deploymentContractHash !== bundle.deploymentContract.hash ||
-    envelope.roleContractVersion !== roleContract.version ||
-    envelope.roleContractHash !== roleContract.hash ||
-    envelope.promptTemplateVersion !== roleContract.promptTemplateVersion ||
-    envelope.promptTemplateHash !== roleContract.promptTemplateHash
-  ) {
-    throw gatewayError(
-      "DEPLOYMENT_CONTRACT_STALE",
-      "The active deployment, role, or prompt contract changed after the claim.",
-    );
-  }
-  return {
-    envelope,
-    prompt: renderAffiliateAgentPrompt(roleContract, envelope),
-    token: dependencies.tokens.issue(
-      tokenScopeForEnvelope(envelope),
-      claim.tokenNonce,
-    ),
-    heartbeatIntervalSeconds: AFFILIATE_AGENT_HEARTBEAT_INTERVAL_SECONDS,
-    leaseExpiresAt: claim.leaseExpiresAt.toISOString(),
-    hardDeadlineAt: claim.hardDeadlineAt.toISOString(),
-  };
-};
 
-const validateClaimRequest = async (
-  dependencies: AffiliateAgentGatewayDependencies,
+const assertClaimAttestationIdentity = (
   input: AffiliateAgentClaimRequest,
-  now: Date,
-): Promise<void> => {
-  assertIdentifier(input.idempotencyKey, "Claim idempotency key");
-  assertIdentifier(input.workerId, "Worker ID");
-  assertIdentifier(input.invocationId, "Invocation ID");
-  const attestation = input.workspaceAttestation;
-  assertIdentifier(attestation.workspaceId, "Workspace ID");
+): void => {
+  const { workspaceAttestation: attestation } = input;
   if (
     attestation.schemaVersion !== 1 ||
     attestation.workerId !== input.workerId ||
@@ -662,12 +1151,22 @@ const validateClaimRequest = async (
       "Offline evaluation cannot claim production Affiliate Agent work.",
     );
   }
+};
+
+const assertClaimWorkspaceAt = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  attestation: AffiliateAgentClaimRequest["workspaceAttestation"],
+  now: Date,
+): Promise<{ issuedAt: Date; expiresAt: Date }> => {
   const issuedAt = new Date(attestation.issuedAt);
   const expiresAt = new Date(attestation.expiresAt);
   if (
     Number.isNaN(issuedAt.getTime()) ||
     Number.isNaN(expiresAt.getTime()) ||
-    issuedAt > now ||
+    issuedAt > addSeconds(
+      now,
+      AFFILIATE_AGENT_WORKSPACE_ATTESTATION_ADMISSION_MARGIN_SECONDS,
+    ) ||
     expiresAt <= now ||
     !(await dependencies.workspaces.verify(attestation))
   ) {
@@ -676,16 +1175,17 @@ const validateClaimRequest = async (
       "The workspace attestation is invalid or expired.",
     );
   }
-  if (expiresAt < addSeconds(now, AFFILIATE_AGENT_HARD_DEADLINE_SECONDS)) {
-    throw gatewayError(
-      "REVIEW_WORKSPACE_INVALID",
-      "The workspace attestation must cover the full invocation deadline.",
-    );
-  }
+  return { issuedAt, expiresAt };
+};
+
+const assertClaimCredential = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  input: AffiliateAgentClaimRequest,
+): Promise<void> => {
   const isCredentialValid = await dependencies.credentials.verify({
     roleCredential: input.roleCredential,
     role: input.role,
-    executionClass: attestation.executionClass,
+    executionClass: input.workspaceAttestation.executionClass,
     workerId: input.workerId,
     invocationId: input.invocationId,
   });
@@ -695,14 +1195,35 @@ const validateClaimRequest = async (
       "The role credential is invalid for this claim request.",
     );
   }
-  const admissionNow = dependencies.clock.now();
-  if (issuedAt > admissionNow || expiresAt <= admissionNow) {
+};
+
+const assertClaimAdmissionWindow = (
+  now: Date,
+  issuedAt: Date,
+  expiresAt: Date,
+): void => {
+  if (
+    issuedAt > addSeconds(
+      now,
+      AFFILIATE_AGENT_WORKSPACE_ATTESTATION_ADMISSION_MARGIN_SECONDS,
+    ) ||
+    expiresAt <= now
+  ) {
     throw gatewayError(
       "REVIEW_WORKSPACE_INVALID",
       "The workspace attestation is invalid or expired.",
     );
   }
-  if (input.role === "SUPPLY_REVIEWER" && attestation.mode !== "READ_ONLY") {
+};
+
+const assertClaimRoleRequirements = (
+  dependencies: AffiliateAgentGatewayDependencies,
+  input: AffiliateAgentClaimRequest,
+): void => {
+  if (
+    input.role === "SUPPLY_REVIEWER" &&
+    input.workspaceAttestation.mode !== "READ_ONLY"
+  ) {
     throw gatewayError(
       "REVIEW_WORKSPACE_INVALID",
       "Supply Reviewer work requires a read-only workspace.",
@@ -714,6 +1235,39 @@ const validateClaimRequest = async (
       "Supply Reviewer work requires a terminal effect adapter.",
     );
   }
+};
+
+const validateClaimRequest = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  input: AffiliateAgentClaimRequest,
+  now: Date,
+): Promise<void> => {
+  assertIdentifier(input.idempotencyKey, "Claim idempotency key");
+  assertIdentifier(input.workerId, "Worker ID");
+  assertIdentifier(input.invocationId, "Invocation ID");
+  assertIdentifier(input.workspaceAttestation.workspaceId, "Workspace ID");
+  assertClaimAttestationIdentity(input);
+  const { issuedAt, expiresAt } = await assertClaimWorkspaceAt(
+    dependencies,
+    input.workspaceAttestation,
+    now,
+  );
+  await assertClaimCredential(dependencies, input);
+  const admissionNow = dependencies.clock.now();
+  assertClaimAdmissionWindow(admissionNow, issuedAt, expiresAt);
+  assertClaimRoleRequirements(dependencies, input);
+};
+export const validateAffiliateAgentClaimForAdmission = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  value: unknown,
+): Promise<AffiliateAgentClaimRequest> => {
+  assertClaimRequestInput(value);
+  await validateClaimRequest(dependencies, value, dependencies.clock.now());
+  const bundle = parseSupportedContractBundle(
+    await dependencies.contracts.loadActiveBundle(),
+  );
+  activeRoleContract(bundle, value.role);
+  return value;
 };
 const subjectPrimaryId = (subject: AffiliateAgentSubject): string => {
   switch (subject.type) {
@@ -748,6 +1302,1169 @@ const parseQueuedSubject = (
   return parsed.data;
 };
 
+type ClaimTransactionResult =
+  | Readonly<{ kind: "REPLAY"; claim: AffiliateAgentGatewayClaims }>
+  | Readonly<{ kind: "CLOSED" }>
+  | Readonly<{ kind: "NO_WORK" }>
+  | Readonly<{
+      kind: "CLAIMED";
+      claim: AffiliateAgentGatewayClaims;
+      envelope: AffiliateAgentClaimEnvelope;
+    }>;
+
+type ClaimAdmissionTiming = Readonly<{
+  now: Date;
+  hardDeadlineAt: Date;
+  leaseExpiresAt: Date;
+}>;
+
+const findClaimReplayOrClosed = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  transaction: Prisma.TransactionClient,
+  idempotencyKey: string,
+  admissionContext: AffiliateAgentClaimAdmissionContext,
+): Promise<ClaimTransactionResult | null> => {
+  const replay = await transaction.affiliateAgentGatewayClaims.findUnique({
+    where: { claimRequestId: idempotencyKey },
+  });
+  if (replay) return { kind: "REPLAY", claim: replay };
+  const admission = dependencies.claimAdmission;
+  if (
+    admission
+    && !(admission.isOpenFor
+      ? admission.isOpenFor(admissionContext)
+      : admission.isOpen())
+  ) {
+    return { kind: "CLOSED" };
+  }
+  return null;
+};
+
+const assertClaimAdmissionTiming = (
+  attestationExpiresAt: Date,
+  now: Date,
+): ClaimAdmissionTiming => {
+  if (attestationExpiresAt <= now) {
+    throw gatewayError(
+      "REVIEW_WORKSPACE_INVALID",
+      "The workspace attestation expired before claim admission.",
+    );
+  }
+  const hardDeadlineAt = addSeconds(now, AFFILIATE_AGENT_HARD_DEADLINE_SECONDS);
+  if (attestationExpiresAt < hardDeadlineAt) {
+    throw gatewayError(
+      "REVIEW_WORKSPACE_INVALID",
+      "The workspace attestation must cover the full invocation deadline.",
+    );
+  }
+  const leaseExpiresAt = new Date(
+    Math.min(
+      addSeconds(now, AFFILIATE_AGENT_LEASE_SECONDS).getTime(),
+      hardDeadlineAt.getTime(),
+    ),
+  );
+  return { now, hardDeadlineAt, leaseExpiresAt };
+};
+
+const assertClaimIdentityAvailable = async (
+  transaction: Prisma.TransactionClient,
+  input: AffiliateAgentClaimRequest,
+): Promise<void> => {
+  const reusedIdentity =
+    await transaction.affiliateAgentGatewayClaims.findFirst({
+      where: {
+        OR: [
+          { invocationId: input.invocationId },
+          { workspaceId: input.workspaceAttestation.workspaceId },
+        ],
+      },
+    });
+  if (reusedIdentity?.invocationId === input.invocationId) {
+    throw gatewayError(
+      "INVOCATION_MISMATCH",
+      "The invocation identity was already used by another claim request.",
+    );
+  }
+  if (reusedIdentity?.workspaceId === input.workspaceAttestation.workspaceId) {
+    throw gatewayError(
+      "REVIEW_WORKSPACE_INVALID",
+      "The workspace identity was already used by another claim request.",
+    );
+  }
+};
+const assertWorkerHasNoLiveClaim = async (
+  transaction: Prisma.TransactionClient,
+  workerId: string,
+  now: Date,
+): Promise<void> => {
+  const liveClaim = await transaction.affiliateAgentGatewayClaims.findFirst({
+    where: {
+      workerId,
+      status: "ACTIVE",
+      leaseExpiresAt: { gt: now },
+    },
+    select: { id: true },
+  });
+  if (liveClaim !== null) {
+    throw gatewayError(
+      "DUPLICATE_LIVE_CLAIM",
+      "The worker already owns an unexpired active claim.",
+      true,
+    );
+  }
+};
+
+const findHaltedClaimLanes = async (
+  transaction: Prisma.TransactionClient,
+): Promise<readonly string[]> => {
+  const globalHalt =
+    await transaction.affiliateAgentGatewayOperationReceipts.findFirst({
+      where: {
+        status: "UNKNOWN",
+        safeErrorCode: "GATEWAY_ADMISSION_HALTED",
+      },
+    });
+  if (globalHalt) {
+    throw gatewayError(
+      "GATEWAY_ADMISSION_HALTED",
+      "Gateway admission is halted until an impossible receipt state is resolved.",
+    );
+  }
+  const impossibleClaim =
+    await transaction.affiliateAgentGatewayClaims.findFirst({
+      where: { safeFailureCode: "GATEWAY_ADMISSION_HALTED" },
+      select: { id: true },
+    });
+  if (impossibleClaim) {
+    throw gatewayError(
+      "GATEWAY_ADMISSION_HALTED",
+      "Gateway admission is halted until an impossible claim state is resolved.",
+    );
+  }
+  const haltedJobs =
+    await transaction.affiliateAgentGatewayJobs.findMany({
+      where: { status: "RECONCILIATION_REQUIRED" },
+      select: { lane: true },
+    });
+  return [...new Set(haltedJobs.map(({ lane }) => lane))];
+};
+
+const findClaimableJob = async (
+  transaction: Prisma.TransactionClient,
+  input: AffiliateAgentClaimRequest,
+  now: Date,
+  haltedLanes: readonly string[],
+): Promise<AffiliateAgentGatewayJobs | null> =>
+  transaction.affiliateAgentGatewayJobs.findFirst({
+    where: {
+      role: input.role,
+      status: { in: ["QUEUED", "RETRY_WAIT"] },
+      activeClaimId: null,
+      nextAttemptAt: { lte: now },
+      lane:
+        haltedLanes.length === 0 ? undefined : { notIn: [...haltedLanes] },
+    },
+    orderBy: [
+      { priority: "desc" },
+      { createdAt: "asc" },
+      { id: "asc" },
+    ],
+  });
+
+const parseClaimEvidenceManifest = (
+  job: AffiliateAgentGatewayJobs,
+  role: AffiliateAgentClaimRequest["role"],
+) => {
+  const result = affiliateAgentEvidenceManifestSchema.safeParse(
+    job.evidenceManifestJson,
+  );
+  if (!result.success) {
+    throw gatewayError(
+      role === "SUPPLY_REVIEWER"
+        ? "REVIEW_WORKSPACE_INVALID"
+        : "DEPLOYMENT_CONTRACT_STALE",
+      "The claim evidence manifest is invalid.",
+    );
+  }
+  return result.data;
+};
+
+const parseClaimEnvelope = (
+  claim: AffiliateAgentGatewayClaims | null,
+): AffiliateAgentClaimEnvelope | null => {
+  if (!claim) return null;
+  const result = affiliateAgentClaimEnvelopeSchema.safeParse(
+    claim.claimEnvelopeJson,
+  );
+  return result.success ? result.data : null;
+};
+
+const parseClaimTerminalResult = (
+  job: AffiliateAgentGatewayJobs | null,
+): AffiliateAgentTerminalResultEnvelope | null => {
+  if (!job) return null;
+  const result = affiliateAgentTerminalResultEnvelopeSchema.safeParse(
+    job.resultJson,
+  );
+  return result.success ? result.data : null;
+};
+
+type ProducerReviewContext = Readonly<{
+  producerClaim: AffiliateAgentGatewayClaims | null;
+  producerJob: AffiliateAgentGatewayJobs | null;
+  producerEnvelope: AffiliateAgentClaimEnvelope | null;
+  producerResult: AffiliateAgentTerminalResultEnvelope | null;
+}>;
+
+const loadProducerReviewContext = async (
+  transaction: Prisma.TransactionClient,
+  producerClaimId: string,
+): Promise<ProducerReviewContext> => {
+  const producerClaim =
+    await transaction.affiliateAgentGatewayClaims.findUnique({
+      where: { id: producerClaimId },
+    });
+  const producerJob = producerClaim
+    ? await transaction.affiliateAgentGatewayJobs.findUnique({
+        where: { id: producerClaim.jobId },
+      })
+    : null;
+  return {
+    producerClaim,
+    producerJob,
+    producerEnvelope: parseClaimEnvelope(producerClaim),
+    producerResult: parseClaimTerminalResult(producerJob),
+  };
+};
+
+const producerPackageHash = (
+  result: AffiliateAgentTerminalResultEnvelope | null,
+): string | null => {
+  if (
+    result?.role === "MAPPING_PRODUCER" &&
+    (result.disposition === "PACKAGE_COMMITTED" ||
+      result.disposition === "BOUNDED_REPAIR_SUBMITTED")
+  ) {
+    return result.payload.packageHash;
+  }
+  return null;
+};
+
+const isProducerResultIdentityMatch = (
+  result: AffiliateAgentTerminalResultEnvelope | null,
+  producerClaim: AffiliateAgentGatewayClaims | null,
+  producerJob: AffiliateAgentGatewayJobs | null,
+): boolean => {
+  if (!result) return false;
+  return (
+    result.jobId === producerJob?.id &&
+    result.claimId === producerClaim?.id &&
+    result.claimGeneration === producerClaim?.claimGeneration &&
+    result.role === "MAPPING_PRODUCER"
+  );
+};
+
+const isProducerClaimStateValid = (
+  producerClaim: AffiliateAgentGatewayClaims | null,
+  producerJob: AffiliateAgentGatewayJobs | null,
+): boolean =>
+  [
+    producerClaim?.status === "COMPLETED",
+    producerClaim?.role === "MAPPING_PRODUCER",
+    producerClaim?.terminalReceiptId !== null,
+    producerJob?.status === "COMPLETED",
+    producerJob?.activeClaimId === null,
+    producerJob?.terminalReceiptId === producerClaim?.terminalReceiptId,
+  ].every(Boolean);
+
+const isProducerClaimValid = (
+  context: ProducerReviewContext,
+  subject: Extract<AffiliateAgentSubject, { type: "SUPPLY_REVIEWER" }>,
+  job: AffiliateAgentGatewayJobs,
+): boolean => {
+  const {
+    producerClaim,
+    producerJob,
+    producerEnvelope,
+    producerResult,
+  } = context;
+  const producerSubject =
+    producerEnvelope?.subject.type === "MAPPING_PRODUCER"
+      ? producerEnvelope.subject
+      : null;
+  return [
+    isProducerClaimStateValid(producerClaim, producerJob),
+    producerEnvelope !== null,
+    producerResult !== null,
+    producerEnvelope !== null &&
+      hashAffiliateAgentValue(producerEnvelope) === producerClaim?.claimEnvelopeHash,
+    producerSubject?.supplySourceId === subject.supplySourceId,
+    job.parentClaimId === subject.producerClaimId,
+    producerClaim?.workerId === subject.producerWorkerId,
+    producerClaim?.invocationId === subject.producerInvocationId,
+    producerClaim?.workspaceId === subject.producerWorkspaceId,
+    isProducerResultIdentityMatch(producerResult, producerClaim, producerJob),
+    producerPackageHash(producerResult) === subject.committedPackageHash,
+  ].every(Boolean);
+};
+
+const assertReviewerProducerAdmission = async (
+  transaction: Prisma.TransactionClient,
+  job: AffiliateAgentGatewayJobs,
+  subject: AffiliateAgentSubject,
+  input: AffiliateAgentClaimRequest,
+): Promise<void> => {
+  if (subject.type !== "SUPPLY_REVIEWER") {
+    throw gatewayError(
+      "REVIEW_WORKSPACE_INVALID",
+      "The reviewer subject is invalid.",
+    );
+  }
+  const context = await loadProducerReviewContext(
+    transaction,
+    subject.producerClaimId,
+  );
+  if (!isProducerClaimValid(context, subject, job)) {
+    throw gatewayError(
+      "REVIEW_WORKSPACE_INVALID",
+      "The reviewer claim must reference one completed matching producer claim.",
+    );
+  }
+  if (
+    subject.producerWorkerId === input.workerId ||
+    subject.producerInvocationId === input.invocationId
+  ) {
+    throw gatewayError(
+      "PRODUCER_REVIEWER_IDENTITY_REUSED",
+      "The reviewer worker and invocation must differ from the producer.",
+    );
+  }
+  if (subject.producerWorkspaceId === input.workspaceAttestation.workspaceId) {
+
+    throw gatewayError(
+      "REVIEW_WORKSPACE_INVALID",
+      "The reviewer workspace must differ from the producer workspace.",
+    );
+  }
+};
+
+type ReviewerArtifact = Readonly<{
+  evidenceKind: string;
+  sourceArtifactId: string;
+  fileId: string;
+  contentHash: string;
+  mimeType: string;
+  byteSize: number;
+  claimId: string;
+  creatingClaimId: string | null;
+}>;
+const isReviewerArtifactOwnedByProducer = (
+  kind: "COMMITTED_PACKAGE" | "DETERMINISTIC_VALIDATION" | "DURABLE_EVIDENCE",
+  artifact: ReviewerArtifact,
+  producerClaimId: string,
+): boolean =>
+  kind === "DURABLE_EVIDENCE"
+    ? artifact.claimId === producerClaimId
+      || artifact.creatingClaimId === producerClaimId
+    : artifact.creatingClaimId === producerClaimId;
+
+const isReviewerArtifactBound = (
+  kind: "COMMITTED_PACKAGE" | "DETERMINISTIC_VALIDATION" | "DURABLE_EVIDENCE",
+  entry: Readonly<{
+    kind: string;
+    artifactId: string;
+    sha256: string;
+    mimeType: string;
+    byteSize: number;
+  }> | undefined,
+  artifacts: readonly ReviewerArtifact[],
+  producerClaimId: string,
+): boolean =>
+  entry !== undefined
+  && artifacts.some((artifact) =>
+    [
+      artifact.evidenceKind === kind,
+      artifact.sourceArtifactId === entry.artifactId,
+      artifact.fileId === entry.artifactId,
+      artifact.contentHash === entry.sha256,
+      artifact.mimeType === entry.mimeType,
+      artifact.byteSize === entry.byteSize,
+      isReviewerArtifactOwnedByProducer(kind, artifact, producerClaimId),
+    ].every(Boolean),
+  );
+
+const hasValidReviewerManifest = (
+  evidenceManifest: z.infer<typeof affiliateAgentEvidenceManifestSchema>,
+  bundle: AffiliateAgentContractBundle,
+  subject: Extract<AffiliateAgentSubject, { type: "SUPPLY_REVIEWER" }>,
+  producerArtifacts: readonly ReviewerArtifact[],
+): boolean => {
+  const manifestKinds = evidenceManifest.entries.map((entry) => entry.kind);
+  const allowedKinds: Readonly<Record<string, true>> = {
+    ACTIVE_SUPPLY_CONTRACT: true,
+    COMMITTED_PACKAGE: true,
+    DETERMINISTIC_VALIDATION: true,
+    DURABLE_EVIDENCE: true,
+  };
+  const requiredKinds = [
+    "ACTIVE_SUPPLY_CONTRACT",
+    "COMMITTED_PACKAGE",
+    "DETERMINISTIC_VALIDATION",
+    "DURABLE_EVIDENCE",
+  ] as const;
+  const activeContractEntry = evidenceManifest.entries.find(
+    (entry) => entry.kind === "ACTIVE_SUPPLY_CONTRACT",
+  );
+  const committedPackageEntry = evidenceManifest.entries.find(
+    (entry) => entry.kind === "COMMITTED_PACKAGE",
+  );
+  const producerEvidenceIsBound = (
+    [
+      "COMMITTED_PACKAGE",
+      "DETERMINISTIC_VALIDATION",
+      "DURABLE_EVIDENCE",
+    ] as const
+  ).every((kind) =>
+    isReviewerArtifactBound(
+      kind,
+      evidenceManifest.entries.find((entry) => entry.kind === kind),
+      producerArtifacts,
+      subject.producerClaimId,
+    ),
+  );
+  return [
+    manifestKinds.every((kind) => allowedKinds[kind] === true),
+    requiredKinds.every(
+      (kind) => manifestKinds.filter((entryKind) => entryKind === kind).length === 1,
+    ),
+    activeContractEntry?.sha256 === bundle.supplyContract.hash,
+    committedPackageEntry?.sha256 === subject.committedPackageHash,
+    producerEvidenceIsBound,
+  ].every(Boolean);
+};
+
+const assertReviewerManifest = async (
+  transaction: Prisma.TransactionClient,
+  evidenceManifest: z.infer<typeof affiliateAgentEvidenceManifestSchema>,
+  bundle: AffiliateAgentContractBundle,
+  subject: AffiliateAgentSubject,
+): Promise<void> => {
+  if (subject.type !== "SUPPLY_REVIEWER") return;
+  const producerArtifacts =
+    await transaction.affiliateAgentGatewayArtifacts.findMany({
+      where: {
+        OR: [
+          { claimId: subject.producerClaimId },
+          { creatingClaimId: subject.producerClaimId },
+        ],
+      },
+    });
+  if (!hasValidReviewerManifest(evidenceManifest, bundle, subject, producerArtifacts)) {
+    throw gatewayError(
+      "REVIEW_WORKSPACE_INVALID",
+      "The reviewer manifest must contain one exact copy of each committed review artifact.",
+    );
+  }
+};
+
+const loadHumanReviewContext = async (
+  transaction: Prisma.TransactionClient,
+  reviewerClaimId: string,
+) => {
+  const reviewerClaim =
+    await transaction.affiliateAgentGatewayClaims.findUnique({
+      where: { id: reviewerClaimId },
+    });
+  const reviewerJob = reviewerClaim
+    ? await transaction.affiliateAgentGatewayJobs.findUnique({
+        where: { id: reviewerClaim.jobId },
+      })
+    : null;
+  const reviewerEnvelope = parseClaimEnvelope(reviewerClaim);
+  const reviewerResult = parseClaimTerminalResult(reviewerJob);
+  return {
+    reviewerClaim,
+    reviewerJob,
+    reviewerEnvelope,
+    reviewerResult:
+      reviewerResult?.role === "SUPPLY_REVIEWER" &&
+      reviewerResult.disposition === "HUMAN_REVIEW_REQUIRED"
+        ? reviewerResult
+        : null,
+  };
+};
+
+const reviewerEntryMatchesHumanEvidence = (
+  humanEntry: Readonly<{
+    evidenceRef: string;
+    artifactId: string;
+    sha256: string;
+    mimeType: string;
+    byteSize: number;
+  }>,
+  evidenceRef: string,
+  reviewerEnvelope: AffiliateAgentClaimEnvelope | null,
+): boolean => {
+  if (evidenceRef !== humanEntry.evidenceRef || !reviewerEnvelope) return false;
+  return reviewerEnvelope.evidenceManifest.entries.some(
+    (reviewerEntry) =>
+      [
+        reviewerEntry.evidenceRef === evidenceRef,
+        reviewerEntry.kind === "DETERMINISTIC_VALIDATION" ||
+          reviewerEntry.kind === "DURABLE_EVIDENCE",
+        reviewerEntry.artifactId === humanEntry.artifactId,
+        reviewerEntry.sha256 === humanEntry.sha256,
+        reviewerEntry.mimeType === humanEntry.mimeType,
+        reviewerEntry.byteSize === humanEntry.byteSize,
+      ].every(Boolean),
+  );
+};
+
+const isReviewerEvidenceMatch = (
+  humanEntries: ReadonlyArray<{
+    evidenceRef: string;
+    artifactId: string;
+    sha256: string;
+    mimeType: string;
+    byteSize: number;
+  }>,
+  reviewerEvidenceRefs: readonly string[] | undefined,
+  reviewerEnvelope: AffiliateAgentClaimEnvelope | null,
+): boolean =>
+  reviewerEvidenceRefs !== undefined &&
+  humanEntries.some((humanEntry) =>
+    reviewerEvidenceRefs.some((evidenceRef) =>
+      reviewerEntryMatchesHumanEvidence(
+        humanEntry,
+        evidenceRef,
+        reviewerEnvelope,
+      ),
+    ),
+  );
+type HumanReviewContext = Readonly<{
+  reviewerClaim: AffiliateAgentGatewayClaims | null;
+  reviewerJob: AffiliateAgentGatewayJobs | null;
+  reviewerEnvelope: AffiliateAgentClaimEnvelope | null;
+  reviewerResult: AffiliateAgentTerminalResultEnvelope | null;
+}>;
+
+const isReviewerClaimStateValid = (
+  reviewerClaim: AffiliateAgentGatewayClaims | null,
+  reviewerJob: AffiliateAgentGatewayJobs | null,
+): boolean =>
+  [
+    reviewerClaim !== null,
+    reviewerClaim?.status === "COMPLETED",
+    reviewerClaim?.role === "SUPPLY_REVIEWER",
+    reviewerClaim?.terminalReceiptId !== null,
+    reviewerJob !== null,
+    reviewerJob?.status === "COMPLETED",
+    reviewerJob?.activeClaimId === null,
+    reviewerJob?.terminalReceiptId === reviewerClaim?.terminalReceiptId,
+  ].every(Boolean);
+
+const isReviewerEnvelopeValid = (
+  reviewerClaim: AffiliateAgentGatewayClaims | null,
+  reviewerEnvelope: AffiliateAgentClaimEnvelope | null,
+): boolean =>
+  [
+    reviewerEnvelope !== null,
+    reviewerEnvelope !== null &&
+      hashAffiliateAgentValue(reviewerEnvelope) ===
+        reviewerClaim?.claimEnvelopeHash,
+  ].every(Boolean);
+
+const isReviewerResultIdentityValid = (
+  reviewerClaim: AffiliateAgentGatewayClaims | null,
+  reviewerJob: AffiliateAgentGatewayJobs | null,
+  reviewerResult: AffiliateAgentTerminalResultEnvelope | null,
+): boolean =>
+  [
+    reviewerResult !== null,
+    reviewerResult?.jobId === reviewerJob?.id,
+    reviewerResult?.claimId === reviewerClaim?.id,
+    reviewerResult?.claimGeneration === reviewerClaim?.claimGeneration,
+  ].every(Boolean);
+
+const isReviewerClaimValid = (
+  context: HumanReviewContext,
+  job: AffiliateAgentGatewayJobs,
+  reviewerClaimId: string,
+  reviewerEvidenceEntries: ReadonlyArray<{
+    evidenceRef: string;
+    artifactId: string;
+    sha256: string;
+    mimeType: string;
+    byteSize: number;
+  }>,
+): boolean => {
+  const { reviewerClaim, reviewerJob, reviewerEnvelope, reviewerResult } =
+    context;
+  const reviewerSubject =
+    reviewerEnvelope?.subject.type === "SUPPLY_REVIEWER"
+      ? reviewerEnvelope.subject
+      : null;
+  return [
+    isReviewerClaimStateValid(reviewerClaim, reviewerJob),
+    isReviewerEnvelopeValid(reviewerClaim, reviewerEnvelope),
+    job.parentClaimId === reviewerClaimId,
+    reviewerSubject?.supplySourceId === job.supplySourceId,
+    isReviewerResultIdentityValid(reviewerClaim, reviewerJob, reviewerResult),
+    isReviewerEvidenceMatch(
+      reviewerEvidenceEntries,
+      reviewerResult?.evidenceRefs,
+      reviewerEnvelope,
+    ),
+  ].every(Boolean);
+};
+
+const assertHumanDirectedAdmission = async (
+  transaction: Prisma.TransactionClient,
+  job: AffiliateAgentGatewayJobs,
+  subject: AffiliateAgentSubject,
+  evidenceManifest: z.infer<typeof affiliateAgentEvidenceManifestSchema>,
+): Promise<void> => {
+  if (subject.type !== "HUMAN_DIRECTED_EXECUTOR") {
+    throw gatewayError(
+      "REVIEW_WORKSPACE_INVALID",
+      "The human-directed subject is invalid.",
+    );
+  }
+  const humanDecisionEntries = evidenceManifest.entries.filter(
+    (entry) => entry.kind === "HUMAN_DECISION",
+  );
+  const reviewerEvidenceEntries = evidenceManifest.entries.filter(
+    (entry) => entry.kind === "REVIEWER_EVIDENCE",
+  );
+  const isHumanEvidenceKindsAllowed = evidenceManifest.entries.every(
+    (entry) =>
+      entry.kind === "HUMAN_DECISION" || entry.kind === "REVIEWER_EVIDENCE",
+  );
+  const context = await loadHumanReviewContext(
+    transaction,
+    subject.reviewerClaimId,
+  );
+  const isClaimValid = isReviewerClaimValid(
+    context,
+    job,
+    subject.reviewerClaimId,
+    reviewerEvidenceEntries,
+  );
+  if (
+    !isHumanEvidenceKindsAllowed ||
+    humanDecisionEntries.length !== 1 ||
+    reviewerEvidenceEntries.length !== 1 ||
+    humanDecisionEntries[0]?.sha256 !== subject.decisionHash ||
+    !isClaimValid
+  ) {
+    throw gatewayError(
+      "REVIEW_WORKSPACE_INVALID",
+      "The human claim must contain the exact decision and completed reviewer evidence.",
+    );
+  }
+};
+
+const readLifecycleGenerationInTransaction = async (
+  transaction: Prisma.TransactionClient,
+  supplySourceId: string,
+): Promise<number> => {
+  const rows = await transaction.$queryRaw<
+    ReadonlyArray<{ lifecycleGeneration: number }>
+  >(
+    Prisma.sql`
+      SELECT source."lifecycleGeneration" AS "lifecycleGeneration"
+      FROM "AffiliateSupplySources" AS source
+      WHERE source."id" = ${supplySourceId}
+      FOR SHARE
+    `,
+  );
+  const supplySource = rows[0];
+  if (!supplySource) {
+    throw gatewayError(
+      "LIFECYCLE_GENERATION_STALE",
+      "The Supply Source lifecycle generation is unavailable.",
+    );
+  }
+  return supplySource.lifecycleGeneration;
+};
+
+const hasClaimLifecycleAdvance = async (
+  transaction: Prisma.TransactionClient,
+  input: AffiliateAgentClaimRequest,
+  job: AffiliateAgentGatewayJobs,
+  currentGeneration: number,
+): Promise<boolean> => {
+  if (
+    input.role !== "MAPPING_PRODUCER"
+    && input.role !== "SUPPLY_REVIEWER"
+    && input.role !== "HUMAN_DIRECTED_EXECUTOR"
+  ) {
+    return false;
+  }
+  if (job.expectedLifecycleGeneration === null) return false;
+  if (currentGeneration !== job.expectedLifecycleGeneration + 1) return false;
+  return hasRecordedLifecycleAdvanceForJob(
+    transaction,
+    job,
+    input.role,
+    currentGeneration,
+  );
+};
+
+const assertClaimLifecycleScope = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  transaction: Prisma.TransactionClient,
+  input: AffiliateAgentClaimRequest,
+  job: AffiliateAgentGatewayJobs,
+): Promise<number | null> => {
+  if (
+    input.role !== "COVERAGE_PLANNER"
+    && (!job.supplySourceId || job.expectedLifecycleGeneration === null)
+  ) {
+    throw gatewayError(
+      "LIFECYCLE_GENERATION_STALE",
+      "Non-coverage jobs require a Supply Source lifecycle generation.",
+    );
+  }
+  if (job.expectedLifecycleGeneration === null) return null;
+  if (!job.supplySourceId || dependencies.lifecycle.kind !== "AVAILABLE") {
+    throw gatewayError(
+      "LIFECYCLE_GENERATION_STALE",
+      "The Supply Source lifecycle generation is stale.",
+    );
+  }
+  const currentGeneration = await readLifecycleGenerationInTransaction(
+    transaction,
+    job.supplySourceId,
+  );
+  const hasLifecycleAdvanceRecorded = await hasClaimLifecycleAdvance(
+    transaction,
+    input,
+    job,
+    currentGeneration,
+  );
+  if (
+    currentGeneration !== job.expectedLifecycleGeneration
+    && !hasLifecycleAdvanceRecorded
+  ) {
+    throw gatewayError(
+      "LIFECYCLE_GENERATION_STALE",
+      "The Supply Source lifecycle generation is stale.",
+    );
+  }
+  return currentGeneration;
+};
+type ClaimEvidenceManifest = z.infer<
+  typeof affiliateAgentEvidenceManifestSchema
+>;
+type ClaimEvidenceEntry = ClaimEvidenceManifest["entries"][number];
+type ClaimParentArtifact = Readonly<{
+  sourceArtifactId: string;
+  fileId: string;
+  contentHash: string;
+  mimeType: string;
+  byteSize: number;
+  creatingClaimId: string | null;
+  claimId: string;
+}>;
+
+const createClaimEnvelope = (
+  input: AffiliateAgentClaimRequest,
+  bundle: AffiliateAgentContractBundle,
+  roleContract: AffiliateAgentRoleContract,
+  job: AffiliateAgentGatewayJobs,
+  lifecycleGeneration: number | null,
+  subject: AffiliateAgentSubject,
+  evidenceManifest: ClaimEvidenceManifest,
+  claimId: string,
+  timing: ClaimAdmissionTiming,
+): AffiliateAgentClaimEnvelope =>
+  affiliateAgentClaimEnvelopeSchema.parse({
+    schemaVersion: 1,
+    queue: job.queue,
+    lane: job.lane,
+    jobId: job.id,
+    claimId,
+    supplySourceId: job.supplySourceId,
+    claimGeneration: job.claimGeneration + 1,
+    lifecycleGeneration,
+    deploymentContractVersion: bundle.deploymentContract.version,
+    deploymentContractHash: bundle.deploymentContract.hash,
+    supplyContractVersion: bundle.supplyContract.version,
+    supplyContractHash: bundle.supplyContract.hash,
+    roleContractVersion: roleContract.version,
+    roleContractHash: roleContract.hash,
+    promptTemplateVersion: roleContract.promptTemplateVersion,
+    promptTemplateHash: roleContract.promptTemplateHash,
+    role: input.role,
+    executionClass: "PRODUCTION_CODEX",
+    workerId: input.workerId,
+    invocationId: input.invocationId,
+    workspaceId: input.workspaceAttestation.workspaceId,
+    claimedAt: timing.now.toISOString(),
+    expiresAt: timing.hardDeadlineAt.toISOString(),
+    evidenceManifest,
+    subject,
+    permittedCommands: roleContract.permittedCommands,
+  });
+
+const findMatchingParentArtifact = (
+  parentArtifacts: readonly ClaimParentArtifact[],
+  entry: ClaimEvidenceEntry,
+): ClaimParentArtifact | undefined =>
+  parentArtifacts.find((artifact) =>
+    [
+      artifact.sourceArtifactId === entry.artifactId,
+      artifact.fileId === entry.artifactId,
+      artifact.contentHash === entry.sha256,
+      artifact.mimeType === entry.mimeType,
+      artifact.byteSize === entry.byteSize,
+    ].every(Boolean),
+  );
+
+const persistClaimArtifacts = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  transaction: Prisma.TransactionClient,
+  job: AffiliateAgentGatewayJobs,
+  claimId: string,
+  claimGeneration: number,
+  evidenceManifest: ClaimEvidenceManifest,
+): Promise<void> => {
+  const parentArtifacts: readonly ClaimParentArtifact[] =
+    job.parentClaimId === null
+      ? []
+      : await transaction.affiliateAgentGatewayArtifacts.findMany({
+          where: { claimId: job.parentClaimId },
+        });
+  if (evidenceManifest.entries.length === 0) return;
+  await transaction.affiliateAgentGatewayArtifacts.createMany({
+    data: evidenceManifest.entries.map((entry) => {
+      const parentArtifact = findMatchingParentArtifact(parentArtifacts, entry);
+      return {
+        id: dependencies.identifiers.create("artifact"),
+        claimId,
+        claimGeneration,
+        evidenceRef: entry.evidenceRef,
+        evidenceKind: entry.kind,
+        sourceArtifactId: entry.artifactId,
+        fileId: entry.artifactId,
+        contentHash: entry.sha256,
+        mimeType: entry.mimeType,
+        byteSize: entry.byteSize,
+        accessMode: "READ_ONLY",
+        creatingClaimId:
+          parentArtifact?.creatingClaimId ?? parentArtifact?.claimId ?? null,
+        retentionClass: entry.retention,
+        isPinned: true,
+      };
+    }),
+  });
+};
+
+const createClaimRecord = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  transaction: Prisma.TransactionClient,
+  input: AffiliateAgentClaimRequest,
+  job: AffiliateAgentGatewayJobs,
+  bundle: AffiliateAgentContractBundle,
+  roleContract: AffiliateAgentRoleContract,
+  envelope: AffiliateAgentClaimEnvelope,
+  requestHash: string,
+  claimId: string,
+  tokenNonce: string,
+  tokenScope: AffiliateAgentClaimTokenScope,
+  timing: ClaimAdmissionTiming,
+): Promise<AffiliateAgentGatewayClaims> =>
+  transaction.affiliateAgentGatewayClaims.create({
+    data: {
+      id: claimId,
+      jobId: job.id,
+      parentClaimId: job.parentClaimId,
+      claimGeneration: envelope.claimGeneration,
+      lifecycleGeneration: envelope.lifecycleGeneration,
+      queue: job.queue,
+      lane: job.lane,
+      role: input.role,
+      workerId: input.workerId,
+      invocationId: input.invocationId,
+      workspaceId: input.workspaceAttestation.workspaceId,
+      workspaceMode: input.workspaceAttestation.mode,
+      workspaceAttestationHash: hashAffiliateAgentValue(
+        input.workspaceAttestation,
+      ),
+      status: "ACTIVE",
+      claimRequestId: input.idempotencyKey,
+      claimRequestHash: requestHash,
+      claimedAt: timing.now,
+      lastHeartbeatAt: timing.now,
+      leaseExpiresAt: timing.leaseExpiresAt,
+      hardDeadlineAt: timing.hardDeadlineAt,
+      endedAt: null,
+      tokenNonce,
+      tokenHash: dependencies.tokens.hashFor(tokenScope, tokenNonce),
+      tokenKeyVersion: dependencies.tokens.keyVersion,
+      tokenExpiresAt: timing.hardDeadlineAt,
+      tokenInvalidatedAt: null,
+      deploymentContractVersion: bundle.deploymentContract.version,
+      deploymentContractHash: bundle.deploymentContract.hash,
+      roleContractVersion: roleContract.version,
+      roleContractHash: roleContract.hash,
+      promptTemplateVersion: roleContract.promptTemplateVersion,
+      promptTemplateHash: roleContract.promptTemplateHash,
+      supplyContractVersion: bundle.supplyContract.version,
+      supplyContractHash: bundle.supplyContract.hash,
+      claimEnvelopeHash: hashAffiliateAgentValue(envelope),
+      claimEnvelopeJson: asPrismaJson(envelope),
+      evidenceManifestHash: envelope.evidenceManifest.hash,
+      permittedCommandHash: tokenScope.permittedCommandHash,
+      permittedCommands: [...roleContract.permittedCommands],
+      schemaCorrectionCount: 0,
+      terminalReceiptId: null,
+      safeFailureCode: null,
+      safeFailureSummary: null,
+      diagnosticRetainUntil: null,
+    },
+  });
+
+const persistClaimCreatedEvent = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  transaction: Prisma.TransactionClient,
+  input: AffiliateAgentClaimRequest,
+  job: AffiliateAgentGatewayJobs,
+  envelope: AffiliateAgentClaimEnvelope,
+  claimId: string,
+  timing: ClaimAdmissionTiming,
+): Promise<void> => {
+  await transaction.affiliateAgentGatewayEvents.create({
+    data: {
+      id: dependencies.identifiers.create("event"),
+      eventKey: `claim:${claimId}`,
+      jobId: job.id,
+      claimId,
+      sequence: job.eventSequence + 1,
+      eventType: "CLAIM_CREATED",
+      actorKind: "AGENT_WORKER",
+      actorId: input.workerId,
+      role: input.role,
+      inputHash: hashAffiliateAgentValue(envelope.subject),
+      outputHash: hashAffiliateAgentValue({
+        claimId,
+        claimGeneration: envelope.claimGeneration,
+        leaseExpiresAt: timing.leaseExpiresAt.toISOString(),
+        hardDeadlineAt: timing.hardDeadlineAt.toISOString(),
+      }),
+      payload: asPrismaJson({
+        claimGeneration: envelope.claimGeneration,
+        workspaceId: input.workspaceAttestation.workspaceId,
+      }),
+      retentionClass: "INDEFINITE",
+    },
+  });
+};
+const persistClaim = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  transaction: Prisma.TransactionClient,
+  input: AffiliateAgentClaimRequest,
+  job: AffiliateAgentGatewayJobs,
+  subject: AffiliateAgentSubject,
+  bundle: AffiliateAgentContractBundle,
+  roleContract: AffiliateAgentRoleContract,
+  requestHash: string,
+  claimId: string,
+  tokenNonce: string,
+  timing: ClaimAdmissionTiming,
+  lifecycleGeneration: number | null,
+  evidenceManifest: ClaimEvidenceManifest,
+): Promise<Readonly<{
+  claim: AffiliateAgentGatewayClaims;
+  envelope: AffiliateAgentClaimEnvelope;
+}> > => {
+  const envelope = createClaimEnvelope(
+    input,
+    bundle,
+    roleContract,
+    job,
+    lifecycleGeneration,
+    subject,
+    evidenceManifest,
+    claimId,
+    timing,
+  );
+  const tokenScope = tokenScopeForEnvelope(envelope);
+  const claimed = await transaction.affiliateAgentGatewayJobs.updateMany({
+    where: {
+      id: job.id,
+      status: { in: ["QUEUED", "RETRY_WAIT"] },
+      activeClaimId: null,
+      claimGeneration: job.claimGeneration,
+      expectedLifecycleGeneration: job.expectedLifecycleGeneration,
+      nextAttemptAt: { lte: timing.now },
+    },
+    data: {
+      status: "CLAIMED",
+      activeClaimId: claimId,
+      claimGeneration: { increment: 1 },
+      expectedLifecycleGeneration: lifecycleGeneration,
+      terminalReceiptId: null,
+      eventSequence: { increment: 1 },
+    },
+  });
+  if (claimed.count !== 1) throw new AffiliateAgentClaimRaceError();
+  const claim = await createClaimRecord(
+    dependencies,
+    transaction,
+    input,
+    job,
+    bundle,
+    roleContract,
+    envelope,
+    requestHash,
+    claimId,
+    tokenNonce,
+    tokenScope,
+    timing,
+  );
+  await persistClaimArtifacts(
+    dependencies,
+    transaction,
+    job,
+    claimId,
+    envelope.claimGeneration,
+    evidenceManifest,
+  );
+  await persistClaimCreatedEvent(
+    dependencies,
+    transaction,
+    input,
+    job,
+    envelope,
+    claimId,
+    timing,
+  );
+  return { claim, envelope };
+};
+
+const executeClaimTransaction = (
+  dependencies: AffiliateAgentGatewayDependencies,
+  input: AffiliateAgentClaimRequest,
+  bundle: AffiliateAgentContractBundle,
+  roleContract: AffiliateAgentRoleContract,
+  requestHash: string,
+  claimId: string,
+  tokenNonce: string,
+  attestationExpiresAt: Date,
+): Promise<ClaimTransactionResult> =>
+  dependencies.prisma.$transaction(
+    async (transaction) => {
+      const replayOrClosed = await findClaimReplayOrClosed(
+        dependencies,
+        transaction,
+        input.idempotencyKey,
+        { role: input.role, workerId: input.workerId },
+      );
+      if (replayOrClosed) return replayOrClosed;
+      const timing = assertClaimAdmissionTiming(
+        attestationExpiresAt,
+        dependencies.clock.now(),
+      );
+      await assertClaimIdentityAvailable(transaction, input);
+      await assertWorkerHasNoLiveClaim(transaction, input.workerId, timing.now);
+      const haltedLanes = await findHaltedClaimLanes(transaction);
+      const job = await findClaimableJob(
+        transaction,
+        input,
+        timing.now,
+        haltedLanes,
+      );
+      if (!job) return { kind: "NO_WORK" as const };
+      const subject = parseQueuedSubject(job, input.role);
+      const evidenceManifest = parseClaimEvidenceManifest(job, input.role);
+      if (input.role === "SUPPLY_REVIEWER") {
+        await assertReviewerProducerAdmission(
+          transaction,
+          job,
+          subject,
+          input,
+        );
+        await assertReviewerManifest(
+          transaction,
+          evidenceManifest,
+          bundle,
+          subject,
+        );
+      }
+      if (input.role === "HUMAN_DIRECTED_EXECUTOR") {
+        await assertHumanDirectedAdmission(
+          transaction,
+          job,
+          subject,
+          evidenceManifest,
+        );
+      }
+      const lifecycleGeneration = await assertClaimLifecycleScope(
+        dependencies,
+        transaction,
+        input,
+        job,
+      );
+      return { kind: "CLAIMED" as const, ...(await persistClaim(
+        dependencies,
+        transaction,
+        input,
+        job,
+        subject,
+        bundle,
+        roleContract,
+        requestHash,
+        claimId,
+        tokenNonce,
+        timing,
+        lifecycleGeneration,
+        evidenceManifest,
+      )) };
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+  );
+
+const claimResultToGrant = (
+  dependencies: AffiliateAgentGatewayDependencies,
+  stored: ClaimTransactionResult,
+  requestHash: string,
+  bundle: AffiliateAgentContractBundle,
+  roleContract: AffiliateAgentRoleContract,
+): AffiliateAgentClaimGrant | null => {
+  switch (stored.kind) {
+    case "CLOSED":
+    case "NO_WORK":
+      return null;
+    case "REPLAY":
+      return replayClaimGrant(
+        dependencies,
+        stored.claim,
+        requestHash,
+        bundle,
+        roleContract,
+      );
+    case "CLAIMED":
+      return {
+        envelope: stored.envelope,
+        prompt: renderAffiliateAgentPrompt(roleContract, stored.envelope),
+        token: dependencies.tokens.issue(
+          tokenScopeForEnvelope(stored.envelope),
+          stored.claim.tokenNonce,
+        ),
+        heartbeatIntervalSeconds: AFFILIATE_AGENT_HEARTBEAT_INTERVAL_SECONDS,
+        leaseExpiresAt: stored.claim.leaseExpiresAt.toISOString(),
+        hardDeadlineAt: stored.claim.hardDeadlineAt.toISOString(),
+      };
+  }
+};
+
+const isClaimRaceOrSerializationConflict = (error: unknown): boolean =>
+  error instanceof AffiliateAgentClaimRaceError ||
+  isSerializableTransactionConflict(error) ||
+  isClaimJobRaceUniqueConflict(error);
+
 const claimAffiliateAgentJob = async (
   dependencies: AffiliateAgentGatewayDependencies,
   input: AffiliateAgentClaimRequest,
@@ -765,630 +2482,41 @@ const claimAffiliateAgentJob = async (
     attempt += 1
   ) {
     try {
-      const stored = await dependencies.prisma.$transaction(
-        async (transaction) => {
-          const replay =
-            await transaction.affiliateAgentGatewayClaims.findUnique({
-              where: { claimRequestId: input.idempotencyKey },
-            });
-          if (replay) {
-            return { kind: "REPLAY" as const, claim: replay };
-          }
-          const now = dependencies.clock.now();
-          if (attestationExpiresAt <= now) {
-            throw gatewayError(
-              "REVIEW_WORKSPACE_INVALID",
-              "The workspace attestation expired before claim admission.",
-            );
-          }
-          const hardDeadlineAt = addSeconds(
-            now,
-            AFFILIATE_AGENT_HARD_DEADLINE_SECONDS,
-          );
-          if (attestationExpiresAt < hardDeadlineAt) {
-            throw gatewayError(
-              "REVIEW_WORKSPACE_INVALID",
-              "The workspace attestation must cover the full invocation deadline.",
-            );
-          }
-          const leaseExpiresAt = new Date(
-            Math.min(
-              addSeconds(now, AFFILIATE_AGENT_LEASE_SECONDS).getTime(),
-              hardDeadlineAt.getTime(),
-            ),
-          );
-
-          const reusedIdentity =
-            await transaction.affiliateAgentGatewayClaims.findFirst({
-              where: {
-                OR: [
-                  { invocationId: input.invocationId },
-                  { workspaceId: input.workspaceAttestation.workspaceId },
-                ],
-              },
-            });
-          if (reusedIdentity?.invocationId === input.invocationId) {
-            throw gatewayError(
-              "INVOCATION_MISMATCH",
-              "The invocation identity was already used by another claim request.",
-            );
-          }
-          if (
-            reusedIdentity?.workspaceId ===
-            input.workspaceAttestation.workspaceId
-          ) {
-            throw gatewayError(
-              "REVIEW_WORKSPACE_INVALID",
-              "The workspace identity was already used by another claim request.",
-            );
-          }
-
-          const globalHalt =
-            await transaction.affiliateAgentGatewayOperationReceipts.findFirst({
-              where: {
-                status: "UNKNOWN",
-                safeErrorCode: "GATEWAY_ADMISSION_HALTED",
-              },
-            });
-          if (globalHalt) {
-            throw gatewayError(
-              "GATEWAY_ADMISSION_HALTED",
-              "Gateway admission is halted until an impossible receipt state is resolved.",
-            );
-          }
-          const impossibleClaim =
-            await transaction.affiliateAgentGatewayClaims.findFirst({
-              where: { safeFailureCode: "GATEWAY_ADMISSION_HALTED" },
-              select: { id: true },
-            });
-          if (impossibleClaim) {
-            throw gatewayError(
-              "GATEWAY_ADMISSION_HALTED",
-              "Gateway admission is halted until an impossible claim state is resolved.",
-            );
-          }
-          const haltedJobs =
-            await transaction.affiliateAgentGatewayJobs.findMany({
-              where: { status: "RECONCILIATION_REQUIRED" },
-              select: { lane: true },
-            });
-          const haltedLanes = [...new Set(haltedJobs.map(({ lane }) => lane))];
-
-          const job = await transaction.affiliateAgentGatewayJobs.findFirst({
-            where: {
-              role: input.role,
-              status: { in: ["QUEUED", "RETRY_WAIT"] },
-              activeClaimId: null,
-              nextAttemptAt: { lte: now },
-              lane:
-                haltedLanes.length === 0 ? undefined : { notIn: haltedLanes },
-            },
-            orderBy: [
-              { priority: "desc" },
-              { createdAt: "asc" },
-              { id: "asc" },
-            ],
-          });
-          if (!job) return { kind: "NO_WORK" as const };
-          const subject = parseQueuedSubject(job, input.role);
-
-          const evidenceManifestResult =
-            affiliateAgentEvidenceManifestSchema.safeParse(
-              job.evidenceManifestJson,
-            );
-          if (!evidenceManifestResult.success) {
-            throw gatewayError(
-              input.role === "SUPPLY_REVIEWER"
-                ? "REVIEW_WORKSPACE_INVALID"
-                : "DEPLOYMENT_CONTRACT_STALE",
-              "The claim evidence manifest is invalid.",
-            );
-          }
-          const evidenceManifest = evidenceManifestResult.data;
-          if (input.role === "SUPPLY_REVIEWER") {
-            if (subject.type !== "SUPPLY_REVIEWER") {
-              throw gatewayError(
-                "REVIEW_WORKSPACE_INVALID",
-                "The reviewer subject is invalid.",
-              );
-            }
-            const producerClaim =
-              await transaction.affiliateAgentGatewayClaims.findUnique({
-                where: { id: subject.producerClaimId },
-              });
-            const producerJob = producerClaim
-              ? await transaction.affiliateAgentGatewayJobs.findUnique({
-                  where: { id: producerClaim.jobId },
-                })
-              : null;
-            const producerEnvelope = producerClaim
-              ? affiliateAgentClaimEnvelopeSchema.safeParse(
-                  producerClaim.claimEnvelopeJson,
-                )
-              : null;
-            const producerResult = producerJob
-              ? affiliateAgentTerminalResultEnvelopeSchema.safeParse(
-                  producerJob.resultJson,
-                )
-              : null;
-            const producerPackageHash =
-              producerResult?.success &&
-              producerResult.data.role === "MAPPING_PRODUCER" &&
-              (producerResult.data.disposition === "PACKAGE_COMMITTED" ||
-                producerResult.data.disposition === "BOUNDED_REPAIR_SUBMITTED")
-                ? producerResult.data.payload.packageHash
-                : null;
-            const producerSubject =
-              producerEnvelope?.success &&
-              producerEnvelope.data.subject.type === "MAPPING_PRODUCER"
-                ? producerEnvelope.data.subject
-                : null;
-            const isProducerResultIdentityMatch =
-              producerResult?.success &&
-              producerResult.data.jobId === producerJob?.id &&
-              producerResult.data.claimId === producerClaim?.id &&
-              producerResult.data.claimGeneration ===
-                producerClaim?.claimGeneration &&
-              producerResult.data.role === "MAPPING_PRODUCER";
-            const isProducerClaimValid =
-              producerClaim?.status === "COMPLETED" &&
-              producerClaim.role === "MAPPING_PRODUCER" &&
-              producerClaim.terminalReceiptId !== null &&
-              producerJob?.status === "COMPLETED" &&
-              producerJob.activeClaimId === null &&
-              producerJob.terminalReceiptId ===
-                producerClaim.terminalReceiptId &&
-              producerEnvelope?.success === true &&
-              hashAffiliateAgentValue(producerEnvelope.data) ===
-                producerClaim.claimEnvelopeHash &&
-              producerSubject?.supplySourceId === subject.supplySourceId &&
-              job.parentClaimId === subject.producerClaimId &&
-              producerClaim.workerId === subject.producerWorkerId &&
-              producerClaim.invocationId === subject.producerInvocationId &&
-              producerClaim.workspaceId === subject.producerWorkspaceId &&
-              isProducerResultIdentityMatch &&
-              producerPackageHash === subject.committedPackageHash;
-            if (!isProducerClaimValid) {
-              throw gatewayError(
-                "REVIEW_WORKSPACE_INVALID",
-                "The reviewer claim must reference one completed matching producer claim.",
-              );
-            }
-            if (
-              subject.producerWorkerId === input.workerId ||
-              subject.producerInvocationId === input.invocationId
-            ) {
-              throw gatewayError(
-                "PRODUCER_REVIEWER_IDENTITY_REUSED",
-                "The reviewer worker and invocation must differ from the producer.",
-              );
-            }
-            if (
-              subject.producerWorkspaceId ===
-              input.workspaceAttestation.workspaceId
-            ) {
-              throw gatewayError(
-                "REVIEW_WORKSPACE_INVALID",
-                "The reviewer workspace must differ from the producer workspace.",
-              );
-            }
-            const manifestKinds = evidenceManifest.entries.map(
-              (entry) => entry.kind,
-            );
-            const allowedKinds: Readonly<Record<string, true>> = {
-              ACTIVE_SUPPLY_CONTRACT: true,
-              COMMITTED_PACKAGE: true,
-              DETERMINISTIC_VALIDATION: true,
-              DURABLE_EVIDENCE: true,
-            };
-            const requiredKinds = [
-              "ACTIVE_SUPPLY_CONTRACT",
-              "COMMITTED_PACKAGE",
-              "DETERMINISTIC_VALIDATION",
-              "DURABLE_EVIDENCE",
-            ] as const;
-            const producerArtifacts =
-              await transaction.affiliateAgentGatewayArtifacts.findMany({
-                where: {
-                  OR: [
-                    { claimId: subject.producerClaimId },
-                    { creatingClaimId: subject.producerClaimId },
-                  ],
-                },
-              });
-            const producerEvidenceIsBound = (
-              ["DETERMINISTIC_VALIDATION", "DURABLE_EVIDENCE"] as const
-            ).every((kind) => {
-              const entry = evidenceManifest.entries.find(
-                (candidate) => candidate.kind === kind,
-              );
-              return (
-                entry !== undefined &&
-                producerArtifacts.some(
-                  (artifact) =>
-                    artifact.evidenceKind === kind &&
-                    artifact.sourceArtifactId === entry.artifactId &&
-                    artifact.fileId === entry.artifactId &&
-                    artifact.contentHash === entry.sha256 &&
-                    artifact.mimeType === entry.mimeType &&
-                    artifact.byteSize === entry.byteSize &&
-                    (artifact.claimId === subject.producerClaimId ||
-                      artifact.creatingClaimId === subject.producerClaimId),
-                )
-              );
-            });
-            const activeContractEntry = evidenceManifest.entries.find(
-              (entry) => entry.kind === "ACTIVE_SUPPLY_CONTRACT",
-            );
-            const committedPackageEntry = evidenceManifest.entries.find(
-              (entry) => entry.kind === "COMMITTED_PACKAGE",
-            );
-            if (
-              manifestKinds.some((kind) => allowedKinds[kind] !== true) ||
-              requiredKinds.some(
-                (kind) =>
-                  manifestKinds.filter((entryKind) => entryKind === kind)
-                    .length !== 1,
-              ) ||
-              activeContractEntry?.sha256 !== bundle.supplyContract.hash ||
-              committedPackageEntry?.sha256 !== subject.committedPackageHash ||
-              !producerEvidenceIsBound
-            ) {
-              throw gatewayError(
-                "REVIEW_WORKSPACE_INVALID",
-                "The reviewer manifest must contain one exact copy of each committed review artifact.",
-              );
-            }
-          }
-          if (input.role === "HUMAN_DIRECTED_EXECUTOR") {
-            if (subject.type !== "HUMAN_DIRECTED_EXECUTOR") {
-              throw gatewayError(
-                "REVIEW_WORKSPACE_INVALID",
-                "The human-directed subject is invalid.",
-              );
-            }
-            const humanDecisionEntries = evidenceManifest.entries.filter(
-              (entry) => entry.kind === "HUMAN_DECISION",
-            );
-            const reviewerEvidenceEntries = evidenceManifest.entries.filter(
-              (entry) => entry.kind === "REVIEWER_EVIDENCE",
-            );
-            const isHumanEvidenceKindsAllowed = evidenceManifest.entries.every(
-              (entry) =>
-                entry.kind === "HUMAN_DECISION" ||
-                entry.kind === "REVIEWER_EVIDENCE",
-            );
-            const reviewerClaim =
-              await transaction.affiliateAgentGatewayClaims.findUnique({
-                where: { id: subject.reviewerClaimId },
-              });
-            const reviewerJob = reviewerClaim
-              ? await transaction.affiliateAgentGatewayJobs.findUnique({
-                  where: { id: reviewerClaim.jobId },
-                })
-              : null;
-            const reviewerEnvelope = reviewerClaim
-              ? affiliateAgentClaimEnvelopeSchema.safeParse(
-                  reviewerClaim.claimEnvelopeJson,
-                )
-              : null;
-            const reviewerResult = reviewerJob
-              ? affiliateAgentTerminalResultEnvelopeSchema.safeParse(
-                  reviewerJob.resultJson,
-                )
-              : null;
-            const reviewerSubject =
-              reviewerEnvelope?.success &&
-              reviewerEnvelope.data.subject.type === "SUPPLY_REVIEWER"
-                ? reviewerEnvelope.data.subject
-                : null;
-            const reviewerResultData =
-              reviewerResult?.success &&
-              reviewerResult.data.role === "SUPPLY_REVIEWER" &&
-              reviewerResult.data.disposition === "HUMAN_REVIEW_REQUIRED"
-                ? reviewerResult.data
-                : null;
-            const isReviewerEvidenceMatch = reviewerEvidenceEntries.some(
-              (humanEntry) =>
-                reviewerResultData?.evidenceRefs.some((evidenceRef) =>
-                  evidenceRef === humanEntry.evidenceRef &&
-                  reviewerEnvelope?.success === true
-                    ? reviewerEnvelope.data.evidenceManifest.entries.some(
-                        (reviewerEntry) =>
-                          reviewerEntry.evidenceRef === evidenceRef &&
-                          (reviewerEntry.kind === "DETERMINISTIC_VALIDATION" ||
-                            reviewerEntry.kind === "DURABLE_EVIDENCE") &&
-                          reviewerEntry.artifactId === humanEntry.artifactId &&
-                          reviewerEntry.sha256 === humanEntry.sha256 &&
-                          reviewerEntry.mimeType === humanEntry.mimeType &&
-                          reviewerEntry.byteSize === humanEntry.byteSize,
-                      )
-                    : false,
-                ) === true,
-            );
-            const isReviewerClaimValid =
-              reviewerClaim?.status === "COMPLETED" &&
-              reviewerClaim.role === "SUPPLY_REVIEWER" &&
-              reviewerClaim.terminalReceiptId !== null &&
-              reviewerJob?.status === "COMPLETED" &&
-              reviewerJob.activeClaimId === null &&
-              reviewerJob.terminalReceiptId ===
-                reviewerClaim.terminalReceiptId &&
-              reviewerEnvelope?.success === true &&
-              hashAffiliateAgentValue(reviewerEnvelope.data) ===
-                reviewerClaim.claimEnvelopeHash &&
-              job.parentClaimId === subject.reviewerClaimId &&
-              reviewerSubject?.supplySourceId === job.supplySourceId &&
-              reviewerResultData?.jobId === reviewerJob.id &&
-              reviewerResultData.claimId === reviewerClaim.id &&
-              reviewerResultData.claimGeneration ===
-                reviewerClaim.claimGeneration &&
-              isReviewerEvidenceMatch;
-            if (
-              !isHumanEvidenceKindsAllowed ||
-              humanDecisionEntries.length !== 1 ||
-              reviewerEvidenceEntries.length !== 1 ||
-              humanDecisionEntries[0]?.sha256 !== subject.decisionHash ||
-              !isReviewerClaimValid
-            ) {
-              throw gatewayError(
-                "REVIEW_WORKSPACE_INVALID",
-                "The human claim must contain the exact decision and completed reviewer evidence.",
-              );
-            }
-          }
-          if (
-            input.role !== "COVERAGE_PLANNER" &&
-            (!job.supplySourceId || job.expectedLifecycleGeneration === null)
-          ) {
-            throw gatewayError(
-              "LIFECYCLE_GENERATION_STALE",
-              "Non-coverage jobs require a Supply Source lifecycle generation.",
-            );
-          }
-          if (job.expectedLifecycleGeneration !== null) {
-            if (
-              !job.supplySourceId ||
-              dependencies.lifecycle.kind !== "AVAILABLE"
-            ) {
-              throw gatewayError(
-                "LIFECYCLE_GENERATION_STALE",
-                "The Supply Source lifecycle generation is stale.",
-              );
-            }
-            const currentGeneration =
-              await dependencies.lifecycle.currentGeneration(
-                job.supplySourceId,
-              );
-            const hasLifecycleAdvanceRecorded =
-              input.role === "HUMAN_DIRECTED_EXECUTOR" &&
-              currentGeneration === job.expectedLifecycleGeneration + 1 &&
-              (await hasRecordedLifecycleAdvanceForJob(
-                transaction,
-                job.id,
-                currentGeneration,
-              ));
-            if (
-              currentGeneration !== job.expectedLifecycleGeneration &&
-              !hasLifecycleAdvanceRecorded
-            ) {
-              throw gatewayError(
-                "LIFECYCLE_GENERATION_STALE",
-                "The Supply Source lifecycle generation is stale.",
-              );
-            }
-          }
-          const claimGeneration = job.claimGeneration + 1;
-          const envelope = affiliateAgentClaimEnvelopeSchema.parse({
-            schemaVersion: 1,
-            queue: job.queue,
-            lane: job.lane,
-            jobId: job.id,
-            claimId,
-            supplySourceId: job.supplySourceId,
-            claimGeneration,
-            lifecycleGeneration: job.expectedLifecycleGeneration,
-            deploymentContractVersion: bundle.deploymentContract.version,
-            deploymentContractHash: bundle.deploymentContract.hash,
-            supplyContractVersion: bundle.supplyContract.version,
-            supplyContractHash: bundle.supplyContract.hash,
-            roleContractVersion: roleContract.version,
-            roleContractHash: roleContract.hash,
-            promptTemplateVersion: roleContract.promptTemplateVersion,
-            promptTemplateHash: roleContract.promptTemplateHash,
-            role: input.role,
-            executionClass: "PRODUCTION_CODEX",
-            workerId: input.workerId,
-            invocationId: input.invocationId,
-            workspaceId: input.workspaceAttestation.workspaceId,
-            claimedAt: now.toISOString(),
-            expiresAt: hardDeadlineAt.toISOString(),
-            evidenceManifest,
-            subject: job.subjectJson,
-            permittedCommands: roleContract.permittedCommands,
-          });
-          const tokenScope = tokenScopeForEnvelope(envelope);
-          const claimed =
-            await transaction.affiliateAgentGatewayJobs.updateMany({
-              where: {
-                id: job.id,
-                status: { in: ["QUEUED", "RETRY_WAIT"] },
-                activeClaimId: null,
-                claimGeneration: job.claimGeneration,
-                nextAttemptAt: { lte: now },
-              },
-              data: {
-                status: "CLAIMED",
-                activeClaimId: claimId,
-                claimGeneration: { increment: 1 },
-                terminalReceiptId: null,
-                eventSequence: { increment: 1 },
-              },
-            });
-          if (claimed.count !== 1) throw new AffiliateAgentClaimRaceError();
-
-          const claim = await transaction.affiliateAgentGatewayClaims.create({
-            data: {
-              id: claimId,
-              jobId: job.id,
-              parentClaimId: job.parentClaimId,
-              claimGeneration,
-              lifecycleGeneration: job.expectedLifecycleGeneration,
-              queue: job.queue,
-              lane: job.lane,
-              role: input.role,
-              workerId: input.workerId,
-              invocationId: input.invocationId,
-              workspaceId: input.workspaceAttestation.workspaceId,
-              workspaceMode: input.workspaceAttestation.mode,
-              workspaceAttestationHash: hashAffiliateAgentValue(
-                input.workspaceAttestation,
-              ),
-              status: "ACTIVE",
-              claimRequestId: input.idempotencyKey,
-              claimRequestHash: requestHash,
-              claimedAt: now,
-              lastHeartbeatAt: now,
-              leaseExpiresAt,
-              hardDeadlineAt,
-              endedAt: null,
-              tokenNonce,
-              tokenHash: dependencies.tokens.hashFor(tokenScope, tokenNonce),
-              tokenKeyVersion: dependencies.tokens.keyVersion,
-              tokenExpiresAt: hardDeadlineAt,
-              tokenInvalidatedAt: null,
-              deploymentContractVersion: bundle.deploymentContract.version,
-              deploymentContractHash: bundle.deploymentContract.hash,
-              roleContractVersion: roleContract.version,
-              roleContractHash: roleContract.hash,
-              promptTemplateVersion: roleContract.promptTemplateVersion,
-              promptTemplateHash: roleContract.promptTemplateHash,
-              supplyContractVersion: bundle.supplyContract.version,
-              supplyContractHash: bundle.supplyContract.hash,
-              claimEnvelopeHash: hashAffiliateAgentValue(envelope),
-              claimEnvelopeJson: asPrismaJson(envelope),
-              evidenceManifestHash: evidenceManifest.hash,
-              permittedCommandHash: tokenScope.permittedCommandHash,
-              permittedCommands: [...roleContract.permittedCommands],
-              schemaCorrectionCount: 0,
-              terminalReceiptId: null,
-              safeFailureCode: null,
-              safeFailureSummary: null,
-              diagnosticRetainUntil: null,
-            },
-          });
-          const parentArtifacts =
-            job.parentClaimId === null
-              ? []
-              : await transaction.affiliateAgentGatewayArtifacts.findMany({
-                  where: { claimId: job.parentClaimId },
-                });
-
-          if (evidenceManifest.entries.length > 0) {
-            await transaction.affiliateAgentGatewayArtifacts.createMany({
-              data: evidenceManifest.entries.map((entry) => {
-                const parentArtifact = parentArtifacts.find(
-                  (artifact) =>
-                    artifact.sourceArtifactId === entry.artifactId &&
-                    artifact.fileId === entry.artifactId &&
-                    artifact.contentHash === entry.sha256 &&
-                    artifact.mimeType === entry.mimeType &&
-                    artifact.byteSize === entry.byteSize,
-                );
-                return {
-                  id: dependencies.identifiers.create("artifact"),
-                  claimId,
-                  claimGeneration,
-                  evidenceRef: entry.evidenceRef,
-                  evidenceKind: entry.kind,
-                  sourceArtifactId: entry.artifactId,
-                  fileId: entry.artifactId,
-                  contentHash: entry.sha256,
-                  mimeType: entry.mimeType,
-                  byteSize: entry.byteSize,
-                  accessMode: "READ_ONLY",
-                  creatingClaimId:
-                    parentArtifact?.creatingClaimId ??
-                    parentArtifact?.claimId ??
-                    null,
-                  retentionClass: entry.retention,
-                  isPinned: true,
-                };
-              }),
-            });
-          }
-
-          await transaction.affiliateAgentGatewayEvents.create({
-            data: {
-              id: dependencies.identifiers.create("event"),
-              eventKey: `claim:${claimId}`,
-              jobId: job.id,
-              claimId,
-              sequence: job.eventSequence + 1,
-              eventType: "CLAIM_CREATED",
-              actorKind: "AGENT_WORKER",
-              actorId: input.workerId,
-              role: input.role,
-              inputHash: hashAffiliateAgentValue(envelope.subject),
-              outputHash: hashAffiliateAgentValue({
-                claimId,
-                claimGeneration,
-                leaseExpiresAt: leaseExpiresAt.toISOString(),
-                hardDeadlineAt: hardDeadlineAt.toISOString(),
-              }),
-              payload: asPrismaJson({
-                claimGeneration,
-                workspaceId: input.workspaceAttestation.workspaceId,
-              }),
-              retentionClass: "INDEFINITE",
-            },
-          });
-          return { kind: "CLAIMED" as const, claim, envelope };
-        },
-        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-      );
-
-      if (stored.kind === "NO_WORK") return null;
-      if (stored.kind === "REPLAY") {
-        return replayClaimGrant(
+      const runClaimTransaction = () =>
+        executeClaimTransaction(
           dependencies,
-          stored.claim,
-          requestHash,
+          input,
           bundle,
           roleContract,
+          requestHash,
+          claimId,
+          tokenNonce,
+          attestationExpiresAt,
         );
-      }
-      return {
-        envelope: stored.envelope,
-        prompt: renderAffiliateAgentPrompt(roleContract, stored.envelope),
-        token: dependencies.tokens.issue(
-          tokenScopeForEnvelope(stored.envelope),
-          stored.claim.tokenNonce,
-        ),
-        heartbeatIntervalSeconds: AFFILIATE_AGENT_HEARTBEAT_INTERVAL_SECONDS,
-        leaseExpiresAt: stored.claim.leaseExpiresAt.toISOString(),
-        hardDeadlineAt: stored.claim.hardDeadlineAt.toISOString(),
-      };
+      const stored = dependencies.claimAdmission
+        ? await dependencies.claimAdmission.withClaim(
+          runClaimTransaction,
+          { role: input.role, workerId: input.workerId },
+        )
+        : await runClaimTransaction();
+      return claimResultToGrant(
+        dependencies,
+        stored,
+        requestHash,
+        bundle,
+        roleContract,
+      );
     } catch (error) {
-      const identityConflict = isClaimIdentityUniqueConflict(error);
-      const jobRaceConflict = isClaimJobRaceUniqueConflict(error);
       const retryableConflict =
         error instanceof AffiliateAgentClaimRaceError ||
-        prismaErrorCode(error) === "P2034" ||
-        identityConflict ||
-        jobRaceConflict;
+        isSerializableTransactionConflict(error);
       if (retryableConflict && attempt < SERIALIZABLE_TRANSACTION_ATTEMPTS) {
         continue;
       }
-      if (
-        error instanceof AffiliateAgentClaimRaceError ||
-        prismaErrorCode(error) === "P2034" ||
-        jobRaceConflict
-      ) {
-        return null;
-      }
+      if (isClaimRaceOrSerializationConflict(error)) return null;
       if (error instanceof AffiliateAgentGatewayError) throw error;
-      throw gatewayError(
+      throw gatewayErrorForPersistenceFailure(
+        error,
         "INTERNAL_ERROR",
         "The Affiliate Agent claim could not be completed.",
         true,
@@ -1413,35 +2541,224 @@ type ClaimAuthorizationOptions = Readonly<{
   isTrustedFailureRecording?: boolean;
 }>;
 
-const hasRecordedLifecycleAdvanceForJob = async (
+type LifecycleAdvanceRole =
+  | "MAPPING_PRODUCER"
+  | "SUPPLY_REVIEWER"
+  | "HUMAN_DIRECTED_EXECUTOR";
+
+const lifecycleReceiptSafeOutput = (
+  responseJson: unknown,
+): Readonly<{ kind: string; safeOutput: Record<string, unknown> }> | null => {
+  if (!isGatewayRecord(responseJson) || !isGatewayRecord(responseJson.safeOutput)) {
+    return null;
+  }
+  if (typeof responseJson.kind !== "string") return null;
+  return {
+    kind: responseJson.kind,
+    safeOutput: responseJson.safeOutput,
+  };
+};
+
+const lifecycleReceiptMatchesRole = (
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  role: LifecycleAdvanceRole,
+): boolean => {
+  if (receipt.status !== "SUCCEEDED") return false;
+  if (role === "MAPPING_PRODUCER") {
+    return (
+      receipt.operationKind === "EXECUTE_COMMAND"
+      && receipt.commandName === "COMMIT_DECLARATIVE_PACKAGE"
+    );
+  }
+  if (role === "SUPPLY_REVIEWER") {
+    return (
+      receipt.operationKind === "TERMINAL_EFFECT"
+      && receipt.commandName === "SUPPLY_REVIEWER_TERMINAL_EFFECT"
+    );
+  }
+  return (
+    receipt.operationKind === "EXECUTE_COMMAND"
+    && receipt.commandName === "EXECUTE_RECORDED_LIFECYCLE_COMMAND"
+  );
+};
+
+const lifecycleReceiptOutputMatchesRole = (
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  role: LifecycleAdvanceRole,
+  currentGeneration: number,
+): Readonly<Record<string, unknown>> | null => {
+  const parsed = lifecycleReceiptSafeOutput(receipt.responseJson);
+  if (!parsed) return null;
+  if (role === "SUPPLY_REVIEWER") {
+    return (
+      parsed.kind === "SUCCEEDED"
+      && parsed.safeOutput.lifecycleGeneration === currentGeneration
+    )
+      ? parsed.safeOutput
+      : null;
+  }
+  if (parsed.kind !== "COMMAND_SUCCEEDED") return null;
+  if (role === "MAPPING_PRODUCER") return parsed.safeOutput;
+  return parsed.safeOutput.lifecycleGeneration === currentGeneration
+    ? parsed.safeOutput
+    : null;
+};
+
+const humanLifecycleActorId = (
+  claim: AffiliateAgentGatewayClaims,
+): string | null => {
+  const envelope = affiliateAgentClaimEnvelopeSchema.safeParse(
+    claim.claimEnvelopeJson,
+  );
+  if (!envelope.success || envelope.data.subject.type !== "HUMAN_DIRECTED_EXECUTOR") {
+    return null;
+  }
+  return envelope.data.subject.recordedHumanActorId;
+};
+
+type LifecycleTransitionRecord = Readonly<{
+  idempotencyKey: string;
+  actorKind: string;
+  executingAgentId: string | null;
+  actorId: string;
+  command: string;
+}>;
+
+const lifecycleTransitionIdentityMatches = (
+  transition: LifecycleTransitionRecord | null,
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  claim: AffiliateAgentGatewayClaims,
+  role: LifecycleAdvanceRole,
+): boolean => transition !== null && [
+  transition.idempotencyKey === receipt.id,
+  transition.actorKind === role,
+  transition.executingAgentId === claim.invocationId,
+].every(Boolean);
+
+const lifecycleTransitionActorMatches = (
+  transition: LifecycleTransitionRecord,
+  claim: AffiliateAgentGatewayClaims,
+  role: LifecycleAdvanceRole,
+): boolean => {
+  const expectedActorId = role === "HUMAN_DIRECTED_EXECUTOR"
+    ? humanLifecycleActorId(claim)
+    : claim.workerId;
+  return expectedActorId !== null && transition.actorId === expectedActorId;
+};
+
+const lifecycleTransitionCommandMatches = (
+  transition: LifecycleTransitionRecord,
+  role: LifecycleAdvanceRole,
+  safeOutput: Readonly<Record<string, unknown>>,
+): boolean => {
+  if (role === "MAPPING_PRODUCER") {
+    return transition.command === "RECORD_MAPPING";
+  }
+  if (role === "SUPPLY_REVIEWER") {
+    return transition.command === safeOutput.command;
+  }
+  return true;
+};
+
+const lifecycleTransitionMatchesReceipt = async (
   client: PrismaClient | Prisma.TransactionClient,
-  jobId: string,
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  claim: AffiliateAgentGatewayClaims,
+  role: LifecycleAdvanceRole,
+  sourceId: string,
+  currentGeneration: number,
+  safeOutput: Readonly<Record<string, unknown>>,
+): Promise<boolean> => {
+  if (typeof client.affiliateSupplyLifecycleTransitions?.findFirst !== "function") {
+    return false;
+  }
+  const transition = await client.affiliateSupplyLifecycleTransitions.findFirst({
+    where: {
+      supplySourceId: sourceId,
+      generation: currentGeneration,
+      commandRef: receipt.id,
+    },
+  });
+  if (
+    transition === null
+    || !lifecycleTransitionIdentityMatches(transition, receipt, claim, role)
+  ) {
+    return false;
+  }
+  if (!lifecycleTransitionActorMatches(transition, claim, role)) {
+    return false;
+  }
+  return lifecycleTransitionCommandMatches(transition, role, safeOutput);
+};
+
+const lifecycleAdvanceMatchesReceipt = async (
+  client: PrismaClient | Prisma.TransactionClient,
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  claim: AffiliateAgentGatewayClaims,
+  role: LifecycleAdvanceRole,
+  sourceId: string,
   currentGeneration: number,
 ): Promise<boolean> => {
-  const receipts = await client.affiliateAgentGatewayOperationReceipts.findMany(
-    {
-      where: {
-        jobId,
-        commandName: "EXECUTE_RECORDED_LIFECYCLE_COMMAND",
-        status: "SUCCEEDED",
-      },
-      select: { responseJson: true },
-    },
+  if (
+    receipt.claimId !== claim.id
+    || receipt.jobId !== claim.jobId
+    || receipt.claimGeneration !== claim.claimGeneration
+    || !lifecycleReceiptMatchesRole(receipt, role)
+  ) {
+    return false;
+  }
+  const safeOutput = lifecycleReceiptOutputMatchesRole(
+    receipt,
+    role,
+    currentGeneration,
   );
-  return receipts.some(({ responseJson: response }) => {
-    if (
-      response === null ||
-      typeof response !== "object" ||
-      Array.isArray(response) ||
-      response.kind !== "COMMAND_SUCCEEDED" ||
-      typeof response.safeOutput !== "object" ||
-      response.safeOutput === null ||
-      Array.isArray(response.safeOutput)
-    ) {
-      return false;
-    }
-    return response.safeOutput.lifecycleGeneration === currentGeneration;
+  return safeOutput !== null
+    && await lifecycleTransitionMatchesReceipt(
+      client,
+      receipt,
+      claim,
+      role,
+      sourceId,
+      currentGeneration,
+      safeOutput,
+    );
+};
+
+const hasRecordedLifecycleAdvanceForJob = async (
+  client: PrismaClient | Prisma.TransactionClient,
+  job: AffiliateAgentGatewayJobs,
+  role: LifecycleAdvanceRole,
+  currentGeneration: number,
+): Promise<boolean> => {
+  if (!job.supplySourceId) return false;
+  const receipts = await client.affiliateAgentGatewayOperationReceipts.findMany({
+    where: {
+      jobId: job.id,
+      claimGeneration: job.claimGeneration,
+      status: "SUCCEEDED",
+    },
   });
+  for (const receipt of receipts) {
+    const claim = await client.affiliateAgentGatewayClaims.findUnique({
+      where: { id: receipt.claimId },
+    });
+    if (
+      claim
+      && claim.role === role
+      && (!job.activeClaimId || job.activeClaimId === claim.id)
+      && await lifecycleAdvanceMatchesReceipt(
+        client,
+        receipt,
+        claim,
+        role,
+        job.supplySourceId,
+        currentGeneration,
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
 };
 
 const hasRecordedLifecycleAdvance = async (
@@ -1450,17 +2767,45 @@ const hasRecordedLifecycleAdvance = async (
   currentGeneration: number,
 ): Promise<boolean> => {
   if (
-    claim.role !== "HUMAN_DIRECTED_EXECUTOR" ||
-    claim.lifecycleGeneration === null ||
-    currentGeneration !== claim.lifecycleGeneration + 1
+    claim.role !== "MAPPING_PRODUCER"
+    && claim.role !== "SUPPLY_REVIEWER"
+    && claim.role !== "HUMAN_DIRECTED_EXECUTOR"
   ) {
     return false;
   }
-  return hasRecordedLifecycleAdvanceForJob(
-    client,
-    claim.jobId,
-    currentGeneration,
-  );
+  if (
+    claim.lifecycleGeneration === null
+    || currentGeneration !== claim.lifecycleGeneration + 1
+  ) {
+    return false;
+  }
+  const job = await client.affiliateAgentGatewayJobs.findUnique({
+    where: { id: claim.jobId },
+  });
+  if (!job?.supplySourceId) return false;
+  const receipts = await client.affiliateAgentGatewayOperationReceipts.findMany({
+    where: {
+      jobId: claim.jobId,
+      claimId: claim.id,
+      claimGeneration: claim.claimGeneration,
+      status: "SUCCEEDED",
+    },
+  });
+  for (const receipt of receipts) {
+    if (
+      await lifecycleAdvanceMatchesReceipt(
+        client,
+        receipt,
+        claim,
+        claim.role,
+        job.supplySourceId,
+        currentGeneration,
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
 };
 
 const operationRequestHash = (input: AffiliateAgentClaimOperation): string => {
@@ -1474,19 +2819,12 @@ const operationRequestHash = (input: AffiliateAgentClaimOperation): string => {
   });
 };
 
-const authorizeClaimOperation = async (
+const assertClaimToken = (
   dependencies: AffiliateAgentGatewayDependencies,
   authorization: AffiliateAgentClaimAuthorization,
-  now: Date,
-  client: PrismaClient | Prisma.TransactionClient = dependencies.prisma,
-  options: ClaimAuthorizationOptions = {},
-): Promise<AuthorizedClaim> => {
-  const claim = await client.affiliateAgentGatewayClaims.findUnique({
-    where: { id: authorization.claimId },
-  });
-  if (!claim) {
-    throw gatewayError("CLAIM_NOT_FOUND", "The claim does not exist.");
-  }
+  claim: AffiliateAgentGatewayClaims,
+  options: ClaimAuthorizationOptions,
+): void => {
   if (
     options.trustedEffectCompletionReceiptId === undefined &&
     claim.tokenKeyVersion !== dependencies.tokens.keyVersion
@@ -1499,6 +2837,12 @@ const authorizeClaimOperation = async (
   ) {
     throw gatewayError("TOKEN_INVALID", "The claim token is invalid.");
   }
+};
+
+const assertClaimIdentity = (
+  authorization: AffiliateAgentClaimAuthorization,
+  claim: AffiliateAgentGatewayClaims,
+): void => {
   if (claim.jobId !== authorization.jobId) {
     throw gatewayError("JOB_MISMATCH", "The claim job does not match.");
   }
@@ -1532,15 +2876,26 @@ const authorizeClaimOperation = async (
       "The Supply Contract is stale.",
     );
   }
-  const isTerminalReplay = options.terminalReplayReceiptId !== undefined;
-  const isTrustedFailureRecording = options.isTrustedFailureRecording === true;
-  const completionReceiptId =
-    options.postEffectCompletionReceiptId ??
-    options.trustedEffectCompletionReceiptId;
-  const isPostEffectCompletionAllowed =
-    completionReceiptId !== undefined &&
-    (await hasPostEffectCompletionReceipt(client, claim, completionReceiptId));
-  if (completionReceiptId !== undefined && !isPostEffectCompletionAllowed) {
+};
+
+const claimCompletionReceiptId = (
+  options: ClaimAuthorizationOptions,
+): string | undefined =>
+  options.postEffectCompletionReceiptId ??
+  options.trustedEffectCompletionReceiptId;
+
+const assertPostEffectCompletionReceipt = async (
+  client: PrismaClient | Prisma.TransactionClient,
+  claim: AffiliateAgentGatewayClaims,
+  completionReceiptId: string | undefined,
+): Promise<boolean> => {
+  if (completionReceiptId === undefined) return false;
+  const isAllowed = await hasPostEffectCompletionReceipt(
+    client,
+    claim,
+    completionReceiptId,
+  );
+  if (!isAllowed) {
     throw gatewayError(
       "PARTIAL_COMMAND_UNRESOLVED",
       "The post-effect terminal result is not eligible for completion.",
@@ -1548,6 +2903,15 @@ const authorizeClaimOperation = async (
       completionReceiptId,
     );
   }
+  return true;
+};
+
+const assertClaimExpiryWindow = (
+  claim: AffiliateAgentGatewayClaims,
+  now: Date,
+  isPostEffectCompletionAllowed: boolean,
+  isTrustedFailureRecording: boolean,
+): void => {
   if (
     !isPostEffectCompletionAllowed &&
     !isTrustedFailureRecording &&
@@ -1565,32 +2929,32 @@ const authorizeClaimOperation = async (
   ) {
     throw gatewayError("TOKEN_EXPIRED", "The claim token has expired.");
   }
+};
+
+const assertClaimStatus = (
+  claim: AffiliateAgentGatewayClaims,
+  isTerminalReplay: boolean,
+  terminalReplayReceiptId: string | undefined,
+): void => {
   if (claim.tokenInvalidatedAt !== null && !isTerminalReplay) {
     throw gatewayError("TOKEN_INVALIDATED", "The claim token is invalidated.");
   }
-  if (
-    claim.status !== "ACTIVE" &&
-    !(
-      isTerminalReplay &&
-      (claim.status === "COMPLETED" ||
-        claim.status === "FAILED" ||
-        claim.status === "EXPIRED") &&
-      claim.terminalReceiptId === options.terminalReplayReceiptId
-    )
-  ) {
+  if (claim.status === "ACTIVE") return;
+  const isValidTerminalReplay =
+    isTerminalReplay &&
+    (claim.status === "COMPLETED" ||
+      claim.status === "FAILED" ||
+      claim.status === "EXPIRED") &&
+    claim.terminalReceiptId === terminalReplayReceiptId;
+  if (!isValidTerminalReplay) {
     throw gatewayError("CLAIM_NOT_ACTIVE", "The claim is not active.");
   }
-  if (
-    !isPostEffectCompletionAllowed &&
-    !isTrustedFailureRecording &&
-    claim.leaseExpiresAt <= now
-  ) {
-    throw gatewayError("LEASE_EXPIRED", "The claim lease has expired.");
-  }
+};
 
-  const activeBundle = parseSupportedContractBundle(
-    await dependencies.contracts.loadActiveBundle(),
-  );
+const assertClaimSupplyContract = (
+  activeBundle: AffiliateAgentContractBundle,
+  claim: AffiliateAgentGatewayClaims,
+): void => {
   if (
     activeBundle.supplyContract.version !== claim.supplyContractVersion ||
     activeBundle.supplyContract.hash !== claim.supplyContractHash
@@ -1600,6 +2964,11 @@ const authorizeClaimOperation = async (
       "The active Supply Contract changed after the claim.",
     );
   }
+};
+const assertClaimDeploymentContract = (
+  activeBundle: AffiliateAgentContractBundle,
+  claim: AffiliateAgentGatewayClaims,
+): void => {
   if (
     activeBundle.deploymentContract.version !==
       claim.deploymentContractVersion ||
@@ -1610,7 +2979,28 @@ const authorizeClaimOperation = async (
       "The active deployment contract changed after the claim.",
     );
   }
-  const roleContract = activeRoleContract(activeBundle, authorization.role);
+};
+
+const assertClaimLease = (
+  claim: AffiliateAgentGatewayClaims,
+  now: Date,
+  isPostEffectCompletionAllowed: boolean,
+  isTrustedFailureRecording: boolean,
+): void => {
+  if (
+    !isPostEffectCompletionAllowed &&
+    !isTrustedFailureRecording &&
+    claim.leaseExpiresAt <= now
+  ) {
+    throw gatewayError("LEASE_EXPIRED", "The claim lease has expired.");
+  }
+};
+
+
+const assertClaimRoleContract = (
+  roleContract: AffiliateAgentRoleContract,
+  claim: AffiliateAgentGatewayClaims,
+): void => {
   if (
     roleContract.version !== claim.roleContractVersion ||
     roleContract.hash !== claim.roleContractHash ||
@@ -1622,91 +3012,135 @@ const authorizeClaimOperation = async (
       "The active role or prompt contract changed after the claim.",
     );
   }
+};
 
-  if (
-    claim.role !== "COVERAGE_PLANNER" &&
-    (jobSupplySourceId(
-      await client.affiliateAgentGatewayJobs.findUnique({
-        where: { id: claim.jobId },
-      }),
-    ) === null ||
-      claim.lifecycleGeneration === null)
-  ) {
+const loadAuthorizedContracts = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  claim: AffiliateAgentGatewayClaims,
+  role: AffiliateAgentClaimAuthorization["role"],
+): Promise<Readonly<{
+  bundle: AffiliateAgentContractBundle;
+  roleContract: AffiliateAgentRoleContract;
+}> > => {
+  const bundle = parseSupportedContractBundle(
+    await dependencies.contracts.loadActiveBundle(),
+  );
+  assertClaimSupplyContract(bundle, claim);
+  assertClaimDeploymentContract(bundle, claim);
+  const roleContract = activeRoleContract(bundle, role);
+  assertClaimRoleContract(roleContract, claim);
+  return { bundle, roleContract };
+};
+
+const assertClaimRequiresLifecycle = async (
+  transaction: Prisma.TransactionClient,
+  claim: AffiliateAgentGatewayClaims,
+): Promise<void> => {
+  if (claim.role === "COVERAGE_PLANNER") return;
+  const job = await transaction.affiliateAgentGatewayJobs.findUnique({
+    where: { id: claim.jobId },
+  });
+  jobSupplySourceId(job);
+  if (claim.lifecycleGeneration === null) {
     throw gatewayError(
       "LIFECYCLE_GENERATION_STALE",
       "Non-coverage claims require a Supply Source lifecycle generation.",
     );
   }
-  if (claim.lifecycleGeneration !== null && !isTrustedFailureRecording) {
-    const supplySourceId = jobSupplySourceId(
-      await client.affiliateAgentGatewayJobs.findUnique({
-        where: { id: claim.jobId },
-      }),
-    );
-    if (dependencies.lifecycle.kind !== "AVAILABLE") {
-      throw gatewayError(
-        "LIFECYCLE_GENERATION_STALE",
-        "The Supply Source lifecycle is not available.",
-      );
-    }
-    const currentGeneration =
-      await dependencies.lifecycle.currentGeneration(supplySourceId);
-    if (
-      currentGeneration !== claim.lifecycleGeneration &&
-      !(await hasRecordedLifecycleAdvance(client, claim, currentGeneration))
-    ) {
-      throw gatewayError(
-        "LIFECYCLE_GENERATION_STALE",
-        "The Supply Source lifecycle generation changed after the claim.",
-      );
-    }
-  }
+};
 
-  const authorizationNow = dependencies.clock.now();
+const assertClaimLifecycleGeneration = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  transaction: Prisma.TransactionClient,
+  claim: AffiliateAgentGatewayClaims,
+  isTrustedFailureRecording: boolean,
+): Promise<void> => {
+  if (claim.lifecycleGeneration === null || isTrustedFailureRecording) return;
+  const supplySourceId = jobSupplySourceId(
+    await transaction.affiliateAgentGatewayJobs.findUnique({
+      where: { id: claim.jobId },
+    }),
+  );
+  if (dependencies.lifecycle.kind !== "AVAILABLE") {
+    throw gatewayError(
+      "LIFECYCLE_GENERATION_STALE",
+      "The Supply Source lifecycle is not available.",
+    );
+  }
+  const currentGeneration = await readLifecycleGenerationInTransaction(
+    transaction,
+    supplySourceId,
+  );
+  const hasAdvance = await hasRecordedLifecycleAdvance(
+    transaction,
+    claim,
+    currentGeneration,
+  );
   if (
-    !isPostEffectCompletionAllowed &&
-    !isTrustedFailureRecording &&
-    claim.hardDeadlineAt < authorizationNow
+    currentGeneration !== claim.lifecycleGeneration &&
+    !hasAdvance
   ) {
     throw gatewayError(
-      "HARD_DEADLINE_EXCEEDED",
-      "The claim hard deadline has passed.",
+      "LIFECYCLE_GENERATION_STALE",
+      "The Supply Source lifecycle generation changed after the claim.",
     );
   }
-  if (
-    !isPostEffectCompletionAllowed &&
-    !isTrustedFailureRecording &&
-    claim.tokenExpiresAt <= authorizationNow
-  ) {
-    throw gatewayError("TOKEN_EXPIRED", "The claim token has expired.");
-  }
-  if (
-    !isPostEffectCompletionAllowed &&
-    !isTrustedFailureRecording &&
-    claim.leaseExpiresAt <= authorizationNow
-  ) {
-    throw gatewayError("LEASE_EXPIRED", "The claim lease has expired.");
-  }
+};
 
-  const job = await client.affiliateAgentGatewayJobs.findUnique({
-    where: { id: claim.jobId },
-  });
-  const jobMatchesClaim = isTerminalReplay
-    ? job?.claimGeneration === claim.claimGeneration &&
-      job.terminalReceiptId === options.terminalReplayReceiptId &&
-      claim.terminalReceiptId === options.terminalReplayReceiptId &&
-      ((claim.status === "COMPLETED" &&
-        job.status === "COMPLETED" &&
-        job.activeClaimId === null) ||
-        ((claim.status === "FAILED" || claim.status === "EXPIRED") &&
-          (job.status === "RETRY_WAIT" || job.status === "PIPELINE_BLOCKED") &&
-          job.activeClaimId === null))
-    : job?.status === "CLAIMED" &&
-      job.activeClaimId === claim.id &&
-      job.claimGeneration === claim.claimGeneration;
-  if (!job || !jobMatchesClaim) {
+const isTerminalReplayJobMatch = (
+  claim: AffiliateAgentGatewayClaims,
+  job: AffiliateAgentGatewayJobs,
+  terminalReplayReceiptId: string | undefined,
+): boolean => {
+  if (
+    job.claimGeneration !== claim.claimGeneration ||
+    job.terminalReceiptId !== terminalReplayReceiptId ||
+    claim.terminalReceiptId !== terminalReplayReceiptId
+  ) {
+    return false;
+  }
+  if (claim.status === "COMPLETED") {
+    return (
+      job.status === "COMPLETED" &&
+      job.activeClaimId === null
+    );
+  }
+  if (claim.status === "FAILED" || claim.status === "EXPIRED") {
+    return (
+      (job.status === "RETRY_WAIT" || job.status === "PIPELINE_BLOCKED") &&
+      job.activeClaimId === null
+    );
+  }
+  return false;
+};
+
+const isActiveClaimJobMatch = (
+  claim: AffiliateAgentGatewayClaims,
+  job: AffiliateAgentGatewayJobs,
+): boolean =>
+  job.status === "CLAIMED" &&
+  job.activeClaimId === claim.id &&
+  job.claimGeneration === claim.claimGeneration;
+
+function assertAuthorizedJob(
+  claim: AffiliateAgentGatewayClaims,
+  job: AffiliateAgentGatewayJobs | null,
+  isTerminalReplay: boolean,
+  terminalReplayReceiptId: string | undefined,
+): asserts job is AffiliateAgentGatewayJobs {
+  const matches =
+    job !== null &&
+    (isTerminalReplay
+      ? isTerminalReplayJobMatch(claim, job, terminalReplayReceiptId)
+      : isActiveClaimJobMatch(claim, job));
+  if (!matches) {
     throw gatewayError("CLAIM_NOT_ACTIVE", "The claim is not active.");
   }
+}
+
+const parseAuthorizedClaimEnvelope = (
+  claim: AffiliateAgentGatewayClaims,
+): AffiliateAgentClaimEnvelope => {
   const envelopeResult = affiliateAgentClaimEnvelopeSchema.safeParse(
     claim.claimEnvelopeJson,
   );
@@ -1719,14 +3153,113 @@ const authorizeClaimOperation = async (
       "The stored claim envelope failed its integrity check.",
     );
   }
+  return envelopeResult.data;
+};
+
+const authorizeClaimOperation = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  authorization: AffiliateAgentClaimAuthorization,
+  now: Date,
+  transaction: Prisma.TransactionClient,
+  options: ClaimAuthorizationOptions = {},
+): Promise<AuthorizedClaim> => {
+  const claim = await transaction.affiliateAgentGatewayClaims.findUnique({
+    where: { id: authorization.claimId },
+  });
+  if (!claim) {
+    throw gatewayError("CLAIM_NOT_FOUND", "The claim does not exist.");
+  }
+  assertClaimToken(dependencies, authorization, claim, options);
+  assertClaimIdentity(authorization, claim);
+  const isTerminalReplay = options.terminalReplayReceiptId !== undefined;
+  const isTrustedFailureRecording = options.isTrustedFailureRecording === true;
+  const completionReceiptId = claimCompletionReceiptId(options);
+  const isPostEffectCompletionAllowed =
+    await assertPostEffectCompletionReceipt(
+      transaction,
+      claim,
+      completionReceiptId,
+    );
+  assertClaimExpiryWindow(
+    claim,
+    now,
+    isPostEffectCompletionAllowed,
+    isTrustedFailureRecording,
+  );
+  assertClaimStatus(
+    claim,
+    isTerminalReplay,
+    options.terminalReplayReceiptId,
+  );
+  assertClaimLease(
+    claim,
+    now,
+    isPostEffectCompletionAllowed,
+    isTrustedFailureRecording,
+  );
+  const { bundle, roleContract } = await loadAuthorizedContracts(
+    dependencies,
+    claim,
+    authorization.role,
+  );
+  await assertClaimRequiresLifecycle(transaction, claim);
+  await assertClaimLifecycleGeneration(
+    dependencies,
+    transaction,
+    claim,
+    isTrustedFailureRecording,
+  );
+  const authorizationNow = dependencies.clock.now();
+  assertClaimExpiryWindow(
+    claim,
+    authorizationNow,
+    isPostEffectCompletionAllowed,
+    isTrustedFailureRecording,
+  );
+  assertClaimLease(
+    claim,
+    authorizationNow,
+    isPostEffectCompletionAllowed,
+    isTrustedFailureRecording,
+  );
+  const job = await transaction.affiliateAgentGatewayJobs.findUnique({
+    where: { id: claim.jobId },
+  });
+  assertAuthorizedJob(
+    claim,
+    job,
+    isTerminalReplay,
+    options.terminalReplayReceiptId,
+  );
   return {
     claim,
     job,
-    envelope: envelopeResult.data,
-    bundle: activeBundle,
+    envelope: parseAuthorizedClaimEnvelope(claim),
+    bundle,
     roleContract,
   };
 };
+const authorizeClaimOperationInSerializableTransaction = (
+  dependencies: AffiliateAgentGatewayDependencies,
+  authorization: AffiliateAgentClaimAuthorization,
+  now: Date,
+  options: ClaimAuthorizationOptions = {},
+): Promise<AuthorizedClaim> =>
+  runSerializableEffectTransaction(
+    dependencies,
+    (transaction) =>
+      authorizeClaimOperation(
+        dependencies,
+        authorization,
+        now,
+        transaction,
+        options,
+      ),
+    {
+      code: "INTERNAL_ERROR",
+      safeMessage: "The claim could not be authorized.",
+    },
+  );
 
 const jobSupplySourceId = (job: AffiliateAgentGatewayJobs | null): string => {
   if (!job?.supplySourceId) {
@@ -1791,175 +3324,198 @@ const replayHeartbeat = (
   };
 };
 
+const resolveHeartbeatReplay = async (
+  transaction: Prisma.TransactionClient,
+  authorized: AuthorizedClaim,
+  input: Extract<AffiliateAgentClaimOperation, { kind: "HEARTBEAT" }>,
+  requestHash: string,
+): Promise<AffiliateAgentHeartbeatResult | undefined> => {
+  const existing =
+    await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
+      where: {
+        claimId_idempotencyKey: {
+          claimId: authorized.claim.id,
+          idempotencyKey: input.idempotencyKey,
+        },
+      },
+    });
+  if (!existing) return undefined;
+  if (
+    existing.operationKind !== input.kind ||
+    existing.requestHash !== requestHash
+  ) {
+    throw gatewayError(
+      "IDEMPOTENCY_KEY_REUSED",
+      "The operation idempotency key was used for different input.",
+    );
+  }
+  if (existing.status === "SUCCEEDED") {
+    return replayHeartbeat(existing.responseJson);
+  }
+  throw gatewayError(
+    "OPERATION_IN_PROGRESS",
+    "The operation is still in progress.",
+    true,
+  );
+};
+
+const executeHeartbeatTransaction = (
+  dependencies: AffiliateAgentGatewayDependencies,
+  input: Extract<AffiliateAgentClaimOperation, { kind: "HEARTBEAT" }>,
+  requestHash: string,
+): Promise<AffiliateAgentHeartbeatResult> =>
+  dependencies.prisma.$transaction(
+    async (transaction) => {
+      const authorized = await authorizeClaimOperation(
+        dependencies,
+        input.authorization,
+        dependencies.clock.now(),
+        transaction,
+      );
+      const replay = await resolveHeartbeatReplay(
+        transaction,
+        authorized,
+        input,
+        requestHash,
+      );
+      if (replay) return replay;
+      const now = dependencies.clock.now();
+      if (
+        authorized.claim.leaseExpiresAt <= now ||
+        authorized.claim.hardDeadlineAt < now
+      ) {
+        throw gatewayError(
+          authorized.claim.hardDeadlineAt < now
+            ? "HARD_DEADLINE_EXCEEDED"
+            : "LEASE_EXPIRED",
+          "The claim expired before the heartbeat could be recorded.",
+        );
+      }
+      const leaseExpiresAt = new Date(
+        Math.min(
+          addSeconds(now, AFFILIATE_AGENT_LEASE_SECONDS).getTime(),
+          authorized.claim.hardDeadlineAt.getTime(),
+        ),
+      );
+      const receiptId = dependencies.identifiers.create("receipt");
+      const heartbeatResult: AffiliateAgentHeartbeatResult = {
+        kind: "HEARTBEAT_ACCEPTED",
+        receiptId,
+        heartbeatAt: now.toISOString(),
+        leaseExpiresAt: leaseExpiresAt.toISOString(),
+      };
+      const heartbeatUpdated =
+        await transaction.affiliateAgentGatewayClaims.updateMany({
+          where: {
+            id: authorized.claim.id,
+            status: "ACTIVE",
+            claimGeneration: authorized.claim.claimGeneration,
+            tokenInvalidatedAt: null,
+            leaseExpiresAt: { gt: now },
+            hardDeadlineAt: { gte: now },
+          },
+          data: {
+            lastHeartbeatAt: now,
+            leaseExpiresAt,
+          },
+        });
+      if (heartbeatUpdated.count !== 1) {
+        throw gatewayError(
+          "CLAIM_NOT_ACTIVE",
+          "The heartbeat lost the active claim compare-and-set.",
+        );
+      }
+      await dependencies.workerHealth?.heartbeat({
+        workerId: authorized.claim.workerId,
+        role: authorized.claim.role as AffiliateAgentRole,
+        now,
+        leaseExpiresAt,
+        database: affiliateSupplyDatabase(transaction),
+      });
+      const jobUpdated =
+        await transaction.affiliateAgentGatewayJobs.updateMany({
+          where: {
+            id: authorized.job.id,
+            status: "CLAIMED",
+            activeClaimId: authorized.claim.id,
+            claimGeneration: authorized.claim.claimGeneration,
+            eventSequence: authorized.job.eventSequence,
+          },
+          data: { eventSequence: { increment: 1 } },
+        });
+      if (jobUpdated.count !== 1) {
+        throw new AffiliateAgentClaimRaceError();
+      }
+      await transaction.affiliateAgentGatewayOperationReceipts.create({
+        data: {
+          id: receiptId,
+          claimId: authorized.claim.id,
+          jobId: authorized.job.id,
+          claimGeneration: authorized.claim.claimGeneration,
+          idempotencyKey: input.idempotencyKey,
+          operationKind: input.kind,
+          requestHash,
+          status: "SUCCEEDED",
+          responseHash: hashAffiliateAgentValue(heartbeatResult),
+          responseJson: asPrismaJson(heartbeatResult),
+          startedAt: now,
+          completedAt: now,
+          retentionClass: "INDEFINITE",
+        },
+      });
+      await transaction.affiliateAgentGatewayEvents.create({
+        data: {
+          id: dependencies.identifiers.create("event"),
+          eventKey: `heartbeat:${receiptId}`,
+          jobId: authorized.job.id,
+          claimId: authorized.claim.id,
+          receiptId,
+          sequence: authorized.job.eventSequence + 1,
+          eventType: "CLAIM_HEARTBEAT_ACCEPTED",
+          actorKind: "AGENT_INVOCATION",
+          actorId: authorized.claim.invocationId,
+          role: authorized.claim.role,
+          requestHash,
+          outputHash: hashAffiliateAgentValue(heartbeatResult),
+          payload: asPrismaJson({
+            leaseExpiresAt: leaseExpiresAt.toISOString(),
+          }),
+          retentionClass: "INDEFINITE",
+        },
+      });
+      return heartbeatResult;
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+  );
+
 const performHeartbeat = async (
   dependencies: AffiliateAgentGatewayDependencies,
   input: Extract<AffiliateAgentClaimOperation, { kind: "HEARTBEAT" }>,
 ): Promise<AffiliateAgentHeartbeatResult> => {
   assertIdentifier(input.idempotencyKey, "Operation idempotency key");
   const requestHash = operationRequestHash(input);
-
   for (
     let attempt = 1;
     attempt <= SERIALIZABLE_TRANSACTION_ATTEMPTS;
     attempt += 1
   ) {
     try {
-      return await dependencies.prisma.$transaction(
-        async (transaction) => {
-          const authorized = await authorizeClaimOperation(
-            dependencies,
-            input.authorization,
-            dependencies.clock.now(),
-            transaction,
-          );
-          const existing =
-            await transaction.affiliateAgentGatewayOperationReceipts.findUnique(
-              {
-                where: {
-                  claimId_idempotencyKey: {
-                    claimId: authorized.claim.id,
-                    idempotencyKey: input.idempotencyKey,
-                  },
-                },
-              },
-            );
-          if (existing) {
-            if (
-              existing.operationKind !== input.kind ||
-              existing.requestHash !== requestHash
-            ) {
-              throw gatewayError(
-                "IDEMPOTENCY_KEY_REUSED",
-                "The operation idempotency key was used for different input.",
-              );
-            }
-            if (existing.status === "SUCCEEDED") {
-              return replayHeartbeat(existing.responseJson);
-            }
-            throw gatewayError(
-              "OPERATION_IN_PROGRESS",
-              "The operation is still in progress.",
-              true,
-            );
-          }
-          const now = dependencies.clock.now();
-          if (
-            authorized.claim.leaseExpiresAt <= now ||
-            authorized.claim.hardDeadlineAt < now
-          ) {
-            throw gatewayError(
-              authorized.claim.hardDeadlineAt < now
-                ? "HARD_DEADLINE_EXCEEDED"
-                : "LEASE_EXPIRED",
-              "The claim expired before the heartbeat could be recorded.",
-            );
-          }
-          const leaseExpiresAt = new Date(
-            Math.min(
-              addSeconds(now, AFFILIATE_AGENT_LEASE_SECONDS).getTime(),
-              authorized.claim.hardDeadlineAt.getTime(),
-            ),
-          );
-
-          const receiptId = dependencies.identifiers.create("receipt");
-          const heartbeatResult: AffiliateAgentHeartbeatResult = {
-            kind: "HEARTBEAT_ACCEPTED",
-            receiptId,
-            heartbeatAt: now.toISOString(),
-            leaseExpiresAt: leaseExpiresAt.toISOString(),
-          };
-          const heartbeatUpdated =
-            await transaction.affiliateAgentGatewayClaims.updateMany({
-              where: {
-                id: authorized.claim.id,
-                status: "ACTIVE",
-                claimGeneration: authorized.claim.claimGeneration,
-                tokenInvalidatedAt: null,
-                leaseExpiresAt: { gt: now },
-                hardDeadlineAt: { gte: now },
-              },
-              data: {
-                lastHeartbeatAt: now,
-                leaseExpiresAt,
-              },
-            });
-          if (heartbeatUpdated.count !== 1) {
-            throw gatewayError(
-              "CLAIM_NOT_ACTIVE",
-              "The heartbeat lost the active claim compare-and-set.",
-            );
-          }
-          await dependencies.workerHealth?.heartbeat({
-            workerId: authorized.claim.workerId,
-            role: authorized.claim.role as AffiliateAgentRole,
-            now,
-            leaseExpiresAt,
-            database: affiliateSupplyDatabase(transaction),
-          });
-          const jobUpdated =
-            await transaction.affiliateAgentGatewayJobs.updateMany({
-              where: {
-                id: authorized.job.id,
-                status: "CLAIMED",
-                activeClaimId: authorized.claim.id,
-                claimGeneration: authorized.claim.claimGeneration,
-                eventSequence: authorized.job.eventSequence,
-              },
-              data: { eventSequence: { increment: 1 } },
-            });
-          if (jobUpdated.count !== 1) {
-            throw new AffiliateAgentClaimRaceError();
-          }
-          await transaction.affiliateAgentGatewayOperationReceipts.create({
-            data: {
-              id: receiptId,
-              claimId: authorized.claim.id,
-              jobId: authorized.job.id,
-              claimGeneration: authorized.claim.claimGeneration,
-              idempotencyKey: input.idempotencyKey,
-              operationKind: input.kind,
-              requestHash,
-              status: "SUCCEEDED",
-              responseHash: hashAffiliateAgentValue(heartbeatResult),
-              responseJson: asPrismaJson(heartbeatResult),
-              startedAt: now,
-              completedAt: now,
-              retentionClass: "INDEFINITE",
-            },
-          });
-          await transaction.affiliateAgentGatewayEvents.create({
-            data: {
-              id: dependencies.identifiers.create("event"),
-              eventKey: `heartbeat:${receiptId}`,
-              jobId: authorized.job.id,
-              claimId: authorized.claim.id,
-              receiptId,
-              sequence: authorized.job.eventSequence + 1,
-              eventType: "CLAIM_HEARTBEAT_ACCEPTED",
-              actorKind: "AGENT_INVOCATION",
-              actorId: authorized.claim.invocationId,
-              role: authorized.claim.role,
-              requestHash,
-              outputHash: hashAffiliateAgentValue(heartbeatResult),
-              payload: asPrismaJson({
-                leaseExpiresAt: leaseExpiresAt.toISOString(),
-              }),
-              retentionClass: "INDEFINITE",
-            },
-          });
-          return heartbeatResult;
-        },
-        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      return await executeHeartbeatTransaction(
+        dependencies,
+        input,
+        requestHash,
       );
     } catch (error) {
       const retryableConflict =
         error instanceof AffiliateAgentClaimRaceError ||
-        prismaErrorCode(error) === "P2034";
+        isSerializableTransactionConflict(error) ||
+        isOperationReceiptUniqueConflict(error);
       if (retryableConflict && attempt < SERIALIZABLE_TRANSACTION_ATTEMPTS) {
         continue;
       }
       if (error instanceof AffiliateAgentGatewayError) throw error;
-      throw gatewayError(
+      throw gatewayErrorForPersistenceFailure(
+        error,
         "INTERNAL_ERROR",
         "The Affiliate Agent heartbeat could not be completed.",
         retryableConflict,
@@ -2001,7 +3557,7 @@ const parseBoundedSafeOutput = (
   }
 };
 
-const verifyArtifactRead = (
+const assertArtifactContentIntegrity = (
   artifact: Readonly<{
     contentHash: string;
     mimeType: string;
@@ -2011,7 +3567,6 @@ const verifyArtifactRead = (
     bytes: Uint8Array;
     mimeType: string;
     byteSize: number;
-    sourceUrl: string | null;
   }>,
 ): void => {
   if (
@@ -2028,28 +3583,49 @@ const verifyArtifactRead = (
       "The artifact failed its content integrity check.",
     );
   }
-  if (read.sourceUrl !== null) {
-    let sourceUrl: URL;
-    try {
-      sourceUrl = new URL(read.sourceUrl);
-    } catch {
-      throw gatewayError(
-        "ARTIFACT_INTEGRITY_FAILED",
-        "The artifact source URL is invalid.",
-      );
-    }
-    if (
-      !["http:", "https:"].includes(sourceUrl.protocol) ||
-      sourceUrl.username !== "" ||
-      sourceUrl.password !== "" ||
-      read.sourceUrl.length > 2_048
-    ) {
-      throw gatewayError(
-        "ARTIFACT_INTEGRITY_FAILED",
-        "The artifact source URL is not safe.",
-      );
-    }
+};
+
+const assertSafeArtifactSourceUrl = (
+  sourceUrlValue: string | null,
+): void => {
+  if (sourceUrlValue === null) return;
+  let sourceUrl: URL;
+  try {
+    sourceUrl = new URL(sourceUrlValue);
+  } catch {
+    throw gatewayError(
+      "ARTIFACT_INTEGRITY_FAILED",
+      "The artifact source URL is invalid.",
+    );
   }
+  if (
+    !["http:", "https:"].includes(sourceUrl.protocol) ||
+    sourceUrl.username !== "" ||
+    sourceUrl.password !== "" ||
+    sourceUrlValue.length > 2_048
+  ) {
+    throw gatewayError(
+      "ARTIFACT_INTEGRITY_FAILED",
+      "The artifact source URL is not safe.",
+    );
+  }
+};
+
+const verifyArtifactRead = (
+  artifact: Readonly<{
+    contentHash: string;
+    mimeType: string;
+    byteSize: number;
+  }>,
+  read: Readonly<{
+    bytes: Uint8Array;
+    mimeType: string;
+    byteSize: number;
+    sourceUrl: string | null;
+  }>,
+): void => {
+  assertArtifactContentIntegrity(artifact, read);
+  assertSafeArtifactSourceUrl(read.sourceUrl);
 };
 
 const failArtifactReceipt = async (
@@ -2221,7 +3797,8 @@ const performArtifactRead = async (
   } catch (error) {
     await failArtifactReceipt(dependencies, reserved.receiptId, now);
     if (error instanceof AffiliateAgentGatewayError) throw error;
-    throw gatewayError(
+    throw gatewayErrorForPersistenceFailure(
+      error,
       "ARTIFACT_INTEGRITY_FAILED",
       "The artifact could not be read safely.",
     );
@@ -2316,13 +3893,14 @@ const performArtifactRead = async (
     } catch (error) {
       if (
         (error instanceof AffiliateAgentClaimRaceError ||
-          prismaErrorCode(error) === "P2034") &&
+          isSerializableTransactionConflict(error)) &&
         attempt < SERIALIZABLE_TRANSACTION_ATTEMPTS
       ) {
         continue;
       }
       if (error instanceof AffiliateAgentGatewayError) throw error;
-      throw gatewayError(
+      throw gatewayErrorForPersistenceFailure(
+        error,
         "INTERNAL_ERROR",
         "The artifact receipt could not be completed.",
         true,
@@ -2341,27 +3919,61 @@ const performArtifactRead = async (
   };
 };
 
-const replayCommand = (
-  response: Prisma.JsonValue | null,
-): AffiliateAgentCommandResult => {
+const assertStoredCommandResponseStrings = (
+  response: Record<string, unknown>,
+): void => {
   if (
-    response === null ||
-    typeof response !== "object" ||
-    Array.isArray(response) ||
-    response.kind !== "COMMAND_SUCCEEDED" ||
     typeof response.receiptId !== "string" ||
     typeof response.commandType !== "string" ||
-    typeof response.responseHash !== "string" ||
-    (response.safeOutput !== null &&
-      (typeof response.safeOutput !== "object" ||
-        Array.isArray(response.safeOutput)))
+    typeof response.responseHash !== "string"
   ) {
     throw gatewayError(
       "INTERNAL_ERROR",
       "The stored command receipt is invalid.",
     );
   }
-  const commandType = (
+};
+
+const assertStoredCommandResponseSafeOutput = (
+  response: Record<string, unknown>,
+): void => {
+  if (
+    response.safeOutput !== null &&
+    (!isGatewayRecord(response.safeOutput) ||
+      Array.isArray(response.safeOutput))
+  ) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The stored command receipt is invalid.",
+    );
+  }
+};
+
+const parseStoredCommandResponse = (
+  response: Prisma.JsonValue | null,
+): Record<string, unknown> => {
+  if (!isGatewayRecord(response) || response.kind !== "COMMAND_SUCCEEDED") {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The stored command receipt is invalid.",
+    );
+  }
+  assertStoredCommandResponseStrings(response);
+  assertStoredCommandResponseSafeOutput(response);
+  return response;
+};
+
+const parseStoredCommandType = (
+  commandType: string,
+): Extract<
+  AffiliateAgentCommand["type"],
+  | "RUN_DISCOVERY_QUERY"
+  | "CAPTURE_CLAIM_URL"
+  | "VALIDATE_DECLARATIVE_PACKAGE"
+  | "COMMIT_DECLARATIVE_PACKAGE"
+  | "EXECUTE_RECORDED_LIFECYCLE_COMMAND"
+> => {
+  const parsed = (
     [
       "RUN_DISCOVERY_QUERY",
       "CAPTURE_CLAIM_URL",
@@ -2369,21 +3981,29 @@ const replayCommand = (
       "COMMIT_DECLARATIVE_PACKAGE",
       "EXECUTE_RECORDED_LIFECYCLE_COMMAND",
     ] as const
-  ).find((candidate) => candidate === response.commandType);
-  if (!commandType) {
+  ).find((candidate) => candidate === commandType);
+  if (!parsed) {
     throw gatewayError("INTERNAL_ERROR", "The stored command type is invalid.");
   }
+  return parsed;
+};
+
+const replayCommand = (
+  response: Prisma.JsonValue | null,
+): AffiliateAgentCommandResult => {
+  const parsed = parseStoredCommandResponse(response);
+  const commandType = parseStoredCommandType(parsed.commandType as string);
   const safeOutput =
-    response.safeOutput === null
+    parsed.safeOutput === null
       ? null
       : (JSON.parse(
-          canonicalizeAffiliateAgentValue(response.safeOutput),
+          canonicalizeAffiliateAgentValue(parsed.safeOutput),
         ) as Readonly<Record<string, unknown>>);
   return {
     kind: "COMMAND_SUCCEEDED",
-    receiptId: response.receiptId,
+    receiptId: parsed.receiptId as string,
     commandType,
-    responseHash: response.responseHash,
+    responseHash: parsed.responseHash as string,
     safeOutput,
   };
 };
@@ -2399,52 +4019,103 @@ type RecoveredExternalOutput = Readonly<{
   sha256: string;
   mimeType: string;
   byteSize: number;
+  captureMetadata?: AffiliateAgentCaptureMetadata;
 }>;
 
-const parseRecoveredExternalOutput = (
-  value: Readonly<Record<string, unknown>>,
-): RecoveredExternalOutput => {
+const throwRecoveredExternalOutputError = (): never => {
+  throw gatewayError(
+    "PARTIAL_COMMAND_UNRESOLVED",
+    "The recovered external command output is invalid.",
+  );
+};
+
+const assertRecoveredExternalOutputKeys = (
+  value: Record<string, unknown>,
+): void => {
   const allowedKeys: Readonly<Record<string, true>> = {
     artifactId: true,
     byteSize: true,
+    captureMetadata: true,
     evidenceRef: true,
     mimeType: true,
     sha256: true,
   };
+  if (Object.keys(value).some((key) => allowedKeys[key] !== true)) {
+    throwRecoveredExternalOutputError();
+  }
+};
+
+const assertRecoveredExternalOutputIdentity = (
+  value: Record<string, unknown>,
+): void => {
   if (
-    value === null ||
-    typeof value !== "object" ||
-    Array.isArray(value) ||
-    Object.keys(value).some((key) => allowedKeys[key] !== true) ||
-    typeof value.evidenceRef !== "string" ||
-    typeof value.artifactId !== "string" ||
-    typeof value.sha256 !== "string" ||
-    !/^[a-f0-9]{64}$/.test(value.sha256) ||
-    typeof value.mimeType !== "string" ||
-    value.mimeType.length === 0 ||
-    value.mimeType.length > 200 ||
-    typeof value.byteSize !== "number" ||
-    !Number.isInteger(value.byteSize) ||
-    value.byteSize < 0 ||
-    value.byteSize > MAXIMUM_GATEWAY_ARTIFACT_BYTES ||
     typeof value.evidenceRef !== "string" ||
     !value.evidenceRef.trim() ||
     value.evidenceRef.length > 200 ||
     typeof value.artifactId !== "string" ||
     !value.artifactId.trim() ||
-    value.artifactId.length > 200
+    value.artifactId.length > 200 ||
+    typeof value.sha256 !== "string" ||
+    !/^[a-f0-9]{64}$/.test(value.sha256)
   ) {
-    throw gatewayError(
-      "PARTIAL_COMMAND_UNRESOLVED",
-      "The recovered external command output is invalid.",
-    );
+    throwRecoveredExternalOutputError();
+  }
+};
+
+const assertRecoveredExternalOutputMimeType = (
+  value: Record<string, unknown>,
+): void => {
+  if (
+    typeof value.mimeType !== "string" ||
+    value.mimeType.length === 0 ||
+    value.mimeType.length > 200
+  ) {
+    throwRecoveredExternalOutputError();
+  }
+};
+
+const assertRecoveredExternalOutputByteSize = (
+  value: Record<string, unknown>,
+): void => {
+  if (
+    typeof value.byteSize !== "number" ||
+    !Number.isInteger(value.byteSize) ||
+    value.byteSize < 0 ||
+    value.byteSize > MAXIMUM_GATEWAY_ARTIFACT_BYTES
+  ) {
+    throwRecoveredExternalOutputError();
+  }
+};
+
+const parseRecoveredExternalOutput = (
+  value: Readonly<Record<string, unknown>>,
+  commandType: AffiliateAgentExternalCommand["type"],
+): RecoveredExternalOutput => {
+  if (!isGatewayRecord(value)) {
+    throwRecoveredExternalOutputError();
+  }
+  assertRecoveredExternalOutputKeys(value);
+  assertRecoveredExternalOutputIdentity(value);
+  assertRecoveredExternalOutputMimeType(value);
+  assertRecoveredExternalOutputByteSize(value);
+  let captureMetadata: AffiliateAgentCaptureMetadata | undefined;
+  if (value.captureMetadata !== undefined) {
+    if (commandType !== "CAPTURE_CLAIM_URL") {
+      throwRecoveredExternalOutputError();
+    }
+    try {
+      captureMetadata = parseAffiliateAgentCaptureMetadata(value.captureMetadata);
+    } catch {
+      throwRecoveredExternalOutputError();
+    }
   }
   return {
-    evidenceRef: value.evidenceRef,
-    artifactId: value.artifactId,
-    sha256: value.sha256,
-    mimeType: value.mimeType,
-    byteSize: value.byteSize,
+    evidenceRef: value.evidenceRef as string,
+    artifactId: value.artifactId as string,
+    sha256: value.sha256 as string,
+    mimeType: value.mimeType as string,
+    byteSize: value.byteSize as number,
+    ...(captureMetadata === undefined ? {} : { captureMetadata }),
   };
 };
 
@@ -2527,31 +4198,14 @@ const ensureExternalArtifact = async (
   );
 };
 
-const performExternalCommand = async (
+const resolveExternalReceipt = async (
   dependencies: AffiliateAgentGatewayDependencies,
+  transaction: Prisma.TransactionClient,
+  authorized: AuthorizedClaim,
   input: Extract<AffiliateAgentClaimOperation, { kind: "EXECUTE_COMMAND" }>,
   command: AffiliateAgentExternalCommand,
-): Promise<AffiliateAgentCommandResult> => {
-  const requestHash = operationRequestHash(input);
-  const commandHash = hashAffiliateAgentValue(command);
-  const reserved = await runSerializableEffectTransaction(
-    dependencies,
-    async (transaction) => {
-      const authorized = await authorizeClaimOperation(
-        dependencies,
-        input.authorization,
-        dependencies.clock.now(),
-        transaction,
-      );
-      if (
-        !authorized.roleContract.permittedCommands.includes(command.type) ||
-        !authorized.claim.permittedCommands.includes(command.type)
-      ) {
-        throw gatewayError(
-          "COMMAND_NOT_PERMITTED",
-          "The external command is not permitted for this claim.",
-        );
-      }
+  requestHash: string,
+) => {
       const existing =
         await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
           where: {
@@ -2611,204 +4265,270 @@ const performExternalCommand = async (
           role: authorized.claim.role,
         };
       }
-      const pendingExternalReceipt =
-        await transaction.affiliateAgentGatewayOperationReceipts.findFirst({
-          where: {
-            claimId: authorized.claim.id,
-            status: "PENDING",
-            commandName: {
-              in: ["CAPTURE_CLAIM_URL", "RUN_DISCOVERY_QUERY"],
-            },
-          },
-          orderBy: { id: "asc" },
-          select: { id: true },
-        });
-      if (pendingExternalReceipt) {
-        throw gatewayError(
-          "PARTIAL_COMMAND_UNRESOLVED",
-          "A prior external command requires reconciliation before another can start.",
-          false,
-          pendingExternalReceipt.id,
-        );
-      }
-      const adapterIsInstalled =
-        command.type === "RUN_DISCOVERY_QUERY"
-          ? dependencies.commands.external.RUN_DISCOVERY_QUERY !== undefined
-          : dependencies.commands.external.CAPTURE_CLAIM_URL !== undefined;
-      if (!adapterIsInstalled) {
-        throw gatewayError(
-          "COMMAND_NOT_PERMITTED",
-          "The external command has no installed adapter.",
-        );
-      }
+  return null;
+};
+type PriorExternalReplayContext = Readonly<{
+  priorReceipt: AffiliateAgentGatewayOperationReceipts;
+  priorOutput: RecoveredExternalOutput;
+  expectedEvidenceKind: "PROVIDER_RESULT" | "CAPTURED_PAGE";
+}>;
 
-      const claimListedRefs =
-        command.type === "RUN_DISCOVERY_QUERY"
-          ? [command.data.strategyRef, command.data.queryRef]
-          : [command.data.urlRef, command.data.captureProfileRef];
-      await assertClaimEvidenceRefs(
-        transaction,
-        authorized.claim.id,
-        [...new Set(claimListedRefs)],
-        "COMMAND_NOT_PERMITTED",
-        "The external command references data outside the claim manifest.",
-      );
-      const priorSucceededEvent =
-        await transaction.affiliateAgentGatewayEvents.findFirst({
-          where: {
-            jobId: authorized.job.id,
-            eventType: "EXTERNAL_COMMAND_SUCCEEDED",
-            inputHash: commandHash,
-            receiptId: { not: null },
-          },
-          orderBy: [{ sequence: "desc" }],
-        });
-      if (priorSucceededEvent?.receiptId) {
-        const priorReceipt =
-          await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
-            where: { id: priorSucceededEvent.receiptId },
-          });
-        if (
-          !priorReceipt ||
-          priorReceipt.status !== "SUCCEEDED" ||
-          priorReceipt.jobId !== authorized.job.id ||
-          priorReceipt.commandName !== command.type ||
-          priorReceipt.operationKind !== "EXECUTE_COMMAND"
-        ) {
-          throw gatewayError(
-            "PARTIAL_COMMAND_UNRESOLVED",
-            "The prior external command receipt is invalid.",
-            false,
-            priorSucceededEvent.receiptId,
-          );
-        }
-        const priorResult = replayCommand(priorReceipt.responseJson);
-        if (
-          priorResult.commandType !== command.type ||
-          priorResult.safeOutput === null
-        ) {
-          throw gatewayError(
-            "PARTIAL_COMMAND_UNRESOLVED",
-            "The prior external command output is invalid.",
-            false,
-            priorReceipt.id,
-          );
-        }
-        let priorOutput: RecoveredExternalOutput;
-        try {
-          priorOutput = parseRecoveredExternalOutput(priorResult.safeOutput);
-        } catch {
-          throw gatewayError(
-            "PARTIAL_COMMAND_UNRESOLVED",
-            "The prior external command output is invalid.",
-            false,
-            priorReceipt.id,
-          );
-        }
-        const priorArtifact =
-          await transaction.affiliateAgentGatewayArtifacts.findUnique({
-            where: {
-              claimId_evidenceRef: {
-                claimId: priorReceipt.claimId,
-                evidenceRef: priorOutput.evidenceRef,
-              },
-            },
-          });
-        const expectedEvidenceKind =
-          command.type === "RUN_DISCOVERY_QUERY"
-            ? "PROVIDER_RESULT"
-            : "CAPTURED_PAGE";
-        if (
-          !priorArtifact ||
-          priorArtifact.claimGeneration !== priorReceipt.claimGeneration ||
-          priorArtifact.evidenceKind !== expectedEvidenceKind ||
-          priorArtifact.sourceArtifactId !== priorOutput.artifactId ||
-          priorArtifact.fileId !== priorOutput.artifactId ||
-          priorArtifact.contentHash !== priorOutput.sha256 ||
-          priorArtifact.mimeType !== priorOutput.mimeType ||
-          priorArtifact.byteSize !== priorOutput.byteSize
-        ) {
-          throw gatewayError(
-            "PARTIAL_COMMAND_UNRESOLVED",
-            "The prior external command artifact is invalid.",
-            false,
-            priorReceipt.id,
-          );
-        }
-        const receiptId = dependencies.identifiers.create("receipt");
-        const responseHash = hashAffiliateAgentValue({
-          commandType: command.type,
-          safeOutput: priorOutput,
-        });
-        const commandResult: AffiliateAgentCommandResult = {
-          kind: "COMMAND_SUCCEEDED",
-          receiptId,
-          commandType: command.type,
-          responseHash,
-          safeOutput: priorOutput,
-        };
-        const jobUpdated =
-          await transaction.affiliateAgentGatewayJobs.updateMany({
-            where: {
-              id: authorized.job.id,
-              status: "CLAIMED",
-              activeClaimId: authorized.claim.id,
-              claimGeneration: authorized.claim.claimGeneration,
-              eventSequence: authorized.job.eventSequence,
-            },
-            data: { eventSequence: { increment: 1 } },
-          });
-        if (jobUpdated.count !== 1) throw new AffiliateAgentClaimRaceError();
-        await ensureExternalArtifact(transaction, {
-          claimId: authorized.claim.id,
-          claimGeneration: authorized.claim.claimGeneration,
-          evidenceKind: expectedEvidenceKind,
-          output: priorOutput,
-          rowId: dependencies.identifiers.create("artifact"),
-          receiptId,
-        });
-        await transaction.affiliateAgentGatewayOperationReceipts.create({
-          data: {
-            id: receiptId,
-            claimId: authorized.claim.id,
-            jobId: authorized.job.id,
-            claimGeneration: authorized.claim.claimGeneration,
-            idempotencyKey: input.idempotencyKey,
-            operationKind: input.kind,
-            commandName: command.type,
-            requestHash,
-            status: "SUCCEEDED",
-            responseHash,
-            responseJson: asPrismaJson(commandResult),
-            startedAt: now,
-            completedAt: now,
-            retentionClass: "INDEFINITE",
-          },
-        });
-        await transaction.affiliateAgentGatewayEvents.create({
-          data: {
-            id: dependencies.identifiers.create("event"),
-            eventKey: `external-command-replayed:${receiptId}`,
-            jobId: authorized.job.id,
-            claimId: authorized.claim.id,
-            receiptId,
-            sequence: authorized.job.eventSequence + 1,
-            eventType: "EXTERNAL_COMMAND_SUCCEEDED",
-            actorKind: "AGENT_INVOCATION",
-            actorId: authorized.claim.invocationId,
-            role: authorized.claim.role,
-            requestHash,
-            inputHash: commandHash,
-            outputHash: responseHash,
-            payload: asPrismaJson({
-              evidenceRef: priorOutput.evidenceRef,
-              replayedFromReceiptId: priorReceipt.id,
-            }),
-            retentionClass: "INDEFINITE",
-          },
-        });
-        return { kind: "COMPLETED" as const, result: commandResult };
-      }
+const loadPriorSucceededExternalReceipt = async (
+  transaction: Prisma.TransactionClient,
+  authorized: AuthorizedClaim,
+  command: AffiliateAgentExternalCommand,
+  commandHash: string,
+): Promise<AffiliateAgentGatewayOperationReceipts | null> => {
+  const priorSucceededEvent =
+    await transaction.affiliateAgentGatewayEvents.findFirst({
+      where: {
+        jobId: authorized.job.id,
+        eventType: "EXTERNAL_COMMAND_SUCCEEDED",
+        inputHash: commandHash,
+        receiptId: { not: null },
+      },
+      orderBy: [{ sequence: "desc" }],
+    });
+  if (!priorSucceededEvent?.receiptId) return null;
+  const priorReceipt =
+    await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
+      where: { id: priorSucceededEvent.receiptId },
+    });
+  if (
+    !priorReceipt ||
+    priorReceipt.status !== "SUCCEEDED" ||
+    priorReceipt.jobId !== authorized.job.id ||
+    priorReceipt.commandName !== command.type ||
+    priorReceipt.operationKind !== "EXECUTE_COMMAND"
+  ) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The prior external command receipt is invalid.",
+      false,
+      priorSucceededEvent.receiptId,
+    );
+  }
+  return priorReceipt;
+};
+
+const loadPriorExternalOutput = (
+  priorReceipt: AffiliateAgentGatewayOperationReceipts,
+  command: AffiliateAgentExternalCommand,
+): RecoveredExternalOutput => {
+  const priorResult = replayCommand(priorReceipt.responseJson);
+  if (
+    priorResult.commandType !== command.type ||
+    priorResult.safeOutput === null
+  ) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The prior external command output is invalid.",
+      false,
+      priorReceipt.id,
+    );
+  }
+  try {
+    return parseRecoveredExternalOutput(priorResult.safeOutput, command.type);
+  } catch {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The prior external command output is invalid.",
+      false,
+      priorReceipt.id,
+    );
+  }
+};
+
+const assertPriorExternalArtifact = (
+  artifact: Awaited<
+    ReturnType<
+      Prisma.TransactionClient["affiliateAgentGatewayArtifacts"]["findUnique"]
+    >
+  >,
+  priorReceipt: AffiliateAgentGatewayOperationReceipts,
+  priorOutput: RecoveredExternalOutput,
+  expectedEvidenceKind: "PROVIDER_RESULT" | "CAPTURED_PAGE",
+): void => {
+  if (
+    !artifact ||
+    artifact.claimGeneration !== priorReceipt.claimGeneration ||
+    artifact.evidenceKind !== expectedEvidenceKind ||
+    artifact.sourceArtifactId !== priorOutput.artifactId ||
+    artifact.fileId !== priorOutput.artifactId ||
+    artifact.contentHash !== priorOutput.sha256 ||
+    artifact.mimeType !== priorOutput.mimeType ||
+    artifact.byteSize !== priorOutput.byteSize
+  ) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The prior external command artifact is invalid.",
+      false,
+      priorReceipt.id,
+    );
+  }
+};
+
+const loadPriorExternalReplayContext = async (
+  transaction: Prisma.TransactionClient,
+  authorized: AuthorizedClaim,
+  command: AffiliateAgentExternalCommand,
+  commandHash: string,
+): Promise<PriorExternalReplayContext | null> => {
+  const priorReceipt = await loadPriorSucceededExternalReceipt(
+    transaction,
+    authorized,
+    command,
+    commandHash,
+  );
+  if (!priorReceipt) return null;
+  const priorOutput = loadPriorExternalOutput(priorReceipt, command);
+  const expectedEvidenceKind =
+    command.type === "RUN_DISCOVERY_QUERY"
+      ? "PROVIDER_RESULT"
+      : "CAPTURED_PAGE";
+  const priorArtifact =
+    await transaction.affiliateAgentGatewayArtifacts.findUnique({
+      where: {
+        claimId_evidenceRef: {
+          claimId: priorReceipt.claimId,
+          evidenceRef: priorOutput.evidenceRef,
+        },
+      },
+    });
+  assertPriorExternalArtifact(
+    priorArtifact,
+    priorReceipt,
+    priorOutput,
+    expectedEvidenceKind,
+  );
+  return { priorReceipt, priorOutput, expectedEvidenceKind };
+};
+
+const completePriorExternalReplay = async (
+  transaction: Prisma.TransactionClient,
+  dependencies: AffiliateAgentGatewayDependencies,
+  authorized: AuthorizedClaim,
+  input: Extract<AffiliateAgentClaimOperation, { kind: "EXECUTE_COMMAND" }>,
+  command: AffiliateAgentExternalCommand,
+  requestHash: string,
+  commandHash: string,
+  now: Date,
+  context: PriorExternalReplayContext,
+) => {
+  const receiptId = dependencies.identifiers.create("receipt");
+  const responseHash = hashAffiliateAgentValue({
+    commandType: command.type,
+    safeOutput: context.priorOutput,
+  });
+  const commandResult: AffiliateAgentCommandResult = {
+    kind: "COMMAND_SUCCEEDED",
+    receiptId,
+    commandType: command.type,
+    responseHash,
+    safeOutput: context.priorOutput,
+  };
+  const jobUpdated =
+    await transaction.affiliateAgentGatewayJobs.updateMany({
+      where: {
+        id: authorized.job.id,
+        status: "CLAIMED",
+        activeClaimId: authorized.claim.id,
+        claimGeneration: authorized.claim.claimGeneration,
+        eventSequence: authorized.job.eventSequence,
+      },
+      data: { eventSequence: { increment: 1 } },
+    });
+  if (jobUpdated.count !== 1) throw new AffiliateAgentClaimRaceError();
+  await ensureExternalArtifact(transaction, {
+    claimId: authorized.claim.id,
+    claimGeneration: authorized.claim.claimGeneration,
+    evidenceKind: context.expectedEvidenceKind,
+    output: context.priorOutput,
+    rowId: dependencies.identifiers.create("artifact"),
+    receiptId,
+  });
+  await transaction.affiliateAgentGatewayOperationReceipts.create({
+    data: {
+      id: receiptId,
+      claimId: authorized.claim.id,
+      jobId: authorized.job.id,
+      claimGeneration: authorized.claim.claimGeneration,
+      idempotencyKey: input.idempotencyKey,
+      operationKind: input.kind,
+      commandName: command.type,
+      requestHash,
+      status: "SUCCEEDED",
+      responseHash,
+      responseJson: asPrismaJson(commandResult),
+      startedAt: now,
+      completedAt: now,
+      retentionClass: "INDEFINITE",
+    },
+  });
+  await transaction.affiliateAgentGatewayEvents.create({
+    data: {
+      id: dependencies.identifiers.create("event"),
+      eventKey: `external-command-replayed:${receiptId}`,
+      jobId: authorized.job.id,
+      claimId: authorized.claim.id,
+      receiptId,
+      sequence: authorized.job.eventSequence + 1,
+      eventType: "EXTERNAL_COMMAND_SUCCEEDED",
+      actorKind: "AGENT_INVOCATION",
+      actorId: authorized.claim.invocationId,
+      role: authorized.claim.role,
+      requestHash,
+      inputHash: commandHash,
+      outputHash: responseHash,
+      payload: asPrismaJson({
+        evidenceRef: context.priorOutput.evidenceRef,
+        replayedFromReceiptId: context.priorReceipt.id,
+      }),
+      retentionClass: "INDEFINITE",
+    },
+  });
+  return { kind: "COMPLETED" as const, result: commandResult };
+};
+
+const replayPriorExternalCommand = async (
+  transaction: Prisma.TransactionClient,
+  dependencies: AffiliateAgentGatewayDependencies,
+  authorized: AuthorizedClaim,
+  input: Extract<AffiliateAgentClaimOperation, { kind: "EXECUTE_COMMAND" }>,
+  command: AffiliateAgentExternalCommand,
+  requestHash: string,
+  commandHash: string,
+  now: Date,
+) => {
+  const context = await loadPriorExternalReplayContext(
+    transaction,
+    authorized,
+    command,
+    commandHash,
+  );
+  if (!context) return null;
+  return completePriorExternalReplay(
+    transaction,
+    dependencies,
+    authorized,
+    input,
+    command,
+    requestHash,
+    commandHash,
+    now,
+    context,
+  );
+};
+const createExternalReservation = async (
+  transaction: Prisma.TransactionClient,
+  dependencies: AffiliateAgentGatewayDependencies,
+  authorized: AuthorizedClaim,
+  input: Extract<AffiliateAgentClaimOperation, { kind: "EXECUTE_COMMAND" }>,
+  command: AffiliateAgentExternalCommand,
+  requestHash: string,
+  commandHash: string,
+  now: Date,
+) => {
       const receiptId = dependencies.identifiers.create("receipt");
       const externalOperationKey =
         dependencies.identifiers.create("external-operation");
@@ -2875,15 +4595,124 @@ const performExternalCommand = async (
         invocationId: authorized.claim.invocationId,
         role: authorized.claim.role,
       };
+};
+const reserveExternalCommandTransaction = (
+  dependencies: AffiliateAgentGatewayDependencies,
+  input: Extract<AffiliateAgentClaimOperation, { kind: "EXECUTE_COMMAND" }>,
+  command: AffiliateAgentExternalCommand,
+  requestHash: string,
+  commandHash: string,
+) =>
+  runSerializableEffectTransaction(
+    dependencies,
+    async (transaction) => {
+      const authorized = await authorizeClaimOperation(
+        dependencies,
+        input.authorization,
+        dependencies.clock.now(),
+        transaction,
+      );
+      if (
+        !authorized.roleContract.permittedCommands.includes(command.type) ||
+        !authorized.claim.permittedCommands.includes(command.type)
+      ) {
+        throw gatewayError(
+          "COMMAND_NOT_PERMITTED",
+          "The external command is not permitted for this claim.",
+        );
+      }
+      const existingResolution = await resolveExternalReceipt(
+        dependencies,
+        transaction,
+        authorized,
+        input,
+        command,
+        requestHash,
+      );
+      if (existingResolution) return existingResolution;
+      const now = dependencies.clock.now();
+
+      const pendingExternalReceipt =
+        await transaction.affiliateAgentGatewayOperationReceipts.findFirst({
+          where: {
+            claimId: authorized.claim.id,
+            status: "PENDING",
+            commandName: {
+              in: ["CAPTURE_CLAIM_URL", "RUN_DISCOVERY_QUERY"],
+            },
+          },
+          orderBy: { id: "asc" },
+          select: { id: true },
+        });
+      if (pendingExternalReceipt) {
+        throw gatewayError(
+          "PARTIAL_COMMAND_UNRESOLVED",
+          "A prior external command requires reconciliation before another can start.",
+          false,
+          pendingExternalReceipt.id,
+        );
+      }
+      const adapterIsInstalled =
+        command.type === "RUN_DISCOVERY_QUERY"
+          ? dependencies.commands.external.RUN_DISCOVERY_QUERY !== undefined
+          : dependencies.commands.external.CAPTURE_CLAIM_URL !== undefined;
+      if (!adapterIsInstalled) {
+        throw gatewayError(
+          "COMMAND_NOT_PERMITTED",
+          "The external command has no installed adapter.",
+        );
+      }
+
+      const claimListedRefs =
+        command.type === "RUN_DISCOVERY_QUERY"
+          ? [command.data.strategyRef, command.data.queryRef]
+          : [command.data.urlRef, command.data.captureProfileRef];
+      await assertClaimEvidenceRefs(
+        transaction,
+        authorized.claim.id,
+        [...new Set(claimListedRefs)],
+        "COMMAND_NOT_PERMITTED",
+        "The external command references data outside the claim manifest.",
+      );
+      const priorResult = await replayPriorExternalCommand(
+        transaction,
+        dependencies,
+        authorized,
+        input,
+        command,
+        requestHash,
+        commandHash,
+        now,
+      );
+      if (priorResult) return priorResult;
+
+      return createExternalReservation(
+        transaction,
+        dependencies,
+        authorized,
+        input,
+        command,
+        requestHash,
+        commandHash,
+        now,
+      );
     },
     {
       code: "INTERNAL_ERROR",
       safeMessage: "The external command could not be reserved.",
     },
   );
-  if (reserved.kind === "COMPLETED") return reserved.result;
 
-  let recovered: Readonly<Record<string, unknown>> | null;
+const invokeExternalCommandAdapter = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  reserved: Readonly<{
+    receiptId: string;
+    externalOperationKey: string;
+    isReplayed: boolean;
+    envelope: AffiliateAgentClaimEnvelope;
+  }>,
+  command: AffiliateAgentExternalCommand,
+): Promise<Readonly<Record<string, unknown>> | null> => {
   try {
     if (command.type === "RUN_DISCOVERY_QUERY") {
       const adapter = dependencies.commands.external.RUN_DISCOVERY_QUERY;
@@ -2893,47 +4722,54 @@ const performExternalCommand = async (
           "The discovery command has no installed external adapter.",
         );
       }
-      recovered = reserved.isReplayed
-        ? await adapter.recover(reserved.externalOperationKey)
-        : await adapter.start(reserved.externalOperationKey, {
-            claim: reserved.envelope,
-            command,
-          });
-    } else {
-      const adapter = dependencies.commands.external.CAPTURE_CLAIM_URL;
-      if (!adapter) {
-        throw gatewayError(
-          "COMMAND_NOT_PERMITTED",
-          "The capture command has no installed external adapter.",
-        );
-      }
-      recovered = reserved.isReplayed
+      return reserved.isReplayed
         ? await adapter.recover(reserved.externalOperationKey)
         : await adapter.start(reserved.externalOperationKey, {
             claim: reserved.envelope,
             command,
           });
     }
+    const adapter = dependencies.commands.external.CAPTURE_CLAIM_URL;
+    if (!adapter) {
+      throw gatewayError(
+        "COMMAND_NOT_PERMITTED",
+        "The capture command has no installed external adapter.",
+      );
+    }
+    return reserved.isReplayed
+      ? await adapter.recover(reserved.externalOperationKey)
+      : await adapter.start(reserved.externalOperationKey, {
+          claim: reserved.envelope,
+          command,
+        });
   } catch (error) {
     if (error instanceof AffiliateAgentGatewayError) throw error;
-    throw gatewayError(
+    throw gatewayErrorForPersistenceFailure(
+      error,
       "PARTIAL_COMMAND_UNRESOLVED",
       "The external command response was lost and requires recovery.",
       true,
       reserved.receiptId,
     );
   }
+};
+
+const readExternalCommandCapture = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  recovered: Readonly<Record<string, unknown>> | null,
+  commandType: AffiliateAgentExternalCommand["type"],
+  receiptId: string,
+): Promise<RecoveredExternalOutput> => {
   if (recovered === null) {
     throw gatewayError(
       "PARTIAL_COMMAND_UNRESOLVED",
       "The external command effect is unknown and requires reconciliation.",
       false,
-      reserved.receiptId,
+      receiptId,
     );
   }
-  let capture: RecoveredExternalOutput;
   try {
-    capture = parseRecoveredExternalOutput(recovered);
+    const capture = parseRecoveredExternalOutput(recovered, commandType);
     const artifactRead = await dependencies.artifacts.readImmutable({
       fileId: capture.artifactId,
       maximumBytes: MAXIMUM_GATEWAY_ARTIFACT_BYTES,
@@ -2946,15 +4782,427 @@ const performExternalCommand = async (
       },
       artifactRead,
     );
+    return capture;
   } catch (error) {
     if (error instanceof AffiliateAgentGatewayError) throw error;
-    throw gatewayError(
+    throw gatewayErrorForPersistenceFailure(
+      error,
       "PARTIAL_COMMAND_UNRESOLVED",
       "The external command evidence could not be verified.",
       true,
+      receiptId,
+    );
+  }
+};
+
+type ExternalCommandReservation = Exclude<
+  Awaited<ReturnType<typeof reserveExternalCommandTransaction>>,
+  { kind: "COMPLETED" }
+>;
+
+type ExternalFinalizationState =
+  | Readonly<{
+      kind: "REPLAY";
+      result: AffiliateAgentCommandResult;
+    }>
+  | Readonly<{
+      kind: "PENDING";
+      receipt: AffiliateAgentGatewayOperationReceipts;
+      claim: AffiliateAgentGatewayClaims;
+      job: AffiliateAgentGatewayJobs;
+    }>;
+
+function assertExternalReceiptIdentity(
+  receipt: AffiliateAgentGatewayOperationReceipts | null,
+  reserved: ExternalCommandReservation,
+  command: AffiliateAgentExternalCommand,
+  requestHash: string,
+): asserts receipt is AffiliateAgentGatewayOperationReceipts {
+  if (
+    !receipt ||
+    receipt.claimId !== reserved.claimId ||
+    receipt.jobId !== reserved.jobId ||
+    receipt.claimGeneration !== reserved.claimGeneration ||
+    receipt.commandName !== command.type ||
+    receipt.requestHash !== requestHash
+  ) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The external command receipt requires reconciliation.",
+      false,
       reserved.receiptId,
     );
   }
+}
+
+function assertExternalClaimCanFinalize(
+  claim: AffiliateAgentGatewayClaims | null,
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  reserved: ExternalCommandReservation,
+  now: Date,
+): asserts claim is AffiliateAgentGatewayClaims {
+  if (!claim || claim.status !== "ACTIVE") {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The capture claim requires reconciliation.",
+      false,
+      reserved.receiptId,
+    );
+  }
+  if (
+    (claim.leaseExpiresAt <= now && receipt.startedAt >= claim.leaseExpiresAt) ||
+    (claim.hardDeadlineAt < now && receipt.startedAt >= claim.hardDeadlineAt)
+  ) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The capture claim requires reconciliation.",
+      false,
+      reserved.receiptId,
+    );
+  }
+}
+
+function assertExternalJobCanFinalize(
+  job: AffiliateAgentGatewayJobs | null,
+  reserved: ExternalCommandReservation,
+): asserts job is AffiliateAgentGatewayJobs {
+  if (!job || job.status !== "CLAIMED") {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The capture claim requires reconciliation.",
+      false,
+      reserved.receiptId,
+    );
+  }
+  if (job.activeClaimId !== reserved.claimId) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The capture claim requires reconciliation.",
+      false,
+      reserved.receiptId,
+    );
+  }
+  if (job.claimGeneration !== reserved.claimGeneration) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The capture claim requires reconciliation.",
+      false,
+      reserved.receiptId,
+    );
+  }
+}
+
+const loadExternalFinalizationState = async (
+  transaction: Prisma.TransactionClient,
+  dependencies: AffiliateAgentGatewayDependencies,
+  reserved: ExternalCommandReservation,
+  command: AffiliateAgentExternalCommand,
+  requestHash: string,
+): Promise<ExternalFinalizationState> => {
+  const receipt =
+    await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
+      where: { id: reserved.receiptId },
+    });
+  assertExternalReceiptIdentity(receipt, reserved, command, requestHash);
+  if (receipt.status === "SUCCEEDED") {
+    return { kind: "REPLAY", result: replayCommand(receipt.responseJson) };
+  }
+  if (receipt.status !== "PENDING") {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The capture receipt requires reconciliation.",
+      false,
+      reserved.receiptId,
+    );
+  }
+  const [claim, job] = await Promise.all([
+    transaction.affiliateAgentGatewayClaims.findUnique({
+      where: { id: reserved.claimId },
+    }),
+    transaction.affiliateAgentGatewayJobs.findUnique({
+      where: { id: reserved.jobId },
+    }),
+  ]);
+  const finalizationNow = dependencies.clock.now();
+  assertExternalClaimCanFinalize(claim, receipt, reserved, finalizationNow);
+  assertExternalJobCanFinalize(job, reserved);
+  return { kind: "PENDING", receipt, claim, job };
+};
+
+const externalArtifactEvidenceKind = (
+  command: AffiliateAgentExternalCommand,
+): "PROVIDER_RESULT" | "CAPTURED_PAGE" =>
+  command.type === "RUN_DISCOVERY_QUERY" ? "PROVIDER_RESULT" : "CAPTURED_PAGE";
+
+const coveragePlanningWaveFor = async (
+  transaction: Prisma.TransactionClient,
+  jobId: string,
+): Promise<unknown> => {
+  if (!("affiliateReplenishmentWaves" in transaction)) return null;
+  const coverageWaves = transaction.affiliateReplenishmentWaves;
+  if (
+    !coverageWaves
+    || typeof coverageWaves !== "object"
+    || !("findFirst" in coverageWaves)
+    || typeof coverageWaves.findFirst !== "function"
+  ) {
+    return null;
+  }
+  return coverageWaves.findFirst({
+    where: { coveragePlanningJobId: jobId },
+    select: { id: true },
+  });
+};
+
+type DiscoveryProviderInput = Readonly<{
+  provider: string;
+  query: string;
+  providerOutput: unknown;
+}>;
+
+const decodeDiscoveryProviderInput = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  reserved: ExternalCommandReservation,
+  capture: RecoveredExternalOutput,
+): Promise<DiscoveryProviderInput> => {
+  try {
+    const providerRead = await dependencies.artifacts.readImmutable({
+      fileId: capture.artifactId,
+      maximumBytes: MAXIMUM_GATEWAY_ARTIFACT_BYTES,
+    });
+    verifyArtifactRead(
+      {
+        contentHash: capture.sha256,
+        mimeType: capture.mimeType,
+        byteSize: capture.byteSize,
+      },
+      providerRead,
+    );
+    const providerOutput = JSON.parse(Buffer.from(providerRead.bytes).toString("utf8"));
+    const providerRecord = isGatewayRecord(providerOutput)
+      ? providerOutput
+      : {};
+    const request = isGatewayRecord(providerRecord.request)
+      ? providerRecord.request
+      : {};
+    return {
+      provider: typeof providerRecord.provider === "string"
+        ? providerRecord.provider
+        : "",
+      query: typeof request.query === "string" ? request.query : "",
+      providerOutput,
+    };
+  } catch (error) {
+    if (error instanceof AffiliateAgentGatewayError) throw error;
+    throw gatewayErrorForPersistenceFailure(
+      error,
+      "INTERNAL_ERROR",
+      "The discovery provider output could not be decoded.",
+      false,
+      reserved.receiptId,
+    );
+  }
+};
+
+const materializeExternalDiscovery = async (
+  transaction: Prisma.TransactionClient,
+  dependencies: AffiliateAgentGatewayDependencies,
+  reserved: ExternalCommandReservation,
+  command: AffiliateAgentExternalCommand,
+  capture: RecoveredExternalOutput,
+  claim: AffiliateAgentGatewayClaims,
+  coverageWave: unknown,
+  completedAt: Date,
+): Promise<Awaited<ReturnType<typeof materializeAffiliateCoverageDiscoveryResult>> | null> => {
+  if (command.type !== "RUN_DISCOVERY_QUERY" || !coverageWave) return null;
+  const { provider, query, providerOutput } =
+    await decodeDiscoveryProviderInput(dependencies, reserved, capture);
+  const envelope = parseClaimEnvelope(claim);
+  if (!envelope) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The discovery claim envelope is invalid.",
+      false,
+      reserved.receiptId,
+    );
+  }
+  return materializeAffiliateCoverageDiscoveryResult({
+    database: affiliateSupplyDatabase(transaction),
+    gatewayJobId: reserved.jobId,
+    claimId: reserved.claimId,
+    claimGeneration: reserved.claimGeneration,
+    receiptId: reserved.receiptId,
+    provider,
+    query,
+    providerOutput,
+    evidenceManifest: envelope.evidenceManifest,
+    providerEvidence: {
+      evidenceRef: capture.evidenceRef,
+      artifactId: capture.artifactId,
+      sha256: capture.sha256,
+      mimeType: capture.mimeType,
+      byteSize: capture.byteSize,
+    },
+    now: completedAt,
+  });
+};
+
+const completeExternalCommandFinalization = async (
+  transaction: Prisma.TransactionClient,
+  dependencies: AffiliateAgentGatewayDependencies,
+  reserved: ExternalCommandReservation,
+  command: AffiliateAgentExternalCommand,
+  requestHash: string,
+  commandHash: string,
+  capture: RecoveredExternalOutput,
+  responseHash: string,
+  commandResult: AffiliateAgentCommandResult,
+  completedAt: Date,
+  state: Extract<ExternalFinalizationState, { kind: "PENDING" }>,
+): Promise<AffiliateAgentCommandResult> => {
+  await ensureExternalArtifact(transaction, {
+    claimId: reserved.claimId,
+    claimGeneration: reserved.claimGeneration,
+    evidenceKind: externalArtifactEvidenceKind(command),
+    output: capture,
+    rowId: dependencies.identifiers.create("artifact"),
+    receiptId: reserved.receiptId,
+  });
+  const discoveryMaterialization = await materializeExternalDiscovery(
+    transaction,
+    dependencies,
+    reserved,
+    command,
+    capture,
+    state.claim,
+    await coveragePlanningWaveFor(transaction, reserved.jobId),
+    completedAt,
+  );
+  const receiptUpdated =
+    await transaction.affiliateAgentGatewayOperationReceipts.updateMany({
+      where: {
+        id: reserved.receiptId,
+        status: "PENDING",
+        requestHash,
+      },
+      data: {
+        status: "SUCCEEDED",
+        responseHash,
+        responseJson: asPrismaJson(commandResult),
+        completedAt,
+        reconcileAfter: null,
+      },
+    });
+  const jobUpdated = await transaction.affiliateAgentGatewayJobs.updateMany({
+    where: {
+      id: reserved.jobId,
+      status: "CLAIMED",
+      activeClaimId: reserved.claimId,
+      claimGeneration: reserved.claimGeneration,
+      eventSequence: state.job.eventSequence,
+    },
+    data: { eventSequence: { increment: 1 } },
+  });
+  if (receiptUpdated.count !== 1 || jobUpdated.count !== 1) {
+    throw new AffiliateAgentClaimRaceError();
+  }
+  await transaction.affiliateAgentGatewayEvents.create({
+    data: {
+      id: dependencies.identifiers.create("event"),
+      eventKey: `external-command-succeeded:${reserved.receiptId}`,
+      jobId: reserved.jobId,
+      claimId: reserved.claimId,
+      receiptId: reserved.receiptId,
+      sequence: state.job.eventSequence + 1,
+      eventType: "EXTERNAL_COMMAND_SUCCEEDED",
+      actorKind: "AGENT_INVOCATION",
+      actorId: reserved.invocationId,
+      role: reserved.role,
+      requestHash,
+      inputHash: commandHash,
+      outputHash: responseHash,
+      payload: asPrismaJson({
+        evidenceRef: capture.evidenceRef,
+        ...(discoveryMaterialization
+          ? { discoveryMaterialization }
+          : {}),
+      }),
+      retentionClass: "INDEFINITE",
+    },
+  });
+  return commandResult;
+};
+
+const finalizeExternalCommand = (
+  dependencies: AffiliateAgentGatewayDependencies,
+  reserved: ExternalCommandReservation,
+  command: AffiliateAgentExternalCommand,
+  requestHash: string,
+  commandHash: string,
+  capture: RecoveredExternalOutput,
+  responseHash: string,
+  commandResult: AffiliateAgentCommandResult,
+  completedAt: Date,
+): Promise<AffiliateAgentCommandResult> =>
+  runSerializableEffectTransaction(
+    dependencies,
+    async (transaction) => {
+      const state = await loadExternalFinalizationState(
+        transaction,
+        dependencies,
+        reserved,
+        command,
+        requestHash,
+      );
+      if (state.kind === "REPLAY") return state.result;
+      return completeExternalCommandFinalization(
+        transaction,
+        dependencies,
+        reserved,
+        command,
+        requestHash,
+        commandHash,
+        capture,
+        responseHash,
+        commandResult,
+        completedAt,
+        state,
+      );
+    },
+    {
+      code: "PARTIAL_COMMAND_UNRESOLVED",
+      safeMessage: "The external command could not be finalized.",
+      receiptId: reserved.receiptId,
+    },
+  );
+
+const performExternalCommand = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  input: Extract<AffiliateAgentClaimOperation, { kind: "EXECUTE_COMMAND" }>,
+  command: AffiliateAgentExternalCommand,
+): Promise<AffiliateAgentCommandResult> => {
+  const requestHash = operationRequestHash(input);
+  const commandHash = hashAffiliateAgentValue(command);
+  const reserved = await reserveExternalCommandTransaction(
+    dependencies,
+    input,
+    command,
+    requestHash,
+    commandHash,
+  );
+  if (reserved.kind === "COMPLETED") return reserved.result;
+
+  const recovered = await invokeExternalCommandAdapter(
+    dependencies,
+    reserved,
+    command,
+  );
+  const capture = await readExternalCommandCapture(
+    dependencies,
+    recovered,
+    command.type,
+    reserved.receiptId,
+  );
   const safeOutput = capture;
   const responseHash = hashAffiliateAgentValue({
     commandType: command.type,
@@ -2968,136 +5216,851 @@ const performExternalCommand = async (
     safeOutput,
   };
   const completedAt = dependencies.clock.now();
-  return runSerializableEffectTransaction(
+  return finalizeExternalCommand(
+    dependencies,
+    reserved,
+    command,
+    requestHash,
+    commandHash,
+    capture,
+    responseHash,
+    commandResult,
+    completedAt,
+  );
+};
+
+type AvailableLifecycleAuthority = Extract<
+  AffiliateAgentGatewayDependencies["lifecycle"],
+  { kind: "AVAILABLE" }
+>;
+
+type LifecycleIdentity = Readonly<{
+  caseId: string;
+  decisionHash: string;
+  recordedHumanActorId: string;
+  commandRef: string;
+}>;
+type HumanDirectedExecutorSubject = Extract<
+  AffiliateAgentSubject,
+  { type: "HUMAN_DIRECTED_EXECUTOR" }
+>;
+
+const assertHumanDirectedExecutorSubject = (
+  subject: AffiliateAgentSubject,
+): HumanDirectedExecutorSubject => {
+  if (subject.type !== "HUMAN_DIRECTED_EXECUTOR") {
+    throw gatewayError(
+      "COMMAND_NOT_PERMITTED",
+      "The lifecycle command requires a human-directed executor subject.",
+    );
+  }
+  return subject;
+};
+
+
+const assertLifecycleCommandRole = (
+  authorized: AuthorizedClaim,
+  command: Extract<
+    AffiliateAgentCommand,
+    { type: "EXECUTE_RECORDED_LIFECYCLE_COMMAND" }
+  >,
+): void => {
+  if (
+    authorized.envelope.role !== "HUMAN_DIRECTED_EXECUTOR" ||
+    !authorized.roleContract.permittedCommands.includes(command.type) ||
+    !authorized.claim.permittedCommands.includes(command.type)
+  ) {
+    throw gatewayError(
+      "COMMAND_NOT_PERMITTED",
+      "The lifecycle command is not permitted for this claim.",
+    );
+  }
+};
+
+const assertLifecycleCommandSubject = (
+  authorized: AuthorizedClaim,
+  command: Extract<
+    AffiliateAgentCommand,
+    { type: "EXECUTE_RECORDED_LIFECYCLE_COMMAND" }
+  >,
+): HumanDirectedExecutorSubject => {
+  const subject = assertHumanDirectedExecutorSubject(
+    authorized.envelope.subject,
+  );
+  if (
+    command.data.caseId !== subject.caseId ||
+    command.data.decisionHash !== subject.decisionHash ||
+    command.data.lifecycleCommandRef !== subject.lifecycleCommandRef ||
+    authorized.claim.lifecycleGeneration === null
+  ) {
+    throw gatewayError(
+      "COMMAND_NOT_PERMITTED",
+      "The lifecycle command does not match the recorded human decision.",
+    );
+  }
+  return subject;
+};
+const requireLifecycleGeneration = (authorized: AuthorizedClaim): number => {
+  const generation = authorized.claim.lifecycleGeneration;
+  if (generation === null) {
+    throw gatewayError(
+      "COMMAND_NOT_PERMITTED",
+      "The lifecycle command does not match the recorded human decision.",
+    );
+  }
+  return generation;
+};
+
+
+const assertLifecycleCommandEvidence = (
+  authorized: AuthorizedClaim,
+): void => {
+  const evidenceKinds = authorized.envelope.evidenceManifest.entries.map(
+    (entry) => entry.kind,
+  );
+  if (
+    !evidenceKinds.includes("HUMAN_DECISION") ||
+    !evidenceKinds.includes("REVIEWER_EVIDENCE")
+  ) {
+    throw gatewayError(
+      "COMMAND_NOT_PERMITTED",
+      "The lifecycle command lacks human decision or reviewer evidence.",
+    );
+  }
+};
+
+const assertResolvedLifecycleIdentity = (
+  resolved: LifecycleIdentity | null,
+  expected: LifecycleIdentity,
+): void => {
+  if (
+    resolved === null ||
+    resolved.caseId !== expected.caseId ||
+    resolved.decisionHash !== expected.decisionHash ||
+    resolved.recordedHumanActorId !== expected.recordedHumanActorId ||
+    resolved.commandRef !== expected.commandRef
+  ) {
+    throw gatewayError(
+      "COMMAND_NOT_PERMITTED",
+      "The lifecycle command does not match the recorded authority.",
+    );
+  }
+};
+
+const admitLifecycleCommand = async (
+  authority: AvailableLifecycleAuthority,
+  authorized: AuthorizedClaim,
+  command: Extract<
+    AffiliateAgentCommand,
+    { type: "EXECUTE_RECORDED_LIFECYCLE_COMMAND" }
+  >,
+) => {
+  assertLifecycleCommandRole(authorized, command);
+  const subject = assertLifecycleCommandSubject(authorized, command);
+  assertLifecycleCommandEvidence(authorized);
+  const lifecycleIdentity: LifecycleIdentity = {
+    caseId: subject.caseId,
+    decisionHash: subject.decisionHash,
+    recordedHumanActorId: subject.recordedHumanActorId,
+    commandRef: command.data.lifecycleCommandRef,
+  };
+  const resolvedLifecycleIdentity =
+    await authority.resolveRecordedCommand(lifecycleIdentity);
+  assertResolvedLifecycleIdentity(
+    resolvedLifecycleIdentity,
+    lifecycleIdentity,
+  );
+  return { subject, lifecycleIdentity };
+};
+
+const resolveLifecycleReceipt = async (
+  transaction: Prisma.TransactionClient,
+  dependencies: AffiliateAgentGatewayDependencies,
+  authorized: AuthorizedClaim,
+  input: Extract<AffiliateAgentClaimOperation, { kind: "EXECUTE_COMMAND" }>,
+  command: Extract<
+    AffiliateAgentCommand,
+    { type: "EXECUTE_RECORDED_LIFECYCLE_COMMAND" }
+  >,
+  requestHash: string,
+  now: Date,
+  lifecycleIdentity: LifecycleIdentity,
+) => {
+  const existing =
+    await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
+      where: {
+        claimId_idempotencyKey: {
+          claimId: authorized.claim.id,
+          idempotencyKey: input.idempotencyKey,
+        },
+      },
+    });
+  if (!existing) return null;
+  if (
+    existing.operationKind !== input.kind ||
+    existing.commandName !== command.type ||
+    existing.requestHash !== requestHash
+  ) {
+    throw gatewayError(
+      "IDEMPOTENCY_KEY_REUSED",
+      "The operation idempotency key was used for different input.",
+    );
+  }
+  if (existing.status === "SUCCEEDED") {
+    return {
+      kind: "COMPLETED" as const,
+      result: replayCommand(existing.responseJson),
+    };
+  }
+  if (existing.status !== "PENDING") {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The lifecycle command requires reconciliation.",
+      false,
+      existing.id,
+    );
+  }
+  if (existing.reconcileAfter === null || existing.reconcileAfter > now) {
+    throw gatewayError(
+      "OPERATION_IN_PROGRESS",
+      "The lifecycle command is still in progress.",
+      true,
+      existing.id,
+    );
+  }
+  return {
+    kind: "RESERVED" as const,
+    receiptId: existing.id,
+    isReplayed: true,
+    claimId: authorized.claim.id,
+    jobId: authorized.job.id,
+    claimGeneration: authorized.claim.claimGeneration,
+    expectedGeneration: requireLifecycleGeneration(authorized),
+    supplyContractVersion: authorized.envelope.supplyContractVersion,
+    supplyContractHash: authorized.envelope.supplyContractHash,
+    inputHash: hashAffiliateAgentValue(command),
+    identity: lifecycleIdentity,
+    commandRef: command.data.lifecycleCommandRef,
+    recordedHumanActorId: lifecycleIdentity.recordedHumanActorId,
+    invocationId: authorized.claim.invocationId,
+    role: authorized.claim.role,
+  };
+};
+
+type PriorLifecycleReplay = Readonly<{
+  priorReceipt: AffiliateAgentGatewayOperationReceipts;
+  priorResult: AffiliateAgentCommandResult;
+}>;
+
+const parsePriorLifecycleResult = (
+  priorReceipt: AffiliateAgentGatewayOperationReceipts,
+  command: Extract<
+    AffiliateAgentCommand,
+    { type: "EXECUTE_RECORDED_LIFECYCLE_COMMAND" }
+  >,
+  expectedGeneration: number,
+): AffiliateAgentCommandResult | null => {
+  try {
+    const priorResult = replayCommand(priorReceipt.responseJson);
+    if (
+      priorResult.commandType !== command.type ||
+      priorResult.safeOutput === null ||
+      priorResult.safeOutput.lifecycleGeneration !== expectedGeneration
+    ) {
+      return null;
+    }
+    return priorResult;
+  } catch {
+    return null;
+  }
+};
+
+const hasLifecycleReplayPayload = (
+  priorEvent: Awaited<
+    ReturnType<
+      Prisma.TransactionClient["affiliateAgentGatewayEvents"]["findFirst"]
+    >
+  >,
+  command: Extract<
+    AffiliateAgentCommand,
+    { type: "EXECUTE_RECORDED_LIFECYCLE_COMMAND" }
+  >,
+  recordedHumanActorId: string,
+): boolean => {
+  if (!priorEvent || !isGatewayRecord(priorEvent.payload)) return false;
+  return (
+    priorEvent.payload.lifecycleCommandRef ===
+      command.data.lifecycleCommandRef &&
+    priorEvent.payload.recordedHumanActorId === recordedHumanActorId
+  );
+};
+
+const findPriorLifecycleReplay = async (
+  transaction: Prisma.TransactionClient,
+  authorized: AuthorizedClaim,
+  command: Extract<
+    AffiliateAgentCommand,
+    { type: "EXECUTE_RECORDED_LIFECYCLE_COMMAND" }
+  >,
+  expectedGeneration: number,
+  recordedHumanActorId: string,
+): Promise<PriorLifecycleReplay | null> => {
+  const priorReceipts =
+    await transaction.affiliateAgentGatewayOperationReceipts.findMany({
+      where: {
+        jobId: authorized.job.id,
+        commandName: command.type,
+        status: "SUCCEEDED",
+      },
+    });
+  for (const priorReceipt of priorReceipts) {
+    if (priorReceipt.claimId === authorized.claim.id) {
+      throw gatewayError(
+        "LIFECYCLE_GENERATION_STALE",
+        "This claim already recorded the lifecycle command.",
+        false,
+        priorReceipt.id,
+      );
+    }
+    const priorResult = parsePriorLifecycleResult(
+      priorReceipt,
+      command,
+      expectedGeneration,
+    );
+    if (!priorResult) continue;
+    const priorEvent =
+      await transaction.affiliateAgentGatewayEvents.findFirst({
+        where: {
+          receiptId: priorReceipt.id,
+          eventType: "LIFECYCLE_COMMAND_SUCCEEDED",
+        },
+      });
+    if (!hasLifecycleReplayPayload(priorEvent, command, recordedHumanActorId)) {
+      continue;
+    }
+    return { priorReceipt, priorResult };
+  }
+  return null;
+};
+const findPriorLifecycleReplayForClaim = async (
+  transaction: Prisma.TransactionClient,
+  authorized: AuthorizedClaim,
+  command: Extract<
+    AffiliateAgentCommand,
+    { type: "EXECUTE_RECORDED_LIFECYCLE_COMMAND" }
+  >,
+  recordedHumanActorId: string,
+): Promise<PriorLifecycleReplay | null> => {
+  const expectedGeneration = requireLifecycleGeneration(authorized);
+  const replay = await findPriorLifecycleReplay(
+    transaction,
+    authorized,
+    command,
+    expectedGeneration,
+    recordedHumanActorId,
+  );
+  if (replay) return replay;
+  return findPriorLifecycleReplay(
+    transaction,
+    authorized,
+    command,
+    expectedGeneration + 1,
+    recordedHumanActorId,
+  );
+};
+
+const completePriorLifecycleReplay = async (
+  transaction: Prisma.TransactionClient,
+  dependencies: AffiliateAgentGatewayDependencies,
+  authorized: AuthorizedClaim,
+  input: Extract<AffiliateAgentClaimOperation, { kind: "EXECUTE_COMMAND" }>,
+  command: Extract<
+    AffiliateAgentCommand,
+    { type: "EXECUTE_RECORDED_LIFECYCLE_COMMAND" }
+  >,
+  requestHash: string,
+  commandHash: string,
+  now: Date,
+  lifecycle: Readonly<{
+    priorReceipt: AffiliateAgentGatewayOperationReceipts;
+    priorResult: AffiliateAgentCommandResult;
+  }>,
+) => {
+  const receiptId = dependencies.identifiers.create("receipt");
+  const replayedResult: AffiliateAgentCommandResult = {
+    ...lifecycle.priorResult,
+    receiptId,
+  };
+  const responseHash = replayedResult.responseHash;
+  const jobUpdated =
+    await transaction.affiliateAgentGatewayJobs.updateMany({
+      where: {
+        id: authorized.job.id,
+        status: "CLAIMED",
+        activeClaimId: authorized.claim.id,
+        claimGeneration: authorized.claim.claimGeneration,
+        eventSequence: authorized.job.eventSequence,
+      },
+      data: { eventSequence: { increment: 1 } },
+    });
+  if (jobUpdated.count !== 1) {
+    throw new AffiliateAgentClaimRaceError();
+  }
+  await transaction.affiliateAgentGatewayOperationReceipts.create({
+    data: {
+      id: receiptId,
+      claimId: authorized.claim.id,
+      jobId: authorized.job.id,
+      claimGeneration: authorized.claim.claimGeneration,
+      idempotencyKey: input.idempotencyKey,
+      operationKind: input.kind,
+      commandName: command.type,
+      requestHash,
+      status: "SUCCEEDED",
+      responseHash,
+      responseJson: asPrismaJson(replayedResult),
+      startedAt: now,
+      completedAt: now,
+      reconcileAfter: null,
+      retentionClass: "INDEFINITE",
+    },
+  });
+  await transaction.affiliateAgentGatewayEvents.create({
+    data: {
+      id: dependencies.identifiers.create("event"),
+      eventKey: `lifecycle-command-replayed:${receiptId}`,
+      jobId: authorized.job.id,
+      claimId: authorized.claim.id,
+      receiptId,
+      sequence: authorized.job.eventSequence + 1,
+      eventType: "LIFECYCLE_COMMAND_REPLAYED",
+      actorKind: "AGENT_INVOCATION",
+      actorId: authorized.claim.invocationId,
+      role: authorized.claim.role,
+      requestHash,
+      inputHash: commandHash,
+      outputHash: responseHash,
+      payload: asPrismaJson({
+        lifecycleCommandRef: command.data.lifecycleCommandRef,
+        priorReceiptId: lifecycle.priorReceipt.id,
+      }),
+      retentionClass: "INDEFINITE",
+    },
+  });
+  return {
+    kind: "COMPLETED" as const,
+    result: replayedResult,
+  };
+};
+
+const createLifecycleReservation = async (
+  transaction: Prisma.TransactionClient,
+  dependencies: AffiliateAgentGatewayDependencies,
+  authorized: AuthorizedClaim,
+  input: Extract<AffiliateAgentClaimOperation, { kind: "EXECUTE_COMMAND" }>,
+  command: Extract<
+    AffiliateAgentCommand,
+    { type: "EXECUTE_RECORDED_LIFECYCLE_COMMAND" }
+  >,
+  requestHash: string,
+  commandHash: string,
+  now: Date,
+  subject: HumanDirectedExecutorSubject,
+  lifecycleIdentity: LifecycleIdentity,
+) => {
+  const receiptId = dependencies.identifiers.create("receipt");
+  const jobUpdated =
+    await transaction.affiliateAgentGatewayJobs.updateMany({
+      where: {
+        id: authorized.job.id,
+        status: "CLAIMED",
+        activeClaimId: authorized.claim.id,
+        claimGeneration: authorized.claim.claimGeneration,
+        eventSequence: authorized.job.eventSequence,
+      },
+      data: { eventSequence: { increment: 1 } },
+    });
+  if (jobUpdated.count !== 1) throw new AffiliateAgentClaimRaceError();
+  await transaction.affiliateAgentGatewayOperationReceipts.create({
+    data: {
+      id: receiptId,
+      claimId: authorized.claim.id,
+      jobId: authorized.job.id,
+      claimGeneration: authorized.claim.claimGeneration,
+      idempotencyKey: input.idempotencyKey,
+      operationKind: input.kind,
+      commandName: command.type,
+      requestHash,
+      status: "PENDING",
+      externalOperationKey: `lifecycle:${receiptId}`,
+      startedAt: now,
+      reconcileAfter: addSeconds(
+        now,
+        AFFILIATE_AGENT_HEARTBEAT_INTERVAL_SECONDS,
+      ),
+      retentionClass: "INDEFINITE",
+    },
+  });
+  await transaction.affiliateAgentGatewayEvents.create({
+    data: {
+      id: dependencies.identifiers.create("event"),
+      eventKey: `lifecycle-command-reserved:${receiptId}`,
+      jobId: authorized.job.id,
+      claimId: authorized.claim.id,
+      receiptId,
+      sequence: authorized.job.eventSequence + 1,
+      eventType: "LIFECYCLE_COMMAND_RESERVED",
+      actorKind: "AGENT_INVOCATION",
+      actorId: authorized.claim.invocationId,
+      role: authorized.claim.role,
+      requestHash,
+      inputHash: commandHash,
+      payload: asPrismaJson({
+        caseId: subject.caseId,
+        decisionHash: subject.decisionHash,
+        recordedHumanActorId: subject.recordedHumanActorId,
+        lifecycleCommandRef: command.data.lifecycleCommandRef,
+      }),
+      retentionClass: "INDEFINITE",
+    },
+  });
+  return {
+    kind: "RESERVED" as const,
+    receiptId,
+    isReplayed: false,
+    claimId: authorized.claim.id,
+    jobId: authorized.job.id,
+    claimGeneration: authorized.claim.claimGeneration,
+    expectedGeneration: requireLifecycleGeneration(authorized),
+    supplyContractVersion: authorized.envelope.supplyContractVersion,
+    supplyContractHash: authorized.envelope.supplyContractHash,
+    inputHash: commandHash,
+    identity: lifecycleIdentity,
+    commandRef: command.data.lifecycleCommandRef,
+    recordedHumanActorId: subject.recordedHumanActorId,
+    invocationId: authorized.claim.invocationId,
+    role: authorized.claim.role,
+  };
+};
+
+const reserveLifecycleCommand = (
+  dependencies: AffiliateAgentGatewayDependencies,
+  input: Extract<AffiliateAgentClaimOperation, { kind: "EXECUTE_COMMAND" }>,
+  command: Extract<
+    AffiliateAgentCommand,
+    { type: "EXECUTE_RECORDED_LIFECYCLE_COMMAND" }
+  >,
+  authority: AvailableLifecycleAuthority,
+  requestHash: string,
+  commandHash: string,
+) =>
+  runSerializableEffectTransaction(
     dependencies,
     async (transaction) => {
-      const receipt =
-        await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
-          where: { id: reserved.receiptId },
-        });
-      if (
-        !receipt ||
-        receipt.claimId !== reserved.claimId ||
-        receipt.jobId !== reserved.jobId ||
-        receipt.claimGeneration !== reserved.claimGeneration ||
-        receipt.commandName !== command.type ||
-        receipt.requestHash !== requestHash
-      ) {
-        throw gatewayError(
-          "PARTIAL_COMMAND_UNRESOLVED",
-          "The external command receipt requires reconciliation.",
-          false,
-          reserved.receiptId,
-        );
-      }
-      if (receipt.status === "SUCCEEDED") {
-        return replayCommand(receipt.responseJson);
-      }
-      if (receipt.status !== "PENDING") {
-        throw gatewayError(
-          "PARTIAL_COMMAND_UNRESOLVED",
-          "The capture receipt requires reconciliation.",
-          false,
-          reserved.receiptId,
-        );
-      }
-      const [claim, job] = await Promise.all([
-        transaction.affiliateAgentGatewayClaims.findUnique({
-          where: { id: reserved.claimId },
-        }),
-        transaction.affiliateAgentGatewayJobs.findUnique({
-          where: { id: reserved.jobId },
-        }),
-      ]);
-      const finalizationNow = dependencies.clock.now();
-      if (
-        !claim ||
-        claim.status !== "ACTIVE" ||
-        (claim.leaseExpiresAt <= finalizationNow &&
-          receipt.startedAt >= claim.leaseExpiresAt) ||
-        (claim.hardDeadlineAt < finalizationNow &&
-          receipt.startedAt >= claim.hardDeadlineAt) ||
-        !job ||
-        job.status !== "CLAIMED" ||
-        job.activeClaimId !== reserved.claimId ||
-        job.claimGeneration !== reserved.claimGeneration
-      ) {
-        throw gatewayError(
-          "PARTIAL_COMMAND_UNRESOLVED",
-          "The capture claim requires reconciliation.",
-          false,
-          reserved.receiptId,
-        );
-      }
-      await ensureExternalArtifact(transaction, {
-        claimId: reserved.claimId,
-        claimGeneration: reserved.claimGeneration,
-        evidenceKind:
-          command.type === "RUN_DISCOVERY_QUERY"
-            ? "PROVIDER_RESULT"
-            : "CAPTURED_PAGE",
-        output: capture,
-        rowId: dependencies.identifiers.create("artifact"),
-        receiptId: reserved.receiptId,
-      });
-      const receiptUpdated =
-        await transaction.affiliateAgentGatewayOperationReceipts.updateMany({
-          where: {
-            id: reserved.receiptId,
-            status: "PENDING",
-            requestHash,
-          },
-          data: {
-            status: "SUCCEEDED",
-            responseHash,
-            responseJson: asPrismaJson(commandResult),
-            completedAt: completedAt,
-            reconcileAfter: null,
-          },
-        });
-      const jobUpdated = await transaction.affiliateAgentGatewayJobs.updateMany(
-        {
-          where: {
-            id: reserved.jobId,
-            status: "CLAIMED",
-            activeClaimId: reserved.claimId,
-            claimGeneration: reserved.claimGeneration,
-            eventSequence: job.eventSequence,
-          },
-          data: { eventSequence: { increment: 1 } },
-        },
+      const authorized = await authorizeClaimOperation(
+        dependencies,
+        input.authorization,
+        dependencies.clock.now(),
+        transaction,
       );
-      if (receiptUpdated.count !== 1 || jobUpdated.count !== 1) {
-        throw new AffiliateAgentClaimRaceError();
-      }
-      await transaction.affiliateAgentGatewayEvents.create({
-        data: {
-          id: dependencies.identifiers.create("event"),
-          eventKey: `external-command-succeeded:${reserved.receiptId}`,
-          jobId: reserved.jobId,
-          claimId: reserved.claimId,
-          receiptId: reserved.receiptId,
-          sequence: job.eventSequence + 1,
-          eventType: "EXTERNAL_COMMAND_SUCCEEDED",
-          actorKind: "AGENT_INVOCATION",
-          actorId: reserved.invocationId,
-          role: reserved.role,
+      const admission = await admitLifecycleCommand(
+        authority,
+        authorized,
+        command,
+      );
+      const now = dependencies.clock.now();
+      const existing = await resolveLifecycleReceipt(
+        transaction,
+        dependencies,
+        authorized,
+        input,
+        command,
+        requestHash,
+        now,
+        admission.lifecycleIdentity,
+      );
+      if (existing) return existing;
+      const prior = await findPriorLifecycleReplayForClaim(
+        transaction,
+        authorized,
+        command,
+        admission.subject.recordedHumanActorId,
+      );
+      if (prior) {
+        return completePriorLifecycleReplay(
+          transaction,
+          dependencies,
+          authorized,
+          input,
+          command,
           requestHash,
-          inputHash: hashAffiliateAgentValue(command),
-          outputHash: responseHash,
-          payload: asPrismaJson({ evidenceRef: capture.evidenceRef }),
-          retentionClass: "INDEFINITE",
-        },
-      });
-      return commandResult;
+          commandHash,
+          now,
+          prior,
+        );
+      }
+      return createLifecycleReservation(
+        transaction,
+        dependencies,
+        authorized,
+        input,
+        command,
+        requestHash,
+        commandHash,
+        now,
+        admission.subject,
+        admission.lifecycleIdentity,
+      );
+    },
+    {
+      code: "INTERNAL_ERROR",
+      safeMessage: "The lifecycle command could not be reserved.",
+    },
+  );
+
+type LifecycleCommandReservation = Exclude<
+  Awaited<ReturnType<typeof reserveLifecycleCommand>>,
+  { kind: "COMPLETED" }
+>;
+
+type LifecycleFinalizationState =
+  | Readonly<{
+      kind: "REPLAY";
+      result: AffiliateAgentCommandResult;
+    }>
+  | Readonly<{
+      kind: "PENDING";
+      receipt: AffiliateAgentGatewayOperationReceipts;
+      claim: AffiliateAgentGatewayClaims;
+      job: AffiliateAgentGatewayJobs;
+    }>;
+
+function assertLifecycleReceiptIdentity(
+  receipt: AffiliateAgentGatewayOperationReceipts | null,
+  reserved: LifecycleCommandReservation,
+  command: Extract<
+    AffiliateAgentCommand,
+    { type: "EXECUTE_RECORDED_LIFECYCLE_COMMAND" }
+  >,
+  requestHash: string,
+): asserts receipt is AffiliateAgentGatewayOperationReceipts {
+  if (
+    !receipt ||
+    receipt.claimId !== reserved.claimId ||
+    receipt.jobId !== reserved.jobId ||
+    receipt.claimGeneration !== reserved.claimGeneration ||
+    receipt.commandName !== command.type ||
+    receipt.requestHash !== requestHash
+  ) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The lifecycle receipt requires reconciliation.",
+      false,
+      reserved.receiptId,
+    );
+  }
+}
+
+function assertLifecycleClaimCanFinalize(
+  claim: AffiliateAgentGatewayClaims | null,
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  reserved: LifecycleCommandReservation,
+  now: Date,
+): asserts claim is AffiliateAgentGatewayClaims {
+  if (!claim || claim.status !== "ACTIVE") {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The lifecycle claim requires reconciliation.",
+      false,
+      reserved.receiptId,
+    );
+  }
+  if (
+    (claim.leaseExpiresAt <= now && receipt.startedAt >= claim.leaseExpiresAt) ||
+    (claim.hardDeadlineAt < now && receipt.startedAt >= claim.hardDeadlineAt)
+  ) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The lifecycle claim requires reconciliation.",
+      false,
+      reserved.receiptId,
+    );
+  }
+}
+
+function assertLifecycleJobCanFinalize(
+  job: AffiliateAgentGatewayJobs | null,
+  reserved: LifecycleCommandReservation,
+): asserts job is AffiliateAgentGatewayJobs {
+  if (!job || job.status !== "CLAIMED") {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The lifecycle claim requires reconciliation.",
+      false,
+      reserved.receiptId,
+    );
+  }
+  if (job.activeClaimId !== reserved.claimId) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The lifecycle claim requires reconciliation.",
+      false,
+      reserved.receiptId,
+    );
+  }
+  if (job.claimGeneration !== reserved.claimGeneration) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The lifecycle claim requires reconciliation.",
+      false,
+      reserved.receiptId,
+    );
+  }
+}
+
+const loadLifecycleFinalizationState = async (
+  transaction: Prisma.TransactionClient,
+  dependencies: AffiliateAgentGatewayDependencies,
+  reserved: LifecycleCommandReservation,
+  command: Extract<
+    AffiliateAgentCommand,
+    { type: "EXECUTE_RECORDED_LIFECYCLE_COMMAND" }
+  >,
+  requestHash: string,
+): Promise<LifecycleFinalizationState> => {
+  const receipt =
+    await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
+      where: { id: reserved.receiptId },
+    });
+  assertLifecycleReceiptIdentity(receipt, reserved, command, requestHash);
+  if (receipt.status === "SUCCEEDED") {
+    return { kind: "REPLAY", result: replayCommand(receipt.responseJson) };
+  }
+  if (receipt.status !== "PENDING") {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The lifecycle receipt requires reconciliation.",
+      false,
+      reserved.receiptId,
+    );
+  }
+  const [claim, job] = await Promise.all([
+    transaction.affiliateAgentGatewayClaims.findUnique({
+      where: { id: reserved.claimId },
+    }),
+    transaction.affiliateAgentGatewayJobs.findUnique({
+      where: { id: reserved.jobId },
+    }),
+  ]);
+  const finalizationNow = dependencies.clock.now();
+  assertLifecycleClaimCanFinalize(claim, receipt, reserved, finalizationNow);
+  assertLifecycleJobCanFinalize(job, reserved);
+  return { kind: "PENDING", receipt, claim, job };
+};
+
+const completeLifecycleFinalization = async (
+  transaction: Prisma.TransactionClient,
+  dependencies: AffiliateAgentGatewayDependencies,
+  reserved: LifecycleCommandReservation,
+  requestHash: string,
+  commandResult: AffiliateAgentCommandResult,
+  responseHash: string,
+  completedAt: Date,
+  state: Extract<LifecycleFinalizationState, { kind: "PENDING" }>,
+): Promise<AffiliateAgentCommandResult> => {
+  const receiptUpdated =
+    await transaction.affiliateAgentGatewayOperationReceipts.updateMany({
+      where: {
+        id: reserved.receiptId,
+        status: "PENDING",
+        requestHash,
+      },
+      data: {
+        status: "SUCCEEDED",
+        responseHash,
+        responseJson: asPrismaJson(commandResult),
+        completedAt,
+        reconcileAfter: null,
+      },
+    });
+  const jobUpdated = await transaction.affiliateAgentGatewayJobs.updateMany({
+    where: {
+      id: reserved.jobId,
+      status: "CLAIMED",
+      activeClaimId: reserved.claimId,
+      claimGeneration: reserved.claimGeneration,
+      eventSequence: state.job.eventSequence,
+    },
+    data: { eventSequence: { increment: 1 } },
+  });
+  if (receiptUpdated.count !== 1 || jobUpdated.count !== 1) {
+    throw new AffiliateAgentClaimRaceError();
+  }
+  await transaction.affiliateAgentGatewayEvents.create({
+    data: {
+      id: dependencies.identifiers.create("event"),
+      eventKey: `lifecycle-command-succeeded:${reserved.receiptId}`,
+      jobId: reserved.jobId,
+      claimId: reserved.claimId,
+      receiptId: reserved.receiptId,
+      sequence: state.job.eventSequence + 1,
+      eventType: "LIFECYCLE_COMMAND_SUCCEEDED",
+      actorKind: "AGENT_INVOCATION",
+      actorId: reserved.invocationId,
+      role: reserved.role,
+      requestHash,
+      inputHash: reserved.inputHash,
+      outputHash: responseHash,
+      payload: asPrismaJson({
+        recordedHumanActorId: reserved.recordedHumanActorId,
+        lifecycleCommandRef: reserved.commandRef,
+      }),
+      retentionClass: "INDEFINITE",
+    },
+  });
+  return commandResult;
+};
+
+const finalizeLifecycleCommand = (
+  dependencies: AffiliateAgentGatewayDependencies,
+  reserved: LifecycleCommandReservation,
+  command: Extract<
+    AffiliateAgentCommand,
+    { type: "EXECUTE_RECORDED_LIFECYCLE_COMMAND" }
+  >,
+  requestHash: string,
+  commandResult: AffiliateAgentCommandResult,
+  responseHash: string,
+  completedAt: Date,
+): Promise<AffiliateAgentCommandResult> =>
+  runSerializableEffectTransaction(
+    dependencies,
+    async (transaction) => {
+      const state = await loadLifecycleFinalizationState(
+        transaction,
+        dependencies,
+        reserved,
+        command,
+        requestHash,
+      );
+      if (state.kind === "REPLAY") return state.result;
+      return completeLifecycleFinalization(
+        transaction,
+        dependencies,
+        reserved,
+        requestHash,
+        commandResult,
+        responseHash,
+        completedAt,
+        state,
+      );
     },
     {
       code: "PARTIAL_COMMAND_UNRESOLVED",
-      safeMessage: "The external command could not be finalized.",
+      safeMessage: "The lifecycle command could not be finalized.",
       receiptId: reserved.receiptId,
     },
   );
-};
 
 const performLifecycleCommand = async (
   dependencies: AffiliateAgentGatewayDependencies,
@@ -3115,328 +6078,14 @@ const performLifecycleCommand = async (
   }
   const authority = dependencies.lifecycle;
   const requestHash = operationRequestHash(input);
-  const reserved = await runSerializableEffectTransaction(
+  const commandHash = hashAffiliateAgentValue(command);
+  const reserved = await reserveLifecycleCommand(
     dependencies,
-    async (transaction) => {
-      const authorized = await authorizeClaimOperation(
-        dependencies,
-        input.authorization,
-        dependencies.clock.now(),
-        transaction,
-      );
-      if (
-        authorized.envelope.role !== "HUMAN_DIRECTED_EXECUTOR" ||
-        !authorized.roleContract.permittedCommands.includes(command.type) ||
-        !authorized.claim.permittedCommands.includes(command.type)
-      ) {
-        throw gatewayError(
-          "COMMAND_NOT_PERMITTED",
-          "The lifecycle command is not permitted for this claim.",
-        );
-      }
-      const subject = authorized.envelope.subject;
-      if (
-        command.data.caseId !== subject.caseId ||
-        command.data.decisionHash !== subject.decisionHash ||
-        command.data.lifecycleCommandRef !== subject.lifecycleCommandRef ||
-        authorized.claim.lifecycleGeneration === null
-      ) {
-        throw gatewayError(
-          "COMMAND_NOT_PERMITTED",
-          "The lifecycle command does not match the recorded human decision.",
-        );
-      }
-      const evidenceKinds = authorized.envelope.evidenceManifest.entries.map(
-        (entry) => entry.kind,
-      );
-      if (
-        !evidenceKinds.includes("HUMAN_DECISION") ||
-        !evidenceKinds.includes("REVIEWER_EVIDENCE")
-      ) {
-        throw gatewayError(
-          "COMMAND_NOT_PERMITTED",
-          "The lifecycle command lacks human decision or reviewer evidence.",
-        );
-      }
-      const lifecycleIdentity = {
-        caseId: subject.caseId,
-        decisionHash: subject.decisionHash,
-        recordedHumanActorId: subject.recordedHumanActorId,
-        commandRef: command.data.lifecycleCommandRef,
-      };
-      const resolvedLifecycleIdentity =
-        await authority.resolveRecordedCommand(lifecycleIdentity);
-      if (
-        resolvedLifecycleIdentity === null ||
-        resolvedLifecycleIdentity.caseId !== lifecycleIdentity.caseId ||
-        resolvedLifecycleIdentity.decisionHash !==
-          lifecycleIdentity.decisionHash ||
-        resolvedLifecycleIdentity.recordedHumanActorId !==
-          lifecycleIdentity.recordedHumanActorId ||
-        resolvedLifecycleIdentity.commandRef !== lifecycleIdentity.commandRef
-      ) {
-        throw gatewayError(
-          "COMMAND_NOT_PERMITTED",
-          "The lifecycle command does not match the recorded authority.",
-        );
-      }
-
-      const existing =
-        await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
-          where: {
-            claimId_idempotencyKey: {
-              claimId: authorized.claim.id,
-              idempotencyKey: input.idempotencyKey,
-            },
-          },
-        });
-      const now = dependencies.clock.now();
-      if (existing) {
-        if (
-          existing.operationKind !== input.kind ||
-          existing.commandName !== command.type ||
-          existing.requestHash !== requestHash
-        ) {
-          throw gatewayError(
-            "IDEMPOTENCY_KEY_REUSED",
-            "The operation idempotency key was used for different input.",
-          );
-        }
-        if (existing.status === "SUCCEEDED") {
-          return {
-            kind: "COMPLETED" as const,
-            result: replayCommand(existing.responseJson),
-          };
-        }
-        if (existing.status !== "PENDING") {
-          throw gatewayError(
-            "PARTIAL_COMMAND_UNRESOLVED",
-            "The lifecycle command requires reconciliation.",
-            false,
-            existing.id,
-          );
-        }
-        if (existing.reconcileAfter === null || existing.reconcileAfter > now) {
-          throw gatewayError(
-            "OPERATION_IN_PROGRESS",
-            "The lifecycle command is still in progress.",
-            true,
-            existing.id,
-          );
-        }
-        return {
-          kind: "RESERVED" as const,
-          receiptId: existing.id,
-          isReplayed: true,
-          claimId: authorized.claim.id,
-          jobId: authorized.job.id,
-          claimGeneration: authorized.claim.claimGeneration,
-          expectedGeneration: authorized.claim.lifecycleGeneration,
-          supplyContractVersion: authorized.envelope.supplyContractVersion,
-          supplyContractHash: authorized.envelope.supplyContractHash,
-          inputHash: hashAffiliateAgentValue(command),
-          identity: lifecycleIdentity,
-          commandRef: command.data.lifecycleCommandRef,
-          recordedHumanActorId: subject.recordedHumanActorId,
-          invocationId: authorized.claim.invocationId,
-          role: authorized.claim.role,
-        };
-      }
-      const priorReceipts =
-        await transaction.affiliateAgentGatewayOperationReceipts.findMany({
-          where: {
-            jobId: authorized.job.id,
-            commandName: command.type,
-            status: "SUCCEEDED",
-          },
-        });
-      for (const priorReceipt of priorReceipts) {
-        if (priorReceipt.claimId === authorized.claim.id) {
-          throw gatewayError(
-            "LIFECYCLE_GENERATION_STALE",
-            "This claim already recorded the lifecycle command.",
-            false,
-            priorReceipt.id,
-          );
-        }
-        let priorResult: AffiliateAgentCommandResult;
-        try {
-          priorResult = replayCommand(priorReceipt.responseJson);
-        } catch {
-          continue;
-        }
-        if (
-          priorResult.commandType !== command.type ||
-          priorResult.safeOutput === null ||
-          priorResult.safeOutput.lifecycleGeneration !==
-            authorized.claim.lifecycleGeneration! + 1
-        ) {
-          continue;
-        }
-        const priorEvent =
-          await transaction.affiliateAgentGatewayEvents.findFirst({
-            where: {
-              receiptId: priorReceipt.id,
-              eventType: "LIFECYCLE_COMMAND_SUCCEEDED",
-            },
-          });
-        const priorPayload = priorEvent?.payload;
-        if (
-          priorPayload === null ||
-          typeof priorPayload !== "object" ||
-          Array.isArray(priorPayload) ||
-          priorPayload.lifecycleCommandRef !==
-            command.data.lifecycleCommandRef ||
-          priorPayload.recordedHumanActorId !== subject.recordedHumanActorId
-        ) {
-          continue;
-        }
-        const receiptId = dependencies.identifiers.create("receipt");
-        const replayedResult: AffiliateAgentCommandResult = {
-          ...priorResult,
-          receiptId,
-        };
-        const responseHash = replayedResult.responseHash;
-        const jobUpdated =
-          await transaction.affiliateAgentGatewayJobs.updateMany({
-            where: {
-              id: authorized.job.id,
-              status: "CLAIMED",
-              activeClaimId: authorized.claim.id,
-              claimGeneration: authorized.claim.claimGeneration,
-              eventSequence: authorized.job.eventSequence,
-            },
-            data: { eventSequence: { increment: 1 } },
-          });
-        if (jobUpdated.count !== 1) {
-          throw new AffiliateAgentClaimRaceError();
-        }
-        await transaction.affiliateAgentGatewayOperationReceipts.create({
-          data: {
-            id: receiptId,
-            claimId: authorized.claim.id,
-            jobId: authorized.job.id,
-            claimGeneration: authorized.claim.claimGeneration,
-            idempotencyKey: input.idempotencyKey,
-            operationKind: input.kind,
-            commandName: command.type,
-            requestHash,
-            status: "SUCCEEDED",
-            responseHash,
-            responseJson: asPrismaJson(replayedResult),
-            startedAt: now,
-            completedAt: now,
-            reconcileAfter: null,
-            retentionClass: "INDEFINITE",
-          },
-        });
-        await transaction.affiliateAgentGatewayEvents.create({
-          data: {
-            id: dependencies.identifiers.create("event"),
-            eventKey: `lifecycle-command-replayed:${receiptId}`,
-            jobId: authorized.job.id,
-            claimId: authorized.claim.id,
-            receiptId,
-            sequence: authorized.job.eventSequence + 1,
-            eventType: "LIFECYCLE_COMMAND_REPLAYED",
-            actorKind: "AGENT_INVOCATION",
-            actorId: authorized.claim.invocationId,
-            role: authorized.claim.role,
-            requestHash,
-            inputHash: hashAffiliateAgentValue(command),
-            outputHash: responseHash,
-            payload: asPrismaJson({
-              lifecycleCommandRef: command.data.lifecycleCommandRef,
-              priorReceiptId: priorReceipt.id,
-            }),
-            retentionClass: "INDEFINITE",
-          },
-        });
-        return {
-          kind: "COMPLETED" as const,
-          result: replayedResult,
-        };
-      }
-
-      const receiptId = dependencies.identifiers.create("receipt");
-      const jobUpdated = await transaction.affiliateAgentGatewayJobs.updateMany(
-        {
-          where: {
-            id: authorized.job.id,
-            status: "CLAIMED",
-            activeClaimId: authorized.claim.id,
-            claimGeneration: authorized.claim.claimGeneration,
-            eventSequence: authorized.job.eventSequence,
-          },
-          data: { eventSequence: { increment: 1 } },
-        },
-      );
-      if (jobUpdated.count !== 1) throw new AffiliateAgentClaimRaceError();
-      await transaction.affiliateAgentGatewayOperationReceipts.create({
-        data: {
-          id: receiptId,
-          claimId: authorized.claim.id,
-          jobId: authorized.job.id,
-          claimGeneration: authorized.claim.claimGeneration,
-          idempotencyKey: input.idempotencyKey,
-          operationKind: input.kind,
-          commandName: command.type,
-          requestHash,
-          status: "PENDING",
-          externalOperationKey: `lifecycle:${receiptId}`,
-          startedAt: now,
-          reconcileAfter: addSeconds(
-            now,
-            AFFILIATE_AGENT_HEARTBEAT_INTERVAL_SECONDS,
-          ),
-          retentionClass: "INDEFINITE",
-        },
-      });
-      await transaction.affiliateAgentGatewayEvents.create({
-        data: {
-          id: dependencies.identifiers.create("event"),
-          eventKey: `lifecycle-command-reserved:${receiptId}`,
-          jobId: authorized.job.id,
-          claimId: authorized.claim.id,
-          receiptId,
-          sequence: authorized.job.eventSequence + 1,
-          eventType: "LIFECYCLE_COMMAND_RESERVED",
-          actorKind: "AGENT_INVOCATION",
-          actorId: authorized.claim.invocationId,
-          role: authorized.claim.role,
-          requestHash,
-          inputHash: hashAffiliateAgentValue(command),
-          payload: asPrismaJson({
-            caseId: subject.caseId,
-            decisionHash: subject.decisionHash,
-            recordedHumanActorId: subject.recordedHumanActorId,
-            lifecycleCommandRef: command.data.lifecycleCommandRef,
-          }),
-          retentionClass: "INDEFINITE",
-        },
-      });
-      return {
-        kind: "RESERVED" as const,
-        receiptId,
-        isReplayed: false,
-        claimId: authorized.claim.id,
-        jobId: authorized.job.id,
-        claimGeneration: authorized.claim.claimGeneration,
-        expectedGeneration: authorized.claim.lifecycleGeneration,
-        supplyContractVersion: authorized.envelope.supplyContractVersion,
-        supplyContractHash: authorized.envelope.supplyContractHash,
-        inputHash: hashAffiliateAgentValue(command),
-        identity: lifecycleIdentity,
-        commandRef: command.data.lifecycleCommandRef,
-        recordedHumanActorId: subject.recordedHumanActorId,
-        invocationId: authorized.claim.invocationId,
-        role: authorized.claim.role,
-      };
-    },
-    {
-      code: "INTERNAL_ERROR",
-      safeMessage: "The lifecycle command could not be reserved.",
-    },
+    input,
+    command,
+    authority,
+    requestHash,
+    commandHash,
   );
   if (reserved.kind === "COMPLETED") return reserved.result;
 
@@ -3453,7 +6102,8 @@ const performLifecycleCommand = async (
           identity: reserved.identity,
           invocationId: reserved.invocationId,
         });
-  } catch {
+  } catch (error) {
+    assertDatabaseAuthorizationFailure(error);
     throw gatewayError(
       "PARTIAL_COMMAND_UNRESOLVED",
       "The lifecycle command response was lost and requires reconciliation.",
@@ -3497,138 +6147,29 @@ const performLifecycleCommand = async (
   };
   const completedAt = dependencies.clock.now();
 
-  return runSerializableEffectTransaction(
+  return finalizeLifecycleCommand(
     dependencies,
-    async (transaction) => {
-      const receipt =
-        await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
-          where: { id: reserved.receiptId },
-        });
-      if (
-        !receipt ||
-        receipt.claimId !== reserved.claimId ||
-        receipt.jobId !== reserved.jobId ||
-        receipt.claimGeneration !== reserved.claimGeneration ||
-        receipt.commandName !== command.type ||
-        receipt.requestHash !== requestHash
-      ) {
-        throw gatewayError(
-          "PARTIAL_COMMAND_UNRESOLVED",
-          "The lifecycle receipt requires reconciliation.",
-          false,
-          reserved.receiptId,
-        );
-      }
-      if (receipt.status === "SUCCEEDED") {
-        return replayCommand(receipt.responseJson);
-      }
-      if (receipt.status !== "PENDING") {
-        throw gatewayError(
-          "PARTIAL_COMMAND_UNRESOLVED",
-          "The lifecycle receipt requires reconciliation.",
-          false,
-          reserved.receiptId,
-        );
-      }
-      const [claim, job] = await Promise.all([
-        transaction.affiliateAgentGatewayClaims.findUnique({
-          where: { id: reserved.claimId },
-        }),
-        transaction.affiliateAgentGatewayJobs.findUnique({
-          where: { id: reserved.jobId },
-        }),
-      ]);
-      const finalizationNow = dependencies.clock.now();
-      if (
-        !claim ||
-        claim.status !== "ACTIVE" ||
-        (claim.leaseExpiresAt <= finalizationNow &&
-          receipt.startedAt >= claim.leaseExpiresAt) ||
-        (claim.hardDeadlineAt < finalizationNow &&
-          receipt.startedAt >= claim.hardDeadlineAt) ||
-        !job ||
-        job.status !== "CLAIMED" ||
-        job.activeClaimId !== reserved.claimId ||
-        job.claimGeneration !== reserved.claimGeneration
-      ) {
-        throw gatewayError(
-          "PARTIAL_COMMAND_UNRESOLVED",
-          "The lifecycle claim requires reconciliation.",
-          false,
-          reserved.receiptId,
-        );
-      }
-      const receiptUpdated =
-        await transaction.affiliateAgentGatewayOperationReceipts.updateMany({
-          where: {
-            id: reserved.receiptId,
-            status: "PENDING",
-            requestHash,
-          },
-          data: {
-            status: "SUCCEEDED",
-            responseHash,
-            responseJson: asPrismaJson(commandResult),
-            completedAt: completedAt,
-            reconcileAfter: null,
-          },
-        });
-      const jobUpdated = await transaction.affiliateAgentGatewayJobs.updateMany(
-        {
-          where: {
-            id: reserved.jobId,
-            status: "CLAIMED",
-            activeClaimId: reserved.claimId,
-            claimGeneration: reserved.claimGeneration,
-            eventSequence: job.eventSequence,
-          },
-          data: { eventSequence: { increment: 1 } },
-        },
-      );
-      if (receiptUpdated.count !== 1 || jobUpdated.count !== 1) {
-        throw new AffiliateAgentClaimRaceError();
-      }
-      await transaction.affiliateAgentGatewayEvents.create({
-        data: {
-          id: dependencies.identifiers.create("event"),
-          eventKey: `lifecycle-command-succeeded:${reserved.receiptId}`,
-          jobId: reserved.jobId,
-          claimId: reserved.claimId,
-          receiptId: reserved.receiptId,
-          sequence: job.eventSequence + 1,
-          eventType: "LIFECYCLE_COMMAND_SUCCEEDED",
-          actorKind: "AGENT_INVOCATION",
-          actorId: reserved.invocationId,
-          role: reserved.role,
-          requestHash,
-          inputHash: reserved.inputHash,
-          outputHash: responseHash,
-          payload: asPrismaJson({
-            recordedHumanActorId: reserved.recordedHumanActorId,
-            lifecycleCommandRef: reserved.commandRef,
-          }),
-          retentionClass: "INDEFINITE",
-        },
-      });
-      return commandResult;
-    },
-    {
-      code: "PARTIAL_COMMAND_UNRESOLVED",
-      safeMessage: "The lifecycle command could not be finalized.",
-      receiptId: reserved.receiptId,
-    },
+    reserved,
+    command,
+    requestHash,
+    commandResult,
+    responseHash,
+    completedAt,
   );
 };
-const blockDuplicatePackageCommit = async (
-  dependencies: AffiliateAgentGatewayDependencies,
+type PackageCommitReplay = Readonly<{
+  duplicateReceipt: AffiliateAgentGatewayOperationReceipts;
+  duplicateResult: AffiliateAgentCommandResult | null;
+}>;
+
+const findPackageCommitReplay = async (
   transaction: Prisma.TransactionClient,
-  input: Extract<AffiliateAgentClaimOperation, { kind: "EXECUTE_COMMAND" }>,
+  authorized: AuthorizedClaim,
   command: Extract<
     AffiliateAgentCommand,
     { type: "COMMIT_DECLARATIVE_PACKAGE" }
   >,
-  authorized: AuthorizedClaim,
-): Promise<AffiliateAgentCommandResult | "BLOCKED" | null> => {
+): Promise<PackageCommitReplay | null> => {
   const priorReceipts =
     await transaction.affiliateAgentGatewayOperationReceipts.findMany({
       where: {
@@ -3658,7 +6199,29 @@ const blockDuplicatePackageCommit = async (
     }
   }
   if (!priorCommitReceipt) return null;
-  duplicateReceipt ??= priorCommitReceipt;
+  return {
+    duplicateReceipt: duplicateReceipt ?? priorCommitReceipt,
+    duplicateResult,
+  };
+};
+
+const blockDuplicatePackageCommit = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  transaction: Prisma.TransactionClient,
+  input: Extract<AffiliateAgentClaimOperation, { kind: "EXECUTE_COMMAND" }>,
+  command: Extract<
+    AffiliateAgentCommand,
+    { type: "COMMIT_DECLARATIVE_PACKAGE" }
+  >,
+  authorized: AuthorizedClaim,
+): Promise<AffiliateAgentCommandResult | "BLOCKED" | null> => {
+  const replay = await findPackageCommitReplay(
+    transaction,
+    authorized,
+    command,
+  );
+  if (!replay) return null;
+  const { duplicateReceipt, duplicateResult } = replay;
   const now = dependencies.clock.now();
   if (duplicateResult !== null) {
     const receiptId = dependencies.identifiers.create("receipt");
@@ -3783,6 +6346,575 @@ const blockDuplicatePackageCommit = async (
   return "BLOCKED";
 };
 
+type TransactionalCommand = Extract<
+  AffiliateAgentCommand,
+  { type: "VALIDATE_DECLARATIVE_PACKAGE" | "COMMIT_DECLARATIVE_PACKAGE" }
+>;
+
+const assertTransactionalCommandPermission = (
+  authorized: AuthorizedClaim,
+  command: TransactionalCommand,
+): void => {
+  if (
+    !authorized.roleContract.permittedCommands.includes(command.type) ||
+    !authorized.claim.permittedCommands.includes(command.type)
+  ) {
+    throw gatewayError(
+      "COMMAND_NOT_PERMITTED",
+      "The command is not permitted for this claim.",
+    );
+  }
+};
+
+const resolveTransactionalReplay = async (
+  transaction: Prisma.TransactionClient,
+  authorized: AuthorizedClaim,
+  input: Extract<AffiliateAgentClaimOperation, { kind: "EXECUTE_COMMAND" }>,
+  command: TransactionalCommand,
+  requestHash: string,
+): Promise<AffiliateAgentCommandResult | null> => {
+  const existing =
+    await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
+      where: {
+        claimId_idempotencyKey: {
+          claimId: authorized.claim.id,
+          idempotencyKey: input.idempotencyKey,
+        },
+      },
+    });
+  if (!existing) return null;
+  if (
+    existing.operationKind !== input.kind ||
+    existing.commandName !== command.type ||
+    existing.requestHash !== requestHash
+  ) {
+    throw gatewayError(
+      "IDEMPOTENCY_KEY_REUSED",
+      "The operation idempotency key was used for different input.",
+    );
+  }
+  if (existing.status === "SUCCEEDED") {
+    return replayCommand(existing.responseJson);
+  }
+  throw gatewayError(
+    "OPERATION_IN_PROGRESS",
+    "The command is still in progress.",
+    true,
+  );
+};
+
+const executePackageValidation = async (
+  transaction: Prisma.TransactionClient,
+  dependencies: AffiliateAgentGatewayDependencies,
+  authorized: AuthorizedClaim,
+  command: Extract<
+    AffiliateAgentCommand,
+    { type: "VALIDATE_DECLARATIVE_PACKAGE" }
+  >,
+  receiptId: string,
+): Promise<Readonly<Record<string, unknown>>> => {
+  const claimSupplySourceId =
+    authorized.envelope.role === "MAPPING_PRODUCER"
+      ? authorized.envelope.subject.supplySourceId
+      : null;
+  if (
+    claimSupplySourceId === null ||
+    command.data.candidatePackage.supplySourceId !== claimSupplySourceId
+  ) {
+    throw gatewayError(
+      "COMMAND_NOT_PERMITTED",
+      "The package Supply Source does not match the claim.",
+    );
+  }
+  if (
+    command.data.evidenceManifestHash !==
+    authorized.envelope.evidenceManifest.hash
+  ) {
+    throw gatewayError(
+      "COMMAND_NOT_PERMITTED",
+      "The package validation manifest does not match the claim.",
+    );
+  }
+  await assertClaimEvidenceRefs(
+    transaction,
+    authorized.claim.id,
+    [
+      command.data.candidatePackage.listUrlRef,
+      ...command.data.candidatePackage.evidenceRefs,
+    ],
+    "COMMAND_NOT_PERMITTED",
+    "The package references evidence outside the claim manifest.",
+  );
+  const adapter =
+    dependencies.commands.transactional.VALIDATE_DECLARATIVE_PACKAGE;
+  if (!adapter) {
+    throw gatewayError(
+      "COMMAND_NOT_PERMITTED",
+      "The command has no installed transactional adapter.",
+    );
+  }
+  return adapter.execute({
+    transaction,
+    claim: authorized.envelope,
+    command,
+    receiptId,
+  });
+};
+
+const extractValidationOutput = (
+  validationReceipt: AffiliateAgentGatewayOperationReceipts | null,
+): unknown => {
+  const response = validationReceipt?.responseJson;
+  if (!isGatewayRecord(response) || !("safeOutput" in response)) return null;
+  return response.safeOutput;
+};
+
+function assertValidationReceiptOwnership(
+  validationReceipt: AffiliateAgentGatewayOperationReceipts | null,
+  authorized: AuthorizedClaim,
+): asserts validationReceipt is AffiliateAgentGatewayOperationReceipts {
+  if (
+    !validationReceipt ||
+    validationReceipt.claimId !== authorized.claim.id ||
+    validationReceipt.jobId !== authorized.job.id ||
+    validationReceipt.claimGeneration !== authorized.claim.claimGeneration
+  ) {
+    throw gatewayError(
+      "COMMAND_NOT_PERMITTED",
+      "The package commit does not match a successful validation receipt.",
+    );
+  }
+}
+
+const assertSuccessfulValidationReceipt = (
+  validationReceipt: AffiliateAgentGatewayOperationReceipts | null,
+  validationOutput: ReturnType<
+    typeof affiliateAgentDeclarativePackageValidationOutputSchema.safeParse
+  >,
+  authorized: AuthorizedClaim,
+  command: Extract<
+    AffiliateAgentCommand,
+    { type: "COMMIT_DECLARATIVE_PACKAGE" }
+  >,
+): void => {
+  assertValidationReceiptOwnership(validationReceipt, authorized);
+  if (validationReceipt.operationKind !== "EXECUTE_COMMAND") {
+    throw gatewayError(
+      "COMMAND_NOT_PERMITTED",
+      "The package commit does not match a successful validation receipt.",
+    );
+  }
+  if (
+    validationReceipt.status !== "SUCCEEDED" ||
+    validationReceipt.commandName !== "VALIDATE_DECLARATIVE_PACKAGE"
+  ) {
+    throw gatewayError(
+      "COMMAND_NOT_PERMITTED",
+      "The package commit does not match a successful validation receipt.",
+    );
+  }
+  if (
+    !validationOutput.success ||
+    validationOutput.data.isValid !== true ||
+    validationOutput.data.validatedPackageHash !==
+      command.data.validatedPackageHash
+  ) {
+    throw gatewayError(
+      "COMMAND_NOT_PERMITTED",
+      "The package commit does not match a successful validation receipt.",
+    );
+  }
+};
+
+const executePackageCommit = async (
+  transaction: Prisma.TransactionClient,
+  dependencies: AffiliateAgentGatewayDependencies,
+  authorized: AuthorizedClaim,
+  command: Extract<
+    AffiliateAgentCommand,
+    { type: "COMMIT_DECLARATIVE_PACKAGE" }
+  >,
+  receiptId: string,
+): Promise<Readonly<Record<string, unknown>>> => {
+  const validationReceipt =
+    await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
+      where: { id: command.data.validationReceiptId },
+    });
+  const validationOutput =
+    affiliateAgentDeclarativePackageValidationOutputSchema.safeParse(
+      extractValidationOutput(validationReceipt),
+    );
+  assertSuccessfulValidationReceipt(
+    validationReceipt,
+    validationOutput,
+    authorized,
+    command,
+  );
+  const adapter =
+    dependencies.commands.transactional.COMMIT_DECLARATIVE_PACKAGE;
+  if (!adapter) {
+    throw gatewayError(
+      "COMMAND_NOT_PERMITTED",
+      "The command has no installed transactional adapter.",
+    );
+  }
+  return adapter.execute({
+    transaction,
+    claim: authorized.envelope,
+    command,
+    receiptId,
+  });
+};
+
+const executeTransactionalAdapter = async (
+  transaction: Prisma.TransactionClient,
+  dependencies: AffiliateAgentGatewayDependencies,
+  authorized: AuthorizedClaim,
+  command: TransactionalCommand,
+  receiptId: string,
+): Promise<Readonly<Record<string, unknown>>> =>
+  command.type === "VALIDATE_DECLARATIVE_PACKAGE"
+    ? executePackageValidation(
+        transaction,
+        dependencies,
+        authorized,
+        command,
+        receiptId,
+      )
+    : executePackageCommit(
+        transaction,
+        dependencies,
+        authorized,
+        command,
+        receiptId,
+      );
+
+const validatePackageValidationOutput = (
+  safeOutput: Readonly<Record<string, unknown>>,
+  command: Extract<
+    AffiliateAgentCommand,
+    { type: "VALIDATE_DECLARATIVE_PACKAGE" }
+  >,
+  receiptId: string,
+): Readonly<Record<string, unknown>> => {
+  const parsedOutput =
+    affiliateAgentDeclarativePackageValidationOutputSchema.safeParse(
+      safeOutput,
+    );
+  if (
+    !parsedOutput.success ||
+    parsedOutput.data.validatedPackageHash !==
+      hashAffiliateAgentValue(command.data.candidatePackage)
+  ) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The package validation adapter returned invalid output.",
+      false,
+      receiptId,
+    );
+  }
+  return parsedOutput.data;
+};
+
+const validatePackageCommitOutput = (
+  safeOutput: Readonly<Record<string, unknown>>,
+  command: Extract<
+    AffiliateAgentCommand,
+    { type: "COMMIT_DECLARATIVE_PACKAGE" }
+  >,
+  receiptId: string,
+): Readonly<Record<string, unknown>> => {
+  const parsedOutput =
+    affiliateAgentDeclarativePackageCommitOutputSchema.safeParse(safeOutput);
+  if (
+    !parsedOutput.success ||
+    parsedOutput.data.packageHash !== command.data.validatedPackageHash
+  ) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The package commit adapter returned invalid output.",
+      false,
+      receiptId,
+    );
+  }
+  return parsedOutput.data;
+};
+
+const validateTransactionalOutput = (
+  safeOutput: Readonly<Record<string, unknown>>,
+  command: TransactionalCommand,
+  receiptId: string,
+): Readonly<Record<string, unknown>> =>
+  command.type === "VALIDATE_DECLARATIVE_PACKAGE"
+    ? validatePackageValidationOutput(safeOutput, command, receiptId)
+    : validatePackageCommitOutput(safeOutput, command, receiptId);
+
+const buildTransactionalCommandResult = (
+  safeOutput: Readonly<Record<string, unknown>>,
+  command: TransactionalCommand,
+  receiptId: string,
+): Readonly<{
+  commandResult: AffiliateAgentCommandResult;
+  responseHash: string;
+}> => {
+  const canonicalOutput = canonicalizeAffiliateAgentValue(safeOutput);
+  if (Buffer.byteLength(canonicalOutput, "utf8") > 16_384) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The command output exceeded the safe receipt limit.",
+    );
+  }
+  const responseHash = hashAffiliateAgentValue({
+    commandType: command.type,
+    safeOutput,
+  });
+  return {
+    responseHash,
+    commandResult: {
+      kind: "COMMAND_SUCCEEDED",
+      receiptId,
+      commandType: command.type,
+      responseHash,
+      safeOutput,
+    },
+  };
+};
+
+const persistTransactionalCommandResult = async (
+  transaction: Prisma.TransactionClient,
+  dependencies: AffiliateAgentGatewayDependencies,
+  authorized: AuthorizedClaim,
+  input: Extract<AffiliateAgentClaimOperation, { kind: "EXECUTE_COMMAND" }>,
+  command: TransactionalCommand,
+  requestHash: string,
+  startedAt: Date,
+  completedAt: Date,
+  result: Readonly<{
+    commandResult: AffiliateAgentCommandResult;
+    responseHash: string;
+  }>,
+): Promise<AffiliateAgentCommandResult> => {
+  const jobUpdated =
+    await transaction.affiliateAgentGatewayJobs.updateMany({
+      where: {
+        id: authorized.job.id,
+        status: "CLAIMED",
+        activeClaimId: authorized.claim.id,
+        claimGeneration: authorized.claim.claimGeneration,
+        eventSequence: authorized.job.eventSequence,
+      },
+      data: { eventSequence: { increment: 1 } },
+    });
+  if (jobUpdated.count !== 1) {
+    throw new AffiliateAgentClaimRaceError();
+  }
+  await transaction.affiliateAgentGatewayOperationReceipts.create({
+    data: {
+      id: result.commandResult.receiptId,
+      claimId: authorized.claim.id,
+      jobId: authorized.job.id,
+      claimGeneration: authorized.claim.claimGeneration,
+      idempotencyKey: input.idempotencyKey,
+      operationKind: input.kind,
+      commandName: command.type,
+      requestHash,
+      status: "SUCCEEDED",
+      responseHash: result.responseHash,
+      responseJson: asPrismaJson(result.commandResult),
+      startedAt,
+      completedAt,
+    },
+  });
+  await transaction.affiliateAgentGatewayEvents.create({
+    data: {
+      id: dependencies.identifiers.create("event"),
+      eventKey: `command:${result.commandResult.receiptId}`,
+      jobId: authorized.job.id,
+      claimId: authorized.claim.id,
+      receiptId: result.commandResult.receiptId,
+      sequence: authorized.job.eventSequence + 1,
+      eventType: "CLAIM_COMMAND_SUCCEEDED",
+      actorKind: "AGENT_INVOCATION",
+      actorId: authorized.claim.invocationId,
+      role: authorized.claim.role,
+      requestHash,
+      inputHash: hashAffiliateAgentValue(command),
+      outputHash: result.responseHash,
+      payload: asPrismaJson({ commandType: command.type }),
+      retentionClass: "INDEFINITE",
+    },
+  });
+  return result.commandResult;
+};
+
+const executeTransactionalCommandTransaction = (
+  dependencies: AffiliateAgentGatewayDependencies,
+  input: Extract<AffiliateAgentClaimOperation, { kind: "EXECUTE_COMMAND" }>,
+  command: TransactionalCommand,
+  requestHash: string,
+) =>
+  dependencies.prisma.$transaction(
+    async (transaction) => {
+      const authorized = await authorizeClaimOperation(
+        dependencies,
+        input.authorization,
+        dependencies.clock.now(),
+        transaction,
+      );
+      assertTransactionalCommandPermission(authorized, command);
+      const now = dependencies.clock.now();
+      const replay = await resolveTransactionalReplay(
+        transaction,
+        authorized,
+        input,
+        command,
+        requestHash,
+      );
+      if (replay) return replay;
+      if (command.type === "COMMIT_DECLARATIVE_PACKAGE") {
+        const duplicateCommit = await blockDuplicatePackageCommit(
+          dependencies,
+          transaction,
+          input,
+          command,
+          authorized,
+        );
+        if (duplicateCommit !== null) return duplicateCommit;
+      }
+      const receiptId = dependencies.identifiers.create("receipt");
+      const adapterOutput = await executeTransactionalAdapter(
+        transaction,
+        dependencies,
+        authorized,
+        command,
+        receiptId,
+      );
+      const safeOutput = validateTransactionalOutput(
+        adapterOutput,
+        command,
+        receiptId,
+      );
+      const finalizationNow = dependencies.clock.now();
+      if (
+        authorized.claim.leaseExpiresAt <= finalizationNow ||
+        authorized.claim.hardDeadlineAt < finalizationNow
+      ) {
+        throw gatewayError(
+          "LEASE_EXPIRED",
+          "The claim lease expired before command completion.",
+        );
+      }
+      const result = buildTransactionalCommandResult(
+        safeOutput,
+        command,
+        receiptId,
+      );
+      return persistTransactionalCommandResult(
+        transaction,
+        dependencies,
+        authorized,
+        input,
+        command,
+        requestHash,
+        now,
+        finalizationNow,
+        result,
+      );
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+  );
+
+const emitGatewayOperationalAlerts = async (
+  writer: AffiliateOperationalAlertWriter,
+  inputs: readonly AffiliateOperationalAlertInput[],
+): Promise<void> => {
+  for (const input of inputs) {
+    const result = await writer(input);
+    if (result.deliveries.some((delivery) => delivery.status === "FAILED")) {
+      throw new Error("The configured operational alert delivery failed.");
+    }
+  }
+};
+
+const flushPersistedLifecycleAlerts = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  receiptId: string,
+): Promise<void> => {
+  const operationalAlert = dependencies.operationalAlert;
+  if (!operationalAlert) return;
+  try {
+    const transition = await dependencies.prisma.affiliateSupplyLifecycleTransitions?.findUnique({
+      where: { idempotencyKey: receiptId },
+    });
+    if (!transition) return;
+    await emitAffiliateSupplyLifecycleTransitionAlerts(
+      transition,
+      (inputs) => emitGatewayOperationalAlerts(operationalAlert, inputs),
+    );
+  } catch (error) {
+    assertDatabaseAuthorizationFailure(error);
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The committed lifecycle alert could not be delivered.",
+      true,
+      receiptId,
+    );
+  }
+};
+
+const performTransactionalCommand = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  input: Extract<AffiliateAgentClaimOperation, { kind: "EXECUTE_COMMAND" }>,
+  command: TransactionalCommand,
+  requestHash: string,
+): Promise<AffiliateAgentCommandResult> => {
+  for (
+    let attempt = 1;
+    attempt <= SERIALIZABLE_TRANSACTION_ATTEMPTS;
+    attempt += 1
+  ) {
+    try {
+      const transactionalResult =
+        await executeTransactionalCommandTransaction(
+          dependencies,
+          input,
+          command,
+          requestHash,
+        );
+      if (transactionalResult === "BLOCKED") {
+        throw gatewayError(
+          "PARTIAL_COMMAND_UNRESOLVED",
+          "The package commit was blocked because it already succeeded.",
+        );
+      }
+      await flushPersistedLifecycleAlerts(
+        dependencies,
+        transactionalResult.receiptId,
+      );
+      return transactionalResult;
+    } catch (error) {
+      const retryableConflict =
+        error instanceof AffiliateAgentClaimRaceError ||
+        isSerializableTransactionConflict(error);
+      if (retryableConflict && attempt < SERIALIZABLE_TRANSACTION_ATTEMPTS) {
+        continue;
+      }
+      if (error instanceof AffiliateAgentGatewayError) throw error;
+      throw gatewayErrorForPersistenceFailure(
+        error,
+        "INTERNAL_ERROR",
+        "The Affiliate Agent command could not be completed.",
+        retryableConflict,
+      );
+    }
+  }
+  throw gatewayError(
+    "INTERNAL_ERROR",
+    "The Affiliate Agent command could not be completed.",
+    true,
+  );
+};
+
 const performCommand = async (
   dependencies: AffiliateAgentGatewayDependencies,
   input: Extract<AffiliateAgentClaimOperation, { kind: "EXECUTE_COMMAND" }>,
@@ -3815,331 +6947,11 @@ const performCommand = async (
     );
   }
   const transactionalCommand = parsedCommand.data;
-  for (
-    let attempt = 1;
-    attempt <= SERIALIZABLE_TRANSACTION_ATTEMPTS;
-    attempt += 1
-  ) {
-    try {
-      const transactionalResult = await dependencies.prisma.$transaction(
-        async (transaction) => {
-          const authorized = await authorizeClaimOperation(
-            dependencies,
-            input.authorization,
-            dependencies.clock.now(),
-            transaction,
-          );
-          if (
-            !authorized.roleContract.permittedCommands.includes(
-              transactionalCommand.type,
-            ) ||
-            !authorized.claim.permittedCommands.includes(
-              transactionalCommand.type,
-            )
-          ) {
-            throw gatewayError(
-              "COMMAND_NOT_PERMITTED",
-              "The command is not permitted for this claim.",
-            );
-          }
-          const existing =
-            await transaction.affiliateAgentGatewayOperationReceipts.findUnique(
-              {
-                where: {
-                  claimId_idempotencyKey: {
-                    claimId: authorized.claim.id,
-                    idempotencyKey: input.idempotencyKey,
-                  },
-                },
-              },
-            );
-          const now = dependencies.clock.now();
-          if (existing) {
-            if (
-              existing.operationKind !== input.kind ||
-              existing.commandName !== transactionalCommand.type ||
-              existing.requestHash !== requestHash
-            ) {
-              throw gatewayError(
-                "IDEMPOTENCY_KEY_REUSED",
-                "The operation idempotency key was used for different input.",
-              );
-            }
-            if (existing.status === "SUCCEEDED") {
-              return replayCommand(existing.responseJson);
-            }
-            throw gatewayError(
-              "OPERATION_IN_PROGRESS",
-              "The command is still in progress.",
-              true,
-            );
-          }
-          if (transactionalCommand.type === "COMMIT_DECLARATIVE_PACKAGE") {
-            const duplicateCommit = await blockDuplicatePackageCommit(
-              dependencies,
-              transaction,
-              input,
-              transactionalCommand,
-              authorized,
-            );
-            if (duplicateCommit === "BLOCKED") return "BLOCKED" as const;
-            if (duplicateCommit !== null) return duplicateCommit;
-          }
-
-          const receiptId = dependencies.identifiers.create("receipt");
-          let safeOutput: Readonly<Record<string, unknown>> | null;
-          if (transactionalCommand.type === "VALIDATE_DECLARATIVE_PACKAGE") {
-            const claimSupplySourceId =
-              authorized.envelope.role === "MAPPING_PRODUCER"
-                ? authorized.envelope.subject.supplySourceId
-                : null;
-            if (
-              claimSupplySourceId === null ||
-              transactionalCommand.data.candidatePackage.supplySourceId !==
-                claimSupplySourceId
-            ) {
-              throw gatewayError(
-                "COMMAND_NOT_PERMITTED",
-                "The package Supply Source does not match the claim.",
-              );
-            }
-            if (
-              transactionalCommand.data.evidenceManifestHash !==
-              authorized.envelope.evidenceManifest.hash
-            ) {
-              throw gatewayError(
-                "COMMAND_NOT_PERMITTED",
-                "The package validation manifest does not match the claim.",
-              );
-            }
-            await assertClaimEvidenceRefs(
-              transaction,
-              authorized.claim.id,
-              [
-                transactionalCommand.data.candidatePackage.listUrlRef,
-                ...transactionalCommand.data.candidatePackage.evidenceRefs,
-              ],
-              "COMMAND_NOT_PERMITTED",
-              "The package references evidence outside the claim manifest.",
-            );
-            const adapter =
-              dependencies.commands.transactional.VALIDATE_DECLARATIVE_PACKAGE;
-            if (!adapter) {
-              throw gatewayError(
-                "COMMAND_NOT_PERMITTED",
-                "The command has no installed transactional adapter.",
-              );
-            }
-            safeOutput = await adapter.execute({
-              transaction,
-              claim: authorized.envelope,
-              command: transactionalCommand,
-              receiptId,
-            });
-          } else {
-            const validationReceipt =
-              await transaction.affiliateAgentGatewayOperationReceipts.findUnique(
-                {
-                  where: {
-                    id: transactionalCommand.data.validationReceiptId,
-                  },
-                },
-              );
-            const validationOutputCandidate =
-              validationReceipt?.responseJson !== null &&
-              typeof validationReceipt?.responseJson === "object" &&
-              !Array.isArray(validationReceipt.responseJson) &&
-              "safeOutput" in validationReceipt.responseJson
-                ? validationReceipt.responseJson.safeOutput
-                : null;
-            const validationOutput =
-              affiliateAgentDeclarativePackageValidationOutputSchema.safeParse(
-                validationOutputCandidate,
-              );
-            if (
-              validationReceipt?.claimId !== authorized.claim.id ||
-              validationReceipt?.jobId !== authorized.job.id ||
-              validationReceipt?.claimGeneration !==
-                authorized.claim.claimGeneration ||
-              validationReceipt.operationKind !== "EXECUTE_COMMAND" ||
-              validationReceipt.status !== "SUCCEEDED" ||
-              validationReceipt.commandName !==
-                "VALIDATE_DECLARATIVE_PACKAGE" ||
-              !validationOutput.success ||
-              validationOutput.data.isValid !== true ||
-              validationOutput.data.validatedPackageHash !==
-                transactionalCommand.data.validatedPackageHash
-            ) {
-              throw gatewayError(
-                "COMMAND_NOT_PERMITTED",
-                "The package commit does not match a successful validation receipt.",
-              );
-            }
-            const adapter =
-              dependencies.commands.transactional.COMMIT_DECLARATIVE_PACKAGE;
-            if (!adapter) {
-              throw gatewayError(
-                "COMMAND_NOT_PERMITTED",
-                "The command has no installed transactional adapter.",
-              );
-            }
-            safeOutput = await adapter.execute({
-              transaction,
-              claim: authorized.envelope,
-              command: transactionalCommand,
-              receiptId,
-            });
-          }
-          if (transactionalCommand.type === "VALIDATE_DECLARATIVE_PACKAGE") {
-            const parsedOutput =
-              affiliateAgentDeclarativePackageValidationOutputSchema.safeParse(
-                safeOutput,
-              );
-            if (
-              !parsedOutput.success ||
-              parsedOutput.data.validatedPackageHash !==
-                hashAffiliateAgentValue(
-                  transactionalCommand.data.candidatePackage,
-                )
-            ) {
-              throw gatewayError(
-                "PARTIAL_COMMAND_UNRESOLVED",
-                "The package validation adapter returned invalid output.",
-                false,
-                receiptId,
-              );
-            }
-            safeOutput = parsedOutput.data;
-          } else {
-            const parsedOutput =
-              affiliateAgentDeclarativePackageCommitOutputSchema.safeParse(
-                safeOutput,
-              );
-            if (
-              !parsedOutput.success ||
-              parsedOutput.data.packageHash !==
-                transactionalCommand.data.validatedPackageHash
-            ) {
-              throw gatewayError(
-                "PARTIAL_COMMAND_UNRESOLVED",
-                "The package commit adapter returned invalid output.",
-                false,
-                receiptId,
-              );
-            }
-            safeOutput = parsedOutput.data;
-          }
-
-          const finalizationNow = dependencies.clock.now();
-          if (
-            authorized.claim.leaseExpiresAt <= finalizationNow ||
-            authorized.claim.hardDeadlineAt < finalizationNow
-          ) {
-            throw gatewayError(
-              "LEASE_EXPIRED",
-              "The claim lease expired before command completion.",
-            );
-          }
-          const canonicalOutput = canonicalizeAffiliateAgentValue(safeOutput);
-          if (Buffer.byteLength(canonicalOutput, "utf8") > 16_384) {
-            throw gatewayError(
-              "INTERNAL_ERROR",
-              "The command output exceeded the safe receipt limit.",
-            );
-          }
-          const responseHash = hashAffiliateAgentValue({
-            commandType: transactionalCommand.type,
-            safeOutput,
-          });
-          const commandResult: AffiliateAgentCommandResult = {
-            kind: "COMMAND_SUCCEEDED",
-            receiptId,
-            commandType: transactionalCommand.type,
-            responseHash,
-            safeOutput,
-          };
-          const jobUpdated =
-            await transaction.affiliateAgentGatewayJobs.updateMany({
-              where: {
-                id: authorized.job.id,
-                status: "CLAIMED",
-                activeClaimId: authorized.claim.id,
-                claimGeneration: authorized.claim.claimGeneration,
-                eventSequence: authorized.job.eventSequence,
-              },
-              data: { eventSequence: { increment: 1 } },
-            });
-          if (jobUpdated.count !== 1) {
-            throw new AffiliateAgentClaimRaceError();
-          }
-          await transaction.affiliateAgentGatewayOperationReceipts.create({
-            data: {
-              id: receiptId,
-              claimId: authorized.claim.id,
-              jobId: authorized.job.id,
-              claimGeneration: authorized.claim.claimGeneration,
-              idempotencyKey: input.idempotencyKey,
-              operationKind: input.kind,
-              commandName: transactionalCommand.type,
-              requestHash,
-              status: "SUCCEEDED",
-              responseHash,
-              responseJson: asPrismaJson(commandResult),
-              startedAt: now,
-              completedAt: finalizationNow,
-            },
-          });
-          await transaction.affiliateAgentGatewayEvents.create({
-            data: {
-              id: dependencies.identifiers.create("event"),
-              eventKey: `command:${receiptId}`,
-              jobId: authorized.job.id,
-              claimId: authorized.claim.id,
-              receiptId,
-              sequence: authorized.job.eventSequence + 1,
-              eventType: "CLAIM_COMMAND_SUCCEEDED",
-              actorKind: "AGENT_INVOCATION",
-              actorId: authorized.claim.invocationId,
-              role: authorized.claim.role,
-              requestHash,
-              inputHash: hashAffiliateAgentValue(transactionalCommand),
-              outputHash: responseHash,
-              payload: asPrismaJson({
-                commandType: transactionalCommand.type,
-              }),
-              retentionClass: "INDEFINITE",
-            },
-          });
-          return commandResult;
-        },
-        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-      );
-      if (transactionalResult === "BLOCKED") {
-        throw gatewayError(
-          "PARTIAL_COMMAND_UNRESOLVED",
-          "The package commit was blocked because it already succeeded.",
-        );
-      }
-      return transactionalResult;
-    } catch (error) {
-      const retryableConflict =
-        error instanceof AffiliateAgentClaimRaceError ||
-        prismaErrorCode(error) === "P2034";
-      if (retryableConflict && attempt < SERIALIZABLE_TRANSACTION_ATTEMPTS) {
-        continue;
-      }
-      if (error instanceof AffiliateAgentGatewayError) throw error;
-      throw gatewayError(
-        "INTERNAL_ERROR",
-        "The Affiliate Agent command could not be completed.",
-        retryableConflict,
-      );
-    }
-  }
-  throw gatewayError(
-    "INTERNAL_ERROR",
-    "The Affiliate Agent command could not be completed.",
-    true,
+  return performTransactionalCommand(
+    dependencies,
+    input,
+    transactionalCommand,
+    requestHash,
   );
 };
 
@@ -4171,18 +6983,30 @@ const replayTerminalResult = (
   };
 };
 
-const replaySchemaCorrection = (
+const assertStoredSchemaCorrectionResponse = (
   response: Prisma.JsonValue | null,
-): AffiliateAgentSchemaCorrectionResult => {
+): Record<string, unknown> => {
   if (
-    response === null ||
-    typeof response !== "object" ||
-    Array.isArray(response) ||
-    response.kind !== "SCHEMA_CORRECTION_REQUIRED" ||
+    !isGatewayRecord(response) ||
+    response.kind !== "SCHEMA_CORRECTION_REQUIRED"
+  ) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The stored schema-correction receipt is invalid.",
+    );
+  }
+  if (
     typeof response.receiptId !== "string" ||
     (response.submissionNumber !== 1 && response.submissionNumber !== 2) ||
     (response.remainingSubmissions !== 1 &&
-      response.remainingSubmissions !== 2) ||
+      response.remainingSubmissions !== 2)
+  ) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The stored schema-correction receipt is invalid.",
+    );
+  }
+  if (
     !Array.isArray(response.issues) ||
     typeof response.correctionPrompt !== "string"
   ) {
@@ -4191,35 +7015,66 @@ const replaySchemaCorrection = (
       "The stored schema-correction receipt is invalid.",
     );
   }
-  return JSON.parse(
-    canonicalizeAffiliateAgentValue(response),
-  ) as AffiliateAgentSchemaCorrectionResult;
+  return response;
 };
 
-const replayInvocationFailure = (
+const replaySchemaCorrection = (
   response: Prisma.JsonValue | null,
-): AffiliateAgentInvocationFailedResult => {
+): AffiliateAgentSchemaCorrectionResult =>
+  JSON.parse(
+    canonicalizeAffiliateAgentValue(
+      assertStoredSchemaCorrectionResponse(response),
+    ),
+  ) as AffiliateAgentSchemaCorrectionResult;
+
+const assertStoredInvocationFailureResponse = (
+  response: Prisma.JsonValue | null,
+): Record<string, unknown> => {
   if (
-    response === null ||
-    typeof response !== "object" ||
-    Array.isArray(response) ||
-    response.kind !== "INVOCATION_FAILED" ||
-    typeof response.receiptId !== "string" ||
-    typeof response.failureCode !== "string" ||
-    ![1, 2, 3].includes(Number(response.invocationFailureCount)) ||
-    (response.nextAttemptAt !== null &&
-      typeof response.nextAttemptAt !== "string") ||
-    typeof response.isPipelineBlocked !== "boolean"
+    !isGatewayRecord(response) ||
+    response.kind !== "INVOCATION_FAILED"
   ) {
     throw gatewayError(
       "INTERNAL_ERROR",
       "The stored invocation-failure receipt is invalid.",
     );
   }
-  return JSON.parse(
-    canonicalizeAffiliateAgentValue(response),
-  ) as AffiliateAgentInvocationFailedResult;
+  if (
+    typeof response.receiptId !== "string" ||
+    typeof response.failureCode !== "string" ||
+    ![1, 2, 3].includes(Number(response.invocationFailureCount))
+  ) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The stored invocation-failure receipt is invalid.",
+    );
+  }
+  if (
+    response.nextAttemptAt !== null &&
+    typeof response.nextAttemptAt !== "string"
+  ) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The stored invocation-failure receipt is invalid.",
+    );
+  }
+  if (typeof response.isPipelineBlocked !== "boolean") {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The stored invocation-failure receipt is invalid.",
+    );
+  }
+  return response;
 };
+
+const replayInvocationFailure = (
+  response: Prisma.JsonValue | null,
+): AffiliateAgentInvocationFailedResult =>
+  JSON.parse(
+    canonicalizeAffiliateAgentValue(
+      assertStoredInvocationFailureResponse(response),
+    ),
+  ) as AffiliateAgentInvocationFailedResult;
 
 const replaySubmitResult = (
   response: Prisma.JsonValue | null,
@@ -4297,6 +7152,354 @@ const assertNoPendingClaimEffects = async (
   }
 };
 
+type InvocationFailureEnvelope = Extract<
+  AffiliateAgentClaimOperation,
+  { kind: "RECORD_FAILURE" }
+>["failure"];
+
+const SUPPORTED_INVOCATION_FAILURE_CODES: readonly AffiliateAgentInvocationFailureCode[] =
+  [
+    "MALFORMED_OUTPUT",
+    "STALE_GENERATION",
+    "PROCESS_CRASH",
+    "TIMEOUT",
+    "TERMINAL_SUBMISSION_FAILURE",
+    "SCHEMA_CORRECTIONS_EXHAUSTED",
+  ];
+
+type InvocationFailureReplayMetadata = Readonly<{
+  existing: AffiliateAgentGatewayOperationReceipts | null;
+  terminalClaim: Pick<
+    AffiliateAgentGatewayClaims,
+    "status" | "terminalReceiptId"
+  > | null;
+  terminalReplayReceiptId: string | undefined;
+}>;
+
+const loadInvocationFailureReplayMetadata = async (
+  transaction: Prisma.TransactionClient,
+  input: Extract<AffiliateAgentClaimOperation, { kind: "RECORD_FAILURE" }>,
+  options: Readonly<{ isCompletedReplayAllowed?: boolean }>,
+): Promise<InvocationFailureReplayMetadata> => {
+  const existing =
+    await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
+      where: {
+        claimId_idempotencyKey: {
+          claimId: input.authorization.claimId,
+          idempotencyKey: input.idempotencyKey,
+        },
+      },
+    });
+  const terminalClaim =
+    options.isCompletedReplayAllowed && existing === null
+      ? await transaction.affiliateAgentGatewayClaims.findUnique({
+          where: { id: input.authorization.claimId },
+          select: { status: true, terminalReceiptId: true },
+        })
+      : null;
+  const terminalReplayReceiptId =
+    existing?.status === "SUCCEEDED"
+      ? existing.id
+      : terminalClaim &&
+          (terminalClaim.status === "COMPLETED" ||
+            terminalClaim.status === "EXPIRED")
+        ? (terminalClaim.terminalReceiptId ?? undefined)
+        : undefined;
+  return { existing, terminalClaim, terminalReplayReceiptId };
+};
+
+const assertInvocationFailureReplayIdentity = (
+  existing: AffiliateAgentGatewayOperationReceipts,
+  input: Extract<AffiliateAgentClaimOperation, { kind: "RECORD_FAILURE" }>,
+  requestHash: string,
+): void => {
+  if (
+    existing.operationKind !== input.kind ||
+    existing.requestHash !== requestHash
+  ) {
+    throw gatewayError(
+      "IDEMPOTENCY_KEY_REUSED",
+      "The operation idempotency key was used for different input.",
+    );
+  }
+};
+
+const resolveExpiredInvocationFailureReplay = async (
+  transaction: Prisma.TransactionClient,
+  input: Extract<AffiliateAgentClaimOperation, { kind: "RECORD_FAILURE" }>,
+  terminalClaim: InvocationFailureReplayMetadata["terminalClaim"],
+): Promise<AffiliateAgentInvocationFailedResult | null> => {
+  if (
+    terminalClaim?.status !== "EXPIRED" ||
+    terminalClaim.terminalReceiptId === null
+  ) {
+    return null;
+  }
+  const terminalReceipt =
+    await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
+      where: { id: terminalClaim.terminalReceiptId },
+    });
+  if (
+    terminalReceipt?.status !== "SUCCEEDED" ||
+    terminalReceipt.operationKind !== input.kind
+  ) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The expired claim terminal failure receipt is invalid.",
+    );
+  }
+  return replayInvocationFailure(terminalReceipt.responseJson);
+};
+
+const resolveInvocationFailureReplay = async (
+  transaction: Prisma.TransactionClient,
+  input: Extract<AffiliateAgentClaimOperation, { kind: "RECORD_FAILURE" }>,
+  metadata: InvocationFailureReplayMetadata,
+  requestHash: string,
+): Promise<
+  AffiliateAgentInvocationFailedResult | Readonly<{ kind: "TERMINAL_ACCEPTED" }> | null
+> => {
+  const { existing, terminalClaim } = metadata;
+  if (existing) {
+    assertInvocationFailureReplayIdentity(existing, input, requestHash);
+    if (existing.status === "SUCCEEDED") {
+      return replayInvocationFailure(existing.responseJson);
+    }
+    throw gatewayError(
+      "OPERATION_IN_PROGRESS",
+      "The invocation failure is still in progress.",
+      true,
+    );
+  }
+  const expiredReplay = await resolveExpiredInvocationFailureReplay(
+    transaction,
+    input,
+    terminalClaim,
+  );
+  if (expiredReplay) return expiredReplay;
+  if (
+    terminalClaim?.status === "COMPLETED" &&
+    terminalClaim.terminalReceiptId !== null
+  ) {
+    return { kind: "TERMINAL_ACCEPTED" as const };
+  }
+  return null;
+};
+
+const assertInvocationFailureTiming = (
+  failure: InvocationFailureEnvelope,
+  authorized: AuthorizedClaim,
+  now: Date,
+): void => {
+  const occurredAt = new Date(failure.occurredAt);
+  if (
+    failure.schemaVersion !== 1 ||
+    !SUPPORTED_INVOCATION_FAILURE_CODES.includes(failure.code) ||
+    Number.isNaN(occurredAt.getTime()) ||
+    occurredAt < authorized.claim.claimedAt ||
+    occurredAt > now
+  ) {
+    throw gatewayError(
+      "RESULT_SCHEMA_INVALID",
+      "The invocation failure envelope is invalid.",
+    );
+  }
+};
+
+const assertInvocationFailureSummary = (
+  failure: InvocationFailureEnvelope,
+): void => {
+  if (!failure.safeSummary.trim() || failure.safeSummary.length > 2_000) {
+    throw gatewayError(
+      "RESULT_SCHEMA_INVALID",
+      "The invocation failure envelope is invalid.",
+    );
+  }
+};
+
+const assertInvocationFailureEvidenceRefs = (
+  failure: InvocationFailureEnvelope,
+): void => {
+  if (
+    failure.evidenceRefs.some(
+      (reference, index) =>
+        !reference.trim() ||
+        reference.length > 200 ||
+        (index > 0 && failure.evidenceRefs[index - 1] >= reference),
+    )
+  ) {
+    throw gatewayError(
+      "RESULT_SCHEMA_INVALID",
+      "The invocation failure envelope is invalid.",
+    );
+  }
+};
+
+const assertInvocationFailureIdentity = (
+  failure: InvocationFailureEnvelope,
+  authorized: AuthorizedClaim,
+): void => {
+  if (failure.jobId !== authorized.claim.jobId) {
+    throw gatewayError(
+      "JOB_MISMATCH",
+      "The invocation failure job does not match.",
+    );
+  }
+  if (failure.claimId !== authorized.claim.id) {
+    throw gatewayError(
+      "CLAIM_NOT_FOUND",
+      "The invocation failure claim does not match.",
+    );
+  }
+  if (failure.role !== authorized.claim.role) {
+    throw gatewayError(
+      "ROLE_NOT_ALLOWED",
+      "The invocation failure role does not match.",
+    );
+  }
+  if (failure.workerId !== authorized.claim.workerId) {
+    throw gatewayError(
+      "WORKER_MISMATCH",
+      "The invocation failure worker does not match.",
+    );
+  }
+  if (failure.invocationId !== authorized.claim.invocationId) {
+    throw gatewayError(
+      "INVOCATION_MISMATCH",
+      "The invocation failure invocation does not match.",
+    );
+  }
+  if (failure.claimGeneration !== authorized.claim.claimGeneration) {
+    throw gatewayError(
+      "CLAIM_GENERATION_STALE",
+      "The invocation failure claim generation is stale.",
+    );
+  }
+  if (failure.lifecycleGeneration !== authorized.claim.lifecycleGeneration) {
+    throw gatewayError(
+      "LIFECYCLE_GENERATION_STALE",
+      "The invocation failure lifecycle generation is stale.",
+    );
+  }
+  if (failure.supplyContractHash !== authorized.claim.supplyContractHash) {
+    throw gatewayError(
+      "SUPPLY_CONTRACT_STALE",
+      "The invocation failure Supply Contract is stale.",
+    );
+  }
+};
+
+const assertInvocationFailureEnvelope = (
+  failure: InvocationFailureEnvelope,
+  authorized: AuthorizedClaim,
+  now: Date,
+): void => {
+  assertInvocationFailureTiming(failure, authorized, now);
+  assertInvocationFailureSummary(failure);
+  assertInvocationFailureEvidenceRefs(failure);
+  assertInvocationFailureIdentity(failure, authorized);
+};
+
+const recordInvocationFailureTransaction = (
+  transaction: Prisma.TransactionClient,
+  dependencies: AffiliateAgentGatewayDependencies,
+  authorized: AuthorizedClaim,
+  input: Extract<AffiliateAgentClaimOperation, { kind: "RECORD_FAILURE" }>,
+  requestHash: string,
+  now: Date,
+): Promise<AffiliateAgentInvocationFailedResult> => {
+  const failure = input.failure;
+  return (async () => {
+    await assertClaimEvidenceRefs(
+      transaction,
+      authorized.claim.id,
+      failure.evidenceRefs,
+      "EVIDENCE_REFERENCE_NOT_PERMITTED",
+      "The invocation failure references evidence outside the claim manifest.",
+    );
+    await assertNoPendingClaimEffects(transaction, authorized.claim.id);
+    const result = await recordInvocationFailureTransition({
+      dependencies,
+      transaction,
+      claim: authorized.claim,
+      job: authorized.job,
+      idempotencyKey: input.idempotencyKey,
+      operationKind: input.kind,
+      requestHash,
+      failureCode: failure.code,
+      failedAt: now,
+      safeSummary: failure.safeSummary.trim(),
+      evidenceRefs: failure.evidenceRefs,
+      claimStatus: "FAILED",
+      claimCasFailure: "GATEWAY_ERROR",
+      actorKind: "AGENT_INVOCATION",
+      actorId: authorized.claim.invocationId,
+      eventType: "CLAIM_INVOCATION_FAILED",
+    });
+    await persistInvocationFailureAlertIntent(
+      transaction,
+      dependencies,
+      invocationFailureAlertContextForAuthorizedClaim(authorized),
+      result,
+      failure.code,
+      failure.safeSummary.trim(),
+    );
+    return result;
+  })();
+};
+
+const executeInvocationFailureTransaction = (
+  dependencies: AffiliateAgentGatewayDependencies,
+  input: Extract<AffiliateAgentClaimOperation, { kind: "RECORD_FAILURE" }>,
+  options: Readonly<{
+    isCompletedReplayAllowed?: boolean;
+    isTrustedFailureRecording?: boolean;
+  }>,
+  requestHash: string,
+  now: Date,
+) =>
+  dependencies.prisma.$transaction(
+    async (transaction) => {
+      const metadata = await loadInvocationFailureReplayMetadata(
+        transaction,
+        input,
+        options,
+      );
+      const authorized = await authorizeClaimOperation(
+        dependencies,
+        input.authorization,
+        now,
+        transaction,
+        {
+          ...(metadata.terminalReplayReceiptId === undefined ||
+          metadata.terminalReplayReceiptId === null
+            ? {}
+            : { terminalReplayReceiptId: metadata.terminalReplayReceiptId }),
+          ...(options.isTrustedFailureRecording
+            ? { isTrustedFailureRecording: true }
+            : {}),
+        },
+      );
+      const replay = await resolveInvocationFailureReplay(
+        transaction,
+        input,
+        metadata,
+        requestHash,
+      );
+      if (replay) return replay;
+      assertInvocationFailureEnvelope(input.failure, authorized, now);
+      return recordInvocationFailureTransaction(
+        transaction,
+        dependencies,
+        authorized,
+        input,
+        requestHash,
+        now,
+      );
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+  );
+
 const performFailure = async (
   dependencies: AffiliateAgentGatewayDependencies,
   input: Extract<AffiliateAgentClaimOperation, { kind: "RECORD_FAILURE" }>,
@@ -4309,14 +7512,6 @@ const performFailure = async (
 > => {
   assertIdentifier(input.idempotencyKey, "Operation idempotency key");
   const requestHash = operationRequestHash(input);
-  const supportedCodes: readonly AffiliateAgentInvocationFailureCode[] = [
-    "MALFORMED_OUTPUT",
-    "STALE_GENERATION",
-    "PROCESS_CRASH",
-    "TIMEOUT",
-    "TERMINAL_SUBMISSION_FAILURE",
-    "SCHEMA_CORRECTIONS_EXHAUSTED",
-  ];
 
   for (
     let attempt = 1;
@@ -4325,208 +7520,23 @@ const performFailure = async (
   ) {
     try {
       const now = dependencies.clock.now();
-      return await dependencies.prisma.$transaction(
-        async (transaction) => {
-          const existing =
-            await transaction.affiliateAgentGatewayOperationReceipts.findUnique(
-              {
-                where: {
-                  claimId_idempotencyKey: {
-                    claimId: input.authorization.claimId,
-                    idempotencyKey: input.idempotencyKey,
-                  },
-                },
-              },
-            );
-          const terminalClaim =
-            options.isCompletedReplayAllowed && existing === null
-              ? await transaction.affiliateAgentGatewayClaims.findUnique({
-                  where: { id: input.authorization.claimId },
-                  select: { status: true, terminalReceiptId: true },
-                })
-              : null;
-          const terminalReplayReceiptId =
-            existing?.status === "SUCCEEDED"
-              ? existing.id
-              : terminalClaim &&
-                  (terminalClaim.status === "COMPLETED" ||
-                    terminalClaim.status === "EXPIRED")
-                ? terminalClaim.terminalReceiptId
-                : undefined;
-          const authorized = await authorizeClaimOperation(
-            dependencies,
-            input.authorization,
-            now,
-            transaction,
-            {
-              ...(terminalReplayReceiptId === undefined ||
-              terminalReplayReceiptId === null
-                ? {}
-                : { terminalReplayReceiptId }),
-              ...(options.isTrustedFailureRecording
-                ? { isTrustedFailureRecording: true }
-                : {}),
-            },
-          );
-          if (existing) {
-            if (
-              existing.operationKind !== input.kind ||
-              existing.requestHash !== requestHash
-            ) {
-              throw gatewayError(
-                "IDEMPOTENCY_KEY_REUSED",
-                "The operation idempotency key was used for different input.",
-              );
-            }
-            if (existing.status === "SUCCEEDED") {
-              return replayInvocationFailure(existing.responseJson);
-            }
-            throw gatewayError(
-              "OPERATION_IN_PROGRESS",
-              "The invocation failure is still in progress.",
-              true,
-            );
-          }
-          if (
-            terminalClaim?.status === "EXPIRED" &&
-            terminalClaim.terminalReceiptId !== null
-          ) {
-            const terminalReceipt =
-              await transaction.affiliateAgentGatewayOperationReceipts.findUnique(
-                {
-                  where: { id: terminalClaim.terminalReceiptId },
-                },
-              );
-            if (
-              terminalReceipt?.status !== "SUCCEEDED" ||
-              terminalReceipt.operationKind !== input.kind
-            ) {
-              throw gatewayError(
-                "INTERNAL_ERROR",
-                "The expired claim terminal failure receipt is invalid.",
-              );
-            }
-            return replayInvocationFailure(terminalReceipt.responseJson);
-          }
-          if (
-            terminalClaim?.status === "COMPLETED" &&
-            terminalClaim.terminalReceiptId !== null
-          ) {
-            return { kind: "TERMINAL_ACCEPTED" as const };
-          }
-
-          const failure = input.failure;
-          const occurredAt = new Date(failure.occurredAt);
-          if (
-            failure.schemaVersion !== 1 ||
-            !supportedCodes.includes(failure.code) ||
-            Number.isNaN(occurredAt.getTime()) ||
-            occurredAt < authorized.claim.claimedAt ||
-            occurredAt > now ||
-            !failure.safeSummary.trim() ||
-            failure.safeSummary.length > 2_000 ||
-            failure.evidenceRefs.some(
-              (reference, index) =>
-                !reference.trim() ||
-                reference.length > 200 ||
-                (index > 0 && failure.evidenceRefs[index - 1] >= reference),
-            )
-          ) {
-            throw gatewayError(
-              "RESULT_SCHEMA_INVALID",
-              "The invocation failure envelope is invalid.",
-            );
-          }
-          if (failure.jobId !== authorized.claim.jobId) {
-            throw gatewayError(
-              "JOB_MISMATCH",
-              "The invocation failure job does not match.",
-            );
-          }
-          if (failure.claimId !== authorized.claim.id) {
-            throw gatewayError(
-              "CLAIM_NOT_FOUND",
-              "The invocation failure claim does not match.",
-            );
-          }
-          if (failure.role !== authorized.claim.role) {
-            throw gatewayError(
-              "ROLE_NOT_ALLOWED",
-              "The invocation failure role does not match.",
-            );
-          }
-          if (failure.workerId !== authorized.claim.workerId) {
-            throw gatewayError(
-              "WORKER_MISMATCH",
-              "The invocation failure worker does not match.",
-            );
-          }
-          if (failure.invocationId !== authorized.claim.invocationId) {
-            throw gatewayError(
-              "INVOCATION_MISMATCH",
-              "The invocation failure invocation does not match.",
-            );
-          }
-          if (failure.claimGeneration !== authorized.claim.claimGeneration) {
-            throw gatewayError(
-              "CLAIM_GENERATION_STALE",
-              "The invocation failure claim generation is stale.",
-            );
-          }
-          if (
-            failure.lifecycleGeneration !== authorized.claim.lifecycleGeneration
-          ) {
-            throw gatewayError(
-              "LIFECYCLE_GENERATION_STALE",
-              "The invocation failure lifecycle generation is stale.",
-            );
-          }
-          if (
-            failure.supplyContractHash !== authorized.claim.supplyContractHash
-          ) {
-            throw gatewayError(
-              "SUPPLY_CONTRACT_STALE",
-              "The invocation failure Supply Contract is stale.",
-            );
-          }
-          await assertClaimEvidenceRefs(
-            transaction,
-            authorized.claim.id,
-            failure.evidenceRefs,
-            "EVIDENCE_REFERENCE_NOT_PERMITTED",
-            "The invocation failure references evidence outside the claim manifest.",
-          );
-          await assertNoPendingClaimEffects(transaction, authorized.claim.id);
-          return recordInvocationFailureTransition({
-            dependencies,
-            transaction,
-            claim: authorized.claim,
-            job: authorized.job,
-            idempotencyKey: input.idempotencyKey,
-            operationKind: input.kind,
-            requestHash,
-            failureCode: failure.code,
-            failedAt: now,
-            safeSummary: failure.safeSummary.trim(),
-            evidenceRefs: failure.evidenceRefs,
-            claimStatus: "FAILED",
-            claimCasFailure: "GATEWAY_ERROR",
-            actorKind: "AGENT_INVOCATION",
-            actorId: authorized.claim.invocationId,
-            eventType: "CLAIM_INVOCATION_FAILED",
-          });
-        },
-        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      return await executeInvocationFailureTransaction(
+        dependencies,
+        input,
+        options,
+        requestHash,
+        now,
       );
     } catch (error) {
       const retryableConflict =
         error instanceof AffiliateAgentClaimRaceError ||
-        prismaErrorCode(error) === "P2034";
+        isSerializableTransactionConflict(error);
       if (retryableConflict && attempt < SERIALIZABLE_TRANSACTION_ATTEMPTS) {
         continue;
       }
       if (error instanceof AffiliateAgentGatewayError) throw error;
-      throw gatewayError(
+      throw gatewayErrorForPersistenceFailure(
+        error,
         "INTERNAL_ERROR",
         "The invocation failure could not be recorded.",
         retryableConflict,
@@ -4540,7 +7550,7 @@ const performFailure = async (
   );
 };
 
-const validateTerminalResultScope = (
+const validateTerminalResultIdentity = (
   authorized: AuthorizedClaim,
   result: AffiliateAgentTerminalResultEnvelope,
 ): void => {
@@ -4586,6 +7596,12 @@ const validateTerminalResultScope = (
       "The terminal result lifecycle generation is stale.",
     );
   }
+};
+
+const validateTerminalResultDeploymentContract = (
+  authorized: AuthorizedClaim,
+  result: AffiliateAgentTerminalResultEnvelope,
+): void => {
   if (
     result.deploymentContractVersion !==
       authorized.claim.deploymentContractVersion ||
@@ -4599,12 +7615,24 @@ const validateTerminalResultScope = (
       "The terminal result contract identity is stale.",
     );
   }
+};
+
+const validateTerminalResultSupplyContract = (
+  authorized: AuthorizedClaim,
+  result: AffiliateAgentTerminalResultEnvelope,
+): void => {
   if (result.supplyContractHash !== authorized.claim.supplyContractHash) {
     throw gatewayError(
       "SUPPLY_CONTRACT_STALE",
       "The terminal result Supply Contract is stale.",
     );
   }
+};
+
+const validateTerminalResultRoleContract = (
+  authorized: AuthorizedClaim,
+  result: AffiliateAgentTerminalResultEnvelope,
+): void => {
   if (
     result.roleContractVersion !== authorized.claim.roleContractVersion ||
     result.roleContractHash !== authorized.claim.roleContractHash
@@ -4614,6 +7642,12 @@ const validateTerminalResultScope = (
       "The terminal result role contract is stale.",
     );
   }
+};
+
+const validateReviewerExactTarget = (
+  authorized: AuthorizedClaim,
+  result: AffiliateAgentTerminalResultEnvelope,
+): void => {
   if (
     result.role === "SUPPLY_REVIEWER" &&
     result.disposition === "EXACT_TARGET_REJECTED" &&
@@ -4628,14 +7662,24 @@ const validateTerminalResultScope = (
       "The reviewer result does not target the exact claimed target.",
     );
   }
-  if (
-    !authorized.roleContract.terminalDispositions.includes(result.disposition)
-  ) {
+};
+
+const validateTerminalResultDisposition = (
+  authorized: AuthorizedClaim,
+  result: AffiliateAgentTerminalResultEnvelope,
+): void => {
+  if (!authorized.roleContract.terminalDispositions.includes(result.disposition)) {
     throw gatewayError(
       "TERMINAL_DISPOSITION_NOT_PERMITTED",
       "The terminal disposition is not permitted for this claim.",
     );
   }
+};
+
+const validateReviewerCommittedPackage = (
+  authorized: AuthorizedClaim,
+  result: AffiliateAgentTerminalResultEnvelope,
+): void => {
   if (
     result.role === "SUPPLY_REVIEWER" &&
     authorized.envelope.role === "SUPPLY_REVIEWER" &&
@@ -4648,6 +7692,12 @@ const validateTerminalResultScope = (
       "The reviewer result does not target the committed package in the claim.",
     );
   }
+};
+
+const validateReviewerSupplySource = (
+  authorized: AuthorizedClaim,
+  result: AffiliateAgentTerminalResultEnvelope,
+): void => {
   if (
     result.role === "SUPPLY_REVIEWER" &&
     authorized.envelope.role === "SUPPLY_REVIEWER" &&
@@ -4660,6 +7710,11 @@ const validateTerminalResultScope = (
       "The reviewer result does not target the Supply Source in the claim.",
     );
   }
+};
+
+const validateNestedTerminalEvidence = (
+  result: AffiliateAgentTerminalResultEnvelope,
+): void => {
   const nestedEvidenceRefs =
     result.role === "COVERAGE_PLANNER" &&
     result.disposition === "FAILED_CAPTURE_EVIDENCE_RECORDED"
@@ -4679,9 +7734,65 @@ const validateTerminalResultScope = (
     );
   }
 };
+
+const validateTerminalResultScope = (
+  authorized: AuthorizedClaim,
+  result: AffiliateAgentTerminalResultEnvelope,
+): void => {
+  validateTerminalResultIdentity(authorized, result);
+  validateTerminalResultDeploymentContract(authorized, result);
+  validateTerminalResultSupplyContract(authorized, result);
+  validateTerminalResultRoleContract(authorized, result);
+  validateReviewerExactTarget(authorized, result);
+  validateTerminalResultDisposition(authorized, result);
+  validateReviewerCommittedPackage(authorized, result);
+  validateReviewerSupplySource(authorized, result);
+  validateNestedTerminalEvidence(result);
+};
 const AFFILIATE_AGENT_TERMINAL_EFFECT_COMMAND =
   "SUPPLY_REVIEWER_TERMINAL_EFFECT";
 const AFFILIATE_AGENT_TERMINAL_EFFECT_OPERATION = "TERMINAL_EFFECT";
+const matchesPostEffectReceiptBase = (
+  receipt: AffiliateAgentGatewayOperationReceipts | null,
+  claim: AffiliateAgentGatewayClaims,
+): receipt is AffiliateAgentGatewayOperationReceipts => {
+  if (
+    receipt === null ||
+    receipt.status !== "SUCCEEDED" ||
+    receipt.claimId !== claim.id ||
+    receipt.jobId !== claim.jobId
+  ) {
+    return false;
+  }
+  if (
+    receipt.claimGeneration !== claim.claimGeneration ||
+    receipt.startedAt >= claim.leaseExpiresAt ||
+    receipt.startedAt >= claim.hardDeadlineAt
+  ) {
+    return false;
+  }
+  return true;
+};
+
+const matchesPostEffectReceiptCommand = (
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  claim: AffiliateAgentGatewayClaims,
+): boolean => {
+  if (claim.role === "SUPPLY_REVIEWER") {
+    return (
+      receipt.operationKind === AFFILIATE_AGENT_TERMINAL_EFFECT_OPERATION &&
+      receipt.commandName === AFFILIATE_AGENT_TERMINAL_EFFECT_COMMAND
+    );
+  }
+  if (claim.role === "HUMAN_DIRECTED_EXECUTOR") {
+    return (
+      receipt.operationKind === "EXECUTE_COMMAND" &&
+      receipt.commandName === "EXECUTE_RECORDED_LIFECYCLE_COMMAND"
+    );
+  }
+  return false;
+};
+
 const hasPostEffectCompletionReceipt = async (
   client: PrismaClient | Prisma.TransactionClient,
   claim: AffiliateAgentGatewayClaims,
@@ -4692,19 +7803,8 @@ const hasPostEffectCompletionReceipt = async (
       where: { id: receiptId },
     });
   return (
-    receipt !== null &&
-    receipt.status === "SUCCEEDED" &&
-    receipt.claimId === claim.id &&
-    receipt.jobId === claim.jobId &&
-    receipt.claimGeneration === claim.claimGeneration &&
-    receipt.startedAt < claim.leaseExpiresAt &&
-    receipt.startedAt < claim.hardDeadlineAt &&
-    ((claim.role === "SUPPLY_REVIEWER" &&
-      receipt.operationKind === AFFILIATE_AGENT_TERMINAL_EFFECT_OPERATION &&
-      receipt.commandName === AFFILIATE_AGENT_TERMINAL_EFFECT_COMMAND) ||
-      (claim.role === "HUMAN_DIRECTED_EXECUTOR" &&
-        receipt.operationKind === "EXECUTE_COMMAND" &&
-        receipt.commandName === "EXECUTE_RECORDED_LIFECYCLE_COMMAND"))
+    matchesPostEffectReceiptBase(receipt, claim) &&
+    matchesPostEffectReceiptCommand(receipt, claim)
   );
 };
 
@@ -4723,6 +7823,10 @@ type ReviewerTerminalEffectReceiptState =
       terminalIdempotencyKey: string;
       terminalRequestHash: string;
     }>;
+type SucceededReviewerTerminalEffectState = Extract<
+  ReviewerTerminalEffectReceiptState,
+  { kind: "SUCCEEDED" }
+>;
 
 type ReviewerTerminalEffectReservation = Readonly<{
   receipt: AffiliateAgentGatewayOperationReceipts;
@@ -4744,6 +7848,19 @@ const reviewerTerminalEffectRequestHash = (
 
 const reviewerTerminalEffectIdempotencyKey = (): string =>
   "reviewer-terminal-effect";
+const invokeReviewerTerminalEffect = async <
+  D extends AffiliateAgentReviewerTerminalDisposition,
+>(
+  handler: AffiliateAgentTerminalEffectHandler<D>,
+  input: AffiliateAgentTerminalEffectAdapterInput<D>,
+  operation: "EXECUTE" | "RECOVER",
+): Promise<Readonly<Record<string, unknown>> | null> => {
+  if (operation === "EXECUTE") {
+    return handler.execute(input);
+  }
+  return handler.recover(input);
+};
+
 const runReviewerTerminalEffect = async (
   adapter: AffiliateAgentTerminalEffectAdapter,
   input: AffiliateAgentTerminalEffectAdapterInput,
@@ -4754,50 +7871,112 @@ const runReviewerTerminalEffect = async (
     claim: input.claim,
   };
   switch (input.result.disposition) {
-    case "APPROVED": {
-      const scopedInput = { ...commonInput, result: input.result };
-      return operation === "EXECUTE"
-        ? adapter.APPROVED.execute(scopedInput)
-        : adapter.APPROVED.recover(scopedInput);
-    }
-    case "ACTIVATED": {
-      const scopedInput = { ...commonInput, result: input.result };
-      return operation === "EXECUTE"
-        ? adapter.ACTIVATED.execute(scopedInput)
-        : adapter.ACTIVATED.recover(scopedInput);
-    }
-    case "PRODUCER_REPAIR_REQUIRED": {
-      const scopedInput = { ...commonInput, result: input.result };
-      return operation === "EXECUTE"
-        ? adapter.PRODUCER_REPAIR_REQUIRED.execute(scopedInput)
-        : adapter.PRODUCER_REPAIR_REQUIRED.recover(scopedInput);
-    }
-    case "REGRESSION_ASSESSED": {
-      const scopedInput = { ...commonInput, result: input.result };
-      return operation === "EXECUTE"
-        ? adapter.REGRESSION_ASSESSED.execute(scopedInput)
-        : adapter.REGRESSION_ASSESSED.recover(scopedInput);
-    }
-    case "SOURCE_EXCLUSION_ASSESSED": {
-      const scopedInput = { ...commonInput, result: input.result };
-      return operation === "EXECUTE"
-        ? adapter.SOURCE_EXCLUSION_ASSESSED.execute(scopedInput)
-        : adapter.SOURCE_EXCLUSION_ASSESSED.recover(scopedInput);
-    }
-    case "EXACT_TARGET_REJECTED": {
-      const scopedInput = { ...commonInput, result: input.result };
-      return operation === "EXECUTE"
-        ? adapter.EXACT_TARGET_REJECTED.execute(scopedInput)
-        : adapter.EXACT_TARGET_REJECTED.recover(scopedInput);
-    }
-    case "HUMAN_REVIEW_REQUIRED": {
-      const scopedInput = { ...commonInput, result: input.result };
-      return operation === "EXECUTE"
-        ? adapter.HUMAN_REVIEW_REQUIRED.execute(scopedInput)
-        : adapter.HUMAN_REVIEW_REQUIRED.recover(scopedInput);
-    }
+    case "APPROVED":
+      return invokeReviewerTerminalEffect(
+        adapter.APPROVED,
+        { ...commonInput, result: input.result },
+        operation,
+      );
+    case "ACTIVATED":
+      return invokeReviewerTerminalEffect(
+        adapter.ACTIVATED,
+        { ...commonInput, result: input.result },
+        operation,
+      );
+    case "PRODUCER_REPAIR_REQUIRED":
+      return invokeReviewerTerminalEffect(
+        adapter.PRODUCER_REPAIR_REQUIRED,
+        { ...commonInput, result: input.result },
+        operation,
+      );
+    case "REGRESSION_ASSESSED":
+      return invokeReviewerTerminalEffect(
+        adapter.REGRESSION_ASSESSED,
+        { ...commonInput, result: input.result },
+        operation,
+      );
+    case "SOURCE_EXCLUSION_ASSESSED":
+      return invokeReviewerTerminalEffect(
+        adapter.SOURCE_EXCLUSION_ASSESSED,
+        { ...commonInput, result: input.result },
+        operation,
+      );
+    case "EXACT_TARGET_REJECTED":
+      return invokeReviewerTerminalEffect(
+        adapter.EXACT_TARGET_REJECTED,
+        { ...commonInput, result: input.result },
+        operation,
+      );
+    case "HUMAN_REVIEW_REQUIRED":
+      return invokeReviewerTerminalEffect(
+        adapter.HUMAN_REVIEW_REQUIRED,
+        { ...commonInput, result: input.result },
+        operation,
+      );
   }
   throw new Error("Unsupported reviewer terminal disposition.");
+};
+
+const assertReviewerTerminalEffectRecord = (
+  value: Prisma.JsonValue | null,
+): Record<string, unknown> => {
+  if (
+    !isGatewayRecord(value) ||
+    typeof value.kind !== "string"
+  ) {
+    throw new Error("Invalid terminal effect state.");
+  }
+  return value;
+};
+
+const parsePendingReviewerTerminalEffect = (
+  value: Record<string, unknown>,
+): ReviewerTerminalEffectReceiptState => {
+  const result = affiliateAgentTerminalResultEnvelopeSchema.safeParse(
+    value.result,
+  );
+  if (
+    !result.success ||
+    result.data.role !== "SUPPLY_REVIEWER" ||
+    typeof value.terminalIdempotencyKey !== "string" ||
+    typeof value.terminalRequestHash !== "string"
+  ) {
+    throw new Error("Invalid pending terminal effect state.");
+  }
+  return {
+    kind: "PENDING",
+    result: result.data,
+    terminalIdempotencyKey: value.terminalIdempotencyKey,
+    terminalRequestHash: value.terminalRequestHash,
+  };
+};
+
+const parseSucceededReviewerTerminalEffect = (
+  value: Record<string, unknown>,
+  receiptId: string,
+): ReviewerTerminalEffectReceiptState => {
+  if (
+    value.kind !== "SUCCEEDED" ||
+    typeof value.resultHash !== "string" ||
+    typeof value.terminalIdempotencyKey !== "string" ||
+    typeof value.terminalRequestHash !== "string"
+  ) {
+    throw new Error("Invalid completed terminal effect state.");
+  }
+  const result = affiliateAgentTerminalResultEnvelopeSchema.safeParse(
+    value.result,
+  );
+  if (!result.success || result.data.role !== "SUPPLY_REVIEWER") {
+    throw new Error("Invalid completed terminal effect result.");
+  }
+  return {
+    kind: "SUCCEEDED",
+    result: result.data,
+    resultHash: value.resultHash,
+    safeOutput: parseBoundedSafeOutput(value.safeOutput, receiptId),
+    terminalIdempotencyKey: value.terminalIdempotencyKey,
+    terminalRequestHash: value.terminalRequestHash,
+  };
 };
 
 const parseReviewerTerminalEffectState = (
@@ -4805,55 +7984,10 @@ const parseReviewerTerminalEffectState = (
   receiptId: string,
 ): ReviewerTerminalEffectReceiptState => {
   try {
-    if (
-      value === null ||
-      typeof value !== "object" ||
-      Array.isArray(value) ||
-      typeof value.kind !== "string"
-    ) {
-      throw new Error("Invalid terminal effect state.");
-    }
-    if (value.kind === "PENDING") {
-      const result = affiliateAgentTerminalResultEnvelopeSchema.safeParse(
-        value.result,
-      );
-      if (
-        !result.success ||
-        result.data.role !== "SUPPLY_REVIEWER" ||
-        typeof value.terminalIdempotencyKey !== "string" ||
-        typeof value.terminalRequestHash !== "string"
-      ) {
-        throw new Error("Invalid pending terminal effect state.");
-      }
-      return {
-        kind: "PENDING",
-        result: result.data,
-        terminalIdempotencyKey: value.terminalIdempotencyKey,
-        terminalRequestHash: value.terminalRequestHash,
-      };
-    }
-    if (
-      value.kind !== "SUCCEEDED" ||
-      typeof value.resultHash !== "string" ||
-      typeof value.terminalIdempotencyKey !== "string" ||
-      typeof value.terminalRequestHash !== "string"
-    ) {
-      throw new Error("Invalid completed terminal effect state.");
-    }
-    const result = affiliateAgentTerminalResultEnvelopeSchema.safeParse(
-      value.result,
-    );
-    if (!result.success || result.data.role !== "SUPPLY_REVIEWER") {
-      throw new Error("Invalid completed terminal effect result.");
-    }
-    return {
-      kind: "SUCCEEDED",
-      result: result.data,
-      resultHash: value.resultHash,
-      safeOutput: parseBoundedSafeOutput(value.safeOutput, receiptId),
-      terminalIdempotencyKey: value.terminalIdempotencyKey,
-      terminalRequestHash: value.terminalRequestHash,
-    };
+    const record = assertReviewerTerminalEffectRecord(value);
+    return record.kind === "PENDING"
+      ? parsePendingReviewerTerminalEffect(record)
+      : parseSucceededReviewerTerminalEffect(record, receiptId);
   } catch {
     throw gatewayError(
       "PARTIAL_COMMAND_UNRESOLVED",
@@ -4862,6 +7996,212 @@ const parseReviewerTerminalEffectState = (
       receiptId,
     );
   }
+};
+
+const resolveReviewerTerminalEffectReservationReplay = async (
+  transaction: Prisma.TransactionClient,
+  claimId: string,
+  idempotencyKey: string,
+  requestHash: string,
+  terminalIdempotencyKey: string,
+  terminalRequestHash: string,
+): Promise<ReviewerTerminalEffectReservation | null> => {
+  const existing =
+    await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
+      where: {
+        claimId_idempotencyKey: {
+          claimId,
+          idempotencyKey,
+        },
+      },
+    });
+  if (!existing) return null;
+  if (
+    existing.operationKind !== AFFILIATE_AGENT_TERMINAL_EFFECT_OPERATION ||
+    existing.commandName !== AFFILIATE_AGENT_TERMINAL_EFFECT_COMMAND ||
+    existing.requestHash !== requestHash
+  ) {
+    throw gatewayError(
+      "IDEMPOTENCY_KEY_REUSED",
+      "The reviewer terminal effect key was used for different input.",
+    );
+  }
+  if (existing.status === "SUCCEEDED" || existing.status === "PENDING") {
+    const existingState = parseReviewerTerminalEffectState(
+      existing.responseJson,
+      existing.id,
+    );
+    if (
+      existingState.terminalIdempotencyKey !== terminalIdempotencyKey ||
+      existingState.terminalRequestHash !== terminalRequestHash
+    ) {
+      throw gatewayError(
+        "IDEMPOTENCY_KEY_REUSED",
+        "The reviewer terminal effect terminal identity changed.",
+      );
+    }
+    return {
+      receipt: existing,
+      isReplayed: existing.status === "PENDING",
+      terminalIdempotencyKey: existingState.terminalIdempotencyKey,
+      terminalRequestHash: existingState.terminalRequestHash,
+    };
+  }
+  throw gatewayError(
+    "PARTIAL_COMMAND_UNRESOLVED",
+    "The reviewer terminal effect requires reconciliation.",
+    false,
+    existing.id,
+  );
+};
+
+const assertReviewerTerminalEffectTiming = (
+  authorized: AuthorizedClaim,
+  now: Date,
+): void => {
+  if (authorized.claim.hardDeadlineAt < now) {
+    throw gatewayError(
+      "HARD_DEADLINE_EXCEEDED",
+      "The claim hard deadline passed before the reviewer effect was reserved.",
+    );
+  }
+  if (authorized.claim.leaseExpiresAt <= now) {
+    throw gatewayError(
+      "LEASE_EXPIRED",
+      "The claim lease expired before the reviewer effect was reserved.",
+    );
+  }
+};
+
+const persistReviewerTerminalEffectReservation = async (
+  transaction: Prisma.TransactionClient,
+  dependencies: AffiliateAgentGatewayDependencies,
+  authorized: AuthorizedClaim,
+  result: AffiliateAgentReviewerTerminalResult,
+  requestHash: string,
+  idempotencyKey: string,
+  terminalIdempotencyKey: string,
+  terminalRequestHash: string,
+  now: Date,
+): Promise<ReviewerTerminalEffectReservation> => {
+  const receiptId = dependencies.identifiers.create("receipt");
+  const jobUpdated = await transaction.affiliateAgentGatewayJobs.updateMany({
+    where: {
+      id: authorized.job.id,
+      status: "CLAIMED",
+      activeClaimId: authorized.claim.id,
+      claimGeneration: authorized.claim.claimGeneration,
+      eventSequence: authorized.job.eventSequence,
+    },
+    data: { eventSequence: { increment: 1 } },
+  });
+  if (jobUpdated.count !== 1) throw new AffiliateAgentClaimRaceError();
+  const pendingState: ReviewerTerminalEffectReceiptState = {
+    kind: "PENDING",
+    result,
+    terminalIdempotencyKey,
+    terminalRequestHash,
+  };
+  const receipt =
+    await transaction.affiliateAgentGatewayOperationReceipts.create({
+      data: {
+        id: receiptId,
+        claimId: authorized.claim.id,
+        jobId: authorized.job.id,
+        claimGeneration: authorized.claim.claimGeneration,
+        idempotencyKey,
+        operationKind: AFFILIATE_AGENT_TERMINAL_EFFECT_OPERATION,
+        commandName: AFFILIATE_AGENT_TERMINAL_EFFECT_COMMAND,
+        requestHash,
+        status: "PENDING",
+        responseJson: asPrismaJson(pendingState),
+        startedAt: now,
+        reconcileAfter: addSeconds(
+          now,
+          AFFILIATE_AGENT_HEARTBEAT_INTERVAL_SECONDS,
+        ),
+        retentionClass: "INDEFINITE",
+      },
+    });
+  await transaction.affiliateAgentGatewayEvents.create({
+    data: {
+      id: dependencies.identifiers.create("event"),
+      eventKey: `terminal-effect-reserved:${receiptId}`,
+      jobId: authorized.job.id,
+      claimId: authorized.claim.id,
+      receiptId,
+      sequence: authorized.job.eventSequence + 1,
+      eventType: "TERMINAL_EFFECT_RESERVED",
+      actorKind: "AGENT_INVOCATION",
+      actorId: authorized.claim.invocationId,
+      role: authorized.claim.role,
+      requestHash,
+      inputHash: hashAffiliateAgentValue(result),
+      payload: asPrismaJson({
+        disposition: result.disposition,
+      }),
+      retentionClass: "INDEFINITE",
+    },
+  });
+  return {
+    receipt,
+    isReplayed: false,
+    terminalIdempotencyKey,
+    terminalRequestHash,
+  };
+};
+
+const reserveReviewerTerminalEffectTransaction = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  transaction: Prisma.TransactionClient,
+  authorization: AffiliateAgentClaimAuthorization,
+  result: AffiliateAgentReviewerTerminalResult,
+  requestHash: string,
+  idempotencyKey: string,
+  terminalIdempotencyKey: string,
+  terminalRequestHash: string,
+  postEffectCompletionReceiptId: string | undefined,
+): Promise<ReviewerTerminalEffectReservation> => {
+  const authorized = await authorizeClaimOperation(
+    dependencies,
+    authorization,
+    dependencies.clock.now(),
+    transaction,
+    postEffectCompletionReceiptId === undefined
+      ? undefined
+      : { postEffectCompletionReceiptId },
+  );
+  validateTerminalResultScope(authorized, result);
+  await assertClaimEvidenceRefs(
+    transaction,
+    authorized.claim.id,
+    result.evidenceRefs,
+    "EVIDENCE_REFERENCE_NOT_PERMITTED",
+    "The reviewer terminal effect references evidence outside the claim manifest.",
+  );
+  const replay = await resolveReviewerTerminalEffectReservationReplay(
+    transaction,
+    authorized.claim.id,
+    idempotencyKey,
+    requestHash,
+    terminalIdempotencyKey,
+    terminalRequestHash,
+  );
+  if (replay) return replay;
+  await assertNoPendingClaimEffects(transaction, authorized.claim.id);
+  const now = dependencies.clock.now();
+  assertReviewerTerminalEffectTiming(authorized, now);
+  return persistReviewerTerminalEffectReservation(
+    transaction,
+    dependencies,
+    authorized,
+    result,
+    requestHash,
+    idempotencyKey,
+    terminalIdempotencyKey,
+    terminalRequestHash,
+    now,
+  );
 };
 
 const reserveReviewerTerminalEffect = async (
@@ -4876,160 +8216,281 @@ const reserveReviewerTerminalEffect = async (
 ): Promise<ReviewerTerminalEffectReservation> =>
   runSerializableEffectTransaction(
     dependencies,
-    async (transaction) => {
-      const authorized = await authorizeClaimOperation(
+    (transaction) =>
+      reserveReviewerTerminalEffectTransaction(
         dependencies,
+        transaction,
         authorization,
-        dependencies.clock.now(),
-        transaction,
-        postEffectCompletionReceiptId === undefined
-          ? undefined
-          : { postEffectCompletionReceiptId },
-      );
-      validateTerminalResultScope(authorized, result);
-      await assertClaimEvidenceRefs(
-        transaction,
-        authorized.claim.id,
-        result.evidenceRefs,
-        "EVIDENCE_REFERENCE_NOT_PERMITTED",
-        "The reviewer terminal effect references evidence outside the claim manifest.",
-      );
-      const existing =
-        await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
-          where: {
-            claimId_idempotencyKey: {
-              claimId: authorized.claim.id,
-              idempotencyKey,
-            },
-          },
-        });
-      if (existing) {
-        if (
-          existing.operationKind !==
-            AFFILIATE_AGENT_TERMINAL_EFFECT_OPERATION ||
-          existing.commandName !== AFFILIATE_AGENT_TERMINAL_EFFECT_COMMAND ||
-          existing.requestHash !== requestHash
-        ) {
-          throw gatewayError(
-            "IDEMPOTENCY_KEY_REUSED",
-            "The reviewer terminal effect key was used for different input.",
-          );
-        }
-        if (existing.status === "SUCCEEDED" || existing.status === "PENDING") {
-          const existingState = parseReviewerTerminalEffectState(
-            existing.responseJson,
-            existing.id,
-          );
-          if (
-            existingState.terminalIdempotencyKey !== terminalIdempotencyKey ||
-            existingState.terminalRequestHash !== terminalRequestHash
-          ) {
-            throw gatewayError(
-              "IDEMPOTENCY_KEY_REUSED",
-              "The reviewer terminal effect terminal identity changed.",
-            );
-          }
-          return {
-            receipt: existing,
-            isReplayed: existing.status === "PENDING",
-            terminalIdempotencyKey: existingState.terminalIdempotencyKey,
-            terminalRequestHash: existingState.terminalRequestHash,
-          };
-        }
-        throw gatewayError(
-          "PARTIAL_COMMAND_UNRESOLVED",
-          "The reviewer terminal effect requires reconciliation.",
-          false,
-          existing.id,
-        );
-      }
-      await assertNoPendingClaimEffects(transaction, authorized.claim.id);
-      const now = dependencies.clock.now();
-      if (authorized.claim.hardDeadlineAt < now) {
-        throw gatewayError(
-          "HARD_DEADLINE_EXCEEDED",
-          "The claim hard deadline passed before the reviewer effect was reserved.",
-        );
-      }
-      if (authorized.claim.leaseExpiresAt <= now) {
-        throw gatewayError(
-          "LEASE_EXPIRED",
-          "The claim lease expired before the reviewer effect was reserved.",
-        );
-      }
-      const receiptId = dependencies.identifiers.create("receipt");
-      const jobUpdated = await transaction.affiliateAgentGatewayJobs.updateMany(
-        {
-          where: {
-            id: authorized.job.id,
-            status: "CLAIMED",
-            activeClaimId: authorized.claim.id,
-            claimGeneration: authorized.claim.claimGeneration,
-            eventSequence: authorized.job.eventSequence,
-          },
-          data: { eventSequence: { increment: 1 } },
-        },
-      );
-      if (jobUpdated.count !== 1) throw new AffiliateAgentClaimRaceError();
-      const pendingState: ReviewerTerminalEffectReceiptState = {
-        kind: "PENDING",
         result,
+        requestHash,
+        idempotencyKey,
         terminalIdempotencyKey,
         terminalRequestHash,
-      };
-      const receipt =
-        await transaction.affiliateAgentGatewayOperationReceipts.create({
-          data: {
-            id: receiptId,
-            claimId: authorized.claim.id,
-            jobId: authorized.job.id,
-            claimGeneration: authorized.claim.claimGeneration,
-            idempotencyKey,
-            operationKind: AFFILIATE_AGENT_TERMINAL_EFFECT_OPERATION,
-            commandName: AFFILIATE_AGENT_TERMINAL_EFFECT_COMMAND,
-            requestHash,
-            status: "PENDING",
-            responseJson: asPrismaJson(pendingState),
-            startedAt: now,
-            reconcileAfter: addSeconds(
-              now,
-              AFFILIATE_AGENT_HEARTBEAT_INTERVAL_SECONDS,
-            ),
-            retentionClass: "INDEFINITE",
-          },
-        });
-      await transaction.affiliateAgentGatewayEvents.create({
-        data: {
-          id: dependencies.identifiers.create("event"),
-          eventKey: `terminal-effect-reserved:${receiptId}`,
-          jobId: authorized.job.id,
-          claimId: authorized.claim.id,
-          receiptId,
-          sequence: authorized.job.eventSequence + 1,
-          eventType: "TERMINAL_EFFECT_RESERVED",
-          actorKind: "AGENT_INVOCATION",
-          actorId: authorized.claim.invocationId,
-          role: authorized.claim.role,
-          requestHash,
-          inputHash: hashAffiliateAgentValue(result),
-          payload: asPrismaJson({
-            disposition: result.disposition,
-          }),
-          retentionClass: "INDEFINITE",
-        },
-      });
-      return {
-        receipt,
-        isReplayed: false,
-        terminalIdempotencyKey,
-        terminalRequestHash,
-      };
-    },
+        postEffectCompletionReceiptId,
+      ),
     {
       code: "INTERNAL_ERROR",
       safeMessage: "The reviewer terminal effect could not be reserved.",
     },
   );
+
+function assertReviewerEffectReceiptMatches(
+  current: AffiliateAgentGatewayOperationReceipts | null,
+  reservation: ReviewerTerminalEffectReservation,
+  requestHash: string,
+): asserts current is AffiliateAgentGatewayOperationReceipts {
+  if (
+    !current ||
+    current.claimId !== reservation.receipt.claimId ||
+    current.jobId !== reservation.receipt.jobId ||
+    current.claimGeneration !== reservation.receipt.claimGeneration ||
+    current.commandName !== AFFILIATE_AGENT_TERMINAL_EFFECT_COMMAND ||
+    current.requestHash !== requestHash
+  ) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The reviewer terminal effect receipt changed during finalization.",
+      false,
+      reservation.receipt.id,
+    );
+  }
+}
+const resolveReviewerEffectFinalizationReplay = (
+  current: AffiliateAgentGatewayOperationReceipts,
+  reservation: ReviewerTerminalEffectReservation,
+  state: SucceededReviewerTerminalEffectState,
+): Readonly<Record<string, unknown>> | null => {
+  if (current.status === "SUCCEEDED") {
+    const completed = parseReviewerTerminalEffectState(
+      current.responseJson,
+      current.id,
+    );
+    if (
+      completed.kind !== "SUCCEEDED" ||
+      completed.resultHash !== state.resultHash ||
+      completed.terminalIdempotencyKey !==
+        reservation.terminalIdempotencyKey ||
+      completed.terminalRequestHash !== reservation.terminalRequestHash
+    ) {
+      throw gatewayError(
+        "IDEMPOTENCY_KEY_REUSED",
+        "The reviewer terminal effect result does not match its receipt.",
+      );
+    }
+    return completed.safeOutput;
+  }
+  if (current.status !== "PENDING") {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The reviewer terminal effect receipt requires reconciliation.",
+      false,
+      current.id,
+    );
+  }
+  const pending = parseReviewerTerminalEffectState(
+    current.responseJson,
+    current.id,
+  );
+  if (
+    pending.kind !== "PENDING" ||
+    pending.terminalIdempotencyKey !== reservation.terminalIdempotencyKey ||
+    pending.terminalRequestHash !== reservation.terminalRequestHash
+  ) {
+    throw gatewayError(
+      "IDEMPOTENCY_KEY_REUSED",
+      "The reviewer terminal effect terminal identity changed.",
+    );
+  }
+  return null;
+};
+
+function assertReviewerEffectClaimState(
+  claim: AffiliateAgentGatewayClaims | null,
+  current: AffiliateAgentGatewayOperationReceipts,
+  finalizationNow: Date,
+): asserts claim is AffiliateAgentGatewayClaims {
+  if (!claim) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The reviewer terminal effect claim requires reconciliation.",
+      false,
+      current.id,
+    );
+  }
+  if (
+    claim.status !== "ACTIVE" ||
+    claim.claimGeneration !== current.claimGeneration
+  ) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The reviewer terminal effect claim requires reconciliation.",
+      false,
+      current.id,
+    );
+  }
+  if (
+    claim.leaseExpiresAt <= finalizationNow &&
+    current.startedAt >= claim.leaseExpiresAt
+  ) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The reviewer terminal effect claim requires reconciliation.",
+      false,
+      current.id,
+    );
+  }
+  if (
+    claim.hardDeadlineAt < finalizationNow &&
+    current.startedAt >= claim.hardDeadlineAt
+  ) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The reviewer terminal effect claim requires reconciliation.",
+      false,
+      current.id,
+    );
+  }
+}
+
+function assertReviewerEffectJobState(
+  job: AffiliateAgentGatewayJobs | null,
+  claim: AffiliateAgentGatewayClaims,
+  current: AffiliateAgentGatewayOperationReceipts,
+): asserts job is AffiliateAgentGatewayJobs {
+  if (!job) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The reviewer terminal effect claim requires reconciliation.",
+      false,
+      current.id,
+    );
+  }
+  if (
+    job.status !== "CLAIMED" ||
+    job.activeClaimId !== claim.id ||
+    job.claimGeneration !== current.claimGeneration
+  ) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The reviewer terminal effect claim requires reconciliation.",
+      false,
+      current.id,
+    );
+  }
+}
+
+const persistReviewerEffectFinalization = async (
+  transaction: Prisma.TransactionClient,
+  dependencies: AffiliateAgentGatewayDependencies,
+  current: AffiliateAgentGatewayOperationReceipts,
+  claim: AffiliateAgentGatewayClaims,
+  job: AffiliateAgentGatewayJobs,
+  result: AffiliateAgentReviewerTerminalResult,
+  requestHash: string,
+  responseHash: string,
+  state: SucceededReviewerTerminalEffectState,
+  completedAt: Date,
+  safeOutput: Readonly<Record<string, unknown>>,
+): Promise<Readonly<Record<string, unknown>>> => {
+  const receiptUpdated =
+    await transaction.affiliateAgentGatewayOperationReceipts.updateMany({
+      where: {
+        id: current.id,
+        status: "PENDING",
+        requestHash,
+      },
+      data: {
+        status: "SUCCEEDED",
+        responseHash,
+        responseJson: asPrismaJson(state),
+        completedAt,
+        reconcileAfter: null,
+      },
+    });
+  const jobUpdated = await transaction.affiliateAgentGatewayJobs.updateMany({
+    where: {
+      id: job.id,
+      status: "CLAIMED",
+      activeClaimId: claim.id,
+      claimGeneration: claim.claimGeneration,
+      eventSequence: job.eventSequence,
+    },
+    data: { eventSequence: { increment: 1 } },
+  });
+  if (receiptUpdated.count !== 1 || jobUpdated.count !== 1) {
+    throw new AffiliateAgentClaimRaceError();
+  }
+  await transaction.affiliateAgentGatewayEvents.create({
+    data: {
+      id: dependencies.identifiers.create("event"),
+      eventKey: `terminal-effect-succeeded:${current.id}`,
+      jobId: job.id,
+      claimId: claim.id,
+      receiptId: current.id,
+      sequence: job.eventSequence + 1,
+      eventType: "TERMINAL_EFFECT_SUCCEEDED",
+      actorKind: "AGENT_INVOCATION",
+      actorId: claim.invocationId,
+      role: claim.role,
+      requestHash,
+      inputHash: hashAffiliateAgentValue(result),
+      outputHash: responseHash,
+      payload: asPrismaJson({
+        disposition: result.disposition,
+      }),
+      retentionClass: "INDEFINITE",
+    },
+  });
+  return safeOutput;
+};
+
+const finalizeReviewerTerminalEffectTransaction = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  transaction: Prisma.TransactionClient,
+  reservation: ReviewerTerminalEffectReservation,
+  result: AffiliateAgentReviewerTerminalResult,
+  requestHash: string,
+  responseHash: string,
+  state: SucceededReviewerTerminalEffectState,
+  completedAt: Date,
+  safeOutput: Readonly<Record<string, unknown>>,
+): Promise<Readonly<Record<string, unknown>>> => {
+  const current =
+    await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
+      where: { id: reservation.receipt.id },
+    });
+  assertReviewerEffectReceiptMatches(current, reservation, requestHash);
+  const replay = resolveReviewerEffectFinalizationReplay(
+    current,
+    reservation,
+    state,
+  );
+  if (replay) return replay;
+  const [claim, job] = await Promise.all([
+    transaction.affiliateAgentGatewayClaims.findUnique({
+      where: { id: current.claimId },
+    }),
+    transaction.affiliateAgentGatewayJobs.findUnique({
+      where: { id: current.jobId },
+    }),
+  ]);
+  const finalizationNow = dependencies.clock.now();
+  assertReviewerEffectClaimState(claim, current, finalizationNow);
+  assertReviewerEffectJobState(job, claim, current);
+  return persistReviewerEffectFinalization(
+    transaction,
+    dependencies,
+    current,
+    claim,
+    job,
+    result,
+    requestHash,
+    responseHash,
+    state,
+    completedAt,
+    safeOutput,
+  );
+};
 
 const finalizeReviewerTerminalEffect = async (
   dependencies: AffiliateAgentGatewayDependencies,
@@ -5038,7 +8499,7 @@ const finalizeReviewerTerminalEffect = async (
   requestHash: string,
   safeOutput: Readonly<Record<string, unknown>>,
 ): Promise<Readonly<Record<string, unknown>>> => {
-  const state: ReviewerTerminalEffectReceiptState = {
+  const state: SucceededReviewerTerminalEffectState = {
     kind: "SUCCEEDED",
     result,
     resultHash: hashAffiliateAgentValue(result),
@@ -5050,155 +8511,54 @@ const finalizeReviewerTerminalEffect = async (
   const completedAt = dependencies.clock.now();
   return runSerializableEffectTransaction(
     dependencies,
-    async (transaction) => {
-      const current =
-        await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
-          where: { id: reservation.receipt.id },
-        });
-      if (
-        !current ||
-        current.claimId !== reservation.receipt.claimId ||
-        current.jobId !== reservation.receipt.jobId ||
-        current.claimGeneration !== reservation.receipt.claimGeneration ||
-        current.commandName !== AFFILIATE_AGENT_TERMINAL_EFFECT_COMMAND ||
-        current.requestHash !== requestHash
-      ) {
-        throw gatewayError(
-          "PARTIAL_COMMAND_UNRESOLVED",
-          "The reviewer terminal effect receipt changed during finalization.",
-          false,
-          reservation.receipt.id,
-        );
-      }
-      if (current.status === "SUCCEEDED") {
-        const completed = parseReviewerTerminalEffectState(
-          current.responseJson,
-          current.id,
-        );
-        if (
-          completed.kind !== "SUCCEEDED" ||
-          completed.resultHash !== state.resultHash ||
-          completed.terminalIdempotencyKey !==
-            reservation.terminalIdempotencyKey ||
-          completed.terminalRequestHash !== reservation.terminalRequestHash
-        ) {
-          throw gatewayError(
-            "IDEMPOTENCY_KEY_REUSED",
-            "The reviewer terminal effect result does not match its receipt.",
-          );
-        }
-        return completed.safeOutput;
-      }
-      if (current.status !== "PENDING") {
-        throw gatewayError(
-          "PARTIAL_COMMAND_UNRESOLVED",
-          "The reviewer terminal effect receipt requires reconciliation.",
-          false,
-          current.id,
-        );
-      }
-      const pending = parseReviewerTerminalEffectState(
-        current.responseJson,
-        current.id,
-      );
-      if (
-        pending.kind !== "PENDING" ||
-        pending.terminalIdempotencyKey !== reservation.terminalIdempotencyKey ||
-        pending.terminalRequestHash !== reservation.terminalRequestHash
-      ) {
-        throw gatewayError(
-          "IDEMPOTENCY_KEY_REUSED",
-          "The reviewer terminal effect terminal identity changed.",
-        );
-      }
-      const [claim, job] = await Promise.all([
-        transaction.affiliateAgentGatewayClaims.findUnique({
-          where: { id: current.claimId },
-        }),
-        transaction.affiliateAgentGatewayJobs.findUnique({
-          where: { id: current.jobId },
-        }),
-      ]);
-      const finalizationNow = dependencies.clock.now();
-      if (
-        !claim ||
-        claim.status !== "ACTIVE" ||
-        claim.claimGeneration !== current.claimGeneration ||
-        (claim.leaseExpiresAt <= finalizationNow &&
-          current.startedAt >= claim.leaseExpiresAt) ||
-        (claim.hardDeadlineAt < finalizationNow &&
-          current.startedAt >= claim.hardDeadlineAt) ||
-        !job ||
-        job.status !== "CLAIMED" ||
-        job.activeClaimId !== claim.id ||
-        job.claimGeneration !== current.claimGeneration
-      ) {
-        throw gatewayError(
-          "PARTIAL_COMMAND_UNRESOLVED",
-          "The reviewer terminal effect claim requires reconciliation.",
-          false,
-          current.id,
-        );
-      }
-      const receiptUpdated =
-        await transaction.affiliateAgentGatewayOperationReceipts.updateMany({
-          where: {
-            id: current.id,
-            status: "PENDING",
-            requestHash,
-          },
-          data: {
-            status: "SUCCEEDED",
-            responseHash,
-            responseJson: asPrismaJson(state),
-            completedAt,
-            reconcileAfter: null,
-          },
-        });
-      const jobUpdated = await transaction.affiliateAgentGatewayJobs.updateMany(
-        {
-          where: {
-            id: job.id,
-            status: "CLAIMED",
-            activeClaimId: claim.id,
-            claimGeneration: claim.claimGeneration,
-            eventSequence: job.eventSequence,
-          },
-          data: { eventSequence: { increment: 1 } },
-        },
-      );
-      if (receiptUpdated.count !== 1 || jobUpdated.count !== 1) {
-        throw new AffiliateAgentClaimRaceError();
-      }
-      await transaction.affiliateAgentGatewayEvents.create({
-        data: {
-          id: dependencies.identifiers.create("event"),
-          eventKey: `terminal-effect-succeeded:${current.id}`,
-          jobId: job.id,
-          claimId: claim.id,
-          receiptId: current.id,
-          sequence: job.eventSequence + 1,
-          eventType: "TERMINAL_EFFECT_SUCCEEDED",
-          actorKind: "AGENT_INVOCATION",
-          actorId: claim.invocationId,
-          role: claim.role,
-          requestHash,
-          inputHash: hashAffiliateAgentValue(result),
-          outputHash: responseHash,
-          payload: asPrismaJson({
-            disposition: result.disposition,
-          }),
-          retentionClass: "INDEFINITE",
-        },
-      });
-      return safeOutput;
-    },
+    (transaction) =>
+      finalizeReviewerTerminalEffectTransaction(
+        dependencies,
+        transaction,
+        reservation,
+        result,
+        requestHash,
+        responseHash,
+        state,
+        completedAt,
+        safeOutput,
+      ),
     {
       code: "PARTIAL_COMMAND_UNRESOLVED",
       safeMessage: "The reviewer terminal effect could not be finalized.",
       receiptId: reservation.receipt.id,
     },
   );
+};
+
+const assertDatabaseAuthorizationFailure = (error: unknown): void => {
+  if (isDatabaseAuthorizationFailure(error)) {
+    throw gatewayError(
+      "GATEWAY_ADMISSION_HALTED",
+      GATEWAY_DATABASE_AUTHORIZATION_FAILURE_MESSAGE,
+    );
+  }
+};
+
+const runReviewerTerminalEffectWithRecovery = async (
+  adapter: AffiliateAgentTerminalEffectAdapter,
+  input: AffiliateAgentTerminalEffectAdapterInput,
+  isReplayed: boolean,
+): Promise<Readonly<Record<string, unknown>> | null> => {
+  try {
+    if (isReplayed) {
+      return await runReviewerTerminalEffect(adapter, input, "RECOVER");
+    }
+    try {
+      return await runReviewerTerminalEffect(adapter, input, "EXECUTE");
+    } catch (error) {
+      assertDatabaseAuthorizationFailure(error);
+      return await runReviewerTerminalEffect(adapter, input, "RECOVER");
+    }
+  } catch (error) {
+    assertDatabaseAuthorizationFailure(error);
+    return null;
+  }
 };
 
 const ensureReviewerTerminalEffect = async (
@@ -5248,37 +8608,16 @@ const ensureReviewerTerminalEffect = async (
     }
     return reservation.receipt.id;
   }
-  let recovered: Readonly<Record<string, unknown>> | null = null;
-  try {
-    const effectInput = {
-      receiptId: reservation.receipt.id,
-      claim: authorized.envelope,
-      result,
-    };
-    if (reservation.isReplayed) {
-      recovered = await runReviewerTerminalEffect(
-        adapter,
-        effectInput,
-        "RECOVER",
-      );
-    } else {
-      try {
-        recovered = await runReviewerTerminalEffect(
-          adapter,
-          effectInput,
-          "EXECUTE",
-        );
-      } catch {
-        recovered = await runReviewerTerminalEffect(
-          adapter,
-          effectInput,
-          "RECOVER",
-        );
-      }
-    }
-  } catch {
-    recovered = null;
-  }
+  const effectInput = {
+    receiptId: reservation.receipt.id,
+    claim: authorized.envelope,
+    result,
+  };
+  const recovered = await runReviewerTerminalEffectWithRecovery(
+    adapter,
+    effectInput,
+    reservation.isReplayed,
+  );
   if (recovered === null) {
     throw gatewayError(
       "PARTIAL_COMMAND_UNRESOLVED",
@@ -5308,6 +8647,353 @@ const ensureReviewerTerminalEffect = async (
   );
   return reservation.receipt.id;
 };
+type RecoveredReviewerEffectRecords = Readonly<{
+  claim: AffiliateAgentGatewayClaims;
+  job: AffiliateAgentGatewayJobs;
+  currentEffect: AffiliateAgentGatewayOperationReceipts;
+}>;
+
+function assertRecoveredReviewerEffectRecords(
+  records: Readonly<{
+    claim: AffiliateAgentGatewayClaims | null;
+    job: AffiliateAgentGatewayJobs | null;
+    currentEffect: AffiliateAgentGatewayOperationReceipts | null;
+  }>,
+  effectReceipt: AffiliateAgentGatewayOperationReceipts,
+): asserts records is RecoveredReviewerEffectRecords {
+  if (!records.claim || !records.job || !records.currentEffect) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The recovered reviewer result claim does not exist.",
+      false,
+      effectReceipt.id,
+    );
+  }
+}
+
+const assertRecoveredReviewerEffectCurrent = (
+  currentEffect: AffiliateAgentGatewayOperationReceipts,
+  claim: AffiliateAgentGatewayClaims,
+  job: AffiliateAgentGatewayJobs,
+  effectReceipt: AffiliateAgentGatewayOperationReceipts,
+  result: AffiliateAgentReviewerTerminalResult,
+): void => {
+  if (
+    currentEffect.status !== "SUCCEEDED" ||
+    currentEffect.commandName !== AFFILIATE_AGENT_TERMINAL_EFFECT_COMMAND ||
+    currentEffect.claimId !== claim.id ||
+    currentEffect.jobId !== job.id ||
+    currentEffect.claimGeneration !== claim.claimGeneration ||
+    currentEffect.requestHash !== effectReceipt.requestHash ||
+    currentEffect.requestHash !== reviewerTerminalEffectRequestHash(claim, result)
+  ) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The recovered reviewer effect is not durably completed.",
+      false,
+      effectReceipt.id,
+    );
+  }
+};
+
+const parseRecoveredReviewerEffectState = (
+  currentEffect: AffiliateAgentGatewayOperationReceipts,
+  effectReceipt: AffiliateAgentGatewayOperationReceipts,
+  result: AffiliateAgentReviewerTerminalResult,
+): Extract<ReviewerTerminalEffectReceiptState, { kind: "SUCCEEDED" }> => {
+  const completedEffectState = parseReviewerTerminalEffectState(
+    currentEffect.responseJson,
+    currentEffect.id,
+  );
+  if (
+    completedEffectState.kind !== "SUCCEEDED" ||
+    completedEffectState.resultHash !== hashAffiliateAgentValue(result) ||
+    hashAffiliateAgentValue(completedEffectState.result) !==
+      hashAffiliateAgentValue(result)
+  ) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The recovered reviewer effect result is not durably completed.",
+      false,
+      effectReceipt.id,
+    );
+  }
+  return completedEffectState;
+};
+
+const recoveredReviewerAuthorization = (
+  claim: AffiliateAgentGatewayClaims,
+): AffiliateAgentClaimAuthorization => ({
+  token: "",
+  jobId: claim.jobId,
+  claimId: claim.id,
+  claimGeneration: claim.claimGeneration,
+  lifecycleGeneration: claim.lifecycleGeneration,
+  role: claim.role as AffiliateAgentClaimAuthorization["role"],
+  workerId: claim.workerId,
+  invocationId: claim.invocationId,
+  supplyContractHash: claim.supplyContractHash,
+});
+
+const recoveredReviewerAuthorizationOptions = (
+  claim: AffiliateAgentGatewayClaims,
+  job: AffiliateAgentGatewayJobs,
+  effectReceipt: AffiliateAgentGatewayOperationReceipts,
+): ClaimAuthorizationOptions => ({
+  trustedEffectCompletionReceiptId: effectReceipt.id,
+  ...(claim.status === "COMPLETED" &&
+  job.status === "COMPLETED" &&
+  claim.terminalReceiptId !== null
+    ? { terminalReplayReceiptId: claim.terminalReceiptId }
+    : {}),
+});
+
+const resolveCompletedRecoveredReviewerResult = async (
+  transaction: Prisma.TransactionClient,
+  claim: AffiliateAgentGatewayClaims,
+  job: AffiliateAgentGatewayJobs,
+  completedEffectState: Extract<
+    ReviewerTerminalEffectReceiptState,
+    { kind: "SUCCEEDED" }
+  >,
+  effectReceipt: AffiliateAgentGatewayOperationReceipts,
+): Promise<AffiliateAgentTerminalAcceptedResult | null> => {
+  if (
+    claim.status !== "COMPLETED" ||
+    job.status !== "COMPLETED" ||
+    claim.terminalReceiptId === null
+  ) {
+    return null;
+  }
+  const terminalReceipt =
+    await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
+      where: { id: claim.terminalReceiptId },
+    });
+  if (
+    !terminalReceipt ||
+    terminalReceipt.idempotencyKey !==
+      completedEffectState.terminalIdempotencyKey ||
+    terminalReceipt.requestHash !== completedEffectState.terminalRequestHash
+  ) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The recovered reviewer terminal receipt is missing or changed.",
+      false,
+      effectReceipt.id,
+    );
+  }
+  return replayTerminalResult(terminalReceipt.responseJson);
+};
+
+const findRecoveredReviewerResultReplay = async (
+  transaction: Prisma.TransactionClient,
+  claimId: string,
+  idempotencyKey: string,
+  requestHash: string,
+  effectReceipt: AffiliateAgentGatewayOperationReceipts,
+): Promise<AffiliateAgentTerminalAcceptedResult | null> => {
+  const existing =
+    await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
+      where: {
+        claimId_idempotencyKey: {
+          claimId,
+          idempotencyKey,
+        },
+      },
+    });
+  if (!existing) return null;
+  if (existing.status === "SUCCEEDED" && existing.requestHash === requestHash) {
+    return replayTerminalResult(existing.responseJson);
+  }
+  throw gatewayError(
+    "PARTIAL_COMMAND_UNRESOLVED",
+    "The recovered reviewer terminal result receipt changed.",
+    false,
+    existing.id,
+  );
+};
+
+const persistRecoveredReviewerTerminalResult = async (
+  transaction: Prisma.TransactionClient,
+  dependencies: AffiliateAgentGatewayDependencies,
+  claim: AffiliateAgentGatewayClaims,
+  job: AffiliateAgentGatewayJobs,
+  result: AffiliateAgentReviewerTerminalResult,
+  effectReceipt: AffiliateAgentGatewayOperationReceipts,
+  resultHash: string,
+  requestHash: string,
+  idempotencyKey: string,
+  now: Date,
+): Promise<AffiliateAgentTerminalAcceptedResult> => {
+  const receiptId = dependencies.identifiers.create("receipt");
+  const terminalResult: AffiliateAgentTerminalAcceptedResult = {
+    kind: "TERMINAL_ACCEPTED",
+    receiptId,
+    resultHash,
+    disposition: result.disposition,
+    completedAt: now.toISOString(),
+  };
+  const claimCompleted =
+    await transaction.affiliateAgentGatewayClaims.updateMany({
+      where: {
+        id: claim.id,
+        status: "ACTIVE",
+        claimGeneration: claim.claimGeneration,
+        tokenInvalidatedAt: null,
+      },
+      data: {
+        status: "COMPLETED",
+        terminalReceiptId: receiptId,
+        tokenInvalidatedAt: now,
+        endedAt: now,
+      },
+    });
+  const jobCompleted = await transaction.affiliateAgentGatewayJobs.updateMany({
+    where: {
+      id: job.id,
+      status: "CLAIMED",
+      activeClaimId: claim.id,
+      claimGeneration: claim.claimGeneration,
+      eventSequence: job.eventSequence,
+    },
+    data: {
+      status: "COMPLETED",
+      activeClaimId: null,
+      terminalDisposition: result.disposition,
+      resultHash,
+      resultJson: asPrismaJson(result),
+      terminalReceiptId: receiptId,
+      finishedAt: now,
+      eventSequence: { increment: 1 },
+    },
+  });
+  if (claimCompleted.count !== 1 || jobCompleted.count !== 1) {
+    throw new AffiliateAgentClaimRaceError();
+  }
+  await transaction.affiliateAgentGatewayOperationReceipts.create({
+    data: {
+      id: receiptId,
+      claimId: claim.id,
+      jobId: job.id,
+      claimGeneration: claim.claimGeneration,
+      idempotencyKey,
+      operationKind: "SUBMIT_RESULT",
+      requestHash,
+      status: "SUCCEEDED",
+      responseHash: hashAffiliateAgentValue(terminalResult),
+      responseJson: asPrismaJson(terminalResult),
+      startedAt: now,
+      completedAt: now,
+      retentionClass: "INDEFINITE",
+    },
+  });
+  await transaction.affiliateAgentGatewayEvents.create({
+    data: {
+      id: dependencies.identifiers.create("event"),
+      eventKey: `terminal:recovered:${receiptId}`,
+      jobId: job.id,
+      claimId: claim.id,
+      receiptId,
+      sequence: job.eventSequence + 1,
+      eventType: "CLAIM_TERMINAL_RESULT_ACCEPTED",
+      actorKind: "AGENT_INVOCATION",
+      actorId: claim.invocationId,
+      role: claim.role,
+      requestHash,
+      inputHash: resultHash,
+      outputHash: hashAffiliateAgentValue(terminalResult),
+      reasonCodes: [...result.reasonCodes],
+      payload: asPrismaJson({
+        disposition: result.disposition,
+        resultHash,
+        recoveredFromReceiptId: effectReceipt.id,
+      }),
+      retentionClass: "INDEFINITE",
+    },
+  });
+  return terminalResult;
+};
+
+const completeRecoveredReviewerTerminalResultTransaction = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  transaction: Prisma.TransactionClient,
+  effectReceipt: AffiliateAgentGatewayOperationReceipts,
+  result: AffiliateAgentReviewerTerminalResult,
+): Promise<AffiliateAgentTerminalAcceptedResult> => {
+  const [claim, job, currentEffect] = await Promise.all([
+    transaction.affiliateAgentGatewayClaims.findUnique({
+      where: { id: effectReceipt.claimId },
+    }),
+    transaction.affiliateAgentGatewayJobs.findUnique({
+      where: { id: effectReceipt.jobId },
+    }),
+    transaction.affiliateAgentGatewayOperationReceipts.findUnique({
+      where: { id: effectReceipt.id },
+    }),
+  ]);
+  const records = { claim, job, currentEffect };
+  assertRecoveredReviewerEffectRecords(records, effectReceipt);
+  assertRecoveredReviewerEffectCurrent(
+    records.currentEffect,
+    records.claim,
+    records.job,
+    effectReceipt,
+    result,
+  );
+  const completedEffectState = parseRecoveredReviewerEffectState(
+    records.currentEffect,
+    effectReceipt,
+    result,
+  );
+  await authorizeClaimOperation(
+    dependencies,
+    recoveredReviewerAuthorization(records.claim),
+    dependencies.clock.now(),
+    transaction,
+    recoveredReviewerAuthorizationOptions(records.claim, records.job, effectReceipt),
+  );
+  const completedReplay = await resolveCompletedRecoveredReviewerResult(
+    transaction,
+    records.claim,
+    records.job,
+    completedEffectState,
+    effectReceipt,
+  );
+  if (completedReplay) return completedReplay;
+  const now = dependencies.clock.now();
+  await assertNoPendingClaimEffects(transaction, records.claim.id);
+  await assertClaimEvidenceRefs(
+    transaction,
+    records.claim.id,
+    result.evidenceRefs,
+    "EVIDENCE_REFERENCE_NOT_PERMITTED",
+    "The recovered reviewer result references evidence outside the claim manifest.",
+  );
+  const resultHash = hashAffiliateAgentValue(result);
+  const requestHash = completedEffectState.terminalRequestHash;
+  const idempotencyKey = completedEffectState.terminalIdempotencyKey;
+  const replay = await findRecoveredReviewerResultReplay(
+    transaction,
+    records.claim.id,
+    idempotencyKey,
+    requestHash,
+    effectReceipt,
+  );
+  if (replay) return replay;
+  return persistRecoveredReviewerTerminalResult(
+    transaction,
+    dependencies,
+    records.claim,
+    records.job,
+    result,
+    effectReceipt,
+    resultHash,
+    requestHash,
+    idempotencyKey,
+    now,
+  );
+};
+
 const completeRecoveredReviewerTerminalResult = async (
   dependencies: AffiliateAgentGatewayDependencies,
   effectReceipt: AffiliateAgentGatewayOperationReceipts,
@@ -5315,235 +9001,13 @@ const completeRecoveredReviewerTerminalResult = async (
 ): Promise<AffiliateAgentTerminalAcceptedResult> =>
   runSerializableEffectTransaction(
     dependencies,
-    async (transaction) => {
-      const [claim, job, currentEffect] = await Promise.all([
-        transaction.affiliateAgentGatewayClaims.findUnique({
-          where: { id: effectReceipt.claimId },
-        }),
-        transaction.affiliateAgentGatewayJobs.findUnique({
-          where: { id: effectReceipt.jobId },
-        }),
-        transaction.affiliateAgentGatewayOperationReceipts.findUnique({
-          where: { id: effectReceipt.id },
-        }),
-      ]);
-      if (!claim || !job || !currentEffect) {
-        throw gatewayError(
-          "PARTIAL_COMMAND_UNRESOLVED",
-          "The recovered reviewer result claim does not exist.",
-          false,
-          effectReceipt.id,
-        );
-      }
-      if (
-        currentEffect.status !== "SUCCEEDED" ||
-        currentEffect.commandName !== AFFILIATE_AGENT_TERMINAL_EFFECT_COMMAND ||
-        currentEffect.claimId !== claim.id ||
-        currentEffect.jobId !== job.id ||
-        currentEffect.claimGeneration !== claim.claimGeneration ||
-        currentEffect.requestHash !== effectReceipt.requestHash ||
-        currentEffect.requestHash !==
-          reviewerTerminalEffectRequestHash(claim, result)
-      ) {
-        throw gatewayError(
-          "PARTIAL_COMMAND_UNRESOLVED",
-          "The recovered reviewer effect is not durably completed.",
-          false,
-          effectReceipt.id,
-        );
-      }
-      const completedEffectState = parseReviewerTerminalEffectState(
-        currentEffect.responseJson,
-        currentEffect.id,
-      );
-      if (
-        completedEffectState.kind !== "SUCCEEDED" ||
-        completedEffectState.resultHash !== hashAffiliateAgentValue(result) ||
-        hashAffiliateAgentValue(completedEffectState.result) !==
-          hashAffiliateAgentValue(result)
-      ) {
-        throw gatewayError(
-          "PARTIAL_COMMAND_UNRESOLVED",
-          "The recovered reviewer effect result is not durably completed.",
-          false,
-          effectReceipt.id,
-        );
-      }
-      const recoveryAuthorization: AffiliateAgentClaimAuthorization = {
-        token: "",
-        jobId: claim.jobId,
-        claimId: claim.id,
-        claimGeneration: claim.claimGeneration,
-        lifecycleGeneration: claim.lifecycleGeneration,
-        role: claim.role as AffiliateAgentClaimAuthorization["role"],
-        workerId: claim.workerId,
-        invocationId: claim.invocationId,
-        supplyContractHash: claim.supplyContractHash,
-      };
-      const recoveryAuthorizationOptions: ClaimAuthorizationOptions = {
-        trustedEffectCompletionReceiptId: effectReceipt.id,
-        ...(claim.status === "COMPLETED" &&
-        job.status === "COMPLETED" &&
-        claim.terminalReceiptId !== null
-          ? { terminalReplayReceiptId: claim.terminalReceiptId }
-          : {}),
-      };
-      await authorizeClaimOperation(
+    (transaction) =>
+      completeRecoveredReviewerTerminalResultTransaction(
         dependencies,
-        recoveryAuthorization,
-        dependencies.clock.now(),
         transaction,
-        recoveryAuthorizationOptions,
-      );
-      if (
-        claim.status === "COMPLETED" &&
-        job.status === "COMPLETED" &&
-        claim.terminalReceiptId !== null
-      ) {
-        const terminalReceipt =
-          await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
-            where: { id: claim.terminalReceiptId },
-          });
-        if (
-          !terminalReceipt ||
-          terminalReceipt.idempotencyKey !==
-            completedEffectState.terminalIdempotencyKey ||
-          terminalReceipt.requestHash !==
-            completedEffectState.terminalRequestHash
-        ) {
-          throw gatewayError(
-            "PARTIAL_COMMAND_UNRESOLVED",
-            "The recovered reviewer terminal receipt is missing or changed.",
-            false,
-            effectReceipt.id,
-          );
-        }
-        return replayTerminalResult(terminalReceipt.responseJson);
-      }
-      const now = dependencies.clock.now();
-      await assertNoPendingClaimEffects(transaction, claim.id);
-      await assertClaimEvidenceRefs(
-        transaction,
-        claim.id,
-        result.evidenceRefs,
-        "EVIDENCE_REFERENCE_NOT_PERMITTED",
-        "The recovered reviewer result references evidence outside the claim manifest.",
-      );
-      const resultHash = hashAffiliateAgentValue(result);
-      const requestHash = completedEffectState.terminalRequestHash;
-      const idempotencyKey = completedEffectState.terminalIdempotencyKey;
-      const existing =
-        await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
-          where: {
-            claimId_idempotencyKey: {
-              claimId: claim.id,
-              idempotencyKey,
-            },
-          },
-        });
-      if (existing) {
-        if (
-          existing.status === "SUCCEEDED" &&
-          existing.requestHash === requestHash
-        ) {
-          return replayTerminalResult(existing.responseJson);
-        }
-        throw gatewayError(
-          "PARTIAL_COMMAND_UNRESOLVED",
-          "The recovered reviewer terminal result receipt changed.",
-          false,
-          existing.id,
-        );
-      }
-      const receiptId = dependencies.identifiers.create("receipt");
-      const terminalResult: AffiliateAgentTerminalAcceptedResult = {
-        kind: "TERMINAL_ACCEPTED",
-        receiptId,
-        resultHash,
-        disposition: result.disposition,
-        completedAt: now.toISOString(),
-      };
-      const claimCompleted =
-        await transaction.affiliateAgentGatewayClaims.updateMany({
-          where: {
-            id: claim.id,
-            status: "ACTIVE",
-            claimGeneration: claim.claimGeneration,
-            tokenInvalidatedAt: null,
-          },
-          data: {
-            status: "COMPLETED",
-            terminalReceiptId: receiptId,
-            tokenInvalidatedAt: now,
-            endedAt: now,
-          },
-        });
-      const jobCompleted =
-        await transaction.affiliateAgentGatewayJobs.updateMany({
-          where: {
-            id: job.id,
-            status: "CLAIMED",
-            activeClaimId: claim.id,
-            claimGeneration: claim.claimGeneration,
-            eventSequence: job.eventSequence,
-          },
-          data: {
-            status: "COMPLETED",
-            activeClaimId: null,
-            terminalDisposition: result.disposition,
-            resultHash,
-            resultJson: asPrismaJson(result),
-            terminalReceiptId: receiptId,
-            finishedAt: now,
-            eventSequence: { increment: 1 },
-          },
-        });
-      if (claimCompleted.count !== 1 || jobCompleted.count !== 1) {
-        throw new AffiliateAgentClaimRaceError();
-      }
-      await transaction.affiliateAgentGatewayOperationReceipts.create({
-        data: {
-          id: receiptId,
-          claimId: claim.id,
-          jobId: job.id,
-          claimGeneration: claim.claimGeneration,
-          idempotencyKey,
-          operationKind: "SUBMIT_RESULT",
-          requestHash,
-          status: "SUCCEEDED",
-          responseHash: hashAffiliateAgentValue(terminalResult),
-          responseJson: asPrismaJson(terminalResult),
-          startedAt: now,
-          completedAt: now,
-          retentionClass: "INDEFINITE",
-        },
-      });
-      await transaction.affiliateAgentGatewayEvents.create({
-        data: {
-          id: dependencies.identifiers.create("event"),
-          eventKey: `terminal:recovered:${receiptId}`,
-          jobId: job.id,
-          claimId: claim.id,
-          receiptId,
-          sequence: job.eventSequence + 1,
-          eventType: "CLAIM_TERMINAL_RESULT_ACCEPTED",
-          actorKind: "AGENT_INVOCATION",
-          actorId: claim.invocationId,
-          role: claim.role,
-          requestHash,
-          inputHash: resultHash,
-          outputHash: hashAffiliateAgentValue(terminalResult),
-          reasonCodes: [...result.reasonCodes],
-          payload: asPrismaJson({
-            disposition: result.disposition,
-            resultHash,
-            recoveredFromReceiptId: effectReceipt.id,
-          }),
-          retentionClass: "INDEFINITE",
-        },
-      });
-      return terminalResult;
-    },
+        effectReceipt,
+        result,
+      ),
     {
       code: "PARTIAL_COMMAND_UNRESOLVED",
       safeMessage:
@@ -5552,11 +9016,168 @@ const completeRecoveredReviewerTerminalResult = async (
     },
   );
 
-const performTerminalResult = async (
+type TerminalResultPreparation = Readonly<{
+  kind: "EXECUTE";
+  input: Extract<AffiliateAgentClaimOperation, { kind: "SUBMIT_RESULT" }>;
+  requestHash: string;
+  parsedResult: AffiliateAgentTerminalResultEnvelope | null;
+  postEffectCompletionReceiptId: string | undefined;
+  reviewerTerminalEffectReceiptId: string | undefined;
+  hasExistingReceipt: boolean;
+}>;
+
+type TerminalResultPreparationOutcome =
+  | TerminalResultPreparation
+  | Readonly<{
+      kind: "REPLAY";
+      result: AffiliateAgentSubmitResultOutcome;
+    }>;
+
+const replayTerminalResultReceipt = async (
   dependencies: AffiliateAgentGatewayDependencies,
   input: Extract<AffiliateAgentClaimOperation, { kind: "SUBMIT_RESULT" }>,
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  requestHash: string,
+  transaction: Prisma.TransactionClient,
 ): Promise<AffiliateAgentSubmitResultOutcome> => {
-  assertIdentifier(input.idempotencyKey, "Operation idempotency key");
+  if (
+    receipt.operationKind !== input.kind ||
+    receipt.requestHash !== requestHash
+  ) {
+    throw gatewayError(
+      "IDEMPOTENCY_KEY_REUSED",
+      "The operation idempotency key was used for different input.",
+    );
+  }
+  const replayResult = replaySubmitResult(receipt.responseJson);
+  const replayAuthorizationOptions =
+    replayResult.kind === "TERMINAL_ACCEPTED" ||
+    replayResult.kind === "INVOCATION_FAILED"
+      ? { terminalReplayReceiptId: receipt.id }
+      : undefined;
+  await authorizeClaimOperation(
+    dependencies,
+    input.authorization,
+    dependencies.clock.now(),
+    transaction,
+    replayAuthorizationOptions,
+  );
+  return replayResult;
+};
+
+const resolveTerminalResultPostEffectReceiptId = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  input: Extract<AffiliateAgentClaimOperation, { kind: "SUBMIT_RESULT" }>,
+  parsedResult: AffiliateAgentTerminalResultEnvelope | null,
+): Promise<string | undefined> => {
+  if (!parsedResult) return undefined;
+  if (parsedResult.role === "SUPPLY_REVIEWER") {
+    const effectReceipt =
+      await dependencies.prisma.affiliateAgentGatewayOperationReceipts.findUnique(
+        {
+          where: {
+            claimId_idempotencyKey: {
+              claimId: input.authorization.claimId,
+              idempotencyKey: reviewerTerminalEffectIdempotencyKey(),
+            },
+          },
+        },
+      );
+    return effectReceipt?.status === "SUCCEEDED"
+      ? effectReceipt.id
+      : undefined;
+  }
+  if (
+    parsedResult.role === "HUMAN_DIRECTED_EXECUTOR" &&
+    parsedResult.disposition === "LIFECYCLE_COMMAND_EXECUTED"
+  ) {
+    return parsedResult.payload.receiptId;
+  }
+  return undefined;
+};
+
+const retainPostEffectReceiptUnlessClaimIsActive = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  claimId: string,
+  receiptId: string | undefined,
+): Promise<string | undefined> => {
+  if (receiptId === undefined) return undefined;
+  const claimTiming =
+    await dependencies.prisma.affiliateAgentGatewayClaims.findUnique({
+      where: { id: claimId },
+      select: {
+        leaseExpiresAt: true,
+        hardDeadlineAt: true,
+        tokenExpiresAt: true,
+      },
+    });
+  const now = dependencies.clock.now();
+  if (
+    claimTiming !== null &&
+    claimTiming.leaseExpiresAt > now &&
+    claimTiming.hardDeadlineAt >= now &&
+    claimTiming.tokenExpiresAt > now
+  ) {
+    return undefined;
+  }
+  return receiptId;
+};
+
+const assertTerminalResultPendingEffectsResolved = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  claimId: string,
+): Promise<void> => {
+  const pendingEffects = await reconcilePendingEffectsForClaim(
+    dependencies,
+    claimId,
+  );
+  if (pendingEffects.isAdmissionHalted || pendingEffects.unresolved > 0) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "A claim effect is still being reconciled.",
+      true,
+    );
+  }
+};
+
+const resolveRecoveredTerminalResultReplay = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  input: Extract<AffiliateAgentClaimOperation, { kind: "SUBMIT_RESULT" }>,
+  requestHash: string,
+): Promise<AffiliateAgentSubmitResultOutcome | null> => {
+  const recoveredTerminalReceipt =
+    await dependencies.prisma.affiliateAgentGatewayOperationReceipts.findUnique(
+      {
+        where: {
+          claimId_idempotencyKey: {
+            claimId: input.authorization.claimId,
+            idempotencyKey: input.idempotencyKey,
+          },
+        },
+      },
+    );
+  if (recoveredTerminalReceipt?.status !== "SUCCEEDED") return null;
+  return runSerializableEffectTransaction(
+    dependencies,
+    (transaction) =>
+      replayTerminalResultReceipt(
+        dependencies,
+        input,
+        recoveredTerminalReceipt,
+        requestHash,
+        transaction,
+      ),
+    {
+      code: "INTERNAL_ERROR",
+      safeMessage: "The terminal result could not be replayed.",
+    },
+  );
+};
+
+const prepareTerminalResult = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  input: Extract<AffiliateAgentClaimOperation, { kind: "SUBMIT_RESULT" }>,
+): Promise<TerminalResultPreparationOutcome> => {
   const requestHash = operationRequestHash(input);
   const existing =
     await dependencies.prisma.affiliateAgentGatewayOperationReceipts.findUnique(
@@ -5570,672 +9191,3215 @@ const performTerminalResult = async (
       },
     );
   if (existing?.status === "SUCCEEDED") {
-    if (
-      existing.operationKind !== input.kind ||
-      existing.requestHash !== requestHash
-    ) {
-      throw gatewayError(
-        "IDEMPOTENCY_KEY_REUSED",
-        "The operation idempotency key was used for different input.",
-      );
-    }
-    const replayResult = replaySubmitResult(existing.responseJson);
-    const replayAuthorizationOptions =
-      replayResult.kind === "TERMINAL_ACCEPTED" ||
-      replayResult.kind === "INVOCATION_FAILED"
-        ? { terminalReplayReceiptId: existing.id }
-        : undefined;
-    await authorizeClaimOperation(
-      dependencies,
-      input.authorization,
-      dependencies.clock.now(),
-      dependencies.prisma,
-      replayAuthorizationOptions,
-    );
-    return replayResult;
+    return {
+      kind: "REPLAY",
+      result: await runSerializableEffectTransaction(
+        dependencies,
+        (transaction) =>
+          replayTerminalResultReceipt(
+            dependencies,
+            input,
+            existing,
+            requestHash,
+            transaction,
+          ),
+        {
+          code: "INTERNAL_ERROR",
+          safeMessage: "The terminal result could not be replayed.",
+        },
+      ),
+    };
   }
   const parsedResultBeforeTransaction =
     affiliateAgentTerminalResultEnvelopeSchema.safeParse(input.result);
-  let postEffectCompletionReceiptId: string | undefined;
-  if (
-    parsedResultBeforeTransaction.success &&
-    parsedResultBeforeTransaction.data.role === "SUPPLY_REVIEWER"
-  ) {
-    const effectReceipt =
-      await dependencies.prisma.affiliateAgentGatewayOperationReceipts.findUnique(
-        {
-          where: {
-            claimId_idempotencyKey: {
-              claimId: input.authorization.claimId,
-              idempotencyKey: reviewerTerminalEffectIdempotencyKey(),
-            },
-          },
-        },
-      );
-    if (effectReceipt?.status === "SUCCEEDED") {
-      postEffectCompletionReceiptId = effectReceipt.id;
-    }
-  } else if (
-    parsedResultBeforeTransaction.success &&
-    parsedResultBeforeTransaction.data.role === "HUMAN_DIRECTED_EXECUTOR" &&
-    parsedResultBeforeTransaction.data.disposition ===
-      "LIFECYCLE_COMMAND_EXECUTED"
-  ) {
-    postEffectCompletionReceiptId =
-      parsedResultBeforeTransaction.data.payload.receiptId;
-  }
-  if (postEffectCompletionReceiptId !== undefined) {
-    const claimTiming =
-      await dependencies.prisma.affiliateAgentGatewayClaims.findUnique({
-        where: { id: input.authorization.claimId },
-        select: {
-          leaseExpiresAt: true,
-          hardDeadlineAt: true,
-          tokenExpiresAt: true,
-        },
-      });
-    const now = dependencies.clock.now();
-    if (
-      claimTiming !== null &&
-      claimTiming.leaseExpiresAt > now &&
-      claimTiming.hardDeadlineAt >= now &&
-      claimTiming.tokenExpiresAt > now
-    ) {
-      postEffectCompletionReceiptId = undefined;
-    }
-  }
-  let reviewerTerminalEffectReceiptId: string | undefined;
+  const parsedResult = parsedResultBeforeTransaction.success
+    ? parsedResultBeforeTransaction.data
+    : null;
+  let postEffectCompletionReceiptId =
+    await resolveTerminalResultPostEffectReceiptId(
+      dependencies,
+      input,
+      parsedResult,
+    );
+  postEffectCompletionReceiptId =
+    await retainPostEffectReceiptUnlessClaimIsActive(
+      dependencies,
+      input.authorization.claimId,
+      postEffectCompletionReceiptId,
+    );
   const authorizationOptions =
     postEffectCompletionReceiptId === undefined
       ? undefined
       : { postEffectCompletionReceiptId };
-  const preAuthorized = await authorizeClaimOperation(
+  await authorizeClaimOperationInSerializableTransaction(
     dependencies,
     input.authorization,
     dependencies.clock.now(),
-    dependencies.prisma,
     authorizationOptions,
   );
-  const pendingEffects = await reconcilePendingEffectsForClaim(
+  await assertTerminalResultPendingEffectsResolved(
     dependencies,
-    preAuthorized.claim.id,
+    input.authorization.claimId,
   );
-  if (pendingEffects.isAdmissionHalted || pendingEffects.unresolved > 0) {
-    throw gatewayError(
-      "PARTIAL_COMMAND_UNRESOLVED",
-      "A claim effect is still being reconciled.",
-      true,
-    );
+  const recoveredReplay = await resolveRecoveredTerminalResultReplay(
+    dependencies,
+    input,
+    requestHash,
+  );
+  if (recoveredReplay) {
+    return { kind: "REPLAY", result: recoveredReplay };
   }
-  const recoveredTerminalReceipt =
-    await dependencies.prisma.affiliateAgentGatewayOperationReceipts.findUnique(
-      {
-        where: {
-          claimId_idempotencyKey: {
-            claimId: input.authorization.claimId,
-            idempotencyKey: input.idempotencyKey,
-          },
-        },
-      },
-    );
-  if (recoveredTerminalReceipt?.status === "SUCCEEDED") {
-    if (
-      recoveredTerminalReceipt.operationKind !== input.kind ||
-      recoveredTerminalReceipt.requestHash !== requestHash
-    ) {
-      throw gatewayError(
-        "IDEMPOTENCY_KEY_REUSED",
-        "The operation idempotency key was used for different input.",
-      );
-    }
-    const replayResult = replaySubmitResult(
-      recoveredTerminalReceipt.responseJson,
-    );
-    const replayAuthorizationOptions =
-      replayResult.kind === "TERMINAL_ACCEPTED" ||
-      replayResult.kind === "INVOCATION_FAILED"
-        ? { terminalReplayReceiptId: recoveredTerminalReceipt.id }
-        : undefined;
-    await authorizeClaimOperation(
+  let reviewerTerminalEffectReceiptId: string | undefined;
+  if (existing === null && parsedResult?.role === "SUPPLY_REVIEWER") {
+    const authorized = await authorizeClaimOperationInSerializableTransaction(
       dependencies,
       input.authorization,
       dependencies.clock.now(),
-      dependencies.prisma,
-      replayAuthorizationOptions,
+      authorizationOptions,
     );
-    return replayResult;
-  }
-  const authorizedForTerminal = await authorizeClaimOperation(
-    dependencies,
-    input.authorization,
-    dependencies.clock.now(),
-    dependencies.prisma,
-    authorizationOptions,
-  );
-  if (
-    !existing &&
-    parsedResultBeforeTransaction.success &&
-    parsedResultBeforeTransaction.data.role === "SUPPLY_REVIEWER"
-  ) {
-    validateTerminalResultScope(
-      authorizedForTerminal,
-      parsedResultBeforeTransaction.data,
-    );
+    validateTerminalResultScope(authorized, parsedResult);
     reviewerTerminalEffectReceiptId = await ensureReviewerTerminalEffect(
       dependencies,
       input.authorization,
-      authorizedForTerminal,
-      parsedResultBeforeTransaction.data,
+      authorized,
+      parsedResult,
       input.idempotencyKey,
       requestHash,
       postEffectCompletionReceiptId,
     );
   }
+  return {
+    kind: "EXECUTE",
+    input,
+    requestHash,
+    parsedResult,
+    postEffectCompletionReceiptId,
+    reviewerTerminalEffectReceiptId,
+    hasExistingReceipt: existing !== null,
+  };
+};
 
+type TerminalResultTransactionReplay = Readonly<{
+  existing: AffiliateAgentGatewayOperationReceipts | null;
+  result: AffiliateAgentSubmitResultOutcome | null;
+}>;
+
+const resolveTerminalResultTransactionReplay = async (
+  transaction: Prisma.TransactionClient,
+  dependencies: AffiliateAgentGatewayDependencies,
+  input: Extract<AffiliateAgentClaimOperation, { kind: "SUBMIT_RESULT" }>,
+  requestHash: string,
+): Promise<TerminalResultTransactionReplay> => {
+  const existing =
+    await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
+      where: {
+        claimId_idempotencyKey: {
+          claimId: input.authorization.claimId,
+          idempotencyKey: input.idempotencyKey,
+        },
+      },
+    });
+  if (existing?.status === "SUCCEEDED") {
+    return {
+      existing,
+      result: await replayTerminalResultReceipt(
+        dependencies,
+        input,
+        existing,
+        requestHash,
+        transaction,
+      ),
+    };
+  }
+  return { existing, result: null };
+};
+
+function assertReviewerTerminalEffectReceipt(
+  effectReceipt: AffiliateAgentGatewayOperationReceipts | null,
+  expectedReceiptId: string | undefined,
+  expectedRequestHash: string,
+  authorized: AuthorizedClaim,
+  result: AffiliateAgentReviewerTerminalResult,
+): asserts effectReceipt is AffiliateAgentGatewayOperationReceipts {
+  if (
+    !effectReceipt ||
+    effectReceipt.id !== expectedReceiptId ||
+    effectReceipt.status !== "SUCCEEDED" ||
+    effectReceipt.requestHash !== expectedRequestHash
+  ) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The reviewer terminal effect is not durably completed.",
+      false,
+      effectReceipt?.id,
+    );
+  }
+  if (
+    effectReceipt.startedAt >= authorized.claim.leaseExpiresAt ||
+    effectReceipt.startedAt >= authorized.claim.hardDeadlineAt
+  ) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The reviewer terminal effect is not durably completed.",
+      false,
+      effectReceipt.id,
+    );
+  }
+  if (result.role !== "SUPPLY_REVIEWER") {
+    throw new Error("Reviewer terminal effect result role changed.");
+  }
+}
+
+const assertReviewerTerminalEffectResult = (
+  effectState: ReviewerTerminalEffectReceiptState | null,
+  result: AffiliateAgentReviewerTerminalResult,
+  effectReceipt: AffiliateAgentGatewayOperationReceipts,
+): void => {
+  if (
+    effectState?.kind !== "SUCCEEDED" ||
+    effectState.resultHash !== hashAffiliateAgentValue(result)
+  ) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The reviewer terminal effect is not durably completed.",
+      false,
+      effectReceipt.id,
+    );
+  }
+};
+
+const assertReviewerTerminalEffectCompleted = async (
+  transaction: Prisma.TransactionClient,
+  authorized: AuthorizedClaim,
+  result: AffiliateAgentTerminalResultEnvelope,
+  expectedReceiptId: string | undefined,
+): Promise<void> => {
+  if (result.role !== "SUPPLY_REVIEWER") return;
+  const expectedRequestHash = reviewerTerminalEffectRequestHash(
+    authorized.claim,
+    result,
+  );
+  const effectReceipt =
+    await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
+      where: {
+        claimId_idempotencyKey: {
+          claimId: authorized.claim.id,
+          idempotencyKey: reviewerTerminalEffectIdempotencyKey(),
+        },
+      },
+    });
+  assertReviewerTerminalEffectReceipt(
+    effectReceipt,
+    expectedReceiptId,
+    expectedRequestHash,
+    authorized,
+    result,
+  );
+  const effectState = parseReviewerTerminalEffectState(
+    effectReceipt.responseJson,
+    effectReceipt.id,
+  );
+  assertReviewerTerminalEffectResult(effectState, result, effectReceipt);
+};
+
+const tryReplayCommandReceipt = (
+  receipt: AffiliateAgentGatewayOperationReceipts | null,
+): AffiliateAgentCommandResult | null => {
+  if (receipt === null || receipt.responseJson === null) return null;
+  try {
+    return replayCommand(receipt.responseJson);
+  } catch {
+    return null;
+  }
+};
+
+const assertMappingCommitReceiptOwnership = (
+  commitReceipt: AffiliateAgentGatewayOperationReceipts | null,
+  authorized: AuthorizedClaim,
+): void => {
+  if (
+    commitReceipt?.claimId !== authorized.claim.id ||
+    commitReceipt?.jobId !== authorized.job.id ||
+    commitReceipt?.claimGeneration !== authorized.claim.claimGeneration
+  ) {
+    throw gatewayError(
+      "TERMINAL_DISPOSITION_NOT_PERMITTED",
+      "The mapping result does not match a committed package receipt.",
+    );
+  }
+};
+
+const assertMappingCommitReceiptOperation = (
+  commitReceipt: AffiliateAgentGatewayOperationReceipts | null,
+): void => {
+  if (
+    commitReceipt?.operationKind !== "EXECUTE_COMMAND" ||
+    commitReceipt?.status !== "SUCCEEDED" ||
+    commitReceipt?.commandName !== "COMMIT_DECLARATIVE_PACKAGE"
+  ) {
+    throw gatewayError(
+      "TERMINAL_DISPOSITION_NOT_PERMITTED",
+      "The mapping result does not match a committed package receipt.",
+    );
+  }
+};
+
+const assertMappingCommitReceiptIdentity = (
+  commitReceipt: AffiliateAgentGatewayOperationReceipts | null,
+  authorized: AuthorizedClaim,
+): void => {
+  assertMappingCommitReceiptOwnership(commitReceipt, authorized);
+  assertMappingCommitReceiptOperation(commitReceipt);
+};
+
+const assertMappingCommitReceiptOutput = (
+  commitReceipt: AffiliateAgentGatewayOperationReceipts | null,
+  commitResult: AffiliateAgentCommandResult | null,
+  packageHash: string,
+): void => {
+  if (
+    commitResult?.receiptId !== commitReceipt?.id ||
+    commitResult?.commandType !== "COMMIT_DECLARATIVE_PACKAGE" ||
+    commitResult?.safeOutput?.packageHash !== packageHash
+  ) {
+    throw gatewayError(
+      "TERMINAL_DISPOSITION_NOT_PERMITTED",
+      "The mapping result does not match a committed package receipt.",
+    );
+  }
+};
+
+const assertMappingTerminalResultCommitted = async (
+  transaction: Prisma.TransactionClient,
+  authorized: AuthorizedClaim,
+  result: AffiliateAgentTerminalResultEnvelope,
+): Promise<void> => {
+  if (
+    result.role !== "MAPPING_PRODUCER" ||
+    (result.disposition !== "PACKAGE_COMMITTED" &&
+      result.disposition !== "BOUNDED_REPAIR_SUBMITTED")
+  ) {
+    return;
+  }
+  if (
+    result.disposition === "BOUNDED_REPAIR_SUBMITTED" &&
+    authorized.envelope.role === "MAPPING_PRODUCER" &&
+    result.payload.repairPass !== authorized.envelope.subject.pass
+  ) {
+    throw gatewayError(
+      "TERMINAL_DISPOSITION_NOT_PERMITTED",
+      "The repair pass does not match the Mapping Producer claim.",
+    );
+  }
+  const commitReceipt =
+    await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
+      where: { id: result.payload.commitReceiptId },
+    });
+  const commitResult = tryReplayCommandReceipt(commitReceipt);
+  assertMappingCommitReceiptIdentity(commitReceipt, authorized);
+  assertMappingCommitReceiptOutput(
+    commitReceipt,
+    commitResult,
+    result.payload.packageHash,
+  );
+};
+
+const lifecycleGenerationFromCommandResult = (
+  commandResult: AffiliateAgentCommandResult | null,
+): number | null => {
+  const lifecycleGeneration = commandResult?.safeOutput?.lifecycleGeneration;
+  return typeof lifecycleGeneration === "number" &&
+    Number.isInteger(lifecycleGeneration)
+    ? lifecycleGeneration
+    : null;
+};
+
+const assertHumanLifecycleResultTarget = (
+  result: Extract<
+    AffiliateAgentTerminalResultEnvelope,
+    Readonly<{
+      role: "HUMAN_DIRECTED_EXECUTOR";
+      disposition: "LIFECYCLE_COMMAND_EXECUTED";
+    }>
+  >,
+  subject: Extract<AffiliateAgentSubject, { type: "HUMAN_DIRECTED_EXECUTOR" }>,
+): void => {
+  if (
+    result.payload.caseId !== subject.caseId ||
+    result.payload.lifecycleCommandRef !== subject.lifecycleCommandRef
+  ) {
+    throw gatewayError(
+      "TERMINAL_DISPOSITION_NOT_PERMITTED",
+      "The human-directed result does not match the recorded lifecycle command.",
+    );
+  }
+};
+
+const assertHumanLifecycleReceiptOperation = (
+  lifecycleReceipt: AffiliateAgentGatewayOperationReceipts | null,
+  lifecycleCommandResult: AffiliateAgentCommandResult | null,
+  authorized: AuthorizedClaim,
+): void => {
+  if (
+    lifecycleReceipt?.claimId !== authorized.claim.id ||
+    lifecycleReceipt.status !== "SUCCEEDED" ||
+    lifecycleReceipt.commandName !==
+      "EXECUTE_RECORDED_LIFECYCLE_COMMAND" ||
+    lifecycleCommandResult?.receiptId !== lifecycleReceipt.id ||
+    lifecycleCommandResult?.commandType !==
+      "EXECUTE_RECORDED_LIFECYCLE_COMMAND"
+  ) {
+    throw gatewayError(
+      "TERMINAL_DISPOSITION_NOT_PERMITTED",
+      "The human-directed result does not match the recorded lifecycle command.",
+    );
+  }
+};
+
+const assertHumanLifecycleReceiptIdentity = (
+  lifecycleReceipt: AffiliateAgentGatewayOperationReceipts | null,
+  lifecycleCommandResult: AffiliateAgentCommandResult | null,
+  authorized: AuthorizedClaim,
+  result: Extract<
+    AffiliateAgentTerminalResultEnvelope,
+    Readonly<{
+      role: "HUMAN_DIRECTED_EXECUTOR";
+      disposition: "LIFECYCLE_COMMAND_EXECUTED";
+    }>
+  >,
+  subject: Extract<AffiliateAgentSubject, { type: "HUMAN_DIRECTED_EXECUTOR" }>,
+): void => {
+  assertHumanLifecycleResultTarget(result, subject);
+  assertHumanLifecycleReceiptOperation(
+    lifecycleReceipt,
+    lifecycleCommandResult,
+    authorized,
+  );
+};
+
+const assertHumanLifecycleGeneration = (
+  authorized: AuthorizedClaim,
+  lifecycleGeneration: number | null,
+): void => {
+  if (
+    authorized.claim.lifecycleGeneration === null
+    || (
+      lifecycleGeneration !== authorized.claim.lifecycleGeneration
+      && lifecycleGeneration !== authorized.claim.lifecycleGeneration + 1
+    )
+  ) {
+    throw gatewayError(
+      "TERMINAL_DISPOSITION_NOT_PERMITTED",
+      "The human-directed result does not match the recorded lifecycle command.",
+    );
+  }
+};
+
+const assertHumanLifecycleCommandRecorded = async (
+  transaction: Prisma.TransactionClient,
+  authorized: AuthorizedClaim,
+  result: AffiliateAgentTerminalResultEnvelope,
+): Promise<void> => {
+  if (
+    result.role !== "HUMAN_DIRECTED_EXECUTOR" ||
+    authorized.envelope.role !== "HUMAN_DIRECTED_EXECUTOR" ||
+    result.disposition !== "LIFECYCLE_COMMAND_EXECUTED"
+  ) {
+    return;
+  }
+  const subject = authorized.envelope.subject;
+  const lifecycleReceipt =
+    await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
+      where: { id: result.payload.receiptId },
+    });
+  const lifecycleCommandResult = tryReplayCommandReceipt(lifecycleReceipt);
+  assertHumanLifecycleReceiptIdentity(
+    lifecycleReceipt,
+    lifecycleCommandResult,
+    authorized,
+    result,
+    subject,
+  );
+  assertHumanLifecycleGeneration(
+    authorized,
+    lifecycleGenerationFromCommandResult(lifecycleCommandResult),
+  );
+};
+
+const assertSchemaCorrectionBudget = (submissionNumber: number): void => {
+  if (
+    submissionNumber < 1 ||
+    submissionNumber > AFFILIATE_AGENT_MAX_SCHEMA_CORRECTIONS
+  ) {
+    throw gatewayError(
+      "SCHEMA_CORRECTIONS_EXHAUSTED",
+      "The schema-correction budget is exhausted.",
+    );
+  }
+};
+
+const recordExhaustedSchemaCorrection = async (
+  transaction: Prisma.TransactionClient,
+  dependencies: AffiliateAgentGatewayDependencies,
+  authorized: AuthorizedClaim,
+  input: Extract<AffiliateAgentClaimOperation, { kind: "SUBMIT_RESULT" }>,
+  requestHash: string,
+  now: Date,
+  submissionNumber: number,
+): Promise<AffiliateAgentInvocationFailedResult> => {
+  await assertNoPendingClaimEffects(transaction, authorized.claim.id);
+  const result = await recordInvocationFailureTransition({
+    dependencies,
+    transaction,
+    claim: authorized.claim,
+    job: authorized.job,
+    idempotencyKey: input.idempotencyKey,
+    operationKind: input.kind,
+    requestHash,
+    failureCode: "SCHEMA_CORRECTIONS_EXHAUSTED",
+    failedAt: now,
+    safeSummary: "The invocation exhausted its schema-correction budget.",
+    evidenceRefs: [],
+    claimCasFailure: "GATEWAY_ERROR",
+    claimStatus: "FAILED",
+    actorKind: "AGENT_INVOCATION",
+    actorId: authorized.claim.invocationId,
+    eventType: "CLAIM_INVOCATION_FAILED",
+    schemaCorrectionCount: submissionNumber,
+  });
+  await persistInvocationFailureAlertIntent(
+    transaction,
+    dependencies,
+    invocationFailureAlertContextForAuthorizedClaim(authorized),
+    result,
+    "SCHEMA_CORRECTIONS_EXHAUSTED",
+    "The invocation exhausted its schema-correction budget.",
+  );
+  return result;
+};
+
+const persistSchemaCorrection = async (
+  transaction: Prisma.TransactionClient,
+  dependencies: AffiliateAgentGatewayDependencies,
+  authorized: AuthorizedClaim,
+  input: Extract<AffiliateAgentClaimOperation, { kind: "SUBMIT_RESULT" }>,
+  requestHash: string,
+  now: Date,
+  submissionNumber: number,
+): Promise<AffiliateAgentSchemaCorrectionResult> => {
+  const receiptId = dependencies.identifiers.create("receipt");
+  const remainingSubmissions =
+    AFFILIATE_AGENT_MAX_SCHEMA_CORRECTIONS - submissionNumber;
+  const issues = [...schemaCorrectionIssues];
+  const correctionResult: AffiliateAgentSchemaCorrectionResult = {
+    kind: "SCHEMA_CORRECTION_REQUIRED",
+    receiptId,
+    submissionNumber: submissionNumber as 1 | 2,
+    remainingSubmissions: remainingSubmissions as 1 | 2,
+    issues,
+    correctionPrompt: [
+      `Correct terminal result submission ${submissionNumber}. Remaining submissions: ${remainingSubmissions}.`,
+      canonicalizeAffiliateAgentValue({ issues }),
+    ].join("\n"),
+  };
+  const claimUpdated =
+    await transaction.affiliateAgentGatewayClaims.updateMany({
+      where: {
+        id: authorized.claim.id,
+        status: "ACTIVE",
+        claimGeneration: authorized.claim.claimGeneration,
+        tokenInvalidatedAt: null,
+      },
+      data: { schemaCorrectionCount: submissionNumber },
+    });
+  if (claimUpdated.count !== 1) {
+    throw gatewayError(
+      "CLAIM_NOT_ACTIVE",
+      "The schema correction lost the active claim compare-and-set.",
+    );
+  }
+  const jobUpdated = await transaction.affiliateAgentGatewayJobs.updateMany({
+    where: {
+      id: authorized.job.id,
+      status: "CLAIMED",
+      activeClaimId: authorized.claim.id,
+      claimGeneration: authorized.claim.claimGeneration,
+      eventSequence: authorized.job.eventSequence,
+    },
+    data: { eventSequence: { increment: 1 } },
+  });
+  if (jobUpdated.count !== 1) {
+    throw new AffiliateAgentClaimRaceError();
+  }
+  await transaction.affiliateAgentGatewayOperationReceipts.create({
+    data: {
+      id: receiptId,
+      claimId: authorized.claim.id,
+      jobId: authorized.job.id,
+      claimGeneration: authorized.claim.claimGeneration,
+      idempotencyKey: input.idempotencyKey,
+      operationKind: input.kind,
+      requestHash,
+      status: "SUCCEEDED",
+      responseHash: hashAffiliateAgentValue(correctionResult),
+      responseJson: asPrismaJson(correctionResult),
+      startedAt: now,
+      completedAt: now,
+      retentionClass: "INDEFINITE",
+    },
+  });
+  await transaction.affiliateAgentGatewayEvents.create({
+    data: {
+      id: dependencies.identifiers.create("event"),
+      eventKey: `schema-correction:${receiptId}`,
+      jobId: authorized.job.id,
+      claimId: authorized.claim.id,
+      receiptId,
+      sequence: authorized.job.eventSequence + 1,
+      eventType: "CLAIM_SCHEMA_CORRECTION_REQUIRED",
+      actorKind: "AGENT_INVOCATION",
+      actorId: authorized.claim.invocationId,
+      role: authorized.claim.role,
+      requestHash,
+      outputHash: hashAffiliateAgentValue(correctionResult),
+      payload: asPrismaJson({
+        submissionNumber,
+        remainingSubmissions,
+      }),
+      retentionClass: "INDEFINITE",
+    },
+  });
+  return correctionResult;
+};
+
+const handleInvalidTerminalResult = async (
+  transaction: Prisma.TransactionClient,
+  dependencies: AffiliateAgentGatewayDependencies,
+  authorized: AuthorizedClaim,
+  input: Extract<AffiliateAgentClaimOperation, { kind: "SUBMIT_RESULT" }>,
+  requestHash: string,
+  now: Date,
+): Promise<AffiliateAgentSchemaCorrectionResult | AffiliateAgentInvocationFailedResult> => {
+  const submissionNumber = authorized.claim.schemaCorrectionCount + 1;
+  assertSchemaCorrectionBudget(submissionNumber);
+  if (submissionNumber === AFFILIATE_AGENT_MAX_SCHEMA_CORRECTIONS) {
+    return recordExhaustedSchemaCorrection(
+      transaction,
+      dependencies,
+      authorized,
+      input,
+      requestHash,
+      now,
+      submissionNumber,
+    );
+  }
+  return persistSchemaCorrection(
+    transaction,
+    dependencies,
+    authorized,
+    input,
+    requestHash,
+    now,
+    submissionNumber,
+  );
+};
+
+const assertTerminalCompletionTiming = (
+  authorized: AuthorizedClaim,
+  completionNow: Date,
+  isPostEffectCompletionAllowed: boolean,
+): void => {
+  if (
+    !isPostEffectCompletionAllowed &&
+    authorized.claim.hardDeadlineAt < completionNow
+  ) {
+    throw gatewayError(
+      "HARD_DEADLINE_EXCEEDED",
+      "The claim hard deadline passed before terminal completion.",
+    );
+  }
+  if (
+    !isPostEffectCompletionAllowed &&
+    authorized.claim.leaseExpiresAt <= completionNow
+  ) {
+    throw gatewayError(
+      "LEASE_EXPIRED",
+      "The claim lease expired before terminal completion.",
+    );
+  }
+};
+
+type GatewayDomainDelegate = Readonly<{
+  findFirst?: (args: unknown) => Promise<unknown>;
+  findUnique?: (args: unknown) => Promise<unknown>;
+  findMany?: (args: unknown) => Promise<unknown>;
+  update?: (args: unknown) => Promise<unknown>;
+  updateMany?: (args: unknown) => Promise<unknown>;
+  upsert?: (args: unknown) => Promise<unknown>;
+  create?: (args: unknown) => Promise<unknown>;
+}>;
+
+const gatewayDomainDelegate = (
+  transaction: Prisma.TransactionClient,
+  name: string,
+): GatewayDomainDelegate | undefined => {
+  const value = (transaction as unknown as Record<string, unknown>)[name];
+  return value !== null && typeof value === "object"
+    ? value as GatewayDomainDelegate
+    : undefined;
+};
+
+const gatewayDomainRecord = (
+  value: unknown,
+): Record<string, unknown> | null => (
+  value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+);
+
+type CoveragePlannerTerminalResult = Extract<
+  AffiliateAgentTerminalResultEnvelope,
+  Readonly<{ role: "COVERAGE_PLANNER" }>
+>;
+
+type MappingProducerTerminalResult =
+  | Extract<
+      AffiliateAgentTerminalResultEnvelope,
+      Readonly<{
+        role: "MAPPING_PRODUCER";
+        disposition: "PACKAGE_COMMITTED";
+      }>
+    >
+  | Extract<
+      AffiliateAgentTerminalResultEnvelope,
+      Readonly<{
+        role: "MAPPING_PRODUCER";
+        disposition: "BOUNDED_REPAIR_SUBMITTED";
+      }>
+    >
+  | Extract<
+      AffiliateAgentTerminalResultEnvelope,
+      Readonly<{
+        role: "MAPPING_PRODUCER";
+        disposition: "SOURCE_INCOMPATIBLE";
+      }>
+    >
+  | Extract<
+      AffiliateAgentTerminalResultEnvelope,
+      Readonly<{
+        role: "MAPPING_PRODUCER";
+        disposition: "CONTRACT_GAP";
+      }>
+    >;
+type MappingProducerSuccessTerminalResult = Exclude<
+  MappingProducerTerminalResult,
+  Extract<
+    MappingProducerTerminalResult,
+    Readonly<{
+      disposition: "SOURCE_INCOMPATIBLE" | "CONTRACT_GAP";
+    }>
+  >
+>;
+
+type MappingProducerFailureTerminalResult = Exclude<
+  MappingProducerTerminalResult,
+  MappingProducerSuccessTerminalResult
+>;
+
+const isMappingProducerSuccessTerminalResult = (
+  result: MappingProducerTerminalResult,
+): result is MappingProducerSuccessTerminalResult =>
+  result.disposition === "PACKAGE_COMMITTED"
+  || result.disposition === "BOUNDED_REPAIR_SUBMITTED";
+
+type GovernedTerminalDomainResult =
+  | CoveragePlannerTerminalResult
+  | MappingProducerTerminalResult;
+
+const appendGatewayDomainEvidenceRefs = (
+  current: unknown,
+  result: AffiliateAgentTerminalResultEnvelope,
+  jobId: string,
+): string[] => Array.from(new Set([
+  ...(Array.isArray(current)
+    ? current.filter((value): value is string => typeof value === "string")
+    : []),
+  `gateway-job:${jobId}`,
+  ...result.evidenceRefs,
+]));
+type CoveragePlannerWaveTransition = Readonly<{
+  waveData: Record<string, unknown>;
+  demandStatus: "OPEN" | "PAUSED" | null;
+  demandReason: string | null;
+  demandNextEligibleAt: Date | null;
+  searchSaturatedUntil: Date | null;
+}>;
+
+const coveragePlannerBaseWaveData = (
+  currentEvidenceRefs: unknown,
+  result: CoveragePlannerTerminalResult,
+  jobId: string,
+): Record<string, unknown> => ({
+  resultJson: asPrismaJson(result),
+  evidenceRefs: appendGatewayDomainEvidenceRefs(
+    currentEvidenceRefs,
+    result,
+    jobId,
+  ),
+  provider: "COVERAGE_PLANNER",
+});
+
+const coveragePlannerCampaignTransition = (
+  baseWaveData: Record<string, unknown>,
+  result: Extract<
+    CoveragePlannerTerminalResult,
+    Readonly<{ disposition: "CAMPAIGN_PROPOSED" }>
+  >,
+): CoveragePlannerWaveTransition => ({
+  waveData: {
+    ...baseWaveData,
+    status: "ACTIVE",
+    terminalAt: null,
+    retryAt: null,
+    campaignId: result.payload.campaignProposalRefs[0],
+    evidenceRefs: Array.from(new Set([
+      ...(Array.isArray(baseWaveData.evidenceRefs)
+        ? baseWaveData.evidenceRefs.filter(
+            (value): value is string => typeof value === "string",
+          )
+        : []),
+      `campaign:${result.payload.campaignProposalRefs[0]}`,
+    ])),
+    errorCode: null,
+  },
+  demandStatus: "OPEN",
+  demandReason: "CAMPAIGN_DISPATCHED",
+  demandNextEligibleAt: null,
+  searchSaturatedUntil: null,
+});
+
+const coveragePlannerCaptureFailureTransition = (
+  baseWaveData: Record<string, unknown>,
+  now: Date,
+): CoveragePlannerWaveTransition => {
+  const retryAt = new Date(now.getTime() + 30 * 60 * 1000);
+  return {
+    waveData: {
+      ...baseWaveData,
+      status: "WAITING",
+      terminalAt: null,
+      retryAt,
+      errorCode: "COVERAGE_PLANNING_CAPTURE_FAILED",
+    },
+    demandStatus: null,
+    demandReason: null,
+    demandNextEligibleAt: null,
+    searchSaturatedUntil: null,
+  };
+};
+
+const coveragePlannerPauseTransition = (
+  baseWaveData: Record<string, unknown>,
+  now: Date,
+  errorCode: string,
+): CoveragePlannerWaveTransition => ({
+  waveData: {
+    ...baseWaveData,
+    status: "PAUSED",
+    terminalAt: now,
+    retryAt: null,
+    errorCode,
+  },
+  demandStatus: "PAUSED",
+  demandReason: errorCode,
+  demandNextEligibleAt: null,
+  searchSaturatedUntil: null,
+});
+
+const coveragePlannerNoActionTransition = (
+  baseWaveData: Record<string, unknown>,
+  result: Extract<
+    CoveragePlannerTerminalResult,
+    Readonly<{ disposition: "NO_ACTION" }>
+  >,
+  now: Date,
+): CoveragePlannerWaveTransition => {
+  const isSearchSaturated = result.payload.basis === "SEARCH_SATURATED";
+  const retryAt = isSearchSaturated
+    ? new Date(now.getTime() + 24 * 60 * 60 * 1000)
+    : null;
+  return {
+    waveData: {
+      ...baseWaveData,
+      status: "SUCCEEDED",
+      terminalAt: now,
+      retryAt,
+      marginalYield: 0,
+      errorCode: null,
+    },
+    demandStatus: "OPEN",
+    demandReason: isSearchSaturated
+      ? "SEARCH_SATURATION"
+      : "COVERAGE_PLANNING_NO_ACTION",
+    demandNextEligibleAt: retryAt,
+    searchSaturatedUntil: retryAt,
+  };
+};
+
+const coveragePlannerWaveTransitionFor = (
+  currentEvidenceRefs: unknown,
+  result: CoveragePlannerTerminalResult,
+  jobId: string,
+  now: Date,
+): CoveragePlannerWaveTransition => {
+  const baseWaveData = coveragePlannerBaseWaveData(
+    currentEvidenceRefs,
+    result,
+    jobId,
+  );
+  switch (result.disposition) {
+    case "CAMPAIGN_PROPOSED":
+      return coveragePlannerCampaignTransition(baseWaveData, result);
+    case "FAILED_CAPTURE_EVIDENCE_RECORDED":
+      return coveragePlannerCaptureFailureTransition(baseWaveData, now);
+    case "SOURCE_EXCLUSION_PROPOSED":
+      return coveragePlannerPauseTransition(
+        baseWaveData,
+        now,
+        "COVERAGE_PLANNING_SOURCE_EXCLUDED",
+      );
+    case "CONTRACT_GAP":
+      return coveragePlannerPauseTransition(
+        baseWaveData,
+        now,
+        "COVERAGE_PLANNING_CONTRACT_GAP",
+      );
+    case "NO_ACTION":
+      return coveragePlannerNoActionTransition(baseWaveData, result, now);
+  }
+  throw gatewayError(
+    "INTERNAL_ERROR",
+    "The coverage planner terminal disposition is unsupported.",
+  );
+};
+
+const coveragePlannerDemandReasonCodesFor = (
+  demand: Record<string, unknown>,
+  transition: CoveragePlannerWaveTransition,
+): string[] => {
+  const currentReasonCodes = Array.isArray(demand.reasonCodes)
+    ? demand.reasonCodes.filter(
+        (value): value is string => typeof value === "string",
+      )
+    : [];
+  return transition.demandReason === null
+    ? currentReasonCodes
+    : Array.from(new Set([...currentReasonCodes, transition.demandReason]));
+};
+
+const updateCoveragePlannerDemand = async (
+  demands: GatewayDomainDelegate | undefined,
+  transition: CoveragePlannerWaveTransition,
+  effect: Readonly<Record<string, unknown>>,
+  demandId: string,
+): Promise<Readonly<Record<string, unknown>>> => {
+  if (!demands?.findUnique || !demands.update) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The coverage planner terminal result is missing its replenishment demand.",
+    );
+  }
+  const demand = gatewayDomainRecord(await demands.findUnique({
+    where: { id: demandId },
+  }));
+  if (!demand) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The coverage planner terminal result references a missing replenishment demand.",
+    );
+  }
+  await demands.update({
+    where: { id: demand.id },
+    data: {
+      status: transition.demandStatus,
+      activeWaveId: null,
+      nextEligibleAt: transition.demandNextEligibleAt,
+      searchSaturatedUntil: transition.searchSaturatedUntil,
+      generation: Number(demand.generation ?? 0) + 1,
+      reasonCodes: coveragePlannerDemandReasonCodesFor(demand, transition),
+    },
+  });
+  return { ...effect, demandId };
+};
+
+const applyCoveragePlannerDemandEffect = async (
+  demands: GatewayDomainDelegate | undefined,
+  wave: Record<string, unknown>,
+  transition: CoveragePlannerWaveTransition,
+): Promise<Readonly<Record<string, unknown>>> => {
+  const effect = {
+    kind: "COVERAGE_PLANNER_TERMINAL_EFFECT",
+    waveId: String(wave.id),
+    status: String(transition.waveData.status),
+  };
+  if (transition.demandStatus === null) return effect;
+  const demandId = typeof wave.demandId === "string" ? wave.demandId.trim() : "";
+  if (!demandId) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The coverage planner terminal result is missing its replenishment demand.",
+    );
+  }
+  return updateCoveragePlannerDemand(
+    demands,
+    transition,
+    effect,
+    demandId,
+  );
+};
+
+type CoveragePlannerDispatchResult = Readonly<{
+  campaignIds: readonly string[];
+  intakeIds: readonly string[];
+  mappingJobIds: readonly string[];
+  producerJobIds: readonly string[];
+  discoveryResultIds: readonly string[];
+}>;
+
+const coveragePlannerStringValue = (value: unknown): string | null => (
+  typeof value === "string" && value.trim().length > 0 ? value.trim() : null
+);
+
+const coveragePlannerLineageValue = (
+  metadata: Record<string, unknown>,
+  key: string,
+): unknown => metadata[key]
+  ?? gatewayDomainRecord(metadata.coverageLineage)?.[key]
+  ?? gatewayDomainRecord(metadata.lineage)?.[key];
+
+const coveragePlannerEvidenceManifestFor = (
+  campaign: Record<string, unknown>,
+  discoveryResult: Record<string, unknown>,
+): Record<string, unknown> => {
+  const campaignMetadata = gatewayDomainRecord(campaign.metadata) ?? {};
+  const resultMetadata = gatewayDomainRecord(discoveryResult.metadata) ?? {};
+  const candidate = campaignMetadata.evidenceManifest
+    ?? resultMetadata.evidenceManifest;
+  if (candidate === undefined) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The campaign discovery result has no durable evidence manifest.",
+    );
+  }
+  const parsed = affiliateAgentEvidenceManifestSchema.safeParse(candidate);
+  if (!parsed.success || parsed.data.entries.length === 0) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The campaign downstream evidence manifest must contain durable entries.",
+    );
+  }
+  return parsed.data;
+};
+
+type CoveragePlannerDispatchDelegates = Readonly<{
+  campaigns: GatewayDomainDelegate;
+  discoveryResults: GatewayDomainDelegate;
+  intakes: GatewayDomainDelegate;
+  pages: GatewayDomainDelegate | undefined;
+  mappingJobs: GatewayDomainDelegate;
+  gatewayJobs: GatewayDomainDelegate;
+  sources: GatewayDomainDelegate;
+  supplySources: GatewayDomainDelegate;
+  demands: GatewayDomainDelegate;
+}>;
+
+type CoveragePlannerDispatchDelegateCandidates = Readonly<{
+  [Key in keyof CoveragePlannerDispatchDelegates]:
+    GatewayDomainDelegate | undefined;
+}>;
+
+const hasCoveragePlannerLineageDelegates = (
+  delegates: CoveragePlannerDispatchDelegateCandidates,
+): boolean => Boolean(
+  delegates.campaigns?.findUnique
+  && delegates.discoveryResults?.findMany
+  && delegates.intakes?.findUnique,
+);
+
+const hasCoveragePlannerJobDelegates = (
+  delegates: CoveragePlannerDispatchDelegateCandidates,
+): boolean => Boolean(
+  delegates.mappingJobs?.findFirst
+  && delegates.mappingJobs.upsert
+  && delegates.mappingJobs.update
+  && delegates.gatewayJobs?.upsert,
+);
+
+const hasCoveragePlannerSourceDelegates = (
+  delegates: CoveragePlannerDispatchDelegateCandidates,
+): boolean => Boolean(
+  delegates.sources?.findUnique
+  && delegates.supplySources?.findUnique
+  && delegates.demands?.findUnique,
+);
+
+const requireCoveragePlannerDispatchDelegates = (
+  delegates: CoveragePlannerDispatchDelegateCandidates,
+): CoveragePlannerDispatchDelegates => {
+  if (
+    !hasCoveragePlannerLineageDelegates(delegates)
+    || !hasCoveragePlannerJobDelegates(delegates)
+    || !hasCoveragePlannerSourceDelegates(delegates)
+  ) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "Coverage campaign dispatch requires complete durable lineage delegates.",
+    );
+  }
+  return {
+    campaigns: delegates.campaigns!,
+    discoveryResults: delegates.discoveryResults!,
+    intakes: delegates.intakes!,
+    pages: delegates.pages,
+    mappingJobs: delegates.mappingJobs!,
+    gatewayJobs: delegates.gatewayJobs!,
+    sources: delegates.sources!,
+    supplySources: delegates.supplySources!,
+    demands: delegates.demands!,
+  };
+};
+
+const coveragePlannerDispatchDelegatesFor = (
+  transaction: Prisma.TransactionClient,
+): CoveragePlannerDispatchDelegates => {
+  const delegates: CoveragePlannerDispatchDelegateCandidates = {
+    campaigns: gatewayDomainDelegate(
+      transaction,
+      "affiliateSourceDiscoveryCampaigns",
+    ),
+    discoveryResults: gatewayDomainDelegate(
+      transaction,
+      "affiliateSourceDiscoveryResults",
+    ),
+    intakes: gatewayDomainDelegate(transaction, "affiliateSourceIntakes"),
+    pages: gatewayDomainDelegate(transaction, "affiliateSourceIntakePages"),
+    mappingJobs: gatewayDomainDelegate(
+      transaction,
+      "affiliateSourceMappingJobs",
+    ),
+    gatewayJobs: gatewayDomainDelegate(
+      transaction,
+      "affiliateAgentGatewayJobs",
+    ),
+    sources: gatewayDomainDelegate(transaction, "affiliateScrapeSources"),
+    supplySources: gatewayDomainDelegate(transaction, "affiliateSupplySources"),
+    demands: gatewayDomainDelegate(
+      transaction,
+      "affiliateReplenishmentDemands",
+    ),
+  };
+  return requireCoveragePlannerDispatchDelegates(delegates);
+};
+
+type CoveragePlannerDispatchContext = Readonly<{
+  subject: Extract<
+    AffiliateAgentClaimEnvelope["subject"],
+    Readonly<{ type: "COVERAGE_PLANNER" }>
+  >;
+  demand: Record<string, unknown>;
+  expectedContractVersion: number;
+  expectedContractHash: string;
+  expectedRolloutCohort: string;
+  priority: number;
+  evidenceManifest: Record<string, unknown>;
+  parentClaimId: string;
+  delegates: CoveragePlannerDispatchDelegates;
+}>;
+
+const coveragePlannerDispatchDemandFor = async (
+  delegates: CoveragePlannerDispatchDelegates,
+  wave: Record<string, unknown>,
+): Promise<Record<string, unknown>> => {
+  const demandId = coveragePlannerStringValue(wave.demandId);
+  if (!demandId) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The coverage campaign result has no replenishment demand.",
+    );
+  }
+  const demand = gatewayDomainRecord(await delegates.demands.findUnique!({
+    where: { id: demandId },
+  }));
+  if (!demand) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The coverage campaign result references a missing replenishment demand.",
+    );
+  }
+  return demand;
+};
+
+const coveragePlannerDispatchGenerationsMatch = (
+  demandGeneration: number,
+  waveDemandGeneration: number,
+): boolean => demandGeneration === waveDemandGeneration
+  && Number.isSafeInteger(demandGeneration)
+  && Number.isSafeInteger(waveDemandGeneration);
+
+const coveragePlannerDispatchContractMatches = (
+  authorized: AuthorizedClaim,
+  wave: Record<string, unknown>,
+  expectedContractVersion: number,
+  expectedContractHash: string | null,
+  expectedRolloutCohort: string | null,
+): boolean => Number.isSafeInteger(expectedContractVersion)
+  && expectedContractHash !== null
+  && expectedRolloutCohort !== null
+  && wave.rolloutCohort === expectedRolloutCohort
+  && authorized.claim.supplyContractVersion === expectedContractVersion
+  && authorized.claim.supplyContractHash === expectedContractHash;
+
+const assertCoveragePlannerDispatchContext = (
+  authorized: AuthorizedClaim,
+  subject: Extract<
+    AffiliateAgentClaimEnvelope["subject"],
+    Readonly<{ type: "COVERAGE_PLANNER" }>
+  >,
+  wave: Record<string, unknown>,
+  demand: Record<string, unknown>,
+  demandGeneration: number,
+  waveDemandGeneration: number,
+  expectedContractVersion: number,
+  expectedContractHash: string | null,
+  expectedRolloutCohort: string | null,
+  expectedAssessmentCycleId: string,
+): void => {
+  const generationsMatch = coveragePlannerDispatchGenerationsMatch(
+    demandGeneration,
+    waveDemandGeneration,
+  );
+  const subjectMatches = demand.targetKey === subject.coverageCellId
+    && subject.assessmentCycleId === expectedAssessmentCycleId;
+  const contractMatches = coveragePlannerDispatchContractMatches(
+    authorized,
+    wave,
+    expectedContractVersion,
+    expectedContractHash,
+    expectedRolloutCohort,
+  );
+  if (!generationsMatch || !subjectMatches || !contractMatches) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The coverage campaign result does not match its demand, cycle, or contract.",
+    );
+  }
+};
+
+const coveragePlannerDispatchContextFor = async (
+  transaction: Prisma.TransactionClient,
+  authorized: AuthorizedClaim,
+  wave: Record<string, unknown>,
+): Promise<CoveragePlannerDispatchContext> => {
+  const subject = authorized.envelope.subject;
+  if (subject.type !== "COVERAGE_PLANNER") {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The coverage planner terminal result has no coverage subject.",
+    );
+  }
+  const delegates = coveragePlannerDispatchDelegatesFor(transaction);
+  const demand = await coveragePlannerDispatchDemandFor(delegates, wave);
+  const expectedContractVersion = Number(demand.contractVersion);
+  const demandGeneration = Number(demand.generation);
+  const waveDemandGeneration = Number(wave.demandGeneration);
+  const expectedContractHash = coveragePlannerStringValue(demand.contractHash);
+  const expectedRolloutCohort = coveragePlannerStringValue(demand.rolloutCohort);
+  const expectedAssessmentCycleId =
+    `${demand.id}:generation:${String(waveDemandGeneration)}`;
+  assertCoveragePlannerDispatchContext(
+    authorized,
+    subject,
+    wave,
+    demand,
+    demandGeneration,
+    waveDemandGeneration,
+    expectedContractVersion,
+    expectedContractHash,
+    expectedRolloutCohort,
+    expectedAssessmentCycleId,
+  );
+  return {
+    subject,
+    demand,
+    expectedContractVersion,
+    expectedContractHash: expectedContractHash!,
+    expectedRolloutCohort: expectedRolloutCohort!,
+    priority: Number(authorized.job.priority ?? 0),
+    evidenceManifest: gatewayDomainRecord(
+      authorized.envelope.evidenceManifest,
+    ) ?? {},
+    parentClaimId: authorized.claim.id,
+    delegates,
+  };
+};
+
+type CoveragePlannerCampaignLineage = Readonly<{
+  metadata: Record<string, unknown> | null;
+  demandId: unknown;
+  cellMatches: boolean;
+  assessmentCycleId: unknown;
+  rolloutCohort: unknown;
+  contractVersion: unknown;
+  contractHash: unknown;
+  waveId: unknown;
+}>;
+
+const coveragePlannerCampaignMetadataFor = (
+  campaign: Record<string, unknown> | null,
+): Record<string, unknown> | null => campaign === null
+  ? null
+  : gatewayDomainRecord(campaign.metadata) ?? {};
+
+const coveragePlannerCampaignLineageValueFor = (
+  metadata: Record<string, unknown>,
+  key: string,
+  fallbackKey: string,
+): unknown => coveragePlannerLineageValue(metadata, key)
+  ?? coveragePlannerLineageValue(metadata, fallbackKey);
+
+const coveragePlannerCampaignCellMatchesFor = (
+  context: CoveragePlannerDispatchContext,
+  metadata: Record<string, unknown>,
+): boolean => {
+  const directCellId = coveragePlannerLineageValue(metadata, "coverageCellId");
+  if (directCellId === context.subject.coverageCellId) return true;
+  const coverageCellIds = coveragePlannerLineageValue(metadata, "coverageCellIds");
+  return Array.isArray(coverageCellIds)
+    && coverageCellIds.includes(context.subject.coverageCellId);
+};
+
+
+const coveragePlannerCampaignLineageFor = (
+  context: CoveragePlannerDispatchContext,
+  campaign: Record<string, unknown> | null,
+): CoveragePlannerCampaignLineage => {
+  const metadata = coveragePlannerCampaignMetadataFor(campaign);
+  const source = metadata ?? {};
+  return {
+    metadata,
+    demandId: coveragePlannerCampaignLineageValueFor(
+      source,
+      "demandId",
+      "coverageDemandId",
+    ),
+    cellMatches: coveragePlannerCampaignCellMatchesFor(context, source),
+    assessmentCycleId: coveragePlannerCampaignLineageValueFor(
+      source,
+      "assessmentCycleId",
+      "coverageAssessmentCycleId",
+    ),
+    rolloutCohort: coveragePlannerCampaignLineageValueFor(
+      source,
+      "rolloutCohort",
+      "coverageRolloutCohort",
+    ),
+    contractVersion: coveragePlannerCampaignLineageValueFor(
+      source,
+      "contractVersion",
+      "coverageContractVersion",
+    ),
+    contractHash: coveragePlannerCampaignLineageValueFor(
+      source,
+      "contractHash",
+      "coverageContractHash",
+    ),
+    waveId: coveragePlannerCampaignLineageValueFor(
+      source,
+      "waveId",
+      "coverageWaveId",
+    ),
+  };
+};
+
+const coveragePlannerCampaignIdentityMatches = (
+  context: CoveragePlannerDispatchContext,
+  wave: Record<string, unknown>,
+  lineage: CoveragePlannerCampaignLineage,
+): boolean => lineage.demandId === context.demand.id
+  && lineage.cellMatches
+  && lineage.assessmentCycleId === context.subject.assessmentCycleId
+  && lineage.waveId === wave.id;
+
+const coveragePlannerCampaignContractMatches = (
+  context: CoveragePlannerDispatchContext,
+  lineage: CoveragePlannerCampaignLineage,
+): boolean => lineage.rolloutCohort === context.expectedRolloutCohort
+  && Number(lineage.contractVersion) === context.expectedContractVersion
+  && lineage.contractHash === context.expectedContractHash;
+
+const requireCoveragePlannerCampaign = (
+  context: CoveragePlannerDispatchContext,
+  wave: Record<string, unknown>,
+  campaign: Record<string, unknown> | null,
+  lineage: CoveragePlannerCampaignLineage,
+): Record<string, unknown> => {
+  if (
+    !campaign
+    || campaign.status === "ARCHIVED"
+    || lineage.metadata === null
+    || !coveragePlannerCampaignIdentityMatches(context, wave, lineage)
+    || !coveragePlannerCampaignContractMatches(context, lineage)
+  ) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The coverage campaign reference is not bound to the claimed planning lineage.",
+    );
+  }
+  return campaign;
+};
+
+const coveragePlannerCampaignFor = async (
+  context: CoveragePlannerDispatchContext,
+  campaignId: string,
+  wave: Record<string, unknown>,
+): Promise<Record<string, unknown>> => {
+  const campaign = gatewayDomainRecord(await context.delegates.campaigns.findUnique!({
+    where: { id: campaignId },
+  }));
+  const lineage = coveragePlannerCampaignLineageFor(context, campaign);
+  return requireCoveragePlannerCampaign(context, wave, campaign, lineage);
+};
+
+const coveragePlannerEligibleDiscoveryResultsFor = async (
+  discoveryResults: GatewayDomainDelegate,
+  campaignId: string,
+): Promise<Record<string, unknown>[]> => {
+  const rows = await discoveryResults.findMany?.({
+    where: { campaignId },
+    orderBy: [{ score: "desc" }, { createdAt: "asc" }],
+  });
+  return Array.isArray(rows)
+    ? rows
+      .map(gatewayDomainRecord)
+      .filter((row): row is Record<string, unknown> => {
+        if (!row) return false;
+        const status = coveragePlannerStringValue(row.status);
+        if (status === "BLOCKED" || status === "REJECTED") return false;
+        const dispatch = gatewayDomainRecord(
+          gatewayDomainRecord(row.metadata)?.coveragePlannerDispatch,
+        );
+        return !coveragePlannerStringValue(dispatch?.producerJobId);
+      })
+    : [];
+};
+
+type CoveragePlannerIntakeIdentity = Readonly<{
+  canonicalUrl: string;
+  name: string;
+  urlKey: string;
+}>;
+
+const coveragePlannerIntakeIdentityFor = (
+  discoveryResult: Record<string, unknown>,
+): CoveragePlannerIntakeIdentity => {
+  const canonicalUrl = coveragePlannerStringValue(discoveryResult.canonicalUrl);
+  const name = coveragePlannerStringValue(discoveryResult.title);
+  const urlKey = coveragePlannerStringValue(discoveryResult.urlKey);
+  if (!canonicalUrl || !name || !urlKey) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The campaign discovery result cannot materialize an intake without durable identity.",
+    );
+  }
+  return { canonicalUrl, name, urlKey };
+};
+
+const coveragePlannerSourceTypeHintsFor = (
+  discoveryResult: Record<string, unknown>,
+): unknown[] => Array.isArray(discoveryResult.sourceTypeHints)
+  ? discoveryResult.sourceTypeHints
+  : [];
+
+const insertCoveragePlannerIntake = async (
+  intakes: GatewayDomainDelegate,
+  campaign: Record<string, unknown>,
+  discoveryResult: Record<string, unknown>,
+  identity: CoveragePlannerIntakeIdentity,
+): Promise<Record<string, unknown>> => {
+  const sourceKey = `campaign:${campaign.id}:result:${discoveryResult.id}`;
+  const intake = gatewayDomainRecord(await intakes.upsert?.({
+    where: { sourceKey },
+    create: {
+      id: createId(),
+      name: identity.name,
+      sourceKey,
+      region: campaign.region ?? null,
+      baseUrl: identity.canonicalUrl,
+      status: "DRAFT",
+      complianceStatus: "UNREVIEWED",
+      targetKindHints: coveragePlannerSourceTypeHintsFor(discoveryResult),
+      notes: null,
+      affiliateSourceId: discoveryResult.matchingSourceId ?? null,
+      supplySourceId: discoveryResult.supplySourceId ?? null,
+    },
+    update: {},
+  }));
+  if (!intake) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The campaign intake could not be materialized.",
+    );
+  }
+  return intake;
+};
+
+const upsertCoveragePlannerIntakePage = async (
+  pages: GatewayDomainDelegate | undefined,
+  intake: Record<string, unknown>,
+  discoveryResult: Record<string, unknown>,
+  identity: CoveragePlannerIntakeIdentity,
+): Promise<void> => {
+  if (!pages?.upsert) return;
+  await pages.upsert({
+    where: { urlKey: identity.urlKey },
+    create: {
+      id: createId(),
+      intakeId: intake.id,
+      supplySourceId: discoveryResult.supplySourceId ?? null,
+      url: identity.canonicalUrl,
+      canonicalUrl: identity.canonicalUrl,
+      urlKey: identity.urlKey,
+      role: "LISTING",
+      targetKindHints: coveragePlannerSourceTypeHintsFor(discoveryResult),
+      status: "ACTIVE",
+      discoverySource: "COVERAGE_PLANNER",
+    },
+    update: {},
+  });
+};
+
+const materializeCoveragePlannerIntake = async (
+  intakes: GatewayDomainDelegate,
+  pages: GatewayDomainDelegate | undefined,
+  campaign: Record<string, unknown>,
+  discoveryResult: Record<string, unknown>,
+): Promise<Record<string, unknown>> => {
+  const identity = coveragePlannerIntakeIdentityFor(discoveryResult);
+  const intake = await insertCoveragePlannerIntake(
+    intakes,
+    campaign,
+    discoveryResult,
+    identity,
+  );
+  await upsertCoveragePlannerIntakePage(
+    pages,
+    intake,
+    discoveryResult,
+    identity,
+  );
+  return intake;
+};
+
+const coveragePlannerIntakeFor = async (
+  context: CoveragePlannerDispatchContext,
+  campaign: Record<string, unknown>,
+  discoveryResult: Record<string, unknown>,
+): Promise<Record<string, unknown>> => {
+  const { intakes, pages } = context.delegates;
+  const intakeId = coveragePlannerStringValue(discoveryResult.matchingIntakeId);
+  const intake = intakeId
+    ? gatewayDomainRecord(await intakes.findUnique?.({ where: { id: intakeId } }))
+    : await materializeCoveragePlannerIntake(
+      intakes,
+      pages,
+      campaign,
+      discoveryResult,
+    );
+  if (intakeId && !intake) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The campaign discovery result references a missing intake.",
+    );
+  }
+  return intake!;
+};
+
+type CoveragePlannerSourceLineage = Readonly<{
+  intake: Record<string, unknown>;
+  source: Record<string, unknown>;
+  sourceId: string;
+  supplySource: Record<string, unknown>;
+  supplySourceId: string;
+}>;
+
+type CoveragePlannerScrapeSourceLink = Readonly<{
+  source: Record<string, unknown>;
+  sourceId: string;
+}>;
+
+const coveragePlannerScrapeSourceFor = async (
+  sources: GatewayDomainDelegate,
+  intake: Record<string, unknown>,
+  discoveryResult: Record<string, unknown>,
+): Promise<CoveragePlannerScrapeSourceLink> => {
+  const resultSourceId = coveragePlannerStringValue(discoveryResult.matchingSourceId);
+  const intakeSourceId = coveragePlannerStringValue(intake.affiliateSourceId);
+  if (intake.affiliateSourceId != null && !intakeSourceId) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The campaign intake has an invalid persisted scrape source link.",
+    );
+  }
+  if (resultSourceId && intakeSourceId && resultSourceId !== intakeSourceId) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The campaign discovery result conflicts with its persisted scrape source.",
+    );
+  }
+  const sourceId = resultSourceId ?? intakeSourceId;
+  if (!sourceId) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The campaign intake has no durable scrape source.",
+    );
+  }
+  const source = gatewayDomainRecord(await sources.findUnique!({
+    where: { id: sourceId },
+  }));
+  if (!source) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The campaign intake scrape source was not found.",
+    );
+  }
+  return { source, sourceId };
+};
+
+type CoveragePlannerSupplySourceLink = Readonly<{
+  supplySource: Record<string, unknown>;
+  supplySourceId: string;
+}>;
+
+const coveragePlannerSupplySourceContractMatches = (
+  context: CoveragePlannerDispatchContext,
+  supplySource: Record<string, unknown> | null,
+): boolean => supplySource !== null
+  && supplySource.rolloutCohort === context.expectedRolloutCohort
+  && (
+    supplySource.activeSupplyContractVersion === null
+    || supplySource.activeSupplyContractVersion === context.expectedContractVersion
+  )
+  && (
+    supplySource.activeSupplyContractHash === null
+    || supplySource.activeSupplyContractHash === context.expectedContractHash
+  );
+
+const coveragePlannerSupplySourceIdFor = (
+  intake: Record<string, unknown>,
+  discoveryResult: Record<string, unknown>,
+  source: Record<string, unknown>,
+): string => {
+  const resultSupplySourceId = coveragePlannerStringValue(
+    discoveryResult.supplySourceId,
+  );
+  const intakeSupplySourceId = coveragePlannerStringValue(intake.supplySourceId);
+  if (intake.supplySourceId != null && !intakeSupplySourceId) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The campaign intake has an invalid persisted Supply Source link.",
+    );
+  }
+  if (
+    resultSupplySourceId
+    && intakeSupplySourceId
+    && resultSupplySourceId !== intakeSupplySourceId
+  ) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The campaign discovery result conflicts with its persisted Supply Source.",
+    );
+  }
+  const sourceSupplySourceId = coveragePlannerStringValue(source.supplySourceId);
+  const supplySourceId =
+    resultSupplySourceId ?? intakeSupplySourceId ?? sourceSupplySourceId;
+  if (!supplySourceId || source.supplySourceId !== supplySourceId) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The campaign intake source is not bound to its Supply Source.",
+    );
+  }
+  return supplySourceId;
+};
+
+const coveragePlannerSupplySourceFor = async (
+  context: CoveragePlannerDispatchContext,
+  supplySources: GatewayDomainDelegate,
+  intake: Record<string, unknown>,
+  discoveryResult: Record<string, unknown>,
+  source: Record<string, unknown>,
+): Promise<CoveragePlannerSupplySourceLink> => {
+  const supplySourceId = coveragePlannerSupplySourceIdFor(
+    intake,
+    discoveryResult,
+    source,
+  );
+  const supplySource = gatewayDomainRecord(await supplySources.findUnique!({
+    where: { id: supplySourceId },
+  }));
+  if (!coveragePlannerSupplySourceContractMatches(context, supplySource)) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The campaign Supply Source does not match the claimed contract.",
+    );
+  }
+  return { supplySource: supplySource!, supplySourceId };
+};
+
+const compareAndSetCoveragePlannerIntakeSources = async (
+  intakes: GatewayDomainDelegate,
+  intake: Record<string, unknown>,
+  sourceId: string,
+  supplySourceId: string,
+  missingAffiliateSource: boolean,
+  missingSupplySource: boolean,
+): Promise<void> => {
+  if (!intakes.updateMany) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The campaign intake link cannot be completed with a compare-and-set.",
+    );
+  }
+  const updated = await intakes.updateMany({
+    where: {
+      id: intake.id,
+      ...(missingAffiliateSource ? { affiliateSourceId: null } : {}),
+      ...(missingSupplySource ? { supplySourceId: null } : {}),
+    },
+    data: {
+      ...(missingAffiliateSource ? { affiliateSourceId: sourceId } : {}),
+      ...(missingSupplySource ? { supplySourceId } : {}),
+    },
+  });
+  if (
+    updated !== undefined
+    && typeof updated === "object"
+    && Number((updated as Record<string, unknown>).count) !== 1
+  ) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The campaign intake source links changed before compare-and-set.",
+    );
+  }
+};
+
+const linkCoveragePlannerIntakeSources = async (
+  intakes: GatewayDomainDelegate,
+  intake: Record<string, unknown>,
+  sourceId: string,
+  supplySourceId: string,
+): Promise<void> => {
+  const missingAffiliateSource = intake.affiliateSourceId === null
+    || intake.affiliateSourceId === undefined;
+  const missingSupplySource = intake.supplySourceId === null
+    || intake.supplySourceId === undefined;
+  if (!missingAffiliateSource && !missingSupplySource) return;
+  await compareAndSetCoveragePlannerIntakeSources(
+    intakes,
+    intake,
+    sourceId,
+    supplySourceId,
+    missingAffiliateSource,
+    missingSupplySource,
+  );
+};
+
+const coveragePlannerSourceLineageFor = async (
+  context: CoveragePlannerDispatchContext,
+  intake: Record<string, unknown>,
+  discoveryResult: Record<string, unknown>,
+): Promise<CoveragePlannerSourceLineage> => {
+  const { intakes, sources, supplySources } = context.delegates;
+  const { source, sourceId } = await coveragePlannerScrapeSourceFor(
+    sources,
+    intake,
+    discoveryResult,
+  );
+  const { supplySource, supplySourceId } = await coveragePlannerSupplySourceFor(
+    context,
+    supplySources,
+    intake,
+    discoveryResult,
+    source,
+  );
+  await linkCoveragePlannerIntakeSources(
+    intakes,
+    intake,
+    sourceId,
+    supplySourceId,
+  );
+  return {
+    intake: {
+      ...intake,
+      affiliateSourceId: sourceId,
+      supplySourceId,
+    },
+    source,
+    sourceId,
+    supplySource,
+    supplySourceId,
+  };
+};
+
+const coveragePlannerMappingJobFor = async (
+  mappingJobs: GatewayDomainDelegate,
+  campaign: Record<string, unknown>,
+  discoveryResult: Record<string, unknown>,
+  intake: Record<string, unknown>,
+  sourceId: string,
+  supplySourceId: string,
+): Promise<Record<string, unknown>> => {
+  const existingMappingJob = gatewayDomainRecord(await mappingJobs.findFirst?.({
+    where: { intakeId: intake.id, sourceId, supplySourceId },
+    orderBy: { createdAt: "desc" },
+  }));
+  const mappingJob = existingMappingJob ?? gatewayDomainRecord(await mappingJobs.upsert?.({
+    where: { id: `gateway-mapping:${campaign.id}:${discoveryResult.id}` },
+    create: {
+      id: `gateway-mapping:${campaign.id}:${discoveryResult.id}`,
+      intakeId: intake.id,
+      supplySourceId,
+      sourceId,
+      mappingId: null,
+      status: "QUEUED",
+      claimedAt: null,
+      leaseExpiresAt: null,
+      workerId: null,
+      attemptCount: 0,
+      legacyIdentityMigrationEligible: false,
+      branch: null,
+      commit: null,
+      resultSummary: null,
+      errorMessage: null,
+      finishedAt: null,
+    },
+    update: {},
+  }));
+  if (
+    !mappingJob
+    || mappingJob.sourceId !== sourceId
+    || mappingJob.supplySourceId !== supplySourceId
+  ) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The campaign mapping job is not bound to its source lineage.",
+    );
+  }
+  return mappingJob;
+};
+
+type CoveragePlannerDiscoveryDispatch = Readonly<{
+  intakeId: string;
+  mappingJobId: string;
+  producerJobId: string;
+  discoveryResultId: string;
+}>;
+
+const updateCoveragePlannerMappingDispatch = async (
+  context: CoveragePlannerDispatchContext,
+  campaign: Record<string, unknown>,
+  discoveryResult: Record<string, unknown>,
+  mappingJob: Record<string, unknown>,
+  manifest: Record<string, unknown>,
+): Promise<void> => {
+  const resultMetadata = gatewayDomainRecord(discoveryResult.metadata) ?? {};
+  const currentMappingSummary =
+    gatewayDomainRecord(mappingJob.resultSummary) ?? {};
+  const evidenceRefs = Array.isArray(manifest.entries)
+    ? manifest.entries
+      .map((entry) => gatewayDomainRecord(entry)?.evidenceRef)
+      .filter((entry): entry is string => typeof entry === "string")
+    : [];
+  await context.delegates.mappingJobs.update!({
+    where: { id: mappingJob.id },
+    data: {
+      resultSummary: asPrismaJson({
+        ...currentMappingSummary,
+        coveragePlannerDispatch: {
+          campaignId: campaign.id,
+          discoveryResultId: discoveryResult.id,
+          canonicalUrl: discoveryResult.canonicalUrl ?? null,
+          originalUrl: discoveryResult.originalUrl ?? null,
+          latestQuery: discoveryResult.latestQuery ?? null,
+          profileKey: resultMetadata.profileKey
+            ?? resultMetadata.captureProfileKey
+            ?? null,
+          evidenceRefs,
+        },
+      }),
+    },
+  });
+};
+
+const enqueueCoveragePlannerProducer = async (
+  context: CoveragePlannerDispatchContext,
+  campaign: Record<string, unknown>,
+  discoveryResult: Record<string, unknown>,
+  mappingJob: Record<string, unknown>,
+  sourceLineage: CoveragePlannerSourceLineage,
+  manifest: Record<string, unknown>,
+  now: Date,
+): Promise<Record<string, unknown>> => {
+  const producerDedupeKey = [
+    "coverage-planner-producer",
+    campaign.id,
+    discoveryResult.id,
+    String(context.demand.generation),
+    String(context.expectedContractVersion),
+    context.expectedContractHash,
+  ].join(":");
+  const producerJob = gatewayDomainRecord(await context.delegates.gatewayJobs.upsert?.({
+    where: { dedupeKey: producerDedupeKey },
+    create: {
+      id: createId(),
+      dedupeKey: producerDedupeKey,
+      queue: "AFFILIATE_MAPPING",
+      lane: "MAPPING_PRODUCTION",
+      role: "MAPPING_PRODUCER",
+      subjectType: "MAPPING_PRODUCER",
+      subjectId: mappingJob.id,
+      subjectJson: asPrismaJson({
+        type: "MAPPING_PRODUCER",
+        supplySourceId: sourceLineage.supplySourceId,
+        mappingJobId: mappingJob.id,
+        pass: 1,
+      }),
+      evidenceManifestJson: asPrismaJson(manifest),
+      supplySourceId: sourceLineage.supplySourceId,
+      expectedLifecycleGeneration: Number(
+        sourceLineage.supplySource.lifecycleGeneration ?? 0,
+      ),
+      priority: context.priority,
+      nextAttemptAt: now,
+      claimGeneration: 0,
+      parentClaimId: context.parentClaimId,
+    },
+    update: {},
+  }));
+  if (!producerJob) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The campaign mapping producer job could not be enqueued.",
+    );
+  }
+  return producerJob;
+};
+
+const markCoveragePlannerDiscoveryDispatched = async (
+  context: CoveragePlannerDispatchContext,
+  campaign: Record<string, unknown>,
+  discoveryResult: Record<string, unknown>,
+  sourceLineage: CoveragePlannerSourceLineage,
+  mappingJob: Record<string, unknown>,
+  producerJob: Record<string, unknown>,
+  now: Date,
+): Promise<void> => {
+  const currentMetadata = gatewayDomainRecord(discoveryResult.metadata) ?? {};
+  const dispatchMetadata = {
+    status: "PRODUCER_QUEUED",
+    campaignId: campaign.id,
+    discoveryResultId: discoveryResult.id,
+    intakeId: sourceLineage.intake.id,
+    mappingJobId: mappingJob.id,
+    producerJobId: producerJob.id,
+    dispatchedAt: now.toISOString(),
+  };
+  const resultData = {
+    status: "INTAKE_CREATED",
+    metadata: asPrismaJson({
+      ...currentMetadata,
+      coveragePlannerDispatch: dispatchMetadata,
+    }),
+  };
+  if (context.delegates.discoveryResults.updateMany) {
+    await context.delegates.discoveryResults.updateMany({
+      where: { id: discoveryResult.id },
+      data: resultData,
+    });
+  } else if (context.delegates.discoveryResults.update) {
+    await context.delegates.discoveryResults.update({
+      where: { id: discoveryResult.id },
+      data: resultData,
+    });
+  }
+};
+
+const dispatchCoveragePlannerDiscoveryResult = async (
+  context: CoveragePlannerDispatchContext,
+  campaign: Record<string, unknown>,
+  discoveryResult: Record<string, unknown>,
+  now: Date,
+): Promise<CoveragePlannerDiscoveryDispatch> => {
+  const intake = await coveragePlannerIntakeFor(context, campaign, discoveryResult);
+  const sourceLineage = await coveragePlannerSourceLineageFor(
+    context,
+    intake,
+    discoveryResult,
+  );
+  const mappingJob = await coveragePlannerMappingJobFor(
+    context.delegates.mappingJobs,
+    campaign,
+    discoveryResult,
+    sourceLineage.intake,
+    sourceLineage.sourceId,
+    sourceLineage.supplySourceId,
+  );
+  const manifest = coveragePlannerEvidenceManifestFor(campaign, discoveryResult);
+  await updateCoveragePlannerMappingDispatch(
+    context,
+    campaign,
+    discoveryResult,
+    mappingJob,
+    manifest,
+  );
+  const producerJob = await enqueueCoveragePlannerProducer(
+    context,
+    campaign,
+    discoveryResult,
+    mappingJob,
+    sourceLineage,
+    manifest,
+    now,
+  );
+  await markCoveragePlannerDiscoveryDispatched(
+    context,
+    campaign,
+    discoveryResult,
+    sourceLineage,
+    mappingJob,
+    producerJob,
+    now,
+  );
+  return {
+    intakeId: String(sourceLineage.intake.id),
+    mappingJobId: String(mappingJob.id),
+    producerJobId: String(producerJob.id),
+    discoveryResultId: String(discoveryResult.id),
+  };
+};
+
+const assertCoveragePlannerProviderRun = async (
+  transaction: Prisma.TransactionClient,
+  discoveryResult: Record<string, unknown>,
+): Promise<void> => {
+  const runId = coveragePlannerStringValue(discoveryResult.latestRunId);
+  const runDelegate = gatewayDomainDelegate(
+    transaction,
+    "affiliateSourceDiscoveryRuns",
+  );
+  if (!runId || !runDelegate?.findUnique) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The campaign discovery result has no durable discovery run.",
+    );
+  }
+  const run = gatewayDomainRecord(await runDelegate.findUnique({
+    where: { id: runId },
+  }));
+  if (
+    !run
+    || run.campaignId !== discoveryResult.campaignId
+    || run.status !== "SUCCEEDED"
+  ) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The campaign discovery result is not backed by a successful discovery run.",
+    );
+  }
+};
+
+const coveragePlannerProviderEvidenceRowsFor = async (
+  transaction: Prisma.TransactionClient,
+  authorized: AuthorizedClaim,
+): Promise<Readonly<{ receiptRows: unknown; artifactRows: unknown }>> => {
+  const receipts = gatewayDomainDelegate(
+    transaction,
+    "affiliateAgentGatewayOperationReceipts",
+  );
+  const artifacts = gatewayDomainDelegate(
+    transaction,
+    "affiliateAgentGatewayArtifacts",
+  );
+  if (!receipts?.findMany || !artifacts?.findMany) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The campaign discovery result has no receipt and artifact lineage delegates.",
+    );
+  }
+  const [receiptRows, artifactRows] = await Promise.all([
+    receipts.findMany({
+      where: {
+        claimId: authorized.claim.id,
+        claimGeneration: authorized.claim.claimGeneration,
+        operationKind: "EXECUTE_COMMAND",
+        commandName: "RUN_DISCOVERY_QUERY",
+        status: "SUCCEEDED",
+      },
+    }),
+    artifacts.findMany({
+      where: {
+        claimId: authorized.claim.id,
+        claimGeneration: authorized.claim.claimGeneration,
+        evidenceKind: "PROVIDER_RESULT",
+      },
+    }),
+  ]);
+  return { receiptRows, artifactRows };
+};
+
+const gatewayDomainRecordsFor = (
+  value: unknown,
+): Record<string, unknown>[] => Array.isArray(value)
+  ? value
+    .map(gatewayDomainRecord)
+    .filter((row): row is Record<string, unknown> => row !== null)
+  : [];
+
+const coveragePlannerSuccessfulProviderOutputsFor = (
+  receiptRows: unknown,
+): Record<string, unknown>[] => gatewayDomainRecordsFor(receiptRows)
+  .map((receipt) => gatewayDomainRecord(
+    gatewayDomainRecord(receipt.responseJson)?.safeOutput,
+  ))
+  .filter((output): output is Record<string, unknown> => output !== null);
+
+const coveragePlannerHasMatchingProviderEvidence = (
+  successfulOutputs: readonly Record<string, unknown>[],
+  providerArtifacts: readonly Record<string, unknown>[],
+): boolean => successfulOutputs.some((output) => (
+  providerArtifacts.some((artifact) => (
+    artifact.evidenceRef === output.evidenceRef
+    && artifact.contentHash === output.sha256
+    && Number(artifact.byteSize) === Number(output.byteSize)
+    && artifact.mimeType === output.mimeType
+  ))
+));
+
+const assertCoveragePlannerProviderEvidence = async (
+  transaction: Prisma.TransactionClient,
+  authorized: AuthorizedClaim,
+  discoveryResult: Record<string, unknown>,
+): Promise<void> => {
+  await assertCoveragePlannerProviderRun(transaction, discoveryResult);
+  const { receiptRows, artifactRows } =
+    await coveragePlannerProviderEvidenceRowsFor(transaction, authorized);
+  const providerArtifacts = gatewayDomainRecordsFor(artifactRows);
+  const successfulOutputs =
+    coveragePlannerSuccessfulProviderOutputsFor(receiptRows);
+  if (!coveragePlannerHasMatchingProviderEvidence(
+    successfulOutputs,
+    providerArtifacts,
+  )) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The campaign discovery result has no claim-owned successful provider evidence.",
+    );
+  }
+};
+
+const applyCoveragePlannerCampaignDispatch = async (
+  transaction: Prisma.TransactionClient,
+  authorized: AuthorizedClaim,
+  wave: Record<string, unknown>,
+  result: Extract<
+    CoveragePlannerTerminalResult,
+    Readonly<{ disposition: "CAMPAIGN_PROPOSED" }>
+  >,
+  now: Date,
+): Promise<CoveragePlannerDispatchResult> => {
+  const context = await coveragePlannerDispatchContextFor(
+    transaction,
+    authorized,
+    wave,
+  );
+  const refs = result.payload.campaignProposalRefs;
+  if (refs.length === 0) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The coverage campaign result has no durable campaign references.",
+    );
+  }
+  const campaignIds: string[] = [];
+  const intakeIds: string[] = [];
+  const mappingJobIds: string[] = [];
+  const producerJobIds: string[] = [];
+  const discoveryResultIds: string[] = [];
+  for (const campaignId of refs) {
+    const campaign = await coveragePlannerCampaignFor(context, campaignId, wave);
+    const discoveryResults = await coveragePlannerEligibleDiscoveryResultsFor(
+      context.delegates.discoveryResults,
+      campaignId,
+    );
+    if (discoveryResults.length === 0) {
+      throw gatewayError(
+        "INTERNAL_ERROR",
+        "The coverage campaign has no eligible discovery results for dispatch.",
+      );
+    }
+    for (const discoveryResult of discoveryResults) {
+      await assertCoveragePlannerProviderEvidence(
+        transaction,
+        authorized,
+        discoveryResult,
+      );
+      const dispatched = await dispatchCoveragePlannerDiscoveryResult(
+        context,
+        campaign,
+        discoveryResult,
+        now,
+      );
+      campaignIds.push(campaignId);
+      intakeIds.push(dispatched.intakeId);
+      mappingJobIds.push(dispatched.mappingJobId);
+      producerJobIds.push(dispatched.producerJobId);
+      discoveryResultIds.push(dispatched.discoveryResultId);
+    }
+  }
+  return {
+    campaignIds,
+    intakeIds,
+    mappingJobIds,
+    producerJobIds,
+    discoveryResultIds,
+  };
+};
+
+const applyCoveragePlannerTerminalDomainEffect = async (
+  transaction: Prisma.TransactionClient,
+  authorized: AuthorizedClaim,
+  result: CoveragePlannerTerminalResult,
+  jobId: string,
+  now: Date,
+): Promise<Readonly<Record<string, unknown>> | null> => {
+  const waves = gatewayDomainDelegate(transaction, "affiliateReplenishmentWaves");
+  const demands = gatewayDomainDelegate(transaction, "affiliateReplenishmentDemands");
+  if (!waves?.findFirst || !waves.update) return null;
+  const wave = gatewayDomainRecord(await waves.findFirst({
+    where: { coveragePlanningJobId: jobId },
+    orderBy: { createdAt: "desc" },
+  }));
+  if (!wave) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The coverage planner terminal result has no replenishment wave.",
+    );
+  }
+  const transition = coveragePlannerWaveTransitionFor(
+    wave.evidenceRefs,
+    result,
+    jobId,
+    now,
+  );
+  const campaignDispatch = result.disposition === "CAMPAIGN_PROPOSED"
+    ? await applyCoveragePlannerCampaignDispatch(
+        transaction,
+        authorized,
+        wave,
+        result,
+        now,
+      )
+    : null;
+  await waves.update({
+    where: { id: wave.id },
+    data: transition.waveData,
+  });
+  const demandEffect = await applyCoveragePlannerDemandEffect(demands, wave, transition);
+  return campaignDispatch === null
+    ? demandEffect
+    : { ...demandEffect, ...campaignDispatch };
+};
+
+const reviewerTargetTypeFor = (
+  targetType: unknown,
+  sourceTargetKind: unknown,
+): "EVENT" | "FACILITY" | "ORGANIZATION" => {
+  const target = String(targetType ?? "").toUpperCase();
+  if (target === "EVENT" || target === "FACILITY" || target === "ORGANIZATION") {
+    return target;
+  }
+  const sourceKind = String(sourceTargetKind ?? "").toUpperCase();
+  return sourceKind === "RENTAL"
+    ? "FACILITY"
+    : sourceKind === "CLUB"
+      ? "ORGANIZATION"
+      : "EVENT";
+};
+
+const reviewerManifestEntryForArtifact = (
+  kind: "COMMITTED_PACKAGE" | "DETERMINISTIC_VALIDATION" | "DURABLE_EVIDENCE",
+  evidenceRef: string,
+  artifact: Record<string, unknown> | undefined,
+): Record<string, unknown> => {
+  if (!artifact) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      `The producer is missing its ${kind.toLowerCase()} artifact.`,
+    );
+  }
+  return {
+    evidenceRef,
+    kind,
+    artifactId: String(artifact.sourceArtifactId ?? artifact.fileId),
+    sha256: String(artifact.contentHash),
+    mimeType: String(artifact.mimeType),
+    byteSize: Number(artifact.byteSize),
+    retention: "INDEFINITE",
+  };
+};
+
+type MappingProducerLineage = Readonly<{
+  mappingJobId: string;
+  supplySourceId: string;
+  mappingJob: Record<string, unknown>;
+  source: Record<string, unknown> | null;
+}>;
+
+const mappingSourceFor = async (
+  sources: GatewayDomainDelegate | undefined,
+  sourceId: string,
+): Promise<Record<string, unknown> | null> => {
+  if (!sources?.findUnique) return null;
+  return gatewayDomainRecord(await sources.findUnique({
+    where: { id: sourceId },
+  }));
+};
+
+const mappingProducerLineageFor = async (
+  mappingJobs: GatewayDomainDelegate,
+  sources: GatewayDomainDelegate | undefined,
+  authorized: AuthorizedClaim,
+): Promise<MappingProducerLineage> => {
+  const mappingSubject = authorized.envelope.subject;
+  if (mappingSubject.type !== "MAPPING_PRODUCER") {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The mapping producer terminal result has no mapping job lineage.",
+    );
+  }
+  const { mappingJobId, supplySourceId } = mappingSubject;
+  const mappingJob = gatewayDomainRecord(await mappingJobs.findUnique?.({
+    where: { id: mappingJobId },
+  }));
+  const sourceId = typeof mappingJob?.sourceId === "string"
+    ? mappingJob.sourceId.trim()
+    : "";
+  if (
+    !mappingJob
+    || mappingJob.supplySourceId !== supplySourceId
+    || sourceId.length === 0
+  ) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The mapping producer terminal result is not bound to its mapping job source.",
+    );
+  }
+  const source = await mappingSourceFor(sources, sourceId);
+  if (!source || source.supplySourceId !== supplySourceId) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The mapping producer terminal result is not bound to its supply source.",
+    );
+  }
+  return { mappingJobId, supplySourceId, mappingJob, source };
+};
+
+const updateMappingProducerLineage = async (
+  mappingJobs: GatewayDomainDelegate,
+  lineage: MappingProducerLineage,
+  result: MappingProducerSuccessTerminalResult,
+  now: Date,
+): Promise<void> => {
+  const mappingSummary = gatewayDomainRecord(lineage.mappingJob.resultSummary) ?? {};
+  await mappingJobs.update?.({
+    where: { id: lineage.mappingJob.id },
+    data: {
+      sourceId: lineage.source?.id ?? lineage.mappingJob.sourceId ?? null,
+      mappingId: lineage.source?.activeMappingId ?? lineage.mappingJob.mappingId ?? null,
+      status: "COMPLETED",
+      commit: result.payload.commitReceiptId,
+      resultSummary: asPrismaJson({
+        ...mappingSummary,
+        gatewayTerminalResult: result,
+      }),
+      errorMessage: null,
+      finishedAt: now,
+      claimedAt: null,
+      workerId: null,
+      leaseExpiresAt: null,
+    },
+  });
+};
+
+const mappingProducerFailureFor = (
+  result: MappingProducerFailureTerminalResult,
+): Readonly<Record<string, unknown>> => result.disposition === "SOURCE_INCOMPATIBLE"
+  ? {
+      kind: result.disposition,
+      incompatibilityCode: result.payload.incompatibilityCode,
+    }
+  : {
+      kind: result.disposition,
+      contractArea: result.payload.contractArea,
+      requestedChange: result.payload.requestedChange,
+    };
+
+const mappingProducerFailureMessageFor = (
+  result: MappingProducerFailureTerminalResult,
+): string => result.disposition === "SOURCE_INCOMPATIBLE"
+  ? `The producer marked the source incompatible: ${result.payload.incompatibilityCode}.`
+  : `The producer reported a Supply Contract gap in ${result.payload.contractArea}.`;
+
+const updateMappingProducerFailureSource = async (
+  sources: GatewayDomainDelegate | undefined,
+  lineage: MappingProducerLineage,
+  result: MappingProducerFailureTerminalResult,
+  failure: Readonly<Record<string, unknown>>,
+): Promise<void> => {
+  const sourceId = typeof lineage.source?.id === "string"
+    ? lineage.source.id.trim()
+    : "";
+  if (!sourceId || !sources?.updateMany) return;
+  const sourceMetadata = gatewayDomainRecord(lineage.source?.metadata) ?? {};
+  await sources.updateMany({
+    where: {
+      id: sourceId,
+      supplySourceId: lineage.supplySourceId,
+    },
+    data: {
+      status: result.disposition === "SOURCE_INCOMPATIBLE"
+        ? "QUARANTINED"
+        : "REVIEW_REQUIRED",
+      autoScrapeEnabled: false,
+      metadata: asPrismaJson({
+        ...sourceMetadata,
+        mappingTerminalOutcome: failure,
+      }),
+    },
+  });
+};
+
+const updateMappingProducerFailure = async (
+  mappingJobs: GatewayDomainDelegate,
+  sources: GatewayDomainDelegate | undefined,
+  lineage: MappingProducerLineage,
+  result: MappingProducerFailureTerminalResult,
+  now: Date,
+): Promise<Readonly<Record<string, unknown>>> => {
+  const failure = mappingProducerFailureFor(result);
+  await mappingJobs.update?.({
+    where: { id: lineage.mappingJob.id },
+    data: {
+      status: "REVIEW_REQUIRED",
+      resultSummary: asPrismaJson({
+        ...(gatewayDomainRecord(lineage.mappingJob.resultSummary) ?? {}),
+        gatewayTerminalResult: result,
+        terminalOutcome: failure,
+      }),
+      errorMessage: mappingProducerFailureMessageFor(result),
+      finishedAt: now,
+      claimedAt: null,
+      workerId: null,
+      leaseExpiresAt: null,
+    },
+  });
+  await updateMappingProducerFailureSource(sources, lineage, result, failure);
+  return {
+    kind: "MAPPING_PRODUCER_TERMINAL_EFFECT",
+    mappingJobId: lineage.mappingJobId,
+    reviewerJobId: null,
+    terminalOutcome: failure,
+  };
+};
+
+const mappingReviewerArtifactsFor = (
+  artifactRows: readonly Record<string, unknown>[],
+  packageHash: string,
+  claimId: string,
+  claimGeneration: number,
+): Readonly<{
+  committedArtifact: Record<string, unknown> | undefined;
+  deterministicArtifact: Record<string, unknown> | undefined;
+  durableArtifact: Record<string, unknown> | undefined;
+}> => {
+  const currentClaimArtifacts = artifactRows.filter(
+    (artifact) => artifact.claimId === claimId
+      && Number(artifact.claimGeneration) === claimGeneration,
+  );
+  return {
+    committedArtifact: currentClaimArtifacts.find(
+      (artifact) => artifact.evidenceKind === "COMMITTED_PACKAGE"
+        && artifact.contentHash === packageHash,
+    ),
+    deterministicArtifact: currentClaimArtifacts.find(
+      (artifact) => artifact.evidenceKind === "DETERMINISTIC_VALIDATION",
+    ),
+    durableArtifact: currentClaimArtifacts.find(
+      (artifact) => artifact.evidenceKind === "DURABLE_EVIDENCE",
+    ),
+  };
+};
+
+const mappingReviewerManifestFor = (
+  authorized: AuthorizedClaim,
+  artifacts: ReturnType<typeof mappingReviewerArtifactsFor>,
+): Record<string, unknown> => {
+  const activeSupplyContract = authorized.bundle?.supplyContract;
+  if (
+    !activeSupplyContract
+    || activeSupplyContract.hash !== authorized.claim.supplyContractHash
+  ) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The active Supply Contract artifact is not bound to the producer claim.",
+    );
+  }
+  const { hash: _contractHash, ...activeSupplyContractPreimage } =
+    activeSupplyContract;
+  const activeSupplyContractBytes = Buffer.from(
+    canonicalizeAffiliateAgentValue(activeSupplyContractPreimage),
+    "utf8",
+  );
+  const preimage = {
+    schemaVersion: 1 as const,
+    entries: [
+      {
+        evidenceRef: "active-contract",
+        kind: "ACTIVE_SUPPLY_CONTRACT" as const,
+        artifactId: `supply-contract:${activeSupplyContract.hash}`,
+        sha256: activeSupplyContract.hash,
+        mimeType: "application/json",
+        byteSize: activeSupplyContractBytes.byteLength,
+        retention: "INDEFINITE" as const,
+      },
+      reviewerManifestEntryForArtifact(
+        "COMMITTED_PACKAGE",
+        "committed-package",
+        artifacts.committedArtifact,
+      ),
+      reviewerManifestEntryForArtifact(
+        "DETERMINISTIC_VALIDATION",
+        "deterministic-validation",
+        artifacts.deterministicArtifact,
+      ),
+      reviewerManifestEntryForArtifact(
+        "DURABLE_EVIDENCE",
+        "durable-evidence",
+        artifacts.durableArtifact,
+      ),
+    ],
+  };
+  return {
+    ...preimage,
+    hash: hashAffiliateAgentValue(preimage),
+  };
+};
+
+const mappingReviewerTargetFor = async (
+  targets: GatewayDomainDelegate | undefined,
+  lineage: MappingProducerLineage,
+): Promise<Readonly<{ targetId: string; targetType: "EVENT" | "FACILITY" | "ORGANIZATION" }>> => {
+  const target = targets?.findFirst
+    ? gatewayDomainRecord(await targets.findFirst({
+        where: {
+          supplySourceId: lineage.supplySourceId,
+          status: "PUBLISHED",
+        },
+        orderBy: { createdAt: "desc" },
+      }))
+    : null;
+  return {
+    targetId: String(
+      target?.targetId
+      ?? lineage.source?.id
+      ?? lineage.supplySourceId,
+    ),
+    targetType: reviewerTargetTypeFor(
+      target?.targetType,
+      lineage.source?.targetKind,
+    ),
+  };
+};
+
+const upsertMappingReviewerJob = async (
+  gatewayJobs: GatewayDomainDelegate,
+  authorized: AuthorizedClaim,
+  result: MappingProducerSuccessTerminalResult,
+  now: Date,
+  lineage: MappingProducerLineage,
+  target: Readonly<{
+    targetId: string;
+    targetType: "EVENT" | "FACILITY" | "ORGANIZATION";
+  }>,
+  evidenceManifest: Record<string, unknown>,
+): Promise<Record<string, unknown> | null> => {
+  const reviewPass = result.disposition === "BOUNDED_REPAIR_SUBMITTED"
+    ? result.payload.repairPass
+    : 1;
+  const reviewerJobDedupeKey = [
+    "mapping-review",
+    authorized.claim.id,
+    result.payload.packageHash,
+    reviewPass,
+  ].join(":");
+  return gatewayDomainRecord(await gatewayJobs.upsert?.({
+    where: { dedupeKey: reviewerJobDedupeKey },
+    create: {
+      id: createId(),
+      dedupeKey: reviewerJobDedupeKey,
+      queue: "AFFILIATE_REVIEW",
+      lane: "SUPPLY_REVIEW",
+      role: "SUPPLY_REVIEWER",
+      subjectType: "SUPPLY_REVIEWER",
+      subjectId: lineage.supplySourceId,
+      parentClaimId: authorized.claim.id,
+      subjectJson: asPrismaJson({
+        type: "SUPPLY_REVIEWER",
+        supplySourceId: lineage.supplySourceId,
+        producerClaimId: authorized.claim.id,
+        producerWorkerId: authorized.claim.workerId,
+        producerInvocationId: authorized.claim.invocationId,
+        producerWorkspaceId: authorized.claim.workspaceId,
+        committedPackageHash: result.payload.packageHash,
+        targetId: target.targetId,
+        targetType: target.targetType,
+        reviewPass,
+      }),
+      evidenceManifestJson: asPrismaJson(evidenceManifest),
+      supplySourceId: lineage.supplySourceId,
+      expectedLifecycleGeneration: Number(lineage.source?.lifecycleGeneration),
+      status: "QUEUED",
+      priority: Number(authorized.job.priority ?? 0),
+      nextAttemptAt: now,
+      claimGeneration: 0,
+    },
+    update: {},
+  }));
+};
+
+type MappingDomainDelegates = Readonly<{
+  mappingJobs: GatewayDomainDelegate;
+  gatewayJobs: GatewayDomainDelegate | undefined;
+  artifacts: GatewayDomainDelegate | undefined;
+}>;
+
+const mappingDomainDelegatesFor = (
+  transaction: Prisma.TransactionClient,
+): MappingDomainDelegates | null => {
+  const mappingJobs = gatewayDomainDelegate(
+    transaction,
+    "affiliateSourceMappingJobs",
+  );
+  if (!mappingJobs?.findUnique || !mappingJobs.update) return null;
+  return {
+    mappingJobs,
+    gatewayJobs: gatewayDomainDelegate(
+      transaction,
+      "affiliateAgentGatewayJobs",
+    ),
+    artifacts: gatewayDomainDelegate(
+      transaction,
+      "affiliateAgentGatewayArtifacts",
+    ),
+  };
+};
+
+const mappingArtifactRowsFor = async (
+  artifacts: GatewayDomainDelegate,
+  claimId: string,
+  claimGeneration: number,
+): Promise<Record<string, unknown>[]> => {
+  const result = await artifacts.findMany?.({
+    where: { claimId, claimGeneration },
+  });
+  return Array.isArray(result)
+    ? result.map(gatewayDomainRecord).filter(
+        (value): value is Record<string, unknown> => value !== null,
+      )
+    : [];
+};
+const committedMappingProducerLineageFor = async (
+  sources: GatewayDomainDelegate | undefined,
+  lineage: MappingProducerLineage,
+): Promise<MappingProducerLineage> => {
+  const committedSourceId = typeof lineage.source?.id === "string"
+    ? lineage.source.id.trim()
+    : "";
+  const committedSource = committedSourceId.length > 0
+    ? await mappingSourceFor(sources, committedSourceId)
+    : null;
+  if (!committedSource || committedSource.supplySourceId !== lineage.supplySourceId) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The committed mapping source could not be re-read after the producer transition.",
+    );
+  }
+  return {
+    ...lineage,
+    source: committedSource,
+  };
+};
+
+const applyMappingProducerSuccessDomainEffect = async (
+  transaction: Prisma.TransactionClient,
+  authorized: AuthorizedClaim,
+  result: MappingProducerSuccessTerminalResult,
+  now: Date,
+  delegates: MappingDomainDelegates,
+  lineage: MappingProducerLineage,
+  sources: GatewayDomainDelegate | undefined,
+): Promise<Readonly<Record<string, unknown>>> => {
+  const { mappingJobs, gatewayJobs, artifacts } = delegates;
+  await updateMappingProducerLineage(mappingJobs, lineage, result, now);
+  const committedLineage = await committedMappingProducerLineageFor(
+    sources,
+    lineage,
+  );
+  if (!gatewayJobs?.upsert || !artifacts?.findMany) {
+    return {
+      kind: "MAPPING_PRODUCER_TERMINAL_EFFECT",
+      mappingJobId: lineage.mappingJobId,
+      reviewerJobId: null,
+    };
+  }
+  const artifactRows = await mappingArtifactRowsFor(
+    artifacts,
+    authorized.claim.id,
+    authorized.claim.claimGeneration,
+  );
+  const reviewerArtifacts = mappingReviewerArtifactsFor(
+    artifactRows,
+    result.payload.packageHash,
+    authorized.claim.id,
+    authorized.claim.claimGeneration,
+  );
+  const evidenceManifest = mappingReviewerManifestFor(
+    authorized,
+    reviewerArtifacts,
+  );
+  const target = await mappingReviewerTargetFor(
+    gatewayDomainDelegate(transaction, "affiliateSupplyTargets"),
+    committedLineage,
+  );
+  const reviewerJob = await upsertMappingReviewerJob(
+    gatewayJobs,
+    authorized,
+    result,
+    now,
+    committedLineage,
+    target,
+    evidenceManifest,
+  );
+  return {
+    kind: "MAPPING_PRODUCER_TERMINAL_EFFECT",
+    mappingJobId: lineage.mappingJobId,
+    reviewerJobId: reviewerJob?.id ?? null,
+  };
+};
+
+const applyMappingProducerTerminalDomainEffect = async (
+  transaction: Prisma.TransactionClient,
+  authorized: AuthorizedClaim,
+  result: MappingProducerTerminalResult,
+  now: Date,
+): Promise<Readonly<Record<string, unknown>> | null> => {
+  const delegates = mappingDomainDelegatesFor(transaction);
+  if (!delegates) return null;
+  const sources = gatewayDomainDelegate(transaction, "affiliateScrapeSources");
+  const lineage = await mappingProducerLineageFor(
+    delegates.mappingJobs,
+    sources,
+    authorized,
+  );
+  if (!isMappingProducerSuccessTerminalResult(result)) {
+    return updateMappingProducerFailure(
+      delegates.mappingJobs,
+      sources,
+      lineage,
+      result,
+      now,
+    );
+  }
+  return applyMappingProducerSuccessDomainEffect(
+    transaction,
+    authorized,
+    result,
+    now,
+    delegates,
+    lineage,
+    sources,
+  );
+};
+
+const isMappingProducerTerminalResult = (
+  result: AffiliateAgentTerminalResultEnvelope,
+): result is MappingProducerTerminalResult =>
+  result.role === "MAPPING_PRODUCER"
+  && (
+    result.disposition === "PACKAGE_COMMITTED"
+    || result.disposition === "BOUNDED_REPAIR_SUBMITTED"
+    || result.disposition === "SOURCE_INCOMPATIBLE"
+    || result.disposition === "CONTRACT_GAP"
+  );
+
+const isGovernedTerminalDomainResult = (
+  result: AffiliateAgentTerminalResultEnvelope,
+): result is GovernedTerminalDomainResult =>
+  result.role === "COVERAGE_PLANNER"
+  || isMappingProducerTerminalResult(result);
+
+const governedTerminalDomainReady = (
+  transaction: Prisma.TransactionClient,
+  result: GovernedTerminalDomainResult,
+): boolean => {
+  if (result.role === "COVERAGE_PLANNER") {
+    const waves = gatewayDomainDelegate(
+      transaction,
+      "affiliateReplenishmentWaves",
+    );
+    return Boolean(waves?.findFirst && waves.update);
+  }
+  const mappingJobs = gatewayDomainDelegate(
+    transaction,
+    "affiliateSourceMappingJobs",
+  );
+  return Boolean(mappingJobs?.findUnique && mappingJobs.update);
+};
+
+const applyGovernedTerminalDomainResult = (
+  transaction: Prisma.TransactionClient,
+  authorized: AuthorizedClaim,
+  result: GovernedTerminalDomainResult,
+  now: Date,
+): Promise<Readonly<Record<string, unknown>> | null> =>
+  result.role === "COVERAGE_PLANNER"
+    ? applyCoveragePlannerTerminalDomainEffect(
+        transaction,
+        authorized,
+        result,
+        authorized.job.id,
+        now,
+      )
+    : applyMappingProducerTerminalDomainEffect(
+        transaction,
+        authorized,
+        result,
+        now,
+      );
+
+const terminalEffectReceiptDelegateFor = (
+  transaction: Prisma.TransactionClient,
+): GatewayDomainDelegate | null => {
+  const receipts = gatewayDomainDelegate(
+    transaction,
+    "affiliateAgentGatewayOperationReceipts",
+  );
+  return receipts?.findUnique && receipts.create && receipts.updateMany
+    ? receipts
+    : null;
+};
+
+const replayGovernedTerminalDomainEffect = async (
+  receipts: GatewayDomainDelegate,
+  claimId: string,
+  effectRequestHash: string,
+): Promise<string | null> => {
+  const existing = gatewayDomainRecord(await receipts.findUnique?.({
+    where: {
+      claimId_idempotencyKey: {
+        claimId,
+        idempotencyKey: "governed-terminal-domain-effect",
+      },
+    },
+  }));
+  if (!existing) return null;
+  if (existing.status === "SUCCEEDED" && existing.requestHash === effectRequestHash) {
+    return String(existing.id);
+  }
+  throw gatewayError(
+    "PARTIAL_COMMAND_UNRESOLVED",
+    "The governed terminal domain effect requires reconciliation.",
+    false,
+    String(existing.id),
+  );
+};
+
+const applyGovernedTerminalDomainEffect = async (
+  transaction: Prisma.TransactionClient,
+  dependencies: AffiliateAgentGatewayDependencies,
+  authorized: AuthorizedClaim,
+  result: AffiliateAgentTerminalResultEnvelope,
+  requestHash: string,
+): Promise<string | null> => {
+  if (!isGovernedTerminalDomainResult(result)) return null;
+  const receipts = terminalEffectReceiptDelegateFor(transaction);
+  if (!receipts) return null;
+  if (!governedTerminalDomainReady(transaction, result)) return null;
+  const effectRequestHash = hashAffiliateAgentValue({
+    terminalRequestHash: requestHash,
+    claimId: authorized.claim.id,
+    claimGeneration: authorized.claim.claimGeneration,
+    result,
+  });
+  const replayedReceiptId = await replayGovernedTerminalDomainEffect(
+    receipts,
+    authorized.claim.id,
+    effectRequestHash,
+  );
+  if (replayedReceiptId !== null) return replayedReceiptId;
+  const receiptId = dependencies.identifiers.create("receipt");
+  const now = dependencies.clock.now();
+  await receipts.create?.({
+    data: {
+      id: receiptId,
+      claimId: authorized.claim.id,
+      jobId: authorized.job.id,
+      claimGeneration: authorized.claim.claimGeneration,
+      idempotencyKey: "governed-terminal-domain-effect",
+      operationKind: "TERMINAL_EFFECT",
+      commandName: "GOVERNED_TERMINAL_DOMAIN_EFFECT",
+      requestHash: effectRequestHash,
+      status: "PENDING",
+      responseJson: asPrismaJson({ kind: "PENDING", result }),
+      startedAt: now,
+      reconcileAfter: now,
+      retentionClass: "INDEFINITE",
+    },
+  });
+  const safeOutput = await applyGovernedTerminalDomainResult(
+    transaction,
+    authorized,
+    result,
+    now,
+  );
+  if (safeOutput === null) {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The governed terminal domain effect did not produce a domain result.",
+    );
+  }
+  const responseHash = hashAffiliateAgentValue(safeOutput);
+  const updated = await receipts.updateMany?.({
+    where: {
+      id: receiptId,
+      status: "PENDING",
+      requestHash: effectRequestHash,
+    },
+    data: {
+      status: "SUCCEEDED",
+      responseHash,
+      responseJson: asPrismaJson({
+        kind: "SUCCEEDED",
+        result,
+        safeOutput,
+      }),
+      completedAt: now,
+      reconcileAfter: null,
+    },
+  });
+  if (gatewayDomainRecord(updated)?.count !== 1) {
+    throw new AffiliateAgentClaimRaceError();
+  }
+  return receiptId;
+};
+
+const persistTerminalResultCompletion = async (
+  transaction: Prisma.TransactionClient,
+  dependencies: AffiliateAgentGatewayDependencies,
+  authorized: AuthorizedClaim,
+  input: Extract<AffiliateAgentClaimOperation, { kind: "SUBMIT_RESULT" }>,
+  result: AffiliateAgentTerminalResultEnvelope,
+  requestHash: string,
+  postEffectCompletionReceiptId: string | undefined,
+  reviewerTerminalEffectReceiptId: string | undefined,
+  completionNow: Date,
+): Promise<AffiliateAgentTerminalAcceptedResult> => {
+  const receiptId = dependencies.identifiers.create("receipt");
+  const resultHash = hashAffiliateAgentValue(result);
+  const terminalResult: AffiliateAgentTerminalAcceptedResult = {
+    kind: "TERMINAL_ACCEPTED",
+    receiptId,
+    resultHash,
+    disposition: result.disposition,
+    completedAt: completionNow.toISOString(),
+  };
+  const claimCompleted =
+    await transaction.affiliateAgentGatewayClaims.updateMany({
+      where: {
+        id: authorized.claim.id,
+        status: "ACTIVE",
+        claimGeneration: authorized.claim.claimGeneration,
+        tokenInvalidatedAt: null,
+        ...(postEffectCompletionReceiptId === undefined &&
+        reviewerTerminalEffectReceiptId === undefined
+          ? {
+              leaseExpiresAt: { gt: completionNow },
+              hardDeadlineAt: { gte: completionNow },
+            }
+          : {}),
+      },
+      data: {
+        status: "COMPLETED",
+        terminalReceiptId: receiptId,
+        tokenInvalidatedAt: completionNow,
+        endedAt: completionNow,
+      },
+    });
+  if (claimCompleted.count !== 1) {
+    throw gatewayError(
+      "TOKEN_INVALIDATED",
+      "The terminal result lost the active claim compare-and-set.",
+    );
+  }
+  const jobCompleted = await transaction.affiliateAgentGatewayJobs.updateMany({
+    where: {
+      id: authorized.job.id,
+      status: "CLAIMED",
+      activeClaimId: authorized.claim.id,
+      claimGeneration: authorized.claim.claimGeneration,
+      eventSequence: authorized.job.eventSequence,
+    },
+    data: {
+      status: "COMPLETED",
+      activeClaimId: null,
+      terminalDisposition: result.disposition,
+      resultHash,
+      resultJson: asPrismaJson(result),
+      terminalReceiptId: receiptId,
+      finishedAt: completionNow,
+      eventSequence: { increment: 1 },
+    },
+  });
+  if (jobCompleted.count !== 1) {
+    throw new AffiliateAgentClaimRaceError();
+  }
+  await transaction.affiliateAgentGatewayOperationReceipts.create({
+    data: {
+      id: receiptId,
+      claimId: authorized.claim.id,
+      jobId: authorized.job.id,
+      claimGeneration: authorized.claim.claimGeneration,
+      idempotencyKey: input.idempotencyKey,
+      operationKind: input.kind,
+      requestHash,
+      status: "SUCCEEDED",
+      responseHash: hashAffiliateAgentValue(terminalResult),
+      responseJson: asPrismaJson(terminalResult),
+      startedAt: completionNow,
+      completedAt: completionNow,
+      retentionClass: "INDEFINITE",
+    },
+  });
+  await transaction.affiliateAgentGatewayEvents.create({
+    data: {
+      id: dependencies.identifiers.create("event"),
+      eventKey: `terminal:${receiptId}`,
+      jobId: authorized.job.id,
+      claimId: authorized.claim.id,
+      receiptId,
+      sequence: authorized.job.eventSequence + 1,
+      eventType: "CLAIM_TERMINAL_RESULT_ACCEPTED",
+      actorKind: "AGENT_INVOCATION",
+      actorId: authorized.claim.invocationId,
+      role: authorized.claim.role,
+      requestHash,
+      inputHash: resultHash,
+      outputHash: hashAffiliateAgentValue(terminalResult),
+      reasonCodes: [...result.reasonCodes],
+      payload: asPrismaJson({
+        disposition: result.disposition,
+        resultHash,
+      }),
+      retentionClass: "INDEFINITE",
+    },
+  });
+  return terminalResult;
+};
+
+const terminalResultTransactionAuthorizationOptions = (
+  reviewerTerminalEffectReceiptId: string | undefined,
+  postEffectCompletionReceiptId: string | undefined,
+): ClaimAuthorizationOptions | undefined =>
+  reviewerTerminalEffectReceiptId !== undefined
+    ? { postEffectCompletionReceiptId: reviewerTerminalEffectReceiptId }
+    : postEffectCompletionReceiptId === undefined
+      ? undefined
+      : { postEffectCompletionReceiptId };
+
+const executePreparedTerminalResultTransaction = (
+  dependencies: AffiliateAgentGatewayDependencies,
+  preparation: TerminalResultPreparation,
+) =>
+  dependencies.prisma.$transaction(
+    async (transaction) => {
+      const replay = await resolveTerminalResultTransactionReplay(
+        transaction,
+        dependencies,
+        preparation.input,
+        preparation.requestHash,
+      );
+      if (replay.result) return replay.result;
+      const now = dependencies.clock.now();
+      const authorized = await authorizeClaimOperation(
+        dependencies,
+        preparation.input.authorization,
+        now,
+        transaction,
+        terminalResultTransactionAuthorizationOptions(
+          preparation.reviewerTerminalEffectReceiptId,
+          preparation.postEffectCompletionReceiptId,
+        ),
+      );
+      if (replay.existing) {
+        if (
+          replay.existing.operationKind !== preparation.input.kind ||
+          replay.existing.requestHash !== preparation.requestHash
+        ) {
+          throw gatewayError(
+            "IDEMPOTENCY_KEY_REUSED",
+            "The operation idempotency key was used for different input.",
+          );
+        }
+        throw gatewayError(
+          "OPERATION_IN_PROGRESS",
+          "The terminal result is still in progress.",
+          true,
+        );
+      }
+      const parsedResult = affiliateAgentTerminalResultEnvelopeSchema.safeParse(
+        preparation.input.result,
+      );
+      if (!parsedResult.success) {
+        return handleInvalidTerminalResult(
+          transaction,
+          dependencies,
+          authorized,
+          preparation.input,
+          preparation.requestHash,
+          now,
+        );
+      }
+      validateTerminalResultScope(authorized, parsedResult.data);
+      await assertReviewerTerminalEffectCompleted(
+        transaction,
+        authorized,
+        parsedResult.data,
+        preparation.reviewerTerminalEffectReceiptId,
+      );
+      await assertMappingTerminalResultCommitted(
+        transaction,
+        authorized,
+        parsedResult.data,
+      );
+      await assertHumanLifecycleCommandRecorded(
+        transaction,
+        authorized,
+        parsedResult.data,
+      );
+      await assertClaimEvidenceRefs(
+        transaction,
+        authorized.claim.id,
+        parsedResult.data.evidenceRefs,
+        "EVIDENCE_REFERENCE_NOT_PERMITTED",
+        "The terminal result references evidence outside the claim manifest.",
+      );
+      await applyGovernedTerminalDomainEffect(
+        transaction,
+        dependencies,
+        authorized,
+        parsedResult.data,
+        preparation.requestHash,
+      );
+      await assertNoPendingClaimEffects(transaction, authorized.claim.id);
+      const completionNow = dependencies.clock.now();
+      const isPostEffectCompletionAllowed =
+        preparation.postEffectCompletionReceiptId !== undefined ||
+        preparation.reviewerTerminalEffectReceiptId !== undefined;
+      assertTerminalCompletionTiming(
+        authorized,
+        completionNow,
+        isPostEffectCompletionAllowed,
+      );
+      return persistTerminalResultCompletion(
+        transaction,
+        dependencies,
+        authorized,
+        preparation.input,
+        parsedResult.data,
+        preparation.requestHash,
+        preparation.postEffectCompletionReceiptId,
+        preparation.reviewerTerminalEffectReceiptId,
+        completionNow,
+      );
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+  );
+
+const shouldRetryTerminalResultAfterError = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  input: Extract<AffiliateAgentClaimOperation, { kind: "SUBMIT_RESULT" }>,
+  error: unknown,
+  retryableConflict: boolean,
+  attempt: number,
+): Promise<boolean> => {
+  if (retryableConflict && attempt < SERIALIZABLE_TRANSACTION_ATTEMPTS) {
+    return true;
+  }
+  if (
+    !(error instanceof AffiliateAgentGatewayError) ||
+    error.code !== "PARTIAL_COMMAND_UNRESOLVED" ||
+    error.safeMessage !== INVOCATION_FAILURE_PENDING_EFFECT_MESSAGE ||
+    error.receiptId === undefined
+  ) {
+    return false;
+  }
+  const pendingEffects = await reconcilePendingEffectsForClaim(
+    dependencies,
+    input.authorization.claimId,
+  );
+  return pendingEffects.examined > 0 && pendingEffects.unresolved === 0;
+};
+
+const executePreparedTerminalResult = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  preparation: TerminalResultPreparation,
+): Promise<AffiliateAgentSubmitResultOutcome> => {
   for (
     let attempt = 1;
     attempt <= SERIALIZABLE_TRANSACTION_ATTEMPTS;
     attempt += 1
   ) {
     try {
-      return await dependencies.prisma.$transaction(
-        async (transaction) => {
-          const existing =
-            await transaction.affiliateAgentGatewayOperationReceipts.findUnique(
-              {
-                where: {
-                  claimId_idempotencyKey: {
-                    claimId: input.authorization.claimId,
-                    idempotencyKey: input.idempotencyKey,
-                  },
-                },
-              },
-            );
-          if (existing?.status === "SUCCEEDED") {
-            if (
-              existing.operationKind !== input.kind ||
-              existing.requestHash !== requestHash
-            ) {
-              throw gatewayError(
-                "IDEMPOTENCY_KEY_REUSED",
-                "The operation idempotency key was used for different input.",
-              );
-            }
-            const replayResult = replaySubmitResult(existing.responseJson);
-            const replayAuthorizationOptions =
-              replayResult.kind === "TERMINAL_ACCEPTED" ||
-              replayResult.kind === "INVOCATION_FAILED"
-                ? { terminalReplayReceiptId: existing.id }
-                : undefined;
-            await authorizeClaimOperation(
-              dependencies,
-              input.authorization,
-              dependencies.clock.now(),
-              transaction,
-              replayAuthorizationOptions,
-            );
-            return replayResult;
-          }
-          const now = dependencies.clock.now();
-          const authorized = await authorizeClaimOperation(
-            dependencies,
-            input.authorization,
-            now,
-            transaction,
-            reviewerTerminalEffectReceiptId !== undefined
-              ? {
-                  postEffectCompletionReceiptId:
-                    reviewerTerminalEffectReceiptId,
-                }
-              : postEffectCompletionReceiptId === undefined
-                ? undefined
-                : { postEffectCompletionReceiptId },
-          );
-          if (existing) {
-            if (
-              existing.operationKind !== input.kind ||
-              existing.requestHash !== requestHash
-            ) {
-              throw gatewayError(
-                "IDEMPOTENCY_KEY_REUSED",
-                "The operation idempotency key was used for different input.",
-              );
-            }
-            throw gatewayError(
-              "OPERATION_IN_PROGRESS",
-              "The terminal result is still in progress.",
-              true,
-            );
-          }
-
-          const parsedResult =
-            affiliateAgentTerminalResultEnvelopeSchema.safeParse(input.result);
-          if (!parsedResult.success) {
-            const submissionNumber = authorized.claim.schemaCorrectionCount + 1;
-            if (
-              submissionNumber < 1 ||
-              submissionNumber > AFFILIATE_AGENT_MAX_SCHEMA_CORRECTIONS
-            ) {
-              throw gatewayError(
-                "SCHEMA_CORRECTIONS_EXHAUSTED",
-                "The schema-correction budget is exhausted.",
-              );
-            }
-            if (submissionNumber === AFFILIATE_AGENT_MAX_SCHEMA_CORRECTIONS) {
-              await assertNoPendingClaimEffects(
-                transaction,
-                authorized.claim.id,
-              );
-              return recordInvocationFailureTransition({
-                dependencies,
-                transaction,
-                claim: authorized.claim,
-                job: authorized.job,
-                idempotencyKey: input.idempotencyKey,
-                operationKind: input.kind,
-                requestHash,
-                failureCode: "SCHEMA_CORRECTIONS_EXHAUSTED",
-                failedAt: now,
-                safeSummary:
-                  "The invocation exhausted its schema-correction budget.",
-                evidenceRefs: [],
-                claimCasFailure: "GATEWAY_ERROR",
-                claimStatus: "FAILED",
-                actorKind: "AGENT_INVOCATION",
-                actorId: authorized.claim.invocationId,
-                eventType: "CLAIM_INVOCATION_FAILED",
-                schemaCorrectionCount: submissionNumber,
-              });
-            }
-
-            const receiptId = dependencies.identifiers.create("receipt");
-            const remainingSubmissions =
-              AFFILIATE_AGENT_MAX_SCHEMA_CORRECTIONS - submissionNumber;
-            const issues = [...schemaCorrectionIssues];
-            const correctionResult: AffiliateAgentSchemaCorrectionResult = {
-              kind: "SCHEMA_CORRECTION_REQUIRED",
-              receiptId,
-              submissionNumber: submissionNumber as 1 | 2,
-              remainingSubmissions: remainingSubmissions as 1 | 2,
-              issues,
-              correctionPrompt: [
-                `Correct terminal result submission ${submissionNumber}. Remaining submissions: ${remainingSubmissions}.`,
-                canonicalizeAffiliateAgentValue({ issues }),
-              ].join("\n"),
-            };
-            const claimUpdated =
-              await transaction.affiliateAgentGatewayClaims.updateMany({
-                where: {
-                  id: authorized.claim.id,
-                  status: "ACTIVE",
-                  claimGeneration: authorized.claim.claimGeneration,
-                  tokenInvalidatedAt: null,
-                },
-                data: { schemaCorrectionCount: submissionNumber },
-              });
-            if (claimUpdated.count !== 1) {
-              throw gatewayError(
-                "CLAIM_NOT_ACTIVE",
-                "The schema correction lost the active claim compare-and-set.",
-              );
-            }
-            const jobUpdated =
-              await transaction.affiliateAgentGatewayJobs.updateMany({
-                where: {
-                  id: authorized.job.id,
-                  status: "CLAIMED",
-                  activeClaimId: authorized.claim.id,
-                  claimGeneration: authorized.claim.claimGeneration,
-                  eventSequence: authorized.job.eventSequence,
-                },
-                data: { eventSequence: { increment: 1 } },
-              });
-            if (jobUpdated.count !== 1) {
-              throw new AffiliateAgentClaimRaceError();
-            }
-            await transaction.affiliateAgentGatewayOperationReceipts.create({
-              data: {
-                id: receiptId,
-                claimId: authorized.claim.id,
-                jobId: authorized.job.id,
-                claimGeneration: authorized.claim.claimGeneration,
-                idempotencyKey: input.idempotencyKey,
-                operationKind: input.kind,
-                requestHash,
-                status: "SUCCEEDED",
-                responseHash: hashAffiliateAgentValue(correctionResult),
-                responseJson: asPrismaJson(correctionResult),
-                startedAt: now,
-                completedAt: now,
-                retentionClass: "INDEFINITE",
-              },
-            });
-            await transaction.affiliateAgentGatewayEvents.create({
-              data: {
-                id: dependencies.identifiers.create("event"),
-                eventKey: `schema-correction:${receiptId}`,
-                jobId: authorized.job.id,
-                claimId: authorized.claim.id,
-                receiptId,
-                sequence: authorized.job.eventSequence + 1,
-                eventType: "CLAIM_SCHEMA_CORRECTION_REQUIRED",
-                actorKind: "AGENT_INVOCATION",
-                actorId: authorized.claim.invocationId,
-                role: authorized.claim.role,
-                requestHash,
-                outputHash: hashAffiliateAgentValue(correctionResult),
-                payload: asPrismaJson({
-                  submissionNumber,
-                  remainingSubmissions,
-                }),
-                retentionClass: "INDEFINITE",
-              },
-            });
-            return correctionResult;
-          }
-          validateTerminalResultScope(authorized, parsedResult.data);
-          if (parsedResult.data.role === "SUPPLY_REVIEWER") {
-            const effectRequestHash = reviewerTerminalEffectRequestHash(
-              authorized.claim,
-              parsedResult.data,
-            );
-            const effectReceipt =
-              await transaction.affiliateAgentGatewayOperationReceipts.findUnique(
-                {
-                  where: {
-                    claimId_idempotencyKey: {
-                      claimId: authorized.claim.id,
-                      idempotencyKey: reviewerTerminalEffectIdempotencyKey(),
-                    },
-                  },
-                },
-              );
-            const effectState = effectReceipt
-              ? parseReviewerTerminalEffectState(
-                  effectReceipt.responseJson,
-                  effectReceipt.id,
-                )
-              : null;
-            if (
-              !effectReceipt ||
-              effectReceipt.id !== reviewerTerminalEffectReceiptId ||
-              effectReceipt.status !== "SUCCEEDED" ||
-              effectReceipt.requestHash !== effectRequestHash ||
-              effectReceipt.startedAt >= authorized.claim.leaseExpiresAt ||
-              effectReceipt.startedAt >= authorized.claim.hardDeadlineAt ||
-              effectState?.kind !== "SUCCEEDED" ||
-              effectState.resultHash !==
-                hashAffiliateAgentValue(parsedResult.data)
-            ) {
-              throw gatewayError(
-                "PARTIAL_COMMAND_UNRESOLVED",
-                "The reviewer terminal effect is not durably completed.",
-                false,
-                effectReceipt?.id,
-              );
-            }
-          }
-          if (
-            parsedResult.data.role === "MAPPING_PRODUCER" &&
-            (parsedResult.data.disposition === "PACKAGE_COMMITTED" ||
-              parsedResult.data.disposition === "BOUNDED_REPAIR_SUBMITTED")
-          ) {
-            if (
-              parsedResult.data.disposition === "BOUNDED_REPAIR_SUBMITTED" &&
-              authorized.envelope.role === "MAPPING_PRODUCER" &&
-              parsedResult.data.payload.repairPass !==
-                authorized.envelope.subject.pass
-            ) {
-              throw gatewayError(
-                "TERMINAL_DISPOSITION_NOT_PERMITTED",
-                "The repair pass does not match the Mapping Producer claim.",
-              );
-            }
-            const commitReceipt =
-              await transaction.affiliateAgentGatewayOperationReceipts.findUnique(
-                {
-                  where: {
-                    id: parsedResult.data.payload.commitReceiptId,
-                  },
-                },
-              );
-            let commitResult: AffiliateAgentCommandResult | null = null;
-            if (commitReceipt !== null && commitReceipt.responseJson !== null) {
-              try {
-                commitResult = replayCommand(commitReceipt.responseJson);
-              } catch {
-                commitResult = null;
-              }
-            }
-            if (
-              commitReceipt?.claimId !== authorized.claim.id ||
-              commitReceipt?.jobId !== authorized.job.id ||
-              commitReceipt?.claimGeneration !==
-                authorized.claim.claimGeneration ||
-              commitReceipt?.operationKind !== "EXECUTE_COMMAND" ||
-              commitReceipt?.status !== "SUCCEEDED" ||
-              commitReceipt?.commandName !== "COMMIT_DECLARATIVE_PACKAGE" ||
-              commitResult?.receiptId !== commitReceipt?.id ||
-              commitResult?.commandType !== "COMMIT_DECLARATIVE_PACKAGE" ||
-              commitResult?.safeOutput?.packageHash !==
-                parsedResult.data.payload.packageHash
-            ) {
-              throw gatewayError(
-                "TERMINAL_DISPOSITION_NOT_PERMITTED",
-                "The mapping result does not match a committed package receipt.",
-              );
-            }
-          }
-          if (
-            parsedResult.data.role === "HUMAN_DIRECTED_EXECUTOR" &&
-            authorized.envelope.role === "HUMAN_DIRECTED_EXECUTOR" &&
-            parsedResult.data.disposition === "LIFECYCLE_COMMAND_EXECUTED"
-          ) {
-            const subject = authorized.envelope.subject;
-            const lifecycleReceipt =
-              await transaction.affiliateAgentGatewayOperationReceipts.findUnique(
-                {
-                  where: { id: parsedResult.data.payload.receiptId },
-                },
-              );
-            let lifecycleCommandResult: AffiliateAgentCommandResult | null =
-              null;
-            if (lifecycleReceipt) {
-              try {
-                lifecycleCommandResult = replayCommand(
-                  lifecycleReceipt.responseJson,
-                );
-              } catch {
-                lifecycleCommandResult = null;
-              }
-            }
-            const nextLifecycleGeneration =
-              typeof lifecycleCommandResult?.safeOutput?.lifecycleGeneration ===
-                "number" &&
-              Number.isInteger(
-                lifecycleCommandResult.safeOutput.lifecycleGeneration,
-              )
-                ? lifecycleCommandResult.safeOutput.lifecycleGeneration
-                : null;
-            if (
-              parsedResult.data.payload.caseId !== subject.caseId ||
-              parsedResult.data.payload.lifecycleCommandRef !==
-                subject.lifecycleCommandRef ||
-              lifecycleReceipt?.claimId !== authorized.claim.id ||
-              lifecycleReceipt.status !== "SUCCEEDED" ||
-              lifecycleReceipt.commandName !==
-                "EXECUTE_RECORDED_LIFECYCLE_COMMAND" ||
-              lifecycleCommandResult?.receiptId !== lifecycleReceipt.id ||
-              lifecycleCommandResult.commandType !==
-                "EXECUTE_RECORDED_LIFECYCLE_COMMAND" ||
-              authorized.claim.lifecycleGeneration === null ||
-              nextLifecycleGeneration !==
-                authorized.claim.lifecycleGeneration + 1
-            ) {
-              throw gatewayError(
-                "TERMINAL_DISPOSITION_NOT_PERMITTED",
-                "The human-directed result does not match the recorded lifecycle command.",
-              );
-            }
-          }
-
-          await assertClaimEvidenceRefs(
-            transaction,
-            authorized.claim.id,
-            parsedResult.data.evidenceRefs,
-            "EVIDENCE_REFERENCE_NOT_PERMITTED",
-            "The terminal result references evidence outside the claim manifest.",
-          );
-
-          await assertNoPendingClaimEffects(transaction, authorized.claim.id);
-          const completionNow = dependencies.clock.now();
-          const isPostEffectCompletionAllowed =
-            postEffectCompletionReceiptId !== undefined ||
-            reviewerTerminalEffectReceiptId !== undefined;
-          if (
-            !isPostEffectCompletionAllowed &&
-            authorized.claim.hardDeadlineAt < completionNow
-          ) {
-            throw gatewayError(
-              "HARD_DEADLINE_EXCEEDED",
-              "The claim hard deadline passed before terminal completion.",
-            );
-          }
-          if (
-            !isPostEffectCompletionAllowed &&
-            authorized.claim.leaseExpiresAt <= completionNow
-          ) {
-            throw gatewayError(
-              "LEASE_EXPIRED",
-              "The claim lease expired before terminal completion.",
-            );
-          }
-          const receiptId = dependencies.identifiers.create("receipt");
-          const resultHash = hashAffiliateAgentValue(parsedResult.data);
-          const terminalResult: AffiliateAgentTerminalAcceptedResult = {
-            kind: "TERMINAL_ACCEPTED",
-            receiptId,
-            resultHash,
-            disposition: parsedResult.data.disposition,
-            completedAt: completionNow.toISOString(),
-          };
-          const claimCompleted =
-            await transaction.affiliateAgentGatewayClaims.updateMany({
-              where: {
-                id: authorized.claim.id,
-                status: "ACTIVE",
-                claimGeneration: authorized.claim.claimGeneration,
-                tokenInvalidatedAt: null,
-                ...(postEffectCompletionReceiptId === undefined &&
-                reviewerTerminalEffectReceiptId === undefined
-                  ? {
-                      leaseExpiresAt: { gt: completionNow },
-                      hardDeadlineAt: { gte: completionNow },
-                    }
-                  : {}),
-              },
-              data: {
-                status: "COMPLETED",
-                terminalReceiptId: receiptId,
-                tokenInvalidatedAt: completionNow,
-                endedAt: completionNow,
-              },
-            });
-          if (claimCompleted.count !== 1) {
-            throw gatewayError(
-              "TOKEN_INVALIDATED",
-              "The terminal result lost the active claim compare-and-set.",
-            );
-          }
-          const jobCompleted =
-            await transaction.affiliateAgentGatewayJobs.updateMany({
-              where: {
-                id: authorized.job.id,
-                status: "CLAIMED",
-                activeClaimId: authorized.claim.id,
-                claimGeneration: authorized.claim.claimGeneration,
-                eventSequence: authorized.job.eventSequence,
-              },
-              data: {
-                status: "COMPLETED",
-                activeClaimId: null,
-                terminalDisposition: parsedResult.data.disposition,
-                resultHash,
-                resultJson: asPrismaJson(parsedResult.data),
-                terminalReceiptId: receiptId,
-                finishedAt: completionNow,
-                eventSequence: { increment: 1 },
-              },
-            });
-          if (jobCompleted.count !== 1) {
-            throw new AffiliateAgentClaimRaceError();
-          }
-          await transaction.affiliateAgentGatewayOperationReceipts.create({
-            data: {
-              id: receiptId,
-              claimId: authorized.claim.id,
-              jobId: authorized.job.id,
-              claimGeneration: authorized.claim.claimGeneration,
-              idempotencyKey: input.idempotencyKey,
-              operationKind: input.kind,
-              requestHash,
-              status: "SUCCEEDED",
-              responseHash: hashAffiliateAgentValue(terminalResult),
-              responseJson: asPrismaJson(terminalResult),
-              startedAt: completionNow,
-              completedAt: completionNow,
-              retentionClass: "INDEFINITE",
-            },
-          });
-          await transaction.affiliateAgentGatewayEvents.create({
-            data: {
-              id: dependencies.identifiers.create("event"),
-              eventKey: `terminal:${receiptId}`,
-              jobId: authorized.job.id,
-              claimId: authorized.claim.id,
-              receiptId,
-              sequence: authorized.job.eventSequence + 1,
-              eventType: "CLAIM_TERMINAL_RESULT_ACCEPTED",
-              actorKind: "AGENT_INVOCATION",
-              actorId: authorized.claim.invocationId,
-              role: authorized.claim.role,
-              requestHash,
-              inputHash: resultHash,
-              outputHash: hashAffiliateAgentValue(terminalResult),
-              reasonCodes: [...parsedResult.data.reasonCodes],
-              payload: asPrismaJson({
-                disposition: parsedResult.data.disposition,
-                resultHash,
-              }),
-              retentionClass: "INDEFINITE",
-            },
-          });
-          return terminalResult;
-        },
-        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      return await executePreparedTerminalResultTransaction(
+        dependencies,
+        preparation,
       );
     } catch (error) {
       const retryableConflict =
         error instanceof AffiliateAgentClaimRaceError ||
-        prismaErrorCode(error) === "P2034";
-      if (retryableConflict && attempt < SERIALIZABLE_TRANSACTION_ATTEMPTS) {
+        isSerializableTransactionConflict(error);
+      if (
+        await shouldRetryTerminalResultAfterError(
+          dependencies,
+          preparation.input,
+          error,
+          retryableConflict,
+          attempt,
+        )
+      ) {
         continue;
       }
-      if (
-        error instanceof AffiliateAgentGatewayError &&
-        error.code === "PARTIAL_COMMAND_UNRESOLVED" &&
-        error.safeMessage === INVOCATION_FAILURE_PENDING_EFFECT_MESSAGE &&
-        error.receiptId !== undefined
-      ) {
-        const pendingEffects = await reconcilePendingEffectsForClaim(
-          dependencies,
-          input.authorization.claimId,
-        );
-        if (pendingEffects.examined > 0 && pendingEffects.unresolved === 0)
-          continue;
-      }
       if (error instanceof AffiliateAgentGatewayError) throw error;
-      throw gatewayError(
+      throw gatewayErrorForPersistenceFailure(
+        error,
         "INTERNAL_ERROR",
         "The terminal result could not be completed.",
         retryableConflict,
@@ -6247,6 +12411,16 @@ const performTerminalResult = async (
     "The terminal result could not be completed.",
     true,
   );
+
+};
+const performTerminalResult = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  input: Extract<AffiliateAgentClaimOperation, { kind: "SUBMIT_RESULT" }>,
+): Promise<AffiliateAgentSubmitResultOutcome> => {
+  assertIdentifier(input.idempotencyKey, "Operation idempotency key");
+  const preparation = await prepareTerminalResult(dependencies, input);
+  if (preparation.kind === "REPLAY") return preparation.result;
+  return executePreparedTerminalResult(dependencies, preparation);
 };
 
 const reconcileLimit = (input?: AffiliateAgentReconcileRequest): number => {
@@ -6276,6 +12450,134 @@ const reconcileBefore = (
   return before;
 };
 
+const isImpossibleReconciliationState = (
+  claim: AffiliateAgentGatewayClaims | null,
+  job: AffiliateAgentGatewayJobs | null,
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  isImpossibleState: boolean,
+): boolean => {
+  if (isImpossibleState || !claim || !job) return true;
+  if (
+    claim.jobId !== receipt.jobId ||
+    claim.claimGeneration !== receipt.claimGeneration
+  ) {
+    return true;
+  }
+  if (
+    job.activeClaimId !== receipt.claimId ||
+    job.claimGeneration !== receipt.claimGeneration
+  ) {
+    return true;
+  }
+  return claim.status !== "ACTIVE" || job.status !== "CLAIMED";
+};
+
+const reconciliationSafeErrorCode = (
+  stateImpossible: boolean,
+): "GATEWAY_ADMISSION_HALTED" | "PARTIAL_COMMAND_UNRESOLVED" =>
+  stateImpossible
+    ? "GATEWAY_ADMISSION_HALTED"
+    : "PARTIAL_COMMAND_UNRESOLVED";
+
+const updateReconciliationClaim = async (
+  transaction: Prisma.TransactionClient,
+  claim: AffiliateAgentGatewayClaims | null,
+  safeErrorCode: "GATEWAY_ADMISSION_HALTED" | "PARTIAL_COMMAND_UNRESOLVED",
+  now: Date,
+): Promise<void> => {
+  if (claim?.status !== "ACTIVE") return;
+  await transaction.affiliateAgentGatewayClaims.updateMany({
+    where: {
+      id: claim.id,
+      status: "ACTIVE",
+      claimGeneration: claim.claimGeneration,
+      tokenInvalidatedAt: null,
+    },
+    data: {
+      status: "RECONCILIATION_REQUIRED",
+      tokenInvalidatedAt: now,
+      safeFailureCode: safeErrorCode,
+      safeFailureSummary: "An external effect could not be determined safely.",
+    },
+  });
+};
+
+const updateReconciliationJob = async (
+  transaction: Prisma.TransactionClient,
+  claim: AffiliateAgentGatewayClaims | null,
+  job: AffiliateAgentGatewayJobs | null,
+): Promise<void> => {
+  if (
+    job?.status !== "CLAIMED" ||
+    !claim ||
+    job.activeClaimId !== claim.id ||
+    job.claimGeneration !== claim.claimGeneration
+  ) {
+    return;
+  }
+  await transaction.affiliateAgentGatewayJobs.updateMany({
+    where: {
+      id: job.id,
+      status: "CLAIMED",
+      activeClaimId: claim.id,
+      claimGeneration: claim.claimGeneration,
+    },
+    data: {
+      status: "RECONCILIATION_REQUIRED",
+      nextAttemptAt: null,
+    },
+  });
+};
+
+const markReceiptReconciliationRequiredTransaction = async (
+  transaction: Prisma.TransactionClient,
+  dependencies: AffiliateAgentGatewayDependencies,
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  now: Date,
+  isImpossibleState: boolean,
+): Promise<"HALTED_LANE" | "HALTED_GATEWAY" | "UNCHANGED"> => {
+  const currentReceipt =
+    await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
+      where: { id: receipt.id },
+    });
+  if (!currentReceipt || currentReceipt.status !== "PENDING") {
+    return "UNCHANGED";
+  }
+  const [claim, job] = await Promise.all([
+    transaction.affiliateAgentGatewayClaims.findUnique({
+      where: { id: currentReceipt.claimId },
+    }),
+    transaction.affiliateAgentGatewayJobs.findUnique({
+      where: { id: currentReceipt.jobId },
+    }),
+  ]);
+  const stateImpossible = isImpossibleReconciliationState(
+    claim,
+    job,
+    currentReceipt,
+    isImpossibleState,
+  );
+  const safeErrorCode = reconciliationSafeErrorCode(stateImpossible);
+  const receiptUpdated =
+    await transaction.affiliateAgentGatewayOperationReceipts.updateMany({
+      where: {
+        id: currentReceipt.id,
+        status: "PENDING",
+        requestHash: currentReceipt.requestHash,
+      },
+      data: {
+        status: "UNKNOWN",
+        safeErrorCode,
+        completedAt: now,
+        reconcileAfter: null,
+      },
+    });
+  if (receiptUpdated.count !== 1) return "UNCHANGED";
+  await updateReconciliationClaim(transaction, claim, safeErrorCode, now);
+  await updateReconciliationJob(transaction, claim, job);
+  return stateImpossible ? "HALTED_GATEWAY" : "HALTED_LANE";
+};
+
 const markReceiptReconciliationRequired = async (
   dependencies: AffiliateAgentGatewayDependencies,
   receipt: AffiliateAgentGatewayOperationReceipts,
@@ -6283,88 +12585,242 @@ const markReceiptReconciliationRequired = async (
   isImpossibleState: boolean,
 ): Promise<"HALTED_LANE" | "HALTED_GATEWAY" | "UNCHANGED"> =>
   dependencies.prisma.$transaction(
-    async (transaction) => {
-      const currentReceipt =
-        await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
-          where: { id: receipt.id },
-        });
-      if (!currentReceipt || currentReceipt.status !== "PENDING") {
-        return "UNCHANGED";
-      }
-      const [claim, job] = await Promise.all([
-        transaction.affiliateAgentGatewayClaims.findUnique({
-          where: { id: currentReceipt.claimId },
-        }),
-        transaction.affiliateAgentGatewayJobs.findUnique({
-          where: { id: currentReceipt.jobId },
-        }),
-      ]);
-      const isStateImpossible =
-        isImpossibleState ||
-        !claim ||
-        !job ||
-        claim.jobId !== currentReceipt.jobId ||
-        claim.claimGeneration !== currentReceipt.claimGeneration ||
-        job.activeClaimId !== currentReceipt.claimId ||
-        job.claimGeneration !== currentReceipt.claimGeneration ||
-        claim.status !== "ACTIVE" ||
-        job.status !== "CLAIMED";
-      const safeErrorCode = isStateImpossible
-        ? "GATEWAY_ADMISSION_HALTED"
-        : "PARTIAL_COMMAND_UNRESOLVED";
-      const receiptUpdated =
-        await transaction.affiliateAgentGatewayOperationReceipts.updateMany({
-          where: {
-            id: currentReceipt.id,
-            status: "PENDING",
-            requestHash: currentReceipt.requestHash,
-          },
-          data: {
-            status: "UNKNOWN",
-            safeErrorCode,
-            completedAt: now,
-            reconcileAfter: null,
-          },
-        });
-      if (receiptUpdated.count !== 1) return "UNCHANGED";
+    (transaction) =>
+      markReceiptReconciliationRequiredTransaction(
+        transaction,
+        dependencies,
+        receipt,
+        now,
+        isImpossibleState,
+      ),
+    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+  );
 
-      if (claim?.status === "ACTIVE") {
-        await transaction.affiliateAgentGatewayClaims.updateMany({
-          where: {
-            id: claim.id,
-            status: "ACTIVE",
-            claimGeneration: claim.claimGeneration,
-            tokenInvalidatedAt: null,
-          },
-          data: {
-            status: "RECONCILIATION_REQUIRED",
-            tokenInvalidatedAt: now,
-            safeFailureCode: safeErrorCode,
-            safeFailureSummary:
-              "An external effect could not be determined safely.",
-          },
-        });
-      }
+type ExternalFinalizationContext =
+  | Readonly<{ kind: "UNCHANGED" | "IMPOSSIBLE" }>
+  | Readonly<{
+      kind: "READY";
+      currentReceipt: AffiliateAgentGatewayOperationReceipts;
+      reservedEvent: Readonly<{ inputHash: string }>;
+      claim: AffiliateAgentGatewayClaims;
+      job: AffiliateAgentGatewayJobs;
+    }>;
+
+const matchesExternalReceipt = (
+  currentReceipt: AffiliateAgentGatewayOperationReceipts | null,
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  commandType: string,
+): boolean => {
+  if (!currentReceipt || currentReceipt.status !== "PENDING") return false;
+  if (currentReceipt.commandName !== commandType) return false;
+  if (currentReceipt.requestHash !== receipt.requestHash) return false;
+  return currentReceipt.externalOperationKey === receipt.externalOperationKey;
+};
+
+const loadExternalFinalizationContext = async (
+  transaction: Prisma.TransactionClient,
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  commandType: string,
+): Promise<ExternalFinalizationContext> => {
+  const currentReceipt =
+    await transaction.affiliateAgentGatewayOperationReceipts.findUnique({
+      where: { id: receipt.id },
+    });
+  if (currentReceipt?.status === "SUCCEEDED") return { kind: "UNCHANGED" };
+  if (
+    !currentReceipt ||
+    !matchesExternalReceipt(currentReceipt, receipt, commandType)
+  ) {
+    return { kind: "IMPOSSIBLE" };
+  }
+  const reservedEvent =
+    await transaction.affiliateAgentGatewayEvents.findFirst({
+      where: {
+        receiptId: currentReceipt.id,
+        eventType: "EXTERNAL_COMMAND_RESERVED",
+      },
+    });
+  if (!reservedEvent || typeof reservedEvent.inputHash !== "string") {
+    return { kind: "IMPOSSIBLE" };
+  }
+  const [claim, job] = await Promise.all([
+    transaction.affiliateAgentGatewayClaims.findUnique({
+      where: { id: currentReceipt.claimId },
+    }),
+    transaction.affiliateAgentGatewayJobs.findUnique({
+      where: { id: currentReceipt.jobId },
+    }),
+  ]);
+  if (!claim || !job) return { kind: "IMPOSSIBLE" };
+  return {
+    kind: "READY",
+    currentReceipt,
+    reservedEvent: { inputHash: reservedEvent.inputHash },
+    claim,
+    job,
+  };
+};
+
+const isExternalFinalizationStateValid = (
+  context: Extract<ExternalFinalizationContext, Readonly<{ kind: "READY" }>>,
+  now: Date,
+): boolean => {
+  const { currentReceipt, claim, job } = context;
+  if (claim.jobId !== currentReceipt.jobId) return false;
+  if (claim.claimGeneration !== currentReceipt.claimGeneration) return false;
+  if (claim.status !== "ACTIVE") return false;
+  if (
+    claim.leaseExpiresAt <= now &&
+    currentReceipt.startedAt >= claim.leaseExpiresAt
+  ) {
+    return false;
+  }
+  if (
+    claim.hardDeadlineAt < now &&
+    currentReceipt.startedAt >= claim.hardDeadlineAt
+  ) {
+    return false;
+  }
+  if (job.status !== "CLAIMED") return false;
+  if (job.activeClaimId !== currentReceipt.claimId) return false;
+  return job.claimGeneration === currentReceipt.claimGeneration;
+};
+
+const completeExternalFinalization = async (
+  transaction: Prisma.TransactionClient,
+  dependencies: AffiliateAgentGatewayDependencies,
+  context: Extract<ExternalFinalizationContext, Readonly<{ kind: "READY" }>>,
+  capture: RecoveredExternalOutput,
+  artifactRowId: string,
+  responseHash: string,
+  commandResult: AffiliateAgentCommandResult,
+  completedAt: Date,
+): Promise<"COMPLETED"> => {
+  const { currentReceipt, reservedEvent, claim, job } = context;
+  await ensureExternalArtifact(transaction, {
+    claimId: currentReceipt.claimId,
+    claimGeneration: currentReceipt.claimGeneration,
+    evidenceKind:
+      currentReceipt.commandName === "RUN_DISCOVERY_QUERY"
+        ? "PROVIDER_RESULT"
+        : "CAPTURED_PAGE",
+    output: capture,
+    rowId: artifactRowId,
+    receiptId: currentReceipt.id,
+  });
+  const receiptUpdated =
+    await transaction.affiliateAgentGatewayOperationReceipts.updateMany({
+      where: {
+        id: currentReceipt.id,
+        status: "PENDING",
+        requestHash: currentReceipt.requestHash,
+      },
+      data: {
+        status: "SUCCEEDED",
+        responseHash,
+        responseJson: asPrismaJson(commandResult),
+        completedAt,
+        reconcileAfter: null,
+      },
+    });
+  const jobUpdated =
+    await transaction.affiliateAgentGatewayJobs.updateMany({
+      where: {
+        id: job.id,
+        status: "CLAIMED",
+        activeClaimId: claim.id,
+        claimGeneration: claim.claimGeneration,
+        eventSequence: job.eventSequence,
+      },
+      data: { eventSequence: { increment: 1 } },
+    });
+  if (receiptUpdated.count !== 1 || jobUpdated.count !== 1) {
+    throw new AffiliateAgentClaimRaceError();
+  }
+  await transaction.affiliateAgentGatewayEvents.create({
+    data: {
+      id: dependencies.identifiers.create("event"),
+      eventKey: `external-command-succeeded:${currentReceipt.id}`,
+      jobId: job.id,
+      claimId: claim.id,
+      receiptId: currentReceipt.id,
+      sequence: job.eventSequence + 1,
+      eventType: "EXTERNAL_COMMAND_SUCCEEDED",
+      actorKind: "GATEWAY_RECONCILER",
+      actorId: "affiliate-agent-gateway",
+      role: claim.role,
+      requestHash: currentReceipt.requestHash,
+      inputHash: reservedEvent.inputHash,
+      outputHash: responseHash,
+      payload: asPrismaJson({ evidenceRef: capture.evidenceRef }),
+      retentionClass: "INDEFINITE",
+    },
+  });
+  return "COMPLETED";
+};
+
+const loadRecoveredExternalOutput = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  recovered: Readonly<Record<string, unknown>>,
+  commandType: "CAPTURE_CLAIM_URL" | "RUN_DISCOVERY_QUERY",
+): Promise<RecoveredExternalOutput | null> => {
+  try {
+    const capture = parseRecoveredExternalOutput(recovered, commandType);
+    const artifactRead = await dependencies.artifacts.readImmutable({
+      fileId: capture.artifactId,
+      maximumBytes: MAXIMUM_GATEWAY_ARTIFACT_BYTES,
+    });
+    verifyArtifactRead(
+      {
+        contentHash: capture.sha256,
+        mimeType: capture.mimeType,
+        byteSize: capture.byteSize,
+      },
+      artifactRead,
+    );
+    return capture;
+  } catch (error) {
+    assertDatabaseAuthorizationFailure(error);
+    return null;
+  }
+};
+
+const executeRecoveredExternalReceiptTransaction = (
+  dependencies: AffiliateAgentGatewayDependencies,
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  commandType: "CAPTURE_CLAIM_URL" | "RUN_DISCOVERY_QUERY",
+  capture: RecoveredExternalOutput,
+  artifactRowId: string,
+  responseHash: string,
+  commandResult: AffiliateAgentCommandResult,
+  completedAt: Date,
+): Promise<"COMPLETED" | "IMPOSSIBLE" | "UNCHANGED"> =>
+  dependencies.prisma.$transaction(
+    async (transaction) => {
+      const context = await loadExternalFinalizationContext(
+        transaction,
+        receipt,
+        commandType,
+      );
+      if (context.kind !== "READY") return context.kind;
       if (
-        job?.status === "CLAIMED" &&
-        claim &&
-        job.activeClaimId === claim.id &&
-        job.claimGeneration === claim.claimGeneration
+        !isExternalFinalizationStateValid(
+          context,
+          dependencies.clock.now(),
+        )
       ) {
-        await transaction.affiliateAgentGatewayJobs.updateMany({
-          where: {
-            id: job.id,
-            status: "CLAIMED",
-            activeClaimId: claim.id,
-            claimGeneration: claim.claimGeneration,
-          },
-          data: {
-            status: "RECONCILIATION_REQUIRED",
-            nextAttemptAt: null,
-          },
-        });
+        return "IMPOSSIBLE";
       }
-      return isStateImpossible ? "HALTED_GATEWAY" : "HALTED_LANE";
+      return completeExternalFinalization(
+        transaction,
+        dependencies,
+        context,
+        capture,
+        artifactRowId,
+        responseHash,
+        commandResult,
+        completedAt,
+      );
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
   );
@@ -6381,24 +12837,12 @@ const finalizeRecoveredExternalReceipt = async (
     return "IMPOSSIBLE";
   }
   const commandType = receipt.commandName;
-  let capture: RecoveredExternalOutput;
-  try {
-    capture = parseRecoveredExternalOutput(recovered);
-    const artifactRead = await dependencies.artifacts.readImmutable({
-      fileId: capture.artifactId,
-      maximumBytes: MAXIMUM_GATEWAY_ARTIFACT_BYTES,
-    });
-    verifyArtifactRead(
-      {
-        contentHash: capture.sha256,
-        mimeType: capture.mimeType,
-        byteSize: capture.byteSize,
-      },
-      artifactRead,
-    );
-  } catch {
-    return "LANE_FAILURE";
-  }
+  const capture = await loadRecoveredExternalOutput(
+    dependencies,
+    recovered,
+    commandType,
+  );
+  if (capture === null) return "LANE_FAILURE";
   const completedAt = dependencies.clock.now();
   const safeOutput = capture;
   const responseHash = hashAffiliateAgentValue({
@@ -6420,147 +12864,46 @@ const finalizeRecoveredExternalReceipt = async (
     attempt += 1
   ) {
     try {
-      return await dependencies.prisma.$transaction(
-        async (transaction) => {
-          const currentReceipt =
-            await transaction.affiliateAgentGatewayOperationReceipts.findUnique(
-              {
-                where: { id: receipt.id },
-              },
-            );
-          if (currentReceipt?.status === "SUCCEEDED") return "UNCHANGED";
-          if (
-            !currentReceipt ||
-            currentReceipt.status !== "PENDING" ||
-            currentReceipt.commandName !== commandType ||
-            currentReceipt.requestHash !== receipt.requestHash ||
-            currentReceipt.externalOperationKey !== receipt.externalOperationKey
-          ) {
-            return "IMPOSSIBLE";
-          }
-          const reservedEvent =
-            await transaction.affiliateAgentGatewayEvents.findFirst({
-              where: {
-                receiptId: currentReceipt.id,
-                eventType: "EXTERNAL_COMMAND_RESERVED",
-              },
-            });
-          if (!reservedEvent || typeof reservedEvent.inputHash !== "string") {
-            return "IMPOSSIBLE";
-          }
-          const [claim, job] = await Promise.all([
-            transaction.affiliateAgentGatewayClaims.findUnique({
-              where: { id: currentReceipt.claimId },
-            }),
-            transaction.affiliateAgentGatewayJobs.findUnique({
-              where: { id: currentReceipt.jobId },
-            }),
-          ]);
-          const finalizationNow = dependencies.clock.now();
-          if (
-            !claim ||
-            !job ||
-            claim.jobId !== currentReceipt.jobId ||
-            claim.claimGeneration !== currentReceipt.claimGeneration ||
-            claim.status !== "ACTIVE" ||
-            (claim.leaseExpiresAt <= finalizationNow &&
-              currentReceipt.startedAt >= claim.leaseExpiresAt) ||
-            (claim.hardDeadlineAt < finalizationNow &&
-              currentReceipt.startedAt >= claim.hardDeadlineAt) ||
-            job.status !== "CLAIMED" ||
-            job.activeClaimId !== currentReceipt.claimId ||
-            job.claimGeneration !== currentReceipt.claimGeneration
-          ) {
-            return "IMPOSSIBLE";
-          }
-          await ensureExternalArtifact(transaction, {
-            claimId: currentReceipt.claimId,
-            claimGeneration: currentReceipt.claimGeneration,
-            evidenceKind:
-              commandType === "RUN_DISCOVERY_QUERY"
-                ? "PROVIDER_RESULT"
-                : "CAPTURED_PAGE",
-            output: capture,
-            rowId: artifactRowId,
-            receiptId: currentReceipt.id,
-          });
-          const receiptUpdated =
-            await transaction.affiliateAgentGatewayOperationReceipts.updateMany(
-              {
-                where: {
-                  id: currentReceipt.id,
-                  status: "PENDING",
-                  requestHash: currentReceipt.requestHash,
-                },
-                data: {
-                  status: "SUCCEEDED",
-                  responseHash,
-                  responseJson: asPrismaJson(commandResult),
-                  completedAt: completedAt,
-                  reconcileAfter: null,
-                },
-              },
-            );
-          const jobUpdated =
-            await transaction.affiliateAgentGatewayJobs.updateMany({
-              where: {
-                id: job.id,
-                status: "CLAIMED",
-                activeClaimId: claim.id,
-                claimGeneration: claim.claimGeneration,
-                eventSequence: job.eventSequence,
-              },
-              data: { eventSequence: { increment: 1 } },
-            });
-          if (receiptUpdated.count !== 1 || jobUpdated.count !== 1) {
-            throw new AffiliateAgentClaimRaceError();
-          }
-          await transaction.affiliateAgentGatewayEvents.create({
-            data: {
-              id: dependencies.identifiers.create("event"),
-              eventKey: `external-command-succeeded:${currentReceipt.id}`,
-              jobId: job.id,
-              claimId: claim.id,
-              receiptId: currentReceipt.id,
-              sequence: job.eventSequence + 1,
-              eventType: "EXTERNAL_COMMAND_SUCCEEDED",
-              actorKind: "GATEWAY_RECONCILER",
-              actorId: "affiliate-agent-gateway",
-              role: claim.role,
-              requestHash: currentReceipt.requestHash,
-              inputHash: reservedEvent.inputHash,
-              outputHash: responseHash,
-              payload: asPrismaJson({ evidenceRef: capture.evidenceRef }),
-              retentionClass: "INDEFINITE",
-            },
-          });
-          return "COMPLETED";
-        },
-        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      return await executeRecoveredExternalReceiptTransaction(
+        dependencies,
+        receipt,
+        commandType,
+        capture,
+        artifactRowId,
+        responseHash,
+        commandResult,
+        completedAt,
       );
     } catch (error) {
       const retryableConflict =
         error instanceof AffiliateAgentClaimRaceError ||
-        prismaErrorCode(error) === "P2034";
+        isSerializableTransactionConflict(error);
       if (retryableConflict && attempt < SERIALIZABLE_TRANSACTION_ATTEMPTS) {
         continue;
       }
       if (error instanceof AffiliateAgentGatewayError) throw error;
+      assertDatabaseAuthorizationFailure(error);
       return "IMPOSSIBLE";
     }
   }
   return "IMPOSSIBLE";
 };
 
-const finalizeRecoveredLifecycleReceipt = async (
-  dependencies: AffiliateAgentGatewayDependencies,
+type RecoveredLifecycleState = Readonly<{
+  claim: AffiliateAgentGatewayClaims;
+  job: AffiliateAgentGatewayJobs;
+}>;
+
+type RecoveredLifecycleReceipt = AffiliateAgentGatewayOperationReceipts &
+  Readonly<{
+    commandName: "EXECUTE_RECORDED_LIFECYCLE_COMMAND";
+    requestHash: string;
+  }>;
+
+function assertRecoveredLifecycleReceipt(
   receipt: AffiliateAgentGatewayOperationReceipts,
-  recoveredSafeOutput: Readonly<Record<string, unknown>>,
-): Promise<"COMPLETED"> => {
-  if (
-    receipt.commandName !== "EXECUTE_RECORDED_LIFECYCLE_COMMAND" ||
-    receipt.requestHash === null
-  ) {
+): asserts receipt is RecoveredLifecycleReceipt {
+  if (receipt.commandName !== "EXECUTE_RECORDED_LIFECYCLE_COMMAND") {
     throw gatewayError(
       "PARTIAL_COMMAND_UNRESOLVED",
       "The recovered lifecycle receipt is invalid.",
@@ -6568,7 +12911,34 @@ const finalizeRecoveredLifecycleReceipt = async (
       receipt.id,
     );
   }
-  const safeOutput = parseBoundedSafeOutput(recoveredSafeOutput, receipt.id);
+  if (receipt.requestHash === null) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The recovered lifecycle receipt is invalid.",
+      false,
+      receipt.id,
+    );
+  }
+}
+
+const isRecoveredLifecycleStateValid = (
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  claim: AffiliateAgentGatewayClaims,
+  job: AffiliateAgentGatewayJobs,
+): boolean => {
+  if (claim.status !== "ACTIVE") return false;
+  if (claim.jobId !== job.id) return false;
+  if (claim.claimGeneration !== receipt.claimGeneration) return false;
+  if (claim.lifecycleGeneration === null) return false;
+  if (job.status !== "CLAIMED") return false;
+  if (job.activeClaimId !== claim.id) return false;
+  return job.claimGeneration === receipt.claimGeneration;
+};
+
+const loadRecoveredLifecycleState = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  receipt: AffiliateAgentGatewayOperationReceipts,
+): Promise<RecoveredLifecycleState> => {
   const claim =
     await dependencies.prisma.affiliateAgentGatewayClaims.findUnique({
       where: { id: receipt.claimId },
@@ -6576,17 +12946,7 @@ const finalizeRecoveredLifecycleReceipt = async (
   const job = await dependencies.prisma.affiliateAgentGatewayJobs.findUnique({
     where: { id: receipt.jobId },
   });
-  if (
-    !claim ||
-    !job ||
-    claim.status !== "ACTIVE" ||
-    claim.jobId !== job.id ||
-    claim.claimGeneration !== receipt.claimGeneration ||
-    claim.lifecycleGeneration === null ||
-    job.status !== "CLAIMED" ||
-    job.activeClaimId !== claim.id ||
-    job.claimGeneration !== receipt.claimGeneration
-  ) {
+  if (!claim || !job || !isRecoveredLifecycleStateValid(receipt, claim, job)) {
     throw gatewayError(
       "PARTIAL_COMMAND_UNRESOLVED",
       "The recovered lifecycle claim state is inconsistent.",
@@ -6594,14 +12954,36 @@ const finalizeRecoveredLifecycleReceipt = async (
       receipt.id,
     );
   }
-  if (safeOutput.lifecycleGeneration !== claim.lifecycleGeneration + 1) {
-    throw gatewayError(
-      "LIFECYCLE_TRANSITION_CONFLICT",
-      "The recovered lifecycle command did not return the next lifecycle generation.",
-      false,
-      receipt.id,
-    );
+  return { claim, job };
+};
+
+const assertRecoveredLifecycleGeneration = (
+  safeOutput: Readonly<Record<string, unknown>>,
+  claim: AffiliateAgentGatewayClaims,
+  receiptId: string,
+): void => {
+  const lifecycleGeneration = claim.lifecycleGeneration;
+  if (
+    lifecycleGeneration !== null &&
+    safeOutput.lifecycleGeneration === lifecycleGeneration + 1
+  ) {
+    return;
   }
+  throw gatewayError(
+    "LIFECYCLE_TRANSITION_CONFLICT",
+    "The recovered lifecycle command did not return the next lifecycle generation.",
+    false,
+    receiptId,
+  );
+};
+
+const parseRecoveredLifecycleEnvelope = (
+  claim: AffiliateAgentGatewayClaims,
+  receiptId: string,
+): Extract<
+  AffiliateAgentClaimEnvelope,
+  Readonly<{ role: "HUMAN_DIRECTED_EXECUTOR" }>
+> => {
   const envelope = affiliateAgentClaimEnvelopeSchema.parse(
     claim.claimEnvelopeJson,
   );
@@ -6610,9 +12992,235 @@ const finalizeRecoveredLifecycleReceipt = async (
       "PARTIAL_COMMAND_UNRESOLVED",
       "The recovered lifecycle claim role is invalid.",
       false,
+      receiptId,
+    );
+  }
+  return envelope;
+};
+
+function assertCurrentLifecycleReceipt(
+  current: AffiliateAgentGatewayOperationReceipts | null,
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  claim: AffiliateAgentGatewayClaims,
+  job: AffiliateAgentGatewayJobs,
+): asserts current is AffiliateAgentGatewayOperationReceipts {
+  if (!current) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The recovered lifecycle receipt changed during reconciliation.",
+      false,
       receipt.id,
     );
   }
+  if (current.status !== "PENDING") {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The recovered lifecycle receipt changed during reconciliation.",
+      false,
+      receipt.id,
+    );
+  }
+  if (current.claimId !== claim.id || current.jobId !== job.id) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The recovered lifecycle receipt changed during reconciliation.",
+      false,
+      receipt.id,
+    );
+  }
+  if (
+    current.claimGeneration !== claim.claimGeneration ||
+    current.requestHash !== receipt.requestHash
+  ) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The recovered lifecycle receipt changed during reconciliation.",
+      false,
+      receipt.id,
+    );
+  }
+}
+
+const isLifecycleReceiptWithinDeadline = (
+  current: AffiliateAgentGatewayOperationReceipts,
+  claim: AffiliateAgentGatewayClaims,
+  now: Date,
+): boolean => {
+  if (
+    claim.leaseExpiresAt <= now &&
+    current.startedAt >= claim.leaseExpiresAt
+  ) {
+    return false;
+  }
+  if (
+    claim.hardDeadlineAt < now &&
+    current.startedAt >= claim.hardDeadlineAt
+  ) {
+    return false;
+  }
+  return true;
+};
+
+const isCurrentLifecycleStateValid = (
+  current: AffiliateAgentGatewayOperationReceipts,
+  currentClaim: AffiliateAgentGatewayClaims,
+  currentJob: AffiliateAgentGatewayJobs,
+  expectedClaim: AffiliateAgentGatewayClaims,
+  expectedJob: AffiliateAgentGatewayJobs,
+  now: Date,
+): boolean => {
+  if (currentClaim.status !== "ACTIVE") return false;
+  if (currentClaim.jobId !== expectedJob.id) return false;
+  if (currentClaim.claimGeneration !== expectedClaim.claimGeneration) {
+    return false;
+  }
+  if (currentClaim.lifecycleGeneration !== expectedClaim.lifecycleGeneration) {
+    return false;
+  }
+  if (!isLifecycleReceiptWithinDeadline(current, currentClaim, now)) {
+    return false;
+  }
+  if (currentJob.status !== "CLAIMED") return false;
+  if (currentJob.activeClaimId !== currentClaim.id) return false;
+  return currentJob.claimGeneration === currentClaim.claimGeneration;
+};
+
+const assertCurrentLifecycleState = (
+  current: AffiliateAgentGatewayOperationReceipts,
+  currentClaim: AffiliateAgentGatewayClaims | null,
+  currentJob: AffiliateAgentGatewayJobs | null,
+  expectedClaim: AffiliateAgentGatewayClaims,
+  expectedJob: AffiliateAgentGatewayJobs,
+  receiptId: string,
+  now: Date,
+): Readonly<{
+  claim: AffiliateAgentGatewayClaims;
+  job: AffiliateAgentGatewayJobs;
+}> => {
+  if (
+    !currentClaim ||
+    !currentJob ||
+    !isCurrentLifecycleStateValid(
+      current,
+      currentClaim,
+      currentJob,
+      expectedClaim,
+      expectedJob,
+      now,
+    )
+  ) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The recovered lifecycle job changed during reconciliation.",
+      false,
+      receiptId,
+    );
+  }
+  return { claim: currentClaim, job: currentJob };
+};
+
+const lifecycleCommandRefFromReservedEvent = (
+  payload: Prisma.JsonValue | null,
+): string | null => {
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
+    return null;
+  }
+  const lifecycleCommandRef = payload.lifecycleCommandRef;
+  return typeof lifecycleCommandRef === "string"
+    ? lifecycleCommandRef
+    : null;
+};
+
+const finalizeRecoveredLifecycleTransaction = async (
+  transaction: Prisma.TransactionClient,
+  dependencies: AffiliateAgentGatewayDependencies,
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  claim: AffiliateAgentGatewayClaims,
+  job: AffiliateAgentGatewayJobs,
+  envelope: Extract<
+    AffiliateAgentClaimEnvelope,
+    Readonly<{ role: "HUMAN_DIRECTED_EXECUTOR" }>
+  >,
+  responseHash: string,
+  commandResult: AffiliateAgentCommandResult,
+  completedAt: Date,
+): Promise<"COMPLETED"> => {
+  const receiptUpdated =
+    await transaction.affiliateAgentGatewayOperationReceipts.updateMany({
+      where: {
+        id: receipt.id,
+        status: "PENDING",
+        requestHash: receipt.requestHash,
+      },
+      data: {
+        status: "SUCCEEDED",
+        responseHash,
+        responseJson: asPrismaJson(commandResult),
+        completedAt,
+        reconcileAfter: null,
+      },
+    });
+  const jobUpdated = await transaction.affiliateAgentGatewayJobs.updateMany({
+    where: {
+      id: job.id,
+      status: "CLAIMED",
+      activeClaimId: claim.id,
+      claimGeneration: claim.claimGeneration,
+      eventSequence: job.eventSequence,
+    },
+    data: { eventSequence: { increment: 1 } },
+  });
+  if (receiptUpdated.count !== 1 || jobUpdated.count !== 1) {
+    throw new AffiliateAgentClaimRaceError();
+  }
+  const reservedEvent =
+    await transaction.affiliateAgentGatewayEvents.findFirst({
+      where: {
+        receiptId: receipt.id,
+        eventType: "LIFECYCLE_COMMAND_RESERVED",
+      },
+    });
+  const lifecycleCommandRef = lifecycleCommandRefFromReservedEvent(
+    reservedEvent?.payload ?? null,
+  );
+  await transaction.affiliateAgentGatewayEvents.create({
+    data: {
+      id: dependencies.identifiers.create("event"),
+      eventKey: `lifecycle-command-succeeded:${receipt.id}`,
+      jobId: job.id,
+      claimId: claim.id,
+      receiptId: receipt.id,
+      sequence: job.eventSequence + 1,
+      eventType: "LIFECYCLE_COMMAND_SUCCEEDED",
+      actorKind: "AGENT_INVOCATION",
+      actorId: claim.invocationId,
+      role: claim.role,
+      requestHash: receipt.requestHash,
+      outputHash: responseHash,
+      payload: asPrismaJson({
+        recordedHumanActorId: envelope.subject.recordedHumanActorId,
+        executingAgentId: claim.workerId,
+        ...(lifecycleCommandRef === null ? {} : { lifecycleCommandRef }),
+      }),
+      retentionClass: "INDEFINITE",
+    },
+  });
+  return "COMPLETED";
+};
+
+const finalizeRecoveredLifecycleReceipt = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  recoveredSafeOutput: Readonly<Record<string, unknown>>,
+): Promise<"COMPLETED"> => {
+  assertRecoveredLifecycleReceipt(receipt);
+  const safeOutput = parseBoundedSafeOutput(recoveredSafeOutput, receipt.id);
+  const { claim, job } = await loadRecoveredLifecycleState(
+    dependencies,
+    receipt,
+  );
+  assertRecoveredLifecycleGeneration(safeOutput, claim, receipt.id);
+  const envelope = parseRecoveredLifecycleEnvelope(claim, receipt.id);
   const completedAt = dependencies.clock.now();
   const responseHash = hashAffiliateAgentValue({
     commandType: receipt.commandName,
@@ -6633,21 +13241,7 @@ const finalizeRecoveredLifecycleReceipt = async (
           where: { id: receipt.id },
         });
       if (current?.status === "SUCCEEDED") return "COMPLETED" as const;
-      if (
-        !current ||
-        current.status !== "PENDING" ||
-        current.claimId !== claim.id ||
-        current.jobId !== job.id ||
-        current.claimGeneration !== claim.claimGeneration ||
-        current.requestHash !== receipt.requestHash
-      ) {
-        throw gatewayError(
-          "PARTIAL_COMMAND_UNRESOLVED",
-          "The recovered lifecycle receipt changed during reconciliation.",
-          false,
-          receipt.id,
-        );
-      }
+      assertCurrentLifecycleReceipt(current, receipt, claim, job);
       const [currentClaim, currentJob] = await Promise.all([
         transaction.affiliateAgentGatewayClaims.findUnique({
           where: { id: claim.id },
@@ -6656,97 +13250,26 @@ const finalizeRecoveredLifecycleReceipt = async (
           where: { id: job.id },
         }),
       ]);
-      const finalizationNow = dependencies.clock.now();
-      if (
-        !currentClaim ||
-        currentClaim.status !== "ACTIVE" ||
-        currentClaim.jobId !== job.id ||
-        currentClaim.claimGeneration !== claim.claimGeneration ||
-        currentClaim.lifecycleGeneration !== claim.lifecycleGeneration ||
-        (currentClaim.leaseExpiresAt <= finalizationNow &&
-          current.startedAt >= currentClaim.leaseExpiresAt) ||
-        (currentClaim.hardDeadlineAt < finalizationNow &&
-          current.startedAt >= currentClaim.hardDeadlineAt) ||
-        !currentJob ||
-        currentJob.status !== "CLAIMED" ||
-        currentJob.activeClaimId !== currentClaim.id ||
-        currentJob.claimGeneration !== currentClaim.claimGeneration
-      ) {
-        throw gatewayError(
-          "PARTIAL_COMMAND_UNRESOLVED",
-          "The recovered lifecycle job changed during reconciliation.",
-          false,
-          receipt.id,
-        );
-      }
-      const receiptUpdated =
-        await transaction.affiliateAgentGatewayOperationReceipts.updateMany({
-          where: {
-            id: receipt.id,
-            status: "PENDING",
-            requestHash: receipt.requestHash,
-          },
-          data: {
-            status: "SUCCEEDED",
-            responseHash,
-            responseJson: asPrismaJson(commandResult),
-            completedAt: completedAt,
-            reconcileAfter: null,
-          },
-        });
-      const jobUpdated = await transaction.affiliateAgentGatewayJobs.updateMany(
-        {
-          where: {
-            id: job.id,
-            status: "CLAIMED",
-            activeClaimId: claim.id,
-            claimGeneration: claim.claimGeneration,
-            eventSequence: currentJob.eventSequence,
-          },
-          data: { eventSequence: { increment: 1 } },
-        },
+      const currentState = assertCurrentLifecycleState(
+        current,
+        currentClaim,
+        currentJob,
+        claim,
+        job,
+        receipt.id,
+        dependencies.clock.now(),
       );
-      if (receiptUpdated.count !== 1 || jobUpdated.count !== 1) {
-        throw new AffiliateAgentClaimRaceError();
-      }
-      const reservedEvent =
-        await transaction.affiliateAgentGatewayEvents.findFirst({
-          where: {
-            receiptId: receipt.id,
-            eventType: "LIFECYCLE_COMMAND_RESERVED",
-          },
-        });
-      const reservedPayload = reservedEvent?.payload;
-      const lifecycleCommandRef =
-        reservedPayload !== null &&
-        typeof reservedPayload === "object" &&
-        !Array.isArray(reservedPayload) &&
-        typeof reservedPayload.lifecycleCommandRef === "string"
-          ? reservedPayload.lifecycleCommandRef
-          : null;
-      await transaction.affiliateAgentGatewayEvents.create({
-        data: {
-          id: dependencies.identifiers.create("event"),
-          eventKey: `lifecycle-command-succeeded:${receipt.id}`,
-          jobId: job.id,
-          claimId: claim.id,
-          receiptId: receipt.id,
-          sequence: currentJob.eventSequence + 1,
-          eventType: "LIFECYCLE_COMMAND_SUCCEEDED",
-          actorKind: "AGENT_INVOCATION",
-          actorId: claim.invocationId,
-          role: claim.role,
-          requestHash: receipt.requestHash,
-          outputHash: responseHash,
-          payload: asPrismaJson({
-            recordedHumanActorId: envelope.subject.recordedHumanActorId,
-            executingAgentId: claim.workerId,
-            ...(lifecycleCommandRef === null ? {} : { lifecycleCommandRef }),
-          }),
-          retentionClass: "INDEFINITE",
-        },
-      });
-      return "COMPLETED" as const;
+      return finalizeRecoveredLifecycleTransaction(
+        transaction,
+        dependencies,
+        receipt,
+        currentState.claim,
+        currentState.job,
+        envelope,
+        responseHash,
+        commandResult,
+        completedAt,
+      );
     },
     {
       code: "PARTIAL_COMMAND_UNRESOLVED",
@@ -6788,6 +13311,762 @@ const findActiveReviewerTerminalEffectReceiptIds = async (
   return rows.map(({ id }) => id);
 };
 
+type ReconciliationReceiptRecovery = Readonly<{
+  recovered: Readonly<Record<string, unknown>> | null;
+  reviewerTerminalEffectResult: AffiliateAgentReviewerTerminalResult | null;
+  reviewerTerminalEffectReservation: ReviewerTerminalEffectReservation | null;
+  isImpossible: boolean;
+}>;
+
+const impossibleReceiptRecovery = (): ReconciliationReceiptRecovery => ({
+  recovered: null,
+  reviewerTerminalEffectResult: null,
+  reviewerTerminalEffectReservation: null,
+  isImpossible: true,
+});
+
+const recoverExternalReconciliationReceipt = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  receipt: AffiliateAgentGatewayOperationReceipts,
+): Promise<ReconciliationReceiptRecovery> => {
+  const adapter =
+    receipt.commandName === "RUN_DISCOVERY_QUERY"
+      ? dependencies.commands.external.RUN_DISCOVERY_QUERY
+      : dependencies.commands.external.CAPTURE_CLAIM_URL;
+  if (typeof receipt.externalOperationKey !== "string" || !adapter) {
+    return impossibleReceiptRecovery();
+  }
+  try {
+    return {
+      recovered: await adapter.recover(receipt.externalOperationKey),
+      reviewerTerminalEffectResult: null,
+      reviewerTerminalEffectReservation: null,
+      isImpossible: false,
+    };
+  } catch {
+    return {
+      recovered: null,
+      reviewerTerminalEffectResult: null,
+      reviewerTerminalEffectReservation: null,
+      isImpossible: false,
+    };
+  }
+};
+
+const recoverLifecycleReconciliationReceipt = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  receipt: AffiliateAgentGatewayOperationReceipts,
+): Promise<ReconciliationReceiptRecovery> => {
+  if (dependencies.lifecycle.kind !== "AVAILABLE") {
+    return impossibleReceiptRecovery();
+  }
+  try {
+    return {
+      recovered: await dependencies.lifecycle.recover(receipt.id),
+      reviewerTerminalEffectResult: null,
+      reviewerTerminalEffectReservation: null,
+      isImpossible: false,
+    };
+  } catch {
+    return {
+      recovered: null,
+      reviewerTerminalEffectResult: null,
+      reviewerTerminalEffectReservation: null,
+      isImpossible: false,
+    };
+  }
+};
+
+type ReviewerTerminalRecoveryContext = Readonly<{
+  claim: AffiliateAgentGatewayClaims | null;
+  job: AffiliateAgentGatewayJobs | null;
+  envelope: AffiliateAgentClaimEnvelope | null;
+  pendingEffectState: Extract<
+    ReviewerTerminalEffectReceiptState,
+    Readonly<{ kind: "PENDING" }>
+  > | null;
+  completedEffectState: Extract<
+    ReviewerTerminalEffectReceiptState,
+    Readonly<{ kind: "SUCCEEDED" }>
+  > | null;
+  reviewerResult: AffiliateAgentReviewerTerminalResult | null;
+}>;
+
+const parseReviewerTerminalEffectStateSafely = (
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  shouldParse: boolean,
+): ReviewerTerminalEffectReceiptState | null => {
+  if (!shouldParse) return null;
+  try {
+    return parseReviewerTerminalEffectState(receipt.responseJson, receipt.id);
+  } catch {
+    return null;
+  }
+};
+
+const reviewerTerminalEffectStateParts = (
+  effectState: ReviewerTerminalEffectReceiptState | null,
+): Pick<
+  ReviewerTerminalRecoveryContext,
+  "pendingEffectState" | "completedEffectState" | "reviewerResult"
+> => {
+  const pendingEffectState =
+    effectState?.kind === "PENDING" ? effectState : null;
+  const completedEffectState =
+    effectState?.kind === "SUCCEEDED" ? effectState : null;
+  return {
+    pendingEffectState,
+    completedEffectState,
+    reviewerResult:
+      pendingEffectState?.result ?? completedEffectState?.result ?? null,
+  };
+};
+
+const loadReviewerTerminalRecoveryContext = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  receipt: AffiliateAgentGatewayOperationReceipts,
+): Promise<ReviewerTerminalRecoveryContext> => {
+  const [claim, job] = await Promise.all([
+    dependencies.prisma.affiliateAgentGatewayClaims.findUnique({
+      where: { id: receipt.claimId },
+    }),
+    dependencies.prisma.affiliateAgentGatewayJobs.findUnique({
+      where: { id: receipt.jobId },
+    }),
+  ]);
+  const parsedEnvelope = claim
+    ? affiliateAgentClaimEnvelopeSchema.safeParse(claim.claimEnvelopeJson)
+    : null;
+  const envelope =
+    parsedEnvelope?.success === true ? parsedEnvelope.data : null;
+  const effectState = parseReviewerTerminalEffectStateSafely(
+    receipt,
+    claim !== null && envelope !== null,
+  );
+  return {
+    claim,
+    job,
+    envelope,
+    ...reviewerTerminalEffectStateParts(effectState),
+  };
+};
+
+const matchesReviewerClaimJobIdentity = (
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  claim: AffiliateAgentGatewayClaims,
+  job: AffiliateAgentGatewayJobs,
+): boolean => {
+  if (claim.status !== "ACTIVE") return false;
+  if (job.status !== "CLAIMED") return false;
+  if (job.activeClaimId !== claim.id) return false;
+  if (job.claimGeneration !== claim.claimGeneration) return false;
+  if (claim.jobId !== job.id) return false;
+  if (receipt.jobId !== job.id) return false;
+  if (receipt.claimId !== claim.id) return false;
+  return receipt.claimGeneration === claim.claimGeneration;
+};
+
+const matchesReviewerClaimEnvelopeIdentity = (
+  claim: AffiliateAgentGatewayClaims,
+  envelope: AffiliateAgentClaimEnvelope,
+  job: AffiliateAgentGatewayJobs,
+): boolean => {
+  if (claim.claimEnvelopeHash !== hashAffiliateAgentValue(envelope)) {
+    return false;
+  }
+  if (envelope.jobId !== job.id) return false;
+  if (envelope.claimId !== claim.id) return false;
+  if (envelope.claimGeneration !== claim.claimGeneration) return false;
+  if (envelope.role !== claim.role) return false;
+  if (envelope.workerId !== claim.workerId) return false;
+  if (envelope.invocationId !== claim.invocationId) return false;
+  return envelope.workspaceId === claim.workspaceId;
+};
+
+const matchesReviewerEffectReceiptIdentity = (
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  claim: AffiliateAgentGatewayClaims,
+  reviewerResult: AffiliateAgentReviewerTerminalResult,
+  pendingEffectState: Extract<
+    ReviewerTerminalEffectReceiptState,
+    Readonly<{ kind: "PENDING" }>
+  > | null,
+  completedEffectState: Extract<
+    ReviewerTerminalEffectReceiptState,
+    Readonly<{ kind: "SUCCEEDED" }>
+  > | null,
+): boolean => {
+  if (reviewerResult.role !== "SUPPLY_REVIEWER") return false;
+  if (receipt.status === "PENDING" && pendingEffectState === null) {
+    return false;
+  }
+  if (receipt.status === "PENDING" && pendingEffectState !== null) {
+    return matchesReviewerEffectRequest(receipt, claim, reviewerResult);
+  }
+  if (receipt.status === "SUCCEEDED" && completedEffectState === null) {
+    return false;
+  }
+  if (receipt.status !== "SUCCEEDED" || completedEffectState === null) {
+    return false;
+  }
+  return matchesReviewerEffectRequest(receipt, claim, reviewerResult);
+};
+
+const matchesReviewerEffectRequest = (
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  claim: AffiliateAgentGatewayClaims,
+  reviewerResult: AffiliateAgentReviewerTerminalResult,
+): boolean => {
+  if (receipt.idempotencyKey !== reviewerTerminalEffectIdempotencyKey()) {
+    return false;
+  }
+  return (
+    receipt.requestHash ===
+    reviewerTerminalEffectRequestHash(claim, reviewerResult)
+  );
+};
+
+const reviewerResultEvidenceTargetsEnvelope = (
+  envelope: AffiliateAgentClaimEnvelope,
+  reviewerResult: AffiliateAgentReviewerTerminalResult,
+): boolean => {
+  for (const evidenceRef of reviewerResult.evidenceRefs) {
+    if (
+      !envelope.evidenceManifest.entries.some(
+        (entry) => entry.evidenceRef === evidenceRef,
+      )
+    ) {
+      return false;
+    }
+  }
+  return true;
+};
+
+const reviewerResultTargetsCommittedPackage = (
+  subject: AffiliateAgentClaimEnvelope["subject"],
+  reviewerResult: Extract<
+    AffiliateAgentReviewerTerminalResult,
+    Readonly<{
+      disposition:
+        | "APPROVED"
+        | "ACTIVATED"
+        | "PRODUCER_REPAIR_REQUIRED";
+    }>
+  >,
+): boolean => {
+  if (!("committedPackageHash" in subject)) return false;
+  return (
+    reviewerResult.payload.committedPackageHash ===
+    subject.committedPackageHash
+  );
+};
+
+const reviewerResultTargetsSupplySource = (
+  subject: AffiliateAgentClaimEnvelope["subject"],
+  reviewerResult: Extract<
+    AffiliateAgentReviewerTerminalResult,
+    Readonly<{
+      disposition:
+        | "REGRESSION_ASSESSED"
+        | "SOURCE_EXCLUSION_ASSESSED";
+    }>
+  >,
+): boolean => {
+  if (!("supplySourceId" in subject)) return false;
+  return reviewerResult.payload.supplySourceId === subject.supplySourceId;
+};
+
+const reviewerResultTargetsRejectedTarget = (
+  subject: AffiliateAgentClaimEnvelope["subject"],
+  reviewerResult: Extract<
+    AffiliateAgentReviewerTerminalResult,
+    Readonly<{ disposition: "EXACT_TARGET_REJECTED" }>
+  >,
+): boolean => {
+  if (!("targetId" in subject) || !("targetType" in subject)) return false;
+  if (reviewerResult.payload.targetId !== subject.targetId) return false;
+  return reviewerResult.payload.targetType === subject.targetType;
+};
+
+const reviewerResultTargetsSubject = (
+  envelope: AffiliateAgentClaimEnvelope,
+  reviewerResult: AffiliateAgentReviewerTerminalResult,
+): boolean => {
+  const subject = envelope.subject;
+  switch (reviewerResult.disposition) {
+    case "APPROVED":
+    case "ACTIVATED":
+    case "PRODUCER_REPAIR_REQUIRED":
+      return reviewerResultTargetsCommittedPackage(subject, reviewerResult);
+    case "REGRESSION_ASSESSED":
+    case "SOURCE_EXCLUSION_ASSESSED":
+      return reviewerResultTargetsSupplySource(subject, reviewerResult);
+    case "EXACT_TARGET_REJECTED":
+      return reviewerResultTargetsRejectedTarget(subject, reviewerResult);
+    default:
+      return true;
+  }
+};
+
+const reviewerResultTargetsEnvelope = (
+  envelope: AffiliateAgentClaimEnvelope | null,
+  reviewerResult: AffiliateAgentReviewerTerminalResult | null,
+): boolean => {
+  if (!envelope || !reviewerResult) return false;
+  if (!reviewerResultEvidenceTargetsEnvelope(envelope, reviewerResult)) {
+    return false;
+  }
+  return reviewerResultTargetsSubject(envelope, reviewerResult);
+};
+
+const reviewerTerminalRecoveryIsValid = (
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  context: ReviewerTerminalRecoveryContext,
+): boolean => {
+  const { claim, job, envelope, reviewerResult } = context;
+  if (!claim || !job || !envelope || !reviewerResult) return false;
+  if (!matchesReviewerClaimJobIdentity(receipt, claim, job)) return false;
+  if (!matchesReviewerClaimEnvelopeIdentity(claim, envelope, job)) {
+    return false;
+  }
+  return matchesReviewerEffectReceiptIdentity(
+    receipt,
+    claim,
+    reviewerResult,
+    context.pendingEffectState,
+    context.completedEffectState,
+  );
+};
+
+const reviewerTerminalRecoveryReservation = (
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  effectState:
+    | Extract<
+        ReviewerTerminalEffectReceiptState,
+        Readonly<{ kind: "PENDING" }>
+      >
+    | Extract<
+        ReviewerTerminalEffectReceiptState,
+        Readonly<{ kind: "SUCCEEDED" }>
+      >,
+): ReviewerTerminalEffectReservation => ({
+  receipt,
+  isReplayed: true,
+  terminalIdempotencyKey: effectState.terminalIdempotencyKey,
+  terminalRequestHash: effectState.terminalRequestHash,
+});
+
+type ValidReviewerTerminalRecovery = Readonly<{
+  claim: AffiliateAgentGatewayClaims;
+  envelope: AffiliateAgentClaimEnvelope;
+  reviewerResult: AffiliateAgentReviewerTerminalResult;
+  effectState: ReviewerTerminalEffectReceiptState;
+}>;
+
+const reviewerTerminalRecoveryParts = (
+  context: ReviewerTerminalRecoveryContext,
+): ValidReviewerTerminalRecovery | null => {
+  const effectState =
+    context.completedEffectState ?? context.pendingEffectState;
+  if (
+    !context.claim ||
+    !context.envelope ||
+    !context.reviewerResult ||
+    !effectState
+  ) {
+    return null;
+  }
+  return {
+    claim: context.claim,
+    envelope: context.envelope,
+    reviewerResult: context.reviewerResult,
+    effectState,
+  };
+};
+
+const recoverPendingReviewerTerminalReceipt = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  claim: AffiliateAgentGatewayClaims,
+  envelope: AffiliateAgentClaimEnvelope,
+  reviewerResult: AffiliateAgentReviewerTerminalResult,
+  reservation: ReviewerTerminalEffectReservation,
+): Promise<ReconciliationReceiptRecovery> => {
+  const adapter = dependencies.terminalEffects;
+  if (!adapter) return impossibleReceiptRecovery();
+  try {
+    return {
+      recovered: await runReviewerTerminalEffect(
+        adapter,
+        {
+          receiptId: receipt.id,
+          claim: envelope,
+          result: reviewerResult,
+        },
+        "RECOVER",
+      ),
+      reviewerTerminalEffectResult: reviewerResult,
+      reviewerTerminalEffectReservation: reservation,
+      isImpossible: false,
+    };
+  } catch {
+    return {
+      recovered: null,
+      reviewerTerminalEffectResult: reviewerResult,
+      reviewerTerminalEffectReservation: reservation,
+      isImpossible: false,
+    };
+  }
+};
+
+const recoverReviewerTerminalReceipt = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  receipt: AffiliateAgentGatewayOperationReceipts,
+): Promise<ReconciliationReceiptRecovery> => {
+  const context = await loadReviewerTerminalRecoveryContext(
+    dependencies,
+    receipt,
+  );
+  if (!reviewerTerminalRecoveryIsValid(receipt, context)) {
+    return impossibleReceiptRecovery();
+  }
+  const validRecovery = reviewerTerminalRecoveryParts(context);
+  if (!validRecovery) return impossibleReceiptRecovery();
+  if (
+    !reviewerResultTargetsEnvelope(
+      validRecovery.envelope,
+      validRecovery.reviewerResult,
+    )
+  ) {
+    return impossibleReceiptRecovery();
+  }
+  const reservation = reviewerTerminalRecoveryReservation(
+    receipt,
+    validRecovery.effectState,
+  );
+  if (validRecovery.effectState.kind === "SUCCEEDED") {
+    return {
+      recovered: validRecovery.effectState.safeOutput,
+      reviewerTerminalEffectResult: validRecovery.reviewerResult,
+      reviewerTerminalEffectReservation: reservation,
+      isImpossible: false,
+    };
+  }
+  return recoverPendingReviewerTerminalReceipt(
+    dependencies,
+    receipt,
+    validRecovery.claim,
+    validRecovery.envelope,
+    validRecovery.reviewerResult,
+    reservation,
+  );
+};
+
+const recoverReconciliationReceipt = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  receipt: AffiliateAgentGatewayOperationReceipts,
+): Promise<ReconciliationReceiptRecovery> => {
+  if (
+    receipt.commandName === "CAPTURE_CLAIM_URL" ||
+    receipt.commandName === "RUN_DISCOVERY_QUERY"
+  ) {
+    return recoverExternalReconciliationReceipt(dependencies, receipt);
+  }
+  if (receipt.commandName === "EXECUTE_RECORDED_LIFECYCLE_COMMAND") {
+    return recoverLifecycleReconciliationReceipt(dependencies, receipt);
+  }
+  if (receipt.commandName === AFFILIATE_AGENT_TERMINAL_EFFECT_COMMAND) {
+    return recoverReviewerTerminalReceipt(dependencies, receipt);
+  }
+  return impossibleReceiptRecovery();
+};
+
+type ReconciliationReceiptOutcome = Readonly<{
+  recovered: boolean;
+  completed: boolean;
+  unresolved: boolean;
+  isAdmissionHalted: boolean;
+}>;
+
+const unchangedReceiptOutcome = (): ReconciliationReceiptOutcome => ({
+  recovered: false,
+  completed: false,
+  unresolved: false,
+  isAdmissionHalted: false,
+});
+
+const findReceiptsForReconciliation = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  before: Date,
+  limit: number | undefined,
+  claimId: string | undefined,
+  includeNotDue: boolean,
+): Promise<readonly AffiliateAgentGatewayOperationReceipts[]> => {
+  const reviewerTerminalEffectReceiptIds =
+    await findActiveReviewerTerminalEffectReceiptIds(
+      dependencies.prisma,
+      limit,
+      claimId,
+    );
+  return dependencies.prisma.affiliateAgentGatewayOperationReceipts.findMany({
+    where: {
+      ...(claimId === undefined ? {} : { claimId }),
+      OR: [
+        {
+          status: "PENDING",
+          ...(claimId === undefined || !includeNotDue
+            ? { reconcileAfter: { lte: before } }
+            : {}),
+          OR: [
+            {
+              commandName: {
+                in: [
+                  "CAPTURE_CLAIM_URL",
+                  "EXECUTE_RECORDED_LIFECYCLE_COMMAND",
+                  "RUN_DISCOVERY_QUERY",
+                  AFFILIATE_AGENT_TERMINAL_EFFECT_COMMAND,
+                ],
+              },
+            },
+            { operationKind: "READ_ARTIFACT" },
+          ],
+        },
+        ...(reviewerTerminalEffectReceiptIds.length === 0
+          ? []
+          : [
+              {
+                status: "SUCCEEDED" as const,
+                id: { in: [...reviewerTerminalEffectReceiptIds] },
+              },
+            ]),
+      ],
+    },
+    orderBy: [{ reconcileAfter: "asc" }, { id: "asc" }],
+    ...(limit === undefined ? {} : { take: limit }),
+  });
+};
+
+const markReceiptForReconciliation = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  now: Date,
+  isImpossibleState: boolean,
+  recovered = false,
+): Promise<ReconciliationReceiptOutcome> => {
+  const marked = await markReceiptReconciliationRequired(
+    dependencies,
+    receipt,
+    now,
+    isImpossibleState,
+  );
+  return {
+    recovered,
+    completed: false,
+    unresolved: marked !== "UNCHANGED",
+    isAdmissionHalted: isImpossibleState
+      ? marked !== "UNCHANGED"
+      : marked === "HALTED_GATEWAY",
+  };
+};
+
+const reconcileArtifactReceipt = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  reconciliationNow: Date,
+  includeNotDue: boolean,
+): Promise<ReconciliationReceiptOutcome> => {
+  if (
+    !includeNotDue &&
+    receipt.reconcileAfter !== null &&
+    receipt.reconcileAfter > reconciliationNow
+  ) {
+    return {
+      ...unchangedReceiptOutcome(),
+      unresolved: true,
+    };
+  }
+  await failStaleArtifactReceipt(
+    dependencies,
+    receipt.id,
+    dependencies.clock.now(),
+  );
+  return unchangedReceiptOutcome();
+};
+
+const reconcileMissingRecovery = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  reconciliationNow: Date,
+  includeNotDue: boolean,
+): Promise<ReconciliationReceiptOutcome> => {
+  if (
+    includeNotDue &&
+    receipt.reconcileAfter !== null &&
+    receipt.reconcileAfter > reconciliationNow
+  ) {
+    return {
+      ...unchangedReceiptOutcome(),
+      unresolved: true,
+    };
+  }
+  return markReceiptForReconciliation(
+    dependencies,
+    receipt,
+    dependencies.clock.now(),
+    false,
+  );
+};
+
+const finalizeRecoveredReviewerTerminalReceipt = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  reviewerTerminalEffectResult: AffiliateAgentReviewerTerminalResult,
+  reviewerTerminalEffectReservation: ReviewerTerminalEffectReservation,
+  recovered: Readonly<Record<string, unknown>>,
+): Promise<"COMPLETED"> => {
+  await finalizeReviewerTerminalEffect(
+    dependencies,
+    reviewerTerminalEffectReservation,
+    reviewerTerminalEffectResult,
+    receipt.requestHash,
+    parseBoundedSafeOutput(recovered, receipt.id),
+  );
+  await completeRecoveredReviewerTerminalResult(
+    dependencies,
+    receipt,
+    reviewerTerminalEffectResult,
+  );
+  return "COMPLETED";
+};
+
+const finalizeReconciliationReceipt = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  recovered: Readonly<Record<string, unknown>>,
+  reviewerTerminalEffectResult: AffiliateAgentReviewerTerminalResult | null,
+  reviewerTerminalEffectReservation: ReviewerTerminalEffectReservation | null,
+): Promise<"COMPLETED" | "IMPOSSIBLE" | "LANE_FAILURE" | "UNCHANGED"> => {
+  if (
+    receipt.commandName === "CAPTURE_CLAIM_URL" ||
+    receipt.commandName === "RUN_DISCOVERY_QUERY"
+  ) {
+    return finalizeRecoveredExternalReceipt(dependencies, receipt, recovered);
+  }
+  if (
+    receipt.commandName === AFFILIATE_AGENT_TERMINAL_EFFECT_COMMAND &&
+    reviewerTerminalEffectResult !== null &&
+    reviewerTerminalEffectReservation !== null
+  ) {
+    return finalizeRecoveredReviewerTerminalReceipt(
+      dependencies,
+      receipt,
+      reviewerTerminalEffectResult,
+      reviewerTerminalEffectReservation,
+      recovered,
+    );
+  }
+  return finalizeRecoveredLifecycleReceipt(dependencies, receipt, recovered);
+};
+
+const reconcileRecoveredReceipt = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  recovery: ReconciliationReceiptRecovery,
+): Promise<ReconciliationReceiptOutcome> => {
+  const recovered = recovery.recovered;
+  if (recovered === null) {
+    return reconcileMissingRecovery(
+      dependencies,
+      receipt,
+      dependencies.clock.now(),
+      false,
+    );
+  }
+  try {
+    const finalized = await finalizeReconciliationReceipt(
+      dependencies,
+      receipt,
+      recovered,
+      recovery.reviewerTerminalEffectResult,
+      recovery.reviewerTerminalEffectReservation,
+    );
+    if (finalized === "COMPLETED") {
+      return {
+        recovered: true,
+        completed: true,
+        unresolved: false,
+        isAdmissionHalted: false,
+      };
+    }
+    if (finalized === "UNCHANGED") {
+      return {
+        recovered: true,
+        completed: false,
+        unresolved: false,
+        isAdmissionHalted: false,
+      };
+    }
+    if (finalized === "LANE_FAILURE") {
+      return markReceiptForReconciliation(
+        dependencies,
+        receipt,
+        dependencies.clock.now(),
+        false,
+        true,
+      );
+    }
+  } catch {
+    return markReceiptForReconciliation(
+      dependencies,
+      receipt,
+      dependencies.clock.now(),
+      true,
+      true,
+    );
+  }
+  return markReceiptForReconciliation(
+    dependencies,
+    receipt,
+    dependencies.clock.now(),
+    true,
+    true,
+  );
+};
+
+const reconcileOnePendingExternalReceipt = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  receipt: AffiliateAgentGatewayOperationReceipts,
+  reconciliationNow: Date,
+  includeNotDue: boolean,
+): Promise<ReconciliationReceiptOutcome> => {
+  if (receipt.operationKind === "READ_ARTIFACT") {
+    return reconcileArtifactReceipt(
+      dependencies,
+      receipt,
+      reconciliationNow,
+      includeNotDue,
+    );
+  }
+  const recovery = await recoverReconciliationReceipt(dependencies, receipt);
+  if (recovery.isImpossible) {
+    return markReceiptForReconciliation(
+      dependencies,
+      receipt,
+      dependencies.clock.now(),
+      true,
+    );
+  }
+  if (recovery.recovered === null) {
+    return reconcileMissingRecovery(
+      dependencies,
+      receipt,
+      reconciliationNow,
+      includeNotDue,
+    );
+  }
+  return reconcileRecoveredReceipt(dependencies, receipt, recovery);
+};
+
 const reconcilePendingExternalReceipts = async (
   dependencies: AffiliateAgentGatewayDependencies,
   before: Date,
@@ -6803,317 +14082,28 @@ const reconcilePendingExternalReceipts = async (
     isAdmissionHalted: boolean;
   }>
 > => {
-  const reviewerTerminalEffectReceiptIds =
-    await findActiveReviewerTerminalEffectReceiptIds(
-      dependencies.prisma,
-      limit,
-      claimId,
-    );
-  const receipts =
-    await dependencies.prisma.affiliateAgentGatewayOperationReceipts.findMany({
-      where: {
-        ...(claimId === undefined ? {} : { claimId }),
-        OR: [
-          {
-            status: "PENDING",
-            ...(claimId === undefined || !includeNotDue
-              ? { reconcileAfter: { lte: before } }
-              : {}),
-            OR: [
-              {
-                commandName: {
-                  in: [
-                    "CAPTURE_CLAIM_URL",
-                    "EXECUTE_RECORDED_LIFECYCLE_COMMAND",
-                    "RUN_DISCOVERY_QUERY",
-                    AFFILIATE_AGENT_TERMINAL_EFFECT_COMMAND,
-                  ],
-                },
-              },
-              { operationKind: "READ_ARTIFACT" },
-            ],
-          },
-          ...(reviewerTerminalEffectReceiptIds.length === 0
-            ? []
-            : [
-                {
-                  status: "SUCCEEDED" as const,
-                  id: { in: [...reviewerTerminalEffectReceiptIds] },
-                },
-              ]),
-        ],
-      },
-      orderBy: [{ reconcileAfter: "asc" }, { id: "asc" }],
-      ...(limit === undefined ? {} : { take: limit }),
-    });
+  const receipts = await findReceiptsForReconciliation(
+    dependencies,
+    before,
+    limit,
+    claimId,
+    includeNotDue,
+  );
   let unresolved = 0;
   let isAdmissionHalted = false;
   let recoveredCount = 0;
   let completed = 0;
   for (const receipt of receipts) {
-    const reconciliationNow = dependencies.clock.now();
-    if (receipt.operationKind === "READ_ARTIFACT") {
-      if (
-        !includeNotDue &&
-        receipt.reconcileAfter !== null &&
-        receipt.reconcileAfter > reconciliationNow
-      ) {
-        unresolved += 1;
-        continue;
-      }
-      await failStaleArtifactReceipt(
-        dependencies,
-        receipt.id,
-        dependencies.clock.now(),
-      );
-      continue;
-    }
-    let recovered: Readonly<Record<string, unknown>> | null = null;
-    let reviewerTerminalEffectResult: AffiliateAgentReviewerTerminalResult | null =
-      null;
-    let reviewerTerminalEffectReservation: ReviewerTerminalEffectReservation | null =
-      null;
-    let isImpossible = false;
-    if (
-      receipt.commandName === "CAPTURE_CLAIM_URL" ||
-      receipt.commandName === "RUN_DISCOVERY_QUERY"
-    ) {
-      const adapter =
-        receipt.commandName === "RUN_DISCOVERY_QUERY"
-          ? dependencies.commands.external.RUN_DISCOVERY_QUERY
-          : dependencies.commands.external.CAPTURE_CLAIM_URL;
-      if (typeof receipt.externalOperationKey !== "string" || !adapter) {
-        isImpossible = true;
-      } else {
-        try {
-          recovered = await adapter.recover(receipt.externalOperationKey);
-        } catch {
-          recovered = null;
-        }
-      }
-    } else if (
-      receipt.commandName === "EXECUTE_RECORDED_LIFECYCLE_COMMAND" &&
-      dependencies.lifecycle.kind === "AVAILABLE"
-    ) {
-      try {
-        recovered = await dependencies.lifecycle.recover(receipt.id);
-      } catch {
-        recovered = null;
-      }
-    } else if (
-      receipt.commandName === AFFILIATE_AGENT_TERMINAL_EFFECT_COMMAND
-    ) {
-      const adapter = dependencies.terminalEffects;
-      const [claim, job] = await Promise.all([
-        dependencies.prisma.affiliateAgentGatewayClaims.findUnique({
-          where: { id: receipt.claimId },
-        }),
-        dependencies.prisma.affiliateAgentGatewayJobs.findUnique({
-          where: { id: receipt.jobId },
-        }),
-      ]);
-      const envelope = claim
-        ? affiliateAgentClaimEnvelopeSchema.safeParse(claim.claimEnvelopeJson)
-        : null;
-      let effectState: ReviewerTerminalEffectReceiptState | null = null;
-      if (claim && envelope?.success) {
-        try {
-          effectState = parseReviewerTerminalEffectState(
-            receipt.responseJson,
-            receipt.id,
-          );
-        } catch {
-          effectState = null;
-        }
-      }
-      const pendingEffectState =
-        effectState?.kind === "PENDING" ? effectState : null;
-      const completedEffectState =
-        effectState?.kind === "SUCCEEDED" ? effectState : null;
-      const reviewerResult =
-        pendingEffectState?.result ?? completedEffectState?.result ?? null;
-      const terminalIdentity = completedEffectState ?? pendingEffectState;
-      const exactIdentity =
-        claim !== null &&
-        job !== null &&
-        envelope?.success === true &&
-        claim.status === "ACTIVE" &&
-        job.status === "CLAIMED" &&
-        job.activeClaimId === claim.id &&
-        job.claimGeneration === claim.claimGeneration &&
-        claim.jobId === job.id &&
-        receipt.jobId === job.id &&
-        receipt.claimId === claim.id &&
-        receipt.claimGeneration === claim.claimGeneration &&
-        claim.claimEnvelopeHash === hashAffiliateAgentValue(envelope.data) &&
-        envelope.data.jobId === job.id &&
-        envelope.data.claimId === claim.id &&
-        envelope.data.claimGeneration === claim.claimGeneration &&
-        envelope.data.role === claim.role &&
-        envelope.data.workerId === claim.workerId &&
-        envelope.data.invocationId === claim.invocationId &&
-        envelope.data.workspaceId === claim.workspaceId &&
-        reviewerResult !== null &&
-        reviewerResult.role === "SUPPLY_REVIEWER" &&
-        ((receipt.status === "PENDING" && pendingEffectState !== null) ||
-          (receipt.status === "SUCCEEDED" && completedEffectState !== null)) &&
-        receipt.idempotencyKey === reviewerTerminalEffectIdempotencyKey() &&
-        receipt.requestHash ===
-          reviewerTerminalEffectRequestHash(claim, reviewerResult);
-      const resultTargetsEnvelope =
-        exactIdentity &&
-        envelope?.success === true &&
-        reviewerResult !== null &&
-        reviewerResult.evidenceRefs.every((evidenceRef) =>
-          envelope.data.evidenceManifest.entries.some(
-            (entry) => entry.evidenceRef === evidenceRef,
-          ),
-        ) &&
-        (reviewerResult.disposition === "APPROVED" ||
-        reviewerResult.disposition === "ACTIVATED" ||
-        reviewerResult.disposition === "PRODUCER_REPAIR_REQUIRED"
-          ? "committedPackageHash" in envelope.data.subject &&
-            reviewerResult.payload.committedPackageHash ===
-              envelope.data.subject.committedPackageHash
-          : reviewerResult.disposition === "REGRESSION_ASSESSED" ||
-              reviewerResult.disposition === "SOURCE_EXCLUSION_ASSESSED"
-            ? "supplySourceId" in envelope.data.subject &&
-              reviewerResult.payload.supplySourceId ===
-                envelope.data.subject.supplySourceId
-            : reviewerResult.disposition === "EXACT_TARGET_REJECTED"
-              ? "targetId" in envelope.data.subject &&
-                "targetType" in envelope.data.subject &&
-                reviewerResult.payload.targetId ===
-                  envelope.data.subject.targetId &&
-                reviewerResult.payload.targetType ===
-                  envelope.data.subject.targetType
-              : true);
-      if (
-        !resultTargetsEnvelope ||
-        reviewerResult === null ||
-        (pendingEffectState !== null && !adapter) ||
-        (pendingEffectState === null && completedEffectState === null)
-      ) {
-        isImpossible = true;
-      } else {
-        reviewerTerminalEffectResult = reviewerResult;
-        reviewerTerminalEffectReservation = {
-          receipt,
-          isReplayed: true,
-          terminalIdempotencyKey: terminalIdentity!.terminalIdempotencyKey,
-          terminalRequestHash: terminalIdentity!.terminalRequestHash,
-        };
-        if (completedEffectState !== null) {
-          recovered = completedEffectState.safeOutput;
-        } else if (pendingEffectState !== null && adapter) {
-          try {
-            recovered = await runReviewerTerminalEffect(
-              adapter,
-              {
-                receiptId: receipt.id,
-                claim: envelope.data,
-                result: reviewerResult,
-              },
-              "RECOVER",
-            );
-          } catch {
-            recovered = null;
-          }
-        } else {
-          isImpossible = true;
-        }
-      }
-    } else {
-      isImpossible = true;
-    }
-    if (isImpossible) {
-      const marked = await markReceiptReconciliationRequired(
-        dependencies,
-        receipt,
-        dependencies.clock.now(),
-        true,
-      );
-      if (marked !== "UNCHANGED") unresolved += 1;
-      isAdmissionHalted ||= marked !== "UNCHANGED";
-      continue;
-    }
-    if (recovered === null) {
-      if (
-        includeNotDue &&
-        receipt.reconcileAfter !== null &&
-        receipt.reconcileAfter > reconciliationNow
-      ) {
-        unresolved += 1;
-        continue;
-      }
-      const marked = await markReceiptReconciliationRequired(
-        dependencies,
-        receipt,
-        dependencies.clock.now(),
-        false,
-      );
-      if (marked !== "UNCHANGED") unresolved += 1;
-      isAdmissionHalted ||= marked === "HALTED_GATEWAY";
-      continue;
-    }
-    recoveredCount += 1;
-    try {
-      const finalized =
-        receipt.commandName === "CAPTURE_CLAIM_URL" ||
-        receipt.commandName === "RUN_DISCOVERY_QUERY"
-          ? await finalizeRecoveredExternalReceipt(
-              dependencies,
-              receipt,
-              recovered,
-            )
-          : receipt.commandName === AFFILIATE_AGENT_TERMINAL_EFFECT_COMMAND &&
-              reviewerTerminalEffectResult !== null &&
-              reviewerTerminalEffectReservation !== null
-            ? (await finalizeReviewerTerminalEffect(
-                dependencies,
-                reviewerTerminalEffectReservation,
-                reviewerTerminalEffectResult,
-                receipt.requestHash,
-                parseBoundedSafeOutput(recovered, receipt.id),
-              ),
-              await completeRecoveredReviewerTerminalResult(
-                dependencies,
-                receipt,
-                reviewerTerminalEffectResult,
-              ),
-              "COMPLETED" as const)
-            : await finalizeRecoveredLifecycleReceipt(
-                dependencies,
-                receipt,
-                recovered,
-              );
-      if (finalized === "COMPLETED") {
-        completed += 1;
-        continue;
-      }
-      if (finalized === "UNCHANGED") continue;
-      if (finalized === "LANE_FAILURE") {
-        const marked = await markReceiptReconciliationRequired(
-          dependencies,
-          receipt,
-          dependencies.clock.now(),
-          false,
-        );
-        if (marked !== "UNCHANGED") unresolved += 1;
-        isAdmissionHalted ||= marked === "HALTED_GATEWAY";
-        continue;
-      }
-    } catch {
-      isImpossible = true;
-    }
-    const marked = await markReceiptReconciliationRequired(
+    const outcome = await reconcileOnePendingExternalReceipt(
       dependencies,
       receipt,
       dependencies.clock.now(),
-      true,
+      includeNotDue,
     );
-    if (marked !== "UNCHANGED") unresolved += 1;
-    isAdmissionHalted ||= marked !== "UNCHANGED";
+    if (outcome.recovered) recoveredCount += 1;
+    if (outcome.completed) completed += 1;
+    if (outcome.unresolved) unresolved += 1;
+    if (outcome.isAdmissionHalted) isAdmissionHalted = true;
   }
   return {
     examined: receipts.length,
@@ -7135,6 +14125,74 @@ const reconcilePendingEffectsForClaim = async (
     claimId,
     includeNotDue,
   );
+const performReconciledFailure = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  input: AffiliateAgentInvocationReconciliationRequest,
+) => {
+  const result = await performFailure(dependencies, input, {
+    isCompletedReplayAllowed: true,
+    isTrustedFailureRecording: true,
+  });
+  if (result.kind === "INVOCATION_FAILED") {
+    await reportInvocationFailure(
+      dependencies,
+      input.authorization,
+      result,
+      input.failure.code,
+      input.failure.safeSummary,
+    );
+  }
+  return result;
+};
+
+
+const assertInvocationPendingEffectsReady = (
+  pendingEffects: Readonly<{
+    isAdmissionHalted: boolean;
+    unresolved: number;
+  }>,
+): void => {
+  if (pendingEffects.isAdmissionHalted) {
+    throw gatewayError(
+      "GATEWAY_ADMISSION_HALTED",
+      "Gateway admission is halted until an impossible receipt state is resolved.",
+    );
+  }
+  if (pendingEffects.unresolved > 0) {
+    throw gatewayError(
+      "PARTIAL_COMMAND_UNRESOLVED",
+      "The invocation has an unresolved external effect.",
+    );
+  }
+};
+
+const isInvocationPendingEffectError = (
+  error: unknown,
+): boolean => error instanceof AffiliateAgentGatewayError
+  && error.code === "PARTIAL_COMMAND_UNRESOLVED"
+  && error.safeMessage === INVOCATION_FAILURE_PENDING_EFFECT_MESSAGE
+  && error.receiptId !== undefined;
+
+const retryInvocationAfterPendingEffect = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  input: AffiliateAgentInvocationReconciliationRequest,
+): Promise<AffiliateAgentInvocationReconciliationResult | null> => {
+  const recovered = await reconcilePendingEffectsForClaim(
+    dependencies,
+    input.authorization.claimId,
+    true,
+  );
+  if (recovered.isAdmissionHalted) {
+    throw gatewayError(
+      "GATEWAY_ADMISSION_HALTED",
+      "Gateway admission is halted until an impossible receipt state is resolved.",
+    );
+  }
+  if (recovered.examined > 0 && recovered.unresolved === 0) {
+    return performReconciledFailure(dependencies, input);
+  }
+  return null;
+};
 
 const reconcileExactInvocation = async (
   dependencies: AffiliateAgentGatewayDependencies,
@@ -7147,36 +14205,17 @@ const reconcileExactInvocation = async (
     input.authorization.claimId,
     true,
   );
-  if (pendingEffects.unresolved > 0) {
-    throw gatewayError(
-      "PARTIAL_COMMAND_UNRESOLVED",
-      "The invocation has an unresolved external effect.",
-    );
-  }
+  assertInvocationPendingEffectsReady(pendingEffects);
 
   try {
-    return await performFailure(dependencies, input, {
-      isCompletedReplayAllowed: true,
-      isTrustedFailureRecording: true,
-    });
+    return await performReconciledFailure(dependencies, input);
   } catch (error) {
-    if (
-      error instanceof AffiliateAgentGatewayError &&
-      error.code === "PARTIAL_COMMAND_UNRESOLVED" &&
-      error.safeMessage === INVOCATION_FAILURE_PENDING_EFFECT_MESSAGE &&
-      error.receiptId !== undefined
-    ) {
-      const recovered = await reconcilePendingEffectsForClaim(
+    if (isInvocationPendingEffectError(error)) {
+      const recovered = await retryInvocationAfterPendingEffect(
         dependencies,
-        input.authorization.claimId,
-        true,
+        input,
       );
-      if (recovered.examined > 0 && recovered.unresolved === 0) {
-        return await performFailure(dependencies, input, {
-          isCompletedReplayAllowed: true,
-          isTrustedFailureRecording: true,
-        });
-      }
+      if (recovered !== null) return recovered;
     }
     throw error;
   }
@@ -7233,6 +14272,7 @@ export function createPrismaAffiliateAgentInvocationReconciler(
 ): AffiliateAgentInvocationReconciler {
   return {
     async reconcileInvocation(input) {
+      assertInvocationReconciliationInput(input);
       return reconcileExactInvocation(dependencies, input);
     },
   };
@@ -7266,7 +14306,8 @@ export function createPrismaAffiliateAgentGateway(
         );
       } catch (error) {
         if (error instanceof AffiliateAgentGatewayError) throw error;
-        throw gatewayError(
+        throw gatewayErrorForPersistenceFailure(
+          error,
           "INTERNAL_ERROR",
           "The Affiliate Agent claim could not be completed.",
           true,

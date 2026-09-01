@@ -3,7 +3,9 @@
 const prismaMock = {
   affiliateOperationalAlerts: {
     findUnique: jest.fn(),
+    findMany: jest.fn(),
     create: jest.fn(),
+    createMany: jest.fn(),
   },
   affiliateOperationalAlertDeliveries: {
     findMany: jest.fn(),
@@ -19,7 +21,10 @@ jest.mock('@/server/email', () => ({
   sendEmail: (...args: unknown[]) => sendEmailMock(...args),
 }));
 
-import { emitAffiliateOperationalAlert } from '@/server/affiliateImports/affiliateOperationalAlerts';
+import {
+  emitAffiliateOperationalAlert,
+  emitAffiliateOperationalAlerts,
+} from '@/server/affiliateImports/affiliateOperationalAlerts';
 
 describe('affiliate operational alerts', () => {
   const originalWebhook = process.env.AFFILIATE_OPERATIONAL_ALERT_WEBHOOK_URL;
@@ -31,6 +36,8 @@ describe('affiliate operational alerts', () => {
     delete process.env.AFFILIATE_OPERATIONAL_ALERT_EMAIL_TO;
     prismaMock.affiliateOperationalAlerts.findUnique.mockResolvedValue(null);
     prismaMock.affiliateOperationalAlerts.create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => data);
+    prismaMock.affiliateOperationalAlerts.findMany.mockResolvedValue([]);
+    prismaMock.affiliateOperationalAlerts.createMany.mockResolvedValue({ count: 0 });
     prismaMock.affiliateOperationalAlertDeliveries.findMany.mockResolvedValue([]);
     prismaMock.affiliateOperationalAlertDeliveries.create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
       ...data,
@@ -201,5 +208,103 @@ describe('affiliate operational alerts', () => {
     const completedRows = deliveryRows.filter((delivery) => delivery.status !== 'IN_FLIGHT');
     expect(completedRows.map((delivery) => delivery.attempt)).toEqual([1, 2]);
     expect(completedRows.map((delivery) => delivery.status)).toEqual(['FAILED', 'DELIVERED']);
+  });
+  it('deduplicates duplicate event keys before persistence and fallback delivery', async () => {
+    const firstInput = {
+      eventKey: 'source-refresh-failed:source-batch:run-1',
+      category: 'AUTOMATIC_REFRESH_FAILURE',
+      severity: 'warning' as const,
+      title: 'First source refresh failure',
+      detail: 'The first payload must win.',
+      payload: { payloadMarker: 'first' },
+    };
+    const duplicateInput = {
+      ...firstInput,
+      title: 'Second source refresh failure',
+      detail: 'The duplicate payload must not win.',
+      payload: { payloadMarker: 'second' },
+    };
+    prismaMock.affiliateOperationalAlerts.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: 'alert-batch', eventKey: firstInput.eventKey }]);
+
+    await emitAffiliateOperationalAlerts([firstInput, duplicateInput], {
+      deliverWebhook: deliverWebhookMock,
+      isDeliveryFailureAlertSuppressed: true,
+    });
+
+    expect(prismaMock.affiliateOperationalAlerts.createMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: [expect.objectContaining({
+        eventKey: firstInput.eventKey,
+        title: firstInput.title,
+        payload: expect.objectContaining({ payloadMarker: 'first' }),
+      })],
+      skipDuplicates: true,
+    }));
+    expect(deliverWebhookMock).toHaveBeenCalledTimes(1);
+    expect(deliverWebhookMock).toHaveBeenCalledWith(firstInput, 'https://alerts.example.test/hook');
+    const deliveryRows = prismaMock.affiliateOperationalAlertDeliveries.create.mock.calls.map(([call]) => call.data);
+    expect(deliveryRows.filter((row) => row.status === 'IN_FLIGHT')).toHaveLength(1);
+    expect(deliveryRows.filter((row) => row.status === 'DELIVERED')).toHaveLength(1);
+  });
+
+  it('re-queries the latest delivery under the advisory lock instead of using a batch snapshot', async () => {
+    const input = {
+      eventKey: 'source-refresh-failed:source-transaction:run-1',
+      category: 'AUTOMATIC_REFRESH_FAILURE',
+      severity: 'warning' as const,
+      title: 'Source refresh failure',
+      detail: 'The latest delivery state must win.',
+    };
+    prismaMock.affiliateOperationalAlerts.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: 'alert-transaction', eventKey: input.eventKey }]);
+    prismaMock.affiliateOperationalAlertDeliveries.findMany.mockResolvedValueOnce([{
+      id: 'delivery-stale',
+      alertId: 'alert-transaction',
+      channel: 'webhook',
+      status: 'FAILED',
+      attempt: 1,
+      createdAt: new Date('2026-08-24T12:00:00.000Z'),
+    }]);
+
+    let lockAcquired = false;
+    const transactionFindMany = jest.fn(async () => {
+      expect(lockAcquired).toBe(true);
+      return [{
+        id: 'delivery-latest',
+        alertId: 'alert-transaction',
+        channel: 'webhook',
+        status: 'DELIVERED',
+        attempt: 2,
+        createdAt: new Date('2026-08-24T12:01:00.000Z'),
+      }];
+    });
+    const transactionCreate = jest.fn();
+    const executeRaw = jest.fn(async () => {
+      lockAcquired = true;
+    });
+    const transactionClient = {
+      $executeRaw: executeRaw,
+      affiliateOperationalAlertDeliveries: {
+        findMany: transactionFindMany,
+        create: transactionCreate,
+      },
+    };
+    const transaction = jest.fn(async (
+      callback: (client: typeof transactionClient) => Promise<unknown>,
+    ) => callback(transactionClient));
+
+    await emitAffiliateOperationalAlerts([input], {
+      db: { ...prismaMock, $transaction: transaction } as never,
+      deliverWebhook: deliverWebhookMock,
+      isDeliveryFailureAlertSuppressed: true,
+    });
+
+    expect(executeRaw).toHaveBeenCalledTimes(1);
+    expect(transactionFindMany).toHaveBeenCalledTimes(1);
+    expect(transactionFindMany.mock.invocationCallOrder[0]).toBeGreaterThan(executeRaw.mock.invocationCallOrder[0]);
+    expect(transactionCreate).not.toHaveBeenCalled();
+    expect(deliverWebhookMock).not.toHaveBeenCalled();
   });
 });

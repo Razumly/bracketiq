@@ -17,7 +17,7 @@ import { GET } from '@/app/api/admin/affiliate-operations/route';
 describe('/api/admin/affiliate-operations', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    requireRazumlyAdminMock.mockResolvedValue({ userId: 'admin_1' });
+    requireRazumlyAdminMock.mockResolvedValue({ userId: 'admin_1', isAdmin: true });
     loadProjectionMock.mockResolvedValue({
       schemaVersion: 2,
       asOf: '2026-08-24T12:00:00.000Z',
@@ -38,6 +38,15 @@ describe('/api/admin/affiliate-operations', () => {
 
     expect(response.status).toBe(403);
     expect(loadProjectionMock).not.toHaveBeenCalled();
+  });
+
+  it('accepts a Razumly-admin session without the legacy admin session bit', async () => {
+    requireRazumlyAdminMock.mockResolvedValue({ userId: 'admin_1', isAdmin: false });
+
+    const response = await GET(new NextRequest('http://localhost/api/admin/affiliate-operations'));
+
+    expect(response.status).toBe(200);
+    expect(loadProjectionMock).toHaveBeenCalled();
   });
 
   it('passes view, bounded pagination, filters, contract, sort, and detail state to one projection read', async () => {

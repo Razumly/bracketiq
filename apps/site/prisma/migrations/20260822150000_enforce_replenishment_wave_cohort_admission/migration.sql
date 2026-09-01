@@ -1,5 +1,7 @@
 -- Replenishment admission permits one non-terminal wave per rollout cohort.
 -- Preserve the oldest live wave for each cohort before adding the unique index.
+BEGIN;
+
 CREATE TEMP TABLE "_AffiliateReplenishmentWaveCohortLosers" ON COMMIT DROP AS
 SELECT "id"
 FROM (
@@ -61,3 +63,5 @@ WHERE "id" IN (SELECT "id" FROM "_AffiliateReplenishmentWaveCohortLosers");
 CREATE UNIQUE INDEX IF NOT EXISTS "AffiliateReplenishmentWaves_one_live_per_cohort"
   ON "AffiliateReplenishmentWaves" ("rolloutCohort")
   WHERE "status" IN ('PLANNED', 'ACTIVE', 'WAITING');
+
+COMMIT;

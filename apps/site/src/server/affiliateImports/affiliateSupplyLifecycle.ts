@@ -165,6 +165,9 @@ export type AffiliateSupplySourceEvidence = Readonly<{
   targetKind?: string | null;
   status?: string | null;
   autoScrapeEnabled: boolean;
+  isAutomationEnabled?: boolean;
+  activeSupplyContractVersion?: number | null;
+  activeSupplyContractHash?: string | null;
   activeMappingId?: string | null;
   lifecycleGeneration: number;
   operatorDomain?: string | null;
@@ -305,6 +308,18 @@ export type AffiliateSupplyLifecycleCommand =
   | 'RECONCILE'
   | 'LEGACY_RECONCILED';
 
+export const AFFILIATE_SUPPLY_REVIEWER_RECONCILE_OUTCOMES = [
+  'REGRESSION_ASSESSED',
+  'SOURCE_EXCLUSION_EXCLUDE',
+  'SOURCE_EXCLUSION_KEEP',
+  'SOURCE_EXCLUSION_HUMAN_REVIEW',
+  'HUMAN_REVIEW_REQUIRED',
+  'PRODUCER_REPAIR_REQUIRED',
+] as const;
+
+export type AffiliateSupplyReviewerReconcileOutcome =
+  (typeof AFFILIATE_SUPPLY_REVIEWER_RECONCILE_OUTCOMES)[number];
+
 export type AffiliateSupplyCommandAuthority = 'MAPPING_PRODUCER' | 'SUPPLY_REVIEWER' | 'HUMAN_DIRECTED_EXECUTOR' | 'SYSTEM';
 export type AffiliateSupplyLifecycleActorKind =
   | 'MAPPING_PRODUCER'
@@ -329,6 +344,7 @@ export type AffiliateSupplyCommandValidationInput = Readonly<{
   commandContractVersion: number;
   commandContractHash: string;
   evidenceRefs: readonly string[];
+  reviewerOutcome?: string | null;
   assessment: AffiliateSupplyAssessment;
 }>;
 
@@ -350,7 +366,7 @@ export type AffiliateSupplyContractImpactSource = Readonly<{
   nextFreshTargetCells?: readonly AffiliateSupplyContractImpactCell[];
   nextStage?: AffiliateSupplyLifecycleStage;
   nextTargetContribution?: number;
-  nextIsAutomationEnabled?: boolean;
+  isNextAutomationEnabled?: boolean;
   nextRepairPriority?: number;
 }>;
 
@@ -442,11 +458,24 @@ const normalizedString = (value: unknown): string | null => (
   typeof value === 'string' && value.trim() ? value.trim() : null
 );
 
+const canonicalCompare = (left: string, right: string): number => (
+  left < right ? -1 : left > right ? 1 : 0
+);
+
 const sortedUnique = (values: readonly string[]): string[] => Array.from(new Set(
   values.map((value) => value.trim()).filter(Boolean),
-)).sort();
+)).sort(canonicalCompare);
 
 const uppercase = (value: unknown): string => normalizedString(value)?.toUpperCase() ?? '';
+
+const targetRuleSortKey = (
+  rule: AffiliateSupplyContractTargetRule,
+): string => [
+  rule.marketKey ?? '',
+  rule.sportId ?? '',
+  rule.sourceProfile,
+  String(rule.minimumFreshPublishedSupply),
+].join('\u0000');
 
 const normalizeOperatorDomain = (value: string | null | undefined): string | null => {
   const normalized = normalizedString(value)?.toLowerCase().replace(/\.$/, '') ?? null;
@@ -507,22 +536,34 @@ const contractTargets = (contract: AffiliateSupplyContractPolicy): AffiliateSupp
   }))
 );
 
-export const targetRuleFor = (
+const matchingTargetRulesFor = (
   contract: AffiliateSupplyContractPolicy,
   target: Pick<AffiliateSupplyTargetEvidence, 'marketKey' | 'sportId' | 'sourceProfile'>,
-): AffiliateSupplyContractTargetRule | null => {
+): AffiliateSupplyContractTargetRule[] => {
   const profile = uppercase(target.sourceProfile);
   const marketKey = normalizedString(target.marketKey);
   const sportId = normalizedString(target.sportId);
-  const matches = contractTargets(contract).filter((rule) => (
+  return contractTargets(contract).filter((rule) => (
     rule.sourceProfile === profile
     && (rule.marketKey === null || rule.marketKey === marketKey)
     && (rule.sportId === null || rule.sportId === sportId)
   ));
+};
+export const targetRulesFor = (
+  contract: AffiliateSupplyContractPolicy,
+  target: Pick<AffiliateSupplyTargetEvidence, 'marketKey' | 'sportId' | 'sourceProfile'>,
+): AffiliateSupplyContractTargetRule[] => matchingTargetRulesFor(contract, target);
+
+export const targetRuleFor = (
+  contract: AffiliateSupplyContractPolicy,
+  target: Pick<AffiliateSupplyTargetEvidence, 'marketKey' | 'sportId' | 'sourceProfile'>,
+): AffiliateSupplyContractTargetRule | null => {
+  const matches = matchingTargetRulesFor(contract, target);
   return matches.sort((left, right) => {
     const leftSpecificity = Number(left.marketKey !== null) + Number(left.sportId !== null);
     const rightSpecificity = Number(right.marketKey !== null) + Number(right.sportId !== null);
-    return rightSpecificity - leftSpecificity;
+    return rightSpecificity - leftSpecificity
+      || canonicalCompare(targetRuleSortKey(left), targetRuleSortKey(right));
   })[0] ?? null;
 };
 
@@ -563,20 +604,37 @@ export const isAffiliateSupplyTargetFresh = (
   const maximumAgeHours = freshnessWindowHoursFor(contract, target.sourceProfile);
   return refreshed.getTime() + maximumAgeHours * 60 * 60 * 1000 > now.getTime();
 };
+const hasUsableMappingPackage = (
+  mapping: AffiliateSupplyMappingEvidence | null | undefined,
+): mapping is AffiliateSupplyMappingEvidence => Boolean(
+  mapping
+  && mapping.isSchemaValid
+  && mapping.id
+  && mapping.packageHash
+);
+
+const hasRequiredMappingEvidence = (
+  mapping: AffiliateSupplyMappingEvidence,
+  requiredKinds: readonly string[],
+): boolean => {
+  if (!requiredKinds.length) return true;
+  const kinds = new Set((mapping.evidenceKinds ?? []).map(uppercase));
+  return requiredKinds.every((kind) => kinds.has(kind));
+};
+
+
 export const mappingPackageValid = (
   snapshot: AffiliateSupplyEvidenceSnapshot,
 ): boolean => {
   const mapping = snapshot.mapping;
-  if (!mapping || !mapping.isSchemaValid || !mapping.id || !mapping.packageHash) return false;
+  if (!hasUsableMappingPackage(mapping)) return false;
   if (!affiliateScrapeMappingSchema.safeParse(mapping.mapping).success) return false;
   if (snapshot.source.activeMappingId && snapshot.source.activeMappingId !== mapping.id) return false;
   if (mapping.validationOutput && mapping.validationOutput.isValid !== true) return false;
-  const requiredKinds = snapshot.contract.requiredMappingEvidenceKinds.map(uppercase);
-  if (requiredKinds.length) {
-    const kinds = new Set((mapping.evidenceKinds ?? []).map(uppercase));
-    if (requiredKinds.some((kind) => !kinds.has(kind))) return false;
-  }
-  return true;
+  return hasRequiredMappingEvidence(
+    mapping,
+    snapshot.contract.requiredMappingEvidenceKinds.map(uppercase),
+  );
 };
 
 const lifecycleEvidenceValid = (snapshot: AffiliateSupplyEvidenceSnapshot): boolean => {
@@ -628,212 +686,684 @@ const resultEvidenceRefs = (snapshot: AffiliateSupplyEvidenceSnapshot): string[]
 ]);
 
 const normalizeTargets = (targets: readonly AffiliateSupplyTargetEvidence[]): AffiliateSupplyTargetEvidence[] => (
-  [...targets].sort((left, right) => `${left.targetType}:${left.targetId}`.localeCompare(`${right.targetType}:${right.targetId}`))
+  [...targets].sort((left, right) => canonicalCompare(
+    `${left.targetType}\u0000${left.targetId}\u0000${left.id}`,
+    `${right.targetType}\u0000${right.targetId}\u0000${right.id}`,
+  ))
+);
+const targetCellKey = (
+  target: Pick<AffiliateSupplyTargetEvidence, 'marketKey' | 'sportId' | 'sourceProfile'>,
+): string => [
+  normalizedString(target.marketKey)?.toUpperCase() ?? '',
+  normalizedString(target.sportId)?.toUpperCase() ?? '',
+  uppercase(target.sourceProfile),
+].join('\u0000');
+
+
+type AffiliateSupplyAssessmentTargetData = Readonly<{
+  normalizedTargets: AffiliateSupplyTargetEvidence[];
+  qualifyingTargets: AffiliateSupplyTargetEvidence[];
+  qualifyingFreshTargets: AffiliateSupplyTargetEvidence[];
+  targetMinimum: number;
+  targetMinimumMet: boolean;
+  potentialTargetContribution: number;
+}>;
+
+type AffiliateSupplyAssessmentContext = Readonly<{
+  snapshot: AffiliateSupplyEvidenceSnapshot;
+  now: Date;
+  parsedBaseline: AffiliateAutomationBaseline | null;
+  lifecycleEvidenceSatisfied: boolean;
+  governedAutomationEnabled: boolean;
+  governedContractMatches: boolean;
+  hasInvalidBaseline: boolean;
+  hasBaselineMappingMismatch: boolean;
+  violations: readonly string[];
+  normalizedTargets: AffiliateSupplyTargetEvidence[];
+  qualifyingTargets: AffiliateSupplyTargetEvidence[];
+  qualifyingFreshTargets: AffiliateSupplyTargetEvidence[];
+  targetMinimum: number;
+  targetMinimumMet: boolean;
+  potentialTargetContribution: number;
+  latestRun: AffiliateSupplyEvidenceSnapshot['latestRun'];
+  latestRunStatus: string;
+  isTerminalRefreshFailure: boolean;
+  mappingValid: boolean;
+  approved: boolean;
+  validated: boolean;
+  activeHold: boolean;
+  automationHoldReason: string | null;
+  sourceExcluded: boolean;
+  baseReasonCodes: readonly string[];
+}>;
+
+type AffiliateSupplyAssessmentState = Readonly<{
+  stage: AffiliateSupplyLifecycleStage;
+  outcome: AffiliateSupplyOutcome | null;
+  freshnessStatus: AffiliateSupplyFreshnessStatus;
+  isAutomationEnabled: boolean;
+  repairPriority: AffiliateReplenishmentPriority;
+  reasonCodes: readonly string[];
+}>;
+
+type AffiliateSupplyAssessmentTransition = (
+  context: AffiliateSupplyAssessmentContext,
+) => AffiliateSupplyAssessmentState | null;
+
+const assessmentReasonIf = (condition: boolean, reason: string): readonly string[] => (
+  condition ? [reason] : []
 );
 
-export const deriveAffiliateSupplyAssessment = (
+const activeMappingViolationReasons = (
   snapshot: AffiliateSupplyEvidenceSnapshot,
-): AffiliateSupplyAssessment => {
-  const now = snapshot.now;
-  const reasons: string[] = [];
-  const baselineProvided = snapshot.baseline !== null && snapshot.baseline !== undefined;
-  const parsedBaseline = parseAffiliateAutomationBaseline(snapshot.baseline);
-  const lifecycleEvidenceSatisfied = lifecycleEvidenceValid(snapshot);
-  const sourceAutomationEnabled = snapshot.source.autoScrapeEnabled === true;
-  const isBaselineRequired = sourceAutomationEnabled;
-  const hasInvalidBaseline = !parsedBaseline && (isBaselineRequired || baselineProvided);
-  const hasBaselineMappingMismatch = Boolean(
-    parsedBaseline
-    && snapshot.mapping
-    && (
-      parsedBaseline.mappingId !== snapshot.mapping.id
-      || parsedBaseline.mappingVersion !== snapshot.mapping.version
+): readonly string[] => [
+  ...assessmentReasonIf(
+    Boolean(snapshot.source.activeMappingId && !snapshot.mapping),
+    'ACTIVE_MAPPING_MISSING',
+  ),
+  ...assessmentReasonIf(
+    Boolean(
+      snapshot.source.activeMappingId
+      && snapshot.mapping?.id
+      && snapshot.source.activeMappingId !== snapshot.mapping.id,
     ),
-  );
-  const violations = sortedUnique([
-    ...(snapshot.identityViolations ?? []),
-    ...(snapshot.source.activeMappingId && !snapshot.mapping
-      ? ['ACTIVE_MAPPING_MISSING']
-      : []),
-    ...(snapshot.source.activeMappingId && snapshot.mapping?.id && snapshot.source.activeMappingId !== snapshot.mapping.id
-      ? ['ACTIVE_MAPPING_SOURCE_MISMATCH']
-      : []),
-    ...(snapshot.mappingJob?.sourceId && snapshot.mappingJob.sourceId !== snapshot.source.id
-      ? ['MAPPING_JOB_SOURCE_MISMATCH']
-      : []),
-    ...(snapshot.mappingJob?.mappingId && snapshot.mapping?.id
-      && snapshot.mappingJob.mappingId !== snapshot.mapping.id
-      ? ['MAPPING_JOB_MAPPING_MISMATCH']
-      : []),
-    ...(snapshot.latestRun?.mappingId && snapshot.source.activeMappingId
-      && snapshot.latestRun.mappingId !== snapshot.source.activeMappingId
-      ? ['LATEST_RUN_MAPPING_MISMATCH']
-      : []),
-    ...(snapshot.latestRun?.mappingId && snapshot.mapping?.id
-      && snapshot.latestRun.mappingId !== snapshot.mapping.id
-      ? ['LATEST_RUN_MAPPING_MISMATCH']
-      : []),
-    ...(hasInvalidBaseline ? ['INVALID_AUTOMATION_BASELINE'] : []),
-    ...(hasBaselineMappingMismatch ? ['AUTOMATION_BASELINE_MAPPING_MISMATCH'] : []),
-    ...(snapshot.approval && !lifecycleEvidenceSatisfied ? ['REQUIRED_LIFECYCLE_EVIDENCE_MISSING'] : []),
-  ]);
+    'ACTIVE_MAPPING_SOURCE_MISMATCH',
+  ),
+];
+
+const mappingJobViolationReasons = (
+  snapshot: AffiliateSupplyEvidenceSnapshot,
+): readonly string[] => [
+  ...assessmentReasonIf(
+    Boolean(snapshot.mappingJob?.sourceId && snapshot.mappingJob.sourceId !== snapshot.source.id),
+    'MAPPING_JOB_SOURCE_MISMATCH',
+  ),
+  ...assessmentReasonIf(
+    Boolean(
+      snapshot.mappingJob?.mappingId
+      && snapshot.mapping?.id
+      && snapshot.mappingJob.mappingId !== snapshot.mapping.id,
+    ),
+    'MAPPING_JOB_MAPPING_MISMATCH',
+  ),
+];
+
+const latestRunViolationReasons = (
+  snapshot: AffiliateSupplyEvidenceSnapshot,
+): readonly string[] => [
+  ...assessmentReasonIf(
+    Boolean(
+      snapshot.latestRun?.mappingId
+      && snapshot.source.activeMappingId
+      && snapshot.latestRun.mappingId !== snapshot.source.activeMappingId,
+    ),
+    'LATEST_RUN_MAPPING_MISMATCH',
+  ),
+  ...assessmentReasonIf(
+    Boolean(
+      snapshot.latestRun?.mappingId
+      && snapshot.mapping?.id
+      && snapshot.latestRun.mappingId !== snapshot.mapping.id,
+    ),
+    'LATEST_RUN_MAPPING_MISMATCH',
+  ),
+];
+
+const buildAssessmentInvariantViolations = (
+  snapshot: AffiliateSupplyEvidenceSnapshot,
+  hasInvalidBaseline: boolean,
+  hasBaselineMappingMismatch: boolean,
+  lifecycleEvidenceSatisfied: boolean,
+  governedContractMatches: boolean,
+): string[] => sortedUnique([
+  ...(snapshot.identityViolations ?? []),
+  ...activeMappingViolationReasons(snapshot),
+  ...mappingJobViolationReasons(snapshot),
+  ...latestRunViolationReasons(snapshot),
+  ...assessmentReasonIf(hasInvalidBaseline, 'INVALID_AUTOMATION_BASELINE'),
+  ...assessmentReasonIf(hasBaselineMappingMismatch, 'AUTOMATION_BASELINE_MAPPING_MISMATCH'),
+  ...assessmentReasonIf(Boolean(snapshot.approval && !lifecycleEvidenceSatisfied), 'REQUIRED_LIFECYCLE_EVIDENCE_MISSING'),
+  ...assessmentReasonIf(
+    snapshot.source.isAutomationEnabled === true && !governedContractMatches,
+    'SUPPLY_CONTRACT_STALE',
+  ),
+]);
+
+const buildAssessmentTargetData = (
+  snapshot: AffiliateSupplyEvidenceSnapshot,
+): AffiliateSupplyAssessmentTargetData => {
   const normalizedTargets = normalizeTargets(snapshot.targets);
-  const freshTargets = normalizedTargets.filter((target) => isAffiliateSupplyTargetFresh(target, snapshot.contract, now));
-  const qualifyingTargets = normalizedTargets.filter((target) => Boolean(targetRuleFor(snapshot.contract, target)));
-  const qualifyingFreshTargets = freshTargets.filter((target) => Boolean(targetRuleFor(snapshot.contract, target)));
-  const matchingRules = normalizedTargets
-    .map((target) => targetRuleFor(snapshot.contract, target))
-    .filter((rule): rule is AffiliateSupplyContractTargetRule => Boolean(rule));
+  const freshTargets = normalizedTargets.filter((target) => (
+    isAffiliateSupplyTargetFresh(target, snapshot.contract, snapshot.now)
+  ));
+  const qualifyingTargets = normalizedTargets.filter((target) => (
+    matchingTargetRulesFor(snapshot.contract, target).length > 0
+  ));
+  const qualifyingFreshTargets = freshTargets.filter((target) => (
+    matchingTargetRulesFor(snapshot.contract, target).length > 0
+  ));
+  const matchingRules = normalizedTargets.flatMap((target) => (
+    matchingTargetRulesFor(snapshot.contract, target)
+  ));
   const configuredRules = contractTargets(snapshot.contract);
   const targetMinimum = Math.max(
     ...(matchingRules.length ? matchingRules : configuredRules).map((rule) => rule.minimumFreshPublishedSupply),
     0,
   );
-  const potentialTargetContribution = isExcluded(snapshot) ? 0 : qualifyingFreshTargets.length;
-  const latestRun = snapshot.latestRun;
-  const latestRunStatus = uppercase(latestRun?.status);
-  const isTerminalRefreshFailure = Boolean(
-    latestRun
-    && latestRun.finishedAt
-    && ['FAILED', 'PARTIAL', 'ERROR', 'CANCELLED', 'ABORTED'].includes(latestRunStatus),
+  const sourceExcluded = isExcluded(snapshot);
+  const targetCellMinimums = new Map<string, number>();
+  qualifyingTargets.forEach((target) => {
+    matchingTargetRulesFor(snapshot.contract, target).forEach((rule) => {
+      const key = targetCellKey(rule);
+      targetCellMinimums.set(key, Math.max(
+        targetCellMinimums.get(key) ?? 0,
+        rule.minimumFreshPublishedSupply,
+      ));
+    });
+  });
+  const freshTargetCellCounts = new Map<string, number>();
+  if (!sourceExcluded) {
+    qualifyingFreshTargets.forEach((target) => {
+      const matchingRuleKeys = new Set(
+        matchingTargetRulesFor(snapshot.contract, target).map(targetCellKey),
+      );
+      matchingRuleKeys.forEach((key) => {
+        freshTargetCellCounts.set(key, (freshTargetCellCounts.get(key) ?? 0) + 1);
+      });
+    });
+  }
+  const targetMinimumMet = targetMinimum > 0
+    && targetCellMinimums.size > 0
+    && Array.from(targetCellMinimums).every(([key, minimum]) => (
+      (freshTargetCellCounts.get(key) ?? 0) >= minimum
+    ));
+  return {
+    normalizedTargets,
+    qualifyingTargets,
+    qualifyingFreshTargets,
+    targetMinimum,
+    targetMinimumMet,
+    potentialTargetContribution: sourceExcluded ? 0 : qualifyingFreshTargets.length,
+  };
+};
+
+const buildAssessmentBaseReasons = (
+  approved: boolean,
+  hasInvalidBaseline: boolean,
+  lifecycleEvidenceSatisfied: boolean,
+): readonly string[] => [
+  ...assessmentReasonIf(approved, 'INDEPENDENT_REVIEW_APPROVED'),
+  ...assessmentReasonIf(hasInvalidBaseline, 'INVALID_AUTOMATION_BASELINE'),
+  ...assessmentReasonIf(!lifecycleEvidenceSatisfied, 'REQUIRED_LIFECYCLE_EVIDENCE_MISSING'),
+];
+
+const isTerminalRefreshFailure = (
+  latestRun: AffiliateSupplyEvidenceSnapshot['latestRun'],
+  latestRunStatus: string,
+): boolean => Boolean(
+  latestRun
+  && latestRun.finishedAt
+  && ['FAILED', 'PARTIAL', 'ERROR', 'CANCELLED', 'ABORTED'].includes(latestRunStatus),
+);
+
+const invalidAutomationBaseline = (
+  parsedBaseline: AffiliateAutomationBaseline | null,
+  governedAutomationEnabled: boolean,
+  baselineProvided: boolean,
+): boolean => {
+  if (parsedBaseline) return false;
+  return governedAutomationEnabled || baselineProvided;
+};
+
+const governedContractMatches = (
+  source: AffiliateSupplyEvidenceSnapshot['source'],
+  contract: AffiliateSupplyContractPolicy,
+): boolean => {
+  const hasContractState = (
+    source.activeSupplyContractVersion !== undefined
+    || source.activeSupplyContractHash !== undefined
   );
+  if (!hasContractState) return true;
+  return (
+    source.activeSupplyContractVersion === contract.version
+    && source.activeSupplyContractHash === contract.hash
+  );
+};
+
+const baselineMappingMismatch = (
+  parsedBaseline: AffiliateAutomationBaseline | null,
+  mapping: AffiliateSupplyMappingEvidence | null | undefined,
+): boolean => {
+  if (!parsedBaseline || !mapping) return false;
+  return (
+    parsedBaseline.mappingId !== mapping.id
+    || parsedBaseline.mappingVersion !== mapping.version
+  );
+};
+
+const buildAssessmentContext = (
+  snapshot: AffiliateSupplyEvidenceSnapshot,
+): AffiliateSupplyAssessmentContext => {
+  const baselineProvided = snapshot.baseline !== null && snapshot.baseline !== undefined;
+  const parsedBaseline = parseAffiliateAutomationBaseline(snapshot.baseline);
+  const lifecycleEvidenceSatisfied = lifecycleEvidenceValid(snapshot);
+  const governedContractStateMatches = governedContractMatches(snapshot.source, snapshot.contract);
+  // `autoScrapeEnabled` remains a compatibility-only evidence fallback for older
+  // snapshots; persisted governed state is authoritative whenever present.
+  const governedAutomationEnabled = snapshot.source.isAutomationEnabled === undefined
+    ? snapshot.source.autoScrapeEnabled === true
+    : snapshot.source.isAutomationEnabled === true && governedContractStateMatches;
+  const hasInvalidBaseline = invalidAutomationBaseline(
+    parsedBaseline,
+    governedAutomationEnabled,
+    baselineProvided,
+  );
+  const hasBaselineMappingMismatch = baselineMappingMismatch(parsedBaseline, snapshot.mapping);
   const mappingValid = mappingPackageValid(snapshot);
   const approved = approvalValid(snapshot);
   const validated = hasValidatedMapping(snapshot);
-  if (approved) reasons.push('INDEPENDENT_REVIEW_APPROVED');
-  if (hasInvalidBaseline) reasons.push('INVALID_AUTOMATION_BASELINE');
-  if (!lifecycleEvidenceSatisfied) reasons.push('REQUIRED_LIFECYCLE_EVIDENCE_MISSING');
-
+  const sourceExcluded = isExcluded(snapshot);
   const activeHold = snapshot.source.isAutomationOnHold === true || Boolean(snapshot.holds?.length);
   const automationHoldReason = activeHold
     ? snapshot.source.automationHoldReason ?? 'AUTOMATION_HOLD'
     : null;
-  let stage: AffiliateSupplyLifecycleStage = 'PRE_MAPPED';
-  let outcome: AffiliateSupplyOutcome | null = null;
-  let freshnessStatus: AffiliateSupplyFreshnessStatus = 'UNKNOWN';
-  let isAutomationEnabled = false;
-  let repairPriority: AffiliateReplenishmentPriority = AFFILIATE_REPLENISHMENT_PRIORITY.NEW_DISCOVERY;
+  const latestRun = snapshot.latestRun;
+  const latestRunStatus = uppercase(latestRun?.status);
+  const targetData = buildAssessmentTargetData(snapshot);
+  return {
+    snapshot,
+    now: snapshot.now,
+    parsedBaseline,
+    lifecycleEvidenceSatisfied,
+    governedAutomationEnabled,
+    governedContractMatches: governedContractStateMatches,
+    hasInvalidBaseline,
+    hasBaselineMappingMismatch,
+    violations: buildAssessmentInvariantViolations(
+      snapshot,
+      hasInvalidBaseline,
+      hasBaselineMappingMismatch,
+      lifecycleEvidenceSatisfied,
+      governedContractStateMatches,
+    ),
+    normalizedTargets: targetData.normalizedTargets,
+    qualifyingTargets: targetData.qualifyingTargets,
+    qualifyingFreshTargets: targetData.qualifyingFreshTargets,
+    targetMinimum: targetData.targetMinimum,
+    targetMinimumMet: targetData.targetMinimumMet,
+    potentialTargetContribution: targetData.potentialTargetContribution,
+    latestRun,
+    latestRunStatus,
+    isTerminalRefreshFailure: isTerminalRefreshFailure(latestRun, latestRunStatus),
+    mappingValid,
+    approved,
+    validated,
+    activeHold,
+    automationHoldReason,
+    sourceExcluded,
+    baseReasonCodes: buildAssessmentBaseReasons(
+      approved,
+      hasInvalidBaseline,
+      lifecycleEvidenceSatisfied,
+    ),
+  };
+};
 
-  if (violations.length) {
-    const impossibleIdentity = (snapshot.identityViolations?.length ?? 0) > 0;
-    stage = impossibleIdentity ? 'HUMAN_REVIEW_REQUIRED' : 'APPROVED';
-    outcome = impossibleIdentity ? 'HUMAN_REVIEW_REQUIRED' : 'REPAIR_REQUIRED';
-    reasons.push(impossibleIdentity ? 'IMPOSSIBLE_SUPPLY_ROOT' : 'INVARIANT_REPAIR_REQUIRED');
-    repairPriority = AFFILIATE_REPLENISHMENT_PRIORITY.REPAIR_MAPPED_APPROVED;
-  } else if (isExcluded(snapshot)) {
-    stage = 'SOURCE_EXCLUDED';
-    outcome = 'SOURCE_EXCLUDED';
-    reasons.push('SOURCE_EXCLUDED');
-    freshnessStatus = qualifyingFreshTargets.length ? 'FRESH' : 'STALE';
-  } else if (snapshot.source.status && ['HUMAN_REVIEW_REQUIRED', 'REVIEW_REQUIRED'].includes(uppercase(snapshot.source.status))) {
-    stage = 'HUMAN_REVIEW_REQUIRED';
-    outcome = 'HUMAN_REVIEW_REQUIRED';
-    reasons.push('HUMAN_REVIEW_REQUIRED');
-    repairPriority = AFFILIATE_REPLENISHMENT_PRIORITY.REPAIR_MAPPED_APPROVED;
-  } else if (!mappingValid) {
-    stage = 'PRE_MAPPED';
-    reasons.push('MAPPING_PACKAGE_MISSING_OR_INVALID');
-    if (snapshot.mapping?.id || snapshot.approval?.id) {
-      repairPriority = AFFILIATE_REPLENISHMENT_PRIORITY.REPAIR_MAPPED_APPROVED;
-    } else if (snapshot.mappingJob?.id || snapshot.intake?.id) {
-      repairPriority = AFFILIATE_REPLENISHMENT_PRIORITY.CAPTURED_MAPPING;
-    }
-  } else if (!approved) {
-    stage = 'MAPPED';
-    reasons.push('MAPPING_PACKAGE_VALID');
-    repairPriority = AFFILIATE_REPLENISHMENT_PRIORITY.ACTIVATION_REVIEW;
-  } else if (activeHold) {
-    stage = 'APPROVED';
-    outcome = 'AUTOMATION_HOLD';
-    reasons.push('AUTOMATION_HOLD');
-    repairPriority = AFFILIATE_REPLENISHMENT_PRIORITY.REPAIR_MAPPED_APPROVED;
-  } else if (isTerminalRefreshFailure) {
-    stage = 'APPROVED';
-    outcome = 'REPAIR_REQUIRED';
-    reasons.push('REFRESH_FAILED');
-    repairPriority = AFFILIATE_REPLENISHMENT_PRIORITY.REPAIR_MAPPED_APPROVED;
-  } else if (!validated || !sourceAutomationEnabled) {
-    stage = 'APPROVED';
-    reasons.push(!validated ? 'MAPPING_NOT_VALIDATED' : 'AUTOMATION_DISABLED');
-    repairPriority = AFFILIATE_REPLENISHMENT_PRIORITY.ACTIVATION_REVIEW;
-  } else if (latestRun && latestRunStatus === 'SUCCEEDED' && latestRun.candidateCount === 0) {
-    if (latestRun.isEmptyStateMatched === true && mappingHasEmptyState(snapshot)) {
-      stage = 'ACTIVATED';
-      outcome = 'VALID_EMPTY_REFRESH';
-      reasons.push('VALID_EMPTY_REFRESH');
-      freshnessStatus = 'FRESH';
-      isAutomationEnabled = true;
-      repairPriority = AFFILIATE_REPLENISHMENT_PRIORITY.RESTORE_FRESH_PUBLISHED;
-    } else {
-      stage = 'APPROVED';
-      outcome = 'REPAIR_REQUIRED';
-      reasons.push('UNEXPLAINED_ZERO_RESULT');
-      repairPriority = AFFILIATE_REPLENISHMENT_PRIORITY.REPAIR_MAPPED_APPROVED;
-    }
-  } else {
-    isAutomationEnabled = true;
-    if (qualifyingFreshTargets.length > 0) {
-      stage = 'PUBLISHED';
-      freshnessStatus = 'FRESH';
-      reasons.push('FRESH_PUBLISHED_TARGET');
-      repairPriority = AFFILIATE_REPLENISHMENT_PRIORITY.RESTORE_FRESH_PUBLISHED;
-    } else {
-      stage = 'ACTIVATED';
-      freshnessStatus = qualifyingTargets.length ? 'STALE' : 'UNKNOWN';
-      outcome = qualifyingTargets.length ? 'NATURAL_EXPIRY' : null;
-      if (qualifyingTargets.length) reasons.push('NATURAL_EXPIRY');
-      repairPriority = AFFILIATE_REPLENISHMENT_PRIORITY.RESTORE_FRESH_PUBLISHED;
-    }
-  }
-  const hasRejectedTarget = normalizedTargets.some((target) => uppercase(target.status) === 'REJECTED');
-  if (hasRejectedTarget) {
-    reasons.push('TARGET_REJECTION_SCOPED');
-    if (
-      stage !== 'SOURCE_EXCLUDED'
-      && (outcome === 'NATURAL_EXPIRY' || !outcome)
-    ) {
-      outcome = 'TARGET_REJECTED';
-    }
-  }
-  if (parsedBaseline && latestRun && latestRunStatus === 'SUCCEEDED') {
-    if (
-      parsedBaseline.candidateCount > 0
-      && latestRun.candidateCount > parsedBaseline.candidateCount * 2
-      && latestRun.candidateCount >= parsedBaseline.candidateCount + 5
-    ) {
-      stage = 'APPROVED';
-      outcome = 'REPAIR_REQUIRED';
-      isAutomationEnabled = false;
-      freshnessStatus = qualifyingFreshTargets.length ? 'FRESH' : freshnessStatus;
-      reasons.push('MAPPING_DRIFT');
-      repairPriority = AFFILIATE_REPLENISHMENT_PRIORITY.REPAIR_MAPPED_APPROVED;
-    }
-  }
-  if (stage === 'APPROVED' && sourceAutomationEnabled && !['AUTOMATION_HOLD'].includes(outcome ?? '')) {
-    isAutomationEnabled = false;
-  }
-  const targetContribution = stage === 'PUBLISHED' ? potentialTargetContribution : 0;
-  const isTargetMet = targetMinimum > 0 && targetContribution >= targetMinimum;
+const assessmentStateForViolations: AffiliateSupplyAssessmentTransition = (context) => {
+  if (!context.violations.length) return null;
+  const impossibleIdentity = (context.snapshot.identityViolations?.length ?? 0) > 0;
+  return {
+    stage: impossibleIdentity ? 'HUMAN_REVIEW_REQUIRED' : 'APPROVED',
+    outcome: impossibleIdentity ? 'HUMAN_REVIEW_REQUIRED' : 'REPAIR_REQUIRED',
+    freshnessStatus: 'UNKNOWN',
+    isAutomationEnabled: false,
+    repairPriority: AFFILIATE_REPLENISHMENT_PRIORITY.REPAIR_MAPPED_APPROVED,
+    reasonCodes: [
+      ...context.baseReasonCodes,
+      impossibleIdentity ? 'IMPOSSIBLE_SUPPLY_ROOT' : 'INVARIANT_REPAIR_REQUIRED',
+    ],
+  };
+};
 
+const assessmentStateForExcluded: AffiliateSupplyAssessmentTransition = (context) => {
+  if (!context.sourceExcluded) return null;
+  return {
+    stage: 'SOURCE_EXCLUDED',
+    outcome: 'SOURCE_EXCLUDED',
+    freshnessStatus: context.qualifyingTargets.length ? 'FRESH' : 'STALE',
+    isAutomationEnabled: false,
+    repairPriority: AFFILIATE_REPLENISHMENT_PRIORITY.NEW_DISCOVERY,
+    reasonCodes: [...context.baseReasonCodes, 'SOURCE_EXCLUDED'],
+  };
+};
+
+const assessmentStateForHumanReview: AffiliateSupplyAssessmentTransition = (context) => {
+  const sourceStatus = context.snapshot.source.status;
+  if (!sourceStatus || !['HUMAN_REVIEW_REQUIRED', 'REVIEW_REQUIRED'].includes(uppercase(sourceStatus))) {
+    return null;
+  }
+  return {
+    stage: 'HUMAN_REVIEW_REQUIRED',
+    outcome: 'HUMAN_REVIEW_REQUIRED',
+    freshnessStatus: 'UNKNOWN',
+    isAutomationEnabled: false,
+    repairPriority: AFFILIATE_REPLENISHMENT_PRIORITY.REPAIR_MAPPED_APPROVED,
+    reasonCodes: [...context.baseReasonCodes, 'HUMAN_REVIEW_REQUIRED'],
+  };
+};
+
+const invalidMappingRepairPriority = (
+  snapshot: AffiliateSupplyEvidenceSnapshot,
+): AffiliateReplenishmentPriority => {
+  if (snapshot.mapping?.id || snapshot.approval?.id) {
+    return AFFILIATE_REPLENISHMENT_PRIORITY.REPAIR_MAPPED_APPROVED;
+  }
+  if (snapshot.mappingJob?.id || snapshot.intake?.id) {
+    return AFFILIATE_REPLENISHMENT_PRIORITY.CAPTURED_MAPPING;
+  }
+  return AFFILIATE_REPLENISHMENT_PRIORITY.NEW_DISCOVERY;
+};
+
+const assessmentStateForInvalidMapping: AffiliateSupplyAssessmentTransition = (context) => {
+  if (context.mappingValid) return null;
+  return {
+    stage: 'PRE_MAPPED',
+    outcome: null,
+    freshnessStatus: 'UNKNOWN',
+    isAutomationEnabled: false,
+    repairPriority: invalidMappingRepairPriority(context.snapshot),
+    reasonCodes: [...context.baseReasonCodes, 'MAPPING_PACKAGE_MISSING_OR_INVALID'],
+  };
+};
+
+const assessmentStateForUnapprovedMapping: AffiliateSupplyAssessmentTransition = (context) => {
+  if (context.approved) return null;
+  return {
+    stage: 'MAPPED',
+    outcome: null,
+    freshnessStatus: 'UNKNOWN',
+    isAutomationEnabled: false,
+    repairPriority: AFFILIATE_REPLENISHMENT_PRIORITY.ACTIVATION_REVIEW,
+    reasonCodes: [...context.baseReasonCodes, 'MAPPING_PACKAGE_VALID'],
+  };
+};
+
+const assessmentStateForAutomationHold: AffiliateSupplyAssessmentTransition = (context) => {
+  if (!context.activeHold) return null;
+  return {
+    stage: 'APPROVED',
+    outcome: 'AUTOMATION_HOLD',
+    freshnessStatus: 'UNKNOWN',
+    isAutomationEnabled: false,
+    repairPriority: AFFILIATE_REPLENISHMENT_PRIORITY.REPAIR_MAPPED_APPROVED,
+    reasonCodes: [...context.baseReasonCodes, 'AUTOMATION_HOLD'],
+  };
+};
+
+const assessmentStateForRefreshFailure: AffiliateSupplyAssessmentTransition = (context) => {
+  if (!context.isTerminalRefreshFailure) return null;
+  return {
+    stage: 'APPROVED',
+    outcome: 'REPAIR_REQUIRED',
+    freshnessStatus: 'UNKNOWN',
+    isAutomationEnabled: false,
+    repairPriority: AFFILIATE_REPLENISHMENT_PRIORITY.REPAIR_MAPPED_APPROVED,
+    reasonCodes: [...context.baseReasonCodes, 'REFRESH_FAILED'],
+  };
+};
+
+const assessmentStateForUnvalidatedAutomation: AffiliateSupplyAssessmentTransition = (context) => {
+  if (context.validated && context.governedAutomationEnabled) return null;
+  return {
+    stage: 'APPROVED',
+    outcome: null,
+    freshnessStatus: 'UNKNOWN',
+    isAutomationEnabled: false,
+    repairPriority: AFFILIATE_REPLENISHMENT_PRIORITY.ACTIVATION_REVIEW,
+    reasonCodes: [
+      ...context.baseReasonCodes,
+      context.validated ? 'AUTOMATION_DISABLED' : 'MAPPING_NOT_VALIDATED',
+    ],
+  };
+};
+
+const assessmentStateForEmptyRefresh: AffiliateSupplyAssessmentTransition = (context) => {
+  if (!context.latestRun || context.latestRunStatus !== 'SUCCEEDED' || context.latestRun.candidateCount !== 0) {
+    return null;
+  }
+  const isValidEmptyRefresh = (
+    context.latestRun.isEmptyStateMatched === true
+    && mappingHasEmptyState(context.snapshot)
+  );
+  return isValidEmptyRefresh
+    ? {
+      stage: 'ACTIVATED',
+      outcome: 'VALID_EMPTY_REFRESH',
+      freshnessStatus: 'FRESH',
+      isAutomationEnabled: true,
+      repairPriority: AFFILIATE_REPLENISHMENT_PRIORITY.RESTORE_FRESH_PUBLISHED,
+      reasonCodes: [...context.baseReasonCodes, 'VALID_EMPTY_REFRESH'],
+    }
+    : {
+      stage: 'APPROVED',
+      outcome: 'REPAIR_REQUIRED',
+      freshnessStatus: 'UNKNOWN',
+      isAutomationEnabled: false,
+      repairPriority: AFFILIATE_REPLENISHMENT_PRIORITY.REPAIR_MAPPED_APPROVED,
+      reasonCodes: [...context.baseReasonCodes, 'UNEXPLAINED_ZERO_RESULT'],
+    };
+};
+
+const assessmentStateForPublishedOrActivated = (
+  context: AffiliateSupplyAssessmentContext,
+): AffiliateSupplyAssessmentState => {
+  if (context.qualifyingFreshTargets.length > 0) {
+    return {
+      stage: 'PUBLISHED',
+      outcome: null,
+      freshnessStatus: 'FRESH',
+      isAutomationEnabled: true,
+      repairPriority: AFFILIATE_REPLENISHMENT_PRIORITY.RESTORE_FRESH_PUBLISHED,
+      reasonCodes: [...context.baseReasonCodes, 'FRESH_PUBLISHED_TARGET'],
+    };
+  }
+  const hasQualifyingTargets = context.qualifyingTargets.length > 0;
+  return {
+    stage: 'ACTIVATED',
+    outcome: hasQualifyingTargets ? 'NATURAL_EXPIRY' : null,
+    freshnessStatus: hasQualifyingTargets ? 'STALE' : 'UNKNOWN',
+    isAutomationEnabled: true,
+    repairPriority: AFFILIATE_REPLENISHMENT_PRIORITY.RESTORE_FRESH_PUBLISHED,
+    reasonCodes: [
+      ...context.baseReasonCodes,
+      ...assessmentReasonIf(hasQualifyingTargets, 'NATURAL_EXPIRY'),
+    ],
+  };
+};
+
+const ASSESSMENT_TRANSITIONS: readonly AffiliateSupplyAssessmentTransition[] = [
+  assessmentStateForViolations,
+  assessmentStateForExcluded,
+  assessmentStateForHumanReview,
+  assessmentStateForInvalidMapping,
+  assessmentStateForUnapprovedMapping,
+  assessmentStateForAutomationHold,
+  assessmentStateForRefreshFailure,
+  assessmentStateForUnvalidatedAutomation,
+  assessmentStateForEmptyRefresh,
+];
+
+const selectAssessmentState = (
+  context: AffiliateSupplyAssessmentContext,
+): AffiliateSupplyAssessmentState => {
+  for (const transition of ASSESSMENT_TRANSITIONS) {
+    const state = transition(context);
+    if (state) return state;
+  }
+  return assessmentStateForPublishedOrActivated(context);
+};
+
+const applyTargetRejection = (
+  context: AffiliateSupplyAssessmentContext,
+  state: AffiliateSupplyAssessmentState,
+): AffiliateSupplyAssessmentState => {
+  const hasRejectedTarget = context.normalizedTargets.some((target) => (
+    uppercase(target.status) === 'REJECTED'
+  ));
+  if (!hasRejectedTarget) return state;
+  const canReclassify = (
+    state.stage !== 'SOURCE_EXCLUDED'
+    && (state.outcome === 'NATURAL_EXPIRY' || !state.outcome)
+  );
+  return {
+    ...state,
+    outcome: canReclassify ? 'TARGET_REJECTED' : state.outcome,
+    reasonCodes: [...state.reasonCodes, 'TARGET_REJECTION_SCOPED'],
+  };
+};
+
+const isMappingDrift = (context: AffiliateSupplyAssessmentContext): boolean => Boolean(
+  context.parsedBaseline
+  && context.latestRun
+  && context.latestRunStatus === 'SUCCEEDED'
+  && context.parsedBaseline.candidateCount > 0
+  && context.latestRun.candidateCount > context.parsedBaseline.candidateCount * 2
+  && context.latestRun.candidateCount >= context.parsedBaseline.candidateCount + 5
+);
+
+const applyMappingDrift = (
+  context: AffiliateSupplyAssessmentContext,
+  state: AffiliateSupplyAssessmentState,
+): AffiliateSupplyAssessmentState => {
+  if (!isMappingDrift(context)) return state;
+  return {
+    ...state,
+    stage: 'APPROVED',
+    outcome: 'REPAIR_REQUIRED',
+    isAutomationEnabled: false,
+    freshnessStatus: context.qualifyingFreshTargets.length ? 'FRESH' : state.freshnessStatus,
+    repairPriority: AFFILIATE_REPLENISHMENT_PRIORITY.REPAIR_MAPPED_APPROVED,
+    reasonCodes: [...state.reasonCodes, 'MAPPING_DRIFT'],
+  };
+};
+
+const disableApprovedAutomation = (
+  context: AffiliateSupplyAssessmentContext,
+  state: AffiliateSupplyAssessmentState,
+): AffiliateSupplyAssessmentState => {
+  if (
+    state.stage !== 'APPROVED'
+    || !context.governedAutomationEnabled
+    || state.outcome === 'AUTOMATION_HOLD'
+  ) {
+    return state;
+  }
+  return { ...state, isAutomationEnabled: false };
+};
+
+const finalizeAssessmentState = (
+  context: AffiliateSupplyAssessmentContext,
+): AffiliateSupplyAssessmentState => {
+  const selectedState = selectAssessmentState(context);
+  const rejectionState = applyTargetRejection(context, selectedState);
+  const driftState = applyMappingDrift(context, rejectionState);
+  return disableApprovedAutomation(context, driftState);
+};
+
+export const deriveAffiliateSupplyAssessment = (
+  snapshot: AffiliateSupplyEvidenceSnapshot,
+): AffiliateSupplyAssessment => {
+  const context = buildAssessmentContext(snapshot);
+  const state = finalizeAssessmentState(context);
+  const targetContribution = state.stage === 'PUBLISHED' ? context.potentialTargetContribution : 0;
+  const isTargetMet = state.stage === 'PUBLISHED' && context.targetMinimumMet;
   return {
     supplySourceId: snapshot.supplySourceId ?? snapshot.source.id,
     lifecycleGeneration: snapshot.source.lifecycleGeneration,
-    stage,
-    outcome,
-    freshnessStatus,
+    stage: state.stage,
+    outcome: state.outcome,
+    freshnessStatus: state.freshnessStatus,
     targetContribution,
-    qualifyingTargetIds: qualifyingFreshTargets.map((target) => target.targetId),
-    targets: normalizedTargets,
-    isAutomationEnabled,
+    qualifyingTargetIds: context.qualifyingFreshTargets.map((target) => target.targetId),
+    targets: context.normalizedTargets,
+    isAutomationEnabled: state.isAutomationEnabled,
     isTargetMet,
-    targetMinimum,
-    repairPriority,
-    reasonCodes: sortedUnique(reasons),
+    targetMinimum: context.targetMinimum,
+    repairPriority: state.repairPriority,
+    reasonCodes: sortedUnique(state.reasonCodes),
     evidenceRefs: resultEvidenceRefs(snapshot),
-    invariantViolations: violations,
-    automationHoldReason,
-    assessedAt: now.toISOString(),
+    invariantViolations: context.violations,
+    automationHoldReason: context.automationHoldReason,
+    assessedAt: context.now.toISOString(),
   };
+};
+
+type AffiliateSupplyIdentityDecision = Readonly<{
+  rootDecision: AffiliateSupplyIdentity['rootDecision'];
+  reasonCodes: readonly string[];
+}>;
+
+const identityRootRequiresSuccessor = (
+  priorOrigin: string | null,
+  currentOrigin: string,
+  operatorDomain: string | null,
+  priorOperatorDomain: string | null,
+): boolean => {
+  if (priorOrigin !== currentOrigin) return true;
+  return operatorDomain !== null && priorOperatorDomain !== operatorDomain;
+};
+
+const decideAffiliateSupplyIdentityRoot = (input: Readonly<{
+  prior?: AffiliateSupplyIdentityInput['prior'];
+  canonicalUrl: string;
+  priorCanonicalUrl: string | null;
+  priorOrigin: string | null;
+  currentOrigin: string;
+  operatorDomain: string | null;
+  priorOperatorDomain: string | null;
+  isRedirectVerified?: boolean;
+}>): AffiliateSupplyIdentityDecision => {
+  if (!input.prior) return { rootDecision: 'NEW_ROOT', reasonCodes: [] };
+  if (identityRootRequiresSuccessor(
+    input.priorOrigin,
+    input.currentOrigin,
+    input.operatorDomain,
+    input.priorOperatorDomain,
+  )) {
+    return {
+      rootDecision: 'SUCCESSOR_REQUIRED',
+      reasonCodes: ['ORIGIN_OR_OPERATOR_CHANGED'],
+    };
+  }
+  if (input.canonicalUrl === input.priorCanonicalUrl || input.isRedirectVerified === true) {
+    return {
+      rootDecision: 'SAME_ROOT',
+      reasonCodes: input.canonicalUrl !== input.priorCanonicalUrl
+        ? ['VERIFIED_SAME_ORIGIN_CANONICAL_REDIRECT']
+        : [],
+    };
+  }
+  return {
+    rootDecision: 'REVIEW_REQUIRED',
+    reasonCodes: ['CANONICAL_CHANGE_NOT_VERIFIED'],
+  };
+};
+
+const identityNeedsRevalidation = (input: Readonly<{
+  prior?: AffiliateSupplyIdentityInput['prior'];
+  rootDecision: AffiliateSupplyIdentity['rootDecision'];
+  canonicalUrl: string;
+  priorCanonicalUrl: string | null;
+  requestedUrl: string;
+  resolvedCanonicalUrl?: string | null;
+}>): boolean => {
+  if (!input.prior || input.rootDecision !== 'SAME_ROOT') return false;
+  if (input.canonicalUrl !== input.priorCanonicalUrl) return true;
+  if (hasRawSupplyUrlNormalizationVariant(input.requestedUrl)) return true;
+  return Boolean(
+    input.resolvedCanonicalUrl
+    && hasRawSupplyUrlNormalizationVariant(input.resolvedCanonicalUrl),
+  );
 };
 
 export const normalizeAffiliateSupplyIdentity = (
@@ -846,44 +1376,31 @@ export const normalizeAffiliateSupplyIdentity = (
   const priorOrigin = priorCanonicalUrl ? new URL(priorCanonicalUrl).origin : null;
   const operatorDomain = normalizeOperatorDomain(input.operatorDomain);
   const priorOperatorDomain = normalizeOperatorDomain(input.prior?.operatorDomain);
-
-  let rootDecision: AffiliateSupplyIdentity['rootDecision'] = 'NEW_ROOT';
-  const reasonCodes: string[] = [];
-
-  if (input.prior) {
-    if (
-      priorOrigin !== parsed.origin
-      || (
-        operatorDomain !== null
-        && priorOperatorDomain !== operatorDomain
-      )
-    ) {
-      rootDecision = 'SUCCESSOR_REQUIRED';
-      reasonCodes.push('ORIGIN_OR_OPERATOR_CHANGED');
-    } else if (canonicalUrl === priorCanonicalUrl || input.isRedirectVerified === true) {
-      rootDecision = 'SAME_ROOT';
-      if (canonicalUrl !== priorCanonicalUrl) reasonCodes.push('VERIFIED_SAME_ORIGIN_CANONICAL_REDIRECT');
-    } else {
-      rootDecision = 'REVIEW_REQUIRED';
-      reasonCodes.push('CANONICAL_CHANGE_NOT_VERIFIED');
-    }
-  }
-  const isRevalidationRequired = Boolean(
-    input.prior
-    && rootDecision === 'SAME_ROOT'
-    && (
-      canonicalUrl !== priorCanonicalUrl
-      || hasRawSupplyUrlNormalizationVariant(input.requestedUrl)
-      || (
-        input.resolvedCanonicalUrl
-        && hasRawSupplyUrlNormalizationVariant(input.resolvedCanonicalUrl)
-      )
-    ),
-  );
-  if (isRevalidationRequired) reasonCodes.push('RAW_URL_NORMALIZATION_VARIANT');
-  if (requestedUrl !== canonicalUrl) reasonCodes.push('CANONICAL_URL_NORMALIZED');
+  const decision = decideAffiliateSupplyIdentityRoot({
+    prior: input.prior,
+    canonicalUrl,
+    priorCanonicalUrl,
+    priorOrigin,
+    currentOrigin: parsed.origin,
+    operatorDomain,
+    priorOperatorDomain,
+    isRedirectVerified: input.isRedirectVerified,
+  });
+  const isRevalidationRequired = identityNeedsRevalidation({
+    prior: input.prior,
+    rootDecision: decision.rootDecision,
+    canonicalUrl,
+    priorCanonicalUrl,
+    requestedUrl: input.requestedUrl,
+    resolvedCanonicalUrl: input.resolvedCanonicalUrl,
+  });
+  const reasonCodes = [
+    ...decision.reasonCodes,
+    ...(isRevalidationRequired ? ['RAW_URL_NORMALIZATION_VARIANT'] : []),
+    ...(requestedUrl !== canonicalUrl ? ['CANONICAL_URL_NORMALIZED'] : []),
+  ];
   const pathKey = `${parsed.origin}${parsed.pathname}`;
-  const identityKey = rootDecision === 'SAME_ROOT' && input.prior?.identityKey
+  const identityKey = decision.rootDecision === 'SAME_ROOT' && input.prior?.identityKey
     ? input.prior.identityKey
     : identityHash(canonicalUrl);
   return {
@@ -891,7 +1408,7 @@ export const normalizeAffiliateSupplyIdentity = (
     origin: parsed.origin,
     pathKey,
     identityKey,
-    rootDecision,
+    rootDecision: decision.rootDecision,
     isRevalidationRequired,
     reasonCodes: sortedUnique(reasonCodes),
   };
@@ -921,56 +1438,71 @@ export const buildAffiliateSupplyContractManifest = (input: Readonly<{
   };
 };
 
-export const normalizeAffiliateSupplyContractPolicy = (
-  input: AffiliateSupplyContractPolicy | AffiliateAgentSupplyContract,
-  rolloutCohort = 'DEFAULT',
-): AffiliateSupplyContractPolicy => {
-  if ('freshnessWindows' in input && 'targets' in input) return input;
-  const componentByName = new Map(input.components.map((component) => [component.name, component]));
-  const readPayload = (component: unknown): Record<string, unknown> => {
-    if (!component || typeof component !== 'object' || !('payload' in component)) return {};
-    const payload = component.payload;
-    return payload && typeof payload === 'object' && !Array.isArray(payload)
-      ? payload as Record<string, unknown>
-      : {};
-  };
-  const readRecord = (value: unknown): Record<string, unknown> => (
-    value && typeof value === 'object' && !Array.isArray(value)
-      ? value as Record<string, unknown>
-      : {}
-  );
+const readAffiliateSupplyContractPayload = (component: unknown): Record<string, unknown> => {
+  if (!component || typeof component !== 'object' || !('payload' in component)) return {};
+  const payload = component.payload;
+  return payload && typeof payload === 'object' && !Array.isArray(payload)
+    ? payload as Record<string, unknown>
+    : {};
+};
+
+const readAffiliateSupplyContractRecord = (value: unknown): Record<string, unknown> => (
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+);
+
+const legacyContractComponentsByName = (input: AffiliateAgentSupplyContract) => new Map(
+  input.components.map((component) => [component.name, component]),
+);
+
+const legacyApplicabilityByProfile = (
+  componentByName: ReadonlyMap<string, unknown>,
+): Map<string, string[]> => {
   const applicabilityByProfile = new Map<string, string[]>();
-  const applicability = readPayload(componentByName.get('COVERAGE_APPLICABILITY')).applicability;
-  if (Array.isArray(applicability)) {
-    for (const value of applicability) {
-      const record = readRecord(value);
-      const sourceProfile = String(record.sourceProfile ?? '').trim().toUpperCase();
-      const sportIds = Array.isArray(record.sportIds)
-        ? sortedUnique(record.sportIds.map(String))
-        : [];
-      if (sourceProfile) applicabilityByProfile.set(sourceProfile, sportIds);
-    }
+  const applicability = readAffiliateSupplyContractPayload(
+    componentByName.get('COVERAGE_APPLICABILITY'),
+  ).applicability;
+  if (!Array.isArray(applicability)) return applicabilityByProfile;
+  for (const value of applicability) {
+    const record = readAffiliateSupplyContractRecord(value);
+    const sourceProfile = String(record.sourceProfile ?? '').trim().toUpperCase();
+    const sportIds = Array.isArray(record.sportIds)
+      ? sortedUnique(record.sportIds.map(String))
+      : [];
+    if (sourceProfile) applicabilityByProfile.set(sourceProfile, sportIds);
   }
-  const freshnessWindows = (Array.isArray(readPayload(componentByName.get('FRESHNESS')).windows)
-    ? readPayload(componentByName.get('FRESHNESS')).windows as unknown[]
-    : []
-  ).map((window) => {
-    const record = readRecord(window);
+  return applicabilityByProfile;
+};
+
+const legacyFreshnessWindows = (
+  componentByName: ReadonlyMap<string, unknown>,
+): AffiliateSupplyContractPolicy['freshnessWindows'] => {
+  const value = readAffiliateSupplyContractPayload(componentByName.get('FRESHNESS')).windows;
+  const windows = Array.isArray(value) ? value as unknown[] : [];
+  return windows.map((window) => {
+    const record = readAffiliateSupplyContractRecord(window);
     return {
       sourceProfile: String(record.sourceProfile ?? ''),
       maximumAgeHours: Number(record.maximumAgeHours ?? 24),
     };
   });
-  const targetTiers = (Array.isArray(readPayload(componentByName.get('SUPPLY_TARGETS_AND_MARKET_TIERS')).tiers)
-    ? readPayload(componentByName.get('SUPPLY_TARGETS_AND_MARKET_TIERS')).tiers as unknown[]
-    : []
-  );
-  const targets = targetTiers.flatMap((tier) => {
-    const tierRecord = readRecord(tier);
+};
+
+const legacySupplyTargets = (
+  componentByName: ReadonlyMap<string, unknown>,
+  applicabilityByProfile: Map<string, string[]>,
+): AffiliateSupplyContractTargetRule[] => {
+  const value = readAffiliateSupplyContractPayload(
+    componentByName.get('SUPPLY_TARGETS_AND_MARKET_TIERS'),
+  ).tiers;
+  const targetTiers = Array.isArray(value) ? value as unknown[] : [];
+  return targetTiers.flatMap((tier) => {
+    const tierRecord = readAffiliateSupplyContractRecord(tier);
     const marketKey = String(tierRecord.tier ?? '');
     const tierTargets = Array.isArray(tierRecord.targets) ? tierRecord.targets as unknown[] : [];
     return tierTargets.flatMap((target) => {
-      const targetRecord = readRecord(target);
+      const targetRecord = readAffiliateSupplyContractRecord(target);
       const sourceProfile = String(targetRecord.sourceProfile ?? '');
       const applicableSportIds = applicabilityByProfile.get(sourceProfile.toUpperCase()) ?? [];
       const sportIds: readonly (string | null)[] = applicableSportIds.length
@@ -983,33 +1515,287 @@ export const normalizeAffiliateSupplyContractPolicy = (
         sportId,
       }));
     });
-  }).sort((left, right) => (
-    `${left.marketKey ?? ''}\u0000${left.sportId ?? ''}\u0000${left.sourceProfile}`
-      .localeCompare(`${right.marketKey ?? ''}\u0000${right.sportId ?? ''}\u0000${right.sourceProfile}`)
+  }).sort((left, right) => canonicalCompare(
+    targetRuleSortKey(left),
+    targetRuleSortKey(right),
   ));
-  const searchFamilies = (
-    Array.isArray(readPayload(componentByName.get('SEARCH_STRATEGIES')).families)
-      ? readPayload(componentByName.get('SEARCH_STRATEGIES')).families as unknown[]
-      : []
-  ).map(readRecord);
-  const searchSaturationMinimumCycles = Math.max(
+};
+
+const legacySearchSaturationMinimumCycles = (
+  componentByName: ReadonlyMap<string, unknown>,
+): number => {
+  const value = readAffiliateSupplyContractPayload(componentByName.get('SEARCH_STRATEGIES')).families;
+  const searchFamilies = (Array.isArray(value) ? value as unknown[] : [])
+    .map(readAffiliateSupplyContractRecord);
+  return Math.max(
     ...searchFamilies.map((family) => Number(family.minimumDistinctCycles ?? 0)),
     1,
   );
-  const readStringArray = (componentName: 'MAPPING_EVIDENCE' | 'LIFECYCLE_EVIDENCE'): string[] => {
-    const values = readPayload(componentByName.get(componentName)).requiredEvidenceKinds;
-    return Array.isArray(values) ? values.map(String) : [];
-  };
+};
+
+const legacyRequiredEvidenceKinds = (
+  componentByName: ReadonlyMap<string, unknown>,
+  componentName: 'MAPPING_EVIDENCE' | 'LIFECYCLE_EVIDENCE',
+): string[] => {
+  const values = readAffiliateSupplyContractPayload(componentByName.get(componentName)).requiredEvidenceKinds;
+  return Array.isArray(values) ? values.map(String) : [];
+};
+
+const normalizeLegacyAffiliateSupplyContractPolicy = (
+  input: AffiliateAgentSupplyContract,
+  rolloutCohort: string,
+): AffiliateSupplyContractPolicy => {
+  const componentByName = legacyContractComponentsByName(input);
+  const applicabilityByProfile = legacyApplicabilityByProfile(componentByName);
+  const targets = legacySupplyTargets(componentByName, applicabilityByProfile);
   return {
     schemaVersion: 1,
     version: input.version,
     rolloutCohort,
     hash: input.hash,
-    freshnessWindows,
+    freshnessWindows: legacyFreshnessWindows(componentByName),
     targets,
-    requiredMappingEvidenceKinds: readStringArray('MAPPING_EVIDENCE'),
-    requiredLifecycleEvidenceKinds: readStringArray('LIFECYCLE_EVIDENCE'),
-    searchSaturationMinimumCycles,
+    requiredMappingEvidenceKinds: legacyRequiredEvidenceKinds(componentByName, 'MAPPING_EVIDENCE'),
+    requiredLifecycleEvidenceKinds: legacyRequiredEvidenceKinds(componentByName, 'LIFECYCLE_EVIDENCE'),
+    searchSaturationMinimumCycles: legacySearchSaturationMinimumCycles(componentByName),
+  };
+};
+
+const isAffiliateSupplyContractPolicy = (
+  input: AffiliateSupplyContractPolicy | AffiliateAgentSupplyContract,
+): input is AffiliateSupplyContractPolicy => 'freshnessWindows' in input && 'targets' in input;
+
+export const normalizeAffiliateSupplyContractPolicy = (
+  input: AffiliateSupplyContractPolicy | AffiliateAgentSupplyContract,
+  rolloutCohort = 'DEFAULT',
+): AffiliateSupplyContractPolicy => {
+  if (isAffiliateSupplyContractPolicy(input)) return input;
+  return normalizeLegacyAffiliateSupplyContractPolicy(input, rolloutCohort);
+};
+
+type AffiliateSupplyImpactTarget = Readonly<{
+  marketKey?: string | null;
+  sportId?: string | null;
+  sourceProfile: string;
+}>;
+
+type AffiliateSupplyImpactCellKey = (target: AffiliateSupplyImpactTarget) => string;
+
+const addFreshSupplyContribution = (
+  counts: Map<string, number>,
+  target: AffiliateSupplyImpactTarget,
+  contribution: number,
+  targetCellKey: AffiliateSupplyImpactCellKey,
+): void => {
+  const key = targetCellKey(target);
+  counts.set(key, (counts.get(key) ?? 0) + Math.max(0, contribution));
+};
+
+const addCurrentFreshSupplyForSource = (
+  source: AffiliateSupplyContractImpactSource,
+  policy: AffiliateSupplyContractPolicy,
+  counts: Map<string, number>,
+  targetCellKey: AffiliateSupplyImpactCellKey,
+  addFreshSupply: (
+    targetCounts: Map<string, number>,
+    cells: readonly AffiliateSupplyContractImpactCell[],
+  ) => void,
+): void => {
+  if (source.currentFreshTargetCells) {
+    addFreshSupply(counts, source.currentFreshTargetCells);
+    return;
+  }
+  if (!source.targetCells?.length && policy.targets.length === 1) {
+    addFreshSupplyContribution(counts, policy.targets[0], source.targetContribution, targetCellKey);
+  }
+};
+
+const addNextFreshSupplyForSource = (
+  source: AffiliateSupplyContractImpactSource,
+  policy: AffiliateSupplyContractPolicy,
+  counts: Map<string, number>,
+  targetCellKey: AffiliateSupplyImpactCellKey,
+  addFreshSupply: (
+    targetCounts: Map<string, number>,
+    cells: readonly AffiliateSupplyContractImpactCell[],
+  ) => void,
+): void => {
+  if (source.nextFreshTargetCells) {
+    addFreshSupply(counts, source.nextFreshTargetCells);
+    return;
+  }
+  if (source.currentFreshTargetCells) {
+    addFreshSupply(counts, source.currentFreshTargetCells);
+    return;
+  }
+  if (!source.targetCells?.length && policy.targets.length === 1) {
+    addFreshSupplyContribution(counts, policy.targets[0], source.targetContribution, targetCellKey);
+  }
+};
+
+const minimumForImpactSource = (
+  source: AffiliateSupplyContractImpactSource,
+  policy: AffiliateSupplyContractPolicy,
+  fallback: number,
+  targetCellKey: AffiliateSupplyImpactCellKey,
+): number => {
+  if (!source.targetCells?.length) return fallback;
+  const sourceCellKeys = new Set(source.targetCells.map(targetCellKey));
+  return Math.max(
+    ...policy.targets
+      .filter((target) => sourceCellKeys.has(targetCellKey(target)))
+      .map((target) => target.minimumFreshPublishedSupply),
+    0,
+  );
+};
+
+const requiresImpactSourceEvaluation = (
+  source: AffiliateSupplyContractImpactSource,
+  contractChanged: boolean,
+  impactedCellKeys: Set<string>,
+  targetCellKey: AffiliateSupplyImpactCellKey,
+): boolean => {
+  const sourceCellKeys = source.targetCells?.map(targetCellKey) ?? [];
+  const sourceHasImpactedCell = sourceCellKeys.some((key) => impactedCellKeys.has(key));
+  return contractChanged || !source.targetCells?.length || sourceHasImpactedCell;
+};
+
+const impactSourceNextStage = (
+  source: AffiliateSupplyContractImpactSource,
+  isEvaluationRequired: boolean,
+  nextMinimum: number,
+): AffiliateSupplyLifecycleStage => {
+  if (!isEvaluationRequired) return source.stage;
+  if (source.nextStage !== undefined && source.nextStage !== null) return source.nextStage;
+  return source.stage === 'PUBLISHED' && nextMinimum > source.targetContribution
+    ? 'ACTIVATED'
+    : source.stage;
+};
+
+const impactSourceNextTargetContribution = (
+  source: AffiliateSupplyContractImpactSource,
+  isEvaluationRequired: boolean,
+): number => {
+  if (!isEvaluationRequired) return source.targetContribution;
+  return source.nextTargetContribution ?? source.targetContribution;
+};
+
+const impactSourceNextAutomationEnabled = (
+  source: AffiliateSupplyContractImpactSource,
+  isEvaluationRequired: boolean,
+): boolean => {
+  if (!isEvaluationRequired) return source.isAutomationEnabled;
+  if (source.isNextAutomationEnabled !== undefined && source.isNextAutomationEnabled !== null) {
+    return source.isNextAutomationEnabled;
+  }
+  return source.freshnessStatus !== 'FRESH' ? false : source.isAutomationEnabled;
+};
+
+const impactSourceNextRepairPriority = (
+  source: AffiliateSupplyContractImpactSource,
+  isEvaluationRequired: boolean,
+): number => {
+  if (!isEvaluationRequired) return source.repairPriority;
+  return source.nextRepairPriority ?? source.repairPriority;
+};
+
+const impactSourceTargetMet = (
+  isEvaluationRequired: boolean,
+  supplyCount: number,
+  minimum: number,
+): boolean => isEvaluationRequired && minimum > 0 && supplyCount >= minimum;
+
+const impactSourceIsAffected = (
+  isEvaluationRequired: boolean,
+  nextStage: AffiliateSupplyLifecycleStage,
+  sourceStage: AffiliateSupplyLifecycleStage,
+  isCurrentTargetMet: boolean,
+  isNextTargetMet: boolean,
+): boolean => {
+  if (!isEvaluationRequired) return false;
+  return nextStage !== sourceStage || isCurrentTargetMet !== isNextTargetMet;
+};
+
+type AffiliateSupplyImpactSourceEvaluation = Readonly<{
+  isAffected: boolean;
+  stageRegressed: boolean;
+  needsRepairWork: boolean;
+  automationStopped: boolean;
+}>;
+
+const evaluateImpactSource = (input: Readonly<{
+  source: AffiliateSupplyContractImpactSource;
+  contractChanged: boolean;
+  impactedCellKeys: Set<string>;
+  currentPolicy: AffiliateSupplyContractPolicy;
+  nextPolicy: AffiliateSupplyContractPolicy;
+  currentMinimum: number;
+  nextMinimum: number;
+  currentFreshSupplyByCell: Map<string, number>;
+  nextFreshSupplyByCell: Map<string, number>;
+  targetCellKey: AffiliateSupplyImpactCellKey;
+}>): AffiliateSupplyImpactSourceEvaluation => {
+  const {
+    source,
+    contractChanged,
+    impactedCellKeys,
+    currentPolicy,
+    nextPolicy,
+    currentMinimum,
+    nextMinimum,
+    currentFreshSupplyByCell,
+    nextFreshSupplyByCell,
+    targetCellKey,
+  } = input;
+  const isSourceEvaluationRequired = requiresImpactSourceEvaluation(
+    source,
+    contractChanged,
+    impactedCellKeys,
+    targetCellKey,
+  );
+  const sourceCurrentMinimum = minimumForImpactSource(
+    source,
+    currentPolicy,
+    currentMinimum,
+    targetCellKey,
+  );
+  const sourceNextMinimum = minimumForImpactSource(
+    source,
+    nextPolicy,
+    nextMinimum,
+    targetCellKey,
+  );
+  const nextStage = impactSourceNextStage(source, isSourceEvaluationRequired, sourceNextMinimum);
+  const nextTargetContribution = impactSourceNextTargetContribution(source, isSourceEvaluationRequired);
+  const isNextAutomationEnabled = impactSourceNextAutomationEnabled(source, isSourceEvaluationRequired);
+  const nextRepairPriority = impactSourceNextRepairPriority(source, isSourceEvaluationRequired);
+  const currentSupplyCount = source.currentFreshTargetCells?.length ?? source.targetContribution;
+  const nextSupplyCount = source.nextFreshTargetCells?.length ?? nextTargetContribution;
+  const isCurrentTargetMet = impactSourceTargetMet(
+    isSourceEvaluationRequired,
+    currentSupplyCount,
+    sourceCurrentMinimum,
+  );
+  const isNextTargetMet = impactSourceTargetMet(
+    isSourceEvaluationRequired,
+    nextSupplyCount,
+    sourceNextMinimum,
+  );
+  return {
+    isAffected: impactSourceIsAffected(
+      isSourceEvaluationRequired,
+      nextStage,
+      source.stage,
+      isCurrentTargetMet,
+      isNextTargetMet,
+    ),
+    stageRegressed: source.stage === 'PUBLISHED' && nextStage !== 'PUBLISHED',
+    needsRepairWork: (
+      source.repairPriority < AFFILIATE_REPLENISHMENT_PRIORITY.NEW_DISCOVERY
+      && nextRepairPriority < AFFILIATE_REPLENISHMENT_PRIORITY.NEW_DISCOVERY
+      && nextStage === 'ACTIVATED'
+    ),
+    automationStopped: source.isAutomationEnabled && !isNextAutomationEnabled,
   };
 };
 
@@ -1056,20 +1842,6 @@ export const buildAffiliateSupplyContractImpactReport = (input: Readonly<{
   let automationStops = 0;
   const currentMinimum = Math.max(...currentPolicy.targets.map((target) => target.minimumFreshPublishedSupply), 0);
   const nextMinimum = Math.max(...input.nextPolicy.targets.map((target) => target.minimumFreshPublishedSupply), 0);
-  const minimumForSource = (
-    source: AffiliateSupplyContractImpactSource,
-    policy: AffiliateSupplyContractPolicy,
-    fallback: number,
-  ): number => {
-    if (!source.targetCells?.length) return fallback;
-    const sourceCellKeys = new Set(source.targetCells.map(targetCellKey));
-    return Math.max(
-      ...policy.targets
-        .filter((target) => sourceCellKeys.has(targetCellKey(target)))
-        .map((target) => target.minimumFreshPublishedSupply),
-      0,
-    );
-  };
   const contractChanged = currentPolicy.version !== input.nextPolicy.version
     || currentPolicy.hash !== input.nextPolicy.hash;
   const currentRuleByCell = new Map(
@@ -1090,26 +1862,20 @@ export const buildAffiliateSupplyContractImpactReport = (input: Readonly<{
     });
   };
   input.sources.forEach((source) => {
-    if (source.currentFreshTargetCells) {
-      addFreshSupply(currentFreshSupplyByCell, source.currentFreshTargetCells);
-    } else if (!source.targetCells?.length && currentPolicy.targets.length === 1) {
-      const key = targetCellKey(currentPolicy.targets[0]);
-      currentFreshSupplyByCell.set(
-        key,
-        (currentFreshSupplyByCell.get(key) ?? 0) + Math.max(0, source.targetContribution),
-      );
-    }
-    if (source.nextFreshTargetCells) {
-      addFreshSupply(nextFreshSupplyByCell, source.nextFreshTargetCells);
-    } else if (source.currentFreshTargetCells) {
-      addFreshSupply(nextFreshSupplyByCell, source.currentFreshTargetCells);
-    } else if (!source.targetCells?.length && input.nextPolicy.targets.length === 1) {
-      const key = targetCellKey(input.nextPolicy.targets[0]);
-      nextFreshSupplyByCell.set(
-        key,
-        (nextFreshSupplyByCell.get(key) ?? 0) + Math.max(0, source.targetContribution),
-      );
-    }
+    addCurrentFreshSupplyForSource(
+      source,
+      currentPolicy,
+      currentFreshSupplyByCell,
+      targetCellKey,
+      addFreshSupply,
+    );
+    addNextFreshSupplyForSource(
+      source,
+      input.nextPolicy,
+      nextFreshSupplyByCell,
+      targetCellKey,
+      addFreshSupply,
+    );
   });
   const newlyDueSearches = Array.from(nextRuleByCell.entries()).filter(([key, nextRule]) => {
     const currentRule = currentRuleByCell.get(key);
@@ -1134,48 +1900,22 @@ export const buildAffiliateSupplyContractImpactReport = (input: Readonly<{
     if (isCurrentTargetMet !== isNextTargetMet) targetMetChanges += 1;
   }
   input.sources.forEach((source) => {
-    const sourceCellKeys = source.targetCells?.map(targetCellKey) ?? [];
-    const sourceHasImpactedCell = sourceCellKeys.some((key) => impactedCellKeys.has(key));
-    const shouldEvaluateSource = contractChanged || !source.targetCells?.length || sourceHasImpactedCell;
-    const sourceCurrentMinimum = minimumForSource(source, currentPolicy, currentMinimum);
-    const sourceNextMinimum = minimumForSource(source, input.nextPolicy, nextMinimum);
-    const nextStage = shouldEvaluateSource
-      ? source.nextStage
-        ?? (
-          source.stage === 'PUBLISHED'
-          && sourceNextMinimum > source.targetContribution
-            ? 'ACTIVATED'
-            : source.stage
-        )
-      : source.stage;
-    const nextTargetContribution = shouldEvaluateSource
-      ? source.nextTargetContribution ?? source.targetContribution
-      : source.targetContribution;
-    const nextIsAutomationEnabled = shouldEvaluateSource
-      ? source.nextIsAutomationEnabled
-        ?? (source.freshnessStatus !== 'FRESH' ? false : source.isAutomationEnabled)
-      : source.isAutomationEnabled;
-    const nextRepairPriority = shouldEvaluateSource
-      ? source.nextRepairPriority ?? source.repairPriority
-      : source.repairPriority;
-    const currentSupplyCount = source.currentFreshTargetCells?.length ?? source.targetContribution;
-    const nextSupplyCount = source.nextFreshTargetCells?.length ?? nextTargetContribution;
-    const isCurrentTargetMet = shouldEvaluateSource
-      && sourceCurrentMinimum > 0
-      && currentSupplyCount >= sourceCurrentMinimum;
-    const isNextTargetMet = shouldEvaluateSource
-      && sourceNextMinimum > 0
-      && nextSupplyCount >= sourceNextMinimum;
-    if (shouldEvaluateSource && (nextStage !== source.stage || isCurrentTargetMet !== isNextTargetMet)) {
-      affectedSourceIds.push(source.id);
-    }
-    if (source.stage === 'PUBLISHED' && nextStage !== 'PUBLISHED') stageRegressions += 1;
-    if (
-      source.repairPriority < AFFILIATE_REPLENISHMENT_PRIORITY.NEW_DISCOVERY
-      && nextRepairPriority < AFFILIATE_REPLENISHMENT_PRIORITY.NEW_DISCOVERY
-      && nextStage === 'ACTIVATED'
-    ) repairWork += 1;
-    if (source.isAutomationEnabled && !nextIsAutomationEnabled) automationStops += 1;
+    const evaluation = evaluateImpactSource({
+      source,
+      contractChanged,
+      impactedCellKeys,
+      currentPolicy,
+      nextPolicy: input.nextPolicy,
+      currentMinimum,
+      nextMinimum,
+      currentFreshSupplyByCell,
+      nextFreshSupplyByCell,
+      targetCellKey,
+    });
+    if (evaluation.isAffected) affectedSourceIds.push(source.id);
+    if (evaluation.stageRegressed) stageRegressions += 1;
+    if (evaluation.needsRepairWork) repairWork += 1;
+    if (evaluation.automationStopped) automationStops += 1;
   });
   return {
     rolloutCohort: input.currentManifest.rolloutCohort,
@@ -1196,56 +1936,124 @@ export const buildAffiliateSupplyContractImpactReport = (input: Readonly<{
   };
 };
 
-export const validateAffiliateSupplyCommand = (
+const AFFILIATE_SUPPLY_COMMAND_AUTHORITIES: Readonly<
+  Record<AffiliateSupplyLifecycleCommand, readonly AffiliateSupplyCommandAuthority[]>
+> = {
+  CREATE_ROOT: ['SYSTEM'],
+  RECORD_MAPPING: ['MAPPING_PRODUCER', 'SYSTEM'],
+  APPROVE: ['SUPPLY_REVIEWER', 'HUMAN_DIRECTED_EXECUTOR'],
+  ACTIVATE: ['SUPPLY_REVIEWER', 'HUMAN_DIRECTED_EXECUTOR'],
+  PUBLISH_TARGET: ['SUPPLY_REVIEWER', 'HUMAN_DIRECTED_EXECUTOR'],
+  RECORD_REFRESH: ['SYSTEM'],
+  RECORD_EMPTY_REFRESH: ['SYSTEM'],
+  RECORD_REFRESH_FAILURE: ['SYSTEM'],
+  REVALIDATE_IDENTITY: ['SYSTEM'],
+  EXCLUDE_SOURCE: ['SUPPLY_REVIEWER', 'HUMAN_DIRECTED_EXECUTOR'],
+  REJECT_TARGET: ['SUPPLY_REVIEWER', 'HUMAN_DIRECTED_EXECUTOR'],
+  CREATE_SUCCESSOR: ['SYSTEM', 'SUPPLY_REVIEWER'],
+  RECONCILE: ['SYSTEM', 'SUPPLY_REVIEWER'],
+  LEGACY_RECONCILED: ['SYSTEM'],
+};
+
+
+const commandLifecycleValidationReasons = (
   input: AffiliateSupplyCommandValidationInput,
-): AffiliateSupplyCommandDecision => {
-  const reasons: string[] = [];
-  const authorityByCommand: Record<AffiliateSupplyLifecycleCommand, AffiliateSupplyCommandAuthority[]> = {
-    CREATE_ROOT: ['SYSTEM'],
-    RECORD_MAPPING: ['MAPPING_PRODUCER', 'SYSTEM'],
-    APPROVE: ['SUPPLY_REVIEWER', 'HUMAN_DIRECTED_EXECUTOR'],
-    ACTIVATE: ['SUPPLY_REVIEWER', 'HUMAN_DIRECTED_EXECUTOR'],
-    PUBLISH_TARGET: ['SUPPLY_REVIEWER', 'HUMAN_DIRECTED_EXECUTOR'],
-    RECORD_REFRESH: ['SYSTEM'],
-    RECORD_EMPTY_REFRESH: ['SYSTEM'],
-    RECORD_REFRESH_FAILURE: ['SYSTEM'],
-    REVALIDATE_IDENTITY: ['SYSTEM'],
-    EXCLUDE_SOURCE: ['SUPPLY_REVIEWER', 'HUMAN_DIRECTED_EXECUTOR'],
-    REJECT_TARGET: ['SUPPLY_REVIEWER', 'HUMAN_DIRECTED_EXECUTOR'],
-    CREATE_SUCCESSOR: ['SYSTEM', 'SUPPLY_REVIEWER'],
-    RECONCILE: ['SYSTEM'],
-    LEGACY_RECONCILED: ['SYSTEM'],
-  };
-  if (input.expectedLifecycleGeneration !== input.currentLifecycleGeneration) reasons.push('LIFECYCLE_GENERATION_STALE');
-  if (input.activeContractVersion !== input.commandContractVersion || input.activeContractHash !== input.commandContractHash) reasons.push('SUPPLY_CONTRACT_STALE');
-  if (!authorityByCommand[input.command].includes(input.authority)) reasons.push('COMMAND_AUTHORITY_NOT_PERMITTED');
-  if (input.evidenceRefs.length === 0) reasons.push('EVIDENCE_REQUIRED');
+): readonly string[] => [
+  ...assessmentReasonIf(
+    input.expectedLifecycleGeneration !== input.currentLifecycleGeneration,
+    'LIFECYCLE_GENERATION_STALE',
+  ),
+  ...assessmentReasonIf(
+    input.activeContractVersion !== input.commandContractVersion
+    || input.activeContractHash !== input.commandContractHash,
+    'SUPPLY_CONTRACT_STALE',
+  ),
+  ...assessmentReasonIf(
+    !AFFILIATE_SUPPLY_COMMAND_AUTHORITIES[input.command].includes(input.authority),
+    'COMMAND_AUTHORITY_NOT_PERMITTED',
+  ),
+  ...assessmentReasonIf(
+    input.command === 'LEGACY_RECONCILED',
+    'LEGACY_RECONCILIATION_WRITER_REQUIRED',
+  ),
+];
+
+const commandReviewerValidationReasons = (
+  input: AffiliateSupplyCommandValidationInput,
+): readonly string[] => [
+  ...assessmentReasonIf(
+    input.command === 'RECONCILE'
+    && input.authority === 'SUPPLY_REVIEWER'
+    && !AFFILIATE_SUPPLY_REVIEWER_RECONCILE_OUTCOMES.some((outcome) => outcome === input.reviewerOutcome),
+    'REVIEWER_OUTCOME_NOT_PERMITTED',
+  ),
+];
+
+const isRefreshAllowed = (assessment: AffiliateSupplyAssessment): boolean => (
+  ['ACTIVATED', 'PUBLISHED'].includes(assessment.stage)
+  || (
+    !assessment.isAutomationEnabled
+    && ['PRE_MAPPED', 'MAPPED', 'APPROVED'].includes(assessment.stage)
+  )
+  || (assessment.stage === 'APPROVED' && assessment.outcome === 'AUTOMATION_HOLD')
+);
+
+const refreshPreconditionReasons = (
+  input: AffiliateSupplyCommandValidationInput,
+  command: 'RECORD_REFRESH' | 'RECORD_EMPTY_REFRESH',
+  reason: string,
+): readonly string[] => {
+  if (input.command !== command || isRefreshAllowed(input.assessment)) return [];
+  return [reason];
+};
+
+const commandPreconditionValidationReasons = (
+  input: AffiliateSupplyCommandValidationInput,
+): readonly string[] => {
   const stage = input.assessment.stage;
-  const canRecordNonAutomatedRefresh = (
-    !input.assessment.isAutomationEnabled
-    && ['PRE_MAPPED', 'MAPPED', 'APPROVED'].includes(stage)
-  );
-  if (input.command === 'APPROVE' && stage !== 'MAPPED') reasons.push('APPROVAL_PRECONDITION_FAILED');
-  if (input.command === 'ACTIVATE' && (stage !== 'APPROVED' || input.assessment.invariantViolations.length > 0)) reasons.push('ACTIVATION_PRECONDITION_FAILED');
-  if (input.command === 'PUBLISH_TARGET' && !['ACTIVATED', 'PUBLISHED'].includes(stage)) {
-    reasons.push('PUBLICATION_PRECONDITION_FAILED');
-  }
   const hasRejectableTarget = input.assessment.targets.some((target) => (
     ['PUBLISHED', 'LAST_KNOWN_GOOD'].includes(target.status.toUpperCase())
   ));
-  if (input.command === 'REJECT_TARGET' && !hasRejectableTarget) reasons.push('TARGET_REJECTION_PRECONDITION_FAILED');
-  if (
-    input.command === 'RECORD_REFRESH'
-    && !['ACTIVATED', 'PUBLISHED'].includes(stage)
-    && !canRecordNonAutomatedRefresh
-    && !(stage === 'APPROVED' && input.assessment.outcome === 'AUTOMATION_HOLD')
-  ) reasons.push('REFRESH_PRECONDITION_FAILED');
-  if (
-    input.command === 'RECORD_EMPTY_REFRESH'
-    && !['ACTIVATED', 'PUBLISHED'].includes(stage)
-    && !canRecordNonAutomatedRefresh
-    && !(stage === 'APPROVED' && input.assessment.outcome === 'AUTOMATION_HOLD')
-  ) reasons.push('EMPTY_REFRESH_PRECONDITION_FAILED');
+  return [
+    ...assessmentReasonIf(input.evidenceRefs.length === 0, 'EVIDENCE_REQUIRED'),
+    ...assessmentReasonIf(
+      input.command === 'APPROVE' && stage !== 'MAPPED',
+      'APPROVAL_PRECONDITION_FAILED',
+    ),
+    ...assessmentReasonIf(
+      input.command === 'ACTIVATE'
+      && (stage !== 'APPROVED' || input.assessment.invariantViolations.length > 0),
+      'ACTIVATION_PRECONDITION_FAILED',
+    ),
+    ...assessmentReasonIf(
+      input.command === 'PUBLISH_TARGET' && !['ACTIVATED', 'PUBLISHED'].includes(stage),
+      'PUBLICATION_PRECONDITION_FAILED',
+    ),
+    ...assessmentReasonIf(
+      input.command === 'REJECT_TARGET' && !hasRejectableTarget,
+      'TARGET_REJECTION_PRECONDITION_FAILED',
+    ),
+    ...refreshPreconditionReasons(
+      input,
+      'RECORD_REFRESH',
+      'REFRESH_PRECONDITION_FAILED',
+    ),
+    ...refreshPreconditionReasons(
+      input,
+      'RECORD_EMPTY_REFRESH',
+      'EMPTY_REFRESH_PRECONDITION_FAILED',
+    ),
+  ];
+};
+
+export const validateAffiliateSupplyCommand = (
+  input: AffiliateSupplyCommandValidationInput,
+): AffiliateSupplyCommandDecision => {
+  const reasons = [
+    ...commandLifecycleValidationReasons(input),
+    ...commandReviewerValidationReasons(input),
+    ...commandPreconditionValidationReasons(input),
+  ];
   const isAccepted = reasons.length === 0;
   return {
     isAccepted,
@@ -1254,113 +2062,185 @@ export const validateAffiliateSupplyCommand = (
   };
 };
 
+type AffiliateReplenishmentReviewState = Readonly<{
+  reviewPressure: boolean;
+  isAdmissionHalted: boolean;
+  isMappingPaused: boolean;
+  isCampaignPaused: boolean;
+  reasonCodes: readonly string[];
+}>;
+
+const buildReplenishmentReviewState = (
+  input: AffiliateReplenishmentPlanningInput,
+  targetWaitingReview: number,
+): AffiliateReplenishmentReviewState => {
+  const noHealthyReviewer = input.review.healthyReviewerCount <= 0;
+  const reviewCapacityReached = input.review.waiting >= targetWaitingReview;
+  const reviewPressure = noHealthyReviewer || reviewCapacityReached;
+  return {
+    reviewPressure,
+    isAdmissionHalted: noHealthyReviewer,
+    isMappingPaused: reviewPressure,
+    isCampaignPaused: reviewPressure,
+    reasonCodes: [
+      ...assessmentReasonIf(noHealthyReviewer, 'NO_HEALTHY_REVIEWER'),
+      ...assessmentReasonIf(reviewCapacityReached, 'REVIEW_CAPACITY_REACHED'),
+    ],
+  };
+};
+
+const replenishmentBufferReasons = (
+  input: AffiliateReplenishmentPlanningInput,
+  targetWaitingMapping: number,
+  reasonCodes: readonly string[],
+): readonly string[] => {
+  const validOvershoot = input.mapping.waiting > targetWaitingMapping;
+  return [
+    ...reasonCodes,
+    ...assessmentReasonIf(validOvershoot, 'VALID_OVERSHOOT_RETAINED'),
+    ...assessmentReasonIf(
+      input.mapping.waiting >= targetWaitingMapping
+      && !validOvershoot
+      && reasonCodes.length === 0,
+      'MAPPING_BUFFER_MET',
+    ),
+  ];
+};
+
+const buildNoActionReplenishmentPlan = (input: Readonly<{
+  targetWaitingMapping: number;
+  targetWaitingReview: number;
+  isAdmissionHalted: boolean;
+  isMappingPaused: boolean;
+  isCampaignPaused: boolean;
+  reasonCodes: readonly string[];
+}>): AffiliateReplenishmentPlan => ({
+  targetWaitingMapping: input.targetWaitingMapping,
+  targetWaitingReview: input.targetWaitingReview,
+  isAdmissionHalted: input.isAdmissionHalted,
+  isMappingPaused: input.isMappingPaused,
+  isCampaignPaused: input.isCampaignPaused,
+  action: 'NONE',
+  selectedDemandId: null,
+  selectedCampaignId: null,
+  reasonCodes: sortedUnique(input.reasonCodes),
+});
+
+const eligibleReplenishmentDemands = (
+  input: AffiliateReplenishmentPlanningInput,
+): AffiliateReplenishmentDemandEvidence[] => input.demands
+  .filter((demand) => demand.status === 'OPEN')
+  .filter((demand) => !demand.nextEligibleAt || demand.nextEligibleAt.getTime() <= input.now.getTime())
+  .filter((demand) => !demand.searchSaturatedUntil || demand.searchSaturatedUntil.getTime() <= input.now.getTime())
+  .sort((left, right) => (
+    left.priority - right.priority
+    || left.openedAt.getTime() - right.openedAt.getTime()
+    || canonicalCompare(left.id, right.id)
+  ));
+
+const replenishmentSearchSaturated = (
+  input: AffiliateReplenishmentPlanningInput,
+): boolean => input.demands.some((demand) => (
+  demand.status === 'OPEN'
+  && demand.searchSaturatedUntil
+  && demand.searchSaturatedUntil.getTime() > input.now.getTime()
+));
+
+const replenishmentDimensionMatches = (
+  candidateValue: string | null | undefined,
+  demandValue: string | null | undefined,
+): boolean => {
+  const candidate = normalizedString(candidateValue);
+  const demand = normalizedString(demandValue);
+  return !candidate || (demand !== null && candidate.toUpperCase() === demand.toUpperCase());
+};
+
+const eligibleCampaignForDemand = (
+  input: AffiliateReplenishmentPlanningInput,
+  selectedDemand: AffiliateReplenishmentDemandEvidence,
+): AffiliateReplenishmentCampaignEvidence | undefined => input.campaigns
+  .filter((candidate) => candidate.isEligible)
+  .filter((candidate) => (
+    replenishmentDimensionMatches(candidate.marketKey, selectedDemand.marketKey)
+    && replenishmentDimensionMatches(candidate.sportId, selectedDemand.sportId)
+    && replenishmentDimensionMatches(candidate.sourceProfile, selectedDemand.sourceProfile)
+  ))
+  .sort((left, right) => (
+    left.priority - right.priority || canonicalCompare(left.id, right.id)
+  ))[0];
+
 export const planAffiliateReplenishment = (
   input: AffiliateReplenishmentPlanningInput,
 ): AffiliateReplenishmentPlan => {
   const targetWaitingMapping = Math.max(0, input.mapping.activeProducerCount * 2);
   const targetWaitingReview = Math.max(0, input.review.activeReviewerCount * 2);
-  const reasons: string[] = [];
   if (!input.isContractSafe) {
-    return {
+    return buildNoActionReplenishmentPlan({
       targetWaitingMapping,
       targetWaitingReview,
       isAdmissionHalted: true,
       isMappingPaused: true,
       isCampaignPaused: true,
-      action: 'NONE',
-      selectedDemandId: null,
-      selectedCampaignId: null,
       reasonCodes: ['UNSAFE_ACTIVE_CONTRACT'],
-    };
+    });
   }
-  const reviewPressure = input.review.healthyReviewerCount <= 0 || input.review.waiting >= targetWaitingReview;
-  const isAdmissionHalted = input.review.healthyReviewerCount <= 0;
-  if (input.review.healthyReviewerCount <= 0) reasons.push('NO_HEALTHY_REVIEWER');
-  if (input.review.waiting >= targetWaitingReview) reasons.push('REVIEW_CAPACITY_REACHED');
-  const isMappingPaused = reviewPressure;
-  const isCampaignPaused = reviewPressure;
-  if (input.mapping.waiting > targetWaitingMapping) reasons.push('VALID_OVERSHOOT_RETAINED');
+  const reviewState = buildReplenishmentReviewState(input, targetWaitingReview);
+  const reasons = replenishmentBufferReasons(
+    input,
+    targetWaitingMapping,
+    reviewState.reasonCodes,
+  );
   if (input.mapping.waiting >= targetWaitingMapping) {
-    if (!reasons.length) reasons.push('MAPPING_BUFFER_MET');
-    return {
+    return buildNoActionReplenishmentPlan({
       targetWaitingMapping,
       targetWaitingReview,
-      isAdmissionHalted,
-      isMappingPaused,
-      isCampaignPaused,
-      action: 'NONE',
-      selectedDemandId: null,
-      selectedCampaignId: null,
-      reasonCodes: sortedUnique(reasons),
-    };
+      isAdmissionHalted: reviewState.isAdmissionHalted,
+      isMappingPaused: reviewState.isMappingPaused,
+      isCampaignPaused: reviewState.isCampaignPaused,
+      reasonCodes: reasons,
+    });
   }
-  if (reviewPressure) {
-    return {
+  if (reviewState.reviewPressure) {
+    return buildNoActionReplenishmentPlan({
       targetWaitingMapping,
       targetWaitingReview,
-      isAdmissionHalted,
-      isMappingPaused,
-      isCampaignPaused,
-      action: 'NONE',
-      selectedDemandId: null,
-      selectedCampaignId: null,
-      reasonCodes: sortedUnique(reasons),
-    };
+      isAdmissionHalted: reviewState.isAdmissionHalted,
+      isMappingPaused: reviewState.isMappingPaused,
+      isCampaignPaused: reviewState.isCampaignPaused,
+      reasonCodes: reasons,
+    });
   }
-  const activeWave = input.activeWaves.find((wave) => ['PLANNED', 'ACTIVE', 'WAITING'].includes(wave.status));
-  if (activeWave) {
-    reasons.push('ACTIVE_WAVE');
-    return {
-      targetWaitingMapping,
-      targetWaitingReview,
-      isAdmissionHalted: false,
-      isMappingPaused: false,
-      isCampaignPaused: false,
-      action: 'NONE',
-      selectedDemandId: null,
-      selectedCampaignId: null,
-      reasonCodes: sortedUnique(reasons),
-    };
-  }
-  const eligibleDemands = input.demands
-    .filter((demand) => demand.status === 'OPEN')
-    .filter((demand) => !demand.nextEligibleAt || demand.nextEligibleAt.getTime() <= input.now.getTime())
-    .filter((demand) => !demand.searchSaturatedUntil || demand.searchSaturatedUntil.getTime() <= input.now.getTime())
-    .sort((left, right) => left.priority - right.priority || left.openedAt.getTime() - right.openedAt.getTime() || left.id.localeCompare(right.id));
-  const saturatedDemand = input.demands.some((demand) => (
-    demand.status === 'OPEN'
-    && demand.searchSaturatedUntil
-    && demand.searchSaturatedUntil.getTime() > input.now.getTime()
+  const activeWave = input.activeWaves.find((wave) => (
+    ['PLANNED', 'ACTIVE', 'WAITING'].includes(wave.status)
   ));
-  if (!eligibleDemands.length) {
-    if (saturatedDemand) reasons.push('SEARCH_SATURATION_NOT_ELIGIBLE');
-    else reasons.push('NO_ELIGIBLE_REPLENISHMENT_DEMAND');
-    return {
+  if (activeWave) {
+    return buildNoActionReplenishmentPlan({
       targetWaitingMapping,
       targetWaitingReview,
       isAdmissionHalted: false,
       isMappingPaused: false,
       isCampaignPaused: false,
-      action: 'NONE',
-      selectedDemandId: null,
-      selectedCampaignId: null,
-      reasonCodes: sortedUnique(reasons),
-    };
+      reasonCodes: [...reasons, 'ACTIVE_WAVE'],
+    });
+  }
+  const eligibleDemands = eligibleReplenishmentDemands(input);
+  if (!eligibleDemands.length) {
+    return buildNoActionReplenishmentPlan({
+      targetWaitingMapping,
+      targetWaitingReview,
+      isAdmissionHalted: false,
+      isMappingPaused: false,
+      isCampaignPaused: false,
+      reasonCodes: [
+        ...reasons,
+        replenishmentSearchSaturated(input)
+          ? 'SEARCH_SATURATION_NOT_ELIGIBLE'
+          : 'NO_ELIGIBLE_REPLENISHMENT_DEMAND',
+      ],
+    });
   }
   const selectedDemand = eligibleDemands[0];
-  const dimensionMatches = (candidateValue: string | null | undefined, demandValue: string | null | undefined): boolean => {
-    const candidate = normalizedString(candidateValue);
-    const demand = normalizedString(demandValue);
-    return !candidate || (demand !== null && candidate.toUpperCase() === demand.toUpperCase());
-  };
-  const campaign = input.campaigns
-    .filter((candidate) => candidate.isEligible)
-    .filter((candidate) => (
-      dimensionMatches(candidate.marketKey, selectedDemand.marketKey)
-      && dimensionMatches(candidate.sportId, selectedDemand.sportId)
-      && dimensionMatches(candidate.sourceProfile, selectedDemand.sourceProfile)
-    ))
-    .sort((left, right) => left.priority - right.priority || left.id.localeCompare(right.id))[0];
+  const campaign = eligibleCampaignForDemand(input, selectedDemand);
   return {
     targetWaitingMapping,
     targetWaitingReview,

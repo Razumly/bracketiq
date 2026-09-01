@@ -1,0 +1,348 @@
+{
+  "schemaVersion": 1,
+  "manifestId": "affiliate-governed-legacy-retirement-paths",
+  "retirementStatus": "BLOCKED_PENDING_GOVERNED_COHORT_PROOF",
+  "cohortProof": {
+    "status": "MISSING",
+    "requiredBeforeRemoval": true,
+    "evidencePath": null,
+    "message": "No governed production cohort evidence is available in this worktree. Keep every paused legacy reference until the evidence is reviewed."
+  },
+  "paths": [
+    "apps/site/deploy/affiliate-agents/README.md",
+    "apps/site/deploy/affiliate-agents/compose.yml",
+    "apps/site/deploy/affiliate-agents/deployment.env.example",
+    "apps/site/deploy/ai/bin/run-controller-once.sh",
+    "apps/site/deploy/ai/controller.env.example",
+    "apps/site/deploy/ai/systemd/bracketiq-affiliate-controller.service",
+    "apps/site/deploy/ai/systemd/bracketiq-affiliate-controller.timer",
+    "apps/site/deploy/vm/systemd/bracketiq-affiliate-intake-automation.service",
+    "apps/site/deploy/vm/systemd/bracketiq-affiliate-intake-automation.timer",
+    "apps/site/deploy/vm/systemd/bracketiq-affiliate-scrape-daily.service",
+    "apps/site/deploy/vm/systemd/bracketiq-affiliate-scrape-daily.timer",
+    "apps/site/scripts/audit-affiliate-mapping-agent-baseline.ts",
+    "apps/site/scripts/capture-affiliate-mapping-gold-cohort.ts",
+    "apps/site/scripts/claim-affiliate-approval.ts",
+    "apps/site/scripts/claim-affiliate-coverage-agent-job.ts",
+    "apps/site/scripts/claim-affiliate-source-mapping.ts",
+    "apps/site/scripts/complete-affiliate-approval.ts",
+    "apps/site/scripts/complete-affiliate-coverage-agent-job.ts",
+    "apps/site/scripts/complete-affiliate-source-mapping.ts",
+    "apps/site/scripts/prepare-affiliate-mapping-gold-capture.ts",
+    "apps/site/scripts/process-affiliate-source-intakes.ts",
+    "apps/site/scripts/run-affiliate-approval-codex-goal.ts",
+    "apps/site/scripts/run-affiliate-approval-loop.ts",
+    "apps/site/scripts/run-affiliate-coverage-codex-goal.ts",
+    "apps/site/scripts/run-affiliate-coverage-loop.ts",
+    "apps/site/scripts/run-affiliate-intake-codex-goal.ts",
+    "apps/site/scripts/run-affiliate-intake-codex-loop.ts",
+    "apps/site/scripts/run-affiliate-intake-codex-pool.ts",
+    "apps/site/scripts/run-affiliate-intake-automation.ts",
+    "apps/site/scripts/run-affiliate-mapping-agent.ts",
+    "apps/site/scripts/run-affiliate-source-discovery.ts",
+    "apps/site/scripts/run-due-affiliate-scrapes.ts",
+    "apps/site/src/server/affiliateImports/affiliateIntakeCodexLoop.ts",
+    "apps/site/src/server/affiliateImports/approvalLoop.ts",
+    "apps/site/src/server/affiliateImports/codexApprovalGoal.ts",
+    "apps/site/src/server/affiliateImports/codexCliGoal.ts",
+    "apps/site/src/server/affiliateImports/codexCoverageGoal.ts",
+    "apps/site/src/server/affiliateImports/codexIngestionApproval.ts",
+    "apps/site/src/server/affiliateImports/codexIngestionResult.ts",
+    "apps/site/src/server/affiliateImports/coverageAgentLoop.ts",
+    "apps/site/src/server/affiliateImports/__tests__/affiliateIntakeCodexLoop.test.ts",
+    "apps/site/src/server/affiliateImports/__tests__/approvalLoop.test.ts",
+    "apps/site/src/server/affiliateImports/__tests__/codexApprovalGoal.test.ts",
+    "apps/site/src/server/affiliateImports/__tests__/codexCliGoal.test.ts",
+    "apps/site/src/server/affiliateImports/__tests__/codexCoverageGoal.test.ts",
+    "apps/site/src/server/affiliateImports/__tests__/codexIngestionApproval.test.ts",
+    "apps/site/src/server/affiliateImports/__tests__/codexIngestionResult.test.ts",
+    "apps/site/src/server/affiliateImports/__tests__/coverageAgentLoop.test.ts"
+  ],
+  "retainedPausedReferences": [
+    {
+      "path": "apps/site/deploy/ai/bin/run-controller-once.sh",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "The queue branch cannot write production directly. Governed gateway admission is required."
+    },
+    {
+      "path": "apps/site/scripts/run-affiliate-intake-codex-goal.ts",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "The legacy Goal launcher remains only as a rollback reference until cohort proof."
+    },
+    {
+      "path": "apps/site/scripts/run-affiliate-approval-codex-goal.ts",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "The legacy Goal launcher remains only as a rollback reference until cohort proof."
+    },
+    {
+      "path": "apps/site/scripts/run-affiliate-coverage-codex-goal.ts",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "The legacy Goal launcher remains only as a rollback reference until cohort proof."
+    },
+    {
+      "path": "apps/site/src/server/affiliateImports/affiliateIntakeCodexLoop.ts",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Retained legacy source reference; governed cohort proof is missing."
+    },
+    {
+      "path": "apps/site/src/server/affiliateImports/approvalLoop.ts",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Retained legacy source reference; governed cohort proof is missing."
+    },
+    {
+      "path": "apps/site/src/server/affiliateImports/codexApprovalGoal.ts",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Retained legacy source reference; governed cohort proof is missing."
+    },
+    {
+      "path": "apps/site/src/server/affiliateImports/codexCliGoal.ts",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Retained legacy source reference; governed cohort proof is missing."
+    },
+    {
+      "path": "apps/site/src/server/affiliateImports/codexCoverageGoal.ts",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Retained legacy source reference; governed cohort proof is missing."
+    },
+    {
+      "path": "apps/site/src/server/affiliateImports/codexIngestionApproval.ts",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Retained legacy source reference; governed cohort proof is missing."
+    },
+    {
+      "path": "apps/site/src/server/affiliateImports/codexIngestionResult.ts",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Retained legacy source reference; governed cohort proof is missing."
+    },
+    {
+      "path": "apps/site/src/server/affiliateImports/coverageAgentLoop.ts",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Retained legacy source reference; governed cohort proof is missing."
+    },
+    {
+      "path": "apps/site/src/server/affiliateImports/__tests__/affiliateIntakeCodexLoop.test.ts",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Retained legacy test reference; governed cohort proof is missing."
+    },
+    {
+      "path": "apps/site/src/server/affiliateImports/__tests__/approvalLoop.test.ts",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Retained legacy test reference; governed cohort proof is missing."
+    },
+    {
+      "path": "apps/site/src/server/affiliateImports/__tests__/codexApprovalGoal.test.ts",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Retained legacy test reference; governed cohort proof is missing."
+    },
+    {
+      "path": "apps/site/src/server/affiliateImports/__tests__/codexCliGoal.test.ts",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Retained legacy test reference; governed cohort proof is missing."
+    },
+    {
+      "path": "apps/site/src/server/affiliateImports/__tests__/codexCoverageGoal.test.ts",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Retained legacy test reference; governed cohort proof is missing."
+    },
+    {
+      "path": "apps/site/src/server/affiliateImports/__tests__/codexIngestionApproval.test.ts",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Retained legacy test reference; governed cohort proof is missing."
+    },
+    {
+      "path": "apps/site/src/server/affiliateImports/__tests__/codexIngestionResult.test.ts",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Retained legacy test reference; governed cohort proof is missing."
+    },
+    {
+      "path": "apps/site/src/server/affiliateImports/__tests__/coverageAgentLoop.test.ts",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Retained legacy test reference; governed cohort proof is missing."
+    },
+    {
+      "path": "apps/site/package.json",
+      "command": "affiliate:scrape:due",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Command registration retained as a paused legacy reference until governed cohort proof."
+    },
+    {
+      "path": "apps/site/package.json",
+      "command": "affiliate:scrape:due:dry-run",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Command registration retained as a paused legacy reference until governed cohort proof."
+    },
+    {
+      "path": "apps/site/package.json",
+      "command": "affiliate:intakes:process",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Command registration retained as a paused legacy reference until governed cohort proof."
+    },
+    {
+      "path": "apps/site/package.json",
+      "command": "affiliate:discovery:run",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Command registration retained as a paused legacy reference until governed cohort proof."
+    },
+    {
+      "path": "apps/site/package.json",
+      "command": "affiliate:intake:automation",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Command registration retained as a paused legacy reference until governed cohort proof."
+    },
+    {
+      "path": "apps/site/package.json",
+      "command": "affiliate:mapping:claim",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Command registration retained as a paused legacy reference until governed cohort proof."
+    },
+    {
+      "path": "apps/site/package.json",
+      "command": "affiliate:mapping:complete",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Command registration retained as a paused legacy reference until governed cohort proof."
+    },
+    {
+      "path": "apps/site/package.json",
+      "command": "affiliate:mapping:baseline",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Command registration retained as a paused legacy reference until governed cohort proof."
+    },
+    {
+      "path": "apps/site/package.json",
+      "command": "affiliate:mapping:gold-capture",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Command registration retained as a paused legacy reference until governed cohort proof."
+    },
+    {
+      "path": "apps/site/package.json",
+      "command": "affiliate:mapping:gold-capture-cohort",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Command registration retained as a paused legacy reference until governed cohort proof."
+    },
+    {
+      "path": "apps/site/package.json",
+      "command": "affiliate:mapping:evaluate",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Command registration retained as a paused legacy reference until governed cohort proof."
+    },
+    {
+      "path": "apps/site/package.json",
+      "command": "affiliate:mapping:agent",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Command registration retained as a paused legacy reference until governed cohort proof."
+    },
+    {
+      "path": "apps/site/package.json",
+      "command": "affiliate:intakes:codex-goal",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Command registration retained as a paused legacy reference until governed cohort proof."
+    },
+    {
+      "path": "apps/site/package.json",
+      "command": "affiliate:intakes:codex-goal:dry-run",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Command registration retained as a paused legacy reference until governed cohort proof."
+    },
+    {
+      "path": "apps/site/package.json",
+      "command": "affiliate:intakes:codex-loop",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Command registration retained as a paused legacy reference until governed cohort proof."
+    },
+    {
+      "path": "apps/site/package.json",
+      "command": "affiliate:intakes:codex-pool",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Command registration retained as a paused legacy reference until governed cohort proof."
+    },
+    {
+      "path": "apps/site/package.json",
+      "command": "affiliate:approvals:claim",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Command registration retained as a paused legacy reference until governed cohort proof."
+    },
+    {
+      "path": "apps/site/package.json",
+      "command": "affiliate:approvals:complete",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Command registration retained as a paused legacy reference until governed cohort proof."
+    },
+    {
+      "path": "apps/site/package.json",
+      "command": "affiliate:approvals:codex-goal",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Command registration retained as a paused legacy reference until governed cohort proof."
+    },
+    {
+      "path": "apps/site/package.json",
+      "command": "affiliate:approvals:codex-goal:dry-run",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Command registration retained as a paused legacy reference until governed cohort proof."
+    },
+    {
+      "path": "apps/site/package.json",
+      "command": "affiliate:approvals:loop",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Command registration retained as a paused legacy reference until governed cohort proof."
+    },
+    {
+      "path": "apps/site/package.json",
+      "command": "affiliate:coverage:claim",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Command registration retained as a paused legacy reference until governed cohort proof."
+    },
+    {
+      "path": "apps/site/package.json",
+      "command": "affiliate:coverage:complete",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Command registration retained as a paused legacy reference until governed cohort proof."
+    },
+    {
+      "path": "apps/site/package.json",
+      "command": "affiliate:coverage:codex-goal",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Command registration retained as a paused legacy reference until governed cohort proof."
+    },
+    {
+      "path": "apps/site/package.json",
+      "command": "affiliate:coverage:codex-goal:dry-run",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Command registration retained as a paused legacy reference until governed cohort proof."
+    },
+    {
+      "path": "apps/site/package.json",
+      "command": "affiliate:coverage:loop",
+      "state": "PAUSED_FAIL_CLOSED",
+      "reason": "Command registration retained as a paused legacy reference until governed cohort proof."
+    }
+  ],
+  "retainedSupport": [
+    "apps/site/src/server/affiliateImports/affiliateIngestionSchemas.ts",
+    "apps/site/src/server/affiliateImports/affiliateMappingApproval.ts",
+    "apps/site/scripts/evaluate-affiliate-mapping-agent.ts",
+    "apps/site/deploy/ai/bin/run-evaluation.sh"
+  ],
+  "reviewedEdits": [
+    {
+      "path": "apps/site/package.json",
+      "operation": "REMOVE_LEGACY_DIRECT_WRITER_COMMANDS",
+      "sha256": "1ece5663eadeadc9a01f01df5ac5d402f6bae5ae73318d61e2e87a1be73cae83"
+    },
+    {
+      "path": "apps/site/deploy/ai/README.md",
+      "operation": "RETIRE_OPEN_WEIGHT_QUEUE_WRITER",
+      "sha256": "095a74168922a0b39a741fdbd344bf1ded4fb082cea8af71dddb3ef2149eabca"
+    },
+    {
+      "path": "apps/site/deploy/ai/compose.yml",
+      "operation": "REMOVE_OPEN_WEIGHT_CONTROLLER_PROFILE",
+      "sha256": "6ed292b2f5289401d0a666ad761c9743dae0921d4c9d99704ce1f449b38a3663"
+    },
+    {
+      "path": "apps/site/deploy/ai/deployment.env.example",
+      "operation": "REMOVE_OPEN_WEIGHT_CONTROLLER_SETTINGS",
+      "sha256": "1938632967582607df737140dfa856b1ffc65bc31733a3ced9a77927c0aed97c"
+    }
+  ],
+  "pathsSha256": "b59a4f4529c0a2de1272d6e0f4230063033e47d413994fc57eb8cba95e110185"
+}

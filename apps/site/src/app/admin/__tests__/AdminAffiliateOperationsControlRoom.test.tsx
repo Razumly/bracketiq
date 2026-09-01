@@ -1,13 +1,21 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import AdminAffiliateOperationsControlRoom from '../AdminAffiliateOperationsControlRoom';
-import type { AffiliateOperationsProjection } from '@/types/affiliateOperations';
+import type {
+  AffiliateOperationsProjection,
+  AlertHistoryRow,
+  CoverageTargetRow,
+  ProjectionDetail,
+  ReconciliationReportEvidence,
+  ReconciliationRunRow,
+} from '@/types/affiliateOperations';
 
 const pushMock = jest.fn();
+const replaceMock = jest.fn();
 const searchParams = new URLSearchParams('tab=affiliateOperations&view=overview');
 
 jest.mock('next/navigation', () => ({
-  useRouter: () => ({ push: pushMock }),
+  useRouter: () => ({ push: pushMock, replace: replaceMock }),
   usePathname: () => '/admin',
   useSearchParams: () => searchParams,
 }));
@@ -19,7 +27,161 @@ const response = (payload: unknown, ok = true): Response => ({
   headers: { get: () => 'application/json' } as Headers,
   json: async () => payload,
 } as Response);
+const emptyEvidencePage = {
+  page: 1,
+  pageSize: 0,
+  total: 0,
+  truncated: false,
+};
+const emptyEvidencePagination = {
+  processes: emptyEvidencePage,
+  roots: emptyEvidencePage,
+  claimActions: emptyEvidencePage,
+  blockingFindings: emptyEvidencePage,
+  warnings: emptyEvidencePage,
+  resolutions: emptyEvidencePage,
+  recordEvidence: emptyEvidencePage,
+  sourceIds: emptyEvidencePage,
+  recordIds: emptyEvidencePage,
+  evidenceRefs: emptyEvidencePage,
+};
 
+const reportEvidence = (
+  overrides: Partial<ReconciliationReportEvidence> = {},
+): ReconciliationReportEvidence => ({
+  kind: 'RECONCILIATION_REPORT',
+  schemaVersion: 1,
+  evaluatedAt: '2026-08-24T12:00:00.000Z',
+  sessionId: 'session_1',
+  sessionHash: 'session_hash',
+  evidenceHash: 'evidence_hash',
+  isApplySafe: true,
+  evidenceComplete: true,
+  decisionMode: 'APPLY',
+  decisionReasonCode: null,
+  decisionDetail: null,
+  decisionResolution: null,
+  legacySnapshotHash: 'legacy_hash',
+  supplyContractVersion: 1,
+  supplyContractHash: 'supply_hash',
+  deploymentContractVersion: 1,
+  deploymentContractHash: 'deployment_hash',
+  inputHash: 'input_hash',
+  outputHash: 'output_hash',
+  counts: { intakes: 1, sources: 1, findings: 0 },
+  recordsByKind: {},
+  preflight: null,
+  evidencePagination: emptyEvidencePagination,
+  processes: [],
+  roots: [],
+  claimActions: [],
+  blockingFindings: [],
+  warnings: [],
+  resolutions: [],
+  recordEvidence: [],
+  ...overrides,
+});
+const alertRow = (
+  overrides: Partial<AlertHistoryRow> = {},
+): AlertHistoryRow => ({
+  id: 'alert_1',
+  eventKey: 'SOURCE_STALE',
+  category: 'SUPPLY',
+  severity: 'warning',
+  title: 'Source stale',
+  detail: 'A source needs a refresh.',
+  at: '2026-08-24T12:00:00.000Z',
+  active: true,
+  recovered: false,
+  recoveryDetail: null,
+  recoveryEvidenceRefs: [],
+  deliveryCount: 2,
+  deliveredCount: 1,
+  latestDeliveryStatus: 'FAILED',
+  href: '/admin?tab=affiliateOperations&view=alerts&selectedType=alert&selected=alert_1',
+  ...overrides,
+});
+
+const reconciliationRun = (
+  overrides: Partial<ReconciliationRunRow> = {},
+): ReconciliationRunRow => ({
+  id: 'reconciliation_1',
+  mode: 'APPLY',
+  status: 'APPLIED',
+  operatorId: 'operator_1',
+  rolloutCohort: 'DEFAULT',
+  supplyContractVersion: 1,
+  supplyContractHash: 'supply_hash',
+  deploymentContractVersion: 1,
+  deploymentContractHash: 'deployment_hash',
+  inputHash: 'input_hash',
+  outputHash: 'output_hash',
+  reportHash: 'report_hash',
+  counts: { intakes: 1, sources: 1, findings: 0 },
+  recordsByKind: {},
+  failedInvariants: [],
+  resolutionRefs: [],
+  reportEvidence: reportEvidence(),
+  createdAt: '2026-08-24T12:00:00.000Z',
+  updatedAt: '2026-08-24T12:05:00.000Z',
+  appliedAt: '2026-08-24T12:05:00.000Z',
+  appliedBy: 'operator_1',
+  href: '/admin?tab=affiliateOperations&view=cutover&selectedType=reconciliationRun&selected=reconciliation_1',
+  ...overrides,
+});
+const coverageTarget = (
+  overrides: Partial<CoverageTargetRow> = {},
+): CoverageTargetRow => ({
+  id: 'target_1',
+  targetType: 'EVENT',
+  targetId: 'event_1',
+  marketKey: 'US-Austin',
+  sportId: 'soccer',
+  sourceProfile: 'CLUB',
+  status: 'FRESH',
+  supplySourceId: 'source_1',
+  candidateId: 'candidate_1',
+  freshnessExpiresAt: '2026-08-25T12:00:00.000Z',
+  publicTargetExists: true,
+  publicTargetState: 'VISIBLE',
+  publicTargetName: 'River City Open',
+  publicTargetHref: 'https://public.example.test/o/river-city/events/event_1',
+  href: '/admin?tab=affiliateOperations&view=coverage&selectedType=target&selected=target_1',
+  ...overrides,
+});
+
+const reconciliationDetail = (): ProjectionDetail => ({
+  id: 'reconciliation_1',
+  kind: 'reconciliationRun',
+  title: 'APPLY reconciliation',
+  subtitle: 'Reconciliation run reconciliation_1',
+  status: 'APPLIED',
+  sections: [
+    {
+      title: 'Hashes and contracts',
+      fields: [
+        { label: 'Session ID', value: 'session_1' },
+        { label: 'Evidence hash', value: 'evidence_hash' },
+      ],
+    },
+    {
+      title: 'Stopped-fleet process evidence',
+      fields: [
+        { label: 'Process count', value: '1' },
+        { label: 'Processes', value: 'legacy-mapping.service: STOPPED' },
+      ],
+    },
+    {
+      title: 'Counts and findings',
+      fields: [
+        { label: 'Blocking findings', value: 'identity_ambiguous' },
+        { label: 'Warnings', value: 'none' },
+      ],
+    },
+  ],
+  history: [],
+  related: [],
+});
 const projection = (overrides: Partial<AffiliateOperationsProjection> = {}): AffiliateOperationsProjection => ({
   schemaVersion: 2,
   asOf: '2026-08-24T12:00:00.000Z',
@@ -36,6 +198,7 @@ const projection = (overrides: Partial<AffiliateOperationsProjection> = {}): Aff
     wipSeries: [],
     lifecycleCounts: [{ stage: 'PUBLISHED', count: 2, href: '/admin?tab=affiliateOperations&view=sources' }],
     exceptions: [],
+    exceptionTotal: 0,
     priorityWork: [],
     counts: {
       supplySources: 2,
@@ -81,6 +244,8 @@ const projection = (overrides: Partial<AffiliateOperationsProjection> = {}): Aff
   review: { rows: [], page: 1, pageSize: 25, total: 0 },
   sources: { rows: [], lifecycleMovement: [], freshnessMovement: [], page: 1, pageSize: 25, total: 0 },
   candidates: { rows: [], page: 1, pageSize: 25, total: 0 },
+  alerts: { rows: [], page: 1, pageSize: 25, total: 0 },
+  cutover: { rows: [], page: 1, pageSize: 25, total: 0 },
   selected: null,
   ...overrides,
 });
@@ -96,6 +261,7 @@ beforeEach(() => {
   searchParams.set('view', 'overview');
   ['selectedType', 'selected', 'page', 'targetPage', 'campaignPage', 'discoveryPage', 'historyPage', 'historyPageSize', 'market', 'city', 'sport', 'profile', 'range', 'status', 'lane', 'role', 'reason', 'sort', 'direction', 'anchor', 'rolloutCohort', 'contractVersion'].forEach((key) => searchParams.delete(key));
   pushMock.mockReset();
+  replaceMock.mockReset();
   Object.defineProperty(window, 'matchMedia', {
     configurable: true,
     value: () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {} }),
@@ -113,9 +279,8 @@ describe('AdminAffiliateOperationsControlRoom', () => {
 
     renderRoom();
 
-    await waitFor(() => expect(screen.getByText('Affiliate Operations Control Room')).toBeInTheDocument());
+    expect(screen.getAllByRole('tab')).toHaveLength(9);
     await waitFor(() => expect(screen.getByText('Current lifecycle counts')).toBeInTheDocument());
-    expect(screen.getAllByRole('tab')).toHaveLength(7);
     fireEvent.click(screen.getByRole('tab', { name: 'Jobs' }));
 
     expect(pushMock).toHaveBeenCalledWith(
@@ -126,6 +291,474 @@ describe('AdminAffiliateOperationsControlRoom', () => {
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/admin/affiliate-operations?tab=affiliateOperations&view=overview',
       expect.objectContaining({ method: 'GET', credentials: 'include' }),
+    );
+  });
+  it('clears inherited filters when entering Alerts or Cutover', async () => {
+    const fetchMock = jest.fn().mockResolvedValue(response(projection()));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    searchParams.set('market', 'Austin');
+    searchParams.set('city', 'Austin');
+    searchParams.set('sport', 'soccer');
+    searchParams.set('profile', 'EVENT');
+    searchParams.set('range', '24h');
+    searchParams.set('status', 'FAILED');
+    searchParams.set('lane', 'MAPPING');
+    searchParams.set('role', 'PUBLISHER');
+    searchParams.set('reason', 'STALE');
+
+    renderRoom();
+    await waitFor(() =>
+      expect(screen.getByText('Current lifecycle counts')).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Alerts' }));
+    expect(pushMock).toHaveBeenLastCalledWith(
+      '/admin?tab=affiliateOperations&view=alerts',
+      { scroll: false },
+    );
+    pushMock.mockReset();
+    fireEvent.click(screen.getByRole('tab', { name: 'Cutover' }));
+    expect(pushMock).toHaveBeenLastCalledWith(
+      '/admin?tab=affiliateOperations&view=cutover',
+      { scroll: false },
+    );
+  });
+  it('normalizes unsupported filters across every tab transition', async () => {
+    const fetchMock = jest.fn().mockResolvedValue(response(projection()));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    searchParams.set('view', 'coverage');
+    searchParams.set('city', 'Portland');
+    const rendered = renderRoom();
+    await waitFor(() => expect(screen.getByText('Coverage Cells')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('tab', { name: 'Overview' }));
+    expect(pushMock).toHaveBeenLastCalledWith(
+      '/admin?tab=affiliateOperations&view=overview',
+      { scroll: false },
+    );
+
+    pushMock.mockReset();
+    searchParams.set('view', 'jobs');
+    searchParams.set('lane', 'MAPPING');
+    searchParams.set('role', 'PUBLISHER');
+    searchParams.set('reason', 'STALE');
+    rendered.rerender(
+      <MantineProvider>
+        <AdminAffiliateOperationsControlRoom isActive refreshKey={0} />
+      </MantineProvider>,
+    );
+    await waitFor(() => expect(screen.getByText('Unified jobs and invocations')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('tab', { name: 'Overview' }));
+    expect(pushMock).toHaveBeenLastCalledWith(
+      '/admin?tab=affiliateOperations&view=overview',
+      { scroll: false },
+    );
+  });
+  it('normalizes unsupported filters on direct Alerts projection links', async () => {
+    const alertHref =
+      '/admin?tab=affiliateOperations&view=alerts&selectedType=alert&selected=alert_1';
+    searchParams.set('view', 'overview');
+    searchParams.set('city', 'Portland');
+    const fetchMock = jest.fn().mockResolvedValue(response(projection({
+      overview: {
+        ...projection().overview,
+        exceptions: [{
+          id: 'alert:alert_1',
+          kind: 'ALERT',
+          severity: 'warning',
+          title: 'Direct alert',
+          detail: 'Follow the alert evidence.',
+          at: '2026-08-24T12:00:00.000Z',
+          href: alertHref,
+        }],
+        exceptionTotal: 1,
+      },
+    })));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    renderRoom();
+    fireEvent.click(await screen.findByRole('link', { name: /Direct alert/ }));
+    expect(pushMock).toHaveBeenCalledWith(alertHref, { scroll: false });
+  });
+  it('renders the authoritative exception total and access to remaining alert history', async () => {
+    const exceptions = Array.from({ length: 13 }, (_value, index) => ({
+      id: `alert:exception_${index + 1}`,
+      kind: 'ALERT' as const,
+      severity: 'warning' as const,
+      title: `Exception ${index + 1}`,
+      detail: 'Follow the recorded alert evidence.',
+      at: '2026-08-24T12:00:00.000Z',
+      href: `/admin?tab=affiliateOperations&view=alerts&selectedType=alert&selected=exception_${index + 1}`,
+    }));
+    const fetchMock = jest.fn().mockResolvedValue(response(projection({
+      overview: {
+        ...projection().overview,
+        exceptions,
+        exceptionTotal: 20,
+      },
+    })));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    renderRoom();
+
+    expect(
+      await screen.findByText(/Showing 13 of 20 recorded exceptions/),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Exception 13')).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: 'View remaining alert history' }),
+    ).toHaveAttribute(
+      'href',
+      '/admin?tab=affiliateOperations&view=alerts',
+    );
+  });
+
+  it('normalizes hidden filters on restored Alerts links before projection GET', async () => {
+    searchParams.set('view', 'alerts');
+    searchParams.set('market', 'Austin');
+    searchParams.set('selectedType', 'alert');
+    searchParams.set('selected', 'alert_1');
+    const fetchMock = jest.fn().mockResolvedValue(response(projection()));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    renderRoom();
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/admin/affiliate-operations?tab=affiliateOperations&view=alerts&selectedType=alert&selected=alert_1',
+        expect.objectContaining({ method: 'GET', credentials: 'include' }),
+      ),
+    );
+    expect(replaceMock).toHaveBeenCalledWith(
+      '/admin?tab=affiliateOperations&view=alerts&selectedType=alert&selected=alert_1',
+      { scroll: false },
+    );
+  });
+  it('forwards lifecycle and freshness movement links in sortable tables', async () => {
+    const lifecycleHref =
+      '/admin?tab=affiliateOperations&view=sources&selectedType=transition&selected=transition_1';
+    const freshnessHref =
+      '/admin?tab=affiliateOperations&view=sources&selectedType=scrapeRun&selected=scrape_1';
+    searchParams.set('view', 'sources');
+    const fetchMock = jest.fn().mockResolvedValue(response(projection({
+      view: 'sources',
+      sources: {
+        rows: [],
+        lifecycleMovement: [{
+          id: 'movement_1',
+          at: '2026-08-24T12:00:00.000Z',
+          label: 'MAPPED → PUBLISHED',
+          direction: 'forward',
+          count: 1,
+          refreshClass: 'FULL',
+          reason: null,
+          href: lifecycleHref,
+        }],
+        freshnessMovement: [{
+          id: 'movement_2',
+          at: '2026-08-24T12:00:00.000Z',
+          label: 'STALE → FRESH',
+          direction: 'forward',
+          count: 1,
+          refreshClass: 'FULL',
+          reason: null,
+          href: freshnessHref,
+        }],
+        page: 1,
+        pageSize: 25,
+        total: 0,
+      },
+    })));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    renderRoom();
+    await waitFor(() => expect(screen.getByText('Lifecycle movement')).toBeInTheDocument());
+    const links = screen.getAllByRole('link');
+    expect(links.some((link) => link.getAttribute('href')?.includes('selected=transition_1'))).toBe(true);
+    expect(links.some((link) => link.getAttribute('href')?.includes('selected=scrape_1'))).toBe(true);
+  });
+  it('renders Alerts and Cutover with deep links and no unsupported filters', async () => {
+    const alert = alertRow();
+    const run = reconciliationRun();
+    const alertProjection = projection({
+      view: 'alerts',
+      alerts: { rows: [alert], page: 1, pageSize: 25, total: 1 },
+    });
+    const cutoverProjection = projection({
+      view: 'cutover',
+      cutover: {
+        rows: [run],
+        page: 1,
+        pageSize: 25,
+        total: 1,
+      },
+      selected: reconciliationDetail(),
+    });
+    const fetchMock = jest.fn((input: RequestInfo | URL) =>
+      Promise.resolve(
+        response(String(input).includes('view=cutover')
+          ? cutoverProjection
+          : alertProjection),
+      ),
+    );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    searchParams.set('view', 'alerts');
+    const rendered = renderRoom();
+
+    expect(screen.getAllByRole('tab')).toHaveLength(9);
+    expect(await screen.findByText('Operational alert history')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Range')).not.toBeInTheDocument();
+    const alertLink = screen.getByRole('link', { name: alert.title });
+    expect(alertLink).toHaveAttribute('href', alert.href);
+    pushMock.mockReset();
+    alertLink.addEventListener(
+      'click',
+      (event) => event.preventDefault(),
+      { once: true },
+    );
+    fireEvent.click(alertLink, { metaKey: true });
+    expect(pushMock).not.toHaveBeenCalled();
+    fireEvent.click(alertLink);
+    expect(pushMock).toHaveBeenCalledWith(alert.href, { scroll: false });
+    pushMock.mockReset();
+    fireEvent.keyDown(
+      screen.getByRole('row', { name: `Open alert ${alert.title}` }),
+      { key: 'Enter' },
+    );
+    expect(pushMock).toHaveBeenCalledWith(
+      '/admin?tab=affiliateOperations&view=alerts&selectedType=alert&selected=alert_1',
+      { scroll: false },
+    );
+
+    pushMock.mockReset();
+    searchParams.set('view', 'cutover');
+    rendered.rerender(
+      <MantineProvider>
+        <AdminAffiliateOperationsControlRoom isActive refreshKey={0} />
+      </MantineProvider>,
+    );
+
+    expect(await screen.findByText('Cutover and reconciliation history')).toBeInTheDocument();
+    expect(screen.getByText('Session: session_1')).toBeInTheDocument();
+    expect(screen.getByText('Evidence: evidence_hash')).toBeInTheDocument();
+    expect(screen.getByText(/Processes: 0; Findings: 0 blocking/)).toBeInTheDocument();
+    expect(screen.queryByLabelText('Range')).not.toBeInTheDocument();
+    const runLink = screen.getByRole('link', { name: run.id });
+    expect(runLink).toHaveAttribute('href', run.href);
+    fireEvent.keyDown(
+      screen.getByRole('row', { name: `Open reconciliation run ${run.id}` }),
+      { key: 'Enter' },
+    );
+    expect(pushMock).toHaveBeenCalledWith(
+      '/admin?tab=affiliateOperations&view=cutover&selectedType=reconciliationRun&selected=reconciliation_1',
+      { scroll: false },
+    );
+    searchParams.set('selectedType', 'reconciliationRun');
+    searchParams.set('selected', run.id);
+    rendered.rerender(
+      <MantineProvider>
+        <AdminAffiliateOperationsControlRoom isActive refreshKey={0} />
+      </MantineProvider>,
+    );
+    expect(await screen.findByText('APPLY reconciliation')).toBeInTheDocument();
+    expect(screen.getByText('identity_ambiguous')).toBeInTheDocument();
+  });
+  it('renders numeric contract versions and explicit unbound fallbacks', async () => {
+    const numericRun = reconciliationRun();
+    const unboundRun = reconciliationRun({
+      id: 'reconciliation_unbound',
+      supplyContractVersion: null,
+      href: '/admin?tab=affiliateOperations&view=cutover&selectedType=reconciliationRun&selected=reconciliation_unbound',
+    });
+    const fetchMock = jest.fn().mockResolvedValue(
+      response(
+        projection({
+          view: 'cutover',
+          cutover: {
+            rows: [numericRun, unboundRun],
+            page: 1,
+            pageSize: 25,
+            total: 2,
+          },
+        }),
+      ),
+    );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    searchParams.set('view', 'cutover');
+
+    renderRoom();
+
+    expect(
+      await screen.findByText('Cutover and reconciliation history'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('row', {
+        name: `Open reconciliation run ${numericRun.id}`,
+      }),
+    ).toHaveTextContent('DEFAULT / v1');
+    expect(
+      screen.getByRole('row', {
+        name: `Open reconciliation run ${unboundRun.id}`,
+      }),
+    ).toHaveTextContent('DEFAULT / Not recorded');
+  });
+  it('renders durable evidence totals separately from bounded previews', async () => {
+    const previewPage = { page: 1, pageSize: 2, total: 42, truncated: true };
+    const run = reconciliationRun({
+      reportEvidence: reportEvidence({
+        evidencePagination: {
+          ...emptyEvidencePagination,
+          processes: previewPage,
+          blockingFindings: { ...previewPage, total: 7 },
+          warnings: { ...previewPage, total: 8 },
+          resolutions: { ...previewPage, total: 9 },
+        },
+        processes: [{ id: 'legacy_1', kind: 'LEGACY', status: 'STOPPED' }],
+      }),
+    });
+    const fetchMock = jest.fn().mockResolvedValue(response(projection({
+      view: 'cutover',
+      cutover: {
+        rows: [run],
+        page: 1,
+        pageSize: 25,
+        total: 1,
+      },
+    })));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    searchParams.set('view', 'cutover');
+
+    renderRoom();
+
+    expect(await screen.findByText('Cutover and reconciliation history')).toBeInTheDocument();
+    expect(
+      screen.getByText('Processes: 42; Findings: 7 blocking / 8 warnings / 9 resolved'),
+    ).toBeInTheDocument();
+  });
+
+  it('renders projected public-target evidence with explicit fallbacks', async () => {
+    searchParams.set('view', 'coverage');
+    const target = coverageTarget();
+    const missingTarget = coverageTarget({
+      id: 'target_2',
+      targetId: 'event_missing',
+      candidateId: null,
+      publicTargetExists: false,
+      publicTargetState: 'MISSING',
+      publicTargetName: null,
+      publicTargetHref: null,
+      href: '/admin?tab=affiliateOperations&view=coverage&selectedType=target&selected=target_2',
+    });
+    const fetchMock = jest.fn().mockResolvedValue(
+      response(projection({
+        view: 'coverage',
+        coverage: {
+          ...projection().coverage,
+          targets: [target, missingTarget],
+          targetTotal: 2,
+        },
+      })),
+    );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    renderRoom();
+
+    expect(await screen.findByText('Supply Targets')).toBeInTheDocument();
+    expect(screen.getByText('VISIBLE')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'River City Open' })).toHaveAttribute(
+      'href',
+      'https://public.example.test/o/river-city/events/event_1',
+    );
+    expect(screen.getByText('MISSING')).toBeInTheDocument();
+    expect(screen.getByText('Public link not recorded')).toBeInTheDocument();
+    expect(screen.getAllByText('Not recorded').length).toBeGreaterThan(0);
+  });
+  it('sorts campaign date values chronologically while formatting them for display', async () => {
+    searchParams.set('view', 'coverage');
+    searchParams.set('sort', 'discovery-campaigns:lastRun');
+    searchParams.set('direction', 'asc');
+    const campaigns = [
+      {
+        id: 'campaign-old',
+        name: 'Older campaign',
+        region: 'Austin',
+        status: 'ACTIVE',
+        lastRunAt: '2025-12-31T12:00:00.000Z',
+        nextRunAt: null,
+        queryLimit: 10,
+        resultLimit: 10,
+        href: '/admin?tab=affiliateOperations&view=coverage&selectedType=campaign&selected=campaign-old',
+      },
+      {
+        id: 'campaign-new',
+        name: 'Newer campaign',
+        region: 'Austin',
+        status: 'ACTIVE',
+        lastRunAt: '2026-01-01T12:00:00.000Z',
+        nextRunAt: null,
+        queryLimit: 10,
+        resultLimit: 10,
+        href: '/admin?tab=affiliateOperations&view=coverage&selectedType=campaign&selected=campaign-new',
+      },
+    ];
+    const fetchMock = jest.fn().mockResolvedValue(response(projection({
+      view: 'coverage',
+      coverage: {
+        ...projection().coverage,
+        campaigns,
+        campaignTotal: campaigns.length,
+      },
+    })));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    renderRoom();
+
+    await screen.findByText('Discovery campaigns');
+    expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual([
+      'Older campaign',
+      'Newer campaign',
+    ]);
+  });
+  it('uses the list page URL key for Alerts and Cutover pagination', async () => {
+    const alert = alertRow();
+    const run = reconciliationRun();
+    const alerts = projection({
+      view: 'alerts',
+      alerts: { rows: [alert], page: 1, pageSize: 25, total: 26 },
+    });
+    const cutover = projection({
+      view: 'cutover',
+      cutover: { rows: [run], page: 1, pageSize: 25, total: 26 },
+    });
+    const fetchMock = jest.fn((input: RequestInfo | URL) =>
+      Promise.resolve(
+        response(String(input).includes('view=cutover') ? cutover : alerts),
+      ),
+    );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    searchParams.set('view', 'alerts');
+    const rendered = renderRoom();
+    await waitFor(() => expect(screen.getByText('26 records. Page size 25.')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /next page/i }));
+    expect(pushMock).toHaveBeenCalledWith(
+      '/admin?tab=affiliateOperations&view=alerts&page=2',
+      { scroll: false },
+    );
+
+    pushMock.mockReset();
+    searchParams.set('view', 'cutover');
+    rendered.rerender(
+      <MantineProvider>
+        <AdminAffiliateOperationsControlRoom isActive refreshKey={0} />
+      </MantineProvider>,
+    );
+    await waitFor(() => expect(screen.getByText('Cutover and reconciliation history')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /next page/i }));
+    expect(pushMock).toHaveBeenCalledWith(
+      '/admin?tab=affiliateOperations&view=cutover&page=2',
+      { scroll: false },
     );
   });
 
@@ -246,7 +879,7 @@ describe('AdminAffiliateOperationsControlRoom', () => {
     expect(screen.getByText('9')).toBeInTheDocument();
   });
 
-  it('retains historical chart series until the rollup revision changes', async () => {
+  it('refreshes time-dependent chart series when a projection refresh keeps the same history revision', async () => {
     const pending: Array<(value: Response) => void> = [];
     const fetchMock = jest.fn(() => new Promise<Response>((resolve) => pending.push(resolve)));
     globalThis.fetch = fetchMock as unknown as typeof fetch;
@@ -282,9 +915,8 @@ describe('AdminAffiliateOperationsControlRoom', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    await waitFor(() => expect(screen.getByText('7')).toBeInTheDocument());
-    expect(screen.getAllByText('41').length).toBeGreaterThan(0);
-    expect(screen.queryByText('99')).not.toBeInTheDocument();
+    expect(screen.getAllByText('99').length).toBeGreaterThan(0);
+    expect(screen.queryByText('41')).not.toBeInTheDocument();
   });
 
   it('opens a job from keyboard without leaving the read-only projection route', async () => {
@@ -300,6 +932,43 @@ describe('AdminAffiliateOperationsControlRoom', () => {
       '/admin?tab=affiliateOperations&view=jobs&selectedType=job&selected=job_1',
       { scroll: false },
     );
+  });
+  it('removes a focused row absent from a foreground refresh', async () => {
+    searchParams.set('view', 'jobs');
+    searchParams.set('selectedType', 'job');
+    searchParams.set('selected', 'job_1');
+    const firstRow = projection().jobs.rows[0];
+    const secondRow = { ...firstRow, id: 'job_2' };
+    const first = projection({
+      view: 'jobs',
+      jobs: { ...projection().jobs, rows: [firstRow, secondRow], total: 2 },
+    });
+    const second = projection({
+      view: 'jobs',
+      jobs: { ...projection().jobs, rows: [secondRow], total: 1 },
+    });
+    const fetchMock = jest.fn()
+      .mockResolvedValueOnce(response(first))
+      .mockResolvedValueOnce(response(second));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    renderRoom();
+    await waitFor(() =>
+      expect(
+        screen.getByRole('row', { name: 'Open job job_1' }),
+      ).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getAllByRole('button', { name: /refresh/i })[0]);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(
+        screen.getByRole('row', { name: 'Open job job_2' }),
+      ).toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByRole('row', { name: 'Open job job_1' }),
+    ).not.toBeInTheDocument();
   });
 
   it('keeps the focused row in place and labels newer background results', async () => {
@@ -347,6 +1016,172 @@ describe('AdminAffiliateOperationsControlRoom', () => {
     const rows = screen.getAllByRole('row');
     const focusedIndex = rows.findIndex((row) => row.getAttribute('aria-label') === 'Open job job_1');
     const nextIndex = rows.findIndex((row) => row.getAttribute('aria-label') === 'Open job job_2');
+    expect(focusedIndex).toBeGreaterThanOrEqual(0);
+    expect(focusedIndex).toBeLessThan(nextIndex);
+  });
+  it('keeps the focused alert row in place during a background refresh', async () => {
+    searchParams.set('view', 'alerts');
+    searchParams.set('selectedType', 'alert');
+    searchParams.set('selected', 'alert_1');
+    const firstRow = alertRow({ title: 'Alert one' });
+    const secondRow = alertRow({
+      id: 'alert_2',
+      title: 'Alert two',
+      href: '/admin?tab=affiliateOperations&view=alerts&selectedType=alert&selected=alert_2',
+    });
+    const first = projection({
+      view: 'alerts',
+      alerts: { ...projection().alerts, rows: [firstRow, secondRow], total: 2 },
+    });
+    const second = projection({
+      view: 'alerts',
+      asOf: '2026-08-24T12:15:00.000Z',
+
+      alerts: {
+        ...projection().alerts,
+        rows: [secondRow, { ...firstRow, active: false }],
+        total: 2,
+      },
+    });
+    const fetchMock = jest.fn()
+      .mockResolvedValueOnce(response(first))
+      .mockResolvedValueOnce(response(second));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    renderRoom();
+    await waitFor(() =>
+      expect(screen.getByRole('row', { name: 'Open alert Alert one' })).toBeInTheDocument(),
+    );
+
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByText('Newer results available')).toBeInTheDocument());
+    const rows = screen.getAllByRole('row');
+    const focusedIndex = rows.findIndex(
+      (row) => row.getAttribute('aria-label') === 'Open alert Alert one',
+    );
+    const nextIndex = rows.findIndex(
+      (row) => row.getAttribute('aria-label') === 'Open alert Alert two',
+    );
+    expect(focusedIndex).toBeGreaterThanOrEqual(0);
+    expect(focusedIndex).toBeLessThan(nextIndex);
+  });
+
+  it('retains a selected row at its prior index when a background page displaces it', async () => {
+    searchParams.set('view', 'jobs');
+    searchParams.set('selectedType', 'job');
+    searchParams.set('selected', 'job_1');
+    const firstRow = projection().jobs.rows[0];
+    const secondRow = { ...firstRow, id: 'job_2' };
+    const thirdRow = { ...firstRow, id: 'job_3' };
+    const fourthRow = { ...firstRow, id: 'job_4' };
+    const fifthRow = { ...firstRow, id: 'job_5' };
+    const detail = {
+      id: 'job_1',
+      kind: 'job' as const,
+      title: 'GATEWAY job_1',
+      subtitle: 'MAPPING / MAPPING_PRODUCER',
+      status: 'QUEUED',
+      sections: [],
+      history: [],
+      related: [],
+    };
+    const first = projection({
+      view: 'jobs',
+      jobs: { ...projection().jobs, rows: [firstRow, secondRow, thirdRow], total: 5 },
+      selected: detail,
+    });
+    const second = projection({
+      view: 'jobs',
+      asOf: '2026-08-24T12:15:00.000Z',
+      jobs: { ...projection().jobs, rows: [thirdRow, fourthRow, fifthRow], total: 5 },
+      selected: null,
+    });
+    const fetchMock = jest.fn()
+      .mockResolvedValueOnce(response(first))
+      .mockResolvedValueOnce(response(second));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    renderRoom();
+    await waitFor(() =>
+      expect(screen.getByRole('row', { name: 'Open job job_1' })).toBeInTheDocument(),
+    );
+
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.getByRole('row', { name: 'Open job job_1' })).toBeInTheDocument(),
+    );
+    const rows = screen.getAllByRole('row');
+    const focusedIndex = rows.findIndex(
+      (row) => row.getAttribute('aria-label') === 'Open job job_1',
+    );
+    const displacedNextIndex = rows.findIndex(
+      (row) => row.getAttribute('aria-label') === 'Open job job_3',
+    );
+    expect(focusedIndex).toBeGreaterThanOrEqual(0);
+    expect(focusedIndex).toBeLessThan(displacedNextIndex);
+  });
+  it('keeps the focused reconciliation row in place during a background refresh', async () => {
+    searchParams.set('view', 'cutover');
+    searchParams.set('selectedType', 'reconciliationRun');
+    searchParams.set('selected', 'reconciliation_1');
+    const firstRow = reconciliationRun();
+    const secondRow = reconciliationRun({
+      id: 'reconciliation_2',
+      href: '/admin?tab=affiliateOperations&view=cutover&selectedType=reconciliationRun&selected=reconciliation_2',
+    });
+    const first = projection({
+      view: 'cutover',
+      cutover: { ...projection().cutover, rows: [firstRow, secondRow], total: 2 },
+    });
+    const second = projection({
+      view: 'cutover',
+      asOf: '2026-08-24T12:15:00.000Z',
+      cutover: {
+        ...projection().cutover,
+        rows: [secondRow, { ...firstRow, status: 'ROLLED_BACK' }],
+        total: 2,
+      },
+    });
+    const fetchMock = jest.fn()
+      .mockResolvedValueOnce(response(first))
+      .mockResolvedValueOnce(response(second));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    renderRoom();
+    await waitFor(() =>
+      expect(
+        screen.getByRole('row', { name: 'Open reconciliation run reconciliation_1' }),
+      ).toBeInTheDocument(),
+    );
+
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByText('Newer results available')).toBeInTheDocument());
+    const rows = screen.getAllByRole('row');
+    const focusedIndex = rows.findIndex(
+      (row) =>
+        row.getAttribute('aria-label') ===
+        'Open reconciliation run reconciliation_1',
+    );
+    const nextIndex = rows.findIndex(
+      (row) =>
+        row.getAttribute('aria-label') ===
+        'Open reconciliation run reconciliation_2',
+    );
     expect(focusedIndex).toBeGreaterThanOrEqual(0);
     expect(focusedIndex).toBeLessThan(nextIndex);
   });
@@ -527,7 +1362,7 @@ describe('AdminAffiliateOperationsControlRoom', () => {
     );
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
     expect(fetchMock).toHaveBeenLastCalledWith(
-      '/api/admin/affiliate-operations?tab=affiliateOperations&view=jobs&page=2&city=Austin&selectedType=job&selected=job_1',
+      '/api/admin/affiliate-operations?tab=affiliateOperations&view=jobs&page=2&selectedType=job&selected=job_1',
       expect.objectContaining({ method: 'GET', credentials: 'include' }),
     );
     expect(await screen.findByText('GATEWAY job_1')).toBeInTheDocument();

@@ -6,6 +6,8 @@ export const AFFILIATE_OPERATIONS_VIEWS = [
   'review',
   'sources',
   'candidates',
+  'alerts',
+  'cutover',
 ] as const;
 export type AffiliateOperationsView = typeof AFFILIATE_OPERATIONS_VIEWS[number];
 export const AFFILIATE_OPERATIONS_DETAIL_TYPES = [
@@ -28,6 +30,7 @@ export const AFFILIATE_OPERATIONS_DETAIL_TYPES = [
   'operation',
   'transition',
   'alert',
+  'reconciliationRun',
   'scrapeRun',
   'intakeRun',
   'page',
@@ -170,6 +173,203 @@ export type ExceptionRow = Readonly<{
   href: string;
 }>;
 
+export type AlertHistoryRow = Readonly<{
+  id: string;
+  eventKey: string;
+  category: string;
+  severity: 'critical' | 'warning' | 'info';
+  title: string;
+  detail: string;
+  at: string | null;
+  active: boolean;
+  recovered: boolean;
+  recoveryDetail: string | null;
+  recoveryEvidenceRefs: readonly string[];
+  deliveryCount: number;
+  deliveredCount: number;
+  latestDeliveryStatus: string | null;
+  href: string;
+}>;
+
+export type AlertsProjection = Readonly<{
+  rows: readonly AlertHistoryRow[];
+  page: number;
+  pageSize: number;
+  total: number;
+}>;
+
+export type ReconciliationPreflightEvidence = Readonly<{
+  evaluatedAt: string | null;
+  isReady: boolean | null;
+  gatewayVersion: number | null;
+  reviewedLegacyProcessManifestHash: string | null;
+  reviewedLegacyProcessManifestCount: number | null;
+  reviewedLegacyProcessManifestArtifactId: string | null;
+  processInventoryArtifactId: string | null;
+  processInventoryHash: string | null;
+  processInventoryCount: number | null;
+  reviewedSystemdUnits: readonly Readonly<{
+    processId: string;
+    unitId: string;
+  }>[];
+  legacyServiceUnits: readonly Readonly<{
+    id: string;
+    isEnabled: string;
+    isActive: string;
+  }>[];
+  counts: Readonly<Record<string, number>>;
+  recordsByKind: Readonly<Record<string, number>>;
+  reviewedAgentNetwork: string | null;
+}>;
+
+export type ReconciliationEvidencePage = Readonly<{
+  page: number;
+  pageSize: number;
+  total: number;
+  truncated: boolean;
+}>;
+
+export type ReconciliationEvidencePagination = Readonly<{
+  processes: ReconciliationEvidencePage;
+  roots: ReconciliationEvidencePage;
+  claimActions: ReconciliationEvidencePage;
+  blockingFindings: ReconciliationEvidencePage;
+  warnings: ReconciliationEvidencePage;
+  resolutions: ReconciliationEvidencePage;
+  recordEvidence: ReconciliationEvidencePage;
+  sourceIds: ReconciliationEvidencePage;
+  recordIds: ReconciliationEvidencePage;
+  evidenceRefs: ReconciliationEvidencePage;
+}>;
+
+export type ReconciliationProcessEvidence = Readonly<{
+  id: string;
+  kind: string;
+  role: string | null;
+  workerId: string | null;
+  processClass: string | null;
+  command: string | null;
+  status: string | null;
+}>;
+
+export type ReconciliationRootEvidence = Readonly<{
+  existingRootId: string | null;
+  identityKey: string | null;
+  canonicalUrl: string | null;
+  origin: string | null;
+  pathKey: string | null;
+  derivedStage: string | null;
+  action: string | null;
+  sourceIds: readonly string[];
+  recordIds: readonly string[];
+  evidenceRefs: readonly string[];
+  targetProjections: readonly Readonly<{
+    sourceTargetId: string;
+    candidateId: string | null;
+    targetType: string;
+    targetId: string;
+    status: string;
+    action: string;
+    evidenceRefs: readonly string[];
+  }>[];
+}>;
+
+export type ReconciliationClaimEvidence = Readonly<{
+  id: string;
+  kind: string;
+  status: string | null;
+  action: string | null;
+  sourceId: string | null;
+  supplySourceId: string | null;
+  evidenceRefs: readonly string[];
+}>;
+
+export type ReconciliationFindingEvidence = Readonly<{
+  code: string;
+  severity: string;
+  detail: string;
+  recordIds: readonly string[];
+  resolution: string;
+}>;
+
+export type ReconciliationRecordEvidence = Readonly<{
+  id: string;
+  kind: string;
+  status: string | null;
+  at: string | null;
+  detail: string | null;
+  refs: readonly string[];
+  sourceIds: readonly string[];
+  recordIds: readonly string[];
+  evidenceRefs: readonly string[];
+}>;
+
+export type ReconciliationReportEvidence = Readonly<{
+  kind: string | null;
+  schemaVersion: number | null;
+  evaluatedAt: string | null;
+  sessionId: string | null;
+  sessionHash: string | null;
+  evidenceHash: string | null;
+  evidenceComplete: boolean | null;
+  isApplySafe: boolean | null;
+  decisionMode: string | null;
+  decisionReasonCode: string | null;
+  decisionDetail: string | null;
+  decisionResolution: string | null;
+  legacySnapshotHash: string | null;
+  supplyContractVersion: number | null;
+  supplyContractHash: string | null;
+  deploymentContractVersion: number | null;
+  deploymentContractHash: string | null;
+  inputHash: string | null;
+  outputHash: string | null;
+  reportHash: string | null;
+  counts: Readonly<Record<string, number>>;
+  recordsByKind: Readonly<Record<string, number>>;
+  preflight: ReconciliationPreflightEvidence | null;
+  evidencePagination: ReconciliationEvidencePagination;
+  processes: readonly ReconciliationProcessEvidence[];
+  roots: readonly ReconciliationRootEvidence[];
+  claimActions: readonly ReconciliationClaimEvidence[];
+  blockingFindings: readonly ReconciliationFindingEvidence[];
+  warnings: readonly ReconciliationFindingEvidence[];
+  resolutions: readonly ReconciliationFindingEvidence[];
+  recordEvidence: readonly ReconciliationRecordEvidence[];
+}>;
+
+export type ReconciliationRunRow = Readonly<{
+  id: string;
+  mode: string;
+  status: string;
+  operatorId: string | null;
+  rolloutCohort: string;
+  supplyContractVersion: number | null;
+  supplyContractHash: string | null;
+  deploymentContractVersion: number | null;
+  deploymentContractHash: string | null;
+  inputHash: string;
+  outputHash: string;
+  reportHash: string;
+  counts: Readonly<Record<string, number>>;
+  recordsByKind: Readonly<Record<string, number>>;
+  failedInvariants: readonly string[];
+  resolutionRefs: readonly string[];
+  reportEvidence: ReconciliationReportEvidence;
+  createdAt: string | null;
+  updatedAt: string | null;
+  appliedAt: string | null;
+  appliedBy: string | null;
+  href: string;
+}>;
+
+export type CutoverProjection = Readonly<{
+  rows: readonly ReconciliationRunRow[];
+  page: number;
+  pageSize: number;
+  total: number;
+}>;
+
 export type PriorityWorkRow = Readonly<{
   id: string;
   kind: 'REPLENISHMENT_DEMAND' | 'MAPPING_JOB' | 'REVIEW_CASE';
@@ -185,6 +385,7 @@ export type OverviewProjection = Readonly<{
   wipSeries: readonly WipSeriesPoint[];
   lifecycleCounts: readonly LifecycleCountRow[];
   exceptions: readonly ExceptionRow[];
+  exceptionTotal: number;
   priorityWork: readonly PriorityWorkRow[];
   counts: Readonly<{
     supplySources: number;
@@ -246,6 +447,10 @@ export type CoverageTargetRow = Readonly<{
   supplySourceId: string;
   candidateId: string | null;
   freshnessExpiresAt: string | null;
+  publicTargetExists: boolean;
+  publicTargetState: string;
+  publicTargetName: string | null;
+  publicTargetHref: string | null;
   href: string;
 }>;
 
@@ -492,6 +697,8 @@ export type AffiliateOperationsProjection = Readonly<{
   review: ReviewProjection;
   sources: SourcesProjection;
   candidates: CandidatesProjection;
+  alerts: AlertsProjection;
+  cutover: CutoverProjection;
   selected: ProjectionDetail | null;
 }>;
 

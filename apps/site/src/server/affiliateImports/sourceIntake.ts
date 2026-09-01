@@ -12,10 +12,17 @@ import {
   evaluateAffiliateHtmlQuality,
   type AffiliateHtmlArtifacts,
 } from './affiliateHtmlArtifacts';
-import type {
-  AffiliateProviderName,
-  AffiliateSourceCaptureClient,
-  AffiliateSourcePageCapture,
+import {
+  affiliateSourceCaptureDeadlineAt,
+  affiliateSourceCaptureTimeoutMs,
+  isAffiliateSourceCaptureTimeout,
+  type AffiliateProviderName,
+  type AffiliateSourceCaptureClient,
+  type AffiliateSourceCaptureOptions,
+  type AffiliateSourcePageCapture,
+  type AffiliateSourcePageScreenshotEvidence,
+  type AffiliateSourceScreenshot,
+  withAffiliateSourceCaptureDeadline,
 } from './affiliateProviderContracts';
 import {
   createAffiliateFallbackCaptureClient,
@@ -348,7 +355,14 @@ const reconcileCapturedAffiliateSupplySource = async (
 ): Promise<string | null> => {
   const currentSupplySourceId = page.supplySourceId ?? intake.supplySourceId ?? null;
   const finalUrl = stringValue(capture.finalUrl);
-  if (!finalUrl || finalUrl === String(page.url).trim()) return currentSupplySourceId;
+  if (
+    !finalUrl
+    || finalUrl === String(page.url).trim()
+    || capture.isRedirectVerified !== true
+  ) {
+    return currentSupplySourceId;
+  }
+  await assertSafePublicUrl(finalUrl);
   const targetKindHints = normalizedTargetKinds(intake.targetKindHints);
   return ensureAffiliateIntakeSupplySource({
     intakeId: intake.id,
@@ -358,7 +372,7 @@ const reconcileCapturedAffiliateSupplySource = async (
     pageUrl: finalUrl,
     targetKindHints: targetKindHints.length ? targetKindHints : null,
     isIntakeLinkPending: true,
-    isRedirectVerified: true,
+    isRedirectVerified: capture.isRedirectVerified === true,
     db: prisma,
   });
 };
@@ -1182,23 +1196,26 @@ const providerForClient = (client: IntakeCaptureClient): AffiliateProviderName =
 const captureWithClient = async (
   client: IntakeCaptureClient,
   url: string,
+  captureOptions: AffiliateSourceCaptureOptions = {},
 ): Promise<AffiliateSourcePageCapture> => {
-  if ('captureSourcePage' in client) return client.captureSourcePage(url);
+  if ('captureSourcePage' in client) return client.captureSourcePage(url, captureOptions);
   const startedAt = Date.now();
-  const legacy = await client.scrapeSourcePage(url);
+  const legacy = await client.scrapeSourcePage(url, captureOptions);
   return {
     provider: 'FIRECRAWL',
     request: legacy.request,
     response: legacy.response,
     requestedUrl: url,
     finalUrl: legacy.normalized.finalUrl,
+    isRedirectVerified: false,
+    inferredCanonicalUrl: null,
     providerStatusCode: 200,
     targetStatusCode: legacy.normalized.statusCode,
     rawHtml: legacy.normalized.rawHtml ?? '',
     renderMode: 'JAVASCRIPT',
     elapsedMs: Date.now() - startedAt,
     estimatedCredits: null,
-    warnings: [],
+    warnings: legacy.normalized.warnings,
     providerJobId: legacy.providerJobId,
     providerArtifacts: {
       markdown: legacy.normalized.markdown,
@@ -1206,44 +1223,214 @@ const captureWithClient = async (
       images: legacy.normalized.images,
       branding: legacy.normalized.branding,
       screenshotUrl: legacy.normalized.screenshotUrl,
+      screenshotEvidence: legacy.normalized.screenshotEvidence,
       metadata: legacy.normalized.metadata,
     },
   };
+};
+
+const providerArtifactsWithScreenshot = (
+  capture: AffiliateSourcePageCapture,
+  screenshot: AffiliateSourceScreenshot,
+): AffiliateSourcePageCapture => {
+  const providerArtifacts = capture.providerArtifacts ?? {
+    markdown: null,
+    links: [],
+    images: [],
+    branding: null,
+    screenshotUrl: null,
+    metadata: {},
+  };
+  const screenshotEvidence: AffiliateSourcePageScreenshotEvidence = {
+    data: screenshot.data,
+    mimeType: screenshot.mimeType,
+    sourceUrl: screenshot.sourceUrl,
+    finalUrl: screenshot.finalUrl,
+    statusCode: screenshot.providerStatusCode,
+  };
+  const captureCredits = capture.estimatedCredits;
+  const screenshotCredits = screenshot.estimatedCredits;
+  return {
+    ...capture,
+    elapsedMs: capture.elapsedMs + screenshot.elapsedMs,
+    estimatedCredits: captureCredits === null && screenshotCredits === null
+      ? null
+      : (captureCredits ?? 0) + (screenshotCredits ?? 0),
+    providerArtifacts: {
+      ...providerArtifacts,
+      screenshotUrl: null,
+      screenshotEvidence,
+      metadata: {
+        ...recordValue(providerArtifacts.metadata),
+        screenshotRequest: screenshot.request,
+        screenshotResponse: screenshot.response,
+        screenshotProviderStatusCode: screenshot.providerStatusCode,
+        screenshotElapsedMs: screenshot.elapsedMs,
+        screenshotEstimatedCredits: screenshot.estimatedCredits,
+      },
+    },
+  };
+};
+
+type AffiliateSourceCaptureBudget = Readonly<{
+  timeoutMs: number;
+  deadlineAt: number;
+}>;
+
+const captureBudgetFor = (
+  captureOptions: AffiliateSourceCaptureOptions,
+): AffiliateSourceCaptureBudget => {
+  const timeoutMs = affiliateSourceCaptureTimeoutMs(captureOptions.profile);
+  return {
+    timeoutMs,
+    deadlineAt: affiliateSourceCaptureDeadlineAt(captureOptions),
+  };
+};
+
+const captureOptionsFor = (
+  captureOptions: AffiliateSourceCaptureOptions,
+  budget: AffiliateSourceCaptureBudget,
+  captureScreenshot: boolean,
+): AffiliateSourceCaptureOptions => ({
+  ...captureOptions,
+  captureScreenshot,
+  deadlineAt: budget.deadlineAt,
+});
+
+const captureWithDeferredScreenshot = async (
+  capture: AffiliateSourcePageCapture,
+  client: IntakeCaptureClient,
+  url: string,
+  captureOptions: AffiliateSourceCaptureOptions,
+  budget: AffiliateSourceCaptureBudget,
+): Promise<AffiliateSourcePageCapture> => {
+  if (captureOptions.captureScreenshot !== true) return capture;
+  if (capture.providerArtifacts?.screenshotEvidence) return capture;
+  const screenshotTarget = capture.isRedirectVerified === true && stringValue(capture.finalUrl)
+    ? capture.finalUrl
+    : url;
+  const providerArtifacts = capture.providerArtifacts ?? {
+    markdown: null,
+    links: [],
+    images: [],
+    branding: null,
+    screenshotUrl: null,
+    metadata: {},
+  };
+  const captureScreenshot = typeof client.captureScreenshot === 'function'
+    ? client.captureScreenshot.bind(client)
+    : null;
+  if (!captureScreenshot) {
+    return {
+      ...capture,
+      warnings: [...capture.warnings, `Screenshot capture unavailable for ${url}.`],
+      providerArtifacts: {
+        ...providerArtifacts,
+        screenshotUrl: null,
+        screenshotEvidence: null,
+      },
+    };
+  }
+  try {
+    let reviewedScreenshotUrl = screenshotTarget;
+    if (capture.isRedirectVerified === true) {
+      const validated = await withAffiliateSourceCaptureDeadline(
+        () => assertSafePublicUrl(screenshotTarget),
+        budget.deadlineAt,
+        budget.timeoutMs,
+      );
+      reviewedScreenshotUrl = validated.url.toString();
+    }
+    const screenshot = await withAffiliateSourceCaptureDeadline(
+      () => captureScreenshot(
+        reviewedScreenshotUrl,
+        captureOptionsFor(captureOptions, budget, true),
+      ),
+      budget.deadlineAt,
+      budget.timeoutMs,
+    );
+    return providerArtifactsWithScreenshot(capture, screenshot);
+  } catch (error) {
+    return {
+      ...capture,
+      warnings: [
+        ...capture.warnings,
+        `Screenshot capture failed for ${url}: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      ],
+      providerArtifacts: {
+        ...providerArtifacts,
+        screenshotUrl: null,
+        screenshotEvidence: null,
+      },
+    };
+  }
 };
 
 const captureWithFallback = async (
   primaryClient: IntakeCaptureClient,
   fallbackClient: AffiliateSourceCaptureClient | null,
   url: string,
+  captureOptions: AffiliateSourceCaptureOptions,
   state: IntakeRunSummary,
 ): Promise<{ capture: AffiliateSourcePageCapture; client: IntakeCaptureClient }> => {
+  const budget = captureBudgetFor(captureOptions);
+  const htmlCaptureOptions = captureOptionsFor(captureOptions, budget, false);
+  const captureSelectedProvider = (
+    capture: AffiliateSourcePageCapture,
+    client: IntakeCaptureClient,
+  ) => captureWithDeferredScreenshot(
+    capture,
+    client,
+    url,
+    captureOptionsFor(
+      captureOptions,
+      budget,
+      captureOptions.captureScreenshot === true,
+    ),
+    budget,
+  );
+  const capture = (client: IntakeCaptureClient): Promise<AffiliateSourcePageCapture> => (
+    withAffiliateSourceCaptureDeadline(
+      () => captureWithClient(client, url, htmlCaptureOptions),
+      budget.deadlineAt,
+      budget.timeoutMs,
+    )
+  );
   try {
-    const capture = await captureWithClient(primaryClient, url);
-    const quality = evaluateAffiliateHtmlQuality(capture.rawHtml, capture.finalUrl || url);
+    const primaryCapture = await capture(primaryClient);
+    const quality = evaluateAffiliateHtmlQuality(primaryCapture.rawHtml, primaryCapture.finalUrl || url);
     if (!quality.accepted && fallbackClient) {
       state.warnings.push(
         `${providerForClient(primaryClient)} capture quality was rejected for ${url}; `
         + `${fallbackClient.provider} fallback was attempted: ${quality.reasons.join('; ')}`,
       );
+      const fallbackCapture = await capture(fallbackClient);
       return {
-        capture: await fallbackClient.captureSourcePage(url),
+        capture: await captureSelectedProvider(fallbackCapture, fallbackClient),
         client: fallbackClient,
       };
     }
-    return { capture, client: primaryClient };
+    return {
+      capture: await captureSelectedProvider(primaryCapture, primaryClient),
+      client: primaryClient,
+    };
   } catch (primaryError) {
-    if (!fallbackClient) throw primaryError;
+    if (isAffiliateSourceCaptureTimeout(primaryError) || !fallbackClient) throw primaryError;
     state.warnings.push(
       `${providerForClient(primaryClient)} capture failed for ${url}; `
       + `${fallbackClient.provider} fallback was attempted: `
       + `${primaryError instanceof Error ? primaryError.message : 'unknown error'}`,
     );
+    const fallbackCapture = await capture(fallbackClient);
     return {
-      capture: await fallbackClient.captureSourcePage(url),
+      capture: await captureSelectedProvider(fallbackCapture, fallbackClient),
       client: fallbackClient,
     };
   }
 };
+
 
 const processCapturePage = async (
   intake: any,
@@ -1348,7 +1535,13 @@ const processCapturePage = async (
   }
 
   try {
-    const captured = await captureWithFallback(primaryClient, fallbackClient, page.url, state);
+    const captured = await captureWithFallback(
+      primaryClient,
+      fallbackClient,
+      page.url,
+      { captureScreenshot },
+      state,
+    );
     const { capture } = captured;
     const capturedSupplySourceId = await reconcileCapturedAffiliateSupplySource(intake, page, capture);
     const artifacts = deriveAffiliateHtmlArtifacts(capture.rawHtml, capture.finalUrl || page.url);
@@ -1360,7 +1553,11 @@ const processCapturePage = async (
       estimatedCredits: capture.estimatedCredits,
       attempts: capture.attempts ?? [],
       quality: artifacts.quality,
+      captureUrl: capture.requestedUrl,
+      isRedirectVerified: capture.isRedirectVerified,
+      inferredCanonicalUrl: artifacts.inferredCanonicalUrl ?? capture.inferredCanonicalUrl ?? null,
     };
+    const providerArtifactsMetadata = recordValue(capture.providerArtifacts?.metadata);
     const baseArtifact = {
       intakeId: intake.id,
       supplySourceId: capturedSupplySourceId,
@@ -1436,43 +1633,26 @@ const processCapturePage = async (
       mimeType: 'application/json',
       metadata: artifactMetadata,
     }, state);
-    if (captureScreenshot && capture.providerArtifacts?.screenshotUrl) {
+    const screenshotEvidence = capture.providerArtifacts?.screenshotEvidence ?? null;
+    if (captureScreenshot && screenshotEvidence) {
       try {
-        const screenshot = await fetchResource(capture.providerArtifacts.screenshotUrl, { maxBytes: 3 * 1024 * 1024 });
         await persistCaptureArtifact({
           ...baseArtifact,
           kind: 'PAGE_SCREENSHOT',
-          data: screenshot.body,
-          sourceUrl: capture.providerArtifacts.screenshotUrl,
-          finalUrl: screenshot.finalUrl,
-          httpStatus: screenshot.statusCode,
-          mimeType: screenshot.contentType ?? 'image/png',
-          metadata: artifactMetadata,
-        }, state);
-      } catch (error) {
-        state.warnings.push(`Screenshot download failed for ${page.url}: ${error instanceof Error ? error.message : 'unknown error'}`);
-      }
-    } else if (captureScreenshot && 'captureScreenshot' in captured.client) {
-      try {
-        const screenshot = await captured.client.captureScreenshot(page.url);
-        await persistCaptureArtifact({
-          ...baseArtifact,
-          kind: 'PAGE_SCREENSHOT',
-          data: screenshot.data,
-          provider: screenshot.provider,
-          httpStatus: screenshot.providerStatusCode,
-          mimeType: screenshot.mimeType,
+          data: screenshotEvidence.data,
+          sourceUrl: screenshotEvidence.sourceUrl,
+          finalUrl: screenshotEvidence.finalUrl,
+          httpStatus: screenshotEvidence.statusCode,
+          mimeType: screenshotEvidence.mimeType,
           metadata: {
             ...artifactMetadata,
-            request: screenshot.request,
-            response: screenshot.response,
-            elapsedMs: screenshot.elapsedMs,
-            estimatedCredits: screenshot.estimatedCredits,
+            providerArtifactsMetadata,
           },
         }, state);
-        state.estimatedCredits += screenshot.estimatedCredits ?? 0;
       } catch (error) {
-        state.warnings.push(`Screenshot capture failed for ${page.url}: ${error instanceof Error ? error.message : 'unknown error'}`);
+        state.warnings.push(
+          `Screenshot persistence failed for ${page.url}: ${error instanceof Error ? error.message : 'unknown error'}`,
+        );
       }
     }
     for (const candidate of candidateLogoUrls(capture, artifacts)) {
@@ -1519,6 +1699,7 @@ const processCapturePage = async (
             providerBranding: capture.providerArtifacts?.branding ?? null,
           },
           screenshotUrl: capture.providerArtifacts?.screenshotUrl ?? null,
+          screenshotEvidence: capture.providerArtifacts?.screenshotEvidence ?? null,
           metadata: {
             ...recordValue(capture.providerArtifacts?.metadata),
             ...artifacts.metadata,

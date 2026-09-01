@@ -146,16 +146,24 @@ remain recorded in `../../../../docs/ovh-vps-migration-execplan.md`.
 
 ## Affiliate source discovery and intake automation
 
-The application image includes the provider-neutral automation command.
-Before you enable its timer, complete these steps:
+The application image includes the provider-neutral automation command. Use
+this automation only in a non-production environment. Do not install, start,
+or enable its service or timer on a production host.
+
+For non-production checks, use a disposable database and complete these steps:
 
 - Set `SCRAPINGDOG_API_KEY` in `app.env`.
-- Set `AFFILIATE_OPERATIONAL_ALERT_WEBHOOK_URL` or `AFFILIATE_OPERATIONAL_ALERT_EMAIL_TO`.
+- Set `AFFILIATE_OPERATIONAL_ALERT_WEBHOOK_URL` or
+  `AFFILIATE_OPERATIONAL_ALERT_EMAIL_TO`.
 - Set email credentials when you use email alerts.
-- Set database and storage credentials.
-- Deploy the discovery and intake migrations.
-- Create paused campaign templates with `npm run affiliate:discovery:setup -- --live`.
+- Set database and storage credentials for that non-production database.
+- Deploy the discovery and intake migrations in that non-production database.
+- Create paused campaign templates with `npm run affiliate:discovery:setup --
+  --live` only in that non-production environment.
 - Review campaign limits in Admin > Affiliate Operations > Source Intake.
+
+Do not copy these non-production settings or commands into a production
+deployment. Use governed gateway admission for production work.
 
 New discovery and intake runs use ScrapingDog by default.
 Set `FIRECRAWL_API_KEY` when you select Firecrawl.
@@ -176,59 +184,40 @@ It discovers sitemap and link pages locally.
 Operational summaries estimate ScrapingDog usage at 1 credit for static capture, 5 for JavaScript capture, 5 for Google Search, and 5 for a screenshot.
 The provider dashboard remains the billing authority.
 
-Install the tracked units and start one manual run before enabling the timer:
+The legacy discovery and intake timer is disabled for production. Do not
+install, start, or enable these units during cutover. The service has a
+sentinel-file guard, and the production script rejects both `NODE_ENV=production`
+and `--live`. Use governed gateway admission for production work.
 
-    sudo install -m 0644 systemd/bracketiq-affiliate-intake-automation.service /etc/systemd/system/
-    sudo install -m 0644 systemd/bracketiq-affiliate-intake-automation.timer /etc/systemd/system/
-    sudo systemctl daemon-reload
-    sudo systemctl start bracketiq-affiliate-intake-automation.service
-    sudo journalctl -u bracketiq-affiliate-intake-automation.service -n 200 --no-pager
-    sudo systemctl enable --now bracketiq-affiliate-intake-automation.timer
+Keep the units in the repository as rollback evidence only. Keep the timer
+disabled:
 
-The timer invokes the lock-protected job every 15 minutes.
-Each invocation processes up to five sequential discovery slices.
-An incomplete location search can continue without waiting for another timer interval.
-Campaign cadence controls whether the selected discovery provider runs.
-The frequent invocation drains approved intake captures promptly.
-These runs do not send a daily digest.
-Inspect current and historical execution, immutable gateway history, and the read-only Affiliate Operations Control Room with:
+    systemctl is-enabled bracketiq-affiliate-intake-automation.timer
+    systemctl is-active bracketiq-affiliate-intake-automation.timer
 
-    systemctl status bracketiq-affiliate-intake-automation.timer
-    systemctl list-timers bracketiq-affiliate-intake-automation.timer
-    journalctl -u bracketiq-affiliate-intake-automation.service --since today
+The command must report `disabled` and `inactive`. Do not create
+`/etc/bracketiq/legacy-affiliate-intake-enabled`. Do not run
+`npm run affiliate:intake:automation` against a production database.
 
-Pause automation without changing web traffic or deleting stored evidence:
-
-    sudo systemctl disable --now bracketiq-affiliate-intake-automation.timer
-
-Keep the timer disabled during rollback.
-Pause active discovery campaigns in Admin.
-Existing organizations, approved scrape sources, intakes, artifacts, and candidates remain intact.
-Re-enable with `sudo systemctl enable --now bracketiq-affiliate-intake-automation.timer` after you correct the issue.
+Use a non-production database for local provider and parsing checks. Existing
+organizations, approved scrape sources, intakes, artifacts, and candidates
+remain intact.
 
 ## Daily mapped-source scraping
 
-Discovery/intake automation and mapped-source scraping are separate jobs. The
-discovery timer finds and captures new source sites. The daily mapped-source
-timer runs validated mappings whose source rows have `autoScrapeEnabled=true`;
-each source's `scrapeIntervalMinutes` determines whether the daily invocation
-performs a full scrape or a lightweight change check.
+The daily mapped-source service is a legacy direct writer. It is not a
+governed worker. Keep it stopped while the governed affiliate cohort is
+authoritative. Do not install, start, or enable its service or timer on a
+production host during cutover:
 
-The daily mapped-source job emits immediate operational alerts for failed refreshes and other configured fault conditions. It records each alert and delivery result in immutable operational history. It does not send a daily digest. The 15-minute intake worker also uses the same immediate alert path.
+    systemctl is-enabled bracketiq-affiliate-scrape-daily.timer
+    systemctl is-active bracketiq-affiliate-scrape-daily.timer
 
-Install and enable the daily mapped-source timer only when explicitly requested:
+If the units exist, the commands must report `disabled` and `inactive`. Keep
+the units in the repository as rollback evidence only. Use governed gateway
+admission for production refreshes. Do not run
+`npm run affiliate:scrape:due` against a production database.
 
-    sudo install -m 0644 systemd/bracketiq-affiliate-scrape-daily.service /etc/systemd/system/
-    sudo install -m 0644 systemd/bracketiq-affiliate-scrape-daily.timer /etc/systemd/system/
-    sudo systemctl daemon-reload
-    sudo systemctl enable --now bracketiq-affiliate-scrape-daily.timer
-
-Run and inspect it with:
-
-    sudo systemctl start bracketiq-affiliate-scrape-daily.service
-    sudo systemctl status bracketiq-affiliate-scrape-daily.timer
-    sudo journalctl -u bracketiq-affiliate-scrape-daily.service --since today --no-pager
-
-Disable it without changing source configuration:
-
-    sudo systemctl disable --now bracketiq-affiliate-scrape-daily.timer
+Run mapped-source scraping only in a non-production environment. Use a
+non-production database and provider credentials for local mapping and parser
+checks. Record the environment in the test evidence.

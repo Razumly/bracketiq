@@ -15,6 +15,7 @@ import {
   type AffiliateAgentRole,
 } from "../agentGatewayContracts";
 import {
+  AFFILIATE_AGENT_WORKSPACE_ATTESTATION_ADMISSION_MARGIN_SECONDS,
   AffiliateAgentGatewayError,
   type AffiliateAgentClaimGrant,
   type AffiliateAgentClaimOperation,
@@ -24,14 +25,19 @@ import {
 } from "../agentGateway";
 import {
   createProductionAffiliateAgentGatewayDependencies,
+  type AffiliateAgentCommandAdapters,
   type AffiliateAgentInvocationReconciliationRequest,
   type AffiliateAgentInvocationReconciliationResult,
   type AffiliateAgentProcessEvent,
   type AffiliateAgentProcessLauncher,
+  type AffiliateAgentProcessReservation,
   type AffiliateAgentProcessSession,
   type AffiliateAgentSupervisorDependencies,
+  type AffiliateAgentTerminalEffectAdapter,
 } from "../agentGatewayAdapters";
 import {
+  AFFILIATE_AGENT_RUNNER_RESERVATION_TIMEOUT_MILLISECONDS,
+  type AffiliateAgentSupervisorAdmissionState,
   type AffiliateAgentSupervisorInput,
   runAffiliateAgentInvocation,
 } from "../agentSupervisor";
@@ -40,6 +46,44 @@ import { createPrismaAffiliateAgentGateway } from "../prismaAgentGateway";
 const SHA256 = "a".repeat(64);
 const STARTED_AT = "2026-08-20T18:00:00.000Z";
 const HARD_DEADLINE_AT = "2026-08-20T18:20:00.000Z";
+const WORKSPACE_ATTESTATION_EXPIRES_AT = new Date(
+  Date.parse(HARD_DEADLINE_AT)
+  + AFFILIATE_AGENT_WORKSPACE_ATTESTATION_ADMISSION_MARGIN_SECONDS * 1_000,
+).toISOString();
+const offlineProductionAdapters = {
+  commands: {
+    transactional: {
+      VALIDATE_DECLARATIVE_PACKAGE: {
+        execute: async () => ({
+          isValid: true as const,
+          validatedPackageHash: "a".repeat(64),
+        }),
+      },
+      COMMIT_DECLARATIVE_PACKAGE: {
+        execute: async () => ({ packageHash: "a".repeat(64) }),
+      },
+    },
+    external: {
+      RUN_DISCOVERY_QUERY: {
+        start: async () => ({}),
+        recover: async () => null,
+      },
+      CAPTURE_CLAIM_URL: {
+        start: async () => ({}),
+        recover: async () => null,
+      },
+    },
+  } satisfies AffiliateAgentCommandAdapters,
+  terminalEffects: {
+    APPROVED: { execute: async () => ({}), recover: async () => null },
+    ACTIVATED: { execute: async () => ({}), recover: async () => null },
+    PRODUCER_REPAIR_REQUIRED: { execute: async () => ({}), recover: async () => null },
+    REGRESSION_ASSESSED: { execute: async () => ({}), recover: async () => null },
+    SOURCE_EXCLUSION_ASSESSED: { execute: async () => ({}), recover: async () => null },
+    EXACT_TARGET_REJECTED: { execute: async () => ({}), recover: async () => null },
+    HUMAN_REVIEW_REQUIRED: { execute: async () => ({}), recover: async () => null },
+  } satisfies AffiliateAgentTerminalEffectAdapter,
+};
 
 const claimEnvelopeFor = (
   request: AffiliateAgentClaimRequest,
@@ -170,6 +214,14 @@ const createDeferred = <T>(): Deferred<T> => {
     },
   };
 };
+const terminalProcessEvent = (
+  result: Record<string, unknown>,
+  idempotencyKey = "terminal-key",
+): AffiliateAgentProcessEvent => ({
+  kind: "TERMINAL_SUBMISSION",
+  idempotencyKey,
+  result,
+});
 type SupervisorHarnessOptions = Readonly<{
   claimResult?: "GRANT" | "NO_WORK";
   claim?: (
@@ -181,7 +233,9 @@ type SupervisorHarnessOptions = Readonly<{
   processStarted?: Promise<void>;
   perform?: (operation: AffiliateAgentClaimOperation) => Promise<unknown>;
   workspacePath?: string;
-  launch?: AffiliateAgentProcessLauncher["launch"];
+  createWorkspace?: AffiliateAgentSupervisorDependencies["workspaces"]["create"];
+  launch?: AffiliateAgentProcessReservation["launch"];
+  reserve?: AffiliateAgentProcessLauncher["reserve"];
   send?: () => Promise<void>;
   terminate?: () => Promise<void>;
   forceTerminate?: () => Promise<void>;
@@ -190,17 +244,21 @@ type SupervisorHarnessOptions = Readonly<{
     input: AffiliateAgentInvocationReconciliationRequest,
   ) => Promise<AffiliateAgentInvocationReconciliationResult>;
   now?: () => Date;
+  workerHealth?: AffiliateAgentSupervisorDependencies["workerHealth"];
 }>;
 type SupervisorHarness = Readonly<{
   dependencies: AffiliateAgentSupervisorDependencies;
   gatewayClaim: jest.Mock;
   gatewayPerform: jest.Mock;
+  reserve: jest.Mock;
+  release: jest.Mock;
   launch: jest.Mock;
   nextEvent: jest.Mock;
   send: jest.Mock;
   terminate: jest.Mock;
   forceTerminate: jest.Mock;
   reconcileInvocation: jest.Mock;
+  recoverStale: jest.Mock;
   createWorkspace: jest.Mock;
   destroyWorkspace: jest.Mock;
 }>;
@@ -211,7 +269,7 @@ const createSupervisorHarness = (
   let identifierSequence = 0;
   let workspaceSequence = 0;
   const events = [
-    ...(options.processEvents ?? [{ kind: "RESULT", value: {} }]),
+    ...(options.processEvents ?? [terminalProcessEvent({})]),
   ];
   const gatewayClaim = jest.fn(
     async (
@@ -296,34 +354,48 @@ const createSupervisorHarness = (
     send,
     terminate,
     forceTerminate,
+    disconnect: jest.fn(),
   };
   const launch = jest.fn(options.launch ?? (() => session));
+  const releaseReservation = jest.fn(async () => undefined);
+  const reservation: AffiliateAgentProcessReservation = {
+    reservationId: "reservation-1",
+    launch,
+    release: releaseReservation,
+  };
+  const reserve = jest.fn(
+    options.reserve ?? (async () => reservation),
+  );
+  const defaultCreateWorkspace = async (
+    input: Readonly<{
+      workerId: string;
+      invocationId: string;
+      mode: "READ_ONLY" | "READ_WRITE";
+    }>,
+  ) => {
+    workspaceSequence += 1;
+    return {
+      path:
+        options.workspacePath ??
+        `/isolated/affiliate-agent-workspace-${workspaceSequence}`,
+      attestation: {
+        schemaVersion: 1 as const,
+        workspaceId: `workspace-${workspaceSequence}`,
+        mode: input.mode,
+        executionClass: "PRODUCTION_CODEX" as const,
+        workerId: input.workerId,
+        invocationId: input.invocationId,
+        issuedAt: STARTED_AT,
+        expiresAt: WORKSPACE_ATTESTATION_EXPIRES_AT,
+        signature: `workspace-signature-${workspaceSequence}`,
+      },
+    };
+  };
   const createWorkspace = jest.fn(
-    async (
-      input: Readonly<{
-        workerId: string;
-        invocationId: string;
-        mode: "READ_ONLY" | "READ_WRITE";
-      }>,
-    ) => {
-      workspaceSequence += 1;
-      return {
-        path:
-          options.workspacePath ??
-          `/isolated/affiliate-agent-workspace-${workspaceSequence}`,
-        attestation: {
-          schemaVersion: 1 as const,
-          workspaceId: `workspace-${workspaceSequence}`,
-          mode: input.mode,
-          executionClass: "PRODUCTION_CODEX" as const,
-          workerId: input.workerId,
-          invocationId: input.invocationId,
-          issuedAt: STARTED_AT,
-          expiresAt: HARD_DEADLINE_AT,
-          signature: `workspace-signature-${workspaceSequence}`,
-        },
-      };
-    },
+    options.createWorkspace ?? defaultCreateWorkspace,
+  );
+  const recoverStale = jest.fn(
+    async (_reservation: AffiliateAgentProcessReservation) => undefined,
   );
   const destroyWorkspace = jest.fn(
     options.destroyWorkspace ?? (async () => undefined),
@@ -337,13 +409,21 @@ const createSupervisorHarness = (
       identifiers: {
         create: (kind) => `${kind}-${++identifierSequence}`,
       },
-      processLauncher: { launch },
-      workspaces: { create: createWorkspace, destroy: destroyWorkspace },
+      processLauncher: { reserve },
+      workspaces: {
+        recoverStale,
+        create: createWorkspace,
+        destroy: destroyWorkspace,
+      },
+      workerHealth: options.workerHealth,
     },
     gatewayClaim,
     gatewayPerform,
+    reserve,
+    release: releaseReservation,
     launch,
     reconcileInvocation,
+    recoverStale,
     nextEvent,
     send,
     terminate,
@@ -374,16 +454,44 @@ const supervisorInput = (
 ): AffiliateAgentSupervisorInput => ({
   role,
   roleCredential: `${role.toLowerCase()}-role-credential`,
-  modelCredential: "model-credential",
   gatewayAddress: "unix:///internal/affiliate-agent-gateway.sock",
+  gatewayPathPrefix: "/v1/affiliate-agent",
   workerId: `${role.toLowerCase()}-worker-1`,
   invocationId: `${role.toLowerCase()}-invocation-1`,
 });
 
 describe("affiliate agent one-claim supervisor", () => {
-  it("starts one exact ephemeral process for one claim and submits one terminal result", async () => {
+  it("reserves runner capacity before claiming and releases it on no work", async () => {
+    const harness = createSupervisorHarness({ claimResult: "NO_WORK" });
+    const order: string[] = [];
+    harness.reserve.mockImplementation(async () => {
+      order.push("reserve");
+      return {
+        reservationId: "reservation-ordered",
+        launch: harness.launch,
+        release: harness.release,
+      } satisfies AffiliateAgentProcessReservation;
+    });
+    harness.recoverStale.mockImplementation(async () => {
+      order.push("recover");
+    });
+    harness.gatewayClaim.mockImplementation(async () => {
+      order.push("claim");
+      return null;
+    });
+
+    await expect(
+      runAffiliateAgentInvocation(harness.dependencies, supervisorInput()),
+    ).resolves.toBe("NO_WORK");
+
+    expect(order).toEqual(["reserve", "recover", "claim"]);
+    expect(harness.launch).not.toHaveBeenCalled();
+    expect(harness.release).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts one exact Codex process for one claim and submits one terminal result", async () => {
     const harness = createSupervisorHarness({
-      processEvents: [{ kind: "RESULT", value: { disposition: "NO_ACTION" } }],
+      processEvents: [terminalProcessEvent({ disposition: "NO_ACTION" })],
     });
 
     await expect(
@@ -396,12 +504,12 @@ describe("affiliate agent one-claim supervisor", () => {
       .calls[0][0] as AffiliateAgentClaimRequest;
     const grant = claimGrantFor(request);
     expect(harness.launch).toHaveBeenCalledWith({
-      command: ["codex", "exec", "--ephemeral"],
+      command: ["codex", "exec"],
       prompt: grant.prompt,
       environment: {
-        OPENAI_API_KEY: "model-credential",
         AFFILIATE_AGENT_GATEWAY_ADDRESS:
           "unix:///internal/affiliate-agent-gateway.sock",
+        AFFILIATE_AGENT_GATEWAY_PATH_PREFIX: "/v1/affiliate-agent",
         AFFILIATE_AGENT_CLAIM_TOKEN: grant.token,
         AFFILIATE_AGENT_CLAIM_ENVELOPE: canonicalizeAffiliateAgentValue(
           grant.envelope,
@@ -409,6 +517,10 @@ describe("affiliate agent one-claim supervisor", () => {
         AFFILIATE_AGENT_PROMPT: grant.prompt,
       },
       workspacePath: "/isolated/affiliate-agent-workspace-1",
+      workerId: request.workerId,
+      invocationId: request.invocationId,
+      workspaceId: grant.envelope.workspaceId,
+      workspaceMode: "READ_WRITE",
     });
     expect(harness.gatewayPerform).toHaveBeenCalledTimes(1);
     expect(harness.gatewayPerform.mock.calls[0][0]).toMatchObject({
@@ -455,9 +567,112 @@ describe("affiliate agent one-claim supervisor", () => {
       expect(harness.destroyWorkspace).toHaveBeenCalledTimes(1);
     },
   );
-  it("destroys a workspace even when process termination is unconfirmed", async () => {
+  it("halts admission after same-key claim transport retries remain indeterminate", async () => {
+    const persistHalt = jest.fn(async () => undefined);
+    const admissionState: AffiliateAgentSupervisorAdmissionState = {
+      isAdmissionHalted: false,
+      admissionHaltError: null,
+      persistHalt,
+    };
     const harness = createSupervisorHarness({
-      processEvents: [{ kind: "RESULT", value: { disposition: "NO_ACTION" } }],
+      claim: async () => {
+        throw new Error("The claim response was unavailable.");
+      },
+    });
+    const input = { ...supervisorInput(), admissionState };
+
+    await expect(
+      runAffiliateAgentInvocation(harness.dependencies, input),
+    ).rejects.toThrow("The claim response was unavailable.");
+
+    expect(harness.gatewayClaim).toHaveBeenCalledTimes(2);
+    expect(harness.gatewayClaim.mock.calls[1][0]).toBe(
+      harness.gatewayClaim.mock.calls[0][0],
+    );
+    expect(admissionState.isAdmissionHalted).toBe(true);
+    expect(persistHalt).toHaveBeenCalledTimes(1);
+    await expect(
+      runAffiliateAgentInvocation(harness.dependencies, {
+        ...input,
+        invocationId: "coverage_planner-invocation-2",
+      }),
+    ).resolves.toBe("NO_WORK");
+    expect(harness.gatewayClaim).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not halt admission for a non-retryable claim rejection", async () => {
+    const persistHalt = jest.fn(async () => undefined);
+    const admissionState: AffiliateAgentSupervisorAdmissionState = {
+      isAdmissionHalted: false,
+      admissionHaltError: null,
+      persistHalt,
+    };
+    const rejection = new AffiliateAgentGatewayError({
+      code: "TOKEN_INVALID",
+      isRetryable: false,
+      safeMessage: "The claim token is invalid.",
+    });
+    const harness = createSupervisorHarness({
+      claim: async () => {
+        throw rejection;
+      },
+    });
+
+    await expect(
+      runAffiliateAgentInvocation(harness.dependencies, {
+        ...supervisorInput(),
+        admissionState,
+      }),
+    ).rejects.toBe(rejection);
+
+    expect(harness.gatewayClaim).toHaveBeenCalledTimes(1);
+    expect(admissionState.isAdmissionHalted).toBe(false);
+    expect(persistHalt).not.toHaveBeenCalled();
+  });
+  it("halts after an indeterminate claim is followed by a non-retryable rejection", async () => {
+    const persistHalt = jest.fn(async () => undefined);
+    const admissionState: AffiliateAgentSupervisorAdmissionState = {
+      isAdmissionHalted: false,
+      admissionHaltError: null,
+      persistHalt,
+    };
+    const rejection = new AffiliateAgentGatewayError({
+      code: "TOKEN_INVALID",
+      isRetryable: false,
+      safeMessage: "The second claim response rejected the request.",
+    });
+    let claimAttempt = 0;
+    const harness = createSupervisorHarness({
+      claim: async () => {
+        claimAttempt += 1;
+        if (claimAttempt === 1) {
+          throw new Error("The first claim response was unavailable.");
+        }
+        throw rejection;
+      },
+    });
+
+    await expect(
+      runAffiliateAgentInvocation(harness.dependencies, {
+        ...supervisorInput(),
+        admissionState,
+      }),
+    ).rejects.toBe(rejection);
+
+    expect(harness.gatewayClaim).toHaveBeenCalledTimes(2);
+    expect(admissionState.isAdmissionHalted).toBe(true);
+    expect(admissionState.admissionHaltError).toBe(rejection);
+    expect(persistHalt).toHaveBeenCalledTimes(1);
+  });
+  it("halts admission and preserves workspace and reservation when process termination is unconfirmed", async () => {
+    const persistHalt = jest.fn(async () => undefined);
+    const admissionState: AffiliateAgentSupervisorAdmissionState = {
+      isAdmissionHalted: false,
+      admissionHaltError: null,
+      persistHalt,
+    };
+    const harness = createSupervisorHarness({
+      processEvents: [terminalProcessEvent({ disposition: "NO_ACTION" })],
       terminate: async () => {
         throw new Error("graceful termination failed");
       },
@@ -467,7 +682,10 @@ describe("affiliate agent one-claim supervisor", () => {
     });
 
     await expect(
-      runAffiliateAgentInvocation(harness.dependencies, supervisorInput()),
+      runAffiliateAgentInvocation(harness.dependencies, {
+        ...supervisorInput(),
+        admissionState,
+      }),
     ).rejects.toMatchObject({
       code: "INTERNAL_ERROR",
       safeMessage: "The agent process could not be terminated.",
@@ -475,13 +693,17 @@ describe("affiliate agent one-claim supervisor", () => {
 
     expect(harness.terminate).toHaveBeenCalledTimes(1);
     expect(harness.forceTerminate).toHaveBeenCalledTimes(1);
-    expect(harness.destroyWorkspace).toHaveBeenCalledWith(
-      "/isolated/affiliate-agent-workspace-1",
-    );
+    expect(harness.destroyWorkspace).not.toHaveBeenCalled();
+    expect(harness.release).not.toHaveBeenCalled();
+    expect(admissionState.isAdmissionHalted).toBe(true);
+    expect(admissionState.admissionHaltError).toMatchObject({
+      safeMessage: "The agent process could not be terminated.",
+    });
+    expect(persistHalt).toHaveBeenCalledTimes(1);
   });
   it("reports explicit cleanup failure when workspace destruction fails", async () => {
     const harness = createSupervisorHarness({
-      processEvents: [{ kind: "RESULT", value: { disposition: "NO_ACTION" } }],
+      processEvents: [terminalProcessEvent({ disposition: "NO_ACTION" })],
       destroyWorkspace: async () => {
         throw new Error("workspace destruction failed");
       },
@@ -499,6 +721,47 @@ describe("affiliate agent one-claim supervisor", () => {
       "/isolated/affiliate-agent-workspace-1",
     );
   });
+  it("halts admission after uncertain workspace cleanup", async () => {
+    const persistHalt = jest.fn(async () => undefined);
+    const admissionState: AffiliateAgentSupervisorAdmissionState = {
+      isAdmissionHalted: false,
+      admissionHaltError: null,
+      persistHalt,
+    };
+    const harness = createSupervisorHarness({
+      processEvents: [terminalProcessEvent({ disposition: "NO_ACTION" })],
+      destroyWorkspace: async () => {
+        throw new Error("workspace destruction failed");
+      },
+    });
+    const input = {
+      ...supervisorInput(),
+      admissionState,
+    };
+
+    await expect(
+      runAffiliateAgentInvocation(harness.dependencies, input),
+    ).rejects.toMatchObject({
+      code: "INTERNAL_ERROR",
+      safeMessage: "The agent workspace could not be destroyed.",
+    });
+    expect(admissionState.isAdmissionHalted).toBe(true);
+    expect(admissionState.admissionHaltError).toMatchObject({
+      safeMessage: "The agent workspace could not be destroyed.",
+    });
+
+    await expect(
+      runAffiliateAgentInvocation(harness.dependencies, {
+        ...input,
+        invocationId: "coverage_planner-invocation-2",
+      }),
+    ).resolves.toBe("NO_WORK");
+    expect(harness.gatewayClaim).toHaveBeenCalledTimes(1);
+    expect(harness.createWorkspace).toHaveBeenCalledTimes(1);
+    expect(harness.destroyWorkspace).toHaveBeenCalledTimes(1);
+    expect(harness.release).not.toHaveBeenCalled();
+    expect(persistHalt).toHaveBeenCalledTimes(1);
+  });
 
   it("returns no work after one claim and destroys the fresh workspace", async () => {
     const harness = createSupervisorHarness({ claimResult: "NO_WORK" });
@@ -514,6 +777,123 @@ describe("affiliate agent one-claim supervisor", () => {
     expect(harness.destroyWorkspace).toHaveBeenCalledWith(
       "/isolated/affiliate-agent-workspace-1",
     );
+  });
+  it("records a grant that resolves after shutdown before cleanup", async () => {
+    const claimResult = createDeferred<AffiliateAgentClaimGrant | null>();
+    const shutdownController = new AbortController();
+    let claimRequest: AffiliateAgentClaimRequest | null = null;
+    const harness = createSupervisorHarness({
+      claim: async (request) => {
+        claimRequest = request;
+        return claimResult.promise;
+      },
+    });
+
+    const invocation = runAffiliateAgentInvocation(harness.dependencies, {
+      ...supervisorInput(),
+      shutdownSignal: shutdownController.signal,
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(harness.gatewayClaim).toHaveBeenCalledTimes(1);
+    expect(claimRequest).not.toBeNull();
+
+    shutdownController.abort();
+    claimResult.resolve(claimGrantFor(claimRequest!));
+
+    await expect(invocation).resolves.toBe("INVOCATION_FAILED");
+    expect(harness.launch).not.toHaveBeenCalled();
+    expect(harness.gatewayPerform).not.toHaveBeenCalled();
+    expectFailureReconciliation(harness, "PROCESS_CRASH", {
+      jobId: "job-coverage_planner",
+      claimId: "claim-coverage_planner",
+      claimGeneration: 1,
+    });
+    expect(harness.reconcileInvocation.mock.invocationCallOrder[0]).toBeLessThan(
+      harness.destroyWorkspace.mock.invocationCallOrder[0],
+    );
+    expect(harness.destroyWorkspace).toHaveBeenCalledTimes(1);
+  });
+  it("recovers a rejected claim after shutdown with the same idempotency key", async () => {
+    let rejectFirstClaim: ((error: unknown) => void) | null = null;
+    const firstClaim = new Promise<AffiliateAgentClaimGrant | null>(
+      (_resolve, reject) => {
+        rejectFirstClaim = reject;
+      },
+    );
+    let claimAttempt = 0;
+    const shutdownController = new AbortController();
+    const harness = createSupervisorHarness({
+      claim: async (request) => {
+        claimAttempt += 1;
+        if (claimAttempt === 1) return firstClaim;
+        return claimGrantFor(request);
+      },
+    });
+    const invocation = runAffiliateAgentInvocation(harness.dependencies, {
+      ...supervisorInput(),
+      shutdownSignal: shutdownController.signal,
+    });
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(harness.gatewayClaim).toHaveBeenCalledTimes(1);
+    shutdownController.abort();
+    if (rejectFirstClaim === null) {
+      throw new Error("The first claim rejection was not initialized.");
+    }
+    rejectFirstClaim(new Error("The first claim response was unavailable."));
+
+    await expect(invocation).resolves.toBe("INVOCATION_FAILED");
+    expect(harness.gatewayClaim).toHaveBeenCalledTimes(2);
+    expect(harness.gatewayClaim.mock.calls[1][0]).toBe(
+      harness.gatewayClaim.mock.calls[0][0],
+    );
+    expect(harness.launch).not.toHaveBeenCalled();
+    expect(harness.gatewayPerform).not.toHaveBeenCalled();
+    expect(harness.reconcileInvocation).toHaveBeenCalledTimes(1);
+    expectFailureReconciliation(harness, "PROCESS_CRASH", {
+      jobId: "job-coverage_planner",
+      claimId: "claim-coverage_planner",
+      claimGeneration: 1,
+    });
+    expect(harness.reconcileInvocation.mock.invocationCallOrder[0]).toBeLessThan(
+      harness.destroyWorkspace.mock.invocationCallOrder[0],
+    );
+  });
+
+
+  it("bounds a stalled runner reservation during shutdown and releases it if it arrives late", async () => {
+    jest.useFakeTimers({ now: new Date(STARTED_AT) });
+    try {
+      const reservationResult = createDeferred<AffiliateAgentProcessReservation>();
+      const shutdownController = new AbortController();
+      const harness = createSupervisorHarness({
+        reserve: async () => reservationResult.promise,
+      });
+      const invocation = runAffiliateAgentInvocation(harness.dependencies, {
+        ...supervisorInput(),
+        shutdownSignal: shutdownController.signal,
+      });
+
+      expect(harness.reserve).toHaveBeenCalledTimes(1);
+      shutdownController.abort();
+      await jest.advanceTimersByTimeAsync(
+        AFFILIATE_AGENT_RUNNER_RESERVATION_TIMEOUT_MILLISECONDS,
+      );
+
+      await expect(invocation).resolves.toBe("NO_WORK");
+      expect(harness.createWorkspace).not.toHaveBeenCalled();
+      expect(harness.gatewayClaim).not.toHaveBeenCalled();
+
+      reservationResult.resolve({
+        reservationId: "late-reservation",
+        launch: harness.launch,
+        release: harness.release,
+      });
+      await jest.advanceTimersByTimeAsync(0);
+      expect(harness.release).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it("creates a fresh read-only reviewer workspace and read-write producer workspaces", async () => {
@@ -582,13 +962,93 @@ describe("affiliate agent one-claim supervisor", () => {
         ).toHaveLength(heartbeat);
       }
 
-      processEvent.resolve({
-        kind: "RESULT",
-        value: { disposition: "NO_ACTION" },
-      });
+      processEvent.resolve(
+        terminalProcessEvent({ disposition: "NO_ACTION" }, "heartbeat-terminal-key"),
+      );
       await expect(invocation).resolves.toBe("TERMINAL_ACCEPTED");
       expect(harness.gatewayClaim).toHaveBeenCalledTimes(1);
       expect(harness.launch).toHaveBeenCalledTimes(1);
+      expect(harness.destroyWorkspace).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+  it("halts admission without reconciling when a lease heartbeat loses authorization", async () => {
+    jest.useFakeTimers({ now: new Date(STARTED_AT) });
+    try {
+      const processEvent = createDeferred<AffiliateAgentProcessEvent>();
+      const persistHalt = jest.fn();
+      const admissionState = {
+        isAdmissionHalted: false,
+        admissionHaltError: null,
+        persistHalt,
+      };
+      const authorizationError = new AffiliateAgentGatewayError({
+        code: "ROLE_CREDENTIAL_INVALID",
+        isRetryable: false,
+        safeMessage: "The role credential is invalid.",
+      });
+      const harness = createSupervisorHarness({
+        processEvents: [],
+        nextProcessEvent: () => processEvent.promise,
+        now: () => new Date(),
+        perform: async (operation) => {
+          if (operation.kind === "HEARTBEAT") throw authorizationError;
+          throw new Error(`Unexpected operation: ${operation.kind}`);
+        },
+      });
+
+      const invocation = runAffiliateAgentInvocation(
+        harness.dependencies,
+        { ...supervisorInput(), admissionState },
+      );
+      const rejection = expect(invocation).rejects.toBe(authorizationError);
+      await jest.advanceTimersByTimeAsync(60_000);
+      await rejection;
+      expect(admissionState.isAdmissionHalted).toBe(true);
+      expect(admissionState.admissionHaltError).toBe(authorizationError);
+      expect(persistHalt).toHaveBeenCalledTimes(1);
+      expect(harness.reconcileInvocation).not.toHaveBeenCalled();
+      expect(harness.destroyWorkspace).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+  it("reconciles an active claim when shutdown interrupts a heartbeat", async () => {
+    jest.useFakeTimers({ now: new Date(STARTED_AT) });
+    try {
+      const shutdownController = new AbortController();
+      const processEvent = createDeferred<AffiliateAgentProcessEvent>();
+      let heartbeatCount = 0;
+      const workerHealth = {
+        heartbeat: jest.fn(async () => {
+          heartbeatCount += 1;
+          if (shutdownController.signal.aborted) {
+            throw new Error("The worker heartbeat was cancelled.");
+          }
+        }),
+      };
+      const harness = createSupervisorHarness({
+        processEvents: [],
+        nextProcessEvent: () => processEvent.promise,
+        workerHealth,
+      });
+      const invocation = runAffiliateAgentInvocation(harness.dependencies, {
+        ...supervisorInput(),
+        shutdownSignal: shutdownController.signal,
+      });
+
+      await jest.advanceTimersByTimeAsync(0);
+      expect(harness.launch).toHaveBeenCalledTimes(1);
+
+      shutdownController.abort();
+      await jest.advanceTimersByTimeAsync(60_000);
+
+      await expect(invocation).resolves.toBe("INVOCATION_FAILED");
+      expect(heartbeatCount).toBe(2);
+      expect(harness.gatewayPerform).not.toHaveBeenCalled();
+      expectFailureReconciliation(harness, "PROCESS_CRASH");
+      expect(harness.terminate).toHaveBeenCalledTimes(1);
       expect(harness.destroyWorkspace).toHaveBeenCalledTimes(1);
     } finally {
       jest.useRealTimers();
@@ -642,10 +1102,9 @@ describe("affiliate agent one-claim supervisor", () => {
       expect(heartbeats[1]).toBe(heartbeats[0]);
       expect(heartbeats[1].idempotencyKey).toBe(heartbeats[0].idempotencyKey);
 
-      processEvent.resolve({
-        kind: "RESULT",
-        value: { disposition: "NO_ACTION" },
-      });
+      processEvent.resolve(
+        terminalProcessEvent({ disposition: "NO_ACTION" }, "heartbeat-terminal-key"),
+      );
       await expect(invocation).resolves.toBe("TERMINAL_ACCEPTED");
       expect(harness.destroyWorkspace).toHaveBeenCalledTimes(1);
     } finally {
@@ -693,6 +1152,114 @@ describe("affiliate agent one-claim supervisor", () => {
     }
   });
 
+  it("drains an already launched claim to terminal acceptance after shutdown", async () => {
+    const processEvent = createDeferred<AffiliateAgentProcessEvent>();
+    const shutdownController = new AbortController();
+    const lifecycle: string[] = [];
+    const harness = createSupervisorHarness({
+      processEvents: [],
+      nextProcessEvent: () => processEvent.promise,
+      perform: async (operation) => {
+        if (operation.kind !== "SUBMIT_RESULT") {
+          throw new Error(`Unexpected operation: ${operation.kind}`);
+        }
+        lifecycle.push("SUBMIT_RESULT");
+        lifecycle.push("TERMINAL_ACCEPTED");
+        return {
+          kind: "TERMINAL_ACCEPTED" as const,
+          receiptId: "terminal-receipt-after-shutdown",
+          resultHash: SHA256,
+          disposition: "NO_ACTION" as const,
+          completedAt: STARTED_AT,
+        };
+      },
+      terminate: async () => {
+        lifecycle.push("TERMINATE");
+      },
+      destroyWorkspace: async () => {
+        lifecycle.push("DESTROY_WORKSPACE");
+      },
+    });
+
+    const invocation = runAffiliateAgentInvocation(harness.dependencies, {
+      ...supervisorInput(),
+      shutdownSignal: shutdownController.signal,
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(harness.launch).toHaveBeenCalledTimes(1);
+
+    shutdownController.abort();
+    processEvent.resolve(
+      terminalProcessEvent(
+        { disposition: "NO_ACTION" },
+        "terminal-key-after-shutdown",
+      ),
+    );
+
+    await expect(invocation).resolves.toBe("TERMINAL_ACCEPTED");
+    expect(lifecycle).toEqual([
+      "SUBMIT_RESULT",
+      "TERMINAL_ACCEPTED",
+      "TERMINATE",
+      "DESTROY_WORKSPACE",
+    ]);
+    expect(harness.reconcileInvocation).not.toHaveBeenCalled();
+    expect(harness.gatewayPerform).toHaveBeenCalledTimes(1);
+    expect(harness.destroyWorkspace).toHaveBeenCalledTimes(1);
+  });
+  it("drains a terminal submission that began before shutdown", async () => {
+    const terminalSubmission = createDeferred<unknown>();
+    const shutdownController = new AbortController();
+    const lifecycle: string[] = [];
+    const harness = createSupervisorHarness({
+      processEvents: [terminalProcessEvent({ disposition: "NO_ACTION" })],
+      perform: async (operation) => {
+        if (operation.kind !== "SUBMIT_RESULT") {
+          throw new Error(`Unexpected operation: ${operation.kind}`);
+        }
+        lifecycle.push("SUBMIT_RESULT");
+        const result = await terminalSubmission.promise;
+        lifecycle.push("TERMINAL_ACCEPTED");
+        return result;
+      },
+      terminate: async () => {
+        lifecycle.push("TERMINATE");
+      },
+      destroyWorkspace: async () => {
+        lifecycle.push("DESTROY_WORKSPACE");
+      },
+    });
+
+    const invocation = runAffiliateAgentInvocation(harness.dependencies, {
+      ...supervisorInput(),
+      shutdownSignal: shutdownController.signal,
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(harness.gatewayPerform).toHaveBeenCalledTimes(1);
+    expect(harness.gatewayPerform.mock.calls[0][0]).toMatchObject({
+      kind: "SUBMIT_RESULT",
+    });
+
+    shutdownController.abort();
+    terminalSubmission.resolve({
+      kind: "TERMINAL_ACCEPTED",
+      receiptId: "terminal-receipt-after-shutdown",
+      resultHash: SHA256,
+      disposition: "NO_ACTION",
+      completedAt: STARTED_AT,
+    });
+
+    await expect(invocation).resolves.toBe("TERMINAL_ACCEPTED");
+    expect(lifecycle).toEqual([
+      "SUBMIT_RESULT",
+      "TERMINAL_ACCEPTED",
+      "TERMINATE",
+      "DESTROY_WORKSPACE",
+    ]);
+    expect(harness.reconcileInvocation).not.toHaveBeenCalled();
+    expect(harness.destroyWorkspace).toHaveBeenCalledTimes(1);
+  });
+
   it("terminates a crashed process before exact-claim failure reconciliation", async () => {
     const harness = createSupervisorHarness({
       processEvents: [{ kind: "EXIT", exitCode: 17 }],
@@ -712,100 +1279,39 @@ describe("affiliate agent one-claim supervisor", () => {
     expect(harness.terminate).toHaveBeenCalledTimes(1);
     expect(harness.destroyWorkspace).toHaveBeenCalledTimes(1);
   });
-  it("returns bounded schema feedback through the same process session", async () => {
-    let resultSubmission = 0;
+  it("preserves a runner hard-deadline timeout when the runner reports first", async () => {
     const harness = createSupervisorHarness({
-      processEvents: [
-        { kind: "RESULT", value: { invalid: 1 } },
-        { kind: "RESULT", value: { invalid: 2 } },
-        { kind: "RESULT", value: { disposition: "NO_ACTION" } },
-      ],
-      perform: async (operation) => {
-        if (operation.kind !== "SUBMIT_RESULT") {
-          throw new Error(`Unexpected operation: ${operation.kind}`);
-        }
-        resultSubmission += 1;
-        if (resultSubmission <= 2) {
-          return {
-            kind: "SCHEMA_CORRECTION_REQUIRED" as const,
-            receiptId: `correction-receipt-${resultSubmission}`,
-            submissionNumber: resultSubmission as 1 | 2,
-            remainingSubmissions: (3 - resultSubmission) as 1 | 2,
-            issues: [
-              {
-                path: ["payload"],
-                code: "invalid_type",
-                message: `Correction ${resultSubmission}`,
-              },
-            ],
-            correctionPrompt: `schema correction ${resultSubmission}`,
-          };
-        }
-        return {
-          kind: "TERMINAL_ACCEPTED" as const,
-          receiptId: "terminal-receipt-1",
-          resultHash: SHA256,
-          disposition: "NO_ACTION" as const,
-          completedAt: STARTED_AT,
-        };
-      },
+      processEvents: [{ kind: "EXIT", exitCode: 1, reason: "TIMEOUT" }],
     });
 
     await expect(
       runAffiliateAgentInvocation(harness.dependencies, supervisorInput()),
-    ).resolves.toBe("TERMINAL_ACCEPTED");
+    ).resolves.toBe("INVOCATION_FAILED");
 
-    expect(harness.gatewayClaim).toHaveBeenCalledTimes(1);
-    expect(harness.launch).toHaveBeenCalledTimes(1);
-    expect(harness.nextEvent).toHaveBeenCalledTimes(3);
-    expect(harness.send.mock.calls.map(([input]) => input)).toEqual([
-      {
-        kind: "SCHEMA_CORRECTION",
-        correctionPrompt: "schema correction 1",
-      },
-      {
-        kind: "SCHEMA_CORRECTION",
-        correctionPrompt: "schema correction 2",
-      },
-    ]);
-    expect(
-      harness.gatewayPerform.mock.calls.filter(
-        ([operation]) => operation.kind === "SUBMIT_RESULT",
-      ),
-    ).toHaveLength(3);
+    expectFailureReconciliation(harness, "TIMEOUT", {
+      jobId: "job-coverage_planner",
+      claimId: "claim-coverage_planner",
+      claimGeneration: 1,
+    });
     expect(harness.terminate).toHaveBeenCalledTimes(1);
     expect(harness.destroyWorkspace).toHaveBeenCalledTimes(1);
   });
-
-  it("uses the gateway-owned third invalid result as the only schema-exhaustion failure", async () => {
-    let invalidSubmission = 0;
+  it("retries failure reconciliation with the same request until authoritative", async () => {
+    let reconciliationAttempts = 0;
+    const reconciliationRequests: AffiliateAgentInvocationReconciliationRequest[] = [];
     const harness = createSupervisorHarness({
-      processEvents: [
-        { kind: "RESULT", value: { invalid: 1 } },
-        { kind: "RESULT", value: { invalid: 2 } },
-        { kind: "RESULT", value: { invalid: 3 } },
-      ],
-      perform: async (operation) => {
-        if (operation.kind !== "SUBMIT_RESULT") {
-          throw new Error(`Unexpected operation: ${operation.kind}`);
-        }
-        invalidSubmission += 1;
-        if (invalidSubmission < 3) {
-          return {
-            kind: "SCHEMA_CORRECTION_REQUIRED" as const,
-            receiptId: `correction-receipt-${invalidSubmission}`,
-            submissionNumber: invalidSubmission as 1 | 2,
-            remainingSubmissions: (3 - invalidSubmission) as 1 | 2,
-            issues: [],
-            correctionPrompt: `schema correction ${invalidSubmission}`,
-          };
+      processEvents: [{ kind: "EXIT", exitCode: 17 }],
+      reconcileInvocation: async (request) => {
+        reconciliationAttempts += 1;
+        reconciliationRequests.push(request);
+        if (reconciliationAttempts === 1) {
+          throw new Error("The failure response was unavailable.");
         }
         return {
-          kind: "INVOCATION_FAILED" as const,
-          receiptId: "schema-exhaustion-receipt",
-          failureCode: "SCHEMA_CORRECTIONS_EXHAUSTED" as const,
-          invocationFailureCount: 1 as const,
-          nextAttemptAt: "2026-08-20T18:05:00.000Z",
+          kind: "INVOCATION_FAILED",
+          failureCode: request.failure.code,
+          invocationFailureCount: 1,
+          nextAttemptAt: null,
           isPipelineBlocked: false,
         };
       },
@@ -815,54 +1321,128 @@ describe("affiliate agent one-claim supervisor", () => {
       runAffiliateAgentInvocation(harness.dependencies, supervisorInput()),
     ).resolves.toBe("INVOCATION_FAILED");
 
-    const operations = harness.gatewayPerform.mock.calls.map(
-      ([operation]) => operation as AffiliateAgentClaimOperation,
+    expect(reconciliationRequests).toHaveLength(2);
+    expect(reconciliationRequests[1]).toBe(reconciliationRequests[0]);
+    expect(reconciliationRequests[1].idempotencyKey).toBe(
+      reconciliationRequests[0].idempotencyKey,
     );
-    expect(operations.map(({ kind }) => kind)).toEqual([
-      "SUBMIT_RESULT",
-      "SUBMIT_RESULT",
-      "SUBMIT_RESULT",
-    ]);
-    expect(harness.send).toHaveBeenCalledTimes(2);
-    expect(harness.reconcileInvocation).not.toHaveBeenCalled();
+  });
+
+  it("halts shared admission after bounded failure reconciliation remains indeterminate", async () => {
+    const persistHalt = jest.fn(async () => undefined);
+    const admissionState: AffiliateAgentSupervisorAdmissionState = {
+      isAdmissionHalted: false,
+      admissionHaltError: null,
+      persistHalt,
+    };
+    const reconciliationRequests: AffiliateAgentInvocationReconciliationRequest[] = [];
+    const harness = createSupervisorHarness({
+      processEvents: [{ kind: "EXIT", exitCode: 17 }],
+      reconcileInvocation: async (request) => {
+        reconciliationRequests.push(request);
+        throw new Error("The failure response was unavailable.");
+      },
+    });
+
+    await expect(
+      runAffiliateAgentInvocation(harness.dependencies, {
+        ...supervisorInput(),
+        admissionState,
+      }),
+    ).rejects.toThrow("The failure response was unavailable.");
+
+    expect(reconciliationRequests).toHaveLength(2);
+    expect(reconciliationRequests[1]).toBe(reconciliationRequests[0]);
+    expect(admissionState.isAdmissionHalted).toBe(true);
+    expect(admissionState.admissionHaltError).toBeInstanceOf(Error);
+    expect(persistHalt).toHaveBeenCalledTimes(1);
+  });
+  it("does not suppress admission persistence failure after an indeterminate outcome", async () => {
+    const persistHalt = jest.fn(async () => {
+      throw new Error("gateway halt persistence failed");
+    });
+    const admissionState: AffiliateAgentSupervisorAdmissionState = {
+      isAdmissionHalted: false,
+      admissionHaltError: null,
+      persistHalt,
+    };
+    const harness = createSupervisorHarness({
+      processEvents: [{ kind: "EXIT", exitCode: 17 }],
+      reconcileInvocation: async () => {
+        throw new Error("The failure response was unavailable.");
+      },
+    });
+    const input = { ...supervisorInput(), admissionState };
+
+    await expect(
+      runAffiliateAgentInvocation(harness.dependencies, input),
+    ).rejects.toThrow("gateway halt persistence failed");
+
+    expect(admissionState.isAdmissionHalted).toBe(true);
+    expect(admissionState.admissionHaltError).toMatchObject({
+      message: "The failure response was unavailable.",
+    });
+    expect(persistHalt).toHaveBeenCalledTimes(1);
+    await expect(
+      runAffiliateAgentInvocation(harness.dependencies, {
+        ...input,
+        invocationId: "coverage_planner-invocation-2",
+      }),
+    ).resolves.toBe("NO_WORK");
+    expect(harness.gatewayClaim).toHaveBeenCalledTimes(1);
+  });
+
+  it("replays the child terminal handoff and never sends a runner correction", async () => {
+    const result = {
+      disposition: "NO_ACTION",
+      evidenceRef: "evidence-1",
+    };
+    const idempotencyKey = "child-terminal-key";
+    const harness = createSupervisorHarness({
+      processEvents: [terminalProcessEvent(result, idempotencyKey)],
+    });
+
+    await expect(
+      runAffiliateAgentInvocation(harness.dependencies, supervisorInput()),
+    ).resolves.toBe("TERMINAL_ACCEPTED");
+
+    expect(harness.gatewayPerform).toHaveBeenCalledTimes(1);
+    expect(harness.gatewayPerform.mock.calls[0][0]).toMatchObject({
+      kind: "SUBMIT_RESULT",
+      idempotencyKey,
+      result,
+    });
+    expect(harness.send).not.toHaveBeenCalled();
     expect(harness.terminate).toHaveBeenCalledTimes(1);
     expect(harness.destroyWorkspace).toHaveBeenCalledTimes(1);
   });
 
-  it("treats an extra correction response as a gateway invariant error", async () => {
-    let invalidSubmission = 0;
+  it("reconciles an inconsistent correction response without invoking runner correction", async () => {
+    const result = { disposition: "NO_ACTION" };
     const harness = createSupervisorHarness({
-      processEvents: [
-        { kind: "RESULT", value: { invalid: 1 } },
-        { kind: "RESULT", value: { invalid: 2 } },
-        { kind: "RESULT", value: { invalid: 3 } },
-      ],
+      processEvents: [terminalProcessEvent(result, "child-terminal-key")],
       perform: async (operation) => {
         if (operation.kind !== "SUBMIT_RESULT") {
           throw new Error(`Unexpected operation: ${operation.kind}`);
         }
-        invalidSubmission += 1;
         return {
           kind: "SCHEMA_CORRECTION_REQUIRED" as const,
-          receiptId: `invalid-correction-receipt-${invalidSubmission}`,
-          submissionNumber: Math.min(invalidSubmission, 2) as 1 | 2,
-          remainingSubmissions: 1 as const,
+          receiptId: "inconsistent-correction-receipt",
+          submissionNumber: 1 as const,
+          remainingSubmissions: 2 as const,
           issues: [],
-          correctionPrompt: `invalid schema correction ${invalidSubmission}`,
+          correctionPrompt: "The child should have handled this correction.",
         };
       },
     });
 
     await expect(
       runAffiliateAgentInvocation(harness.dependencies, supervisorInput()),
-    ).rejects.toMatchObject({
-      code: "INTERNAL_ERROR",
-      safeMessage: expect.any(String),
-    });
+    ).resolves.toBe("INVOCATION_FAILED");
 
-    expect(harness.gatewayPerform).toHaveBeenCalledTimes(3);
-    expect(harness.send).toHaveBeenCalledTimes(2);
-    expect(harness.reconcileInvocation).not.toHaveBeenCalled();
+    expect(harness.gatewayPerform).toHaveBeenCalledTimes(1);
+    expect(harness.send).not.toHaveBeenCalled();
+    expectFailureReconciliation(harness, "TERMINAL_SUBMISSION_FAILURE");
     expect(harness.terminate).toHaveBeenCalledTimes(1);
     expect(harness.destroyWorkspace).toHaveBeenCalledTimes(1);
   });
@@ -930,6 +1510,48 @@ describe("affiliate agent one-claim supervisor", () => {
       harness.reconcileInvocation.mock.invocationCallOrder[0],
     );
     expect(harness.destroyWorkspace).toHaveBeenCalledTimes(1);
+  });
+
+  it("reconciles a malformed post-claim launch input", async () => {
+    const harness = createSupervisorHarness({
+      claim: async (request) => ({
+        ...claimGrantFor(request),
+        prompt: "x".repeat(100_000),
+      }),
+    });
+
+    await expect(
+      runAffiliateAgentInvocation(harness.dependencies, supervisorInput()),
+    ).resolves.toBe("INVOCATION_FAILED");
+
+    expect(harness.launch).not.toHaveBeenCalled();
+    expectFailureReconciliation(harness, "MALFORMED_OUTPUT");
+    expect(harness.destroyWorkspace).toHaveBeenCalledTimes(1);
+  });
+
+  it("bounds failure reconciliation idempotency keys for long claim ids", async () => {
+    const harness = createSupervisorHarness({
+      claim: async (request) => {
+        const grant = claimGrantFor(request);
+        return {
+          ...grant,
+          envelope: {
+            ...grant.envelope,
+            claimId: "claim-" + "x".repeat(300),
+          },
+        };
+      },
+      processEvents: [{ kind: "EXIT", exitCode: 9 }],
+    });
+
+    await expect(
+      runAffiliateAgentInvocation(harness.dependencies, supervisorInput()),
+    ).resolves.toBe("INVOCATION_FAILED");
+
+    const failureRequest = harness.reconcileInvocation.mock.calls[0][0] as
+      AffiliateAgentInvocationReconciliationRequest;
+    expect(failureRequest.idempotencyKey).toHaveLength(83);
+    expect(failureRequest.idempotencyKey).toMatch(/^supervisor-failure-[0-9a-f]{64}$/);
   });
 
   it("keeps an authoritative terminal commit when both submission responses are lost", async () => {
@@ -1067,66 +1689,187 @@ describe("affiliate agent one-claim supervisor", () => {
     }
   });
 
-  it("terminates and cleans up when a schema-correction send hangs until the deadline", async () => {
+  it("bounds workspace settlement after shutdown and cleans up a late workspace", async () => {
     jest.useFakeTimers({ now: new Date(STARTED_AT) });
+    const shutdown = new AbortController();
+    const workspace = {
+      path: "/isolated/late-workspace",
+      attestation: {
+        schemaVersion: 1 as const,
+        workspaceId: "workspace-late",
+        mode: "READ_WRITE" as const,
+        executionClass: "PRODUCTION_CODEX" as const,
+        workerId: "coverage_planner-worker-1",
+        invocationId: "coverage_planner-invocation-1",
+        issuedAt: STARTED_AT,
+        expiresAt: WORKSPACE_ATTESTATION_EXPIRES_AT,
+        signature: "late-workspace-signature",
+      },
+    };
+    const workspaceCreation = createDeferred<typeof workspace>();
+    const admissionState: AffiliateAgentSupervisorAdmissionState = {
+      isAdmissionHalted: false,
+      admissionHaltError: null,
+    };
     try {
       const harness = createSupervisorHarness({
-        processEvents: [{ kind: "RESULT", value: { invalid: 1 } }],
-        now: () => new Date(),
-        send: async () => new Promise<void>(() => undefined),
-        perform: async (operation) => {
-          if (operation.kind === "HEARTBEAT") {
-            return {
-              kind: "HEARTBEAT_ACCEPTED" as const,
-              receiptId: operation.idempotencyKey,
-              heartbeatAt: new Date().toISOString(),
-              leaseExpiresAt: HARD_DEADLINE_AT,
-            };
-          }
-          if (operation.kind !== "SUBMIT_RESULT") {
-            throw new Error(`Unexpected operation: ${operation.kind}`);
-          }
-          return {
-            kind: "SCHEMA_CORRECTION_REQUIRED" as const,
-            receiptId: "hung-send-correction",
-            submissionNumber: 1 as const,
-            remainingSubmissions: 2 as const,
-            issues: [],
-            correctionPrompt: "Correct the terminal result.",
-          };
-        },
+        createWorkspace: async () => workspaceCreation.promise,
       });
-
       const invocation = runAffiliateAgentInvocation(
         harness.dependencies,
-        supervisorInput(),
+        {
+          ...supervisorInput(),
+          shutdownSignal: shutdown.signal,
+          admissionState,
+        },
       );
-      await jest.advanceTimersByTimeAsync(0);
-      expect(harness.send).toHaveBeenCalledTimes(1);
-      await jest.advanceTimersByTimeAsync(20 * 60 * 1_000);
-      await expect(invocation).resolves.toBe("INVOCATION_FAILED");
-
-      expect(
-        harness.gatewayPerform.mock.calls.filter(
-          ([operation]) => operation.kind === "HEARTBEAT",
-        ),
-      ).toHaveLength(19);
-      expect(harness.send).toHaveBeenCalledTimes(1);
-      expect(harness.launch).toHaveBeenCalledTimes(1);
-      expect(harness.terminate).toHaveBeenCalledTimes(1);
-      expectFailureReconciliation(harness, "TIMEOUT");
-      expect(harness.destroyWorkspace).toHaveBeenCalledTimes(1);
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        await Promise.resolve();
+      }
+      shutdown.abort();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await jest.advanceTimersByTimeAsync(
+        AFFILIATE_AGENT_RUNNER_RESERVATION_TIMEOUT_MILLISECONDS,
+      );
+      expect(admissionState.isAdmissionHalted).toBe(true);
+      workspaceCreation.resolve(workspace);
+      await expect(invocation).rejects.toMatchObject({
+        safeMessage: "The agent workspace did not settle during shutdown.",
+      });
+      expect(harness.destroyWorkspace).toHaveBeenCalledWith(workspace.path);
     } finally {
       jest.useRealTimers();
     }
   });
+  it("bounds normal workspace creation before the runner reservation expires", async () => {
+    jest.useFakeTimers({ now: new Date(STARTED_AT) });
+    const workspace = {
+      path: "/isolated/slow-workspace",
+      attestation: {
+        schemaVersion: 1 as const,
+        workspaceId: "workspace-slow",
+        mode: "READ_WRITE" as const,
+        executionClass: "PRODUCTION_CODEX" as const,
+        workerId: "coverage_planner-worker-1",
+        invocationId: "coverage_planner-invocation-1",
+        issuedAt: STARTED_AT,
+        expiresAt: WORKSPACE_ATTESTATION_EXPIRES_AT,
+        signature: "slow-workspace-signature",
+      },
+    };
+    const workspaceCreation = createDeferred<typeof workspace>();
+    const admissionState: AffiliateAgentSupervisorAdmissionState = {
+      isAdmissionHalted: false,
+      admissionHaltError: null,
+    };
+    try {
+      const harness = createSupervisorHarness({
+        createWorkspace: () => workspaceCreation.promise,
+      });
+      const invocation = runAffiliateAgentInvocation(
+        harness.dependencies,
+        {
+          ...supervisorInput(),
+          admissionState,
+        },
+      );
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        await Promise.resolve();
+      }
+      await jest.advanceTimersByTimeAsync(
+        AFFILIATE_AGENT_RUNNER_RESERVATION_TIMEOUT_MILLISECONDS,
+      );
+      workspaceCreation.resolve(workspace);
+      await expect(invocation).rejects.toMatchObject({
+        safeMessage:
+          "The agent workspace did not settle within its creation deadline.",
+      });
+      expect(admissionState.isAdmissionHalted).toBe(true);
+      expect(harness.gatewayClaim).not.toHaveBeenCalled();
+      expect(harness.launch).not.toHaveBeenCalled();
+      expect(harness.destroyWorkspace).toHaveBeenCalledWith(workspace.path);
+      expect(harness.release).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("destroys a workspace retained when shutdown races its completion", async () => {
+    const shutdown = new AbortController();
+    const workspaceStarted = createDeferred<boolean>();
+    const workspace = {
+      path: "/isolated/raced-workspace",
+      attestation: {
+        schemaVersion: 1 as const,
+        workspaceId: "workspace-raced",
+        mode: "READ_WRITE" as const,
+        executionClass: "PRODUCTION_CODEX" as const,
+        workerId: "coverage_planner-worker-1",
+        invocationId: "coverage_planner-invocation-1",
+        issuedAt: STARTED_AT,
+        expiresAt: WORKSPACE_ATTESTATION_EXPIRES_AT,
+        signature: "raced-workspace-signature",
+      },
+    };
+    const workspaceCreation = createDeferred<typeof workspace>();
+    const harness = createSupervisorHarness({
+      createWorkspace: () => {
+        workspaceStarted.resolve(true);
+        return workspaceCreation.promise;
+      },
+    });
+
+    const invocation = runAffiliateAgentInvocation(
+      harness.dependencies,
+      {
+        ...supervisorInput(),
+        shutdownSignal: shutdown.signal,
+      },
+    );
+    await workspaceStarted.promise;
+    workspaceCreation.resolve(workspace);
+    queueMicrotask(() => shutdown.abort());
+
+    await expect(invocation).resolves.toBe("NO_WORK");
+    expect(harness.gatewayClaim).not.toHaveBeenCalled();
+    expect(harness.destroyWorkspace).toHaveBeenCalledWith(workspace.path);
+    expect(harness.release).toHaveBeenCalledTimes(1);
+  });
+  it("rechecks an indeterminate claim after shutdown until authoritative no-work", async () => {
+    const shutdown = new AbortController();
+    let claimAttempt = 0;
+    const harness = createSupervisorHarness({
+      claim: async () => {
+        claimAttempt += 1;
+        if (claimAttempt === 1) {
+          shutdown.abort();
+          throw new Error("The first claim response was unavailable.");
+        }
+        return null;
+      },
+    });
+
+    await expect(
+      runAffiliateAgentInvocation(harness.dependencies, {
+        ...supervisorInput(),
+        shutdownSignal: shutdown.signal,
+      }),
+    ).resolves.toBe("NO_WORK");
+
+    expect(harness.gatewayClaim).toHaveBeenCalledTimes(2);
+    expect(harness.destroyWorkspace).toHaveBeenCalledTimes(1);
+    expect(harness.release).toHaveBeenCalledTimes(1);
+  });
+
 
   it("terminates and cleans up when terminal submission hangs until the deadline", async () => {
     jest.useFakeTimers({ now: new Date(STARTED_AT) });
     try {
       const harness = createSupervisorHarness({
         processEvents: [
-          { kind: "RESULT", value: { disposition: "NO_ACTION" } },
+          terminalProcessEvent({ disposition: "NO_ACTION" }),
         ],
         now: () => new Date(),
         perform: async (operation) => {
@@ -1205,7 +1948,7 @@ describe("affiliate agent one-claim supervisor", () => {
     }
   });
 
-  it("passes only the scoped token, canonical envelope, prompt, channel, and model credential", async () => {
+  it("passes only the scoped token, canonical envelope, prompt, and gateway channel", async () => {
     const parentEnvironment = jest.replaceProperty(process, "env", {
       ...process.env,
       DATABASE_URL: "database-fixture",
@@ -1232,8 +1975,8 @@ describe("affiliate agent one-claim supervisor", () => {
         "AFFILIATE_AGENT_CLAIM_ENVELOPE",
         "AFFILIATE_AGENT_CLAIM_TOKEN",
         "AFFILIATE_AGENT_GATEWAY_ADDRESS",
+        "AFFILIATE_AGENT_GATEWAY_PATH_PREFIX",
         "AFFILIATE_AGENT_PROMPT",
-        "OPENAI_API_KEY",
       ]);
       const request = harness.gatewayClaim.mock
         .calls[0][0] as AffiliateAgentClaimRequest;
@@ -1303,7 +2046,7 @@ describe("affiliate agent one-claim supervisor", () => {
         }) + "\\n",
       );
     `;
-    const restrictedChildLauncher: AffiliateAgentProcessLauncher["launch"] = ({
+    const restrictedChildLauncher: AffiliateAgentProcessReservation["launch"] = ({
       environment,
       workspacePath: launchWorkspacePath,
     }) => {
@@ -1345,7 +2088,7 @@ describe("affiliate agent one-claim supervisor", () => {
           resolveStarted?.();
           return;
         }
-        pushEvent({ kind: "RESULT", value: JSON.parse(line) });
+        pushEvent(terminalProcessEvent(JSON.parse(line), "restricted-child-terminal-key"));
       });
       child.once("error", (error) => {
         if (!isReady) rejectStarted?.(error);
@@ -1375,6 +2118,10 @@ describe("affiliate agent one-claim supervisor", () => {
         send: async () => undefined,
         terminate: () => stop("SIGTERM"),
         forceTerminate: () => stop("SIGKILL"),
+        disconnect: () => {
+          if (!hasExited) child.kill("SIGKILL");
+          reader.close();
+        },
       };
     };
     try {
@@ -1398,8 +2145,8 @@ describe("affiliate agent one-claim supervisor", () => {
           "AFFILIATE_AGENT_CLAIM_ENVELOPE",
           "AFFILIATE_AGENT_CLAIM_TOKEN",
           "AFFILIATE_AGENT_GATEWAY_ADDRESS",
+          "AFFILIATE_AGENT_GATEWAY_PATH_PREFIX",
           "AFFILIATE_AGENT_PROMPT",
-          "OPENAI_API_KEY",
         ]),
         missingCredentialNames: forbiddenNames,
         directAccess: Object.fromEntries(
@@ -1438,6 +2185,8 @@ describe("affiliate agent one-claim supervisor", () => {
         credentials: { verify: credentialVerification },
         workspaces: { verify: workspaceVerification },
         contracts: { loadActiveBundle: contractLoad },
+        commands: offlineProductionAdapters.commands,
+        terminalEffects: offlineProductionAdapters.terminalEffects,
         artifacts: {
           readImmutable: async () => {
             throw new Error("Artifact access is forbidden in this test.");

@@ -17,6 +17,7 @@ import {
   geocodeAddressToCoordinates,
   isValidGeocodeCoordinates,
 } from "@/server/geocoding";
+import { assertSafePublicUrl } from "./sourceIntakeUrlSafety";
 import { acquireEventLock } from "@/server/repositories/locks";
 import { syncEventDivisions } from "@/server/repositories/events";
 import { applyEventSourceTransition } from "@/server/events/eventSourceTransition";
@@ -36,6 +37,7 @@ import {
   extractAffiliateCandidatesFromPage,
   extractAffiliateFieldValuesFromPage,
   normalizeAffiliateCandidateDateTime,
+  type AffiliateCandidateDateTimeInput,
 } from "./mappingExtractor";
 import {
   AFFILIATE_DATE_TIME_CONTRACT_VERSION,
@@ -70,6 +72,11 @@ import {
   loadActiveAffiliateSupplyContract,
   recordAffiliateCandidateReview,
 } from './affiliateSupplyPersistence';
+import type {
+  AffiliateSupplyClient,
+  AffiliateSupplyLifecycleTargetWrite,
+  ExecuteAffiliateSupplyLifecycleCommandInput,
+} from './affiliateSupplyPersistence';
 import { normalizeAffiliateSupplyIdentity, targetRuleFor } from './affiliateSupplyLifecycle';
 import { hashAffiliateAgentValue } from './agentGatewayContracts';
 import {
@@ -79,9 +86,26 @@ import {
   type AffiliateScrapeMapping,
   parseAffiliateScrapeMapping,
   type ScrapePageClient,
+  type ScrapedPage,
+
 } from "./types";
 import { affiliateOrganizationInitialOwnership } from "./organizationOwnership";
 import { tryResolveTimeZoneFromCoordinates } from "@/server/timeZones";
+type AffiliateCandidateRecord = AffiliateCandidateDateTimeInput & Readonly<{
+  [key: string]: unknown;
+  id?: string | null;
+  createdAt?: Date | string | null;
+  updatedAt?: Date | string | null;
+  sourceId?: string | null;
+  supplySourceId?: string | null;
+  runId?: string | null;
+  mappingId?: string | null;
+  status?: string | null;
+  dedupeKey?: string | null;
+  formatName?: string | null;
+  staffingPriority?: unknown;
+  officialSchedulingMode?: unknown;
+}>;
 
 type AffiliateSourceCreateInput = {
   name: string;
@@ -209,12 +233,12 @@ const normalizeDateDisplayMode = (value: unknown): AffiliateDateDisplayMode => {
     : "SCHEDULED";
 };
 
-const isEvergreenAffiliateCandidate = (candidate: any): boolean => {
+const isEvergreenAffiliateCandidate = (candidate: AffiliateCandidateRecord): boolean => {
   const mode = normalizeDateDisplayMode(candidate?.dateDisplayMode);
   return mode === "NO_FIXED_DATE" || mode === "ONGOING";
 };
 
-const dateDisplayTextFromCandidate = (candidate: any): string | null =>
+const dateDisplayTextFromCandidate = (candidate: AffiliateCandidateRecord): string | null =>
   nullableString(candidate.dateDisplayText) ??
   (isEvergreenAffiliateCandidate(candidate)
     ? nullableString(candidate.scheduleText)
@@ -224,8 +248,11 @@ const dateDisplayTextFromCandidate = (candidate: any): string | null =>
 const normalizeStatus = (value: unknown, fallback: string): string =>
   nullableString(value)?.toUpperCase() ?? fallback;
 
-const parseDateOrNull = (value: string | null | undefined): Date | null => {
+const parseDateOrNull = (value: string | Date | null | undefined): Date | null => {
   if (!value) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
@@ -260,7 +287,7 @@ const parseSourceDateOrNull = (
 };
 
 const candidateStartDate = (
-  candidate: Pick<AffiliateCandidateInput, "startsAt"> | any,
+  candidate: AffiliateCandidateRecord,
 ): Date | null => {
   if (
     candidate.startsAt instanceof Date &&
@@ -273,7 +300,7 @@ const candidateStartDate = (
   );
 };
 
-const candidateUpdatedAtDate = (candidate: any): Date | null => {
+const candidateUpdatedAtDate = (candidate: AffiliateCandidateRecord): Date | null => {
   if (
     candidate?.updatedAt instanceof Date &&
     !Number.isNaN(candidate.updatedAt.getTime())
@@ -284,9 +311,7 @@ const candidateUpdatedAtDate = (candidate: any): Date | null => {
 };
 
 const candidateRegistrationDeadline = (
-  candidate:
-    | Pick<AffiliateCandidateInput, "registrationDeadlineText" | "startsAt">
-    | any,
+  candidate: AffiliateCandidateRecord,
 ): Date | null => {
   const text = nullableString(candidate.registrationDeadlineText);
   if (!text) return null;
@@ -304,7 +329,7 @@ const isImportableCandidate = (
   return candidateImportRejectionReasons(candidate, now).length === 0;
 };
 
-const isTryoutCandidate = (candidate: AffiliateCandidateInput): boolean => {
+const isTryoutCandidate = (candidate: AffiliateCandidateRecord): boolean => {
   const haystack = [
     candidate.title,
     candidate.formatLabel,
@@ -318,43 +343,61 @@ const isTryoutCandidate = (candidate: AffiliateCandidateInput): boolean => {
   return /\btry[\s-]?outs?\b|\bevaluations?\b/.test(haystack);
 };
 
+const candidateTimeZoneRejectionReason = (
+  candidate: AffiliateCandidateInput,
+): string | null => {
+  const dateDisplayMode = normalizeDateDisplayMode(candidate.dateDisplayMode);
+  const requiresTimeZone =
+    candidate.listingKind === "EVENT" &&
+    (dateDisplayMode === "SCHEDULED" || dateDisplayMode === "DATE_ONLY");
+  return requiresTimeZone &&
+    !isValidAffiliateTimeZone(nullableString(candidate.timeZone) ?? "")
+    ? "timeZone:MISSING_IANA_TIME_ZONE"
+    : null;
+};
+
+const candidateStartRejectionReason = (
+  candidate: AffiliateCandidateInput,
+  now: Date,
+): string | null => {
+  const evergreen = isEvergreenAffiliateCandidate(candidate);
+  if (evergreen) {
+    return isTryoutCandidate(candidate) ? "tryouts cannot be evergreen" : null;
+  }
+  const start = candidateStartDate(candidate);
+  return !start || start.getTime() <= now.getTime()
+    ? (start ? "start is not in the future" : "missing source start date")
+    : null;
+};
+
+const candidateDeadlineRejectionReason = (
+  candidate: AffiliateCandidateInput,
+  now: Date,
+): string | null => {
+  const registrationDeadline = candidateRegistrationDeadline(candidate);
+  return registrationDeadline && registrationDeadline.getTime() < now.getTime()
+    ? "registration deadline passed"
+    : null;
+};
+
+const nonNullReasons = (reasons: Array<string | null>): string[] =>
+  reasons.filter((reason): reason is string => Boolean(reason));
+
 export const candidateImportRejectionReasons = (
   candidate: AffiliateCandidateInput,
   now: Date = new Date(),
 ): string[] => {
-  if (candidate.listingKind === "RENTAL" || candidate.listingKind === "CLUB")
+  if (candidate.listingKind === "RENTAL" || candidate.listingKind === "CLUB") {
     return [];
-  const reasons: string[] = [];
-  const dateDisplayMode = normalizeDateDisplayMode(candidate.dateDisplayMode);
-  if (
-    candidate.listingKind === "EVENT" &&
-    (dateDisplayMode === "SCHEDULED" || dateDisplayMode === "DATE_ONLY") &&
-    !isValidAffiliateTimeZone(nullableString(candidate.timeZone) ?? "")
-  ) {
-    reasons.push("timeZone:MISSING_IANA_TIME_ZONE");
   }
-  const start = candidateStartDate(candidate);
-  if (
-    isEvergreenAffiliateCandidate(candidate) &&
-    isTryoutCandidate(candidate)
-  ) {
-    reasons.push("tryouts cannot be evergreen");
-  } else if (
-    !isEvergreenAffiliateCandidate(candidate) &&
-    (!start || start.getTime() <= now.getTime())
-  ) {
-    reasons.push(
-      start ? "start is not in the future" : "missing source start date",
-    );
-  }
-  const registrationDeadline = candidateRegistrationDeadline(candidate);
-  if (registrationDeadline && registrationDeadline.getTime() < now.getTime()) {
-    reasons.push("registration deadline passed");
-  }
-  return reasons;
+  return nonNullReasons([
+    candidateTimeZoneRejectionReason(candidate),
+    candidateStartRejectionReason(candidate, now),
+    candidateDeadlineRejectionReason(candidate, now),
+  ]);
 };
 
-const assertEventOrTeamCandidateImportable = (candidate: any) => {
+const assertEventOrTeamCandidateImportable = (candidate: AffiliateCandidateRecord) => {
   const start = candidateStartDate(candidate);
   if (
     isEvergreenAffiliateCandidate(candidate) &&
@@ -381,7 +424,7 @@ const assertEventOrTeamCandidateImportable = (candidate: any) => {
 };
 
 const candidateValue = (
-  candidate: AffiliateCandidateInput,
+  candidate: AffiliateCandidateDateTimeInput,
   fieldName: string,
 ): string => {
   const value = (candidate as Record<string, unknown>)[fieldName];
@@ -390,7 +433,7 @@ const candidateValue = (
 
 export const buildAffiliateCandidateDedupeKey = (
   sourceId: string,
-  candidate: AffiliateCandidateInput,
+  candidate: AffiliateCandidateDateTimeInput,
   mapping?: AffiliateScrapeMapping,
 ): string => {
   const fields = mapping?.dedupe?.fields?.length
@@ -402,6 +445,41 @@ export const buildAffiliateCandidateDedupeKey = (
   ].join("|");
   return createHash("sha256").update(raw).digest("hex");
 };
+const affiliateNullableValue = <T>(
+  value: T | null | undefined,
+): T | null => (value === undefined ? null : value);
+
+const affiliateValueOrDefault = <T>(
+  value: T | null | undefined,
+  fallback: T,
+): T => (value == null ? fallback : value);
+
+const candidatePersistencePayload = (
+  candidate: AffiliateCandidateInput,
+): Record<string, unknown> => {
+  const rawPayload = {
+    ...recordValue(candidate.rawPayload),
+  };
+  if (candidate.listingKind === "EVENT") {
+    delete rawPayload.officialSchedulingMode;
+    rawPayload.staffingPriority = staffingPriorityFromAffiliateCandidate(
+      candidate as unknown as Record<string, unknown>,
+    );
+  }
+  rawPayload.tags =
+    candidate.listingKind === "EVENT"
+      ? buildAffiliateEventTagNames(candidate)
+      : [];
+  rawPayload.normalizedImport = buildAffiliateImportMetadata(candidate);
+  rawPayload.sportNames = candidateSportNames(candidate);
+  return rawPayload;
+};
+
+const supplySourcePersistenceData = (
+  supplySourceId: string | null | undefined,
+): Record<string, string> =>
+  supplySourceId ? { supplySourceId } : {};
+
 const candidatePersistenceData = (params: {
   sourceId: string;
   supplySourceId?: string | null;
@@ -418,59 +496,46 @@ const candidatePersistenceData = (params: {
     dedupeKey,
     candidate,
   } = params;
-  const tagNames =
-    candidate.listingKind === "EVENT"
-      ? buildAffiliateEventTagNames(candidate)
-      : [];
-  const rawPayload = {
-    ...recordValue(candidate.rawPayload),
-  };
-  if (candidate.listingKind === "EVENT") {
-    delete rawPayload.officialSchedulingMode;
-    rawPayload.staffingPriority = staffingPriorityFromAffiliateCandidate(
-      candidate as unknown as Record<string, unknown>,
-    );
-  }
-  rawPayload.tags = tagNames;
-  rawPayload.normalizedImport = buildAffiliateImportMetadata(candidate);
-  rawPayload.sportNames = candidateSportNames(candidate);
+  const rawPayload = candidatePersistencePayload(candidate);
   return {
     sourceId,
-    ...(supplySourceId ? { supplySourceId } : {}),
+    ...supplySourcePersistenceData(supplySourceId),
     runId,
     mappingId,
     listingKind: candidate.listingKind,
     dedupeKey,
     title: candidate.title,
-    organizerName: candidate.organizerName ?? null,
-    sportName: candidate.sportName ?? null,
-    formatLabel: candidate.formatLabel ?? null,
-    city: candidate.city ?? null,
-    venueName: candidate.venueName ?? null,
-    address: candidate.address ?? null,
+    organizerName: affiliateNullableValue(candidate.organizerName),
+    sportName: affiliateNullableValue(candidate.sportName),
+    formatLabel: affiliateNullableValue(candidate.formatLabel),
+    city: affiliateNullableValue(candidate.city),
+    venueName: affiliateNullableValue(candidate.venueName),
+    address: affiliateNullableValue(candidate.address),
     startsAt: parseDateOrNull(candidate.startsAt),
     endsAt: parseDateOrNull(candidate.endsAt),
-    timeZone: candidate.timeZone ?? null,
-    scheduleText: candidate.scheduleText ?? null,
+    timeZone: affiliateNullableValue(candidate.timeZone),
+    scheduleText: affiliateNullableValue(candidate.scheduleText),
     dateDisplayMode: normalizeDateDisplayMode(candidate.dateDisplayMode),
-    dateDisplayText: candidate.dateDisplayText ?? null,
-    skillLevel: candidate.skillLevel ?? null,
-    ageGroup: candidate.ageGroup ?? null,
-    divisionText: candidate.divisionText ?? null,
-    participantOptionsText: candidate.participantOptionsText ?? null,
-    priceText: candidate.priceText ?? null,
-    statusText: candidate.statusText ?? null,
-    registrationDeadlineText: candidate.registrationDeadlineText ?? null,
+    dateDisplayText: affiliateNullableValue(candidate.dateDisplayText),
+    skillLevel: affiliateNullableValue(candidate.skillLevel),
+    ageGroup: affiliateNullableValue(candidate.ageGroup),
+    divisionText: affiliateNullableValue(candidate.divisionText),
+    participantOptionsText: affiliateNullableValue(candidate.participantOptionsText),
+    priceText: affiliateNullableValue(candidate.priceText),
+    statusText: affiliateNullableValue(candidate.statusText),
+    registrationDeadlineText: affiliateNullableValue(
+      candidate.registrationDeadlineText,
+    ),
     officialActionUrl: candidate.officialActionUrl,
     sourceUrl: candidate.sourceUrl,
-    description: candidate.description ?? null,
+    description: affiliateNullableValue(candidate.description),
     rawPayload,
-    warnings: candidate.warnings ?? [],
+    warnings: affiliateValueOrDefault(candidate.warnings, []),
   };
 };
 
 const affiliateCandidateDateTimeRepairData = (
-  candidate: AffiliateCandidateInput,
+  candidate: AffiliateCandidateDateTimeInput,
   dedupeKey: string,
 ) => {
   const rawPayload = recordValue(candidate.rawPayload);
@@ -492,8 +557,23 @@ const affiliateCandidateDateTimeRepairData = (
   };
 };
 
+const parseAffiliateCandidateMapping = (
+  candidate: AffiliateCandidateRecord,
+  mappingId: string,
+  mappingValue: unknown,
+): AffiliateScrapeMapping => {
+  try {
+    return parseAffiliateScrapeMapping(mappingValue);
+  } catch {
+    throw new Error(
+      `Affiliate candidate ${candidate?.id ?? "unknown"} references invalid mapping ${mappingId}; ` +
+        "repair cannot safely recalculate its dedupe key.",
+    );
+  }
+};
+
 const mappingForAffiliateCandidateDedupe = async (
-  candidate: any,
+  candidate: AffiliateCandidateRecord,
   client: any = prisma,
 ): Promise<AffiliateScrapeMapping | undefined> => {
   const mappingId = nullableString(candidate?.mappingId);
@@ -507,21 +587,14 @@ const mappingForAffiliateCandidateDedupe = async (
         "repair cannot safely recalculate its dedupe key.",
     );
   }
-  try {
-    return parseAffiliateScrapeMapping(mappingRow.mapping);
-  } catch {
-    throw new Error(
-      `Affiliate candidate ${candidate?.id ?? "unknown"} references invalid mapping ${mappingId}; ` +
-        "repair cannot safely recalculate its dedupe key.",
-    );
-  }
+  return parseAffiliateCandidateMapping(candidate, mappingId, mappingRow.mapping);
 };
 
 const AFFILIATE_SPORT_REVIEW_WARNING =
   "Sport mapping is not a canonical Sports.name; human review is required.";
 
 const quarantineAffiliateCandidateTarget = async (
-  candidate: any,
+  candidate: AffiliateCandidateRecord,
   client: any = prisma,
 ): Promise<void> => {
   const { events, facilities, organizations } = affiliatePrisma(client);
@@ -601,372 +674,688 @@ export const listAffiliateSources = async () => {
   );
 };
 
+const createAffiliateSupplySourceIfReady = async (
+  input: AffiliateSourceCreateInput,
+  sourceId: string,
+  isLifecycleReady: boolean,
+  supplyDatabase: any,
+) => (
+  isLifecycleReady
+    ? ensureAffiliateSupplySource({
+        requestedUrl: input.listUrl,
+        resolvedCanonicalUrl: input.listUrl,
+        isRedirectVerified: true,
+        targetKind: input.targetKind,
+        liveSourceId: sourceId,
+        db: supplyDatabase,
+      })
+    : null
+);
+
+const affiliateSourceCreateData = (
+  input: AffiliateSourceCreateInput,
+  sourceId: string,
+  isLifecycleReady: boolean,
+) => ({
+  id: sourceId,
+  name: input.name.trim(),
+  sourceKey: input.sourceKey.trim(),
+  organizationId: nullableString(input.organizationId),
+  baseUrl: nullableString(input.baseUrl),
+  listUrl: input.listUrl.trim(),
+  targetKind: normalizeStatus(input.targetKind, "EVENT"),
+  status: normalizeStatus(input.status, "ACTIVE"),
+  autoScrapeEnabled: isLifecycleReady ? false : input.autoScrapeEnabled === true,
+  scrapeIntervalMinutes:
+    typeof input.scrapeIntervalMinutes === "number" &&
+    Number.isInteger(input.scrapeIntervalMinutes) &&
+    input.scrapeIntervalMinutes >= 60
+      ? input.scrapeIntervalMinutes
+      : 1440,
+  notes: nullableString(input.notes),
+  metadata: input.metadata ?? null,
+});
+
+const affiliateSourceMappingData = (
+  input: AffiliateSourceCreateInput,
+  sourceId: string,
+  supply: any,
+  isLifecycleReady: boolean,
+  adminUserId: string | undefined,
+) => ({
+  id: createId(),
+  sourceId,
+  ...(supply ? { supplySourceId: supply.supplySource.id } : {}),
+  version: 1,
+  isActive: !isLifecycleReady,
+  mapping: input.mapping,
+  createdByUserId: adminUserId ?? null,
+});
+
+const createAffiliateSourceInTransaction = async (
+  input: AffiliateSourceCreateInput,
+  adminUserId: string | undefined,
+  transactionClient: any,
+) => {
+  const { sources, mappings } = affiliatePrisma(transactionClient);
+  const sourceId = createId();
+  const supplyDatabase = affiliateSupplyDatabase(transactionClient);
+  const isLifecycleReady = Boolean(supplyDatabase.supplySources?.findUnique);
+  const source = await sources.create({
+    data: affiliateSourceCreateData(input, sourceId, isLifecycleReady),
+  });
+  const supply = await createAffiliateSupplySourceIfReady(
+    input,
+    sourceId,
+    isLifecycleReady,
+    supplyDatabase,
+  );
+  if (supply) {
+    await sources.update({
+      where: { id: sourceId },
+      data: { supplySourceId: supply.supplySource.id },
+    });
+  }
+  if (!input.mapping) {
+    return supply
+      ? { ...source, supplySourceId: supply.supplySource.id }
+      : source;
+  }
+  const mapping = await mappings.create({
+    data: affiliateSourceMappingData(
+      input,
+      sourceId,
+      supply,
+      isLifecycleReady,
+      adminUserId,
+    ),
+  });
+  return sources.update({
+    where: { id: sourceId },
+    data: { activeMappingId: mapping.id },
+  });
+};
+
 export const createAffiliateSource = async (
   input: AffiliateSourceCreateInput,
   adminUserId?: string,
-) => {
-  const execute = async (transactionClient: any) => {
-    const { sources, mappings } = affiliatePrisma(transactionClient);
-    const sourceId = createId();
-    const supplyDatabase = affiliateSupplyDatabase(transactionClient);
-    const isLifecycleReady = Boolean(supplyDatabase.supplySources?.findUnique);
-    const source = await sources.create({
-      data: {
-        id: sourceId,
-        name: input.name.trim(),
-        sourceKey: input.sourceKey.trim(),
-        organizationId: nullableString(input.organizationId),
-        baseUrl: nullableString(input.baseUrl),
-        listUrl: input.listUrl.trim(),
-        targetKind: normalizeStatus(input.targetKind, "EVENT"),
-        status: normalizeStatus(input.status, "ACTIVE"),
-        autoScrapeEnabled: isLifecycleReady ? false : input.autoScrapeEnabled === true,
-        scrapeIntervalMinutes:
-          typeof input.scrapeIntervalMinutes === "number" &&
-          Number.isInteger(input.scrapeIntervalMinutes) &&
-          input.scrapeIntervalMinutes >= 60
-            ? input.scrapeIntervalMinutes
-            : 1440,
-        notes: nullableString(input.notes),
-        metadata: input.metadata ?? null,
-      },
-    });
-    const supply = isLifecycleReady
-      ? await ensureAffiliateSupplySource({
-          requestedUrl: input.listUrl,
-          resolvedCanonicalUrl: input.listUrl,
-          isRedirectVerified: true,
-          targetKind: input.targetKind,
-          liveSourceId: sourceId,
-          db: supplyDatabase,
-        })
-      : null;
-    if (supply) {
-      await sources.update({
-        where: { id: sourceId },
-        data: { supplySourceId: supply.supplySource.id },
-      });
-    }
-    if (!input.mapping) {
-      return supply
-        ? { ...source, supplySourceId: supply.supplySource.id }
-        : source;
-    }
-    const mapping = await mappings.create({
-      data: {
-        id: createId(),
-        sourceId,
-        ...(supply ? { supplySourceId: supply.supplySource.id } : {}),
-        version: 1,
-        isActive: !isLifecycleReady,
-        mapping: input.mapping,
-        createdByUserId: adminUserId ?? null,
-      },
-    });
-    return sources.update({
-      where: { id: sourceId },
-      data: { activeMappingId: mapping.id },
-    });
+) =>
+  withAffiliateScrapeTransaction(
+    prisma,
+    (transactionClient: any) =>
+      createAffiliateSourceInTransaction(input, adminUserId, transactionClient),
+  );
+
+const assertAffiliateSourceAutomationSource = (source: any): void => {
+  if (!source) throw new Error("Affiliate scrape source not found.");
+  if (!source.activeMappingId) {
+    throw new Error("No active scrape mapping is configured for this source.");
+  }
+};
+
+const assertAffiliateSourceAutomationMapping = (
+  source: any,
+  mapping: any,
+): void => {
+  if (!mapping || mapping.sourceId !== source.id) {
+    throw new Error("The active scrape mapping does not belong to this source.");
+  }
+};
+
+const assertAffiliateSourceAutomationRun = (latestRun: any): void => {
+  if (!latestRun) {
+    throw new Error(
+      "Run and review a successful first-pass scrape before enabling automatic imports.",
+    );
+  }
+};
+
+const assertAffiliateSourceAutomationBaseline = (baseline: any): void => {
+  if (baseline.candidateCount === 0) {
+    throw new Error(
+      "The first-pass scrape must contain at least one reviewable candidate before automatic imports can be enabled.",
+    );
+  }
+};
+
+type AffiliateSourceAutomationApprovalContext = Readonly<{
+  source: any;
+  mapping: any;
+  latestRun: any;
+  baseline: any;
+  mappingPackageHash: string;
+  approvedAt: Date;
+  supplyDatabase: any;
+  activeContract: any;
+  sources: any;
+  mappings: any;
+  candidates: any;
+}>;
+
+const loadAffiliateSourceAutomationApprovalContext = async (
+  sourceId: string,
+  transactionClient: any,
+): Promise<AffiliateSourceAutomationApprovalContext> => {
+  const { sources, mappings, runs, candidates } = affiliatePrisma(transactionClient);
+  const supplyDatabase = affiliateSupplyDatabase(transactionClient);
+  const source = await sources.findUnique({ where: { id: sourceId } });
+  assertAffiliateSourceAutomationSource(source);
+  const mapping = await mappings.findUnique({ where: { id: source.activeMappingId } });
+  assertAffiliateSourceAutomationMapping(source, mapping);
+  const latestRun = await runs.findFirst({
+    where: { sourceId, mappingId: mapping.id, status: "SUCCEEDED" },
+    orderBy: { startedAt: "desc" },
+  });
+  assertAffiliateSourceAutomationRun(latestRun);
+  const baselineCandidates = await candidates.findMany({
+    where: { runId: latestRun.id },
+    select: {
+      listingKind: true,
+      title: true,
+      officialActionUrl: true,
+      sourceUrl: true,
+      startsAt: true,
+      dateDisplayMode: true,
+      city: true,
+      venueName: true,
+      address: true,
+      priceText: true,
+    },
+  });
+  const runLogs = recordValue(latestRun.logs);
+  const approvedAt = new Date();
+  const baseline = buildAffiliateAutomationBaseline({
+    mappingId: mapping.id,
+    mappingVersion: Number.isInteger(mapping.version) ? mapping.version : 1,
+    approvedAt,
+    candidates: baselineCandidates,
+    rejectedCount: typeof runLogs.rejectedCount === "number" ? runLogs.rejectedCount : 0,
+  });
+  assertAffiliateSourceAutomationBaseline(baseline);
+  const mappingPackageHash = hashAffiliateAgentValue(mapping.mapping ?? {});
+  const isLifecycleReady = Boolean(
+    source.supplySourceId
+      && typeof supplyDatabase.supplySources.findUnique === "function"
+      && typeof supplyDatabase.approvals.upsert === "function"
+      && typeof supplyDatabase.transitions.create === "function",
+  );
+  const activeContract = isLifecycleReady
+    ? await loadActiveAffiliateSupplyContract({ db: supplyDatabase })
+    : null;
+  return {
+    source,
+    mapping,
+    latestRun,
+    baseline,
+    mappingPackageHash,
+    approvedAt,
+    supplyDatabase,
+    activeContract,
+    sources,
+    mappings,
+    candidates,
   };
-  const client = prisma as any;
-  return typeof client.$transaction === "function"
-    ? client.$transaction((transactionClient: any) => execute(transactionClient), {
-        isolationLevel: "Serializable",
-      })
-    : execute(client);
+};
+
+const approveAffiliateSourceThroughLifecycle = async (
+  context: AffiliateSourceAutomationApprovalContext,
+  sourceId: string,
+  adminUserId: string,
+) => {
+  const currentRoot = await context.supplyDatabase.supplySources.findUnique({
+    where: { id: context.source.supplySourceId },
+  });
+  if (!currentRoot) {
+    throw new Error("Affiliate Supply Source root not found.");
+  }
+  await executeAffiliateSupplyLifecycleCommand({
+    supplySourceId: context.source.supplySourceId,
+    command: "APPROVE",
+    authority: "SUPPLY_REVIEWER",
+    expectedLifecycleGeneration: currentRoot.lifecycleGeneration,
+    idempotencyKey: `approve:${context.mapping.id}:${context.baseline.normalizedFieldsHash}`,
+    request: {
+      sourceId,
+      mappingId: context.mapping.id,
+      packageHash: context.mappingPackageHash,
+      baseline: context.baseline,
+      evidenceRefs: [`mapping:${context.mapping.id}`, `run:${context.latestRun.id}`],
+      lifecycleEvidenceKinds: ["DURABLE_SOURCE_EVIDENCE", "VALIDATION_OUTPUT"],
+    },
+    actorKind: "SUPPLY_REVIEWER",
+    actorId: adminUserId,
+    db: context.supplyDatabase,
+    now: context.approvedAt,
+  });
+  return context.sources.findUnique({ where: { id: sourceId } });
+};
+
+const approveAffiliateSourceWithoutLifecycle = async (
+  context: AffiliateSourceAutomationApprovalContext,
+  adminUserId: string,
+) => {
+  await context.mappings.update({
+    where: { id: context.mapping.id },
+    data: {
+      validatedAt: context.approvedAt,
+      notes: [
+        nullableString(context.mapping.notes),
+        `Mapping reviewed by ${adminUserId} on ${context.approvedAt.toISOString()}`,
+      ].filter(Boolean).join("\n"),
+    },
+  });
+  return context.sources.update({
+    where: { id: context.source.id },
+    data: {
+      autoScrapeEnabled: false,
+      metadata: {
+        ...recordValue(context.source.metadata),
+        [AFFILIATE_AUTOMATION_BASELINE_METADATA_KEY]: context.baseline,
+        [AFFILIATE_AUTOMATION_REVIEW_METADATA_KEY]: {
+          hold: true,
+          reason: "SUPPLY_SOURCE_ROOT_REQUIRED",
+        },
+      },
+    },
+  });
+};
+
+const approveAffiliateSourceInTransaction = async (
+  sourceId: string,
+  adminUserId: string,
+  transactionClient: any,
+) => {
+  const context = await loadAffiliateSourceAutomationApprovalContext(
+    sourceId,
+    transactionClient,
+  );
+  if (
+    context.activeContract &&
+    context.source.supplySourceId
+  ) {
+    return approveAffiliateSourceThroughLifecycle(context, sourceId, adminUserId);
+  }
+  return approveAffiliateSourceWithoutLifecycle(context, adminUserId);
 };
 
 export const approveAffiliateSourceAutomation = async (
   sourceId: string,
   adminUserId: string,
-) => {
-  const execute = async (transactionClient: any) => {
-    const { sources, mappings, runs, candidates } = affiliatePrisma(transactionClient);
-    const supplyDatabase = affiliateSupplyDatabase(transactionClient);
-    const source = await sources.findUnique({ where: { id: sourceId } });
-    if (!source) throw new Error("Affiliate scrape source not found.");
-    if (!source.activeMappingId) {
-      throw new Error("No active scrape mapping is configured for this source.");
-    }
-    const mapping = await mappings.findUnique({ where: { id: source.activeMappingId } });
-    if (!mapping || mapping.sourceId !== source.id) {
-      throw new Error("The active scrape mapping does not belong to this source.");
-    }
-    const latestRun = await runs.findFirst({
-      where: { sourceId, mappingId: mapping.id, status: "SUCCEEDED" },
-      orderBy: { startedAt: "desc" },
-    });
-    if (!latestRun) {
-      throw new Error("Run and review a successful first-pass scrape before enabling automatic imports.");
-    }
-    const baselineCandidates = await candidates.findMany({
-      where: { runId: latestRun.id },
-      select: {
-        listingKind: true,
-        title: true,
-        officialActionUrl: true,
-        sourceUrl: true,
-        startsAt: true,
-        dateDisplayMode: true,
-        city: true,
-        venueName: true,
-        address: true,
-        priceText: true,
-      },
-    });
-    const runLogs = recordValue(latestRun.logs);
-    const approvedAt = new Date();
-    const baseline = buildAffiliateAutomationBaseline({
-      mappingId: mapping.id,
-      mappingVersion: Number.isInteger(mapping.version) ? mapping.version : 1,
-      approvedAt,
-      candidates: baselineCandidates,
-      rejectedCount: typeof runLogs.rejectedCount === "number" ? runLogs.rejectedCount : 0,
-    });
-    const mappingPackageHash = hashAffiliateAgentValue(mapping.mapping ?? {});
-    if (baseline.candidateCount === 0) {
-      throw new Error("The first-pass scrape must contain at least one reviewable candidate before automatic imports can be enabled.");
-    }
-    const isLifecycleReady = Boolean(
-      source.supplySourceId
-      && typeof supplyDatabase.supplySources.findUnique === "function"
-      && typeof supplyDatabase.approvals.upsert === "function"
-      && typeof supplyDatabase.transitions.create === "function"
-    );
-    const activeContract = isLifecycleReady
-      ? await loadActiveAffiliateSupplyContract({ db: supplyDatabase })
-      : null;
-
-    let updatedSource;
-    if (isLifecycleReady && source.supplySourceId && activeContract) {
-      const currentRoot = await supplyDatabase.supplySources.findUnique({
-        where: { id: source.supplySourceId },
-      });
-      if (!currentRoot) {
-        throw new Error("Affiliate Supply Source root not found.");
-      }
-      await executeAffiliateSupplyLifecycleCommand({
-        supplySourceId: source.supplySourceId,
-        command: 'APPROVE',
-        authority: 'SUPPLY_REVIEWER',
-        expectedLifecycleGeneration: currentRoot.lifecycleGeneration,
-        idempotencyKey: `approve:${mapping.id}:${baseline.normalizedFieldsHash}`,
-        request: {
-          sourceId,
-          mappingId: mapping.id,
-          packageHash: mappingPackageHash,
-          baseline,
-          evidenceRefs: [`mapping:${mapping.id}`, `run:${latestRun.id}`],
-          lifecycleEvidenceKinds: ['DURABLE_SOURCE_EVIDENCE', 'VALIDATION_OUTPUT'],
-        },
-        actorKind: 'SUPPLY_REVIEWER',
-        actorId: adminUserId,
-        db: supplyDatabase,
-        now: approvedAt,
-      });
-      updatedSource = await sources.findUnique({ where: { id: sourceId } });
-    } else {
-      await mappings.update({
-        where: { id: mapping.id },
-        data: {
-          validatedAt: approvedAt,
-          notes: [
-            nullableString(mapping.notes),
-            `Mapping reviewed by ${adminUserId} on ${approvedAt.toISOString()}`,
-          ].filter(Boolean).join("\n"),
-        },
-      });
-      updatedSource = await sources.update({
-        where: { id: sourceId },
-        data: {
-          autoScrapeEnabled: false,
-          metadata: {
-            ...recordValue(source.metadata),
-            [AFFILIATE_AUTOMATION_BASELINE_METADATA_KEY]: baseline,
-            [AFFILIATE_AUTOMATION_REVIEW_METADATA_KEY]: {
-              hold: true,
-              reason: "SUPPLY_SOURCE_ROOT_REQUIRED",
-            },
-          },
-        },
-      });
-    }
-    return updatedSource;
-  };
-  const client = prisma as any;
-  return typeof client.$transaction === "function"
-    ? client.$transaction((transactionClient: any) => execute(transactionClient), { isolationLevel: "Serializable" })
-    : execute(client);
-};
+) =>
+  withAffiliateScrapeTransaction(
+    prisma,
+    (transactionClient: any) =>
+      approveAffiliateSourceInTransaction(
+        sourceId,
+        adminUserId,
+        transactionClient,
+      ),
+  );
 export type AffiliateSourceActivationInput = Readonly<{
   candidateReviewId: string;
 }>;
 export const recordAffiliateSourceCandidateReview = recordAffiliateCandidateReview;
+
+type DeferredAffiliateOrganizationLogo = Readonly<{
+  candidateId: string;
+  organizationId: string;
+}>;
+
+const loadAffiliateSourceActivationContext = async (
+  sourceId: string,
+  transactionClient: any,
+) => {
+  const { sources, mappings } = affiliatePrisma(transactionClient);
+  const supplyDatabase = affiliateSupplyDatabase(transactionClient);
+  const source = await sources.findUnique({ where: { id: sourceId } });
+  if (!source?.supplySourceId) {
+    throw new Error("Affiliate source is not linked to a Supply Source root.");
+  }
+  if (!source.activeMappingId) {
+    throw new Error("No active scrape mapping is configured for this source.");
+  }
+  const mapping = await mappings.findUnique({ where: { id: source.activeMappingId } });
+  if (!mapping || mapping.sourceId !== source.id) {
+    throw new Error("The active scrape mapping does not belong to this source.");
+  }
+  const baseline = parseAffiliateAutomationBaseline(
+    recordValue(source.metadata)[AFFILIATE_AUTOMATION_BASELINE_METADATA_KEY],
+  );
+  if (!baseline) {
+    throw new Error("Affiliate source has no reviewed automation baseline.");
+  }
+  const root = await supplyDatabase.supplySources.findUnique({
+    where: { id: source.supplySourceId },
+  });
+  if (!root) {
+    throw new Error("Affiliate Supply Source root not found.");
+  }
+  return {
+    sources,
+    source,
+    mapping,
+    baseline,
+    root,
+    supplyDatabase,
+    mappingPackageHash: hashAffiliateAgentValue(mapping.mapping ?? {}),
+  };
+};
+
+const affiliateActivationEvidenceRefs = (
+  target: Record<string, unknown>,
+): string[] =>
+  Array.isArray(target.evidenceRefs)
+    ? target.evidenceRefs.filter(
+        (value): value is string => typeof value === "string",
+      )
+    : [];
+
+export const publishAffiliateActivationTarget = async (params: {
+  client: AffiliateSupplyClient;
+  target: Record<string, unknown>;
+  adminUserId: string;
+  deferredOrganizationLogos: DeferredAffiliateOrganizationLogo[];
+  candidate?: AffiliateCandidateRecord;
+  source?: AffiliateScrapeSourceRow;
+}) => {
+  const candidateId = nullableString(params.target.candidateId);
+  if (!candidateId) {
+    throw new Error("Affiliate activation target requires a candidate.");
+  }
+  const candidate = params.candidate
+    ?? await affiliatePrisma(params.client).candidates.findUnique({
+      where: { id: candidateId },
+    });
+  if (!candidate) {
+    throw new Error("Affiliate import candidate not found.");
+  }
+  const targetRoute = affiliateTargetRouteForCandidate(candidate);
+  if (!targetRoute) {
+    throw new Error("Affiliate listing kind is required for lifecycle activation.");
+  }
+  const publishedTarget = await publishAffiliateCandidateDirect(candidateId, {
+    publishedByUserId: params.adminUserId,
+    deferOrganizationLogo: targetRoute.targetType === "ORGANIZATION",
+    client: params.client,
+    candidate,
+    source: params.source,
+  });
+  if (!publishedTarget?.id) {
+    throw new Error("Affiliate lifecycle activation did not publish a target.");
+  }
+  if (targetRoute.targetType === "ORGANIZATION") {
+    params.deferredOrganizationLogos.push({
+      candidateId,
+      organizationId: String(publishedTarget.id),
+    });
+  }
+  return {
+    targetType: targetRoute.targetType,
+    targetId: String(publishedTarget.id),
+    sourceProfile:
+      nullableString(params.target.sourceProfile) ?? targetRoute.listingKind,
+    candidateId,
+    marketKey: nullableString(params.target.marketKey),
+    sportId: nullableString(params.target.sportId),
+    evidenceRefs: affiliateActivationEvidenceRefs(params.target),
+  };
+};
+type AffiliateSupplyActivationTargetWriter = NonNullable<
+  ExecuteAffiliateSupplyLifecycleCommandInput["activationTargetWriter"]
+>;
+
+export type AffiliateSupplyActivationTargetWriterBinding = Readonly<{
+  actorId: string;
+  claimId: string;
+  claimGeneration: number;
+  invocationId: string;
+  supplySourceId: string;
+}>;
+
+export const createAffiliateSupplyActivationTargetWriter = (
+  binding: AffiliateSupplyActivationTargetWriterBinding,
+): AffiliateSupplyActivationTargetWriter => {
+  const actorId = nullableString(binding.actorId);
+  if (
+    !actorId
+    || !nullableString(binding.claimId)
+    || !nullableString(binding.invocationId)
+    || !Number.isInteger(binding.claimGeneration)
+    || binding.claimGeneration < 1
+    || !nullableString(binding.supplySourceId)
+  ) {
+    throw new Error("Affiliate lifecycle activation target writer binding is incomplete.");
+  }
+  return async ({
+    database,
+    client,
+    request,
+    target,
+    candidate,
+  }): Promise<AffiliateSupplyLifecycleTargetWrite> => {
+    const requestClaimGeneration = typeof request.reviewerClaimGeneration === "number"
+      ? request.reviewerClaimGeneration
+      : null;
+    if (
+      nullableString(request.reviewerWorkerId) !== actorId
+      || nullableString(request.reviewerClaimId) !== binding.claimId
+      || nullableString(request.reviewerInvocationId) !== binding.invocationId
+      || requestClaimGeneration !== binding.claimGeneration
+      || nullableString(request.reviewerSupplySourceId) !== binding.supplySourceId
+    ) {
+      throw new Error("Affiliate lifecycle activation target writer is not bound to the admitted reviewer.");
+    }
+    const candidateId = nullableString(candidate.id);
+    if (!candidateId || nullableString(target.candidateId) !== candidateId) {
+      throw new Error("Affiliate lifecycle activation target writer candidate identity is invalid.");
+    }
+    const root = await database.supplySources.findUnique({
+      where: { id: binding.supplySourceId },
+    });
+    if (!root) {
+      throw new Error("Affiliate lifecycle activation target writer Supply Source root is unavailable.");
+    }
+    const currentCandidate = await database.candidates.findUnique({
+      where: { id: candidateId },
+    });
+    if (!currentCandidate || currentCandidate.id !== candidateId) {
+      throw new Error("Affiliate lifecycle activation target writer candidate is unavailable.");
+    }
+    const currentCandidateSourceId = nullableString(currentCandidate.sourceId);
+    if (!currentCandidateSourceId) {
+      throw new Error("Affiliate lifecycle activation target writer candidate source is unavailable.");
+    }
+    const currentSource = await database.sources.findUnique({
+      where: { id: currentCandidateSourceId },
+    });
+    if (
+      !currentSource
+      || nullableString(currentSource.supplySourceId) !== binding.supplySourceId
+      || (
+        nullableString(request.sourceId)
+        && nullableString(request.sourceId) !== currentSource.id
+      )
+    ) {
+      throw new Error("Affiliate lifecycle activation target writer source lineage is invalid.");
+    }
+    const currentListingKind = nullableString(currentCandidate.listingKind)?.toUpperCase();
+    const reviewedListingKind = nullableString(candidate.listingKind)?.toUpperCase();
+    if (!currentListingKind || (reviewedListingKind && currentListingKind !== reviewedListingKind)) {
+      throw new Error("Affiliate lifecycle activation target writer candidate kind is stale.");
+    }
+    if (nullableString(currentCandidate.status)?.toUpperCase() === "REJECTED") {
+      throw new Error("Affiliate lifecycle activation target writer cannot publish a rejected candidate.");
+    }
+    const expectedTargetType = ({
+      EVENT: "EVENT",
+      TEAM: "TEAM",
+      RENTAL: "FACILITY",
+      CLUB: "ORGANIZATION",
+    } as const)[currentListingKind as "EVENT" | "TEAM" | "RENTAL" | "CLUB"];
+    if (
+      !expectedTargetType
+      || nullableString(target.targetType)?.toUpperCase() !== expectedTargetType
+    ) {
+      throw new Error("Affiliate lifecycle activation target writer target kind is invalid.");
+    }
+    const publishedIdField = ({
+      EVENT: "publishedEventId",
+      TEAM: "publishedTeamId",
+      RENTAL: "publishedFacilityId",
+      CLUB: "publishedOrganizationId",
+    } as const)[currentListingKind as "EVENT" | "TEAM" | "RENTAL" | "CLUB"];
+    if (nullableString(currentCandidate[publishedIdField])) {
+      throw new Error("Affiliate lifecycle activation target writer candidate already has a target.");
+    }
+    const currentCandidateForPublication: AffiliateCandidateRecord = {
+      ...currentCandidate,
+      listingKind: normalizeListingKind(currentCandidate.listingKind),
+      rawPayload: recordValue(currentCandidate.rawPayload),
+    };
+    return publishAffiliateActivationTarget({
+      client,
+      candidate: currentCandidateForPublication,
+      target,
+      adminUserId: actorId,
+      deferredOrganizationLogos: [],
+      source: currentSource,
+    });
+  };
+};
+
+const activateAffiliateSourceInTransaction = async (
+  sourceId: string,
+  adminUserId: string,
+  input: AffiliateSourceActivationInput,
+  transactionClient: any,
+) => {
+  const context = await loadAffiliateSourceActivationContext(
+    sourceId,
+    transactionClient,
+  );
+  const now = new Date();
+  const deferredOrganizationLogos: DeferredAffiliateOrganizationLogo[] = [];
+  await executeAffiliateSupplyLifecycleCommand({
+    supplySourceId: context.source.supplySourceId,
+    command: "ACTIVATE",
+    authority: "SUPPLY_REVIEWER",
+    expectedLifecycleGeneration: context.root.lifecycleGeneration,
+    idempotencyKey: `activate:${context.mapping.id}:${context.baseline.normalizedFieldsHash}:${hashAffiliateAgentValue(input)}`,
+    request: {
+      sourceId,
+      mappingId: context.mapping.id,
+      packageHash: context.mappingPackageHash,
+      baselineHash: context.baseline.normalizedFieldsHash,
+      candidateReviewId: input.candidateReviewId,
+      evidenceRefs: [
+        `mapping:${context.mapping.id}`,
+        `supply-source:${context.source.supplySourceId}`,
+        `candidate-review:${input.candidateReviewId}`,
+      ],
+    },
+    actorKind: "SUPPLY_REVIEWER",
+    actorId: adminUserId,
+    db: context.supplyDatabase,
+    activationTargetWriter: ({ client, target }) =>
+      publishAffiliateActivationTarget({
+        client,
+        target,
+        adminUserId,
+        deferredOrganizationLogos,
+      }),
+    now,
+  });
+  const committedSource = await context.sources.findUnique({
+    where: { id: sourceId },
+  });
+  if (!committedSource) {
+    throw new Error("Affiliate source disappeared after lifecycle activation.");
+  }
+  return { source: committedSource, deferredOrganizationLogos };
+};
+
+const replayAffiliateOrganizationCandidateIds = (
+  candidateReview: any,
+): Set<string> => {
+  const reviewDecision = recordValue(candidateReview?.decision);
+  const reviewTargets = Array.isArray(reviewDecision.targets)
+    ? reviewDecision.targets.filter(
+        (target): target is Record<string, unknown> => (
+          Boolean(target) && typeof target === "object" && !Array.isArray(target)
+        ),
+      )
+    : [];
+  return new Set(
+    reviewTargets
+      .filter((target) => (
+        nullableString(target.targetType)?.toUpperCase() === "ORGANIZATION" &&
+        (nullableString(target.status)?.toUpperCase() ?? "PUBLISHED") === "PUBLISHED"
+      ))
+      .map((target) => nullableString(target.candidateId))
+      .filter((candidateId): candidateId is string => Boolean(candidateId)),
+  );
+};
+
+const replayAffiliateOrganizationLogos = async (
+  input: AffiliateSourceActivationInput,
+  adminUserId: string,
+  committed: {
+    deferredOrganizationLogos: DeferredAffiliateOrganizationLogo[];
+  },
+) => {
+  const { candidates, approvals } = affiliatePrisma();
+  const candidateReview =
+    typeof approvals?.findUnique === "function"
+      ? await approvals.findUnique({ where: { id: input.candidateReviewId } })
+      : null;
+  const replayIds = replayAffiliateOrganizationCandidateIds(candidateReview);
+  const deferred = committed.deferredOrganizationLogos;
+  const byCandidate = new Map(
+    deferred.map((logo) => [logo.candidateId, logo.organizationId]),
+  );
+  const candidateIds = Array.from(new Set([
+    ...deferred.map((logo) => logo.candidateId),
+    ...replayIds,
+  ]));
+  if (!candidateIds.length || typeof candidates.findMany !== "function") {
+    return;
+  }
+  const candidateRows = await candidates.findMany({
+    where: { id: { in: candidateIds } },
+  }) as Array<AffiliateCandidateRecord>;
+  for (const candidate of candidateRows) {
+    const candidateId = nullableString(candidate?.id);
+    if (!candidateId) continue;
+    const organizationId =
+      byCandidate.get(candidateId) ??
+      nullableString(candidate.publishedOrganizationId);
+    if (!organizationId) continue;
+    await upsertAffiliateOrganizationLogoForCandidate(
+      candidate,
+      organizationId,
+      adminUserId,
+      prisma,
+      { assignOrganizationLogo: true },
+    );
+  }
+};
 
 export const activateAffiliateSourceAutomation = async (
   sourceId: string,
   adminUserId: string,
   input: AffiliateSourceActivationInput,
 ) => {
-  const execute = async (transactionClient: any) => {
-    const { sources, mappings } = affiliatePrisma(transactionClient);
-    const supplyDatabase = affiliateSupplyDatabase(transactionClient);
-    const source = await sources.findUnique({ where: { id: sourceId } });
-    if (!source?.supplySourceId) {
-      throw new Error("Affiliate source is not linked to a Supply Source root.");
-    }
-    if (!source.activeMappingId) {
-      throw new Error("No active scrape mapping is configured for this source.");
-    }
-    const mapping = await mappings.findUnique({ where: { id: source.activeMappingId } });
-    if (!mapping || mapping.sourceId !== source.id) {
-      throw new Error("The active scrape mapping does not belong to this source.");
-    }
-    const baseline = parseAffiliateAutomationBaseline(
-      recordValue(source.metadata)[AFFILIATE_AUTOMATION_BASELINE_METADATA_KEY],
-    );
-    if (!baseline) {
-      throw new Error("Affiliate source has no reviewed automation baseline.");
-    }
-    const mappingPackageHash = hashAffiliateAgentValue(mapping.mapping ?? {});
-    const root = await supplyDatabase.supplySources.findUnique({
-      where: { id: source.supplySourceId },
-    });
-    if (!root) {
-      throw new Error("Affiliate Supply Source root not found.");
-    }
-    const now = new Date();
-    const deferredOrganizationLogos: Array<{
-      candidateId: string;
-      organizationId: string;
-    }> = [];
-    await executeAffiliateSupplyLifecycleCommand({
-      supplySourceId: source.supplySourceId,
-      command: 'ACTIVATE',
-      authority: 'SUPPLY_REVIEWER',
-      expectedLifecycleGeneration: root.lifecycleGeneration,
-      idempotencyKey: `activate:${mapping.id}:${baseline.normalizedFieldsHash}:${hashAffiliateAgentValue(input)}`,
-      request: {
+  const committed = await withAffiliateScrapeTransaction(
+    prisma,
+    (transactionClient: any) =>
+      activateAffiliateSourceInTransaction(
         sourceId,
-        mappingId: mapping.id,
-        packageHash: mappingPackageHash,
-        baselineHash: baseline.normalizedFieldsHash,
-        candidateReviewId: input.candidateReviewId,
-        evidenceRefs: [
-          `mapping:${mapping.id}`,
-          `supply-source:${source.supplySourceId}`,
-          `candidate-review:${input.candidateReviewId}`,
-        ],
-      },
-      actorKind: 'SUPPLY_REVIEWER',
-      actorId: adminUserId,
-      db: supplyDatabase,
-      activationTargetWriter: async ({ client, target }) => {
-        const candidateId = nullableString(target.candidateId);
-        if (!candidateId) {
-          throw new Error("Affiliate activation target requires a candidate.");
-        }
-        const candidate = await affiliatePrisma(client).candidates.findUnique({
-          where: { id: candidateId },
-        });
-        if (!candidate) {
-          throw new Error("Affiliate import candidate not found.");
-        }
-        const targetRoute = affiliateTargetRouteForCandidate(candidate);
-        if (!targetRoute) {
-          throw new Error("Affiliate listing kind is required for lifecycle activation.");
-        }
-        const publishedTarget = await publishAffiliateCandidateDirect(candidateId, {
-          publishedByUserId: adminUserId,
-          deferOrganizationLogo: targetRoute.targetType === 'ORGANIZATION',
-          client,
-          candidate,
-        });
-        if (!publishedTarget?.id) {
-          throw new Error("Affiliate lifecycle activation did not publish a target.");
-        }
-        if (targetRoute.targetType === 'ORGANIZATION') {
-          deferredOrganizationLogos.push({
-            candidateId,
-            organizationId: String(publishedTarget.id),
-          });
-        }
-        return {
-          targetType: targetRoute.targetType,
-          targetId: String(publishedTarget.id),
-          sourceProfile: nullableString(target.sourceProfile) ?? targetRoute.listingKind,
-          candidateId,
-          marketKey: nullableString(target.marketKey),
-          sportId: nullableString(target.sportId),
-          evidenceRefs: Array.isArray(target.evidenceRefs)
-            ? target.evidenceRefs.filter((value): value is string => typeof value === "string")
-            : [],
-        };
-      },
-      now,
-    });
-    const committedSource = await sources.findUnique({ where: { id: sourceId } });
-    if (!committedSource) {
-      throw new Error("Affiliate source disappeared after lifecycle activation.");
-    }
-    return { source: committedSource, deferredOrganizationLogos };
-  };
-  const client = prisma as any;
-  const committed = typeof client.$transaction === "function"
-    ? await client.$transaction(
-        (transactionClient: any) => execute(transactionClient),
-        { isolationLevel: "Serializable" },
-      )
-    : await execute(client);
-  const { candidates, approvals } = affiliatePrisma();
-  const candidateReview = typeof approvals?.findUnique === 'function'
-    ? await approvals.findUnique({ where: { id: input.candidateReviewId } })
-    : null;
-  const reviewDecision = recordValue(candidateReview?.decision);
-  const reviewTargets = Array.isArray(reviewDecision.targets)
-    ? reviewDecision.targets.filter(
-      (target): target is Record<string, unknown> => (
-        Boolean(target) && typeof target === 'object' && !Array.isArray(target)
-      ),
-    )
-    : [];
-  const replayOrganizationCandidateIds = new Set(
-    reviewTargets
-      .filter((target) => (
-        nullableString(target.targetType)?.toUpperCase() === 'ORGANIZATION'
-        && (nullableString(target.status)?.toUpperCase() ?? 'PUBLISHED') === 'PUBLISHED'
-      ))
-      .map((target) => nullableString(target.candidateId))
-      .filter((candidateId): candidateId is string => Boolean(candidateId)),
-  );
-  const deferredOrganizationLogos: Array<{
-    candidateId: string;
-    organizationId: string;
-  }> = committed.deferredOrganizationLogos;
-  const deferredOrganizationLogoByCandidate = new Map(
-    deferredOrganizationLogos.map((logo) => [logo.candidateId, logo.organizationId]),
-  );
-  const candidateIds = Array.from(new Set([
-    ...deferredOrganizationLogos.map((logo) => logo.candidateId),
-    ...replayOrganizationCandidateIds,
-  ]));
-  if (candidateIds.length && typeof candidates.findMany === 'function') {
-    const candidateRows = await candidates.findMany({ where: { id: { in: candidateIds } } }) as Array<Record<string, unknown>>;
-    for (const candidate of candidateRows) {
-      const candidateId = nullableString(candidate?.id);
-      if (!candidateId) continue;
-      const organizationId = deferredOrganizationLogoByCandidate.get(candidateId)
-        ?? nullableString(candidate.publishedOrganizationId);
-      if (!organizationId) continue;
-      await upsertAffiliateOrganizationLogoForCandidate(
-        candidate,
-        organizationId,
         adminUserId,
-        prisma,
-        { assignOrganizationLogo: true },
-      );
-    }
-  }
+        input,
+        transactionClient,
+      ),
+  );
+  await replayAffiliateOrganizationLogos(input, adminUserId, committed);
   return committed.source;
 };
 
@@ -1023,7 +1412,7 @@ const affiliateTargetRouteForListingKind = (
 };
 
 const affiliateTargetRouteForCandidate = (
-  candidate: any,
+  candidate: AffiliateCandidateRecord,
 ): (AffiliateTargetRoute & { targetId: string | null }) | null => {
   const route = affiliateTargetRouteForListingKind(candidate?.listingKind);
   return route
@@ -1031,13 +1420,13 @@ const affiliateTargetRouteForCandidate = (
     : null;
 };
 
-const publishedEventIdFromCandidate = (candidate: any): string | null =>
+const publishedEventIdFromCandidate = (candidate: AffiliateCandidateRecord): string | null =>
   nullableString(candidate?.publishedEventId);
 
-const publishedTeamIdFromCandidate = (candidate: any): string | null =>
+const publishedTeamIdFromCandidate = (candidate: AffiliateCandidateRecord): string | null =>
   nullableString(candidate?.publishedTeamId);
 
-const publishedOrganizationIdFromCandidate = (candidate: any): string | null =>
+const publishedOrganizationIdFromCandidate = (candidate: AffiliateCandidateRecord): string | null =>
   nullableString(candidate?.publishedOrganizationId);
 
 const slugifyForId = (value: string): string =>
@@ -1107,34 +1496,13 @@ const parseFirstPositiveInteger = (value: unknown): number | null => {
 const parseMaxParticipants = parseAffiliateMaxParticipants;
 
 const rawExtractedCandidateFields = (
-  candidate: any,
+  candidate: AffiliateCandidateRecord,
 ): Record<string, unknown> => {
-  const rawPayload = candidate?.rawPayload;
-  if (
-    !rawPayload ||
-    typeof rawPayload !== "object" ||
-    Array.isArray(rawPayload)
-  ) {
-    return {};
-  }
-  const extractedFields = (rawPayload as Record<string, unknown>)
-    .extractedFields;
-  const detailPage = (rawPayload as Record<string, unknown>).detailPage;
-  const detailFields =
-    detailPage && typeof detailPage === "object" && !Array.isArray(detailPage)
-      ? (detailPage as Record<string, unknown>).extractedFields
-      : null;
+  const rawPayload = recordValue(candidate?.rawPayload);
+  const detailPage = recordValue(rawPayload.detailPage);
   return {
-    ...(extractedFields &&
-    typeof extractedFields === "object" &&
-    !Array.isArray(extractedFields)
-      ? (extractedFields as Record<string, unknown>)
-      : {}),
-    ...(detailFields &&
-    typeof detailFields === "object" &&
-    !Array.isArray(detailFields)
-      ? (detailFields as Record<string, unknown>)
-      : {}),
+    ...recordValue(rawPayload.extractedFields),
+    ...recordValue(detailPage.extractedFields),
   };
 };
 
@@ -1149,7 +1517,7 @@ const normalizeAffiliateSportNames = (value: unknown): string[] => {
   );
 };
 
-const candidateSportNames = (candidate: any): string[] => {
+const candidateSportNames = (candidate: AffiliateCandidateRecord): string[] => {
   const extracted = rawExtractedCandidateFields(candidate);
   const rawPayload = recordValue(candidate?.rawPayload);
   const normalizedImport = recordValue(rawPayload.normalizedImport);
@@ -1164,7 +1532,7 @@ const candidateSportNames = (candidate: any): string[] => {
   return names;
 };
 
-const candidateClubLogoUrl = (candidate: any): string | null => {
+const candidateClubLogoUrl = (candidate: AffiliateCandidateRecord): string | null => {
   const fields = rawExtractedCandidateFields(candidate);
   return (
     nullableString(fields.logoUrl) ??
@@ -1182,8 +1550,207 @@ type AffiliateOrganizationLogoOptions = Readonly<{
   assignOrganizationLogo?: boolean;
 }>;
 
+type AffiliateLogoObject = Readonly<{
+  key: string;
+  sizeBytes: number;
+  bucket?: string;
+}>;
+
+type AffiliatePreviousLogoObject = Readonly<{
+  key: string;
+  bucket?: string;
+}>;
+
+const loadPreviousAffiliateLogoObject = async (
+  files: any,
+  logoId: string,
+): Promise<AffiliatePreviousLogoObject | null> => {
+  if (typeof files.findUnique !== "function") return null;
+  const existingFile = await files.findUnique({
+    where: { id: logoId },
+    select: { path: true, bucket: true },
+  });
+  return existingFile?.path
+    ? { key: String(existingFile.path), bucket: existingFile.bucket ?? undefined }
+    : null;
+};
+
+const writeAffiliateLogoFile = async (params: {
+  files: any;
+  logoId: string;
+  previousObject: AffiliatePreviousLogoObject | null;
+  fileData: Record<string, unknown>;
+  now: Date;
+}) => {
+  const { files, logoId, previousObject, fileData, now } = params;
+  if (previousObject) {
+    if (typeof files.updateMany !== "function") {
+      throw new Error("Affiliate organization logo compare-and-set is unavailable.");
+    }
+    const updated = await files.updateMany({
+      where: { id: logoId, path: previousObject.key },
+      data: fileData,
+    });
+    if (updated.count !== 1) {
+      throw new Error(
+        "Affiliate organization logo replacement lost a compare-and-set race.",
+      );
+    }
+    return;
+  }
+  if (typeof files.create !== "function") {
+    throw new Error("Affiliate organization logo file creation is unavailable.");
+  }
+  await files.create({
+    data: {
+      id: logoId,
+      ...fileData,
+      createdAt: now,
+    },
+  });
+};
+
+const assignAffiliateOrganizationLogo = async (
+  persistence: ReturnType<typeof affiliatePrisma>,
+  organizationId: string,
+  logoId: string,
+  shouldAssignOrganizationLogo: boolean,
+) => {
+  if (!shouldAssignOrganizationLogo) return;
+  if (!persistence.organizations?.update) {
+    throw new Error("Affiliate organization logo assignment is unavailable.");
+  }
+  await persistence.organizations.update({
+    where: { id: organizationId },
+    data: { logoId },
+  });
+};
+
+const persistAffiliateOrganizationLogo = async (params: {
+  persistenceClient: any;
+  logoId: string;
+  organizationId: string;
+  ownerId: string;
+  normalized: Buffer;
+  originalName: string;
+  key: string;
+  storedObject: AffiliateLogoObject;
+  shouldAssignOrganizationLogo: boolean;
+}): Promise<AffiliatePreviousLogoObject | null> => {
+  const {
+    persistenceClient,
+    logoId,
+    organizationId,
+    ownerId,
+    normalized,
+    originalName,
+    key,
+    storedObject,
+    shouldAssignOrganizationLogo,
+  } = params;
+  const persistence = affiliatePrisma(persistenceClient);
+  if (!persistence.files) {
+    throw new Error("Affiliate organization logo file persistence is unavailable.");
+  }
+  const previousObject = await loadPreviousAffiliateLogoObject(
+    persistence.files,
+    logoId,
+  );
+  const now = new Date();
+  const fileData = {
+    uploaderId: ownerId,
+    organizationId,
+    bucket: affiliateNullableValue(storedObject.bucket),
+    originalName,
+    mimeType: "image/png",
+    sizeBytes:
+      storedObject.sizeBytes === undefined
+        ? normalized.length
+        : storedObject.sizeBytes,
+    path: storedObject.key || key,
+    updatedAt: now,
+  };
+  await writeAffiliateLogoFile({
+    files: persistence.files,
+    logoId,
+    previousObject,
+    fileData,
+    now,
+  });
+  await assignAffiliateOrganizationLogo(
+    persistence,
+    organizationId,
+    logoId,
+    shouldAssignOrganizationLogo,
+  );
+  return previousObject;
+};
+
+const affiliateLogoUploadPreparation = async (
+  storage: ReturnType<typeof getStorageProvider>,
+  organizationId: string,
+  shouldAssignOrganizationLogo: boolean,
+) => {
+  const key = shouldAssignOrganizationLogo
+    ? `affiliate-organizations/${organizationId}/logo-${createId()}.png`
+    : `affiliate-organizations/${organizationId}/logo.png`;
+  if (shouldAssignOrganizationLogo) {
+    return { key, stagedKey: key, createdObject: false };
+  }
+  const existingObject = await storage.headObject({ key });
+  return { key, stagedKey: null, createdObject: !existingObject.exists };
+};
+
+const cleanupAffiliateLogoAfterCommit = async (
+  storage: ReturnType<typeof getStorageProvider>,
+  previousObject: AffiliatePreviousLogoObject | null,
+  storedObject: AffiliateLogoObject,
+  shouldAssignOrganizationLogo: boolean,
+) => {
+  const committedStoredKey = storedObject.key;
+  if (
+    !shouldAssignOrganizationLogo ||
+    !previousObject ||
+    previousObject.key === committedStoredKey
+  ) {
+    return;
+  }
+  try {
+    await storage.deleteObject({
+      key: previousObject.key,
+      bucket: previousObject.bucket,
+    });
+  } catch {
+    // Old logo cleanup is best effort after the new logo is committed.
+  }
+};
+
+const cleanupAffiliateLogoAfterFailure = async (params: {
+  storage: ReturnType<typeof getStorageProvider>;
+  persistenceCommitted: boolean;
+  stagedKey: string | null;
+  createdObject: boolean;
+  storedObject: AffiliateLogoObject | null;
+}) => {
+  if (params.persistenceCommitted) return;
+  const cleanupKey =
+    params.stagedKey ??
+    (params.createdObject && params.storedObject
+      ? params.storedObject.key
+      : null);
+  if (!cleanupKey) return;
+  try {
+    await params.storage.deleteObject({
+      key: cleanupKey,
+      bucket: params.storedObject?.bucket,
+    });
+  } catch {
+    // Storage cleanup is best effort after a failed logo save.
+  }
+};
+
 const upsertAffiliateOrganizationLogoForCandidate = async (
-  candidate: any,
+  candidate: AffiliateCandidateRecord,
   organizationId: string,
   ownerId: string,
   client: any = prisma,
@@ -1194,13 +1761,8 @@ const upsertAffiliateOrganizationLogoForCandidate = async (
   const storage = getStorageProvider();
   const shouldAssignOrganizationLogo = options.assignOrganizationLogo === true;
   const logoId = affiliateOrganizationLogoId(organizationId);
-  let previousObject: { key: string; bucket?: string } | null = null;
-  let storedObject: {
-    key: string;
-    sizeBytes: number;
-    contentType?: string;
-    bucket?: string;
-  } | null = null;
+  let previousObject: AffiliatePreviousLogoObject | null = null;
+  let storedObject: AffiliateLogoObject | null = null;
   let createdObject = false;
   let stagedKey: string | null = null;
   let persistenceCommitted = false;
@@ -1211,136 +1773,73 @@ const upsertAffiliateOrganizationLogoForCandidate = async (
     const originalName =
       nullableString(rawExtractedCandidateFields(candidate).logoOriginalName) ??
       filenameFromUrl(logoUrl, `${slugifyForId(organizationId)}-logo.png`);
-    const key = shouldAssignOrganizationLogo
-      ? `affiliate-organizations/${organizationId}/logo-${createId()}.png`
-      : `affiliate-organizations/${organizationId}/logo.png`;
-    stagedKey = shouldAssignOrganizationLogo ? key : null;
-    if (!shouldAssignOrganizationLogo) {
-      const existingObject = await storage.headObject({ key });
-      createdObject = !existingObject.exists;
-    }
+    const upload = await affiliateLogoUploadPreparation(
+      storage,
+      organizationId,
+      shouldAssignOrganizationLogo,
+    );
+    stagedKey = upload.stagedKey;
+    createdObject = upload.createdObject;
     storedObject = await storage.putObject({
       data: normalized,
       originalName,
       contentType: "image/png",
       organizationId,
-      key,
+      key: upload.key,
     });
-    const persist = async (persistenceClient: any): Promise<void> => {
-      const now = new Date();
-      const persistence = affiliatePrisma(persistenceClient);
-      if (!persistence.files) {
-        throw new Error("Affiliate organization logo file persistence is unavailable.");
-      }
-      previousObject = null;
-      if (typeof persistence.files.findUnique === "function") {
-        const existingFile = await persistence.files.findUnique({
-          where: { id: logoId },
-          select: { path: true, bucket: true },
-        });
-        if (existingFile?.path) {
-          previousObject = {
-            key: String(existingFile.path),
-            bucket: existingFile.bucket ?? undefined,
-          };
-        }
-      }
-      const fileData = {
-        uploaderId: ownerId,
-        organizationId,
-        bucket: storedObject?.bucket ?? null,
-        originalName,
-        mimeType: "image/png",
-        sizeBytes: storedObject?.sizeBytes ?? normalized.length,
-        path: storedObject?.key ?? key,
-        updatedAt: now,
-      };
-      if (previousObject) {
-        if (typeof persistence.files.updateMany !== "function") {
-          throw new Error("Affiliate organization logo compare-and-set is unavailable.");
-        }
-        const updated = await persistence.files.updateMany({
-          where: { id: logoId, path: previousObject.key },
-          data: fileData,
-        });
-        if (updated.count !== 1) {
-          throw new Error("Affiliate organization logo replacement lost a compare-and-set race.");
-        }
-      } else {
-        if (typeof persistence.files.create !== "function") {
-          throw new Error("Affiliate organization logo file creation is unavailable.");
-        }
-        await persistence.files.create({
-          data: {
-            id: logoId,
-            ...fileData,
-            createdAt: now,
-          },
-        });
-      }
-      if (shouldAssignOrganizationLogo) {
-        if (!persistence.organizations?.update) {
-          throw new Error("Affiliate organization logo assignment is unavailable.");
-        }
-        await persistence.organizations.update({
-          where: { id: organizationId },
-          data: { logoId },
-        });
-      }
-    };
     const transaction = (client as { $transaction?: unknown }).$transaction;
-    if (shouldAssignOrganizationLogo && typeof transaction === "function") {
-      await (transaction as Function).call(
-        client,
-        (transactionClient: any) => persist(transactionClient),
-        { isolationLevel: "Serializable" },
-      );
-    } else {
-      await persist(client);
-    }
+    const persist = () =>
+      persistAffiliateOrganizationLogo({
+        persistenceClient: client,
+        logoId,
+        organizationId,
+        ownerId,
+        normalized,
+        originalName,
+        key: upload.key,
+        storedObject: storedObject as AffiliateLogoObject,
+        shouldAssignOrganizationLogo,
+      });
+    previousObject =
+      shouldAssignOrganizationLogo && typeof transaction === "function"
+        ? await (transaction as Function).call(
+            client,
+            (transactionClient: any) =>
+              persistAffiliateOrganizationLogo({
+                persistenceClient: transactionClient,
+                logoId,
+                organizationId,
+                ownerId,
+                normalized,
+                originalName,
+                key: upload.key,
+                storedObject: storedObject as AffiliateLogoObject,
+                shouldAssignOrganizationLogo,
+              }),
+            { isolationLevel: "Serializable" },
+          )
+        : await persist();
     persistenceCommitted = true;
-    const committedPreviousKey = (previousObject as { key: string; bucket?: string } | null)?.key ?? null;
-    const committedPreviousBucket = (previousObject as { key: string; bucket?: string } | null)?.bucket;
-    const committedStoredKey = (storedObject as { key: string } | null)?.key ?? null;
-    if (
-      shouldAssignOrganizationLogo
-      && committedPreviousKey
-      && committedStoredKey
-      && committedPreviousKey !== committedStoredKey
-    ) {
-      try {
-        await storage.deleteObject({
-          key: committedPreviousKey,
-          bucket: committedPreviousBucket,
-        });
-      } catch {
-        // Old logo cleanup is best effort after the new logo is committed.
-      }
-    }
+    await cleanupAffiliateLogoAfterCommit(
+      storage,
+      previousObject,
+      storedObject as AffiliateLogoObject,
+      shouldAssignOrganizationLogo,
+    );
     return logoId;
   } catch {
-    if (!persistenceCommitted) {
-      const cleanupKey = stagedKey ?? (
-        createdObject && storedObject
-          ? storedObject.key
-          : null
-      );
-      if (cleanupKey) {
-        try {
-          await storage.deleteObject({
-            key: cleanupKey,
-            bucket: storedObject?.bucket,
-          });
-        } catch {
-          // Storage cleanup is best effort after a failed logo save.
-        }
-      }
-    }
+    await cleanupAffiliateLogoAfterFailure({
+      storage,
+      persistenceCommitted,
+      stagedKey,
+      createdObject,
+      storedObject,
+    });
     return null;
   }
 };
 
-const inferCandidateParticipantAvailability = (candidate: any) =>
+const inferCandidateParticipantAvailability = (candidate: AffiliateCandidateRecord) =>
   inferAffiliateParticipantAvailability({
     ...rawExtractedCandidateFields(candidate),
     ...candidate,
@@ -1356,7 +1855,7 @@ const parsePriceCents = (value: unknown): number | null => {
   return Math.max(0, Math.round(amount * 100));
 };
 
-const affiliateCandidateText = (candidate: any): string =>
+const affiliateCandidateText = (candidate: AffiliateCandidateRecord): string =>
   [
     candidate.title,
     candidate.description,
@@ -1372,7 +1871,7 @@ const affiliateCandidateText = (candidate: any): string =>
     .join(" ");
 
 export const buildAffiliateEventTagNames = (
-  candidate: any,
+  candidate: AffiliateCandidateRecord,
   eventType: unknown = inferAffiliateEventType(candidate),
 ): string[] =>
   inferAffiliateEventTagNames(
@@ -1387,7 +1886,7 @@ export const buildAffiliateEventTagNames = (
   );
 
 const inferAffiliateTeamSignup = (
-  candidate: any,
+  candidate: AffiliateCandidateRecord,
   eventType: "EVENT" | "WEEKLY_EVENT" | "LEAGUE" | "TOURNAMENT",
 ): boolean => {
   const text = affiliateCandidateText(candidate);
@@ -1416,23 +1915,16 @@ const inferAffiliateTeamSignup = (
   return eventType === "LEAGUE" || eventType === "TOURNAMENT";
 };
 
-const inferAffiliateTeamSizeLimit = (
-  candidate: any,
-  teamSignup: boolean,
-): number => {
-  if (!teamSignup) return 1;
-
-  const text = affiliateCandidateText(candidate).toLowerCase();
-  const explicitTeamSize =
+const explicitAffiliateTeamSize = (text: string): number | null => {
+  const match =
     text.match(/\bteams?\s+of\s+([1-9]\d?)\b/) ??
     text.match(/\b([1-9]\d?)\s*(?:person|player)\s+teams?\b/);
-  if (explicitTeamSize) {
-    const parsed = Number.parseInt(explicitTeamSize[1], 10);
-    if (Number.isFinite(parsed) && parsed > 1) {
-      return parsed;
-    }
-  }
+  if (!match) return null;
+  const parsed = Number.parseInt(match[1], 10);
+  return Number.isFinite(parsed) && parsed > 1 ? parsed : null;
+};
 
+const defaultAffiliateTeamSize = (text: string): number => {
   if (/\bsoftball\b|\bbaseball\b/.test(text)) return 10;
   if (/\bquads?\b/.test(text)) return 4;
   if (/\bdoubles?\b|\b2s\b/.test(text)) return 2;
@@ -1440,6 +1932,15 @@ const inferAffiliateTeamSizeLimit = (
   if (/\bsoccer\b|\bfutsal\b/.test(text)) return 20;
   if (/\bvolleyball\b/.test(text)) return 2;
   return 20;
+};
+
+const inferAffiliateTeamSizeLimit = (
+  candidate: AffiliateCandidateRecord,
+  teamSignup: boolean,
+): number => {
+  if (!teamSignup) return 1;
+  const text = affiliateCandidateText(candidate).toLowerCase();
+  return explicitAffiliateTeamSize(text) ?? defaultAffiliateTeamSize(text);
 };
 
 const slugToken = (value: string): string =>
@@ -1458,6 +1959,48 @@ const inferDivisionGender = (value: unknown): DivisionGender => {
   return "C";
 };
 
+type AffiliateAgeRange = {
+  minAge: number | null;
+  maxAge: number | null;
+  ageDivisionTypeId: string | null;
+};
+
+const emptyAffiliateAgeRange = (): AffiliateAgeRange => ({
+  minAge: null,
+  maxAge: null,
+  ageDivisionTypeId: null,
+});
+
+const affiliateAgeRangeFromMatch = (
+  match: RegExpMatchArray | null,
+): AffiliateAgeRange | null => {
+  if (!match) return null;
+  const minAge = Number.parseInt(match[1], 10);
+  const maxAge = Number.parseInt(match[2], 10);
+  if (!Number.isFinite(minAge) || !Number.isFinite(maxAge)) return null;
+  return {
+    minAge: Math.min(minAge, maxAge),
+    maxAge: Math.max(minAge, maxAge),
+    ageDivisionTypeId: `u${Math.max(minAge, maxAge)}`,
+  };
+};
+
+const affiliateUpperAgeRangeFromMatch = (
+  match: RegExpMatchArray | null,
+): AffiliateAgeRange | null => {
+  if (!match) return null;
+  const maxAge = Number.parseInt(match[1], 10);
+  return { minAge: null, maxAge, ageDivisionTypeId: `u${maxAge}` };
+};
+
+const affiliateOverAgeRangeFromMatch = (
+  match: RegExpMatchArray | null,
+): AffiliateAgeRange | null => {
+  if (!match) return null;
+  const minAge = Number.parseInt(match[1], 10);
+  return { minAge, maxAge: null, ageDivisionTypeId: `${minAge}plus` };
+};
+
 const inferAgeRangeFromText = (
   value: unknown,
 ): {
@@ -1466,63 +2009,31 @@ const inferAgeRangeFromText = (
   ageDivisionTypeId: string | null;
 } => {
   const haystack = nullableString(value) ?? "";
-  const uRangeMatch = haystack.match(
-    /\bU\s*([1-9]\d?)\s*(?:-|–|to)\s*U?\s*([1-9]\d?)\b/i,
+  const range = affiliateAgeRangeFromMatch(
+    haystack.match(/\bU\s*([1-9]\d?)\s*(?:-|–|to)\s*U?\s*([1-9]\d?)\b/i) ??
+      haystack.match(/\bages?\s*([1-9]\d?)\s*(?:-|–|to)\s*([1-9]\d?)\b/i),
   );
-  if (uRangeMatch) {
-    const minAge = Number.parseInt(uRangeMatch[1], 10);
-    const maxAge = Number.parseInt(uRangeMatch[2], 10);
-    if (Number.isFinite(minAge) && Number.isFinite(maxAge)) {
-      return {
-        minAge: Math.min(minAge, maxAge),
-        maxAge: Math.max(minAge, maxAge),
-        ageDivisionTypeId: `u${Math.max(minAge, maxAge)}`,
-      };
-    }
-  }
-
-  const ageRangeMatch = haystack.match(
-    /\bages?\s*([1-9]\d?)\s*(?:-|–|to)\s*([1-9]\d?)\b/i,
-  );
-  if (ageRangeMatch) {
-    const minAge = Number.parseInt(ageRangeMatch[1], 10);
-    const maxAge = Number.parseInt(ageRangeMatch[2], 10);
-    if (Number.isFinite(minAge) && Number.isFinite(maxAge)) {
-      return {
-        minAge: Math.min(minAge, maxAge),
-        maxAge: Math.max(minAge, maxAge),
-        ageDivisionTypeId: `u${Math.max(minAge, maxAge)}`,
-      };
-    }
-  }
-
-  const upperMatch =
+  if (range) return range;
+  const upper = affiliateUpperAgeRangeFromMatch(
     haystack.match(/\bU\s*([1-9]\d?)\b/i) ??
-    haystack.match(/\b([1-9]\d?)\s*U\b/i);
-  if (upperMatch) {
-    const maxAge = Number.parseInt(upperMatch[1], 10);
-    return { minAge: null, maxAge, ageDivisionTypeId: `u${maxAge}` };
-  }
-
-  const overMatch =
+      haystack.match(/\b([1-9]\d?)\s*U\b/i),
+  );
+  if (upper) return upper;
+  const over = affiliateOverAgeRangeFromMatch(
     haystack.match(
       /\b(?:ages?|adult)\s*([1-9]\d?)\s*(?:\+|(?:and\s+)?over|or\s+older|and\s+older|and\s+up)(?!\w)/i,
     ) ??
-    haystack.match(/\bover\s*([1-9]\d?)(?!\d)/i) ??
-    haystack.match(
-      /\b([1-9]\d?)\s*(?:\+|(?:and\s+)?over|or\s+older|and\s+older|and\s+up)(?!\w)/i,
-    ) ??
-    haystack.match(/\b(?:ages?|adult)\s*([1-9]\d?)\b/i);
-  if (overMatch) {
-    const minAge = Number.parseInt(overMatch[1], 10);
-    return { minAge, maxAge: null, ageDivisionTypeId: `${minAge}plus` };
-  }
-
-  return { minAge: null, maxAge: null, ageDivisionTypeId: null };
+      haystack.match(/\bover\s*([1-9]\d?)(?!\d)/i) ??
+      haystack.match(
+        /\b([1-9]\d?)\s*(?:\+|(?:and\s+)?over|or\s+older|and\s+older|and\s+up)(?!\w)/i,
+      ) ??
+      haystack.match(/\b(?:ages?|adult)\s*([1-9]\d?)\b/i),
+  );
+  return over ?? emptyAffiliateAgeRange();
 };
 
 const inferAgeRange = (
-  candidate: any,
+  candidate: AffiliateCandidateRecord,
 ): {
   minAge: number | null;
   maxAge: number | null;
@@ -1562,7 +2073,7 @@ const inferSkillDivisionTypeId = (value: unknown): string => {
 
 const buildAffiliateDivisionDetailFromLabel = (
   sourceLabel: string,
-  candidate: any,
+  candidate: AffiliateCandidateRecord,
   sportId?: string | null,
 ) => {
   const gender = inferDivisionGender(sourceLabel);
@@ -1614,7 +2125,7 @@ const buildAffiliateDivisionDetailFromLabel = (
 };
 
 const buildAffiliateDivisionDetail = (
-  candidate: any,
+  candidate: AffiliateCandidateRecord,
   sportId?: string | null,
 ) => {
   const sourceLabel =
@@ -1655,7 +2166,7 @@ const normalizeSourceDivisionMaxParticipants = (
 };
 
 const sourceDivisionRowsFromCandidate = (
-  candidate: any,
+  candidate: AffiliateCandidateRecord,
 ): Record<string, unknown>[] => {
   const rows = rawExtractedCandidateFields(candidate).divisions;
   return Array.isArray(rows)
@@ -1667,7 +2178,7 @@ const sourceDivisionRowsFromCandidate = (
 };
 
 const buildAffiliateDivisionDetailsFromSourceRows = (
-  candidate: any,
+  candidate: AffiliateCandidateRecord,
   sportId?: string | null,
 ) => {
   return sourceDivisionRowsFromCandidate(candidate)
@@ -1729,7 +2240,7 @@ const buildAffiliateDivisionDetailsFromSourceRows = (
     .filter((detail): detail is NonNullable<typeof detail> => detail !== null);
 };
 
-const inferSourceDivisionLabels = (candidate: any): string[] => {
+const inferSourceDivisionLabels = (candidate: AffiliateCandidateRecord): string[] => {
   const explicitLabel =
     nullableString(candidate.divisionText) ??
     nullableString(candidate.skillLevel);
@@ -1772,7 +2283,7 @@ const inferSourceDivisionLabels = (candidate: any): string[] => {
 };
 
 const buildAffiliateDivisionDetails = (
-  candidate: any,
+  candidate: AffiliateCandidateRecord,
   sportId?: string | null,
 ) => {
   const sourceDivisionDetails = buildAffiliateDivisionDetailsFromSourceRows(
@@ -1905,7 +2416,7 @@ const isSimpleAffiliatePriceText = (
 };
 
 const buildAffiliateEventPricing = (
-  candidate: any,
+  candidate: AffiliateCandidateRecord,
   divisionDetails: Array<{ price?: number | null }>,
 ) => {
   const range =
@@ -1925,7 +2436,7 @@ const buildAffiliateEventPricing = (
   };
 };
 
-const buildAffiliateImportMetadata = (candidate: AffiliateCandidateInput) => {
+const buildAffiliateImportMetadata = (candidate: AffiliateCandidateDateTimeInput) => {
   const ageRange = inferAgeRange(candidate);
   const participantAvailability =
     inferCandidateParticipantAvailability(candidate);
@@ -1952,13 +2463,13 @@ const buildAffiliateImportMetadata = (candidate: AffiliateCandidateInput) => {
   };
 };
 
-const eventStartFromCandidate = (candidate: any): Date => {
+const eventStartFromCandidate = (candidate: AffiliateCandidateRecord): Date => {
   assertEventOrTeamCandidateImportable(candidate);
   return candidateStartDate(candidate) ?? EVERGREEN_AFFILIATE_START_DATE;
 };
 
 const buildAffiliateEventDescription = (
-  candidate: any,
+  candidate: AffiliateCandidateRecord,
   pricingDetailsText?: string | null,
 ): string | null => {
   const description = nullableString(candidate.description);
@@ -1979,39 +2490,40 @@ const buildAffiliateEventDescription = (
     .join("\n\n");
 };
 
+type AffiliateInferredEventType =
+  | "EVENT"
+  | "WEEKLY_EVENT"
+  | "LEAGUE"
+  | "TOURNAMENT";
+
+const affiliateEventTypeFromText = (
+  text: string,
+): Exclude<AffiliateInferredEventType, "EVENT"> | null => {
+  if (/\btournament\b/.test(text)) return "TOURNAMENT";
+  if (/\bleague\b/.test(text)) return "LEAGUE";
+  if (/\bweekly\b/.test(text)) return "WEEKLY_EVENT";
+  return null;
+};
+
+const affiliateLowerText = (values: unknown[]): string =>
+  values.map((value) => nullableString(value)?.toLowerCase() ?? "").join(" ");
+
 const inferAffiliateEventType = (
-  candidate: any,
+  candidate: AffiliateCandidateRecord,
 ): "EVENT" | "WEEKLY_EVENT" | "LEAGUE" | "TOURNAMENT" => {
   const sourceFormat =
-    nullableString(
-      candidate.formatLabel ?? candidate.formatName,
-    )?.toLowerCase() ?? "";
-  if (/\btournament\b/.test(sourceFormat)) {
-    return "TOURNAMENT";
-  }
-  if (/\bleague\b/.test(sourceFormat)) {
-    return "LEAGUE";
-  }
-  if (/\bweekly\b/.test(sourceFormat)) {
-    return "WEEKLY_EVENT";
-  }
-  if (
-    /\b(?:camp|class|clinic|pickup|pick[-\s]?up|open\s+(?:gym|play|court))\b/.test(
-      sourceFormat,
-    )
-  ) {
-    return "EVENT";
-  }
-
-  const haystack = [
+    nullableString(candidate.formatLabel ?? candidate.formatName)?.toLowerCase() ??
+    "";
+  if (/\bclass(?:es)?\b/.test(sourceFormat)) return "EVENT";
+  const sourceType = affiliateEventTypeFromText(sourceFormat);
+  if (sourceType) return sourceType;
+  const haystack = affiliateLowerText([
     candidate.title,
     candidate.formatLabel,
     candidate.formatName,
     candidate.scheduleText,
     candidate.description,
-  ]
-    .map((value) => nullableString(value)?.toLowerCase() ?? "")
-    .join(" ");
+  ]);
   if (
     /\btournament\b|\bbracket\b|\bpool play\b|\b(?:[2-9]\s*)?game guarantee\b|\b[2-9]\s*gg\b|\bteam entry fee\b|\bhomerun bracelets?\b/.test(
       haystack,
@@ -2019,9 +2531,7 @@ const inferAffiliateEventType = (
   ) {
     return "TOURNAMENT";
   }
-  if (/\bleague\b|\bleagues\b/.test(haystack)) {
-    return "LEAGUE";
-  }
+  if (/\bleague\b|\bleagues\b/.test(haystack)) return "LEAGUE";
   if (
     /\bweekly\b|\bevery\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/.test(
       haystack,
@@ -2058,7 +2568,7 @@ const affiliateCanonicalSportError = (
 };
 
 const assertAffiliateCandidateUsesCanonicalSport = async (
-  candidate: Pick<AffiliateCandidateInput, "sportName" | "sportNames"> | any,
+  candidate: AffiliateCandidateRecord,
   targetLabel: "event" | "organization" | "rental facility" | "team",
 ): Promise<string[]> => {
   const sportNames = candidateSportNames(candidate);
@@ -2092,7 +2602,7 @@ const geocodeFirstAvailableAddress = async (
   (await geocodeFirstAvailableAddressWithQuery(queries)).coordinates;
 
 const candidateLocationEvidence = (
-  candidate: AffiliateCandidateInput | any,
+  candidate: AffiliateCandidateRecord,
 ): string | null => {
   const fields = rawExtractedCandidateFields(candidate);
   return (
@@ -2101,7 +2611,7 @@ const candidateLocationEvidence = (
   );
 };
 
-const candidateLocationSource = (candidate: AffiliateCandidateInput | any) => {
+const candidateLocationSource = (candidate: AffiliateCandidateRecord) => {
   const fields = rawExtractedCandidateFields(candidate);
   return normalizeAffiliateLocationSource(
     candidate?.locationSource ?? fields.locationSource,
@@ -2109,7 +2619,7 @@ const candidateLocationSource = (candidate: AffiliateCandidateInput | any) => {
 };
 
 const candidateResolvedCoordinates = (
-  candidate: AffiliateCandidateInput | any,
+  candidate: AffiliateCandidateRecord,
 ): [number, number] | null => {
   const rawPayload = recordValue(candidate?.rawPayload);
   const resolution = recordValue(rawPayload.locationResolution);
@@ -2117,7 +2627,7 @@ const candidateResolvedCoordinates = (
 };
 
 const candidateSourceDateTime = (
-  candidate: AffiliateCandidateInput | any,
+  candidate: AffiliateCandidateRecord,
 ): string | null => {
   const rawPayload = recordValue(candidate?.rawPayload);
   const dateTimeInputs = recordValue(rawPayload.dateTimeInputs);
@@ -2128,22 +2638,20 @@ const candidateSourceDateTime = (
   );
 };
 
+const candidateDateValue = (
+  value: Date | string | null | undefined,
+): Date | null =>
+  value instanceof Date ? value : parseDateOrNull(nullableString(value));
+
 const candidateDateTimeReferenceDate = (
-  candidate: AffiliateCandidateInput | any,
+  candidate: AffiliateCandidateRecord,
 ): Date => {
   const rawPayload = recordValue(candidate?.rawPayload);
   const capturedAt = parseDateOrNull(nullableString(rawPayload.fetchedAt));
   if (capturedAt) return capturedAt;
-  const createdAt =
-    candidate?.createdAt instanceof Date
-      ? candidate.createdAt
-      : parseDateOrNull(nullableString(candidate?.createdAt));
+  const createdAt = candidateDateValue(candidate?.createdAt);
   if (createdAt) return createdAt;
-  const updatedAt =
-    candidate?.updatedAt instanceof Date
-      ? candidate.updatedAt
-      : parseDateOrNull(nullableString(candidate?.updatedAt));
-  return updatedAt ?? new Date();
+  return candidateDateValue(candidate?.updatedAt) ?? new Date();
 };
 
 const enrichAffiliateEventDateTimeFromCoordinates = (params: {
@@ -2181,6 +2689,44 @@ type AffiliateSourceOrganizationLocation = {
   coordinates?: unknown;
 };
 
+const firstAffiliateNullableString = (...values: unknown[]): string | null => {
+  for (const value of values) {
+    const normalized = nullableString(value);
+    if (normalized) return normalized;
+  }
+  return null;
+};
+
+const affiliateLocationOrganizationFields = (params: {
+  candidate: AffiliateCandidateInput;
+  mode: "CANDIDATE" | "SOURCE_ORGANIZATION";
+  organization?: AffiliateSourceOrganizationLocation | null;
+}): Partial<AffiliateCandidateInput> => {
+  if (params.mode !== "SOURCE_ORGANIZATION") return {};
+  return {
+    venueName: firstAffiliateNullableString(
+      params.candidate.venueName,
+      params.organization?.name,
+    ),
+    address: firstAffiliateNullableString(
+      params.candidate.address,
+      params.organization?.address,
+    ),
+    city: firstAffiliateNullableString(
+      params.candidate.city,
+      params.organization?.location,
+    ),
+  };
+};
+
+const affiliateLocationOrganizationId = (
+  mode: "CANDIDATE" | "SOURCE_ORGANIZATION",
+  organization?: AffiliateSourceOrganizationLocation | null,
+): string | null =>
+  mode === "SOURCE_ORGANIZATION"
+    ? affiliateNullableValue(organization?.id)
+    : null;
+
 const withCandidateLocationResolution = (params: {
   candidate: AffiliateCandidateInput;
   coordinates: [number, number];
@@ -2188,77 +2734,56 @@ const withCandidateLocationResolution = (params: {
   query: string | null;
   evidence: string | null;
   organization?: AffiliateSourceOrganizationLocation | null;
-}): AffiliateCandidateInput => {
-  const organization = params.organization;
-  return {
-    ...params.candidate,
-    ...(params.mode === "SOURCE_ORGANIZATION"
-      ? {
-          venueName:
-            nullableString(params.candidate.venueName) ??
-            nullableString(organization?.name),
-          address:
-            nullableString(params.candidate.address) ??
-            nullableString(organization?.address),
-          city:
-            nullableString(params.candidate.city) ??
-            nullableString(organization?.location),
-        }
-      : {}),
-    rawPayload: {
-      ...(params.candidate.rawPayload ?? {}),
-      locationResolution: {
-        mode: params.mode,
-        coordinates: params.coordinates,
-        query: params.query,
-        evidence: params.evidence,
-        organizationId:
-          params.mode === "SOURCE_ORGANIZATION"
-            ? (organization?.id ?? null)
-            : null,
-      },
+}): AffiliateCandidateInput => ({
+  ...params.candidate,
+  ...affiliateLocationOrganizationFields(params),
+  rawPayload: {
+    ...affiliateValueOrDefault(params.candidate.rawPayload, {}),
+    locationResolution: {
+      mode: params.mode,
+      coordinates: params.coordinates,
+      query: params.query,
+      evidence: params.evidence,
+      organizationId: affiliateLocationOrganizationId(
+        params.mode,
+        params.organization,
+      ),
     },
-  };
+  },
+});
+
+const resolveAffiliateCandidateLocation = async (
+  candidate: AffiliateCandidateInput,
+  queries: string[],
+  evidence: string | null,
+): Promise<AffiliateCandidateInput | null> => {
+  for (const query of queries) {
+    const coordinates = await geocodeAddressToCoordinates(query);
+    if (coordinates) {
+      return withCandidateLocationResolution({
+        candidate,
+        coordinates,
+        mode: "CANDIDATE",
+        query,
+        evidence,
+      });
+    }
+  }
+  return null;
 };
 
-const resolveAffiliateEventCandidateLocation = async (params: {
+const resolveAffiliateSourceOrganizationLocation = async (params: {
   candidate: AffiliateCandidateInput;
   sourceOrganization: AffiliateSourceOrganizationLocation | null;
+  locationSource: string | null;
+  evidence: string | null;
 }): Promise<{ candidate: AffiliateCandidateInput; reasons: string[] }> => {
-  const { candidate, sourceOrganization } = params;
-  if (candidate.listingKind !== "EVENT") {
-    return { candidate, reasons: [] };
-  }
-
-  const locationSource = candidateLocationSource(candidate);
-  const evidence = candidateLocationEvidence(candidate);
-  const candidateQueries = buildAffiliateSpecificEventLocationQueries({
-    venueName: nullableString(candidate.venueName),
-    address: nullableString(candidate.address),
-    city: nullableString(candidate.city),
-  });
-  if (candidateQueries.length) {
-    for (const query of candidateQueries) {
-      const coordinates = await geocodeAddressToCoordinates(query);
-      if (coordinates) {
-        return {
-          candidate: withCandidateLocationResolution({
-            candidate,
-            coordinates,
-            mode: "CANDIDATE",
-            query,
-            evidence,
-          }),
-          reasons: [],
-        };
-      }
-    }
-    return {
-      candidate,
-      reasons: ["event venue or address could not be resolved"],
-    };
-  }
-
+  const {
+    candidate,
+    sourceOrganization,
+    locationSource,
+    evidence,
+  } = params;
   if (locationSource !== "SOURCE_ORGANIZATION") {
     return { candidate, reasons: ["missing event venue or address"] };
   }
@@ -2274,7 +2799,6 @@ const resolveAffiliateEventCandidateLocation = async (params: {
       reasons: ["source organization location is unavailable"],
     };
   }
-
   const existingCoordinates = normalizeAffiliateCoordinates(
     sourceOrganization.coordinates,
   );
@@ -2291,7 +2815,6 @@ const resolveAffiliateEventCandidateLocation = async (params: {
       reasons: [],
     };
   }
-
   const organizationQueries = buildAffiliatePlaceLocationQueries({
     name: nullableString(sourceOrganization.name),
     location: nullableString(sourceOrganization.location),
@@ -2314,11 +2837,47 @@ const resolveAffiliateEventCandidateLocation = async (params: {
       };
     }
   }
-
   return {
     candidate,
     reasons: ["source organization location could not be resolved"],
   };
+};
+
+const resolveAffiliateEventCandidateLocation = async (params: {
+  candidate: AffiliateCandidateInput;
+  sourceOrganization: AffiliateSourceOrganizationLocation | null;
+}): Promise<{ candidate: AffiliateCandidateInput; reasons: string[] }> => {
+  const { candidate, sourceOrganization } = params;
+  if (candidate.listingKind !== "EVENT") {
+    return { candidate, reasons: [] };
+  }
+  const locationSource = candidateLocationSource(candidate);
+  const evidence = candidateLocationEvidence(candidate);
+  const candidateQueries = buildAffiliateSpecificEventLocationQueries({
+    venueName: nullableString(candidate.venueName),
+    address: nullableString(candidate.address),
+    city: nullableString(candidate.city),
+  });
+  const candidateWithLocation = await resolveAffiliateCandidateLocation(
+    candidate,
+    candidateQueries,
+    evidence,
+  );
+  if (candidateWithLocation) {
+    return { candidate: candidateWithLocation, reasons: [] };
+  }
+  if (candidateQueries.length) {
+    return {
+      candidate,
+      reasons: ["event venue or address could not be resolved"],
+    };
+  }
+  return resolveAffiliateSourceOrganizationLocation({
+    candidate,
+    sourceOrganization,
+    locationSource,
+    evidence,
+  });
 };
 
 const assertAffiliateCoordinatesForPublication = (params: {
@@ -2352,78 +2911,145 @@ const assertAffiliateCoordinatesForPublication = (params: {
   );
 };
 
-const buildAffiliateEventData = async (
-  candidate: any,
-  source: { id: string; organizationId?: string | null; name?: string | null },
-  state: "UNPUBLISHED" | "PUBLISHED" | "PRIVATE" = "UNPUBLISHED",
-  fallbackCoordinates?: unknown,
-  onCandidateNormalized?: (
-    candidate: AffiliateCandidateInput,
-  ) => void | Promise<void>,
-  client: any = prisma,
-  allowRemoteGeocoding = true,
-  preferFallbackCoordinates = false,
-) => {
+type AffiliateEventSportData = Readonly<{
+  eventType: AffiliateInferredEventType;
+  sportNames: string[];
+  sportIds: string[];
+}>;
+
+const resolveAffiliateEventSports = async (
+  candidate: AffiliateCandidateRecord,
+  state: "UNPUBLISHED" | "PUBLISHED" | "PRIVATE",
+  client: any,
+): Promise<AffiliateEventSportData> => {
   const eventType = inferAffiliateEventType(candidate);
   const sportNames = candidateSportNames(candidate);
   const sportIds: string[] = [];
   for (const sportName of sportNames) {
     const sportId = await resolveAffiliateSportId(sportName, client);
-    if (!sportId) {
-      if (state === "PUBLISHED")
-        throw affiliateCanonicalSportError(sportName, "event");
-      continue;
+    if (!sportId && state === "PUBLISHED") {
+      throw affiliateCanonicalSportError(sportName, "event");
     }
-    sportIds.push(sportId);
+    if (sportId) sportIds.push(sportId);
   }
   if (state === "PUBLISHED" && !sportIds.length) {
     throw affiliateCanonicalSportError(sportNames[0], "event");
   }
   validateEventSportIds({ eventType, sportIds });
-  const primarySportId = sportIds[0] ?? null;
-  const ageRange = inferAgeRange(candidate);
-  const participantAvailability =
-    inferCandidateParticipantAvailability(candidate);
-  const maxParticipants = participantAvailability.maxParticipants;
-  const divisionDetails = buildAffiliateDivisionDetails(
-    candidate,
-    primarySportId,
+  return { eventType, sportNames, sportIds };
+};
+
+type AffiliateEventLocationData = Readonly<{
+  location: string;
+  address: string | null;
+  city: string | null;
+  geocodeQueries: string[];
+  coordinates: [number, number] | null;
+}>;
+
+const resolveAffiliateEventCoordinates = async (params: {
+  candidate: AffiliateCandidateRecord;
+  geocodeQueries: string[];
+  fallbackCoordinates?: unknown;
+  allowRemoteGeocoding: boolean;
+  preferFallbackCoordinates: boolean;
+}): Promise<[number, number] | null> => {
+  const preparedCoordinates = normalizeAffiliateCoordinates(
+    params.fallbackCoordinates,
   );
-  const affiliatePricing = buildAffiliateEventPricing(
-    candidate,
-    divisionDetails,
-  );
-  const hasSourceDivision = divisionDetails.length > 0;
-  const teamSignup = inferAffiliateTeamSignup(candidate, eventType);
-  const location =
-    nullableString(candidate.venueName) ??
-    nullableString(candidate.city) ??
-    nullableString(candidate.address) ??
-    "Location TBD";
-  const address = nullableString(candidate.address);
-  const city = nullableString(candidate.city);
+  const preferredCoordinates = params.preferFallbackCoordinates
+    ? preparedCoordinates ?? candidateResolvedCoordinates(params.candidate)
+    : candidateResolvedCoordinates(params.candidate) ?? preparedCoordinates;
+  if (preferredCoordinates || !params.allowRemoteGeocoding) {
+    return preferredCoordinates;
+  }
+  return geocodeFirstAvailableAddress(params.geocodeQueries);
+};
+
+const resolveAffiliateEventLocation = async (params: {
+  candidate: AffiliateCandidateRecord;
+  fallbackCoordinates?: unknown;
+  allowRemoteGeocoding: boolean;
+  preferFallbackCoordinates: boolean;
+}): Promise<AffiliateEventLocationData> => {
+  const address = nullableString(params.candidate.address);
+  const city = nullableString(params.candidate.city);
   const geocodeQueries = buildAffiliateEventLocationQueries({
-    location: nullableString(candidate.venueName),
+    location: nullableString(params.candidate.venueName),
     address,
     city,
   });
-  const preparedCoordinates =
-    normalizeAffiliateCoordinates(fallbackCoordinates);
-  const coordinates = preferFallbackCoordinates
-    ? (preparedCoordinates ??
-      candidateResolvedCoordinates(candidate) ??
-      (allowRemoteGeocoding
-        ? await geocodeFirstAvailableAddress(geocodeQueries)
-        : null))
-    : (candidateResolvedCoordinates(candidate) ??
-      preparedCoordinates ??
-      (allowRemoteGeocoding
-        ? await geocodeFirstAvailableAddress(geocodeQueries)
-        : null));
+  const coordinates = await resolveAffiliateEventCoordinates({
+    candidate: params.candidate,
+    geocodeQueries,
+    fallbackCoordinates: params.fallbackCoordinates,
+    allowRemoteGeocoding: params.allowRemoteGeocoding,
+    preferFallbackCoordinates: params.preferFallbackCoordinates,
+  });
+  return {
+    location:
+      firstAffiliateNullableString(
+        params.candidate.venueName,
+        params.candidate.city,
+        params.candidate.address,
+      ) ?? "Location TBD",
+    address,
+    city,
+    geocodeQueries,
+    coordinates,
+  };
+};
+
+const hasAffiliatePersistedSourceTimeZoneEvidence = (
+  rawTimeZone: string | null,
+  sourceTimeZone: string | null,
+): boolean =>
+  Boolean(
+    isValidAffiliateTimeZone(rawTimeZone ?? "") &&
+      rawTimeZone === sourceTimeZone,
+  );
+
+const hasAffiliateCoordinateTimeZoneEvidence = (
+  metadata: Record<string, unknown>,
+  sourceTimeZone: string | null,
+  coordinateTimeZone: string | null,
+): boolean =>
+  metadata.timeZoneEvidence === "COORDINATES" &&
+  nullableString(metadata.timeZone) === sourceTimeZone &&
+  coordinateTimeZone === sourceTimeZone;
+
+const hasCurrentAffiliateDateTimeProvenance = (
+  metadata: Record<string, unknown>,
+  normalizedStartsAt: Date | null,
+  existingStart: Date | null,
+  eventTimeZone: string | null,
+): boolean =>
+  metadata.contractVersion === AFFILIATE_DATE_TIME_CONTRACT_VERSION &&
+  (metadata.startPrecision === "DATE_TIME" ||
+    metadata.startPrecision === "DATE_ONLY") &&
+  normalizedStartsAt?.getTime() === existingStart?.getTime() &&
+  nullableString(metadata.timeZone) === eventTimeZone;
+
+type AffiliateEventDateTimeEvidence = Readonly<{
+  sourceTimeZone: string | null;
+  coordinateTimeZone: string | null;
+  existingStart: Date | null;
+  sourceDateTime: string | null;
+  hasMatchingPersistedSourceTimeZoneEvidence: boolean;
+  hasTrustedStoredTimeZone: boolean;
+  hasCurrentNormalizedStartProvenance: boolean;
+  initialDateDisplayMode: AffiliateDateDisplayMode;
+  isTimedAffiliateDateDisplayMode: boolean;
+  eventTimeZone: string | null;
+}>;
+
+const affiliateEventDateTimeEvidence = (
+  candidate: AffiliateCandidateRecord,
+  coordinates: [number, number] | null,
+): AffiliateEventDateTimeEvidence => {
   const sourceTimeZone = nullableString(candidate.timeZone);
   const coordinateTimeZone = tryResolveTimeZoneFromCoordinates(coordinates);
   const existingStart = candidateStartDate(candidate);
-  const hasValidSourceTimeZone = isValidAffiliateTimeZone(sourceTimeZone ?? "");
   const sourceDateTime = candidateSourceDateTime(candidate);
   const rawPayload = recordValue(candidate.rawPayload);
   const dateTimeInputs = recordValue(rawPayload.dateTimeInputs);
@@ -2431,113 +3057,246 @@ const buildAffiliateEventData = async (
   const existingDateTimeMetadata = recordValue(
     recordValue(rawPayload.normalizedImport).dateTime,
   );
-  const rawTimeZone =
-    nullableString(dateTimeInputs.timeZone) ??
-    nullableString(rawExtractedFields.timeZone);
+  const rawTimeZone = firstAffiliateNullableString(
+    dateTimeInputs.timeZone,
+    rawExtractedFields.timeZone,
+  );
   const hasMatchingPersistedSourceTimeZoneEvidence =
-    isValidAffiliateTimeZone(rawTimeZone ?? "") &&
-    rawTimeZone === sourceTimeZone;
-  const hasMatchingCoordinateTimeZoneEvidence =
-    existingDateTimeMetadata.timeZoneEvidence === "COORDINATES" &&
-    nullableString(existingDateTimeMetadata.timeZone) === sourceTimeZone &&
-    coordinateTimeZone === sourceTimeZone;
+    hasAffiliatePersistedSourceTimeZoneEvidence(
+      rawTimeZone,
+      sourceTimeZone,
+    );
+  const hasMatchingCoordinateEvidence = hasAffiliateCoordinateTimeZoneEvidence(
+    existingDateTimeMetadata,
+    sourceTimeZone,
+    coordinateTimeZone,
+  );
   const hasTrustedStoredTimeZone =
-    hasValidSourceTimeZone &&
-    (hasMatchingCoordinateTimeZoneEvidence ||
+    Boolean(sourceTimeZone) &&
+    isValidAffiliateTimeZone(sourceTimeZone ?? "") &&
+    (hasMatchingCoordinateEvidence ||
       hasMatchingPersistedSourceTimeZoneEvidence);
-  let eventTimeZone = hasTrustedStoredTimeZone
+  const eventTimeZone = hasTrustedStoredTimeZone
     ? sourceTimeZone
     : coordinateTimeZone;
   const normalizedStartsAt = parseDateOrNull(
     nullableString(existingDateTimeMetadata.normalizedStartsAt),
   );
   const hasCurrentNormalizedStartProvenance =
-    existingDateTimeMetadata.contractVersion ===
-      AFFILIATE_DATE_TIME_CONTRACT_VERSION &&
-    (existingDateTimeMetadata.startPrecision === "DATE_TIME" ||
-      existingDateTimeMetadata.startPrecision === "DATE_ONLY") &&
-    normalizedStartsAt?.getTime() === existingStart?.getTime() &&
-    nullableString(existingDateTimeMetadata.timeZone) === eventTimeZone;
+    hasCurrentAffiliateDateTimeProvenance(
+      existingDateTimeMetadata,
+      normalizedStartsAt,
+      existingStart,
+      eventTimeZone,
+    );
   const initialDateDisplayMode = normalizeDateDisplayMode(
     candidate.dateDisplayMode,
   );
   const isTimedAffiliateDateDisplayMode =
     initialDateDisplayMode === "SCHEDULED" ||
     initialDateDisplayMode === "DATE_ONLY";
-  if (
-    state === "PUBLISHED" &&
-    isTimedAffiliateDateDisplayMode &&
-    sourceDateTime
-  ) {
-    const normalizationTimeZone = hasTrustedStoredTimeZone
-      ? sourceTimeZone
-      : coordinateTimeZone;
-    if (!normalizationTimeZone) {
-      throw new Error(
-        "Affiliate event candidates require an evidence-backed IANA time zone before publication.",
-      );
-    }
-    candidate = normalizeAffiliateCandidateDateTime(candidate, {
-      timeZone: normalizationTimeZone,
-      timeZoneEvidence: hasMatchingPersistedSourceTimeZoneEvidence
-        ? "SOURCE_FIELD"
-        : "COORDINATES",
-      referenceDate: candidateDateTimeReferenceDate(candidate),
-    });
-    await onCandidateNormalized?.(candidate);
-    eventTimeZone = candidate.timeZone;
-    if (!eventTimeZone || !candidateStartDate(candidate)) {
-      throw new Error(
-        "Affiliate event candidate datetime could not be normalized from preserved source text.",
-      );
-    }
-  } else if (
-    state === "PUBLISHED" &&
-    isTimedAffiliateDateDisplayMode &&
-    existingStart &&
-    (!hasTrustedStoredTimeZone || !hasCurrentNormalizedStartProvenance)
-  ) {
+  return {
+    sourceTimeZone,
+    coordinateTimeZone,
+    existingStart,
+    sourceDateTime,
+    hasMatchingPersistedSourceTimeZoneEvidence,
+    hasTrustedStoredTimeZone,
+    hasCurrentNormalizedStartProvenance,
+    initialDateDisplayMode,
+    isTimedAffiliateDateDisplayMode,
+    eventTimeZone,
+  };
+};
+
+const affiliateEventNeedsDateTimeNormalization = (
+  state: "UNPUBLISHED" | "PUBLISHED" | "PRIVATE",
+  evidence: AffiliateEventDateTimeEvidence,
+): boolean =>
+  state === "PUBLISHED" &&
+  evidence.isTimedAffiliateDateDisplayMode &&
+  Boolean(evidence.sourceDateTime);
+
+const affiliateEventHasStaleDateTimeProvenance = (
+  state: "UNPUBLISHED" | "PUBLISHED" | "PRIVATE",
+  evidence: AffiliateEventDateTimeEvidence,
+): boolean =>
+  state === "PUBLISHED" &&
+  evidence.isTimedAffiliateDateDisplayMode &&
+  Boolean(evidence.existingStart) &&
+  (!evidence.hasTrustedStoredTimeZone ||
+    !evidence.hasCurrentNormalizedStartProvenance);
+
+const normalizeAffiliatePublishedEventDateTime = async (
+  candidate: AffiliateCandidateRecord,
+  evidence: AffiliateEventDateTimeEvidence,
+  onCandidateNormalized?: (
+    candidate: AffiliateCandidateDateTimeInput,
+  ) => void | Promise<void>,
+): Promise<{ candidate: AffiliateCandidateRecord; eventTimeZone: string | null }> => {
+  const normalizationTimeZone = evidence.hasTrustedStoredTimeZone
+    ? evidence.sourceTimeZone
+    : evidence.coordinateTimeZone;
+  if (!normalizationTimeZone) {
+    throw new Error(
+      "Affiliate event candidates require an evidence-backed IANA time zone before publication.",
+    );
+  }
+  const normalizedCandidate = normalizeAffiliateCandidateDateTime(candidate, {
+    timeZone: normalizationTimeZone,
+    timeZoneEvidence: evidence.hasMatchingPersistedSourceTimeZoneEvidence
+      ? "SOURCE_FIELD"
+      : "COORDINATES",
+    referenceDate: candidateDateTimeReferenceDate(candidate),
+  });
+  await onCandidateNormalized?.(normalizedCandidate);
+  const eventTimeZone = normalizedCandidate.timeZone ?? null;
+  if (!eventTimeZone || !candidateStartDate(normalizedCandidate)) {
+    throw new Error(
+      "Affiliate event candidate datetime could not be normalized from preserved source text.",
+    );
+  }
+  return { candidate: normalizedCandidate, eventTimeZone };
+};
+
+const prepareAffiliateEventDateTime = async (params: {
+  candidate: AffiliateCandidateRecord;
+  state: "UNPUBLISHED" | "PUBLISHED" | "PRIVATE";
+  coordinates: [number, number] | null;
+  onCandidateNormalized?: (
+    candidate: AffiliateCandidateDateTimeInput,
+  ) => void | Promise<void>;
+}): Promise<{ candidate: AffiliateCandidateRecord; eventTimeZone: string | null }> => {
+  const evidence = affiliateEventDateTimeEvidence(
+    params.candidate,
+    params.coordinates,
+  );
+  if (affiliateEventNeedsDateTimeNormalization(params.state, evidence)) {
+    return normalizeAffiliatePublishedEventDateTime(
+      params.candidate,
+      evidence,
+      params.onCandidateNormalized,
+    );
+  }
+  if (affiliateEventHasStaleDateTimeProvenance(params.state, evidence)) {
     throw new Error(
       "Affiliate event candidates cannot be published without preserved source datetime text or current normalized datetime provenance.",
     );
   }
+  return { candidate: params.candidate, eventTimeZone: evidence.eventTimeZone };
+};
+
+const affiliateEventEndDate = (
+  candidate: AffiliateCandidateRecord,
+  dateDisplayMode: AffiliateDateDisplayMode,
+): Date | null => {
+  if (dateDisplayMode !== "SCHEDULED" && dateDisplayMode !== "DATE_ONLY") {
+    return null;
+  }
+  if (candidate.endsAt instanceof Date) return candidate.endsAt;
+  return typeof candidate.endsAt === "string"
+    ? parseDateOrNull(candidate.endsAt)
+    : null;
+};
+
+type AffiliateEventDateValues = Readonly<{
+  dateDisplayMode: AffiliateDateDisplayMode;
+  dateDisplayText: string | null;
+  start: Date;
+  end: Date | null;
+}>;
+
+const affiliateEventDateValues = (
+  candidate: AffiliateCandidateRecord,
+): AffiliateEventDateValues => {
   const dateDisplayMode = normalizeDateDisplayMode(candidate.dateDisplayMode);
-  const dateDisplayText = dateDisplayTextFromCandidate(candidate);
-  const start = eventStartFromCandidate(candidate);
-  const end =
-    dateDisplayMode === "SCHEDULED" || dateDisplayMode === "DATE_ONLY"
-      ? candidate.endsAt instanceof Date
-        ? candidate.endsAt
-        : parseDateOrNull(
-            typeof candidate.endsAt === "string" ? candidate.endsAt : null,
-          )
-      : null;
-  if (
-    state === "PUBLISHED" &&
-    (dateDisplayMode === "SCHEDULED" || dateDisplayMode === "DATE_ONLY") &&
-    !eventTimeZone
-  ) {
+  return {
+    dateDisplayMode,
+    dateDisplayText: dateDisplayTextFromCandidate(candidate),
+    start: eventStartFromCandidate(candidate),
+    end: affiliateEventEndDate(candidate, dateDisplayMode),
+  };
+};
+
+const assertAffiliateEventPublicationData = (params: {
+  state: "UNPUBLISHED" | "PUBLISHED" | "PRIVATE";
+  dateDisplayMode: AffiliateDateDisplayMode;
+  eventTimeZone: string | null;
+  coordinates: [number, number] | null;
+  geocodeQueries: string[];
+}) => {
+  const isTimed =
+    params.dateDisplayMode === "SCHEDULED" ||
+    params.dateDisplayMode === "DATE_ONLY";
+  if (params.state === "PUBLISHED" && isTimed && !params.eventTimeZone) {
     throw new Error(
       "Affiliate scheduled and date-only events require an evidence-backed IANA time zone before publication.",
     );
   }
-  if (state === "PUBLISHED") {
+  if (params.state === "PUBLISHED") {
     assertAffiliateCoordinatesForPublication({
-      coordinates,
+      coordinates: params.coordinates,
       targetLabel: "event",
-      queries: geocodeQueries,
+      queries: params.geocodeQueries,
     });
   }
-  const organizerName =
-    nullableString(candidate.organizerName) ?? nullableString(source.name);
+};
 
+const affiliateStringOrFallback = (
+  value: unknown,
+  fallback: string,
+): string => firstAffiliateNullableString(value) ?? fallback;
+
+const affiliateNoFixedEndDateTime = (end: Date | null): boolean => end === null;
+
+const buildAffiliateEventRecord = (params: {
+  candidate: AffiliateCandidateRecord;
+  source: { id: string; organizationId?: string | null; name?: string | null };
+  state: "UNPUBLISHED" | "PUBLISHED" | "PRIVATE";
+  eventType: AffiliateInferredEventType;
+  sportIds: string[];
+  ageRange: {
+    minAge: number | null;
+    maxAge: number | null;
+  };
+  maxParticipants: number | null;
+  hasSourceDivision: boolean;
+  teamSignup: boolean;
+  locationData: AffiliateEventLocationData;
+  eventTimeZone: string | null;
+  dateValues: AffiliateEventDateValues;
+  affiliatePricing: {
+    detailsText: string | null;
+    displayText: string | null;
+    priceCents: number | null;
+  };
+}) => {
+  const {
+    candidate,
+    source,
+    state,
+    eventType,
+    sportIds,
+    ageRange,
+    maxParticipants,
+    hasSourceDivision,
+    teamSignup,
+    locationData,
+    eventTimeZone,
+    dateValues,
+    affiliatePricing,
+  } = params;
+  const organizerName = firstAffiliateNullableString(
+    candidate.organizerName,
+    source.name,
+  );
   return {
-    name: nullableString(candidate.title) ?? "Untitled affiliate event",
+    name: affiliateStringOrFallback(candidate.title, "Untitled affiliate event"),
     createdAt: new Date(),
     updatedAt: new Date(),
-    start,
-    end,
-    timeZone: eventTimeZone ?? "UTC",
+    start: dateValues.start,
+    end: dateValues.end,
+    timeZone: affiliateStringOrFallback(eventTimeZone, "UTC"),
     description: buildAffiliateEventDescription(
       candidate,
       affiliatePricing.detailsText,
@@ -2547,16 +3306,19 @@ const buildAffiliateEventData = async (
     sourceId: candidate.id,
     sourceUrl: nullableString(candidate.sourceUrl),
     organizerName,
-    scheduleText: nullableString(candidate.scheduleText) ?? dateDisplayText,
-    dateDisplayMode,
-    dateDisplayText,
+    scheduleText: affiliateValueOrDefault(
+      nullableString(candidate.scheduleText),
+      dateValues.dateDisplayText,
+    ),
+    dateDisplayMode: dateValues.dateDisplayMode,
+    dateDisplayText: dateValues.dateDisplayText,
     priceText: affiliatePricing.displayText,
     statusText: nullableString(candidate.statusText),
     winnerSetCount: null,
     loserSetCount: null,
     doubleElimination: false,
-    location,
-    address,
+    location: locationData.location,
+    address: locationData.address,
     rating: null,
     teamSizeLimit: inferAffiliateTeamSizeLimit(candidate, teamSignup),
     maxParticipants,
@@ -2564,8 +3326,8 @@ const buildAffiliateEventData = async (
     maxAge: ageRange.maxAge,
     hostId: null,
     assistantHostIds: [],
-    noFixedEndDateTime: end === null,
-    price: affiliatePricing.priceCents ?? 0,
+    noFixedEndDateTime: affiliateNoFixedEndDateTime(dateValues.end),
+    price: affiliateValueOrDefault(affiliatePricing.priceCents, 0),
     taxHandling: "ORGANIZER_COLLECTS",
     organizerManualTaxRateBps: 0,
     singleDivision: !hasSourceDivision,
@@ -2579,7 +3341,7 @@ const buildAffiliateEventData = async (
     fieldCount: null,
     winnerBracketPointsToVictory: [],
     loserBracketPointsToVictory: [],
-    coordinates: coordinates ?? [0, 0],
+    coordinates: affiliateValueOrDefault(locationData.coordinates, [0, 0]),
     gamesPerOpponent: null,
     includePlayoffs: false,
     playoffTeamCount: null,
@@ -2613,6 +3375,72 @@ const buildAffiliateEventData = async (
     splitLeaguePlayoffDivisions: false,
     requiredTemplateIds: [],
   };
+};
+
+const buildAffiliateEventData = async (
+  candidate: AffiliateCandidateRecord,
+  source: { id: string; organizationId?: string | null; name?: string | null },
+  state: "UNPUBLISHED" | "PUBLISHED" | "PRIVATE" = "UNPUBLISHED",
+  fallbackCoordinates?: unknown,
+  onCandidateNormalized?: (
+    candidate: AffiliateCandidateDateTimeInput,
+  ) => void | Promise<void>,
+  client: any = prisma,
+  allowRemoteGeocoding = true,
+  preferFallbackCoordinates = false,
+) => {
+  const { eventType, sportIds } = await resolveAffiliateEventSports(
+    candidate,
+    state,
+    client,
+  );
+  const primarySportId = sportIds[0] ?? null;
+  const ageRange = inferAgeRange(candidate);
+  const participantAvailability =
+    inferCandidateParticipantAvailability(candidate);
+  const divisionDetails = buildAffiliateDivisionDetails(
+    candidate,
+    primarySportId,
+  );
+  const affiliatePricing = buildAffiliateEventPricing(
+    candidate,
+    divisionDetails,
+  );
+  const locationData = await resolveAffiliateEventLocation({
+    candidate,
+    fallbackCoordinates,
+    allowRemoteGeocoding,
+    preferFallbackCoordinates,
+  });
+  const preparedDateTime = await prepareAffiliateEventDateTime({
+    candidate,
+    state,
+    coordinates: locationData.coordinates,
+    onCandidateNormalized,
+  });
+  const dateValues = affiliateEventDateValues(preparedDateTime.candidate);
+  assertAffiliateEventPublicationData({
+    state,
+    dateDisplayMode: dateValues.dateDisplayMode,
+    eventTimeZone: preparedDateTime.eventTimeZone,
+    coordinates: locationData.coordinates,
+    geocodeQueries: locationData.geocodeQueries,
+  });
+  return buildAffiliateEventRecord({
+    candidate: preparedDateTime.candidate,
+    source,
+    state,
+    eventType,
+    sportIds,
+    ageRange,
+    maxParticipants: participantAvailability.maxParticipants,
+    hasSourceDivision: divisionDetails.length > 0,
+    teamSignup: inferAffiliateTeamSignup(candidate, eventType),
+    locationData,
+    eventTimeZone: preparedDateTime.eventTimeZone,
+    dateValues,
+    affiliatePricing,
+  });
 };
 
 const loadSourceOrganization = async (
@@ -2673,7 +3501,7 @@ const sourceHasSeparatePublishedClubTarget = async (
 };
 
 const affiliateEventPublicationCandidateFingerprint = (
-  candidate: any,
+  candidate: AffiliateCandidateRecord,
 ): string =>
   JSON.stringify({
     id: nullableString(candidate?.id),
@@ -2719,7 +3547,7 @@ const affiliateEventPublicationOrganizationFingerprint = (organization: {
   });
 
 const prepareAffiliateEventPublicationLocations = async (
-  candidate: any,
+  candidate: AffiliateCandidateRecord,
   source: { id?: string | null; organizationId?: string | null },
   client: any = prisma,
 ): Promise<{
@@ -2860,35 +3688,45 @@ const markSourceOrganizationListedForPublishedContent = async (
     },
   });
 };
+const affiliateTeamName = (
+  candidate: AffiliateCandidateRecord,
+  sourceName: string | null,
+): string => {
+  const title = affiliateStringOrFallback(
+    candidate.title,
+    "Affiliate team registration",
+  );
+  return sourceName && !title.toLowerCase().includes(sourceName.toLowerCase())
+    ? `${sourceName} ${title}`
+    : title;
+};
+
+const affiliateTeamDivision = (candidate: AffiliateCandidateRecord): string =>
+  firstAffiliateNullableString(
+    candidate.divisionText,
+    candidate.formatLabel,
+  ) ?? "Community Team";
+
 const buildAffiliateTeamData = async (
-  candidate: any,
+  candidate: AffiliateCandidateRecord,
   source: { id: string; organizationId?: string | null; name?: string | null },
   visibility: "ADMIN_ONLY" | "PUBLIC" = "ADMIN_ONLY",
   client: any = prisma,
 ) => {
   const organization = await loadSourceOrganization(source, client);
-  const sourceName = nullableString(source.name);
-  const title =
-    nullableString(candidate.title) ?? "Affiliate team registration";
-  const name =
-    sourceName && !title.toLowerCase().includes(sourceName.toLowerCase())
-      ? `${sourceName} ${title}`
-      : title;
-  const division =
-    nullableString(candidate.divisionText) ??
-    nullableString(candidate.formatLabel) ??
-    "Community Team";
   const divisionDetail = buildAffiliateDivisionDetail(candidate);
-
   return {
-    name,
-    division,
-    divisionTypeId: divisionDetail?.divisionTypeId ?? null,
+    name: affiliateTeamName(candidate, nullableString(source.name)),
+    division: affiliateTeamDivision(candidate),
+    divisionTypeId: affiliateNullableValue(divisionDetail?.divisionTypeId),
     wins: null,
     losses: null,
-    teamSize: parseFirstPositiveInteger(candidate.participantOptionsText) ?? 20,
+    teamSize: affiliateValueOrDefault(
+      parseFirstPositiveInteger(candidate.participantOptionsText),
+      20,
+    ),
     profileImageId: null,
-    sport: nullableString(candidate.sportName) ?? "Soccer",
+    sport: affiliateStringOrFallback(candidate.sportName, "Soccer"),
     organizationId: organization.id,
     createdBy: nullableString(organization.ownerId),
     openRegistration: true,
@@ -2902,31 +3740,56 @@ const buildAffiliateTeamData = async (
     sourceUrl: nullableString(candidate.sourceUrl),
   };
 };
+const affiliateTeamVisibility = (
+  requested: unknown,
+  existing: unknown,
+  fallback = "ADMIN_ONLY",
+): "ADMIN_ONLY" | "PUBLIC" =>
+  (requested ?? existing ?? fallback) as "ADMIN_ONLY" | "PUBLIC";
+
+const updateAffiliateTeamByPublishedId = async (params: {
+  candidate: AffiliateCandidateRecord;
+  source: { id: string; organizationId?: string | null; name?: string | null };
+  teams: any;
+  client: any;
+  options: { visibility?: "ADMIN_ONLY" | "PUBLIC" };
+}) => {
+  const existingTeamId = publishedTeamIdFromCandidate(params.candidate);
+  if (!existingTeamId) return null;
+  const existingTeam = await params.teams.findUnique({
+    where: { id: existingTeamId },
+  });
+  if (!existingTeam) return null;
+  const updateData = await buildAffiliateTeamData(
+    params.candidate,
+    params.source,
+    affiliateTeamVisibility(
+      params.options.visibility,
+      existingTeam.visibility,
+    ),
+    params.client,
+  );
+  return params.teams.update({
+    where: { id: existingTeamId },
+    data: updateData,
+  });
+};
+
 const upsertAffiliateTeamForCandidate = async (
-  candidate: any,
+  candidate: AffiliateCandidateRecord,
   source: { id: string; organizationId?: string | null; name?: string | null },
   options: { visibility?: "ADMIN_ONLY" | "PUBLIC"; client?: any } = {},
 ) => {
   const client = options.client ?? prisma;
   const { teams } = affiliatePrisma(client);
-  const existingTeamId = publishedTeamIdFromCandidate(candidate);
-  if (existingTeamId) {
-    const existingTeam = await teams.findUnique({
-      where: { id: existingTeamId },
-    });
-    if (existingTeam) {
-      const updateData = await buildAffiliateTeamData(
-        candidate,
-        source,
-        options.visibility ?? existingTeam.visibility ?? "ADMIN_ONLY",
-        client,
-      );
-      return teams.update({
-        where: { id: existingTeamId },
-        data: updateData,
-      });
-    }
-  }
+  const existingTeam = await updateAffiliateTeamByPublishedId({
+    candidate,
+    source,
+    teams,
+    client,
+    options,
+  });
+  if (existingTeam) return existingTeam;
 
   const existingBySource = await teams.findFirst({
     where: {
@@ -2938,7 +3801,7 @@ const upsertAffiliateTeamForCandidate = async (
     const updateData = await buildAffiliateTeamData(
       candidate,
       source,
-      options.visibility ?? existingBySource.visibility ?? "ADMIN_ONLY",
+      affiliateTeamVisibility(options.visibility, existingBySource.visibility),
       client,
     );
     return teams.update({
@@ -2950,7 +3813,7 @@ const upsertAffiliateTeamForCandidate = async (
   const createData = await buildAffiliateTeamData(
     candidate,
     source,
-    options.visibility ?? "ADMIN_ONLY",
+    affiliateTeamVisibility(options.visibility, undefined),
     client,
   );
   return teams.create({
@@ -2964,7 +3827,7 @@ const upsertAffiliateTeamForCandidate = async (
 };
 
 const affiliateFacilityIdForCandidate = (
-  candidate: any,
+  candidate: AffiliateCandidateRecord,
   source: AffiliateScrapeSourceRow,
 ): string => {
   const sourceKey =
@@ -2972,12 +3835,82 @@ const affiliateFacilityIdForCandidate = (
   const title =
     nullableString(candidate.title) ??
     nullableString(candidate.venueName) ??
-    candidate.id;
+    candidate.id ?? "candidate";
   return `affiliate_facility_${slugifyForId(sourceKey)}_${slugifyForId(title)}`;
 };
 
+type AffiliateFacilityLocationData = Readonly<{
+  name: string;
+  location: string;
+  address: string | null;
+  city: string | null;
+  geocodeQueries: string[];
+}>;
+
+const affiliateFacilityLocationData = (
+  candidate: AffiliateCandidateRecord,
+): AffiliateFacilityLocationData => {
+  const name =
+    firstAffiliateNullableString(candidate.title, candidate.venueName) ??
+    "Affiliate facility";
+  const location =
+    firstAffiliateNullableString(
+      candidate.venueName,
+      candidate.city,
+      candidate.address,
+    ) ?? name;
+  const address = nullableString(candidate.address);
+  const city = nullableString(candidate.city);
+  return {
+    name,
+    location,
+    address,
+    city,
+    geocodeQueries: buildAffiliatePlaceLocationQueries({
+      name,
+      location,
+      address,
+      city,
+    }),
+  };
+};
+
+const affiliateFacilityCoordinates = async (
+  locationData: AffiliateFacilityLocationData,
+  existingCoordinates: unknown,
+): Promise<[number, number] | null> =>
+  affiliateValueOrDefault(
+    await geocodeFirstAvailableAddress(locationData.geocodeQueries),
+    normalizeAffiliateCoordinates(existingCoordinates),
+  );
+
+const affiliateFacilityStatus = (
+  candidate: AffiliateCandidateRecord,
+  requestedStatus: string | null | undefined,
+): string =>
+  firstAffiliateNullableString(requestedStatus) ??
+  (candidate.status === "PUBLISHED" ? "ACTIVE" : "DRAFT");
+
+const assertAffiliateFacilityCanBePublished = async (params: {
+  candidate: AffiliateCandidateRecord;
+  status: string;
+  coordinates: [number, number] | null;
+  geocodeQueries: string[];
+}) => {
+  if (params.status !== "ACTIVE") return;
+  await assertAffiliateCandidateUsesCanonicalSport(
+    params.candidate,
+    "rental facility",
+  );
+  assertAffiliateCoordinatesForPublication({
+    coordinates: params.coordinates,
+    targetLabel: "rental facility",
+    queries: params.geocodeQueries,
+  });
+};
+
 const upsertAffiliateFacilityForCandidate = async (
-  candidate: any,
+  candidate: AffiliateCandidateRecord,
   source: AffiliateScrapeSourceRow,
   options: { status?: string | null; client?: any } = {},
 ) => {
@@ -2985,59 +3918,39 @@ const upsertAffiliateFacilityForCandidate = async (
   await loadSourceOrganization(source, client);
   const { facilities } = affiliatePrisma(client);
   const facilityId =
-    nullableString(candidate.publishedFacilityId) ??
+    firstAffiliateNullableString(candidate.publishedFacilityId) ??
     affiliateFacilityIdForCandidate(candidate, source);
   const existingFacility = await facilities.findUnique({
     where: { id: facilityId },
     select: { coordinates: true },
   });
-  const name =
-    nullableString(candidate.title) ??
-    nullableString(candidate.venueName) ??
-    "Affiliate facility";
-  const location =
-    nullableString(candidate.venueName) ??
-    nullableString(candidate.city) ??
-    nullableString(candidate.address) ??
-    name;
-  const address = nullableString(candidate.address);
-  const city = nullableString(candidate.city);
-  const geocodeQueries = buildAffiliatePlaceLocationQueries({
-    name,
-    location,
-    address,
-    city,
+  const locationData = affiliateFacilityLocationData(candidate);
+  const coordinates = await affiliateFacilityCoordinates(
+    locationData,
+    existingFacility?.coordinates,
+  );
+  const status = affiliateFacilityStatus(candidate, options.status);
+  await assertAffiliateFacilityCanBePublished({
+    candidate,
+    status,
+    coordinates,
+    geocodeQueries: locationData.geocodeQueries,
   });
-  const coordinates =
-    (await geocodeFirstAvailableAddress(geocodeQueries)) ??
-    normalizeAffiliateCoordinates(existingFacility?.coordinates);
-  const status =
-    nullableString(options.status) ??
-    (candidate.status === "PUBLISHED" ? "ACTIVE" : "DRAFT");
-  if (status === "ACTIVE") {
-    await assertAffiliateCandidateUsesCanonicalSport(
-      candidate,
-      "rental facility",
-    );
-    assertAffiliateCoordinatesForPublication({
-      coordinates,
-      targetLabel: "rental facility",
-      queries: geocodeQueries,
-    });
-  }
   const data = {
     organizationId: nullableString(source.organizationId),
-    name,
-    location,
-    address,
+    name: locationData.name,
+    location: locationData.location,
+    address: locationData.address,
     coordinates,
     operatingHours: null,
-    timeZone: nullableString(candidate.timeZone) ?? "America/Los_Angeles",
+    timeZone: affiliateStringOrFallback(
+      candidate.timeZone,
+      "America/Los_Angeles",
+    ),
     status,
     isDefault: false,
     affiliateUrl: nullableString(candidate.officialActionUrl),
   };
-
   return facilities.upsert({
     where: { id: facilityId },
     create: {
@@ -3052,7 +3965,7 @@ const slugifyForPublicSlug = (value: string): string =>
   slugifyPublicOrganizationName(value, 80) || "club";
 
 const affiliateOrganizationIdForCandidate = (
-  candidate: any,
+  candidate: AffiliateCandidateRecord,
   source: AffiliateScrapeSourceRow,
 ): string => {
   const sourceKey =
@@ -3060,7 +3973,7 @@ const affiliateOrganizationIdForCandidate = (
   const title =
     nullableString(candidate.title) ??
     nullableString(candidate.organizerName) ??
-    candidate.id;
+    candidate.id ?? "candidate";
   return `affiliate_org_${slugifyForId(sourceKey)}_${slugifyForId(title)}`;
 };
 
@@ -3091,8 +4004,180 @@ const nextAvailableOrganizationSlug = async (
   return `${base}-${shortHash}`;
 };
 
+type AffiliateOrganizationLocationData = Readonly<{
+  name: string;
+  location: string | null;
+  address: string | null;
+  city: string | null;
+  geocodeQueries: string[];
+}>;
+
+const affiliateOrganizationField = (
+  values: unknown[],
+  canonical: boolean,
+  sourceValue: unknown,
+): string | null =>
+  firstAffiliateNullableString(
+    ...values,
+    ...(canonical ? [sourceValue] : []),
+  );
+
+const affiliateOrganizationLocationData = (params: {
+  candidate: AffiliateCandidateRecord;
+  source: AffiliateScrapeSourceRow;
+  sourceOrganization: any;
+  canonical: boolean;
+}): AffiliateOrganizationLocationData => {
+  const {
+    candidate,
+    source,
+    sourceOrganization,
+    canonical,
+  } = params;
+  const name =
+    firstAffiliateNullableString(
+      canonical ? sourceOrganization.name : null,
+      candidate.title,
+      candidate.organizerName,
+      source.name,
+    ) ?? "Affiliate club";
+  const location = affiliateOrganizationField(
+    [candidate.venueName, candidate.city, candidate.address],
+    canonical,
+    sourceOrganization.location,
+  );
+  const address = affiliateOrganizationField(
+    [candidate.address],
+    canonical,
+    sourceOrganization.address,
+  );
+  const city = affiliateOrganizationField(
+    [candidate.city],
+    canonical,
+    sourceOrganization.location,
+  );
+  return {
+    name,
+    location,
+    address,
+    city,
+    geocodeQueries: buildAffiliatePlaceLocationQueries({
+      name,
+      location,
+      address,
+      city,
+    }),
+  };
+};
+
+const affiliateOrganizationCoordinates = async (params: {
+  existingOrganization: any;
+  sourceOrganization: any;
+  canonical: boolean;
+  geocodeQueries: string[];
+}): Promise<[number, number] | null> => {
+  const existingCoordinates = normalizeAffiliateCoordinates(
+    params.existingOrganization?.coordinates,
+  );
+  if (existingCoordinates) return existingCoordinates;
+  if (params.canonical) {
+    const sourceCoordinates = normalizeAffiliateCoordinates(
+      params.sourceOrganization.coordinates,
+    );
+    if (sourceCoordinates) return sourceCoordinates;
+  }
+  return geocodeFirstAvailableAddress(params.geocodeQueries);
+};
+
+const assertAffiliateOrganizationCanBePublished = async (params: {
+  candidate: AffiliateCandidateRecord;
+  status: "LISTED" | "UNLISTED";
+  publicPageEnabled: boolean;
+  coordinates: [number, number] | null;
+  geocodeQueries: string[];
+}) => {
+  if (params.status !== "LISTED" && !params.publicPageEnabled) return;
+  await assertAffiliateCandidateUsesCanonicalSport(params.candidate, "organization");
+  assertAffiliateCoordinatesForPublication({
+    coordinates: params.coordinates,
+    targetLabel: "organization",
+    queries: params.geocodeQueries,
+  });
+};
+
+const affiliateOrganizationDescription = (params: {
+  candidate: AffiliateCandidateRecord;
+  sourceOrganization: any;
+  canonical: boolean;
+}): string | null =>
+  firstAffiliateNullableString(
+    params.canonical ? params.sourceOrganization.description : null,
+    params.candidate.description,
+    params.candidate.scheduleText,
+    params.candidate.statusText,
+  );
+
+const affiliateOrganizationWebsite = (params: {
+  candidate: AffiliateCandidateRecord;
+  source: AffiliateScrapeSourceRow;
+  sourceOrganization: any;
+  canonical: boolean;
+}): string | null =>
+  firstAffiliateNullableString(
+    params.canonical ? params.sourceOrganization.website : null,
+    params.candidate.officialActionUrl,
+    params.candidate.sourceUrl,
+    params.source.baseUrl,
+  );
+
+const affiliateOrganizationLogo = async (params: {
+  candidate: AffiliateCandidateRecord;
+  sourceOrganization: any;
+  organizationId: string;
+  ownerId: string;
+  client: any;
+  existingOrganization: any;
+  canonical: boolean;
+  deferLogoUpload: boolean;
+}): Promise<string | null> => {
+  const sourceLogo = params.canonical
+    ? nullableString(params.sourceOrganization.logoId)
+    : null;
+  if (params.deferLogoUpload) {
+    return firstAffiliateNullableString(
+      params.existingOrganization?.logoId,
+      sourceLogo,
+    );
+  }
+  const uploadedLogo = await upsertAffiliateOrganizationLogoForCandidate(
+    params.candidate,
+    params.organizationId,
+    params.ownerId,
+    params.client,
+  );
+  return firstAffiliateNullableString(
+    uploadedLogo,
+    params.existingOrganization?.logoId,
+    sourceLogo,
+  );
+};
+
+const affiliateOrganizationLogoField = (
+  logoId: string | null,
+): Record<string, string> => (logoId ? { logoId } : {});
+
+const affiliateOrganizationOwnerId = (sourceOrganization: any): string => {
+  const ownerId = nullableString(sourceOrganization.ownerId);
+  if (!ownerId) {
+    throw new Error(
+      "Affiliate source organization must have an owner before club rows can be created.",
+    );
+  }
+  return ownerId;
+};
+
 const buildAffiliateOrganizationData = async (
-  candidate: any,
+  candidate: AffiliateCandidateRecord,
   source: AffiliateScrapeSourceRow,
   organizationId: string,
   options: {
@@ -3104,102 +4189,59 @@ const buildAffiliateOrganizationData = async (
   client: any = prisma,
 ) => {
   const sourceOrganization = await loadSourceOrganization(source, client);
-  const ownerId = nullableString(sourceOrganization.ownerId);
-  if (!ownerId) {
-    throw new Error(
-      "Affiliate source organization must have an owner before club rows can be created.",
-    );
-  }
-  const isCanonicalSourceOrganization =
-    organizationId === nullableString(source.organizationId);
-  const name =
-    (isCanonicalSourceOrganization
-      ? nullableString(sourceOrganization.name)
-      : null) ??
-    nullableString(candidate.title) ??
-    nullableString(candidate.organizerName) ??
-    nullableString(source.name) ??
-    "Affiliate club";
-  const location =
-    nullableString(candidate.venueName) ??
-    nullableString(candidate.city) ??
-    nullableString(candidate.address) ??
-    (isCanonicalSourceOrganization
-      ? nullableString(sourceOrganization.location)
-      : null) ??
-    null;
-  const address =
-    nullableString(candidate.address) ??
-    (isCanonicalSourceOrganization
-      ? nullableString(sourceOrganization.address)
-      : null);
-  const city =
-    nullableString(candidate.city) ??
-    (isCanonicalSourceOrganization
-      ? nullableString(sourceOrganization.location)
-      : null);
-  const geocodeQueries = buildAffiliatePlaceLocationQueries({
-    name,
-    location,
-    address,
-    city,
+  const ownerId = affiliateOrganizationOwnerId(sourceOrganization);
+  const canonical = organizationId === nullableString(source.organizationId);
+  const locationData = affiliateOrganizationLocationData({
+    candidate,
+    source,
+    sourceOrganization,
+    canonical,
   });
-  const coordinates =
-    normalizeAffiliateCoordinates(existingOrganization?.coordinates) ??
-    (isCanonicalSourceOrganization
-      ? normalizeAffiliateCoordinates(sourceOrganization.coordinates)
-      : null) ??
-    (await geocodeFirstAvailableAddress(geocodeQueries));
-  const status = options.status ?? "UNLISTED";
+  const coordinates = await affiliateOrganizationCoordinates({
+    existingOrganization,
+    sourceOrganization,
+    canonical,
+    geocodeQueries: locationData.geocodeQueries,
+  });
+  const status = affiliateValueOrDefault(options.status, "UNLISTED");
   const publicPageEnabled = options.publicPageEnabled === true;
-  if (status === "LISTED" || publicPageEnabled) {
-    await assertAffiliateCandidateUsesCanonicalSport(candidate, "organization");
-    assertAffiliateCoordinatesForPublication({
-      coordinates,
-      targetLabel: "organization",
-      queries: geocodeQueries,
-    });
-  }
+  await assertAffiliateOrganizationCanBePublished({
+    candidate,
+    status,
+    publicPageEnabled,
+    coordinates,
+    geocodeQueries: locationData.geocodeQueries,
+  });
   const sportNames = candidateSportNames(candidate);
-  const description =
-    nullableString(candidate.description) ??
-    (isCanonicalSourceOrganization
-      ? nullableString(sourceOrganization.description)
-      : null) ??
-    nullableString(candidate.scheduleText) ??
-    nullableString(candidate.statusText) ??
-    null;
-  const website =
-    (isCanonicalSourceOrganization
-      ? nullableString(sourceOrganization.website)
-      : null) ??
-    nullableString(candidate.officialActionUrl) ??
-    nullableString(candidate.sourceUrl) ??
-    nullableString(source.baseUrl);
-  const logoId = options.deferLogoUpload
-    ? nullableString(existingOrganization?.logoId)
-      ?? (isCanonicalSourceOrganization
-        ? nullableString(sourceOrganization.logoId)
-        : null)
-    : (await upsertAffiliateOrganizationLogoForCandidate(
-      candidate,
-      organizationId,
-      ownerId,
-      client,
-    )) ??
-      nullableString(existingOrganization?.logoId) ??
-      (isCanonicalSourceOrganization
-        ? nullableString(sourceOrganization.logoId)
-        : null);
-
+  const description = affiliateOrganizationDescription({
+    candidate,
+    sourceOrganization,
+    canonical,
+  });
+  const website = affiliateOrganizationWebsite({
+    candidate,
+    source,
+    sourceOrganization,
+    canonical,
+  });
+  const logoId = await affiliateOrganizationLogo({
+    candidate,
+    sourceOrganization,
+    organizationId,
+    ownerId,
+    client,
+    existingOrganization,
+    canonical,
+    deferLogoUpload: options.deferLogoUpload === true,
+  });
   return {
     updatedAt: new Date(),
-    name,
-    ...(logoId ? { logoId } : {}),
+    name: locationData.name,
+    ...affiliateOrganizationLogoField(logoId),
     ownerId,
     coordinates,
-    location,
-    address,
+    location: locationData.location,
+    address: locationData.address,
     description,
     website,
     sports: sportNames,
@@ -3207,16 +4249,55 @@ const buildAffiliateOrganizationData = async (
     hasStripeAccount: false,
     verificationStatus: "UNVERIFIED",
     verificationReviewStatus: "NONE",
-    publicSlug: await nextAvailableOrganizationSlug(name, organizationId, client),
+    publicSlug: await nextAvailableOrganizationSlug(
+      locationData.name,
+      organizationId,
+      client,
+    ),
     publicPageEnabled,
     publicWidgetsEnabled: false,
-    publicHeadline: name,
+    publicHeadline: locationData.name,
     publicIntroText: description,
     operatesAthleticFacility: false,
   };
 };
+const shouldPreserveAffiliateOrganization = (
+  existingOrganization: any,
+  organizationId: string,
+  sourceOrganizationId: string | null,
+): boolean =>
+  existingOrganization?.id === organizationId &&
+  Boolean(existingOrganization.ownershipStatus) &&
+  existingOrganization.ownershipStatus !== "UNCLAIMED" &&
+  Boolean(
+    organizationId !== sourceOrganizationId ||
+      existingOrganization.claimedAt ||
+      nullableString(existingOrganization.claimedByUserId),
+  );
+
+const affiliateOrganizationCreateData = (
+  organizationId: string,
+  data: Record<string, unknown>,
+) => ({
+  id: organizationId,
+  createdAt: new Date(),
+  ...data,
+  ...affiliateOrganizationInitialOwnership(),
+});
+
+const affiliateOrganizationUpdateData = (
+  organizationId: string,
+  sourceOrganizationId: string | null,
+  data: Record<string, unknown>,
+) => ({
+  ...data,
+  ...(organizationId === sourceOrganizationId
+    ? {}
+    : { originType: "AFFILIATE_IMPORTED" }),
+});
+
 const upsertAffiliateOrganizationForCandidate = async (
-  candidate: any,
+  candidate: AffiliateCandidateRecord,
   source: AffiliateScrapeSourceRow,
   options: {
     status?: "LISTED" | "UNLISTED";
@@ -3234,12 +4315,11 @@ const upsertAffiliateOrganizationForCandidate = async (
     where: { id: organizationId },
   });
   if (
-    existingOrganization?.id === organizationId &&
-    existingOrganization.ownershipStatus &&
-    existingOrganization.ownershipStatus !== "UNCLAIMED" &&
-    (organizationId !== nullableString(source.organizationId) ||
-      existingOrganization.claimedAt ||
-      nullableString(existingOrganization.claimedByUserId))
+    shouldPreserveAffiliateOrganization(
+      existingOrganization,
+      organizationId,
+      nullableString(source.organizationId),
+    )
   ) {
     return existingOrganization;
   }
@@ -3251,199 +4331,246 @@ const upsertAffiliateOrganizationForCandidate = async (
     existingOrganization,
     client,
   );
-
   return organizations.upsert({
     where: { id: organizationId },
-    create: {
-      id: organizationId,
-      createdAt: new Date(),
-      ...data,
-      ...affiliateOrganizationInitialOwnership(),
-    },
-    update: {
-      ...data,
-      ...(organizationId === nullableString(source.organizationId)
-        ? {}
-        : { originType: "AFFILIATE_IMPORTED" }),
-    },
+    create: affiliateOrganizationCreateData(organizationId, data),
+    update: affiliateOrganizationUpdateData(
+      organizationId,
+      nullableString(source.organizationId),
+      data,
+    ),
   });
 };
 
-const upsertAffiliateEventForCandidate = async (
-  candidate: any,
-  source: { id: string; organizationId?: string | null; name?: string | null },
+const syncAffiliateEventDivisions = async (params: {
+  event: any;
+  candidate: AffiliateCandidateRecord;
+  source: { organizationId?: string | null };
+  metadataClient: any;
+}) => {
+  const primarySportId = Array.isArray(params.event?.sportIds)
+    ? params.event.sportIds[0] ?? null
+    : null;
+  const divisionDetails = buildAffiliateDivisionDetails(
+    params.candidate,
+    primarySportId,
+  );
+  if (divisionDetails.length === 0) return;
+  await syncEventDivisions(
+    {
+      eventId: params.event.id,
+      divisionIds: divisionDetails.map(
+        (divisionDetail) => divisionDetail.key,
+      ),
+      fieldIds: [],
+      includePlayoffs: false,
+      singleDivision: false,
+      sportId: primarySportId,
+      referenceDate:
+        params.event?.start instanceof Date
+          ? params.event.start
+          : candidateStartDate(params.candidate),
+      organizationId: nullableString(params.source.organizationId),
+      divisionDetails,
+      defaultPrice: null,
+      defaultMaxParticipants: null,
+      eventType:
+        params.event?.eventType ?? inferAffiliateEventType(params.candidate),
+    },
+    params.metadataClient,
+  );
+};
+
+const syncAffiliateEventTags = async (params: {
+  event: any;
+  candidate: AffiliateCandidateRecord;
+  metadataClient: any;
+}) => {
+  const eventType =
+    params.event?.eventType ?? inferAffiliateEventType(params.candidate);
+  const syncEventType =
+    eventType === "LEAGUE" || eventType === "TOURNAMENT"
+      ? eventType
+      : undefined;
+  await syncEventTags(
+    params.event.id,
+    buildAffiliateEventTagNames(params.candidate, eventType),
+    params.metadataClient,
+    { eventType: syncEventType },
+  );
+};
+
+const syncAffiliateEventMetadata = async (params: {
+  event: any;
+  candidate: AffiliateCandidateRecord;
+  source: { organizationId?: string | null };
+  metadataClient: any;
+}) => {
+  await syncAffiliateEventDivisions(params);
+  await syncAffiliateEventTags(params);
+};
+
+const applyAffiliateLockedEventUpdate = async (params: {
+  eventId: string;
+  updateData: Record<string, unknown>;
+  client: any;
+  useCurrentClient: boolean;
+  candidate: AffiliateCandidateRecord;
+  source: { organizationId?: string | null };
+}) => {
+  const applyWithinTransaction = async (transactionClient: any) => {
+    await acquireEventLock(transactionClient, params.eventId);
+    const transactionEvents = affiliatePrisma(transactionClient).events;
+    const lockedEvent = await transactionEvents.findUnique({
+      where: { id: params.eventId },
+    });
+    if (!lockedEvent) {
+      throw new Error(`Affiliate event ${params.eventId} was not found.`);
+    }
+    const sourceUpdate = {
+      sourceType: nullableString(params.updateData.sourceType),
+      sourceId: nullableString(params.updateData.sourceId),
+      sourceUrl: nullableString(params.updateData.sourceUrl),
+    };
+    const eventUpdate = { ...params.updateData };
+    delete eventUpdate.sourceType;
+    delete eventUpdate.sourceId;
+    delete eventUpdate.sourceUrl;
+    const transition = await applyEventSourceTransition({
+      tx: transactionClient,
+      currentEvent: lockedEvent,
+      sourceUpdate,
+      eventUpdate,
+      beforeScheduleReconcile: (updatedEvent) =>
+        syncAffiliateEventMetadata({
+          event: updatedEvent,
+          candidate: params.candidate,
+          source: params.source,
+          metadataClient: transactionClient,
+        }),
+    });
+    return transition.event;
+  };
+  if (params.useCurrentClient) {
+    return applyWithinTransaction(params.client);
+  }
+  if (typeof params.client.$transaction === "function") {
+    return params.client.$transaction((transactionClient: any) =>
+      applyWithinTransaction(transactionClient),
+    );
+  }
+  return applyWithinTransaction(params.client);
+};
+
+const affiliateEventState = (
+  options: {
+    state?: "UNPUBLISHED" | "PUBLISHED" | "PRIVATE";
+  },
+  existingState?: string | null,
+): "UNPUBLISHED" | "PUBLISHED" | "PRIVATE" =>
+  affiliateValueOrDefault(
+    options.state,
+    affiliateValueOrDefault(existingState as "UNPUBLISHED" | "PUBLISHED" | "PRIVATE" | null | undefined, "UNPUBLISHED"),
+  );
+
+const affiliateExistingEventFallbackCoordinates = (
+  options: {
+    fallbackCoordinates?: unknown;
+    preferFallbackCoordinates?: boolean;
+  },
+  existingCoordinates: unknown,
+): unknown =>
+  options.preferFallbackCoordinates
+    ? options.fallbackCoordinates
+    : affiliateValueOrDefault(existingCoordinates, options.fallbackCoordinates);
+
+const updateAffiliateEventFromExisting = async (params: {
+  candidate: AffiliateCandidateRecord;
+  source: { id: string; organizationId?: string | null; name?: string | null };
+  existingEvent: any;
   options: {
     state?: "UNPUBLISHED" | "PUBLISHED" | "PRIVATE";
     onCandidateNormalized?: (
-      candidate: AffiliateCandidateInput,
+      candidate: AffiliateCandidateDateTimeInput,
     ) => void | Promise<void>;
-    client?: any;
     fallbackCoordinates?: unknown;
-    allowRemoteGeocoding?: boolean;
-    preferFallbackCoordinates?: boolean;
-  } = {},
-) => {
-  const client = options.client ?? prisma;
-  const allowRemoteGeocoding = options.allowRemoteGeocoding ?? true;
-  const preferFallbackCoordinates = options.preferFallbackCoordinates ?? false;
-  await assertSourceOrganization(source, client);
-  const { events } = affiliatePrisma(client);
-  const syncSourceDivisions = async (event: any, metadataClient = client) => {
-    const primarySportId = Array.isArray(event?.sportIds)
-      ? (event.sportIds[0] ?? null)
-      : null;
-    const divisionDetails = buildAffiliateDivisionDetails(
-      candidate,
-      primarySportId,
-    );
-    if (divisionDetails.length === 0) {
-      return;
-    }
-    await syncEventDivisions(
-      {
-        eventId: event.id,
-        divisionIds: divisionDetails.map(
-          (divisionDetail) => divisionDetail.key,
-        ),
-        fieldIds: [],
-        includePlayoffs: false,
-        singleDivision: false,
-        sportId: primarySportId,
-        referenceDate:
-          event?.start instanceof Date
-            ? event.start
-            : candidateStartDate(candidate),
-        organizationId: nullableString(source.organizationId),
-        divisionDetails,
-        defaultPrice: null,
-        defaultMaxParticipants: null,
-        eventType: event?.eventType ?? inferAffiliateEventType(candidate),
-      },
-      metadataClient,
-    );
+    allowRemoteGeocoding: boolean;
+    preferFallbackCoordinates: boolean;
   };
-  const syncSourceTags = async (event: any, metadataClient = client) => {
-    const eventType = event?.eventType ?? inferAffiliateEventType(candidate);
-    const syncEventType =
-      eventType === "LEAGUE" || eventType === "TOURNAMENT"
-        ? eventType
-        : undefined;
-    await syncEventTags(
-      event.id,
-      buildAffiliateEventTagNames(candidate, eventType),
-      metadataClient,
-      {
-        eventType: syncEventType,
-      },
-    );
-  };
-  const syncSourceMetadata = async (event: any, metadataClient = client) => {
-    await syncSourceDivisions(event, metadataClient);
-    await syncSourceTags(event, metadataClient);
-  };
-  const applyLockedEventUpdate = async (
-    eventId: string,
-    updateData: Record<string, unknown>,
-  ) => {
-    const applyWithinTransaction = async (transactionClient: any) => {
-      await acquireEventLock(transactionClient, eventId);
-      const transactionEvents = affiliatePrisma(transactionClient).events;
-      const lockedEvent = await transactionEvents.findUnique({
-        where: { id: eventId },
-      });
-      if (!lockedEvent) {
-        throw new Error(`Affiliate event ${eventId} was not found.`);
-      }
-      const sourceUpdate = {
-        sourceType: nullableString(updateData.sourceType),
-        sourceId: nullableString(updateData.sourceId),
-        sourceUrl: nullableString(updateData.sourceUrl),
-      };
-      const eventUpdate = { ...updateData };
-      delete eventUpdate.sourceType;
-      delete eventUpdate.sourceId;
-      delete eventUpdate.sourceUrl;
-      const transition = await applyEventSourceTransition({
-        tx: transactionClient,
-        currentEvent: lockedEvent,
-        sourceUpdate,
-        eventUpdate,
-        beforeScheduleReconcile: (updatedEvent) =>
-          syncSourceMetadata(updatedEvent, transactionClient),
-      });
-      return transition.event;
-    };
-    if (options.client) {
-      return applyWithinTransaction(client);
-    }
-    if (typeof client.$transaction === "function") {
-      return client.$transaction((transactionClient: any) =>
-        applyWithinTransaction(transactionClient),
-      );
-    }
-    return applyWithinTransaction(client);
-  };
-  const existingEventId = publishedEventIdFromCandidate(candidate);
-  if (existingEventId) {
-    const existingEvent = await events.findUnique({
-      where: { id: existingEventId },
-    });
-    if (existingEvent) {
-      const updateData = await buildAffiliateEventData(
-        candidate,
-        source,
-        options.state ?? existingEvent.state ?? "UNPUBLISHED",
-        preferFallbackCoordinates
-          ? options.fallbackCoordinates
-          : (existingEvent.coordinates ?? options.fallbackCoordinates),
-        options.onCandidateNormalized,
-        client,
-        allowRemoteGeocoding,
-        preferFallbackCoordinates,
-      );
-      delete (updateData as any).createdAt;
-      return applyLockedEventUpdate(existingEventId, updateData);
-    }
-  }
-
-  const existingBySource = await events.findFirst({
-    where: {
-      sourceType: "AFFILIATE_IMPORT",
-      sourceId: candidate.id,
-    },
+  client: any;
+  useCurrentClient: boolean;
+}) => {
+  const updateData = await buildAffiliateEventData(
+    params.candidate,
+    params.source,
+    affiliateEventState(params.options, params.existingEvent.state),
+    affiliateExistingEventFallbackCoordinates(
+      params.options,
+      params.existingEvent.coordinates,
+    ),
+    params.options.onCandidateNormalized,
+    params.client,
+    params.options.allowRemoteGeocoding,
+    params.options.preferFallbackCoordinates,
+  );
+  delete (updateData as any).createdAt;
+  return applyAffiliateLockedEventUpdate({
+    eventId: params.existingEvent.id,
+    updateData,
+    client: params.client,
+    useCurrentClient: params.useCurrentClient,
+    candidate: params.candidate,
+    source: params.source,
   });
-  if (existingBySource) {
-    const updateData = await buildAffiliateEventData(
-      candidate,
-      source,
-      options.state ?? existingBySource.state ?? "UNPUBLISHED",
-      preferFallbackCoordinates
-        ? options.fallbackCoordinates
-        : (existingBySource.coordinates ?? options.fallbackCoordinates),
-      options.onCandidateNormalized,
-      client,
-      allowRemoteGeocoding,
-      preferFallbackCoordinates,
-    );
-    delete (updateData as any).createdAt;
-    return applyLockedEventUpdate(existingBySource.id, updateData);
-  }
+};
 
+const affiliateOccurrenceEventUpdateData = (
+  createData: Record<string, any>,
+  state: "UNPUBLISHED" | "PUBLISHED" | "PRIVATE" | undefined,
+  existingEvent: Record<string, any>,
+) => ({
+  ...createData,
+  state: affiliateValueOrDefault(
+    state,
+    affiliateValueOrDefault(existingEvent.state, createData.state),
+  ),
+  sourceId: affiliateValueOrDefault(
+    existingEvent.sourceId,
+    createData.sourceId,
+  ),
+});
+
+const createAffiliateEventForCandidate = async (params: {
+  candidate: AffiliateCandidateRecord;
+  source: { id: string; organizationId?: string | null; name?: string | null };
+  options: {
+    state?: "UNPUBLISHED" | "PUBLISHED" | "PRIVATE";
+    onCandidateNormalized?: (
+      candidate: AffiliateCandidateDateTimeInput,
+    ) => void | Promise<void>;
+    fallbackCoordinates?: unknown;
+    allowRemoteGeocoding: boolean;
+    preferFallbackCoordinates: boolean;
+  };
+  client: any;
+  events: any;
+  useCurrentClient: boolean;
+}) => {
   const createData = await buildAffiliateEventData(
-    candidate,
-    source,
-    options.state ?? "UNPUBLISHED",
-    options.fallbackCoordinates,
-    options.onCandidateNormalized,
-    client,
-    allowRemoteGeocoding,
-    preferFallbackCoordinates,
+    params.candidate,
+    params.source,
+    affiliateValueOrDefault(params.options.state, "UNPUBLISHED"),
+    params.options.fallbackCoordinates,
+    params.options.onCandidateNormalized,
+    params.client,
+    params.options.allowRemoteGeocoding,
+    params.options.preferFallbackCoordinates,
   );
   const existingByOccurrence = createData.affiliateUrl
-    ? await events.findFirst({
+    ? await params.events.findFirst({
         where: {
           sourceType: "AFFILIATE_IMPORT",
-          sourceId: { not: candidate.id },
+          sourceId: { not: params.candidate.id },
           organizationId: createData.organizationId,
           affiliateUrl: createData.affiliateUrl,
           name: createData.name,
@@ -3455,23 +4582,114 @@ const upsertAffiliateEventForCandidate = async (
       })
     : null;
   if (existingByOccurrence) {
-    const updateData = {
-      ...createData,
-      state: options.state ?? existingByOccurrence.state ?? createData.state,
-      sourceId: existingByOccurrence.sourceId ?? createData.sourceId,
-    };
+    const updateData = affiliateOccurrenceEventUpdateData(
+      createData,
+      params.options.state,
+      existingByOccurrence,
+    );
     delete (updateData as any).createdAt;
-    return applyLockedEventUpdate(existingByOccurrence.id, updateData);
+    return applyAffiliateLockedEventUpdate({
+      eventId: existingByOccurrence.id,
+      updateData,
+      client: params.client,
+      useCurrentClient: params.useCurrentClient,
+      candidate: params.candidate,
+      source: params.source,
+    });
   }
-
-  const event = await events.create({
+  const event = await params.events.create({
     data: {
       id: createId(),
       ...createData,
     },
   });
-  await syncSourceMetadata(event);
+  await syncAffiliateEventMetadata({
+    event,
+    candidate: params.candidate,
+    source: params.source,
+    metadataClient: params.client,
+  });
   return event;
+};
+
+const upsertAffiliateEventForCandidate = async (
+  candidate: AffiliateCandidateRecord,
+  source: { id: string; organizationId?: string | null; name?: string | null },
+  options: {
+    state?: "UNPUBLISHED" | "PUBLISHED" | "PRIVATE";
+    onCandidateNormalized?: (
+      candidate: AffiliateCandidateDateTimeInput,
+    ) => void | Promise<void>;
+    client?: any;
+    fallbackCoordinates?: unknown;
+    allowRemoteGeocoding?: boolean;
+    preferFallbackCoordinates?: boolean;
+  } = {},
+) => {
+  const client = options.client ?? prisma;
+  const allowRemoteGeocoding = affiliateValueOrDefault(
+    options.allowRemoteGeocoding,
+    true,
+  );
+  const preferFallbackCoordinates = affiliateValueOrDefault(
+    options.preferFallbackCoordinates,
+    false,
+  );
+  await assertSourceOrganization(source, client);
+  const { events } = affiliatePrisma(client);
+  const useCurrentClient = Boolean(options.client);
+  const existingEventId = publishedEventIdFromCandidate(candidate);
+  if (existingEventId) {
+    const existingEvent = await events.findUnique({
+      where: { id: existingEventId },
+    });
+    if (existingEvent) {
+      return updateAffiliateEventFromExisting({
+        candidate,
+        source,
+        existingEvent,
+        options: {
+          ...options,
+          allowRemoteGeocoding,
+          preferFallbackCoordinates,
+        },
+        client,
+        useCurrentClient,
+      });
+    }
+  }
+  const existingBySource = await events.findFirst({
+    where: {
+      sourceType: "AFFILIATE_IMPORT",
+      sourceId: candidate.id,
+    },
+  });
+  if (existingBySource) {
+    return updateAffiliateEventFromExisting({
+      candidate,
+      source,
+      existingEvent: existingBySource,
+      options: {
+        ...options,
+        allowRemoteGeocoding,
+        preferFallbackCoordinates,
+      },
+      client,
+      useCurrentClient,
+    });
+  }
+  return createAffiliateEventForCandidate({
+    candidate,
+    source,
+    options: {
+      ...options,
+      allowRemoteGeocoding,
+      preferFallbackCoordinates,
+    },
+    client,
+    events,
+    useCurrentClient,
+  });
 };
 
 const resolveActiveMapping = async (
@@ -3498,124 +4716,184 @@ const resolveActiveMapping = async (
   };
 };
 
+type AffiliateDetailPageMapping = NonNullable<
+  AffiliateScrapeMapping["detailPage"]
+>;
+
+const applyAffiliateDetailFields = (params: {
+  candidate: AffiliateCandidateInput;
+  detailValues: Record<string, unknown>;
+  fields: AffiliateDetailPageMapping["fields"];
+  detailUrl: string;
+  detailPage: {
+    finalUrl: string;
+    statusCode: number | null;
+    fetchedAt: string;
+  };
+}): {
+  candidate: AffiliateCandidateInput;
+  warnings: string[];
+} => {
+  const warnings = [...(params.candidate.warnings ?? [])];
+  const nextCandidate: AffiliateCandidateInput = {
+    ...params.candidate,
+    rawPayload: {
+      ...affiliateValueOrDefault(params.candidate.rawPayload, {}),
+      detailPage: {
+        url: params.detailUrl,
+        finalUrl: params.detailPage.finalUrl,
+        statusCode: params.detailPage.statusCode,
+        extractedFields: params.detailValues,
+      },
+    },
+  };
+  Object.entries(params.fields).forEach(([fieldName, fieldMapping]) => {
+    const value = nullableString(params.detailValues[fieldName]);
+    if (value) {
+      (nextCandidate as Record<string, unknown>)[fieldName] = value;
+    } else if (fieldMapping.required) {
+      warnings.push(`Missing required detail field: ${fieldName}`);
+    }
+  });
+  nextCandidate.warnings = warnings;
+  return { candidate: nextCandidate, warnings };
+};
+
+const affiliateDetailDateTimeInputs = (
+  detailValues: Record<string, unknown>,
+): Record<string, unknown> =>
+  Object.fromEntries(
+    ["startsAt", "endsAt", "durationText", "timeZone", "dateDisplayMode"]
+      .filter((fieldName) => nullableString(detailValues[fieldName]) != null)
+      .map((fieldName) => [fieldName, nullableString(detailValues[fieldName])]),
+  );
+
+const affiliateDetailTimeZoneEvidence = (
+  detailDateTimeInputs: Record<string, unknown>,
+  candidate: AffiliateCandidateInput,
+): "SOURCE_FIELD" | "COORDINATES" | undefined => {
+  if (detailDateTimeInputs.timeZone) return "SOURCE_FIELD";
+  const existingEvidence = recordValue(
+    recordValue(recordValue(candidate.rawPayload).normalizedImport).dateTime,
+  ).timeZoneEvidence;
+  if (existingEvidence === "COORDINATES") return "COORDINATES";
+  return candidate.timeZone ? "SOURCE_FIELD" : undefined;
+};
+
+const affiliateDetailReferenceDate = (
+  detailPage: { fetchedAt: string },
+  params: { referenceDate?: Date },
+): Date => {
+  const fetchedAt = new Date(detailPage.fetchedAt);
+  return params.referenceDate ??
+    (Number.isNaN(fetchedAt.getTime()) ? new Date() : fetchedAt);
+};
+
+const normalizeAffiliateDetailDateTime = (params: {
+  candidate: AffiliateCandidateInput;
+  detailValues: Record<string, unknown>;
+  detailPage: { fetchedAt: string };
+  referenceDate?: Date;
+}): AffiliateCandidateInput => {
+  const detailDateTimeInputs = affiliateDetailDateTimeInputs(params.detailValues);
+  if (!Object.keys(detailDateTimeInputs).length) return params.candidate;
+  return normalizeAffiliateCandidateDateTime(params.candidate, {
+    timeZone:
+      nullableString(detailDateTimeInputs.timeZone) ??
+      nullableString(params.candidate.timeZone),
+    timeZoneEvidence: affiliateDetailTimeZoneEvidence(
+      detailDateTimeInputs,
+      params.candidate,
+    ),
+    referenceDate: affiliateDetailReferenceDate(
+      params.detailPage,
+      params,
+    ),
+    dateTimeInputs: detailDateTimeInputs,
+  });
+};
+
+const enrichAffiliateDetailCandidate = (params: {
+  candidate: AffiliateCandidateInput;
+  detailUrl: string;
+  detailPage: {
+    finalUrl: string;
+    statusCode: number | null;
+    fetchedAt: string;
+  };
+  mapping: AffiliateDetailPageMapping;
+  referenceDate?: Date;
+  detailValues: Record<string, unknown>;
+}): AffiliateCandidateInput => {
+  const fieldResult = applyAffiliateDetailFields({
+    candidate: params.candidate,
+    detailValues: params.detailValues,
+    fields: params.mapping.fields,
+    detailUrl: params.detailUrl,
+    detailPage: params.detailPage,
+  });
+  return normalizeAffiliateDetailDateTime({
+    candidate: fieldResult.candidate,
+    detailValues: params.detailValues,
+    detailPage: params.detailPage,
+    referenceDate: params.referenceDate,
+  });
+};
+
+const affiliateDetailFetchFailureCandidate = (
+  candidate: AffiliateCandidateInput,
+  error: unknown,
+): AffiliateCandidateInput => ({
+  ...candidate,
+  warnings: [
+    ...(candidate.warnings ?? []),
+    `Detail page fetch failed: ${error instanceof Error ? error.message : "unknown error"}`,
+  ],
+});
+
 export const enrichAffiliateCandidatesWithDetailPages = async (
   candidates: AffiliateCandidateInput[],
   mapping: AffiliateScrapeMapping,
   client: ScrapePageClient,
   params: { referenceDate?: Date } = {},
 ): Promise<AffiliateCandidateInput[]> => {
-  if (!mapping.detailPage) {
-    return candidates;
-  }
-
-  const delayMs = mapping.detailPage.requestDelayMs ?? 0;
+  const detailPageMapping = mapping.detailPage;
+  if (!detailPageMapping) return candidates;
+  const delayMs = detailPageMapping.requestDelayMs ?? 0;
   const enriched: AffiliateCandidateInput[] = [];
   let fetchedDetailCount = 0;
-
   for (const candidate of candidates) {
-    const detailUrl = nullableString(candidate[mapping.detailPage.urlField]);
+    const detailUrl = nullableString(candidate[detailPageMapping.urlField]);
     if (!detailUrl) {
       enriched.push(candidate);
       continue;
     }
-
-    if (fetchedDetailCount > 0) {
-      await sleep(delayMs);
-    }
-
+    if (fetchedDetailCount > 0) await sleep(delayMs);
     try {
       const detailPage = await client.fetchPage({
         url: detailUrl,
-        renderJavascript: mapping.detailPage.renderJavascript,
-        waitMs: mapping.detailPage.waitMs,
+        renderJavascript: detailPageMapping.renderJavascript,
+        waitMs: detailPageMapping.waitMs,
       });
       fetchedDetailCount += 1;
       const detailValues = extractAffiliateFieldValuesFromPage(
         detailPage,
-        mapping.detailPage.fields,
+        detailPageMapping.fields,
       );
-      const warnings = [...(candidate.warnings ?? [])];
-      let nextCandidate: AffiliateCandidateInput = {
-        ...candidate,
-        rawPayload: {
-          ...(candidate.rawPayload ?? {}),
-          detailPage: {
-            url: detailUrl,
-            finalUrl: detailPage.finalUrl,
-            statusCode: detailPage.statusCode,
-            extractedFields: detailValues,
-          },
-        },
-      };
-
-      Object.entries(mapping.detailPage.fields).forEach(
-        ([fieldName, fieldMapping]) => {
-          const value = nullableString(detailValues[fieldName]);
-          if (!value) {
-            if (fieldMapping.required) {
-              warnings.push(`Missing required detail field: ${fieldName}`);
-            }
-            return;
-          }
-          (nextCandidate as Record<string, unknown>)[fieldName] = value;
-        },
+      enriched.push(
+        enrichAffiliateDetailCandidate({
+          candidate,
+          detailUrl,
+          detailPage,
+          mapping: detailPageMapping,
+          referenceDate: params.referenceDate,
+          detailValues,
+        }),
       );
-      nextCandidate.warnings = warnings;
-      const detailDateTimeFields = [
-        "startsAt",
-        "endsAt",
-        "durationText",
-        "timeZone",
-        "dateDisplayMode",
-      ];
-      const detailDateTimeInputs = Object.fromEntries(
-        detailDateTimeFields
-          .filter(
-            (fieldName) => nullableString(detailValues[fieldName]) != null,
-          )
-          .map((fieldName) => [
-            fieldName,
-            nullableString(detailValues[fieldName]),
-          ]),
-      );
-      if (Object.keys(detailDateTimeInputs).length > 0) {
-        const detailFetchedAt = new Date(detailPage.fetchedAt);
-        const referenceDate =
-          params.referenceDate ??
-          (Number.isNaN(detailFetchedAt.getTime())
-            ? new Date()
-            : detailFetchedAt);
-        nextCandidate = normalizeAffiliateCandidateDateTime(nextCandidate, {
-          timeZone:
-            nullableString(detailDateTimeInputs.timeZone) ??
-            nullableString(candidate.timeZone),
-          timeZoneEvidence: detailDateTimeInputs.timeZone
-            ? "SOURCE_FIELD"
-            : recordValue(
-                  recordValue(
-                    recordValue(candidate.rawPayload).normalizedImport,
-                  ).dateTime,
-                ).timeZoneEvidence === "COORDINATES"
-              ? "COORDINATES"
-              : candidate.timeZone
-                ? "SOURCE_FIELD"
-                : undefined,
-          referenceDate,
-          dateTimeInputs: detailDateTimeInputs,
-        });
-      }
-      enriched.push(nextCandidate);
     } catch (error) {
-      enriched.push({
-        ...candidate,
-        warnings: [
-          ...(candidate.warnings ?? []),
-          `Detail page fetch failed: ${error instanceof Error ? error.message : "unknown error"}`,
-        ],
-      });
+      enriched.push(affiliateDetailFetchFailureCandidate(candidate, error));
     }
   }
-
   return enriched;
 };
 const affiliateSupplyTargetDimensions = (
@@ -3671,6 +4949,1164 @@ const matchesAffiliatePublicEmptyState = (
   return condition.textIncludes.every((text) => normalizedBodyText.includes(text.toLowerCase()));
 };
 
+type AffiliateScrapeRunContext = {
+  sourceId: string;
+  source: any;
+  importMode: AffiliateScrapeImportMode;
+  supplyDatabase: any;
+  activeSupplySourceId: string | null;
+  automaticSupplyContract: Parameters<typeof targetRuleFor>[0] | null;
+  mappingRow: AffiliateScrapeMappingRow;
+  mapping: AffiliateScrapeMapping;
+  sourceOrganization: AffiliateSourceOrganizationLocation | null;
+  run: any;
+};
+type AffiliateScrapeCompletionPage = Pick<
+  ScrapedPage,
+  "finalUrl" | "statusCode"
+>;
+
+const assertAffiliateAutomaticScrapeAssessment = (assessment: any): void => {
+  if (
+    !["ACTIVATED", "PUBLISHED"].includes(assessment.stage) ||
+    !assessment.isAutomationEnabled
+  ) {
+    throw new Error(
+      `Automatic affiliate scrape is not authorized for supply stage ${assessment.stage}.`,
+    );
+  }
+};
+
+const loadAffiliateAutomaticSupplyRoot = async (
+  source: any,
+  supplyDatabase: any,
+) => {
+  if (!source.supplySourceId) {
+    throw new Error("Automatic affiliate scrape requires a Supply Source root.");
+  }
+  return supplyDatabase.supplySources?.findUnique
+    ? supplyDatabase.supplySources.findUnique({
+        where: { id: source.supplySourceId },
+        select: { rolloutCohort: true },
+      })
+    : null;
+};
+
+const loadAffiliateAutomaticManifestContract = async (params: {
+  supplyDatabase: any;
+  rolloutCohort?: string | null;
+}): Promise<Parameters<typeof targetRuleFor>[0] | null> => {
+  if (!params.supplyDatabase.contractManifests?.findFirst) return null;
+  const activeManifest = await params.supplyDatabase.contractManifests.findFirst({
+    where: {
+      status: "ACTIVE",
+      ...(params.rolloutCohort
+        ? { rolloutCohort: params.rolloutCohort }
+        : {}),
+    },
+  });
+  return activeManifest
+    ? (
+        await loadActiveAffiliateSupplyContract({
+          db: params.supplyDatabase,
+          rolloutCohort: params.rolloutCohort ?? undefined,
+        })
+      ).policy
+    : null;
+};
+
+const loadAffiliateAutomaticSupplyContract = async (
+  source: any,
+  supplyDatabase: any,
+): Promise<Parameters<typeof targetRuleFor>[0] | null> => {
+  const supplyRoot = await loadAffiliateAutomaticSupplyRoot(
+    source,
+    supplyDatabase,
+  );
+  const contract = await loadAffiliateAutomaticManifestContract({
+    supplyDatabase,
+    rolloutCohort: supplyRoot?.rolloutCohort,
+  });
+  const assessment = await deriveAndPersistAffiliateSupplyAssessment({
+    supplySourceId: source.supplySourceId,
+    contract: contract ?? undefined,
+    db: supplyDatabase,
+  });
+  assertAffiliateAutomaticScrapeAssessment(assessment);
+  return contract;
+};
+
+const mappingRequiresAffiliateSourceOrganization = (
+  mapping: AffiliateScrapeMapping,
+): boolean =>
+  mapping.kind === "EVENT" ||
+  mapping.kind === "TEAM" ||
+  mapping.kind === "CLUB";
+
+const loadAffiliateScrapeRunContext = async (
+  sourceId: string,
+  params: {
+    requestedByUserId?: string | null;
+    importMode?: AffiliateScrapeImportMode;
+  },
+): Promise<AffiliateScrapeRunContext> => {
+  const { sources, runs } = affiliatePrisma();
+  const source = await sources.findUnique({ where: { id: sourceId } });
+  if (!source) {
+    throw new Error("Affiliate scrape source not found.");
+  }
+  const importMode = params.importMode ?? "REVIEW";
+  const supplyDatabase = affiliateSupplyDatabase();
+  const automaticSupplyContract =
+    importMode === "AUTOMATIC"
+      ? await loadAffiliateAutomaticSupplyContract(source, supplyDatabase)
+      : null;
+  const { row: mappingRow, mapping } = await resolveActiveMapping(source);
+  if (importMode === "AUTOMATIC" && !mappingRow.validatedAt) {
+    throw new Error(
+      "Automatic imports require an explicitly validated active mapping.",
+    );
+  }
+  const sourceOrganization = mappingRequiresAffiliateSourceOrganization(mapping)
+    ? await loadSourceOrganization(source)
+    : null;
+  const run = await runs.create({
+    data: {
+      id: createId(),
+      sourceId,
+      ...(source.supplySourceId
+        ? { supplySourceId: source.supplySourceId }
+        : {}),
+      mappingId: mappingRow.id,
+      requestedByUserId: params.requestedByUserId ?? null,
+      status: "RUNNING",
+      fetchedUrl: mapping.listUrl,
+    },
+  });
+  return {
+    sourceId,
+    source,
+    importMode,
+    supplyDatabase,
+    activeSupplySourceId: source.supplySourceId ?? null,
+    automaticSupplyContract,
+    mappingRow,
+    mapping,
+    sourceOrganization,
+    run,
+  };
+};
+
+const fetchAffiliateScrapePage = async (
+  context: AffiliateScrapeRunContext,
+  client?: ScrapePageClient,
+) => {
+  const pageClient = client ?? scrapingDogClient;
+  const fetchedPage = await pageClient.fetchPage({
+    url: context.mapping.listUrl || context.source.listUrl,
+    renderJavascript: context.mapping.renderJavascript,
+    waitMs: context.mapping.waitMs,
+  });
+  const page = fetchedPage.isRedirectVerified === true
+    ? fetchedPage
+    : { ...fetchedPage, finalUrl: fetchedPage.url };
+  return { pageClient, page };
+};
+
+const assertAffiliateScrapeIdentityResult = (identityResult: {
+  identity: {
+    rootDecision: string;
+    isRevalidationRequired?: boolean;
+  };
+}): void => {
+  if (identityResult.identity.rootDecision === "REVIEW_REQUIRED") {
+    throw new Error(
+      "Affiliate scrape final URL requires Supply Source identity review.",
+    );
+  }
+  if (identityResult.identity.rootDecision === "SUCCESSOR_REQUIRED") {
+    throw new Error(
+      "Affiliate scrape final URL created a successor Supply Source and requires revalidation.",
+    );
+  }
+  if (
+    identityResult.identity.rootDecision === "SAME_ROOT" &&
+    identityResult.identity.isRevalidationRequired
+  ) {
+    throw new Error(
+      "Affiliate scrape final URL changed the Supply Source identity and requires revalidation.",
+    );
+  }
+};
+
+const reconcileAffiliateScrapeSupplyIdentity = async (
+  context: AffiliateScrapeRunContext,
+  page: Pick<ScrapedPage, "finalUrl" | "isRedirectVerified">,
+): Promise<void> => {
+  if (
+    !context.activeSupplySourceId
+    || !page.finalUrl
+    || page.isRedirectVerified !== true
+    || !context.supplyDatabase.supplySources?.findUnique
+  ) {
+    return;
+  }
+
+  // Only a transport-observed redirect can enter identity reconciliation.
+  // Validate that resolved transport URL before loading or mutating identity.
+  await assertSafePublicUrl(page.finalUrl);
+
+  const currentRoot = await context.supplyDatabase.supplySources.findUnique({
+    where: { id: context.activeSupplySourceId },
+  });
+  if (!currentRoot) {
+    throw new Error("Affiliate Supply Source root not found.");
+  }
+  const identity = normalizeAffiliateSupplyIdentity({
+    requestedUrl: currentRoot.canonicalUrl,
+    resolvedCanonicalUrl: page.finalUrl,
+    isRedirectVerified: page.isRedirectVerified === true,
+    operatorDomain: currentRoot.operatorDomain,
+    prior: {
+      canonicalUrl: currentRoot.canonicalUrl,
+      operatorDomain: currentRoot.operatorDomain,
+      identityKey: currentRoot.identityKey,
+    },
+  });
+  const successorRequired = identity.rootDecision === "SUCCESSOR_REQUIRED";
+  const identityResult = await ensureAffiliateSupplySource({
+    requestedUrl: currentRoot.canonicalUrl,
+    resolvedCanonicalUrl: page.finalUrl,
+    isRedirectVerified: page.isRedirectVerified === true,
+    operatorDomain: currentRoot.operatorDomain,
+    targetKind: currentRoot.targetKind,
+    rolloutCohort: currentRoot.rolloutCohort,
+    priorSupplySourceId: currentRoot.id,
+    liveSourceId: successorRequired ? null : context.source.id,
+    db: context.supplyDatabase,
+    now: new Date(),
+  });
+  assertAffiliateScrapeIdentityResult(identityResult);
+  context.activeSupplySourceId = String(identityResult.supplySource.id);
+};
+
+const affiliateScrapeEffectiveReferenceDate = (fetchedAt: string): Date => {
+  const referenceDate = new Date(fetchedAt);
+  return Number.isNaN(referenceDate.getTime()) ? new Date() : referenceDate;
+};
+
+const affiliateCandidateHasSourceDateTime = (
+  candidate: AffiliateCandidateInput,
+): boolean => {
+  const rawPayload = recordValue(candidate.rawPayload);
+  const dateTimeInputs = recordValue(rawPayload.dateTimeInputs);
+  const rawExtractedFields = recordValue(rawPayload.rawExtractedFields);
+  return Boolean(
+    firstAffiliateNullableString(
+      dateTimeInputs.startsAt,
+      rawExtractedFields.startsAt,
+    ),
+  );
+};
+
+const affiliateCandidateCanResolveDateTime = (
+  candidate: AffiliateCandidateInput,
+): boolean =>
+  candidate.listingKind === "EVENT" &&
+  (normalizeDateDisplayMode(candidate.dateDisplayMode) === "SCHEDULED" ||
+    normalizeDateDisplayMode(candidate.dateDisplayMode) === "DATE_ONLY") &&
+  affiliateCandidateHasSourceDateTime(candidate);
+
+type AffiliateScrapeCandidateClassification =
+  | { candidate: AffiliateCandidateInput; rejection?: never }
+  | { candidate?: never; rejection: { title: string; reasons: string[] } };
+
+const classifyAffiliateScrapeCandidate = async (params: {
+  candidate: AffiliateCandidateInput;
+  sourceOrganization: AffiliateSourceOrganizationLocation | null;
+  referenceDate: Date;
+  now: Date;
+}): Promise<AffiliateScrapeCandidateClassification> => {
+  const initialReasons = candidateImportRejectionReasons(
+    params.candidate,
+    params.now,
+  );
+  if (
+    initialReasons.length &&
+    !affiliateCandidateCanResolveDateTime(params.candidate)
+  ) {
+    return {
+      rejection: { title: params.candidate.title, reasons: initialReasons },
+    };
+  }
+  const locationResult = await resolveAffiliateEventCandidateLocation({
+    candidate: params.candidate,
+    sourceOrganization: params.sourceOrganization,
+  });
+  if (locationResult.reasons.length) {
+    return {
+      rejection: {
+        title: params.candidate.title,
+        reasons: locationResult.reasons,
+      },
+    };
+  }
+  const normalizedCandidate = enrichAffiliateEventDateTimeFromCoordinates({
+    candidate: locationResult.candidate,
+    referenceDate: params.referenceDate,
+  });
+  const reasons = candidateImportRejectionReasons(
+    normalizedCandidate,
+    params.now,
+  );
+  if (reasons.length) {
+    return {
+      rejection: { title: normalizedCandidate.title, reasons },
+    };
+  }
+  return { candidate: normalizedCandidate };
+};
+
+const classifyAffiliateScrapeCandidates = async (params: {
+  candidates: AffiliateCandidateInput[];
+  sourceOrganization: AffiliateSourceOrganizationLocation | null;
+  referenceDate: Date;
+}): Promise<{
+  rejectedCandidates: Array<{ title: string; reasons: string[] }>;
+  importableCandidates: AffiliateCandidateInput[];
+}> => {
+  const rejectedCandidates: Array<{ title: string; reasons: string[] }> = [];
+  const importableCandidates: AffiliateCandidateInput[] = [];
+  const now = new Date();
+  for (const candidate of params.candidates) {
+    const classification = await classifyAffiliateScrapeCandidate({
+      candidate,
+      sourceOrganization: params.sourceOrganization,
+      referenceDate: params.referenceDate,
+      now,
+    });
+    if (classification.rejection) {
+      rejectedCandidates.push(classification.rejection);
+    } else {
+      importableCandidates.push(classification.candidate);
+    }
+  }
+  return { rejectedCandidates, importableCandidates };
+};
+
+const extractAffiliateScrapeCandidates = async (params: {
+  context: AffiliateScrapeRunContext;
+  page: ScrapedPage;
+  client: ScrapePageClient;
+}) => {
+  const isEmptyStateMatched = matchesAffiliatePublicEmptyState(
+    params.page,
+    params.context.mapping,
+  );
+  const extractedListCandidates = extractAffiliateCandidatesFromPage(
+    params.page,
+    params.context.mapping,
+  );
+  const effectiveReferenceDate = affiliateScrapeEffectiveReferenceDate(
+    params.page.fetchedAt,
+  );
+  const extractedCandidates = await enrichAffiliateCandidatesWithDetailPages(
+    extractedListCandidates,
+    params.context.mapping,
+    params.client,
+    { referenceDate: effectiveReferenceDate },
+  );
+  return {
+    isEmptyStateMatched,
+    extractedListCandidates,
+    extractedCandidates,
+    effectiveReferenceDate,
+  };
+};
+
+const buildAffiliateRejectionSummary = (
+  rejectedCandidates: Array<{ title: string; reasons: string[] }>,
+): Record<string, number> =>
+  rejectedCandidates.reduce<Record<string, number>>((summary, candidate) => {
+    candidate.reasons.forEach((reason) => {
+      summary[reason] = (summary[reason] ?? 0) + 1;
+    });
+    return summary;
+  }, {});
+
+const buildAffiliateAutomationDecision = (params: {
+  context: AffiliateScrapeRunContext;
+  importableCandidates: AffiliateCandidateInput[];
+  rejectedCandidates: Array<{ title: string; reasons: string[] }>;
+}) => {
+  const automaticallyRequested = params.context.importMode === "AUTOMATIC";
+  const automationMetrics = calculateAffiliateAutomationRunMetrics(
+    params.importableCandidates,
+    params.rejectedCandidates.length,
+  );
+  const automationDriftReasons = automaticallyRequested
+    ? affiliateAutomationDriftReasons(
+        parseAffiliateAutomationBaseline(
+          recordValue(params.context.source.metadata)[
+            AFFILIATE_AUTOMATION_BASELINE_METADATA_KEY
+          ],
+        ),
+        automationMetrics,
+      )
+    : [];
+  const automationHeld = automationDriftReasons.length > 0;
+  return {
+    automaticallyPublishCandidates: automaticallyRequested && !automationHeld,
+    automationHeld,
+    automationDriftReasons,
+    automationMetrics,
+  };
+};
+
+type AffiliateScrapePersistenceResult = {
+  savedCandidate: any;
+  existingCandidate: any | null;
+};
+
+const affiliateCandidateInvalidSportMapping = (
+  candidate: AffiliateCandidateInput,
+  sportNames: string[],
+  sportIds: Array<string | null>,
+): boolean => {
+  const inferredEventType =
+    candidate.listingKind === "EVENT"
+      ? inferAffiliateEventType(candidate)
+      : null;
+  return (
+    sportNames.length === 0 ||
+    sportIds.some((sportId) => !sportId) ||
+    (sportNames.length > 1 && !isMultiSportEventType(inferredEventType))
+  );
+};
+
+const affiliateCandidateWithSportReviewWarning = (
+  candidate: AffiliateCandidateInput,
+  invalidSportMapping: boolean,
+): AffiliateCandidateInput =>
+  invalidSportMapping
+    ? {
+        ...candidate,
+        warnings: Array.from(
+          new Set([
+            ...(candidate.warnings ?? []),
+            AFFILIATE_SPORT_REVIEW_WARNING,
+          ]),
+        ),
+      }
+    : candidate;
+
+const affiliateCandidateInitialStatus = (
+  existingCandidate: any | null,
+  quarantineInvalidSport: boolean,
+): string =>
+  quarantineInvalidSport
+    ? "NEEDS_REVIEW"
+    : existingCandidate?.status === "PUBLISHED"
+      ? "PUBLISHED"
+      : "DISCOVERED";
+
+const saveAffiliateCandidateForRun = async (params: {
+  candidates: any;
+  existingCandidate: any | null;
+  data: Record<string, unknown>;
+  status: string;
+}) => {
+  if (params.existingCandidate) {
+    return params.candidates.update({
+      where: { id: params.existingCandidate.id },
+      data: {
+        ...params.data,
+        publishedEventId: params.existingCandidate.publishedEventId ?? null,
+        publishedTeamId: params.existingCandidate.publishedTeamId ?? null,
+        publishedFacilityId: params.existingCandidate.publishedFacilityId ?? null,
+        publishedOrganizationId:
+          params.existingCandidate.publishedOrganizationId ?? null,
+        status: params.status,
+      },
+    });
+  }
+  return params.candidates.create({
+    data: {
+      id: createId(),
+      ...params.data,
+      status: params.status,
+    },
+  });
+};
+
+const affiliateCandidatePublishedStatusData = (
+  shouldPublishCandidate: boolean,
+): Record<string, string> =>
+  shouldPublishCandidate ? { status: "PUBLISHED" } : {};
+
+type AffiliateCandidateTargetPersistenceParams = {
+  savedCandidate: any;
+  source: any;
+  candidate: AffiliateCandidateInput;
+  shouldPublishCandidate: boolean;
+  transactionClient: any;
+  candidates: any;
+};
+
+const persistAffiliateEventTarget = async (
+  params: AffiliateCandidateTargetPersistenceParams,
+  publishedStatusData: Record<string, string>,
+) => {
+  const event = await upsertAffiliateEventForCandidate(
+    params.savedCandidate,
+    params.source,
+    {
+      state: params.shouldPublishCandidate ? "PUBLISHED" : "UNPUBLISHED",
+      client: params.transactionClient,
+    },
+  );
+  if (params.shouldPublishCandidate) {
+    await markSourceOrganizationListedForPublishedContent(
+      params.source,
+      params.transactionClient,
+    );
+  }
+  return params.candidates.update({
+    where: { id: params.savedCandidate.id },
+    data: {
+      ...publishedStatusData,
+      publishedEventId: event.id,
+    },
+  });
+};
+
+const persistAffiliateTeamTarget = async (
+  params: AffiliateCandidateTargetPersistenceParams,
+  publishedStatusData: Record<string, string>,
+) => {
+  const team = await upsertAffiliateTeamForCandidate(
+    params.savedCandidate,
+    params.source,
+    {
+      visibility: params.shouldPublishCandidate ? "PUBLIC" : "ADMIN_ONLY",
+      client: params.transactionClient,
+    },
+  );
+  return params.candidates.update({
+    where: { id: params.savedCandidate.id },
+    data: {
+      ...publishedStatusData,
+      publishedTeamId: team.id,
+    },
+  });
+};
+
+const persistAffiliateFacilityTarget = async (
+  params: AffiliateCandidateTargetPersistenceParams,
+  publishedStatusData: Record<string, string>,
+) => {
+  const facility = await upsertAffiliateFacilityForCandidate(
+    params.savedCandidate,
+    params.source,
+    {
+      status: params.shouldPublishCandidate ? "ACTIVE" : "DRAFT",
+      client: params.transactionClient,
+    },
+  );
+  if (params.shouldPublishCandidate) {
+    await markSourceOrganizationListedForPublishedContent(
+      params.source,
+      params.transactionClient,
+    );
+  }
+  return params.candidates.update({
+    where: { id: params.savedCandidate.id },
+    data: {
+      ...publishedStatusData,
+      publishedFacilityId: facility.id,
+    },
+  });
+};
+
+const persistAffiliateClubTarget = async (
+  params: AffiliateCandidateTargetPersistenceParams,
+  publishedStatusData: Record<string, string>,
+) => {
+  const organization = await upsertAffiliateOrganizationForCandidate(
+    params.savedCandidate,
+    params.source,
+    {
+      status: params.shouldPublishCandidate ? "LISTED" : "UNLISTED",
+      publicPageEnabled: params.shouldPublishCandidate,
+      client: params.transactionClient,
+    },
+  );
+  const savedWithOrganization = await params.candidates.update({
+    where: { id: params.savedCandidate.id },
+    data: {
+      ...publishedStatusData,
+      publishedOrganizationId: organization.id,
+    },
+  });
+  if (params.shouldPublishCandidate) {
+    await keepSourceOrganizationPrivateForPublishedClub(
+      params.source,
+      organization.id,
+      params.transactionClient,
+    );
+  }
+  return savedWithOrganization;
+};
+
+const persistAffiliateFallbackTarget = async (
+  params: AffiliateCandidateTargetPersistenceParams,
+) => {
+  if (
+    params.shouldPublishCandidate &&
+    params.savedCandidate.status !== "PUBLISHED"
+  ) {
+    return params.candidates.update({
+      where: { id: params.savedCandidate.id },
+      data: { status: "PUBLISHED" },
+    });
+  }
+  return params.savedCandidate;
+};
+
+const persistAffiliateCandidateTarget = async (
+  params: AffiliateCandidateTargetPersistenceParams,
+) => {
+  const publishedStatusData = affiliateCandidatePublishedStatusData(
+    params.shouldPublishCandidate,
+  );
+  if (params.candidate.listingKind === "EVENT") {
+    return persistAffiliateEventTarget(params, publishedStatusData);
+  }
+  if (params.candidate.listingKind === "TEAM") {
+    return persistAffiliateTeamTarget(params, publishedStatusData);
+  }
+  if (
+    params.candidate.listingKind === "RENTAL" &&
+    nullableString(params.source.organizationId)
+  ) {
+    return persistAffiliateFacilityTarget(params, publishedStatusData);
+  }
+  if (params.candidate.listingKind === "CLUB") {
+    return persistAffiliateClubTarget(params, publishedStatusData);
+  }
+  return persistAffiliateFallbackTarget(params);
+};
+
+const persistAffiliateCandidateForRun = async (params: {
+  context: AffiliateScrapeRunContext;
+  candidate: AffiliateCandidateInput;
+  transactionClient: any;
+  automaticallyPublishCandidates: boolean;
+  automationHeld: boolean;
+}): Promise<AffiliateScrapePersistenceResult> => {
+  const { candidates } = affiliatePrisma(params.transactionClient);
+  const dedupeKey = buildAffiliateCandidateDedupeKey(
+    params.context.sourceId,
+    params.candidate,
+    params.context.mapping,
+  );
+  const existingCandidate = await candidates.findUnique({
+    where: {
+      sourceId_dedupeKey: {
+        sourceId: params.context.sourceId,
+        dedupeKey,
+      },
+    },
+  });
+  if (
+    params.automationHeld &&
+    existingCandidate?.status === "PUBLISHED"
+  ) {
+    return { savedCandidate: existingCandidate, existingCandidate };
+  }
+  const sportNames = candidateSportNames(params.candidate);
+  const sportIds = await Promise.all(
+    sportNames.map((sportName) =>
+      resolveAffiliateSportId(sportName, params.transactionClient),
+    ),
+  );
+  const invalidSportMapping = affiliateCandidateInvalidSportMapping(
+    params.candidate,
+    sportNames,
+    sportIds,
+  );
+  const candidateForPersistence = affiliateCandidateWithSportReviewWarning(
+    params.candidate,
+    invalidSportMapping,
+  );
+  const quarantineInvalidSport =
+    invalidSportMapping &&
+    (params.context.importMode === "AUTOMATIC" ||
+      existingCandidate?.status === "PUBLISHED");
+  const data = candidatePersistenceData({
+    sourceId: params.context.sourceId,
+    supplySourceId: params.context.activeSupplySourceId,
+    runId: params.context.run.id,
+    mappingId: params.context.mappingRow.id,
+    dedupeKey,
+    candidate: candidateForPersistence,
+  });
+  const shouldPublishCandidate =
+    !params.automationHeld &&
+    !invalidSportMapping &&
+    (params.automaticallyPublishCandidates ||
+      existingCandidate?.status === "PUBLISHED");
+  const initialCandidateStatus = affiliateCandidateInitialStatus(
+    existingCandidate,
+    quarantineInvalidSport,
+  );
+  const savedCandidate = await saveAffiliateCandidateForRun({
+    candidates,
+    existingCandidate,
+    data,
+    status: initialCandidateStatus,
+  });
+  if (quarantineInvalidSport) {
+    await quarantineAffiliateCandidateTarget(
+      savedCandidate,
+      params.transactionClient,
+    );
+    return { savedCandidate, existingCandidate };
+  }
+  const savedWithTarget = await persistAffiliateCandidateTarget({
+    savedCandidate,
+    source: params.context.source,
+    candidate: params.candidate,
+    shouldPublishCandidate,
+    transactionClient: params.transactionClient,
+    candidates,
+  });
+  return { savedCandidate: savedWithTarget, existingCandidate };
+};
+
+const affiliateLifecycleTargetOptionalData = (params: {
+  dimensions: { marketKey?: string | null; sportId?: string | null };
+  naturalExpiryAt: unknown;
+}): Record<string, unknown> => ({
+  ...(params.dimensions.marketKey
+    ? { marketKey: params.dimensions.marketKey }
+    : {}),
+  ...(params.dimensions.sportId ? { sportId: params.dimensions.sportId } : {}),
+  ...(params.naturalExpiryAt
+    ? { metadata: { naturalExpiryAt: params.naturalExpiryAt } }
+    : {}),
+});
+
+const buildAffiliateLifecycleTarget = (params: {
+  context: AffiliateScrapeRunContext;
+  mappingRow: AffiliateScrapeMappingRow;
+  candidate: AffiliateCandidateInput;
+  savedCandidate: any;
+  automationHeld: boolean;
+}): Record<string, unknown> | null => {
+  if (!params.context.activeSupplySourceId) return null;
+  if (params.automationHeld) return null;
+  if (params.savedCandidate?.status !== "PUBLISHED") return null;
+  const targetRoute = affiliateTargetRouteForListingKind(
+    params.candidate.listingKind,
+  );
+  if (!targetRoute) return null;
+  const targetId = nullableString(
+    params.savedCandidate[targetRoute.publishedIdField],
+  );
+  if (!targetId) return null;
+  const dimensions = affiliateSupplyTargetDimensions(
+    params.context.source,
+    params.mappingRow,
+    params.candidate,
+    params.context.automaticSupplyContract,
+  );
+  const naturalExpiryAt = params.candidate.endsAt ?? params.candidate.startsAt;
+  return {
+    targetType: targetRoute.targetType,
+    targetId,
+    sourceProfile:
+      targetRoute.listingKind ?? params.candidate.listingKind,
+    candidateId: params.savedCandidate.id,
+    ...affiliateLifecycleTargetOptionalData({
+      dimensions,
+      naturalExpiryAt,
+    }),
+    evidenceRefs: [
+      `run:${params.context.run.id}`,
+      `candidate:${params.savedCandidate.id}`,
+    ],
+  };
+};
+
+const persistAffiliateCandidatesForRun = async (params: {
+  context: AffiliateScrapeRunContext;
+  importableCandidates: AffiliateCandidateInput[];
+  automaticallyPublishCandidates: boolean;
+  automationHeld: boolean;
+  transactionClient: any;
+}) => {
+  const result = {
+    savedCandidates: [] as any[],
+    lifecycleTargets: [] as Array<Record<string, unknown>>,
+    createdCandidateCount: 0,
+    updatedCandidateCount: 0,
+    automaticallyPublishedCandidateCount: 0,
+  };
+  for (const candidate of params.importableCandidates) {
+    const persisted = await persistAffiliateCandidateForRun({
+      context: params.context,
+      candidate,
+      transactionClient: params.transactionClient,
+      automaticallyPublishCandidates: params.automaticallyPublishCandidates,
+      automationHeld: params.automationHeld,
+    });
+    result.savedCandidates.push(persisted.savedCandidate);
+    const lifecycleTarget = buildAffiliateLifecycleTarget({
+      context: params.context,
+      mappingRow: params.context.mappingRow,
+      candidate,
+      savedCandidate: persisted.savedCandidate,
+      automationHeld: params.automationHeld,
+    });
+    if (lifecycleTarget) {
+      result.lifecycleTargets.push(lifecycleTarget);
+    }
+    if (persisted.existingCandidate) {
+      result.updatedCandidateCount += 1;
+    } else {
+      result.createdCandidateCount += 1;
+    }
+    if (
+      params.automaticallyPublishCandidates &&
+      persisted.savedCandidate.status === "PUBLISHED"
+    ) {
+      result.automaticallyPublishedCandidateCount += 1;
+    }
+  }
+  return result;
+};
+
+const buildAffiliateScrapeRunLogs = (params: {
+  isEmptyStateMatched: boolean;
+  createdCandidateCount: number;
+  updatedCandidateCount: number;
+  rejectedCandidates: Array<{ title: string; reasons: string[] }>;
+  automaticallyPublishedCandidateCount: number;
+  automationHeld: boolean;
+  automationDriftReasons: string[];
+  automationMetrics: Record<string, unknown>;
+}): Record<string, unknown> => ({
+  isEmptyStateMatched: params.isEmptyStateMatched,
+  createdCandidateCount: params.createdCandidateCount,
+  updatedCandidateCount: params.updatedCandidateCount,
+  rejectedCount: params.rejectedCandidates.length,
+  automaticallyPublishedCandidateCount:
+    params.automaticallyPublishedCandidateCount,
+  automationHeld: params.automationHeld,
+  automationDriftReasons: params.automationDriftReasons,
+  automationMetrics: params.automationMetrics,
+  rejectionSummary: buildAffiliateRejectionSummary(params.rejectedCandidates),
+  rejectedCandidates: params.rejectedCandidates.slice(0, 25),
+});
+
+const recordAffiliateAutomationHold = async (params: {
+  context: AffiliateScrapeRunContext;
+  transactionSources: any;
+  automationDriftReasons: string[];
+  automationMetrics: Record<string, unknown>;
+}) => {
+  const heldAt = new Date();
+  await params.transactionSources.update({
+    where: { id: params.context.sourceId },
+    data: {
+      autoScrapeEnabled: false,
+      metadata: {
+        ...recordValue(params.context.source.metadata),
+        [AFFILIATE_AUTOMATION_REVIEW_METADATA_KEY]: {
+          heldAt: heldAt.toISOString(),
+          runId: params.context.run.id,
+          mappingId: params.context.mappingRow.id,
+          reasons: params.automationDriftReasons,
+          metrics: params.automationMetrics,
+        },
+      },
+    },
+  });
+};
+
+const completeAffiliateScrapeWithLifecycle = async (params: {
+  context: AffiliateScrapeRunContext;
+  activeSupplySourceId: string;
+  transactionRuns: any;
+  extractedCandidates: AffiliateCandidateInput[];
+  savedCandidates: any[];
+  lifecycleTargets: Array<Record<string, unknown>>;
+  page: AffiliateScrapeCompletionPage;
+  runLogs: Record<string, unknown>;
+  isEmptyStateMatched: boolean;
+  extractedListCandidates: AffiliateCandidateInput[];
+  finishedAt: Date;
+  automationHeld: boolean;
+  automationDriftReasons: string[];
+  automationMetrics: Record<string, unknown>;
+  transactionClient: any;
+}) => {
+  const supplyDatabase = affiliateSupplyDatabase(params.transactionClient);
+  const currentRoot = await supplyDatabase.supplySources.findUnique({
+    where: { id: params.activeSupplySourceId },
+  });
+  if (!currentRoot) {
+    throw new Error("Affiliate Supply Source not found.");
+  }
+  const automationReviewRequired = params.automationHeld
+    ? {
+        heldAt: params.finishedAt.toISOString(),
+        runId: params.context.run.id,
+        mappingId: params.context.mappingRow.id,
+        reasons: params.automationDriftReasons,
+        metrics: params.automationMetrics,
+      }
+    : undefined;
+  const command =
+    params.isEmptyStateMatched && params.extractedListCandidates.length === 0
+      ? "RECORD_EMPTY_REFRESH"
+      : "RECORD_REFRESH";
+  await executeAffiliateSupplyLifecycleCommand({
+    supplySourceId: params.activeSupplySourceId,
+    rolloutCohort: currentRoot.rolloutCohort,
+    command,
+    authority: "SYSTEM",
+    expectedLifecycleGeneration: currentRoot.lifecycleGeneration,
+    idempotencyKey: `refresh:${params.context.run.id}`,
+    request: {
+      sourceId: params.context.sourceId,
+      runId: params.context.run.id,
+      mappingId: params.context.mappingRow.id,
+      itemCount: params.extractedCandidates.length,
+      candidateCount: params.savedCandidates.length,
+      finalUrl: params.page.finalUrl,
+      httpStatus: params.page.statusCode,
+      isEmptyStateMatched: params.isEmptyStateMatched,
+      runLogs: params.runLogs,
+      targets: params.lifecycleTargets,
+      evidenceRefs: [
+        `run:${params.context.run.id}`,
+        `source:${params.context.sourceId}`,
+        `mapping:${params.context.mappingRow.id}`,
+      ],
+      ...(automationReviewRequired ? { automationReviewRequired } : {}),
+    },
+    actorKind: "SYSTEM",
+    actorId: "affiliate-source-scrape",
+    db: supplyDatabase,
+    now: params.finishedAt,
+  });
+  return params.transactionRuns.findUnique({
+    where: { id: params.context.run.id },
+  });
+};
+
+const completeAffiliateScrapeWithoutLifecycle = async (params: {
+  context: AffiliateScrapeRunContext;
+  transactionSources: any;
+  transactionRuns: any;
+  extractedCandidates: AffiliateCandidateInput[];
+  savedCandidates: any[];
+  page: AffiliateScrapeCompletionPage;
+  runLogs: Record<string, unknown>;
+  finishedAt: Date;
+}) => {
+  const finishedRun = await params.transactionRuns.update({
+    where: { id: params.context.run.id },
+    data: {
+      status: "SUCCEEDED",
+      finishedAt: params.finishedAt,
+      finalUrl: params.page.finalUrl,
+      httpStatus: params.page.statusCode,
+      itemCount: params.extractedCandidates.length,
+      candidateCount: params.savedCandidates.length,
+      logs: params.runLogs,
+    },
+  });
+  await params.transactionSources.update({
+    where: { id: params.context.sourceId },
+    data: {
+      lastScrapeRunId: params.context.run.id,
+      lastScrapedAt: params.finishedAt,
+    },
+  });
+  return finishedRun;
+};
+
+const completeAffiliateScrapeRun = async (params: {
+  context: AffiliateScrapeRunContext;
+  transactionSources: any;
+  transactionRuns: any;
+  transactionClient: any;
+  extractedCandidates: AffiliateCandidateInput[];
+  extractedListCandidates: AffiliateCandidateInput[];
+  savedCandidates: any[];
+  page: AffiliateScrapeCompletionPage;
+  lifecycleTargets: Array<Record<string, unknown>>;
+  runLogs: Record<string, unknown>;
+  isEmptyStateMatched: boolean;
+  finishedAt: Date;
+  automationHeld: boolean;
+  automationDriftReasons: string[];
+  automationMetrics: Record<string, unknown>;
+}) => {
+  const activeSupplySourceId = params.context.activeSupplySourceId;
+  const finishedRun = activeSupplySourceId
+    ? await completeAffiliateScrapeWithLifecycle({
+        ...params,
+        activeSupplySourceId,
+      })
+    : await completeAffiliateScrapeWithoutLifecycle(params);
+  if (!finishedRun) {
+    throw new Error("Affiliate scrape run was not found after completion.");
+  }
+  return {
+    run: finishedRun,
+    candidates: params.savedCandidates,
+  };
+};
+
+const persistAffiliateScrapeRunTransaction = async (params: {
+  context: AffiliateScrapeRunContext;
+  transactionClient: any;
+  extractedCandidates: AffiliateCandidateInput[];
+  extractedListCandidates: AffiliateCandidateInput[];
+  importableCandidates: AffiliateCandidateInput[];
+  page: AffiliateScrapeCompletionPage;
+  rejectedCandidates: Array<{ title: string; reasons: string[] }>;
+  isEmptyStateMatched: boolean;
+  automation: ReturnType<typeof buildAffiliateAutomationDecision>;
+}) => {
+  const {
+    sources: transactionSources,
+    runs: transactionRuns,
+  } = affiliatePrisma(params.transactionClient);
+  if (params.automation.automationHeld) {
+    await recordAffiliateAutomationHold({
+      context: params.context,
+      transactionSources,
+      automationDriftReasons: params.automation.automationDriftReasons,
+      automationMetrics: params.automation.automationMetrics,
+    });
+  }
+  const persisted = await persistAffiliateCandidatesForRun({
+    context: params.context,
+    importableCandidates: params.importableCandidates,
+    automaticallyPublishCandidates:
+      params.automation.automaticallyPublishCandidates,
+    automationHeld: params.automation.automationHeld,
+    transactionClient: params.transactionClient,
+  });
+  const finishedAt = new Date();
+  const runLogs = buildAffiliateScrapeRunLogs({
+    isEmptyStateMatched: params.isEmptyStateMatched,
+    createdCandidateCount: persisted.createdCandidateCount,
+    updatedCandidateCount: persisted.updatedCandidateCount,
+    rejectedCandidates: params.rejectedCandidates,
+    automaticallyPublishedCandidateCount:
+      persisted.automaticallyPublishedCandidateCount,
+    automationHeld: params.automation.automationHeld,
+    automationDriftReasons: params.automation.automationDriftReasons,
+    automationMetrics: params.automation.automationMetrics,
+  });
+  return completeAffiliateScrapeRun({
+    context: params.context,
+    transactionSources,
+    transactionRuns,
+    transactionClient: params.transactionClient,
+    page: params.page,
+    extractedCandidates: params.extractedCandidates,
+    extractedListCandidates: params.extractedListCandidates,
+    savedCandidates: persisted.savedCandidates,
+    lifecycleTargets: persisted.lifecycleTargets,
+    runLogs,
+    isEmptyStateMatched: params.isEmptyStateMatched,
+    finishedAt,
+    automationHeld: params.automation.automationHeld,
+    automationDriftReasons: params.automation.automationDriftReasons,
+    automationMetrics: params.automation.automationMetrics,
+  });
+};
+
+const tryRecordAffiliateScrapeLifecycleFailure = async (params: {
+  context: AffiliateScrapeRunContext;
+  errorMessage: string;
+}): Promise<{ recorded: boolean; error: Error | null }> => {
+  if (!params.context.activeSupplySourceId) {
+    return { recorded: false, error: null };
+  }
+  try {
+    const supplyDatabase = affiliateSupplyDatabase();
+    const currentRoot = await supplyDatabase.supplySources.findUnique({
+      where: { id: params.context.activeSupplySourceId },
+    });
+    if (!currentRoot) {
+      return { recorded: false, error: null };
+    }
+    await executeAffiliateSupplyLifecycleCommand({
+      supplySourceId: params.context.activeSupplySourceId,
+      command: "RECORD_REFRESH_FAILURE",
+      authority: "SYSTEM",
+      expectedLifecycleGeneration: currentRoot.lifecycleGeneration,
+      idempotencyKey: `refresh-failure:${params.context.run.id}`,
+      request: {
+        sourceId: params.context.sourceId,
+        runId: params.context.run.id,
+        mappingId: params.context.mappingRow.id,
+        errorMessage: params.errorMessage,
+        evidenceRefs: [
+          `run:${params.context.run.id}`,
+          `source:${params.context.sourceId}`,
+        ],
+      },
+      actorKind: "SYSTEM",
+      actorId: "affiliate-source-scrape",
+      db: supplyDatabase,
+      now: new Date(),
+    });
+    return { recorded: true, error: null };
+  } catch (failure) {
+    return {
+      recorded: false,
+      error: failure instanceof Error ? failure : new Error(String(failure)),
+    };
+  }
+};
+
+const handleAffiliateScrapeFailure = async (
+  context: AffiliateScrapeRunContext,
+  error: unknown,
+): Promise<never> => {
+  const errorMessage = error instanceof Error ? error.message : "Scrape failed.";
+  const lifecycleFailure = await tryRecordAffiliateScrapeLifecycleFailure({
+    context,
+    errorMessage,
+  });
+  if (!lifecycleFailure.recorded) {
+    const { runs } = affiliatePrisma();
+    await runs.update({
+      where: { id: context.run.id },
+      data: {
+        status: "FAILED",
+        finishedAt: new Date(),
+        errorMessage,
+      },
+    });
+  }
+  if (lifecycleFailure.error) {
+    throw new Error(
+      `${errorMessage} Lifecycle failure recording failed: ${lifecycleFailure.error.message}`,
+    );
+  }
+  throw error;
+};
+
 export const runAffiliateSourceScrape = async (
   sourceId: string,
   params: {
@@ -3679,620 +6115,45 @@ export const runAffiliateSourceScrape = async (
     importMode?: AffiliateScrapeImportMode;
   } = {},
 ) => {
-  const { sources, runs, candidates } = affiliatePrisma();
-  const source = await sources.findUnique({ where: { id: sourceId } });
-  if (!source) {
-    throw new Error("Affiliate scrape source not found.");
-  }
-
-  const importMode = params.importMode ?? "REVIEW";
-  const supplyDatabase = affiliateSupplyDatabase();
-  let activeSupplySourceId = source.supplySourceId;
-  let automaticSupplyContract: Parameters<typeof targetRuleFor>[0] | null = null;
-  if (importMode === "AUTOMATIC") {
-    if (!source.supplySourceId) {
-      throw new Error("Automatic affiliate scrape requires a Supply Source root.");
-    }
-    const supplyRoot = supplyDatabase.supplySources?.findUnique
-      ? await supplyDatabase.supplySources.findUnique({
-          where: { id: source.supplySourceId },
-          select: { rolloutCohort: true },
-        })
-      : null;
-    if (supplyDatabase.contractManifests?.findFirst) {
-      const activeManifest = await supplyDatabase.contractManifests.findFirst({
-        where: {
-          status: 'ACTIVE',
-          ...(supplyRoot?.rolloutCohort
-            ? { rolloutCohort: supplyRoot.rolloutCohort }
-            : {}),
-        },
-      });
-      if (activeManifest) {
-        automaticSupplyContract = (
-          await loadActiveAffiliateSupplyContract({
-            db: supplyDatabase,
-            rolloutCohort: supplyRoot?.rolloutCohort ?? undefined,
-          })
-        ).policy;
-      }
-    }
-    const assessment = await deriveAndPersistAffiliateSupplyAssessment({
-      supplySourceId: source.supplySourceId,
-      contract: automaticSupplyContract ?? undefined,
-      db: supplyDatabase,
-    });
-    if (!['ACTIVATED', 'PUBLISHED'].includes(assessment.stage) || !assessment.isAutomationEnabled) {
-      throw new Error(
-        `Automatic affiliate scrape is not authorized for supply stage ${assessment.stage}.`,
-      );
-    }
-  }
-
-  const { row: mappingRow, mapping } = await resolveActiveMapping(source);
-  let automaticallyPublishCandidates = importMode === "AUTOMATIC";
-  if (automaticallyPublishCandidates && !mappingRow.validatedAt) {
-    throw new Error(
-      "Automatic imports require an explicitly validated active mapping.",
-    );
-  }
-  const sourceOrganization =
-    mapping.kind === "EVENT" ||
-    mapping.kind === "TEAM" ||
-    mapping.kind === "CLUB"
-      ? await loadSourceOrganization(source)
-      : null;
-  const run = await runs.create({
-    data: {
-      id: createId(),
-      sourceId,
-      ...(source.supplySourceId ? { supplySourceId: source.supplySourceId } : {}),
-      mappingId: mappingRow.id,
-      requestedByUserId: params.requestedByUserId ?? null,
-      status: "RUNNING",
-      fetchedUrl: mapping.listUrl,
-    },
-  });
-
+  const context = await loadAffiliateScrapeRunContext(sourceId, params);
   try {
-    const client = params.client ?? scrapingDogClient;
-    const page = await client.fetchPage({
-      url: mapping.listUrl || source.listUrl,
-      renderJavascript: mapping.renderJavascript,
-      waitMs: mapping.waitMs,
-    });
-    if (
-      activeSupplySourceId
-      && page.finalUrl
-      && supplyDatabase.supplySources?.findUnique
-    ) {
-      const currentRoot = await supplyDatabase.supplySources.findUnique({
-        where: { id: activeSupplySourceId },
-      });
-      if (!currentRoot) {
-        throw new Error("Affiliate Supply Source root not found.");
-      }
-      const identity = normalizeAffiliateSupplyIdentity({
-        requestedUrl: currentRoot.canonicalUrl,
-        resolvedCanonicalUrl: page.finalUrl,
-        isRedirectVerified: true,
-        operatorDomain: currentRoot.operatorDomain,
-        prior: {
-          canonicalUrl: currentRoot.canonicalUrl,
-          operatorDomain: currentRoot.operatorDomain,
-          identityKey: currentRoot.identityKey,
-        },
-      });
-      const successorRequired = identity.rootDecision === "SUCCESSOR_REQUIRED";
-      const identityResult = await ensureAffiliateSupplySource({
-        requestedUrl: currentRoot.canonicalUrl,
-        resolvedCanonicalUrl: page.finalUrl,
-        isRedirectVerified: true,
-        operatorDomain: currentRoot.operatorDomain,
-        targetKind: currentRoot.targetKind,
-        rolloutCohort: currentRoot.rolloutCohort,
-        priorSupplySourceId: currentRoot.id,
-        liveSourceId: successorRequired ? null : source.id,
-        db: supplyDatabase,
-        now: new Date(),
-      });
-      if (identityResult.identity.rootDecision === "REVIEW_REQUIRED") {
-        throw new Error("Affiliate scrape final URL requires Supply Source identity review.");
-      }
-      if (successorRequired || identityResult.identity.rootDecision === "SUCCESSOR_REQUIRED") {
-        throw new Error("Affiliate scrape final URL created a successor Supply Source and requires revalidation.");
-      }
-      activeSupplySourceId = String(identityResult.supplySource.id);
-      if (
-        identityResult.identity.rootDecision === "SAME_ROOT"
-        && identityResult.identity.isRevalidationRequired
-      ) {
-        throw new Error("Affiliate scrape final URL changed the Supply Source identity and requires revalidation.");
-      }
-    }
-    const isEmptyStateMatched = matchesAffiliatePublicEmptyState(page, mapping);
-    const extractedListCandidates = extractAffiliateCandidatesFromPage(
+    const { pageClient, page } = await fetchAffiliateScrapePage(
+      context,
+      params.client,
+    );
+    await reconcileAffiliateScrapeSupplyIdentity(context, page);
+    const extracted = await extractAffiliateScrapeCandidates({
+      context,
       page,
-      mapping,
-    );
-    const referenceDate = new Date(page.fetchedAt);
-    const effectiveReferenceDate = Number.isNaN(referenceDate.getTime())
-      ? new Date()
-      : referenceDate;
-    const extractedCandidates = await enrichAffiliateCandidatesWithDetailPages(
-      extractedListCandidates,
-      mapping,
-      client,
-      { referenceDate: effectiveReferenceDate },
-    );
-    const now = new Date();
-    const rejectedCandidates: Array<{ title: string; reasons: string[] }> = [];
-    const importableCandidates: AffiliateCandidateInput[] = [];
-    for (const candidate of extractedCandidates) {
-      const initialReasons = candidateImportRejectionReasons(candidate, now);
-      const rawPayload = recordValue(candidate.rawPayload);
-      const dateTimeInputs = recordValue(rawPayload.dateTimeInputs);
-      const rawExtractedFields = recordValue(rawPayload.rawExtractedFields);
-      const hasSourceDateTime = Boolean(
-        nullableString(dateTimeInputs.startsAt) ??
-          nullableString(rawExtractedFields.startsAt),
-      );
-      const canResolveCandidateDateTime =
-        candidate.listingKind === "EVENT" &&
-        ["SCHEDULED", "DATE_ONLY"].includes(
-          normalizeDateDisplayMode(candidate.dateDisplayMode),
-        ) &&
-        hasSourceDateTime;
-      if (initialReasons.length && !canResolveCandidateDateTime) {
-        rejectedCandidates.push({
-          title: candidate.title,
-          reasons: initialReasons,
-        });
-        continue;
-      }
-      const locationResult = await resolveAffiliateEventCandidateLocation({
-        candidate,
-        sourceOrganization,
-      });
-      if (locationResult.reasons.length) {
-        rejectedCandidates.push({
-          title: candidate.title,
-          reasons: locationResult.reasons,
-        });
-        continue;
-      }
-      const normalizedCandidate = enrichAffiliateEventDateTimeFromCoordinates({
-        candidate: locationResult.candidate,
-        referenceDate: effectiveReferenceDate,
-      });
-      const reasons = candidateImportRejectionReasons(normalizedCandidate, now);
-      if (reasons.length) {
-        rejectedCandidates.push({ title: normalizedCandidate.title, reasons });
-        continue;
-      }
-      importableCandidates.push(normalizedCandidate);
-    }
-    const rejectionSummary = rejectedCandidates.reduce<Record<string, number>>(
-      (summary, candidate) => {
-        candidate.reasons.forEach((reason) => {
-          summary[reason] = (summary[reason] ?? 0) + 1;
-        });
-        return summary;
-      },
-      {},
-    );
-    const automationMetrics = calculateAffiliateAutomationRunMetrics(
-      importableCandidates,
-      rejectedCandidates.length,
-    );
-    const automationDriftReasons = automaticallyPublishCandidates
-      ? affiliateAutomationDriftReasons(
-          parseAffiliateAutomationBaseline(
-            recordValue(source.metadata)[
-              AFFILIATE_AUTOMATION_BASELINE_METADATA_KEY
-            ],
-          ),
-          automationMetrics,
-        )
-      : [];
-    const automationHeld = automationDriftReasons.length > 0;
-    if (automationHeld) {
-      automaticallyPublishCandidates = false;
-    }
-    const transactionResult = await withAffiliateScrapeTransaction(
+      client: pageClient,
+    });
+    const classified = await classifyAffiliateScrapeCandidates({
+      candidates: extracted.extractedCandidates,
+      sourceOrganization: context.sourceOrganization,
+      referenceDate: extracted.effectiveReferenceDate,
+    });
+    const automation = buildAffiliateAutomationDecision({
+      context,
+      importableCandidates: classified.importableCandidates,
+      rejectedCandidates: classified.rejectedCandidates,
+    });
+    return withAffiliateScrapeTransaction(
       prisma,
-      async (transactionClient) => {
-        const { sources: transactionSources, runs: transactionRuns, candidates } =
-          affiliatePrisma(transactionClient);
-        if (automationHeld) {
-          const heldAt = new Date();
-          await transactionSources.update({
-            where: { id: sourceId },
-            data: {
-              autoScrapeEnabled: false,
-              metadata: {
-                ...recordValue(source.metadata),
-                [AFFILIATE_AUTOMATION_REVIEW_METADATA_KEY]: {
-                  heldAt: heldAt.toISOString(),
-                  runId: run.id,
-                  mappingId: mappingRow.id,
-                  reasons: automationDriftReasons,
-                  metrics: automationMetrics,
-                },
-              },
-            },
-          });
-        }
-    const savedCandidates = [];
-    const lifecycleTargets: Array<Record<string, unknown>> = [];
-    let createdCandidateCount = 0;
-    let updatedCandidateCount = 0;
-    let automaticallyPublishedCandidateCount = 0;
-
-    for (const candidate of importableCandidates) {
-      const dedupeKey = buildAffiliateCandidateDedupeKey(
-        sourceId,
-        candidate,
-        mapping,
-      );
-      const existing = await candidates.findUnique({
-        where: {
-          sourceId_dedupeKey: {
-            sourceId,
-            dedupeKey,
-          },
-        },
-      });
-      const sportNames = candidateSportNames(candidate);
-      const sportIds = await Promise.all(
-        sportNames.map((sportName) => resolveAffiliateSportId(sportName, transactionClient)),
-      );
-      const inferredEventType =
-        candidate.listingKind === "EVENT"
-          ? inferAffiliateEventType(candidate)
-          : null;
-      const invalidSportMapping =
-        sportNames.length === 0 ||
-        sportIds.some((sportId) => !sportId) ||
-        (sportNames.length > 1 && !isMultiSportEventType(inferredEventType));
-      const candidateForPersistence = !invalidSportMapping
-        ? candidate
-        : {
-            ...candidate,
-            warnings: Array.from(
-              new Set([
-                ...(candidate.warnings ?? []),
-                AFFILIATE_SPORT_REVIEW_WARNING,
-              ]),
-            ),
-          };
-      const quarantineInvalidSport =
-        invalidSportMapping &&
-        (importMode === "AUTOMATIC" || existing?.status === "PUBLISHED");
-      const data = candidatePersistenceData({
-        sourceId,
-        supplySourceId: activeSupplySourceId,
-        runId: run.id,
-        mappingId: mappingRow.id,
-        dedupeKey,
-        candidate: candidateForPersistence,
-      });
-      const shouldPublishCandidate =
-        !automationHeld &&
-        !invalidSportMapping &&
-        (automaticallyPublishCandidates || existing?.status === "PUBLISHED");
-      // Automatic runs are admitted only after the Supply lifecycle gate.
-      // Their valid candidates can therefore publish new lifecycle targets.
-      const initialCandidateStatus = quarantineInvalidSport
-        ? "NEEDS_REVIEW"
-        : existing?.status === "PUBLISHED"
-          ? "PUBLISHED"
-          : "DISCOVERED";
-
-      const saved = existing
-        ? await candidates.update({
-            where: { id: existing.id },
-            data: {
-              ...data,
-              publishedEventId: existing.publishedEventId ?? null,
-              publishedTeamId: existing.publishedTeamId ?? null,
-              publishedFacilityId: existing.publishedFacilityId ?? null,
-              publishedOrganizationId: existing.publishedOrganizationId ?? null,
-              status: initialCandidateStatus,
-            },
-          })
-        : await candidates.create({
-            data: {
-              id: createId(),
-              ...data,
-              status: initialCandidateStatus,
-            },
-          });
-      if (quarantineInvalidSport) {
-        await quarantineAffiliateCandidateTarget(saved, transactionClient);
-        savedCandidates.push(saved);
-        if (existing) updatedCandidateCount += 1;
-        else createdCandidateCount += 1;
-        continue;
-      }
-      if (candidate.listingKind === "EVENT") {
-        const event = await upsertAffiliateEventForCandidate(saved, source, {
-          state: shouldPublishCandidate ? "PUBLISHED" : "UNPUBLISHED",
-          client: transactionClient,
-        });
-        if (shouldPublishCandidate) {
-          await markSourceOrganizationListedForPublishedContent(source, transactionClient);
-        }
-        const savedWithEvent = await candidates.update({
-          where: { id: saved.id },
-          data: {
-            ...(shouldPublishCandidate ? { status: "PUBLISHED" } : {}),
-            publishedEventId: event.id,
-          },
-        });
-        savedCandidates.push(savedWithEvent);
-      } else if (candidate.listingKind === "TEAM") {
-        const team = await upsertAffiliateTeamForCandidate(saved, source, {
-          visibility: shouldPublishCandidate ? "PUBLIC" : "ADMIN_ONLY",
-          client: transactionClient,
-        });
-        const savedWithTeam = await candidates.update({
-          where: { id: saved.id },
-          data: {
-            ...(shouldPublishCandidate ? { status: "PUBLISHED" } : {}),
-            publishedTeamId: team.id,
-          },
-        });
-        savedCandidates.push(savedWithTeam);
-      } else if (
-        candidate.listingKind === "RENTAL" &&
-        nullableString(source.organizationId)
-      ) {
-        const facility = await upsertAffiliateFacilityForCandidate(
-          saved,
-          source,
-          {
-            status: shouldPublishCandidate ? "ACTIVE" : "DRAFT",
-            client: transactionClient,
-          },
-        );
-        if (shouldPublishCandidate) {
-          await markSourceOrganizationListedForPublishedContent(source, transactionClient);
-        }
-        const savedWithFacility = await candidates.update({
-          where: { id: saved.id },
-          data: {
-            ...(shouldPublishCandidate ? { status: "PUBLISHED" } : {}),
-            publishedFacilityId: facility.id,
-          },
-        });
-        savedCandidates.push(savedWithFacility);
-      } else if (candidate.listingKind === "CLUB") {
-        const organization = await upsertAffiliateOrganizationForCandidate(
-          saved,
-          source,
-          {
-            status: shouldPublishCandidate ? "LISTED" : "UNLISTED",
-            publicPageEnabled: shouldPublishCandidate,
-            client: transactionClient,
-          },
-        );
-        const savedWithOrganization = await candidates.update({
-          where: { id: saved.id },
-          data: {
-            ...(shouldPublishCandidate ? { status: "PUBLISHED" } : {}),
-            publishedOrganizationId: organization.id,
-          },
-        });
-        if (shouldPublishCandidate) {
-          await keepSourceOrganizationPrivateForPublishedClub(
-            source,
-            organization.id,
-            transactionClient,
-          );
-        }
-        savedCandidates.push(savedWithOrganization);
-      } else {
-        if (shouldPublishCandidate && initialCandidateStatus !== "PUBLISHED") {
-          savedCandidates.push(
-            await candidates.update({
-              where: { id: saved.id },
-              data: { status: "PUBLISHED" },
-            }),
-          );
-        } else {
-          savedCandidates.push(saved);
-        }
-      }
-      const savedCandidate = savedCandidates[savedCandidates.length - 1];
-      if (activeSupplySourceId && !automationHeld && savedCandidate?.status === "PUBLISHED") {
-        const targetRoute = affiliateTargetRouteForListingKind(candidate.listingKind);
-        const targetId = targetRoute
-          ? nullableString(savedCandidate[targetRoute.publishedIdField])
-          : null;
-        const targetType = targetRoute?.targetType ?? null;
-        if (targetId && targetType) {
-          const dimensions = affiliateSupplyTargetDimensions(
-            source,
-            mappingRow,
-            candidate,
-            automaticSupplyContract,
-          );
-          lifecycleTargets.push({
-            targetType,
-            targetId,
-            sourceProfile: targetRoute?.listingKind ?? candidate.listingKind,
-            candidateId: savedCandidate.id,
-            ...(dimensions.marketKey ? { marketKey: dimensions.marketKey } : {}),
-            ...(dimensions.sportId ? { sportId: dimensions.sportId } : {}),
-            ...((candidate.endsAt ?? candidate.startsAt)
-              ? { metadata: { naturalExpiryAt: candidate.endsAt ?? candidate.startsAt } }
-              : {}),
-            evidenceRefs: [`run:${run.id}`, `candidate:${savedCandidate.id}`],
-          });
-        }
-      }
-      if (existing) {
-        updatedCandidateCount += 1;
-      } else {
-        createdCandidateCount += 1;
-      }
-      if (automaticallyPublishCandidates && shouldPublishCandidate) {
-        automaticallyPublishedCandidateCount += 1;
-      }
-    }
-
-    const finishedAt = new Date();
-    const runLogs = {
-      isEmptyStateMatched,
-      createdCandidateCount,
-      updatedCandidateCount,
-      rejectedCount: rejectedCandidates.length,
-      automaticallyPublishedCandidateCount,
-      automationHeld,
-      automationDriftReasons,
-      automationMetrics,
-      rejectionSummary,
-      rejectedCandidates: rejectedCandidates.slice(0, 25),
-    };
-    let finishedRun;
-    if (activeSupplySourceId) {
-      const supplyDatabase = affiliateSupplyDatabase(transactionClient);
-      const currentRoot = await supplyDatabase.supplySources.findUnique({
-        where: { id: activeSupplySourceId },
-      });
-      if (!currentRoot) {
-        throw new Error("Affiliate Supply Source not found.");
-      }
-      const automationReviewRequired = automationHeld
-        ? {
-            heldAt: finishedAt.toISOString(),
-            runId: run.id,
-            mappingId: mappingRow.id,
-            reasons: automationDriftReasons,
-            metrics: automationMetrics,
-          }
-        : undefined;
- const command =
- isEmptyStateMatched && extractedListCandidates.length === 0
- ? "RECORD_EMPTY_REFRESH"
- : "RECORD_REFRESH";
-      await executeAffiliateSupplyLifecycleCommand({
-        supplySourceId: activeSupplySourceId,
-        rolloutCohort: currentRoot.rolloutCohort,
-        command,
-        authority: "SYSTEM",
-        expectedLifecycleGeneration: currentRoot.lifecycleGeneration,
-        idempotencyKey: `refresh:${run.id}`,
-        request: {
-          sourceId,
-          runId: run.id,
-          mappingId: mappingRow.id,
-          itemCount: extractedCandidates.length,
-          candidateCount: savedCandidates.length,
-          finalUrl: page.finalUrl,
-          httpStatus: page.statusCode,
-          isEmptyStateMatched,
-          runLogs,
-          targets: lifecycleTargets,
-          evidenceRefs: [
-            `run:${run.id}`,
-            `source:${sourceId}`,
-            `mapping:${mappingRow.id}`,
-          ],
-          ...(automationReviewRequired ? { automationReviewRequired } : {}),
-        },
-        actorKind: "SYSTEM",
-        actorId: "affiliate-source-scrape",
-        db: supplyDatabase,
-        now: finishedAt,
-      });
-      finishedRun = await transactionRuns.findUnique({ where: { id: run.id } });
-    } else {
-      finishedRun = await transactionRuns.update({
-        where: { id: run.id },
-        data: {
-          status: "SUCCEEDED",
-          finishedAt,
-          finalUrl: page.finalUrl,
-          httpStatus: page.statusCode,
-          itemCount: extractedCandidates.length,
-          candidateCount: savedCandidates.length,
-          logs: runLogs,
-        },
-      });
-      await transactionSources.update({
-        where: { id: sourceId },
-        data: {
-          lastScrapeRunId: run.id,
-          lastScrapedAt: finishedAt,
-        },
-      });
-    }
-    if (!finishedRun) {
-      throw new Error("Affiliate scrape run was not found after completion.");
-    }
-
-    return {
-      run: finishedRun,
-      candidates: savedCandidates,
-    };
-      },
+      async (transactionClient) =>
+        persistAffiliateScrapeRunTransaction({
+          context,
+          transactionClient,
+          page,
+          extractedCandidates: extracted.extractedCandidates,
+          extractedListCandidates: extracted.extractedListCandidates,
+          importableCandidates: classified.importableCandidates,
+          rejectedCandidates: classified.rejectedCandidates,
+          isEmptyStateMatched: extracted.isEmptyStateMatched,
+          automation,
+        }),
     );
-    return transactionResult;
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : "Scrape failed.";
-    let isLifecycleFailureRecorded = false;
-    let lifecycleFailureError: Error | null = null;
-    if (activeSupplySourceId) {
-      try {
-        const supplyDatabase = affiliateSupplyDatabase();
-        const currentRoot = await supplyDatabase.supplySources.findUnique({
-          where: { id: activeSupplySourceId },
-        });
-        if (currentRoot) {
-          await executeAffiliateSupplyLifecycleCommand({
-            supplySourceId: activeSupplySourceId,
-            command: "RECORD_REFRESH_FAILURE",
-            authority: "SYSTEM",
-            expectedLifecycleGeneration: currentRoot.lifecycleGeneration,
-            idempotencyKey: `refresh-failure:${run.id}`,
-            request: {
-              sourceId,
-              runId: run.id,
-              mappingId: mappingRow.id,
-              errorMessage,
-              evidenceRefs: [`run:${run.id}`, `source:${sourceId}`],
-            },
-            actorKind: "SYSTEM",
-            actorId: "affiliate-source-scrape",
-            db: supplyDatabase,
-            now: new Date(),
-          });
-          isLifecycleFailureRecorded = true;
-        }
-      } catch (failure) {
-        lifecycleFailureError = failure instanceof Error
-          ? failure
-          : new Error(String(failure));
-      }
-    }
-    if (!isLifecycleFailureRecorded) {
-      await runs.update({
-        where: { id: run.id },
-        data: {
-          status: "FAILED",
-          finishedAt: new Date(),
-          errorMessage,
-        },
-      });
-    }
-    if (lifecycleFailureError) {
-      throw new Error(
-        `${errorMessage} Lifecycle failure recording failed: ${lifecycleFailureError.message}`,
-      );
-    }
-    throw error;
+    return handleAffiliateScrapeFailure(context, error);
   }
 };
 
@@ -4323,7 +6184,7 @@ export const getAffiliateCandidate = async (candidateId: string) => {
 };
 
 const deleteImportedOrganizationTarget = async (
-  candidate: any,
+  candidate: AffiliateCandidateRecord,
   source?: { organizationId?: string | null } | null,
 ) => {
   const organizationId = nullableString(candidate?.publishedOrganizationId);
@@ -4500,242 +6361,382 @@ export const reclassifyAffiliateCandidate = async (
   return { candidate: updatedCandidate, target: organization };
 };
 
-const publishAffiliateCandidateDirect = async (
+type AffiliateDirectPublicationParams = {
+  publishedByUserId?: string | null;
+  deferOrganizationLogo?: boolean;
+  client?: any;
+  candidate?: AffiliateCandidateRecord;
+  source?: AffiliateScrapeSourceRow;
+};
+
+type AffiliatePreparedEventPublicationLocations = Awaited<
+  ReturnType<typeof prepareAffiliateEventPublicationLocations>
+>;
+
+const loadAffiliateDirectPublicationContext = async (
   candidateId: string,
-  params: {
-    publishedByUserId?: string | null;
-    deferOrganizationLogo?: boolean;
-    client?: any;
-    candidate?: any;
-    source?: any;
-  } = {},
+  params: AffiliateDirectPublicationParams,
 ) => {
   const baseClient = params.client ?? prisma;
-  const { candidates, sources } = affiliatePrisma(baseClient);
-  const candidate = params.candidate ?? await candidates.findUnique({ where: { id: candidateId } });
+  const repositories = affiliatePrisma(baseClient);
+  const candidate =
+    params.candidate ??
+    (await repositories.candidates.findUnique({ where: { id: candidateId } }));
   if (!candidate) {
     throw new Error("Affiliate import candidate not found.");
   }
+  return { baseClient, repositories, candidate };
+};
 
-  if (normalizeSourceType(candidate.listingKind) === "EVENT") {
-    const source = params.source ?? await sources.findUnique({
-      where: { id: candidate.sourceId },
-    });
-    if (!source) {
-      throw new Error("Affiliate scrape source not found.");
-    }
-    const publicationLocations =
-      await prepareAffiliateEventPublicationLocations(candidate, source, baseClient);
-    const publishEvent = async (client: any) => {
-      const transactionDb = affiliatePrisma(client);
-      const currentCandidate = await transactionDb.candidates.findUnique({
-        where: { id: candidateId },
-      });
-      if (!currentCandidate) {
-        throw new Error("Affiliate import candidate not found.");
-      }
-      const source = await transactionDb.sources.findUnique({
-        where: { id: currentCandidate.sourceId },
-      });
-      if (!source) {
-        throw new Error("Affiliate scrape source not found.");
-      }
-      if (
-        affiliateEventPublicationCandidateFingerprint(currentCandidate) !==
-          publicationLocations.candidateFingerprint ||
-        affiliateEventPublicationSourceFingerprint(source) !==
-          publicationLocations.sourceFingerprint
-      ) {
-        throw new Error(
-          "Affiliate event candidate or source changed after location preparation. " +
-            "Refresh the candidate and retry publication.",
-        );
-      }
-      const sourceOrganization = await loadSourceOrganization(source, client);
-      if (
-        affiliateEventPublicationOrganizationFingerprint(sourceOrganization) !==
-        publicationLocations.sourceOrganizationFingerprint
-      ) {
-        throw new Error(
-          "Affiliate source organization changed after location preparation. " +
-            "Refresh the candidate and retry publication.",
-        );
-      }
-      let repairedDateTimeData: Record<string, unknown> = {};
-      const event = await upsertAffiliateEventForCandidate(
-        currentCandidate,
-        source,
-        {
-          state: "PUBLISHED",
-          client,
-          fallbackCoordinates: publicationLocations.eventCoordinates,
-          allowRemoteGeocoding: false,
-          preferFallbackCoordinates: true,
-          onCandidateNormalized: async (nextCandidate) => {
-            const mapping = await mappingForAffiliateCandidateDedupe(
-              currentCandidate,
-              client,
-            );
-            const dedupeKey = buildAffiliateCandidateDedupeKey(
-              currentCandidate.sourceId,
-              nextCandidate,
-              mapping,
-            );
-            const conflictingCandidate =
-              await transactionDb.candidates.findUnique({
-                where: {
-                  sourceId_dedupeKey: {
-                    sourceId: currentCandidate.sourceId,
-                    dedupeKey,
-                  },
-                },
-                select: { id: true },
-              });
-            if (
-              conflictingCandidate &&
-              conflictingCandidate.id !== candidateId
-            ) {
-              throw new Error(
-                "Affiliate candidate datetime repair would collide with another candidate dedupe key. " +
-                  "Review the duplicate candidate before publication.",
-              );
-            }
-            repairedDateTimeData = affiliateCandidateDateTimeRepairData(
-              nextCandidate,
-              dedupeKey,
-            );
-          },
-        },
-      );
-      await markSourceOrganizationListedForPublishedContent(
-        source,
-        client,
-        publicationLocations.sourceOrganizationCoordinates,
-        publicationLocations.sourceOrganizationFingerprint,
-      );
-      const candidateUpdatedAt = candidateUpdatedAtDate(currentCandidate);
-      await transactionDb.candidates.update({
-        where: candidateUpdatedAt
-          ? { id: candidateId, updatedAt: candidateUpdatedAt }
-          : { id: candidateId },
-        data: {
-          ...repairedDateTimeData,
-          status: "PUBLISHED",
-          publishedEventId: event.id,
-        },
-      });
-      return event;
-    };
-
-    return withAffiliateScrapeTransaction(baseClient, publishEvent);
+const loadAffiliatePublicationSource = async (params: {
+  candidate: AffiliateCandidateRecord;
+  source?: AffiliateScrapeSourceRow;
+  sources: any;
+}): Promise<AffiliateScrapeSourceRow> => {
+  const source =
+    params.source ??
+    (await params.sources.findUnique({ where: { id: params.candidate.sourceId } }));
+  if (!source) {
+    throw new Error("Affiliate scrape source not found.");
   }
+  return source;
+};
 
-  if (normalizeSourceType(candidate.listingKind) === "TEAM") {
-    const source = params.source ?? await sources.findUnique({
-      where: { id: candidate.sourceId },
-    });
-    if (!source) {
-      throw new Error("Affiliate scrape source not found.");
-    }
-    const team = await upsertAffiliateTeamForCandidate(candidate, source, {
-      visibility: "PUBLIC",
-      client: baseClient,
-    });
-    await candidates.update({
-      where: { id: candidateId },
-      data: {
-        status: "PUBLISHED",
-        publishedTeamId: team.id,
+const repairAffiliatePublicationCandidateDateTime = async (params: {
+  candidateId: string;
+  currentCandidate: AffiliateCandidateRecord & { sourceId: string };
+  nextCandidate: AffiliateCandidateDateTimeInput;
+  transactionDb: any;
+  client: any;
+}): Promise<Record<string, unknown>> => {
+  const mapping = await mappingForAffiliateCandidateDedupe(
+    params.currentCandidate,
+    params.client,
+  );
+  const dedupeKey = buildAffiliateCandidateDedupeKey(
+    params.currentCandidate.sourceId,
+    params.nextCandidate,
+    mapping,
+  );
+  const conflictingCandidate = await params.transactionDb.candidates.findUnique({
+    where: {
+      sourceId_dedupeKey: {
+        sourceId: params.currentCandidate.sourceId,
+        dedupeKey,
       },
-    });
-    return team;
-  }
-
-  const source = params.source ?? await sources.findUnique({
-    where: { id: candidate.sourceId },
+    },
+    select: { id: true },
   });
-  if (normalizeSourceType(candidate.listingKind) === "RENTAL") {
-    if (!source) {
-      throw new Error("Affiliate scrape source not found.");
-    }
-    const facility = await upsertAffiliateFacilityForCandidate(
-      candidate,
-      source,
-      { status: "ACTIVE", client: baseClient },
+  if (
+    conflictingCandidate &&
+    conflictingCandidate.id !== params.candidateId
+  ) {
+    throw new Error(
+      "Affiliate candidate datetime repair would collide with another candidate dedupe key. " +
+        "Review the duplicate candidate before publication.",
     );
-    await markSourceOrganizationListedForPublishedContent(source, baseClient);
-    await candidates.update({
-      where: { id: candidateId },
-      data: {
-        status: "PUBLISHED",
-        publishedFacilityId: facility.id,
-      },
-    });
-    return facility;
   }
+  return affiliateCandidateDateTimeRepairData(
+    params.nextCandidate,
+    dedupeKey,
+  );
+};
 
-  if (normalizeSourceType(candidate.listingKind) === "CLUB") {
-    if (!source) {
-      throw new Error("Affiliate scrape source not found.");
-    }
-    const organization = await upsertAffiliateOrganizationForCandidate(
-      candidate,
-      source,
-      {
-        status: "LISTED",
-        publicPageEnabled: true,
-        deferLogoUpload: params.deferOrganizationLogo === true,
-        client: baseClient,
-      },
-    );
-    await candidates.update({
-      where: { id: candidateId },
-      data: {
-        status: "PUBLISHED",
-        publishedOrganizationId: organization.id,
-      },
-    });
-    await keepSourceOrganizationPrivateForPublishedClub(
-      source,
-      organization.id,
-      baseClient,
-    );
-    return organization;
+const publishPreparedAffiliateEvent = async (params: {
+  candidateId: string;
+  client: any;
+  transactionDb: any;
+  publicationLocations: AffiliatePreparedEventPublicationLocations;
+}) => {
+  const currentCandidate = await params.transactionDb.candidates.findUnique({
+    where: { id: params.candidateId },
+  });
+  if (!currentCandidate) {
+    throw new Error("Affiliate import candidate not found.");
   }
+  const source = await params.transactionDb.sources.findUnique({
+    where: { id: currentCandidate.sourceId },
+  });
+  if (!source) {
+    throw new Error("Affiliate scrape source not found.");
+  }
+  if (
+    affiliateEventPublicationCandidateFingerprint(currentCandidate) !==
+      params.publicationLocations.candidateFingerprint ||
+    affiliateEventPublicationSourceFingerprint(source) !==
+      params.publicationLocations.sourceFingerprint
+  ) {
+    throw new Error(
+      "Affiliate event candidate or source changed after location preparation. " +
+        "Refresh the candidate and retry publication.",
+    );
+  }
+  const sourceOrganization = await loadSourceOrganization(source, params.client);
+  if (
+    affiliateEventPublicationOrganizationFingerprint(sourceOrganization) !==
+    params.publicationLocations.sourceOrganizationFingerprint
+  ) {
+    throw new Error(
+      "Affiliate source organization changed after location preparation. " +
+        "Refresh the candidate and retry publication.",
+    );
+  }
+  let repairedDateTimeData: Record<string, unknown> = {};
+  const event = await upsertAffiliateEventForCandidate(
+    currentCandidate,
+    source,
+    {
+      state: "PUBLISHED",
+      client: params.client,
+      fallbackCoordinates: params.publicationLocations.eventCoordinates,
+      allowRemoteGeocoding: false,
+      preferFallbackCoordinates: true,
+      onCandidateNormalized: async (nextCandidate) => {
+        repairedDateTimeData =
+          await repairAffiliatePublicationCandidateDateTime({
+            candidateId: params.candidateId,
+            currentCandidate,
+            nextCandidate,
+            transactionDb: params.transactionDb,
+            client: params.client,
+          });
+      },
+    },
+  );
+  await markSourceOrganizationListedForPublishedContent(
+    source,
+    params.client,
+    params.publicationLocations.sourceOrganizationCoordinates,
+    params.publicationLocations.sourceOrganizationFingerprint,
+  );
+  const candidateUpdatedAt = candidateUpdatedAtDate(currentCandidate);
+  await params.transactionDb.candidates.update({
+    where: candidateUpdatedAt
+      ? { id: params.candidateId, updatedAt: candidateUpdatedAt }
+      : { id: params.candidateId },
+    data: {
+      ...repairedDateTimeData,
+      status: "PUBLISHED",
+      publishedEventId: event.id,
+    },
+  });
+  return event;
+};
 
+const publishAffiliateEventCandidateDirect = async (params: {
+  candidateId: string;
+  candidate: AffiliateCandidateRecord;
+  source?: AffiliateScrapeSourceRow;
+  baseClient: any;
+  sources: any;
+}) => {
+  const source = await loadAffiliatePublicationSource({
+    candidate: params.candidate,
+    source: params.source,
+    sources: params.sources,
+  });
+  const publicationLocations = await prepareAffiliateEventPublicationLocations(
+    params.candidate,
+    source,
+    params.baseClient,
+  );
+  return withAffiliateScrapeTransaction(
+    params.baseClient,
+    async (client: any) => {
+      const transactionDb = affiliatePrisma(client);
+      return publishPreparedAffiliateEvent({
+        candidateId: params.candidateId,
+        client,
+        transactionDb,
+        publicationLocations,
+      });
+    },
+  );
+};
+
+const publishAffiliateTeamCandidateDirect = async (params: {
+  candidateId: string;
+  candidate: AffiliateCandidateRecord;
+  source?: AffiliateScrapeSourceRow;
+  baseClient: any;
+  repositories: any;
+}) => {
+  const source = await loadAffiliatePublicationSource({
+    candidate: params.candidate,
+    source: params.source,
+    sources: params.repositories.sources,
+  });
+  const team = await upsertAffiliateTeamForCandidate(params.candidate, source, {
+    visibility: "PUBLIC",
+    client: params.baseClient,
+  });
+  await params.repositories.candidates.update({
+    where: { id: params.candidateId },
+    data: {
+      status: "PUBLISHED",
+      publishedTeamId: team.id,
+    },
+  });
+  return team;
+};
+
+const publishAffiliateFacilityCandidateDirect = async (params: {
+  candidateId: string;
+  candidate: AffiliateCandidateRecord;
+  source?: AffiliateScrapeSourceRow;
+  baseClient: any;
+  repositories: any;
+}) => {
+  const source = await loadAffiliatePublicationSource({
+    candidate: params.candidate,
+    source: params.source,
+    sources: params.repositories.sources,
+  });
+  const facility = await upsertAffiliateFacilityForCandidate(
+    params.candidate,
+    source,
+    { status: "ACTIVE", client: params.baseClient },
+  );
+  await markSourceOrganizationListedForPublishedContent(
+    source,
+    params.baseClient,
+  );
+  await params.repositories.candidates.update({
+    where: { id: params.candidateId },
+    data: {
+      status: "PUBLISHED",
+      publishedFacilityId: facility.id,
+    },
+  });
+  return facility;
+};
+
+const publishAffiliateClubCandidateDirect = async (params: {
+  candidateId: string;
+  candidate: AffiliateCandidateRecord;
+  source?: AffiliateScrapeSourceRow;
+  baseClient: any;
+  repositories: any;
+  deferOrganizationLogo?: boolean;
+}) => {
+  const source = await loadAffiliatePublicationSource({
+    candidate: params.candidate,
+    source: params.source,
+    sources: params.repositories.sources,
+  });
+  const organization = await upsertAffiliateOrganizationForCandidate(
+    params.candidate,
+    source,
+    {
+      status: "LISTED",
+      publicPageEnabled: true,
+      deferLogoUpload: params.deferOrganizationLogo === true,
+      client: params.baseClient,
+    },
+  );
+  await params.repositories.candidates.update({
+    where: { id: params.candidateId },
+    data: {
+      status: "PUBLISHED",
+      publishedOrganizationId: organization.id,
+    },
+  });
+  await keepSourceOrganizationPrivateForPublishedClub(
+    source,
+    organization.id,
+    params.baseClient,
+  );
+  return organization;
+};
+
+const publishAffiliateCandidateDirect = async (
+  candidateId: string,
+  params: AffiliateDirectPublicationParams = {},
+) => {
+  const context = await loadAffiliateDirectPublicationContext(
+    candidateId,
+    params,
+  );
+  const listingKind = normalizeSourceType(context.candidate.listingKind);
+  if (listingKind === "EVENT") {
+    return publishAffiliateEventCandidateDirect({
+      candidateId,
+      candidate: context.candidate,
+      source: params.source,
+      baseClient: context.baseClient,
+      sources: context.repositories.sources,
+    });
+  }
+  if (listingKind === "TEAM") {
+    return publishAffiliateTeamCandidateDirect({
+      candidateId,
+      candidate: context.candidate,
+      source: params.source,
+      baseClient: context.baseClient,
+      repositories: context.repositories,
+    });
+  }
+  if (listingKind === "RENTAL") {
+    return publishAffiliateFacilityCandidateDirect({
+      candidateId,
+      candidate: context.candidate,
+      source: params.source,
+      baseClient: context.baseClient,
+      repositories: context.repositories,
+    });
+  }
+  if (listingKind === "CLUB") {
+    return publishAffiliateClubCandidateDirect({
+      candidateId,
+      candidate: context.candidate,
+      source: params.source,
+      baseClient: context.baseClient,
+      repositories: context.repositories,
+      deferOrganizationLogo: params.deferOrganizationLogo,
+    });
+  }
   throw new Error(
     "Affiliate listing kind must be EVENT, TEAM, RENTAL, or CLUB.",
   );
 };
-export const publishAffiliateCandidate = async (
+type AffiliatePublicationContext = {
+  candidate: AffiliateCandidateRecord;
+  source: AffiliateScrapeSourceRow | null;
+  candidates: any;
+  supplySourceId: string | null;
+};
+
+const loadAffiliatePublicationContext = async (
   candidateId: string,
-  params: { publishedByUserId?: string | null } = {},
-) => {
+): Promise<AffiliatePublicationContext> => {
   const { candidates, sources } = affiliatePrisma();
   const candidate = await candidates.findUnique({ where: { id: candidateId } });
   if (!candidate) {
     throw new Error("Affiliate import candidate not found.");
   }
   const source = await sources.findUnique({ where: { id: candidate.sourceId } });
-  const supplySourceId = source?.supplySourceId ?? candidate.supplySourceId;
-  if (!supplySourceId) {
-    return publishAffiliateCandidateDirect(candidateId, {
-      ...params,
-      candidate,
-      source,
-    });
-  }
-  const actorId = params.publishedByUserId?.trim();
+  return {
+    candidate,
+    source,
+    candidates,
+    supplySourceId: source?.supplySourceId ?? candidate.supplySourceId,
+  };
+};
+
+const affiliatePublicationActorId = (
+  publishedByUserId?: string | null,
+): string => {
+  const actorId = publishedByUserId?.trim();
   if (!actorId) {
     throw new Error("Supply-backed affiliate publication requires a human actor.");
   }
-  const database = affiliateSupplyDatabase();
-  const root = await database.supplySources.findUnique({
-    where: { id: supplySourceId },
-  });
-  if (!root) {
-    throw new Error("Affiliate Supply Source not found.");
-  }
+  return actorId;
+};
+
+const affiliatePublicationEvidenceRefs = (
+  candidateId: string,
+  candidate: AffiliateCandidateRecord,
+): string[] => {
   const rawCandidatePayload = recordValue(candidate.rawPayload);
   const rawEvidenceRefs = Array.isArray(rawCandidatePayload.evidenceRefs)
     ? rawCandidatePayload.evidenceRefs
@@ -4743,64 +6744,146 @@ export const publishAffiliateCandidate = async (
   const candidateEvidenceRefs = rawEvidenceRefs.filter(
     (value: unknown): value is string => typeof value === "string",
   );
-  const evidenceRefs = Array.from(new Set([
-    ...candidateEvidenceRefs,
-    `affiliate-candidate:${candidateId}`,
-  ]));
-  let publishedTarget: any = null;
-  let deferredOrganizationId: string | null = null;
+  return Array.from(
+    new Set([
+      ...candidateEvidenceRefs,
+      `affiliate-candidate:${candidateId}`,
+    ]),
+  );
+};
+
+type AffiliatePublicationTargetState = {
+  publishedTarget: Readonly<{ id: string }> | null;
+  deferredOrganizationId: string | null;
+};
+
+const writeAffiliatePublicationTarget = async (params: {
+  client: any;
+  candidateId: string;
+  candidate: AffiliateCandidateRecord;
+  directParams: AffiliateDirectPublicationParams;
+  evidenceRefs: string[];
+  state: AffiliatePublicationTargetState;
+}) => {
+  const targetRoute = affiliateTargetRouteForCandidate(params.candidate);
+  if (!targetRoute) {
+    throw new Error("Affiliate listing kind is required for lifecycle publication.");
+  }
+  params.state.publishedTarget = await publishAffiliateCandidateDirect(
+    params.candidateId,
+    {
+      ...params.directParams,
+      deferOrganizationLogo: targetRoute.targetType === "ORGANIZATION",
+      client: params.client,
+    },
+  );
+  if (!params.state.publishedTarget) {
+    throw new Error("Affiliate publication did not return a public target.");
+  }
+  if (targetRoute.targetType === "ORGANIZATION") {
+    params.state.deferredOrganizationId = params.state.publishedTarget.id;
+  }
+  return {
+    targetType: targetRoute.targetType,
+    targetId: params.state.publishedTarget.id,
+    sourceProfile: targetRoute.listingKind,
+    candidateId: params.candidateId,
+    evidenceRefs: params.evidenceRefs,
+  };
+};
+
+const publishAffiliateCandidateThroughLifecycle = async (params: {
+  candidateId: string;
+  candidate: AffiliateCandidateRecord;
+  repositories: { candidates: any };
+  supplySourceId: string;
+  directParams: AffiliateDirectPublicationParams;
+  actorId: string;
+}) => {
+  const database = affiliateSupplyDatabase();
+  const root = await database.supplySources.findUnique({
+    where: { id: params.supplySourceId },
+  });
+  if (!root) {
+    throw new Error("Affiliate Supply Source not found.");
+  }
+  const evidenceRefs = affiliatePublicationEvidenceRefs(
+    params.candidateId,
+    params.candidate,
+  );
+  const state: AffiliatePublicationTargetState = {
+    publishedTarget: null,
+    deferredOrganizationId: null,
+  };
   const lifecycleResult = await executeAffiliateSupplyLifecycleCommand({
-    supplySourceId,
+    supplySourceId: params.supplySourceId,
     command: "PUBLISH_TARGET",
     authority: "HUMAN_DIRECTED_EXECUTOR",
     expectedLifecycleGeneration: root.lifecycleGeneration,
-    idempotencyKey: `affiliate-candidate-publication:${candidateId}`,
+    idempotencyKey: `affiliate-candidate-publication:${params.candidateId}`,
     request: {
-      candidateId,
+      candidateId: params.candidateId,
       evidenceRefs,
     },
     actorKind: "HUMAN",
-    actorId,
+    actorId: params.actorId,
     rolloutCohort: root.rolloutCohort,
     db: database,
-    targetWriter: async ({ client }) => {
-      const targetRoute = affiliateTargetRouteForCandidate(candidate);
-      if (!targetRoute) {
-        throw new Error("Affiliate listing kind is required for lifecycle publication.");
-      }
-      publishedTarget = await publishAffiliateCandidateDirect(candidateId, {
-        ...params,
-        deferOrganizationLogo: targetRoute.targetType === 'ORGANIZATION',
+    targetWriter: async ({ client }) =>
+      writeAffiliatePublicationTarget({
         client,
-      });
-      if (targetRoute.targetType === 'ORGANIZATION' && publishedTarget?.id) {
-        deferredOrganizationId = String(publishedTarget.id);
-      }
-      return {
-        targetType: targetRoute.targetType,
-        targetId: String(publishedTarget.id),
-        sourceProfile: targetRoute.listingKind,
-        candidateId,
+        candidateId: params.candidateId,
+        candidate: params.candidate,
+        directParams: params.directParams,
         evidenceRefs,
-      };
-    },
+        state,
+      }),
   });
-  const committedCandidate = await candidates.findUnique({ where: { id: candidateId } });
-  const organizationId = deferredOrganizationId
-    ?? nullableString(committedCandidate?.publishedOrganizationId);
+  const committedCandidate = await params.repositories.candidates.findUnique({
+    where: { id: params.candidateId },
+  });
+  const organizationId =
+    state.deferredOrganizationId ??
+    nullableString(committedCandidate?.publishedOrganizationId);
   if (
-    organizationId
-    && normalizeSourceType(committedCandidate?.listingKind) === 'CLUB'
+    organizationId &&
+    normalizeSourceType(committedCandidate?.listingKind) === "CLUB"
   ) {
     await upsertAffiliateOrganizationLogoForCandidate(
       committedCandidate,
       organizationId,
-      actorId,
+      params.actorId,
       prisma,
       { assignOrganizationLogo: true },
     );
   }
-  if (publishedTarget) return publishedTarget;
-  const replayedTargetId = lifecycleResult.assessment.qualifyingTargetIds[0] ?? null;
-  return replayedTargetId ? { id: replayedTargetId } : lifecycleResult.assessment;
+  if (state.publishedTarget) return state.publishedTarget;
+  const replayedTargetId =
+    lifecycleResult.assessment.qualifyingTargetIds[0] ?? null;
+  return replayedTargetId
+    ? { id: replayedTargetId }
+    : lifecycleResult.assessment;
+};
+
+export const publishAffiliateCandidate = async (
+  candidateId: string,
+  params: { publishedByUserId?: string | null } = {},
+) => {
+  const context = await loadAffiliatePublicationContext(candidateId);
+  if (!context.supplySourceId) {
+    return publishAffiliateCandidateDirect(candidateId, {
+      ...params,
+      candidate: context.candidate,
+      source: context.source ?? undefined,
+    });
+  }
+  const actorId = affiliatePublicationActorId(params.publishedByUserId);
+  return publishAffiliateCandidateThroughLifecycle({
+    candidateId,
+    candidate: context.candidate,
+    repositories: { candidates: context.candidates },
+    supplySourceId: context.supplySourceId,
+    directParams: params,
+    actorId,
+  });
 };

@@ -62,9 +62,53 @@ describe('ScrapingDogAffiliateClient', () => {
     expect(requestedUrl.searchParams.get('dynamic')).toBe('false');
     expect(result).toMatchObject({
       renderMode: 'STATIC',
-      finalUrl: 'https://club.example.test/events',
+      isRedirectVerified: false,
       estimatedCredits: 1,
       attempts: [{ accepted: true, renderMode: 'STATIC' }],
+    });
+  });
+
+  it('retains direct screenshot request and response metadata with the page evidence', async () => {
+    const pageUrl = 'https://club.example.test/home';
+    const staticResponse = {
+      request: { endpoint: '/scrape', targetUrl: pageUrl },
+      response: { statusCode: 200 },
+      statusCode: 200,
+      headers: {},
+      body: usefulHtml,
+      elapsedMs: 10,
+    };
+    const screenshotResponse = {
+      request: { endpoint: '/screenshot', targetUrl: pageUrl },
+      response: { statusCode: 200 },
+      statusCode: 200,
+      headers: { 'content-type': 'image/png' },
+      body: Buffer.from([137, 80, 78, 71]),
+      elapsedMs: 20,
+    };
+    const transport = {
+      requestText: jest.fn().mockResolvedValue(staticResponse),
+      requestJson: jest.fn(),
+      requestBuffer: jest.fn().mockResolvedValue(screenshotResponse),
+    };
+    const client = new ScrapingDogAffiliateClient(transport);
+
+    const result = await client.captureSourcePage(pageUrl, {
+      captureScreenshot: true,
+    });
+
+    expect(result.providerArtifacts?.screenshotEvidence?.data).toEqual(
+      Buffer.from([137, 80, 78, 71]),
+    );
+    expect(result.providerArtifacts?.metadata).toMatchObject({
+      screenshotRequest: expect.objectContaining({ endpoint: '/screenshot' }),
+      screenshotResponse: expect.objectContaining({ statusCode: 200 }),
+      screenshotProviderStatusCode: 200,
+    });
+    expect(result.providerArtifacts?.screenshotEvidence).toMatchObject({
+      sourceUrl: pageUrl,
+      finalUrl: pageUrl,
+      statusCode: 200,
     });
   });
 
@@ -79,10 +123,9 @@ describe('ScrapingDogAffiliateClient', () => {
     const result = await client.captureSourcePage('https://club.example.test/events');
 
     expect(fetchImpl).toHaveBeenCalledTimes(2);
-    const dynamicUrl = new URL(String(fetchImpl.mock.calls[1][0]));
-    expect(dynamicUrl.searchParams.get('dynamic')).toBe('true');
     expect(result).toMatchObject({
       renderMode: 'JAVASCRIPT',
+      isRedirectVerified: false,
       estimatedCredits: 6,
       attempts: [
         { accepted: false, renderMode: 'STATIC' },
@@ -131,7 +174,7 @@ describe('ScrapingDogAffiliateClient', () => {
     expect(fallbackUrl.searchParams.get('url')).toBe('https://www.club.example.test/home');
     expect(result).toMatchObject({
       requestedUrl: 'https://club.example.test/home',
-      finalUrl: 'https://www.club.example.test/events',
+      isRedirectVerified: false,
       warnings: [expect.stringContaining('www.club.example.test')],
     });
   });

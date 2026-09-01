@@ -188,6 +188,85 @@ describe('affiliate supply lifecycle assessment', () => {
     expect(assessment.targetContribution).toBe(1);
     expect(assessment.isTargetMet).toBe(false);
   });
+  it('counts fresh targets against a wildcard contract cell', () => {
+    const assessment = deriveAffiliateSupplyAssessment(mappedSnapshot({
+      approval: {
+        id: 'approval-wildcard',
+        status: 'APPROVED',
+        decision: 'APPROVE',
+        isIndependent: true,
+        reviewerId: 'reviewer-wildcard',
+        reviewedPackageHash: 'package-hash',
+        evidenceRefs: ['review-wildcard'],
+      },
+      mapping: {
+        ...mappedSnapshot().mapping!,
+        isActive: true,
+        validatedAt: new Date('2026-08-21T12:00:00.000Z'),
+      },
+      source: {
+        ...mappedSnapshot().source,
+        autoScrapeEnabled: true,
+      },
+      latestRun: {
+        id: 'run-wildcard',
+        status: 'SUCCEEDED',
+        mappingId: 'mapping-1',
+        finishedAt: new Date('2026-08-22T08:00:00.000Z'),
+        candidateCount: 2,
+        itemCount: 2,
+        isEmptyStateMatched: false,
+      },
+      baseline,
+      contract: {
+        ...contract,
+        targets: [
+          {
+            marketKey: null,
+            sportId: null,
+            sourceProfile: 'EVENT',
+            minimumFreshPublishedSupply: 2,
+          },
+          {
+            marketKey: 'portland',
+            sportId: 'soccer',
+            sourceProfile: 'EVENT',
+            minimumFreshPublishedSupply: 1,
+          },
+        ],
+      },
+      targets: [
+        {
+          id: 'target-portland',
+          targetType: 'EVENT',
+          targetId: 'event-portland',
+          sourceProfile: 'EVENT',
+          marketKey: 'portland',
+          sportId: 'soccer',
+          status: 'PUBLISHED',
+          lastSuccessfulRefreshAt: new Date('2026-08-22T08:00:00.000Z'),
+          freshnessExpiresAt: new Date('2026-08-23T08:00:00.000Z'),
+          evidenceRefs: ['run-1'],
+        },
+        {
+          id: 'target-seattle',
+          targetType: 'EVENT',
+          targetId: 'event-seattle',
+          sourceProfile: 'EVENT',
+          marketKey: 'seattle',
+          sportId: 'baseball',
+          status: 'PUBLISHED',
+          lastSuccessfulRefreshAt: new Date('2026-08-22T08:00:00.000Z'),
+          freshnessExpiresAt: new Date('2026-08-23T08:00:00.000Z'),
+          evidenceRefs: ['run-1'],
+        },
+      ],
+    }));
+
+    expect(assessment.targetMinimum).toBe(2);
+    expect(assessment.targetContribution).toBe(2);
+    expect(assessment.isTargetMet).toBe(true);
+  });
 
   it('returns Activated Supply after natural expiry without disabling automation', () => {
     const assessment = deriveAffiliateSupplyAssessment(mappedSnapshot({
@@ -360,6 +439,42 @@ describe('affiliate supply commands and contracts', () => {
     expect(decision.isAccepted).toBe(false);
     expect(decision.reasonCodes).toEqual(expect.arrayContaining(['LIFECYCLE_GENERATION_STALE', 'EVIDENCE_REQUIRED', 'ACTIVATION_PRECONDITION_FAILED']));
   });
+  it('rejects legacy reconciliation from the generic lifecycle command validator', () => {
+    const decision = validateAffiliateSupplyCommand({
+      command: 'LEGACY_RECONCILED',
+      authority: 'SYSTEM',
+      expectedLifecycleGeneration: 4,
+      currentLifecycleGeneration: 4,
+      activeContractVersion: contract.version,
+      activeContractHash: contract.hash,
+      commandContractVersion: contract.version,
+      commandContractHash: contract.hash,
+      evidenceRefs: ['legacy-report:report-1'],
+      assessment: deriveAffiliateSupplyAssessment(mappedSnapshot()),
+    });
+
+    expect(decision.isAccepted).toBe(false);
+    expect(decision.reasonCodes).toContain('LEGACY_RECONCILIATION_WRITER_REQUIRED');
+  });
+
+  it('keeps the explicit reconciliation command available to system callers', () => {
+    const decision = validateAffiliateSupplyCommand({
+      command: 'RECONCILE',
+      authority: 'SYSTEM',
+      expectedLifecycleGeneration: 4,
+      currentLifecycleGeneration: 4,
+      activeContractVersion: contract.version,
+      activeContractHash: contract.hash,
+      commandContractVersion: contract.version,
+      commandContractHash: contract.hash,
+      evidenceRefs: ['reconciliation-report:report-1'],
+      assessment: deriveAffiliateSupplyAssessment(mappedSnapshot()),
+    });
+
+    expect(decision.isAccepted).toBe(true);
+    expect(decision.nextStage).toBe('MAPPED');
+  });
+
   it('blocks target publication until the source is Activated or Published', () => {
     const decision = validateAffiliateSupplyCommand({
       command: 'PUBLISH_TARGET',

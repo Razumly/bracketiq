@@ -1155,6 +1155,15 @@ export const createAffiliateCoverageCampaign = async (
       where: { id: stringValue(recordValue(job.context).demandId) ?? job.subjectKey },
     })
     : null;
+  const replenishmentWave = isSupplyReplenishment && database.waves?.findFirst
+    ? await database.waves.findFirst({
+      where: {
+        coveragePlanningJobId: job.id,
+        demandId: replenishmentDemand?.id ?? job.subjectKey,
+      },
+      orderBy: { createdAt: 'desc' },
+    })
+    : null;
   if (isSupplyReplenishment && !replenishmentDemand) {
     throw new Error('Supply replenishment demand was not found.');
   }
@@ -1267,6 +1276,30 @@ export const createAffiliateCoverageCampaign = async (
       || String(left.profileKey).localeCompare(String(right.profileKey))
     ));
   }
+  const replenishmentGeneration = replenishmentDemand
+    ? Number(replenishmentWave?.demandGeneration ?? replenishmentDemand.generation)
+    : Number.NaN;
+  const replenishmentContractVersion = replenishmentDemand
+    ? Number(replenishmentDemand.contractVersion)
+    : Number.NaN;
+  const replenishmentRolloutCohort = replenishmentDemand?.rolloutCohort;
+  const replenishmentContractHash = replenishmentDemand?.contractHash;
+  const replenishmentLineageMetadata = replenishmentDemand
+    && Number.isSafeInteger(replenishmentGeneration)
+    && replenishmentGeneration >= 0
+    && Number.isSafeInteger(replenishmentContractVersion)
+    && typeof replenishmentRolloutCohort === 'string'
+    && replenishmentRolloutCohort.trim().length > 0
+    && typeof replenishmentContractHash === 'string'
+    && replenishmentContractHash.trim().length > 0
+    ? {
+      coverageAssessmentCycleId: `${replenishmentDemand.id}:generation:${replenishmentGeneration}`,
+      coverageRolloutCohort: replenishmentRolloutCohort,
+      coverageContractVersion: replenishmentContractVersion,
+      coverageContractHash: replenishmentContractHash,
+      coverageWaveId: replenishmentWave?.id ?? replenishmentDemand.activeWaveId ?? null,
+    }
+    : {};
   const coverageFingerprint = normalizedFingerprint(proposal, parentCampaignId);
   let campaign = await database.campaigns.findUnique({ where: { coverageFingerprint } });
   let created = false;
@@ -1279,7 +1312,6 @@ export const createAffiliateCoverageCampaign = async (
         location: proposal.location ?? null,
         sportIds,
         sourceTypeHints: [...new Set(proposal.sourceTypeHints)],
-        status: 'ACTIVE',
         autoCreateIntakes: true,
         searchIntervalMinutes: proposal.searchIntervalMinutes,
         nextRunAt: now,
@@ -1293,6 +1325,7 @@ export const createAffiliateCoverageCampaign = async (
           coverageParentCampaignId: parent?.id ?? null,
           coverageDemandId: replenishmentDemand?.id ?? null,
           coverageJobId: job.id,
+          ...replenishmentLineageMetadata,
           coverageArchetypes: proposal.coverageArchetypes,
           coverageCellIds: proposal.coverageCellIds,
           coverageTargetCells,

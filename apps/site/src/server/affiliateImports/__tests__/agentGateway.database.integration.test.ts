@@ -1,6 +1,7 @@
 /** @jest-environment node */
 
 import { createHash, randomUUID } from "node:crypto";
+import { Readable } from "node:stream";
 import { Client } from "pg";
 import { prisma } from "@/lib/prisma";
 import {
@@ -19,6 +20,7 @@ import type {
   AffiliateAgentInvocationFailureCode,
 } from "../agentGateway";
 import {
+  createProductionAffiliateAgentGatewayAdapters,
   createProductionAffiliateAgentGatewayDependencies,
   type AffiliateAgentCommandAdapters,
   type AffiliateAgentGatewayDependencies,
@@ -28,6 +30,7 @@ import {
   type AffiliateAgentSupervisorDependencies,
   type AffiliateAgentTerminalEffectAdapter,
 } from "../agentGatewayAdapters";
+import type { StorageProvider } from "@/lib/storageProvider";
 import {
   runAffiliateAgentInvocation,
   type AffiliateAgentSupervisorInput,
@@ -43,6 +46,85 @@ const INITIAL_TIME = new Date("2026-08-20T18:00:00.000Z");
 const RUN_PREFIX = `issue67-gateway-${randomUUID()}`;
 const INPUT_BYTES = Buffer.from("database gateway evidence", "utf8");
 const INPUT_HASH = createHash("sha256").update(INPUT_BYTES).digest("hex");
+const PROTECTED_AFFILIATE_AGENT_TABLES = [
+  "AffiliateAgentGatewayJobs",
+  "AffiliateAgentGatewayClaims",
+  "AffiliateAgentGatewayArtifacts",
+  "AffiliateAgentGatewayOperationReceipts",
+  "AffiliateAgentGatewayEvents",
+  "AffiliateCoverageAgentJobs",
+  "AffiliateSourceMappingJobs",
+  "AffiliateApprovalJobs",
+  "AffiliateSourceIntakes",
+  "AffiliateSourceIntakeArtifacts",
+  "AffiliateSourceDiscoveryCampaigns",
+  "AffiliateScrapeSources",
+  "AffiliateScrapeMappings",
+  "File",
+] as const;
+const PROTECTED_TABLE_OPERATIONS = [
+  "SELECT",
+  "INSERT",
+  "UPDATE",
+  "DELETE",
+] as const;
+
+const assertIsolatedDatabaseUrl = (databaseUrl: string | undefined): string => {
+  if (!databaseUrl) throw new Error("DATABASE_URL is required.");
+  const parsed = new URL(databaseUrl);
+  const isIsolatedDatabase =
+    ["127.0.0.1", "localhost"].includes(parsed.hostname) &&
+    parsed.pathname.slice(1) === DATABASE_NAME;
+  if (!isIsolatedDatabase) {
+    throw new Error("The direct denial probe requires the isolated database.");
+  }
+  return databaseUrl;
+};
+
+const isAffiliateAgentPermissionDenied = (error: unknown): boolean => {
+  if (error === null || typeof error !== "object") return false;
+  return "code" in error && error.code === "42501";
+};
+
+const probeProtectedTableWrites = async (
+  client: Client,
+  agentRole: string,
+  targets: readonly string[],
+): Promise<string[]> => {
+  const facts: string[] = [];
+  for (const table of targets) {
+    const statements = [
+      {
+        operation: "INSERT",
+        sql: `INSERT INTO public."${table}" DEFAULT VALUES`,
+      },
+      {
+        operation: "UPDATE",
+        sql: `UPDATE public."${table}" SET "id" = "id" WHERE FALSE`,
+      },
+      {
+        operation: "DELETE",
+        sql: `DELETE FROM public."${table}" WHERE FALSE`,
+      },
+    ] as const;
+    for (const statement of statements) {
+      let isDenied = false;
+      await client.query("BEGIN");
+      try {
+        await client.query(`SET LOCAL ROLE "${agentRole}"`);
+        await client.query(statement.sql);
+      } catch (error) {
+        isDenied = isAffiliateAgentPermissionDenied(error);
+      } finally {
+        await client.query("ROLLBACK");
+      }
+      expect(isDenied).toBe(true);
+      facts.push(`${table} ${statement.operation.toLowerCase()}`);
+    }
+  }
+  return facts;
+};
+
 
 const supplyContractFixture = {
   schemaVersion: 1,
@@ -351,9 +433,26 @@ const reviewerManifestFor = (
     },
   ]);
 
+const seedSupplySource = async (
+  id: string,
+  lifecycleGeneration = 7,
+): Promise<void> => {
+  await prisma.affiliateSupplySources.create({
+    data: {
+      id,
+      identityKey: `${id}:identity`,
+      canonicalUrl: `https://source.example.test/${id}`,
+      origin: "https://source.example.test",
+      pathKey: `/${id}`,
+      lifecycleGeneration,
+    },
+  });
+};
+
 const seedMappingJob = async (label: string): Promise<string> => {
   const id = `${RUN_PREFIX}-${label}-job`;
   const supplySourceId = `${RUN_PREFIX}-${label}-supply-source`;
+  await seedSupplySource(supplySourceId);
   await prisma.affiliateAgentGatewayJobs.create({
     data: {
       id,
@@ -432,6 +531,7 @@ const seedCompletedReviewerForHuman = async (
   label: string,
   supplySourceId: string,
 ): Promise<HumanJobPrerequisite> => {
+  await seedSupplySource(supplySourceId);
   const jobId = `${RUN_PREFIX}-${label}-reviewer-job`;
   const claimId = `${RUN_PREFIX}-${label}-reviewer-claim`;
   const terminalReceiptId = `${RUN_PREFIX}-${label}-reviewer-terminal`;
@@ -876,33 +976,96 @@ const createGatewayHarness = (
   let now = new Date(INITIAL_TIME);
   let activeBundle: unknown = contractBundleFixture;
   let identifierSequence = 0;
+  const database = options.database ?? prisma;
+  const identifiers = {
+    create: (
+      kind: Parameters<
+        AffiliateAgentGatewayDependencies["identifiers"]["create"]
+      >[0],
+    ) => `${RUN_PREFIX}-${label}-${kind}-${++identifierSequence}`,
+  };
+  const artifacts: AffiliateAgentGatewayDependencies["artifacts"] = {
+    readImmutable:
+      options.readImmutable ??
+      (async () => ({
+        bytes: new Uint8Array(INPUT_BYTES),
+        mimeType: "text/markdown",
+        byteSize: INPUT_BYTES.byteLength,
+        sourceUrl: "https://evidence.example.test/database",
+      })),
+  };
+  const storedObjects = new Map<
+    string,
+    Readonly<{ bytes: Buffer; contentType?: string }>
+  >();
+  const storage: StorageProvider = {
+    async putObject({ data, originalName, contentType, key }) {
+      const objectKey = key?.trim() || `${RUN_PREFIX}-${label}-${originalName}`;
+      const normalizedContentType = contentType?.trim() || undefined;
+      storedObjects.set(objectKey, {
+        bytes: Buffer.from(data),
+        ...(normalizedContentType ? { contentType: normalizedContentType } : {}),
+      });
+      return {
+        key: objectKey,
+        sizeBytes: data.byteLength,
+        ...(normalizedContentType ? { contentType: normalizedContentType } : {}),
+      };
+    },
+    async getObjectStream({ key }) {
+      const stored = storedObjects.get(key);
+      if (!stored) throw new Error(`Stored object ${key} was not found.`);
+      return {
+        stream: Readable.from([Buffer.from(stored.bytes)]),
+        contentType: stored.contentType,
+        sizeBytes: stored.bytes.byteLength,
+      };
+    },
+    async deleteObject({ key }) {
+      storedObjects.delete(key);
+    },
+    async headObject({ key }) {
+      const stored = storedObjects.get(key);
+      return stored
+        ? {
+          exists: true,
+          contentType: stored.contentType,
+          sizeBytes: stored.bytes.byteLength,
+        }
+        : { exists: false };
+    },
+  };
+  const productionAdapters = createProductionAffiliateAgentGatewayAdapters({
+    prisma: database,
+    artifacts,
+    storage,
+    identifiers,
+  });
+  const commands: AffiliateAgentCommandAdapters = {
+    transactional: {
+      ...productionAdapters.commands.transactional,
+      ...(options.commands?.transactional ?? {}),
+    },
+    external: {
+      ...productionAdapters.commands.external,
+      ...(options.commands?.external ?? {}),
+    },
+  };
   const dependencies = createProductionAffiliateAgentGatewayDependencies({
-    prisma: options.database ?? prisma,
+    prisma: database,
     tokenSigningKey: Buffer.from("database-gateway-signing-key".repeat(2)),
     tokenKeyVersion: "database-key-v1",
     clock: { now: () => new Date(now) },
-    identifiers: {
-      create: (kind) =>
-        `${RUN_PREFIX}-${label}-${kind}-${++identifierSequence}`,
-    },
+    identifiers,
     credentials: {
       verify: async ({ executionClass }) =>
         executionClass === "PRODUCTION_CODEX",
     },
     workspaces: { verify: async () => true },
     contracts: { loadActiveBundle: async () => activeBundle },
-    artifacts: {
-      readImmutable:
-        options.readImmutable ??
-        (async () => ({
-          bytes: new Uint8Array(INPUT_BYTES),
-          mimeType: "text/markdown",
-          byteSize: INPUT_BYTES.byteLength,
-          sourceUrl: "https://evidence.example.test/database",
-        })),
-    },
-    commands: options.commands ?? { transactional: {}, external: {} },
-    terminalEffects: options.terminalEffects,
+    artifacts,
+    commands,
+    terminalEffects: options.terminalEffects ?? productionAdapters.terminalEffects,
     lifecycle: options.lifecycle ?? { kind: "UNAVAILABLE" },
   });
   const gateway = createPrismaAffiliateAgentGateway(dependencies);
@@ -939,6 +1102,12 @@ const cleanupGatewayRows = async (): Promise<void> => {
   });
   const jobIds = jobs.map(({ id }) => id);
   if (jobIds.length === 0) return;
+  const supplySourceIds = (
+    await prisma.affiliateSupplySources.findMany({
+      where: { id: { startsWith: RUN_PREFIX } },
+      select: { id: true },
+    })
+  ).map(({ id }) => id);
   const claims = await prisma.affiliateAgentGatewayClaims.findMany({
     where: { jobId: { in: jobIds } },
     select: { id: true },
@@ -963,6 +1132,11 @@ const cleanupGatewayRows = async (): Promise<void> => {
     await transaction.affiliateAgentGatewayJobs.deleteMany({
       where: { id: { in: jobIds } },
     });
+    if (supplySourceIds.length > 0) {
+      await transaction.affiliateSupplySources.deleteMany({
+        where: { id: { in: supplySourceIds } },
+      });
+    }
   });
 };
 
@@ -1049,6 +1223,136 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
     expect(
       await prisma.affiliateAgentGatewayClaims.count({ where: { jobId } }),
     ).toBe(1);
+  }, 20_000);
+  it("rejects claim admission after an intervening lifecycle advance", async () => {
+    const label = "lifecycle-admission-race";
+    const jobId = await seedMappingJob(label);
+    const supplySourceId = `${RUN_PREFIX}-${label}-supply-source`;
+    let readPhase: "BEFORE" | null = null;
+    let releaseLifecycleRead = (): void => undefined;
+    let markLifecycleRead = (): void => undefined;
+    const lifecycleReadReleased = new Promise<void>((resolve) => {
+      releaseLifecycleRead = resolve;
+    });
+    const lifecycleReadEntered = new Promise<void>((resolve) => {
+      markLifecycleRead = resolve;
+    });
+    const racingPrisma = prisma.$extends({
+      query: {
+        $allOperations: async ({ operation, args, query }) => {
+          if (operation === "$queryRaw" && readPhase === "BEFORE") {
+            readPhase = null;
+            markLifecycleRead();
+            await lifecycleReadReleased;
+          }
+          return query(args);
+        },
+      },
+    });
+    const harness = createGatewayHarness(label, {
+      database: racingPrisma,
+      lifecycle: {
+        kind: "AVAILABLE",
+        currentGeneration: async () => 7,
+        resolveRecordedCommand: async (identity) => identity,
+        execute: async () => ({}),
+        recover: async () => null,
+      },
+    });
+    readPhase = "BEFORE";
+    const claim = harness.gateway.claim(
+      requestFor(label, "MAPPING_PRODUCER", INITIAL_TIME),
+    );
+    await lifecycleReadEntered;
+    await prisma.affiliateSupplySources.update({
+      where: { id: supplySourceId },
+      data: { lifecycleGeneration: 8 },
+    });
+    releaseLifecycleRead();
+
+    await expect(claim).rejects.toMatchObject({
+      code: "LIFECYCLE_GENERATION_STALE",
+    });
+    expect(
+      await prisma.affiliateAgentGatewayClaims.count({ where: { jobId } }),
+    ).toBe(0);
+    expect(
+      await prisma.affiliateAgentGatewayEvents.count({ where: { jobId } }),
+    ).toBe(0);
+    await expect(
+      prisma.affiliateAgentGatewayJobs.findUniqueOrThrow({
+        where: { id: jobId },
+      }),
+    ).resolves.toMatchObject({
+      status: "QUEUED",
+      activeClaimId: null,
+      claimGeneration: 0,
+    });
+  }, 20_000);
+  it("rejects a terminal effect after an intervening lifecycle advance", async () => {
+    const label = "lifecycle-terminal-race";
+    const jobId = await seedMappingJob(label);
+    const supplySourceId = `${RUN_PREFIX}-${label}-supply-source`;
+    const harness = createGatewayHarness(label, {
+      lifecycle: {
+        kind: "AVAILABLE",
+        currentGeneration: async () => 7,
+        resolveRecordedCommand: async (identity) => identity,
+        execute: async () => ({}),
+        recover: async () => null,
+      },
+    });
+    const grant = await claimOrThrow(
+      harness.gateway,
+      requestFor(label, "MAPPING_PRODUCER", INITIAL_TIME),
+    );
+    const result = {
+      ...terminalResultFor(grant),
+      role: "MAPPING_PRODUCER" as const,
+      disposition: "SOURCE_INCOMPATIBLE" as const,
+      reasonCodes: ["SOURCE_UNSUPPORTED"] as const,
+      summary: "The source layout is not supported.",
+      payload: { incompatibilityCode: "UNSUPPORTED_LAYOUT" as const },
+    };
+    await prisma.affiliateSupplySources.update({
+      where: { id: supplySourceId },
+      data: { lifecycleGeneration: 8 },
+    });
+
+    await expect(
+      harness.gateway.perform({
+        kind: "SUBMIT_RESULT",
+        idempotencyKey: `${RUN_PREFIX}-${label}-terminal`,
+        authorization: authorizationFor(grant),
+        result,
+      }),
+    ).rejects.toMatchObject({
+      code: "LIFECYCLE_GENERATION_STALE",
+    });
+    expect(
+      await prisma.affiliateAgentGatewayOperationReceipts.count({
+        where: { claimId: grant.envelope.claimId },
+      }),
+    ).toBe(0);
+    await expect(
+      prisma.affiliateAgentGatewayClaims.findUniqueOrThrow({
+        where: { id: grant.envelope.claimId },
+      }),
+    ).resolves.toMatchObject({
+      status: "ACTIVE",
+      terminalReceiptId: null,
+      claimGeneration: grant.envelope.claimGeneration,
+      lifecycleGeneration: 7,
+    });
+    await expect(
+      prisma.affiliateAgentGatewayJobs.findUniqueOrThrow({
+        where: { id: jobId },
+      }),
+    ).resolves.toMatchObject({
+      status: "CLAIMED",
+      activeClaimId: grant.envelope.claimId,
+      terminalReceiptId: null,
+    });
   }, 20_000);
   it("handles one concurrent artifact read receipt without duplicate writes", async () => {
     const jobId = await seedCoverageJob("artifact-read-race");
@@ -1216,6 +1520,10 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
       }),
     ]);
     lifecycleGeneration = 8;
+    await prisma.affiliateSupplySources.update({
+      where: { id: `${RUN_PREFIX}-stale-lifecycle-supply-source` },
+      data: { lifecycleGeneration },
+    });
     await expect(
       harness.gateway.perform({
         kind: "HEARTBEAT",
@@ -2435,7 +2743,7 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
       listUrlRef: "input-evidence",
       itemSelector: ".event",
       fields: [],
-      evidenceRefs: ["input-evidence"],
+      evidenceRefs: [],
     });
     const mappingPackageHash = hashAffiliateAgentValue(
       mappingCandidatePackageFor(
@@ -2495,31 +2803,158 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
       lifecycle,
     });
 
+    type GatewayTerminalResultCommon = Readonly<{
+      schemaVersion: 1;
+      jobId: string;
+      claimId: string;
+      claimGeneration: number;
+      lifecycleGeneration: number | null;
+      deploymentContractVersion: number;
+      deploymentContractHash: string;
+      supplyContractVersion: number;
+      supplyContractHash: string;
+      roleContractVersion: number;
+      roleContractHash: string;
+      promptTemplateVersion: number;
+      promptTemplateHash: string;
+      workerId: string;
+      invocationId: string;
+      evidenceRefs: string[];
+    }>;
+
+    const terminalResultCommonFor = (
+      envelope: AffiliateAgentClaimEnvelope,
+    ): GatewayTerminalResultCommon => ({
+      schemaVersion: 1 as const,
+      jobId: envelope.jobId,
+      claimId: envelope.claimId,
+      claimGeneration: envelope.claimGeneration,
+      lifecycleGeneration: envelope.lifecycleGeneration,
+      deploymentContractVersion: envelope.deploymentContractVersion,
+      deploymentContractHash: envelope.deploymentContractHash,
+      supplyContractVersion: envelope.supplyContractVersion,
+      supplyContractHash: envelope.supplyContractHash,
+      roleContractVersion: envelope.roleContractVersion,
+      roleContractHash: envelope.roleContractHash,
+      promptTemplateVersion: envelope.promptTemplateVersion,
+      promptTemplateHash: envelope.promptTemplateHash,
+      workerId: envelope.workerId,
+      invocationId: envelope.invocationId,
+      evidenceRefs: envelope.evidenceManifest.entries.map(
+        ({ evidenceRef }) => evidenceRef,
+      ),
+    });
+
+    const mappingTerminalResultFor = async (
+      authorization: AffiliateAgentClaimAuthorization,
+      envelope: Extract<
+        AffiliateAgentClaimEnvelope,
+        { role: "MAPPING_PRODUCER" }
+      >,
+      common: GatewayTerminalResultCommon,
+    ): Promise<unknown> => {
+      if (envelope.subject.type !== "MAPPING_PRODUCER") {
+        throw new Error("Expected a Mapping Producer subject.");
+      }
+      const candidatePackage = mappingCandidatePackageFor(
+        envelope.subject.supplySourceId,
+      );
+      const validation = await harness.gateway.perform({
+        kind: "EXECUTE_COMMAND",
+        idempotencyKey: `${RUN_PREFIX}-four-role-mapping-validation`,
+        authorization,
+        command: {
+          type: "VALIDATE_DECLARATIVE_PACKAGE",
+          data: {
+            candidatePackage,
+            evidenceManifestHash: envelope.evidenceManifest.hash,
+          },
+        },
+      });
+      if (
+        validation.kind !== "COMMAND_SUCCEEDED" ||
+        validation.safeOutput?.validatedPackageHash !== mappingPackageHash
+      ) {
+        throw new Error("Mapping validation did not return its package hash.");
+      }
+      const commit = await harness.gateway.perform({
+        kind: "EXECUTE_COMMAND",
+        idempotencyKey: `${RUN_PREFIX}-four-role-mapping-commit`,
+        authorization,
+        command: {
+          type: "COMMIT_DECLARATIVE_PACKAGE",
+          data: {
+            validationReceiptId: validation.receiptId,
+            validatedPackageHash: mappingPackageHash,
+          },
+        },
+      });
+      if (
+        commit.kind !== "COMMAND_SUCCEEDED" ||
+        commit.safeOutput?.packageHash !== mappingPackageHash
+      ) {
+        throw new Error("Mapping commit did not return its package hash.");
+      }
+      return {
+        ...common,
+        role: envelope.role,
+        disposition: "PACKAGE_COMMITTED" as const,
+        reasonCodes: ["SCHEMA_VALIDATED"] as const,
+        summary: "The declarative package passed validation and committed.",
+        payload: {
+          packageHash: mappingPackageHash,
+          commitReceiptId: commit.receiptId,
+        },
+      };
+    };
+
+    const humanTerminalResultFor = async (
+      authorization: AffiliateAgentClaimAuthorization,
+      envelope: Extract<
+        AffiliateAgentClaimEnvelope,
+        { role: "HUMAN_DIRECTED_EXECUTOR" }
+      >,
+      common: GatewayTerminalResultCommon,
+    ): Promise<unknown> => {
+      if (envelope.subject.type !== "HUMAN_DIRECTED_EXECUTOR") {
+        throw new Error("Expected a Human-directed Executor subject.");
+      }
+      const lifecycleResult = await harness.gateway.perform({
+        kind: "EXECUTE_COMMAND",
+        idempotencyKey: `${RUN_PREFIX}-four-role-human-lifecycle`,
+        authorization,
+        command: {
+          type: "EXECUTE_RECORDED_LIFECYCLE_COMMAND",
+          data: {
+            caseId: envelope.subject.caseId,
+            decisionHash: envelope.subject.decisionHash,
+            lifecycleCommandRef: envelope.subject.lifecycleCommandRef,
+          },
+        },
+      });
+      if (lifecycleResult.kind !== "COMMAND_SUCCEEDED") {
+        throw new Error("The recorded lifecycle command did not succeed.");
+      }
+      return {
+        ...common,
+        role: envelope.role,
+        disposition: "LIFECYCLE_COMMAND_EXECUTED" as const,
+        reasonCodes: ["EVIDENCE_VERIFIED"] as const,
+        summary: "The recorded human decision executed once.",
+        payload: {
+          caseId: envelope.subject.caseId,
+          lifecycleCommandRef: envelope.subject.lifecycleCommandRef,
+          receiptId: lifecycleResult.receiptId,
+        },
+      };
+    };
+
     const terminalResultForClaim = async (
       token: string,
       envelope: AffiliateAgentClaimEnvelope,
     ): Promise<unknown> => {
       const authorization = authorizationForTokenAndEnvelope(token, envelope);
-      const common = {
-        schemaVersion: 1 as const,
-        jobId: envelope.jobId,
-        claimId: envelope.claimId,
-        claimGeneration: envelope.claimGeneration,
-        lifecycleGeneration: envelope.lifecycleGeneration,
-        deploymentContractVersion: envelope.deploymentContractVersion,
-        deploymentContractHash: envelope.deploymentContractHash,
-        supplyContractVersion: envelope.supplyContractVersion,
-        supplyContractHash: envelope.supplyContractHash,
-        roleContractVersion: envelope.roleContractVersion,
-        roleContractHash: envelope.roleContractHash,
-        promptTemplateVersion: envelope.promptTemplateVersion,
-        promptTemplateHash: envelope.promptTemplateHash,
-        workerId: envelope.workerId,
-        invocationId: envelope.invocationId,
-        evidenceRefs: envelope.evidenceManifest.entries.map(
-          ({ evidenceRef }) => evidenceRef,
-        ),
-      };
+      const common = terminalResultCommonFor(envelope);
 
       switch (envelope.role) {
         case "COVERAGE_PLANNER":
@@ -2531,63 +2966,8 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
             summary: "The coverage cell has one evidence-backed campaign.",
             payload: { campaignProposalRefs: ["smoke-campaign"] },
           };
-        case "MAPPING_PRODUCER": {
-          if (envelope.subject.type !== "MAPPING_PRODUCER") {
-            throw new Error("Expected a Mapping Producer subject.");
-          }
-          const candidatePackage = mappingCandidatePackageFor(
-            envelope.subject.supplySourceId,
-          );
-          const validation = await harness.gateway.perform({
-            kind: "EXECUTE_COMMAND",
-            idempotencyKey: `${RUN_PREFIX}-four-role-mapping-validation`,
-            authorization,
-            command: {
-              type: "VALIDATE_DECLARATIVE_PACKAGE",
-              data: {
-                candidatePackage,
-                evidenceManifestHash: envelope.evidenceManifest.hash,
-              },
-            },
-          });
-          if (
-            validation.kind !== "COMMAND_SUCCEEDED" ||
-            validation.safeOutput?.validatedPackageHash !== mappingPackageHash
-          ) {
-            throw new Error(
-              "Mapping validation did not return its package hash.",
-            );
-          }
-          const commit = await harness.gateway.perform({
-            kind: "EXECUTE_COMMAND",
-            idempotencyKey: `${RUN_PREFIX}-four-role-mapping-commit`,
-            authorization,
-            command: {
-              type: "COMMIT_DECLARATIVE_PACKAGE",
-              data: {
-                validationReceiptId: validation.receiptId,
-                validatedPackageHash: mappingPackageHash,
-              },
-            },
-          });
-          if (
-            commit.kind !== "COMMAND_SUCCEEDED" ||
-            commit.safeOutput?.packageHash !== mappingPackageHash
-          ) {
-            throw new Error("Mapping commit did not return its package hash.");
-          }
-          return {
-            ...common,
-            role: envelope.role,
-            disposition: "PACKAGE_COMMITTED" as const,
-            reasonCodes: ["SCHEMA_VALIDATED"] as const,
-            summary: "The declarative package passed validation and committed.",
-            payload: {
-              packageHash: mappingPackageHash,
-              commitReceiptId: commit.receiptId,
-            },
-          };
-        }
+        case "MAPPING_PRODUCER":
+          return mappingTerminalResultFor(authorization, envelope, common);
         case "SUPPLY_REVIEWER":
           return {
             ...common,
@@ -2599,68 +2979,47 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
               caseReason: "Smoke-test review requires human direction.",
             },
           };
-        case "HUMAN_DIRECTED_EXECUTOR": {
-          if (envelope.subject.type !== "HUMAN_DIRECTED_EXECUTOR") {
-            throw new Error("Expected a Human-directed Executor subject.");
-          }
-          const lifecycleResult = await harness.gateway.perform({
-            kind: "EXECUTE_COMMAND",
-            idempotencyKey: `${RUN_PREFIX}-four-role-human-lifecycle`,
-            authorization,
-            command: {
-              type: "EXECUTE_RECORDED_LIFECYCLE_COMMAND",
-              data: {
-                caseId: envelope.subject.caseId,
-                decisionHash: envelope.subject.decisionHash,
-                lifecycleCommandRef: envelope.subject.lifecycleCommandRef,
-              },
-            },
-          });
-          if (lifecycleResult.kind !== "COMMAND_SUCCEEDED") {
-            throw new Error("The recorded lifecycle command did not succeed.");
-          }
-          return {
-            ...common,
-            role: envelope.role,
-            disposition: "LIFECYCLE_COMMAND_EXECUTED" as const,
-            reasonCodes: ["EVIDENCE_VERIFIED"] as const,
-            summary: "The recorded human decision executed once.",
-            payload: {
-              caseId: envelope.subject.caseId,
-              lifecycleCommandRef: envelope.subject.lifecycleCommandRef,
-              receiptId: lifecycleResult.receiptId,
-            },
-          };
-        }
+        case "HUMAN_DIRECTED_EXECUTOR":
+          return humanTerminalResultFor(authorization, envelope, common);
       }
     };
 
     const processLauncher: AffiliateAgentSupervisorDependencies["processLauncher"] =
       {
-        launch: (input) => {
-          const envelope = JSON.parse(
-            input.environment.AFFILIATE_AGENT_CLAIM_ENVELOPE,
-          ) as AffiliateAgentClaimEnvelope;
-          const token = input.environment.AFFILIATE_AGENT_CLAIM_TOKEN;
-          launchedClaims.set(envelope.role, envelope);
-          childEnvironmentKeys.push(Object.keys(input.environment).sort());
-          let resultPromise: Promise<AffiliateAgentProcessEvent> | null = null;
-          return {
-            started: Promise.resolve(),
-            nextEvent: () => {
-              resultPromise ??= terminalResultForClaim(token, envelope).then(
-                (value) => ({ kind: "RESULT" as const, value }),
-              );
-              return resultPromise;
-            },
-            send: async () => undefined,
-            terminate: async () => undefined,
-            forceTerminate: async () => undefined,
-          } satisfies AffiliateAgentProcessSession;
-        },
+        reserve: async () => ({
+          reservationId: "integration-runner-reservation",
+          release: async () => undefined,
+          launch: (input) => {
+            const envelope = JSON.parse(
+              input.environment.AFFILIATE_AGENT_CLAIM_ENVELOPE,
+            ) as AffiliateAgentClaimEnvelope;
+            const token = input.environment.AFFILIATE_AGENT_CLAIM_TOKEN;
+            launchedClaims.set(envelope.role, envelope);
+            childEnvironmentKeys.push(Object.keys(input.environment).sort());
+            let resultPromise: Promise<AffiliateAgentProcessEvent> | null = null;
+            return {
+              started: Promise.resolve(),
+              nextEvent: () => {
+                resultPromise ??= terminalResultForClaim(token, envelope).then(
+                  (value) => ({
+                    kind: "TERMINAL_SUBMISSION" as const,
+                    idempotencyKey: `integration-terminal-${envelope.claimId}`,
+                    result: value,
+                  }),
+                );
+                return resultPromise;
+              },
+              send: async () => undefined,
+              terminate: async () => undefined,
+              forceTerminate: async () => undefined,
+              disconnect: () => undefined,
+            } satisfies AffiliateAgentProcessSession;
+          },
+        }),
       };
     let workspaceSequence = 0;
     const workspaces: AffiliateAgentSupervisorDependencies["workspaces"] = {
+      recoverStale: async () => undefined,
       create: async ({ workerId, invocationId, mode }) => {
         workspaceSequence += 1;
         return {
@@ -2695,8 +3054,8 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
       const input: AffiliateAgentSupervisorInput = {
         role,
         roleCredential: `${role.toLowerCase()}-smoke-credential`,
-        modelCredential: "smoke-model-credential",
         gatewayAddress: "unix:///internal/affiliate-agent-gateway.sock",
+        gatewayPathPrefix: "/v1/affiliate-agent",
         workerId: `${RUN_PREFIX}-${role}-worker`,
         invocationId: `${RUN_PREFIX}-${role}-invocation`,
       };
@@ -2766,8 +3125,9 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
         "AFFILIATE_AGENT_CLAIM_ENVELOPE",
         "AFFILIATE_AGENT_CLAIM_TOKEN",
         "AFFILIATE_AGENT_GATEWAY_ADDRESS",
+        "AFFILIATE_AGENT_GATEWAY_PATH_PREFIX",
         "AFFILIATE_AGENT_PROMPT",
-        "OPENAI_API_KEY",
+        "CODEX_HOME",
       ]);
     }
     expect(
@@ -2784,38 +3144,11 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
   });
 
   it("denies protected-table writes for the provisioned affiliate agent role", async () => {
-    const databaseUrl = process.env.DATABASE_URL;
-    if (!databaseUrl) throw new Error("DATABASE_URL is required.");
-    const parsed = new URL(databaseUrl);
-    if (
-      !["127.0.0.1", "localhost"].includes(parsed.hostname) ||
-      parsed.pathname.slice(1) !== DATABASE_NAME
-    ) {
-      throw new Error(
-        "The direct denial probe requires the isolated database.",
-      );
-    }
+    const databaseUrl = assertIsolatedDatabaseUrl(process.env.DATABASE_URL);
     const agentRole = "bracketiq_affiliate_agent";
     const client = new Client({ connectionString: databaseUrl });
     let isRoleCreated = false;
-    const targets = [
-      "AffiliateAgentGatewayJobs",
-      "AffiliateAgentGatewayClaims",
-      "AffiliateAgentGatewayArtifacts",
-      "AffiliateAgentGatewayOperationReceipts",
-      "AffiliateAgentGatewayEvents",
-      "AffiliateCoverageAgentJobs",
-      "AffiliateSourceMappingJobs",
-      "AffiliateApprovalJobs",
-      "AffiliateSourceIntakes",
-      "AffiliateSourceIntakeArtifacts",
-      "AffiliateSourceDiscoveryCampaigns",
-      "AffiliateScrapeSources",
-      "AffiliateScrapeMappings",
-      "File",
-    ] as const;
-    const operations = ["SELECT", "INSERT", "UPDATE", "DELETE"] as const;
-    const facts: string[] = [];
+    let facts: string[] = [];
     try {
       await client.connect();
       const existingRole = await client.query<{ exists: boolean }>(
@@ -2867,49 +3200,22 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
         `,
         [agentRole],
       );
-      expect(privileges.rows).toHaveLength(targets.length * operations.length);
+      expect(privileges.rows).toHaveLength(
+        PROTECTED_AFFILIATE_AGENT_TABLES.length *
+          PROTECTED_TABLE_OPERATIONS.length,
+      );
       expect(privileges.rows.every((row) => row.allowed === false)).toBe(true);
-
-      for (const table of targets) {
-        const statements = [
-          {
-            operation: "INSERT",
-            sql: `INSERT INTO public."${table}" DEFAULT VALUES`,
-          },
-          {
-            operation: "UPDATE",
-            sql: `UPDATE public."${table}" SET "id" = "id" WHERE FALSE`,
-          },
-          {
-            operation: "DELETE",
-            sql: `DELETE FROM public."${table}" WHERE FALSE`,
-          },
-        ] as const;
-        for (const statement of statements) {
-          let isDenied = false;
-          await client.query("BEGIN");
-          try {
-            await client.query(`SET LOCAL ROLE "${agentRole}"`);
-            await client.query(statement.sql);
-          } catch (error) {
-            isDenied =
-              error !== null &&
-              typeof error === "object" &&
-              "code" in error &&
-              error.code === "42501";
-          } finally {
-            await client.query("ROLLBACK");
-          }
-          expect(isDenied).toBe(true);
-          facts.push(`${table} ${statement.operation.toLowerCase()}`);
-        }
-      }
+      facts = await probeProtectedTableWrites(
+        client,
+        agentRole,
+        PROTECTED_AFFILIATE_AGENT_TABLES,
+      );
     } finally {
       await client.end().catch(() => undefined);
       if (isRoleCreated) {
         await prisma.$executeRawUnsafe(`DROP ROLE IF EXISTS "${agentRole}"`);
       }
     }
-    expect(facts).toHaveLength(targets.length * 3);
+    expect(facts).toHaveLength(PROTECTED_AFFILIATE_AGENT_TABLES.length * 3);
   });
 });

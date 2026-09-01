@@ -27,7 +27,7 @@ if [[ -z "$api_key" ]]; then
 fi
 export AFFILIATE_MAPPING_MODEL_TOKEN="$api_key"
 
-exec npm run affiliate:mapping:evaluate -- \
+exec ./node_modules/.bin/tsx scripts/evaluate-affiliate-mapping-agent.ts \
   --worker=llama \
   "--model-endpoint=$endpoint" \
   "--model-id=$model_id" \

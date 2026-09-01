@@ -100,6 +100,8 @@ const cleanup = async (): Promise<void> => {
   await prisma.$transaction(async (transaction) => {
     await transaction.$executeRaw`ALTER TABLE "AffiliateSupplyLifecycleTransitions" DISABLE TRIGGER "AffiliateSupplyLifecycleTransitions_immutable"`;
     await transaction.$executeRaw`ALTER TABLE "AffiliateSupplyContractManifests" DISABLE TRIGGER "AffiliateSupplyContractManifests_immutable_content"`;
+    await transaction.$executeRaw`ALTER TABLE "AffiliateSupplyReconciliationRuns" DISABLE TRIGGER "AffiliateSupplyReconciliationRuns_immutable_evidence"`;
+    await transaction.$executeRaw`ALTER TABLE "AffiliateSupplyReconciliationRuns" DISABLE TRIGGER "AffiliateSupplyReconciliationRuns_immutable_delete"`;
     try {
       await transaction.affiliateReplenishmentWaves.deleteMany({
         where: { demandId: { startsWith: TEST_PREFIX } },
@@ -122,9 +124,14 @@ const cleanup = async (): Promise<void> => {
       await transaction.affiliateSupplyContractManifests.deleteMany({
         where: { rolloutCohort: { startsWith: TEST_PREFIX } },
       });
+      await transaction.affiliateSupplyReconciliationRuns.deleteMany({
+        where: { id: { startsWith: TEST_PREFIX } },
+      });
     } finally {
       await transaction.$executeRaw`ALTER TABLE "AffiliateSupplyLifecycleTransitions" ENABLE TRIGGER "AffiliateSupplyLifecycleTransitions_immutable"`;
       await transaction.$executeRaw`ALTER TABLE "AffiliateSupplyContractManifests" ENABLE TRIGGER "AffiliateSupplyContractManifests_immutable_content"`;
+      await transaction.$executeRaw`ALTER TABLE "AffiliateSupplyReconciliationRuns" ENABLE TRIGGER "AffiliateSupplyReconciliationRuns_immutable_evidence"`;
+      await transaction.$executeRaw`ALTER TABLE "AffiliateSupplyReconciliationRuns" ENABLE TRIGGER "AffiliateSupplyReconciliationRuns_immutable_delete"`;
     }
   });
 };
@@ -240,6 +247,149 @@ describeDatabase("Affiliate Supply lifecycle PostgreSQL authority", () => {
     );
     await expect(prisma.affiliateSupplyLifecycleTransitions.count({ where: { supplySourceId } })).resolves.toBe(0);
   });
+  it("allows one guarded dry-run promotion and rejects post-apply mutation or deletion", async () => {
+    const runId = newId("reconciliation-trigger");
+    const inputHash = newId("reconciliation-input");
+    const outputHash = newId("reconciliation-output");
+    const reportHash = newId("reconciliation-report");
+    const reportJson = {
+      schemaVersion: 1,
+      inputHash,
+      outputHash,
+      reportHash,
+      counts: { roots: 1 },
+    };
+    await prisma.affiliateSupplyReconciliationRuns.create({
+      data: {
+        id: runId,
+        mode: "DRY_RUN",
+        status: "READY",
+        operatorId: "integration-operator",
+        rolloutCohort: `${TEST_PREFIX}-reconciliation`,
+        supplyContractVersion: 1,
+        supplyContractHash: "a".repeat(64),
+        deploymentContractVersion: null,
+        deploymentContractHash: null,
+        inputHash,
+        outputHash,
+        reportHash,
+        counts: reportJson.counts,
+        failedInvariants: [],
+        resolutionRefs: [],
+        reportJson,
+        appliedAt: null,
+        appliedBy: null,
+        applyNonceHash: null,
+      },
+    });
+
+    const cutoverSessionHash = "b".repeat(64);
+    await expect(prisma.affiliateSupplyReconciliationRuns.update({
+      where: { id: runId },
+      data: {
+        mode: "APPLY",
+        status: "APPLIED",
+        deploymentContractVersion: 2,
+        deploymentContractHash: "c".repeat(64),
+        appliedAt: NOW,
+        appliedBy: "integration-operator",
+        applyNonceHash: "d".repeat(64),
+        reportJson: {
+          ...reportJson,
+          cutoverSessionId: "integration-session",
+          cutoverSessionHash,
+          postApplyLegacySnapshotHash: "e".repeat(64),
+        },
+      },
+    })).resolves.toEqual(expect.objectContaining({
+      mode: "APPLY",
+      status: "APPLIED",
+      deploymentContractVersion: 2,
+      reportJson: expect.objectContaining({
+        cutoverSessionId: "integration-session",
+        cutoverSessionHash,
+        postApplyLegacySnapshotHash: "e".repeat(64),
+      }),
+    }));
+
+    await expect(prisma.affiliateSupplyReconciliationRuns.update({
+      where: { id: runId },
+      data: { inputHash: "tampered-input" },
+    })).rejects.toThrow();
+    await expect(prisma.affiliateSupplyReconciliationRuns.update({
+      where: { id: runId },
+      data: { appliedBy: "tampered-operator" },
+    })).rejects.toThrow();
+    await expect(prisma.affiliateSupplyReconciliationRuns.delete({
+      where: { id: runId },
+    })).rejects.toThrow();
+  });
+  it("rejects a blocked reconciliation run promotion even with complete metadata", async () => {
+    const runId = newId("reconciliation-blocked");
+    const inputHash = newId("reconciliation-blocked-input");
+    const outputHash = newId("reconciliation-blocked-output");
+    const reportHash = newId("reconciliation-blocked-report");
+    const reportJson = {
+      schemaVersion: 1,
+      inputHash,
+      outputHash,
+      reportHash,
+      counts: { roots: 1 },
+    };
+    await prisma.affiliateSupplyReconciliationRuns.create({
+      data: {
+        id: runId,
+        mode: "DRY_RUN",
+        status: "BLOCKED",
+        operatorId: "integration-operator",
+        rolloutCohort: `${TEST_PREFIX}-reconciliation-blocked`,
+        supplyContractVersion: 1,
+        supplyContractHash: "a".repeat(64),
+        deploymentContractVersion: null,
+        deploymentContractHash: null,
+        inputHash,
+        outputHash,
+        reportHash,
+        counts: reportJson.counts,
+        failedInvariants: ["BLOCKED_BY_INVARIANT"],
+        resolutionRefs: [],
+        reportJson,
+        appliedAt: null,
+        appliedBy: null,
+        applyNonceHash: null,
+      },
+    });
+
+    await expect(prisma.affiliateSupplyReconciliationRuns.update({
+      where: { id: runId },
+      data: {
+        mode: "APPLY",
+        status: "APPLIED",
+        deploymentContractVersion: 2,
+        deploymentContractHash: "c".repeat(64),
+        appliedAt: NOW,
+        appliedBy: "integration-operator",
+        applyNonceHash: "d".repeat(64),
+        reportJson: {
+          ...reportJson,
+          cutoverSessionId: "integration-blocked-session",
+          cutoverSessionHash: "b".repeat(64),
+        },
+      },
+    })).rejects.toThrow();
+
+    await expect(prisma.affiliateSupplyReconciliationRuns.findUnique({
+      where: { id: runId },
+    })).resolves.toEqual(expect.objectContaining({
+      mode: "DRY_RUN",
+      status: "BLOCKED",
+      appliedAt: null,
+      appliedBy: null,
+      applyNonceHash: null,
+    }));
+  });
+
+
 
   it("enforces one active contract per cohort and durable demand state", async () => {
     const rolloutCohort = `${TEST_PREFIX}-contract`;

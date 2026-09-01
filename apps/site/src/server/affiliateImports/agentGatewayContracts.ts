@@ -1,16 +1,22 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 
+type CanonicalAffiliateAgentPrimitive = null | string | boolean | number;
+
+const isCanonicalAffiliateAgentPrimitive = (
+  value: unknown,
+): value is CanonicalAffiliateAgentPrimitive =>
+  value === null ||
+  typeof value === "string" ||
+  typeof value === "boolean" ||
+  (typeof value === "number" && Number.isFinite(value));
+
+
 const canonicalAffiliateAgentValue = (
   value: unknown,
   ancestors: Set<object> = new Set(),
 ): unknown => {
-  if (
-    value === null ||
-    typeof value === "string" ||
-    typeof value === "boolean" ||
-    (typeof value === "number" && Number.isFinite(value))
-  ) {
+  if (isCanonicalAffiliateAgentPrimitive(value)) {
     return value;
   }
   if (!value || typeof value !== "object") {
@@ -53,6 +59,316 @@ export const hashAffiliateAgentValue = (value: unknown): string =>
     .update(canonicalizeAffiliateAgentValue(value))
     .digest("hex");
 
+export type AffiliateAgentCaptureRecordSummary = Readonly<{
+  keys: readonly string[];
+  sha256: string;
+  byteSize: number;
+}>;
+
+export type AffiliateAgentCaptureTextSummary = Readonly<{
+  sha256: string;
+  byteSize: number;
+}>;
+
+export type AffiliateAgentCaptureSetSummary = Readonly<{
+  count: number;
+  sha256: string;
+  refs: readonly string[];
+}>;
+export type AffiliateAgentCaptureScreenshotEvidence = Readonly<{
+  sourceUrl: string;
+  finalUrl: string;
+  statusCode: number;
+  mimeType: string;
+  byteSize: number;
+  sha256: string;
+}>;
+
+export type AffiliateAgentCaptureMetadata = Readonly<{
+  provider: "SCRAPINGDOG" | "FIRECRAWL";
+  request: AffiliateAgentCaptureRecordSummary;
+  response: AffiliateAgentCaptureRecordSummary;
+  requestedUrl: string;
+  /** URL reached by provider transport, never an HTML-declared canonical. */
+  finalUrl: string;
+  /** True only when transport explicitly observed a network redirect. */
+  isRedirectVerified: boolean;
+  /** HTML-declared canonical retained as untrusted evidence. */
+  inferredCanonicalUrl?: string | null;
+  providerStatusCode: number;
+  targetStatusCode: number | null;
+  renderMode: "STATIC" | "JAVASCRIPT";
+  elapsedMs: number;
+  estimatedCredits: number | null;
+  warnings: readonly string[];
+  providerJobId?: string | null;
+  attempts?: readonly Readonly<{
+    renderMode: "STATIC" | "JAVASCRIPT";
+    providerStatusCode: number;
+    elapsedMs: number;
+    estimatedCredits: number | null;
+    accepted: boolean;
+    quality?: Readonly<Record<string, unknown>>;
+    error?: string;
+  }>[];
+  providerArtifacts?: Readonly<{
+    markdown: AffiliateAgentCaptureTextSummary | null;
+    links: AffiliateAgentCaptureSetSummary;
+    images: AffiliateAgentCaptureSetSummary;
+    branding: Readonly<Record<string, unknown>> | null;
+    screenshotUrl: string | null;
+    screenshotEvidence?: AffiliateAgentCaptureScreenshotEvidence | null;
+    metadata: Readonly<Record<string, unknown>>;
+  }>;
+}>;
+
+export const AFFILIATE_AGENT_MAX_CAPTURE_METADATA_CANONICAL_BYTES = 12_000 as const;
+
+const CAPTURE_METADATA_MAX_DEPTH = 8;
+const CAPTURE_METADATA_MAX_OBJECT_ENTRIES = 64;
+const CAPTURE_METADATA_MAX_ARRAY_ITEMS = 64;
+const CAPTURE_METADATA_MAX_RECORD_KEYS = 32;
+const CAPTURE_METADATA_MAX_REF_ITEMS = 8;
+const CAPTURE_METADATA_MAX_SOURCE_BYTES = 10 * 1024 * 1024;
+const CAPTURE_METADATA_MAX_STRING_BYTES = 4_096;
+const CAPTURE_METADATA_MAX_KEY_BYTES = 256;
+
+const captureMetadataRecordSchema = z.record(
+  z.string().max(CAPTURE_METADATA_MAX_KEY_BYTES),
+  z.unknown(),
+);
+const captureMetadataSha256Schema = z
+  .string()
+  .regex(/^[a-f0-9]{64}$/);
+const captureMetadataSummaryByteSizeSchema = z
+  .number()
+  .int()
+  .min(0)
+  .max(CAPTURE_METADATA_MAX_SOURCE_BYTES);
+const captureMetadataStatusSchema = z.number().int().min(0).max(999);
+const captureMetadataElapsedSchema = z.number().int().min(0).max(3_600_000);
+const captureMetadataCreditsSchema = z
+  .number()
+  .finite()
+  .min(0)
+  .max(1_000_000)
+  .nullable();
+const captureMetadataStringSchema = z.string().trim().min(1).max(2_048);
+const captureMetadataNullableStringSchema = z
+  .string()
+  .trim()
+  .max(2_048)
+  .nullable();
+const captureMetadataScreenshotMimeTypeSchema = z
+  .string()
+  .trim()
+  .regex(/^image\/[a-z0-9][a-z0-9.+-]*$/i)
+  .max(255);
+const captureMetadataScreenshotStatusSchema = z
+  .number()
+  .int()
+  .min(200)
+  .max(299);
+const captureMetadataScreenshotByteSizeSchema = z
+  .number()
+  .int()
+  .min(0)
+const captureMetadataScreenshotEvidenceSchema = z
+  .object({
+    sourceUrl: z.string().trim().url().max(2_048),
+    finalUrl: z.string().trim().url().max(2_048),
+    statusCode: captureMetadataScreenshotStatusSchema,
+    mimeType: captureMetadataScreenshotMimeTypeSchema,
+    byteSize: captureMetadataScreenshotByteSizeSchema,
+    sha256: captureMetadataSha256Schema,
+  })
+  .strict();
+const captureMetadataTextSummarySchema = z
+  .object({
+    sha256: captureMetadataSha256Schema,
+    byteSize: captureMetadataSummaryByteSizeSchema,
+  })
+  .strict();
+const captureMetadataSetSummarySchema = z
+  .object({
+    count: z.number().int().min(0).max(10_000),
+    sha256: captureMetadataSha256Schema,
+    refs: z.array(captureMetadataStringSchema).max(CAPTURE_METADATA_MAX_REF_ITEMS),
+  })
+  .strict();
+const captureMetadataRecordSummarySchema = z
+  .object({
+    keys: z.array(captureMetadataStringSchema).max(CAPTURE_METADATA_MAX_RECORD_KEYS),
+    sha256: captureMetadataSha256Schema,
+    byteSize: captureMetadataSummaryByteSizeSchema,
+  })
+  .strict();
+const affiliateAgentCaptureMetadataSchema = z
+  .object({
+    provider: z.enum(["SCRAPINGDOG", "FIRECRAWL"]),
+    request: captureMetadataRecordSummarySchema,
+    response: captureMetadataRecordSummarySchema,
+    requestedUrl: z.string().trim().url().max(2_048),
+    finalUrl: z.string().trim().url().max(2_048),
+    isRedirectVerified: z.boolean().default(false),
+    inferredCanonicalUrl: captureMetadataNullableStringSchema.optional(),
+    providerStatusCode: captureMetadataStatusSchema,
+    targetStatusCode: captureMetadataStatusSchema.nullable(),
+    renderMode: z.enum(["STATIC", "JAVASCRIPT"]),
+    elapsedMs: captureMetadataElapsedSchema,
+    estimatedCredits: captureMetadataCreditsSchema,
+    warnings: z.array(captureMetadataStringSchema).max(CAPTURE_METADATA_MAX_ARRAY_ITEMS),
+    providerJobId: captureMetadataStringSchema.nullable().optional(),
+    attempts: z
+      .array(
+        z
+          .object({
+            renderMode: z.enum(["STATIC", "JAVASCRIPT"]),
+            providerStatusCode: captureMetadataStatusSchema,
+            elapsedMs: captureMetadataElapsedSchema,
+            estimatedCredits: captureMetadataCreditsSchema,
+            accepted: z.boolean(),
+            quality: captureMetadataRecordSchema.optional(),
+            error: captureMetadataStringSchema.optional(),
+          })
+          .strict(),
+      )
+      .max(CAPTURE_METADATA_MAX_ARRAY_ITEMS)
+      .optional(),
+    providerArtifacts: z
+      .object({
+        markdown: captureMetadataTextSummarySchema.nullable(),
+        links: captureMetadataSetSummarySchema,
+        images: captureMetadataSetSummarySchema,
+        branding: captureMetadataRecordSchema.nullable(),
+        screenshotUrl: captureMetadataNullableStringSchema,
+        screenshotEvidence: captureMetadataScreenshotEvidenceSchema.nullable().optional(),
+        metadata: captureMetadataRecordSchema,
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
+const boundedCaptureMetadataArray = (
+  value: readonly unknown[],
+  depth: number,
+  ancestors: Set<object>,
+): unknown[] => {
+  if (value.length > CAPTURE_METADATA_MAX_ARRAY_ITEMS) {
+    throw new TypeError("Capture metadata contains too many array items.");
+  }
+  return value.map((item) => boundedCaptureMetadataValue(
+    item,
+    depth + 1,
+    ancestors,
+  ));
+};
+
+const boundedCaptureMetadataObject = (
+  value: Record<string, unknown>,
+  depth: number,
+  ancestors: Set<object>,
+): Record<string, unknown> => {
+  if (Object.getPrototypeOf(value) !== Object.prototype) {
+    throw new TypeError("Capture metadata contains a non-plain object.");
+  }
+  const entries = Object.entries(value);
+  if (entries.length > CAPTURE_METADATA_MAX_OBJECT_ENTRIES) {
+    throw new TypeError("Capture metadata contains too many object fields.");
+  }
+  for (const [key] of entries) {
+    if (Buffer.byteLength(key, "utf8") > CAPTURE_METADATA_MAX_KEY_BYTES) {
+      throw new TypeError("Capture metadata contains an oversized key.");
+    }
+  }
+  return Object.fromEntries(
+    entries.map(([key, nested]) => [
+      key,
+      boundedCaptureMetadataValue(nested, depth + 1, ancestors),
+    ]),
+  );
+};
+
+type BoundedCaptureMetadataScalar =
+  | Readonly<{ kind: "VALUE"; value: null | string | boolean | number }>
+  | Readonly<{ kind: "NOT_SCALAR" }>;
+
+const boundedCaptureMetadataScalar = (
+  value: unknown,
+): BoundedCaptureMetadataScalar => {
+  if (
+    value === null
+    || typeof value === "string"
+    || typeof value === "boolean"
+  ) {
+    if (
+      typeof value === "string"
+      && Buffer.byteLength(value, "utf8") > CAPTURE_METADATA_MAX_STRING_BYTES
+    ) {
+      throw new TypeError("Capture metadata contains an oversized string.");
+    }
+    return { kind: "VALUE", value };
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new TypeError("Capture metadata contains a non-finite number.");
+    }
+    return { kind: "VALUE", value };
+  }
+  return { kind: "NOT_SCALAR" };
+};
+
+const boundedCaptureMetadataValue = (
+  value: unknown,
+  depth = 0,
+  ancestors: Set<object> = new Set(),
+): unknown => {
+  const scalar = boundedCaptureMetadataScalar(value);
+  if (scalar.kind === "VALUE") return scalar.value;
+  if (!value || typeof value !== "object") {
+    throw new TypeError("Capture metadata contains an unsupported value.");
+  }
+  if (depth >= CAPTURE_METADATA_MAX_DEPTH || ancestors.has(value)) {
+    throw new TypeError("Capture metadata is too deeply nested or cyclic.");
+  }
+  ancestors.add(value);
+  try {
+    return Array.isArray(value)
+      ? boundedCaptureMetadataArray(value, depth, ancestors)
+      : boundedCaptureMetadataObject(value as Record<string, unknown>, depth, ancestors);
+  } finally {
+    ancestors.delete(value);
+  }
+};
+
+export const parseAffiliateAgentCaptureMetadata = (
+  value: unknown,
+): AffiliateAgentCaptureMetadata => {
+  const parsed = affiliateAgentCaptureMetadataSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new TypeError("Affiliate capture metadata has invalid settings.");
+  }
+  try {
+    const normalized = {
+      ...parsed.data,
+      requestedUrl: new URL(parsed.data.requestedUrl).toString(),
+      finalUrl: new URL(parsed.data.finalUrl).toString(),
+    };
+    const bounded = boundedCaptureMetadataValue(normalized);
+    const canonical = canonicalizeAffiliateAgentValue(bounded);
+    if (
+      Buffer.byteLength(canonical, "utf8")
+      > AFFILIATE_AGENT_MAX_CAPTURE_METADATA_CANONICAL_BYTES
+    ) {
+      throw new TypeError("Affiliate capture metadata is too large.");
+    }
+    return JSON.parse(canonical) as AffiliateAgentCaptureMetadata;
+  } catch {
+    throw new TypeError("Affiliate capture metadata is invalid or unbounded.");
+  }
+};
+
 const sha256Schema = z
   .string()
   .regex(/^[a-f0-9]{64}$/, "Expected a lowercase SHA-256 hash.");
@@ -70,7 +386,10 @@ export const AFFILIATE_AGENT_MAX_ENVIRONMENT_VALUE_BYTES = 65_536 as const;
 
 const MAX_DECLARATIVE_PACKAGE_FIELDS = 64 as const;
 const MAX_DECLARATIVE_PACKAGE_CANONICAL_BYTES = 65_536 as const;
-const MAX_TERMINAL_RESULT_CANONICAL_BYTES = 65_536 as const;
+export const AFFILIATE_AGENT_MAX_TERMINAL_RESULT_CANONICAL_BYTES =
+  65_536 as const;
+const MAX_TERMINAL_RESULT_CANONICAL_BYTES =
+  AFFILIATE_AGENT_MAX_TERMINAL_RESULT_CANONICAL_BYTES;
 const MAX_MANIFEST_ARTIFACT_BYTES = 8_388_608 as const;
 const MAX_SCHEMA_ISSUE_PATH_ITEMS = 32 as const;
 
@@ -387,6 +706,127 @@ export const AFFILIATE_AGENT_ROLES = [
 ] as const;
 
 export type AffiliateAgentRole = (typeof AFFILIATE_AGENT_ROLES)[number];
+const AFFILIATE_AGENT_TERMINAL_RESULT_PAYLOAD_SHAPES: Readonly<
+  Record<AffiliateAgentRole, readonly string[]>
+> = {
+  COVERAGE_PLANNER: [
+    '- CAMPAIGN_PROPOSED: {"campaignProposalRefs":["<identifier>"]}',
+    '- FAILED_CAPTURE_EVIDENCE_RECORDED: {"captureEvidenceRef":"<identifier>"}',
+    '- SOURCE_EXCLUSION_PROPOSED: {"supplySourceId":"<identifier>","policyEvidenceRefs":["<identifier>"]}',
+    '- CONTRACT_GAP: {"contractArea":"<COVERAGE_APPLICABILITY|FRESHNESS|LIFECYCLE_EVIDENCE|MAPPING_EVIDENCE|SEARCH_STRATEGIES|SUPPLY_TARGETS_AND_MARKET_TIERS>","requestedChange":"<non-empty string>"}',
+    '- NO_ACTION: {"basis":"<NO_QUALIFIED_ACTION|SEARCH_SATURATED|TARGET_MET>"}; evidenceRefs must be non-empty',
+  ],
+  MAPPING_PRODUCER: [
+    '- PACKAGE_COMMITTED: {"packageHash":"<sha256>","commitReceiptId":"<identifier>"}',
+    '- BOUNDED_REPAIR_SUBMITTED: {"repairPass":<integer 1-3>,"packageHash":"<sha256>","commitReceiptId":"<identifier>"}',
+    '- SOURCE_INCOMPATIBLE: {"incompatibilityCode":"<SOURCE_BLOCKED|SOURCE_POLICY_PROHIBITS_CAPTURE|UNSUPPORTED_LAYOUT>"}',
+    '- CONTRACT_GAP: {"contractArea":"<COVERAGE_APPLICABILITY|FRESHNESS|LIFECYCLE_EVIDENCE|MAPPING_EVIDENCE|SEARCH_STRATEGIES|SUPPLY_TARGETS_AND_MARKET_TIERS>","requestedChange":"<non-empty string>"}',
+  ],
+  SUPPLY_REVIEWER: [
+    '- APPROVED: {"committedPackageHash":"<sha256>"}',
+    '- ACTIVATED: {"committedPackageHash":"<sha256>","baselineHash":"<sha256>","candidateReviewId":"<identifier>"}',
+    '- PRODUCER_REPAIR_REQUIRED: {"committedPackageHash":"<sha256>","repairIssues":["<EVIDENCE_MISMATCH|MISSING_REQUIRED_FIELD|VALIDATION_FAILED>"]}',
+    '- REGRESSION_ASSESSED: {"supplySourceId":"<identifier>","assessment":"<FAIL|PASS>"}',
+    '- SOURCE_EXCLUSION_ASSESSED: {"supplySourceId":"<identifier>","recommendation":"<EXCLUDE|HUMAN_REVIEW|KEEP>"}',
+    '- EXACT_TARGET_REJECTED: {"targetId":"<identifier>","targetType":"<EVENT|FACILITY|ORGANIZATION>"}',
+    '- HUMAN_REVIEW_REQUIRED: {"caseReason":"<non-empty string>"}; evidenceRefs must be non-empty',
+  ],
+  HUMAN_DIRECTED_EXECUTOR: [
+    '- LIFECYCLE_COMMAND_EXECUTED: {"caseId":"<identifier>","lifecycleCommandRef":"<identifier>","receiptId":"<identifier>"}',
+    '- CONTRACT_GAP: {"contractArea":"<COVERAGE_APPLICABILITY|FRESHNESS|LIFECYCLE_EVIDENCE|MAPPING_EVIDENCE|SEARCH_STRATEGIES|SUPPLY_TARGETS_AND_MARKET_TIERS>","requestedChange":"<non-empty string>"}',
+  ],
+};
+
+const terminalResultShapeForRole = (
+  role: AffiliateAgentRole,
+): readonly string[] => [
+  `{"schemaVersion":1,"jobId":"<claim jobId>","claimId":"<claim id>","claimGeneration":<claim generation>,"lifecycleGeneration":<claim lifecycle generation or null>,"deploymentContractVersion":<claim deployment contract version>,"deploymentContractHash":"<deployment contract hash>","supplyContractVersion":<claim supply contract version>,"supplyContractHash":"<claim supply contract hash>","roleContractVersion":<role contract version>,"roleContractHash":"<role contract hash>","promptTemplateVersion":<prompt template version>,"promptTemplateHash":"<prompt template hash>","workerId":"<claim workerId>","invocationId":"<claim invocationId>","reasonCodes":["<allowed reason code>"],"evidenceRefs":["<sorted unique evidence ref>"],"summary":"<non-empty summary>","role":"${role}","disposition":"<one listed terminal disposition>","payload":<payload shape below>}`,
+  "Allowed reasonCodes: CONTRACT_REQUIREMENT_MISSING | EVIDENCE_VERIFIED | NO_QUALIFIED_ACTION | POLICY_CONFLICT | SCHEMA_VALIDATED | SOURCE_UNSUPPORTED | TARGET_INVALID.",
+  "Use an empty reasonCodes array when no reason code applies; evidenceRefs are sorted unique identifiers.",
+  "All result and payload objects are strict: add no fields beyond this shape.",
+  ...AFFILIATE_AGENT_TERMINAL_RESULT_PAYLOAD_SHAPES[role],
+];
+
+
+
+const ROLE_PROMPT_INSTRUCTIONS: Readonly<
+  Record<AffiliateAgentRole, readonly string[]>
+> = {
+  COVERAGE_PLANNER: [
+    "Read the claim envelope from the supplied environment.",
+    "Read the authority projection from the supplied environment.",
+    "Read only listed evidence refs through the gateway.",
+    "Do not call discovery providers directly.",
+    "Do not call capture providers directly.",
+    "Use only the non-terminal commands listed in the authority projection.",
+    "Return one evidence-backed terminal disposition.",
+    "Use only the listed terminal dispositions.",
+    "Use a contract gap or no-action disposition when the evidence does not support work.",
+    "Do not invent facts.",
+  ],
+  MAPPING_PRODUCER: [
+    "Read the claim envelope from the supplied environment.",
+    "Read the authority projection from the supplied environment.",
+    "Read only listed evidence refs through the gateway.",
+    "Do not call providers directly.",
+    "Do not mutate live mappings directly.",
+    "Build only the closed declarative package shape defined by the mapping contract.",
+    "Validate the package before you commit it.",
+    "Commit only the validated package receipt.",
+    "Return one evidence-backed terminal disposition.",
+    "Use only the listed terminal dispositions.",
+    "Never submit executable code.",
+  ],
+  SUPPLY_REVIEWER: [
+    "Read the claim envelope from the supplied environment.",
+    "Read the authority projection from the supplied environment.",
+    "Read the committed package through the gateway.",
+    "Read listed reviewer evidence through the gateway.",
+    "Review the package.",
+    "Do not edit the package.",
+    "Do not reuse producer context.",
+    "Return one evidence-backed terminal disposition.",
+    "Use only the listed terminal dispositions.",
+    "Use human review or producer repair when the evidence does not support approval or activation.",
+    "Do not invent authority.",
+  ],
+  HUMAN_DIRECTED_EXECUTOR: [
+    "Read the claim envelope from the supplied environment.",
+    "Read the authority projection from the supplied environment.",
+    "Read the listed human decision through the gateway.",
+    "Read reviewer evidence through the gateway.",
+    "Execute only the exact recorded lifecycle command.",
+    "Use the claim and decision evidence to identify the command.",
+    "Verify the case ID, decision hash, and lifecycle command reference before execution.",
+    "Return one evidence-backed terminal disposition.",
+    "Use only the listed terminal dispositions.",
+    "Do not substitute a human decision.",
+  ],
+};
+
+const AFFILIATE_AGENT_TERMINAL_REQUEST_SHAPE =
+  '{"kind":"SUBMIT_RESULT","idempotencyKey":"<new idempotency key>","authorization":<claim authorization object>,"result":<valid role-specific affiliate-agent/terminal-result@1 object>}' as const;
+
+const PROMPT_GATEWAY_PROTOCOL = {
+  method: "POST" as const,
+  gatewayAddressEnvironment: "AFFILIATE_AGENT_GATEWAY_ADDRESS" as const,
+  gatewayPathPrefixEnvironment: "AFFILIATE_AGENT_GATEWAY_PATH_PREFIX" as const,
+  pathSuffix: "/perform" as const,
+  authorizationEnvironment: "AFFILIATE_AGENT_CLAIM_TOKEN" as const,
+  claimEnvelopeEnvironment: "AFFILIATE_AGENT_CLAIM_ENVELOPE" as const,
+  requestFields: [
+    "kind",
+    "idempotencyKey",
+    "authorization",
+    "evidenceRef",
+    "command",
+    "result",
+  ] as const,
+  terminalResultSchema: "affiliate-agent/terminal-result@1" as const,
+  terminalRequestShape: AFFILIATE_AGENT_TERMINAL_REQUEST_SHAPE,
+} as const;
+
+
 
 export const AFFILIATE_AGENT_EXECUTION_CLASSES = [
   "PRODUCTION_CODEX",
@@ -492,6 +932,8 @@ export type AffiliateAgentRoleContract = z.infer<
 
 const ROLE_PROMPT_TEMPLATE_HEADING_ORDER = [
   "AUTHORITY_PROJECTION",
+  "ROLE_INSTRUCTIONS",
+  "GATEWAY_PROTOCOL",
   "COMPLETION",
 ] as const;
 
@@ -502,9 +944,39 @@ export const affiliateAgentPromptTemplateSchema = z
     version: positiveIntegerSchema,
     headingOrder: z.tuple([
       z.literal("AUTHORITY_PROJECTION"),
+      z.literal("ROLE_INSTRUCTIONS"),
+      z.literal("GATEWAY_PROTOCOL"),
       z.literal("COMPLETION"),
     ]),
     lineEnding: z.literal("LF"),
+    roleInstructions: z
+      .array(z.string().trim().min(1).max(1_000))
+      .min(1)
+      .max(16),
+    gatewayProtocol: z
+      .object({
+        method: z.literal("POST"),
+        gatewayAddressEnvironment: z.literal("AFFILIATE_AGENT_GATEWAY_ADDRESS"),
+        gatewayPathPrefixEnvironment: z.literal("AFFILIATE_AGENT_GATEWAY_PATH_PREFIX"),
+        pathSuffix: z.literal("/perform"),
+        authorizationEnvironment: z.literal("AFFILIATE_AGENT_CLAIM_TOKEN"),
+        claimEnvelopeEnvironment: z.literal("AFFILIATE_AGENT_CLAIM_ENVELOPE"),
+        requestFields: z
+          .array(z.string().trim().min(1).max(100))
+          .min(1)
+          .max(16),
+        terminalResultSchema: z.literal("affiliate-agent/terminal-result@1"),
+
+        terminalResultShape: z
+          .array(z.string().trim().min(1).max(4_000))
+          .min(1)
+          .max(32),
+        terminalRequestShape: z.literal(
+          AFFILIATE_AGENT_TERMINAL_REQUEST_SHAPE,
+        ),
+      })
+      .strict(),
+
     terminalCommand: z.literal("SUBMIT_TERMINAL_RESULT"),
     hash: sha256Schema,
   })
@@ -524,6 +996,11 @@ const createPromptTemplate = (
     version: 1,
     headingOrder: ROLE_PROMPT_TEMPLATE_HEADING_ORDER,
     lineEnding: "LF" as const,
+    roleInstructions: ROLE_PROMPT_INSTRUCTIONS[role],
+    gatewayProtocol: {
+      ...PROMPT_GATEWAY_PROTOCOL,
+      terminalResultShape: terminalResultShapeForRole(role),
+    },
     terminalCommand: "SUBMIT_TERMINAL_RESULT" as const,
   };
   return affiliateAgentPromptTemplateSchema.parse({
@@ -1064,83 +1541,110 @@ export const affiliateAgentClaimEnvelopeSchema = z
       [],
       "Claim envelope",
     );
-    const expectedCommands =
-      AFFILIATE_AGENT_ROLE_CONTRACTS[claim.role].permittedCommands;
-    if (
-      claim.permittedCommands.join("\u0000") !== expectedCommands.join("\u0000")
-    ) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Claim commands must match the active role contract.",
-        path: ["permittedCommands"],
-      });
-    }
+    assertClaimEnvelopeCommands(claim, context);
+    assertClaimEnvelopeSourceRequirements(claim, context);
+    assertClaimEnvelopeSubjectSource(claim, context);
+    assertSupplyReviewerIdentity(claim, context);
+  });
 
-    if (claim.role === "COVERAGE_PLANNER" && claim.supplySourceId !== null) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Coverage Planner claims cannot identify a Supply Source.",
-        path: ["supplySourceId"],
-      });
-    }
-    if (
-      claim.role !== "COVERAGE_PLANNER" &&
-      (claim.supplySourceId === null || claim.lifecycleGeneration === null)
-    ) {
+type AffiliateAgentClaimEnvelopeForAssertions = z.infer<
+  typeof affiliateAgentClaimEnvelopeSchema
+>;
+
+const assertClaimEnvelopeCommands = (
+  claim: AffiliateAgentClaimEnvelopeForAssertions,
+  context: z.RefinementCtx,
+): void => {
+  const expectedCommands =
+    AFFILIATE_AGENT_ROLE_CONTRACTS[claim.role].permittedCommands;
+  if (
+    claim.permittedCommands.join("\u0000") !== expectedCommands.join("\u0000")
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Claim commands must match the active role contract.",
+      path: ["permittedCommands"],
+    });
+  }
+};
+
+const assertClaimEnvelopeSourceRequirements = (
+  claim: AffiliateAgentClaimEnvelopeForAssertions,
+  context: z.RefinementCtx,
+): void => {
+  if (claim.role === "COVERAGE_PLANNER" && claim.supplySourceId !== null) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Coverage Planner claims cannot identify a Supply Source.",
+      path: ["supplySourceId"],
+    });
+  }
+  if (
+    claim.role !== "COVERAGE_PLANNER" &&
+    (claim.supplySourceId === null || claim.lifecycleGeneration === null)
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        "Non-coverage claims require a Supply Source and lifecycle generation.",
+      path: [
+        claim.supplySourceId === null
+          ? "supplySourceId"
+          : "lifecycleGeneration",
+      ],
+    });
+  }
+};
+
+const assertClaimEnvelopeSubjectSource = (
+  claim: AffiliateAgentClaimEnvelopeForAssertions,
+  context: z.RefinementCtx,
+): void => {
+  if (
+    (claim.role === "MAPPING_PRODUCER" || claim.role === "SUPPLY_REVIEWER") &&
+    claim.supplySourceId !== claim.subject.supplySourceId
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Claim Supply Source must match the role subject Supply Source.",
+      path: ["supplySourceId"],
+    });
+  }
+};
+
+const assertSupplyReviewerIdentity = (
+  claim: AffiliateAgentClaimEnvelopeForAssertions,
+  context: z.RefinementCtx,
+): void => {
+  if (claim.role !== "SUPPLY_REVIEWER") return;
+  const identityChecks = [
+    {
+      claimValue: claim.workerId,
+      producerValue: claim.subject.producerWorkerId,
+      path: "workerId",
+    },
+    {
+      claimValue: claim.invocationId,
+      producerValue: claim.subject.producerInvocationId,
+      path: "invocationId",
+    },
+    {
+      claimValue: claim.workspaceId,
+      producerValue: claim.subject.producerWorkspaceId,
+      path: "workspaceId",
+    },
+  ];
+  identityChecks.forEach(({ claimValue, producerValue, path }) => {
+    if (claimValue === producerValue) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         message:
-          "Non-coverage claims require a Supply Source and lifecycle generation.",
-        path: [
-          claim.supplySourceId === null
-            ? "supplySourceId"
-            : "lifecycleGeneration",
-        ],
-      });
-    }
-
-    if (
-      (claim.role === "MAPPING_PRODUCER" || claim.role === "SUPPLY_REVIEWER") &&
-      claim.supplySourceId !== claim.subject.supplySourceId
-    ) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message:
-          "Claim Supply Source must match the role subject Supply Source.",
-        path: ["supplySourceId"],
-      });
-    }
-
-    if (claim.role === "SUPPLY_REVIEWER") {
-      const identityChecks = [
-        {
-          claimValue: claim.workerId,
-          producerValue: claim.subject.producerWorkerId,
-          path: "workerId",
-        },
-        {
-          claimValue: claim.invocationId,
-          producerValue: claim.subject.producerInvocationId,
-          path: "invocationId",
-        },
-        {
-          claimValue: claim.workspaceId,
-          producerValue: claim.subject.producerWorkspaceId,
-          path: "workspaceId",
-        },
-      ];
-      identityChecks.forEach(({ claimValue, producerValue, path }) => {
-        if (claimValue === producerValue) {
-          context.addIssue({
-            code: z.ZodIssueCode.custom,
-            message:
-              "Supply Reviewer identity must differ from the producer identity.",
-            path: [path],
-          });
-        }
+          "Supply Reviewer identity must differ from the producer identity.",
+        path: [path],
       });
     }
   });
+};
 
 export type AffiliateAgentClaimEnvelope = z.infer<
   typeof affiliateAgentClaimEnvelopeSchema
@@ -1476,6 +1980,8 @@ export const affiliateAgentTerminalResultEnvelopeSchema = z.union([
     z
       .object({
         committedPackageHash: sha256Schema,
+        baselineHash: sha256Schema,
+        candidateReviewId: identifierSchema,
       })
       .strict(),
   ),
@@ -1692,7 +2198,20 @@ export const renderAffiliateAgentPrompt = (
     "## Authority Projection",
     canonicalizeAffiliateAgentValue(authorityProjection),
     "",
+    "## Role Instructions",
+    ...promptTemplate.roleInstructions.map(
+      (instruction, index) => `${index + 1}. ${instruction}`,
+    ),
+    "",
+    `Send ${promptTemplate.gatewayProtocol.method} JSON requests to the URL in ${promptTemplate.gatewayProtocol.gatewayAddressEnvironment}, using the path prefix in ${promptTemplate.gatewayProtocol.gatewayPathPrefixEnvironment} and appending ${promptTemplate.gatewayProtocol.pathSuffix}.`,
+    `Read each permitted artifact with a READ_ARTIFACT request before using it. Use EXECUTE_COMMAND only for a command listed in the authority projection.`,
+    `Each request must contain kind, a new idempotencyKey, authorization, and the field required by that kind: evidenceRef, command, or result.`,
+    `Set authorization.token from ${promptTemplate.gatewayProtocol.authorizationEnvironment}. Copy jobId, claimId, claimGeneration, lifecycleGeneration, role, workerId, invocationId, and supplyContractHash from the claim envelope.`,
+    `The terminal result must match ${promptTemplate.gatewayProtocol.terminalResultSchema} and the claim's role, hashes, identity, evidence refs, and listed disposition.`,
+    "Submit the terminal result directly to the gateway. If the gateway returns SCHEMA_CORRECTION_REQUIRED, use its correctionPrompt and submit a new idempotencyKey with the corrected result. Make at most three terminal submissions for this claim.",
+    "Do not return a plain terminal result to the supervisor. After the gateway returns TERMINAL_ACCEPTED or INVOCATION_FAILED, print exactly one JSON object with kind TERMINAL_SUBMISSION, the accepted submission idempotencyKey, and the submitted result.",
+    "",
     "## Completion",
-    `Submit one terminal result with ${promptTemplate.terminalCommand}.`,
+    `Submit one terminal result using the ${promptTemplate.terminalCommand} capability (not as the wire discriminator). Send exactly this JSON request shape to the gateway: ${promptTemplate.gatewayProtocol.terminalRequestShape}. The result value must match ${promptTemplate.gatewayProtocol.terminalResultSchema} and use this strict role-specific shape (use only a listed disposition; add no extra fields):\n${promptTemplate.gatewayProtocol.terminalResultShape.join("\n")}`,
   ].join("\n");
 };

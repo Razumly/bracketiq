@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 import { ScrapingDogClient } from '../scrapingDogClient';
 
 describe('ScrapingDogClient', () => {
@@ -31,11 +33,10 @@ describe('ScrapingDogClient', () => {
   });
 
   it('returns a successful response before the timeout', async () => {
-    const fetchImpl = jest.fn().mockResolvedValue({
-      ok: true,
+    const fetchImpl = jest.fn().mockResolvedValue(new Response('<h1>Events</h1>', {
       status: 200,
-      text: async () => '<h1>Events</h1>',
-    } as Response);
+      headers: { 'content-type': 'text/html' },
+    }));
 
     await expect(new ScrapingDogClient('test-key', fetchImpl).fetchPage({
       url: 'https://example.com/events',

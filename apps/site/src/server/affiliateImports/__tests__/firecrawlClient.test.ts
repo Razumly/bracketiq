@@ -12,7 +12,10 @@ jest.mock('@mendable/firecrawl-js', () => ({
   default: firecrawlConstructorMock,
 }));
 
-import { FirecrawlAffiliateClient } from '@/server/affiliateImports/firecrawlClient';
+import {
+  FirecrawlAffiliateClient,
+  boundedFirecrawlMetadata,
+} from '@/server/affiliateImports/firecrawlClient';
 
 describe('FirecrawlAffiliateClient source search', () => {
   beforeEach(() => {
@@ -46,9 +49,27 @@ describe('FirecrawlAffiliateClient source search', () => {
     });
   });
 
+
   it('rejects an empty search query before calling Firecrawl', async () => {
     const client = new FirecrawlAffiliateClient('test-api-key');
     await expect(client.searchSources('   ')).rejects.toThrow('query is required');
     expect(searchMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps only bounded scalar response metadata', () => {
+    expect(boundedFirecrawlMetadata({
+      sourceURL: ' https://club.example.test/events ',
+      statusCode: 200,
+      rawHtml: '<html>should not be retained</html>',
+      markdown: '# should not be retained',
+      links: ['https://club.example.test/events'],
+      images: ['https://club.example.test/logo.png'],
+      oversized: 'x'.repeat(2_049),
+      nested: { rawHtml: 'should not be retained' },
+      ['é'.repeat(129)]: 'oversized UTF-8 key',
+    })).toEqual({
+      sourceURL: 'https://club.example.test/events',
+      statusCode: 200,
+    });
   });
 });

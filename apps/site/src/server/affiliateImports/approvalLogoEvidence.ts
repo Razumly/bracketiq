@@ -5,7 +5,7 @@ import { prisma } from '@/lib/prisma';
 import { deriveAffiliateHtmlArtifacts } from './affiliateHtmlArtifacts';
 import type { AffiliateSourceCaptureClient } from './affiliateProviderContracts';
 import { createAffiliateSourceCaptureClient } from './affiliateProviderFactory';
-import { codexAffiliateIngestionResultSchema } from './codexIngestionResult';
+import { codexAffiliateIngestionResultSchema } from './affiliateIngestionSchemas';
 import type { AffiliateApprovalClaimGeneration } from './approvalResult';
 import { evaluateRobotsPath } from './sourceIntakeRobots';
 import {

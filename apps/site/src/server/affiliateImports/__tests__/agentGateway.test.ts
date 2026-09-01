@@ -23,7 +23,8 @@ import {
   AFFILIATE_AGENT_HARD_DEADLINE_SECONDS,
   AFFILIATE_AGENT_HEARTBEAT_INTERVAL_SECONDS,
   AFFILIATE_AGENT_LEASE_SECONDS,
-  type AffiliateAgentClaimAuthorization,
+  AFFILIATE_AGENT_WORKSPACE_ATTESTATION_ADMISSION_MARGIN_SECONDS,
+  AFFILIATE_AGENT_WORKSPACE_ATTESTATION_LIFETIME_SECONDS,
   type AffiliateAgentClaimGrant,
   type AffiliateAgentClaimOperation,
   type AffiliateAgentClaimRequest,
@@ -35,14 +36,20 @@ import {
   affiliateAgentRetryDelaySeconds,
 } from "../agentGateway";
 import {
+  createProductionAffiliateAgentGatewayAdapters,
   createProductionAffiliateAgentGatewayDependencies,
   type AffiliateAgentArtifactRead,
+  type AffiliateAgentClaimAdmission,
   type AffiliateAgentInvocationReconciler,
   type AffiliateAgentReviewerTerminalDisposition,
-  type AffiliateAgentReviewerTerminalResult,
   type AffiliateAgentTerminalEffectAdapter,
 } from "../agentGatewayAdapters";
+import type {
+  AffiliateOperationalAlertInput,
+  AffiliateOperationalAlertWriter,
+} from "../affiliateOperationalAlerts";
 import {
+  createAffiliateAgentClaimAdmission,
   createPrismaAffiliateAgentGateway,
   createPrismaAffiliateAgentInvocationReconciler,
 } from "../prismaAgentGateway";
@@ -136,44 +143,49 @@ const supplyContractFixture = {
   hash: "b12139b403f6f2ad946a7d416731ea7eed5aa6cb2bd149e1264c1e9b5304c554",
 } as const;
 
-const deploymentContractFixture = {
-  schemaVersion: 1,
-  version: 1,
-  gatewayVersion: 1,
-  activeSupplyContract: {
-    version: supplyContractFixture.version,
-    hash: supplyContractFixture.hash,
-  },
-  roleContracts: Object.values(AFFILIATE_AGENT_ROLE_CONTRACTS).map(
-    (contract) => ({
-      role: contract.role,
-      version: contract.version,
-      hash: contract.hash,
-    }),
-  ),
-  promptTemplates: Object.values(AFFILIATE_AGENT_ROLE_CONTRACTS).map(
-    (contract) => ({
-      role: contract.role,
-      version: contract.promptTemplateVersion,
-      hash: contract.promptTemplateHash,
-    }),
-  ),
-  expectedTopology: {
-    claimsPerInvocation: 1,
-    hasFreshWorkspacePerClaim: true,
-    processCommand: ["codex", "exec", "--ephemeral"],
-    hasNestedGoal: false,
-    hasClaimLoop: false,
-    hasContextReuse: false,
-    executionClass: "PRODUCTION_CODEX",
-    databaseRoles: {
-      gateway: "bracketiq_affiliate_gateway",
-      lifecycleAuthority: "bracketiq_affiliate_lifecycle",
-      agent: "bracketiq_affiliate_agent",
+const deploymentContractFixture = (() => {
+  const preimage = {
+    schemaVersion: 1,
+    version: 1,
+    gatewayVersion: 1,
+    activeSupplyContract: {
+      version: supplyContractFixture.version,
+      hash: supplyContractFixture.hash,
     },
-  },
-  hash: "4f9b7d6a299e9262e29aaa8a3f3f8c3dabd3788eeffb26f7f3e7fa5b7eb3a840",
-};
+    roleContracts: Object.values(AFFILIATE_AGENT_ROLE_CONTRACTS).map(
+      (contract) => ({
+        role: contract.role,
+        version: contract.version,
+        hash: contract.hash,
+      }),
+    ),
+    promptTemplates: Object.values(AFFILIATE_AGENT_ROLE_CONTRACTS).map(
+      (contract) => ({
+        role: contract.role,
+        version: contract.promptTemplateVersion,
+        hash: contract.promptTemplateHash,
+      }),
+    ),
+    expectedTopology: {
+      claimsPerInvocation: 1,
+      hasFreshWorkspacePerClaim: true,
+      processCommand: ["codex", "exec", "--ephemeral"],
+      hasNestedGoal: false,
+      hasClaimLoop: false,
+      hasContextReuse: false,
+      executionClass: "PRODUCTION_CODEX",
+      databaseRoles: {
+        gateway: "bracketiq_affiliate_gateway",
+        lifecycleAuthority: "bracketiq_affiliate_lifecycle",
+        agent: "bracketiq_affiliate_agent",
+      },
+    },
+  } as const;
+  return {
+    ...preimage,
+    hash: hashAffiliateAgentValue(preimage),
+  } as const;
+})();
 
 const contractBundleFixture = {
   schemaVersion: 1,
@@ -417,7 +429,11 @@ const terminalResultCases = [
   {
     role: "SUPPLY_REVIEWER",
     disposition: "ACTIVATED",
-    payload: { committedPackageHash: "b".repeat(64) },
+    payload: {
+      committedPackageHash: "b".repeat(64),
+      baselineHash: "c".repeat(64),
+      candidateReviewId: "candidate-review-1",
+    },
   },
   {
     role: "SUPPLY_REVIEWER",
@@ -720,9 +736,9 @@ describe("affiliate Agent Gateway contracts", () => {
     ).toEqual([
       {
         role: "COVERAGE_PLANNER",
-        hash: "381db9c28c2870b8a0a530110bd5931fd18a3675707fac4641d2e1fdaab70d72",
+        hash: "92afa8d6ddd19ccfe7732cf26f1e69e3657c8403a1a13456f1c93be335975473",
         promptTemplateHash:
-          "9c0e6f32b1e935fd14c8872b8ea1ddad96cd25a7498858c4b810835cd38149fb",
+          "c479f1154f997c2a5e0522e9a520dcc615df9836c51ed4d3323d80e0e24399a5",
         inputSchemaId: "affiliate-agent/coverage-planner-subject@1",
         permittedCommands: [
           "CAPTURE_CLAIM_URL",
@@ -742,9 +758,9 @@ describe("affiliate Agent Gateway contracts", () => {
       },
       {
         role: "MAPPING_PRODUCER",
-        hash: "1d1a18a7b25a084413dda5200409e236a2da465d2fa8ac062ec094d835c8cb05",
+        hash: "c47e9b2e4cc6aed9d50c8c752fb192b3c9f763f958d40bb3761a7de83f3d43b4",
         promptTemplateHash:
-          "8523e9a1d0377a45e5a4de03f5724ed4b07294f3b1ad623a55d064e6b872b45f",
+          "b66d9ab1e8bfb4dd69e54a9e595cbeaf99b23a5a532a5d55ebf5c7acc450b72f",
         inputSchemaId: "affiliate-agent/mapping-producer-subject@1",
         permittedCommands: [
           "CAPTURE_CLAIM_URL",
@@ -764,9 +780,9 @@ describe("affiliate Agent Gateway contracts", () => {
       },
       {
         role: "SUPPLY_REVIEWER",
-        hash: "434df5725ec14b466768c656a538d2a917afc93a900e4eeb9ccfe5191606b56b",
+        hash: "b82efa94995fedc9379791248a7e865dc8c4935de2df5f27e37b36b2d76268cb",
         promptTemplateHash:
-          "f2a685039fac0dd4f261a645d3cfb9128f28dfbb0c86549e9d7866d858a32fe2",
+          "43401952a0391978bf17e5e7bcdbbc3230b73541a48105e2e0b3d0f190224305",
         inputSchemaId: "affiliate-agent/supply-reviewer-subject@1",
         permittedCommands: ["SUBMIT_TERMINAL_RESULT"],
         terminalDispositions: [
@@ -784,9 +800,9 @@ describe("affiliate Agent Gateway contracts", () => {
       },
       {
         role: "HUMAN_DIRECTED_EXECUTOR",
-        hash: "4aae27af7110f5ad4e3141f4d11882825e4db90422f1021bb4d24ee36c68527f",
+        hash: "f800a1cf83d59e70cbb24de11ed280253bd9356a0320036d958efed3f87417e9",
         promptTemplateHash:
-          "514fca00a373112dec2385a0b3b527975dec41d17b2288eb04e78ba7b98a72ec",
+          "c718980812e1732987596153c26cf52ef621a6f154c8faec95835d090d4fc9d7",
         inputSchemaId: "affiliate-agent/human-directed-executor-subject@1",
         permittedCommands: [
           "EXECUTE_RECORDED_LIFECYCLE_COMMAND",
@@ -871,7 +887,7 @@ describe("affiliate Agent Gateway contracts", () => {
     );
 
     expect(parsed.hash).toBe(
-      "4f9b7d6a299e9262e29aaa8a3f3f8c3dabd3788eeffb26f7f3e7fa5b7eb3a840",
+      "637cc16e500f9de57eaa54c570d0f12cb97a1aa236b4274432156c288de8d237",
     );
     expect(parsed.expectedTopology).toEqual({
       claimsPerInvocation: 1,
@@ -1124,7 +1140,7 @@ describe("affiliate Agent Gateway contracts", () => {
     const prompt = renderAffiliateAgentPrompt(roleContract, claim);
     const projectionJson = prompt
       .split("## Authority Projection\n")[1]
-      .split("\n\n## Completion")[0];
+      .split("\n\n## Role Instructions")[0];
 
     expect(JSON.parse(projectionJson)).toEqual({
       schemaVersion: 1,
@@ -1180,13 +1196,28 @@ describe("affiliate Agent Gateway contracts", () => {
         claimFixtureForRole(roleContract.role),
       );
       const prompt = renderAffiliateAgentPrompt(roleContract, claim);
+      const promptTemplate = AFFILIATE_AGENT_PROMPT_TEMPLATES[roleContract.role];
 
       expect(prompt.match(/SUBMIT_TERMINAL_RESULT/g)).toHaveLength(1);
-      expect(
-        prompt.endsWith(
-          "Submit one terminal result with SUBMIT_TERMINAL_RESULT.",
-        ),
-      ).toBe(true);
+      expect(prompt).toContain(
+        'Submit one terminal result using the SUBMIT_TERMINAL_RESULT capability (not as the wire discriminator). Send exactly this JSON request shape to the gateway: {"kind":"SUBMIT_RESULT","idempotencyKey":"<new idempotency key>","authorization":<claim authorization object>,"result":<valid role-specific affiliate-agent/terminal-result@1 object>}.',
+      );
+      expect(prompt).toMatch(
+        /"kind":"SUBMIT_RESULT".*"result":<valid role-specific affiliate-agent\/terminal-result@1 object>/s,
+      );
+      expect(prompt).toContain(
+        "Allowed reasonCodes: CONTRACT_REQUIREMENT_MISSING | EVIDENCE_VERIFIED | NO_QUALIFIED_ACTION | POLICY_CONFLICT | SCHEMA_VALIDATED | SOURCE_UNSUPPORTED | TARGET_INVALID.",
+      );
+      expect(prompt).toContain(
+        "All result and payload objects are strict: add no fields beyond this shape.",
+      );
+      promptTemplate.gatewayProtocol.terminalResultShape.forEach((shapeLine) => {
+        expect(prompt).toContain(shapeLine);
+      });
+      roleContract.terminalDispositions.forEach((disposition) => {
+        expect(prompt).toContain(`- ${disposition}:`);
+      });
+      expect(prompt).not.toContain('"kind":"SUBMIT_TERMINAL_RESULT"');
     });
   });
 
@@ -1195,6 +1226,9 @@ describe("affiliate Agent Gateway contracts", () => {
       heartbeat: AFFILIATE_AGENT_HEARTBEAT_INTERVAL_SECONDS,
       lease: AFFILIATE_AGENT_LEASE_SECONDS,
       deadline: AFFILIATE_AGENT_HARD_DEADLINE_SECONDS,
+      attestationAdmissionMargin:
+        AFFILIATE_AGENT_WORKSPACE_ATTESTATION_ADMISSION_MARGIN_SECONDS,
+      attestationLifetime: AFFILIATE_AGENT_WORKSPACE_ATTESTATION_LIFETIME_SECONDS,
       schemaCorrections: AFFILIATE_AGENT_MAX_SCHEMA_CORRECTIONS,
       invocationAttempts: AFFILIATE_AGENT_MAX_INVOCATION_ATTEMPTS,
       retryDelays: [1, 2, 3].map((attempt) =>
@@ -1204,6 +1238,8 @@ describe("affiliate Agent Gateway contracts", () => {
       heartbeat: 60,
       lease: 300,
       deadline: 1_200,
+      attestationAdmissionMargin: 180,
+      attestationLifetime: 1_380,
       schemaCorrections: 3,
       invocationAttempts: 3,
       retryDelays: [300, 900, null],
@@ -1212,6 +1248,94 @@ describe("affiliate Agent Gateway contracts", () => {
 });
 
 type GatewayTestRow = Record<string, unknown>;
+const gatewayTestMatchesAlternative = (
+  row: GatewayTestRow,
+  alternative: unknown,
+): boolean => {
+  if (alternative === null || typeof alternative !== "object") return false;
+  return gatewayTestMatchesWhere(row, alternative as GatewayTestRow);
+};
+
+const gatewayTestIsObjectFilter = (
+  value: unknown,
+): value is GatewayTestRow =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
+const gatewayTestMatchesFilterMembership = (
+  actual: unknown,
+  filter: GatewayTestRow,
+): boolean => {
+  if (Array.isArray(filter.in) && !filter.in.includes(actual)) return false;
+  if (Array.isArray(filter.notIn) && filter.notIn.includes(actual)) return false;
+  return true;
+};
+
+const gatewayTestMatchesDateFilter = (
+  actual: unknown,
+  filter: GatewayTestRow,
+  key: "lte" | "lt",
+): boolean => {
+  const boundary = filter[key];
+  if (!(boundary instanceof Date)) return true;
+  if (!(actual instanceof Date)) return false;
+  return key === "lte" ? !(actual > boundary) : !(actual >= boundary);
+};
+
+const gatewayTestMatchesObjectFilter = (
+  actual: unknown,
+  filter: GatewayTestRow,
+): boolean => {
+  if (!gatewayTestMatchesFilterMembership(actual, filter)) return false;
+  if (!gatewayTestMatchesDateFilter(actual, filter, "lte")) return false;
+  if (!gatewayTestMatchesDateFilter(actual, filter, "lt")) return false;
+  return true;
+};
+
+const gatewayTestMatchesExpectedValue = (
+  row: GatewayTestRow,
+  key: string,
+  expected: unknown,
+): boolean => {
+  if (expected === undefined) return true;
+  if (key === "AND" && Array.isArray(expected)) {
+    return expected.every((alternative) =>
+      gatewayTestMatchesAlternative(row, alternative),
+    );
+  }
+  if (key === "OR" && Array.isArray(expected)) {
+    return expected.some((alternative) =>
+      gatewayTestMatchesAlternative(row, alternative),
+    );
+  }
+  const actual = row[key];
+  if (expected instanceof Date) {
+    return actual instanceof Date && actual.getTime() === expected.getTime();
+  }
+  if (gatewayTestIsObjectFilter(expected)) {
+    return gatewayTestMatchesObjectFilter(actual, expected);
+  }
+  return actual === expected;
+};
+
+const gatewayTestMatchesWhere = (
+  row: GatewayTestRow,
+  where: GatewayTestRow,
+): boolean => {
+  const matches = Object.entries(where).every(([key, expected]) =>
+    gatewayTestMatchesExpectedValue(row, key, expected),
+  );
+  return matches;
+};
+
+type GatewayClaimTransactionBarrier = Readonly<{
+  entered(): void;
+  released: Promise<void>;
+}>;
+type GatewayOperationReceiptReadBarrier = {
+  remaining: number;
+  entered(): void;
+  released: Promise<void>;
+};
 
 type GatewayClaimTestPrisma = {
   affiliateAgentGatewayJobs: {
@@ -1242,6 +1366,25 @@ type GatewayClaimTestPrisma = {
       where: GatewayTestRow;
       data: GatewayTestRow;
     }): Promise<{ count: number }>;
+  };
+  affiliateSupplySources: {
+    findUnique(input: {
+      where: GatewayTestRow;
+      select?: GatewayTestRow;
+    }): Promise<GatewayTestRow | null>;
+  };
+  affiliateSupplyLifecycleTransitions: {
+    findUnique(input: {
+      where: GatewayTestRow;
+    }): Promise<GatewayTestRow | null>;
+    findFirst(input: {
+      where: GatewayTestRow;
+    }): Promise<GatewayTestRow | null>;
+  };
+  affiliateSourceDiscoveryRuns: {
+    findUnique(input: {
+      where: GatewayTestRow;
+    }): Promise<GatewayTestRow | null>;
   };
   affiliateAgentWorkerHealth: {
     upsert(input: {
@@ -1280,6 +1423,12 @@ type GatewayClaimTestPrisma = {
       orderBy?: readonly GatewayTestRow[];
     }): Promise<GatewayTestRow | null>;
   };
+  affiliateOperationalAlerts: {
+    findUnique(input: {
+      where: GatewayTestRow;
+    }): Promise<GatewayTestRow | null>;
+    create(input: { data: GatewayTestRow }): Promise<GatewayTestRow>;
+  };
   $queryRaw<T>(query: unknown): Promise<T>;
   $transaction<T>(
     callback: (transaction: GatewayClaimTestPrisma) => Promise<T>,
@@ -1295,14 +1444,18 @@ type GatewayClaimHarness = Readonly<{
     jobs: GatewayTestRow[];
     claims: GatewayTestRow[];
     artifacts: GatewayTestRow[];
+    discoveryRuns: GatewayTestRow[];
     receipts: GatewayTestRow[];
     workerHealth: GatewayTestRow[];
     events: GatewayTestRow[];
+    operationalAlerts: GatewayTestRow[];
+    lifecycleTransitions: GatewayTestRow[];
     lifecycleCalls: GatewayTestRow[];
     reviewerEffectCalls: string[];
     lifecycleRecoverReceiptIds: string[];
     externalStartKeys: string[];
     externalRecoverKeys: string[];
+    transactionCalls: number;
   };
   artifactBytes: Buffer;
   setNow(value: string): void;
@@ -1311,6 +1464,7 @@ type GatewayClaimHarness = Readonly<{
   setConcurrentArtifact(value: GatewayTestRow): void;
   setTransactionConflictsAfterArtifactRead(value: number): void;
   setNextTransactionConflicts(value: number): void;
+  setNextTransactionError(value: unknown): void;
   setActiveBundle(value: unknown): void;
   setExternalCaptureMode(value: "SUCCEED" | "LOSE_RESPONSE" | "UNKNOWN"): void;
   setTerminalEffectTimeAdvanceSeconds(value: number): void;
@@ -1319,6 +1473,12 @@ type GatewayClaimHarness = Readonly<{
   setLifecycleGeneration(value: number): void;
   setLifecycleSafeOutputDetails(value: string | null): void;
   setClaimCreateError(value: unknown): void;
+  setOperationReceiptReadBarrier(
+    barrier: GatewayOperationReceiptReadBarrier,
+  ): void;
+  setOperationReceiptCreateConflict(value: unknown, persist?: boolean): void;
+  setClaimAdmissionOpen(value: boolean): void;
+  setDomainDelegates(value: Readonly<Record<string, unknown>>): void;
   request: AffiliateAgentClaimRequest;
 }>;
 
@@ -1338,7 +1498,46 @@ type GatewayClaimHarnessOptions = Readonly<{
   disableExternalAdapters?: boolean;
   advanceClockDuringCredentialVerificationSeconds?: number;
   advanceClockDuringTransactionalCommandSeconds?: number;
+  operationalAlert?: AffiliateOperationalAlertWriter;
+  persistLifecycleAlertTransition?: boolean;
+  persistLifecycleTransition?: boolean;
+  claimAdmissionOpen?: boolean;
+  claimAdmission?: AffiliateAgentClaimAdmission;
+  claimTransactionBarrier?: GatewayClaimTransactionBarrier;
 }>;
+const captureRecordSummaryFixture = (
+  value: Readonly<Record<string, unknown>>,
+): Readonly<{
+  keys: readonly string[];
+  sha256: string;
+  byteSize: number;
+}> => {
+  const canonical = canonicalizeAffiliateAgentValue(value);
+  return {
+    keys: Object.keys(value).sort(),
+    sha256: createHash("sha256").update(canonical).digest("hex"),
+    byteSize: Buffer.byteLength(canonical, "utf8"),
+  };
+};
+
+const captureTextSummaryFixture = (
+  value: string | null,
+): Readonly<{ sha256: string; byteSize: number }> | null =>
+  value === null
+    ? null
+    : {
+        sha256: createHash("sha256").update(value, "utf8").digest("hex"),
+        byteSize: Buffer.byteLength(value, "utf8"),
+      };
+
+const captureSetSummaryFixture = (
+  values: readonly string[],
+): Readonly<{ count: number; sha256: string; refs: readonly string[] }> => ({
+  count: values.length,
+  sha256: hashAffiliateAgentValue(values),
+  refs: values,
+});
+
 
 const createGatewayClaimHarness = (
   options: GatewayClaimHarnessOptions = {},
@@ -1348,67 +1547,27 @@ const createGatewayClaimHarness = (
   const initialTime = new Date(currentTime);
   let identifierSequence = 0;
   let claimCreateError: unknown = null;
+  let operationReceiptCreateError: unknown = null;
+  let persistOperationReceiptCreateError = false;
   let artifactReadError: unknown = null;
+  let operationReceiptReadBarrier: GatewayOperationReceiptReadBarrier | null =
+    null;
   let concurrentArtifact: GatewayTestRow | null = null;
   let transactionConflictsAfterArtifactRead = 0;
+  let pendingTransactionError: unknown = null;
   let pendingTransactionConflicts = 0;
   let lifecycleSafeOutputDetails: string | null = null;
   let terminalEffectTimeAdvanceSeconds = 0;
   let currentLifecycleGeneration = 7;
   let externalMimeType = "text/markdown";
+  let claimAdmissionOpen = options.claimAdmissionOpen ?? true;
+  let claimTransactionBarrier = options.claimTransactionBarrier ?? null;
+  const claimAdmission: AffiliateAgentClaimAdmission =
+    options.claimAdmission ?? {
+      isOpen: () => claimAdmissionOpen,
+      withClaim: (operation) => operation(),
+    };
 
-  const gatewayTestMatchesWhere = (
-    row: GatewayTestRow,
-    where: GatewayTestRow,
-  ): boolean =>
-    Object.entries(where).every(([key, expected]) => {
-      if (expected === undefined) return true;
-      if (key === "AND" && Array.isArray(expected)) {
-        return expected.every(
-          (alternative) =>
-            alternative !== null &&
-            typeof alternative === "object" &&
-            gatewayTestMatchesWhere(row, alternative as GatewayTestRow),
-        );
-      }
-      if (key === "OR" && Array.isArray(expected)) {
-        return expected.some(
-          (alternative) =>
-            alternative !== null &&
-            typeof alternative === "object" &&
-            gatewayTestMatchesWhere(row, alternative as GatewayTestRow),
-        );
-      }
-      const actual = row[key];
-      if (expected instanceof Date) {
-        return (
-          actual instanceof Date && actual.getTime() === expected.getTime()
-        );
-      }
-      if (
-        expected !== null &&
-        typeof expected === "object" &&
-        !Array.isArray(expected)
-      ) {
-        const filter = expected as GatewayTestRow;
-        if (Array.isArray(filter.in) && !filter.in.includes(actual))
-          return false;
-        if (Array.isArray(filter.notIn) && filter.notIn.includes(actual))
-          return false;
-        if (
-          filter.lte instanceof Date &&
-          (!(actual instanceof Date) || actual > filter.lte)
-        )
-          return false;
-        if (
-          filter.lt instanceof Date &&
-          (!(actual instanceof Date) || actual >= filter.lt)
-        )
-          return false;
-        return true;
-      }
-      return actual === expected;
-    });
   const artifactBytes = Buffer.from("verified gateway artifact", "utf8");
   let externalCaptureMode: "SUCCEED" | "LOSE_RESPONSE" | "UNKNOWN" = "SUCCEED";
   const externalCaptureEffects = new Map<
@@ -1480,15 +1639,124 @@ const createGatewayClaimHarness = (
     ] as GatewayTestRow[],
     claims: [] as GatewayTestRow[],
     artifacts: [] as GatewayTestRow[],
+    discoveryRuns: [] as GatewayTestRow[],
     receipts: [] as GatewayTestRow[],
     events: [] as GatewayTestRow[],
     workerHealth: [] as GatewayTestRow[],
+    operationalAlerts: [] as GatewayTestRow[],
+    lifecycleTransitions: [] as GatewayTestRow[],
     lifecycleCalls: [] as GatewayTestRow[],
     reviewerEffectCalls: [] as string[],
     lifecycleRecoverReceiptIds: [] as string[],
     externalStartKeys: [] as string[],
     externalRecoverKeys: [] as string[],
+    transactionCalls: 0,
   };
+const findOperationReceiptById = (
+  id: string,
+): GatewayTestRow | null =>
+  state.receipts.find((receipt) => receipt.id === id) ?? null;
+
+const findOperationReceiptByCompound = async (
+  compound: unknown,
+): Promise<GatewayTestRow | null> => {
+  if (
+    compound === null
+    || typeof compound !== "object"
+    || !("claimId" in compound)
+    || !("idempotencyKey" in compound)
+  ) {
+    return null;
+  }
+  const selected =
+    state.receipts.find(
+      (receipt) =>
+        receipt.claimId === compound.claimId &&
+        receipt.idempotencyKey === compound.idempotencyKey,
+    ) ?? null;
+  if (selected === null && operationReceiptReadBarrier !== null) {
+    const barrier = operationReceiptReadBarrier;
+    barrier.remaining -= 1;
+    if (barrier.remaining === 0) {
+      operationReceiptReadBarrier = null;
+      barrier.entered();
+    }
+    await barrier.released;
+  }
+  return selected;
+};
+
+const queryRecordFor = (
+  query: unknown,
+): { strings?: readonly unknown[]; values?: readonly unknown[] } =>
+  query !== null && typeof query === "object"
+    ? query as { strings?: readonly unknown[]; values?: readonly unknown[] }
+    : {};
+
+const queryTextFor = (
+  queryRecord: { strings?: readonly unknown[] },
+): string =>
+  Array.isArray(queryRecord.strings) ? queryRecord.strings.join("") : "";
+
+const lifecycleDeadlineRowsFor = (
+  queryRecord: { values?: readonly unknown[] },
+): Array<{ id: unknown }> => {
+  const before =
+    queryRecord.values?.find(
+      (value): value is Date => value instanceof Date,
+    ) ?? currentTime;
+  const limit =
+    [...(queryRecord.values ?? [])]
+      .reverse()
+      .find((value): value is number => typeof value === "number") ??
+    state.claims.length;
+  return state.claims
+    .filter((claim) => {
+      if (
+        claim.status !== "ACTIVE" ||
+        !(claim.leaseExpiresAt instanceof Date) ||
+        !(claim.hardDeadlineAt instanceof Date) ||
+        (claim.leaseExpiresAt > before && claim.hardDeadlineAt > before)
+      ) {
+        return false;
+      }
+      return !state.receipts.some(
+        (receipt) =>
+          receipt.claimId === claim.id &&
+          receipt.jobId === claim.jobId &&
+          receipt.claimGeneration === claim.claimGeneration &&
+          receipt.status === "SUCCEEDED" &&
+          receipt.operationKind === "EXECUTE_COMMAND" &&
+          receipt.commandName === "EXECUTE_RECORDED_LIFECYCLE_COMMAND" &&
+          claim.hardDeadlineAt > before,
+      );
+    })
+    .sort(
+      (left, right) =>
+        Number(left.hardDeadlineAt) - Number(right.hardDeadlineAt) ||
+        Number(left.leaseExpiresAt) - Number(right.leaseExpiresAt) ||
+        String(left.id).localeCompare(String(right.id)),
+    )
+    .slice(0, limit)
+    .map(({ id }) => ({ id }));
+};
+
+const reviewerEffectRows = (): Array<{ id: unknown }> =>
+  state.receipts
+    .filter((receipt) => {
+      const claim = state.claims.find(
+        (candidate) => candidate.id === receipt.claimId,
+      );
+      const isReviewerTerminalEffect =
+        claim?.role === "SUPPLY_REVIEWER" &&
+        receipt.status === "SUCCEEDED" &&
+        receipt.operationKind === "TERMINAL_EFFECT" &&
+        receipt.commandName === "SUPPLY_REVIEWER_TERMINAL_EFFECT";
+      return claim?.status === "ACTIVE" && isReviewerTerminalEffect;
+    })
+    .sort((left, right) => String(left.id).localeCompare(String(right.id)))
+    .map(({ id }) => ({ id }));
+
   const prismaMock: GatewayClaimTestPrisma = {
     affiliateAgentGatewayJobs: {
       findFirst: async ({ where }) =>
@@ -1569,6 +1837,30 @@ const createGatewayClaimHarness = (
         return { count: 1 };
       },
     },
+    affiliateSupplySources: {
+      findUnique: async ({ where }) =>
+        typeof where.id === "string"
+          ? {
+              id: where.id,
+              lifecycleGeneration: currentLifecycleGeneration,
+            }
+          : null,
+    },
+    affiliateSupplyLifecycleTransitions: {
+      findUnique: async ({ where }) =>
+        state.lifecycleTransitions.find((transition) =>
+          gatewayTestMatchesWhere(transition, where),
+        ) ?? null,
+      findFirst: async ({ where }) =>
+        state.lifecycleTransitions.find((transition) =>
+          gatewayTestMatchesWhere(transition, where),
+        ) ?? null,
+    },
+    affiliateSourceDiscoveryRuns: {
+      findUnique: async ({ where }) =>
+        state.discoveryRuns.find((run) => gatewayTestMatchesWhere(run, where))
+        ?? null,
+    },
     affiliateAgentWorkerHealth: {
       upsert: async ({ where, create, update }) => {
         const key = where.workerId_role as GatewayTestRow;
@@ -1618,28 +1910,32 @@ const createGatewayClaimHarness = (
       },
     },
     affiliateAgentGatewayOperationReceipts: {
-      findUnique: async ({ where }) => {
-        if (typeof where.id === "string") {
-          return (
-            state.receipts.find((receipt) => receipt.id === where.id) ?? null
-          );
+      findUnique: async ({ where }) =>
+        typeof where.id === "string"
+          ? findOperationReceiptById(where.id)
+          : findOperationReceiptByCompound(where.claimId_idempotencyKey),
+      create: async ({ data }) => {
+        if (operationReceiptCreateError !== null) {
+          const error = operationReceiptCreateError;
+          const persist = persistOperationReceiptCreateError;
+          operationReceiptCreateError = null;
+          persistOperationReceiptCreateError = false;
+          if (persist) state.receipts.push(data);
+          throw error;
         }
-        const compound = where.claimId_idempotencyKey;
-        if (
-          compound === null ||
-          typeof compound !== "object" ||
-          !("claimId" in compound) ||
-          !("idempotencyKey" in compound)
-        ) {
-          return null;
-        }
-        return (
-          state.receipts.find(
-            (receipt) =>
-              receipt.claimId === compound.claimId &&
-              receipt.idempotencyKey === compound.idempotencyKey,
-          ) ?? null
+        const duplicate = state.receipts.some(
+          (receipt) =>
+            receipt.claimId === data.claimId &&
+            receipt.idempotencyKey === data.idempotencyKey,
         );
+        if (duplicate) {
+          throw {
+            code: "P2002",
+            meta: { target: ["claimId_idempotencyKey"] },
+          };
+        }
+        state.receipts.push(data);
+        return data;
       },
       findFirst: async ({ where }) =>
         state.receipts.find((receipt) =>
@@ -1650,10 +1946,6 @@ const createGatewayClaimHarness = (
           gatewayTestMatchesWhere(receipt, where),
         );
         return take === undefined ? matches : matches.slice(0, take);
-      },
-      create: async ({ data }) => {
-        state.receipts.push(data);
-        return data;
       },
       updateMany: async ({ where, data }) => {
         const receipt = state.receipts.find((candidate) =>
@@ -1682,79 +1974,52 @@ const createGatewayClaimHarness = (
         return matches[0] ?? null;
       },
     },
+    affiliateOperationalAlerts: {
+      findUnique: async ({ where }) =>
+        state.operationalAlerts.find(
+          (alert) => alert.eventKey === where.eventKey,
+        ) ?? null,
+      create: async ({ data }) => {
+        const existing = state.operationalAlerts.find(
+          (alert) => alert.eventKey === data.eventKey,
+        );
+        if (existing) throw { code: "P2002" };
+        state.operationalAlerts.push(data);
+        return data;
+      },
+    },
     $queryRaw: async <T>(query: unknown) => {
-      const queryRecord =
-        query !== null && typeof query === "object"
-          ? (query as {
-              strings?: readonly unknown[];
-              values?: readonly unknown[];
-            })
-          : {};
-      const queryText = Array.isArray(queryRecord.strings)
-        ? queryRecord.strings.join("")
-        : "";
+      const queryRecord = queryRecordFor(query);
+      const queryText = queryTextFor(queryRecord);
+      if (
+        queryText.includes('FROM "AffiliateSupplySources"') &&
+        queryText.includes('"lifecycleGeneration"')
+      ) {
+        return [{ lifecycleGeneration: currentLifecycleGeneration }] as T;
+      }
       if (
         queryText.includes('claim."hardDeadlineAt"') &&
         queryText.includes("NOT EXISTS")
       ) {
-        const before =
-          queryRecord.values?.find(
-            (value): value is Date => value instanceof Date,
-          ) ?? currentTime;
-        const limit =
-          [...(queryRecord.values ?? [])]
-            .reverse()
-            .find((value): value is number => typeof value === "number") ??
-          state.claims.length;
-        const rows = state.claims
-          .filter((claim) => {
-            if (
-              claim.status !== "ACTIVE" ||
-              !(claim.leaseExpiresAt instanceof Date) ||
-              !(claim.hardDeadlineAt instanceof Date) ||
-              (claim.leaseExpiresAt > before && claim.hardDeadlineAt > before)
-            ) {
-              return false;
-            }
-            return !state.receipts.some(
-              (receipt) =>
-                receipt.claimId === claim.id &&
-                receipt.jobId === claim.jobId &&
-                receipt.claimGeneration === claim.claimGeneration &&
-                receipt.status === "SUCCEEDED" &&
-                receipt.operationKind === "EXECUTE_COMMAND" &&
-                receipt.commandName === "EXECUTE_RECORDED_LIFECYCLE_COMMAND" &&
-                claim.hardDeadlineAt > before,
-            );
-          })
-          .sort(
-            (left, right) =>
-              Number(left.hardDeadlineAt) - Number(right.hardDeadlineAt) ||
-              Number(left.leaseExpiresAt) - Number(right.leaseExpiresAt) ||
-              String(left.id).localeCompare(String(right.id)),
-          )
-          .slice(0, limit)
-          .map(({ id }) => ({ id }));
-        return rows as T;
+        return lifecycleDeadlineRowsFor(queryRecord) as T;
       }
-      return state.receipts
-        .filter((receipt) => {
-          const claim = state.claims.find(
-            (candidate) => candidate.id === receipt.claimId,
-          );
-          const isReviewerTerminalEffect =
-            claim?.role === "SUPPLY_REVIEWER" &&
-            receipt.status === "SUCCEEDED" &&
-            receipt.operationKind === "TERMINAL_EFFECT" &&
-            receipt.commandName === "SUPPLY_REVIEWER_TERMINAL_EFFECT";
-          return claim?.status === "ACTIVE" && isReviewerTerminalEffect;
-        })
-        .sort((left, right) => String(left.id).localeCompare(String(right.id)))
-        .map(({ id }) => ({ id })) as T;
+      return reviewerEffectRows() as T;
     },
     $transaction: async <T>(
       callback: (transaction: GatewayClaimTestPrisma) => Promise<T>,
     ): Promise<T> => {
+      state.transactionCalls += 1;
+      const barrier = claimTransactionBarrier;
+      if (barrier !== null) {
+        claimTransactionBarrier = null;
+        barrier.entered();
+        await barrier.released;
+      }
+      if (pendingTransactionError !== null) {
+        const error = pendingTransactionError;
+        pendingTransactionError = null;
+        throw error;
+      }
       if (pendingTransactionConflicts > 0) {
         pendingTransactionConflicts -= 1;
         throw { code: "P2034", message: "unsafe serializable conflict detail" };
@@ -1785,7 +2050,7 @@ const createGatewayClaimHarness = (
     },
   });
 
-  const dependencies = createProductionAffiliateAgentGatewayDependencies({
+  const productionDependencies = createProductionAffiliateAgentGatewayDependencies({
     prisma: gatewayPrismaTestDouble,
     tokenSigningKey: Buffer.from("gateway-test-signing-key".repeat(2)),
     tokenKeyVersion: "test-key-v1",
@@ -1850,11 +2115,30 @@ const createGatewayClaimHarness = (
           },
         },
         COMMIT_DECLARATIVE_PACKAGE: {
-          execute: async ({ command }) => {
+          execute: async ({ command, receiptId }) => {
             const seconds =
               options.advanceClockDuringTransactionalCommandSeconds;
             if (seconds !== undefined) {
               currentTime = new Date(currentTime.getTime() + seconds * 1_000);
+            }
+            if (options.persistLifecycleAlertTransition) {
+              state.lifecycleTransitions.push({
+                idempotencyKey: receiptId,
+                requestJson: {
+                  __affiliateInvariantAlertContract: {
+                    rolloutCohort: "test",
+                    version: 1,
+                    hash: "test-contract-hash",
+                  },
+                },
+                resultJson: {
+                  supplySourceId: "supply-source-1",
+                  lifecycleGeneration: 8,
+                  assessedAt: "2026-08-20T18:00:00.000Z",
+                  invariantViolations: ["MAPPING_JOB_MAPPING_MISMATCH"],
+                  evidenceRefs: [],
+                },
+              });
             }
             return {
               packageHash: command.data.validatedPackageHash,
@@ -1862,9 +2146,7 @@ const createGatewayClaimHarness = (
           },
         },
       },
-      external: options.disableExternalAdapters
-        ? {}
-        : {
+      external: {
             RUN_DISCOVERY_QUERY: {
               start: async (externalOperationKey) => {
                 state.externalStartKeys.push(externalOperationKey);
@@ -1901,6 +2183,47 @@ const createGatewayClaimHarness = (
                     .digest("hex"),
                   mimeType: externalMimeType,
                   byteSize: artifactBytes.byteLength,
+                  captureMetadata: {
+                    provider: "SCRAPINGDOG",
+                    request: captureRecordSummaryFixture({
+                      method: "GET",
+                      profile: "capture-profile",
+                    }),
+                    response: captureRecordSummaryFixture({
+                      status: "ok",
+                      requestId: "provider-request-1",
+                    }),
+                    requestedUrl: "https://capture.example.test/requested",
+                    finalUrl: "https://capture.example.test/final",
+                    providerStatusCode: 207,
+                    targetStatusCode: 200,
+                    renderMode: "JAVASCRIPT",
+                    elapsedMs: 321,
+                    estimatedCredits: 5,
+                    warnings: ["used provider fallback"],
+                    providerJobId: "provider-job-1",
+                    attempts: [{
+                      renderMode: "STATIC",
+                      providerStatusCode: 200,
+                      elapsedMs: 123,
+                      estimatedCredits: 1,
+                      accepted: false,
+                      quality: { textLength: 0 },
+                      error: "insufficient content",
+                    }],
+                    providerArtifacts: {
+                      markdown: captureTextSummaryFixture("# Capture"),
+                      links: captureSetSummaryFixture([
+                        "https://capture.example.test/final",
+                      ]),
+                      images: captureSetSummaryFixture([
+                        "https://capture.example.test/image.png",
+                      ]),
+                      branding: { name: "Capture Example" },
+                      screenshotUrl: "https://capture.example.test/screenshot.png",
+                      metadata: { source: "test" },
+                    },
+                  },
                 };
                 if (externalCaptureMode !== "UNKNOWN") {
                   externalCaptureEffects.set(externalOperationKey, output);
@@ -1930,6 +2253,10 @@ const createGatewayClaimHarness = (
       EXACT_TARGET_REJECTED: reviewerEffectHandler("EXACT_TARGET_REJECTED"),
       HUMAN_REVIEW_REQUIRED: reviewerEffectHandler("HUMAN_REVIEW_REQUIRED"),
     } satisfies AffiliateAgentTerminalEffectAdapter,
+    claimAdmission,
+    ...(options.operationalAlert === undefined
+      ? {}
+      : { operationalAlert: options.operationalAlert }),
     lifecycle: {
       kind: "AVAILABLE",
       currentGeneration: async () => currentLifecycleGeneration,
@@ -1944,6 +2271,19 @@ const createGatewayClaimHarness = (
             : { details: lifecycleSafeOutputDetails }),
         };
         lifecycleEffects.set(input.receiptId, output);
+        if (options.persistLifecycleTransition) {
+          currentLifecycleGeneration = 8;
+          state.lifecycleTransitions.push({
+            supplySourceId: "supply-source-1",
+            generation: 8,
+            commandRef: input.receiptId,
+            idempotencyKey: input.receiptId,
+            actorKind: "HUMAN_DIRECTED_EXECUTOR",
+            actorId: input.identity.recordedHumanActorId,
+            executingAgentId: input.invocationId,
+            command: "RECONCILE",
+          });
+        }
         if (isLifecycleResponseLost) {
           throw new Error("Simulated lifecycle response loss.");
         }
@@ -1955,7 +2295,15 @@ const createGatewayClaimHarness = (
       },
     },
   });
-
+  const dependencies = options.disableExternalAdapters
+    ? {
+      ...productionDependencies,
+      commands: {
+        ...productionDependencies.commands,
+        external: {},
+      },
+    }
+    : productionDependencies;
   const gateway = createPrismaAffiliateAgentGateway(dependencies);
   const reconciler =
     createPrismaAffiliateAgentInvocationReconciler(dependencies);
@@ -1964,6 +2312,22 @@ const createGatewayClaimHarness = (
     reconciler,
     recreateGateway: () => createPrismaAffiliateAgentGateway(dependencies),
     state,
+    setDomainDelegates: (value: Readonly<Record<string, unknown>>) => {
+      const target = prismaMock as unknown as Record<string, unknown>;
+      for (const [name, delegate] of Object.entries(value)) {
+        const current = target[name];
+        if (
+          current !== null
+          && typeof current === "object"
+          && delegate !== null
+          && typeof delegate === "object"
+        ) {
+          Object.assign(current, delegate);
+        } else {
+          target[name] = delegate;
+        }
+      }
+    },
     artifactBytes,
     setNow: (value: string) => {
       currentTime = new Date(value);
@@ -1982,6 +2346,9 @@ const createGatewayClaimHarness = (
     },
     setNextTransactionConflicts: (value: number) => {
       pendingTransactionConflicts = value;
+    },
+    setNextTransactionError: (value: unknown) => {
+      pendingTransactionError = value;
     },
     setExternalCaptureMode: (value) => {
       externalCaptureMode = value;
@@ -2003,6 +2370,16 @@ const createGatewayClaimHarness = (
     },
     setClaimCreateError: (value) => {
       claimCreateError = value;
+    },
+    setOperationReceiptCreateConflict: (value, persist = false) => {
+      operationReceiptCreateError = value;
+      persistOperationReceiptCreateError = persist;
+    },
+    setOperationReceiptReadBarrier: (barrier) => {
+      operationReceiptReadBarrier = barrier;
+    },
+    setClaimAdmissionOpen: (value: boolean) => {
+      claimAdmissionOpen = value;
     },
     setActiveBundle: (value: unknown) => {
       activeBundle = value;
@@ -2327,7 +2704,10 @@ const configureStandaloneReviewerScenario = (
       mimeType: entry.mimeType,
       byteSize: entry.byteSize,
       accessMode: "READ_ONLY",
-      creatingClaimId: null,
+      creatingClaimId:
+        entry.kind === "COMMITTED_PACKAGE" || entry.kind === "DETERMINISTIC_VALIDATION"
+          ? "producer-claim-1"
+          : null,
       retentionClass: entry.retention,
       isPinned: true,
     });
@@ -2418,6 +2798,31 @@ describe("Prisma affiliate Agent Gateway", () => {
       safeMessage: expect.any(String),
     });
   });
+  it("rejects a second live claim for the same worker while preserving exact-key replay", async () => {
+    const { gateway, request, state } = createGatewayClaimHarness();
+    const firstGrant = await gateway.claim(request);
+    expect(firstGrant).not.toBeNull();
+
+    const secondRequest: AffiliateAgentClaimRequest = {
+      ...request,
+      idempotencyKey: "claim-request-2",
+      invocationId: "coverage-invocation-2",
+      workspaceAttestation: {
+        ...request.workspaceAttestation,
+        workspaceId: "coverage-workspace-2",
+        invocationId: "coverage-invocation-2",
+      },
+    };
+    await expect(gateway.claim(secondRequest)).rejects.toMatchObject({
+      code: "DUPLICATE_LIVE_CLAIM",
+      safeMessage: "The worker already owns an unexpired active claim.",
+      isRetryable: true,
+    });
+    expect(state.claims).toHaveLength(1);
+
+    await expect(gateway.claim(request)).resolves.toEqual(firstGrant);
+    expect(state.claims).toHaveLength(1);
+  });
 
   it("does not treat an unrelated Prisma unique violation as a lost claim race", async () => {
     const harness = createGatewayClaimHarness();
@@ -2429,6 +2834,120 @@ describe("Prisma affiliate Agent Gateway", () => {
     await expect(harness.gateway.claim(harness.request)).rejects.toMatchObject({
       code: "INTERNAL_ERROR",
       isRetryable: true,
+    });
+  });
+  it("surfaces unrelated raw-query P2010 failures instead of returning no work", async () => {
+    const harness = createGatewayClaimHarness();
+    harness.setNextTransactionError({
+      code: "P2010",
+      meta: {
+        code: "42P01",
+        message: "relation affiliateAgentGatewayJobs does not exist",
+      },
+    });
+
+    await expect(harness.gateway.claim(harness.request)).rejects.toMatchObject({
+      code: "INTERNAL_ERROR",
+      isRetryable: true,
+    });
+  });
+
+  it("replays a durable same-key claim during closed admission but rejects unrelated work", async () => {
+    const harness = createGatewayClaimHarness();
+    const claimed = await harness.gateway.claim(harness.request);
+    expect(claimed).not.toBeNull();
+    harness.setClaimAdmissionOpen(false);
+
+    const replayed = await harness.recreateGateway().claim(harness.request);
+    expect(replayed).toEqual(claimed);
+
+    const originalJob = harness.state.jobs[0];
+    if (!originalJob) throw new Error("Expected the seeded Coverage Planner job.");
+    harness.state.jobs.push({
+      ...originalJob,
+      id: "gateway-job-2",
+      dedupeKey: "coverage:coverage-cell-2:assessment-cycle-1",
+      subjectId: "coverage-cell-2",
+      subjectJson: {
+        type: "COVERAGE_PLANNER",
+        coverageCellId: "coverage-cell-2",
+        assessmentCycleId: "assessment-cycle-1",
+      },
+      status: "QUEUED",
+      claimGeneration: 0,
+      activeClaimId: null,
+      eventSequence: 0,
+    });
+    const unrelatedRequest: AffiliateAgentClaimRequest = {
+      ...harness.request,
+      idempotencyKey: "claim-request-2",
+      workerId: "coverage-worker-2",
+      invocationId: "coverage-invocation-2",
+      workspaceAttestation: {
+        ...harness.request.workspaceAttestation,
+        workspaceId: "coverage-workspace-2",
+        workerId: "coverage-worker-2",
+        invocationId: "coverage-invocation-2",
+      },
+    };
+
+    await expect(harness.gateway.claim(unrelatedRequest)).resolves.toBeNull();
+    expect(harness.state.claims).toHaveLength(1);
+    expect(harness.state.jobs[1]).toMatchObject({
+      id: "gateway-job-2",
+      status: "QUEUED",
+      activeClaimId: null,
+    });
+  });
+
+  it("linearizes admission close around concurrent claim transactions", async () => {
+    let resolveClaimTransactionEntered: () => void = () => {};
+    const claimTransactionEntered = new Promise<void>((resolve) => {
+      resolveClaimTransactionEntered = resolve;
+    });
+    let releaseClaimTransaction: () => void = () => {};
+    const claimTransactionReleased = new Promise<void>((resolve) => {
+      releaseClaimTransaction = resolve;
+    });
+    const admission = createAffiliateAgentClaimAdmission(true);
+    const harness = createGatewayClaimHarness({
+      claimAdmission: admission,
+      claimTransactionBarrier: {
+        entered: resolveClaimTransactionEntered,
+        released: claimTransactionReleased,
+      },
+    });
+
+    const claimPromise = harness.gateway.claim(harness.request);
+    await claimTransactionEntered;
+
+    let closeSettled = false;
+    const closePromise = admission.close().then(() => {
+      closeSettled = true;
+    });
+    await Promise.resolve();
+    expect(closeSettled).toBe(false);
+
+    releaseClaimTransaction();
+    const grant = await claimPromise;
+    await closePromise;
+    expect(grant).not.toBeNull();
+    expect(harness.state.claims).toHaveLength(1);
+    expect(closeSettled).toBe(true);
+
+    const closedAdmission = createAffiliateAgentClaimAdmission(true);
+    const closedHarness = createGatewayClaimHarness({
+      claimAdmission: closedAdmission,
+    });
+    const closeFirst = closedAdmission.close();
+    const claimAfterClose = closedHarness.gateway.claim(closedHarness.request);
+
+    await closeFirst;
+    await expect(claimAfterClose).resolves.toBeNull();
+    expect(closedHarness.state.claims).toHaveLength(0);
+    expect(closedHarness.state.jobs[0]).toMatchObject({
+      status: "QUEUED",
+      activeClaimId: null,
     });
   });
 
@@ -2556,6 +3075,43 @@ describe("Prisma affiliate Agent Gateway", () => {
     });
     expect(harness.state.claims).toHaveLength(0);
   });
+  it("admits a fresh attestation through the full handoff margin", async () => {
+    const delayedSeconds =
+      AFFILIATE_AGENT_WORKSPACE_ATTESTATION_ADMISSION_MARGIN_SECONDS;
+    const harness = createGatewayClaimHarness({
+      advanceClockDuringCredentialVerificationSeconds: delayedSeconds,
+    });
+    const issuedAt = "2026-08-20T18:00:00.000Z";
+    const expiresAt = new Date(
+      Date.parse(issuedAt)
+        + AFFILIATE_AGENT_WORKSPACE_ATTESTATION_LIFETIME_SECONDS * 1_000,
+    ).toISOString();
+    const request = {
+      ...harness.request,
+      workspaceAttestation: {
+        ...harness.request.workspaceAttestation,
+        issuedAt,
+        expiresAt,
+      },
+    };
+
+    const grant = await harness.gateway.claim(request);
+
+    const admissionAt = new Date(
+      Date.parse(issuedAt) + delayedSeconds * 1_000,
+    );
+    const expectedLeaseExpiresAt = new Date(
+      admissionAt.getTime() + AFFILIATE_AGENT_LEASE_SECONDS * 1_000,
+    ).toISOString();
+    const expectedHardDeadlineAt = new Date(
+      admissionAt.getTime() + AFFILIATE_AGENT_HARD_DEADLINE_SECONDS * 1_000,
+    ).toISOString();
+    expect(grant).toMatchObject({
+      leaseExpiresAt: expectedLeaseExpiresAt,
+      hardDeadlineAt: expectedHardDeadlineAt,
+    });
+    expect(harness.state.claims).toHaveLength(1);
+  });
 
   it("enforces reviewer worker, invocation, workspace, attestation, and manifest isolation", async () => {
     const reviewerManifestPreimage = {
@@ -2662,9 +3218,12 @@ describe("Prisma affiliate Agent Gateway", () => {
           fileId: entry.artifactId,
           contentHash: entry.sha256,
           mimeType: entry.mimeType,
+          creatingClaimId:
+            entry.kind === "COMMITTED_PACKAGE" || entry.kind === "DETERMINISTIC_VALIDATION"
+              ? "producer-claim-1"
+              : null,
           byteSize: entry.byteSize,
           accessMode: "READ_ONLY",
-          creatingClaimId: null,
           retentionClass: entry.retention,
           isPinned: true,
         });
@@ -2877,6 +3436,8 @@ describe("Prisma affiliate Agent Gateway", () => {
         payload: {
           committedPackageHash:
             claimRoleFields.SUPPLY_REVIEWER.subject.committedPackageHash,
+          baselineHash: "c".repeat(64),
+          candidateReviewId: "candidate-review-1",
         },
       },
       {
@@ -3163,10 +3724,535 @@ describe("Prisma affiliate Agent Gateway", () => {
       expect(harness.state.claims).toHaveLength(0);
     }
   });
+  it("applies a Coverage Planner campaign result to its linked replenishment wave", async () => {
+    const harness = createGatewayClaimHarness();
+    const wave = {
+      id: "replenishment-wave-1",
+      demandId: "replenishment-demand-1",
+      coveragePlanningJobId: "gateway-job-1",
+      rolloutCohort: "DEFAULT",
+      demandGeneration: 1,
+      status: "WAITING",
+      evidenceRefs: [] as string[],
+    };
+    const demand = {
+      id: "replenishment-demand-1",
+      targetKey: "coverage-cell-1",
+      rolloutCohort: "DEFAULT",
+      contractVersion: supplyContractFixture.version,
+      contractHash: supplyContractFixture.hash,
+      generation: 1,
+    };
+    const campaign = {
+      id: "campaign-1",
+      status: "ACTIVE",
+      region: "Test Region",
+      metadata: {
+        demandId: demand.id,
+        coverageCellId: "coverage-cell-1",
+        assessmentCycleId: "replenishment-demand-1:generation:1",
+        rolloutCohort: "DEFAULT",
+        contractVersion: supplyContractFixture.version,
+        contractHash: supplyContractFixture.hash,
+        waveId: wave.id,
+        evidenceManifest: harness.state.jobs[0].evidenceManifestJson,
+      },
+    };
+    const intake = {
+      id: "intake-1",
+      affiliateSourceId: "source-1",
+      supplySourceId: "supply-source-1",
+    };
+    const mappingJob = {
+      id: "mapping-job-1",
+      intakeId: intake.id,
+      sourceId: "source-1",
+      supplySourceId: "supply-source-1",
+      resultSummary: {},
+    };
+    const source = {
+      id: "source-1",
+      supplySourceId: "supply-source-1",
+      targetKind: "EVENT",
+    };
+    const supplySource = {
+      id: "supply-source-1",
+      rolloutCohort: "DEFAULT",
+      lifecycleGeneration: 0,
+      activeSupplyContractVersion: null,
+      activeSupplyContractHash: null,
+    };
+    const discoveryResult = {
+      id: "discovery-result-1",
+      campaignId: campaign.id,
+      latestRunId: "discovery-run-1",
+      matchingIntakeId: intake.id,
+      matchingSourceId: source.id,
+      supplySourceId: supplySource.id,
+      canonicalUrl: "https://source.example.test/events",
+      urlKey: "source.example.test/events",
+      title: "Source events",
+      sourceTypeHints: ["EVENT"],
+    };
+    harness.state.jobs[0].subjectJson = {
+      type: "COVERAGE_PLANNER",
+      coverageCellId: "coverage-cell-1",
+      assessmentCycleId: "replenishment-demand-1:generation:1",
+    };
+    const waves = {
+      findFirst: jest.fn(async () => wave),
+      update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        Object.assign(wave, data);
+        return wave;
+      }),
+    };
+    const campaigns = {
+      findUnique: jest.fn(async ({ where }: { where: { id: string } }) => (
+        where.id === campaign.id ? campaign : null
+      )),
+    };
+    const discoveryResults = {
+      findMany: jest.fn(async () => [discoveryResult]),
+    };
+    const intakes = {
+      findUnique: jest.fn(async ({ where }: { where: { id: string } }) => (
+        where.id === intake.id ? intake : null
+      )),
+      upsert: jest.fn(async () => intake),
+    };
+    const mappingJobs = {
+      findFirst: jest.fn(async () => mappingJob),
+      upsert: jest.fn(async () => mappingJob),
+      update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        Object.assign(mappingJob, data);
+        return mappingJob;
+      }),
+    };
+    const gatewayJobs = {
+      upsert: jest.fn(async () => ({ id: "producer-job-1" })),
+    };
+    const sources = {
+      findUnique: jest.fn(async ({ where }: { where: { id: string } }) => (
+        where.id === source.id ? source : null
+      )),
+    };
+    const supplySources = {
+      findUnique: jest.fn(async ({ where }: { where: { id: string } }) => (
+        where.id === supplySource.id ? supplySource : null
+      )),
+    };
+    const demands = {
+      findUnique: jest.fn(async ({ where }: { where: { id: string } }) => (
+        where.id === demand.id ? demand : null
+      )),
+      update: jest.fn(async () => demand),
+    };
+    harness.setDomainDelegates({
+      affiliateReplenishmentWaves: waves,
+      affiliateReplenishmentDemands: demands,
+      affiliateSourceDiscoveryCampaigns: campaigns,
+      affiliateSourceDiscoveryResults: discoveryResults,
+      affiliateSourceIntakes: intakes,
+      affiliateSourceMappingJobs: mappingJobs,
+      affiliateAgentGatewayJobs: gatewayJobs,
+      affiliateScrapeSources: sources,
+      affiliateSupplySources: supplySources,
+    });
+
+    const grant = await harness.gateway.claim(harness.request);
+    if (!grant) throw new Error("Expected one Coverage Planner claim.");
+    const providerEvidence = Buffer.from("provider discovery output", "utf8");
+    const providerEvidenceHash = createHash("sha256")
+      .update(providerEvidence)
+      .digest("hex");
+    harness.state.discoveryRuns.push({
+      id: "discovery-run-1",
+      campaignId: campaign.id,
+      status: "SUCCEEDED",
+    });
+    harness.state.receipts.push({
+      id: "discovery-receipt-1",
+      claimId: grant.envelope.claimId,
+      jobId: grant.envelope.jobId,
+      claimGeneration: grant.envelope.claimGeneration,
+      operationKind: "EXECUTE_COMMAND",
+      commandName: "RUN_DISCOVERY_QUERY",
+      status: "SUCCEEDED",
+      responseJson: {
+        kind: "COMMAND_SUCCEEDED",
+        safeOutput: {
+          evidenceRef: "provider-evidence-1",
+          artifactId: "provider-artifact-1",
+          sha256: providerEvidenceHash,
+          mimeType: "application/json",
+          byteSize: providerEvidence.byteLength,
+        },
+      },
+    });
+    harness.state.artifacts.push({
+      id: "provider-artifact-row-1",
+      claimId: grant.envelope.claimId,
+      claimGeneration: grant.envelope.claimGeneration,
+      evidenceRef: "provider-evidence-1",
+      evidenceKind: "PROVIDER_RESULT",
+      sourceArtifactId: "provider-artifact-1",
+      fileId: "provider-artifact-1",
+      contentHash: providerEvidenceHash,
+      mimeType: "application/json",
+      byteSize: providerEvidence.byteLength,
+    });
+    const operation = {
+      kind: "SUBMIT_RESULT" as const,
+      idempotencyKey: "coverage-domain-terminal",
+      authorization: gatewayAuthorizationFor(grant),
+      result: {
+        ...coverageTerminalResultFor(grant),
+        disposition: "CAMPAIGN_PROPOSED" as const,
+        reasonCodes: ["EVIDENCE_VERIFIED"] as const,
+        summary: "The coverage cell has one evidence-backed campaign.",
+        payload: { campaignProposalRefs: ["campaign-1"] },
+      },
+    };
+
+    const accepted = await harness.gateway.perform(operation);
+
+    expect(accepted).toMatchObject({
+      kind: "TERMINAL_ACCEPTED",
+      disposition: "CAMPAIGN_PROPOSED",
+    });
+    expect(wave).toEqual(expect.objectContaining({
+      status: "ACTIVE",
+      campaignId: "campaign-1",
+      provider: "COVERAGE_PLANNER",
+      evidenceRefs: [
+        "gateway-job:gateway-job-1",
+        "evidence-1",
+        "campaign:campaign-1",
+      ],
+    }));
+    expect(waves.update).toHaveBeenCalledTimes(1);
+    expect(mappingJobs.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        resultSummary: expect.objectContaining({
+          coveragePlannerDispatch: expect.objectContaining({
+            campaignId: campaign.id,
+            discoveryResultId: discoveryResult.id,
+            canonicalUrl: discoveryResult.canonicalUrl,
+          }),
+        }),
+      }),
+    }));
+    expect(gatewayJobs.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        subjectJson: {
+          type: "MAPPING_PRODUCER",
+          supplySourceId: supplySource.id,
+          mappingJobId: mappingJob.id,
+          pass: 1,
+        },
+      }),
+    }));
+    expect(harness.state.receipts).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        commandName: "GOVERNED_TERMINAL_DOMAIN_EFFECT",
+        operationKind: "TERMINAL_EFFECT",
+        status: "SUCCEEDED",
+        responseJson: expect.objectContaining({
+          kind: "SUCCEEDED",
+          safeOutput: expect.objectContaining({
+            kind: "COVERAGE_PLANNER_TERMINAL_EFFECT",
+            waveId: wave.id,
+          }),
+        }),
+      }),
+    ]));
+    await expect(harness.gateway.perform(operation)).resolves.toEqual(accepted);
+    expect(waves.update).toHaveBeenCalledTimes(1);
+  });
+
+  it("applies a Mapping Producer package result to its mapping lineage and reviewer queue", async () => {
+    const harness = createGatewayClaimHarness();
+    const mappingJob = {
+      id: "mapping-job-domain",
+      supplySourceId: "supply-source-domain",
+      sourceId: "scrape-source-domain",
+      mappingId: null,
+      resultSummary: {},
+    };
+    const source = {
+      id: "scrape-source-domain",
+      supplySourceId: "supply-source-domain",
+      activeMappingId: "mapping-domain",
+      targetKind: "EVENT",
+    };
+    const mappingJobs = {
+      findUnique: jest.fn(async () => mappingJob),
+      update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        Object.assign(mappingJob, data);
+        return mappingJob;
+      }),
+    };
+    const sources = {
+      findUnique: jest.fn(async () => source),
+    };
+    const targets = {
+      findFirst: jest.fn(async () => ({
+        targetId: "target-domain",
+        targetType: "EVENT",
+      })),
+    };
+    harness.setDomainDelegates({
+      affiliateSourceMappingJobs: mappingJobs,
+      affiliateScrapeSources: sources,
+      affiliateSupplyTargets: targets,
+    });
+    Object.assign(harness.state.jobs[0], {
+      queue: "AFFILIATE_MAPPING",
+      lane: "MAPPING_PRODUCTION",
+      role: "MAPPING_PRODUCER",
+      subjectType: "MAPPING_PRODUCER",
+      subjectId: "mapping-job-domain",
+      subjectJson: {
+        type: "MAPPING_PRODUCER",
+        supplySourceId: "supply-source-domain",
+        mappingJobId: "mapping-job-domain",
+        pass: 1,
+      },
+      supplySourceId: "supply-source-domain",
+      expectedLifecycleGeneration: 7,
+    });
+    const request: AffiliateAgentClaimRequest = {
+      idempotencyKey: "mapping-domain-claim",
+      roleCredential: "mapping-role-credential",
+      role: "MAPPING_PRODUCER",
+      workerId: "mapping-worker-domain",
+      invocationId: "mapping-invocation-domain",
+      workspaceAttestation: {
+        schemaVersion: 1,
+        workspaceId: "mapping-workspace-domain",
+        mode: "READ_WRITE",
+        executionClass: "PRODUCTION_CODEX",
+        workerId: "mapping-worker-domain",
+        invocationId: "mapping-invocation-domain",
+        issuedAt: "2026-08-20T17:59:00.000Z",
+        expiresAt: "2026-08-20T18:20:00.000Z",
+        signature: "valid-workspace-signature",
+      },
+    };
+    const grant = await harness.gateway.claim(request);
+    if (!grant) throw new Error("Expected one Mapping Producer claim.");
+    const packageHash = "b".repeat(64);
+    harness.state.receipts.push({
+      id: "mapping-commit-receipt-domain",
+      claimId: grant.envelope.claimId,
+      jobId: grant.envelope.jobId,
+      claimGeneration: grant.envelope.claimGeneration,
+      idempotencyKey: "mapping-commit-domain",
+      operationKind: "EXECUTE_COMMAND",
+      commandName: "COMMIT_DECLARATIVE_PACKAGE",
+      requestHash: "c".repeat(64),
+      status: "SUCCEEDED",
+      responseHash: "d".repeat(64),
+      responseJson: {
+        kind: "COMMAND_SUCCEEDED",
+        receiptId: "mapping-commit-receipt-domain",
+        commandType: "COMMIT_DECLARATIVE_PACKAGE",
+        responseHash: "d".repeat(64),
+        safeOutput: { packageHash },
+      },
+      startedAt: new Date("2026-08-20T18:00:00.000Z"),
+      completedAt: new Date("2026-08-20T18:00:01.000Z"),
+    });
+    harness.state.artifacts.push(
+      {
+        id: "mapping-package-artifact-domain",
+        claimId: grant.envelope.claimId,
+        claimGeneration: grant.envelope.claimGeneration,
+        evidenceRef: "committed-package",
+        evidenceKind: "COMMITTED_PACKAGE",
+        sourceArtifactId: "mapping-package-file-domain",
+        fileId: "mapping-package-file-domain",
+        contentHash: packageHash,
+        mimeType: "application/json",
+        byteSize: 128,
+        creatingClaimId: grant.envelope.claimId,
+      },
+      {
+        id: "mapping-validation-artifact-domain",
+        claimId: grant.envelope.claimId,
+        claimGeneration: grant.envelope.claimGeneration,
+        evidenceRef: "deterministic-validation",
+        evidenceKind: "DETERMINISTIC_VALIDATION",
+        sourceArtifactId: "mapping-validation-file-domain",
+        fileId: "mapping-validation-file-domain",
+        contentHash: "e".repeat(64),
+        mimeType: "application/json",
+        byteSize: 256,
+        creatingClaimId: grant.envelope.claimId,
+      },
+      {
+        id: "mapping-durable-artifact-domain",
+        claimId: grant.envelope.claimId,
+        claimGeneration: grant.envelope.claimGeneration,
+        evidenceRef: "durable-evidence",
+        evidenceKind: "DURABLE_EVIDENCE",
+        sourceArtifactId: "mapping-durable-file-domain",
+        fileId: "mapping-durable-file-domain",
+        contentHash: "f".repeat(64),
+        mimeType: "text/markdown",
+        byteSize: 512,
+        creatingClaimId: grant.envelope.claimId,
+      },
+    );
+    const reviewerUpsert = jest.fn(async ({
+      create,
+    }: {
+      create: Record<string, unknown>;
+    }) => ({
+      ...create,
+      id: "mapping-reviewer-job-domain",
+    }));
+    harness.setDomainDelegates({
+      affiliateAgentGatewayJobs: { upsert: reviewerUpsert },
+    });
+    const resultOperation = {
+      kind: "SUBMIT_RESULT" as const,
+      idempotencyKey: "mapping-domain-terminal",
+      authorization: gatewayAuthorizationFor(grant),
+      result: {
+        ...coverageTerminalResultFor(grant),
+        role: "MAPPING_PRODUCER" as const,
+        disposition: "PACKAGE_COMMITTED" as const,
+        reasonCodes: ["SCHEMA_VALIDATED"] as const,
+        summary: "The declarative mapping package is committed.",
+        payload: {
+          packageHash,
+          commitReceiptId: "mapping-commit-receipt-domain",
+        },
+      },
+    };
+
+    const accepted = await harness.gateway.perform(resultOperation);
+    expect(accepted).toMatchObject({
+      kind: "TERMINAL_ACCEPTED",
+      disposition: "PACKAGE_COMMITTED",
+    });
+    expect(mappingJob).toEqual(expect.objectContaining({
+      status: "COMPLETED",
+      sourceId: source.id,
+      mappingId: source.activeMappingId,
+      commit: "mapping-commit-receipt-domain",
+      claimedAt: null,
+      workerId: null,
+      leaseExpiresAt: null,
+    }));
+    expect(mappingJobs.update).toHaveBeenCalledTimes(1);
+    expect(reviewerUpsert).toHaveBeenCalledTimes(1);
+    expect(reviewerUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        dedupeKey: `mapping-review:${grant.envelope.claimId}:${packageHash}:1`,
+      },
+      create: expect.objectContaining({
+        queue: "AFFILIATE_REVIEW",
+        lane: "SUPPLY_REVIEW",
+        role: "SUPPLY_REVIEWER",
+        parentClaimId: grant.envelope.claimId,
+        supplySourceId: "supply-source-domain",
+        subjectJson: expect.objectContaining({
+          type: "SUPPLY_REVIEWER",
+          producerClaimId: grant.envelope.claimId,
+          committedPackageHash: packageHash,
+          targetId: "target-domain",
+          targetType: "EVENT",
+          reviewPass: 1,
+        }),
+        evidenceManifestJson: expect.objectContaining({
+          hash: expect.any(String),
+          entries: expect.arrayContaining([
+            expect.objectContaining({
+              evidenceRef: "committed-package",
+              kind: "COMMITTED_PACKAGE",
+              artifactId: "mapping-package-file-domain",
+              sha256: packageHash,
+            }),
+          ]),
+        }),
+      }),
+    }));
+    expect(harness.state.receipts).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        commandName: "GOVERNED_TERMINAL_DOMAIN_EFFECT",
+        operationKind: "TERMINAL_EFFECT",
+        status: "SUCCEEDED",
+        responseJson: expect.objectContaining({
+          kind: "SUCCEEDED",
+          safeOutput: expect.objectContaining({
+            kind: "MAPPING_PRODUCER_TERMINAL_EFFECT",
+            mappingJobId: "mapping-job-domain",
+            reviewerJobId: "mapping-reviewer-job-domain",
+          }),
+        }),
+      }),
+    ]));
+    await expect(harness.gateway.perform(resultOperation)).resolves.toEqual(accepted);
+    expect(mappingJobs.update).toHaveBeenCalledTimes(1);
+    expect(reviewerUpsert).toHaveBeenCalledTimes(1);
+  });
+
   it("claims Mapping Producer work, validates and commits one declarative package, and replays its terminal result", async () => {
+    let alertWriterCalls = 0;
+    const operationalAlert: AffiliateOperationalAlertWriter = async (
+      _input: AffiliateOperationalAlertInput,
+    ) => {
+      alertWriterCalls += 1;
+      if (alertWriterCalls === 1) {
+        return {
+          alertId: "alert-1",
+          deliveries: [{
+            channel: "webhook",
+            status: "FAILED",
+            errorMessage: "Simulated post-commit alert failure.",
+          }],
+        };
+      }
+      return {
+        alertId: `alert-${String(alertWriterCalls)}`,
+        deliveries: [],
+      };
+    };
     const harness = createGatewayClaimHarness({
       advanceClockDuringTransactionalCommandSeconds: 7,
+      operationalAlert,
+      persistLifecycleAlertTransition: true,
     });
+    const listBytes = Buffer.from(
+      '<div class="event-card"><span class="event-title">Sample event</span><a class="event-link" href="/events/sample">Details</a></div>',
+      "utf8",
+    );
+    harness.setArtifactRead({
+      bytes: new Uint8Array(listBytes),
+      mimeType: "text/markdown",
+      byteSize: listBytes.byteLength,
+      sourceUrl: "https://evidence.example.test/page",
+    });
+    const listManifestPreimage = {
+      schemaVersion: 1 as const,
+      entries: [
+        {
+          evidenceRef: "evidence-1",
+          kind: "PAGE_MARKDOWN" as const,
+          artifactId: "file-evidence-1",
+          sha256: createHash("sha256").update(listBytes).digest("hex"),
+          mimeType: "text/markdown",
+          byteSize: listBytes.byteLength,
+          retention: "INDEFINITE" as const,
+        },
+      ],
+    };
+    harness.state.jobs[0].evidenceManifestJson = {
+      ...listManifestPreimage,
+      hash: hashAffiliateAgentValue(listManifestPreimage),
+    };
     Object.assign(harness.state.jobs[0], {
       queue: "AFFILIATE_MAPPING",
       lane: "MAPPING_PRODUCTION",
@@ -3205,6 +4291,13 @@ describe("Prisma affiliate Agent Gateway", () => {
       listUrlRef: "evidence-1",
       itemSelector: ".event-card",
       fields: [
+        {
+          field: "officialActionUrl" as const,
+          selector: ".event-link" as const,
+          mode: "ATTRIBUTE" as const,
+          attribute: "href",
+          transform: "ABSOLUTE_URL" as const,
+        },
         {
           field: "title" as const,
           selector: ".event-title",
@@ -3258,23 +4351,32 @@ describe("Prisma affiliate Agent Gateway", () => {
       startedAt: new Date("2026-08-20T18:00:00.000Z"),
       completedAt: new Date("2026-08-20T18:00:07.000Z"),
     });
-    const committed = await harness.gateway.perform({
-      kind: "EXECUTE_COMMAND",
+    const commitOperation = {
+      kind: "EXECUTE_COMMAND" as const,
       idempotencyKey: "mapping-commit-1",
       authorization,
       command: {
-        type: "COMMIT_DECLARATIVE_PACKAGE",
+        type: "COMMIT_DECLARATIVE_PACKAGE" as const,
         data: {
           validationReceiptId: validation.receiptId,
           validatedPackageHash: packageHash,
         },
       },
+    };
+    await expect(
+      harness.gateway.perform(commitOperation),
+    ).rejects.toMatchObject({
+      code: "INTERNAL_ERROR",
+      isRetryable: true,
+      receiptId: expect.any(String),
     });
+    const committed = await harness.gateway.perform(commitOperation);
     expect(committed).toMatchObject({
       kind: "COMMAND_SUCCEEDED",
       commandType: "COMMIT_DECLARATIVE_PACKAGE",
       safeOutput: { packageHash },
     });
+    expect(alertWriterCalls).toBe(2);
     const replayedCommit = await harness.gateway.perform({
       kind: "EXECUTE_COMMAND",
       idempotencyKey: "mapping-commit-replay",
@@ -3853,6 +4955,117 @@ describe("Prisma affiliate Agent Gateway", () => {
       leaseExpiresAt: new Date("2026-08-20T18:06:00.000Z"),
     });
   });
+  it("normalizes database authorization loss across claim and active operations", async () => {
+    const claimHarness = createGatewayClaimHarness();
+    claimHarness.setNextTransactionError({ code: "P1000" });
+    await expect(claimHarness.gateway.claim(claimHarness.request)).rejects.toMatchObject({
+      code: "GATEWAY_ADMISSION_HALTED",
+      safeMessage: "Gateway admission is halted because gateway database authorization failed.",
+      isRetryable: false,
+    });
+
+    const harness = createGatewayClaimHarness();
+    const grant = await harness.gateway.claim(harness.request);
+    if (!grant) throw new Error("Expected one Coverage Planner claim.");
+    harness.setNextTransactionError({
+      code: "P2010",
+      meta: { driverAdapterError: { originalCode: "42501" } },
+    });
+    await expect(
+      harness.gateway.perform({
+        kind: "HEARTBEAT",
+        idempotencyKey: "heartbeat-auth-revoked",
+        authorization: gatewayAuthorizationFor(grant),
+      }),
+    ).rejects.toMatchObject({
+      code: "GATEWAY_ADMISSION_HALTED",
+      safeMessage: "Gateway admission is halted because gateway database authorization failed.",
+      isRetryable: false,
+    });
+
+    harness.setNextTransactionError({ cause: { code: "P1010" } });
+    await expect(
+      harness.gateway.perform(
+        failureOperationFor(grant, "failure-auth-revoked", "PROCESS_CRASH"),
+      ),
+    ).rejects.toMatchObject({
+      code: "GATEWAY_ADMISSION_HALTED",
+      safeMessage: "Gateway admission is halted because gateway database authorization failed.",
+      isRetryable: false,
+    });
+  });
+  it("replays concurrent identical heartbeats after an operation receipt race", async () => {
+    const harness = createGatewayClaimHarness();
+    const grant = await harness.gateway.claim(harness.request);
+    if (!grant) throw new Error("Expected one Coverage Planner claim.");
+    let releaseReads = (): void => undefined;
+    let markBothReads = (): void => undefined;
+    const readsReleased = new Promise<void>((resolve) => {
+      releaseReads = resolve;
+    });
+    const bothReads = new Promise<void>((resolve) => {
+      markBothReads = resolve;
+    });
+    harness.setOperationReceiptReadBarrier({
+      remaining: 2,
+      entered: markBothReads,
+      released: readsReleased,
+    });
+    const operation = {
+      kind: "HEARTBEAT" as const,
+      idempotencyKey: "heartbeat-receipt-race",
+      authorization: gatewayAuthorizationFor(grant),
+    };
+    harness.setOperationReceiptCreateConflict(
+      {
+        code: "P2002",
+        meta: { target: ["claimId", "idempotencyKey"] },
+      },
+      true,
+    );
+
+    const pending = [
+      harness.gateway.perform(operation),
+      harness.gateway.perform(operation),
+    ];
+    await bothReads;
+    releaseReads();
+    const results = await Promise.all(pending);
+
+    expect(results[0]).toEqual(results[1]);
+    expect(harness.state.receipts).toHaveLength(1);
+    expect(harness.state.receipts[0]).toMatchObject({
+      claimId: grant.envelope.claimId,
+      idempotencyKey: operation.idempotencyKey,
+      status: "SUCCEEDED",
+    });
+    await expect(harness.gateway.perform(operation)).resolves.toEqual(
+      results[0],
+    );
+  });
+
+  it("does not replay a heartbeat for an unrelated receipt unique violation", async () => {
+    const harness = createGatewayClaimHarness();
+    const grant = await harness.gateway.claim(harness.request);
+    if (!grant) throw new Error("Expected one Coverage Planner claim.");
+    const operation = {
+      kind: "HEARTBEAT" as const,
+      idempotencyKey: "heartbeat-unrelated-unique",
+      authorization: gatewayAuthorizationFor(grant),
+    };
+    harness.setOperationReceiptCreateConflict({
+      code: "P2002",
+      meta: { target: ["externalOperationKey"] },
+    });
+    const transactionCallsBefore = harness.state.transactionCalls;
+
+    await expect(harness.gateway.perform(operation)).rejects.toMatchObject({
+      code: "INTERNAL_ERROR",
+      isRetryable: false,
+    });
+    expect(harness.state.transactionCalls).toBe(transactionCallsBefore + 1);
+    expect(harness.state.receipts).toHaveLength(0);
+  });
 
   it("reads only a claim-manifest artifact after integrity verification", async () => {
     const { gateway, request, artifactBytes } = createGatewayClaimHarness();
@@ -3971,6 +5184,51 @@ describe("Prisma affiliate Agent Gateway", () => {
         artifactId: "capture-file-1",
       },
     });
+    expect(completed).toMatchObject({
+      safeOutput: {
+        captureMetadata: {
+          provider: "SCRAPINGDOG",
+          request: captureRecordSummaryFixture({
+            method: "GET",
+            profile: "capture-profile",
+          }),
+          response: captureRecordSummaryFixture({
+            status: "ok",
+            requestId: "provider-request-1",
+          }),
+          requestedUrl: "https://capture.example.test/requested",
+          finalUrl: "https://capture.example.test/final",
+          providerStatusCode: 207,
+          targetStatusCode: 200,
+          renderMode: "JAVASCRIPT",
+          elapsedMs: 321,
+          estimatedCredits: 5,
+          warnings: ["used provider fallback"],
+          providerJobId: "provider-job-1",
+          attempts: [{
+            renderMode: "STATIC",
+            providerStatusCode: 200,
+            elapsedMs: 123,
+            estimatedCredits: 1,
+            accepted: false,
+            quality: { textLength: 0 },
+            error: "insufficient content",
+          }],
+          providerArtifacts: {
+            markdown: captureTextSummaryFixture("# Capture"),
+            links: captureSetSummaryFixture([
+              "https://capture.example.test/final",
+            ]),
+            images: captureSetSummaryFixture([
+              "https://capture.example.test/image.png",
+            ]),
+            branding: { name: "Capture Example" },
+            screenshotUrl: "https://capture.example.test/screenshot.png",
+            metadata: { source: "test" },
+          },
+        },
+      },
+    });
     expect(await harness.gateway.perform(operation)).toEqual(completed);
     expect(harness.state.externalStartKeys).toHaveLength(1);
     expect(harness.state.externalRecoverKeys).toHaveLength(0);
@@ -4018,6 +5276,34 @@ describe("Prisma affiliate Agent Gateway", () => {
     expect(recovered).toMatchObject({
       kind: "COMMAND_SUCCEEDED",
       commandType: "CAPTURE_CLAIM_URL",
+    });
+    expect(recovered).toMatchObject({
+      safeOutput: {
+        captureMetadata: {
+          provider: "SCRAPINGDOG",
+          requestedUrl: "https://capture.example.test/requested",
+          finalUrl: "https://capture.example.test/final",
+          providerStatusCode: 207,
+          targetStatusCode: 200,
+          renderMode: "JAVASCRIPT",
+          elapsedMs: 321,
+          estimatedCredits: 5,
+          warnings: ["used provider fallback"],
+          providerJobId: "provider-job-1",
+          attempts: [{
+            renderMode: "STATIC",
+            providerStatusCode: 200,
+            elapsedMs: 123,
+            estimatedCredits: 1,
+            accepted: false,
+            quality: { textLength: 0 },
+            error: "insufficient content",
+          }],
+          providerArtifacts: {
+            metadata: { source: "test" },
+          },
+        },
+      },
     });
     expect(harness.state.externalStartKeys).toHaveLength(1);
 
@@ -4121,7 +5407,9 @@ describe("Prisma affiliate Agent Gateway", () => {
   });
 
   it("carries a successful lifecycle effect to the retry claim", async () => {
-    const harness = createGatewayClaimHarness();
+    const harness = createGatewayClaimHarness({
+      persistLifecycleTransition: true,
+    });
     harness.setLifecycleResponseLoss(true);
     const humanManifestPreimage = {
       schemaVersion: 1 as const,
@@ -4219,16 +5507,58 @@ describe("Prisma affiliate Agent Gateway", () => {
       },
     };
     const secondGrant = await harness.gateway.claim(secondRequest);
-    await expect(
-      harness.gateway.perform({
-        kind: "EXECUTE_COMMAND",
-        idempotencyKey: "lifecycle-carry-command-2",
-        authorization: gatewayAuthorizationFor(secondGrant),
-        command,
-      }),
-    ).resolves.toMatchObject({
+    expect(secondGrant?.envelope.lifecycleGeneration).toBe(8);
+    expect(harness.state.jobs[0]).toMatchObject({
+      expectedLifecycleGeneration: 8,
+    });
+    const adoptedCommandResult = await harness.gateway.perform({
+      kind: "EXECUTE_COMMAND",
+      idempotencyKey: "lifecycle-carry-command-2",
+      authorization: gatewayAuthorizationFor(secondGrant),
+      command,
+    });
+    expect(adoptedCommandResult).toMatchObject({
       kind: "COMMAND_SUCCEEDED",
       commandType: "EXECUTE_RECORDED_LIFECYCLE_COMMAND",
+    });
+    const adoptedTerminal = {
+      kind: "SUBMIT_RESULT" as const,
+      idempotencyKey: "lifecycle-carry-terminal-2",
+      authorization: gatewayAuthorizationFor(secondGrant),
+      result: {
+        schemaVersion: 1 as const,
+        jobId: secondGrant.envelope.jobId,
+        claimId: secondGrant.envelope.claimId,
+        claimGeneration: secondGrant.envelope.claimGeneration,
+        lifecycleGeneration: secondGrant.envelope.lifecycleGeneration,
+        deploymentContractVersion: secondGrant.envelope.deploymentContractVersion,
+        deploymentContractHash: secondGrant.envelope.deploymentContractHash,
+        supplyContractVersion: secondGrant.envelope.supplyContractVersion,
+        supplyContractHash: secondGrant.envelope.supplyContractHash,
+        roleContractVersion: secondGrant.envelope.roleContractVersion,
+        roleContractHash: secondGrant.envelope.roleContractHash,
+        promptTemplateVersion: secondGrant.envelope.promptTemplateVersion,
+        promptTemplateHash: secondGrant.envelope.promptTemplateHash,
+        workerId: secondGrant.envelope.workerId,
+        role: "HUMAN_DIRECTED_EXECUTOR" as const,
+        invocationId: secondGrant.envelope.invocationId,
+        disposition: "LIFECYCLE_COMMAND_EXECUTED" as const,
+        reasonCodes: ["EVIDENCE_VERIFIED"] as const,
+        evidenceRefs: [
+          "lifecycle-carry-evidence-1",
+          "lifecycle-carry-evidence-2",
+        ] as const,
+        summary: "The adopted lifecycle command completed.",
+        payload: {
+          caseId: "case-1",
+          lifecycleCommandRef: "lifecycle-command-1",
+          receiptId: adoptedCommandResult.receiptId,
+        },
+      },
+    };
+    await expect(harness.gateway.perform(adoptedTerminal)).resolves.toMatchObject({
+      kind: "TERMINAL_ACCEPTED",
+      disposition: "LIFECYCLE_COMMAND_EXECUTED",
     });
     expect(harness.state.lifecycleCalls).toHaveLength(1);
     expect(
@@ -4422,6 +5752,24 @@ describe("Prisma affiliate Agent Gateway", () => {
     ).resolves.toMatchObject({
       kind: "COMMAND_SUCCEEDED",
       commandType: "CAPTURE_CLAIM_URL",
+    });
+    expect(harness.state.externalStartKeys).toHaveLength(1);
+  });
+  it("maps exhausted serializable effect conflicts to a safe gateway error", async () => {
+    const harness = createGatewayClaimHarness();
+    const grant = await harness.gateway.claim(harness.request);
+    if (!grant) throw new Error("Expected one Coverage Planner claim.");
+    harness.setTransactionConflictsAfterArtifactRead(3);
+
+    await expect(
+      harness.gateway.perform(
+        captureOperationFor(grant, "capture-finalization-exhausted"),
+      ),
+    ).rejects.toMatchObject({
+      code: "PARTIAL_COMMAND_UNRESOLVED",
+      safeMessage: "The external command could not be finalized.",
+      isRetryable: true,
+      receiptId: expect.any(String),
     });
     expect(harness.state.externalStartKeys).toHaveLength(1);
   });
@@ -4792,6 +6140,45 @@ describe("Prisma affiliate Agent Gateway", () => {
       }),
     ).rejects.toMatchObject({ code: "GATEWAY_ADMISSION_HALTED" });
   });
+  it("propagates an impossible invocation reconciliation as a global admission halt", async () => {
+    const harness = createGatewayClaimHarness();
+    harness.setExternalCaptureMode("LOSE_RESPONSE");
+    const grant = await harness.gateway.claim(harness.request);
+    if (!grant) throw new Error("Expected one Coverage Planner claim.");
+    const operation = {
+      kind: "EXECUTE_COMMAND" as const,
+      idempotencyKey: "invocation-halt-capture",
+      authorization: gatewayAuthorizationFor(grant),
+      command: {
+        type: "CAPTURE_CLAIM_URL" as const,
+        data: {
+          urlRef: "evidence-1",
+          captureProfileRef: "evidence-1",
+        },
+      },
+    };
+    await expect(harness.gateway.perform(operation)).rejects.toMatchObject({
+      code: "PARTIAL_COMMAND_UNRESOLVED",
+    });
+    const receipt = harness.state.receipts[0];
+    if (!receipt) throw new Error("Expected one pending receipt.");
+    receipt.claimGeneration = 99;
+    harness.setNow("2026-08-20T18:01:00.000Z");
+
+    await expect(
+      harness.reconciler.reconcileInvocation(
+        failureOperationFor(grant, "invocation-halt-failure", "PROCESS_CRASH"),
+      ),
+    ).rejects.toMatchObject({
+      code: "GATEWAY_ADMISSION_HALTED",
+      safeMessage: "Gateway admission is halted until an impossible receipt state is resolved.",
+      isRetryable: false,
+    });
+    expect(receipt).toMatchObject({
+      status: "UNKNOWN",
+      safeErrorCode: "GATEWAY_ADMISSION_HALTED",
+    });
+  });
 
   it("reconciles each expired lease once through plus five, plus fifteen, then Pipeline Blocked", async () => {
     const harness = createGatewayClaimHarness();
@@ -5025,10 +6412,12 @@ describe("Prisma affiliate Agent Gateway", () => {
     const secondGrant = await harness.gateway.claim({
       ...harness.request,
       idempotencyKey: "claim-after-deferred-lifecycle",
+      workerId: "coverage-worker-2",
       invocationId: "coverage-invocation-2",
       workspaceAttestation: {
         ...harness.request.workspaceAttestation,
         workspaceId: "coverage-workspace-2",
+        workerId: "coverage-worker-2",
         invocationId: "coverage-invocation-2",
         expiresAt: "2026-08-20T19:00:00.000Z",
       },
@@ -5373,6 +6762,161 @@ describe("Prisma affiliate Agent Gateway", () => {
       ),
     ).toBeNull();
   });
+
+  it("validates invocation reconciliation input before Prisma access", async () => {
+    const harness = createGatewayClaimHarness();
+    const grant = await harness.gateway.claim(harness.request);
+    if (!grant) throw new Error("Expected one Coverage Planner claim.");
+    const request = failureOperationFor(
+      grant,
+      "reconcile-input-validation",
+      "PROCESS_CRASH",
+    );
+    const invalidInputs: readonly unknown[] = [
+      {},
+      {
+        kind: "HEARTBEAT",
+        idempotencyKey: "heartbeat-input",
+        authorization: request.authorization,
+      },
+      { ...request, unexpected: true },
+      { ...request, idempotencyKey: "" },
+      {
+        ...request,
+        failure: { ...request.failure, claimId: "" },
+      },
+    ];
+    const transactionCallsBefore = harness.state.transactionCalls;
+
+    for (const invalidInput of invalidInputs) {
+      await expect(
+        harness.reconciler.reconcileInvocation(invalidInput as never),
+      ).rejects.toMatchObject({
+        code: "INTERNAL_ERROR",
+        safeMessage: "The invocation reconciliation request is invalid.",
+        isRetryable: false,
+      });
+      expect(harness.state.transactionCalls).toBe(transactionCallsBefore);
+    }
+
+    const reconciled = await harness.reconciler.reconcileInvocation(request);
+    expect(reconciled).toMatchObject({
+      kind: "INVOCATION_FAILED",
+      failureCode: "PROCESS_CRASH",
+      invocationFailureCount: 1,
+    });
+  });
+  it("best-effort reports alert delivery failure after durable intent", async () => {
+    let alertWriterCalls = 0;
+    const alertEventKeys: string[] = [];
+    const operationalAlert: AffiliateOperationalAlertWriter = async (
+      input: AffiliateOperationalAlertInput,
+    ) => {
+      alertWriterCalls += 1;
+      alertEventKeys.push(input.eventKey);
+      if (alertWriterCalls === 2) {
+        throw new Error("simulated alert delivery failure");
+      }
+      return {
+        alertId: `alert-${String(alertWriterCalls)}`,
+        deliveries: [],
+      };
+    };
+    const harness = createGatewayClaimHarness({ operationalAlert });
+    const grant = await harness.gateway.claim(harness.request);
+    if (!grant) throw new Error("Expected one Coverage Planner claim.");
+    const request = failureOperationFor(
+      grant,
+      "alert-delivery-failure",
+      "PROCESS_CRASH",
+    );
+
+    await expect(harness.gateway.perform(request)).resolves.toMatchObject({
+      kind: "INVOCATION_FAILED",
+    });
+    expect(harness.state.operationalAlerts).toHaveLength(1);
+    expect(harness.state.operationalAlerts[0]?.eventKey).toBe(alertEventKeys[0]);
+
+    await expect(harness.gateway.perform(request)).resolves.toMatchObject({
+      kind: "INVOCATION_FAILED",
+    });
+    expect(alertWriterCalls).toBe(3);
+    expect(harness.state.operationalAlerts).toHaveLength(1);
+    expect(alertEventKeys).toEqual([
+      alertEventKeys[0],
+      alertEventKeys[0],
+      alertEventKeys[0],
+    ]);
+  });
+  it("halts when database authorization fails while reporting an invocation alert", async () => {
+    const operationalAlert: AffiliateOperationalAlertWriter = async () => {
+      throw {
+        code: "P2010",
+        meta: { originalCode: "42501" },
+      };
+    };
+    const harness = createGatewayClaimHarness({ operationalAlert });
+    const grant = await harness.gateway.claim(harness.request);
+    if (!grant) throw new Error("Expected one Coverage Planner claim.");
+    const request = failureOperationFor(
+      grant,
+      "alert-auth-revoked",
+      "PROCESS_CRASH",
+    );
+
+    await expect(harness.gateway.perform(request)).rejects.toMatchObject({
+      code: "GATEWAY_ADMISSION_HALTED",
+      safeMessage: "Gateway admission is halted because gateway database authorization failed.",
+      isRetryable: false,
+    });
+  });
+  it("reports supervisor-recorded failures and replays without duplicate intent", async () => {
+    let alertWriterCalls = 0;
+    const alertEventKeys: string[] = [];
+    const operationalAlert: AffiliateOperationalAlertWriter = async (
+      input: AffiliateOperationalAlertInput,
+    ) => {
+      alertWriterCalls += 1;
+      alertEventKeys.push(input.eventKey);
+      return {
+        alertId: `alert-${String(alertWriterCalls)}`,
+        deliveries: [],
+      };
+    };
+    const harness = createGatewayClaimHarness({ operationalAlert });
+    const grant = await harness.gateway.claim(harness.request);
+    if (!grant) throw new Error("Expected one Coverage Planner claim.");
+    const request = failureOperationFor(
+      grant,
+      "supervisor-alert-replay",
+      "PROCESS_CRASH",
+    );
+
+    await expect(
+      harness.reconciler.reconcileInvocation(request),
+    ).resolves.toMatchObject({
+      kind: "INVOCATION_FAILED",
+      failureCode: "PROCESS_CRASH",
+    });
+    expect(alertWriterCalls).toBe(2);
+    expect(harness.state.operationalAlerts).toHaveLength(1);
+
+    await expect(
+      harness.reconciler.reconcileInvocation(request),
+    ).resolves.toMatchObject({
+      kind: "INVOCATION_FAILED",
+      failureCode: "PROCESS_CRASH",
+    });
+    expect(alertWriterCalls).toBe(3);
+    expect(harness.state.operationalAlerts).toHaveLength(1);
+    expect(alertEventKeys).toEqual([
+      alertEventKeys[0],
+      alertEventKeys[0],
+      alertEventKeys[0],
+    ]);
+  });
+
+
 
   it("reconciles the five supervisor-reportable invocation failure codes", async () => {
     const failureCodes = [

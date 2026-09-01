@@ -3,9 +3,13 @@ import type {
   PrismaClient,
 } from "@/generated/prisma/client";
 import { Prisma } from "@/generated/prisma/client";
-
 import type { AffiliateAgentGatewayDependencies } from "./agentGatewayAdapters";
 import { hashAffiliateAgentValue } from "./agentGatewayContracts";
+
+import type {
+  AffiliateOperationalAlertInput,
+  AffiliateOperationalAlertWriter,
+} from "./affiliateOperationalAlerts";
 import {
   AffiliateAgentClaimRaceError,
   recordInvocationFailureTransition,
@@ -15,6 +19,31 @@ const SERIALIZABLE_TRANSACTION_ATTEMPTS = 3;
 const AFFILIATE_AGENT_TERMINAL_EFFECT_COMMAND =
   "SUPPLY_REVIEWER_TERMINAL_EFFECT";
 const AFFILIATE_AGENT_TERMINAL_EFFECT_OPERATION = "TERMINAL_EFFECT";
+
+const emitClaimExpiryAlertWithRetry = async (
+  writer: AffiliateOperationalAlertWriter,
+  input: AffiliateOperationalAlertInput,
+): Promise<void> => {
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      const result = await writer(input);
+      const failedDeliveries = result.deliveries.filter(
+        (delivery) => delivery.status === "FAILED",
+      );
+      if (failedDeliveries.length === 0) return;
+      lastError = new Error(
+        `Claim expiry alert delivery failed on ${failedDeliveries.length} channel(s).`,
+      );
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  console.error(
+    "[affiliate:gateway] failed to persist claim expiry alert after retry",
+    lastError,
+  );
+};
 
 const findReconcileableExpiredClaimIds = async (
   client: PrismaClient,
@@ -292,8 +321,9 @@ export const reconcileExpiredClaims = async (
     if (outcome === "EXPIRED") {
       expired += 1;
       if (dependencies.operationalAlert) {
-        try {
-          await dependencies.operationalAlert({
+        await emitClaimExpiryAlertWithRetry(
+          dependencies.operationalAlert,
+          {
             eventKey: `affiliate-agent-claim-expired:${selectedClaim.id}`,
             category: "AGENT_LEASE_EXPIRED",
             severity: "critical",
@@ -308,10 +338,8 @@ export const reconcileExpiredClaims = async (
             nextState: "RETRY_WAIT",
             reasonCodes: ["LEASE_EXPIRED"],
             payload: { claimId: selectedClaim.id },
-          });
-        } catch (error) {
-          console.error("[affiliate:gateway] failed to persist claim expiry alert", error);
-        }
+          },
+        );
       }
       continue;
     }

@@ -1,6 +1,7 @@
 import { JSDOM, VirtualConsole } from 'jsdom';
 import {
   normalizeAffiliateEventDateTime,
+  type AffiliateDateTimeNormalization,
 } from './affiliateDateTime';
 import type {
   AffiliateCandidateInput,
@@ -199,48 +200,73 @@ const normalizeLocationCity = (value: string | null): string | null => {
   return city.length > 0 ? city : null;
 };
 
-export const parseVenueAddressFromLocationText = (value: string): LocationParts => {
-  const normalized = normalizeWhitespace(value.replace(/[–—]/g, '-'));
+const findLastStreetMatch = (value: string): RegExpMatchArray | undefined => {
   const streetPattern = new RegExp(
     `\\b(\\d{1,6}\\s+(?:(?:N|NE|NW|S|SE|SW|E|W)\\s+)?[A-Za-z0-9 ']+?\\b(?:${STREET_SUFFIX_PATTERN})(?:\\s*-\\s*[A-Za-z][A-Za-z .]+|\\s+[A-Za-z][A-Za-z .]+)?)`,
     'gi',
   );
-  const streetMatches = Array.from(normalized.matchAll(streetPattern));
-  const streetMatch = streetMatches[streetMatches.length - 1];
+  const streetMatches = Array.from(value.matchAll(streetPattern));
+  return streetMatches[streetMatches.length - 1];
+};
+
+const extractVenueName = (normalized: string, streetIndex: number): string | null => {
+  const venueText = normalized.slice(0, streetIndex).replace(/\s*-\s*$/, '').replace(/[.\s]+$/, '');
+  const sentenceParts = venueText.split(/\.\s*/).map(normalizeWhitespace).filter(Boolean);
+  const venueSentence = sentenceParts[sentenceParts.length - 1] ?? venueText;
+  const venueDashParts = venueSentence.split(/\s*-\s*/).map(normalizeWhitespace).filter(Boolean);
+  return venueDashParts[venueDashParts.length - 1]?.replace(/^\d{1,2}:\d{2}\s*[AP]M\s*-\s*/i, '') ?? null;
+};
+
+const splitStreetAndCity = (value: string): { street: string; city: string | null } => {
+  let street = normalizeWhitespace(value);
+  const dashCity = street.match(/^(.*?)\s*-\s*([A-Za-z][A-Za-z .]+)$/);
+  if (dashCity?.[1] && dashCity[2]) {
+    return {
+      street: normalizeWhitespace(dashCity[1]),
+      city: normalizeLocationCity(dashCity[2]),
+    };
+  }
+
+  const suffixCityPattern = new RegExp(`^(.*\\b(?:${STREET_SUFFIX_PATTERN})\\b)\\s+([A-Za-z][A-Za-z .]+)$`, 'i');
+  const suffixCity = street.match(suffixCityPattern);
+  if (suffixCity?.[1] && suffixCity[2]) {
+    street = normalizeWhitespace(suffixCity[1]);
+    return {
+      street,
+      city: normalizeLocationCity(suffixCity[2]),
+    };
+  }
+
+  return { street, city: null };
+};
+
+const formatLocationCity = (city: string): string => (
+  `${city}${/\b(?:OR|Oregon)\b/i.test(city) ? '' : ', OR'}`
+);
+
+const formatLocationParts = (
+  venueName: string | null,
+  street: string,
+  city: string | null,
+): LocationParts => {
+  const formattedCity = city ? formatLocationCity(city) : null;
+  return {
+    venueName: venueName && venueName.length > 0 ? venueName : null,
+    address: formattedCity ? `${street}, ${formattedCity}` : street,
+    city: formattedCity,
+  };
+};
+
+export const parseVenueAddressFromLocationText = (value: string): LocationParts => {
+  const normalized = normalizeWhitespace(value.replace(/[–—]/g, '-'));
+  const streetMatch = findLastStreetMatch(normalized);
   if (!streetMatch?.[1] || streetMatch.index == null) {
     return { venueName: null, address: null, city: null };
   }
 
-  const venueText = normalized.slice(0, streetMatch.index).replace(/\s*-\s*$/, '').replace(/[.\s]+$/, '');
-  const sentenceParts = venueText.split(/\.\s*/).map(normalizeWhitespace).filter(Boolean);
-  const venueSentence = sentenceParts[sentenceParts.length - 1] ?? venueText;
-  const venueDashParts = venueSentence.split(/\s*-\s*/).map(normalizeWhitespace).filter(Boolean);
-  const venueName = venueDashParts[venueDashParts.length - 1]?.replace(/^\d{1,2}:\d{2}\s*[AP]M\s*-\s*/i, '') ?? null;
-
-  let street = normalizeWhitespace(streetMatch[1]);
-  let city: string | null = null;
-  const dashCity = street.match(/^(.*?)\s*-\s*([A-Za-z][A-Za-z .]+)$/);
-  if (dashCity?.[1] && dashCity[2]) {
-    street = normalizeWhitespace(dashCity[1]);
-    city = normalizeLocationCity(dashCity[2]);
-  } else {
-    const suffixCityPattern = new RegExp(`^(.*\\b(?:${STREET_SUFFIX_PATTERN})\\b)\\s+([A-Za-z][A-Za-z .]+)$`, 'i');
-    const suffixCity = street.match(suffixCityPattern);
-    if (suffixCity?.[1] && suffixCity[2]) {
-      street = normalizeWhitespace(suffixCity[1]);
-      city = normalizeLocationCity(suffixCity[2]);
-    }
-  }
-
-  const address = city
-    ? `${street}, ${city}${/\b(?:OR|Oregon)\b/i.test(city) ? '' : ', OR'}`
-    : street;
-
-  return {
-    venueName: venueName && venueName.length > 0 ? venueName : null,
-    address,
-    city: city ? `${city}${/\b(?:OR|Oregon)\b/i.test(city) ? '' : ', OR'}` : null,
-  };
+  const venueName = extractVenueName(normalized, streetMatch.index);
+  const location = splitStreetAndCity(streetMatch[1]);
+  return formatLocationParts(venueName, location.street, location.city);
 };
 
 const cloneElementWithoutExcludedSelectors = (element: Element, mapping: FieldMapping): Element => {
@@ -260,64 +286,122 @@ const textContentWithBlockSpacing = (element: Element): string => {
   return clone.textContent ?? '';
 };
 
+const extractElementValue = (
+  element: Element,
+  mapping: FieldMapping,
+  baseUrl: string,
+): string => {
+  const contentElement = cloneElementWithoutExcludedSelectors(element, mapping);
+  if (mapping.transform === 'telerikPostBackUrl') {
+    const ownerDocument = element.ownerDocument;
+    const elementId = element.getAttribute('id') ?? '';
+    return elementId ? findTelerikPostBackUrl(ownerDocument, elementId, baseUrl) ?? '' : '';
+  }
+  if (mapping.mode === 'attribute') {
+    return mapping.attribute ? element.getAttribute(mapping.attribute) ?? '' : '';
+  }
+  if (mapping.mode === 'html') {
+    return contentElement.innerHTML;
+  }
+  return textContentWithBlockSpacing(contentElement);
+};
+
+const extractRawFieldValue = (
+  root: Element,
+  mapping: FieldMapping,
+  baseUrl: string,
+): string | null => {
+  if (mapping.mode === 'literal') {
+    return mapping.value ?? '';
+  }
+  const element = selectElement(root, mapping.selector);
+  if (!element) return null;
+  return extractElementValue(element, mapping, baseUrl);
+};
+
+const isDateTimeTransform = (transform: FieldMapping['transform']): boolean => (
+  transform === 'dateTime'
+  || transform === 'dateRangeEnd'
+  || transform === 'previousDaySectionDateTime'
+);
+
+const applyLocationTransform = (
+  value: string,
+  transform: FieldMapping['transform'],
+): string | null => {
+  if (transform === 'venueFromLocationText') {
+    return parseVenueAddressFromLocationText(value).venueName ?? '';
+  }
+  if (transform === 'addressFromLocationText') {
+    return parseVenueAddressFromLocationText(value).address ?? '';
+  }
+  if (transform === 'cityFromLocationText') {
+    return parseVenueAddressFromLocationText(value).city ?? '';
+  }
+  return null;
+};
+
+const applyFieldTransform = (
+  value: string,
+  mapping: FieldMapping,
+  baseUrl: string,
+): string => {
+  const transform = mapping.transform ?? 'trim';
+  if (isDateTimeTransform(transform)) {
+    return normalizeWhitespace(value);
+  }
+  if (transform === 'absoluteUrl') {
+    return toAbsoluteUrl(normalizeWhitespace(value), baseUrl);
+  }
+  if (transform === 'priceText') {
+    return normalizePriceTextValue(value);
+  }
+  return applyLocationTransform(value, transform) ?? normalizeWhitespace(value);
+};
+
 const extractFieldValue = (
   root: Element,
   mapping: FieldMapping,
   baseUrl: string,
   referenceDate: Date,
 ): string | null => {
-  let value = '';
-  let element: Element | null = null;
-  if (mapping.mode === 'literal') {
-    value = mapping.value ?? '';
-  } else {
-    element = selectElement(root, mapping.selector);
-    if (!element) {
-      return null;
-    }
+  const rawValue = extractRawFieldValue(root, mapping, baseUrl);
+  if (rawValue == null) return null;
 
-    const contentElement = cloneElementWithoutExcludedSelectors(element, mapping);
-    if (mapping.mode === 'attribute') {
-      value = mapping.attribute ? element.getAttribute(mapping.attribute) ?? '' : '';
-    } else if (mapping.mode === 'html') {
-      value = contentElement.innerHTML;
-    } else {
-      value = textContentWithBlockSpacing(contentElement);
-    }
-
-    if (mapping.transform === 'telerikPostBackUrl') {
-      const ownerDocument = element.ownerDocument;
-      const elementId = element.getAttribute('id') ?? '';
-      value = elementId ? findTelerikPostBackUrl(ownerDocument, elementId, baseUrl) ?? '' : '';
-    }
-  }
-
-  value = applyRegex(value, mapping.regex);
-  value = applyValueMap(value, mapping);
+  const value = applyValueMap(applyRegex(rawValue, mapping.regex), mapping);
   if (normalizeWhitespace(value).length === 0) {
     return null;
   }
 
-  const transform = mapping.transform ?? 'trim';
-  if (transform === 'dateTime' || transform === 'dateRangeEnd' || transform === 'previousDaySectionDateTime') {
-    return normalizeWhitespace(value) || null;
-  }
+  const transformedValue = applyFieldTransform(value, mapping, baseUrl);
+  return transformedValue.length > 0 ? transformedValue : null;
+};
 
-  if (transform === 'absoluteUrl') {
-    value = toAbsoluteUrl(normalizeWhitespace(value), baseUrl);
-  } else if (transform === 'priceText') {
-    value = normalizePriceTextValue(value);
-  } else if (transform === 'venueFromLocationText') {
-    value = parseVenueAddressFromLocationText(value).venueName ?? '';
-  } else if (transform === 'addressFromLocationText') {
-    value = parseVenueAddressFromLocationText(value).address ?? '';
-  } else if (transform === 'cityFromLocationText') {
-    value = parseVenueAddressFromLocationText(value).city ?? '';
-  } else {
-    value = normalizeWhitespace(value);
+const resolveExtractedStartSource = (
+  rawStartsAt: string | null,
+  startMapping: FieldMapping | undefined,
+  startElement: Element | null | undefined,
+): string | null => {
+  if (startMapping?.transform !== 'previousDaySectionDateTime' || !startElement || !rawStartsAt) {
+    return rawStartsAt;
   }
+  const dayText = findNearestPreviousText(startElement, '.day-section');
+  return dayText ? `${dayText} ${rawStartsAt}` : rawStartsAt;
+};
 
-  return value.length > 0 ? value : null;
+const applyNormalizedExtractedDateTimeFields = (
+  fieldValues: Partial<Record<ExtractedFieldName, string | null>>,
+  rawStartsAt: string | null,
+  rawEndsAt: string | null,
+  rawTimeZone: string | null,
+  normalized: AffiliateDateTimeNormalization,
+): void => {
+  if (rawStartsAt) fieldValues.startsAt = normalized.startsAt;
+  if (normalized.endsAt || rawEndsAt) {
+    fieldValues.endsAt = normalized.endsAt;
+  }
+  if (rawTimeZone) fieldValues.timeZone = normalized.metadata.timeZone;
+  if (normalized.dateDisplayMode) fieldValues.dateDisplayMode = normalized.dateDisplayMode;
 };
 
 const normalizeExtractedDateTimeFields = (params: {
@@ -327,34 +411,34 @@ const normalizeExtractedDateTimeFields = (params: {
   referenceDate: Date;
 }) => {
   const { fieldValues, fieldMappings, fieldElements, referenceDate } = params;
-  const rawStartsAt = fieldValues.startsAt ?? null;
-  const rawEndsAt = fieldValues.endsAt ?? null;
-  const rawDurationText = fieldValues.durationText ?? null;
-  const rawTimeZone = fieldValues.timeZone ?? null;
-  const startElement = fieldElements.startsAt ?? null;
-  const startMapping = fieldMappings.startsAt;
-  let startSource = rawStartsAt;
-
-  if (startMapping?.transform === 'previousDaySectionDateTime' && startElement && rawStartsAt) {
-    const dayText = findNearestPreviousText(startElement, '.day-section');
-    if (dayText) startSource = `${dayText} ${rawStartsAt}`;
-  }
-
+  const {
+    startsAt: rawStartsAt = null,
+    endsAt: rawEndsAt = null,
+    durationText: rawDurationText = null,
+    timeZone: rawTimeZone = null,
+    dateDisplayMode = null,
+  } = fieldValues;
+  const startSource = resolveExtractedStartSource(
+    rawStartsAt,
+    fieldMappings.startsAt,
+    fieldElements.startsAt,
+  );
   const normalized = normalizeAffiliateEventDateTime({
     startsAt: startSource,
     endsAt: rawEndsAt,
     durationText: rawDurationText,
     timeZone: rawTimeZone,
-    dateDisplayMode: fieldValues.dateDisplayMode ?? null,
+    dateDisplayMode,
     referenceDate,
   });
 
-  if (rawStartsAt) fieldValues.startsAt = normalized.startsAt;
-  if (normalized.endsAt || rawEndsAt) {
-    fieldValues.endsAt = normalized.endsAt;
-  }
-  if (rawTimeZone) fieldValues.timeZone = normalized.metadata.timeZone;
-  if (normalized.dateDisplayMode) fieldValues.dateDisplayMode = normalized.dateDisplayMode;
+  applyNormalizedExtractedDateTimeFields(
+    fieldValues,
+    rawStartsAt,
+    rawEndsAt,
+    rawTimeZone,
+    normalized,
+  );
 
   return {
     normalized,
@@ -388,91 +472,273 @@ const stringOrNull = (value: unknown): string | null => (
  * Re-run datetime normalization after the service resolves a candidate's
  * venue or source-organization coordinates to an IANA timezone.
  */
-export const normalizeAffiliateCandidateDateTime = (
-  candidate: AffiliateCandidateInput,
-  params: {
-    timeZone?: string | null;
-    timeZoneEvidence?: 'SOURCE_FIELD' | 'COORDINATES';
-    referenceDate: Date;
-    dateTimeInputs?: Record<string, unknown>;
+export type AffiliateCandidateDateTimeInput = Omit<
+  AffiliateCandidateInput,
+  'startsAt' | 'endsAt'
+> & {
+  startsAt?: string | Date | null;
+  endsAt?: string | Date | null;
+};
+
+type AffiliateCandidateDateTimeParams = {
+  timeZone?: string | null;
+  timeZoneEvidence?: 'SOURCE_FIELD' | 'COORDINATES';
+  referenceDate: Date;
+  dateTimeInputs?: Record<string, unknown>;
+};
+
+type CandidateDateTimeValues = {
+  startsAt: string | null;
+  endsAt: string | null;
+  durationText: string | null;
+  dateDisplayMode: string | null;
+  timeZone: string | null;
+};
+
+const hasRecordKey = (
+  records: ReadonlyArray<Record<string, unknown>>,
+  fieldName: string,
+): boolean => {
+  for (const record of records) {
+    if (Object.prototype.hasOwnProperty.call(record, fieldName)) return true;
+  }
+  return false;
+};
+
+const selectDateTimeInputValue = (
+  overrides: Record<string, unknown>,
+  fieldName: string,
+  fallback: unknown,
+): unknown => {
+  if (Object.prototype.hasOwnProperty.call(overrides, fieldName)) {
+    return overrides[fieldName];
+  }
+  return fallback;
+};
+
+const resolveCandidateDateTimeValues = (
+  candidate: AffiliateCandidateDateTimeInput,
+  params: AffiliateCandidateDateTimeParams,
+  dateTimeInputs: Record<string, unknown>,
+  rawExtractedFields: Record<string, unknown>,
+  overrides: Record<string, unknown>,
+): CandidateDateTimeValues => ({
+  startsAt: stringOrNull(selectDateTimeInputValue(
+    overrides,
+    'startsAt',
+    dateTimeInputs.startsAt ?? rawExtractedFields.startsAt,
+  )),
+  endsAt: stringOrNull(selectDateTimeInputValue(
+    overrides,
+    'endsAt',
+    dateTimeInputs.endsAt ?? rawExtractedFields.endsAt,
+  )),
+  durationText: stringOrNull(selectDateTimeInputValue(
+    overrides,
+    'durationText',
+    dateTimeInputs.durationText ?? rawExtractedFields.durationText,
+  )),
+  dateDisplayMode: stringOrNull(selectDateTimeInputValue(
+    overrides,
+    'dateDisplayMode',
+    dateTimeInputs.dateDisplayMode ?? candidate.dateDisplayMode,
+  )),
+  timeZone: stringOrNull(selectDateTimeInputValue(
+    overrides,
+    'timeZone',
+    params.timeZone ?? candidate.timeZone,
+  )),
+});
+
+const resolveCandidateTimeZoneEvidence = (
+  params: AffiliateCandidateDateTimeParams,
+  existingDateTimeMetadata: Record<string, unknown>,
+): 'SOURCE_FIELD' | 'COORDINATES' => {
+  if (params.timeZoneEvidence != null) return params.timeZoneEvidence;
+  if (existingDateTimeMetadata.timeZoneEvidence === 'COORDINATES') return 'COORDINATES';
+  return params.timeZone ? 'COORDINATES' : 'SOURCE_FIELD';
+};
+
+const buildNormalizedCandidate = <Candidate extends AffiliateCandidateDateTimeInput>(
+  candidate: Candidate,
+  rawPayload: Record<string, unknown>,
+  dateTimeInputs: Record<string, unknown>,
+  overrides: Record<string, unknown>,
+  values: CandidateDateTimeValues,
+  normalized: AffiliateDateTimeNormalization,
+): Candidate => ({
+  ...candidate,
+  timeZone: normalized.metadata.timeZone,
+  warnings: [
+    ...(candidate.warnings ?? []).filter((warning) => !isStaleMissingTimeZoneWarning(warning)),
+    ...normalized.metadata.warnings,
+  ],
+  rawPayload: {
+    ...rawPayload,
+    dateTimeInputs: {
+      ...dateTimeInputs,
+      ...overrides,
+    },
+    extractedFields: {
+      ...recordValue(rawPayload.extractedFields),
+      startsAt: normalized.startsAt,
+      endsAt: normalized.endsAt,
+      durationText: values.durationText,
+      timeZone: normalized.metadata.timeZone,
+      dateDisplayMode: normalized.dateDisplayMode,
+    },
+    normalizedImport: {
+      ...recordValue(rawPayload.normalizedImport),
+      dateTime: normalized.metadata,
+    },
   },
-): AffiliateCandidateInput => {
+} as Candidate);
+
+const applyNormalizedCandidateDateTimeFields = <Candidate extends AffiliateCandidateDateTimeInput>(
+  candidate: Candidate,
+  normalized: AffiliateDateTimeNormalization,
+  inputRecords: ReadonlyArray<Record<string, unknown>>,
+): Candidate => {
+  if (hasRecordKey(inputRecords, 'startsAt')) candidate.startsAt = normalized.startsAt;
+  if (hasRecordKey(inputRecords, 'startsAt') || hasRecordKey(inputRecords, 'endsAt')) {
+    candidate.endsAt = normalized.endsAt;
+  }
+  if (normalized.dateDisplayMode) candidate.dateDisplayMode = normalized.dateDisplayMode;
+  return candidate;
+};
+
+export const normalizeAffiliateCandidateDateTime = <
+  Candidate extends AffiliateCandidateDateTimeInput,
+>(
+  candidate: Candidate,
+  params: AffiliateCandidateDateTimeParams,
+): Candidate => {
   const rawPayload = recordValue(candidate.rawPayload);
   const dateTimeInputs = recordValue(rawPayload.dateTimeInputs);
   const rawExtractedFields = recordValue(rawPayload.rawExtractedFields);
   const overrides = params.dateTimeInputs ?? {};
-  const hasInput = (fieldName: string): boolean => (
-    Object.prototype.hasOwnProperty.call(overrides, fieldName)
-    || Object.prototype.hasOwnProperty.call(dateTimeInputs, fieldName)
-    || Object.prototype.hasOwnProperty.call(rawExtractedFields, fieldName)
+  const inputRecords = [overrides, dateTimeInputs, rawExtractedFields];
+  const values = resolveCandidateDateTimeValues(
+    candidate,
+    params,
+    dateTimeInputs,
+    rawExtractedFields,
+    overrides,
   );
-  const inputValue = (fieldName: string, fallback: unknown): unknown => (
-    Object.prototype.hasOwnProperty.call(overrides, fieldName)
-      ? overrides[fieldName]
-      : fallback
-  );
-  const startsAt = stringOrNull(inputValue('startsAt', dateTimeInputs.startsAt ?? rawExtractedFields.startsAt));
-  const endsAt = stringOrNull(inputValue('endsAt', dateTimeInputs.endsAt ?? rawExtractedFields.endsAt));
-  const durationText = stringOrNull(inputValue(
-    'durationText',
-    dateTimeInputs.durationText ?? rawExtractedFields.durationText,
-  ));
-  const dateDisplayMode = stringOrNull(inputValue(
-    'dateDisplayMode',
-    dateTimeInputs.dateDisplayMode ?? candidate.dateDisplayMode,
-  ));
-  const timeZone = stringOrNull(inputValue(
-    'timeZone',
-    params.timeZone ?? candidate.timeZone,
-  ));
   const existingDateTimeMetadata = recordValue(recordValue(rawPayload.normalizedImport).dateTime);
-  const timeZoneEvidence = params.timeZoneEvidence
-    ?? (existingDateTimeMetadata.timeZoneEvidence === 'COORDINATES'
-      ? 'COORDINATES'
-      : params.timeZone
-        ? 'COORDINATES'
-        : 'SOURCE_FIELD');
+  const timeZoneEvidence = resolveCandidateTimeZoneEvidence(params, existingDateTimeMetadata);
   const normalized = normalizeAffiliateEventDateTime({
+    ...values,
+    timeZoneEvidence,
+    referenceDate: params.referenceDate,
+  });
+  const nextCandidate = buildNormalizedCandidate(
+    candidate,
+    rawPayload,
+    dateTimeInputs,
+    overrides,
+    values,
+    normalized,
+  );
+  return applyNormalizedCandidateDateTimeFields(nextCandidate, normalized, inputRecords);
+};
+
+type ManualAffiliateCandidate = NonNullable<AffiliateScrapeMapping['manualCandidates']>[number];
+
+const createManualDateTimeInputs = (
+  manualCandidate: ManualAffiliateCandidate,
+): {
+  startsAt: string | null;
+  endsAt: string | null;
+  durationText: string | null;
+  timeZone: string | null;
+  dateDisplayMode: string | null;
+} => {
+  const {
+    startsAt = null,
+    endsAt = null,
+    durationText = null,
+    timeZone = null,
+    dateDisplayMode = null,
+  } = manualCandidate;
+  return {
     startsAt,
     endsAt,
     durationText,
     timeZone,
-    timeZoneEvidence,
     dateDisplayMode,
-    referenceDate: params.referenceDate,
+  };
+};
+
+const addManualCandidateFields = (
+  candidate: AffiliateCandidateInput,
+  manualCandidate: ManualAffiliateCandidate,
+): void => {
+  nullableFieldNames.forEach((fieldName) => {
+    const value = manualCandidate[fieldName as keyof typeof manualCandidate];
+    if (typeof value === 'string' && value.trim().length > 0) {
+      candidate[fieldName] = value.trim();
+    }
   });
-  const nextCandidate: AffiliateCandidateInput = {
-    ...candidate,
-    timeZone: normalized.metadata.timeZone,
-    warnings: [
-      ...(candidate.warnings ?? []).filter((warning) => !isStaleMissingTimeZoneWarning(warning)),
-      ...normalized.metadata.warnings,
-    ],
+  if (Array.isArray(manualCandidate.sportNames)) {
+    candidate.sportNames = manualCandidate.sportNames.map((value) => value.trim()).filter(Boolean);
+  }
+};
+
+const normalizeManualCandidateDateTime = (
+  candidate: AffiliateCandidateInput,
+  manualCandidate: ManualAffiliateCandidate,
+  fetchedAt: string,
+): AffiliateCandidateInput => {
+  const dateTimeInputs = createManualDateTimeInputs(manualCandidate);
+  const normalizedDateTime = normalizeAffiliateEventDateTime({
+    ...dateTimeInputs,
+    referenceDate: new Date(fetchedAt),
+  });
+  if (manualCandidate.startsAt != null) candidate.startsAt = normalizedDateTime.startsAt;
+  if (manualCandidate.endsAt != null || normalizedDateTime.endsAt != null) {
+    candidate.endsAt = normalizedDateTime.endsAt;
+  }
+  if (manualCandidate.timeZone != null) candidate.timeZone = normalizedDateTime.metadata.timeZone;
+  if (normalizedDateTime.dateDisplayMode) candidate.dateDisplayMode = normalizedDateTime.dateDisplayMode;
+  candidate.warnings = [...(candidate.warnings ?? []), ...normalizedDateTime.metadata.warnings];
+  const rawPayload = candidate.rawPayload as Record<string, unknown>;
+  rawPayload.normalizedImport = {
+    dateTime: normalizedDateTime.metadata,
+  };
+  rawPayload.dateTimeInputs = {
+    ...dateTimeInputs,
+  };
+  return candidate;
+};
+
+const createManualCandidate = (
+  manualCandidate: ManualAffiliateCandidate,
+  mapping: AffiliateScrapeMapping,
+  baseUrl: string,
+  index: number,
+  fetchedAt: string,
+): AffiliateCandidateInput => {
+  const dateTimeInputs = createManualDateTimeInputs(manualCandidate);
+  const candidate: AffiliateCandidateInput = {
+    listingKind: manualCandidate.listingKind ?? mapping.kind,
+    title: manualCandidate.title,
+    officialActionUrl: toAbsoluteUrl(manualCandidate.officialActionUrl, baseUrl),
+    sourceUrl: toAbsoluteUrl(manualCandidate.sourceUrl ?? manualCandidate.officialActionUrl, baseUrl),
+    tags: normalizeTagInputs(manualCandidate.tags ?? manualCandidate.tagText),
+    tagText: manualCandidate.tagText ?? null,
     rawPayload: {
-      ...rawPayload,
-      dateTimeInputs: {
-        ...dateTimeInputs,
-        ...overrides,
-      },
-      extractedFields: {
-        ...recordValue(rawPayload.extractedFields),
-        startsAt: normalized.startsAt,
-        endsAt: normalized.endsAt,
-        durationText,
-        timeZone: normalized.metadata.timeZone,
-        dateDisplayMode: normalized.dateDisplayMode,
-      },
-      normalizedImport: {
-        ...recordValue(rawPayload.normalizedImport),
-        dateTime: normalized.metadata,
-      },
+      sourceIndex: index,
+      manualSummaryCandidate: true,
+      extractedFields: manualCandidate,
+      dateTimeInputs,
+      tags: normalizeTagInputs(manualCandidate.tags ?? manualCandidate.tagText),
     },
+    warnings: manualCandidate.warnings ?? [],
   };
 
-  if (hasInput('startsAt')) nextCandidate.startsAt = normalized.startsAt;
-  if (hasInput('startsAt') || hasInput('endsAt')) nextCandidate.endsAt = normalized.endsAt;
-  if (normalized.dateDisplayMode) nextCandidate.dateDisplayMode = normalized.dateDisplayMode;
-  return nextCandidate;
+  addManualCandidateFields(candidate, manualCandidate);
+  return normalizeManualCandidateDateTime(candidate, manualCandidate, fetchedAt);
 };
 
 export const extractAffiliateCandidatesFromPage = (
@@ -481,68 +747,9 @@ export const extractAffiliateCandidatesFromPage = (
 ): AffiliateCandidateInput[] => {
   const baseUrl = page.finalUrl || page.url;
   if (mapping.manualCandidates?.length) {
-    return mapping.manualCandidates.map((manualCandidate, index) => {
-      const candidate: AffiliateCandidateInput = {
-        listingKind: manualCandidate.listingKind ?? mapping.kind,
-        title: manualCandidate.title,
-        officialActionUrl: toAbsoluteUrl(manualCandidate.officialActionUrl, baseUrl),
-        sourceUrl: toAbsoluteUrl(manualCandidate.sourceUrl ?? manualCandidate.officialActionUrl, baseUrl),
-        tags: normalizeTagInputs(manualCandidate.tags ?? manualCandidate.tagText),
-        tagText: manualCandidate.tagText ?? null,
-        rawPayload: {
-          sourceIndex: index,
-          manualSummaryCandidate: true,
-          extractedFields: manualCandidate,
-          dateTimeInputs: {
-            startsAt: manualCandidate.startsAt ?? null,
-            endsAt: manualCandidate.endsAt ?? null,
-            durationText: manualCandidate.durationText ?? null,
-            timeZone: manualCandidate.timeZone ?? null,
-            dateDisplayMode: manualCandidate.dateDisplayMode ?? null,
-          },
-          tags: normalizeTagInputs(manualCandidate.tags ?? manualCandidate.tagText),
-        },
-        warnings: manualCandidate.warnings ?? [],
-      };
-
-      nullableFieldNames.forEach((fieldName) => {
-        const value = manualCandidate[fieldName as keyof typeof manualCandidate];
-        if (typeof value === 'string' && value.trim().length > 0) {
-          candidate[fieldName] = value.trim();
-        }
-      });
-      if (Array.isArray(manualCandidate.sportNames)) {
-        candidate.sportNames = manualCandidate.sportNames.map((value) => value.trim()).filter(Boolean);
-      }
-
-      const normalizedDateTime = normalizeAffiliateEventDateTime({
-        startsAt: manualCandidate.startsAt ?? null,
-        endsAt: manualCandidate.endsAt ?? null,
-        durationText: manualCandidate.durationText ?? null,
-        timeZone: manualCandidate.timeZone ?? null,
-        dateDisplayMode: manualCandidate.dateDisplayMode ?? null,
-        referenceDate: new Date(page.fetchedAt),
-      });
-      if (manualCandidate.startsAt != null) candidate.startsAt = normalizedDateTime.startsAt;
-      if (manualCandidate.endsAt != null || normalizedDateTime.endsAt != null) {
-        candidate.endsAt = normalizedDateTime.endsAt;
-      }
-      if (manualCandidate.timeZone != null) candidate.timeZone = normalizedDateTime.metadata.timeZone;
-      if (normalizedDateTime.dateDisplayMode) candidate.dateDisplayMode = normalizedDateTime.dateDisplayMode;
-      candidate.warnings = [...(candidate.warnings ?? []), ...normalizedDateTime.metadata.warnings];
-      (candidate.rawPayload as Record<string, unknown>).normalizedImport = {
-        dateTime: normalizedDateTime.metadata,
-      };
-      (candidate.rawPayload as Record<string, unknown>).dateTimeInputs = {
-        startsAt: manualCandidate.startsAt ?? null,
-        endsAt: manualCandidate.endsAt ?? null,
-        durationText: manualCandidate.durationText ?? null,
-        timeZone: manualCandidate.timeZone ?? null,
-        dateDisplayMode: manualCandidate.dateDisplayMode ?? null,
-      };
-
-      return candidate;
-    });
+    return mapping.manualCandidates.map((manualCandidate, index) => (
+      createManualCandidate(manualCandidate, mapping, baseUrl, index, page.fetchedAt)
+    ));
   }
 
   const dom = createDom(page.body, page.finalUrl || page.url);

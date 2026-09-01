@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { Prisma } from "@/generated/prisma/client";
+import { normalizeExternalHttpUrl } from "@/lib/externalUrl";
 import { prisma } from "@/lib/prisma";
 import {
   AFFILIATE_OPERATIONS_VIEWS,
@@ -10,6 +11,8 @@ import {
   type AffiliateOperationsProjection,
   type AffiliateOperationsProjectionInput,
   type AffiliateOperationsView,
+  type AlertHistoryRow,
+  type AlertsProjection,
   type CandidateRow,
   type CandidatesProjection,
   type CoverageCellRow,
@@ -17,6 +20,7 @@ import {
   type DemandHistoryRow,
   type CampaignRow,
   type CoverageTargetRow,
+  type CutoverProjection,
   type DiscoveryOutcomeRow,
   type CoverageMovementRow,
   type ExceptionRow,
@@ -33,8 +37,18 @@ import {
   type ProjectionField,
   type ProjectionHistoryRow,
   type ProjectionRelatedRow,
-  type ReviewProjection,
+  type ReconciliationClaimEvidence,
+  type ReconciliationEvidencePage,
+  type ReconciliationEvidencePagination,
+  type ReconciliationFindingEvidence,
+  type ReconciliationPreflightEvidence,
+  type ReconciliationProcessEvidence,
+  type ReconciliationRecordEvidence,
+  type ReconciliationReportEvidence,
+  type ReconciliationRootEvidence,
+  type ReconciliationRunRow,
   type ReviewRow,
+  type ReviewProjection,
   type SourceRow,
   type SourcesProjection,
   type SupplyTargetDeficitRow,
@@ -49,12 +63,59 @@ import { affiliateDiscoveryPolicyKeyForUrl } from "./sourceDiscoveryRules";
 
 const MAX_PAGE_SIZE = 50;
 const MAX_PROJECTION_ROWS = 10_000;
+const MAX_EXCEPTION_ROWS = 50;
+const MAX_ALERT_RECOVERY_SCAN_ROWS = MAX_PROJECTION_ROWS + MAX_EXCEPTION_ROWS;
 const TRUNCATION_TOLERATED_COLLECTIONS = new Set([
   "transitions",
   "gatewayEvents",
   "alertDeliveries",
+  "reconciliationRuns",
+]);
+const NEVER_TRUNCATE_COLLECTIONS = new Set(["alertDeliveries"]);
+const boundedProjectionRowsFor = <
+  T extends Record<string, readonly unknown[]>,
+>(
+  rawRows: T,
+): T => {
+  const oversizedCollections = Object.entries(rawRows)
+    .filter(
+      ([collection, rows]) =>
+        rows.length > MAX_PROJECTION_ROWS &&
+        !TRUNCATION_TOLERATED_COLLECTIONS.has(collection),
+    )
+    .map(([collection]) => collection);
+  if (oversizedCollections.length > 0) {
+    throw new AffiliateOperationsProjectionIncompleteError(
+      oversizedCollections,
+    );
+  }
+  return Object.fromEntries(
+    Object.entries(rawRows).map(([collection, rows]) => [
+      collection,
+      rows.length > MAX_PROJECTION_ROWS &&
+      !NEVER_TRUNCATE_COLLECTIONS.has(collection)
+        ? rows.slice(0, MAX_PROJECTION_ROWS)
+        : rows,
+    ]),
+  ) as T;
+};
+const GLOBAL_OPERATIONAL_ALERT_SUBJECT_TYPES = [
+  "AUTOMATION_SUPERVISOR",
+  "ALERT",
+] as const;
+const GLOBAL_OPERATIONAL_ALERT_CATEGORIES = [
+  "ALERT_DELIVERY_FAILURE",
+  "AUTOMATION_ORCHESTRATION_FAILURE",
+  "STALE_WORK_RECOVERY",
+  "SUPERVISOR_HEARTBEAT_LOSS",
+] as const;
+const WORKER_HEALTH_RECOVERY_CATEGORIES = new Set([
+  "SUPERVISOR_HEARTBEAT_LOSS",
 ]);
 const DEFAULT_PAGE_SIZE = 25;
+const MAX_RECONCILIATION_EVIDENCE_ITEMS = 100;
+const MAX_RECONCILIATION_EVIDENCE_TEXT_LENGTH = 512;
+const MAX_PRESERVED_PUBLIC_TARGET_HREF_LENGTH = 2048;
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
 const ROLLUP_MS = 15 * MINUTE_MS;
@@ -122,7 +183,7 @@ const dateValue = (value: unknown): Date | null => {
 };
 
 const isWorkerHealthy = (
-  worker: ProjectionRows["workerHealth"][number],
+  worker: Readonly<{ status: unknown; leaseExpiresAt: unknown }>,
   now: Date,
 ): boolean => {
   const leaseExpiresAt = dateValue(worker.leaseExpiresAt);
@@ -152,6 +213,42 @@ const upper = (value: unknown): string =>
   String(value ?? "")
     .trim()
     .toUpperCase();
+const boundedEvidenceText = (value: unknown): string | null => {
+  const text = stringValue(value);
+  if (!text) return null;
+  return text.length > MAX_RECONCILIATION_EVIDENCE_TEXT_LENGTH
+    ? text.slice(0, MAX_RECONCILIATION_EVIDENCE_TEXT_LENGTH)
+    : text;
+};
+
+const boundedEvidenceList = (value: unknown): string[] =>
+  stringList(value).map((entry) =>
+    entry.slice(0, MAX_RECONCILIATION_EVIDENCE_TEXT_LENGTH),
+  );
+
+const boundedEvidenceCounts = (value: unknown): Readonly<Record<string, number>> =>
+  Object.fromEntries(
+    Object.entries(recordValue(value))
+      .filter(([key]) => /^[A-Za-z][A-Za-z0-9_.-]{0,80}$/.test(key))
+      .map(([key, entry]) => [key, numberValue(entry, Number.NaN)] as const)
+      .filter(([, entry]) => Number.isFinite(entry))
+      .sort(([left], [right]) => left.localeCompare(right))
+      .slice(0, MAX_RECONCILIATION_EVIDENCE_ITEMS),
+  );
+const boundedRecordsByKind = (
+  ...values: readonly unknown[]
+): Readonly<Record<string, number>> =>
+  boundedEvidenceCounts(firstDefinedEvidenceValue(...values));
+const boundedEvidenceCollection = <T>(
+  values: readonly T[],
+  includeAllCollections = false,
+): T[] =>
+  includeAllCollections
+    ? [...values]
+    : values.slice(0, MAX_RECONCILIATION_EVIDENCE_ITEMS);
+
+const evidenceEntries = (...values: readonly unknown[]): unknown[] =>
+  values.flatMap((value) => (Array.isArray(value) ? value : []));
 
 const targetKey = (
   marketKey: string | null,
@@ -170,6 +267,18 @@ const targetLabel = (
   [marketKey, sportId, upper(sourceProfile)].filter(Boolean).join(" / ") ||
   "Unclassified target";
 
+const ORGANIZATION_TARGET_TYPE_ALIASES = new Set([
+  "ORG",
+  "ORGS",
+  "ORGANIZATION",
+  "ORGANIZATIONS",
+  "ORGANISATION",
+  "ORGANISATIONS",
+  "CLUB",
+]);
+const isOrganizationTargetType = (value: unknown): boolean =>
+  ORGANIZATION_TARGET_TYPE_ALIASES.has(upper(value));
+
 const adminLink = (
   view: AffiliateOperationsView,
   detailType?: AffiliateOperationsDetailType,
@@ -186,6 +295,120 @@ const adminLink = (
   });
   return `/admin?${params.toString()}`;
 };
+const operationalAlertGatewayJobIdForLink = (
+  alert: Readonly<{
+    subjectType?: string | null;
+    subjectId?: string | null;
+    payload?: unknown;
+  }>,
+): string | null => {
+  const payload = recordValue(alert.payload);
+  const payloadJobId = stringValue(payload.gatewayJobId ?? payload.jobId);
+  if (payloadJobId) return payloadJobId;
+  if (
+    ["GATEWAY_JOB", "AGENT_GATEWAY_JOB", "AGENT_JOB"].includes(
+      upper(alert.subjectType),
+    )
+  ) {
+    return stringValue(alert.subjectId);
+  }
+  return null;
+};
+const operationalAlertGatewayJobContractForLink = (
+  alert: Readonly<{
+    rolloutCohort: string | null;
+    contractVersion: number | null;
+    subjectType?: string | null;
+    subjectId?: string | null;
+    payload?: unknown;
+  }>,
+  gatewayJobs: readonly Readonly<{
+    id: string;
+    subjectJson?: unknown;
+  }>[] = [],
+): Readonly<{
+  rolloutCohort: string | null;
+  contractVersion: number | null;
+}> => {
+  const gatewayJobId = operationalAlertGatewayJobIdForLink(alert);
+  const gatewaySubject = recordValue(
+    gatewayJobs.find((job) => job.id === gatewayJobId)?.subjectJson,
+  );
+  const gatewaySubjectVersion = numberValue(
+    gatewaySubject.contractVersion ?? gatewaySubject.supplyContractVersion,
+    -1,
+  );
+  return {
+    rolloutCohort:
+      alert.rolloutCohort ??
+      stringValue(gatewaySubject.rolloutCohort ?? gatewaySubject.cohort),
+    contractVersion:
+      alert.contractVersion ??
+      (gatewaySubjectVersion >= 0 ? gatewaySubjectVersion : null),
+  };
+};
+const adminLinkForOperationalAlert = (
+  alert: Readonly<{
+    id: string;
+    rolloutCohort: string | null;
+    contractVersion: number | null;
+    subjectType?: string | null;
+    subjectId?: string | null;
+    supplySourceId?: string | null;
+    payload?: unknown;
+  }>,
+  recoveryRows: OperationalAlertRecoveryRows,
+  view: AffiliateOperationsView = "alerts",
+): string => {
+  const contract = operationalAlertLineageContractForLink(
+    alert,
+    recoveryRows,
+  );
+  return adminLink(view, "alert", alert.id, {
+    rolloutCohort: contract.rolloutCohort,
+    contractVersion:
+      contract.contractVersion === null
+        ? undefined
+        : String(contract.contractVersion),
+  });
+};
+
+const appendProjectionContractToLinks = (
+  value: unknown,
+  contract: AffiliateOperationsContractSelection,
+): void => {
+  if (Array.isArray(value)) {
+    value.forEach((entry) => appendProjectionContractToLinks(entry, contract));
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  const record = value as Record<string, unknown>;
+  Object.entries(record).forEach(([key, entry]) => {
+    if (
+      key === "href" &&
+      typeof entry === "string" &&
+      entry.startsWith("/admin?")
+    ) {
+      const url = new URL(entry, "https://affiliate-operations.invalid");
+      const isAlertDetail =
+        url.searchParams.get("selectedType") === "alert" &&
+        url.searchParams.has("selected");
+      if (isAlertDetail && !url.searchParams.has("rolloutCohort")) return;
+      if (!url.searchParams.has("rolloutCohort")) {
+        url.searchParams.set("rolloutCohort", contract.rolloutCohort);
+      }
+      if (
+        contract.contractVersion !== null &&
+        !url.searchParams.has("contractVersion")
+      ) {
+        url.searchParams.set("contractVersion", String(contract.contractVersion));
+      }
+      record[key] = `${url.pathname}?${url.searchParams.toString()}`;
+      return;
+    }
+    appendProjectionContractToLinks(entry, contract);
+  });
+};
 
 const paginate = <T>(rows: readonly T[], page: number, pageSize: number) => {
   const safePage = Math.max(1, Math.trunc(page));
@@ -201,6 +424,65 @@ const paginate = <T>(rows: readonly T[], page: number, pageSize: number) => {
     total: rows.length,
   };
 };
+const clampedPageForTotal = (
+  page: number,
+  pageSize: number,
+  total: number,
+): number =>
+  Math.min(
+    Math.max(1, Math.trunc(page)),
+    Math.max(1, Math.ceil(Math.max(0, total) / pageSize)),
+  );
+type ProjectionTimestampedValue = Readonly<{
+  id: string;
+  at?: unknown;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+  attempt?: unknown;
+}>;
+
+const projectionTimestampFor = (
+  value: ProjectionTimestampedValue,
+): number =>
+  dateValue(value.at ?? value.createdAt ?? value.updatedAt)?.getTime() ?? 0;
+
+const compareProjectionTimestamp = (
+  left: ProjectionTimestampedValue,
+  right: ProjectionTimestampedValue,
+): number => projectionTimestampFor(right) - projectionTimestampFor(left);
+
+const compareProjectionTimestampIdAttempt = (
+  left: ProjectionTimestampedValue,
+  right: ProjectionTimestampedValue,
+): number => {
+  const timestampComparison = compareProjectionTimestamp(left, right);
+  if (timestampComparison) return timestampComparison;
+  const idComparison = left.id.localeCompare(right.id);
+  if (idComparison) return idComparison;
+  return (
+    numberValue(right.attempt, -1) - numberValue(left.attempt, -1)
+  );
+};
+
+const alertDeliveryStatusPriority = (value: unknown): number =>
+  ["DELIVERED", "FAILED", "NOT_CONFIGURED"].includes(upper(value)) ? 1 : 0;
+
+const compareAlertDeliveryRecency = (
+  left: ProjectionTimestampedValue & Readonly<{ status?: unknown }>,
+  right: ProjectionTimestampedValue & Readonly<{ status?: unknown }>,
+): number => {
+  const timestampComparison = compareProjectionTimestamp(left, right);
+  if (timestampComparison) return timestampComparison;
+  const attemptComparison =
+    numberValue(right.attempt, -1) - numberValue(left.attempt, -1);
+  if (attemptComparison) return attemptComparison;
+  const statusComparison =
+    alertDeliveryStatusPriority(right.status)
+    - alertDeliveryStatusPriority(left.status);
+  if (statusComparison) return statusComparison;
+  return left.id.localeCompare(right.id);
+};
+
 
 const ageMinutes = (startedAt: unknown, now: Date): number => {
   const start = dateValue(startedAt);
@@ -323,6 +605,1060 @@ const isFreshTarget = (
 };
 
 type ProjectionRows = Awaited<ReturnType<typeof loadProjectionRows>>;
+type ProjectionAlertDeliveryRecord = Readonly<{
+  id: string;
+  createdAt: Date;
+  alertId: string;
+  channel: string;
+  status: string;
+  attempt: number;
+  deliveredAt: Date | null;
+  responseCode: number | null;
+  responseBody: string | null;
+  errorMessage: string | null;
+}>;
+type OperationalAlertRecoveryAlert = Readonly<{
+  id: string;
+  createdAt: Date;
+  eventKey: string;
+  category: string;
+  severity: string;
+  title: string;
+  detail: string;
+  subjectType: string | null;
+  subjectId: string | null;
+  rolloutCohort: string | null;
+  contractVersion: number | null;
+  supplySourceId: string | null;
+  coverageCellId: string | null;
+  demandId: string | null;
+  waveId: string | null;
+  lifecycleGeneration: number | null;
+  claimGeneration: number | null;
+  workerId: string | null;
+  queue: string | null;
+  attempt: number | null;
+  previousState: string | null;
+  nextState: string | null;
+  reasonCodes: unknown;
+  evidenceRefs: unknown;
+  payload: unknown;
+}>;
+type OperationalAlertRecoveryRows = Readonly<{
+  roots: readonly Readonly<{
+    id: string;
+    liveSourceId: string | null;
+    freshnessStatus: string;
+    lastSuccessfulRefreshAt: unknown;
+    lifecycleGeneration: number;
+    rolloutCohort?: string | null;
+    activeSupplyContractVersion?: number | null;
+    invariantViolations: unknown;
+  }>[];
+  scrapeRuns: readonly Readonly<{
+    id: string;
+    supplySourceId: string | null;
+    sourceId: string | null;
+    status?: unknown;
+    createdAt?: unknown;
+    updatedAt?: unknown;
+    startedAt?: unknown;
+    finishedAt?: unknown;
+  }>[];
+  gatewayJobs: readonly Readonly<{
+    id: string;
+    supplySourceId: string | null;
+    status: unknown;
+    subjectType?: string | null;
+    subjectId?: string | null;
+    subjectJson?: unknown;
+  }>[];
+  receipts: readonly Readonly<{
+    id?: string | null;
+    jobId: string;
+    operationKind: unknown;
+    status: unknown;
+    completedAt: unknown;
+    updatedAt: unknown;
+    createdAt: unknown;
+  }>[];
+  gatewayEvents: readonly Readonly<{
+    id?: string | null;
+    jobId: string | null;
+    eventType: unknown;
+    createdAt: unknown;
+  }>[];
+  discoveryRuns?: readonly Readonly<{
+    id: string;
+    campaignId: string;
+  }>[];
+  campaigns?: readonly Readonly<{
+    id: string;
+    metadata: unknown;
+  }>[];
+  intakes?: readonly Readonly<{
+    id: string;
+    supplySourceId: string | null;
+    affiliateSourceId: string | null;
+  }>[];
+  intakeRuns?: readonly Readonly<{
+    id: string;
+    intakeId: string;
+    supplySourceId: string | null;
+  }>[];
+  operationalAlerts: readonly OperationalAlertRecoveryAlert[];
+  alertDeliveries: readonly Readonly<{
+    id?: string | null;
+    alertId: string;
+    channel: unknown;
+    status: unknown;
+  }>[];
+  workerHealth: readonly Readonly<{
+    workerId: string;
+    status: unknown;
+    leaseExpiresAt: unknown;
+  }>[];
+}>;
+const isTerminalAlertDelivery = (value: { status?: unknown }): boolean =>
+  upper(value.status) !== "IN_FLIGHT";
+
+const compareAlertDeliveryAttempt = (
+  left: ProjectionAlertDeliveryRecord,
+  right: ProjectionAlertDeliveryRecord,
+): number => {
+  const terminalComparison =
+    Number(isTerminalAlertDelivery(right))
+    - Number(isTerminalAlertDelivery(left));
+  if (terminalComparison) return terminalComparison;
+  return compareAlertDeliveryRecency(left, right);
+};
+
+const alertDeliveryAttemptKey = (
+  delivery: ProjectionAlertDeliveryRecord,
+): string =>
+  [
+    delivery.alertId,
+    upper(delivery.channel),
+    numberValue(delivery.attempt, -1),
+  ].join("\u0000");
+
+const dedupeAlertDeliveries = (
+  deliveries: readonly ProjectionAlertDeliveryRecord[],
+): ProjectionAlertDeliveryRecord[] => {
+  const byAttempt = new Map<string, ProjectionAlertDeliveryRecord>();
+  deliveries.forEach((delivery) => {
+    const key = alertDeliveryAttemptKey(delivery);
+    const current = byAttempt.get(key);
+    if (!current || compareAlertDeliveryAttempt(delivery, current) < 0) {
+      byAttempt.set(key, delivery);
+    }
+  });
+  return [...byAttempt.values()].sort(compareAlertDeliveryRecency);
+};
+const uniqueEvidence = <T>(
+  values: readonly T[],
+  key: (value: T) => string,
+): T[] => {
+  const seen = new Set<string>();
+  const result: T[] = [];
+  for (const value of values) {
+    const valueKey = key(value);
+    if (seen.has(valueKey)) continue;
+    seen.add(valueKey);
+    result.push(value);
+  }
+  return result;
+};
+const stableEvidenceSortKey = (...values: readonly unknown[]): string =>
+  values
+    .map((value) =>
+      Array.isArray(value)
+        ? value.map((entry) => String(entry ?? "")).join("\u0000")
+        : String(value ?? ""),
+    )
+    .join("\u0001");
+
+const sortReconciliationEvidence = <T>(
+  values: T[],
+  key: (value: T) => readonly unknown[],
+): T[] =>
+  values.sort((left, right) =>
+    stableEvidenceSortKey(...key(left)).localeCompare(
+      stableEvidenceSortKey(...key(right)),
+    ),
+  );
+
+
+const reconciliationFindingEvidenceFor = (
+  value: unknown,
+): ReconciliationFindingEvidence | null => {
+  const finding = recordValue(value);
+  const code = boundedEvidenceText(finding.code);
+  if (!code) return null;
+  return {
+    code,
+    severity: upper(finding.severity) || "UNKNOWN",
+    detail: boundedEvidenceText(finding.detail) ?? "Not recorded",
+    recordIds: boundedEvidenceList(finding.recordIds),
+    resolution: boundedEvidenceText(finding.resolution) ?? "Not recorded",
+  };
+};
+const reconciliationProcessEvidenceFor = (
+  value: unknown,
+): ReconciliationProcessEvidence | null => {
+  const process = recordValue(value);
+  const id = boundedEvidenceText(process.id);
+  if (!id) return null;
+  const command = boundedEvidenceText(process.command);
+  return {
+    id,
+    kind: upper(process.kind) || "UNKNOWN",
+    role: boundedEvidenceText(process.role),
+    workerId: boundedEvidenceText(process.workerId),
+    processClass: upper(process.processClass) || null,
+    command: command?.split(/\s+/u, 1)[0] ?? null,
+    status: upper(process.status) || null,
+  };
+};
+
+const reconciliationTargetProjectionFor = (
+  value: unknown,
+): ReconciliationRootEvidence["targetProjections"][number] | null => {
+  const target = recordValue(value);
+  const sourceTargetId = boundedEvidenceText(
+    target.sourceTargetId ?? target.id,
+  );
+  const targetId = boundedEvidenceText(target.targetId);
+  if (!sourceTargetId || !targetId) return null;
+  return {
+    sourceTargetId,
+    candidateId: boundedEvidenceText(target.candidateId),
+    targetType: upper(target.targetType) || "UNKNOWN",
+    targetId,
+    status: upper(target.status) || "UNKNOWN",
+    action: upper(target.action) || "UNKNOWN",
+    evidenceRefs: boundedEvidenceList(target.evidenceRefs),
+  };
+};
+
+const reconciliationRootSourceIdsFor = (
+  root: Record<string, unknown>,
+): string[] =>
+  boundedEvidenceList([
+    ...boundedEvidenceList(root.sourceIds),
+    boundedEvidenceText(root.sourceId),
+    boundedEvidenceText(root.existingRootId),
+  ]);
+
+const reconciliationRootTargetProjectionsFor = (
+  root: Record<string, unknown>,
+): ReconciliationRootEvidence["targetProjections"] =>
+  sortReconciliationEvidence(
+    uniqueEvidence(
+      evidenceEntries(root.targetProjections ?? root.targets)
+        .map(reconciliationTargetProjectionFor)
+        .filter(
+          (
+            target,
+          ): target is ReconciliationRootEvidence["targetProjections"][number] =>
+            target !== null,
+        ),
+      (target) => `${target.sourceTargetId}:${target.targetId}`,
+    ),
+    (target) => [
+      target.sourceTargetId,
+      target.targetId,
+      target.candidateId,
+      target.targetType,
+      target.status,
+      target.action,
+      target.evidenceRefs,
+    ],
+  );
+
+const reconciliationRootHasEvidence = (
+  root: Record<string, unknown>,
+  sourceIds: readonly string[],
+  recordIds: readonly string[],
+  targetProjections: readonly ReconciliationRootEvidence["targetProjections"][number][],
+): boolean =>
+  sourceIds.length > 0
+  || recordIds.length > 0
+  || targetProjections.length > 0
+  || Boolean(boundedEvidenceText(root.existingRootId))
+  || Boolean(boundedEvidenceText(root.identityKey));
+
+const reconciliationRootEvidenceFor = (
+  value: unknown,
+): ReconciliationRootEvidence | null => {
+  const root = recordValue(value);
+  const sourceIds = reconciliationRootSourceIdsFor(root);
+  const recordIds = boundedEvidenceList(root.recordIds);
+  const targetProjections = reconciliationRootTargetProjectionsFor(root);
+  if (!reconciliationRootHasEvidence(
+    root,
+    sourceIds,
+    recordIds,
+    targetProjections,
+  )) {
+    return null;
+  }
+  return {
+    existingRootId: boundedEvidenceText(root.existingRootId),
+    identityKey: boundedEvidenceText(root.identityKey),
+    canonicalUrl: boundedEvidenceText(root.canonicalUrl),
+    origin: boundedEvidenceText(root.origin),
+    pathKey: boundedEvidenceText(root.pathKey),
+    derivedStage: upper(root.derivedStage) || null,
+    action: upper(root.action) || null,
+    sourceIds,
+    recordIds,
+    evidenceRefs: boundedEvidenceList(root.evidenceRefs),
+    targetProjections,
+  };
+};
+
+const reconciliationClaimEvidenceFor = (
+  value: unknown,
+): ReconciliationClaimEvidence | null => {
+  const claim = recordValue(value);
+  const id = boundedEvidenceText(claim.id);
+  if (!id) return null;
+  return {
+    id,
+    kind: upper(claim.kind) || "UNKNOWN",
+    status: upper(claim.status) || null,
+    action: upper(claim.action) || null,
+    sourceId: boundedEvidenceText(claim.sourceId),
+    supplySourceId: boundedEvidenceText(claim.supplySourceId),
+    evidenceRefs: boundedEvidenceList(claim.evidenceRefs),
+  };
+};
+
+const reconciliationRecordIdFor = (
+  kind: string,
+  record: Record<string, unknown>,
+  index: number,
+): string =>
+  boundedEvidenceText(record.id) ?? `${upper(kind) || "RECORD"}:${index + 1}`;
+
+const reconciliationRecordSourceIdsFor = (
+  record: Record<string, unknown>,
+): string[] =>
+  boundedEvidenceList([
+    ...boundedEvidenceList(record.sourceIds),
+    ...boundedEvidenceList(record.supplySourceIds),
+    record.sourceId,
+    record.supplySourceId,
+    record.affiliateSourceId,
+  ]);
+
+const reconciliationRecordIdsFor = (
+  record: Record<string, unknown>,
+): string[] =>
+  boundedEvidenceList([
+    ...boundedEvidenceList(record.recordIds),
+    ...boundedEvidenceList(record.jobIds),
+    ...boundedEvidenceList(record.claimIds),
+    ...boundedEvidenceList(record.demandIds),
+    ...boundedEvidenceList(record.waveIds),
+    ...boundedEvidenceList(record.cellIds),
+    ...boundedEvidenceList(record.runIds),
+    ...boundedEvidenceList(record.mappingIds),
+    ...boundedEvidenceList(record.candidateIds),
+    record.jobId,
+    record.claimId,
+    record.demandId,
+    record.waveId,
+    record.cellId,
+    record.runId,
+    record.mappingId,
+    record.candidateId,
+  ]);
+
+const reconciliationRecordEvidenceRefsFor = (
+  record: Record<string, unknown>,
+): string[] =>
+  boundedEvidenceList([
+    ...boundedEvidenceList(record.evidenceRefs),
+    record.evidenceRef,
+  ]);
+
+
+const reconciliationRecordTimestampFor = (
+  record: Record<string, unknown>,
+): string | null =>
+  isoValue(
+    record.updatedAt
+    ?? record.occurredAt
+    ?? record.completedAt
+    ?? record.createdAt,
+  );
+
+const reconciliationRecordDetailFor = (
+  record: Record<string, unknown>,
+): string | null =>
+  boundedEvidenceText(
+    record.detail
+    ?? record.code
+    ?? record.operationKind
+    ?? record.command,
+  );
+
+const reconciliationRecordEvidenceFor = (
+  kind: string,
+  value: unknown,
+  index: number,
+): ReconciliationRecordEvidence => {
+  const record = recordValue(value);
+  const sourceIds = reconciliationRecordSourceIdsFor(record);
+  const recordIds = reconciliationRecordIdsFor(record);
+  const evidenceRefs = reconciliationRecordEvidenceRefsFor(record);
+  return {
+    id: reconciliationRecordIdFor(kind, record, index),
+    kind: upper(kind) || "RECORD",
+    status: upper(record.status) || null,
+    at: reconciliationRecordTimestampFor(record),
+    detail: reconciliationRecordDetailFor(record),
+    refs: boundedEvidenceList([...evidenceRefs, ...sourceIds, ...recordIds]),
+    sourceIds,
+    recordIds,
+    evidenceRefs,
+  };
+};
+
+const reconciliationRecordEvidenceForCollection = (
+  kind: string,
+  value: unknown,
+): ReconciliationRecordEvidence[] =>
+  evidenceEntries(value).map((entry, index) =>
+    reconciliationRecordEvidenceFor(kind, entry, index),
+  );
+
+type ReconciliationReportEvidenceContext = Readonly<{
+  payload: Record<string, unknown>;
+  report: Record<string, unknown>;
+  session: Record<string, unknown>;
+  evidence: Record<string, unknown>;
+  decision: Record<string, unknown>;
+  preflight: Record<string, unknown>;
+}>;
+
+const firstDefinedEvidenceValue = (...values: readonly unknown[]): unknown => {
+  for (const value of values) {
+    if (value !== null && value !== undefined) return value;
+  }
+  return null;
+};
+
+const booleanEvidenceValue = (value: unknown): boolean | null =>
+  typeof value === "boolean" ? value : null;
+
+const integerEvidenceValue = (...values: readonly unknown[]): number | null => {
+  const value = firstDefinedEvidenceValue(...values);
+  return typeof value === "number" && Number.isInteger(value) ? value : null;
+};
+
+const textEvidenceValue = (...values: readonly unknown[]): string | null =>
+  boundedEvidenceText(firstDefinedEvidenceValue(...values));
+
+const reconciliationReportEvidenceContextFor = (
+  run: ProjectionRows["reconciliationRuns"][number],
+): ReconciliationReportEvidenceContext => {
+  const payload = recordValue(
+    (run as unknown as { reportJson?: unknown }).reportJson,
+  );
+  const report = recordValue(firstDefinedEvidenceValue(payload.report, payload));
+  const session = recordValue(
+    firstDefinedEvidenceValue(payload.session, payload.cutoverSession, payload),
+  );
+  const evidence = recordValue(payload.evidence);
+  const decision = recordValue(payload.decision);
+  const nestedPreflight = firstDefinedEvidenceValue(
+    session.preflightReport,
+    session.preflight,
+    payload.preflightReport,
+    payload.preflight,
+    report.preflightReport,
+    report.preflight,
+  );
+  const hasRootPreflightEvidence = [
+    "gatewayVersion",
+    "reviewedLegacyProcessManifestHash",
+    "reviewedLegacyProcessManifestCount",
+    "reviewedLegacyProcessManifestArtifactId",
+    "processInventoryArtifactId",
+    "processInventoryHash",
+    "processInventoryCount",
+    "reviewedSystemdUnits",
+    "legacyServiceUnits",
+    "reviewedAgentNetwork",
+  ].some((key) => payload[key] !== undefined);
+  const preflight = recordValue(
+    nestedPreflight !== null
+      ? nestedPreflight
+      : hasRootPreflightEvidence
+        ? payload
+        : null,
+  );
+  return { payload, report, session, evidence, decision, preflight };
+};
+
+const dedupeReconciliationProcessEvidence = (
+  values: readonly ReconciliationProcessEvidence[],
+): ReconciliationProcessEvidence[] => {
+  const byId = new Map<string, ReconciliationProcessEvidence>();
+  values.forEach((process) => {
+    const existing = byId.get(process.id);
+    if (!existing || (process.kind === "LEGACY" && existing.kind !== "LEGACY")) {
+      byId.set(process.id, process);
+    }
+  });
+  return [...byId.values()];
+};
+
+const reconciliationProcessEvidenceForContext = (
+  context: ReconciliationReportEvidenceContext,
+): ReconciliationProcessEvidence[] =>
+  sortReconciliationEvidence(
+    dedupeReconciliationProcessEvidence(
+      evidenceEntries(
+        recordValue(context.session.reviewedLegacyProcessManifest).processes,
+        context.payload.processInventory,
+        context.payload.reviewedProcessInventory,
+        context.evidence.processInventory,
+        context.evidence.reviewedProcessInventory,
+        context.session.processInventory,
+        context.report.processInventory,
+      )
+        .map(reconciliationProcessEvidenceFor)
+        .filter(
+          (process): process is ReconciliationProcessEvidence =>
+            process !== null,
+        ),
+    ),
+    (process) => [
+      process.kind,
+      process.id,
+      process.role,
+      process.workerId,
+      process.processClass,
+      process.command,
+      process.status,
+    ],
+  );
+
+const reconciliationRootEvidenceCollectionFor = (
+  context: ReconciliationReportEvidenceContext,
+): ReconciliationRootEvidence[] =>
+  sortReconciliationEvidence(
+    uniqueEvidence(
+      evidenceEntries(context.report.roots, context.payload.roots)
+        .map(reconciliationRootEvidenceFor)
+        .filter((root): root is ReconciliationRootEvidence => root !== null),
+      (root) => JSON.stringify({
+        existingRootId: root.existingRootId,
+        identityKey: root.identityKey,
+        sourceIds: root.sourceIds,
+      }),
+    ),
+    (root) => [
+      root.existingRootId,
+      root.identityKey,
+      root.canonicalUrl,
+      root.origin,
+      root.pathKey,
+      root.derivedStage,
+      root.action,
+      root.sourceIds,
+      root.recordIds,
+      root.evidenceRefs,
+      root.targetProjections.map((target) =>
+        stableEvidenceSortKey(
+          target.sourceTargetId,
+          target.targetId,
+          target.candidateId,
+          target.targetType,
+          target.status,
+          target.action,
+          target.evidenceRefs,
+        ),
+      ),
+    ],
+  );
+
+const reconciliationClaimEvidenceCollectionFor = (
+  context: ReconciliationReportEvidenceContext,
+): ReconciliationClaimEvidence[] =>
+  sortReconciliationEvidence(
+    uniqueEvidence(
+      evidenceEntries(context.report.claimActions, context.payload.claimActions)
+        .map(reconciliationClaimEvidenceFor)
+        .filter(
+          (claim): claim is ReconciliationClaimEvidence => claim !== null,
+        ),
+      (claim) => `${claim.kind}:${claim.id}`,
+    ),
+    (claim) => [
+      claim.kind,
+      claim.id,
+      claim.status,
+      claim.action,
+      claim.sourceId,
+      claim.supplySourceId,
+      claim.evidenceRefs,
+    ],
+  );
+
+const reconciliationFindingEvidenceKey = (
+  finding: ReconciliationFindingEvidence,
+): string => `${finding.code}:${finding.recordIds.join(",")}`;
+
+const reconciliationFindingEvidenceCollectionFor = (
+  values: readonly unknown[],
+): ReconciliationFindingEvidence[] =>
+  sortReconciliationEvidence(
+    uniqueEvidence(
+      evidenceEntries(...values)
+        .map(reconciliationFindingEvidenceFor)
+        .filter(
+          (finding): finding is ReconciliationFindingEvidence =>
+            finding !== null,
+        ),
+      reconciliationFindingEvidenceKey,
+    ),
+    (finding) => [
+      finding.code,
+      finding.severity,
+      finding.detail,
+      finding.recordIds,
+      finding.resolution,
+    ],
+  );
+
+const reconciliationRecordEvidenceCollectionForContext = (
+  context: ReconciliationReportEvidenceContext,
+): ReconciliationRecordEvidence[] =>
+  sortReconciliationEvidence(
+    [
+      ...reconciliationRecordEvidenceForCollection(
+        "LEGACY_SERVICE_UNIT",
+        context.evidence.legacyServiceUnits,
+      ),
+      ...reconciliationRecordEvidenceForCollection(
+        "CONTROL_PLANE_PROCESS",
+        context.evidence.controlPlaneProcesses,
+      ),
+      ...reconciliationRecordEvidenceForCollection(
+        "GOVERNED_RECEIPT",
+        context.evidence.governedReceipts,
+      ),
+      ...reconciliationRecordEvidenceForCollection(
+        "GOVERNED_LIFECYCLE",
+        context.evidence.governedLifecycleTransitions,
+      ),
+      ...reconciliationRecordEvidenceForCollection(
+        "GOVERNED_DEMAND_OR_WAVE",
+        context.evidence.governedDemandOrWaveEvents,
+      ),
+      ...reconciliationRecordEvidenceForCollection(
+        "GOVERNED_AUTHORITATIVE_WRITE",
+        context.evidence.governedAuthoritativeWrites,
+      ),
+    ],
+    (record) => [
+      record.kind,
+      record.id,
+      record.at,
+      record.status,
+      record.detail,
+      record.refs,
+    ],
+  );
+const reconciliationSystemdUnitEvidenceFor = (
+  value: unknown,
+): ReconciliationPreflightEvidence["reviewedSystemdUnits"][number] | null => {
+  const unit = recordValue(value);
+  const processId = boundedEvidenceText(unit.processId);
+  const unitId = boundedEvidenceText(unit.unitId);
+  return processId && unitId ? { processId, unitId } : null;
+};
+
+const reconciliationLegacyServiceUnitEvidenceFor = (
+  value: unknown,
+): ReconciliationPreflightEvidence["legacyServiceUnits"][number] | null => {
+  const unit = recordValue(value);
+  const id = boundedEvidenceText(unit.id);
+  const isEnabled = boundedEvidenceText(unit.isEnabled);
+  const isActive = boundedEvidenceText(unit.isActive);
+  return id && isEnabled && isActive ? { id, isEnabled, isActive } : null;
+};
+
+const reconciliationPreflightSystemdUnitsFor = (
+  preflight: Record<string, unknown>,
+  includeAllCollections: boolean,
+): ReconciliationPreflightEvidence["reviewedSystemdUnits"] =>
+  boundedEvidenceCollection(
+    evidenceEntries(preflight.reviewedSystemdUnits)
+      .map(reconciliationSystemdUnitEvidenceFor)
+      .filter(
+        (
+          unit,
+        ): unit is ReconciliationPreflightEvidence["reviewedSystemdUnits"][number] =>
+          unit !== null,
+      )
+      .sort((left, right) =>
+        `${left.processId}:${left.unitId}`.localeCompare(
+          `${right.processId}:${right.unitId}`,
+        ),
+      ),
+    includeAllCollections,
+  );
+
+const reconciliationPreflightLegacyServiceUnitsFor = (
+  preflight: Record<string, unknown>,
+  includeAllCollections: boolean,
+): ReconciliationPreflightEvidence["legacyServiceUnits"] =>
+  boundedEvidenceCollection(
+    evidenceEntries(preflight.legacyServiceUnits)
+      .map(reconciliationLegacyServiceUnitEvidenceFor)
+      .filter(
+        (
+          unit,
+        ): unit is ReconciliationPreflightEvidence["legacyServiceUnits"][number] =>
+          unit !== null,
+      )
+      .sort((left, right) => left.id.localeCompare(right.id)),
+    includeAllCollections,
+  );
+
+const hasAnyEvidence = (...flags: readonly boolean[]): boolean =>
+  flags.some(Boolean);
+
+const reconciliationPreflightEvidenceFor = (
+  context: ReconciliationReportEvidenceContext,
+  includeAllCollections = false,
+): ReconciliationPreflightEvidence | null => {
+  const preflight = context.preflight;
+  const reviewedSystemdUnits = reconciliationPreflightSystemdUnitsFor(
+    preflight,
+    includeAllCollections,
+  );
+  const legacyServiceUnits = reconciliationPreflightLegacyServiceUnitsFor(
+    preflight,
+    includeAllCollections,
+  );
+  const evaluatedAt = isoValue(preflight.evaluatedAt);
+  const isReady = booleanEvidenceValue(
+    firstDefinedEvidenceValue(
+      preflight.isReady,
+      preflight.ready,
+      preflight.readiness,
+    ),
+  );
+  const gatewayVersion = integerEvidenceValue(preflight.gatewayVersion);
+  const reviewedLegacyProcessManifestHash = textEvidenceValue(
+    preflight.reviewedLegacyProcessManifestHash,
+  );
+  const reviewedLegacyProcessManifestCount = integerEvidenceValue(
+    preflight.reviewedLegacyProcessManifestCount,
+  );
+  const reviewedLegacyProcessManifestArtifactId = textEvidenceValue(
+    preflight.reviewedLegacyProcessManifestArtifactId,
+  );
+  const processInventoryArtifactId = textEvidenceValue(
+    preflight.processInventoryArtifactId,
+  );
+  const processInventoryHash = textEvidenceValue(preflight.processInventoryHash);
+  const processInventoryCount = integerEvidenceValue(
+    preflight.processInventoryCount,
+  );
+  const counts = boundedEvidenceCounts(preflight.counts);
+  const recordsByKind = boundedRecordsByKind(
+    preflight.recordsByKind,
+    recordValue(preflight.counts).recordsByKind,
+    context.evidence.recordsByKind,
+    recordValue(context.evidence.counts).recordsByKind,
+  );
+  const reviewedAgentNetwork = textEvidenceValue(
+    preflight.reviewedAgentNetwork,
+    preflight.agentNetwork,
+    preflight.network,
+  );
+  const hasEvidence = hasAnyEvidence(
+    evaluatedAt !== null,
+    isReady !== null,
+    gatewayVersion !== null,
+    reviewedLegacyProcessManifestHash !== null,
+    reviewedLegacyProcessManifestCount !== null,
+    reviewedLegacyProcessManifestArtifactId !== null,
+    processInventoryArtifactId !== null,
+    processInventoryHash !== null,
+    processInventoryCount !== null,
+    reviewedSystemdUnits.length > 0,
+    legacyServiceUnits.length > 0,
+    Object.keys(counts).length > 0,
+    Object.keys(recordsByKind).length > 0,
+    reviewedAgentNetwork !== null,
+  );
+  return hasEvidence
+    ? {
+        evaluatedAt,
+        isReady,
+        gatewayVersion,
+        reviewedLegacyProcessManifestHash,
+        reviewedLegacyProcessManifestCount,
+        reviewedLegacyProcessManifestArtifactId,
+        processInventoryArtifactId,
+        processInventoryHash,
+        processInventoryCount,
+        reviewedSystemdUnits,
+        legacyServiceUnits,
+        counts,
+        recordsByKind,
+        reviewedAgentNetwork,
+      }
+    : null;
+};
+
+const evidencePageFor = (total: number): ReconciliationEvidencePage => ({
+  page: 1,
+  pageSize: Math.min(total, MAX_RECONCILIATION_EVIDENCE_ITEMS),
+  total,
+  truncated: total > MAX_RECONCILIATION_EVIDENCE_ITEMS,
+});
+
+const reconciliationEvidencePaginationFor = (
+  collections: Pick<
+    ReconciliationReportEvidence,
+    | "processes"
+    | "roots"
+    | "claimActions"
+    | "blockingFindings"
+    | "warnings"
+    | "resolutions"
+    | "recordEvidence"
+  >,
+): ReconciliationEvidencePagination => {
+  const sourceIds = new Set<string>();
+  const recordIds = new Set<string>();
+  const evidenceRefs = new Set<string>();
+  collections.roots.forEach((root) => {
+    root.sourceIds.forEach((id) => sourceIds.add(id));
+    root.recordIds.forEach((id) => recordIds.add(id));
+    root.evidenceRefs.forEach((id) => evidenceRefs.add(id));
+    root.targetProjections.forEach((target) => {
+      target.evidenceRefs.forEach((id) => evidenceRefs.add(id));
+    });
+  });
+  collections.claimActions.forEach((claim) => {
+    [claim.sourceId, claim.supplySourceId]
+      .filter((id): id is string => Boolean(id))
+      .forEach((id) => sourceIds.add(id));
+    claim.evidenceRefs.forEach((id) => evidenceRefs.add(id));
+  });
+  [...collections.blockingFindings, ...collections.warnings, ...collections.resolutions]
+    .forEach((finding) => finding.recordIds.forEach((id) => recordIds.add(id)));
+  collections.recordEvidence.forEach((record) => {
+    recordIds.add(record.id);
+    record.sourceIds.forEach((id) => sourceIds.add(id));
+    record.recordIds.forEach((id) => recordIds.add(id));
+    record.evidenceRefs.forEach((id) => evidenceRefs.add(id));
+  });
+  return {
+    processes: evidencePageFor(collections.processes.length),
+    roots: evidencePageFor(collections.roots.length),
+    claimActions: evidencePageFor(collections.claimActions.length),
+    blockingFindings: evidencePageFor(collections.blockingFindings.length),
+    warnings: evidencePageFor(collections.warnings.length),
+    resolutions: evidencePageFor(collections.resolutions.length),
+    recordEvidence: evidencePageFor(collections.recordEvidence.length),
+    sourceIds: evidencePageFor(sourceIds.size),
+    recordIds: evidencePageFor(recordIds.size),
+    evidenceRefs: evidencePageFor(evidenceRefs.size),
+  };
+};
+
+type ReconciliationReportEvidenceCollections = Pick<
+  ReconciliationReportEvidence,
+  | "processes"
+  | "roots"
+  | "claimActions"
+  | "blockingFindings"
+  | "warnings"
+  | "resolutions"
+  | "recordEvidence"
+  | "preflight"
+  | "evidencePagination"
+>;
+
+const reconciliationReportEvidenceCollectionsFor = (
+  context: ReconciliationReportEvidenceContext,
+  includeAllCollections = false,
+): ReconciliationReportEvidenceCollections => {
+  const collections = {
+    processes: reconciliationProcessEvidenceForContext(context),
+    roots: reconciliationRootEvidenceCollectionFor(context),
+    claimActions: reconciliationClaimEvidenceCollectionFor(context),
+    blockingFindings: reconciliationFindingEvidenceCollectionFor([
+      context.report.blockingFindings,
+      context.payload.blockingFindings,
+      context.preflight.blockingFindings,
+    ]),
+    warnings: reconciliationFindingEvidenceCollectionFor([
+      context.report.warnings,
+      context.payload.warnings,
+      context.preflight.warnings,
+    ]),
+    resolutions: reconciliationFindingEvidenceCollectionFor([
+      context.report.resolutions,
+      context.payload.resolutions,
+      context.preflight.resolutions,
+    ]),
+    recordEvidence: reconciliationRecordEvidenceCollectionForContext(context),
+  };
+  const evidencePagination = reconciliationEvidencePaginationFor(collections);
+  return {
+    processes: boundedEvidenceCollection(
+      collections.processes,
+      includeAllCollections,
+    ),
+    roots: boundedEvidenceCollection(collections.roots, includeAllCollections),
+    claimActions: boundedEvidenceCollection(
+      collections.claimActions,
+      includeAllCollections,
+    ),
+    blockingFindings: boundedEvidenceCollection(
+      collections.blockingFindings,
+      includeAllCollections,
+    ),
+    warnings: boundedEvidenceCollection(
+      collections.warnings,
+      includeAllCollections,
+    ),
+    resolutions: boundedEvidenceCollection(
+      collections.resolutions,
+      includeAllCollections,
+    ),
+    recordEvidence: boundedEvidenceCollection(
+      collections.recordEvidence,
+      includeAllCollections,
+    ),
+    preflight: reconciliationPreflightEvidenceFor(
+      context,
+      includeAllCollections,
+    ),
+    evidencePagination,
+  };
+};
+
+type ReconciliationReportEvidenceScalars = Omit<
+  ReconciliationReportEvidence,
+  keyof ReconciliationReportEvidenceCollections
+>;
+
+const reconciliationReportEvidenceScalarsFor = (
+  run: ProjectionRows["reconciliationRuns"][number],
+  context: ReconciliationReportEvidenceContext,
+): ReconciliationReportEvidenceScalars => ({
+  kind: textEvidenceValue(
+    context.payload.kind,
+    context.report.kind,
+    run.mode,
+  ),
+  schemaVersion: integerEvidenceValue(
+    context.report.schemaVersion,
+    context.payload.schemaVersion,
+  ),
+  evaluatedAt: isoValue(
+    firstDefinedEvidenceValue(
+      context.report.evaluatedAt,
+      context.payload.evaluatedAt,
+    ),
+  ),
+  sessionId: textEvidenceValue(
+    context.payload.sessionId,
+    context.payload.cutoverSessionId,
+    context.session.sessionId,
+  ),
+  sessionHash: textEvidenceValue(
+    context.payload.sessionHash,
+    context.payload.cutoverSessionHash,
+    context.session.sessionHash,
+  ),
+  evidenceHash: boundedEvidenceText(context.payload.evidenceHash),
+  isApplySafe: booleanEvidenceValue(context.report.isApplySafe),
+  evidenceComplete: booleanEvidenceValue(context.payload.evidenceComplete),
+  decisionMode: textEvidenceValue(context.decision.mode),
+  decisionReasonCode: textEvidenceValue(context.decision.reasonCode),
+  decisionDetail: textEvidenceValue(context.decision.detail),
+  decisionResolution: textEvidenceValue(context.decision.resolution),
+  legacySnapshotHash: boundedEvidenceText(context.report.legacySnapshotHash),
+  supplyContractVersion: integerEvidenceValue(
+    context.report.supplyContractVersion,
+    context.payload.supplyContractVersion,
+    run.supplyContractVersion,
+  ),
+  supplyContractHash: textEvidenceValue(
+    context.report.supplyContractHash,
+    context.payload.supplyContractHash,
+    run.supplyContractHash,
+  ),
+  deploymentContractVersion: integerEvidenceValue(
+    context.report.deploymentContractVersion,
+    context.payload.deploymentContractVersion,
+    run.deploymentContractVersion,
+  ),
+  deploymentContractHash: textEvidenceValue(
+    context.report.deploymentContractHash,
+    context.payload.deploymentContractHash,
+    run.deploymentContractHash,
+  ),
+  inputHash: textEvidenceValue(
+    context.report.inputHash,
+    context.payload.inputHash,
+    run.inputHash,
+  ),
+  outputHash: textEvidenceValue(
+    context.report.outputHash,
+    context.payload.outputHash,
+    run.outputHash,
+  ),
+  reportHash: textEvidenceValue(
+    context.report.reportHash,
+    context.payload.reportHash,
+    run.reportHash,
+  ),
+  counts: boundedEvidenceCounts(
+    firstDefinedEvidenceValue(
+      context.report.counts,
+      context.payload.counts,
+      run.counts,
+    ),
+  ),
+  recordsByKind: boundedRecordsByKind(
+    context.report.recordsByKind,
+    recordValue(context.report.counts).recordsByKind,
+    context.payload.recordsByKind,
+    recordValue(context.payload.counts).recordsByKind,
+    recordValue(run.counts).recordsByKind,
+  ),
+});
+
+const reconciliationReportEvidenceFor = (
+  run: ProjectionRows["reconciliationRuns"][number],
+  includeAllCollections = false,
+): ReconciliationReportEvidence => {
+  const context = reconciliationReportEvidenceContextFor(run);
+  return {
+    ...reconciliationReportEvidenceScalarsFor(run, context),
+    ...reconciliationReportEvidenceCollectionsFor(
+      context,
+      includeAllCollections,
+    ),
+  };
+};
+
 type ProjectionDimensionContext = Readonly<{
   rootsById: ReadonlyMap<string, ProjectionRows["roots"][number]>;
   targetsByRoot: ReadonlyMap<
@@ -364,26 +1700,24 @@ const projectionDimensionContext = (
   };
 };
 
-const targetMatchesCity = (
+const valueForId = <T>(
+  id: string | null | undefined,
+  values: ReadonlyMap<string, T>,
+): T | undefined => (id ? values.get(id) : undefined);
+
+const targetCityValuesFor = (
   target: ProjectionRows["targets"][number],
   context: ProjectionDimensionContext,
-  city: string,
-): boolean => {
-  if (!city) return true;
+): readonly unknown[] => {
   const metadata = recordValue(target.metadata);
-  const candidate = target.candidateId
-    ? context.candidatesById.get(target.candidateId)
-    : undefined;
+  const candidate = valueForId(target.candidateId, context.candidatesById);
   const root = context.rootsById.get(target.supplySourceId);
-  const intake = root?.intakeId
-    ? context.intakesById.get(root.intakeId)
-    : undefined;
-  const source = root?.liveSourceId
-    ? context.sourcesById.get(root.liveSourceId)
-    : undefined;
-  const organization = source?.organizationId
-    ? context.organizationsById.get(source.organizationId)
-    : undefined;
+  const intake = valueForId(root?.intakeId, context.intakesById);
+  const source = valueForId(root?.liveSourceId, context.sourcesById);
+  const organization = valueForId(
+    source?.organizationId,
+    context.organizationsById,
+  );
   return [
     metadata.city,
     metadata.cityId,
@@ -391,7 +1725,18 @@ const targetMatchesCity = (
     candidate?.city,
     intake?.region,
     organization?.location,
-  ].some((value) => containsFilter(value, city));
+  ];
+};
+
+const targetMatchesCity = (
+  target: ProjectionRows["targets"][number],
+  context: ProjectionDimensionContext,
+  city: string,
+): boolean => {
+  if (!city) return true;
+  return targetCityValuesFor(target, context).some((value) =>
+    containsFilter(value, city),
+  );
 };
 
 const targetMatchesDimensions = (
@@ -443,43 +1788,72 @@ const rootMatchesCity = (
   );
 };
 
+const rootHasTargetDimensionFilter = (
+  filters: AffiliateOperationsFilters,
+): boolean => Boolean(filters.market || filters.sport || filters.profile);
+
+const rootHasMatchingTarget = (
+  rootTargets: readonly ProjectionRows["targets"][number][],
+  filters: AffiliateOperationsFilters,
+  context: ProjectionDimensionContext,
+): boolean =>
+  rootTargets.some((target) => targetMatchesFilters(target, filters, context));
+
+const rootStatusMatchesFilters = (
+  root: ProjectionRows["roots"][number],
+  rootTargets: readonly ProjectionRows["targets"][number][],
+  filters: AffiliateOperationsFilters,
+): boolean => {
+  if (!filters.status) return true;
+  return (
+    [root.derivedStage, root.derivedOutcome, root.freshnessStatus].some(
+      (value) => containsFilter(value, filters.status),
+    ) ||
+    rootTargets.some((target) => containsFilter(target.status, filters.status))
+  );
+};
+
+const rootDateMatchesFilters = (
+  root: ProjectionRows["roots"][number],
+  rootTargets: readonly ProjectionRows["targets"][number][],
+  filters: AffiliateOperationsFilters,
+  context: ProjectionDimensionContext,
+): boolean => {
+  if (!filters.range) return true;
+  if (matchesDateRange(root.lastSuccessfulRefreshAt, context.dateRangeCutoff))
+    return true;
+  return rootTargets.some((target) =>
+    matchesDateRange(
+      target.freshnessExpiresAt ??
+        target.lastSuccessfulRefreshAt ??
+        target.publishedAt,
+      context.dateRangeCutoff,
+    ),
+  );
+};
+
 const rootMatchesFilters = (
   root: ProjectionRows["roots"][number],
   filters: AffiliateOperationsFilters,
   context: ProjectionDimensionContext,
 ): boolean => {
-  const hasTargetDimensionFilter = Boolean(
-    filters.market || filters.sport || filters.profile,
-  );
   const rootTargets = context.targetsByRoot.get(root.id) ?? [];
-  const hasMatchingTarget = rootTargets.some((target) =>
-    targetMatchesFilters(target, filters, context),
-  );
   if (filters.city && !rootMatchesCity(root, context, filters.city))
     return false;
-  if (hasTargetDimensionFilter && !hasMatchingTarget) return false;
-  const statusMatches =
-    !filters.status ||
-    [root.derivedStage, root.derivedOutcome, root.freshnessStatus].some(
-      (value) => containsFilter(value, filters.status),
-    ) ||
-    rootTargets.some((target) => containsFilter(target.status, filters.status));
-  const dateMatches =
-    !filters.range ||
-    matchesDateRange(root.lastSuccessfulRefreshAt, context.dateRangeCutoff) ||
-    rootTargets.some((target) =>
-      matchesDateRange(
-        target.freshnessExpiresAt ??
-          target.lastSuccessfulRefreshAt ??
-          target.publishedAt,
-        context.dateRangeCutoff,
-      ),
-    );
-  return statusMatches && dateMatches;
+  if (
+    rootHasTargetDimensionFilter(filters) &&
+    !rootHasMatchingTarget(rootTargets, filters, context)
+  ) {
+    return false;
+  }
+  return (
+    rootStatusMatchesFilters(root, rootTargets, filters) &&
+    rootDateMatchesFilters(root, rootTargets, filters, context)
+  );
 };
 
 const rootIdForSource = (
-  rows: ProjectionRows,
+  rows: OperationalAlertRecoveryRows,
   sourceId: string | null | undefined,
 ): string | null => {
   if (!sourceId) return null;
@@ -488,7 +1862,7 @@ const rootIdForSource = (
 };
 
 const rootIdForScrapeRun = (
-  rows: ProjectionRows,
+  rows: OperationalAlertRecoveryRows,
   runId: string | null | undefined,
 ): string | null => {
   if (!runId) return null;
@@ -496,52 +1870,611 @@ const rootIdForScrapeRun = (
   return rootIdForSource(rows, run?.supplySourceId ?? run?.sourceId);
 };
 
-const rootIdForAlert = (
-  rows: ProjectionRows,
-  alert: ProjectionRows["operationalAlerts"][number],
+const alertDirectSupplySourceIdFor = (
+  alert: OperationalAlertRecoveryAlert,
+  payload: Record<string, unknown>,
+): string | null =>
+  stringValue(alert.supplySourceId) ?? stringValue(payload.supplySourceId);
+
+const alertSourceIdFor = (
+  alert: OperationalAlertRecoveryAlert,
+  payload: Record<string, unknown>,
+): string | null =>
+  stringValue(payload.sourceId) ??
+  (["AFFILIATE_SOURCE", "AFFILIATE_SUPPLY_SOURCE"].includes(
+    upper(alert.subjectType),
+  )
+    ? stringValue(alert.subjectId)
+    : null);
+
+const alertScrapeRunIdFor = (
+  alert: OperationalAlertRecoveryAlert,
+  payload: Record<string, unknown>,
+): string | null =>
+  stringValue(payload.scrapeRunId ?? payload.runId) ??
+  (["SOURCE_REFRESH", "AFFILIATE_SOURCE_REFRESH"].includes(
+    upper(alert.subjectType),
+  )
+    ? stringValue(alert.subjectId)
+    : null);
+
+const alertGatewayJobIdFor = (
+  alert: OperationalAlertRecoveryAlert,
+  payload: Record<string, unknown>,
+): string | null =>
+  stringValue(payload.gatewayJobId ?? payload.jobId) ??
+  (["GATEWAY_JOB", "AGENT_GATEWAY_JOB", "AGENT_JOB"].includes(
+    upper(alert.subjectType),
+  )
+    ? stringValue(alert.subjectId)
+    : null);
+
+const alertGatewayRootIdFor = (
+  rows: OperationalAlertRecoveryRows,
+  alert: OperationalAlertRecoveryAlert,
+  payload: Record<string, unknown>,
 ): string | null => {
-  const payload = recordValue(alert.payload);
-  const directSupplySourceId =
-    stringValue(alert.supplySourceId) ?? stringValue(payload.supplySourceId);
-  const directRootId = rootIdForSource(rows, directSupplySourceId);
-  if (directRootId) return directRootId;
-  const sourceId =
-    stringValue(payload.sourceId) ??
-    (alert.subjectType === "AFFILIATE_SOURCE"
-      ? stringValue(alert.subjectId)
-      : null);
-  const sourceRootId = rootIdForSource(rows, sourceId);
-  if (sourceRootId) return sourceRootId;
-  const runId =
-    stringValue(payload.scrapeRunId ?? payload.runId) ??
-    (["SOURCE_REFRESH", "AFFILIATE_SOURCE_REFRESH"].includes(
-      upper(alert.subjectType),
-    )
-      ? stringValue(alert.subjectId)
-      : null);
-  const runRootId = rootIdForScrapeRun(rows, runId);
-  if (runRootId) return runRootId;
-  const jobId =
-    stringValue(payload.gatewayJobId ?? payload.jobId) ??
-    (["GATEWAY_JOB", "AGENT_GATEWAY_JOB"].includes(upper(alert.subjectType))
-      ? stringValue(alert.subjectId)
-      : null);
+  const jobId = alertGatewayJobIdFor(alert, payload);
   const job = jobId
     ? rows.gatewayJobs.find((candidate) => candidate.id === jobId)
     : undefined;
-  return rootIdForSource(rows, job?.supplySourceId);
+  const subject = recordValue(job?.subjectJson);
+  return rootIdForSource(
+    rows,
+    job?.supplySourceId ??
+      stringValue(subject.supplySourceId ?? subject.sourceId),
+  );
 };
 
-const loadProjectionRows = async (
+const alertIntakeRootIdFor = (
+  rows: OperationalAlertRecoveryRows,
+  subjectId: string | null,
+): string | null => {
+  const run = rows.intakeRuns?.find((candidate) => candidate.id === subjectId);
+  const intake = rows.intakes?.find((candidate) => candidate.id === run?.intakeId);
+  return rootIdForSource(
+    rows,
+    run?.supplySourceId ??
+      intake?.supplySourceId ??
+      intake?.affiliateSourceId,
+  );
+};
+
+const alertDiscoveryRootIdFor = (
+  rows: OperationalAlertRecoveryRows,
+  subjectId: string | null,
+  payload: Record<string, unknown>,
+): string | null => {
+  const run = rows.discoveryRuns?.find((candidate) =>
+    candidate.id === subjectId,
+  );
+  const campaign = rows.campaigns?.find(
+    (candidate) => candidate.id === run?.campaignId,
+  );
+  const metadata = recordValue(campaign?.metadata);
+  return rootIdForSource(
+    rows,
+    stringValue(
+      metadata.supplySourceId ??
+        metadata.sourceId ??
+        payload.supplySourceId ??
+        payload.sourceId,
+    ),
+  );
+};
+
+const alertTypedRootIdFor = (
+  rows: OperationalAlertRecoveryRows,
+  alert: OperationalAlertRecoveryAlert,
+  payload: Record<string, unknown>,
+): string | null => {
+  const subjectType = upper(alert.subjectType);
+  const subjectId = stringValue(alert.subjectId);
+  switch (subjectType) {
+    case "AFFILIATE_SUPPLY_SOURCE":
+      return rootIdForSource(rows, subjectId);
+    case "INTAKE_RUN":
+      return alertIntakeRootIdFor(rows, subjectId);
+    case "DISCOVERY_RUN":
+      return alertDiscoveryRootIdFor(rows, subjectId, payload);
+    default:
+      return null;
+  }
+};
+
+const rootIdForAlert = (
+  rows: OperationalAlertRecoveryRows,
+  alert: OperationalAlertRecoveryAlert,
+): string | null => {
+  const payload = recordValue(alert.payload);
+  return (
+    [
+      alertTypedRootIdFor(rows, alert, payload),
+      rootIdForSource(rows, alertDirectSupplySourceIdFor(alert, payload)),
+      rootIdForSource(rows, alertSourceIdFor(alert, payload)),
+      rootIdForScrapeRun(rows, alertScrapeRunIdFor(alert, payload)),
+      alertGatewayRootIdFor(rows, alert, payload),
+    ].find((rootId): rootId is string => Boolean(rootId)) ?? null
+  );
+};
+
+const operationalAlertLineageContractForLink = (
+  alert: Readonly<{
+    rolloutCohort: string | null;
+    contractVersion: number | null;
+    subjectType?: string | null;
+    subjectId?: string | null;
+    supplySourceId?: string | null;
+    payload?: unknown;
+  }>,
+  rows: OperationalAlertRecoveryRows,
+): Readonly<{
+  rolloutCohort: string | null;
+  contractVersion: number | null;
+}> => {
+  const gatewayContract = operationalAlertGatewayJobContractForLink(
+    alert,
+    rows.gatewayJobs,
+  );
+  const rootId = rootIdForAlert(
+    rows,
+    alert as OperationalAlertRecoveryAlert,
+  );
+  const root = rootId
+    ? rows.roots.find((candidate) => candidate.id === rootId)
+    : undefined;
+  return {
+    rolloutCohort:
+      gatewayContract.rolloutCohort ?? root?.rolloutCohort ?? null,
+    contractVersion:
+      gatewayContract.contractVersion ??
+      root?.activeSupplyContractVersion ??
+      null,
+  };
+};
+const targetIdsByTypeFor = (
+  targets: readonly Readonly<{
+    targetId: unknown;
+    targetType: unknown;
+  }>[],
+): Map<string, Set<string>> => {
+  const targetIdsByType = new Map<string, Set<string>>();
+  targets.forEach((target) => {
+    const targetId = stringValue(target.targetId);
+    if (!targetId) return;
+    const targetType = upper(target.targetType);
+    const ids = targetIdsByType.get(targetType) ?? new Set<string>();
+    ids.add(targetId);
+    targetIdsByType.set(targetType, ids);
+  });
+  return targetIdsByType;
+};
+
+const targetIdsForType = (
+  targetIdsByType: ReadonlyMap<string, ReadonlySet<string>>,
+  targetType: string,
+): string[] => Array.from(targetIdsByType.get(targetType) ?? []);
+
+const reconciliationRunSelect = {
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  mode: true,
+  status: true,
+  operatorId: true,
+  rolloutCohort: true,
+  supplyContractVersion: true,
+  supplyContractHash: true,
+  deploymentContractVersion: true,
+  deploymentContractHash: true,
+  inputHash: true,
+  outputHash: true,
+  reportHash: true,
+  counts: true,
+  failedInvariants: true,
+  resolutionRefs: true,
+  reportJson: true,
+  appliedAt: true,
+  appliedBy: true,
+} as const;
+
+const operationalAlertSelect = {
+  id: true,
+  createdAt: true,
+  eventKey: true,
+  category: true,
+  severity: true,
+  title: true,
+  detail: true,
+  subjectType: true,
+  subjectId: true,
+  rolloutCohort: true,
+  contractVersion: true,
+  supplySourceId: true,
+  coverageCellId: true,
+  demandId: true,
+  waveId: true,
+  queue: true,
+  lifecycleGeneration: true,
+  claimGeneration: true,
+  workerId: true,
+  attempt: true,
+  previousState: true,
+  nextState: true,
+  reasonCodes: true,
+  evidenceRefs: true,
+  inputHash: true,
+  outputHash: true,
+  payload: true,
+  retentionClass: true,
+  retentionDeadline: true,
+} as const;
+const operationalAlertRecoverySelect = operationalAlertSelect;
+const operationalAlertGatewayJobRecoverySelect = {
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  queue: true,
+  lane: true,
+  role: true,
+  subjectType: true,
+  subjectId: true,
+  subjectJson: true,
+  evidenceManifestJson: true,
+  supplySourceId: true,
+  expectedLifecycleGeneration: true,
+  status: true,
+  priority: true,
+  nextAttemptAt: true,
+  claimGeneration: true,
+  activeClaimId: true,
+  parentClaimId: true,
+  invocationFailureCount: true,
+  lastInvocationFailedAt: true,
+  pipelineBlockedAt: true,
+  terminalDisposition: true,
+  resultHash: true,
+  resultJson: true,
+  terminalReceiptId: true,
+  finishedAt: true,
+  eventSequence: true,
+} as const;
+
+type OperationalAlertLineageScope = Readonly<{
+  sourceIds: readonly string[];
+  gatewayJobIds: readonly string[];
+  discoveryRunIds: readonly string[];
+  intakeRunIds: readonly string[];
+  scrapeRunIds: readonly string[];
+}>;
+
+const nonEmptyUniqueIds = (values: readonly string[]): string[] =>
+  Array.from(new Set(values.filter((value) => value.length > 0)));
+
+const operationalAlertSubjectLineageWhereFor = (
+  scope: OperationalAlertLineageScope,
+): Prisma.AffiliateOperationalAlertsWhereInput[] => [
+  ...(
+    scope.sourceIds.length > 0
+      ? [
+          {
+            AND: [
+              {
+                subjectType: {
+                  in: ["AFFILIATE_SOURCE", "AFFILIATE_SUPPLY_SOURCE"],
+                },
+              },
+              { subjectId: { in: [...scope.sourceIds] } },
+            ],
+          },
+        ]
+      : []
+  ),
+  ...(
+    scope.gatewayJobIds.length > 0
+      ? [
+          {
+            AND: [
+              {
+                subjectType: {
+                  in: ["GATEWAY_JOB", "AGENT_GATEWAY_JOB", "AGENT_JOB"],
+                },
+              },
+              { subjectId: { in: [...scope.gatewayJobIds] } },
+            ],
+          },
+        ]
+      : []
+  ),
+  ...(
+    scope.discoveryRunIds.length > 0
+      ? [
+          {
+            AND: [
+              { subjectType: "DISCOVERY_RUN" },
+              { subjectId: { in: [...scope.discoveryRunIds] } },
+            ],
+          },
+        ]
+      : []
+  ),
+  ...(
+    scope.intakeRunIds.length > 0
+      ? [
+          {
+            AND: [
+              { subjectType: "INTAKE_RUN" },
+              { subjectId: { in: [...scope.intakeRunIds] } },
+            ],
+          },
+        ]
+      : []
+  ),
+  ...(
+    scope.scrapeRunIds.length > 0
+      ? [
+          {
+            AND: [
+              {
+                subjectType: {
+                  in: ["SOURCE_REFRESH", "AFFILIATE_SOURCE_REFRESH"],
+                },
+              },
+              { subjectId: { in: [...scope.scrapeRunIds] } },
+            ],
+          },
+        ]
+      : []
+  ),
+];
+const operationalAlertCoverageSubjectLineageWhereFor = (
+  coverageCellIds: readonly string[],
+): Prisma.AffiliateOperationalAlertsWhereInput[] =>
+  coverageCellIds.length > 0
+    ? [
+        {
+          AND: [
+            { subjectType: "AGENT_JOB" },
+            { subjectId: { in: [...coverageCellIds] } },
+          ],
+        },
+      ]
+    : [];
+
+
+const operationalAlertLineageWhereFor = (
+  scope: OperationalAlertLineageScope,
+): Prisma.AffiliateOperationalAlertsWhereInput[] =>
+  operationalAlertSubjectLineageWhereFor(scope);
+
+type OperationalAlertWhereOptions = Readonly<{
+  includeGlobalInfrastructure?: boolean;
+  includeUnbound?: boolean;
+}>;
+const operationalAlertNormalizedLineageFor = (
+  lineage: OperationalAlertLineageScope,
+): OperationalAlertLineageScope => ({
+  sourceIds: nonEmptyUniqueIds(lineage.sourceIds),
+  gatewayJobIds: nonEmptyUniqueIds(lineage.gatewayJobIds),
+  discoveryRunIds: nonEmptyUniqueIds(lineage.discoveryRunIds),
+  intakeRunIds: nonEmptyUniqueIds(lineage.intakeRunIds),
+  scrapeRunIds: nonEmptyUniqueIds(lineage.scrapeRunIds),
+});
+
+const operationalAlertDirectLineageWhereFor = (
+  rootIds: readonly string[],
+  coverageCellIds: readonly string[],
+  demandIds: readonly string[],
+  waveIds: readonly string[],
+): Prisma.AffiliateOperationalAlertsWhereInput[] => [
+  ...(rootIds.length > 0
+    ? [{ supplySourceId: { in: [...rootIds] } }]
+    : []),
+  ...(coverageCellIds.length > 0
+    ? [{ coverageCellId: { in: [...coverageCellIds] } }]
+    : []),
+  ...(demandIds.length > 0 ? [{ demandId: { in: [...demandIds] } }] : []),
+  ...(waveIds.length > 0 ? [{ waveId: { in: [...waveIds] } }] : []),
+];
+
+const operationalAlertGlobalWhereFor =
+  (): Prisma.AffiliateOperationalAlertsWhereInput => ({
+    AND: [
+      { rolloutCohort: null, contractVersion: null },
+      {
+        OR: [
+          {
+            subjectType: {
+              in: [...GLOBAL_OPERATIONAL_ALERT_SUBJECT_TYPES],
+            },
+          },
+          {
+            category: {
+              in: [...GLOBAL_OPERATIONAL_ALERT_CATEGORIES],
+            },
+          },
+        ],
+      },
+    ],
+  });
+
+const operationalAlertUnboundWhereFor = (
+  lineageWhere: readonly Prisma.AffiliateOperationalAlertsWhereInput[],
+  includeUnbound: boolean,
+): Prisma.AffiliateOperationalAlertsWhereInput[] =>
+  includeUnbound && lineageWhere.length === 0
+    ? [
+        {
+          rolloutCohort: null,
+          contractVersion: null,
+          supplySourceId: null,
+          coverageCellId: null,
+          demandId: null,
+          waveId: null,
+        },
+      ]
+    : [];
+
+const operationalAlertLineageWithInfrastructureWhereFor = (
+  lineageWhere: readonly Prisma.AffiliateOperationalAlertsWhereInput[],
+  options: OperationalAlertWhereOptions,
+): Prisma.AffiliateOperationalAlertsWhereInput[] => [
+  ...lineageWhere,
+  ...(options.includeGlobalInfrastructure
+    ? [operationalAlertGlobalWhereFor()]
+    : []),
+  ...operationalAlertUnboundWhereFor(
+    lineageWhere,
+    options.includeUnbound ?? true,
+  ),
+];
+
+const operationalAlertContractWhereFor = (
+  selection: AffiliateOperationsContractSelection,
+): Prisma.AffiliateOperationalAlertsWhereInput => ({
+  AND: [
+    selection.contractVersion === null
+      ? { contractVersion: null }
+      : {
+          OR: [
+            { contractVersion: null },
+            { contractVersion: selection.contractVersion },
+          ],
+        },
+    {
+      OR: [
+        { rolloutCohort: null },
+        { rolloutCohort: selection.rolloutCohort },
+      ],
+    },
+  ],
+});
+
+const operationalAlertWhereFor = (
+  selection: AffiliateOperationsContractSelection,
+  rootIds: readonly string[],
+  coverageCellIds: readonly string[],
+  demandIds: readonly string[],
+  waveIds: readonly string[],
+  lineage: OperationalAlertLineageScope,
+  options: OperationalAlertWhereOptions = {},
+): Prisma.AffiliateOperationalAlertsWhereInput => {
+  const resolvedOptions: Required<OperationalAlertWhereOptions> = {
+    includeGlobalInfrastructure:
+      options.includeGlobalInfrastructure ?? true,
+    includeUnbound: options.includeUnbound ?? true,
+  };
+  const normalizedLineage = operationalAlertNormalizedLineageFor(lineage);
+  const lineageWhere = [
+    ...operationalAlertDirectLineageWhereFor(
+      rootIds,
+      coverageCellIds,
+      demandIds,
+      waveIds,
+    ),
+    ...operationalAlertLineageWhereFor(normalizedLineage),
+    ...operationalAlertCoverageSubjectLineageWhereFor(coverageCellIds),
+  ];
+  const alertLineageWhere =
+    operationalAlertLineageWithInfrastructureWhereFor(
+      lineageWhere,
+      resolvedOptions,
+    );
+  return {
+    AND: [
+      {
+        OR:
+          alertLineageWhere.length > 0
+            ? alertLineageWhere
+            : [{ id: { in: [] } }],
+      },
+      operationalAlertContractWhereFor(selection),
+    ],
+  };
+};
+
+const loadProjectionSeedRows = async (
   client: Prisma.TransactionClient,
   selection: AffiliateOperationsContractSelection,
+  page: number,
+  pageSize: number,
+  selectedReconciliationRunId: string | null,
 ) => {
-  const [contracts, roots, coverageCells] = await Promise.all([
+  const contractVersionFilter =
+    selection.contractVersion === null ? undefined : selection.contractVersion;
+  const reconciliationPage = Math.max(1, Math.trunc(page));
+  const reconciliationPageSize = Math.min(
+    MAX_PAGE_SIZE,
+    Math.max(1, Math.trunc(pageSize)),
+  );
+  const reconciliationRunWhere = {
+    rolloutCohort: selection.rolloutCohort,
+    ...(contractVersionFilter === undefined
+      ? {}
+      : { supplyContractVersion: contractVersionFilter }),
+  };
+  const reconciliationRunsDelegate = client.affiliateSupplyReconciliationRuns;
+  const hasReconciliationDbCount =
+    typeof reconciliationRunsDelegate.count === "function";
+  const reconciliationRunTotalPromise = hasReconciliationDbCount
+    ? reconciliationRunsDelegate.count({ where: reconciliationRunWhere })
+    : reconciliationRunsDelegate
+        .findMany({
+          where: reconciliationRunWhere,
+          select: { id: true },
+        })
+        .then((runs) => runs.length);
+  const reconciliationRunsPromise = (async () => {
+    const reconciliationRunTotal = await reconciliationRunTotalPromise;
+    const resolvedPage = clampedPageForTotal(
+      reconciliationPage,
+      reconciliationPageSize,
+      reconciliationRunTotal,
+    );
+    const runs = await reconciliationRunsDelegate.findMany({
+      where: reconciliationRunWhere,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      skip: (resolvedPage - 1) * reconciliationPageSize,
+      take: reconciliationPageSize,
+      select: reconciliationRunSelect,
+    });
+    return { runs, page: resolvedPage };
+  })();
+  const selectedReconciliationRunPromise = selectedReconciliationRunId
+    ? typeof reconciliationRunsDelegate.findFirst === "function"
+      ? reconciliationRunsDelegate.findFirst({
+          where: {
+            ...reconciliationRunWhere,
+            id: selectedReconciliationRunId,
+          },
+          select: reconciliationRunSelect,
+        })
+      : reconciliationRunsDelegate
+          .findMany({
+            where: {
+              ...reconciliationRunWhere,
+              id: selectedReconciliationRunId,
+            },
+            take: 1,
+            select: reconciliationRunSelect,
+          })
+          .then((runs) =>
+            runs.find((run) => run.id === selectedReconciliationRunId) ?? null,
+          )
+    : Promise.resolve(null);
+  const [
+    contracts,
+    roots,
+    coverageCells,
+    loadedReconciliationRunsPage,
+    reconciliationRunTotal,
+    selectedReconciliationRun,
+  ] = await Promise.all([
     client.affiliateSupplyContractManifests.findMany({
       where: {
         status: "ACTIVE",
         rolloutCohort: selection.rolloutCohort,
-        version: selection.contractVersion ?? undefined,
+        version: contractVersionFilter,
       },
       orderBy: { activatedAt: "desc" },
       take: 1,
@@ -559,7 +2492,7 @@ const loadProjectionRows = async (
     client.affiliateSupplySources.findMany({
       where: {
         rolloutCohort: selection.rolloutCohort,
-        activeSupplyContractVersion: selection.contractVersion ?? undefined,
+        activeSupplyContractVersion: contractVersionFilter,
       },
       orderBy: { updatedAt: "desc" },
       take: MAX_PROJECTION_ROWS + 1,
@@ -629,38 +2562,911 @@ const loadProjectionRows = async (
         updatedAt: true,
       },
     }),
+    reconciliationRunsPromise,
+    reconciliationRunTotalPromise,
+    selectedReconciliationRunPromise,
   ]);
-  const scopedRootIds = roots.map((root) => root.id);
-  const scopedCoverageCellIds = coverageCells.map((cell) => cell.id);
-  const scopedRootIntakeIds = roots.flatMap((root) =>
-    root.intakeId ? [root.intakeId] : [],
+  const loadedReconciliationRuns = loadedReconciliationRunsPage.runs;
+  const reconciliationRunPage = loadedReconciliationRunsPage.page;
+  const reconciliationRuns =
+    loadedReconciliationRuns.length > reconciliationPageSize
+      ? loadedReconciliationRuns.slice(
+          (reconciliationRunPage - 1) * reconciliationPageSize,
+          reconciliationRunPage * reconciliationPageSize,
+        )
+      : loadedReconciliationRuns;
+  return {
+    contracts,
+    roots,
+    coverageCells,
+    reconciliationRuns,
+    reconciliationRunTotal,
+    reconciliationRunPage,
+    selectedReconciliationRun,
+  };
+};
+const projectionAlertDeliverySelect = {
+  id: true,
+  createdAt: true,
+  alertId: true,
+  channel: true,
+  status: true,
+  attempt: true,
+  deliveredAt: true,
+  responseCode: true,
+  responseBody: true,
+  errorMessage: true,
+} as const;
+
+type ProjectionAlertDeliveryAttemptGroup = Readonly<{
+  alertId: string;
+  channel: string;
+  attempt: number;
+  status: string;
+  _max: Readonly<{ createdAt: Date | null }>;
+}>;
+type ProjectionAlertDeliveryStats = Readonly<{
+  deliveryCount: number;
+  deliveredCount: number;
+  latestDeliveryStatus: string | null;
+}>;
+
+const loadProjectionAlertDeliveryAttemptGroups = async (
+  alertDeliveryDelegate: Prisma.TransactionClient["affiliateOperationalAlertDeliveries"],
+  alertIds: readonly string[],
+): Promise<ProjectionAlertDeliveryAttemptGroup[] | null> => {
+  if (
+    alertIds.length === 0 ||
+    typeof alertDeliveryDelegate.groupBy !== "function"
+  ) {
+    return null;
+  }
+  const groups = await alertDeliveryDelegate.groupBy({
+    by: ["alertId", "channel", "attempt", "status"],
+    where: { alertId: { in: [...alertIds] } },
+    _max: { createdAt: true },
+  });
+  return groups as ProjectionAlertDeliveryAttemptGroup[];
+};
+
+const projectionAlertDeliveryAttemptKeyFor = (
+  alertId: string,
+  channel: string,
+  attempt: number,
+): string => `${alertId}\u0000${upper(channel)}\u0000${attempt}`;
+
+const projectionAlertDeliveryLatestReplaces = (
+  group: ProjectionAlertDeliveryAttemptGroup,
+  current: Readonly<{ at: number; terminal: boolean; status: string }> | undefined,
+  at: number,
+  terminal: boolean,
+): boolean =>
+  !current ||
+  at > current.at ||
+  (at === current.at &&
+    (Number(terminal) > Number(current.terminal) ||
+      (terminal === current.terminal &&
+        alertDeliveryStatusPriority(group.status) >
+          alertDeliveryStatusPriority(current.status))));
+
+const updateProjectionAlertDeliveryLatestFor = (
+  group: ProjectionAlertDeliveryAttemptGroup,
+  latestByAlert: Map<
+    string,
+    Readonly<{ at: number; terminal: boolean; status: string }>
+  >,
+): void => {
+  const at = dateValue(group._max.createdAt)?.getTime() ?? 0;
+  const terminal = upper(group.status) !== "IN_FLIGHT";
+  const current = latestByAlert.get(group.alertId);
+  if (projectionAlertDeliveryLatestReplaces(group, current, at, terminal)) {
+    latestByAlert.set(group.alertId, {
+      at,
+      terminal,
+      status: group.status,
+    });
+  }
+};
+
+const addProjectionAlertDeliveryStatsFor = (
+  group: ProjectionAlertDeliveryAttemptGroup,
+  alertIdSet: ReadonlySet<string>,
+  attemptsByAlert: ReadonlyMap<string, Set<string>>,
+  deliveredAttemptsByAlert: ReadonlyMap<string, Set<string>>,
+  latestByAlert: Map<
+    string,
+    Readonly<{ at: number; terminal: boolean; status: string }>
+  >,
+): void => {
+  if (!alertIdSet.has(group.alertId)) return;
+  const key = projectionAlertDeliveryAttemptKeyFor(
+    group.alertId,
+    group.channel,
+    group.attempt,
   );
-  const scopedRootLiveSourceIds = roots.flatMap((root) =>
-    root.liveSourceId ? [root.liveSourceId] : [],
+  attemptsByAlert.get(group.alertId)?.add(key);
+  if (upper(group.status) === "DELIVERED") {
+    deliveredAttemptsByAlert.get(group.alertId)?.add(key);
+  }
+  updateProjectionAlertDeliveryLatestFor(group, latestByAlert);
+};
+
+
+const projectionAlertDeliveryStatsFor = (
+  groups: readonly ProjectionAlertDeliveryAttemptGroup[],
+  alertIds: readonly string[],
+): ReadonlyMap<string, ProjectionAlertDeliveryStats> => {
+  const alertIdSet = new Set(alertIds);
+  const attemptsByAlert = new Map<string, Set<string>>(
+    alertIds.map((alertId): [string, Set<string>] => [
+      alertId,
+      new Set<string>(),
+    ]),
   );
-  const gatewaySubjectContractScope =
-    selection.contractVersion === null
-      ? {}
-      : {
-          AND: [
-            {
-              OR: [
-                {
-                  subjectJson: {
-                    path: ["contractVersion"],
-                    equals: selection.contractVersion,
-                  },
-                },
-                {
-                  subjectJson: {
-                    path: ["supplyContractVersion"],
-                    equals: selection.contractVersion,
-                  },
-                },
-              ],
+  const deliveredAttemptsByAlert = new Map<string, Set<string>>(
+    alertIds.map((alertId): [string, Set<string>] => [
+      alertId,
+      new Set<string>(),
+    ]),
+  );
+  const latestByAlert = new Map<
+    string,
+    Readonly<{ at: number; terminal: boolean; status: string }>
+  >();
+  groups.forEach((group) =>
+    addProjectionAlertDeliveryStatsFor(
+      group,
+      alertIdSet,
+      attemptsByAlert,
+      deliveredAttemptsByAlert,
+      latestByAlert,
+    ),
+  );
+  return new Map(
+    alertIds.map((alertId) => [
+      alertId,
+      {
+        deliveryCount: attemptsByAlert.get(alertId)?.size ?? 0,
+        deliveredCount: deliveredAttemptsByAlert.get(alertId)?.size ?? 0,
+        latestDeliveryStatus: latestByAlert.get(alertId)?.status ?? null,
+      },
+    ]),
+  );
+};
+
+const projectionAlertDeliveryAttemptsFor = (
+  groups: readonly ProjectionAlertDeliveryAttemptGroup[],
+  alertId: string | null,
+): Array<Readonly<{
+  alertId: string;
+  channel: string;
+  attempt: number;
+  at: number;
+}>> => {
+  if (!alertId) return [];
+  const attempts = new Map<
+    string,
+    Readonly<{
+      alertId: string;
+      channel: string;
+      attempt: number;
+      at: number;
+    }>
+  >();
+  groups
+    .filter((group) => group.alertId === alertId)
+    .forEach((group) => {
+      const key = projectionAlertDeliveryAttemptKeyFor(
+        group.alertId,
+        group.channel,
+        group.attempt,
+      );
+      const current = attempts.get(key);
+      const at = dateValue(group._max.createdAt)?.getTime() ?? 0;
+      if (!current || at > current.at) {
+        attempts.set(key, {
+          alertId: group.alertId,
+          channel: group.channel,
+          attempt: group.attempt,
+          at,
+        });
+      }
+    });
+  return [...attempts.values()].sort(
+    (left, right) =>
+      right.at - left.at ||
+      left.channel.localeCompare(right.channel) ||
+      right.attempt - left.attempt,
+  );
+};
+
+const loadProjectionAlertDeliveryFallbackHistory = async (
+  alertDeliveryDelegate: Prisma.TransactionClient["affiliateOperationalAlertDeliveries"],
+  selectedAlertId: string | null,
+  historyPage: number,
+  historyPageSize: number,
+) => {
+  if (!selectedAlertId) return { rows: [], total: 0 };
+  const [rows, total] = await Promise.all([
+    alertDeliveryDelegate.findMany({
+      where: { alertId: selectedAlertId },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      skip: (historyPage - 1) * historyPageSize,
+      take: historyPageSize,
+      select: projectionAlertDeliverySelect,
+    }),
+    typeof alertDeliveryDelegate.count === "function"
+      ? alertDeliveryDelegate.count({ where: { alertId: selectedAlertId } })
+      : alertDeliveryDelegate
+          .findMany({
+            where: { alertId: selectedAlertId },
+            select: { id: true, alertId: true },
+          })
+          .then(
+            (deliveries) =>
+              deliveries.filter(
+                (delivery) => delivery.alertId === selectedAlertId,
+              ).length,
+          ),
+  ]);
+  return { rows, total };
+};
+
+const loadProjectionAlertDeliveryGroupedHistory = async (
+  alertDeliveryDelegate: Prisma.TransactionClient["affiliateOperationalAlertDeliveries"],
+  groups: readonly ProjectionAlertDeliveryAttemptGroup[],
+  selectedAlertId: string | null,
+  historyPage: number,
+  historyPageSize: number,
+) => {
+  const attempts = projectionAlertDeliveryAttemptsFor(groups, selectedAlertId);
+  const pageAttempts = attempts.slice(
+    (historyPage - 1) * historyPageSize,
+    historyPage * historyPageSize,
+  );
+  const rows =
+    pageAttempts.length === 0
+      ? []
+      : await alertDeliveryDelegate.findMany({
+          where: {
+            OR: pageAttempts.map(({ alertId, channel, attempt }) => ({
+              alertId,
+              channel,
+              attempt,
+            })),
+          },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          select: projectionAlertDeliverySelect,
+        });
+  return { rows, total: attempts.length };
+};
+
+const projectionAlertDeliveryFallbackStatsFor = (
+  rows: readonly ProjectionAlertDeliveryRecord[],
+  alertIds: readonly string[],
+): ReadonlyMap<string, ProjectionAlertDeliveryStats> => {
+  const rowsByAlert = new Map<
+    string,
+    Array<ProjectionAlertDeliveryRecord>
+  >();
+  rows.forEach((row) => {
+    const alertRows = rowsByAlert.get(row.alertId) ?? [];
+    alertRows.push(row);
+    rowsByAlert.set(row.alertId, alertRows);
+  });
+  return new Map(
+    alertIds.map((alertId) => {
+      const alertRows = dedupeAlertDeliveries(rowsByAlert.get(alertId) ?? []);
+      const attempts = new Set(
+        alertRows.map((row) =>
+          projectionAlertDeliveryAttemptKeyFor(
+            row.alertId,
+            row.channel,
+            row.attempt,
+          ),
+        ),
+      );
+      const deliveredAttempts = new Set(
+        alertRows
+          .filter((row) => upper(row.status) === "DELIVERED")
+          .map((row) =>
+            projectionAlertDeliveryAttemptKeyFor(
+              row.alertId,
+              row.channel,
+              row.attempt,
+            ),
+          ),
+      );
+      return [
+        alertId,
+        {
+          deliveryCount: attempts.size,
+          deliveredCount: deliveredAttempts.size,
+          latestDeliveryStatus: alertRows[0]?.status ?? null,
+        },
+      ];
+    }),
+  );
+};
+
+type ProjectionAlertDeliveryLoad = Readonly<{
+  alertDeliveries: ProjectionAlertDeliveryRecord[];
+  alertDeliveryHistory: ProjectionAlertDeliveryRecord[];
+  alertDeliveryStats: ReadonlyMap<string, ProjectionAlertDeliveryStats>;
+  alertDeliveryTotal: number;
+  alertDeliveryPage: number;
+  alertDeliveryPageSize: number;
+}>;
+
+type ProjectionAlertDeliveryRawQueryClient = Readonly<{
+  $queryRaw<T = unknown>(query: Prisma.Sql): Promise<T>;
+}>;
+
+type ProjectionAlertDeliverySqlStatsRow = Readonly<{
+  alertId: string;
+  deliveryCount: number | bigint;
+  deliveredCount: number | bigint;
+  latestDeliveryStatus: string | null;
+}>;
+
+const projectionAlertDeliveryRawQueryClientFor = (
+  client: Prisma.TransactionClient,
+): ProjectionAlertDeliveryRawQueryClient | null =>
+  typeof client.$queryRaw === "function"
+    ? (client as unknown as ProjectionAlertDeliveryRawQueryClient)
+    : null;
+
+const projectionAlertDeliverySqlNumberFor = (value: unknown): number =>
+  typeof value === "bigint" ? Number(value) : numberValue(value, 0);
+
+const projectionAlertDeliverySqlIdsFor = (
+  alertIds: readonly string[],
+): Prisma.Sql => Prisma.join(alertIds.map((alertId) => Prisma.sql`${alertId}`));
+
+const loadProjectionAlertDeliverySqlStats = async (
+  queryClient: ProjectionAlertDeliveryRawQueryClient,
+  alertIds: readonly string[],
+): Promise<ReadonlyMap<string, ProjectionAlertDeliveryStats>> => {
+  if (alertIds.length === 0) return new Map();
+  const rows = await queryClient.$queryRaw<ProjectionAlertDeliverySqlStatsRow[]>(
+    Prisma.sql`
+      WITH logical_attempts AS (
+        SELECT DISTINCT ON (d."alertId", UPPER(d."channel"), d."attempt")
+          d."alertId",
+          d."channel",
+          d."attempt",
+          d."status",
+          d."createdAt",
+          d."id"
+        FROM "AffiliateOperationalAlertDeliveries" AS d
+        WHERE d."alertId" IN (${projectionAlertDeliverySqlIdsFor(alertIds)})
+        ORDER BY
+          d."alertId",
+          UPPER(d."channel"),
+          d."attempt",
+          CASE WHEN UPPER(d."status") = 'IN_FLIGHT' THEN 0 ELSE 1 END DESC,
+          d."createdAt" DESC,
+          d."id" DESC
+      )
+      SELECT
+        "alertId",
+        COUNT(*)::int AS "deliveryCount",
+        COUNT(*) FILTER (
+          WHERE UPPER("status") = 'DELIVERED'
+        )::int AS "deliveredCount",
+        (
+          ARRAY_AGG(
+            "status"
+            ORDER BY
+              "createdAt" DESC,
+              "attempt" DESC,
+              CASE
+                WHEN UPPER("status") IN ('DELIVERED', 'FAILED', 'NOT_CONFIGURED')
+                THEN 1
+                ELSE 0
+              END DESC,
+              "id" ASC
+          )
+        )[1] AS "latestDeliveryStatus"
+      FROM logical_attempts
+      GROUP BY "alertId"
+    `,
+  );
+  return new Map(
+    rows.map(
+      (row): [string, ProjectionAlertDeliveryStats] => [
+        row.alertId,
+        {
+          deliveryCount: projectionAlertDeliverySqlNumberFor(row.deliveryCount),
+          deliveredCount: projectionAlertDeliverySqlNumberFor(
+            row.deliveredCount,
+          ),
+          latestDeliveryStatus: row.latestDeliveryStatus,
+        },
+      ],
+    ),
+  );
+};
+
+const loadProjectionAlertDeliverySqlHistoryRows = async (
+  queryClient: ProjectionAlertDeliveryRawQueryClient,
+  selectedAlertId: string,
+  offset: number,
+  historyPageSize: number,
+): Promise<ProjectionAlertDeliveryRecord[]> =>
+  queryClient.$queryRaw<ProjectionAlertDeliveryRecord[]>(
+    Prisma.sql`
+      WITH logical_attempts AS (
+        SELECT DISTINCT ON (d."alertId", UPPER(d."channel"), d."attempt")
+          d."id",
+          d."createdAt",
+          d."alertId",
+          d."channel",
+          d."status",
+          d."attempt",
+          d."deliveredAt",
+          d."responseCode",
+          d."responseBody",
+          d."errorMessage"
+        FROM "AffiliateOperationalAlertDeliveries" AS d
+        WHERE d."alertId" = ${selectedAlertId}
+        ORDER BY
+          d."alertId",
+          UPPER(d."channel"),
+          d."attempt",
+          CASE WHEN UPPER(d."status") = 'IN_FLIGHT' THEN 0 ELSE 1 END DESC,
+          d."createdAt" DESC,
+          d."id" DESC
+      )
+      SELECT
+        "id",
+        "createdAt",
+        "alertId",
+        "channel",
+        "status",
+        "attempt",
+        "deliveredAt",
+        "responseCode",
+        "responseBody",
+        "errorMessage"
+      FROM logical_attempts
+      ORDER BY
+        "createdAt" DESC,
+        "attempt" DESC,
+        CASE
+          WHEN UPPER("status") IN ('DELIVERED', 'FAILED', 'NOT_CONFIGURED')
+          THEN 1
+          ELSE 0
+        END DESC,
+        "id" ASC
+      OFFSET ${offset}
+      LIMIT ${historyPageSize}
+    `,
+  );
+
+const loadProjectionAlertDeliverySqlHistoryTotal = async (
+  queryClient: ProjectionAlertDeliveryRawQueryClient,
+  selectedAlertId: string,
+): Promise<number> => {
+  const totalRows = await queryClient.$queryRaw<
+    Array<{ total: number | bigint }>
+  >(
+    Prisma.sql`
+      WITH logical_attempts AS (
+        SELECT DISTINCT ON (UPPER(d."channel"), d."attempt")
+          d."channel",
+          d."attempt"
+        FROM "AffiliateOperationalAlertDeliveries" AS d
+        WHERE d."alertId" = ${selectedAlertId}
+        ORDER BY
+          UPPER(d."channel"),
+          d."attempt",
+          CASE WHEN UPPER(d."status") = 'IN_FLIGHT' THEN 0 ELSE 1 END DESC,
+          d."createdAt" DESC,
+          d."id" DESC
+      )
+      SELECT COUNT(*)::int AS "total"
+      FROM logical_attempts
+    `,
+  );
+  return projectionAlertDeliverySqlNumberFor(totalRows[0]?.total);
+};
+
+const loadProjectionAlertDeliverySqlHistory = async (
+  queryClient: ProjectionAlertDeliveryRawQueryClient,
+  selectedAlertId: string | null,
+  historyPage: number,
+  historyPageSize: number,
+): Promise<
+  Readonly<{
+    rows: ProjectionAlertDeliveryRecord[];
+    total: number;
+    page: number;
+  }>
+> => {
+  if (!selectedAlertId) return { rows: [], total: 0, page: 1 };
+  const total = await loadProjectionAlertDeliverySqlHistoryTotal(
+    queryClient,
+    selectedAlertId,
+  );
+  const totalPages = Math.max(1, Math.ceil(total / historyPageSize));
+  const page = Math.min(
+    totalPages,
+    Math.max(1, Math.trunc(historyPage)),
+  );
+  const rows = await loadProjectionAlertDeliverySqlHistoryRows(
+    queryClient,
+    selectedAlertId,
+    (page - 1) * historyPageSize,
+    historyPageSize,
+  );
+  return { rows, total, page };
+};
+
+const loadProjectionAlertDeliveryRowsViaSql = async (
+  queryClient: ProjectionAlertDeliveryRawQueryClient,
+  alertDeliveryDelegate: Prisma.TransactionClient["affiliateOperationalAlertDeliveries"],
+  pageAlertIds: readonly string[],
+  selectedAlertId: string | null,
+  historyPage: number,
+  historyPageSize: number,
+): Promise<ProjectionAlertDeliveryLoad> => {
+  const relevantAlertIds = [
+    ...new Set([
+      ...pageAlertIds,
+      ...(selectedAlertId ? [selectedAlertId] : []),
+    ]),
+  ];
+  const latestDeliveryRowsPromise =
+    pageAlertIds.length > 0
+      ? alertDeliveryDelegate.findMany({
+          where: { alertId: { in: [...pageAlertIds] } },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          distinct: ["alertId"],
+          take: pageAlertIds.length,
+          select: projectionAlertDeliverySelect,
+        })
+      : Promise.resolve([]);
+  const [latestDeliveryRows, alertDeliveryStats, selectedHistory] =
+    await Promise.all([
+      latestDeliveryRowsPromise,
+      loadProjectionAlertDeliverySqlStats(queryClient, relevantAlertIds),
+      loadProjectionAlertDeliverySqlHistory(
+        queryClient,
+        selectedAlertId,
+        historyPage,
+        historyPageSize,
+      ),
+    ]);
+  const latestRows = latestDeliveryRows.filter((delivery) =>
+    pageAlertIds.includes(delivery.alertId),
+  );
+  return {
+    alertDeliveries: dedupeAlertDeliveries(latestRows),
+    alertDeliveryHistory: dedupeAlertDeliveries(
+      selectedHistory.rows.filter(
+        (delivery) => delivery.alertId === selectedAlertId,
+      ),
+    ),
+    alertDeliveryStats,
+    alertDeliveryTotal: selectedHistory.total,
+    alertDeliveryPage: selectedHistory.page,
+    alertDeliveryPageSize: historyPageSize,
+  };
+};
+
+const loadProjectionAlertDeliveryRowsViaDelegate = async (
+  alertDeliveryDelegate: Prisma.TransactionClient["affiliateOperationalAlertDeliveries"],
+  pageAlertIds: readonly string[],
+  selectedAlertId: string | null,
+  historyPage: number,
+  historyPageSize: number,
+): Promise<ProjectionAlertDeliveryLoad> => {
+  const resolvedHistoryPage = Math.max(1, Math.trunc(historyPage));
+  const resolvedHistoryPageSize = Math.min(
+    MAX_PAGE_SIZE,
+    Math.max(1, Math.trunc(historyPageSize)),
+  );
+  const relevantAlertIds = [
+    ...new Set([
+      ...pageAlertIds,
+      ...(selectedAlertId ? [selectedAlertId] : []),
+    ]),
+  ];
+  const attemptGroups = await loadProjectionAlertDeliveryAttemptGroups(
+    alertDeliveryDelegate,
+    relevantAlertIds,
+  );
+  const latestDeliveryRowsPromise =
+    pageAlertIds.length > 0
+      ? alertDeliveryDelegate.findMany({
+          where: { alertId: { in: [...pageAlertIds] } },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          distinct: ["alertId"],
+          take: pageAlertIds.length,
+          select: projectionAlertDeliverySelect,
+        })
+      : Promise.resolve([]);
+  const selectedHistoryPromise =
+    attemptGroups === null
+      ? loadProjectionAlertDeliveryFallbackHistory(
+          alertDeliveryDelegate,
+          selectedAlertId,
+          resolvedHistoryPage,
+          resolvedHistoryPageSize,
+        )
+      : loadProjectionAlertDeliveryGroupedHistory(
+          alertDeliveryDelegate,
+          attemptGroups,
+          selectedAlertId,
+          resolvedHistoryPage,
+          resolvedHistoryPageSize,
+        );
+  const [latestDeliveryRows, selectedHistory] = await Promise.all([
+    latestDeliveryRowsPromise,
+    selectedHistoryPromise,
+  ]);
+  const latestRows = latestDeliveryRows.filter((delivery) =>
+    pageAlertIds.includes(delivery.alertId),
+  );
+  return {
+    alertDeliveries: dedupeAlertDeliveries(latestRows),
+    alertDeliveryHistory: dedupeAlertDeliveries(
+      selectedHistory.rows.filter(
+        (delivery) => delivery.alertId === selectedAlertId,
+      ),
+    ),
+    alertDeliveryStats:
+      attemptGroups === null
+        ? projectionAlertDeliveryFallbackStatsFor(latestRows, pageAlertIds)
+        : projectionAlertDeliveryStatsFor(attemptGroups, pageAlertIds),
+    alertDeliveryTotal: selectedHistory.total,
+    alertDeliveryPage: resolvedHistoryPage,
+    alertDeliveryPageSize: resolvedHistoryPageSize,
+  };
+};
+
+const loadProjectionAlertDeliveryRows = async (
+  client: Prisma.TransactionClient,
+  pageAlertIds: readonly string[],
+  selectedAlertId: string | null,
+  historyPage: number,
+  historyPageSize: number,
+): Promise<ProjectionAlertDeliveryLoad> => {
+  const queryClient = projectionAlertDeliveryRawQueryClientFor(client);
+  const alertDeliveryDelegate = client.affiliateOperationalAlertDeliveries;
+  return queryClient
+    ? loadProjectionAlertDeliveryRowsViaSql(
+        queryClient,
+        alertDeliveryDelegate,
+        pageAlertIds,
+        selectedAlertId,
+        historyPage,
+        historyPageSize,
+      )
+    : loadProjectionAlertDeliveryRowsViaDelegate(
+        alertDeliveryDelegate,
+        pageAlertIds,
+        selectedAlertId,
+        historyPage,
+        historyPageSize,
+      );
+};
+
+const loadProjectionAlertRows = async (
+  client: Prisma.TransactionClient,
+  selection: AffiliateOperationsContractSelection,
+  scopedRootIds: readonly string[],
+  scopedCoverageCellIds: readonly string[],
+  scopedDemandIds: readonly string[],
+  scopedWaveIds: readonly string[],
+  lineage: OperationalAlertLineageScope,
+  page: number,
+  pageSize: number,
+  selectedAlertId: string | null,
+  historyPage = 1,
+  historyPageSize = DEFAULT_PAGE_SIZE,
+) => {
+  const operationalAlertWhere = operationalAlertWhereFor(
+    selection,
+    scopedRootIds,
+    scopedCoverageCellIds,
+    scopedDemandIds,
+    scopedWaveIds,
+    lineage,
+  );
+  const operationalAlertsDelegate = client.affiliateOperationalAlerts;
+  const alertPage = Math.max(1, Math.trunc(page));
+  const alertPageSize = Math.min(
+    MAX_PAGE_SIZE,
+    Math.max(1, Math.trunc(pageSize)),
+  );
+  const hasOperationalAlertDbCount =
+    typeof operationalAlertsDelegate.count === "function";
+  const operationalAlertTotalPromise = hasOperationalAlertDbCount
+    ? operationalAlertsDelegate.count({ where: operationalAlertWhere })
+    : operationalAlertsDelegate
+        .findMany({
+          where: operationalAlertWhere,
+          select: { id: true },
+        })
+        .then((alerts) => alerts.length);
+  const operationalAlertPagePromise = (async () => {
+    const operationalAlertTotal = await operationalAlertTotalPromise;
+    const resolvedPage = clampedPageForTotal(
+      alertPage,
+      alertPageSize,
+      operationalAlertTotal,
+    );
+    const loaded = await operationalAlertsDelegate.findMany({
+      where: operationalAlertWhere,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      skip: (resolvedPage - 1) * alertPageSize,
+      take: alertPageSize,
+      select: operationalAlertSelect,
+    });
+    return { rows: loaded, page: resolvedPage };
+  })();
+  const selectedOperationalAlertPromise = selectedAlertId
+    ? typeof operationalAlertsDelegate.findFirst === "function"
+      ? operationalAlertsDelegate.findFirst({
+          where: {
+            AND: [operationalAlertWhere, { id: selectedAlertId }],
+          },
+          select: operationalAlertSelect,
+        })
+      : operationalAlertsDelegate
+          .findMany({
+            where: {
+              AND: [operationalAlertWhere, { id: selectedAlertId }],
             },
-          ],
-        };
+            take: 1,
+            select: operationalAlertSelect,
+          })
+          .then(
+            (alerts) =>
+              alerts.find((alert) => alert.id === selectedAlertId) ?? null,
+          )
+    : Promise.resolve(null);
+  const [
+    loadedOperationalAlertPage,
+    operationalAlertTotal,
+    selectedOperationalAlert,
+  ] = await Promise.all([
+    operationalAlertPagePromise,
+    operationalAlertTotalPromise,
+    selectedOperationalAlertPromise,
+  ]);
+  const alertPageStart =
+    (loadedOperationalAlertPage.page - 1) * alertPageSize;
+  const operationalAlertPageRows =
+    loadedOperationalAlertPage.rows.length > alertPageSize
+      ? loadedOperationalAlertPage.rows.slice(
+          alertPageStart,
+          alertPageStart + alertPageSize,
+        )
+      : loadedOperationalAlertPage.rows;
+  const exceptionAlertRows: typeof loadedOperationalAlertPage.rows = [];
+  const operationalAlertPageIds = operationalAlertPageRows.map(
+    (alert) => alert.id,
+  );
+  const operationalAlertsById = new Map<
+    string,
+    (typeof operationalAlertPageRows)[number]
+  >();
+  [
+    ...operationalAlertPageRows,
+    ...exceptionAlertRows,
+    ...(selectedOperationalAlert ? [selectedOperationalAlert] : []),
+  ].forEach((alert) => {
+    operationalAlertsById.set(alert.id, alert);
+  });
+  const operationalAlerts = [...operationalAlertsById.values()].sort(
+    compareProjectionTimestampIdAttempt,
+  );
+  const pageAlertIds = operationalAlertPageRows.map((alert) => alert.id);
+  const deliveryData = await loadProjectionAlertDeliveryRows(
+    client,
+    pageAlertIds,
+    selectedOperationalAlert?.id ?? null,
+    historyPage,
+    historyPageSize,
+  );
+  return {
+    operationalAlerts,
+    operationalAlertPageIds,
+    operationalAlertPage: loadedOperationalAlertPage.page,
+    operationalAlertPageSize: alertPageSize,
+    operationalAlertTotal,
+    ...deliveryData,
+  };
+};
+const projectionContractVersionFilterFor = (
+  selection: AffiliateOperationsContractSelection,
+): number | undefined =>
+  selection.contractVersion === null ? undefined : selection.contractVersion;
+
+const projectionRootScopeIdsFor = (
+  roots: readonly Readonly<{
+    id: string;
+    intakeId: string | null;
+    liveSourceId: string | null;
+  }>[],
+): Readonly<{
+  rootIds: string[];
+  intakeIds: string[];
+  liveSourceIds: string[];
+}> => ({
+  rootIds: roots.map((root) => root.id),
+  intakeIds: roots.flatMap((root) => root.intakeId ? [root.intakeId] : []),
+  liveSourceIds: roots.flatMap((root) =>
+    root.liveSourceId ? [root.liveSourceId] : [],
+  ),
+});
+
+const gatewaySubjectContractScopeFor = (
+  selection: AffiliateOperationsContractSelection,
+) =>
+  selection.contractVersion === null
+    ? {}
+    : {
+        AND: [
+          {
+            OR: [
+              {
+                subjectJson: {
+                  path: ["contractVersion"],
+                  equals: selection.contractVersion,
+                },
+              },
+              {
+                subjectJson: {
+                  path: ["supplyContractVersion"],
+                  equals: selection.contractVersion,
+                },
+              },
+            ],
+          },
+        ],
+      };
+
+
+const loadProjectionRows = async (
+  client: Prisma.TransactionClient,
+  selection: AffiliateOperationsContractSelection,
+  page = 1,
+  pageSize = DEFAULT_PAGE_SIZE,
+  selectedReconciliationRunId: string | null = null,
+  selectedAlertId: string | null = null,
+  now = new Date(),
+  historyPage = 1,
+  historyPageSize = DEFAULT_PAGE_SIZE,
+) => {
+  const {
+    contracts,
+    roots,
+    coverageCells,
+    reconciliationRuns,
+    reconciliationRunTotal,
+    reconciliationRunPage,
+    selectedReconciliationRun,
+  } = await loadProjectionSeedRows(
+    client,
+    selection,
+    page,
+    pageSize,
+    selectedReconciliationRunId,
+  );
+  const contractVersionFilter =
+    projectionContractVersionFilterFor(selection);
+  const {
+    rootIds: scopedRootIds,
+    intakeIds: scopedRootIntakeIds,
+    liveSourceIds: scopedRootLiveSourceIds,
+  } = projectionRootScopeIdsFor(roots);
+  const scopedCoverageCellIds = coverageCells.map((cell) => cell.id);
+  const gatewaySubjectContractScope =
+    gatewaySubjectContractScopeFor(selection);
   const [
     targets,
     demands,
@@ -707,7 +3513,7 @@ const loadProjectionRows = async (
     client.affiliateReplenishmentDemands.findMany({
       where: {
         rolloutCohort: selection.rolloutCohort,
-        contractVersion: selection.contractVersion ?? undefined,
+        contractVersion: contractVersionFilter,
       },
       orderBy: [{ priority: "asc" }, { updatedAt: "desc" }],
       take: MAX_PROJECTION_ROWS + 1,
@@ -739,7 +3545,7 @@ const loadProjectionRows = async (
     client.affiliateSupplyLifecycleTransitions.findMany({
       where: {
         supplySourceId: { in: scopedRootIds },
-        contractVersion: selection.contractVersion ?? undefined,
+        contractVersion: contractVersionFilter,
       },
       orderBy: { occurredAt: "desc" },
       take: MAX_PROJECTION_ROWS + 1,
@@ -1202,6 +4008,14 @@ const loadProjectionRows = async (
       },
     }),
   ]);
+  const organizationTargetIds = Array.from(
+    new Set(
+      targets
+        .filter((target) => isOrganizationTargetType(target.targetType))
+        .map((target) => stringValue(target.targetId))
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ).sort((left, right) => left.localeCompare(right));
   const waves = await client.affiliateReplenishmentWaves.findMany({
     where: { demandId: { in: demands.map((demand) => demand.id) } },
     orderBy: { createdAt: "desc" },
@@ -1227,6 +4041,49 @@ const loadProjectionRows = async (
       updatedAt: true,
     },
   });
+  const scopedDemandIds = demands.map((demand) => demand.id);
+  const scopedWaveIds = waves.map((wave) => wave.id);
+  const targetIdsByType = targetIdsByTypeFor(targets);
+  const canonicalEventIds = targetIdsForType(targetIdsByType, "EVENT");
+  const canonicalTeamIds = targetIdsForType(targetIdsByType, "TEAM");
+  const canonicalFacilityIds = targetIdsForType(targetIdsByType, "FACILITY");
+  const [canonicalEvents, canonicalTeams, facilities] = await Promise.all([
+    client.events.findMany({
+      where: { id: { in: canonicalEventIds } },
+      select: {
+        id: true,
+        createdAt: true,
+        updatedAt: true,
+        name: true,
+        archivedAt: true,
+        organizationId: true,
+        state: true,
+      },
+    }),
+    client.canonicalTeams.findMany({
+      where: { id: { in: canonicalTeamIds } },
+      select: {
+        id: true,
+        createdAt: true,
+        updatedAt: true,
+        name: true,
+        archivedAt: true,
+        visibility: true,
+        organizationId: true,
+      },
+    }),
+    client.facilities.findMany({
+      where: { id: { in: canonicalFacilityIds } },
+      select: {
+        id: true,
+        createdAt: true,
+        updatedAt: true,
+        name: true,
+        status: true,
+        organizationId: true,
+      },
+    }),
+  ]);
   const assessmentCampaignIds = [
     ...new Set(
       coverageAssessments.flatMap((assessment) => assessment.campaignIds),
@@ -1405,7 +4262,17 @@ const loadProjectionRows = async (
       evidence: true,
     },
   });
-  const scopedGatewayJobIds = gatewayJobs.map((job) => job.id);
+  const gatewayScopeContext: ProjectionJobScopeContext = {
+    rows: { roots },
+    cohort: selection.rolloutCohort,
+    version: selection.contractVersion,
+    coverageCellIds: new Set(scopedCoverageCellIds),
+    scopedPolicyKeys: new Set(scopedPolicyKeys),
+    campaignIds: new Set(campaigns.map((campaign) => campaign.id)),
+  };
+  const scopedGatewayJobIds = gatewayJobs
+    .filter((job) => projectionJobMatchesScope(job, gatewayScopeContext))
+    .map((job) => job.id);
   const [gatewayClaims, receipts, gatewayEvents] = await Promise.all([
     client.affiliateAgentGatewayClaims.findMany({
       where: { jobId: { in: scopedGatewayJobIds } },
@@ -1491,101 +4358,51 @@ const loadProjectionRows = async (
       },
     }),
   ]);
-  const scopedDemandIds = demands.map((demand) => demand.id);
-  const scopedWaveIds = waves.map((wave) => wave.id);
-  const operationalAlertContractScope =
-    selection.contractVersion === null
-      ? { contractVersion: null }
-      : {
-          OR: [
-            { contractVersion: null },
-            { contractVersion: selection.contractVersion },
-          ],
-        };
-  const operationalAlerts = await client.affiliateOperationalAlerts.findMany({
-    where: {
-      AND: [
-        {
-          OR: [
-            { supplySourceId: { in: scopedRootIds } },
-            { coverageCellId: { in: scopedCoverageCellIds } },
-            { demandId: { in: scopedDemandIds } },
-            { waveId: { in: scopedWaveIds } },
-            { rolloutCohort: selection.rolloutCohort },
-            {
-              rolloutCohort: null,
-              contractVersion: null,
-              supplySourceId: null,
-              coverageCellId: null,
-              demandId: null,
-              waveId: null,
-            },
-          ],
-        },
-        operationalAlertContractScope,
-      ],
+  const alertData = await loadProjectionAlertRows(
+    client,
+    selection,
+    scopedRootIds,
+    scopedCoverageCellIds,
+    scopedDemandIds,
+    scopedWaveIds,
+    {
+      sourceIds: [...scopedRootIds, ...scopedRootLiveSourceIds],
+      gatewayJobIds: scopedGatewayJobIds,
+      discoveryRunIds,
+      intakeRunIds: intakeRuns.map((run) => run.id),
+      scrapeRunIds: scrapeRuns.map((run) => run.id),
     },
-    orderBy: { createdAt: "desc" },
-    take: MAX_PROJECTION_ROWS + 1,
-    select: {
-      id: true,
-      createdAt: true,
-      eventKey: true,
-      category: true,
-      severity: true,
-      title: true,
-      detail: true,
-      subjectType: true,
-      subjectId: true,
-      rolloutCohort: true,
-      contractVersion: true,
-      supplySourceId: true,
-      coverageCellId: true,
-      demandId: true,
-      waveId: true,
-      queue: true,
-      lifecycleGeneration: true,
-      claimGeneration: true,
-      workerId: true,
-      attempt: true,
-      previousState: true,
-      nextState: true,
-      reasonCodes: true,
-      evidenceRefs: true,
-      inputHash: true,
-      outputHash: true,
-      payload: true,
-      retentionClass: true,
-      retentionDeadline: true,
-    },
-  });
-  const scopedAlertIds = operationalAlerts.map((alert) => alert.id);
-  const alertDeliveries =
-    await client.affiliateOperationalAlertDeliveries.findMany({
-      where: { alertId: { in: scopedAlertIds } },
-      orderBy: { createdAt: "desc" },
-      take: MAX_PROJECTION_ROWS + 1,
-      select: {
-        id: true,
-        createdAt: true,
-        alertId: true,
-        channel: true,
-        status: true,
-        attempt: true,
-        deliveredAt: true,
-        responseCode: true,
-        responseBody: true,
-        errorMessage: true,
-      },
-    });
+    page,
+    pageSize,
+    selectedAlertId,
+    historyPage,
+    historyPageSize,
+  );
+  const {
+    operationalAlerts,
+    operationalAlertPageIds,
+    operationalAlertPage,
+    operationalAlertPageSize,
+    operationalAlertTotal,
+    alertDeliveries,
+    alertDeliveryHistory,
+    alertDeliveryStats,
+    alertDeliveryTotal,
+    alertDeliveryPage,
+    alertDeliveryPageSize,
+  } = alertData;
   const scopedOrganizationIds = [
     ...new Set(
       [
         ...intakes.map((intake) => intake.organizationId),
         ...sources.map((source) => source.organizationId),
+        ...canonicalEvents.map((event) => event.organizationId),
+        ...canonicalTeams.map((team) => team.organizationId),
+        ...facilities.map((facility) => facility.organizationId),
+        ...organizationTargetIds,
       ].filter((id): id is string => Boolean(id)),
     ),
-  ];
+  ].sort((left, right) => left.localeCompare(right));
   const organizations = await client.organizations.findMany({
     where: { id: { in: scopedOrganizationIds } },
     orderBy: { updatedAt: "desc" },
@@ -1617,6 +4434,7 @@ const loadProjectionRows = async (
     gatewayClaims,
     receipts,
     gatewayEvents,
+    reconciliationRuns,
     coverageCells,
     coverageAssessments,
     coverageJobs,
@@ -1639,28 +4457,289 @@ const loadProjectionRows = async (
     alertDeliveries,
     workerHealth,
     organizations,
+    canonicalEvents,
+    canonicalTeams,
+    facilities,
   };
-  const oversizedCollections = Object.entries(rawRows)
-    .filter(
-      ([collection, rows]) =>
-        rows.length > MAX_PROJECTION_ROWS &&
-        !TRUNCATION_TOLERATED_COLLECTIONS.has(collection),
-    )
-    .map(([collection]) => collection);
-  if (oversizedCollections.length > 0) {
-    throw new AffiliateOperationsProjectionIncompleteError(
-      oversizedCollections,
+  const boundedRows = boundedProjectionRowsFor(rawRows);
+  const projectionRows = {
+    ...boundedRows,
+    reconciliationRunTotal,
+    reconciliationRunPage,
+    selectedReconciliationRun,
+    operationalAlertPageIds,
+    operationalAlertPage,
+    operationalAlertPageSize,
+    operationalAlertTotal,
+    alertDeliveryHistory,
+    alertDeliveryStats,
+    alertDeliveryTotal,
+    alertDeliveryPage,
+    alertDeliveryPageSize,
+  };
+  return {
+    ...projectionRows,
+  };
+};
+type ProjectionGatewayJob = Readonly<{
+  id: string;
+  supplySourceId: string | null;
+  subjectJson: unknown;
+}>;
+
+type ProjectionJobScopeContext = Readonly<{
+  rows: Readonly<{
+    roots: readonly Readonly<{ id: string; liveSourceId: string | null }>[];
+  }>;
+  cohort: string;
+  version: number | null;
+  coverageCellIds: ReadonlySet<string>;
+  scopedPolicyKeys: ReadonlySet<string>;
+  campaignIds: ReadonlySet<string>;
+}>;
+
+type ProjectionScopeContext = Omit<ProjectionJobScopeContext, "rows"> &
+  Readonly<{
+    rows: ProjectionRows;
+    rootIds: ReadonlySet<string>;
+    demandIds: ReadonlySet<string>;
+    eligibleWaveIds: ReadonlySet<string>;
+  }>;
+
+const projectionIdIn = (
+  id: string | null | undefined,
+  ids: ReadonlySet<string>,
+): boolean => Boolean(id && ids.has(id));
+
+const projectionRootSourceMatchesScope = (
+  context: Pick<ProjectionJobScopeContext, "rows">,
+  sourceId: string | null,
+): boolean =>
+  Boolean(
+    sourceId &&
+      context.rows.roots.some(
+        (root) => root.id === sourceId || root.liveSourceId === sourceId,
+      ),
+  );
+
+const projectionJobContractMatchesScope = (
+  jobCohort: string | null,
+  jobVersion: number,
+  context: Pick<ProjectionJobScopeContext, "cohort" | "version">,
+): boolean =>
+  (jobCohort === null || jobCohort === context.cohort) &&
+  (context.version === null || jobVersion < 0 || jobVersion === context.version);
+
+const projectionJobMatchesMetadataScope = (
+  context: ProjectionJobScopeContext,
+  jobCohort: string | null,
+  jobVersion: number,
+  policyKey: string | null,
+  subject: Record<string, unknown>,
+): boolean =>
+  stringList(subject.coverageCellIds).some((cellId) =>
+    context.coverageCellIds.has(cellId),
+  ) ||
+  stringList(subject.campaignIds).some((campaignId) =>
+    context.campaignIds.has(campaignId),
+  ) ||
+  projectionIdIn(policyKey, context.scopedPolicyKeys) ||
+  (jobCohort === context.cohort &&
+    (context.version === null || jobVersion === context.version));
+
+const projectionJobMatchesScope = (
+  job: ProjectionGatewayJob,
+  context: ProjectionJobScopeContext,
+): boolean => {
+  const subject = recordValue(job.subjectJson);
+  const sourceId =
+    stringValue(job.supplySourceId) ??
+    stringValue(subject.supplySourceId ?? subject.sourceId);
+  const jobCohort = stringValue(subject.rolloutCohort ?? subject.cohort);
+  const jobVersion = numberValue(
+    subject.contractVersion ?? subject.supplyContractVersion,
+    -1,
+  );
+  const policyKey = stringValue(subject.policyKey ?? subject.domainPolicyKey);
+  if (sourceId) {
+    return (
+      projectionRootSourceMatchesScope(context, sourceId) &&
+      projectionJobContractMatchesScope(jobCohort, jobVersion, context)
     );
   }
-  return Object.fromEntries(
-    Object.entries(rawRows).map(([collection, rows]) => [
-      collection,
-      rows.length > MAX_PROJECTION_ROWS
-        ? rows.slice(0, MAX_PROJECTION_ROWS)
-        : rows,
-    ]),
-  ) as typeof rawRows;
+  return projectionJobMatchesMetadataScope(
+    context,
+    jobCohort,
+    jobVersion,
+    policyKey,
+    subject,
+  );
 };
+
+const projectionAlertHasLineage = (
+  alert: ProjectionRows["operationalAlerts"][number],
+  payload: Record<string, unknown>,
+  rootId: string | null,
+): boolean =>
+  [
+    alert.supplySourceId,
+    alert.coverageCellId,
+    alert.demandId,
+    alert.waveId,
+    rootId,
+    payload.coverageCellId,
+    payload.demandId,
+    payload.waveId,
+    payload.supplySourceId,
+    payload.sourceId,
+    payload.scrapeRunId,
+    payload.runId,
+    payload.discoveryRunId,
+    payload.intakeRunId,
+    payload.jobId,
+    payload.gatewayJobId,
+    upper(alert.subjectType) === "AFFILIATE_SUPPLY_SOURCE" ? alert.subjectId : null,
+    upper(alert.subjectType) === "DISCOVERY_RUN" ? alert.subjectId : null,
+    upper(alert.subjectType) === "INTAKE_RUN" ? alert.subjectId : null,
+    upper(alert.subjectType) === "AGENT_JOB" ? alert.subjectId : null,
+  ].some(Boolean);
+
+const projectionAlertMatchesDirectLineage = (
+  alert: ProjectionRows["operationalAlerts"][number],
+  payload: Record<string, unknown>,
+  rootId: string | null,
+  context: ProjectionScopeContext,
+): boolean =>
+  [
+    projectionIdIn(rootId, context.rootIds),
+    projectionIdIn(alert.coverageCellId, context.coverageCellIds),
+    projectionIdIn(alert.demandId, context.demandIds),
+    projectionIdIn(alert.waveId, context.eligibleWaveIds),
+    projectionIdIn(
+      stringValue(payload.coverageCellId),
+      context.coverageCellIds,
+    ),
+    projectionIdIn(stringValue(payload.demandId), context.demandIds),
+    projectionIdIn(stringValue(payload.waveId), context.eligibleWaveIds),
+  ].some(Boolean);
+
+const projectionAlertMatchesGatewayLineage = (
+  alert: ProjectionRows["operationalAlerts"][number],
+  payload: Record<string, unknown>,
+  context: ProjectionScopeContext,
+): boolean => {
+  const gatewayJobId = alertGatewayJobIdFor(alert, payload);
+  const gatewayJob = context.rows.gatewayJobs.find(
+    (candidate) => candidate.id === gatewayJobId,
+  );
+  const coverageCellSubject =
+    upper(alert.subjectType) === "AGENT_JOB" ? alert.subjectId : null;
+  return (
+    Boolean(gatewayJob && projectionJobMatchesScope(gatewayJob, context)) ||
+    projectionIdIn(coverageCellSubject, context.coverageCellIds)
+  );
+};
+
+const projectionRootMatchesSource = (
+  context: ProjectionScopeContext,
+  sourceId: string | null | undefined,
+): boolean =>
+  Boolean(
+    sourceId &&
+      context.rows.roots.some(
+        (root) => root.id === sourceId || root.liveSourceId === sourceId,
+      ),
+  );
+const projectionAlertMatchesDiscoveryLineage = (
+  alert: ProjectionRows["operationalAlerts"][number],
+  payload: Record<string, unknown>,
+  context: ProjectionScopeContext,
+): boolean => {
+  const runId =
+    stringValue(payload.discoveryRunId) ??
+    (upper(alert.subjectType) === "DISCOVERY_RUN"
+      ? stringValue(alert.subjectId)
+      : null);
+  const run = context.rows.discoveryRuns.find((candidate) => candidate.id === runId);
+
+  return Boolean(run && context.campaignIds.has(run.campaignId));
+};
+
+const projectionAlertMatchesIntakeLineage = (
+  alert: ProjectionRows["operationalAlerts"][number],
+  payload: Record<string, unknown>,
+  context: ProjectionScopeContext,
+): boolean => {
+  const runId =
+    stringValue(payload.intakeRunId) ??
+    (upper(alert.subjectType) === "INTAKE_RUN"
+      ? stringValue(alert.subjectId)
+      : null);
+  const run = context.rows.intakeRuns.find((candidate) => candidate.id === runId);
+  const intake = run
+    ? context.rows.intakes.find((candidate) => candidate.id === run.intakeId)
+    : undefined;
+  return [
+    run?.supplySourceId,
+    intake?.supplySourceId,
+    intake?.affiliateSourceId,
+  ].some((sourceId) => projectionRootMatchesSource(context, sourceId));
+};
+
+const projectionAlertMatchesLineage = (
+  alert: ProjectionRows["operationalAlerts"][number],
+  payload: Record<string, unknown>,
+  rootId: string | null,
+  context: ProjectionScopeContext,
+): boolean =>
+  [
+    projectionAlertMatchesDirectLineage(alert, payload, rootId, context),
+    projectionAlertMatchesGatewayLineage(alert, payload, context),
+    projectionAlertMatchesDiscoveryLineage(alert, payload, context),
+    projectionAlertMatchesIntakeLineage(alert, payload, context),
+  ].some(Boolean);
+
+const projectionAlertIsGlobalInfrastructure = (
+  alert: ProjectionRows["operationalAlerts"][number],
+): boolean =>
+  alert.rolloutCohort === null &&
+  alert.contractVersion === null &&
+  (GLOBAL_OPERATIONAL_ALERT_SUBJECT_TYPES.some(
+    (subjectType) => subjectType === upper(alert.subjectType),
+  ) ||
+    GLOBAL_OPERATIONAL_ALERT_CATEGORIES.some(
+      (category) => category === upper(alert.category),
+    ));
+const projectionAlertMatchesScope = (
+  alert: ProjectionRows["operationalAlerts"][number],
+  context: ProjectionScopeContext,
+): boolean => {
+  const payload = recordValue(alert.payload);
+  const rootId = rootIdForAlert(context.rows, alert);
+  const hasLineage = projectionAlertHasLineage(alert, payload, rootId);
+  if (projectionAlertIsGlobalInfrastructure(alert)) return true;
+  if (
+    !hasLineage &&
+    alert.rolloutCohort === null &&
+    alert.contractVersion === null
+  ) {
+    return true;
+  }
+  if (
+    alert.rolloutCohort !== null &&
+    alert.rolloutCohort !== context.cohort
+  ) {
+    return false;
+  }
+  if (
+    alert.contractVersion !== null &&
+    alert.contractVersion !== context.version
+  ) {
+    return false;
+  }
+  return projectionAlertMatchesLineage(alert, payload, rootId, context);
+};
+
 const scopeProjectionRows = (
   rows: ProjectionRows,
   selection: AffiliateOperationsContractSelection,
@@ -1733,7 +4812,9 @@ const scopeProjectionRows = (
   );
   const relevantSupplySource = (
     supplySourceId: string | null | undefined,
-  ): boolean => Boolean(supplySourceId && rootIds.has(supplySourceId));
+  ): boolean =>
+    projectionIdIn(supplySourceId, rootIds) ||
+    projectionIdIn(supplySourceId, rootLiveSourceIds);
   const scopedIntakes = rows.intakes.filter(
     (intake) =>
       rootIntakeIds.has(intake.id) ||
@@ -1778,90 +4859,62 @@ const scopeProjectionRows = (
     ]),
     ...discoveryResults.map((result) => result.policyKey),
   ]);
-  const jobMatchesScope = (
-    job: ProjectionRows["gatewayJobs"][number],
-  ): boolean => {
-    if (relevantSupplySource(job.supplySourceId)) return true;
-    const subject = recordValue(job.subjectJson);
-    const jobCohort = stringValue(subject.rolloutCohort ?? subject.cohort);
-    const jobVersion = numberValue(
-      subject.contractVersion ?? subject.supplyContractVersion,
-      -1,
-    );
-    const policyKey = stringValue(subject.policyKey ?? subject.domainPolicyKey);
-    return (
-      stringList(subject.coverageCellIds).some((cellId) =>
-        coverageCellIds.has(cellId),
-      ) ||
-      stringList(subject.campaignIds).some((campaignId) =>
-        campaignIds.has(campaignId),
-      ) ||
-      (policyKey !== null && scopedPolicyKeys.has(policyKey)) ||
-      (jobCohort === cohort && (version === null || jobVersion === version))
-    );
+  const eligibleWaveIds = new Set(
+    rows.waves
+      .filter((wave) => demandIds.has(wave.demandId))
+      .map((wave) => wave.id),
+  );
+  const scopeContext: ProjectionScopeContext = {
+    rows,
+    cohort,
+    version,
+    rootIds,
+    demandIds,
+    coverageCellIds,
+    eligibleWaveIds,
+    campaignIds,
+    scopedPolicyKeys,
   };
-  const gatewayJobs = rows.gatewayJobs.filter(jobMatchesScope);
+  const gatewayJobs = rows.gatewayJobs.filter((job) =>
+    projectionJobMatchesScope(job, scopeContext),
+  );
   const gatewayJobIds = new Set(gatewayJobs.map((job) => job.id));
   const gatewayClaims = rows.gatewayClaims.filter((claim) =>
     gatewayJobIds.has(claim.jobId),
   );
-  const operationalAlerts = rows.operationalAlerts.filter((alert) => {
-    const payload = recordValue(alert.payload);
-    const alertRootId = rootIdForAlert(rows, alert);
-    const payloadCoverageCellId = stringValue(payload.coverageCellId);
-    const payloadDemandId = stringValue(payload.demandId);
-    const payloadWaveId = stringValue(payload.waveId);
-    const hasLineage = Boolean(
-      alert.supplySourceId ||
-        alert.coverageCellId ||
-        alert.demandId ||
-        alert.waveId ||
-        alertRootId ||
-        payloadCoverageCellId ||
-        payloadDemandId ||
-        payloadWaveId ||
-        payload.supplySourceId ||
-        payload.sourceId ||
-        payload.scrapeRunId ||
-        payload.runId ||
-        payload.jobId ||
-        payload.gatewayJobId,
-    );
-    const isGlobal =
-      !hasLineage &&
-      alert.rolloutCohort === null &&
-      alert.contractVersion === null;
-    if (isGlobal) return true;
-    if (alert.rolloutCohort !== null && alert.rolloutCohort !== cohort)
-      return false;
-    if (alert.contractVersion !== null && alert.contractVersion !== version)
-      return false;
-    return (
-      (alertRootId !== null && rootIds.has(alertRootId)) ||
-      (alert.coverageCellId !== null &&
-        coverageCellIds.has(alert.coverageCellId)) ||
-      (alert.demandId !== null && demandIds.has(alert.demandId)) ||
-      (alert.waveId !== null &&
-        rows.waves.some(
-          (wave) => wave.id === alert.waveId && demandIds.has(wave.demandId),
-        )) ||
-      (payloadCoverageCellId !== null &&
-        coverageCellIds.has(payloadCoverageCellId)) ||
-      (payloadDemandId !== null && demandIds.has(payloadDemandId)) ||
-      (payloadWaveId !== null &&
-        rows.waves.some(
-          (wave) => wave.id === payloadWaveId && demandIds.has(wave.demandId),
-        ))
-    );
-  });
+  const operationalAlerts = rows.operationalAlerts.filter((alert) =>
+    projectionAlertMatchesScope(alert, scopeContext),
+  );
   const alertIds = new Set(operationalAlerts.map((alert) => alert.id));
   const alertDeliveries = rows.alertDeliveries.filter((delivery) =>
     alertIds.has(delivery.alertId),
+  );
+  const targetIds = new Set(
+    rows.targets
+      .filter((target) => rootIds.has(target.supplySourceId))
+      .map((target) => stringValue(target.targetId))
+      .filter((id): id is string => Boolean(id)),
   );
   const organizationIds = new Set(
     [
       ...scopedIntakes.map((intake) => intake.organizationId),
       ...scopedSources.map((source) => source.organizationId),
+      ...rows.canonicalEvents
+        .filter((event) => targetIds.has(event.id))
+        .map((event) => event.organizationId),
+      ...rows.canonicalTeams
+        .filter((team) => targetIds.has(team.id))
+        .map((team) => team.organizationId),
+      ...rows.facilities
+        .filter((facility) => targetIds.has(facility.id))
+        .map((facility) => facility.organizationId),
+      ...rows.targets
+        .filter(
+          (target) =>
+            rootIds.has(target.supplySourceId) &&
+            isOrganizationTargetType(target.targetType),
+        )
+        .map((target) => target.targetId),
     ].filter((id): id is string => Boolean(id)),
   );
   const organizations = rows.organizations.filter((organization) =>
@@ -1893,6 +4946,11 @@ const scopeProjectionRows = (
         (event.claimId
           ? gatewayClaims.some((claim) => claim.id === event.claimId)
           : false),
+    ),
+    reconciliationRuns: rows.reconciliationRuns.filter(
+      (run) =>
+        run.rolloutCohort === cohort &&
+        (version === null || run.supplyContractVersion === version),
     ),
     coverageCells,
     coverageAssessments,
@@ -1934,6 +4992,14 @@ const scopeProjectionRows = (
     campaigns,
     operationalAlerts,
     alertDeliveries,
+    organizations,
+    canonicalEvents: rows.canonicalEvents.filter((event) =>
+      targetIds.has(event.id),
+    ),
+    canonicalTeams: rows.canonicalTeams.filter((team) =>
+      targetIds.has(team.id),
+    ),
+    facilities: rows.facilities.filter((facility) => targetIds.has(facility.id)),
     workerHealth: rows.workerHealth,
   };
 };
@@ -2010,6 +5076,22 @@ const historyRevisionFor = (
       rows.alertDeliveries,
       (record) => record.createdAt,
     ),
+    reconciliation: latestProjectionRecord(
+      rows.reconciliationRuns,
+      (record) => record.updatedAt ?? record.createdAt,
+    ),
+    publicEvent: latestProjectionRecord(
+      rows.canonicalEvents,
+      (record) => record.updatedAt ?? record.createdAt,
+    ),
+    publicTeam: latestProjectionRecord(
+      rows.canonicalTeams,
+      (record) => record.updatedAt ?? record.createdAt,
+    ),
+    publicFacility: latestProjectionRecord(
+      rows.facilities,
+      (record) => record.updatedAt ?? record.createdAt,
+    ),
   };
   return createHash("sha256")
     .update(
@@ -2019,6 +5101,46 @@ const historyRevisionFor = (
       }),
     )
     .digest("hex");
+};
+
+const targetDeficitRowFor = (
+  key: string,
+  rule: {
+    marketKey: string | null;
+    sportId: string | null;
+    sourceProfile: string;
+    minimumFreshPublishedSupply: number;
+  },
+  demand: ProjectionRows["demands"][number] | undefined,
+  current: number,
+  contract: AffiliateOperationsContractSelection,
+  version: number,
+): SupplyTargetDeficitRow => {
+  const target = Math.max(
+    rule.minimumFreshPublishedSupply,
+    demand?.minimumFreshPublishedSupply ?? 0,
+  );
+  const deficit = Math.max(0, target - current);
+  return {
+    id: demand?.id ?? `target:${key}`,
+    marketKey: rule.marketKey,
+    sportId: rule.sportId,
+    sourceProfile: upper(rule.sourceProfile),
+    rolloutCohort: contract.rolloutCohort,
+    contractVersion: version,
+    current,
+    target,
+    deficit,
+    priority: demand?.priority ?? 4,
+    status: demand?.status ?? (deficit > 0 ? "OPEN" : "MET"),
+    href: adminLink("coverage", undefined, undefined, {
+      market: rule.marketKey,
+      sport: rule.sportId,
+      profile: upper(rule.sourceProfile),
+      rolloutCohort: contract.rolloutCohort,
+      contractVersion: String(version),
+    }),
+  };
 };
 
 const buildTargetDeficits = (
@@ -2108,7 +5230,8 @@ const buildTargetDeficits = (
       root.rolloutCohort !== contract.rolloutCohort ||
       (contract.contractVersion !== null &&
         root.activeSupplyContractVersion !== contract.contractVersion) ||
-      !isFreshTarget(target, root, contractJson, contract.rolloutCohort, now)
+      !isFreshTarget(target, root, contractJson, contract.rolloutCohort, now) ||
+      !targetHasVisiblePublicRecord(target, rows)
     )
       return;
     const key = targetKey(
@@ -2121,35 +5244,16 @@ const buildTargetDeficits = (
     counts.set(key, (counts.get(key) ?? 0) + 1);
   });
   return Array.from(ruleByKey.entries())
-    .map(([key, rule]) => {
-      const demand = demandByKey.get(key);
-      const current = counts.get(key) ?? 0;
-      const target = Math.max(
-        rule.minimumFreshPublishedSupply,
-        demand?.minimumFreshPublishedSupply ?? 0,
-      );
-      const deficit = Math.max(0, target - current);
-      return {
-        id: demand?.id ?? `target:${key}`,
-        marketKey: rule.marketKey,
-        sportId: rule.sportId,
-        sourceProfile: upper(rule.sourceProfile),
-        rolloutCohort: contract.rolloutCohort,
-        contractVersion: version,
-        current,
-        target,
-        deficit,
-        priority: demand?.priority ?? 4,
-        status: demand?.status ?? (deficit > 0 ? "OPEN" : "MET"),
-        href: adminLink("coverage", undefined, undefined, {
-          market: rule.marketKey,
-          sport: rule.sportId,
-          profile: upper(rule.sourceProfile),
-          rolloutCohort: contract.rolloutCohort,
-          contractVersion: String(version),
-        }),
-      };
-    })
+    .map(([key, rule]) =>
+      targetDeficitRowFor(
+        key,
+        rule,
+        demandByKey.get(key),
+        counts.get(key) ?? 0,
+        contract,
+        version,
+      ),
+    )
     .sort(
       (left, right) =>
         left.priority - right.priority ||
@@ -2334,38 +5438,474 @@ const buildLifecycleCounts = (rows: ProjectionRows): LifecycleCountRow[] => {
 const isSuccessfulRefreshStatus = (status: unknown): boolean =>
   ["SUCCEEDED", "SUCCESS", "COMPLETED", "PUBLISHED"].includes(upper(status));
 
+const successfulGatewayJob = (
+  job: Readonly<{ status: unknown }> | null | undefined,
+): boolean =>
+  Boolean(
+    job &&
+      ["COMPLETED", "SUCCEEDED", "SUCCESS"].includes(upper(job.status)),
+  );
+
+const sourceRootFreshAfter = (
+  root: ProjectionRows["roots"][number] | null,
+  runAt: number,
+): boolean =>
+  Boolean(
+    root &&
+      upper(root.freshnessStatus) === "FRESH" &&
+      (dateValue(root.lastSuccessfulRefreshAt)?.getTime() ?? 0) > runAt,
+  );
+
+const successfulRefreshAfterRun = (
+  sourceId: string | null,
+  runAt: number,
+  recoveryRows: ProjectionRows,
+): boolean =>
+  recoveryRows.scrapeRuns.some(
+    (candidate) =>
+      rootIdForSource(
+        recoveryRows,
+        candidate.supplySourceId ?? candidate.sourceId,
+      ) === sourceId &&
+      (dateValue(
+        candidate.finishedAt ?? candidate.updatedAt ?? candidate.createdAt,
+      )?.getTime() ?? 0) > runAt &&
+      isSuccessfulRefreshStatus(candidate.status),
+  );
+
+const refreshRunRecovered = (
+  run: ProjectionRows["scrapeRuns"][number],
+  recoveryRows: ProjectionRows,
+): boolean => {
+  const sourceId = rootIdForSource(
+    recoveryRows,
+    run.supplySourceId ?? run.sourceId,
+  );
+  const runAt =
+    dateValue(run.finishedAt ?? run.updatedAt ?? run.createdAt)?.getTime() ?? 0;
+  const root = sourceId
+    ? recoveryRows.roots.find((candidate) => candidate.id === sourceId) ?? null
+    : null;
+  return (
+    sourceRootFreshAfter(root, runAt) ||
+    successfulRefreshAfterRun(sourceId, runAt, recoveryRows)
+  );
+};
+
+const receiptRecovered = (
+  receipt: ProjectionRows["receipts"][number],
+  recoveryRows: ProjectionRows,
+): boolean => {
+  const receiptAt =
+    dateValue(
+      receipt.completedAt ?? receipt.updatedAt ?? receipt.createdAt,
+    )?.getTime() ?? 0;
+  const recoveredByReceipt = recoveryRows.receipts.some(
+    (candidate) =>
+      candidate.jobId === receipt.jobId &&
+      (dateValue(
+        candidate.completedAt ?? candidate.updatedAt ?? candidate.createdAt,
+      )?.getTime() ?? 0) > receiptAt &&
+      isSuccessfulRefreshStatus(candidate.status),
+  );
+  const job = recoveryRows.gatewayJobs.find(
+    (candidate) => candidate.id === receipt.jobId,
+  );
+  return recoveredByReceipt || successfulGatewayJob(job);
+};
+
+const gatewayEventHasRecovery = (
+  event: ProjectionRows["gatewayEvents"][number],
+  recoveryRows: ProjectionRows,
+): boolean =>
+  recoveryRows.gatewayEvents.some((candidate) => {
+    const sameOperation = [
+      candidate.jobId === event.jobId,
+      candidate.claimId === event.claimId,
+      candidate.receiptId === event.receiptId,
+    ].some(Boolean);
+    const later =
+      (dateValue(candidate.createdAt)?.getTime() ?? 0) >
+      (dateValue(event.createdAt)?.getTime() ?? 0);
+    const eventType = upper(candidate.eventType);
+    const successfulEvent = [
+      eventType.includes("SUCC"),
+      eventType.includes("COMPLET"),
+      eventType.includes("RECOVER"),
+      eventType.includes("REPLAY"),
+    ].some(Boolean);
+    return (
+      candidate.id !== event.id &&
+      sameOperation &&
+      later &&
+      !eventType.includes("FAIL") &&
+      !eventType.includes("ERROR") &&
+      successfulEvent
+    );
+  });
+
+const gatewayEventRecovered = (
+  event: ProjectionRows["gatewayEvents"][number],
+  recoveryRows: ProjectionRows,
+): boolean => {
+  const job = event.jobId
+    ? recoveryRows.gatewayJobs.find(
+        (candidate) => candidate.id === event.jobId,
+      )
+    : null;
+  return gatewayEventHasRecovery(event, recoveryRows) || successfulGatewayJob(job);
+};
+
+const alertJobIdFor = (
+  alert: OperationalAlertRecoveryAlert,
+  payload: Record<string, unknown>,
+): string | null => alertGatewayJobIdFor(alert, payload);
+
+const alertDeliveryFailureRecoveryIdsFor = (
+  payload: Record<string, unknown>,
+  recoveryRows: OperationalAlertRecoveryRows,
+): string[] => {
+  const sourceEventKey = stringValue(payload.sourceEventKey);
+  const channel = upper(payload.channel);
+  const sourceAlert = recoveryRows.operationalAlerts.find(
+    (candidate) => candidate.eventKey === sourceEventKey,
+  );
+  if (!sourceAlert) return [];
+  return recoveryRows.alertDeliveries
+    .filter(
+      (delivery) =>
+        delivery.alertId === sourceAlert.id &&
+        upper(delivery.channel) === channel &&
+        upper(delivery.status) === "DELIVERED",
+    )
+    .map((delivery) => stringValue(delivery.id))
+    .filter((id): id is string => Boolean(id));
+};
+
+const alertDeliveryFailureRecovered = (
+  payload: Record<string, unknown>,
+  recoveryRows: OperationalAlertRecoveryRows,
+): boolean =>
+  alertDeliveryFailureRecoveryIdsFor(payload, recoveryRows).length > 0;
+const invocationRecoveryReceiptRecorded = (
+  receipt: Readonly<{ operationKind: unknown; status: unknown }>,
+): boolean => {
+  const operationKind = upper(receipt.operationKind);
+  return (
+    ["SUCCEEDED", "SUCCESS", "COMPLETED"].includes(upper(receipt.status)) &&
+    !["CLAIM", "HEARTBEAT", "RECORD_FAILURE"].includes(operationKind)
+  );
+};
+
+const invocationRecoveryEventRecorded = (
+  event: Readonly<{ eventType: unknown }>,
+): boolean => {
+  const eventType = upper(event.eventType);
+  return (
+    !eventType.includes("FAIL") &&
+    !eventType.includes("ERROR") &&
+    !eventType.includes("BLOCK") &&
+    !eventType.includes("REQUIRED") &&
+    !eventType.includes("HEARTBEAT") &&
+    [
+      eventType.includes("SUCC"),
+      eventType.includes("COMPLET"),
+      eventType.includes("RECOVER"),
+      eventType.includes("REPLAY"),
+      eventType.includes("ACCEPT"),
+    ].some(Boolean)
+  );
+};
+
+const invocationRecoveryEvidenceRefsFor = (
+  alert: OperationalAlertRecoveryAlert,
+  payload: Record<string, unknown>,
+  recoveryRows: OperationalAlertRecoveryRows,
+): string[] => {
+  const jobId = alertJobIdFor(alert, payload);
+  if (!jobId) return [];
+  const alertAt = dateValue(alert.createdAt)?.getTime() ?? 0;
+  const receiptRefs = recoveryRows.receipts
+    .filter(
+      (receipt) =>
+        receipt.jobId === jobId &&
+        invocationRecoveryReceiptRecorded(receipt) &&
+        (dateValue(
+          receipt.completedAt ?? receipt.updatedAt ?? receipt.createdAt,
+        )?.getTime() ?? 0) > alertAt,
+    )
+    .map((receipt) => stringValue(receipt.id))
+    .filter((id): id is string => Boolean(id));
+  const eventRefs = recoveryRows.gatewayEvents
+    .filter(
+      (event) =>
+        event.jobId === jobId &&
+        invocationRecoveryEventRecorded(event) &&
+        (dateValue(event.createdAt)?.getTime() ?? 0) > alertAt,
+    )
+    .map((event) => stringValue(event.id))
+    .filter((id): id is string => Boolean(id));
+  return [...receiptRefs, ...eventRefs];
+};
+
+const invocationAlertRecovered = (
+  alert: OperationalAlertRecoveryAlert,
+  payload: Record<string, unknown>,
+  recoveryRows: OperationalAlertRecoveryRows,
+): boolean =>
+  invocationRecoveryEvidenceRefsFor(alert, payload, recoveryRows).length > 0;
+
+const alertRefreshRecoveryEvidenceRefsFor = (
+  alert: OperationalAlertRecoveryAlert,
+  payload: Record<string, unknown>,
+  source: OperationalAlertRecoveryRows["roots"][number] | undefined,
+  recoveryRows: OperationalAlertRecoveryRows,
+): string[] => {
+  if (
+    !source ||
+    !upper(alert.category).includes("REFRESH") ||
+    upper(source.freshnessStatus) !== "FRESH"
+  ) {
+    return [];
+  }
+  const alertAt = dateValue(alert.createdAt)?.getTime() ?? 0;
+  const refreshedAt = dateValue(source.lastSuccessfulRefreshAt)?.getTime();
+  if (refreshedAt === undefined || refreshedAt <= alertAt) return [];
+  const explicitRunId = alertScrapeRunIdFor(alert, payload);
+  return recoveryRows.scrapeRuns
+    .filter((run) => {
+      const associated = explicitRunId
+        ? run.id === explicitRunId
+        : rootIdForSource(
+            recoveryRows,
+            run.supplySourceId ?? run.sourceId,
+          ) === source.id;
+      if (!associated) return false;
+      const status = upper(run.status);
+      if (
+        !["SUCCEEDED", "SUCCESS", "COMPLETED", "PUBLISHED"].includes(status)
+      ) {
+        return false;
+      }
+      const runAt = dateValue(
+        run.finishedAt ?? run.updatedAt ?? run.createdAt,
+      )?.getTime();
+      return runAt !== undefined && runAt > alertAt;
+    })
+    .map((run) => run.id);
+};
+
+const alertInvariantRecoveryReasonsFor = (
+  alert: OperationalAlertRecoveryAlert,
+  payload: Record<string, unknown>,
+): string[] =>
+  Array.from(
+    new Set([
+      ...stringList(alert.reasonCodes),
+      ...stringList(payload.reasonCodes),
+      ...stringList(payload.invariantViolations),
+      ...stringList(payload.invariantReasonCodes),
+      ...stringList(payload.reasonCode),
+    ]),
+  );
+
+const alertInvariantRecovered = (
+  alert: OperationalAlertRecoveryAlert,
+  payload: Record<string, unknown>,
+  source: OperationalAlertRecoveryRows["roots"][number] | undefined,
+): boolean => {
+  if (upper(alert.category) !== "SUPPLY_SOURCE_INVARIANT" || !source) {
+    return false;
+  }
+  const alertGeneration =
+    alert.lifecycleGeneration ??
+    numberValue(
+      payload.lifecycleGeneration ??
+        payload.sourceLifecycleGeneration ??
+        payload.generation,
+      -1,
+    );
+  const generationAdvanced =
+    alertGeneration < 0 || source.lifecycleGeneration >= alertGeneration;
+  const currentReasons = stringList(source.invariantViolations);
+  const reportedReasons = alertInvariantRecoveryReasonsFor(alert, payload);
+  return (
+    generationAdvanced &&
+    reportedReasons.length > 0 &&
+    reportedReasons.every((reason) => !currentReasons.includes(reason))
+  );
+
+};
+type OperationalAlertRecovery = Readonly<{
+  recovered: boolean;
+  detail: string | null;
+  evidenceRefs: readonly string[];
+}>;
+
+type OperationalAlertRecoverySignals = Readonly<{
+  deliveryFailureRecovered: boolean;
+  refreshRecovered: boolean;
+  invariantRecovered: boolean;
+  invocationRecovery: boolean;
+  gatewayJobRecovered: boolean;
+  workerRecovered: boolean;
+  refreshRecoveryEvidenceRefs: readonly string[];
+}>;
+
+const operationalAlertExplicitRecoveryFor = (
+  payload: Record<string, unknown>,
+): Readonly<{ detail: string | null; evidenceRefs: readonly string[] }> => {
+  const explicitRecovery = recordValue(payload.operationalAlertRecovered);
+  const recorded = [
+    payload.operationalAlertRecovered === true,
+    payload.recovered === true,
+    payload.resolved === true,
+    payload.resolvedAt !== null && payload.resolvedAt !== undefined,
+    explicitRecovery.recovered === true,
+    explicitRecovery.isRecovered === true,
+  ].some(Boolean);
+  return {
+    detail: recorded
+      ? boundedEvidenceText(
+          explicitRecovery.detail
+          ?? explicitRecovery.reason
+          ?? explicitRecovery.summary,
+        ) ?? "Persisted recovery evidence recorded."
+      : null,
+    evidenceRefs: stringList(
+      explicitRecovery.evidenceRefs
+      ?? payload.recoveryEvidenceRefs
+      ?? payload.operationalAlertRecoveryEvidenceRefs,
+    ),
+  };
+};
+
+const operationalAlertRecoverySignalsFor = (
+  alert: OperationalAlertRecoveryAlert,
+  payload: Record<string, unknown>,
+  source: OperationalAlertRecoveryRows["roots"][number] | undefined,
+  job: OperationalAlertRecoveryRows["gatewayJobs"][number] | undefined,
+  worker: OperationalAlertRecoveryRows["workerHealth"][number] | undefined,
+  recoveryRows: OperationalAlertRecoveryRows,
+  now: Date,
+): OperationalAlertRecoverySignals => {
+  const category = upper(alert.category);
+  const invocationFailure = category === "AGENT_INVOCATION_FAILURE";
+  const refreshRecoveryEvidenceRefs = alertRefreshRecoveryEvidenceRefsFor(
+    alert,
+    payload,
+    source,
+    recoveryRows,
+  );
+  return {
+    deliveryFailureRecovered:
+      category === "ALERT_DELIVERY_FAILURE" &&
+      alertDeliveryFailureRecovered(payload, recoveryRows),
+    refreshRecovered: refreshRecoveryEvidenceRefs.length > 0,
+    invariantRecovered: alertInvariantRecovered(alert, payload, source),
+    invocationRecovery:
+      invocationFailure && invocationAlertRecovered(alert, payload, recoveryRows),
+    gatewayJobRecovered:
+      !invocationFailure && successfulGatewayJob(job),
+    workerRecovered:
+      !invocationFailure &&
+      WORKER_HEALTH_RECOVERY_CATEGORIES.has(category) &&
+      Boolean(worker && isWorkerHealthy(worker, now)),
+    refreshRecoveryEvidenceRefs,
+  };
+};
+
+const operationalAlertRecoveryDetailsFor = (
+  explicitDetail: string | null,
+  signals: OperationalAlertRecoverySignals,
+): string[] =>
+  [
+    explicitDetail,
+    signals.deliveryFailureRecovered
+      ? "A later delivery succeeded on the same channel."
+      : null,
+    signals.refreshRecovered ? "The related supply source is fresh." : null,
+    signals.invariantRecovered
+      ? "The recorded source invariant is absent at the current generation."
+      : null,
+    signals.invocationRecovery
+      ? "A later successful gateway receipt or event was recorded for this job."
+      : null,
+    signals.gatewayJobRecovered
+      ? "The related gateway job completed successfully."
+      : null,
+    signals.workerRecovered ? "The related worker has a current healthy lease." : null,
+  ].filter((detail): detail is string => detail !== null);
+
+const operationalAlertRecoveryFor = (
+  alert: OperationalAlertRecoveryAlert,
+  recoveryRows: OperationalAlertRecoveryRows,
+  now: Date,
+): OperationalAlertRecovery => {
+  const sourceRootId = rootIdForAlert(recoveryRows, alert);
+  const source = recoveryRows.roots.find(
+    (root) => root.id === sourceRootId,
+  );
+  const payload = recordValue(alert.payload);
+  const explicitRecovery = operationalAlertExplicitRecoveryFor(payload);
+  const jobId = alertJobIdFor(alert, payload);
+  const job = recoveryRows.gatewayJobs.find(
+    (candidate) => candidate.id === jobId,
+  );
+  const workerId =
+    stringValue(alert.workerId) ?? stringValue(payload.workerId);
+  const worker = recoveryRows.workerHealth.find(
+    (candidate) => candidate.workerId === workerId,
+  );
+  const signals = operationalAlertRecoverySignalsFor(
+    alert,
+    payload,
+    source,
+    job,
+    worker,
+    recoveryRows,
+    now,
+  );
+  const details = operationalAlertRecoveryDetailsFor(
+    explicitRecovery.detail,
+    signals,
+  );
+  const recoveryEvidenceRefs = Array.from(
+    new Set([
+      ...explicitRecovery.evidenceRefs,
+      ...signals.refreshRecoveryEvidenceRefs,
+      ...alertDeliveryFailureRecoveryIdsFor(payload, recoveryRows),
+      ...invocationRecoveryEvidenceRefsFor(alert, payload, recoveryRows),
+    ]),
+  );
+  return {
+    recovered: details.length > 0,
+    detail: details.join(" "),
+    evidenceRefs: recoveryEvidenceRefs,
+  };
+};
+
+const operationalAlertRecovered = (
+  alert: OperationalAlertRecoveryAlert,
+  recoveryRows: OperationalAlertRecoveryRows,
+  now: Date,
+): boolean => operationalAlertRecoveryFor(alert, recoveryRows, now).recovered;
+
+const exceptionSeverityFor = (
+  severity: unknown,
+): ExceptionRow["severity"] =>
+  upper(severity) === "CRITICAL"
+    ? "critical"
+    : upper(severity) === "WARNING"
+      ? "warning"
+      : "info";
+
 const buildExceptions = (
   rows: ProjectionRows,
   now: Date,
   recoveryRows: ProjectionRows = rows,
 ): ExceptionRow[] => {
   const exceptions: ExceptionRow[] = [];
-  const isRefreshRecovered = (
-    run: ProjectionRows["scrapeRuns"][number],
-  ): boolean => {
-    const sourceId = rootIdForSource(
-      recoveryRows,
-      run.supplySourceId ?? run.sourceId,
-    );
-    const runAt =
-      dateValue(run.finishedAt ?? run.updatedAt ?? run.createdAt)?.getTime() ??
-      0;
-    const root = sourceId
-      ? recoveryRows.roots.find((candidate) => candidate.id === sourceId)
-      : null;
-    if (root && upper(root.freshnessStatus) === "FRESH") return true;
-    return recoveryRows.scrapeRuns.some(
-      (candidate) =>
-        rootIdForSource(
-          recoveryRows,
-          candidate.supplySourceId ?? candidate.sourceId,
-        ) === sourceId &&
-        (dateValue(
-          candidate.finishedAt ?? candidate.updatedAt ?? candidate.createdAt,
-        )?.getTime() ?? 0) > runAt &&
-        isSuccessfulRefreshStatus(candidate.status),
-    );
-  };
   rows.roots.forEach((root) => {
     root.invariantViolations.forEach((reason) =>
       exceptions.push({
@@ -2400,27 +5940,7 @@ const buildExceptions = (
   rows.receipts
     .filter((receipt) => ["FAILED", "UNKNOWN"].includes(upper(receipt.status)))
     .forEach((receipt) => {
-      const receiptAt =
-        dateValue(
-          receipt.completedAt ?? receipt.updatedAt ?? receipt.createdAt,
-        )?.getTime() ?? 0;
-      const isRecovered = recoveryRows.receipts.some(
-        (candidate) =>
-          candidate.jobId === receipt.jobId &&
-          (dateValue(
-            candidate.completedAt ?? candidate.updatedAt ?? candidate.createdAt,
-          )?.getTime() ?? 0) > receiptAt &&
-          isSuccessfulRefreshStatus(candidate.status),
-      );
-      const job = recoveryRows.gatewayJobs.find(
-        (candidate) => candidate.id === receipt.jobId,
-      );
-      if (
-        isRecovered ||
-        (job &&
-          ["COMPLETED", "SUCCEEDED", "SUCCESS"].includes(upper(job.status)))
-      )
-        return;
+      if (receiptRecovered(receipt, recoveryRows)) return;
       exceptions.push({
         id: `receipt:${receipt.id}`,
         kind: "OPERATION",
@@ -2449,7 +5969,11 @@ const buildExceptions = (
       }),
     );
   rows.scrapeRuns
-    .filter((run) => upper(run.status) === "FAILED" && !isRefreshRecovered(run))
+    .filter(
+      (run) =>
+        upper(run.status) === "FAILED" &&
+        !refreshRunRecovered(run, recoveryRows),
+    )
     .forEach((run) =>
       exceptions.push({
         id: `scrape:${run.id}`,
@@ -2469,38 +5993,7 @@ const buildExceptions = (
         event.reasonCodes.length > 0,
     )
     .forEach((event) => {
-      const laterEvent = recoveryRows.gatewayEvents.some((candidate) => {
-        const sameOperation =
-          candidate.jobId === event.jobId ||
-          candidate.claimId === event.claimId ||
-          candidate.receiptId === event.receiptId;
-        const later =
-          (dateValue(candidate.createdAt)?.getTime() ?? 0) >
-          (dateValue(event.createdAt)?.getTime() ?? 0);
-        const eventType = upper(candidate.eventType);
-        return (
-          candidate.id !== event.id &&
-          sameOperation &&
-          later &&
-          !eventType.includes("FAIL") &&
-          !eventType.includes("ERROR") &&
-          (eventType.includes("SUCC") ||
-            eventType.includes("COMPLET") ||
-            eventType.includes("RECOVER") ||
-            eventType.includes("REPLAY"))
-        );
-      });
-      const job = event.jobId
-        ? recoveryRows.gatewayJobs.find(
-            (candidate) => candidate.id === event.jobId,
-          )
-        : null;
-      if (
-        laterEvent ||
-        (job &&
-          ["COMPLETED", "SUCCEEDED", "SUCCESS"].includes(upper(job.status)))
-      )
-        return;
+      if (gatewayEventRecovered(event, recoveryRows)) return;
       exceptions.push({
         id: `event:${event.id}`,
         kind: "EVENT",
@@ -2512,83 +6005,28 @@ const buildExceptions = (
       });
     });
   rows.operationalAlerts.forEach((alert) => {
-    const sourceRootId = rootIdForAlert(recoveryRows, alert);
-    const source = sourceRootId
-      ? recoveryRows.roots.find((root) => root.id === sourceRootId)
-      : null;
-    const payload = recordValue(alert.payload);
-    const alertJobId =
-      stringValue(payload.jobId ?? payload.gatewayJobId) ??
-      (["GATEWAY_JOB", "AGENT_GATEWAY_JOB"].includes(upper(alert.subjectType))
-        ? stringValue(alert.subjectId)
-        : null);
-    const job = alertJobId
-      ? recoveryRows.gatewayJobs.find(
-          (candidate) => candidate.id === alertJobId,
-        )
-      : null;
-    const workerId =
-      stringValue(alert.workerId) ?? stringValue(payload.workerId);
-    const worker = workerId
-      ? recoveryRows.workerHealth.find(
-          (candidate) => candidate.workerId === workerId,
-        )
-      : null;
-    const category = upper(alert.category);
-    const deliveryFailureRecovered =
-      category === "ALERT_DELIVERY_FAILURE"
-        ? (() => {
-            const sourceEventKey = stringValue(payload.sourceEventKey);
-            const channel = upper(payload.channel);
-            const sourceAlert = sourceEventKey
-              ? recoveryRows.operationalAlerts.find(
-                  (candidate) => candidate.eventKey === sourceEventKey,
-                )
-              : null;
-            return Boolean(
-              sourceAlert &&
-                typeof channel === "string" &&
-                recoveryRows.alertDeliveries.some(
-                  (delivery) =>
-                    delivery.alertId === sourceAlert.id &&
-                    upper(delivery.channel) === channel &&
-                    upper(delivery.status) === "DELIVERED",
-                ),
-            );
-          })()
-        : false;
-    const isRecovered =
-      deliveryFailureRecovered ||
-      (source &&
-        category.includes("REFRESH") &&
-        upper(source.freshnessStatus) === "FRESH") ||
-      (job &&
-        ["COMPLETED", "SUCCEEDED", "SUCCESS"].includes(upper(job.status))) ||
-      (worker && isWorkerHealthy(worker, now));
-    if (isRecovered) return;
-    const severity =
-      upper(alert.severity) === "CRITICAL"
-        ? "critical"
-        : upper(alert.severity) === "WARNING"
-          ? "warning"
-          : "info";
+    if (operationalAlertRecovered(alert, recoveryRows, now)) return;
     exceptions.push({
       id: `alert:${alert.id}`,
       kind: "ALERT",
-      severity,
+      severity: exceptionSeverityFor(alert.severity),
       title: alert.title,
       detail: alert.detail,
       at: isoValue(alert.createdAt),
-      href: adminLink("overview", "alert", alert.id),
+      href: adminLinkForOperationalAlert(
+        alert,
+        recoveryRows,
+        "overview",
+      ),
     });
   });
   return exceptions
-    .sort(
-      (left, right) =>
+    .sort((left, right) => {
+      const timeComparison =
         (dateValue(right.at)?.getTime() ?? 0) -
-        (dateValue(left.at)?.getTime() ?? 0),
-    )
-    .slice(0, 50);
+        (dateValue(left.at)?.getTime() ?? 0);
+      return timeComparison || left.id.localeCompare(right.id);
+    });
 };
 
 const buildPriorityWork = (
@@ -2649,6 +6087,293 @@ const buildPriorityWork = (
     )
     .slice(0, 50);
 };
+type PublicTargetResolution = Readonly<{
+  exists: boolean;
+  intrinsicallyVisible: boolean;
+  name: string | null;
+  organizationId: string | null;
+  hrefSuffix: string | null;
+}>;
+
+const missingPublicTargetResolution = (): PublicTargetResolution => ({
+  exists: false,
+  intrinsicallyVisible: false,
+  name: null,
+  organizationId: null,
+  hrefSuffix: null,
+});
+
+const publicEventTargetResolution = (
+  targetId: string,
+  rows: ProjectionRows,
+): PublicTargetResolution => {
+  const event = rows.canonicalEvents.find((candidate) => candidate.id === targetId);
+  if (!event) return missingPublicTargetResolution();
+  return {
+    exists: true,
+    intrinsicallyVisible:
+      event.archivedAt === null &&
+      (event.state === null || upper(event.state) === "PUBLISHED"),
+    name: event.name,
+    organizationId: event.organizationId,
+    hrefSuffix: `events/${encodeURIComponent(event.id)}`,
+  };
+};
+
+const publicTeamTargetResolution = (
+  targetId: string,
+  rows: ProjectionRows,
+): PublicTargetResolution => {
+  const team = rows.canonicalTeams.find((candidate) => candidate.id === targetId);
+  if (!team) return missingPublicTargetResolution();
+  return {
+    exists: true,
+    intrinsicallyVisible: upper(team.visibility) === "PUBLIC",
+    name: team.name,
+    organizationId: team.organizationId,
+    hrefSuffix: `teams/${encodeURIComponent(team.id)}`,
+  };
+};
+
+const publicFacilityTargetResolution = (
+  targetId: string,
+  rows: ProjectionRows,
+): PublicTargetResolution => {
+  const facility = rows.facilities.find(
+    (candidate) => candidate.id === targetId,
+  );
+  if (!facility) return missingPublicTargetResolution();
+  return {
+    exists: true,
+    intrinsicallyVisible: upper(facility.status) === "ACTIVE",
+    name: facility.name,
+    organizationId: facility.organizationId,
+    hrefSuffix: "",
+  };
+};
+
+const publicOrganizationTargetResolution = (
+  targetId: string,
+  rows: ProjectionRows,
+): PublicTargetResolution => {
+  const organization = rows.organizations.find(
+    (candidate) => candidate.id === targetId,
+  );
+  if (!organization) return missingPublicTargetResolution();
+  return {
+    exists: true,
+    intrinsicallyVisible: organization.publicPageEnabled,
+    name: organization.name,
+    organizationId: organization.id,
+    hrefSuffix: "",
+  };
+};
+
+type PublicTargetResolver = (
+  targetId: string,
+  rows: ProjectionRows,
+) => PublicTargetResolution;
+
+const PUBLIC_TARGET_RESOLVERS: Readonly<
+  Record<string, PublicTargetResolver>
+> = {
+  EVENT: publicEventTargetResolution,
+  TEAM: publicTeamTargetResolution,
+  FACILITY: publicFacilityTargetResolution,
+  ORG: publicOrganizationTargetResolution,
+  ORGS: publicOrganizationTargetResolution,
+  ORGANIZATION: publicOrganizationTargetResolution,
+  ORGANIZATIONS: publicOrganizationTargetResolution,
+  ORGANISATION: publicOrganizationTargetResolution,
+  ORGANISATIONS: publicOrganizationTargetResolution,
+  CLUB: publicOrganizationTargetResolution,
+};
+
+const publicTargetResolutionFor = (
+  targetType: string,
+  targetId: string,
+  rows: ProjectionRows,
+): PublicTargetResolution | null =>
+  PUBLIC_TARGET_RESOLVERS[targetType]?.(targetId, rows) ?? null;
+
+const publicTargetStateFor = (
+  resolution: PublicTargetResolution,
+  organization: ProjectionRows["organizations"][number] | undefined,
+  publicSlug: string | null,
+): CoverageTargetRow["publicTargetState"] => {
+  if (!resolution.exists) return "MISSING";
+  const visible = Boolean(
+    resolution.intrinsicallyVisible &&
+      organization?.publicPageEnabled &&
+      publicSlug,
+  );
+  if (visible) return "VISIBLE";
+  return organization ? "HIDDEN" : "ORGANIZATION_MISSING";
+};
+
+const publicTargetHrefFor = (
+  resolution: PublicTargetResolution,
+  publicSlug: string | null,
+): string | null =>
+  resolution.exists && publicSlug
+    ? `/o/${encodeURIComponent(publicSlug)}${resolution.hrefSuffix ? `/${resolution.hrefSuffix}` : ""}`
+    : null;
+
+const preservedPublicTargetHrefFor = (value: unknown): string | null => {
+  const href = stringValue(value);
+  if (!href || href.length > MAX_PRESERVED_PUBLIC_TARGET_HREF_LENGTH) {
+    return null;
+  }
+  if (href.startsWith("/") && !href.startsWith("//")) {
+    try {
+      const url = new URL(href, "https://bracket-iq.com");
+      if (url.origin !== "https://bracket-iq.com") return null;
+      return `${url.pathname}${url.search}${url.hash}`;
+    } catch {
+      return null;
+    }
+  }
+  return normalizeExternalHttpUrl(href);
+};
+
+type PreservedPublicTargetEvidence = Readonly<{
+  name: string | null;
+  href: string | null;
+}>;
+
+const preservedPublicTargetEvidenceFor = (
+  target: ProjectionRows["targets"][number],
+): PreservedPublicTargetEvidence => {
+  const metadata = recordValue(target.metadata);
+  const publicTarget = recordValue(
+    metadata.publicTarget ?? metadata.publicTargetEvidence,
+  );
+  return {
+    name: stringValue(
+      publicTarget.name
+      ?? publicTarget.title
+      ?? metadata.publicTargetName
+      ?? metadata.publicName
+      ?? metadata.targetName,
+    ),
+    href: preservedPublicTargetHrefFor(
+      publicTarget.href
+      ?? publicTarget.url
+      ?? metadata.publicTargetHref
+      ?? metadata.publicHref
+      ?? metadata.publicUrl,
+    ),
+  };
+};
+
+const isPreservedPublicTarget = (
+  target: ProjectionRows["targets"][number],
+): boolean => ["PUBLISHED", "LAST_KNOWN_GOOD"].includes(upper(target.status));
+
+type PublicTargetProjection = Pick<
+  CoverageTargetRow,
+  | "publicTargetExists"
+  | "publicTargetState"
+  | "publicTargetName"
+  | "publicTargetHref"
+>;
+
+const missingPublicTargetProjection = (): PublicTargetProjection => ({
+  publicTargetExists: false,
+  publicTargetState: "MISSING",
+  publicTargetName: null,
+  publicTargetHref: null,
+});
+
+const lastKnownGoodPublicTargetProjection = (
+  targetId: string,
+  preserved: PreservedPublicTargetEvidence,
+): PublicTargetProjection => ({
+  publicTargetExists: true,
+  publicTargetState: "LAST_KNOWN_GOOD",
+  publicTargetName: preserved.name,
+  publicTargetHref: preserved.href,
+});
+
+const unsupportedPublicTargetProjection = (): PublicTargetProjection => ({
+  publicTargetExists: false,
+  publicTargetState: "UNSUPPORTED_TARGET_TYPE",
+  publicTargetName: null,
+  publicTargetHref: null,
+});
+
+const publicTargetProjectionForMissingResolution = (
+  targetId: string,
+  preserveLastKnownGood: boolean,
+  preserved: PreservedPublicTargetEvidence,
+): PublicTargetProjection =>
+  preserveLastKnownGood
+    ? lastKnownGoodPublicTargetProjection(targetId, preserved)
+    : unsupportedPublicTargetProjection();
+
+const publicTargetProjectionForResolvedResolution = (
+  resolution: PublicTargetResolution,
+  rows: ProjectionRows,
+  preserved: PreservedPublicTargetEvidence,
+  preserveLastKnownGood: boolean,
+): PublicTargetProjection => {
+  const organization = resolution.organizationId
+    ? rows.organizations.find(
+        (candidate) => candidate.id === resolution.organizationId,
+      )
+    : undefined;
+  const publicSlug = stringValue(organization?.publicSlug);
+  const currentState = publicTargetStateFor(
+    resolution,
+    organization,
+    publicSlug,
+  );
+  const preserve = preserveLastKnownGood && currentState !== "VISIBLE";
+  const publicTargetHref =
+    preserve
+      ? preserved.href
+      : currentState === "VISIBLE"
+        ? publicTargetHrefFor(resolution, publicSlug)
+        : null;
+  return {
+    publicTargetExists: resolution.exists || preserve,
+    publicTargetState: preserve ? "LAST_KNOWN_GOOD" : currentState,
+    publicTargetName: resolution.name ?? preserved.name,
+    publicTargetHref,
+  };
+};
+
+const publicTargetProjection = (
+  target: ProjectionRows["targets"][number],
+  rows: ProjectionRows,
+): PublicTargetProjection => {
+  const targetType = upper(target.targetType);
+  const targetId = stringValue(target.targetId);
+  if (!targetId) return missingPublicTargetProjection();
+  const preserveLastKnownGood = isPreservedPublicTarget(target);
+  const preserved = preservedPublicTargetEvidenceFor(target);
+  const resolution = publicTargetResolutionFor(targetType, targetId, rows);
+  if (!resolution) {
+    return publicTargetProjectionForMissingResolution(
+      targetId,
+      preserveLastKnownGood,
+      preserved,
+    );
+  }
+  return publicTargetProjectionForResolvedResolution(
+    resolution,
+    rows,
+    preserved,
+    preserveLastKnownGood,
+  );
+};
+function targetHasVisiblePublicRecord(
+  target: ProjectionRows["targets"][number],
+  rows: ProjectionRows,
+): boolean {
+  return publicTargetProjection(target, rows).publicTargetState === "VISIBLE";
+}
+
 
 const buildCoverage = (
   rows: ProjectionRows,
@@ -2869,6 +6594,7 @@ const buildCoverage = (
       supplySourceId: target.supplySourceId,
       candidateId: target.candidateId,
       freshnessExpiresAt: isoValue(target.freshnessExpiresAt),
+      ...publicTargetProjection(target, rows),
       href: adminLink("coverage", "target", target.id),
     }));
   const targetPage = paginate(targetRows, input.targetPage, input.pageSize);
@@ -2990,6 +6716,79 @@ const refreshClassValue = (...values: readonly unknown[]): string | null => {
   return null;
 };
 
+type GatewayJobRowContext = Readonly<{
+  claimsById: ReadonlyMap<
+    string,
+    ProjectionRows["gatewayClaims"][number]
+  >;
+  claimsByJob: ReadonlyMap<string, ProjectionRows["gatewayClaims"]>;
+  receiptsByJob: ReadonlyMap<string, ProjectionRows["receipts"]>;
+  eventsByJob: ReadonlyMap<string, ProjectionRows["gatewayEvents"]>;
+}>;
+
+const gatewayJobClaimFor = (
+  job: ProjectionRows["gatewayJobs"][number],
+  context: GatewayJobRowContext,
+): ProjectionRows["gatewayClaims"][number] | undefined =>
+  valueForId(job.activeClaimId, context.claimsById) ??
+  context.claimsByJob.get(job.id)?.[0];
+
+const gatewayJobInvocationFor = (
+  claim: ProjectionRows["gatewayClaims"][number] | undefined,
+  receipt: ProjectionRows["receipts"][number] | undefined,
+): string | null =>
+  claim?.invocationId ??
+  receipt?.commandName ??
+  receipt?.operationKind ??
+  null;
+
+const gatewayJobTransitionFor = (
+  events: readonly ProjectionRows["gatewayEvents"][number][],
+): string | null =>
+  events.length > 0
+    ? events
+        .slice(0, 3)
+        .map((event) => String(event.eventType))
+        .join(" → ")
+    : null;
+
+const gatewayJobFailureFor = (
+  job: ProjectionRows["gatewayJobs"][number],
+): string | null =>
+  job.terminalDisposition ??
+  (job.pipelineBlockedAt ? "PIPELINE_BLOCKED" : null);
+
+const gatewayJobRowFor = (
+  job: ProjectionRows["gatewayJobs"][number],
+  context: GatewayJobRowContext,
+  now: Date,
+): JobRow => {
+  const claim = gatewayJobClaimFor(job, context);
+  const receipts = context.receiptsByJob.get(job.id) ?? [];
+  const events = context.eventsByJob.get(job.id) ?? [];
+  const subject = recordValue(job.subjectJson);
+  const receipt = receipts[0];
+  return {
+    id: job.id,
+    kind: "GATEWAY",
+    queue: job.queue,
+    lane: job.lane,
+    role: job.role,
+    subjectId: job.subjectId,
+    status: String(job.status),
+    ageMinutes: ageMinutes(job.createdAt, now),
+    retries: job.invocationFailureCount,
+    failure: gatewayJobFailureFor(job),
+    workerId: claim?.workerId ?? null,
+    lineage: job.supplySourceId ?? job.parentClaimId ?? job.subjectId,
+    provider: providerValue(subject, job.evidenceManifestJson, receipt),
+    refreshClass: refreshClassValue(subject, job.evidenceManifestJson),
+    invocation: gatewayJobInvocationFor(claim, receipt),
+    transition: gatewayJobTransitionFor(events),
+    href: adminLink("jobs", "job", job.id),
+  };
+};
+
 const buildJobRows = (
   rows: ProjectionRows,
   now: Date,
@@ -3048,6 +6847,12 @@ const buildJobRows = (
     rows.coverageJobs.map((job) => [job.id, providerValue(job.result)]),
   );
 
+  const gatewayJobContext: GatewayJobRowContext = {
+    claimsById,
+    claimsByJob,
+    receiptsByJob,
+    eventsByJob,
+  };
   claimsByJob.forEach((claims) => {
     claims.sort(
       (left, right) =>
@@ -3055,52 +6860,9 @@ const buildJobRows = (
         (dateValue(left.claimedAt)?.getTime() ?? 0),
     );
   });
-  rows.gatewayJobs.forEach((job) => {
-    const claim =
-      (job.activeClaimId ? claimsById.get(job.activeClaimId) : undefined) ??
-      claimsByJob.get(job.id)?.[0];
-    const receipts = receiptsByJob.get(job.id) ?? [];
-    const events = eventsByJob.get(job.id) ?? [];
-    const subject = recordValue(job.subjectJson);
-    const provider = providerValue(
-      subject,
-      job.evidenceManifestJson,
-      receipts[0],
-    );
-    const invocation =
-      claim?.invocationId ??
-      receipts[0]?.commandName ??
-      receipts[0]?.operationKind ??
-      null;
-    const transition =
-      events.length > 0
-        ? events
-            .slice(0, 3)
-            .map((event) => String(event.eventType))
-            .join(" → ")
-        : null;
-    jobs.push({
-      id: job.id,
-      kind: "GATEWAY",
-      queue: job.queue,
-      lane: job.lane,
-      role: job.role,
-      subjectId: job.subjectId,
-      status: String(job.status),
-      ageMinutes: ageMinutes(job.createdAt, now),
-      retries: job.invocationFailureCount,
-      failure:
-        job.terminalDisposition ??
-        (job.pipelineBlockedAt ? "PIPELINE_BLOCKED" : null),
-      workerId: claim?.workerId ?? null,
-      lineage: job.supplySourceId ?? job.parentClaimId ?? job.subjectId,
-      provider,
-      refreshClass: refreshClassValue(subject, job.evidenceManifestJson),
-      invocation,
-      transition,
-      href: adminLink("jobs", "job", job.id),
-    });
-  });
+  rows.gatewayJobs.forEach((job) =>
+    jobs.push(gatewayJobRowFor(job, gatewayJobContext, now)),
+  );
   rows.mappingJobs.forEach((job) =>
     jobs.push({
       id: job.id,
@@ -3521,6 +7283,177 @@ const buildReviews = (
   };
 };
 
+type FreshnessRollupContext = Readonly<{
+  rows: ProjectionRows;
+  rootsById: ReadonlyMap<string, ProjectionRows["roots"][number]>;
+  latestRunBySource: ReadonlyMap<string, string>;
+  freshnessBySource: Map<string, string>;
+  freshnessByKey: Map<string, CoverageMovementRow>;
+  refreshClassFor: (
+    run: ProjectionRows["scrapeRuns"][number],
+    sourceKey: string,
+  ) => string;
+}>;
+
+type FreshnessRunState = Readonly<{
+  sourceKey: string;
+  status: string;
+  previous: string;
+  next: string;
+  restored: boolean;
+  lost: boolean;
+  label: string;
+  direction: string;
+  reason: string | null;
+  refreshClass: string;
+  at: string | null;
+}>;
+
+const freshnessNextStatusFor = (
+  run: ProjectionRows["scrapeRuns"][number],
+  status: string,
+  previous: string,
+  currentRoot: ProjectionRows["roots"][number] | undefined,
+  isLatest: boolean,
+): string => {
+  const metadata = recordValue(run.metadata);
+  const explicitNext = upper(stringValue(metadata.nextFreshnessStatus));
+  if (explicitNext) return explicitNext;
+  if (isSuccessfulRefreshStatus(status)) return "FRESH";
+  if (
+    isLatest &&
+    currentRoot &&
+    upper(currentRoot.freshnessStatus) !== "FRESH"
+  ) {
+    return upper(currentRoot.freshnessStatus);
+  }
+  return previous;
+};
+
+const freshnessLabelFor = (
+  status: string,
+  restored: boolean,
+  lost: boolean,
+): string => {
+  if (restored) return "Freshness restored";
+  if (lost) return "Freshness lost";
+  if (status.includes("FAIL")) return "Refresh failed";
+  if (isSuccessfulRefreshStatus(status)) return "Refresh succeeded";
+  return `Refresh ${status}`;
+};
+
+const freshnessSourceKeyFor = (
+  run: ProjectionRows["scrapeRuns"][number],
+  context: FreshnessRollupContext,
+): string =>
+  rootIdForSource(context.rows, run.supplySourceId ?? run.sourceId) ??
+  run.sourceId;
+
+const freshnessPreviousStatusFor = (
+  metadata: Record<string, unknown>,
+  sourceKey: string,
+  context: FreshnessRollupContext,
+): string =>
+  upper(stringValue(metadata.previousFreshnessStatus)) ||
+  context.freshnessBySource.get(sourceKey) ||
+  "UNKNOWN";
+
+const freshnessTransitionFlagsFor = (
+  explicitTransition: string | null,
+  previous: string,
+  next: string,
+): Readonly<{ restored: boolean; lost: boolean }> => ({
+  restored:
+    explicitTransition === "RESTORED" ||
+    (previous === "STALE" && next === "FRESH"),
+  lost:
+    explicitTransition === "LOST" ||
+    (previous === "FRESH" && next === "STALE"),
+});
+
+const freshnessDirectionFor = (
+  restored: boolean,
+  lost: boolean,
+): string => (restored ? "restored" : lost ? "loss" : "observed");
+
+const freshnessRunStateFor = (
+  run: ProjectionRows["scrapeRuns"][number],
+  context: FreshnessRollupContext,
+): FreshnessRunState => {
+  const sourceKey = freshnessSourceKeyFor(run, context);
+  const status = upper(run.status);
+  const metadata = recordValue(run.metadata);
+  const explicitTransition = upper(stringValue(metadata.freshnessTransition));
+  const previous = freshnessPreviousStatusFor(metadata, sourceKey, context);
+  const currentRoot = context.rootsById.get(sourceKey);
+  const isLatest = context.latestRunBySource.get(sourceKey) === run.id;
+  const next = freshnessNextStatusFor(
+    run,
+    status,
+    previous,
+    currentRoot,
+    isLatest,
+  );
+  const { restored, lost } = freshnessTransitionFlagsFor(
+    explicitTransition,
+    previous,
+    next,
+  );
+  return {
+    sourceKey,
+    status,
+    previous,
+    next,
+    restored,
+    lost,
+    label: freshnessLabelFor(status, restored, lost),
+    direction: freshnessDirectionFor(restored, lost),
+    reason: run.errorMessage,
+    refreshClass: context.refreshClassFor(run, sourceKey),
+    at: isoValue(run.finishedAt ?? run.updatedAt),
+  };
+};
+
+const recordFreshnessRun = (
+  run: ProjectionRows["scrapeRuns"][number],
+  context: FreshnessRollupContext,
+): void => {
+  const state = freshnessRunStateFor(run, context);
+  context.freshnessBySource.set(state.sourceKey, state.next);
+  const rollupBucket = Math.floor(
+    (dateValue(state.at)?.getTime() ?? 0) / ROLLUP_MS,
+  );
+  const groupKey = JSON.stringify([
+    rollupBucket,
+    state.refreshClass,
+    state.label,
+    state.direction,
+    state.reason ?? "",
+  ]);
+  const current = context.freshnessByKey.get(groupKey);
+  if (current) {
+    const currentTime = dateValue(current.at)?.getTime() ?? 0;
+    const stateTime = dateValue(state.at)?.getTime() ?? 0;
+    context.freshnessByKey.set(groupKey, {
+      ...current,
+      at: stateTime > currentTime ? state.at : current.at,
+      count: current.count + 1,
+      href: adminLink("sources", "source", state.sourceKey),
+    });
+    return;
+  }
+  context.freshnessByKey.set(groupKey, {
+    id: `freshness:${createHash("sha1").update(groupKey).digest("hex").slice(0, 16)}`,
+    at: state.at,
+    label: state.label,
+    direction: state.direction,
+    count: 1,
+    refreshClass: state.refreshClass,
+    reason: state.reason,
+    href: adminLink("sources", "source", state.sourceKey),
+  });
+};
+
 const buildSources = (
   rows: ProjectionRows,
   input: AffiliateOperationsProjectionInput,
@@ -3667,98 +7600,18 @@ const buildSources = (
   const freshnessByKey = new Map<string, CoverageMovementRow>();
   const refreshClassFor = (
     run: ProjectionRows["scrapeRuns"][number],
-    sourceKey: string,
-  ): string => {
-    const metadata = recordValue(run.metadata);
-    const explicitClass = stringValue(
-      metadata.refreshClass ?? metadata.refreshType ?? metadata.refreshMode,
-    );
-    if (explicitClass) return upper(explicitClass);
-    const root = dimensionContext.rootsById.get(sourceKey);
-    const source = rows.sources.find(
-      (candidate) =>
-        candidate.id === run.sourceId || candidate.supplySourceId === sourceKey,
-    );
-    return upper(root?.targetKind ?? source?.targetKind) || "UNKNOWN";
+    _sourceKey: string,
+  ): string =>
+    refreshClassValue(run.metadata) ?? "SOURCE_REFRESH";
+  const freshnessContext: FreshnessRollupContext = {
+    rows,
+    rootsById: dimensionContext.rootsById,
+    latestRunBySource,
+    freshnessBySource,
+    freshnessByKey,
+    refreshClassFor,
   };
-  freshnessRuns.forEach((run) => {
-    const sourceKey =
-      rootIdForSource(rows, run.supplySourceId ?? run.sourceId) ?? run.sourceId;
-    const status = upper(run.status);
-    const metadata = recordValue(run.metadata);
-    const explicitTransition = upper(stringValue(metadata.freshnessTransition));
-    const previousMetadata = upper(
-      stringValue(metadata.previousFreshnessStatus),
-    );
-    const nextMetadata = upper(stringValue(metadata.nextFreshnessStatus));
-    const previous =
-      previousMetadata || freshnessBySource.get(sourceKey) || "UNKNOWN";
-    const currentRoot = dimensionContext.rootsById.get(sourceKey);
-    const isLatest = latestRunBySource.get(sourceKey) === run.id;
-    const next =
-      nextMetadata ||
-      (isSuccessfulRefreshStatus(status)
-        ? "FRESH"
-        : isLatest &&
-            currentRoot &&
-            upper(currentRoot.freshnessStatus) !== "FRESH"
-          ? upper(currentRoot.freshnessStatus)
-          : previous);
-    freshnessBySource.set(sourceKey, next);
-    const restored =
-      explicitTransition === "RESTORED" ||
-      (previous === "STALE" && next === "FRESH");
-    const lost =
-      explicitTransition === "LOST" ||
-      (previous === "FRESH" && next === "STALE");
-    const label = restored
-      ? "Freshness restored"
-      : lost
-        ? "Freshness lost"
-        : status.includes("FAIL")
-          ? "Refresh failed"
-          : isSuccessfulRefreshStatus(status)
-            ? "Refresh succeeded"
-            : `Refresh ${status}`;
-    const direction = restored ? "restored" : lost ? "loss" : "observed";
-    const reason = run.errorMessage;
-    const refreshClass = refreshClassFor(run, sourceKey);
-    const at = isoValue(run.finishedAt ?? run.updatedAt);
-    const rollupBucket = Math.floor(
-      (dateValue(at)?.getTime() ?? 0) / ROLLUP_MS,
-    );
-    const groupKey = JSON.stringify([
-      rollupBucket,
-      refreshClass,
-      label,
-      direction,
-      reason ?? "",
-    ]);
-    const current = freshnessByKey.get(groupKey);
-    if (current) {
-      freshnessByKey.set(groupKey, {
-        ...current,
-        at:
-          (dateValue(at)?.getTime() ?? 0) >
-          (dateValue(current.at)?.getTime() ?? 0)
-            ? at
-            : current.at,
-        count: current.count + 1,
-        href: adminLink("sources", "source", sourceKey),
-      });
-    } else {
-      freshnessByKey.set(groupKey, {
-        id: `freshness:${createHash("sha1").update(groupKey).digest("hex").slice(0, 16)}`,
-        at,
-        label,
-        direction,
-        count: 1,
-        refreshClass,
-        reason,
-        href: adminLink("sources", "source", sourceKey),
-      });
-    }
-  });
+  freshnessRuns.forEach((run) => recordFreshnessRun(run, freshnessContext));
   const freshnessMovement: CoverageMovementRow[] = Array.from(
     freshnessByKey.values(),
   )
@@ -3884,6 +7737,45 @@ const lightweightCheckHistoryForSource = (
   ];
 };
 
+const gatewayEventClaimFor = (
+  event: ProjectionRows["gatewayEvents"][number],
+  claimsById: ReadonlyMap<
+    string,
+    ProjectionRows["gatewayClaims"][number]
+  >,
+): ProjectionRows["gatewayClaims"][number] | undefined =>
+  event.claimId ? claimsById.get(event.claimId) : undefined;
+
+const gatewayEventHistoryRowFor = (
+  event: ProjectionRows["gatewayEvents"][number],
+  claimsById: ReadonlyMap<
+    string,
+    ProjectionRows["gatewayClaims"][number]
+  >,
+): ProjectionHistoryRow => {
+  const payload = recordValue(event.payload);
+  const claim = gatewayEventClaimFor(event, claimsById);
+  return {
+    id: event.id,
+    kind: `GATEWAY ${event.eventType}`,
+    at: isoValue(event.createdAt),
+    status: stringValue(payload.status) ?? event.eventType,
+    reason: event.reasonCodes.join(", ") || stringValue(payload.reason),
+    actor: event.actorId,
+    lane: event.role,
+    claimGeneration: claim?.claimGeneration ?? null,
+    recordedAt: isoValue(event.createdAt),
+    workerId: claim?.workerId ?? stringValue(payload.workerId),
+    executorId: event.actorId,
+    previousState: stringValue(payload.previousState ?? payload.fromState),
+    nextState: stringValue(payload.nextState ?? payload.toState),
+    evidenceRefs: stringList(payload.evidenceRefs),
+    inputHash: event.inputHash ?? event.requestHash,
+    outputHash: event.outputHash,
+    href: adminLink("jobs", "event", event.id),
+  };
+};
+
 const historyForSource = (
   rows: ProjectionRows,
   sourceId: string,
@@ -3937,32 +7829,7 @@ const historyForSource = (
           jobSourceId === sourceId
         );
       })
-      .map((event) => {
-        const payload = recordValue(event.payload);
-        const claim = event.claimId ? claimsById.get(event.claimId) : undefined;
-        return {
-          id: event.id,
-          kind: `GATEWAY ${event.eventType}`,
-          at: isoValue(event.createdAt),
-          status: stringValue(payload.status) ?? event.eventType,
-          reason: event.reasonCodes.join(", ") || stringValue(payload.reason),
-          actor: event.actorId,
-          lane: event.role,
-          claimGeneration:
-            claim?.claimGeneration ?? numberValue(payload.claimGeneration, 0),
-          recordedAt: isoValue(event.createdAt),
-          workerId: claim?.workerId ?? stringValue(payload.workerId),
-          executorId: event.actorId,
-          previousState: stringValue(
-            payload.previousState ?? payload.fromState,
-          ),
-          nextState: stringValue(payload.nextState ?? payload.toState),
-          evidenceRefs: stringList(payload.evidenceRefs),
-          inputHash: event.inputHash ?? event.requestHash,
-          outputHash: event.outputHash,
-          href: adminLink("jobs", "event", event.id),
-        };
-      }),
+      .map((event) => gatewayEventHistoryRowFor(event, claimsById)),
     ...rows.scrapeRuns
       .filter(
         (run) =>
@@ -4029,6 +7896,96 @@ const relatedForSource = (
   return related;
 };
 
+const sourceDetailExecutionFieldsFor = (
+  source: ProjectionRows["roots"][number],
+  liveSource: ProjectionRows["sources"][number] | null,
+  mapping: ProjectionRows["mappings"][number] | null,
+): ProjectionField[] => [
+  field("Automation enabled", source.isAutomationEnabled),
+  field("Automation hold", source.automationHoldReason),
+  field("Live source", source.liveSourceId),
+  field(
+    "Mapping",
+    mapping?.id,
+    mapping?.id ? adminLink("sources", "mapping", mapping.id) : null,
+  ),
+  field(
+    "Organization",
+    liveSource?.organizationId,
+    liveSource?.organizationId
+      ? adminLink("sources", "organization", liveSource.organizationId)
+      : null,
+  ),
+];
+
+const sourceDetailLineageFieldsFor = (
+  source: ProjectionRows["roots"][number],
+): ProjectionField[] => [
+  field(
+    "Intake",
+    source.intakeId,
+    source.intakeId
+      ? adminLink("intake", "intake", source.intakeId)
+      : null,
+  ),
+  field(
+    "Predecessor",
+    source.predecessorId,
+    source.predecessorId
+      ? adminLink("sources", "source", source.predecessorId)
+      : null,
+  ),
+  field(
+    "Successor",
+    source.successorId,
+    source.successorId
+      ? adminLink("sources", "source", source.successorId)
+      : null,
+  ),
+];
+
+const sourceDetailSectionsFor = (
+  source: ProjectionRows["roots"][number],
+  liveSource: ProjectionRows["sources"][number] | null,
+  mapping: ProjectionRows["mappings"][number] | null,
+): ProjectionDetail["sections"] => [
+  {
+    title: "Header",
+    fields: [
+      field("Canonical URL", source.canonicalUrl),
+      field("Operator domain", source.operatorDomain),
+      field("Lifecycle generation", source.lifecycleGeneration),
+      field("Rollout cohort", source.rolloutCohort),
+    ],
+  },
+  {
+    title: "Priority and Supply Target impact",
+    fields: [
+      field("Fresh target contribution", source.targetContribution),
+      field("Repair priority", source.repairPriority),
+      field("Freshness", source.freshnessStatus),
+      field("Outcome", source.derivedOutcome),
+    ],
+  },
+  {
+    title: "Execution",
+    fields: sourceDetailExecutionFieldsFor(source, liveSource, mapping),
+  },
+  {
+    title: "Lineage",
+    fields: sourceDetailLineageFieldsFor(source),
+  },
+  {
+    title: "Evidence and result",
+    fields: [
+      field("Last successful refresh", source.lastSuccessfulRefreshAt),
+      field("Assessment", source.lastAssessmentAt),
+      field("Invariant violations", source.invariantViolations.join(", ")),
+      field("Mapping validation", mapping?.validatedAt),
+    ],
+  },
+];
+
 const buildSourceDetail = (
   rows: ProjectionRows,
   id: string,
@@ -4048,84 +8005,383 @@ const buildSourceDetail = (
     title: source.canonicalUrl,
     subtitle: `Supply Source ${id}`,
     status: String(source.derivedStage),
-    sections: [
-      {
-        title: "Header",
-        fields: [
-          field("Canonical URL", source.canonicalUrl),
-          field("Operator domain", source.operatorDomain),
-          field("Lifecycle generation", source.lifecycleGeneration),
-          field("Rollout cohort", source.rolloutCohort),
-        ],
-      },
-      {
-        title: "Priority and Supply Target impact",
-        fields: [
-          field("Fresh target contribution", source.targetContribution),
-          field("Repair priority", source.repairPriority),
-          field("Freshness", source.freshnessStatus),
-          field("Outcome", source.derivedOutcome),
-        ],
-      },
-      {
-        title: "Execution",
-        fields: [
-          field("Automation enabled", source.isAutomationEnabled),
-          field("Automation hold", source.automationHoldReason),
-          field("Live source", source.liveSourceId),
-          field(
-            "Mapping",
-            mapping?.id,
-            mapping?.id ? adminLink("sources", "mapping", mapping.id) : null,
-          ),
-          field(
-            "Organization",
-            liveSource?.organizationId,
-            liveSource?.organizationId
-              ? adminLink("sources", "organization", liveSource.organizationId)
-              : null,
-          ),
-        ],
-      },
-      {
-        title: "Lineage",
-        fields: [
-          field(
-            "Intake",
-            source.intakeId,
-            source.intakeId
-              ? adminLink("intake", "intake", source.intakeId)
-              : null,
-          ),
-          field(
-            "Predecessor",
-            source.predecessorId,
-            source.predecessorId
-              ? adminLink("sources", "source", source.predecessorId)
-              : null,
-          ),
-          field(
-            "Successor",
-            source.successorId,
-            source.successorId
-              ? adminLink("sources", "source", source.successorId)
-              : null,
-          ),
-        ],
-      },
-      {
-        title: "Evidence and result",
-        fields: [
-          field("Last successful refresh", source.lastSuccessfulRefreshAt),
-          field("Assessment", source.lastAssessmentAt),
-          field("Invariant violations", source.invariantViolations.join(", ")),
-          field("Mapping validation", mapping?.validatedAt),
-        ],
-      },
-    ],
+    sections: sourceDetailSectionsFor(source, liveSource, mapping),
     history: historyForSource(rows, id),
     related: relatedForSource(rows, id),
   };
+};
+
+type JobRelatedAccumulator = Readonly<{
+  rows: ProjectionRows;
+  related: ProjectionRelatedRow[];
+  seen: Set<string>;
+}>;
+
+const addRelatedRow = (
+  context: JobRelatedAccumulator,
+  kind: string,
+  id: string | null | undefined,
+  label: string | null | undefined,
+  href: string | null,
+  status: string | null = null,
+): void => {
+  if (!id || context.seen.has(`${kind}:${id}`)) return;
+  context.seen.add(`${kind}:${id}`);
+  context.related.push({ id, kind, label: label || id, status, href });
+};
+
+const sourceRootForRelated = (
+  rows: ProjectionRows,
+  candidateId: string | null | undefined,
+): ProjectionRows["roots"][number] | null =>
+  candidateId
+    ? (rows.roots.find(
+        (item) =>
+          item.id === candidateId ||
+          item.liveSourceId === candidateId ||
+          item.intakeId === candidateId,
+      ) ?? null)
+    : null;
+
+const addSourceRelatedRow = (
+  context: JobRelatedAccumulator,
+  candidateId: string | null | undefined,
+): void => {
+  const root = sourceRootForRelated(context.rows, candidateId);
+  if (!root) return;
+  addRelatedRow(
+    context,
+    "SOURCE",
+    root.id,
+    root.canonicalUrl,
+    adminLink("sources", "source", root.id),
+    String(root.derivedStage),
+  );
+};
+
+const coverageSubjectRelatedRowFor = (
+  rows: ProjectionRows,
+  subjectId: string,
+): ProjectionRelatedRow | null => {
+  const cell = rows.coverageCells.find((candidate) => candidate.id === subjectId);
+  if (!cell) return null;
+  return {
+    id: cell.id,
+    kind: "COVERAGE CELL",
+    label: `${cell.cityId} / ${cell.sportName || cell.sportId}`,
+    status: cell.coverageStatus,
+    href: adminLink("coverage", "coverageCell", cell.id),
+  };
+};
+
+const demandSubjectRelatedRowFor = (
+  rows: ProjectionRows,
+  subjectId: string,
+): ProjectionRelatedRow | null => {
+  const demand = rows.demands.find((candidate) => candidate.id === subjectId);
+  if (!demand) return null;
+  return {
+    id: demand.id,
+    kind: "DEMAND",
+    label: targetLabel(demand.marketKey, demand.sportId, demand.sourceProfile),
+    status: demand.status,
+    href: adminLink("coverage", "demand", demand.id),
+  };
+};
+
+const waveSubjectRelatedRowFor = (
+  rows: ProjectionRows,
+  subjectId: string,
+): ProjectionRelatedRow | null => {
+  const wave = rows.waves.find((candidate) => candidate.id === subjectId);
+  if (!wave) return null;
+  return {
+    id: wave.id,
+    kind: "WAVE",
+    label: wave.id,
+    status: wave.status,
+    href: adminLink("coverage", "wave", wave.id),
+  };
+};
+
+const campaignSubjectRelatedRowFor = (
+  rows: ProjectionRows,
+  subjectId: string,
+): ProjectionRelatedRow | null => {
+  const campaign = rows.campaigns.find((candidate) => candidate.id === subjectId);
+  if (!campaign) return null;
+  return {
+    id: campaign.id,
+    kind: "CAMPAIGN",
+    label: campaign.name,
+    status: campaign.status,
+    href: adminLink("coverage", "campaign", campaign.id),
+  };
+};
+
+const discoverySubjectRelatedRowFor = (
+  rows: ProjectionRows,
+  subjectId: string,
+): ProjectionRelatedRow | null => {
+  const run = rows.discoveryRuns.find((candidate) => candidate.id === subjectId);
+  if (!run) return null;
+  return {
+    id: run.id,
+    kind: "DISCOVERY RUN",
+    label: run.id,
+    status: run.status,
+    href: adminLink("coverage", "discoveryRun", run.id),
+  };
+};
+
+const intakeSubjectRelatedRowFor = (
+  rows: ProjectionRows,
+  subjectId: string,
+): ProjectionRelatedRow | null => {
+  const intake = rows.intakes.find((candidate) => candidate.id === subjectId);
+  if (!intake) return null;
+  return {
+    id: intake.id,
+    kind: "INTAKE",
+    label: intake.name,
+    status: intake.status,
+    href: adminLink("intake", "intake", intake.id),
+  };
+};
+
+const refreshSubjectRelatedRowFor = (
+  rows: ProjectionRows,
+  subjectId: string,
+): ProjectionRelatedRow | null => {
+  const run = rows.scrapeRuns.find((candidate) => candidate.id === subjectId);
+  if (!run) return null;
+  return {
+    id: run.id,
+    kind: "REFRESH",
+    label: run.id,
+    status: run.status,
+    href: adminLink("sources", "scrapeRun", run.id),
+  };
+};
+
+const subjectKindFor = (subjectType: string): string => {
+  const kinds = [
+    ["COVERAGE", "COVERAGE"],
+    ["DEMAND", "DEMAND"],
+    ["WAVE", "WAVE"],
+    ["CAMPAIGN", "CAMPAIGN"],
+    ["DISCOVERY", "DISCOVERY"],
+    ["INTAKE", "INTAKE"],
+    ["SCRAPE", "REFRESH"],
+    ["REFRESH", "REFRESH"],
+  ] as const;
+  for (const [needle, kind] of kinds) {
+    if (subjectType.includes(needle)) return kind;
+  }
+  return "SOURCE";
+};
+
+const sourceSubjectRelatedRowFor = (
+  rows: ProjectionRows,
+  subjectId: string,
+): ProjectionRelatedRow | null => {
+  const root = sourceRootForRelated(rows, subjectId);
+  if (!root) return null;
+  return {
+    id: root.id,
+    kind: "SOURCE",
+    label: root.canonicalUrl,
+    status: String(root.derivedStage),
+    href: adminLink("sources", "source", root.id),
+  };
+};
+
+const subjectRelatedRowFor = (
+  rows: ProjectionRows,
+  subjectType: string,
+  subjectId: string | null | undefined,
+): ProjectionRelatedRow | null => {
+  if (!subjectId) return null;
+  switch (subjectKindFor(subjectType)) {
+    case "COVERAGE":
+      return coverageSubjectRelatedRowFor(rows, subjectId);
+    case "DEMAND":
+      return demandSubjectRelatedRowFor(rows, subjectId);
+    case "WAVE":
+      return waveSubjectRelatedRowFor(rows, subjectId);
+    case "CAMPAIGN":
+      return campaignSubjectRelatedRowFor(rows, subjectId);
+    case "DISCOVERY":
+      return discoverySubjectRelatedRowFor(rows, subjectId);
+    case "INTAKE":
+      return intakeSubjectRelatedRowFor(rows, subjectId);
+    case "REFRESH":
+      return refreshSubjectRelatedRowFor(rows, subjectId);
+    default:
+      return sourceSubjectRelatedRowFor(rows, subjectId);
+  }
+};
+
+const addSubjectRelatedRow = (
+  context: JobRelatedAccumulator,
+  subjectType: string,
+  subjectId: string | null | undefined,
+): void => {
+  const related = subjectRelatedRowFor(context.rows, subjectType, subjectId);
+  if (!related) return;
+  addRelatedRow(
+    context,
+    related.kind,
+    related.id,
+    related.label,
+    related.href ?? null,
+    related.status,
+  );
+};
+
+const addGatewayJobRelated = (
+  context: JobRelatedAccumulator,
+  row: JobRow,
+  gatewayJob: ProjectionRows["gatewayJobs"][number] | null,
+): void => {
+  addSourceRelatedRow(context, gatewayJob?.supplySourceId);
+  addSubjectRelatedRow(
+    context,
+    upper(gatewayJob?.subjectType ?? ""),
+    gatewayJob?.subjectId ?? row.subjectId,
+  );
+  if (!gatewayJob?.parentClaimId) return;
+  addRelatedRow(
+    context,
+    "CLAIM",
+    gatewayJob.parentClaimId,
+    gatewayJob.parentClaimId,
+    adminLink("jobs", "claim", gatewayJob.parentClaimId),
+    null,
+  );
+};
+
+const addMappingJobRelated = (
+  context: JobRelatedAccumulator,
+  row: JobRow,
+): void => {
+  const job = context.rows.mappingJobs.find((candidate) => candidate.id === row.id);
+  addSourceRelatedRow(context, job?.supplySourceId);
+  if (job?.supplySourceId || !job?.intakeId) return;
+  const intake = context.rows.intakes.find(
+    (candidate) => candidate.id === job.intakeId,
+  );
+  if (!intake) return;
+  addRelatedRow(
+    context,
+    "INTAKE",
+    intake.id,
+    intake.name,
+    adminLink("intake", "intake", intake.id),
+    intake.status,
+  );
+};
+
+const addReviewJobRelated = (
+  context: JobRelatedAccumulator,
+  row: JobRow,
+): void => {
+  const job = context.rows.approvals.find((candidate) => candidate.id === row.id);
+  addSourceRelatedRow(context, job?.supplySourceId);
+  if (!job) return;
+  addRelatedRow(
+    context,
+    "REVIEW",
+    job.id,
+    job.subjectType,
+    adminLink("review", "review", job.id),
+    job.status,
+  );
+};
+
+const addCoverageJobRelated = (
+  context: JobRelatedAccumulator,
+  row: JobRow,
+): void => {
+  addSubjectRelatedRow(context, "COVERAGE", row.subjectId);
+  addSubjectRelatedRow(context, "DEMAND", row.subjectId);
+  addSubjectRelatedRow(context, "CAMPAIGN", row.subjectId);
+};
+
+const addCaptureJobRelated = (
+  context: JobRelatedAccumulator,
+  row: JobRow,
+): void => {
+  const run = context.rows.intakeRuns.find((candidate) => candidate.id === row.id);
+  addSourceRelatedRow(context, run?.supplySourceId);
+  const intake = context.rows.intakes.find(
+    (candidate) => candidate.id === run?.intakeId,
+  );
+  if (!intake) return;
+  addRelatedRow(
+    context,
+    "INTAKE",
+    intake.id,
+    intake.name,
+    adminLink("intake", "intake", intake.id),
+    intake.status,
+  );
+};
+
+const addDiscoveryJobRelated = (
+  context: JobRelatedAccumulator,
+  row: JobRow,
+): void => {
+  const run = context.rows.discoveryRuns.find((candidate) => candidate.id === row.id);
+  const campaign = context.rows.campaigns.find(
+    (candidate) => candidate.id === run?.campaignId,
+  );
+  if (!campaign) return;
+  addRelatedRow(
+    context,
+    "CAMPAIGN",
+    campaign.id,
+    campaign.name,
+    adminLink("coverage", "campaign", campaign.id),
+    campaign.status,
+  );
+};
+
+const addRefreshJobRelated = (
+  context: JobRelatedAccumulator,
+  row: JobRow,
+): void => {
+  const run = context.rows.scrapeRuns.find((candidate) => candidate.id === row.id);
+  addSourceRelatedRow(context, run?.supplySourceId);
+};
+
+type JobRelatedAdder = (
+  context: JobRelatedAccumulator,
+  row: JobRow,
+  gatewayJob: ProjectionRows["gatewayJobs"][number] | null,
+) => void;
+
+const JOB_RELATED_ADDERS: Readonly<Record<string, JobRelatedAdder>> = {
+  GATEWAY: addGatewayJobRelated,
+  MAPPING: addMappingJobRelated,
+  REVIEW: addReviewJobRelated,
+  COVERAGE: addCoverageJobRelated,
+  CAPTURE: addCaptureJobRelated,
+  DISCOVERY: addDiscoveryJobRelated,
+  REFRESH: addRefreshJobRelated,
+};
+
+const jobPackageHashFor = (
+  rows: ProjectionRows,
+  row: JobRow,
+  gatewayJob: ProjectionRows["gatewayJobs"][number] | null,
+): string | null => {
+  if (row.kind === "GATEWAY") {
+    return stringValue(recordValue(gatewayJob?.subjectJson).packageHash);
+  }
+  if (row.kind !== "REVIEW") return null;
+  const review = rows.approvals.find((candidate) => candidate.id === row.id);
+  return stringValue(recordValue(review?.decision).packageHash);
 };
 
 const jobLineageRelated = (
@@ -4133,235 +8389,96 @@ const jobLineageRelated = (
   row: JobRow,
   gatewayJob: ProjectionRows["gatewayJobs"][number] | null,
 ): ProjectionRelatedRow[] => {
-  const related: ProjectionRelatedRow[] = [];
-  const seen = new Set<string>();
-  const add = (
-    kind: string,
-    id: string | null | undefined,
-    label: string | null | undefined,
-    href: string,
-    status: string | null = null,
-  ) => {
-    if (!id || seen.has(`${kind}:${id}`)) return;
-    seen.add(`${kind}:${id}`);
-    related.push({ id, kind, label: label || id, status, href });
+  const context: JobRelatedAccumulator = {
+    rows,
+    related: [],
+    seen: new Set<string>(),
   };
-  const addSource = (candidateId: string | null | undefined) => {
-    const root = candidateId
-      ? (rows.roots.find(
-          (item) =>
-            item.id === candidateId ||
-            item.liveSourceId === candidateId ||
-            item.intakeId === candidateId,
-        ) ?? null)
-      : null;
-    if (root)
-      add(
-        "SOURCE",
-        root.id,
-        root.canonicalUrl,
-        adminLink("sources", "source", root.id),
-        String(root.derivedStage),
-      );
-  };
-  const addSubject = (
-    subjectType: string,
-    subjectId: string | null | undefined,
-  ) => {
-    if (!subjectId) return;
-    if (subjectType.includes("COVERAGE")) {
-      const cell = rows.coverageCells.find(
-        (candidate) => candidate.id === subjectId,
-      );
-      if (cell)
-        add(
-          "COVERAGE CELL",
-          cell.id,
-          `${cell.cityId} / ${cell.sportName || cell.sportId}`,
-          adminLink("coverage", "coverageCell", cell.id),
-          cell.coverageStatus,
-        );
-      return;
-    }
-    if (subjectType.includes("DEMAND")) {
-      const demand = rows.demands.find(
-        (candidate) => candidate.id === subjectId,
-      );
-      if (demand)
-        add(
-          "DEMAND",
-          demand.id,
-          targetLabel(demand.marketKey, demand.sportId, demand.sourceProfile),
-          adminLink("coverage", "demand", demand.id),
-          demand.status,
-        );
-      return;
-    }
-    if (subjectType.includes("WAVE")) {
-      const wave = rows.waves.find((candidate) => candidate.id === subjectId);
-      if (wave)
-        add(
-          "WAVE",
-          wave.id,
-          wave.id,
-          adminLink("coverage", "wave", wave.id),
-          wave.status,
-        );
-      return;
-    }
-    if (subjectType.includes("CAMPAIGN")) {
-      const campaign = rows.campaigns.find(
-        (candidate) => candidate.id === subjectId,
-      );
-      if (campaign)
-        add(
-          "CAMPAIGN",
-          campaign.id,
-          campaign.name,
-          adminLink("coverage", "campaign", campaign.id),
-          campaign.status,
-        );
-      return;
-    }
-    if (subjectType.includes("DISCOVERY")) {
-      const run = rows.discoveryRuns.find(
-        (candidate) => candidate.id === subjectId,
-      );
-      if (run)
-        add(
-          "DISCOVERY RUN",
-          run.id,
-          run.id,
-          adminLink("coverage", "discoveryRun", run.id),
-          run.status,
-        );
-      return;
-    }
-    if (subjectType.includes("INTAKE")) {
-      const intake = rows.intakes.find(
-        (candidate) => candidate.id === subjectId,
-      );
-      if (intake)
-        add(
-          "INTAKE",
-          intake.id,
-          intake.name,
-          adminLink("intake", "intake", intake.id),
-          intake.status,
-        );
-      return;
-    }
-    if (subjectType.includes("SCRAPE") || subjectType.includes("REFRESH")) {
-      const run = rows.scrapeRuns.find(
-        (candidate) => candidate.id === subjectId,
-      );
-      if (run)
-        add(
-          "REFRESH",
-          run.id,
-          run.id,
-          adminLink("sources", "scrapeRun", run.id),
-          run.status,
-        );
-      return;
-    }
-    addSource(subjectId);
-  };
-
-  if (row.kind === "GATEWAY") {
-    addSource(gatewayJob?.supplySourceId);
-    addSubject(
-      upper(gatewayJob?.subjectType ?? ""),
-      gatewayJob?.subjectId ?? row.subjectId,
-    );
-    if (gatewayJob?.parentClaimId)
-      add(
-        "CLAIM",
-        gatewayJob.parentClaimId,
-        gatewayJob.parentClaimId,
-        adminLink("jobs", "claim", gatewayJob.parentClaimId),
-      );
-  } else if (row.kind === "MAPPING") {
-    const job = rows.mappingJobs.find((candidate) => candidate.id === row.id);
-    addSource(job?.supplySourceId);
-    if (!job?.supplySourceId && job?.intakeId) {
-      const intake = rows.intakes.find(
-        (candidate) => candidate.id === job.intakeId,
-      );
-      if (intake)
-        add(
-          "INTAKE",
-          intake.id,
-          intake.name,
-          adminLink("intake", "intake", intake.id),
-          intake.status,
-        );
-    }
-  } else if (row.kind === "REVIEW") {
-    const job = rows.approvals.find((candidate) => candidate.id === row.id);
-    addSource(job?.supplySourceId);
-    if (job)
-      add(
-        "REVIEW",
-        job.id,
-        job.subjectType,
-        adminLink("review", "review", job.id),
-        job.status,
-      );
-  } else if (row.kind === "COVERAGE") {
-    addSubject("COVERAGE", row.subjectId);
-    addSubject("DEMAND", row.subjectId);
-    addSubject("CAMPAIGN", row.subjectId);
-  } else if (row.kind === "CAPTURE") {
-    const run = rows.intakeRuns.find((candidate) => candidate.id === row.id);
-    addSource(run?.supplySourceId);
-    const intake = rows.intakes.find(
-      (candidate) => candidate.id === run?.intakeId,
-    );
-    if (intake)
-      add(
-        "INTAKE",
-        intake.id,
-        intake.name,
-        adminLink("intake", "intake", intake.id),
-        intake.status,
-      );
-  } else if (row.kind === "DISCOVERY") {
-    const run = rows.discoveryRuns.find((candidate) => candidate.id === row.id);
-    const campaign = rows.campaigns.find(
-      (candidate) => candidate.id === run?.campaignId,
-    );
-    if (campaign)
-      add(
-        "CAMPAIGN",
-        campaign.id,
-        campaign.name,
-        adminLink("coverage", "campaign", campaign.id),
-        campaign.status,
-      );
-  } else if (row.kind === "REFRESH") {
-    const run = rows.scrapeRuns.find((candidate) => candidate.id === row.id);
-    addSource(run?.supplySourceId);
-  }
-  const packageHash =
-    row.kind === "GATEWAY"
-      ? stringValue(recordValue(gatewayJob?.subjectJson).packageHash)
-      : row.kind === "REVIEW"
-        ? stringValue(
-            recordValue(
-              rows.approvals.find((candidate) => candidate.id === row.id)
-                ?.decision,
-            ).packageHash,
-          )
-        : null;
-  if (packageHash)
-    add(
+  const addForKind = JOB_RELATED_ADDERS[row.kind];
+  if (addForKind) addForKind(context, row, gatewayJob);
+  const packageHash = jobPackageHashFor(rows, row, gatewayJob);
+  if (packageHash) {
+    addRelatedRow(
+      context,
       "PACKAGE",
       packageHash,
       packageHash,
       adminLink("review", "package", packageHash),
+      null,
     );
-  return related;
+  }
+  return context.related;
+};
+
+
+const gatewayJobEventClaimFieldsFor = (
+  event: ProjectionRows["gatewayEvents"][number],
+  claim: ProjectionRows["gatewayClaims"][number] | undefined,
+  payload: Record<string, unknown>,
+  provider: string | null,
+): Pick<
+  ProjectionHistoryRow,
+  | "provider"
+  | "claimGeneration"
+  | "queuedAt"
+  | "startedAt"
+  | "heartbeatAt"
+  | "effectiveAt"
+  | "recordedAt"
+  | "workerId"
+  | "executorId"
+> => ({
+  provider,
+  claimGeneration: claim?.claimGeneration ?? null,
+  startedAt: isoValue(claim?.claimedAt),
+  heartbeatAt: isoValue(claim?.lastHeartbeatAt),
+  effectiveAt: isoValue(event.createdAt),
+  recordedAt: isoValue(event.createdAt),
+  workerId: claim?.workerId ?? stringValue(payload.workerId),
+  executorId: event.actorId,
+});
+
+const gatewayJobEventStateFieldsFor = (
+  event: ProjectionRows["gatewayEvents"][number],
+  payload: Record<string, unknown>,
+): Pick<
+  ProjectionHistoryRow,
+  | "status"
+  | "reason"
+  | "previousState"
+  | "nextState"
+  | "evidenceRefs"
+  | "inputHash"
+  | "outputHash"
+> => ({
+  status: stringValue(payload.status) ?? event.eventType,
+  reason: event.reasonCodes.join(", ") || stringValue(payload.reason),
+  previousState: stringValue(payload.previousState ?? payload.fromState),
+  nextState: stringValue(payload.nextState ?? payload.toState),
+  evidenceRefs: stringList(payload.evidenceRefs),
+  inputHash: event.inputHash ?? event.requestHash,
+  outputHash: event.outputHash,
+});
+
+const gatewayJobEventHistoryRowFor = (
+  event: ProjectionRows["gatewayEvents"][number],
+  claimsById: ReadonlyMap<
+    string,
+    ProjectionRows["gatewayClaims"][number]
+  >,
+  provider: string | null,
+): ProjectionHistoryRow => {
+  const payload = recordValue(event.payload);
+  const claim = gatewayEventClaimFor(event, claimsById);
+  return {
+    id: event.id,
+    kind: `EVENT ${event.eventType}`,
+    at: isoValue(event.createdAt),
+    actor: event.actorId,
+    href: adminLink("jobs", "event", event.id),
+    ...gatewayJobEventClaimFieldsFor(event, claim, payload, provider),
+    ...gatewayJobEventStateFieldsFor(event, payload),
+  };
 };
 
 const jobHistory = (
@@ -4423,37 +8540,9 @@ const jobHistory = (
       })),
     ...rows.gatewayEvents
       .filter((event) => event.jobId === id)
-      .map((event) => {
-        const payload = recordValue(event.payload);
-        const claim = event.claimId ? claimsById.get(event.claimId) : undefined;
-        return {
-          id: event.id,
-          kind: `EVENT ${event.eventType}`,
-          at: isoValue(event.createdAt),
-          status: stringValue(payload.status) ?? event.eventType,
-          reason: event.reasonCodes.join(", ") || stringValue(payload.reason),
-          actor: event.actorId,
-          provider,
-          lane: event.role,
-          claimGeneration:
-            claim?.claimGeneration ?? numberValue(payload.claimGeneration, 0),
-          queuedAt: isoValue(claim?.createdAt),
-          startedAt: isoValue(claim?.claimedAt),
-          heartbeatAt: isoValue(claim?.lastHeartbeatAt),
-          effectiveAt: isoValue(event.createdAt),
-          recordedAt: isoValue(event.createdAt),
-          workerId: claim?.workerId ?? stringValue(payload.workerId),
-          executorId: event.actorId,
-          previousState: stringValue(
-            payload.previousState ?? payload.fromState,
-          ),
-          nextState: stringValue(payload.nextState ?? payload.toState),
-          evidenceRefs: stringList(payload.evidenceRefs),
-          inputHash: event.inputHash ?? event.requestHash,
-          outputHash: event.outputHash,
-          href: adminLink("jobs", "event", event.id),
-        };
-      }),
+      .map((event) =>
+        gatewayJobEventHistoryRowFor(event, claimsById, provider),
+      ),
   ].sort(
     (left, right) =>
       (dateValue(right.at)?.getTime() ?? 0) -
@@ -4496,6 +8585,440 @@ const buildJobLifecycleHistory = (
           : String(entry.actor),
       href: entry.href,
     }));
+type JobHistoryBuilder = (
+  rows: ProjectionRows,
+  id: string,
+) => ProjectionHistoryRow[];
+
+const mappingJobHistoryFor = (
+  rows: ProjectionRows,
+  id: string,
+): ProjectionHistoryRow[] => {
+  const job = rows.mappingJobs.find((candidate) => candidate.id === id);
+  if (!job) return [];
+  return buildJobLifecycleHistory([
+    {
+      id: `${id}:created`,
+      kind: "MAPPING CREATED",
+      at: job.createdAt,
+      status: "CREATED",
+      href: adminLink("jobs", "job", id),
+    },
+    {
+      id: `${id}:claimed`,
+      kind: "MAPPING CLAIMED",
+      at: job.claimedAt,
+      status: "CLAIMED",
+      actor: job.workerId,
+      href: adminLink("jobs", "job", id),
+    },
+    {
+      id: `${id}:finished`,
+      kind: "MAPPING FINISHED",
+      at: job.finishedAt,
+      status: job.status,
+      reason: job.errorMessage,
+      actor: job.workerId,
+      href: adminLink("jobs", "job", id),
+    },
+  ]);
+};
+
+const reviewJobHistoryFor = (
+  rows: ProjectionRows,
+  id: string,
+): ProjectionHistoryRow[] => {
+  const job = rows.approvals.find((candidate) => candidate.id === id);
+  if (!job) return [];
+  return buildJobLifecycleHistory([
+    {
+      id: `${id}:created`,
+      kind: "REVIEW CREATED",
+      at: job.createdAt,
+      status: "CREATED",
+      href: adminLink("jobs", "job", id),
+    },
+    {
+      id: `${id}:claimed`,
+      kind: "REVIEW CLAIMED",
+      at: job.claimedAt,
+      status: "CLAIMED",
+      actor: job.reviewerId,
+      href: adminLink("jobs", "job", id),
+    },
+    {
+      id: `${id}:finished`,
+      kind: "REVIEW FINISHED",
+      at: job.finishedAt,
+      status: job.status,
+      reason: job.errorMessage,
+      actor: job.reviewerId,
+      href: adminLink("jobs", "job", id),
+    },
+  ]);
+};
+
+const coverageJobHistoryFor = (
+  rows: ProjectionRows,
+  id: string,
+): ProjectionHistoryRow[] => {
+  const job = rows.coverageJobs.find((candidate) => candidate.id === id);
+  if (!job) return [];
+  return buildJobLifecycleHistory([
+    {
+      id: `${id}:created`,
+      kind: "COVERAGE CREATED",
+      at: job.createdAt,
+      status: "CREATED",
+      href: adminLink("jobs", "job", id),
+    },
+    {
+      id: `${id}:claimed`,
+      kind: "COVERAGE CLAIMED",
+      at: job.claimedAt,
+      status: "CLAIMED",
+      actor: job.workerId,
+      href: adminLink("jobs", "job", id),
+    },
+    {
+      id: `${id}:finished`,
+      kind: "COVERAGE FINISHED",
+      at: job.finishedAt,
+      status: job.status,
+      reason: job.errorMessage,
+      actor: job.workerId,
+      href: adminLink("jobs", "job", id),
+    },
+  ]);
+};
+
+const captureJobHistoryFor = (
+  rows: ProjectionRows,
+  id: string,
+): ProjectionHistoryRow[] => {
+  const run = rows.intakeRuns.find((candidate) => candidate.id === id);
+  if (!run) return [];
+  return buildJobLifecycleHistory([
+    {
+      id: `${id}:queued`,
+      kind: "CAPTURE QUEUED",
+      at: run.queuedAt,
+      status: "QUEUED",
+      href: adminLink("intake", "intakeRun", id),
+    },
+    {
+      id: `${id}:started`,
+      kind: "CAPTURE STARTED",
+      at: run.startedAt,
+      status: "STARTED",
+      actor: run.workerId,
+      href: adminLink("intake", "intakeRun", id),
+    },
+    {
+      id: `${id}:claimed`,
+      kind: "CAPTURE CLAIMED",
+      at: run.claimedAt,
+      status: "CLAIMED",
+      actor: run.workerId,
+      href: adminLink("intake", "intakeRun", id),
+    },
+    {
+      id: `${id}:finished`,
+      kind: "CAPTURE FINISHED",
+      at: run.finishedAt,
+      status: run.status,
+      reason: run.errorMessage,
+      actor: run.workerId,
+      href: adminLink("intake", "intakeRun", id),
+    },
+  ]);
+};
+
+const discoveryJobHistoryFor = (
+  rows: ProjectionRows,
+  id: string,
+): ProjectionHistoryRow[] => {
+  const run = rows.discoveryRuns.find((candidate) => candidate.id === id);
+  if (!run) return [];
+  return buildJobLifecycleHistory([
+    {
+      id: `${id}:queued`,
+      kind: "DISCOVERY QUEUED",
+      at: run.queuedAt,
+      status: "QUEUED",
+      href: adminLink("coverage", "discoveryRun", id),
+    },
+    {
+      id: `${id}:started`,
+      kind: "DISCOVERY STARTED",
+      at: run.startedAt,
+      status: "STARTED",
+      actor: run.workerId,
+      href: adminLink("coverage", "discoveryRun", id),
+    },
+    {
+      id: `${id}:claimed`,
+      kind: "DISCOVERY CLAIMED",
+      at: run.claimedAt,
+      status: "CLAIMED",
+      actor: run.workerId,
+      href: adminLink("coverage", "discoveryRun", id),
+    },
+    {
+      id: `${id}:finished`,
+      kind: "DISCOVERY FINISHED",
+      at: run.finishedAt,
+      status: run.status,
+      reason: run.errorMessage,
+      actor: run.workerId,
+      href: adminLink("coverage", "discoveryRun", id),
+    },
+  ]);
+};
+
+const refreshJobHistoryFor = (
+  rows: ProjectionRows,
+  id: string,
+): ProjectionHistoryRow[] => {
+  const run = rows.scrapeRuns.find((candidate) => candidate.id === id);
+  if (!run) return [];
+  return buildJobLifecycleHistory([
+    {
+      id: `${id}:created`,
+      kind: "REFRESH CREATED",
+      at: run.createdAt,
+      status: "CREATED",
+      href: adminLink("sources", "scrapeRun", id),
+    },
+    {
+      id: `${id}:started`,
+      kind: "REFRESH STARTED",
+      at: run.startedAt,
+      status: "STARTED",
+      href: adminLink("sources", "scrapeRun", id),
+    },
+    {
+      id: `${id}:finished`,
+      kind: "REFRESH FINISHED",
+      at: run.finishedAt,
+      status: run.status,
+      reason: run.errorMessage,
+      actor: run.requestedByUserId,
+      href: adminLink("sources", "scrapeRun", id),
+    },
+  ]);
+};
+
+const JOB_HISTORY_BUILDERS: Readonly<Record<string, JobHistoryBuilder>> = {
+  MAPPING: mappingJobHistoryFor,
+  REVIEW: reviewJobHistoryFor,
+  COVERAGE: coverageJobHistoryFor,
+  CAPTURE: captureJobHistoryFor,
+  DISCOVERY: discoveryJobHistoryFor,
+  REFRESH: refreshJobHistoryFor,
+};
+
+const gatewayJobFor = (
+  rows: ProjectionRows,
+  row: JobRow,
+  id: string,
+): ProjectionRows["gatewayJobs"][number] | null =>
+  row.kind === "GATEWAY"
+    ? (rows.gatewayJobs.find((job) => job.id === id) ?? null)
+    : null;
+
+const gatewayClaimFor = (
+  rows: ProjectionRows,
+  gatewayJob: ProjectionRows["gatewayJobs"][number] | null,
+): ProjectionRows["gatewayClaims"][number] | null =>
+  gatewayJob?.activeClaimId
+    ? (rows.gatewayClaims.find(
+        (claim) => claim.id === gatewayJob.activeClaimId,
+      ) ?? null)
+    : null;
+
+const jobHistoryForRow = (
+  rows: ProjectionRows,
+  row: JobRow,
+  id: string,
+): ProjectionHistoryRow[] => {
+  if (row.kind === "GATEWAY") return jobHistory(rows, id);
+  const builder = JOB_HISTORY_BUILDERS[row.kind];
+  return builder ? builder(rows, id) : [];
+};
+
+type JobExecutionFieldsBuilder = (
+  rows: ProjectionRows,
+  id: string,
+) => ProjectionField[];
+
+const gatewayExecutionFieldsFor = (
+  gatewayJob: ProjectionRows["gatewayJobs"][number],
+): ProjectionField[] => [
+  field("Created", gatewayJob.createdAt),
+  field("Updated", gatewayJob.updatedAt),
+  field("Finished", gatewayJob.finishedAt),
+  field("Expected lifecycle generation", gatewayJob.expectedLifecycleGeneration),
+  field("Invocation failures", gatewayJob.invocationFailureCount),
+  field("Terminal disposition", gatewayJob.terminalDisposition),
+  field(
+    "Terminal receipt",
+    gatewayJob.terminalReceiptId,
+    gatewayJob.terminalReceiptId
+      ? adminLink("jobs", "operation", gatewayJob.terminalReceiptId)
+      : null,
+  ),
+];
+
+const mappingExecutionFieldsFor: JobExecutionFieldsBuilder = (rows, id) => {
+  const job = rows.mappingJobs.find((candidate) => candidate.id === id);
+  return [
+    field("Created", job?.createdAt),
+    field("Claimed", job?.claimedAt),
+    field("Finished", job?.finishedAt),
+    field("Attempt", job?.attemptCount),
+    field("Branch", job?.branch),
+    field("Commit", job?.commit),
+  ];
+};
+
+const reviewExecutionFieldsFor: JobExecutionFieldsBuilder = (rows, id) => {
+  const job = rows.approvals.find((candidate) => candidate.id === id);
+  return [
+    field("Created", job?.createdAt),
+    field("Claimed", job?.claimedAt),
+    field("Finished", job?.finishedAt),
+    field("Attempt", job?.attemptCount),
+    field("Decision", recordValue(job?.decision)),
+  ];
+};
+
+const coverageExecutionFieldsFor: JobExecutionFieldsBuilder = (rows, id) => {
+  const job = rows.coverageJobs.find((candidate) => candidate.id === id);
+  return [
+    field("Created", job?.createdAt),
+    field("Claimed", job?.claimedAt),
+    field("Finished", job?.finishedAt),
+    field("Attempt", job?.attemptCount),
+    field("Priority", job?.priorityScore),
+  ];
+};
+
+const captureExecutionFieldsFor: JobExecutionFieldsBuilder = (rows, id) => {
+  const run = rows.intakeRuns.find((candidate) => candidate.id === id);
+  return [
+    field("Queued", run?.queuedAt),
+    field("Started", run?.startedAt),
+    field("Claimed", run?.claimedAt),
+    field("Finished", run?.finishedAt),
+    field("Attempt", run?.attemptCount),
+  ];
+};
+
+const discoveryExecutionFieldsFor: JobExecutionFieldsBuilder = (rows, id) => {
+  const run = rows.discoveryRuns.find((candidate) => candidate.id === id);
+  return [
+    field("Queued", run?.queuedAt),
+    field("Started", run?.startedAt),
+    field("Claimed", run?.claimedAt),
+    field("Finished", run?.finishedAt),
+    field("Attempt", run?.attemptCount),
+  ];
+};
+
+const refreshExecutionFieldsFor: JobExecutionFieldsBuilder = (rows, id) => {
+  const run = rows.scrapeRuns.find((candidate) => candidate.id === id);
+  return [
+    field("Created", run?.createdAt),
+    field("Started", run?.startedAt),
+    field("Finished", run?.finishedAt),
+    field("Requested by", run?.requestedByUserId),
+  ];
+};
+
+const JOB_EXECUTION_FIELDS_BUILDERS: Readonly<
+  Record<string, JobExecutionFieldsBuilder>
+> = {
+  MAPPING: mappingExecutionFieldsFor,
+  REVIEW: reviewExecutionFieldsFor,
+  COVERAGE: coverageExecutionFieldsFor,
+  CAPTURE: captureExecutionFieldsFor,
+  DISCOVERY: discoveryExecutionFieldsFor,
+  REFRESH: refreshExecutionFieldsFor,
+};
+
+const recordedExecutionFor = (
+  rows: ProjectionRows,
+  row: JobRow,
+  id: string,
+  gatewayJob: ProjectionRows["gatewayJobs"][number] | null,
+): ProjectionField[] => {
+  if (gatewayJob) return gatewayExecutionFieldsFor(gatewayJob);
+  const builder = JOB_EXECUTION_FIELDS_BUILDERS[row.kind];
+  return builder ? builder(rows, id) : [];
+};
+
+const gatewayGenerationFieldsFor = (
+  row: JobRow,
+  gatewayJob: ProjectionRows["gatewayJobs"][number],
+  gatewayClaim: ProjectionRows["gatewayClaims"][number] | null,
+): ProjectionField[] => [
+  field("Subject", row.subjectId),
+  field("Lineage", row.lineage),
+  field("Claim generation", gatewayJob.claimGeneration),
+  field(
+    "Active claim",
+    gatewayJob.activeClaimId,
+    gatewayJob.activeClaimId
+      ? adminLink("jobs", "claim", gatewayJob.activeClaimId)
+      : null,
+  ),
+  field(
+    "Parent claim",
+    gatewayJob.parentClaimId,
+    gatewayJob.parentClaimId
+      ? adminLink("jobs", "claim", gatewayJob.parentClaimId)
+      : null,
+  ),
+  field("Claim lifecycle generation", gatewayClaim?.lifecycleGeneration),
+  field("Claim worker", gatewayClaim?.workerId),
+];
+
+const generationFieldsFor = (
+  row: JobRow,
+  gatewayJob: ProjectionRows["gatewayJobs"][number] | null,
+  gatewayClaim: ProjectionRows["gatewayClaims"][number] | null,
+): ProjectionField[] =>
+  gatewayJob
+    ? gatewayGenerationFieldsFor(row, gatewayJob, gatewayClaim)
+    : [field("Subject", row.subjectId), field("Lineage", row.lineage)];
+
+const gatewayEvidenceFieldsFor = (
+  gatewayJob: ProjectionRows["gatewayJobs"][number],
+): ProjectionField[] => [
+  field("Subject payload", gatewayJob.subjectJson),
+  field("Evidence manifest", gatewayJob.evidenceManifestJson),
+  field("Result hash", gatewayJob.resultHash),
+  field("Result", gatewayJob.resultJson),
+  field(
+    "Terminal receipt",
+    gatewayJob.terminalReceiptId,
+    gatewayJob.terminalReceiptId
+      ? adminLink("jobs", "operation", gatewayJob.terminalReceiptId)
+      : null,
+  ),
+  field("Event sequence", gatewayJob.eventSequence),
+];
+
+const jobEvidenceFieldsFor = (
+  row: JobRow,
+  gatewayJob: ProjectionRows["gatewayJobs"][number] | null,
+): ProjectionField[] => [
+  field("Failure", row.failure),
+  field("Operation history", row.id),
+  ...(gatewayJob ? gatewayEvidenceFieldsFor(gatewayJob) : []),
+];
+
 const buildJobDetail = (
   rows: ProjectionRows,
   id: string,
@@ -4514,364 +9037,13 @@ const buildJobDetail = (
   });
   const row = jobs.find((job) => job.id === id);
   if (!row) return null;
-  const gatewayJob =
-    row.kind === "GATEWAY"
-      ? (rows.gatewayJobs.find((job) => job.id === id) ?? null)
-      : null;
-  const gatewayClaim = gatewayJob?.activeClaimId
-    ? (rows.gatewayClaims.find(
-        (claim) => claim.id === gatewayJob.activeClaimId,
-      ) ?? null)
-    : null;
-  const history =
-    row.kind === "GATEWAY"
-      ? jobHistory(rows, id)
-      : row.kind === "MAPPING"
-        ? (() => {
-            const job = rows.mappingJobs.find(
-              (candidate) => candidate.id === id,
-            );
-            return job
-              ? buildJobLifecycleHistory([
-                  {
-                    id: `${id}:created`,
-                    kind: "MAPPING CREATED",
-                    at: job.createdAt,
-                    status: "CREATED",
-                    href: adminLink("jobs", "job", id),
-                  },
-                  {
-                    id: `${id}:claimed`,
-                    kind: "MAPPING CLAIMED",
-                    at: job.claimedAt,
-                    status: "CLAIMED",
-                    actor: job.workerId,
-                    href: adminLink("jobs", "job", id),
-                  },
-                  {
-                    id: `${id}:finished`,
-                    kind: "MAPPING FINISHED",
-                    at: job.finishedAt,
-                    status: job.status,
-                    reason: job.errorMessage,
-                    actor: job.workerId,
-                    href: adminLink("jobs", "job", id),
-                  },
-                ])
-              : [];
-          })()
-        : row.kind === "REVIEW"
-          ? (() => {
-              const job = rows.approvals.find(
-                (candidate) => candidate.id === id,
-              );
-              return job
-                ? buildJobLifecycleHistory([
-                    {
-                      id: `${id}:created`,
-                      kind: "REVIEW CREATED",
-                      at: job.createdAt,
-                      status: "CREATED",
-                      href: adminLink("jobs", "job", id),
-                    },
-                    {
-                      id: `${id}:claimed`,
-                      kind: "REVIEW CLAIMED",
-                      at: job.claimedAt,
-                      status: "CLAIMED",
-                      actor: job.reviewerId,
-                      href: adminLink("jobs", "job", id),
-                    },
-                    {
-                      id: `${id}:finished`,
-                      kind: "REVIEW FINISHED",
-                      at: job.finishedAt,
-                      status: job.status,
-                      reason: job.errorMessage,
-                      actor: job.reviewerId,
-                      href: adminLink("jobs", "job", id),
-                    },
-                  ])
-                : [];
-            })()
-          : row.kind === "COVERAGE"
-            ? (() => {
-                const job = rows.coverageJobs.find(
-                  (candidate) => candidate.id === id,
-                );
-                return job
-                  ? buildJobLifecycleHistory([
-                      {
-                        id: `${id}:created`,
-                        kind: "COVERAGE CREATED",
-                        at: job.createdAt,
-                        status: "CREATED",
-                        href: adminLink("jobs", "job", id),
-                      },
-                      {
-                        id: `${id}:claimed`,
-                        kind: "COVERAGE CLAIMED",
-                        at: job.claimedAt,
-                        status: "CLAIMED",
-                        actor: job.workerId,
-                        href: adminLink("jobs", "job", id),
-                      },
-                      {
-                        id: `${id}:finished`,
-                        kind: "COVERAGE FINISHED",
-                        at: job.finishedAt,
-                        status: job.status,
-                        reason: job.errorMessage,
-                        actor: job.workerId,
-                        href: adminLink("jobs", "job", id),
-                      },
-                    ])
-                  : [];
-              })()
-            : row.kind === "CAPTURE"
-              ? (() => {
-                  const run = rows.intakeRuns.find(
-                    (candidate) => candidate.id === id,
-                  );
-                  return run
-                    ? buildJobLifecycleHistory([
-                        {
-                          id: `${id}:queued`,
-                          kind: "CAPTURE QUEUED",
-                          at: run.queuedAt,
-                          status: "QUEUED",
-                          href: adminLink("intake", "intakeRun", id),
-                        },
-                        {
-                          id: `${id}:started`,
-                          kind: "CAPTURE STARTED",
-                          at: run.startedAt,
-                          status: "STARTED",
-                          actor: run.workerId,
-                          href: adminLink("intake", "intakeRun", id),
-                        },
-                        {
-                          id: `${id}:claimed`,
-                          kind: "CAPTURE CLAIMED",
-                          at: run.claimedAt,
-                          status: "CLAIMED",
-                          actor: run.workerId,
-                          href: adminLink("intake", "intakeRun", id),
-                        },
-                        {
-                          id: `${id}:finished`,
-                          kind: "CAPTURE FINISHED",
-                          at: run.finishedAt,
-                          status: run.status,
-                          reason: run.errorMessage,
-                          actor: run.workerId,
-                          href: adminLink("intake", "intakeRun", id),
-                        },
-                      ])
-                    : [];
-                })()
-              : row.kind === "DISCOVERY"
-                ? (() => {
-                    const run = rows.discoveryRuns.find(
-                      (candidate) => candidate.id === id,
-                    );
-                    return run
-                      ? buildJobLifecycleHistory([
-                          {
-                            id: `${id}:queued`,
-                            kind: "DISCOVERY QUEUED",
-                            at: run.queuedAt,
-                            status: "QUEUED",
-                            href: adminLink("coverage", "discoveryRun", id),
-                          },
-                          {
-                            id: `${id}:started`,
-                            kind: "DISCOVERY STARTED",
-                            at: run.startedAt,
-                            status: "STARTED",
-                            actor: run.workerId,
-                            href: adminLink("coverage", "discoveryRun", id),
-                          },
-                          {
-                            id: `${id}:claimed`,
-                            kind: "DISCOVERY CLAIMED",
-                            at: run.claimedAt,
-                            status: "CLAIMED",
-                            actor: run.workerId,
-                            href: adminLink("coverage", "discoveryRun", id),
-                          },
-                          {
-                            id: `${id}:finished`,
-                            kind: "DISCOVERY FINISHED",
-                            at: run.finishedAt,
-                            status: run.status,
-                            reason: run.errorMessage,
-                            actor: run.workerId,
-                            href: adminLink("coverage", "discoveryRun", id),
-                          },
-                        ])
-                      : [];
-                  })()
-                : row.kind === "REFRESH"
-                  ? (() => {
-                      const run = rows.scrapeRuns.find(
-                        (candidate) => candidate.id === id,
-                      );
-                      return run
-                        ? buildJobLifecycleHistory([
-                            {
-                              id: `${id}:created`,
-                              kind: "REFRESH CREATED",
-                              at: run.createdAt,
-                              status: "CREATED",
-                              href: adminLink("sources", "scrapeRun", id),
-                            },
-                            {
-                              id: `${id}:started`,
-                              kind: "REFRESH STARTED",
-                              at: run.startedAt,
-                              status: "STARTED",
-                              href: adminLink("sources", "scrapeRun", id),
-                            },
-                            {
-                              id: `${id}:finished`,
-                              kind: "REFRESH FINISHED",
-                              at: run.finishedAt,
-                              status: run.status,
-                              reason: run.errorMessage,
-                              actor: run.requestedByUserId,
-                              href: adminLink("sources", "scrapeRun", id),
-                            },
-                          ])
-                        : [];
-                    })()
-                  : [];
+  const gatewayJob = gatewayJobFor(rows, row, id);
+  const gatewayClaim = gatewayClaimFor(rows, gatewayJob);
+  const history = jobHistoryForRow(rows, row, id);
   const historyWithProvider = history.map((entry) => ({
     ...entry,
     provider: entry.provider ?? row.provider,
   }));
-  const recordedExecution =
-    row.kind === "GATEWAY"
-      ? [
-          field("Created", gatewayJob?.createdAt),
-          field("Updated", gatewayJob?.updatedAt),
-          field("Finished", gatewayJob?.finishedAt),
-          field(
-            "Expected lifecycle generation",
-            gatewayJob?.expectedLifecycleGeneration,
-          ),
-          field("Invocation failures", gatewayJob?.invocationFailureCount),
-          field("Terminal disposition", gatewayJob?.terminalDisposition),
-          field(
-            "Terminal receipt",
-            gatewayJob?.terminalReceiptId,
-            gatewayJob?.terminalReceiptId
-              ? adminLink("jobs", "operation", gatewayJob.terminalReceiptId)
-              : null,
-          ),
-        ]
-      : row.kind === "MAPPING"
-        ? (() => {
-            const job = rows.mappingJobs.find(
-              (candidate) => candidate.id === id,
-            );
-            return [
-              field("Created", job?.createdAt),
-              field("Claimed", job?.claimedAt),
-              field("Finished", job?.finishedAt),
-              field("Attempt", job?.attemptCount),
-              field("Branch", job?.branch),
-              field("Commit", job?.commit),
-            ];
-          })()
-        : row.kind === "REVIEW"
-          ? (() => {
-              const job = rows.approvals.find(
-                (candidate) => candidate.id === id,
-              );
-              return [
-                field("Created", job?.createdAt),
-                field("Claimed", job?.claimedAt),
-                field("Finished", job?.finishedAt),
-                field("Attempt", job?.attemptCount),
-                field("Decision", recordValue(job?.decision)),
-              ];
-            })()
-          : row.kind === "COVERAGE"
-            ? (() => {
-                const job = rows.coverageJobs.find(
-                  (candidate) => candidate.id === id,
-                );
-                return [
-                  field("Created", job?.createdAt),
-                  field("Claimed", job?.claimedAt),
-                  field("Finished", job?.finishedAt),
-                  field("Attempt", job?.attemptCount),
-                  field("Priority", job?.priorityScore),
-                ];
-              })()
-            : row.kind === "CAPTURE"
-              ? (() => {
-                  const run = rows.intakeRuns.find(
-                    (candidate) => candidate.id === id,
-                  );
-                  return [
-                    field("Queued", run?.queuedAt),
-                    field("Started", run?.startedAt),
-                    field("Claimed", run?.claimedAt),
-                    field("Finished", run?.finishedAt),
-                    field("Attempt", run?.attemptCount),
-                  ];
-                })()
-              : row.kind === "DISCOVERY"
-                ? (() => {
-                    const run = rows.discoveryRuns.find(
-                      (candidate) => candidate.id === id,
-                    );
-                    return [
-                      field("Queued", run?.queuedAt),
-                      field("Started", run?.startedAt),
-                      field("Claimed", run?.claimedAt),
-                      field("Finished", run?.finishedAt),
-                      field("Attempt", run?.attemptCount),
-                    ];
-                  })()
-                : row.kind === "REFRESH"
-                  ? (() => {
-                      const run = rows.scrapeRuns.find(
-                        (candidate) => candidate.id === id,
-                      );
-                      return [
-                        field("Created", run?.createdAt),
-                        field("Started", run?.startedAt),
-                        field("Finished", run?.finishedAt),
-                        field("Requested by", run?.requestedByUserId),
-                      ];
-                    })()
-                  : [];
-  const generationFields = gatewayJob
-    ? [
-        field("Subject", row.subjectId),
-        field("Lineage", row.lineage),
-        field("Claim generation", gatewayJob.claimGeneration),
-        field(
-          "Active claim",
-          gatewayJob.activeClaimId,
-          gatewayJob.activeClaimId
-            ? adminLink("jobs", "claim", gatewayJob.activeClaimId)
-            : null,
-        ),
-        field(
-          "Parent claim",
-          gatewayJob.parentClaimId,
-          gatewayJob.parentClaimId
-            ? adminLink("jobs", "claim", gatewayJob.parentClaimId)
-            : null,
-        ),
-        field("Claim lifecycle generation", gatewayClaim?.lifecycleGeneration),
-        field("Claim worker", gatewayClaim?.workerId),
-      ]
-    : [field("Subject", row.subjectId), field("Lineage", row.lineage)];
   return {
     id,
     kind: "job",
@@ -4898,36 +9070,16 @@ const buildJobDetail = (
           field("Worker", row.workerId),
           field("Invocation", row.invocation),
           field("Transition", row.transition),
-          ...recordedExecution,
+          ...recordedExecutionFor(rows, row, id, gatewayJob),
         ],
       },
-      { title: "Generations", fields: generationFields },
+      {
+        title: "Generations",
+        fields: generationFieldsFor(row, gatewayJob, gatewayClaim),
+      },
       {
         title: "Evidence and result",
-        fields: [
-          field("Failure", row.failure),
-          field("Operation history", row.id),
-          ...(gatewayJob
-            ? [
-                field("Subject payload", gatewayJob.subjectJson),
-                field("Evidence manifest", gatewayJob.evidenceManifestJson),
-                field("Result hash", gatewayJob.resultHash),
-                field("Result", gatewayJob.resultJson),
-                field(
-                  "Terminal receipt",
-                  gatewayJob.terminalReceiptId,
-                  gatewayJob.terminalReceiptId
-                    ? adminLink(
-                        "jobs",
-                        "operation",
-                        gatewayJob.terminalReceiptId,
-                      )
-                    : null,
-                ),
-                field("Event sequence", gatewayJob.eventSequence),
-              ]
-            : []),
-        ],
+        fields: jobEvidenceFieldsFor(row, gatewayJob),
       },
     ],
     history: historyWithProvider,
@@ -4952,6 +9104,114 @@ const policyKeysForIntake = (
   return keys;
 };
 
+const intakeDetailPolicyFieldsFor = (
+  intake: ProjectionRows["intakes"][number],
+  policy: ProjectionRows["domainPolicies"][number] | undefined,
+  policyEvidence: Record<string, unknown>,
+  pages: readonly ProjectionRows["pages"][number][],
+  runs: readonly ProjectionRows["intakeRuns"][number][],
+): ProjectionField[] => [
+  field("Compliance", intake.complianceStatus),
+  field("Compliance notes", intake.complianceNotes),
+  field("Policy key", policy?.policyKey),
+  field("Policy status", policy?.status),
+  field("Policy terms URL", policy?.termsUrl),
+  field("Policy robots summary", policy?.robotsSummary),
+  field("Policy restrictions", policy?.restrictionNotes),
+  field("Policy reviewer", policy?.reviewedByUserId),
+  field("Policy reviewed at", policy?.reviewedAt),
+  field("Policy expires at", policy?.expiresAt),
+  field("Policy evidence", policyEvidence),
+  field("Pages", pages.length),
+  field("Capture runs", runs.length),
+];
+
+const intakeDetailSectionsFor = (
+  intake: ProjectionRows["intakes"][number],
+  pages: readonly ProjectionRows["pages"][number][],
+  runs: readonly ProjectionRows["intakeRuns"][number][],
+  mapping: ProjectionRows["mappingJobs"][number] | undefined,
+  policy: ProjectionRows["domainPolicies"][number] | undefined,
+  policyEvidence: Record<string, unknown>,
+): ProjectionDetail["sections"] => [
+  {
+    title: "Header",
+    fields: [
+      field("Name", intake.name),
+      field("Source key", intake.sourceKey),
+      field("Region", intake.region),
+      field("Status", intake.status),
+    ],
+  },
+  {
+    title: "Policy and capture",
+    fields: intakeDetailPolicyFieldsFor(
+      intake,
+      policy,
+      policyEvidence,
+      pages,
+      runs,
+    ),
+  },
+  {
+    title: "Lineage",
+    fields: [
+      field(
+        "Mapping job",
+        mapping?.id,
+        mapping?.id ? adminLink("jobs", "job", mapping.id) : null,
+      ),
+      field("Mapping status", mapping?.status),
+      field("Mapping source", mapping?.supplySourceId ?? mapping?.sourceId),
+    ],
+  },
+];
+
+const intakeDetailHistoryFor = (
+  runs: readonly ProjectionRows["intakeRuns"][number][],
+): ProjectionHistoryRow[] =>
+  runs.map((run) => ({
+    id: run.id,
+    kind: "CAPTURE",
+    at: isoValue(run.finishedAt ?? run.createdAt),
+    status: run.status,
+    reason: run.errorMessage,
+    actor: run.workerId,
+    href: adminLink("intake", "intakeRun", run.id),
+  }));
+
+const intakeDetailRelatedFor = (
+  mapping: ProjectionRows["mappingJobs"][number] | undefined,
+  pages: readonly ProjectionRows["pages"][number][],
+  artifacts: readonly ProjectionRows["artifacts"][number][],
+): ProjectionRelatedRow[] => [
+  ...(mapping
+    ? [
+        {
+          id: mapping.id,
+          kind: "MAPPING",
+          label: mapping.id,
+          status: mapping.status,
+          href: adminLink("jobs", "job", mapping.id),
+        },
+      ]
+    : []),
+  ...pages.map((page) => ({
+    id: page.id,
+    kind: "PAGE",
+    label: page.canonicalUrl,
+    status: page.status,
+    href: adminLink("intake", "page", page.id),
+  })),
+  ...artifacts.map((artifact) => ({
+    id: artifact.id,
+    kind: `ARTIFACT ${artifact.kind}`,
+    label: artifact.contentHash,
+    status: artifact.isPinned ? "PINNED" : "RETAINED",
+    href: adminLink("intake", "artifact", artifact.id),
+  })),
+];
+
 const buildIntakeDetail = (
   rows: ProjectionRows,
   id: string,
@@ -4974,288 +9234,357 @@ const buildIntakeDetail = (
     title: intake.name,
     subtitle: `Source Intake ${intake.sourceKey}`,
     status: intake.status,
-    sections: [
-      {
-        title: "Header",
-        fields: [
-          field("Name", intake.name),
-          field("Source key", intake.sourceKey),
-          field("Region", intake.region),
-          field("Status", intake.status),
-        ],
-      },
-      {
-        title: "Policy and capture",
-        fields: [
-          field("Compliance", intake.complianceStatus),
-          field("Compliance notes", intake.complianceNotes),
-          field("Policy key", policy?.policyKey),
-          field("Policy status", policy?.status),
-          field("Policy terms URL", policy?.termsUrl),
-          field("Policy robots summary", policy?.robotsSummary),
-          field("Policy restrictions", policy?.restrictionNotes),
-          field("Policy reviewer", policy?.reviewedByUserId),
-          field("Policy reviewed at", policy?.reviewedAt),
-          field("Policy expires at", policy?.expiresAt),
-          field("Policy evidence", policyEvidence),
-          field("Pages", pages.length),
-          field("Capture runs", runs.length),
-        ],
-      },
-      {
-        title: "Lineage",
-        fields: [
-          field(
-            "Mapping job",
-            mapping?.id,
-            mapping?.id ? adminLink("jobs", "job", mapping.id) : null,
-          ),
-          field("Mapping status", mapping?.status),
-          field("Mapping source", mapping?.supplySourceId ?? mapping?.sourceId),
-        ],
-      },
-    ],
-    history: runs.map((run) => ({
-      id: run.id,
-      kind: "CAPTURE",
-      at: isoValue(run.finishedAt ?? run.createdAt),
-      status: run.status,
-      reason: run.errorMessage,
-      actor: run.workerId,
-      href: adminLink("intake", "intakeRun", run.id),
-    })),
-    related: [
-      ...(mapping
-        ? [
-            {
-              id: mapping.id,
-              kind: "MAPPING",
-              label: mapping.id,
-              status: mapping.status,
-              href: adminLink("jobs", "job", mapping.id),
-            },
-          ]
-        : []),
-      ...pages.map((page) => ({
-        id: page.id,
-        kind: "PAGE",
-        label: page.canonicalUrl,
-        status: page.status,
-        href: adminLink("intake", "page", page.id),
-      })),
-      ...artifacts.map((artifact) => ({
-        id: artifact.id,
-        kind: `ARTIFACT ${artifact.kind}`,
-        label: artifact.contentHash,
-        status: artifact.isPinned ? "PINNED" : "RETAINED",
-        href: adminLink("intake", "artifact", artifact.id),
-      })),
-    ],
+    sections: intakeDetailSectionsFor(
+      intake,
+      pages,
+      runs,
+      mapping,
+      policy,
+      policyEvidence,
+    ),
+    history: intakeDetailHistoryFor(runs),
+    related: intakeDetailRelatedFor(mapping, pages, artifacts),
   };
 };
+
+const reviewExecutionHistoryFor = (
+  review: ProjectionRows["approvals"][number],
+): ProjectionHistoryRow[] => [
+  {
+    id: `${review.id}:created`,
+    kind: "REVIEW CREATED",
+    at: isoValue(review.createdAt),
+    status: "QUEUED",
+    reason: null,
+    actor: null,
+    attempt: review.attemptCount,
+    href: adminLink("review", "review", review.id),
+  },
+  ...(review.claimedAt
+    ? [
+        {
+          id: `${review.id}:claimed`,
+          kind: "REVIEW CLAIMED",
+          at: isoValue(review.claimedAt),
+          status: "CLAIMED",
+          reason: null,
+          actor: review.reviewerId,
+          attempt: review.attemptCount,
+          href: adminLink("review", "review", review.id),
+        },
+      ]
+    : []),
+  ...(review.finishedAt
+    ? [
+        {
+          id: `${review.id}:finished`,
+          kind: "REVIEW FINISHED",
+          at: isoValue(review.finishedAt),
+          status: review.status,
+          reason: review.errorMessage,
+          actor: review.reviewerId,
+          attempt: review.attemptCount,
+          href: adminLink("review", "review", review.id),
+        },
+      ]
+    : []),
+];
+
+const reviewDetailSectionsFor = (
+  review: ProjectionRows["approvals"][number],
+  decision: Record<string, unknown>,
+): ProjectionDetail["sections"] => [
+  {
+    title: "Header",
+    fields: [
+      field("Case type", review.subjectType),
+      field("Subject", review.subjectKey),
+      field("Status", review.status),
+      field("Reviewer", review.reviewerId),
+    ],
+  },
+  {
+    title: "Lineage",
+    fields: [
+      field(
+        "Supply Source",
+        review.supplySourceId,
+        review.supplySourceId
+          ? adminLink("sources", "source", review.supplySourceId)
+          : null,
+      ),
+      field("Package hash", decision.packageHash),
+      field("Baseline hash", decision.baselineHash),
+    ],
+  },
+  {
+    title: "Execution",
+    fields: [
+      field("Created", review.createdAt),
+      field("Claimed", review.claimedAt),
+      field("Finished", review.finishedAt),
+      field("Attempts", review.attemptCount),
+      field("Reviewer", review.reviewerId),
+      field("Error", review.errorMessage),
+    ],
+  },
+  {
+    title: "Evidence and result",
+    fields: [
+      field("Decision", decision.decision),
+      field(
+        "Evidence references",
+        stringList(
+          decision.evidenceRefs ?? decision.candidateReviewEvidenceRefs,
+        ).join(", "),
+      ),
+      field("Reason", decision.reasonCode ?? review.errorMessage),
+    ],
+  },
+];
+
+const reviewDetailHistoryFor = (
+  rows: ProjectionRows,
+  review: ProjectionRows["approvals"][number],
+): ProjectionHistoryRow[] => [
+  ...reviewExecutionHistoryFor(review),
+  ...rows.transitions
+    .filter((transition) => transition.supplySourceId === review.supplySourceId)
+    .map((transition) => ({
+      id: transition.id,
+      kind: `LIFECYCLE ${transition.command}`,
+      at: isoValue(transition.occurredAt),
+      status: String(transition.toStage),
+      reason: transition.reasonCodes.join(", ") || null,
+      actor: transition.actorId,
+      href: adminLink("sources", "source", transition.supplySourceId),
+    })),
+];
+
+const reviewDetailRelatedFor = (
+  review: ProjectionRows["approvals"][number],
+  decision: Record<string, unknown>,
+): ProjectionRelatedRow[] => [
+  ...(review.supplySourceId
+    ? [
+        {
+          id: review.supplySourceId,
+          kind: "SOURCE",
+          label: review.supplySourceId,
+          status: null,
+          href: adminLink("sources", "source", review.supplySourceId),
+        },
+      ]
+    : []),
+  ...(stringValue(decision.packageHash)
+    ? [
+        {
+          id: String(decision.packageHash),
+          kind: "PACKAGE",
+          label: String(decision.packageHash),
+          status: null,
+          href: adminLink(
+            "review",
+            "package",
+            String(decision.packageHash),
+          ),
+        },
+      ]
+    : []),
+];
+
+const buildReviewRecordDetail = (
+  review: ProjectionRows["approvals"][number],
+  rows: ProjectionRows,
+  id: string,
+): ProjectionDetail => {
+  const decision = recordValue(review.decision);
+  return {
+    id,
+    kind: "review",
+    title: `${review.subjectType} review`,
+    subtitle: review.subjectKey,
+    status: review.status,
+    sections: reviewDetailSectionsFor(review, decision),
+    history: reviewDetailHistoryFor(rows, review),
+    related: reviewDetailRelatedFor(review, decision),
+  };
+};
+
+const buildReviewTransitionDetail = (
+  transition: ProjectionRows["transitions"][number],
+  id: string,
+): ProjectionDetail => ({
+  id,
+  kind: "review",
+  title: `Review case: ${String(transition.outcome)}`,
+  subtitle: `Supply Source ${transition.supplySourceId}`,
+  status: String(transition.toStage),
+  sections: [
+    {
+      title: "Header",
+      fields: [
+        field("Case type", transition.outcome),
+        field(
+          "Supply Source",
+          transition.supplySourceId,
+          adminLink("sources", "source", transition.supplySourceId),
+        ),
+        field("Status", transition.toStage),
+      ],
+    },
+    {
+      title: "Priority and Supply Target impact",
+      fields: [
+        field("Command", transition.command),
+        field("Generation", transition.generation),
+        field("Sequence", transition.sequence),
+      ],
+    },
+    {
+      title: "Evidence and result",
+      fields: [
+        field("Reason codes", transition.reasonCodes.join(", ")),
+        field("Evidence references", transition.evidenceRefs.join(", ")),
+        field("Request hash", transition.requestHash),
+        field("Result hash", transition.resultHash),
+        field("Result", transition.resultJson),
+      ],
+    },
+  ],
+  history: [],
+  related: [
+    {
+      id: transition.supplySourceId,
+      kind: "SOURCE",
+      label: transition.supplySourceId,
+      status: String(transition.toStage),
+      href: adminLink("sources", "source", transition.supplySourceId),
+    },
+  ],
+});
 
 const buildReviewDetail = (
   rows: ProjectionRows,
   id: string,
 ): ProjectionDetail | null => {
   const review = rows.approvals.find((item) => item.id === id);
-  if (review) {
-    const decision = recordValue(review.decision);
-    const executionHistory: ProjectionHistoryRow[] = [
-      {
-        id: `${review.id}:created`,
-        kind: "REVIEW CREATED",
-        at: isoValue(review.createdAt),
-        status: "QUEUED",
-        reason: null,
-        actor: null,
-        attempt: review.attemptCount,
-        href: adminLink("review", "review", review.id),
-      },
-      ...(review.claimedAt
-        ? [
-            {
-              id: `${review.id}:claimed`,
-              kind: "REVIEW CLAIMED",
-              at: isoValue(review.claimedAt),
-              status: "CLAIMED",
-              reason: null,
-              actor: review.reviewerId,
-              attempt: review.attemptCount,
-              href: adminLink("review", "review", review.id),
-            },
-          ]
-        : []),
-      ...(review.finishedAt
-        ? [
-            {
-              id: `${review.id}:finished`,
-              kind: "REVIEW FINISHED",
-              at: isoValue(review.finishedAt),
-              status: review.status,
-              reason: review.errorMessage,
-              actor: review.reviewerId,
-              attempt: review.attemptCount,
-              href: adminLink("review", "review", review.id),
-            },
-          ]
-        : []),
-    ];
-    return {
-      id,
-      kind: "review",
-      title: `${review.subjectType} review`,
-      subtitle: review.subjectKey,
-      status: review.status,
-      sections: [
-        {
-          title: "Header",
-          fields: [
-            field("Case type", review.subjectType),
-            field("Subject", review.subjectKey),
-            field("Status", review.status),
-            field("Reviewer", review.reviewerId),
-          ],
-        },
-        {
-          title: "Lineage",
-          fields: [
-            field(
-              "Supply Source",
-              review.supplySourceId,
-              review.supplySourceId
-                ? adminLink("sources", "source", review.supplySourceId)
-                : null,
-            ),
-            field("Package hash", decision.packageHash),
-            field("Baseline hash", decision.baselineHash),
-          ],
-        },
-        {
-          title: "Execution",
-          fields: [
-            field("Created", review.createdAt),
-            field("Claimed", review.claimedAt),
-            field("Finished", review.finishedAt),
-            field("Attempts", review.attemptCount),
-            field("Reviewer", review.reviewerId),
-            field("Error", review.errorMessage),
-          ],
-        },
-        {
-          title: "Evidence and result",
-          fields: [
-            field("Decision", decision.decision),
-            field(
-              "Evidence references",
-              stringList(
-                decision.evidenceRefs ?? decision.candidateReviewEvidenceRefs,
-              ).join(", "),
-            ),
-            field("Reason", decision.reasonCode ?? review.errorMessage),
-          ],
-        },
-      ],
-      history: [
-        ...executionHistory,
-        ...rows.transitions
-          .filter(
-            (transition) => transition.supplySourceId === review.supplySourceId,
-          )
-          .map((transition) => ({
-            id: transition.id,
-            kind: `LIFECYCLE ${transition.command}`,
-            at: isoValue(transition.occurredAt),
-            status: String(transition.toStage),
-            reason: transition.reasonCodes.join(", ") || null,
-            actor: transition.actorId,
-            href: adminLink("sources", "source", transition.supplySourceId),
-          })),
-      ],
-      related: [
-        ...(review.supplySourceId
-          ? [
-              {
-                id: review.supplySourceId,
-                kind: "SOURCE",
-                label: review.supplySourceId,
-                status: null,
-                href: adminLink("sources", "source", review.supplySourceId),
-              },
-            ]
-          : []),
-        ...(stringValue(decision.packageHash)
-          ? [
-              {
-                id: String(decision.packageHash),
-                kind: "PACKAGE",
-                label: String(decision.packageHash),
-                status: null,
-                href: adminLink(
-                  "review",
-                  "package",
-                  String(decision.packageHash),
-                ),
-              },
-            ]
-          : []),
-      ],
-    };
-  }
+  if (review) return buildReviewRecordDetail(review, rows, id);
   const job = rows.gatewayJobs.find((item) => item.id === id);
   if (job) return buildJobDetail(rows, id, new Date());
   const transition = rows.transitions.find((item) => item.id === id);
-  if (!transition) return null;
-  return {
-    id,
-    kind: "review",
-    title: `Review case: ${String(transition.outcome)}`,
-    subtitle: `Supply Source ${transition.supplySourceId}`,
-    status: String(transition.toStage),
-    sections: [
-      {
-        title: "Header",
-        fields: [
-          field("Case type", transition.outcome),
-          field(
-            "Supply Source",
-            transition.supplySourceId,
-            adminLink("sources", "source", transition.supplySourceId),
-          ),
-          field("Status", transition.toStage),
-        ],
-      },
-      {
-        title: "Priority and Supply Target impact",
-        fields: [
-          field("Command", transition.command),
-          field("Generation", transition.generation),
-          field("Sequence", transition.sequence),
-        ],
-      },
-      {
-        title: "Evidence and result",
-        fields: [
-          field("Reason codes", transition.reasonCodes.join(", ")),
-          field("Evidence references", transition.evidenceRefs.join(", ")),
-          field("Request hash", transition.requestHash),
-          field("Result hash", transition.resultHash),
-          field("Result", transition.resultJson),
-        ],
-      },
-    ],
-    history: [],
-    related: [
-      {
-        id: transition.supplySourceId,
-        kind: "SOURCE",
-        label: transition.supplySourceId,
-        status: String(transition.toStage),
-        href: adminLink("sources", "source", transition.supplySourceId),
-      },
-    ],
-  };
+  return transition ? buildReviewTransitionDetail(transition, id) : null;
 };
+
+const candidateDetailSectionsFor = (
+  candidate: ProjectionRows["candidates"][number],
+  target: ProjectionRows["targets"][number] | undefined,
+  sourceRootId: string | null,
+  supplyRootId: string | null,
+): ProjectionDetail["sections"] => [
+  {
+    title: "Header",
+    fields: [
+      field("Title", candidate.title),
+      field("Listing kind", candidate.listingKind),
+      field("Status", candidate.status),
+      field("Sport", candidate.sportName),
+      field("City", candidate.city),
+    ],
+  },
+  {
+    title: "Priority and target impact",
+    fields: [
+      field(
+        "Target ID",
+        target?.targetId,
+        target ? adminLink("candidates", "target", target.id) : null,
+      ),
+      field("Target status", target?.status),
+      field("Rejection reason", target?.rejectionReason),
+      field("Freshness expiry", target?.freshnessExpiresAt),
+    ],
+  },
+  {
+    title: "Lineage",
+    fields: [
+      field(
+        "Source",
+        candidate.sourceId,
+        sourceRootId ? adminLink("sources", "source", sourceRootId) : null,
+      ),
+      field(
+        "Supply Source",
+        supplyRootId,
+        supplyRootId ? adminLink("sources", "source", supplyRootId) : null,
+      ),
+      field(
+        "Run",
+        candidate.runId,
+        adminLink("sources", "scrapeRun", candidate.runId),
+      ),
+      field(
+        "Mapping",
+        candidate.mappingId,
+        candidate.mappingId
+          ? adminLink("sources", "mapping", candidate.mappingId)
+          : null,
+      ),
+    ],
+  },
+  {
+    title: "Evidence and result",
+    fields: [
+      field("Official action URL", candidate.officialActionUrl),
+      field("Source URL", candidate.sourceUrl),
+      field("Warnings", candidate.warnings.join(", ")),
+    ],
+  },
+];
+
+const candidateDetailHistoryFor = (
+  rows: ProjectionRows,
+  runId: string,
+): ProjectionHistoryRow[] =>
+  rows.scrapeRuns
+    .filter((run) => run.id === runId)
+    .map((run) => ({
+      id: run.id,
+      kind: "REFRESH",
+      at: isoValue(run.finishedAt ?? run.createdAt),
+      status: run.status,
+      reason: run.errorMessage,
+      actor: run.requestedByUserId,
+      href: adminLink("sources", "scrapeRun", run.id),
+    }));
+
+const candidateDetailRelatedFor = (
+  target: ProjectionRows["targets"][number] | undefined,
+  supplyRootId: string | null,
+): ProjectionRelatedRow[] => [
+  ...(supplyRootId
+    ? [
+        {
+          id: supplyRootId,
+          kind: "SOURCE",
+          label: supplyRootId,
+          status: null,
+          href: adminLink("sources", "source", supplyRootId),
+        },
+      ]
+    : []),
+  ...(target
+    ? [
+        {
+          id: target.id,
+          kind: "TARGET",
+          label: target.targetId,
+          status: target.status,
+          href: adminLink("candidates", "target", target.id),
+        },
+      ]
+    : []),
+];
 
 const buildCandidateDetail = (
   rows: ProjectionRows,
@@ -5273,127 +9602,150 @@ const buildCandidateDetail = (
     title: candidate.title,
     subtitle: `${candidate.listingKind} candidate`,
     status: candidate.status,
-    sections: [
-      {
-        title: "Header",
-        fields: [
-          field("Title", candidate.title),
-          field("Listing kind", candidate.listingKind),
-          field("Status", candidate.status),
-          field("Sport", candidate.sportName),
-          field("City", candidate.city),
-        ],
-      },
-      {
-        title: "Priority and target impact",
-        fields: [
-          field(
-            "Target ID",
-            target?.targetId,
-            target ? adminLink("candidates", "target", target.id) : null,
-          ),
-          field("Target status", target?.status),
-          field("Rejection reason", target?.rejectionReason),
-          field("Freshness expiry", target?.freshnessExpiresAt),
-        ],
-      },
-      {
-        title: "Lineage",
-        fields: [
-          field(
-            "Source",
-            candidate.sourceId,
-            sourceRootId ? adminLink("sources", "source", sourceRootId) : null,
-          ),
-          field(
-            "Supply Source",
-            supplyRootId,
-            supplyRootId ? adminLink("sources", "source", supplyRootId) : null,
-          ),
-          field(
-            "Run",
-            candidate.runId,
-            adminLink("sources", "scrapeRun", candidate.runId),
-          ),
-          field(
-            "Mapping",
-            candidate.mappingId,
-            candidate.mappingId
-              ? adminLink("sources", "mapping", candidate.mappingId)
-              : null,
-          ),
-        ],
-      },
-      {
-        title: "Evidence and result",
-        fields: [
-          field("Official action URL", candidate.officialActionUrl),
-          field("Source URL", candidate.sourceUrl),
-          field("Warnings", candidate.warnings.join(", ")),
-        ],
-      },
-    ],
-    history: rows.scrapeRuns
-      .filter((run) => run.id === candidate.runId)
-      .map((run) => ({
-        id: run.id,
-        kind: "REFRESH",
-        at: isoValue(run.finishedAt ?? run.createdAt),
-        status: run.status,
-        reason: run.errorMessage,
-        actor: run.requestedByUserId,
-        href: adminLink("sources", "scrapeRun", run.id),
-      })),
-    related: [
-      ...(supplyRootId
-        ? [
-            {
-              id: supplyRootId,
-              kind: "SOURCE",
-              label: supplyRootId,
-              status: null,
-              href: adminLink("sources", "source", supplyRootId),
-            },
-          ]
-        : []),
-      ...(target
-        ? [
-            {
-              id: target.id,
-              kind: "TARGET",
-              label: target.targetId,
-              status: target.status,
-              href: adminLink("candidates", "target", target.id),
-            },
-          ]
-        : []),
-    ],
+    sections: candidateDetailSectionsFor(
+      candidate,
+      target,
+      sourceRootId,
+      supplyRootId,
+    ),
+    history: candidateDetailHistoryFor(rows, candidate.runId),
+    related: candidateDetailRelatedFor(target, supplyRootId),
   };
 };
-const buildAdditionalDetail = (
+const reconciliationRootIdForRelatedSource = (
+  roots: readonly ProjectionRows["roots"][number][],
+  sourceId: string,
+): string | null =>
+  roots.find((root) => root.id === sourceId || root.liveSourceId === sourceId)
+    ?.id ?? null;
+
+const reconciliationRootRelatedRowsFor = (
+  root: ReconciliationRootEvidence,
+  roots: readonly ProjectionRows["roots"][number][],
+): ProjectionRelatedRow[] => {
+  const relatedSource = (sourceId: string): ProjectionRelatedRow => {
+    const rootId = reconciliationRootIdForRelatedSource(roots, sourceId);
+    return {
+      id: sourceId,
+      kind: "SOURCE",
+      label: sourceId,
+      status: root.action,
+      href: rootId ? adminLink("sources", "source", rootId) : null,
+    };
+  };
+  const rows: ProjectionRelatedRow[] = [
+    ...(root.existingRootId
+      ? [relatedSource(root.existingRootId)]
+      : []),
+    ...root.sourceIds.map(relatedSource),
+  ];
+  return uniqueEvidence(rows, (row) => `${row.kind}:${row.id}`);
+};
+const reconciliationTargetProjectionRelatedRowsFor = (
+  target: ReconciliationRootEvidence["targetProjections"][number],
+  rows: ProjectionRows,
+): ProjectionRelatedRow[] => {
+  const targetRow = rows.targets.find((item) => item.id === target.sourceTargetId);
+  const candidateRow =
+    target.candidateId === null
+      ? null
+      : rows.candidates.find((item) => item.id === target.candidateId);
+  const sourceTargetHref = targetRow
+    ? adminLink("candidates", "target", targetRow.id)
+    : null;
+  const candidateHref = candidateRow
+    ? adminLink("candidates", "candidate", candidateRow.id)
+    : null;
+  return [
+    {
+      id: target.sourceTargetId,
+      kind: "TARGET",
+      label: target.sourceTargetId,
+      status: target.status,
+      href: sourceTargetHref,
+    },
+    ...(target.candidateId
+      ? [
+          {
+            id: target.candidateId,
+            kind: "CANDIDATE",
+            label: target.candidateId,
+            status: target.status,
+            href: candidateHref,
+          },
+        ]
+      : []),
+    {
+      id: target.targetId,
+      kind: "CANONICAL_TARGET",
+      label: `${target.targetType}:${target.targetId}`,
+      status: target.status,
+      href: sourceTargetHref,
+    },
+  ];
+};
+const reconciliationClaimHrefFor = (
+  claim: ReconciliationClaimEvidence,
+): string | null => {
+  switch (claim.kind) {
+    case "GATEWAY_CLAIM":
+      return adminLink("jobs", "claim", claim.id);
+    case "MAPPING_JOB":
+    case "COVERAGE_JOB":
+      return adminLink("jobs", "job", claim.id);
+    case "INTAKE_RUN":
+      return adminLink("intake", "intakeRun", claim.id);
+    case "APPROVAL_JOB":
+      return adminLink("review", "review", claim.id);
+    case "DISCOVERY_RUN":
+      return adminLink("coverage", "discoveryRun", claim.id);
+    case "MAPPING":
+    case "SOURCE":
+      return claim.supplySourceId
+        ? adminLink("sources", "source", claim.supplySourceId)
+        : null;
+    default:
+      return null;
+  }
+};
+
+type ProjectionDetailCreator = (
+  kind: AffiliateOperationsDetailType,
+  title: string,
+  subtitle: string,
+  status: string | null,
+  sections: ProjectionDetail["sections"],
+  history: readonly ProjectionHistoryRow[],
+  related?: readonly ProjectionRelatedRow[],
+) => ProjectionDetail;
+
+const createProjectionDetailFor = (
+  id: string,
+): ProjectionDetailCreator => (
+  kind,
+  title,
+  subtitle,
+  status,
+  sections,
+  history,
+  related = [],
+) => ({
+  id,
+  kind,
+  title,
+  subtitle,
+  status,
+  sections,
+  history,
+  related,
+});
+
+const buildScrapeRunAdditionalDetail = (
   rows: ProjectionRows,
   type: AffiliateOperationsDetailType,
   id: string,
 ): ProjectionDetail | null => {
-  const create = (
-    kind: AffiliateOperationsDetailType,
-    title: string,
-    subtitle: string,
-    status: string | null,
-    sections: ProjectionDetail["sections"],
-    history: readonly ProjectionHistoryRow[],
-    related: readonly ProjectionRelatedRow[] = [],
-  ): ProjectionDetail => ({
-    id,
-    kind,
-    title,
-    subtitle,
-    status,
-    sections,
-    history,
-    related,
-  });
-
+  const create = createProjectionDetailFor(id);
   if (type === "scrapeRun") {
     const run = rows.scrapeRuns.find((item) => item.id === id);
     if (!run) return null;
@@ -5494,7 +9846,36 @@ const buildAdditionalDetail = (
       ],
     );
   }
+  return null;
+};
+const buildAdditionalDetail = (
+  rows: ProjectionRows,
+  type: AffiliateOperationsDetailType,
+  id: string,
+  recoveryRows: ProjectionRows = rows,
+  now: Date = new Date(),
+): ProjectionDetail | null => {
+  const create = (
+    kind: AffiliateOperationsDetailType,
+    title: string,
+    subtitle: string,
+    status: string | null,
+    sections: ProjectionDetail["sections"],
+    history: readonly ProjectionHistoryRow[],
+    related: readonly ProjectionRelatedRow[] = [],
+  ): ProjectionDetail => ({
+    id,
+    kind,
+    title,
+    subtitle,
+    status,
+    sections,
+    history,
+    related,
+  });
 
+
+  const buildIntakeRunAdditionalDetail = (): ProjectionDetail | null => {
   if (type === "intakeRun") {
     const run = rows.intakeRuns.find((item) => item.id === id);
     if (!run) return null;
@@ -5578,7 +9959,11 @@ const buildAdditionalDetail = (
       ],
     );
   }
+    return null;
+  };
 
+
+  const buildPageAdditionalDetail = (): ProjectionDetail | null => {
   if (type === "page") {
     const page = rows.pages.find((item) => item.id === id);
     if (!page) return null;
@@ -5644,7 +10029,11 @@ const buildAdditionalDetail = (
       ],
     );
   }
+    return null;
+  };
 
+
+  const buildArtifactAdditionalDetail = (): ProjectionDetail | null => {
   if (type === "artifact") {
     const artifact = rows.artifacts.find((item) => item.id === id);
     if (!artifact) return null;
@@ -5717,7 +10106,11 @@ const buildAdditionalDetail = (
         : [],
     );
   }
+    return null;
+  };
 
+
+  const buildOrganizationAdditionalDetail = (): ProjectionDetail | null => {
   if (type === "organization") {
     const organization = rows.organizations.find((item) => item.id === id);
     if (!organization) {
@@ -5831,7 +10224,11 @@ const buildAdditionalDetail = (
       ],
     );
   }
+    return null;
+  };
 
+
+  const buildPackageAdditionalDetail = (): ProjectionDetail | null => {
   if (type === "package") {
     const matchingReviews = rows.approvals.filter(
       (approval) => recordValue(approval.decision).packageHash === id,
@@ -5900,7 +10297,11 @@ const buildAdditionalDetail = (
       })),
     );
   }
+    return null;
+  };
 
+
+  const buildEventAdditionalDetail = (): ProjectionDetail | null => {
   if (type === "event") {
     const event = rows.gatewayEvents.find((item) => item.id === id);
     if (!event) return null;
@@ -5971,7 +10372,11 @@ const buildAdditionalDetail = (
       ],
     );
   }
+    return null;
+  };
 
+
+  const buildCoverageCellAdditionalDetail = (): ProjectionDetail | null => {
   if (type === "coverageCell") {
     const cell = rows.coverageCells.find((item) => item.id === id);
     if (!cell) return null;
@@ -6029,7 +10434,11 @@ const buildAdditionalDetail = (
       [],
     );
   }
+    return null;
+  };
 
+
+  const buildDemandAdditionalDetail = (): ProjectionDetail | null => {
   if (type === "demand") {
     const demand = rows.demands.find((item) => item.id === id);
     if (!demand) return null;
@@ -6097,7 +10506,11 @@ const buildAdditionalDetail = (
       })),
     );
   }
+    return null;
+  };
 
+
+  const buildWaveAdditionalDetail = (): ProjectionDetail | null => {
   if (type === "wave") {
     const wave = rows.waves.find((item) => item.id === id);
     if (!wave) return null;
@@ -6184,7 +10597,11 @@ const buildAdditionalDetail = (
       ],
     );
   }
+    return null;
+  };
 
+
+  const buildCampaignAdditionalDetail = (): ProjectionDetail | null => {
   if (type === "campaign") {
     const campaign = rows.campaigns.find((item) => item.id === id);
     if (!campaign) return null;
@@ -6235,7 +10652,11 @@ const buildAdditionalDetail = (
       })),
     );
   }
+    return null;
+  };
 
+
+  const buildDiscoveryRunAdditionalDetail = (): ProjectionDetail | null => {
   if (type === "discoveryRun") {
     const run = rows.discoveryRuns.find((item) => item.id === id);
     if (!run) return null;
@@ -6295,6 +10716,10 @@ const buildAdditionalDetail = (
       })),
     );
   }
+    return null;
+  };
+
+  const buildDiscoveryQueryAdditionalDetail = (): ProjectionDetail | null => {
   if (type === "discoveryQuery") {
     const query = rows.discoveryQueries.find((item) => item.id === id);
     if (!query) return null;
@@ -6375,7 +10800,11 @@ const buildAdditionalDetail = (
       })),
     );
   }
+    return null;
+  };
 
+
+  const buildDiscoveryResultAdditionalDetail = (): ProjectionDetail | null => {
   if (type === "discoveryResult") {
     const result = rows.discoveryResults.find((item) => item.id === id);
     if (!result) return null;
@@ -6457,10 +10886,15 @@ const buildAdditionalDetail = (
       [],
     );
   }
+    return null;
+  };
 
+
+  const buildTargetAdditionalDetail = (): ProjectionDetail | null => {
   if (type === "target") {
     const target = rows.targets.find((item) => item.id === id);
     if (!target) return null;
+    const publicTarget = publicTargetProjection(target, rows);
     return create(
       type,
       target.targetId ?? target.targetType,
@@ -6481,6 +10915,14 @@ const buildAdditionalDetail = (
           title: "Publication and freshness",
           fields: [
             field("Status", target.status),
+            field("Public target exists", publicTarget.publicTargetExists),
+            field("Public target state", publicTarget.publicTargetState),
+            field("Public target name", publicTarget.publicTargetName),
+            field(
+              "Public target link",
+              publicTarget.publicTargetHref,
+              publicTarget.publicTargetHref,
+            ),
             field("Published at", target.publishedAt),
             field("Last successful refresh", target.lastSuccessfulRefreshAt),
             field("Freshness expires", target.freshnessExpiresAt),
@@ -6523,7 +10965,11 @@ const buildAdditionalDetail = (
         })),
     );
   }
+    return null;
+  };
 
+
+  const buildMappingAdditionalDetail = (): ProjectionDetail | null => {
   if (type === "mapping") {
     const mapping = rows.mappings.find((item) => item.id === id);
     if (!mapping) return null;
@@ -6568,7 +11014,11 @@ const buildAdditionalDetail = (
       })),
     );
   }
+    return null;
+  };
 
+
+  const buildClaimAdditionalDetail = (): ProjectionDetail | null => {
   if (type === "claim") {
     const claim = rows.gatewayClaims.find((item) => item.id === id);
     if (!claim) return null;
@@ -6621,13 +11071,17 @@ const buildAdditionalDetail = (
           reason: event.reasonCodes.join(", ") || null,
           actor: event.actorId,
           href: adminLink("jobs", "job", claim.jobId),
-          claimGeneration: event.sequence,
+          claimGeneration: claim.claimGeneration,
           inputHash: event.inputHash,
           outputHash: event.outputHash,
         })),
     );
   }
+    return null;
+  };
 
+
+  const buildWorkerAdditionalDetail = (): ProjectionDetail | null => {
   if (type === "worker") {
     const worker = rows.workerHealth.find((item) => item.id === id);
     if (!worker) return null;
@@ -6670,7 +11124,11 @@ const buildAdditionalDetail = (
       })),
     );
   }
+    return null;
+  };
 
+
+  const buildOperationAdditionalDetail = (): ProjectionDetail | null => {
   if (type === "operation") {
     const receipt = rows.receipts.find((item) => item.id === id);
     if (!receipt) return null;
@@ -6735,7 +11193,11 @@ const buildAdditionalDetail = (
         })),
     );
   }
+    return null;
+  };
 
+
+  const buildTransitionAdditionalDetail = (): ProjectionDetail | null => {
   if (type === "transition") {
     const transition = rows.transitions.find((item) => item.id === id);
     if (!transition) return null;
@@ -6795,12 +11257,466 @@ const buildAdditionalDetail = (
       ],
     );
   }
+    return null;
+  };
 
+
+  const reconciliationRunFor = () =>
+    rows.reconciliationRuns.find((item) => item.id === id)
+    ?? (rows.selectedReconciliationRun?.id === id
+      ? rows.selectedReconciliationRun
+      : undefined);
+
+  const buildReconciliationRunAdditionalDetail = (): ProjectionDetail | null => {
+  if (type === "reconciliationRun") {
+    const run = reconciliationRunFor();
+    if (!run) return null;
+    const reportEvidence = reconciliationReportEvidenceFor(run);
+    const detailEvidence = reconciliationReportEvidenceFor(run, true);
+    const reportHref = adminLink("cutover", "reconciliationRun", run.id);
+    const processHistory: ProjectionHistoryRow[] = detailEvidence.processes.map(
+      (process) => ({
+        id: `${run.id}:process:${process.kind}:${process.id}`,
+        kind: `PROCESS ${process.kind}`,
+        at: detailEvidence.evaluatedAt,
+        status: process.status,
+        reason: process.command,
+        actor: process.workerId ?? process.role,
+        href: reportHref,
+        evidenceRefs: [process.id],
+      }),
+    );
+    const findingHistory = (
+      findings: readonly ReconciliationFindingEvidence[],
+      kind: string,
+    ): ProjectionHistoryRow[] =>
+      findings.map((finding, index) => ({
+        id: `${run.id}:${kind}:${finding.code}:${index}`,
+        kind: `${kind} ${finding.code}`,
+        at: detailEvidence.evaluatedAt,
+        status: finding.severity,
+        reason: finding.detail,
+        actor: run.operatorId,
+        href: reportHref,
+        evidenceRefs: finding.recordIds,
+      }));
+    const recordHistory: ProjectionHistoryRow[] =
+      detailEvidence.recordEvidence.map((record) => ({
+        id: `${run.id}:record:${record.kind}:${record.id}`,
+        kind: record.kind,
+        at: record.at ?? detailEvidence.evaluatedAt,
+        status: record.status,
+        reason: record.detail,
+        actor: run.operatorId,
+        href: reportHref,
+        evidenceRefs: record.refs,
+      }));
+    const rootHistory: ProjectionHistoryRow[] = detailEvidence.roots.flatMap(
+      (root, index) => [
+        {
+          id: `${run.id}:root:${index}:${root.existingRootId ?? root.identityKey ?? "unknown"}`,
+          kind: "ROOT PLAN",
+          at: detailEvidence.evaluatedAt,
+          status: root.derivedStage,
+          reason: root.canonicalUrl ?? root.identityKey,
+          actor: run.operatorId,
+          href: reportHref,
+          evidenceRefs: boundedEvidenceList([
+            ...root.sourceIds,
+            ...root.recordIds,
+            ...root.evidenceRefs,
+          ]),
+        },
+        ...root.targetProjections.map((target) => ({
+          id: `${run.id}:target:${target.sourceTargetId}:${target.targetId}`,
+          kind: `TARGET ${target.targetType}`,
+          at: detailEvidence.evaluatedAt,
+          status: target.status,
+          reason: target.action,
+          actor: run.operatorId,
+          href: reportHref,
+          evidenceRefs: target.evidenceRefs,
+        })),
+      ],
+    );
+    const claimHistory: ProjectionHistoryRow[] =
+      detailEvidence.claimActions.map((claim) => ({
+        id: `${run.id}:claim:${claim.kind}:${claim.id}`,
+        kind: `CLAIM ${claim.kind}`,
+        at: detailEvidence.evaluatedAt,
+        status: claim.status,
+        reason: claim.action,
+        actor: run.operatorId,
+        href: reportHref,
+        evidenceRefs: claim.evidenceRefs,
+      }));
+    const preflightHistory: ProjectionHistoryRow[] = [
+      ...(detailEvidence.preflight?.reviewedSystemdUnits.map((unit) => ({
+        id: `${run.id}:systemd:${unit.processId}:${unit.unitId}`,
+        kind: "PREFLIGHT SYSTEMD",
+        at: detailEvidence.preflight?.evaluatedAt ?? detailEvidence.evaluatedAt,
+        status: null,
+        reason: unit.unitId,
+        actor: unit.processId,
+        href: reportHref,
+        evidenceRefs: [unit.processId, unit.unitId],
+      })) ?? []),
+      ...(detailEvidence.preflight?.legacyServiceUnits.map((unit) => ({
+        id: `${run.id}:service:${unit.id}`,
+        kind: "PREFLIGHT SERVICE",
+        at: detailEvidence.preflight?.evaluatedAt ?? detailEvidence.evaluatedAt,
+        status: unit.isActive,
+        reason: `${unit.isEnabled}/${unit.isActive}`,
+        actor: run.operatorId,
+        href: reportHref,
+        evidenceRefs: [unit.id],
+      })) ?? []),
+    ];
+    const history = [
+      {
+        id: run.id,
+        kind: `${run.mode} REPORT`,
+        at: isoValue(run.updatedAt ?? run.createdAt),
+        status: run.status,
+        reason: null,
+        actor: run.operatorId,
+        href: reportHref,
+        inputHash: run.inputHash,
+        outputHash: run.outputHash,
+      },
+      ...processHistory,
+      ...rootHistory,
+      ...claimHistory,
+      ...findingHistory(detailEvidence.blockingFindings, "BLOCKING"),
+      ...findingHistory(detailEvidence.warnings, "WARNING"),
+      ...findingHistory(detailEvidence.resolutions, "RESOLUTION"),
+      ...recordHistory,
+      ...preflightHistory,
+    ].sort(compareProjectionTimestampIdAttempt);
+    const relatedFor = (): ProjectionRelatedRow[] =>
+      uniqueEvidence(
+        [
+          ...(detailEvidence.sessionId && detailEvidence.sessionId !== run.id
+            ? [
+                {
+                  id: detailEvidence.sessionId,
+                  kind: "CUTOVER_SESSION",
+                  label: detailEvidence.sessionId,
+                  status: null,
+                  href: adminLink(
+                    "cutover",
+                    "reconciliationRun",
+                    detailEvidence.sessionId,
+                  ),
+                },
+              ]
+            : []),
+          ...detailEvidence.roots.flatMap((root) => [
+            ...reconciliationRootRelatedRowsFor(root, rows.roots),
+            ...root.targetProjections.flatMap((target) =>
+              reconciliationTargetProjectionRelatedRowsFor(target, rows),
+            ),
+          ]),
+          ...detailEvidence.claimActions.map((claim) => ({
+            id: claim.id,
+            kind: "CLAIM",
+            label: claim.id,
+            status: claim.action ?? claim.status,
+            href: reconciliationClaimHrefFor(claim),
+          })),
+          ...detailEvidence.recordEvidence.map((record) => ({
+            id: record.id,
+            kind: record.kind,
+            label: record.id,
+            status: record.status,
+            href: reportHref,
+          })),
+        ],
+        (record) => `${record.kind}:${record.id}`,
+      );
+    const related = relatedFor();
+    const reconciliationFindingFields = (): ProjectionField[] => [
+      field("Counts", reportEvidence.counts),
+      field("Records by kind", reportEvidence.recordsByKind),
+      field("Apply safe", reportEvidence.isApplySafe),
+      field(
+        "Blocking findings count",
+        reportEvidence.evidencePagination.blockingFindings.total,
+      ),
+      field("Blocking findings preview", reportEvidence.blockingFindings.length
+        ? reportEvidence.blockingFindings
+        : null),
+      field(
+        "Warnings count",
+        reportEvidence.evidencePagination.warnings.total,
+      ),
+      field("Warnings preview", reportEvidence.warnings.length
+        ? reportEvidence.warnings
+        : null),
+      field(
+        "Resolutions count",
+        reportEvidence.evidencePagination.resolutions.total,
+      ),
+      field("Resolutions preview", reportEvidence.resolutions.length
+        ? reportEvidence.resolutions
+        : null),
+    ];
+    const preflightSectionFor = (
+      preflight: typeof reportEvidence.preflight,
+    ): ProjectionDetail["sections"][number] => {
+      const preflightEvidence =
+        preflight ?? ({} as NonNullable<typeof preflight>);
+      return {
+        title: "Cutover session preflight",
+        fields: [
+          field("Preflight evaluated at", preflightEvidence.evaluatedAt),
+          field("Preflight ready", preflightEvidence.isReady),
+          field("Gateway version", preflightEvidence.gatewayVersion),
+          field(
+            "Reviewed manifest hash",
+            preflightEvidence.reviewedLegacyProcessManifestHash,
+          ),
+          field(
+            "Reviewed manifest count",
+            preflightEvidence.reviewedLegacyProcessManifestCount,
+          ),
+          field(
+            "Reviewed manifest artifact",
+            preflightEvidence.reviewedLegacyProcessManifestArtifactId,
+          ),
+          field(
+            "Process inventory artifact",
+            preflightEvidence.processInventoryArtifactId,
+          ),
+          field("Process inventory hash", preflightEvidence.processInventoryHash),
+          field("Process inventory count", preflightEvidence.processInventoryCount),
+          field(
+            "Reviewed systemd units",
+            preflightEvidence.reviewedSystemdUnits,
+          ),
+          field(
+            "Legacy service units",
+            preflightEvidence.legacyServiceUnits,
+          ),
+          field("Preflight counts", preflightEvidence.counts),
+          field("Preflight records by kind", preflightEvidence.recordsByKind),
+          field(
+            "Reviewed agent network",
+            preflightEvidence.reviewedAgentNetwork,
+          ),
+        ],
+      };
+    };
+
+    const firstDefinedFor = (left: unknown, right: unknown): unknown =>
+      left ?? right;
+    const previewFieldFor = (
+      label: string,
+      values: readonly unknown[],
+    ): ProjectionField => field(label, values.length > 0 ? values : null);
+
+    const sectionsFor = (): ProjectionDetail["sections"] => [
+        {
+          title: "Header",
+          fields: [
+            field("Mode", run.mode),
+            field("Status", run.status),
+            field("Operator", run.operatorId),
+            field("Rollout cohort", run.rolloutCohort),
+            field("Created", run.createdAt),
+            field("Updated", run.updatedAt),
+            field("Applied at", run.appliedAt),
+            field("Applied by", run.appliedBy),
+          ],
+        },
+        {
+          title: "Hashes and contracts",
+          fields: [
+            field("Input hash", firstDefinedFor(reportEvidence.inputHash, run.inputHash)),
+            field("Output hash", firstDefinedFor(reportEvidence.outputHash, run.outputHash)),
+            field("Report hash", firstDefinedFor(reportEvidence.reportHash, run.reportHash)),
+            field("Legacy snapshot hash", reportEvidence.legacySnapshotHash),
+            field("Session ID", reportEvidence.sessionId),
+            field("Session hash", reportEvidence.sessionHash),
+            field("Evidence hash", reportEvidence.evidenceHash),
+            field("Supply Contract version", reportEvidence.supplyContractVersion),
+            field("Supply Contract hash", reportEvidence.supplyContractHash),
+            field("Deployment Contract version", reportEvidence.deploymentContractVersion),
+            field("Deployment Contract hash", reportEvidence.deploymentContractHash),
+          ],
+        },
+        {
+          title: "Counts and findings",
+          fields: reconciliationFindingFields(),
+        },
+        {
+          title: "Stopped-fleet process evidence",
+          fields: [
+            field("Evaluated at", reportEvidence.evaluatedAt),
+            field(
+              "Process count",
+              reportEvidence.evidencePagination.processes.total,
+            ),
+            previewFieldFor("Processes preview", reportEvidence.processes),
+            field("Evidence complete", reportEvidence.evidenceComplete),
+            field("Decision mode", reportEvidence.decisionMode),
+            field("Decision reason", reportEvidence.decisionReasonCode),
+            field("Decision detail", reportEvidence.decisionDetail),
+            field("Decision resolution", reportEvidence.decisionResolution),
+          ],
+        },
+        preflightSectionFor(reportEvidence.preflight),
+        {
+          title: "Reconciliation evidence",
+          fields: [
+            field("Evidence pagination", reportEvidence.evidencePagination),
+            previewFieldFor("Root plans", reportEvidence.roots),
+            previewFieldFor("Claim actions", reportEvidence.claimActions),
+          ],
+        },
+    ];
+    return create(
+      type,
+      `${run.mode} reconciliation`,
+      `Reconciliation run ${run.id}`,
+      run.status,
+      sectionsFor(),
+      history,
+      related,
+    );
+  }
+    return null;
+  };
+const alertRecoveryBaseRelatedRowsFor = (
+  alert: OperationalAlertRecoveryAlert,
+  recoveryRows: OperationalAlertRecoveryRows,
+): ProjectionRelatedRow[] => {
+  const payload = recordValue(alert.payload);
+  const sourceEventKey = stringValue(payload.sourceEventKey);
+  const sourceAlert = recoveryRows.operationalAlerts.find(
+    (candidate) =>
+      candidate.id !== alert.id && candidate.eventKey === sourceEventKey,
+  );
+  const sourceRows = sourceAlert
+    ? [
+        {
+          id: sourceAlert.id,
+          kind: "SOURCE_ALERT" as const,
+          label: sourceAlert.eventKey,
+          status: sourceAlert.category,
+          href: adminLinkForOperationalAlert(sourceAlert, recoveryRows),
+        },
+      ]
+    : [];
+  const recoveryJobId = alertJobIdFor(alert, payload);
+  const recoveryJob = recoveryRows.gatewayJobs.find(
+    (candidate) => candidate.id === recoveryJobId,
+  );
+  const jobRows = recoveryJob
+    ? [
+        {
+          id: recoveryJob.id,
+          kind: "GATEWAY_JOB" as const,
+          label: recoveryJob.id,
+          status: String(recoveryJob.status),
+          href: adminLink("jobs", "job", recoveryJob.id),
+        },
+      ]
+    : [];
+  return [...sourceRows, ...jobRows];
+};
+
+const alertRecoveryEvidenceRelatedRowFor = (
+  evidenceRef: string,
+  recoveryRows: OperationalAlertRecoveryRows,
+): ProjectionRelatedRow | null => {
+  const delivery = recoveryRows.alertDeliveries.find(
+    (candidate) => candidate.id === evidenceRef,
+  );
+  if (delivery) {
+    const deliveryAlert = recoveryRows.operationalAlerts.find(
+      (candidate) => candidate.id === delivery.alertId,
+    );
+    return {
+      id: evidenceRef,
+      kind: "ALERT_DELIVERY",
+      label: `${String(delivery.channel)} delivery ${evidenceRef}`,
+      status: stringValue(delivery.status),
+      href: deliveryAlert
+        ? adminLinkForOperationalAlert(deliveryAlert, recoveryRows)
+        : adminLink("alerts", "alert", delivery.alertId),
+    };
+  }
+  const receipt = recoveryRows.receipts.find(
+    (candidate) => candidate.id === evidenceRef,
+  );
+  if (receipt) {
+    return {
+      id: evidenceRef,
+      kind: "GATEWAY_RECEIPT",
+      label: evidenceRef,
+      status: stringValue(receipt.status),
+      href: adminLink("jobs", "operation", evidenceRef),
+    };
+  }
+  const scrapeRun = recoveryRows.scrapeRuns.find(
+    (candidate) => candidate.id === evidenceRef,
+  );
+  if (scrapeRun) {
+    return {
+      id: evidenceRef,
+      kind: "SOURCE_REFRESH",
+      label: evidenceRef,
+      status: stringValue(scrapeRun.status),
+      href: adminLink("sources", "scrapeRun", evidenceRef),
+    };
+  }
+  const event = recoveryRows.gatewayEvents.find(
+    (candidate) => candidate.id === evidenceRef,
+  );
+  return event
+    ? {
+        id: evidenceRef,
+        kind: "GATEWAY_EVENT",
+        label: evidenceRef,
+        status: stringValue(event.eventType),
+        href: adminLink("jobs", "event", evidenceRef),
+      }
+    : null;
+};
+
+const alertRecoveryRelatedRowsFor = (
+  alert: OperationalAlertRecoveryAlert,
+  recovery: OperationalAlertRecovery,
+  recoveryRows: OperationalAlertRecoveryRows,
+): ProjectionRelatedRow[] =>
+  uniqueEvidence(
+    [
+      ...alertRecoveryBaseRelatedRowsFor(alert, recoveryRows),
+      ...recovery.evidenceRefs
+        .map((evidenceRef) =>
+          alertRecoveryEvidenceRelatedRowFor(
+            evidenceRef,
+            recoveryRows,
+          ),
+        )
+        .filter((row): row is ProjectionRelatedRow => row !== null),
+    ],
+    (record) => `${record.kind}:${record.id}`,
+  );
+
+  const buildAlertAdditionalDetail = (): ProjectionDetail | null => {
   if (type === "alert") {
     const alert = rows.operationalAlerts.find((item) => item.id === id);
     if (!alert) return null;
-    const deliveries = rows.alertDeliveries.filter(
-      (delivery) => delivery.alertId === id,
+    const deliveries = dedupeAlertDeliveries(
+      rows.alertDeliveryHistory.filter((delivery) => delivery.alertId === id),
+    );
+    const recovery = operationalAlertRecoveryFor(alert, recoveryRows, now);
+    const recoveryRelated = alertRecoveryRelatedRowsFor(
+      alert,
+      recovery,
+      recoveryRows,
     );
     return create(
       type,
@@ -6814,6 +11730,7 @@ const buildAdditionalDetail = (
             field("Category", alert.category),
             field("Event key", alert.eventKey),
             field("Severity", alert.severity),
+            field("State", recovery.recovered ? "Recovered" : "Active"),
             field("Created", alert.createdAt),
             field("Subject type", alert.subjectType),
             field("Subject ID", alert.subjectId),
@@ -6853,6 +11770,14 @@ const buildAdditionalDetail = (
           ],
         },
         {
+          title: "Recovery",
+          fields: [
+            field("Recovered", recovery.recovered),
+            field("Recovery detail", recovery.detail),
+            field("Recovery evidence", recovery.evidenceRefs.join(", ")),
+          ],
+        },
+        {
           title: "Delivery",
           fields:
             deliveries.length === 0
@@ -6887,10 +11812,39 @@ const buildAdditionalDetail = (
         actor: delivery.channel,
         href: adminLink("overview", "alert", id),
       })),
+      recoveryRelated,
     );
   }
+    return null;
+  };
 
-  return null;
+  const additionalDetailBuilders: Partial<
+    Record<AffiliateOperationsDetailType, () => ProjectionDetail | null>
+  > = {
+    scrapeRun: () => buildScrapeRunAdditionalDetail(rows, type, id),
+    intakeRun: buildIntakeRunAdditionalDetail,
+    page: buildPageAdditionalDetail,
+    artifact: buildArtifactAdditionalDetail,
+    organization: buildOrganizationAdditionalDetail,
+    package: buildPackageAdditionalDetail,
+    event: buildEventAdditionalDetail,
+    coverageCell: buildCoverageCellAdditionalDetail,
+    demand: buildDemandAdditionalDetail,
+    wave: buildWaveAdditionalDetail,
+    campaign: buildCampaignAdditionalDetail,
+    discoveryRun: buildDiscoveryRunAdditionalDetail,
+    discoveryQuery: buildDiscoveryQueryAdditionalDetail,
+    discoveryResult: buildDiscoveryResultAdditionalDetail,
+    target: buildTargetAdditionalDetail,
+    mapping: buildMappingAdditionalDetail,
+    claim: buildClaimAdditionalDetail,
+    worker: buildWorkerAdditionalDetail,
+    operation: buildOperationAdditionalDetail,
+    transition: buildTransitionAdditionalDetail,
+    reconciliationRun: buildReconciliationRunAdditionalDetail,
+    alert: buildAlertAdditionalDetail,
+  };
+  return additionalDetailBuilders[type]?.() ?? null;
 };
 
 const normalizeProjectionDetail = (
@@ -6943,14 +11897,19 @@ const normalizeProjectionDetail = (
     ],
   };
 };
+const projectionHistoryPageSizeFor = (
+  input: AffiliateOperationsProjectionInput,
+): number =>
+  Math.min(
+    MAX_PAGE_SIZE,
+    Math.max(1, Math.trunc(input.historyPageSize || DEFAULT_PAGE_SIZE)),
+  );
+
 const paginateProjectionDetail = (
   detail: ProjectionDetail,
   input: AffiliateOperationsProjectionInput,
 ): ProjectionDetail => {
-  const historyPageSize = Math.min(
-    MAX_PAGE_SIZE,
-    Math.max(1, Math.trunc(input.historyPageSize || DEFAULT_PAGE_SIZE)),
-  );
+  const historyPageSize = projectionHistoryPageSizeFor(input);
   const historyTotal = detail.history.length;
   const historyTotalPages = Math.max(
     1,
@@ -6971,10 +11930,47 @@ const paginateProjectionDetail = (
   };
 };
 
+const paginateProjectionServerHistoryDetail = (
+  detail: ProjectionDetail,
+  input: AffiliateOperationsProjectionInput,
+  serverHistory: Readonly<{ page: number; total: number }>,
+): ProjectionDetail => {
+  const historyPageSize = projectionHistoryPageSizeFor(input);
+  const historyTotal = Math.max(0, serverHistory.total);
+  const historyTotalPages = Math.max(
+    1,
+    Math.ceil(historyTotal / historyPageSize),
+  );
+  const historyPage = Math.min(
+    historyTotalPages,
+    Math.max(1, Math.trunc(serverHistory.page)),
+  );
+  return {
+    ...detail,
+    historyPage,
+    historyPageSize,
+    historyTotal,
+    historyTotalPages,
+  };
+};
+
+const paginateSelectedProjectionDetail = (
+  detail: ProjectionDetail,
+  input: AffiliateOperationsProjectionInput,
+  rows: ProjectionRows,
+): ProjectionDetail =>
+  input.selectedType === "alert"
+    ? paginateProjectionServerHistoryDetail(detail, input, {
+        page: rows.alertDeliveryPage,
+        total: rows.alertDeliveryTotal,
+      })
+    : paginateProjectionDetail(detail, input);
+
 const buildSelectedDetail = (
   rows: ProjectionRows,
   input: AffiliateOperationsProjectionInput,
   now: Date,
+  recoveryRows: ProjectionRows = rows,
 ): ProjectionDetail | null => {
   if (!input.selectedId || !input.selectedType) return null;
   const detail =
@@ -6992,9 +11988,15 @@ const buildSelectedDetail = (
                   rows,
                   input.selectedType,
                   input.selectedId,
+                  recoveryRows,
+                  now,
                 );
   return detail
-    ? paginateProjectionDetail(normalizeProjectionDetail(detail), input)
+    ? paginateSelectedProjectionDetail(
+        normalizeProjectionDetail(detail),
+        input,
+        rows,
+      )
     : null;
 };
 
@@ -7072,13 +12074,16 @@ const scopeOverviewRows = (
       )
       .map((intake) => intake.id),
   );
-  const linkedJob = (job: ProjectionRows["gatewayJobs"][number]): boolean =>
-    !hasDimensionFilter ||
+  const jobHasScopedLineage = (
+    job: ProjectionRows["gatewayJobs"][number],
+  ): boolean =>
     rootIds.has(job.supplySourceId ?? "") ||
     rootIds.has(job.subjectId ?? "") ||
     demandIds.has(job.subjectId ?? "") ||
     waveIds.has(job.subjectId ?? "") ||
     coverageCellIds.has(job.subjectId ?? "");
+  const linkedJob = (job: ProjectionRows["gatewayJobs"][number]): boolean =>
+    !hasDimensionFilter || jobHasScopedLineage(job);
   const gatewayJobs = rows.gatewayJobs.filter(
     (job) =>
       linkedJob(job) &&
@@ -7100,23 +12105,36 @@ const scopeOverviewRows = (
       matchesDateRange(receipt.updatedAt ?? receipt.createdAt, dateRangeCutoff),
   );
   const receiptIds = new Set(receipts.map((receipt) => receipt.id));
+  const gatewayEventHasGatewayLineage = (
+    event: ProjectionRows["gatewayEvents"][number],
+    payload: Record<string, unknown>,
+  ): boolean =>
+    gatewayJobIds.has(event.jobId ?? "") ||
+    claimIds.has(event.claimId ?? "") ||
+    receiptIds.has(event.receiptId ?? "") ||
+    rootIds.has(
+      rootIdForSource(
+        rows,
+        stringValue(payload.supplySourceId ?? payload.sourceId),
+      ) ?? "",
+    );
+  const gatewayEventHasTargetLineage = (
+    payload: Record<string, unknown>,
+  ): boolean =>
+    rootIds.has(stringValue(payload.subjectId) ?? "") ||
+    demandIds.has(stringValue(payload.demandId) ?? "") ||
+    waveIds.has(stringValue(payload.waveId) ?? "") ||
+    coverageCellIds.has(stringValue(payload.coverageCellId) ?? "");
+  const gatewayEventIsLinked = (
+    event: ProjectionRows["gatewayEvents"][number],
+    payload: Record<string, unknown>,
+  ): boolean =>
+    !hasDimensionFilter ||
+    gatewayEventHasGatewayLineage(event, payload) ||
+    gatewayEventHasTargetLineage(payload);
   const gatewayEvents = rows.gatewayEvents.filter((event) => {
     const payload = recordValue(event.payload);
-    const linked =
-      !hasDimensionFilter ||
-      gatewayJobIds.has(event.jobId ?? "") ||
-      claimIds.has(event.claimId ?? "") ||
-      receiptIds.has(event.receiptId ?? "") ||
-      rootIds.has(
-        rootIdForSource(
-          rows,
-          stringValue(payload.supplySourceId ?? payload.sourceId),
-        ) ?? "",
-      ) ||
-      rootIds.has(stringValue(payload.subjectId) ?? "") ||
-      demandIds.has(stringValue(payload.demandId) ?? "") ||
-      waveIds.has(stringValue(payload.waveId) ?? "") ||
-      coverageCellIds.has(stringValue(payload.coverageCellId) ?? "");
+    const linked = gatewayEventIsLinked(event, payload);
     return (
       linked &&
       containsFilter(event.eventType, filters.status) &&
@@ -7140,6 +12158,7 @@ const scopeOverviewRows = (
         dateRangeCutoff,
       ),
   );
+  const scrapeRunIds = new Set(scrapeRuns.map((run) => run.id));
   const sourceBelongsToRoot = (
     source: ProjectionRows["sources"][number],
   ): boolean =>
@@ -7163,6 +12182,7 @@ const scopeOverviewRows = (
   const intakeRuns = rows.intakeRuns.filter((run) =>
     intakeIds.has(run.intakeId),
   );
+  const intakeRunIds = new Set(intakeRuns.map((run) => run.id));
   const artifacts = rows.artifacts.filter((artifact) =>
     intakeIds.has(artifact.intakeId),
   );
@@ -7198,16 +12218,20 @@ const scopeOverviewRows = (
         dateRangeCutoff,
       ),
   );
+  const discoveryQueryMatchesDimensions = (
+    query: ProjectionRows["discoveryQueries"][number],
+  ): boolean =>
+    containsFilter(
+      query.targetCity ?? query.cityGeoid ?? query.targetState,
+      filters.market,
+    ) &&
+    containsFilter(query.targetCity ?? query.cityGeoid, filters.city) &&
+    (containsFilter(query.sportId, filters.sport) ||
+      containsFilter(query.sportName, filters.sport)) &&
+    containsFilter(query.profileKey, filters.profile);
   const discoveryQueries = rows.discoveryQueries.filter(
     (query) =>
-      containsFilter(
-        query.targetCity ?? query.cityGeoid ?? query.targetState,
-        filters.market,
-      ) &&
-      containsFilter(query.targetCity ?? query.cityGeoid, filters.city) &&
-      (containsFilter(query.sportId, filters.sport) ||
-        containsFilter(query.sportName, filters.sport)) &&
-      containsFilter(query.profileKey, filters.profile) &&
+      discoveryQueryMatchesDimensions(query) &&
       containsFilter(query.status, filters.status) &&
       matchesDateRange(query.updatedAt ?? query.createdAt, dateRangeCutoff),
   );
@@ -7247,38 +12271,152 @@ const scopeOverviewRows = (
         dateRangeCutoff,
       ),
   );
-  const operationalAlerts = rows.operationalAlerts.filter((alert) => {
-    const payload = recordValue(alert.payload);
-    const alertRootId = rootIdForAlert(rows, alert);
-    const payloadCoverageCellId = stringValue(payload.coverageCellId);
-    const payloadDemandId = stringValue(payload.demandId);
-    const payloadWaveId = stringValue(payload.waveId);
-    const hasLineage = Boolean(
+  const alertHasDirectLineage = (
+    alert: ProjectionRows["operationalAlerts"][number],
+    alertRootId: string | null,
+  ): boolean =>
+    Boolean(
       alert.supplySourceId ||
         alert.coverageCellId ||
         alert.demandId ||
         alert.waveId ||
-        alertRootId ||
-        payloadCoverageCellId ||
-        payloadDemandId ||
-        payloadWaveId ||
-        payload.supplySourceId ||
+        alertRootId,
+    );
+  const alertHasPayloadTargetLineage = (
+    payloadCoverageCellId: string | null,
+    payloadDemandId: string | null,
+    payloadWaveId: string | null,
+  ): boolean =>
+    Boolean(payloadCoverageCellId || payloadDemandId || payloadWaveId);
+  const alertHasPayloadRecordLineage = (
+    payload: Record<string, unknown>,
+  ): boolean =>
+    Boolean(
+      payload.supplySourceId ||
         payload.sourceId ||
         payload.scrapeRunId ||
         payload.runId ||
         payload.jobId ||
         payload.gatewayJobId,
     );
-    const linked =
-      (!hasDimensionFilter && !hasLineage) ||
-      (alertRootId !== null && rootIds.has(alertRootId)) ||
-      demandIds.has(alert.demandId ?? "") ||
-      waveIds.has(alert.waveId ?? "") ||
-      coverageCellIds.has(alert.coverageCellId ?? "") ||
-      (payloadCoverageCellId !== null &&
-        coverageCellIds.has(payloadCoverageCellId)) ||
-      (payloadDemandId !== null && demandIds.has(payloadDemandId)) ||
-      (payloadWaveId !== null && waveIds.has(payloadWaveId));
+  const alertHasPayloadLineage = (
+    payload: Record<string, unknown>,
+    payloadCoverageCellId: string | null,
+    payloadDemandId: string | null,
+    payloadWaveId: string | null,
+  ): boolean =>
+    alertHasPayloadTargetLineage(
+      payloadCoverageCellId,
+      payloadDemandId,
+      payloadWaveId,
+    ) || alertHasPayloadRecordLineage(payload);
+  const alertMatchesDirectDomain = (
+    alert: ProjectionRows["operationalAlerts"][number],
+  ): boolean =>
+    demandIds.has(alert.demandId ?? "") ||
+    waveIds.has(alert.waveId ?? "") ||
+    coverageCellIds.has(alert.coverageCellId ?? "");
+  const alertMatchesPayloadDomain = (
+    payloadCoverageCellId: string | null,
+    payloadDemandId: string | null,
+    payloadWaveId: string | null,
+  ): boolean =>
+    (payloadCoverageCellId !== null &&
+      coverageCellIds.has(payloadCoverageCellId)) ||
+    (payloadDemandId !== null && demandIds.has(payloadDemandId)) ||
+    (payloadWaveId !== null && waveIds.has(payloadWaveId));
+  const alertMatchesTypedDomainIds = (
+    gatewayJobId: string | null,
+    discoveryRunId: string | null,
+    intakeRunId: string | null,
+    scrapeRunId: string | null,
+    sourceId: string | null,
+    directSupplySourceId: string | null,
+  ): boolean => {
+    const pairs: ReadonlyArray<
+      readonly [string | null, ReadonlySet<string>]
+    > = [
+      [gatewayJobId, gatewayJobIds],
+      [discoveryRunId, discoveryRunIds],
+      [intakeRunId, intakeRunIds],
+      [scrapeRunId, scrapeRunIds],
+      [sourceId, sourceIds],
+      [directSupplySourceId, rootIds],
+    ];
+    return pairs.some(([id, ids]) => id !== null && ids.has(id));
+  };
+  const alertMatchesTypedDomain = (
+    alert: ProjectionRows["operationalAlerts"][number],
+    payload: Record<string, unknown>,
+  ): boolean => {
+    const subjectType = upper(alert.subjectType);
+    const subjectId = stringValue(alert.subjectId);
+    const gatewayJobId = alertGatewayJobIdFor(alert, payload);
+    const discoveryRunId =
+      stringValue(payload.discoveryRunId) ??
+      (subjectType === "DISCOVERY_RUN" ? subjectId : null);
+    const intakeRunId =
+      stringValue(payload.intakeRunId) ??
+      (subjectType === "INTAKE_RUN" ? subjectId : null);
+    const scrapeRunId = alertScrapeRunIdFor(alert, payload);
+    const sourceId = alertSourceIdFor(alert, payload);
+    const directSupplySourceId = alertDirectSupplySourceIdFor(alert, payload);
+    return (
+      alertMatchesTypedDomainIds(
+        gatewayJobId,
+        discoveryRunId,
+        intakeRunId,
+        scrapeRunId,
+        sourceId,
+        directSupplySourceId,
+      ) ||
+      (subjectType === "AGENT_JOB" &&
+        subjectId !== null &&
+        coverageCellIds.has(subjectId))
+    );
+  };
+  const alertIsLinked = (
+    alert: ProjectionRows["operationalAlerts"][number],
+    alertRootId: string | null,
+    hasLineage: boolean,
+    payload: Record<string, unknown>,
+    payloadCoverageCellId: string | null,
+    payloadDemandId: string | null,
+    payloadWaveId: string | null,
+  ): boolean =>
+    (!hasDimensionFilter &&
+      (!hasLineage || projectionAlertIsGlobalInfrastructure(alert))) ||
+    (alertRootId !== null && rootIds.has(alertRootId)) ||
+    alertMatchesDirectDomain(alert) ||
+    alertMatchesPayloadDomain(
+      payloadCoverageCellId,
+      payloadDemandId,
+      payloadWaveId,
+    ) ||
+    alertMatchesTypedDomain(alert, payload);
+  const operationalAlerts = rows.operationalAlerts.filter((alert) => {
+    const payload = recordValue(alert.payload);
+    const alertRootId = rootIdForAlert(rows, alert);
+    const payloadCoverageCellId = stringValue(payload.coverageCellId);
+    const payloadDemandId = stringValue(payload.demandId);
+    const payloadWaveId = stringValue(payload.waveId);
+    const hasLineage =
+      alertHasDirectLineage(alert, alertRootId) ||
+      alertHasPayloadLineage(
+        payload,
+        payloadCoverageCellId,
+        payloadDemandId,
+        payloadWaveId,
+      );
+    const linked = alertIsLinked(
+      alert,
+      alertRootId,
+      hasLineage,
+      payload,
+      payloadCoverageCellId,
+      payloadDemandId,
+      payloadWaveId,
+    );
     return (
       linked &&
       containsFilter(alert.severity, filters.status) &&
@@ -7327,9 +12465,688 @@ const scopeOverviewRows = (
     workerHealth,
   };
 };
+const projectionAlertBatchForScope = (
+  alerts: readonly OperationalAlertRecoveryAlert[],
+): ProjectionRows["operationalAlerts"] =>
+  alerts as unknown as ProjectionRows["operationalAlerts"];
+
+const operationalAlertRecoveryRowsFor = (
+  rows: ProjectionRows,
+  operationalAlerts: readonly OperationalAlertRecoveryAlert[],
+  alertDeliveries: readonly Readonly<{
+    id?: string | null;
+    alertId: string;
+    channel: unknown;
+    status: unknown;
+  }>[],
+  gatewayJobs: readonly OperationalAlertRecoveryRows["gatewayJobs"][number][] =
+    rows.gatewayJobs,
+): OperationalAlertRecoveryRows => ({
+  roots: rows.roots,
+  scrapeRuns: rows.scrapeRuns,
+  gatewayJobs,
+  receipts: rows.receipts,
+  gatewayEvents: rows.gatewayEvents,
+  discoveryRuns: rows.discoveryRuns,
+  campaigns: rows.campaigns,
+  intakes: rows.intakes,
+  intakeRuns: rows.intakeRuns,
+  operationalAlerts,
+  alertDeliveries,
+  workerHealth: rows.workerHealth,
+});
+
+type OperationalAlertRecoveryBatch = Readonly<{
+  alerts: readonly OperationalAlertRecoveryAlert[];
+  gatewayJobs: readonly ProjectionRows["gatewayJobs"][number][];
+  deliveredAttempts: readonly Readonly<{
+    id?: string | null;
+    alertId: string;
+    channel: unknown;
+    status: unknown;
+  }>[];
+}>;
+
+const loadOperationalAlertRecoveryBatch = async (
+  operationalAlertsDelegate: Prisma.TransactionClient["affiliateOperationalAlerts"],
+  alertDeliveriesDelegate: Prisma.TransactionClient["affiliateOperationalAlertDeliveries"],
+  gatewayJobsDelegate: Prisma.TransactionClient["affiliateAgentGatewayJobs"],
+  alerts: readonly OperationalAlertRecoveryAlert[],
+): Promise<OperationalAlertRecoveryBatch> => {
+  const sourceEventKeys = Array.from(
+    new Set(
+      alerts
+        .map((alert) => stringValue(recordValue(alert.payload).sourceEventKey))
+        .filter((eventKey): eventKey is string => Boolean(eventKey)),
+    ),
+  );
+  const sourceAlerts =
+    sourceEventKeys.length > 0
+      ? await operationalAlertsDelegate.findMany({
+          where: { eventKey: { in: sourceEventKeys } },
+          select: operationalAlertRecoverySelect,
+        })
+      : [];
+  const alertById = new Map<string, OperationalAlertRecoveryAlert>();
+  [...alerts, ...(sourceAlerts as OperationalAlertRecoveryAlert[])].forEach(
+    (alert) => alertById.set(alert.id, alert),
+  );
+  const sourceAlertsByEventKey = new Map(
+    (sourceAlerts as OperationalAlertRecoveryAlert[]).map((alert) => [
+      alert.eventKey,
+      alert,
+    ]),
+  );
+  const deliveryRecoveryPairs = alerts.flatMap((alert) => {
+    const payload = recordValue(alert.payload);
+    const sourceEventKey = stringValue(payload.sourceEventKey);
+    const channel = stringValue(payload.channel);
+    const sourceAlert = sourceEventKey
+      ? sourceAlertsByEventKey.get(sourceEventKey)
+      : undefined;
+    return sourceAlert && channel
+      ? [{ alertId: sourceAlert.id, channel }]
+      : [];
+  });
+  const deliveryRecoveryPairKeys = new Set(
+    deliveryRecoveryPairs.map((pair) =>
+      `${pair.alertId}\u0000${upper(pair.channel)}`,
+    ),
+  );
+  const deliveryRecoveryWhere =
+    deliveryRecoveryPairs.length > 0
+      ? {
+          OR: deliveryRecoveryPairs.flatMap((pair) =>
+            Array.from(
+              new Set([
+                pair.channel,
+                pair.channel.toUpperCase(),
+                pair.channel.toLowerCase(),
+              ]),
+            ).map((channel) => ({
+              alertId: pair.alertId,
+              channel,
+              status: "DELIVERED",
+            })),
+          ),
+        }
+      : { id: { in: [] } };
+  const gatewayJobIds = Array.from(
+    new Set(
+      [...alertById.values()]
+        .map((alert) =>
+          alertGatewayJobIdFor(alert, recordValue(alert.payload)),
+        )
+        .filter((id): id is string => Boolean(id)),
+    ),
+  );
+  const gatewayJobs =
+    gatewayJobIds.length > 0
+      ? await gatewayJobsDelegate.findMany({
+          where: { id: { in: gatewayJobIds } },
+          select: operationalAlertGatewayJobRecoverySelect,
+        })
+      : [];
+  const deliveredAttemptRows =
+    deliveryRecoveryPairs.length > 0
+      ? await alertDeliveriesDelegate.findMany({
+          where: deliveryRecoveryWhere,
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          distinct: ["alertId", "channel"],
+          take: deliveryRecoveryPairs.length,
+          select: { id: true, alertId: true, channel: true, status: true },
+        })
+      : [];
+  const deliveredAttempts = deliveredAttemptRows.filter((delivery) =>
+    deliveryRecoveryPairKeys.has(
+      `${delivery.alertId}\u0000${upper(delivery.channel)}`,
+    ),
+  );
+  return {
+    alerts: [...alertById.values()],
+    gatewayJobs: gatewayJobs as ProjectionRows["gatewayJobs"],
+    deliveredAttempts,
+  };
+};
+const operationalAlertExplicitRecoveryWhere =
+  (): Prisma.AffiliateOperationalAlertsWhereInput => ({
+    OR: [
+      {
+        payload: {
+          path: ["operationalAlertRecovered"],
+          equals: true,
+        },
+      },
+      {
+        payload: {
+          path: ["operationalAlertRecovered", "recovered"],
+          equals: true,
+        },
+      },
+      {
+        payload: {
+          path: ["operationalAlertRecovered", "isRecovered"],
+          equals: true,
+        },
+      },
+      { payload: { path: ["recovered"], equals: true } },
+      { payload: { path: ["resolved"], equals: true } },
+      { payload: { path: ["resolvedAt"], not: Prisma.JsonNull } },
+    ],
+  });
+
+
+const operationalAlertUnrecoveredWhereFor = (
+  where: Prisma.AffiliateOperationalAlertsWhereInput,
+): Prisma.AffiliateOperationalAlertsWhereInput => ({
+  AND: [
+    where,
+    {
+      NOT: operationalAlertExplicitRecoveryWhere(),
+    },
+  ],
+});
+
+const operationalAlertHasExplicitRecovery = (
+  alert: OperationalAlertRecoveryAlert,
+): boolean =>
+  operationalAlertExplicitRecoveryFor(recordValue(alert.payload)).detail !==
+  null;
+
+const operationalAlertRecoveryCandidateRowsFor = (
+  alerts: readonly OperationalAlertRecoveryAlert[],
+): readonly OperationalAlertRecoveryAlert[] =>
+  alerts.filter((alert) => !operationalAlertHasExplicitRecovery(alert));
+
+const alertBatchForQuery = async (
+  operationalAlertsDelegate: Pick<
+    Prisma.TransactionClient["affiliateOperationalAlerts"],
+    "findMany"
+  >,
+  where: Prisma.AffiliateOperationalAlertsWhereInput,
+  offset: number,
+  limit = MAX_EXCEPTION_ROWS,
+): Promise<readonly OperationalAlertRecoveryAlert[]> => {
+  const batchLimit = Math.max(1, Math.trunc(limit));
+  const loaded = await operationalAlertsDelegate.findMany({
+    where,
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    skip: offset,
+    take: batchLimit,
+    select: operationalAlertSelect,
+  });
+  return (loaded as OperationalAlertRecoveryAlert[]).slice(0, batchLimit);
+};
+
+
+type OperationalAlertExceptionRail = Readonly<{
+  alerts: readonly OperationalAlertRecoveryAlert[];
+  supportingAlerts: readonly OperationalAlertRecoveryAlert[];
+  supportingGatewayJobs: readonly ProjectionRows["gatewayJobs"][number][];
+  deliveries: readonly ProjectionRows["alertDeliveries"][number][];
+  supportingDeliveries: readonly Readonly<{
+    id?: string | null;
+    alertId: string;
+    channel: unknown;
+    status: unknown;
+  }>[];
+  summary: Readonly<{ total: number; recovered: number }>;
+}>;
+
+const operationalAlertOverviewWhereFor = (
+  where: Prisma.AffiliateOperationalAlertsWhereInput,
+  filters: AffiliateOperationsFilters,
+  now: Date,
+): Prisma.AffiliateOperationalAlertsWhereInput => {
+  const dateRangeCutoff = dateRangeCutoffFor(filters.range, now);
+  return {
+    AND: [
+      where,
+      ...(filters.status
+        ? [
+            {
+              severity: {
+                contains: filters.status,
+                mode: "insensitive" as const,
+              },
+            },
+          ]
+        : []),
+      ...(dateRangeCutoff === null
+        ? []
+        : [{ createdAt: { gte: new Date(dateRangeCutoff) } }]),
+    ],
+  };
+};
+
+const operationalAlertWhereForOverviewScope = (
+  baseRows: ProjectionRows,
+  selection: AffiliateOperationsContractSelection,
+  filters: AffiliateOperationsFilters,
+  now: Date,
+): Prisma.AffiliateOperationalAlertsWhereInput => {
+  const contractRows = scopeProjectionRows(
+    {
+      ...baseRows,
+      operationalAlerts: [],
+      alertDeliveries: [],
+    },
+    selection,
+  );
+  const overviewRows = scopeOverviewRows(contractRows, filters, now);
+  const hasDimensionFilter = Boolean(
+    filters.market || filters.sport || filters.profile || filters.city,
+  );
+  return operationalAlertWhereFor(
+    selection,
+    overviewRows.roots.map((root) => root.id),
+    overviewRows.coverageCells.map((cell) => cell.id),
+    overviewRows.demands.map((demand) => demand.id),
+    overviewRows.waves.map((wave) => wave.id),
+    {
+      sourceIds: [
+        ...overviewRows.roots.flatMap((root) =>
+          [root.id, root.liveSourceId].filter(
+            (id): id is string => Boolean(id),
+          ),
+        ),
+        ...overviewRows.sources.map((source) => source.id),
+      ],
+      gatewayJobIds: overviewRows.gatewayJobs.map((job) => job.id),
+      discoveryRunIds: overviewRows.discoveryRuns.map((run) => run.id),
+      intakeRunIds: overviewRows.intakeRuns.map((run) => run.id),
+      scrapeRunIds: overviewRows.scrapeRuns.map((run) => run.id),
+    },
+    {
+      includeGlobalInfrastructure: !hasDimensionFilter,
+      includeUnbound: !hasDimensionFilter,
+    },
+  );
+};
+
+const loadUnrecoveredOperationalAlertRail = async (
+  client: Prisma.TransactionClient,
+  baseRows: ProjectionRows,
+  selection: AffiliateOperationsContractSelection,
+  filters: AffiliateOperationsFilters,
+  now: Date,
+): Promise<OperationalAlertExceptionRail> => {
+  const alerts: OperationalAlertRecoveryAlert[] = [];
+  const supportingAlerts = new Map<string, OperationalAlertRecoveryAlert>();
+  const supportingGatewayJobs = new Map<
+    string,
+    ProjectionRows["gatewayJobs"][number]
+  >();
+  const supportingDeliveries = new Map<
+    string,
+    Readonly<{
+      id?: string | null;
+      alertId: string;
+      channel: unknown;
+      status: unknown;
+    }>
+  >();
+  const operationalAlertsDelegate = client.affiliateOperationalAlerts;
+  const scopedWhere = operationalAlertWhereForOverviewScope(
+    baseRows,
+    selection,
+    filters,
+    now,
+  );
+  const filteredWhere = operationalAlertOverviewWhereFor(
+    scopedWhere,
+    filters,
+    now,
+  );
+  const candidateWhere = operationalAlertUnrecoveredWhereFor(filteredWhere);
+  const hasOperationalAlertDbCount =
+    typeof operationalAlertsDelegate.count === "function";
+  const mergeRecoverySupport = (
+    recoveryBatch: OperationalAlertRecoveryBatch,
+    retainedCandidates: readonly OperationalAlertRecoveryAlert[],
+  ): void => {
+    const retainedCandidateIds = new Set(
+      retainedCandidates.map((candidate) => candidate.id),
+    );
+    const retainedSourceEventKeys = new Set(
+      retainedCandidates
+        .map((candidate) =>
+          stringValue(recordValue(candidate.payload).sourceEventKey),
+        )
+        .filter((eventKey): eventKey is string => Boolean(eventKey)),
+    );
+    const sourceAlerts = recoveryBatch.alerts.filter(
+      (alert) =>
+        !retainedCandidateIds.has(alert.id) &&
+        retainedSourceEventKeys.has(alert.eventKey),
+    );
+    sourceAlerts.forEach((alert) =>
+      supportingAlerts.set(alert.id, alert),
+    );
+    const supportedAlertIds = new Set([
+      ...retainedCandidateIds,
+      ...sourceAlerts.map((alert) => alert.id),
+    ]);
+    recoveryBatch.gatewayJobs.forEach((job) => {
+      const linked = recoveryBatch.alerts.some((alert) =>
+        supportedAlertIds.has(alert.id) &&
+        alertGatewayJobIdFor(alert, recordValue(alert.payload)) === job.id,
+      );
+      if (linked) supportingGatewayJobs.set(job.id, job);
+    });
+    const sourceAlertsByEventKey = new Map(
+      sourceAlerts.map((alert) => [alert.eventKey, alert]),
+    );
+    retainedCandidates.forEach((candidate) => {
+      const payload = recordValue(candidate.payload);
+      const sourceEventKey = stringValue(payload.sourceEventKey);
+      const channel = stringValue(payload.channel);
+      const sourceAlert = sourceEventKey
+        ? sourceAlertsByEventKey.get(sourceEventKey)
+        : undefined;
+      if (!sourceAlert || !channel) return;
+      const deliveryPairKey =
+        `${sourceAlert.id}\u0000${upper(channel)}`;
+      recoveryBatch.deliveredAttempts
+        .filter((delivery) =>
+          `${delivery.alertId}\u0000${upper(delivery.channel)}` ===
+          deliveryPairKey,
+        )
+        .forEach((delivery) =>
+          supportingDeliveries.set(deliveryPairKey, delivery),
+        );
+    });
+  };
+  const baseCandidateRows = operationalAlertRecoveryCandidateRowsFor(
+    baseRows.operationalAlerts,
+  );
+  const baseRecoveryBatch =
+    baseCandidateRows.length > 0
+      ? await loadOperationalAlertRecoveryBatch(
+          client.affiliateOperationalAlerts,
+          client.affiliateOperationalAlertDeliveries,
+          client.affiliateAgentGatewayJobs,
+          baseCandidateRows,
+        )
+      : { alerts: [], gatewayJobs: [], deliveredAttempts: [] };
+  mergeRecoverySupport(baseRecoveryBatch, baseCandidateRows);
+  let total: number;
+  let candidateTotal: number;
+  let dynamicallyRecovered = 0;
+  const processCandidateBatch = async (
+    candidateRows: readonly OperationalAlertRecoveryAlert[],
+  ): Promise<void> => {
+    if (candidateRows.length === 0) return;
+    const recoveryBatch = await loadOperationalAlertRecoveryBatch(
+      client.affiliateOperationalAlerts,
+      client.affiliateOperationalAlertDeliveries,
+      client.affiliateAgentGatewayJobs,
+      candidateRows,
+    );
+    const recoveryRows = operationalAlertRecoveryRowsFor(
+      baseRows,
+      [...baseRecoveryBatch.alerts, ...recoveryBatch.alerts],
+      [
+        ...baseRecoveryBatch.deliveredAttempts,
+        ...recoveryBatch.deliveredAttempts,
+      ],
+      [
+        ...baseRows.gatewayJobs,
+        ...baseRecoveryBatch.gatewayJobs,
+        ...recoveryBatch.gatewayJobs,
+      ],
+    );
+    const batchRows = scopeProjectionRows(
+      {
+        ...baseRows,
+        operationalAlerts: projectionAlertBatchForScope(candidateRows),
+        alertDeliveries: [],
+      },
+      selection,
+    );
+    const overviewBatchRows = scopeOverviewRows(batchRows, filters, now);
+    const matchingAlerts =
+      overviewBatchRows.operationalAlerts as readonly OperationalAlertRecoveryAlert[];
+    const recoveredAlerts = matchingAlerts.filter((alert) =>
+      operationalAlertRecovered(alert, recoveryRows, now),
+    );
+    dynamicallyRecovered += recoveredAlerts.length;
+    const unrecoveredAlerts = matchingAlerts.filter(
+      (alert) => !operationalAlertRecovered(alert, recoveryRows, now),
+    );
+    const remaining = Math.max(0, MAX_EXCEPTION_ROWS - alerts.length);
+    const retainedAlerts = unrecoveredAlerts.slice(0, remaining);
+    alerts.push(...retainedAlerts);
+    mergeRecoverySupport(
+      recoveryBatch,
+      [...baseCandidateRows, ...retainedAlerts],
+    );
+  };
+  if (hasOperationalAlertDbCount) {
+    [total, candidateTotal] = await Promise.all([
+      operationalAlertsDelegate.count({ where: filteredWhere }),
+      operationalAlertsDelegate.count({ where: candidateWhere }),
+    ]);
+    for (
+      let offset = 0;
+      offset < candidateTotal;
+      offset += MAX_EXCEPTION_ROWS
+    ) {
+      const candidateBatch = await alertBatchForQuery(
+        operationalAlertsDelegate,
+        candidateWhere,
+        offset,
+        MAX_EXCEPTION_ROWS,
+      );
+      await processCandidateBatch(
+        operationalAlertRecoveryCandidateRowsFor(candidateBatch),
+      );
+    }
+  } else {
+    const loaded = await alertBatchForQuery(
+      operationalAlertsDelegate,
+      filteredWhere,
+      0,
+      MAX_ALERT_RECOVERY_SCAN_ROWS,
+    );
+    const candidateRows = operationalAlertRecoveryCandidateRowsFor(loaded);
+    total = loaded.length;
+    candidateTotal = candidateRows.length;
+    await processCandidateBatch(candidateRows);
+  }
+  const alertIds = alerts.map((alert) => alert.id);
+  const deliveryRows =
+    alertIds.length > 0
+      ? await client.affiliateOperationalAlertDeliveries.findMany({
+          where: { alertId: { in: alertIds } },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          distinct: ["alertId"],
+          take: alertIds.length,
+          select: {
+            id: true,
+            createdAt: true,
+            alertId: true,
+            channel: true,
+            status: true,
+            attempt: true,
+            deliveredAt: true,
+            responseCode: true,
+            responseBody: true,
+            errorMessage: true,
+          },
+        })
+      : [];
+  const deliveries = deliveryRows.filter((delivery) =>
+    alertIds.includes(delivery.alertId),
+  );
+  return {
+    alerts,
+    supportingAlerts: [...supportingAlerts.values()],
+    supportingGatewayJobs: [...supportingGatewayJobs.values()],
+    deliveries,
+    supportingDeliveries: [...supportingDeliveries.values()],
+    summary: {
+      total,
+      recovered: Math.max(0, total - candidateTotal) + dynamicallyRecovered,
+    },
+  };
+};
+
+const alertActiveFor = (
+  payload: Record<string, unknown>,
+  recovery: OperationalAlertRecovery,
+): boolean => {
+  if (recovery.recovered) return false;
+  const explicitActive = payload.active ?? payload.isActive;
+  if (typeof explicitActive === "boolean") return explicitActive;
+  return payload.resolved === true || Boolean(payload.resolvedAt) ? false : true;
+};
+
+const alertSeverityFor = (
+  severity: string,
+): AlertHistoryRow["severity"] =>
+  upper(severity) === "CRITICAL"
+    ? "critical"
+    : upper(severity) === "WARNING"
+      ? "warning"
+      : "info";
+
+const alertDeliverySummaryFor = (
+  deliveries: readonly ProjectionAlertDeliveryRecord[],
+  stats: ProjectionAlertDeliveryStats | undefined,
+): Readonly<{
+  deliveryCount: number;
+  deliveredCount: number;
+  latestDeliveryStatus: string | null;
+}> => {
+  const latestDelivery = deliveries[0] ?? null;
+  return {
+    deliveryCount: stats?.deliveryCount ?? deliveries.length,
+    deliveredCount:
+      stats?.deliveredCount ??
+      deliveries.filter(
+        (delivery) => upper(delivery.status) === "DELIVERED",
+      ).length,
+    latestDeliveryStatus:
+      stats?.latestDeliveryStatus ?? latestDelivery?.status ?? null,
+  };
+};
+
+const alertHistoryRowFor = (
+  alert: OperationalAlertRecoveryAlert,
+  rows: ProjectionRows,
+  recoveryRows: ProjectionRows,
+  now: Date,
+): AlertHistoryRow => {
+  const payload = recordValue(alert.payload);
+  const deliveries = dedupeAlertDeliveries(
+    rows.alertDeliveries.filter((delivery) => delivery.alertId === alert.id),
+  );
+  const deliveryStats = rows.alertDeliveryStats.get(alert.id);
+  const deliverySummary = alertDeliverySummaryFor(deliveries, deliveryStats);
+  const recovery = operationalAlertRecoveryFor(alert, recoveryRows, now);
+  const active = alertActiveFor(payload, recovery);
+  const severity = alertSeverityFor(alert.severity);
+  return {
+    id: alert.id,
+    eventKey: alert.eventKey,
+    category: alert.category,
+    severity,
+    title: alert.title,
+    detail: alert.detail,
+    at: isoValue(alert.createdAt),
+    active,
+    recovered: recovery.recovered,
+    recoveryDetail: recovery.detail,
+    recoveryEvidenceRefs: recovery.evidenceRefs,
+    ...deliverySummary,
+    href: adminLinkForOperationalAlert(alert, recoveryRows),
+  };
+};
+
+const buildAlerts = (
+  rows: ProjectionRows,
+  input: AffiliateOperationsProjectionInput,
+  recoveryRows: ProjectionRows = rows,
+  now: Date = new Date(),
+): AlertsProjection => {
+  const alertPageIds = new Set(rows.operationalAlertPageIds);
+  const alertRows: AlertHistoryRow[] = [...rows.operationalAlerts]
+    .filter(
+      (alert) =>
+        !("operationalAlertPage" in rows) || alertPageIds.has(alert.id),
+    )
+    .sort(compareProjectionTimestampIdAttempt)
+    .map((alert) =>
+      alertHistoryRowFor(alert, rows, recoveryRows, now),
+    );
+  const page =
+    rows.operationalAlertPage === undefined
+      ? paginate(alertRows, input.page, input.pageSize)
+      : {
+          rows: alertRows,
+          page: rows.operationalAlertPage,
+          pageSize: rows.operationalAlertPageSize,
+          total: rows.operationalAlertTotal,
+        };
+  return {
+    rows: page.rows,
+    page: page.page,
+    pageSize: page.pageSize,
+    total: page.total,
+  };
+};
+
+const buildCutover = (
+  rows: ProjectionRows,
+  input: AffiliateOperationsProjectionInput,
+): CutoverProjection => {
+  const runRows: ReconciliationRunRow[] = [...rows.reconciliationRuns]
+    .sort(compareProjectionTimestampIdAttempt)
+    .map((run) => ({
+      id: run.id,
+      mode: run.mode,
+      status: run.status,
+      operatorId: run.operatorId,
+      rolloutCohort: run.rolloutCohort,
+      supplyContractVersion: run.supplyContractVersion,
+      supplyContractHash: run.supplyContractHash,
+      deploymentContractVersion: run.deploymentContractVersion,
+      deploymentContractHash: run.deploymentContractHash,
+      inputHash: run.inputHash,
+      outputHash: run.outputHash,
+      reportHash: run.reportHash,
+      counts: boundedEvidenceCounts(run.counts),
+      recordsByKind: boundedRecordsByKind(
+        recordValue(run.counts).recordsByKind,
+      ),
+      failedInvariants: stringList(run.failedInvariants),
+      resolutionRefs: stringList(run.resolutionRefs),
+      reportEvidence: reconciliationReportEvidenceFor(run),
+      createdAt: isoValue(run.createdAt),
+      updatedAt: isoValue(run.updatedAt),
+      appliedAt: isoValue(run.appliedAt),
+      appliedBy: run.appliedBy,
+      href: adminLink("cutover", "reconciliationRun", run.id),
+    }));
+  return {
+    rows: runRows,
+    page: rows.reconciliationRunPage,
+    pageSize: Math.min(
+      MAX_PAGE_SIZE,
+      Math.max(1, Math.trunc(input.pageSize || DEFAULT_PAGE_SIZE)),
+    ),
+    total: rows.reconciliationRunTotal,
+  };
+};
+
+type ProjectionRowsWithAlertSummary = ProjectionRows & Readonly<{
+  operationalAlertFilteredTotal: number;
+  operationalAlertFilteredRecoveredTotal: number;
+}>;
 
 const buildOverview = (
-  rows: ProjectionRows,
+  rows: ProjectionRowsWithAlertSummary,
   rootsById: ReadonlyMap<string, ProjectionRows["roots"][number]>,
   contractJson: unknown,
   contract: AffiliateOperationsContractSelection,
@@ -7372,11 +13189,27 @@ const buildOverview = (
     isWorkerHealthy(worker, now),
   ).length;
   const stoppedWorkers = rows.workerHealth.length - activeWorkers;
+  const allExceptions = buildExceptions(rows, now, recoveryRows);
+  const alertExceptionCount = allExceptions.filter(
+    (exception) => exception.kind === "ALERT",
+  ).length;
+  const knownRecoveredAlertCount =
+    rows.operationalAlertFilteredRecoveredTotal;
+  const totalAlertExceptionCount = Math.max(
+    alertExceptionCount,
+    rows.operationalAlertFilteredTotal - knownRecoveredAlertCount,
+  );
+  const exceptionTotal =
+    allExceptions.length
+    - alertExceptionCount
+    + totalAlertExceptionCount;
+  const exceptions = allExceptions.slice(0, MAX_EXCEPTION_ROWS);
   return {
     targetDeficits,
     wipSeries: buildWipSeries(rows, now),
     lifecycleCounts: buildLifecycleCounts(rows),
-    exceptions: buildExceptions(rows, now, recoveryRows),
+    exceptions,
+    exceptionTotal,
     priorityWork: buildPriorityWork(rows, now),
     counts: {
       supplySources: rows.roots.length,
@@ -7451,20 +13284,84 @@ export const loadAffiliateOperationsProjection = async (
         rolloutCohort: contract.rolloutCohort,
         contractVersion: contract.version,
       };
-      const rows = await loadProjectionRows(client, contractSelection);
-      const scopedRows = scopeProjectionRows(rows, contractSelection);
+      const rows = await loadProjectionRows(
+        client,
+        contractSelection,
+        page,
+        pageSize,
+        input.selectedType === "reconciliationRun" ? input.selectedId : null,
+        input.selectedType === "alert" ? input.selectedId : null,
+        now,
+        historyPage,
+        historyPageSize,
+      );
+      const exceptionRail = await loadUnrecoveredOperationalAlertRail(
+        client,
+        rows,
+        contractSelection,
+        input.filters,
+        now,
+      );
+      const displayAlertsById = new Map(
+        rows.operationalAlerts.map((alert) => [alert.id, alert]),
+      );
+      exceptionRail.alerts.forEach((alert) =>
+        displayAlertsById.set(
+          alert.id,
+          alert as (typeof rows.operationalAlerts)[number],
+        ),
+      );
+      const displayGatewayJobsById = new Map(
+        rows.gatewayJobs.map((job) => [job.id, job]),
+      );
+      exceptionRail.supportingGatewayJobs.forEach((job) =>
+        displayGatewayJobsById.set(job.id, job),
+      );
+      const displayRows = {
+        ...rows,
+        gatewayJobs: [...displayGatewayJobsById.values()],
+        operationalAlerts: [...displayAlertsById.values()],
+        alertDeliveries: [
+          ...rows.alertDeliveries,
+          ...exceptionRail.deliveries,
+        ],
+      };
+      const recoveryAlertsById = new Map(
+        displayRows.operationalAlerts.map((alert) => [alert.id, alert]),
+      );
+      exceptionRail.supportingAlerts.forEach((alert) =>
+        recoveryAlertsById.set(
+          alert.id,
+          alert as (typeof rows.operationalAlerts)[number],
+        ),
+      );
+      const recoveryRows = {
+        ...displayRows,
+        operationalAlerts: [...recoveryAlertsById.values()],
+        alertDeliveries: [
+          ...displayRows.alertDeliveries,
+          ...exceptionRail.supportingDeliveries,
+        ],
+      } as ProjectionRows;
+      const scopedRows = scopeProjectionRows(displayRows, contractSelection);
       const overviewRows = scopeOverviewRows(scopedRows, input.filters, now);
+      const alertSummary = exceptionRail.summary;
+      const overviewRowsWithSummary = {
+        ...overviewRows,
+        operationalAlertFilteredTotal: alertSummary.total,
+        operationalAlertFilteredRecoveredTotal: alertSummary.recovered,
+      };
       const rootsById = new Map(
         overviewRows.roots.map((root) => [root.id, root]),
       );
       const overview = buildOverview(
-        overviewRows,
+        overviewRowsWithSummary,
         rootsById,
         contract?.contractJson,
         contractSelection,
         now,
         input.filters,
-        rows,
+        recoveryRows,
       );
       const normalizedInput: AffiliateOperationsProjectionInput = {
         ...input,
@@ -7484,8 +13381,10 @@ export const loadAffiliateOperationsProjection = async (
       const review = buildReviews(scopedRows, normalizedInput, now);
       const sources = buildSources(scopedRows, normalizedInput, now);
       const { candidates } = buildCandidates(scopedRows, normalizedInput, now);
+      const alerts = buildAlerts(scopedRows, normalizedInput, recoveryRows, now);
+      const cutover = buildCutover(scopedRows, normalizedInput);
       const historyRevision = historyRevisionFor(scopedRows, contractSelection);
-      return {
+      const projection: AffiliateOperationsProjection = {
         schemaVersion: 2,
         asOf: now.toISOString(),
         historyRevision,
@@ -7501,8 +13400,17 @@ export const loadAffiliateOperationsProjection = async (
         review,
         sources,
         candidates,
-        selected: buildSelectedDetail(scopedRows, normalizedInput, now),
+        alerts,
+        cutover,
+        selected: buildSelectedDetail(
+          scopedRows,
+          normalizedInput,
+          now,
+          recoveryRows,
+        ),
       };
+      appendProjectionContractToLinks(projection, contractSelection);
+      return projection;
     },
     {
       isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,

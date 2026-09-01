@@ -9,11 +9,15 @@ worktree_parent="${AFFILIATE_MAPPING_WORKTREE_PARENT:-/worktrees}"
 base_commit="${AFFILIATE_MAPPING_BASE_COMMIT:-}"
 worker_id="${AFFILIATE_MAPPING_WORKER_ID:-ovh-affiliate-open-weight}"
 model_timeout_ms="${AFFILIATE_MAPPING_MODEL_TIMEOUT_MS:-5400000}"
-key_file="/run/secrets/model_api_key"
+key_file="${AFFILIATE_MAPPING_MODEL_API_KEY_FILE:-/run/secrets/model_api_key}"
 
 if [[ "$mode" == "disabled" ]]; then
-  echo "Controller mode is disabled; set CONTROLLER_MODE=dry-run or queue explicitly." >&2
+  echo "Controller mode is disabled; set CONTROLLER_MODE=dry-run explicitly for local evaluation." >&2
   exit 64
+fi
+if [[ "$mode" == "queue" ]]; then
+  echo "Legacy queue controller is paused and cannot write production directly; use governed gateway admission." >&2
+  exit 78
 fi
 if [[ ! "$base_commit" =~ ^[a-f0-9]{40}$ ]]; then
   echo "AFFILIATE_MAPPING_BASE_COMMIT must be an exact 40-character Git commit." >&2
@@ -54,9 +58,6 @@ case "$mode" in
     fi
     arguments+=("--dry-run" "--source-key=$source_key")
     ;;
-  queue)
-    arguments+=("--live")
-    ;;
   *)
     echo "Unknown AFFILIATE_MAPPING_MODE: $mode" >&2
     exit 64
@@ -71,4 +72,5 @@ if [[ "${AFFILIATE_MAPPING_REVIEW_SCRAPE:-false}" == "true" ]]; then
   arguments+=("--review-scrape")
 fi
 
-exec npm run affiliate:mapping:agent -- "${arguments[@]}"
+echo "Legacy controller executable is retired; dry-run evaluation is unavailable from this launcher." >&2
+exit 78
