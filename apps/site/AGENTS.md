@@ -215,11 +215,6 @@ We persist raw string IDs for associations (for example `teamIds`, `friendIds`, 
   text, product names, API names, or code identifiers only to conform to this
   writing standard.
 
-## Completion Responses
-
-- End each response with concise suggestions for fixes or improvements noticed during the work. Include only relevant suggestions, and state when there are none.
-
-
 ## Shared agent rules
 
 Read the root `../../AGENTS.md` for the issue tracker, triage labels, domain documents, current HTTP-contract rules, and operational boundaries.
