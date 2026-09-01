@@ -289,6 +289,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1030.0",
+    "@base-ui/react": "^1.7.0",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
     "@hookform/resolvers": "^5.2.2",
@@ -363,6 +364,7 @@
     "recharts": "^3.5.0",
     "redis": "^6.0.0",
     "sharp": "^0.34.5",
+    "sonner": "^2.0.8",
     "stripe": "^20.0.0",
     "tailwind-merge": "^3.4.0",
     "tailwindcss": "^4.1.17",

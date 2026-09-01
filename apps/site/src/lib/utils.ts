@@ -5,6 +5,18 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+export function mergeBaseUIClassName<State>(
+  ownedClassName: string,
+  className:
+    | string
+    | ((state: State) => string | undefined)
+    | undefined
+): string | ((state: State) => string | undefined) {
+  return typeof className === "function"
+    ? (state) => cn(ownedClassName, className(state))
+    : cn(ownedClassName, className)
+}
+
 
 
 export function buildPayload<T>(data: Record<string, any>, omitKeys: string[] = []): Record<string, unknown> {
