@@ -57,6 +57,11 @@ export type PublicBracketWidgetView = {
   winnersLane: PublicBracketWidgetLane | null;
   losersLane: PublicBracketWidgetLane | null;
   hasLosersBracket: boolean;
+  isScheduleIncomplete: boolean;
+  unscheduledMatchCount: number;
+  unscheduledMatchIds: string[];
+  affectedCompetitionPhaseIds: string[];
+  affectedCompetitionPhaseLabels: string[];
 };
 
 type BracketTeamSlot = 'team1' | 'team2';
@@ -139,6 +144,59 @@ const extractDivisionIdentifier = (value: unknown): string => {
   }
   return '';
 };
+type PublicIncompleteMatch = Match & {
+  phaseDivisionId?: unknown;
+  phase?: unknown;
+  division?: unknown;
+};
+
+type PublicCompetitionPhaseDisplay = {
+  id: string;
+  label: string;
+};
+
+const resolvePublicCompetitionPhaseId = (
+  match: PublicIncompleteMatch,
+  divisionDetails: Division[],
+  phaseDivisionIds: Set<string>,
+  divisionDetailsById: Map<string, Division>,
+): string | null => {
+  const explicitPhaseId = normalizeToken(match.phaseDivisionId);
+  const divisionId = extractDivisionIdentifier(match.division);
+  const divisionDetail = divisionDetailsById.get(divisionId);
+  const phaseBySourceAndPhase = divisionDetails.find((detail) =>
+    normalizeToken(detail.sourceDivisionId) === divisionId
+    && normalizeToken(detail.phase) === normalizeToken(match.phase),
+  );
+  return explicitPhaseId
+    ?? (phaseBySourceAndPhase ? normalizeToken(phaseBySourceAndPhase.id) : null)
+    ?? (divisionDetail && (phaseDivisionIds.has(divisionId) || divisionDetail.role === "PHASE")
+      ? divisionId
+      : null);
+};
+
+const resolvePublicCompetitionPhaseDisplay = (
+  match: Match,
+  divisionDetails: Division[],
+  phaseDivisionIds: Set<string>,
+  divisionDetailsById: Map<string, Division>,
+): PublicCompetitionPhaseDisplay | null => {
+  const phaseId = resolvePublicCompetitionPhaseId(
+    match as PublicIncompleteMatch,
+    divisionDetails,
+    phaseDivisionIds,
+    divisionDetailsById,
+  );
+  if (!phaseId) {
+    return null;
+  }
+  return {
+    id: phaseId,
+    label: normalizeToken(divisionDetailsById.get(phaseId)?.name)
+      ?? "Competition Phase details unavailable",
+  };
+};
+
 
 const extractEntityId = (value: unknown): string => {
   if (typeof value === 'string') {
@@ -528,11 +586,75 @@ const buildLane = (
   };
 };
 
+export const getPublicIncompleteScheduleStatus = (event: Tournament | League): {
+  isScheduleIncomplete: boolean;
+  unscheduledMatchCount: number;
+  unscheduledMatchIds: string[];
+  affectedCompetitionPhaseIds: string[];
+  affectedCompetitionPhaseLabels: string[];
+} => {
+  const matches = Object.values(event.matches ?? {});
+  const divisionDetails = [
+    ...((event as League).divisions ?? []),
+    ...((event as Tournament).divisions ?? []),
+    ...((event as League).playoffDivisions ?? []),
+    ...((event as Tournament).playoffDivisions ?? []),
+  ];
+  const phaseDivisionIds = new Set(
+    divisionDetails
+      .filter((detail) =>
+        detail?.role === "PHASE" ||
+        detail?.kind === "PLAYOFF",
+      )
+      .map((detail) => normalizeToken(detail?.id))
+      .filter((id): id is string => Boolean(id)),
+  );
+  const divisionDetailsById = new Map(
+    divisionDetails
+      .map((detail) => [normalizeToken(detail?.id), detail] as const)
+      .filter((entry): entry is readonly [string, (typeof divisionDetails)[number]] => Boolean(entry[0])),
+  );
+  const unplacedMatches = matches
+    .filter((match) =>
+      String((match as Match & { placementState?: unknown }).placementState ?? "")
+        .trim()
+        .toUpperCase() === "UNPLACED",
+    )
+    .sort((left, right) => left.id.localeCompare(right.id));
+  const unscheduledMatchIds = unplacedMatches
+    .map((match) => String(match.id ?? "").trim())
+    .filter(Boolean);
+  const phasesById = new Map<string, PublicCompetitionPhaseDisplay>();
+  unplacedMatches.forEach((match) => {
+    const phase = resolvePublicCompetitionPhaseDisplay(
+      match,
+      divisionDetails,
+      phaseDivisionIds,
+      divisionDetailsById,
+    );
+    if (!phase || phasesById.has(phase.id)) {
+      return;
+    }
+    phasesById.set(phase.id, phase);
+  });
+  const phases = Array.from(phasesById.values()).sort((left, right) =>
+    left.id.localeCompare(right.id),
+  );
+  return {
+    isScheduleIncomplete: unscheduledMatchIds.length > 0,
+    unscheduledMatchCount: unscheduledMatchIds.length,
+    unscheduledMatchIds,
+    affectedCompetitionPhaseIds: phases.map((phase) => phase.id),
+    affectedCompetitionPhaseLabels: phases.map((phase) => phase.label),
+  };
+};
+
 export const buildPublicBracketWidgetView = (
   event: Tournament | League,
   requestedDivisionId?: string | null,
 ): PublicBracketWidgetView | null => {
   const isLeagueEvent = event instanceof League || (event as { eventType?: unknown }).eventType === 'LEAGUE';
+  const incompleteSchedule = getPublicIncompleteScheduleStatus(event);
   const bracketMatches = Object.values(event.matches ?? {}).filter(hasBracketConnections);
   if (!bracketMatches.length) {
     return null;
@@ -567,6 +689,7 @@ export const buildPublicBracketWidgetView = (
       winnersLane: null,
       losersLane: null,
       hasLosersBracket: false,
+      ...incompleteSchedule,
     };
   }
 
@@ -600,6 +723,7 @@ export const buildPublicBracketWidgetView = (
     selectedDivisionName: divisionOptions.find((option) => option.value === selectedDivisionId)?.label ?? null,
     winnersLane,
     losersLane,
+    ...incompleteSchedule,
     hasLosersBracket: Boolean(losersLane && losersLane.matchIds.length > 0),
   };
 };

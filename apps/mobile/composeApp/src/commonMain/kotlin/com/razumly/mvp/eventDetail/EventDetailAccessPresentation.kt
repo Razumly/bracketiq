@@ -46,8 +46,10 @@ internal fun buildEventDetailAccessPresentation(
     isEditingMatches: Boolean,
 ): EventDetailAccessPresentation {
     val event = selectedEvent.event
+    val isArchivedEvent = event.isArchived()
     val isTemplateEvent = event.state.equals("TEMPLATE", ignoreCase = true)
-    val canShowQrCode = !isTemplateEvent &&
+    val canShowQrCode = !isArchivedEvent &&
+        !isTemplateEvent &&
         !event.isDraftLikeState() &&
         !event.isPrivateState()
     val eventType = event.eventType
@@ -69,15 +71,15 @@ internal fun buildEventDetailAccessPresentation(
         event = event,
     )
     val isOrganizationManager = selectedEvent.organization?.canManageEventsForViewer(currentUserId) == true
-    val canManageTemplate = isHost || isAssistantHost || isOrganizationManager
-    val canEditEventDetails = canEditEventDetailsOnMobile(
+    val canManageTemplate = !isArchivedEvent && (isHost || isAssistantHost || isOrganizationManager)
+    val canEditEventDetails = !isArchivedEvent && canEditEventDetailsOnMobile(
         event = event,
         isHost = isHost,
         canManageTemplate = canManageTemplate,
     )
-    val canDeleteEvent = if (isTemplateEvent) canManageTemplate else isHost
-    val showCreateTemplateFromCurrentEvent = isHost && !isTemplateEvent
-    val canManageLeagueStandings = currentUserId.isNotBlank() && (
+    val canDeleteEvent = !isArchivedEvent && if (isTemplateEvent) canManageTemplate else isHost
+    val showCreateTemplateFromCurrentEvent = !isArchivedEvent && isHost && !isTemplateEvent
+    val canManageLeagueStandings = !isArchivedEvent && currentUserId.isNotBlank() && (
         event.hostId.trim() == currentUserId ||
             event.assistantHostIds.any { assistantHostId -> assistantHostId.trim() == currentUserId }
         )
@@ -86,8 +88,8 @@ internal fun buildEventDetailAccessPresentation(
         event = event,
         organization = selectedEvent.organization,
     )
-    val selectedSport = sports.firstOrNull { it.id == editedEvent.sportIds.firstOrNull() }
-    val standingsSport = sports.firstOrNull { it.id == event.sportIds.firstOrNull() }
+    val selectedSport = sports.firstOrNull { sport -> sport.id == editedEvent.sportIds.firstOrNull() }
+    val standingsSport = sports.firstOrNull { sport -> sport.id == event.sportIds.firstOrNull() }
     val showStandingsDrawColumn = resolveLeagueStandingsSupportsDraw(
         event = event,
         sport = standingsSport,

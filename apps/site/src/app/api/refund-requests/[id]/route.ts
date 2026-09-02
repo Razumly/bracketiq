@@ -15,6 +15,7 @@ import {
   type RefundRequestRow,
   type StripeRefundAttempt,
 } from '@/server/refunds/refundExecution';
+import { acquireEventMutationTarget } from '@/server/events/weeklyOccurrences';
 
 export const dynamic = 'force-dynamic';
 
@@ -73,15 +74,33 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       && existing.eventId === teamRegistrationRefundEventId,
   );
 
-  const eventAccess = await prisma.events.findUnique({
-    where: { id: existing.eventId },
-    select: {
-      id: true,
-      hostId: true,
-      assistantHostIds: true,
-      organizationId: true,
-    },
-  });
+  let eventAccess: {
+    id: string;
+    hostId: string | null;
+    assistantHostIds?: unknown;
+    organizationId?: string | null;
+  } | null = null;
+  if (!isTeamRegistrationRefund) {
+    const requestedEvent = await prisma.events.findUnique({
+      where: { id: existing.eventId },
+    });
+    if (!requestedEvent) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+    const parentEventId = typeof requestedEvent.parentEvent === 'string'
+      ? requestedEvent.parentEvent.trim()
+      : '';
+    const parentEvent = parentEventId && parentEventId !== requestedEvent.id
+      ? await prisma.events.findUnique({ where: { id: parentEventId } })
+      : null;
+    const targetEvent = parentEvent ?? requestedEvent;
+    eventAccess = {
+      id: targetEvent.id,
+      hostId: targetEvent.hostId ?? null,
+      assistantHostIds: targetEvent.assistantHostIds,
+      organizationId: targetEvent.organizationId ?? null,
+    };
+  }
   if (eventAccess) {
     if (!session.isAdmin && !(await canManageEvent(session, eventAccess))) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
@@ -170,6 +189,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   const result = await prisma.$transaction(async (tx) => {
+    const target = isTeamRegistrationRefund
+      ? null
+      : await acquireEventMutationTarget(tx, existing.eventId);
+    if (!isTeamRegistrationRefund && !target) {
+      return { missing: true as const };
+    }
     const updated = await tx.refundRequests.update({
       where: { id },
       data: { status: parsed.data.status, updatedAt: now },
@@ -183,6 +208,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       updatedPayments,
     };
   });
+  if ('missing' in result) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
 
   const refundSummary = summarizeRefundAttempts(stripeRefundAttempts);
 

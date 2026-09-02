@@ -10,11 +10,13 @@ export interface EventRankingCandidate {
   id: string;
   name?: string | null;
   start?: Date | string | number | null;
+  nextOccurrence?: {
+    start?: Date | string | number | null;
+  } | null;
   coordinates?: unknown;
   organizationId?: string | null;
   sourceType?: string | null;
 }
-
 export interface OrganizationRankingMetadata {
   originType?: string | null;
   ownershipStatus?: string | null;
@@ -120,9 +122,12 @@ const organizationPreferenceScore = (
     || Boolean(organization.ownershipVerifiedAt);
   return CLAIMED_ORGANIZATION_BOOST + (isVerified ? VERIFIED_ORGANIZATION_BOOST : 0);
 };
+const eventStartTime = (event: EventRankingCandidate): number =>
+  toComparableTime(event.nextOccurrence?.start ?? event.start);
+
 
 const compareStable = (left: EventRankingCandidate, right: EventRankingCandidate): number => {
-  const timeDifference = toComparableTime(left.start) - toComparableTime(right.start);
+  const timeDifference = eventStartTime(left) - eventStartTime(right);
   if (timeDifference !== 0) return timeDifference;
   return left.id.localeCompare(right.id);
 };
@@ -143,7 +148,7 @@ const recommendedBaseScore = (
         * MILES_WITH_LOCATION_PENALTY;
   }
 
-  const startTime = toComparableTime(event.start);
+  const startTime = eventStartTime(event);
   if (startTime !== Number.MAX_SAFE_INTEGER && earliestStart !== Number.MAX_SAFE_INTEGER) {
     const weeksAfterEarliest = Math.max(0, startTime - earliestStart) / (7 * 24 * 60 * 60 * 1000);
     score += Math.max(0, MAX_SOONNESS_SCORE - weeksAfterEarliest * SOONNESS_SCORE_WEEK_STEP);
@@ -223,7 +228,7 @@ export const rankEventSearchCandidates = <T extends EventRankingCandidate>(
   }
 
   const earliestStart = candidates.reduce(
-    (earliest, event) => Math.min(earliest, toComparableTime(event.start)),
+    (earliest, event) => Math.min(earliest, eventStartTime(event)),
     Number.MAX_SAFE_INTEGER,
   );
   const baseScores = new Map(candidates.map((event) => [

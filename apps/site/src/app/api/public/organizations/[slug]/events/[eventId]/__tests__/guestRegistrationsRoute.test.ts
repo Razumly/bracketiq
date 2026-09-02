@@ -92,6 +92,7 @@ jest.mock('@/server/events/eventRegistrations', () => ({
   acquireEventLockAndLoadStructure: (...args: unknown[]) => acquireEventLockAndLoadStructureMock(...args),
 }));
 jest.mock('@/server/events/weeklyOccurrences', () => ({
+  isActiveWeeklyParentEvent: () => false,
   isWeeklyParentEvent: () => false,
   isWeeklyOccurrenceJoinClosed: () => false,
   resolveWeeklyOccurrence: jest.fn(),

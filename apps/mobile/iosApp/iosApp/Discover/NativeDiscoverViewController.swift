@@ -78,6 +78,7 @@ final class DiscoverObservableState: ObservableObject {
     let mapComponent: MapComponent
 
     @Published private(set) var events: [Event] = []
+    @Published private(set) var eventCards: [DiscoverEventSearchResult] = []
     @Published private(set) var organizations: [Organization] = []
     @Published private(set) var allOrganizations: [Organization] = []
     @Published private(set) var rentals: [Organization] = []
@@ -139,6 +140,12 @@ private extension DiscoverObservableState {
         let mapComponent = mapComponent
 
         observationTasks = [
+            Task { [weak self] in
+                for await value in component.eventCards {
+                    guard let self else { return }
+                    eventCards = value
+                }
+            },
             Task { [weak self] in
                 for await value in component.events {
                     guard let self else { return }

@@ -12,6 +12,7 @@ import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.EventSearchOccurrence
 import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.core.data.dataTypes.Facility
 import com.razumly.mvp.core.data.dataTypes.Field
@@ -20,6 +21,7 @@ import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.activeAffiliateRentalFacilities
 import com.razumly.mvp.core.data.dataTypes.normalizedAffiliateRentalUrl
 import com.razumly.mvp.core.data.dataTypes.normalizedAffiliateUrl
@@ -38,6 +40,8 @@ import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.calcDistance
 import com.razumly.mvp.core.util.getBounds
 import com.razumly.mvp.eventDetail.data.IMatchRepository
+import com.razumly.mvp.eventDetail.isArchived
+import com.razumly.mvp.eventDetail.withNextWeeklyOccurrenceForDiscover
 import com.razumly.mvp.eventSearch.util.EventFilter
 import com.razumly.mvp.eventSearch.tabs.organizations.toMvpPlaceOrNull
 import dev.icerock.moko.geo.LatLng
@@ -100,9 +104,17 @@ interface EventSearchComponent {
     val isLoadingRentalFields: StateFlow<Boolean>
     val rentalBusyBlocks: StateFlow<List<RentalBusyBlock>>
 
+    /**
+     * Search-card values keep occurrence metadata in immutable state.
+     *
+     * The [Event] remains canonical for navigation and map callbacks.
+     */
+    val eventCards: StateFlow<List<DiscoverEventSearchResult>>
+
     val events: StateFlow<List<Event>>
     val selectedEvent: StateFlow<Event?>
     val currentUserId: StateFlow<String>
+
 
     fun setLoadingHandler(handler: LoadingHandler)
     fun onDiscoverVisible()
@@ -206,6 +218,46 @@ data class RentalBusyBlock(
 
 internal fun shouldReportDiscoverFailure(error: Throwable?): Boolean =
     error != null && error !is CancellationException
+/**
+ * Immutable Discover event presentation data.
+ *
+ * The event stays canonical for navigation and map callbacks. The occurrence
+ * snapshot participates in equality, unlike Event.nextOccurrence.
+ */
+data class DiscoverEventSearchResult(
+    val event: Event,
+    val nextOccurrence: EventSearchOccurrence?,
+)
+
+private data class EventOccurrenceScheduleSignature(
+    val eventType: EventType,
+    val timeSlotIds: List<String>,
+    val timeSlots: List<Pair<String, TimeSlot?>>,
+    val start: Instant,
+    val end: Instant,
+    val noFixedEndDateTime: Boolean,
+    val timeZone: String,
+)
+
+private fun Event.occurrenceScheduleSignature(
+    timeSlotsById: Map<String, TimeSlot>,
+): EventOccurrenceScheduleSignature {
+    val normalizedTimeSlotIds = timeSlotIds
+        .map(String::trim)
+        .filter(String::isNotBlank)
+        .distinct()
+    return EventOccurrenceScheduleSignature(
+        eventType = eventType,
+        timeSlotIds = normalizedTimeSlotIds,
+        timeSlots = normalizedTimeSlotIds
+            .sorted()
+            .map { slotId -> slotId to timeSlotsById[slotId] },
+        start = start,
+        end = end,
+        noFixedEndDateTime = noFixedEndDateTime,
+        timeZone = timeZone,
+    )
+}
 
 class DefaultEventSearchComponent(
     componentContext: ComponentContext,
@@ -300,10 +352,18 @@ class DefaultEventSearchComponent(
     override val filter = _filter.asStateFlow()
     private val _rawEvents = MutableStateFlow<List<Event>>(emptyList())
     private val _events = MutableStateFlow<List<Event>>(emptyList())
+    private var authoritativeEventIds: Set<String>? = null
+    private var weeklyTimeSlotsById: Map<String, TimeSlot> = emptyMap()
+    private var weeklyTimeSlotLoadIncompleteIds: Set<String> = emptySet()
+    private var eventOccurrenceSnapshotsById: Map<String, EventSearchOccurrence?> = emptyMap()
+    private var eventOccurrenceScheduleSignaturesById: Map<String, EventOccurrenceScheduleSignature> =
+        emptyMap()
     override val events: StateFlow<List<Event>> = _events.asStateFlow()
+    private val _eventCards = MutableStateFlow<List<DiscoverEventSearchResult>>(emptyList())
     private val _organizations = MutableStateFlow<List<Organization>>(emptyList())
     override val organizations: StateFlow<List<Organization>> = _organizations.asStateFlow()
     private val _allOrganizations = MutableStateFlow<List<Organization>>(emptyList())
+    override val eventCards: StateFlow<List<DiscoverEventSearchResult>> = _eventCards.asStateFlow()
     override val allOrganizations: StateFlow<List<Organization>> = _allOrganizations.asStateFlow()
     private val _isLoadingOrganizations = MutableStateFlow(false)
     override val isLoadingOrganizations: StateFlow<Boolean> = _isLoadingOrganizations.asStateFlow()
@@ -844,7 +904,7 @@ class DefaultEventSearchComponent(
     override fun nativeDiscoverSearchSnapshot(query: String): NativeDiscoverSearchSnapshot =
         buildNativeDiscoverSearchSnapshot(
             query = query,
-            events = _events.value,
+            eventCards = _eventCards.value,
             organizations = _organizations.value,
             teams = _teams.value,
             rentals = _rentals.value,
@@ -912,13 +972,28 @@ class DefaultEventSearchComponent(
                     sort = activeFilter.sort,
                 )
                     .onSuccess { (eventsPage, hasMore) ->
+                        val isFirstPage = eventOffset == 0
                         if (!discoverEventRequests.isCurrent(generation)) return@onSuccess
+                        authoritativeEventIds = if (isFirstPage) {
+                            eventsPage.map(Event::id).toSet()
+                        } else {
+                            authoritativeEventIds.orEmpty() + eventsPage.map(Event::id)
+                        }
                         loadOrganizationsForEvents(eventsPage)
+                        if (!discoverEventRequests.isCurrent(generation)) return@onSuccess
+                        loadWeeklyTimeSlotsForEvents(
+                            events = eventsPage,
+                            replaceSnapshot = isFirstPage,
+                        )
                         if (!discoverEventRequests.isCurrent(generation)) return@onSuccess
                         eventOffset += eventsPage.size
                         _hasMoreEvents.value = hasMore
-                        _rawEvents.value = mergeEvents(_rawEvents.value, eventsPage)
-                        _events.value = applyEventFilter(_rawEvents.value, _filter.value)
+                        _rawEvents.value = if (isFirstPage) {
+                            eventsPage
+                        } else {
+                            mergeEvents(_rawEvents.value, eventsPage)
+                        }
+                        setVisibleEventProjection(_rawEvents.value)
                     }
                     .onFailure { e ->
                         if (!discoverEventRequests.isCurrent(generation)) return@onFailure
@@ -981,6 +1056,10 @@ class DefaultEventSearchComponent(
         if (clearExisting) {
             _rawEvents.value = emptyList()
             _events.value = emptyList()
+            _eventCards.value = emptyList()
+            eventOccurrenceSnapshotsById = emptyMap()
+            authoritativeEventIds = null
+            eventOccurrenceScheduleSignaturesById = emptyMap()
         }
         eventRepository.resetCursor()
         loadMoreEvents(
@@ -1001,7 +1080,7 @@ class DefaultEventSearchComponent(
         if (dateRangeChanged || sportsChanged || tagsChanged || sortChanged) {
             refreshEvents(force = true)
         } else {
-            _events.value = applyEventFilter(_rawEvents.value, updated)
+            setVisibleEventProjection(_rawEvents.value, updated)
         }
     }
 
@@ -1154,6 +1233,155 @@ class DefaultEventSearchComponent(
         _rentalBusyBlocks.value = emptyList()
     }
 
+    private suspend fun loadWeeklyTimeSlotsForEvents(
+        events: List<Event>,
+        replaceSnapshot: Boolean = false,
+        preserveTransientOccurrences: Boolean = false,
+    ) {
+        val sourceEvents = if (replaceSnapshot) {
+            events
+        } else {
+            _rawEvents.value + events
+        }
+        val requestedIds = sourceEvents
+            .filter { event -> event.eventType == EventType.WEEKLY_EVENT }
+            .flatMap { event -> event.timeSlotIds }
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .distinct()
+        val previousSnapshots = eventOccurrenceSnapshotsById
+        val previousScheduleSignatures = eventOccurrenceScheduleSignaturesById
+        if (replaceSnapshot) {
+            weeklyTimeSlotsById = emptyMap()
+            weeklyTimeSlotLoadIncompleteIds = emptySet()
+        }
+        if (requestedIds.isNotEmpty()) {
+            fieldRepository.getTimeSlots(requestedIds)
+                .onSuccess { timeSlots ->
+                    val fetchedById = timeSlots
+                        .mapNotNull { timeSlot ->
+                            timeSlot.id.trim()
+                                .takeIf(String::isNotBlank)
+                                ?.let { slotId -> slotId to timeSlot }
+                        }
+                        .toMap()
+                    weeklyTimeSlotsById = (weeklyTimeSlotsById - requestedIds.toSet()) + fetchedById
+                    weeklyTimeSlotLoadIncompleteIds = (
+                        weeklyTimeSlotLoadIncompleteIds - requestedIds.toSet()
+                    ) + (requestedIds.toSet() - fetchedById.keys)
+                }
+                .onFailure { error ->
+                    weeklyTimeSlotsById = weeklyTimeSlotsById - requestedIds.toSet()
+                    weeklyTimeSlotLoadIncompleteIds = weeklyTimeSlotLoadIncompleteIds + requestedIds
+                    Napier.w("Failed to load weekly event time slots: ${error.message}")
+                }
+        }
+
+        val incomingSnapshots = events.associate { event -> event.id to event.nextOccurrence }
+        val incomingScheduleSignatures = events.associate { event ->
+            event.id to event.occurrenceScheduleSignature(weeklyTimeSlotsById)
+        }
+        if (replaceSnapshot && !preserveTransientOccurrences) {
+            eventOccurrenceSnapshotsById = incomingSnapshots
+            eventOccurrenceScheduleSignaturesById = incomingScheduleSignatures
+        } else {
+            eventOccurrenceSnapshotsById = buildMap {
+                if (!replaceSnapshot) {
+                    putAll(previousSnapshots)
+                }
+                events.forEach { event ->
+                    val occurrence = event.nextOccurrence
+                    val scheduleChanged = previousScheduleSignatures[event.id] == null ||
+                        previousScheduleSignatures[event.id] != incomingScheduleSignatures[event.id]
+                    if (
+                        preserveTransientOccurrences &&
+                        occurrence == null &&
+                        !event.isArchived() &&
+                        !scheduleChanged &&
+                        previousSnapshots[event.id]
+                            ?.let { previousOccurrence ->
+                                previousOccurrence.end > kotlin.time.Clock.System.now()
+                            } == true
+                    ) {
+                        put(event.id, previousSnapshots[event.id])
+                    } else {
+                        put(event.id, occurrence)
+                    }
+                }
+            }
+            eventOccurrenceScheduleSignaturesById = buildMap {
+                if (!replaceSnapshot) {
+                    putAll(previousScheduleSignatures)
+                }
+                putAll(incomingScheduleSignatures)
+            }
+        }
+    }
+
+    private fun setVisibleEventProjection(
+        source: List<Event>,
+        filter: EventFilter = _filter.value,
+    ) {
+        val cards = projectVisibleEventCards(source, filter)
+        _eventCards.value = cards
+        _events.value = cards.map { result -> result.event }
+    }
+
+    private fun projectVisibleEventCards(
+        source: List<Event>,
+        filter: EventFilter = _filter.value,
+    ): List<DiscoverEventSearchResult> {
+        return applyEventFilter(source, filter).mapNotNull { event ->
+            val slotIds = event.timeSlotIds
+                .map(String::trim)
+                .filter(String::isNotBlank)
+                .distinct()
+            val occurrenceSnapshot = if (eventOccurrenceSnapshotsById.containsKey(event.id)) {
+                eventOccurrenceSnapshotsById[event.id]
+            } else {
+                event.nextOccurrence
+            }
+            val serverOccurrence = if (event.isArchived()) {
+                null
+            } else {
+                occurrenceSnapshot
+                    ?.takeIf { occurrence ->
+                        occurrence.end > kotlin.time.Clock.System.now() &&
+                            occurrence.end > filter.date.first &&
+                            (filter.date.second == null || occurrence.start <= filter.date.second!!)
+                    }
+            }
+            if (
+                event.eventType == EventType.WEEKLY_EVENT &&
+                serverOccurrence == null &&
+                (
+                    slotIds.isEmpty() ||
+                        slotIds.any { slotId ->
+                            slotId !in weeklyTimeSlotsById ||
+                                slotId in weeklyTimeSlotLoadIncompleteIds
+                        }
+                    )
+            ) {
+                return@mapNotNull null
+            }
+            val timeSlots = slotIds.mapNotNull { slotId -> weeklyTimeSlotsById[slotId] }
+            val occurrence = serverOccurrence ?: event
+                .withNextWeeklyOccurrenceForDiscover(
+                    timeSlots = timeSlots,
+                    occurrenceRangeStart = filter.date.first,
+                    occurrenceRangeEnd = filter.date.second,
+                )
+                .nextOccurrence
+            if (
+                event.eventType == EventType.WEEKLY_EVENT &&
+                occurrence == null
+            ) {
+                return@mapNotNull null
+            }
+            DiscoverEventSearchResult(event = event, nextOccurrence = occurrence)
+        }
+    }
+
     private fun applyEventFilter(source: List<Event>, filter: EventFilter): List<Event> {
         return source.filter { event -> filter.filter(event) }
     }
@@ -1293,6 +1521,11 @@ class DefaultEventSearchComponent(
         cachedEventsSyncJob = scope.launch {
             eventRepository.getCachedEventsFlow().collect { result ->
                 result.onSuccess { cachedEvents ->
+                    loadWeeklyTimeSlotsForEvents(
+                        events = cachedEvents,
+                        replaceSnapshot = true,
+                        preserveTransientOccurrences = true,
+                    )
                     reconcileVisibleEventsWithCache(cachedEvents)
                 }.onFailure { error ->
                     Napier.w("Failed to sync discover events from cache: ${error.message}")
@@ -1303,23 +1536,42 @@ class DefaultEventSearchComponent(
 
     private fun reconcileVisibleEventsWithCache(cachedEvents: List<Event>) {
         val currentEvents = _rawEvents.value
+        val authoritativeIds = authoritativeEventIds
+        val visibleCachedEvents = if (authoritativeIds == null) {
+            cachedEvents
+        } else {
+            cachedEvents.filter { event -> event.id in authoritativeIds }
+        }
         if (currentEvents.isEmpty()) {
-            if (cachedEvents.isNotEmpty()) {
-                _rawEvents.value = cachedEvents
-                _events.value = applyEventFilter(cachedEvents, _filter.value)
+            if (visibleCachedEvents.isNotEmpty()) {
+                _rawEvents.value = visibleCachedEvents
+                setVisibleEventProjection(visibleCachedEvents)
+            } else if (authoritativeIds != null) {
+                setVisibleEventProjection(emptyList())
             }
             return
         }
 
-        val cachedById = cachedEvents.associateBy { it.id }
+        val cachedById = visibleCachedEvents.associateBy { event -> event.id }
         val reconciledEvents = currentEvents.mapNotNull { current ->
-            cachedById[current.id]
+            if (authoritativeIds != null && current.id !in authoritativeIds) {
+                null
+            } else if (authoritativeIds != null) {
+                // A completed Room emission is authoritative after a remote page
+                // loaded. Missing ids are deleted, including an archived event
+                // evicted by the archive action.
+                cachedById[current.id]
+            } else {
+                cachedById[current.id] ?: current
+            }
+        }
+        if (reconciledEvents == currentEvents) {
+            setVisibleEventProjection(currentEvents)
+            return
         }
 
-        if (reconciledEvents == currentEvents) return
-
         _rawEvents.value = reconciledEvents
-        _events.value = applyEventFilter(reconciledEvents, _filter.value)
+        setVisibleEventProjection(reconciledEvents)
         eventOffset = eventOffset.coerceAtMost(reconciledEvents.size)
     }
 

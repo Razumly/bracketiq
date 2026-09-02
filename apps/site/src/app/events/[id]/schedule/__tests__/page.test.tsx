@@ -1,12 +1,18 @@
 import { renderWithMantine } from '../../../../../../test/utils/renderWithMantine';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
-import LeagueSchedulePage from '../page';
+import LeagueSchedulePage, {
+  getFreshCreateOperationId,
+  getScheduleProposalAcceptanceFailureState,
+  toCanonicalMatchPersistencePayload,
+} from '../page';
 import { ApiRequestError, apiRequest } from '@/lib/apiClient';
 import { eventService } from '@/lib/eventService';
 import { leagueService } from '@/lib/leagueService';
 import { organizationService } from '@/lib/organizationService';
 import { formatLocalDateTime } from '@/lib/dateUtils';
 import { buildEventDivisionId } from '@/lib/divisionTypes';
+
+import type { EventEditorMaintenanceOperation } from '@/contracts/eventEditor';
 
 jest.setTimeout(20000);
 jest.mock('react-big-calendar/lib/css/react-big-calendar.css', () => ({}));
@@ -68,7 +74,9 @@ jest.mock('@/lib/eventService', () => ({
     getEventDetailBootstrap: jest.fn(),
     deleteEvent: jest.fn(),
     deleteEventResult: jest.fn(),
-    reconcileEventSchedule: jest.fn(),
+    proposeEventScheduleMaintenance: jest.fn(),
+    acceptEventScheduleMaintenanceProposal: jest.fn(),
+    rejectEventScheduleMaintenanceProposal: jest.fn(),
     getEventParticipants: jest.fn(),
   },
 }));
@@ -302,6 +310,9 @@ const buildApiEvent = (overrides: Record<string, any> = {}) => {
 type MockRequestOptions = { method?: string; body?: Record<string, any> } | undefined;
 
 let latestEditorEvent: Record<string, any> | null = null;
+let mockEditorReadObserver: (() => void) | null = null;
+
+let mockAvailableMaintenanceOperations: EventEditorMaintenanceOperation[] | null = null;
 
 const buildEditorSnapshot = (
   sourceEvent: Record<string, any>,
@@ -324,6 +335,42 @@ const buildEditorSnapshot = (
   };
   const { legacyEventToEditorDraft } = require('../components/eventForm/editorContractAdapters');
   const draft = draftOverride ?? legacyEventToEditorDraft(sourceEvent);
+  const draftRecord = draft as {
+    basics?: { eventType?: unknown };
+    schedule?: { isAutomatedScheduling?: unknown };
+  };
+  const scheduleEventType = String(
+    draftRecord.basics?.eventType ?? sourceEvent.eventType ?? '',
+  ).trim().toUpperCase();
+  const inferredAvailableMaintenanceOperations =
+    mode !== 'EDIT'
+    || draftRecord.schedule?.isAutomatedScheduling !== true
+    || !['LEAGUE', 'TOURNAMENT'].includes(scheduleEventType)
+    || String(sourceEvent.state ?? '').toUpperCase() === 'TEMPLATE'
+      ? []
+      : matchCount === 0
+        ? ['BUILD']
+        : matchDemand.unplaced > 0
+          ? ['COMPLETE', 'REBUILD']
+          : ['REBUILD'];
+  const availableMaintenanceOperations =
+    mockAvailableMaintenanceOperations ?? inferredAvailableMaintenanceOperations;
+  const fieldRevisions = Object.fromEntries(
+    (Array.isArray(sourceEvent.fields) ? sourceEvent.fields : []).map(
+      (field: any, index: number) => [
+        field?.$id ?? field?.id ?? `field_${index}`,
+        `test-field-revision-${index}`,
+      ],
+    ),
+  );
+  const timeSlotRevisions = Object.fromEntries(
+    (Array.isArray(sourceEvent.timeSlots) ? sourceEvent.timeSlots : []).map(
+      (timeSlot: any, index: number) => [
+        timeSlot?.$id ?? timeSlot?.id ?? `time-slot_${index}`,
+        `test-time-slot-revision-${index}`,
+      ],
+    ),
+  );
   return {
     contractVersion: 3,
     eventId: mode === 'CREATE' ? null : (sourceEvent.$id ?? sourceEvent.id ?? 'event_1'),
@@ -358,10 +405,129 @@ const buildEditorSnapshot = (
       sourceType: typeof sourceEvent.sourceType === 'string' ? sourceEvent.sourceType : null,
       matchDemand,
       matchCount,
+      availableMaintenanceOperations,
       revision: `test-schedule-revision-${matchCount}`,
       hasProtectedHistory: false,
     },
+    revisionBinding: {
+      editorRevision: 'test-editor-revision',
+      staffRevision: 'test-staff-revision',
+      scheduleRevision: `test-schedule-revision-${matchCount}`,
+      fieldRevisions,
+      timeSlotRevisions,
+      rentalBookingRevision: null,
+      rentalBookingRevisions: {},
+      rentalBookingItemRevisions: {},
+      availabilityRevision: `test-availability-revision-${matchCount}`,
+    },
     legacyEvent: sourceEvent,
+  };
+};
+const buildMaintenanceProposal = ({
+  operation = 'REBUILD',
+  includeUnplaced = false,
+  warnings = [],
+}: {
+  operation?: 'BUILD' | 'COMPLETE' | 'REBUILD';
+  includeUnplaced?: boolean;
+  warnings?: Array<{ code: string; message: string }>;
+} = {}) => {
+  const placedMatch = buildApiEvent().matches[0];
+  const unplacedMatch = {
+    ...placedMatch,
+    id: 'maintenance_unplaced_match',
+    $id: 'maintenance_unplaced_match',
+    matchId: 2,
+    placementState: 'UNPLACED',
+    fieldId: null,
+    field: null,
+    start: null,
+    end: null,
+  };
+  const graphMatches = includeUnplaced ? [placedMatch, unplacedMatch] : [placedMatch];
+  const projections = graphMatches.map((match: any) => ({
+    id: match.id ?? match.$id,
+    matchId: match.matchId ?? null,
+    eventId: 'event_1',
+    start: match.start ?? null,
+    end: match.end ?? null,
+    locked: Boolean(match.locked),
+    placementState: match.placementState === 'UNPLACED' ? 'UNPLACED' : 'PLACED',
+    phase: 'POOL',
+    sourceDivisionId: null,
+    phaseDivisionId: 'division_open',
+    division: 'division_open',
+    fieldId: match.fieldId ?? null,
+    team1Id: match.team1Id ?? null,
+    team2Id: match.team2Id ?? null,
+    team1Seed: null,
+    team2Seed: null,
+    status: null,
+    resultStatus: null,
+    resultType: null,
+    actualStart: null,
+    actualEnd: null,
+    statusReason: null,
+    winnerEventTeamId: null,
+    matchRulesSnapshot: null,
+    resolvedMatchRules: null,
+    segments: [],
+    incidents: [],
+    officialId: null,
+    officialIds: [],
+    teamOfficialId: null,
+    team1Points: [],
+    team2Points: [],
+    losersBracket: false,
+    winnerNextMatchId: null,
+    loserNextMatchId: null,
+    previousLeftId: null,
+    previousRightId: null,
+    side: null,
+    officialCheckedIn: false,
+  }));
+  const unplaced = projections.filter((match: any) => match.placementState === 'UNPLACED');
+  return {
+    status: 'PROPOSED',
+    contractVersion: 3,
+    eventId: 'event_1',
+    operation,
+    operationId: `maintenance-${operation.toLowerCase()}`,
+    proposalRevision: `maintenance-proposal-${operation.toLowerCase()}`,
+    revisionBinding: {},
+    graph: {
+      event: {
+        ...buildApiEvent(),
+        id: 'event_1',
+        fields: [],
+        teams: [],
+        officials: [],
+      },
+      matches: graphMatches,
+    },
+    protectedMatchIds: [],
+    scheduleOutcome: {
+      status: unplaced.length > 0 ? 'INCOMPLETE' : 'COMPLETE',
+      isComplete: unplaced.length === 0,
+      matchCount: projections.length,
+      placedMatchCount: projections.length - unplaced.length,
+      unplacedMatchCount: unplaced.length,
+      matches: projections,
+      unscheduledMatches: unplaced.map((match: any) => ({
+        id: match.id,
+        matchId: match.matchId,
+        phaseDivisionId: match.phaseDivisionId,
+        phase: match.phase,
+        sourceDivisionId: match.sourceDivisionId,
+      })),
+      affectedCompetitionPhases: unplaced.map((match: any) => ({
+        id: match.phaseDivisionId,
+        name: 'Opening round',
+        phase: match.phase,
+        sourceDivisionId: match.sourceDivisionId,
+      })),
+      warnings,
+    },
   };
 };
 
@@ -472,6 +638,11 @@ const installApiEditorContractMock = () => {
           ...snapshot.scheduleState,
           matchCount: scheduleOutcome.matchCount || snapshot.scheduleState.matchCount,
           revision: 'test-schedule-revision-after-save',
+        };
+        snapshot.revisionBinding = {
+          ...snapshot.revisionBinding,
+          scheduleRevision: snapshot.scheduleState.revision,
+          availabilityRevision: 'test-availability-revision-after-save',
         };
         return response?.snapshot
           ? {
@@ -612,7 +783,16 @@ const buildWeeklyParentEvent = ({
 
 const mockScheduleApiEvent = (overrides: Record<string, any> = {}) => {
   const scheduledEvent = buildApiEvent(overrides);
-  apiRequestMock.mockImplementation((path: string) => {
+  apiRequestMock.mockImplementation((path: string, options?: MockRequestOptions) => {
+    if (
+      path === '/api/events/event_1/editor'
+      && (!options?.method || options.method === 'GET')
+    ) {
+      mockEditorReadObserver?.();
+    }
+    if (path.startsWith('/api/realtime/matches/token')) {
+      return Promise.reject(new ApiRequestError('Not found', 404));
+    }
     if (path === '/api/events/event_1') {
       const event = { ...scheduledEvent };
       delete (event as any).matches;
@@ -620,6 +800,9 @@ const mockScheduleApiEvent = (overrides: Record<string, any> = {}) => {
     }
     if (path === '/api/events/event_1/matches') {
       return Promise.resolve({ matches: scheduledEvent.matches ?? [] });
+    }
+    if (path === '/api/sports') {
+      return Promise.resolve({ sports: [] });
     }
     return Promise.resolve({});
   });
@@ -631,6 +814,7 @@ const openMoreActionsMenu = async () => {
   await act(async () => {
     fireEvent.click(moreButton);
   });
+  await screen.findByRole('menu');
 };
 
 const clickMoreActionElement = async (action: HTMLElement) => {
@@ -648,6 +832,139 @@ const clickMoreAction = async (name: RegExp) => {
 };
 
 describe('League schedule page', () => {
+  const nativeElementMatches = Element.prototype.matches;
+  beforeAll(() => {
+    Element.prototype.matches = function guardedMatches(selector: string) {
+      if (selector === ':modal' || selector === ':fullscreen') return false;
+      return nativeElementMatches.call(this, selector);
+    };
+  });
+  afterAll(() => {
+    Element.prototype.matches = nativeElementMatches;
+  });
+  it('recovers a stale partial proposal through the rendered modal', async () => {
+    useSearchParamsMock.mockReturnValue({
+      get: (key: string) => {
+        if (key === 'create') return '1';
+        if (key === 'mode') return 'edit';
+        if (key === 'eventType') return 'LEAGUE';
+        return null;
+      },
+    });
+    mockEventFormDraft = {
+      name: 'Stale proposal event',
+      eventType: 'LEAGUE',
+      sportIds: ['volleyball'],
+      start: '2026-10-09T18:00:00.000Z',
+      end: '2026-10-09T21:00:00.000Z',
+      singleDivision: true,
+      divisions: ['open'],
+      teamSignup: true,
+      maxParticipants: 8,
+    };
+
+    const createCalls: Array<[string, MockRequestOptions | undefined]> = [];
+    const defaultImplementation = apiRequestMock.getMockImplementation();
+    apiRequestMock.mockImplementation((path: string, options?: MockRequestOptions) => {
+      if (path === '/api/events/editor' && options?.method === 'POST') {
+        createCalls.push([path, options]);
+        const sourceEvent = buildApiEvent({
+          id: 'event_proposed',
+          $id: 'event_proposed',
+          eventType: 'LEAGUE',
+        });
+        const snapshot = buildEditorSnapshot(sourceEvent, 'CREATE', options.body?.draft);
+        return Promise.resolve({
+          status: 'PROPOSED',
+          createOperationId: options.body?.createOperationId,
+          eventId: 'event_proposed',
+          proposalRevision: `proposal-revision-${createCalls.length}`,
+          expectedRevisions: options.body?.expectedRevisions,
+          completion: options.body?.completion,
+          snapshot,
+          revisionBinding: {
+            editorRevision: snapshot.editorRevision,
+            staffRevision: snapshot.staffRevision,
+            scheduleRevision: snapshot.scheduleState.revision,
+          },
+          scheduleOutcome: {
+            status: 'PARTIAL',
+            isComplete: false,
+            matchCount: 1,
+            placedMatchCount: 0,
+            unplacedMatchCount: 1,
+            matches: [{ id: 'match_unplaced', matchId: 1 }],
+            unscheduledMatches: [{ id: 'match_unplaced' }],
+            affectedCompetitionPhases: [{ id: 'phase_1', name: 'Opening round' }],
+            warnings: [],
+          },
+          graph: {
+            event: { fields: [] },
+            matches: [{
+              id: 'match_unplaced',
+              matchId: 1,
+              placementState: 'UNPLACED',
+            }],
+          },
+        });
+      }
+      if (path === '/api/events/editor' && options?.method === 'PUT') {
+        return Promise.reject(new ApiRequestError(
+          'This schedule proposal is stale.',
+          409,
+          { code: 'EDITOR_PROPOSAL_STALE' },
+        ));
+      }
+      return defaultImplementation?.(path, options) ?? Promise.resolve({});
+    });
+
+    renderWithMantine(<LeagueSchedulePage />);
+
+    const createButton = await screen.findByRole('button', { name: /create event/i });
+    await waitFor(() => expect(createButton).toBeEnabled());
+    fireEvent.click(createButton);
+
+    const proposalModal = await screen.findByRole('dialog', {
+      name: /review schedule proposal/i,
+    });
+    expect(within(proposalModal).getByText(/proposal is incomplete/i)).toBeInTheDocument();
+    const reviewPartialButton = within(proposalModal).getByRole('button', {
+      name: /review partial acceptance/i,
+    });
+    expect(reviewPartialButton).toBeEnabled();
+    expect(within(proposalModal).getByRole('button', { name: /^reject$/i })).toBeEnabled();
+
+    fireEvent.click(reviewPartialButton);
+    const acceptanceModal = await screen.findByRole('dialog', {
+      name: /accept incomplete schedule/i,
+    });
+    const acceptPartialButton = within(acceptanceModal).getByRole('button', {
+      name: /accept partial schedule/i,
+    });
+    expect(acceptPartialButton).toBeEnabled();
+    fireEvent.click(acceptPartialButton);
+
+    await waitFor(() => {
+      expect(within(screen.getByRole('dialog', { name: /review schedule proposal/i }))
+        .getByRole('button', { name: /review partial acceptance/i })).toBeDisabled();
+    });
+    expect(within(screen.getByRole('dialog', { name: /review schedule proposal/i }))
+      .getByRole('button', { name: /^reject$/i })).toBeEnabled();
+    expect(await screen.findByText(/refresh the proposal to review the current schedule/i))
+      .toBeInTheDocument();
+
+    const refreshButton = screen.getByRole('button', { name: /refresh proposal/i });
+    expect(refreshButton).toBeEnabled();
+    fireEvent.click(refreshButton);
+
+    await waitFor(() => expect(createCalls).toHaveLength(2));
+    expect(createCalls[1]?.[1]?.body?.createOperationId)
+      .not.toBe(createCalls[0]?.[1]?.body?.createOperationId);
+    await waitFor(() => {
+      expect(within(screen.getByRole('dialog', { name: /review schedule proposal/i }))
+        .getByRole('button', { name: /review partial acceptance/i })).toBeEnabled();
+    });
+  });
   beforeEach(() => {
     window.localStorage.clear();
     useSearchParamsMock.mockReset();
@@ -655,6 +972,8 @@ describe('League schedule page', () => {
     mockRouter.replace.mockReset();
     mockRouter.back.mockReset();
     latestEditorEvent = null;
+    mockEditorReadObserver = null;
+    mockAvailableMaintenanceOperations = null;
     capturedEventFormProps = null;
     mockEventFormDraft = null;
     mockEventFormValidateResult = true;
@@ -708,7 +1027,9 @@ describe('League schedule page', () => {
     (eventService.getEventWithRelations as jest.Mock).mockReset();
     (eventService.getEventDetailBootstrap as jest.Mock).mockReset();
     (eventService.deleteEvent as jest.Mock).mockReset();
-    (eventService.reconcileEventSchedule as jest.Mock).mockReset();
+    (eventService.proposeEventScheduleMaintenance as jest.Mock).mockReset();
+    (eventService.acceptEventScheduleMaintenanceProposal as jest.Mock).mockReset();
+    (eventService.rejectEventScheduleMaintenanceProposal as jest.Mock).mockReset();
     apiRequestMock.mockImplementation((path: string, options?: any) => {
       const editorMatch = path.match(/^\/api\/events\/editor(?:\?([^/]*))?$/);
       const editEditorMatch = path.match(/^\/api\/events\/([^/]+)\/editor$/);
@@ -907,10 +1228,9 @@ describe('League schedule page', () => {
     const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
 
     renderWithMantine(<LeagueSchedulePage />);
-
     fireEvent.click(await screen.findByRole('button', { name: 'Select First Match' }));
 
-    expect(await screen.findByText('Teams required')).toBeInTheDocument();
+    expect(screen.getByText('Teams required')).toBeInTheDocument();
     expect(confirmSpy).not.toHaveBeenCalled();
     expect(apiRequestMock).not.toHaveBeenCalledWith(
       '/api/events/event_1/matches/match_1',
@@ -2232,7 +2552,7 @@ describe('League schedule page', () => {
     (eventService.deleteEventResult as jest.Mock).mockResolvedValue({ deleted: true, action: 'deleted' });
 
     try {
-      renderWithMantine(<LeagueSchedulePage />);
+      renderWithMantine(<LeagueSchedulePage />, undefined, { env: 'test' });
 
       expect(await screen.findByRole('button', { name: /^manage$/i })).toBeInTheDocument();
       await clickMoreAction(/delete event/i);
@@ -2502,7 +2822,7 @@ describe('League schedule page', () => {
       return Promise.resolve({});
     });
 
-    renderWithMantine(<LeagueSchedulePage />);
+    renderWithMantine(<LeagueSchedulePage />, undefined, { env: 'test' });
 
     await waitFor(() => {
       expect(screen.getByText('Test League')).toBeInTheDocument();
@@ -2717,7 +3037,7 @@ describe('League schedule page', () => {
       event: buildApiEvent({ state: 'UNPUBLISHED' }),
     });
 
-    renderWithMantine(<LeagueSchedulePage />);
+    renderWithMantine(<LeagueSchedulePage />, undefined, { env: 'test' });
 
     await waitFor(() => {
       expect(screen.getByText(/Summer League/)).toBeInTheDocument();
@@ -3065,18 +3385,16 @@ describe('League schedule page', () => {
     expect(command.draft.competition.usesSets).toBe(true);
   });
 
-  it('saves dirty Event Configuration once before one explicit Build schedule operation', async () => {
+  it('saves dirty Event Configuration before a Build proposal without mutating the displayed schedule', async () => {
     useSearchParamsMock.mockReturnValue({
-      get: (key: string) => {
-        if (key === 'mode') return 'edit';
-        return null;
-      },
+      get: (key: string) => (key === 'mode' ? 'edit' : null),
     });
     const unscheduledEvent = buildApiEvent({
       id: 'event_1',
       $id: 'event_1',
       eventType: 'LEAGUE',
       matches: [],
+      isAutomatedScheduling: true,
     });
     const eventWithoutMatches = { ...unscheduledEvent };
     delete (eventWithoutMatches as any).matches;
@@ -3092,13 +3410,11 @@ describe('League schedule page', () => {
       }
       return Promise.resolve({});
     });
-    (eventService.reconcileEventSchedule as jest.Mock).mockResolvedValue({
-      event: { ...unscheduledEvent, matches: [buildApiEvent().matches[0]] },
-      warnings: [],
-    });
     (eventService.getEvent as jest.Mock).mockResolvedValue(eventWithoutMatches);
     (eventService.getEventById as jest.Mock).mockResolvedValue(eventWithoutMatches);
-    const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
+    (eventService.proposeEventScheduleMaintenance as jest.Mock).mockResolvedValue(
+      buildMaintenanceProposal({ operation: 'BUILD' }),
+    );
 
     renderWithMantine(<LeagueSchedulePage />);
 
@@ -3106,373 +3422,1447 @@ describe('League schedule page', () => {
     const emptyCopy = await screen.findByText(
       /No schedule has been built\. Build a schedule from the current divisions, .+, availability, and team capacity\./,
     );
-    fireEvent.click(within(emptyCopy.parentElement as HTMLElement).getByRole('button', { name: 'Build schedule' }));
-
-    await waitFor(() => {
-      expect(apiRequestMock.mock.calls.filter(([path, options]) => (
-        path === '/api/events/event_1/editor'
-        && (options as { method?: string } | undefined)?.method === 'PUT'
-      ))).toHaveLength(1);
-    });
-    await waitFor(() => {
-      expect(eventService.reconcileEventSchedule).toHaveBeenCalledTimes(1);
-    });
-    expect(eventService.reconcileEventSchedule).toHaveBeenCalledWith(
-      'event_1',
-      expect.objectContaining({
-        expectedScheduleRevision: 'test-schedule-revision-after-save',
-        participantCount: 24,
-        replaceExistingMatches: false,
+    fireEvent.click(
+      within(emptyCopy.parentElement as HTMLElement).getByRole('button', {
+        name: 'Build schedule',
       }),
     );
-    expect(await screen.findByText('Schedule built.')).toBeInTheDocument();
 
-    confirmSpy.mockRestore();
+    await waitFor(() => {
+      expect(
+        apiRequestMock.mock.calls.filter(
+          ([path, options]) =>
+            path === '/api/events/event_1/editor' &&
+            (options as { method?: string } | undefined)?.method === 'PUT',
+        ),
+      ).toHaveLength(1);
+    });
+    await waitFor(() =>
+      expect(eventService.proposeEventScheduleMaintenance).toHaveBeenCalledTimes(1),
+    );
+    const proposalRequest = (
+      eventService.proposeEventScheduleMaintenance as jest.Mock
+    ).mock.calls[0][0];
+    expect(proposalRequest).toEqual(
+      expect.objectContaining({
+        contractVersion: 3,
+        eventId: 'event_1',
+        operation: 'BUILD',
+        participantCount: 24,
+      }),
+    );
+    expect(proposalRequest.expectedRevisions).toEqual(
+      expect.objectContaining({
+        editorRevision: 'test-editor-revision',
+        staffRevision: 'test-staff-revision',
+        scheduleRevision: 'test-schedule-revision-after-save',
+        fieldRevisions: expect.any(Object),
+        timeSlotRevisions: expect.any(Object),
+        rentalBookingRevision: null,
+        rentalBookingRevisions: {},
+        rentalBookingItemRevisions: {},
+        availabilityRevision: 'test-availability-revision-after-save',
+      }),
+    );
+    expect(proposalRequest).not.toHaveProperty('replaceExistingMatches');
+    expect(proposalRequest.operationId).toEqual(expect.any(String));
+    expect(
+      await screen.findByRole('dialog', {
+        name: /review schedule maintenance proposal/i,
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Placed matches: 1/)).toBeInTheDocument();
+    expect(screen.queryByTestId('calendar-match-match_1')).not.toBeInTheDocument();
   });
 
-  it.each(['LEAGUE', 'TOURNAMENT'] as const)(
-    'preserves an unplaced %s Match Graph when saving an unchanged Event Type',
-    async (eventType) => {
-      useSearchParamsMock.mockReturnValue({
-        get: (key: string) => (key === 'mode' ? 'edit' : null),
+  it('restores a dirty Event when capability validation fails after the pre-save', async () => {
+    useSearchParamsMock.mockReturnValue({
+      get: (key: string) => (key === 'mode' ? 'edit' : null),
+    });
+    const scheduledEvent = mockScheduleApiEvent({
+      isAutomatedScheduling: true,
+    });
+    latestEditorEvent = scheduledEvent;
+    mockEventFormDraft = {
+      ...scheduledEvent,
+    };
+    mockEventFormDirtyState = true;
+    let editorWriteCount = 0;
+    const editorWriteBodies: Array<Record<string, any>> = [];
+    const defaultImplementation = apiRequestMock.getMockImplementation();
+    apiRequestMock.mockImplementation((path: string, options?: MockRequestOptions) => {
+      if (
+        path === '/api/events/event_1/editor'
+        && options?.method === 'PUT'
+      ) {
+        editorWriteCount += 1;
+        if (options.body) editorWriteBodies.push(options.body);
+        if (editorWriteCount === 1) {
+          mockAvailableMaintenanceOperations = [];
+        }
+      }
+      return defaultImplementation?.(path, options) ?? Promise.resolve({});
+    });
+
+    renderWithMantine(<LeagueSchedulePage />, undefined, { env: 'test' });
+
+    await screen.findByText('Summer League');
+    mockEventFormDraft = {
+      ...scheduledEvent,
+      name: 'Edited maintenance event',
+    };
+    await clickMoreAction(/^Rebuild$/i);
+
+    await waitFor(() => expect(editorWriteCount).toBe(2));
+    expect(editorWriteBodies[0]?.draft?.basics?.name).toBe('Edited maintenance event');
+    expect(editorWriteBodies[1]?.draft?.basics?.name).toBe(scheduledEvent.name);
+    expect(eventService.proposeEventScheduleMaintenance).not.toHaveBeenCalled();
+    expect(await screen.findByText(
+      /That schedule maintenance operation is not available for the current Event/i,
+    )).toBeInTheDocument();
+  });
+
+  it('synchronizes an already accepted response returned by the proposal endpoint', async () => {
+    useSearchParamsMock.mockReturnValue({
+      get: (key: string) => (key === 'mode' ? 'edit' : null),
+    });
+    mockScheduleApiEvent({ isAutomatedScheduling: true });
+    const proposal = buildMaintenanceProposal({ operation: 'REBUILD' });
+    (eventService.proposeEventScheduleMaintenance as jest.Mock).mockResolvedValue({
+      ...proposal,
+      status: 'ACCEPTED',
+      acceptanceOperationId: 'accepted-during-propose',
+    });
+
+    renderWithMantine(<LeagueSchedulePage />, undefined, { env: 'test' });
+
+    await screen.findByText('Summer League');
+    await clickMoreAction(/^Rebuild$/i);
+
+    await waitFor(() => expect(eventService.proposeEventScheduleMaintenance)
+      .toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(/Schedule accepted with 1 matches/i))
+      .toBeInTheDocument();
+    expect(screen.queryByRole('dialog', {
+      name: /review schedule maintenance proposal/i,
+    })).not.toBeInTheDocument();
+    await openMoreActionsMenu();
+    expect(screen.getByRole('menuitem', { name: /^Rebuild$/i })).toBeInTheDocument();
+  });
+
+  it('blocks maintenance proposals while staged Match changes remain unsaved', async () => {
+    useSearchParamsMock.mockReturnValue({
+      get: (key: string) => (key === 'mode' ? 'edit' : null),
+    });
+    const acceptedEvent = mockScheduleApiEvent({ isAutomatedScheduling: true });
+
+    renderWithMantine(<LeagueSchedulePage />, undefined, { env: 'test' });
+
+    await screen.findByText(/Summer League/);
+    const saveButton = await screen.findByRole('button', { name: /^save$/i });
+    fireEvent.click(await screen.findByRole('button', { name: /move first match/i }));
+    await waitFor(() => expect(saveButton).toBeEnabled());
+
+    await clickMoreAction(/^Rebuild$/i);
+
+    expect(
+      await screen.findByText(
+        /Save or discard staged Match changes before generating a schedule maintenance proposal/i,
+      ),
+    ).toBeInTheDocument();
+    expect(saveButton).toBeEnabled();
+    expect(eventService.proposeEventScheduleMaintenance).not.toHaveBeenCalled();
+    expect(
+      apiRequestMock.mock.calls.some(
+        ([path, options]) =>
+          path === '/api/events/event_1/matches' &&
+          (options as { method?: string } | undefined)?.method === 'PATCH',
+      ),
+    ).toBe(false);
+    expect(acceptedEvent.matches?.[0]?.start).toBe('2026-03-01T10:00:00Z');
+  });
+
+  it('sends PRESERVE for an existing event type change and keeps its Match Graph for explicit Rebuild', async () => {
+    useSearchParamsMock.mockReturnValue({
+      get: (key: string) => (key === 'mode' ? 'edit' : null),
+    });
+    const acceptedEvent = mockScheduleApiEvent({
+      eventType: 'LEAGUE',
+      isAutomatedScheduling: true,
+    });
+    latestEditorEvent = acceptedEvent;
+
+    renderWithMantine(<LeagueSchedulePage />);
+
+    await screen.findByText('Summer League');
+    const saveButton = await screen.findByRole('button', { name: /^save$/i });
+    mockEventFormDraft = {
+      ...acceptedEvent,
+      eventType: 'EVENT',
+    };
+    fireEvent.change(screen.getByLabelText('Mock Event Form Input'), {
+      target: { value: 'event type changed' },
+    });
+
+    await waitFor(() => expect(saveButton).toBeEnabled());
+    fireEvent.click(saveButton);
+
+    const confirmation = await screen.findByRole('dialog', {
+      name: /change event type and preserve schedule/i,
+    });
+    expect(
+      within(confirmation).getByText(/preserving its 1 scheduled matches/i),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      within(confirmation).getByRole('button', {
+        name: /change type & preserve schedule/i,
+      }),
+    );
+
+    let editorSaveCall: [string, any] | undefined;
+    await waitFor(() => {
+      editorSaveCall = [...apiRequestMock.mock.calls].reverse().find(([path, options]) => (
+        path === '/api/events/event_1/editor' &&
+        (options as { method?: string } | undefined)?.method === 'PUT'
+      )) as [string, any] | undefined;
+      expect(editorSaveCall).toBeDefined();
+    });
+    expect(editorSaveCall?.[1]?.body?.scheduleTransition).toEqual({
+      mode: 'PRESERVE',
+    });
+    expect(editorSaveCall?.[1]?.body?.scheduleTransition).not.toHaveProperty(
+      'expectedScheduleRevision',
+    );
+    expect(
+      apiRequestMock.mock.calls.some(
+        ([path, options]) =>
+          path === '/api/events/event_1/matches' &&
+          (options as { method?: string } | undefined)?.method === 'PATCH',
+      ),
+    ).toBe(false);
+    expect(acceptedEvent.matches?.[0]?.start).toBe('2026-03-01T10:00:00Z');
+  });
+
+
+  it('refreshes maintenance capabilities and keeps stale review safe when its operation is unavailable', async () => {
+    useSearchParamsMock.mockReturnValue({
+      get: (key: string) => (key === 'mode' ? 'edit' : null),
+    });
+    let editorReadCount = 0;
+    mockEditorReadObserver = () => {
+      editorReadCount += 1;
+    };
+    mockScheduleApiEvent({ isAutomatedScheduling: true });
+    const proposal = buildMaintenanceProposal({ operation: 'REBUILD' });
+    (eventService.proposeEventScheduleMaintenance as jest.Mock).mockResolvedValue(
+      proposal,
+    );
+    (eventService.acceptEventScheduleMaintenanceProposal as jest.Mock).mockRejectedValue(
+      new ApiRequestError(
+        'The schedule maintenance proposal is stale.',
+        409,
+        { code: 'EDITOR_MAINTENANCE_STALE' },
+      ),
+    );
+
+    renderWithMantine(<LeagueSchedulePage />, undefined, { env: 'test' });
+
+    await screen.findByText(/Summer League/);
+    await clickMoreAction(/^Rebuild$/i);
+    const review = await screen.findByRole('dialog', {
+      name: /review schedule maintenance proposal/i,
+    });
+    fireEvent.click(within(review).getByRole('button', { name: /accept schedule/i }));
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole('dialog', {
+          name: /review schedule maintenance proposal/i,
+        })).getByText(/proposal is stale and cannot be accepted/i),
+      ).toBeInTheDocument(),
+    );
+
+    const readsBeforeRefresh = editorReadCount;
+    mockAvailableMaintenanceOperations = ['COMPLETE'];
+    fireEvent.click(
+      within(screen.getByRole('dialog', {
+        name: /review schedule maintenance proposal/i,
+      })).getByRole('button', { name: /create fresh proposal/i }),
+    );
+
+    await waitFor(() => expect(editorReadCount).toBeGreaterThan(readsBeforeRefresh));
+    expect(eventService.proposeEventScheduleMaintenance).toHaveBeenCalledTimes(1);
+    const staleReview = screen.getByRole('dialog', {
+      name: /review schedule maintenance proposal/i,
+    });
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole('dialog', {
+          name: /review schedule maintenance proposal/i,
+        })).getByText(
+          /That schedule maintenance operation is not available for the current Event/i,
+        ),
+      ).toBeInTheDocument(),
+    );
+    expect(
+      within(staleReview).getByRole('button', { name: /accept schedule/i }),
+    ).toBeDisabled();
+  });
+
+
+  it('reviews an incomplete Complete proposal, accepts it, and refreshes operation availability', async () => {
+    useSearchParamsMock.mockReturnValue({
+      get: (key: string) => (key === 'mode' ? 'edit' : null),
+    });
+    const sourceMatch = buildApiEvent().matches[0];
+    const unplacedMatch = {
+      ...sourceMatch,
+      id: 'unplaced_current',
+      $id: 'unplaced_current',
+      placementState: 'UNPLACED',
+      fieldId: null,
+      field: null,
+      start: null,
+      end: null,
+    };
+    let hasAccepted = false;
+    const editorReadAcceptanceStates: boolean[] = [];
+    mockEditorReadObserver = () => editorReadAcceptanceStates.push(hasAccepted);
+    const scheduledEvent = mockScheduleApiEvent({
+      isAutomatedScheduling: true,
+      matches: [unplacedMatch],
+    });
+    latestEditorEvent = scheduledEvent;
+    mockAvailableMaintenanceOperations = ['COMPLETE', 'REBUILD'];
+    const proposal = buildMaintenanceProposal({
+      operation: 'COMPLETE',
+      includeUnplaced: true,
+      warnings: [{ code: 'RESOURCE_LIMIT', message: 'One warning from backend.' }],
+    });
+    (eventService.proposeEventScheduleMaintenance as jest.Mock).mockResolvedValue(
+      proposal,
+    );
+    (eventService.acceptEventScheduleMaintenanceProposal as jest.Mock).mockImplementation(
+      async () => {
+        hasAccepted = true;
+        mockAvailableMaintenanceOperations = ['REBUILD'];
+        return {
+          ...proposal,
+          status: 'ACCEPTED',
+          acceptanceOperationId: 'acceptance-1',
+        };
+      },
+    );
+    const originalMatches = Element.prototype.matches;
+    Element.prototype.matches = function guardedMatches(selector: string) {
+      if (selector === ':modal' || selector === ':fullscreen') return false;
+      return originalMatches.call(this, selector);
+    };
+    try {
+      renderWithMantine(<LeagueSchedulePage />, undefined, { env: 'test' });
+      await screen.findByText(/Summer League/);
+      await clickMoreAction(/^Complete$/i);
+      const review = await screen.findByRole('dialog', {
+        name: /review schedule maintenance proposal/i,
       });
-      const sourceMatch = buildApiEvent().matches[0];
-      const unplacedMatch = {
+      expect(within(review).getByText(/Placed matches: 1/)).toBeInTheDocument();
+      expect(within(review).getByText(/Unplaced matches: 1/)).toBeInTheDocument();
+      expect(within(review).getByText(/One warning from backend/)).toBeInTheDocument();
+      expect(within(review).getByText(/Affected Competition Phases: Opening round/))
+        .toBeInTheDocument();
+      expect(within(review).getByText(/Match 2:/)).toBeInTheDocument();
+
+      fireEvent.click(within(review).getByRole('button', { name: /accept schedule/i }));
+
+      await waitFor(() =>
+        expect(eventService.acceptEventScheduleMaintenanceProposal).toHaveBeenCalledTimes(1),
+      );
+      const acceptanceRequest = (
+        eventService.acceptEventScheduleMaintenanceProposal as jest.Mock
+      ).mock.calls[0][0];
+      expect(acceptanceRequest).toEqual({
+        contractVersion: 3,
+        eventId: proposal.eventId,
+        operation: proposal.operation,
+        operationId: proposal.operationId,
+        proposalRevision: proposal.proposalRevision,
+        acceptanceOperationId: expect.any(String),
+      });
+      expect(acceptanceRequest.acceptanceOperationId).not.toBe(
+        proposal.operationId,
+      );
+      await waitFor(() =>
+        expect(
+          screen.queryByRole('dialog', {
+            name: /review schedule maintenance proposal/i,
+          }),
+        ).not.toBeInTheDocument(),
+      );
+      expect(await screen.findByText(/Schedule accepted with 1 placed and 1 unplaced/))
+        .toBeInTheDocument();
+      await waitFor(() => expect(editorReadAcceptanceStates).toContain(true));
+      await openMoreActionsMenu();
+      expect(screen.queryByRole('menuitem', { name: /^Build$/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('menuitem', { name: /^Complete$/i })).not.toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: /^Rebuild$/i })).toBeInTheDocument();
+      expect(
+        apiRequestMock.mock.calls.filter(
+          ([path]) => path === '/api/events/event_1/matches',
+        ).length,
+      ).toBeGreaterThan(1);
+    } finally {
+      Element.prototype.matches = originalMatches;
+    }
+  });
+
+  it('keeps a stale proposal review open, never writes the schedule, and recovers with a fresh identity', async () => {
+    useSearchParamsMock.mockReturnValue({
+      get: (key: string) => (key === 'mode' ? 'edit' : null),
+    });
+    mockScheduleApiEvent({ isAutomatedScheduling: true });
+    const proposalRequests: Array<Record<string, unknown>> = [];
+    (eventService.proposeEventScheduleMaintenance as jest.Mock).mockImplementation(
+      (request: Record<string, unknown>) => {
+        proposalRequests.push(request);
+        return Promise.resolve(
+          buildMaintenanceProposal({
+            operation: 'REBUILD',
+          }),
+        );
+      },
+    );
+    (eventService.acceptEventScheduleMaintenanceProposal as jest.Mock).mockRejectedValue(
+      new ApiRequestError(
+        'The schedule maintenance proposal is stale.',
+        409,
+        { code: 'EDITOR_MAINTENANCE_STALE' },
+      ),
+    );
+
+    renderWithMantine(<LeagueSchedulePage />, undefined, { env: 'test' });
+
+    await screen.findByText(/Summer League/);
+    await clickMoreAction(/^Rebuild$/i);
+    const review = await screen.findByRole('dialog', {
+      name: /review schedule maintenance proposal/i,
+    });
+    const matchReadsBeforeAccept = apiRequestMock.mock.calls.filter(
+      ([path]) => path === '/api/events/event_1/matches',
+    ).length;
+    fireEvent.click(within(review).getByRole('button', { name: /accept schedule/i }));
+
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole('dialog', {
+          name: /review schedule maintenance proposal/i,
+        })).getByText(/proposal is stale and cannot be accepted/i),
+      ).toBeInTheDocument(),
+    );
+    expect(
+      within(screen.getByRole('dialog', {
+        name: /review schedule maintenance proposal/i,
+      })).getByRole('button', { name: /accept schedule/i }),
+    ).toBeDisabled();
+    expect(
+      apiRequestMock.mock.calls.filter(
+        ([path]) => path === '/api/events/event_1/matches',
+      ).length,
+    ).toBe(matchReadsBeforeAccept);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /create fresh proposal/i }),
+    );
+    await waitFor(() =>
+      expect(eventService.proposeEventScheduleMaintenance).toHaveBeenCalledTimes(2),
+    );
+    expect(proposalRequests[1]?.operationId).not.toBe(
+      proposalRequests[0]?.operationId,
+    );
+  });
+
+  it('rejects a maintenance proposal with its stored identity and leaves the schedule untouched', async () => {
+    useSearchParamsMock.mockReturnValue({
+      get: (key: string) => (key === 'mode' ? 'edit' : null),
+    });
+    mockScheduleApiEvent({ isAutomatedScheduling: true });
+    let editorReadCount = 0;
+    mockEditorReadObserver = () => {
+      editorReadCount += 1;
+    };
+    const proposal = buildMaintenanceProposal({ operation: 'REBUILD' });
+    (eventService.proposeEventScheduleMaintenance as jest.Mock).mockResolvedValue(
+      proposal,
+    );
+    (eventService.rejectEventScheduleMaintenanceProposal as jest.Mock).mockResolvedValue({
+      status: 'REJECTED',
+      contractVersion: 3,
+      eventId: proposal.eventId,
+      operation: proposal.operation,
+      operationId: proposal.operationId,
+      proposalRevision: proposal.proposalRevision,
+    });
+
+    renderWithMantine(<LeagueSchedulePage />, undefined, { env: 'test' });
+
+    await screen.findByText(/Summer League/);
+    await clickMoreAction(/^Rebuild$/i);
+    const review = await screen.findByRole('dialog', {
+      name: /review schedule maintenance proposal/i,
+    });
+    const editorReadsBeforeReject = editorReadCount;
+    fireEvent.click(within(review).getByRole('button', { name: /^Reject$/i }));
+
+    await waitFor(() =>
+      expect(eventService.rejectEventScheduleMaintenanceProposal).toHaveBeenCalledWith({
+        contractVersion: 3,
+        eventId: proposal.eventId,
+        operation: proposal.operation,
+        operationId: proposal.operationId,
+        proposalRevision: proposal.proposalRevision,
+      }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('dialog', {
+          name: /review schedule maintenance proposal/i,
+        }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(await screen.findByText(/Schedule proposal rejected/)).toBeInTheDocument();
+    expect(editorReadCount).toBeGreaterThan(editorReadsBeforeReject);
+    expect(eventService.acceptEventScheduleMaintenanceProposal).not.toHaveBeenCalled();
+  });
+
+  it('retries a rejected proposal capability refresh without creating another proposal', async () => {
+    useSearchParamsMock.mockReturnValue({
+      get: (key: string) => (key === 'mode' ? 'edit' : null),
+    });
+    mockScheduleApiEvent({ isAutomatedScheduling: true });
+    const defaultImplementation = apiRequestMock.getMockImplementation();
+    let failEditorSnapshotRead = false;
+    apiRequestMock.mockImplementation((path: string, options?: MockRequestOptions) => {
+      if (
+        failEditorSnapshotRead
+        && path === '/api/events/event_1/editor'
+        && (!options?.method || options.method === 'GET')
+      ) {
+        return Promise.reject(new Error('Editor capabilities unavailable.'));
+      }
+      return defaultImplementation?.(path, options) ?? Promise.resolve({});
+    });
+    const proposal = buildMaintenanceProposal({ operation: 'REBUILD' });
+    (eventService.proposeEventScheduleMaintenance as jest.Mock).mockResolvedValue(
+      proposal,
+    );
+    (eventService.rejectEventScheduleMaintenanceProposal as jest.Mock).mockResolvedValue({
+      status: 'REJECTED',
+      contractVersion: 3,
+      eventId: proposal.eventId,
+      operation: proposal.operation,
+      operationId: proposal.operationId,
+      proposalRevision: proposal.proposalRevision,
+    });
+
+    renderWithMantine(<LeagueSchedulePage />, undefined, { env: 'test' });
+
+    await screen.findByText(/Summer League/);
+    await clickMoreAction(/^Rebuild$/i);
+    const review = await screen.findByRole('dialog', {
+      name: /review schedule maintenance proposal/i,
+    });
+    failEditorSnapshotRead = true;
+    fireEvent.click(within(review).getByRole('button', { name: /^Reject$/i }));
+
+    await waitFor(() =>
+      expect(eventService.rejectEventScheduleMaintenanceProposal).toHaveBeenCalledTimes(1),
+    );
+    const syncReview = await screen.findByRole('dialog', {
+      name: /review schedule maintenance proposal/i,
+    });
+    expect(
+      within(syncReview).getByText(
+        /^Schedule proposal was rejected, but operation availability could not be refreshed/i,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(syncReview).getByRole('button', { name: /^Reject$/i }),
+    ).toBeDisabled();
+    const refreshButton = within(syncReview).getByRole('button', {
+      name: /refresh operation availability/i,
+    });
+    expect(refreshButton).toBeEnabled();
+
+    fireEvent.click(refreshButton);
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole('dialog', {
+          name: /review schedule maintenance proposal/i,
+        })).getByText(
+          /^Schedule proposal was rejected, but operation availability could not be refreshed/i,
+        ),
+      ).toBeInTheDocument(),
+    );
+    expect(eventService.proposeEventScheduleMaintenance).toHaveBeenCalledTimes(1);
+
+    failEditorSnapshotRead = false;
+    fireEvent.click(
+      within(screen.getByRole('dialog', {
+        name: /review schedule maintenance proposal/i,
+      })).getByRole('button', { name: /refresh operation availability/i }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('dialog', {
+          name: /review schedule maintenance proposal/i,
+        }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(eventService.proposeEventScheduleMaintenance).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText(/Schedule proposal rejected/)).toBeInTheDocument();
+    expect(eventService.rejectEventScheduleMaintenanceProposal).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses a fresh maintenance operation identity after saved scheduling inputs change', async () => {
+    useSearchParamsMock.mockReturnValue({
+      get: (key: string) => (key === 'mode' ? 'edit' : null),
+    });
+    const scheduledEvent = mockScheduleApiEvent({ isAutomatedScheduling: true });
+    latestEditorEvent = scheduledEvent;
+    let editorRevision = 'maintenance-editor-revision-1';
+    let scheduleRevision = 'maintenance-schedule-revision-1';
+    const defaultImplementation = apiRequestMock.getMockImplementation();
+    apiRequestMock.mockImplementation((path: string, options?: MockRequestOptions) => {
+      if (
+        path === '/api/events/event_1/editor'
+        && (!options?.method || options.method === 'GET')
+      ) {
+        const snapshot = buildEditorSnapshot(scheduledEvent, 'EDIT');
+        snapshot.editorRevision = editorRevision;
+        snapshot.scheduleState.revision = scheduleRevision;
+        snapshot.revisionBinding = {
+          ...snapshot.revisionBinding,
+          editorRevision,
+          scheduleRevision,
+          availabilityRevision: `maintenance-availability-${scheduleRevision}`,
+        };
+        return Promise.resolve(snapshot);
+      }
+      if (path === '/api/events/event_1/editor' && options?.method === 'PUT') {
+        const persistedSource = latestEditorEvent ?? scheduledEvent;
+        const snapshot = buildEditorSnapshot(
+          persistedSource,
+          'EDIT',
+          options.body?.draft,
+        );
+        snapshot.editorRevision = editorRevision;
+        snapshot.scheduleState.revision = scheduleRevision;
+        snapshot.revisionBinding = {
+          ...snapshot.revisionBinding,
+          editorRevision,
+          scheduleRevision,
+          availabilityRevision: `maintenance-availability-${scheduleRevision}`,
+        };
+        return Promise.resolve({
+          status: 'SAVED',
+          event: persistedSource,
+          snapshot,
+          questionIdMap: {},
+          staffEmailDelivery: 'NOT_REQUESTED',
+          scheduleOutcome: buildEditorScheduleOutcome(options, persistedSource),
+        });
+      }
+      return defaultImplementation?.(path, options) ?? Promise.resolve({});
+    });
+
+    const proposalRequests: Array<Record<string, unknown>> = [];
+    (eventService.proposeEventScheduleMaintenance as jest.Mock).mockImplementation(
+      (request: Record<string, unknown>) => {
+        proposalRequests.push(request);
+        if (proposalRequests.length <= 2) {
+          return Promise.reject(new Error('Maintenance request failed.'));
+        }
+        return Promise.resolve(buildMaintenanceProposal({ operation: 'REBUILD' }));
+      },
+    );
+
+    renderWithMantine(<LeagueSchedulePage />, undefined, { env: 'test' });
+
+    await screen.findByText(/Summer League/);
+    await clickMoreAction(/^Rebuild$/i);
+    await waitFor(() => expect(proposalRequests).toHaveLength(1));
+    await screen.findByText(/Failed to rebuild schedule/);
+
+    await clickMoreAction(/^Rebuild$/i);
+    await waitFor(() => expect(proposalRequests).toHaveLength(2));
+    expect(proposalRequests[1]?.operationId).toBe(proposalRequests[0]?.operationId);
+
+    editorRevision = 'maintenance-editor-revision-2';
+    scheduleRevision = 'maintenance-schedule-revision-2';
+    mockEventFormDraft = {
+      ...scheduledEvent,
+      name: 'Changed scheduling inputs',
+    };
+    fireEvent.change(screen.getByLabelText('Mock Event Form Input'), {
+      target: { value: 'changed scheduling inputs' },
+    });
+    const saveButton = await screen.findByRole('button', { name: /^save$/i });
+    await waitFor(() => expect(saveButton).toBeEnabled());
+    fireEvent.click(saveButton);
+    await waitFor(() =>
+      expect(
+        apiRequestMock.mock.calls.filter(
+          ([path, options]) =>
+            path === '/api/events/event_1/editor'
+            && (options as MockRequestOptions)?.method === 'PUT',
+        ),
+      ).toHaveLength(1),
+    );
+
+    await clickMoreAction(/^Rebuild$/i);
+    await waitFor(() => expect(proposalRequests).toHaveLength(3));
+    expect(proposalRequests[2]?.operationId).not.toBe(proposalRequests[1]?.operationId);
+  });
+
+  it('reuses a fresh maintenance identity when an unchanged stale refresh request is retried', async () => {
+    useSearchParamsMock.mockReturnValue({
+      get: (key: string) => (key === 'mode' ? 'edit' : null),
+    });
+    mockScheduleApiEvent({ isAutomatedScheduling: true });
+    const proposal = buildMaintenanceProposal({ operation: 'REBUILD' });
+    const proposalRequests: Array<Record<string, unknown>> = [];
+    (eventService.proposeEventScheduleMaintenance as jest.Mock).mockImplementation(
+      (request: Record<string, unknown>) => {
+        proposalRequests.push(request);
+        return proposalRequests.length === 1
+          ? Promise.resolve(proposal)
+          : Promise.reject(new Error('Refresh request failed.'));
+      },
+    );
+    (eventService.acceptEventScheduleMaintenanceProposal as jest.Mock).mockRejectedValue(
+      new ApiRequestError(
+        'The schedule maintenance proposal is stale.',
+        409,
+        { code: 'EDITOR_MAINTENANCE_STALE' },
+      ),
+    );
+
+    renderWithMantine(<LeagueSchedulePage />, undefined, { env: 'test' });
+
+    await screen.findByText(/Summer League/);
+    await clickMoreAction(/^Rebuild$/i);
+    const review = await screen.findByRole('dialog', {
+      name: /review schedule maintenance proposal/i,
+    });
+    fireEvent.click(within(review).getByRole('button', { name: /accept schedule/i }));
+    await waitFor(() =>
+      expect(within(screen.getByRole('dialog', {
+        name: /review schedule maintenance proposal/i,
+      })).getByText(/proposal is stale and cannot be accepted/i)).toBeInTheDocument(),
+    );
+
+    fireEvent.click(
+      within(screen.getByRole('dialog', {
+        name: /review schedule maintenance proposal/i,
+      })).getByRole('button', { name: /create fresh proposal/i }),
+    );
+    await waitFor(() => expect(proposalRequests).toHaveLength(2));
+    await waitFor(() =>
+      expect(within(screen.getByRole('dialog', {
+        name: /review schedule maintenance proposal/i,
+      })).getByText(/Failed to rebuild schedule/i)).toBeInTheDocument(),
+    );
+    expect(proposalRequests[1]?.operationId).not.toBe(proposalRequests[0]?.operationId);
+
+    fireEvent.click(
+      within(screen.getByRole('dialog', {
+        name: /review schedule maintenance proposal/i,
+      })).getByRole('button', { name: /create fresh proposal/i }),
+    );
+    await waitFor(() => expect(proposalRequests).toHaveLength(3));
+    expect(proposalRequests[2]?.operationId).toBe(proposalRequests[1]?.operationId);
+  });
+
+  it('closes maintenance review when acceptance reports a rejected proposal', async () => {
+    useSearchParamsMock.mockReturnValue({
+      get: (key: string) => (key === 'mode' ? 'edit' : null),
+    });
+    mockScheduleApiEvent({ isAutomatedScheduling: true });
+    const proposal = buildMaintenanceProposal({ operation: 'REBUILD' });
+    (eventService.proposeEventScheduleMaintenance as jest.Mock).mockResolvedValue(
+      proposal,
+    );
+    (eventService.acceptEventScheduleMaintenanceProposal as jest.Mock).mockRejectedValue(
+      new ApiRequestError(
+        'The maintenance proposal has been rejected.',
+        409,
+        { code: 'EDITOR_MAINTENANCE_REJECTED' },
+      ),
+    );
+
+    renderWithMantine(<LeagueSchedulePage />, undefined, { env: 'test' });
+
+    await screen.findByText(/Summer League/);
+    await clickMoreAction(/^Rebuild$/i);
+    const review = await screen.findByRole('dialog', {
+      name: /review schedule maintenance proposal/i,
+    });
+    const matchReadsBeforeAccept = apiRequestMock.mock.calls.filter(
+      ([path]) => path === '/api/events/event_1/matches',
+    ).length;
+    fireEvent.click(within(review).getByRole('button', { name: /accept schedule/i }));
+
+    await waitFor(() =>
+      expect(eventService.acceptEventScheduleMaintenanceProposal).toHaveBeenCalledTimes(1),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('dialog', {
+          name: /review schedule maintenance proposal/i,
+        }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(
+      await screen.findByText(/was rejected and can no longer be accepted/i),
+    ).toBeInTheDocument();
+    expect(
+      apiRequestMock.mock.calls.filter(
+        ([path]) => path === '/api/events/event_1/matches',
+      ),
+    ).toHaveLength(matchReadsBeforeAccept);
+  });
+
+  it('recovers a PUT acceptance conflict from the current schedule without creating a fresh proposal', async () => {
+    useSearchParamsMock.mockReturnValue({
+      get: (key: string) => (key === 'mode' ? 'edit' : null),
+      toString: () => '',
+    });
+    let editorReadCount = 0;
+    mockEditorReadObserver = () => {
+      editorReadCount += 1;
+    };
+    mockScheduleApiEvent({
+      isAutomatedScheduling: true,
+      name: 'Accepted server schedule',
+    });
+    const proposal = buildMaintenanceProposal({ operation: 'REBUILD' });
+    (eventService.proposeEventScheduleMaintenance as jest.Mock).mockResolvedValue(
+      proposal,
+    );
+    (eventService.acceptEventScheduleMaintenanceProposal as jest.Mock).mockRejectedValue(
+      new ApiRequestError(
+        'The proposal was already accepted by another acceptance operation.',
+        409,
+        { code: 'EDITOR_MAINTENANCE_ACCEPTANCE_CONFLICT' },
+      ),
+    );
+
+    renderWithMantine(<LeagueSchedulePage />, undefined, { env: 'test' });
+
+    await screen.findByText(/Accepted server schedule/);
+    await clickMoreAction(/^Rebuild$/i);
+    const review = await screen.findByRole('dialog', {
+      name: /review schedule maintenance proposal/i,
+    });
+    const editorReadsBeforeAccept = editorReadCount;
+    const matchReadsBeforeAccept = apiRequestMock.mock.calls.filter(
+      ([path]) => path === '/api/events/event_1/matches',
+    ).length;
+    mockRouter.replace.mockClear();
+
+    fireEvent.click(within(review).getByRole('button', { name: /accept schedule/i }));
+
+    await waitFor(() =>
+      expect(eventService.acceptEventScheduleMaintenanceProposal).toHaveBeenCalledTimes(1),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('dialog', {
+          name: /review schedule maintenance proposal/i,
+        }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(
+      await screen.findByText(/Schedule accepted by another client/i),
+    ).toBeInTheDocument();
+    expect(editorReadCount).toBeGreaterThan(editorReadsBeforeAccept);
+    expect(
+      apiRequestMock.mock.calls.filter(
+        ([path]) => path === '/api/events/event_1/matches',
+      ).length,
+    ).toBeGreaterThan(matchReadsBeforeAccept);
+    expect(mockRouter.replace).toHaveBeenCalledWith(
+      '/events/event_1/schedule',
+      { scroll: false },
+    );
+    expect(eventService.proposeEventScheduleMaintenance).toHaveBeenCalledTimes(1);
+  });
+
+  it('recovers a rejected acceptance conflict from the current schedule without repeating rejection', async () => {
+    useSearchParamsMock.mockReturnValue({
+      get: (key: string) => (key === 'mode' ? 'edit' : null),
+      toString: () => '',
+    });
+    let editorReadCount = 0;
+    mockEditorReadObserver = () => {
+      editorReadCount += 1;
+    };
+    mockScheduleApiEvent({
+      isAutomatedScheduling: true,
+      name: 'Accepted server schedule',
+    });
+    const proposal = buildMaintenanceProposal({ operation: 'REBUILD' });
+    (eventService.proposeEventScheduleMaintenance as jest.Mock).mockResolvedValue(
+      proposal,
+    );
+    (eventService.rejectEventScheduleMaintenanceProposal as jest.Mock).mockRejectedValue(
+      new ApiRequestError(
+        'The proposal was already accepted by another acceptance operation.',
+        409,
+        { code: 'EDITOR_MAINTENANCE_ACCEPTANCE_CONFLICT' },
+      ),
+    );
+
+    renderWithMantine(<LeagueSchedulePage />, undefined, { env: 'test' });
+
+    await screen.findByText(/Accepted server schedule/);
+    await clickMoreAction(/^Rebuild$/i);
+    const review = await screen.findByRole('dialog', {
+      name: /review schedule maintenance proposal/i,
+    });
+    const editorReadsBeforeReject = editorReadCount;
+    const matchReadsBeforeReject = apiRequestMock.mock.calls.filter(
+      ([path]) => path === '/api/events/event_1/matches',
+    ).length;
+    mockRouter.replace.mockClear();
+
+    fireEvent.click(within(review).getByRole('button', { name: /^Reject$/i }));
+
+    await waitFor(() =>
+      expect(eventService.rejectEventScheduleMaintenanceProposal).toHaveBeenCalledTimes(1),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('dialog', {
+          name: /review schedule maintenance proposal/i,
+        }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(
+      await screen.findByText(/Schedule accepted by another client/i),
+    ).toBeInTheDocument();
+    expect(editorReadCount).toBeGreaterThan(editorReadsBeforeReject);
+    expect(
+      apiRequestMock.mock.calls.filter(
+        ([path]) => path === '/api/events/event_1/matches',
+      ).length,
+    ).toBeGreaterThan(matchReadsBeforeReject);
+    expect(mockRouter.replace).toHaveBeenCalledWith(
+      '/events/event_1/schedule',
+      { scroll: false },
+    );
+    expect(eventService.rejectEventScheduleMaintenanceProposal).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps an acceptance-conflict review non-actionable when schedule refresh fails', async () => {
+    useSearchParamsMock.mockReturnValue({
+      get: (key: string) => (key === 'mode' ? 'edit' : null),
+    });
+    mockScheduleApiEvent({ isAutomatedScheduling: true });
+    const defaultImplementation = apiRequestMock.getMockImplementation();
+    let failScheduleReload = false;
+    apiRequestMock.mockImplementation((path: string, options?: MockRequestOptions) => {
+      if (failScheduleReload && path === '/api/events/event_1') {
+        return Promise.reject(
+          new ApiRequestError(
+            'Schedule refresh failed.',
+            503,
+            { code: 'SCHEDULE_REFRESH_FAILED' },
+          ),
+        );
+      }
+      return defaultImplementation?.(path, options) ?? Promise.resolve({});
+    });
+    const proposal = buildMaintenanceProposal({ operation: 'REBUILD' });
+    (eventService.proposeEventScheduleMaintenance as jest.Mock).mockResolvedValue(
+      proposal,
+    );
+    (eventService.rejectEventScheduleMaintenanceProposal as jest.Mock).mockRejectedValue(
+      new ApiRequestError(
+        'The proposal was already accepted by another acceptance operation.',
+        409,
+        { code: 'EDITOR_MAINTENANCE_ACCEPTANCE_CONFLICT' },
+      ),
+    );
+
+    renderWithMantine(<LeagueSchedulePage />, undefined, { env: 'test' });
+
+    await screen.findByText(/Summer League/);
+    await clickMoreAction(/^Rebuild$/i);
+    const review = await screen.findByRole('dialog', {
+      name: /review schedule maintenance proposal/i,
+    });
+    failScheduleReload = true;
+    fireEvent.click(within(review).getByRole('button', { name: /^Reject$/i }));
+    await waitFor(() =>
+      expect(eventService.rejectEventScheduleMaintenanceProposal).toHaveBeenCalledTimes(1),
+    );
+
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole('dialog', {
+          name: /review schedule maintenance proposal/i,
+        })).getByText(
+          'Another client accepted this proposal, but the current schedule could not be synchronized. Retry synchronization.',
+        ),
+      ).toBeInTheDocument(),
+    );
+    const staleReview = screen.getByRole('dialog', {
+      name: /review schedule maintenance proposal/i,
+    });
+    expect(
+      within(staleReview).getByRole('button', { name: /^Reject$/i }),
+    ).toBeDisabled();
+    expect(
+      within(staleReview).getByRole('button', { name: /accept schedule/i }),
+    ).toBeDisabled();
+    const refreshButton = within(staleReview).getByRole('button', {
+      name: /refresh accepted schedule/i,
+    });
+    expect(refreshButton).toBeEnabled();
+
+    fireEvent.click(refreshButton);
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole('dialog', {
+          name: /review schedule maintenance proposal/i,
+        })).getByText(
+          'Another client accepted this proposal, but the current schedule could not be synchronized. Retry synchronization.',
+        ),
+      ).toBeInTheDocument(),
+    );
+    expect(eventService.rejectEventScheduleMaintenanceProposal).toHaveBeenCalledTimes(1);
+  });
+
+  it('compares every persisted Match field in the canonical maintenance payload', () => {
+    const baseline = buildApiEvent().matches[0];
+    const changed = {
+      ...baseline,
+      matchId: 99,
+      actualStart: '2026-03-01T10:05:00Z',
+      matchRulesSnapshot: {
+        scoringModel: 'SETS',
+        segmentCount: 3,
+      },
+    };
+
+    const baselinePayload = toCanonicalMatchPersistencePayload(baseline);
+    const changedPayload = toCanonicalMatchPersistencePayload(changed);
+
+    expect(changedPayload).toMatchObject({
+      matchId: 99,
+      actualStart: '2026-03-01T10:05:00Z',
+      matchRulesSnapshot: {
+        scoringModel: 'SETS',
+        segmentCount: 3,
+      },
+    });
+    expect(changedPayload).not.toEqual(baselinePayload);
+  });
+
+  it('refreshes maintenance capabilities after an invalid proposal before exposing retries', async () => {
+    useSearchParamsMock.mockReturnValue({
+      get: (key: string) => (key === 'mode' ? 'edit' : null),
+    });
+    let editorReadCount = 0;
+    mockEditorReadObserver = () => {
+      editorReadCount += 1;
+    };
+    const scheduledEvent = mockScheduleApiEvent({ isAutomatedScheduling: true });
+    latestEditorEvent = scheduledEvent;
+    mockAvailableMaintenanceOperations = ['REBUILD'];
+    (eventService.proposeEventScheduleMaintenance as jest.Mock).mockImplementation(
+      async () => {
+        mockAvailableMaintenanceOperations = [];
+        throw new ApiRequestError(
+          'Automated Scheduling must be enabled for schedule maintenance.',
+          400,
+          { code: 'EDITOR_MAINTENANCE_INVALID' },
+        );
+      },
+    );
+
+    renderWithMantine(<LeagueSchedulePage />, undefined, { env: 'test' });
+
+    await screen.findByText(/Summer League/);
+    const readsBeforeProposal = editorReadCount;
+    await clickMoreAction(/^Rebuild$/i);
+    await waitFor(() =>
+      expect(eventService.proposeEventScheduleMaintenance).toHaveBeenCalledTimes(1),
+    );
+    expect(await screen.findByText(/Failed to rebuild schedule/)).toBeInTheDocument();
+    await waitFor(() => expect(editorReadCount).toBeGreaterThan(readsBeforeProposal));
+
+    await openMoreActionsMenu();
+    expect(
+      screen.queryByRole('menuitem', { name: /^Rebuild$/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('disables maintenance actions when invalid proposal capability refresh fails', async () => {
+    useSearchParamsMock.mockReturnValue({
+      get: (key: string) => (key === 'mode' ? 'edit' : null),
+    });
+    const scheduledEvent = mockScheduleApiEvent({ isAutomatedScheduling: true });
+    latestEditorEvent = scheduledEvent;
+    mockAvailableMaintenanceOperations = ['REBUILD'];
+    let failEditorSnapshotRead = false;
+    const defaultImplementation = apiRequestMock.getMockImplementation();
+    apiRequestMock.mockImplementation((path: string, options?: MockRequestOptions) => {
+      if (
+        failEditorSnapshotRead
+        && path === '/api/events/event_1/editor'
+        && (!options?.method || options.method === 'GET')
+      ) {
+        return Promise.reject(new Error('Editor snapshot unavailable.'));
+      }
+      return defaultImplementation?.(path, options) ?? Promise.resolve({});
+    });
+    (eventService.proposeEventScheduleMaintenance as jest.Mock).mockImplementation(
+      async () => {
+        failEditorSnapshotRead = true;
+        throw new ApiRequestError(
+          'Automated Scheduling must be enabled for schedule maintenance.',
+          400,
+          { code: 'EDITOR_MAINTENANCE_INVALID' },
+        );
+      },
+    );
+
+    renderWithMantine(<LeagueSchedulePage />, undefined, { env: 'test' });
+
+    await screen.findByText(/Summer League/);
+    await clickMoreAction(/^Rebuild$/i);
+    await waitFor(() =>
+      expect(eventService.proposeEventScheduleMaintenance).toHaveBeenCalledTimes(1),
+    );
+    expect(
+      await screen.findByText(/Failed to refresh schedule capabilities/),
+    ).toBeInTheDocument();
+
+    await openMoreActionsMenu();
+    expect(
+      screen.queryByRole('menuitem', { name: /^Build$/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('menuitem', { name: /^Complete$/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('menuitem', { name: /^Rebuild$/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('sends current maintenance revisions and refreshes them after a stale proposal failure', async () => {
+    useSearchParamsMock.mockReturnValue({
+      get: (key: string) => (key === 'mode' ? 'edit' : null),
+    });
+    const scheduledEvent = mockScheduleApiEvent({ isAutomatedScheduling: true });
+    latestEditorEvent = scheduledEvent;
+    mockAvailableMaintenanceOperations = ['REBUILD'];
+    let revisionNumber = 1;
+    const defaultImplementation = apiRequestMock.getMockImplementation();
+    apiRequestMock.mockImplementation((path: string, options?: MockRequestOptions) => {
+      if (
+        path === '/api/events/event_1/editor'
+        && (!options?.method || options.method === 'GET')
+      ) {
+        const snapshot = buildEditorSnapshot(scheduledEvent, 'EDIT');
+        const editorRevision = `maintenance-editor-revision-${revisionNumber}`;
+        const scheduleRevision = `maintenance-schedule-revision-${revisionNumber}`;
+        snapshot.editorRevision = editorRevision;
+        snapshot.scheduleState.revision = scheduleRevision;
+        snapshot.revisionBinding = {
+          ...snapshot.revisionBinding,
+          editorRevision,
+          scheduleRevision,
+          availabilityRevision: `maintenance-availability-revision-${revisionNumber}`,
+        };
+        return Promise.resolve(snapshot);
+      }
+      return defaultImplementation?.(path, options) ?? Promise.resolve({});
+    });
+    const proposalRequests: Array<Record<string, unknown>> = [];
+    (eventService.proposeEventScheduleMaintenance as jest.Mock).mockImplementation(
+      async (request: Record<string, unknown>) => {
+        proposalRequests.push(request);
+        if (proposalRequests.length === 1) {
+          revisionNumber = 2;
+          throw new ApiRequestError(
+            'The Event scheduling resources changed. Request a new proposal.',
+            409,
+            { code: 'EDITOR_MAINTENANCE_STALE' },
+          );
+        }
+        return buildMaintenanceProposal({ operation: 'REBUILD' });
+      },
+    );
+
+    renderWithMantine(<LeagueSchedulePage />, undefined, { env: 'test' });
+
+    await screen.findByText(/Summer League/);
+    await clickMoreAction(/^Rebuild$/i);
+    await waitFor(() => expect(proposalRequests).toHaveLength(1));
+    expect(proposalRequests[0]?.expectedRevisions).toEqual(
+      expect.objectContaining({
+        editorRevision: 'maintenance-editor-revision-1',
+        scheduleRevision: 'maintenance-schedule-revision-1',
+        availabilityRevision: 'maintenance-availability-revision-1',
+        fieldRevisions: expect.any(Object),
+        timeSlotRevisions: expect.any(Object),
+        rentalBookingRevision: null,
+        rentalBookingRevisions: {},
+        rentalBookingItemRevisions: {},
+      }),
+    );
+    await screen.findByText(/Failed to rebuild schedule/);
+
+    await clickMoreAction(/^Rebuild$/i);
+    await waitFor(() => expect(proposalRequests).toHaveLength(2));
+    expect(proposalRequests[1]?.expectedRevisions).toEqual(
+      expect.objectContaining({
+        editorRevision: 'maintenance-editor-revision-2',
+        scheduleRevision: 'maintenance-schedule-revision-2',
+        availabilityRevision: 'maintenance-availability-revision-2',
+      }),
+    );
+    expect(proposalRequests[1]?.operationId).not.toBe(
+      proposalRequests[0]?.operationId,
+    );
+  });
+
+  it('invalidates maintenance controls when accepted snapshot refresh fails', async () => {
+    useSearchParamsMock.mockReturnValue({
+      get: (key: string) => (key === 'mode' ? 'edit' : null),
+    });
+    const scheduledEvent = mockScheduleApiEvent({ isAutomatedScheduling: true });
+    latestEditorEvent = scheduledEvent;
+    mockAvailableMaintenanceOperations = ['REBUILD'];
+    const proposal = buildMaintenanceProposal({ operation: 'REBUILD' });
+    const defaultImplementation = apiRequestMock.getMockImplementation();
+    let failEditorSnapshotRead = false;
+    apiRequestMock.mockImplementation((path: string, options?: MockRequestOptions) => {
+      if (
+        failEditorSnapshotRead
+        && path === '/api/events/event_1/editor'
+        && (!options?.method || options.method === 'GET')
+      ) {
+        return Promise.reject(new Error('Editor snapshot unavailable.'));
+      }
+      return defaultImplementation?.(path, options) ?? Promise.resolve({});
+    });
+    (eventService.proposeEventScheduleMaintenance as jest.Mock).mockResolvedValue(
+      proposal,
+    );
+    (eventService.acceptEventScheduleMaintenanceProposal as jest.Mock).mockImplementation(
+      async () => {
+        failEditorSnapshotRead = true;
+        return {
+          ...proposal,
+          status: 'ACCEPTED',
+        };
+      },
+    );
+
+    renderWithMantine(<LeagueSchedulePage />, undefined, { env: 'test' });
+
+    await screen.findByText(/Summer League/);
+    await clickMoreAction(/^Rebuild$/i);
+    const review = await screen.findByRole('dialog', {
+      name: /review schedule maintenance proposal/i,
+    });
+    fireEvent.click(within(review).getByRole('button', { name: /accept schedule/i }));
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('dialog', {
+          name: /review schedule maintenance proposal/i,
+        }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(
+      await screen.findByText(/operation availability could not be refreshed/i),
+    ).toBeInTheDocument();
+    await openMoreActionsMenu();
+    expect(screen.queryByRole('menuitem', { name: /^Complete$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /^Rebuild$/i })).not.toBeInTheDocument();
+  });
+
+  it('refreshes maintenance capabilities after rejecting a stale proposal', async () => {
+    useSearchParamsMock.mockReturnValue({
+      get: (key: string) => (key === 'mode' ? 'edit' : null),
+    });
+    const sourceMatch = buildApiEvent().matches[0];
+    const unplacedMatch = {
+      ...sourceMatch,
+      id: 'unplaced_stale_reject',
+      $id: 'unplaced_stale_reject',
+      matchId: 2,
+      placementState: 'UNPLACED',
+      fieldId: null,
+      field: null,
+      start: null,
+      end: null,
+    };
+    const scheduledEvent = mockScheduleApiEvent({
+      isAutomatedScheduling: true,
+      matches: [unplacedMatch],
+    });
+    latestEditorEvent = scheduledEvent;
+    mockAvailableMaintenanceOperations = ['COMPLETE', 'REBUILD'];
+    const proposal = buildMaintenanceProposal({
+      operation: 'COMPLETE',
+      includeUnplaced: true,
+    });
+    (eventService.proposeEventScheduleMaintenance as jest.Mock).mockResolvedValue(
+      proposal,
+    );
+    (eventService.acceptEventScheduleMaintenanceProposal as jest.Mock).mockRejectedValue(
+      new ApiRequestError(
+        'The schedule maintenance proposal is stale.',
+        409,
+        { code: 'EDITOR_MAINTENANCE_STALE' },
+      ),
+    );
+    (eventService.rejectEventScheduleMaintenanceProposal as jest.Mock).mockResolvedValue({
+      status: 'REJECTED',
+      contractVersion: 3,
+      eventId: proposal.eventId,
+      operation: proposal.operation,
+      operationId: proposal.operationId,
+      proposalRevision: proposal.proposalRevision,
+    });
+
+    renderWithMantine(<LeagueSchedulePage />, undefined, { env: 'test' });
+
+    await screen.findByText(/Summer League/);
+    await clickMoreAction(/^Complete$/i);
+    const review = await screen.findByRole('dialog', {
+      name: /review schedule maintenance proposal/i,
+    });
+    fireEvent.click(within(review).getByRole('button', { name: /accept schedule/i }));
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole('dialog', {
+          name: /review schedule maintenance proposal/i,
+        })).getByText(/proposal is stale and cannot be accepted/i),
+      ).toBeInTheDocument(),
+    );
+
+    mockAvailableMaintenanceOperations = ['REBUILD'];
+    fireEvent.click(
+      within(screen.getByRole('dialog', {
+        name: /review schedule maintenance proposal/i,
+      })).getByRole('button', { name: /^Reject$/i }),
+    );
+
+    await waitFor(() =>
+      expect(eventService.rejectEventScheduleMaintenanceProposal).toHaveBeenCalledTimes(1),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('dialog', {
+          name: /review schedule maintenance proposal/i,
+        }),
+      ).not.toBeInTheDocument(),
+    );
+    await openMoreActionsMenu();
+    expect(screen.queryByRole('menuitem', { name: /^Complete$/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /^Rebuild$/i })).toBeInTheDocument();
+  });
+
+
+  it('shows only Build for an automated league with no Match Graph', async () => {
+    useSearchParamsMock.mockReturnValue({
+      get: (key: string) => (key === 'mode' ? 'edit' : null),
+    });
+    mockScheduleApiEvent({
+      isAutomatedScheduling: true,
+      matches: [],
+    });
+
+    renderWithMantine(<LeagueSchedulePage />, undefined, { env: 'test' });
+
+    await screen.findByText(/Summer League/);
+    await openMoreActionsMenu();
+    expect(screen.getByRole('menuitem', { name: /^Build$/i })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /^Complete$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /^Rebuild$/i })).not.toBeInTheDocument();
+  });
+
+
+  it('shows Complete and Rebuild, but not Build, for an automated league with unplaced Matches', async () => {
+    useSearchParamsMock.mockReturnValue({
+      get: (key: string) => (key === 'mode' ? 'edit' : null),
+    });
+    const sourceMatch = buildApiEvent().matches[0];
+    mockScheduleApiEvent({
+      isAutomatedScheduling: true,
+      matches: [{
         ...sourceMatch,
-        id: `${eventType.toLowerCase()}_unplaced_match`,
-        $id: `${eventType.toLowerCase()}_unplaced_match`,
         placementState: 'UNPLACED',
         fieldId: null,
         field: null,
         start: null,
         end: null,
-      };
-      const eventBeforeSave = buildApiEvent({
-        id: 'event_1',
-        $id: 'event_1',
-        eventType,
-        state: 'UNPUBLISHED',
-        includePlayoffs: true,
-        playoffTeamCount: 3,
-        matches: [unplacedMatch],
-      });
-      const eventWithoutMatches = { ...eventBeforeSave };
-      delete (eventWithoutMatches as any).matches;
-      latestEditorEvent = eventBeforeSave;
-      mockEventFormDraft = {
-        ...eventBeforeSave,
-        playoffTeamCount: 4,
-      };
-      mockEventFormDirtyState = true;
-      apiRequestMock.mockImplementation((path: string) => {
-        if (path === '/api/events/event_1') {
-          return Promise.resolve({ event: eventWithoutMatches });
-        }
-        if (path === '/api/events/event_1/matches') {
-          return Promise.resolve({ matches: [unplacedMatch] });
-        }
-        return Promise.resolve({});
-      });
-      (eventService.getEvent as jest.Mock).mockResolvedValue(eventWithoutMatches);
-      (eventService.getEventById as jest.Mock).mockResolvedValue(eventWithoutMatches);
+      }],
+    });
 
-      renderWithMantine(<LeagueSchedulePage />);
+    renderWithMantine(<LeagueSchedulePage />, undefined, { env: 'test' });
 
-      const saveButton = await screen.findByRole('button', { name: /^save$/i });
-      await waitFor(() => expect(saveButton).toBeEnabled());
-      fireEvent.click(saveButton);
+    await screen.findByText(/Summer League/);
+    await openMoreActionsMenu();
+    expect(screen.queryByRole('menuitem', { name: /^Build$/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /^Complete$/i })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /^Rebuild$/i })).toBeInTheDocument();
+  });
 
-      const findEditorPutCalls = () => apiRequestMock.mock.calls.filter(([path, options]) => (
-        path === '/api/events/event_1/editor'
-        && (options as MockRequestOptions)?.method === 'PUT'
-      )) as Array<[string, MockRequestOptions]>;
-      await waitFor(() => {
-        expect(findEditorPutCalls()).toHaveLength(1);
-      });
-      const editorSaveCall = findEditorPutCalls()[0];
-      expect(editorSaveCall?.[1]?.body?.draft?.competition?.playoffTeamCount).toBe(4);
-      expect(editorSaveCall?.[1]?.body?.scheduleTransition).toEqual({
-        mode: 'PRESERVE',
-      });
-      expect(await screen.findByText(
-        `${eventType === 'LEAGUE' ? 'League' : 'Tournament'} changes saved.`,
-      )).toBeInTheDocument();
-      const editorPutCalls = findEditorPutCalls();
-      expect(editorPutCalls).toHaveLength(1);
-      expect(apiRequestMock.mock.calls.filter(([path]) => (
-        String(path).startsWith('/api/events/event_1/schedule')
-      ))).toHaveLength(0);
-      expect(eventService.reconcileEventSchedule).not.toHaveBeenCalled();
-    },
-  );
-
-  it('offers Build schedule from the normal view of an unscheduled league', async () => {
-    const unscheduledEvent = buildApiEvent({
-      id: 'event_1',
-      $id: 'event_1',
-      eventType: 'LEAGUE',
+  it('hides all maintenance operations when Automated Scheduling is false', async () => {
+    useSearchParamsMock.mockReturnValue({
+      get: (key: string) => (key === 'mode' ? 'edit' : null),
+    });
+    latestEditorEvent = buildApiEvent({
+      isAutomatedScheduling: false,
       matches: [],
     });
-    const eventWithoutMatches = { ...unscheduledEvent };
-    delete (eventWithoutMatches as any).matches;
-    latestEditorEvent = { ...unscheduledEvent };
-    apiRequestMock.mockImplementation((path: string) => {
-      if (path === '/api/events/event_1') {
-        return Promise.resolve({ event: eventWithoutMatches });
-      }
-      if (path === '/api/events/event_1/matches') {
-        return Promise.resolve({ matches: [] });
-      }
-      return Promise.resolve({});
-    });
-    (eventService.getEvent as jest.Mock).mockResolvedValue(eventWithoutMatches);
-    (eventService.getEventById as jest.Mock).mockResolvedValue(eventWithoutMatches);
-    (eventService.reconcileEventSchedule as jest.Mock).mockResolvedValue({
-      event: { ...unscheduledEvent, matches: [buildApiEvent().matches[0]] },
-      warnings: [],
-    });
-    const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
-
-    renderWithMantine(<LeagueSchedulePage />);
-
-    fireEvent.click(await screen.findByRole('tab', { name: /schedule/i }));
-    const emptyCopy = await screen.findByText(
-      /No schedule has been built\. Build a schedule from the current divisions, .+, availability, and team capacity\./,
-    );
-    fireEvent.click(within(emptyCopy.parentElement as HTMLElement).getByRole('button', { name: 'Build schedule' }));
-
-    await waitFor(() => {
-      expect(eventService.reconcileEventSchedule).toHaveBeenCalledTimes(1);
-    });
-    confirmSpy.mockRestore();
-  });
-
-  it('reschedules from non-details tabs and surfaces backend warnings', async () => {
-    useSearchParamsMock.mockReturnValue({
-      get: (key: string) => {
-        if (key === 'mode') return 'edit';
-        if (key === 'preview') return null;
-        return null;
-      },
+    mockScheduleApiEvent({
+      isAutomatedScheduling: false,
+      matches: [],
     });
 
-    mockEventFormValidateResult = false;
-    (eventService.reconcileEventSchedule as jest.Mock).mockResolvedValue({
-      event: buildApiEvent({
-        id: 'event_1',
-        $id: 'event_1',
-      }),
-      preview: false,
-      warnings: [
-        {
-          code: 'LOCKED_MATCH_OUTSIDE_WINDOW',
-          message: 'Locked match is outside the updated start/time-slot window and was preserved.',
-          matchIds: ['match_1'],
-        },
-      ],
-    });
+    renderWithMantine(<LeagueSchedulePage />, undefined, { env: 'test' });
 
-    renderWithMantine(<LeagueSchedulePage />);
-
-    expect(await screen.findByText(/Summer League/)).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('tab', { name: /schedule/i }));
-    await clickMoreAction(/^reschedule$/i);
-
-    await waitFor(() => {
-      expect(eventService.reconcileEventSchedule).toHaveBeenCalledTimes(1);
-    });
-    expect(eventService.reconcileEventSchedule).toHaveBeenCalledWith(
-      'event_1',
-      expect.objectContaining({
-        expectedScheduleRevision: 'test-schedule-revision-1',
-      }),
-    );
-    expect(
-      await screen.findByText(/Locked match is outside the updated start\/time-slot window and was preserved\./i),
-    ).toBeInTheDocument();
-  });
-
-  it('persists match lock edits before triggering reschedule', async () => {
-    useSearchParamsMock.mockReturnValue({
-      get: (key: string) => {
-        if (key === 'mode') return 'edit';
-        if (key === 'preview') return null;
-        return null;
-      },
-    });
-
-    const baseEvent = buildApiEvent({
-      id: 'event_1',
-      $id: 'event_1',
-    });
-    const persistedMatches = (baseEvent.matches ?? []).map((match: Record<string, any>) => ({
-      ...match,
-      locked: false,
-    }));
-
-    apiRequestMock.mockImplementation((path: string, options?: unknown) => {
-      const method = (options as { method?: string } | undefined)?.method;
-      if (path === '/api/events/event_1') {
-        const event = { ...baseEvent };
-        delete (event as any).matches;
-        return Promise.resolve({ event });
-      }
-      if (path === '/api/events/event_1/matches' && method === 'PATCH') {
-        const body = (options as { body?: { matches?: Array<Record<string, any>> } } | undefined)?.body;
-        const updates = Array.isArray(body?.matches) ? body.matches : [];
-        const updatesById = new Map(
-          updates
-            .filter((entry) => typeof entry?.id === 'string' && entry.id.length > 0)
-            .map((entry) => [entry.id as string, entry]),
-        );
-        const nextMatches = persistedMatches.map((match) => {
-          const update = updatesById.get(String(match.$id ?? match.id));
-          return update ? { ...match, ...update, id: update.id, $id: update.id } : match;
-        });
-        persistedMatches.splice(0, persistedMatches.length, ...nextMatches);
-        return Promise.resolve({ matches: persistedMatches });
-      }
-      if (path === '/api/events/event_1/matches') {
-        return Promise.resolve({ matches: persistedMatches });
-      }
-      return Promise.resolve({});
-    });
-
-    (eventService.reconcileEventSchedule as jest.Mock).mockResolvedValue({
-      event: buildApiEvent({
-        id: 'event_1',
-        $id: 'event_1',
-      }),
-      preview: false,
-      warnings: [],
-    });
-
-    renderWithMantine(<LeagueSchedulePage />);
-
-    expect(await screen.findByText(/Summer League/)).toBeInTheDocument();
-
-    fireEvent.click(await screen.findByRole('button', { name: /edit first match/i }));
-    const lockCheckbox = await screen.findByRole('checkbox', { name: /lock match/i });
-    expect(lockCheckbox).not.toBeChecked();
-
-    fireEvent.click(lockCheckbox);
-    expect(lockCheckbox).toBeChecked();
-
-    fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
-    await waitFor(() => {
-      expect(screen.queryByText(/Edit Match/)).not.toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByRole('tab', { name: /schedule/i }));
-    await clickMoreAction(/^reschedule$/i);
-
-    await waitFor(() => {
-      expect(eventService.reconcileEventSchedule).toHaveBeenCalledTimes(1);
-    });
-
-    const patchCallIndex = apiRequestMock.mock.calls.findIndex(([path, options]) => (
-      path === '/api/events/event_1/matches'
-      && (options as { method?: string } | undefined)?.method === 'PATCH'
-    ));
-    expect(patchCallIndex).toBeGreaterThanOrEqual(0);
-    const patchCall = apiRequestMock.mock.calls[patchCallIndex];
-    const patchBody = (patchCall?.[1] as { body?: { matches?: Array<Record<string, any>> } } | undefined)?.body;
-    expect(patchBody?.matches).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: 'match_1',
-          locked: true,
-        }),
-      ]),
-    );
-
-    const patchOrder = apiRequestMock.mock.invocationCallOrder[patchCallIndex];
-    const scheduleOrder = (eventService.reconcileEventSchedule as jest.Mock).mock.invocationCallOrder[0];
-    expect(patchOrder).toBeLessThan(scheduleOrder);
-  });
-
-  it('warns but allows Save and Reschedule when conflicts exist on the same field', async () => {
-    useSearchParamsMock.mockReturnValue({
-      get: (key: string) => {
-        if (key === 'mode') return 'edit';
-        if (key === 'preview') return null;
-        return null;
-      },
-    });
-
-    const baseEvent = buildApiEvent({
-      id: 'event_1',
-      $id: 'event_1',
-    });
-    const conflictingMatches = [
-      {
-        ...baseEvent.matches[0],
-        $id: 'conflict_1',
-        id: 'conflict_1',
-        fieldId: 'field_1',
-        field: undefined,
-        start: '2026-03-01T10:00:00.000Z',
-        end: '2026-03-01T11:00:00.000Z',
-      },
-      {
-        ...baseEvent.matches[1],
-        $id: 'conflict_2',
-        id: 'conflict_2',
-        fieldId: 'field_1',
-        field: undefined,
-        start: '2026-03-01T10:30:00.000Z',
-        end: '2026-03-01T11:30:00.000Z',
-      },
-    ];
-
-    apiRequestMock.mockImplementation((path: string) => {
-      if (path === '/api/events/event_1') {
-        const event = { ...baseEvent };
-        delete (event as any).matches;
-        return Promise.resolve({ event });
-      }
-      if (path === '/api/events/event_1/matches') {
-        return Promise.resolve({ matches: conflictingMatches });
-      }
-      return Promise.resolve({});
-    });
-    (eventService.reconcileEventSchedule as jest.Mock).mockResolvedValue({
-      event: buildApiEvent({
-        id: 'event_1',
-        $id: 'event_1',
-      }),
-      preview: false,
-      warnings: [],
-    });
-    mockEventFormDirtyState = true;
-
-    renderWithMantine(<LeagueSchedulePage />);
-
-    expect(await screen.findByText(/Summer League/)).toBeInTheDocument();
-    expect(await screen.findByTestId('calendar-conflict-count')).toHaveTextContent('2');
-    expect(await screen.findByText(/You can still save/i)).toBeInTheDocument();
-
-    const saveButton = await screen.findByRole('button', { name: /^save$/i });
-    await waitFor(() => {
-      expect(saveButton).toBeEnabled();
-    });
-    fireEvent.click(saveButton);
-    await waitFor(() => {
-      expect(apiRequestMock.mock.calls.some(([path, options]) => (
-        path === '/api/events/event_1/editor'
-        && (options as { method?: string } | undefined)?.method === 'PUT'
-      ))).toBe(true);
-    });
-
+    await screen.findByText(/Summer League/);
     await openMoreActionsMenu();
-    const rescheduleButton = await screen.findByRole('menuitem', { name: /^reschedule$/i });
-    expect(rescheduleButton).toBeEnabled();
-    await clickMoreActionElement(rescheduleButton);
+    expect(screen.queryByRole('menuitem', { name: /^Build$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /^Complete$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /^Rebuild$/i })).not.toBeInTheDocument();
+  });
 
-    await waitFor(() => {
-      expect(eventService.reconcileEventSchedule).toHaveBeenCalledTimes(1);
+  it('does not show maintenance actions when the snapshot projection is empty', async () => {
+    useSearchParamsMock.mockReturnValue({
+      get: (key: string) => (key === 'mode' ? 'edit' : null),
     });
+    mockAvailableMaintenanceOperations = [];
+    mockScheduleApiEvent({
+      isAutomatedScheduling: true,
+      matches: [],
+    });
+
+    renderWithMantine(<LeagueSchedulePage />, undefined, { env: 'test' });
+
+    await screen.findByText(/Summer League/);
+    await openMoreActionsMenu();
+    expect(screen.queryByRole('menuitem', { name: /^Build$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /^Complete$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /^Rebuild$/i })).not.toBeInTheDocument();
   });
 
   it('blocks create publish when form validation fails (for example missing playoff team count)', async () => {
@@ -3491,9 +4881,9 @@ describe('League schedule page', () => {
     fireEvent.click(publishButton);
 
     await waitFor(() => {
-      expect(eventService.reconcileEventSchedule).not.toHaveBeenCalled();
+      expect(eventService.proposeEventScheduleMaintenance).not.toHaveBeenCalled();
     });
-    expect(eventService.reconcileEventSchedule).not.toHaveBeenCalled();
+    expect(eventService.proposeEventScheduleMaintenance).not.toHaveBeenCalled();
   });
 
   it('shows create event failure details returned by the server', async () => {
@@ -3583,7 +4973,7 @@ describe('League schedule page', () => {
         path === '/api/events/editor' && options?.method === 'POST'
       ))).toHaveLength(1);
     });
-    expect(eventService.reconcileEventSchedule).not.toHaveBeenCalled();
+    expect(eventService.proposeEventScheduleMaintenance).not.toHaveBeenCalled();
     expect(await screen.findByText(/Selected resources and time range conflict/)).toBeInTheDocument();
     expect(screen.getByTestId('event-form')).toBeInTheDocument();
     expect(mockEventFormDraft?.name).toBe('Create Regular Event');
@@ -3641,8 +5031,9 @@ describe('League schedule page', () => {
     expect(calls[0][1]?.body?.createOperationId).toBe('create-operation-test');
     expect(calls[1][1]?.body?.createOperationId).toBe('create-operation-test');
     expect(calls[1][1]?.body).toEqual(calls[0][1]?.body);
-    expect(eventService.reconcileEventSchedule).not.toHaveBeenCalled();
+    expect(eventService.proposeEventScheduleMaintenance).not.toHaveBeenCalled();
   });
+
 
   it('validates and submits one synchronously captured complete One-Time Event configuration', async () => {
     useSearchParamsMock.mockReturnValue({
@@ -3989,7 +5380,7 @@ describe('League schedule page', () => {
         path === '/api/events/editor' && options?.method === 'POST'
       ))).toHaveLength(1);
     });
-    expect(eventService.reconcileEventSchedule).not.toHaveBeenCalled();
+    expect(eventService.proposeEventScheduleMaintenance).not.toHaveBeenCalled();
 
     const editorSaveCall = apiRequestMock.mock.calls.find(([path, options]) => (
       path === '/api/events/editor'
@@ -4092,7 +5483,7 @@ describe('League schedule page', () => {
         path === '/api/events/editor' && options?.method === 'POST'
       ))).toHaveLength(1);
     });
-    expect(eventService.reconcileEventSchedule).not.toHaveBeenCalled();
+    expect(eventService.proposeEventScheduleMaintenance).not.toHaveBeenCalled();
     expect(mockRouter.replace).toHaveBeenCalledWith(
       expect.stringContaining('/events/event_created/schedule'),
       { scroll: false },
@@ -5767,7 +7158,7 @@ describe('League schedule page', () => {
         path === '/api/events/editor' && options?.method === 'POST'
       ))).toBe(true);
     });
-    expect(eventService.reconcileEventSchedule).not.toHaveBeenCalled();
+    expect(eventService.proposeEventScheduleMaintenance).not.toHaveBeenCalled();
 
     const editorSaveCall = apiRequestMock.mock.calls.find(([path, options]) => (
       path === '/api/events/editor'

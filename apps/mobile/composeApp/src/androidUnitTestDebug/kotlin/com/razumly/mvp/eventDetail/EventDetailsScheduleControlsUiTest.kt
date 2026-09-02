@@ -65,7 +65,7 @@ class EventDetailsScheduleControlsUiTest {
         }
 
         composeRule.onNodeWithText("Automated Scheduling").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("Set end date during match generation").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("No Planned End").performScrollTo().assertIsDisplayed()
         composeRule.onNode(
             hasText("Automated Scheduling") and hasClickAction(),
         ).assertIsEnabled().performClick()
@@ -89,7 +89,7 @@ class EventDetailsScheduleControlsUiTest {
         }
 
         composeRule.onNodeWithText("Automated Scheduling").performScrollTo().assertIsDisplayed()
-        composeRule.onAllNodesWithText("Set end date during match generation").assertCountEquals(0)
+        composeRule.onAllNodesWithText("No Planned End").assertCountEquals(0)
     }
 
     @Test

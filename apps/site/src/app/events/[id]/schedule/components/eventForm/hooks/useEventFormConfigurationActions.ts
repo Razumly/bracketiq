@@ -165,6 +165,14 @@ export const useEventFormConfigurationActions = ({
         const enforcingTeamSettings = !isAffiliateEvent
             && (nextType === 'LEAGUE' || nextType === 'TOURNAMENT');
         const enforcingTryoutSettings = !isAffiliateEvent && nextType === 'TRYOUT';
+        const ensureFiniteEndAfterStart = () => {
+            const parsedStart = parseLocalDateTime(getValues('start'));
+            const parsedEnd = parseLocalDateTime(getValues('end'));
+            if (parsedStart && (!parsedEnd || parsedEnd.getTime() <= parsedStart.getTime())) {
+                const minimumEnd = new Date(parsedStart.getTime() + 60 * 60 * 1000);
+                setValue('end', formatLocalDateTime(minimumEnd), { shouldDirty: true, shouldValidate: true });
+            }
+        };
         const nextIsAutomatedScheduling =
             !isAffiliateEvent
             && (nextType === 'LEAGUE' || nextType === 'TOURNAMENT' || nextType === 'WEEKLY_EVENT');
@@ -191,16 +199,12 @@ export const useEventFormConfigurationActions = ({
             setValue('noFixedEndDateTime', false, { shouldDirty: true, shouldValidate: true });
             setValue('divisionDetails', [], { shouldDirty: true, shouldValidate: true });
             setValue('divisions', [], { shouldDirty: true, shouldValidate: true });
+            ensureFiniteEndAfterStart();
             return;
         }
 
         setValue('noFixedEndDateTime', false, { shouldDirty: true, shouldValidate: true });
-        const parsedStart = parseLocalDateTime(getValues('start'));
-        const parsedEnd = parseLocalDateTime(getValues('end'));
-        if (parsedStart && (!parsedEnd || parsedEnd.getTime() <= parsedStart.getTime())) {
-            const minimumEnd = new Date(parsedStart.getTime() + 60 * 60 * 1000);
-            setValue('end', formatLocalDateTime(minimumEnd), { shouldDirty: true, shouldValidate: true });
-        }
+        ensureFiniteEndAfterStart();
     }, [clearLeagueSlotErrors, getValues, isAffiliateEvent, setValue]);
 
     const handleAffiliateEventChange = useCallback((

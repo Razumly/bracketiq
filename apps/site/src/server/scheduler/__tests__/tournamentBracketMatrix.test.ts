@@ -1,6 +1,7 @@
 /** @jest-environment node */
 
 import { scheduleEvent } from '@/server/scheduler/scheduleEvent';
+import { matchDemandFromGraph } from '@/server/scheduler/matchGraph';
 import {
   Division,
   PlayingField,
@@ -151,8 +152,20 @@ const poolScenarios: PoolScenario[] = [
   },
 ];
 
-const buildPoolTournament = (scenario: PoolScenario) => {
-  const suffix = scenario.officiating.toLowerCase();
+const buildBracketConfig = (scenario: PoolScenario) => ({
+  doubleElimination: scenario.isDoubleElimination,
+  winnerSetCount: scenario.isSetBased ? 3 : 1,
+  loserSetCount: 1,
+  winnerBracketPointsToVictory: scenario.isSetBased ? [21, 21, 15] : [],
+  loserBracketPointsToVictory: scenario.isSetBased ? [21] : [],
+  prize: 'Championship',
+  fieldCount: 1,
+  restTimeMinutes: 15,
+  matchDurationMinutes: scenario.isSetBased ? null : 45,
+  setDurationMinutes: scenario.isSetBased ? 15 : null,
+});
+
+const buildBracketDivision = (scenario: PoolScenario, suffix: string) => {
   const bracketDivision = new Division(
     `${suffix}_bracket`,
     'Open Bracket',
@@ -162,18 +175,26 @@ const buildPoolTournament = (scenario: PoolScenario) => {
     4,
     'PLAYOFF',
   );
-  bracketDivision.playoffConfig = {
-    doubleElimination: scenario.isDoubleElimination,
-    winnerSetCount: scenario.isSetBased ? 3 : 1,
-    loserSetCount: 1,
-    winnerBracketPointsToVictory: scenario.isSetBased ? [21, 21, 15] : [],
-    loserBracketPointsToVictory: scenario.isSetBased ? [21] : [],
-    prize: 'Championship',
-    fieldCount: 1,
-    restTimeMinutes: 15,
-    matchDurationMinutes: scenario.isSetBased ? null : 45,
-    setDurationMinutes: scenario.isSetBased ? 15 : null,
-  };
+  bracketDivision.playoffConfig = buildBracketConfig(scenario);
+  return bracketDivision;
+};
+
+const buildPoolConfig = (scenario: PoolScenario) => ({
+  gamesPerOpponent: 1,
+  usesSets: scenario.isSetBased,
+  matchDurationMinutes: scenario.isSetBased ? undefined : 45,
+  setDurationMinutes: scenario.isSetBased ? 15 : undefined,
+  setsPerMatch: scenario.isSetBased ? 3 : undefined,
+  pointsToVictory: scenario.isSetBased ? [21, 21, 15] : undefined,
+  restTimeMinutes: 15,
+});
+
+const buildPoolDivisions = (
+  scenario: PoolScenario,
+  suffix: string,
+  bracketDivision: Division,
+): [Division, Division] => {
+  const poolConfig = buildPoolConfig(scenario);
   const poolA = new Division(
     `${suffix}_pool_z`,
     'Pool A',
@@ -194,20 +215,67 @@ const buildPoolTournament = (scenario: PoolScenario) => {
     'LEAGUE',
     [bracketDivision.id, bracketDivision.id],
   );
-  const poolConfig = {
-    gamesPerOpponent: 1,
-    usesSets: scenario.isSetBased,
-    matchDurationMinutes: scenario.isSetBased ? undefined : 45,
-    setDurationMinutes: scenario.isSetBased ? 15 : undefined,
-    setsPerMatch: scenario.isSetBased ? 3 : undefined,
-    pointsToVictory: scenario.isSetBased ? [21, 21, 15] : undefined,
-    restTimeMinutes: 15,
-  };
   poolA.leagueConfig = { ...poolConfig };
   poolB.leagueConfig = { ...poolConfig };
+  return [poolA, poolB];
+};
 
-  const eventDivisions = [poolA, poolB];
-  const resourceDivisions = [bracketDivision, poolB, poolA];
+const buildOfficiatingSetup = (
+  scenario: PoolScenario,
+  resourceDivisions: Division[],
+  field: PlayingField,
+) => {
+  const isTeamOfficiating = scenario.officiating === 'TEAM';
+  const officials: UserData[] = isTeamOfficiating
+    ? []
+    : [
+      new UserData({ id: 'official_r1', divisions: resourceDivisions, matches: [] }),
+      new UserData({ id: 'official_scorekeeper', divisions: resourceDivisions, matches: [] }),
+    ];
+  return {
+    officials,
+    eventOfficials: officials.map((official) => ({
+      id: `event_${official.id}`,
+      userId: official.id,
+      positionIds: [official.id === 'official_r1' ? 'r1' : 'scorekeeper'],
+      fieldIds: [field.id],
+      isActive: true,
+    })),
+    doTeamsOfficiate: isTeamOfficiating,
+    teamOfficialsMaySwap: isTeamOfficiating,
+    officialSchedulingMode: isTeamOfficiating ? 'TEAM_STAFFING' : 'STAFFING',
+    staffingPriority: isTeamOfficiating
+      ? 'BEST_AVAILABLE_COVERAGE'
+      : 'OFFICIAL_COVERAGE_REQUIRED',
+    officialPositions: isTeamOfficiating
+      ? [
+        { id: 'referee', name: 'Referee', count: 1, order: 0 },
+      ]
+      : [
+        { id: 'r1', name: 'R1', count: 1, order: 0 },
+        { id: 'scorekeeper', name: 'Scorekeeper', count: 1, order: 1 },
+      ],
+  };
+};
+
+const buildTournamentCompetitionSettings = (scenario: PoolScenario) => ({
+  doubleElimination: scenario.isDoubleElimination,
+  winnerSetCount: scenario.isSetBased ? 3 : 1,
+  loserSetCount: 1,
+  winnerBracketPointsToVictory: scenario.isSetBased ? [21, 21, 15] : [],
+  loserBracketPointsToVictory: scenario.isSetBased ? [21] : [],
+  usesSets: scenario.isSetBased,
+  matchDurationMinutes: scenario.isSetBased ? undefined : 45,
+  setDurationMinutes: scenario.isSetBased ? 15 : undefined,
+  restTimeMinutes: 15,
+});
+
+const buildPoolTournament = (scenario: PoolScenario) => {
+  const suffix = scenario.officiating.toLowerCase();
+  const bracketDivision = buildBracketDivision(scenario, suffix);
+  const poolDivisions = buildPoolDivisions(scenario, suffix, bracketDivision);
+  const eventDivisions = [...poolDivisions];
+  const resourceDivisions = [bracketDivision, poolDivisions[1], poolDivisions[0]];
   const field = new PlayingField({
     id: 'field_1',
     divisions: resourceDivisions,
@@ -217,15 +285,10 @@ const buildPoolTournament = (scenario: PoolScenario) => {
     name: 'Court A',
   });
   const teams = {
-    ...buildTeams(scenario.teamsPerPool, poolA, 'pool_a_team'),
-    ...buildTeams(scenario.teamsPerPool, poolB, 'pool_b_team'),
+    ...buildTeams(scenario.teamsPerPool, poolDivisions[0], 'pool_a_team'),
+    ...buildTeams(scenario.teamsPerPool, poolDivisions[1], 'pool_b_team'),
   };
-  const officials = scenario.officiating === 'STAFF'
-    ? [
-      new UserData({ id: 'official_r1', divisions: resourceDivisions, matches: [] }),
-      new UserData({ id: 'official_scorekeeper', divisions: resourceDivisions, matches: [] }),
-    ]
-    : [];
+  const officiating = buildOfficiatingSetup(scenario, resourceDivisions, field);
   const timeSlots = buildTimeSlots(resourceDivisions);
   const tournament = new Tournament({
     id: `pool_tournament_${suffix}`,
@@ -247,42 +310,19 @@ const buildPoolTournament = (scenario: PoolScenario) => {
     playoffTeamCount: 4,
     fields: { [field.id]: field },
     timeSlots,
-    officials,
-    doTeamsOfficiate: scenario.officiating === 'TEAM',
-    teamOfficialsMaySwap: scenario.officiating === 'TEAM',
-    officialSchedulingMode: scenario.officiating === 'TEAM' ? 'TEAM_STAFFING' : 'STAFFING',
-    staffingPriority: scenario.officiating === 'TEAM'
-      ? 'BEST_AVAILABLE_COVERAGE'
-      : 'OFFICIAL_COVERAGE_REQUIRED',
-    officialPositions: scenario.officiating === 'STAFF'
-      ? [
-        { id: 'r1', name: 'R1', count: 1, order: 0 },
-        { id: 'scorekeeper', name: 'Scorekeeper', count: 1, order: 1 },
-      ]
-      : [
-        { id: 'referee', name: 'Referee', count: 1, order: 0 },
-      ],
-    eventOfficials: officials.map((official) => ({
-      id: `event_${official.id}`,
-      userId: official.id,
-      positionIds: [official.id === 'official_r1' ? 'r1' : 'scorekeeper'],
-      fieldIds: [field.id],
-      isActive: true,
-    })),
-    doubleElimination: scenario.isDoubleElimination,
-    winnerSetCount: scenario.isSetBased ? 3 : 1,
-    loserSetCount: 1,
-    winnerBracketPointsToVictory: scenario.isSetBased ? [21, 21, 15] : [],
-    loserBracketPointsToVictory: scenario.isSetBased ? [21] : [],
-    usesSets: scenario.isSetBased,
-    matchDurationMinutes: scenario.isSetBased ? undefined : 45,
-    setDurationMinutes: scenario.isSetBased ? 15 : undefined,
-    restTimeMinutes: 15,
+    officials: officiating.officials,
+    doTeamsOfficiate: officiating.doTeamsOfficiate,
+    teamOfficialsMaySwap: officiating.teamOfficialsMaySwap,
+    officialSchedulingMode: officiating.officialSchedulingMode,
+    staffingPriority: officiating.staffingPriority,
+    officialPositions: officiating.officialPositions,
+    eventOfficials: officiating.eventOfficials,
+    ...buildTournamentCompetitionSettings(scenario),
   });
 
   return {
     bracketDivision,
-    poolDivisions: [poolA, poolB],
+    poolDivisions,
     timeSlots,
     tournament,
   };
@@ -302,6 +342,7 @@ describe('tournament bracket matrix', () => {
       event: tournament,
       includePlaceholderTeams: true,
     }, context);
+    expect(scheduled.matches.every((match) => match.eventId === tournament.id)).toBe(true);
     const poolDivisionIds = new Set(poolDivisions.map((division) => division.id));
     const poolMatches = scheduled.matches.filter((match) => (
       poolDivisionIds.has(match.division.id)
@@ -499,5 +540,64 @@ describe('tournament bracket matrix', () => {
     expect(scheduled.matches).toHaveLength(3);
     expect(firstRoundMatches).toHaveLength(2);
     expect(new Set(directlyAssignedTeamIds)).toEqual(new Set(scheduledTeamIds));
+  });
+  it('rebuilds a persisted pool and playoff graph without promoting playoff seeds', () => {
+    const scenario = poolScenarios[0]!;
+    const { tournament } = buildPoolTournament(scenario);
+    const first = scheduleEvent({
+      event: tournament,
+      includePlaceholderTeams: true,
+    }, context);
+    const firstEvent = first.event as Tournament;
+    const normalizeMembership = (event: Tournament): Record<string, string> => {
+      const membership: Record<string, string> = {};
+      for (const team of Object.values(event.teams)) {
+        membership[team.id] = team.division?.id ?? '';
+      }
+      return membership;
+    };
+    const firstDemand = matchDemandFromGraph(first.matches);
+    const firstMembership = normalizeMembership(firstEvent);
+
+    const second = scheduleEvent({
+      event: firstEvent,
+      includePlaceholderTeams: true,
+    }, context);
+
+    expect(matchDemandFromGraph(second.matches)).toEqual(firstDemand);
+    expect(normalizeMembership(second.event as Tournament)).toEqual(
+      firstMembership,
+    );
+  });
+
+  it('keeps each placed match in the matches list of its owning field', () => {
+    const scheduled = scheduleTournament(4, false);
+    const tournament = scheduled.event as Tournament;
+    const secondField = new PlayingField({
+      id: 'field_2',
+      divisions: tournament.divisions,
+      matches: [],
+      events: [],
+      rentalSlots: [],
+      name: 'Court B',
+    });
+    tournament.fields[secondField.id] = secondField;
+    for (const slot of tournament.timeSlots) {
+      slot.field = null;
+      slot.fieldIds = ['field_1', 'field_2'];
+    }
+
+    const replanned = scheduleEvent({
+      event: tournament,
+      includePlaceholderTeams: false,
+    }, context);
+
+    for (const field of Object.values(replanned.event.fields)) {
+      const expectedMatchIds = replanned.matches
+        .filter((match) => match.field?.id === field.id)
+        .map((match) => match.id);
+      expect(field.matches.map((match) => match.id)).toEqual(expectedMatchIds);
+    }
+    expect(replanned.event.fields.field_2?.matches.length).toBeGreaterThan(0);
   });
 });

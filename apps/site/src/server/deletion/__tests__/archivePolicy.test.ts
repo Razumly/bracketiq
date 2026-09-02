@@ -2,6 +2,7 @@ jest.mock('@/server/realtime/broadcastOverlayRealtime', () => ({
   publishBroadcastOverlayRevocation: jest.fn(),
 }));
 jest.mock('@/server/repositories/locks', () => ({
+  acquireEventLock: jest.fn().mockResolvedValue(undefined),
   acquireFieldLocks: jest.fn().mockResolvedValue(undefined),
   acquireTimeSlotLocks: jest.fn().mockResolvedValue(undefined),
 }));
@@ -9,6 +10,7 @@ jest.mock('@/server/repositories/locks', () => ({
 import { deleteOrArchiveEvent } from '../archivePolicy';
 import { publishBroadcastOverlayRevocation } from '@/server/realtime/broadcastOverlayRealtime';
 import {
+  acquireEventLock,
   acquireFieldLocks,
   acquireTimeSlotLocks,
 } from '@/server/repositories/locks';
@@ -136,6 +138,7 @@ describe('event broadcast overlay archival', () => {
     });
 
     expect(transactionCompleted).toBe(true);
+    expect(acquireEventLock).toHaveBeenCalledWith(client, 'event_1');
     expect(client.$transaction).toHaveBeenCalledTimes(1);
     expect(client.broadcastOverlays.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: { in: ['overlay_1', 'overlay_2'] }, archivedAt: null },

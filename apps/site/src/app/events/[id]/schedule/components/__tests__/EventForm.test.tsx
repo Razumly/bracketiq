@@ -2496,7 +2496,7 @@ describe('EventForm dirty state', () => {
     });
   });
 
-  it('disables generated-end-date mode and clears stale values for Weekly Events', async () => {
+  it('preserves and edits No Planned End for Weekly Events', async () => {
     const formRef = React.createRef<EventFormHandle>();
 
     renderForm(jest.fn(), formRef, {
@@ -2524,12 +2524,14 @@ describe('EventForm dirty state', () => {
       }],
     });
 
-    const generatedEndCheckbox = screen.getByRole('checkbox', {
-      name: 'Set the end date during match generation',
+    const noPlannedEndCheckbox = screen.getByRole('checkbox', {
+      name: 'No Planned End',
     });
-    expect(generatedEndCheckbox).toBeDisabled();
-    expect(generatedEndCheckbox).not.toBeChecked();
+    expect(noPlannedEndCheckbox).toBeEnabled();
+    expect(noPlannedEndCheckbox).toBeChecked();
 
+    fireEvent.click(noPlannedEndCheckbox);
+    expect(noPlannedEndCheckbox).not.toBeChecked();
     await waitFor(() => expect(getLegacyDraft(formRef)?.noFixedEndDateTime).toBe(false));
   });
 

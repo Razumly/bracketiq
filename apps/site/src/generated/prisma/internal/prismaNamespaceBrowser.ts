@@ -63,6 +63,7 @@ export const ModelName = {
   MatchIncidents: 'MatchIncidents',
   MatchOperationReceipts: 'MatchOperationReceipts',
   EventEditorCreateOperations: 'EventEditorCreateOperations',
+  EventEditorMaintenanceOperations: 'EventEditorMaintenanceOperations',
   Divisions: 'Divisions',
   EventDivisionPhaseSources: 'EventDivisionPhaseSources',
   EventDivisionPhaseParticipants: 'EventDivisionPhaseParticipants',
@@ -448,6 +449,26 @@ export const EventEditorCreateOperationsScalarFieldEnum = {
 } as const
 
 export type EventEditorCreateOperationsScalarFieldEnum = (typeof EventEditorCreateOperationsScalarFieldEnum)[keyof typeof EventEditorCreateOperationsScalarFieldEnum]
+
+
+export const EventEditorMaintenanceOperationsScalarFieldEnum = {
+  operationId: 'operationId',
+  eventId: 'eventId',
+  actorUserId: 'actorUserId',
+  operation: 'operation',
+  requestHash: 'requestHash',
+  requestJson: 'requestJson',
+  proposalRevision: 'proposalRevision',
+  revisionBindingJson: 'revisionBindingJson',
+  proposalJson: 'proposalJson',
+  status: 'status',
+  acceptanceOperationId: 'acceptanceOperationId',
+  acceptedResponseJson: 'acceptedResponseJson',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type EventEditorMaintenanceOperationsScalarFieldEnum = (typeof EventEditorMaintenanceOperationsScalarFieldEnum)[keyof typeof EventEditorMaintenanceOperationsScalarFieldEnum]
 
 
 export const DivisionsScalarFieldEnum = {

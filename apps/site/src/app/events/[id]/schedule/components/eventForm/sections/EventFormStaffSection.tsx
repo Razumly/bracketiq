@@ -153,6 +153,9 @@ export const EventFormStaffSection = ({
                     });
                 }}
                 onLoadSportDefaults={handleResetOfficialPositionsFromSport}
+                showDedicatedOfficials={eventData.eventType !== 'TRYOUT'}
+                showCustomOfficialPositions={eventData.eventType !== 'TRYOUT'}
+                showTeamOperations={eventData.eventType !== 'TRYOUT'}
                 onAddPosition={handleAddOfficialPosition}
                 onUpdatePosition={handleUpdateOfficialPosition}
                 onRemovePosition={handleRemoveOfficialPosition}

@@ -254,6 +254,7 @@ internal fun computeEventValidationResult(
     }
     val isNameValid = editEvent.name.isNotBlank()
     val isImageValid = editEvent.imageId.isNotBlank() && isColorLoaded
+    val sourceBackedTryout = isNewEvent && editEvent.eventType == EventType.TRYOUT
     val isPriceValid = if (!requiresPositiveRegistrationPrice) {
         editEvent.priceCents >= 0
     } else if (editEvent.singleDivision) {
@@ -266,7 +267,9 @@ internal fun computeEventValidationResult(
     val eventCapacityValid =
         editEvent.eventType != EventType.TOURNAMENT ||
             editEvent.maxParticipants >= minimumParticipantCount
-    val isMaxParticipantsValid = if (editEvent.singleDivision) {
+    val isMaxParticipantsValid = if (sourceBackedTryout) {
+        true
+    } else if (editEvent.singleDivision) {
         eventCapacityValid && editEvent.maxParticipants >= minimumParticipantCount
     } else {
         eventCapacityValid &&
@@ -290,7 +293,7 @@ internal fun computeEventValidationResult(
         position.id.isNotBlank() && position.name.isNotBlank() && position.count >= 1 && position.order >= 0
     }
     val isLocationValid = editEvent.location.isNotBlank() && editEvent.lat != 0.0 && editEvent.long != 0.0
-    val isSkillLevelValid = editEvent.eventType == EventType.LEAGUE || editEvent.divisions.isNotEmpty()
+    val isSkillLevelValid = sourceBackedTryout || editEvent.eventType == EventType.LEAGUE || editEvent.divisions.isNotEmpty()
     val duplicateDivisionIdentityNames = duplicateDivisionIdentityNames(divisionDetailsForSettings)
     val isDivisionIdentityValid = duplicateDivisionIdentityNames.isEmpty()
     val duplicateDivisionNames = duplicateDivisionNames(
@@ -302,7 +305,9 @@ internal fun computeEventValidationResult(
         event = editEvent,
         scheduleTimeLocked = scheduleTimeLocked,
     )
-    val isFixedEndDateRangeValid = !requiresFixedEndValidation || editEvent.end > editEvent.start
+    val isFixedEndDateRangeValid =
+        (editEvent.eventType != EventType.TRYOUT || !editEvent.noFixedEndDateTime) &&
+            (!requiresFixedEndValidation || editEvent.end > editEvent.start)
     val isLeagueSlotsValid = if (
         requiresScheduleInputValidation(
             eventType = editEvent.eventType,

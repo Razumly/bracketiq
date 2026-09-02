@@ -48,6 +48,7 @@ jest.mock("@/lib/prisma", () => ({ prisma: prismaMock }));
 const buildDivisionStandingsResponseMock = jest.fn();
 const toLeagueEventMock = jest.fn();
 const buildPublicBracketWidgetViewMock = jest.fn();
+const getPublicIncompleteScheduleStatusMock = jest.fn();
 const loadEventWithRelationsMock = jest.fn();
 
 jest.mock("@/app/api/events/[eventId]/standings/shared", () => ({
@@ -59,6 +60,8 @@ jest.mock("@/app/api/events/[eventId]/standings/shared", () => ({
 jest.mock("@/server/publicWidgetBracket", () => ({
   buildPublicBracketWidgetView: (...args: unknown[]) =>
     buildPublicBracketWidgetViewMock(...args),
+  getPublicIncompleteScheduleStatus: (...args: unknown[]) =>
+    getPublicIncompleteScheduleStatusMock(...args),
 }));
 
 jest.mock("@/server/repositories/events", () => ({
@@ -131,6 +134,14 @@ describe("publicOrganizationCatalog", () => {
     buildDivisionStandingsResponseMock.mockReset();
     toLeagueEventMock.mockReset();
     buildPublicBracketWidgetViewMock.mockReset();
+    getPublicIncompleteScheduleStatusMock.mockReset();
+    getPublicIncompleteScheduleStatusMock.mockReturnValue({
+      isScheduleIncomplete: false,
+      unscheduledMatchCount: 0,
+      unscheduledMatchIds: [],
+      affectedCompetitionPhaseIds: [],
+      affectedCompetitionPhaseLabels: [],
+    });
     loadEventWithRelationsMock.mockReset();
   });
 
@@ -555,6 +566,13 @@ describe("publicOrganizationCatalog", () => {
       divisions: [{ id: "open", name: "Open Division" }],
       matches: {},
     });
+    getPublicIncompleteScheduleStatusMock.mockReturnValue({
+      isScheduleIncomplete: true,
+      unscheduledMatchCount: 2,
+      unscheduledMatchIds: ["match-unplaced-1", "match-unplaced-2"],
+      affectedCompetitionPhaseIds: ["phase-final"],
+      affectedCompetitionPhaseLabels: ["Final"],
+    });
     buildDivisionStandingsResponseMock.mockReturnValue({
       divisionName: "Open Division",
       standings: [
@@ -589,12 +607,22 @@ describe("publicOrganizationCatalog", () => {
     });
     expect(loadEventWithRelationsMock).toHaveBeenCalledWith("league_1");
     expect(toLeagueEventMock).toHaveBeenCalled();
+    expect(getPublicIncompleteScheduleStatusMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        divisions: [{ id: "open", name: "Open Division" }],
+      }),
+    );
     expect(buildDivisionStandingsResponseMock).toHaveBeenCalledWith(
       expect.any(Object),
       "open",
     );
     expect(page).toEqual(
       expect.objectContaining({
+        isScheduleIncomplete: true,
+        unscheduledMatchCount: 2,
+        unscheduledMatchIds: ["match-unplaced-1", "match-unplaced-2"],
+        affectedCompetitionPhaseIds: ["phase-final"],
+        affectedCompetitionPhaseLabels: ["Final"],
         currentEvent: expect.objectContaining({ id: "league_1" }),
         selectedDivisionId: "open",
         selectedDivisionName: "Open Division",
@@ -1301,11 +1329,65 @@ describe("publicOrganizationCatalog", () => {
     prismaMock.fields.findMany.mockResolvedValue([]);
     prismaMock.timeSlots.findMany.mockResolvedValue([]);
     prismaMock.teams.findMany.mockResolvedValue([]);
+    prismaMock.divisions.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: "phase-final",
+          sourceDivisionId: "entry-open",
+          name: "Final",
+          phase: "FINAL",
+        },
+      ]);
+    prismaMock.matches.findMany.mockResolvedValue([
+      {
+        id: "match-z",
+        placementState: "PLACED",
+        division: "phase-final",
+        team1Id: "private-team",
+      },
+      {
+        id: "match-a",
+        placementState: "UNPLACED",
+        division: "phase-final",
+        team1Id: "private-team",
+      },
+    ]);
 
     const result = await getPublicOrganizationEventForRegistration(
       "recs-pickleball",
       "event_1",
     );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          matches: [
+            {
+              $id: "match-a",
+              placementState: "UNPLACED",
+              phase: "FINAL",
+              sourceDivisionId: "entry-open",
+              phaseDivisionId: "phase-final",
+              division: "phase-final",
+            },
+            {
+              $id: "match-z",
+              placementState: "PLACED",
+              phase: "FINAL",
+              sourceDivisionId: "entry-open",
+              phaseDivisionId: "phase-final",
+              division: "phase-final",
+            },
+          ],
+        }),
+      }),
+    );
+    expect(prismaMock.matches.findMany).toHaveBeenCalledWith({
+      where: { eventId: "event_1" },
+      select: { id: true, placementState: true, division: true },
+      orderBy: { id: "asc" },
+    });
 
     expect(result?.event.organization).toEqual(
       expect.objectContaining({
@@ -1314,6 +1396,73 @@ describe("publicOrganizationCatalog", () => {
         logoUrl: "/api/files/recs_logo/preview?w=240&h=240",
       }),
     );
+  });
+  it("includes active league phase metadata in public registration match projection", async () => {
+    prismaMock.organizations.findUnique.mockResolvedValue({
+      id: "org_1",
+      name: "League Org",
+      logoId: null,
+      publicSlug: "league-org",
+      publicPageEnabled: true,
+      publicWidgetsEnabled: true,
+      publicCompletionRedirectUrl: null,
+    });
+    prismaMock.events.findUnique.mockResolvedValue({
+      id: "event_league",
+      name: "League Event",
+      organizationId: "org_1",
+      state: "PUBLISHED",
+      sportIds: [],
+      fieldIds: [],
+      timeSlotIds: [],
+      createdAt: new Date("2026-07-01T00:00:00.000Z"),
+      updatedAt: new Date("2026-07-01T00:00:00.000Z"),
+      start: new Date("2026-07-19T11:00:00.000Z"),
+      end: null,
+    });
+    prismaMock.divisions.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: "phase-pool",
+          name: "Pool Play",
+          phase: "POOL",
+          sourceDivisionId: "entry-open",
+        },
+      ]);
+    prismaMock.matches.findMany.mockResolvedValue([
+      {
+        id: "match-pool",
+        placementState: "UNPLACED",
+        division: "phase-pool",
+        officialId: "private-official",
+      },
+    ]);
+
+    const result = await getPublicOrganizationEventForRegistration(
+      "league-org",
+      "event_league",
+    );
+
+    expect(result?.event.matches).toEqual([
+      {
+        $id: "match-pool",
+        placementState: "UNPLACED",
+        phase: "POOL",
+        sourceDivisionId: "entry-open",
+        phaseDivisionId: "phase-pool",
+        division: "phase-pool",
+      },
+    ]);
+    expect(result?.event.competitionPhaseDetails).toEqual([
+      {
+        id: "phase-pool",
+        name: "Pool Play",
+        phase: "POOL",
+        sourceDivisionId: "entry-open",
+      },
+    ]);
   });
 
   it("links request-to-join public teams to the registration page", async () => {

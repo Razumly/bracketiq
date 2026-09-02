@@ -8,6 +8,7 @@ import {
   parseEventEditorSnapshot,
   type EventEditorBootstrapQuery,
   type EventEditorDraft,
+  type EventEditorMaintenanceOperation,
   type EventEditorSnapshot,
 } from "@/contracts/eventEditor";
 import { legacyEventToEditorDraft } from "@/app/events/[id]/schedule/components/eventForm/editorContractAdapters";
@@ -175,7 +176,7 @@ export const loadEventScheduleState = async (
       "scheduleEndConstraint",
       "generatedScheduleEnd",
       "isAutomatedScheduling",
-      "fieldIds",
+      "automatedScheduling",
       "timeSlotIds",
       "updatedAt",
     ]),
@@ -852,6 +853,52 @@ const loadCapability = async (
   };
 };
 
+const maintenanceOperationsFor = ({
+  event,
+  eventId,
+  mode,
+  scheduleState,
+  capabilities,
+  immutable,
+}: {
+  event: Record<string, unknown>;
+  eventId: string | null;
+  mode: "CREATE" | "EDIT";
+  scheduleState: {
+    matchCount: number;
+    matchDemand?: MatchDemand;
+  };
+  capabilities: {
+    canEdit: boolean;
+    readOnly: boolean;
+  };
+  immutable: {
+    template: boolean;
+  };
+}): EventEditorMaintenanceOperation[] => {
+  if (
+    mode !== "EDIT"
+    || !eventId
+    || event.automatedScheduling !== true
+    || !["LEAGUE", "TOURNAMENT"].includes(
+      String(event.eventType ?? "").trim().toUpperCase(),
+    )
+    || capabilities.canEdit !== true
+    || capabilities.readOnly !== false
+    || immutable.template
+  ) {
+    return [];
+  }
+
+  if (scheduleState.matchCount === 0) {
+    return ["BUILD"];
+  }
+  if ((scheduleState.matchDemand?.unplaced ?? 0) > 0) {
+    return ["COMPLETE", "REBUILD"];
+  }
+  return ["REBUILD"];
+};
+
 const asDate = (value: unknown): Date | null => {
   const date =
     value instanceof Date ? new Date(value) : new Date(String(value ?? ""));
@@ -1083,7 +1130,7 @@ const emptyEvent = (
 ): Record<string, unknown> => {
   const eventType = String(query.eventType ?? "EVENT").trim().toUpperCase();
   const start = (asDate(query.start) ?? new Date()).toISOString();
-  const isOneTimeEvent = eventType === "EVENT";
+  const isOneTimeEvent = eventType === "EVENT" || eventType === "TRYOUT";
   const end = isOneTimeEvent
     ? new Date(new Date(start).getTime() + 60 * 60 * 1000).toISOString()
     : null;
@@ -1119,9 +1166,9 @@ const emptyEvent = (
     installmentDueRelativeDays: [],
     installmentAmounts: [],
     teamSignup: false,
-    singleDivision: true,
+    singleDivision: eventType === "TRYOUT" ? false : true,
     registrationByDivisionType: false,
-    teamSizeLimit: 2,
+    teamSizeLimit: eventType === "TRYOUT" ? 0 : 2,
     minAge: null,
     maxAge: null,
     cancellationRefundHours: null,
@@ -1140,8 +1187,6 @@ const emptyEvent = (
     splitLeaguePlayoffDivisions: false,
     playoffTeamCount: null,
     pointsToVictory: [],
-    winnerBracketPointsToVictory: [],
-    loserBracketPointsToVictory: [],
     usesSets: false,
     setsPerMatch: null,
     setDurationMinutes: null,
@@ -1193,6 +1238,7 @@ export const buildEventEditorSnapshot = async (
       placed: 0,
       unplaced: 0,
     },
+    availableMaintenanceOperations: [] as EventEditorMaintenanceOperation[],
     revision: "new",
     hasProtectedHistory: false,
   } as const;
@@ -1313,14 +1359,18 @@ export const buildEventEditorSnapshot = async (
     questions,
   );
   if (staff) {
-    draft.staff = {
-      ...draft.staff,
-      assistantHostIds: staff.assistantHostIds,
-      officialPositions: staff.officialPositions,
-      eventOfficials: staff.eventOfficials,
-      officialIds: staff.officialIds,
-      pendingInvites: staff.staffInvites,
-    };
+    const staffDraft = legacyEventToEditorDraft(
+      {
+        ...eventWithResources,
+        assistantHostIds: staff.assistantHostIds,
+        officialPositions: staff.officialPositions,
+        eventOfficials: staff.eventOfficials,
+        officialIds: staff.officialIds,
+        pendingStaffInvites: staff.staffInvites,
+      } as unknown as Event,
+      questions,
+    );
+    draft.staff = staffDraft.staff;
   }
   const immutableFieldNames = new Set(
     Array.isArray(event.immutableFieldNames)
@@ -1346,6 +1396,15 @@ export const buildEventEditorSnapshot = async (
       String(event.state ?? "").toUpperCase() === "TEMPLATE" ||
       Boolean(context.query?.templateId),
   };
+  const availableMaintenanceOperations =
+    maintenanceOperationsFor({
+      event,
+      eventId,
+      mode,
+      scheduleState,
+      capabilities,
+      immutable,
+    });
   const createSource =
     mode === "CREATE"
       ? {
@@ -1365,12 +1424,16 @@ export const buildEventEditorSnapshot = async (
     mode === "CREATE"
       ? {
           ...scheduleState,
+          availableMaintenanceOperations: [] as EventEditorMaintenanceOperation[],
           revision: editorRevisionFor({
             source: "CREATE_SCHEDULE",
             ...createSource,
           }),
         }
-      : scheduleState;
+      : {
+          ...scheduleState,
+          availableMaintenanceOperations,
+        };
   const snapshot = {
     contractVersion: EVENT_EDITOR_CONTRACT_VERSION,
     mode,

@@ -39,6 +39,8 @@ internal data class SimpleEventDetailsOptionsState(
     val eventTypeHasProtectedHistory: Boolean = false,
     val teamSignupLocked: Boolean = false,
     val automatedSchedulingLocked: Boolean = false,
+    val tryoutAvailable: Boolean = false,
+    val preserveSelectedTryout: Boolean = false,
 )
 
 internal data class SimpleEventDetailsOptionsActions(
@@ -77,6 +79,8 @@ internal fun LazyListScope.simpleEventDetailsOptionsSection(
             )
             EventTypeGrid(
                 selectedType = state.editEvent.eventType,
+                tryoutAvailable = state.tryoutAvailable,
+                preserveSelectedTryout = state.preserveSelectedTryout,
                 enabled = !state.eventTypeLocked,
                 onSelected = actions.onEventTypeSelected,
             )
@@ -134,14 +138,17 @@ internal fun LazyListScope.simpleEventDetailsOptionsSection(
                     )
                 }
                 val supportsGeneratedEndDate =
-                    state.editEvent.isAutomatedScheduling &&
-                        state.editEvent.eventType.isScheduleConstructionAutomationType()
+                    state.editEvent.eventType == EventType.WEEKLY_EVENT ||
+                        (
+                            state.editEvent.isAutomatedScheduling &&
+                                state.editEvent.eventType.isScheduleConstructionAutomationType()
+                            )
                 val showsGeneratedEndDate = state.editEvent.showsGeneratedEndDateControl()
                 if (showsGeneratedEndDate) {
                     OptionCheckboxRow(
                         checked = supportsGeneratedEndDate && state.editEvent.noFixedEndDateTime,
-                        label = "Set end date during match generation",
-                        description = "The generated match schedule will determine the event end date.",
+                        label = "No Planned End",
+                        description = "Continue generating weekly occurrences without a planned end date.",
                         enabled = supportsGeneratedEndDate,
                         onCheckedChange = actions.onNoFixedEndDateChange,
                     )
@@ -249,11 +256,19 @@ internal fun LazyListScope.simpleEventDetailsOptionsSection(
 @Composable
 private fun EventTypeGrid(
     selectedType: EventType,
+    tryoutAvailable: Boolean,
+    preserveSelectedTryout: Boolean,
     enabled: Boolean = true,
     onSelected: (EventType) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        mobileCreateEventTypes().chunked(2).forEach { eventTypes ->
+        val eventTypes = (
+            mobileCreateEventTypes(tryoutAvailable) +
+                selectedType.takeIf { preserveSelectedTryout && it == EventType.TRYOUT }
+                    ?.let(::listOf)
+                    .orEmpty()
+            ).distinct()
+        eventTypes.chunked(2).forEach { eventTypes ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),

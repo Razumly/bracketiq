@@ -116,6 +116,7 @@ internal fun buildEventDetailJoinPresentation(
         else -> 0
     }
     val options = when {
+        event.isArchived() -> emptyList()
         isAffiliateEvent -> listOf(
             JoinOption(
                 label = "Register on website",
@@ -127,7 +128,6 @@ internal fun buildEventDetailJoinPresentation(
         joinBlockedByStart ||
             (isWeeklyParentEvent && (!hasSelectedWeeklyOccurrence || selectedWeeklyOccurrenceJoined)) ||
             (!isWeeklyParentEvent && isUserInEvent) -> emptyList()
-
         else -> buildList {
             if (isEventFull) {
                 if (event.teamSignup) {

@@ -101,9 +101,9 @@ data class MatchApiDto(
     val locked: Boolean? = null,
 ) {
     @OptIn(ExperimentalTime::class)
-    fun toMatchOrNull(): MatchMVP? {
+    fun toMatchOrNull(fallbackMatchId: Int? = null): MatchMVP? {
         val resolvedId = id
-        val resolvedMatchId = matchId
+        val resolvedMatchId = matchId ?: fallbackMatchId
         val resolvedEventId = eventId
         val resolvedFieldId = fieldId?.trim()?.takeIf(String::isNotBlank)
             ?: field?.resolvedId()?.trim()?.takeIf(String::isNotBlank)

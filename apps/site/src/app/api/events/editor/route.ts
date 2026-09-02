@@ -11,11 +11,15 @@ import {
   eventEditorAcceptProposalCommandSchema,
   eventEditorBootstrapQuerySchema,
   parseCreateEventEditorCommand,
+  parseEventEditorAcceptPartialProposalCommand,
   parseEventEditorAcceptProposalCommand,
   parseEventEditorRejectProposalCommand,
   type CreateEventEditorCommand,
+  type EventEditorAcceptPartialProposalCommand,
+  type EventEditorAcceptProposalCommand,
 } from "@/contracts/eventEditor";
 import {
+  acceptPartialScheduleProposalFromEditor,
   acceptScheduleProposalFromEditor,
   createEventEditor,
   createScheduleProposalFromEditor,
@@ -385,9 +389,29 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   const session = await requireSession(request);
   const body = await request.json().catch(() => null);
-  let command;
+  let command:
+    | {
+      kind: "PARTIAL";
+      payload: EventEditorAcceptPartialProposalCommand;
+    }
+    | {
+      kind: "FULL";
+      payload: EventEditorAcceptProposalCommand;
+    };
   try {
-    command = parseEventEditorAcceptProposalCommand(body);
+    const isPartial =
+      body !== null
+      && typeof body === "object"
+      && (body as Record<string, unknown>).acceptanceMode === "PARTIAL";
+    command = isPartial
+      ? {
+        kind: "PARTIAL",
+        payload: parseEventEditorAcceptPartialProposalCommand(body),
+      }
+      : {
+        kind: "FULL",
+        payload: parseEventEditorAcceptProposalCommand(body),
+      };
   } catch (error) {
     return NextResponse.json(
       {
@@ -399,26 +423,48 @@ export async function PUT(request: NextRequest) {
     );
   }
   try {
-    const result = await acceptScheduleProposalFromEditor(
-      session,
-      command.createOperationId,
-      command.proposalRevision,
-      command.draft,
-      {
-        sendStaffInvites: (candidates, eventId) =>
-          deliverEventStaffInvitesAfterCommit(
-            eventId,
-            candidates as Parameters<
-              typeof deliverEventStaffInvitesAfterCommit
-            >[1],
-            getRequestOrigin(request),
-          ),
-        onEventCreated: buildEventCreatedHandler(request, session.userId),
-        onScheduleChanged: async (notification: MatchScheduleNotificationPlan) => {
-          await notifyTeamsOfMatchScheduleUpdate(notification);
+    const result = command.kind === "PARTIAL"
+      ? await acceptPartialScheduleProposalFromEditor(
+        session,
+        command.payload.createOperationId,
+        command.payload.proposalRevision,
+        command.payload.acceptanceOperationId,
+        command.payload.draft,
+        {
+          sendStaffInvites: (candidates, eventId) =>
+            deliverEventStaffInvitesAfterCommit(
+              eventId,
+              candidates as Parameters<
+                typeof deliverEventStaffInvitesAfterCommit
+              >[1],
+              getRequestOrigin(request),
+            ),
+          onEventCreated: buildEventCreatedHandler(request, session.userId),
+          onScheduleChanged: async (notification: MatchScheduleNotificationPlan) => {
+            await notifyTeamsOfMatchScheduleUpdate(notification);
+          },
         },
-      },
-    );
+      )
+      : await acceptScheduleProposalFromEditor(
+        session,
+        command.payload.createOperationId,
+        command.payload.proposalRevision,
+        command.payload.draft,
+        {
+          sendStaffInvites: (candidates, eventId) =>
+            deliverEventStaffInvitesAfterCommit(
+              eventId,
+              candidates as Parameters<
+                typeof deliverEventStaffInvitesAfterCommit
+              >[1],
+              getRequestOrigin(request),
+            ),
+          onEventCreated: buildEventCreatedHandler(request, session.userId),
+          onScheduleChanged: async (notification: MatchScheduleNotificationPlan) => {
+            await notifyTeamsOfMatchScheduleUpdate(notification);
+          },
+        },
+      );
     return NextResponse.json(serializeEventEditorSnapshotEnvelope(result), {
       status: 201,
     });

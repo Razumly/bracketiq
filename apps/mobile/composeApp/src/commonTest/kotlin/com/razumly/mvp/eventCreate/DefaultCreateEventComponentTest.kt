@@ -1,6 +1,9 @@
 package com.razumly.mvp.eventCreate
 
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
+import com.razumly.mvp.core.data.dataTypes.Organization
+import com.razumly.mvp.core.data.dataTypes.OrganizationFeature
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.Facility
@@ -14,6 +17,8 @@ import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.RentalResourceOption
 import com.razumly.mvp.core.network.ApiException
+import com.razumly.mvp.core.data.repositories.EventEditorProposalStaleException
+import com.razumly.mvp.core.network.dto.EventEditorErrorDto
 import com.razumly.mvp.core.network.dto.EventEditorBootstrapQueryDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateCompletionMode
 import com.razumly.mvp.core.data.repositories.RegistrationQuestionDraft
@@ -639,6 +644,149 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         }
 
     @Test
+    fun given_partial_schedule_proposal_when_created_then_only_partial_acceptance_persists_after_confirmation() =
+        runTest(testDispatcher) {
+            val harness = CreateEventHarness(
+                bootstrapSession = createEventEditorSession(
+                    event = com.razumly.mvp.core.data.dataTypes.Event(
+                        id = "bootstrap-partial",
+                        name = "Partial League",
+                        hostId = "user-1",
+                        eventType = EventType.LEAGUE,
+                        sportIds = listOf("Indoor Volleyball"),
+                        start = Instant.parse("2026-07-01T00:00:00Z"),
+                        end = Instant.parse("2026-07-01T02:00:00Z"),
+                        divisions = listOf("Open"),
+                        isAutomatedScheduling = true,
+                    ),
+                ),
+            )
+            harness.eventRepository.createEditorOutcomeFactory = { command, session ->
+                com.razumly.mvp.core.data.repositories.EventEditorSaveOutcome(
+                    session = session,
+                    staffEmailDelivery = "NOT_REQUESTED",
+                    scheduleOutcome = createEventEditorPartialScheduleProposal(command, session)
+                        .scheduleOutcome,
+                    proposal = createEventEditorPartialScheduleProposal(command, session),
+                )
+            }
+            advance()
+
+            harness.component.createEvent()
+            advance()
+
+            assertEquals(0, harness.onEventCreatedCount)
+            assertTrue(harness.eventRepository.acceptedEventEditorProposals.isEmpty())
+            assertTrue(harness.eventRepository.acceptedPartialEventEditorProposals.isEmpty())
+            val proposal = harness.component.pendingScheduleProposal.value?.proposal
+            assertEquals(
+                com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeStatus.PARTIAL,
+                proposal?.scheduleOutcome?.status,
+            )
+            assertEquals(listOf("match-unplaced"), proposal?.scheduleOutcome?.unscheduledMatches?.map { it.id })
+            assertEquals(
+                listOf("playoff-phase"),
+                proposal?.scheduleOutcome?.affectedCompetitionPhases?.map { it.id },
+            )
+
+            harness.component.acceptScheduleProposal()
+            advance()
+
+            val command = harness.eventRepository.createEventEditorCalls.single()
+            val accepted = harness.eventRepository.acceptedPartialEventEditorProposals.single()
+            assertEquals(command.createOperationId, accepted.createOperationId)
+            assertEquals("proposal-revision", accepted.proposalRevision)
+            assertTrue(accepted.acceptanceOperationId.isNotBlank())
+            assertEquals(1, harness.onEventCreatedCount)
+            assertTrue(harness.eventRepository.acceptedEventEditorProposals.isEmpty())
+            assertTrue(harness.component.pendingScheduleProposal.value == null)
+        }
+
+    @Test
+    fun given_partial_acceptance_transport_failure_when_retried_then_acceptance_identity_is_reused() =
+        runTest(testDispatcher) {
+            val harness = partialProposalHarness()
+            harness.eventRepository.acceptEditorFailure = IllegalStateException("transport timeout")
+            advance()
+
+            harness.component.createEvent()
+            advance()
+            harness.component.acceptScheduleProposal()
+            advance()
+
+            val firstAttempt = harness.eventRepository.acceptedPartialEventEditorProposals.single()
+            assertTrue(harness.component.pendingScheduleProposal.value != null)
+            assertEquals(0, harness.onEventCreatedCount)
+
+            harness.eventRepository.acceptEditorFailure = null
+            harness.component.acceptScheduleProposal()
+            advance()
+
+            val attempts = harness.eventRepository.acceptedPartialEventEditorProposals
+            assertEquals(2, attempts.size)
+            assertEquals(firstAttempt.acceptanceOperationId, attempts.last().acceptanceOperationId)
+            assertEquals(1, harness.onEventCreatedCount)
+            assertTrue(harness.component.pendingScheduleProposal.value == null)
+        }
+
+    @Test
+    fun given_typed_stale_partial_acceptance_then_refresh_requires_a_new_proposal() =
+        runTest(testDispatcher) {
+            val harness = partialProposalHarness()
+            harness.eventRepository.acceptEditorFailure = EventEditorProposalStaleException(
+                statusCode = 409,
+                url = "/api/events/editor/accept",
+                payload = EventEditorErrorDto(
+                    error = "Proposal is stale.",
+                    code = "EDITOR_PROPOSAL_STALE",
+                ),
+                responseBody = null,
+            )
+            advance()
+
+            harness.component.createEvent()
+            advance()
+            harness.component.acceptScheduleProposal()
+            advance()
+
+            val firstProposal = harness.component.pendingScheduleProposal.value
+            assertTrue(firstProposal != null)
+            assertTrue(harness.component.scheduleProposalState.value is ScheduleProposalState.Stale)
+            assertTrue(harness.component.errorState.value?.message?.contains("stale") == true)
+            assertEquals("Refresh proposal", harness.component.errorState.value?.actionLabel)
+            assertEquals(1, harness.eventRepository.acceptedPartialEventEditorProposals.size)
+
+            // A stale proposal remains available, but accepting it again must not retry
+            // the old revision or perform another repository write.
+            harness.component.acceptScheduleProposal()
+            advance()
+            assertEquals(1, harness.eventRepository.acceptedPartialEventEditorProposals.size)
+            assertEquals(firstProposal, harness.component.pendingScheduleProposal.value)
+
+            harness.eventRepository.acceptEditorFailure = null
+            harness.component.refreshScheduleProposal()
+            advance()
+
+            assertEquals(2, harness.eventRepository.createEventEditorCalls.size)
+            assertNotEquals(
+                harness.eventRepository.createEventEditorCalls[0].createOperationId,
+                harness.eventRepository.createEventEditorCalls[1].createOperationId,
+            )
+            assertTrue(harness.component.scheduleProposalState.value is ScheduleProposalState.Review)
+            assertEquals(
+                firstProposal?.proposal?.snapshot?.draft?.basics?.name,
+                harness.component.pendingScheduleProposal.value?.proposal?.snapshot?.draft?.basics?.name,
+            )
+
+            harness.component.acceptScheduleProposal()
+            advance()
+            assertEquals(2, harness.eventRepository.acceptedPartialEventEditorProposals.size)
+            assertEquals(1, harness.onEventCreatedCount)
+            assertTrue(harness.component.pendingScheduleProposal.value == null)
+            assertTrue(harness.component.scheduleProposalState.value is ScheduleProposalState.None)
+        }
+
+    @Test
     fun given_changed_create_setup_when_proposal_is_accepted_then_it_is_stale_and_rejection_creates_nothing() =
         runTest(testDispatcher) {
             val harness = CreateEventHarness(
@@ -679,6 +827,8 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
 
             assertTrue(harness.eventRepository.acceptedEventEditorProposals.isEmpty())
             assertTrue(harness.component.errorState.value?.message?.contains("stale") == true)
+            assertTrue(harness.component.scheduleProposalState.value is ScheduleProposalState.Stale)
+            assertEquals("Changed after proposal", harness.component.newEventState.value.name)
             assertEquals(0, harness.onEventCreatedCount)
 
             harness.component.rejectScheduleProposal()
@@ -1026,8 +1176,8 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         advance()
         harness.component.onTypeSelected(EventType.TOURNAMENT)
         advance()
-        assertFalse(harness.component.newEventState.value.noFixedEndDateTime)
-        assertFalse(harness.component.newEventState.value.isAutomatedScheduling)
+        assertTrue(harness.component.newEventState.value.noFixedEndDateTime)
+        assertTrue(harness.component.newEventState.value.isAutomatedScheduling)
         assertFalse(harness.component.useManualTimeSlots.value)
 
         harness.component.onTypeSelected(EventType.EVENT)
@@ -1055,6 +1205,28 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         assertFalse(harness.component.newEventState.value.isAutomatedScheduling)
         assertFalse(harness.component.useManualTimeSlots.value)
     }
+
+    @Test
+    fun given_tournament_when_league_and_tournament_are_selected_back_to_back_then_latest_selection_is_applied() =
+        runTest(testDispatcher) {
+            val harness = CreateEventHarness(
+                bootstrapSession = createEventEditorSession(
+                    event = com.razumly.mvp.core.data.dataTypes.Event(
+                        eventType = EventType.TOURNAMENT,
+                    ),
+                ),
+            )
+            advance()
+
+            harness.component.onTypeSelected(EventType.LEAGUE)
+            harness.component.onTypeSelected(EventType.TOURNAMENT)
+
+            assertEquals(EventType.TOURNAMENT, harness.component.currentEventType.value)
+
+            advance()
+
+            assertEquals(EventType.TOURNAMENT, harness.component.newEventState.value.eventType)
+        }
 
     @Test
     fun given_automated_league_with_slots_when_tryout_is_selected_then_manual_slot_state_is_preserved() =
@@ -1151,7 +1323,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         val createCall = harness.eventRepository.createEditorCalls.single()
         assertEquals(2, createCall.fields.orEmpty().size)
         assertEquals(createCall.fields.orEmpty().map { field -> field.id }, createCall.event.fieldIds)
-        assertFalse(createCall.event.noFixedEndDateTime)
+        assertTrue(createCall.event.noFixedEndDateTime)
         assertEquals(1, createCall.timeSlots.orEmpty().size)
         assertTrue(createCall.timeSlots.orEmpty().single().repeating)
         assertEquals(listOf(1, 3), createCall.timeSlots.orEmpty().single().daysOfWeek)
@@ -2447,7 +2619,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun given_fixed_end_tournament_when_selected_then_repeating_slots_retain_event_end() = runTest(testDispatcher) {
+    fun given_fixed_end_league_when_tournament_is_selected_then_repeating_slots_use_generated_end() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()
 
@@ -2475,7 +2647,34 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.onTypeSelected(EventType.TOURNAMENT)
         advance()
 
-        assertTrue(harness.component.leagueSlots.value.all { slot -> slot.endDate == expectedDateOnlyEnd })
+        assertTrue(harness.component.leagueSlots.value.all { slot -> slot.endDate == null })
+    }
+
+    @Test
+    fun given_fixed_end_weekly_when_repeating_slot_is_created_then_event_end_is_used() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        advance()
+
+        harness.component.onTypeSelected(EventType.WEEKLY_EVENT)
+        advance()
+
+        val eventStart = instant(1_700_000_000_000)
+        val eventEnd = instant(1_700_086_400_000)
+        val timezone = TimeZone.currentSystemDefault()
+        val expectedDateOnlyEnd = eventEnd.toLocalDateTime(timezone).date.atStartOfDayIn(timezone)
+        harness.component.updateEventField {
+            copy(
+                start = eventStart,
+                end = eventEnd,
+                noFixedEndDateTime = false,
+            )
+        }
+        advance()
+
+        harness.component.addLeagueTimeSlot()
+        advance()
+
+        assertEquals(expectedDateOnlyEnd, harness.component.leagueSlots.value.last().endDate)
     }
 
     @Test
@@ -2855,6 +3054,110 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
+    fun given_fixed_unscheduled_league_when_tournament_is_selected_then_generated_end_defaults_are_canonical() =
+        runTest(testDispatcher) {
+            val eventStart = instant(1_700_000_000_000)
+            val eventEnd = instant(1_700_086_400_000)
+            val harness = CreateEventHarness(
+                bootstrapSession = createEventEditorSession(
+                    event = com.razumly.mvp.core.data.dataTypes.Event(
+                        id = "fixed-unscheduled-league",
+                        eventType = EventType.LEAGUE,
+                        isAutomatedScheduling = false,
+                        noFixedEndDateTime = false,
+                        start = eventStart,
+                        end = eventEnd,
+                        divisions = listOf("Open"),
+                    ),
+                ),
+            )
+            harness.component.setLoadingHandler(harness.loadingHandler)
+            advance()
+
+            harness.component.onTypeSelected(EventType.TOURNAMENT)
+            advance()
+            harness.component.selectFieldCount(1)
+            advance()
+            val fieldId = harness.component.localFields.value.single().id
+            harness.component.updateEventField {
+                copy(
+                    name = "Tournament From Fixed League",
+                    organizationId = "org-tournament-from-league",
+                    divisions = listOf("Open"),
+                )
+            }
+            advance()
+            harness.component.updateLeagueTimeSlot(0) {
+                copy(
+                    dayOfWeek = 1,
+                    daysOfWeek = listOf(1),
+                    startTimeMinutes = 600,
+                    endTimeMinutes = 660,
+                    scheduledFieldId = fieldId,
+                    scheduledFieldIds = listOf(fieldId),
+                )
+            }
+            advance()
+
+            harness.component.createEvent()
+            advance()
+
+            val command = harness.eventRepository.attemptedCreateEventEditorCommands.single()
+            assertTrue(command.draft.schedule.isAutomatedScheduling)
+            assertEquals("GENERATED_END", command.draft.schedule.mode)
+            assertNull(command.draft.schedule.endConstraint)
+            assertEquals(
+                EventEditorCreateCompletionMode.CREATE_AND_BUILD_SCHEDULE,
+                command.completion.mode,
+            )
+        }
+
+    @Test
+    fun given_fresh_tournament_selection_without_scheduling_override_when_submitted_then_generated_end_defaults_are_canonical() =
+        runTest(testDispatcher) {
+            val harness = CreateEventHarness()
+            harness.component.setLoadingHandler(harness.loadingHandler)
+            advance()
+
+            harness.component.onTypeSelected(EventType.TOURNAMENT)
+            advance()
+            harness.component.selectFieldCount(1)
+            advance()
+            val fieldId = harness.component.localFields.value.single().id
+            harness.component.updateEventField {
+                copy(
+                    name = "Fresh Tournament",
+                    organizationId = "org-fresh-tournament",
+                    divisions = listOf("Open"),
+                )
+            }
+            advance()
+            harness.component.updateLeagueTimeSlot(0) {
+                copy(
+                    dayOfWeek = 1,
+                    daysOfWeek = listOf(1),
+                    startTimeMinutes = 600,
+                    endTimeMinutes = 660,
+                    scheduledFieldId = fieldId,
+                    scheduledFieldIds = listOf(fieldId),
+                )
+            }
+            advance()
+
+            harness.component.createEvent()
+            advance()
+
+            val command = harness.eventRepository.attemptedCreateEventEditorCommands.single()
+            assertTrue(command.draft.schedule.isAutomatedScheduling)
+            assertEquals("GENERATED_END", command.draft.schedule.mode)
+            assertNull(command.draft.schedule.endConstraint)
+            assertEquals(
+                EventEditorCreateCompletionMode.CREATE_AND_BUILD_SCHEDULE,
+                command.completion.mode,
+            )
+        }
+
+    @Test
     fun given_tournament_creation_when_submitted_then_fields_are_created_without_league_slots_or_scoring_config() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         harness.component.setLoadingHandler(harness.loadingHandler)
@@ -2893,6 +3196,478 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         assertEquals(createCall.timeSlots.orEmpty().map { slot -> slot.id }, createCall.event.timeSlotIds)
         assertNull(createCall.leagueScoringConfig)
     }
+
+    @Test
+    fun given_immediate_tournament_edit_when_created_then_first_command_contains_final_values() =
+        runTest(testDispatcher) {
+            val harness = CreateEventHarness()
+            harness.component.setLoadingHandler(harness.loadingHandler)
+            advance()
+
+            harness.component.onTypeSelected(EventType.TOURNAMENT)
+            advance()
+            assertTrue(harness.component.newEventState.value.singleDivision)
+            harness.component.selectFieldCount(1)
+            advance()
+
+            val eventStart = instant(1_700_000_000_000)
+            val eventEnd = instant(1_700_086_400_000)
+            harness.component.updateTournamentField {
+                copy(
+                    name = "Tournament Immediate Edit",
+                    organizationId = "org-tournament-immediate",
+                    divisions = listOf("Open"),
+                    start = eventStart,
+                    end = eventEnd,
+                    isAutomatedScheduling = true,
+                    noFixedEndDateTime = false,
+                    doubleElimination = true,
+                )
+            }
+            harness.component.createEvent()
+            advance()
+
+            val command = harness.eventRepository.attemptedCreateEventEditorCommands.single()
+            assertEquals("TOURNAMENT", command.draft.basics.eventType)
+            assertTrue(command.draft.participation.singleDivision)
+            assertEquals("Tournament Immediate Edit", command.draft.basics.name)
+            assertTrue(command.draft.competition.doubleElimination)
+            assertEquals(
+                EventEditorCreateCompletionMode.CREATE_AND_BUILD_SCHEDULE,
+                command.completion.mode,
+            )
+            assertTrue(command.hasScheduleProposalSupport)
+            assertEquals("FIXED_END", command.draft.schedule.mode)
+            assertEquals(eventEnd.toString(), command.draft.schedule.endConstraint)
+            assertNull(command.draft.schedule.generatedScheduleEnd)
+        }
+
+    @Test
+    fun given_fixed_end_unscheduled_tournament_when_submitted_then_create_only_persists_no_schedule_construction() =
+        runTest(testDispatcher) {
+            val harness = CreateEventHarness()
+            harness.component.setLoadingHandler(harness.loadingHandler)
+            advance()
+
+            harness.component.onTypeSelected(EventType.TOURNAMENT)
+            advance()
+            harness.component.selectFieldCount(1)
+            advance()
+
+            val eventStart = instant(1_700_000_000_000)
+            val eventEnd = instant(1_700_086_400_000)
+            harness.component.updateTournamentField {
+                copy(
+                    name = "Unscheduled Tournament",
+                    organizationId = "org-unscheduled-tournament",
+                    divisions = listOf("Open"),
+                    start = eventStart,
+                    end = eventEnd,
+                    isAutomatedScheduling = false,
+                    noFixedEndDateTime = false,
+                )
+            }
+            advance()
+
+            harness.component.createEvent()
+            advance()
+
+            val command = harness.eventRepository.createEventEditorCalls.single()
+            val createCall = harness.eventRepository.createEditorCalls.single()
+            assertEquals(EventEditorCreateCompletionMode.CREATE_ONLY, command.completion.mode)
+            assertFalse(command.hasScheduleProposalSupport)
+            assertFalse(command.draft.schedule.isAutomatedScheduling)
+            assertEquals("FIXED_END", command.draft.schedule.mode)
+            assertEquals(eventEnd.toString(), command.draft.schedule.endConstraint)
+            assertNull(command.draft.schedule.generatedScheduleEnd)
+            assertTrue(command.draft.resources.timeSlotIds.isEmpty())
+            assertTrue(command.draft.resources.timeSlots.isEmpty())
+            assertTrue(createCall.event.timeSlotIds.isEmpty())
+            assertTrue(createCall.timeSlots.orEmpty().isEmpty())
+            assertEquals(eventEnd, createCall.event.end)
+        }
+
+    @Test
+    fun given_unscheduled_fixed_end_tournament_when_reselected_then_scheduling_state_and_create_command_are_preserved() =
+        runTest(testDispatcher) {
+            val eventStart = instant(1_700_000_000_000)
+            val eventEnd = instant(1_700_086_400_000)
+            val harness = CreateEventHarness(
+                bootstrapSession = createEventEditorSession(
+                    event = com.razumly.mvp.core.data.dataTypes.Event(
+                        id = "unscheduled-fixed-end-tournament-reselection",
+                        name = "Unscheduled Tournament Reselection",
+                        eventType = EventType.TOURNAMENT,
+                        isAutomatedScheduling = false,
+                        noFixedEndDateTime = false,
+                        start = eventStart,
+                        end = eventEnd,
+                        divisions = listOf("Open"),
+                    ),
+                ),
+            )
+            harness.component.setLoadingHandler(harness.loadingHandler)
+            advance()
+
+            val configuredState = harness.component.newEventState.value
+            assertEquals(EventType.TOURNAMENT, configuredState.eventType)
+            assertFalse(configuredState.isAutomatedScheduling)
+            assertFalse(configuredState.noFixedEndDateTime)
+            assertEquals(eventStart, configuredState.start)
+            assertEquals(eventEnd, configuredState.end)
+
+            harness.component.onTypeSelected(EventType.TOURNAMENT)
+            advance()
+
+            assertEquals(configuredState, harness.component.newEventState.value)
+
+            harness.component.createEvent()
+            advance()
+
+            val command = harness.eventRepository.createEventEditorCalls.single()
+            val createCall = harness.eventRepository.createEditorCalls.single()
+            assertEquals(EventEditorCreateCompletionMode.CREATE_ONLY, command.completion.mode)
+            assertEquals(EventType.TOURNAMENT.name, command.draft.basics.eventType)
+            assertEquals(eventStart.toString(), command.draft.basics.start)
+            assertFalse(command.draft.schedule.isAutomatedScheduling)
+            assertEquals("FIXED_END", command.draft.schedule.mode)
+            assertEquals(eventEnd.toString(), command.draft.schedule.endConstraint)
+            assertNull(command.draft.schedule.generatedScheduleEnd)
+            assertEquals(eventEnd, createCall.event.end)
+        }
+
+
+    @Test
+    fun given_unscheduled_tournament_without_a_finite_end_when_submitted_then_creation_is_blocked() =
+        runTest(testDispatcher) {
+            val harness = CreateEventHarness()
+            harness.component.setLoadingHandler(harness.loadingHandler)
+            advance()
+
+            harness.component.onTypeSelected(EventType.TOURNAMENT)
+            advance()
+            harness.component.selectFieldCount(1)
+            advance()
+
+            val eventStart = instant(1_700_000_000_000)
+            harness.component.updateTournamentField {
+                copy(
+                    name = "Invalid Tournament End",
+                    organizationId = "org-invalid-tournament-end",
+                    divisions = listOf("Open"),
+                    start = eventStart,
+                    end = eventStart,
+                    isAutomatedScheduling = false,
+                    noFixedEndDateTime = false,
+                )
+            }
+            advance()
+            val visibleStateBeforeSubmit = harness.component.newEventState.value
+
+            harness.component.createEvent()
+            advance()
+
+            assertEquals(visibleStateBeforeSubmit, harness.component.newEventState.value)
+            assertTrue(harness.eventRepository.attemptedCreateEventEditorCommands.isEmpty())
+            assertTrue(harness.eventRepository.createEventEditorCalls.isEmpty())
+            assertEquals(
+                "Unscheduled League/Tournament events require a planned end date and time.",
+                harness.component.errorState.value?.message,
+            )
+        }
+
+    @Test
+    fun given_failed_tournament_create_when_retrying_then_unchanged_identity_is_reused_and_edit_gets_new_identity() =
+        runTest(testDispatcher) {
+            val harness = CreateEventHarness()
+            harness.component.setLoadingHandler(harness.loadingHandler)
+            advance()
+
+            harness.component.onTypeSelected(EventType.TOURNAMENT)
+            advance()
+            harness.component.selectFieldCount(2)
+            advance()
+            val localFieldIds = harness.component.localFields.value.map(Field::id)
+            val eventStart = instant(1_700_000_000_000)
+            val eventEnd = instant(1_700_086_400_000)
+
+            harness.component.updateTournamentField {
+                copy(
+                    name = "Tournament Retry Identity",
+                    organizationId = "org-tournament-retry",
+                    divisions = listOf("Open"),
+                    start = eventStart,
+                    end = eventEnd,
+                    isAutomatedScheduling = false,
+                    noFixedEndDateTime = false,
+                )
+            }
+            advance()
+            harness.component.updateLocalFieldName(0, "Tournament Court A")
+            harness.component.updateLocalFieldName(1, "Tournament Court B")
+            harness.component.updateLocalFieldDivisions(0, listOf("Open"))
+            harness.component.updateLocalFieldDivisions(1, listOf("Open"))
+            harness.component.setUseManualTimeSlots(true)
+            advance()
+            harness.component.updateLeagueTimeSlot(0) {
+                copy(
+                    repeating = true,
+                    startDate = eventStart,
+                    endDate = eventEnd,
+                    dayOfWeek = 2,
+                    daysOfWeek = listOf(2),
+                    startTimeMinutes = 600,
+                    endTimeMinutes = 660,
+                    scheduledFieldId = localFieldIds.first(),
+                    scheduledFieldIds = localFieldIds,
+                )
+            }
+            harness.component.setRegistrationQuestionDrafts(
+                listOf(
+                    RegistrationQuestionDraft(
+                        prompt = "Which division are you entering?",
+                        answerType = "LONG_TEXT",
+                        required = true,
+                    ),
+                ),
+            )
+            assertTrue(
+                harness.component.addPendingStaffInvite(
+                    firstName = "Tournament",
+                    lastName = "Official",
+                    email = "tournament-official@example.com",
+                    roles = setOf(EventStaffRole.OFFICIAL),
+                ).isSuccess,
+            )
+            advance()
+
+            val visibleStateBeforeFailure = harness.component.newEventState.value
+            val localFieldsBeforeFailure = harness.component.localFields.value
+            val leagueSlotsBeforeFailure = harness.component.leagueSlots.value
+            val useManualTimeSlotsBeforeFailure = harness.component.useManualTimeSlots.value
+            val selectedRentalResourceIdsBeforeFailure = harness.component.selectedRentalResourceIds.value
+            val registrationQuestionsBeforeFailure = harness.component.registrationQuestionDrafts.value
+            val pendingStaffInvitesBeforeFailure = harness.component.pendingStaffInvites.value
+
+            harness.eventRepository.createEditorFailure = IllegalStateException("offline")
+            harness.component.createEvent()
+            advance()
+
+            assertEquals(visibleStateBeforeFailure, harness.component.newEventState.value)
+            assertEquals(localFieldsBeforeFailure, harness.component.localFields.value)
+            assertEquals(leagueSlotsBeforeFailure, harness.component.leagueSlots.value)
+            assertEquals(useManualTimeSlotsBeforeFailure, harness.component.useManualTimeSlots.value)
+            assertEquals(selectedRentalResourceIdsBeforeFailure, harness.component.selectedRentalResourceIds.value)
+            assertEquals(registrationQuestionsBeforeFailure, harness.component.registrationQuestionDrafts.value)
+            assertEquals(pendingStaffInvitesBeforeFailure, harness.component.pendingStaffInvites.value)
+            assertEquals(0, harness.onEventCreatedCount)
+            assertFalse(harness.navigatedToSchedule)
+            assertEquals(1, harness.eventRepository.attemptedCreateEventEditorCommands.size)
+            val firstCommand = harness.eventRepository.attemptedCreateEventEditorCommands.single()
+            assertEquals("TOURNAMENT", firstCommand.draft.basics.eventType)
+
+            harness.component.createEvent()
+            advance()
+
+            assertEquals(visibleStateBeforeFailure, harness.component.newEventState.value)
+            assertEquals(localFieldsBeforeFailure, harness.component.localFields.value)
+            assertEquals(leagueSlotsBeforeFailure, harness.component.leagueSlots.value)
+            assertEquals(useManualTimeSlotsBeforeFailure, harness.component.useManualTimeSlots.value)
+            assertEquals(selectedRentalResourceIdsBeforeFailure, harness.component.selectedRentalResourceIds.value)
+            assertEquals(registrationQuestionsBeforeFailure, harness.component.registrationQuestionDrafts.value)
+            assertEquals(pendingStaffInvitesBeforeFailure, harness.component.pendingStaffInvites.value)
+            assertEquals(0, harness.onEventCreatedCount)
+            assertFalse(harness.navigatedToSchedule)
+            assertEquals(2, harness.eventRepository.attemptedCreateEventEditorCommands.size)
+            assertEquals(
+                firstCommand,
+                harness.eventRepository.attemptedCreateEventEditorCommands[1],
+            )
+
+            harness.component.updateTournamentField { copy(doubleElimination = true) }
+            advance()
+            harness.eventRepository.createEditorFailure = null
+            harness.component.createEvent()
+            advance()
+
+            assertEquals(3, harness.eventRepository.attemptedCreateEventEditorCommands.size)
+            val editedCommand = harness.eventRepository.attemptedCreateEventEditorCommands[2]
+            assertNotEquals(firstCommand.createOperationId, editedCommand.createOperationId)
+            assertTrue(editedCommand.draft.competition.doubleElimination)
+            assertEquals(1, harness.eventRepository.createEventEditorCalls.size)
+            assertEquals(1, harness.onEventCreatedCount)
+        }
+    @Test
+    fun given_club_tryout_bootstrap_when_creating_then_command_has_individual_registration_and_valid_resources() =
+        runTest(testDispatcher) {
+            val organizationId = "club-tryout-org"
+            val field = Field(
+                id = "club-field-1",
+                name = "Main Court",
+                organizationId = organizationId,
+            )
+            val organization = testTryoutOrganization(organizationId)
+            val harness = CreateEventHarness(
+                bootstrap = EventEditorBootstrapQueryDto(
+                    organizationId = organizationId,
+                    eventType = EventType.TRYOUT.name,
+                ),
+                bootstrapSession = createEventEditorSession(
+                    event = Event(
+                        id = "tryout-bootstrap",
+                        name = "Club Tryouts",
+                        hostId = "user-1",
+                        organizationId = organizationId,
+                        eventType = EventType.TRYOUT,
+                        sportIds = listOf("Indoor Volleyball"),
+                        start = Instant.parse("2026-07-01T10:00:00Z"),
+                        end = Instant.parse("2026-07-01T12:00:00Z"),
+                        location = "Main Court",
+                        coordinates = listOf(-118.0, 34.0),
+                        fieldIds = listOf(field.id),
+                    ),
+                    fields = listOf(field),
+                ),
+            )
+            harness.billingRepository.organizations = listOf(organization)
+            advance()
+
+            harness.component.createEvent()
+            advance()
+
+            val command = harness.eventRepository.createEventEditorCalls.single()
+            assertFalse(command.draft.participation.teamSignup)
+            assertFalse(command.draft.participation.singleDivision)
+            assertEquals("FIXED_END", command.draft.schedule.mode)
+            assertFalse(command.draft.schedule.generatedScheduleEnd != null)
+            assertEquals(listOf(field.id), command.draft.resources.fieldIds)
+            assertEquals(1, command.draft.resources.timeSlots.size)
+            assertEquals(listOf(field.id), command.draft.resources.timeSlots.single().scheduledFieldIds)
+            assertFalse(command.draft.resources.timeSlots.single().repeating == true)
+            assertEquals(1, command.draft.competition.divisionDetails.size)
+            assertEquals(
+                organization.divisions.single().id,
+                command.draft.competition.divisionDetails.single().sourceDivisionId,
+            )
+            val commandDivision = command.draft.competition.divisionDetails.single()
+            assertEquals(
+                mapOf(commandDivision.id to listOf(field.id)),
+                command.draft.competition.divisionFieldIds,
+            )
+            assertNull(commandDivision.poolPlay)
+            assertNull(commandDivision.standingsOverrides)
+            assertEquals(EventEditorCreateCompletionMode.CREATE_ONLY, command.completion.mode)
+            assertFalse(command.hasScheduleProposalSupport)
+            assertFalse(command.draft.competition.includePlayoffs)
+            assertNull(command.draft.competition.matchRulesOverride)
+            assertFalse(command.draft.staff.doTeamsOfficiate == true)
+            assertEquals("OFF", command.draft.staff.teamCheckInMode)
+            assertFalse(command.draft.staff.allowMatchRosterEdits)
+            assertFalse(command.draft.staff.allowTemporaryMatchPlayers)
+            assertFalse(command.draft.staff.autoCreatePointMatchIncidents)
+        }
+
+    @Test
+    fun given_club_tryout_without_club_features_when_creating_then_command_is_rejected() =
+        runTest(testDispatcher) {
+            val organizationId = "club-tryout-org"
+            val field = Field(
+                id = "club-field-1",
+                name = "Main Court",
+                organizationId = organizationId,
+            )
+            val organization = testTryoutOrganization(organizationId)
+                .copy(enabledFeatures = emptyList())
+            val harness = CreateEventHarness(
+                bootstrap = EventEditorBootstrapQueryDto(
+                    organizationId = organizationId,
+                    eventType = EventType.TRYOUT.name,
+                ),
+                bootstrapSession = createEventEditorSession(
+                    event = Event(
+                        id = "tryout-bootstrap",
+                        name = "Club Tryouts",
+                        hostId = "user-1",
+                        organizationId = organizationId,
+                        eventType = EventType.TRYOUT,
+                        sportIds = listOf("Indoor Volleyball"),
+                        start = Instant.parse("2026-07-01T10:00:00Z"),
+                        end = Instant.parse("2026-07-01T12:00:00Z"),
+                        location = "Main Court",
+                        coordinates = listOf(-118.0, 34.0),
+                    ),
+                    fields = listOf(field),
+                ),
+            )
+            harness.billingRepository.organizations = listOf(organization)
+            advance()
+
+            harness.component.createEvent()
+            advance()
+
+            assertTrue(harness.eventRepository.createEventEditorCalls.isEmpty())
+            assertTrue(
+                harness.component.errorState.value?.message
+                    ?.contains("club and team features", ignoreCase = true) == true,
+            )
+        }
+    @Test
+    fun given_failed_proposal_refresh_when_retried_then_new_command_identity_is_reused() =
+        runTest(testDispatcher) {
+            val harness = partialProposalHarness()
+            advance()
+
+            harness.component.createEvent()
+            advance()
+            val initialCommand = harness.eventRepository.createEventEditorCalls.single()
+
+            harness.eventRepository.createEditorFailure = IllegalStateException("transport timeout")
+            harness.component.refreshScheduleProposal()
+            advance()
+
+            val failedRefreshCommand =
+                harness.eventRepository.attemptedCreateEventEditorCommands[1]
+            assertNotEquals(initialCommand.createOperationId, failedRefreshCommand.createOperationId)
+            assertEquals(1, harness.eventRepository.createEventEditorCalls.size)
+            assertTrue(harness.component.pendingScheduleProposal.value != null)
+
+            harness.eventRepository.createEditorFailure = null
+            harness.component.refreshScheduleProposal()
+            advance()
+
+            val attempts = harness.eventRepository.attemptedCreateEventEditorCommands
+            assertEquals(3, attempts.size)
+            assertEquals(failedRefreshCommand.createOperationId, attempts[2].createOperationId)
+            assertEquals(2, harness.eventRepository.createEventEditorCalls.size)
+        }
+}
+
+private fun partialProposalHarness(): CreateEventHarness {
+    val harness = CreateEventHarness(
+        bootstrapSession = createEventEditorSession(
+            event = com.razumly.mvp.core.data.dataTypes.Event(
+                id = "bootstrap-partial",
+                name = "Partial League",
+                hostId = "user-1",
+                eventType = EventType.LEAGUE,
+                sportIds = listOf("Indoor Volleyball"),
+                start = Instant.parse("2026-07-01T00:00:00Z"),
+                end = Instant.parse("2026-07-01T02:00:00Z"),
+                divisions = listOf("Open"),
+                isAutomatedScheduling = true,
+            ),
+        ),
+    )
+    harness.eventRepository.createEditorOutcomeFactory = { command, session ->
+        val proposal = createEventEditorPartialScheduleProposal(command, session)
+        com.razumly.mvp.core.data.repositories.EventEditorSaveOutcome(
+            session = session,
+            staffEmailDelivery = "NOT_REQUESTED",
+            scheduleOutcome = proposal.scheduleOutcome,
+            proposal = proposal,
+        )
+    }
+    return harness
 }
 
 private fun completedRentalOption(
@@ -2918,3 +3693,32 @@ private fun completedRentalOption(
     priceCents = 2_500,
 )
 
+private fun testTryoutOrganization(organizationId: String): Organization = Organization(
+    id = organizationId,
+    name = "Club Tryout Organization",
+    location = "Los Angeles",
+    description = null,
+    logoId = null,
+    ownerId = "owner-1",
+    website = null,
+    enabledFeatures = listOf(OrganizationFeature.CLUB_TEAMS),
+    divisions = listOf(
+        DivisionDetail(
+            id = "club-division-1",
+            key = "girls_u14",
+            kind = "LEAGUE",
+            name = "Girls U14",
+            divisionTypeId = "skill_competitive_age_u14",
+            divisionTypeName = "Competitive U14",
+            ratingType = "SKILL",
+            gender = "F",
+            skillDivisionTypeId = "competitive",
+            skillDivisionTypeName = "Competitive",
+            ageDivisionTypeId = "u14",
+            ageDivisionTypeName = "U14",
+            maxParticipants = 12,
+        ),
+    ),
+    hasStripeAccount = false,
+    coordinates = null,
+)

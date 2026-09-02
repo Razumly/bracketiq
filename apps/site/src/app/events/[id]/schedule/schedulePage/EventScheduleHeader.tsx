@@ -57,13 +57,15 @@ type EventScheduleHeaderProps = {
   hasPendingUnsavedChanges: boolean;
   hasSplitDivisionUnassignedTeams: boolean;
   showMoreActions: boolean;
-  showRescheduleAction: boolean;
-  isRescheduleActionInFlight: boolean;
-  onRescheduleMatches: () => void;
   showBuildScheduleAction: boolean;
-  buildScheduleIsRebuild: boolean;
   isBuildScheduleActionInFlight: boolean;
   onBuildSchedule: () => void;
+  showCompleteScheduleAction: boolean;
+  isCompleteScheduleActionInFlight: boolean;
+  onCompleteSchedule: () => void;
+  showRebuildScheduleAction: boolean;
+  isRebuildScheduleActionInFlight: boolean;
+  onRebuildSchedule: () => void;
   showRebuildWithoutPlaceholdersAction: boolean;
   isRebuildWithoutPlaceholdersActionInFlight: boolean;
   onRebuildWithoutPlaceholders: () => void;
@@ -133,13 +135,15 @@ export default function EventScheduleHeader({
   hasPendingUnsavedChanges,
   hasSplitDivisionUnassignedTeams,
   showMoreActions,
-  showRescheduleAction,
-  isRescheduleActionInFlight,
-  onRescheduleMatches,
   showBuildScheduleAction,
-  buildScheduleIsRebuild,
   isBuildScheduleActionInFlight,
   onBuildSchedule,
+  showCompleteScheduleAction,
+  isCompleteScheduleActionInFlight,
+  onCompleteSchedule,
+  showRebuildScheduleAction,
+  isRebuildScheduleActionInFlight,
+  onRebuildSchedule,
   showRebuildWithoutPlaceholdersAction,
   isRebuildWithoutPlaceholdersActionInFlight,
   onRebuildWithoutPlaceholders,
@@ -291,17 +295,6 @@ export default function EventScheduleHeader({
                       <Button variant="default">More</Button>
                     </Menu.Target>
                     <Menu.Dropdown>
-                      {showRescheduleAction && (
-                        <Menu.Item
-                          onClick={onRescheduleMatches}
-                          disabled={
-                            (hasNetworkActionInFlight && !isRescheduleActionInFlight)
-                            || hasSplitDivisionUnassignedTeams
-                          }
-                        >
-                          {isRescheduleActionInFlight ? 'Rescheduling...' : 'Reschedule'}
-                        </Menu.Item>
-                      )}
                       {showBuildScheduleAction && (
                         <Menu.Item
                           color="orange"
@@ -311,13 +304,31 @@ export default function EventScheduleHeader({
                             || hasSplitDivisionUnassignedTeams
                           }
                         >
-                          {isBuildScheduleActionInFlight
-                            ? buildScheduleIsRebuild
-                              ? 'Rebuilding schedule...'
-                              : 'Building schedule...'
-                            : buildScheduleIsRebuild
-                              ? 'Rebuild schedule'
-                              : 'Build schedule'}
+                          {isBuildScheduleActionInFlight ? 'Building...' : 'Build'}
+                        </Menu.Item>
+                      )}
+                      {showCompleteScheduleAction && (
+                        <Menu.Item
+                          color="orange"
+                          onClick={onCompleteSchedule}
+                          disabled={
+                            (hasNetworkActionInFlight && !isCompleteScheduleActionInFlight)
+                            || hasSplitDivisionUnassignedTeams
+                          }
+                        >
+                          {isCompleteScheduleActionInFlight ? 'Completing...' : 'Complete'}
+                        </Menu.Item>
+                      )}
+                      {showRebuildScheduleAction && (
+                        <Menu.Item
+                          color="orange"
+                          onClick={onRebuildSchedule}
+                          disabled={
+                            (hasNetworkActionInFlight && !isRebuildScheduleActionInFlight)
+                            || hasSplitDivisionUnassignedTeams
+                          }
+                        >
+                          {isRebuildScheduleActionInFlight ? 'Rebuilding...' : 'Rebuild'}
                         </Menu.Item>
                       )}
                       {showRebuildWithoutPlaceholdersAction && (
@@ -331,7 +342,7 @@ export default function EventScheduleHeader({
                         >
                           {isRebuildWithoutPlaceholdersActionInFlight
                             ? 'Rebuilding without placeholders...'
-                            : 'Rebuild Without Placeholders'}
+                            : 'Rebuild without placeholders'}
                         </Menu.Item>
                       )}
                       {showCancelAction && (

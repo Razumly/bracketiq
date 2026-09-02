@@ -13,6 +13,7 @@ export const normalizeAutomatedSchedulingForEventType = (
 ): boolean => {
   const normalized = String(eventType ?? "").trim().toUpperCase();
   if (!defaultAutomatedSchedulingForEventType(normalized)) return false;
+  if (normalized === "WEEKLY_EVENT") return true;
   return typeof value === "boolean"
     ? value
     : defaultAutomatedSchedulingForEventType(normalized);

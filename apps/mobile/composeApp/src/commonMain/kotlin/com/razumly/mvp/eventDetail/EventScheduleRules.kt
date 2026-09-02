@@ -117,7 +117,8 @@ internal fun requiresFixedEndRangeValidation(
         (
             event.eventType == EventType.LEAGUE ||
                 event.eventType == EventType.TOURNAMENT ||
-                event.eventType == EventType.WEEKLY_EVENT
+                event.eventType == EventType.WEEKLY_EVENT ||
+                event.eventType == EventType.TRYOUT
             )
 }
 

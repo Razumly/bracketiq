@@ -8,9 +8,11 @@ const canManageEventMock = jest.fn();
 const bootstrapQueryMock = jest.fn();
 const loadCreateSnapshotMock = jest.fn();
 const loadSnapshotMock = jest.fn();
+const attachSnapshotBindingMock = jest.fn();
 const createEventEditorMock = jest.fn();
 const createScheduleProposalMock = jest.fn();
 const acceptScheduleProposalMock = jest.fn();
+const acceptPartialScheduleProposalMock = jest.fn();
 const rejectScheduleProposalMock = jest.fn();
 const saveEventEditorMock = jest.fn();
 const parseAcceptMock = jest.fn();
@@ -60,6 +62,8 @@ jest.mock("@/contracts/eventEditor", () => ({
     safeParse: (...args: any[]) => bootstrapQueryMock(...args),
   },
   parseCreateEventEditorCommand: (...args: any[]) => parseCreateMock(...args),
+  parseEventEditorAcceptPartialProposalCommand: (...args: any[]) =>
+    parseAcceptMock(...args),
   parseEventEditorAcceptProposalCommand: (...args: any[]) =>
     parseAcceptMock(...args),
   parseEventEditorRejectProposalCommand: (...args: any[]) =>
@@ -71,19 +75,25 @@ jest.mock("@/contracts/eventEditor", () => ({
       .projectEventEditorDraftNestedInput(input),
 }));
 jest.mock("@/server/events/eventEditorSnapshot", () => ({
-  loadCreateEventEditorSnapshot: (...args: any[]) =>
+  loadCreateEventEditorSnapshot: (...args: unknown[]) =>
     loadCreateSnapshotMock(...args),
-  loadEventEditorSnapshot: (...args: any[]) => loadSnapshotMock(...args),
+  loadEventEditorSnapshot: (...args: unknown[]) => loadSnapshotMock(...args),
+}));
+jest.mock("@/server/events/eventEditorRevisionBinding", () => ({
+  attachEventEditorRevisionBinding: (...args: unknown[]) =>
+    attachSnapshotBindingMock(...args),
 }));
 jest.mock("@/server/events/eventEditorSave", () => ({
-  acceptScheduleProposalFromEditor: (...args: any[]) =>
+  acceptPartialScheduleProposalFromEditor: (...args: unknown[]) =>
+    acceptPartialScheduleProposalMock(...args),
+  acceptScheduleProposalFromEditor: (...args: unknown[]) =>
     acceptScheduleProposalMock(...args),
-  createEventEditor: (...args: any[]) => createEventEditorMock(...args),
-  createScheduleProposalFromEditor: (...args: any[]) =>
+  createEventEditor: (...args: unknown[]) => createEventEditorMock(...args),
+  createScheduleProposalFromEditor: (...args: unknown[]) =>
     createScheduleProposalMock(...args),
-  rejectScheduleProposalFromEditor: (...args: any[]) =>
+  rejectScheduleProposalFromEditor: (...args: unknown[]) =>
     rejectScheduleProposalMock(...args),
-  saveEventEditor: (...args: any[]) => saveEventEditorMock(...args),
+  saveEventEditor: (...args: unknown[]) => saveEventEditorMock(...args),
   EditorCapabilityError: class extends Error {},
   EditorImmutableFieldError: class extends Error {},
   EditorInputError: MockEditorInputError,
@@ -94,7 +104,7 @@ jest.mock("@/server/events/eventEditorSave", () => ({
   EventEditorProposalStaleError: MockEditorProposalStaleError,
 }));
 jest.mock("@/server/events/eventStaffDelivery", () => ({
-  deliverEventStaffInvitesAfterCommit: (...args: any[]) =>
+  deliverEventStaffInvitesAfterCommit: (...args: unknown[]) =>
     deliverInvitesMock(...args),
 }));
 
@@ -156,6 +166,7 @@ describe("canonical editor routes", () => {
       draft: { basics: { organizationId: null } },
       catalogs: { organizations: [] },
     });
+    attachSnapshotBindingMock.mockImplementation(async (snapshot) => snapshot);
   });
 
   it("rejects malformed create bootstrap queries before loading catalogs", async () => {
@@ -293,6 +304,69 @@ describe("canonical editor routes", () => {
         onScheduleChanged: expect.any(Function),
       }),
     );
+  });
+  it("dispatches explicit partial acceptance with its fresh identity", async () => {
+    const command = {
+      contractVersion: 3,
+      createOperationId: "proposal-operation-1",
+      proposalRevision: "proposal-revision-1",
+      acceptanceMode: "PARTIAL",
+      acceptanceOperationId: "acceptance-operation-1",
+      draft: { basics: { name: "Proposal fixture" } },
+    };
+    const result = {
+      status: "SAVED",
+      acceptanceOperationId: command.acceptanceOperationId,
+      snapshot: { eventId: "event-proposal-1" },
+    };
+    parseAcceptMock.mockReturnValue(command);
+    acceptPartialScheduleProposalMock.mockResolvedValue(result);
+
+    const response = await createPut(
+      request("http://localhost/api/events/editor", "PUT", command),
+    );
+
+    expect(response.status).toBe(201);
+    expect(await response.json()).toEqual(result);
+    expect(acceptPartialScheduleProposalMock).toHaveBeenCalledWith(
+      { userId: "host_1", isAdmin: false },
+      command.createOperationId,
+      command.proposalRevision,
+      command.acceptanceOperationId,
+      command.draft,
+      expect.objectContaining({
+        onScheduleChanged: expect.any(Function),
+      }),
+    );
+    expect(acceptScheduleProposalMock).not.toHaveBeenCalled();
+  });
+  it("maps stale partial acceptance to EDITOR_PROPOSAL_STALE", async () => {
+    const command = {
+      contractVersion: 3,
+      createOperationId: "proposal-operation-stale",
+      proposalRevision: "proposal-revision-stale",
+      acceptanceMode: "PARTIAL",
+      acceptanceOperationId: "acceptance-operation-stale",
+      draft: { basics: { name: "Proposal fixture" } },
+    };
+    parseAcceptMock.mockReturnValue(command);
+    acceptPartialScheduleProposalMock.mockRejectedValue(
+      new MockEditorProposalStaleError(
+        "The schedule proposal changed before acceptance.",
+      ),
+    );
+
+    const response = await createPut(
+      request("http://localhost/api/events/editor", "PUT", command),
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: "The schedule proposal changed before acceptance.",
+      code: "EDITOR_PROPOSAL_STALE",
+    });
+    expect(acceptPartialScheduleProposalMock).toHaveBeenCalledTimes(1);
+    expect(acceptScheduleProposalMock).not.toHaveBeenCalled();
   });
 
   it("rejects a proposal through the canonical DELETE route", async () => {

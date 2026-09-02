@@ -6,6 +6,7 @@ import {
 } from "@/app/api/events/[eventId]/standings/shared";
 import {
   buildPublicBracketWidgetView,
+  getPublicIncompleteScheduleStatus,
   type PublicBracketWidgetView,
   type PublicWidgetDivisionOption,
 } from "@/server/publicWidgetBracket";
@@ -176,6 +177,11 @@ export type PublicStandingsWidgetPage = {
   selectedDivisionId: string | null;
   selectedDivisionName: string | null;
   division: DivisionStandingsResponse | null;
+  isScheduleIncomplete: boolean;
+  unscheduledMatchCount: number;
+  unscheduledMatchIds: string[];
+  affectedCompetitionPhaseIds: string[];
+  affectedCompetitionPhaseLabels: string[];
 };
 
 export type PublicBracketWidgetPage = {
@@ -188,6 +194,11 @@ export type PublicBracketWidgetPage = {
   winnersLane: PublicBracketWidgetView["winnersLane"];
   losersLane: PublicBracketWidgetView["losersLane"];
   hasLosersBracket: boolean;
+  isScheduleIncomplete: boolean;
+  unscheduledMatchCount: number;
+  unscheduledMatchIds: string[];
+  affectedCompetitionPhaseIds: string[];
+  affectedCompetitionPhaseLabels: string[];
 };
 
 export type PublicOrganizationRentalSelectionData = {
@@ -1805,6 +1816,11 @@ export const getPublicStandingsWidgetPage = async (
       selectedDivisionId: null,
       selectedDivisionName: null,
       division: null,
+      isScheduleIncomplete: false,
+      unscheduledMatchCount: 0,
+      unscheduledMatchIds: [],
+      affectedCompetitionPhaseIds: [],
+      affectedCompetitionPhaseLabels: [],
     };
   }
 
@@ -1822,8 +1838,14 @@ export const getPublicStandingsWidgetPage = async (
       selectedDivisionId: null,
       selectedDivisionName: null,
       division: null,
+      isScheduleIncomplete: false,
+      unscheduledMatchCount: 0,
+      unscheduledMatchIds: [],
+      affectedCompetitionPhaseIds: [],
+      affectedCompetitionPhaseLabels: [],
     };
   }
+  const incompleteSchedule = getPublicIncompleteScheduleStatus(league);
 
   const divisionOptions = league.divisions
     .map((division) => ({
@@ -1841,6 +1863,7 @@ export const getPublicStandingsWidgetPage = async (
       selectedDivisionId: null,
       selectedDivisionName: null,
       division: null,
+      ...incompleteSchedule,
     };
   }
 
@@ -1860,6 +1883,7 @@ export const getPublicStandingsWidgetPage = async (
       divisionOptions.find((option) => option.value === selectedDivisionId)
         ?.label ?? null,
     division: buildDivisionStandingsResponse(league, selectedDivisionId),
+    ...incompleteSchedule,
   };
 };
 
@@ -1984,6 +2008,11 @@ export const getPublicBracketWidgetPage = async (
       winnersLane: null,
       losersLane: null,
       hasLosersBracket: false,
+      isScheduleIncomplete: false,
+      unscheduledMatchCount: 0,
+      unscheduledMatchIds: [],
+      affectedCompetitionPhaseIds: [],
+      affectedCompetitionPhaseLabels: [],
     };
   }
 
@@ -2002,6 +2031,11 @@ export const getPublicBracketWidgetPage = async (
       winnersLane: null,
       losersLane: null,
       hasLosersBracket: false,
+      isScheduleIncomplete: false,
+      unscheduledMatchCount: 0,
+      unscheduledMatchIds: [],
+      affectedCompetitionPhaseIds: [],
+      affectedCompetitionPhaseLabels: [],
     };
   }
 
@@ -2009,6 +2043,7 @@ export const getPublicBracketWidgetPage = async (
     loadedEvent,
     options.divisionId,
   );
+  const incompleteSchedule = getPublicIncompleteScheduleStatus(loadedEvent);
   return {
     organization,
     eventPageInfo: eventPage.pageInfo,
@@ -2019,6 +2054,7 @@ export const getPublicBracketWidgetPage = async (
     winnersLane: bracketView?.winnersLane ?? null,
     losersLane: bracketView?.losersLane ?? null,
     hasLosersBracket: bracketView?.hasLosersBracket ?? false,
+    ...incompleteSchedule,
   };
 };
 
@@ -2109,6 +2145,56 @@ export const getPublicOrganizationTeamForRegistration = async (
   };
 };
 
+type PublicRegistrationMatchRow = {
+  id?: unknown;
+  placementState?: unknown;
+  division?: unknown;
+  phase?: unknown;
+  phaseDivisionId?: unknown;
+  sourceDivisionId?: unknown;
+};
+
+const mapPublicRegistrationMatches = (
+  rows: PublicRegistrationMatchRow[],
+  phaseDivisionDetails: Array<Record<string, unknown>>,
+) => {
+  const phaseDetailsById = new Map(
+    phaseDivisionDetails
+      .map((detail) => [String(detail.id ?? "").trim(), detail] as const)
+      .filter(([id]) => id.length > 0),
+  );
+
+  return [...rows]
+    .sort((left, right) =>
+      (normalizeNullableString(left.id) ?? "").localeCompare(
+        normalizeNullableString(right.id) ?? "",
+      ),
+    )
+    .map((row) => {
+      const divisionId = normalizeNullableString(row.division);
+      const phaseDetail = divisionId ? phaseDetailsById.get(divisionId) : undefined;
+      const phaseDivisionId =
+        normalizeNullableString(row.phaseDivisionId) ??
+        normalizeNullableString(phaseDetail?.id) ??
+        null;
+      const phase =
+        normalizeNullableString(row.phase) ??
+        normalizeNullableString(phaseDetail?.phase);
+      const sourceDivisionId =
+        normalizeNullableString(row.sourceDivisionId) ??
+        normalizeNullableString(phaseDetail?.sourceDivisionId);
+
+      return {
+        $id: normalizeNullableString(row.id) ?? "",
+        placementState: normalizeNullableString(row.placementState),
+        phase,
+        sourceDivisionId,
+        phaseDivisionId,
+        division: divisionId,
+      };
+    });
+};
+
 export const getPublicOrganizationEventForRegistration = async (
   slug: string,
   eventId: string,
@@ -2139,10 +2225,12 @@ export const getPublicOrganizationEventForRegistration = async (
     sport,
     divisionDetails,
     playoffDivisionDetails,
+    phaseDivisionDetails,
     fields,
     timeSlots,
     teams,
     officialIds,
+    matchRows,
   ] = await Promise.all([
     typeof event.sportIds?.[0] === "string"
       ? (prisma as any).sports.findUnique({ where: { id: event.sportIds[0] } })
@@ -2160,6 +2248,11 @@ export const getPublicOrganizationEventForRegistration = async (
       where: { eventId, role: "PHASE", status: "ACTIVE", kind: "PLAYOFF" },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }, { id: "asc" }],
     }),
+    (prisma as any).divisions.findMany({
+      where: { eventId, role: "PHASE", status: "ACTIVE" },
+      select: { id: true, name: true, phase: true, sourceDivisionId: true },
+      orderBy: [{ id: "asc" }],
+    }),
     normalizeIdList(event.fieldIds).length
       ? (prisma as any).fields.findMany({
           where: { id: { in: normalizeIdList(event.fieldIds) } },
@@ -2174,6 +2267,11 @@ export const getPublicOrganizationEventForRegistration = async (
       ? (prisma as any).teams.findMany({ where: { id: { in: teamIds } } })
       : Promise.resolve([]),
     getEventOfficialIdsForEvent(eventId, prisma),
+    (prisma as any).matches.findMany({
+      where: { eventId },
+      select: { id: true, placementState: true, division: true },
+      orderBy: { id: "asc" },
+    }),
   ]);
 
   return {
@@ -2192,6 +2290,21 @@ export const getPublicOrganizationEventForRegistration = async (
         waitListIds: participantIds.waitListIds,
         freeAgentIds: participantIds.freeAgentIds,
         officialIds,
+        matches: mapPublicRegistrationMatches(
+          matchRows as PublicRegistrationMatchRow[],
+          [
+            ...(phaseDivisionDetails as unknown as Array<Record<string, unknown>>),
+            ...(playoffDivisionDetails as unknown as Array<Record<string, unknown>>),
+          ],
+        ),
+        competitionPhaseDetails: (phaseDivisionDetails as Array<Record<string, unknown>>)
+          .map((row) => ({
+            id: normalizeNullableString(row.id) ?? "",
+            name: normalizeNullableString(row.name) ?? "",
+            phase: normalizeNullableString(row.phase),
+            sourceDivisionId: normalizeNullableString(row.sourceDivisionId),
+          }))
+          .filter((row) => row.id.length > 0),
         divisions: divisionDetails
           .map((row: Record<string, any>) => row.id)
           .filter(Boolean),

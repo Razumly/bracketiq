@@ -212,7 +212,11 @@ internal fun LazyListScope.simpleEventDetailsBasicInfoSection(
             val usesGeneratedEnd = state.editEvent.isAutomatedScheduling &&
                 state.editEvent.noFixedEndDateTime
 
-            if (state.editEvent.eventType == EventType.EVENT || supportsNoFixedEndDateTime) {
+            if (
+                state.editEvent.eventType == EventType.EVENT ||
+                    state.editEvent.eventType == EventType.TRYOUT ||
+                    supportsNoFixedEndDateTime
+            ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),

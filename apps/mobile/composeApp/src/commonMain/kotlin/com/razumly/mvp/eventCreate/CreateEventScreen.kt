@@ -133,11 +133,14 @@ fun CreateEventScreen(
     val pendingStaffInvites by component.pendingStaffInvites.collectAsState()
     val termsConsentState by component.termsConsentState.collectAsState()
     val isEditorReady by component.isEditorReady.collectAsState()
+    val isTryoutAvailable by component.isTryoutAvailable.collectAsState()
     val editorBootstrapError by component.editorBootstrapError.collectAsState()
     val termsConsentLoading by component.termsConsentLoading.collectAsState()
     val pendingScheduleProposal by component.pendingScheduleProposal.collectAsState()
+    val scheduleProposalState by component.scheduleProposalState.collectAsState()
     val showMap by mapComponent.showMap.collectAsState()
     val isEditing = true
+    val showOfficialsPanel = newEventState.eventType != EventType.TRYOUT
     val currentUser by component.currentUser.collectAsState()
     val isDark = isSystemInDarkTheme()
     val loadingHandler = LocalLoadingHandler.current
@@ -156,9 +159,12 @@ fun CreateEventScreen(
     }
 
     pendingScheduleProposal?.proposal?.let { proposal ->
+        val isStale = scheduleProposalState is ScheduleProposalState.Stale
         ScheduleProposalDialog(
             proposal = proposal,
+            isStale = isStale,
             onAccept = component::acceptScheduleProposal,
+            onRefresh = component::refreshScheduleProposal,
             onReject = component::rejectScheduleProposal,
         )
     }
@@ -262,15 +268,17 @@ fun CreateEventScreen(
         }
     }
 
-    val onEventTypeSelected: (EventType) -> Unit = remember(component) {
+    val onEventTypeSelected: (EventType) -> Unit = remember(component, isTryoutAvailable) {
         { selectedType ->
-            val normalizedType = selectedType.takeIf { it in mobileCreateEventTypes() } ?: EventType.EVENT
+            val normalizedType = selectedType.takeIf {
+                it in mobileCreateEventTypes(isTryoutAvailable)
+            } ?: EventType.EVENT
             component.onTypeSelected(normalizedType)
         }
     }
 
-    LaunchedEffect(newEventState.eventType) {
-        if (newEventState.eventType !in mobileCreateEventTypes()) {
+    LaunchedEffect(newEventState.eventType, isTryoutAvailable) {
+        if (newEventState.eventType !in mobileCreateEventTypes(isTryoutAvailable)) {
             onEventTypeSelected(EventType.EVENT)
         }
     }
@@ -577,6 +585,8 @@ fun CreateEventScreen(
                                     includeStatusBarInsetInStickyHeaders = false,
                                     editView = isEditing,
                                     isNewEvent = true,
+                                    showOfficialsPanel = showOfficialsPanel,
+                                    tryoutAvailable = isTryoutAvailable,
                                     showValidationErrors = hasAttemptedEventSubmit,
                                     rentalTimeLocked = false,
                                     onAddCurrentUser = component::addUserToEvent,
@@ -709,7 +719,9 @@ fun CreateEventScreen(
 @Composable
 internal fun ScheduleProposalDialog(
     proposal: com.razumly.mvp.core.network.dto.EventEditorCreateProposalDto,
+    isStale: Boolean = false,
     onAccept: () -> Unit,
+    onRefresh: () -> Unit = {},
     onReject: () -> Unit,
 ) {
     val schedule = proposal.scheduleOutcome
@@ -758,11 +770,38 @@ internal fun ScheduleProposalDialog(
             ) {
                 Text(proposal.snapshot.draft.basics.name)
                 Spacer(Modifier.height(8.dp))
-                Text("Complete match graph: ${proposal.graph.matches.size} matches")
+                val isPartial = schedule.status ==
+                    com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeStatus.PARTIAL
+                Text(
+                    if (isPartial) {
+                        "Incomplete schedule: ${schedule.placedMatchCount} placed, " +
+                            "${schedule.unplacedMatchCount} unscheduled"
+                    } else {
+                        "Complete match graph: ${proposal.graph.matches.size} matches"
+                    },
+                )
                 Text("Proposed schedule: ${schedule.matchCount} matches")
                 Text("Resource assignments: $assignedFields")
                 Text("Officiating assignments: $assignedOfficials")
-                Spacer(Modifier.height(8.dp))
+                if (isPartial) {
+                    Spacer(Modifier.height(8.dp))
+                    Text("Unscheduled matches")
+                    schedule.unscheduledMatches.forEach { unscheduled ->
+                        Text(
+                            "${unscheduled.id} (match ${unscheduled.matchId ?: "pending"}, " +
+                                "phaseDivisionId ${unscheduled.phaseDivisionId}, " +
+                                "phase ${unscheduled.phase}, " +
+                                "sourceDivisionId ${unscheduled.sourceDivisionId ?: "none"})",
+                        )
+                    }
+                    Text("Affected Competition Phases")
+                    schedule.affectedCompetitionPhases.forEach { phase ->
+                        Text(
+                            "${phase.id}: ${phase.name} (${phase.phase}, " +
+                                "sourceDivisionId ${phase.sourceDivisionId ?: "none"})",
+                        )
+                    }
+                }
                 proposal.graph.matches.forEachIndexed { index, match ->
                     val team1 = match.team1Id?.let { teamNames[it] }
                         ?: if (match.team1Id == null) "TBD" else "Team unavailable"
@@ -819,13 +858,16 @@ internal fun ScheduleProposalDialog(
                         Text("  Officials: ${assignmentLabels.joinToString(", ")}")
                     }
                     }
+                if (isStale) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "This schedule proposal is stale and cannot be accepted. " +
+                            "Refresh to review the current proposal; your event setup is still here.",
+                    )
+                }
                 if (displayErrors.isNotEmpty()) {
                     Spacer(Modifier.height(8.dp))
                     Text("Cannot accept: ${displayErrors.take(3).joinToString("; ")}")
-                }
-                if (displayWarnings.isNotEmpty()) {
-                    Spacer(Modifier.height(8.dp))
-                    Text("Review warnings: ${displayWarnings.take(3).joinToString("; ")}")
                 }
                 if (schedule.warnings.isNotEmpty()) {
                     Spacer(Modifier.height(8.dp))
@@ -835,17 +877,27 @@ internal fun ScheduleProposalDialog(
                 }
             }
         },
+        confirmButton = {
+            TextButton(
+                onClick = if (isStale) onRefresh else onAccept,
+                enabled = isStale || displayErrors.isEmpty(),
+            ) {
+                Text(
+                    if (isStale) {
+                        "Refresh proposal"
+                    } else if (schedule.status ==
+                        com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeStatus.PARTIAL
+                    ) {
+                        "Accept partial schedule"
+                    } else {
+                        "Accept and create"
+                    },
+                )
+            }
+        },
         dismissButton = {
             TextButton(onClick = onReject) {
                 Text("Reject")
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = onAccept,
-                enabled = displayErrors.isEmpty(),
-            ) {
-                Text("Accept and create")
             }
         },
     )
@@ -1000,8 +1052,12 @@ private fun proposalDisplayIssues(
     if (eventTimeZone == null) {
         warnings += "The proposal time zone is unavailable."
     }
+    val isPartial = proposal.scheduleOutcome.status ==
+        com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeStatus.PARTIAL
     proposal.graph.matches.forEachIndexed { index, match ->
         val matchLabel = "Match ${index + 1}"
+        val isUnplaced = !match.placementState.orEmpty().trim().equals("PLACED", ignoreCase = true)
+        val allowsUnplaced = isPartial && isUnplaced
         if (match.team1Id != null && !teamNames.containsKey(match.team1Id)) {
             errors += "$matchLabel has an unavailable first team."
         }
@@ -1009,74 +1065,72 @@ private fun proposalDisplayIssues(
             errors += "$matchLabel has an unavailable second team."
         }
         if (match.fieldId == null) {
-            errors += "$matchLabel has no resource assignment."
+            if (!allowsUnplaced) errors += "$matchLabel has no resource assignment."
+        } else if (allowsUnplaced) {
+            errors += "$matchLabel has an invalid resource assignment."
         } else if (!fieldNames.containsKey(match.fieldId)) {
             errors += "$matchLabel has an unavailable resource."
         }
         val time = eventTimeZone?.let { proposalMatchTime(match, it) }
         val hasRawTime = !match.start.isNullOrBlank() && !match.end.isNullOrBlank()
-        if (!hasRawTime || (eventTimeZone != null && time == "Time pending")) {
+        if (allowsUnplaced) {
+            if (match.start != null || match.end != null) {
+                errors += "$matchLabel has an invalid time assignment."
+            }
+        } else if (!hasRawTime || (eventTimeZone != null && time == "Time pending")) {
             errors += "$matchLabel has no proposed time."
         }
-        if (!match.placementState.orEmpty().trim().equals("PLACED", ignoreCase = true)) {
+        if (isUnplaced && !allowsUnplaced) {
             errors += "$matchLabel is not placed."
         }
         val phaseSettings = proposalPhaseSettingsForMatch(proposal.graph.event, match)
-        val assignments = match.officialAssignments.orEmpty().ifEmpty {
-            match.officialIds.orEmpty()
-        }
-        val configuredPositions = phaseSettings?.officialPositions
-            ?: proposal.graph.event.officialPositions.orEmpty()
-        configuredPositions.forEach { position ->
-            repeat(position.count) { slotIndex ->
-                val assignment = assignments.firstOrNull {
-                    it.positionId == position.id && it.slotIndex == slotIndex
+        val assignments = match.officialAssignments.orEmpty().ifEmpty { match.officialIds.orEmpty() }
+        if (allowsUnplaced) {
+            if (assignments.isNotEmpty() || match.officialId != null || match.teamOfficialId != null) {
+                errors += "$matchLabel has invalid officiating assignments."
+            }
+        } else {
+            val configuredPositions = phaseSettings?.officialPositions
+                ?: proposal.graph.event.officialPositions.orEmpty()
+            configuredPositions.forEach { position ->
+                repeat(position.count) { slotIndex ->
+                    val assignment = assignments.firstOrNull {
+                        it.positionId == position.id && it.slotIndex == slotIndex
+                    }
+                    val holderId = assignment?.userId?.trim()?.takeIf(String::isNotBlank)
+                        ?: assignment?.eventOfficialId?.trim()?.takeIf(String::isNotBlank)
+                    if (holderId == null) errors += "$matchLabel has an unassigned officiating slot."
                 }
-                val holderId = assignment?.userId?.trim()?.takeIf(String::isNotBlank)
-                    ?: assignment?.eventOfficialId?.trim()?.takeIf(String::isNotBlank)
+            }
+            assignments.forEach { assignment ->
+                if (!officialPositionNames.containsKey(assignment.positionId)) {
+                    errors += "$matchLabel has an unavailable officiating position."
+                }
+                val holderId = assignment.userId?.trim()?.takeIf(String::isNotBlank)
+                    ?: assignment.eventOfficialId?.trim()?.takeIf(String::isNotBlank)
                 if (holderId == null) {
                     errors += "$matchLabel has an unassigned officiating slot."
+                } else if (!officialNames.containsKey(holderId)) {
+                    errors += "$matchLabel has an unavailable official."
+                }
+            }
+            match.officialId?.let { officialId ->
+                if (!officialNames.containsKey(officialId)) errors += "$matchLabel has an unavailable official."
+            }
+            val requiresTeamOfficial =
+                phaseSettings?.doTeamsOfficiate ?: proposal.graph.event.doTeamsOfficiate == true
+            if (requiresTeamOfficial && match.teamOfficialId.isNullOrBlank()) {
+                errors += "$matchLabel has no proposed team official."
+            } else {
+                match.teamOfficialId?.let { teamId ->
+                    if (!teamNames.containsKey(teamId)) errors += "$matchLabel has an unavailable team official."
                 }
             }
         }
-        assignments.forEach { assignment ->
-            if (!officialPositionNames.containsKey(assignment.positionId)) {
-                errors += "$matchLabel has an unavailable officiating position."
+        listOf(match.previousLeftId, match.previousRightId, match.winnerNextMatchId, match.loserNextMatchId)
+            .filterNotNull().forEach { link ->
+                if (link !in matchKeys) errors += "$matchLabel has an unresolved Match Graph link."
             }
-            val holderId = assignment.userId?.trim()?.takeIf(String::isNotBlank)
-                ?: assignment.eventOfficialId?.trim()?.takeIf(String::isNotBlank)
-            if (holderId == null) {
-                errors += "$matchLabel has an unassigned officiating slot."
-            } else if (!officialNames.containsKey(holderId)) {
-                errors += "$matchLabel has an unavailable official."
-            }
-        }
-        match.officialId?.let { officialId ->
-            if (!officialNames.containsKey(officialId)) {
-                errors += "$matchLabel has an unavailable official."
-            }
-        }
-        val requiresTeamOfficial =
-            phaseSettings?.doTeamsOfficiate ?: proposal.graph.event.doTeamsOfficiate == true
-        if (requiresTeamOfficial && match.teamOfficialId.isNullOrBlank()) {
-            errors += "$matchLabel has no proposed team official."
-        } else {
-            match.teamOfficialId?.let { teamId ->
-                if (!teamNames.containsKey(teamId)) {
-                    errors += "$matchLabel has an unavailable team official."
-                }
-            }
-        }
-        listOf(
-            match.previousLeftId,
-            match.previousRightId,
-            match.winnerNextMatchId,
-            match.loserNextMatchId,
-        ).filterNotNull().forEach { link ->
-            if (link !in matchKeys) {
-                errors += "$matchLabel has an unresolved Match Graph link."
-            }
-        }
     }
     return ProposalDisplayIssues(
         errors = errors.distinct(),

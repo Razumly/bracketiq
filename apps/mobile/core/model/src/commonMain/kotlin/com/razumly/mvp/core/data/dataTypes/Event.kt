@@ -25,6 +25,16 @@ import kotlin.time.ExperimentalTime
 import kotlin.time.Duration.Companion.hours
 import kotlin.time.Instant
 
+@Serializable
+@OptIn(ExperimentalTime::class)
+data class EventSearchOccurrence(
+    val slotId: String,
+    val occurrenceDate: String,
+    @Contextual val start: Instant,
+    @Contextual val end: Instant,
+    val timeZone: String = "UTC",
+)
+
 @Entity
 @Serializable
 @OptIn(ExperimentalTime::class)
@@ -108,6 +118,7 @@ data class Event(
     val resolvedMatchRules: ResolvedMatchRulesMVP? = null,
     val restTimeMinutes: Int? = null,
     val state: String = "UNPUBLISHED",
+    val archivedAt: String? = null,
     val pointsToVictory: List<Int> = emptyList(),
     val officialSchedulingMode: OfficialSchedulingMode = OfficialSchedulingMode.SCHEDULE,
     val staffingPriority: StaffingPriority = StaffingPriority.BEST_AVAILABLE_COVERAGE,
@@ -124,6 +135,9 @@ data class Event(
     val tags: List<EventTag> = emptyList(),
     @Transient val lastUpdated: Instant = Clock.System.now(),
 ) : MVPDocument {
+    @Ignore
+    @Transient
+    var nextOccurrence: EventSearchOccurrence? = null
     @Ignore
     var price: Double = 0.0
         get() = priceCents.toDouble() / 100.0

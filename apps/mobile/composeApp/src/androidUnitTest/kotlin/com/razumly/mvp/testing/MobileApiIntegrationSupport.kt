@@ -11,6 +11,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.repositories.EventEditorApiException
 import com.razumly.mvp.core.data.repositories.EventEditorMutation
 import com.razumly.mvp.core.data.repositories.EventEditorSessionMapper
 import com.razumly.mvp.core.data.repositories.EventRepository
@@ -27,12 +28,23 @@ import com.razumly.mvp.core.network.createMvpHttpClient
 import com.razumly.mvp.core.network.dto.*
 import com.razumly.mvp.eventDetail.data.MatchRepository
 import io.ktor.client.HttpClient
+import io.ktor.client.plugins.plugin
+import io.ktor.client.plugins.HttpSend
+import io.ktor.http.encodedPath
+import io.ktor.http.content.OutgoingContent
+import io.ktor.http.HttpMethod
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.robolectric.RuntimeEnvironment
@@ -41,6 +53,8 @@ import java.net.Socket
 import java.net.URI
 import java.net.URLDecoder
 import java.security.MessageDigest
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.TimeUnit
 
 internal const val MOBILE_TEST_HOST_EMAIL = "host@example.com"
@@ -49,6 +63,30 @@ internal const val MOBILE_TEST_PARTICIPANT_EMAIL = "player@example.com"
 internal const val MOBILE_TEST_PARTICIPANT_PASSWORD = "password123!"
 internal const val MOBILE_TEST_PARTICIPANT_USER_ID = "user_participant"
 
+private fun decodeEventEditorCommandJson(body: Any): JsonObject? {
+    return when (body) {
+        is JsonObject -> body
+        is OutgoingContent.ByteArrayContent -> runCatching {
+            Json.parseToJsonElement(body.bytes().decodeToString()).jsonObject
+        }.getOrNull()
+        is OutgoingContent.ContentWrapper -> decodeEventEditorCommandJson(body.delegate())
+        else -> null
+    }
+}
+
+private fun decodeEventEditorOperationId(body: Any): String? {
+    val json = decodeEventEditorCommandJson(body) ?: return null
+    return runCatching {
+        json["createOperationId"]?.jsonPrimitive?.content?.takeIf(String::isNotBlank)
+    }.getOrNull()
+}
+
+internal fun acceptanceRequestJson(body: Any): JsonObject? =
+    decodeEventEditorCommandJson(body)
+
+internal fun acceptanceRequestMatchesOperation(body: Any, operationId: String): Boolean =
+    operationId.isNotBlank() && decodeEventEditorOperationId(body) == operationId
+
 internal class MobileApiTestSession private constructor(
     val api: MvpApiClient,
     val httpClient: HttpClient,
@@ -56,10 +94,50 @@ internal class MobileApiTestSession private constructor(
     val userRepository: UserRepository,
     val eventRepository: EventRepository,
     val fieldRepository: FieldRepository,
+
     val teamRepository: TeamRepository,
     val matchRepository: MatchRepository,
     val sportsRepository: SportsRepository,
 ) {
+    private val acceptanceObservationOperationId = AtomicReference<String?>(null)
+    private val acceptanceObservationRequestObserver = AtomicReference<((JsonObject) -> Unit)?>(null)
+    private val acceptancePutDispatchCount = AtomicInteger(0)
+
+    init {
+        httpClient.plugin(HttpSend).intercept { request ->
+            val observedOperationId = acceptanceObservationOperationId.get()
+            if (
+                request.method == HttpMethod.Put &&
+                request.url.encodedPath.trimEnd('/') == "/api/events/editor" &&
+                observedOperationId != null &&
+                acceptanceRequestMatchesOperation(request.body, observedOperationId)
+            ) {
+                acceptancePutDispatchCount.incrementAndGet()
+                acceptanceRequestJson(request.body)?.let { body ->
+                    acceptanceObservationRequestObserver.get()?.invoke(body)
+                }
+            }
+            execute(request)
+        }
+    }
+
+    internal suspend fun <T> observeAcceptancePutDispatch(
+        operationId: String,
+        onRequest: ((JsonObject) -> Unit)? = null,
+        block: suspend () -> T,
+    ): Pair<T, Int> {
+        check(acceptanceObservationOperationId.compareAndSet(null, operationId)) {
+            "An acceptance request observation is already active."
+        }
+        acceptanceObservationRequestObserver.set(onRequest)
+        acceptancePutDispatchCount.set(0)
+        return try {
+            block() to acceptancePutDispatchCount.get()
+        } finally {
+            acceptanceObservationRequestObserver.set(null)
+            acceptanceObservationOperationId.set(null)
+        }
+    }
     suspend fun deleteEvent(eventId: String) {
         if (eventId.isBlank()) return
         runCatching { api.deleteNoResponse("api/events/$eventId") }
@@ -138,7 +216,17 @@ internal class MobileApiTestSession private constructor(
 }
 
 internal data class PreparedEventEditorCreate(
+    val eventId: String,
     val command: EventEditorCreateCommandDto,
+    val receiptIdentity: String = command.createOperationId,
+    var createDispatchStarted: Boolean = false,
+    var createDispatchTerminal: Boolean = false,
+    var acceptanceDispatchStarted: Boolean = false,
+    var acceptanceDispatchTerminal: Boolean = false,
+    var acceptancePutDispatchCount: Int = 0,
+    var acceptanceRequestBody: JsonObject? = null,
+    var proposal: EventEditorCreateProposalDto? = null,
+    var resolvedEventId: String? = null,
 )
 
 internal suspend fun MobileApiTestSession.prepareEventEditorCreate(
@@ -168,6 +256,7 @@ internal suspend fun MobileApiTestSession.prepareEventEditorCreate(
         ),
     )
     return PreparedEventEditorCreate(
+        eventId = event.id,
         command = EventEditorSessionMapper.toCreateCommand(session, mutation).command,
     )
 }
@@ -186,24 +275,48 @@ internal suspend fun MobileApiTestSession.createEventThroughEditor(
         operationId = operationId,
     )
     onPrepared?.invoke(prepared)
-    val outcome = eventRepository.createEventEditor(prepared.command)
-        .getOrThrow()
+    prepared.createDispatchStarted = true
+    val outcome = try {
+        eventRepository.createEventEditor(prepared.command).getOrThrow()
+    } catch (failure: EventEditorApiException) {
+        prepared.createDispatchTerminal = true
+        throw failure
+    }
     val accepted = outcome.proposal?.let { proposal ->
         check(database.getEventDao.getEventById(proposal.eventId) == null) {
             "A schedule proposal must not write an Event to Room before acceptance."
         }
-        eventRepository.acceptEventEditorProposal(
-            createOperationId = proposal.createOperationId,
-            proposalRevision = proposal.proposalRevision,
-            draft = proposal.snapshot.draft,
-        ).getOrThrow()
+        prepared.proposal = proposal
+        prepared.acceptanceDispatchStarted = true
+        try {
+            val (acceptanceOutcome, acceptancePutCount) =
+                observeAcceptancePutDispatch(
+                    operationId = proposal.createOperationId,
+                    onRequest = { body -> prepared.acceptanceRequestBody = body },
+                ) {
+                    eventRepository.acceptEventEditorProposal(
+                        createOperationId = proposal.createOperationId,
+                        proposalRevision = proposal.proposalRevision,
+                        draft = proposal.snapshot.draft,
+                    ).getOrThrow()
+                }
+            prepared.acceptancePutDispatchCount = acceptancePutCount
+            acceptanceOutcome
+        } catch (failure: EventEditorApiException) {
+            prepared.acceptanceDispatchTerminal = true
+            throw failure
+        }
     } ?: outcome
+    prepared.resolvedEventId = accepted.session.canonicalState.event.id
     return accepted.session.canonicalState.event
 }
 
 internal suspend fun MobileApiTestSession.resolveCreatedEventId(
     prepared: PreparedEventEditorCreate,
 ): String? {
+    check(prepared.createDispatchStarted) {
+        "Cannot resolve an Event Editor create receipt before command dispatch starts."
+    }
     val response = api.post<JsonObject, JsonObject>(
         path = "api/events/editor",
         body = encodeEventEditorCreateCommand(prepared.command),
@@ -215,6 +328,234 @@ internal suspend fun MobileApiTestSession.resolveCreatedEventId(
         ?.content
         ?.takeIf(String::isNotBlank)
 }
+
+private const val MOBILE_TOURNAMENT_PURGE_SCRIPT = "purge-mobile-tournament-test-run.mjs"
+private const val MOBILE_EVENT_EDITOR_RECEIPT_PURGE_SCRIPT = "purge-mobile-event-editor-receipts.mjs"
+
+private fun normalizedDistinctIds(
+    declaredIds: Iterable<String>,
+    embeddedIds: Iterable<String?>,
+): List<String> {
+    val normalizedIds = LinkedHashSet<String>()
+    declaredIds.forEach { id ->
+        id.trim().takeIf(String::isNotBlank)?.let(normalizedIds::add)
+    }
+    embeddedIds.forEach { id ->
+        id?.trim()?.takeIf(String::isNotBlank)?.let(normalizedIds::add)
+    }
+    return normalizedIds.toList()
+}
+
+private fun jsonArrayOfStrings(values: Iterable<String>): JsonArray =
+    JsonArray(values.map { value -> JsonPrimitive(value) })
+
+internal fun mobileTournamentPurgeRequest(
+    eventIds: Collection<String>,
+    preparedCreates: Collection<PreparedEventEditorCreate>,
+    seededOrganizationId: String,
+    seededTeamIds: Collection<String>,
+): String {
+    val operations = preparedCreates.map { prepared ->
+        val draft = prepared.command.draft
+        val fieldIds = normalizedDistinctIds(
+            declaredIds = draft.resources.fieldIds,
+            embeddedIds = draft.resources.fields.map { field -> field.id ?: field.legacyId },
+        )
+        val timeSlotIds = normalizedDistinctIds(
+            declaredIds = draft.resources.timeSlotIds,
+            embeddedIds = draft.resources.timeSlots.map { timeSlot -> timeSlot.id ?: timeSlot.legacyId },
+        )
+        buildJsonObject {
+            put("draftEventId", prepared.eventId)
+            put("resolvedEventId", prepared.resolvedEventId ?: "")
+            put("createDispatchStarted", prepared.createDispatchStarted)
+            put("createDispatchTerminal", prepared.createDispatchTerminal)
+            put("acceptanceDispatchStarted", prepared.acceptanceDispatchStarted)
+            put("acceptanceDispatchTerminal", prepared.acceptanceDispatchTerminal)
+            put("createOperationId", prepared.receiptIdentity)
+            put("fieldIds", jsonArrayOfStrings(fieldIds))
+            put("timeSlotIds", jsonArrayOfStrings(timeSlotIds))
+            put(
+                "divisionIds",
+                jsonArrayOfStrings(
+                    draft.competition.divisionIds +
+                        draft.competition.divisionDetails.map { detail -> detail.id } +
+                        draft.competition.playoffDivisionDetails.map { detail -> detail.id },
+                ),
+            )
+        }
+    }
+    return buildJsonObject {
+        put("eventIds", jsonArrayOfStrings(eventIds))
+        put("operations", JsonArray(operations))
+        put("seededOrganizationId", seededOrganizationId)
+        put("seededTeamIds", jsonArrayOfStrings(seededTeamIds))
+    }.toString()
+}
+
+private fun resolveMobileTournamentPurgeScript(backendDir: File): File {
+    val workingDir = File(System.getProperty("user.dir") ?: ".").canonicalFile
+    val candidates = listOf(
+        File(workingDir, "scripts/$MOBILE_TOURNAMENT_PURGE_SCRIPT"),
+        File(workingDir, "apps/mobile/scripts/$MOBILE_TOURNAMENT_PURGE_SCRIPT"),
+        File(backendDir.parentFile, "mobile/scripts/$MOBILE_TOURNAMENT_PURGE_SCRIPT"),
+    ).map { file -> file.canonicalFile }
+    return candidates.firstOrNull { file -> file.isFile }
+        ?: error(
+            "Could not find the mobile Tournament purge helper. " +
+                "Expected $MOBILE_TOURNAMENT_PURGE_SCRIPT in apps/mobile/scripts.",
+        )
+}
+
+internal fun MobileApiTestSession.purgeMobileTournamentRun(
+    eventIds: Collection<String>,
+    preparedCreates: Collection<PreparedEventEditorCreate>,
+    seededOrganizationId: String,
+    seededTeamIds: Collection<String>,
+): Unit {
+    if (eventIds.isEmpty() && preparedCreates.isEmpty()) return
+    val databaseUrl = System.getenv("MVP_TEST_DATABASE_URL")
+        ?.trim()
+        ?.takeIf(String::isNotEmpty)
+        ?.let(::validateLocalTestDatabaseUrl)
+        ?: error(
+            "Mobile Tournament cleanup requires MVP_TEST_DATABASE_URL to be a validated local PostgreSQL URL.",
+        )
+    require(
+        System.getenv("MVP_TEST_DISABLE_OUTBOUND_PROVIDERS")
+            ?.trim()
+            ?.lowercase() in setOf("1", "true", "yes"),
+    ) {
+        "Mobile Tournament cleanup requires MVP_TEST_DISABLE_OUTBOUND_PROVIDERS=1."
+    }
+    val backendDir = resolveBackendDir()
+    val script = resolveMobileTournamentPurgeScript(backendDir)
+    val process = ProcessBuilder("node", script.absolutePath)
+        .directory(backendDir)
+        .redirectErrorStream(true)
+        .apply {
+            environment()["MVP_TEST_DATABASE_URL"] = databaseUrl
+            environment()["MVP_SITE_DIR"] = backendDir.absolutePath
+        }
+        .start()
+    process.outputStream.bufferedWriter(Charsets.UTF_8).use { writer ->
+        writer.write(
+            mobileTournamentPurgeRequest(
+                eventIds = eventIds,
+                preparedCreates = preparedCreates,
+                seededOrganizationId = seededOrganizationId,
+                seededTeamIds = seededTeamIds,
+            ),
+        )
+        writer.newLine()
+    }
+    val finished = process.waitFor(45, TimeUnit.SECONDS)
+    if (!finished) {
+        process.destroyForcibly()
+        val output = process.inputStream.bufferedReader().use { reader -> reader.readText() }
+        error("Timed out running the mobile Tournament purge helper.\n$output")
+    }
+    val output = process.inputStream.bufferedReader().use { reader -> reader.readText() }
+    if (process.exitValue() != 0) {
+        error(
+            "Mobile Tournament purge helper failed with exit code ${process.exitValue()}.\n$output",
+        )
+    }
+}
+
+private fun resolveMobileEventEditorReceiptPurgeScript(backendDir: File): File {
+    val workingDir = File(System.getProperty("user.dir") ?: ".").canonicalFile
+    val candidates = listOf(
+        File(workingDir, "scripts/$MOBILE_EVENT_EDITOR_RECEIPT_PURGE_SCRIPT"),
+        File(workingDir, "apps/mobile/scripts/$MOBILE_EVENT_EDITOR_RECEIPT_PURGE_SCRIPT"),
+        File(backendDir.parentFile, "mobile/scripts/$MOBILE_EVENT_EDITOR_RECEIPT_PURGE_SCRIPT"),
+    ).map { file -> file.canonicalFile }
+    return candidates.firstOrNull { file -> file.isFile }
+        ?: error(
+            "Could not find the mobile Event Editor receipt purge helper. " +
+                "Expected $MOBILE_EVENT_EDITOR_RECEIPT_PURGE_SCRIPT in apps/mobile/scripts.",
+        )
+}
+
+internal fun mobileEventEditorReceiptPurgeRequest(
+    eventIds: Collection<String>,
+    preparedCreates: Collection<PreparedEventEditorCreate>,
+): String {
+    val operations = preparedCreates.map { prepared ->
+        buildJsonObject {
+            put("createOperationId", prepared.receiptIdentity)
+            put("createDispatchStarted", prepared.createDispatchStarted)
+            put("createDispatchTerminal", prepared.createDispatchTerminal)
+            put("eventId", prepared.resolvedEventId ?: "")
+        }
+    }
+    return buildJsonObject {
+        put("eventIds", jsonArrayOfStrings(eventIds))
+        put("operations", JsonArray(operations))
+    }.toString()
+}
+
+internal fun MobileApiTestSession.purgeMobileEventEditorReceipts(
+    eventIds: Collection<String>,
+    preparedCreates: Collection<PreparedEventEditorCreate>,
+): List<String> {
+    if (eventIds.isEmpty() && preparedCreates.isEmpty()) return emptyList()
+    val databaseUrl = System.getenv("MVP_TEST_DATABASE_URL")
+        ?.trim()
+        ?.takeIf(String::isNotEmpty)
+        ?.let(::validateLocalTestDatabaseUrl)
+        ?: error(
+            "Mobile Event Editor cleanup requires MVP_TEST_DATABASE_URL to be a validated local PostgreSQL URL.",
+        )
+    require(
+        System.getenv("MVP_TEST_DISABLE_OUTBOUND_PROVIDERS")
+            ?.trim()
+            ?.lowercase() in setOf("1", "true", "yes"),
+    ) {
+        "Mobile Event Editor cleanup requires MVP_TEST_DISABLE_OUTBOUND_PROVIDERS=1."
+    }
+    val backendDir = resolveBackendDir()
+    val script = resolveMobileEventEditorReceiptPurgeScript(backendDir)
+    val process = ProcessBuilder("node", script.absolutePath)
+        .directory(backendDir)
+        .redirectErrorStream(true)
+        .apply {
+            environment()["MVP_TEST_DATABASE_URL"] = databaseUrl
+            environment()["MVP_SITE_DIR"] = backendDir.absolutePath
+        }
+        .start()
+    process.outputStream.bufferedWriter(Charsets.UTF_8).use { writer ->
+        writer.write(
+            mobileEventEditorReceiptPurgeRequest(
+                eventIds = eventIds,
+                preparedCreates = preparedCreates,
+            ),
+        )
+        writer.newLine()
+    }
+    val finished = process.waitFor(45, TimeUnit.SECONDS)
+    if (!finished) {
+        process.destroyForcibly()
+        val output = process.inputStream.bufferedReader().use { reader -> reader.readText() }
+        error("Timed out running the mobile Event Editor receipt purge helper.\n$output")
+    }
+    val output = process.inputStream.bufferedReader().use { reader -> reader.readText() }
+    if (process.exitValue() != 0) {
+        error(
+            "Mobile Event Editor receipt purge helper failed with exit code ${process.exitValue()}.\n$output",
+        )
+    }
+    val result = Json.parseToJsonElement(output.trim()).jsonObject
+    val residualReceiptRows = result["residualReceiptRows"]?.jsonArray ?: JsonArray(emptyList())
+    check(residualReceiptRows.isEmpty()) {
+        "Mobile Event Editor receipt purge helper reported residual receipt rows: $residualReceiptRows"
+    }
+    return result["eventIds"]?.jsonArray
+        ?.mapNotNull { value -> value.jsonPrimitive.content.takeIf(String::isNotBlank) }
+        .orEmpty()
+}
+
+
 
 internal fun mobileApiLoginFixturesReady(vararg credentials: Pair<String, String>): Boolean {
     val session = runCatching { MobileApiTestSession.create() }.getOrElse { return false }
@@ -324,7 +665,7 @@ private fun validateLocalBackendBaseUrl(raw: String): String {
 }
 
 private val LOCAL_DATABASE_TARGET_OVERRIDE_PARAMETERS =
-    setOf("connectionstring", "host", "hostaddr", "port", "socket")
+    setOf("connectionstring", "host", "hostaddr", "port", "socket", "target_session_attrs")
 
 internal fun validateLocalTestDatabaseUrl(raw: String): String {
     val uri = runCatching { URI(raw) }.getOrNull()
@@ -359,9 +700,10 @@ internal fun validateLocalTestDatabaseUrl(raw: String): String {
     }
     require(
         normalizedDatabaseName.startsWith("mvp") ||
-            listOf("test", "dev", "local", "e2e", "ci").any(normalizedDatabaseName::contains),
+            listOf("test", "dev", "local", "e2e", "ci").any(normalizedDatabaseName::contains) ||
+            normalizedDatabaseName == "bracketiq_repeating_time_slots",
     ) {
-        "MVP_TEST_DATABASE_URL must name an mvp, test, dev, local, e2e, or ci database."
+        "MVP_TEST_DATABASE_URL must name an mvp, test, dev, local, e2e, ci, or bracketiq_repeating_time_slots database."
     }
     return raw
 }

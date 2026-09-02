@@ -13,7 +13,7 @@ import kotlin.time.Instant
 
 class EventEditPayloadBuilderTest {
     @Test
-    fun prepareForUpdate_clears_generated_end_date_mode_for_weekly_events() {
+    fun prepareForUpdate_preserves_generated_end_date_mode_for_weekly_events() {
         val event = leagueEvent(
             eventType = EventType.WEEKLY_EVENT,
             fieldIds = emptyList(),
@@ -30,7 +30,7 @@ class EventEditPayloadBuilderTest {
             ),
         )
 
-        assertEquals(false, result.prepared.event.noFixedEndDateTime)
+        assertEquals(true, result.prepared.event.noFixedEndDateTime)
     }
 
     @Test
@@ -206,6 +206,45 @@ class EventEditPayloadBuilderTest {
         assertEquals("field-1", preparedSlot.scheduledFieldId)
         assertEquals(listOf("field-1"), preparedSlot.scheduledFieldIds)
     }
+    @Test
+    fun prepareForUpdate_persists_tryout_fields_and_updates_non_repeating_slot_bounds() {
+        val previousEvent = leagueEvent(eventType = EventType.TRYOUT)
+        val updatedEvent = previousEvent.copy(
+            start = Instant.parse("2026-04-20T13:00:00Z"),
+            end = Instant.parse("2026-04-20T15:00:00Z"),
+        )
+        val previousSlot = slot(
+            id = "slot-1",
+            repeating = false,
+            startDate = previousEvent.start,
+            endDate = previousEvent.end,
+        )
+        val syncedSlot = syncEditableLeagueSlotBoundaries(
+            previousEvent,
+            updatedEvent,
+            listOf(previousSlot),
+        ).single()
+
+        assertEquals(updatedEvent.start, syncedSlot.startDate)
+        assertEquals(updatedEvent.end, syncedSlot.endDate)
+
+        val result = EventEditPayloadBuilder.prepareForUpdate(
+            EventEditPayloadInput(
+                editedEvent = updatedEvent,
+                editableFields = listOf(field(id = "field-1")),
+                editableLeagueTimeSlots = listOf(syncedSlot),
+                selectedRentalFields = emptyList(),
+                leagueScoringConfig = LeagueScoringConfigDTO(),
+                originalEventStart = previousEvent.start,
+            ),
+        )
+
+        val preparedSlot = assertNotNull(result.prepared.timeSlots).single()
+        assertEquals(updatedEvent.start, preparedSlot.startDate)
+        assertEquals(updatedEvent.end, preparedSlot.endDate)
+        assertEquals(listOf("field-1"), result.prepared.event.fieldIds)
+    }
+
 
     @Test
     fun buildLeagueSlotDrafts_preserves_multiple_weekdays_for_repeating_weekly_slots() {

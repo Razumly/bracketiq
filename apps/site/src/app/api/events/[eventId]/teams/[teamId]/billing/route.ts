@@ -86,6 +86,12 @@ export async function GET(
     return NextResponse.json({ error: participantOccurrence.error }, { status: 400 });
   }
   const participantIds = await getEventParticipantIdsForEvent(event.id, prisma, participantOccurrence.occurrence);
+  const occurrenceBillWhere = participantOccurrence.occurrence
+    ? {
+      slotId: participantOccurrence.occurrence.slotId,
+      occurrenceDate: participantOccurrence.occurrence.occurrenceDate,
+    }
+    : {};
 
   if (!event.teamSignup) {
     const participantUserIds = participantIds.userIds;
@@ -109,6 +115,7 @@ export async function GET(
     const userBills = await prisma.bills.findMany({
       where: {
         eventId,
+        ...occurrenceBillWhere,
         ownerType: 'USER',
         ownerId: normalizedTeamId,
       },
@@ -320,6 +327,7 @@ export async function GET(
         eventId,
         ownerType: 'TEAM',
         ownerId: { in: teamOwnerIds },
+        ...occurrenceBillWhere,
       },
       select: {
         id: true,
@@ -346,6 +354,7 @@ export async function GET(
         eventId,
         ownerType: 'USER',
         ownerId: { in: teamMemberIds },
+        ...occurrenceBillWhere,
         ...(teamBillIds.length > 0
           ? {
               OR: [

@@ -599,7 +599,7 @@ describe('Weekly Event schedule validation', () => {
     expect(mixedResult.success).toBe(true);
   });
 
-  it('does not restore generated-end-date mode from a stale Weekly Event', () => {
+  it('preserves No Planned End for a saved Weekly Event', () => {
     const editState = mapEventToFormState({
       $id: 'weekly_event_1',
       eventType: 'WEEKLY_EVENT',
@@ -611,7 +611,7 @@ describe('Weekly Event schedule validation', () => {
       end: '2026-08-31T12:00:00.000Z',
     } as any);
 
-    expect(editState.noFixedEndDateTime).toBe(false);
+    expect(editState.noFixedEndDateTime).toBe(true);
   });
 });
 

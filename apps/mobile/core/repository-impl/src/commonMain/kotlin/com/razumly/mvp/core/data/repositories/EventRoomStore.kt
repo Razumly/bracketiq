@@ -37,7 +37,9 @@ internal fun mergePersistedEventEditorLocks(
         eventTypeLocked = eventTypeLocked,
         registrationUnitLocked = registrationUnitLocked,
         eventTypeHasProtectedHistory = eventTypeHasProtectedHistory,
-    )
+    ).also { merged ->
+        merged.nextOccurrence = incoming.nextOccurrence
+    }
 }
 
 /** Owns canonical Room reads and writes for the event-detail facade boundary. */
@@ -54,6 +56,18 @@ internal class EventRoomStore(
         databaseService.getEventDao.getEventWithRelationsById(eventId)
 
     suspend fun cacheEvent(
+        event: Event,
+        protectedHistoryAuthoritative: Boolean = false,
+    ) {
+        databaseService.withTransaction {
+            cacheEventInTransaction(
+                event = event,
+                protectedHistoryAuthoritative = protectedHistoryAuthoritative,
+            )
+        }
+    }
+
+    private suspend fun cacheEventInTransaction(
         event: Event,
         protectedHistoryAuthoritative: Boolean = false,
     ) {
@@ -90,14 +104,22 @@ internal class EventRoomStore(
         event: Event,
         expectedEventId: String,
         protectedHistoryAuthoritative: Boolean = false,
+    ): Event = databaseService.withTransaction {
+        cacheAndReadEventInTransaction(
+            event = event,
+            expectedEventId = expectedEventId,
+            protectedHistoryAuthoritative = protectedHistoryAuthoritative,
+        )
+    }
+
+    internal suspend fun cacheAndReadEventInTransaction(
+        event: Event,
+        expectedEventId: String,
+        protectedHistoryAuthoritative: Boolean = false,
     ): Event {
-        val cachedEvent = databaseService.getEventDao.getEventById(event.id)
-        databaseService.getEventDao.upsertEvent(
-            mergePersistedEventEditorLocks(
-                incoming = event,
-                cached = cachedEvent,
-                protectedHistoryAuthoritative = protectedHistoryAuthoritative,
-            ),
+        cacheEventInTransaction(
+            event = event,
+            protectedHistoryAuthoritative = protectedHistoryAuthoritative,
         )
         return databaseService.getEventDao.getEventById(expectedEventId)
             ?: throw IllegalStateException("Event $expectedEventId not cached")

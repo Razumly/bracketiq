@@ -1,8 +1,9 @@
 package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.dataTypes.Event
-import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.EventSearchOccurrence
+import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
 import com.razumly.mvp.core.data.dataTypes.resolveOneTimeInterval
@@ -27,8 +28,21 @@ internal data class WeeklySessionOption(
     val start: Instant,
     val end: Instant,
     val label: String,
+
     val divisionLabel: String,
 )
+private fun EventSearchOccurrence.isWithinRange(
+    rangeStart: Instant?,
+    rangeEnd: Instant?,
+): Boolean {
+    if (rangeStart != null && end <= rangeStart) {
+        return false
+    }
+    if (rangeEnd != null && start > rangeEnd) {
+        return false
+    }
+    return true
+}
 
 private fun buildOneTimeSessionOption(
     slot: TimeSlot,
@@ -51,8 +65,13 @@ private fun buildOneTimeSessionOption(
 internal fun buildWeeklySessionOptions(
     event: Event,
     timeSlots: List<TimeSlot>,
+    now: Instant = Clock.System.now(),
 ): List<WeeklySessionOption> {
-    if (event.eventType != EventType.WEEKLY_EVENT || timeSlots.isEmpty()) {
+    if (
+        event.eventType != EventType.WEEKLY_EVENT ||
+            event.isArchived() ||
+            timeSlots.isEmpty()
+    ) {
         return emptyList()
     }
 
@@ -66,18 +85,28 @@ internal fun buildWeeklySessionOptions(
 
     timeSlots.forEach { slot ->
         val slotTimeZone = slot.resolvedTimeZone(timeZone)
-        val today = Clock.System.now().toLocalDateTime(slotTimeZone).date
+        val today = now.toLocalDateTime(slotTimeZone).date
         val normalizedDays = slot.normalizedDaysOfWeek()
         if (slot.repeating && normalizedDays.isEmpty()) {
             return@forEach
         }
 
         val slotStartDate = slot.startDate.toLocalDateTime(slotTimeZone).date
-        val rawSlotEndDate = slot.endDate?.toLocalDateTime(slotTimeZone)?.date
-        val slotEndDate = rawSlotEndDate?.takeIf { endDate ->
-            endDate >= slotStartDate
+        val eventStartDate = runCatching {
+            event.start.toLocalDateTime(slotTimeZone).date
+        }.getOrNull()
+        val slotEndDate = slot.endDate
+            ?.toLocalDateTime(slotTimeZone)
+            ?.date
+            ?.takeIf { endDate -> endDate >= slotStartDate }
+        val eventEndDate = if (!event.noFixedEndDateTime) {
+            event.end.toLocalDateTime(slotTimeZone).date
+        } else {
+            null
         }
-        val anchorDate = if (today > slotStartDate) today else slotStartDate
+        val occurrenceEndDate = listOfNotNull(slotEndDate, eventEndDate).minOrNull()
+        val anchorDate = listOfNotNull(today, slotStartDate, eventStartDate).maxOrNull()
+            ?: slotStartDate
         val anchorWeekStart = startOfWeekMonday(anchorDate)
 
         val slotDivisionIds = slot.normalizedDivisionIds()
@@ -104,7 +133,10 @@ internal fun buildWeeklySessionOptions(
                 option != null &&
                     occurrenceDate != null &&
                     occurrenceDate >= anchorDate &&
-                    occurrenceDate < rangeEnd
+                    occurrenceDate < rangeEnd &&
+                    (occurrenceEndDate == null || occurrenceDate <= occurrenceEndDate) &&
+                    (eventStartDate == null || option.start >= event.start) &&
+                    (event.noFixedEndDateTime || option.end <= event.end)
             ) {
                 sessions += option
             }
@@ -118,12 +150,18 @@ internal fun buildWeeklySessionOptions(
                 if (occurrenceDate < anchorDate || occurrenceDate < slotStartDate) {
                     return@forEach
                 }
-                if (slotEndDate != null && occurrenceDate > slotEndDate) {
+                if (occurrenceEndDate != null && occurrenceDate > occurrenceEndDate) {
                     return@forEach
                 }
                 val resolved = slot.resolveRepeatingOccurrence(occurrenceDate)
                 val sessionStart = resolved.start
                 val sessionEnd = resolved.end
+                if (eventStartDate != null && sessionStart < event.start) {
+                    return@forEach
+                }
+                if (!event.noFixedEndDateTime && sessionEnd > event.end) {
+                    return@forEach
+                }
                 val slotId = slot.id.trim().takeIf(String::isNotBlank)
                 sessions += WeeklySessionOption(
                     id = "${slotId ?: "slot"}-${occurrenceDate}",
@@ -138,16 +176,106 @@ internal fun buildWeeklySessionOptions(
         }
     }
 
+
     return sessions
         .distinctBy { session -> session.id }
         .sortedBy { session -> session.start }
+}
+
+internal fun Event.withNextWeeklyOccurrenceForDiscover(
+    timeSlots: List<TimeSlot>,
+    now: Instant = Clock.System.now(),
+    occurrenceRangeStart: Instant? = null,
+    occurrenceRangeEnd: Instant? = null,
+): Event {
+    if (eventType != EventType.WEEKLY_EVENT) {
+        return this
+    }
+    if (isArchived()) {
+        return copy(
+            scheduleText = null,
+            dateDisplayMode = null,
+            dateDisplayText = null,
+        ).also { projected ->
+            projected.nextOccurrence = null
+        }
+    }
+    val serverOccurrence = nextOccurrence
+        ?.takeIf { occurrence ->
+            occurrence.end > now &&
+                occurrence.isWithinRange(occurrenceRangeStart, occurrenceRangeEnd)
+        }
+    if (serverOccurrence != null) {
+        return copy(
+            scheduleText = null,
+            dateDisplayMode = null,
+            dateDisplayText = null,
+        ).also { projected ->
+            projected.nextOccurrence = serverOccurrence
+        }
+    }
+
+    val localAnchor = if (occurrenceRangeStart != null && occurrenceRangeStart > now) {
+        occurrenceRangeStart
+    } else {
+        now
+    }
+    val localOccurrence = runCatching {
+        buildWeeklySessionOptions(
+            event = this,
+            timeSlots = timeSlots.filter { slot -> slot.repeating },
+            now = localAnchor,
+        ).firstOrNull { option ->
+            option.end > now &&
+                option.start >= now &&
+                (occurrenceRangeStart == null || option.end > occurrenceRangeStart) &&
+                (occurrenceRangeEnd == null || option.start <= occurrenceRangeEnd)
+        }
+    }.getOrNull()
+    if (localOccurrence == null) {
+        return copy(
+            scheduleText = null,
+            dateDisplayMode = null,
+            dateDisplayText = null,
+        ).also { projected ->
+            projected.nextOccurrence = null
+        }
+    }
+    val occurrenceSlotId = localOccurrence.slotId
+        ?: return copy(
+            scheduleText = null,
+            dateDisplayMode = null,
+            dateDisplayText = null,
+        ).also { projected ->
+            projected.nextOccurrence = null
+        }
+    return copy(
+        scheduleText = null,
+        dateDisplayMode = null,
+        dateDisplayText = null,
+    ).also { projected ->
+        projected.nextOccurrence = EventSearchOccurrence(
+            slotId = occurrenceSlotId,
+            occurrenceDate = localOccurrence.occurrenceDate,
+            start = localOccurrence.start,
+            end = localOccurrence.end,
+            timeZone = timeSlots
+                .firstOrNull { slot -> slot.id == occurrenceSlotId }
+                ?.timeZone
+                ?: timeZone,
+        )
+    }
 }
 
 internal fun buildWeeklyScheduleOptions(
     event: Event,
     timeSlots: List<TimeSlot>,
 ): List<WeeklySessionOption> {
-    if (event.eventType != EventType.WEEKLY_EVENT || timeSlots.isEmpty()) {
+    if (
+        event.eventType != EventType.WEEKLY_EVENT ||
+            event.isArchived() ||
+            timeSlots.isEmpty()
+    ) {
         return emptyList()
     }
 
@@ -169,8 +297,16 @@ internal fun buildWeeklyScheduleOptions(
 
         val slotStartDate = slot.startDate.toLocalDateTime(slotTimeZone).date
         val effectiveStartDate = if (eventStartDate > slotStartDate) eventStartDate else slotStartDate
-        val slotEndDate = slot.endDate?.toLocalDateTime(slotTimeZone)?.date
+        val slotEndDate = slot.endDate
+            ?.toLocalDateTime(slotTimeZone)
+            ?.date
             ?.takeIf { endDate -> endDate >= effectiveStartDate }
+        val eventEndDate = if (!event.noFixedEndDateTime) {
+            event.end.toLocalDateTime(slotTimeZone).date
+        } else {
+            null
+        }
+        val effectiveEndDate = listOfNotNull(slotEndDate, eventEndDate).minOrNull()
             ?: effectiveStartDate.plus(DatePeriod(days = fallbackScheduleWindowDays))
         val anchorWeekStart = startOfWeekMonday(effectiveStartDate)
 
@@ -197,7 +333,9 @@ internal fun buildWeeklyScheduleOptions(
                 option != null &&
                     occurrenceDate != null &&
                     occurrenceDate >= effectiveStartDate &&
-                    occurrenceDate <= slotEndDate
+                    occurrenceDate <= effectiveEndDate &&
+                    option.start >= event.start &&
+                    (event.noFixedEndDateTime || option.end <= event.end)
             ) {
                 sessions += option
             }
@@ -207,7 +345,7 @@ internal fun buildWeeklyScheduleOptions(
         var weekOffset = 0
         while (true) {
             val weekStart = anchorWeekStart.plus(DatePeriod(days = weekOffset * 7))
-            if (weekStart > slotEndDate) {
+            if (weekStart > effectiveEndDate) {
                 break
             }
             normalizedDays.forEach { weekday ->
@@ -215,12 +353,18 @@ internal fun buildWeeklyScheduleOptions(
                 if (occurrenceDate < effectiveStartDate || occurrenceDate < slotStartDate) {
                     return@forEach
                 }
-                if (occurrenceDate > slotEndDate) {
+                if (occurrenceDate > effectiveEndDate) {
                     return@forEach
                 }
                 val resolved = slot.resolveRepeatingOccurrence(occurrenceDate)
                 val sessionStart = resolved.start
                 val sessionEnd = resolved.end
+                if (sessionStart < event.start) {
+                    return@forEach
+                }
+                if (!event.noFixedEndDateTime && sessionEnd > event.end) {
+                    return@forEach
+                }
                 val slotId = slot.id.trim().takeIf(String::isNotBlank)
                 sessions += WeeklySessionOption(
                     id = "${slotId ?: "slot"}-${occurrenceDate}",

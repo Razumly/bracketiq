@@ -11,6 +11,16 @@ const txMock = {
   billPayments: {
     create: jest.fn(),
   },
+  events: {
+    findUnique: jest.fn(),
+  },
+  timeSlots: {
+    findFirst: jest.fn(),
+    findUnique: jest.fn(),
+  },
+  divisions: {
+    findMany: jest.fn(),
+  },
 };
 
 const prismaMock = {
@@ -97,7 +107,11 @@ describe('POST /api/billing/bills', () => {
       divisions: [],
       timeSlotIds: [],
     });
+    txMock.events.findUnique.mockImplementation((args: unknown) => prismaMock.events.findUnique(args));
     prismaMock.timeSlots.findUnique.mockResolvedValue(null);
+    txMock.timeSlots.findFirst.mockImplementation((args: unknown) => prismaMock.timeSlots.findUnique(args));
+    txMock.timeSlots.findUnique.mockImplementation((args: unknown) => prismaMock.timeSlots.findUnique(args));
+    txMock.divisions.findMany.mockImplementation((args: unknown) => prismaMock.divisions.findMany(args));
     prismaMock.divisions.findMany.mockResolvedValue([]);
     prismaMock.$transaction.mockImplementation(async (callback: (tx: typeof txMock) => unknown) => callback(txMock));
   });
@@ -254,6 +268,8 @@ describe('POST /api/billing/bills', () => {
   it('creates weekly payment-plan installments from occurrence-relative due days', async () => {
     prismaMock.events.findUnique.mockResolvedValueOnce({
       id: 'event_1',
+      start: new Date('2026-07-01T00:00:00.000Z'),
+      end: null,
       eventType: 'WEEKLY_EVENT',
       parentEvent: null,
       divisions: ['open'],
@@ -341,6 +357,8 @@ describe('POST /api/billing/bills', () => {
     txMock.bills.findFirst.mockResolvedValueOnce({ id: 'bill_existing' });
     prismaMock.events.findUnique.mockResolvedValueOnce({
       id: 'event_1',
+      start: new Date('2026-07-01T00:00:00.000Z'),
+      end: null,
       eventType: 'WEEKLY_EVENT',
       parentEvent: null,
       divisions: ['open'],
@@ -389,6 +407,8 @@ describe('POST /api/billing/bills', () => {
   it('rejects weekly payment plans without occurrence-relative due days', async () => {
     prismaMock.events.findUnique.mockResolvedValueOnce({
       id: 'event_1',
+      start: new Date('2026-07-01T00:00:00.000Z'),
+      end: null,
       eventType: 'WEEKLY_EVENT',
       parentEvent: null,
       divisions: ['open'],

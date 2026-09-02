@@ -13,7 +13,10 @@ import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.SportDTO
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.network.dto.EventEditorCatalogsDto
+import com.razumly.mvp.core.util.jsonMVP
 import com.razumly.mvp.eventDetail.EventDetailsSectionVisibility
+import kotlinx.serialization.json.jsonObject
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 import kotlin.test.Test
@@ -161,6 +164,56 @@ class EventCreateSimpleSetupTest {
         assertTrue(isSimpleSetupPageComplete(EventCreateSetupPageId.BASIC_INFORMATION, event))
         assertTrue(isSimpleSetupPageComplete(EventCreateSetupPageId.SCHEDULE, event))
         assertFalse(isSimpleSetupPageComplete(EventCreateSetupPageId.DIVISIONS, event))
+    }
+
+    @Test
+    fun given_tryout_setup_when_divisions_are_empty_then_divisions_page_is_complete_for_source_bootstrap() {
+        assertTrue(
+            isSimpleSetupPageComplete(
+                EventCreateSetupPageId.DIVISIONS,
+                Event(eventType = EventType.TRYOUT),
+            ),
+        )
+    }
+
+    @Test
+    fun given_empty_create_bootstrap_when_event_types_are_read_then_tryout_is_not_available() {
+        assertFalse(EventType.TRYOUT in mobileCreateEventTypes())
+    }
+
+    @Test
+    fun given_club_teams_create_bootstrap_when_event_types_are_read_then_tryout_is_available() {
+        val session = createEventEditorSession(
+            event = Event(
+                eventType = EventType.TRYOUT,
+                organizationId = "org-club",
+            ),
+        ).let { loadedSession ->
+            loadedSession.copy(
+                snapshot = loadedSession.snapshot.copy(
+                    catalogs = EventEditorCatalogsDto(
+                        organizations = listOf(
+                            jsonMVP.parseToJsonElement(
+                                """{"id":"org-club","name":"Club","enabledFeatures":["CLUB_TEAMS"]}""",
+                            ).jsonObject,
+                        ),
+                    ),
+                ),
+            )
+        }
+
+        assertTrue(session.hasClubTeamsOrganization())
+        assertTrue(EventType.TRYOUT in mobileCreateEventTypes(session.hasClubTeamsOrganization()))
+    }
+
+    @Test
+    fun given_organizationless_create_bootstrap_when_event_types_are_read_then_tryout_is_not_available() {
+        val session = createEventEditorSession(
+            event = Event(eventType = EventType.TRYOUT),
+        )
+
+        assertFalse(session.hasClubTeamsOrganization())
+        assertFalse(EventType.TRYOUT in mobileCreateEventTypes(session.hasClubTeamsOrganization()))
     }
 
     @Test

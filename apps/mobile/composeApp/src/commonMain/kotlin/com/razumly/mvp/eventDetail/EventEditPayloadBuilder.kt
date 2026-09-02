@@ -54,11 +54,7 @@ private data class FieldDraftResult(
 
 internal object EventEditPayloadBuilder {
     fun prepareForUpdate(input: EventEditPayloadInput): EventEditPayloadResult {
-        val eventDraft = if (input.editedEvent.eventType == EventType.WEEKLY_EVENT) {
-            input.editedEvent.copy(noFixedEndDateTime = false)
-        } else {
-            input.editedEvent
-        }
+        val eventDraft = input.editedEvent
         val hasRentalBackedSlots = input.editableLeagueTimeSlots.any { slot -> slot.isRentalBacked() }
         val selectedRentalFieldIds = (
             input.selectedRentalFields.map { field -> field.id.trim() } +
@@ -249,6 +245,7 @@ internal object EventEditPayloadBuilder {
         return eventType == EventType.LEAGUE ||
             eventType == EventType.TOURNAMENT ||
             eventType == EventType.WEEKLY_EVENT ||
+            eventType == EventType.TRYOUT ||
             hasRentalBackedSlots
     }
 }
@@ -297,7 +294,14 @@ internal fun syncEditableLeagueSlotBoundaries(
 
     return slots.map { slot ->
         if (!slot.repeating) {
-            slot
+            if (updatedEvent.eventType == EventType.TRYOUT) {
+                slot.copy(
+                    startDate = updatedEvent.start,
+                    endDate = updatedEvent.end,
+                )
+            } else {
+                slot
+            }
         } else {
             val normalizedStart = when {
                 slot.startDate == Instant.DISTANT_PAST -> Instant.DISTANT_PAST

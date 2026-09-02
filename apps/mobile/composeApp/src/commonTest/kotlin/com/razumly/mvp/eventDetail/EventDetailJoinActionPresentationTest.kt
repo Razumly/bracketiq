@@ -105,4 +105,29 @@ class EventDetailJoinActionPresentationTest {
 
         assertTrue(presentation.options.isEmpty())
     }
+    @Test
+    fun joinPresentation_archivedWeeklyEventHasNoRegistrationOptions() {
+        val presentation = buildEventDetailJoinPresentation(
+            event = Event(
+                eventType = com.razumly.mvp.core.data.dataTypes.enums.EventType.WEEKLY_EVENT,
+                state = "ARCHIVED",
+            ),
+            selectedDivision = null,
+            selectedJoinOptionDivisionId = null,
+            hasAnyPaidDivision = false,
+            tournamentPoolPlayEnabled = false,
+            isUserInEvent = false,
+            selectedWeeklyOccurrenceJoined = false,
+            isEventFull = false,
+            joinBlockedByStart = false,
+            isWeeklyParentEvent = false,
+            hasSelectedWeeklyOccurrence = false,
+            isAffiliateEvent = true,
+            isRegistrationPaymentFailed = false,
+            onJoinEvent = {},
+            onSelectTeam = {},
+        )
+
+        assertTrue(presentation.options.isEmpty())
+    }
 }

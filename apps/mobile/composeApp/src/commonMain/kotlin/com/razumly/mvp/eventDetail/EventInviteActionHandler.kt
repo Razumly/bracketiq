@@ -30,6 +30,10 @@ internal class EventInviteActionHandler(
     private val setError: (ErrorMessage) -> Unit,
 ) {
     fun searchUsers(query: String) {
+        if (selectedEvent().isArchived()) {
+            inviteCoordinator.clearSuggestedUsers()
+            return
+        }
         if (normalizedInviteSearchQuery(query) == null) {
             inviteCoordinator.clearSuggestedUsers()
             return
@@ -44,7 +48,11 @@ internal class EventInviteActionHandler(
 
     fun searchInviteTeams(query: String) {
         val event = selectedEvent()
-        if (normalizedInviteSearchQuery(query, minLength = 2) == null || !event.teamSignup) {
+        if (
+            event.isArchived() ||
+            normalizedInviteSearchQuery(query, minLength = 2) == null ||
+            !event.teamSignup
+        ) {
             inviteCoordinator.clearInviteTeamSearch()
             return
         }
@@ -71,6 +79,10 @@ internal class EventInviteActionHandler(
     fun inviteTeamToEvent(team: Team) {
         scope.launch {
             val event = selectedEvent()
+            if (event.isArchived()) {
+                setError(ErrorMessage(ARCHIVED_EVENT_ACTION_ERROR))
+                return@launch
+            }
             val occurrence = selectedOccurrenceOrNull(
                 event,
                 "Select an occurrence before inviting a team.",
@@ -94,6 +106,10 @@ internal class EventInviteActionHandler(
     fun invitePlayerToEvent(user: UserData) {
         scope.launch {
             val event = selectedEvent()
+            if (event.isArchived()) {
+                setError(ErrorMessage(ARCHIVED_EVENT_ACTION_ERROR))
+                return@launch
+            }
             val occurrence = selectedOccurrenceOrNull(
                 event,
                 "Select an occurrence before inviting a player.",
@@ -117,6 +133,10 @@ internal class EventInviteActionHandler(
     fun invitePlayerToEventByEmail(firstName: String, lastName: String, email: String) {
         scope.launch {
             val event = selectedEvent()
+            if (event.isArchived()) {
+                setError(ErrorMessage(ARCHIVED_EVENT_ACTION_ERROR))
+                return@launch
+            }
             setError(
                 inviteCoordinator.invitePlayerToEventByEmail(
                     firstName = firstName,
@@ -145,6 +165,9 @@ internal class EventInviteActionHandler(
         roles: Set<EventStaffRole>,
         editedEvent: Event,
     ): Result<Unit> = runCatching {
+        if (editedEvent.isArchived()) {
+            error(ARCHIVED_EVENT_ACTION_ERROR)
+        }
         val normalizedDraft = inviteCoordinator.pendingStaffInviteDraft(
             firstName = firstName,
             lastName = lastName,

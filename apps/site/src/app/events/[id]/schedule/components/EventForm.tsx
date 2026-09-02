@@ -991,6 +991,7 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
     );
     const supportsNoFixedEndDateTime =
       !isAffiliateEvent &&
+      eventData.eventType !== 'TRYOUT' &&
       supportsScheduleSlotsForEvent(eventData.eventType, eventData.parentEvent);
     useEventFormInvariantSynchronization({
       eventData,

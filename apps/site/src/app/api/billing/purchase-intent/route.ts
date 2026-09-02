@@ -66,9 +66,11 @@ import {
 } from '@/server/teams/teamMembership';
 import { getTeamRegistrationSignatureState } from '@/server/teams/teamRegistrationDocuments';
 import {
-  isWeeklyParentEvent,
+  isActiveWeeklyParentEvent,
+  isArchivedWeeklyParentEvent,
   isWeeklyOccurrenceJoinClosed,
   resolveWeeklyOccurrence,
+  WEEKLY_EVENT_ARCHIVED_ERROR,
   WEEKLY_OCCURRENCE_JOIN_CLOSED_ERROR,
 } from '@/server/events/weeklyOccurrences';
 import {
@@ -361,6 +363,7 @@ const reserveEventRegistrationSlot = async ({
   now: Date;
 }): Promise<{
   ok: true;
+  eventId: string;
   registrationId: string;
   teamId: string | null;
   registrationHoldExpiresAt: Date;
@@ -372,6 +375,7 @@ const reserveEventRegistrationSlot = async ({
   if (!eventId) {
     return { ok: false, status: 400, error: 'Event id is required for event checkout.' };
   }
+  const requestedEventId = eventId;
   if (!teamId && !userId) {
     return { ok: false, status: 400, error: 'User or team id is required for event checkout.' };
   }
@@ -386,41 +390,65 @@ const reserveEventRegistrationSlot = async ({
   const cutoff = new Date(now.getTime() - STARTED_REGISTRATION_TTL_MS);
 
   return prisma.$transaction(async (tx) => {
-    await acquireEventLock(tx, eventId);
-    const lockedEvents = await tx.$queryRaw<Array<{
-      id: string;
-      start: Date | string | null;
-      minAge: number | null;
-      maxAge: number | null;
-      sportIds: string[] | null;
-      registrationByDivisionType: boolean | null;
-      maxParticipants: number | null;
-      teamSignup: boolean | null;
-      eventType: string | null;
-      includePlayoffs: boolean | null;
-      parentEvent: string | null;
-      timeSlotIds: string[] | null;
-    }>>`
-      SELECT
-        "id",
-        "start",
-        "minAge",
-        "maxAge",
-        "sportIds",
-        "registrationByDivisionType",
-        "maxParticipants",
-        "teamSignup",
-        "eventType",
-        "includePlayoffs",
-        "parentEvent",
-        "timeSlotIds"
-      FROM "Events"
-      WHERE "id" = ${eventId}
-      FOR UPDATE
-    `;
-    const event = lockedEvents[0] ?? null;
+    let eventId = requestedEventId;
+    const loadLockedEvent = async (lockedEventId: string) => {
+      await acquireEventLock(tx, lockedEventId);
+      const lockedEvents = await tx.$queryRaw<Array<{
+        id: string;
+        start: Date;
+        end: Date | null;
+        archivedAt: Date | null;
+        minAge: number | null;
+        maxAge: number | null;
+        sportIds: string[] | null;
+        registrationByDivisionType: boolean | null;
+        maxParticipants: number | null;
+        teamSignup: boolean | null;
+        eventType: string | null;
+        includePlayoffs: boolean | null;
+        parentEvent: string | null;
+        timeSlotIds: string[] | null;
+      }>>`
+        SELECT
+          "id",
+          "start",
+          "end",
+          "archivedAt",
+          "minAge",
+          "maxAge",
+          "sportIds",
+          "registrationByDivisionType",
+          "maxParticipants",
+          "teamSignup",
+          "eventType",
+          "includePlayoffs",
+          "parentEvent",
+          "timeSlotIds"
+        FROM "Events"
+        WHERE "id" = ${lockedEventId}
+        FOR UPDATE
+      `;
+      return lockedEvents[0] ?? null;
+    };
+
+    let event = await loadLockedEvent(eventId);
     if (!event) {
       return { ok: false, status: 404, error: 'Event not found.' };
+    }
+    if (event.archivedAt) {
+      return { ok: false, status: 409, error: WEEKLY_EVENT_ARCHIVED_ERROR };
+    }
+    const parentEventId = normalizeString(event.parentEvent);
+    if (parentEventId && parentEventId !== event.id) {
+      const parentEvent = await loadLockedEvent(parentEventId);
+      if (!parentEvent) {
+        return { ok: false, status: 404, error: 'Event not found.' };
+      }
+      eventId = parentEvent.id;
+      event = parentEvent;
+    }
+    if (event.archivedAt || isArchivedWeeklyParentEvent(event)) {
+      return { ok: false, status: 409, error: WEEKLY_EVENT_ARCHIVED_ERROR };
     }
     const dedupeHeldRegistrations = <
       T extends {
@@ -484,7 +512,7 @@ const reserveEventRegistrationSlot = async ({
     }
 
     const hasOccurrenceInput = Boolean(slotId || occurrenceDate);
-    const resolvedOccurrence = isWeeklyParentEvent(event)
+    const resolvedOccurrence = isActiveWeeklyParentEvent(event)
       ? await resolveWeeklyOccurrence({
         event,
         occurrence: {
@@ -496,10 +524,10 @@ const reserveEventRegistrationSlot = async ({
     if (resolvedOccurrence && !resolvedOccurrence.ok) {
       return { ok: false, status: 400, error: resolvedOccurrence.error };
     }
-    if (isWeeklyParentEvent(event) && (!slotId || !occurrenceDate)) {
+    if (isActiveWeeklyParentEvent(event) && (!slotId || !occurrenceDate)) {
       return { ok: false, status: 400, error: 'Weekly event checkout requires slotId and occurrenceDate.' };
     }
-    if (!isWeeklyParentEvent(event) && hasOccurrenceInput) {
+    if (!isActiveWeeklyParentEvent(event) && hasOccurrenceInput) {
       return { ok: false, status: 400, error: 'Occurrence selection is only valid for weekly events.' };
     }
     const occurrence = resolvedOccurrence?.ok ? resolvedOccurrence.value : null;
@@ -1043,9 +1071,11 @@ const reserveEventRegistrationSlot = async ({
         }
       }
     }
-
+    // This transaction is the checkout linearization point. It locks the
+    // event before committing the durable STARTED registration hold.
     return {
       ok: true,
+      eventId,
       registrationId,
       teamId: participantTeamId,
       registrationHoldExpiresAt: new Date(registrationHoldCreatedAt.getTime() + STARTED_REGISTRATION_TTL_MS),
@@ -1171,6 +1201,20 @@ const resolveDiscountTargetId = ({
   }
   return null;
 };
+const resolveCanonicalEventId = async (eventId: string | null): Promise<string | null> => {
+  if (!eventId || typeof (prisma as any).events?.findUnique !== 'function') {
+    return eventId;
+  }
+  const event = await (prisma as any).events.findUnique({
+    where: { id: eventId },
+    select: { id: true, parentEvent: true },
+  }) as { id?: unknown; parentEvent?: unknown } | null;
+  if (!event) {
+    return eventId;
+  }
+  return normalizeString(event.parentEvent) ?? normalizeString(event.id) ?? eventId;
+};
+
 
 export async function POST(req: NextRequest) {
   const session = await requireSession(req);
@@ -1243,6 +1287,9 @@ export async function POST(req: NextRequest) {
       },
     });
     return NextResponse.json({ error: message }, { status: 400 });
+  }
+  if (resolvedPurchase.purchaseType === 'event') {
+    eventId = await resolveCanonicalEventId(eventId);
   }
 
   let canonicalRentalCheckout: CanonicalRentalCheckout | null = null;
@@ -1694,6 +1741,7 @@ export async function POST(req: NextRequest) {
     if (!reservationResult.ok) {
       return NextResponse.json({ error: reservationResult.error }, { status: reservationResult.status });
     }
+    eventId = reservationResult.eventId;
     reservedRegistrationId = reservationResult.registrationId;
     reservedRegistrationHoldExpiresAt = reservationResult.registrationHoldExpiresAt;
     checkoutTeamId = reservationResult.teamId ?? checkoutTeamId;
@@ -1705,6 +1753,7 @@ export async function POST(req: NextRequest) {
     const reservationResult = await reserveTeamRegistrationSlot({
       teamId,
       userId: checkoutUserId,
+
       actorUserId,
       status: 'STARTED',
       registrantType: teamCheckoutTarget.registrantType,

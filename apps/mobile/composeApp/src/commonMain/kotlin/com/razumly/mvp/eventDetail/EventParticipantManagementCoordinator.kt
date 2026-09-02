@@ -336,18 +336,26 @@ internal class EventParticipantManagementCoordinator(
         teamId: String,
         billPaymentId: String,
         amountCents: Int,
+        occurrence: EventOccurrenceSelection?,
         refundPayment: suspend (
             eventId: String,
             teamId: String,
             billPaymentId: String,
             amountCents: Int,
+            occurrence: EventOccurrenceSelection?,
         ) -> Result<Unit>,
         refreshAfterSuccess: suspend () -> Unit,
     ): Result<Unit> {
         val target = participantBillingTarget(eventId, teamId).getOrElse { throwable ->
             return Result.failure(throwable)
         }
-        val result = refundPayment(target.eventId, target.teamId, billPaymentId, amountCents)
+        val result = refundPayment(
+            target.eventId,
+            target.teamId,
+            billPaymentId,
+            amountCents,
+            occurrence,
+        )
         if (result.isSuccess) {
             refreshAfterSuccess()
         }

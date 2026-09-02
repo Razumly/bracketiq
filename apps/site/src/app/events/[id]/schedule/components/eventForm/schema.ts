@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import type { LeagueSlotForm } from '@/app/discover/components/LeagueFields';
+import { resolveOneTimeTimeSlot } from '@/lib/timeSlotAvailability';
 import { parseDateTimeInTimeZone, parseLocalDateTime } from '@/lib/dateUtils';
 import { evaluatePlayoffPlacementCapacities } from '@/lib/divisionCapacity';
 import {
@@ -34,6 +35,7 @@ import {
 } from '@/lib/divisionTypes';
 import { BRACKET_TEAM_COUNT_ERROR } from './divisionMessages';
 import { coordinatesAreSet } from './locationHelpers';
+import { getFieldOrganizationId } from '../externalRentalField';
 import { isEventLocalField } from './resourceGroups';
 import { stringSetsEqual } from './shared';
 import { normalizeSlotFieldIds, normalizeWeekdays } from './slotForm';
@@ -476,6 +478,13 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
                     path: ['singleDivision'],
                 });
             }
+            if (values.noFixedEndDateTime) {
+                ctx.addIssue({
+                    code: 'custom',
+                    message: 'Tryout events require a Planned End.',
+                    path: ['noFixedEndDateTime'],
+                });
+            }
             values.divisionDetails.forEach((division, index) => {
                 if (!division.sourceDivisionId) {
                     ctx.addIssue({
@@ -485,6 +494,52 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
                     });
                 }
             });
+            const organizationId = values.organizationId?.trim() ?? '';
+            const organizationFieldIds = new Set(
+                values.fields
+                    .filter((field) => !isEventLocalField(field as Field))
+                    .filter((field) => getFieldOrganizationId(field as Field)?.trim() === organizationId)
+                    .map((field) => String(
+                        (field as Field & { $id?: string }).$id
+                            ?? (field as Field & { id?: string }).id
+                            ?? '',
+                    ).trim())
+                    .filter(Boolean),
+            );
+            const selectedOrganizationFieldIds = new Set(
+                values.selectedFieldIds.map((fieldId) => fieldId.trim()).filter(Boolean),
+            );
+            const hasValidOrganizationField = Array.from(selectedOrganizationFieldIds)
+                .some((fieldId) => organizationFieldIds.has(fieldId));
+            if (!hasValidOrganizationField) {
+                ctx.addIssue({
+                    code: 'custom',
+                    message: 'Select at least one field owned by the tryout organization.',
+                    path: ['selectedFieldIds'],
+                });
+            }
+            const hasValidFiniteTimeSlot = values.leagueSlots.some((slot) => {
+                if (slot.repeating !== false) {
+                    return false;
+                }
+                const slotFieldIds = normalizeSlotFieldIds(slot);
+                if (!slotFieldIds.some((fieldId) => organizationFieldIds.has(fieldId))) {
+                    return false;
+                }
+                try {
+                    const resolved = resolveOneTimeTimeSlot(slot, slot.timeZone);
+                    return resolved.end.getTime() > resolved.start.getTime();
+                } catch {
+                    return false;
+                }
+            });
+            if (!hasValidFiniteTimeSlot) {
+                ctx.addIssue({
+                    code: 'custom',
+                    message: 'Add at least one finite time slot assigned to a tryout organization field.',
+                    path: ['leagueSlots'],
+                });
+            }
         }
 
         if (!isAffiliateEvent && supportsScheduleSlotsForEvent(values.eventType, values.parentEvent) && !values.noFixedEndDateTime) {

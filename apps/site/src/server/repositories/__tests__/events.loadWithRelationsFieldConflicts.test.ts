@@ -192,6 +192,33 @@ describe('loadEventWithRelations field conflict hydration', () => {
     expect(loaded.timeSlots).toHaveLength(1);
     expect(loaded.timeSlots[0].timeZone).toBe('America/Los_Angeles');
   });
+
+  it('uses persisted field divisions when no event division mapping is available', async () => {
+    const client = createClient({
+      eventType: 'LEAGUE',
+      divisions: [],
+    });
+    client.fields.findMany.mockResolvedValue([
+      {
+        id: 'field_1',
+        organizationId: null,
+        divisions: ['legacy_division'],
+        name: 'Court A',
+        createdAt: null,
+        updatedAt: null,
+      },
+    ]);
+
+    const loaded = await loadEventWithRelations(
+      'event_sched',
+      client as unknown as Parameters<typeof loadEventWithRelations>[1],
+    );
+
+    expect(loaded.fields.field_1.divisions.map((division) => division.id)).toEqual([
+      'legacy_division',
+    ]);
+  });
+
   it('retains every Phase Division scoped by a shared Bracket', async () => {
     const client = createClient({
       divisions: ['entry_a', 'entry_b'],
@@ -329,6 +356,84 @@ describe('loadEventWithRelations field conflict hydration', () => {
       'entry_a__phase__pool',
       'entry_b__phase__pool',
     ]);
+  });
+
+  it('hydrates a retained Match against its inactive Division instead of falling back', async () => {
+    const client = createClient({
+      divisions: ['entry'],
+      fieldIds: [],
+      teamIds: [],
+    });
+    client.divisions.findMany.mockResolvedValue([
+      {
+        id: 'entry',
+        key: 'entry',
+        name: 'Entry',
+        kind: 'LEAGUE',
+        role: 'ENTRY',
+        status: 'ACTIVE',
+        scope: 'EVENT',
+        fieldIds: [],
+        teamIds: [],
+      },
+      {
+        id: 'removed_phase',
+        key: 'removed_phase',
+        name: 'Removed Phase',
+        kind: 'LEAGUE',
+        role: 'PHASE',
+        phase: 'POOL',
+        sourceDivisionId: 'entry',
+        status: 'ARCHIVED',
+        scope: 'EVENT',
+        fieldIds: [],
+        teamIds: [],
+      },
+    ]);
+    const protectedMatchRow = {
+      id: 'match_protected',
+      eventId: 'event_sched',
+      division: 'removed_phase',
+      fieldId: null,
+      team1Id: null,
+      team2Id: null,
+      teamOfficialId: null,
+      start: null,
+      end: null,
+      locked: true,
+      status: 'STARTED',
+      resultStatus: null,
+      resultType: null,
+      team1Points: [],
+      team2Points: [],
+      placementState: 'PLACED',
+    };
+    client.matches.findMany.mockImplementation(async (args?: Record<string, unknown>) => {
+      const select = args?.select;
+      const isRetainedDivisionLookup =
+        typeof select === 'object'
+        && select !== null
+        && 'division' in select;
+      return isRetainedDivisionLookup
+        ? [{ division: 'removed_phase' }]
+        : [protectedMatchRow];
+    });
+
+    const loaded = await loadEventWithRelations(
+      'event_sched',
+      client as unknown as Parameters<typeof loadEventWithRelations>[1],
+      { retainedMatchIds: ['match_protected'] },
+    );
+
+    expect(client.divisions.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        OR: [
+          { status: 'ACTIVE' },
+          { id: { in: ['removed_phase'] } },
+        ],
+      }),
+    }));
+    expect(loaded.matches.match_protected.division.id).toBe('removed_phase');
   });
 
   it('keeps hydrated regular scope narrow when an explicit Playoff slot exists', async () => {

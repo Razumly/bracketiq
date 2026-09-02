@@ -52,6 +52,7 @@ const prismaMock = {
     updateMany: jest.fn(),
   },
   $transaction: jest.fn(),
+  $executeRaw: jest.fn(),
 };
 
 const requireSessionMock = jest.fn();
@@ -228,10 +229,18 @@ describe('POST /api/billing/refund', () => {
           eventId: 'event_1',
           userId: 'user_1',
           reason: 'Need to cancel',
-          status: 'APPROVED',
+          status: 'WAITING',
         }),
       }),
     );
+    expect(prismaMock.refundRequests.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: expect.any(String) },
+        data: expect.objectContaining({ status: 'APPROVED' }),
+      }),
+    );
+    expect(prismaMock.refundRequests.create.mock.invocationCallOrder[0])
+      .toBeLessThan(mockStripeRefundCreate.mock.invocationCallOrder[0]);
     expect(prismaMock.billPayments.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 'payment_1' },
@@ -309,7 +318,82 @@ describe('POST /api/billing/refund', () => {
     expect(response.status).toBe(409);
     expect(payload.error).toContain('payment scope changed');
     expect(mockStripeRefundCreate).not.toHaveBeenCalled();
-    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(2);
+  });
+
+  it('allows a historical archived Weekly occurrence refund request', async () => {
+    const historicalOccurrence = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const occurrenceDate = historicalOccurrence.toISOString().slice(0, 10);
+    const occurrenceDay = (historicalOccurrence.getUTCDay() + 6) % 7;
+    prismaMock.events.findUnique.mockResolvedValue({
+      id: 'weekly_archived',
+      start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+      end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      archivedAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      cancellationRefundHours: null,
+      hostId: 'host_1',
+      organizationId: 'org_1',
+      eventType: 'WEEKLY_EVENT',
+      parentEvent: null,
+      timeSlotIds: ['slot_archived'],
+      divisions: [],
+    });
+    prismaMock.timeSlots.findUnique.mockResolvedValue({
+      id: 'slot_archived',
+      startTimeMinutes: 12 * 60,
+      endTimeMinutes: 13 * 60,
+      daysOfWeek: [occurrenceDay],
+      startDate: occurrenceDate,
+      endDate: occurrenceDate,
+      timeZone: 'UTC',
+      repeating: true,
+      divisions: [],
+    });
+    prismaMock.eventRegistrations.findMany.mockResolvedValue([
+      {
+        id: `weekly_archived__self__user_1__slot_archived__${occurrenceDate}`,
+        eventId: 'weekly_archived',
+        registrantId: 'user_1',
+        registrantType: 'SELF',
+        rosterRole: 'PARTICIPANT',
+        slotId: 'slot_archived',
+        occurrenceDate,
+        createdAt: new Date('2026-06-01T00:00:00.000Z'),
+      },
+    ]);
+    prismaMock.bills.findMany.mockResolvedValue([{ id: 'bill_archived' }]);
+    prismaMock.billPayments.findMany.mockResolvedValue([{
+      id: 'payment_archived',
+      billId: 'bill_archived',
+      amountCents: 2500,
+      refundedAmountCents: 0,
+      paymentIntentId: 'pi_archived',
+      status: 'PAID',
+    }]);
+
+    const response = await POST(
+      jsonPost('http://localhost/api/billing/refund', {
+        payloadEvent: { id: 'weekly_archived' },
+        reason: 'Request refund after archive',
+        slotId: 'slot_archived',
+        occurrenceDate,
+      }),
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.success).toBe(true);
+    expect(mockStripeRefundCreate).not.toHaveBeenCalled();
+    expect(prismaMock.refundRequests.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          eventId: 'weekly_archived',
+          slotId: 'slot_archived',
+          occurrenceDate,
+          status: 'WAITING',
+        }),
+      }),
+    );
   });
 
   it('uses the weekly occurrence start and bill scope for automatic session refunds', async () => {

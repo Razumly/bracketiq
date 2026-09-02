@@ -32,11 +32,14 @@ fun EventType.isScheduleConstructionAutomationType(): Boolean =
 fun normalizeAutomatedSchedulingForEventType(
     eventType: EventType,
     value: Boolean?,
-): Boolean = if (defaultAutomatedSchedulingForEventType(eventType)) {
-    value ?: true
-} else {
-    false
+): Boolean = when (eventType) {
+    EventType.WEEKLY_EVENT -> true
+    EventType.LEAGUE,
+    EventType.TOURNAMENT -> value ?: true
+    EventType.EVENT,
+    EventType.TRYOUT -> false
 }
+
 
 fun EventType.minimumParticipantCount(): Int = when (this) {
     EventType.TOURNAMENT -> MIN_BRACKET_TEAM_COUNT

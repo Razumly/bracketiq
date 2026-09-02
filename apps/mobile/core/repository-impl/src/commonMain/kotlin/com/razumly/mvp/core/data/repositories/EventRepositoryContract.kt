@@ -13,8 +13,12 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.network.dto.EventEditorBootstrapQueryDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateCommandDto
 import com.razumly.mvp.core.network.dto.EventEditorDraftDto
+import com.razumly.mvp.core.network.dto.EventEditorMaintenanceAcceptedResultDto
+import com.razumly.mvp.core.network.dto.EventEditorMaintenanceRequestDto
+import com.razumly.mvp.core.network.dto.EventEditorMaintenanceResponseDto
+import com.razumly.mvp.core.network.dto.EventEditorAcceptMaintenanceProposalDto
+import com.razumly.mvp.core.network.dto.EventEditorRejectMaintenanceProposalDto
 import com.razumly.mvp.core.network.dto.EventEditorSaveCommandDto
-import com.razumly.mvp.core.network.dto.EventEditorScheduleRequestDto
 import dev.icerock.moko.geo.LatLng
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -50,6 +54,13 @@ interface IEventRepository : IMVPRepository {
         draft: EventEditorDraftDto,
     ): Result<EventEditorSaveOutcome> =
         Result.failure(UnsupportedOperationException("Event editor proposal acceptance is not supported."))
+    suspend fun acceptEventEditorPartialProposal(
+        createOperationId: String,
+        proposalRevision: String,
+        acceptanceOperationId: String,
+        draft: EventEditorDraftDto,
+    ): Result<EventEditorSaveOutcome> =
+        Result.failure(UnsupportedOperationException("Partial event editor proposal acceptance is not supported."))
     suspend fun rejectEventEditorProposal(
         createOperationId: String,
         proposalRevision: String,
@@ -60,13 +71,25 @@ interface IEventRepository : IMVPRepository {
     suspend fun saveEventEditor(
         eventId: String,
         command: EventEditorSaveCommandDto,
+        persistLocally: Boolean = true,
     ): Result<EventEditorSaveOutcome> =
         Result.failure(UnsupportedOperationException("Event editor save is not supported."))
-    suspend fun scheduleEventEditor(
-        eventId: String,
-        request: EventEditorScheduleRequestDto,
-    ): Result<EventScheduleOutcome> =
-        Result.failure(UnsupportedOperationException("Event editor scheduling is not supported."))
+    suspend fun proposeEventScheduleMaintenance(
+        request: EventEditorMaintenanceRequestDto,
+    ): Result<EventEditorMaintenanceResponseDto> =
+        Result.failure(UnsupportedOperationException("Event schedule maintenance is not supported."))
+    suspend fun acceptEventScheduleMaintenance(
+        request: EventEditorAcceptMaintenanceProposalDto,
+    ): Result<EventEditorMaintenanceAcceptedResultDto> =
+        Result.failure(UnsupportedOperationException("Event schedule maintenance acceptance is not supported."))
+    suspend fun syncAcceptedEventScheduleMaintenance(
+        result: EventEditorMaintenanceAcceptedResultDto,
+    ): Result<Unit> =
+        Result.failure(UnsupportedOperationException("Accepted event schedule maintenance synchronization is not supported."))
+    suspend fun rejectEventScheduleMaintenance(
+        request: EventEditorRejectMaintenanceProposalDto,
+    ): Result<com.razumly.mvp.core.network.dto.EventEditorMaintenanceRejectedResultDto> =
+        Result.failure(UnsupportedOperationException("Event schedule maintenance rejection is not supported."))
     suspend fun getLeagueScoringConfig(eventId: String): Result<LeagueScoringConfig?> = Result.success(null)
     suspend fun getEventsByIds(eventIds: List<String>): Result<List<Event>>
     suspend fun getEventsByOrganization(organizationId: String, limit: Int = 200): Result<List<Event>>

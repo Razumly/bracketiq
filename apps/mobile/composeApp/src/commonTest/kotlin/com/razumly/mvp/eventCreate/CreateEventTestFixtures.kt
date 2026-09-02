@@ -467,7 +467,25 @@ internal fun createEventEditorSession(
                     canEdit = true,
                     supportsTeamStaffing = true,
                 ),
-                catalogs = EventEditorCatalogsDto(),
+                catalogs = EventEditorCatalogsDto(
+                    fields = fields.map { field ->
+                        jsonMVP.encodeToJsonElement(
+                            EventEditorFieldDto(
+                                id = field.id,
+                                name = field.name,
+                                location = field.location,
+                                lat = field.lat,
+                                long = field.long,
+                                heading = field.heading,
+                                inUse = field.inUse,
+                                rentalSlotIds = field.rentalSlotIds,
+                                sportIds = field.sportIds,
+                                organizationId = field.organizationId,
+                                facilityId = field.facilityId,
+                            ),
+                        ).jsonObject
+                    },
+                ),
                 immutable = EventEditorImmutableDto(
                     rental = rentalBookingId != null,
                 ),
@@ -523,6 +541,96 @@ internal fun createEventEditorScheduleOutcome(
         )
     },
 )
+internal fun createEventEditorPartialScheduleProposal(
+    command: EventEditorCreateCommandDto,
+    session: EventEditorSession,
+): EventEditorCreateProposalDto {
+    val eventId = session.canonicalState.event.id
+    val placedStart = "2026-09-01T10:00:00Z"
+    val placedEnd = "2026-09-01T11:00:00Z"
+    val placed = EventEditorMatchProjectionDto(
+        id = "match-placed",
+        matchId = 1,
+        eventId = eventId,
+        start = placedStart,
+        end = placedEnd,
+        placementState = "PLACED",
+        phase = "POOL",
+        phaseDivisionId = "pool-phase",
+        sourceDivisionId = "division-1",
+        fieldId = "field-1",
+        team1Id = "team-1",
+        team2Id = "team-2",
+    )
+    val unplaced = EventEditorMatchProjectionDto(
+        id = "match-unplaced",
+        matchId = 2,
+        eventId = eventId,
+        placementState = "UNPLACED",
+        phase = "PLAYOFF",
+        phaseDivisionId = "playoff-phase",
+        sourceDivisionId = "division-1",
+        team1Id = "team-3",
+        team2Id = "team-4",
+    )
+    val proposal = createEventEditorScheduleProposal(command, session, matchCount = 2)
+    return proposal.copy(
+        scheduleOutcome = EventEditorScheduleOutcomeDto(
+            status = EventEditorScheduleOutcomeStatus.PARTIAL,
+            matchCount = 2,
+            matches = listOf(placed, unplaced),
+            unscheduledMatches = listOf(
+                EventEditorUnscheduledMatchDto(
+                    id = unplaced.id,
+                    matchId = unplaced.matchId,
+                    phaseDivisionId = unplaced.phaseDivisionId!!,
+                    phase = unplaced.phase!!,
+                    sourceDivisionId = unplaced.sourceDivisionId,
+                ),
+            ),
+            affectedCompetitionPhases = listOf(
+                EventEditorAffectedCompetitionPhaseDto(
+                    id = "playoff-phase",
+                    name = "Playoffs",
+                    phase = "PLAYOFF",
+                    sourceDivisionId = "division-1",
+                ),
+            ),
+            placedMatchCount = 1,
+            unplacedMatchCount = 1,
+        ),
+        graph = proposal.graph.copy(
+            event = proposal.graph.event.copy(id = eventId),
+            matches = listOf(
+                MatchApiDto(
+                    id = placed.id,
+                    matchId = placed.matchId,
+                    eventId = eventId,
+                    start = placedStart,
+                    end = placedEnd,
+                    placementState = "PLACED",
+                    phase = "POOL",
+                    phaseDivisionId = "pool-phase",
+                    division = "division-1",
+                    fieldId = "field-1",
+                    team1Id = "team-1",
+                    team2Id = "team-2",
+                ),
+                MatchApiDto(
+                    id = unplaced.id,
+                    matchId = unplaced.matchId,
+                    eventId = eventId,
+                    placementState = "UNPLACED",
+                    phase = "PLAYOFF",
+                    phaseDivisionId = "playoff-phase",
+                    division = "division-1",
+                    team1Id = "team-3",
+                    team2Id = "team-4",
+                ),
+            ),
+        ),
+    )
+}
 
 internal fun createSport(id: String, usePointsPerSetWin: Boolean): Sport =
     SportDTO(
@@ -732,6 +840,7 @@ internal class CreateEvent_FakeEventRepository(
     val attemptedCreateEventEditorCommands = mutableListOf<EventEditorCreateCommandDto>()
     val createBootstrapQueries = mutableListOf<EventEditorBootstrapQueryDto>()
     val acceptedEventEditorProposals = mutableListOf<EventEditorAcceptProposalCommandDto>()
+    val acceptedPartialEventEditorProposals = mutableListOf<EventEditorAcceptPartialProposalCommandDto>()
     val rejectedEventEditorProposals = mutableListOf<Pair<String, String>>()
     var createBootstrapSession: EventEditorSession? = null
     var createEditorFailure: Throwable? = null
@@ -820,6 +929,31 @@ internal class CreateEvent_FakeEventRepository(
                 scheduleOutcome = createEventEditorScheduleOutcome(
                     eventId = session.canonicalState.event.id,
                 ),
+            ),
+        )
+    }
+
+    override suspend fun acceptEventEditorPartialProposal(
+        createOperationId: String,
+        proposalRevision: String,
+        acceptanceOperationId: String,
+        draft: EventEditorDraftDto,
+    ): Result<EventEditorSaveOutcome> {
+        acceptedPartialEventEditorProposals += EventEditorAcceptPartialProposalCommandDto(
+            contractVersion = EVENT_EDITOR_CONTRACT_VERSION,
+            createOperationId = createOperationId,
+            proposalRevision = proposalRevision,
+            acceptanceOperationId = acceptanceOperationId,
+            draft = draft,
+        )
+        acceptEditorFailure?.let { failure -> return Result.failure(failure) }
+        val session = lastCreateSession
+            ?: return Result.failure(IllegalStateException("missing create session"))
+        return Result.success(
+            acceptEditorOutcome ?: EventEditorSaveOutcome(
+                session = session,
+                staffEmailDelivery = staffEmailDelivery,
+                scheduleOutcome = createEventEditorScheduleOutcome(eventId = session.canonicalState.event.id),
             ),
         )
     }
@@ -1140,6 +1274,7 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
     val teamRecordSignatureCalls = mutableListOf<TeamRecordSignatureCall>()
     val rentalResourceOptionCalls = mutableListOf<Pair<String?, String?>>()
     var rentalResourceOptions: List<RentalResourceOption> = emptyList()
+    var organizations: List<Organization> = emptyList()
     var rentalSignLinksResult: List<SignStep> = emptyList()
     var teamSignLinksResult: List<SignStep> = emptyList()
     var queuedTeamSignLinksResults: MutableList<List<SignStep>> = mutableListOf()
@@ -1320,6 +1455,7 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
     override suspend fun getEventTeamBillingSnapshot(
         eventId: String,
         teamId: String,
+        occurrence: EventOccurrenceSelection?,
     ): Result<EventTeamBillingSnapshot> = Result.success(
         EventTeamBillingSnapshot(
             teamId = teamId,
@@ -1359,6 +1495,7 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
         teamId: String,
         billPaymentId: String,
         amountCents: Int,
+        occurrence: EventOccurrenceSelection?,
     ): Result<Unit> = Result.success(Unit)
     override suspend fun createBillingIntent(billId: String, billPaymentId: String): Result<PurchaseIntent> =
         Result.success(PurchaseIntent(paymentIntent = "pi_bill", publishableKey = "pk_bill"))
@@ -1456,7 +1593,11 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
         tagSlugs: Set<String>,
     ): Result<List<Organization>> = Result.success(emptyList())
     override suspend fun getOrganizationsByIds(organizationIds: List<String>): Result<List<Organization>> =
-        Result.success(emptyList())
+        Result.success(
+            organizations.filter { organization ->
+                organization.id in organizationIds
+            },
+        )
     override suspend fun listOrganizationTemplates(organizationId: String): Result<List<OrganizationTemplateDocument>> =
         Result.success(emptyList())
     override suspend fun leaveAndRefundEvent(event: Event, reason: String, targetUserId: String?): Result<Unit> =

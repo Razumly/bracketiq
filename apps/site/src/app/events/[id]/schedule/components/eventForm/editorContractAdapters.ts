@@ -43,6 +43,11 @@ const numberOrNull = (value: unknown): number | null => {
   return Math.trunc(value);
 };
 
+const positiveNumberOrNull = (value: unknown): number | null => {
+  const normalized = numberOrNull(value);
+  return normalized !== null && normalized > 0 ? normalized : null;
+};
+
 const booleanValue = (value: unknown, fallback = false): boolean => (
   typeof value === 'boolean' ? value : fallback
 );
@@ -81,11 +86,32 @@ const normalizeQuestion = (value: unknown, index: number): RegistrationQuestionI
 
 const normalizePendingInvite = (value: Record<string, unknown>): Record<string, unknown> => {
   const inviteId = nullableString(value.id) ?? nullableString(value.$id);
+  const rawRoles = stringArray(value.roles ?? value.staffTypes);
+  const roles = Array.from(new Set(
+    rawRoles
+      .map((role) => role === 'HOST' ? 'ASSISTANT_HOST' : role)
+      .filter((role): role is 'OFFICIAL' | 'ASSISTANT_HOST' => (
+        role === 'OFFICIAL' || role === 'ASSISTANT_HOST'
+      )),
+  ));
   return {
     ...value,
     ...(inviteId ? { id: inviteId } : {}),
-    roles: stringArray(value.roles ?? value.staffTypes),
+    roles,
   };
+};
+const normalizePendingInvitesForEvent = (
+  value: unknown,
+  isTryoutEvent: boolean,
+): Record<string, unknown>[] => {
+  const pendingInvites = objectArray(value).map(normalizePendingInvite);
+  if (!isTryoutEvent) return pendingInvites;
+  return pendingInvites
+    .map((invite) => ({
+      ...invite,
+      roles: stringArray(invite.roles).filter((role) => role === 'ASSISTANT_HOST'),
+    }))
+    .filter((invite) => (invite.roles as string[]).length > 0);
 };
 
 const normalizeQuestions = (value: unknown): RegistrationQuestionInput[] => (
@@ -104,6 +130,10 @@ const draftFromRecord = (
   isPersistedBracketCountNormalizationEnabled = false,
 ): EventEditorDraft => {
   const normalizedEventType = stringValue(event.eventType, 'EVENT').trim().toUpperCase();
+  const isBracketEvent = normalizedEventType === 'LEAGUE' || normalizedEventType === 'TOURNAMENT';
+  const isTryoutEvent = normalizedEventType === 'TRYOUT';
+  const isWeeklyChildEvent = normalizedEventType === 'WEEKLY_EVENT'
+    && Boolean(nullableString(event.parentEvent));
   const isAutomatedScheduling = normalizeAutomatedSchedulingForEventType(
     normalizedEventType,
     event.isAutomatedScheduling ?? event.automatedScheduling,
@@ -111,9 +141,10 @@ const draftFromRecord = (
   const start = asIsoDateTime(event.start, new Date(0).toISOString());
   const explicitScheduleEndConstraint = nullableString(event.scheduleEndConstraint);
   const explicitGeneratedScheduleEnd = nullableString(event.generatedScheduleEnd);
-  const generatedEnd = explicitScheduleEndConstraint
-    ? false
-    : explicitGeneratedScheduleEnd !== null || booleanValue(event.noFixedEndDateTime, false);
+  const generatedEnd = !isWeeklyChildEvent
+    && normalizedEventType !== 'TRYOUT'
+    && explicitScheduleEndConstraint === null
+    && (explicitGeneratedScheduleEnd !== null || booleanValue(event.noFixedEndDateTime, false));
   const sportIds = stringArray(event.sportIds);
   const sportConfig = event.sportConfig && typeof event.sportConfig === 'object'
     ? event.sportConfig as Record<string, unknown>
@@ -141,14 +172,14 @@ const draftFromRecord = (
   const regularDivisionDetails = rawDivisionDetails.filter(
     (detail) => stringValue(detail.kind).trim().toUpperCase() !== 'PLAYOFF',
   );
-  const includePlayoffs = booleanValue(event.includePlayoffs);
+  const includePlayoffs = isBracketEvent && booleanValue(event.includePlayoffs);
   const rawEventPlayoffTeamCount = numberOrNull(event.playoffTeamCount);
   const normalizedEventPlayoffTeamCount =
     isPersistedBracketCountNormalizationEnabled &&
     includePlayoffs &&
     (normalizedEventType === 'LEAGUE' || normalizedEventType === 'TOURNAMENT')
       ? normalizeBracketTeamCount(rawEventPlayoffTeamCount)
-      : rawEventPlayoffTeamCount;
+      : isBracketEvent ? rawEventPlayoffTeamCount : null;
   const normalizedEventMaxParticipants =
     isPersistedBracketCountNormalizationEnabled && normalizedEventType === 'TOURNAMENT'
       ? normalizeBracketTeamCount(numberOrNull(event.maxParticipants))
@@ -166,8 +197,10 @@ const draftFromRecord = (
     explicitStaffingPriority,
     legacyOfficialSchedulingMode,
   );
-  const doTeamsOfficiate = booleanValue(event.doTeamsOfficiate)
-    || (!hasExplicitStaffingPriority && legacyOfficialSchedulingMode === 'TEAM_STAFFING');
+  const doTeamsOfficiate = isTryoutEvent
+    ? false
+    : booleanValue(event.doTeamsOfficiate)
+      || (!hasExplicitStaffingPriority && legacyOfficialSchedulingMode === 'TEAM_STAFFING');
   const normalizedOfficialIds = stringArray(event.officialIds);
   const eventOfficials = objectArray(event.eventOfficials).length > 0
     ? objectArray(event.eventOfficials)
@@ -178,10 +211,13 @@ const draftFromRecord = (
       fieldIds: [],
       isActive: true,
     }));
-  const rawMatchRulesOverride = event.matchRulesOverride && typeof event.matchRulesOverride === 'object'
+  const officialIds = isTryoutEvent ? [] : normalizedOfficialIds;
+  const normalizedEventOfficials = isTryoutEvent ? [] : eventOfficials;
+  const rawMatchRulesOverride = isBracketEvent
+    && event.matchRulesOverride && typeof event.matchRulesOverride === 'object'
     ? event.matchRulesOverride as Record<string, unknown>
     : {};
-  const usesSets = booleanValue(event.usesSets);
+  const usesSets = isBracketEvent && booleanValue(event.usesSets);
   const shouldCalculateMatchDuration = usesSets
     || rawMatchRulesOverride.segmentCount !== undefined
     || rawMatchRulesOverride.segmentLengthMinutes !== undefined;
@@ -192,8 +228,9 @@ const draftFromRecord = (
       segmentBreakMinutes: numberOrNull(rawMatchRulesOverride.segmentBreakMinutes),
     })
     : null;
-  const matchDurationMinutes = calculatedMatchDurationMinutes
-    ?? numberOrNull(event.matchDurationMinutes);
+  const matchDurationMinutes = isBracketEvent
+    ? calculatedMatchDurationMinutes ?? numberOrNull(event.matchDurationMinutes)
+    : null;
 
 
   const draft = {
@@ -218,16 +255,16 @@ const draftFromRecord = (
       tags: objectArray(event.tags),
     },
     participation: {
-      teamSignup: booleanValue(event.teamSignup),
-      singleDivision: booleanValue(event.singleDivision),
+      teamSignup: normalizedEventType === 'TRYOUT' ? false : booleanValue(event.teamSignup),
+      singleDivision: normalizedEventType === 'TRYOUT' ? false : booleanValue(event.singleDivision),
       registrationByDivisionType: booleanValue(event.registrationByDivisionType),
-      teamSizeLimit: numberOrNull(event.teamSizeLimit),
+      teamSizeLimit: normalizedEventType === 'TRYOUT' ? null : positiveNumberOrNull(event.teamSizeLimit),
       maxParticipants: normalizedEventMaxParticipants,
       minAge: numberOrNull(event.minAge),
       maxAge: numberOrNull(event.maxAge),
       cancellationRefundHours: numberOrNull(event.cancellationRefundHours),
       registrationCutoffHours: numberOrNull(event.registrationCutoffHours) ?? 0,
-      allowTeamSplitDefault: booleanValue(event.allowTeamSplitDefault),
+      allowTeamSplitDefault: isBracketEvent && booleanValue(event.allowTeamSplitDefault),
       waitListIds: stringArray(event.waitListIds),
       freeAgentIds: stringArray(event.freeAgentIds),
     },
@@ -251,34 +288,53 @@ const draftFromRecord = (
     competition: {
       divisionIds: stringArray(event.divisions),
       divisionDetails: rawDivisionDetails,
-      playoffDivisionDetails: objectArray(event.playoffDivisionDetails),
-      divisionFieldIds: Object.fromEntries(
-        Object.entries(event.divisionFieldIds && typeof event.divisionFieldIds === 'object' ? event.divisionFieldIds : {})
-          .map(([key, value]) => [key, stringArray(value)]),
-      ),
-      winnerSetCount: numberOrNull(event.winnerSetCount),
-      loserSetCount: numberOrNull(event.loserSetCount),
-      doubleElimination: booleanValue(event.doubleElimination),
+      playoffDivisionDetails: isBracketEvent ? objectArray(event.playoffDivisionDetails) : [],
+      divisionFieldIds: isBracketEvent
+        ? Object.fromEntries(
+          Object.entries(event.divisionFieldIds && typeof event.divisionFieldIds === 'object' ? event.divisionFieldIds : {})
+            .map(([key, value]) => [key, stringArray(value)]),
+        )
+        : {},
+      winnerSetCount: isBracketEvent ? numberOrNull(event.winnerSetCount) : null,
+      loserSetCount: isBracketEvent ? numberOrNull(event.loserSetCount) : null,
+      doubleElimination: isBracketEvent && booleanValue(event.doubleElimination),
       includePlayoffs,
-      splitLeaguePlayoffDivisions: booleanValue(event.splitLeaguePlayoffDivisions),
+      splitLeaguePlayoffDivisions: isBracketEvent
+        && normalizedEventType === 'LEAGUE'
+        && booleanValue(event.splitLeaguePlayoffDivisions),
       playoffTeamCount: normalizedEventPlayoffTeamCount,
-      pointsToVictory: Array.isArray(event.pointsToVictory) ? event.pointsToVictory.map(Number).filter(Number.isFinite) : [],
-      winnerBracketPointsToVictory: Array.isArray(event.winnerBracketPointsToVictory) ? event.winnerBracketPointsToVictory.map(Number).filter(Number.isFinite) : [],
-      loserBracketPointsToVictory: Array.isArray(event.loserBracketPointsToVictory) ? event.loserBracketPointsToVictory.map(Number).filter(Number.isFinite) : [],
+      pointsToVictory: isBracketEvent && Array.isArray(event.pointsToVictory)
+        ? event.pointsToVictory.map(Number).filter(Number.isFinite)
+        : [],
+      winnerBracketPointsToVictory: isBracketEvent && Array.isArray(event.winnerBracketPointsToVictory)
+        ? event.winnerBracketPointsToVictory.map(Number).filter(Number.isFinite)
+        : [],
+      loserBracketPointsToVictory: isBracketEvent && Array.isArray(event.loserBracketPointsToVictory)
+        ? event.loserBracketPointsToVictory.map(Number).filter(Number.isFinite)
+        : [],
       usesSets,
-      setsPerMatch: numberOrNull(event.setsPerMatch),
-      setDurationMinutes: typeof event.setDurationMinutes === 'number' ? event.setDurationMinutes : null,
-      restTimeMinutes: typeof event.restTimeMinutes === 'number' ? event.restTimeMinutes : null,
+      setsPerMatch: isBracketEvent ? numberOrNull(event.setsPerMatch) : null,
+      setDurationMinutes: isBracketEvent && typeof event.setDurationMinutes === 'number'
+        ? event.setDurationMinutes
+        : null,
+      restTimeMinutes: isBracketEvent && typeof event.restTimeMinutes === 'number'
+        ? event.restTimeMinutes
+        : null,
       matchDurationMinutes,
-      gamesPerOpponent: numberOrNull(event.gamesPerOpponent),
+      gamesPerOpponent: isBracketEvent ? numberOrNull(event.gamesPerOpponent) : null,
       matchRulesOverride: Object.keys(rawMatchRulesOverride).length ? { ...rawMatchRulesOverride } : null,
-      leagueScoringConfig: event.leagueScoringConfig && typeof event.leagueScoringConfig === 'object' ? { ...(event.leagueScoringConfig as Record<string, unknown>) } : null,
+      leagueScoringConfig: isBracketEvent
+        && event.leagueScoringConfig && typeof event.leagueScoringConfig === 'object'
+        ? { ...(event.leagueScoringConfig as Record<string, unknown>) }
+        : null,
     },
     schedule: generatedEnd
       ? {
         mode: 'GENERATED_END',
         endConstraint: null,
-        generatedScheduleEnd: explicitGeneratedScheduleEnd ?? nullableString(event.end),
+        generatedScheduleEnd: normalizedEventType === 'WEEKLY_EVENT'
+          ? null
+          : explicitGeneratedScheduleEnd ?? nullableString(event.end),
         isAutomatedScheduling,
       }
       : {
@@ -297,21 +353,30 @@ const draftFromRecord = (
       rentalBookingItemId: nullableString(event.rentalBookingItemId),
     },
     staff: {
-      staffingPriority,
+      staffingPriority: isTryoutEvent
+        ? 'FULL_COVERAGE_WITH_CONFLICTS_ALLOWED'
+        : staffingPriority,
       doTeamsOfficiate,
-      teamOfficialsMaySwap: booleanValue(event.teamOfficialsMaySwap),
-      teamCheckInMode: ['EVENT', 'MATCH'].includes(stringValue(event.teamCheckInMode).toUpperCase())
-        ? stringValue(event.teamCheckInMode).toUpperCase() as 'EVENT' | 'MATCH'
-        : 'OFF',
-      teamCheckInOpenMinutesBefore: Math.max(0, numberOrNull(event.teamCheckInOpenMinutesBefore) ?? 60),
-      allowMatchRosterEdits: booleanValue(event.allowMatchRosterEdits),
-      allowTemporaryMatchPlayers: booleanValue(event.allowTemporaryMatchPlayers),
-      autoCreatePointMatchIncidents: booleanValue(event.autoCreatePointMatchIncidents),
-      officialIds: normalizedOfficialIds,
-      officialPositions: objectArray(event.officialPositions),
-      eventOfficials,
+      teamOfficialsMaySwap: isTryoutEvent ? false : booleanValue(event.teamOfficialsMaySwap),
+      teamCheckInMode: isTryoutEvent
+        ? 'OFF'
+        : ['EVENT', 'MATCH'].includes(stringValue(event.teamCheckInMode).toUpperCase())
+          ? stringValue(event.teamCheckInMode).toUpperCase() as 'EVENT' | 'MATCH'
+          : 'OFF',
+      teamCheckInOpenMinutesBefore: isTryoutEvent
+        ? 60
+        : Math.max(0, numberOrNull(event.teamCheckInOpenMinutesBefore) ?? 60),
+      allowMatchRosterEdits: isTryoutEvent ? false : booleanValue(event.allowMatchRosterEdits),
+      allowTemporaryMatchPlayers: isTryoutEvent ? false : booleanValue(event.allowTemporaryMatchPlayers),
+      autoCreatePointMatchIncidents: isTryoutEvent ? false : booleanValue(event.autoCreatePointMatchIncidents),
+      officialIds,
+      officialPositions: isTryoutEvent ? [] : objectArray(event.officialPositions),
+      eventOfficials: normalizedEventOfficials,
       assistantHostIds: stringArray(event.assistantHostIds),
-      pendingInvites: objectArray(event.pendingStaffInvites ?? event.staffInvites).map(normalizePendingInvite),
+      pendingInvites: normalizePendingInvitesForEvent(
+        event.pendingStaffInvites ?? event.staffInvites,
+        isTryoutEvent,
+      ),
     },
   };
   return projectEventEditorDraftNestedInput(draft) as EventEditorDraft;
@@ -350,7 +415,9 @@ export const editorSnapshotToFormValues = (
     requiredDocumentIds: registration.requiredDocumentIds,
     end: schedule.mode === 'FIXED_END'
       ? schedule.endConstraint
-      : schedule.generatedScheduleEnd ?? (base.end as string | null | undefined) ?? null,
+      : basics.eventType === 'WEEKLY_EVENT'
+        ? null
+        : schedule.generatedScheduleEnd ?? (base.end as string | null | undefined) ?? null,
     noFixedEndDateTime: schedule.mode === 'GENERATED_END',
     isAutomatedScheduling: schedule.isAutomatedScheduling,
     divisions: competition.divisionIds,
@@ -381,35 +448,95 @@ export const editorSnapshotToFormValues = (
 
 export const editorDraftToLegacyEvent = (draft: EventEditorDraft, eventId?: string | null): Record<string, unknown> => {
   const { basics, participation, registration, competition, schedule, resources, staff } = draft;
-  const playoffDivisionIds = new Set(competition.playoffDivisionDetails.map((detail) => detail.id));
-  const hasTournamentBracketProxy = basics.eventType.trim().toUpperCase() === 'TOURNAMENT'
-    && competition.includePlayoffs
-    && competition.divisionDetails.some(
+  const normalizedEventType = basics.eventType.trim().toUpperCase();
+  const isBracketEvent = normalizedEventType === 'LEAGUE' || normalizedEventType === 'TOURNAMENT';
+  const isTryoutEvent = normalizedEventType === 'TRYOUT';
+  const normalizedParticipation = normalizedEventType === 'TRYOUT'
+    ? {
+      ...participation,
+      teamSignup: false,
+      singleDivision: false,
+      teamSizeLimit: null,
+      allowTeamSplitDefault: false,
+    }
+    : participation;
+  const normalizedCompetition = isBracketEvent
+    ? competition
+    : {
+      ...competition,
+      playoffDivisionDetails: [],
+      divisionFieldIds: {},
+      winnerSetCount: null,
+      loserSetCount: null,
+      doubleElimination: false,
+      includePlayoffs: false,
+      splitLeaguePlayoffDivisions: false,
+      playoffTeamCount: null,
+      pointsToVictory: [],
+      winnerBracketPointsToVictory: [],
+      loserBracketPointsToVictory: [],
+      usesSets: false,
+      setsPerMatch: null,
+      setDurationMinutes: null,
+      restTimeMinutes: null,
+      matchDurationMinutes: null,
+      gamesPerOpponent: null,
+      matchRulesOverride: null,
+      leagueScoringConfig: null,
+    };
+  const playoffDivisionIds = new Set(normalizedCompetition.playoffDivisionDetails.map((detail) => detail.id));
+  const hasTournamentBracketProxy = normalizedEventType === 'TOURNAMENT'
+    && normalizedCompetition.includePlayoffs
+    && normalizedCompetition.divisionDetails.some(
       (detail) => detail.kind === 'LEAGUE' && playoffDivisionIds.has(detail.id),
     );
   const serializedDivisionDetails = hasTournamentBracketProxy
-    ? competition.divisionDetails.filter(
+    ? normalizedCompetition.divisionDetails.filter(
       (detail) => !(detail.kind === 'LEAGUE' && playoffDivisionIds.has(detail.id)),
     )
-    : competition.divisionDetails;
+    : normalizedCompetition.divisionDetails;
+  const normalizedStaff = isTryoutEvent
+    ? {
+      ...staff,
+      staffingPriority: 'FULL_COVERAGE_WITH_CONFLICTS_ALLOWED' as const,
+      doTeamsOfficiate: false,
+      teamOfficialsMaySwap: false,
+      teamCheckInMode: 'OFF' as const,
+      teamCheckInOpenMinutesBefore: 60,
+      allowMatchRosterEdits: false,
+      allowTemporaryMatchPlayers: false,
+      autoCreatePointMatchIncidents: false,
+      officialIds: [],
+      officialPositions: [],
+      eventOfficials: [],
+      pendingInvites: normalizePendingInvitesForEvent(staff.pendingInvites, true),
+    }
+    : staff;
   return {
     ...(eventId ? { id: eventId, $id: eventId } : {}),
     ...basics,
-    ...participation,
+    ...normalizedParticipation,
     registrationPaymentMode: registration.payment.mode === 'FREE' ? 'ONLINE' : registration.payment.mode,
     price: registration.payment.priceCents,
     ...registration.payment,
     registrationQuestions: registration.questions,
     requiredDocumentIds: registration.requiredDocumentIds,
-    divisions: competition.divisionIds,
-    ...competition,
+    divisions: normalizedCompetition.divisionIds,
+    ...normalizedCompetition,
     divisionDetails: serializedDivisionDetails,
-    end: schedule.mode === 'FIXED_END' ? schedule.endConstraint : schedule.generatedScheduleEnd ?? null,
+    end: schedule.mode === 'FIXED_END' ? schedule.endConstraint : (
+      normalizedEventType === 'WEEKLY_EVENT' ? null : schedule.generatedScheduleEnd
+    ),
     scheduleEndConstraint: schedule.mode === 'FIXED_END' ? schedule.endConstraint : null,
-    generatedScheduleEnd: schedule.mode === 'GENERATED_END' ? schedule.generatedScheduleEnd : null,
-    noFixedEndDateTime: schedule.mode === 'GENERATED_END',
-    isAutomatedScheduling: schedule.isAutomatedScheduling,
-    fieldIds: resources.fieldIds,
+    generatedScheduleEnd: schedule.mode === 'GENERATED_END' && normalizedEventType !== 'WEEKLY_EVENT'
+      ? schedule.generatedScheduleEnd
+      : null,
+    noFixedEndDateTime: normalizedEventType === 'TRYOUT' ? false : schedule.mode === 'GENERATED_END',
+    isAutomatedScheduling: normalizeAutomatedSchedulingForEventType(
+      normalizedEventType,
+      schedule.isAutomatedScheduling,
+    ),
+    ...normalizedStaff,
     fields: resources.fields,
     timeSlotIds: resources.timeSlotIds,
     timeSlots: resources.timeSlots,
@@ -417,9 +544,8 @@ export const editorDraftToLegacyEvent = (draft: EventEditorDraft, eventId?: stri
     rentalBookingId: resources.rentalBookingId,
     immutableFieldIds: resources.immutableFieldIds,
     rentalBookingItemId: resources.rentalBookingItemId,
-    ...staff,
-    pendingStaffInvites: staff.pendingInvites,
-    staffInvites: staff.pendingInvites,
+    pendingStaffInvites: normalizedStaff.pendingInvites,
+    staffInvites: normalizedStaff.pendingInvites,
   };
 };
 
@@ -452,6 +578,7 @@ export const emptyEditorSnapshot = (draft: EventEditorDraft, mode: 'CREATE' | 'E
   scheduleState: {
     sourceType: null,
     matchCount: 0,
+    availableMaintenanceOperations: [],
     revision: 'new',
     hasProtectedHistory: false,
   },

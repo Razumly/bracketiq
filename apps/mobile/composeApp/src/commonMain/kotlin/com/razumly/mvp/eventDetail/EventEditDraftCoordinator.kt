@@ -37,6 +37,7 @@ internal class EventEditDraftCoordinator(
 
     private val _isEditing = MutableStateFlow(canEditInitial)
     val isEditing = _isEditing.asStateFlow()
+    private var draftHasUnsavedChanges = false
 
     private val _fieldCount = MutableStateFlow(0)
     val fieldCount = _fieldCount.asStateFlow()
@@ -54,6 +55,7 @@ internal class EventEditDraftCoordinator(
         _isEditing.value = enabled
         if (!enabled) {
             _controlLocks.value = EventEditorControlLocks()
+            draftHasUnsavedChanges = false
         }
     }
 
@@ -84,6 +86,7 @@ internal class EventEditDraftCoordinator(
     fun forceExitEditing(event: Event) {
         _isEditing.value = false
         _controlLocks.value = EventEditorControlLocks()
+        draftHasUnsavedChanges = false
         val retainedSlots = normalizeScheduleConstructionTimeSlots(
             event = event,
             slots = _editableLeagueTimeSlots.value,
@@ -144,9 +147,13 @@ internal class EventEditDraftCoordinator(
         _editableFields.value = seededFields
         _fieldCount.value = seededFields.size
         _editableLeagueTimeSlots.value = retainedSlots
+        draftHasUnsavedChanges = false
     }
 
+    fun hasUnsavedChanges(): Boolean = draftHasUnsavedChanges
+
     fun updateEditedEvent(update: (Event) -> Event) {
+        draftHasUnsavedChanges = true
         val previous = _editedEvent.value
         val candidate = update(previous)
         val locks = _controlLocks.value
@@ -176,7 +183,10 @@ internal class EventEditDraftCoordinator(
         val nextAutomatedScheduling = if (locks.automatedScheduling) {
             previous.isAutomatedScheduling
         } else {
-            candidate.isAutomatedScheduling
+            normalizeAutomatedSchedulingForEventType(
+                eventType = nextEventType,
+                value = candidate.isAutomatedScheduling,
+            )
         }
         val automatedSchedulingChangeRejected = locks.automatedScheduling &&
             candidate.isAutomatedScheduling != previous.isAutomatedScheduling
@@ -226,6 +236,7 @@ internal class EventEditDraftCoordinator(
         resourceLabelSingular: String = "Resource",
         idFactory: () -> String = ::newId,
     ) {
+        draftHasUnsavedChanges = true
         val normalized = count.coerceAtLeast(0)
         _fieldCount.value = normalized
 
@@ -278,11 +289,13 @@ internal class EventEditDraftCoordinator(
     fun updateLocalFieldName(index: Int, name: String) {
         val fields = _editableFields.value.toMutableList()
         if (index !in fields.indices) return
+        draftHasUnsavedChanges = true
         fields[index] = fields[index].copy(name = name)
         _editableFields.value = fields
     }
 
     fun updateLeagueScoringConfig(update: LeagueScoringConfigDTO.() -> LeagueScoringConfigDTO) {
+        draftHasUnsavedChanges = true
         _editableLeagueScoringConfig.value = _editableLeagueScoringConfig.value.update()
     }
 
@@ -290,6 +303,7 @@ internal class EventEditDraftCoordinator(
         now: Instant = Clock.System.now(),
         idFactory: () -> String = ::newId,
     ) {
+        draftHasUnsavedChanges = true
         _editableLeagueTimeSlots.value = _editableLeagueTimeSlots.value + createDefaultLeagueSlot(
             event = _editedEvent.value,
             now = now,
@@ -304,6 +318,7 @@ internal class EventEditDraftCoordinator(
     ) {
         val slots = _editableLeagueTimeSlots.value.toMutableList()
         if (index !in slots.indices) return
+        draftHasUnsavedChanges = true
         val validFieldIds = editableFieldIds()
         slots[index] = normalizeSlotResourceSelection(slots[index].update(), validFieldIds)
         _editableLeagueTimeSlots.value = slots
@@ -312,6 +327,7 @@ internal class EventEditDraftCoordinator(
     fun removeLeagueTimeSlot(index: Int) {
         val slots = _editableLeagueTimeSlots.value.toMutableList()
         if (index !in slots.indices) return
+        draftHasUnsavedChanges = true
         slots.removeAt(index)
         _editableLeagueTimeSlots.value = slots
     }
@@ -321,6 +337,7 @@ internal class EventEditDraftCoordinator(
     }
 
     fun applyRentalDraft(draft: RentalResourceDraftSyncResult) {
+        draftHasUnsavedChanges = true
         val retainedSlots = normalizeScheduleConstructionTimeSlots(
             event = draft.event,
             slots = draft.timeSlots,

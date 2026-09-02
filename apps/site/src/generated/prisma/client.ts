@@ -100,6 +100,11 @@ export type MatchOperationReceipts = Prisma.MatchOperationReceiptsModel
  */
 export type EventEditorCreateOperations = Prisma.EventEditorCreateOperationsModel
 /**
+ * Model EventEditorMaintenanceOperations
+ *
+ */
+export type EventEditorMaintenanceOperations = Prisma.EventEditorMaintenanceOperationsModel
+/**
  * Model Divisions
  *
  */

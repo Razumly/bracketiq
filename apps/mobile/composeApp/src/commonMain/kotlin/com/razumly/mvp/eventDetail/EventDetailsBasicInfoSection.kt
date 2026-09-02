@@ -242,10 +242,13 @@ internal fun LazyListScope.eventDetailsBasicInfoSection(
                     state.editEvent.eventType == EventType.WEEKLY_EVENT
             val usesGeneratedEnd = state.editEvent.isAutomatedScheduling &&
                 state.editEvent.noFixedEndDateTime
-            val canEditNoFixedEndDateTime = supportsNoFixedEndDateTime &&
-                state.editEvent.eventType != EventType.WEEKLY_EVENT
+            val canEditNoFixedEndDateTime = supportsNoFixedEndDateTime
 
-            if (state.editEvent.eventType == EventType.EVENT || supportsNoFixedEndDateTime) {
+            if (
+                state.editEvent.eventType == EventType.EVENT ||
+                    state.editEvent.eventType == EventType.TRYOUT ||
+                    supportsNoFixedEndDateTime
+            ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -337,7 +340,7 @@ internal fun LazyListScope.eventDetailsBasicInfoSection(
                         },
                     )
                     Text(
-                        text = "No fixed end datetime scheduling",
+                        text = "No Planned End",
                         style = MaterialTheme.typography.bodyMedium,
                         color = Color(localImageScheme.current.onSurface),
                     )

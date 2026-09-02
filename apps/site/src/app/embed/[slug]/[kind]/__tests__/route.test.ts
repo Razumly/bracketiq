@@ -100,6 +100,11 @@ const standingsPage = {
       },
     ],
   },
+  isScheduleIncomplete: false,
+  unscheduledMatchCount: 0,
+  unscheduledMatchIds: [],
+  affectedCompetitionPhaseIds: [],
+  affectedCompetitionPhaseLabels: [],
 };
 
 const bracketPage = {
@@ -338,6 +343,31 @@ describe('GET /embed/[slug]/[kind]', () => {
     expect(html).toContain('<th>L</th>');
     expect(html).toContain('<td>3</td>');
     expect(html).toContain('<td>1</td>');
+    expect(html).not.toContain('Schedule incomplete');
+  });
+
+  it('renders incomplete standings status with exact ids and escaped phase details', async () => {
+    getPublicStandingsWidgetPageMock.mockResolvedValue({
+      ...standingsPage,
+      isScheduleIncomplete: true,
+      unscheduledMatchCount: 2,
+      unscheduledMatchIds: ['match-unplaced-1', 'match-unplaced-2'],
+      affectedCompetitionPhaseIds: ['phase-final'],
+      affectedCompetitionPhaseLabels: ['Final <Phase>'],
+    });
+    const req = new NextRequest('http://localhost/embed/scsoccer/standings');
+
+    const res = await getWidget(req, {
+      params: Promise.resolve({ slug: 'scsoccer', kind: 'standings' }),
+    });
+    const html = await res.text();
+
+    expect(html).toContain('Schedule incomplete');
+    expect(html).toContain('2 unscheduled matches');
+    expect(html).toContain('Unscheduled match IDs: match-unplaced-1, match-unplaced-2');
+    expect(html).toContain('Affected Competition Phases: Final &lt;Phase&gt;');
+    expect(html).toContain('Competition Phase IDs: phase-final');
+    expect(html).not.toContain('Accept partial schedule');
   });
 
   it('renders bracket widgets with winners and losers lanes', async () => {
@@ -358,12 +388,33 @@ describe('GET /embed/[slug]/[kind]', () => {
     expect(html).toContain('class="bracket-canvas"');
     expect(html).toContain('data-bracket-match-id="match_1"');
     expect(html).toContain('id="public-bracket-winners-arrowhead"');
-    expect(html).toContain('marker-end="url(#public-bracket-winners-arrowhead)"');
-    expect(html).toContain('stroke="#aeb9c7"');
     expect(html).toContain('fill="#aeb9c7"');
     expect(html).toContain('Court 1');
     expect(html).toContain('Aces');
     expect(html).toContain('Bumpers');
+  });
+  it('renders incomplete schedule status without organizer controls', async () => {
+    getPublicBracketWidgetPageMock.mockResolvedValue({
+      ...bracketPage,
+      isScheduleIncomplete: true,
+      unscheduledMatchCount: 2,
+      unscheduledMatchIds: ['match-unplaced-1', 'match-unplaced-2'],
+      affectedCompetitionPhaseIds: ['phase-final'],
+      affectedCompetitionPhaseLabels: ['Final'],
+    });
+    const req = new NextRequest('http://localhost/embed/scsoccer/brackets');
+
+    const res = await getWidget(req, {
+      params: Promise.resolve({ slug: 'scsoccer', kind: 'brackets' }),
+    });
+    const html = await res.text();
+
+    expect(html).toContain('Schedule incomplete');
+    expect(html).toContain('2 unscheduled matches');
+    expect(html).toContain('Unscheduled match IDs: match-unplaced-1, match-unplaced-2');
+    expect(html).toContain('Affected Competition Phases: Final');
+    expect(html).toContain('Competition Phase IDs: phase-final');
+    expect(html).not.toContain('Accept partial schedule');
   });
 
   it('renders open-registration team cards as public registration links', async () => {

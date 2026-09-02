@@ -1,4 +1,4 @@
-import type { PrismaClient } from "../../generated/prisma/client";
+import type { Prisma, PrismaClient } from "../../generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePrismaSchemaContract } from "@/lib/prismaSchemaContract";
 import { canOrganizationUsePaidBilling } from "@/lib/organizationVerification";
@@ -138,7 +138,7 @@ import {
   normalizeDivisionPhaseSettingsMap,
   resolveDivisionCompetitionPhase,
 } from "@/lib/divisionPhaseSettings";
-import type { DivisionPhaseSettingsMap } from "@/types";
+import type { DivisionCompetitionPhase, DivisionPhaseSettingsMap } from "@/types";
 import {
   normalizeEventSportIds,
   validateEventSportIds,
@@ -262,6 +262,7 @@ export type MatchPersistenceInput = {
 };
 
 type PrismaLike = PrismaClient | any;
+type MatchRow = Prisma.MatchesGetPayload<{}>;
 
 const normalizeLegacyBracketTeamCount = (value: unknown): number =>
   Math.max(MIN_BRACKET_TEAM_COUNT, normalizeBracketTeamCount(value));
@@ -387,10 +388,15 @@ const isSchedulableEventType = (value: unknown): boolean => {
   return (
     normalized === "LEAGUE" ||
     normalized === "TOURNAMENT" ||
+    normalized === "WEEKLY_EVENT" ||
     normalized === "TRYOUT"
   );
 };
 const requiresScheduledFields = (value: unknown): boolean => {
+  const normalized = typeof value === "string" ? value.toUpperCase() : "";
+  return normalized === "LEAGUE" || normalized === "TOURNAMENT";
+};
+const isBracketEventType = (value: unknown): boolean => {
   const normalized = typeof value === "string" ? value.toUpperCase() : "";
   return normalized === "LEAGUE" || normalized === "TOURNAMENT";
 };
@@ -447,7 +453,7 @@ const normalizeEntityId = (value: unknown): string | null => {
   return trimmed.length ? trimmed : null;
 };
 
-const resolveHydratedWinnerEventTeamId = (params: {
+type HydratedWinnerEventTeamParams = {
   persistedWinnerEventTeamId: unknown;
   shouldHydrateSegments: boolean;
   segments: Array<{ status?: unknown; winnerEventTeamId?: unknown }>;
@@ -457,32 +463,30 @@ const resolveHydratedWinnerEventTeamId = (params: {
     | undefined;
   team1Id: unknown;
   team2Id: unknown;
-}): string | null => {
-  const persistedWinnerEventTeamId = normalizeEntityId(
-    params.persistedWinnerEventTeamId,
+};
+
+const resolveCompletedSegmentWinner = (
+  segments: Array<{ status?: unknown; winnerEventTeamId?: unknown }>,
+): string | null => {
+  const completedSegment = segments.find(
+    (segment) =>
+      String(segment.status ?? "")
+        .trim()
+        .toUpperCase() === "COMPLETE" &&
+      normalizeEntityId(segment.winnerEventTeamId),
   );
-  if (persistedWinnerEventTeamId) {
-    return persistedWinnerEventTeamId;
-  }
-  if (!params.shouldHydrateSegments) {
-    return null;
-  }
+  return normalizeEntityId(completedSegment?.winnerEventTeamId);
+};
 
-  const scoringModel =
-    typeof params.resolvedMatchRules?.scoringModel === "string"
-      ? params.resolvedMatchRules.scoringModel.trim().toUpperCase()
-      : "";
-  if (scoringModel !== "SETS") {
-    const completedSegment = params.segments.find(
-      (segment) =>
-        String(segment.status ?? "")
-          .trim()
-          .toUpperCase() === "COMPLETE" &&
-        normalizeEntityId(segment.winnerEventTeamId),
-    );
-    return normalizeEntityId(completedSegment?.winnerEventTeamId);
-  }
-
+const resolveSetsWinner = (params: {
+  segments: Array<{ status?: unknown; winnerEventTeamId?: unknown }>;
+  resolvedMatchRules:
+    | { segmentCount?: unknown }
+    | null
+    | undefined;
+  team1Id: unknown;
+  team2Id: unknown;
+}): string | null => {
   const team1Id = normalizeEntityId(params.team1Id);
   const team2Id = normalizeEntityId(params.team2Id);
   if (!team1Id || !team2Id) {
@@ -520,6 +524,28 @@ const resolveHydratedWinnerEventTeamId = (params: {
   return null;
 };
 
+const resolveHydratedWinnerEventTeamId = (
+  params: HydratedWinnerEventTeamParams,
+): string | null => {
+  const persistedWinnerEventTeamId = normalizeEntityId(
+    params.persistedWinnerEventTeamId,
+  );
+  if (persistedWinnerEventTeamId) {
+    return persistedWinnerEventTeamId;
+  }
+  if (!params.shouldHydrateSegments) {
+    return null;
+  }
+  const scoringModel =
+    typeof params.resolvedMatchRules?.scoringModel === "string"
+      ? params.resolvedMatchRules.scoringModel.trim().toUpperCase()
+      : "";
+  if (scoringModel === "SETS") {
+    return resolveSetsWinner(params);
+  }
+  return resolveCompletedSegmentWinner(params.segments);
+};
+
 const normalizeOptionalText = (value: unknown): string | null => {
   if (typeof value !== "string") {
     return null;
@@ -535,50 +561,63 @@ const ACTIVE_EVENT_REGISTRATION_STATUSES = [
   "BLOCKED",
 ] as const;
 
-export const syncEventParticipantRegistrationsFromCompatibilityIds = async (
+type CompatibilityRegistrationParameters = {
+  eventId: string;
+  createdBy: string;
+  teamIds: string[];
+  userIds: string[];
+  waitListIds: string[];
+  freeAgentIds: string[];
+  syncTeams: boolean;
+  syncUsers: boolean;
+  syncWaitList: boolean;
+  syncFreeAgents: boolean;
+  placeholderTeamIds?: string[];
+  divisionIdByRegistrantId?: Record<string, string | null | undefined>;
+};
+
+type CompatibilityRegistrationState = {
+  createdBy: string;
+  teamIds: string[];
+  userIds: string[];
+  waitListIds: string[];
+  freeAgentIds: string[];
+  activeTeamIds: string[];
+  placeholderTeamIds: Set<string>;
+  waitListTeamIds: Set<string>;
+  entryDivisionRows: any[];
+  defaultEntryDivisionId: string | null;
+  existingRowsById: Map<string, any>;
+};
+
+type CompatibilityRegistrationEntry = {
+  registrantType: "TEAM" | "SELF";
+  registrantId: string;
+  rosterRole: "PARTICIPANT" | "WAITLIST" | "FREE_AGENT";
+};
+
+const loadCompatibilityTeamRows = async (
   client: PrismaLike,
-  params: {
-    eventId: string;
-    createdBy: string;
-    teamIds: string[];
-    userIds: string[];
-    waitListIds: string[];
-    freeAgentIds: string[];
-    syncTeams: boolean;
-    syncUsers: boolean;
-    syncWaitList: boolean;
-    syncFreeAgents: boolean;
-    placeholderTeamIds?: string[];
-    divisionIdByRegistrantId?: Record<string, string | null | undefined>;
-  },
-): Promise<void> => {
-  if (typeof (client as any).eventRegistrations?.upsert !== "function") {
-    return;
-  }
+  teamIds: string[],
+): Promise<any[]> =>
+  teamIds.length && typeof (client as any).teams?.findMany === "function"
+    ? (client as any).teams.findMany({
+        where: { id: { in: teamIds } },
+        select: {
+          id: true,
+          kind: true,
+          captainId: true,
+          name: true,
+          parentTeamId: true,
+        },
+      })
+    : [];
 
-  const now = new Date();
-  const createdBy = normalizeEntityId(params.createdBy) ?? "system";
-  const teamIds = normalizeTeamIdList(params.teamIds);
-  const userIds = normalizeTeamIdList(params.userIds);
-  const waitListIds = normalizeTeamIdList(params.waitListIds);
-  const freeAgentIds = normalizeTeamIdList(params.freeAgentIds);
-  const explicitPlaceholderTeamIds = new Set(
-    normalizeTeamIdList(params.placeholderTeamIds ?? []),
-  );
-
-  const teamRows =
-    teamIds.length && typeof (client as any).teams?.findMany === "function"
-      ? await (client as any).teams.findMany({
-          where: { id: { in: teamIds } },
-          select: {
-            id: true,
-            kind: true,
-            captainId: true,
-            name: true,
-            parentTeamId: true,
-          },
-        })
-      : [];
+const collectCompatibilityPlaceholderTeamIds = (
+  teamIds: string[],
+  explicitPlaceholderTeamIds: string[],
+  teamRows: any[],
+): { placeholderTeamIds: Set<string>; activeTeamIds: string[] } => {
   const placeholderTeamIds = new Set(explicitPlaceholderTeamIds);
   for (const row of teamRows as Array<{
     id?: unknown;
@@ -606,77 +645,95 @@ export const syncEventParticipantRegistrationsFromCompatibilityIds = async (
       placeholderTeamIds.add(id);
     }
   }
-  const activeTeamIds = teamIds.filter(
-    (teamId) => !placeholderTeamIds.has(teamId),
-  );
+  return {
+    placeholderTeamIds,
+    activeTeamIds: teamIds.filter(
+      (teamId) => !placeholderTeamIds.has(teamId),
+    ),
+  };
+};
 
-  const waitListTeamRows =
+const loadCompatibilityWaitListTeamIds = async (
+  client: PrismaLike,
+  waitListIds: string[],
+): Promise<Set<string>> => {
+  const rows =
     waitListIds.length && typeof (client as any).teams?.findMany === "function"
       ? await (client as any).teams.findMany({
           where: { id: { in: waitListIds } },
           select: { id: true },
         })
       : [];
-  const waitListTeamIds = new Set(
-    (waitListTeamRows as Array<{ id?: unknown }>)
+  return new Set(
+    (rows as Array<{ id?: unknown }>)
       .map((row) => normalizeEntityId(row.id))
       .filter((id): id is string => Boolean(id)),
   );
+};
 
-  const entryDivisionRows =
-    typeof (client as any).divisions?.findMany === "function"
-      ? await (client as any).divisions.findMany({
-          where: {
-            eventId: params.eventId,
-            role: "ENTRY",
-            status: "ACTIVE",
-          },
-          select: { id: true, key: true },
-        })
-      : [];
-  const defaultEntryDivisionId =
-    Array.isArray(entryDivisionRows) && entryDivisionRows.length === 1
-      ? normalizeEntityId(entryDivisionRows[0]?.id)
-      : null;
-  const resolveImportedDivisionId = (registrantId: string): string | null =>
-    normalizeEntityId(params.divisionIdByRegistrantId?.[registrantId]) ??
-    defaultEntryDivisionId;
-  const compatibilityRegistrationIds = Array.from(new Set([
+const loadCompatibilityEntryDivisionRows = async (
+  client: PrismaLike,
+  eventId: string,
+): Promise<any[]> =>
+  typeof (client as any).divisions?.findMany === "function"
+    ? (client as any).divisions.findMany({
+        where: {
+          eventId,
+          role: "ENTRY",
+          status: "ACTIVE",
+        },
+        select: { id: true, key: true },
+      })
+    : [];
+
+const compatibilityRegistrationIdsFor = (
+  eventId: string,
+  activeTeamIds: string[],
+  userIds: string[],
+  waitListIds: string[],
+  freeAgentIds: string[],
+): string[] =>
+  Array.from(new Set([
     ...activeTeamIds.map((registrantId) => buildEventRegistrationId({
-      eventId: params.eventId,
+      eventId,
       registrantType: "TEAM",
       registrantId,
     })),
     ...userIds.map((registrantId) => buildEventRegistrationId({
-      eventId: params.eventId,
+      eventId,
       registrantType: "SELF",
       registrantId,
     })),
     ...waitListIds.flatMap((registrantId) => [
       buildEventRegistrationId({
-        eventId: params.eventId,
+        eventId,
         registrantType: "TEAM",
         registrantId,
       }),
       buildEventRegistrationId({
-        eventId: params.eventId,
+        eventId,
         registrantType: "SELF",
         registrantId,
       }),
     ]),
     ...freeAgentIds.map((registrantId) => buildEventRegistrationId({
-      eventId: params.eventId,
+      eventId,
       registrantType: "SELF",
       registrantId,
     })),
   ]));
-  const existingCompatibilityRows =
-    compatibilityRegistrationIds.length
-      && typeof (client as any).eventRegistrations?.findMany === "function"
+
+const loadExistingCompatibilityRows = async (
+  client: PrismaLike,
+  eventId: string,
+  ids: string[],
+): Promise<Map<string, any>> => {
+  const rows =
+    ids.length && typeof (client as any).eventRegistrations?.findMany === "function"
       ? await (client as any).eventRegistrations.findMany({
           where: {
-            eventId: params.eventId,
-            id: { in: compatibilityRegistrationIds },
+            eventId,
+            id: { in: ids },
           },
           select: {
             id: true,
@@ -706,200 +763,380 @@ export const syncEventParticipantRegistrationsFromCompatibilityIds = async (
           },
         })
       : [];
-  const existingCompatibilityRowsById = new Map<string, any>(
-    (Array.isArray(existingCompatibilityRows) ? existingCompatibilityRows : [])
+  return new Map<string, any>(
+    (Array.isArray(rows) ? rows : [])
       .map((row: { id?: unknown }) => [normalizeEntityId(row.id), row] as const)
       .filter((entry): entry is readonly [string, any] => Boolean(entry[0])),
   );
+};
 
-  const upsertRegistration = async (entry: {
-    registrantType: "TEAM" | "SELF";
-    registrantId: string;
-    rosterRole: "PARTICIPANT" | "WAITLIST" | "FREE_AGENT";
-  }) => {
-    const id = buildEventRegistrationId({
-      eventId: params.eventId,
-      registrantType: entry.registrantType,
-      registrantId: entry.registrantId,
-    });
-    const divisionId = entry.rosterRole === "PARTICIPANT"
-      ? resolveImportedDivisionId(entry.registrantId)
-      : null;
-    if (
-      entry.rosterRole === "PARTICIPANT"
-      && entryDivisionRows.length > 0
-      && !divisionId
-    ) {
-      return;
-    }
-
-    const existing = existingCompatibilityRowsById.get(id) ?? null;
-    const existingAccepted = Boolean(
-      existing?.acceptedAt
-      || ["ACTIVE", "BLOCKED"].includes(String(existing?.status ?? "").toUpperCase()),
+const loadCompatibilityRegistrationState = async (
+  client: PrismaLike,
+  params: CompatibilityRegistrationParameters,
+): Promise<CompatibilityRegistrationState> => {
+  const createdBy = normalizeEntityId(params.createdBy) ?? "system";
+  const teamIds = normalizeTeamIdList(params.teamIds);
+  const userIds = normalizeTeamIdList(params.userIds);
+  const waitListIds = normalizeTeamIdList(params.waitListIds);
+  const freeAgentIds = normalizeTeamIdList(params.freeAgentIds);
+  const explicitPlaceholderTeamIds = normalizeTeamIdList(
+    params.placeholderTeamIds ?? [],
+  );
+  const teamRows = await loadCompatibilityTeamRows(client, teamIds);
+  const { placeholderTeamIds, activeTeamIds } =
+    collectCompatibilityPlaceholderTeamIds(
+      teamIds,
+      explicitPlaceholderTeamIds,
+      teamRows,
     );
-    const status =
-      entry.rosterRole === "PARTICIPANT"
-        ? existingAccepted
-          ? String(existing?.status ?? "ACTIVE").toUpperCase()
-          : "STARTED"
-        : "ACTIVE";
-
-    if (existing) {
-      await upsertEventRegistration({
-        eventId: existing.eventId ?? params.eventId,
-        registrationId: id,
-        registrantType: entry.registrantType,
-        registrantId: entry.registrantId,
-        rosterRole: entry.rosterRole,
-        status: status as any,
-        parentId: existing.parentId ?? null,
-        eventTeamId:
-          entry.registrantType === "TEAM"
-            ? entry.registrantId
-            : null,
-        sourceTeamRegistrationId: null,
-        ageAtEvent: existing.ageAtEvent ?? null,
-        divisionId: entry.rosterRole === "PARTICIPANT"
-          ? divisionId
-          : existing.divisionId ?? null,
-        divisionTypeId: existing.divisionTypeId ?? null,
-        divisionTypeKey: existing.divisionTypeKey ?? null,
-        jerseyNumber: existing.jerseyNumber ?? null,
-        position: existing.position ?? null,
-        isCaptain: existing.isCaptain ?? false,
-        consentDocumentId: existing.consentDocumentId ?? null,
-        consentStatus: existing.consentStatus ?? null,
-        createdBy: existing.createdBy ?? createdBy,
-        occurrence: existing.slotId && existing.occurrenceDate
-          ? {
-              slotId: existing.slotId,
-              occurrenceDate: existing.occurrenceDate,
-            }
-          : null,
-      }, client);
-      return;
-    }
-
-    await upsertEventRegistration({
-      eventId: params.eventId,
-      registrantType: entry.registrantType,
-      registrantId: entry.registrantId,
-      rosterRole: entry.rosterRole,
-      status: status as any,
-      parentId: null,
-      eventTeamId:
-        entry.registrantType === "TEAM" ? entry.registrantId : null,
-      divisionId,
-      createdBy,
-    }, client);
+  const waitListTeamIds = await loadCompatibilityWaitListTeamIds(
+    client,
+    waitListIds,
+  );
+  const entryDivisionRows = await loadCompatibilityEntryDivisionRows(
+    client,
+    params.eventId,
+  );
+  const defaultEntryDivisionId =
+    Array.isArray(entryDivisionRows) && entryDivisionRows.length === 1
+      ? normalizeEntityId(entryDivisionRows[0]?.id)
+      : null;
+  const compatibilityRegistrationIds = compatibilityRegistrationIdsFor(
+    params.eventId,
+    activeTeamIds,
+    userIds,
+    waitListIds,
+    freeAgentIds,
+  );
+  const existingRowsById = await loadExistingCompatibilityRows(
+    client,
+    params.eventId,
+    compatibilityRegistrationIds,
+  );
+  return {
+    createdBy,
+    teamIds,
+    userIds,
+    waitListIds,
+    freeAgentIds,
+    activeTeamIds,
+    placeholderTeamIds,
+    waitListTeamIds,
+    entryDivisionRows,
+    defaultEntryDivisionId,
+    existingRowsById,
   };
+};
 
-  const deletePlaceholderRegistrations = async () => {
-    const ids = Array.from(placeholderTeamIds);
-    if (!ids.length) {
-      return;
-    }
-    const where = {
-      eventId: params.eventId,
-      registrantType: "TEAM",
-      rosterRole: "PARTICIPANT",
-      OR: [{ registrantId: { in: ids } }, { eventTeamId: { in: ids } }],
-    };
-    if (typeof (client as any).eventRegistrations?.deleteMany === "function") {
-      await (client as any).eventRegistrations.deleteMany({ where });
-      return;
-    }
-    if (typeof (client as any).eventRegistrations?.updateMany === "function") {
-      await (client as any).eventRegistrations.updateMany({
-        where: {
-          ...where,
-          status: { in: [...ACTIVE_EVENT_REGISTRATION_STATUSES] },
-        },
-        data: {
-          status: "CANCELLED",
-          updatedAt: now,
-        },
-      });
-    }
+const existingCompatibilityValue = (
+  existing: Record<string, any>,
+  key: string,
+  fallback: unknown,
+): any => {
+  const value = existing[key];
+  if (value !== null && value !== undefined) {
+    return value;
+  }
+  return fallback;
+};
+
+const resolveCompatibilityRegistrationDivisionId = (
+  params: CompatibilityRegistrationParameters,
+  state: CompatibilityRegistrationState,
+  registrantId: string,
+): string | null =>
+  normalizeEntityId(params.divisionIdByRegistrantId?.[registrantId]) ??
+  state.defaultEntryDivisionId;
+
+const isExistingCompatibilityRegistrationAccepted = (
+  existing: Record<string, any> | null,
+): boolean =>
+  Boolean(
+    existing?.acceptedAt ||
+      ["ACTIVE", "BLOCKED"].includes(
+        String(existing?.status ?? "").toUpperCase(),
+      ),
+  );
+
+const resolveCompatibilityRegistrationStatus = (
+  entry: CompatibilityRegistrationEntry,
+  existing: Record<string, any> | null,
+): string =>
+  entry.rosterRole !== "PARTICIPANT"
+    ? "ACTIVE"
+    : isExistingCompatibilityRegistrationAccepted(existing)
+      ? String(existing?.status ?? "ACTIVE").toUpperCase()
+      : "STARTED";
+
+const resolveCompatibilityEventTeamId = (
+  entry: CompatibilityRegistrationEntry,
+): string | null => (entry.registrantType === "TEAM" ? entry.registrantId : null);
+
+const resolveCompatibilityDivisionForEntry = (
+  entry: CompatibilityRegistrationEntry,
+  divisionId: string | null,
+  existing: Record<string, any> | null,
+): string | null =>
+  entry.rosterRole === "PARTICIPANT"
+    ? divisionId
+    : existingCompatibilityValue(existing ?? {}, "divisionId", null);
+
+const resolveCompatibilityOccurrence = (
+  existing: Record<string, any> | null,
+): { slotId: unknown; occurrenceDate: unknown } | null => {
+  if (!existing?.slotId || !existing.occurrenceDate) {
+    return null;
+  }
+  return {
+    slotId: existing.slotId,
+    occurrenceDate: existing.occurrenceDate,
   };
+};
 
-  const cancelMissing = async (
-    where: Record<string, unknown>,
-    desiredIds: string[],
-  ) => {
-    if (typeof (client as any).eventRegistrations?.updateMany !== "function") {
-      return;
-    }
+const buildExistingCompatibilityRegistrationInput = (
+  params: CompatibilityRegistrationParameters,
+  state: CompatibilityRegistrationState,
+  entry: CompatibilityRegistrationEntry,
+  id: string,
+  divisionId: string | null,
+  status: string,
+  existing: Record<string, any>,
+): Record<string, unknown> => ({
+  eventId: existingCompatibilityValue(existing, "eventId", params.eventId),
+  registrationId: id,
+  registrantType: entry.registrantType,
+  registrantId: entry.registrantId,
+  rosterRole: entry.rosterRole,
+  status,
+  parentId: existingCompatibilityValue(existing, "parentId", null),
+  eventTeamId: resolveCompatibilityEventTeamId(entry),
+  sourceTeamRegistrationId: null,
+  ageAtEvent: existingCompatibilityValue(existing, "ageAtEvent", null),
+  divisionId: resolveCompatibilityDivisionForEntry(entry, divisionId, existing),
+  divisionTypeId: existingCompatibilityValue(existing, "divisionTypeId", null),
+  divisionTypeKey: existingCompatibilityValue(existing, "divisionTypeKey", null),
+  jerseyNumber: existingCompatibilityValue(existing, "jerseyNumber", null),
+  position: existingCompatibilityValue(existing, "position", null),
+  isCaptain: existingCompatibilityValue(existing, "isCaptain", false),
+  consentDocumentId: existingCompatibilityValue(
+    existing,
+    "consentDocumentId",
+    null,
+  ),
+  consentStatus: existingCompatibilityValue(existing, "consentStatus", null),
+  createdBy: existingCompatibilityValue(existing, "createdBy", state.createdBy),
+  occurrence: resolveCompatibilityOccurrence(existing),
+});
+
+const buildNewCompatibilityRegistrationInput = (
+  params: CompatibilityRegistrationParameters,
+  entry: CompatibilityRegistrationEntry,
+  divisionId: string | null,
+  status: string,
+): Record<string, unknown> => ({
+  eventId: params.eventId,
+  registrantType: entry.registrantType,
+  registrantId: entry.registrantId,
+  rosterRole: entry.rosterRole,
+  status,
+  parentId: null,
+  eventTeamId: resolveCompatibilityEventTeamId(entry),
+  divisionId,
+  createdBy: normalizeEntityId(params.createdBy) ?? "system",
+});
+
+const upsertCompatibilityRegistration = async (
+  client: PrismaLike,
+  params: CompatibilityRegistrationParameters,
+  state: CompatibilityRegistrationState,
+  entry: CompatibilityRegistrationEntry,
+): Promise<void> => {
+  const id = buildEventRegistrationId({
+    eventId: params.eventId,
+    registrantType: entry.registrantType,
+    registrantId: entry.registrantId,
+  });
+  const divisionId =
+    entry.rosterRole === "PARTICIPANT"
+      ? resolveCompatibilityRegistrationDivisionId(
+          params,
+          state,
+          entry.registrantId,
+        )
+      : null;
+  if (
+    entry.rosterRole === "PARTICIPANT" &&
+    state.entryDivisionRows.length > 0 &&
+    !divisionId
+  ) {
+    return;
+  }
+  const existing = state.existingRowsById.get(id) ?? null;
+  const status = resolveCompatibilityRegistrationStatus(entry, existing);
+  const input = existing
+    ? buildExistingCompatibilityRegistrationInput(
+        params,
+        state,
+        entry,
+        id,
+        divisionId,
+        status,
+        existing,
+      )
+    : buildNewCompatibilityRegistrationInput(
+        params,
+        entry,
+        divisionId,
+        status,
+      );
+  await upsertEventRegistration(input as any, client);
+};
+
+const deleteCompatibilityPlaceholderRegistrations = async (
+  client: PrismaLike,
+  params: CompatibilityRegistrationParameters,
+  state: CompatibilityRegistrationState,
+  now: Date,
+): Promise<void> => {
+  const ids = Array.from(state.placeholderTeamIds);
+  if (!ids.length) {
+    return;
+  }
+  const where = {
+    eventId: params.eventId,
+    registrantType: "TEAM",
+    rosterRole: "PARTICIPANT",
+    OR: [{ registrantId: { in: ids } }, { eventTeamId: { in: ids } }],
+  };
+  if (typeof (client as any).eventRegistrations?.deleteMany === "function") {
+    await (client as any).eventRegistrations.deleteMany({ where });
+    return;
+  }
+  if (typeof (client as any).eventRegistrations?.updateMany === "function") {
     await (client as any).eventRegistrations.updateMany({
       where: {
-        eventId: params.eventId,
-        slotId: null,
-        occurrenceDate: null,
-        status: { in: [...ACTIVE_EVENT_REGISTRATION_STATUSES] },
         ...where,
-        ...(desiredIds.length ? { registrantId: { notIn: desiredIds } } : {}),
+        status: { in: [...ACTIVE_EVENT_REGISTRATION_STATUSES] },
       },
       data: {
         status: "CANCELLED",
         updatedAt: now,
       },
     });
-  };
+  }
+};
 
+const cancelMissingCompatibilityRegistrations = async (
+  client: PrismaLike,
+  eventId: string,
+  where: Record<string, unknown>,
+  desiredIds: string[],
+  now: Date,
+): Promise<void> => {
+  if (typeof (client as any).eventRegistrations?.updateMany !== "function") {
+    return;
+  }
+  await (client as any).eventRegistrations.updateMany({
+    where: {
+      eventId,
+      slotId: null,
+      occurrenceDate: null,
+      status: { in: [...ACTIVE_EVENT_REGISTRATION_STATUSES] },
+      ...where,
+      ...(desiredIds.length ? { registrantId: { notIn: desiredIds } } : {}),
+    },
+    data: {
+      status: "CANCELLED",
+      updatedAt: now,
+    },
+  });
+};
+
+const syncCompatibilityRegistrationEntries = async (
+  client: PrismaLike,
+  params: CompatibilityRegistrationParameters,
+  state: CompatibilityRegistrationState,
+  now: Date,
+): Promise<void> => {
   if (params.syncTeams) {
-    await cancelMissing(
+    await cancelMissingCompatibilityRegistrations(
+      client,
+      params.eventId,
       { registrantType: "TEAM", rosterRole: "PARTICIPANT" },
-      teamIds,
+      state.teamIds,
+      now,
     );
-    await deletePlaceholderRegistrations();
-    for (const registrantId of activeTeamIds) {
-      await upsertRegistration({
+    await deleteCompatibilityPlaceholderRegistrations(client, params, state, now);
+    for (const registrantId of state.activeTeamIds) {
+      await upsertCompatibilityRegistration(client, params, state, {
         registrantType: "TEAM",
         registrantId,
         rosterRole: "PARTICIPANT",
       });
     }
   }
-
   if (params.syncUsers) {
-    await cancelMissing(
+    await cancelMissingCompatibilityRegistrations(
+      client,
+      params.eventId,
       { registrantType: "SELF", rosterRole: "PARTICIPANT" },
-      userIds,
+      state.userIds,
+      now,
     );
-    for (const registrantId of userIds) {
-      await upsertRegistration({
+    for (const registrantId of state.userIds) {
+      await upsertCompatibilityRegistration(client, params, state, {
         registrantType: "SELF",
         registrantId,
         rosterRole: "PARTICIPANT",
       });
     }
   }
-
   if (params.syncWaitList) {
-    await cancelMissing({ rosterRole: "WAITLIST" }, waitListIds);
-    for (const registrantId of waitListIds) {
-      await upsertRegistration({
-        registrantType: waitListTeamIds.has(registrantId) ? "TEAM" : "SELF",
+    await cancelMissingCompatibilityRegistrations(
+      client,
+      params.eventId,
+      { rosterRole: "WAITLIST" },
+      state.waitListIds,
+      now,
+    );
+    for (const registrantId of state.waitListIds) {
+      await upsertCompatibilityRegistration(client, params, state, {
+        registrantType: state.waitListTeamIds.has(registrantId)
+          ? "TEAM"
+          : "SELF",
         registrantId,
         rosterRole: "WAITLIST",
       });
     }
   }
-
   if (params.syncFreeAgents) {
-    await cancelMissing(
+    await cancelMissingCompatibilityRegistrations(
+      client,
+      params.eventId,
       { registrantType: "SELF", rosterRole: "FREE_AGENT" },
-      freeAgentIds,
+      state.freeAgentIds,
+      now,
     );
-    for (const registrantId of freeAgentIds) {
-      await upsertRegistration({
+    for (const registrantId of state.freeAgentIds) {
+      await upsertCompatibilityRegistration(client, params, state, {
         registrantType: "SELF",
         registrantId,
         rosterRole: "FREE_AGENT",
       });
     }
   }
+};
+
+export const syncEventParticipantRegistrationsFromCompatibilityIds = async (
+  client: PrismaLike,
+  params: CompatibilityRegistrationParameters,
+): Promise<void> => {
+  if (typeof (client as any).eventRegistrations?.upsert !== "function") {
+    return;
+  }
+  const now = new Date();
+  const state = await loadCompatibilityRegistrationState(client, params);
+  await syncCompatibilityRegistrationEntries(client, params, state, now);
 };
 
 const loadEventOfficialRows = async (
@@ -911,7 +1148,7 @@ const loadEventOfficialRows = async (
   }
   return (client as any).eventOfficials.findMany({
     where: { eventId },
-    orderBy: { createdAt: "asc" },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
   });
 };
 
@@ -940,23 +1177,20 @@ const persistEventOfficialRows = async (
   }
 };
 
-const shouldKeepMatchOfficialAssignment = (
-  assignment: unknown,
-  activeOfficialById: Map<string, EventOfficialRecord>,
-  activeOfficialByUserId: Map<string, EventOfficialRecord>,
+const isOfficialAssignmentWithinField = (
+  official: EventOfficialRecord,
   matchFieldId: string | null,
 ): boolean => {
-  if (!assignment || typeof assignment !== "object") {
-    return false;
-  }
-  const row = assignment as Record<string, unknown>;
-  const holderType =
-    typeof row.holderType === "string"
-      ? row.holderType.trim().toUpperCase()
-      : "";
-  if (holderType !== "OFFICIAL") {
+  if (!matchFieldId || !official.fieldIds.length) {
     return true;
   }
+  return official.fieldIds.includes(matchFieldId);
+};
+
+const isValidOfficialAssignmentIdentity = (
+  row: Record<string, unknown>,
+  activeOfficialById: Map<string, EventOfficialRecord>,
+): boolean => {
   const userId = normalizeEntityId(row.userId);
   const eventOfficialId = normalizeEntityId(row.eventOfficialId);
   if (!userId && !eventOfficialId) {
@@ -970,14 +1204,292 @@ const shouldKeepMatchOfficialAssignment = (
     return false;
   }
   const positionId = normalizeEntityId(row.positionId);
-  if (!positionId || !official.positionIds.includes(positionId)) {
+  return Boolean(
+    positionId &&
+      official.positionIds.includes(positionId),
+  ) && isOfficialAssignmentWithinField(official, row.matchFieldId as string | null);
+};
+
+const shouldKeepMatchOfficialAssignment = (
+  assignment: unknown,
+  activeOfficialById: Map<string, EventOfficialRecord>,
+  _activeOfficialByUserId: Map<string, EventOfficialRecord>,
+  matchFieldId: string | null,
+): boolean => {
+  if (!assignment || typeof assignment !== "object") {
     return false;
   }
-  return !(
-    matchFieldId &&
-    official.fieldIds.length &&
-    !official.fieldIds.includes(matchFieldId)
+  const row = assignment as Record<string, unknown>;
+  const holderType =
+    typeof row.holderType === "string"
+      ? row.holderType.trim().toUpperCase()
+      : "";
+  if (holderType !== "OFFICIAL") {
+    return true;
+  }
+  return isValidOfficialAssignmentIdentity({
+    ...row,
+    matchFieldId,
+  }, activeOfficialById);
+};
+
+const canonicalizeOfficialAssignment = (
+  assignment: Record<string, unknown>,
+): { assignment: Record<string, unknown>; changed: boolean } => {
+  const canonicalAssignment = {
+    ...assignment,
+    positionId: normalizeEntityId(assignment.positionId),
+    slotIndex: Number(assignment.slotIndex),
+    holderType:
+      typeof assignment.holderType === "string"
+        ? assignment.holderType.trim().toUpperCase()
+        : assignment.holderType,
+    userId: normalizeEntityId(assignment.userId),
+    eventOfficialId: normalizeEntityId(assignment.eventOfficialId),
+    checkedIn: assignment.checkedIn === true,
+    hasConflict: assignment.hasConflict === true,
+  };
+  const changed =
+    assignment.positionId !== canonicalAssignment.positionId ||
+    assignment.slotIndex !== canonicalAssignment.slotIndex ||
+    assignment.holderType !== canonicalAssignment.holderType ||
+    assignment.userId !== canonicalAssignment.userId ||
+    assignment.eventOfficialId !== canonicalAssignment.eventOfficialId ||
+    assignment.checkedIn !== canonicalAssignment.checkedIn ||
+    assignment.hasConflict !== canonicalAssignment.hasConflict;
+  return { assignment: canonicalAssignment, changed };
+};
+
+const isConfiguredOfficialAssignmentSlot = (
+  holderType: string,
+  positionId: string | null,
+  slotIndex: number,
+  configuredSlotCount: number | undefined,
+  officialPositions: EventOfficialPosition[] | undefined,
+): boolean =>
+  holderType === "OFFICIAL" &&
+  Boolean(positionId) &&
+  Number.isInteger(slotIndex) &&
+  slotIndex >= 0 &&
+  (officialPositions === undefined ||
+    (typeof configuredSlotCount === "number" &&
+      slotIndex < configuredSlotCount));
+
+const replacementOfficialAssignment = (
+  assignment: unknown,
+  configuredPositionCounts: Map<string, number>,
+  officialPositions: EventOfficialPosition[] | undefined,
+): Record<string, unknown>[] => {
+  if (!assignment || typeof assignment !== "object") {
+    return [];
+  }
+  const row = assignment as Record<string, unknown>;
+  const holderType =
+    typeof row.holderType === "string"
+      ? row.holderType.trim().toUpperCase()
+      : "";
+  const positionId = normalizeEntityId(row.positionId);
+  const slotIndex = Number(row.slotIndex);
+  const configuredSlotCount = positionId
+    ? configuredPositionCounts.get(positionId)
+    : undefined;
+  if (
+    !isConfiguredOfficialAssignmentSlot(
+      holderType,
+      positionId,
+      slotIndex,
+      configuredSlotCount,
+      officialPositions,
+    )
+  ) {
+    return [];
+  }
+  return [
+    {
+      positionId,
+      slotIndex,
+      holderType: "OFFICIAL",
+      userId: null,
+      eventOfficialId: null,
+      checkedIn: false,
+      hasConflict: false,
+    },
+  ];
+};
+
+const sanitizeOfficialAssignment = (
+  assignment: unknown,
+  activeOfficialById: Map<string, EventOfficialRecord>,
+  activeOfficialByUserId: Map<string, EventOfficialRecord>,
+  matchFieldId: string | null,
+  configuredPositionCounts: Map<string, number>,
+  officialPositions: EventOfficialPosition[] | undefined,
+): { assignments: Record<string, unknown>[]; changed: boolean } => {
+  if (
+    shouldKeepMatchOfficialAssignment(
+      assignment,
+      activeOfficialById,
+      activeOfficialByUserId,
+      matchFieldId,
+    )
+  ) {
+    const canonical = canonicalizeOfficialAssignment(
+      assignment as Record<string, unknown>,
+    );
+    return {
+      assignments: [canonical.assignment],
+      changed: canonical.changed,
+    };
+  }
+  return {
+    assignments: replacementOfficialAssignment(
+      assignment,
+      configuredPositionCounts,
+      officialPositions,
+    ),
+    changed: true,
+  };
+};
+
+const sanitizeOfficialAssignments = (
+  rawAssignments: unknown[],
+  activeOfficialById: Map<string, EventOfficialRecord>,
+  activeOfficialByUserId: Map<string, EventOfficialRecord>,
+  matchFieldId: string | null,
+  configuredPositionCounts: Map<string, number>,
+  officialPositions: EventOfficialPosition[] | undefined,
+): { assignments: Record<string, unknown>[]; changed: boolean } => {
+  let changed = false;
+  const assignments = rawAssignments.flatMap((assignment) => {
+    const sanitized = sanitizeOfficialAssignment(
+      assignment,
+      activeOfficialById,
+      activeOfficialByUserId,
+      matchFieldId,
+      configuredPositionCounts,
+      officialPositions,
+    );
+    changed ||= sanitized.changed;
+    return sanitized.assignments;
+  });
+  return { assignments, changed };
+};
+
+const officialAssignmentsEqual = (
+  left: MatchOfficialAssignment | undefined,
+  right: MatchOfficialAssignment | undefined,
+): boolean => {
+  if (!left || !right) {
+    return false;
+  }
+  const keys: Array<keyof MatchOfficialAssignment> = [
+    "positionId",
+    "slotIndex",
+    "holderType",
+    "userId",
+    "eventOfficialId",
+    "checkedIn",
+    "hasConflict",
+  ];
+  for (const key of keys) {
+    if (left[key] !== right[key]) {
+      return false;
+    }
+  }
+  return true;
+};
+
+const officialAssignmentsChanged = (
+  nextAssignments: MatchOfficialAssignment[],
+  sanitizedAssignments: Record<string, unknown>[],
+): boolean => {
+  if (nextAssignments.length !== sanitizedAssignments.length) {
+    return true;
+  }
+  return nextAssignments.some((assignment, index) =>
+    !officialAssignmentsEqual(
+      assignment,
+      sanitizedAssignments[index] as unknown as MatchOfficialAssignment,
+    ),
   );
+};
+
+const shouldClearLegacyOfficialAssignment = (
+  match: Record<string, unknown>,
+  matchFieldId: string | null,
+  activeOfficialByUserId: Map<string, EventOfficialRecord>,
+): boolean => {
+  const existingPrimaryOfficialId = normalizeEntityId(match.officialId);
+  if (!existingPrimaryOfficialId) {
+    return false;
+  }
+  const legacyOfficial = activeOfficialByUserId.get(existingPrimaryOfficialId);
+  return (
+    !legacyOfficial ||
+    Boolean(
+      matchFieldId &&
+        legacyOfficial.fieldIds.length &&
+        !legacyOfficial.fieldIds.includes(matchFieldId),
+    )
+  );
+};
+
+const cleanupOfficialAssignmentsForMatch = (
+  match: Record<string, unknown>,
+  activeOfficialById: Map<string, EventOfficialRecord>,
+  activeOfficialByUserId: Map<string, EventOfficialRecord>,
+  configuredPositionCounts: Map<string, number>,
+  officialPositions: EventOfficialPosition[] | undefined,
+): {
+  matchId: string | null;
+  assignments: MatchOfficialAssignment[];
+  assignmentsChanged: boolean;
+  primaryOfficialId: string | null;
+  primaryOfficialCheckedIn: boolean;
+} => {
+  const matchFieldId = normalizeEntityId(match.fieldId);
+  const rawAssignments = Array.isArray(match.officialIds)
+    ? match.officialIds
+    : [];
+  const sanitized = sanitizeOfficialAssignments(
+    rawAssignments,
+    activeOfficialById,
+    activeOfficialByUserId,
+    matchFieldId,
+    configuredPositionCounts,
+    officialPositions,
+  );
+  const sanitizedAssignments =
+    sanitized.assignments as unknown as MatchOfficialAssignment[];
+  const nextAssignments =
+    officialPositions === undefined
+      ? sanitizedAssignments
+      : completeMatchOfficialAssignmentSlots(
+          sanitizedAssignments,
+          officialPositions,
+        );
+  const assignmentsChanged =
+    sanitized.changed ||
+    officialAssignmentsChanged(nextAssignments, sanitized.assignments);
+  const primaryOfficialId = nextAssignments.length
+    ? deriveLegacyOfficialIdFromAssignments(nextAssignments)
+    : null;
+  const primaryOfficialCheckedIn = nextAssignments.length
+    ? deriveLegacyOfficialCheckedInFromAssignments(nextAssignments)
+    : false;
+  return {
+    matchId: normalizeEntityId(match.id),
+    assignments: nextAssignments,
+    assignmentsChanged:
+      assignmentsChanged ||
+      shouldClearLegacyOfficialAssignment(
+        match,
+        matchFieldId,
+        activeOfficialByUserId,
+      ),
+    primaryOfficialId,
+    primaryOfficialCheckedIn,
+  };
 };
 
 export const clearRemovedEventOfficialMatchAssignments = async (
@@ -1016,146 +1528,24 @@ export const clearRemovedEventOfficialMatchAssignments = async (
   });
   let updatedCount = 0;
   for (const match of matches as Array<Record<string, unknown>>) {
-    const matchFieldId = normalizeEntityId(match.fieldId);
-    const rawAssignments = Array.isArray(match.officialIds)
-      ? match.officialIds
-      : [];
-    let assignmentsChanged = false;
-    const sanitizedAssignments = rawAssignments.flatMap((assignment) => {
-      if (
-        shouldKeepMatchOfficialAssignment(
-          assignment,
-          activeOfficialById,
-          activeOfficialByUserId,
-          matchFieldId,
-        )
-      ) {
-        const row = assignment as Record<string, unknown>;
-        const canonicalAssignment = {
-          ...row,
-          positionId: normalizeEntityId(row.positionId),
-          slotIndex: Number(row.slotIndex),
-          holderType:
-            typeof row.holderType === "string"
-              ? row.holderType.trim().toUpperCase()
-              : row.holderType,
-          userId: normalizeEntityId(row.userId),
-          eventOfficialId: normalizeEntityId(row.eventOfficialId),
-          checkedIn: row.checkedIn === true,
-          hasConflict: row.hasConflict === true,
-        };
-        if (
-          row.positionId !== canonicalAssignment.positionId ||
-          row.slotIndex !== canonicalAssignment.slotIndex ||
-          row.holderType !== canonicalAssignment.holderType ||
-          row.userId !== canonicalAssignment.userId ||
-          row.eventOfficialId !== canonicalAssignment.eventOfficialId ||
-          row.checkedIn !== canonicalAssignment.checkedIn ||
-          row.hasConflict !== canonicalAssignment.hasConflict
-        ) {
-          assignmentsChanged = true;
-        }
-        return [canonicalAssignment];
-      }
-      assignmentsChanged = true;
-      if (!assignment || typeof assignment !== "object") {
-        return [];
-      }
-      const row = assignment as Record<string, unknown>;
-      const holderType =
-        typeof row.holderType === "string"
-          ? row.holderType.trim().toUpperCase()
-          : "";
-      const positionId = normalizeEntityId(row.positionId);
-      const slotIndex = Number(row.slotIndex);
-      const configuredSlotCount = positionId
-        ? configuredPositionCounts.get(positionId)
-        : undefined;
-      const isConfiguredSlot =
-        holderType === "OFFICIAL" &&
-        Boolean(positionId) &&
-        Number.isInteger(slotIndex) &&
-        slotIndex >= 0 &&
-        (officialPositions === undefined ||
-          (typeof configuredSlotCount === "number" &&
-            slotIndex < configuredSlotCount));
-      return isConfiguredSlot
-        ? [
-            {
-              positionId,
-              slotIndex,
-              holderType: "OFFICIAL",
-              userId: null,
-              eventOfficialId: null,
-              checkedIn: false,
-              hasConflict: false,
-            },
-          ]
-        : [];
-    });
-    const nextAssignments =
-      officialPositions === undefined
-        ? (sanitizedAssignments as MatchOfficialAssignment[])
-        : completeMatchOfficialAssignmentSlots(
-            sanitizedAssignments as MatchOfficialAssignment[],
-            officialPositions,
-          );
-    if (
-      nextAssignments.length !== sanitizedAssignments.length ||
-      nextAssignments.some((assignment, index) => {
-        const previous = sanitizedAssignments[index] as
-          | MatchOfficialAssignment
-          | undefined;
-        return (
-          !previous ||
-          assignment.positionId !== previous.positionId ||
-          assignment.slotIndex !== previous.slotIndex ||
-          assignment.holderType !== previous.holderType ||
-          assignment.userId !== previous.userId ||
-          assignment.eventOfficialId !== previous.eventOfficialId ||
-          assignment.checkedIn !== previous.checkedIn ||
-          assignment.hasConflict !== previous.hasConflict
-        );
-      })
-    ) {
-      assignmentsChanged = true;
-    }
-    const nextPrimaryOfficialId = nextAssignments.length
-      ? deriveLegacyOfficialIdFromAssignments(
-          nextAssignments as MatchOfficialAssignment[],
-        )
-      : null;
-    const nextPrimaryOfficialCheckedIn = nextAssignments.length
-      ? deriveLegacyOfficialCheckedInFromAssignments(
-          nextAssignments as MatchOfficialAssignment[],
-        )
-      : false;
-    const existingPrimaryOfficialId = normalizeEntityId(match.officialId);
-    const legacyOfficial = existingPrimaryOfficialId
-      ? activeOfficialByUserId.get(existingPrimaryOfficialId)
-      : null;
-    const shouldClearLegacyOfficial = Boolean(
-      existingPrimaryOfficialId &&
-        (!legacyOfficial ||
-          (matchFieldId &&
-            legacyOfficial.fieldIds.length &&
-            !legacyOfficial.fieldIds.includes(matchFieldId))),
+    const cleanup = cleanupOfficialAssignmentsForMatch(
+      match,
+      activeOfficialById,
+      activeOfficialByUserId,
+      configuredPositionCounts,
+      officialPositions,
     );
-    if (!assignmentsChanged && !shouldClearLegacyOfficial) {
-      continue;
-    }
-    const matchId = normalizeEntityId(match.id);
-    if (!matchId) {
+    if (!cleanup.assignmentsChanged || !cleanup.matchId) {
       continue;
     }
     await (client as any).matches.update({
-      where: { id: matchId },
+      where: { id: cleanup.matchId },
       data: {
-        officialIds: nextAssignments.length
-          ? (nextAssignments as unknown as Record<string, unknown>[])
+        officialIds: cleanup.assignments.length
+          ? (cleanup.assignments as unknown as Record<string, unknown>[])
           : null,
-        officialId: nextPrimaryOfficialId,
-        officialCheckedIn: nextPrimaryOfficialCheckedIn,
+        officialId: cleanup.primaryOfficialId,
+        officialCheckedIn: cleanup.primaryOfficialCheckedIn,
       },
     });
     updatedCount += 1;
@@ -1387,20 +1777,69 @@ const normalizeDivisionPlayoffConfigFields = (
   });
 };
 
+const nullablePlayoffConfigField = <T>(
+  value: T | null | undefined,
+): T | null => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  return value;
+};
+
+const playoffConfigArrayField = (
+  value: number[] | null | undefined,
+): number[] => {
+  if (value === null || value === undefined) {
+    return [];
+  }
+  return value;
+};
+
+const readPlayoffConfigField = <
+  K extends keyof PlayoffDivisionConfigPayload,
+>(
+  value: PlayoffDivisionConfigPayload | null | undefined,
+  key: K,
+): PlayoffDivisionConfigPayload[K] | undefined => {
+  if (!value) {
+    return undefined;
+  }
+  return value[key];
+};
+
 const playoffConfigToDivisionFields = (
   value: PlayoffDivisionConfigPayload | null | undefined,
 ) => ({
-  playoffDoubleElimination: value?.doubleElimination ?? null,
-  playoffWinnerSetCount: value?.winnerSetCount ?? null,
-  playoffLoserSetCount: value?.loserSetCount ?? null,
-  playoffWinnerBracketPointsToVictory:
-    value?.winnerBracketPointsToVictory ?? [],
-  playoffLoserBracketPointsToVictory: value?.loserBracketPointsToVictory ?? [],
-  playoffPrize: value?.prize ?? null,
-  playoffFieldCount: value?.fieldCount ?? null,
-  playoffRestTimeMinutes: value?.restTimeMinutes ?? null,
-  playoffMatchDurationMinutes: value?.matchDurationMinutes ?? null,
-  playoffSetDurationMinutes: value?.setDurationMinutes ?? null,
+  playoffDoubleElimination: nullablePlayoffConfigField(
+    readPlayoffConfigField(value, "doubleElimination"),
+  ),
+  playoffWinnerSetCount: nullablePlayoffConfigField(
+    readPlayoffConfigField(value, "winnerSetCount"),
+  ),
+  playoffLoserSetCount: nullablePlayoffConfigField(
+    readPlayoffConfigField(value, "loserSetCount"),
+  ),
+  playoffWinnerBracketPointsToVictory: playoffConfigArrayField(
+    readPlayoffConfigField(value, "winnerBracketPointsToVictory"),
+  ),
+  playoffLoserBracketPointsToVictory: playoffConfigArrayField(
+    readPlayoffConfigField(value, "loserBracketPointsToVictory"),
+  ),
+  playoffPrize: nullablePlayoffConfigField(
+    readPlayoffConfigField(value, "prize"),
+  ),
+  playoffFieldCount: nullablePlayoffConfigField(
+    readPlayoffConfigField(value, "fieldCount"),
+  ),
+  playoffRestTimeMinutes: nullablePlayoffConfigField(
+    readPlayoffConfigField(value, "restTimeMinutes"),
+  ),
+  playoffMatchDurationMinutes: nullablePlayoffConfigField(
+    readPlayoffConfigField(value, "matchDurationMinutes"),
+  ),
+  playoffSetDurationMinutes: nullablePlayoffConfigField(
+    readPlayoffConfigField(value, "setDurationMinutes"),
+  ),
 });
 
 type LeagueDivisionConfigPayload = LeagueDivisionConfig;
@@ -1415,6 +1854,102 @@ const LEAGUE_CONFIG_KEYS: ReadonlyArray<keyof LeagueDivisionConfigPayload> = [
   "restTimeMinutes",
 ];
 
+const hasLeagueDivisionConfigValue = (
+  row: Record<string, unknown>,
+): boolean =>
+  LEAGUE_CONFIG_KEYS.some((key) => {
+    if (!Object.prototype.hasOwnProperty.call(row, key)) {
+      return false;
+    }
+    return row[key] !== null && row[key] !== undefined;
+  });
+
+const normalizeLeagueConfigNumber = (
+  input: unknown,
+  min: number,
+): number | undefined => {
+  const parsed = typeof input === "number" ? input : Number(input);
+  if (!Number.isFinite(parsed)) {
+    return undefined;
+  }
+  return Math.max(min, Math.trunc(parsed));
+};
+
+const normalizeLeagueConfigSetCount = (
+  input: unknown,
+): number | undefined => {
+  const parsed = normalizeLeagueConfigNumber(input, 1);
+  if (parsed === undefined || ![1, 3, 5].includes(parsed)) {
+    return undefined;
+  }
+  return parsed;
+};
+
+const normalizeLeagueConfigPoints = (
+  input: unknown,
+  expectedLength: number,
+): number[] | undefined => {
+  if (!Array.isArray(input)) {
+    return undefined;
+  }
+  const values = input
+    .map((entry) => (typeof entry === "number" ? entry : Number(entry)))
+    .filter((entry) => Number.isFinite(entry))
+    .map((entry) => Math.max(1, Math.trunc(entry)));
+  const next = values.slice(0, expectedLength);
+  while (next.length < expectedLength) {
+    next.push(21);
+  }
+  return next;
+};
+
+const resolveLeagueConfigUsesSets = (
+  row: Record<string, unknown>,
+): boolean | undefined => {
+  if (typeof row.usesSets === "boolean") {
+    return row.usesSets;
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(row, "setsPerMatch") ||
+    Object.prototype.hasOwnProperty.call(row, "setDurationMinutes") ||
+    Object.prototype.hasOwnProperty.call(row, "pointsToVictory")
+  ) {
+    return true;
+  }
+  return undefined;
+};
+
+const buildLeagueDivisionConfig = (
+  row: Record<string, unknown>,
+  usesSets: boolean | undefined,
+): LeagueDivisionConfigPayload => {
+  const setsPerMatch = usesSets
+    ? (normalizeLeagueConfigSetCount(row.setsPerMatch) ?? 1)
+    : undefined;
+  const config: LeagueDivisionConfigPayload = {
+    gamesPerOpponent: normalizeLeagueConfigNumber(row.gamesPerOpponent, 1),
+    usesSets,
+    matchDurationMinutes: normalizeLeagueConfigNumber(
+      row.matchDurationMinutes,
+      0,
+    ),
+    restTimeMinutes: normalizeLeagueConfigNumber(row.restTimeMinutes, 0),
+    setDurationMinutes: usesSets
+      ? normalizeLeagueConfigNumber(row.setDurationMinutes, 0)
+      : undefined,
+    setsPerMatch,
+    pointsToVictory: usesSets
+      ? normalizeLeagueConfigPoints(
+          row.pointsToVictory,
+          setsPerMatch ?? 1,
+        )
+      : undefined,
+  };
+  return Object.fromEntries(
+    Object.entries(config).filter(([, entry]) => entry !== undefined),
+  ) as LeagueDivisionConfigPayload;
+};
+
 const normalizeLeagueDivisionConfig = (
   value: unknown,
 ): LeagueDivisionConfigPayload | null => {
@@ -1422,73 +1957,10 @@ const normalizeLeagueDivisionConfig = (
     return null;
   }
   const row = value as Record<string, unknown>;
-  const hasConfigValue = LEAGUE_CONFIG_KEYS.some(
-    (key) =>
-      Object.prototype.hasOwnProperty.call(row, key) &&
-      row[key] !== null &&
-      row[key] !== undefined,
-  );
-  if (!hasConfigValue) {
+  if (!hasLeagueDivisionConfigValue(row)) {
     return null;
   }
-
-  const normalizeNumber = (input: unknown, min: number): number | undefined => {
-    const parsed = typeof input === "number" ? input : Number(input);
-    if (!Number.isFinite(parsed)) {
-      return undefined;
-    }
-    return Math.max(min, Math.trunc(parsed));
-  };
-  const normalizeSetCount = (input: unknown): number | undefined => {
-    const parsed = normalizeNumber(input, 1);
-    return parsed && [1, 3, 5].includes(parsed) ? parsed : undefined;
-  };
-  const normalizePoints = (
-    input: unknown,
-    expectedLength: number,
-  ): number[] | undefined => {
-    if (!Array.isArray(input)) {
-      return undefined;
-    }
-    const values = input
-      .map((entry) => (typeof entry === "number" ? entry : Number(entry)))
-      .filter((entry) => Number.isFinite(entry))
-      .map((entry) => Math.max(1, Math.trunc(entry)));
-    const next = values.slice(0, expectedLength);
-    while (next.length < expectedLength) {
-      next.push(21);
-    }
-    return next;
-  };
-
-  const usesSets =
-    typeof row.usesSets === "boolean"
-      ? row.usesSets
-      : Object.prototype.hasOwnProperty.call(row, "setsPerMatch") ||
-          Object.prototype.hasOwnProperty.call(row, "setDurationMinutes") ||
-          Object.prototype.hasOwnProperty.call(row, "pointsToVictory")
-        ? true
-        : undefined;
-  const setsPerMatch = usesSets
-    ? (normalizeSetCount(row.setsPerMatch) ?? 1)
-    : undefined;
-  const config: LeagueDivisionConfigPayload = {
-    gamesPerOpponent: normalizeNumber(row.gamesPerOpponent, 1),
-    usesSets,
-    matchDurationMinutes: normalizeNumber(row.matchDurationMinutes, 0),
-    restTimeMinutes: normalizeNumber(row.restTimeMinutes, 0),
-    setDurationMinutes: usesSets
-      ? normalizeNumber(row.setDurationMinutes, 0)
-      : undefined,
-    setsPerMatch,
-    pointsToVictory: usesSets
-      ? normalizePoints(row.pointsToVictory, setsPerMatch ?? 1)
-      : undefined,
-  };
-
-  return Object.fromEntries(
-    Object.entries(config).filter(([, entry]) => entry !== undefined),
-  ) as LeagueDivisionConfigPayload;
+  return buildLeagueDivisionConfig(row, resolveLeagueConfigUsesSets(row));
 };
 
 const normalizeDivisionKeys = (value: unknown): string[] => {
@@ -1782,6 +2254,440 @@ type DivisionDetailPayload = {
   teamIds?: string[];
 };
 
+const resolveDivisionDetailSportInput = (
+  row: Record<string, unknown>,
+  sportId?: string | null,
+): string | undefined =>
+  typeof row.sportId === "string" ? row.sportId : (sportId ?? undefined);
+
+const resolveDivisionDetailRawKey = (
+  row: Record<string, unknown>,
+  rawId: string | null,
+): string | null =>
+  normalizeDivisionKey(row.key) ??
+  (rawId ? extractDivisionTokenFromId(rawId) : null);
+
+const assertDivisionDetailTypeIdsMatch = (
+  rawComposite: ReturnType<typeof parseCompositeDivisionTypeId>,
+  rawSkillDivisionTypeId: string | null,
+  rawAgeDivisionTypeId: string | null,
+): void => {
+  if (
+    rawComposite &&
+    ((rawSkillDivisionTypeId &&
+      rawSkillDivisionTypeId !== rawComposite.skillDivisionTypeId) ||
+      (rawAgeDivisionTypeId &&
+        rawAgeDivisionTypeId !== rawComposite.ageDivisionTypeId))
+  ) {
+    throw new Error(
+      "Division age and skill values do not match the composite division type.",
+    );
+  }
+};
+
+type DivisionDetailIdentity = {
+  row: Record<string, unknown>;
+  rawId: string | null;
+  inferred: ReturnType<typeof inferDivisionDetails>;
+  gender: DivisionGender;
+  ratingType: DivisionRatingType;
+  divisionTypeId: string;
+  skillDivisionTypeId: string;
+  ageDivisionTypeId: string;
+  key: string;
+  id: string;
+  divisionTypeName: string;
+  rawKind: "LEAGUE" | "PLAYOFF";
+};
+
+const buildDivisionDetailIdentity = (
+  row: Record<string, unknown>,
+  eventId: string,
+  sportId: string | null | undefined,
+  defaultKind: "LEAGUE" | "PLAYOFF",
+): DivisionDetailIdentity => {
+  const rawId = normalizeDivisionKey(row.id);
+  const rawKey = resolveDivisionDetailRawKey(row, rawId);
+  const sportInput = resolveDivisionDetailSportInput(row, sportId);
+  const inferred = inferDivisionDetails({
+    identifier: rawKey ?? rawId ?? "c_skill_open",
+    sportInput,
+    fallbackName: typeof row.name === "string" ? row.name : undefined,
+  });
+  const gender = normalizeDivisionGender(row.gender) ?? inferred.gender;
+  const ratingType =
+    normalizeDivisionRatingType(row.ratingType) ?? inferred.ratingType;
+  const rawComposite = parseCompositeDivisionTypeId(
+    normalizeDivisionKey(row.divisionTypeId),
+  );
+  const rawSkillDivisionTypeId = normalizeDivisionKey(
+    row.skillDivisionTypeId,
+  );
+  const rawAgeDivisionTypeId = normalizeDivisionKey(row.ageDivisionTypeId);
+  assertDivisionDetailTypeIdsMatch(
+    rawComposite,
+    rawSkillDivisionTypeId,
+    rawAgeDivisionTypeId,
+  );
+  const normalizedTypeIds = normalizeDivisionTypeIds({
+    divisionTypeId:
+      normalizeDivisionKey(row.divisionTypeId) ?? inferred.divisionTypeId,
+    skillDivisionTypeId: rawSkillDivisionTypeId,
+    ageDivisionTypeId: rawAgeDivisionTypeId,
+    ratingType,
+  });
+  const { divisionTypeId, skillDivisionTypeId, ageDivisionTypeId } =
+    normalizedTypeIds;
+  const key =
+    normalizeDivisionKey(row.key) ??
+    buildDivisionToken({
+      gender,
+      ratingType,
+      divisionTypeId,
+    });
+  const id = rawId
+    ? scopeDivisionIdentifierToEvent(rawId, eventId)
+    : buildDivisionId(eventId, key);
+  const divisionTypeName = deriveDivisionTypeDisplayName({
+    sportInput,
+    gender,
+    ratingType,
+    divisionTypeId,
+  });
+  return {
+    row,
+    rawId,
+    inferred,
+    gender,
+    ratingType,
+    divisionTypeId,
+    skillDivisionTypeId,
+    ageDivisionTypeId,
+    key,
+    id,
+    divisionTypeName,
+    rawKind: normalizeDivisionKind(row.kind, defaultKind),
+  };
+};
+
+const normalizeDivisionDetailPhase = (
+  value: unknown,
+): "LEAGUE" | "POOL" | "BRACKET" | "PLAYOFF" | null => {
+  const normalized = String(value ?? "")
+    .trim()
+    .toUpperCase();
+  if (!["LEAGUE", "POOL", "BRACKET", "PLAYOFF"].includes(normalized)) {
+    return null;
+  }
+  return normalized as "LEAGUE" | "POOL" | "BRACKET" | "PLAYOFF";
+};
+
+const normalizeOptionalDivisionDetailList = <T>(
+  value: unknown,
+  normalize: (input: unknown) => T[],
+): T[] | undefined => {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  return normalize(value);
+};
+
+type DivisionDetailOptionalValues = {
+  rawPrice: number | null | undefined;
+  rawMaxParticipants: number | null | undefined;
+  rawPlayoffTeamCount: number | null | undefined;
+  rawPoolCount: number | null | undefined;
+  rawRole: "ENTRY" | "PHASE";
+  rawPhase: "LEAGUE" | "POOL" | "BRACKET" | "PLAYOFF" | null;
+  rawPlayoffPlacementDivisionIds: string[] | undefined;
+  rawStandingsOverrides: Record<string, number> | null;
+  rawPlayoffConfig: PlayoffDivisionConfigPayload | null | undefined;
+  rawLeagueConfig: LeagueDivisionConfigPayload | null;
+  rawPhaseSettings: DivisionPhaseSettingsMap | undefined;
+  rawStandingsConfirmedAt: string | null;
+  rawStandingsConfirmedBy: string | null;
+  rawAllowPaymentPlans: boolean | null | undefined;
+  rawInstallmentCount: number | null | undefined;
+  rawInstallmentDueDates: string[] | undefined;
+  rawInstallmentDueRelativeDays: number[] | undefined;
+  rawInstallmentAmounts: number[] | undefined;
+  hasTeamIdsInput: boolean;
+  rawTeamIds: string[] | undefined;
+};
+
+const normalizeDivisionDetailRelationshipValues = (
+  row: Record<string, unknown>,
+  eventId: string,
+  rawKind: "LEAGUE" | "PLAYOFF",
+): Pick<
+  DivisionDetailOptionalValues,
+  | "rawPlayoffPlacementDivisionIds"
+  | "rawPhaseSettings"
+  | "hasTeamIdsInput"
+  | "rawTeamIds"
+> => {
+  const hasPlayoffPlacementDivisionIdsInput =
+    Object.prototype.hasOwnProperty.call(
+      row,
+      "playoffPlacementDivisionIds",
+    );
+  const hasPhaseSettingsInput = Object.prototype.hasOwnProperty.call(
+    row,
+    "phaseSettings",
+  );
+  const hasTeamIdsInput = Object.prototype.hasOwnProperty.call(row, "teamIds");
+  return {
+    rawPlayoffPlacementDivisionIds: hasPlayoffPlacementDivisionIdsInput
+      ? normalizePlacementDivisionIdentifierList(
+          row.playoffPlacementDivisionIds,
+          eventId,
+        )
+      : undefined,
+    rawPhaseSettings: hasPhaseSettingsInput
+      ? normalizeDivisionPhaseSettingsMap(row.phaseSettings)
+      : undefined,
+    hasTeamIdsInput,
+    rawTeamIds:
+      rawKind === "PLAYOFF" || !hasTeamIdsInput
+        ? undefined
+        : normalizeTeamIdList(row.teamIds),
+  };
+};
+
+const normalizeDivisionDetailOptionalValues = (
+  row: Record<string, unknown>,
+  eventId: string,
+  defaultKind: "LEAGUE" | "PLAYOFF",
+): DivisionDetailOptionalValues => {
+  const rawKind = normalizeDivisionKind(row.kind, defaultKind);
+  const relationships = normalizeDivisionDetailRelationshipValues(
+    row,
+    eventId,
+    rawKind,
+  );
+  const hasExplicitPlayoffConfigClear =
+    Object.prototype.hasOwnProperty.call(row, "playoffConfig") &&
+    row.playoffConfig === null;
+  const rawExplicitPlayoffConfig = normalizePlayoffDivisionConfig(
+    row.playoffConfig,
+  );
+  return {
+    rawPrice: coerceNullableNumber(row.price),
+    rawMaxParticipants: coerceNullableNumber(row.maxParticipants),
+    rawPlayoffTeamCount: coerceNullableNumber(row.playoffTeamCount),
+    rawPoolCount: coerceNullableNumber(row.poolCount),
+    rawRole:
+      String(row.role ?? "ENTRY").toUpperCase() === "PHASE"
+        ? "PHASE"
+        : "ENTRY",
+    rawPhase: normalizeDivisionDetailPhase(row.phase),
+    rawPlayoffPlacementDivisionIds:
+      relationships.rawPlayoffPlacementDivisionIds,
+    rawStandingsOverrides: normalizeStandingsOverrides(
+      row.standingsOverrides,
+    ),
+    rawPlayoffConfig:
+      rawKind === "PLAYOFF"
+        ? hasExplicitPlayoffConfigClear
+          ? null
+          : (rawExplicitPlayoffConfig ??
+            normalizePlayoffDivisionConfig(row) ??
+            undefined)
+        : rawExplicitPlayoffConfig,
+    rawLeagueConfig: normalizeLeagueDivisionConfig(row),
+    rawPhaseSettings: relationships.rawPhaseSettings,
+    rawStandingsConfirmedAt: normalizeIsoDateString(row.standingsConfirmedAt),
+    rawStandingsConfirmedBy:
+      typeof row.standingsConfirmedBy === "string"
+        ? row.standingsConfirmedBy.trim() || null
+        : null,
+    rawAllowPaymentPlans: coerceNullableBoolean(row.allowPaymentPlans),
+    rawInstallmentCount: coerceNullableNumber(row.installmentCount),
+    rawInstallmentDueDates: normalizeOptionalDivisionDetailList(
+      row.installmentDueDates,
+      normalizeInstallmentDateList,
+    ),
+    rawInstallmentDueRelativeDays: normalizeOptionalDivisionDetailList(
+      row.installmentDueRelativeDays,
+      normalizeInstallmentRelativeDayList,
+    ),
+    rawInstallmentAmounts: normalizeOptionalDivisionDetailList(
+      row.installmentAmounts,
+      normalizeInstallmentAmountList,
+    ),
+    hasTeamIdsInput: relationships.hasTeamIdsInput,
+    rawTeamIds: relationships.rawTeamIds,
+  };
+};
+
+const normalizeDivisionDetailPrice = (
+  value: number | null | undefined,
+): number | null | undefined => {
+  if (value === undefined || value === null) {
+    return value;
+  }
+  return Math.max(0, Math.round(value));
+};
+
+const normalizeDivisionDetailCount = (
+  value: number | null | undefined,
+): number | null | undefined => {
+  if (value === undefined || value === null) {
+    return value;
+  }
+  return Math.max(0, Math.trunc(value));
+};
+
+const nullableDivisionDetailValue = <T>(
+  value: T | null | undefined,
+  fallback: T | null,
+): T | null => {
+  if (value === undefined || value === null) {
+    return fallback;
+  }
+  return value;
+};
+
+const optionalDivisionDetailProperty = <T>(
+  key: string,
+  value: T | undefined,
+): Record<string, T> => {
+  if (value === undefined) {
+    return {};
+  }
+  return { [key]: value };
+};
+
+const divisionDetailTeamIdsProperty = (
+  rawKind: "LEAGUE" | "PLAYOFF",
+  hasTeamIdsInput: boolean,
+  rawTeamIds: string[] | undefined,
+): Record<string, string[] | undefined> => {
+  if (rawKind === "PLAYOFF") {
+    return { teamIds: [] };
+  }
+  if (hasTeamIdsInput) {
+    return { teamIds: rawTeamIds };
+  }
+  return {};
+};
+
+const buildDivisionDetailPayload = (
+  identity: DivisionDetailIdentity,
+  values: DivisionDetailOptionalValues,
+): DivisionDetailPayload => {
+  const {
+    row,
+    id,
+    key,
+    inferred,
+    divisionTypeId,
+    skillDivisionTypeId,
+    ageDivisionTypeId,
+    divisionTypeName,
+    gender,
+    ratingType,
+    rawKind,
+  } = identity;
+  return {
+    id,
+    sourceDivisionId: normalizeDivisionKey(row.sourceDivisionId),
+    key,
+    name: cleanDivisionDisplayName(row.name, divisionTypeName),
+    role: values.rawRole,
+    phase: values.rawPhase,
+    kind: rawKind,
+    divisionTypeId,
+    skillDivisionTypeId,
+    ageDivisionTypeId,
+    divisionTypeName,
+    ratingType,
+    gender,
+    price: normalizeDivisionDetailPrice(values.rawPrice),
+    maxParticipants: normalizeDivisionDetailCount(values.rawMaxParticipants),
+    playoffTeamCount: normalizeDivisionDetailCount(
+      values.rawPlayoffTeamCount,
+    ),
+    poolCount: normalizeDivisionDetailCount(values.rawPoolCount),
+    ...optionalDivisionDetailProperty(
+      "phaseSettings",
+      values.rawPhaseSettings,
+    ),
+    ...optionalDivisionDetailProperty(
+      "playoffPlacementDivisionIds",
+      values.rawPlayoffPlacementDivisionIds,
+    ),
+    standingsOverrides: values.rawStandingsOverrides,
+    playoffConfig: values.rawPlayoffConfig,
+    gamesPerOpponent: nullableDivisionDetailValue(
+      values.rawLeagueConfig?.gamesPerOpponent,
+      null,
+    ),
+    restTimeMinutes: nullableDivisionDetailValue(
+      values.rawLeagueConfig?.restTimeMinutes,
+      null,
+    ),
+    usesSets: nullableDivisionDetailValue(values.rawLeagueConfig?.usesSets, null),
+    matchDurationMinutes: nullableDivisionDetailValue(
+      values.rawLeagueConfig?.matchDurationMinutes,
+      null,
+    ),
+    setDurationMinutes: nullableDivisionDetailValue(
+      values.rawLeagueConfig?.setDurationMinutes,
+      null,
+    ),
+    setsPerMatch: nullableDivisionDetailValue(
+      values.rawLeagueConfig?.setsPerMatch,
+      null,
+    ),
+    pointsToVictory: values.rawLeagueConfig?.pointsToVictory ?? [],
+    standingsConfirmedAt: values.rawStandingsConfirmedAt,
+    standingsConfirmedBy: values.rawStandingsConfirmedBy,
+    allowPaymentPlans: values.rawAllowPaymentPlans,
+    installmentCount: normalizeDivisionDetailCount(
+      values.rawInstallmentCount,
+    ),
+    installmentDueDates: values.rawInstallmentDueDates,
+    installmentDueRelativeDays: values.rawInstallmentDueRelativeDays,
+    installmentAmounts: values.rawInstallmentAmounts,
+    ageCutoffDate: normalizeIsoDateString(row.ageCutoffDate),
+    ageCutoffLabel:
+      typeof row.ageCutoffLabel === "string" ? row.ageCutoffLabel : null,
+    ageCutoffSource:
+      typeof row.ageCutoffSource === "string" ? row.ageCutoffSource : null,
+    fieldIds: normalizeFieldIds(row.fieldIds),
+    ...divisionDetailTeamIdsProperty(
+      rawKind,
+      values.hasTeamIdsInput,
+      values.rawTeamIds,
+    ),
+  };
+};
+
+const normalizeDivisionDetailEntry = (
+  entry: unknown,
+  eventId: string,
+  sportId: string | null | undefined,
+  defaultKind: "LEAGUE" | "PLAYOFF",
+): DivisionDetailPayload | null => {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+  const row = entry as Record<string, unknown>;
+  const identity = buildDivisionDetailIdentity(
+    row,
+    eventId,
+    sportId,
+    defaultKind,
+  );
+  const values = normalizeDivisionDetailOptionalValues(
+    row,
+    eventId,
+    defaultKind,
+  );
+  return buildDivisionDetailPayload(identity, values);
+};
+
 const normalizeDivisionDetailsPayload = (
   value: unknown,
   eventId: string,
@@ -1792,237 +2698,10 @@ const normalizeDivisionDetailsPayload = (
     return [];
   }
   const details = value
-    .map((entry) => {
-      if (!entry || typeof entry !== "object") {
-        return null;
-      }
-      const row = entry as Record<string, unknown>;
-      const rawId = normalizeDivisionKey(row.id);
-      const rawKey =
-        normalizeDivisionKey(row.key) ??
-        (rawId ? extractDivisionTokenFromId(rawId) : null);
-      const inferred = inferDivisionDetails({
-        identifier: rawKey ?? rawId ?? "c_skill_open",
-        sportInput:
-          typeof row.sportId === "string"
-            ? row.sportId
-            : (sportId ?? undefined),
-        fallbackName: typeof row.name === "string" ? row.name : undefined,
-      });
-
-      const gender = normalizeDivisionGender(row.gender) ?? inferred.gender;
-      const ratingType =
-        normalizeDivisionRatingType(row.ratingType) ?? inferred.ratingType;
-      const rawComposite = parseCompositeDivisionTypeId(
-        normalizeDivisionKey(row.divisionTypeId),
-      );
-      const rawSkillDivisionTypeId = normalizeDivisionKey(
-        row.skillDivisionTypeId,
-      );
-      const rawAgeDivisionTypeId = normalizeDivisionKey(row.ageDivisionTypeId);
-      if (
-        rawComposite &&
-        ((rawSkillDivisionTypeId &&
-          rawSkillDivisionTypeId !== rawComposite.skillDivisionTypeId) ||
-          (rawAgeDivisionTypeId &&
-            rawAgeDivisionTypeId !== rawComposite.ageDivisionTypeId))
-      ) {
-        throw new Error(
-          "Division age and skill values do not match the composite division type.",
-        );
-      }
-      const normalizedTypeIds = normalizeDivisionTypeIds({
-        divisionTypeId:
-          normalizeDivisionKey(row.divisionTypeId) ?? inferred.divisionTypeId,
-        skillDivisionTypeId: rawSkillDivisionTypeId,
-        ageDivisionTypeId: rawAgeDivisionTypeId,
-        ratingType,
-      });
-      const { divisionTypeId, skillDivisionTypeId, ageDivisionTypeId } =
-        normalizedTypeIds;
-      const key =
-        normalizeDivisionKey(row.key) ??
-        buildDivisionToken({
-          gender,
-          ratingType,
-          divisionTypeId,
-        });
-      const id = rawId
-        ? scopeDivisionIdentifierToEvent(rawId, eventId)
-        : buildDivisionId(eventId, key);
-      const divisionTypeName = deriveDivisionTypeDisplayName({
-        sportInput:
-          typeof row.sportId === "string"
-            ? row.sportId
-            : (sportId ?? undefined),
-        gender,
-        ratingType,
-        divisionTypeId,
-      });
-      const defaultName = divisionTypeName;
-      const rawPrice = coerceNullableNumber(row.price);
-      const rawMaxParticipants = coerceNullableNumber(row.maxParticipants);
-      const rawPlayoffTeamCount = coerceNullableNumber(row.playoffTeamCount);
-      const rawRole =
-        String(row.role ?? "ENTRY").toUpperCase() === "PHASE"
-          ? "PHASE"
-          : "ENTRY";
-      const rawPhase = (() => {
-        const normalized = String(row.phase ?? "")
-          .trim()
-          .toUpperCase();
-        return ["LEAGUE", "POOL", "BRACKET", "PLAYOFF"].includes(normalized)
-          ? (normalized as "LEAGUE" | "POOL" | "BRACKET" | "PLAYOFF")
-          : null;
-      })();
-      const rawPoolCount = coerceNullableNumber((row as any).poolCount);
-      const rawKind = normalizeDivisionKind(row.kind, defaultKind);
-      const hasPlayoffPlacementDivisionIdsInput =
-        Object.prototype.hasOwnProperty.call(
-          row,
-          "playoffPlacementDivisionIds",
-        );
-      const rawPlayoffPlacementDivisionIds = hasPlayoffPlacementDivisionIdsInput
-        ? normalizePlacementDivisionIdentifierList(
-            row.playoffPlacementDivisionIds,
-            eventId,
-          )
-        : undefined;
-      const rawStandingsOverrides = normalizeStandingsOverrides(
-        row.standingsOverrides,
-      );
-      const rawExplicitPlayoffConfig = normalizePlayoffDivisionConfig(
-        row.playoffConfig,
-      );
-      const rawPlayoffConfig =
-        rawKind === "PLAYOFF"
-          ? (rawExplicitPlayoffConfig ?? normalizePlayoffDivisionConfig(row))
-          : rawExplicitPlayoffConfig;
-      const rawLeagueConfig = normalizeLeagueDivisionConfig(row);
-      const hasPhaseSettingsInput = Object.prototype.hasOwnProperty.call(
-        row,
-        "phaseSettings",
-      );
-      const rawPhaseSettings = hasPhaseSettingsInput
-        ? normalizeDivisionPhaseSettingsMap(row.phaseSettings)
-        : undefined;
-      const rawStandingsConfirmedAt = normalizeIsoDateString(
-        row.standingsConfirmedAt,
-      );
-      const rawStandingsConfirmedBy =
-        typeof row.standingsConfirmedBy === "string"
-          ? row.standingsConfirmedBy.trim() || null
-          : null;
-      const rawAllowPaymentPlans = coerceNullableBoolean(row.allowPaymentPlans);
-      const rawInstallmentCount = coerceNullableNumber(row.installmentCount);
-      const rawInstallmentDueDates = Array.isArray(row.installmentDueDates)
-        ? row.installmentDueDates
-            .map((value) => normalizeIsoDateString(value))
-            .filter((value): value is string => Boolean(value))
-        : undefined;
-      const rawInstallmentDueRelativeDays = Array.isArray(
-        row.installmentDueRelativeDays,
-      )
-        ? row.installmentDueRelativeDays
-            .map((value) => (typeof value === "number" ? value : Number(value)))
-            .filter((value) => Number.isFinite(value))
-            .map((value) => Math.trunc(value))
-        : undefined;
-      const rawInstallmentAmounts = Array.isArray(row.installmentAmounts)
-        ? row.installmentAmounts
-            .map((value) => (typeof value === "number" ? value : Number(value)))
-            .filter((value) => Number.isFinite(value))
-            .map((value) => Math.max(0, Math.round(value)))
-        : undefined;
-      const hasTeamIdsInput = Object.prototype.hasOwnProperty.call(
-        row,
-        "teamIds",
-      );
-      const rawTeamIds = hasTeamIdsInput
-        ? normalizeTeamIdList(row.teamIds)
-        : undefined;
-
-      const detail: DivisionDetailPayload = {
-        id,
-        sourceDivisionId: normalizeDivisionKey(row.sourceDivisionId),
-        key,
-        name: cleanDivisionDisplayName(row.name, defaultName),
-        role: rawRole,
-        phase: rawPhase,
-        kind: rawKind,
-        divisionTypeId,
-        skillDivisionTypeId,
-        ageDivisionTypeId,
-        divisionTypeName,
-        ratingType,
-        gender,
-        price:
-          rawPrice === undefined
-            ? undefined
-            : rawPrice === null
-              ? null
-              : Math.max(0, Math.round(rawPrice)),
-        maxParticipants:
-          rawMaxParticipants === undefined
-            ? undefined
-            : rawMaxParticipants === null
-              ? null
-              : Math.max(0, Math.trunc(rawMaxParticipants)),
-        playoffTeamCount:
-          rawPlayoffTeamCount === undefined
-            ? undefined
-            : rawPlayoffTeamCount === null
-              ? null
-              : Math.max(0, Math.trunc(rawPlayoffTeamCount)),
-        poolCount:
-          rawPoolCount === undefined
-            ? undefined
-            : rawPoolCount === null
-              ? null
-              : Math.max(0, Math.trunc(rawPoolCount)),
-        ...(rawPhaseSettings !== undefined
-          ? { phaseSettings: rawPhaseSettings }
-          : {}),
-        ...(rawPlayoffPlacementDivisionIds !== undefined
-          ? { playoffPlacementDivisionIds: rawPlayoffPlacementDivisionIds }
-          : {}),
-        standingsOverrides: rawStandingsOverrides,
-        playoffConfig: rawPlayoffConfig,
-        gamesPerOpponent: rawLeagueConfig?.gamesPerOpponent ?? null,
-        restTimeMinutes: rawLeagueConfig?.restTimeMinutes ?? null,
-        usesSets: rawLeagueConfig?.usesSets ?? null,
-        matchDurationMinutes: rawLeagueConfig?.matchDurationMinutes ?? null,
-        setDurationMinutes: rawLeagueConfig?.setDurationMinutes ?? null,
-        setsPerMatch: rawLeagueConfig?.setsPerMatch ?? null,
-        pointsToVictory: rawLeagueConfig?.pointsToVictory ?? [],
-        standingsConfirmedAt: rawStandingsConfirmedAt,
-        standingsConfirmedBy: rawStandingsConfirmedBy,
-        allowPaymentPlans: rawAllowPaymentPlans,
-        installmentCount:
-          rawInstallmentCount === undefined
-            ? undefined
-            : rawInstallmentCount === null
-              ? null
-              : Math.max(0, Math.trunc(rawInstallmentCount)),
-        installmentDueDates: rawInstallmentDueDates,
-        installmentDueRelativeDays: rawInstallmentDueRelativeDays,
-        installmentAmounts: rawInstallmentAmounts,
-        ageCutoffDate: normalizeIsoDateString(row.ageCutoffDate),
-        ageCutoffLabel:
-          typeof row.ageCutoffLabel === "string" ? row.ageCutoffLabel : null,
-        ageCutoffSource:
-          typeof row.ageCutoffSource === "string" ? row.ageCutoffSource : null,
-        fieldIds: normalizeFieldIds(row.fieldIds),
-        ...(rawKind === "PLAYOFF"
-          ? { teamIds: [] }
-          : hasTeamIdsInput
-            ? { teamIds: rawTeamIds }
-            : {}),
-      };
-      return detail;
-    })
+    .map((entry) =>
+      normalizeDivisionDetailEntry(entry, eventId, sportId, defaultKind),
+    )
     .filter((entry): entry is DivisionDetailPayload => entry !== null);
-
   const seen = new Set<string>();
   const unique: DivisionDetailPayload[] = [];
   for (const detail of details) {
@@ -2043,6 +2722,85 @@ type PersistedSplitLeagueDivisionDetail = {
   playoffPlacementDivisionIds: string[];
 };
 
+const divisionDetailAliases = (
+  id: string | null | undefined,
+  key: string | null | undefined,
+): string[] => [
+  normalizeDivisionKey(id),
+  normalizeDivisionKey(key),
+  id ? extractDivisionTokenFromId(id) : null,
+].filter((alias): alias is string => Boolean(alias));
+
+const buildPersistedSplitDivisionLookup = (
+  persistedDivisionDetails: PersistedSplitLeagueDivisionDetail[],
+): Map<string, PersistedSplitLeagueDivisionDetail> => {
+  const lookup = new Map<string, PersistedSplitLeagueDivisionDetail>();
+  for (const detail of persistedDivisionDetails) {
+    for (const alias of divisionDetailAliases(detail.id, detail.key)) {
+      lookup.set(alias, detail);
+    }
+  }
+  return lookup;
+};
+
+const findPersistedSplitDivisionDetail = (
+  detail: DivisionDetailPayload,
+  persistedByIdentifier: Map<string, PersistedSplitLeagueDivisionDetail>,
+): PersistedSplitLeagueDivisionDetail | undefined => {
+  for (const alias of divisionDetailAliases(detail.id, detail.key)) {
+    const persisted = persistedByIdentifier.get(alias);
+    if (persisted) {
+      return persisted;
+    }
+  }
+  return undefined;
+};
+
+const buildSplitPlacementCapacityInputs = (
+  divisionDetails: DivisionDetailPayload[],
+  persistedByIdentifier: Map<string, PersistedSplitLeagueDivisionDetail>,
+  defaultPlayoffTeamCount: number | null,
+) =>
+  divisionDetails.map((detail) => {
+    const persisted = findPersistedSplitDivisionDetail(
+      detail,
+      persistedByIdentifier,
+    );
+    return {
+      placementCount: resolveDivisionValue(
+        detail.playoffTeamCount,
+        persisted?.playoffTeamCount,
+        defaultPlayoffTeamCount ?? undefined,
+      ),
+      playoffDivisionIds:
+        resolveDivisionValue(
+          detail.playoffPlacementDivisionIds,
+          persisted?.playoffPlacementDivisionIds,
+          [],
+        ) ?? [],
+    };
+  });
+
+const buildSplitPlayoffCapacityInputs = (
+  playoffDivisionDetails: DivisionDetailPayload[],
+  persistedByIdentifier: Map<string, PersistedSplitLeagueDivisionDetail>,
+) =>
+  playoffDivisionDetails.map((detail) => {
+    const persisted = findPersistedSplitDivisionDetail(
+      detail,
+      persistedByIdentifier,
+    );
+    return {
+      playoffDivisionId: detail.id,
+      capacity: resolveDivisionValue(
+        detail.maxParticipants,
+        persisted?.maxParticipants,
+        undefined,
+      ),
+      name: detail.name,
+    };
+  });
+
 const assertSplitLeaguePlayoffMappingCounts = ({
   divisionDetails,
   playoffDivisionDetails,
@@ -2057,73 +2815,21 @@ const assertSplitLeaguePlayoffMappingCounts = ({
   if (divisionDetails.length === 0 || playoffDivisionDetails.length === 0) {
     return;
   }
-
-  const persistedByIdentifier = new Map<
-    string,
-    PersistedSplitLeagueDivisionDetail
-  >();
-  for (const detail of persistedDivisionDetails) {
-    const aliases = [
-      normalizeDivisionKey(detail.id),
-      normalizeDivisionKey(detail.key),
-      extractDivisionTokenFromId(detail.id),
-    ];
-    for (const alias of aliases) {
-      if (alias) {
-        persistedByIdentifier.set(alias, detail);
-      }
-    }
-  }
-
-  const findPersistedDetail = (
-    detail: DivisionDetailPayload,
-  ): PersistedSplitLeagueDivisionDetail | undefined => {
-    const aliases = [
-      normalizeDivisionKey(detail.id),
-      normalizeDivisionKey(detail.key),
-      extractDivisionTokenFromId(detail.id),
-    ];
-    for (const alias of aliases) {
-      const persisted = alias ? persistedByIdentifier.get(alias) : undefined;
-      if (persisted) {
-        return persisted;
-      }
-    }
-    return undefined;
-  };
-
+  const persistedByIdentifier = buildPersistedSplitDivisionLookup(
+    persistedDivisionDetails,
+  );
   const capacityResults = evaluatePlayoffPlacementCapacities(
-    divisionDetails.map((detail) => {
-      const persisted = findPersistedDetail(detail);
-      return {
-        placementCount: resolveDivisionValue(
-          detail.playoffTeamCount,
-          persisted?.playoffTeamCount,
-          defaultPlayoffTeamCount ?? undefined,
-        ),
-        playoffDivisionIds:
-          resolveDivisionValue(
-            detail.playoffPlacementDivisionIds,
-            persisted?.playoffPlacementDivisionIds,
-            [],
-          ) ?? [],
-      };
-    }),
-    playoffDivisionDetails.map((detail) => {
-      const persisted = findPersistedDetail(detail);
-      return {
-        playoffDivisionId: detail.id,
-        capacity: resolveDivisionValue(
-          detail.maxParticipants,
-          persisted?.maxParticipants,
-          undefined,
-        ),
-        name: detail.name,
-      };
-    }),
+    buildSplitPlacementCapacityInputs(
+      divisionDetails,
+      persistedByIdentifier,
+      defaultPlayoffTeamCount,
+    ),
+    buildSplitPlayoffCapacityInputs(
+      playoffDivisionDetails,
+      persistedByIdentifier,
+    ),
     normalizeDivisionKey,
   );
-
   for (const result of capacityResults) {
     if (result.capacity === null) {
       throw new Error(
@@ -2230,25 +2936,10 @@ const isRentalBookingSlot = (slot: RentalBookingSlotInput): boolean =>
   Boolean(slot.rentalBookingItemId) ||
   slot.sourceType === "RENTAL_BOOKING";
 
-export const reserveRentalBookingSlotsForEvent = async (
-  client: PrismaLike,
-  eventId: string,
+const collectRentalBookingSlots = (
   slots: RentalBookingSlotInput[],
-  now: Date = new Date(),
-): Promise<void> => {
-  if (
-    !client.rentalBookingItems?.findMany ||
-    !client.rentalBookingItems?.updateMany ||
-    !client.rentalBookings?.updateMany
-  ) {
-    return;
-  }
-
+): Map<string, RentalBookingSlotInput> => {
   const rentalSlots = slots.filter(isRentalBookingSlot);
-  if (!rentalSlots.length) {
-    return;
-  }
-
   const slotsByBookingItemId = new Map<string, RentalBookingSlotInput>();
   const duplicateItemIds = new Set<string>();
   for (const slot of rentalSlots) {
@@ -2268,8 +2959,13 @@ export const reserveRentalBookingSlotsForEvent = async (
       "A rental reservation can only be used in one event timeslot.",
     );
   }
+  return slotsByBookingItemId;
+};
 
-  const bookingItemIds = Array.from(slotsByBookingItemId.keys());
+const loadRentalBookingItems = async (
+  client: PrismaLike,
+  bookingItemIds: string[],
+): Promise<Map<string, any>> => {
   const bookingItems = await client.rentalBookingItems.findMany({
     where: { id: { in: bookingItemIds } },
     select: {
@@ -2283,11 +2979,91 @@ export const reserveRentalBookingSlotsForEvent = async (
       eventTimeSlotId: true,
     } as any,
   });
-  const bookingItemById = new Map<string, any>(
+  return new Map<string, any>(
     (bookingItems as any[]).map((item) => [String(item.id), item]),
   );
+};
 
-  for (const bookingItemId of bookingItemIds) {
+const assertRentalBookingItemReservationIdentity = (
+  eventId: string,
+  slot: RentalBookingSlotInput,
+  item: Record<string, any>,
+): void => {
+  const expectedBookingId = normalizeEntityId(slot.rentalBookingId);
+  const actualBookingId = normalizeEntityId(item.bookingId);
+  if (expectedBookingId && actualBookingId !== expectedBookingId) {
+    throw new RentalBookingReservationError(
+      "Rental reservation does not match the selected booking.",
+    );
+  }
+  const itemEventId = normalizeEntityId(item.eventId);
+  const itemEventTimeSlotId = normalizeEntityId(item.eventTimeSlotId);
+  if (itemEventId && itemEventId !== eventId) {
+    throw new RentalBookingReservationError(
+      "This rental reservation is already attached to another event.",
+    );
+  }
+  if (itemEventTimeSlotId && itemEventTimeSlotId !== slot.id) {
+    throw new RentalBookingReservationError(
+      "This rental reservation is already attached to another event timeslot.",
+    );
+  }
+};
+
+const assertRentalBookingItemAvailability = (
+  slot: RentalBookingSlotInput,
+  item: Record<string, any>,
+): void => {
+  const status = typeof item.status === "string" ? item.status : "";
+  if (!RENTAL_BOOKING_ITEM_ACTIVE_STATUSES.includes(status)) {
+    throw new RentalBookingReservationError(
+      "This rental reservation is not available for event scheduling.",
+    );
+  }
+  const itemFieldId = normalizeEntityId(item.fieldId);
+  if (!itemFieldId || !slot.scheduledFieldIds.includes(itemFieldId)) {
+    throw new RentalBookingReservationError(
+      "Rental-backed time slots must include the rented resource.",
+    );
+  }
+};
+
+const assertRentalBookingItemOwnership = (
+  eventId: string,
+  slot: RentalBookingSlotInput,
+  item: Record<string, any>,
+): void => {
+  assertRentalBookingItemReservationIdentity(eventId, slot, item);
+  assertRentalBookingItemAvailability(slot, item);
+};
+
+const assertRentalBookingItemDateRange = (
+  slot: RentalBookingSlotInput,
+  item: Record<string, any>,
+): void => {
+  const itemStart =
+    item.start instanceof Date ? item.start : new Date(item.start);
+  const itemEnd = item.end instanceof Date ? item.end : new Date(item.end);
+  const datesDoNotMatch =
+    slot.repeating ||
+    !slot.endDate ||
+    !Number.isFinite(itemStart.getTime()) ||
+    !Number.isFinite(itemEnd.getTime()) ||
+    itemStart.getTime() !== slot.startDate.getTime() ||
+    itemEnd.getTime() !== slot.endDate.getTime();
+  if (datesDoNotMatch) {
+    throw new RentalBookingReservationError(
+      "Rental-backed time slots must match the reserved date and time.",
+    );
+  }
+};
+
+const validateRentalBookingItems = (
+  eventId: string,
+  slotsByBookingItemId: Map<string, RentalBookingSlotInput>,
+  bookingItemById: Map<string, any>,
+): void => {
+  for (const bookingItemId of slotsByBookingItemId.keys()) {
     const slot = slotsByBookingItemId.get(bookingItemId);
     const item = bookingItemById.get(bookingItemId);
     if (!slot || !item) {
@@ -2295,59 +3071,18 @@ export const reserveRentalBookingSlotsForEvent = async (
         "Rental reservation could not be found.",
       );
     }
-
-    const expectedBookingId = normalizeEntityId(slot.rentalBookingId);
-    const actualBookingId = normalizeEntityId(item.bookingId);
-    if (expectedBookingId && actualBookingId !== expectedBookingId) {
-      throw new RentalBookingReservationError(
-        "Rental reservation does not match the selected booking.",
-      );
-    }
-
-    const itemEventId = normalizeEntityId(item.eventId);
-    const itemEventTimeSlotId = normalizeEntityId(item.eventTimeSlotId);
-    if (itemEventId && itemEventId !== eventId) {
-      throw new RentalBookingReservationError(
-        "This rental reservation is already attached to another event.",
-      );
-    }
-    if (itemEventTimeSlotId && itemEventTimeSlotId !== slot.id) {
-      throw new RentalBookingReservationError(
-        "This rental reservation is already attached to another event timeslot.",
-      );
-    }
-
-    const status = typeof item.status === "string" ? item.status : "";
-    if (!RENTAL_BOOKING_ITEM_ACTIVE_STATUSES.includes(status)) {
-      throw new RentalBookingReservationError(
-        "This rental reservation is not available for event scheduling.",
-      );
-    }
-
-    const itemFieldId = normalizeEntityId(item.fieldId);
-    if (!itemFieldId || !slot.scheduledFieldIds.includes(itemFieldId)) {
-      throw new RentalBookingReservationError(
-        "Rental-backed time slots must include the rented resource.",
-      );
-    }
-
-    const itemStart =
-      item.start instanceof Date ? item.start : new Date(item.start);
-    const itemEnd = item.end instanceof Date ? item.end : new Date(item.end);
-    if (
-      slot.repeating ||
-      !slot.endDate ||
-      !Number.isFinite(itemStart.getTime()) ||
-      !Number.isFinite(itemEnd.getTime()) ||
-      itemStart.getTime() !== slot.startDate.getTime() ||
-      itemEnd.getTime() !== slot.endDate.getTime()
-    ) {
-      throw new RentalBookingReservationError(
-        "Rental-backed time slots must match the reserved date and time.",
-      );
-    }
+    assertRentalBookingItemOwnership(eventId, slot, item);
+    assertRentalBookingItemDateRange(slot, item);
   }
+};
 
+const persistRentalBookingReservations = async (
+  client: PrismaLike,
+  eventId: string,
+  slotsByBookingItemId: Map<string, RentalBookingSlotInput>,
+  bookingItemById: Map<string, any>,
+  now: Date,
+): Promise<void> => {
   for (const [bookingItemId, slot] of slotsByBookingItemId.entries()) {
     const item = bookingItemById.get(bookingItemId);
     const bookingId = normalizeEntityId(item?.bookingId);
@@ -2386,6 +3121,38 @@ export const reserveRentalBookingSlotsForEvent = async (
       });
     }
   }
+};
+
+export const reserveRentalBookingSlotsForEvent = async (
+  client: PrismaLike,
+  eventId: string,
+  slots: RentalBookingSlotInput[],
+  now: Date = new Date(),
+): Promise<void> => {
+  if (
+    !client.rentalBookingItems?.findMany ||
+    !client.rentalBookingItems?.updateMany ||
+    !client.rentalBookings?.updateMany
+  ) {
+    return;
+  }
+  const rentalSlots = slots.filter(isRentalBookingSlot);
+  if (!rentalSlots.length) {
+    return;
+  }
+  const slotsByBookingItemId = collectRentalBookingSlots(rentalSlots);
+  const bookingItemById = await loadRentalBookingItems(
+    client,
+    Array.from(slotsByBookingItemId.keys()),
+  );
+  validateRentalBookingItems(eventId, slotsByBookingItemId, bookingItemById);
+  await persistRentalBookingReservations(
+    client,
+    eventId,
+    slotsByBookingItemId,
+    bookingItemById,
+    now,
+  );
 };
 
 const buildDivisionFieldMap = (
@@ -2448,20 +3215,70 @@ const coerceNullableNumber = (value: unknown): number | null | undefined => {
   return undefined;
 };
 
+const parseNullableBooleanString = (
+  value: string,
+): boolean | null | undefined => {
+  const normalized = value.trim().toLowerCase();
+  if (["true", "1", "yes", "y", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["false", "0", "no", "n", "off"].includes(normalized)) {
+    return false;
+  }
+  return undefined;
+};
+
+const parseNullableBooleanNumber = (
+  value: number,
+): boolean | null | undefined => {
+  if (!Number.isFinite(value)) {
+    return undefined;
+  }
+  if (value === 1) {
+    return true;
+  }
+  if (value === 0) {
+    return false;
+  }
+  return undefined;
+};
+
 const coerceNullableBoolean = (value: unknown): boolean | null | undefined => {
   if (value === undefined) return undefined;
   if (value === null) return null;
   if (typeof value === "boolean") return value;
   if (typeof value === "string") {
-    const normalized = value.trim().toLowerCase();
-    if (["true", "1", "yes", "y", "on"].includes(normalized)) return true;
-    if (["false", "0", "no", "n", "off"].includes(normalized)) return false;
+    return parseNullableBooleanString(value);
   }
-  if (typeof value === "number" && Number.isFinite(value)) {
-    if (value === 1) return true;
-    if (value === 0) return false;
+  if (typeof value === "number") {
+    return parseNullableBooleanNumber(value);
   }
   return undefined;
+};
+
+const normalizeLeagueScoringFields = (
+  row: Record<string, unknown>,
+  keys: readonly string[],
+  normalize: (value: unknown) => number | boolean | null | undefined,
+): Record<string, number | boolean | null> => {
+  const data: Record<string, number | boolean | null> = {};
+  for (const key of keys) {
+    if (!Object.prototype.hasOwnProperty.call(row, key)) continue;
+    const normalized = normalize(row[key]);
+    if (normalized !== undefined) {
+      data[key] = normalized;
+    }
+  }
+  return data;
+};
+
+const normalizeLeagueScoringConfigId = (
+  row: Record<string, unknown>,
+): string | undefined => {
+  if (typeof row.id !== "string" || row.id.trim().length === 0) {
+    return undefined;
+  }
+  return row.id.trim();
 };
 
 const normalizeLeagueScoringConfigPayload = (
@@ -2470,31 +3287,20 @@ const normalizeLeagueScoringConfigPayload = (
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
   }
-
   const row = value as Record<string, unknown>;
-  const configuredId =
-    typeof row.id === "string" && row.id.trim().length > 0
-      ? row.id.trim()
-      : undefined;
-  const data: Record<string, number | boolean | null> = {};
-
-  for (const key of LEAGUE_SCORING_NUMBER_FIELDS) {
-    if (!Object.prototype.hasOwnProperty.call(row, key)) continue;
-    const normalized = coerceNullableNumber(row[key]);
-    if (normalized !== undefined) {
-      data[key] = normalized;
-    }
-  }
-
-  for (const key of LEAGUE_SCORING_BOOLEAN_FIELDS) {
-    if (!Object.prototype.hasOwnProperty.call(row, key)) continue;
-    const normalized = coerceNullableBoolean(row[key]);
-    if (normalized !== undefined) {
-      data[key] = normalized;
-    }
-  }
-
-  return { id: configuredId, data };
+  const data = {
+    ...normalizeLeagueScoringFields(
+      row,
+      LEAGUE_SCORING_NUMBER_FIELDS,
+      coerceNullableNumber,
+    ),
+    ...normalizeLeagueScoringFields(
+      row,
+      LEAGUE_SCORING_BOOLEAN_FIELDS,
+      coerceNullableBoolean,
+    ),
+  };
+  return { id: normalizeLeagueScoringConfigId(row), data };
 };
 
 const normalizeInstallmentAmountList = (value: unknown): number[] => {
@@ -2555,6 +3361,50 @@ const normalizeDivisionSortOrder = (value: unknown): number | null => {
   return Number.isFinite(numeric) ? Math.trunc(numeric) : null;
 };
 
+const compareDivisionSortOrders = (
+  leftOrder: number | null,
+  rightOrder: number | null,
+): number | null => {
+  if (leftOrder === null && rightOrder === null) {
+    return null;
+  }
+  if (leftOrder === null) {
+    return 1;
+  }
+  if (rightOrder === null) {
+    return -1;
+  }
+  return leftOrder === rightOrder ? 0 : leftOrder - rightOrder;
+};
+
+const storedDivisionDate = (
+  value: Date | string | null | undefined,
+): number => {
+  if (value instanceof Date) {
+    return value.getTime();
+  }
+  if (typeof value === "string") {
+    return Date.parse(value);
+  }
+  return Number.NaN;
+};
+
+const compareStoredDivisionDates = (
+  leftCreated: number,
+  rightCreated: number,
+): number | null => {
+  if (!Number.isFinite(leftCreated) && !Number.isFinite(rightCreated)) {
+    return null;
+  }
+  if (!Number.isFinite(leftCreated)) {
+    return 1;
+  }
+  if (!Number.isFinite(rightCreated)) {
+    return -1;
+  }
+  return leftCreated === rightCreated ? 0 : leftCreated - rightCreated;
+};
+
 const compareDivisionRowsByStoredOrder = <
   T extends {
     id?: string | null;
@@ -2566,29 +3416,19 @@ const compareDivisionRowsByStoredOrder = <
   left: T,
   right: T,
 ): number => {
-  const leftOrder = normalizeDivisionSortOrder(left.sortOrder);
-  const rightOrder = normalizeDivisionSortOrder(right.sortOrder);
-  if (leftOrder !== null || rightOrder !== null) {
-    if (leftOrder === null) return 1;
-    if (rightOrder === null) return -1;
-    if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+  const orderComparison = compareDivisionSortOrders(
+    normalizeDivisionSortOrder(left.sortOrder),
+    normalizeDivisionSortOrder(right.sortOrder),
+  );
+  if (orderComparison !== null && orderComparison !== 0) {
+    return orderComparison;
   }
-  const leftCreated =
-    left.createdAt instanceof Date
-      ? left.createdAt.getTime()
-      : typeof left.createdAt === "string"
-        ? Date.parse(left.createdAt)
-        : Number.NaN;
-  const rightCreated =
-    right.createdAt instanceof Date
-      ? right.createdAt.getTime()
-      : typeof right.createdAt === "string"
-        ? Date.parse(right.createdAt)
-        : Number.NaN;
-  if (Number.isFinite(leftCreated) || Number.isFinite(rightCreated)) {
-    if (!Number.isFinite(leftCreated)) return 1;
-    if (!Number.isFinite(rightCreated)) return -1;
-    if (leftCreated !== rightCreated) return leftCreated - rightCreated;
+  const dateComparison = compareStoredDivisionDates(
+    storedDivisionDate(left.createdAt),
+    storedDivisionDate(right.createdAt),
+  );
+  if (dateComparison !== null && dateComparison !== 0) {
+    return dateComparison;
   }
   const nameCompare = String(left.name ?? "").localeCompare(
     String(right.name ?? ""),
@@ -2598,61 +3438,72 @@ const compareDivisionRowsByStoredOrder = <
   );
 };
 
-const buildDivisions = (
-  divisionIds: string[],
-  divisionRows: Array<{
-    id: string;
-    name?: string | null;
-    key?: string | null;
-    kind?: "LEAGUE" | "PLAYOFF" | null;
-    role?: "ENTRY" | "PHASE" | string | null;
-    phase?: "LEAGUE" | "POOL" | "BRACKET" | "PLAYOFF" | string | null;
-    isSystemGenerated?: boolean | null;
-    sortOrder?: number | null;
-    fieldIds?: string[] | null;
-    sportId?: string | null;
-    price?: number | null;
-    maxParticipants?: number | null;
-    playoffTeamCount?: number | null;
-    playoffPlacementDivisionIds?: string[] | null;
-    standingsOverrides?: unknown;
-    gamesPerOpponent?: number | null;
-    restTimeMinutes?: number | null;
-    usesSets?: boolean | null;
-    matchDurationMinutes?: number | null;
-    setDurationMinutes?: number | null;
-    setsPerMatch?: number | null;
-    pointsToVictory?: number[] | null;
-    playoffDoubleElimination?: boolean | null;
-    playoffWinnerSetCount?: number | null;
-    playoffLoserSetCount?: number | null;
-    playoffWinnerBracketPointsToVictory?: number[] | null;
-    playoffLoserBracketPointsToVictory?: number[] | null;
-    playoffPrize?: string | null;
-    playoffFieldCount?: number | null;
-    playoffRestTimeMinutes?: number | null;
-    playoffMatchDurationMinutes?: number | null;
-    playoffSetDurationMinutes?: number | null;
-    standingsConfirmedAt?: Date | null;
-    standingsConfirmedBy?: string | null;
-    teamIds?: string[] | null;
-    phaseSettings?: unknown;
-    sourceDivisionId?: string | null;
-  }>,
-  sportId?: string | null,
-  options?: {
-    allowFallback?: boolean;
-    fallbackKind?: "LEAGUE" | "PLAYOFF";
-    includeSourceAliases?: boolean;
-  },
-) => {
-  const allowFallback = options?.allowFallback ?? true;
-  const fallbackKind = options?.fallbackKind ?? "LEAGUE";
-  const map = new Map<string, Division>();
-  const fieldIdsByDivision = new Map<string, string[]>();
-  const rowsById = new Map<string, (typeof divisionRows)[number]>();
-  const rowsByKey = new Map<string, (typeof divisionRows)[number]>();
+type EventDivisionHydrationRow = {
+  id: string;
+  name?: string | null;
+  key?: string | null;
+  kind?: "LEAGUE" | "PLAYOFF" | null;
+  role?: "ENTRY" | "PHASE" | string | null;
+  phase?: "LEAGUE" | "POOL" | "BRACKET" | "PLAYOFF" | string | null;
+  isSystemGenerated?: boolean | null;
+  sortOrder?: number | null;
+  fieldIds?: string[] | null;
+  sportId?: string | null;
+  price?: number | null;
+  maxParticipants?: number | null;
+  playoffTeamCount?: number | null;
+  playoffPlacementDivisionIds?: string[] | null;
+  standingsOverrides?: unknown;
+  gamesPerOpponent?: number | null;
+  restTimeMinutes?: number | null;
+  usesSets?: boolean | null;
+  matchDurationMinutes?: number | null;
+  setDurationMinutes?: number | null;
+  setsPerMatch?: number | null;
+  pointsToVictory?: number[] | null;
+  playoffDoubleElimination?: boolean | null;
+  playoffWinnerSetCount?: number | null;
+  playoffLoserSetCount?: number | null;
+  playoffWinnerBracketPointsToVictory?: number[] | null;
+  playoffLoserBracketPointsToVictory?: number[] | null;
+  playoffPrize?: string | null;
+  playoffFieldCount?: number | null;
+  playoffRestTimeMinutes?: number | null;
+  playoffMatchDurationMinutes?: number | null;
+  playoffSetDurationMinutes?: number | null;
+  standingsConfirmedAt?: Date | null;
+  standingsConfirmedBy?: string | null;
+  teamIds?: string[] | null;
+  phaseSettings?: unknown;
+  sourceDivisionId?: string | null;
+};
 
+type BuildDivisionsOptions = {
+  allowFallback?: boolean;
+  fallbackKind?: "LEAGUE" | "PLAYOFF";
+  includeSourceAliases?: boolean;
+};
+
+const readDivisionRowValue = <T>(
+  row: EventDivisionHydrationRow | undefined,
+  key: string,
+  fallback: T,
+): T => {
+  const value = row?.[key as keyof EventDivisionHydrationRow];
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+  return value as T;
+};
+
+const indexDivisionRows = (
+  divisionRows: EventDivisionHydrationRow[],
+): {
+  rowsById: Map<string, EventDivisionHydrationRow>;
+  rowsByKey: Map<string, EventDivisionHydrationRow>;
+} => {
+  const rowsById = new Map<string, EventDivisionHydrationRow>();
+  const rowsByKey = new Map<string, EventDivisionHydrationRow>();
   for (const row of divisionRows) {
     const normalizedId = normalizeDivisionKey(row.id) ?? row.id;
     const normalizedKey = normalizeDivisionKey(row.key);
@@ -2665,116 +3516,213 @@ const buildDivisions = (
       rowsByKey.set(tokenFromId, row);
     }
   }
+  return { rowsById, rowsByKey };
+};
 
-  const addAliases = (
-    aliases: Array<string | null | undefined>,
-    division: Division,
-    fieldIds: string[],
-  ) => {
-    aliases.forEach((alias) => {
-      const normalizedAlias = normalizeDivisionKey(alias);
-      if (!normalizedAlias) return;
-      map.set(normalizedAlias, division);
-      fieldIdsByDivision.set(normalizedAlias, fieldIds);
-    });
+const addDivisionAliases = (
+  aliases: Array<string | null | undefined>,
+  division: Division,
+  fieldIds: string[],
+  map: Map<string, Division>,
+  fieldIdsByDivision: Map<string, string[]>,
+): void => {
+  for (const alias of aliases) {
+    const normalizedAlias = normalizeDivisionKey(alias);
+    if (!normalizedAlias) continue;
+    map.set(normalizedAlias, division);
+    fieldIdsByDivision.set(normalizedAlias, fieldIds);
+  }
+};
+
+const resolveDivisionRowKindAndPhase = (
+  row: EventDivisionHydrationRow | undefined,
+): {
+  kind: "LEAGUE" | "PLAYOFF";
+  role: "ENTRY" | "PHASE";
+  phase: "LEAGUE" | "POOL" | "BRACKET" | "PLAYOFF" | null;
+} => {
+  const kind = normalizeDivisionKind(
+    readDivisionRowValue(row, "kind", null),
+    "LEAGUE",
+  );
+  const role =
+    String(readDivisionRowValue(row, "role", "ENTRY")).toUpperCase() === "PHASE"
+      ? "PHASE"
+      : "ENTRY";
+  return {
+    kind,
+    role,
+    phase: normalizeDivisionDetailPhase(
+      readDivisionRowValue(row, "phase", null),
+    ),
   };
+};
 
+const buildDivisionFromRow = (
+  divisionId: string,
+  matchedRow: EventDivisionHydrationRow | undefined,
+  sportId?: string | null,
+): { division: Division; fieldIds: string[] } => {
+  const { kind, role, phase } = resolveDivisionRowKindAndPhase(matchedRow);
+  const standingsOverrides =
+    kind === "PLAYOFF"
+      ? null
+      : (normalizeStandingsOverrides(
+          readDivisionRowValue(matchedRow, "standingsOverrides", null),
+        ) ?? null);
+  const playoffConfig =
+    kind === "PLAYOFF"
+      ? normalizePlayoffDivisionConfig(
+          readDivisionRowValue(matchedRow, "standingsOverrides", null),
+        )
+      : normalizeDivisionPlayoffConfigFields(matchedRow);
+  const leagueConfig =
+    kind === "LEAGUE" ? normalizeLeagueDivisionConfig(matchedRow) : null;
+  const inferred = inferDivisionDetails({
+    identifier: divisionId,
+    sportInput: sportId ?? undefined,
+    fallbackName: readDivisionRowValue<string | undefined>(
+      matchedRow,
+      "name",
+      undefined,
+    ),
+  });
+  const divisionName =
+    readDivisionRowValue<string | undefined>(
+      matchedRow,
+      "name",
+      undefined,
+    ) ??
+    inferred.defaultName ??
+    buildDivisionDisplayName(divisionId, sportId);
+  const fieldIds = ensureStringArray(
+    readDivisionRowValue(matchedRow, "fieldIds", null),
+  );
+  const teamIds = normalizeTeamIdList(
+    readDivisionRowValue(matchedRow, "teamIds", null),
+  );
+  const division = new Division(
+    divisionId,
+    divisionName,
+    fieldIds,
+    readDivisionRowValue(matchedRow, "price", null),
+    readDivisionRowValue(matchedRow, "maxParticipants", null),
+    readDivisionRowValue(matchedRow, "playoffTeamCount", null),
+    kind,
+    normalizePlacementDivisionIdentifierList(
+      readDivisionRowValue(matchedRow, "playoffPlacementDivisionIds", null),
+    ),
+    standingsOverrides,
+    readDivisionRowValue(matchedRow, "standingsConfirmedAt", null),
+    readDivisionRowValue(matchedRow, "standingsConfirmedBy", null),
+    playoffConfig,
+    teamIds,
+    leagueConfig,
+    normalizeDivisionPhaseSettingsMap(
+      readDivisionRowValue(matchedRow, "phaseSettings", null),
+    ),
+    role,
+    phase,
+    readDivisionRowValue(matchedRow, "sourceDivisionId", null),
+    readDivisionRowValue<boolean>(matchedRow, "isSystemGenerated", false) === true,
+  );
+  return { division, fieldIds };
+};
+
+const resolveMatchedDivisionRow = (
+  divisionId: string,
+  rowsById: Map<string, EventDivisionHydrationRow>,
+  rowsByKey: Map<string, EventDivisionHydrationRow>,
+): EventDivisionHydrationRow | undefined =>
+  rowsById.get(divisionId) ??
+  rowsByKey.get(divisionId) ??
+  rowsByKey.get(extractDivisionTokenFromId(divisionId) ?? "");
+
+const resolveBuildDivisionsOptions = (
+  options: BuildDivisionsOptions | undefined,
+): Required<BuildDivisionsOptions> => ({
+  allowFallback: options?.allowFallback ?? true,
+  fallbackKind: options?.fallbackKind ?? "LEAGUE",
+  includeSourceAliases: options?.includeSourceAliases ?? true,
+});
+
+const buildDivisionAliases = (
+  divisionId: string,
+  matchedRow: EventDivisionHydrationRow | undefined,
+  includeSourceAliases: boolean,
+): Array<string | null | undefined> => [
+  divisionId,
+  matchedRow?.id,
+  matchedRow?.key,
+  extractDivisionTokenFromId(divisionId),
+  extractDivisionTokenFromId(matchedRow?.id),
+  ...(includeSourceAliases ? [matchedRow?.sourceDivisionId] : []),
+];
+
+const buildFallbackDivision = (
+  fallbackKind: "LEAGUE" | "PLAYOFF",
+  sportId?: string | null,
+): Division =>
+  new Division(
+    DEFAULT_DIVISION_KEY,
+    buildDivisionDisplayName(DEFAULT_DIVISION_KEY, sportId),
+    [],
+    null,
+    null,
+    null,
+    fallbackKind,
+  );
+
+const buildDivisions = (
+  divisionIds: string[],
+  divisionRows: EventDivisionHydrationRow[],
+  sportId?: string | null,
+  options?: BuildDivisionsOptions,
+) => {
+  const resolvedOptions = resolveBuildDivisionsOptions(options);
+  const map = new Map<string, Division>();
+  const fieldIdsByDivision = new Map<string, string[]>();
+  const { rowsById, rowsByKey } = indexDivisionRows(divisionRows);
   const result: Division[] = [];
   for (const rawDivisionId of divisionIds) {
     const divisionId = normalizeDivisionKey(rawDivisionId) ?? rawDivisionId;
-    const matchedRow =
-      rowsById.get(divisionId) ??
-      rowsByKey.get(divisionId) ??
-      rowsByKey.get(extractDivisionTokenFromId(divisionId) ?? "");
-    const kind = normalizeDivisionKind(matchedRow?.kind, "LEAGUE");
-    const role =
-      String(matchedRow?.role ?? "ENTRY").toUpperCase() === "PHASE"
-        ? "PHASE"
-        : "ENTRY";
-    const phase = (() => {
-      const normalized = String(matchedRow?.phase ?? "")
-        .trim()
-        .toUpperCase();
-      return ["LEAGUE", "POOL", "BRACKET", "PLAYOFF"].includes(normalized)
-        ? (normalized as "LEAGUE" | "POOL" | "BRACKET" | "PLAYOFF")
-        : null;
-    })();
-    const standingsOverrides =
-      kind === "PLAYOFF"
-        ? null
-        : (normalizeStandingsOverrides(matchedRow?.standingsOverrides) ?? null);
-    const playoffConfig =
-      kind === "PLAYOFF"
-        ? normalizePlayoffDivisionConfig(matchedRow?.standingsOverrides)
-        : normalizeDivisionPlayoffConfigFields(matchedRow);
-    const leagueConfig =
-      kind === "LEAGUE" ? normalizeLeagueDivisionConfig(matchedRow) : null;
-    const inferred = inferDivisionDetails({
-      identifier: divisionId,
-      sportInput: sportId ?? undefined,
-      fallbackName: matchedRow?.name ?? undefined,
-    });
-    const divisionName =
-      matchedRow?.name ??
-      inferred.defaultName ??
-      buildDivisionDisplayName(divisionId, sportId);
-    const fieldIds = ensureStringArray(matchedRow?.fieldIds);
-    const teamIds = normalizeTeamIdList(matchedRow?.teamIds);
-    const division = new Division(
+    const matchedRow = resolveMatchedDivisionRow(
       divisionId,
-      divisionName,
-      fieldIds,
-      matchedRow?.price ?? null,
-      matchedRow?.maxParticipants ?? null,
-      matchedRow?.playoffTeamCount ?? null,
-      kind,
-      normalizePlacementDivisionIdentifierList(
-        matchedRow?.playoffPlacementDivisionIds,
-      ),
-      standingsOverrides,
-      matchedRow?.standingsConfirmedAt ?? null,
-      matchedRow?.standingsConfirmedBy ?? null,
-      playoffConfig,
-      teamIds,
-      leagueConfig,
-      normalizeDivisionPhaseSettingsMap(matchedRow?.phaseSettings),
-      role,
-      phase,
-      matchedRow?.sourceDivisionId ?? null,
-      matchedRow?.isSystemGenerated === true,
+      rowsById,
+      rowsByKey,
+    );
+    const { division, fieldIds } = buildDivisionFromRow(
+      divisionId,
+      matchedRow,
+      sportId,
     );
     result.push(division);
-
-    const aliases = [
-      divisionId,
-      matchedRow?.id,
-      matchedRow?.key,
-      extractDivisionTokenFromId(divisionId),
-      extractDivisionTokenFromId(matchedRow?.id),
-      ...(options?.includeSourceAliases === false
-        ? []
-        : [matchedRow?.sourceDivisionId]),
-    ];
-    addAliases(aliases, division, fieldIds);
-  }
-
-  if (!result.length && allowFallback) {
-    const fallbackId = DEFAULT_DIVISION_KEY;
-    const fallback = new Division(
-      fallbackId,
-      buildDivisionDisplayName(fallbackId, sportId),
-      [],
-      null,
-      null,
-      null,
-      fallbackKind,
+    addDivisionAliases(
+      buildDivisionAliases(
+        divisionId,
+        matchedRow,
+        resolvedOptions.includeSourceAliases,
+      ),
+      division,
+      fieldIds,
+      map,
+      fieldIdsByDivision,
     );
-    result.push(fallback);
-    addAliases([fallbackId], fallback, []);
   }
-
+  if (!result.length && resolvedOptions.allowFallback) {
+    const fallback = buildFallbackDivision(resolvedOptions.fallbackKind, sportId);
+    result.push(fallback);
+    addDivisionAliases(
+      [DEFAULT_DIVISION_KEY],
+      fallback,
+      [],
+      map,
+      fieldIdsByDivision,
+    );
+  }
   return { divisions: result, map, fieldIdsByDivision };
 };
+
 type EventDivisionPayloadRow = DivisionNameCandidate & {
   [key: string]: unknown;
   installmentDueDates?: unknown[];
@@ -2826,67 +3774,222 @@ const assertUniqueSubmittedEventDivisionNames = (
   }
 };
 
+const readDivisionTemplateValue = <T>(
+  row: EventDivisionPayloadRow,
+  key: string,
+  fallback: T,
+): T => {
+  const value = row[key];
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+  return value as T;
+};
+
+const serializeDivisionTemplateDate = (value: unknown): unknown => {
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  return value === null || value === undefined ? null : value;
+};
+const serializeDivisionTemplateRole = (
+  value: unknown,
+): "ENTRY" | "PHASE" =>
+  String(value ?? "ENTRY").toUpperCase() === "PHASE" ? "PHASE" : "ENTRY";
+
+const serializeDivisionDetailRow = (
+  row: EventDivisionPayloadRow,
+  index: number,
+): Record<string, unknown> => ({
+  id: row.id,
+  sourceDivisionId: readDivisionTemplateValue(row, "sourceDivisionId", null),
+  key:
+    readDivisionTemplateValue<string | null>(row, "key", null) ??
+    extractDivisionTokenFromId(row.id) ??
+    row.id,
+  name: row.name,
+  kind: normalizeDivisionKind(row.kind, "LEAGUE"),
+  role: serializeDivisionTemplateRole(row.role),
+  phase: readDivisionTemplateValue(row, "phase", null),
+  sortOrder:
+    typeof row.sortOrder === "number" ? row.sortOrder : index,
+  sportId: readDivisionTemplateValue(row, "sportId", null),
+  price: readDivisionTemplateValue(row, "price", null),
+  maxParticipants: readDivisionTemplateValue(row, "maxParticipants", null),
+  playoffTeamCount: readDivisionTemplateValue(row, "playoffTeamCount", null),
+  playoffPlacementDivisionIds: ensureStringArray(
+    row.playoffPlacementDivisionIds,
+  ),
+  standingsOverrides: readDivisionTemplateValue(
+    row,
+    "standingsOverrides",
+    null,
+  ),
+  phaseSettings: normalizeDivisionPhaseSettingsMap(row.phaseSettings),
+  gamesPerOpponent: readDivisionTemplateValue(row, "gamesPerOpponent", null),
+  restTimeMinutes: readDivisionTemplateValue(row, "restTimeMinutes", null),
+  usesSets: readDivisionTemplateValue(row, "usesSets", null),
+  matchDurationMinutes: readDivisionTemplateValue(
+    row,
+    "matchDurationMinutes",
+    null,
+  ),
+  setDurationMinutes: readDivisionTemplateValue(
+    row,
+    "setDurationMinutes",
+    null,
+  ),
+  setsPerMatch: readDivisionTemplateValue(row, "setsPerMatch", null),
+  pointsToVictory: ensureNumberArray(row.pointsToVictory),
+  standingsConfirmedAt: serializeDivisionTemplateDate(row.standingsConfirmedAt),
+  standingsConfirmedBy: readDivisionTemplateValue(
+    row,
+    "standingsConfirmedBy",
+    null,
+  ),
+  allowPaymentPlans: readDivisionTemplateValue(
+    row,
+    "allowPaymentPlans",
+    null,
+  ),
+  installmentCount: readDivisionTemplateValue(row, "installmentCount", null),
+  installmentDueDates: ensureArray(row.installmentDueDates)
+    .map((value) => coerceDate(value))
+    .filter(Boolean)
+    .map((date) => (date as Date).toISOString()),
+  installmentDueRelativeDays: ensureNumberArray(
+    row.installmentDueRelativeDays,
+  ),
+  installmentAmounts: ensureNumberArray(row.installmentAmounts),
+  divisionTypeId: readDivisionTemplateValue(row, "divisionTypeId", null),
+  skillDivisionTypeId: readDivisionTemplateValue(
+    row,
+    "skillDivisionTypeId",
+    null,
+  ),
+  ageDivisionTypeId: readDivisionTemplateValue(
+    row,
+    "ageDivisionTypeId",
+    null,
+  ),
+  ratingType: readDivisionTemplateValue(row, "ratingType", null),
+  gender: readDivisionTemplateValue(row, "gender", null),
+  ageCutoffDate: serializeDivisionTemplateDate(row.ageCutoffDate),
+  ageCutoffLabel: readDivisionTemplateValue(row, "ageCutoffLabel", null),
+  ageCutoffSource: readDivisionTemplateValue(row, "ageCutoffSource", null),
+  fieldIds: ensureStringArray(row.fieldIds),
+  teamIds: [],
+});
+
 const serializeDivisionDetailsForTemplate = (
   divisionRows: EventDivisionPayloadRow[],
 ): Array<Record<string, unknown>> =>
-  divisionRows.map((row, index) => ({
-    id: row.id,
-    sourceDivisionId: row.sourceDivisionId ?? null,
-    key: row.key ?? extractDivisionTokenFromId(row.id) ?? row.id,
-    name: row.name,
-    kind: normalizeDivisionKind(row.kind, "LEAGUE"),
-    role:
-      String(row.role ?? "ENTRY").toUpperCase() === "PHASE" ? "PHASE" : "ENTRY",
-    phase: row.phase ?? null,
-    sortOrder: typeof row.sortOrder === "number" ? row.sortOrder : index,
-    sportId: row.sportId ?? null,
-    price: row.price ?? null,
-    maxParticipants: row.maxParticipants ?? null,
-    playoffTeamCount: row.playoffTeamCount ?? null,
-    playoffPlacementDivisionIds: ensureStringArray(
-      row.playoffPlacementDivisionIds,
+  divisionRows.map(serializeDivisionDetailRow);
+
+type EventTeamHydrationRow = {
+  id: string;
+  captainId?: string | null;
+  kind?: string | null;
+  division?: string | null;
+  name?: string | null;
+  playerIds?: string[] | null;
+};
+
+type EventFieldHydrationRow = {
+  id: string;
+  organizationId?: string | null;
+  divisions?: unknown;
+  name?: string | null;
+};
+
+const readTeamRowValue = <T>(
+  row: EventTeamHydrationRow,
+  key: string,
+  fallback: T,
+): T => {
+  const value = row[key as keyof EventTeamHydrationRow];
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+  return value as T;
+};
+
+const resolveTeamDivision = (
+  row: EventTeamHydrationRow,
+  divisionMap: Map<string, Division>,
+  fallbackDivision: Division,
+  divisionByTeamId: Map<string, Division>,
+): Division => {
+  const mappedDivision = divisionByTeamId.get(String(row.id));
+  if (mappedDivision) {
+    return mappedDivision;
+  }
+  const normalizedDivisionId = normalizeDivisionKey(row.division);
+  if (normalizedDivisionId) {
+    const normalizedDivision = divisionMap.get(normalizedDivisionId);
+    if (normalizedDivision) {
+      return normalizedDivision;
+    }
+  }
+  const rawDivision = row.division;
+  if (typeof rawDivision === "string") {
+    const rawMappedDivision = divisionMap.get(rawDivision);
+    if (rawMappedDivision) {
+      return rawMappedDivision;
+    }
+  }
+  return fallbackDivision;
+};
+
+const resolveTeamPlayers = (
+  row: EventTeamHydrationRow,
+  playerLookup: Map<string, UserData>,
+): UserData[] =>
+  ensureArray(row.playerIds as unknown[])
+    .map((playerId) => playerLookup.get(String(playerId)))
+    .filter((player): player is UserData => Boolean(player));
+
+const buildTeamFromRow = (
+  row: EventTeamHydrationRow,
+  divisionMap: Map<string, Division>,
+  fallbackDivision: Division,
+  divisionByTeamId: Map<string, Division>,
+  playerLookup: Map<string, UserData>,
+  playerRegistrationsByTeamId: Map<
+    string,
+    Array<{
+      id: string;
+      teamId?: string | null;
+      userId: string;
+      status: string;
+      jerseyNumber?: string | null;
+      position?: string | null;
+      isCaptain?: boolean;
+    }>
+  >,
+): Team => {
+  const teamId = String(row.id);
+  const playerIds = ensureArray(readTeamRowValue(row, "playerIds", []));
+  return new Team({
+    id: teamId,
+    captainId: readTeamRowValue(row, "captainId", ""),
+    kind: readTeamRowValue(row, "kind", null),
+    division: resolveTeamDivision(
+      row,
+      divisionMap,
+      fallbackDivision,
+      divisionByTeamId,
     ),
-    standingsOverrides: row.standingsOverrides ?? null,
-    phaseSettings: normalizeDivisionPhaseSettingsMap(row.phaseSettings),
-    gamesPerOpponent: row.gamesPerOpponent ?? null,
-    restTimeMinutes: row.restTimeMinutes ?? null,
-    usesSets: row.usesSets ?? null,
-    matchDurationMinutes: row.matchDurationMinutes ?? null,
-    setDurationMinutes: row.setDurationMinutes ?? null,
-    setsPerMatch: row.setsPerMatch ?? null,
-    pointsToVictory: ensureNumberArray(row.pointsToVictory),
-    standingsConfirmedAt:
-      row.standingsConfirmedAt instanceof Date
-        ? row.standingsConfirmedAt.toISOString()
-        : (row.standingsConfirmedAt ?? null),
-    standingsConfirmedBy: row.standingsConfirmedBy ?? null,
-    allowPaymentPlans: row.allowPaymentPlans ?? null,
-    installmentCount: row.installmentCount ?? null,
-    installmentDueDates: ensureArray(row.installmentDueDates)
-      .map((value) => coerceDate(value))
-      .filter(Boolean)
-      .map((date) => (date as Date).toISOString()),
-    installmentDueRelativeDays: ensureNumberArray(
-      row.installmentDueRelativeDays,
-    ),
-    installmentAmounts: ensureNumberArray(row.installmentAmounts),
-    divisionTypeId: row.divisionTypeId ?? null,
-    skillDivisionTypeId: row.skillDivisionTypeId ?? null,
-    ageDivisionTypeId: row.ageDivisionTypeId ?? null,
-    ratingType: row.ratingType ?? null,
-    gender: row.gender ?? null,
-    ageCutoffDate:
-      row.ageCutoffDate instanceof Date
-        ? row.ageCutoffDate.toISOString()
-        : (row.ageCutoffDate ?? null),
-    ageCutoffLabel: row.ageCutoffLabel ?? null,
-    ageCutoffSource: row.ageCutoffSource ?? null,
-    fieldIds: ensureStringArray(row.fieldIds),
-    teamIds: [],
-  }));
+    name: readTeamRowValue(row, "name", ""),
+    matches: [],
+    playerIds,
+    players: resolveTeamPlayers(row, playerLookup),
+    playerRegistrations: playerRegistrationsByTeamId.get(teamId) ?? [],
+  });
+};
 
 const buildTeams = (
-  rows: any[],
+  rows: readonly EventTeamHydrationRow[],
   divisionMap: Map<string, Division>,
   fallbackDivision: Division,
   divisionByTeamId: Map<string, Division> = new Map<string, Division>(),
@@ -2906,34 +4009,20 @@ const buildTeams = (
 ) => {
   const teams: Record<string, Team> = {};
   for (const row of rows) {
-    const mappedDivision = divisionByTeamId.get(row.id);
-    const normalizedDivisionId = normalizeDivisionKey(row.division);
-    const division =
-      mappedDivision ??
-      (normalizedDivisionId && divisionMap.has(normalizedDivisionId)
-        ? (divisionMap.get(normalizedDivisionId) as Division)
-        : row.division && divisionMap.has(row.division)
-          ? (divisionMap.get(row.division) as Division)
-          : fallbackDivision);
-    teams[row.id] = new Team({
-      id: row.id,
-      captainId: row.captainId ?? "",
-      kind: row.kind ?? null,
-      division,
-      name: row.name ?? "",
-      matches: [],
-      playerIds: ensureArray(row.playerIds),
-      players: ensureArray(row.playerIds)
-        .map((playerId) => playerLookup.get(String(playerId)))
-        .filter((player): player is UserData => Boolean(player)),
-      playerRegistrations: playerRegistrationsByTeamId.get(row.id) ?? [],
-    });
+    const team = buildTeamFromRow(
+      row,
+      divisionMap,
+      fallbackDivision,
+      divisionByTeamId,
+      playerLookup,
+      playerRegistrationsByTeamId,
+    );
+    teams[row.id] = team;
   }
   return teams;
 };
-
 const buildFields = (
-  rows: any[],
+  rows: readonly EventFieldHydrationRow[],
   divisionMap: Map<string, Division>,
   fallbackDivisionIds: string[],
   divisionFieldIds: Map<string, string[]>,
@@ -2944,9 +4033,19 @@ const buildFields = (
     const explicitDivisionIds = Array.from(divisionFieldIds.entries())
       .filter(([, fieldIds]) => fieldIds.includes(row.id))
       .map(([divisionId]) => divisionId);
+    const persistedDivisionIds = Array.from(
+      new Set([
+        ...(explicitDivisionIdsByFieldId.get(row.id) ?? []),
+        ...normalizeDivisionKeys(row.divisions),
+      ]),
+    );
     const divisionIds = explicitDivisionIds.length
       ? explicitDivisionIds
-      : fallbackDivisionIds;
+      : fallbackDivisionIds.length
+        ? fallbackDivisionIds
+        : persistedDivisionIds.length
+          ? persistedDivisionIds
+          : [DEFAULT_DIVISION_KEY];
     const divisions = Array.from(
       new Map(
         divisionIds.map((id) => {
@@ -2971,67 +4070,127 @@ const buildFields = (
   return fields;
 };
 
+const readTimeSlotValue = <T>(
+  row: Record<string, unknown>,
+  key: string,
+  fallback: T,
+): T => {
+  const value = row[key];
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+  return value as T;
+};
+
+const resolveTimeSlotDateValues = (
+  row: Record<string, unknown>,
+  slotTimeZone: string,
+): {
+  startDate: Date;
+  endDate: Date | null;
+  startTimeMinutes: number;
+  endTimeMinutes: number;
+} => {
+  const rawStartDate = row.startDate;
+  const startDate =
+    rawStartDate instanceof Date ? rawStartDate : new Date(rawStartDate as any);
+  const rawEndDate = row.endDate;
+  const endDate = rawEndDate ? new Date(rawEndDate as any) : null;
+  const startTimeMinutes =
+    typeof row.startTimeMinutes === "number"
+      ? row.startTimeMinutes
+      : minutesInTimeZone(startDate, slotTimeZone);
+  const endTimeMinutes =
+    typeof row.endTimeMinutes === "number"
+      ? row.endTimeMinutes
+      : endDate
+        ? minutesInTimeZone(endDate, slotTimeZone)
+        : 0;
+  return { startDate, endDate, startTimeMinutes, endTimeMinutes };
+};
+
+const resolveTimeSlotDivisions = (
+  row: Record<string, unknown>,
+  divisionMap: Map<string, Division>,
+  fallbackDivisions: Division[],
+): { divisionIds: string[]; divisions: Division[] } => {
+  const divisionIds = normalizeDivisionKeys(row.divisions);
+  if (!divisionIds.length) {
+    return { divisionIds, divisions: fallbackDivisions };
+  }
+  const divisions = divisionIds.map(
+    (id) =>
+      divisionMap.get(id) ?? new Division(id, buildDivisionDisplayName(id)),
+  );
+  return { divisionIds, divisions };
+};
+
+const resolveTimeSlotDays = (
+  row: Record<string, unknown>,
+  startDate: Date,
+  slotTimeZone: string,
+): { dayOfWeek: number; daysOfWeek: number[] } => {
+  const normalizedDays = normalizeTimeSlotDays({
+    dayOfWeek: row.dayOfWeek,
+    daysOfWeek: row.daysOfWeek,
+  });
+  const daysOfWeek = normalizedDays.length
+    ? normalizedDays
+    : [mondayDayInTimeZone(startDate, slotTimeZone)];
+  const defaultDay = mondayDayInTimeZone(startDate, slotTimeZone);
+  return { dayOfWeek: daysOfWeek[0] ?? defaultDay, daysOfWeek };
+};
+
+const buildTimeSlotFromRow = (
+  row: Record<string, unknown>,
+  divisionMap: Map<string, Division>,
+  fallbackDivisions: Division[],
+): TimeSlot => {
+  const repeating = Boolean(row.repeating);
+  const slotTimeZone = resolveTimeZone(
+    row.timeZone,
+    DEFAULT_EVENT_TIME_ZONE,
+  );
+  const { startDate, endDate, startTimeMinutes, endTimeMinutes } =
+    resolveTimeSlotDateValues(row, slotTimeZone);
+  const normalizedFieldIds = normalizeTimeSlotFieldIds(row);
+  const { divisionIds, divisions } = resolveTimeSlotDivisions(
+    row,
+    divisionMap,
+    fallbackDivisions,
+  );
+  const { dayOfWeek, daysOfWeek } = resolveTimeSlotDays(
+    row,
+    startDate,
+    slotTimeZone,
+  );
+  return new TimeSlot({
+    id: String(row.id),
+    dayOfWeek,
+    daysOfWeek,
+    startDate,
+    endDate,
+    repeating,
+    startTimeMinutes,
+    endTimeMinutes,
+    price: readTimeSlotValue(row, "price", null),
+    sourceType: readTimeSlotValue(row, "sourceType", null),
+    rentalBookingId: readTimeSlotValue(row, "rentalBookingId", null),
+    rentalBookingItemId: readTimeSlotValue(row, "rentalBookingItemId", null),
+    rentalLocked: Boolean(row.rentalLocked),
+    field: normalizedFieldIds[0] ?? null,
+    fieldIds: normalizedFieldIds,
+    divisions: [...divisions],
+    explicitDivisionIds: divisionIds,
+    timeZone: slotTimeZone,
+  });
+};
+
 const buildTimeSlots = (
   rows: any[],
   divisionMap: Map<string, Division>,
   fallbackDivisions: Division[],
-) => {
-  return rows.map((row) => {
-    const repeating = Boolean(row.repeating);
-    const slotTimeZone = resolveTimeZone(row.timeZone, DEFAULT_EVENT_TIME_ZONE);
-    const startDate =
-      row.startDate instanceof Date ? row.startDate : new Date(row.startDate);
-    const endDate = row.endDate ? new Date(row.endDate) : null;
-    const startTimeMinutes =
-      typeof row.startTimeMinutes === "number"
-        ? row.startTimeMinutes
-        : minutesInTimeZone(startDate, slotTimeZone);
-    const endTimeMinutes =
-      typeof row.endTimeMinutes === "number"
-        ? row.endTimeMinutes
-        : endDate
-          ? minutesInTimeZone(endDate, slotTimeZone)
-          : 0;
-    const normalizedDays = normalizeTimeSlotDays({
-      dayOfWeek: row.dayOfWeek,
-      daysOfWeek: (row as any).daysOfWeek,
-    });
-    const normalizedFieldIds = normalizeTimeSlotFieldIds(row);
-    const slotDivisionIds = normalizeDivisionKeys((row as any).divisions);
-    const slotDivisions = slotDivisionIds.length
-      ? slotDivisionIds.map(
-          (id) =>
-            divisionMap.get(id) ??
-            new Division(id, buildDivisionDisplayName(id)),
-        )
-      : fallbackDivisions;
-    const daysOfWeek = normalizedDays.length
-      ? normalizedDays
-      : [mondayDayInTimeZone(startDate, slotTimeZone)];
-    const dayOfWeek =
-      daysOfWeek[0] ?? mondayDayInTimeZone(startDate, slotTimeZone);
-    return new TimeSlot({
-      id: row.id,
-      dayOfWeek,
-      daysOfWeek,
-      startDate,
-      endDate,
-      repeating,
-      startTimeMinutes,
-      endTimeMinutes,
-      price: row.price ?? null,
-      sourceType: row.sourceType ?? null,
-      rentalBookingId: row.rentalBookingId ?? null,
-      rentalBookingItemId: row.rentalBookingItemId ?? null,
-      rentalLocked: Boolean(row.rentalLocked),
-      field: normalizedFieldIds[0] ?? null,
-      fieldIds: normalizedFieldIds,
-      divisions: [...slotDivisions],
-      explicitDivisionIds: slotDivisionIds,
-      timeZone: slotTimeZone,
-    });
-  });
-};
+) => rows.map((row) => buildTimeSlotFromRow(row, divisionMap, fallbackDivisions));
 
 const buildOfficials = (
   rows: any[],
@@ -3055,69 +4214,103 @@ const buildOfficials = (
   );
 };
 
-const buildOfficialEventTeamIds = (params: {
-  officialIds: string[];
-  canonicalTeamIdsByUserId: Map<string, string[]>;
-  eventTeamRows: any[];
-  eventParticipantRows: any[];
-  eventTeamStaffRows: any[];
-}): Map<string, Set<string>> => {
-  const officialIds = new Set(params.officialIds);
-  const eventTeamIdsByUserId = new Map<string, Set<string>>(
-    params.officialIds.map((userId) => [userId, new Set<string>()]),
-  );
-  const eventTeamIds = new Set(
-    params.eventTeamRows
-      .map((row) => normalizeEntityId(row?.id))
-      .filter((teamId): teamId is string => Boolean(teamId)),
-  );
+const linkEventTeamRelationship = (
+  relationships: Map<string, Set<string>>,
+  relationshipId: string | null,
+  eventTeamId: string,
+): void => {
+  if (!relationshipId) {
+    return;
+  }
+  const linkedEventTeamIds =
+    relationships.get(relationshipId) ?? new Set<string>();
+  linkedEventTeamIds.add(eventTeamId);
+  relationships.set(relationshipId, linkedEventTeamIds);
+};
+
+const indexOfficialEventTeams = (
+  rows: any[],
+): {
+  eventTeamIds: Set<string>;
+  eventTeamIdsByRelationshipId: Map<string, Set<string>>;
+} => {
+  const eventTeamIds = new Set<string>();
   const eventTeamIdsByRelationshipId = new Map<string, Set<string>>();
-  const linkEventTeam = (
-    relationshipId: string | null,
-    eventTeamId: string,
-  ) => {
-    if (!relationshipId) {
-      return;
-    }
-    const linkedEventTeamIds =
-      eventTeamIdsByRelationshipId.get(relationshipId) ?? new Set<string>();
-    linkedEventTeamIds.add(eventTeamId);
-    eventTeamIdsByRelationshipId.set(relationshipId, linkedEventTeamIds);
-  };
-  for (const eventTeam of params.eventTeamRows) {
+  for (const eventTeam of rows) {
     const eventTeamId = normalizeEntityId(eventTeam?.id);
     if (!eventTeamId) {
       continue;
     }
-    linkEventTeam(eventTeamId, eventTeamId);
-    linkEventTeam(normalizeEntityId(eventTeam?.parentTeamId), eventTeamId);
+    eventTeamIds.add(eventTeamId);
+    linkEventTeamRelationship(
+      eventTeamIdsByRelationshipId,
+      eventTeamId,
+      eventTeamId,
+    );
+    linkEventTeamRelationship(
+      eventTeamIdsByRelationshipId,
+      normalizeEntityId(eventTeam?.parentTeamId),
+      eventTeamId,
+    );
   }
-  const addMembership = (userIdValue: unknown, eventTeamIdValue: unknown) => {
-    const userId = normalizeEntityId(userIdValue);
-    const eventTeamId = normalizeEntityId(eventTeamIdValue);
-    if (
-      !userId ||
-      !eventTeamId ||
-      !officialIds.has(userId) ||
-      !eventTeamIds.has(eventTeamId)
-    ) {
-      return;
-    }
-    eventTeamIdsByUserId.get(userId)?.add(eventTeamId);
-  };
+  return { eventTeamIds, eventTeamIdsByRelationshipId };
+};
 
+const addOfficialMembership = (
+  userIdValue: unknown,
+  eventTeamIdValue: unknown,
+  officialIds: Set<string>,
+  eventTeamIds: Set<string>,
+  eventTeamIdsByUserId: Map<string, Set<string>>,
+): void => {
+  const userId = normalizeEntityId(userIdValue);
+  const eventTeamId = normalizeEntityId(eventTeamIdValue);
+  if (
+    !userId ||
+    !eventTeamId ||
+    !officialIds.has(userId) ||
+    !eventTeamIds.has(eventTeamId)
+  ) {
+    return;
+  }
+  eventTeamIdsByUserId.get(userId)?.add(eventTeamId);
+};
+
+const addCanonicalOfficialMemberships = (
+  params: {
+    officialIds: string[];
+    canonicalTeamIdsByUserId: Map<string, string[]>;
+    eventTeamIdsByRelationshipId: Map<string, Set<string>>;
+  },
+  officialIds: Set<string>,
+  eventTeamIds: Set<string>,
+  eventTeamIdsByUserId: Map<string, Set<string>>,
+): void => {
   for (const userId of params.officialIds) {
     for (const canonicalTeamId of params.canonicalTeamIdsByUserId.get(userId) ??
       []) {
-      for (const eventTeamId of eventTeamIdsByRelationshipId.get(
+      for (const eventTeamId of params.eventTeamIdsByRelationshipId.get(
         canonicalTeamId,
       ) ?? []) {
-        addMembership(userId, eventTeamId);
+        addOfficialMembership(
+          userId,
+          eventTeamId,
+          officialIds,
+          eventTeamIds,
+          eventTeamIdsByUserId,
+        );
       }
     }
   }
+};
 
-  for (const eventTeam of params.eventTeamRows) {
+const addOfficialRosterMemberships = (
+  rows: any[],
+  officialIds: Set<string>,
+  eventTeamIds: Set<string>,
+  eventTeamIdsByUserId: Map<string, Set<string>>,
+): void => {
+  for (const eventTeam of rows) {
     const eventTeamId = normalizeEntityId(eventTeam?.id);
     if (!eventTeamId) {
       continue;
@@ -3129,18 +4322,95 @@ const buildOfficialEventTeamIds = (params: {
       normalizeEntityId(eventTeam?.headCoachId),
       ...ensureStringArray(eventTeam?.coachIds),
     ];
-    rosterUserIds.forEach((userId) => addMembership(userId, eventTeamId));
+    rosterUserIds.forEach((userId) =>
+      addOfficialMembership(
+        userId,
+        eventTeamId,
+        officialIds,
+        eventTeamIds,
+        eventTeamIdsByUserId,
+      ),
+    );
   }
+};
 
-  params.eventParticipantRows.forEach((row) => {
+const addOfficialParticipantMemberships = (
+  rows: any[],
+  officialIds: Set<string>,
+  eventTeamIds: Set<string>,
+  eventTeamIdsByUserId: Map<string, Set<string>>,
+): void => {
+  rows.forEach((row) => {
     if (row?.status === "ACTIVE") {
-      addMembership(row?.registrantId, row?.eventTeamId);
+      addOfficialMembership(
+        row?.registrantId,
+        row?.eventTeamId,
+        officialIds,
+        eventTeamIds,
+        eventTeamIdsByUserId,
+      );
     }
   });
-  params.eventTeamStaffRows.forEach((row) => {
-    addMembership(row?.userId, row?.eventTeamId);
-  });
+};
 
+const addOfficialStaffMemberships = (
+  rows: any[],
+  officialIds: Set<string>,
+  eventTeamIds: Set<string>,
+  eventTeamIdsByUserId: Map<string, Set<string>>,
+): void => {
+  rows.forEach((row) => {
+    addOfficialMembership(
+      row?.userId,
+      row?.eventTeamId,
+      officialIds,
+      eventTeamIds,
+      eventTeamIdsByUserId,
+    );
+  });
+};
+
+const buildOfficialEventTeamIds = (params: {
+  officialIds: string[];
+  canonicalTeamIdsByUserId: Map<string, string[]>;
+  eventTeamRows: any[];
+  eventParticipantRows: any[];
+  eventTeamStaffRows: any[];
+}): Map<string, Set<string>> => {
+  const officialIds = new Set(params.officialIds);
+  const eventTeamIdsByUserId = new Map<string, Set<string>>(
+    params.officialIds.map((userId) => [userId, new Set<string>()]),
+  );
+  const { eventTeamIds, eventTeamIdsByRelationshipId } =
+    indexOfficialEventTeams(params.eventTeamRows);
+  addCanonicalOfficialMemberships(
+    {
+      officialIds: params.officialIds,
+      canonicalTeamIdsByUserId: params.canonicalTeamIdsByUserId,
+      eventTeamIdsByRelationshipId,
+    },
+    officialIds,
+    eventTeamIds,
+    eventTeamIdsByUserId,
+  );
+  addOfficialRosterMemberships(
+    params.eventTeamRows,
+    officialIds,
+    eventTeamIds,
+    eventTeamIdsByUserId,
+  );
+  addOfficialParticipantMemberships(
+    params.eventParticipantRows,
+    officialIds,
+    eventTeamIds,
+    eventTeamIdsByUserId,
+  );
+  addOfficialStaffMemberships(
+    params.eventTeamStaffRows,
+    officialIds,
+    eventTeamIds,
+    eventTeamIdsByUserId,
+  );
   return eventTeamIdsByUserId;
 };
 
@@ -3267,6 +4537,189 @@ const appendBlockingEvent = (params: {
   );
 };
 
+type ResolvedBlockingSlotTimes = {
+  slotTimeZone: string;
+  slotStart: Date;
+  repeating: boolean;
+  startMinutes: number;
+  explicitEnd: Date | null;
+  endMinutes: number | null;
+};
+
+const firstBlockingDate = (
+  primary: Date | null | undefined,
+  fallback: Date | null | undefined,
+): Date | null => {
+  if (primary !== null && primary !== undefined) {
+    return primary;
+  }
+  if (fallback !== null && fallback !== undefined) {
+    return fallback;
+  }
+  return null;
+};
+
+const resolveBlockingStartMinutes = (
+  slot: any,
+  slotStart: Date,
+  slotTimeZone: string,
+): number => {
+  if (typeof slot?.startTimeMinutes === "number") {
+    return slot.startTimeMinutes;
+  }
+  return minutesInTimeZone(slotStart, slotTimeZone);
+};
+
+const resolveBlockingEndMinutes = (
+  slot: any,
+  explicitEnd: Date | null,
+  slotTimeZone: string,
+): number | null => {
+  if (typeof slot?.endTimeMinutes === "number") {
+    return slot.endTimeMinutes;
+  }
+  if (explicitEnd) {
+    return minutesInTimeZone(explicitEnd, slotTimeZone);
+  }
+  return null;
+};
+
+const resolveBlockingSlotTimes = (params: {
+  slot: any;
+  fallbackStart?: Date | null;
+  fallbackEnd?: Date | null;
+}): ResolvedBlockingSlotTimes | null => {
+  const slotTimeZone = resolveTimeZone(
+    params.slot?.timeZone,
+    DEFAULT_EVENT_TIME_ZONE,
+  );
+  const slotStart = firstBlockingDate(
+    parseDateInputInTimeZone(params.slot?.startDate, slotTimeZone),
+    params.fallbackStart,
+  );
+  if (!slotStart) {
+    return null;
+  }
+  const explicitEnd = firstBlockingDate(
+    parseDateInputInTimeZone(params.slot?.endDate, slotTimeZone),
+    params.fallbackEnd,
+  );
+  return {
+    slotTimeZone,
+    slotStart,
+    repeating: params.slot?.repeating !== false,
+    startMinutes: resolveBlockingStartMinutes(
+      params.slot,
+      slotStart,
+      slotTimeZone,
+    ),
+    explicitEnd,
+    endMinutes: resolveBlockingEndMinutes(
+      params.slot,
+      explicitEnd,
+      slotTimeZone,
+    ),
+  };
+};
+
+const deriveBlockingSlotEnd = (
+  slotStart: Date,
+  startMinutes: number,
+  explicitEnd: Date | null,
+  endMinutes: number | null,
+): Date | null => {
+  if (explicitEnd) {
+    return explicitEnd;
+  }
+  if (typeof endMinutes === "number" && endMinutes > startMinutes) {
+    return new Date(
+      slotStart.getTime() + (endMinutes - startMinutes) * MINUTE_MS,
+    );
+  }
+  return null;
+};
+
+const appendSingleBlockingSlot = (
+  params: {
+    field: PlayingField;
+    fieldId: string;
+    blockPrefix: string;
+    parentId: string;
+    windowStart: Date;
+    windowEnd: Date;
+  },
+  slotStart: Date,
+  resolvedEnd: Date | null,
+): void => {
+  if (!resolvedEnd) {
+    return;
+  }
+  if (
+    !rangesOverlap(
+      slotStart,
+      resolvedEnd,
+      params.windowStart,
+      params.windowEnd,
+    )
+  ) {
+    return;
+  }
+  const startTime = Math.max(slotStart.getTime(), params.windowStart.getTime());
+  const endTime = Math.min(resolvedEnd.getTime(), params.windowEnd.getTime());
+  appendBlockingEvent({
+    field: params.field,
+    id: `${params.blockPrefix}${params.fieldId}__${startTime}`,
+    start: new Date(startTime),
+    end: new Date(endTime),
+    parentId: params.parentId,
+  });
+};
+
+const appendRepeatingBlockingSlot = (
+  params: {
+    slot: any;
+    field: PlayingField;
+    fieldId: string;
+    blockPrefix: string;
+    parentId: string;
+    windowStart: Date;
+    windowEnd: Date;
+  },
+  slotStart: Date,
+): void => {
+  const effectiveStart = new Date(
+    Math.max(slotStart.getTime(), params.windowStart.getTime()),
+  );
+  const effectiveEnd = new Date(params.windowEnd.getTime());
+  if (effectiveEnd.getTime() <= effectiveStart.getTime()) {
+    return;
+  }
+  const occurrences = enumerateRepeatingTimeSlotOccurrences({
+    slot: params.slot,
+    windowStart: effectiveStart,
+    windowEnd: effectiveEnd,
+  });
+  occurrences.forEach((occurrence) => {
+    if (
+      !rangesOverlap(
+        occurrence.start,
+        occurrence.end,
+        effectiveStart,
+        effectiveEnd,
+      )
+    ) {
+      return;
+    }
+    appendBlockingEvent({
+      field: params.field,
+      id: `${params.blockPrefix}${params.fieldId}__${occurrence.start.getTime()}`,
+      start: occurrence.start,
+      end: occurrence.end,
+      parentId: params.parentId,
+    });
+  });
+};
+
 const appendBlockingEventsFromSlot = (params: {
   slot: any;
   field: PlayingField;
@@ -3278,96 +4731,24 @@ const appendBlockingEventsFromSlot = (params: {
   fallbackStart?: Date | null;
   fallbackEnd?: Date | null;
 }): void => {
-  const slotTimeZone = resolveTimeZone(
-    params.slot?.timeZone,
-    DEFAULT_EVENT_TIME_ZONE,
-  );
-  const slotStart =
-    parseDateInputInTimeZone(params.slot?.startDate, slotTimeZone) ??
-    params.fallbackStart ??
-    null;
-  if (!slotStart) {
+  const resolved = resolveBlockingSlotTimes(params);
+  if (!resolved) {
     return;
   }
-  const repeating = params.slot?.repeating !== false;
-  const startMinutes =
-    typeof params.slot?.startTimeMinutes === "number"
-      ? params.slot.startTimeMinutes
-      : minutesInTimeZone(slotStart, slotTimeZone);
-  const explicitEnd =
-    parseDateInputInTimeZone(params.slot?.endDate, slotTimeZone) ??
-    params.fallbackEnd ??
-    null;
-  const endMinutes =
-    typeof params.slot?.endTimeMinutes === "number"
-      ? params.slot.endTimeMinutes
-      : explicitEnd
-        ? minutesInTimeZone(explicitEnd, slotTimeZone)
-        : null;
-
-  if (!repeating) {
-    const resolvedEnd =
-      explicitEnd ??
-      (typeof endMinutes === "number" && endMinutes > startMinutes
-        ? new Date(
-            slotStart.getTime() + (endMinutes - startMinutes) * MINUTE_MS,
-          )
-        : null);
-    if (
-      !resolvedEnd ||
-      !rangesOverlap(
-        slotStart,
-        resolvedEnd,
-        params.windowStart,
-        params.windowEnd,
-      )
-    ) {
-      return;
-    }
-    appendBlockingEvent({
-      field: params.field,
-      id: `${params.blockPrefix}${params.fieldId}__${Math.max(slotStart.getTime(), params.windowStart.getTime())}`,
-      start: new Date(
-        Math.max(slotStart.getTime(), params.windowStart.getTime()),
+  if (!resolved.repeating) {
+    appendSingleBlockingSlot(
+      params,
+      resolved.slotStart,
+      deriveBlockingSlotEnd(
+        resolved.slotStart,
+        resolved.startMinutes,
+        resolved.explicitEnd,
+        resolved.endMinutes,
       ),
-      end: new Date(
-        Math.min(resolvedEnd.getTime(), params.windowEnd.getTime()),
-      ),
-      parentId: params.parentId,
-    });
+    );
     return;
   }
-
-  const effectiveStart = new Date(
-    Math.max(slotStart.getTime(), params.windowStart.getTime()),
-  );
-  const effectiveEnd = new Date(params.windowEnd.getTime());
-  if (effectiveEnd.getTime() <= effectiveStart.getTime()) {
-    return;
-  }
-
-  const occurrences = enumerateRepeatingTimeSlotOccurrences({
-    slot: params.slot,
-    windowStart: effectiveStart,
-    windowEnd: effectiveEnd,
-  });
-  occurrences.forEach((occurrence) => {
-    if (!rangesOverlap(
-      occurrence.start,
-      occurrence.end,
-      effectiveStart,
-      effectiveEnd,
-    )) {
-      return;
-    }
-    appendBlockingEvent({
-      field: params.field,
-      id: `${params.blockPrefix}${params.fieldId}__${occurrence.start.getTime()}`,
-      start: occurrence.start,
-      end: occurrence.end,
-      parentId: params.parentId,
-    });
-  });
+  appendRepeatingBlockingSlot(params, resolved.slotStart);
 };
 
 type FieldSchedulingConflictDetail = FieldSchedulingConflict & {
@@ -3490,6 +4871,33 @@ const buildConflictFieldMap = (
   return fields;
 };
 
+const buildFieldScheduleConflict = (
+  fieldId: string,
+  block: any,
+  start: Date,
+  end: Date,
+): EventFieldScheduleConflict | null => {
+  const blockStart = toOptionalDate(block?.start);
+  const blockEnd = toOptionalDate(block?.end);
+  if (
+    !blockStart ||
+    !blockEnd ||
+    blockEnd.getTime() <= blockStart.getTime()
+  ) {
+    return null;
+  }
+  if (!rangesOverlap(blockStart, blockEnd, start, end)) {
+    return null;
+  }
+  return {
+    fieldId,
+    blockId: String(block?.id ?? ""),
+    parentId: normalizeEntityId(block?.parentId),
+    start: blockStart,
+    end: blockEnd,
+  };
+};
+
 const collectFieldScheduleConflicts = (params: {
   fields: Record<string, PlayingField>;
   start: Date;
@@ -3498,25 +4906,15 @@ const collectFieldScheduleConflicts = (params: {
   const conflicts: EventFieldScheduleConflict[] = [];
   for (const [fieldId, field] of Object.entries(params.fields)) {
     for (const block of ensureArray((field as any)?.events)) {
-      const blockStart = toOptionalDate((block as any)?.start);
-      const blockEnd = toOptionalDate((block as any)?.end);
-      if (
-        !blockStart ||
-        !blockEnd ||
-        blockEnd.getTime() <= blockStart.getTime()
-      ) {
-        continue;
-      }
-      if (!rangesOverlap(blockStart, blockEnd, params.start, params.end)) {
-        continue;
-      }
-      conflicts.push({
+      const conflict = buildFieldScheduleConflict(
         fieldId,
-        blockId: String((block as any)?.id ?? ""),
-        parentId: normalizeEntityId((block as any)?.parentId),
-        start: blockStart,
-        end: blockEnd,
-      });
+        block,
+        params.start,
+        params.end,
+      );
+      if (conflict) {
+        conflicts.push(conflict);
+      }
     }
   }
   return conflicts;
@@ -3579,6 +4977,575 @@ export const assertNoEventFieldSchedulingConflicts = async (params: {
   }
 };
 
+const readMatchRowValue = <T>(
+  row: Record<string, unknown>,
+  key: string,
+  fallback: T,
+): T => {
+  const value = row[key];
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+  return value as T;
+};
+
+const resolveMatchDivision = (
+  row: Record<string, unknown>,
+  divisionLookup: Map<string, Division>,
+  divisions: Division[],
+): Division => {
+  const normalizedDivisionId = normalizeDivisionKey(row.division);
+  if (normalizedDivisionId) {
+    const normalizedDivision = divisionLookup.get(normalizedDivisionId);
+    if (normalizedDivision) {
+      return normalizedDivision;
+    }
+  }
+  if (typeof row.division === "string") {
+    const rawDivision = divisionLookup.get(row.division);
+    if (rawDivision) {
+      return rawDivision;
+    }
+  }
+  return divisions[0] as Division;
+};
+
+const resolveMatchHydrationFlags = (
+  row: Record<string, unknown>,
+  hydration: {
+    segmentMatchIds?: Set<string> | null;
+    incidentMatchIds?: Set<string> | null;
+  },
+): {
+  rowMatchId: string;
+  shouldHydrateSegments: boolean;
+  shouldHydrateIncidents: boolean;
+} => {
+  const rowMatchId =
+    normalizeEntityId(row.id) ?? String(readMatchRowValue(row, "id", ""));
+  const shouldHydrateSegments =
+    !hydration.segmentMatchIds || hydration.segmentMatchIds.has(rowMatchId);
+  const shouldHydrateIncidents =
+    !hydration.incidentMatchIds || hydration.incidentMatchIds.has(rowMatchId);
+  return { rowMatchId, shouldHydrateSegments, shouldHydrateIncidents };
+};
+
+const sortMatchDetailRows = (rows: any[]): any[] =>
+  rows.sort(
+    (left, right) =>
+      Number(left.sequence ?? 0) - Number(right.sequence ?? 0),
+  );
+
+const resolveMatchSegments = (
+  row: Record<string, unknown>,
+  shouldHydrate: boolean,
+  segmentRowsByMatchId: Map<string, any[]>,
+): any[] => {
+  if (!shouldHydrate) {
+    return [];
+  }
+  const rowMatchId = normalizeEntityId(row.id);
+  return sortMatchDetailRows(
+    rowMatchId ? segmentRowsByMatchId.get(rowMatchId) ?? [] : [],
+  ).map(
+    serializeMatchSegmentRow,
+  );
+};
+
+const resolveMatchIncidents = (
+  row: Record<string, unknown>,
+  shouldHydrate: boolean,
+  incidentRowsByMatchId: Map<string, any[]>,
+): any[] => {
+  if (!shouldHydrate) {
+    return [];
+  }
+  const rowMatchId = normalizeEntityId(row.id);
+  return sortMatchDetailRows(
+    rowMatchId ? incidentRowsByMatchId.get(rowMatchId) ?? [] : [],
+  ).map(
+    serializeMatchIncidentRow,
+  );
+};
+
+const hasMatchBracketLinks = (row: Record<string, unknown>): boolean =>
+  Boolean(
+    row.losersBracket ||
+      row.previousLeftId ||
+      row.previousRightId ||
+      row.winnerNextMatchId ||
+      row.loserNextMatchId,
+  );
+
+const resolveMatchCompetitionPhase = (
+  row: Record<string, unknown>,
+  event: Tournament | League,
+  division: Division,
+): DivisionCompetitionPhase =>
+  division.phase ??
+  resolveDivisionCompetitionPhase({
+    eventType: event.eventType,
+    divisionKind: division.kind,
+    hasBracketLinks: hasMatchBracketLinks(row),
+  });
+
+const resolveMatchOfficialAssignments = (params: {
+  row: Record<string, unknown>;
+  event: Tournament | League;
+  officialPositionsForMatch: EventOfficialPosition[];
+  eventOfficialsById: Map<string, EventOfficialRecord>;
+}): MatchOfficialAssignment[] => {
+  const positionCountsForMatch = new Map(
+    params.officialPositionsForMatch.map((position) => [
+      position.id,
+      position.count,
+    ]),
+  );
+  let officialAssignments: MatchOfficialAssignment[] = [];
+  try {
+    officialAssignments = normalizeMatchOfficialAssignments(
+      params.row.officialIds,
+      {
+        positionCountsById: positionCountsForMatch,
+        eventOfficialsById: params.eventOfficialsById,
+      },
+    );
+  } catch {
+    officialAssignments = [];
+  }
+  if (!officialAssignments.length) {
+    officialAssignments = buildLegacyOfficialAssignment({
+      eventId: readMatchRowValue(params.row, "eventId", params.event.id),
+      officialId: readMatchRowValue<string | null>(
+        params.row,
+        "officialId",
+        null,
+      ),
+      officialCheckedIn:
+        readMatchRowValue<boolean>(params.row, "officialCheckedIn", false) === true,
+      officialPositions: params.officialPositionsForMatch,
+    });
+  }
+  return completeMatchOfficialAssignmentSlots(
+    officialAssignments,
+    params.officialPositionsForMatch,
+  );
+};
+
+const resolveMatchOfficialData = (params: {
+  row: Record<string, unknown>;
+  event: Tournament | League;
+  division: Division;
+  eventOfficialsById: Map<string, EventOfficialRecord>;
+}): {
+  officialAssignments: MatchOfficialAssignment[];
+  primaryOfficialId: string | null;
+  primaryOfficialCheckedIn: boolean;
+} => {
+  const competitionPhase = resolveMatchCompetitionPhase(
+    params.row,
+    params.event,
+    params.division,
+  );
+  const officialPositionsForMatch =
+    params.division.phaseSettings?.[competitionPhase]?.officialPositions ??
+    params.event.officialPositions;
+  const officialAssignments = resolveMatchOfficialAssignments({
+    row: params.row,
+    event: params.event,
+    officialPositionsForMatch,
+    eventOfficialsById: params.eventOfficialsById,
+  });
+  const primaryOfficialId =
+    deriveLegacyOfficialIdFromAssignments(officialAssignments) ??
+    normalizeEntityId(params.row.officialId);
+  const primaryOfficialCheckedIn = officialAssignments.length
+    ? deriveLegacyOfficialCheckedInFromAssignments(officialAssignments)
+    : readMatchRowValue(params.row, "officialCheckedIn", false);
+  return {
+    officialAssignments,
+    primaryOfficialId,
+    primaryOfficialCheckedIn,
+  };
+};
+
+type MatchPhaseRuleInputs = {
+  competitionPhase: DivisionCompetitionPhase;
+  phaseUsesSets: boolean;
+  phaseSetsPerMatch: number | null;
+  phaseWinnerSetCount: number | null;
+  phaseLoserSetCount: number | null;
+  phaseMatchDurationMinutes: number;
+};
+
+const resolveMatchPhaseUsesSets = (
+  division: Division,
+  event: Tournament | League,
+): boolean =>
+  division.kind === "LEAGUE"
+    ? division.leagueConfig?.usesSets ?? event.usesSets
+    : event.usesSets;
+
+const resolveMatchPhaseSetCounts = (
+  division: Division,
+  event: Tournament | League,
+): Pick<
+  MatchPhaseRuleInputs,
+  "phaseSetsPerMatch" | "phaseWinnerSetCount" | "phaseLoserSetCount"
+> => ({
+  phaseSetsPerMatch:
+    division.leagueConfig?.setsPerMatch ??
+    (event as any).setsPerMatch ??
+    null,
+  phaseWinnerSetCount:
+    division.playoffConfig?.winnerSetCount ??
+    (event as any).winnerSetCount ??
+    null,
+  phaseLoserSetCount:
+    division.playoffConfig?.loserSetCount ??
+    (event as any).loserSetCount ??
+    null,
+});
+
+const resolveMatchPhaseDuration = (
+  competitionPhase: string,
+  division: Division,
+  event: Tournament | League,
+): number =>
+  competitionPhase === "LEAGUE" || competitionPhase === "POOL"
+    ? division.leagueConfig?.matchDurationMinutes ??
+      event.matchDurationMinutes
+    : division.playoffConfig?.matchDurationMinutes ??
+      event.matchDurationMinutes;
+
+const resolveMatchPhaseRuleInputs = (params: {
+  row: Record<string, unknown>;
+  event: Tournament | League;
+  division: Division;
+}): MatchPhaseRuleInputs => {
+  const competitionPhase = resolveMatchCompetitionPhase(
+    params.row,
+    params.event,
+    params.division,
+  );
+  const setCounts = resolveMatchPhaseSetCounts(params.division, params.event);
+  return {
+    competitionPhase,
+    phaseUsesSets: resolveMatchPhaseUsesSets(
+      params.division,
+      params.event,
+    ),
+    ...setCounts,
+    phaseMatchDurationMinutes: resolveMatchPhaseDuration(
+      competitionPhase,
+      params.division,
+      params.event,
+    ),
+  };
+};
+
+const buildContextualMatchRules = (params: {
+  row: Record<string, unknown>;
+  event: Tournament | League;
+  phaseRules: MatchPhaseRuleInputs;
+  phaseResolvedMatchRules: any;
+  segments: any[];
+}): any => {
+  const { row, event, phaseRules, phaseResolvedMatchRules, segments } = params;
+  if (row.matchRulesSnapshot) {
+    return row.matchRulesSnapshot;
+  }
+  return resolveMatchRulesForContext({
+    baseRules: phaseResolvedMatchRules,
+    eventType: event.eventType,
+    usesSets: phaseRules.phaseUsesSets,
+    setsPerMatch: phaseRules.phaseSetsPerMatch,
+    winnerSetCount: phaseRules.phaseWinnerSetCount,
+    loserSetCount: phaseRules.phaseLoserSetCount,
+    losersBracket: Boolean(row.losersBracket),
+    previousLeftId: readMatchRowValue(row, "previousLeftId", null),
+    previousRightId: readMatchRowValue(row, "previousRightId", null),
+    winnerNextMatchId: readMatchRowValue(row, "winnerNextMatchId", null),
+    loserNextMatchId: readMatchRowValue(row, "loserNextMatchId", null),
+    existingSegmentCount: segments.length,
+    existingTeam1PointCount: ensureArray(row.team1Points as unknown[]).length,
+    existingTeam2PointCount: ensureArray(row.team2Points as unknown[]).length,
+  });
+};
+
+const resolveMatchPhaseRules = (params: {
+  row: Record<string, unknown>;
+  event: Tournament | League;
+  division: Division;
+  segments: any[];
+  resolvedMatchRules: ReturnType<typeof resolveMatchRules> | null;
+}): any => {
+  const phaseRules = resolveMatchPhaseRuleInputs(params);
+  const phaseResolvedMatchRules = resolveMatchRulesForDivisionPhase({
+    phase: phaseRules.competitionPhase,
+    phaseSettings: params.division.phaseSettings,
+    sportTemplate:
+      params.resolvedMatchRules ?? (params.event as any).resolvedMatchRules,
+    autoCreatePointMatchIncidents: (params.event as any)
+      .autoCreatePointMatchIncidents,
+    usesSets: phaseRules.phaseUsesSets,
+    setsPerMatch: phaseRules.phaseSetsPerMatch,
+    winnerSetCount: phaseRules.phaseWinnerSetCount,
+    matchDurationMinutes: phaseRules.phaseMatchDurationMinutes,
+    officialPositions: params.event.officialPositions,
+  });
+  return buildContextualMatchRules({
+    row: params.row,
+    event: params.event,
+    phaseRules,
+    phaseResolvedMatchRules,
+    segments: params.segments,
+  });
+};
+
+const resolveMatchField = (
+  row: Record<string, unknown>,
+  fields: Record<string, PlayingField>,
+): PlayingField | null => {
+  const fieldId = readMatchRowValue<string | null>(row, "fieldId", null);
+  if (!fieldId) {
+    return null;
+  }
+  return fields[fieldId] ?? null;
+};
+
+const resolveMatchTeam = (
+  row: Record<string, unknown>,
+  teams: Record<string, Team>,
+  key: string,
+): Team | null => {
+  const teamId = readMatchRowValue<string | null>(row, key, null);
+  if (!teamId) {
+    return null;
+  }
+  return teams[teamId] ?? null;
+};
+
+const resolveMatchOfficial = (
+  row: Record<string, unknown>,
+  officialLookup: Map<string, UserData>,
+): UserData | null => {
+  const officialId = normalizeEntityId(row.officialId);
+  if (!officialId) {
+    return null;
+  }
+  return officialLookup.get(officialId) ?? null;
+};
+
+const resolveMatchPlacementState = (
+  row: Record<string, unknown>,
+): "PLACED" | "UNPLACED" =>
+  readMatchRowValue(row, "placementState", null) === "PLACED" ||
+  Boolean(row.fieldId)
+    ? "PLACED"
+    : "UNPLACED";
+
+const resolveMatchNullableDateForConstructor = (
+  value: Date | null,
+): Date => value ?? new Date(0);
+
+const applyHydratedMatchDates = (
+  match: Match,
+  start: Date | null,
+  end: Date | null,
+): void => {
+  if (!start) {
+    (match as unknown as { start: Date | null }).start = null;
+  }
+  if (!end) {
+    (match as unknown as { end: Date | null }).end = null;
+  }
+};
+
+const markHydratedMatchDetails = (
+  match: Match,
+  shouldHydrateSegments: boolean,
+  shouldHydrateIncidents: boolean,
+): void => {
+  Object.defineProperty(match, hydratedMatchSegmentsSymbol, {
+    configurable: true,
+    enumerable: false,
+    value: shouldHydrateSegments,
+    writable: true,
+  });
+  Object.defineProperty(match, hydratedMatchIncidentsSymbol, {
+    configurable: true,
+    enumerable: false,
+    value: shouldHydrateIncidents,
+    writable: true,
+  });
+};
+
+const buildMatchFromRow = (params: {
+  row: any;
+  event: Tournament | League;
+  teams: Record<string, Team>;
+  fields: Record<string, PlayingField>;
+  divisionLookup: Map<string, Division>;
+  divisions: Division[];
+  officialLookup: Map<string, UserData>;
+  eventOfficialsById: Map<string, EventOfficialRecord>;
+  segmentRowsByMatchId: Map<string, any[]>;
+  incidentRowsByMatchId: Map<string, any[]>;
+  resolvedMatchRules: ReturnType<typeof resolveMatchRules> | null;
+  hydration: {
+    segmentMatchIds?: Set<string> | null;
+    incidentMatchIds?: Set<string> | null;
+  };
+}): Match => {
+  const division = resolveMatchDivision(
+    params.row,
+    params.divisionLookup,
+    params.divisions,
+  );
+  const {
+    rowMatchId,
+    shouldHydrateSegments,
+    shouldHydrateIncidents,
+  } = resolveMatchHydrationFlags(params.row, params.hydration);
+  const start = toOptionalDate(params.row.start);
+  const end = toOptionalDate(params.row.end);
+  const segments = resolveMatchSegments(
+    params.row,
+    shouldHydrateSegments,
+    params.segmentRowsByMatchId,
+  );
+  const incidents = resolveMatchIncidents(
+    params.row,
+    shouldHydrateIncidents,
+    params.incidentRowsByMatchId,
+  );
+  const officialData = resolveMatchOfficialData({
+    row: params.row,
+    event: params.event,
+    division,
+    eventOfficialsById: params.eventOfficialsById,
+  });
+  const contextualResolvedMatchRules = resolveMatchPhaseRules({
+    row: params.row,
+    event: params.event,
+    division,
+    segments,
+    resolvedMatchRules: params.resolvedMatchRules,
+  });
+  const winnerEventTeamId = resolveHydratedWinnerEventTeamId({
+    persistedWinnerEventTeamId: params.row.winnerEventTeamId,
+    shouldHydrateSegments,
+    segments,
+    resolvedMatchRules: contextualResolvedMatchRules,
+    team1Id: params.row.team1Id,
+    team2Id: params.row.team2Id,
+  });
+  const match = new Match({
+    id: params.row.id,
+    matchId: readMatchRowValue(params.row, "matchId", null),
+    locked: Boolean(params.row.locked),
+    placementState: resolveMatchPlacementState(params.row),
+    team1Seed:
+      typeof params.row.team1Seed === "number" ? params.row.team1Seed : null,
+    team2Seed:
+      typeof params.row.team2Seed === "number" ? params.row.team2Seed : null,
+    team1Points: ensureArray(params.row.team1Points),
+    team2Points: ensureArray(params.row.team2Points),
+    // Match currently expects Date in constructor, but unscheduled matches may be null.
+    // Use a temporary fallback and overwrite below.
+    start: resolveMatchNullableDateForConstructor(start),
+    end: resolveMatchNullableDateForConstructor(end),
+    createdAt: readMatchRowValue(params.row, "createdAt", null),
+    updatedAt: readMatchRowValue(params.row, "updatedAt", null),
+    losersBracket: Boolean(params.row.losersBracket),
+    division,
+    status: readMatchRowValue(params.row, "status", null),
+    field: resolveMatchField(params.row, params.fields),
+    resultStatus: readMatchRowValue(params.row, "resultStatus", null),
+    resultType: readMatchRowValue(params.row, "resultType", null),
+    actualStart: toOptionalDate(params.row.actualStart),
+    actualEnd: toOptionalDate(params.row.actualEnd),
+    statusReason: readMatchRowValue(params.row, "statusReason", null),
+    winnerEventTeamId,
+    matchRulesSnapshot: readMatchRowValue(
+      params.row,
+      "matchRulesSnapshot",
+      null,
+    ),
+    resolvedMatchRules: contextualResolvedMatchRules,
+    segments,
+    incidents,
+    bufferMs: matchBufferMs(params.event),
+    side: sideFrom(params.row.side),
+    officialCheckedIn: officialData.primaryOfficialCheckedIn,
+    officialAssignments: officialData.officialAssignments,
+    teamOfficial: resolveMatchTeam(params.row, params.teams, "teamOfficialId"),
+    official: resolveMatchOfficial(params.row, params.officialLookup),
+    team1: resolveMatchTeam(params.row, params.teams, "team1Id"),
+    team2: resolveMatchTeam(params.row, params.teams, "team2Id"),
+    eventId: params.row.eventId,
+  });
+  applyHydratedMatchDates(match, start, end);
+  markHydratedMatchDetails(
+    match,
+    shouldHydrateSegments,
+    shouldHydrateIncidents,
+  );
+  return match;
+};
+
+const resolveMatchPointer = (
+  matches: Record<string, Match>,
+  matchId: unknown,
+): Match | null => {
+  if (!matchId) {
+    return null;
+  }
+  return matches[String(matchId)] ?? null;
+};
+
+const wireMatchPointers = (
+  rows: any[],
+  matches: Record<string, Match>,
+): void => {
+  for (const row of rows) {
+    const match = matches[row.id];
+    if (!match) continue;
+    match.previousLeftMatch = resolveMatchPointer(
+      matches,
+      row.previousLeftId,
+    );
+    match.previousRightMatch = resolveMatchPointer(
+      matches,
+      row.previousRightId,
+    );
+    match.winnerNextMatch = resolveMatchPointer(
+      matches,
+      row.winnerNextMatchId,
+    );
+    match.loserNextMatch = resolveMatchPointer(
+      matches,
+      row.loserNextMatchId,
+    );
+  }
+};
+
+const attachMatchesToRelations = (
+  matches: Record<string, Match>,
+): void => {
+  for (const match of Object.values(matches)) {
+    if (match.field) {
+      match.field.matches.push(match);
+    }
+    for (const participant of match.getParticipants()) {
+      const matchesAttr = (participant as any).matches as Match[] | undefined;
+      if (!matchesAttr || matchesAttr.includes(match)) continue;
+      matchesAttr.push(match);
+    }
+  }
+};
+
 const buildMatches = (
   rows: any[],
   event: Tournament | League,
@@ -3603,246 +5570,25 @@ const buildMatches = (
   const eventOfficialsById = new Map(
     event.eventOfficials.map((official) => [official.id, official]),
   );
-  const segmentMatchIds = hydration.segmentMatchIds ?? null;
-  const incidentMatchIds = hydration.incidentMatchIds ?? null;
   const matches: Record<string, Match> = {};
   for (const row of rows) {
-    const rowMatchId = normalizeEntityId(row.id) ?? String(row.id ?? "");
-    const shouldHydrateSegments =
-      !segmentMatchIds || segmentMatchIds.has(rowMatchId);
-    const shouldHydrateIncidents =
-      !incidentMatchIds || incidentMatchIds.has(rowMatchId);
-    const normalizedDivisionId = normalizeDivisionKey(row.division);
-    const division =
-      normalizedDivisionId && divisionLookup.has(normalizedDivisionId)
-        ? (divisionLookup.get(normalizedDivisionId) as Division)
-        : row.division && divisionLookup.has(row.division)
-          ? (divisionLookup.get(row.division) as Division)
-          : divisions[0];
-    const start = toOptionalDate(row.start);
-    const end = toOptionalDate(row.end);
-    const hasBracketLinks = Boolean(
-      row.losersBracket ||
-        row.previousLeftId ||
-        row.previousRightId ||
-        row.winnerNextMatchId ||
-        row.loserNextMatchId,
-    );
-    const competitionPhase =
-      division.phase ??
-      resolveDivisionCompetitionPhase({
-        eventType: event.eventType,
-        divisionKind: division.kind,
-        hasBracketLinks,
-      });
-    const officialPositionsForMatch =
-      division.phaseSettings?.[competitionPhase]?.officialPositions ??
-      event.officialPositions;
-    const positionCountsForMatch = new Map(
-      officialPositionsForMatch.map((position) => [
-        position.id,
-        position.count,
-      ]),
-    );
-    let officialAssignments: MatchOfficialAssignment[] = [];
-    try {
-      officialAssignments = normalizeMatchOfficialAssignments(
-        (row as any).officialIds,
-        {
-          positionCountsById: positionCountsForMatch,
-          eventOfficialsById,
-        },
-      );
-    } catch {
-      officialAssignments = [];
-    }
-    if (!officialAssignments.length) {
-      officialAssignments = buildLegacyOfficialAssignment({
-        eventId: row.eventId ?? event.id,
-        officialId: row.officialId ?? null,
-        officialCheckedIn: row.officialCheckedIn === true,
-        officialPositions: officialPositionsForMatch,
-      });
-    }
-    officialAssignments = completeMatchOfficialAssignmentSlots(
-      officialAssignments,
-      officialPositionsForMatch,
-    );
-    const primaryOfficialId =
-      deriveLegacyOfficialIdFromAssignments(officialAssignments) ??
-      normalizeEntityId(row.officialId);
-    const primaryOfficialCheckedIn = officialAssignments.length
-      ? deriveLegacyOfficialCheckedInFromAssignments(officialAssignments)
-      : (row.officialCheckedIn ?? false);
-    const persistedSegments = shouldHydrateSegments
-      ? (segmentRowsByMatchId.get(row.id) ?? [])
-          .sort(
-            (left, right) =>
-              Number(left.sequence ?? 0) - Number(right.sequence ?? 0),
-          )
-          .map(serializeMatchSegmentRow)
-      : [];
-    const segments = shouldHydrateSegments ? persistedSegments : [];
-    const phaseUsesSets =
-      division.kind === "LEAGUE"
-        ? (division.leagueConfig?.usesSets ?? event.usesSets)
-        : event.usesSets;
-    const phaseSetsPerMatch =
-      division.leagueConfig?.setsPerMatch ??
-      (event as any).setsPerMatch ??
-      null;
-    const phaseWinnerSetCount =
-      division.playoffConfig?.winnerSetCount ??
-      (event as any).winnerSetCount ??
-      null;
-    const phaseLoserSetCount =
-      division.playoffConfig?.loserSetCount ??
-      (event as any).loserSetCount ??
-      null;
-    const phaseMatchDurationMinutes =
-      competitionPhase === "LEAGUE" || competitionPhase === "POOL"
-        ? (division.leagueConfig?.matchDurationMinutes ??
-          event.matchDurationMinutes)
-        : (division.playoffConfig?.matchDurationMinutes ??
-          event.matchDurationMinutes);
-    const phaseResolvedMatchRules = resolveMatchRulesForDivisionPhase({
-      phase: competitionPhase,
-      phaseSettings: division.phaseSettings,
-      sportTemplate: resolvedMatchRules ?? (event as any).resolvedMatchRules,
-      autoCreatePointMatchIncidents: (event as any)
-        .autoCreatePointMatchIncidents,
-      usesSets: phaseUsesSets,
-      setsPerMatch: phaseSetsPerMatch,
-      winnerSetCount: phaseWinnerSetCount,
-      matchDurationMinutes: phaseMatchDurationMinutes,
-      officialPositions: event.officialPositions,
+    matches[row.id] = buildMatchFromRow({
+      row,
+      event,
+      teams,
+      fields,
+      divisionLookup,
+      divisions,
+      officialLookup,
+      eventOfficialsById,
+      segmentRowsByMatchId,
+      incidentRowsByMatchId,
+      resolvedMatchRules,
+      hydration,
     });
-    const contextualResolvedMatchRules =
-      row.matchRulesSnapshot ??
-      resolveMatchRulesForContext({
-        baseRules: phaseResolvedMatchRules,
-        eventType: event.eventType,
-        usesSets: phaseUsesSets,
-        setsPerMatch: phaseSetsPerMatch,
-        winnerSetCount: phaseWinnerSetCount,
-        loserSetCount: phaseLoserSetCount,
-        losersBracket: Boolean(row.losersBracket),
-        previousLeftId: row.previousLeftId ?? null,
-        previousRightId: row.previousRightId ?? null,
-        winnerNextMatchId: row.winnerNextMatchId ?? null,
-        loserNextMatchId: row.loserNextMatchId ?? null,
-        existingSegmentCount: segments.length,
-        existingTeam1PointCount: ensureArray(row.team1Points).length,
-        existingTeam2PointCount: ensureArray(row.team2Points).length,
-      });
-    const incidents = shouldHydrateIncidents
-      ? (incidentRowsByMatchId.get(row.id) ?? [])
-          .sort(
-            (left, right) =>
-              Number(left.sequence ?? 0) - Number(right.sequence ?? 0),
-          )
-          .map(serializeMatchIncidentRow)
-      : [];
-    const winnerEventTeamId = resolveHydratedWinnerEventTeamId({
-      persistedWinnerEventTeamId: row.winnerEventTeamId,
-      shouldHydrateSegments,
-      segments,
-      resolvedMatchRules: contextualResolvedMatchRules,
-      team1Id: row.team1Id,
-      team2Id: row.team2Id,
-    });
-    const match = new Match({
-      id: row.id,
-      matchId: row.matchId ?? null,
-      locked: Boolean(row.locked),
-      placementState:
-        row.placementState === "PLACED" || row.fieldId ? "PLACED" : "UNPLACED",
-      team1Seed: typeof row.team1Seed === "number" ? row.team1Seed : null,
-      team2Seed: typeof row.team2Seed === "number" ? row.team2Seed : null,
-      team1Points: ensureArray(row.team1Points),
-      team2Points: ensureArray(row.team2Points),
-      // Match currently expects Date in constructor, but unscheduled matches may be null.
-      // Use a temporary fallback and overwrite below.
-      start: start ?? new Date(0),
-      end: end ?? new Date(0),
-      createdAt: row.createdAt ?? null,
-      updatedAt: row.updatedAt ?? null,
-      losersBracket: Boolean(row.losersBracket),
-      division,
-      status: row.status ?? null,
-      field: row.fieldId ? (fields[row.fieldId] ?? null) : null,
-      resultStatus: row.resultStatus ?? null,
-      resultType: row.resultType ?? null,
-      actualStart: toOptionalDate(row.actualStart),
-      actualEnd: toOptionalDate(row.actualEnd),
-      statusReason: row.statusReason ?? null,
-      winnerEventTeamId,
-      matchRulesSnapshot: row.matchRulesSnapshot ?? null,
-      resolvedMatchRules: contextualResolvedMatchRules,
-      segments,
-      incidents,
-      bufferMs: matchBufferMs(event),
-      side: sideFrom(row.side),
-      officialCheckedIn: primaryOfficialCheckedIn,
-      officialAssignments,
-      teamOfficial: row.teamOfficialId
-        ? (teams[row.teamOfficialId] ?? null)
-        : null,
-      official: primaryOfficialId
-        ? (officialLookup.get(primaryOfficialId) ?? null)
-        : null,
-      team1: row.team1Id ? (teams[row.team1Id] ?? null) : null,
-      team2: row.team2Id ? (teams[row.team2Id] ?? null) : null,
-      eventId: row.eventId,
-    });
-    if (!start) {
-      (match as unknown as { start: Date | null }).start = null;
-    }
-    if (!end) {
-      (match as unknown as { end: Date | null }).end = null;
-    }
-    Object.defineProperty(match, hydratedMatchSegmentsSymbol, {
-      configurable: true,
-      enumerable: false,
-      value: shouldHydrateSegments,
-      writable: true,
-    });
-    Object.defineProperty(match, hydratedMatchIncidentsSymbol, {
-      configurable: true,
-      enumerable: false,
-      value: shouldHydrateIncidents,
-      writable: true,
-    });
-    matches[row.id] = match;
   }
-  // Wire pointers
-  for (const row of rows) {
-    const match = matches[row.id];
-    if (!match) continue;
-    match.previousLeftMatch = row.previousLeftId
-      ? (matches[row.previousLeftId] ?? null)
-      : null;
-    match.previousRightMatch = row.previousRightId
-      ? (matches[row.previousRightId] ?? null)
-      : null;
-    match.winnerNextMatch = row.winnerNextMatchId
-      ? (matches[row.winnerNextMatchId] ?? null)
-      : null;
-    match.loserNextMatch = row.loserNextMatchId
-      ? (matches[row.loserNextMatchId] ?? null)
-      : null;
-  }
-  // Attach to teams/fields/officials
-  for (const match of Object.values(matches)) {
-    if (match.field) {
-      match.field.matches.push(match);
-    }
-    for (const participant of match.getParticipants()) {
-      const matchesAttr = (participant as any).matches as Match[] | undefined;
-      if (!matchesAttr) continue;
-      if (!matchesAttr.includes(match)) matchesAttr.push(match);
-    }
-  }
+  wireMatchPointers(rows, matches);
+  attachMatchesToRelations(matches);
   return matches;
 };
 
@@ -3855,6 +5601,7 @@ type HydratedMatchPersistenceInput = MatchPersistenceInput & {
 
 type LoadEventWithRelationsOptions = {
   hydratedMatchDetailIds?: string[] | null;
+  retainedMatchIds?: string[] | null;
   includeTeamPlayers?: boolean;
   includeTeamRegistrations?: boolean;
 };
@@ -3868,178 +5615,193 @@ const shouldPersistHydratedMatchIncidents = (
   match: HydratedMatchPersistenceInput,
 ): boolean =>
   match[hydratedMatchIncidentsSymbol] !== false;
-export const loadEventWithRelations = async (
-  eventId: string,
-  client: PrismaLike = prisma,
-  options: LoadEventWithRelationsOptions = {},
-): Promise<League | Tournament> => {
-  const event = await client.events.findUnique({ where: { id: eventId } });
-  if (!event) {
-    throw new Error("Event not found");
-  }
-  const includeTeamPlayers = options.includeTeamPlayers !== false;
-  const includeTeamRegistrations = options.includeTeamRegistrations !== false;
+type EventPhaseParticipantRow = {
+  phaseDivisionId?: string | null;
+  eventTeamId?: string | null;
+};
 
-  const allDivisionRows = await client.divisions.findMany({
-    where: {
-      eventId: event.id,
-      scope: "EVENT",
-      status: "ACTIVE",
-    },
-    orderBy: [
-      { kind: "asc" },
-      { sortOrder: "asc" },
-      { createdAt: "asc" },
-      { name: "asc" },
-      { id: "asc" },
-    ],
-  });
-  const orderedDivisionRows = [...allDivisionRows].sort(
-    compareDivisionRowsByStoredOrder,
-  );
-  const phaseParticipantRows: Array<{
-    phaseDivisionId?: string | null;
-    eventTeamId?: string | null;
-  }> =
-    typeof (client as any).eventDivisionPhaseParticipants?.findMany ===
-    "function"
-      ? await (client as any).eventDivisionPhaseParticipants.findMany({
-          where: { eventId: event.id },
+type EventPhaseSourceRow = {
+  phaseDivisionId?: string | null;
+  entryDivisionId?: string | null;
+};
+
+type EventDivisionHydrationState = {
+  hydratedDivisionRows: any[];
+  divisions: Division[];
+  playoffDivisions: Division[];
+  divisionMap: Map<string, Division>;
+  fieldIdsByDivision: Map<string, string[]>;
+  allDivisions: Division[];
+  phaseSourceDivisionIdsByPhase: Map<string, string[]>;
+  phaseDivisionsBySource: Map<string, Division[]>;
+  relatedPhaseDivisionsByPhaseId: Map<string, Division[]>;
+};
+
+const loadEventPhaseRows = async (
+  client: PrismaLike,
+  eventId: string,
+): Promise<{
+  participantRows: EventPhaseParticipantRow[];
+  sourceRows: EventPhaseSourceRow[];
+}> => {
+  const participantDelegate = (client as any).eventDivisionPhaseParticipants;
+  const sourceDelegate = (client as any).eventDivisionPhaseSources;
+  const participantRows =
+    typeof participantDelegate?.findMany === "function"
+      ? await participantDelegate.findMany({
+          where: { eventId },
           select: { phaseDivisionId: true, eventTeamId: true },
+          orderBy: [
+            { phaseDivisionId: "asc" },
+            { eventTeamId: "asc" },
+          ],
         })
       : [];
-  const phaseSourceRows: Array<{
-    phaseDivisionId?: string | null;
-    entryDivisionId?: string | null;
-  }> =
-    typeof (client as any).eventDivisionPhaseSources?.findMany === "function"
-      ? await (client as any).eventDivisionPhaseSources.findMany({
-          where: { eventId: event.id },
+  const sourceRows =
+    typeof sourceDelegate?.findMany === "function"
+      ? await sourceDelegate.findMany({
+          where: { eventId },
           select: { phaseDivisionId: true, entryDivisionId: true },
+          orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
         })
       : [];
-  const phaseParticipantTeamIdsByDivision = new Map<string, string[]>();
-  for (const row of phaseParticipantRows) {
+  return { participantRows, sourceRows };
+};
+
+const collectPhaseParticipantTeamIds = (
+  rows: EventPhaseParticipantRow[],
+): Map<string, string[]> => {
+  const teamIdsByDivision = new Map<string, string[]>();
+  for (const row of rows) {
     const divisionId = normalizeDivisionKey(row.phaseDivisionId);
     const teamId = normalizeEntityId(row.eventTeamId);
     if (!divisionId || !teamId) continue;
-    const teamIds = phaseParticipantTeamIdsByDivision.get(divisionId) ?? [];
+    const teamIds = teamIdsByDivision.get(divisionId) ?? [];
     if (!teamIds.includes(teamId)) teamIds.push(teamId);
-    phaseParticipantTeamIdsByDivision.set(divisionId, teamIds);
+    teamIdsByDivision.set(divisionId, teamIds);
   }
-  const hydratedDivisionRows = orderedDivisionRows.map((row: any) => {
-    if (String(row.role ?? "").toUpperCase() !== "PHASE") return row;
-    const participantTeamIds =
-      phaseParticipantTeamIdsByDivision.get(
-        normalizeDivisionKey(row.id) ?? row.id,
-      ) ?? [];
+  return teamIdsByDivision;
+};
+
+const hydratePhaseDivisionRow = (
+  row: any,
+  participantTeamIdsByDivision: Map<string, string[]>,
+): any => {
+  if (String(row.role ?? "").toUpperCase() !== "PHASE") {
+    return row;
+  }
+  const divisionId = normalizeDivisionKey(row.id) ?? row.id;
+  const participantTeamIds =
+    participantTeamIdsByDivision.get(divisionId) ?? [];
+  return {
+    ...row,
+    teamIds: Array.from(new Set(participantTeamIds)),
+  };
+};
+
+const hydrateEventDivisionRows = (
+  rows: any[],
+  participantRows: EventPhaseParticipantRow[],
+): any[] => {
+  const teamIdsByDivision = collectPhaseParticipantTeamIds(participantRows);
+  return rows.map((row) =>
+    hydratePhaseDivisionRow(row, teamIdsByDivision),
+  );
+};
+
+const isExplicitPhaseDivisionRow = (row: any): boolean =>
+  String(row?.role ?? "").toUpperCase() === "PHASE" || Boolean(row?.phase);
+
+const filterDivisionRowsByPhase = (
+  rows: any[],
+  phase: string,
+): any[] =>
+  rows.filter(
+    (row) => String(row?.phase ?? "").toUpperCase() === phase,
+  );
+
+const selectEventDivisionRows = (
+  rows: any[],
+  eventTypeValue: unknown,
+): {
+  leagueDivisionRows: any[];
+  playoffDivisionRows: any[];
+} => {
+  const legacyLeagueDivisionRows = rows.filter(
+    (row) => normalizeDivisionKind(row?.kind, "LEAGUE") !== "PLAYOFF",
+  );
+  const legacyPlayoffDivisionRows = rows.filter(
+    (row) => normalizeDivisionKind(row?.kind, "LEAGUE") === "PLAYOFF",
+  );
+  if (!rows.some(isExplicitPhaseDivisionRow)) {
     return {
-      ...row,
-      teamIds: Array.from(new Set(participantTeamIds)),
+      leagueDivisionRows: legacyLeagueDivisionRows,
+      playoffDivisionRows: legacyPlayoffDivisionRows,
     };
-  });
-  const hasExplicitPhaseStructure = hydratedDivisionRows.some(
-    (row: any) =>
-      String((row as any).role ?? "").toUpperCase() === "PHASE" ||
-      Boolean((row as any).phase),
-  );
-  const legacyLeagueDivisionRows = hydratedDivisionRows.filter(
-    (row: any) =>
-      normalizeDivisionKind((row as any).kind, "LEAGUE") !== "PLAYOFF",
-  );
-  const legacyPlayoffDivisionRows = hydratedDivisionRows.filter(
-    (row: any) =>
-      normalizeDivisionKind((row as any).kind, "LEAGUE") === "PLAYOFF",
-  );
-  let leagueDivisionRows = legacyLeagueDivisionRows;
-  let playoffDivisionRows = legacyPlayoffDivisionRows;
-  if (hasExplicitPhaseStructure) {
-    const phaseRows = hydratedDivisionRows.filter(
-      (row: any) =>
-        String((row as any).role ?? "").toUpperCase() === "PHASE" ||
-        Boolean((row as any).phase),
+  }
+  const phaseRows = rows.filter(isExplicitPhaseDivisionRow);
+  const eventType = String(eventTypeValue ?? "").toUpperCase();
+  let leagueDivisionRows: any[];
+  let playoffDivisionRows: any[];
+  if (eventType === "LEAGUE") {
+    leagueDivisionRows = filterDivisionRowsByPhase(phaseRows, "LEAGUE");
+    playoffDivisionRows = filterDivisionRowsByPhase(phaseRows, "PLAYOFF");
+  } else if (eventType === "TOURNAMENT") {
+    const poolRows = filterDivisionRowsByPhase(phaseRows, "POOL");
+    const bracketRows = phaseRows.filter((row) =>
+      ["BRACKET", "PLAYOFF"].includes(
+        String(row?.phase ?? "").toUpperCase(),
+      ),
     );
-    const eventType = String(event.eventType ?? "").toUpperCase();
-    if (eventType === "LEAGUE") {
-      leagueDivisionRows = phaseRows.filter(
-        (row: any) =>
-          String((row as any).phase ?? "").toUpperCase() === "LEAGUE",
-      );
-      playoffDivisionRows = phaseRows.filter(
-        (row: any) =>
-          String((row as any).phase ?? "").toUpperCase() === "PLAYOFF",
-      );
-    } else if (eventType === "TOURNAMENT") {
-      const poolRows = phaseRows.filter(
-        (row: any) => String((row as any).phase ?? "").toUpperCase() === "POOL",
-      );
-      const bracketRows = phaseRows.filter((row: any) =>
-        ["BRACKET", "PLAYOFF"].includes(
-          String((row as any).phase ?? "").toUpperCase(),
-        ),
-      );
-      if (poolRows.length) {
-        leagueDivisionRows = poolRows;
-        playoffDivisionRows = bracketRows;
-      } else {
-        leagueDivisionRows = bracketRows;
-        playoffDivisionRows = [];
-      }
-    } else {
-      leagueDivisionRows = phaseRows.filter(
-        (row: any) =>
-          String((row as any).phase ?? "").toUpperCase() === "LEAGUE",
-      );
-      playoffDivisionRows = [];
-    }
-    if (!leagueDivisionRows.length) {
-      leagueDivisionRows = legacyLeagueDivisionRows;
-    }
+    leagueDivisionRows = poolRows.length ? poolRows : bracketRows;
+    playoffDivisionRows = poolRows.length ? bracketRows : [];
+  } else {
+    leagueDivisionRows = filterDivisionRowsByPhase(phaseRows, "LEAGUE");
+    playoffDivisionRows = [];
   }
-  const leagueDivisionIds = leagueDivisionRows.map((row: any) => row.id);
-  const {
-    divisions,
-    map: leagueDivisionMap,
-    fieldIdsByDivision,
-  } = buildDivisions(
-    leagueDivisionIds,
-    leagueDivisionRows,
-    event.sportIds?.[0] ?? null,
-  );
-  const {
-    divisions: playoffDivisions,
-    map: playoffDivisionMap,
-    fieldIdsByDivision: playoffFieldIdsByDivision,
-  } = buildDivisions(
-    playoffDivisionRows.map((row: any) => row.id),
-    playoffDivisionRows,
-    event.sportIds?.[0] ?? null,
-    {
-      allowFallback: false,
-      fallbackKind: "PLAYOFF",
-      includeSourceAliases: false,
-    },
-  );
-  const divisionMap = new Map<string, Division>();
-  for (const [key, division] of leagueDivisionMap.entries()) {
-    divisionMap.set(key, division);
+  if (!leagueDivisionRows.length) {
+    leagueDivisionRows = legacyLeagueDivisionRows;
   }
-  for (const [key, division] of playoffDivisionMap.entries()) {
-    divisionMap.set(key, division);
+  return { leagueDivisionRows, playoffDivisionRows };
+};
+
+const mergeDivisionMaps = (
+  target: Map<string, Division>,
+  source: Map<string, Division>,
+): void => {
+  for (const [key, division] of source.entries()) {
+    target.set(key, division);
   }
-  const allDivisions = [...divisions, ...playoffDivisions];
-  for (const [
-    divisionId,
-    phaseFieldIds,
-  ] of playoffFieldIdsByDivision.entries()) {
-    const existingFieldIds = fieldIdsByDivision.get(divisionId) ?? [];
-    fieldIdsByDivision.set(
+};
+
+const mergeDivisionFieldIds = (
+  target: Map<string, string[]>,
+  source: Map<string, string[]>,
+): void => {
+  for (const [divisionId, phaseFieldIds] of source.entries()) {
+    const existingFieldIds = target.get(divisionId) ?? [];
+    target.set(
       divisionId,
       Array.from(new Set([...existingFieldIds, ...phaseFieldIds])),
     );
   }
-  const phaseSourceDivisionIdsByPhase = new Map<string, string[]>();
-  for (const row of phaseSourceRows) {
+};
+
+const addPhaseSourceId = (
+  phaseSourceDivisionIdsByPhase: Map<string, string[]>,
+  phaseDivisionId: string,
+  entryDivisionId: string,
+): void => {
+  const sourceIds = phaseSourceDivisionIdsByPhase.get(phaseDivisionId) ?? [];
+  if (!sourceIds.includes(entryDivisionId)) sourceIds.push(entryDivisionId);
+  phaseSourceDivisionIdsByPhase.set(phaseDivisionId, sourceIds);
+};
+
+const collectPhaseSourceDivisionIds = (
+  rows: EventPhaseSourceRow[],
+): Map<string, string[]> => {
+  const sourceIdsByPhase = new Map<string, string[]>();
+  for (const row of rows) {
     const phaseDivisionId = normalizeDivisionKey(row.phaseDivisionId);
     const entryDivisionId = normalizeDivisionKey(row.entryDivisionId);
     if (!phaseDivisionId || !entryDivisionId) {
@@ -4047,11 +5809,18 @@ export const loadEventWithRelations = async (
         "Unable to hydrate Phase Division scope because a persisted phase or source Division ID is missing.",
       );
     }
-    const sourceIds = phaseSourceDivisionIdsByPhase.get(phaseDivisionId) ?? [];
-    if (!sourceIds.includes(entryDivisionId)) sourceIds.push(entryDivisionId);
-    phaseSourceDivisionIdsByPhase.set(phaseDivisionId, sourceIds);
+    addPhaseSourceId(sourceIdsByPhase, phaseDivisionId, entryDivisionId);
   }
-  for (const row of hydratedDivisionRows as any[]) {
+  return sourceIdsByPhase;
+};
+
+const projectPhaseDivisionFieldIds = (
+  rows: any[],
+  phaseSourceDivisionIdsByPhase: Map<string, string[]>,
+  fieldIdsByDivision: Map<string, string[]>,
+  eventFieldIds: unknown,
+): void => {
+  for (const row of rows) {
     if (String(row.role ?? "").toUpperCase() !== "PHASE") continue;
     const phaseDivisionId = normalizeDivisionKey(row.id);
     if (!phaseDivisionId) continue;
@@ -4069,49 +5838,472 @@ export const loadEventWithRelations = async (
         ...inheritedFieldIds,
         ...(ownFieldIds.length || inheritedFieldIds.length
           ? []
-          : ensureStringArray(event.fieldIds)),
+          : ensureStringArray(eventFieldIds)),
       ]),
     );
     fieldIdsByDivision.set(phaseDivisionId, projectedFieldIds);
   }
-  const primarySportId = event.sportIds?.[0] ?? null;
-  const fallbackDivision =
-    divisions[0] ??
-    new Division(
-      DEFAULT_DIVISION_KEY,
-      buildDivisionDisplayName(DEFAULT_DIVISION_KEY, primarySportId),
-    );
+};
 
-  const participantIds = includeTeamRegistrations
-    ? await getEventParticipantIdsForEvent(event.id, client)
-    : { teamIds: [], userIds: [], waitListIds: [], freeAgentIds: [] };
-  const fieldIds = ensureStringArray(event.fieldIds);
-  // Prisma no longer stores these on Events. The fallback only supports legacy
-  // in-memory fixtures or DTOs passed into scheduler tests.
-  const teamIds = participantIds.teamIds.length
-    ? participantIds.teamIds
-    : ensureStringArray((event as any).teamIds);
-  const matchRows = await client.matches.findMany({
-    where: { eventId: event.id },
+const isRegularDivisionPhase = (phase: string): boolean =>
+  phase === "LEAGUE" || phase === "POOL";
+
+const isFinalDivisionPhase = (phase: string): boolean =>
+  phase === "PLAYOFF" || phase === "BRACKET";
+
+const addPhaseSourceRelation = (
+  phaseDivisionsBySource: Map<string, Division[]>,
+  phaseSourceDivisionIdsByPhase: Map<string, string[]>,
+  divisionMap: Map<string, Division>,
+  phaseDivisionId: string,
+  sourceDivisionId: string,
+): void => {
+  const normalizedPhaseId = normalizeDivisionKey(phaseDivisionId);
+  const normalizedSourceId = normalizeDivisionKey(sourceDivisionId);
+  if (!normalizedPhaseId || !normalizedSourceId) {
+    throw new Error(
+      "Unable to hydrate Phase Division scope because a phase or source Division ID is missing.",
+    );
+  }
+  const phaseDivision = divisionMap.get(normalizedPhaseId);
+  if (!phaseDivision) {
+    throw new Error(
+      `Unable to hydrate Phase Division scope because ${phaseDivisionId} is not present in the Event.`,
+    );
+  }
+  const phaseDivisions = phaseDivisionsBySource.get(normalizedSourceId) ?? [];
+  if (!phaseDivisions.some((division) => division.id === phaseDivision.id)) {
+    phaseDivisions.push(phaseDivision);
+  }
+  phaseDivisionsBySource.set(normalizedSourceId, phaseDivisions);
+  addPhaseSourceId(
+    phaseSourceDivisionIdsByPhase,
+    normalizedPhaseId,
+    normalizedSourceId,
+  );
+};
+
+const buildPhaseDivisionsBySource = (
+  rows: any[],
+  phaseSourceDivisionIdsByPhase: Map<string, string[]>,
+  divisionMap: Map<string, Division>,
+): Map<string, Division[]> => {
+  const phaseDivisionsBySource = new Map<string, Division[]>();
+  for (const [
+    phaseDivisionId,
+    sourceDivisionIds,
+  ] of phaseSourceDivisionIdsByPhase.entries()) {
+    for (const sourceDivisionId of sourceDivisionIds) {
+      addPhaseSourceRelation(
+        phaseDivisionsBySource,
+        phaseSourceDivisionIdsByPhase,
+        divisionMap,
+        phaseDivisionId,
+        sourceDivisionId,
+      );
+    }
+  }
+  for (const row of rows) {
+    if (String(row.role ?? "").toUpperCase() !== "PHASE") continue;
+    const phaseDivisionId = normalizeDivisionKey(row.id);
+    const sourceDivisionId = normalizeDivisionKey(row.sourceDivisionId);
+    if (!phaseDivisionId) {
+      throw new Error(
+        "Unable to hydrate Phase Division scope because a persisted phase Division ID is missing.",
+      );
+    }
+    if (sourceDivisionId) {
+      addPhaseSourceRelation(
+        phaseDivisionsBySource,
+        phaseSourceDivisionIdsByPhase,
+        divisionMap,
+        phaseDivisionId,
+        sourceDivisionId,
+      );
+    } else if (!phaseSourceDivisionIdsByPhase.has(phaseDivisionId)) {
+      throw new Error(
+        `Unable to hydrate Phase Division scope because ${row.id} has no source Division.`,
+      );
+    }
+  }
+  return phaseDivisionsBySource;
+};
+
+const shouldLinkRelatedPhaseDivisions = (
+  phase: string,
+  relatedPhase: string,
+): boolean => {
+  const isRegularPhase = isRegularDivisionPhase(phase);
+  const isFinalPhase = isFinalDivisionPhase(phase);
+  const isRelatedRegularPhase = isRegularDivisionPhase(relatedPhase);
+  const isRelatedFinalPhase = isFinalDivisionPhase(relatedPhase);
+  return (
+    (isRegularPhase && isRelatedFinalPhase) ||
+    (isFinalPhase && isRelatedRegularPhase)
+  );
+};
+
+const collectRelatedPhaseDivisions = (
+  sourceDivisionIds: string[],
+  phase: string,
+  phaseDivisionsBySource: Map<string, Division[]>,
+  phaseDivision: Division,
+): Map<string, Division> => {
+  const relatedDivisions = new Map<string, Division>([
+    [phaseDivision.id, phaseDivision],
+  ]);
+  const isKnownPhase =
+    isRegularDivisionPhase(phase) || isFinalDivisionPhase(phase);
+  if (!isKnownPhase) {
+    return relatedDivisions;
+  }
+  for (const sourceDivisionId of sourceDivisionIds) {
+    for (const relatedPhaseDivision of phaseDivisionsBySource.get(
+      sourceDivisionId,
+    ) ?? []) {
+      const relatedPhase = String(
+        relatedPhaseDivision.phase ?? "",
+      ).toUpperCase();
+      if (shouldLinkRelatedPhaseDivisions(phase, relatedPhase)) {
+        relatedDivisions.set(
+          relatedPhaseDivision.id,
+          relatedPhaseDivision,
+        );
+      }
+    }
+  }
+  return relatedDivisions;
+};
+
+const buildRelatedPhaseDivisions = (
+  phaseSourceDivisionIdsByPhase: Map<string, string[]>,
+  phaseDivisionsBySource: Map<string, Division[]>,
+  divisionMap: Map<string, Division>,
+): Map<string, Division[]> => {
+  const relatedPhaseDivisionsByPhaseId = new Map<string, Division[]>();
+  for (const [
+    phaseDivisionId,
+    sourceDivisionIds,
+  ] of phaseSourceDivisionIdsByPhase.entries()) {
+    const phaseDivision = divisionMap.get(phaseDivisionId);
+    if (!phaseDivision) {
+      throw new Error(
+        `Unable to hydrate Phase Division scope because ${phaseDivisionId} is not present in the Event.`,
+      );
+    }
+    const phase = String(phaseDivision.phase ?? "").toUpperCase();
+    const relatedDivisions = collectRelatedPhaseDivisions(
+      sourceDivisionIds,
+      phase,
+      phaseDivisionsBySource,
+      phaseDivision,
+    );
+    relatedPhaseDivisionsByPhaseId.set(
+      phaseDivisionId,
+      Array.from(relatedDivisions.values()),
+    );
+  }
+  return relatedPhaseDivisionsByPhaseId;
+};
+
+const expandTimeSlotDivisions = (
+  timeSlots: TimeSlot[],
+  relatedPhaseDivisionsByPhaseId: Map<string, Division[]>,
+  phaseDivisionsBySource: Map<string, Division[]>,
+): void => {
+  for (const timeSlot of timeSlots) {
+    const expandedDivisions = new Map(
+      timeSlot.divisions.map((division) => [division.id, division]),
+    );
+    for (const division of timeSlot.divisions) {
+      const divisionId = normalizeDivisionKey(division.id) ?? division.id;
+      const sourcePhaseDivisions =
+        relatedPhaseDivisionsByPhaseId.get(divisionId) ??
+        phaseDivisionsBySource.get(divisionId) ??
+        [];
+      for (const phaseDivision of sourcePhaseDivisions) {
+        expandedDivisions.set(phaseDivision.id, phaseDivision);
+      }
+    }
+    timeSlot.divisions = Array.from(expandedDivisions.values());
+  }
+};
+
+const loadRetainedMatchDivisionIds = async (
+  client: PrismaLike,
+  eventId: string,
+  retainedMatchIds: string[],
+): Promise<string[]> => {
+  if (!retainedMatchIds.length) return [];
+  const matches = client.matches;
+  if (typeof matches?.findMany !== "function") return [];
+  const rows: unknown = await matches.findMany({
+    where: { eventId, id: { in: retainedMatchIds } },
+    select: { division: true },
   });
-  const graphTeamIds = (matchRows as any[]).flatMap((row) =>
+  const divisionIds = (Array.isArray(rows) ? rows : [])
+    .map((row: unknown) => {
+      if (!row || typeof row !== "object" || !("division" in row)) {
+        return "";
+      }
+      const division = row.division;
+      return typeof division === "string" ? division.trim() : "";
+    })
+    .filter((divisionId): divisionId is string => divisionId.length > 0);
+  return Array.from(new Set(divisionIds));
+};
+
+const loadEventDivisionState = async (
+  client: PrismaLike,
+  event: any,
+  retainedMatchIds: string[] = [],
+): Promise<EventDivisionHydrationState> => {
+  const retainedDivisionIds = await loadRetainedMatchDivisionIds(
+    client,
+    event.id,
+    retainedMatchIds,
+  );
+  const allDivisionRows = await client.divisions.findMany({
+    where: {
+      eventId: event.id,
+      scope: "EVENT",
+      ...(retainedDivisionIds.length
+        ? {
+            OR: [
+              { status: "ACTIVE" },
+              { id: { in: retainedDivisionIds } },
+            ],
+          }
+        : { status: "ACTIVE" }),
+    },
+    orderBy: [
+      { kind: "asc" },
+      { sortOrder: "asc" },
+      { createdAt: "asc" },
+      { name: "asc" },
+      { id: "asc" },
+    ],
+  });
+  const orderedDivisionRows = [...allDivisionRows].sort(
+    compareDivisionRowsByStoredOrder,
+  );
+  const { participantRows, sourceRows } = await loadEventPhaseRows(
+    client,
+    event.id,
+  );
+  const hydratedDivisionRows = hydrateEventDivisionRows(
+    orderedDivisionRows,
+    participantRows,
+  );
+  const { leagueDivisionRows, playoffDivisionRows } =
+    selectEventDivisionRows(hydratedDivisionRows, event.eventType);
+  const primarySportId = event.sportIds?.[0] ?? null;
+  const {
+    divisions,
+    map: leagueDivisionMap,
+    fieldIdsByDivision,
+  } = buildDivisions(
+    leagueDivisionRows.map((row: any) => row.id),
+    leagueDivisionRows,
+    primarySportId,
+  );
+  const {
+    divisions: playoffDivisions,
+    map: playoffDivisionMap,
+    fieldIdsByDivision: playoffFieldIdsByDivision,
+  } = buildDivisions(
+    playoffDivisionRows.map((row: any) => row.id),
+    playoffDivisionRows,
+    primarySportId,
+    {
+      allowFallback: false,
+      fallbackKind: "PLAYOFF",
+      includeSourceAliases: false,
+    },
+  );
+  const divisionMap = new Map<string, Division>();
+  mergeDivisionMaps(divisionMap, leagueDivisionMap);
+  mergeDivisionMaps(divisionMap, playoffDivisionMap);
+  mergeDivisionFieldIds(fieldIdsByDivision, playoffFieldIdsByDivision);
+  const phaseSourceDivisionIdsByPhase =
+    collectPhaseSourceDivisionIds(sourceRows);
+  projectPhaseDivisionFieldIds(
+    hydratedDivisionRows,
+    phaseSourceDivisionIdsByPhase,
+    fieldIdsByDivision,
+    event.fieldIds,
+  );
+  const allDivisions = [...divisions, ...playoffDivisions];
+  const phaseDivisionsBySource = buildPhaseDivisionsBySource(
+    hydratedDivisionRows,
+    phaseSourceDivisionIdsByPhase,
+    divisionMap,
+  );
+  const relatedPhaseDivisionsByPhaseId = buildRelatedPhaseDivisions(
+    phaseSourceDivisionIdsByPhase,
+    phaseDivisionsBySource,
+    divisionMap,
+  );
+  return {
+    hydratedDivisionRows,
+    divisions,
+    playoffDivisions,
+    divisionMap,
+    fieldIdsByDivision,
+    allDivisions,
+    phaseSourceDivisionIdsByPhase,
+    phaseDivisionsBySource,
+    relatedPhaseDivisionsByPhaseId,
+  };
+};
+
+type EventLoadParticipantIds = {
+  teamIds: string[];
+  userIds: string[];
+  waitListIds: string[];
+  freeAgentIds: string[];
+};
+
+type EventLoadParticipantAndMatchInputs = {
+  participantIds: EventLoadParticipantIds;
+  registeredTeamIds: string[];
+  fieldIds: string[];
+  teamIdsToLoad: string[];
+  timeSlotIds: string[];
+  matchRows: any[];
+};
+
+const collectMatchGraphTeamIds = (rows: any[]): string[] =>
+  rows.flatMap((row) =>
     [row.team1Id, row.team2Id, row.teamOfficialId]
       .map((id) => normalizeEntityId(id))
       .filter((id): id is string => Boolean(id)),
   );
+
+const loadEventParticipantAndMatchInputs = async (
+  event: any,
+  client: PrismaLike,
+  includeTeamRegistrations: boolean,
+  retainedMatchIds: string[] = [],
+): Promise<EventLoadParticipantAndMatchInputs> => {
+  const participantIds = includeTeamRegistrations
+    ? await getEventParticipantIdsForEvent(event.id, client)
+    : { teamIds: [], userIds: [], waitListIds: [], freeAgentIds: [] };
+  const matchRows: MatchRow[] = await client.matches.findMany({
+    where: { eventId: event.id },
+  });
+  const retainedMatchIdSet = new Set(retainedMatchIds);
+  const retainedFieldIds = matchRows
+    .filter((row) => retainedMatchIdSet.has(String(row.id ?? "")))
+    .map((row) => normalizeEntityId(row.fieldId))
+    .filter((id): id is string => Boolean(id));
+  const fieldIds = Array.from(new Set([
+    ...ensureStringArray(event.fieldIds),
+    ...retainedFieldIds,
+  ]));
+  const teamIds = participantIds.teamIds.length
+    ? participantIds.teamIds
+    : ensureStringArray((event as any).teamIds);
+  const graphTeamIds = collectMatchGraphTeamIds(matchRows as any[]);
   const teamIdsToLoad = Array.from(new Set([...teamIds, ...graphTeamIds]));
   const timeSlotIds = ensureStringArray(event.timeSlotIds);
+  return {
+    participantIds,
+    fieldIds,
+    registeredTeamIds: teamIds,
+    teamIdsToLoad,
+    timeSlotIds,
+    matchRows,
+  };
+};
+
+type EventLoadOfficialData = {
+  eventOfficialRows: any[];
+  sportRow: any;
+  officialPositions: any[];
+  eventOfficials: any[];
+  officialIds: string[];
+};
+
+const loadEventSportRow = async (
+  client: PrismaLike,
+  primarySportId: string | null,
+): Promise<any> => {
+  const sportsDelegate = (client as any).sports;
+  if (
+    !primarySportId ||
+    typeof sportsDelegate?.findUnique !== "function"
+  ) {
+    return null;
+  }
+  return sportsDelegate.findUnique({
+    where: { id: primarySportId },
+    select: {
+      officialPositionTemplates: true,
+      matchRulesTemplate: true,
+    } as any,
+  });
+};
+
+const resolveEventOfficialPositionsForLoad = (
+  event: any,
+  eventOfficialRows: any[],
+  templatePositions: any[],
+): any[] => {
+  const explicitPositions = normalizeEventOfficialPositions(
+    (event as any).officialPositions,
+    event.id,
+  );
+  if (explicitPositions.length) {
+    return explicitPositions;
+  }
+  if (templatePositions.length) {
+    return templatePositions;
+  }
+  if (eventOfficialRows.length) {
+    return buildEventOfficialPositionsFromTemplates(event.id, [
+      { name: "Official", count: 1 },
+    ]);
+  }
+  return [];
+};
+
+const normalizeEventOfficialsForLoad = (
+  eventOfficialRows: any[],
+  officialPositions: any[],
+  fieldIds: string[],
+): any[] => {
+  const validPositionIdSet = new Set(
+    officialPositions.map((position) => position.id),
+  );
+  const validFieldIdSet = new Set(fieldIds);
+  if (!eventOfficialRows.length) {
+    return [];
+  }
+  return eventOfficialRows
+    .map((row) => ({
+      id: row.id,
+      userId: row.userId,
+      positionIds: ensureStringArray(row.positionIds).filter((positionId) =>
+        validPositionIdSet.has(positionId),
+      ),
+      fieldIds: ensureStringArray(row.fieldIds).filter((fieldId) =>
+        validFieldIdSet.has(fieldId),
+      ),
+      isActive: row.isActive !== false,
+    }))
+    .filter((row) => row.positionIds.length > 0);
+};
+
+const loadEventOfficialData = async (
+  event: any,
+  client: PrismaLike,
+  primarySportId: string | null,
+  fieldIds: string[],
+): Promise<EventLoadOfficialData> => {
   const [eventOfficialRows, sportRow] = await Promise.all([
     loadEventOfficialRows(client, event.id),
-    primarySportId && typeof (client as any).sports?.findUnique === "function"
-      ? (client as any).sports.findUnique({
-          where: { id: primarySportId },
-          select: {
-            officialPositionTemplates: true,
-            matchRulesTemplate: true,
-          } as any,
-        })
-      : Promise.resolve(null),
+    loadEventSportRow(client, primarySportId),
   ]);
   const templatePositions = buildEventOfficialPositionsFromTemplates(
     event.id,
@@ -4119,45 +6311,90 @@ export const loadEventWithRelations = async (
       (sportRow as any)?.officialPositionTemplates,
     ),
   );
-  const officialPositions = (() => {
-    const explicitPositions = normalizeEventOfficialPositions(
-      (event as any).officialPositions,
-      event.id,
-    );
-    if (explicitPositions.length) {
-      return explicitPositions;
-    }
-    if (templatePositions.length) {
-      return templatePositions;
-    }
-    if (eventOfficialRows.length) {
-      return buildEventOfficialPositionsFromTemplates(event.id, [
-        { name: "Official", count: 1 },
-      ]);
-    }
-    return [];
-  })();
-  const validPositionIdSetForLoad = new Set(
-    officialPositions.map((position) => position.id),
+  const officialPositions = resolveEventOfficialPositionsForLoad(
+    event,
+    eventOfficialRows,
+    templatePositions,
   );
-  const validFieldIdSetForLoad = new Set(fieldIds);
-  const eventOfficials = eventOfficialRows.length
-    ? (eventOfficialRows as any[])
-        .map((row) => ({
-          id: row.id,
-          userId: row.userId,
-          positionIds: ensureStringArray(row.positionIds).filter((positionId) =>
-            validPositionIdSetForLoad.has(positionId),
-          ),
-          fieldIds: ensureStringArray(row.fieldIds).filter((fieldId) =>
-            validFieldIdSetForLoad.has(fieldId),
-          ),
-          isActive: row.isActive !== false,
-        }))
-        .filter((row) => row.positionIds.length > 0)
-    : [];
+  const eventOfficials = normalizeEventOfficialsForLoad(
+    eventOfficialRows,
+    officialPositions,
+    fieldIds,
+  );
   const officialIds = eventOfficials.map((official: any) => official.userId);
+  return {
+    eventOfficialRows,
+    sportRow,
+    officialPositions,
+    eventOfficials,
+    officialIds,
+  };
+};
 
+type RelationRowWithId = {
+  id?: unknown;
+};
+
+const orderRelationRowsByRequestedIds = <T extends RelationRowWithId>(
+  rows: readonly T[],
+  requestedIds: readonly string[],
+): T[] => {
+  const requestedIndexById = new Map<string, number>();
+  for (const [index, requestedId] of requestedIds.entries()) {
+    const normalizedId = normalizeEntityId(requestedId);
+    if (normalizedId && !requestedIndexById.has(normalizedId)) {
+      requestedIndexById.set(normalizedId, index);
+    }
+  }
+  return [...rows].sort((left, right) => {
+    const leftId = normalizeEntityId(left.id);
+    const rightId = normalizeEntityId(right.id);
+    const leftIndex = leftId
+      ? requestedIndexById.get(leftId)
+      : undefined;
+    const rightIndex = rightId
+      ? requestedIndexById.get(rightId)
+      : undefined;
+    if (leftIndex !== undefined || rightIndex !== undefined) {
+      if (leftIndex === undefined) {
+        return 1;
+      }
+      if (rightIndex === undefined) {
+        return -1;
+      }
+      if (leftIndex !== rightIndex) {
+        return leftIndex - rightIndex;
+      }
+    }
+    return (leftId ?? "").localeCompare(rightId ?? "");
+  });
+};
+
+type EventLoadPrimaryRelationRows = {
+  fieldRows: any[];
+  teamRows: any[];
+  timeSlotRows: any[];
+  officialRows: any[];
+  leagueConfigRow: any;
+  canonicalTeamIdsByOfficialId: Map<string, string[]>;
+};
+
+const loadEventPrimaryRelationRows = async (params: {
+  event: any;
+  client: PrismaLike;
+  fieldIds: string[];
+  teamIdsToLoad: string[];
+  timeSlotIds: string[];
+  officialIds: string[];
+}): Promise<EventLoadPrimaryRelationRows> => {
+  const {
+    event,
+    client,
+    fieldIds,
+    teamIdsToLoad,
+    timeSlotIds,
+    officialIds,
+  } = params;
   const [
     fieldRows,
     teamRows,
@@ -4183,177 +6420,364 @@ export const loadEventWithRelations = async (
       : Promise.resolve(null),
     getCanonicalTeamIdsByUserIds(officialIds, client),
   ]);
-  const teamPlayerIds = includeTeamPlayers
-    ? Array.from(
-        new Set(
-          (teamRows as any[]).flatMap((row) =>
-            ensureStringArray((row as any).playerIds),
-          ),
-        ),
-      )
-    : [];
+  return {
+    fieldRows: orderRelationRowsByRequestedIds(fieldRows, fieldIds),
+    teamRows: orderRelationRowsByRequestedIds(teamRows, teamIdsToLoad),
+    timeSlotRows: orderRelationRowsByRequestedIds(timeSlotRows, timeSlotIds),
+    officialRows: orderRelationRowsByRequestedIds(officialRows, officialIds),
+    leagueConfigRow,
+    canonicalTeamIdsByOfficialId,
+  };
+};
+
+const collectTeamPlayerIds = (
+  teamRows: any[],
+  includeTeamPlayers: boolean,
+): string[] => {
+  if (!includeTeamPlayers) {
+    return [];
+  }
+  return Array.from(
+    new Set(
+      teamRows.flatMap((row) => ensureStringArray(row.playerIds)),
+    ),
+  );
+};
+
+type EventLoadPlayerRegistration = {
+  id: string;
+  teamId?: string | null;
+  userId: string;
+  status: string;
+  jerseyNumber?: string | null;
+  position?: string | null;
+  isCaptain?: boolean;
+};
+type EventLoadSecondaryRelationRows = {
+  teamPlayerRows: any[];
+  eventRegistrationRows: any[];
+  eventTeamStaffRows: any[];
+};
+
+const loadEventTeamPlayerRows = async (params: {
+  client: PrismaLike;
+  teamPlayerIds: string[];
+  includeTeamPlayers: boolean;
+}): Promise<any[]> => {
+  if (!params.includeTeamPlayers || !params.teamPlayerIds.length) {
+    return [];
+  }
+  return params.client.userData.findMany({
+    where: { id: { in: params.teamPlayerIds } },
+  });
+};
+
+const loadEventRegistrationRows = async (params: {
+  event: any;
+  client: PrismaLike;
+  includeTeamRegistrations: boolean;
+  teamIdsToLoad: string[];
+}): Promise<any[]> => {
+  const registrationsDelegate = (params.client as any).eventRegistrations;
+  if (
+    !params.includeTeamRegistrations ||
+    !params.teamIdsToLoad.length ||
+    typeof registrationsDelegate?.findMany !== "function"
+  ) {
+    return [];
+  }
+  return registrationsDelegate.findMany({
+    where: {
+      eventId: params.event.id,
+      eventTeamId: { in: params.teamIdsToLoad },
+      rosterRole: "PARTICIPANT",
+      status: { in: ["ACTIVE", "PENDING", "STARTED"] },
+    },
+    select: {
+      id: true,
+      eventTeamId: true,
+      registrantId: true,
+      status: true,
+      jerseyNumber: true,
+      position: true,
+      isCaptain: true,
+    },
+  });
+};
+
+const loadEventTeamStaffRows = async (params: {
+  client: PrismaLike;
+  teamIdsToLoad: string[];
+}): Promise<any[]> => {
+  const staffDelegate = (params.client as any).eventTeamStaffAssignments;
+  if (
+    !params.teamIdsToLoad.length ||
+    typeof staffDelegate?.findMany !== "function"
+  ) {
+    return [];
+  }
+  return staffDelegate.findMany({
+    where: {
+      eventTeamId: { in: params.teamIdsToLoad },
+      status: "ACTIVE",
+    },
+    select: {
+      eventTeamId: true,
+      userId: true,
+    },
+  });
+};
+
+const loadEventSecondaryRelationRows = async (params: {
+  event: any;
+  client: PrismaLike;
+  teamPlayerIds: string[];
+  includeTeamPlayers: boolean;
+  includeTeamRegistrations: boolean;
+  teamIdsToLoad: string[];
+}): Promise<EventLoadSecondaryRelationRows> => {
   const [teamPlayerRows, eventRegistrationRows, eventTeamStaffRows] =
     await Promise.all([
-      includeTeamPlayers && teamPlayerIds.length
-        ? client.userData.findMany({ where: { id: { in: teamPlayerIds } } })
-        : Promise.resolve([]),
-      includeTeamRegistrations &&
-      teamIdsToLoad.length &&
-      typeof (client as any).eventRegistrations?.findMany === "function"
-        ? (client as any).eventRegistrations.findMany({
-            where: {
-              eventId: event.id,
-              eventTeamId: { in: teamIdsToLoad },
-              rosterRole: "PARTICIPANT",
-              status: { in: ["ACTIVE", "PENDING", "STARTED"] },
-            },
-            select: {
-              id: true,
-              eventTeamId: true,
-              registrantId: true,
-              status: true,
-              jerseyNumber: true,
-              position: true,
-              isCaptain: true,
-            },
-          })
-        : Promise.resolve([]),
-      teamIdsToLoad.length &&
-      typeof (client as any).eventTeamStaffAssignments?.findMany === "function"
-        ? (client as any).eventTeamStaffAssignments.findMany({
-            where: {
-              eventTeamId: { in: teamIdsToLoad },
-              status: "ACTIVE",
-            },
-            select: {
-              eventTeamId: true,
-              userId: true,
-            },
-          })
-        : Promise.resolve([]),
+      loadEventTeamPlayerRows(params),
+      loadEventRegistrationRows(params),
+      loadEventTeamStaffRows(params),
     ]);
-  const teamPlayerLookup = new Map<string, UserData>();
-  for (const row of teamPlayerRows as any[]) {
-    const normalizedId = normalizeEntityId((row as any).id);
+  return { teamPlayerRows, eventRegistrationRows, eventTeamStaffRows };
+};
+
+const buildTeamPlayerLookup = (
+  rows: any[],
+  allDivisions: Division[],
+): Map<string, UserData> => {
+  const lookup = new Map<string, UserData>();
+  for (const row of rows) {
+    const normalizedId = normalizeEntityId(row?.id);
     if (!normalizedId) continue;
-    teamPlayerLookup.set(
+    lookup.set(
       normalizedId,
       new UserData({
         id: normalizedId,
-        firstName: (row as any).firstName ?? "",
-        lastName: (row as any).lastName ?? "",
-        userName: (row as any).userName ?? "",
+        firstName: row?.firstName ?? "",
+        lastName: row?.lastName ?? "",
+        userName: row?.userName ?? "",
         divisions: allDivisions,
       }),
     );
   }
-  const playerRegistrationsByTeamId = new Map<
-    string,
-    Array<{
-      id: string;
-      teamId?: string | null;
-      userId: string;
-      status: string;
-      jerseyNumber?: string | null;
-      position?: string | null;
-      isCaptain?: boolean;
-    }>
-  >();
-  for (const row of eventRegistrationRows as any[]) {
-    const eventTeamId = normalizeEntityId((row as any).eventTeamId);
-    const userId = normalizeEntityId((row as any).registrantId);
-    const registrationId = normalizeEntityId((row as any).id);
-    if (!eventTeamId || !userId || !registrationId) continue;
-    const list = playerRegistrationsByTeamId.get(eventTeamId) ?? [];
-    list.push({
-      id: registrationId,
-      teamId: eventTeamId,
-      userId,
-      status: String((row as any).status ?? "ACTIVE"),
-      jerseyNumber: (row as any).jerseyNumber ?? null,
-      position: (row as any).position ?? null,
-      isCaptain: Boolean((row as any).isCaptain),
-    });
-    playerRegistrationsByTeamId.set(eventTeamId, list);
+  return lookup;
+};
+
+const buildEventPlayerRegistration = (
+  row: any,
+): EventLoadPlayerRegistration | null => {
+  const eventTeamId = normalizeEntityId(
+    readTeamRowValue(row, "eventTeamId", null),
+  );
+  const userId = normalizeEntityId(
+    readTeamRowValue(row, "registrantId", null),
+  );
+  const registrationId = normalizeEntityId(
+    readTeamRowValue(row, "id", null),
+  );
+  if (!eventTeamId || !userId || !registrationId) {
+    return null;
   }
-  const matchIds = (matchRows as any[])
+  return {
+    id: registrationId,
+    teamId: eventTeamId,
+    userId,
+    status: String(readTeamRowValue(row, "status", "ACTIVE")),
+    jerseyNumber: readTeamRowValue(row, "jerseyNumber", null),
+    position: readTeamRowValue(row, "position", null),
+    isCaptain: Boolean(readTeamRowValue(row, "isCaptain", false)),
+  };
+};
+
+const buildPlayerRegistrationsByTeamId = (
+  rows: any[],
+): Map<string, EventLoadPlayerRegistration[]> => {
+  const registrations = new Map<string, EventLoadPlayerRegistration[]>();
+  for (const row of rows) {
+    const registration = buildEventPlayerRegistration(row);
+    if (!registration || !registration.teamId) continue;
+    const list = registrations.get(registration.teamId) ?? [];
+    list.push(registration);
+    registrations.set(registration.teamId, list);
+  }
+  return registrations;
+};
+
+const resolveHydratedMatchDetailIds = (
+  matchRows: any[],
+  requestedIds: unknown,
+): { matchIds: string[]; matchDetailIdsToLoad: string[]; detailIdSet: Set<string> | null } => {
+  const matchIds = matchRows
     .map((row) => normalizeEntityId(row.id))
     .filter((id): id is string => Boolean(id));
-  const hydratedMatchDetailIdSet = Array.isArray(options.hydratedMatchDetailIds)
+  const detailIdSet = Array.isArray(requestedIds)
     ? new Set(
-        options.hydratedMatchDetailIds
+        requestedIds
           .map((value) => normalizeEntityId(value))
           .filter((value): value is string => Boolean(value)),
       )
     : null;
-  const matchDetailIdsToLoad = hydratedMatchDetailIdSet
-    ? matchIds.filter((id) => hydratedMatchDetailIdSet.has(id))
+  const matchDetailIdsToLoad = detailIdSet
+    ? matchIds.filter((id) => detailIdSet.has(id))
     : matchIds;
+  return { matchIds, matchDetailIdsToLoad, detailIdSet };
+};
+
+const indexRowsByMatchId = (rows: any[]): Map<string, any[]> => {
+  const rowsByMatchId = new Map<string, any[]>();
+  for (const row of rows) {
+    const rowMatchId = normalizeEntityId(row.matchId);
+    if (!rowMatchId) continue;
+    const list = rowsByMatchId.get(rowMatchId) ?? [];
+    list.push(row);
+    rowsByMatchId.set(rowMatchId, list);
+  }
+  return rowsByMatchId;
+};
+
+type EventLoadMatchDetailRows = {
+  segmentRowsByMatchId: Map<string, any[]>;
+  incidentRowsByMatchId: Map<string, any[]>;
+  hydratedMatchDetailIdSet: Set<string> | null;
+};
+
+const loadEventMatchDetailRows = async (params: {
+  client: PrismaLike;
+  matchRows: any[];
+  requestedIds: unknown;
+}): Promise<EventLoadMatchDetailRows> => {
+  const { matchDetailIdsToLoad, detailIdSet } = resolveHydratedMatchDetailIds(
+    params.matchRows,
+    params.requestedIds,
+  );
   const [segmentRows, incidentRows] = await Promise.all([
     matchDetailIdsToLoad.length &&
-    typeof (client as any).matchSegments?.findMany === "function"
-      ? (client as any).matchSegments.findMany({
+    typeof (params.client as any).matchSegments?.findMany === "function"
+      ? (params.client as any).matchSegments.findMany({
           where: { matchId: { in: matchDetailIdsToLoad } },
         })
       : Promise.resolve([]),
     matchDetailIdsToLoad.length &&
-    typeof (client as any).matchIncidents?.findMany === "function"
-      ? (client as any).matchIncidents.findMany({
+    typeof (params.client as any).matchIncidents?.findMany === "function"
+      ? (params.client as any).matchIncidents.findMany({
           where: { matchId: { in: matchDetailIdsToLoad } },
         })
       : Promise.resolve([]),
   ]);
-  const segmentRowsByMatchId = new Map<string, any[]>();
-  for (const row of segmentRows as any[]) {
-    const rowMatchId = normalizeEntityId(row.matchId);
-    if (!rowMatchId) continue;
-    const list = segmentRowsByMatchId.get(rowMatchId) ?? [];
-    list.push(row);
-    segmentRowsByMatchId.set(rowMatchId, list);
-  }
-  const incidentRowsByMatchId = new Map<string, any[]>();
-  for (const row of incidentRows as any[]) {
-    const rowMatchId = normalizeEntityId(row.matchId);
-    if (!rowMatchId) continue;
-    const list = incidentRowsByMatchId.get(rowMatchId) ?? [];
-    list.push(row);
-    incidentRowsByMatchId.set(rowMatchId, list);
-  }
+  return {
+    segmentRowsByMatchId: indexRowsByMatchId(segmentRows as any[]),
+    incidentRowsByMatchId: indexRowsByMatchId(incidentRows as any[]),
+    hydratedMatchDetailIdSet: detailIdSet,
+  };
+};
 
-  const fallbackFieldDivisionIds = allDivisions.length
-    ? allDivisions.map((division) => division.id)
-    : [DEFAULT_DIVISION_KEY];
-  const rawFieldDivisionIdsByFieldId = new Map<string, string[]>();
-  for (const row of hydratedDivisionRows as any[]) {
-    const rawDivisionId = normalizeDivisionKey(row.id);
-    if (!rawDivisionId) {
+type EventLoadRelationRows = EventLoadPrimaryRelationRows &
+  EventLoadSecondaryRelationRows & {
+    teamPlayerLookup: Map<string, UserData>;
+    playerRegistrationsByTeamId: Map<
+      string,
+      EventLoadPlayerRegistration[]
+    >;
+    segmentRowsByMatchId: Map<string, any[]>;
+    incidentRowsByMatchId: Map<string, any[]>;
+    hydratedMatchDetailIdSet: Set<string> | null;
+  };
+
+const loadEventRelationRows = async (params: {
+  event: any;
+  client: PrismaLike;
+  fieldIds: string[];
+  teamIdsToLoad: string[];
+  timeSlotIds: string[];
+  officialIds: string[];
+  includeTeamPlayers: boolean;
+  includeTeamRegistrations: boolean;
+  allDivisions: Division[];
+  matchRows: any[];
+  requestedMatchDetailIds: unknown;
+}): Promise<EventLoadRelationRows> => {
+  const primaryRows = await loadEventPrimaryRelationRows(params);
+  const teamPlayerIds = collectTeamPlayerIds(
+    primaryRows.teamRows,
+    params.includeTeamPlayers,
+  );
+  const secondaryRows = await loadEventSecondaryRelationRows({
+    event: params.event,
+    client: params.client,
+    teamPlayerIds,
+    includeTeamPlayers: params.includeTeamPlayers,
+    includeTeamRegistrations: params.includeTeamRegistrations,
+    teamIdsToLoad: params.teamIdsToLoad,
+  });
+  const teamPlayerLookup = buildTeamPlayerLookup(
+    secondaryRows.teamPlayerRows as any[],
+    params.allDivisions,
+  );
+  const playerRegistrationsByTeamId = buildPlayerRegistrationsByTeamId(
+    secondaryRows.eventRegistrationRows as any[],
+  );
+  const detailRows = await loadEventMatchDetailRows({
+    client: params.client,
+    matchRows: params.matchRows,
+    requestedIds: params.requestedMatchDetailIds,
+  });
+  return {
+    ...primaryRows,
+    ...secondaryRows,
+    teamPlayerLookup,
+    playerRegistrationsByTeamId,
+    ...detailRows,
+  };
+};
+
+const buildRawFieldDivisionIdsByFieldId = (
+  rows: any[],
+): Map<string, string[]> => {
+  const divisionIdsByFieldId = new Map<string, string[]>();
+  for (const row of rows) {
+    const divisionId = normalizeDivisionKey(row.id);
+    if (!divisionId) {
       continue;
     }
     for (const fieldId of ensureStringArray(row.fieldIds)) {
-      const scopedDivisionIds = rawFieldDivisionIdsByFieldId.get(fieldId) ?? [];
-      if (!scopedDivisionIds.includes(rawDivisionId)) {
-        scopedDivisionIds.push(rawDivisionId);
+      const scopedDivisionIds = divisionIdsByFieldId.get(fieldId) ?? [];
+      if (!scopedDivisionIds.includes(divisionId)) {
+        scopedDivisionIds.push(divisionId);
       }
-      rawFieldDivisionIdsByFieldId.set(fieldId, scopedDivisionIds);
+      divisionIdsByFieldId.set(fieldId, scopedDivisionIds);
     }
   }
-  const fields = buildFields(
-    fieldRows,
-    divisionMap,
-    fallbackFieldDivisionIds,
-    fieldIdsByDivision,
-    rawFieldDivisionIdsByFieldId,
-  );
-  const teamRosterSet = new Set(teamIdsToLoad);
-  const divisionByTeamId = new Map<string, Division>();
+  return divisionIdsByFieldId;
+};
+
+const resolveTeamAssignmentDivisions = (
+  divisions: Division[],
+  event: any,
+): Division[] => {
+  if (!Boolean(event.singleDivision)) {
+    return divisions;
+  }
   const poolDivisions = divisions.filter(
     (division) => division.phase === "POOL",
   );
-  const teamAssignmentDivisions = !Boolean(event.singleDivision)
-    ? divisions
-    : poolDivisions.length > 1
-      ? poolDivisions
-      : [];
+  return poolDivisions.length > 1 ? poolDivisions : [];
+};
+
+const buildDivisionByTeamId = (
+  divisions: Division[],
+  teamIdsToLoad: string[],
+  event: any,
+): Map<string, Division> => {
+  const teamRosterSet = new Set(teamIdsToLoad);
+  const divisionByTeamId = new Map<string, Division>();
+  const teamAssignmentDivisions = resolveTeamAssignmentDivisions(
+    divisions,
+    event,
+  );
   for (const division of teamAssignmentDivisions) {
     for (const divisionTeamId of division.teamIds) {
       if (!teamRosterSet.has(divisionTeamId)) {
@@ -4364,142 +6788,81 @@ export const loadEventWithRelations = async (
       }
     }
   }
+  return divisionByTeamId;
+};
+type EventFieldTeamRelations = {
+  fields: Record<string, PlayingField>;
+  teams: Record<string, Team>;
+  timeSlots: TimeSlot[];
+};
+const buildEventFieldTeamRelations = (params: {
+  event: any;
+  hydratedDivisionRows: any[];
+  fieldRows: any[];
+  teamRows: any[];
+  timeSlotRows: any[];
+  divisionMap: Map<string, Division>;
+  fieldIdsByDivision: Map<string, string[]>;
+  allDivisions: Division[];
+  assignmentDivisions: Division[];
+  teamIdsToLoad: string[];
+  fallbackDivision: Division;
+  teamPlayerLookup: Map<string, UserData>;
+  playerRegistrationsByTeamId: Map<string, EventLoadPlayerRegistration[]>;
+  relatedPhaseDivisionsByPhaseId: Map<string, Division[]>;
+  phaseDivisionsBySource: Map<string, Division[]>;
+}): EventFieldTeamRelations => {
+  const fallbackFieldDivisionIds = params.allDivisions.length
+    ? params.allDivisions
+        .filter((division) => division.id !== DEFAULT_DIVISION_KEY)
+        .map((division) => division.id)
+    : [];
+  const rawFieldDivisionIdsByFieldId = buildRawFieldDivisionIdsByFieldId(
+    params.hydratedDivisionRows,
+  );
+  const fields = buildFields(
+    params.fieldRows,
+    params.divisionMap,
+    fallbackFieldDivisionIds,
+    params.fieldIdsByDivision,
+    rawFieldDivisionIdsByFieldId,
+  );
+  const divisionByTeamId = buildDivisionByTeamId(
+    params.assignmentDivisions,
+    params.teamIdsToLoad,
+    params.event,
+  );
   const teams = buildTeams(
-    teamRows,
-    divisionMap,
-    fallbackDivision,
+    params.teamRows,
+    params.divisionMap,
+    params.fallbackDivision,
     divisionByTeamId,
-    teamPlayerLookup,
-    playerRegistrationsByTeamId,
+    params.teamPlayerLookup,
+    params.playerRegistrationsByTeamId,
   );
-  const timeSlots = buildTimeSlots(timeSlotRows, divisionMap, allDivisions);
-  const phaseDivisionsBySource = new Map<string, Division[]>();
-  const addPhaseSource = (
-    phaseDivisionId: string,
-    sourceDivisionId: string,
-  ) => {
-    const normalizedPhaseId = normalizeDivisionKey(phaseDivisionId);
-    const normalizedSourceId = normalizeDivisionKey(sourceDivisionId);
-    if (!normalizedPhaseId || !normalizedSourceId) {
-      throw new Error(
-        "Unable to hydrate Phase Division scope because a phase or source Division ID is missing.",
-      );
-    }
-    const phaseDivision = divisionMap.get(normalizedPhaseId);
-    if (!phaseDivision) {
-      throw new Error(
-        `Unable to hydrate Phase Division scope because ${phaseDivisionId} is not present in the Event.`,
-      );
-    }
-    const phaseDivisions = phaseDivisionsBySource.get(normalizedSourceId) ?? [];
-    if (!phaseDivisions.some((division) => division.id === phaseDivision.id)) {
-      phaseDivisions.push(phaseDivision);
-    }
-    phaseDivisionsBySource.set(normalizedSourceId, phaseDivisions);
-    const sourceIds =
-      phaseSourceDivisionIdsByPhase.get(normalizedPhaseId) ?? [];
-    if (!sourceIds.includes(normalizedSourceId)) {
-      sourceIds.push(normalizedSourceId);
-      phaseSourceDivisionIdsByPhase.set(normalizedPhaseId, sourceIds);
-    }
-  };
-  for (const [
-    phaseDivisionId,
-    sourceDivisionIds,
-  ] of phaseSourceDivisionIdsByPhase.entries()) {
-    for (const sourceDivisionId of sourceDivisionIds) {
-      addPhaseSource(phaseDivisionId, sourceDivisionId);
-    }
-  }
-  for (const row of hydratedDivisionRows as any[]) {
-    if (String(row.role ?? "").toUpperCase() !== "PHASE") continue;
-    const phaseDivisionId = normalizeDivisionKey(row.id);
-    const sourceDivisionId = normalizeDivisionKey(row.sourceDivisionId);
-    if (!phaseDivisionId) {
-      throw new Error(
-        "Unable to hydrate Phase Division scope because a persisted phase Division ID is missing.",
-      );
-    }
-    if (sourceDivisionId) {
-      addPhaseSource(phaseDivisionId, sourceDivisionId);
-    } else if (!phaseSourceDivisionIdsByPhase.has(phaseDivisionId)) {
-      throw new Error(
-        `Unable to hydrate Phase Division scope because ${row.id} has no source Division.`,
-      );
-    }
-  }
-  const relatedPhaseDivisionsByPhaseId = new Map<string, Division[]>();
-  for (const [
-    phaseDivisionId,
-    sourceDivisionIds,
-  ] of phaseSourceDivisionIdsByPhase.entries()) {
-    const phaseDivision = divisionMap.get(phaseDivisionId);
-    if (!phaseDivision) {
-      throw new Error(
-        `Unable to hydrate Phase Division scope because ${phaseDivisionId} is not present in the Event.`,
-      );
-    }
-    const relatedDivisions = new Map<string, Division>([
-      [phaseDivision.id, phaseDivision],
-    ]);
-    const phase = String(phaseDivision.phase ?? "").toUpperCase();
-    const isRegularPhase = phase === "LEAGUE" || phase === "POOL";
-    const isFinalPhase = phase === "PLAYOFF" || phase === "BRACKET";
-    if (isRegularPhase || isFinalPhase) {
-      for (const sourceDivisionId of sourceDivisionIds) {
-        for (const relatedPhaseDivision of phaseDivisionsBySource.get(
-          sourceDivisionId,
-        ) ?? []) {
-          const relatedPhase = String(
-            relatedPhaseDivision.phase ?? "",
-          ).toUpperCase();
-          const isRelatedRegularPhase =
-            relatedPhase === "LEAGUE" || relatedPhase === "POOL";
-          const isRelatedFinalPhase =
-            relatedPhase === "PLAYOFF" || relatedPhase === "BRACKET";
-          if (
-            (isRegularPhase && isRelatedFinalPhase) ||
-            (isFinalPhase && isRelatedRegularPhase)
-          ) {
-            relatedDivisions.set(relatedPhaseDivision.id, relatedPhaseDivision);
-          }
-        }
-      }
-    }
-    relatedPhaseDivisionsByPhaseId.set(
-      phaseDivisionId,
-      Array.from(relatedDivisions.values()),
-    );
-  }
-  for (const timeSlot of timeSlots) {
-    const expandedDivisions = new Map(
-      timeSlot.divisions.map((division) => [division.id, division]),
-    );
-    for (const division of timeSlot.divisions) {
-      const divisionId = normalizeDivisionKey(division.id) ?? division.id;
-      const sourcePhaseDivisions =
-        relatedPhaseDivisionsByPhaseId.get(divisionId) ??
-        phaseDivisionsBySource.get(divisionId) ??
-        [];
-      for (const phaseDivision of sourcePhaseDivisions) {
-        expandedDivisions.set(phaseDivision.id, phaseDivision);
-      }
-    }
-    timeSlot.divisions = Array.from(expandedDivisions.values());
-  }
-  const officialEventTeamIds = buildOfficialEventTeamIds({
-    officialIds,
-    canonicalTeamIdsByUserId: canonicalTeamIdsByOfficialId,
-    eventTeamRows: teamRows,
-    eventParticipantRows: eventRegistrationRows,
-    eventTeamStaffRows,
-  });
-  const officials = buildOfficials(
-    officialRows,
-    allDivisions,
-    officialEventTeamIds,
+  const timeSlots = buildTimeSlots(
+    params.timeSlotRows,
+    params.divisionMap,
+    params.allDivisions,
   );
-  attachTimeSlotsToFields(fields, timeSlots);
+  expandTimeSlotDivisions(
+    timeSlots,
+    params.relatedPhaseDivisionsByPhaseId,
+    params.phaseDivisionsBySource,
+  );
+  return { fields, teams, timeSlots };
+};
+
+
+type LoadedEventTimeline = {
+  eventStart: Date;
+  eventEnd: Date;
+  normalizedParentEvent: string | null;
+  isWeeklyChild: boolean;
+  noFixedEndDateTime: boolean;
+};
+
+const resolveLoadedEventTimeline = (event: any): LoadedEventTimeline => {
   const eventStart =
     event.start instanceof Date ? event.start : new Date(event.start);
   const eventEnd =
@@ -4508,203 +6871,641 @@ export const loadEventWithRelations = async (
       : event.end
         ? new Date(event.end)
         : eventStart;
-  const normalizedParentEvent = normalizeEntityId((event as any).parentEvent);
+  const normalizedParentEvent = normalizeEntityId(event.parentEvent);
   const isWeeklyChild =
     String(event.eventType ?? "").toUpperCase() === "WEEKLY_EVENT" &&
     Boolean(normalizedParentEvent);
   const noFixedEndDateTime =
-    typeof (event as any).noFixedEndDateTime === "boolean"
-      ? (event as any).noFixedEndDateTime
+    typeof event.noFixedEndDateTime === "boolean"
+      ? event.noFixedEndDateTime
       : false;
-  if (!isWeeklyChild) {
-    const conflictWindowEnd = resolveFieldConflictWindowEnd({
-      start: eventStart,
-      end: eventEnd,
-      noFixedEndDateTime,
-    });
-    await attachFieldSchedulingConflicts({
-      client,
-      eventId: event.id,
-      fields,
-      windowStart: eventStart,
-      windowEnd: conflictWindowEnd,
-    });
-  }
+  return {
+    eventStart,
+    eventEnd,
+    normalizedParentEvent,
+    isWeeklyChild,
+    noFixedEndDateTime,
+  };
+};
 
-  const coordinates = Array.isArray(event.coordinates)
+const attachLoadedEventSchedulingConflicts = async (params: {
+  event: any;
+  client: PrismaLike;
+  fields: Record<string, PlayingField>;
+  timeline: LoadedEventTimeline;
+}): Promise<void> => {
+  if (params.timeline.isWeeklyChild) {
+    return;
+  }
+  const conflictWindowEnd = resolveFieldConflictWindowEnd({
+    start: params.timeline.eventStart,
+    end: params.timeline.eventEnd,
+    noFixedEndDateTime: params.timeline.noFixedEndDateTime,
+  });
+  await attachFieldSchedulingConflicts({
+    client: params.client,
+    eventId: params.event.id,
+    fields: params.fields,
+    windowStart: params.timeline.eventStart,
+    windowEnd: conflictWindowEnd,
+  });
+};
+
+const resolveLoadedCoordinates = (event: any): number[] | null =>
+  Array.isArray(event.coordinates)
     ? event.coordinates.filter(
         (value: unknown): value is number => typeof value === "number",
       )
     : null;
-  const resolvedFieldCount = (() => {
-    const resolvedFieldEntries = Object.keys(fields).length;
-    if (resolvedFieldEntries > 0) {
-      return resolvedFieldEntries;
-    }
-    const linkedFieldCount = ensureStringArray(event.fieldIds).length;
-    return linkedFieldCount > 0 ? linkedFieldCount : null;
-  })();
-  const resolvedMatchRules = resolveMatchRules({
-    sportTemplate: (sportRow as any)?.matchRulesTemplate,
-    eventOverride: (event as any).matchRulesOverride,
-    autoCreatePointMatchIncidents: (event as any).autoCreatePointMatchIncidents,
-    usesSets: event.usesSets,
-    setsPerMatch: event.setsPerMatch,
-    winnerSetCount: event.winnerSetCount,
-    matchDurationMinutes: event.matchDurationMinutes,
-    officialPositions,
-  });
-  const legacyOfficialSchedulingMode = normalizeOfficialSchedulingMode(
-    (event as any).officialSchedulingMode,
-  );
-  const staffingPriority = normalizeStaffingPriority(
-    (event as any).staffingPriority,
-    legacyOfficialSchedulingMode,
-  );
-  const doTeamsOfficiate =
-    typeof event.doTeamsOfficiate === "boolean"
-      ? event.doTeamsOfficiate
-      : legacyOfficialSchedulingMode === "TEAM_STAFFING";
 
-  const schedulerPlayoffTeamCount =
-    Boolean(event.includePlayoffs) &&
-    (event.eventType === "LEAGUE" || event.eventType === "TOURNAMENT")
-      ? normalizeBracketTeamCount(event.playoffTeamCount)
-      : (event.playoffTeamCount ?? 0);
-  const baseParams = {
+const resolveLoadedFieldCount = (
+  fields: Record<string, PlayingField>,
+  event: any,
+): number | null => {
+  const resolvedFieldEntries = Object.keys(fields).length;
+  if (resolvedFieldEntries > 0) {
+    return resolvedFieldEntries;
+  }
+  const linkedFieldCount = ensureStringArray(event.fieldIds).length;
+  return linkedFieldCount > 0 ? linkedFieldCount : null;
+};
+
+const readLoadedEventValue = <T>(
+  event: any,
+  key: string,
+  fallback: T,
+): T => {
+  const value = event[key];
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+  return value as T;
+};
+
+const resolveLoadedList = (
+  loadedIds: string[],
+  event: any,
+  key: string,
+): string[] =>
+  loadedIds.length
+    ? loadedIds
+    : ensureStringArray(event[key]);
+
+const resolveLoadedMaxParticipants = (event: any): number =>
+  event.eventType === "TOURNAMENT"
+    ? normalizeBracketTeamCount(event.maxParticipants)
+    : readLoadedEventValue(event, "maxParticipants", 0);
+
+const resolveLoadedSchedulerPlayoffTeamCount = (event: any): number => {
+  if (!Boolean(event.includePlayoffs)) {
+    return readLoadedEventValue(event, "playoffTeamCount", 0);
+  }
+  if (event.eventType === "LEAGUE" || event.eventType === "TOURNAMENT") {
+    return normalizeBracketTeamCount(event.playoffTeamCount);
+  }
+  return readLoadedEventValue(event, "playoffTeamCount", 0);
+};
+
+const resolveLoadedTeamOfficialsMaySwap = (
+  event: any,
+  doTeamsOfficiate: boolean,
+): boolean => {
+  if (!doTeamsOfficiate) {
+    return false;
+  }
+  return typeof event.teamOfficialsMaySwap === "boolean"
+    ? Boolean(event.teamOfficialsMaySwap)
+    : false;
+};
+
+const resolveLoadedTeamCheckInMode = (
+  event: any,
+): ReturnType<typeof normalizeTeamCheckInMode> | "OFF" =>
+  Boolean(event.teamSignup)
+    ? normalizeTeamCheckInMode(event.teamCheckInMode)
+    : "OFF";
+
+const resolveLoadedDoTeamsOfficiate = (
+  event: any,
+  legacyOfficialSchedulingMode: ReturnType<
+    typeof normalizeOfficialSchedulingMode
+  >,
+): boolean =>
+  typeof event.doTeamsOfficiate === "boolean"
+    ? event.doTeamsOfficiate
+    : legacyOfficialSchedulingMode === "TEAM_STAFFING";
+
+const buildLoadedEventBaseParams = (params: {
+  event: any;
+  participantIds: EventLoadParticipantIds;
+  timeline: LoadedEventTimeline;
+  coordinates: number[] | null;
+  resolvedFieldCount: number | null;
+  resolvedMatchRules: any;
+  staffingPriority: any;
+  doTeamsOfficiate: boolean;
+  schedulerPlayoffTeamCount: number;
+  officialPositions: any[];
+  eventOfficials: any[];
+  leagueConfigRow: any;
+  registeredTeamIds: string[];
+  teams: Record<string, Team>;
+  divisions: Division[];
+  officials: UserData[];
+  fields: Record<string, PlayingField>;
+  timeSlots: TimeSlot[];
+  playoffDivisions: Division[];
+}): ConstructorParameters<typeof Tournament>[0] & { address: string | null } => {
+  const {
+    event,
+    timeline,
+    coordinates,
+    resolvedFieldCount,
+    resolvedMatchRules,
+    staffingPriority,
+    doTeamsOfficiate,
+    schedulerPlayoffTeamCount,
+    officialPositions,
+    eventOfficials,
+    leagueConfigRow,
+    registeredTeamIds,
+    teams,
+    divisions,
+    officials,
+    fields,
+    timeSlots,
+    playoffDivisions,
+  } = params;
+  const teamOfficialsMaySwap = resolveLoadedTeamOfficialsMaySwap(
+    event,
+    doTeamsOfficiate,
+  );
+  const allowMatchRosterEdits =
+    Boolean(event.teamSignup) &&
+    Boolean(event.allowMatchRosterEdits);
+  const allowTemporaryMatchPlayers =
+    allowMatchRosterEdits &&
+    Boolean(event.allowTemporaryMatchPlayers);
+  return {
     id: event.id,
-    start: eventStart,
-    end: eventEnd,
-    createdAt: event.createdAt ?? null,
-    updatedAt: event.updatedAt ?? null,
+    start: timeline.eventStart,
+    end: timeline.eventEnd,
+    createdAt: readLoadedEventValue(event, "createdAt", null),
+    updatedAt: readLoadedEventValue(event, "updatedAt", null),
     name: event.name,
-    description: event.description ?? "",
-    waitListIds: participantIds.waitListIds.length
-      ? participantIds.waitListIds
-      : ensureStringArray((event as any).waitListIds),
-    freeAgentIds: participantIds.freeAgentIds.length
-      ? participantIds.freeAgentIds
-      : ensureStringArray((event as any).freeAgentIds),
-    maxParticipants:
-      event.eventType === "TOURNAMENT"
-        ? normalizeBracketTeamCount(event.maxParticipants)
-        : (event.maxParticipants ?? 0),
+    description: readLoadedEventValue(event, "description", ""),
+    waitListIds: resolveLoadedList(
+      params.participantIds.waitListIds,
+      event,
+      "waitListIds",
+    ),
+    freeAgentIds: resolveLoadedList(
+      params.participantIds.freeAgentIds,
+      event,
+      "freeAgentIds",
+    ),
+    maxParticipants: resolveLoadedMaxParticipants(event),
     teamSignup: Boolean(event.teamSignup),
     coordinates,
-    organizationId: event.organizationId ?? null,
+    organizationId: readLoadedEventValue(event, "organizationId", null),
     requiredTemplateIds: ensureStringArray(event.requiredTemplateIds),
-    location: event.location ?? "",
-    address: event.address ?? null,
-    price: event.price ?? null,
-    registrationPaymentMode: (event as any).registrationPaymentMode ?? "ONLINE",
-    manualPaymentLinks: Array.isArray((event as any).manualPaymentLinks)
-      ? (event as any).manualPaymentLinks
+    location: readLoadedEventValue(event, "location", ""),
+    address: readLoadedEventValue<string | null>(event, "address", null),
+    price: readLoadedEventValue(event, "price", null),
+    registrationPaymentMode: readLoadedEventValue(
+      event,
+      "registrationPaymentMode",
+      "ONLINE",
+    ),
+    manualPaymentLinks: Array.isArray(event.manualPaymentLinks)
+      ? event.manualPaymentLinks
       : [],
-    manualPaymentInstructions: (event as any).manualPaymentInstructions ?? null,
-    taxHandling: (event as any).taxHandling ?? "INHERIT_ORG",
-    organizerManualTaxRateBps: (event as any).organizerManualTaxRateBps ?? 0,
+    manualPaymentInstructions: readLoadedEventValue(
+      event,
+      "manualPaymentInstructions",
+      null,
+    ),
+    taxHandling: readLoadedEventValue(event, "taxHandling", "INHERIT_ORG"),
+    organizerManualTaxRateBps: readLoadedEventValue(
+      event,
+      "organizerManualTaxRateBps",
+      0,
+    ),
     allowPaymentPlans: Boolean(event.allowPaymentPlans),
-    installmentCount: event.installmentCount ?? 0,
+    installmentCount: readLoadedEventValue(event, "installmentCount", 0),
     installmentDueDates: ensureArray(event.installmentDueDates)
       .map((value) => coerceDate(value))
       .filter(Boolean) as Date[],
     installmentDueRelativeDays: normalizeInstallmentRelativeDayList(
-      (event as any).installmentDueRelativeDays,
+      event.installmentDueRelativeDays,
     ),
     installmentAmounts: ensureNumberArray(event.installmentAmounts),
     allowTeamSplitDefault: Boolean(event.allowTeamSplitDefault),
     sportIds: ensureStringArray(event.sportIds),
-    teamSizeLimit: event.teamSizeLimit ?? null,
+    teamSizeLimit: readLoadedEventValue(event, "teamSizeLimit", null),
     singleDivision: Boolean(event.singleDivision),
-    seedColor: event.seedColor ?? null,
-    cancellationRefundHours: event.cancellationRefundHours ?? null,
-    registrationCutoffHours: event.registrationCutoffHours ?? null,
-    rating: event.rating ?? null,
-    minAge: event.minAge ?? null,
-    maxAge: event.maxAge ?? null,
-    doTeamsOfficiate,
-    teamOfficialsMaySwap:
-      doTeamsOfficiate &&
-      typeof (event as any).teamOfficialsMaySwap === "boolean"
-        ? Boolean((event as any).teamOfficialsMaySwap)
-        : false,
-    teamCheckInMode: Boolean(event.teamSignup)
-      ? normalizeTeamCheckInMode((event as any).teamCheckInMode)
-      : "OFF",
-    teamCheckInOpenMinutesBefore: normalizeOpenMinutesBefore(
-      (event as any).teamCheckInOpenMinutesBefore,
+    seedColor: readLoadedEventValue(event, "seedColor", null),
+    cancellationRefundHours: readLoadedEventValue(
+      event,
+      "cancellationRefundHours",
+      null,
     ),
-    allowMatchRosterEdits:
-      Boolean(event.teamSignup) &&
-      Boolean((event as any).allowMatchRosterEdits),
-    allowTemporaryMatchPlayers:
-      Boolean(event.teamSignup) &&
-      Boolean((event as any).allowMatchRosterEdits) &&
-      Boolean((event as any).allowTemporaryMatchPlayers),
+    registrationCutoffHours: readLoadedEventValue(
+      event,
+      "registrationCutoffHours",
+      null,
+    ),
+    rating: readLoadedEventValue(event, "rating", null),
+    minAge: readLoadedEventValue(event, "minAge", null),
+    maxAge: readLoadedEventValue(event, "maxAge", null),
+    doTeamsOfficiate,
+    teamOfficialsMaySwap,
+    teamCheckInMode: resolveLoadedTeamCheckInMode(event),
+    teamCheckInOpenMinutesBefore: normalizeOpenMinutesBefore(
+      event.teamCheckInOpenMinutesBefore,
+    ),
+    allowMatchRosterEdits,
+    allowTemporaryMatchPlayers,
     staffingPriority,
     officialPositions,
     eventOfficials,
-    matchRulesOverride: (event as any).matchRulesOverride ?? null,
+    matchRulesOverride: readLoadedEventValue(
+      event,
+      "matchRulesOverride",
+      null,
+    ),
     autoCreatePointMatchIncidents: Boolean(
-      (event as any).autoCreatePointMatchIncidents,
+      event.autoCreatePointMatchIncidents,
     ),
     resolvedMatchRules,
     fieldCount: resolvedFieldCount,
-    prize: event.prize ?? null,
-    hostId: event.hostId ?? "",
-    assistantHostIds: ensureStringArray((event as any).assistantHostIds),
-    noFixedEndDateTime,
-    imageId: event.imageId ?? "",
+    prize: readLoadedEventValue(event, "prize", null),
+    hostId: readLoadedEventValue(event, "hostId", ""),
+    assistantHostIds: ensureStringArray(event.assistantHostIds),
+    noFixedEndDateTime: timeline.noFixedEndDateTime,
+    imageId: readLoadedEventValue(event, "imageId", ""),
     loserBracketPointsToVictory: ensureNumberArray(
       event.loserBracketPointsToVictory,
     ),
     winnerBracketPointsToVictory: ensureNumberArray(
       event.winnerBracketPointsToVictory,
     ),
-    restTimeMinutes: event.restTimeMinutes ?? 0,
-    state: event.state ?? "UNPUBLISHED",
-    leagueScoringConfig: leagueConfigRow ?? null,
-    registeredTeamIds: teamIds,
+    restTimeMinutes: readLoadedEventValue(event, "restTimeMinutes", 0),
+    state: readLoadedEventValue(event, "state", "UNPUBLISHED"),
+    leagueScoringConfig: leagueConfigRow,
+    registeredTeamIds,
     teams,
     players: [],
     divisions,
     officials,
-    eventType: event.eventType ?? "EVENT",
+    eventType: readLoadedEventValue(event, "eventType", "EVENT"),
     fields,
     doubleElimination: Boolean(event.doubleElimination),
     matches: {},
-    winnerSetCount: event.winnerSetCount ?? null,
-    loserSetCount: event.loserSetCount ?? null,
-    matchDurationMinutes: event.matchDurationMinutes ?? 0,
+    winnerSetCount: readLoadedEventValue(event, "winnerSetCount", null),
+    loserSetCount: readLoadedEventValue(event, "loserSetCount", null),
+    matchDurationMinutes: readLoadedEventValue(
+      event,
+      "matchDurationMinutes",
+      0,
+    ),
     usesSets: Boolean(event.usesSets),
-    setDurationMinutes: event.setDurationMinutes ?? 0,
-    gamesPerOpponent: event.gamesPerOpponent ?? 1,
+    setDurationMinutes: readLoadedEventValue(
+      event,
+      "setDurationMinutes",
+      0,
+    ),
+    gamesPerOpponent: readLoadedEventValue(event, "gamesPerOpponent", 1),
     includePlayoffs: Boolean(event.includePlayoffs),
     playoffTeamCount: schedulerPlayoffTeamCount,
-    setsPerMatch: event.setsPerMatch ?? 0,
+    setsPerMatch: readLoadedEventValue(event, "setsPerMatch", 0),
     pointsToVictory: ensureNumberArray(event.pointsToVictory),
     timeSlots,
     splitLeaguePlayoffDivisions: Boolean(
-      (event as any).splitLeaguePlayoffDivisions,
+      event.splitLeaguePlayoffDivisions,
     ),
     playoffDivisions,
   };
+};
 
+type LoadedEventModel = {
+  constructed: League | Tournament;
+  normalizedParentEvent: string | null;
+  resolvedMatchRules: any;
+};
+
+const buildLoadedEventModel = (params: {
+  event: any;
+  sportRow: any;
+  officialPositions: any[];
+  eventOfficials: any[];
+  leagueConfigRow: any;
+  participantIds: EventLoadParticipantIds;
+  registeredTeamIds: string[];
+  teams: Record<string, Team>;
+  divisions: Division[];
+  playoffDivisions: Division[];
+  officials: UserData[];
+  fields: Record<string, PlayingField>;
+  timeSlots: TimeSlot[];
+}): LoadedEventModel => {
+  const timeline = resolveLoadedEventTimeline(params.event);
+  const resolvedFieldCount = resolveLoadedFieldCount(
+    params.fields,
+    params.event,
+  );
+  const resolvedMatchRules = resolveMatchRules({
+    sportTemplate: params.sportRow?.matchRulesTemplate,
+    eventOverride: params.event.matchRulesOverride,
+    autoCreatePointMatchIncidents:
+      params.event.autoCreatePointMatchIncidents,
+    usesSets: params.event.usesSets,
+    setsPerMatch: params.event.setsPerMatch,
+    winnerSetCount: params.event.winnerSetCount,
+    matchDurationMinutes: params.event.matchDurationMinutes,
+    officialPositions: params.officialPositions,
+  });
+  const legacyOfficialSchedulingMode = normalizeOfficialSchedulingMode(
+    params.event.officialSchedulingMode,
+  );
+  const staffingPriority = normalizeStaffingPriority(
+    params.event.staffingPriority,
+    legacyOfficialSchedulingMode,
+  );
+  const doTeamsOfficiate = resolveLoadedDoTeamsOfficiate(
+    params.event,
+    legacyOfficialSchedulingMode,
+  );
+  const schedulerPlayoffTeamCount =
+    resolveLoadedSchedulerPlayoffTeamCount(params.event);
+  const baseParams = buildLoadedEventBaseParams({
+    event: params.event,
+    timeline,
+    coordinates: resolveLoadedCoordinates(params.event),
+    resolvedFieldCount,
+    resolvedMatchRules,
+    staffingPriority,
+    doTeamsOfficiate,
+    schedulerPlayoffTeamCount,
+    officialPositions: params.officialPositions,
+    eventOfficials: params.eventOfficials,
+    leagueConfigRow: params.leagueConfigRow,
+    participantIds: params.participantIds,
+    registeredTeamIds: params.registeredTeamIds,
+    teams: params.teams,
+    divisions: params.divisions,
+    officials: params.officials,
+    fields: params.fields,
+    timeSlots: params.timeSlots,
+    playoffDivisions: params.playoffDivisions,
+  });
   const constructed =
-    event.eventType === "LEAGUE"
+    params.event.eventType === "LEAGUE"
       ? new League({
           ...baseParams,
-          gamesPerOpponent: event.gamesPerOpponent ?? 1,
-          includePlayoffs: Boolean(event.includePlayoffs),
+          gamesPerOpponent: readLoadedEventValue(
+            params.event,
+            "gamesPerOpponent",
+            1,
+          ),
+          includePlayoffs: Boolean(params.event.includePlayoffs),
           playoffTeamCount: schedulerPlayoffTeamCount,
-          setsPerMatch: event.setsPerMatch ?? 0,
-          pointsToVictory: ensureNumberArray(event.pointsToVictory),
+          setsPerMatch: readLoadedEventValue(
+            params.event,
+            "setsPerMatch",
+            0,
+          ),
+          pointsToVictory: ensureNumberArray(params.event.pointsToVictory),
         })
       : new Tournament(baseParams);
-
-  const matches = buildMatches(
-    matchRows,
+  return {
     constructed,
+    normalizedParentEvent: timeline.normalizedParentEvent,
+    resolvedMatchRules,
+  };
+};
+
+const isLoadedEntryDivisionRow = (row: any): boolean =>
+  String(row?.role ?? "")
+      .trim()
+      .toUpperCase() !== "PHASE" &&
+  normalizeDivisionKind(row?.kind, "LEAGUE") !== "PLAYOFF";
+
+const isLoadedExplicitPlayoffRow = (row: any): boolean =>
+  normalizeDivisionKind(row?.kind, "LEAGUE") === "PLAYOFF" &&
+  row?.isSystemGenerated !== true;
+
+const finalizeLoadedEvent = (params: {
+  constructed: League | Tournament;
+  matchRows: any[];
+  teams: Record<string, Team>;
+  fields: Record<string, PlayingField>;
+  allDivisions: Division[];
+  officials: UserData[];
+  segmentRowsByMatchId: Map<string, any[]>;
+  incidentRowsByMatchId: Map<string, any[]>;
+  resolvedMatchRules: any;
+  hydratedMatchDetailIdSet: Set<string> | null;
+  normalizedParentEvent: string | null;
+  hydratedDivisionRows: any[];
+}): League | Tournament => {
+  const matches = buildMatches(
+    params.matchRows,
+    params.constructed,
+    params.teams,
+    params.fields,
+    params.allDivisions,
+    params.officials,
+    params.segmentRowsByMatchId,
+    params.incidentRowsByMatchId,
+    params.resolvedMatchRules,
+    {
+      segmentMatchIds: params.hydratedMatchDetailIdSet,
+      incidentMatchIds: params.hydratedMatchDetailIdSet,
+    },
+  );
+  params.constructed.matches = matches;
+  (params.constructed as any).parentEvent = params.normalizedParentEvent;
+  const entryDivisionRows = params.hydratedDivisionRows.filter(
+    isLoadedEntryDivisionRow,
+  );
+  const explicitPlayoffRows = params.hydratedDivisionRows.filter(
+    isLoadedExplicitPlayoffRow,
+  );
+  (params.constructed as any).divisionDetails =
+    serializeDivisionDetailsForTemplate(entryDivisionRows);
+  (params.constructed as any).playoffDivisionDetails =
+    serializeDivisionDetailsForTemplate(explicitPlayoffRows);
+  return params.constructed;
+};
+
+const buildLoadedOfficials = (
+  officialIds: string[],
+  officialRows: any[],
+  allDivisions: Division[],
+  eventOfficialTeamIds: Map<string, Set<string>>,
+): UserData[] => {
+  const officialRowsById = new Map<string, any>(
+    officialRows.map((row) => [String(row.id), row]),
+  );
+  const orderedOfficialRows = officialIds
+    .map((officialId) => officialRowsById.get(officialId))
+    .filter((row): row is any => row !== undefined);
+  return buildOfficials(
+    orderedOfficialRows,
+    allDivisions,
+    eventOfficialTeamIds,
+  );
+};
+
+export const loadEventWithRelations = async (
+  eventId: string,
+  client: PrismaLike = prisma,
+  options: LoadEventWithRelationsOptions = {},
+): Promise<League | Tournament> => {
+  const event = await client.events.findUnique({ where: { id: eventId } });
+  if (!event) {
+    throw new Error("Event not found");
+  }
+  const includeTeamPlayers = options.includeTeamPlayers !== false;
+  const includeTeamRegistrations = options.includeTeamRegistrations !== false;
+  const retainedMatchIds =
+    options.retainedMatchIds
+      ?.map((matchId) => normalizeEntityId(matchId))
+      .filter((matchId): matchId is string => Boolean(matchId)) ?? [];
+
+  const {
+    hydratedDivisionRows,
+    divisions,
+    playoffDivisions,
+    divisionMap,
+    fieldIdsByDivision,
+    allDivisions,
+    phaseSourceDivisionIdsByPhase,
+    phaseDivisionsBySource,
+    relatedPhaseDivisionsByPhaseId,
+  } = await loadEventDivisionState(client, event, retainedMatchIds);
+  const primarySportId = event.sportIds?.[0] ?? null;
+  const fallbackDivision =
+    divisions[0] ??
+    new Division(
+      DEFAULT_DIVISION_KEY,
+      buildDivisionDisplayName(DEFAULT_DIVISION_KEY, primarySportId),
+    );
+
+  const {
+    participantIds,
+    registeredTeamIds,
+    fieldIds,
+    teamIdsToLoad,
+    timeSlotIds,
+    matchRows,
+  } = await loadEventParticipantAndMatchInputs(
+    event,
+    client,
+    includeTeamRegistrations,
+    retainedMatchIds,
+  );
+  const {
+    sportRow,
+    officialPositions,
+    eventOfficials,
+    officialIds,
+  } = await loadEventOfficialData(
+    event,
+    client,
+    primarySportId,
+    fieldIds,
+  );
+  const {
+    fieldRows,
+    teamRows,
+    timeSlotRows,
+    officialRows,
+    leagueConfigRow,
+    canonicalTeamIdsByOfficialId,
+    eventRegistrationRows,
+    eventTeamStaffRows,
+    teamPlayerLookup,
+    playerRegistrationsByTeamId,
+    segmentRowsByMatchId,
+    incidentRowsByMatchId,
+    hydratedMatchDetailIdSet,
+  } = await loadEventRelationRows({
+    event,
+    client,
+    fieldIds,
+    teamIdsToLoad,
+    timeSlotIds,
+    officialIds,
+    includeTeamPlayers,
+    includeTeamRegistrations,
+    allDivisions,
+    matchRows,
+    requestedMatchDetailIds: options.hydratedMatchDetailIds,
+  });
+
+  const { fields, teams, timeSlots } = buildEventFieldTeamRelations({
+    event,
+    hydratedDivisionRows,
+    fieldRows,
+    teamRows,
+    timeSlotRows,
+    divisionMap,
+    fieldIdsByDivision,
+    allDivisions,
+    assignmentDivisions: divisions,
+    teamIdsToLoad,
+    fallbackDivision,
+    teamPlayerLookup,
+    playerRegistrationsByTeamId,
+    relatedPhaseDivisionsByPhaseId,
+    phaseDivisionsBySource,
+  });
+  const officialEventTeamIds = buildOfficialEventTeamIds({
+    officialIds,
+    canonicalTeamIdsByUserId: canonicalTeamIdsByOfficialId,
+    eventTeamRows: teamRows,
+    eventParticipantRows: eventRegistrationRows,
+    eventTeamStaffRows,
+  });
+  const officials = buildLoadedOfficials(
+    officialIds,
+    officialRows,
+    allDivisions,
+    officialEventTeamIds,
+  );
+  attachTimeSlotsToFields(fields, timeSlots);
+  const timeline = resolveLoadedEventTimeline(event);
+  await attachLoadedEventSchedulingConflicts({
+    event,
+    client,
+    fields,
+    timeline,
+  });
+
+  const {
+    constructed,
+    normalizedParentEvent,
+    resolvedMatchRules,
+  } = buildLoadedEventModel({
+    event,
+    sportRow,
+    officialPositions,
+    eventOfficials,
+    leagueConfigRow,
+    participantIds,
+    registeredTeamIds,
+    teams,
+    divisions,
+    playoffDivisions,
+    officials,
+    fields,
+    timeSlots,
+  });
+  return finalizeLoadedEvent({
+    constructed,
+    matchRows,
     teams,
     fields,
     allDivisions,
@@ -4712,30 +7513,10 @@ export const loadEventWithRelations = async (
     segmentRowsByMatchId,
     incidentRowsByMatchId,
     resolvedMatchRules,
-    {
-      segmentMatchIds: hydratedMatchDetailIdSet,
-      incidentMatchIds: hydratedMatchDetailIdSet,
-    },
-  );
-  constructed.matches = matches;
-  (constructed as any).parentEvent = normalizedParentEvent;
-  const entryDivisionRows = hydratedDivisionRows.filter(
-    (row: any) =>
-      String(row?.role ?? "")
-        .trim()
-        .toUpperCase() !== "PHASE" &&
-      normalizeDivisionKind(row?.kind, "LEAGUE") !== "PLAYOFF",
-  );
-  const explicitPlayoffRows = hydratedDivisionRows.filter(
-    (row: any) =>
-      normalizeDivisionKind(row?.kind, "LEAGUE") === "PLAYOFF" &&
-      row?.isSystemGenerated !== true,
-  );
-  (constructed as any).divisionDetails =
-    serializeDivisionDetailsForTemplate(entryDivisionRows);
-  (constructed as any).playoffDivisionDetails =
-    serializeDivisionDetailsForTemplate(explicitPlayoffRows);
-  return constructed;
+    hydratedMatchDetailIdSet,
+    normalizedParentEvent,
+    hydratedDivisionRows,
+  });
 };
 
 export const loadEventForMatchMutation = async (
@@ -4749,16 +7530,536 @@ export const loadEventForMatchMutation = async (
     includeTeamRegistrations: true,
   });
 
-export const saveMatches = async (
+type SavedMatchPlacement = {
+  placementState: "PLACED" | "UNPLACED";
+  isPlaced: boolean;
+  isBracketMatch: boolean;
+};
+
+const resolveSavedMatchPlacement = (
+  match: MatchPersistenceInput,
+): SavedMatchPlacement => {
+  const placementState =
+    match.placementState === "PLACED" || match.field ? "PLACED" : "UNPLACED";
+  return {
+    placementState,
+    isPlaced: placementState === "PLACED",
+    isBracketMatch: Boolean(
+      match.previousLeftMatch ||
+        match.previousRightMatch ||
+        match.winnerNextMatch ||
+        match.loserNextMatch,
+    ),
+  };
+};
+
+const resolveSavedMatchPhase = (
+  match: MatchPersistenceInput,
+  isBracketMatch: boolean,
+): string =>
+  match.division?.phase ??
+  resolveDivisionCompetitionPhase({
+    divisionKind: match.division?.kind,
+    hasBracketLinks: isBracketMatch,
+  });
+
+const resolveSavedMatchOfficialPositions = (
+  match: MatchPersistenceInput,
+  matchPhase: string,
+  persistedOfficialPositions: EventOfficialPosition[] | null,
+): EventOfficialPosition[] | null =>
+  match.division?.phaseSettings?.[matchPhase]?.officialPositions ??
+  persistedOfficialPositions;
+
+const resolveSavedRawOfficialAssignments = (
+  match: MatchPersistenceInput,
+  isPlaced: boolean,
+): unknown[] =>
+  isPlaced && Array.isArray(match.officialAssignments)
+    ? match.officialAssignments
+    : [];
+
+const resolveSavedLegacyOfficialAssignments = (params: {
+  eventId: string;
+  match: MatchPersistenceInput;
+  isPlaced: boolean;
+  rawOfficialAssignments: unknown[];
+  officialPositionsForMatch: EventOfficialPosition[] | null;
+}): unknown[] => {
+  if (
+    params.rawOfficialAssignments.length > 0 ||
+    !params.officialPositionsForMatch
+  ) {
+    return params.rawOfficialAssignments;
+  }
+  return buildLegacyOfficialAssignment({
+    eventId: params.eventId,
+    officialId: params.isPlaced ? (params.match.official?.id ?? null) : null,
+    officialCheckedIn:
+      params.isPlaced && params.match.officialCheckedIn === true,
+    officialPositions: params.officialPositionsForMatch,
+  });
+};
+
+const completeSavedOfficialAssignments = (
+  assignments: unknown[],
+  officialPositionsForMatch: EventOfficialPosition[] | null,
+): MatchOfficialAssignment[] => {
+  if (!officialPositionsForMatch) {
+    return assignments as MatchOfficialAssignment[];
+  }
+  return completeMatchOfficialAssignmentSlots(
+    assignments as MatchOfficialAssignment[],
+    officialPositionsForMatch,
+  );
+};
+
+const resolveSavedOfficialIdentity = (params: {
+  match: MatchPersistenceInput;
+  isPlaced: boolean;
+  officialAssignments: MatchOfficialAssignment[];
+}): {
+  primaryOfficialId: string | null;
+  primaryOfficialCheckedIn: boolean;
+} => {
+  const primaryOfficialId = params.officialAssignments.length
+    ? deriveLegacyOfficialIdFromAssignments(params.officialAssignments)
+    : params.isPlaced
+      ? (params.match.official?.id ?? null)
+      : null;
+  const primaryOfficialCheckedIn = params.officialAssignments.length
+    ? deriveLegacyOfficialCheckedInFromAssignments(params.officialAssignments)
+    : params.isPlaced
+      ? (params.match.officialCheckedIn ?? false)
+      : false;
+  return { primaryOfficialId, primaryOfficialCheckedIn };
+};
+
+const resolveSavedMatchOfficialData = (params: {
+  eventId: string;
+  match: MatchPersistenceInput;
+  isPlaced: boolean;
+  isBracketMatch: boolean;
+  persistedOfficialPositions: EventOfficialPosition[] | null;
+}): {
+  officialAssignments: MatchOfficialAssignment[];
+  primaryOfficialId: string | null;
+  primaryOfficialCheckedIn: boolean;
+} => {
+  const matchPhase = resolveSavedMatchPhase(
+    params.match,
+    params.isBracketMatch,
+  );
+  const officialPositionsForMatch = resolveSavedMatchOfficialPositions(
+    params.match,
+    matchPhase,
+    params.persistedOfficialPositions,
+  );
+  const rawOfficialAssignments = resolveSavedRawOfficialAssignments(
+    params.match,
+    params.isPlaced,
+  );
+  const legacyOfficialAssignments = resolveSavedLegacyOfficialAssignments({
+    eventId: params.eventId,
+    match: params.match,
+    isPlaced: params.isPlaced,
+    rawOfficialAssignments,
+    officialPositionsForMatch,
+  });
+  const officialAssignments = completeSavedOfficialAssignments(
+    legacyOfficialAssignments,
+    officialPositionsForMatch,
+  );
+  return {
+    officialAssignments,
+    ...resolveSavedOfficialIdentity({
+      match: params.match,
+      isPlaced: params.isPlaced,
+      officialAssignments,
+    }),
+  };
+};
+
+const readSavedMatchValue = <T>(
+  match: any,
+  key: string,
+  fallback: T,
+): T => {
+  const value = match[key];
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+  return value as T;
+};
+
+const resolveSavedRelationId = (
+  relation: { id?: string | null } | null | undefined,
+): string | null => relation?.id ?? null;
+
+const resolveSavedPlacedRelationId = (
+  isPlaced: boolean,
+  relation: { id?: string | null } | null | undefined,
+): string | null => (isPlaced ? resolveSavedRelationId(relation) : null);
+
+const resolveSavedBracketSeed = (
+  isBracketMatch: boolean,
+  seed: unknown,
+): number | null =>
+  isBracketMatch && typeof seed === "number" ? seed : null;
+
+const resolveSavedMatchRulesSnapshot = (
+  match: MatchPersistenceInput,
+): Record<string, unknown> | null => {
+  const matchRulesSnapshot =
+    match.matchRulesSnapshot ?? match.resolvedMatchRules;
+  return matchRulesSnapshot
+    ? (matchRulesSnapshot as Record<string, unknown>)
+    : null;
+};
+
+const buildSavedMatchData = (params: {
+  eventId: string;
+  index: number;
+  now: Date;
+  match: MatchPersistenceInput;
+  placement: SavedMatchPlacement;
+  officialData: {
+    officialAssignments: MatchOfficialAssignment[];
+    primaryOfficialId: string | null;
+    primaryOfficialCheckedIn: boolean;
+  };
+}): Record<string, unknown> => {
+  const { eventId, index, now, match, placement, officialData } = params;
+  const { isPlaced, isBracketMatch, placementState } = placement;
+  const persistedOfficialIds = officialData.officialAssignments.length
+    ? (officialData.officialAssignments as unknown as Record<string, unknown>[])
+    : null;
+  return {
+    id: match.id,
+    matchId: readSavedMatchValue(match, "matchId", index + 1),
+    start: isPlaced ? match.start : null,
+    end: isPlaced ? match.end : null,
+    locked: Boolean(match.locked),
+    placementState,
+    team1Seed: resolveSavedBracketSeed(isBracketMatch, match.team1Seed),
+    team2Seed: resolveSavedBracketSeed(isBracketMatch, match.team2Seed),
+    division: resolveSavedRelationId(match.division),
+    team1Points: readSavedMatchValue(match, "team1Points", []),
+    team2Points: readSavedMatchValue(match, "team2Points", []),
+    status: readSavedMatchValue(match, "status", null),
+    resultStatus: readSavedMatchValue(match, "resultStatus", null),
+    resultType: readSavedMatchValue(match, "resultType", null),
+    actualStart: readSavedMatchValue(match, "actualStart", null),
+    actualEnd: readSavedMatchValue(match, "actualEnd", null),
+    statusReason: readSavedMatchValue(match, "statusReason", null),
+    winnerEventTeamId: readSavedMatchValue(match, "winnerEventTeamId", null),
+    matchRulesSnapshot: resolveSavedMatchRulesSnapshot(match),
+    side: readSavedMatchValue(match, "side", null),
+    losersBracket: Boolean(match.losersBracket),
+    winnerNextMatchId: resolveSavedRelationId(match.winnerNextMatch),
+    loserNextMatchId: resolveSavedRelationId(match.loserNextMatch),
+    previousLeftId: resolveSavedRelationId(match.previousLeftMatch),
+    previousRightId: resolveSavedRelationId(match.previousRightMatch),
+    officialCheckedIn: officialData.primaryOfficialCheckedIn,
+    officialId: officialData.primaryOfficialId,
+    officialIds: persistedOfficialIds,
+    teamOfficialId: resolveSavedPlacedRelationId(
+      isPlaced,
+      match.teamOfficial,
+    ),
+    team1Id: resolveSavedRelationId(match.team1),
+    team2Id: resolveSavedRelationId(match.team2),
+    eventId,
+    fieldId: resolveSavedPlacedRelationId(isPlaced, match.field),
+    updatedAt: now,
+  };
+};
+
+const toSavedDetailDate = (value: unknown): Date | null =>
+  value ? new Date(value as string | number | Date) : null;
+
+const canPersistMatchSegments = (
+  client: PrismaLike,
+  match: MatchPersistenceInput,
+): boolean => {
+  if (!shouldPersistHydratedMatchSegments(match)) {
+    return false;
+  }
+  if (!Array.isArray(match.segments)) {
+    return false;
+  }
+  const segmentsDelegate = (client as any).matchSegments;
+  return (
+    typeof segmentsDelegate?.upsert === "function" ||
+    (typeof segmentsDelegate?.deleteMany === "function" &&
+      typeof segmentsDelegate?.createMany === "function")
+  );
+};
+
+const canPersistMatchIncidents = (
+  client: PrismaLike,
+  match: MatchPersistenceInput,
+): boolean => {
+  if (!shouldPersistHydratedMatchIncidents(match)) {
+    return false;
+  }
+  if (!Array.isArray(match.incidents)) {
+    return false;
+  }
+  const incidentsDelegate = (client as any).matchIncidents;
+  return (
+    typeof incidentsDelegate?.upsert === "function" ||
+    (typeof incidentsDelegate?.deleteMany === "function" &&
+      typeof incidentsDelegate?.createMany === "function")
+  );
+};
+
+const appendSavedMatchSegments = (
   eventId: string,
-  matches: MatchPersistenceInput[],
-  client: PrismaLike = prisma,
+  match: MatchPersistenceInput,
+  now: Date,
+  segmentRows: Array<Record<string, unknown>>,
+): void => {
+  for (const segment of match.segments ?? []) {
+    const segmentId =
+      segment.id || `${match.id}_segment_${segment.sequence}`;
+    segmentRows.push({
+      id: segmentId,
+      createdAt: now,
+      updatedAt: now,
+      eventId,
+      matchId: match.id,
+      sequence: segment.sequence,
+      status: segment.status ?? "NOT_STARTED",
+      scores: segment.scores ?? {},
+      winnerEventTeamId: segment.winnerEventTeamId ?? null,
+      startedAt: toSavedDetailDate(segment.startedAt),
+      endedAt: toSavedDetailDate(segment.endedAt),
+      resultType: segment.resultType ?? null,
+      statusReason: segment.statusReason ?? null,
+      metadata: segment.metadata ?? null,
+    });
+  }
+};
+
+const buildSavedMatchIncidentRow = (
+  eventId: string,
+  match: MatchPersistenceInput,
+  now: Date,
+  incident: any,
+): Record<string, unknown> => ({
+  id: incident.id || `${match.id}_incident_${incident.sequence}`,
+  createdAt: now,
+  updatedAt: now,
+  eventId,
+  matchId: match.id,
+  segmentId: readSavedMatchValue(incident, "segmentId", null),
+  eventTeamId: readSavedMatchValue(incident, "eventTeamId", null),
+  eventRegistrationId: readSavedMatchValue(
+    incident,
+    "eventRegistrationId",
+    null,
+  ),
+  participantUserId: readSavedMatchValue(incident, "participantUserId", null),
+  officialUserId: readSavedMatchValue(incident, "officialUserId", null),
+  incidentType: incident.incidentType,
+  sequence: incident.sequence,
+  minute: readSavedMatchValue(incident, "minute", null),
+  clock: readSavedMatchValue(incident, "clock", null),
+  clockSeconds: readSavedMatchValue(incident, "clockSeconds", null),
+  linkedPointDelta: readSavedMatchValue(incident, "linkedPointDelta", null),
+  note: readSavedMatchValue(incident, "note", null),
+  metadata: readSavedMatchValue(incident, "metadata", null),
+});
+
+const appendSavedMatchIncidents = (
+  eventId: string,
+  match: MatchPersistenceInput,
+  now: Date,
+  incidentRows: Array<Record<string, unknown>>,
+): void => {
+  for (const incident of match.incidents ?? []) {
+    incidentRows.push(
+      buildSavedMatchIncidentRow(eventId, match, now, incident),
+    );
+  }
+};
+
+const persistOneMatch = async (params: {
+  eventId: string;
+  index: number;
+  match: MatchPersistenceInput;
+  client: PrismaLike;
+  now: Date;
+  persistedOfficialPositions: EventOfficialPosition[] | null;
+  segmentMatchIds: Set<string>;
+  incidentMatchIds: Set<string>;
+  segmentRows: Array<Record<string, unknown>>;
+  incidentRows: Array<Record<string, unknown>>;
+}): Promise<void> => {
+  const placement = resolveSavedMatchPlacement(params.match);
+  const officialData = resolveSavedMatchOfficialData({
+    eventId: params.eventId,
+    match: params.match,
+    isPlaced: placement.isPlaced,
+    isBracketMatch: placement.isBracketMatch,
+    persistedOfficialPositions: params.persistedOfficialPositions,
+  });
+  const data = buildSavedMatchData({
+    eventId: params.eventId,
+    index: params.index,
+    now: params.now,
+    match: params.match,
+    placement,
+    officialData,
+  });
+  const { id, ...updateData } = data;
+  await params.client.matches.upsert({
+    where: { id },
+    create: { ...data, createdAt: params.now },
+    update: updateData,
+  });
+  if (canPersistMatchSegments(params.client, params.match)) {
+    params.segmentMatchIds.add(params.match.id);
+    appendSavedMatchSegments(
+      params.eventId,
+      params.match,
+      params.now,
+      params.segmentRows,
+    );
+  }
+  if (canPersistMatchIncidents(params.client, params.match)) {
+    params.incidentMatchIds.add(params.match.id);
+    appendSavedMatchIncidents(
+      params.eventId,
+      params.match,
+      params.now,
+      params.incidentRows,
+    );
+  }
+};
+
+const persistSavedMatchSegmentsWithReplacement = async (params: {
+  client: PrismaLike;
+  segmentMatchIds: Set<string>;
+  segmentRows: Array<Record<string, unknown>>;
+}): Promise<boolean> => {
+  const matchSegments = (params.client as any).matchSegments;
+  if (
+    params.segmentMatchIds.size === 0 ||
+    typeof matchSegments?.deleteMany !== "function" ||
+    typeof matchSegments?.createMany !== "function"
+  ) {
+    return false;
+  }
+  await matchSegments.deleteMany({
+    where: { matchId: { in: Array.from(params.segmentMatchIds) } },
+  });
+  if (params.segmentRows.length > 0) {
+    await matchSegments.createMany({ data: params.segmentRows });
+  }
+  return true;
+};
+
+const persistSavedMatchSegmentsWithUpsert = async (
+  client: PrismaLike,
+  segmentRows: Array<Record<string, unknown>>,
 ): Promise<void> => {
-  const now = new Date();
-  const segmentMatchIds = new Set<string>();
-  const incidentMatchIds = new Set<string>();
-  const segmentRows: Array<Record<string, unknown>> = [];
-  const incidentRows: Array<Record<string, unknown>> = [];
+  const matchSegments = (client as any).matchSegments;
+  if (typeof matchSegments?.upsert !== "function") {
+    return;
+  }
+  for (const segmentRow of segmentRows) {
+    await matchSegments.upsert({
+      where: {
+        matchId_sequence: {
+          matchId: String(segmentRow.matchId),
+          sequence: Number(segmentRow.sequence),
+        },
+      },
+      create: { ...segmentRow },
+      update: {
+        ...segmentRow,
+        createdAt: undefined,
+      },
+    });
+  }
+};
+
+const persistSavedMatchSegments = async (params: {
+  client: PrismaLike;
+  segmentMatchIds: Set<string>;
+  segmentRows: Array<Record<string, unknown>>;
+}): Promise<void> => {
+  const replaced = await persistSavedMatchSegmentsWithReplacement(params);
+  if (!replaced) {
+    await persistSavedMatchSegmentsWithUpsert(
+      params.client,
+      params.segmentRows,
+    );
+  }
+};
+
+const persistSavedMatchIncidentsWithReplacement = async (params: {
+  client: PrismaLike;
+  incidentMatchIds: Set<string>;
+  incidentRows: Array<Record<string, unknown>>;
+}): Promise<boolean> => {
+  const matchIncidents = (params.client as any).matchIncidents;
+  if (
+    params.incidentMatchIds.size === 0 ||
+    typeof matchIncidents?.deleteMany !== "function" ||
+    typeof matchIncidents?.createMany !== "function"
+  ) {
+    return false;
+  }
+  await matchIncidents.deleteMany({
+    where: { matchId: { in: Array.from(params.incidentMatchIds) } },
+  });
+  if (params.incidentRows.length > 0) {
+    await matchIncidents.createMany({ data: params.incidentRows });
+  }
+  return true;
+};
+
+const persistSavedMatchIncidentsWithUpsert = async (
+  client: PrismaLike,
+  incidentRows: Array<Record<string, unknown>>,
+): Promise<void> => {
+  const matchIncidents = (client as any).matchIncidents;
+  if (typeof matchIncidents?.upsert !== "function") {
+    return;
+  }
+  for (const incidentRow of incidentRows) {
+    await matchIncidents.upsert({
+      where: { id: String(incidentRow.id) },
+      create: { ...incidentRow },
+      update: {
+        ...incidentRow,
+        createdAt: undefined,
+      },
+    });
+  }
+};
+
+const persistSavedMatchIncidents = async (params: {
+  client: PrismaLike;
+  incidentMatchIds: Set<string>;
+  incidentRows: Array<Record<string, unknown>>;
+}): Promise<void> => {
+  const replaced = await persistSavedMatchIncidentsWithReplacement(params);
+  if (!replaced) {
+    await persistSavedMatchIncidentsWithUpsert(
+      params.client,
+      params.incidentRows,
+    );
+  }
+};
+
+const loadPersistedOfficialPositionsForMatches = async (
+  client: PrismaLike,
+  eventId: string,
+): Promise<EventOfficialPosition[] | null> => {
   let persistedOfficialPositions: EventOfficialPosition[] | null = null;
   if (typeof client.events?.findUnique === "function") {
     const persistedEvent = await client.events.findUnique({
@@ -4772,231 +8073,486 @@ export const saveMatches = async (
       );
     }
   }
+  return persistedOfficialPositions;
+};
+
+export const saveMatches = async (
+  eventId: string,
+  matches: MatchPersistenceInput[],
+  client: PrismaLike = prisma,
+): Promise<void> => {
+  const now = new Date();
+  const segmentMatchIds = new Set<string>();
+  const incidentMatchIds = new Set<string>();
+  const segmentRows: Array<Record<string, unknown>> = [];
+  const incidentRows: Array<Record<string, unknown>> = [];
+  const persistedOfficialPositions =
+    await loadPersistedOfficialPositionsForMatches(client, eventId);
   for (const [index, match] of matches.entries()) {
-    const placementState =
-      match.placementState === "PLACED" || match.field ? "PLACED" : "UNPLACED";
-    const isPlaced = placementState === "PLACED";
-    const isBracketMatch = Boolean(
-      match.previousLeftMatch ||
-        match.previousRightMatch ||
-        match.winnerNextMatch ||
-        match.loserNextMatch,
-    );
-    const start = isPlaced ? match.start : null;
-    const end = isPlaced ? match.end : null;
-    const rawOfficialAssignments =
-      isPlaced && Array.isArray(match.officialAssignments)
-        ? match.officialAssignments
-        : [];
-    const matchPhase =
-      match.division?.phase ??
-      resolveDivisionCompetitionPhase({
-        divisionKind: match.division?.kind,
-        hasBracketLinks: isBracketMatch,
-      });
-    const officialPositionsForMatch =
-      match.division?.phaseSettings?.[matchPhase]?.officialPositions ??
-      persistedOfficialPositions;
-    const legacyOfficialAssignments =
-      !rawOfficialAssignments.length && officialPositionsForMatch
-        ? buildLegacyOfficialAssignment({
-            eventId,
-            officialId: isPlaced ? (match.official?.id ?? null) : null,
-            officialCheckedIn: isPlaced && match.officialCheckedIn === true,
-            officialPositions: officialPositionsForMatch,
-          })
-        : rawOfficialAssignments;
-    const officialAssignments = officialPositionsForMatch
-      ? completeMatchOfficialAssignmentSlots(
-          legacyOfficialAssignments,
-          officialPositionsForMatch,
-        )
-      : legacyOfficialAssignments;
-    const primaryOfficialId = officialAssignments.length
-      ? deriveLegacyOfficialIdFromAssignments(officialAssignments)
-      : isPlaced
-        ? (match.official?.id ?? null)
-        : null;
-    const primaryOfficialCheckedIn = officialAssignments.length
-      ? deriveLegacyOfficialCheckedInFromAssignments(officialAssignments)
-      : isPlaced
-        ? (match.officialCheckedIn ?? false)
-        : false;
-    const matchRulesSnapshot =
-      match.matchRulesSnapshot ?? match.resolvedMatchRules;
-    const persistedRules = matchRulesSnapshot
-      ? (matchRulesSnapshot as Record<string, unknown>)
-      : null;
-    const persistedOfficialIds = officialAssignments.length
-      ? (officialAssignments as unknown as Record<string, unknown>[])
-      : null;
-    const data = {
-      id: match.id,
-      matchId: match.matchId ?? index + 1,
-      start,
-      end,
-      locked: Boolean(match.locked),
-      placementState,
-      team1Seed: isBracketMatch
-        ? typeof match.team1Seed === "number"
-          ? match.team1Seed
-          : null
-        : null,
-      team2Seed: isBracketMatch
-        ? typeof match.team2Seed === "number"
-          ? match.team2Seed
-          : null
-        : null,
-      division: match.division?.id ?? null,
-      team1Points: match.team1Points ?? [],
-      team2Points: match.team2Points ?? [],
-      status: match.status ?? null,
-      resultStatus: match.resultStatus ?? null,
-      resultType: match.resultType ?? null,
-      actualStart: match.actualStart ?? null,
-      actualEnd: match.actualEnd ?? null,
-      statusReason: match.statusReason ?? null,
-      winnerEventTeamId: match.winnerEventTeamId ?? null,
-      matchRulesSnapshot: persistedRules,
-      side: match.side ?? null,
-      losersBracket: Boolean(match.losersBracket),
-      winnerNextMatchId: match.winnerNextMatch?.id ?? null,
-      loserNextMatchId: match.loserNextMatch?.id ?? null,
-      previousLeftId: match.previousLeftMatch?.id ?? null,
-      previousRightId: match.previousRightMatch?.id ?? null,
-      officialCheckedIn: primaryOfficialCheckedIn,
-      officialId: primaryOfficialId,
-      officialIds: persistedOfficialIds,
-      teamOfficialId: isPlaced ? (match.teamOfficial?.id ?? null) : null,
-      team1Id: match.team1?.id ?? null,
-      team2Id: match.team2?.id ?? null,
+    await persistOneMatch({
       eventId,
-      fieldId: isPlaced ? (match.field?.id ?? null) : null,
-      updatedAt: now,
-    };
-    const { id, ...updateData } = data;
-    await client.matches.upsert({
-      where: { id },
-      create: { ...data, createdAt: now },
-      update: updateData,
+      index,
+      match,
+      client,
+      now,
+      persistedOfficialPositions,
+      segmentMatchIds,
+      incidentMatchIds,
+      segmentRows,
+      incidentRows,
     });
-    if (
-      shouldPersistHydratedMatchSegments(match) &&
-      Array.isArray(match.segments) &&
-      (typeof (client as any).matchSegments?.upsert === "function" ||
-        (typeof (client as any).matchSegments?.deleteMany === "function" &&
-          typeof (client as any).matchSegments?.createMany === "function"))
-    ) {
-      segmentMatchIds.add(match.id);
-      for (const segment of match.segments) {
-        const segmentId =
-          segment.id || `${match.id}_segment_${segment.sequence}`;
-        segmentRows.push({
-          id: segmentId,
-          createdAt: now,
-          updatedAt: now,
-          eventId,
-          matchId: match.id,
-          sequence: segment.sequence,
-          status: segment.status ?? "NOT_STARTED",
-          scores: segment.scores ?? {},
-          winnerEventTeamId: segment.winnerEventTeamId ?? null,
-          startedAt: segment.startedAt ? new Date(segment.startedAt) : null,
-          endedAt: segment.endedAt ? new Date(segment.endedAt) : null,
-          resultType: segment.resultType ?? null,
-          statusReason: segment.statusReason ?? null,
-          metadata: segment.metadata ?? null,
-        });
-      }
-    }
-    if (
-      shouldPersistHydratedMatchIncidents(match) &&
-      Array.isArray(match.incidents) &&
-      (typeof (client as any).matchIncidents?.upsert === "function" ||
-        (typeof (client as any).matchIncidents?.deleteMany === "function" &&
-          typeof (client as any).matchIncidents?.createMany === "function"))
-    ) {
-      incidentMatchIds.add(match.id);
-      for (const incident of match.incidents) {
-        const incidentId =
-          incident.id || `${match.id}_incident_${incident.sequence}`;
-        incidentRows.push({
-          id: incidentId,
-          createdAt: now,
-          updatedAt: now,
-          eventId,
-          matchId: match.id,
-          segmentId: incident.segmentId ?? null,
-          eventTeamId: incident.eventTeamId ?? null,
-          eventRegistrationId: incident.eventRegistrationId ?? null,
-          participantUserId: incident.participantUserId ?? null,
-          officialUserId: incident.officialUserId ?? null,
-          incidentType: incident.incidentType,
-          sequence: incident.sequence,
-          minute: incident.minute ?? null,
-          clock: incident.clock ?? null,
-          clockSeconds: incident.clockSeconds ?? null,
-          linkedPointDelta: incident.linkedPointDelta ?? null,
-          note: incident.note ?? null,
-          metadata: incident.metadata ?? null,
-        });
-      }
-    }
   }
+  await persistSavedMatchSegments({
+    client,
+    segmentMatchIds,
+    segmentRows,
+  });
+  await persistSavedMatchIncidents({
+    client,
+    incidentMatchIds,
+    incidentRows,
+  });
+};
 
-  const matchSegments = (client as any).matchSegments;
-  if (
-    segmentMatchIds.size > 0 &&
-    typeof matchSegments?.deleteMany === "function" &&
-    typeof matchSegments?.createMany === "function"
-  ) {
-    await matchSegments.deleteMany({
-      where: { matchId: { in: Array.from(segmentMatchIds) } },
-    });
-    if (segmentRows.length > 0) {
-      await matchSegments.createMany({ data: segmentRows });
-    }
-  } else if (typeof matchSegments?.upsert === "function") {
-    for (const segmentRow of segmentRows) {
-      await matchSegments.upsert({
+const collectPlaceholderRosterTeamIds = (
+  scheduled: ScheduledRosterInput,
+  rosterTeamIds: string[],
+): string[] =>
+  rosterTeamIds.filter((teamId) => {
+    const team = scheduled.teams?.[teamId];
+    const captainId = String(team?.captainId ?? "").trim();
+    const playerIds = ensureStringArray(team?.playerIds);
+    return !captainId && playerIds.length === 0;
+  });
+
+const loadScheduledPhaseSourceRows = async (
+  client: PrismaLike,
+  eventId: string,
+  phaseDivisionIds: string[],
+): Promise<any[]> =>
+  typeof (client as any).eventDivisionPhaseSources?.findMany === "function"
+    ? await (client as any).eventDivisionPhaseSources.findMany({
         where: {
-          matchId_sequence: {
-            matchId: String(segmentRow.matchId),
-            sequence: Number(segmentRow.sequence),
-          },
+          eventId,
+          phaseDivisionId: { in: phaseDivisionIds },
         },
-        create: { ...segmentRow },
-        update: {
-          ...segmentRow,
-          createdAt: undefined,
+        select: { phaseDivisionId: true, entryDivisionId: true },
+      })
+    : [];
+
+const addScheduledPhaseSourceRows = (
+  sourceDivisionIdByPhase: Map<string, string>,
+  rows: any[],
+  preferExisting: boolean,
+): void => {
+  for (const row of rows) {
+    const phaseDivisionId = normalizeDivisionKey(row.id ?? row.phaseDivisionId);
+    const entryDivisionId = normalizeDivisionKey(
+      row.sourceDivisionId ?? row.entryDivisionId,
+    );
+    if (
+      phaseDivisionId &&
+      entryDivisionId &&
+      (!preferExisting || !sourceDivisionIdByPhase.has(phaseDivisionId))
+    ) {
+      sourceDivisionIdByPhase.set(phaseDivisionId, entryDivisionId);
+    }
+  }
+};
+
+const loadScheduledPhaseSourceDivisionMap = async (
+  client: PrismaLike,
+  eventId: string,
+  phaseDivisionIds: string[],
+): Promise<Map<string, string>> => {
+  const sourceDivisionIdByPhase = new Map<string, string>();
+  const phaseSourceRows = await loadScheduledPhaseSourceRows(
+    client,
+    eventId,
+    phaseDivisionIds,
+  );
+  addScheduledPhaseSourceRows(
+    sourceDivisionIdByPhase,
+    phaseSourceRows,
+    false,
+  );
+  if (
+    phaseDivisionIds.length &&
+    typeof client.divisions?.findMany === "function"
+  ) {
+    const phaseRows = await client.divisions.findMany({
+      where: {
+        eventId,
+        role: "PHASE",
+        status: "ACTIVE",
+        id: { in: phaseDivisionIds },
+      },
+      select: { id: true, sourceDivisionId: true },
+    });
+    addScheduledPhaseSourceRows(sourceDivisionIdByPhase, phaseRows, true);
+  }
+  return sourceDivisionIdByPhase;
+};
+
+const collectScheduledLeagueDivisionIds = (params: {
+  scheduledDivisions: PhaseDivisionCandidate[];
+  phaseDivisionIds: string[];
+  sourceDivisionIdByPhase: Map<string, string>;
+}): string[] => {
+  const ids: string[] = [];
+  for (const division of params.scheduledDivisions) {
+    const normalizedDivisionId = normalizeDivisionKey(division.id);
+    if (!normalizedDivisionId) continue;
+    const isPhaseDivision = params.phaseDivisionIds.includes(division.id);
+    const ownerDivisionId = isPhaseDivision
+      ? (params.sourceDivisionIdByPhase.get(normalizedDivisionId) ??
+        division.id)
+      : division.id;
+    if (!ids.includes(ownerDivisionId)) ids.push(ownerDivisionId);
+  }
+  return ids;
+};
+
+const addScheduledDivisionAliases = (
+  aliasesById: Map<string, string>,
+  divisionId: string,
+  ownerDivisionId: string,
+): void => {
+  const aliases = [
+    normalizeDivisionKey(divisionId),
+    normalizeDivisionKey(extractDivisionTokenFromId(divisionId)),
+    normalizeDivisionKey(ownerDivisionId),
+    normalizeDivisionKey(extractDivisionTokenFromId(ownerDivisionId)),
+  ].filter((alias): alias is string => Boolean(alias));
+  for (const alias of aliases) {
+    if (!aliasesById.has(alias)) {
+      aliasesById.set(alias, ownerDivisionId);
+    }
+  }
+};
+
+type ScheduledRosterDivisionContext = {
+  scheduledDivisions: PhaseDivisionCandidate[];
+  phaseDivisions: PhaseDivisionCandidate[];
+  phaseDivisionIds: string[];
+  scheduledDivisionAliasToId: Map<string, string>;
+  scheduledLeagueDivisionIds: string[];
+  fallbackDivisionId: string;
+  resolveTeamDivisionId: (
+    team: ScheduledRosterTeamInput | undefined,
+  ) => string;
+};
+
+const buildScheduledRosterDivisionContext = async (params: {
+  client: PrismaLike;
+  eventId: string;
+  scheduled: ScheduledRosterInput;
+}): Promise<ScheduledRosterDivisionContext> => {
+  const scheduledDivisions = collectScheduledDivisions(params.scheduled);
+  const phaseDivisions = collectPhaseDivisions(params.scheduled);
+  const scheduledDivisionIds = scheduledDivisions
+    .map((division) => division.id)
+    .filter((divisionId) => normalizeDivisionKey(divisionId));
+  const phaseDivisionIds = phaseDivisions
+    .map((division) => division.id)
+    .filter((divisionId) => scheduledDivisionIds.includes(divisionId));
+  const sourceDivisionIdByPhase = await loadScheduledPhaseSourceDivisionMap(
+    params.client,
+    params.eventId,
+    phaseDivisionIds,
+  );
+  const scheduledLeagueDivisionIds = collectScheduledLeagueDivisionIds({
+    scheduledDivisions,
+    phaseDivisionIds,
+    sourceDivisionIdByPhase,
+  });
+  const scheduledDivisionAliasToId = new Map<string, string>();
+  for (const divisionId of scheduledLeagueDivisionIds) {
+    addScheduledDivisionAliases(
+      scheduledDivisionAliasToId,
+      divisionId,
+      divisionId,
+    );
+  }
+  for (const division of scheduledDivisions) {
+    const divisionId = normalizeDivisionKey(division.id);
+    if (!divisionId) continue;
+    const ownerDivisionId = phaseDivisionIds.includes(division.id)
+      ? (sourceDivisionIdByPhase.get(divisionId) ?? divisionId)
+      : divisionId;
+    addScheduledDivisionAliases(
+      scheduledDivisionAliasToId,
+      divisionId,
+      ownerDivisionId,
+    );
+  }
+  const fallbackDivisionId =
+    scheduledLeagueDivisionIds[0] ?? DEFAULT_DIVISION_KEY;
+  const resolveTeamDivisionId = (
+    team: ScheduledRosterTeamInput | undefined,
+  ): string => {
+    const explicitDivisionId = normalizeDivisionKey(team?.division?.id);
+    if (explicitDivisionId) {
+      const mappedFromId = scheduledDivisionAliasToId.get(explicitDivisionId);
+      if (mappedFromId) return mappedFromId;
+      const token = normalizeDivisionKey(
+        extractDivisionTokenFromId(team?.division?.id),
+      );
+      if (token) {
+        const mappedFromToken = scheduledDivisionAliasToId.get(token);
+        if (mappedFromToken) return mappedFromToken;
+      }
+    }
+    return fallbackDivisionId;
+  };
+  return {
+    scheduledDivisions,
+    phaseDivisions,
+    phaseDivisionIds,
+    scheduledDivisionAliasToId,
+    scheduledLeagueDivisionIds,
+    fallbackDivisionId,
+    resolveTeamDivisionId,
+  };
+};
+
+const removeOmittedScheduledPlaceholderTeams = async (params: {
+  client: PrismaLike;
+  eventId: string;
+  rosterTeamIds: string[];
+  shouldRemove: boolean;
+}): Promise<void> => {
+  if (
+    !params.shouldRemove ||
+    typeof (params.client as any).teams?.deleteMany !== "function"
+  ) {
+    return;
+  }
+  await (params.client as any).teams.deleteMany({
+    where: {
+      eventId: params.eventId,
+      ...(params.rosterTeamIds.length
+        ? { id: { notIn: params.rosterTeamIds } }
+        : {}),
+      kind: "PLACEHOLDER",
+    } as any,
+  });
+};
+
+const clearScheduledPhaseAssignmentsForEmptyRoster = async (params: {
+  client: PhasePersistenceClient;
+  eventId: string;
+  phaseDivisions: PhaseDivisionCandidate[];
+}): Promise<void> => {
+  if (!params.phaseDivisions.length) return;
+  await persistPhaseParticipantAssignments({
+    client: params.client,
+    eventId: params.eventId,
+    teamIdsByPhaseDivision: Object.fromEntries(
+      params.phaseDivisions.map((division) => [division.id, []]),
+    ),
+  });
+};
+
+
+const loadScheduledRosterEventAndTeams = async (params: {
+  client: PrismaLike;
+  eventId: string;
+  rosterTeamIds: string[];
+}): Promise<{
+  teamSizeLimit: number | null;
+  singleDivision: boolean;
+  existingTeamById: Map<string, any>;
+}> => {
+  const event = await params.client.events.findUnique({
+    where: { id: params.eventId },
+    select: {
+      teamSizeLimit: true,
+      singleDivision: true,
+    },
+  });
+  const teamSizeLimit =
+    typeof event?.teamSizeLimit === "number" &&
+    Number.isFinite(event.teamSizeLimit)
+      ? Math.max(0, Math.trunc(event.teamSizeLimit))
+      : null;
+  const existingTeams = await params.client.teams.findMany({
+    where: { id: { in: params.rosterTeamIds } },
+    select: {
+      id: true,
+      division: true,
+    },
+  });
+  return {
+    teamSizeLimit,
+    singleDivision: Boolean(event?.singleDivision),
+    existingTeamById: new Map(
+      existingTeams.map((team: any) => [team.id, team]),
+    ),
+  };
+};
+
+const buildScheduledRosterTeamCreateData = (params: {
+  eventId: string;
+  teamId: string;
+  scheduledTeam: ScheduledRosterTeamInput;
+  playerIds: string[];
+  captainId: string;
+  divisionId: string;
+  teamSize: number;
+  now: Date;
+}): Record<string, unknown> => ({
+  id: params.teamId,
+  createdAt: params.now,
+  updatedAt: params.now,
+  eventId: params.eventId,
+  kind: params.captainId ? "REGISTERED" : "PLACEHOLDER",
+  playerIds: params.playerIds,
+  playerRegistrationIds: [],
+  division: params.divisionId,
+  divisionTypeId: null,
+  name: params.scheduledTeam.name ?? "",
+  captainId: params.captainId,
+  managerId: params.captainId || "",
+  headCoachId: null,
+  coachIds: [],
+  staffAssignmentIds: [],
+  parentTeamId: null,
+  pending: [],
+  teamSize: params.teamSize,
+  profileImageId: null,
+  sport: null,
+});
+
+const persistScheduledRosterTeamRows = async (params: {
+  client: PrismaLike;
+  eventId: string;
+  scheduled: ScheduledRosterInput;
+  rosterTeamIds: string[];
+  existingTeamById: Map<string, any>;
+  eventTeamSizeLimit: number | null;
+  isTournamentPoolPlaySchedule: boolean;
+  resolveTeamDivisionId: (
+    team: ScheduledRosterTeamInput | undefined,
+  ) => string;
+  now: Date;
+}): Promise<void> => {
+  for (const teamId of params.rosterTeamIds) {
+    const scheduledTeam = params.scheduled.teams[teamId];
+    if (!scheduledTeam) continue;
+    const existingTeam = params.existingTeamById.get(teamId);
+    const captainId = String(scheduledTeam.captainId ?? "");
+    const playerIds = ensureStringArray(scheduledTeam.playerIds);
+    const divisionId = params.resolveTeamDivisionId(scheduledTeam);
+    const teamSize = params.eventTeamSizeLimit ?? playerIds.length;
+    if (!existingTeam) {
+      await params.client.teams.create({
+        data: buildScheduledRosterTeamCreateData({
+          eventId: params.eventId,
+          teamId,
+          scheduledTeam,
+          playerIds,
+          captainId,
+          divisionId,
+          teamSize,
+          now: params.now,
+        }),
+      });
+      continue;
+    }
+    const existingDivision = normalizeDivisionKey(existingTeam.division);
+    const nextDivision = normalizeDivisionKey(divisionId);
+    if (
+      !params.isTournamentPoolPlaySchedule &&
+      existingDivision !== nextDivision
+    ) {
+      await params.client.teams.update({
+        where: { id: teamId },
+        data: {
+          division: divisionId,
+          updatedAt: params.now,
         },
       });
     }
   }
+};
 
-  const matchIncidents = (client as any).matchIncidents;
-  if (
-    incidentMatchIds.size > 0 &&
-    typeof matchIncidents?.deleteMany === "function" &&
-    typeof matchIncidents?.createMany === "function"
-  ) {
-    await matchIncidents.deleteMany({
-      where: { matchId: { in: Array.from(incidentMatchIds) } },
+const groupScheduledTeamIdsByDivision = (params: {
+  scheduled: ScheduledRosterInput;
+  rosterTeamIds: string[];
+  resolveTeamDivisionId: (
+    team: ScheduledRosterTeamInput | undefined,
+  ) => string;
+}): Map<string, string[]> => {
+  const assignedTeamIdsByDivisionId = new Map<string, string[]>();
+  for (const teamId of params.rosterTeamIds) {
+    const divisionId = params.resolveTeamDivisionId(
+      params.scheduled.teams[teamId],
+    );
+    const bucket = assignedTeamIdsByDivisionId.get(divisionId) ?? [];
+    bucket.push(teamId);
+    assignedTeamIdsByDivisionId.set(divisionId, bucket);
+  }
+  return assignedTeamIdsByDivisionId;
+};
+
+const resolveScheduledEntryDivisionId = (params: {
+  row: any;
+  scheduledDivisionAliasToId: Map<string, string>;
+  fallbackDivisionId: string;
+}): string => {
+  const aliases = [
+    normalizeDivisionKey(params.row.id),
+    normalizeDivisionKey(params.row.key),
+    normalizeDivisionKey(extractDivisionTokenFromId(params.row.id)),
+  ].filter((alias): alias is string => Boolean(alias));
+  return (
+    aliases
+      .map((alias) => params.scheduledDivisionAliasToId.get(alias))
+      .find((value): value is string => Boolean(value)) ??
+    params.fallbackDivisionId
+  );
+};
+
+const syncScheduledLeagueDivisionTeams = async (params: {
+  client: PrismaLike;
+  eventId: string;
+  scheduled: ScheduledRosterInput;
+  rosterTeamIds: string[];
+  singleDivision: boolean;
+  now: Date;
+  scheduledDivisionAliasToId: Map<string, string>;
+  fallbackDivisionId: string;
+  resolveTeamDivisionId: (
+    team: ScheduledRosterTeamInput | undefined,
+  ) => string;
+}): Promise<void> => {
+  const isLeagueSchedule =
+    String(params.scheduled.eventType ?? "").toUpperCase() === "LEAGUE";
+  if (!isLeagueSchedule || params.singleDivision) return;
+  const assignedTeamIdsByDivisionId = groupScheduledTeamIdsByDivision(params);
+  const divisionRows = await params.client.divisions.findMany({
+    where: { eventId: params.eventId, role: "ENTRY", status: "ACTIVE" },
+    select: {
+      id: true,
+      key: true,
+      kind: true,
+    },
+  });
+  for (const row of divisionRows) {
+    if (normalizeDivisionKind(row.kind, "LEAGUE") === "PLAYOFF") continue;
+    const mappedDivisionId = resolveScheduledEntryDivisionId({
+      row,
+      scheduledDivisionAliasToId: params.scheduledDivisionAliasToId,
+      fallbackDivisionId: params.fallbackDivisionId,
     });
-    if (incidentRows.length > 0) {
-      await matchIncidents.createMany({ data: incidentRows });
-    }
-  } else if (typeof matchIncidents?.upsert === "function") {
-    for (const incidentRow of incidentRows) {
-      await matchIncidents.upsert({
-        where: { id: String(incidentRow.id) },
-        create: { ...incidentRow },
-        update: {
-          ...incidentRow,
-          createdAt: undefined,
-        },
-      });
-    }
+    await params.client.divisions.update({
+      where: { id: row.id },
+      data: {
+        teamIds: assignedTeamIdsByDivisionId.get(mappedDivisionId) ?? [],
+        updatedAt: params.now,
+      },
+    });
   }
 };
 
@@ -5009,132 +8565,19 @@ export const persistScheduledRosterTeams = async (
   client: PrismaLike = prisma,
 ): Promise<string[]> => {
   const rosterTeamIds = Object.keys(params.scheduled.teams ?? {});
-  const placeholderRosterTeamIds = rosterTeamIds.filter((teamId) => {
-    const team = params.scheduled.teams?.[teamId];
-    const captainId = String(team?.captainId ?? "").trim();
-    const playerIds = ensureStringArray(team?.playerIds);
-    return !captainId && playerIds.length === 0;
-  });
+  const placeholderRosterTeamIds = collectPlaceholderRosterTeamIds(
+    params.scheduled,
+    rosterTeamIds,
+  );
   const now = new Date();
-  // Prisma and test clients share the phase persistence delegates.
   const phasePersistenceClient = client as unknown as PhasePersistenceClient;
   const shouldRemoveOmittedPlaceholderTeams =
     params.removeOmittedPlaceholderTeams !== false;
-
-  const scheduledDivisions = collectScheduledDivisions(params.scheduled);
-  const phaseDivisions = collectPhaseDivisions(params.scheduled);
-  const scheduledDivisionIds = scheduledDivisions
-    .map((division) => division.id)
-    .filter((divisionId) => normalizeDivisionKey(divisionId));
-  const phaseDivisionIds = phaseDivisions
-    .map((division) => division.id)
-    .filter((divisionId) => scheduledDivisionIds.includes(divisionId));
-  const sourceDivisionIdByPhase = new Map<string, string>();
-  const phaseSourceRows =
-    typeof (client as any).eventDivisionPhaseSources?.findMany === "function"
-      ? await (client as any).eventDivisionPhaseSources.findMany({
-          where: {
-            eventId: params.eventId,
-            phaseDivisionId: { in: phaseDivisionIds },
-          },
-          select: { phaseDivisionId: true, entryDivisionId: true },
-        })
-      : [];
-  for (const row of phaseSourceRows as any[]) {
-    const phaseDivisionId = normalizeDivisionKey(row.phaseDivisionId);
-    const entryDivisionId = normalizeDivisionKey(row.entryDivisionId);
-    if (phaseDivisionId && entryDivisionId) {
-      sourceDivisionIdByPhase.set(phaseDivisionId, entryDivisionId);
-    }
-  }
-  if (
-    phaseDivisionIds.length &&
-    typeof client.divisions?.findMany === "function"
-  ) {
-    const phaseRows = await client.divisions.findMany({
-      where: {
-        eventId: params.eventId,
-        role: "PHASE",
-        status: "ACTIVE",
-        id: { in: phaseDivisionIds },
-      },
-      select: { id: true, sourceDivisionId: true },
-    });
-    for (const row of phaseRows as any[]) {
-      const phaseDivisionId = normalizeDivisionKey(row.id);
-      const entryDivisionId = normalizeDivisionKey(row.sourceDivisionId);
-      if (
-        phaseDivisionId &&
-        entryDivisionId &&
-        !sourceDivisionIdByPhase.has(phaseDivisionId)
-      ) {
-        sourceDivisionIdByPhase.set(phaseDivisionId, entryDivisionId);
-      }
-    }
-  }
-  const scheduledLeagueDivisionIds = (() => {
-    const ids: string[] = [];
-    for (const division of scheduledDivisions) {
-      const normalizedDivisionId = normalizeDivisionKey(division.id);
-      if (!normalizedDivisionId) continue;
-      const isPhaseDivision = phaseDivisionIds.includes(division.id);
-      const ownerDivisionId = isPhaseDivision
-        ? (sourceDivisionIdByPhase.get(normalizedDivisionId) ?? division.id)
-        : division.id;
-      if (!ids.includes(ownerDivisionId)) ids.push(ownerDivisionId);
-    }
-    return ids;
-  })();
-  const scheduledDivisionAliasToId = new Map<string, string>();
-  const addDivisionAliases = (divisionId: string, ownerDivisionId: string) => {
-    const aliases = [
-      normalizeDivisionKey(divisionId),
-      normalizeDivisionKey(extractDivisionTokenFromId(divisionId)),
-      normalizeDivisionKey(ownerDivisionId),
-      normalizeDivisionKey(extractDivisionTokenFromId(ownerDivisionId)),
-    ].filter((alias): alias is string => Boolean(alias));
-    for (const alias of aliases) {
-      if (!scheduledDivisionAliasToId.has(alias)) {
-        scheduledDivisionAliasToId.set(alias, ownerDivisionId);
-      }
-    }
-  };
-  for (const divisionId of scheduledLeagueDivisionIds) {
-    addDivisionAliases(divisionId, divisionId);
-  }
-  for (const division of scheduledDivisions) {
-    const divisionId = normalizeDivisionKey(division.id);
-    if (!divisionId) continue;
-    addDivisionAliases(
-      divisionId,
-      phaseDivisionIds.includes(division.id)
-        ? (sourceDivisionIdByPhase.get(divisionId) ?? divisionId)
-        : divisionId,
-    );
-  }
-  const fallbackDivisionId =
-    scheduledLeagueDivisionIds[0] ?? DEFAULT_DIVISION_KEY;
-  const resolveScheduledTeamDivisionId = (
-    team: ScheduledRosterTeamInput | undefined,
-  ): string => {
-    const explicitDivisionId = normalizeDivisionKey(team?.division?.id);
-    if (explicitDivisionId) {
-      const mappedFromId = scheduledDivisionAliasToId.get(explicitDivisionId);
-      if (mappedFromId) {
-        return mappedFromId;
-      }
-      const token = normalizeDivisionKey(
-        extractDivisionTokenFromId(team?.division?.id),
-      );
-      if (token) {
-        const mappedFromToken = scheduledDivisionAliasToId.get(token);
-        if (mappedFromToken) {
-          return mappedFromToken;
-        }
-      }
-    }
-    return fallbackDivisionId;
-  };
+  const divisionContext = await buildScheduledRosterDivisionContext({
+    client,
+    eventId: params.eventId,
+    scheduled: params.scheduled,
+  });
 
   await client.events.update({
     where: { id: params.eventId },
@@ -5142,7 +8585,6 @@ export const persistScheduledRosterTeams = async (
       updatedAt: now,
     },
   });
-
   await syncEventParticipantRegistrationsFromCompatibilityIds(client, {
     eventId: params.eventId,
     createdBy: params.scheduled.hostId ?? "system",
@@ -5157,166 +8599,60 @@ export const persistScheduledRosterTeams = async (
     divisionIdByRegistrantId: Object.fromEntries(
       rosterTeamIds.map((teamId) => [
         teamId,
-        resolveScheduledTeamDivisionId(params.scheduled.teams?.[teamId]),
+        divisionContext.resolveTeamDivisionId(
+          params.scheduled.teams?.[teamId],
+        ),
       ]),
     ),
     placeholderTeamIds: placeholderRosterTeamIds,
   });
-
-  if (
-    shouldRemoveOmittedPlaceholderTeams &&
-    typeof (client as any).teams?.deleteMany === "function"
-  ) {
-    await (client as any).teams.deleteMany({
-      where: {
-        eventId: params.eventId,
-        ...(rosterTeamIds.length ? { id: { notIn: rosterTeamIds } } : {}),
-        kind: "PLACEHOLDER",
-      } as any,
-    });
-  }
+  await removeOmittedScheduledPlaceholderTeams({
+    client,
+    eventId: params.eventId,
+    rosterTeamIds,
+    shouldRemove: shouldRemoveOmittedPlaceholderTeams,
+  });
 
   if (!rosterTeamIds.length) {
-    const phaseDivisions = collectPhaseDivisions(params.scheduled);
-    if (phaseDivisions.length) {
-      await persistPhaseParticipantAssignments({
-        client: phasePersistenceClient,
-        eventId: params.eventId,
-        teamIdsByPhaseDivision: Object.fromEntries(
-          phaseDivisions.map((division) => [division.id, []]),
-        ),
-      });
-    }
+    await clearScheduledPhaseAssignmentsForEmptyRoster({
+      client: phasePersistenceClient,
+      eventId: params.eventId,
+      phaseDivisions: divisionContext.phaseDivisions,
+    });
     return rosterTeamIds;
   }
 
-  const event = await client.events.findUnique({
-    where: { id: params.eventId },
-    select: {
-      teamSizeLimit: true,
-      singleDivision: true,
-    },
+  const rosterState = await loadScheduledRosterEventAndTeams({
+    client,
+    eventId: params.eventId,
+    rosterTeamIds,
   });
-  const eventTeamSizeLimit =
-    typeof event?.teamSizeLimit === "number" &&
-    Number.isFinite(event.teamSizeLimit)
-      ? Math.max(0, Math.trunc(event.teamSizeLimit))
-      : null;
-
-  const existingTeams = await client.teams.findMany({
-    where: { id: { in: rosterTeamIds } },
-    select: {
-      id: true,
-      division: true,
-    },
+  await persistScheduledRosterTeamRows({
+    client,
+    eventId: params.eventId,
+    scheduled: params.scheduled,
+    rosterTeamIds,
+    existingTeamById: rosterState.existingTeamById,
+    eventTeamSizeLimit: rosterState.teamSizeLimit,
+    isTournamentPoolPlaySchedule: isTournamentPoolPlayEnabled(
+      params.scheduled,
+    ),
+    resolveTeamDivisionId: divisionContext.resolveTeamDivisionId,
+    now,
   });
-  const existingTeamById = new Map(
-    existingTeams.map((team: any) => [team.id, team]),
-  );
-  const isTournamentPoolPlaySchedule = isTournamentPoolPlayEnabled(
-    params.scheduled,
-  );
-
-  for (const teamId of rosterTeamIds) {
-    const scheduledTeam = params.scheduled.teams[teamId];
-    if (!scheduledTeam) {
-      continue;
-    }
-    const existingTeam = existingTeamById.get(teamId);
-    const captainId = String(scheduledTeam.captainId ?? "");
-    const playerIds = ensureStringArray(scheduledTeam.playerIds);
-    const divisionId = resolveScheduledTeamDivisionId(scheduledTeam);
-    const teamSize = eventTeamSizeLimit ?? playerIds.length;
-
-    if (!existingTeam) {
-      await client.teams.create({
-        data: {
-          id: teamId,
-          createdAt: now,
-          updatedAt: now,
-          eventId: params.eventId,
-          kind: captainId ? "REGISTERED" : "PLACEHOLDER",
-          playerIds,
-          playerRegistrationIds: [],
-          division: divisionId,
-          divisionTypeId: null,
-          name: scheduledTeam.name ?? "",
-          captainId,
-          managerId: captainId || "",
-          headCoachId: null,
-          coachIds: [],
-          staffAssignmentIds: [],
-          parentTeamId: null,
-          pending: [],
-          teamSize,
-          profileImageId: null,
-          sport: null,
-        },
-      });
-      continue;
-    }
-
-    const existingDivision = normalizeDivisionKey(
-      (existingTeam as any).division,
-    );
-    const nextDivision = normalizeDivisionKey(divisionId);
-    if (!isTournamentPoolPlaySchedule && existingDivision !== nextDivision) {
-      await client.teams.update({
-        where: { id: teamId },
-        data: {
-          division: divisionId,
-          updatedAt: now,
-        },
-      });
-    }
-  }
-
-  const isLeagueSchedule =
-    String(params.scheduled.eventType ?? "").toUpperCase() === "LEAGUE";
-  if (isLeagueSchedule && !Boolean(event?.singleDivision)) {
-    const assignedTeamIdsByDivisionId = new Map<string, string[]>();
-    for (const teamId of rosterTeamIds) {
-      const scheduledTeam = params.scheduled.teams[teamId];
-      const divisionId = resolveScheduledTeamDivisionId(scheduledTeam);
-      const bucket = assignedTeamIdsByDivisionId.get(divisionId) ?? [];
-      bucket.push(teamId);
-      assignedTeamIdsByDivisionId.set(divisionId, bucket);
-    }
-
-    const divisionRows = await client.divisions.findMany({
-      where: { eventId: params.eventId, role: "ENTRY", status: "ACTIVE" },
-      select: {
-        id: true,
-        key: true,
-        kind: true,
-      },
-    });
-
-    for (const row of divisionRows) {
-      if (normalizeDivisionKind(row.kind, "LEAGUE") === "PLAYOFF") {
-        continue;
-      }
-      const aliases = [
-        normalizeDivisionKey(row.id),
-        normalizeDivisionKey(row.key),
-        normalizeDivisionKey(extractDivisionTokenFromId(row.id)),
-      ].filter((alias): alias is string => Boolean(alias));
-      const mappedDivisionId =
-        aliases
-          .map((alias) => scheduledDivisionAliasToId.get(alias))
-          .find((value): value is string => Boolean(value)) ??
-        fallbackDivisionId;
-
-      await client.divisions.update({
-        where: { id: row.id },
-        data: {
-          teamIds: assignedTeamIdsByDivisionId.get(mappedDivisionId) ?? [],
-          updatedAt: now,
-        },
-      });
-    }
-  }
-  if (phaseDivisions.length) {
+  await syncScheduledLeagueDivisionTeams({
+    client,
+    eventId: params.eventId,
+    scheduled: params.scheduled,
+    rosterTeamIds,
+    singleDivision: rosterState.singleDivision,
+    now,
+    scheduledDivisionAliasToId:
+      divisionContext.scheduledDivisionAliasToId,
+    fallbackDivisionId: divisionContext.fallbackDivisionId,
+    resolveTeamDivisionId: divisionContext.resolveTeamDivisionId,
+  });
+  if (divisionContext.phaseDivisions.length) {
     const teamIdsByPhaseDivision = collectPhaseTeamIdsByDivision(
       params.scheduled,
       params.scheduled.teams,
@@ -5327,7 +8663,6 @@ export const persistScheduledRosterTeams = async (
       teamIdsByPhaseDivision,
     });
   }
-
   return rosterTeamIds;
 };
 
@@ -5385,59 +8720,61 @@ export const saveEventSchedule = async (
   });
 };
 
-export const syncEventDivisions = async (
-  params: {
-    eventId: string;
-    divisionIds: string[];
-    fieldIds: string[];
-    includePlayoffs?: boolean;
-    singleDivision?: boolean;
-    sportId?: string | null;
-    referenceDate?: Date | null;
-    organizationId?: string | null;
-    divisionFieldMap?: Record<string, string[]>;
-    divisionDetails?: unknown[];
-    playoffDivisionDetails?: unknown[];
-    defaultPrice?: number | null;
-    defaultMaxParticipants?: number | null;
-    defaultPlayoffTeamCount?: number | null;
-    defaultAllowPaymentPlans?: boolean | null;
-    defaultInstallmentCount?: number | null;
-    defaultInstallmentDueDates?: string[];
-    defaultInstallmentDueRelativeDays?: number[];
-    defaultInstallmentAmounts?: number[];
-    eventType?: string | null;
-    clearPlayoffPlacementMappings?: boolean;
-  },
-  client: PrismaLike = prisma,
-) => {
-  const usesRelativeInstallmentDueDates =
-    String(params.eventType ?? "").toUpperCase() === "WEEKLY_EVENT";
-  const submittedDivisionIds = normalizeDivisionIdentifierList(
-    params.divisionIds,
-    params.eventId,
-  );
-  const divisionFieldMap = params.divisionFieldMap ?? {};
-  const allowedFieldIds = new Set(
-    params.fieldIds.map((fieldId) => String(fieldId)),
-  );
+type SyncEventDivisionsParams = {
+  eventId: string;
+  divisionIds: string[];
+  fieldIds: string[];
+  includePlayoffs?: boolean;
+  singleDivision?: boolean;
+  sportId?: string | null;
+  referenceDate?: Date | null;
+  organizationId?: string | null;
+  divisionFieldMap?: Record<string, string[]>;
+  divisionDetails?: unknown[];
+  playoffDivisionDetails?: unknown[];
+  defaultPrice?: number | null;
+  defaultMaxParticipants?: number | null;
+  defaultPlayoffTeamCount?: number | null;
+  defaultAllowPaymentPlans?: boolean | null;
+  defaultInstallmentCount?: number | null;
+  defaultInstallmentDueDates?: string[];
+  defaultInstallmentDueRelativeDays?: number[];
+  defaultInstallmentAmounts?: number[];
+  eventType?: string | null;
+  clearPlayoffPlacementMappings?: boolean;
+};
 
-  const submittedLeagueDetails = normalizeDivisionDetailsPayload(
-    params.divisionDetails ?? [],
-    params.eventId,
-    params.sportId,
-    "LEAGUE",
-  );
-  const submittedPlayoffDetails = normalizeDivisionDetailsPayload(
-    params.playoffDivisionDetails ?? [],
-    params.eventId,
-    params.sportId,
-    "PLAYOFF",
-  );
+type SyncEventDivisionState = {
+  usesRelativeInstallmentDueDates: boolean;
+  submittedDivisionIds: string[];
+  divisionFieldMap: Record<string, string[]>;
+  allowedFieldIds: Set<string>;
+  submittedLeagueDetails: DivisionDetailPayload[];
+  submittedPlayoffDetails: DivisionDetailPayload[];
+  persistedRows: any[];
+  existingRows: any[];
+  existingById: Map<string, any>;
+  existingByKey: Map<string, any>;
+  normalizedEventType: string;
+  tournamentPoolPlayEnabled: boolean;
+  submittedLeagueDetailIds: Set<string>;
+  normalizedLeagueDetails: DivisionDetailPayload[];
+  normalizedPlayoffDetails: DivisionDetailPayload[];
+  divisionIds: string[];
+  detailLookup: Map<string, DivisionDetailPayload>;
+  trustedInternalDivisionIds: Set<string>;
+  normalizedDefaultPlayoffTeamCount: number | null | undefined;
+  clearSingleDivisionTeamAssignments: boolean;
+  effectiveDivisionIds: string[];
+};
 
-  const persistedRows = await client.divisions.findMany({
+const loadSyncEventDivisionRows = async (
+  client: PrismaLike,
+  eventId: string,
+): Promise<any[]> =>
+  client.divisions.findMany({
     where: {
-      eventId: params.eventId,
+      eventId,
       role: { in: ["ENTRY", "PHASE"] },
       status: "ACTIVE",
     },
@@ -5494,6 +8831,12 @@ export const syncEventDivisions = async (
       fieldIds: true,
     },
   });
+
+const buildSyncEventDivisionLookups = (persistedRows: any[]): {
+  existingRows: any[];
+  existingById: Map<string, any>;
+  existingByKey: Map<string, any>;
+} => {
   const existingRows = persistedRows.filter(
     (row: any) => String(row.role ?? "").toUpperCase() !== "PHASE",
   );
@@ -5502,80 +8845,88 @@ export const syncEventDivisions = async (
       String(row.role ?? "").toUpperCase() !== "PHASE" ||
       normalizeDivisionKind(row.kind, "LEAGUE") === "PLAYOFF",
   );
-
-  const existingById = new Map<string, (typeof existingLookupRows)[number]>();
-  const existingByKey = new Map<string, (typeof existingLookupRows)[number]>();
+  const existingById = new Map<string, any>();
+  const existingByKey = new Map<string, any>();
   for (const row of existingLookupRows) {
     const normalizedId = normalizeDivisionKey(row.id);
     if (normalizedId) {
       existingById.set(normalizedId, row);
       const token = extractDivisionTokenFromId(normalizedId);
-      if (token) {
-        existingByKey.set(token, row);
-      }
+      if (token) existingByKey.set(token, row);
     }
     const normalizedKey = normalizeDivisionKey(row.key);
-    if (normalizedKey) {
-      existingByKey.set(normalizedKey, row);
-    }
+    if (normalizedKey) existingByKey.set(normalizedKey, row);
   }
+  return { existingRows, existingById, existingByKey };
+};
 
-  const normalizedEventType =
-    typeof params.eventType === "string" ? params.eventType.toUpperCase() : "";
-  const tournamentPoolPlayEnabled = isTournamentPoolPlayEnabled({
-    eventType: normalizedEventType,
-    includePlayoffs: params.includePlayoffs,
-  });
-  const submittedLeagueDetailIds = new Set(
-    submittedLeagueDetails
-      .map((detail) => normalizeDivisionKey(detail.id))
-      .filter((id): id is string => Boolean(id)),
-  );
-  const ignoredSystemGeneratedDivisionIds = new Set(
+const getSyncIgnoredSystemGeneratedDivisionIds = (
+  persistedRows: any[],
+  tournamentPoolPlayEnabled: boolean,
+): Set<string> =>
+  new Set(
     persistedRows
       .filter((row: any) => {
-        if (row.isSystemGenerated !== true) {
-          return false;
-        }
-        const role = String(row.role ?? "")
-          .trim()
-          .toUpperCase();
+        if (row.isSystemGenerated !== true) return false;
+        const role = String(row.role ?? "").trim().toUpperCase();
         return role === "PHASE" || !tournamentPoolPlayEnabled;
       })
       .map((row: any) => normalizeDivisionKey(row.id))
       .filter((id: string | null): id is string => Boolean(id)),
   );
-  const isIgnoredSystemGeneratedDivision = (id: unknown): boolean => {
+
+const normalizeSyncSubmittedDivisionDetails = (params: {
+  submittedLeagueDetails: DivisionDetailPayload[];
+  submittedPlayoffDetails: DivisionDetailPayload[];
+  persistedRows: any[];
+  normalizedEventType: string;
+  tournamentPoolPlayEnabled: boolean;
+}): {
+  submittedLeagueDetailIds: Set<string>;
+  normalizedLeagueDetails: DivisionDetailPayload[];
+  normalizedPlayoffDetails: DivisionDetailPayload[];
+} => {
+  const submittedLeagueDetailIds = new Set(
+    params.submittedLeagueDetails
+      .map((detail) => normalizeDivisionKey(detail.id))
+      .filter((id): id is string => Boolean(id)),
+  );
+  const ignoredSystemGeneratedDivisionIds =
+    getSyncIgnoredSystemGeneratedDivisionIds(
+      params.persistedRows,
+      params.tournamentPoolPlayEnabled,
+    );
+  const isIgnored = (id: unknown): boolean => {
     const normalizedId = normalizeDivisionKey(id);
     return Boolean(
       normalizedId && ignoredSystemGeneratedDivisionIds.has(normalizedId),
     );
   };
-  const normalizedLeagueDetails = submittedLeagueDetails.filter(
-    (detail) => !isIgnoredSystemGeneratedDivision(detail.id),
+  const normalizedLeagueDetails = params.submittedLeagueDetails.filter(
+    (detail) => !isIgnored(detail.id),
   );
-  const normalizedPlayoffDetails = submittedPlayoffDetails.filter((detail) => {
-    const id = normalizeDivisionKey(detail.id);
-    const regularTournamentProjection =
-      normalizedEventType === "TOURNAMENT" &&
-      !tournamentPoolPlayEnabled &&
-      Boolean(id && submittedLeagueDetailIds.has(id));
-    return (
-      !regularTournamentProjection &&
-      !isIgnoredSystemGeneratedDivision(detail.id)
-    );
-  });
-  const activeSubmittedDivisionIds = submittedDivisionIds.filter(
-    (id) => !isIgnoredSystemGeneratedDivision(id),
+  const normalizedPlayoffDetails = params.submittedPlayoffDetails.filter(
+    (detail) => {
+      const id = normalizeDivisionKey(detail.id);
+      const regularTournamentProjection =
+        params.normalizedEventType === "TOURNAMENT" &&
+        !params.tournamentPoolPlayEnabled &&
+        Boolean(id && submittedLeagueDetailIds.has(id));
+      return !regularTournamentProjection && !isIgnored(detail.id);
+    },
   );
-  const divisionIds = activeSubmittedDivisionIds.length
-    ? activeSubmittedDivisionIds
-    : [buildDivisionId(params.eventId, DEFAULT_DIVISION_KEY)];
+  return {
+    submittedLeagueDetailIds,
+    normalizedLeagueDetails,
+    normalizedPlayoffDetails,
+  };
+};
+
+const buildSyncDivisionDetailLookup = (
+  details: DivisionDetailPayload[],
+): Map<string, DivisionDetailPayload> => {
   const detailLookup = new Map<string, DivisionDetailPayload>();
-  for (const detail of [
-    ...normalizedLeagueDetails,
-    ...normalizedPlayoffDetails,
-  ]) {
+  for (const detail of details) {
     const aliases = new Set<string>([
       detail.id,
       detail.key,
@@ -5583,800 +8934,1787 @@ export const syncEventDivisions = async (
     ]);
     aliases.forEach((alias) => {
       const normalized = normalizeDivisionKey(alias);
-      if (!normalized) return;
-      detailLookup.set(normalized, detail);
+      if (normalized) detailLookup.set(normalized, detail);
     });
   }
-  const trustedInternalDivisionIds = collectSystemGeneratedDivisionIds(
-    persistedRows.filter(
-      (row: any) => !isIgnoredSystemGeneratedDivision(row.id),
-    ),
-  );
-  const normalizedDefaultPlayoffTeamCount = params.includePlayoffs
-    ? resolveLeaguePlayoffTeamCount(
-        params.defaultPlayoffTeamCount,
-        `Playoff team count must be at least ${MIN_BRACKET_TEAM_COUNT} when playoffs are enabled.`,
-      )
-    : params.defaultPlayoffTeamCount;
-  const clearSingleDivisionTeamAssignments =
-    Boolean(params.singleDivision) && !tournamentPoolPlayEnabled;
-  let effectiveDivisionIds = divisionIds;
+  return detailLookup;
+};
+
+const addSyncGeneratedPoolAliases = (
+  detailLookup: Map<string, DivisionDetailPayload>,
+  entryDetail: DivisionDetailPayload,
+): void => {
+  const aliases = new Set<string>([
+    entryDetail.id,
+    entryDetail.key,
+    extractDivisionTokenFromId(entryDetail.id) ?? "",
+  ]);
+  aliases.forEach((alias) => {
+    const normalized = normalizeDivisionKey(alias);
+    if (normalized && !detailLookup.has(normalized)) {
+      detailLookup.set(normalized, entryDetail);
+    }
+  });
+};
+
+const buildSyncGeneratedPoolEntryDetail = (
+  bracketDetail: DivisionDetailPayload,
+  pool: any,
+  existingPool: any,
+): DivisionDetailPayload => ({
+  ...bracketDetail,
+  id: pool.id,
+  key: pool.key,
+  name: pool.name,
+  role: "ENTRY",
+  phase: null,
+  kind: "LEAGUE",
+  isSystemGenerated: true,
+  sourceDivisionId:
+    existingPool?.sourceDivisionId ?? bracketDetail.sourceDivisionId ?? null,
+  maxParticipants: pool.maxParticipants,
+  playoffTeamCount: pool.playoffTeamCount,
+  playoffPlacementDivisionIds: pool.playoffPlacementDivisionIds,
+  standingsOverrides: undefined,
+  standingsConfirmedAt: undefined,
+  standingsConfirmedBy: undefined,
+  teamIds: pool.teamIds,
+});
+
+const hasSyncExplicitTournamentPoolEntries = (
+  normalizedLeagueDetails: DivisionDetailPayload[],
+  normalizedPlayoffDetails: DivisionDetailPayload[],
+): boolean => {
   const normalizedPlayoffDivisionIds = new Set(
     normalizedPlayoffDetails
       .map((detail) => normalizeDivisionKey(detail.id))
       .filter((id): id is string => Boolean(id)),
   );
-  const hasExplicitTournamentPoolEntries = normalizedLeagueDetails.some(
-    (detail) => {
-      const id = normalizeDivisionKey(detail.id);
-      return Boolean(id && !normalizedPlayoffDivisionIds.has(id));
-    },
+  return normalizedLeagueDetails.some((detail) => {
+    const id = normalizeDivisionKey(detail.id);
+    return Boolean(id && !normalizedPlayoffDivisionIds.has(id));
+  });
+};
+
+const appendSyncGeneratedPoolsForBracket = (params: {
+  eventId: string;
+  existingRows: any[];
+  existingById: Map<string, any>;
+  bracketDetail: DivisionDetailPayload;
+  detailLookup: Map<string, DivisionDetailPayload>;
+  trustedInternalDivisionIds: Set<string>;
+  generatedPoolEntryIds: string[];
+}): void => {
+  const existingPools = generatedPoolsForBracket(
+    params.existingRows,
+    params.bracketDetail.id,
   );
-  if (
-    tournamentPoolPlayEnabled &&
-    !hasExplicitTournamentPoolEntries &&
-    normalizedPlayoffDetails.length
-  ) {
-    const generatedPoolEntryIds: string[] = [];
-    for (const bracketDetail of normalizedPlayoffDetails) {
-      const existingPools = generatedPoolsForBracket(
-        existingRows,
-        bracketDetail.id,
+  const generatedPools = buildGeneratedTournamentPools({
+    eventId: params.eventId,
+    bracket: {
+      id: params.bracketDetail.id,
+      key: params.bracketDetail.key,
+      name: params.bracketDetail.name,
+      maxParticipants: normalizeLegacyBracketTeamCount(
+        params.bracketDetail.maxParticipants,
+      ),
+      playoffTeamCount: normalizeLegacyBracketTeamCount(
+        params.bracketDetail.playoffTeamCount,
+      ),
+      poolCount: params.bracketDetail.poolCount,
+    },
+    existingPools,
+  });
+  for (const pool of generatedPools) {
+    const existingPool = params.existingById.get(
+      normalizeDivisionKey(pool.id) ?? pool.id,
+    );
+    if (existingPool && existingPool.isSystemGenerated !== true) {
+      throw new TournamentPoolValidationError(
+        `Generated tournament pool "${pool.id}" conflicts with organizer-owned division "${existingPool.id}".`,
       );
-      const generatedPools = buildGeneratedTournamentPools({
-        eventId: params.eventId,
-        bracket: {
-          id: bracketDetail.id,
-          key: bracketDetail.key,
-          name: bracketDetail.name,
-          maxParticipants: normalizeLegacyBracketTeamCount(
-            bracketDetail.maxParticipants,
-          ),
-          playoffTeamCount: normalizeLegacyBracketTeamCount(
-            bracketDetail.playoffTeamCount,
-          ),
-          poolCount: bracketDetail.poolCount,
-        },
-        existingPools,
-      });
-      for (const pool of generatedPools) {
-        const existingPool = existingById.get(
-          normalizeDivisionKey(pool.id) ?? pool.id,
-        );
-        if (existingPool && existingPool.isSystemGenerated !== true) {
-          throw new TournamentPoolValidationError(
-            `Generated tournament pool "${pool.id}" conflicts with organizer-owned division "${existingPool.id}".`,
-          );
-        }
-        const entryDetail: DivisionDetailPayload = {
-          ...bracketDetail,
-          id: pool.id,
-          key: pool.key,
-          name: pool.name,
-          role: "ENTRY",
-          phase: null,
-          kind: "LEAGUE",
-          isSystemGenerated: true,
-          sourceDivisionId:
-            existingPool?.sourceDivisionId ??
-            bracketDetail.sourceDivisionId ??
-            null,
-          maxParticipants: pool.maxParticipants,
-          playoffTeamCount: pool.playoffTeamCount,
-          playoffPlacementDivisionIds: pool.playoffPlacementDivisionIds,
-          standingsOverrides: undefined,
-          standingsConfirmedAt: undefined,
-          standingsConfirmedBy: undefined,
-          teamIds: pool.teamIds,
-        };
-        generatedPoolEntryIds.push(entryDetail.id);
-        const generatedPoolId = normalizeDivisionKey(entryDetail.id);
-        if (generatedPoolId) {
-          trustedInternalDivisionIds.add(generatedPoolId);
-        }
-        const aliases = new Set<string>([
-          entryDetail.id,
-          entryDetail.key,
-          extractDivisionTokenFromId(entryDetail.id) ?? "",
-        ]);
-        aliases.forEach((alias) => {
-          const normalized = normalizeDivisionKey(alias);
-          if (normalized && !detailLookup.has(normalized)) {
-            detailLookup.set(normalized, entryDetail);
-          }
+    }
+    const entryDetail = buildSyncGeneratedPoolEntryDetail(
+      params.bracketDetail,
+      pool,
+      existingPool,
+    );
+    params.generatedPoolEntryIds.push(entryDetail.id);
+    const generatedPoolId = normalizeDivisionKey(entryDetail.id);
+    if (generatedPoolId) {
+      params.trustedInternalDivisionIds.add(generatedPoolId);
+    }
+    addSyncGeneratedPoolAliases(params.detailLookup, entryDetail);
+  }
+};
+
+const ensureSyncGeneratedPoolEntries = (params: {
+  eventId: string;
+  existingRows: any[];
+  existingById: Map<string, any>;
+  normalizedLeagueDetails: DivisionDetailPayload[];
+  normalizedPlayoffDetails: DivisionDetailPayload[];
+  tournamentPoolPlayEnabled: boolean;
+  detailLookup: Map<string, DivisionDetailPayload>;
+  trustedInternalDivisionIds: Set<string>;
+  effectiveDivisionIds: string[];
+}): string[] => {
+  const hasExplicitTournamentPoolEntries =
+    hasSyncExplicitTournamentPoolEntries(
+      params.normalizedLeagueDetails,
+      params.normalizedPlayoffDetails,
+    );
+  if (
+    !params.tournamentPoolPlayEnabled ||
+    hasExplicitTournamentPoolEntries ||
+    !params.normalizedPlayoffDetails.length
+  ) {
+    return params.effectiveDivisionIds;
+  }
+  const generatedPoolEntryIds: string[] = [];
+  for (const bracketDetail of params.normalizedPlayoffDetails) {
+    appendSyncGeneratedPoolsForBracket({
+      eventId: params.eventId,
+      existingRows: params.existingRows,
+      existingById: params.existingById,
+      bracketDetail,
+      detailLookup: params.detailLookup,
+      trustedInternalDivisionIds: params.trustedInternalDivisionIds,
+      generatedPoolEntryIds,
+    });
+  }
+  return generatedPoolEntryIds;
+};
+
+const resolveSyncPlayoffDivisionLabel = (
+  normalizedDivisionId: string,
+  detail: DivisionDetailPayload | null,
+  existing: any,
+): string =>
+  detail?.name ??
+  existing?.name ??
+  detail?.key ??
+  existing?.key ??
+  extractDivisionTokenFromId(normalizedDivisionId) ??
+  normalizedDivisionId;
+
+const resolveSyncPlayoffDivisionValidationInput = (params: {
+  rawDivisionId: string;
+  detailLookup: Map<string, DivisionDetailPayload>;
+  existingById: Map<string, any>;
+  existingByKey: Map<string, any>;
+}): {
+  detail: DivisionDetailPayload | null;
+  existing: any;
+  label: string;
+} => {
+  const normalizedDivisionId =
+    normalizeDivisionKey(params.rawDivisionId) ?? params.rawDivisionId;
+  const detail = findSyncFinalEntryDetail(
+    normalizedDivisionId,
+    params.detailLookup,
+  );
+  const existing = findSyncFinalEntryExisting(
+    normalizedDivisionId,
+    params.existingById,
+    params.existingByKey,
+  );
+  return {
+    detail,
+    existing,
+    label: resolveSyncPlayoffDivisionLabel(
+      normalizedDivisionId,
+      detail,
+      existing,
+    ),
+  };
+};
+
+const validateSyncPlayoffTeamCountForDivision = (params: {
+  rawDivisionId: string;
+  normalizedDefaultPlayoffTeamCount: number | null | undefined;
+  detailLookup: Map<string, DivisionDetailPayload>;
+  existingById: Map<string, any>;
+  existingByKey: Map<string, any>;
+}): void => {
+  const { detail, existing, label } =
+    resolveSyncPlayoffDivisionValidationInput(params);
+  resolveLeaguePlayoffTeamCount(
+    detail?.playoffTeamCount ??
+      existing?.playoffTeamCount ??
+      params.normalizedDefaultPlayoffTeamCount,
+    `Playoff team count must be at least ${MIN_BRACKET_TEAM_COUNT} for division "${label}" when playoffs are enabled.`,
+  );
+};
+
+const validateSyncPlayoffTeamCounts = (params: {
+  includePlayoffs?: boolean;
+  tournamentPoolPlayEnabled: boolean;
+  divisionIds: string[];
+  normalizedPlayoffDetails: DivisionDetailPayload[];
+  normalizedDefaultPlayoffTeamCount: number | null | undefined;
+  detailLookup: Map<string, DivisionDetailPayload>;
+  existingById: Map<string, any>;
+  existingByKey: Map<string, any>;
+}): void => {
+  const usesPerDivisionPlayoffTeamCount =
+    params.divisionIds.length > 1 || params.normalizedPlayoffDetails.length > 0;
+  if (
+    !params.includePlayoffs ||
+    params.tournamentPoolPlayEnabled ||
+    usesPerDivisionPlayoffTeamCount
+  ) {
+    if (
+      params.includePlayoffs &&
+      !params.tournamentPoolPlayEnabled &&
+      usesPerDivisionPlayoffTeamCount
+    ) {
+      for (const rawDivisionId of params.divisionIds) {
+        validateSyncPlayoffTeamCountForDivision({
+          rawDivisionId,
+          normalizedDefaultPlayoffTeamCount:
+            params.normalizedDefaultPlayoffTeamCount,
+          detailLookup: params.detailLookup,
+          existingById: params.existingById,
+          existingByKey: params.existingByKey,
         });
       }
     }
-    effectiveDivisionIds = generatedPoolEntryIds;
+    return;
   }
+  resolveLeaguePlayoffTeamCount(
+    params.normalizedDefaultPlayoffTeamCount,
+    `Playoff team count must be at least ${MIN_BRACKET_TEAM_COUNT} when playoffs are enabled.`,
+  );
+};
 
-  const hasMultipleRegularDivisions = divisionIds.length > 1;
-  const usesPerDivisionPlayoffTeamCount =
-    hasMultipleRegularDivisions || normalizedPlayoffDetails.length > 0;
-  if (params.includePlayoffs && !tournamentPoolPlayEnabled) {
-    if (usesPerDivisionPlayoffTeamCount) {
-      for (const rawDivisionId of divisionIds) {
-        const normalizedDivisionId =
-          normalizeDivisionKey(rawDivisionId) ?? rawDivisionId;
-        const detail =
-          detailLookup.get(normalizedDivisionId) ??
-          detailLookup.get(
-            extractDivisionTokenFromId(normalizedDivisionId) ?? "",
-          ) ??
-          null;
-        const existing =
-          existingById.get(normalizedDivisionId) ??
-          existingByKey.get(normalizedDivisionId) ??
-          existingByKey.get(
-            extractDivisionTokenFromId(normalizedDivisionId) ?? "",
-          ) ??
-          null;
-        const divisionLabel =
-          detail?.name ??
-          existing?.name ??
-          detail?.key ??
-          existing?.key ??
-          extractDivisionTokenFromId(normalizedDivisionId) ??
-          normalizedDivisionId;
-
-        resolveLeaguePlayoffTeamCount(
-          detail?.playoffTeamCount ??
-            existing?.playoffTeamCount ??
-            normalizedDefaultPlayoffTeamCount,
-          `Playoff team count must be at least ${MIN_BRACKET_TEAM_COUNT} for division "${divisionLabel}" when playoffs are enabled.`,
-        );
-      }
-    } else {
-      resolveLeaguePlayoffTeamCount(
-        normalizedDefaultPlayoffTeamCount,
+const prepareSyncEventDivisionState = async (params: {
+  client: PrismaLike;
+  values: SyncEventDivisionsParams;
+}): Promise<SyncEventDivisionState> => {
+  const values = params.values;
+  const usesRelativeInstallmentDueDates =
+    String(values.eventType ?? "").toUpperCase() === "WEEKLY_EVENT";
+  const submittedDivisionIds = normalizeDivisionIdentifierList(
+    values.divisionIds,
+    values.eventId,
+  );
+  const divisionFieldMap = values.divisionFieldMap ?? {};
+  const allowedFieldIds = new Set(
+    values.fieldIds.map((fieldId) => String(fieldId)),
+  );
+  const submittedLeagueDetails = normalizeDivisionDetailsPayload(
+    values.divisionDetails ?? [],
+    values.eventId,
+    values.sportId,
+    "LEAGUE",
+  );
+  const submittedPlayoffDetails = normalizeDivisionDetailsPayload(
+    values.playoffDivisionDetails ?? [],
+    values.eventId,
+    values.sportId,
+    "PLAYOFF",
+  );
+  const persistedRows = await loadSyncEventDivisionRows(
+    params.client,
+    values.eventId,
+  );
+  const { existingRows, existingById, existingByKey } =
+    buildSyncEventDivisionLookups(persistedRows);
+  const normalizedEventType =
+    typeof values.eventType === "string" ? values.eventType.toUpperCase() : "";
+  const tournamentPoolPlayEnabled = isTournamentPoolPlayEnabled({
+    eventType: normalizedEventType,
+    includePlayoffs: values.includePlayoffs,
+  });
+  const normalizedDetails = normalizeSyncSubmittedDivisionDetails({
+    submittedLeagueDetails,
+    submittedPlayoffDetails,
+    persistedRows,
+    normalizedEventType,
+    tournamentPoolPlayEnabled,
+  });
+  const activeSubmittedDivisionIds = submittedDivisionIds.filter(
+    (id) =>
+      !getSyncIgnoredSystemGeneratedDivisionIds(
+        persistedRows,
+        tournamentPoolPlayEnabled,
+      ).has(normalizeDivisionKey(id) ?? id),
+  );
+  const divisionIds = activeSubmittedDivisionIds.length
+    ? activeSubmittedDivisionIds
+    : [buildDivisionId(values.eventId, DEFAULT_DIVISION_KEY)];
+  const detailLookup = buildSyncDivisionDetailLookup([
+    ...normalizedDetails.normalizedLeagueDetails,
+    ...normalizedDetails.normalizedPlayoffDetails,
+  ]);
+  const trustedInternalDivisionIds = collectSystemGeneratedDivisionIds(
+    persistedRows.filter(
+      (row: any) =>
+        !getSyncIgnoredSystemGeneratedDivisionIds(
+          persistedRows,
+          tournamentPoolPlayEnabled,
+        ).has(normalizeDivisionKey(row.id) ?? row.id),
+    ),
+  );
+  const normalizedDefaultPlayoffTeamCount = values.includePlayoffs
+    ? resolveLeaguePlayoffTeamCount(
+        values.defaultPlayoffTeamCount,
         `Playoff team count must be at least ${MIN_BRACKET_TEAM_COUNT} when playoffs are enabled.`,
-      );
-    }
-  }
+      )
+    : values.defaultPlayoffTeamCount;
+  const clearSingleDivisionTeamAssignments =
+    Boolean(values.singleDivision) && !tournamentPoolPlayEnabled;
+  const normalizedPlayoffDivisionIds = new Set(
+    normalizedDetails.normalizedPlayoffDetails
+      .map((detail) => normalizeDivisionKey(detail.id))
+      .filter((id): id is string => Boolean(id)),
+  );
+  const effectiveDivisionIds = ensureSyncGeneratedPoolEntries({
+    eventId: values.eventId,
+    existingRows,
+    existingById,
+    normalizedLeagueDetails: normalizedDetails.normalizedLeagueDetails,
+    normalizedPlayoffDetails: normalizedDetails.normalizedPlayoffDetails,
+    tournamentPoolPlayEnabled,
+    detailLookup,
+    trustedInternalDivisionIds,
+    effectiveDivisionIds: divisionIds,
+  });
+  validateSyncPlayoffTeamCounts({
+    includePlayoffs: values.includePlayoffs,
+    tournamentPoolPlayEnabled,
+    divisionIds,
+    normalizedPlayoffDetails: normalizedDetails.normalizedPlayoffDetails,
+    normalizedDefaultPlayoffTeamCount,
+    detailLookup,
+    existingById,
+    existingByKey,
+  });
+  return {
+    usesRelativeInstallmentDueDates,
+    submittedDivisionIds,
+    divisionFieldMap,
+    allowedFieldIds,
+    submittedLeagueDetails,
+    submittedPlayoffDetails,
+    persistedRows,
+    existingRows,
+    existingById,
+    existingByKey,
+    normalizedEventType,
+    tournamentPoolPlayEnabled,
+    submittedLeagueDetailIds: normalizedDetails.submittedLeagueDetailIds,
+    normalizedLeagueDetails: normalizedDetails.normalizedLeagueDetails,
+    normalizedPlayoffDetails: normalizedDetails.normalizedPlayoffDetails,
+    divisionIds,
+    detailLookup,
+    trustedInternalDivisionIds,
+    normalizedDefaultPlayoffTeamCount,
+    clearSingleDivisionTeamAssignments,
+    effectiveDivisionIds,
+  };
+};
 
+type SyncFinalEntryIdentity = {
+  normalizedDivisionId: string;
+  detail: DivisionDetailPayload | null;
+  existing: any;
+  fallbackIdentifier: string;
+  inferred: any;
+  persistedId: string;
+};
+
+const findSyncFinalEntryDetail = (
+  normalizedDivisionId: string,
+  detailLookup: Map<string, DivisionDetailPayload>,
+): DivisionDetailPayload | null =>
+  detailLookup.get(normalizedDivisionId) ??
+  detailLookup.get(extractDivisionTokenFromId(normalizedDivisionId) ?? "") ??
+  null;
+
+const findSyncFinalEntryExisting = (
+  normalizedDivisionId: string,
+  existingById: Map<string, any>,
+  existingByKey: Map<string, any>,
+): any =>
+  existingById.get(normalizedDivisionId) ??
+  existingByKey.get(normalizedDivisionId) ??
+  existingByKey.get(
+    extractDivisionTokenFromId(normalizedDivisionId) ?? "",
+  ) ??
+  null;
+
+const resolveSyncFinalEntryPersistedId = (params: {
+  eventId: string;
+  normalizedDivisionId: string;
+  detail: DivisionDetailPayload | null;
+  existing: any;
+  inferred: any;
+}): string => {
+  if (
+    params.normalizedDivisionId.includes("__division__") ||
+    params.normalizedDivisionId.startsWith("division_")
+  ) {
+    return params.normalizedDivisionId;
+  }
+  if (params.existing?.id) {
+    const existingId = normalizeDivisionKey(params.existing.id);
+    if (existingId) return existingId;
+  }
+  if (params.detail?.id) return params.detail.id;
+  return buildDivisionId(params.eventId, params.inferred.token);
+};
+
+const resolveSyncFinalEntryFallbackIdentifier = (
+  normalizedDivisionId: string,
+  detail: DivisionDetailPayload | null,
+  existing: any,
+): string =>
+  detail?.key ??
+  existing?.key ??
+  extractDivisionTokenFromId(normalizedDivisionId) ??
+  normalizedDivisionId;
+
+const buildSyncFinalEntryIdentity = (params: {
+  eventId: string;
+  rawDivisionId: string;
+  detailLookup: Map<string, DivisionDetailPayload>;
+  existingById: Map<string, any>;
+  existingByKey: Map<string, any>;
+  sportId?: string | null;
+}): SyncFinalEntryIdentity => {
+  const normalizedDivisionId =
+    normalizeDivisionKey(params.rawDivisionId) ?? params.rawDivisionId;
+  const detail = findSyncFinalEntryDetail(
+    normalizedDivisionId,
+    params.detailLookup,
+  );
+  const existing = findSyncFinalEntryExisting(
+    normalizedDivisionId,
+    params.existingById,
+    params.existingByKey,
+  );
+  const fallbackIdentifier = resolveSyncFinalEntryFallbackIdentifier(
+    normalizedDivisionId,
+    detail,
+    existing,
+  );
+  const inferred = inferDivisionDetails({
+    identifier: fallbackIdentifier,
+    sportInput: params.sportId ?? existing?.sportId ?? undefined,
+    fallbackName: detail?.name ?? existing?.name ?? undefined,
+  });
+  const persistedId = resolveSyncFinalEntryPersistedId({
+    eventId: params.eventId,
+    normalizedDivisionId,
+    detail,
+    existing,
+    inferred,
+  });
+  return {
+    normalizedDivisionId,
+    detail,
+    existing,
+    fallbackIdentifier,
+    inferred,
+    persistedId,
+  };
+};
+
+type SyncFinalEntryClassification = {
+  kind: string;
+  isTournamentBracketDivision: boolean;
+  gender: any;
+  ratingType: any;
+  divisionTypeId: any;
+  skillDivisionTypeId: any;
+  ageDivisionTypeId: any;
+  key: string;
+  divisionTypeName: any;
+};
+
+const resolveSyncFinalEntryTypeIds = (params: {
+  detail: DivisionDetailPayload | null;
+  existing: any;
+  inferred: any;
+  ratingType: any;
+}): {
+  divisionTypeId: any;
+  skillDivisionTypeId: any;
+  ageDivisionTypeId: any;
+} =>
+  normalizeDivisionTypeIds({
+    divisionTypeId:
+      params.detail?.divisionTypeId ?? params.inferred.divisionTypeId,
+    skillDivisionTypeId:
+      params.detail?.skillDivisionTypeId ?? params.existing?.skillDivisionTypeId,
+    ageDivisionTypeId:
+      params.detail?.ageDivisionTypeId ?? params.existing?.ageDivisionTypeId,
+    ratingType: params.ratingType,
+  });
+
+const resolveSyncFinalEntryKey = (params: {
+  detail: DivisionDetailPayload | null;
+  existing: any;
+  fallbackIdentifier: string;
+  gender: any;
+  ratingType: any;
+  divisionTypeId: any;
+}): string =>
+  params.detail?.key ??
+  params.existing?.key ??
+  (params.detail || params.existing
+    ? buildDivisionToken({
+        gender: params.gender,
+        ratingType: params.ratingType,
+        divisionTypeId: params.divisionTypeId,
+      })
+    : params.fallbackIdentifier);
+const resolveSyncFinalEntryKind = (params: {
+  targetKind: "LEAGUE" | "PLAYOFF";
+  detail: DivisionDetailPayload | null;
+  existing: any;
+}): string =>
+  normalizeDivisionKind(
+    params.detail?.kind ?? params.existing?.kind ?? params.targetKind,
+    params.targetKind,
+  );
+
+const resolveSyncFinalEntryDemographics = (params: {
+  detail: DivisionDetailPayload | null;
+  inferred: any;
+}): { gender: any; ratingType: any } => ({
+  gender: params.detail?.gender ?? params.inferred.gender,
+  ratingType: params.detail?.ratingType ?? params.inferred.ratingType,
+});
+
+const buildSyncFinalEntryClassification = (params: {
+  targetKind: "LEAGUE" | "PLAYOFF";
+  detail: DivisionDetailPayload | null;
+  existing: any;
+  inferred: any;
+  fallbackIdentifier: string;
+  tournamentPoolPlayEnabled: boolean;
+  sportId?: string | null;
+}): SyncFinalEntryClassification => {
+  const kind = resolveSyncFinalEntryKind(params);
+  const isTournamentBracketDivision =
+    params.tournamentPoolPlayEnabled && kind === "PLAYOFF";
+  const { gender, ratingType } = resolveSyncFinalEntryDemographics({
+    detail: params.detail,
+    inferred: params.inferred,
+  });
+  const { divisionTypeId, skillDivisionTypeId, ageDivisionTypeId } =
+    resolveSyncFinalEntryTypeIds({
+      detail: params.detail,
+      existing: params.existing,
+      inferred: params.inferred,
+      ratingType,
+    });
+  const key = resolveSyncFinalEntryKey({
+    detail: params.detail,
+    existing: params.existing,
+    fallbackIdentifier: params.fallbackIdentifier,
+    gender,
+    ratingType,
+    divisionTypeId,
+  });
+  const divisionTypeName = deriveDivisionTypeDisplayName({
+    sportInput: params.sportId ?? undefined,
+    gender,
+    ratingType,
+    divisionTypeId,
+  });
+  return {
+    kind,
+    isTournamentBracketDivision,
+    gender,
+    ratingType,
+    divisionTypeId,
+    skillDivisionTypeId,
+    ageDivisionTypeId,
+    key,
+    divisionTypeName,
+  };
+};
+
+const buildSyncFinalEntryFieldIds = (params: {
+  normalizedDivisionId: string;
+  persistedId: string;
+  key: string;
+  detail: DivisionDetailPayload | null;
+  divisionFieldMap: Record<string, string[]>;
+  allowedFieldIds: Set<string>;
+}): string[] => {
+  const fieldMapAliases = Array.from(
+    new Set(
+      [
+        params.normalizedDivisionId,
+        params.persistedId,
+        params.key,
+        params.detail?.id,
+        params.detail?.key,
+        extractDivisionTokenFromId(params.normalizedDivisionId),
+        extractDivisionTokenFromId(params.persistedId),
+      ]
+        .map((alias) => normalizeDivisionKey(alias))
+        .filter((alias): alias is string => Boolean(alias)),
+    ),
+  );
+  return Array.from(
+    new Set([
+      ...fieldMapAliases.flatMap((alias) =>
+        ensureStringArray(params.divisionFieldMap[alias]),
+      ),
+      ...ensureStringArray(params.detail?.fieldIds),
+    ]),
+  ).filter(
+    (fieldId) =>
+      !params.allowedFieldIds.size || params.allowedFieldIds.has(fieldId),
+  );
+};
+
+const buildSyncFinalEntryTeamIds = (params: {
+  kind: string;
+  singleDivision?: boolean;
+  detail: DivisionDetailPayload | null;
+  existing: any;
+}): string[] => {
+  if (params.kind === "PLAYOFF" || params.singleDivision) return [];
+  return normalizeTeamIdList(
+    resolveDivisionValue(
+      params.detail?.teamIds,
+      normalizeTeamIdList(params.existing?.teamIds),
+      [],
+    ) ?? [],
+  );
+};
+
+const resolveSyncFinalEntryRatings = (params: {
+  kind: string;
+  isTournamentBracketDivision: boolean;
+  key: string;
+  sportId?: string | null;
+}): any =>
+  params.kind === "PLAYOFF" && !params.isTournamentBracketDivision
+    ? { minRating: null, maxRating: null }
+    : divisionRatingWindow(params.key, params.sportId ?? null);
+
+const resolveSyncFinalEntryFallbackName = (params: {
+  detail: DivisionDetailPayload | null;
+  existing: any;
+  divisionTypeName: any;
+  inferred: any;
+  key: string;
+  sportId?: string | null;
+}): string =>
+  params.detail || params.existing
+    ? params.divisionTypeName ||
+      params.inferred.defaultName ||
+      buildDivisionDisplayName(params.key, params.sportId ?? null)
+    : buildDivisionDisplayName(params.key, params.sportId ?? null);
+
+const resolveSyncFinalEntryName = (params: {
+  detail: DivisionDetailPayload | null;
+  existing: any;
+  fallbackName: string;
+}): string =>
+  cleanDivisionDisplayName(
+    params.detail?.name ?? params.existing?.name,
+    params.fallbackName,
+  );
+
+const resolveSyncFinalEntryRatingsAndName = (params: {
+  kind: string;
+  isTournamentBracketDivision: boolean;
+  detail: DivisionDetailPayload | null;
+  existing: any;
+  divisionTypeName: any;
+  inferred: any;
+  key: string;
+  sportId?: string | null;
+}): { ratings: any; name: string } => {
+  const ratings = resolveSyncFinalEntryRatings(params);
+  const fallbackName = resolveSyncFinalEntryFallbackName(params);
+  const name = resolveSyncFinalEntryName({
+    detail: params.detail,
+    existing: params.existing,
+    fallbackName,
+  });
+  return { ratings, name };
+};
+
+type SyncFinalEntryEligibility = {
+  ageCutoffDate: string | null;
+  ageCutoffLabel: string | null;
+  ageCutoffSource: string | null;
+};
+
+const resolveSyncAgeCutoffDate = (params: {
+  detail: DivisionDetailPayload | null;
+  existing: any;
+  ageEligibility: any;
+}): string | null =>
+  params.detail?.ageCutoffDate ??
+  normalizeIsoDateString(params.existing?.ageCutoffDate) ??
+  (params.ageEligibility?.applies
+    ? params.ageEligibility.cutoffDate.toISOString()
+    : null);
+
+const resolveSyncAgeCutoffLabel = (params: {
+  detail: DivisionDetailPayload | null;
+  existing: any;
+  ageEligibility: any;
+}): string | null =>
+  params.detail?.ageCutoffLabel ??
+  params.existing?.ageCutoffLabel ??
+  params.ageEligibility?.message ??
+  null;
+
+const resolveSyncAgeCutoffSource = (params: {
+  detail: DivisionDetailPayload | null;
+  existing: any;
+  ageEligibility: any;
+}): string | null =>
+  params.detail?.ageCutoffSource ??
+  params.existing?.ageCutoffSource ??
+  (params.ageEligibility?.applies
+    ? params.ageEligibility.cutoffRule.source
+    : null);
+
+const resolveSyncFinalEntryEligibility = (params: {
+  kind: string;
+  isTournamentBracketDivision: boolean;
+  detail: DivisionDetailPayload | null;
+  existing: any;
+  divisionTypeId: any;
+  sportId?: string | null;
+  referenceDate?: Date | null;
+}): SyncFinalEntryEligibility => {
+  const isNonBracketPlayoff =
+    params.kind === "PLAYOFF" && !params.isTournamentBracketDivision;
+  if (isNonBracketPlayoff) {
+    return {
+      ageCutoffDate: null,
+      ageCutoffLabel: null,
+      ageCutoffSource: null,
+    };
+  }
+  const ageEligibility = evaluateDivisionAgeEligibility({
+    divisionTypeId: params.divisionTypeId,
+    sportInput: params.sportId ?? null,
+    referenceDate: params.referenceDate ?? null,
+  });
+  return {
+    ageCutoffDate: resolveSyncAgeCutoffDate({
+      detail: params.detail,
+      existing: params.existing,
+      ageEligibility,
+    }),
+    ageCutoffLabel: resolveSyncAgeCutoffLabel({
+      detail: params.detail,
+      existing: params.existing,
+      ageEligibility,
+    }),
+    ageCutoffSource: resolveSyncAgeCutoffSource({
+      detail: params.detail,
+      existing: params.existing,
+      ageEligibility,
+    }),
+  };
+};
+
+const resolveSyncFinalEntryPrice = (params: {
+  isNonBracketPlayoff: boolean;
+  detail: DivisionDetailPayload | null;
+  existing: any;
+  defaultPrice?: number | null;
+}): number | null =>
+  params.isNonBracketPlayoff
+    ? null
+    : (resolveDivisionValue(
+        params.detail?.price,
+        params.existing?.price,
+        params.defaultPrice ?? undefined,
+      ) ?? null);
+
+const resolveSyncFinalEntryGeneratedPool = (params: {
+  eventType: string;
+  tournamentPoolPlayEnabled: boolean;
+  kind: string;
+  persistedId: string;
+  trustedInternalDivisionIds: Set<string>;
+  detail: DivisionDetailPayload | null;
+  existing: any;
+}): boolean =>
+  isGeneratedTournamentPoolRecord({
+    eventType: params.eventType,
+    isPoolPlayEnabled: params.tournamentPoolPlayEnabled,
+    kind: params.kind,
+    isSystemGenerated: Boolean(
+      params.persistedId &&
+        params.trustedInternalDivisionIds.has(params.persistedId),
+    ),
+    poolCount: params.detail?.poolCount,
+    playoffPlacementDivisionIds: [
+      ...ensureStringArray(params.detail?.playoffPlacementDivisionIds),
+      ...ensureStringArray(params.existing?.playoffPlacementDivisionIds),
+    ],
+  });
+
+const resolveSyncFinalEntryMaxParticipants = (params: {
+  kind: string;
+  eventType: string;
+  isGeneratedTournamentPool: boolean;
+  detail: DivisionDetailPayload | null;
+  existing: any;
+  defaultMaxParticipants?: number | null;
+}): number | null => {
+  const isLeaguePlayoffTarget =
+    params.eventType === "LEAGUE" && params.kind === "PLAYOFF";
+  const rawMaxParticipants =
+    resolveDivisionValue(
+      params.detail?.maxParticipants,
+      params.existing?.maxParticipants,
+      isLeaguePlayoffTarget
+        ? undefined
+        : params.defaultMaxParticipants ?? undefined,
+    ) ?? null;
+  return params.eventType === "TOURNAMENT" && !params.isGeneratedTournamentPool
+    ? normalizeLegacyBracketTeamCount(rawMaxParticipants)
+    : rawMaxParticipants;
+};
+
+const resolveSyncFinalEntryPlayoffTeamCount = (params: {
+  kind: string;
+  eventType: string;
+  includePlayoffs?: boolean;
+  isGeneratedTournamentPool: boolean;
+  detail: DivisionDetailPayload | null;
+  existing: any;
+  defaultPlayoffTeamCount: number | null | undefined;
+}): number | null => {
+  const isLeaguePlayoffTarget =
+    params.eventType === "LEAGUE" && params.kind === "PLAYOFF";
+  if (isLeaguePlayoffTarget) return null;
+  const rawPlayoffTeamCount =
+    resolveDivisionValue(
+      params.detail?.playoffTeamCount,
+      params.existing?.playoffTeamCount,
+      params.includePlayoffs
+        ? (params.defaultPlayoffTeamCount ?? undefined)
+        : undefined,
+    ) ?? null;
+  return params.includePlayoffs && !params.isGeneratedTournamentPool
+    ? normalizeLegacyBracketTeamCount(rawPlayoffTeamCount)
+    : rawPlayoffTeamCount;
+};
+
+const resolveSyncFinalEntryAllowPaymentPlans = (params: {
+  kind: string;
+  isTournamentBracketDivision: boolean;
+  detail: DivisionDetailPayload | null;
+  existing: any;
+  defaultAllowPaymentPlans?: boolean | null;
+}): boolean | null => {
+  if (params.kind === "PLAYOFF" && !params.isTournamentBracketDivision) {
+    return false;
+  }
+  return (
+    resolveDivisionValue(
+      params.detail?.allowPaymentPlans,
+      params.existing?.allowPaymentPlans ?? undefined,
+      params.defaultAllowPaymentPlans ?? undefined,
+    ) ?? null
+  );
+};
+
+type SyncFinalEntryCapacity = {
+  price: number | null;
+  maxParticipants: number | null;
+  playoffTeamCount: number | null;
+  allowPaymentPlans: boolean | null;
+};
+
+const resolveSyncFinalEntryCapacity = (params: {
+  eventType: string;
+  tournamentPoolPlayEnabled: boolean;
+  kind: string;
+  isTournamentBracketDivision: boolean;
+  persistedId: string;
+  trustedInternalDivisionIds: Set<string>;
+  detail: DivisionDetailPayload | null;
+  existing: any;
+  includePlayoffs?: boolean;
+  defaultPrice?: number | null;
+  defaultMaxParticipants?: number | null;
+  defaultPlayoffTeamCount: number | null | undefined;
+  defaultAllowPaymentPlans?: boolean | null;
+}): SyncFinalEntryCapacity => {
+  const isNonBracketPlayoff =
+    params.kind === "PLAYOFF" && !params.isTournamentBracketDivision;
+  const isGeneratedTournamentPool = resolveSyncFinalEntryGeneratedPool(params);
+  return {
+    price: resolveSyncFinalEntryPrice({
+      isNonBracketPlayoff,
+      detail: params.detail,
+      existing: params.existing,
+      defaultPrice: params.defaultPrice,
+    }),
+    maxParticipants: resolveSyncFinalEntryMaxParticipants({
+      kind: params.kind,
+      eventType: params.eventType,
+      isGeneratedTournamentPool,
+      detail: params.detail,
+      existing: params.existing,
+      defaultMaxParticipants: params.defaultMaxParticipants,
+    }),
+    playoffTeamCount: resolveSyncFinalEntryPlayoffTeamCount({
+      kind: params.kind,
+      eventType: params.eventType,
+      includePlayoffs: params.includePlayoffs,
+      isGeneratedTournamentPool,
+      detail: params.detail,
+      existing: params.existing,
+      defaultPlayoffTeamCount: params.defaultPlayoffTeamCount,
+    }),
+    allowPaymentPlans: resolveSyncFinalEntryAllowPaymentPlans({
+      kind: params.kind,
+      isTournamentBracketDivision: params.isTournamentBracketDivision,
+      detail: params.detail,
+      existing: params.existing,
+      defaultAllowPaymentPlans: params.defaultAllowPaymentPlans,
+    }),
+  };
+};
+
+const resolveSyncFinalEntryPlacementIds = (params: {
+  kind: string;
+  clearPlayoffPlacementMappings?: boolean;
+  detail: DivisionDetailPayload | null;
+  existing: any;
+}): string[] =>
+  params.kind === "PLAYOFF" || params.clearPlayoffPlacementMappings
+    ? []
+    : (resolveDivisionValue(
+        params.detail?.playoffPlacementDivisionIds,
+        normalizePlacementDivisionIdentifierList(
+          params.existing?.playoffPlacementDivisionIds,
+        ),
+        [],
+      ) ?? []);
+
+const resolveSyncFinalEntryPlayoffConfig = (params: {
+  kind: string;
+  detail: DivisionDetailPayload | null;
+  existing: any;
+}): any =>
+  params.kind === "PLAYOFF"
+    ? (resolveDivisionValue(
+        params.detail?.playoffConfig,
+        normalizePlayoffDivisionConfig(params.existing?.standingsOverrides),
+        normalizePlayoffDivisionConfig(params.detail),
+      ) ?? null)
+    : (resolveDivisionValue(
+        params.detail?.playoffConfig,
+        normalizeDivisionPlayoffConfigFields(params.existing),
+        normalizePlayoffDivisionConfig(params.detail),
+      ) ?? null);
+
+const resolveSyncFinalEntryStandingsOverrides = (params: {
+  kind: string;
+  playoffConfig: any;
+  detail: DivisionDetailPayload | null;
+  existing: any;
+}): any =>
+  params.kind === "PLAYOFF"
+    ? params.playoffConfig
+      ? serializePlayoffDivisionConfig(params.playoffConfig)
+      : null
+    : (resolveDivisionValue(
+        params.detail?.standingsOverrides,
+        normalizeStandingsOverrides(params.existing?.standingsOverrides),
+        null,
+      ) ?? null);
+
+const resolveSyncFinalEntryStandingsConfirmation = (params: {
+  kind: string;
+  detail: DivisionDetailPayload | null;
+  existing: any;
+}): {
+  standingsConfirmedAt: string | null;
+  standingsConfirmedBy: string | null;
+} =>
+  params.kind === "PLAYOFF"
+    ? { standingsConfirmedAt: null, standingsConfirmedBy: null }
+    : {
+        standingsConfirmedAt:
+          resolveDivisionValue(
+            params.detail?.standingsConfirmedAt,
+            normalizeIsoDateString(params.existing?.standingsConfirmedAt),
+            null,
+          ) ?? null,
+        standingsConfirmedBy:
+          resolveDivisionValue(
+            params.detail?.standingsConfirmedBy,
+            params.existing?.standingsConfirmedBy ?? null,
+            null,
+          ) ?? null,
+      };
+
+type SyncFinalEntryConfigs = {
+  playoffPlacementDivisionIds: string[];
+  playoffConfig: any;
+  leagueConfig: any;
+  standingsOverrides: any;
+  phaseSettings: any;
+  standingsConfirmedAt: string | null;
+  standingsConfirmedBy: string | null;
+};
+
+const resolveSyncFinalEntryConfigs = (params: {
+  kind: string;
+  clearPlayoffPlacementMappings?: boolean;
+  detail: DivisionDetailPayload | null;
+  existing: any;
+}): SyncFinalEntryConfigs => {
+  const playoffPlacementDivisionIds = resolveSyncFinalEntryPlacementIds(params);
+  const playoffConfig = resolveSyncFinalEntryPlayoffConfig(params);
+  const leagueConfig =
+    resolveDivisionValue(
+      normalizeLeagueDivisionConfig(params.detail),
+      normalizeLeagueDivisionConfig(params.existing),
+      null,
+    ) ?? null;
+  const standingsOverrides = resolveSyncFinalEntryStandingsOverrides({
+    kind: params.kind,
+    playoffConfig,
+    detail: params.detail,
+    existing: params.existing,
+  });
+  const phaseSettings =
+    resolveDivisionValue(
+      params.detail?.phaseSettings,
+      normalizeDivisionPhaseSettingsMap(params.existing?.phaseSettings),
+      {},
+    ) ?? {};
+  return {
+    playoffPlacementDivisionIds,
+    playoffConfig,
+    leagueConfig,
+    standingsOverrides,
+    phaseSettings,
+    ...resolveSyncFinalEntryStandingsConfirmation(params),
+  };
+};
+
+type SyncFinalEntryInstallments = {
+  installmentCount: number | null;
+  installmentDueDates: string[];
+  installmentDueRelativeDays: number[];
+  installmentAmounts: number[];
+};
+
+const resolveSyncFinalEntryInstallmentFallbacks = (params: {
+  usesRelativeInstallmentDueDates: boolean;
+  defaultInstallmentDueDates?: string[];
+  defaultInstallmentDueRelativeDays?: number[];
+  defaultInstallmentAmounts?: number[];
+}): {
+  fallbackInstallmentAmounts: number[];
+  fallbackInstallmentDueDates: string[];
+  fallbackInstallmentDueRelativeDays: number[];
+} => ({
+  fallbackInstallmentAmounts: normalizeInstallmentAmountList(
+    params.defaultInstallmentAmounts ?? [],
+  ),
+  fallbackInstallmentDueDates: params.usesRelativeInstallmentDueDates
+    ? []
+    : normalizeInstallmentDateList(params.defaultInstallmentDueDates ?? []),
+  fallbackInstallmentDueRelativeDays: params.usesRelativeInstallmentDueDates
+    ? normalizeInstallmentRelativeDayList(
+        params.defaultInstallmentDueRelativeDays ?? [],
+      )
+    : [],
+});
+
+const resolveSyncFinalEntryInstallmentAmounts = (params: {
+  allowPaymentPlans: boolean | null;
+  detail: DivisionDetailPayload | null;
+  existing: any;
+  fallbackInstallmentAmounts: number[];
+}): number[] =>
+  params.allowPaymentPlans
+    ? (resolveDivisionValue(
+        params.detail?.installmentAmounts,
+        Array.isArray(params.existing?.installmentAmounts)
+          ? normalizeInstallmentAmountList(params.existing.installmentAmounts)
+          : undefined,
+        params.fallbackInstallmentAmounts,
+      ) ?? [])
+    : [];
+
+const resolveSyncFinalEntryInstallmentDueDates = (params: {
+  allowPaymentPlans: boolean | null;
+  usesRelativeInstallmentDueDates: boolean;
+  detail: DivisionDetailPayload | null;
+  existing: any;
+  fallbackInstallmentDueDates: string[];
+}): string[] =>
+  params.allowPaymentPlans && !params.usesRelativeInstallmentDueDates
+    ? (resolveDivisionValue(
+        params.detail?.installmentDueDates,
+        Array.isArray(params.existing?.installmentDueDates)
+          ? normalizeInstallmentDateList(params.existing.installmentDueDates)
+          : undefined,
+        params.fallbackInstallmentDueDates,
+      ) ?? [])
+    : [];
+
+const resolveSyncFinalEntryInstallmentRelativeDays = (params: {
+  allowPaymentPlans: boolean | null;
+  usesRelativeInstallmentDueDates: boolean;
+  detail: DivisionDetailPayload | null;
+  existing: any;
+  fallbackInstallmentDueRelativeDays: number[];
+}): number[] =>
+  params.allowPaymentPlans && params.usesRelativeInstallmentDueDates
+    ? (resolveDivisionValue(
+        params.detail?.installmentDueRelativeDays,
+        Array.isArray(params.existing?.installmentDueRelativeDays)
+          ? normalizeInstallmentRelativeDayList(
+              params.existing.installmentDueRelativeDays,
+            )
+          : undefined,
+        params.fallbackInstallmentDueRelativeDays,
+      ) ?? [])
+    : [];
+
+const resolveSyncFinalEntryInstallmentCount = (params: {
+  allowPaymentPlans: boolean | null;
+  detail: DivisionDetailPayload | null;
+  existing: any;
+  defaultInstallmentCount?: number | null;
+  installmentAmounts: number[];
+}): number | null => {
+  if (!params.allowPaymentPlans) return null;
+  const resolvedInstallmentCount = resolveDivisionValue(
+    params.detail?.installmentCount,
+    params.existing?.installmentCount ?? undefined,
+    params.defaultInstallmentCount ?? undefined,
+  );
+  return typeof resolvedInstallmentCount === "number" &&
+    Number.isFinite(resolvedInstallmentCount)
+    ? Math.max(0, Math.trunc(resolvedInstallmentCount))
+    : params.installmentAmounts.length;
+};
+
+const resolveSyncFinalEntryInstallments = (params: {
+  allowPaymentPlans: boolean | null;
+  usesRelativeInstallmentDueDates: boolean;
+  detail: DivisionDetailPayload | null;
+  existing: any;
+  defaultInstallmentCount?: number | null;
+  defaultInstallmentDueDates?: string[];
+  defaultInstallmentDueRelativeDays?: number[];
+  defaultInstallmentAmounts?: number[];
+}): SyncFinalEntryInstallments => {
+  const fallbacks = resolveSyncFinalEntryInstallmentFallbacks(params);
+  const installmentAmounts = resolveSyncFinalEntryInstallmentAmounts({
+    allowPaymentPlans: params.allowPaymentPlans,
+    detail: params.detail,
+    existing: params.existing,
+    fallbackInstallmentAmounts: fallbacks.fallbackInstallmentAmounts,
+  });
+  return {
+    installmentAmounts,
+    installmentDueDates: resolveSyncFinalEntryInstallmentDueDates({
+      allowPaymentPlans: params.allowPaymentPlans,
+      usesRelativeInstallmentDueDates: params.usesRelativeInstallmentDueDates,
+      detail: params.detail,
+      existing: params.existing,
+      fallbackInstallmentDueDates: fallbacks.fallbackInstallmentDueDates,
+    }),
+    installmentDueRelativeDays: resolveSyncFinalEntryInstallmentRelativeDays({
+      allowPaymentPlans: params.allowPaymentPlans,
+      usesRelativeInstallmentDueDates: params.usesRelativeInstallmentDueDates,
+      detail: params.detail,
+      existing: params.existing,
+      fallbackInstallmentDueRelativeDays:
+        fallbacks.fallbackInstallmentDueRelativeDays,
+    }),
+    installmentCount: resolveSyncFinalEntryInstallmentCount({
+      allowPaymentPlans: params.allowPaymentPlans,
+      detail: params.detail,
+      existing: params.existing,
+      defaultInstallmentCount: params.defaultInstallmentCount,
+      installmentAmounts,
+    }),
+  };
+};
+
+const buildSyncFinalEntryIdentityFields = (params: {
+  identity: SyncFinalEntryIdentity;
+  state: SyncEventDivisionState;
+}): Record<string, unknown> => ({
+  sourceDivisionId:
+    params.identity.detail?.sourceDivisionId ??
+    params.identity.existing?.sourceDivisionId ??
+    null,
+  isSystemGenerated: Boolean(
+    params.identity.persistedId &&
+      params.state.trustedInternalDivisionIds.has(
+        params.identity.persistedId,
+      ),
+  ),
+});
+
+const readSyncLeagueConfigValue = <T>(
+  config: any,
+  key: string,
+  fallback: T,
+): T => config?.[key] ?? fallback;
+
+const buildSyncFinalEntryLeagueFields = (params: {
+  classification: SyncFinalEntryClassification;
+  configs: SyncFinalEntryConfigs;
+}): Record<string, unknown> => ({
+  ...playoffConfigToDivisionFields(
+    params.classification.kind === "LEAGUE"
+      ? params.configs.playoffConfig
+      : null,
+  ),
+  gamesPerOpponent: readSyncLeagueConfigValue(
+    params.configs.leagueConfig,
+    "gamesPerOpponent",
+    null,
+  ),
+  restTimeMinutes: readSyncLeagueConfigValue(
+    params.configs.leagueConfig,
+    "restTimeMinutes",
+    null,
+  ),
+  usesSets: readSyncLeagueConfigValue(
+    params.configs.leagueConfig,
+    "usesSets",
+    null,
+  ),
+  matchDurationMinutes: readSyncLeagueConfigValue(
+    params.configs.leagueConfig,
+    "matchDurationMinutes",
+    null,
+  ),
+  setDurationMinutes: readSyncLeagueConfigValue(
+    params.configs.leagueConfig,
+    "setDurationMinutes",
+    null,
+  ),
+  setsPerMatch: readSyncLeagueConfigValue(
+    params.configs.leagueConfig,
+    "setsPerMatch",
+    null,
+  ),
+  pointsToVictory: readSyncLeagueConfigValue(
+    params.configs.leagueConfig,
+    "pointsToVictory",
+    [],
+  ),
+});
+
+const buildSyncFinalEntryResult = (params: {
+  values: SyncEventDivisionsParams;
+  state: SyncEventDivisionState;
+  sortOrder: number;
+  identity: SyncFinalEntryIdentity;
+  classification: SyncFinalEntryClassification;
+  ratingsAndName: { ratings: any; name: string };
+  capacity: SyncFinalEntryCapacity;
+  eligibility: SyncFinalEntryEligibility;
+  configs: SyncFinalEntryConfigs;
+  installments: SyncFinalEntryInstallments;
+  mappedFieldIds: string[];
+  mappedTeamIds: string[];
+}): any => ({
+  ...buildSyncFinalEntryIdentityFields({
+    identity: params.identity,
+    state: params.state,
+  }),
+  id: params.identity.persistedId,
+  key: params.classification.key,
+  name: params.ratingsAndName.name,
+  kind: params.classification.kind,
+  sortOrder: params.sortOrder,
+  divisionTypeId: params.classification.divisionTypeId,
+  skillDivisionTypeId: params.classification.skillDivisionTypeId,
+  ageDivisionTypeId: params.classification.ageDivisionTypeId,
+  divisionTypeName: params.classification.divisionTypeName,
+  ratingType: params.classification.ratingType,
+  gender: params.classification.gender,
+  ageCutoffDate: params.eligibility.ageCutoffDate,
+  ageCutoffLabel: params.eligibility.ageCutoffLabel,
+  ageCutoffSource: params.eligibility.ageCutoffSource,
+  price: params.capacity.price,
+  maxParticipants: params.capacity.maxParticipants,
+  playoffTeamCount: params.capacity.playoffTeamCount,
+  playoffPlacementDivisionIds:
+    params.configs.playoffPlacementDivisionIds,
+  standingsOverrides: params.configs.standingsOverrides,
+  phaseSettings: params.configs.phaseSettings,
+  ...buildSyncFinalEntryLeagueFields({
+    classification: params.classification,
+    configs: params.configs,
+  }),
+  standingsConfirmedAt: params.configs.standingsConfirmedAt,
+  standingsConfirmedBy: params.configs.standingsConfirmedBy,
+  allowPaymentPlans: params.capacity.allowPaymentPlans,
+  installmentCount: params.installments.installmentCount,
+  installmentDueDates: params.installments.installmentDueDates,
+  installmentDueRelativeDays:
+    params.installments.installmentDueRelativeDays,
+  installmentAmounts: params.installments.installmentAmounts,
+  minRating: params.ratingsAndName.ratings.minRating,
+  maxRating: params.ratingsAndName.ratings.maxRating,
+  fieldIds: params.mappedFieldIds,
+  teamIds: params.mappedTeamIds,
+});
+
+const buildSyncFinalEntry = (params: {
+  values: SyncEventDivisionsParams;
+  state: SyncEventDivisionState;
+  rawDivisionId: string;
+  targetKind: "LEAGUE" | "PLAYOFF";
+  sortOrder: number;
+}): any => {
+  const values = params.values;
+  const state = params.state;
+  const identity = buildSyncFinalEntryIdentity({
+    eventId: values.eventId,
+    rawDivisionId: params.rawDivisionId,
+    detailLookup: state.detailLookup,
+    existingById: state.existingById,
+    existingByKey: state.existingByKey,
+    sportId: values.sportId,
+  });
+  const classification = buildSyncFinalEntryClassification({
+    targetKind: params.targetKind,
+    detail: identity.detail,
+    existing: identity.existing,
+    inferred: identity.inferred,
+    fallbackIdentifier: identity.fallbackIdentifier,
+    tournamentPoolPlayEnabled: state.tournamentPoolPlayEnabled,
+    sportId: values.sportId,
+  });
+  const mappedFieldIds = buildSyncFinalEntryFieldIds({
+    normalizedDivisionId: identity.normalizedDivisionId,
+    persistedId: identity.persistedId,
+    key: classification.key,
+    detail: identity.detail,
+    divisionFieldMap: state.divisionFieldMap,
+    allowedFieldIds: state.allowedFieldIds,
+  });
+  const mappedTeamIds = buildSyncFinalEntryTeamIds({
+    kind: classification.kind,
+    singleDivision: values.singleDivision,
+    detail: identity.detail,
+    existing: identity.existing,
+  });
+  const ratingsAndName = resolveSyncFinalEntryRatingsAndName({
+    kind: classification.kind,
+    isTournamentBracketDivision: classification.isTournamentBracketDivision,
+    detail: identity.detail,
+    existing: identity.existing,
+    divisionTypeName: classification.divisionTypeName,
+    inferred: identity.inferred,
+    key: classification.key,
+    sportId: values.sportId,
+  });
+  const capacity = resolveSyncFinalEntryCapacity({
+    eventType: state.normalizedEventType,
+    tournamentPoolPlayEnabled: state.tournamentPoolPlayEnabled,
+    kind: classification.kind,
+    isTournamentBracketDivision: classification.isTournamentBracketDivision,
+    persistedId: identity.persistedId,
+    trustedInternalDivisionIds: state.trustedInternalDivisionIds,
+    detail: identity.detail,
+    existing: identity.existing,
+    includePlayoffs: values.includePlayoffs,
+    defaultPrice: values.defaultPrice,
+    defaultMaxParticipants: values.defaultMaxParticipants,
+    defaultPlayoffTeamCount: state.normalizedDefaultPlayoffTeamCount,
+    defaultAllowPaymentPlans: values.defaultAllowPaymentPlans,
+  });
+  const eligibility = resolveSyncFinalEntryEligibility({
+    kind: classification.kind,
+    isTournamentBracketDivision: classification.isTournamentBracketDivision,
+    detail: identity.detail,
+    existing: identity.existing,
+    divisionTypeId: classification.divisionTypeId,
+    sportId: values.sportId,
+    referenceDate: values.referenceDate,
+  });
+  const configs = resolveSyncFinalEntryConfigs({
+    kind: classification.kind,
+    clearPlayoffPlacementMappings: values.clearPlayoffPlacementMappings,
+    detail: identity.detail,
+    existing: identity.existing,
+  });
+  const installments = resolveSyncFinalEntryInstallments({
+    allowPaymentPlans: capacity.allowPaymentPlans,
+    usesRelativeInstallmentDueDates: state.usesRelativeInstallmentDueDates,
+    detail: identity.detail,
+    existing: identity.existing,
+    defaultInstallmentCount: values.defaultInstallmentCount,
+    defaultInstallmentDueDates: values.defaultInstallmentDueDates,
+    defaultInstallmentDueRelativeDays: values.defaultInstallmentDueRelativeDays,
+    defaultInstallmentAmounts: values.defaultInstallmentAmounts,
+  });
+  return buildSyncFinalEntryResult({
+    values,
+    state,
+    sortOrder: params.sortOrder,
+    identity,
+    classification,
+    ratingsAndName,
+    capacity,
+    eligibility,
+    configs,
+    installments,
+    mappedFieldIds,
+    mappedTeamIds,
+  });
+};
+
+const buildSyncFinalEntries = (
+  params: SyncEventDivisionsParams,
+  state: SyncEventDivisionState,
+): any[] => {
   const targetDivisionDescriptors = [
-    ...effectiveDivisionIds.map((rawDivisionId, sortOrder) => ({
+    ...state.effectiveDivisionIds.map((rawDivisionId, sortOrder) => ({
       rawDivisionId,
       kind: "LEAGUE" as const,
       sortOrder,
     })),
-    ...normalizedPlayoffDetails.map((detail, sortOrder) => ({
+    ...state.normalizedPlayoffDetails.map((detail, sortOrder) => ({
       rawDivisionId: detail.id,
       kind: "PLAYOFF" as const,
       sortOrder,
     })),
   ];
   const seenDivisionIds = new Set<string>();
-  const finalEntries = targetDivisionDescriptors
+  return targetDivisionDescriptors
     .filter(({ rawDivisionId }) => {
       const normalizedDivisionId =
         normalizeDivisionKey(rawDivisionId) ?? rawDivisionId;
-      if (seenDivisionIds.has(normalizedDivisionId)) {
-        return false;
-      }
+      if (seenDivisionIds.has(normalizedDivisionId)) return false;
       seenDivisionIds.add(normalizedDivisionId);
       return true;
     })
-    .map(({ rawDivisionId, kind: targetKind, sortOrder }) => {
-      const normalizedDivisionId =
-        normalizeDivisionKey(rawDivisionId) ?? rawDivisionId;
-      const detail =
-        detailLookup.get(normalizedDivisionId) ??
-        detailLookup.get(
-          extractDivisionTokenFromId(normalizedDivisionId) ?? "",
-        ) ??
-        null;
-      const existing =
-        existingById.get(normalizedDivisionId) ??
-        existingByKey.get(normalizedDivisionId) ??
-        existingByKey.get(
-          extractDivisionTokenFromId(normalizedDivisionId) ?? "",
-        ) ??
-        null;
-
-      const fallbackIdentifier =
-        detail?.key ??
-        existing?.key ??
-        extractDivisionTokenFromId(normalizedDivisionId) ??
-        normalizedDivisionId;
-      const inferred = inferDivisionDetails({
-        identifier: fallbackIdentifier,
-        sportInput: params.sportId ?? existing?.sportId ?? undefined,
-        fallbackName: detail?.name ?? existing?.name ?? undefined,
-      });
-
-      const persistedId = (() => {
-        if (
-          normalizedDivisionId.includes("__division__") ||
-          normalizedDivisionId.startsWith("division_")
-        ) {
-          return normalizedDivisionId;
-        }
-        if (existing?.id) {
-          const existingId = normalizeDivisionKey(existing.id);
-          if (existingId) {
-            return existingId;
-          }
-        }
-        if (detail?.id) {
-          return detail.id;
-        }
-        return buildDivisionId(params.eventId, inferred.token);
-      })();
-      const kind = normalizeDivisionKind(
-        detail?.kind ?? existing?.kind ?? targetKind,
-        targetKind,
-      );
-      const isTournamentBracketDivision =
-        tournamentPoolPlayEnabled && kind === "PLAYOFF";
-
-      const gender = detail?.gender ?? inferred.gender;
-      const ratingType = detail?.ratingType ?? inferred.ratingType;
-      const normalizedTypeIds = normalizeDivisionTypeIds({
-        divisionTypeId: detail?.divisionTypeId ?? inferred.divisionTypeId,
-        skillDivisionTypeId:
-          detail?.skillDivisionTypeId ?? existing?.skillDivisionTypeId,
-        ageDivisionTypeId:
-          detail?.ageDivisionTypeId ?? existing?.ageDivisionTypeId,
-        ratingType,
-      });
-      const { divisionTypeId, skillDivisionTypeId, ageDivisionTypeId } =
-        normalizedTypeIds;
-      const key =
-        detail?.key ??
-        existing?.key ??
-        (detail || existing
-          ? buildDivisionToken({
-              gender,
-              ratingType,
-              divisionTypeId,
-            })
-          : fallbackIdentifier);
-      const divisionTypeName = deriveDivisionTypeDisplayName({
-        sportInput: params.sportId ?? undefined,
-        gender,
-        ratingType,
-        divisionTypeId,
-      });
-
-      const mappedFieldIds = (() => {
-        const fieldMapAliases = Array.from(
-          new Set(
-            [
-              normalizedDivisionId,
-              persistedId,
-              key,
-              detail?.id,
-              detail?.key,
-              extractDivisionTokenFromId(normalizedDivisionId),
-              extractDivisionTokenFromId(persistedId),
-            ]
-              .map((alias) => normalizeDivisionKey(alias))
-              .filter((alias): alias is string => Boolean(alias)),
-          ),
-        );
-        return Array.from(
-          new Set([
-            ...fieldMapAliases.flatMap((alias) =>
-              ensureStringArray(divisionFieldMap[alias]),
-            ),
-            ...ensureStringArray(detail?.fieldIds),
-          ]),
-        ).filter(
-          (fieldId) => !allowedFieldIds.size || allowedFieldIds.has(fieldId),
-        );
-      })();
-      const mappedTeamIds =
-        kind === "PLAYOFF" || params.singleDivision
-          ? []
-          : normalizeTeamIdList(
-              resolveDivisionValue(
-                detail?.teamIds,
-                normalizeTeamIdList(existing?.teamIds),
-                [],
-              ) ?? [],
-            );
-
-      const ratings =
-        kind === "PLAYOFF" && !isTournamentBracketDivision
-          ? { minRating: null, maxRating: null }
-          : divisionRatingWindow(key, params.sportId ?? null);
-      const fallbackName =
-        detail || existing
-          ? divisionTypeName ||
-            inferred.defaultName ||
-            buildDivisionDisplayName(key, params.sportId ?? null)
-          : buildDivisionDisplayName(key, params.sportId ?? null);
-      const name = cleanDivisionDisplayName(
-        detail?.name ?? existing?.name,
-        fallbackName,
-      );
-      const ageEligibility =
-        kind === "PLAYOFF" && !isTournamentBracketDivision
-          ? null
-          : evaluateDivisionAgeEligibility({
-              divisionTypeId,
-              sportInput: params.sportId ?? null,
-              referenceDate: params.referenceDate ?? null,
-            });
-      const ageCutoffDate =
-        kind === "PLAYOFF" && !isTournamentBracketDivision
-          ? null
-          : (detail?.ageCutoffDate ??
-            normalizeIsoDateString(existing?.ageCutoffDate) ??
-            (ageEligibility?.applies
-              ? ageEligibility.cutoffDate.toISOString()
-              : null));
-      const ageCutoffLabel =
-        kind === "PLAYOFF" && !isTournamentBracketDivision
-          ? null
-          : (detail?.ageCutoffLabel ??
-            existing?.ageCutoffLabel ??
-            ageEligibility?.message ??
-            null);
-      const ageCutoffSource =
-        kind === "PLAYOFF" && !isTournamentBracketDivision
-          ? null
-          : (detail?.ageCutoffSource ??
-            existing?.ageCutoffSource ??
-            (ageEligibility?.applies
-              ? ageEligibility.cutoffRule.source
-              : null));
-      const price =
-        kind === "PLAYOFF" && !isTournamentBracketDivision
-          ? null
-          : (resolveDivisionValue(
-              detail?.price,
-              existing?.price,
-              params.defaultPrice ?? undefined,
-            ) ?? null);
-      const isLeaguePlayoffTarget =
-        normalizedEventType === "LEAGUE" && kind === "PLAYOFF";
-      const rawMaxParticipants =
-        resolveDivisionValue(
-          detail?.maxParticipants,
-          existing?.maxParticipants,
-          isLeaguePlayoffTarget
-            ? undefined
-            : params.defaultMaxParticipants ?? undefined,
-        ) ?? null;
-      const isGeneratedTournamentPool = isGeneratedTournamentPoolRecord({
-        eventType: normalizedEventType,
-        isPoolPlayEnabled: tournamentPoolPlayEnabled,
-        kind,
-        isSystemGenerated: Boolean(
-          persistedId && trustedInternalDivisionIds.has(persistedId),
-        ),
-        poolCount: detail?.poolCount,
-        playoffPlacementDivisionIds: [
-          ...ensureStringArray(detail?.playoffPlacementDivisionIds),
-          ...ensureStringArray(existing?.playoffPlacementDivisionIds),
-        ],
-      });
-      const maxParticipants =
-        normalizedEventType === "TOURNAMENT" && !isGeneratedTournamentPool
-          ? normalizeLegacyBracketTeamCount(rawMaxParticipants)
-          : rawMaxParticipants;
-      // A split League playoff target owns bracket capacity in maxParticipants.
-      // It does not advance standings, so playoffTeamCount is not applicable.
-      const rawPlayoffTeamCount = isLeaguePlayoffTarget
-        ? null
-        : (resolveDivisionValue(
-            detail?.playoffTeamCount,
-            existing?.playoffTeamCount,
-            params.includePlayoffs
-              ? (normalizedDefaultPlayoffTeamCount ?? undefined)
-              : undefined,
-          ) ?? null);
-      const playoffTeamCount = isLeaguePlayoffTarget
-        ? null
-        : params.includePlayoffs && !isGeneratedTournamentPool
-          ? normalizeLegacyBracketTeamCount(rawPlayoffTeamCount)
-          : rawPlayoffTeamCount;
-      const allowPaymentPlans =
-        kind === "PLAYOFF" && !isTournamentBracketDivision
-          ? false
-          : (resolveDivisionValue(
-              detail?.allowPaymentPlans,
-              existing?.allowPaymentPlans ?? undefined,
-              params.defaultAllowPaymentPlans ?? undefined,
-            ) ?? null);
-      const playoffPlacementDivisionIds =
-        kind === "PLAYOFF" || params.clearPlayoffPlacementMappings
-          ? []
-          : (resolveDivisionValue(
-              detail?.playoffPlacementDivisionIds,
-              normalizePlacementDivisionIdentifierList(
-                existing?.playoffPlacementDivisionIds,
-              ),
-              [],
-            ) ?? []);
-      const playoffConfig =
-        kind === "PLAYOFF"
-          ? (resolveDivisionValue(
-              detail?.playoffConfig,
-              normalizePlayoffDivisionConfig(existing?.standingsOverrides),
-              normalizePlayoffDivisionConfig(detail),
-            ) ?? null)
-          : (resolveDivisionValue(
-              detail?.playoffConfig,
-              normalizeDivisionPlayoffConfigFields(existing),
-              normalizePlayoffDivisionConfig(detail),
-            ) ?? null);
-      const leagueConfig =
-        resolveDivisionValue(
-          normalizeLeagueDivisionConfig(detail),
-          normalizeLeagueDivisionConfig(existing),
-          null,
-        ) ?? null;
-      const standingsOverrides =
-        kind === "PLAYOFF"
-          ? playoffConfig
-            ? serializePlayoffDivisionConfig(playoffConfig)
-            : null
-          : (resolveDivisionValue(
-              detail?.standingsOverrides,
-              normalizeStandingsOverrides(existing?.standingsOverrides),
-              null,
-            ) ?? null);
-      const phaseSettings =
-        resolveDivisionValue(
-          detail?.phaseSettings,
-          normalizeDivisionPhaseSettingsMap(existing?.phaseSettings),
-          {},
-        ) ?? {};
-      const standingsConfirmedAt =
-        kind === "PLAYOFF"
-          ? null
-          : (resolveDivisionValue(
-              detail?.standingsConfirmedAt,
-              normalizeIsoDateString(existing?.standingsConfirmedAt),
-              null,
-            ) ?? null);
-      const standingsConfirmedBy =
-        kind === "PLAYOFF"
-          ? null
-          : (resolveDivisionValue(
-              detail?.standingsConfirmedBy,
-              existing?.standingsConfirmedBy ?? null,
-              null,
-            ) ?? null);
-
-      const fallbackInstallmentAmounts = normalizeInstallmentAmountList(
-        params.defaultInstallmentAmounts ?? [],
-      );
-      const fallbackInstallmentDueDates = usesRelativeInstallmentDueDates
-        ? []
-        : normalizeInstallmentDateList(params.defaultInstallmentDueDates ?? []);
-      const fallbackInstallmentDueRelativeDays = usesRelativeInstallmentDueDates
-        ? normalizeInstallmentRelativeDayList(
-            params.defaultInstallmentDueRelativeDays ?? [],
-          )
-        : [];
-      const installmentAmounts = allowPaymentPlans
-        ? (resolveDivisionValue(
-            detail?.installmentAmounts,
-            Array.isArray(existing?.installmentAmounts)
-              ? normalizeInstallmentAmountList(existing.installmentAmounts)
-              : undefined,
-            fallbackInstallmentAmounts,
-          ) ?? [])
-        : [];
-      const installmentDueDates =
-        allowPaymentPlans && !usesRelativeInstallmentDueDates
-          ? (resolveDivisionValue(
-              detail?.installmentDueDates,
-              Array.isArray(existing?.installmentDueDates)
-                ? normalizeInstallmentDateList(existing.installmentDueDates)
-                : undefined,
-              fallbackInstallmentDueDates,
-            ) ?? [])
-          : [];
-      const installmentDueRelativeDays =
-        allowPaymentPlans && usesRelativeInstallmentDueDates
-          ? (resolveDivisionValue(
-              detail?.installmentDueRelativeDays,
-              Array.isArray((existing as any)?.installmentDueRelativeDays)
-                ? normalizeInstallmentRelativeDayList(
-                    (existing as any).installmentDueRelativeDays,
-                  )
-                : undefined,
-              fallbackInstallmentDueRelativeDays,
-            ) ?? [])
-          : [];
-      const resolvedInstallmentCount = allowPaymentPlans
-        ? resolveDivisionValue(
-            detail?.installmentCount,
-            existing?.installmentCount ?? undefined,
-            params.defaultInstallmentCount ?? undefined,
-          )
-        : null;
-      const installmentCount = allowPaymentPlans
-        ? typeof resolvedInstallmentCount === "number" &&
-          Number.isFinite(resolvedInstallmentCount)
-          ? Math.max(0, Math.trunc(resolvedInstallmentCount))
-          : installmentAmounts.length
-        : null;
-
-      return {
-        id: persistedId,
-        sourceDivisionId:
-          detail?.sourceDivisionId ?? existing?.sourceDivisionId ?? null,
-        isSystemGenerated: Boolean(
-          persistedId && trustedInternalDivisionIds.has(persistedId),
-        ),
-        key,
-        name,
-        kind,
+    .map(({ rawDivisionId, kind, sortOrder }) =>
+      buildSyncFinalEntry({
+        values: params,
+        state,
+        rawDivisionId,
+        targetKind: kind,
         sortOrder,
-        divisionTypeId,
-        skillDivisionTypeId,
-        ageDivisionTypeId,
-        divisionTypeName,
-        ratingType,
-        gender,
-        ageCutoffDate,
-        ageCutoffLabel,
-        ageCutoffSource,
-        price,
-        maxParticipants,
-        playoffTeamCount,
-        playoffPlacementDivisionIds,
-        standingsOverrides,
-        phaseSettings,
-        ...playoffConfigToDivisionFields(
-          kind === "LEAGUE" ? playoffConfig : null,
-        ),
-        gamesPerOpponent: leagueConfig?.gamesPerOpponent ?? null,
-        restTimeMinutes: leagueConfig?.restTimeMinutes ?? null,
-        usesSets: leagueConfig?.usesSets ?? null,
-        matchDurationMinutes: leagueConfig?.matchDurationMinutes ?? null,
-        setDurationMinutes: leagueConfig?.setDurationMinutes ?? null,
-        setsPerMatch: leagueConfig?.setsPerMatch ?? null,
-        pointsToVictory: leagueConfig?.pointsToVictory ?? [],
-        standingsConfirmedAt,
-        standingsConfirmedBy,
-        allowPaymentPlans,
-        installmentCount,
-        installmentDueDates,
-        installmentDueRelativeDays,
-        installmentAmounts,
-        minRating: ratings.minRating,
-        maxRating: ratings.maxRating,
-        fieldIds: mappedFieldIds,
-        teamIds: mappedTeamIds,
-      };
-    });
+      }),
+    );
+};
+const validateSyncTeamDivisionAssignments = (finalEntries: any[]): void => {
+  const teamDivisionMap = new Map<string, string>();
+  for (const entry of finalEntries) {
+    if (entry.kind === "PLAYOFF") continue;
+    for (const teamId of entry.teamIds ?? []) {
+      const existingDivisionId = teamDivisionMap.get(teamId);
+      if (existingDivisionId && existingDivisionId !== entry.id) {
+        throw new Error(
+          `Team ${teamId} is assigned to more than one division.`,
+        );
+      }
+      teamDivisionMap.set(teamId, entry.id);
+    }
+  }
+};
 
+const collectSyncStaleDivisionIds = (
+  finalEntries: any[],
+  existingRows: any[],
+): string[] => {
+  const finalIdSet = new Set(
+    finalEntries.map((entry) => normalizeDivisionKey(entry.id) ?? entry.id),
+  );
+  return existingRows
+    .filter((row: any) => {
+      const normalizedId = normalizeDivisionKey(row.id) ?? row.id;
+      if (String(row.role ?? "").toUpperCase() === "PHASE") return false;
+      return !finalIdSet.has(normalizedId);
+    })
+    .map((row: any) => row.id);
+};
+
+const assertNoStaleAssignedTournamentPool = (
+  finalEntries: any[],
+  existingRows: any[],
+  tournamentPoolPlayEnabled: boolean,
+): void => {
+  if (!tournamentPoolPlayEnabled) return;
+  const finalIdSet = new Set(
+    finalEntries.map((entry) => normalizeDivisionKey(entry.id) ?? entry.id),
+  );
+  const staleAssignedPool = existingRows.find((row: any) => {
+    const normalizedId = normalizeDivisionKey(row.id) ?? row.id;
+    if (finalIdSet.has(normalizedId)) return false;
+    if (normalizeDivisionKind(row.kind, "LEAGUE") === "PLAYOFF") {
+      return false;
+    }
+    return normalizeTeamIdList(row.teamIds).length > 0;
+  });
+  if (staleAssignedPool) {
+    throw new Error(
+      `Cannot remove pool "${staleAssignedPool.name ?? staleAssignedPool.id}" while it has assigned teams.`,
+    );
+  }
+};
+
+const validateSyncFinalEntries = (params: {
+  finalEntries: any[];
+  existingRows: any[];
+  trustedInternalDivisionIds: Set<string>;
+  singleDivision?: boolean;
+  tournamentPoolPlayEnabled: boolean;
+}): string[] => {
   const duplicateDivisionNames = findDuplicateDivisionNames(
-    finalEntries.filter((entry) => {
+    params.finalEntries.filter((entry) => {
       const id = normalizeDivisionKey(entry.id);
-      return !id || !trustedInternalDivisionIds.has(id);
+      return !id || !params.trustedInternalDivisionIds.has(id);
     }),
   );
   if (duplicateDivisionNames.length > 0) {
     throw new EventDivisionNameValidationError(duplicateDivisionNames);
   }
-
-  if (!params.singleDivision || tournamentPoolPlayEnabled) {
-    const teamDivisionMap = new Map<string, string>();
-    for (const entry of finalEntries) {
-      if (entry.kind === "PLAYOFF") {
-        continue;
-      }
-      for (const teamId of entry.teamIds ?? []) {
-        const existingDivisionId = teamDivisionMap.get(teamId);
-        if (existingDivisionId && existingDivisionId !== entry.id) {
-          throw new Error(
-            `Team ${teamId} is assigned to more than one division.`,
-          );
-        }
-        teamDivisionMap.set(teamId, entry.id);
-      }
-    }
+  if (!params.singleDivision || params.tournamentPoolPlayEnabled) {
+    validateSyncTeamDivisionAssignments(params.finalEntries);
   }
-
-  const finalIdSet = new Set(
-    finalEntries.map((entry) => normalizeDivisionKey(entry.id) ?? entry.id),
+  assertNoStaleAssignedTournamentPool(
+    params.finalEntries,
+    params.existingRows,
+    params.tournamentPoolPlayEnabled,
   );
-  const staleDivisionIds = existingRows
-    .filter((row: any) => {
-      const normalizedId = normalizeDivisionKey(row.id) ?? row.id;
-      if (String(row.role ?? "").toUpperCase() === "PHASE") {
-        return false;
-      }
-      return !finalIdSet.has(normalizedId);
-    })
-    .map((row: any) => row.id);
+  return collectSyncStaleDivisionIds(
+    params.finalEntries,
+    params.existingRows,
+  );
+};
 
-  if (tournamentPoolPlayEnabled) {
-    const staleAssignedPool = existingRows.find((row: any) => {
-      const normalizedId = normalizeDivisionKey(row.id) ?? row.id;
-      if (finalIdSet.has(normalizedId)) {
-        return false;
-      }
-      if (normalizeDivisionKind(row.kind, "LEAGUE") === "PLAYOFF") {
-        return false;
-      }
-      return normalizeTeamIdList(row.teamIds).length > 0;
-    });
-    if (staleAssignedPool) {
-      throw new Error(
-        `Cannot remove pool "${staleAssignedPool.name ?? staleAssignedPool.id}" while it has assigned teams.`,
-      );
-    }
+const resolveSyncDivisionRole = (kind: string): string =>
+  kind === "PLAYOFF" ? "PHASE" : "ENTRY";
+
+const resolveSyncDivisionPhase = (
+  kind: string,
+  tournamentPoolPlayEnabled: boolean,
+): string | null => {
+  if (kind !== "PLAYOFF") return null;
+  return tournamentPoolPlayEnabled ? "BRACKET" : "PLAYOFF";
+};
+
+const normalizeSyncDivisionDueDates = (values: string[]): Date[] =>
+  values
+    .map((value) => new Date(value))
+    .filter((value) => !Number.isNaN(value.getTime()));
+
+const resolveSyncDivisionDate = (value: string | null): Date | null =>
+  value ? new Date(value) : null;
+
+const resolveSyncDivisionTeamIds = (
+  clearSingleDivisionTeamAssignments: boolean,
+  entry: any,
+): string[] =>
+  clearSingleDivisionTeamAssignments ? [] : (entry.teamIds ?? []);
+
+const buildSyncDivisionPersistenceBase = (params: {
+  entry: any;
+  values: SyncEventDivisionsParams;
+  tournamentPoolPlayEnabled: boolean;
+  clearSingleDivisionTeamAssignments: boolean;
+}): Record<string, unknown> => {
+  const entry = params.entry;
+  return {
+    key: entry.key,
+    name: entry.name,
+    kind: entry.kind,
+    sortOrder: entry.sortOrder,
+    eventId: params.values.eventId,
+    scope: "EVENT",
+    status: "ACTIVE",
+    role: resolveSyncDivisionRole(entry.kind),
+    isSystemGenerated: entry.isSystemGenerated,
+    phase: resolveSyncDivisionPhase(
+      entry.kind,
+      params.tournamentPoolPlayEnabled,
+    ),
+    sourceDivisionId: entry.sourceDivisionId,
+    organizationId: params.values.organizationId ?? null,
+    sportId: params.values.sportId ?? null,
+    price: entry.price,
+    maxParticipants: entry.maxParticipants,
+    playoffTeamCount: entry.playoffTeamCount,
+    playoffPlacementDivisionIds: entry.playoffPlacementDivisionIds,
+    standingsOverrides: entry.standingsOverrides,
+    phaseSettings: entry.phaseSettings,
+    gamesPerOpponent: entry.gamesPerOpponent,
+    restTimeMinutes: entry.restTimeMinutes,
+    usesSets: entry.usesSets,
+    matchDurationMinutes: entry.matchDurationMinutes,
+    setDurationMinutes: entry.setDurationMinutes,
+    setsPerMatch: entry.setsPerMatch,
+    pointsToVictory: entry.pointsToVictory,
+    playoffDoubleElimination: entry.playoffDoubleElimination,
+    playoffWinnerSetCount: entry.playoffWinnerSetCount,
+    playoffLoserSetCount: entry.playoffLoserSetCount,
+    playoffWinnerBracketPointsToVictory:
+      entry.playoffWinnerBracketPointsToVictory,
+    playoffLoserBracketPointsToVictory:
+      entry.playoffLoserBracketPointsToVictory,
+    playoffPrize: entry.playoffPrize,
+    playoffFieldCount: entry.playoffFieldCount,
+    playoffRestTimeMinutes: entry.playoffRestTimeMinutes,
+    playoffMatchDurationMinutes: entry.playoffMatchDurationMinutes,
+    playoffSetDurationMinutes: entry.playoffSetDurationMinutes,
+    standingsConfirmedAt: resolveSyncDivisionDate(entry.standingsConfirmedAt),
+    standingsConfirmedBy: entry.standingsConfirmedBy,
+    allowPaymentPlans: entry.allowPaymentPlans,
+    installmentCount: entry.installmentCount,
+    installmentDueDates: normalizeSyncDivisionDueDates(
+      entry.installmentDueDates,
+    ),
+    installmentDueRelativeDays: entry.installmentDueRelativeDays,
+    installmentAmounts: entry.installmentAmounts,
+    divisionTypeId: entry.divisionTypeId,
+    skillDivisionTypeId: entry.skillDivisionTypeId,
+    ageDivisionTypeId: entry.ageDivisionTypeId,
+    ratingType: entry.ratingType,
+    gender: entry.gender,
+    ageCutoffDate: resolveSyncDivisionDate(entry.ageCutoffDate),
+    ageCutoffLabel: entry.ageCutoffLabel,
+    ageCutoffSource: entry.ageCutoffSource,
+    minRating: entry.minRating,
+    maxRating: entry.maxRating,
+    fieldIds: entry.fieldIds,
+    teamIds: resolveSyncDivisionTeamIds(
+      params.clearSingleDivisionTeamAssignments,
+      entry,
+    ),
+  };
+};
+
+const buildSyncDivisionUpsertArgs = (params: {
+  entry: any;
+  values: SyncEventDivisionsParams;
+  tournamentPoolPlayEnabled: boolean;
+  clearSingleDivisionTeamAssignments: boolean;
+  now: Date;
+}): {
+  where: { id: string };
+  create: Record<string, unknown>;
+  update: Record<string, unknown>;
+} => {
+  const base = buildSyncDivisionPersistenceBase(params);
+  return {
+    where: { id: params.entry.id },
+    create: {
+      id: params.entry.id,
+      ...base,
+      createdAt: params.now,
+      updatedAt: params.now,
+    },
+    update: {
+      ...base,
+      updatedAt: params.now,
+    },
+  };
+};
+
+const persistSyncDivisionEntries = async (params: {
+  client: PrismaLike;
+  entries: any[];
+  values: SyncEventDivisionsParams;
+  tournamentPoolPlayEnabled: boolean;
+  clearSingleDivisionTeamAssignments: boolean;
+  now: Date;
+}): Promise<void> => {
+  for (const entry of params.entries) {
+    await params.client.divisions.upsert(
+      buildSyncDivisionUpsertArgs({
+        entry,
+        values: params.values,
+        tournamentPoolPlayEnabled: params.tournamentPoolPlayEnabled,
+        clearSingleDivisionTeamAssignments:
+          params.clearSingleDivisionTeamAssignments,
+        now: params.now,
+      }),
+    );
   }
+};
 
-  if (staleDivisionIds.length) {
-    await client.divisions.deleteMany({
-      where: { id: { in: staleDivisionIds } },
+const persistSyncEventDivisions = async (params: {
+  client: PrismaLike;
+  values: SyncEventDivisionsParams;
+  finalEntries: any[];
+  staleDivisionIds: string[];
+  tournamentPoolPlayEnabled: boolean;
+  clearSingleDivisionTeamAssignments: boolean;
+}): Promise<void> => {
+  if (params.staleDivisionIds.length) {
+    await params.client.divisions.deleteMany({
+      where: { id: { in: params.staleDivisionIds } },
     });
   }
-
   const now = new Date();
-  for (const entry of finalEntries) {
-    await client.divisions.upsert({
-      where: { id: entry.id },
-      create: {
-        id: entry.id,
-        key: entry.key,
-        name: entry.name,
-        kind: entry.kind,
-        sortOrder: entry.sortOrder,
-        eventId: params.eventId,
-        scope: "EVENT",
-        status: "ACTIVE",
-        role: entry.kind === "PLAYOFF" ? "PHASE" : "ENTRY",
-        isSystemGenerated: entry.isSystemGenerated,
-        phase:
-          entry.kind === "PLAYOFF"
-            ? tournamentPoolPlayEnabled
-              ? "BRACKET"
-              : "PLAYOFF"
-            : null,
-        sourceDivisionId: entry.sourceDivisionId,
-        organizationId: params.organizationId ?? null,
-        sportId: params.sportId ?? null,
-        price: entry.price,
-        maxParticipants: entry.maxParticipants,
-        playoffTeamCount: entry.playoffTeamCount,
-        playoffPlacementDivisionIds: entry.playoffPlacementDivisionIds,
-        standingsOverrides: entry.standingsOverrides,
-        phaseSettings: entry.phaseSettings,
-        gamesPerOpponent: entry.gamesPerOpponent,
-        restTimeMinutes: entry.restTimeMinutes,
-        usesSets: entry.usesSets,
-        matchDurationMinutes: entry.matchDurationMinutes,
-        setDurationMinutes: entry.setDurationMinutes,
-        setsPerMatch: entry.setsPerMatch,
-        pointsToVictory: entry.pointsToVictory,
-        playoffDoubleElimination: entry.playoffDoubleElimination,
-        playoffWinnerSetCount: entry.playoffWinnerSetCount,
-        playoffLoserSetCount: entry.playoffLoserSetCount,
-        playoffWinnerBracketPointsToVictory:
-          entry.playoffWinnerBracketPointsToVictory,
-        playoffLoserBracketPointsToVictory:
-          entry.playoffLoserBracketPointsToVictory,
-        playoffPrize: entry.playoffPrize,
-        playoffFieldCount: entry.playoffFieldCount,
-        playoffRestTimeMinutes: entry.playoffRestTimeMinutes,
-        playoffMatchDurationMinutes: entry.playoffMatchDurationMinutes,
-        playoffSetDurationMinutes: entry.playoffSetDurationMinutes,
-        standingsConfirmedAt: entry.standingsConfirmedAt
-          ? new Date(entry.standingsConfirmedAt)
-          : null,
-        standingsConfirmedBy: entry.standingsConfirmedBy,
-        allowPaymentPlans: entry.allowPaymentPlans,
-        installmentCount: entry.installmentCount,
-        installmentDueDates: entry.installmentDueDates
-          .map((value) => new Date(value))
-          .filter((value) => !Number.isNaN(value.getTime())),
-        installmentDueRelativeDays: entry.installmentDueRelativeDays,
-        installmentAmounts: entry.installmentAmounts,
-        divisionTypeId: entry.divisionTypeId,
-        skillDivisionTypeId: entry.skillDivisionTypeId,
-        ageDivisionTypeId: entry.ageDivisionTypeId,
-        ratingType: entry.ratingType,
-        gender: entry.gender,
-        ageCutoffDate: entry.ageCutoffDate
-          ? new Date(entry.ageCutoffDate)
-          : null,
-        ageCutoffLabel: entry.ageCutoffLabel,
-        ageCutoffSource: entry.ageCutoffSource,
-        minRating: entry.minRating,
-        maxRating: entry.maxRating,
-        fieldIds: entry.fieldIds,
-        teamIds: clearSingleDivisionTeamAssignments
-          ? []
-          : (entry.teamIds ?? []),
-        createdAt: now,
-        updatedAt: now,
-      } as any,
-      update: {
-        key: entry.key,
-        name: entry.name,
-        kind: entry.kind,
-        sortOrder: entry.sortOrder,
-        eventId: params.eventId,
-        role: entry.kind === "PLAYOFF" ? "PHASE" : "ENTRY",
-        isSystemGenerated: entry.isSystemGenerated,
-        phase:
-          entry.kind === "PLAYOFF"
-            ? tournamentPoolPlayEnabled
-              ? "BRACKET"
-              : "PLAYOFF"
-            : null,
-        scope: "EVENT",
-        status: "ACTIVE",
-        sourceDivisionId: entry.sourceDivisionId,
-        organizationId: params.organizationId ?? null,
-        sportId: params.sportId ?? null,
-        price: entry.price,
-        maxParticipants: entry.maxParticipants,
-        playoffTeamCount: entry.playoffTeamCount,
-        playoffPlacementDivisionIds: entry.playoffPlacementDivisionIds,
-        standingsOverrides: entry.standingsOverrides,
-        phaseSettings: entry.phaseSettings,
-        gamesPerOpponent: entry.gamesPerOpponent,
-        restTimeMinutes: entry.restTimeMinutes,
-        usesSets: entry.usesSets,
-        matchDurationMinutes: entry.matchDurationMinutes,
-        setDurationMinutes: entry.setDurationMinutes,
-        setsPerMatch: entry.setsPerMatch,
-        pointsToVictory: entry.pointsToVictory,
-        playoffDoubleElimination: entry.playoffDoubleElimination,
-        playoffWinnerSetCount: entry.playoffWinnerSetCount,
-        playoffLoserSetCount: entry.playoffLoserSetCount,
-        playoffWinnerBracketPointsToVictory:
-          entry.playoffWinnerBracketPointsToVictory,
-        playoffLoserBracketPointsToVictory:
-          entry.playoffLoserBracketPointsToVictory,
-        playoffPrize: entry.playoffPrize,
-        playoffFieldCount: entry.playoffFieldCount,
-        playoffRestTimeMinutes: entry.playoffRestTimeMinutes,
-        playoffMatchDurationMinutes: entry.playoffMatchDurationMinutes,
-        playoffSetDurationMinutes: entry.playoffSetDurationMinutes,
-        standingsConfirmedAt: entry.standingsConfirmedAt
-          ? new Date(entry.standingsConfirmedAt)
-          : null,
-        standingsConfirmedBy: entry.standingsConfirmedBy,
-        allowPaymentPlans: entry.allowPaymentPlans,
-        installmentCount: entry.installmentCount,
-        installmentDueDates: entry.installmentDueDates
-          .map((value) => new Date(value))
-          .filter((value) => !Number.isNaN(value.getTime())),
-        installmentDueRelativeDays: entry.installmentDueRelativeDays,
-        installmentAmounts: entry.installmentAmounts,
-        divisionTypeId: entry.divisionTypeId,
-        skillDivisionTypeId: entry.skillDivisionTypeId,
-        ageDivisionTypeId: entry.ageDivisionTypeId,
-        ratingType: entry.ratingType,
-        gender: entry.gender,
-        ageCutoffDate: entry.ageCutoffDate
-          ? new Date(entry.ageCutoffDate)
-          : null,
-        ageCutoffLabel: entry.ageCutoffLabel,
-        ageCutoffSource: entry.ageCutoffSource,
-        minRating: entry.minRating,
-        maxRating: entry.maxRating,
-        fieldIds: entry.fieldIds,
-        teamIds: clearSingleDivisionTeamAssignments
-          ? []
-          : (entry.teamIds ?? []),
-        updatedAt: now,
-      } as any,
-    });
-  }
-  await syncEventDivisionPhases({
-    client,
-    eventId: params.eventId,
-    eventType: params.eventType,
-    includePlayoffs: params.includePlayoffs,
-    tournamentPoolPlayEnabled,
-    organizationId: params.organizationId,
-    entries: finalEntries as any,
+  await persistSyncDivisionEntries({
+    client: params.client,
+    entries: params.finalEntries,
+    values: params.values,
+    tournamentPoolPlayEnabled: params.tournamentPoolPlayEnabled,
+    clearSingleDivisionTeamAssignments:
+      params.clearSingleDivisionTeamAssignments,
+    now,
   });
+  await syncEventDivisionPhases({
+    client: params.client,
+    eventId: params.values.eventId,
+    eventType: params.values.eventType,
+    includePlayoffs: params.values.includePlayoffs,
+    tournamentPoolPlayEnabled: params.tournamentPoolPlayEnabled,
+    organizationId: params.values.organizationId,
+    entries: params.finalEntries as any,
+  });
+};
 
+export const syncEventDivisions = async (
+  params: SyncEventDivisionsParams,
+  client: PrismaLike = prisma,
+) => {
+  const state = await prepareSyncEventDivisionState({
+    client,
+    values: params,
+  });
+  const finalEntries = buildSyncFinalEntries(params, state);
+  const staleDivisionIds = validateSyncFinalEntries({
+    finalEntries,
+    existingRows: state.existingRows,
+    trustedInternalDivisionIds: state.trustedInternalDivisionIds,
+    singleDivision: params.singleDivision,
+    tournamentPoolPlayEnabled: state.tournamentPoolPlayEnabled,
+  });
+  await persistSyncEventDivisions({
+    client,
+    values: params,
+    finalEntries,
+    staleDivisionIds,
+    tournamentPoolPlayEnabled: state.tournamentPoolPlayEnabled,
+    clearSingleDivisionTeamAssignments:
+      state.clearSingleDivisionTeamAssignments,
+  });
   return finalEntries
     .filter((entry) => entry.kind !== "PLAYOFF")
     .map((entry) => entry.id);
@@ -6387,83 +10725,2044 @@ export type EventUpsertOptions = {
   preserveStaffState?: boolean;
 };
 
-export const upsertEventFromPayload = async (
-  payload: any,
-  client: PrismaLike = prisma,
-  options: EventUpsertOptions = {},
-): Promise<string> => {
-  const id = payload?.id;
-  if (!id) {
-    throw new Error("Event payload missing id");
-  }
-  const existingEvent = await client.events.findUnique({
+const normalizeUpsertEventType = (value: unknown): string | null =>
+  typeof value === "string"
+    ? value.trim().toUpperCase()
+    : (value as string | null | undefined) ?? null;
+
+const eventUpsertExistingEventSelect = {
+  fieldIds: true,
+  timeSlotIds: true,
+  eventType: true,
+  teamSignup: true,
+  includePlayoffs: true,
+  end: true,
+  scheduleEndConstraint: true,
+  generatedScheduleEnd: true,
+  noFixedEndDateTime: true,
+  automatedScheduling: true,
+  hostId: true,
+  assistantHostIds: true,
+  organizationId: true,
+  parentEvent: true,
+  location: true,
+  officialPositions: true as any,
+  officialSchedulingMode: true as any,
+  staffingPriority: true as any,
+  doTeamsOfficiate: true as any,
+  matchRulesOverride: true as any,
+  autoCreatePointMatchIncidents: true,
+  sportIds: true,
+  coordinates: true,
+  timeZone: true,
+};
+
+const loadExistingEventForUpsert = async (
+  id: string,
+  client: PrismaLike,
+): Promise<any> =>
+  client.events.findUnique({
     where: { id },
+    select: eventUpsertExistingEventSelect,
+  });
+const resolveEventUpsertTeamSignup = (
+  payload: any,
+  existingEvent: any,
+): boolean =>
+  Boolean(
+    Object.prototype.hasOwnProperty.call(payload, "teamSignup")
+      ? payload.teamSignup
+      : existingEvent.teamSignup,
+  );
+
+
+const assertEventUpsertStructureUnlocked = async (params: {
+  id: string;
+  payload: any;
+  existingEvent: any;
+  client: PrismaLike;
+}): Promise<void> => {
+  if (!params.existingEvent) return;
+  const existingEventType = normalizeUpsertEventType(
+    params.existingEvent.eventType,
+  );
+  const incomingEventType = normalizeUpsertEventType(
+    params.payload.eventType ?? params.existingEvent.eventType,
+  );
+  const existingTeamSignup = Boolean(params.existingEvent.teamSignup);
+  const incomingTeamSignup = resolveEventUpsertTeamSignup(
+    params.payload,
+    params.existingEvent,
+  );
+
+  const eventRegistrationsDelegate = (params.client as any)
+    .eventRegistrations;
+  const hasAcceptedParticipant =
+    typeof eventRegistrationsDelegate?.findFirst === "function"
+      ? await hasJoinedEventParticipant(params.id, params.client)
+      : false;
+  const hasProtectedHistory = await hasProtectedEventHistory(
+    params.id,
+    params.client,
+  );
+  if (hasAcceptedParticipant || hasProtectedHistory) {
+    if (incomingEventType !== existingEventType) {
+      throw new EventRegistrationStructureLockedError("eventType");
+    }
+  }
+  if (hasAcceptedParticipant && incomingTeamSignup !== existingTeamSignup) {
+    throw new EventRegistrationStructureLockedError("teamSignup");
+  }
+};
+
+type EventUpsertOrganizationContext = {
+  resolvedOrganizationId: string | null;
+  resolvedHostId: string | null;
+  organizationAccess: any;
+  organizationStaffMembers: any[];
+  organizationStaffInvites: any[];
+};
+const loadEventUpsertOrganizationAccess = async (
+  client: PrismaLike,
+  organizationId: string | null,
+) =>
+  organizationId
+    ? client.organizations.findUnique({
+        where: { id: organizationId },
+        select: {
+          ownerId: true,
+          coordinates: true,
+          enabledFeatures: true,
+        } as any,
+      })
+    : null;
+
+const loadEventUpsertStaffMembers = async (
+  client: PrismaLike,
+  organizationId: string | null,
+) => {
+  if (!organizationId || !client.staffMembers?.findMany) return [];
+  return client.staffMembers.findMany({
+    where: { organizationId },
     select: {
-      fieldIds: true,
-      timeSlotIds: true,
-      eventType: true,
-      teamSignup: true,
-      includePlayoffs: true,
-      end: true,
-      scheduleEndConstraint: true,
-      generatedScheduleEnd: true,
-      noFixedEndDateTime: true,
-      automatedScheduling: true,
-      hostId: true,
-      assistantHostIds: true,
       organizationId: true,
-      parentEvent: true,
-      location: true,
-      officialPositions: true as any,
-      officialSchedulingMode: true as any,
-      staffingPriority: true as any,
-      doTeamsOfficiate: true as any,
-      matchRulesOverride: true as any,
-      autoCreatePointMatchIncidents: true,
-      sportIds: true,
-      coordinates: true,
-      timeZone: true,
+      userId: true,
+      types: true,
     },
   });
-  if (existingEvent) {
-    const existingEventType = typeof existingEvent.eventType === "string"
-      ? existingEvent.eventType.trim().toUpperCase()
-      : existingEvent.eventType ?? null;
-    const incomingEventType = typeof (payload.eventType ?? existingEvent.eventType) === "string"
-      ? String(payload.eventType ?? existingEvent.eventType).trim().toUpperCase()
-      : payload.eventType ?? existingEvent.eventType ?? null;
-    const existingTeamSignup = Boolean(existingEvent.teamSignup);
-    const incomingTeamSignup = Boolean(
-      Object.prototype.hasOwnProperty.call(payload, "teamSignup")
-        ? payload.teamSignup
-        : existingEvent.teamSignup,
-    );
-    const eventRegistrationsDelegate = (client as any).eventRegistrations;
-    const hasAcceptedParticipant = typeof eventRegistrationsDelegate?.findFirst === "function"
-      ? await hasJoinedEventParticipant(id, client)
-      : false;
-    const hasProtectedHistory = await hasProtectedEventHistory(id, client);
-    if (hasAcceptedParticipant || hasProtectedHistory) {
-      if (incomingEventType !== existingEventType) {
-        throw new EventRegistrationStructureLockedError("eventType");
+};
+
+const loadEventUpsertStaffInvites = async (
+  client: PrismaLike,
+  organizationId: string | null,
+) => {
+  if (!organizationId || !client.invites?.findMany) return [];
+  return client.invites.findMany({
+    where: { organizationId, type: "STAFF" },
+    select: {
+      organizationId: true,
+      userId: true,
+      type: true,
+      status: true,
+    },
+  });
+};
+
+
+const loadEventUpsertOrganizationContext = async (params: {
+  payload: any;
+  existingEvent: any;
+  client: PrismaLike;
+}): Promise<EventUpsertOrganizationContext> => {
+  const resolvedOrganizationId =
+    normalizeEntityId(params.payload.organizationId) ??
+    normalizeEntityId(params.existingEvent?.organizationId);
+  const resolvedHostId =
+    normalizeEntityId(params.payload.hostId) ??
+    normalizeEntityId(params.existingEvent?.hostId);
+  const organizationAccess = await loadEventUpsertOrganizationAccess(
+    params.client,
+    resolvedOrganizationId,
+  );
+  const organizationStaffMembers = await loadEventUpsertStaffMembers(
+    params.client,
+    resolvedOrganizationId,
+  );
+  const organizationStaffInvites = await loadEventUpsertStaffInvites(
+    params.client,
+    resolvedOrganizationId,
+  );
+  return {
+    resolvedOrganizationId,
+    resolvedHostId,
+    organizationAccess,
+    organizationStaffMembers,
+    organizationStaffInvites,
+  };
+};
+
+const extractRequestedEventOfficialIds = (payload: any): string[] =>
+  Array.isArray(payload.eventOfficials)
+    ? Array.from(
+        new Set(
+          payload.eventOfficials
+            .map((entry: unknown) =>
+              entry && typeof entry === "object"
+                ? normalizeEntityId((entry as Record<string, unknown>).userId)
+                : null,
+            )
+            .filter((userId: string | null): userId is string =>
+              Boolean(userId),
+            ),
+        ),
+      )
+    : [];
+
+const resolveEventUpsertAssistantHostIds = (
+  payload: any,
+  existingEvent: any,
+  preserveStaffState: boolean,
+): string[] => {
+  if (Object.prototype.hasOwnProperty.call(payload, "assistantHostIds")) {
+    return ensureStringArray(payload.assistantHostIds);
+  }
+  if (preserveStaffState) {
+    return ensureStringArray(existingEvent?.assistantHostIds);
+  }
+  return [];
+};
+
+const resolveEventUpsertOrganizationAssignments = (params: {
+  payload: any;
+  organization: EventUpsertOrganizationContext;
+  assistantHostIds: string[];
+  officialIds: string[];
+}) => {
+  if (!params.organization.resolvedOrganizationId) return null;
+  const organizationAccess = params.organization.organizationAccess
+    ? {
+        ...params.organization.organizationAccess,
+        staffMembers: params.organization.organizationStaffMembers,
+        staffInvites: params.organization.organizationStaffInvites,
       }
-    }
-    if (hasAcceptedParticipant && incomingTeamSignup !== existingTeamSignup) {
-      throw new EventRegistrationStructureLockedError("teamSignup");
+    : null;
+  return sanitizeOrganizationEventAssignments(
+    {
+      hostId:
+        params.payload.hostId ??
+        params.organization.resolvedHostId ??
+        null,
+      assistantHostIds: params.assistantHostIds,
+      officialIds: params.officialIds,
+    },
+    organizationAccess,
+  );
+};
+
+const resolveEventUpsertNormalizedHostId = (
+  organizationAssignments: any,
+  requestedPayloadHostId: string | null,
+  resolvedHostId: string | null,
+): string =>
+  organizationAssignments?.hostId ??
+  requestedPayloadHostId ??
+  resolvedHostId ??
+  "";
+
+const resolveEventUpsertAssignments = (params: {
+  payload: any;
+  existingEvent: any;
+  organization: EventUpsertOrganizationContext;
+  options: EventUpsertOptions;
+}): {
+  normalizedHostId: string;
+  normalizedAssistantHostIds: string[];
+  normalizedOfficialIds: string[];
+} => {
+  const assistantHostIds = resolveEventUpsertAssistantHostIds(
+    params.payload,
+    params.existingEvent,
+    params.options.preserveStaffState === true,
+  );
+  const requestedPayloadHostId = normalizeEntityId(params.payload.hostId);
+  const requestedEventOfficialIds = extractRequestedEventOfficialIds(
+    params.payload,
+  );
+  const organizationAssignments = resolveEventUpsertOrganizationAssignments({
+    payload: params.payload,
+    organization: params.organization,
+    assistantHostIds,
+    officialIds: requestedEventOfficialIds,
+  });
+  return {
+    normalizedHostId: resolveEventUpsertNormalizedHostId(
+      organizationAssignments,
+      requestedPayloadHostId,
+      params.organization.resolvedHostId,
+    ),
+    normalizedAssistantHostIds: organizationAssignments
+      ? organizationAssignments.assistantHostIds
+      : assistantHostIds,
+    normalizedOfficialIds: organizationAssignments
+      ? organizationAssignments.officialIds
+      : requestedEventOfficialIds,
+  };
+};
+
+const resolveEventUpsertState = (params: {
+  payload: any;
+  existingEvent: any;
+}) => {
+  const normalizedState =
+    normalizeUpsertEventType(params.payload.state) ??
+    normalizeUpsertEventType(params.existingEvent?.state) ??
+    "";
+  const payloadIncludesAffiliateUrl = Object.prototype.hasOwnProperty.call(
+    params.payload,
+    "affiliateUrl",
+  );
+  const payloadAffiliateUrl =
+    normalizeUpsertTrimmedString(params.payload.affiliateUrl);
+  const existingAffiliateUrl = normalizeUpsertTrimmedString(
+    params.existingEvent?.affiliateUrl,
+  );
+  const normalizedAffiliateUrl = payloadIncludesAffiliateUrl
+    ? payloadAffiliateUrl
+    : existingAffiliateUrl;
+  const existingEventType = normalizeUpsertEventType(
+    params.existingEvent?.eventType,
+  );
+  const payloadEventType = normalizeUpsertEventType(params.payload.eventType);
+  return {
+    normalizedState,
+    isTemplateState: normalizedState === "TEMPLATE",
+    normalizedAffiliateUrl,
+    isAffiliateExternalEvent: normalizedAffiliateUrl.length > 0,
+    existingEventType,
+    payloadEventType,
+    nextEventType: payloadEventType ?? existingEventType,
+  };
+};
+
+const normalizeUpsertTrimmedString = (value: unknown): string =>
+  typeof value === "string" ? value.trim() : "";
+
+const resolveEventUpsertPayloadOrExisting = (
+  payload: any,
+  existingEvent: any,
+  key: string,
+): unknown =>
+  Object.prototype.hasOwnProperty.call(payload, key)
+    ? payload[key]
+    : existingEvent?.[key];
+
+const loadEventUpsertOfficialRows = async (
+  client: PrismaLike,
+  id: string,
+  existingEvent: any,
+) => (existingEvent ? loadEventOfficialRows(client, id) : []);
+
+const loadEventUpsertSportRow = async (
+  client: PrismaLike,
+  primarySportId: string | null,
+) => {
+  if (!primarySportId) return null;
+  const sportDelegate = (client as any).sports;
+  if (typeof sportDelegate?.findUnique !== "function") return null;
+  return sportDelegate.findUnique({
+    where: { id: primarySportId },
+    select: { officialPositionTemplates: true } as any,
+  });
+};
+
+const loadEventUpsertSportContext = async (params: {
+  payload: any;
+  existingEvent: any;
+  client: PrismaLike;
+  id: string;
+  nextEventType: string | null;
+  resolvedOrganizationId: string | null;
+  normalizedHostId: string;
+}) => {
+  const effectiveSportIds = normalizeEventSportIds(
+    resolveEventUpsertPayloadOrExisting(
+      params.payload,
+      params.existingEvent,
+      "sportIds",
+    ),
+  );
+  validateEventSportIds({
+    eventType: params.nextEventType ?? "EVENT",
+    sportIds: effectiveSportIds,
+  });
+  await validateEventSportIdsExist(params.client, effectiveSportIds);
+  const primarySportId = effectiveSportIds[0] ?? null;
+  const [existingEventOfficialRows, sportRow] = await Promise.all([
+    loadEventUpsertOfficialRows(
+      params.client,
+      params.id,
+      params.existingEvent,
+    ),
+    loadEventUpsertSportRow(params.client, primarySportId),
+  ]);
+  const normalizedRegistrationPaymentMode =
+    normalizeRegistrationPaymentMode(
+      resolveEventUpsertPayloadOrExisting(
+        params.payload,
+        params.existingEvent,
+        "registrationPaymentMode",
+      ),
+    );
+  const isManualRegistrationPayment =
+    normalizedRegistrationPaymentMode === "MANUAL";
+  const normalizedManualPaymentLinks =
+    normalizeManualPaymentLinksForPersistence(
+      resolveEventUpsertPayloadOrExisting(
+        params.payload,
+        params.existingEvent,
+        "manualPaymentLinks",
+      ),
+    );
+  const normalizedManualPaymentInstructions =
+    normalizeManualPaymentInstructions(
+      resolveEventUpsertPayloadOrExisting(
+        params.payload,
+        params.existingEvent,
+        "manualPaymentInstructions",
+      ),
+    );
+  const billingOwnerHasStripeAccount =
+    await resolveBillingOwnerHasStripeAccount(params.client, {
+      organizationId: params.resolvedOrganizationId,
+      hostId: params.normalizedHostId,
+    });
+  return {
+    effectiveSportIds,
+    primarySportId,
+    existingEventOfficialRows,
+    sportRow,
+    normalizedRegistrationPaymentMode,
+    isManualRegistrationPayment,
+    normalizedManualPaymentLinks,
+    normalizedManualPaymentInstructions,
+    canPersistEventPricing:
+      billingOwnerHasStripeAccount ||
+      isManualRegistrationPayment ||
+      normalizeUpsertTrimmedString(params.payload.affiliateUrl).length > 0,
+  };
+};
+
+const normalizeUpsertPayloadFields = (payload: any): any[] =>
+  Array.isArray(payload.fields)
+    ? payload.fields.map((field: unknown) => {
+        if (!field || typeof field !== "object" || Array.isArray(field)) {
+          return field;
+        }
+        const fieldRecord = field as Record<string, unknown>;
+        const fieldId =
+          normalizeEntityId(fieldRecord.id) ??
+          normalizeEntityId(fieldRecord.$id);
+        return fieldId ? { ...fieldRecord, id: fieldId } : fieldRecord;
+      })
+    : [];
+
+const resolveEventUpsertPayloadCoordinates = (
+  payload: any,
+): number[] | null =>
+  Array.isArray(payload.coordinates)
+    ? payload.coordinates.filter(
+        (value: unknown): value is number => typeof value === "number",
+      )
+    : null;
+
+const resolveEventUpsertPayloadTeams = (payload: any): any[] =>
+  Array.isArray(payload.teams) ? payload.teams : [];
+
+const resolveEventUpsertPayloadTimeSlots = (payload: any): any[] =>
+  Array.isArray(payload.timeSlots) ? payload.timeSlots : [];
+
+const buildEventUpsertCompatibilityDivisionMap = (
+  teams: any[],
+): Record<string, string | null> =>
+  Object.fromEntries(
+    teams
+      .map((team: any) => {
+        const registrantId = normalizeEntityId(team?.id);
+        const divisionId = normalizeEntityId(
+          team?.divisionId ??
+            (typeof team?.division === "object"
+              ? team.division?.id
+              : team?.division),
+        );
+        return registrantId
+          ? ([registrantId, divisionId] as [string, string | null])
+          : null;
+      })
+      .filter(
+        (
+          entry: [string, string | null] | null,
+        ): entry is [string, string | null] => Boolean(entry),
+      ),
+  );
+
+const resolveEventUpsertLocationContext = (params: {
+  payload: any;
+  existingEvent: any;
+  organizationAccess: any;
+}) => {
+  const fields = normalizeUpsertPayloadFields(params.payload);
+  const eventLocation =
+    (resolveEventUpsertPayloadOrExisting(
+      params.payload,
+      params.existingEvent,
+      "location",
+    ) as string | null) ?? "";
+  const payloadCoordinates = resolveEventUpsertPayloadCoordinates(
+    params.payload,
+  );
+  const existingEventTimeZone = resolveTimeZone(
+    params.existingEvent?.timeZone,
+    DEFAULT_EVENT_TIME_ZONE,
+  );
+  const coordinateTimeZone = resolveTimeZoneFromCoordinates(
+    payloadCoordinates ??
+      params.existingEvent?.coordinates ??
+      params.organizationAccess?.coordinates,
+    existingEventTimeZone,
+  );
+  const eventTimeZone = payloadCoordinates
+    ? coordinateTimeZone
+    : resolveTimeZone(params.payload.timeZone, coordinateTimeZone);
+  const defaultFieldLocation = normalizeOptionalText(eventLocation);
+  const teams = resolveEventUpsertPayloadTeams(params.payload);
+  const compatibilityDivisionIdByRegistrantId =
+    buildEventUpsertCompatibilityDivisionMap(teams);
+  const timeSlots = resolveEventUpsertPayloadTimeSlots(params.payload);
+  return {
+    fields,
+    eventLocation,
+    payloadCoordinates,
+    eventTimeZone,
+    defaultFieldLocation,
+    teams,
+    compatibilityDivisionIdByRegistrantId,
+    timeSlots,
+  };
+};
+
+const loadEventUpsertTimeSlotContext = async (params: {
+  client: PrismaLike;
+  fields: any[];
+  timeSlots: any[];
+  organizationAccess: any;
+  eventTimeZone: string;
+}) => {
+  const payloadFieldById = new Map<string, Record<string, unknown>>();
+  for (const field of params.fields) {
+    const fieldId =
+      typeof field?.id === "string" && field.id.trim().length > 0
+        ? field.id.trim()
+        : "";
+    if (fieldId) payloadFieldById.set(fieldId, field);
+  }
+  const rawTimeSlotFieldIds = normalizeFieldIds(
+    params.timeSlots.flatMap((slot: Record<string, unknown>) =>
+      normalizeTimeSlotFieldIds(slot),
+    ),
+  );
+  const persistedSlotFields =
+    rawTimeSlotFieldIds.length &&
+    typeof (params.client as any).fields?.findMany === "function"
+      ? await (params.client as any).fields.findMany({
+          where: { id: { in: rawTimeSlotFieldIds } },
+          select: { id: true, lat: true, long: true, organizationId: true },
+        })
+      : [];
+  const persistedSlotFieldById = new Map<string, Record<string, unknown>>(
+    (persistedSlotFields as Array<Record<string, unknown>>).map((field) => [
+      String(field.id),
+      field,
+    ]),
+  );
+  const timeSlotsWithResolvedTimeZones = params.timeSlots.map(
+    (slot: Record<string, unknown>) => {
+      const scheduledFieldIds = normalizeTimeSlotFieldIds(slot);
+      const primaryFieldId = scheduledFieldIds[0] ?? null;
+      const primaryField = primaryFieldId
+        ? (payloadFieldById.get(primaryFieldId) ??
+          persistedSlotFieldById.get(primaryFieldId) ??
+          null)
+        : null;
+      return {
+        ...slot,
+        timeZone: resolveTimeZoneFromFieldOrOrganization(
+          primaryField,
+          params.organizationAccess,
+          params.eventTimeZone,
+        ),
+      };
+    },
+  );
+  return { timeSlotsWithResolvedTimeZones };
+};
+const normalizeEventUpsertDivisionBilling = (
+  detail: DivisionDetailPayload,
+  canPersistEventPricing: boolean,
+  isManualRegistrationPayment: boolean,
+): DivisionDetailPayload => {
+  if (canPersistEventPricing && !isManualRegistrationPayment) return detail;
+  return {
+    ...detail,
+    price: canPersistEventPricing
+      ? detail.price
+      : detail.kind === "PLAYOFF"
+        ? null
+        : 0,
+    allowPaymentPlans: false,
+    installmentCount: 0,
+    installmentDueDates: [],
+    installmentDueRelativeDays: [],
+    installmentAmounts: [],
+  };
+};
+
+const resolveEventUpsertIncludePlayoffs = (payload: any): boolean =>
+  coerceBoolean(
+    Object.prototype.hasOwnProperty.call(payload, "includePlayoffsOrPools")
+      ? payload.includePlayoffsOrPools
+      : payload.includePlayoffs,
+    false,
+  );
+
+const resolveEventUpsertDivisionDetails = (params: {
+  payload: any;
+  id: string;
+  primarySportId: string | null;
+  nextEventType: string | null;
+  canPersistEventPricing: boolean;
+  isManualRegistrationPayment: boolean;
+}) => {
+  const isBracketEvent = params.nextEventType === "LEAGUE" || params.nextEventType === "TOURNAMENT";
+  const normalizeDivisionBilling = (detail: DivisionDetailPayload) =>
+    normalizeEventUpsertDivisionBilling(
+      detail,
+      params.canPersistEventPricing,
+      params.isManualRegistrationPayment,
+    );
+  const normalizedDivisionDetails = normalizeDivisionDetailsPayload(
+    params.payload.divisionDetails,
+    params.id,
+    params.primarySportId,
+    "LEAGUE",
+  )
+    .filter((detail) => isBracketEvent || detail.kind !== "PLAYOFF")
+    .map(normalizeDivisionBilling);
+  const normalizedPlayoffDivisionDetails = isBracketEvent
+    ? normalizeDivisionDetailsPayload(
+      params.payload.playoffDivisionDetails,
+      params.id,
+      params.primarySportId,
+      "PLAYOFF",
+    ).map(normalizeDivisionBilling)
+    : [];
+  const payloadDivisionIds = normalizeDivisionIdentifierList(
+    params.payload.divisions,
+    params.id,
+  );
+  const divisionIdsFromDetails = normalizedDivisionDetails.map(
+    (detail) => detail.id,
+  );
+  const fallbackDivisionIds = defaultDivisionKeysForSport(
+    params.primarySportId,
+  ).map((divisionKey) => buildDivisionId(params.id, divisionKey));
+  const normalizedEventDivisionIds = payloadDivisionIds.length
+    ? payloadDivisionIds
+    : divisionIdsFromDetails.length
+      ? divisionIdsFromDetails
+      : fallbackDivisionIds;
+  const singleDivisionEnabled = Boolean(params.payload.singleDivision);
+  const includePlayoffsOrPools = isBracketEvent
+    ? resolveEventUpsertIncludePlayoffs(params.payload)
+    : false;
+  const parsedPlayoffTeamCount = coerceNullableNumber(
+    params.payload.playoffTeamCount,
+  );
+  const normalizedEventPlayoffTeamCount =
+    !includePlayoffsOrPools ||
+    (params.nextEventType !== "LEAGUE" &&
+      params.nextEventType !== "TOURNAMENT")
+      ? parsedPlayoffTeamCount ?? null
+      : resolveLeaguePlayoffTeamCount(
+          parsedPlayoffTeamCount,
+          `Playoff team count must be at least ${MIN_BRACKET_TEAM_COUNT} when playoffs are enabled.`,
+        );
+  const isTournamentPoolPlay = isBracketEvent && isTournamentPoolPlayEnabled({
+    eventType: params.payload.eventType,
+    includePlayoffs: includePlayoffsOrPools,
+  });
+  return {
+    normalizedDivisionDetails,
+    normalizedPlayoffDivisionDetails,
+    normalizedEventDivisionIds,
+    singleDivisionEnabled,
+    includePlayoffsOrPools,
+    normalizedEventPlayoffTeamCount,
+    isTournamentPoolPlay,
+  };
+};
+
+const canonicalizeEventUpsertTimeSlots = (params: {
+  isAffiliateExternalEvent: boolean;
+  eventId: string;
+  timeSlotsWithResolvedTimeZones: any[];
+  start: Date;
+  eventTimeZone: string;
+  normalizedEventDivisionIds: string[];
+  singleDivisionEnabled: boolean;
+  isTournamentPoolPlay: boolean;
+}) =>
+  params.isAffiliateExternalEvent
+    ? []
+    : canonicalizeTimeSlots({
+        eventId: params.eventId,
+        slots: params.timeSlotsWithResolvedTimeZones,
+        fallbackStartDate: params.start,
+        timeZone: params.eventTimeZone,
+        fallbackDivisionKeys: params.normalizedEventDivisionIds,
+        enforceAllDivisions:
+          params.singleDivisionEnabled && !params.isTournamentPoolPlay,
+        normalizeDivisions: (value) =>
+          normalizeDivisionIdentifierList(value, params.eventId),
+      });
+
+const resolveEventUpsertFieldIds = (params: {
+  payload: any;
+  fields: any[];
+  existingFieldIds: string[];
+  canonicalTimeSlots: any[];
+  isAffiliateExternalEvent: boolean;
+  isTemplateState: boolean;
+  payloadEventType: string | null;
+}): { fieldIds: string[]; payloadLocalFieldIds: any[] } => {
+  const slotFieldIds = normalizeFieldIds(
+    params.canonicalTimeSlots.flatMap((slot) => slot.scheduledFieldIds),
+  );
+  const hasPayloadFieldIds = Array.isArray(params.payload.fieldIds);
+  const payloadLocalFieldIds = params.fields
+    .map((field: any) => field.id)
+    .filter(Boolean);
+  const fieldIds = slotFieldIds.length
+    ? slotFieldIds
+    : hasPayloadFieldIds
+      ? normalizeFieldIds(params.payload.fieldIds)
+      : payloadLocalFieldIds.length
+        ? normalizeFieldIds(payloadLocalFieldIds)
+        : params.existingFieldIds;
+  if (
+    !params.isAffiliateExternalEvent &&
+    !params.isTemplateState &&
+    requiresScheduledFields(params.payloadEventType) &&
+    fieldIds.length === 0
+  ) {
+    throw new Error(EVENT_FIELDS_REQUIRED_MESSAGE);
+  }
+  return { fieldIds, payloadLocalFieldIds };
+};
+
+const resolveEventUpsertOfficialPositions = (params: {
+  payload: any;
+  id: string;
+  existingEvent: any;
+  existingEventOfficialRows: any[];
+  normalizedOfficialIds: string[];
+  sportRow: any;
+}) => {
+  const hasExplicitOfficialPositions = Object.prototype.hasOwnProperty.call(
+    params.payload,
+    "officialPositions",
+  );
+  const sportTemplatePositions = buildEventOfficialPositionsFromTemplates(
+    params.id,
+    normalizeSportOfficialPositionTemplates(
+      params.sportRow?.officialPositionTemplates,
+    ),
+  );
+  let resolvedOfficialPositions = normalizeEventOfficialPositions(
+    hasExplicitOfficialPositions
+      ? params.payload.officialPositions
+      : params.existingEvent?.officialPositions,
+    params.id,
+  );
+  if (!resolvedOfficialPositions.length) {
+    resolvedOfficialPositions = sportTemplatePositions;
+  }
+  if (
+    !resolvedOfficialPositions.length &&
+    (params.normalizedOfficialIds.length ||
+      params.existingEventOfficialRows.length)
+  ) {
+    resolvedOfficialPositions = buildEventOfficialPositionsFromTemplates(
+      params.id,
+      [{ name: "Official", count: 1 }],
+    );
+  }
+  return resolvedOfficialPositions;
+};
+const collectEventUpsertOfficialPositionIds = (
+  resolvedOfficialPositions: EventOfficialPosition[],
+  divisionDetails: DivisionDetailPayload[],
+): string[] => {
+  const phasePositionIds = divisionDetails.flatMap((detail) =>
+    Object.values(detail.phaseSettings ?? {}).flatMap(
+      (settings) => settings?.officialPositions?.map((position) => position.id) ?? [],
+    ),
+  );
+  return Array.from(
+    new Set([...resolvedOfficialPositions.map((position) => position.id), ...phasePositionIds]),
+  );
+};
+
+const buildEventUpsertExistingOfficials = (
+  rows: any[],
+  validPositionIdSet: Set<string>,
+  validFieldIdSet: Set<string>,
+) =>
+  rows
+    .map((row) => ({
+      id: row.id,
+      userId: row.userId,
+      positionIds: ensureStringArray(row.positionIds).filter((positionId) =>
+        validPositionIdSet.has(positionId),
+      ),
+      fieldIds: ensureStringArray(row.fieldIds).filter((fieldId) =>
+        validFieldIdSet.has(fieldId),
+      ),
+      isActive: row.isActive !== false,
+    }))
+    .filter((row: any) => row.positionIds.length > 0);
+
+const resolveEventUpsertOfficials = (params: {
+  payload: any;
+  id: string;
+  fieldIds: string[];
+  existingEvent: any;
+  existingEventOfficialRows: any[];
+  normalizedOfficialIds: string[];
+  sportRow: any;
+  divisionDetails: DivisionDetailPayload[];
+}) => {
+  const resolvedOfficialPositions = resolveEventUpsertOfficialPositions(params);
+  const hasExplicitEventOfficials = Object.prototype.hasOwnProperty.call(
+    params.payload,
+    "eventOfficials",
+  );
+  const validOfficialPositionIds = collectEventUpsertOfficialPositionIds(
+    resolvedOfficialPositions,
+    params.divisionDetails,
+  );
+  const validPositionIdSet = new Set(validOfficialPositionIds);
+  const validFieldIdSet = new Set(params.fieldIds);
+  const existingEventOfficials = buildEventUpsertExistingOfficials(
+    params.existingEventOfficialRows,
+    validPositionIdSet,
+    validFieldIdSet,
+  );
+  const allowedEventOfficialUserIds = hasExplicitEventOfficials
+    ? params.normalizedOfficialIds
+    : existingEventOfficials.map((row: any) => row.userId);
+  const eventOfficialsInput = hasExplicitEventOfficials
+    ? filterEventOfficialsByUserIds(
+        params.payload.eventOfficials,
+        allowedEventOfficialUserIds,
+      )
+    : params.payload.eventOfficials;
+  const resolvedEventOfficials = hasExplicitEventOfficials
+    ? normalizeEventOfficials(eventOfficialsInput, {
+        eventId: params.id,
+        positionIds: validOfficialPositionIds,
+        fieldIds: params.fieldIds,
+      })
+    : existingEventOfficials.length
+      ? existingEventOfficials
+      : [];
+  return {
+    hasExplicitEventOfficials,
+    resolvedOfficialPositions,
+    existingEventOfficials,
+    resolvedEventOfficials,
+  };
+};
+
+const loadEventUpsertFieldOwnership = async (params: {
+  client: PrismaLike;
+  fieldsToPersistIds: string[];
+  fieldIds: string[];
+  hasExplicitFieldResourcePayload: boolean;
+  existingEvent: any;
+}) => {
+  const fieldsToInspect = Array.from(
+    new Set([...params.fieldsToPersistIds, ...params.fieldIds]),
+  );
+  const existingFieldOwnershipById = new Map<
+    string,
+    { organizationId: string | null; createdBy: string | null }
+  >();
+  if (
+    fieldsToInspect.length &&
+    typeof (params.client as any).fields?.findMany === "function"
+  ) {
+    const existingFields = await (params.client as any).fields.findMany({
+      where: { id: { in: fieldsToInspect } },
+      select: { id: true, organizationId: true, createdBy: true },
+    });
+    for (const row of existingFields as Array<{
+      id: string;
+      organizationId?: string | null;
+      createdBy?: string | null;
+    }>) {
+      existingFieldOwnershipById.set(row.id, {
+        organizationId: normalizeEntityId(row.organizationId) ?? null,
+        createdBy: normalizeEntityId(row.createdBy) ?? null,
+      });
     }
   }
-  const divisionNameEventType = payload.eventType ?? existingEvent?.eventType;
-  const divisionNamePoolPlayEnabled = isTournamentPoolPlayEnabled({
-    eventType: divisionNameEventType,
-    includePlayoffsOrPools:
-      payload.includePlayoffsOrPools ??
-      payload.includePlayoffs ??
-      existingEvent?.includePlayoffs,
+  if (params.hasExplicitFieldResourcePayload || !params.existingEvent) {
+    const payloadFieldIdSet = new Set(params.fieldsToPersistIds);
+    const missingFieldIds = params.fieldIds.filter(
+      (fieldId) =>
+        !existingFieldOwnershipById.has(fieldId) &&
+        !payloadFieldIdSet.has(fieldId),
+    );
+    if (missingFieldIds.length) {
+      throw new EventFieldReferenceError(missingFieldIds);
+    }
+  }
+  return { fieldsToInspect, existingFieldOwnershipById };
+};
+
+const normalizeUpsertTeamText = (value: unknown): string =>
+  String(value ?? "").trim();
+
+const isUpsertPlaceholderTeam = (team: any): boolean => {
+  const id = normalizeEntityId(team?.id);
+  if (!id) return false;
+  const kind = normalizeUpsertTeamText(team?.kind).toUpperCase();
+  const captainId = normalizeUpsertTeamText(team?.captainId);
+  const parentTeamId = normalizeEntityId(team?.parentTeamId);
+  const name = normalizeUpsertTeamText(team?.name).toLowerCase();
+  return (
+    kind === "PLACEHOLDER" ||
+    (!parentTeamId && !captainId && name.startsWith("place holder"))
+  );
+};
+
+const resolveEventUpsertTeamIds = (payload: any, teams: any[]): string[] =>
+  Array.isArray(payload.teamIds) && payload.teamIds.length
+    ? payload.teamIds
+    : teams.map((team: any) => team.id).filter(Boolean);
+
+const resolveEventUpsertPlaceholderTeamIds = (teams: any[]): string[] =>
+  teams
+    .filter(isUpsertPlaceholderTeam)
+    .map((team: any) => team.id)
+    .filter(
+      (id: unknown): id is string => typeof id === "string" && id.length > 0,
+    );
+
+const resolveEventUpsertTimeSlotIds = (
+  payload: any,
+  canonicalTimeSlots: any[],
+  isAffiliateExternalEvent: boolean,
+): string[] => {
+  if (isAffiliateExternalEvent) return [];
+  const derivedTimeSlotIds = canonicalTimeSlots
+    .map((slot) => slot.id)
+    .filter(Boolean);
+  if (derivedTimeSlotIds.length) return derivedTimeSlotIds;
+  return Array.isArray(payload.timeSlotIds) && payload.timeSlotIds.length
+    ? payload.timeSlotIds
+    : [];
+};
+
+const resolveEventUpsertTeamAndSlotIds = (params: {
+  payload: any;
+  teams: any[];
+  canonicalTimeSlots: any[];
+  isAffiliateExternalEvent: boolean;
+}) => {
+  const teamIds = resolveEventUpsertTeamIds(params.payload, params.teams);
+  const placeholderTeamIds = resolveEventUpsertPlaceholderTeamIds(params.teams);
+  const timeSlotIds = resolveEventUpsertTimeSlotIds(
+    params.payload,
+    params.canonicalTimeSlots,
+    params.isAffiliateExternalEvent,
+  );
+  return { teamIds, placeholderTeamIds, timeSlotIds };
+};
+const assertEventUpsertTryoutDivisions = async (params: {
+  nextEventType: string | null;
+  resolvedOrganizationId: string | null;
+  organizationAccess: any;
+  singleDivisionEnabled: boolean;
+  normalizedDivisionDetails: DivisionDetailPayload[];
+  client: PrismaLike;
+}): Promise<void> => {
+  if (params.nextEventType !== "TRYOUT") return;
+  if (!params.resolvedOrganizationId || !params.organizationAccess) {
+    throw new Error("Tryout events must belong to an organization.");
+  }
+  const enabledFeatures = ensureStringArray(
+    params.organizationAccess.enabledFeatures,
+  );
+  if (!enabledFeatures.includes("CLUB_TEAMS")) {
+    throw new Error(
+      "Enable club and team features before creating tryout events.",
+    );
+  }
+  if (params.singleDivisionEnabled) {
+    throw new Error("Tryout events must use their selected club divisions.");
+  }
+  if (
+    !params.normalizedDivisionDetails.length ||
+    params.normalizedDivisionDetails.some((detail) => !detail.sourceDivisionId)
+  ) {
+    throw new Error("Select at least one club division for this tryout.");
+  }
+  const sourceDivisionIds = Array.from(
+    new Set(
+      params.normalizedDivisionDetails
+        .map((detail) => detail.sourceDivisionId)
+        .filter((divisionId): divisionId is string => Boolean(divisionId)),
+    ),
+  );
+  const sourceDivisions = await params.client.divisions.findMany({
+    where: {
+      id: { in: sourceDivisionIds },
+      organizationId: params.resolvedOrganizationId,
+      scope: "ORGANIZATION",
+      status: { not: "ARCHIVED" },
+    } as any,
+    select: { id: true },
   });
-  const persistedInternalDivisionRows = existingEvent
-    ? await client.divisions.findMany({
+  if (sourceDivisions.length !== sourceDivisionIds.length) {
+    throw new Error("One or more selected club divisions are unavailable.");
+  }
+};
+const resolveEventUpsertAutomatedScheduling = (
+  payload: any,
+  existingEvent: any,
+  nextEventType: string | null,
+) =>
+  normalizeAutomatedSchedulingForEventType(
+    nextEventType,
+    Object.prototype.hasOwnProperty.call(payload, "isAutomatedScheduling")
+      ? payload.isAutomatedScheduling
+      : Object.prototype.hasOwnProperty.call(payload, "automatedScheduling")
+        ? payload.automatedScheduling
+        : existingEvent?.automatedScheduling,
+  );
+
+const resolveEventUpsertSplitLeaguePlayoffDivisions = (params: {
+  payload: any;
+  payloadEventType: string | null;
+  nextEventType: string | null;
+  includePlayoffsOrPools: boolean;
+}) =>
+  params.payloadEventType === "LEAGUE"
+    ? coerceBoolean(params.payload.splitLeaguePlayoffDivisions, false)
+    : params.nextEventType === "TOURNAMENT" && params.includePlayoffsOrPools;
+
+const resolveEventUpsertSchedulingFlags = (params: {
+  payload: any;
+  existingEvent: any;
+  nextEventType: string | null;
+  payloadEventType: string | null;
+  includePlayoffsOrPools: boolean;
+  isAffiliateExternalEvent: boolean;
+}) => {
+  const isAutomatedScheduling = resolveEventUpsertAutomatedScheduling(
+    params.payload,
+    params.existingEvent,
+    params.nextEventType,
+  );
+  const normalizedParentEvent =
+    normalizeEntityId(params.payload.parentEvent) ??
+    normalizeEntityId(params.existingEvent?.parentEvent);
+  const isWeeklyParent =
+    params.nextEventType === "WEEKLY_EVENT" && !normalizedParentEvent;
+  const supportsNoFixedEndDateTime =
+    !params.isAffiliateExternalEvent &&
+    (isWeeklyParent || isBracketEventType(params.nextEventType));
+  const splitLeaguePlayoffDivisions =
+    resolveEventUpsertSplitLeaguePlayoffDivisions(params);
+  const shouldClearLeaguePlayoffDivisionMappings =
+    params.nextEventType === "LEAGUE" &&
+    Object.prototype.hasOwnProperty.call(
+      params.payload,
+      "splitLeaguePlayoffDivisions",
+    ) &&
+    !splitLeaguePlayoffDivisions;
+  return {
+    isAutomatedScheduling,
+    normalizedParentEvent,
+    isWeeklyParent,
+    supportsNoFixedEndDateTime,
+    splitLeaguePlayoffDivisions,
+    shouldClearLeaguePlayoffDivisionMappings,
+  };
+};
+
+const assertEventUpsertExplicitDate = (params: {
+  field: string;
+  included: boolean;
+  value: unknown;
+  parsed: Date | null;
+}): void => {
+  if (!params.included || params.value === null || params.value === undefined) {
+    return;
+  }
+  if (typeof params.value === "string" && params.value.trim().length === 0) {
+    throw new Error(`${params.field} must be a valid date/time.`);
+  }
+  if (!params.parsed || Number.isNaN(params.parsed.getTime())) {
+    throw new Error(`${params.field} must be a valid date/time.`);
+  }
+};
+
+const resolveEventUpsertParsedEnds = (params: {
+  payload: any;
+  existingEvent: any;
+  eventTimeZone: string;
+}) => {
+  const payloadIncludesEnd = Object.prototype.hasOwnProperty.call(
+    params.payload,
+    "end",
+  );
+  const payloadIncludesScheduleEndConstraint =
+    Object.prototype.hasOwnProperty.call(params.payload, "scheduleEndConstraint");
+  const payloadIncludesGeneratedScheduleEnd =
+    Object.prototype.hasOwnProperty.call(
+      params.payload,
+      "generatedScheduleEnd",
+    );
+  const payloadIncludesNoFixedEndDateTime = Object.prototype.hasOwnProperty.call(
+    params.payload,
+    "noFixedEndDateTime",
+  );
+  const parsedPayloadEnd = payloadIncludesEnd
+    ? coerceDate(params.payload.end, params.eventTimeZone)
+    : null;
+  const parsedExistingEnd = coerceDate(
+    params.existingEvent?.end,
+    params.eventTimeZone,
+  );
+  const parsedPayloadScheduleEndConstraint =
+    payloadIncludesScheduleEndConstraint
+      ? coerceDate(
+          params.payload.scheduleEndConstraint,
+          params.eventTimeZone,
+        )
+      : null;
+  const parsedPayloadGeneratedScheduleEnd =
+    payloadIncludesGeneratedScheduleEnd
+      ? coerceDate(params.payload.generatedScheduleEnd, params.eventTimeZone)
+      : null;
+  const parsedExistingScheduleEndConstraint = coerceDate(
+    params.existingEvent?.scheduleEndConstraint,
+    params.eventTimeZone,
+  );
+  const parsedExistingGeneratedScheduleEnd = coerceDate(
+    params.existingEvent?.generatedScheduleEnd,
+    params.eventTimeZone,
+  );
+  assertEventUpsertExplicitDate({
+    field: "end",
+    included: payloadIncludesEnd,
+    value: params.payload.end,
+    parsed: parsedPayloadEnd,
+  });
+  assertEventUpsertExplicitDate({
+    field: "scheduleEndConstraint",
+    included: payloadIncludesScheduleEndConstraint,
+    value: params.payload.scheduleEndConstraint,
+    parsed: parsedPayloadScheduleEndConstraint,
+  });
+  assertEventUpsertExplicitDate({
+    field: "generatedScheduleEnd",
+    included: payloadIncludesGeneratedScheduleEnd,
+    value: params.payload.generatedScheduleEnd,
+    parsed: parsedPayloadGeneratedScheduleEnd,
+  });
+  return {
+    payloadIncludesEnd,
+    payloadIncludesScheduleEndConstraint,
+    payloadIncludesGeneratedScheduleEnd,
+    payloadIncludesNoFixedEndDateTime,
+    parsedPayloadEnd,
+    parsedExistingEnd,
+    parsedPayloadScheduleEndConstraint,
+    parsedPayloadGeneratedScheduleEnd,
+    parsedExistingScheduleEndConstraint,
+    parsedExistingGeneratedScheduleEnd,
+  };
+};
+
+const resolveEventUpsertNoFixedEndDateTime = (params: {
+  payload: any;
+  existingEvent: any;
+  supportsNoFixedEndDateTime: boolean;
+  hasExplicitScheduleMode: boolean;
+  payloadIncludesNoFixedEndDateTime: boolean;
+  parsedPayloadScheduleEndConstraint: Date | null;
+  candidateEnd: Date | null;
+}) => {
+  const fallbackNoFixedEndDateTime = params.supportsNoFixedEndDateTime
+    ? params.hasExplicitScheduleMode
+      ? !params.parsedPayloadScheduleEndConstraint
+      : !params.payloadIncludesNoFixedEndDateTime &&
+          typeof params.existingEvent?.noFixedEndDateTime === "boolean"
+        ? Boolean(params.existingEvent.noFixedEndDateTime)
+        : params.candidateEnd === null
+    : false;
+  return params.supportsNoFixedEndDateTime
+    ? params.hasExplicitScheduleMode
+      ? !params.parsedPayloadScheduleEndConstraint
+      : coerceBoolean(
+          params.payload.noFixedEndDateTime,
+          fallbackNoFixedEndDateTime,
+        )
+    : false;
+};
+
+const resolveEventUpsertScheduleEndConstraint = (params: {
+  noFixedEndDateTime: boolean;
+  parsedPayloadScheduleEndConstraint: Date | null;
+  payloadIncludesScheduleEndConstraint: boolean;
+  parsedExistingScheduleEndConstraint: Date | null;
+  candidateEnd: Date | null;
+}) => {
+  if (params.noFixedEndDateTime) return null;
+  if (params.parsedPayloadScheduleEndConstraint) {
+    return params.parsedPayloadScheduleEndConstraint;
+  }
+  if (params.payloadIncludesScheduleEndConstraint) return null;
+  return params.parsedExistingScheduleEndConstraint ?? params.candidateEnd;
+};
+
+const resolveEventUpsertGeneratedScheduleEnd = (params: {
+  noFixedEndDateTime: boolean;
+  isWeeklyParent: boolean;
+  parsedPayloadGeneratedScheduleEnd: Date | null;
+  payloadIncludesGeneratedScheduleEnd: boolean;
+  parsedExistingGeneratedScheduleEnd: Date | null;
+  parsedExistingEnd: Date | null;
+  candidateEnd: Date | null;
+}) => {
+  if (!params.noFixedEndDateTime || params.isWeeklyParent) return null;
+  if (params.parsedPayloadGeneratedScheduleEnd) {
+    return params.parsedPayloadGeneratedScheduleEnd;
+  }
+  if (params.payloadIncludesGeneratedScheduleEnd) return null;
+  return (
+    params.parsedExistingGeneratedScheduleEnd ??
+    params.parsedExistingEnd ??
+    params.candidateEnd
+  );
+};
+
+const resolveEventUpsertScheduleEnds = (params: {
+  noFixedEndDateTime: boolean;
+  isWeeklyParent: boolean;
+  parsedPayloadGeneratedScheduleEnd: Date | null;
+  payloadIncludesGeneratedScheduleEnd: boolean;
+  parsedExistingGeneratedScheduleEnd: Date | null;
+  parsedExistingScheduleEndConstraint: Date | null;
+  parsedExistingEnd: Date | null;
+  candidateEnd: Date | null;
+  parsedPayloadScheduleEndConstraint: Date | null;
+  payloadIncludesScheduleEndConstraint: boolean;
+}) => {
+  const scheduleEndConstraint = resolveEventUpsertScheduleEndConstraint(params);
+  const generatedScheduleEnd = resolveEventUpsertGeneratedScheduleEnd(params);
+  return {
+    scheduleEndConstraint,
+    generatedScheduleEnd,
+    normalizedEnd: params.noFixedEndDateTime
+      ? generatedScheduleEnd
+      : scheduleEndConstraint,
+  };
+};
+const assertEventUpsertScheduling = async (params: {
+  isAffiliateExternalEvent: boolean;
+  isTemplateState: boolean;
+  isWeeklyParent: boolean;
+  canonicalTimeSlots: any[];
+  eventTimeZone: string;
+  start: Date;
+  noFixedEndDateTime: boolean;
+  normalizedEnd: Date | null;
+  fieldIds: string[];
+  normalizedEventDivisionIds: string[];
+  client: PrismaLike;
+  id: string;
+  timeSlotIds: string[];
+  resolvedOrganizationId: string | null;
+  nextEventType: string | null;
+  normalizedParentEvent: string | null;
+}): Promise<void> => {
+  if (params.nextEventType === "TRYOUT" && params.noFixedEndDateTime) {
+    throw new Error("Tryout events require a Planned End.");
+  }
+  if (
+    !params.isAffiliateExternalEvent &&
+    !params.isTemplateState &&
+    params.isWeeklyParent &&
+    !hasWeeklyRepeatingTimeSlot(params.canonicalTimeSlots)
+  ) {
+    throw new Error(WEEKLY_REPEATING_TIME_SLOT_REQUIRED_MESSAGE);
+  }
+  if (!params.isAffiliateExternalEvent) {
+    assertValidOneTimeTimeSlots({
+      slots: params.canonicalTimeSlots,
+      fallbackTimeZone: params.eventTimeZone,
+      eventStart: params.start,
+      eventEnd: params.noFixedEndDateTime ? null : params.normalizedEnd,
+      eligibleResourceIds: params.fieldIds,
+      eligibleDivisionIds: params.normalizedEventDivisionIds,
+    });
+    assertRepeatingTimeSlotsResolvable({
+      slots: params.canonicalTimeSlots,
+      eventStart: params.start,
+      eventEnd: params.noFixedEndDateTime ? null : params.normalizedEnd,
+    });
+    await reserveRentalBookingSlotsForEvent(
+      params.client,
+      params.id,
+      params.canonicalTimeSlots,
+    );
+  }
+  if (!params.isAffiliateExternalEvent && params.normalizedEnd) {
+    await assertNoEventFieldSchedulingConflicts({
+      client: params.client,
+      eventId: params.id,
+      organizationId: params.resolvedOrganizationId,
+      fieldIds: params.fieldIds,
+      timeSlotIds: params.timeSlotIds,
+      start: params.start,
+      end: params.normalizedEnd,
+      noFixedEndDateTime: params.noFixedEndDateTime,
+      eventType: params.nextEventType,
+      parentEvent: params.normalizedParentEvent,
+    });
+  }
+};
+const normalizeUpsertOptionalId = (value: unknown): string | null =>
+  typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+const resolveEventUpsertLeagueScoringIdentity = (
+  normalizedConfig: { id?: string; data?: Record<string, unknown> } | null,
+  fallbackId: string | null,
+) => ({
+  id: normalizedConfig?.id ?? fallbackId ?? crypto.randomUUID(),
+  data: normalizedConfig?.data ?? {},
+});
+
+
+const resolveEventUpsertLeagueScoringConfigId = async (params: {
+  payload: any;
+  existingEvent: any;
+  client: PrismaLike;
+  nextEventType: string | null;
+  isAffiliateExternalEvent: boolean;
+}): Promise<string | null> => {
+  const normalizedLeagueScoringConfig = normalizeLeagueScoringConfigPayload(
+    params.payload.leagueScoringConfig,
+  );
+  const payloadLeagueScoringConfigId = normalizeUpsertOptionalId(
+    params.payload.leagueScoringConfigId,
+  );
+  const existingLeagueScoringConfigId = normalizeUpsertOptionalId(
+    params.existingEvent?.leagueScoringConfigId,
+  );
+  const fallbackId =
+    payloadLeagueScoringConfigId ?? existingLeagueScoringConfigId ?? null;
+  if (params.isAffiliateExternalEvent || params.nextEventType !== "LEAGUE") {
+    return null;
+  }
+  const {
+    id: leagueScoringConfigId,
+    data: leagueScoringData,
+  } = resolveEventUpsertLeagueScoringIdentity(
+    normalizedLeagueScoringConfig,
+    fallbackId,
+  );
+  const now = new Date();
+  await params.client.leagueScoringConfigs.upsert({
+    where: { id: leagueScoringConfigId },
+    create: {
+      id: leagueScoringConfigId,
+      ...leagueScoringData,
+      createdAt: now,
+      updatedAt: now,
+    },
+    update: {
+      ...leagueScoringData,
+      updatedAt: now,
+    },
+  });
+  return leagueScoringConfigId;
+};
+
+const resolveEventUpsertEventPrice = (
+  payload: any,
+  canPersistEventPricing: boolean,
+): number => {
+  if (!canPersistEventPricing) return 0;
+  const parsed = coerceNullableNumber(payload.price);
+  return typeof parsed === "number"
+    ? Math.max(0, Math.round(parsed))
+    : 0;
+};
+
+const resolveEventUpsertInstallmentFields = (params: {
+  payload: any;
+  canPersistEventPricing: boolean;
+  isAffiliateExternalEvent: boolean;
+  isManualRegistrationPayment: boolean;
+  isWeeklyParent: boolean;
+  eventTimeZone: string;
+}) => {
+  const canPersistInstallments =
+    params.canPersistEventPricing &&
+    !params.isAffiliateExternalEvent &&
+    !params.isManualRegistrationPayment;
+  if (!canPersistInstallments) {
+    return {
+      normalizedEventAllowPaymentPlans: false,
+      normalizedEventInstallmentCount: 0,
+      normalizedEventInstallmentDueDates: [],
+      normalizedEventInstallmentDueRelativeDays: [],
+      normalizedEventInstallmentAmounts: [],
+    };
+  }
+  return {
+    normalizedEventAllowPaymentPlans:
+      params.payload.allowPaymentPlans ?? null,
+    normalizedEventInstallmentCount: params.payload.installmentCount ?? null,
+    normalizedEventInstallmentDueDates: params.isWeeklyParent
+      ? []
+      : (ensureArray(params.payload.installmentDueDates)
+          .map((value) => coerceDate(value, params.eventTimeZone))
+          .filter(Boolean) as Date[]),
+    normalizedEventInstallmentDueRelativeDays: params.isWeeklyParent
+      ? normalizeInstallmentRelativeDayList(
+          params.payload.installmentDueRelativeDays,
+        )
+      : [],
+    normalizedEventInstallmentAmounts: ensureNumberArray(
+      params.payload.installmentAmounts,
+    ),
+  };
+};
+
+const resolveEventUpsertEventPricing = (params: {
+  payload: any;
+  canPersistEventPricing: boolean;
+  isAffiliateExternalEvent: boolean;
+  isManualRegistrationPayment: boolean;
+  isWeeklyParent: boolean;
+  eventTimeZone: string;
+}) => ({
+  normalizedEventPrice: resolveEventUpsertEventPrice(
+    params.payload,
+    params.canPersistEventPricing,
+  ),
+  ...resolveEventUpsertInstallmentFields(params),
+});
+
+const resolveEventUpsertDivisionInstallmentFields = (params: {
+  payload: any;
+  canPersistEventPricing: boolean;
+  isAffiliateExternalEvent: boolean;
+  isManualRegistrationPayment: boolean;
+  isWeeklyParent: boolean;
+}) => {
+  const canPersistInstallments =
+    params.canPersistEventPricing &&
+    !params.isAffiliateExternalEvent &&
+    !params.isManualRegistrationPayment;
+  if (!canPersistInstallments) {
+    return {
+      defaultDivisionAllowPaymentPlans: false,
+      defaultDivisionInstallmentCount: 0,
+      defaultDivisionInstallmentDueDates: [],
+      defaultDivisionInstallmentDueRelativeDays: [],
+      defaultDivisionInstallmentAmounts: [],
+    };
+  }
+  const parsedAllowPaymentPlans = coerceNullableBoolean(
+    params.payload.allowPaymentPlans,
+  );
+  const parsedInstallmentCount = coerceNullableNumber(
+    params.payload.installmentCount,
+  );
+  return {
+    defaultDivisionAllowPaymentPlans:
+      typeof parsedAllowPaymentPlans === "boolean"
+        ? parsedAllowPaymentPlans
+        : (parsedAllowPaymentPlans ?? null),
+    defaultDivisionInstallmentCount:
+      typeof parsedInstallmentCount === "number"
+        ? Math.max(0, Math.trunc(parsedInstallmentCount))
+        : (parsedInstallmentCount ?? null),
+    defaultDivisionInstallmentDueDates: params.isWeeklyParent
+      ? []
+      : normalizeInstallmentDateList(params.payload.installmentDueDates),
+    defaultDivisionInstallmentDueRelativeDays: params.isWeeklyParent
+      ? normalizeInstallmentRelativeDayList(
+          params.payload.installmentDueRelativeDays,
+        )
+      : [],
+    defaultDivisionInstallmentAmounts: normalizeInstallmentAmountList(
+      params.payload.installmentAmounts,
+    ),
+  };
+};
+
+const resolveEventUpsertDivisionPricingDefaults = (params: {
+  payload: any;
+  canPersistEventPricing: boolean;
+  isAffiliateExternalEvent: boolean;
+  isManualRegistrationPayment: boolean;
+  isWeeklyParent: boolean;
+  normalizedEventPrice: number;
+  normalizedEventMaxParticipants: number | null;
+  normalizedEventPlayoffTeamCount: number | null;
+}) => {
+  const parsedPrice = params.canPersistEventPricing
+    ? params.normalizedEventPrice
+    : 0;
+  const defaultDivisionMaxParticipants =
+    typeof params.normalizedEventMaxParticipants === "number"
+      ? Math.max(0, Math.trunc(params.normalizedEventMaxParticipants))
+      : params.normalizedEventMaxParticipants;
+  return {
+    defaultDivisionPrice: parsedPrice,
+    defaultDivisionMaxParticipants,
+    defaultDivisionPlayoffTeamCount: params.normalizedEventPlayoffTeamCount,
+    ...resolveEventUpsertDivisionInstallmentFields(params),
+  };
+};
+
+const resolveEventUpsertStaffingPriority = (params: {
+  payload: any;
+  existingEvent: any;
+  isAffiliateExternalEvent: boolean;
+  hasLegacyOfficialSchedulingModeInput: boolean;
+}) => {
+  if (params.isAffiliateExternalEvent) {
+    return "FULL_COVERAGE_WITH_CONFLICTS_ALLOWED";
+  }
+  const staffingPriorityInput =
+    params.payload.staffingPriority ??
+    (params.hasLegacyOfficialSchedulingModeInput
+      ? undefined
+      : params.existingEvent?.staffingPriority);
+  const officialSchedulingModeInput =
+    params.hasLegacyOfficialSchedulingModeInput
+      ? params.payload.officialSchedulingMode
+      : params.existingEvent?.officialSchedulingMode;
+  return normalizeStaffingPriority(
+    staffingPriorityInput,
+    officialSchedulingModeInput,
+  );
+};
+
+const resolveEventUpsertDoTeamsOfficiate = (params: {
+  payload: any;
+  existingEvent: any;
+  isAffiliateExternalEvent: boolean;
+}) => {
+  const requestedDoTeamsOfficiate = coerceNullableBoolean(
+    resolveEventUpsertPayloadOrExisting(
+      params.payload,
+      params.existingEvent,
+      "doTeamsOfficiate",
+    ),
+  );
+  return params.isAffiliateExternalEvent
+    ? false
+    : requestedDoTeamsOfficiate;
+};
+
+const resolveEventUpsertNormalizedTeamSignup = (
+  isAffiliateExternalEvent: boolean,
+  normalizedTeamSignupInput: unknown,
+  nextEventType: string | null,
+): boolean =>
+  isAffiliateExternalEvent || nextEventType === "TRYOUT"
+    ? false
+    : coerceBoolean(normalizedTeamSignupInput, true);
+
+const resolveEventUpsertTeamCheckInMode = (
+  payload: any,
+  existingEvent: any,
+  normalizedTeamSignup: any,
+) => {
+  const existingTeamCheckInMode = normalizeTeamCheckInMode(
+    existingEvent?.teamCheckInMode,
+  );
+  if (!normalizedTeamSignup) return "OFF";
+  return normalizeTeamCheckInMode(
+    payload.teamCheckInMode,
+    existingTeamCheckInMode,
+  );
+};
+
+const resolveEventUpsertRosterEditFlags = (
+  payload: any,
+  existingEvent: any,
+  normalizedTeamSignup: any,
+) => {
+  const normalizedAllowMatchRosterEdits = normalizedTeamSignup
+    ? coerceBoolean(
+        payload.allowMatchRosterEdits,
+        Boolean(existingEvent?.allowMatchRosterEdits),
+      )
+    : false;
+  const normalizedAllowTemporaryMatchPlayers =
+    normalizedTeamSignup && normalizedAllowMatchRosterEdits
+      ? coerceBoolean(
+          payload.allowTemporaryMatchPlayers,
+          Boolean(existingEvent?.allowTemporaryMatchPlayers),
+        )
+      : false;
+  return {
+    normalizedAllowMatchRosterEdits,
+    normalizedAllowTemporaryMatchPlayers,
+  };
+};
+
+const resolveEventUpsertStaffing = (params: {
+  payload: any;
+  existingEvent: any;
+  isAffiliateExternalEvent: boolean;
+  normalizedTeamSignupInput: unknown;
+  nextEventType: string | null;
+}) => {
+  const hasLegacyOfficialSchedulingModeInput =
+    Object.prototype.hasOwnProperty.call(params.payload, "officialSchedulingMode");
+  const legacyOfficialSchedulingMode = normalizeOfficialSchedulingMode(
+    params.payload.officialSchedulingMode,
+    normalizeOfficialSchedulingMode(params.existingEvent?.officialSchedulingMode),
+  );
+  const staffingPriority = resolveEventUpsertStaffingPriority({
+    payload: params.payload,
+    existingEvent: params.existingEvent,
+    isAffiliateExternalEvent: params.isAffiliateExternalEvent,
+    hasLegacyOfficialSchedulingModeInput,
+  });
+  const normalizedDoTeamsOfficiate = params.nextEventType === "TRYOUT"
+    ? false
+    : resolveEventUpsertDoTeamsOfficiate({
+      payload: params.payload,
+      existingEvent: params.existingEvent,
+      isAffiliateExternalEvent: params.isAffiliateExternalEvent,
+    });
+  const normalizedTeamOfficialsMaySwap =
+    normalizedDoTeamsOfficiate === true
+      ? coerceBoolean(params.payload.teamOfficialsMaySwap, false)
+      : false;
+  const normalizedTeamSignup = resolveEventUpsertNormalizedTeamSignup(
+    params.isAffiliateExternalEvent,
+    params.normalizedTeamSignupInput,
+    params.nextEventType,
+  );
+  const normalizedTeamCheckInMode = resolveEventUpsertTeamCheckInMode(
+    params.payload,
+    params.existingEvent,
+    normalizedTeamSignup,
+  );
+  const normalizedTeamCheckInOpenMinutesBefore = normalizeOpenMinutesBefore(
+    params.payload.teamCheckInOpenMinutesBefore,
+    normalizeOpenMinutesBefore(
+      params.existingEvent?.teamCheckInOpenMinutesBefore,
+    ),
+  );
+  const {
+    normalizedAllowMatchRosterEdits,
+    normalizedAllowTemporaryMatchPlayers,
+  } = resolveEventUpsertRosterEditFlags(
+    params.payload,
+    params.existingEvent,
+    normalizedTeamSignup,
+  );
+  return {
+    hasLegacyOfficialSchedulingModeInput,
+    legacyOfficialSchedulingMode,
+    staffingPriority,
+    normalizedDoTeamsOfficiate,
+    normalizedTeamOfficialsMaySwap,
+    normalizedTeamSignup,
+    normalizedTeamCheckInMode,
+    normalizedTeamCheckInOpenMinutesBefore,
+    normalizedAllowMatchRosterEdits,
+    normalizedAllowTemporaryMatchPlayers,
+  };
+};
+
+const cloneEventUpsertMatchRulesObject = (value: any) =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? { ...(value as Record<string, unknown>) }
+    : null;
+
+const resolveEventUpsertExistingMatchRulesOverride = (value: any) => {
+  const cloned = cloneEventUpsertMatchRulesObject(value);
+  if (cloned !== null) return cloned;
+  return value === null ? null : undefined;
+};
+
+const resolveEventUpsertMatchRulesOverride = (params: {
+  payload: any;
+  existingEvent: any;
+  isAffiliateExternalEvent: boolean;
+  nextEventType: string | null;
+}) => {
+  if (
+    params.isAffiliateExternalEvent ||
+    (params.nextEventType !== "LEAGUE" && params.nextEventType !== "TOURNAMENT")
+  ) {
+    return null;
+  }
+  if (Object.prototype.hasOwnProperty.call(params.payload, "matchRulesOverride")) {
+    return cloneEventUpsertMatchRulesObject(params.payload.matchRulesOverride);
+  }
+  return resolveEventUpsertExistingMatchRulesOverride(
+    params.existingEvent?.matchRulesOverride,
+  );
+};
+
+const resolveEventUpsertMaxParticipants = (
+  payload: any,
+  nextEventType: string | null,
+) => {
+  const rawEventMaxParticipants =
+    coerceNullableNumber(payload.maxParticipants) ??
+    (nextEventType === "TOURNAMENT" ? MIN_BRACKET_TEAM_COUNT : null);
+  return nextEventType === "TOURNAMENT"
+    ? normalizeLegacyBracketTeamCount(rawEventMaxParticipants)
+    : rawEventMaxParticipants;
+};
+
+const resolveEventUpsertIncidentAndTaxData = (params: {
+  payload: any;
+  existingEvent: any;
+  isAffiliateExternalEvent: boolean;
+  nextEventType: string | null;
+}) => {
+  const payloadIncludesAutoCreatePointMatchIncidents =
+    Object.prototype.hasOwnProperty.call(
+      params.payload,
+      "autoCreatePointMatchIncidents",
+    );
+  const normalizedAutoCreatePointMatchIncidents =
+    params.isAffiliateExternalEvent || params.nextEventType === "TRYOUT"
+      ? false
+      : payloadIncludesAutoCreatePointMatchIncidents
+        ? coerceBoolean(params.payload.autoCreatePointMatchIncidents, false)
+        : typeof params.existingEvent?.autoCreatePointMatchIncidents ===
+            "boolean"
+          ? Boolean(params.existingEvent.autoCreatePointMatchIncidents)
+          : undefined;
+  const normalizedTaxHandling = normalizeEventTaxHandling(
+    Object.prototype.hasOwnProperty.call(params.payload, "taxHandling")
+      ? params.payload.taxHandling
+      : params.existingEvent?.taxHandling,
+  );
+  const normalizedOrganizerManualTaxRateBps =
+    normalizeOrganizerManualTaxRateBps(
+      Object.prototype.hasOwnProperty.call(
+        params.payload,
+        "organizerManualTaxRateBps",
+      )
+        ? params.payload.organizerManualTaxRateBps
+        : params.existingEvent?.organizerManualTaxRateBps,
+    );
+  return {
+    normalizedAutoCreatePointMatchIncidents,
+    normalizedTaxHandling,
+    normalizedOrganizerManualTaxRateBps,
+  };
+};
+const buildEventUpsertRegistrationFields = (params: {
+  isAffiliateExternalEvent: boolean;
+  isManualRegistrationPayment: boolean;
+  normalizedRegistrationPaymentMode: string;
+  normalizedManualPaymentLinks: any[];
+  normalizedManualPaymentInstructions: string | null;
+}) => ({
+  registrationPaymentMode: params.isAffiliateExternalEvent
+    ? "ONLINE"
+    : params.normalizedRegistrationPaymentMode,
+  manualPaymentLinks:
+    params.isManualRegistrationPayment && !params.isAffiliateExternalEvent
+      ? params.normalizedManualPaymentLinks
+      : [],
+  manualPaymentInstructions:
+    params.isManualRegistrationPayment && !params.isAffiliateExternalEvent
+      ? params.normalizedManualPaymentInstructions
+      : null,
+});
+
+const buildEventUpsertAssignmentFields = (params: {
+  isAffiliateExternalEvent: boolean;
+  normalizedAssistantHostIds: string[];
+  resolvedOfficialPositions: any[];
+}) => ({
+  assistantHostIds: params.isAffiliateExternalEvent
+    ? []
+    : params.normalizedAssistantHostIds,
+  officialPositions: params.isAffiliateExternalEvent
+    ? []
+    : params.resolvedOfficialPositions,
+});
+
+const buildEventUpsertOptionalFields = (params: {
+  payload: any;
+  isAffiliateExternalEvent: boolean;
+  hasLegacyOfficialSchedulingModeInput: boolean;
+  legacyOfficialSchedulingMode: string;
+  staffingPriority: string;
+  normalizedMatchRulesOverride: any;
+  normalizedAutoCreatePointMatchIncidents: boolean | undefined;
+}) => ({
+  ...(params.hasLegacyOfficialSchedulingModeInput
+    ? { officialSchedulingMode: params.legacyOfficialSchedulingMode }
+    : {}),
+  staffingPriority: params.staffingPriority,
+  ...(params.normalizedMatchRulesOverride !== undefined
+    ? { matchRulesOverride: params.normalizedMatchRulesOverride }
+    : {}),
+  ...(params.normalizedAutoCreatePointMatchIncidents !== undefined
+    ? {
+        autoCreatePointMatchIncidents:
+          params.normalizedAutoCreatePointMatchIncidents,
+      }
+    : {}),
+  requiredTemplateIds: params.isAffiliateExternalEvent
+    ? []
+    : ensureStringArray(params.payload.requiredTemplateIds),
+});
+
+type EventUpsertDataParams = {
+  payload: any;
+  id: string;
+  start: Date;
+  normalizedEnd: Date | null;
+  scheduleEndConstraint: Date | null;
+  generatedScheduleEnd: Date | null;
+  eventTimeZone: string;
+  normalizedAffiliateUrl: string;
+  eventLocation: any;
+  payloadCoordinates: number[] | null;
+  isAutomatedScheduling: boolean;
+  normalizedEventMaxParticipants: number | null;
+  normalizedHostId: string;
+  normalizedAssistantHostIds: string[];
+  isAffiliateExternalEvent: boolean;
+  noFixedEndDateTime: boolean;
+  normalizedEventPrice: number;
+  normalizedRegistrationPaymentMode: string;
+  isManualRegistrationPayment: boolean;
+  normalizedManualPaymentLinks: any[];
+  normalizedManualPaymentInstructions: string | null;
+  normalizedTaxHandling: string;
+  normalizedOrganizerManualTaxRateBps: number | null;
+  normalizedTeamSignup: boolean;
+  fieldIds: string[];
+  normalizedEventPlayoffTeamCount: number | null;
+  includePlayoffsOrPools: boolean;
+  effectiveSportIds: string[];
+  timeSlotIds: string[];
+  resolvedLeagueScoringConfigId: string | null;
+  normalizedParentEvent: string | null;
+  hasLegacyOfficialSchedulingModeInput: boolean;
+  legacyOfficialSchedulingMode: string;
+  staffingPriority: string;
+  normalizedDoTeamsOfficiate: boolean | null | undefined;
+  normalizedTeamOfficialsMaySwap: boolean;
+  normalizedTeamCheckInMode: string;
+  normalizedTeamCheckInOpenMinutesBefore: number;
+  normalizedAllowMatchRosterEdits: boolean;
+  normalizedAllowTemporaryMatchPlayers: boolean;
+  resolvedOfficialPositions: any[];
+  normalizedMatchRulesOverride: any;
+  normalizedAutoCreatePointMatchIncidents: boolean | undefined;
+  normalizedEventAllowPaymentPlans: boolean | null;
+  normalizedEventInstallmentCount: number | null;
+  normalizedEventInstallmentDueDates: Date[];
+  normalizedEventInstallmentDueRelativeDays: number[];
+  normalizedEventInstallmentAmounts: number[];
+  splitLeaguePlayoffDivisions: boolean;
+};
+
+const buildEventUpsertIdentityFields = (params: EventUpsertDataParams) => {
+  const isBracket = isBracketEventType(params.payload.eventType);
+  return {
+    name: params.payload.name ?? "Untitled Event",
+    description: params.payload.description ?? null,
+    affiliateUrl:
+      params.normalizedAffiliateUrl.length > 0
+        ? params.normalizedAffiliateUrl
+        : null,
+    winnerSetCount: isBracket ? params.payload.winnerSetCount ?? null : null,
+    loserSetCount: isBracket ? params.payload.loserSetCount ?? null : null,
+    doubleElimination: isBracket ? params.payload.doubleElimination ?? false : false,
+  };
+};
+
+const buildEventUpsertLocationFields = (params: EventUpsertDataParams) => ({
+  location: params.eventLocation,
+  address: params.payload.address ?? null,
+  rating: params.payload.rating ?? null,
+  teamSizeLimit: params.normalizedTeamSignup
+    ? params.payload.teamSizeLimit ?? 0
+    : 0,
+  minAge: params.payload.minAge ?? null,
+  maxAge: params.payload.maxAge ?? null,
+});
+
+const buildEventUpsertRegistrationMetadataFields = (
+  params: EventUpsertDataParams,
+) => ({
+  singleDivision: params.payload.singleDivision ?? false,
+  registrationByDivisionType:
+    params.payload.registrationByDivisionType ?? false,
+  cancellationRefundHours: params.isManualRegistrationPayment
+    ? null
+    : (params.payload.cancellationRefundHours ?? null),
+  prize: params.payload.prize ?? null,
+  registrationCutoffHours: params.payload.registrationCutoffHours ?? null,
+});
+
+const buildEventUpsertPresentationFields = (params: EventUpsertDataParams) => ({
+  seedColor: params.payload.seedColor ?? null,
+  imageId: params.payload.imageId ?? "",
+  fieldCount: params.fieldIds.length > 0 ? params.fieldIds.length : null,
+});
+
+const buildEventUpsertBracketFields = (params: EventUpsertDataParams) => {
+  const isBracket = isBracketEventType(params.payload.eventType);
+  return {
+    winnerBracketPointsToVictory: isBracket
+      ? ensureNumberArray(params.payload.winnerBracketPointsToVictory)
+      : [],
+    loserBracketPointsToVictory: isBracket
+      ? ensureNumberArray(params.payload.loserBracketPointsToVictory)
+      : [],
+    coordinates: params.payloadCoordinates,
+    gamesPerOpponent: isBracket ? params.payload.gamesPerOpponent ?? null : null,
+    includePlayoffs: isBracket ? params.includePlayoffsOrPools : false,
+    playoffTeamCount: isBracket ? params.normalizedEventPlayoffTeamCount : null,
+    usesSets: isBracket ? params.payload.usesSets ?? false : false,
+    matchDurationMinutes: isBracket
+      ? params.payload.matchDurationMinutes ?? null
+      : null,
+    setDurationMinutes: isBracket ? params.payload.setDurationMinutes ?? null : null,
+    setsPerMatch: isBracket ? params.payload.setsPerMatch ?? null : null,
+  };
+};
+
+const buildEventUpsertSchedulingFields = (params: EventUpsertDataParams) => {
+  const isBracket = isBracketEventType(params.payload.eventType);
+  return {
+    restTimeMinutes: isBracket ? params.payload.restTimeMinutes ?? null : null,
+    state: params.payload.state ?? null,
+    pointsToVictory: isBracket ? ensureNumberArray(params.payload.pointsToVictory) : [],
+    sportIds: params.effectiveSportIds,
+    timeSlotIds: params.timeSlotIds,
+    fieldIds: params.fieldIds,
+    leagueScoringConfigId: params.resolvedLeagueScoringConfigId,
+    organizationId: params.payload.organizationId ?? null,
+    parentEvent: params.normalizedParentEvent,
+    autoCancellation: params.payload.autoCancellation ?? null,
+    eventType: params.payload.eventType ?? null,
+  };
+};
+
+const buildEventUpsertStaffFields = (params: EventUpsertDataParams) => ({
+  doTeamsOfficiate: params.normalizedDoTeamsOfficiate ?? null,
+  teamOfficialsMaySwap: params.normalizedTeamOfficialsMaySwap,
+  teamCheckInMode: params.normalizedTeamCheckInMode,
+  teamCheckInOpenMinutesBefore:
+    params.normalizedTeamCheckInOpenMinutesBefore,
+  allowMatchRosterEdits: params.normalizedAllowMatchRosterEdits,
+  allowTemporaryMatchPlayers: params.normalizedAllowTemporaryMatchPlayers,
+  allowPaymentPlans: params.normalizedEventAllowPaymentPlans,
+  installmentCount: params.normalizedEventInstallmentCount,
+  installmentDueDates: params.normalizedEventInstallmentDueDates,
+  installmentDueRelativeDays: params.normalizedEventInstallmentDueRelativeDays,
+  installmentAmounts: params.normalizedEventInstallmentAmounts,
+  allowTeamSplitDefault: params.payload.allowTeamSplitDefault ?? null,
+  splitLeaguePlayoffDivisions: params.splitLeaguePlayoffDivisions,
+});
+
+const buildEventUpsertData = (params: EventUpsertDataParams) => ({
+  id: params.id,
+  ...buildEventUpsertIdentityFields(params),
+  start: params.start,
+  end: params.normalizedEnd,
+  scheduleEndConstraint: params.scheduleEndConstraint,
+  generatedScheduleEnd: params.generatedScheduleEnd,
+  timeZone: params.eventTimeZone,
+  ...buildEventUpsertLocationFields(params),
+  automatedScheduling: params.isAutomatedScheduling,
+  maxParticipants: params.normalizedEventMaxParticipants,
+  hostId: params.normalizedHostId,
+  ...buildEventUpsertAssignmentFields({
+    isAffiliateExternalEvent: params.isAffiliateExternalEvent,
+    normalizedAssistantHostIds: params.normalizedAssistantHostIds,
+    resolvedOfficialPositions: params.resolvedOfficialPositions,
+  }),
+  noFixedEndDateTime: params.noFixedEndDateTime,
+  price: params.normalizedEventPrice,
+  ...buildEventUpsertRegistrationFields({
+    isAffiliateExternalEvent: params.isAffiliateExternalEvent,
+    isManualRegistrationPayment: params.isManualRegistrationPayment,
+    normalizedRegistrationPaymentMode: params.normalizedRegistrationPaymentMode,
+    normalizedManualPaymentLinks: params.normalizedManualPaymentLinks,
+    normalizedManualPaymentInstructions:
+      params.normalizedManualPaymentInstructions,
+  }),
+  taxHandling: params.normalizedTaxHandling,
+  organizerManualTaxRateBps: params.normalizedOrganizerManualTaxRateBps,
+  ...buildEventUpsertRegistrationMetadataFields(params),
+  teamSignup: params.normalizedTeamSignup,
+  ...buildEventUpsertPresentationFields(params),
+  ...buildEventUpsertBracketFields(params),
+  ...buildEventUpsertSchedulingFields(params),
+  ...buildEventUpsertOptionalFields({
+    payload: params.payload,
+    isAffiliateExternalEvent: params.isAffiliateExternalEvent,
+    hasLegacyOfficialSchedulingModeInput:
+      params.hasLegacyOfficialSchedulingModeInput,
+    legacyOfficialSchedulingMode: params.legacyOfficialSchedulingMode,
+    staffingPriority: params.staffingPriority,
+    normalizedMatchRulesOverride: params.normalizedMatchRulesOverride,
+    normalizedAutoCreatePointMatchIncidents:
+      params.normalizedAutoCreatePointMatchIncidents,
+  }),
+  ...buildEventUpsertStaffFields(params),
+  updatedAt: new Date(),
+});
+const loadEventUpsertDivisionNameContext = async (params: {
+  client: PrismaLike;
+  eventId: string;
+  existingEvent: any;
+}) => {
+  const persistedInternalDivisionRows = params.existingEvent
+    ? await params.client.divisions.findMany({
         where: {
-          eventId: id,
+          eventId: params.eventId,
           role: { in: ["ENTRY", "PHASE"] },
           status: "ACTIVE",
         },
@@ -6479,1226 +12778,1146 @@ export const upsertEventFromPayload = async (
         },
       })
     : [];
-  const systemGeneratedDivisionIds = collectSystemGeneratedDivisionIds(
-    persistedInternalDivisionRows,
-  );
-  const systemGeneratedEntryIds = collectSystemGeneratedDivisionIds(
-    persistedInternalDivisionRows.filter(
-      (row: any) =>
-        String(row.role ?? "")
-          .trim()
-          .toUpperCase() === "ENTRY",
+  return {
+    systemGeneratedDivisionIds: collectSystemGeneratedDivisionIds(
+      persistedInternalDivisionRows,
     ),
+    systemGeneratedEntryIds: collectSystemGeneratedDivisionIds(
+      persistedInternalDivisionRows.filter(
+        (row: any) =>
+          String(row.role ?? "")
+            .trim()
+            .toUpperCase() === "ENTRY",
+      ),
+    ),
+  };
+};
+
+const assertEventUpsertSplitLeagueMappings = async (params: {
+  nextEventType: string | null;
+  includePlayoffsOrPools: boolean;
+  splitLeaguePlayoffDivisions: boolean;
+  existingEvent: any;
+  client: PrismaLike;
+  id: string;
+  normalizedDivisionDetails: DivisionDetailPayload[];
+  normalizedPlayoffDivisionDetails: DivisionDetailPayload[];
+  defaultDivisionPlayoffTeamCount: number | null;
+}): Promise<void> => {
+  if (
+    params.nextEventType !== "LEAGUE" ||
+    !params.includePlayoffsOrPools ||
+    !params.splitLeaguePlayoffDivisions
+  ) {
+    return;
+  }
+  const needsPersistedDivisionDetails =
+    Boolean(params.existingEvent) &&
+    (params.normalizedDivisionDetails.some(
+      (detail) =>
+        detail.playoffTeamCount === undefined ||
+        detail.playoffPlacementDivisionIds === undefined,
+    ) ||
+      params.normalizedPlayoffDivisionDetails.some(
+        (detail) => detail.maxParticipants === undefined,
+      ));
+  const persistedDivisionDetails = needsPersistedDivisionDetails
+    ? ((await params.client.divisions.findMany({
+        where: {
+          eventId: params.id,
+          role: { in: ["ENTRY", "PHASE"] },
+          status: "ACTIVE",
+        },
+        select: {
+          id: true,
+          key: true,
+          maxParticipants: true,
+          playoffTeamCount: true,
+          playoffPlacementDivisionIds: true,
+        },
+      })) as PersistedSplitLeagueDivisionDetail[])
+    : [];
+  assertSplitLeaguePlayoffMappingCounts({
+    divisionDetails: params.normalizedDivisionDetails,
+    playoffDivisionDetails: params.normalizedPlayoffDivisionDetails,
+    persistedDivisionDetails,
+    defaultPlayoffTeamCount: params.defaultDivisionPlayoffTeamCount,
+  });
+};
+
+const syncEventUpsertTags = async (params: {
+  client: PrismaLike;
+  id: string;
+  payload: any;
+}): Promise<void> => {
+  const hasIncomingTags = Object.prototype.hasOwnProperty.call(
+    params.payload,
+    "tags",
   );
+  const hasIncomingEventType = Object.prototype.hasOwnProperty.call(
+    params.payload,
+    "eventType",
+  );
+  if (hasIncomingTags) {
+    await syncEventTags(params.id, params.payload.tags, params.client, {
+      eventType: params.payload.eventType,
+    });
+  } else if (hasIncomingEventType) {
+    await syncEventTypeTagsForEvent(
+      params.id,
+      params.payload.eventType,
+      params.client,
+    );
+  }
+};
+
+const syncEventUpsertParticipantRegistrations = async (params: {
+  client: PrismaLike;
+  id: string;
+  payload: any;
+  normalizedHostId: string;
+  teamIds: string[];
+  teams: any[];
+  compatibilityDivisionIdByRegistrantId: Record<string, string | null>;
+  placeholderTeamIds: string[];
+}): Promise<void> => {
+  const normalizedParentEvent = normalizeEntityId(params.payload.parentEvent);
+  const isWeeklyParent =
+    String(params.payload.eventType ?? "").trim().toUpperCase() === "WEEKLY_EVENT" &&
+    !normalizedParentEvent;
+  if (isWeeklyParent) {
+    // Weekly registrations are occurrence-scoped. Legacy participant arrays
+    // do not carry the selected slot and date, so they cannot be synchronized.
+    return;
+  }
+  await syncEventParticipantRegistrationsFromCompatibilityIds(params.client, {
+    eventId: params.id,
+    createdBy: params.normalizedHostId,
+    teamIds: params.teamIds,
+    userIds: ensureStringArray(params.payload.userIds),
+    waitListIds: ensureStringArray(params.payload.waitListIds),
+    freeAgentIds: ensureStringArray(params.payload.freeAgentIds),
+    syncTeams:
+      Object.prototype.hasOwnProperty.call(params.payload, "teamIds") ||
+      params.teams.length > 0,
+    syncUsers: Object.prototype.hasOwnProperty.call(
+      params.payload,
+      "userIds",
+    ),
+    syncWaitList: Object.prototype.hasOwnProperty.call(
+      params.payload,
+      "waitListIds",
+    ),
+    syncFreeAgents: Object.prototype.hasOwnProperty.call(
+      params.payload,
+      "freeAgentIds",
+    ),
+    divisionIdByRegistrantId: params.compatibilityDivisionIdByRegistrantId,
+    placeholderTeamIds: params.placeholderTeamIds,
+  });
+};
+
+const persistEventUpsertOfficials = async (params: {
+  client: PrismaLike;
+  id: string;
+  isAffiliateExternalEvent: boolean;
+  hasExplicitEventOfficials: boolean;
+  existingEvent: any;
+  existingEventOfficials: any[];
+  resolvedEventOfficials: any[];
+  resolvedOfficialPositions: any[];
+}): Promise<void> => {
+  if (
+    !params.isAffiliateExternalEvent &&
+    !params.hasExplicitEventOfficials &&
+    params.existingEvent &&
+    params.existingEventOfficials.length > 0
+  ) {
+    return;
+  }
+  const eventOfficialsToPersist = params.isAffiliateExternalEvent
+    ? []
+    : params.resolvedEventOfficials;
+  const officialPositions = params.isAffiliateExternalEvent
+    ? []
+    : params.resolvedOfficialPositions;
+  await persistEventOfficialRows(
+    params.client,
+    params.id,
+    eventOfficialsToPersist,
+  );
+  await clearRemovedEventOfficialMatchAssignments(
+    params.client,
+    params.id,
+    eventOfficialsToPersist,
+    officialPositions,
+  );
+};
+
+const persistEventUpsertCore = async (params: {
+  client: PrismaLike;
+  id: string;
+  payload: any;
+  eventData: Record<string, unknown>;
+  existingEvent: any;
+  normalizedHostId: string;
+  teamIds: string[];
+  teams: any[];
+  compatibilityDivisionIdByRegistrantId: Record<string, string | null>;
+  placeholderTeamIds: string[];
+  isAffiliateExternalEvent: boolean;
+  hasExplicitEventOfficials: boolean;
+  existingEventOfficials: any[];
+  resolvedEventOfficials: any[];
+  resolvedOfficialPositions: any[];
+  divisionSyncInput: SyncEventDivisionsParams;
+}): Promise<void> => {
+  await upsertEventWithSchemaContract(
+    params.client,
+    params.id,
+    params.eventData,
+  );
+  await syncEventUpsertTags({
+    client: params.client,
+    id: params.id,
+    payload: params.payload,
+  });
+  await syncEventUpsertParticipantRegistrations({
+    client: params.client,
+    id: params.id,
+    payload: params.payload,
+    normalizedHostId: params.normalizedHostId,
+    teamIds: params.teamIds,
+    teams: params.teams,
+    compatibilityDivisionIdByRegistrantId:
+      params.compatibilityDivisionIdByRegistrantId,
+    placeholderTeamIds: params.placeholderTeamIds,
+  });
+  await persistEventUpsertOfficials({
+    client: params.client,
+    id: params.id,
+    isAffiliateExternalEvent: params.isAffiliateExternalEvent,
+    hasExplicitEventOfficials: params.hasExplicitEventOfficials,
+    existingEvent: params.existingEvent,
+    existingEventOfficials: params.existingEventOfficials,
+    resolvedEventOfficials: params.resolvedEventOfficials,
+    resolvedOfficialPositions: params.resolvedOfficialPositions,
+  });
+  await syncEventDivisions(params.divisionSyncInput, params.client);
+};
+
+const buildEventUpsertFieldScalarData = (field: any) => ({
+  lat: field.lat ?? null,
+  long: field.long ?? null,
+  heading: field.heading ?? null,
+  inUse: field.inUse ?? null,
+  name: field.name ?? null,
+});
+
+const buildEventUpsertFieldCreateData = (params: {
+  fieldId: string;
+  field: any;
+  normalizedRentalSlotIds: string[] | null;
+  fieldLocation: string | null;
+  defaultFieldLocation: string | null;
+  persistedFieldCreatedBy: string | null;
+  normalizedHostId: string;
+}) => ({
+  id: params.fieldId,
+  ...buildEventUpsertFieldScalarData(params.field),
+  rentalSlotIds: params.normalizedRentalSlotIds ?? [],
+  location: params.fieldLocation ?? params.defaultFieldLocation,
+  organizationId: null,
+  createdBy: params.persistedFieldCreatedBy ?? (params.normalizedHostId || null),
+  createdAt: new Date(),
+  updatedAt: new Date(),
+});
+
+const buildEventUpsertFieldUpdateData = (params: {
+  field: any;
+  normalizedRentalSlotIds: string[] | null;
+  hasPersistedFieldOwnership: boolean;
+  persistedFieldOrganizationId: string | null;
+  persistedFieldCreatedBy: string | null;
+}) => ({
+  ...buildEventUpsertFieldScalarData(params.field),
+  ...(params.normalizedRentalSlotIds !== null
+    ? { rentalSlotIds: params.normalizedRentalSlotIds }
+    : {}),
+  location: params.field.location ?? null,
+  ...(params.hasPersistedFieldOwnership
+    ? {
+        organizationId: params.persistedFieldOrganizationId ?? null,
+        createdBy: params.persistedFieldCreatedBy ?? null,
+      }
+    : {}),
+  updatedAt: new Date(),
+});
+
+const warnOnEventUpsertFieldOwnershipChange = (params: {
+  fieldId: string;
+  hasPersistedFieldOwnership: boolean;
+  incomingFieldOrganizationId: string | null;
+  persistedFieldOrganizationId: string | null;
+}) => {
+  if (
+    params.hasPersistedFieldOwnership &&
+    params.incomingFieldOrganizationId !== null &&
+    params.persistedFieldOrganizationId !== params.incomingFieldOrganizationId
+  ) {
+    console.warn(
+      `[events] Ignoring attempted field ownership change in upsertEventFromPayload for field ${params.fieldId}: ` +
+        `${params.persistedFieldOrganizationId ?? "null"} -> ${params.incomingFieldOrganizationId}`,
+    );
+  }
+};
+
+const persistEventUpsertField = async (params: {
+  client: PrismaLike;
+  field: any;
+  existingFieldOwnershipById: Map<
+    string,
+    { organizationId: string | null; createdBy: string | null }
+  >;
+  defaultFieldLocation: string | null;
+  normalizedHostId: string;
+}): Promise<void> => {
+  const fieldId = params.field.id;
+  if (!fieldId) return;
+  const field = params.field;
+  const existingFieldOwnership =
+    params.existingFieldOwnershipById.get(fieldId);
+  const incomingFieldOrganizationId = normalizeEntityId(field.organizationId);
+  const persistedFieldOrganizationId =
+    existingFieldOwnership?.organizationId ?? null;
+  const persistedFieldCreatedBy = existingFieldOwnership?.createdBy ?? null;
+  const hasPersistedFieldOwnership = Boolean(existingFieldOwnership);
+  warnOnEventUpsertFieldOwnershipChange({
+    fieldId,
+    hasPersistedFieldOwnership,
+    incomingFieldOrganizationId,
+    persistedFieldOrganizationId,
+  });
+  const hasRentalSlotIdsInput = Array.isArray(field.rentalSlotIds);
+  const normalizedRentalSlotIds = hasRentalSlotIdsInput
+    ? ensureArray(field.rentalSlotIds)
+        .map((value) => String(value))
+        .filter(Boolean)
+    : null;
+  const fieldLocation = normalizeOptionalText(field.location);
+  await params.client.fields.upsert({
+    where: { id: fieldId },
+    create: buildEventUpsertFieldCreateData({
+      fieldId,
+      field,
+      normalizedRentalSlotIds,
+      fieldLocation,
+      defaultFieldLocation: params.defaultFieldLocation,
+      persistedFieldCreatedBy,
+      normalizedHostId: params.normalizedHostId,
+    }),
+    update: buildEventUpsertFieldUpdateData({
+      field,
+      normalizedRentalSlotIds,
+      hasPersistedFieldOwnership,
+      persistedFieldOrganizationId,
+      persistedFieldCreatedBy,
+    }),
+  });
+};
+
+const persistEventUpsertFields = async (params: {
+  client: PrismaLike;
+  fieldsToPersist: any[];
+  existingFieldOwnershipById: Map<
+    string,
+    { organizationId: string | null; createdBy: string | null }
+  >;
+  defaultFieldLocation: string | null;
+  normalizedHostId: string;
+}): Promise<void> => {
+  for (const field of params.fieldsToPersist) {
+    await persistEventUpsertField({
+      client: params.client,
+      field,
+      existingFieldOwnershipById: params.existingFieldOwnershipById,
+      defaultFieldLocation: params.defaultFieldLocation,
+      normalizedHostId: params.normalizedHostId,
+    });
+  }
+};
+
+const buildEventUpsertTeamRoleFields = (team: any) => ({
+  kind: (team.captainId ?? "") ? "REGISTERED" : "PLACEHOLDER",
+  name: team.name ?? null,
+  captainId: team.captainId ?? "",
+  managerId: team.managerId ?? team.captainId ?? "",
+  headCoachId: team.headCoachId ?? null,
+});
+
+const buildEventUpsertTeamCollectionFields = (team: any) => ({
+  playerIds: ensureArray(team.playerIds),
+  playerRegistrationIds: ensureArray(team.playerRegistrationIds),
+  coachIds: ensureArray(team.assistantCoachIds ?? team.coachIds),
+  staffAssignmentIds: ensureArray(team.staffAssignmentIds),
+  pending: ensureArray(team.pending),
+});
+
+const buildEventUpsertTeamMetadataFields = (team: any) => ({
+  teamSize: team.teamSize ?? 0,
+  profileImageId: team.profileImageId ?? null,
+  sport: team.sport ?? null,
+});
+
+const buildEventUpsertTeamPersistenceBase = (params: {
+  id: string;
+  team: any;
+  normalizedTeamDivision: string;
+  normalizedTeamDivisionTypeId: string | null;
+}) => ({
+  eventId: params.id,
+  ...buildEventUpsertTeamRoleFields(params.team),
+  ...buildEventUpsertTeamCollectionFields(params.team),
+  division: params.normalizedTeamDivision,
+  divisionTypeId: params.normalizedTeamDivisionTypeId,
+  parentTeamId: params.team.parentTeamId ?? null,
+  ...buildEventUpsertTeamMetadataFields(params.team),
+});
+
+const persistEventUpsertTeam = async (params: {
+  client: PrismaLike;
+  id: string;
+  team: any;
+  normalizedEventDivisionIds: string[];
+  primarySportId: string | null;
+}): Promise<void> => {
+  const teamId = params.team.id;
+  if (!teamId) return;
+  const normalizedTeamDivision =
+    normalizeDivisionKey(
+      typeof params.team.division === "string"
+        ? params.team.division
+        : params.team.division?.id,
+    ) ??
+    params.normalizedEventDivisionIds[0] ??
+    DEFAULT_DIVISION_KEY;
+  const inferredTeamDivision = inferDivisionDetails({
+    identifier: normalizedTeamDivision,
+    sportInput: params.primarySportId ?? undefined,
+  });
+  const normalizedTeamDivisionTypeId =
+    normalizeDivisionKey(params.team.divisionTypeId) ??
+    inferredTeamDivision.divisionTypeId;
+  const base = buildEventUpsertTeamPersistenceBase({
+    id: params.id,
+    team: params.team,
+    normalizedTeamDivision,
+    normalizedTeamDivisionTypeId,
+  });
+  await params.client.teams.upsert({
+    where: { id: teamId },
+    create: {
+      id: teamId,
+      ...base,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+    update: {
+      ...base,
+      updatedAt: new Date(),
+    },
+  });
+};
+
+const persistEventUpsertTeams = async (params: {
+  client: PrismaLike;
+  id: string;
+  teams: any[];
+  normalizedEventDivisionIds: string[];
+  primarySportId: string | null;
+}): Promise<void> => {
+  for (const team of params.teams) {
+    await persistEventUpsertTeam({
+      client: params.client,
+      id: params.id,
+      team,
+      normalizedEventDivisionIds: params.normalizedEventDivisionIds,
+      primarySportId: params.primarySportId,
+    });
+  }
+};
+
+const resolveEventUpsertSlotDivisions = (
+  singleDivisionEnabled: boolean,
+  slotDivisionKeys: string[],
+  normalizedEventDivisionIds: string[],
+) =>
+  singleDivisionEnabled
+    ? normalizedEventDivisionIds
+    : slotDivisionKeys.length
+      ? slotDivisionKeys
+      : normalizedEventDivisionIds;
+
+const buildEventUpsertTimeSlotData = (params: {
+  slot: any;
+  slotTimeZone: string;
+  startDate: Date;
+  endDate: Date | null;
+}) => ({
+  dayOfWeek: params.slot.dayOfWeek ?? null,
+  daysOfWeek: params.slot.daysOfWeek,
+  startTimeMinutes: params.slot.startTimeMinutes ?? null,
+  endTimeMinutes: params.slot.endTimeMinutes ?? null,
+  startDate: params.startDate,
+  timeZone: params.slotTimeZone,
+  repeating: Boolean(params.slot.repeating),
+  endDate: params.endDate,
+  scheduledFieldId: params.slot.scheduledFieldId ?? null,
+  scheduledFieldIds: params.slot.scheduledFieldIds,
+  price: params.slot.price ?? null,
+  taxHandling: normalizeRentalTaxHandling(params.slot.taxHandling),
+  sourceType: params.slot.sourceType,
+  rentalBookingId: params.slot.rentalBookingId,
+  rentalBookingItemId: params.slot.rentalBookingItemId,
+  rentalLocked: params.slot.rentalLocked,
+});
+
+const persistEventUpsertTimeSlot = async (params: {
+  client: PrismaLike;
+  id: string;
+  slot: any;
+  eventTimeZone: string;
+  singleDivisionEnabled: boolean;
+  normalizedEventDivisionIds: string[];
+}): Promise<void> => {
+  const slotId = params.slot.id;
+  if (!slotId) return;
+  const slotTimeZone = resolveTimeZone(
+    params.slot.timeZone,
+    params.eventTimeZone,
+  );
+  const startDate =
+    coerceDate(params.slot.startDate, slotTimeZone) ?? new Date();
+  const endDate = params.slot.endDate
+    ? coerceDate(params.slot.endDate, slotTimeZone)
+    : null;
+  const slotDivisionKeys = normalizeDivisionIdentifierList(
+    params.slot.divisions,
+    params.id,
+  );
+  const slotDivisions = resolveEventUpsertSlotDivisions(
+    params.singleDivisionEnabled,
+    slotDivisionKeys,
+    params.normalizedEventDivisionIds,
+  );
+  const now = new Date();
+  const slotData = buildEventUpsertTimeSlotData({
+    slot: params.slot,
+    slotTimeZone,
+    startDate,
+    endDate,
+  });
+  await params.client.timeSlots.upsert({
+    where: { id: slotId },
+    create: {
+      id: slotId,
+      ...slotData,
+      createdAt: now,
+      updatedAt: now,
+    },
+    update: {
+      ...slotData,
+      updatedAt: now,
+    },
+  } as any);
+  await persistTimeSlotDivisions(params.client, slotId, slotDivisions, now);
+};
+
+const persistEventUpsertTimeSlots = async (params: {
+  client: PrismaLike;
+  id: string;
+  canonicalTimeSlots: any[];
+  eventTimeZone: string;
+  singleDivisionEnabled: boolean;
+  normalizedEventDivisionIds: string[];
+}): Promise<void> => {
+  for (const slot of params.canonicalTimeSlots) {
+    await persistEventUpsertTimeSlot({
+      client: params.client,
+      id: params.id,
+      slot,
+      eventTimeZone: params.eventTimeZone,
+      singleDivisionEnabled: params.singleDivisionEnabled,
+      normalizedEventDivisionIds: params.normalizedEventDivisionIds,
+    });
+  }
+};
+
+const removeEventUpsertStaleFields = async (params: {
+  client: PrismaLike;
+  id: string;
+  existingFieldIds: string[];
+  allowedFieldIdSet: Set<string>;
+  preserveOperationalState: boolean;
+}): Promise<void> => {
+  const removedFieldIds = params.existingFieldIds.filter(
+    (fieldId) => !params.allowedFieldIdSet.has(fieldId),
+  );
+  if (removedFieldIds.length && !params.preserveOperationalState) {
+    await params.client.matches.deleteMany({
+      where: {
+        eventId: params.id,
+        fieldId: { in: removedFieldIds },
+      },
+    });
+    await params.client.fields.deleteMany({
+      where: {
+        id: { in: removedFieldIds },
+        organizationId: null,
+      },
+    });
+  }
+};
+
+const removeEventUpsertStaleTimeSlots = async (params: {
+  client: PrismaLike;
+  id: string;
+  existingTimeSlotIds: string[];
+  timeSlotIds: string[];
+}): Promise<void> => {
+  const nextTimeSlotIdSet = new Set(params.timeSlotIds);
+  const staleTimeSlotIds = params.existingTimeSlotIds.filter(
+    (slotId) => !nextTimeSlotIdSet.has(slotId),
+  );
+  if (!staleTimeSlotIds.length) return;
+  if (params.client.rentalBookingItems?.updateMany) {
+    await params.client.rentalBookingItems.updateMany({
+      where: {
+        eventId: params.id,
+        eventTimeSlotId: { in: staleTimeSlotIds },
+      } as any,
+      data: {
+        eventId: null,
+        eventTimeSlotId: null,
+        updatedAt: new Date(),
+      } as any,
+    });
+  }
+  await params.client.timeSlots.deleteMany({
+    where: { id: { in: staleTimeSlotIds } },
+  });
+};
+const resolveEventUpsertExistingResourceIds = (existingEvent: any) => ({
+  existingFieldIds: normalizeFieldIds(existingEvent?.fieldIds ?? []),
+  existingTimeSlotIds: normalizeFieldIds(existingEvent?.timeSlotIds ?? []),
+});
+
+const hasEventUpsertFieldResourcePayload = (payload: any): boolean =>
+  Object.prototype.hasOwnProperty.call(payload, "fields") ||
+  Object.prototype.hasOwnProperty.call(payload, "fieldIds") ||
+  Object.prototype.hasOwnProperty.call(payload, "timeSlots");
+
+const filterEventUpsertFieldsToPersist = (
+  fields: any[],
+  allowedFieldIdSet: Set<string>,
+) => {
+  if (!allowedFieldIdSet.size) return fields;
+  return fields.filter((field: any) => {
+    const fieldId = field?.id;
+    return typeof fieldId === "string" && allowedFieldIdSet.has(fieldId);
+  });
+};
+
+const resolveEventUpsertStart = (payload: any, eventTimeZone: string): Date =>
+  coerceDate(payload.start, eventTimeZone) ?? new Date();
+
+const resolveEventUpsertCandidateEnd = (
+  payloadIncludesEnd: boolean,
+  parsedPayloadEnd: Date | null,
+  parsedExistingEnd: Date | null,
+) => (payloadIncludesEnd ? parsedPayloadEnd : parsedExistingEnd);
+
+const hasEventUpsertExplicitScheduleMode = (
+  payloadIncludesScheduleEndConstraint: boolean,
+  payloadIncludesGeneratedScheduleEnd: boolean,
+) =>
+  payloadIncludesScheduleEndConstraint || payloadIncludesGeneratedScheduleEnd;
+
+const assertEventUpsertEndAfterStart = (params: {
+  noFixedEndDateTime: boolean;
+  normalizedEnd: Date | null;
+  start: Date;
+}): void => {
+  if (params.noFixedEndDateTime) return;
+  if (!params.normalizedEnd || params.normalizedEnd.getTime() <= params.start.getTime()) {
+    throw new Error(
+      'End date/time must be after start date/time when "No fixed end datetime scheduling" is disabled.',
+    );
+  }
+};
+
+const resolveEventUpsertOrganizationId = (payload: any): unknown =>
+  payload.organizationId ?? null;
+
+export const upsertEventFromPayload = async (
+  payload: any,
+  client: PrismaLike = prisma,
+  options: EventUpsertOptions = {},
+): Promise<string> => {
+  const id = payload?.id;
+  if (!id) {
+    throw new Error("Event payload missing id");
+  }
+  const existingEvent = await loadExistingEventForUpsert(id, client);
+  const organization = await loadEventUpsertOrganizationContext({
+    payload,
+    existingEvent,
+    client,
+  });
+  await assertEventUpsertStructureUnlocked({
+    id,
+    payload,
+    existingEvent,
+    client,
+  });
+  const {
+    systemGeneratedDivisionIds,
+    systemGeneratedEntryIds,
+  } = await loadEventUpsertDivisionNameContext({
+    client,
+    eventId: id,
+    existingEvent,
+  });
   assertUniqueSubmittedEventDivisionNames(
     payload,
     systemGeneratedDivisionIds,
     systemGeneratedEntryIds,
   );
-  const resolvedOrganizationId =
-    normalizeEntityId(payload.organizationId) ??
-    normalizeEntityId(existingEvent?.organizationId);
-  const resolvedHostId =
-    normalizeEntityId(payload.hostId) ??
-    normalizeEntityId(existingEvent?.hostId);
-  const organizationAccess = resolvedOrganizationId
-    ? await client.organizations.findUnique({
-        where: { id: resolvedOrganizationId },
-        select: {
-          ownerId: true,
-          coordinates: true,
-          enabledFeatures: true,
-        } as any,
-      })
-    : null;
-  const organizationStaffMembers =
-    resolvedOrganizationId && client.staffMembers?.findMany
-      ? await client.staffMembers.findMany({
-          where: { organizationId: resolvedOrganizationId },
-          select: {
-            organizationId: true,
-            userId: true,
-            types: true,
-          },
-        })
-      : [];
-  const organizationStaffInvites =
-    resolvedOrganizationId && client.invites?.findMany
-      ? await client.invites.findMany({
-          where: { organizationId: resolvedOrganizationId, type: "STAFF" },
-          select: {
-            organizationId: true,
-            userId: true,
-            type: true,
-            status: true,
-          },
-        })
-      : [];
-  const preserveStaffState = options.preserveStaffState === true;
-  const payloadIncludesAssistantHostIds = Object.prototype.hasOwnProperty.call(
-    payload,
-    "assistantHostIds",
-  );
-  const assistantHostIdsForAssignments = payloadIncludesAssistantHostIds
-    ? ensureStringArray(payload.assistantHostIds)
-    : preserveStaffState
-      ? ensureStringArray((existingEvent as any)?.assistantHostIds)
-      : [];
-  const requestedPayloadHostId = normalizeEntityId(payload.hostId);
-  const requestedEventOfficialIds: string[] = Array.isArray(
-    payload.eventOfficials,
-  )
-    ? Array.from(
-        new Set(
-          payload.eventOfficials
-            .map((entry: unknown) =>
-              entry && typeof entry === "object"
-                ? normalizeEntityId((entry as Record<string, unknown>).userId)
-                : null,
-            )
-            .filter((userId: string | null): userId is string =>
-              Boolean(userId),
-            ),
-        ),
-      )
-    : [];
-  const organizationAssignments = resolvedOrganizationId
-    ? sanitizeOrganizationEventAssignments(
-        {
-          hostId: payload.hostId ?? resolvedHostId ?? null,
-          assistantHostIds: assistantHostIdsForAssignments,
-          officialIds: requestedEventOfficialIds,
-        },
-        organizationAccess
-          ? {
-              ...organizationAccess,
-              staffMembers: organizationStaffMembers,
-              staffInvites: organizationStaffInvites,
-            }
-          : null,
-      )
-    : null;
-  const normalizedHostId =
-    organizationAssignments?.hostId ??
-    requestedPayloadHostId ??
-    resolvedHostId ??
-    "";
-  const normalizedAssistantHostIds = organizationAssignments
-    ? organizationAssignments.assistantHostIds
-    : assistantHostIdsForAssignments;
-  const normalizedOfficialIds = organizationAssignments
-    ? organizationAssignments.officialIds
-    : requestedEventOfficialIds;
-  const normalizedState =
-    typeof payload.state === "string"
-      ? payload.state.trim().toUpperCase()
-      : typeof (existingEvent as any)?.state === "string"
-        ? String((existingEvent as any).state)
-            .trim()
-            .toUpperCase()
-        : "";
-  const isTemplateState = normalizedState === "TEMPLATE";
-  const payloadIncludesAffiliateUrl = Object.prototype.hasOwnProperty.call(
-    payload,
-    "affiliateUrl",
-  );
-  const payloadAffiliateUrl =
-    typeof payload.affiliateUrl === "string" ? payload.affiliateUrl.trim() : "";
-  const existingAffiliateUrl =
-    typeof (existingEvent as any)?.affiliateUrl === "string"
-      ? (existingEvent as any).affiliateUrl.trim()
-      : "";
-  const normalizedAffiliateUrl = payloadIncludesAffiliateUrl
-    ? payloadAffiliateUrl
-    : existingAffiliateUrl;
-  const isAffiliateExternalEvent = normalizedAffiliateUrl.length > 0;
-  const existingEventType =
-    typeof existingEvent?.eventType === "string"
-      ? existingEvent.eventType.toUpperCase()
-      : null;
-  const payloadEventType =
-    typeof payload.eventType === "string"
-      ? payload.eventType.toUpperCase()
-      : null;
-  const nextEventType = payloadEventType ?? existingEventType;
-  const effectiveSportIds = normalizeEventSportIds(
-    Object.prototype.hasOwnProperty.call(payload, "sportIds")
-      ? payload.sportIds
-      : existingEvent?.sportIds,
-  );
-  validateEventSportIds({
-    eventType: nextEventType ?? "EVENT",
-    sportIds: effectiveSportIds,
-  });
-  await validateEventSportIdsExist(client, effectiveSportIds);
-  const primarySportId = effectiveSportIds[0] ?? null;
-  const [existingEventOfficialRows, sportRow] = await Promise.all([
-    existingEvent ? loadEventOfficialRows(client, id) : Promise.resolve([]),
-    primarySportId && typeof (client as any).sports?.findUnique === "function"
-      ? (client as any).sports.findUnique({
-          where: { id: primarySportId },
-          select: { officialPositionTemplates: true } as any,
-        })
-      : Promise.resolve(null),
-  ]);
-  const normalizedRegistrationPaymentMode = normalizeRegistrationPaymentMode(
-    Object.prototype.hasOwnProperty.call(payload, "registrationPaymentMode")
-      ? payload.registrationPaymentMode
-      : (existingEvent as any)?.registrationPaymentMode,
-  );
-  const isManualRegistrationPayment =
-    normalizedRegistrationPaymentMode === "MANUAL";
-  const normalizedManualPaymentLinks =
-    normalizeManualPaymentLinksForPersistence(
-      Object.prototype.hasOwnProperty.call(payload, "manualPaymentLinks")
-        ? payload.manualPaymentLinks
-        : (existingEvent as any)?.manualPaymentLinks,
-    );
-  const normalizedManualPaymentInstructions =
-    normalizeManualPaymentInstructions(
-      Object.prototype.hasOwnProperty.call(payload, "manualPaymentInstructions")
-        ? payload.manualPaymentInstructions
-        : (existingEvent as any)?.manualPaymentInstructions,
-    );
-  const billingOwnerHasStripeAccount =
-    await resolveBillingOwnerHasStripeAccount(client, {
-      organizationId: resolvedOrganizationId,
-      hostId: normalizedHostId,
-    });
-  const canPersistEventPricing =
-    billingOwnerHasStripeAccount ||
-    isManualRegistrationPayment ||
-    isAffiliateExternalEvent;
-  const existingFieldIds = normalizeFieldIds(existingEvent?.fieldIds ?? []);
-  const existingTimeSlotIds = normalizeFieldIds(
-    existingEvent?.timeSlotIds ?? [],
-  );
+  const {
+    existingFieldIds,
+    existingTimeSlotIds,
+  } = resolveEventUpsertExistingResourceIds(existingEvent);
   const hasExplicitFieldResourcePayload =
-    Object.prototype.hasOwnProperty.call(payload, "fields") ||
-    Object.prototype.hasOwnProperty.call(payload, "fieldIds") ||
-    Object.prototype.hasOwnProperty.call(payload, "timeSlots");
-  const fields = Array.isArray(payload.fields)
-    ? payload.fields.map((field: unknown) => {
-        if (!field || typeof field !== "object" || Array.isArray(field))
-          return field;
-        const fieldRecord = field as Record<string, unknown>;
-        const fieldId =
-          normalizeEntityId(fieldRecord.id) ??
-          normalizeEntityId(fieldRecord.$id);
-        return fieldId ? { ...fieldRecord, id: fieldId } : fieldRecord;
-      })
-    : [];
-  const payloadIncludesLocation = Object.prototype.hasOwnProperty.call(
+    hasEventUpsertFieldResourcePayload(payload);
+  const {
+    resolvedOrganizationId,
+    organizationAccess,
+  } = organization;
+  const {
+    normalizedHostId,
+    normalizedAssistantHostIds,
+    normalizedOfficialIds,
+  } = resolveEventUpsertAssignments({
     payload,
-    "location",
-  );
-  const eventLocation = payloadIncludesLocation
-    ? (payload.location ?? "")
-    : ((existingEvent as any)?.location ?? "");
-  const payloadCoordinates = Array.isArray(payload.coordinates)
-    ? payload.coordinates.filter(
-        (value: unknown): value is number => typeof value === "number",
-      )
-    : null;
-  const existingEventTimeZone = resolveTimeZone(
-    (existingEvent as any)?.timeZone,
-    DEFAULT_EVENT_TIME_ZONE,
-  );
-  const coordinateTimeZone = resolveTimeZoneFromCoordinates(
-    payloadCoordinates ??
-      (existingEvent as any)?.coordinates ??
-      (organizationAccess as any)?.coordinates,
-    existingEventTimeZone,
-  );
-  const eventTimeZone = payloadCoordinates
-    ? coordinateTimeZone
-    : resolveTimeZone(payload.timeZone, coordinateTimeZone);
-  const defaultFieldLocation = normalizeOptionalText(eventLocation);
-  const teams = Array.isArray(payload.teams) ? payload.teams : [];
-  const compatibilityDivisionIdByRegistrantId = Object.fromEntries(
-    teams
-      .map((team: any) => {
-        const registrantId = normalizeEntityId(team?.id);
-        const divisionId = normalizeEntityId(
-          team?.divisionId
-            ?? (typeof team?.division === "object" ? team.division?.id : team?.division),
-        );
-        return registrantId ? [registrantId, divisionId] : null;
-      })
-      .filter((entry: [string, string | null] | null): entry is [string, string | null] => Boolean(entry)),
-  );
-  const timeSlots = Array.isArray(payload.timeSlots) ? payload.timeSlots : [];
-  const payloadFieldById = new Map<string, Record<string, unknown>>();
-  for (const field of fields) {
-    const fieldId =
-      typeof field?.id === "string" && field.id.trim().length > 0
-        ? field.id.trim()
-        : "";
-    if (fieldId) {
-      payloadFieldById.set(fieldId, field);
-    }
-  }
-  const rawTimeSlotFieldIds = normalizeFieldIds(
-    timeSlots.flatMap((slot: Record<string, unknown>) =>
-      normalizeTimeSlotFieldIds(slot),
-    ),
-  );
-  const persistedSlotFields =
-    rawTimeSlotFieldIds.length &&
-    typeof (client as any).fields?.findMany === "function"
-      ? await (client as any).fields.findMany({
-          where: { id: { in: rawTimeSlotFieldIds } },
-          select: { id: true, lat: true, long: true, organizationId: true },
-        })
-      : [];
-  const persistedSlotFieldById = new Map<string, Record<string, unknown>>(
-    (persistedSlotFields as Array<Record<string, unknown>>).map((field) => [
-      String(field.id),
-      field,
-    ]),
-  );
-  const timeSlotsWithResolvedTimeZones = timeSlots.map(
-    (slot: Record<string, unknown>) => {
-      const scheduledFieldIds = normalizeTimeSlotFieldIds(slot);
-      const primaryFieldId = scheduledFieldIds[0] ?? null;
-      const primaryField = primaryFieldId
-        ? (payloadFieldById.get(primaryFieldId) ??
-          persistedSlotFieldById.get(primaryFieldId) ??
-          null)
-        : null;
-      return {
-        ...slot,
-        timeZone: resolveTimeZoneFromFieldOrOrganization(
-          primaryField,
-          organizationAccess as any,
-          eventTimeZone,
-        ),
-      };
-    },
-  );
-  const normalizeDivisionBilling = (
-    detail: DivisionDetailPayload,
-  ): DivisionDetailPayload => {
-    if (canPersistEventPricing && !isManualRegistrationPayment) {
-      return detail;
-    }
-    return {
-      ...detail,
-      price: canPersistEventPricing
-        ? detail.price
-        : detail.kind === "PLAYOFF"
-          ? null
-          : 0,
-      allowPaymentPlans: false,
-      installmentCount: 0,
-      installmentDueDates: [],
-      installmentDueRelativeDays: [],
-      installmentAmounts: [],
-    };
-  };
-  const normalizedDivisionDetails = normalizeDivisionDetailsPayload(
-    payload.divisionDetails,
-    id,
-    primarySportId,
-    "LEAGUE",
-  ).map(normalizeDivisionBilling);
-  let normalizedPlayoffDivisionDetails = normalizeDivisionDetailsPayload(
-    payload.playoffDivisionDetails,
-    id,
-    primarySportId,
-    "PLAYOFF",
-  ).map(normalizeDivisionBilling);
-  const payloadDivisionIds = normalizeDivisionIdentifierList(
-    payload.divisions,
-    id,
-  );
-  const divisionIdsFromDetails = normalizedDivisionDetails.map(
-    (detail) => detail.id,
-  );
-  const fallbackDivisionIds = defaultDivisionKeysForSport(primarySportId).map(
-    (divisionKey) => buildDivisionId(id, divisionKey),
-  );
-  const normalizedEventDivisionIds = payloadDivisionIds.length
-    ? payloadDivisionIds
-    : divisionIdsFromDetails.length
-      ? divisionIdsFromDetails
-      : fallbackDivisionIds;
-  const singleDivisionEnabled = Boolean(payload.singleDivision);
-  const includePlayoffsOrPools = coerceBoolean(
-    Object.prototype.hasOwnProperty.call(payload, "includePlayoffsOrPools")
-      ? payload.includePlayoffsOrPools
-      : payload.includePlayoffs,
-    false,
-  );
-  const normalizedEventPlayoffTeamCount = (() => {
-    const parsed = coerceNullableNumber(payload.playoffTeamCount);
-    if (
-      !includePlayoffsOrPools ||
-      (nextEventType !== "LEAGUE" && nextEventType !== "TOURNAMENT")
-    ) {
-      return parsed ?? null;
-    }
-    return resolveLeaguePlayoffTeamCount(
-      parsed,
-      `Playoff team count must be at least ${MIN_BRACKET_TEAM_COUNT} when playoffs are enabled.`,
-    );
-  })();
-  const isTournamentPoolPlay = isTournamentPoolPlayEnabled({
-    eventType: payloadEventType,
-    includePlayoffs: includePlayoffsOrPools,
+    existingEvent,
+    organization,
+    options,
   });
-  const start = coerceDate(payload.start, eventTimeZone) ?? new Date();
-  const canonicalTimeSlots = isAffiliateExternalEvent
-    ? []
-    : canonicalizeTimeSlots({
-        eventId: id,
-        slots: timeSlotsWithResolvedTimeZones,
-        fallbackStartDate: start,
-        timeZone: eventTimeZone,
-        fallbackDivisionKeys: normalizedEventDivisionIds,
-        enforceAllDivisions: singleDivisionEnabled && !isTournamentPoolPlay,
-        normalizeDivisions: (value) =>
-          normalizeDivisionIdentifierList(value, id),
-      });
-
-  const slotFieldIds = normalizeFieldIds(
-    canonicalTimeSlots.flatMap((slot) => slot.scheduledFieldIds),
-  );
-  const hasPayloadFieldIds = Array.isArray(payload.fieldIds);
-  const payloadLocalFieldIds = fields
-    .map((field: any) => field.id)
-    .filter(Boolean);
-  const fieldIds = slotFieldIds.length
-    ? slotFieldIds
-    : hasPayloadFieldIds
-      ? normalizeFieldIds(payload.fieldIds)
-      : payloadLocalFieldIds.length
-        ? normalizeFieldIds(payloadLocalFieldIds)
-        : existingFieldIds;
-  if (
-    !isAffiliateExternalEvent &&
-    !isTemplateState &&
-    requiresScheduledFields(payloadEventType) &&
-    fieldIds.length === 0
-  ) {
-    throw new Error(EVENT_FIELDS_REQUIRED_MESSAGE);
-  }
-  const hasExplicitOfficialPositions = Object.prototype.hasOwnProperty.call(
+  const upsertState = resolveEventUpsertState({ payload, existingEvent });
+  const {
+    normalizedState,
+    isTemplateState,
+    normalizedAffiliateUrl,
+    isAffiliateExternalEvent,
+    existingEventType,
+    payloadEventType,
+    nextEventType,
+  } = upsertState;
+  const upsertSport = await loadEventUpsertSportContext({
     payload,
-    "officialPositions",
-  );
-  const sportTemplatePositions = buildEventOfficialPositionsFromTemplates(
+    existingEvent,
+    client,
     id,
-    normalizeSportOfficialPositionTemplates(
-      (sportRow as any)?.officialPositionTemplates,
-    ),
-  );
-  let resolvedOfficialPositions = hasExplicitOfficialPositions
-    ? normalizeEventOfficialPositions(payload.officialPositions, id)
-    : normalizeEventOfficialPositions(
-        (existingEvent as any)?.officialPositions,
-        id,
-      );
-  if (!resolvedOfficialPositions.length) {
-    resolvedOfficialPositions = sportTemplatePositions;
-  }
-  if (
-    !resolvedOfficialPositions.length &&
-    (normalizedOfficialIds.length || existingEventOfficialRows.length)
-  ) {
-    resolvedOfficialPositions = buildEventOfficialPositionsFromTemplates(id, [
-      { name: "Official", count: 1 },
-    ]);
-  }
-  const hasExplicitEventOfficials = Object.prototype.hasOwnProperty.call(
+    nextEventType,
+    resolvedOrganizationId,
+    normalizedHostId,
+  });
+  const {
+    effectiveSportIds,
+    primarySportId,
+    existingEventOfficialRows,
+    sportRow,
+    normalizedRegistrationPaymentMode,
+    isManualRegistrationPayment,
+    normalizedManualPaymentLinks,
+    normalizedManualPaymentInstructions,
+    canPersistEventPricing,
+  } = upsertSport;
+  const upsertLocation = resolveEventUpsertLocationContext({
     payload,
-    "eventOfficials",
+    existingEvent,
+    organizationAccess,
+  });
+  const {
+    fields,
+    eventLocation,
+    payloadCoordinates,
+    eventTimeZone,
+    defaultFieldLocation,
+    teams,
+    compatibilityDivisionIdByRegistrantId,
+    timeSlots,
+  } = upsertLocation;
+  const { timeSlotsWithResolvedTimeZones } =
+    await loadEventUpsertTimeSlotContext({
+      client,
+      fields,
+      timeSlots,
+      organizationAccess,
+      eventTimeZone,
+    });
+  const upsertDivisions = resolveEventUpsertDivisionDetails({
+    payload,
+    id,
+    primarySportId,
+    nextEventType,
+    canPersistEventPricing,
+    isManualRegistrationPayment,
+  });
+  const {
+    normalizedDivisionDetails,
+    singleDivisionEnabled,
+    includePlayoffsOrPools,
+    normalizedEventPlayoffTeamCount,
+    isTournamentPoolPlay,
+    normalizedEventDivisionIds,
+  } = upsertDivisions;
+  const start = resolveEventUpsertStart(payload, eventTimeZone);
+  const canonicalTimeSlots = canonicalizeEventUpsertTimeSlots({
+    isAffiliateExternalEvent,
+    eventId: id,
+    timeSlotsWithResolvedTimeZones,
+    start,
+    eventTimeZone,
+    normalizedEventDivisionIds,
+    singleDivisionEnabled,
+    isTournamentPoolPlay,
+  });
+  const { fieldIds } = resolveEventUpsertFieldIds({
+    payload,
+    fields,
+    existingFieldIds,
+    canonicalTimeSlots,
+    isAffiliateExternalEvent,
+    isTemplateState,
+    payloadEventType,
+  });
+  const upsertOfficials = resolveEventUpsertOfficials({
+    payload,
+    id,
+    fieldIds,
+    existingEvent,
+    existingEventOfficialRows,
+    normalizedOfficialIds,
+    sportRow,
+    divisionDetails: [
+      ...normalizedDivisionDetails,
+      ...upsertDivisions.normalizedPlayoffDivisionDetails,
+    ],
+  });
+  const {
+    resolvedOfficialPositions,
+    existingEventOfficials,
+    resolvedEventOfficials,
+    hasExplicitEventOfficials,
+  } = upsertOfficials;
+const allowedFieldIdSet = new Set(fieldIds);
+  const fieldsToPersist = filterEventUpsertFieldsToPersist(
+    fields,
+    allowedFieldIdSet,
   );
-  const validPositionIdSet = new Set(
-    resolvedOfficialPositions.map((position) => position.id),
-  );
-  const validFieldIdSet = new Set(fieldIds);
-  const existingEventOfficials = existingEventOfficialRows
-    .map((row) => ({
-      id: row.id,
-      userId: row.userId,
-      positionIds: ensureStringArray(row.positionIds).filter((positionId) =>
-        validPositionIdSet.has(positionId),
-      ),
-      fieldIds: ensureStringArray(row.fieldIds).filter((fieldId) =>
-        validFieldIdSet.has(fieldId),
-      ),
-      isActive: row.isActive !== false,
-    }))
-    .filter((row: any) => row.positionIds.length > 0);
-  const allowedEventOfficialUserIds = hasExplicitEventOfficials
-    ? normalizedOfficialIds
-    : existingEventOfficials.map((row: any) => row.userId);
-  const eventOfficialsInput = hasExplicitEventOfficials
-    ? filterEventOfficialsByUserIds(
-        payload.eventOfficials,
-        allowedEventOfficialUserIds,
-      )
-    : payload.eventOfficials;
-  const resolvedEventOfficials = hasExplicitEventOfficials
-    ? normalizeEventOfficials(eventOfficialsInput, {
-        eventId: id,
-        positionIds: resolvedOfficialPositions.map((position) => position.id),
-        fieldIds,
-      })
-    : existingEventOfficials.length
-      ? existingEventOfficials
-      : [];
-  const allowedFieldIdSet = new Set(fieldIds);
-  const fieldsToPersist = allowedFieldIdSet.size
-    ? fields.filter((field: any) => {
-        const fieldId = field?.id;
-        return typeof fieldId === "string" && allowedFieldIdSet.has(fieldId);
-      })
-    : fields;
   const fieldsToPersistIds = fieldsToPersist
     .map((field: any) => field?.id)
     .filter(
       (fieldId: unknown): fieldId is string =>
         typeof fieldId === "string" && fieldId.length > 0,
     );
-  const fieldsToInspect = Array.from(
-    new Set([...fieldsToPersistIds, ...fieldIds]),
-  );
-  const existingFieldOwnershipById = new Map<
-    string,
-    { organizationId: string | null; createdBy: string | null }
-  >();
-  if (
-    fieldsToInspect.length &&
-    typeof (client as any).fields?.findMany === "function"
-  ) {
-    const existingFields = await (client as any).fields.findMany({
-      where: { id: { in: fieldsToInspect } },
-      select: { id: true, organizationId: true, createdBy: true },
+  const { existingFieldOwnershipById } = await loadEventUpsertFieldOwnership({
+    client,
+    fieldsToPersistIds,
+    fieldIds,
+    hasExplicitFieldResourcePayload,
+    existingEvent,
+  });
+  const { teamIds, placeholderTeamIds, timeSlotIds } =
+    resolveEventUpsertTeamAndSlotIds({
+      payload,
+      teams,
+      canonicalTimeSlots,
+      isAffiliateExternalEvent,
     });
-    for (const row of existingFields as Array<{
-      id: string;
-      organizationId?: string | null;
-      createdBy?: string | null;
-    }>) {
-      existingFieldOwnershipById.set(row.id, {
-        organizationId: normalizeEntityId(row.organizationId) ?? null,
-        createdBy: normalizeEntityId(row.createdBy) ?? null,
-      });
-    }
-  }
-  if (hasExplicitFieldResourcePayload || !existingEvent) {
-    const payloadFieldIdSet = new Set(fieldsToPersistIds);
-    const missingFieldIds = fieldIds.filter(
-      (fieldId) =>
-        !existingFieldOwnershipById.has(fieldId) &&
-        !payloadFieldIdSet.has(fieldId),
-    );
-    if (missingFieldIds.length) {
-      throw new EventFieldReferenceError(missingFieldIds);
-    }
-  }
-  const teamIds =
-    Array.isArray(payload.teamIds) && payload.teamIds.length
-      ? payload.teamIds
-      : teams.map((team: any) => team.id).filter(Boolean);
-  const placeholderTeamIds = teams
-    .filter((team: any) => {
-      const id = normalizeEntityId(team?.id);
-      if (!id) {
-        return false;
-      }
-      const kind = String(team?.kind ?? "")
-        .trim()
-        .toUpperCase();
-      const captainId = String(team?.captainId ?? "").trim();
-      const parentTeamId = normalizeEntityId(team?.parentTeamId);
-      const name = String(team?.name ?? "")
-        .trim()
-        .toLowerCase();
-      return (
-        kind === "PLACEHOLDER" ||
-        (!parentTeamId && !captainId && name.startsWith("place holder"))
-      );
-    })
-    .map((team: any) => team.id)
-    .filter(
-      (id: unknown): id is string => typeof id === "string" && id.length > 0,
-    );
-  const derivedTimeSlotIds = canonicalTimeSlots
-    .map((slot) => slot.id)
-    .filter(Boolean);
-  const timeSlotIds = isAffiliateExternalEvent
-    ? []
-    : derivedTimeSlotIds.length
-      ? derivedTimeSlotIds
-      : Array.isArray(payload.timeSlotIds) && payload.timeSlotIds.length
-        ? payload.timeSlotIds
-        : [];
-  const incomingDivisionFieldMap = coerceDivisionFieldMap(
-    payload.divisionFieldIds,
-  );
   const divisionFieldMap = buildDivisionFieldMap(
     normalizedEventDivisionIds,
     fieldIds,
-    incomingDivisionFieldMap,
+    coerceDivisionFieldMap(payload.divisionFieldIds),
   );
 
-  if (nextEventType === "TRYOUT") {
-    if (!resolvedOrganizationId || !organizationAccess) {
-      throw new Error("Tryout events must belong to an organization.");
-    }
-    const enabledFeatures = ensureStringArray(
-      (organizationAccess as any).enabledFeatures,
-    );
-    if (!enabledFeatures.includes("CLUB_TEAMS")) {
-      throw new Error(
-        "Enable club and team features before creating tryout events.",
-      );
-    }
-    if (singleDivisionEnabled) {
-      throw new Error("Tryout events must use their selected club divisions.");
-    }
-    if (
-      !normalizedDivisionDetails.length ||
-      normalizedDivisionDetails.some((detail) => !detail.sourceDivisionId)
-    ) {
-      throw new Error("Select at least one club division for this tryout.");
-    }
-    const sourceDivisionIds = Array.from(
-      new Set(
-        normalizedDivisionDetails
-          .map((detail) => detail.sourceDivisionId)
-          .filter((divisionId): divisionId is string => Boolean(divisionId)),
-      ),
-    );
-    const sourceDivisions = await client.divisions.findMany({
-      where: {
-        id: { in: sourceDivisionIds },
-        organizationId: resolvedOrganizationId,
-        scope: "ORGANIZATION",
-        status: { not: "ARCHIVED" },
-      } as any,
-      select: { id: true },
-    });
-    if (sourceDivisions.length !== sourceDivisionIds.length) {
-      throw new Error("One or more selected club divisions are unavailable.");
-    }
-  }
-  const isAutomatedScheduling = normalizeAutomatedSchedulingForEventType(
+  await assertEventUpsertTryoutDivisions({
     nextEventType,
-    Object.prototype.hasOwnProperty.call(payload, "isAutomatedScheduling")
-      ? payload.isAutomatedScheduling
-      : Object.prototype.hasOwnProperty.call(payload, "automatedScheduling")
-        ? payload.automatedScheduling
-        : existingEvent?.automatedScheduling,
-  );
-  const normalizedParentEvent =
-    normalizeEntityId(payload.parentEvent) ??
-    normalizeEntityId((existingEvent as any)?.parentEvent);
-  const isWeeklyParent =
-    nextEventType === "WEEKLY_EVENT" && !normalizedParentEvent;
-  if (
-    !isAffiliateExternalEvent &&
-    !isTemplateState &&
-    isWeeklyParent &&
-    !hasWeeklyRepeatingTimeSlot(canonicalTimeSlots)
-  ) {
-    throw new Error(WEEKLY_REPEATING_TIME_SLOT_REQUIRED_MESSAGE);
-  }
-  const supportsNoFixedEndDateTime =
-    !isAffiliateExternalEvent && isSchedulableEventType(nextEventType);
-  const payloadIncludesEnd = Object.prototype.hasOwnProperty.call(
+    resolvedOrganizationId,
+    organizationAccess,
+    singleDivisionEnabled,
+    normalizedDivisionDetails,
+    client,
+  });
+  const upsertSchedulingFlags = resolveEventUpsertSchedulingFlags({
     payload,
-    "end",
-  );
-  const payloadIncludesScheduleEndConstraint =
-    Object.prototype.hasOwnProperty.call(payload, "scheduleEndConstraint");
-  const payloadIncludesGeneratedScheduleEnd =
-    Object.prototype.hasOwnProperty.call(payload, "generatedScheduleEnd");
-  const payloadIncludesNoFixedEndDateTime =
-    Object.prototype.hasOwnProperty.call(payload, "noFixedEndDateTime");
-  const parsedPayloadEnd = payloadIncludesEnd
-    ? coerceDate(payload.end, eventTimeZone)
-    : null;
-  const parsedExistingEnd = coerceDate(existingEvent?.end, eventTimeZone);
-  const parsedPayloadScheduleEndConstraint =
-    payloadIncludesScheduleEndConstraint
-      ? coerceDate(payload.scheduleEndConstraint, eventTimeZone)
-      : null;
-  const parsedPayloadGeneratedScheduleEnd = payloadIncludesGeneratedScheduleEnd
-    ? coerceDate(payload.generatedScheduleEnd, eventTimeZone)
-    : null;
-  const parsedExistingScheduleEndConstraint = coerceDate(
-    (existingEvent as any)?.scheduleEndConstraint,
+    existingEvent,
+    nextEventType,
+    payloadEventType,
+    includePlayoffsOrPools,
+    isAffiliateExternalEvent,
+  });
+  const {
+    isAutomatedScheduling,
+    normalizedParentEvent,
+    isWeeklyParent,
+    supportsNoFixedEndDateTime,
+    splitLeaguePlayoffDivisions,
+    shouldClearLeaguePlayoffDivisionMappings,
+  } = upsertSchedulingFlags;
+  const normalizedPlayoffDivisionDetails = shouldClearLeaguePlayoffDivisionMappings
+    ? []
+    : upsertDivisions.normalizedPlayoffDivisionDetails;
+  const parsedEnds = resolveEventUpsertParsedEnds({
+    payload,
+    existingEvent,
     eventTimeZone,
+  });
+  const {
+    payloadIncludesEnd,
+    payloadIncludesScheduleEndConstraint,
+    payloadIncludesGeneratedScheduleEnd,
+    payloadIncludesNoFixedEndDateTime,
+    parsedPayloadEnd,
+    parsedExistingEnd,
+    parsedPayloadScheduleEndConstraint,
+    parsedPayloadGeneratedScheduleEnd,
+    parsedExistingScheduleEndConstraint,
+    parsedExistingGeneratedScheduleEnd,
+  } = parsedEnds;
+  const candidateEnd = resolveEventUpsertCandidateEnd(
+    payloadIncludesEnd,
+    parsedPayloadEnd,
+    parsedExistingEnd,
   );
-  const parsedExistingGeneratedScheduleEnd = coerceDate(
-    (existingEvent as any)?.generatedScheduleEnd,
-    eventTimeZone,
+  const hasExplicitScheduleMode = hasEventUpsertExplicitScheduleMode(
+    payloadIncludesScheduleEndConstraint,
+    payloadIncludesGeneratedScheduleEnd,
   );
-  const candidateEnd = payloadIncludesEnd
-    ? parsedPayloadEnd
-    : parsedExistingEnd;
-  const splitLeaguePlayoffDivisions =
-    payloadEventType === "LEAGUE"
-      ? coerceBoolean(payload.splitLeaguePlayoffDivisions, false)
-      : nextEventType === "TOURNAMENT" && includePlayoffsOrPools;
-  const shouldClearLeaguePlayoffDivisionMappings =
-    nextEventType === "LEAGUE" &&
-    Object.prototype.hasOwnProperty.call(
-      payload,
-      "splitLeaguePlayoffDivisions",
-    ) &&
-    !splitLeaguePlayoffDivisions;
-  if (shouldClearLeaguePlayoffDivisionMappings) {
-    normalizedPlayoffDivisionDetails = [];
-  }
-  const hasExplicitScheduleMode =
-    payloadIncludesScheduleEndConstraint || payloadIncludesGeneratedScheduleEnd;
-  const fallbackNoFixedEndDateTime = supportsNoFixedEndDateTime
-    ? hasExplicitScheduleMode
-      ? !parsedPayloadScheduleEndConstraint
-      : !payloadIncludesNoFixedEndDateTime &&
-          typeof (existingEvent as any)?.noFixedEndDateTime === "boolean"
-        ? Boolean((existingEvent as any).noFixedEndDateTime)
-        : candidateEnd === null
-    : false;
-  const noFixedEndDateTime = supportsNoFixedEndDateTime
-    ? hasExplicitScheduleMode
-      ? !parsedPayloadScheduleEndConstraint
-      : coerceBoolean(payload.noFixedEndDateTime, fallbackNoFixedEndDateTime)
-    : false;
-  const scheduleEndConstraint = noFixedEndDateTime
-    ? null
-    : (parsedPayloadScheduleEndConstraint ??
-      (payloadIncludesScheduleEndConstraint
-        ? null
-        : (parsedExistingScheduleEndConstraint ?? candidateEnd)));
-  const generatedScheduleEnd = noFixedEndDateTime
-    ? (parsedPayloadGeneratedScheduleEnd ??
-      (payloadIncludesGeneratedScheduleEnd
-        ? null
-        : (parsedExistingGeneratedScheduleEnd ??
-          parsedExistingEnd ??
-          candidateEnd)))
-    : null;
-  const normalizedEnd = noFixedEndDateTime
-    ? generatedScheduleEnd
-    : scheduleEndConstraint;
-
-  if (
-    !noFixedEndDateTime &&
-    (!normalizedEnd || normalizedEnd.getTime() <= start.getTime())
-  ) {
-    throw new Error(
-      'End date/time must be after start date/time when "No fixed end datetime scheduling" is disabled.',
-    );
-  }
-  if (!isAffiliateExternalEvent) {
-    assertValidOneTimeTimeSlots({
-      slots: canonicalTimeSlots,
-      fallbackTimeZone: eventTimeZone,
-      eventStart: start,
-      eventEnd: noFixedEndDateTime ? null : normalizedEnd,
-      eligibleResourceIds: fieldIds,
-      eligibleDivisionIds: normalizedEventDivisionIds,
-    });
-    assertRepeatingTimeSlotsResolvable({
-      slots: canonicalTimeSlots,
-      eventStart: start,
-      eventEnd: noFixedEndDateTime ? null : normalizedEnd,
-    });
-    await reserveRentalBookingSlotsForEvent(client, id, canonicalTimeSlots);
-  }
-  if (!isAffiliateExternalEvent && normalizedEnd) {
-    await assertNoEventFieldSchedulingConflicts({
-      client,
-      eventId: id,
-      organizationId: resolvedOrganizationId,
-      fieldIds,
-      timeSlotIds,
-      start,
-      end: normalizedEnd,
-      noFixedEndDateTime,
-      eventType: nextEventType,
-      parentEvent: normalizedParentEvent,
-    });
-  }
-
-  const normalizedLeagueScoringConfig = normalizeLeagueScoringConfigPayload(
-    payload.leagueScoringConfig,
-  );
-  const payloadLeagueScoringConfigId =
-    typeof payload.leagueScoringConfigId === "string" &&
-    payload.leagueScoringConfigId.trim().length > 0
-      ? payload.leagueScoringConfigId.trim()
-      : null;
-  const existingLeagueScoringConfigId =
-    typeof existingEvent?.leagueScoringConfigId === "string" &&
-    existingEvent.leagueScoringConfigId.trim().length > 0
-      ? existingEvent.leagueScoringConfigId.trim()
-      : null;
-  let resolvedLeagueScoringConfigId =
-    payloadLeagueScoringConfigId ?? existingLeagueScoringConfigId ?? null;
-  if (isAffiliateExternalEvent) {
-    resolvedLeagueScoringConfigId = null;
-  } else if (nextEventType === "LEAGUE") {
-    const leagueScoringConfigId =
-      normalizedLeagueScoringConfig?.id ??
-      payloadLeagueScoringConfigId ??
-      existingLeagueScoringConfigId ??
-      crypto.randomUUID();
-    const leagueScoringData = normalizedLeagueScoringConfig?.data ?? {};
-    const now = new Date();
-    await client.leagueScoringConfigs.upsert({
-      where: { id: leagueScoringConfigId },
-      create: {
-        id: leagueScoringConfigId,
-        ...leagueScoringData,
-        createdAt: now,
-        updatedAt: now,
-      },
-      update: {
-        ...leagueScoringData,
-        updatedAt: now,
-      },
-    });
-    resolvedLeagueScoringConfigId = leagueScoringConfigId;
-  }
-
-  const normalizedEventPrice = (() => {
-    if (!canPersistEventPricing) {
-      return 0;
-    }
-    const parsed = coerceNullableNumber(payload.price);
-    if (typeof parsed === "number") {
-      return Math.max(0, Math.round(parsed));
-    }
-    return 0;
-  })();
-  const normalizedEventAllowPaymentPlans =
-    canPersistEventPricing &&
-    !isAffiliateExternalEvent &&
-    !isManualRegistrationPayment
-      ? (payload.allowPaymentPlans ?? null)
-      : false;
-  const normalizedEventInstallmentCount =
-    canPersistEventPricing &&
-    !isAffiliateExternalEvent &&
-    !isManualRegistrationPayment
-      ? (payload.installmentCount ?? null)
-      : 0;
-  const normalizedEventInstallmentDueDates =
-    canPersistEventPricing &&
-    !isAffiliateExternalEvent &&
-    !isManualRegistrationPayment
-      ? isWeeklyParent
-        ? []
-        : (ensureArray(payload.installmentDueDates)
-            .map((value) => coerceDate(value, eventTimeZone))
-            .filter(Boolean) as Date[])
-      : [];
-  const normalizedEventInstallmentDueRelativeDays =
-    canPersistEventPricing &&
-    !isAffiliateExternalEvent &&
-    !isManualRegistrationPayment &&
-    isWeeklyParent
-      ? normalizeInstallmentRelativeDayList(payload.installmentDueRelativeDays)
-      : [];
-  const normalizedEventInstallmentAmounts =
-    canPersistEventPricing &&
-    !isAffiliateExternalEvent &&
-    !isManualRegistrationPayment
-      ? ensureNumberArray(payload.installmentAmounts)
-      : [];
-  const hasLegacyOfficialSchedulingModeInput =
-    Object.prototype.hasOwnProperty.call(payload, "officialSchedulingMode");
-  const legacyOfficialSchedulingMode = normalizeOfficialSchedulingMode(
-    payload.officialSchedulingMode,
-    normalizeOfficialSchedulingMode(
-      (existingEvent as any)?.officialSchedulingMode,
-    ),
-  );
-  const staffingPriority = isAffiliateExternalEvent
-    ? "FULL_COVERAGE_WITH_CONFLICTS_ALLOWED"
-    : normalizeStaffingPriority(
-        payload.staffingPriority ??
-          (hasLegacyOfficialSchedulingModeInput
-            ? undefined
-            : (existingEvent as any)?.staffingPriority),
-        hasLegacyOfficialSchedulingModeInput
-          ? payload.officialSchedulingMode
-          : (existingEvent as any)?.officialSchedulingMode,
-      );
-  const requestedDoTeamsOfficiate = coerceNullableBoolean(
-    Object.prototype.hasOwnProperty.call(payload, "doTeamsOfficiate")
-      ? payload.doTeamsOfficiate
-      : (existingEvent as any)?.doTeamsOfficiate,
-  );
-  const normalizedDoTeamsOfficiate = isAffiliateExternalEvent
-    ? false
-    : requestedDoTeamsOfficiate;
-  const normalizedTeamOfficialsMaySwap =
-    normalizedDoTeamsOfficiate === true
-      ? coerceBoolean(payload.teamOfficialsMaySwap, false)
-      : false;
-  const normalizedTeamSignup = isAffiliateExternalEvent
-    ? false
-    : (payload.teamSignup ?? true);
-  const existingTeamCheckInMode = normalizeTeamCheckInMode(
-    (existingEvent as any)?.teamCheckInMode,
-  );
-  const normalizedTeamCheckInMode = normalizedTeamSignup
-    ? normalizeTeamCheckInMode(payload.teamCheckInMode, existingTeamCheckInMode)
-    : "OFF";
-  const normalizedTeamCheckInOpenMinutesBefore = normalizeOpenMinutesBefore(
-    payload.teamCheckInOpenMinutesBefore,
-    normalizeOpenMinutesBefore(
-      (existingEvent as any)?.teamCheckInOpenMinutesBefore,
-    ),
-  );
-  const normalizedAllowMatchRosterEdits = normalizedTeamSignup
-    ? coerceBoolean(
-        payload.allowMatchRosterEdits,
-        Boolean((existingEvent as any)?.allowMatchRosterEdits),
-      )
-    : false;
-  const normalizedAllowTemporaryMatchPlayers =
-    normalizedTeamSignup && normalizedAllowMatchRosterEdits
-      ? coerceBoolean(
-          payload.allowTemporaryMatchPlayers,
-          Boolean((existingEvent as any)?.allowTemporaryMatchPlayers),
-        )
-      : false;
-  const payloadIncludesMatchRulesOverride =
-    Object.prototype.hasOwnProperty.call(payload, "matchRulesOverride");
-  const normalizedMatchRulesOverride = (() => {
-    if (isAffiliateExternalEvent) {
-      return null;
-    }
-    if (payloadIncludesMatchRulesOverride) {
-      const value = payload.matchRulesOverride;
-      if (value && typeof value === "object" && !Array.isArray(value)) {
-        return { ...(value as Record<string, unknown>) };
-      }
-      return null;
-    }
-
-    const existingMatchRulesOverride = (existingEvent as any)
-      ?.matchRulesOverride;
-    if (
-      existingMatchRulesOverride &&
-      typeof existingMatchRulesOverride === "object" &&
-      !Array.isArray(existingMatchRulesOverride)
-    ) {
-      return { ...(existingMatchRulesOverride as Record<string, unknown>) };
-    }
-    return existingMatchRulesOverride === null ? null : undefined;
-  })();
-  const rawEventMaxParticipants =
-    coerceNullableNumber(payload.maxParticipants) ??
-    (nextEventType === "TOURNAMENT" ? MIN_BRACKET_TEAM_COUNT : null);
-  const normalizedEventMaxParticipants =
-    nextEventType === "TOURNAMENT"
-      ? normalizeLegacyBracketTeamCount(rawEventMaxParticipants)
-      : rawEventMaxParticipants;
-  const payloadIncludesAutoCreatePointMatchIncidents =
-    Object.prototype.hasOwnProperty.call(
-      payload,
-      "autoCreatePointMatchIncidents",
-    );
-  const normalizedAutoCreatePointMatchIncidents = isAffiliateExternalEvent
-    ? false
-    : payloadIncludesAutoCreatePointMatchIncidents
-      ? coerceBoolean(payload.autoCreatePointMatchIncidents, false)
-      : typeof (existingEvent as any)?.autoCreatePointMatchIncidents ===
-          "boolean"
-        ? Boolean((existingEvent as any).autoCreatePointMatchIncidents)
-        : undefined;
-  const normalizedTaxHandling = normalizeEventTaxHandling(
-    Object.prototype.hasOwnProperty.call(payload, "taxHandling")
-      ? payload.taxHandling
-      : (existingEvent as any)?.taxHandling,
-  );
-  const normalizedOrganizerManualTaxRateBps =
-    normalizeOrganizerManualTaxRateBps(
-      Object.prototype.hasOwnProperty.call(payload, "organizerManualTaxRateBps")
-        ? payload.organizerManualTaxRateBps
-        : (existingEvent as any)?.organizerManualTaxRateBps,
-    );
-
-  const eventData = {
-    id,
-    name: payload.name ?? "Untitled Event",
-    start,
-    end: normalizedEnd,
+  const noFixedEndDateTime = resolveEventUpsertNoFixedEndDateTime({
+    payload,
+    existingEvent,
+    supportsNoFixedEndDateTime,
+    hasExplicitScheduleMode,
+    payloadIncludesNoFixedEndDateTime,
+    parsedPayloadScheduleEndConstraint,
+    candidateEnd,
+  });
+  const {
     scheduleEndConstraint,
     generatedScheduleEnd,
-    timeZone: eventTimeZone,
-    description: payload.description ?? null,
-    affiliateUrl:
-      normalizedAffiliateUrl.length > 0 ? normalizedAffiliateUrl : null,
-    winnerSetCount: payload.winnerSetCount ?? null,
-    loserSetCount: payload.loserSetCount ?? null,
-    doubleElimination: payload.doubleElimination ?? false,
-    location: eventLocation,
-    address: payload.address ?? null,
-    rating: payload.rating ?? null,
-    teamSizeLimit: payload.teamSizeLimit ?? 0,
-    automatedScheduling: isAutomatedScheduling,
-    maxParticipants: normalizedEventMaxParticipants,
-    minAge: payload.minAge ?? null,
-    maxAge: payload.maxAge ?? null,
-    hostId: normalizedHostId,
-    assistantHostIds: isAffiliateExternalEvent
-      ? []
-      : normalizedAssistantHostIds,
+    normalizedEnd,
+  } = resolveEventUpsertScheduleEnds({
     noFixedEndDateTime,
-    price: normalizedEventPrice,
-    registrationPaymentMode: isAffiliateExternalEvent
-      ? "ONLINE"
-      : normalizedRegistrationPaymentMode,
-    manualPaymentLinks:
-      isManualRegistrationPayment && !isAffiliateExternalEvent
-        ? normalizedManualPaymentLinks
-        : [],
-    manualPaymentInstructions:
-      isManualRegistrationPayment && !isAffiliateExternalEvent
-        ? normalizedManualPaymentInstructions
-        : null,
-    taxHandling: normalizedTaxHandling,
-    organizerManualTaxRateBps: normalizedOrganizerManualTaxRateBps,
-    singleDivision: payload.singleDivision ?? false,
-    registrationByDivisionType: payload.registrationByDivisionType ?? false,
-    cancellationRefundHours: isManualRegistrationPayment
-      ? null
-      : (payload.cancellationRefundHours ?? null),
-    teamSignup: normalizedTeamSignup,
-    prize: payload.prize ?? null,
-    registrationCutoffHours: payload.registrationCutoffHours ?? null,
-    seedColor: payload.seedColor ?? null,
-    imageId: payload.imageId ?? "",
-    // Deprecated input: derive field count from linked fields instead of trusting payload.fieldCount.
-    fieldCount: fieldIds.length > 0 ? fieldIds.length : null,
-    winnerBracketPointsToVictory: ensureNumberArray(
-      payload.winnerBracketPointsToVictory,
-    ),
-    loserBracketPointsToVictory: ensureNumberArray(
-      payload.loserBracketPointsToVictory,
-    ),
-    coordinates: payloadCoordinates,
-    gamesPerOpponent: payload.gamesPerOpponent ?? null,
-    includePlayoffs: includePlayoffsOrPools,
-    playoffTeamCount: normalizedEventPlayoffTeamCount,
-    usesSets: payload.usesSets ?? false,
-    matchDurationMinutes: payload.matchDurationMinutes ?? null,
-    setDurationMinutes: payload.setDurationMinutes ?? null,
-    setsPerMatch: payload.setsPerMatch ?? null,
-    restTimeMinutes: payload.restTimeMinutes ?? null,
-    state: payload.state ?? null,
-    pointsToVictory: ensureNumberArray(payload.pointsToVictory),
-    sportIds: effectiveSportIds,
-    timeSlotIds,
+    isWeeklyParent,
+    parsedPayloadGeneratedScheduleEnd,
+    payloadIncludesGeneratedScheduleEnd,
+    parsedExistingGeneratedScheduleEnd,
+    parsedExistingScheduleEndConstraint,
+    parsedExistingEnd,
+    candidateEnd,
+    parsedPayloadScheduleEndConstraint,
+    payloadIncludesScheduleEndConstraint,
+  });
+  assertEventUpsertEndAfterStart({
+    noFixedEndDateTime,
+    normalizedEnd,
+    start,
+  });
+  await assertEventUpsertScheduling({
+    isAffiliateExternalEvent,
+    isTemplateState,
+    isWeeklyParent,
+    canonicalTimeSlots,
+    eventTimeZone,
+    start,
+    noFixedEndDateTime,
+    normalizedEnd,
     fieldIds,
-    leagueScoringConfigId: resolvedLeagueScoringConfigId,
-    organizationId: payload.organizationId ?? null,
-    parentEvent: normalizedParentEvent,
-    autoCancellation: payload.autoCancellation ?? null,
-    eventType: payload.eventType ?? null,
-    ...(hasLegacyOfficialSchedulingModeInput
-      ? { officialSchedulingMode: legacyOfficialSchedulingMode }
-      : {}),
-    staffingPriority,
-    doTeamsOfficiate: normalizedDoTeamsOfficiate ?? null,
-    teamOfficialsMaySwap: normalizedTeamOfficialsMaySwap,
-    teamCheckInMode: normalizedTeamCheckInMode,
-    teamCheckInOpenMinutesBefore: normalizedTeamCheckInOpenMinutesBefore,
-    allowMatchRosterEdits: normalizedAllowMatchRosterEdits,
-    allowTemporaryMatchPlayers: normalizedAllowTemporaryMatchPlayers,
-    officialPositions: isAffiliateExternalEvent
-      ? []
-      : resolvedOfficialPositions,
-    ...(normalizedMatchRulesOverride !== undefined
-      ? { matchRulesOverride: normalizedMatchRulesOverride }
-      : {}),
-    ...(normalizedAutoCreatePointMatchIncidents !== undefined
-      ? {
-          autoCreatePointMatchIncidents:
-            normalizedAutoCreatePointMatchIncidents,
-        }
-      : {}),
-    allowPaymentPlans: normalizedEventAllowPaymentPlans,
-    installmentCount: normalizedEventInstallmentCount,
-    installmentDueDates: normalizedEventInstallmentDueDates,
-    installmentDueRelativeDays: normalizedEventInstallmentDueRelativeDays,
-    installmentAmounts: normalizedEventInstallmentAmounts,
-    allowTeamSplitDefault: payload.allowTeamSplitDefault ?? null,
-    splitLeaguePlayoffDivisions,
-    requiredTemplateIds: isAffiliateExternalEvent
-      ? []
-      : ensureStringArray(payload.requiredTemplateIds),
-    updatedAt: new Date(),
-  };
-
-  const defaultDivisionPrice = (() => {
-    if (!canPersistEventPricing) {
-      return 0;
-    }
-    return normalizedEventPrice;
-  })();
-  const defaultDivisionMaxParticipants =
-    typeof normalizedEventMaxParticipants === "number"
-      ? Math.max(0, Math.trunc(normalizedEventMaxParticipants))
-      : normalizedEventMaxParticipants;
-  const defaultDivisionPlayoffTeamCount = normalizedEventPlayoffTeamCount;
-  const defaultDivisionAllowPaymentPlans = (() => {
-    if (
-      !canPersistEventPricing ||
-      isAffiliateExternalEvent ||
-      isManualRegistrationPayment
-    ) {
-      return false;
-    }
-    const parsed = coerceNullableBoolean(payload.allowPaymentPlans);
-    if (typeof parsed === "boolean") {
-      return parsed;
-    }
-    return parsed ?? null;
-  })();
-  const defaultDivisionInstallmentCount = (() => {
-    if (
-      !canPersistEventPricing ||
-      isAffiliateExternalEvent ||
-      isManualRegistrationPayment
-    ) {
-      return 0;
-    }
-    const parsed = coerceNullableNumber(payload.installmentCount);
-    if (typeof parsed === "number") {
-      return Math.max(0, Math.trunc(parsed));
-    }
-    return parsed ?? null;
-  })();
-  const defaultDivisionInstallmentDueDates =
-    canPersistEventPricing &&
-    !isAffiliateExternalEvent &&
-    !isManualRegistrationPayment
-      ? isWeeklyParent
-        ? []
-        : normalizeInstallmentDateList(payload.installmentDueDates)
-      : [];
-  const defaultDivisionInstallmentDueRelativeDays =
-    canPersistEventPricing &&
-    !isAffiliateExternalEvent &&
-    !isManualRegistrationPayment &&
-    isWeeklyParent
-      ? normalizeInstallmentRelativeDayList(payload.installmentDueRelativeDays)
-      : [];
-  const defaultDivisionInstallmentAmounts =
-    canPersistEventPricing &&
-    !isAffiliateExternalEvent &&
-    !isManualRegistrationPayment
-      ? normalizeInstallmentAmountList(payload.installmentAmounts)
-      : [];
-
-  if (
-    nextEventType === "LEAGUE" &&
-    includePlayoffsOrPools &&
-    splitLeaguePlayoffDivisions
-  ) {
-    const needsPersistedDivisionDetails =
-      Boolean(existingEvent) &&
-      (normalizedDivisionDetails.some(
-        (detail) =>
-          detail.playoffTeamCount === undefined ||
-          detail.playoffPlacementDivisionIds === undefined,
-      ) ||
-        normalizedPlayoffDivisionDetails.some(
-          (detail) => detail.maxParticipants === undefined,
-        ));
-    const persistedDivisionDetails = needsPersistedDivisionDetails
-      ? ((await client.divisions.findMany({
-          where: {
-            eventId: id,
-            role: { in: ["ENTRY", "PHASE"] },
-            status: "ACTIVE",
-          },
-          select: {
-            id: true,
-            key: true,
-            maxParticipants: true,
-            playoffTeamCount: true,
-            playoffPlacementDivisionIds: true,
-          },
-        })) as PersistedSplitLeagueDivisionDetail[])
-      : [];
-
-    assertSplitLeaguePlayoffMappingCounts({
-      divisionDetails: normalizedDivisionDetails,
-      playoffDivisionDetails: normalizedPlayoffDivisionDetails,
-      persistedDivisionDetails,
-      defaultPlayoffTeamCount: defaultDivisionPlayoffTeamCount,
-    });
-  }
-
-  await upsertEventWithSchemaContract(
+    normalizedEventDivisionIds,
     client,
     id,
-    eventData as Record<string, unknown>,
-  );
-  const hasIncomingTags = Object.prototype.hasOwnProperty.call(payload, "tags");
-  const hasIncomingEventType = Object.prototype.hasOwnProperty.call(
-    payload,
-    "eventType",
-  );
-  if (hasIncomingTags) {
-    await syncEventTags(id, payload.tags, client, {
-      eventType: payload.eventType,
-    });
-  } else if (hasIncomingEventType) {
-    await syncEventTypeTagsForEvent(id, payload.eventType, client);
-  }
-  await syncEventParticipantRegistrationsFromCompatibilityIds(client, {
-    eventId: id,
-    createdBy: normalizedHostId,
-    teamIds,
-    userIds: ensureStringArray(payload.userIds),
-    waitListIds: ensureStringArray(payload.waitListIds),
-    freeAgentIds: ensureStringArray(payload.freeAgentIds),
-    syncTeams:
-      Object.prototype.hasOwnProperty.call(payload, "teamIds") ||
-      teams.length > 0,
-    syncUsers: Object.prototype.hasOwnProperty.call(payload, "userIds"),
-    syncWaitList: Object.prototype.hasOwnProperty.call(payload, "waitListIds"),
-    syncFreeAgents: Object.prototype.hasOwnProperty.call(
-      payload,
-      "freeAgentIds",
-    ),
-    divisionIdByRegistrantId: compatibilityDivisionIdByRegistrantId,
-    placeholderTeamIds,
+    timeSlotIds,
+    resolvedOrganizationId,
+    nextEventType,
+    normalizedParentEvent,
   });
-  if (
-    isAffiliateExternalEvent ||
-    hasExplicitEventOfficials ||
-    !existingEvent ||
-    existingEventOfficials.length === 0
-  ) {
-    const eventOfficialsToPersist = isAffiliateExternalEvent
-      ? []
-      : resolvedEventOfficials;
-    await persistEventOfficialRows(client, id, eventOfficialsToPersist);
-    await clearRemovedEventOfficialMatchAssignments(
+  const resolvedLeagueScoringConfigId =
+    await resolveEventUpsertLeagueScoringConfigId({
+      payload,
+      existingEvent,
       client,
-      id,
-      eventOfficialsToPersist,
-      isAffiliateExternalEvent ? [] : resolvedOfficialPositions,
-    );
-  }
+      nextEventType,
+      isAffiliateExternalEvent,
+    });
+  const eventPricing = resolveEventUpsertEventPricing({
+    payload,
+    canPersistEventPricing,
+    isAffiliateExternalEvent,
+    isManualRegistrationPayment,
+    isWeeklyParent,
+    eventTimeZone,
+  });
+  const {
+    normalizedEventPrice,
+    normalizedEventAllowPaymentPlans,
+    normalizedEventInstallmentCount,
+    normalizedEventInstallmentDueDates,
+    normalizedEventInstallmentDueRelativeDays,
+    normalizedEventInstallmentAmounts,
+  } = eventPricing;
+  const normalizedEventMaxParticipants = resolveEventUpsertMaxParticipants(
+    payload,
+    nextEventType,
+  );
+  const staffing = resolveEventUpsertStaffing({
+    payload,
+    existingEvent,
+    isAffiliateExternalEvent,
+    normalizedTeamSignupInput: payload.teamSignup,
+    nextEventType,
+  });
+  const {
+    hasLegacyOfficialSchedulingModeInput,
+    legacyOfficialSchedulingMode,
+    staffingPriority,
+    normalizedDoTeamsOfficiate,
+    normalizedTeamOfficialsMaySwap,
+    normalizedTeamSignup,
+    normalizedTeamCheckInMode,
+    normalizedTeamCheckInOpenMinutesBefore,
+    normalizedAllowMatchRosterEdits,
+    normalizedAllowTemporaryMatchPlayers,
+  } = staffing;
+  const normalizedMatchRulesOverride = resolveEventUpsertMatchRulesOverride({
+    payload,
+    existingEvent,
+    isAffiliateExternalEvent,
+    nextEventType,
+  });
+  const {
+    normalizedAutoCreatePointMatchIncidents,
+    normalizedTaxHandling,
+    normalizedOrganizerManualTaxRateBps,
+  } = resolveEventUpsertIncidentAndTaxData({
+    payload,
+    existingEvent,
+    isAffiliateExternalEvent,
+    nextEventType,
+  });
+  const eventData = buildEventUpsertData({
+    payload,
+    id,
+    start,
+    normalizedEnd,
+    scheduleEndConstraint,
+    generatedScheduleEnd,
+    eventTimeZone,
+    normalizedAffiliateUrl,
+    eventLocation,
+    isAutomatedScheduling,
+    normalizedEventMaxParticipants,
+    normalizedHostId,
+    normalizedAssistantHostIds,
+    isAffiliateExternalEvent,
+    noFixedEndDateTime,
+    normalizedEventPrice,
+    normalizedRegistrationPaymentMode,
+    isManualRegistrationPayment,
+    normalizedManualPaymentLinks,
+    normalizedManualPaymentInstructions,
+    normalizedTaxHandling,
+    normalizedOrganizerManualTaxRateBps,
+    normalizedTeamSignup,
+    fieldIds,
+    normalizedEventPlayoffTeamCount,
+    includePlayoffsOrPools,
+    effectiveSportIds,
+    timeSlotIds,
+    resolvedLeagueScoringConfigId,
+    normalizedParentEvent,
+    hasLegacyOfficialSchedulingModeInput,
+    legacyOfficialSchedulingMode,
+    staffingPriority,
+    normalizedDoTeamsOfficiate,
+    normalizedTeamOfficialsMaySwap,
+    normalizedTeamCheckInMode,
+    normalizedTeamCheckInOpenMinutesBefore,
+    normalizedAllowMatchRosterEdits,
+    normalizedAllowTemporaryMatchPlayers,
+    resolvedOfficialPositions,
+    normalizedMatchRulesOverride,
+    normalizedAutoCreatePointMatchIncidents,
+    normalizedEventAllowPaymentPlans,
+    normalizedEventInstallmentCount,
+    normalizedEventInstallmentDueDates,
+    normalizedEventInstallmentDueRelativeDays,
+    normalizedEventInstallmentAmounts,
+    splitLeaguePlayoffDivisions,
+    payloadCoordinates,
+  });
+  const divisionPricingDefaults =
+    resolveEventUpsertDivisionPricingDefaults({
+      payload,
+      canPersistEventPricing,
+      isAffiliateExternalEvent,
+      isManualRegistrationPayment,
+      isWeeklyParent,
+      normalizedEventPrice,
+      normalizedEventMaxParticipants,
+      normalizedEventPlayoffTeamCount,
+    });
+  const {
+    defaultDivisionPrice,
+    defaultDivisionMaxParticipants,
+    defaultDivisionPlayoffTeamCount,
+    defaultDivisionAllowPaymentPlans,
+    defaultDivisionInstallmentCount,
+    defaultDivisionInstallmentDueDates,
+    defaultDivisionInstallmentDueRelativeDays,
+    defaultDivisionInstallmentAmounts,
+  } = divisionPricingDefaults;
 
-  const syncedDivisionIds = await syncEventDivisions(
-    {
+  await assertEventUpsertSplitLeagueMappings({
+    nextEventType,
+    includePlayoffsOrPools,
+    splitLeaguePlayoffDivisions,
+    existingEvent,
+    client,
+    id,
+    normalizedDivisionDetails,
+    normalizedPlayoffDivisionDetails,
+    defaultDivisionPlayoffTeamCount,
+  });
+
+  await persistEventUpsertCore({
+    client,
+    id,
+    payload,
+    eventData: eventData as Record<string, unknown>,
+    existingEvent,
+    normalizedHostId,
+    teamIds,
+    teams,
+    compatibilityDivisionIdByRegistrantId,
+    placeholderTeamIds,
+    isAffiliateExternalEvent,
+    hasExplicitEventOfficials,
+    existingEventOfficials,
+    resolvedEventOfficials,
+    resolvedOfficialPositions,
+    divisionSyncInput: {
       eventId: id,
       divisionIds: normalizedEventDivisionIds,
       fieldIds,
@@ -7722,241 +13941,41 @@ export const upsertEventFromPayload = async (
       eventType: nextEventType,
       clearPlayoffPlacementMappings: shouldClearLeaguePlayoffDivisionMappings,
     },
+  });
+  await removeEventUpsertStaleFields({
     client,
-  );
-  void syncedDivisionIds;
-
-  const removedFieldIds = existingFieldIds.filter(
-    (fieldId) => !allowedFieldIdSet.has(fieldId),
-  );
-  if (removedFieldIds.length && !options.preserveOperationalState) {
-    await client.matches.deleteMany({
-      where: {
-        eventId: id,
-        fieldId: { in: removedFieldIds },
-      },
-    });
-    await client.fields.deleteMany({
-      where: {
-        id: { in: removedFieldIds },
-        organizationId: null,
-      },
-    });
-  }
-
-  for (const field of fieldsToPersist) {
-    const fieldId = field.id;
-    if (!fieldId) continue;
-    const existingFieldOwnership = existingFieldOwnershipById.get(fieldId);
-    const incomingFieldOrganizationId = normalizeEntityId(field.organizationId);
-    const persistedFieldOrganizationId =
-      existingFieldOwnership?.organizationId ?? null;
-    const persistedFieldCreatedBy = existingFieldOwnership?.createdBy ?? null;
-    const hasPersistedFieldOwnership = Boolean(existingFieldOwnership);
-    const createFieldOrganizationId = null;
-    if (
-      hasPersistedFieldOwnership &&
-      incomingFieldOrganizationId !== null &&
-      persistedFieldOrganizationId !== incomingFieldOrganizationId
-    ) {
-      console.warn(
-        `[events] Ignoring attempted field ownership change in upsertEventFromPayload for field ${fieldId}: ` +
-          `${persistedFieldOrganizationId ?? "null"} -> ${incomingFieldOrganizationId}`,
-      );
-    }
-    const hasRentalSlotIdsInput = Array.isArray(field.rentalSlotIds);
-    const normalizedRentalSlotIds = hasRentalSlotIdsInput
-      ? ensureArray(field.rentalSlotIds)
-          .map((value) => String(value))
-          .filter(Boolean)
-      : null;
-    const fieldLocation = normalizeOptionalText(field.location);
-    await client.fields.upsert({
-      where: { id: fieldId },
-      create: {
-        id: fieldId,
-        lat: field.lat ?? null,
-        long: field.long ?? null,
-        heading: field.heading ?? null,
-        inUse: field.inUse ?? null,
-        name: field.name ?? null,
-        rentalSlotIds: normalizedRentalSlotIds ?? [],
-        location: fieldLocation ?? defaultFieldLocation,
-        organizationId: createFieldOrganizationId,
-        createdBy: persistedFieldCreatedBy ?? (normalizedHostId || null),
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      },
-      update: {
-        lat: field.lat ?? null,
-        long: field.long ?? null,
-        heading: field.heading ?? null,
-        inUse: field.inUse ?? null,
-        name: field.name ?? null,
-        ...(normalizedRentalSlotIds !== null
-          ? { rentalSlotIds: normalizedRentalSlotIds }
-          : {}),
-        location: field.location ?? null,
-        ...(hasPersistedFieldOwnership
-          ? {
-              organizationId: persistedFieldOrganizationId ?? null,
-              createdBy: persistedFieldCreatedBy ?? null,
-            }
-          : {}),
-        updatedAt: new Date(),
-      },
-    });
-  }
-
-  for (const team of teams) {
-    const teamId = team.id;
-    if (!teamId) continue;
-    const normalizedTeamDivision =
-      normalizeDivisionKey(
-        typeof team.division === "string" ? team.division : team.division?.id,
-      ) ??
-      normalizedEventDivisionIds[0] ??
-      DEFAULT_DIVISION_KEY;
-    const inferredTeamDivision = inferDivisionDetails({
-      identifier: normalizedTeamDivision,
-      sportInput: primarySportId ?? undefined,
-    });
-    const normalizedTeamDivisionTypeId =
-      normalizeDivisionKey(team.divisionTypeId) ??
-      inferredTeamDivision.divisionTypeId;
-    await client.teams.upsert({
-      where: { id: teamId },
-      create: {
-        id: teamId,
-        eventId: id,
-        kind: (team.captainId ?? "") ? "REGISTERED" : "PLACEHOLDER",
-        playerIds: ensureArray(team.playerIds),
-        playerRegistrationIds: ensureArray((team as any).playerRegistrationIds),
-        division: normalizedTeamDivision,
-        divisionTypeId: normalizedTeamDivisionTypeId,
-        name: team.name ?? null,
-        captainId: team.captainId ?? "",
-        managerId: team.managerId ?? team.captainId ?? "",
-        headCoachId: team.headCoachId ?? null,
-        coachIds: ensureArray((team as any).assistantCoachIds ?? team.coachIds),
-        staffAssignmentIds: ensureArray((team as any).staffAssignmentIds),
-        parentTeamId: team.parentTeamId ?? null,
-        pending: ensureArray(team.pending),
-        teamSize: team.teamSize ?? 0,
-        profileImageId: team.profileImageId ?? null,
-        sport: team.sport ?? null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      },
-      update: {
-        eventId: id,
-        kind: (team.captainId ?? "") ? "REGISTERED" : "PLACEHOLDER",
-        playerIds: ensureArray(team.playerIds),
-        playerRegistrationIds: ensureArray((team as any).playerRegistrationIds),
-        division: normalizedTeamDivision,
-        divisionTypeId: normalizedTeamDivisionTypeId,
-        name: team.name ?? null,
-        captainId: team.captainId ?? "",
-        managerId: team.managerId ?? team.captainId ?? "",
-        headCoachId: team.headCoachId ?? null,
-        coachIds: ensureArray((team as any).assistantCoachIds ?? team.coachIds),
-        staffAssignmentIds: ensureArray((team as any).staffAssignmentIds),
-        parentTeamId: team.parentTeamId ?? null,
-        pending: ensureArray(team.pending),
-        teamSize: team.teamSize ?? 0,
-        profileImageId: team.profileImageId ?? null,
-        sport: team.sport ?? null,
-        updatedAt: new Date(),
-      },
-    });
-  }
-
-  for (const slot of canonicalTimeSlots) {
-    const slotId = slot.id;
-    if (!slotId) continue;
-    const slotTimeZone = resolveTimeZone(slot.timeZone, eventTimeZone);
-    const startDate = coerceDate(slot.startDate, slotTimeZone) ?? new Date();
-    const endDate = slot.endDate
-      ? coerceDate(slot.endDate, slotTimeZone)
-      : null;
-    const slotDivisionKeys = normalizeDivisionIdentifierList(
-      slot.divisions,
-      id,
-    );
-    const slotDivisions = singleDivisionEnabled
-      ? normalizedEventDivisionIds
-      : slotDivisionKeys.length
-        ? slotDivisionKeys
-        : normalizedEventDivisionIds;
-    const now = new Date();
-    await client.timeSlots.upsert({
-      where: { id: slotId },
-      create: {
-        id: slotId,
-        dayOfWeek: slot.dayOfWeek ?? null,
-        daysOfWeek: slot.daysOfWeek,
-        startTimeMinutes: slot.startTimeMinutes ?? null,
-        endTimeMinutes: slot.endTimeMinutes ?? null,
-        startDate,
-        timeZone: slotTimeZone,
-        repeating: Boolean(slot.repeating),
-        endDate,
-        scheduledFieldId: slot.scheduledFieldId ?? null,
-        scheduledFieldIds: slot.scheduledFieldIds,
-        price: slot.price ?? null,
-        taxHandling: normalizeRentalTaxHandling((slot as any).taxHandling),
-        sourceType: slot.sourceType,
-        rentalBookingId: slot.rentalBookingId,
-        rentalBookingItemId: slot.rentalBookingItemId,
-        rentalLocked: slot.rentalLocked,
-        createdAt: now,
-        updatedAt: now,
-      } as any,
-      update: {
-        dayOfWeek: slot.dayOfWeek ?? null,
-        daysOfWeek: slot.daysOfWeek,
-        startTimeMinutes: slot.startTimeMinutes ?? null,
-        endTimeMinutes: slot.endTimeMinutes ?? null,
-        startDate,
-        timeZone: slotTimeZone,
-        repeating: Boolean(slot.repeating),
-        endDate,
-        scheduledFieldId: slot.scheduledFieldId ?? null,
-        scheduledFieldIds: slot.scheduledFieldIds,
-        price: slot.price ?? null,
-        taxHandling: normalizeRentalTaxHandling((slot as any).taxHandling),
-        sourceType: slot.sourceType,
-        rentalBookingId: slot.rentalBookingId,
-        rentalBookingItemId: slot.rentalBookingItemId,
-        rentalLocked: slot.rentalLocked,
-        updatedAt: now,
-      } as any,
-    });
-    await persistTimeSlotDivisions(client, slotId, slotDivisions, now);
-  }
-
-  const nextTimeSlotIdSet = new Set(timeSlotIds);
-  const staleTimeSlotIds = existingTimeSlotIds.filter(
-    (slotId) => !nextTimeSlotIdSet.has(slotId),
-  );
-  if (staleTimeSlotIds.length) {
-    if (client.rentalBookingItems?.updateMany) {
-      await client.rentalBookingItems.updateMany({
-        where: {
-          eventId: id,
-          eventTimeSlotId: { in: staleTimeSlotIds },
-        } as any,
-        data: {
-          eventId: null,
-          eventTimeSlotId: null,
-          updatedAt: new Date(),
-        } as any,
-      });
-    }
-    await client.timeSlots.deleteMany({
-      where: { id: { in: staleTimeSlotIds } },
-    });
-  }
-
+    id,
+    existingFieldIds,
+    allowedFieldIdSet,
+    preserveOperationalState: options.preserveOperationalState === true,
+  });
+  await persistEventUpsertFields({
+    client,
+    fieldsToPersist,
+    existingFieldOwnershipById,
+    defaultFieldLocation,
+    normalizedHostId,
+  });
+  await persistEventUpsertTeams({
+    client,
+    id,
+    teams,
+    normalizedEventDivisionIds,
+    primarySportId,
+  });
+  await persistEventUpsertTimeSlots({
+    client,
+    id,
+    canonicalTimeSlots,
+    eventTimeZone,
+    singleDivisionEnabled,
+    normalizedEventDivisionIds,
+  });
+  await removeEventUpsertStaleTimeSlots({
+    client,
+    id,
+    existingTimeSlotIds,
+    timeSlotIds,
+  });
   return id;
 };
