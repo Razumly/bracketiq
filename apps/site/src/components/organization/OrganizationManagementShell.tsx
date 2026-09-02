@@ -7,6 +7,7 @@ import {
   BarChart3,
   Building2,
   CalendarDays,
+  Check,
   ChevronDown,
   ChevronRight,
   CircleDollarSign,
@@ -18,6 +19,7 @@ import {
   MapPin,
   Pencil,
   Search,
+  Share2,
   Settings2,
   ShieldCheck,
   Store,
@@ -103,19 +105,21 @@ export type OrganizationManagementShellProps = {
   onEditOrganization?: () => void;
   canToggleHomePagePreference?: boolean;
   isCurrentOrganizationHomePage?: boolean;
-  updatingHomePagePreference?: boolean;
+  isUpdatingHomePagePreference?: boolean;
   onSetHomePage?: (checked: boolean) => void;
   canCreateEvent?: boolean;
-  createEventDisabled?: boolean;
+  isCreateEventDisabled?: boolean;
   createEventHelperText?: string | null;
   onCreateEvent?: () => void;
-  overviewEmpty?: boolean;
+  isOverviewEmpty?: boolean;
+  onShareOrganization?: () => void;
   children?: ReactNode;
 };
 
 function OrganizationShellLoadingState() {
   return (
-    <div className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8" data-testid="organization-shell-loading">
+    <div className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8" data-testid="organization-shell-loading" role="status" aria-live="polite">
+      <span className="sr-only">Loading Organization overview</span>
       <div className="h-36 animate-pulse rounded-2xl bg-muted motion-reduce:animate-none sm:h-52" />
       <div className="-mt-10 space-y-4 px-2 sm:-mt-14 sm:px-6">
         <div className="h-24 w-24 animate-pulse rounded-full border-4 border-background bg-muted motion-reduce:animate-none sm:h-28 sm:w-28" />
@@ -195,10 +199,11 @@ function OrganizationShellPermissionState({
 function OrganizationShellEmptyOverview({
   organization,
   canCreateEvent,
-  createEventDisabled,
+  isCreateEventDisabled,
+  canEditOrganization,
   onCreateEvent,
   onEditOrganization,
-}: Pick<OrganizationManagementShellProps, 'organization' | 'canCreateEvent' | 'createEventDisabled' | 'onCreateEvent' | 'onEditOrganization'>) {
+}: Pick<OrganizationManagementShellProps, 'organization' | 'canCreateEvent' | 'isCreateEventDisabled' | 'onCreateEvent' | 'onEditOrganization'> & { canEditOrganization?: boolean }) {
   return (
     <div className="grid gap-4 lg:grid-cols-3" data-testid="organization-overview-empty">
       <Card className="lg:col-span-2">
@@ -214,12 +219,12 @@ function OrganizationShellEmptyOverview({
           </div>
           <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
             {canCreateEvent && onCreateEvent && (
-              <Button disabled={createEventDisabled} onClick={onCreateEvent}>
+              <Button disabled={isCreateEventDisabled} onClick={onCreateEvent}>
                 <CalendarDays data-icon="inline-start" aria-hidden="true" />
                 Create event
               </Button>
             )}
-            {onEditOrganization && (
+            {canEditOrganization && onEditOrganization && (
               <Button variant="outline" onClick={onEditOrganization}>
                 <Pencil data-icon="inline-start" aria-hidden="true" />
                 Complete profile
@@ -304,8 +309,8 @@ function OrganizationSectionDrawer({
               )}
             </div>
             <div className="min-w-0 flex-1">
-              <SheetTitle id={titleId} className="truncate">{organization.name}</SheetTitle>
-              <SheetDescription>Organization sections</SheetDescription>
+              <SheetTitle id={titleId}>Organization sections</SheetTitle>
+              <SheetDescription className="truncate">{organization.name}</SheetDescription>
             </div>
             <SheetClose aria-label="Close Organization sections" className="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground">
               <X aria-hidden="true" className="size-5" />
@@ -333,7 +338,7 @@ function OrganizationSectionDrawer({
                   const Icon = ORGANIZATION_TAB_ICONS[option.value];
                   const isActive = option.value === activeTab;
                   return (
-                    <button
+                  <button
                       key={option.value}
                       type="button"
                       aria-current={isActive ? 'page' : undefined}
@@ -345,6 +350,7 @@ function OrganizationSectionDrawer({
                     >
                       <Icon aria-hidden="true" className="size-4 shrink-0" />
                       <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                      {isActive && <Check aria-hidden="true" className="size-4 shrink-0" />}
                       <ChevronRight aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
                     </button>
                   );
@@ -375,16 +381,17 @@ export function OrganizationManagementShell({
   onEditOrganization,
   canToggleHomePagePreference = false,
   isCurrentOrganizationHomePage = false,
-  updatingHomePagePreference = false,
+  isUpdatingHomePagePreference = false,
   onSetHomePage,
   canCreateEvent = false,
-  createEventDisabled = false,
+  isCreateEventDisabled = false,
   createEventHelperText,
   onCreateEvent,
-  overviewEmpty = false,
+  isOverviewEmpty = false,
+  onShareOrganization,
   children,
 }: OrganizationManagementShellProps) {
-  const [sectionsOpen, setSectionsOpen] = useState(false);
+  const [isSectionsOpen, setIsSectionsOpen] = useState(false);
   const homePageCheckboxId = useId();
 
   if (status === 'loading') {
@@ -422,11 +429,14 @@ export function OrganizationManagementShell({
 
   return (
     <div className="min-w-0 bg-background text-foreground" data-testid="organization-management-shell">
-      <section className="relative overflow-hidden bg-slate-950">
+      <section className="relative overflow-hidden bg-background">
         <div
           aria-hidden="true"
-          className="h-36 bg-[radial-gradient(circle_at_78%_18%,rgba(20,184,166,0.36),transparent_28%),linear-gradient(120deg,#0f172a_0%,#172554_55%,#0f766e_140%)] sm:h-52"
-          style={organization.brandPrimaryColor ? { backgroundColor: organization.brandPrimaryColor } : undefined}
+          className="h-36 bg-[radial-gradient(circle_at_78%_18%,rgba(20,184,166,0.36),transparent_28%),linear-gradient(120deg,#0f172a_0%,#172554_55%,#0f766e_140%)] bg-cover bg-center sm:h-52"
+          style={{
+            ...(organization.brandPrimaryColor ? { backgroundColor: organization.brandPrimaryColor } : {}),
+            ...(organization.imageUrl ? { backgroundImage: `linear-gradient(rgba(15,23,42,0.18),rgba(15,23,42,0.18)), url(${organization.imageUrl})` } : {}),
+          }}
         >
           <div className="mx-auto h-full max-w-[1440px] px-4 sm:px-6 lg:px-8">
             <div className="h-full w-1/2 border-r border-white/10 opacity-60" />
@@ -439,10 +449,10 @@ export function OrganizationManagementShell({
                 <div className="grid size-24 shrink-0 place-content-center overflow-hidden rounded-full border-4 border-background bg-card shadow-lg sm:size-32">
                   <Image src={logoUrl} alt={`${organization.name} logo`} width={128} height={128} unoptimized className="size-full object-contain" />
                 </div>
-                <div className="min-w-0 pb-1 text-white">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/65">Organization</p>
+                <div className="min-w-0 pb-1 text-foreground">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Organization</p>
                   <h1 className="mt-1 break-words text-2xl font-semibold tracking-tight sm:text-3xl">{organization.name}</h1>
-                  <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-white/75">
+                  <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
                     {organization.location && (
                       <span className="inline-flex min-w-0 items-center gap-1.5">
                         <MapPin aria-hidden="true" className="size-4 shrink-0" />
@@ -459,6 +469,12 @@ export function OrganizationManagementShell({
                 </div>
               </div>
               <div className="flex w-full flex-wrap items-center justify-start gap-2 sm:w-auto sm:justify-end">
+                {onShareOrganization && (
+                  <Button variant="outline" onClick={onShareOrganization} className="border-border bg-background text-foreground hover:bg-muted">
+                    <Share2 data-icon="inline-start" aria-hidden="true" />
+                    <span>Share</span>
+                  </Button>
+                )}
                 {canEditOrganization && onEditOrganization && (
                   <Button variant="default" onClick={onEditOrganization} className="bg-accent text-accent-foreground hover:bg-accent/90">
                     <Pencil data-icon="inline-start" aria-hidden="true" />
@@ -470,17 +486,17 @@ export function OrganizationManagementShell({
             </div>
             <div className="flex flex-wrap items-center gap-2 pl-0 sm:pl-36">
               {organization.sports?.map((sport) => (
-                <span key={sport} className="rounded-full border border-white/20 bg-white/10 px-2.5 py-1 text-xs font-medium text-white/85">
+                <span key={sport} className="rounded-full border border-border bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
                   {sport}
                 </span>
               ))}
               {headerBadges}
               {canToggleHomePagePreference && onSetHomePage && (
-                <label htmlFor={homePageCheckboxId} className="inline-flex min-h-11 items-center gap-2 rounded-lg px-2 text-xs text-white/75 hover:bg-white/10">
+                <label htmlFor={homePageCheckboxId} className="inline-flex min-h-11 items-center gap-2 rounded-lg px-2 text-xs text-muted-foreground hover:bg-muted">
                   <Checkbox
                     id={homePageCheckboxId}
                     checked={isCurrentOrganizationHomePage}
-                    disabled={updatingHomePagePreference}
+                    disabled={isUpdatingHomePagePreference}
                     onCheckedChange={(checked) => onSetHomePage(Boolean(checked))}
                     className="text-white before:border-white/50 before:bg-transparent data-checked:before:border-accent data-checked:before:bg-accent"
                   />
@@ -497,8 +513,8 @@ export function OrganizationManagementShell({
           <Button
             variant="outline"
             aria-haspopup="dialog"
-            aria-expanded={sectionsOpen}
-            onClick={() => setSectionsOpen(true)}
+            aria-expanded={isSectionsOpen}
+            onClick={() => setIsSectionsOpen(true)}
             className="w-full justify-between bg-card text-left"
           >
             <span className="min-w-0 truncate">
@@ -507,33 +523,41 @@ export function OrganizationManagementShell({
             </span>
             <ChevronDown aria-hidden="true" className="size-4 shrink-0" />
           </Button>
-          <OrganizationSectionDrawer
+            <OrganizationSectionDrawer
             organization={organization}
             availableTabs={availableTabs}
             activeTab={activeTab}
             onTabChange={onTabChange}
-            open={sectionsOpen}
-            onOpenChange={setSectionsOpen}
+              open={isSectionsOpen}
+              onOpenChange={setIsSectionsOpen}
           />
         </div>
 
         <div className="hidden md:block">
           <Tabs value={activeTab} onValueChange={onTabChange}>
-            <TabsList variant="line" aria-label="Organization sections" className="w-full gap-x-1 gap-y-0 border-b border-border rounded-none p-0">
-              {availableTabs.map((option) => {
-                const Icon = ORGANIZATION_TAB_ICONS[option.value];
-                return (
-                  <TabsTrigger
-                    key={option.value}
-                    value={option.value}
-                    className="min-h-12 rounded-none px-3 text-sm lg:px-4"
-                  >
-                    <Icon aria-hidden="true" className="hidden size-4 lg:inline-block" />
-                    {option.label}
-                  </TabsTrigger>
-                );
-              })}
-            </TabsList>
+            {ORGANIZATION_TAB_GROUPS.map((group) => {
+              const groupTabs = group.values
+                .map((value) => availableTabs.find((option) => option.value === value))
+                .filter((option): option is OrganizationTabOption => Boolean(option));
+              if (groupTabs.length === 0) return null;
+              return (
+                <TabsList key={group.label} variant="line" aria-label={`${group.label} sections`} className="w-full gap-x-1 gap-y-0 border-b border-border rounded-none p-0">
+                  {groupTabs.map((option) => {
+                    const Icon = ORGANIZATION_TAB_ICONS[option.value];
+                    return (
+                      <TabsTrigger
+                        key={option.value}
+                        value={option.value}
+                        className="min-h-12 rounded-none px-3 text-sm lg:px-4"
+                      >
+                        <Icon aria-hidden="true" className="hidden size-4 lg:inline-block" />
+                        {option.label}
+                      </TabsTrigger>
+                    );
+                  })}
+                </TabsList>
+              );
+            })}
           </Tabs>
         </div>
 
@@ -545,7 +569,7 @@ export function OrganizationManagementShell({
             </div>
             {canCreateEvent && onCreateEvent && (
               <div className="flex flex-col items-end gap-1">
-                <Button disabled={createEventDisabled} onClick={onCreateEvent}>
+                <Button disabled={isCreateEventDisabled} onClick={onCreateEvent}>
                   <CalendarDays data-icon="inline-start" aria-hidden="true" />
                   Create event
                 </Button>
@@ -555,12 +579,13 @@ export function OrganizationManagementShell({
           </div>
         )}
 
-        {activeTab === 'overview' && overviewEmpty ? (
+        {activeTab === 'overview' && isOverviewEmpty ? (
           <div className="mt-6">
             <OrganizationShellEmptyOverview
               organization={organization}
               canCreateEvent={canCreateEvent}
-              createEventDisabled={createEventDisabled}
+              isCreateEventDisabled={isCreateEventDisabled}
+              canEditOrganization={canEditOrganization}
               onCreateEvent={onCreateEvent}
               onEditOrganization={onEditOrganization}
             />
