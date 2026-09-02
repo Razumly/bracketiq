@@ -911,7 +911,18 @@ const handleSupervisorAdmissionCloseRequest = async (
   input: AffiliateAgentGatewayHttpDependencies,
 ): Promise<boolean> => {
   if (!matchesGatewayRequest(httpRequest, 'POST', '/admission/supervisor/close')) return false;
-  if (!supervisorHaltCredentialMatches(request, input.supervisorHaltCredential)) {
+  const admissionRequest = workerGatewayRequestFrom(await readJson(request));
+  if (!admissionRequest) {
+    sendJson(response, 400, {
+      error: {
+        code: 'INVALID_REQUEST',
+        safeMessage: 'Worker admission fields are invalid.',
+        isRetryable: false,
+      },
+    });
+    return true;
+  }
+  if (!(await input.verifyWorkerCredential(admissionRequest))) {
     sendUnauthorized(response);
     return true;
   }

@@ -29,6 +29,7 @@ import {
 const OPERATOR_TOKEN = "operator-token";
 const REPLENISHMENT_TOKEN = "replenishment-token-4f3a9e7c";
 const SUPERVISOR_HALT_CREDENTIAL = "supervisor-halt-credential-4f3a9e7c";
+const WORKER_ROLE_CREDENTIAL = "worker-role-credential-4f3a9e7c";
 const PATH_PREFIX = "/v1/affiliate-agent";
 describe("affiliate agent gateway artifact store", () => {
   it("uses persisted gateway artifact MIME when local storage omits content type", async () => {
@@ -310,8 +311,8 @@ describe("affiliate agent gateway admission HTTP boundary", () => {
     heartbeat: jest.fn(async () => undefined),
   };
   const verifyWorkerCredential = jest.fn(async (
-    _input: Readonly<{ role: string; workerId: string; roleCredential: string }>,
-  ) => true);
+    input: Readonly<{ role: string; workerId: string; roleCredential: string }>,
+  ) => input.roleCredential !== "random-credential");
   const invocationReconciler = {
     reconcileInvocation: jest.fn(async () => ({ kind: "TERMINAL_ACCEPTED" as const })),
   } as unknown as AffiliateAgentInvocationReconciler;
@@ -390,15 +391,18 @@ describe("affiliate agent gateway admission HTTP boundary", () => {
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     },
   );
-  const requestSupervisor = (credential = SUPERVISOR_HALT_CREDENTIAL) => fetch(
+  const requestSupervisor = (credential = WORKER_ROLE_CREDENTIAL) => fetch(
     `${running.baseUrl}${PATH_PREFIX}/admission/supervisor/close`,
     {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-affiliate-gateway-supervisor-halt-credential": credential,
       },
-      body: JSON.stringify({}),
+      body: JSON.stringify({
+        role: "SUPPLY_REVIEWER",
+        workerId: "supply-reviewer-1",
+        roleCredential: credential,
+      }),
     },
   );
 
@@ -853,7 +857,7 @@ describe("affiliate agent gateway admission HTTP boundary", () => {
     expect(admission.isOpen()).toBe(true);
   });
 
-  it("rejects child or random halt requests without mutating global admission", async () => {
+  it("rejects child or random worker credential requests without mutating global admission", async () => {
     await admission.open();
     let response = await request("/admission/worker/close", "", "POST", {});
     expect(response.status).toBe(401);
@@ -865,7 +869,8 @@ describe("affiliate agent gateway admission HTTP boundary", () => {
     await expect(response.json()).resolves.toEqual({ error: "Unauthorized." });
     expect(admission.isOpen()).toBe(true);
   });
-  it("allows only the dedicated supervisor halt credential to close global admission", async () => {
+
+  it("allows an authenticated supervisor worker to close global admission", async () => {
     await admission.open();
 
     const response = await requestSupervisor();

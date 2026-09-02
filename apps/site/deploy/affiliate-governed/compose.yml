@@ -14,7 +14,6 @@ x-agent-environment: &agent-environment
 x-agent-supervisor-environment: &agent-supervisor-environment
   <<: *agent-environment
   AFFILIATE_AGENT_WORKSPACE_SIGNING_KEY: ${AFFILIATE_AGENT_WORKSPACE_SIGNING_KEY:?Set the workspace signing key}
-  AFFILIATE_AGENT_SUPERVISOR_HALT_CREDENTIAL: ${AFFILIATE_AGENT_SUPERVISOR_HALT_CREDENTIAL:?Set the supervisor halt credential}
 x-agent-restart-policy: &agent-restart-policy
   # Keep the safe stopped-creation value until the reviewed startup gates pass.
   # The private deployment.env may change this to unless-stopped only after
@@ -95,8 +94,16 @@ services:
       AFFILIATE_GATEWAY_OPERATOR_TOKEN: ${AFFILIATE_GATEWAY_OPERATOR_TOKEN:?Set the gateway operator token}
       AFFILIATE_GATEWAY_REPLENISHMENT_TOKEN: ${AFFILIATE_GATEWAY_REPLENISHMENT_TOKEN:?Set the gateway replenishment token}
       AFFILIATE_AGENT_SUPERVISOR_HALT_CREDENTIAL: ${AFFILIATE_AGENT_SUPERVISOR_HALT_CREDENTIAL:?Set the supervisor halt credential}
-      # Keep the reviewed alert URL in private deployment.env; never commit it.
-      AFFILIATE_OPERATIONAL_ALERT_WEBHOOK_URL: ${AFFILIATE_OPERATIONAL_ALERT_WEBHOOK_URL:?Set the operational alert webhook URL}
+      # Use the existing reviewed production SMTP path until a dedicated
+      # mobile or webhook alert channel is approved.
+      AFFILIATE_OPERATIONAL_ALERT_EMAIL_TO: ${AFFILIATE_OPERATIONAL_ALERT_EMAIL_TO:?Set the operational alert email}
+      SMTP_HOST: ${SMTP_HOST:?Set the SMTP host}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:?Set the SMTP user}
+      SMTP_PASS: ${SMTP_PASS:?Set the SMTP password}
+      SMTP_FROM: ${SMTP_FROM:?Set the SMTP sender}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-BracketIQ}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
       AFFILIATE_SUPPLY_ROLLOUT_COHORT: ${AFFILIATE_SUPPLY_ROLLOUT_COHORT:?Set the Supply Contract rollout cohort}
       AFFILIATE_AGENT_DEPLOYMENT_CONTRACT_JSON: ${AFFILIATE_AGENT_DEPLOYMENT_CONTRACT_JSON:?Set the reviewed deployment contract JSON}
       AFFILIATE_AGENT_TOKEN_SIGNING_KEY: ${AFFILIATE_AGENT_TOKEN_SIGNING_KEY:?Set the token signing key}
@@ -172,6 +179,9 @@ services:
   affiliate-agent-runner:
     <<: *agent-common
     user: "0:0"
+    networks:
+      - gateway_internal
+      - gateway_egress
     group_add:
       - "${AFFILIATE_AGENT_GID:?Set reviewed agent group}"
     cgroup: private
@@ -189,14 +199,17 @@ services:
       - KILL
       - DAC_OVERRIDE
       - FOWNER
+    volumes:
+      - *agent-workspace-volume
+      - ${AFFILIATE_AGENT_CODEX_AUTH_FILE:?Set reviewed Codex auth file}:/run/secrets/codex-auth.json:ro
     environment:
       <<: *agent-environment
       AFFILIATE_AGENT_UID: ${AFFILIATE_AGENT_UID:?Set the supervisor workspace UID}
       AFFILIATE_AGENT_RUNNER_CHILD_UID: ${AFFILIATE_AGENT_RUNNER_CHILD_UID:?Set the runner child UID}
       AFFILIATE_AGENT_RUNNER_CHILD_GID: ${AFFILIATE_AGENT_RUNNER_CHILD_GID:?Set the runner child GID}
       AFFILIATE_AGENT_RUNNER_PROTOCOL_PUBLIC_KEYS: ${AFFILIATE_AGENT_RUNNER_PROTOCOL_PUBLIC_KEYS:?Set the runner worker public-key map}
-      AFFILIATE_AGENT_MODEL_ADDRESS: ${AFFILIATE_AGENT_MODEL_ADDRESS:?Set AFFILIATE_AGENT_MODEL_ADDRESS}
-      AFFILIATE_AGENT_MODEL_CREDENTIAL: ${AFFILIATE_AGENT_MODEL_CREDENTIAL:?Set the model credential}
+      AFFILIATE_AGENT_CODEX_AUTH_SEED: /run/secrets/codex-auth.json
+      AFFILIATE_AGENT_CODEX_MODEL: ${AFFILIATE_AGENT_CODEX_MODEL:?Set Codex model}
       AFFILIATE_AGENT_RUNNER_CGROUP_RELATIVE_PATH: ${AFFILIATE_AGENT_RUNNER_CGROUP_RELATIVE_PATH:?Set the runner relative cgroup path}
     command: ["/usr/local/bin/affiliate-agent-runner"]
     healthcheck:

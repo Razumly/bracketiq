@@ -3,7 +3,7 @@
 import { generateKeyPairSync, sign, type KeyObject } from "node:crypto";
 import { EventEmitter, once } from "node:events";
 import { createConnection, createServer, type Socket } from "node:net";
-import { mkdir, mkdtemp, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn as nodeSpawn } from "node:child_process";
@@ -29,9 +29,11 @@ const createDeferred = <T>(): Deferred<T> => {
 import {
   configureRunnerConnection,
   prepareWorkspaceForSupervisorCleanup,
+  seedCodexAuthForWorkspace,
   AFFILIATE_AGENT_RUNNER_PRE_RESERVATION_TIMEOUT_MILLISECONDS,
   AFFILIATE_AGENT_RUNNER_RESERVATION_LIFETIME_MILLISECONDS,
   AFFILIATE_AGENT_RUNNER_MAX_CHILD_OUTPUT_BYTES,
+  type RunnerServerContext,
 } from "../../../../scripts/run-affiliate-agent-runner";
 import {
   parseAffiliateAgentRunnerResponse,
@@ -131,6 +133,7 @@ const runSingleChildScenario = async (
   event: AffiliateAgentProcessEvent;
   child: FakeCodexChild;
   environment: NodeJS.ProcessEnv;
+  args: readonly string[];
   responses: AffiliateAgentRunnerResponse[];
 }> => {
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");
@@ -153,8 +156,6 @@ const runSingleChildScenario = async (
     connections: new Set(),
     seenRequestIds: new Map(),
     protocolPublicKeys: new Map([["worker-1", publicKey]]),
-    modelAddress: "https://model.internal",
-    modelCredential: "credential",
     maxConcurrentInvocations: 1,
     spawnProcess,
   };
@@ -196,6 +197,8 @@ const runSingleChildScenario = async (
       throw new Error("Expected an EVENT response.");
     }
     if (!child) throw new Error("The Codex child was not spawned.");
+    const spawnArgs = spawnProcessMock.mock.calls[0]?.[1] as readonly string[] | undefined;
+    if (!spawnArgs) throw new Error("The Codex child arguments were not captured.");
     const spawnOptions = spawnProcessMock.mock.calls[0]?.[2] as {
       env?: NodeJS.ProcessEnv;
     } | undefined;
@@ -204,6 +207,7 @@ const runSingleChildScenario = async (
       event: eventResponse.event,
       child,
       environment: spawnOptions.env,
+      args: spawnArgs,
       responses,
     };
   } finally {
@@ -214,27 +218,66 @@ const runSingleChildScenario = async (
     await rm(socketDirectory, { recursive: true, force: true });
   }
 };
-
 describe("executable affiliate agent runner boundary", () => {
-  it("emits the child terminal wrapper and enables gateway network access", async () => {
+  it("emits the pinned Codex model and enables child network access", async () => {
     const terminal = {
       kind: "TERMINAL_SUBMISSION",
       idempotencyKey: "child-terminal-key",
       result: { disposition: "APPROVED" },
     };
-    const { event, child, environment } = await runSingleChildScenario(
+    const { event, child, environment, args } = await runSingleChildScenario(
       JSON.stringify(terminal),
       0,
     );
     expect(event).toEqual(terminal);
+    expect(args).toEqual(expect.arrayContaining([
+      "--model",
+      "gpt-5.6-luna",
+      "-c",
+      "sandbox_workspace_write.network_access=true",
+    ]));
     expect(environment.HOME).toBe("/workspaces/workspace-1-session/.codex");
     expect(environment.CODEX_HOME).toBe("/workspaces/workspace-1-session/.codex");
     expect(environment.TMPDIR).toBe("/workspaces/workspace-1-session/.tmp");
     expect(environment.TMP).toBe("/workspaces/workspace-1-session/.tmp");
     expect(environment.TEMP).toBe("/workspaces/workspace-1-session/.tmp");
-    expect(child.stdin.write).toHaveBeenCalledWith("initial prompt");
     expect(child.stdin.end).toHaveBeenCalledTimes(1);
     expect(child.stderr.resume).toHaveBeenCalledTimes(1);
+  });
+  it("copies only reviewed Codex auth into the workspace home", async () => {
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), "affiliate-runner-auth-"));
+    const seedPath = join(temporaryDirectory, "auth.json");
+    const workspacePath = join(temporaryDirectory, "workspace");
+    const targetPath = join(workspacePath, ".codex", "auth.json");
+    const seed = JSON.stringify({
+      auth_mode: "chatgpt",
+      access_token: "access-token",
+      refresh_token: "refresh-token",
+      account_id: "account-id",
+    });
+    try {
+      await mkdir(join(workspacePath, ".codex"), { recursive: true });
+      await writeFile(seedPath, seed, { mode: 0o600 });
+      expect(seedCodexAuthForWorkspace(seedPath, workspacePath)).toBe(targetPath);
+      expect(await readFile(targetPath, "utf8")).toBe(seed);
+      expect((await stat(targetPath)).mode & 0o777).toBe(0o600);
+    } finally {
+      await rm(temporaryDirectory, { recursive: true, force: true });
+    }
+  });
+  it("rejects an auth seed without reviewed ChatGPT credentials", async () => {
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), "affiliate-runner-auth-"));
+    const seedPath = join(temporaryDirectory, "auth.json");
+    const workspacePath = join(temporaryDirectory, "workspace");
+    try {
+      await mkdir(join(workspacePath, ".codex"), { recursive: true });
+      await writeFile(seedPath, JSON.stringify({ auth_mode: "api_key" }));
+      expect(() => seedCodexAuthForWorkspace(seedPath, workspacePath)).toThrow(
+        "reviewed ChatGPT credentials",
+      );
+    } finally {
+      await rm(temporaryDirectory, { recursive: true, force: true });
+    }
   });
   it("fails closed for a workspace symlink and never changes its target", async () => {
     const temporaryDirectory = await mkdtemp(join(tmpdir(), "affiliate-runner-cleanup-"));
@@ -289,8 +332,6 @@ describe("executable affiliate agent runner boundary", () => {
       connections: new Set(),
       seenRequestIds: new Map(),
       protocolPublicKeys: new Map([["worker-1", publicKey]]),
-      modelAddress: "https://model.internal",
-      modelCredential: "credential",
       maxConcurrentInvocations: 1,
       spawnProcess,
     };
@@ -400,8 +441,6 @@ describe("executable affiliate agent runner boundary", () => {
       connections: new Set(),
       seenRequestIds: new Map(),
       protocolPublicKeys: new Map([["worker-1", publicKey]]),
-      modelAddress: "https://model.internal",
-      modelCredential: "credential",
       maxConcurrentInvocations: 1,
       spawnProcess: jest.fn(),
     };
@@ -460,8 +499,6 @@ describe("executable affiliate agent runner boundary", () => {
       connections: new Set(),
       seenRequestIds: new Map(),
       protocolPublicKeys: new Map([["worker-1", publicKey]]),
-      modelAddress: "https://model.internal",
-      modelCredential: "credential",
       maxConcurrentInvocations: 1,
       spawnProcess,
     };
@@ -524,8 +561,6 @@ describe("executable affiliate agent runner boundary", () => {
         ["worker-1", first.publicKey],
         ["worker-2", second.publicKey],
       ]),
-      modelAddress: "https://model.internal",
-      modelCredential: "credential",
       maxConcurrentInvocations: 1,
       spawnProcess: jest.fn() as unknown as typeof nodeSpawn,
     };
@@ -571,8 +606,6 @@ describe("executable affiliate agent runner boundary", () => {
       connections: new Set(),
       seenRequestIds: new Map(),
       protocolPublicKeys: new Map([["worker-1", publicKey]]),
-      modelAddress: "https://model.internal",
-      modelCredential: "credential",
       maxConcurrentInvocations: 1,
       spawnProcess,
     };
@@ -635,8 +668,6 @@ describe("executable affiliate agent runner boundary", () => {
         ["worker-1", publicKey],
         ["worker-2", publicKey],
       ]),
-      modelAddress: "https://model.internal",
-      modelCredential: "credential",
       maxConcurrentInvocations: 1,
       spawnProcess,
     };
@@ -700,8 +731,6 @@ describe("executable affiliate agent runner boundary", () => {
         ["worker-1", publicKey],
         ["worker-2", publicKey],
       ]),
-      modelAddress: "https://model.internal",
-      modelCredential: "credential",
       maxConcurrentInvocations: 1,
       spawnProcess,
     };
@@ -847,8 +876,6 @@ describe("executable affiliate agent runner boundary", () => {
       connections: new Set(),
       seenRequestIds: new Map(),
       protocolPublicKeys: new Map([["worker-1", publicKey]]),
-      modelAddress: "https://model.internal",
-      modelCredential: "credential",
       maxConcurrentInvocations: 1,
       spawnProcess,
     };
@@ -910,8 +937,6 @@ describe("executable affiliate agent runner boundary", () => {
       connections: new Set(),
       seenRequestIds: new Map(),
       protocolPublicKeys: new Map([["worker-1", publicKey]]),
-      modelAddress: "https://model.internal",
-      modelCredential: "credential",
       maxConcurrentInvocations: 1,
       spawnProcess: jest.fn() as unknown as typeof nodeSpawn,
     };

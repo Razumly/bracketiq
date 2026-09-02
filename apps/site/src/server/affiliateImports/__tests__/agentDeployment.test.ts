@@ -229,9 +229,11 @@ const strictInventoryFixture = () => {
       },
       environment: [
         'AFFILIATE_AGENT_GATEWAY_ADDRESS=http://gateway:8080',
-        'AFFILIATE_AGENT_MODEL_CREDENTIAL=redacted',
+        'AFFILIATE_AGENT_CODEX_AUTH_SEED=/run/secrets/codex-auth.json',
+        'AFFILIATE_AGENT_CODEX_MODEL=gpt-5.6-luna',
       ],
-      networks: ['affiliate_gateway_internal'],
+      volumes: ['/reviewed/auth.json:/run/secrets/codex-auth.json:ro'],
+      networks: ['affiliate_gateway_internal', 'affiliate_gateway_egress'],
       isNetworkInternal: true,
       capDrop: ['ALL'],
       capAdd: ['CHOWN', 'DAC_OVERRIDE', 'FOWNER', 'KILL', 'SETGID', 'SETUID'],
@@ -496,6 +498,24 @@ describe('affiliate mapping VM deployment boundary', () => {
     );
   });
 
+  it('keeps Codex auth and egress access on the runner only', () => {
+    const compose = read('deploy/affiliate-governed/compose.yml');
+    const runner = compose
+      .split('\n  affiliate-agent-runner:\n')[1]
+      .split('\n  mapping-producer-1:\n')[0];
+    const supervisor = compose
+      .split('\n  mapping-producer-1:\n')[1]
+      .split('\n  mapping-producer-2:\n')[0];
+
+    expect(runner).toContain('- gateway_internal');
+    expect(runner).toContain('- gateway_egress');
+    expect(runner).toContain('AFFILIATE_AGENT_CODEX_AUTH_SEED');
+    expect(runner).toContain('AFFILIATE_AGENT_CODEX_MODEL');
+    expect(runner).toContain('${AFFILIATE_AGENT_CODEX_AUTH_FILE:?');
+    expect(supervisor).not.toContain('AFFILIATE_AGENT_CODEX');
+    expect(supervisor).not.toContain('codex-auth.json');
+    expect((compose.match(/AFFILIATE_AGENT_CODEX_AUTH_FILE/g) ?? []).length).toBe(1);
+  });
   it('gives the cadence controller only the replenishment credential', () => {
     const compose = read('deploy/affiliate-governed/compose.yml');
     const controller = compose

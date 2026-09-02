@@ -614,7 +614,6 @@ describe("affiliate agent supervisor CLI", () => {
         "role-credential",
         "COVERAGE_PLANNER",
         "worker-1",
-        "supervisor-halt-credential",
       );
       await gateway.haltAdmission();
       await expect(gateway.isAdmissionOpen()).resolves.toBe(false);

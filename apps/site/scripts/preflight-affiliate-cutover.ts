@@ -108,6 +108,7 @@ const agentContainerSchema = z.object({
   privileged: z.boolean(),
   tmpfs: z.record(z.string(), z.string()),
   environment: containerEnvironmentSchema,
+  volumes: z.array(nonEmptyStringSchema).optional(),
   networks: z.array(nonEmptyStringSchema),
   isNetworkInternal: z.boolean(),
   capDrop: z.array(nonEmptyStringSchema),

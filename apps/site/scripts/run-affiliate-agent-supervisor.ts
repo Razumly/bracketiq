@@ -518,15 +518,6 @@ const requiredEnvironment = (name: string): string => {
   if (!value) throw new Error(`${name} is required.`);
   return value;
 };
-const requiredSupervisorHaltCredential = (): string => {
-  const value = requiredEnvironment("AFFILIATE_AGENT_SUPERVISOR_HALT_CREDENTIAL");
-  if (Buffer.byteLength(value, "utf8") < 32) {
-    throw new Error(
-      "AFFILIATE_AGENT_SUPERVISOR_HALT_CREDENTIAL must be at least 32 bytes.",
-    );
-  }
-  return value;
-};
 const parseRunnerPrivateKey = (value: string) => {
   try {
     return createPrivateKey({
@@ -847,7 +838,6 @@ export class AffiliateAgentHttpGateway implements AffiliateAgentGateway {
   private readonly roleCredential: string;
   private readonly workerRole?: AffiliateAgentRole;
   private readonly workerId?: string;
-  private readonly supervisorHaltCredential?: string;
 
   constructor(
     address: string,
@@ -855,7 +845,6 @@ export class AffiliateAgentHttpGateway implements AffiliateAgentGateway {
     roleCredential: string,
     workerRole?: AffiliateAgentRole,
     workerId?: string,
-    supervisorHaltCredential?: string,
   ) {
     this.baseUrl = new URL(address);
     if (this.baseUrl.protocol !== "http:" && this.baseUrl.protocol !== "https:") {
@@ -865,7 +854,6 @@ export class AffiliateAgentHttpGateway implements AffiliateAgentGateway {
     this.roleCredential = roleCredential;
     this.workerRole = workerRole;
     this.workerId = workerId;
-    this.supervisorHaltCredential = supervisorHaltCredential?.trim() || undefined;
   }
 
   async heartbeatWorker(
@@ -984,21 +972,14 @@ export class AffiliateAgentHttpGateway implements AffiliateAgentGateway {
   }
 
   private async closeSupervisorAdmission(): Promise<void> {
-    if (this.supervisorHaltCredential === undefined) {
-      throw new Error("AFFILIATE_AGENT_SUPERVISOR_HALT_CREDENTIAL is required.");
-    }
     await this.request(
       gatewayPath("admission/supervisor/close"),
-      {},
-      {
-        "x-affiliate-gateway-supervisor-halt-credential":
-          this.supervisorHaltCredential,
-      },
+      this.workerAdmissionRequest(),
+      undefined,
       false,
       (value) => isAdmissionStatusResult(value) && value.status === "closed" && !value.open,
     );
   }
-
   private async workerAdmissionIsOpen(): Promise<boolean> {
     const result = await this.request<Readonly<{ status: "open" | "closed"; open: boolean }>>(
       gatewayPath("admission/worker/status"),
@@ -1009,7 +990,6 @@ export class AffiliateAgentHttpGateway implements AffiliateAgentGateway {
     );
     return result.open;
   }
-
   private async persistWorkerAdmissionHalt(): Promise<void> {
     let lastError: unknown = new Error("The gateway admission halt was not confirmed.");
     while (true) {
@@ -2036,14 +2016,12 @@ const createSupervisorConfiguration = (
   shutdownSignal: AbortSignal,
 ): SupervisorConfiguration => {
   const roleCredential = requiredEnvironment("AFFILIATE_AGENT_ROLE_CREDENTIAL");
-  const supervisorHaltCredential = requiredSupervisorHaltCredential();
   const gateway = new AffiliateAgentHttpGateway(
     requiredEnvironment("AFFILIATE_AGENT_GATEWAY_ADDRESS"),
     shutdownSignal,
     roleCredential,
     role,
     workerId,
-    supervisorHaltCredential,
   );
   const runnerSocket = requiredEnvironment("AFFILIATE_AGENT_RUNNER_SOCKET");
   const runnerProtocolPrivateKey = parseRunnerPrivateKey(
