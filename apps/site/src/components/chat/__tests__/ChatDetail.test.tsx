@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 
 import { ChatDetail } from '../ChatDetail';
@@ -167,5 +168,68 @@ describe('ChatDetail', () => {
     await waitFor(() => {
       expect(input.value).toBe('');
     });
+  });
+  it('returns focus to the connected chat entry when Escape unmounts the window', async () => {
+    let open = false;
+    let rerender: (ui: ReactNode) => void = () => {};
+    const view = renderWithMantine(
+      <button type="button" id="chat-entry" data-chat-entry-id="chat_1">Open chat</button>,
+    );
+    rerender = view.rerender;
+    const opener = document.getElementById('chat-entry') as HTMLButtonElement;
+    opener.focus();
+
+    closeChatWindowMock.mockImplementation(() => {
+      open = false;
+      rerender(
+        <>
+          <button type="button" id="chat-entry" data-chat-entry-id="chat_1">Open chat</button>
+          {open ? <ChatDetail chatId="chat_1" /> : null}
+        </>,
+      );
+    });
+
+    open = true;
+    rerender(
+      <>
+        <button type="button" id="chat-entry" data-chat-entry-id="chat_1">Open chat</button>
+        <ChatDetail chatId="chat_1" />
+      </>,
+    );
+
+    const dialog = await screen.findByRole('dialog', { name: 'Weekend League' });
+    const closeButton = screen.getByRole('button', { name: 'Close chat' });
+    await waitFor(() => expect(closeButton).toHaveFocus());
+
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    expect(closeChatWindowMock).toHaveBeenCalledWith('chat_1');
+    await waitFor(() => expect(document.getElementById('chat-entry')).toHaveFocus());
+  });
+
+
+  it('names the modeless window, focuses its close action, and closes on local Escape', async () => {
+    const view = renderWithMantine(
+      <>
+        <button type="button" id="chat-entry" data-chat-entry-id="chat_1">Open chat</button>
+      </>,
+    );
+    const opener = view.container.querySelector('#chat-entry') as HTMLButtonElement;
+    opener.focus();
+
+    view.rerender(
+      <>
+        <button type="button" id="chat-entry" data-chat-entry-id="chat_1">Open chat</button>
+        <ChatDetail chatId="chat_1" />
+      </>,
+    );
+
+    const dialog = await screen.findByRole('dialog', { name: 'Weekend League' });
+    const closeButton = screen.getByRole('button', { name: 'Close chat' });
+    await waitFor(() => expect(closeButton).toHaveFocus());
+    expect(dialog).not.toHaveAttribute('aria-modal');
+
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    expect(closeChatWindowMock).toHaveBeenCalledWith('chat_1');
+    await waitFor(() => expect(document.getElementById('chat-entry')).toHaveFocus());
   });
 });

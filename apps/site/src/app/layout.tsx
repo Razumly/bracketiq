@@ -16,6 +16,7 @@ import ProfileCompletionGate from '@/components/auth/ProfileCompletionGate';
 import PostHogIdentity from '@/components/analytics/PostHogIdentity';
 import MobileAppPrompt from '@/components/layout/MobileAppPrompt';
 import SiteFooter from '@/components/layout/SiteFooter';
+import { PageShell } from '@/components/layout/PageShell';
 import { Toaster } from '@/components/ui/sonner';
 import { MOBILE_APP_MANTINE_PRIMARY_SCALE } from './theme/mobilePalette';
 export { metadata, viewport } from './rootMetadata';
@@ -85,24 +86,21 @@ export default async function RootLayout({ children }: RootLayoutProps) {
               <ProfileCompletionGate />
             </Suspense>
             <PostHogIdentity />
-            <div className="flex min-h-screen flex-col">
-              <div className="flex-1">
-                <AgentProvider>
-                  {disableChat ? (
-                    children
-                  ) : (
-                    <ChatProvider>
-                      <ChatUIProvider>
-                        {children}
-                        <ChatComponents />
-                      </ChatUIProvider>
-                    </ChatProvider>
-                  )}
-                  <AIAssistantDrawer enabled={!disableAgent} />
-                </AgentProvider>
-              </div>
-              <SiteFooter />
-            </div>
+            <PageShell footer={<SiteFooter />}>
+              <AgentProvider>
+                {disableChat ? (
+                  children
+                ) : (
+                  <ChatProvider>
+                    <ChatUIProvider>
+                      {children}
+                      <ChatComponents />
+                    </ChatUIProvider>
+                  </ChatProvider>
+                )}
+                <AIAssistantDrawer enabled={!disableAgent} />
+              </AgentProvider>
+            </PageShell>
             <MobileAppPrompt />
             <Toaster />
           </Providers>
