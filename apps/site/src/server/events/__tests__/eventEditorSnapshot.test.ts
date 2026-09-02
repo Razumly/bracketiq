@@ -29,7 +29,110 @@ const buildClient = (
     eventTemplates: { findMany: jest.fn().mockResolvedValue([]) },
     stripeAccounts: { findFirst: jest.fn().mockResolvedValue(null) },
     eventRegistrations: { findFirst: jest.fn().mockResolvedValue(null) },
-  }) as any;
+  }) as unknown as Prisma.TransactionClient;
+
+const buildMaintenanceSnapshot = async ({
+  matches = [],
+  eventType = "LEAGUE",
+  automatedScheduling,
+  state = "PUBLISHED",
+  actor = { userId: "host_maintenance" },
+}: {
+  matches?: Array<Record<string, unknown>>;
+  eventType?: string;
+  automatedScheduling?: unknown;
+  state?: string;
+  actor?: { userId: string; isAdmin?: boolean } | null;
+} = { automatedScheduling: true }) => {
+  const client = {
+    ...buildClient([], []),
+    matches: {
+      findMany: jest.fn().mockResolvedValue(matches),
+    },
+    divisions: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
+  } as unknown as Prisma.TransactionClient;
+  return buildEventEditorSnapshot(
+    {
+      id: "event_maintenance",
+      name: "Maintenance event",
+      eventType,
+      automatedScheduling,
+      state,
+      hostId: "host_maintenance",
+      organizationId: null,
+      sourceType: null,
+      start: "2026-08-20T09:00:00.000Z",
+      end: "2026-08-20T17:00:00.000Z",
+      sportIds: [],
+      fieldIds: [],
+      timeSlotIds: [],
+      divisions: [],
+      divisionDetails: [],
+      playoffDivisionDetails: [],
+    },
+    { client, mode: "EDIT", actor },
+  );
+};
+
+describe("maintenance operation projection", () => {
+  const placedMatch = {
+    id: "event_maintenance:match:1",
+    division: "division_1",
+    placementState: "PLACED",
+    fieldId: "field_1",
+  };
+  const unplacedMatch = {
+    id: "event_maintenance:match:2",
+    division: "division_1",
+    placementState: "UNPLACED",
+    fieldId: null,
+  };
+
+  it("advertises Build only when the authoritative graph is empty", async () => {
+    const snapshot = await buildMaintenanceSnapshot();
+
+    expect(snapshot.scheduleState.availableMaintenanceOperations).toEqual([
+      "BUILD",
+    ]);
+  });
+
+  it("advertises Complete and Rebuild for an existing graph with unplaced nodes", async () => {
+    const snapshot = await buildMaintenanceSnapshot({
+      matches: [placedMatch, unplacedMatch],
+      automatedScheduling: true,
+    });
+
+    expect(snapshot.scheduleState.availableMaintenanceOperations).toEqual([
+      "COMPLETE",
+      "REBUILD",
+    ]);
+  });
+
+  it("advertises only Rebuild for an existing fully placed graph", async () => {
+    const snapshot = await buildMaintenanceSnapshot({
+      matches: [placedMatch],
+      automatedScheduling: true,
+    });
+
+    expect(snapshot.scheduleState.availableMaintenanceOperations).toEqual([
+      "REBUILD",
+    ]);
+  });
+
+  it.each([
+    ["disabled automation", { automatedScheduling: false }],
+    ["unknown automation", { automatedScheduling: undefined }],
+    ["unsupported event type", { eventType: "EVENT" }],
+    ["template event", { state: "TEMPLATE" }],
+    ["unmanaged event", { actor: null }],
+  ])("fails closed for %s", async (_label, options) => {
+    const snapshot = await buildMaintenanceSnapshot(options);
+
+    expect(snapshot.scheduleState.availableMaintenanceOperations).toEqual([]);
+  });
+});
 
 describe("buildEventEditorSnapshot", () => {
   it("projects real resource rows into the strict editor resource contract", async () => {
@@ -136,6 +239,7 @@ it("keeps create revisions stable when defaults are omitted", async () => {
     { client },
   );
 
+  expect(initial.scheduleState.availableMaintenanceOperations).toEqual([]);
   expect(initial.draft.schedule.mode).toBe("FIXED_END");
   expect(
     new Date(initial.draft.schedule.endConstraint).getTime() -

@@ -2,16 +2,16 @@ import { createRef } from 'react';
 import { screen } from '@testing-library/react';
 
 import EventsTabContent from '../EventsTabContent';
+import type { Event } from '@/types';
 import { renderWithMantine } from '../../../../../test/utils/renderWithMantine';
 
 jest.mock('@/components/location/LocationSearch', () => ({
   __esModule: true,
   default: () => <div data-testid="location-search" />,
 }));
-
 jest.mock('@/components/ui/EventCard', () => ({
   __esModule: true,
-  default: () => <div data-testid="event-card" />,
+  default: ({ event }: { event: { name: string } }) => <div data-testid="event-card">{event.name}</div>,
 }));
 
 jest.mock('@/components/ui/ResponsiveCardGrid', () => ({
@@ -160,4 +160,62 @@ describe('EventsTabContent', () => {
     expect(screen.getByText('12 events near you.')).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Sort events' })).toHaveValue('Nearest');
   });
+  it('sorts Weekly cards by next occurrence metadata instead of season start', () => {
+    const weeklySeason = {
+      $id: 'weekly-season',
+      name: 'Weekly season',
+      start: '2025-06-01T18:00:00.000Z',
+      nextOccurrence: {
+        slotId: 'slot-weekly',
+        occurrenceDate: '2026-07-16',
+        start: '2026-07-16T18:00:00.000Z',
+        end: '2026-07-16T20:00:00.000Z',
+      },
+    } as unknown as Event;
+    const laterEvent = {
+      $id: 'later-event',
+      name: 'Later event',
+      start: '2026-07-20T18:00:00.000Z',
+    } as unknown as Event;
+
+    renderWithMantine(
+      <EventsTabContent
+        location={null}
+        searchTerm=""
+        setSearchTerm={jest.fn()}
+        selectedEventTypes={['EVENT', 'WEEKLY_EVENT']}
+        setSelectedEventTypes={jest.fn()}
+        eventTypeOptions={['EVENT', 'WEEKLY_EVENT'] as const}
+        selectedSports={[]}
+        setSelectedSports={jest.fn()}
+        maxDistance={null}
+        setMaxDistance={jest.fn()}
+        selectedStartDate={null}
+        setSelectedStartDate={jest.fn()}
+        selectedEndDate={null}
+        setSelectedEndDate={jest.fn()}
+        sports={[]}
+        sportsLoading={false}
+        sportsError={null}
+        defaultMaxDistance={50}
+        kmBetween={jest.fn(() => 0)}
+        events={[laterEvent, weeklySeason]}
+        totalEvents={2}
+        isLoadingInitial={false}
+        isLoadingMore={false}
+        hasMoreEvents={false}
+        sentinelRef={createRef<HTMLDivElement>()}
+        eventsError={null}
+        onEventClick={jest.fn()}
+        onCreateEvent={jest.fn()}
+        defaultSort="soonest"
+      />,
+    );
+
+    expect(screen.getAllByTestId('event-card').map((card) => card.textContent)).toEqual([
+      'Weekly season',
+      'Later event',
+    ]);
+  });
+
 });

@@ -38,16 +38,20 @@ internal fun buildEventDetailWeeklyRoutePresentation(
 ): EventDetailWeeklyRoutePresentation {
     val event = selectedEvent.event
     val isWeeklyEvent = event.eventType == EventType.WEEKLY_EVENT
+    val isArchivedEvent = event.isArchived()
     val selectedWeeklyOccurrenceStarted = selectedWeeklyOccurrence?.sessionStart?.let { sessionStart ->
         now >= sessionStart
     } == true
-    val joinBlockedByStart = if (isWeeklyEvent) selectedWeeklyOccurrenceStarted else eventHasStarted
-    val hasWeeklyParentTimeSlots = event.timeSlotIds.any(String::isNotBlank)
+    val joinBlockedByStart = isArchivedEvent || if (isWeeklyEvent) {
+        selectedWeeklyOccurrenceStarted
+    } else {
+        eventHasStarted
+    }
     val hasDirectionsTarget = !event.address.isNullOrBlank() ||
         event.lat != 0.0 ||
         event.long != 0.0
-    val isWeeklyParentEvent = isWeeklyEvent && hasWeeklyParentTimeSlots
-    val weeklySessionOptions = if (!isWeeklyParentEvent) {
+    val weeklyParentEvent = isWeeklyParentEvent(event)
+    val weeklySessionOptions = if (!weeklyParentEvent) {
         emptyList()
     } else {
         buildWeeklySessionOptions(
@@ -55,7 +59,7 @@ internal fun buildEventDetailWeeklyRoutePresentation(
             timeSlots = selectedEvent.timeSlots,
         )
     }
-    val weeklyScheduleOptions = if (!isWeeklyParentEvent) {
+    val weeklyScheduleOptions = if (!weeklyParentEvent) {
         emptyList()
     } else {
         buildWeeklyScheduleOptions(
@@ -82,12 +86,12 @@ internal fun buildEventDetailWeeklyRoutePresentation(
         }
         .joinToString(", ")
         .ifBlank { selectedEvent.sport?.name ?: "this event" }
-    val selectedWeeklyOccurrenceJoined = isWeeklyParentEvent &&
+    val selectedWeeklyOccurrenceJoined = weeklyParentEvent &&
         selectedWeeklyOccurrence != null &&
         isUserInEvent
     val isAffiliateEvent = event.isAffiliateEvent()
     val shouldShowViewSchedulePrimaryAction = shouldUseViewSchedulePrimaryAction(
-        isWeeklyParentEvent = isWeeklyParentEvent,
+        isWeeklyParentEvent = weeklyParentEvent,
         isAffiliateEvent = isAffiliateEvent,
         isUserInEvent = isUserInEvent,
         isHost = isHost,
@@ -100,7 +104,7 @@ internal fun buildEventDetailWeeklyRoutePresentation(
         selectedWeeklyOccurrenceStarted = selectedWeeklyOccurrenceStarted,
         joinBlockedByStart = joinBlockedByStart,
         hasDirectionsTarget = hasDirectionsTarget,
-        isWeeklyParentEvent = isWeeklyParentEvent,
+        isWeeklyParentEvent = weeklyParentEvent,
         weeklySessionOptions = weeklySessionOptions,
         weeklyScheduleOptions = weeklyScheduleOptions,
         weeklyScheduleOptionsById = weeklyScheduleOptionsById,
@@ -111,6 +115,6 @@ internal fun buildEventDetailWeeklyRoutePresentation(
         isAffiliateEvent = isAffiliateEvent,
         shouldShowViewSchedulePrimaryAction = shouldShowViewSchedulePrimaryAction,
         showOverviewOpenDetailsAction = !isAffiliateEvent &&
-            (isWeeklyParentEvent || !shouldShowViewSchedulePrimaryAction),
+            (weeklyParentEvent || !shouldShowViewSchedulePrimaryAction),
     )
 }

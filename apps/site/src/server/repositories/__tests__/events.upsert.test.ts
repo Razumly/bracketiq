@@ -540,8 +540,37 @@ describe("upsertEventFromPayload", () => {
       "slot_weekly",
       "slot_fixed",
     ]);
-    expect(eventUpsertArg.create.noFixedEndDateTime).toBe(false);
-    expect(eventUpsertArg.update.noFixedEndDateTime).toBe(false);
+    expect(eventUpsertArg.create.noFixedEndDateTime).toBe(true);
+    expect(eventUpsertArg.update.noFixedEndDateTime).toBe(true);
+  });
+
+  it("does not synchronize legacy participant arrays for a Weekly parent", async () => {
+    const client = createMockClient();
+    const payload = {
+      ...baseEventPayload(),
+      eventType: "WEEKLY_EVENT",
+      noFixedEndDateTime: true,
+      divisions: ["OPEN"],
+      waitListIds: ["user_waiting"],
+      freeAgentIds: ["user_free_agent"],
+      timeSlots: [{
+        id: "slot_weekly",
+        dayOfWeek: 1,
+        daysOfWeek: [1],
+        divisions: ["OPEN"],
+        startTimeMinutes: 9 * 60,
+        endTimeMinutes: 10 * 60,
+        repeating: true,
+        scheduledFieldId: "field_1",
+        startDate: "2026-01-05T09:00:00.000Z",
+        endDate: "2026-03-05T10:00:00.000Z",
+      }],
+    };
+
+    await upsertEventFromPayload(payload, client as any);
+
+    expect(client.events.upsert).toHaveBeenCalled();
+    expect((client as any).eventRegistrations).toBeUndefined();
   });
 
   it('persists an overnight repeating slot instead of dropping it before persistence', async () => {
@@ -1485,6 +1514,272 @@ describe("upsertEventFromPayload", () => {
         }),
       }),
     );
+  });
+  it("clears an existing playoff config when the payload explicitly sends null", async () => {
+    const client = createMockClient();
+    const playoffDivisionId = divisionId("gold");
+    const existingPlayoffConfig = {
+      doubleElimination: true,
+      winnerSetCount: 2,
+      loserSetCount: 2,
+      winnerBracketPointsToVictory: [31, 29],
+      loserBracketPointsToVictory: [17, 15],
+      prize: "Existing trophy",
+      fieldCount: 2,
+      restTimeMinutes: 10,
+      matchDurationMinutes: 60,
+      setDurationMinutes: null,
+    };
+    client.events.findUnique.mockResolvedValue({
+      fieldIds: ["field_1"],
+      timeSlotIds: [],
+      eventType: "LEAGUE",
+      end: new Date("2026-03-05T09:00:00.000Z"),
+      noFixedEndDateTime: false,
+      hostId: "host_1",
+      organizationId: null,
+      parentEvent: null,
+      officialPositions: [],
+      officialSchedulingMode: "SCHEDULE",
+      sportIds: ["sport_1"],
+    });
+    client.divisions.findMany.mockResolvedValue([
+      {
+        id: playoffDivisionId,
+        key: "gold",
+        name: "Gold",
+        kind: "PLAYOFF",
+        role: "PHASE",
+        status: "ACTIVE",
+        maxParticipants: 4,
+        playoffTeamCount: 4,
+        playoffPlacementDivisionIds: [],
+        standingsOverrides: existingPlayoffConfig,
+        playoffDoubleElimination: true,
+        playoffWinnerSetCount: 2,
+        playoffLoserSetCount: 2,
+        playoffWinnerBracketPointsToVictory: [31, 29],
+        playoffLoserBracketPointsToVictory: [17, 15],
+        playoffPrize: "Existing trophy",
+        playoffFieldCount: 2,
+        playoffRestTimeMinutes: 10,
+        playoffMatchDurationMinutes: 60,
+        playoffSetDurationMinutes: null,
+      },
+    ]);
+    const payload = {
+      ...baseEventPayload(),
+      includePlayoffs: true,
+      singleDivision: false,
+      divisions: [playoffDivisionId],
+      divisionDetails: [],
+      playoffDivisionDetails: [
+        {
+          id: playoffDivisionId,
+          key: "gold",
+          kind: "PLAYOFF",
+          name: "Gold",
+          maxParticipants: 4,
+          playoffTeamCount: 4,
+          doubleElimination: false,
+          winnerSetCount: 3,
+          loserSetCount: 1,
+          winnerBracketPointsToVictory: [25, 25, 15],
+          loserBracketPointsToVictory: [25],
+          prize: "Payload legacy trophy",
+          fieldCount: 1,
+          restTimeMinutes: 0,
+          matchDurationMinutes: 45,
+          playoffConfig: null,
+        },
+      ],
+    };
+
+    await upsertEventFromPayload(
+      payload,
+      client as unknown as Parameters<typeof upsertEventFromPayload>[1],
+    );
+
+    const playoffUpsert = client.divisions.upsert.mock.calls
+      .map(([args]) => args)
+      .find((args) => args.where.id === playoffDivisionId);
+    expect(playoffUpsert?.update.standingsOverrides).toBeNull();
+    expect(playoffUpsert?.update.playoffDoubleElimination).toBeNull();
+    expect(playoffUpsert?.update.playoffWinnerSetCount).toBeNull();
+    expect(playoffUpsert?.update.playoffLoserSetCount).toBeNull();
+    expect(playoffUpsert?.update.playoffWinnerBracketPointsToVictory).toEqual(
+      [],
+    );
+    expect(playoffUpsert?.update.playoffLoserBracketPointsToVictory).toEqual([]);
+    expect(playoffUpsert?.update.playoffPrize).toBeNull();
+    expect(playoffUpsert?.update.playoffFieldCount).toBeNull();
+    expect(playoffUpsert?.update.playoffRestTimeMinutes).toBeNull();
+    expect(playoffUpsert?.update.playoffMatchDurationMinutes).toBeNull();
+    expect(playoffUpsert?.update.playoffSetDurationMinutes).toBeNull();
+  });
+  it("preserves an existing playoff config when a partial update omits it", async () => {
+    const client = createMockClient();
+    const playoffDivisionId = divisionId("gold");
+    const existingPlayoffConfig = {
+      doubleElimination: true,
+      winnerSetCount: 2,
+      loserSetCount: 2,
+      winnerBracketPointsToVictory: [31, 29],
+      loserBracketPointsToVictory: [17, 15],
+      prize: "Existing trophy",
+      fieldCount: 2,
+      restTimeMinutes: 10,
+      matchDurationMinutes: 60,
+      setDurationMinutes: null,
+    };
+    client.events.findUnique.mockResolvedValue({
+      fieldIds: ["field_1"],
+      timeSlotIds: [],
+      eventType: "LEAGUE",
+      end: new Date("2026-03-05T09:00:00.000Z"),
+      noFixedEndDateTime: false,
+      hostId: "host_1",
+      organizationId: null,
+      parentEvent: null,
+      officialPositions: [],
+      officialSchedulingMode: "SCHEDULE",
+      sportIds: ["sport_1"],
+    });
+    client.divisions.findMany.mockResolvedValue([
+      {
+        id: playoffDivisionId,
+        key: "gold",
+        name: "Gold",
+        kind: "PLAYOFF",
+        role: "PHASE",
+        status: "ACTIVE",
+        maxParticipants: 4,
+        playoffTeamCount: 4,
+        playoffPlacementDivisionIds: [],
+        standingsOverrides: existingPlayoffConfig,
+      },
+    ]);
+    const payload = {
+      ...baseEventPayload(),
+      includePlayoffs: true,
+      singleDivision: false,
+      divisions: [playoffDivisionId],
+      divisionDetails: [],
+      playoffDivisionDetails: [
+        {
+          id: playoffDivisionId,
+          key: "gold",
+          kind: "PLAYOFF",
+          name: "Gold",
+          maxParticipants: 4,
+          playoffTeamCount: 4,
+        },
+      ],
+    };
+
+    await upsertEventFromPayload(
+      payload,
+      client as unknown as Parameters<typeof upsertEventFromPayload>[1],
+    );
+
+    const playoffUpsert = client.divisions.upsert.mock.calls
+      .map(([args]) => args)
+      .find((args) => args.where.id === playoffDivisionId);
+    expect(playoffUpsert?.update.standingsOverrides).toEqual(
+      existingPlayoffConfig,
+    );
+  });
+
+
+  it("retains legacy playoff config fallback when playoffConfig is omitted", async () => {
+    const client = createMockClient();
+    const playoffDivisionId = divisionId("gold");
+    client.events.findUnique.mockResolvedValue({
+      fieldIds: ["field_1"],
+      timeSlotIds: [],
+      eventType: "LEAGUE",
+      end: new Date("2026-03-05T09:00:00.000Z"),
+      noFixedEndDateTime: false,
+      hostId: "host_1",
+      organizationId: null,
+      parentEvent: null,
+      officialPositions: [],
+      officialSchedulingMode: "SCHEDULE",
+      sportIds: ["sport_1"],
+    });
+    client.divisions.findMany.mockResolvedValue([
+      {
+        id: playoffDivisionId,
+        key: "gold",
+        name: "Gold",
+        kind: "PLAYOFF",
+        role: "PHASE",
+        status: "ACTIVE",
+        maxParticipants: 4,
+        playoffTeamCount: 4,
+        playoffPlacementDivisionIds: [],
+        standingsOverrides: {
+          doubleElimination: true,
+          winnerSetCount: 2,
+          loserSetCount: 2,
+          winnerBracketPointsToVictory: [31, 29],
+          loserBracketPointsToVictory: [17, 15],
+          prize: "Existing trophy",
+          fieldCount: 2,
+          restTimeMinutes: 10,
+          matchDurationMinutes: 60,
+          setDurationMinutes: null,
+        },
+      },
+    ]);
+    const payload = {
+      ...baseEventPayload(),
+      includePlayoffs: true,
+      singleDivision: false,
+      divisions: [playoffDivisionId],
+      divisionDetails: [],
+      playoffDivisionDetails: [
+        {
+          id: playoffDivisionId,
+          key: "gold",
+          kind: "PLAYOFF",
+          name: "Gold",
+          maxParticipants: 4,
+          playoffTeamCount: 4,
+          doubleElimination: false,
+          winnerSetCount: 3,
+          loserSetCount: 1,
+          winnerBracketPointsToVictory: [25, 25, 15],
+          loserBracketPointsToVictory: [25],
+          prize: "Payload legacy trophy",
+          fieldCount: 1,
+          restTimeMinutes: 0,
+          matchDurationMinutes: 45,
+        },
+      ],
+    };
+
+    await upsertEventFromPayload(
+      payload,
+      client as unknown as Parameters<typeof upsertEventFromPayload>[1],
+    );
+
+    const playoffUpsert = client.divisions.upsert.mock.calls
+      .map(([args]) => args)
+      .find((args) => args.where.id === playoffDivisionId);
+    expect(playoffUpsert?.update.standingsOverrides).toEqual({
+      doubleElimination: false,
+      winnerSetCount: 3,
+      loserSetCount: 1,
+      winnerBracketPointsToVictory: [25, 25, 15],
+      loserBracketPointsToVictory: [25],
+      prize: "Payload legacy trophy",
+      fieldCount: 1,
+      restTimeMinutes: 0,
+      matchDurationMinutes: 45,
+      setDurationMinutes: null,
+    });
+    expect(playoffUpsert?.update.playoffDoubleElimination).toBeNull();
   });
 
   it("preserves tournament pool set config on bracket and generated pool divisions", async () => {
@@ -3653,6 +3948,66 @@ describe("upsertEventFromPayload", () => {
       }),
     });
   });
+  it("preserves phase-only official positions when persisting event officials", async () => {
+    const client = createMockClient();
+    const payload = {
+      ...baseEventPayload(),
+      divisions: ["OPEN"],
+      officialPositions: [
+        {
+          id: "event_pos_referee",
+          name: "Referee",
+          count: 1,
+          order: 0,
+        },
+      ],
+      divisionDetails: [
+        {
+          id: divisionId("open"),
+          key: "open",
+          kind: "LEAGUE",
+          name: "Open",
+          phaseSettings: {
+            LEAGUE: {
+              officialPositions: [
+                {
+                  id: "phase_pos_referee",
+                  name: "Phase Referee",
+                  count: 1,
+                  order: 0,
+                },
+              ],
+            },
+          },
+        },
+      ],
+      officialIds: ["official_phase"],
+      eventOfficials: [
+        {
+          id: "event_official_phase",
+          userId: "official_phase",
+          positionIds: ["phase_pos_referee"],
+          fieldIds: ["field_1"],
+          isActive: true,
+        },
+      ],
+    };
+
+    await upsertEventFromPayload(
+      payload,
+      client as unknown as NonNullable<
+        Parameters<typeof upsertEventFromPayload>[1]
+      >,
+    );
+
+    expect(client.eventOfficials.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        id: "event_official_phase",
+        positionIds: ["phase_pos_referee"],
+      }),
+    });
+  });
+
 
   it("maps explicit legacy intake mode while keeping canonical priority persisted", async () => {
     const mockClient = createMockClient();

@@ -1,5 +1,5 @@
 import { serializeEvent, serializeMatches } from '../serialize';
-import { Division, Match, Team, Tournament, UserData } from '../types';
+import { Division, League, Match, PlayingField, Team, Tournament, UserData } from '../types';
 import { eventEditorCreateProposalGraphSchema } from "@/contracts/eventEditor";
 
 describe('scheduler API serialization', () => {
@@ -108,6 +108,8 @@ describe('scheduler API serialization', () => {
 
     expect(serialized).toEqual(expect.objectContaining({
       placementState: 'UNPLACED',
+      start: null,
+      end: null,
       phase: 'POOL',
       sourceDivisionId: 'entry',
       phaseDivisionId: 'phase',
@@ -115,6 +117,36 @@ describe('scheduler API serialization', () => {
       fieldId: null,
     }));
   });
+  it('does not synthesize officiating slots for an unplaced match', () => {
+    const division = new Division('phase', 'Phase');
+    division.phase = 'POOL';
+    const match = new Match({
+      id: 'match_unplaced_staffing',
+      start: new Date('2026-03-01T14:00:00.000Z'),
+      end: new Date('2026-03-01T15:00:00.000Z'),
+      division,
+      bufferMs: 0,
+      eventId: 'event_1',
+    });
+    match.placementState = 'UNPLACED';
+    match.officialAssignments = [{
+      positionId: 'r1',
+      slotIndex: 0,
+      holderType: 'OFFICIAL',
+      userId: 'official_1',
+      eventOfficialId: null,
+      checkedIn: false,
+      hasConflict: false,
+    }];
+
+    const [serialized] = serializeMatches([match], [
+      { id: 'r1', name: 'R1', count: 1, order: 0 },
+    ]);
+
+    expect(serialized.officialAssignments).toEqual([]);
+    expect(serialized.officialIds).toEqual([]);
+  });
+
 
   it('serializes every named assignment slot with stable nullable official identities', () => {
     const division = new Division('open', 'Open');
@@ -131,6 +163,7 @@ describe('scheduler API serialization', () => {
       bufferMs: 0,
       eventId: 'event_1',
     });
+    match.placementState = 'PLACED';
     match.officialAssignments = [{
       positionId: 'r1',
       slotIndex: 0,
@@ -191,6 +224,11 @@ describe('scheduler API serialization', () => {
   it('preserves placeholder identity and bound PLAYER holders in canonical slots', () => {
     const division = new Division('open', 'Open');
     division.isSystemGenerated = true;
+    const field = new PlayingField({
+      id: 'field_stable_slots',
+      name: 'Stable Court',
+      divisions: [division],
+    });
     const placeholder = new Team({
       id: 'event_team_slot_1',
       captainId: '',
@@ -204,7 +242,9 @@ describe('scheduler API serialization', () => {
       id: 'match_stable_slots',
       start: new Date('2026-03-01T10:00:00.000Z'),
       end: new Date('2026-03-01T11:00:00.000Z'),
+      placementState: 'PLACED',
       division,
+      field,
       team1: placeholder,
       bufferMs: 0,
       eventId: 'event_stable_slots',
@@ -230,6 +270,7 @@ describe('scheduler API serialization', () => {
       teams: { [placeholder.id]: placeholder },
       divisions: [division],
       matches: { [match.id]: match },
+      fields: { [field.id]: field },
       officialPositions,
     });
 
@@ -241,8 +282,11 @@ describe('scheduler API serialization', () => {
     expect(proposalGraph.matches[0]).toEqual(
       expect.objectContaining({
         id: match.id,
+        placementState: 'PLACED',
         start: match.start.toISOString(),
-        fieldId: null,
+        end: match.end.toISOString(),
+        fieldId: field.id,
+        field: expect.objectContaining({ id: field.id }),
         officialAssignments: expect.arrayContaining([
           expect.objectContaining({
             positionId: "line_judge",
@@ -323,6 +367,7 @@ describe('scheduler API serialization', () => {
         hasConflict: false,
       }],
     });
+    match.placementState = 'PLACED';
     const event = new Tournament({
       id: 'event_phase_slots',
       name: 'Phase slots',
@@ -370,6 +415,115 @@ describe('scheduler API serialization', () => {
     expect(serialized.officialSchedulingMode).toBe('SCHEDULE');
     expect(serialized.doTeamsOfficiate).toBe(false);
     expect(serialized.teamOfficialsMaySwap).toBe(false);
+  });
+
+  it('preserves Tournament competition settings in the proposal graph and League defaults', () => {
+    const tournament = new Tournament({
+      id: 'event_tournament_competition_serialization',
+      name: 'Tournament competition',
+      start: new Date('2026-03-01T09:00:00.000Z'),
+      end: new Date('2026-03-01T12:00:00.000Z'),
+      maxParticipants: 8,
+      teamSignup: true,
+      eventType: 'TOURNAMENT',
+      gamesPerOpponent: 3,
+      includePlayoffs: true,
+      playoffTeamCount: 6,
+      pointsToVictory: [25, 25, 15],
+    });
+
+    const tournamentGraph = eventEditorCreateProposalGraphSchema.parse({
+      event: serializeEvent(tournament),
+      matches: [],
+    });
+
+    expect(tournamentGraph.event).toEqual(expect.objectContaining({
+      gamesPerOpponent: 3,
+      includePlayoffs: true,
+      playoffTeamCount: 6,
+      pointsToVictory: [25, 25, 15],
+    }));
+
+    const league = new League({
+      id: 'event_league_competition_serialization',
+      name: 'League competition',
+      start: new Date('2026-03-01T09:00:00.000Z'),
+      end: new Date('2026-03-01T12:00:00.000Z'),
+      maxParticipants: 8,
+      teamSignup: true,
+      eventType: 'LEAGUE',
+    });
+
+    expect(serializeEvent(league)).toEqual(expect.objectContaining({
+      gamesPerOpponent: 1,
+      includePlayoffs: false,
+      playoffTeamCount: 0,
+      pointsToVictory: [],
+    }));
+  });
+
+  it('includes Tournament playoff divisions in canonical graph resources without duplicates', () => {
+    const entryDivision = new Division('tournament_entry', 'Entry');
+    const playoffDivision = new Division(
+      'tournament_playoff',
+      'Playoffs',
+      [],
+      null,
+      4,
+      4,
+      'PLAYOFF',
+    );
+    playoffDivision.role = 'PHASE';
+    playoffDivision.phase = 'BRACKET';
+    playoffDivision.sourceDivisionId = entryDivision.id;
+    const event = new Tournament({
+      id: 'event_tournament_playoff_serialization',
+      name: 'Tournament playoffs',
+      start: new Date('2026-03-01T09:00:00.000Z'),
+      end: new Date('2026-03-01T12:00:00.000Z'),
+      maxParticipants: 4,
+      teamSignup: true,
+      eventType: 'TOURNAMENT',
+      divisions: [entryDivision, playoffDivision],
+      playoffDivisions: [playoffDivision],
+    });
+
+    const serialized = serializeEvent(event);
+    const divisionDetailIds = serialized.divisionDetails.map((division) => division.id);
+
+    expect(serialized.divisions).toEqual([entryDivision.id, playoffDivision.id]);
+    expect(divisionDetailIds).toEqual([entryDivision.id, playoffDivision.id]);
+    expect(new Set(divisionDetailIds).size).toBe(divisionDetailIds.length);
+    expect(serialized.playoffDivisionDetails).toEqual([
+      expect.objectContaining({
+        id: playoffDivision.id,
+        sourceDivisionId: entryDivision.id,
+        phase: 'BRACKET',
+      }),
+    ]);
+  });
+
+  it('rejects conflicting duplicate Division definitions before graph serialization', () => {
+    const eventDivision = new Division('duplicate_division', 'Entry');
+    const conflictingPlayoffDivision = new Division(
+      'duplicate_division',
+      'Conflicting playoffs',
+    );
+    const event = new Tournament({
+      id: 'event_conflicting_division_serialization',
+      name: 'Conflicting divisions',
+      start: new Date('2026-03-01T09:00:00.000Z'),
+      end: new Date('2026-03-01T12:00:00.000Z'),
+      maxParticipants: 4,
+      teamSignup: true,
+      eventType: 'TOURNAMENT',
+      divisions: [eventDivision],
+      playoffDivisions: [conflictingPlayoffDivision],
+    });
+
+    expect(() => serializeEvent(event)).toThrow(
+      'Cannot serialize event: conflicting Division definitions for "duplicate_division".',
+    );
   });
 
 });

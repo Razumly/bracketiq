@@ -8,10 +8,13 @@ import {
   upsertEventRegistration,
   type RegistrationRegistrantType,
 } from '@/server/events/eventRegistrations';
+import { eventRegistrationErrorResponse } from '@/server/events/eventRegistrationErrorResponse';
 import {
-  isWeeklyParentEvent,
+  isActiveWeeklyParentEvent,
+  isArchivedWeeklyParentEvent,
   isWeeklyOccurrenceJoinClosed,
   resolveWeeklyOccurrence,
+  WEEKLY_EVENT_ARCHIVED_ERROR,
   WEEKLY_OCCURRENCE_JOIN_CLOSED_ERROR,
 } from '@/server/events/weeklyOccurrences';
 import { requireVerifiedEmailForEventRegistrationIfPaid } from '@/server/paidRegistrationGate';
@@ -83,6 +86,8 @@ async function updateWaitlist(
     select: {
       id: true,
       start: true,
+      end: true,
+      archivedAt: true,
       teamSignup: true,
       eventType: true,
       parentEvent: true,
@@ -93,9 +98,12 @@ async function updateWaitlist(
   if (!event) {
     return NextResponse.json({ error: 'Event not found' }, { status: 404 });
   }
+  if (isArchivedWeeklyParentEvent(event)) {
+    return NextResponse.json({ error: WEEKLY_EVENT_ARCHIVED_ERROR }, { status: 409 });
+  }
 
   const hasOccurrenceInput = Boolean(parsed.data.slotId || parsed.data.occurrenceDate);
-  const occurrence = isWeeklyParentEvent(event)
+  const occurrence = isActiveWeeklyParentEvent(event)
     ? await resolveWeeklyOccurrence({
       event,
       occurrence: parsed.data,
@@ -104,7 +112,7 @@ async function updateWaitlist(
   if (occurrence && !occurrence.ok) {
     return NextResponse.json({ error: occurrence.error }, { status: 400 });
   }
-  if (!isWeeklyParentEvent(event) && hasOccurrenceInput) {
+  if (!isActiveWeeklyParentEvent(event) && hasOccurrenceInput) {
     return NextResponse.json({ error: 'Weekly occurrence selection is only valid for weekly events.' }, { status: 400 });
   }
   const resolvedOccurrence = occurrence?.ok ? occurrence.value : null;
@@ -198,26 +206,34 @@ async function updateWaitlist(
     if (emailVerificationRequired) {
       return emailVerificationRequired;
     }
+  }
 
-    const registrantId = (userId ?? teamId)!;
-    await upsertEventRegistration({
-      eventId,
-      registrantType,
-      registrantId,
-      rosterRole: 'WAITLIST',
-      status: 'ACTIVE',
-      createdBy: session.userId,
-      parentId,
-      ageAtEvent,
-      occurrence: resolvedOccurrence,
-    });
-  } else {
-    await deleteEventRegistration({
-      eventId,
-      registrantType,
-      registrantId: (userId ?? teamId)!,
-      occurrence: resolvedOccurrence,
-    });
+  try {
+    if (mode === 'add') {
+      const registrantId = (userId ?? teamId)!;
+      await upsertEventRegistration({
+        eventId,
+        registrantType,
+        registrantId,
+        rosterRole: 'WAITLIST',
+        status: 'ACTIVE',
+        createdBy: session.userId,
+        parentId,
+        ageAtEvent,
+        occurrence: resolvedOccurrence,
+      });
+    } else {
+      await deleteEventRegistration({
+        eventId,
+        registrantType,
+        registrantId: (userId ?? teamId)!,
+        occurrence: resolvedOccurrence,
+      });
+    }
+  } catch (error) {
+    const registrationResponse = eventRegistrationErrorResponse(error);
+    if (registrationResponse) return registrationResponse;
+    throw error;
   }
 
   const refreshedEvent = await prisma.events.findUnique({ where: { id: eventId } });

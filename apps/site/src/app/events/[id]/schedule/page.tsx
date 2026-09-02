@@ -44,6 +44,7 @@ import { TermsConsentModal } from "@/components/moderation/TermsConsentModal";
 import Loading from "@/components/ui/Loading";
 import ResponsiveCardGrid from "@/components/ui/ResponsiveCardGrid";
 import { useApp } from "@/app/providers";
+import { deepEqual } from "@/app/utils";
 import { useAgentContext } from "@/context/AgentContext";
 import type {
   AgentClientAction,
@@ -137,6 +138,9 @@ import {
   type EventEditorCreateBootstrap,
   type EventEditorCreateProposal,
   type EventEditorCreateResult,
+  type EventEditorMaintenanceOperation,
+  type EventEditorMaintenanceProposal,
+  type EventEditorMaintenanceScheduleOutcome,
   type EventEditorSaveResult,
   type EventEditorSnapshot,
   type EventEditorDraft,
@@ -328,7 +332,58 @@ type EventTypeTransitionConfirmation = {
   actionLabel: string;
   canContinue: boolean;
 };
+type MaintenanceRevisionBinding = NonNullable<
+  EventEditorSnapshot["revisionBinding"]
+>;
+const maintenanceRevisionBindingFor = (
+  snapshot: EventEditorSnapshot | null,
+): MaintenanceRevisionBinding | null => snapshot?.revisionBinding ?? null;
+type MaintenanceOperationAttempt = {
+  eventId: string;
+  operation: EventEditorMaintenanceOperation;
+  includePlaceholderTeams?: boolean;
+  participantCount: number | null;
+  operationId: string;
+  revisionBinding: MaintenanceRevisionBinding | null;
+  forceFreshOperationId: boolean;
+  status: "PENDING" | "PROPOSED" | "FAILED";
+};
+export type ScheduleProposalReviewState = "ACTIVE" | "STALE";
 
+export const getScheduleProposalAcceptanceFailureState = ({
+  isPartialProposal,
+  errorCode,
+}: {
+  isPartialProposal: boolean;
+  errorCode: string | null;
+}): {
+  reviewState: ScheduleProposalReviewState;
+  clearPartialAcceptanceOperationId: boolean;
+  closePartialAcceptanceConfirmation: boolean;
+  acceptDisabled: boolean;
+  showRefreshAction: boolean;
+  rejectAvailable: boolean;
+} => {
+  const stalePartialProposal =
+    isPartialProposal && errorCode === "EDITOR_PROPOSAL_STALE";
+  return {
+    reviewState: stalePartialProposal ? "STALE" : "ACTIVE",
+    clearPartialAcceptanceOperationId: stalePartialProposal,
+    closePartialAcceptanceConfirmation: stalePartialProposal,
+    acceptDisabled: stalePartialProposal,
+    showRefreshAction: stalePartialProposal,
+    rejectAvailable: true,
+  };
+};
+export const getFreshCreateOperationId = (
+  previousOperationId: string | null | undefined,
+  generateOperationId: () => string = createClientId,
+): string => {
+  const nextOperationId = generateOperationId();
+  return nextOperationId === previousOperationId
+    ? generateOperationId()
+    : nextOperationId;
+};
 const EDITOR_SCHEDULE_ERROR_CODES = new Set([
   "EDITOR_SCHEDULE_UNSUPPORTED",
   "EDITOR_SCHEDULE_INPUT_INVALID",
@@ -346,6 +401,27 @@ const isEditorScheduleCreateFailure = (error: unknown): boolean => {
   const code = "code" in error.data ? String(error.data.code) : "";
   return EDITOR_SCHEDULE_ERROR_CODES.has(code);
 };
+const EDITOR_MAINTENANCE_CAPABILITY_ERROR_CODES = new Set([
+  "EDITOR_MAINTENANCE_INVALID",
+  "EDITOR_MAINTENANCE_NOT_FOUND",
+  "EDITOR_MAINTENANCE_STALE",
+  "EDITOR_MAINTENANCE_UNAUTHORIZED",
+]);
+
+const isEditorMaintenanceCapabilityFailure = (error: unknown): boolean => {
+  if (
+    !isApiRequestError(error) ||
+    !error.data ||
+    typeof error.data !== "object" ||
+    !("code" in error.data)
+  ) {
+    return false;
+  }
+  return EDITOR_MAINTENANCE_CAPABILITY_ERROR_CODES.has(
+    String(error.data.code),
+  );
+};
+
 
 const sameCreateRequest = (
   left: CreateEventEditorCommand,
@@ -388,6 +464,80 @@ const proposalMatchLinks = (
       ? `Loser -> ${resolve(match.loserNextMatchId)}`
       : null,
   ].filter((value): value is string => Boolean(value));
+};
+export const toCanonicalMatchPersistencePayload = (
+  match: Match,
+): Record<string, unknown> => {
+  const normalizeRelationId = (value: unknown): string | null => {
+    if (typeof value === "string") {
+      const normalized = value.trim();
+      return normalized.length > 0 ? normalized : null;
+    }
+    if (
+      value &&
+      typeof value === "object" &&
+      "$id" in (value as Record<string, unknown>)
+    ) {
+      const relationId = (value as Record<string, unknown>).$id;
+      if (typeof relationId === "string" && relationId.trim().length > 0) {
+        return relationId.trim();
+      }
+    }
+    return null;
+  };
+  const resolvePersistableTeamId = (
+    explicitId: string | null | undefined,
+    relation: unknown,
+  ): string | null => {
+    const candidate =
+      normalizeRelationId(explicitId) ?? normalizeRelationId(relation);
+    if (!candidate || isLocalPlaceholderId(candidate)) {
+      return null;
+    }
+    return candidate;
+  };
+  const payload: Record<string, unknown> = {
+    id: match.$id,
+    matchId: match.matchId ?? null,
+    locked: Boolean(match.locked),
+    status: match.status ?? null,
+    resultStatus: match.resultStatus ?? null,
+    resultType: match.resultType ?? null,
+    actualStart: match.actualStart ?? null,
+    actualEnd: match.actualEnd ?? null,
+    statusReason: match.statusReason ?? null,
+    winnerEventTeamId: match.winnerEventTeamId ?? null,
+    segments: Array.isArray(match.segments) ? match.segments : [],
+    team1Points: Array.isArray(match.team1Points) ? match.team1Points : [],
+    team2Points: Array.isArray(match.team2Points) ? match.team2Points : [],
+    team1Id: resolvePersistableTeamId(match.team1Id, match.team1),
+    team2Id: resolvePersistableTeamId(match.team2Id, match.team2),
+    officialId:
+      normalizeRelationId(match.officialId) ??
+      normalizeRelationId(match.official),
+    officialIds: Array.isArray(match.officialIds) ? match.officialIds : [],
+    teamOfficialId: resolvePersistableTeamId(
+      match.teamOfficialId,
+      match.teamOfficial,
+    ),
+    fieldId:
+      normalizeRelationId(match.fieldId) ??
+      normalizeRelationId(match.field),
+    previousLeftId: asBulkMatchRef(match.previousLeftId),
+    previousRightId: asBulkMatchRef(match.previousRightId),
+    winnerNextMatchId: asBulkMatchRef(match.winnerNextMatchId),
+    loserNextMatchId: asBulkMatchRef(match.loserNextMatchId),
+    side: match.side ?? null,
+    officialCheckedIn: Boolean(match.officialCheckedIn),
+    start: match.start ?? null,
+    end: match.end ?? null,
+    division: normalizeIdToken(getDivisionId(match.division) ?? null),
+    losersBracket: Boolean(match.losersBracket),
+  };
+  if (match.matchRulesSnapshot) {
+    payload.matchRulesSnapshot = match.matchRulesSnapshot;
+  }
+  return stripApiCompatibilityFields(payload) as Record<string, unknown>;
 };
 
 // Main schedule page component that protects access and renders league schedule/bracket content.
@@ -492,10 +642,49 @@ function EventScheduleContent() {
     useState<EventEditorSnapshot | null>(null);
   const [scheduleProposal, setScheduleProposal] =
     useState<EventEditorCreateProposal | null>(null);
+  const [scheduleProposalReviewState, setScheduleProposalReviewState] =
+    useState<ScheduleProposalReviewState>("ACTIVE");
   const [isAcceptingScheduleProposal, setIsAcceptingScheduleProposal] =
+    useState(false);
+  const [isRefreshingScheduleProposal, setIsRefreshingScheduleProposal] =
     useState(false);
   const [isRejectingScheduleProposal, setIsRejectingScheduleProposal] =
     useState(false);
+  const [partialAcceptanceOperationId, setPartialAcceptanceOperationId] =
+    useState<string | null>(null);
+  const [showPartialAcceptanceConfirmation, setShowPartialAcceptanceConfirmation] =
+    useState(false);
+  const [scheduleProposalError, setScheduleProposalError] = useState<string | null>(
+    null,
+  );
+  const [maintenanceProposal, setMaintenanceProposal] =
+    useState<EventEditorMaintenanceProposal | null>(null);
+  const [maintenanceProposalReviewState, setMaintenanceProposalReviewState] =
+    useState<ScheduleProposalReviewState>("ACTIVE");
+  const maintenanceOperationAttemptRef =
+    useRef<MaintenanceOperationAttempt | null>(null);
+  const [isAcceptingMaintenanceProposal, setIsAcceptingMaintenanceProposal] =
+    useState(false);
+  const [isRejectingMaintenanceProposal, setIsRejectingMaintenanceProposal] =
+    useState(false);
+  const [isRefreshingMaintenanceProposal, setIsRefreshingMaintenanceProposal] =
+    useState(false);
+  const maintenanceProposalRefreshInFlightRef = useRef(false);
+  const [maintenanceProposalError, setMaintenanceProposalError] = useState<
+    string | null
+  >(null);
+  const [
+    maintenanceAcceptanceConflict,
+    setMaintenanceAcceptanceConflict,
+  ] = useState(false);
+  const [
+    maintenanceProposalSyncPending,
+    setMaintenanceProposalSyncPending,
+  ] = useState(false);
+  const maintenanceProposalIncludePlaceholderTeamsRef = useRef<
+    boolean | undefined
+  >(undefined);
+  const maintenanceAcceptanceOperationIdRef = useRef<string | null>(null);
   const [matches, setMatches] = useState<Match[]>([]);
   const [changesEvent, setChangesEvent] = useState<Event | null>(null);
   const [changesMatches, setChangesMatches] = useState<Match[]>([]);
@@ -530,7 +719,7 @@ function EventScheduleContent() {
   const [reportingEvent, setReportingEvent] = useState(false);
   const [reschedulingMatches, setReschedulingMatches] = useState(false);
   const [pendingScheduleAction, setPendingScheduleAction] = useState<
-    "reschedule" | "buildSchedule" | "rebuildNoPlaceholders" | null
+    "BUILD" | "COMPLETE" | "REBUILD" | "REBUILD_WITHOUT_PLACEHOLDERS" | null
   >(null);
   const [selectedLifecycleStatus, setSelectedLifecycleStatus] =
     useState<EventLifecycleStatus | null>(null);
@@ -1105,6 +1294,13 @@ function EventScheduleContent() {
     },
     [],
   );
+  const loadExistingEditorSnapshot = useCallback(
+    (targetId: string): Promise<EventEditorSnapshot> =>
+      apiRequest<EventEditorSnapshot>(
+        `/api/events/${encodeURIComponent(targetId)}/editor`,
+      ),
+    [],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -1145,9 +1341,7 @@ function EventScheduleContent() {
           createBootstrapKeyRef.current = null;
           pendingCreateCommandRef.current = null;
           setCreateBootstrap(null);
-          const result = await apiRequest<EventEditorSnapshot>(
-            `/api/events/${encodeURIComponent(targetId as string)}/editor`,
-          );
+          const result = await loadExistingEditorSnapshot(targetId as string);
           if (!cancelled) setEditorSnapshot(result);
         }
       } catch (snapshotError) {
@@ -1174,6 +1368,7 @@ function EventScheduleContent() {
     commitCreateBootstrap,
     editorDraftBootstrapKey,
     loadCreateBootstrapForQuery,
+    loadExistingEditorSnapshot,
     eventId,
     isCreateMode,
     isEditingEvent,
@@ -1185,6 +1380,7 @@ function EventScheduleContent() {
     templateIdParam,
     user?.$id,
   ]);
+
   const {
     clearMatchConflictDraftAlerts,
     dismissMatchConflictMessage,
@@ -2223,8 +2419,9 @@ function EventScheduleContent() {
       const arrayChanged = (
         first: unknown[] | null | undefined,
         second: unknown[] | null | undefined,
-      ): boolean =>
-        JSON.stringify(first ?? []) !== JSON.stringify(second ?? []);
+      ): boolean => !deepEqual(first ?? [], second ?? []);
+      const objectChanged = (first: unknown, second: unknown): boolean =>
+        !deepEqual(first ?? null, second ?? null);
       const startBefore =
         typeof before.start === "string" && before.start.trim().length > 0
           ? before.start
@@ -2247,6 +2444,26 @@ function EventScheduleContent() {
       const divisionAfter = normalizeDivisionToken(
         getDivisionId(after.division),
       );
+      if (valueChanged(before.status, after.status))
+        changedFields.push("status");
+      if (valueChanged(before.resultStatus, after.resultStatus))
+        changedFields.push("result status");
+      if (valueChanged(before.resultType, after.resultType))
+        changedFields.push("result type");
+      if (valueChanged(before.actualStart, after.actualStart))
+        changedFields.push("actual start");
+      if (valueChanged(before.actualEnd, after.actualEnd))
+        changedFields.push("actual end");
+      if (valueChanged(before.statusReason, after.statusReason))
+        changedFields.push("status reason");
+      if (idChanged(before.winnerEventTeamId, after.winnerEventTeamId))
+        changedFields.push("winner");
+      if (arrayChanged(before.segments, after.segments))
+        changedFields.push("segments");
+      if (arrayChanged(before.officialIds, after.officialIds))
+        changedFields.push("official assignments");
+      if (objectChanged(before.matchRulesSnapshot, after.matchRulesSnapshot))
+        changedFields.push("match rules");
 
       if (idChanged(before.team1Id, after.team1Id))
         changedFields.push("team 1");
@@ -2286,6 +2503,16 @@ function EventScheduleContent() {
         arrayChanged(before.team2Points, after.team2Points)
       ) {
         changedFields.push("score values");
+      }
+
+      if (
+        changedFields.length === 0 &&
+        !deepEqual(
+          toCanonicalMatchPersistencePayload(before),
+          toCanonicalMatchPersistencePayload(after),
+        )
+      ) {
+        changedFields.push("match details");
       }
 
       return changedFields;
@@ -4120,12 +4347,12 @@ function EventScheduleContent() {
     }: {
       showPageLoader?: boolean;
       clearMessages?: boolean;
-    } = {}) => {
-      if (!eventId) return;
+    } = {}): Promise<boolean> => {
+      if (!eventId) return false;
       if (isCreateMode) {
         setLoading(false);
         setError(null);
-        return;
+        return true;
       }
 
       if (showPageLoader) {
@@ -4155,7 +4382,7 @@ function EventScheduleContent() {
         }
         if (!fetchedEvent) {
           setError("League not found.");
-          return;
+          return false;
         }
         const normalizedEvent =
           await hydrateEventFormDependencies(fetchedEvent);
@@ -4167,6 +4394,7 @@ function EventScheduleContent() {
           setHasUnsavedChanges(false);
           setFormHasUnsavedChanges(false);
         }
+        return true;
       } catch (err) {
         console.error("Failed to load league schedule:", err);
         setError(
@@ -4175,6 +4403,7 @@ function EventScheduleContent() {
             err,
           ),
         );
+        return false;
       } finally {
         if (showPageLoader) {
           setLoading(false);
@@ -5372,6 +5601,8 @@ function EventScheduleContent() {
       mode: "CREATE" | "EDIT",
       createCompletionMode?: "CREATE_ONLY" | "CREATE_AND_BUILD_SCHEDULE",
       hasDraftMatchChanges = false,
+      forceFreshCreateOperationId = false,
+      preserveSchedule = false,
     ): Promise<{
       event: Event;
       snapshot: EventEditorSnapshot;
@@ -5410,20 +5641,9 @@ function EventScheduleContent() {
               : "CREATE_AND_BUILD_SCHEDULE"
             : "CREATE_ONLY"),
       } as const;
-      const eventTypeChanged =
-        effectiveMode === "EDIT" &&
-        currentSnapshot &&
-        currentSnapshot.draft.basics.eventType.trim().toUpperCase() !==
-          scheduleType;
       const scheduleTransition =
         effectiveMode === "EDIT" && currentSnapshot
-          ? eventTypeChanged
-            ? {
-                mode: "RECONCILE" as const,
-                expectedScheduleRevision:
-                  currentSnapshot.scheduleState.revision,
-              }
-            : { mode: "PRESERVE" as const }
+          ? { mode: "PRESERVE" as const }
           : null;
       if (effectiveMode === "CREATE") {
         const bootstrapQuery = buildCreateEditorBootstrapQuery(contractDraft);
@@ -5433,8 +5653,9 @@ function EventScheduleContent() {
           bootstrapQuery.url,
         );
         const pending = pendingCreateCommandRef.current;
-        const createOperationId =
-          pending?.createOperationId ?? bootstrapForCreate?.createOperationId;
+        const createOperationId = forceFreshCreateOperationId
+          ? getFreshCreateOperationId(pending?.createOperationId)
+          : (pending?.createOperationId ?? bootstrapForCreate?.createOperationId);
         const expectedRevisions = bootstrapForCreate?.snapshot
           ? {
               editorRevision: bootstrapForCreate.snapshot.editorRevision,
@@ -5458,13 +5679,18 @@ function EventScheduleContent() {
             completion.mode === "CREATE_AND_BUILD_SCHEDULE",
         });
         command =
-          pending && sameCreateRequest(pending, candidate)
+          !forceFreshCreateOperationId &&
+          pending &&
+          sameCreateRequest(pending, candidate)
             ? pending
             : parseCreateEventEditorCommand({
                 ...candidate,
-                createOperationId: pending
-                  ? createClientId()
-                  : candidate.createOperationId,
+                createOperationId:
+                  forceFreshCreateOperationId
+                    ? candidate.createOperationId
+                    : pending
+                      ? createClientId()
+                      : candidate.createOperationId,
               });
         pendingCreateCommandRef.current = cloneValue(
           command,
@@ -5496,9 +5722,15 @@ function EventScheduleContent() {
       );
       if (result.status === "PROPOSED") {
         setScheduleProposal(result);
+        setScheduleProposalReviewState("ACTIVE");
+        setPartialAcceptanceOperationId(null);
+        setShowPartialAcceptanceConfirmation(false);
+        setScheduleProposalError(null);
         setEditorSnapshot(result.snapshot);
         setInfoMessage(
-          `Review the complete schedule proposal with ${result.scheduleOutcome.matchCount} matches before acceptance.`,
+          result.scheduleOutcome.status === "PARTIAL"
+            ? `Review the incomplete schedule proposal with ${result.scheduleOutcome.placedMatchCount} of ${result.scheduleOutcome.matchCount} matches scheduled.`
+            : `Review the complete schedule proposal with ${result.scheduleOutcome.matchCount} matches before acceptance.`,
         );
         const proposalEvent = editorDraftToLegacyEvent(
           result.snapshot.draft,
@@ -5585,27 +5817,44 @@ function EventScheduleContent() {
   );
   const acceptPendingScheduleProposal = useCallback(async () => {
     if (!scheduleProposal) return;
+    const isPartialProposal = scheduleProposal.scheduleOutcome.status === "PARTIAL";
     const pendingCreateCommand = pendingCreateCommandRef.current;
     const currentDraft = await getDraftFromForm();
     if (
       !pendingCreateCommand ||
       !currentDraft ||
-      JSON.stringify(currentDraft) !== JSON.stringify(pendingCreateCommand.draft)
+      !deepEqual(currentDraft, pendingCreateCommand.draft)
     ) {
-      setError(
+      setScheduleProposalError(
         "The event configuration changed. The schedule proposal is stale. Return to the editor and create a new proposal.",
       );
       return;
     }
     setIsAcceptingScheduleProposal(true);
-    setError(null);
+    setScheduleProposalError(null);
     try {
-      const result = await eventEditorService.acceptScheduleProposal({
-        contractVersion: EVENT_EDITOR_CONTRACT_VERSION,
-        createOperationId: scheduleProposal.createOperationId,
-        proposalRevision: scheduleProposal.proposalRevision,
-        draft: currentDraft,
-      });
+      const partialOperationId = isPartialProposal
+        ? (partialAcceptanceOperationId ?? createClientId())
+        : null;
+      if (partialOperationId && !partialAcceptanceOperationId) {
+        setPartialAcceptanceOperationId(partialOperationId);
+      }
+      const command = isPartialProposal
+        ? {
+            contractVersion: EVENT_EDITOR_CONTRACT_VERSION,
+            createOperationId: scheduleProposal.createOperationId,
+            proposalRevision: scheduleProposal.proposalRevision,
+            acceptanceMode: "PARTIAL" as const,
+            acceptanceOperationId: partialOperationId as string,
+            draft: currentDraft,
+          }
+        : {
+            contractVersion: EVENT_EDITOR_CONTRACT_VERSION,
+            createOperationId: scheduleProposal.createOperationId,
+            proposalRevision: scheduleProposal.proposalRevision,
+            draft: currentDraft,
+          };
+      const result = await eventEditorService.acceptScheduleProposal(command);
       const acceptedEventId = result.snapshot.eventId;
       if (!acceptedEventId) {
         throw new Error(
@@ -5630,12 +5879,18 @@ function EventScheduleContent() {
           matches: scheduleMatches,
         } as Event);
       setScheduleProposal(null);
+      setScheduleProposalReviewState("ACTIVE");
+      setPartialAcceptanceOperationId(null);
+      setShowPartialAcceptanceConfirmation(false);
+      setScheduleProposalError(null);
       pendingCreateCommandRef.current = null;
       createdEditorEventIdRef.current = acceptedEventId;
       setEditorSnapshot(result.snapshot);
       handlePreviewEventUpdate(canonicalEvent);
       setInfoMessage(
-        `Event created with ${result.scheduleOutcome.matchCount} scheduled matches.`,
+        result.scheduleOutcome.status === "PARTIAL"
+          ? `Event created with ${result.scheduleOutcome.placedMatchCount} scheduled matches. Schedule incomplete: ${result.scheduleOutcome.unplacedMatchCount} unscheduled.`
+          : `Event created with ${result.scheduleOutcome.matchCount} scheduled matches.`,
       );
       const params = new URLSearchParams(searchParams?.toString() ?? "");
       params.delete("create");
@@ -5646,11 +5901,30 @@ function EventScheduleContent() {
         { scroll: false },
       );
     } catch (proposalError) {
-      setError(
-        formatActionErrorMessage(
-          "Failed to accept schedule proposal.",
-          proposalError,
-        ),
+      const stale =
+        isApiRequestError(proposalError)
+        && typeof proposalError.data === "object"
+        && proposalError.data !== null
+        && "code" in proposalError.data
+        && String(proposalError.data.code) === "EDITOR_PROPOSAL_STALE";
+      const staleState = getScheduleProposalAcceptanceFailureState({
+        isPartialProposal,
+        errorCode: stale ? "EDITOR_PROPOSAL_STALE" : null,
+      });
+      if (staleState.clearPartialAcceptanceOperationId) {
+        setPartialAcceptanceOperationId(null);
+        setScheduleProposalReviewState(staleState.reviewState);
+        if (staleState.closePartialAcceptanceConfirmation) {
+          setShowPartialAcceptanceConfirmation(false);
+        }
+      }
+      setScheduleProposalError(
+        stale
+          ? "This schedule proposal is stale. Review context is still open; refresh the proposal before accepting."
+          : formatActionErrorMessage(
+              "Failed to accept schedule proposal.",
+              proposalError,
+            ),
       );
     } finally {
       setIsAcceptingScheduleProposal(false);
@@ -5658,14 +5932,51 @@ function EventScheduleContent() {
   }, [
     getDraftFromForm,
     handlePreviewEventUpdate,
+    partialAcceptanceOperationId,
     router,
     scheduleProposal,
     searchParams,
   ]);
 
+  const refreshStaleScheduleProposal = useCallback(async () => {
+    if (
+      !scheduleProposal ||
+      scheduleProposalReviewState !== "STALE" ||
+      scheduleProposal.scheduleOutcome.status !== "PARTIAL"
+    ) {
+      return;
+    }
+    const currentDraft = await getDraftFromForm();
+    if (!currentDraft) return;
+
+    setIsRefreshingScheduleProposal(true);
+    setScheduleProposalError(null);
+    try {
+      await saveEditorConfiguration(
+        currentDraft,
+        "CREATE",
+        "CREATE_AND_BUILD_SCHEDULE",
+        false,
+        true,
+      );
+    } catch (proposalError) {
+      setScheduleProposalError(
+        formatActionErrorMessage("Failed to refresh schedule proposal.", proposalError),
+      );
+    } finally {
+      setIsRefreshingScheduleProposal(false);
+    }
+  }, [
+    getDraftFromForm,
+    saveEditorConfiguration,
+    scheduleProposal,
+    scheduleProposalReviewState,
+  ]);
+
   const rejectPendingScheduleProposal = useCallback(async () => {
     if (!scheduleProposal) return;
     setIsRejectingScheduleProposal(true);
+    setScheduleProposalError(null);
     try {
       await eventEditorService.rejectScheduleProposal({
         contractVersion: EVENT_EDITOR_CONTRACT_VERSION,
@@ -5673,14 +5984,26 @@ function EventScheduleContent() {
         proposalRevision: scheduleProposal.proposalRevision,
       });
       setScheduleProposal(null);
+      setScheduleProposalReviewState("ACTIVE");
+      setPartialAcceptanceOperationId(null);
+      setShowPartialAcceptanceConfirmation(false);
+      setScheduleProposalError(null);
       pendingCreateCommandRef.current = null;
       setInfoMessage("Schedule proposal rejected. The Event was not created.");
     } catch (proposalError) {
-      setError(
-        formatActionErrorMessage(
-          "Failed to reject schedule proposal.",
-          proposalError,
-        ),
+      const stale =
+        isApiRequestError(proposalError)
+        && typeof proposalError.data === "object"
+        && proposalError.data !== null
+        && "code" in proposalError.data
+        && String(proposalError.data.code) === "EDITOR_PROPOSAL_STALE";
+      setScheduleProposalError(
+        stale
+          ? "This schedule proposal is stale. Review context is still open; return to the editor and create a new proposal."
+          : formatActionErrorMessage(
+              "Failed to reject schedule proposal.",
+              proposalError,
+            ),
       );
     } finally {
       setIsRejectingScheduleProposal(false);
@@ -5754,80 +6077,8 @@ function EventScheduleContent() {
   );
 
   const toBulkMatchUpdatePayload = useCallback(
-    (match: Match): Record<string, unknown> => {
-      const normalizeRelationId = (value: unknown): string | null => {
-        if (typeof value === "string") {
-          const normalized = value.trim();
-          return normalized.length > 0 ? normalized : null;
-        }
-        if (
-          value &&
-          typeof value === "object" &&
-          "$id" in (value as Record<string, unknown>)
-        ) {
-          const relationId = (value as Record<string, unknown>).$id;
-          if (typeof relationId === "string" && relationId.trim().length > 0) {
-            return relationId.trim();
-          }
-        }
-        return null;
-      };
-
-      const resolvePersistableTeamId = (
-        explicitId: string | null | undefined,
-        relation: unknown,
-      ): string | null => {
-        const candidate =
-          normalizeRelationId(explicitId) ?? normalizeRelationId(relation);
-        if (!candidate || isLocalPlaceholderId(candidate)) {
-          return null;
-        }
-        return candidate;
-      };
-
-      const payload: Record<string, unknown> = {
-        id: match.$id,
-        matchId: match.matchId ?? null,
-        locked: Boolean(match.locked),
-        status: match.status ?? null,
-        resultStatus: match.resultStatus ?? null,
-        resultType: match.resultType ?? null,
-        actualStart: match.actualStart ?? null,
-        actualEnd: match.actualEnd ?? null,
-        statusReason: match.statusReason ?? null,
-        winnerEventTeamId: match.winnerEventTeamId ?? null,
-        segments: Array.isArray(match.segments) ? match.segments : [],
-        team1Points: Array.isArray(match.team1Points) ? match.team1Points : [],
-        team2Points: Array.isArray(match.team2Points) ? match.team2Points : [],
-        team1Id: resolvePersistableTeamId(match.team1Id, match.team1),
-        team2Id: resolvePersistableTeamId(match.team2Id, match.team2),
-        officialId:
-          normalizeRelationId(match.officialId) ??
-          normalizeRelationId(match.official),
-        officialIds: Array.isArray(match.officialIds) ? match.officialIds : [],
-        teamOfficialId: resolvePersistableTeamId(
-          match.teamOfficialId,
-          match.teamOfficial,
-        ),
-        fieldId:
-          normalizeRelationId(match.fieldId) ??
-          normalizeRelationId(match.field),
-        previousLeftId: asBulkMatchRef(match.previousLeftId),
-        previousRightId: asBulkMatchRef(match.previousRightId),
-        winnerNextMatchId: asBulkMatchRef(match.winnerNextMatchId),
-        loserNextMatchId: asBulkMatchRef(match.loserNextMatchId),
-        side: match.side ?? null,
-        officialCheckedIn: Boolean(match.officialCheckedIn),
-        start: match.start ?? null,
-        end: match.end ?? null,
-        division: normalizeIdToken(getDivisionId(match.division) ?? null),
-        losersBracket: Boolean(match.losersBracket),
-      };
-      if (match.matchRulesSnapshot) {
-        payload.matchRulesSnapshot = match.matchRulesSnapshot;
-      }
-      return stripApiCompatibilityFields(payload) as Record<string, unknown>;
-    },
+    (match: Match): Record<string, unknown> =>
+      toCanonicalMatchPersistencePayload(match),
     [],
   );
 
@@ -5978,8 +6229,10 @@ function EventScheduleContent() {
   const saveExistingEvent = useCallback(
     async ({
       eventTypeTransitionConfirmed = false,
+      preserveSchedule = false,
     }: {
       eventTypeTransitionConfirmed?: boolean;
+      preserveSchedule?: boolean;
     } = {}): Promise<EventEditorSnapshot | null> => {
       if (!activeEvent) return null;
       if (!event) {
@@ -5988,7 +6241,11 @@ function EventScheduleContent() {
         );
         return null;
       }
-      if (eventTypeTransitionConfirmation && !eventTypeTransitionConfirmed)
+      if (
+        !preserveSchedule &&
+        eventTypeTransitionConfirmation &&
+        !eventTypeTransitionConfirmed
+      )
         return null;
 
       const draft = await getDraftFromForm();
@@ -6004,6 +6261,19 @@ function EventScheduleContent() {
         .toUpperCase();
       const nextEventType = draft.basics.eventType.trim().toUpperCase();
       if (
+        preserveSchedule &&
+        previousEventType !== nextEventType &&
+        editorSnapshot?.scheduleState.hasProtectedHistory
+      ) {
+        setEventTypeTransitionConfirmation({
+          message: `This event has protected match history. Changing it from ${previousEventType || "the current event type"} to ${nextEventType || "the selected event type"} is not allowed.`,
+          actionLabel: "Close",
+          canContinue: false,
+        });
+        return null;
+      }
+      if (
+        !preserveSchedule &&
         previousEventType !== nextEventType &&
         !eventTypeTransitionConfirmed
       ) {
@@ -6021,20 +6291,17 @@ function EventScheduleContent() {
           return null;
         }
         setEventTypeTransitionConfirmation({
-          message: nextSupportsSchedule
-            ? matchCount > 0
-              ? `Changing this event from ${previousLabel} to ${nextLabel} will rebuild its ${matchCount} scheduled matches. Match times, fields, seeds, and official assignments can change.`
-              : `Changing this event from ${previousLabel} to ${nextLabel} will build a schedule.`
-            : matchCount > 0
-              ? `Changing this event from ${previousLabel} to ${nextLabel} will delete its ${matchCount} scheduled matches.`
-              : `Changing this event from ${previousLabel} to ${nextLabel} will not create a schedule.`,
-          actionLabel: nextSupportsSchedule
-            ? matchCount > 0
-              ? "Change type & rebuild schedule"
-              : "Change type & build schedule"
-            : matchCount > 0
-              ? "Change type & delete schedule"
-              : "Change type",
+          message:
+            matchCount > 0
+              ? nextSupportsSchedule
+                ? `Changing this event from ${previousLabel} to ${nextLabel} will save the new event type while preserving its ${matchCount} scheduled matches. Use the explicit Rebuild operation after saving when you need new placements.`
+                : `Changing this event from ${previousLabel} to ${nextLabel} will save the new event type while preserving its ${matchCount} scheduled matches. This change will not delete or regenerate the existing Match Graph.`
+              : nextSupportsSchedule
+                ? `Changing this event from ${previousLabel} to ${nextLabel} will save the new event type without building a schedule. Use an explicit Build or Rebuild operation after saving when scheduling is available.`
+                : `Changing this event from ${previousLabel} to ${nextLabel} will save the new event type without creating a schedule.`,
+          actionLabel: matchCount > 0
+            ? "Change type & preserve schedule"
+            : "Change type",
           canContinue: true,
         });
         return null;
@@ -6068,6 +6335,8 @@ function EventScheduleContent() {
             "EDIT",
             undefined,
             hasDraftMatchChanges,
+            false,
+            preserveSchedule,
           );
         const nextEvent = cloneValue(canonicalEvent) as Event;
         const nextMatches = Array.isArray(canonicalEvent.matches)
@@ -6236,8 +6505,8 @@ function EventScheduleContent() {
           }
         }
         if (persistedDraftMatches && updatedEvent.$id) {
-          latestEditorSnapshot = await apiRequest<EventEditorSnapshot>(
-            `/api/events/${encodeURIComponent(updatedEvent.$id)}/editor`,
+          latestEditorSnapshot = await loadExistingEditorSnapshot(
+            updatedEvent.$id,
           );
           setEditorSnapshot(latestEditorSnapshot);
         }
@@ -6292,6 +6561,7 @@ function EventScheduleContent() {
       getDraftFromForm,
       saveEditorConfiguration,
       loadSchedule,
+      loadExistingEditorSnapshot,
       matchConflictPairs,
       editorSnapshot,
       eventTypeTransitionConfirmation,
@@ -6309,89 +6579,620 @@ function EventScheduleContent() {
     ],
   );
 
-  const runManualScheduleAction = useCallback(
+  const requestScheduleMaintenanceProposal = useCallback(
     async ({
-      action,
-      participantCount,
+      requestedOperation,
       includePlaceholderTeams,
-      replaceExistingMatches,
-      successMessage,
-      failureMessage,
+      refreshSnapshot = false,
+      forceFreshOperationId = false,
+      refreshRequest = false,
     }: {
-      action: "reschedule" | "buildSchedule" | "rebuildNoPlaceholders";
-      participantCount?: number;
+      requestedOperation?: EventEditorMaintenanceOperation;
       includePlaceholderTeams?: boolean;
-      replaceExistingMatches?: boolean;
-      successMessage: string;
-      failureMessage: string;
-    }) => {
-      if (publishing || reschedulingMatches || !activeEvent?.$id) return;
-      const scheduleWasMissing =
-        (editorSnapshot?.scheduleState.matchCount ?? activeMatches.length) ===
-        0;
-      let expectedScheduleRevision = editorSnapshot?.scheduleState.revision;
+      refreshSnapshot?: boolean;
+      forceFreshOperationId?: boolean;
+      refreshRequest?: boolean;
+    } = {}) => {
+      if (
+        publishing ||
+        reschedulingMatches ||
+        isAcceptingMaintenanceProposal ||
+        isRejectingMaintenanceProposal ||
+        (!refreshRequest && maintenanceProposalRefreshInFlightRef.current) ||
+        !activeEvent?.$id
+      ) {
+        return;
+      }
+
+      const hasDraftMatchChanges = pendingSaveChanges.some(
+        (change) => change.category === "match",
+      );
+      if (hasDraftMatchChanges) {
+        const message =
+          "Save or discard staged Match changes before generating a schedule maintenance proposal. Your staged Match changes remain unsaved.";
+        setMaintenanceProposalError(message);
+        setActionError(message);
+        return;
+      }
+
+      let savedSnapshot = editorSnapshot;
       if (hasPendingUnsavedChanges) {
-        const savedSnapshot = await saveExistingEvent();
-        if (!savedSnapshot) return;
-        if (
-          action === "buildSchedule" &&
-          scheduleWasMissing &&
-          savedSnapshot.scheduleState.matchCount > 0
-        ) {
-          setInfoMessage(successMessage);
+        savedSnapshot = await saveExistingEvent({ preserveSchedule: true });
+        if (!savedSnapshot) {
           return;
         }
-        expectedScheduleRevision = savedSnapshot.scheduleState.revision;
       }
+
+      if (refreshSnapshot) {
+        try {
+          savedSnapshot = await loadExistingEditorSnapshot(activeEvent.$id);
+          setEditorSnapshot(savedSnapshot);
+        } catch (snapshotError) {
+          const message = formatActionErrorMessage(
+            "Failed to refresh schedule capabilities.",
+            snapshotError,
+          );
+          setMaintenanceProposalError(message);
+          setActionError(message);
+          return;
+        }
+      }
+
+      const availableMaintenanceOperations =
+        savedSnapshot?.scheduleState.availableMaintenanceOperations ?? [];
+      const operation =
+        requestedOperation ?? availableMaintenanceOperations[0] ?? null;
+
+      if (
+        !operation ||
+        !availableMaintenanceOperations.includes(operation)
+      ) {
+        const message =
+          "That schedule maintenance operation is not available for the current Event.";
+        setMaintenanceProposalError(message);
+        setActionError(message);
+        return;
+      }
+      if (
+        includePlaceholderTeams === false &&
+        operation !== "REBUILD"
+      ) {
+        const message = "Placeholder-free scheduling is only available for Rebuild.";
+        setMaintenanceProposalError(message);
+        setActionError(message);
+        return;
+      }
+
+      const participantCount =
+        savedSnapshot?.draft.participation.maxParticipants ??
+        (typeof activeEvent.maxParticipants === "number"
+          ? Math.trunc(activeEvent.maxParticipants)
+          : null);
+      const requestParticipantCount =
+        participantCount && participantCount > 0 ? participantCount : null;
+      const revisionBinding = maintenanceRevisionBindingFor(savedSnapshot);
+      const previousAttempt = maintenanceOperationAttemptRef.current;
+      const canReuseFailedOperationId =
+        previousAttempt?.status === "FAILED" &&
+        previousAttempt.eventId === activeEvent.$id &&
+        previousAttempt.operation === operation &&
+        previousAttempt.includePlaceholderTeams === includePlaceholderTeams &&
+        previousAttempt.participantCount === requestParticipantCount &&
+        previousAttempt.revisionBinding !== null &&
+        revisionBinding !== null &&
+        deepEqual(previousAttempt.revisionBinding, revisionBinding);
+      const canReuseOperationId =
+        canReuseFailedOperationId &&
+        previousAttempt.forceFreshOperationId === forceFreshOperationId;
+      const operationId = canReuseOperationId
+        ? previousAttempt.operationId
+        : getFreshCreateOperationId(previousAttempt?.operationId);
+      const operationAttempt: MaintenanceOperationAttempt = {
+        eventId: activeEvent.$id,
+        operation,
+        includePlaceholderTeams,
+        participantCount: requestParticipantCount,
+        operationId,
+        revisionBinding,
+        forceFreshOperationId,
+        status: "PENDING",
+      };
+      maintenanceOperationAttemptRef.current = operationAttempt;
+      maintenanceProposalIncludePlaceholderTeamsRef.current =
+        includePlaceholderTeams;
       setSubmitError(null);
       setError(null);
+      setActionError(null);
+      setMaintenanceProposalError(null);
+      setMaintenanceAcceptanceConflict(false);
       setInfoMessage(null);
       setWarningMessage(null);
-      setPendingScheduleAction(action);
+      setPendingScheduleAction(
+        includePlaceholderTeams === false
+          ? "REBUILD_WITHOUT_PLACEHOLDERS"
+          : operation,
+      );
       setReschedulingMatches(true);
+      const request = {
+        contractVersion: EVENT_EDITOR_CONTRACT_VERSION,
+        eventId: activeEvent.$id,
+        operation,
+        operationId,
+        ...(revisionBinding ? { expectedRevisions: revisionBinding } : {}),
+        ...(requestParticipantCount === null
+          ? {}
+          : { participantCount: requestParticipantCount }),
+        ...(includePlaceholderTeams === undefined
+          ? {}
+          : { includePlaceholderTeams }),
+      } as const;
       try {
-        const scheduled = await eventService.reconcileEventSchedule(
-          activeEvent.$id,
-          {
-            expectedScheduleRevision,
-            participantCount,
-            includePlaceholderTeams,
-            replaceExistingMatches,
-          },
+        const proposalResponse =
+          await eventService.proposeEventScheduleMaintenance(request);
+        if (proposalResponse.status !== "PROPOSED") {
+          throw new Error(
+            "The schedule maintenance operation did not return a proposal.",
+          );
+        }
+        maintenanceOperationAttemptRef.current = {
+          ...operationAttempt,
+          status: "PROPOSED",
+        };
+        maintenanceAcceptanceOperationIdRef.current = null;
+        setMaintenanceProposal(proposalResponse);
+        setMaintenanceProposalReviewState("ACTIVE");
+        setMaintenanceProposalError(null);
+        setMaintenanceProposalSyncPending(false);
+        setInfoMessage(
+          `Review the ${operation.toLowerCase()} proposal: ${proposalResponse.scheduleOutcome.placedMatchCount} placed, ${proposalResponse.scheduleOutcome.unplacedMatchCount} unplaced.`,
         );
-        if (!scheduled.event) {
-          throw new Error(failureMessage);
+      } catch (proposalError) {
+        maintenanceOperationAttemptRef.current = {
+          ...operationAttempt,
+          status: "FAILED",
+        };
+        let capabilityRefreshError: string | null = null;
+        if (isEditorMaintenanceCapabilityFailure(proposalError)) {
+          try {
+            const refreshedEditorSnapshot = await loadExistingEditorSnapshot(
+              activeEvent.$id,
+            );
+            setEditorSnapshot(refreshedEditorSnapshot);
+          } catch (snapshotError) {
+            setEditorSnapshot(null);
+            capabilityRefreshError = formatActionErrorMessage(
+              "Failed to refresh schedule capabilities.",
+              snapshotError,
+            );
+          }
         }
-        const warningText = (scheduled.warnings ?? [])
-          .map((warning) => warning.message.trim())
-          .filter(Boolean)
-          .join(" ");
-        await loadSchedule({ showPageLoader: false, clearMessages: false });
-        setInfoMessage(successMessage);
-        if (warningText) {
-          setWarningMessage(warningText);
-        }
-      } catch (scheduleError) {
-        console.error(failureMessage, scheduleError);
-        setError(formatActionErrorMessage(failureMessage, scheduleError));
+        console.error("Failed to propose schedule maintenance:", proposalError);
+        const message = formatActionErrorMessage(
+          `Failed to ${operation.toLowerCase()} schedule.`,
+          proposalError,
+        );
+        setMaintenanceProposalError(message);
+        setActionError(capabilityRefreshError ?? message);
       } finally {
         setPendingScheduleAction((current) =>
-          current === action ? null : current,
+          current === operation ||
+          (includePlaceholderTeams === false &&
+            current === "REBUILD_WITHOUT_PLACEHOLDERS")
+            ? null
+            : current,
         );
         setReschedulingMatches(false);
       }
     },
     [
-      activeMatches.length,
-      activeEvent?.$id,
-      editorSnapshot?.scheduleState.revision,
+      activeEvent,
+      editorSnapshot,
       hasPendingUnsavedChanges,
-      loadSchedule,
+      isAcceptingMaintenanceProposal,
+      isRejectingMaintenanceProposal,
+      loadExistingEditorSnapshot,
+      pendingSaveChanges,
       publishing,
-      saveExistingEvent,
       reschedulingMatches,
+      saveExistingEvent,
     ],
   );
+  const refreshAcceptedMaintenanceAfterConflict = useCallback(
+    async (proposal: EventEditorMaintenanceProposal): Promise<boolean> => {
+      const followUpErrors: string[] = [];
+      try {
+        const refreshedEditorSnapshot = await loadExistingEditorSnapshot(
+          proposal.eventId,
+        );
+        setEditorSnapshot(refreshedEditorSnapshot);
+      } catch (snapshotError) {
+        setEditorSnapshot(null);
+        followUpErrors.push(
+          formatActionErrorMessage(
+            "Another client accepted this proposal, but operation availability could not be refreshed.",
+            snapshotError,
+          ),
+        );
+      }
+
+      try {
+        const scheduleReloaded = await loadSchedule({
+          showPageLoader: false,
+          clearMessages: false,
+        });
+        if (!scheduleReloaded) {
+          followUpErrors.push(
+            "Another client accepted this proposal, but the current schedule could not be reloaded. Retry synchronization.",
+          );
+        }
+      } catch (scheduleError) {
+        followUpErrors.push(
+          formatActionErrorMessage(
+            "Another client accepted this proposal, but the current schedule could not be reloaded.",
+            scheduleError,
+          ),
+        );
+      }
+
+      if (followUpErrors.length > 0) {
+        setMaintenanceProposalReviewState("STALE");
+        setMaintenanceProposalError(
+          "Another client accepted this proposal, but the current schedule could not be synchronized. Retry synchronization.",
+        );
+        setMaintenanceProposalSyncPending(true);
+        setActionError(followUpErrors.join(" "));
+        return false;
+      }
+
+      maintenanceAcceptanceOperationIdRef.current = null;
+      maintenanceOperationAttemptRef.current = null;
+      maintenanceProposalIncludePlaceholderTeamsRef.current = undefined;
+      setMaintenanceAcceptanceConflict(false);
+      setMaintenanceProposalSyncPending(false);
+      setMaintenanceProposal(null);
+      setMaintenanceProposalReviewState("ACTIVE");
+      setMaintenanceProposalError(null);
+      setActionError(null);
+      setInfoMessage(
+        "Schedule accepted by another client. The current schedule is now shown.",
+      );
+      setSelectedLifecycleStatus(null);
+      if (pathname) {
+        const params = new URLSearchParams(searchParams?.toString() ?? "");
+        params.delete("mode");
+        params.delete("preview");
+        const query = params.toString();
+        router.replace(`${pathname}${query ? `?${query}` : ""}`, {
+          scroll: false,
+        });
+      }
+      return true;
+    },
+    [loadExistingEditorSnapshot, loadSchedule, pathname, router, searchParams],
+  );
+  const refreshRejectedMaintenanceCapabilities = useCallback(
+    async (proposal: EventEditorMaintenanceProposal): Promise<boolean> => {
+      try {
+        const refreshedEditorSnapshot = await loadExistingEditorSnapshot(
+          proposal.eventId,
+        );
+        setEditorSnapshot(refreshedEditorSnapshot);
+      } catch (snapshotError) {
+        setEditorSnapshot(null);
+        setMaintenanceProposalReviewState("STALE");
+        setMaintenanceProposalSyncPending(true);
+        setMaintenanceProposalError(
+          "Schedule proposal was rejected, but operation availability could not be refreshed. Retry synchronization.",
+        );
+        setActionError(
+          formatActionErrorMessage(
+            "Proposal rejected, but operation availability could not be refreshed.",
+            snapshotError,
+          ),
+        );
+        return false;
+      }
+
+      maintenanceAcceptanceOperationIdRef.current = null;
+      maintenanceOperationAttemptRef.current = null;
+      maintenanceProposalIncludePlaceholderTeamsRef.current = undefined;
+      setMaintenanceAcceptanceConflict(false);
+      setMaintenanceProposalSyncPending(false);
+      setMaintenanceProposal(null);
+      setMaintenanceProposalReviewState("ACTIVE");
+      setMaintenanceProposalError(null);
+      setActionError(null);
+      setInfoMessage("Schedule proposal rejected. The schedule was not changed.");
+      return true;
+    },
+    [loadExistingEditorSnapshot],
+  );
+
+
+
+  const acceptMaintenanceScheduleProposal = useCallback(async () => {
+    const proposal = maintenanceProposal;
+    if (
+      !proposal ||
+      maintenanceProposalReviewState === "STALE" ||
+      isAcceptingMaintenanceProposal ||
+      isRejectingMaintenanceProposal ||
+      isRefreshingMaintenanceProposal ||
+      maintenanceProposalRefreshInFlightRef.current
+    ) {
+      return;
+    }
+
+    const acceptanceOperationId =
+      maintenanceAcceptanceOperationIdRef.current ?? createClientId();
+    maintenanceAcceptanceOperationIdRef.current = acceptanceOperationId;
+    setIsAcceptingMaintenanceProposal(true);
+    setMaintenanceProposalError(null);
+    setActionError(null);
+    try {
+      const accepted =
+        await eventService.acceptEventScheduleMaintenanceProposal({
+          contractVersion: EVENT_EDITOR_CONTRACT_VERSION,
+          eventId: proposal.eventId,
+          operation: proposal.operation,
+          operationId: proposal.operationId,
+          proposalRevision: proposal.proposalRevision,
+          acceptanceOperationId,
+        });
+      if (accepted.status !== "ACCEPTED") {
+        throw new Error("The schedule maintenance operation was not accepted.");
+      }
+
+      maintenanceAcceptanceOperationIdRef.current = null;
+      maintenanceOperationAttemptRef.current = null;
+      maintenanceProposalIncludePlaceholderTeamsRef.current = undefined;
+      setMaintenanceAcceptanceConflict(false);
+      setMaintenanceProposalSyncPending(false);
+      setMaintenanceProposal(null);
+      setMaintenanceProposalReviewState("ACTIVE");
+      setMaintenanceProposalError(null);
+
+      const followUpErrors: string[] = [];
+      try {
+        const refreshedEditorSnapshot = await loadExistingEditorSnapshot(
+          proposal.eventId,
+        );
+        setEditorSnapshot(refreshedEditorSnapshot);
+      } catch (snapshotError) {
+        setEditorSnapshot(null);
+        followUpErrors.push(
+          formatActionErrorMessage(
+            "Schedule accepted, but operation availability could not be refreshed.",
+            snapshotError,
+          ),
+        );
+      }
+
+      const scheduleReloaded = await loadSchedule({
+        showPageLoader: false,
+        clearMessages: false,
+      });
+      if (!scheduleReloaded) {
+        followUpErrors.push(
+          "Schedule accepted, but the schedule could not be reloaded. Refresh the page to view the current schedule.",
+        );
+      }
+      setInfoMessage(
+        accepted.scheduleOutcome.status === "INCOMPLETE"
+          ? `Schedule accepted with ${accepted.scheduleOutcome.placedMatchCount} placed and ${accepted.scheduleOutcome.unplacedMatchCount} unplaced matches.`
+          : `Schedule accepted with ${accepted.scheduleOutcome.matchCount} matches.`,
+      );
+      if (followUpErrors.length > 0) {
+        setActionError(followUpErrors.join(" "));
+      }
+    } catch (acceptError) {
+      const errorCode =
+        isApiRequestError(acceptError) &&
+        acceptError.data &&
+        typeof acceptError.data === "object" &&
+        "code" in acceptError.data
+          ? String(acceptError.data.code)
+        : null;
+      const message =
+        errorCode === "EDITOR_MAINTENANCE_STALE"
+          ? "This schedule proposal is stale and cannot be accepted. Create a fresh proposal before trying again."
+          : errorCode === "EDITOR_MAINTENANCE_REJECTED"
+            ? "This schedule proposal was rejected and can no longer be accepted."
+            : errorCode === "EDITOR_MAINTENANCE_ACCEPTANCE_CONFLICT"
+              ? "This schedule proposal is no longer current because another acceptance completed. Create a fresh proposal before trying again."
+              : formatActionErrorMessage(
+                  "Failed to accept schedule proposal.",
+                  acceptError,
+                );
+      if (errorCode === "EDITOR_MAINTENANCE_STALE") {
+        setMaintenanceProposalReviewState("STALE");
+        setMaintenanceProposalSyncPending(false);
+      } else if (errorCode === "EDITOR_MAINTENANCE_REJECTED") {
+        maintenanceAcceptanceOperationIdRef.current = null;
+        maintenanceOperationAttemptRef.current = null;
+        maintenanceProposalIncludePlaceholderTeamsRef.current = undefined;
+        setMaintenanceProposal(null);
+        setMaintenanceProposalReviewState("ACTIVE");
+        setMaintenanceProposalError(null);
+        setMaintenanceProposalSyncPending(false);
+      } else if (errorCode === "EDITOR_MAINTENANCE_ACCEPTANCE_CONFLICT") {
+        maintenanceAcceptanceOperationIdRef.current = null;
+        setMaintenanceAcceptanceConflict(true);
+        await refreshAcceptedMaintenanceAfterConflict(proposal);
+        return;
+      }
+      if (errorCode !== "EDITOR_MAINTENANCE_REJECTED") {
+        setMaintenanceProposalError(message);
+      }
+      setActionError(message);
+    } finally {
+      setIsAcceptingMaintenanceProposal(false);
+    }
+  }, [
+    isAcceptingMaintenanceProposal,
+    isRejectingMaintenanceProposal,
+    isRefreshingMaintenanceProposal,
+    loadSchedule,
+    loadExistingEditorSnapshot,
+    maintenanceProposal,
+    maintenanceProposalReviewState,
+    refreshAcceptedMaintenanceAfterConflict,
+  ]);
+  const rejectMaintenanceScheduleProposal = useCallback(async () => {
+    const proposal = maintenanceProposal;
+    if (
+      !proposal ||
+      maintenanceAcceptanceConflict ||
+      isAcceptingMaintenanceProposal ||
+      isRejectingMaintenanceProposal ||
+      isRefreshingMaintenanceProposal ||
+      maintenanceProposalRefreshInFlightRef.current ||
+      reschedulingMatches
+    ) {
+      return;
+    }
+    setIsRejectingMaintenanceProposal(true);
+    setMaintenanceProposalError(null);
+    try {
+      const rejected =
+        await eventService.rejectEventScheduleMaintenanceProposal({
+          contractVersion: EVENT_EDITOR_CONTRACT_VERSION,
+          eventId: proposal.eventId,
+          operation: proposal.operation,
+          operationId: proposal.operationId,
+          proposalRevision: proposal.proposalRevision,
+        });
+      if (rejected.status !== "REJECTED") {
+        throw new Error("The schedule maintenance proposal was not rejected.");
+      }
+      let capabilityRefreshError: string | null = null;
+      try {
+        const refreshedEditorSnapshot = await loadExistingEditorSnapshot(
+          proposal.eventId,
+        );
+        setEditorSnapshot(refreshedEditorSnapshot);
+      } catch (snapshotError) {
+        setEditorSnapshot(null);
+        capabilityRefreshError = formatActionErrorMessage(
+          "Proposal rejected, but operation availability could not be refreshed.",
+          snapshotError,
+        );
+      }
+      maintenanceAcceptanceOperationIdRef.current = null;
+      maintenanceOperationAttemptRef.current = null;
+      setMaintenanceAcceptanceConflict(false);
+      if (capabilityRefreshError) {
+        setMaintenanceProposalSyncPending(true);
+        setMaintenanceProposalReviewState("STALE");
+        setMaintenanceProposalError(
+          "Schedule proposal was rejected, but operation availability could not be refreshed. Retry synchronization before creating a fresh proposal.",
+        );
+        setActionError(capabilityRefreshError);
+        setInfoMessage(
+          "Schedule proposal rejected. Refresh operation availability before continuing.",
+        );
+      } else {
+        maintenanceProposalIncludePlaceholderTeamsRef.current = undefined;
+        setMaintenanceProposalSyncPending(false);
+        setMaintenanceProposal(null);
+        setMaintenanceProposalReviewState("ACTIVE");
+        setMaintenanceProposalError(null);
+        setActionError(null);
+        setInfoMessage(
+          "Schedule proposal rejected. The schedule was not changed.",
+        );
+      }
+    } catch (rejectError) {
+      const errorCode =
+        isApiRequestError(rejectError) &&
+        rejectError.data &&
+        typeof rejectError.data === "object" &&
+        "code" in rejectError.data
+          ? String(rejectError.data.code)
+          : null;
+      if (errorCode === "EDITOR_MAINTENANCE_ACCEPTANCE_CONFLICT") {
+        setMaintenanceAcceptanceConflict(true);
+        await refreshAcceptedMaintenanceAfterConflict(proposal);
+        return;
+      }
+      if (errorCode === "EDITOR_MAINTENANCE_STALE") {
+        setMaintenanceAcceptanceConflict(false);
+        setMaintenanceProposalSyncPending(false);
+        setMaintenanceProposalReviewState("STALE");
+      } else if (errorCode === "EDITOR_MAINTENANCE_REJECTED") {
+        maintenanceOperationAttemptRef.current = null;
+        maintenanceProposalIncludePlaceholderTeamsRef.current = undefined;
+        setMaintenanceAcceptanceConflict(false);
+        setMaintenanceProposal(null);
+        setMaintenanceProposalReviewState("ACTIVE");
+        setMaintenanceProposalSyncPending(false);
+      }
+      const message = formatActionErrorMessage(
+        "Failed to reject schedule proposal.",
+        rejectError,
+      );
+      setMaintenanceProposalError(message);
+      setActionError(message);
+    } finally {
+      setIsRejectingMaintenanceProposal(false);
+    }
+  }, [
+    isAcceptingMaintenanceProposal,
+    isRejectingMaintenanceProposal,
+    isRefreshingMaintenanceProposal,
+    loadExistingEditorSnapshot,
+    maintenanceAcceptanceConflict,
+    maintenanceProposal,
+    refreshAcceptedMaintenanceAfterConflict,
+    reschedulingMatches,
+  ]);
+
+  const handleRefreshMaintenanceProposal = useCallback(() => {
+    const proposal = maintenanceProposal;
+    if (
+      !proposal ||
+      reschedulingMatches ||
+      maintenanceProposalRefreshInFlightRef.current
+    ) {
+      return;
+    }
+    maintenanceProposalRefreshInFlightRef.current = true;
+    setIsRefreshingMaintenanceProposal(true);
+    if (maintenanceAcceptanceConflict) {
+      void refreshAcceptedMaintenanceAfterConflict(proposal).finally(() => {
+        maintenanceProposalRefreshInFlightRef.current = false;
+        setIsRefreshingMaintenanceProposal(false);
+      });
+      return;
+    }
+    if (maintenanceProposalSyncPending) {
+      void refreshRejectedMaintenanceCapabilities(proposal).finally(() => {
+        maintenanceProposalRefreshInFlightRef.current = false;
+        setIsRefreshingMaintenanceProposal(false);
+      });
+      return;
+    }
+    const includePlaceholderTeams =
+      maintenanceProposalIncludePlaceholderTeamsRef.current;
+    void requestScheduleMaintenanceProposal({
+      requestedOperation: proposal.operation,
+      includePlaceholderTeams,
+      refreshSnapshot: true,
+      forceFreshOperationId: true,
+      refreshRequest: true,
+    }).finally(() => {
+      maintenanceProposalRefreshInFlightRef.current = false;
+      setIsRefreshingMaintenanceProposal(false);
+    });
+  }, [
+    maintenanceAcceptanceConflict,
+    maintenanceProposal,
+    refreshAcceptedMaintenanceAfterConflict,
+    requestScheduleMaintenanceProposal,
+    reschedulingMatches,
+    maintenanceProposalSyncPending,
+    refreshRejectedMaintenanceCapabilities,
+  ]);
 
   const handleSaveEvent = useCallback(async () => {
     if (publishing || reschedulingMatches) return;
@@ -6399,49 +7200,24 @@ function EventScheduleContent() {
     await saveExistingEvent();
   }, [publishing, reschedulingMatches, saveExistingEvent]);
 
-  const handleRescheduleMatches = useCallback(async () => {
-    await runManualScheduleAction({
-      action: "reschedule",
-      successMessage: "Matches rescheduled.",
-      failureMessage: "Failed to reschedule matches.",
-    });
-  }, [runManualScheduleAction]);
-
   const handleBuildSchedule = useCallback(async () => {
-    if (!activeEvent) return;
-    const isRebuild = activeMatches.length > 0;
-    const confirmed = window.confirm(
-      isRebuild
-        ? `Rebuild schedule? This deletes and recreates ${activeMatches.length} scheduled matches. Match times, fields, seeds, and official assignments can change.`
-        : "Build a schedule from the current event settings and registered teams?",
-    );
-    if (!confirmed) return;
-    await runManualScheduleAction({
-      action: "buildSchedule",
-      participantCount:
-        typeof activeEvent.maxParticipants === "number"
-          ? Math.max(2, Math.trunc(activeEvent.maxParticipants))
-          : undefined,
-      replaceExistingMatches: isRebuild,
-      successMessage: isRebuild ? "Schedule rebuilt." : "Schedule built.",
-      failureMessage: isRebuild
-        ? "Failed to rebuild schedule."
-        : "Failed to build schedule.",
-    });
-  }, [activeEvent, activeMatches.length, runManualScheduleAction]);
+    await requestScheduleMaintenanceProposal({ requestedOperation: "BUILD" });
+  }, [requestScheduleMaintenanceProposal]);
+
+  const handleCompleteSchedule = useCallback(async () => {
+    await requestScheduleMaintenanceProposal({ requestedOperation: "COMPLETE" });
+  }, [requestScheduleMaintenanceProposal]);
+
+  const handleRebuildSchedule = useCallback(async () => {
+    await requestScheduleMaintenanceProposal({ requestedOperation: "REBUILD" });
+  }, [requestScheduleMaintenanceProposal]);
 
   const handleRebuildWithoutPlaceholders = useCallback(async () => {
-    const confirmed = window.confirm(
-      "Rebuild without placeholder teams? This removes empty placeholder teams and rebuilds matches from registered teams only.",
-    );
-    if (!confirmed) return;
-    await runManualScheduleAction({
-      action: "rebuildNoPlaceholders",
+    await requestScheduleMaintenanceProposal({
+      requestedOperation: "REBUILD",
       includePlaceholderTeams: false,
-      successMessage: "Schedule rebuilt without placeholder teams.",
-      failureMessage: "Failed to rebuild without placeholder teams.",
     });
-  }, [runManualScheduleAction]);
+  }, [requestScheduleMaintenanceProposal]);
 
   const handlePublish = async () => {
     if (publishing || reschedulingMatches) return;
@@ -7316,6 +8092,26 @@ function EventScheduleContent() {
   );
   const scheduleProposalDisplayErrors = scheduleProposalDisplay.errors;
   const scheduleProposalDisplayWarnings = scheduleProposalDisplay.warnings;
+  const partialScheduleOutcome =
+    scheduleProposal?.scheduleOutcome.status === "PARTIAL"
+      ? scheduleProposal.scheduleOutcome
+      : null;
+  const isPartialScheduleProposal = partialScheduleOutcome !== null;
+  const isStaleScheduleProposal =
+    isPartialScheduleProposal && scheduleProposalReviewState === "STALE";
+  const maintenanceScheduleOutcome: EventEditorMaintenanceScheduleOutcome | null =
+    maintenanceProposal?.scheduleOutcome ?? null;
+  const isIncompleteMaintenanceProposal =
+    maintenanceScheduleOutcome?.status === "INCOMPLETE";
+  const isStaleMaintenanceProposal =
+    maintenanceProposalReviewState === "STALE";
+  const isMaintenanceProposalSyncPending =
+    maintenanceAcceptanceConflict || maintenanceProposalSyncPending;
+  const maintenanceProposalWarnings =
+    maintenanceScheduleOutcome?.warnings.map((warning) => warning.message) ?? [];
+  const maintenanceProposalTimeZone =
+    editorSnapshot?.draft.basics.timeZone ??
+    (typeof activeEvent?.timeZone === "string" ? activeEvent.timeZone : null);
 
   const handleStandingsSortChange = useCallback((field: StandingsSortField) => {
     setStandingsSort((prev) => {
@@ -7444,16 +8240,50 @@ function EventScheduleContent() {
         >
           <Stack gap="md">
             <Text size="sm">
-              No Event has been created. Review the complete Match Graph and
-              proposed assignments.
+              {isPartialScheduleProposal
+                ? "No Event has been created. This proposal is incomplete; review the scheduled matches and the unscheduled Match Graph nodes before accepting."
+                : "No Event has been created. Review the complete Match Graph and proposed assignments."}
             </Text>
-            <Text fw={600}>
-              {scheduleProposal?.scheduleOutcome.matchCount ?? 0} matches
-            </Text>
+            <Group gap="xs">
+              <Text fw={600}>
+                {scheduleProposal?.scheduleOutcome.matchCount ?? 0} matches
+              </Text>
+              {isPartialScheduleProposal ? (
+                <Badge color="yellow">Schedule incomplete</Badge>
+              ) : null}
+              {isStaleScheduleProposal ? (
+                <Badge color="orange">Proposal stale</Badge>
+              ) : null}
+            </Group>
             <Text size="sm" c="dimmed">
               Complete Match Graph:{" "}
               {scheduleProposal?.graph.matches.length ?? 0} nodes
             </Text>
+            {isPartialScheduleProposal ? (
+              <>
+                <Alert color="yellow" title="Schedule incomplete">
+                  {partialScheduleOutcome?.unplacedMatchCount ?? 0} unscheduled{" "}
+                  {(partialScheduleOutcome?.unplacedMatchCount ?? 0) === 1
+                    ? "match"
+                    : "matches"}:{" "}
+                  {partialScheduleOutcome?.unscheduledMatches
+                    .map((match) => match.id)
+                    .join(", ")}
+                </Alert>
+                <Text size="sm">
+                  Affected Competition Phases:{" "}
+                  {partialScheduleOutcome?.affectedCompetitionPhases
+                    .map((phase) => `${phase.name} (${phase.id})`)
+                    .join(", ")}
+                </Text>
+              </>
+            ) : null}
+            {isStaleScheduleProposal ? (
+              <Alert color="orange" title="Proposal is stale">
+                This proposal can no longer be accepted. Refresh the proposal to
+                review the current schedule with a new proposal identity.
+              </Alert>
+            ) : null}
             <Stack gap="xs" mah={280} style={{ overflowY: "auto" }}>
               {(scheduleProposal?.scheduleOutcome.matches ?? []).map(
                 (match, index) => {
@@ -7526,27 +8356,104 @@ function EventScheduleContent() {
               </Alert>
             )}
             <Group justify="flex-end">
+              {isStaleScheduleProposal ? (
+                <Button
+                  variant="default"
+                  onClick={() => {
+                    void refreshStaleScheduleProposal();
+                  }}
+                  loading={isRefreshingScheduleProposal}
+                  disabled={
+                    isAcceptingScheduleProposal || isRejectingScheduleProposal
+                  }
+                >
+                  Refresh proposal
+                </Button>
+              ) : null}
               <Button
                 variant="default"
                 onClick={() => {
                   void rejectPendingScheduleProposal();
                 }}
                 loading={isRejectingScheduleProposal}
-                disabled={isAcceptingScheduleProposal}
+                disabled={
+                  isAcceptingScheduleProposal || isRefreshingScheduleProposal
+                }
               >
                 Reject
               </Button>
               <Button
                 onClick={() => {
+                  if (isPartialScheduleProposal) {
+                    setShowPartialAcceptanceConfirmation(true);
+                  } else {
+                    void acceptPendingScheduleProposal();
+                  }
+                }}
+                loading={isAcceptingScheduleProposal}
+                disabled={
+                  isStaleScheduleProposal ||
+                  isRejectingScheduleProposal ||
+                  isRefreshingScheduleProposal ||
+                  scheduleProposalDisplayErrors.length > 0
+                }
+              >
+                {isPartialScheduleProposal
+                  ? "Review partial acceptance"
+                  : "Accept and create Event"}
+              </Button>
+            </Group>
+            {scheduleProposalError ? (
+              <Alert color="red" title="Proposal action needs attention">
+                {scheduleProposalError}
+              </Alert>
+            ) : null}
+          </Stack>
+        </Modal>
+        <Modal
+          opened={showPartialAcceptanceConfirmation}
+          onClose={() => setShowPartialAcceptanceConfirmation(false)}
+          title="Accept incomplete schedule?"
+          centered
+        >
+          <Stack gap="md">
+            <Text size="sm">
+              This will create the Event with{" "}
+              {partialScheduleOutcome?.placedMatchCount ?? 0} scheduled
+              matches. The schedule will remain incomplete with{" "}
+              {partialScheduleOutcome?.unplacedMatchCount ?? 0} unscheduled
+              matches.
+            </Text>
+            <Text size="sm">
+              Affected Competition Phases:{" "}
+              {partialScheduleOutcome?.affectedCompetitionPhases
+                .map((phase) => `${phase.name} (${phase.id})`)
+                .join(", ")}
+            </Text>
+            <Group justify="flex-end">
+              <Button
+                variant="default"
+                onClick={() => setShowPartialAcceptanceConfirmation(false)}
+                disabled={
+                  isAcceptingScheduleProposal || isRefreshingScheduleProposal
+                }
+              >
+                Keep reviewing
+              </Button>
+              <Button
+                onClick={() => {
+                  setShowPartialAcceptanceConfirmation(false);
                   void acceptPendingScheduleProposal();
                 }}
                 loading={isAcceptingScheduleProposal}
                 disabled={
+                  isStaleScheduleProposal ||
                   isRejectingScheduleProposal ||
+                  isRefreshingScheduleProposal ||
                   scheduleProposalDisplayErrors.length > 0
                 }
               >
-                Accept and create Event
+                Accept partial schedule
               </Button>
             </Group>
           </Stack>
@@ -7606,18 +8513,28 @@ function EventScheduleContent() {
 
   const leagueConfig = activeEvent.leagueConfig;
   const hasNetworkActionInFlight =
-    publishing || reschedulingMatches || cancelling || creatingTemplate;
+    publishing ||
+    reschedulingMatches ||
+    isAcceptingMaintenanceProposal ||
+    isRejectingMaintenanceProposal ||
+    isRefreshingMaintenanceProposal ||
+    cancelling ||
+    creatingTemplate;
   const showEditActionButton =
     canManageEvent && !isCreateMode && !isTemplateEvent && !isEditingEvent;
   const showSaveActionButton = Boolean(
     editorSnapshot && (isCreateMode || isEditingEvent),
   );
-  const showRescheduleActionButton =
-    isEditingEvent && (isLeague || isTournament) && activeMatches.length > 0;
+  const availableMaintenanceOperations =
+    editorSnapshot?.scheduleState.availableMaintenanceOperations ?? [];
   const showBuildScheduleActionButton =
-    isEditingEvent && (isLeague || isTournament);
+    availableMaintenanceOperations.includes("BUILD");
+  const showCompleteScheduleActionButton =
+    availableMaintenanceOperations.includes("COMPLETE");
+  const showRebuildScheduleActionButton =
+    availableMaintenanceOperations.includes("REBUILD");
   const showRebuildWithoutPlaceholdersActionButton =
-    isEditingEvent && (isLeague || isTournament);
+    showRebuildScheduleActionButton;
   const showDeleteTemplateActionButton = isTemplateEvent;
   const showCancelActionButton =
     (isEditingEvent || isCreateMode) && !isTemplateEvent;
@@ -7642,19 +8559,23 @@ function EventScheduleContent() {
       activeEvent?.$id,
   );
   const showMoreActionsMenu =
-    showRescheduleActionButton ||
     showBuildScheduleActionButton ||
+    showCompleteScheduleActionButton ||
+    showRebuildScheduleActionButton ||
     showRebuildWithoutPlaceholdersActionButton ||
     showCancelActionButton ||
     showDeleteTemplateActionButton ||
     showDeleteEventActionButton ||
     showCreateTemplateButton;
-  const isRescheduleActionInFlight =
-    reschedulingMatches && pendingScheduleAction === "reschedule";
   const isBuildScheduleActionInFlight =
-    reschedulingMatches && pendingScheduleAction === "buildSchedule";
+    reschedulingMatches && pendingScheduleAction === "BUILD";
+  const isCompleteScheduleActionInFlight =
+    reschedulingMatches && pendingScheduleAction === "COMPLETE";
+  const isRebuildScheduleActionInFlight =
+    reschedulingMatches && pendingScheduleAction === "REBUILD";
   const isRebuildWithoutPlaceholdersActionInFlight =
-    reschedulingMatches && pendingScheduleAction === "rebuildNoPlaceholders";
+    reschedulingMatches &&
+    pendingScheduleAction === "REBUILD_WITHOUT_PLACEHOLDERS";
   const showLifecycleStatusSelect = isEditingEvent && !isTemplateEvent;
   const showDiscardChangesButton =
     (isEditingEvent || isCreateMode) && hasPendingUnsavedChanges;
@@ -7671,7 +8592,7 @@ function EventScheduleContent() {
         onClose={() => setEventTypeTransitionConfirmation(null)}
         title={
           eventTypeTransitionConfirmation?.canContinue
-            ? "Change event type and rebuild schedule?"
+            ? "Change event type and preserve schedule?"
             : "Cannot change event type"
         }
         centered
@@ -7704,6 +8625,230 @@ function EventScheduleContent() {
             </Button>
           </Group>
         </Stack>
+      </Modal>
+      <Modal
+        opened={Boolean(maintenanceProposal)}
+        onClose={() => undefined}
+        withCloseButton={false}
+        title="Review schedule maintenance proposal"
+        centered
+      >
+        {maintenanceProposal && maintenanceScheduleOutcome ? (
+          <Stack gap="md">
+            <Text size="sm">
+              {isIncompleteMaintenanceProposal
+                ? "This schedule is incomplete. Review the placed and unplaced Match Graph nodes before accepting."
+                : "Review the complete Match Graph and proposed assignments before accepting."}
+            </Text>
+            <Text size="sm" fw={600}>
+              Operation: {maintenanceProposal.operation}
+            </Text>
+            <Group gap="xs">
+              <Badge color={isIncompleteMaintenanceProposal ? "yellow" : "green"}>
+                {isIncompleteMaintenanceProposal ? "Incomplete" : "Complete"}
+              </Badge>
+              <Text fw={600}>
+                {maintenanceScheduleOutcome.matchCount} proposed matches
+              </Text>
+            </Group>
+            <Text size="sm">
+              Placed matches: {maintenanceScheduleOutcome.placedMatchCount} ·
+              {" "}Unplaced matches: {maintenanceScheduleOutcome.unplacedMatchCount}
+            </Text>
+            {isStaleMaintenanceProposal ? (
+              <Alert
+                color="orange"
+                title={
+                  maintenanceAcceptanceConflict
+                    ? "Schedule accepted elsewhere"
+                    : maintenanceProposalSyncPending
+                      ? "Synchronization needed"
+                      : "Proposal is stale"
+                }
+              >
+                {maintenanceAcceptanceConflict
+                  ? "Another client accepted this proposal. Refresh the current schedule before continuing."
+                  : maintenanceProposalSyncPending
+                    ? "The proposal was rejected, but operation availability could not be refreshed. Retry synchronization before creating a fresh proposal."
+                    : "This proposal can no longer be accepted. Create a fresh proposal to review the current schedule."}
+              </Alert>
+            ) : null}
+            {maintenanceScheduleOutcome.affectedCompetitionPhases.length > 0 ? (
+              <Text size="sm">
+                Affected Competition Phases:{" "}
+                {maintenanceScheduleOutcome.affectedCompetitionPhases
+                  .map((phase) => `${phase.name} (${phase.id})`)
+                  .join(", ")}
+              </Text>
+            ) : null}
+            {isIncompleteMaintenanceProposal ? (
+              <Alert color="yellow" title="Unscheduled matches">
+                <Stack gap="xs">
+                  {maintenanceScheduleOutcome.unscheduledMatches.map(
+                    (unscheduledMatch) => (
+                      <Text
+                        key={`${unscheduledMatch.id}-${unscheduledMatch.matchId ?? "none"}`}
+                        size="xs"
+                      >
+                        {unscheduledMatch.id} · matchId:{" "}
+                        {unscheduledMatch.matchId ?? "none"} · phase:{" "}
+                        {unscheduledMatch.phase} · phaseDivisionId:{" "}
+                        {unscheduledMatch.phaseDivisionId}
+                        {unscheduledMatch.sourceDivisionId
+                          ? ` · sourceDivisionId: ${unscheduledMatch.sourceDivisionId}`
+                          : ""}
+                      </Text>
+                    ),
+                  )}
+                </Stack>
+              </Alert>
+            ) : null}
+            <Stack gap="xs" mah={320} style={{ overflowY: "auto" }}>
+              {maintenanceScheduleOutcome.matches.map((match, index) => {
+                const graphMatch = maintenanceProposal.graph.matches.find(
+                  (candidate) => candidate.id === match.id,
+                );
+                const graphEvent = maintenanceProposal.graph.event;
+                const graphMatchRecord = graphMatch as
+                  | Record<string, unknown>
+                  | undefined;
+                const isProtectedMatch =
+                  maintenanceProposal.protectedMatchIds.includes(match.id);
+                const isFixedMatch =
+                  isProtectedMatch ||
+                  match.locked ||
+                  (maintenanceProposal.operation === "COMPLETE" &&
+                    match.placementState === "PLACED");
+                const team1 = proposalRecordLabel(
+                  graphMatchRecord?.team1 ?? match.team1Id,
+                  match.team1Id ?? "Team unavailable",
+                );
+                const team2 = proposalRecordLabel(
+                  graphMatchRecord?.team2 ?? match.team2Id,
+                  match.team2Id ?? "Team unavailable",
+                );
+                const links = proposalMatchLinks(
+                  graphMatchRecord,
+                  maintenanceProposal.graph.matches as Array<
+                    Record<string, unknown>
+                  >,
+                );
+                const officials = proposalAssignmentLabels(
+                  graphMatchRecord,
+                  graphEvent,
+                );
+                return (
+                  <Paper
+                    key={`${match.id}-${match.matchId ?? index}`}
+                    withBorder
+                    p="xs"
+                  >
+                    <Group justify="space-between" wrap="nowrap">
+                      <Text size="sm">
+                        Match {match.matchId ?? index + 1}: {team1} vs {team2}
+                      </Text>
+                      <Badge
+                        size="sm"
+                        color={match.placementState === "PLACED" ? "green" : "yellow"}
+                      >
+                        {match.placementState === "PLACED" ? "Placed" : "Unplaced"}
+                      </Badge>
+                      {isProtectedMatch ? (
+                        <Badge size="sm" color="orange">
+                          Protected
+                        </Badge>
+                      ) : null}
+                      {isFixedMatch ? (
+                        <Badge size="sm" color="blue">
+                          Fixed
+                        </Badge>
+                      ) : null}
+                    </Group>
+                    <Text size="xs" c="dimmed">
+                      {formatProposalTime(
+                        match.start,
+                        maintenanceProposalTimeZone,
+                      )}{" "}
+                      ·{" "}
+                      {proposalFieldLabel(
+                        graphEvent.fields as Array<Record<string, unknown>>,
+                        match.fieldId,
+                      )}
+                    </Text>
+                    <Text size="xs" c="dimmed">
+                      Officials: {officials.length ? officials.join(", ") : "Unassigned"}
+                    </Text>
+                    {links.length > 0 ? (
+                      <Text size="xs" c="dimmed">
+                        Links: {links.join(", ")}
+                      </Text>
+                    ) : null}
+                  </Paper>
+                );
+              })}
+            </Stack>
+            {maintenanceProposalWarnings.length > 0 ? (
+              <Alert color="yellow" title="Review proposal warnings">
+                {maintenanceProposalWarnings.join(" ")}
+              </Alert>
+            ) : null}
+            {maintenanceProposalError ? (
+              <Alert color="red" title="Proposal action needs attention">
+                {maintenanceProposalError}
+              </Alert>
+            ) : null}
+            <Group justify="flex-end">
+            {isStaleMaintenanceProposal || maintenanceProposalError ? (
+              <Button
+                variant="default"
+                onClick={handleRefreshMaintenanceProposal}
+                loading={isRefreshingMaintenanceProposal || reschedulingMatches}
+                disabled={
+                  isAcceptingMaintenanceProposal ||
+                  isRejectingMaintenanceProposal ||
+                  isRefreshingMaintenanceProposal ||
+                  reschedulingMatches
+                }
+              >
+                {maintenanceAcceptanceConflict
+                  ? "Refresh accepted schedule"
+                  : maintenanceProposalSyncPending
+                    ? "Refresh operation availability"
+                    : "Create fresh proposal"}
+              </Button>
+            ) : null}
+              <Button
+                variant="default"
+                onClick={() => {
+                  void rejectMaintenanceScheduleProposal();
+                }}
+                loading={isRejectingMaintenanceProposal}
+                disabled={
+                  isAcceptingMaintenanceProposal ||
+                  isMaintenanceProposalSyncPending ||
+                  isRefreshingMaintenanceProposal ||
+                  reschedulingMatches
+                }
+              >
+                Reject
+              </Button>
+              <Button
+                onClick={() => {
+                  void acceptMaintenanceScheduleProposal();
+                }}
+                loading={isAcceptingMaintenanceProposal}
+                disabled={
+                  isStaleMaintenanceProposal ||
+                  isRejectingMaintenanceProposal ||
+                  isRefreshingMaintenanceProposal ||
+                  reschedulingMatches
+                }
+              >
+                Accept schedule
+              </Button>
+            </Group>
+          </Stack>
+        ) : null}
       </Modal>
       <Container fluid pt="xl" pb={0}>
         <Stack gap="lg">
@@ -7748,13 +8893,15 @@ function EventScheduleContent() {
             hasPendingUnsavedChanges={hasPendingUnsavedChanges}
             hasSplitDivisionUnassignedTeams={hasSplitDivisionUnassignedTeams}
             showMoreActions={showMoreActionsMenu}
-            showRescheduleAction={showRescheduleActionButton}
-            isRescheduleActionInFlight={isRescheduleActionInFlight}
-            onRescheduleMatches={handleRescheduleMatches}
             showBuildScheduleAction={showBuildScheduleActionButton}
-            buildScheduleIsRebuild={activeMatches.length > 0}
             isBuildScheduleActionInFlight={isBuildScheduleActionInFlight}
             onBuildSchedule={handleBuildSchedule}
+            showCompleteScheduleAction={showCompleteScheduleActionButton}
+            isCompleteScheduleActionInFlight={isCompleteScheduleActionInFlight}
+            onCompleteSchedule={handleCompleteSchedule}
+            showRebuildScheduleAction={showRebuildScheduleActionButton}
+            isRebuildScheduleActionInFlight={isRebuildScheduleActionInFlight}
+            onRebuildSchedule={handleRebuildSchedule}
             showRebuildWithoutPlaceholdersAction={
               showRebuildWithoutPlaceholdersActionButton
             }
@@ -8010,12 +9157,7 @@ function EventScheduleContent() {
               scheduleBracketPlaceholderAssignments={
                 scheduleBracketPlaceholderAssignments
               }
-              showBuildScheduleAction={
-                canManageEvent &&
-                !isCreateMode &&
-                !isTemplateEvent &&
-                (isLeague || isTournament)
-              }
+              showBuildScheduleAction={showBuildScheduleActionButton}
               isBuildScheduleActionInFlight={isBuildScheduleActionInFlight}
               onBuildSchedule={handleBuildSchedule}
               onAddScheduleMatch={handleAddScheduleMatch}

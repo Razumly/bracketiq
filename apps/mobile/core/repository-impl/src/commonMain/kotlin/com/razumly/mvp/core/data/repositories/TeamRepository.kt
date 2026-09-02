@@ -76,6 +76,14 @@ interface ITeamRepository : IMVPRepository {
     fun getCachedTeamsFlow(ids: List<String>): Flow<Result<List<TeamWithPlayers>>> = getTeamsFlow(ids)
     suspend fun getTeamWithPlayers(teamId: String): Result<TeamWithPlayers>
     suspend fun getTeams(ids: List<String>): Result<List<Team>>
+    /**
+     * Fetches remote team rows without changing the local cache.
+     *
+     * The default keeps existing repository fakes source-compatible. The concrete repository
+     * overrides this method for acceptance flows that must defer all Room writes to one
+     * transaction.
+     */
+    suspend fun fetchTeams(ids: List<String>): Result<List<Team>> = getTeams(ids)
     suspend fun getTeamsWithPlayers(ids: List<String>): Result<List<TeamWithPlayers>>
     suspend fun getTeamsByOrganization(
         organizationId: String,
@@ -625,6 +633,18 @@ class TeamRepository(
                 }
                 .toMap()
             teamIds.mapNotNull(teamsById::get)
+        }
+    }
+
+    override suspend fun fetchTeams(ids: List<String>): Result<List<Team>> {
+        val teamIds = ids.distinct().filter(String::isNotBlank)
+        if (teamIds.isEmpty()) return Result.success(emptyList())
+
+        return runCatching {
+            fetchRemoteTeamsByIds(
+                ids = teamIds,
+                cacheRelatedUsers = false,
+            )
         }
     }
 
@@ -1236,7 +1256,10 @@ class TeamRepository(
         }
     }
 
-    private suspend fun fetchRemoteTeamsByIds(ids: List<String>): List<Team> {
+    private suspend fun fetchRemoteTeamsByIds(
+        ids: List<String>,
+        cacheRelatedUsers: Boolean = true,
+    ): List<Team> {
         val idChunks = collectionIdChunks(ids)
         val requestedIds = idChunks.flatten()
         if (requestedIds.isEmpty()) return emptyList()
@@ -1250,7 +1273,9 @@ class TeamRepository(
             }
         }
         val teams = requestedIds.mapNotNull(teamsById::get)
-        ensureUsersCachedForTeams(teams)
+        if (cacheRelatedUsers) {
+            ensureUsersCachedForTeams(teams)
+        }
         return teams
     }
 

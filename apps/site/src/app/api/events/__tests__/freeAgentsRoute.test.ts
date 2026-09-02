@@ -3,6 +3,7 @@
 import { NextRequest } from 'next/server';
 
 const prismaMock = {
+  $transaction: jest.fn(),
   events: {
     findUnique: jest.fn(),
     update: jest.fn(),
@@ -26,6 +27,8 @@ const dispatchRequiredEventDocumentsMock = jest.fn();
 const upsertEventRegistrationMock = jest.fn();
 const deleteEventRegistrationMock = jest.fn();
 const buildEventParticipantSnapshotMock = jest.fn();
+const acquireEventLockAndLoadStructureMock = jest.fn();
+
 
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 jest.mock('@/lib/permissions', () => ({ requireSession: requireSessionMock }));
@@ -33,9 +36,13 @@ jest.mock('@/lib/eventConsentDispatch', () => ({
   dispatchRequiredEventDocuments: (...args: any[]) => dispatchRequiredEventDocumentsMock(...args),
 }));
 jest.mock('@/server/events/eventRegistrations', () => ({
+  acquireEventLockAndLoadStructure: (...args: unknown[]) => acquireEventLockAndLoadStructureMock(...args),
   buildEventParticipantSnapshot: (...args: unknown[]) => buildEventParticipantSnapshotMock(...args),
   upsertEventRegistration: (...args: unknown[]) => upsertEventRegistrationMock(...args),
   deleteEventRegistration: (...args: unknown[]) => deleteEventRegistrationMock(...args),
+}));
+jest.mock('@/server/events/eventRegistrationErrorResponse', () => ({
+  eventRegistrationErrorResponse: jest.fn(() => null),
 }));
 
 import { DELETE, POST } from '@/app/api/events/[eventId]/free-agents/route';
@@ -50,6 +57,10 @@ const jsonRequest = (method: 'POST' | 'DELETE', url: string, body: unknown) =>
 describe('event free-agent route', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    prismaMock.$transaction.mockImplementation(async (callback: (client: typeof prismaMock) => unknown) => (
+      callback(prismaMock)
+    ));
+    acquireEventLockAndLoadStructureMock.mockResolvedValue(undefined);
     requireSessionMock.mockResolvedValue({ userId: 'user_1', isAdmin: false });
     dispatchRequiredEventDocumentsMock.mockResolvedValue({
       sentDocumentIds: [],
@@ -101,7 +112,7 @@ describe('event free-agent route', () => {
       rosterRole: 'FREE_AGENT',
       status: 'ACTIVE',
       createdBy: 'user_1',
-    }));
+    }), expect.anything());
     expect(prismaMock.events.update).not.toHaveBeenCalled();
   });
 
@@ -182,7 +193,7 @@ describe('event free-agent route', () => {
       registrantType: 'SELF',
       registrantId: 'user_1',
       rosterRole: 'FREE_AGENT',
-    }));
+    }), expect.anything());
     expect(prismaMock.events.update).not.toHaveBeenCalled();
   });
 
@@ -208,7 +219,7 @@ describe('event free-agent route', () => {
       eventId: 'event_1',
       registrantId: 'user_1',
       rosterRole: 'FREE_AGENT',
-    }));
+    }), expect.anything());
   });
 
   it('rejects free-agent add for non-team events', async () => {
@@ -296,7 +307,7 @@ describe('event free-agent route', () => {
       parentId: 'parent_1',
       rosterRole: 'FREE_AGENT',
       createdBy: 'parent_1',
-    }));
+    }), expect.anything());
   });
 
   it('requires parent approval when a child account tries to self-add as free agent', async () => {

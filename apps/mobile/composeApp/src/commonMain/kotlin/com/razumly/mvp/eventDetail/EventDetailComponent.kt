@@ -44,6 +44,7 @@ import com.razumly.mvp.core.data.repositories.RentalResourceOption
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
 import com.razumly.mvp.core.network.dto.TeamCheckInDto
+import com.razumly.mvp.core.network.dto.EventEditorSnapshotDto
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.composables.PermissionPrimerState
 import com.razumly.mvp.core.util.ErrorMessage
@@ -89,6 +90,8 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val isHost: StateFlow<Boolean>
     val isEditing: StateFlow<Boolean>
     val eventEditorControlLocks: StateFlow<EventEditorControlLocks>
+    val eventEditorSnapshot: StateFlow<EventEditorSnapshotDto?>
+    val scheduleMaintenanceReview: StateFlow<EventScheduleMaintenanceReview?>
     val eventTypeTransitionConfirmation: StateFlow<EventTypeTransitionConfirmation?>
     val isUserInEvent: StateFlow<Boolean>
     val isRegistrationPaymentPending: StateFlow<Boolean>
@@ -193,6 +196,11 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun updateEvent()
     fun dismissEventTypeTransitionConfirmation()
     fun confirmEventTypeTransition()
+    fun acceptScheduleMaintenanceProposal()
+    fun retryAcceptedScheduleSync()
+    fun rejectScheduleMaintenanceProposal()
+    fun dismissScheduleMaintenanceReview()
+    fun requestFreshScheduleMaintenanceProposal()
     fun rescheduleEvent()
     fun buildSchedule()
     fun rebuildWithoutPlaceholderTeams()

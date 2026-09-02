@@ -3,6 +3,7 @@
 package com.razumly.mvp.core.network.dto
 
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.EventSearchOccurrence
 import com.razumly.mvp.core.data.dataTypes.isBracketTeamCountEnabled
 import com.razumly.mvp.core.data.dataTypes.normalizeBracketTeamCount
 import com.razumly.mvp.core.data.dataTypes.DEFAULT_EVENT_SEED_COLOR_ARGB
@@ -73,25 +74,31 @@ private fun parseApiInstant(value: String, timeZone: String): Instant? {
     }.getOrDefault(TimeZone.UTC)
     return runCatching { LocalDateTime.parse(normalized).toInstant(zone) }.getOrNull()
 }
+@Serializable
+data class EventSearchOccurrenceDto(
+    val slotId: String? = null,
+    val occurrenceDate: String? = null,
+    val start: String? = null,
+    val end: String? = null,
+    val timeZone: String? = null,
+)
+
 
 @Serializable
 data class EventApiDto(
     val id: String? = null,
 
     val name: String? = null,
-    @property:ObjCName(swiftName = "eventDescription")
-    val description: String? = null,
-
+    val start: String? = null,
+    val end: String? = null,
+    val timeZone: String? = null,
+    val nextOccurrence: EventSearchOccurrenceDto? = null,
     val divisions: List<String>? = null,
     val divisionDetails: List<DivisionDetail>? = null,
     val playoffDivisionDetails: List<DivisionDetail>? = null,
     val location: String? = null,
     val address: String? = null,
-
-    val start: String? = null,
-    val end: String? = null,
-    val timeZone: String? = null,
-
+    val description: String? = null,
     val price: Int? = null,
     val rating: Double? = null,
     val imageId: String? = null,
@@ -176,6 +183,7 @@ data class EventApiDto(
     val restTimeMinutes: Int? = null,
 
     val state: String? = null,
+    val archivedAt: String? = null,
     val pointsToVictory: List<Int>? = null,
     val staffingPriority: String? = null,
     val officialSchedulingMode: String? = null,
@@ -211,6 +219,28 @@ data class EventApiDto(
         if (resolvedStart.isNullOrBlank()) return null
         val resolvedTimeZone = timeZone?.trim()?.takeIf(String::isNotBlank) ?: "UTC"
         val parsedStart = parseApiInstant(resolvedStart, resolvedTimeZone) ?: return null
+        val resolvedNextOccurrence = nextOccurrence?.let { occurrence ->
+            val occurrenceSlotId = occurrence.slotId?.trim()?.takeIf(String::isNotBlank)
+            val occurrenceDate = occurrence.occurrenceDate?.trim()?.takeIf(String::isNotBlank)
+            val occurrenceTimeZone = occurrence.timeZone?.trim()?.takeIf(String::isNotBlank)
+                ?: resolvedTimeZone
+            val occurrenceStart = occurrence.start
+                ?.let { value -> parseApiInstant(value, occurrenceTimeZone) }
+            val occurrenceEnd = occurrence.end
+                ?.let { value -> parseApiInstant(value, occurrenceTimeZone) }
+            if (occurrenceSlotId == null || occurrenceDate == null || occurrenceStart == null || occurrenceEnd == null) {
+                null
+            } else {
+                EventSearchOccurrence(
+                    slotId = occurrenceSlotId,
+                    occurrenceDate = occurrenceDate,
+                    start = occurrenceStart,
+                    end = occurrenceEnd,
+                    timeZone = occurrenceTimeZone,
+                )
+            }
+        }
+
 
         val normalizedEventType = eventType?.trim()?.uppercase()
         val resolvedEventType = runCatching { EventType.valueOf(normalizedEventType ?: EventType.EVENT.name) }
@@ -437,7 +467,7 @@ data class EventApiDto(
             else -> emptyList()
         }
 
-        return Event(
+        val event = Event(
             id = resolvedId,
             name = resolvedName,
             description = description ?: "",
@@ -525,6 +555,7 @@ data class EventApiDto(
             resolvedMatchRules = resolvedMatchRules,
             restTimeMinutes = restTimeMinutes,
             state = state ?: "UNPUBLISHED",
+            archivedAt = archivedAt,
             pointsToVictory = pointsToVictory ?: emptyList(),
             staffingPriority = resolvedStaffingPriority,
             officialSchedulingMode = resolvedOfficialSchedulingMode,
@@ -535,12 +566,14 @@ data class EventApiDto(
             installmentCount = resolvedEventInstallmentCount,
             installmentDueDates = resolvedEventInstallmentDueDates,
             installmentDueRelativeDays = resolvedEventInstallmentDueRelativeDays,
+            tags = (tags ?: emptyList()).syncEventTypeTagsForEventType(resolvedEventType),
             installmentAmounts = resolvedEventInstallmentAmounts,
             allowTeamSplitDefault = allowTeamSplitDefault,
             requiredTemplateIds = requiredTemplateIds ?: emptyList(),
-            tags = (tags ?: emptyList()).syncEventTypeTagsForEventType(resolvedEventType),
             lastUpdated = Clock.System.now(),
         )
+        event.nextOccurrence = resolvedNextOccurrence
+        return event
     }
 }
 

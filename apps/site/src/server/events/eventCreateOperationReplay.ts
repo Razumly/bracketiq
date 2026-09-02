@@ -31,6 +31,7 @@ type CreateOperationDelegate = {
   update: (args: Record<string, unknown>) => Promise<unknown>;
   updateMany: (args: Record<string, unknown>) => Promise<{ count: number }>;
   delete: (args: Record<string, unknown>) => Promise<unknown>;
+  deleteMany: (args: Record<string, unknown>) => Promise<{ count: number }>;
 };
 
 export type EventCreateOperationProposal = {
@@ -48,6 +49,7 @@ type EventCreateOperationClaimBase = {
   requestHash: string;
   responseStatus: number;
   emailDelivery: string;
+  claimToken: Date;
 };
 
 export type EventCreateOperationClaim =
@@ -59,6 +61,7 @@ export type EventCreateOperationClaim =
     firstClaim: false;
     result: EventEditorCreateResult | null;
   });
+
 
 export class EventCreateOperationPayloadMismatchError extends Error {
   constructor() {
@@ -173,6 +176,34 @@ const assertReplayIdentity = (
   if (row.requestHash !== requestHash) throw new EventCreateOperationPayloadMismatchError();
 };
 
+const claimTokenFor = (row: CreateOperationRow): Date => {
+  const claimToken = row.updatedAt instanceof Date
+    ? row.updatedAt
+    : new Date(String(row.updatedAt ?? ""));
+  if (!Number.isFinite(claimToken.getTime())) {
+    throw new EventCreateOperationIncompleteError();
+  }
+  return claimToken;
+};
+
+const firstClaimFor = (
+  row: CreateOperationRow,
+  actorUserId: string,
+  requestHash: string,
+): EventCreateOperationClaim => {
+  assertReplayIdentity(row, actorUserId, requestHash);
+  return {
+    firstClaim: true,
+    createOperationId: row.createOperationId,
+    eventId: row.eventId,
+    requestHash,
+    responseStatus: row.responseStatus,
+    emailDelivery: row.emailDelivery,
+    claimToken: claimTokenFor(row),
+    result: null,
+  };
+};
+
 const claimFor = (
   row: CreateOperationRow,
   actorUserId: string,
@@ -187,6 +218,7 @@ const claimFor = (
     requestHash,
     responseStatus: row.responseStatus,
     emailDelivery: row.emailDelivery,
+    claimToken: claimTokenFor(row),
     result: replayReady ? parseStoredResult(row) : null,
   };
 };
@@ -204,6 +236,11 @@ const isAbandonedClaim = (row: CreateOperationRow): boolean => {
   );
 };
 
+const nextClaimTokenFor = (row: CreateOperationRow): Date => (
+  new Date(Math.max(Date.now(), claimTokenFor(row).getTime() + 1))
+);
+
+
 const reclaimAbandonedClaim = async (params: {
   client: PrismaLike;
   row: CreateOperationRow;
@@ -212,6 +249,7 @@ const reclaimAbandonedClaim = async (params: {
 }): Promise<EventCreateOperationClaim | null> => {
   assertReplayIdentity(params.row, params.actorUserId, params.requestHash);
   if (!isAbandonedClaim(params.row)) return null;
+  const claimToken = nextClaimTokenFor(params.row);
   const reclaimed = await operationsFor(params.client).updateMany({
     where: {
       createOperationId: params.row.createOperationId,
@@ -223,7 +261,7 @@ const reclaimAbandonedClaim = async (params: {
       emailDelivery: "PROCESSING",
       updatedAt: params.row.updatedAt,
     },
-    data: { updatedAt: new Date() },
+    data: { updatedAt: claimToken },
   });
   if (reclaimed.count !== 1) {
     const winner = await loadOperation(
@@ -233,15 +271,19 @@ const reclaimAbandonedClaim = async (params: {
     if (!winner) throw new EventCreateOperationIncompleteError();
     return claimFor(winner, params.actorUserId, params.requestHash);
   }
-  return {
-    firstClaim: true,
-    createOperationId: params.row.createOperationId,
-    eventId: params.row.eventId,
-    requestHash: params.requestHash,
-    responseStatus: params.row.responseStatus,
-    emailDelivery: "PROCESSING",
-    result: null,
-  };
+  const reclaimedRow = await loadOperation(
+    params.client,
+    params.row.createOperationId,
+  );
+  if (!reclaimedRow) throw new EventCreateOperationIncompleteError();
+  if (claimTokenFor(reclaimedRow).getTime() !== claimToken.getTime()) {
+    return claimFor(reclaimedRow, params.actorUserId, params.requestHash);
+  }
+  return firstClaimFor(
+    reclaimedRow,
+    params.actorUserId,
+    params.requestHash,
+  );
 };
 
 /**
@@ -264,6 +306,7 @@ export const claimEventEditorCreateOperation = async (params: {
   }
 
   const eventId = createId();
+  const claimToken = new Date();
   const inserted = await operationsFor(params.client).createMany({
     data: {
       createOperationId: params.createOperationId,
@@ -273,19 +316,21 @@ export const claimEventEditorCreateOperation = async (params: {
       responseStatus: 201,
       responseJson: null,
       emailDelivery: "PROCESSING",
+      updatedAt: claimToken,
     },
     skipDuplicates: true,
   });
   if (inserted.count > 0) {
-    return {
-      firstClaim: true,
-      createOperationId: params.createOperationId,
-      eventId,
-      requestHash: params.requestHash,
-      responseStatus: 201,
-      emailDelivery: "PROCESSING",
-      result: null,
-    };
+    const insertedRow = await loadOperation(
+      params.client,
+      params.createOperationId,
+    );
+    if (!insertedRow) throw new EventCreateOperationIncompleteError();
+    return firstClaimFor(
+      insertedRow,
+      params.actorUserId,
+      params.requestHash,
+    );
   }
 
   const winner = await loadOperation(params.client, params.createOperationId);
@@ -297,16 +342,51 @@ export const claimEventEditorCreateOperation = async (params: {
   return reclaimed ?? claimFor(winner, params.actorUserId, params.requestHash);
 };
 
+const fencedOperationUpdate = async (params: {
+  client: PrismaLike;
+  createOperationId: string;
+  claimToken: Date;
+  data: Record<string, unknown>;
+}): Promise<Date> => {
+  const updated = await operationsFor(params.client).updateMany({
+    where: {
+      createOperationId: params.createOperationId,
+      updatedAt: params.claimToken,
+    },
+    data: {
+      ...params.data,
+      updatedAt: params.claimToken,
+    },
+  });
+  if (updated.count !== 1) {
+    const current = await loadOperation(
+      params.client,
+      params.createOperationId,
+    );
+    if (!current) throw new EventCreateOperationIncompleteError();
+    throw new EventCreateOperationConflictError();
+  }
+  const current = await loadOperation(
+    params.client,
+    params.createOperationId,
+  );
+  if (!current) throw new EventCreateOperationIncompleteError();
+  return claimTokenFor(current);
+};
+
 export const completeEventEditorCreateOperation = async (params: {
   client: PrismaLike;
   createOperationId: string;
+  claimToken: Date;
   result: EventEditorCreateResult;
   emailDelivery: string;
   proposalStatus?: string;
-}): Promise<void> => {
+}): Promise<Date> => {
   const parsed = eventEditorCreateResultSchema.parse(params.result);
-  await operationsFor(params.client).update({
-    where: { createOperationId: params.createOperationId },
+  return fencedOperationUpdate({
+    client: params.client,
+    createOperationId: params.createOperationId,
+    claimToken: params.claimToken,
     data: {
       responseStatus: 201,
       responseJson: stableJsonSafe(parsed),
@@ -318,11 +398,14 @@ export const completeEventEditorCreateOperation = async (params: {
 export const completeEventEditorCreateProposal = async (params: {
   client: PrismaLike;
   createOperationId: string;
+  claimToken: Date;
   proposal: EventEditorCreateProposal;
-}): Promise<void> => {
+}): Promise<Date> => {
   const parsed = eventEditorCreateProposalSchema.parse(params.proposal);
-  await operationsFor(params.client).update({
-    where: { createOperationId: params.createOperationId },
+  return fencedOperationUpdate({
+    client: params.client,
+    createOperationId: params.createOperationId,
+    claimToken: params.claimToken,
     data: {
       responseStatus: 202,
       proposalJson: stableJsonSafe(parsed),
@@ -374,6 +457,7 @@ export const waitForEventEditorCreateOperation = async (params: {
           requestHash: committedClaim.requestHash,
           responseStatus: committedClaim.responseStatus,
           emailDelivery: committedClaim.emailDelivery,
+          claimToken: committedClaim.claimToken,
           result: parseStoredResult(row),
         };
       }
@@ -390,6 +474,18 @@ export const readEventEditorCreateOperation = async (params: {
 }): Promise<EventCreateOperationClaim | null> => {
   const row = await loadOperation(params.client, params.createOperationId);
   return row ? claimFor(row, params.actorUserId, params.requestHash) : null;
+};
+export const readEventEditorCreateOperationClaimToken = async (params: {
+  client: PrismaLike;
+  createOperationId: string;
+  actorUserId: string;
+}): Promise<Date> => {
+  const row = await loadOperation(params.client, params.createOperationId);
+  if (!row) throw new EventCreateOperationIncompleteError();
+  if (row.actorUserId !== params.actorUserId) {
+    throw new EventCreateOperationConflictError();
+  }
+  return claimTokenFor(row);
 };
 
 export const waitForEventEditorCreateProposal = async (params: {
@@ -445,10 +541,26 @@ export const deleteEventEditorCreateOperation = async (params: {
   createOperationId: string;
   actorUserId: string;
   requestHash: string;
+  claimToken?: Date;
 }): Promise<void> => {
   const row = await loadOperation(params.client, params.createOperationId);
   if (!row) return;
   assertReplayIdentity(row, params.actorUserId, params.requestHash);
+  if (params.claimToken) {
+    await operationsFor(params.client).deleteMany({
+      where: {
+        createOperationId: params.createOperationId,
+        actorUserId: params.actorUserId,
+        requestHash: params.requestHash,
+        responseJson: null,
+        proposalJson: null,
+        proposalStatus: "NONE",
+        emailDelivery: "PROCESSING",
+        updatedAt: params.claimToken,
+      },
+    });
+    return;
+  }
   await operationsFor(params.client).delete({
     where: { createOperationId: params.createOperationId },
   });

@@ -54,6 +54,37 @@ class EventDetailsValidationTest {
         assertFalse(result.isLeagueSlotsValid)
         assertTrue("Add at least one weekly repeating timeslot." in result.validationErrors)
     }
+    @Test
+    fun new_source_backed_tryout_does_not_require_local_divisions_or_capacities() {
+        val event = Event(
+            name = "Summer tryout",
+            eventType = EventType.TRYOUT,
+            teamSignup = false,
+            singleDivision = false,
+            sportIds = listOf("sport-1"),
+            start = kotlinx.datetime.Instant.parse("2026-06-15T17:00:00Z"),
+            end = kotlinx.datetime.Instant.parse("2026-06-15T19:00:00Z"),
+            location = "Main Courts",
+            coordinates = listOf(-122.0, 37.0),
+            imageId = "image-1",
+        )
+
+        val result = computeEventValidationResult(
+            editEvent = event,
+            isNewEvent = true,
+            fieldCount = 0,
+            leagueTimeSlots = emptyList(),
+            leagueSlotErrors = emptyMap(),
+            slotEditorEnabled = false,
+            divisionDetailsForSettings = emptyList(),
+            isColorLoaded = true,
+            scheduleTimeLocked = false,
+        )
+
+        assertTrue(result.isMaxParticipantsValid)
+        assertTrue(result.isSkillLevelValid)
+        assertTrue(result.isValid)
+    }
 
     @Test
     fun unscheduled_league_does_not_require_resources_or_timeslots() {

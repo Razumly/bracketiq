@@ -37,6 +37,26 @@ type BillPaymentOutcomeRegistrationResult = {
   registrationId?: string;
   activated?: boolean;
 };
+const canFinalizeArchivedWeeklyReservation = (
+  event: {
+    eventType: unknown;
+    archivedAt?: Date | null;
+  },
+  existingStatus: unknown,
+  targetStatus: 'ACTIVE' | 'PENDING',
+): boolean => {
+  if (
+    !event.archivedAt
+    || String(event.eventType ?? '').trim().toUpperCase() !== 'WEEKLY_EVENT'
+  ) {
+    return true;
+  }
+  const normalizedStatus = String(existingStatus ?? '').trim().toUpperCase();
+  return normalizedStatus === 'STARTED'
+    || normalizedStatus === targetStatus
+    || (targetStatus === 'PENDING' && normalizedStatus === 'ACTIVE')
+    || (targetStatus === 'ACTIVE' && normalizedStatus === 'PENDING');
+};
 export const ensureEventRegistrationFromPurchase = async ({
   purchaseType,
   eventId,
@@ -83,7 +103,12 @@ export const ensureEventRegistrationFromPurchase = async ({
 
   try {
     const apply = async (transaction: Prisma.TransactionClient) => {
-      const event = await acquireEventLockAndLoadStructure(transaction, eventId);
+      const event = await acquireEventLockAndLoadStructure(
+        transaction,
+        eventId,
+        undefined,
+        { allowArchivedWeeklyReservation: true },
+      );
       if (!event) {
         return { applied: false, reason: 'event_not_found' };
       }
@@ -131,6 +156,15 @@ export const ensureEventRegistrationFromPurchase = async ({
         });
         if (!existingRegistration && (normalizedRegistrationId || schedulableTeamEventRequiresReservation)) {
           return { applied: false, reason: 'reservation_missing' };
+        }
+        if (
+          !canFinalizeArchivedWeeklyReservation(
+            event,
+            existingRegistration?.status,
+            targetStatus,
+          )
+        ) {
+          return { applied: false, reason: 'event_archived' };
         }
 
         if (schedulableTeamEventRequiresReservation && existingRegistration) {
@@ -187,6 +221,7 @@ export const ensureEventRegistrationFromPurchase = async ({
             registrationId: effectiveRegistrationId,
             eventId,
             event,
+            allowArchivedWeeklyReservation: true,
             status: targetStatus,
             create: {
               eventId,
@@ -212,6 +247,7 @@ export const ensureEventRegistrationFromPurchase = async ({
             registrationId: effectiveRegistrationId,
             eventId,
             event,
+            allowArchivedWeeklyReservation: true,
             status: targetStatus,
             fallbackCurrent: {
               id: effectiveRegistrationId,
@@ -291,12 +327,22 @@ export const ensureEventRegistrationFromPurchase = async ({
       if (!existingRegistration && normalizedRegistrationId) {
         return { applied: false, reason: 'reservation_missing' };
       }
+      if (
+        !canFinalizeArchivedWeeklyReservation(
+          event,
+          existingRegistration?.status,
+          targetStatus,
+        )
+      ) {
+        return { applied: false, reason: 'event_archived' };
+      }
       let activated = false;
       if (!existingRegistration) {
         await transitionEventRegistrationStatus({
           registrationId: effectiveRegistrationId,
           eventId,
           event,
+          allowArchivedWeeklyReservation: true,
           status: targetStatus,
           create: {
             eventId,
@@ -349,6 +395,7 @@ export const ensureEventRegistrationFromPurchase = async ({
             updatedAt: null,
           } as any,
           event,
+          allowArchivedWeeklyReservation: true,
         }, transaction);
         activated = targetStatus === 'ACTIVE';
       }
@@ -375,12 +422,15 @@ export const ensureEventRegistrationFromPurchase = async ({
     const status = error && typeof error === 'object' && 'status' in error
       ? error.status
       : null;
-    if (typeof status === 'number' && status === 404) {
-      return { applied: false, reason: 'event_not_found' };
-    }
     const errorCode = error && typeof error === 'object' && 'code' in error
       ? error.code
       : null;
+    if (typeof status === 'number' && status === 404) {
+      return { applied: false, reason: 'event_not_found' };
+    }
+    if (errorCode === 'EVENT_REGISTRATION_EVENT_ARCHIVED') {
+      return { applied: false, reason: 'event_archived' };
+    }
     if (errorCode === 'EVENT_REGISTRATION_CAPACITY_EXCEEDED') {
       return { applied: false, reason: 'capacity_exceeded' };
     }

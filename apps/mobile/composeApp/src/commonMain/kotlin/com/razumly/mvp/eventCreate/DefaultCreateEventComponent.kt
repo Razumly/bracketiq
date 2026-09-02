@@ -3,6 +3,7 @@
 package com.razumly.mvp.eventCreate
 
 import com.razumly.mvp.core.network.userMessage
+import com.razumly.mvp.core.data.repositories.EventEditorProposalStaleException
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.decompose.router.stack.ChildStack
 import com.arkivanov.decompose.router.stack.StackNavigation
@@ -12,6 +13,7 @@ import com.arkivanov.decompose.router.stack.pushNew
 import com.arkivanov.decompose.value.Value
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
+import com.razumly.mvp.core.data.dataTypes.OrganizationFeature
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.enums.defaultAutomatedSchedulingForEventType
 import com.razumly.mvp.core.data.dataTypes.EventTag
@@ -54,6 +56,7 @@ import com.razumly.mvp.core.data.dataTypes.validateOneTimeTimeSlots
 import com.razumly.mvp.core.data.dataTypes.validateRepeatingTimeSlotOccurrences
 import com.razumly.mvp.core.data.dataTypes.RepeatingTimeSlotValidationException
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
+import com.razumly.mvp.core.data.util.buildEventDivisionId
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.InclusivePriceQuote
 import com.razumly.mvp.core.data.repositories.InclusivePriceQuoteDirection
@@ -115,12 +118,25 @@ import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
+sealed interface ScheduleProposalState {
+    data object None : ScheduleProposalState
+
+    data class Review(
+        val outcome: com.razumly.mvp.core.data.repositories.EventEditorSaveOutcome,
+    ) : ScheduleProposalState
+
+    data class Stale(
+        val outcome: com.razumly.mvp.core.data.repositories.EventEditorSaveOutcome,
+    ) : ScheduleProposalState
+}
+
 interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     val newEventState: StateFlow<Event>
     val currentEventType: StateFlow<EventType>
     val childStack: Value<ChildStack<Config, Child>>
     val canProceed: StateFlow<Boolean>
     val isEditorReady: StateFlow<Boolean>
+    val isTryoutAvailable: StateFlow<Boolean>
     val editorBootstrapError: StateFlow<String?>
     val selectedPlace: StateFlow<MVPPlace?>
     val defaultEvent: StateFlow<EventWithRelations>
@@ -147,8 +163,10 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     val termsConsentState: StateFlow<ChatTermsConsentState>
     val termsConsentLoading: StateFlow<Boolean>
     val pendingScheduleProposal: StateFlow<com.razumly.mvp.core.data.repositories.EventEditorSaveOutcome?>
+    val scheduleProposalState: StateFlow<ScheduleProposalState>
 
     fun acceptScheduleProposal()
+    fun refreshScheduleProposal()
     fun rejectScheduleProposal()
 
     fun onBackClicked()
@@ -244,15 +262,22 @@ class DefaultCreateEventComponent(
         eventType = eventType,
     )
     private val _editorSession = MutableStateFlow<EventEditorSession?>(null)
+    private val _isTryoutAvailable = MutableStateFlow(false)
+    override val isTryoutAvailable = _isTryoutAvailable.asStateFlow()
     private val _isEditorReady = MutableStateFlow(false)
     override val isEditorReady = _isEditorReady.asStateFlow()
     private val _pendingScheduleProposal =
         MutableStateFlow<com.razumly.mvp.core.data.repositories.EventEditorSaveOutcome?>(null)
     override val pendingScheduleProposal = _pendingScheduleProposal.asStateFlow()
+    private val _scheduleProposalState = MutableStateFlow<ScheduleProposalState>(ScheduleProposalState.None)
+    override val scheduleProposalState = _scheduleProposalState.asStateFlow()
     private val _editorBootstrapError = MutableStateFlow<String?>(null)
     override val editorBootstrapError = _editorBootstrapError.asStateFlow()
     private var pendingCreateCommand: EventEditorCreateCommandDto? = null
     private var pendingCreateSubmission: CreateEventSubmissionSnapshot? = null
+    private var createEventJob: Job? = null
+    private var pendingAcceptanceOperationId: String? = null
+    private var refreshProposalCommandConsumed = false
     private val initialEventDraft = createInitialEventDraft(initialHostId = resolveCurrentUserId())
 
     private val _newEventState: MutableStateFlow<Event> = MutableStateFlow(initialEventDraft)
@@ -357,6 +382,7 @@ class DefaultCreateEventComponent(
 
     private fun loadEditorBootstrap() {
         _isEditorReady.value = false
+        _isTryoutAvailable.value = false
         _editorBootstrapError.value = null
         scope.launch {
             eventRepository.getEventEditorCreateBootstrap(bootstrap)
@@ -387,6 +413,7 @@ class DefaultCreateEventComponent(
             baseEvent.copy(timeSlotIds = normalizedTimeSlots.map(TimeSlot::id))
         }
         _editorSession.value = session
+        _isTryoutAvailable.value = session.hasClubTeamsOrganization()
         _newEventState.value = normalizedEvent
         _currentEventType.value = normalizedEvent.eventType
         defaultEvent.value = defaultEvent.value.copy(
@@ -476,55 +503,61 @@ class DefaultCreateEventComponent(
     }
 
     override fun createEvent() {
-        scope.launch {
-            if (!_isEditorReady.value) {
-                _errorState.value = ErrorMessage(
-                    _editorBootstrapError.value ?: "The event editor is still loading.",
-                )
-                return@launch
-            }
-            val currentUserId = resolveCurrentUserId()
-            if (currentUserId.isBlank()) {
-                _errorState.value = ErrorMessage("Unable to create event until your user profile is ready.")
-                return@launch
-            }
-            val session = _editorSession.value
-                ?: run {
-                    _errorState.value = ErrorMessage("The event editor is not ready.")
+        if (createEventJob?.isActive == true) {
+            return
+        }
+        createEventJob = scope.launch {
+            try {
+                if (!_isEditorReady.value) {
+                    _errorState.value = ErrorMessage(
+                        _editorBootstrapError.value ?: "The event editor is still loading.",
+                    )
                     return@launch
                 }
-            val eventDraft = newEventState.value
-                .withRequiredHost(currentUserId)
-                .applyCreateSelectionRules()
-            if (eventDraft != newEventState.value) {
-                _newEventState.value = eventDraft
+                val currentUserId = resolveCurrentUserId()
+                if (currentUserId.isBlank()) {
+                    _errorState.value = ErrorMessage("Unable to create event until your user profile is ready.")
+                    return@launch
+                }
+                val session = _editorSession.value
+                    ?: run {
+                        _errorState.value = ErrorMessage("The event editor is not ready.")
+                        return@launch
+                    }
+                val eventDraft = newEventState.value
+                    .withRequiredHost(currentUserId)
+                    .applyCreateSelectionRules()
+                if (eventDraft != newEventState.value) {
+                    _newEventState.value = eventDraft
+                }
+                val submission = CreateEventSubmissionSnapshot(
+                    session = session,
+                    event = eventDraft,
+                    localFields = _localFields.value.toList(),
+                    leagueSlots = _leagueSlots.value.toList(),
+                    fieldCount = _fieldCount.value,
+                    useManualTimeSlots = _useManualTimeSlots.value,
+                    availableRentalResources = _availableRentalResources.value.toList(),
+                    selectedRentalResourceIds = _selectedRentalResourceIds.value.toSet(),
+                    leagueScoringConfig = _leagueScoringConfig.value,
+                    registrationQuestions = _registrationQuestionDrafts.value.toList(),
+                    pendingStaffInvites = _pendingStaffInvites.value.toList(),
+                )
+                validateCompletedRentalContext(submission)?.let { error ->
+                    _errorState.value = ErrorMessage(error)
+                    return@launch
+                }
+                val validationError = validateCreateEventDraft(submission)
+                if (validationError != null) {
+                    _errorState.value = ErrorMessage(validationError)
+                    return@launch
+                }
+                createEventAfterPayment(submission)
+            } finally {
+                createEventJob = null
             }
-            val submission = CreateEventSubmissionSnapshot(
-                session = session,
-                event = eventDraft,
-                localFields = _localFields.value.toList(),
-                leagueSlots = _leagueSlots.value.toList(),
-                fieldCount = _fieldCount.value,
-                useManualTimeSlots = _useManualTimeSlots.value,
-                availableRentalResources = _availableRentalResources.value.toList(),
-                selectedRentalResourceIds = _selectedRentalResourceIds.value.toSet(),
-                leagueScoringConfig = _leagueScoringConfig.value,
-                registrationQuestions = _registrationQuestionDrafts.value.toList(),
-                pendingStaffInvites = _pendingStaffInvites.value.toList(),
-            )
-            validateCompletedRentalContext(submission)?.let { error ->
-                _errorState.value = ErrorMessage(error)
-                return@launch
-            }
-            val validationError = validateCreateEventDraft(submission)
-            if (validationError != null) {
-                _errorState.value = ErrorMessage(validationError)
-                return@launch
-            }
-            createEventAfterPayment(submission)
         }
     }
-
     override fun acceptScheduleProposal() {
         scope.launch {
             val pending = _pendingScheduleProposal.value
@@ -534,6 +567,11 @@ class DefaultCreateEventComponent(
                 _errorState.value = ErrorMessage("There is no schedule proposal to accept.")
                 return@launch
             }
+            val pendingOutcome = pending ?: return@launch
+            if (_scheduleProposalState.value is ScheduleProposalState.Stale) {
+                _errorState.value = staleProposalError()
+                return@launch
+            }
             val currentSubmission = currentCreateSubmissionSnapshot()
             if (
                 pendingCommand == null ||
@@ -541,22 +579,39 @@ class DefaultCreateEventComponent(
                 currentSubmission == null ||
                 currentSubmission != pendingCreateSubmission
             ) {
-                _errorState.value = ErrorMessage(
-                    "The event configuration changed. The schedule proposal is stale.",
-                )
+                markProposalStale(pendingOutcome)
+                _errorState.value = staleProposalError()
                 return@launch
             }
             val loadingOperation = loadingHandler.newOperation()
             loadingOperation.showLoading("Accepting schedule proposal...")
             try {
-                eventRepository.acceptEventEditorProposal(
-                    createOperationId = proposal.createOperationId,
-                    proposalRevision = proposal.proposalRevision,
-                    draft = pendingCommand.draft,
-                ).onSuccess { outcome ->
+                val result = if (
+                    proposal.scheduleOutcome.status ==
+                    com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeStatus.PARTIAL
+                ) {
+                    val acceptanceOperationId = pendingAcceptanceOperationId ?: newId().also {
+                        pendingAcceptanceOperationId = it
+                    }
+                    eventRepository.acceptEventEditorPartialProposal(
+                        createOperationId = proposal.createOperationId,
+                        proposalRevision = proposal.proposalRevision,
+                        acceptanceOperationId = acceptanceOperationId,
+                        draft = pendingCommand.draft,
+                    )
+                } else {
+                    eventRepository.acceptEventEditorProposal(
+                        createOperationId = proposal.createOperationId,
+                        proposalRevision = proposal.proposalRevision,
+                        draft = pendingCommand.draft,
+                    )
+                }
+                result.onSuccess { outcome ->
                     _pendingScheduleProposal.value = null
+                    _scheduleProposalState.value = ScheduleProposalState.None
                     pendingCreateCommand = null
                     pendingCreateSubmission = null
+                    pendingAcceptanceOperationId = null
                     applyEditorSession(outcome.session)
                     val notices = buildList {
                         if (
@@ -573,15 +628,52 @@ class DefaultCreateEventComponent(
                     onEventCreated(
                         outcome.session.canonicalState.event,
                         outcome.scheduleOutcome.status ==
-                            com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeStatus.BUILT,
+                            com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeStatus.BUILT ||
+                            outcome.scheduleOutcome.status ==
+                            com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeStatus.REBUILT ||
+                            outcome.scheduleOutcome.status ==
+                            com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeStatus.PARTIAL,
                     )
                 }.onFailure { error ->
-                    _errorState.value = ErrorMessage(
-                        error.userMessage("The schedule proposal is no longer valid."),
-                    )
+                    if (error is EventEditorProposalStaleException) {
+                        pendingAcceptanceOperationId = null
+                        markProposalStale(pendingOutcome)
+                        _errorState.value = staleProposalError()
+                    } else {
+                        _errorState.value = ErrorMessage(
+                            error.userMessage("The schedule proposal is no longer valid."),
+                        )
+                    }
                 }
             } finally {
                 loadingOperation.hideLoading()
+            }
+        }
+    }
+
+    override fun refreshScheduleProposal() {
+        scope.launch {
+            val pending = _pendingScheduleProposal.value
+            if (pending?.proposal == null) {
+                _errorState.value = ErrorMessage("There is no schedule proposal to refresh.")
+                return@launch
+            }
+            val submission = currentCreateSubmissionSnapshot()
+            if (submission == null) {
+                _errorState.value = ErrorMessage("The event configuration is not ready to refresh the proposal.")
+                return@launch
+            }
+            _errorState.value = null
+            val forceNewCommand = !refreshProposalCommandConsumed
+            if (forceNewCommand) {
+                refreshProposalCommandConsumed = true
+            }
+            val submitted = createEventAfterPayment(
+                submission = submission,
+                forceNewCommand = forceNewCommand,
+            )
+            if (!submitted && forceNewCommand) {
+                refreshProposalCommandConsumed = false
             }
         }
     }
@@ -597,7 +689,9 @@ class DefaultCreateEventComponent(
                 createOperationId = proposal.createOperationId,
                 proposalRevision = proposal.proposalRevision,
             ).onSuccess {
+                pendingAcceptanceOperationId = null
                 _pendingScheduleProposal.value = null
+                _scheduleProposalState.value = ScheduleProposalState.None
             }.onFailure { error ->
                 _errorState.value = ErrorMessage(
                     error.userMessage("The schedule proposal could not be rejected."),
@@ -606,6 +700,15 @@ class DefaultCreateEventComponent(
         }
     }
 
+    private fun markProposalStale(outcome: com.razumly.mvp.core.data.repositories.EventEditorSaveOutcome) {
+        _scheduleProposalState.value = ScheduleProposalState.Stale(outcome)
+    }
+
+    private fun staleProposalError(): ErrorMessage = ErrorMessage(
+        message = "The schedule proposal is stale. Refresh it to review the current proposal before accepting.",
+        actionLabel = "Refresh proposal",
+        action = ::refreshScheduleProposal,
+    )
 
     override fun createAccount() {
         scope.launch {
@@ -1042,6 +1145,9 @@ class DefaultCreateEventComponent(
 
     override fun onTypeSelected(type: EventType) {
         val previousType = _newEventState.value.eventType
+        if (type == EventType.TOURNAMENT && _currentEventType.value == EventType.TOURNAMENT) {
+            return
+        }
         val previousScheduling = _newEventState.value.isAutomatedScheduling
         val preserveLeagueTournamentChoice =
             previousType == EventType.LEAGUE || previousType == EventType.TOURNAMENT
@@ -1060,7 +1166,7 @@ class DefaultCreateEventComponent(
         updateEventField(
             update = {
                 when (type) {
-                    EventType.LEAGUE, EventType.TOURNAMENT -> copy(
+                    EventType.LEAGUE -> copy(
                         eventType = type,
                         isAutomatedScheduling = if (preserveLeagueTournamentChoice) {
                             previousScheduling
@@ -1072,10 +1178,19 @@ class DefaultCreateEventComponent(
                         end = end.takeIf { it > start } ?: defaultEventEnd(start),
                     )
 
-                    EventType.WEEKLY_EVENT -> copy(
+                    EventType.TOURNAMENT -> copy(
                         eventType = type,
                         isAutomatedScheduling = defaultAutomatedSchedulingForEventType(type),
-                        noFixedEndDateTime = false,
+                        teamSignup = true,
+                        singleDivision = true,
+                        noFixedEndDateTime = true,
+                        end = end.takeIf { it > start } ?: defaultEventEnd(start),
+                    )
+
+                    EventType.WEEKLY_EVENT -> copy(
+                        eventType = type,
+                        isAutomatedScheduling = true,
+                        // Weekly end policy is selected by the user and must survive type normalization.
                         end = end.takeIf { it > start } ?: defaultEventEnd(start),
                     )
 
@@ -1199,43 +1314,78 @@ class DefaultCreateEventComponent(
         }
         val rentalFields = selectedRentalResourceFields()
         val rentalFieldIds = rentalFields.map { field -> field.id }.toSet()
-        val normalized = count.coerceAtLeast(rentalFields.size)
-        _fieldCount.value = normalized
-
         val currentEvent = newEventState.value
-        val resourceLabels = resolveEventResourceLabels(currentEvent.sportIds, _sports.value)
-        val currentFields = _localFields.value
-        val editableFields = currentFields.filterNot { field -> rentalFieldIds.contains(field.id) }
-        val editableTargetCount = (normalized - rentalFields.size).coerceAtLeast(0)
-        val resized = rentalFields.toMutableList()
-        resized += editableFields
-            .take(editableTargetCount)
-            .take(normalized)
-            .mapIndexed { index, field ->
-                field.copy(
-                    id = if (field.id.isBlank()) newId() else field.id,
-                    fieldNumber = rentalFields.size + index + 1,
-                    divisions = field.divisions
-                        .normalizeDivisionIdentifiers()
-                        .ifEmpty { defaultFieldDivisions(currentEvent) },
-                    location = eventFieldLocationDefault(field, currentEvent),
-                    organizationId = currentEvent.organizationId,
+        val resized: List<Field>
+        if (currentEvent.eventType == EventType.TRYOUT) {
+            val catalogFields = _editorSession.value
+                ?.catalogFields
+                .orEmpty()
+                .filter { field -> field.id.trim().isNotBlank() }
+                .distinctBy { field -> field.id.trim() }
+            val catalogFieldIds = catalogFields.map { field -> field.id.trim() }.toSet()
+            val selectedFields = _localFields.value.filter { field ->
+                field.id.trim() in catalogFieldIds
+            }
+            val selectedFieldIds = selectedFields.map { field -> field.id.trim() }.toSet()
+            val availableFields = selectedFields + catalogFields.filterNot { field ->
+                field.id.trim() in selectedFieldIds
+            }
+            val normalized = if (availableFields.isEmpty()) {
+                0
+            } else {
+                count.coerceIn(1, availableFields.size)
+            }
+            _fieldCount.value = normalized
+            resized = availableFields
+                .take(normalized)
+                .mapIndexed { index, field ->
+                    field.copy(
+                        fieldNumber = index + 1,
+                        divisions = field.divisions
+                            .normalizeDivisionIdentifiers()
+                            .ifEmpty { defaultFieldDivisions(currentEvent) },
+                        location = eventFieldLocationDefault(field, currentEvent),
+                        organizationId = currentEvent.organizationId,
+                    )
+                }
+        } else {
+            val normalized = count.coerceAtLeast(rentalFields.size)
+            _fieldCount.value = normalized
+            val resourceLabels = resolveEventResourceLabels(currentEvent.sportIds, _sports.value)
+            val currentFields = _localFields.value
+            val editableFields = currentFields.filterNot { field -> rentalFieldIds.contains(field.id) }
+            val editableTargetCount = (normalized - rentalFields.size).coerceAtLeast(0)
+            val nextFields = rentalFields.toMutableList()
+            nextFields += editableFields
+                .take(editableTargetCount)
+                .take(normalized)
+                .mapIndexed { index, field ->
+                    field.copy(
+                        id = if (field.id.isBlank()) newId() else field.id,
+                        fieldNumber = rentalFields.size + index + 1,
+                        divisions = field.divisions
+                            .normalizeDivisionIdentifiers()
+                            .ifEmpty { defaultFieldDivisions(currentEvent) },
+                        location = eventFieldLocationDefault(field, currentEvent),
+                        organizationId = currentEvent.organizationId,
+                    )
+                }
+
+            while (nextFields.size < normalized) {
+                val fieldNumber = nextFields.size + 1
+                nextFields.add(
+                    Field(
+                        fieldNumber = fieldNumber,
+                        organizationId = currentEvent.organizationId,
+                        id = newId(),
+                    ).copy(
+                        name = "${resourceLabels.singular} $fieldNumber",
+                        divisions = defaultFieldDivisions(currentEvent),
+                        location = defaultFieldLocation(currentEvent),
+                    ),
                 )
             }
-
-        while (resized.size < normalized) {
-            val fieldNumber = resized.size + 1
-            resized.add(
-                Field(
-                    fieldNumber = fieldNumber,
-                    organizationId = currentEvent.organizationId,
-                    id = newId(),
-                ).copy(
-                    name = "${resourceLabels.singular} $fieldNumber",
-                    divisions = defaultFieldDivisions(currentEvent),
-                    location = defaultFieldLocation(currentEvent),
-                ),
-            )
+            resized = nextFields
         }
         _localFields.value = resized
         _newEventState.value = _newEventState.value.copy(
@@ -1570,20 +1720,26 @@ class DefaultCreateEventComponent(
             pendingStaffInvites = _pendingStaffInvites.value.toList(),
         )
     }
-    private suspend fun createEventAfterPayment(submission: CreateEventSubmissionSnapshot) {
-        pendingCreateCommand
-            ?.takeIf { pendingCreateSubmission == submission }
-            ?.let { command ->
-                submitCreateCommand(command)
-                return
-            }
+    private suspend fun createEventAfterPayment(
+        submission: CreateEventSubmissionSnapshot,
+        forceNewCommand: Boolean = false,
+    ): Boolean {
+        if (!forceNewCommand) {
+            pendingCreateCommand
+                ?.takeIf { pendingCreateSubmission == submission }
+                ?.let { command ->
+                    submitCreateCommand(command)
+                    return true
+                }
+        }
 
         val command = buildCreateCommandForSubmission(submission).getOrElse { error ->
             _errorState.value = ErrorMessage(error.userMessage("Failed to create event."))
-            return
+            return false
         }.copy(createOperationId = newId())
         pendingCreateSubmission = submission
         submitCreateCommand(command)
+        return true
     }
 
     private suspend fun buildCreateCommandForSubmission(
@@ -1603,7 +1759,13 @@ class DefaultCreateEventComponent(
                     eventId = prepared.event.id,
                 ),
                 playoffDivisionDetails = submission.session.canonicalState.playoffDivisionDetails,
-                divisionFieldIds = submission.session.canonicalState.divisionFieldIds,
+                divisionFieldIds = if (prepared.event.eventType == EventType.TRYOUT) {
+                    prepared.event.divisionDetails.associate { detail ->
+                        detail.id to detail.fieldIds
+                    }
+                } else {
+                    submission.session.canonicalState.divisionFieldIds
+                },
             ),
         )
         EventEditorSessionMapper.toCreateCommand(submission.session, mutation).command
@@ -1627,11 +1789,15 @@ class DefaultCreateEventComponent(
             eventRepository.createEventEditor(command)
                 .onSuccess { outcome ->
                     if (outcome.proposal != null) {
+                        pendingAcceptanceOperationId = null
                         _pendingScheduleProposal.value = outcome
+                        _scheduleProposalState.value = ScheduleProposalState.Review(outcome)
+                        refreshProposalCommandConsumed = false
                         return@onSuccess
                     }
                     pendingCreateCommand = null
                     pendingCreateSubmission = null
+                    pendingAcceptanceOperationId = null
                     _editorSession.value = outcome.session
                     applyEditorSession(outcome.session)
                     val notices = buildList {
@@ -1712,13 +1878,12 @@ class DefaultCreateEventComponent(
     private suspend fun prepareEventForCreation(
         submission: CreateEventSubmissionSnapshot,
     ): Result<PreparedEventForCreation> = runCatching {
-        var preparedEvent = if (submission.event.eventType == EventType.WEEKLY_EVENT) {
-            submission.event.copy(noFixedEndDateTime = false)
-        } else {
-            submission.event
-        }
+        var preparedEvent = submission.event
         var preparedFields = submission.localFields
         var preparedTimeSlots = submission.leagueSlots
+        if (preparedEvent.eventType == EventType.TRYOUT) {
+            return@runCatching prepareTryoutEventForCreation(submission)
+        }
         val selectedRentalOptions = selectedRentalResourceOptions(
             availableRentalResources = submission.availableRentalResources,
             selectedRentalResourceIds = submission.selectedRentalResourceIds,
@@ -1813,6 +1978,188 @@ class DefaultCreateEventComponent(
         )
     }
 
+    private suspend fun prepareTryoutEventForCreation(
+        submission: CreateEventSubmissionSnapshot,
+    ): PreparedEventForCreation {
+        val event = submission.event
+        val organizationId = event.organizationId
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?: error("Tryout events require a valid organization.")
+        require(event.end > event.start) {
+            "Tryout events require a Planned End after the event start."
+        }
+        val organization = billingRepository.getOrganizationsByIds(listOf(organizationId))
+            .getOrThrow()
+            .firstOrNull { candidate -> candidate.id.trim() == organizationId }
+            ?: error("Unable to load the organization for this tryout.")
+        require(OrganizationFeature.CLUB_TEAMS in organization.enabledFeatures) {
+            "Enable club and team features before creating tryout events."
+        }
+
+        val sourceDivisions = organization.divisions
+            .filter { detail ->
+                detail.id.trim().isNotBlank() &&
+                    detail.kind?.equals("PLAYOFF", ignoreCase = true) != true
+            }
+            .distinctBy { detail -> detail.id.trim() }
+        require(sourceDivisions.isNotEmpty()) {
+            "Select at least one club division for this tryout."
+        }
+
+        val persistedOrganizationFieldIds = (
+            organization.fieldIds +
+                submission.session.catalogFields.map { field -> field.id }
+        )
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .toSet()
+        val validFields = submission.localFields
+            .filter { field ->
+                val fieldId = field.id.trim()
+                fieldId.isNotBlank() && fieldId in persistedOrganizationFieldIds
+            }
+            .distinctBy { field -> field.id.trim() }
+        require(validFields.isNotEmpty()) {
+            "The organization has no available fields for this tryout."
+        }
+        val sourceById = sourceDivisions.associateBy { detail -> detail.id.trim() }
+        val selectedSourceIds = (
+            submission.event.divisionDetails.mapNotNull { detail ->
+                detail.sourceDivisionId?.trim()?.takeIf(String::isNotBlank)
+            } + submission.event.divisions
+            )
+            .map(String::trim)
+            .filter(sourceById::containsKey)
+            .distinct()
+        val selectedSourceDivisions = if (selectedSourceIds.isEmpty()) {
+            sourceDivisions
+        } else {
+            selectedSourceIds.mapNotNull(sourceById::get)
+        }
+        require(selectedSourceDivisions.isNotEmpty()) {
+            "Select at least one club division for this tryout."
+        }
+
+        val validFieldIds = validFields.map { field -> field.id.trim() }
+        val usedDivisionIds = mutableSetOf<String>()
+        val divisionDetails = selectedSourceDivisions.mapIndexed { index, source ->
+            val sourceId = source.id.trim()
+            val sourceToken = sourceId
+                .replace(Regex("[^A-Za-z0-9]+"), "_")
+                .trim('_')
+                .ifBlank { "source_${index + 1}" }
+            val baseId = buildEventDivisionId(
+                eventId = event.id,
+                divisionToken = "tryout_source_$sourceToken",
+            )
+            val divisionId = if (usedDivisionIds.add(baseId)) {
+                baseId
+            } else {
+                buildEventDivisionId(
+                    eventId = event.id,
+                    divisionToken = "tryout_source_${sourceToken}_${index + 1}",
+                ).also(usedDivisionIds::add)
+            }
+            val skillId = source.skillDivisionTypeId.trim().ifBlank { "open" }
+            val ageId = source.ageDivisionTypeId.trim().ifBlank { "18plus" }
+            val skillName = source.skillDivisionTypeName.trim().ifBlank { "Open" }
+            val ageName = source.ageDivisionTypeName.trim().ifBlank { "18+" }
+            source.copy(
+                id = divisionId,
+                sourceDivisionId = sourceId,
+                kind = "LEAGUE",
+                isSystemGenerated = false,
+                key = source.key.trim().ifBlank { sourceToken.lowercase() },
+                name = source.name.trim().ifBlank { "Club division" },
+                divisionTypeId = source.divisionTypeId.trim()
+                    .ifBlank { "skill_${skillId}_age_${ageId}" },
+                divisionTypeName = source.divisionTypeName.trim()
+                    .ifBlank { "$skillName $ageName" },
+                ratingType = source.ratingType.trim().uppercase()
+                    .takeIf { rating -> rating == "AGE" || rating == "SKILL" }
+                    ?: "SKILL",
+                gender = source.gender.trim().uppercase()
+                    .takeIf { gender -> gender == "M" || gender == "F" || gender == "C" }
+                    ?: "C",
+                skillDivisionTypeId = skillId,
+                skillDivisionTypeName = skillName,
+                ageDivisionTypeId = ageId,
+                ageDivisionTypeName = ageName,
+                price = 0,
+                maxParticipants = maxOf(2, source.maxParticipants ?: 10),
+                playoffTeamCount = null,
+                poolCount = null,
+                poolTeamCount = null,
+                allowPaymentPlans = false,
+                installmentCount = null,
+                installmentDueDates = emptyList(),
+                installmentDueRelativeDays = emptyList(),
+                installmentAmounts = emptyList(),
+                fieldIds = validFieldIds,
+                playoffPlacementDivisionIds = emptyList(),
+                playoffConfig = null,
+                gamesPerOpponent = null,
+                restTimeMinutes = null,
+                usesSets = null,
+                matchDurationMinutes = null,
+                setDurationMinutes = null,
+                setsPerMatch = null,
+                pointsToVictory = emptyList(),
+                phaseSettings = emptyMap(),
+                teamIds = emptyList(),
+            )
+        }
+        val preparedEvent = event.copy(
+            organizationId = organizationId,
+            divisions = divisionDetails.map { detail -> detail.id },
+            divisionDetails = divisionDetails,
+            fieldIds = validFieldIds,
+            timeSlotIds = emptyList(),
+            isAutomatedScheduling = false,
+            teamSignup = false,
+            singleDivision = false,
+            noFixedEndDateTime = false,
+            includePlayoffs = false,
+            splitLeaguePlayoffDivisions = false,
+            playoffTeamCount = null,
+            matchRulesOverride = null,
+            resolvedMatchRules = null,
+            gamesPerOpponent = null,
+            restTimeMinutes = null,
+            usesSets = false,
+            matchDurationMinutes = null,
+            setDurationMinutes = null,
+            setsPerMatch = null,
+            pointsToVictory = emptyList(),
+            winnerBracketPointsToVictory = emptyList(),
+            loserBracketPointsToVictory = emptyList(),
+            doubleElimination = false,
+            doTeamsOfficiate = false,
+            teamOfficialsMaySwap = false,
+            teamCheckInMode = com.razumly.mvp.core.data.dataTypes.TeamCheckInMode.OFF,
+            teamCheckInOpenMinutesBefore = 60,
+            allowMatchRosterEdits = false,
+            allowTemporaryMatchPlayers = false,
+            autoCreatePointMatchIncidents = false,
+            officialIds = emptyList(),
+            officialPositions = emptyList(),
+            eventOfficials = emptyList(),
+        )
+        val preparedTimeSlots = buildAutomaticEventRangeSlotDrafts(
+            event = preparedEvent,
+            fieldIds = validFieldIds,
+        )
+        require(preparedTimeSlots.isNotEmpty()) {
+            "The tryout could not be assigned a valid schedule slot."
+        }
+        return PreparedEventForCreation(
+            event = preparedEvent.copy(timeSlotIds = preparedTimeSlots.map(TimeSlot::id)),
+            fields = validFields,
+            timeSlots = preparedTimeSlots,
+        )
+    }
+
     private fun validateCreateEventDraft(submission: CreateEventSubmissionSnapshot): String? {
         if (
             (submission.event.eventType == EventType.LEAGUE ||
@@ -1825,13 +2172,15 @@ class DefaultCreateEventComponent(
         ) {
             return "Unscheduled League/Tournament events require a planned end date and time."
         }
-        validateConfiguredLeagueSlots(
-            event = submission.event,
-            leagueSlots = submission.leagueSlots,
-            localFields = submission.localFields,
-            useManualTimeSlots = submission.useManualTimeSlots,
-            availableRentalResources = submission.availableRentalResources,
-        )?.let { return it }
+        if (submission.event.eventType != EventType.TRYOUT) {
+            validateConfiguredLeagueSlots(
+                event = submission.event,
+                leagueSlots = submission.leagueSlots,
+                localFields = submission.localFields,
+                useManualTimeSlots = submission.useManualTimeSlots,
+                availableRentalResources = submission.availableRentalResources,
+            )?.let { return it }
+        }
 
         val submittedDivisionDetails = (
             submission.event.divisionDetails +
@@ -1849,7 +2198,10 @@ class DefaultCreateEventComponent(
             return null
         }
         val selectedDivisionIds = submission.event.divisions.normalizeDivisionIdentifiers()
-        if (selectedDivisionIds.isEmpty()) {
+        if (
+            submission.event.eventType != EventType.TRYOUT &&
+                selectedDivisionIds.isEmpty()
+        ) {
             return "Add at least one division before creating this event."
         }
         return null
@@ -2133,9 +2485,7 @@ class DefaultCreateEventComponent(
                 invalidConfiguredScheduleSlot(index, "select an end time.")
             }
             val slotStartDate = slot.startDate.takeUnless { it == Instant.DISTANT_PAST } ?: event.start
-            val repeatingEndDate = if (event.eventType == EventType.WEEKLY_EVENT) {
-                null
-            } else if (event.noFixedEndDateTime) {
+            val repeatingEndDate = if (event.noFixedEndDateTime) {
                 null
             } else {
                 (slot.endDate ?: event.defaultLeagueSlotEndDate())
@@ -2616,7 +2966,7 @@ class DefaultCreateEventComponent(
     }
 
     private fun Event.defaultLeagueSlotEndDate(): Instant? {
-        if (eventType == EventType.WEEKLY_EVENT || noFixedEndDateTime) {
+        if (noFixedEndDateTime) {
             return null
         }
         return end

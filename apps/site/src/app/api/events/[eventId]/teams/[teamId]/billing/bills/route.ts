@@ -14,6 +14,8 @@ const createSchema = z.object({
   taxAmountCents: z.number().optional(),
   allowSplit: z.boolean().optional(),
   label: z.string().optional(),
+  slotId: z.string().optional(),
+  occurrenceDate: z.string().optional(),
 }).passthrough();
 
 const normalizeId = (value: unknown): string | null => {
@@ -36,12 +38,17 @@ const normalizeIdList = (value: unknown): string[] => (
     : []
 );
 
-const resolveOccurrenceFromRequest = (req: NextRequest): {
+const resolveOccurrenceFromRequest = (
+  req: NextRequest,
+  body: { slotId?: unknown; occurrenceDate?: unknown },
+): {
   occurrence: { slotId: string; occurrenceDate: string } | null;
   error: string | null;
 } => {
-  const slotId = normalizeId(req.nextUrl.searchParams.get('slotId'));
-  const occurrenceDate = normalizeId(req.nextUrl.searchParams.get('occurrenceDate'));
+  const slotId = normalizeId(body.slotId)
+    ?? normalizeId(req.nextUrl.searchParams.get('slotId'));
+  const occurrenceDate = normalizeId(body.occurrenceDate)
+    ?? normalizeId(req.nextUrl.searchParams.get('occurrenceDate'));
   if (!slotId && !occurrenceDate) {
     return { occurrence: null, error: null };
   }
@@ -99,7 +106,7 @@ export async function POST(
 
   const ownerType = parsed.data.ownerType;
   const requestedOwnerId = normalizeId(parsed.data.ownerId);
-  const participantOccurrence = resolveOccurrenceFromRequest(req);
+  const participantOccurrence = resolveOccurrenceFromRequest(req, parsed.data);
   if (participantOccurrence.error) {
     return NextResponse.json({ error: participantOccurrence.error }, { status: 400 });
   }
@@ -204,6 +211,8 @@ export async function POST(
         ownerType,
         ownerId,
         eventId,
+        slotId: participantOccurrence.occurrence?.slotId ?? null,
+        occurrenceDate: participantOccurrence.occurrence?.occurrenceDate ?? null,
         organizationId: event.organizationId ?? null,
         totalAmountCents,
         paidAmountCents: 0,

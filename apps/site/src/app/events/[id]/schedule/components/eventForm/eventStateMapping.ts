@@ -483,7 +483,7 @@ export const mapEventToFormState = (event: Event): EventFormState => {
         ? Number(event.registrationCutoffHours)
         : 0,
     hostId: event.hostId || undefined,
-    noFixedEndDateTime: isSchedulableType && event.eventType !== 'WEEKLY_EVENT'
+    noFixedEndDateTime: isSchedulableType && event.eventType !== 'TRYOUT'
         ? derivedNoFixedEndDateTime
         : false,
     isAutomatedScheduling: normalizeAutomatedSchedulingForEventType(

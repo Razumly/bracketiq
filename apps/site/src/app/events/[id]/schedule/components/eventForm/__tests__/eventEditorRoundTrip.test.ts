@@ -29,6 +29,134 @@ describe('event editor draft round trips', () => {
 
     expect(roundTrippedDraft).toEqual(initialDraft);
   });
+  it('normalizes Tryout staffing state at both adapter boundaries', () => {
+    const sourceEvent = {
+      ...eventEditorFixtures[0].event,
+      eventType: 'TRYOUT',
+      teamSignup: true,
+      officialIds: ['official-stale'],
+      officialPositions: [{ id: 'position-stale', name: 'Referee', count: 1, order: 0 }],
+      eventOfficials: [{
+        id: 'event-official-stale',
+        userId: 'official-stale',
+        positionIds: ['position-stale'],
+        fieldIds: [],
+        isActive: true,
+      }],
+      assistantHostIds: ['assistant-stale'],
+      pendingStaffInvites: [{
+        email: 'stale@example.com',
+        firstName: 'Stale',
+        lastName: 'Official',
+        roles: ['OFFICIAL', 'ASSISTANT_HOST'],
+      }],
+      doTeamsOfficiate: true,
+      teamOfficialsMaySwap: true,
+      teamCheckInMode: 'MATCH',
+      teamCheckInOpenMinutesBefore: 5,
+      allowMatchRosterEdits: true,
+      allowTemporaryMatchPlayers: true,
+      autoCreatePointMatchIncidents: true,
+    } as unknown as Event;
+
+    const draft = legacyEventToEditorDraft(sourceEvent);
+    expect(draft.staff).toMatchObject({
+      staffingPriority: 'FULL_COVERAGE_WITH_CONFLICTS_ALLOWED',
+      doTeamsOfficiate: false,
+      teamOfficialsMaySwap: false,
+      teamCheckInMode: 'OFF',
+      teamCheckInOpenMinutesBefore: 60,
+      allowMatchRosterEdits: false,
+      allowTemporaryMatchPlayers: false,
+      autoCreatePointMatchIncidents: false,
+      officialIds: [],
+      officialPositions: [],
+      eventOfficials: [],
+      assistantHostIds: ['assistant-stale'],
+      pendingInvites: [{
+        email: 'stale@example.com',
+        firstName: 'Stale',
+        lastName: 'Official',
+        roles: ['ASSISTANT_HOST'],
+      }],
+    });
+
+    const projected = editorDraftToLegacyEvent({
+      ...draft,
+      staff: {
+        ...draft.staff,
+        officialIds: ['official-stale'],
+        officialPositions: [{ id: 'position-stale', name: 'Referee', count: 1, order: 0 }],
+        eventOfficials: [{
+          id: 'event-official-stale',
+          userId: 'official-stale',
+          positionIds: ['position-stale'],
+          fieldIds: [],
+          isActive: true,
+        }],
+        assistantHostIds: ['assistant-stale'],
+        pendingInvites: [{
+          email: 'stale@example.com',
+          firstName: 'Stale',
+          lastName: 'Official',
+          roles: ['OFFICIAL', 'ASSISTANT_HOST'],
+        }],
+        doTeamsOfficiate: true,
+        teamOfficialsMaySwap: true,
+        teamCheckInMode: 'MATCH',
+        teamCheckInOpenMinutesBefore: 5,
+        allowMatchRosterEdits: true,
+        allowTemporaryMatchPlayers: true,
+        autoCreatePointMatchIncidents: true,
+      },
+    });
+
+    expect(projected).toEqual(expect.objectContaining({
+      staffingPriority: 'FULL_COVERAGE_WITH_CONFLICTS_ALLOWED',
+      doTeamsOfficiate: false,
+      teamOfficialsMaySwap: false,
+      teamCheckInMode: 'OFF',
+      teamCheckInOpenMinutesBefore: 60,
+      allowMatchRosterEdits: false,
+      allowTemporaryMatchPlayers: false,
+      autoCreatePointMatchIncidents: false,
+      officialIds: [],
+      officialPositions: [],
+      eventOfficials: [],
+      assistantHostIds: ['assistant-stale'],
+      pendingStaffInvites: [{
+        email: 'stale@example.com',
+        firstName: 'Stale',
+        lastName: 'Official',
+          roles: ['ASSISTANT_HOST'],
+      }],
+      staffInvites: [{
+        email: 'stale@example.com',
+        firstName: 'Stale',
+        lastName: 'Official',
+          roles: ['ASSISTANT_HOST'],
+      }],
+    }));
+  });
+  it('maps persisted staff types to editor role values', () => {
+    const sourceEvent = {
+      ...eventEditorFixtures[0].event,
+      pendingStaffInvites: [{
+        email: 'assigned-host@example.test',
+        firstName: 'Assigned',
+        lastName: 'Host',
+        staffTypes: ['HOST', 'OFFICIAL'],
+      }],
+    } as unknown as Event;
+
+    expect(legacyEventToEditorDraft(sourceEvent).staff.pendingInvites).toEqual([{
+      email: 'assigned-host@example.test',
+      firstName: 'Assigned',
+      lastName: 'Host',
+      staffTypes: ['HOST', 'OFFICIAL'],
+      roles: ['ASSISTANT_HOST', 'OFFICIAL'],
+    }]);
+  });
   it.each([
     ['STAFFING', 'OFFICIAL_COVERAGE_REQUIRED'],
     ['TEAM_STAFFING', 'TEAM_COVERAGE_REQUIRED'],

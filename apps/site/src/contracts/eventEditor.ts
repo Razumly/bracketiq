@@ -729,11 +729,23 @@ const eventEditorMatchDemandSchema = z
   })
   .strict();
 
+/**
+ * Existing-Event schedule maintenance is deliberately separate from the
+ * create-event proposal protocol.  The operation identity belongs to one
+ * user action; retries carry that same identity and proposal revision.
+ */
+export const eventEditorMaintenanceOperationSchema = z.enum([
+  "BUILD",
+  "COMPLETE",
+  "REBUILD",
+]);
+
 export const eventEditorScheduleStateSchema = z
   .object({
     sourceType: z.string().nullable(),
     matchCount: z.number().int().nonnegative(),
     matchDemand: eventEditorMatchDemandSchema.optional(),
+    availableMaintenanceOperations: z.array(eventEditorMaintenanceOperationSchema),
     revision: id,
     hasProtectedHistory: z.boolean(),
   })
@@ -788,8 +800,204 @@ export const eventEditorScheduleWarningSchema = z
     code: id,
     message: z.string().trim().min(1),
     matchIds: z.array(id).optional(),
+    restrictingFactor: z.enum([
+      "RESOURCE",
+      "PLAYING_TEAM",
+      "TEAM_DUTY",
+      "NAMED_OFFICIAL_POSITION",
+      "DIVISION_ORDER",
+      "UNKNOWN",
+    ]).optional(),
   })
   .strict();
+
+export const eventEditorUnscheduledMatchSchema = z
+  .object({
+    id,
+    matchId: z.number().int().nullable(),
+    phaseDivisionId: id,
+    phase: z.string().trim().min(1),
+    sourceDivisionId: nullableId,
+  })
+  .strict();
+
+export const eventEditorAffectedCompetitionPhaseSchema = z
+  .object({
+    id,
+    name: z.string().trim().min(1),
+    phase: z.string().trim().min(1),
+    sourceDivisionId: nullableId,
+  })
+  .strict();
+
+type PartialScheduleOutcomeForValidation = {
+  matchCount: number;
+  placedMatchCount: number;
+  unplacedMatchCount: number;
+  matches: z.infer<typeof editorMatchProjectionSchema>[];
+  unscheduledMatches: z.infer<typeof eventEditorUnscheduledMatchSchema>[];
+  affectedCompetitionPhases: z.infer<
+    typeof eventEditorAffectedCompetitionPhaseSchema
+  >[];
+};
+
+const validatePartialScheduleCounts = (
+  outcome: PartialScheduleOutcomeForValidation,
+  context: z.RefinementCtx,
+): z.infer<typeof editorMatchProjectionSchema>[] => {
+  if (outcome.matchCount !== outcome.matches.length) {
+    context.addIssue({
+      code: "custom",
+      path: ["matchCount"],
+      message: "matchCount must describe the complete Match Graph.",
+    });
+  }
+
+  const placedMatches = outcome.matches.filter(
+    (match) => match.placementState === "PLACED",
+  );
+  const unplacedMatches = outcome.matches.filter(
+    (match) => match.placementState === "UNPLACED",
+  );
+  if (outcome.placedMatchCount !== placedMatches.length) {
+    context.addIssue({
+      code: "custom",
+      path: ["placedMatchCount"],
+      message: "placedMatchCount must describe the complete Match Graph.",
+    });
+  }
+  if (outcome.unplacedMatchCount !== unplacedMatches.length) {
+    context.addIssue({
+      code: "custom",
+      path: ["unplacedMatchCount"],
+      message: "unplacedMatchCount must describe the complete Match Graph.",
+    });
+  }
+  if (
+    outcome.placedMatchCount + outcome.unplacedMatchCount
+    !== outcome.matchCount
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["unplacedMatchCount"],
+      message: "placed and unplaced counts must equal matchCount.",
+    });
+  }
+
+  return unplacedMatches;
+};
+
+const validatePartialUnscheduledMatches = (
+  outcome: PartialScheduleOutcomeForValidation,
+  unplacedMatches: z.infer<typeof editorMatchProjectionSchema>[],
+  context: z.RefinementCtx,
+): void => {
+  const unscheduledIds = outcome.unscheduledMatches.map((match) => match.id);
+  if (new Set(unscheduledIds).size !== unscheduledIds.length) {
+    context.addIssue({
+      code: "custom",
+      path: ["unscheduledMatches"],
+      message: "unscheduledMatches must not contain duplicate Match IDs.",
+    });
+  }
+  if (
+    unscheduledIds.length !== unplacedMatches.length
+    || unscheduledIds.some((matchId, index) => matchId !== unplacedMatches[index]?.id)
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["unscheduledMatches"],
+      message: "unscheduledMatches must contain exactly the UNPLACED nodes in graph order.",
+    });
+  }
+
+  const matchesById = new Map(
+    outcome.matches.map((match) => [match.id, match]),
+  );
+  outcome.unscheduledMatches.forEach((unscheduledMatch, index) => {
+    const graphMatch = matchesById.get(unscheduledMatch.id);
+    if (!graphMatch) {
+      context.addIssue({
+        code: "custom",
+        path: ["unscheduledMatches", index, "id"],
+        message: "unscheduledMatches contains an unknown Match ID.",
+      });
+      return;
+    }
+    if (graphMatch.placementState !== "UNPLACED") {
+      context.addIssue({
+        code: "custom",
+        path: ["unscheduledMatches", index, "id"],
+        message: "unscheduledMatches may contain only UNPLACED nodes.",
+      });
+    }
+    if (
+      unscheduledMatch.matchId !== graphMatch.matchId
+      || unscheduledMatch.phaseDivisionId !== graphMatch.phaseDivisionId
+      || unscheduledMatch.phase !== graphMatch.phase
+      || unscheduledMatch.sourceDivisionId !== graphMatch.sourceDivisionId
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["unscheduledMatches", index],
+        message: "unscheduledMatches identity must match its graph node.",
+      });
+    }
+  });
+};
+
+const validatePartialAffectedCompetitionPhases = (
+  outcome: PartialScheduleOutcomeForValidation,
+  unplacedMatches: z.infer<typeof editorMatchProjectionSchema>[],
+  context: z.RefinementCtx,
+): void => {
+  const expectedPhaseIds = Array.from(
+    new Set(
+      unplacedMatches
+        .map((match) => match.phaseDivisionId)
+        .filter((phaseId): phaseId is string => Boolean(phaseId)),
+    ),
+  ).sort((left, right) => left.localeCompare(right));
+  const phaseIds = outcome.affectedCompetitionPhases.map((phase) => phase.id);
+  if (new Set(phaseIds).size !== phaseIds.length) {
+    context.addIssue({
+      code: "custom",
+      path: ["affectedCompetitionPhases"],
+      message: "affectedCompetitionPhases must not contain duplicate phase IDs.",
+    });
+  }
+  if (
+    phaseIds.length !== expectedPhaseIds.length
+    || phaseIds.some((phaseId, index) => phaseId !== expectedPhaseIds[index])
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["affectedCompetitionPhases"],
+      message: "affectedCompetitionPhases must describe exactly the phases containing UNPLACED nodes.",
+    });
+  }
+};
+
+export const eventEditorPartialScheduleOutcomeSchema = z
+  .object({
+    status: z.literal("PARTIAL"),
+    isComplete: z.literal(false),
+    matchCount: z.number().int().positive(),
+    placedMatchCount: z.number().int().nonnegative(),
+    unplacedMatchCount: z.number().int().positive(),
+    matches: z.array(editorMatchProjectionSchema),
+    unscheduledMatches: z.array(eventEditorUnscheduledMatchSchema),
+    affectedCompetitionPhases: z.array(
+      eventEditorAffectedCompetitionPhaseSchema,
+    ),
+    warnings: z.array(eventEditorScheduleWarningSchema),
+  })
+  .strict()
+  .superRefine((outcome, context) => {
+    const unplacedMatches = validatePartialScheduleCounts(outcome, context);
+    validatePartialUnscheduledMatches(outcome, unplacedMatches, context);
+    validatePartialAffectedCompetitionPhases(outcome, unplacedMatches, context);
+  });
 
 export const eventEditorCreateCompletionSchema = z
   .object({
@@ -839,6 +1047,7 @@ export const eventEditorScheduleOutcomeSchema = z.discriminatedUnion("status", [
       warnings: z.array(z.never()),
     })
     .strict(),
+  eventEditorPartialScheduleOutcomeSchema,
 ]);
 export const eventEditorRevisionBindingSchema = z
   .object({
@@ -877,6 +1086,7 @@ export const eventEditorSnapshotSchema = z
       })
       .strict(),
     scheduleState: eventEditorScheduleStateSchema,
+    revisionBinding: eventEditorRevisionBindingSchema.nullish(),
   })
   .strict();
 export const eventEditorCreateBootstrapSchema = z
@@ -1162,7 +1372,7 @@ const eventEditorProposalGraphMatchSchema = z
     start: isoDateTime.nullable(),
     end: isoDateTime.nullable(),
     locked: z.boolean(),
-    placementState: z.string(),
+    placementState: z.enum(["PLACED", "UNPLACED"]),
     phase: z.string().nullable(),
     sourceDivisionId: nullableId,
     phaseDivisionId: nullableId,
@@ -1296,6 +1506,160 @@ export const eventEditorCreateProposalGraphSchema = z
   })
   .strict();
 
+export const eventEditorMaintenanceRequestSchema = z
+  .object({
+    contractVersion: z.literal(EVENT_EDITOR_CONTRACT_VERSION),
+    eventId: id,
+    operation: eventEditorMaintenanceOperationSchema,
+    operationId: id,
+    expectedRevisions: eventEditorRevisionBindingSchema.optional(),
+    participantCount: z.number().int().positive().optional(),
+    includePlaceholderTeams: z.boolean().optional(),
+  })
+  .strict();
+
+const maintenanceUnscheduledMatchSchema = z
+  .object({
+    id,
+    matchId: z.number().int().nullable(),
+    phaseDivisionId: id,
+    phase: z.string(),
+    sourceDivisionId: nullableId,
+  })
+  .strict();
+
+const maintenanceAffectedPhaseSchema = z
+  .object({
+    id,
+    name: z.string(),
+    phase: z.string(),
+    sourceDivisionId: nullableId,
+  })
+  .strict();
+
+export const eventEditorMaintenanceScheduleOutcomeSchema =
+  z.discriminatedUnion("status", [
+    z
+      .object({
+        status: z.literal("COMPLETE"),
+        isComplete: z.literal(true),
+        matchCount: z.number().int().positive(),
+        placedMatchCount: z.number().int().nonnegative(),
+        unplacedMatchCount: z.literal(0),
+        matches: z.array(editorMatchProjectionSchema),
+        unscheduledMatches: z.array(z.never()),
+        affectedCompetitionPhases: z.array(z.never()),
+        warnings: z.array(eventEditorScheduleWarningSchema),
+      })
+      .strict(),
+    z
+      .object({
+        status: z.literal("INCOMPLETE"),
+        isComplete: z.literal(false),
+        matchCount: z.number().int().positive(),
+        placedMatchCount: z.number().int().nonnegative(),
+        unplacedMatchCount: z.number().int().positive(),
+        matches: z.array(editorMatchProjectionSchema),
+        unscheduledMatches: z.array(maintenanceUnscheduledMatchSchema),
+        affectedCompetitionPhases: z.array(maintenanceAffectedPhaseSchema),
+        warnings: z.array(eventEditorScheduleWarningSchema),
+      })
+      .strict(),
+  ]);
+
+export const eventEditorMaintenanceProposalSchema = z
+  .object({
+    status: z.literal("PROPOSED"),
+    contractVersion: z.literal(EVENT_EDITOR_CONTRACT_VERSION),
+    eventId: id,
+    operation: eventEditorMaintenanceOperationSchema,
+    operationId: id,
+    proposalRevision: id,
+    revisionBinding: eventEditorRevisionBindingSchema,
+    graph: eventEditorCreateProposalGraphSchema,
+    protectedMatchIds: z.array(id),
+    scheduleOutcome: eventEditorMaintenanceScheduleOutcomeSchema,
+  })
+  .strict();
+
+export const eventEditorAcceptMaintenanceProposalSchema = z
+  .object({
+    contractVersion: z.literal(EVENT_EDITOR_CONTRACT_VERSION),
+    eventId: id,
+    operation: eventEditorMaintenanceOperationSchema,
+    operationId: id,
+    proposalRevision: id,
+    acceptanceOperationId: id,
+  })
+  .strict();
+
+export const eventEditorRejectMaintenanceProposalSchema = z
+  .object({
+    contractVersion: z.literal(EVENT_EDITOR_CONTRACT_VERSION),
+    eventId: id,
+    operation: eventEditorMaintenanceOperationSchema,
+    operationId: id,
+    proposalRevision: id,
+  })
+  .strict();
+
+export const eventEditorMaintenanceAcceptedResultSchema =
+  eventEditorMaintenanceProposalSchema
+    .omit({ status: true })
+    .extend({
+      status: z.literal("ACCEPTED"),
+      acceptanceOperationId: id,
+    })
+    .strict();
+
+export const eventEditorMaintenanceRejectedResultSchema = z
+  .object({
+    status: z.literal("REJECTED"),
+    contractVersion: z.literal(EVENT_EDITOR_CONTRACT_VERSION),
+    eventId: id,
+    operation: eventEditorMaintenanceOperationSchema,
+    operationId: id,
+    proposalRevision: id,
+  })
+  .strict();
+
+export const eventEditorMaintenanceResponseSchema = z.discriminatedUnion(
+  "status",
+  [
+    eventEditorMaintenanceProposalSchema,
+    eventEditorMaintenanceAcceptedResultSchema,
+    eventEditorMaintenanceRejectedResultSchema,
+  ],
+);
+
+export type EventEditorMaintenanceOperation = z.infer<
+  typeof eventEditorMaintenanceOperationSchema
+>;
+export type EventEditorMaintenanceRequest = z.infer<
+  typeof eventEditorMaintenanceRequestSchema
+>;
+export type EventEditorMaintenanceScheduleOutcome = z.infer<
+  typeof eventEditorMaintenanceScheduleOutcomeSchema
+>;
+export type EventEditorMaintenanceProposal = z.infer<
+  typeof eventEditorMaintenanceProposalSchema
+>;
+export type EventEditorAcceptMaintenanceProposal = z.infer<
+  typeof eventEditorAcceptMaintenanceProposalSchema
+>;
+export type EventEditorRejectMaintenanceProposal = z.infer<
+  typeof eventEditorRejectMaintenanceProposalSchema
+>;
+export type EventEditorMaintenanceAcceptedResult = z.infer<
+  typeof eventEditorMaintenanceAcceptedResultSchema
+>;
+export type EventEditorMaintenanceRejectedResult = z.infer<
+  typeof eventEditorMaintenanceRejectedResultSchema
+>;
+export type EventEditorMaintenanceResponse = z.infer<
+  typeof eventEditorMaintenanceResponseSchema
+>;
+
 export const eventEditorSaveResultSchema = z
   .object({
     status: z.literal("SAVED"),
@@ -1304,6 +1668,7 @@ export const eventEditorSaveResultSchema = z
     staffEmailDelivery: z.enum(["QUEUED", "FAILED", "NOT_REQUESTED"]),
     scheduleOutcome: eventEditorScheduleOutcomeSchema,
     graph: eventEditorCreateProposalGraphSchema.optional(),
+    acceptanceOperationId: id.optional(),
   })
   .strict();
 
@@ -1315,14 +1680,18 @@ export const eventEditorCreateResultSchema = eventEditorSaveResultSchema
     scheduleRevision: id,
   })
   .strict();
-export const eventEditorCreateProposalScheduleOutcomeSchema = z
-  .object({
-    status: z.literal("BUILT"),
-    matchCount: z.number().int().positive(),
-    matches: z.array(editorMatchProjectionSchema),
-    warnings: z.array(eventEditorScheduleWarningSchema),
-  })
-  .strict();
+export const eventEditorCreateProposalScheduleOutcomeSchema =
+  z.discriminatedUnion("status", [
+    z
+      .object({
+        status: z.literal("BUILT"),
+        matchCount: z.number().int().positive(),
+        matches: z.array(editorMatchProjectionSchema),
+        warnings: z.array(eventEditorScheduleWarningSchema),
+      })
+      .strict(),
+    eventEditorPartialScheduleOutcomeSchema,
+  ]);
 
 export const eventEditorCreateProposalSchema = z
   .object({
@@ -1346,11 +1715,28 @@ export const eventEditorProposalReferenceSchema = z
   })
   .strict();
 
-
 export const eventEditorAcceptProposalCommandSchema =
   eventEditorProposalReferenceSchema.extend({
     draft: eventEditorDraftSchema,
   });
+
+export const eventEditorAcceptPartialProposalCommandSchema =
+  eventEditorProposalReferenceSchema.extend({
+    acceptanceMode: z.literal("PARTIAL"),
+    acceptanceOperationId: id,
+    draft: eventEditorDraftSchema,
+  });
+
+export const eventEditorAcceptProposalResultSchema =
+  eventEditorCreateResultSchema;
+
+export const eventEditorAcceptPartialProposalResultSchema =
+  eventEditorCreateResultSchema
+    .extend({
+      acceptanceOperationId: id,
+      scheduleOutcome: eventEditorPartialScheduleOutcomeSchema,
+    })
+    .strict();
 
 export const eventEditorRejectProposalCommandSchema =
   eventEditorProposalReferenceSchema;
@@ -1358,6 +1744,12 @@ export const eventEditorCreateResponseSchema = z.discriminatedUnion("status", [
   eventEditorCreateResultSchema,
   eventEditorCreateProposalSchema,
 ]);
+export type EventEditorUnscheduledMatch = z.infer<
+  typeof eventEditorUnscheduledMatchSchema
+>;
+export type EventEditorAffectedCompetitionPhase = z.infer<
+  typeof eventEditorAffectedCompetitionPhaseSchema
+>;
 
 export type EventEditorCreateProposalScheduleOutcome = z.infer<
   typeof eventEditorCreateProposalScheduleOutcomeSchema
@@ -1373,6 +1765,15 @@ export type EventEditorProposalReference = z.infer<
 >;
 export type EventEditorAcceptProposalCommand = z.infer<
   typeof eventEditorAcceptProposalCommandSchema
+>;
+export type EventEditorAcceptPartialProposalCommand = z.infer<
+  typeof eventEditorAcceptPartialProposalCommandSchema
+>;
+export type EventEditorAcceptProposalResult = z.infer<
+  typeof eventEditorAcceptProposalResultSchema
+>;
+export type EventEditorAcceptPartialProposalResult = z.infer<
+  typeof eventEditorAcceptPartialProposalResultSchema
 >;
 export type EventEditorRejectProposalCommand = z.infer<
   typeof eventEditorRejectProposalCommandSchema
@@ -1410,6 +1811,12 @@ export const eventEditorErrorSchema = z
       "EDITOR_PROPOSAL_INVALID",
       "EDITOR_PROPOSAL_STALE",
       "EDITOR_PROPOSAL_NOT_FOUND",
+      "EDITOR_MAINTENANCE_INVALID",
+      "EDITOR_MAINTENANCE_NOT_FOUND",
+      "EDITOR_MAINTENANCE_REJECTED",
+      "EDITOR_MAINTENANCE_STALE",
+      "EDITOR_MAINTENANCE_ACCEPTANCE_CONFLICT",
+      "EDITOR_MAINTENANCE_UNAUTHORIZED",
       "INVALID_TIME_SLOT",
     ]),
     field: z.string().nullable().optional(),
@@ -1545,7 +1952,27 @@ export const parseEventEditorAcceptProposalCommand = (
   input: unknown,
 ): EventEditorAcceptProposalCommand =>
   eventEditorAcceptProposalCommandSchema.parse(input);
+export const parseEventEditorAcceptPartialProposalCommand = (
+  input: unknown,
+): EventEditorAcceptPartialProposalCommand =>
+  eventEditorAcceptPartialProposalCommandSchema.parse(input);
 export const parseEventEditorRejectProposalCommand = (
   input: unknown,
 ): EventEditorRejectProposalCommand =>
   eventEditorRejectProposalCommandSchema.parse(input);
+export const parseEventEditorMaintenanceRequest = (
+  input: unknown,
+): EventEditorMaintenanceRequest =>
+  eventEditorMaintenanceRequestSchema.parse(input);
+export const parseEventEditorAcceptMaintenanceProposal = (
+  input: unknown,
+): EventEditorAcceptMaintenanceProposal =>
+  eventEditorAcceptMaintenanceProposalSchema.parse(input);
+export const parseEventEditorRejectMaintenanceProposal = (
+  input: unknown,
+): EventEditorRejectMaintenanceProposal =>
+  eventEditorRejectMaintenanceProposalSchema.parse(input);
+export const parseEventEditorMaintenanceResponse = (
+  input: unknown,
+): EventEditorMaintenanceResponse =>
+  eventEditorMaintenanceResponseSchema.parse(input);

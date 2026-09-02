@@ -200,4 +200,151 @@ describe("schedule proposal display", () => {
       ]),
     );
   });
+  it("allows valid unplaced nodes in a partial proposal without complete-schedule errors", () => {
+    const proposal = {
+      snapshot: { draft: { basics: { timeZone: "UTC" } } },
+      graph: {
+        event: {
+          fields: [{ id: "field-1", name: "Court 1" }],
+          teams: [{ id: "team-1", name: "Team One" }],
+          officials: [],
+          eventOfficials: [],
+          officialPositions: [],
+        },
+        matches: [
+          {
+            id: "match-1",
+            matchId: 1,
+            placementState: "PLACED",
+            fieldId: "field-1",
+            start: "2026-01-05T05:00:00.000Z",
+            end: "2026-01-05T06:00:00.000Z",
+          },
+          {
+            id: "match-2",
+            matchId: 2,
+            placementState: "UNPLACED",
+            fieldId: null,
+            start: null,
+            end: null,
+            phaseDivisionId: "phase-final",
+            phase: "FINAL",
+          },
+        ],
+      },
+      scheduleOutcome: {
+        status: "PARTIAL",
+        isComplete: false,
+        matchCount: 2,
+        placedMatchCount: 1,
+        unplacedMatchCount: 1,
+        matches: [
+          {
+            id: "match-1",
+            matchId: 1,
+            placementState: "PLACED",
+            team1Id: null,
+            team2Id: null,
+            fieldId: "field-1",
+            start: "2026-01-05T05:00:00.000Z",
+            end: "2026-01-05T06:00:00.000Z",
+          },
+          {
+            id: "match-2",
+            matchId: 2,
+            placementState: "UNPLACED",
+            team1Id: null,
+            team2Id: null,
+            fieldId: null,
+            start: null,
+            end: null,
+          },
+        ],
+        unscheduledMatches: [
+          {
+            id: "match-2",
+            matchId: 2,
+            phaseDivisionId: "phase-final",
+            phase: "FINAL",
+            sourceDivisionId: null,
+          },
+        ],
+        affectedCompetitionPhases: [
+          {
+            id: "phase-final",
+            name: "Final",
+            phase: "FINAL",
+            sourceDivisionId: null,
+          },
+        ],
+        warnings: [],
+      },
+    } as unknown as Parameters<typeof proposalDisplayIssues>[0];
+
+    expect(proposalDisplayIssues(proposal).errors).toEqual([]);
+  });
+
+  it("keeps malformed graph references as errors in a partial proposal", () => {
+    const proposal = {
+      snapshot: { draft: { basics: { timeZone: "UTC" } } },
+      graph: {
+        event: {
+          fields: [],
+          teams: [],
+          officials: [],
+          eventOfficials: [],
+          officialPositions: [],
+        },
+        matches: [
+          {
+            id: "match-1",
+            matchId: 1,
+            placementState: "UNPLACED",
+            previousLeftId: "missing-match",
+          },
+        ],
+      },
+      scheduleOutcome: {
+        status: "PARTIAL",
+        isComplete: false,
+        matchCount: 1,
+        placedMatchCount: 0,
+        unplacedMatchCount: 1,
+        matches: [
+          {
+            id: "match-1",
+            matchId: 1,
+            placementState: "UNPLACED",
+            team1Id: null,
+            team2Id: null,
+            fieldId: null,
+            start: null,
+            end: null,
+          },
+        ],
+        unscheduledMatches: [
+          {
+            id: "match-1",
+            matchId: 1,
+            phaseDivisionId: "phase-final",
+            phase: "FINAL",
+            sourceDivisionId: null,
+          },
+        ],
+        affectedCompetitionPhases: [
+          {
+            id: "phase-final",
+            name: "Final",
+            phase: "FINAL",
+            sourceDivisionId: null,
+          },
+        ],
+        warnings: [],
+      },
+    } as unknown as Parameters<typeof proposalDisplayIssues>[0];
+
+    expect(proposalDisplayIssues(proposal).errors).toContain(
+      "Match 1 has an unresolved Match Graph link.",
+    );
+  });
 });

@@ -32,7 +32,6 @@ kotlin {
                 implementation(libs.androidx.datastore)
                 implementation(libs.datastore.preferences)
                 implementation(libs.geo)
-                implementation(libs.kmpnotifier)
                 implementation(libs.napier)
                 implementation(libs.kotlinx.datetime)
                 implementation(libs.kotlinx.datetime.ext)
@@ -58,6 +57,12 @@ kotlin {
                 implementation(libs.ktor.client.mock)
                 implementation(libs.ktor.client.content.negotiation)
                 implementation(libs.ktor.serialization.kotlinx.json)
+            }
+        }
+        androidUnitTest {
+            dependencies {
+                implementation(libs.mockk)
+                implementation(libs.robolectric)
             }
         }
     }

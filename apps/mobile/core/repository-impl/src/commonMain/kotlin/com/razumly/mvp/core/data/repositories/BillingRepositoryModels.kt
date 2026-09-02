@@ -181,6 +181,8 @@ data class EventTeamBillCreateRequest(
     val taxAmountCents: Int = 0,
     val allowSplit: Boolean = false,
     val label: String? = null,
+    val slotId: String? = null,
+    val occurrenceDate: String? = null,
 )
 
 data class EventTeamPaymentCheckoutRequest(
@@ -190,6 +192,8 @@ data class EventTeamPaymentCheckoutRequest(
     val taxAmountCents: Int = 0,
     val divisionId: String? = null,
     val label: String? = null,
+    val slotId: String? = null,
+    val occurrenceDate: String? = null,
 )
 
 data class EventTeamPaymentCheckout(

@@ -92,6 +92,7 @@ import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
 import com.razumly.mvp.core.data.dataTypes.skillsForSport
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.enums.minimumParticipantCount
+import com.razumly.mvp.core.data.dataTypes.enums.isScheduleConstructionAutomationType
 import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeId
 import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeName
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
@@ -246,6 +247,7 @@ fun EventDetails(
     eventTypeHasProtectedHistory: Boolean = false,
     teamSignupLocked: Boolean = false,
     automatedSchedulingLocked: Boolean = false,
+    tryoutAvailable: Boolean = false,
     onHostCreateAccount: () -> Unit,
     onOpenLocationMap: () -> Unit,
     onPlaceSelected: (MVPPlace?) -> Unit,
@@ -2518,6 +2520,10 @@ fun EventDetails(
                             eventTypeHasProtectedHistory = eventTypeHasProtectedHistory,
                             teamSignupLocked = teamSignupLocked,
                             automatedSchedulingLocked = automatedSchedulingLocked,
+                            tryoutAvailable = tryoutAvailable,
+                            preserveSelectedTryout = !isNewEvent &&
+                                editView &&
+                                editEvent.eventType == EventType.TRYOUT,
                         ),
                         actions = SimpleEventDetailsOptionsActions(
                             onEventTypeSelected = onEventTypeSelected,
@@ -2541,8 +2547,22 @@ fun EventDetails(
                                 }
                             },
                             onNoFixedEndDateChange = { enabled ->
-                                if (editEvent.eventType != EventType.WEEKLY_EVENT) {
-                                    onEditEvent { copy(noFixedEndDateTime = enabled) }
+                                if (
+                                    editEvent.eventType == EventType.WEEKLY_EVENT ||
+                                        editEvent.eventType.isScheduleConstructionAutomationType()
+                                ) {
+                                    onEditEvent {
+                                        copy(
+                                            noFixedEndDateTime = enabled,
+                                            isAutomatedScheduling = if (
+                                                eventType == EventType.WEEKLY_EVENT
+                                            ) {
+                                                true
+                                            } else {
+                                                isAutomatedScheduling
+                                            },
+                                        )
+                                    }
                                 }
                             },
                             onPlayoffsOrPoolPlayChange = { enabled ->
@@ -2673,6 +2693,7 @@ fun EventDetails(
                         enabled = sportRequiredSectionEnabled,
                         isNewEvent = isNewEvent,
                         rentalTimeLocked = rentalTimeLocked,
+                        tryoutAvailable = tryoutAvailable,
                         event = event,
                         editEvent = editEvent,
                         divisionDetails = divisionDetailsForSettings,

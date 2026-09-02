@@ -16,6 +16,8 @@ import com.razumly.mvp.core.network.dto.EventEditorCompetitionDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateCompletionDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateCompletionMode
 import com.razumly.mvp.core.network.dto.EventEditorCreateProposalDto
+import com.razumly.mvp.core.network.dto.EventEditorAffectedCompetitionPhaseDto
+import com.razumly.mvp.core.network.dto.EventEditorUnscheduledMatchDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateProposalGraphDto
 import com.razumly.mvp.core.network.dto.EventEditorDraftDto
 import com.razumly.mvp.core.network.dto.EventEditorExpectedCreateRevisionsDto
@@ -56,14 +58,13 @@ class ScheduleProposalDialogUiTest {
     @Test
     fun given_completeProposal_when_dialogRenders_then_showsGraphAssignmentsAndActions() {
         var accepted = false
-        var rejected = false
 
         composeRule.setContent {
             MaterialTheme {
                 ScheduleProposalDialog(
                     proposal = buildProposal(),
                     onAccept = { accepted = true },
-                    onReject = { rejected = true },
+                    onReject = {},
                 )
             }
         }
@@ -73,11 +74,29 @@ class ScheduleProposalDialogUiTest {
         }
 
         composeRule.onNodeWithText("Accept and create").performClick()
-        composeRule.onNodeWithText("Reject").performClick()
 
         assertTrue(accepted)
+    }
+
+    @Test
+    fun givenProposal_when_rejectClicked_then_invokesRejectCallback() {
+        var rejected = false
+
+        composeRule.setContent {
+            MaterialTheme {
+                ScheduleProposalDialog(
+                    proposal = buildProposal(),
+                    onAccept = {},
+                    onReject = { rejected = true },
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Reject").assertIsDisplayed().performClick()
+
         assertTrue(rejected)
     }
+
     @Test
     fun givenPlayerOfficialAssignment_when_dialogRenders_then_acceptanceRemainsEnabled() {
         var accepted = false
@@ -114,37 +133,31 @@ class ScheduleProposalDialogUiTest {
         composeRule.onNodeWithText("Accept and create").assertIsEnabled().performClick()
         assertTrue(accepted)
     }
+
     @Test
-    fun givenPartialProposal_when_dialogRenders_then_acceptanceIsBlocked() {
+    fun givenPartialProposal_when_dialogRenders_then_showsIncompleteData_and_partialAcceptInvokesCallback() {
         var accepted = false
-        val completeProposal = buildProposal()
-        val incompleteProposal = completeProposal.copy(
-            graph = completeProposal.graph.copy(
-                matches = completeProposal.graph.matches.map { match ->
-                    match.copy(
-                        fieldId = null,
-                        officialAssignments = match.officialAssignments?.map { assignment ->
-                            assignment.copy(userId = null, eventOfficialId = null)
-                        },
-                    )
-                },
-            ),
-        )
 
         composeRule.setContent {
             MaterialTheme {
                 ScheduleProposalDialog(
-                    proposal = incompleteProposal,
+                    proposal = buildPartialProposal(),
                     onAccept = { accepted = true },
                     onReject = {},
                 )
             }
         }
 
-        composeRule.onNodeWithText("Cannot accept:", substring = true).assertIsDisplayed()
-        composeRule.onNodeWithText("Accept and create").assertIsNotEnabled()
+        composeRule.onNodeWithText("Incomplete schedule: 1 placed, 1 unscheduled").assertIsDisplayed()
+        composeRule.onNodeWithText(
+            "match-unplaced (match 2, phaseDivisionId playoff-phase, phase PLAYOFF, sourceDivisionId division-1)",
+        ).assertIsDisplayed()
+        composeRule.onNodeWithText(
+            "playoff-phase: Playoffs (PLAYOFF, sourceDivisionId division-1)",
+        ).assertIsDisplayed()
+        composeRule.onNodeWithText("Accept partial schedule").assertIsEnabled().performClick()
 
-        assertFalse(accepted)
+        assertTrue(accepted)
     }
     @Test
     fun givenMissingReferencedResourceName_when_dialogRenders_then_acceptanceIsBlocked() {
@@ -170,6 +183,34 @@ class ScheduleProposalDialogUiTest {
         }
 
         composeRule.onNodeWithText("Accept and create").assertIsNotEnabled()
+    }
+    @Test
+    fun givenStaleProposal_when_dialogRenders_then_offersRefreshAndReject_withoutAccepting() {
+        var accepted = false
+        var refreshed = false
+        var rejected = false
+
+        composeRule.setContent {
+            MaterialTheme {
+                ScheduleProposalDialog(
+                    proposal = buildProposal(),
+                    isStale = true,
+                    onAccept = { accepted = true },
+                    onRefresh = { refreshed = true },
+                    onReject = { rejected = true },
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(
+            "This schedule proposal is stale and cannot be accepted. Refresh to review the current proposal; your event setup is still here.",
+        ).assertIsDisplayed()
+        composeRule.onNodeWithText("Refresh proposal").assertIsEnabled().performClick()
+        composeRule.onNodeWithText("Reject").assertIsDisplayed().performClick()
+        composeRule.onNodeWithText("Accept and create").assertDoesNotExist()
+        assertTrue(refreshed)
+        assertTrue(rejected)
+        assertFalse(accepted)
     }
 }
 private fun proposalSnapshotLabels(): List<String> {
@@ -361,6 +402,78 @@ private fun buildProposal(): EventEditorCreateProposalDto {
         graph = EventEditorCreateProposalGraphDto(
             event = graphEvent,
             matches = listOf(match),
+        ),
+    )
+}
+private fun buildPartialProposal(): EventEditorCreateProposalDto {
+    val complete = buildProposal()
+    val placed = EventEditorMatchProjectionDto(
+        id = "match-1",
+        matchId = 1,
+        eventId = "event-1",
+        start = "2026-08-24T21:00:00Z",
+        end = "2026-08-24T22:00:00Z",
+        placementState = "PLACED",
+        phase = "POOL",
+        phaseDivisionId = "pool-phase",
+        sourceDivisionId = "division-1",
+        fieldId = "field-1",
+        team1Id = "team-1",
+        team2Id = "team-2",
+        officialId = "official-1",
+    )
+    val unplaced = EventEditorMatchProjectionDto(
+        id = "match-unplaced",
+        matchId = 2,
+        eventId = "event-1",
+        placementState = "UNPLACED",
+        phase = "PLAYOFF",
+        phaseDivisionId = "playoff-phase",
+        sourceDivisionId = "division-1",
+        team1Id = "team-1",
+        team2Id = "team-2",
+    )
+    val unplacedGraphMatch = complete.graph.matches.single().copy(
+        id = "match-unplaced",
+        matchId = 2,
+        start = null,
+        end = null,
+        placementState = "UNPLACED",
+        phase = "PLAYOFF",
+        phaseDivisionId = "playoff-phase",
+        fieldId = null,
+        officialId = null,
+        officialAssignments = null,
+        officialIds = null,
+        teamOfficialId = null,
+    )
+    return complete.copy(
+        scheduleOutcome = EventEditorScheduleOutcomeDto(
+            status = EventEditorScheduleOutcomeStatus.PARTIAL,
+            matchCount = 2,
+            matches = listOf(placed, unplaced),
+            unscheduledMatches = listOf(
+                EventEditorUnscheduledMatchDto(
+                    id = unplaced.id,
+                    matchId = unplaced.matchId,
+                    phaseDivisionId = unplaced.phaseDivisionId!!,
+                    phase = unplaced.phase!!,
+                    sourceDivisionId = unplaced.sourceDivisionId,
+                ),
+            ),
+            affectedCompetitionPhases = listOf(
+                EventEditorAffectedCompetitionPhaseDto(
+                    id = "playoff-phase",
+                    name = "Playoffs",
+                    phase = "PLAYOFF",
+                    sourceDivisionId = "division-1",
+                ),
+            ),
+            placedMatchCount = 1,
+            unplacedMatchCount = 1,
+        ),
+        graph = complete.graph.copy(
+            matches = listOf(complete.graph.matches.single(), unplacedGraphMatch),
         ),
     )
 }

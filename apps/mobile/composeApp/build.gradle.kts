@@ -24,8 +24,10 @@ plugins {
     alias(libs.plugins.skie)
     id("kotlin-parcelize")
 }
-private val MOBILE_LIVE_CONTRACT_TEST_CLASS =
-    "com.razumly.mvp.eventDetail.MobileEventEditorApiContractTest"
+private val MOBILE_LIVE_CONTRACT_TEST_CLASSES = listOf(
+    "com.razumly.mvp.eventDetail.MobileEventEditorApiContractTest",
+    "com.razumly.mvp.eventDetail.MobileTournamentEventEditorApiContractTest",
+)
 private val runMobileLiveContractTests =
     System.getenv("MVP_TEST_REQUIRE_BACKEND")?.trim()?.lowercase() in setOf("1", "true", "yes")
 
@@ -565,7 +567,9 @@ tasks.configureEach {
 tasks.withType<Test>().configureEach {
     if (!runMobileLiveContractTests) {
         filter {
-            excludeTestsMatching("$MOBILE_LIVE_CONTRACT_TEST_CLASS.*")
+            MOBILE_LIVE_CONTRACT_TEST_CLASSES.forEach { testClass ->
+                excludeTestsMatching("$testClass.*")
+            }
         }
     }
 }

@@ -1,6 +1,7 @@
 import { apiRequest } from "@/lib/apiClient";
 import {
   EVENT_EDITOR_CONTRACT_VERSION,
+  type EventEditorAcceptPartialProposalCommand,
   type EventEditorAcceptProposalCommand,
   type EventEditorCreateResult,
   type EventEditorProposalReference,
@@ -14,7 +15,9 @@ const proposalBody = (reference: EventEditorProposalReference) => ({
 
 export const eventEditorService = {
   acceptScheduleProposal: (
-    command: EventEditorAcceptProposalCommand,
+    command:
+      | EventEditorAcceptProposalCommand
+      | EventEditorAcceptPartialProposalCommand,
   ): Promise<EventEditorCreateResult> =>
     apiRequest<EventEditorCreateResult>("/api/events/editor", {
       method: "PUT",
@@ -30,3 +33,4 @@ export const eventEditorService = {
     });
   },
 };
+

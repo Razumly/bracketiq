@@ -192,6 +192,7 @@ const hasNonEmptyValue = (value: unknown): boolean =>
 const hasProtectedMatchState = (row: MatchHistoryRow): boolean => {
   const status = row.status?.trim().toUpperCase() ?? null;
   return (
+    row.locked === true ||
     (status !== null && PROTECTED_MATCH_STATUSES.has(status)) ||
     hasNonEmptyValue(row.actualStart) ||
     hasNonEmptyValue(row.actualEnd) ||

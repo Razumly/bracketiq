@@ -42,6 +42,43 @@ describe('loadEventProtectedHistory', () => {
     expect(history.protectedMatchIds).toEqual(new Set());
   });
 
+  it('protects a lock-only match without gameplay history', async () => {
+    const client = buildClient();
+    client.matches.findMany.mockResolvedValue([{
+      id: 'match_locked',
+      locked: true,
+    }]);
+
+    const history = await loadEventProtectedHistory('event_1', client);
+
+    expect(history.protectedMatchIds).toEqual(new Set(['match_locked']));
+  });
+
+  it('protects locked matches while preserving gameplay protection for unlocked matches', async () => {
+    const client = buildClient();
+    client.matches.findMany.mockResolvedValue([
+      {
+        id: 'match_locked',
+        locked: true,
+      },
+      {
+        id: 'match_clean',
+        locked: false,
+      },
+      {
+        id: 'match_started',
+        locked: false,
+        status: 'IN_PROGRESS',
+      },
+    ]);
+
+    const history = await loadEventProtectedHistory('event_1', client);
+
+    expect(history.protectedMatchIds).toEqual(
+      new Set(['match_locked', 'match_started']),
+    );
+  });
+
   it('protects a match when it has started or has a result', async () => {
     const client = buildClient();
     client.matches.findMany.mockResolvedValue([

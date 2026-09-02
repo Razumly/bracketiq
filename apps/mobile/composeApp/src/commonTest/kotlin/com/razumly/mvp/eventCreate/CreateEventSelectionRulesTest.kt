@@ -87,6 +87,25 @@ class CreateEventSelectionRulesTest {
     }
 
     @Test
+    fun given_tournament_with_generated_end_when_automated_scheduling_is_disabled_then_selection_rules_remove_generated_end() {
+        val start = Instant.fromEpochMilliseconds(5_000L)
+        val end = Instant.fromEpochMilliseconds(8_000L)
+        val draft = Event(
+            eventType = EventType.TOURNAMENT,
+            isAutomatedScheduling = false,
+            noFixedEndDateTime = true,
+            start = start,
+            end = end,
+        )
+
+        val updated = draft.applyCreateSelectionRules()
+
+        assertFalse(updated.isAutomatedScheduling)
+        assertFalse(updated.noFixedEndDateTime)
+        assertEquals(end, updated.end)
+    }
+
+    @Test
     fun given_explicit_tournament_capacity_when_selection_rules_apply_then_value_is_preserved_for_validation() {
         val updated = Event(
             eventType = EventType.TOURNAMENT,
@@ -141,7 +160,7 @@ class CreateEventSelectionRulesTest {
         assertEquals(EventType.WEEKLY_EVENT, updated.eventType)
         assertFalse(updated.teamSignup)
         assertFalse(updated.singleDivision)
-        assertFalse(updated.noFixedEndDateTime)
+        assertTrue(updated.noFixedEndDateTime)
         assertTrue(updated.allowPaymentPlans == true)
         assertEquals(2, updated.installmentCount)
         assertEquals(listOf(-1, 0), updated.installmentDueRelativeDays)
@@ -190,5 +209,21 @@ class CreateEventSelectionRulesTest {
                 nextSimplePageId = null,
             ),
         )
+    }
+
+    @Test
+    fun tryout_selection_enforces_individual_fixed_end_and_clears_automation() {
+        val updated = Event(
+            eventType = EventType.TRYOUT,
+            teamSignup = true,
+            singleDivision = true,
+            isAutomatedScheduling = true,
+            noFixedEndDateTime = true,
+        ).applyCreateSelectionRules()
+
+        assertFalse(updated.teamSignup)
+        assertFalse(updated.isAutomatedScheduling)
+        assertFalse(updated.noFixedEndDateTime)
+        assertFalse(updated.singleDivision)
     }
 }

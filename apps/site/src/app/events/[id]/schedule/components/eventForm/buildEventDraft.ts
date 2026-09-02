@@ -586,7 +586,7 @@ export function buildEventDraft(input: BuildEventDraftInput): BuiltEventDraft {
             eventType: source.eventType,
             parentEvent: source.parentEvent || undefined,
             noFixedEndDateTime: !isAffiliateEvent
-                && source.eventType !== 'WEEKLY_EVENT'
+                && source.eventType !== 'TRYOUT'
                 && supportsScheduleSlotsForEvent(source.eventType, source.parentEvent)
                 ? Boolean(source.noFixedEndDateTime)
                 : false,

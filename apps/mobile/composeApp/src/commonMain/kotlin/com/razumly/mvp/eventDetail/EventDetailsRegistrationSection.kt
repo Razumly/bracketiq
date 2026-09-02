@@ -94,6 +94,7 @@ internal data class EventDetailsRegistrationState(
     val enabled: Boolean,
     val isNewEvent: Boolean,
     val rentalTimeLocked: Boolean,
+    val tryoutAvailable: Boolean = true,
     val eventTypeLocked: Boolean = false,
     val eventTypeHasProtectedHistory: Boolean = false,
     val teamSignupLocked: Boolean = false,
@@ -192,6 +193,7 @@ internal fun LazyListScope.eventDetailsRegistrationSection(
                         isNewEvent = state.isNewEvent,
                         rentalTimeLocked = state.rentalTimeLocked,
                         currentEventType = state.editEvent.eventType,
+                        tryoutAvailable = state.tryoutAvailable,
                     )
                         .map { eventType ->
                             DropdownOption(

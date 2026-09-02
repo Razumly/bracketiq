@@ -67,10 +67,13 @@ import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.enums.isScheduleConstructionAutomationType
 import com.razumly.mvp.core.data.repositories.InclusivePriceQuote
 import com.razumly.mvp.core.data.repositories.InclusivePriceQuoteDirection
 import com.razumly.mvp.core.data.repositories.RentalResourceOption
 import com.razumly.mvp.core.data.repositories.TeamJoinQuestion
+import com.razumly.mvp.core.network.dto.EventEditorMaintenanceOperation
+import com.razumly.mvp.core.network.dto.EventEditorSnapshotDto
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.guides.EventGuideTargets
@@ -94,6 +97,7 @@ internal data class EventDetailOverviewEditHostState(
     val imageScheme: DynamicScheme,
     val imageIds: List<String>,
     val eventRegistrationQuestions: List<TeamJoinQuestion>,
+    val eventEditorSnapshot: EventEditorSnapshotDto?,
     val eventRegistrationQuestionAnswers: Map<String, String>,
     val eventRegistrationQuestionsExpanded: Boolean,
     val availableRentalResources: List<RentalResourceOption>,
@@ -202,6 +206,7 @@ internal data class EventDetailOverviewEditHostActions(
 internal data class EventEditActionAvailability(
     val canReschedule: Boolean,
     val canBuildSchedule: Boolean,
+    val canRebuildWithoutPlaceholders: Boolean,
     val eventActionEnabled: Boolean,
     val canCreateTemplate: Boolean,
 )
@@ -217,6 +222,7 @@ internal data class EventDetailOverviewStickyActionState(
     val isUserInEvent: Boolean,
     val directionsEnabled: Boolean,
     val selectedWeeklyOccurrenceLabel: String?,
+    val isArchivedEvent: Boolean = false,
 )
 
 internal data class EventDetailOverviewStickyActionActions(
@@ -242,7 +248,6 @@ internal data class EventDetailStickyPrimaryAction(
     val enabled: Boolean,
     val intent: EventDetailStickyPrimaryIntent,
 )
-
 internal fun resolveEventDetailStickyPrimaryAction(
     isAffiliateEvent: Boolean,
     isRegistrationPaymentPending: Boolean,
@@ -251,8 +256,10 @@ internal fun resolveEventDetailStickyPrimaryAction(
     isWeeklyParentEvent: Boolean,
     shouldShowViewSchedulePrimaryAction: Boolean,
     isUserInEvent: Boolean,
+    isArchivedEvent: Boolean = false,
 ): EventDetailStickyPrimaryAction {
     val label = when {
+        isArchivedEvent -> "Archived"
         isAffiliateEvent -> "Register on website"
         isRegistrationPaymentPending -> "Payment pending"
         isRegistrationPaymentFailed && !joinBlockedByStart -> "Complete payment"
@@ -263,7 +270,9 @@ internal fun resolveEventDetailStickyPrimaryAction(
         joinBlockedByStart -> "Event Started"
         else -> "Joined with Team"
     }
-    val enabled = if (isAffiliateEvent) {
+    val enabled = if (isArchivedEvent) {
+        false
+    } else if (isAffiliateEvent) {
         true
     } else if (isWeeklyParentEvent) {
         !isRegistrationPaymentPending && !joinBlockedByStart
@@ -276,6 +285,7 @@ internal fun resolveEventDetailStickyPrimaryAction(
                 )
     }
     val intent = when {
+        isArchivedEvent -> EventDetailStickyPrimaryIntent.NONE
         isAffiliateEvent -> EventDetailStickyPrimaryIntent.AFFILIATE_JOIN
         isRegistrationPaymentPending -> EventDetailStickyPrimaryIntent.NONE
         isRegistrationPaymentFailed && !joinBlockedByStart ->
@@ -292,12 +302,33 @@ internal fun resolveEventDetailStickyPrimaryAction(
 internal fun eventEditActionAvailability(
     event: Event,
     isHost: Boolean,
+    eventEditorSnapshot: EventEditorSnapshotDto?,
 ): EventEditActionAvailability {
     val isTemplate = event.state.equals("TEMPLATE", ignoreCase = true)
-    val canReschedule = event.eventType == EventType.LEAGUE || event.eventType == EventType.TOURNAMENT
+    val isCurrentDraftScheduleCapable =
+        event.isAutomatedScheduling && event.eventType.isScheduleConstructionAutomationType()
+    val availableMaintenanceOperations =
+        eventEditorSnapshot
+            ?.takeIf { snapshot ->
+                isCurrentDraftScheduleCapable &&
+                    !isTemplate &&
+                    snapshot.mode == "EDIT" &&
+                    snapshot.eventId == event.id &&
+                    snapshot.capabilities.canEdit
+            }
+            ?.scheduleState
+            ?.availableMaintenanceOperations
+            .orEmpty()
+    val canMaintenance = availableMaintenanceOperations.isNotEmpty()
     return EventEditActionAvailability(
-        canReschedule = canReschedule,
-        canBuildSchedule = canReschedule,
+        canReschedule = canMaintenance &&
+            EventEditorMaintenanceOperation.COMPLETE in availableMaintenanceOperations,
+        canBuildSchedule = canMaintenance && (
+            EventEditorMaintenanceOperation.BUILD in availableMaintenanceOperations ||
+                EventEditorMaintenanceOperation.REBUILD in availableMaintenanceOperations
+            ),
+        canRebuildWithoutPlaceholders = canMaintenance &&
+            EventEditorMaintenanceOperation.REBUILD in availableMaintenanceOperations,
         eventActionEnabled = !isTemplate,
         canCreateTemplate = isHost && !isTemplate,
     )
@@ -610,11 +641,18 @@ private fun EventDetailEditActions(
     actions: EventDetailOverviewEditHostActions,
     buttonColors: ButtonColors,
 ) {
-    val availability = eventEditActionAvailability(state.editEvent, state.isHost)
+    val availability = eventEditActionAvailability(
+        event = state.editEvent,
+        isHost = state.isHost,
+        eventEditorSnapshot = state.eventEditorSnapshot,
+    )
     var isActionsDropdownExpanded by remember { mutableStateOf(false) }
     val showStateButton = state.isHost && availability.eventActionEnabled
     val canCreateTemplate = availability.canCreateTemplate
-    val showActionsButton = availability.canReschedule || canCreateTemplate
+    val showActionsButton = availability.canReschedule ||
+        availability.canBuildSchedule ||
+        availability.canRebuildWithoutPlaceholders ||
+        canCreateTemplate
 
     Column(
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -685,29 +723,37 @@ private fun EventDetailEditActions(
                         content = {
                             if (availability.canReschedule) {
                                 DropdownMenuItem(
-                                    text = { Text("Reschedule Event") },
+                                    text = { Text("Complete Schedule") },
                                     onClick = {
                                         isActionsDropdownExpanded = false
                                         actions.onRescheduleEvent()
                                     },
                                 )
-                                if (availability.canBuildSchedule) {
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text(
-                                                if (state.eventWithRelations.matches.isEmpty()) {
-                                                    "Build Schedule"
-                                                } else {
-                                                    "Rebuild Schedule"
-                                                },
-                                            )
-                                        },
-                                        onClick = {
-                                            isActionsDropdownExpanded = false
-                                            actions.onBuildSchedule()
-                                        },
-                                    )
-                                }
+                            }
+                            if (availability.canBuildSchedule) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            if (
+                                                EventEditorMaintenanceOperation.BUILD in
+                                                    state.eventEditorSnapshot
+                                                        ?.scheduleState
+                                                        ?.availableMaintenanceOperations
+                                                        .orEmpty()
+                                            ) {
+                                                "Build Schedule"
+                                            } else {
+                                                "Rebuild Schedule"
+                                            },
+                                        )
+                                    },
+                                    onClick = {
+                                        isActionsDropdownExpanded = false
+                                        actions.onBuildSchedule()
+                                    },
+                                )
+                            }
+                            if (availability.canRebuildWithoutPlaceholders) {
                                 DropdownMenuItem(
                                     text = { Text("Rebuild Without Placeholders") },
                                     onClick = {
@@ -837,6 +883,7 @@ internal fun BoxScope.EventDetailOverviewStickyActionHost(
         isWeeklyParentEvent = state.isWeeklyParentEvent,
         shouldShowViewSchedulePrimaryAction = state.shouldShowViewSchedulePrimaryAction,
         isUserInEvent = state.isUserInEvent,
+        isArchivedEvent = state.isArchivedEvent,
     )
     StickyActionBar(
         primaryLabel = primaryAction.label,

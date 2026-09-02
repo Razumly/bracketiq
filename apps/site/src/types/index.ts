@@ -528,6 +528,7 @@ export interface Match {
   phaseDivisionId?: string | null;
   fieldId?: string | null;
   locked?: boolean;
+  placementState?: string | null;
   status?: MatchLifecycleStatus | string | null;
   resultStatus?: MatchResultStatus | string | null;
   resultType?: MatchResultType | string | null;
@@ -885,6 +886,14 @@ export interface OrganizationTag {
   isSystem?: boolean;
 }
 
+export interface EventOccurrencePreview {
+  slotId: string;
+  occurrenceDate: string;
+  start: string;
+  end: string;
+  timeZone?: string;
+}
+
 // Core Event interface with relationships
 export interface Event {
   $id: string;
@@ -893,12 +902,13 @@ export interface Event {
   affiliateUrl?: string | null;
   affiliateActionUrl?: string | null;
   sourceUrl?: string | null;
-  organizerName?: string | null;
-  scheduleText?: string | null;
+  nextOccurrence?: EventOccurrencePreview | null;
   dateDisplayMode?: 'SCHEDULED' | 'DATE_ONLY' | 'NO_FIXED_DATE' | 'ONGOING' | string | null;
   dateDisplayText?: string | null;
   priceText?: string | null;
   statusText?: string | null;
+  organizerName?: string | null;
+  scheduleText?: string | null;
   tags?: EventTag[];
   start: string;
   end: string | null;

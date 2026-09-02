@@ -3,11 +3,15 @@ package com.razumly.mvp.eventCreate
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
+import com.razumly.mvp.core.data.dataTypes.OrganizationFeature
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.usesManualRegistrationPayments
+import com.razumly.mvp.core.data.repositories.EventEditorSession
+import com.razumly.mvp.core.network.dto.OrganizationApiDto
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
+import com.razumly.mvp.core.util.jsonMVP
 import com.razumly.mvp.core.util.newId
 import com.razumly.mvp.core.util.resolvedTimeZone
 import com.razumly.mvp.eventDetail.EventDetailsSectionVisibility
@@ -16,6 +20,7 @@ import com.razumly.mvp.eventDetail.manualPaymentLinkError
 import com.razumly.mvp.eventDetail.composables.leagueScoringValidationErrors
 import kotlinx.datetime.isoDayNumber
 import kotlinx.datetime.toLocalDateTime
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.hours
 import kotlin.time.ExperimentalTime
@@ -84,12 +89,33 @@ fun createSimpleSetupEventRangeSlot(
     )
 }
 
-fun mobileCreateEventTypes(): List<EventType> = listOf(
-    EventType.EVENT,
-    EventType.WEEKLY_EVENT,
-    EventType.LEAGUE,
-    EventType.TOURNAMENT,
-)
+fun mobileCreateEventTypes(isTryoutAvailable: Boolean = false): List<EventType> = buildList {
+    add(EventType.EVENT)
+    add(EventType.WEEKLY_EVENT)
+    if (isTryoutAvailable) {
+        add(EventType.TRYOUT)
+    }
+    add(EventType.LEAGUE)
+    add(EventType.TOURNAMENT)
+}
+
+internal fun EventEditorSession?.hasClubTeamsOrganization(): Boolean {
+    val session = this ?: return false
+    val organizationId = session.canonicalState.event.organizationId
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?: return false
+
+    return session.snapshot.catalogs.organizations.any { organizationJson ->
+        runCatching {
+            jsonMVP.decodeFromJsonElement<OrganizationApiDto>(organizationJson)
+                .toOrganizationOrNull()
+        }.getOrNull()?.let { organization ->
+            organization.id == organizationId &&
+                OrganizationFeature.CLUB_TEAMS in organization.enabledFeatures
+        } == true
+    }
+}
 
 fun resolveEventCreateSetupPages(
     event: Event,
@@ -209,13 +235,16 @@ fun isSimpleSetupPageComplete(
     }
     EventCreateSetupPageId.DIVISIONS -> {
         val usesSets = selectedSport?.usePointsPerSetWin ?: event.usesSets
-        event.divisions.isNotEmpty() && event.divisionDetails.all { detail ->
-            usesSets || detail.phaseSettings.values.all { settings ->
-                val segmentCount = settings.matchRulesOverride?.segmentCount
-                settings.segmentLengthMinutes?.let { it >= 1 } == true &&
-                    (segmentCount == null || segmentCount >= 1)
-            }
-        }
+        event.eventType == EventType.TRYOUT ||
+            (
+                event.divisions.isNotEmpty() && event.divisionDetails.all { detail ->
+                    usesSets || detail.phaseSettings.values.all { settings ->
+                        val segmentCount = settings.matchRulesOverride?.segmentCount
+                        settings.segmentLengthMinutes?.let { it >= 1 } == true &&
+                            (segmentCount == null || segmentCount >= 1)
+                    }
+                }
+            )
     }
     EventCreateSetupPageId.SCHEDULE -> {
         event.location.isNotBlank() &&

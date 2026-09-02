@@ -232,11 +232,13 @@ export const loadEventStaffSnapshot = async (
       fieldIds: true,
       sportIds: true,
       officialPositions: true,
+      eventType: true,
     },
   });
   if (!event) {
     throw new EventStaffNotFoundError();
   }
+  const isTryoutEvent = String(event.eventType ?? '').trim().toUpperCase() === 'TRYOUT';
 
   const [officialRows, inviteRows] = await Promise.all([
     (client as any).eventOfficials.findMany({
@@ -248,8 +250,9 @@ export const loadEventStaffSnapshot = async (
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     }),
   ]);
-
-  const officialPositions = await resolveOfficialPositions(client, event, officialRows.length > 0);
+  const officialPositions = isTryoutEvent
+    ? []
+    : await resolveOfficialPositions(client, event, officialRows.length > 0);
   const validPositionIds = new Set(officialPositions.map((position) => position.id));
   const validFieldIds = new Set(normalizeIdList(event.fieldIds));
   const fallbackPositionId = officialPositions[0]?.id ?? null;
@@ -274,31 +277,39 @@ export const loadEventStaffSnapshot = async (
     })
     .filter((row): row is CanonicalEventOfficial => Boolean(row))
     .sort((left, right) => left.userId.localeCompare(right.userId) || left.id.localeCompare(right.id));
-  const eventOfficials: CanonicalEventOfficial[] = storedEventOfficials
-    .map((row) => {
-      let positionIds = row.positionIds.filter((positionId) => validPositionIds.has(positionId));
-      if (!positionIds.length && fallbackPositionId) {
-        positionIds = [fallbackPositionId];
-      }
-      if (!positionIds.length) {
-        return null;
-      }
-      return {
-        id: row.id,
-        userId: row.userId,
-        positionIds,
-        fieldIds: row.fieldIds.filter((fieldId) => validFieldIds.has(fieldId)),
-        isActive: row.isActive,
-      };
-    })
-    .filter((row): row is CanonicalEventOfficial => Boolean(row))
-    .sort((left, right) => left.userId.localeCompare(right.userId) || left.id.localeCompare(right.id));
+  const eventOfficials: CanonicalEventOfficial[] = isTryoutEvent
+    ? []
+    : storedEventOfficials
+      .map((row) => {
+        let positionIds = row.positionIds.filter((positionId) => validPositionIds.has(positionId));
+        if (!positionIds.length && fallbackPositionId) {
+          positionIds = [fallbackPositionId];
+        }
+        if (!positionIds.length) {
+          return null;
+        }
+        return {
+          id: row.id,
+          userId: row.userId,
+          positionIds,
+          fieldIds: row.fieldIds.filter((fieldId) => validFieldIds.has(fieldId)),
+          isActive: row.isActive,
+        };
+      })
+      .filter((row): row is CanonicalEventOfficial => Boolean(row))
+      .sort((left, right) => left.userId.localeCompare(right.userId) || left.id.localeCompare(right.id));
   const hostId = normalizeId(event.hostId);
   const storedAssistantHostIds = normalizeIdList(event.assistantHostIds);
   const assistantHostIds = storedAssistantHostIds.filter((id) => id !== hostId);
   const staffInvites = (inviteRows as Array<Record<string, any>>)
     .filter((invite) => normalizeInviteType(invite.type) === 'STAFF')
     .map((invite) => canonicalizeInvite(invite, eventId))
+    .map((invite) => isTryoutEvent
+      ? {
+        ...invite,
+        staffTypes: invite.staffTypes.filter((staffType) => staffType === 'HOST'),
+      }
+      : invite)
     .sort((left, right) => left.id.localeCompare(right.id));
   const revision = revisionFor({
     assistantHostIds: storedAssistantHostIds,
@@ -432,6 +443,7 @@ export const reconcileEventStaffDesiredState = async (
       fieldIds: true,
       sportIds: true,
       officialPositions: true,
+      eventType: true,
     },
   });
   if (!event) {
@@ -441,19 +453,31 @@ export const reconcileEventStaffDesiredState = async (
   const hostId = normalizeId(event.hostId);
   const assistantHostIds = normalizeIdList(input.assistantHostIds).filter((id) => id !== hostId);
   const fieldIds = normalizeIdList(event.fieldIds);
-  const pendingNeedsOfficialPosition = input.pendingInvites.some((invite) => invite.roles.includes('OFFICIAL'));
-  const officialPositions = input.officialPositions?.length
-    ? normalizeEventOfficialPositions(input.officialPositions, eventId)
-    : await resolveOfficialPositions(
-      client,
-      event,
-      input.eventOfficials.length > 0 || pendingNeedsOfficialPosition,
-    );
+  const isTryoutEvent = String(event.eventType ?? '').trim().toUpperCase() === 'TRYOUT';
+  const pendingInvites = isTryoutEvent
+    ? input.pendingInvites
+      .map((invite) => ({
+        ...invite,
+        roles: invite.roles.filter((role) => role === 'ASSISTANT_HOST'),
+      }))
+      .filter((invite) => invite.roles.length > 0)
+    : input.pendingInvites;
+  const eventOfficials = isTryoutEvent ? [] : input.eventOfficials;
+  const pendingNeedsOfficialPosition = pendingInvites.some((invite) => invite.roles.includes('OFFICIAL'));
+  const officialPositions = isTryoutEvent
+    ? []
+    : input.officialPositions?.length
+      ? normalizeEventOfficialPositions(input.officialPositions, eventId)
+      : await resolveOfficialPositions(
+        client,
+        event,
+        eventOfficials.length > 0 || pendingNeedsOfficialPosition,
+      );
 
   let desiredOfficials: CanonicalEventOfficial[];
   try {
     desiredOfficials = normalizeEventOfficials(
-      input.eventOfficials.map((official) => ({
+      eventOfficials.map((official) => ({
         userId: official.userId,
         positionIds: official.positionIds,
         fieldIds: official.fieldIds,
@@ -517,7 +541,7 @@ export const reconcileEventStaffDesiredState = async (
     rolesByUserId.set(userId, roles);
   });
 
-  for (const pending of input.pendingInvites) {
+  for (const pending of pendingInvites) {
     const ensured = await ensureAuthUserAndUserDataByEmail(client, pending.email, now, {
       firstName: pending.firstName,
       lastName: pending.lastName,
@@ -617,7 +641,7 @@ export const reconcileEventStaffDesiredState = async (
     where: { id: eventId },
     data: {
       assistantHostIds: { set: assistantHostIds },
-      ...(input.officialPositions?.length ? { officialPositions } : {}),
+      ...(isTryoutEvent || input.officialPositions?.length ? { officialPositions } : {}),
       updatedAt: now,
     },
   });

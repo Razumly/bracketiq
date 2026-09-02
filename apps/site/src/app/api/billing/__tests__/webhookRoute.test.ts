@@ -50,6 +50,12 @@ const prismaMock = {
     update: jest.fn(),
     updateMany: jest.fn(),
   },
+  timeSlots: {
+    findFirst: jest.fn(),
+  },
+  divisions: {
+    findMany: jest.fn(),
+  },
   $queryRaw: jest.fn(),
   $transaction: jest.fn(),
 };
@@ -151,9 +157,19 @@ describe('POST /api/billing/webhook', () => {
     jest.clearAllMocks();
     acquireEventLockAndLoadStructureMock.mockImplementation(async () => {
       const rows = await prismaMock.$queryRaw();
-      const event = rows?.[0] as { id?: string; eventType?: string | null; teamSignup?: boolean | null } | undefined;
+      const event = rows?.[0] as {
+        id?: string;
+        eventType?: string | null;
+        teamSignup?: boolean | null;
+        parentEvent?: string | null;
+        start?: Date;
+        end?: Date | null;
+        timeSlotIds?: string[];
+        archivedAt?: Date | null;
+      } | undefined;
       return event
         ? {
+          ...event,
           id: event.id ?? 'event_1',
           eventType: event.eventType ?? null,
           teamSignup: event.teamSignup ?? null,
@@ -162,6 +178,8 @@ describe('POST /api/billing/webhook', () => {
     });
     claimOrCreateEventTeamSnapshotMock.mockResolvedValue({ id: 'slot_pool_a_2' });
     syncDivisionTeamMembershipFromRegistrationsMock.mockResolvedValue(undefined);
+    prismaMock.timeSlots.findFirst.mockResolvedValue(null);
+    prismaMock.divisions.findMany.mockResolvedValue([]);
     sendPurchaseReceiptEmailMock.mockResolvedValue({ sent: true });
     sendPaymentFailureEmailMock.mockResolvedValue({ sent: true });
     delete process.env.STRIPE_SECRET_KEY;
@@ -267,6 +285,12 @@ describe('POST /api/billing/webhook', () => {
           create: prismaMock.eventRegistrations.create,
           update: prismaMock.eventRegistrations.update,
           updateMany: prismaMock.eventRegistrations.updateMany,
+        },
+        timeSlots: {
+          findFirst: prismaMock.timeSlots.findFirst,
+        },
+        divisions: {
+          findMany: prismaMock.divisions.findMany,
         },
         $queryRaw: (...args: any[]) => {
           const query = args[0]?.join?.('') ?? '';
@@ -437,6 +461,8 @@ describe('POST /api/billing/webhook', () => {
           mvp_fee_cents: '45',
           stripe_fee_cents: '170',
           total_charge_cents: '4500',
+          slot_id: 'slot_1',
+          occurrence_date: '2026-07-01',
         },
         amount: 4500,
         amountReceived: 4500,
@@ -452,6 +478,8 @@ describe('POST /api/billing/webhook', () => {
           ownerId: 'team_1',
           eventId: 'event_1',
           organizationId: 'org_1',
+          slotId: 'slot_1',
+          occurrenceDate: '2026-07-01',
           totalAmountCents: 4500,
           paidAmountCents: 4500,
           status: 'PAID',
@@ -555,12 +583,29 @@ describe('POST /api/billing/webhook', () => {
         id: 'weekly_parent',
         eventType: 'WEEKLY_EVENT',
         teamSignup: true,
+        parentEvent: null,
+        archivedAt: null,
+        start: new Date('2026-04-01T00:00:00.000Z'),
+        end: new Date('2026-05-01T00:00:00.000Z'),
+        timeSlotIds: ['slot_1'],
         teamIds: [],
         userIds: [],
         waitListIds: [],
         freeAgentIds: [],
       },
     ]);
+    prismaMock.timeSlots.findFirst.mockResolvedValueOnce({
+      id: 'slot_1',
+      repeating: true,
+      daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
+      startDate: '2026-04-01',
+      endDate: null,
+      startTimeMinutes: 600,
+      endTimeMinutes: 660,
+      timeZone: 'UTC',
+      divisions: [],
+      archivedAt: null,
+    });
     prismaMock.eventRegistrations.findUnique.mockResolvedValueOnce({ status: 'PENDING' });
 
     const response = await POST(
@@ -642,6 +687,9 @@ describe('POST /api/billing/webhook', () => {
         eventType: 'TOURNAMENT',
         teamSignup: true,
       },
+    ]);
+    prismaMock.divisions.findMany.mockResolvedValue([
+      { id: 'entry_open', key: 'c_skill_open', divisionTypeId: 'open' },
     ]);
     prismaMock.eventRegistrations.findUnique.mockResolvedValueOnce(reservation);
     prismaMock.eventRegistrations.update.mockImplementationOnce(async ({ data }: {
@@ -747,6 +795,9 @@ describe('POST /api/billing/webhook', () => {
         update: activationUpdateMock,
         updateMany: prismaMock.eventRegistrations.updateMany,
       },
+      divisions: {
+        findMany: prismaMock.divisions.findMany,
+      },
       $queryRaw: prismaMock.$queryRaw,
     };
     prismaMock.$transaction.mockImplementation(async (
@@ -768,6 +819,9 @@ describe('POST /api/billing/webhook', () => {
         eventType: 'TOURNAMENT',
         teamSignup: true,
       },
+    ]);
+    prismaMock.divisions.findMany.mockResolvedValue([
+      { id: 'entry_open', key: 'c_skill_open', divisionTypeId: 'open' },
     ]);
     claimOrCreateEventTeamSnapshotMock.mockImplementationOnce(async ({
       eventTeamId,
@@ -886,30 +940,59 @@ describe('POST /api/billing/webhook', () => {
       billId: 'bill_weekly_1',
       status: 'PENDING',
     });
-    prismaMock.bills.findUnique
-      .mockResolvedValueOnce({
-        id: 'bill_weekly_1',
-        totalAmountCents: 4700,
-        status: 'OPEN',
-        parentBillId: null,
-      })
-      .mockResolvedValueOnce({
-        ownerType: 'TEAM',
-        ownerId: 'team_1',
-        eventId: 'weekly_parent',
-        organizationId: 'org_1',
-        slotId: 'slot_1',
-        occurrenceDate: '2026-04-14',
-        lineItems: [],
-      });
+    prismaMock.bills.findUnique.mockResolvedValue({
+      id: 'bill_weekly_1',
+      totalAmountCents: 4700,
+      status: 'OPEN',
+      parentBillId: null,
+      ownerType: 'TEAM',
+      ownerId: 'team_1',
+      eventId: 'weekly_parent',
+      organizationId: 'org_1',
+      slotId: 'slot_1',
+      occurrenceDate: '2026-04-14',
+      lineItems: [],
+    });
     prismaMock.$queryRaw.mockResolvedValueOnce([
       {
         id: 'weekly_parent',
         eventType: 'WEEKLY_EVENT',
         teamSignup: true,
+        parentEvent: null,
+        archivedAt: null,
+        start: new Date('2026-04-01T00:00:00.000Z'),
+        end: new Date('2026-05-01T00:00:00.000Z'),
+        timeSlotIds: ['slot_1'],
       },
     ]);
-    prismaMock.eventRegistrations.findUnique.mockResolvedValueOnce({ status: 'STARTED' });
+    prismaMock.timeSlots.findFirst.mockResolvedValueOnce({
+      id: 'slot_1',
+      repeating: true,
+      daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
+      startDate: '2026-04-01',
+      endDate: null,
+      startTimeMinutes: 600,
+      endTimeMinutes: 660,
+      timeZone: 'UTC',
+      divisions: [],
+      archivedAt: null,
+    });
+    prismaMock.eventRegistrations.findUnique.mockResolvedValueOnce({
+      id: 'weekly_parent__team__team_1__slot_1__2026-04-14',
+      eventId: 'weekly_parent',
+      registrantId: 'team_1',
+      parentId: 'canonical_team_1',
+      eventTeamId: 'team_1',
+      registrantType: 'TEAM',
+      rosterRole: 'PARTICIPANT',
+      status: 'STARTED',
+      slotId: 'slot_1',
+      occurrenceDate: '2026-04-14',
+      divisionId: null,
+      divisionTypeId: null,
+      divisionTypeKey: null,
+      createdBy: 'user_1',
+    });
 
     const response = await POST(
       jsonPost(buildPaymentIntentSucceededEvent({

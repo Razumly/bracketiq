@@ -8,7 +8,8 @@ import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 
 internal fun canEditEventDetails(targetEvent: Event): Boolean {
-    return mobileEventEditUnsupportedFeatures(targetEvent).isEmpty()
+    return !targetEvent.isArchived() &&
+        mobileEventEditUnsupportedFeatures(targetEvent).isEmpty()
 }
 
 internal fun canManageEventForUser(

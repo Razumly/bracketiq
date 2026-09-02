@@ -1141,7 +1141,13 @@ const createInstantBillAndPayment = async ({
       organizationId,
       registrationId,
       rentalBookingId,
-      occurrenceSlotId: toStringOrNull(metadata.occurrence_slot_id ?? metadata.occurrenceSlotId ?? null),
+      occurrenceSlotId: toStringOrNull(
+        metadata.occurrence_slot_id
+          ?? metadata.occurrenceSlotId
+          ?? metadata.slot_id
+          ?? metadata.slotId
+          ?? null,
+      ),
       occurrenceDate: toStringOrNull(metadata.occurrence_date ?? metadata.occurrenceDate ?? null),
       productId: toStringOrNull(metadata.product_id ?? metadata.productId ?? null),
       eventRegistrationDivisionId: toStringOrNull(

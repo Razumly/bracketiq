@@ -290,6 +290,25 @@ describe('buildSimpleSetupReviewModel', () => {
         expect(JSON.stringify(model.sections.find((section) => section.id === 'divisions')))
             .not.toContain('Bracket teams');
     });
+ 
+    it('shows No Planned End for a weekly event with an open-ended schedule', () => {
+        const eventData = buildEventData('Weekly Clinic');
+        eventData.eventType = 'WEEKLY_EVENT';
+        eventData.noFixedEndDateTime = true;
+        const model = buildSimpleSetupReviewModel({
+            eventData,
+            choices,
+            eventTypeOptions: [{ value: 'WEEKLY_EVENT', label: 'Weekly Event' }],
+            fields: eventData.fields,
+            templateOptions: [],
+            registrationQuestions: [],
+            assignedHostCards: [],
+            assignedOfficialCards: [],
+        });
+        const scheduleLocation = model.sections.find((section) => section.id === 'schedule-location');
+
+        expect(scheduleLocation?.rows).toContainEqual({ label: 'Ends', value: 'No Planned End' });
+    });
 
     it('uses Monday-based weekday labels and friendly division names for weekly slots', () => {
         const eventData = buildEventData('Weekly League');

@@ -838,6 +838,30 @@ model EventEditorCreateOperations {
   @@index([actorUserId, createdAt])
   @@index([proposalStatus, updatedAt])
 }
+
+// Existing-Event schedule proposals. Unlike create operations, maintenance
+// operations are not unique per Event: an Event can be built, completed, and
+// rebuilt over its lifetime.
+model EventEditorMaintenanceOperations {
+  operationId          String   @id
+  eventId              String
+  actorUserId          String
+  operation            String
+  requestHash          String
+  requestJson          Json
+  proposalRevision     String?
+  revisionBindingJson  Json?
+  proposalJson         Json?
+  status               String   @default("PROPOSED")
+  acceptanceOperationId String?
+  acceptedResponseJson Json?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([eventId, createdAt])
+  @@index([eventId, operation])
+  @@index([status, updatedAt])
+}
 model Divisions {
   id                                  String             @id
   createdAt                           DateTime?

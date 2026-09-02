@@ -4,54 +4,52 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.EventEditorSaveOutcome
-import com.razumly.mvp.core.data.repositories.EventScheduleOutcome
-import com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeStatus
 import com.razumly.mvp.core.network.userMessage
+import com.razumly.mvp.core.network.dto.EventEditorMaintenanceAcceptedResultDto
+import com.razumly.mvp.core.network.dto.EventEditorMaintenanceOperation
+import com.razumly.mvp.core.network.dto.EventEditorMaintenanceProposalDto
+import com.razumly.mvp.core.network.dto.EventEditorMaintenanceResponseDto
+import com.razumly.mvp.core.network.dto.EventEditorMaintenanceScheduleOutcomeStatus
+import com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeStatus
+import com.razumly.mvp.core.network.dto.EventEditorScheduleWarningDto
 
 internal enum class EventScheduleEditAction(
     val loadingMessage: String,
     val logAction: String,
     val successMessage: String,
     val failureMessage: String,
+    val maintenanceOperation: EventEditorMaintenanceOperation,
 ) {
     RESCHEDULE(
-        loadingMessage = "Rescheduling event...",
-        logAction = "reschedule",
-        successMessage = "Event rescheduled.",
-        failureMessage = "Failed to reschedule event.",
+        loadingMessage = "Preparing schedule completion...",
+        logAction = "complete_schedule",
+        successMessage = "Schedule completed.",
+        failureMessage = "Failed to complete schedule.",
+        maintenanceOperation = EventEditorMaintenanceOperation.COMPLETE,
     ),
     BUILD_SCHEDULE(
-        loadingMessage = "Building schedule...",
+        loadingMessage = "Preparing schedule build...",
         logAction = "build_schedule",
         successMessage = "Schedule built.",
         failureMessage = "Failed to build schedule.",
+        maintenanceOperation = EventEditorMaintenanceOperation.BUILD,
     ),
     REBUILD_SCHEDULE(
-        loadingMessage = "Rebuilding schedule...",
+        loadingMessage = "Preparing schedule rebuild...",
         logAction = "rebuild_schedule",
         successMessage = "Schedule rebuilt.",
         failureMessage = "Failed to rebuild schedule.",
+        maintenanceOperation = EventEditorMaintenanceOperation.REBUILD,
     ),
     REBUILD_WITHOUT_PLACEHOLDER_TEAMS(
-        loadingMessage = "Rebuilding without placeholder teams...",
+        loadingMessage = "Preparing rebuild without placeholder teams...",
         logAction = "rebuild_without_placeholders",
         successMessage = "Schedule rebuilt without placeholder teams.",
         failureMessage = "Failed to rebuild without placeholder teams.",
+        maintenanceOperation = EventEditorMaintenanceOperation.REBUILD,
     ),
 }
 
-internal sealed class EventScheduleEditResult {
-    data class Success(
-        val message: String,
-        val scheduledEvent: Event,
-    ) : EventScheduleEditResult()
-
-    data class Failure(
-        val throwable: Throwable,
-        val fallbackMessage: String,
-        val settingsSaved: Boolean,
-    ) : EventScheduleEditResult()
-}
 
 internal sealed class EventSaveActionResult {
     data class Success(
@@ -67,6 +65,46 @@ internal sealed class EventSaveActionResult {
         val fallbackMessage: String,
         val didSaveEventDetails: Boolean,
     ) : EventSaveActionResult()
+}
+
+enum class EventScheduleMaintenanceReviewPhase {
+    PROPOSED,
+    ACCEPTING,
+    REJECTING,
+    STALE,
+    REJECTED,
+    ACCEPTED_SYNC_PENDING,
+}
+
+data class EventScheduleMaintenanceReview(
+    val proposal: EventEditorMaintenanceProposalDto,
+    val acceptanceOperationId: String,
+    val includePlaceholderTeams: Boolean? = null,
+    val eventTimeZone: String = "UTC",
+    val phase: EventScheduleMaintenanceReviewPhase = EventScheduleMaintenanceReviewPhase.PROPOSED,
+    val message: String? = null,
+)
+
+internal sealed class EventScheduleMaintenanceActionResult {
+    data class Proposed(
+        val review: EventScheduleMaintenanceReview,
+    ) : EventScheduleMaintenanceActionResult()
+
+    data class Accepted(
+        val result: EventEditorMaintenanceAcceptedResultDto,
+        val scheduledEvent: Event,
+        val message: String,
+    ) : EventScheduleMaintenanceActionResult()
+
+    data class Rejected(
+        val message: String,
+    ) : EventScheduleMaintenanceActionResult()
+
+    data class Failure(
+        val throwable: Throwable,
+        val fallbackMessage: String,
+        val settingsSaved: Boolean,
+    ) : EventScheduleMaintenanceActionResult()
 }
 
 internal fun EventSaveActionResult.Failure.userFacingMessage(): String = if (didSaveEventDetails) {
@@ -134,18 +172,19 @@ internal class EventEditActionCoordinator {
         }
     }
 
-    suspend fun runScheduleEditAction(
+
+    suspend fun runScheduleMaintenanceAction(
         action: EventScheduleEditAction,
         prepareEventForUpdate: () -> PreparedEventForUpdate,
         validatePreparedEvent: (PreparedEventForUpdate) -> Unit = {},
         logPreparedFieldOwnership: (String, PreparedEventForUpdate) -> Unit,
         updateEvent: suspend (PreparedEventForUpdate) -> EventEditorSaveOutcome,
-        scheduleEvent: suspend (EventScheduleEditAction, Event) -> EventScheduleOutcome,
-        refetchMatchesOfTournament: suspend (String) -> Unit,
-        refreshLeagueStandingsAfterSchedule: suspend (Event) -> Unit,
+        proposeMaintenance: suspend (EventScheduleEditAction, Event) -> EventEditorMaintenanceResponseDto,
+        refreshAcceptedSchedule: suspend (String) -> Event,
         showLoading: (String) -> Unit,
         hideLoading: () -> Unit,
-    ): EventScheduleEditResult {
+        newOperationId: () -> String,
+    ): EventScheduleMaintenanceActionResult {
         showLoading(action.loadingMessage)
         var settingsSaved = false
         return try {
@@ -155,39 +194,39 @@ internal class EventEditActionCoordinator {
             val saveOutcome = updateEvent(prepared)
             val updated = saveOutcome.session.canonicalState.event
             settingsSaved = true
-
-            val saveScheduleOutcome = saveOutcome.scheduleOutcome
-            val useSaveScheduleOutcome =
-                saveScheduleOutcome.status != EventEditorScheduleOutcomeStatus.NOT_REQUESTED &&
-                    action != EventScheduleEditAction.REBUILD_WITHOUT_PLACEHOLDER_TEAMS
-            val scheduledEvent: Event
-            val warnings: List<String>
-            val successMessage: String
-            if (useSaveScheduleOutcome) {
-                scheduledEvent = updated
-                warnings = saveScheduleOutcome.warnings.map { warning -> warning.message }
-                successMessage = when (saveScheduleOutcome.status) {
-                    EventEditorScheduleOutcomeStatus.BUILT -> "Schedule built."
-                    EventEditorScheduleOutcomeStatus.REBUILT -> "Schedule rebuilt."
-                    EventEditorScheduleOutcomeStatus.DELETED -> "Schedule deleted."
-                    EventEditorScheduleOutcomeStatus.NOT_REQUESTED -> action.successMessage
+            when (val response = proposeMaintenance(action, updated)) {
+                is EventEditorMaintenanceResponseDto.Proposed ->
+                    EventScheduleMaintenanceActionResult.Proposed(
+                        review = EventScheduleMaintenanceReview(
+                            proposal = response.proposal,
+                            acceptanceOperationId = newOperationId(),
+                            includePlaceholderTeams = when (action) {
+                                EventScheduleEditAction.REBUILD_WITHOUT_PLACEHOLDER_TEAMS -> false
+                                EventScheduleEditAction.BUILD_SCHEDULE,
+                                EventScheduleEditAction.REBUILD_SCHEDULE -> true
+                                EventScheduleEditAction.RESCHEDULE -> null
+                            },
+                            eventTimeZone = updated.timeZone,
+                        ),
+                    )
+                is EventEditorMaintenanceResponseDto.Accepted -> {
+                    val scheduledEvent = refreshAcceptedSchedule(updated.id)
+                    EventScheduleMaintenanceActionResult.Accepted(
+                        result = response.result,
+                        scheduledEvent = scheduledEvent,
+                        message = maintenanceSuccessMessage(
+                            action = action,
+                            result = response.result,
+                        ),
+                    )
                 }
-            } else {
-                val scheduleOutcome = scheduleEvent(action, updated)
-                scheduledEvent = scheduleOutcome.event
-                warnings = scheduleOutcome.warnings
-                successMessage = action.successMessage
+                is EventEditorMaintenanceResponseDto.Rejected ->
+                    EventScheduleMaintenanceActionResult.Rejected(
+                        message = "The schedule proposal was rejected. Request a new proposal.",
+                    )
             }
-
-            refetchMatchesOfTournament(scheduledEvent.id)
-            refreshLeagueStandingsAfterSchedule(scheduledEvent)
-
-            EventScheduleEditResult.Success(
-                message = (listOf(successMessage) + warnings).joinToString("\n"),
-                scheduledEvent = scheduledEvent,
-            )
         } catch (throwable: Throwable) {
-            EventScheduleEditResult.Failure(
+            EventScheduleMaintenanceActionResult.Failure(
                 throwable = throwable,
                 fallbackMessage = action.failureMessage,
                 settingsSaved = settingsSaved,
@@ -195,6 +234,21 @@ internal class EventEditActionCoordinator {
         } finally {
             hideLoading()
         }
+    }
+
+    private fun maintenanceSuccessMessage(
+        action: EventScheduleEditAction,
+        result: EventEditorMaintenanceAcceptedResultDto,
+    ): String {
+        val statusMessage = when (result.scheduleOutcome.status) {
+            EventEditorMaintenanceScheduleOutcomeStatus.COMPLETE -> action.successMessage
+            EventEditorMaintenanceScheduleOutcomeStatus.INCOMPLETE ->
+                "${action.successMessage} ${result.scheduleOutcome.unplacedMatchCount} matches remain unplaced."
+        }
+        val warnings = result.scheduleOutcome.warnings
+            .map(EventEditorScheduleWarningDto::message)
+            .filter(String::isNotBlank)
+        return (listOf(statusMessage) + warnings).joinToString("\n")
     }
 
     suspend fun runCreateTemplateAction(

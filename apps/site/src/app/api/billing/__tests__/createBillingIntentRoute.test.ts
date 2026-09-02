@@ -59,6 +59,9 @@ describe('POST /api/billing/create_billing_intent', () => {
       findUnique: jest.Mock;
       findFirst: jest.Mock;
     };
+    events: {
+      findUnique: jest.Mock;
+    };
     billPayments: {
       findUnique: jest.Mock;
       updateMany: jest.Mock;
@@ -70,7 +73,7 @@ describe('POST /api/billing/create_billing_intent', () => {
       findUnique: jest.Mock;
       findMany: jest.Mock;
     };
-    $queryRaw: jest.Mock;
+    $executeRaw: jest.Mock;
   };
 
   beforeEach(() => {
@@ -117,6 +120,13 @@ describe('POST /api/billing/create_billing_intent', () => {
         }),
         findFirst: jest.fn().mockResolvedValue(null),
       },
+      events: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'event_1',
+          eventType: 'EVENT',
+          archivedAt: null,
+        }),
+      },
       billPayments: {
         findUnique: jest.fn().mockResolvedValue({
           id: 'payment_1',
@@ -135,6 +145,7 @@ describe('POST /api/billing/create_billing_intent', () => {
         findMany: jest.fn().mockResolvedValue([]),
       },
       $queryRaw: jest.fn().mockResolvedValue([]),
+      $executeRaw: jest.fn().mockResolvedValue(1),
     };
     prismaMock.$transaction.mockImplementation(async (callback: (tx: typeof txMock) => Promise<unknown>) => callback(txMock));
   });
@@ -218,6 +229,24 @@ describe('POST /api/billing/create_billing_intent', () => {
     expect(response.status).toBe(400);
     expect(payload.error).toBe('This bill is paid outside BracketIQ. Upload proof of payment instead.');
     expect(prismaMock.teamRegistrations.findFirst).not.toHaveBeenCalled();
+    expect(txMock.billPayments.updateMany).not.toHaveBeenCalled();
+  });
+  it('rejects billing intents for archived event bills before creating Stripe state', async () => {
+    txMock.events.findUnique.mockResolvedValue({
+      id: 'event_1',
+      eventType: 'WEEKLY_EVENT',
+      archivedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+
+    const response = await POST(jsonPost({
+      billId: 'bill_1',
+      billPaymentId: 'payment_1',
+    }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(payload.error).toBe('This weekly event is archived and no longer available.');
+    expect(stripePaymentIntentCreateMock).not.toHaveBeenCalled();
     expect(txMock.billPayments.updateMany).not.toHaveBeenCalled();
   });
 

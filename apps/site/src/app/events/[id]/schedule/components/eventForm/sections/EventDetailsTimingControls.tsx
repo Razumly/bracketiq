@@ -52,8 +52,7 @@ export const EventDetailsTimingControls = ({
   showRegistrationControls = true,
   showGeneratedEndDateControl = true,
 }: EventDetailsTimingControlsProps) => {
-  const generatedEndDateDisabled =
-    eventType === "WEEKLY_EVENT" || isImmutableField("noFixedEndDateTime");
+  const generatedEndDateDisabled = isImmutableField("noFixedEndDateTime");
   const isAutomatedScheduling = useWatch({
     control,
     name: "isAutomatedScheduling",
@@ -124,7 +123,11 @@ export const EventDetailsTimingControls = ({
       ) : null}
       {showScheduleControls ? (
         <AnimatedSection
-          in={eventType === "EVENT" || supportsNoFixedEndDateTime}
+          in={
+            eventType === "EVENT" ||
+            eventType === "TRYOUT" ||
+            supportsNoFixedEndDateTime
+          }
           collapseClassName="md:col-span-2"
         >
           <Controller
@@ -163,13 +166,17 @@ export const EventDetailsTimingControls = ({
                   <div className="space-y-1">
                     <Checkbox
                       size="xs"
-                      label="Set the end date during match generation"
-                      description="Use an open scheduling window now. The generated match schedule will determine the event end date."
-                      checked={
+                      label={
                         eventType === "WEEKLY_EVENT"
-                          ? false
-                          : noFixedEndDateTime
+                          ? "No Planned End"
+                          : "Set the end date during match generation"
                       }
+                      description={
+                        eventType === "WEEKLY_EVENT"
+                          ? "Keep this Weekly Event open-ended. Clear this option to set a Planned End."
+                          : "Use an open scheduling window now. The generated match schedule will determine the event end date."
+                      }
+                      checked={noFixedEndDateTime}
                       disabled={generatedEndDateDisabled}
                       onChange={(event) => {
                         if (generatedEndDateDisabled) return;

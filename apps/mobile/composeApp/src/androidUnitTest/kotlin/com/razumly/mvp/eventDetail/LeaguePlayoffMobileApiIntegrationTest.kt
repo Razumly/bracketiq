@@ -12,8 +12,12 @@ import com.razumly.mvp.core.data.repositories.EventEditorCanonicalState
 import com.razumly.mvp.core.data.repositories.EventEditorMutation
 import com.razumly.mvp.core.data.repositories.EventEditorSessionMapper
 import com.razumly.mvp.core.network.ApiException
+import com.razumly.mvp.core.network.dto.EVENT_EDITOR_CONTRACT_VERSION
 import com.razumly.mvp.core.network.dto.EventEditorBootstrapQueryDto
-import com.razumly.mvp.core.network.dto.EventEditorScheduleRequestDto
+import com.razumly.mvp.core.network.dto.EventEditorMaintenanceOperation
+import com.razumly.mvp.core.network.dto.EventEditorMaintenanceRequestDto
+import com.razumly.mvp.core.network.dto.EventEditorMaintenanceResponseDto
+import com.razumly.mvp.core.network.dto.EventEditorAcceptMaintenanceProposalDto
 import com.razumly.mvp.core.network.dto.EventParticipantsRequestDto
 import com.razumly.mvp.core.network.dto.EventParticipantsResponseDto
 import com.razumly.mvp.core.network.dto.InviteCreateDto
@@ -147,27 +151,46 @@ class LeaguePlayoffMobileApiIntegrationTest {
 
         registerSeededTeams(host = host, event = publishedEvent)
 
-        host.userRepository.createInvites(
-            invites = staffInvitePayloads(eventId = publishedEvent.id, createdBy = hostUser.id),
-        ).getOrThrow()
-
-        val scheduleRevision = host.eventRepository.getEventEditor(publishedEvent.id)
-            .getOrThrow()
-            .snapshot
-            .scheduleState
-            .revision
-        val scheduledEvent = host.eventRepository.scheduleEventEditor(
-            publishedEvent.id,
-            EventEditorScheduleRequestDto(
-                expectedScheduleRevision = scheduleRevision,
-                replaceExistingMatches = true,
+        val maintenanceResponse = host.eventRepository.proposeEventScheduleMaintenance(
+            EventEditorMaintenanceRequestDto(
+                contractVersion = EVENT_EDITOR_CONTRACT_VERSION,
+                eventId = publishedEvent.id,
+                operation = EventEditorMaintenanceOperation.BUILD,
+                operationId = "mobile-maintenance-playoff-build",
+                participantCount = publishedEvent.maxParticipants.takeIf { it > 0 },
+                includePlaceholderTeams = true,
             ),
         ).getOrElse { error ->
             throw AssertionError(
-                "Scheduling ${publishedEvent.id} failed: ${error.message}",
+                "Schedule proposal ${publishedEvent.id} failed: ${error.message}",
                 error,
             )
-        }.event
+        }
+        val scheduledEvent = when (maintenanceResponse) {
+            is EventEditorMaintenanceResponseDto.Proposed -> {
+                val proposal = maintenanceResponse.proposal
+                host.eventRepository.acceptEventScheduleMaintenance(
+                    EventEditorAcceptMaintenanceProposalDto(
+                        contractVersion = proposal.contractVersion,
+                        eventId = proposal.eventId,
+                        operation = proposal.operation,
+                        operationId = proposal.operationId,
+                        proposalRevision = proposal.proposalRevision,
+                        acceptanceOperationId = "mobile-maintenance-playoff-accept",
+                    ),
+                ).getOrElse { error ->
+                    throw AssertionError(
+                        "Schedule acceptance ${publishedEvent.id} failed: ${error.message}",
+                        error,
+                    )
+                }
+                host.eventRepository.getEvent(publishedEvent.id).getOrThrow()
+            }
+            is EventEditorMaintenanceResponseDto.Accepted ->
+                host.eventRepository.getEvent(publishedEvent.id).getOrThrow()
+            is EventEditorMaintenanceResponseDto.Rejected ->
+                error("Schedule maintenance ${publishedEvent.id} was rejected.")
+        }
         val scheduledMatches = host.matchRepository.getMatchesOfTournament(publishedEvent.id).getOrThrow()
 
         assertTrue(scheduledEvent.includePlayoffs)

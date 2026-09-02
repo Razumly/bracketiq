@@ -1,6 +1,8 @@
 package com.razumly.mvp.core.data.repositories
 
+import com.razumly.mvp.core.data.dataTypes.DEFAULT_EVENT_SEED_COLOR_ARGB
 import com.razumly.mvp.core.data.dataTypes.ManualPaymentLink
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.network.dto.EVENT_EDITOR_CONTRACT_VERSION
 import com.razumly.mvp.core.network.dto.EventEditorBasicsDto
 import com.razumly.mvp.core.network.dto.EventEditorCapabilitiesDto
@@ -35,6 +37,8 @@ import com.razumly.mvp.core.util.jsonMVP
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -320,6 +324,121 @@ class EventEditorSessionMapperTest {
         assertEquals(listOf("field-1"), canonical.divisionFieldIds["division-1"])
         assertEquals("summer", canonical.event.tags.single().slug)
     }
+    @Test
+    fun given_editor_draft_when_projected_then_omitted_server_fields_are_not_fabricated() {
+        val event = EventEditorSessionMapper
+            .fromEditSnapshot(editorProtocolSnapshot(mode = "EDIT"))
+            .canonicalState
+            .event
+
+        assertTrue(event.teamIds.isEmpty())
+        assertTrue(event.userIds.isEmpty())
+        assertNull(event.rating)
+        assertEquals(DEFAULT_EVENT_SEED_COLOR_ARGB, event.seedColor)
+        assertEquals("", event.prize)
+        assertNull(event.leagueScoringConfigId)
+        assertNull(event.scheduleText)
+        assertNull(event.dateDisplayMode)
+        assertNull(event.dateDisplayText)
+        assertFalse(event.autoCancellation)
+        assertNull(event.fieldCount)
+        assertNull(event.resolvedMatchRules)
+        assertNull(event.archivedAt)
+    }
+
+    @Test
+    fun given_scoring_config_identity_when_snapshot_is_projected_then_only_league_retains_it() {
+        val baseSnapshot = editorProtocolSnapshot(mode = "EDIT")
+        val scoringConfigJson =
+            """{"id":"league-scoring-config-1","pointsForWin":3,"pointsForDraw":1,"pointsForLoss":0}"""
+
+        fun snapshotFor(eventType: EventType, configJson: String): EventEditorSnapshotDto =
+            baseSnapshot.copy(
+                draft = baseSnapshot.draft.copy(
+                    basics = baseSnapshot.draft.basics.copy(eventType = eventType.name),
+                    competition = baseSnapshot.draft.competition.copy(
+                        leagueScoringConfig = jsonMVP.parseToJsonElement(configJson).jsonObject,
+                    ),
+                ),
+            )
+
+        val league = EventEditorSessionMapper
+            .fromEditSnapshot(snapshotFor(EventType.LEAGUE, scoringConfigJson))
+            .canonicalState
+        assertEquals("league-scoring-config-1", league.event.leagueScoringConfigId)
+        assertEquals(3, league.leagueScoringConfig?.pointsForWin)
+        assertEquals(1, league.leagueScoringConfig?.pointsForDraw)
+
+        val tournament = EventEditorSessionMapper
+            .fromEditSnapshot(snapshotFor(EventType.TOURNAMENT, scoringConfigJson))
+            .canonicalState
+        assertNull(tournament.event.leagueScoringConfigId)
+
+        val missingIdentity = EventEditorSessionMapper
+            .fromEditSnapshot(
+                snapshotFor(
+                    EventType.LEAGUE,
+                    """{"pointsForWin":3,"pointsForDraw":1,"pointsForLoss":0}""",
+                ),
+            )
+            .canonicalState
+        assertNull(missingIdentity.event.leagueScoringConfigId)
+
+        val blankIdentity = EventEditorSessionMapper
+            .fromEditSnapshot(
+                snapshotFor(
+                    EventType.LEAGUE,
+                    """{"id":"   ","pointsForWin":3,"pointsForDraw":1,"pointsForLoss":0}""",
+                ),
+            )
+            .canonicalState
+        assertNull(blankIdentity.event.leagueScoringConfigId)
+    }
+
+    @Test
+    fun given_event_to_league_save_result_when_reopened_then_server_scoring_config_identity_is_retained() {
+        val editSnapshot = oneTimeEventPlatformSnapshot().copy(
+            mode = "EDIT",
+            eventId = "event-1",
+            editorRevision = "revision-1",
+        )
+        val session = EventEditorSessionMapper.fromEditSnapshot(editSnapshot)
+        val command = EventEditorSessionMapper.toSaveCommand(
+            session = session,
+            mutation = EventEditorMutation(
+                session.canonicalState.copy(
+                    event = session.canonicalState.event.copy(eventType = EventType.LEAGUE),
+                ),
+            ),
+        )
+        assertEquals("LEAGUE", command.draft.basics.eventType)
+
+        val resultSnapshot = editSnapshot.copy(
+            editorRevision = "revision-2",
+            draft = command.draft.copy(
+                competition = command.draft.competition.copy(
+                    leagueScoringConfig = jsonMVP.parseToJsonElement(
+                        """{"id":"server-scoring-config-1","pointsForWin":3,"pointsForDraw":1,"pointsForLoss":0}""",
+                    ).jsonObject,
+                ),
+            ),
+        )
+        val reopened = EventEditorSessionMapper.applySaveResult(
+            result = EventEditorSaveResultDto(
+                status = "SAVED",
+                snapshot = resultSnapshot,
+                staffEmailDelivery = "NOT_REQUESTED",
+                scheduleOutcome = EventEditorScheduleOutcomeDto(
+                    status = EventEditorScheduleOutcomeStatus.NOT_REQUESTED,
+                    matchCount = 0,
+                ),
+            ),
+            previous = session,
+        )
+
+        assertEquals("server-scoring-config-1", reopened.canonicalState.event.leagueScoringConfigId)
+        assertEquals(3, reopened.canonicalState.leagueScoringConfig?.pointsForWin)
+    }
 
     @Test
     fun given_accepted_registration_when_cancellation_or_refund_is_projected_then_lock_survives() {
@@ -451,6 +570,129 @@ class EventEditorSessionMapperTest {
     }
 
     @Test
+    fun given_match_generation_values_when_event_changes_to_tryout_then_configuration_is_cleared_and_assignments_removed() {
+        val baseSnapshot = editorProtocolSnapshot()
+        val nestedPhaseSettings = jsonMVP.parseToJsonElement(
+            """{"BRACKET":{"segmentLengthMinutes":10}}""",
+        ).jsonObject
+        val nestedPlayoffConfig = jsonMVP.parseToJsonElement(
+            """{"seeding":"POOL_WINNERS"}""",
+        ).jsonObject
+        val snapshot = baseSnapshot.copy(
+            draft = baseSnapshot.draft.copy(
+                competition = baseSnapshot.draft.competition.copy(
+                    divisionDetails = baseSnapshot.draft.competition.divisionDetails.map { detail ->
+                        detail.copy(
+                            sourceDivisionId = "source-division-1",
+                            poolPlay = true,
+                            playoffTeamCount = 8.0,
+                            poolCount = 2.0,
+                            poolTeamCount = 4.0,
+                            phaseSettings = nestedPhaseSettings,
+                            playoffPlacementDivisionIds = listOf("playoff-division-1"),
+                            standingsOverrides = mapOf("team-1" to 12.0),
+                            playoffConfig = nestedPlayoffConfig,
+                            gamesPerOpponent = 2.0,
+                            restTimeMinutes = 10.0,
+                            usesSets = true,
+                            matchDurationMinutes = 60.0,
+                            setDurationMinutes = 20.0,
+                            setsPerMatch = 3.0,
+                            pointsToVictory = listOf(21, 15),
+                            standingsConfirmedAt = TEST_START,
+                            standingsConfirmedBy = "official-1",
+                            fieldIds = listOf("field-1"),
+                            teamIds = listOf("team-1"),
+                        )
+                    },
+                ),
+            ),
+        )
+        val session = EventEditorSessionMapper.fromCreateBootstrap(
+            editorProtocolBootstrap(snapshot),
+        )
+
+        val command = EventEditorSessionMapper.toCreateCommand(
+            session = session,
+            mutation = EventEditorMutation(
+                canonicalState = session.canonicalState.copy(
+                    event = session.canonicalState.event.copy(eventType = EventType.TRYOUT),
+                ),
+            ),
+        ).command
+        val competition = command.draft.competition
+        val division = competition.divisionDetails.single()
+
+        assertEquals("TRYOUT", command.draft.basics.eventType)
+        assertEquals(mapOf("division-1" to listOf("field-1")), competition.divisionFieldIds)
+        assertEquals("source-division-1", division.sourceDivisionId)
+        assertEquals(listOf("field-1"), division.fieldIds)
+        assertNull(division.poolPlay)
+        assertNull(division.playoffTeamCount)
+        assertNull(division.poolCount)
+        assertNull(division.poolTeamCount)
+        assertNull(division.phaseSettings)
+        assertEquals(emptyList(), division.playoffPlacementDivisionIds)
+        assertNull(division.standingsOverrides)
+        assertNull(division.playoffConfig)
+        assertNull(division.gamesPerOpponent)
+        assertNull(division.restTimeMinutes)
+        assertNull(division.usesSets)
+        assertNull(division.matchDurationMinutes)
+        assertNull(division.setDurationMinutes)
+        assertNull(division.setsPerMatch)
+        assertEquals(emptyList(), division.pointsToVictory)
+        assertNull(division.standingsConfirmedAt)
+        assertNull(division.standingsConfirmedBy)
+        assertEquals(emptyList(), division.teamIds)
+        assertTrue(competition.playoffDivisionDetails.isEmpty())
+        assertNull(competition.winnerSetCount)
+        assertNull(competition.loserSetCount)
+        assertFalse(competition.doubleElimination)
+        assertFalse(competition.includePlayoffs)
+        assertFalse(competition.splitLeaguePlayoffDivisions)
+        assertNull(competition.playoffTeamCount)
+        assertEquals(emptyList(), competition.pointsToVictory)
+        assertEquals(emptyList(), competition.winnerBracketPointsToVictory)
+        assertEquals(emptyList(), competition.loserBracketPointsToVictory)
+        assertFalse(competition.usesSets)
+        assertNull(competition.setsPerMatch)
+        assertNull(competition.setDurationMinutes)
+        assertNull(competition.restTimeMinutes)
+        assertNull(competition.matchDurationMinutes)
+        assertNull(competition.gamesPerOpponent)
+        assertNull(competition.matchRulesOverride)
+        assertNull(competition.leagueScoringConfig)
+    }
+
+    @Test
+    fun given_division_team_assignments_when_event_type_is_sanitized_then_only_tryout_clears_them() {
+        listOf(EventType.EVENT, EventType.WEEKLY_EVENT, EventType.TRYOUT).forEach { eventType ->
+            val baseSnapshot = editorProtocolSnapshot()
+            val snapshot = baseSnapshot.copy(
+                draft = baseSnapshot.draft.copy(
+                    basics = baseSnapshot.draft.basics.copy(eventType = eventType.name),
+                ),
+            )
+            val session = EventEditorSessionMapper.fromCreateBootstrap(
+                editorProtocolBootstrap(snapshot),
+            )
+
+            val command = EventEditorSessionMapper.toCreateCommand(
+                session = session,
+                mutation = EventEditorMutation(
+                    canonicalState = session.canonicalState.copy(
+                        event = session.canonicalState.event.copy(eventType = eventType),
+                    ),
+                ),
+            ).command
+
+            val expectedTeamIds = if (eventType == EventType.TRYOUT) emptyList() else listOf("team-1")
+            assertEquals(expectedTeamIds, command.draft.competition.divisionDetails.single().teamIds)
+        }
+    }
+
+    @Test
     fun given_shared_league_fixture_when_command_is_built_then_canonical_values_match_expected_contract() {
         val baseDraft = editorProtocolSnapshot().draft
         val fixture = baseDraft.copy(
@@ -550,6 +792,33 @@ class EventEditorSessionMapperTest {
     }
 
     @Test
+    fun given_unbounded_weekly_event_when_command_is_built_then_generated_end_is_omitted_on_the_wire() {
+        val baseSnapshot = editorProtocolSnapshot(generatedEnd = true)
+        val snapshot = baseSnapshot.copy(
+            draft = baseSnapshot.draft.copy(
+                basics = baseSnapshot.draft.basics.copy(eventType = "WEEKLY_EVENT"),
+            ),
+        )
+        val session = EventEditorSessionMapper.fromCreateBootstrap(
+            editorProtocolBootstrap(snapshot),
+        )
+
+        val command = EventEditorSessionMapper.toCreateCommand(
+            session = session,
+            mutation = EventEditorMutation(session.canonicalState),
+        ).command
+        val decoded = jsonMVP.decodeFromString<EventEditorCreateCommandDto>(
+            jsonMVP.encodeToString(command),
+        )
+
+        assertEquals("WEEKLY_EVENT", decoded.draft.basics.eventType)
+        assertEquals("GENERATED_END", decoded.draft.schedule.mode)
+        assertNull(decoded.draft.schedule.generatedScheduleEnd)
+        assertNull(decoded.draft.schedule.endConstraint)
+        assertTrue(decoded.draft.schedule.isAutomatedScheduling)
+    }
+
+    @Test
     fun given_unchanged_snapshot_when_create_command_is_built_then_open_records_are_preserved() {
         val session = EventEditorSessionMapper.fromCreateBootstrap(editorProtocolBootstrap())
         val mutation = EventEditorMutation(
@@ -627,10 +896,45 @@ class EventEditorSessionMapperTest {
             mutation = EventEditorMutation(session.canonicalState),
         ).command
 
-        assertEquals("EVENT", command.draft.basics.eventType)
-        assertEquals(false, command.draft.competition.doubleElimination)
-        assertEquals(false, command.draft.competition.includePlayoffs)
-        assertEquals(snapshot.draft, command.draft)
+        val expectedCompetition = snapshot.draft.competition.copy(
+            divisionDetails = snapshot.draft.competition.divisionDetails.map { detail ->
+                detail.copy(
+                    playoffTeamCount = null,
+                    poolCount = null,
+                    poolTeamCount = null,
+                    phaseSettings = null,
+                    playoffPlacementDivisionIds = emptyList(),
+                    playoffConfig = null,
+                    gamesPerOpponent = null,
+                    restTimeMinutes = null,
+                    usesSets = null,
+                    matchDurationMinutes = null,
+                    setDurationMinutes = null,
+                    setsPerMatch = null,
+                    pointsToVictory = emptyList(),
+                )
+            },
+            playoffDivisionDetails = emptyList(),
+            divisionFieldIds = emptyMap(),
+            winnerSetCount = null,
+            loserSetCount = null,
+            doubleElimination = false,
+            includePlayoffs = false,
+            splitLeaguePlayoffDivisions = false,
+            playoffTeamCount = null,
+            pointsToVictory = emptyList(),
+            winnerBracketPointsToVictory = emptyList(),
+            loserBracketPointsToVictory = emptyList(),
+            usesSets = false,
+            setsPerMatch = null,
+            setDurationMinutes = null,
+            restTimeMinutes = null,
+            matchDurationMinutes = null,
+            gamesPerOpponent = null,
+            matchRulesOverride = null,
+            leagueScoringConfig = null,
+        )
+        assertEquals(snapshot.draft.copy(competition = expectedCompetition), command.draft)
     }
 
     @Test
@@ -849,6 +1153,127 @@ class EventEditorSessionMapperTest {
     }
 
     @Test
+    fun given_changed_official_position_count_when_save_command_is_built_then_unknown_position_fields_are_preserved() {
+        val baseSnapshot = editorProtocolSnapshot(mode = "EDIT")
+        val rawPhaseSettings = jsonMVP.parseToJsonElement(
+            """{"BRACKET":{"segmentLengthMinutes":10,"officialPositions":[{"id":"position-1","name":"Referee","count":2,"order":0,"futureOfficialSetting":{"enabled":true}}]}}""",
+        ).jsonObject
+        val snapshot = baseSnapshot.copy(
+            draft = baseSnapshot.draft.copy(
+                competition = baseSnapshot.draft.competition.copy(
+                    divisionDetails = baseSnapshot.draft.competition.divisionDetails.map { detail ->
+                        detail.copy(phaseSettings = rawPhaseSettings)
+                    },
+                ),
+            ),
+        )
+        val session = EventEditorSessionMapper.fromEditSnapshot(snapshot)
+        val editedEvent = session.canonicalState.event.copy(
+            divisionDetails = session.canonicalState.event.divisionDetails.map { detail ->
+                if (detail.id == "division-1") {
+                    detail.copy(
+                        phaseSettings = detail.phaseSettings.mapValues { (_, settings) ->
+                            settings.copy(
+                                officialPositions = settings.officialPositions?.map { position ->
+                                    position.copy(count = 7)
+                                },
+                            )
+                        },
+                    )
+                } else {
+                    detail
+                }
+            },
+        )
+
+        val command = EventEditorSessionMapper.toSaveCommand(
+            session = session,
+            mutation = EventEditorMutation(session.canonicalState.copy(event = editedEvent)),
+        )
+        val position = command.draft.competition.divisionDetails
+            .single { detail -> detail.id == "division-1" }
+            .phaseSettings
+            ?.get("BRACKET")
+            ?.jsonObject
+            ?.get("officialPositions")
+            ?.jsonArray
+            ?.single()
+            ?.jsonObject
+
+        assertEquals(7, position?.get("count")?.jsonPrimitive?.content?.toInt())
+        assertEquals(
+            jsonMVP.parseToJsonElement("""{"enabled":true}"""),
+            position?.get("futureOfficialSetting"),
+        )
+    }
+
+    @Test
+    fun given_shared_regular_and_playoff_ids_when_regular_name_changes_then_each_raw_phase_settings_stay_in_category() {
+        val baseSnapshot = editorProtocolSnapshot(mode = "EDIT")
+        val regularPhaseSettings = jsonMVP.parseToJsonElement(
+            """{"BRACKET":{"segmentLengthMinutes":10,"futureRegularSetting":{"enabled":true}}}""",
+        ).jsonObject
+        val playoffPhaseSettings = jsonMVP.parseToJsonElement(
+            """{"BRACKET":{"segmentLengthMinutes":20,"futurePlayoffSetting":{"enabled":true}}}""",
+        ).jsonObject
+        val snapshot = baseSnapshot.copy(
+            draft = baseSnapshot.draft.copy(
+                competition = baseSnapshot.draft.competition.copy(
+                    divisionDetails = baseSnapshot.draft.competition.divisionDetails.map { detail ->
+                        detail.copy(
+                            id = "shared-division",
+                            phaseSettings = regularPhaseSettings,
+                        )
+                    },
+                    playoffDivisionDetails = baseSnapshot.draft.competition.playoffDivisionDetails.map { detail ->
+                        detail.copy(
+                            id = "shared-division",
+                            phaseSettings = playoffPhaseSettings,
+                        )
+                    },
+                ),
+            ),
+        )
+        val session = EventEditorSessionMapper.fromEditSnapshot(snapshot)
+        val editedEvent = session.canonicalState.event.copy(
+            divisionDetails = session.canonicalState.event.divisionDetails.map { detail ->
+                if (detail.kind?.equals("PLAYOFF", ignoreCase = true) != true) {
+                    detail.copy(name = "Edited regular division")
+                } else {
+                    detail
+                }
+            },
+        )
+
+        val command = EventEditorSessionMapper.toSaveCommand(
+            session = session,
+            mutation = EventEditorMutation(session.canonicalState.copy(event = editedEvent)),
+        )
+        val regular = command.draft.competition.divisionDetails.single()
+        val playoff = command.draft.competition.playoffDivisionDetails.single()
+
+        assertEquals("Edited regular division", regular.name)
+        assertEquals(
+            10,
+            regular.phaseSettings?.get("BRACKET")?.jsonObject?.get("segmentLengthMinutes")
+                ?.jsonPrimitive?.content?.toInt(),
+        )
+        assertEquals(
+            jsonMVP.parseToJsonElement("""{"enabled":true}"""),
+            regular.phaseSettings?.get("BRACKET")?.jsonObject?.get("futureRegularSetting"),
+        )
+        assertEquals(
+            20,
+            playoff.phaseSettings?.get("BRACKET")?.jsonObject?.get("segmentLengthMinutes")
+                ?.jsonPrimitive?.content?.toInt(),
+        )
+        assertEquals(
+            jsonMVP.parseToJsonElement("""{"enabled":true}"""),
+            playoff.phaseSettings?.get("BRACKET")?.jsonObject?.get("futurePlayoffSetting"),
+        )
+    }
+
+    @Test
     fun given_same_event_type_league_with_no_placed_matches_when_save_command_is_built_then_schedule_transition_is_preserve() {
         val editSession = EventEditorSessionMapper.fromEditSnapshot(
             editorProtocolSnapshot(mode = "EDIT", editorRevision = "revision-1"),
@@ -869,6 +1294,26 @@ class EventEditorSessionMapperTest {
         )
         assertNull(command.scheduleTransition.expectedScheduleRevision)
         assertEquals(4, command.draft.competition.playoffTeamCount)
+    }
+
+    @Test
+    fun given_existing_event_type_change_when_save_command_is_built_then_schedule_transition_is_preserve() {
+        val editSession = EventEditorSessionMapper.fromEditSnapshot(
+            editorProtocolSnapshot(mode = "EDIT", editorRevision = "revision-1"),
+        )
+        val mutation = EventEditorMutation(
+            editSession.canonicalState.copy(
+                event = editSession.canonicalState.event.copy(eventType = EventType.TOURNAMENT),
+            ),
+        )
+
+        val command = EventEditorSessionMapper.toSaveCommand(editSession, mutation)
+
+        assertEquals(
+            EventEditorScheduleTransitionMode.PRESERVE,
+            command.scheduleTransition.mode,
+        )
+        assertNull(command.scheduleTransition.expectedScheduleRevision)
     }
 
     @Test

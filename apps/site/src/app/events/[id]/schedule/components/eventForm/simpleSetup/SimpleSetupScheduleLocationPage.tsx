@@ -158,7 +158,7 @@ export const SimpleSetupScheduleLocationPage = ({
           onNoFixedEndDateTimeChange={handleNoFixedEndDateTimeChange}
           showScheduleControls
           showRegistrationControls={false}
-          showGeneratedEndDateControl={false}
+          showGeneratedEndDateControl={eventData.eventType === "WEEKLY_EVENT"}
         />
       </div>
 

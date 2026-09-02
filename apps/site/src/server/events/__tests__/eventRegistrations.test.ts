@@ -5,10 +5,12 @@ jest.mock('@/lib/prisma', () => ({ prisma: {} }));
 import type { Prisma } from '@/generated/prisma/client';
 import { buildEventDivisionId } from '@/lib/divisionTypes';
 import {
+  acquireEventLockAndLoadStructure,
   assertEventRegistrationUnit,
   assertEventTypeRegistrationUnit,
   buildEventParticipantSnapshot,
   dedupeRegistrationCapacityRows,
+  EventRegistrationArchivedError,
   EventRegistrationDivisionError,
   EventRegistrationUnitError,
   getEventParticipantAggregates,
@@ -23,11 +25,25 @@ import {
 import { syncEventParticipantRegistrationsFromCompatibilityIds } from '@/server/repositories/events';
 import { resolveWeeklyOccurrence } from '@/server/events/weeklyOccurrences';
 
+const weeklyBoundarySlot = {
+  id: 'slot_1',
+  divisions: [],
+  daysOfWeek: [1],
+  startDate: '2026-04-01',
+  endDate: '2026-04-30',
+  startTimeMinutes: 10 * 60,
+  endTimeMinutes: 11 * 60,
+  timeZone: 'UTC',
+  repeating: true,
+};
+
 describe('resolveWeeklyOccurrence', () => {
   it('returns the strict DST resolver error for an invalid selected occurrence', async () => {
     const result = await resolveWeeklyOccurrence({
       event: {
         id: 'weekly_parent',
+        start: new Date('2026-01-01T00:00:00.000Z'),
+        end: null,
         eventType: 'WEEKLY_EVENT',
         timeSlotIds: ['slot_dst_gap'],
       },
@@ -54,6 +70,171 @@ describe('resolveWeeklyOccurrence', () => {
       ok: false,
       error: expect.stringContaining('does not exist on 2026-03-08'),
     });
+  });
+
+  it('rejects a selected occurrence before the canonical event start', async () => {
+    const result = await resolveWeeklyOccurrence({
+      event: {
+        id: 'weekly_parent',
+        start: new Date('2026-04-15T00:00:00.000Z'),
+        end: null,
+        eventType: 'WEEKLY_EVENT',
+        parentEvent: null,
+        timeSlotIds: ['slot_1'],
+      },
+      occurrence: {
+        slotId: 'slot_1',
+        occurrenceDate: '2026-04-14',
+      },
+    }, {
+      timeSlots: {
+        findUnique: jest.fn().mockResolvedValue(weeklyBoundarySlot),
+      },
+      divisions: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+    } as unknown as Prisma.TransactionClient);
+
+    expect(result).toEqual({
+      ok: false,
+      error: 'Selected weekly occurrence starts before the event start.',
+    });
+  });
+
+  it('rejects a selected occurrence after the finite canonical event end', async () => {
+    const result = await resolveWeeklyOccurrence({
+      event: {
+        id: 'weekly_parent',
+        start: new Date('2026-04-01T00:00:00.000Z'),
+        end: new Date('2026-04-14T10:30:00.000Z'),
+        eventType: 'WEEKLY_EVENT',
+        parentEvent: null,
+        timeSlotIds: ['slot_1'],
+      },
+      occurrence: {
+        slotId: 'slot_1',
+        occurrenceDate: '2026-04-14',
+      },
+    }, {
+      timeSlots: {
+        findUnique: jest.fn().mockResolvedValue(weeklyBoundarySlot),
+      },
+      divisions: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+    } as unknown as Prisma.TransactionClient);
+
+    expect(result).toEqual({
+      ok: false,
+      error: 'Selected weekly occurrence ends after the event planned end.',
+    });
+  });
+  it('rejects an archived selected timeslot', async () => {
+    const findFirst = jest.fn().mockResolvedValue(null);
+    const result = await resolveWeeklyOccurrence({
+      event: {
+        id: 'weekly_parent',
+        start: new Date('2026-04-01T00:00:00.000Z'),
+        end: null,
+        eventType: 'WEEKLY_EVENT',
+        parentEvent: null,
+        timeSlotIds: ['slot_archived'],
+      },
+      occurrence: {
+        slotId: 'slot_archived',
+        occurrenceDate: '2026-04-14',
+      },
+    }, {
+      timeSlots: {
+        findFirst,
+        findUnique: jest.fn(),
+      },
+      divisions: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+    } as unknown as Prisma.TransactionClient);
+
+    expect(result).toEqual({
+      ok: false,
+      error: 'Selected weekly timeslot was not found.',
+    });
+    expect(findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'slot_archived',
+        archivedAt: null,
+      },
+    });
+  });
+
+});
+
+describe('acquireEventLockAndLoadStructure', () => {
+  const createClient = (eventRows: unknown[]) => ({
+    $executeRaw: jest.fn().mockResolvedValue(1),
+    events: {
+      findUnique: jest.fn()
+        .mockResolvedValueOnce(eventRows[0])
+        .mockResolvedValueOnce(eventRows[1]),
+    },
+    divisions: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
+  });
+
+  it('rejects a child registration when its archived Weekly parent is locked', async () => {
+    const client = createClient([
+      {
+        id: 'weekly-child',
+        eventType: 'EVENT',
+        teamSignup: false,
+        parentEvent: 'weekly-parent',
+        archivedAt: null,
+        maxParticipants: null,
+        singleDivision: false,
+      },
+      {
+        id: 'weekly-parent',
+        eventType: 'WEEKLY_EVENT',
+        parentEvent: null,
+        archivedAt: new Date('2026-04-10T00:00:00.000Z'),
+      },
+    ]);
+
+    await expect(
+      acquireEventLockAndLoadStructure(client as any, 'weekly-child'),
+    ).rejects.toBeInstanceOf(EventRegistrationArchivedError);
+
+    expect(client.$executeRaw).toHaveBeenCalledTimes(2);
+  });
+
+  it('loads an unarchived event structure after the event lock', async () => {
+    const client = createClient([
+      {
+        id: 'event-1',
+        eventType: 'EVENT',
+        teamSignup: false,
+        parentEvent: null,
+        archivedAt: null,
+        maxParticipants: null,
+        singleDivision: false,
+      },
+    ]);
+
+    await expect(
+      acquireEventLockAndLoadStructure(client as any, 'event-1'),
+    ).resolves.toMatchObject({
+      id: 'event-1',
+      eventType: 'EVENT',
+      teamSignup: false,
+      divisionIds: [],
+    });
+
+    expect(client.events.findUnique).toHaveBeenCalledWith(expect.objectContaining({
+      select: expect.objectContaining({
+        archivedAt: true,
+        parentEvent: true,
+      }),
+    }));
   });
 });
 
@@ -83,6 +264,8 @@ describe('buildEventParticipantSnapshot', () => {
     const snapshot = await buildEventParticipantSnapshot({
       event: {
         id: 'weekly_parent',
+        start: new Date('2026-04-01T00:00:00.000Z'),
+        end: new Date('2026-04-30T23:59:59.999Z'),
         eventType: 'WEEKLY_EVENT',
         parentEvent: null,
         teamSignup: true,
@@ -148,6 +331,8 @@ describe('buildEventParticipantSnapshot', () => {
     const snapshot = await buildEventParticipantSnapshot({
       event: {
         id: 'weekly_parent',
+        start: new Date('2026-04-01T00:00:00.000Z'),
+        end: new Date('2026-04-30T23:59:59.999Z'),
         eventType: 'WEEKLY_EVENT',
         parentEvent: null,
         teamSignup: true,
@@ -215,6 +400,8 @@ describe('buildEventParticipantSnapshot', () => {
     const snapshot = await buildEventParticipantSnapshot({
       event: {
         id: 'weekly_parent',
+        start: new Date('2026-04-01T00:00:00.000Z'),
+        end: new Date('2026-04-30T23:59:59.999Z'),
         eventType: 'WEEKLY_EVENT',
         parentEvent: null,
         teamSignup: false,
@@ -1327,8 +1514,51 @@ describe('event registration unit validation', () => {
       code: 'INVALID_EVENT_REGISTRATION_UNIT',
     }));
   });
-});
+  it('rejects a weekly occurrence that changed after the event lock was acquired', async () => {
+    const upsert = jest.fn();
+    const client = {
+      $executeRaw: jest.fn().mockResolvedValue(0),
+      events: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'weekly-event',
+          eventType: 'WEEKLY_EVENT',
+          teamSignup: false,
+          maxParticipants: null,
+          singleDivision: true,
+          parentEvent: null,
+          archivedAt: null,
+          start: new Date('2026-04-01T00:00:00.000Z'),
+          end: null,
+          timeSlotIds: ['current-slot'],
+        }),
+      },
+      divisions: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      eventRegistrations: {
+        findMany: jest.fn().mockResolvedValue([]),
+        upsert,
+      },
+    } as any;
 
+    await expect(upsertEventRegistration({
+      eventId: 'weekly-event',
+      registrantType: 'SELF',
+      registrantId: 'user-1',
+      rosterRole: 'PARTICIPANT',
+      status: 'ACTIVE',
+      createdBy: 'user-1',
+      occurrence: {
+        slotId: 'stale-slot',
+        occurrenceDate: '2026-04-14',
+      },
+    }, client)).rejects.toMatchObject({
+      code: 'EVENT_WEEKLY_OCCURRENCE_CHANGED',
+      status: 409,
+    });
+    expect(upsert).not.toHaveBeenCalled();
+  });
+});
 describe('registration capacity enforcement', () => {
   it('dedupes existing identities before enforcing event capacity', async () => {
     const upsert = jest.fn().mockResolvedValue({ id: 'event_1__self__user_2' });

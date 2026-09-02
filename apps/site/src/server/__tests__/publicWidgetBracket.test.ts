@@ -1,4 +1,7 @@
-import { buildPublicBracketWidgetView } from '@/server/publicWidgetBracket';
+import {
+  buildPublicBracketWidgetView,
+  getPublicIncompleteScheduleStatus,
+} from '@/server/publicWidgetBracket';
 
 type TestMatch = {
   id: string;
@@ -21,6 +24,12 @@ type TestMatch = {
   team2: null;
   team1Points: number[];
   team2Points: number[];
+};
+type TournamentLikeEvent = {
+  eventType: string;
+  divisions: Array<{ id: string; name: string }>;
+  playoffDivisions: Array<{ id: string; name: string }>;
+  matches: Record<string, TestMatch>;
 };
 
 const createMatch = (
@@ -361,4 +370,104 @@ describe('buildPublicBracketWidgetView', () => {
       team2Name: '1st place (CoEd Open • 18+)',
     }));
   });
+  it('exposes exact persisted unplaced match and competition phase status', () => {
+    const division = { id: 'phase-final', name: 'Final' };
+    const finalMatch = createMatch('match-final', 7, division.id) as TestMatch & {
+      placementState: string;
+      phaseDivisionId: string;
+      phase: string;
+    };
+    const nextMatch = createMatch('match-next', 8, division.id);
+    finalMatch.placementState = 'UNPLACED';
+    finalMatch.phaseDivisionId = division.id;
+    finalMatch.phase = 'FINAL';
+    finalMatch.winnerNextMatch = nextMatch;
+    nextMatch.previousLeftMatch = finalMatch;
+    const view = buildPublicBracketWidgetView({
+      eventType: 'TOURNAMENT',
+      divisions: [division],
+      playoffDivisions: [],
+      matches: { [finalMatch.id]: finalMatch, [nextMatch.id]: nextMatch },
+    } as unknown as TournamentLikeEvent, division.id);
+
+    expect(view).not.toBeNull();
+    expect(view).toEqual(expect.objectContaining({
+      isScheduleIncomplete: true,
+      unscheduledMatchCount: 1,
+      unscheduledMatchIds: ['match-final'],
+      affectedCompetitionPhaseIds: ['phase-final'],
+      affectedCompetitionPhaseLabels: ['Final'],
+    }));
+  });
+  it('sorts unplaced IDs and resolves phase IDs from source division metadata', () => {
+    const matchZ = createMatch('match-z', 2, 'entry-open') as TestMatch & {
+      placementState: string;
+      phase: string;
+    };
+    matchZ.placementState = 'UNPLACED';
+    matchZ.phase = 'FINAL';
+    const matchA = createMatch('match-a', 1, 'entry-open') as TestMatch & {
+      placementState: string;
+      phase: string;
+    };
+    matchA.placementState = 'UNPLACED';
+    matchA.phase = 'POOL';
+
+    const status = getPublicIncompleteScheduleStatus({
+      eventType: 'TOURNAMENT',
+      divisions: [
+        {
+          id: 'phase-final',
+          name: 'Final',
+          role: 'PHASE',
+          sourceDivisionId: 'entry-open',
+          phase: 'FINAL',
+        },
+        {
+          id: 'phase-pool',
+          name: 'Pool',
+          role: 'PHASE',
+          sourceDivisionId: 'entry-open',
+          phase: 'POOL',
+        },
+      ],
+      playoffDivisions: [],
+      matches: {
+        [matchZ.id]: matchZ,
+        [matchA.id]: matchA,
+      },
+    } as unknown as TournamentLikeEvent);
+
+    expect(status).toEqual({
+      isScheduleIncomplete: true,
+      unscheduledMatchCount: 2,
+      unscheduledMatchIds: ['match-a', 'match-z'],
+      affectedCompetitionPhaseIds: ['phase-final', 'phase-pool'],
+      affectedCompetitionPhaseLabels: [
+        'Final',
+        'Pool',
+      ],
+    });
+  });
+  it('uses an unavailable label when an affected competition phase has no public name', () => {
+    const match = createMatch('match-unknown-phase', 3, 'entry-open') as TestMatch & {
+      placementState: string;
+      phaseDivisionId: string;
+    };
+    match.placementState = 'UNPLACED';
+    match.phaseDivisionId = 'phase-unknown';
+
+    const status = getPublicIncompleteScheduleStatus({
+      eventType: 'TOURNAMENT',
+      divisions: [{ id: 'phase-unknown', name: '' }],
+      playoffDivisions: [],
+      matches: { [match.id]: match },
+    } as unknown as TournamentLikeEvent);
+
+    expect(status).toEqual(expect.objectContaining({
+      affectedCompetitionPhaseIds: ['phase-unknown'],
+      affectedCompetitionPhaseLabels: ['Competition Phase details unavailable'],
+    }));
+  });
+
 });

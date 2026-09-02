@@ -7,6 +7,7 @@ import { getRequestOrigin } from "@/lib/requestOrigin";
 import { requireSession } from "@/lib/permissions";
 import { parseSaveEventEditorCommand } from "@/contracts/eventEditor";
 import { loadEventEditorSnapshot } from "@/server/events/eventEditorSnapshot";
+import { attachEventEditorRevisionBinding } from "@/server/events/eventEditorRevisionBinding";
 import {
   serializeEventEditorSnapshot,
   serializeEventEditorSnapshotEnvelope,
@@ -164,7 +165,10 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
       { status: 404 },
     );
   try {
-    const snapshot = await loadEventEditorSnapshot(eventId, { actor: session });
+    const snapshot = await attachEventEditorRevisionBinding(
+      await loadEventEditorSnapshot(eventId, { actor: session }),
+      { actor: session },
+    );
     return NextResponse.json(
       serializeEventEditorSnapshot(snapshot),
       { status: 200 },
@@ -202,8 +206,14 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
           getRequestOrigin(request),
         ),
     });
+    const resultWithBinding = {
+      ...result,
+      snapshot: await attachEventEditorRevisionBinding(result.snapshot, {
+        actor: session,
+      }),
+    };
     return NextResponse.json(
-      serializeEventEditorSnapshotEnvelope(result),
+      serializeEventEditorSnapshotEnvelope(resultWithBinding),
       { status: 200 },
     );
   } catch (error) {

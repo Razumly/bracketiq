@@ -2,8 +2,10 @@ import { NextResponse } from "next/server";
 
 import {
   EventConfigurationChangedError,
+  EventRegistrationArchivedError,
   EventRegistrationCapacityError,
   EventRegistrationDivisionError,
+  EventRegistrationOccurrenceChangedError,
   EventRegistrationStructureLockedError,
   EventRegistrationUnitError,
 } from "@/server/events/eventRegistrations";
@@ -11,6 +13,18 @@ import {
 export const eventRegistrationErrorResponse = (
   error: unknown,
 ): NextResponse | null => {
+  if (error instanceof EventRegistrationArchivedError) {
+    return NextResponse.json(
+      { error: error.message, code: error.code },
+      { status: error.status },
+    );
+  }
+  if (error instanceof EventRegistrationOccurrenceChangedError) {
+    return NextResponse.json(
+      { error: error.message, code: error.code },
+      { status: error.status },
+    );
+  }
   if (error instanceof EventConfigurationChangedError) {
     return NextResponse.json(
       { error: error.message, code: error.code },

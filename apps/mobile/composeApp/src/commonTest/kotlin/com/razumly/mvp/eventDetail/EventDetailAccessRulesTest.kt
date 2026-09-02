@@ -26,6 +26,15 @@ class EventDetailAccessRulesTest {
     }
 
     @Test
+    fun can_edit_event_details_rejects_archived_events() {
+        assertFalse(
+            canEditEventDetails(
+                Event(archivedAt = "2026-06-01T00:00:00Z"),
+            ),
+        )
+    }
+
+    @Test
     fun can_manage_event_for_user_accepts_host_assistant_and_org_manager() {
         assertFalse(canManageEventForUser(Event(hostId = "host-1"), UserData(), null))
         assertTrue(canManageEventForUser(Event(hostId = "host-1"), user(" host-1 "), null))

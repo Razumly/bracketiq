@@ -4,7 +4,7 @@ import { getFieldDisplayName } from '@/lib/fieldUtils';
 import { formatEnumDisplayLabel } from '@/lib/enumUtils';
 import { normalizeExternalHttpUrl } from '@/lib/externalUrl';
 import { resolveDivisionDisplayName } from '@/lib/divisionDisplay';
-import type { Event, Match, Team, UserData } from '@/types';
+import type { Division, Event, Match, Team, UserData } from '@/types';
 import {
     formatAffiliateEventPriceRange,
     formatEventDivisionPriceRange,
@@ -32,6 +32,7 @@ import {
 } from './eventDetailPresentation';
 import { parseDateValue } from './weeklySessions';
 
+const COMPETITION_PHASE_DETAILS_UNAVAILABLE_LABEL = 'Competition Phase details unavailable';
 const STAFF_NAME_UNAVAILABLE_LABEL = 'Staff name unavailable';
 
 const getStaffFullName = (user?: Partial<UserData> | null): string | null => {
@@ -60,6 +61,116 @@ type BuildEventDetailPublicModelArgs = {
     now: Date;
 };
 
+type PublicCompetitionPhaseDisplay = {
+    id: string;
+    name: string;
+    phase: string;
+    label: string;
+};
+
+type PublicIncompleteScheduleMatch = Match & {
+    phaseDivisionId?: unknown;
+    phase?: unknown;
+    division?: unknown;
+};
+
+type PublicCompetitionPhaseDetail = Division & {
+    $id?: unknown;
+    key?: unknown;
+};
+
+const resolvePublicCompetitionPhaseId = (match: PublicIncompleteScheduleMatch): string => (
+    typeof match.phaseDivisionId === "string"
+        ? match.phaseDivisionId.trim()
+        : typeof match.division === "string" ? match.division.trim() : ""
+);
+
+const findPublicCompetitionPhaseDetail = (
+    phaseDetails: PublicCompetitionPhaseDetail[],
+    phaseId: string,
+): PublicCompetitionPhaseDetail | undefined => {
+    for (const candidate of phaseDetails) {
+        if ([candidate.id, candidate.$id, candidate.key].some(
+            (value) => typeof value === "string" && value === phaseId,
+        )) {
+            return candidate;
+        }
+    }
+    return undefined;
+};
+
+const resolvePublicCompetitionPhaseDisplay = (
+    match: PublicIncompleteScheduleMatch,
+    phaseDetails: PublicCompetitionPhaseDetail[],
+): PublicCompetitionPhaseDisplay | null => {
+    const phaseId = resolvePublicCompetitionPhaseId(match);
+    if (!phaseId) {
+        return null;
+    }
+    const detail = findPublicCompetitionPhaseDetail(phaseDetails, phaseId);
+    const name = typeof detail?.name === "string" && detail.name.trim()
+        ? detail.name.trim()
+        : COMPETITION_PHASE_DETAILS_UNAVAILABLE_LABEL;
+    const phase = typeof match.phase === "string" && match.phase.trim()
+        ? match.phase.trim()
+        : typeof detail?.phase === "string" && detail.phase.trim()
+            ? detail.phase.trim()
+            : "PHASE";
+    return {
+        id: phaseId,
+        name,
+        phase,
+        label: name,
+    };
+};
+
+const buildPublicIncompleteSchedule = (event: Event): {
+    isScheduleIncomplete: boolean;
+    unscheduledMatchCount: number;
+    unscheduledMatchIds: string[];
+    affectedCompetitionPhaseIds: string[];
+    affectedCompetitionPhaseLabels: string[];
+    affectedCompetitionPhases: PublicCompetitionPhaseDisplay[];
+} => {
+    const unplacedMatches = (event.matches ?? []).filter((match) =>
+        String((match as Match & { placementState?: unknown }).placementState ?? "")
+            .trim()
+            .toUpperCase() === "UNPLACED",
+    );
+    const unscheduledMatchIds = unplacedMatches
+        .map((match) => String(match.$id ?? "").trim())
+        .filter(Boolean)
+        .sort((left, right) => left.localeCompare(right));
+    const phaseDetails = [
+        ...(((event as Event & { divisionDetails?: unknown[] }).divisionDetails ?? [])),
+        ...(((event as Event & { playoffDivisionDetails?: unknown[] }).playoffDivisionDetails ?? [])),
+        ...(((event as Event & { competitionPhaseDetails?: unknown[] }).competitionPhaseDetails ?? [])),
+    ].filter((detail): detail is PublicCompetitionPhaseDetail =>
+        Boolean(detail) && typeof detail === "object" && !Array.isArray(detail),
+    );
+    const phasesById = new Map<string, PublicCompetitionPhaseDisplay>();
+    unplacedMatches.forEach((match) => {
+        const phase = resolvePublicCompetitionPhaseDisplay(
+            match as PublicIncompleteScheduleMatch,
+            phaseDetails,
+        );
+        if (!phase || phasesById.has(phase.id)) {
+            return;
+        }
+        phasesById.set(phase.id, phase);
+    });
+    const affectedCompetitionPhases = Array.from(phasesById.values())
+        .sort((left, right) => left.id.localeCompare(right.id));
+    return {
+        isScheduleIncomplete: unscheduledMatchIds.length > 0,
+        unscheduledMatchCount: unscheduledMatchIds.length,
+        unscheduledMatchIds,
+        affectedCompetitionPhaseIds: affectedCompetitionPhases.map((phase) => phase.id),
+        affectedCompetitionPhaseLabels: affectedCompetitionPhases.map((phase) => phase.label),
+        affectedCompetitionPhases,
+    };
+};
+
 export function buildEventDetailPublicModel({
     event,
     user,
@@ -75,6 +186,7 @@ export function buildEventDetailPublicModel({
     isWeeklyParentEvent,
     now,
 }: BuildEventDetailPublicModelArgs) {
+    const incompleteSchedule = buildPublicIncompleteSchedule(event);
     const { date, time } = getEventDateTime(event);
     const affiliateActionUrl = normalizeExternalHttpUrl(event.affiliateActionUrl)
         ?? normalizeExternalHttpUrl(event.affiliateUrl)
@@ -400,6 +512,7 @@ export function buildEventDetailPublicModel({
         canViewStaffSection,
         eventDisplayTimeZone,
         schedulePreviewItems,
+        ...incompleteSchedule,
         scheduleDateChips,
         supportsScheduleDetails,
         canShowScheduleButton: isEventHost && !renderInline && !isWeeklyParentEvent,

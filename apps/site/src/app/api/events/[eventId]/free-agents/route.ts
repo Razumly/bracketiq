@@ -5,15 +5,19 @@ import { requireSession } from '@/lib/permissions';
 import { calculateAgeOnDate } from '@/lib/age';
 import { dispatchRequiredEventDocuments } from '@/lib/eventConsentDispatch';
 import {
+  acquireEventLockAndLoadStructure,
   buildEventParticipantSnapshot,
   deleteEventRegistration,
   upsertEventRegistration,
 } from '@/server/events/eventRegistrations';
 import { requireVerifiedEmailForEventRegistrationIfPaid } from '@/server/paidRegistrationGate';
+import { eventRegistrationErrorResponse } from '@/server/events/eventRegistrationErrorResponse';
 import {
-  isWeeklyParentEvent,
+  isActiveWeeklyParentEvent,
+  isArchivedWeeklyParentEvent,
   isWeeklyOccurrenceJoinClosed,
   resolveWeeklyOccurrence,
+  WEEKLY_EVENT_ARCHIVED_ERROR,
   WEEKLY_OCCURRENCE_JOIN_CLOSED_ERROR,
 } from '@/server/events/weeklyOccurrences';
 
@@ -63,12 +67,14 @@ const occurrenceWhere = (occurrence: { slotId: string; occurrenceDate: string } 
 );
 
 const cancelRegistrationsConflictingWithFreeAgent = async ({
+  client,
   eventId,
   targetUserId,
   actorUserId,
   includeActorTeamHolds,
   occurrence,
 }: {
+  client: NonNullable<Parameters<typeof upsertEventRegistration>[1]>;
   eventId: string;
   targetUserId: string;
   actorUserId: string;
@@ -90,7 +96,7 @@ const cancelRegistrationsConflictingWithFreeAgent = async ({
     });
   }
 
-  await prisma.eventRegistrations.updateMany({
+  await client.eventRegistrations.updateMany({
     where: {
       eventId,
       ...occurrenceWhere(occurrence),
@@ -142,6 +148,8 @@ async function updateFreeAgents(
         organizationId: true,
         price: true,
         start: true,
+        end: true,
+        archivedAt: true,
         eventType: true,
         parentEvent: true,
         timeSlotIds: true,
@@ -162,6 +170,9 @@ async function updateFreeAgents(
 
   if (!event) {
     return NextResponse.json({ error: 'Event not found' }, { status: 404 });
+  }
+  if (isArchivedWeeklyParentEvent(event)) {
+    return NextResponse.json({ error: WEEKLY_EVENT_ARCHIVED_ERROR }, { status: 409 });
   }
   if (!targetUser) {
     return NextResponse.json({ error: 'User not found' }, { status: 404 });
@@ -184,7 +195,7 @@ async function updateFreeAgents(
   }
 
   const hasOccurrenceInput = Boolean(parsed.data.slotId || parsed.data.occurrenceDate);
-  const occurrence = isWeeklyParentEvent(event)
+  const occurrence = isActiveWeeklyParentEvent(event)
     ? await resolveWeeklyOccurrence({
       event,
       occurrence: parsed.data,
@@ -193,7 +204,7 @@ async function updateFreeAgents(
   if (occurrence && !occurrence.ok) {
     return NextResponse.json({ error: occurrence.error }, { status: 400 });
   }
-  if (!isWeeklyParentEvent(event) && hasOccurrenceInput) {
+  if (!isActiveWeeklyParentEvent(event) && hasOccurrenceInput) {
     return NextResponse.json({ error: 'Weekly occurrence selection is only valid for weekly events.' }, { status: 400 });
   }
   const resolvedOccurrence = occurrence?.ok ? occurrence.value : null;
@@ -244,25 +255,38 @@ async function updateFreeAgents(
       warnings.push(...consentDispatch.errors);
     }
 
-    await cancelRegistrationsConflictingWithFreeAgent({
-      eventId,
-      targetUserId,
-      actorUserId: session.userId,
-      includeActorTeamHolds: targetUserId === session.userId,
-      occurrence: resolvedOccurrence,
-    });
-
-    const registration = await upsertEventRegistration({
-      eventId,
-      registrantType: managingLinkedChild ? 'CHILD' : 'SELF',
-      registrantId: targetUserId,
-      parentId: managingLinkedChild ? session.userId : null,
-      rosterRole: 'FREE_AGENT',
-      status: 'ACTIVE',
-      ageAtEvent: Number.isFinite(targetUserAgeAtEvent) ? targetUserAgeAtEvent : null,
-      createdBy: session.userId,
-      occurrence: resolvedOccurrence,
-    });
+    let registration: Awaited<ReturnType<typeof upsertEventRegistration>>;
+    try {
+      registration = await prisma.$transaction(async (tx) => {
+        await acquireEventLockAndLoadStructure(tx, event.id, {
+          eventType: event.eventType,
+          teamSignup: event.teamSignup,
+        });
+        await cancelRegistrationsConflictingWithFreeAgent({
+          client: tx,
+          eventId,
+          targetUserId,
+          actorUserId: session.userId,
+          includeActorTeamHolds: targetUserId === session.userId,
+          occurrence: resolvedOccurrence,
+        });
+        return upsertEventRegistration({
+          eventId,
+          registrantType: managingLinkedChild ? 'CHILD' : 'SELF',
+          registrantId: targetUserId,
+          parentId: managingLinkedChild ? session.userId : null,
+          rosterRole: 'FREE_AGENT',
+          status: 'ACTIVE',
+          ageAtEvent: Number.isFinite(targetUserAgeAtEvent) ? targetUserAgeAtEvent : null,
+          createdBy: session.userId,
+          occurrence: resolvedOccurrence,
+        }, tx);
+      });
+    } catch (error) {
+      const archivedResponse = eventRegistrationErrorResponse(error);
+      if (archivedResponse) return archivedResponse;
+      throw error;
+    }
 
     const refreshedEvent = await prisma.events.findUnique({ where: { id: eventId } });
     const snapshot = await buildEventParticipantSnapshot({
@@ -283,12 +307,18 @@ async function updateFreeAgents(
     }, { status: 200 });
   }
 
-  await deleteEventRegistration({
-    eventId,
-    registrantType: managingLinkedChild ? 'CHILD' : 'SELF',
-    registrantId: targetUserId,
-    occurrence: resolvedOccurrence,
-  });
+  try {
+    await deleteEventRegistration({
+      eventId,
+      registrantType: managingLinkedChild ? 'CHILD' : 'SELF',
+      registrantId: targetUserId,
+      occurrence: resolvedOccurrence,
+    });
+  } catch (error) {
+    const archivedResponse = eventRegistrationErrorResponse(error);
+    if (archivedResponse) return archivedResponse;
+    throw error;
+  }
 
   const refreshedEvent = await prisma.events.findUnique({ where: { id: eventId } });
   const snapshot = await buildEventParticipantSnapshot({

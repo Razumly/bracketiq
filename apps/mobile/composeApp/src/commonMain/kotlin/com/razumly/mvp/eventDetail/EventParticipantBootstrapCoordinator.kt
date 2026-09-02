@@ -193,9 +193,9 @@ internal class EventParticipantBootstrapCoordinator(
         )
     }
 
-    fun onSelectedEventChanged(isWeeklyParent: Boolean) {
+    fun onSelectedEventChanged(eventId: String, isWeeklyParent: Boolean) {
         weeklyOccurrenceSummaryPrefetchJob?.cancel()
-        weeklyOccurrenceCoordinator.handleSelectedEventChanged(isWeeklyParent)
+        weeklyOccurrenceCoordinator.handleSelectedEventChanged(eventId, isWeeklyParent)
     }
 
     fun applyParticipantSyncResult(result: EventParticipantsSyncResult) {

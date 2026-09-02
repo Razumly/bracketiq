@@ -57,7 +57,10 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toInstant
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
@@ -105,9 +108,136 @@ private fun MatchRulesConfigMVP?.toJsonObjectOrNull(): JsonObject? = this?.let {
 private fun TournamentConfig?.toJsonObjectOrNull(): JsonObject? = this?.let {
     jsonMVP.encodeToJsonElement(it).jsonObject
 }
+private fun JsonElement.stableObjectId(): String? =
+    (this as? JsonObject)
+        ?.get("id")
+        ?.let { value -> (value as? JsonPrimitive)?.content }
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
 
-private fun DivisionDetail.toDto(existing: EventEditorDivisionDetailDto? = null): EventEditorDivisionDetailDto =
-    EventEditorDivisionDetailDto(
+private fun JsonArray.mergeModeledJsonArray(
+    modeled: JsonArray,
+    baselineModeled: JsonArray? = null,
+): JsonArray {
+    val modeledIds = modeled.map(JsonElement::stableObjectId)
+    if (modeledIds.any { id -> id == null } || modeledIds.toSet().size != modeledIds.size) {
+        return modeled
+    }
+    val existingById = mapNotNull { element ->
+        element.stableObjectId()?.let { id -> id to element }
+    }.toMap()
+    val baselineById = baselineModeled
+        ?.mapNotNull { element ->
+            element.stableObjectId()?.let { id -> id to element }
+        }
+        ?.toMap()
+        .orEmpty()
+    return JsonArray(
+        modeled.mapIndexed { index, modeledElement ->
+            val existingElement = existingById[modeledIds[index]]
+            if (existingElement is JsonObject && modeledElement is JsonObject) {
+                existingElement.mergeModeledJsonObject(
+                    modeled = modeledElement,
+                    baselineModeled = baselineById[modeledIds[index]] as? JsonObject,
+                )
+            } else {
+                modeledElement
+            }
+        },
+    )
+}
+
+private fun JsonObject.mergeModeledJsonObject(
+    modeled: JsonObject,
+    baselineModeled: JsonObject? = null,
+): JsonObject {
+    val merged = toMutableMap()
+    modeled.forEach { (key, value) ->
+        val existingValue = merged[key]
+        val baselineValue = baselineModeled?.get(key)
+        merged[key] = when {
+            baselineValue != null && value == baselineValue && existingValue != null -> existingValue
+            existingValue is JsonObject && value is JsonObject -> {
+                existingValue.mergeModeledJsonObject(
+                    modeled = value,
+                    baselineModeled = baselineValue as? JsonObject,
+                )
+            }
+            existingValue is JsonArray && value is JsonArray -> {
+                existingValue.mergeModeledJsonArray(
+                    modeled = value,
+                    baselineModeled = baselineValue as? JsonArray,
+                )
+            }
+            else -> value
+        }
+    }
+    baselineModeled?.keys
+        ?.filterNot { key -> modeled.containsKey(key) }
+        ?.forEach { key -> merged.remove(key) }
+    return JsonObject(merged)
+}
+
+
+private fun DivisionDetail.toDto(
+    existing: EventEditorDivisionDetailDto? = null,
+    baseline: DivisionDetail? = null,
+): EventEditorDivisionDetailDto {
+    fun currentIntOrExisting(
+        current: Int?,
+        baselineValue: Int?,
+        existingValue: Double?,
+    ): Double? = if (current != null) {
+        current.toDouble()
+    } else if (baseline != null && current == baselineValue) {
+        existingValue
+    } else {
+        null
+    }
+
+    fun currentBooleanOrExisting(
+        current: Boolean?,
+        baselineValue: Boolean?,
+        existingValue: Boolean?,
+    ): Boolean? = if (current != null) {
+        current
+    } else if (baseline != null && current == baselineValue) {
+        existingValue
+    } else {
+        null
+    }
+
+    val phaseSettingsDto = when {
+        baseline != null && phaseSettings == baseline.phaseSettings -> existing?.phaseSettings
+        phaseSettings.isNotEmpty() -> {
+            val modeled = jsonMVP.encodeToJsonElement(phaseSettings).jsonObject
+            val baselineModeled = baseline?.phaseSettings?.let {
+                jsonMVP.encodeToJsonElement(it).jsonObject
+            }
+            existing?.phaseSettings?.mergeModeledJsonObject(
+                modeled = modeled,
+                baselineModeled = baselineModeled,
+            ) ?: modeled
+        }
+        baseline != null && phaseSettings != baseline.phaseSettings -> JsonObject(emptyMap())
+        else -> existing?.phaseSettings
+    }
+    val playoffConfigDto = when {
+        baseline != null && playoffConfig == baseline.playoffConfig -> existing?.playoffConfig
+        playoffConfig != null -> {
+            playoffConfig.toJsonObjectOrNull()?.let { modeled ->
+                val baselineModeled = (baseline?.playoffConfig).toJsonObjectOrNull()
+                existing?.playoffConfig?.mergeModeledJsonObject(
+                    modeled = modeled,
+                    baselineModeled = baselineModeled,
+                ) ?: modeled
+            }
+        }
+        baseline != null && playoffConfig != baseline.playoffConfig -> null
+        else -> existing?.playoffConfig
+    }
+
+    return EventEditorDivisionDetailDto(
         id = id.normalizedId(),
         sourceDivisionId = sourceDivisionId ?: existing?.sourceDivisionId,
         key = key,
@@ -126,18 +256,42 @@ private fun DivisionDetail.toDto(existing: EventEditorDivisionDetailDto? = null)
         playoffTeamCount = playoffTeamCount?.toDouble() ?: existing?.playoffTeamCount,
         poolCount = poolCount?.toDouble() ?: existing?.poolCount,
         poolTeamCount = poolTeamCount?.toDouble() ?: existing?.poolTeamCount,
-        phaseSettings = existing?.phaseSettings ?: phaseSettings.takeIf { it.isNotEmpty() }?.let {
-            jsonMVP.encodeToJsonElement(it).jsonObject
-        },
+        phaseSettings = phaseSettingsDto,
         playoffPlacementDivisionIds = if (playoffPlacementDivisionIds.isNotEmpty()) playoffPlacementDivisionIds else existing?.playoffPlacementDivisionIds.orEmpty(),
         standingsOverrides = existing?.standingsOverrides,
-        playoffConfig = existing?.playoffConfig ?: playoffConfig.toJsonObjectOrNull(),
-        gamesPerOpponent = gamesPerOpponent?.toDouble() ?: existing?.gamesPerOpponent,
-        restTimeMinutes = restTimeMinutes?.toDouble() ?: existing?.restTimeMinutes,
-        usesSets = usesSets ?: existing?.usesSets,
-        matchDurationMinutes = matchDurationMinutes?.toDouble() ?: existing?.matchDurationMinutes,
-        setDurationMinutes = setDurationMinutes?.toDouble() ?: existing?.setDurationMinutes,
-        setsPerMatch = setsPerMatch?.toDouble() ?: existing?.setsPerMatch,
+        playoffConfig = playoffConfigDto,
+        playoffConfigPresent = playoffConfigDto != null ||
+            (baseline != null && playoffConfig != baseline.playoffConfig),
+        gamesPerOpponent = currentIntOrExisting(
+            gamesPerOpponent,
+            baseline?.gamesPerOpponent,
+            existing?.gamesPerOpponent,
+        ),
+        restTimeMinutes = currentIntOrExisting(
+            restTimeMinutes,
+            baseline?.restTimeMinutes,
+            existing?.restTimeMinutes,
+        ),
+        usesSets = currentBooleanOrExisting(
+            usesSets,
+            baseline?.usesSets,
+            existing?.usesSets,
+        ),
+        matchDurationMinutes = currentIntOrExisting(
+            matchDurationMinutes,
+            baseline?.matchDurationMinutes,
+            existing?.matchDurationMinutes,
+        ),
+        setDurationMinutes = currentIntOrExisting(
+            setDurationMinutes,
+            baseline?.setDurationMinutes,
+            existing?.setDurationMinutes,
+        ),
+        setsPerMatch = currentIntOrExisting(
+            setsPerMatch,
+            baseline?.setsPerMatch,
+            existing?.setsPerMatch,
+        ),
         pointsToVictory = if (pointsToVictory.isNotEmpty()) pointsToVictory else existing?.pointsToVictory.orEmpty(),
         standingsConfirmedAt = existing?.standingsConfirmedAt,
         standingsConfirmedBy = existing?.standingsConfirmedBy,
@@ -152,6 +306,7 @@ private fun DivisionDetail.toDto(existing: EventEditorDivisionDetailDto? = null)
         fieldIds = if (fieldIds.isNotEmpty()) fieldIds else existing?.fieldIds.orEmpty(),
         teamIds = if (teamIds.isNotEmpty()) teamIds else existing?.teamIds.orEmpty(),
     )
+}
 
 @OptIn(ExperimentalTime::class)
 private fun EventEditorDivisionDetailDto.toDomain(): DivisionDetail = DivisionDetail(
@@ -418,6 +573,11 @@ private fun EventEditorDraftDto.toEvent(eventId: String): Event {
         sportIds = basics.sportIds,
         timeSlotIds = resources.timeSlotIds,
         fieldIds = resources.fieldIds,
+        leagueScoringConfigId = if (eventType == EventType.LEAGUE) {
+            competition.leagueScoringConfig?.stableObjectId()
+        } else {
+            null
+        },
         organizationId = basics.organizationId,
         affiliateUrl = basics.affiliateUrl.takeIf(String::isNotBlank),
         registrationPaymentMode = payment.mode,
@@ -469,9 +629,53 @@ private fun EventEditorDraftDto.toEvent(eventId: String): Event {
         requiredTemplateIds = resources.requiredTemplateIds,
         tags = basics.tags.map(EventEditorTagDto::toDomain),
         imageId = basics.imageId.orEmpty(),
-    )
+    ).withEditorEventTypeInvariants()
 }
 
+private fun Event.withoutMatchGenerationConfiguration(): Event = copy(
+    leagueScoringConfigId = null,
+    gamesPerOpponent = null,
+    includePlayoffs = false,
+    splitLeaguePlayoffDivisions = false,
+    playoffTeamCount = null,
+    doubleElimination = false,
+    winnerSetCount = 1,
+    loserSetCount = 0,
+    winnerBracketPointsToVictory = emptyList(),
+    loserBracketPointsToVictory = emptyList(),
+    usesSets = false,
+    matchDurationMinutes = null,
+    setDurationMinutes = null,
+    setsPerMatch = null,
+    matchRulesOverride = null,
+    resolvedMatchRules = null,
+    restTimeMinutes = null,
+    pointsToVictory = emptyList(),
+)
+
+private fun Event.withEditorEventTypeInvariants(): Event = when (eventType) {
+    EventType.WEEKLY_EVENT -> withoutMatchGenerationConfiguration()
+        .copy(isAutomatedScheduling = true)
+    EventType.TRYOUT -> withoutMatchGenerationConfiguration()
+        .copy(
+            isAutomatedScheduling = false,
+            teamSignup = false,
+            noFixedEndDateTime = false,
+            staffingPriority = com.razumly.mvp.core.data.dataTypes.StaffingPriority.FULL_COVERAGE_WITH_CONFLICTS_ALLOWED,
+            doTeamsOfficiate = false,
+            teamOfficialsMaySwap = false,
+            teamCheckInMode = TeamCheckInMode.OFF,
+            teamCheckInOpenMinutesBefore = 60,
+            allowMatchRosterEdits = false,
+            allowTemporaryMatchPlayers = false,
+            autoCreatePointMatchIncidents = false,
+            officialIds = emptyList(),
+            officialPositions = emptyList(),
+            eventOfficials = emptyList(),
+        )
+    EventType.EVENT -> withoutMatchGenerationConfiguration()
+    else -> this
+}
 private fun EventEditorSnapshotDto.toCanonicalState(operationId: String?): EventEditorCanonicalState {
     val eventId = eventId.normalizedIdOrNull() ?: "editor-create-${operationId ?: "session"}"
     val protectedHistory = scheduleState.hasProtectedHistory
@@ -492,10 +696,17 @@ private fun EventEditorSnapshotDto.toCanonicalState(operationId: String?): Event
             .mapNotNull(EventEditorFieldDto::toDomain)
             .withDivisionAssignments(divisionFieldIds),
         timeSlots = draft.resources.timeSlots.mapNotNull { slot -> slot.toDomain(fallbackStart) },
-        leagueScoringConfig = draft.competition.leagueScoringConfig?.toLeagueScoringConfigOrNull(),
+        leagueScoringConfig = draft.competition.leagueScoringConfig
+            ?.takeIf { event.eventType == EventType.LEAGUE }
+            ?.toLeagueScoringConfigOrNull(),
         questions = draft.registration.questions.map(EventEditorQuestionDto::toDomain),
         pendingStaffInvites = draft.staff.pendingInvites.map(EventEditorStaffInviteDto::toDomain),
-        playoffDivisionDetails = draft.competition.playoffDivisionDetails.map(EventEditorDivisionDetailDto::toDomain),
+        playoffDivisionDetails = draft.competition.playoffDivisionDetails
+            .takeIf {
+                event.eventType == EventType.LEAGUE || event.eventType == EventType.TOURNAMENT
+            }
+            .orEmpty()
+            .map(EventEditorDivisionDetailDto::toDomain),
         divisionFieldIds = divisionFieldIds,
     )
 }
@@ -539,7 +750,13 @@ private fun Event.toParticipationDto(
     existing: com.razumly.mvp.core.network.dto.EventEditorParticipationDto,
     baseline: Event,
 ) = existing.copy(
-    teamSignup = if (teamSignup != baseline.teamSignup) teamSignup else existing.teamSignup,
+    teamSignup = if (eventType == EventType.TRYOUT) {
+        false
+    } else if (teamSignup != baseline.teamSignup) {
+        teamSignup
+    } else {
+        existing.teamSignup
+    },
     singleDivision = if (singleDivision != baseline.singleDivision) singleDivision else existing.singleDivision,
     registrationByDivisionType = if (registrationByDivisionType != baseline.registrationByDivisionType) {
         registrationByDivisionType
@@ -629,14 +846,33 @@ private fun Event.toScheduleDto(
         eventType,
         isAutomatedScheduling,
     )
-    val effectiveNoFixedEndDateTime = normalizedAutomatedScheduling && noFixedEndDateTime
+    val effectiveNoFixedEndDateTime =
+        normalizedAutomatedScheduling &&
+            noFixedEndDateTime &&
+            eventType != EventType.TRYOUT
     val generatedEndMustBeCleared =
         existing.mode.trim().uppercase() == "GENERATED_END" &&
             !effectiveNoFixedEndDateTime
+    val weeklyGeneratedEndMustBeNormalized =
+        eventType == EventType.WEEKLY_EVENT &&
+            effectiveNoFixedEndDateTime &&
+            (
+                existing.mode.trim().uppercase() != "GENERATED_END" ||
+                    existing.generatedScheduleEnd != null ||
+                    existing.endConstraint != null
+                )
     val modeChanged = effectiveNoFixedEndDateTime != baseline.noFixedEndDateTime
     val endChanged = end != baseline.end
     val schedulingChanged = normalizedAutomatedScheduling != existing.isAutomatedScheduling
-    if (!modeChanged && !endChanged && !schedulingChanged && !generatedEndMustBeCleared) return existing
+    if (
+        !modeChanged &&
+        !endChanged &&
+        !schedulingChanged &&
+        !generatedEndMustBeCleared &&
+        !weeklyGeneratedEndMustBeNormalized
+    ) {
+        return existing
+    }
 
     val withAutomatedScheduling = existing.copy(
         isAutomatedScheduling = normalizedAutomatedScheduling,
@@ -645,7 +881,7 @@ private fun Event.toScheduleDto(
         effectiveNoFixedEndDateTime -> withAutomatedScheduling.copy(
             mode = "GENERATED_END",
             endConstraint = null,
-            generatedScheduleEnd = end.toString(),
+            generatedScheduleEnd = if (eventType == EventType.WEEKLY_EVENT) null else end.toString(),
         )
         else -> withAutomatedScheduling.copy(
             mode = "FIXED_END",
@@ -667,10 +903,18 @@ private fun Event.toCompetitionDto(
     leagueScoringConfig: LeagueScoringConfigDTO?,
     scoringChanged: Boolean,
 ): EventEditorCompetitionDto {
-    val existingById = (existing.divisionDetails + existing.playoffDivisionDetails).associateBy { it.id }
+    val existingRegularById = existing.divisionDetails.associateBy { detail ->
+        detail.id.normalizedId()
+    }
+    val existingPlayoffById = existing.playoffDivisionDetails.associateBy { detail ->
+        detail.id.normalizedId()
+    }
     val currentRegularDetails = divisionDetails.filterNot { it.kind?.equals("PLAYOFF", ignoreCase = true) == true }
     val baselineRegularDetails = baseline.divisionDetails.filterNot {
         it.kind?.equals("PLAYOFF", ignoreCase = true) == true
+    }
+    val baselineRegularDetailsById = baselineRegularDetails.associateBy { detail ->
+        detail.id.normalizedId()
     }
     val currentDetailsById = divisionDetails.associateBy { detail -> detail.id.normalizedId() }
     val routedPlayoffDetails = linkedMapOf<String, DivisionDetail>()
@@ -693,6 +937,9 @@ private fun Event.toCompetitionDto(
         .forEach { detail -> routedPlayoffDetails[detail.id.normalizedId()] = detail }
     val baselinePlayoffDetails = baseline.divisionDetails.filter {
         it.kind?.equals("PLAYOFF", ignoreCase = true) == true
+    }
+    val baselinePlayoffDetailsById = baselinePlayoffDetails.associateBy { detail ->
+        detail.id.normalizedId()
     }
     val isCurrentBracketCountEnabled = isBracketTeamCountEnabled(eventType, includePlayoffs)
     val currentPlayoffTeamCount = if (isCurrentBracketCountEnabled) {
@@ -751,11 +998,11 @@ private fun Event.toCompetitionDto(
     }
     val isRegularBracketCountSerializationRequired =
         isCurrentBracketCountEnabled && currentRegularDetailsForDto.any { detail ->
-            existingById[detail.id]?.playoffTeamCount != detail.playoffTeamCount?.toDouble()
+            existingRegularById[detail.id.normalizedId()]?.playoffTeamCount != detail.playoffTeamCount?.toDouble()
         }
     val isPlayoffBracketCountSerializationRequired =
         isCurrentBracketCountEnabled && currentPlayoffDetailsForDto.any { detail ->
-            existingById[detail.id]?.playoffTeamCount != detail.playoffTeamCount?.toDouble()
+            existingPlayoffById[detail.id.normalizedId()]?.playoffTeamCount != detail.playoffTeamCount?.toDouble()
         }
     val regularDetailsChanged =
         currentRegularDetailsForDto != baselineRegularDetailsForDto ||
@@ -785,12 +1032,22 @@ private fun Event.toCompetitionDto(
     return existing.copy(
         divisionIds = if (currentDivisionIdsChanged) divisions else existing.divisionIds,
         divisionDetails = if (regularDetailsChanged) {
-            currentRegularDetailsForDto.map { detail -> detail.toDto(existingById[detail.id]) }
+            currentRegularDetailsForDto.map { detail ->
+                detail.toDto(
+                    existing = existingRegularById[detail.id.normalizedId()],
+                    baseline = baselineRegularDetailsById[detail.id.normalizedId()],
+                )
+            }
         } else {
             existing.divisionDetails
         },
         playoffDivisionDetails = if (normalizedPlayoffDetailsChanged) {
-            currentPlayoffDetailsForDto.map { detail -> detail.toDto(existingById[detail.id]) }
+            currentPlayoffDetailsForDto.map { detail ->
+                detail.toDto(
+                    existing = existingPlayoffById[detail.id.normalizedId()],
+                    baseline = baselinePlayoffDetailsById[detail.id.normalizedId()],
+                )
+            }
         } else {
             existing.playoffDivisionDetails
         },
@@ -837,6 +1094,63 @@ private fun Event.toCompetitionDto(
             leagueScoringConfig.toJsonObjectOrNull()
         } else {
             existing.leagueScoringConfig
+        },
+    )
+}
+
+private fun EventEditorCompetitionDto.withoutMatchGenerationConfiguration(
+    preserveDivisionFieldIds: Boolean = false,
+): EventEditorCompetitionDto =
+    copy(
+        divisionFieldIds = if (preserveDivisionFieldIds) divisionFieldIds else emptyMap(),
+        divisionDetails = divisionDetails.map { detail ->
+            detail.copy(
+                playoffTeamCount = null,
+                poolCount = null,
+                poolTeamCount = null,
+                phaseSettings = null,
+                playoffPlacementDivisionIds = emptyList(),
+                playoffConfig = null,
+                gamesPerOpponent = null,
+                restTimeMinutes = null,
+                usesSets = null,
+                matchDurationMinutes = null,
+                setDurationMinutes = null,
+                setsPerMatch = null,
+                pointsToVictory = emptyList(),
+            )
+        },
+        playoffDivisionDetails = emptyList(),
+        winnerSetCount = null,
+        loserSetCount = null,
+        doubleElimination = false,
+        includePlayoffs = false,
+        splitLeaguePlayoffDivisions = false,
+        playoffTeamCount = null,
+        pointsToVictory = emptyList(),
+        winnerBracketPointsToVictory = emptyList(),
+        loserBracketPointsToVictory = emptyList(),
+        usesSets = false,
+        setsPerMatch = null,
+        setDurationMinutes = null,
+        restTimeMinutes = null,
+        matchDurationMinutes = null,
+        gamesPerOpponent = null,
+        matchRulesOverride = null,
+        leagueScoringConfig = null,
+    )
+
+private fun EventEditorCompetitionDto.withoutTryoutMatchGenerationConfiguration(): EventEditorCompetitionDto {
+    val sanitized = withoutMatchGenerationConfiguration(preserveDivisionFieldIds = true)
+    return sanitized.copy(
+        divisionDetails = sanitized.divisionDetails.map { detail ->
+            detail.copy(
+                poolPlay = null,
+                standingsOverrides = null,
+                standingsConfirmedAt = null,
+                standingsConfirmedBy = null,
+                teamIds = emptyList(),
+            )
         },
     )
 }
@@ -925,44 +1239,88 @@ private fun Event.toStaffDto(
     pendingStaffInvites: List<Invite>,
     pendingStaffInvitesChanged: Boolean,
 ): EventEditorStaffDto {
+    val isTryout = eventType == EventType.TRYOUT
+    fun tryoutStaffTypes(staffTypes: List<String>): List<String> = staffTypes
+        .map(String::trim)
+        .map(String::uppercase)
+        .filter { staffType -> staffType == "HOST" }
+        .distinct()
+    val canonicalPendingInvites = if (isTryout) {
+        pendingStaffInvites.mapNotNull { invite ->
+            val staffTypes = tryoutStaffTypes(invite.staffTypes)
+            staffTypes.takeIf { it.isNotEmpty() }?.let { invite.copy(staffTypes = it) }
+        }
+    } else {
+        pendingStaffInvites
+    }
     return existing.copy(
-        staffingPriority = staffingPriority.name,
-        doTeamsOfficiate = doTeamsOfficiate == true,
-        teamOfficialsMaySwap = if (teamOfficialsMaySwap != baseline.teamOfficialsMaySwap) {
+        staffingPriority = if (isTryout) {
+            com.razumly.mvp.core.data.dataTypes.StaffingPriority.FULL_COVERAGE_WITH_CONFLICTS_ALLOWED.name
+        } else {
+            staffingPriority.name
+        },
+        doTeamsOfficiate = if (isTryout) false else doTeamsOfficiate == true,
+        teamOfficialsMaySwap = if (isTryout) {
+            false
+        } else if (teamOfficialsMaySwap != baseline.teamOfficialsMaySwap) {
             teamOfficialsMaySwap == true
         } else {
             existing.teamOfficialsMaySwap
         },
-        teamCheckInMode = if (teamCheckInMode != baseline.teamCheckInMode) teamCheckInMode.name else existing.teamCheckInMode,
-        teamCheckInOpenMinutesBefore = if (teamCheckInOpenMinutesBefore != baseline.teamCheckInOpenMinutesBefore) {
+        teamCheckInMode = if (isTryout) {
+            TeamCheckInMode.OFF.name
+        } else if (teamCheckInMode != baseline.teamCheckInMode) {
+            teamCheckInMode.name
+        } else {
+            existing.teamCheckInMode
+        },
+        teamCheckInOpenMinutesBefore = if (isTryout) {
+            60
+        } else if (teamCheckInOpenMinutesBefore != baseline.teamCheckInOpenMinutesBefore) {
             teamCheckInOpenMinutesBefore
         } else {
             existing.teamCheckInOpenMinutesBefore
         },
-        allowMatchRosterEdits = if (allowMatchRosterEdits != baseline.allowMatchRosterEdits) {
+        allowMatchRosterEdits = if (isTryout) {
+            false
+        } else if (allowMatchRosterEdits != baseline.allowMatchRosterEdits) {
             allowMatchRosterEdits
         } else {
             existing.allowMatchRosterEdits
         },
-        allowTemporaryMatchPlayers = if (allowTemporaryMatchPlayers != baseline.allowTemporaryMatchPlayers) {
+        allowTemporaryMatchPlayers = if (isTryout) {
+            false
+        } else if (allowTemporaryMatchPlayers != baseline.allowTemporaryMatchPlayers) {
             allowTemporaryMatchPlayers
         } else {
             existing.allowTemporaryMatchPlayers
         },
-        autoCreatePointMatchIncidents = if (autoCreatePointMatchIncidents != baseline.autoCreatePointMatchIncidents) {
+        autoCreatePointMatchIncidents = if (isTryout) {
+            false
+        } else if (autoCreatePointMatchIncidents != baseline.autoCreatePointMatchIncidents) {
             autoCreatePointMatchIncidents
         } else {
             existing.autoCreatePointMatchIncidents
         },
-        officialIds = if (officialIds != baseline.officialIds) officialIds else existing.officialIds,
-        officialPositions = if (officialPositions != baseline.officialPositions) {
+        officialIds = if (isTryout) {
+            emptyList()
+        } else if (officialIds != baseline.officialIds) {
+            officialIds
+        } else {
+            existing.officialIds
+        },
+        officialPositions = if (isTryout) {
+            emptyList()
+        } else if (officialPositions != baseline.officialPositions) {
             officialPositions.map { position ->
                 EventEditorOfficialPositionDto(position.id, position.name, position.count, position.order)
             }
         } else {
             existing.officialPositions
         },
-        eventOfficials = if (eventOfficials != baseline.eventOfficials) {
+        eventOfficials = if (isTryout) {
+            emptyList()
+        } else if (eventOfficials != baseline.eventOfficials) {
             eventOfficials.map { official ->
                 EventEditorOfficialDto(official.id, official.userId, official.positionIds, official.fieldIds, official.isActive)
             }
@@ -971,9 +1329,9 @@ private fun Event.toStaffDto(
         },
         assistantHostIds = if (assistantHostIds != baseline.assistantHostIds) assistantHostIds else existing.assistantHostIds,
         pendingInvites = if (pendingStaffInvitesChanged) {
-            pendingStaffInvites.map { invite ->
+            canonicalPendingInvites.map { invite ->
                 val existingInvite = existing.pendingInvites.firstOrNull { row -> row.id == invite.id }
-                existingInvite?.toDto(invite) ?: EventEditorStaffInviteDto(
+                val projected = existingInvite?.toDto(invite) ?: EventEditorStaffInviteDto(
                     id = invite.id.takeIf(String::isNotBlank),
                     email = invite.email,
                     firstName = invite.firstName,
@@ -988,6 +1346,16 @@ private fun Event.toStaffDto(
                     teamId = invite.teamId,
                     createdBy = invite.createdBy,
                 )
+                if (isTryout) {
+                    projected.copy(staffTypes = tryoutStaffTypes(projected.staffTypes))
+                } else {
+                    projected
+                }
+            }
+        } else if (isTryout) {
+            existing.pendingInvites.mapNotNull { invite ->
+                val staffTypes = tryoutStaffTypes(invite.staffTypes)
+                staffTypes.takeIf { it.isNotEmpty() }?.let { invite.copy(staffTypes = it) }
             }
         } else {
             existing.pendingInvites
@@ -1085,7 +1453,17 @@ private fun EventEditorDraftDto.withMutation(
         divisionFieldIdsChanged = divisionFieldIdsChanged,
         leagueScoringConfig = mutation.leagueScoringConfig,
         scoringChanged = scoringChanged,
-    )
+    ).let { projected ->
+        if (mutation.event.eventType == EventType.LEAGUE ||
+            mutation.event.eventType == EventType.TOURNAMENT
+        ) {
+            projected
+        } else if (mutation.event.eventType == EventType.TRYOUT) {
+            projected.withoutTryoutMatchGenerationConfiguration()
+        } else {
+            projected.withoutMatchGenerationConfiguration()
+        }
+    }
 
     val nextRegistration = registration.copy(
         payment = mutation.event.toPaymentDto(registration.payment, baseline.event),
@@ -1130,11 +1508,19 @@ object EventEditorSessionMapper {
         }
         require(bootstrap.createOperationId.normalizedId().isNotBlank()) { "Create bootstrap did not include an operation ID." }
         val canonical = bootstrap.snapshot.toCanonicalState(bootstrap.createOperationId)
+        val catalogFields = bootstrap.snapshot.catalogs.fields.mapNotNull { rawField ->
+            runCatching {
+                jsonMVP.decodeFromJsonElement<EventEditorFieldDto>(rawField)
+            }.getOrNull()
+                ?.takeIf { field -> field.archivedAt.isNullOrBlank() }
+                ?.toDomain()
+        }
         return EventEditorSession(
             snapshot = bootstrap.snapshot,
             canonicalState = canonical,
             baseline = canonical,
             createOperationId = bootstrap.createOperationId,
+            catalogFields = catalogFields,
         )
     }
 
@@ -1202,15 +1588,7 @@ object EventEditorSessionMapper {
     fun toSaveCommand(session: EventEditorSession, mutation: EventEditorMutation): com.razumly.mvp.core.network.dto.EventEditorSaveCommandDto {
         require(session.snapshot.mode == "EDIT") { "Save command requires an edit editor session." }
         val draft = session.snapshot.draft.withMutation(session.baseline, mutation.canonicalState)
-        val previousEventType = session.baseline.event.eventType.name.trim().uppercase()
-        val nextEventType = draft.basics.eventType.trim().uppercase()
-        val transition = when {
-            previousEventType != nextEventType -> EventEditorSaveScheduleTransitionDto(
-                mode = EventEditorScheduleTransitionMode.RECONCILE,
-                expectedScheduleRevision = session.snapshot.scheduleState.revision,
-            )
-            else -> EventEditorSaveScheduleTransitionDto(mode = EventEditorScheduleTransitionMode.PRESERVE)
-        }
+        val transition = EventEditorSaveScheduleTransitionDto(mode = EventEditorScheduleTransitionMode.PRESERVE)
         return com.razumly.mvp.core.network.dto.EventEditorSaveCommandDto(
             contractVersion = EVENT_EDITOR_CONTRACT_VERSION,
             editorRevision = session.snapshot.editorRevision,

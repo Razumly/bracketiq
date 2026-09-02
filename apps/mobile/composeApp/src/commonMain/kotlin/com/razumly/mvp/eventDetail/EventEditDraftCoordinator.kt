@@ -176,7 +176,10 @@ internal class EventEditDraftCoordinator(
         val nextAutomatedScheduling = if (locks.automatedScheduling) {
             previous.isAutomatedScheduling
         } else {
-            candidate.isAutomatedScheduling
+            normalizeAutomatedSchedulingForEventType(
+                eventType = nextEventType,
+                value = candidate.isAutomatedScheduling,
+            )
         }
         val automatedSchedulingChangeRejected = locks.automatedScheduling &&
             candidate.isAutomatedScheduling != previous.isAutomatedScheduling

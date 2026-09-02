@@ -9,6 +9,7 @@ import {
   getEventImageFallbackUrl,
   getEventImageUrl,
 } from '@/types';
+import { formatDisplayDate, formatDisplayTime } from '@/lib/dateUtils';
 import { formatEnumDisplayLabel } from '@/lib/enumUtils';
 import { locationService } from '@/lib/locationService';
 import { resolveEventParticipantCapacity } from '@/lib/eventCapacity';
@@ -39,7 +40,17 @@ export default function EventCard({
   onHostChange,
   hostChangeDisabled = false,
 }: EventCardProps) {
-  const { date, time } = getEventDateTime(event);
+  const nextOccurrence = event.nextOccurrence;
+  const { date, time } = nextOccurrence
+    ? {
+      date: formatDisplayDate(nextOccurrence.start, {
+        timeZone: nextOccurrence.timeZone ?? event.timeZone ?? 'UTC',
+      }),
+      time: formatDisplayTime(nextOccurrence.start, {
+        timeZone: nextOccurrence.timeZone ?? event.timeZone ?? 'UTC',
+      }),
+    }
+    : getEventDateTime(event);
   const affiliateUrl = normalizeExternalHttpUrl(event.affiliateUrl) ?? '';
   const isAffiliateEvent = affiliateUrl.length > 0;
   const normalizedDateDisplayMode = typeof event.dateDisplayMode === 'string'

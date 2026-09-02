@@ -160,6 +160,24 @@ describe('useEventFormConfigurationActions', () => {
         });
     });
 
+    it('repairs a missing end time when Tryout requires a fixed end', async () => {
+        const { result } = renderHook(() => useConfigurationActionsHarness(
+            buildEventData({ end: '' }),
+            jest.fn(),
+        ));
+
+        act(() => result.current.actions.handleEventTypeChange(
+            'TRYOUT',
+            result.current.applyEventType,
+        ));
+
+        await waitFor(() => {
+            expect(result.current.eventData.eventType).toBe('TRYOUT');
+            expect(result.current.eventData.noFixedEndDateTime).toBe(false);
+            expect(result.current.eventData.end).toBe('2026-07-20T10:00:00');
+        });
+    });
+
     it('derives count-up match duration from the configured segment policy', async () => {
         const override = {
             timekeeping: {

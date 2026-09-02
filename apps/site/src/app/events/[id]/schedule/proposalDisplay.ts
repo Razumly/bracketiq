@@ -255,16 +255,20 @@ export const proposalDisplayIssues = (
       errors.push(`${label} is missing from the Match Graph.`);
       return;
     }
+    const placementState = String(graphMatch.placementState ?? "")
+      .trim()
+      .toUpperCase();
+    const isPartialUnplaced =
+      proposal.scheduleOutcome.status === "PARTIAL"
+      && placementState === "UNPLACED";
     const graphStart =
       typeof graphMatch.start === "string" ? graphMatch.start : null;
     const graphEnd =
       typeof graphMatch.end === "string" ? graphMatch.end : null;
-    if (!match.start || !match.end || !graphStart || !graphEnd) {
+    if (!isPartialUnplaced && (!match.start || !match.end || !graphStart || !graphEnd)) {
       errors.push(`${label} has no proposed time.`);
     }
-    if (
-      String(graphMatch.placementState ?? "").trim().toUpperCase() !== "PLACED"
-    ) {
+    if (!isPartialUnplaced && placementState !== "PLACED") {
       errors.push(`${label} is not placed.`);
     }
     for (const teamId of [match.team1Id, match.team2Id]) {
@@ -275,9 +279,9 @@ export const proposalDisplayIssues = (
     const graphFieldId =
       typeof graphMatch.fieldId === "string" ? graphMatch.fieldId : null;
     const fieldId = match.fieldId ?? graphFieldId;
-    if (!match.fieldId || !graphFieldId) {
+    if (!isPartialUnplaced && (!match.fieldId || !graphFieldId)) {
       errors.push(`${label} has no resource assignment.`);
-    } else {
+    } else if (!isPartialUnplaced) {
       const field = fields.find(
         (candidate) =>
           String(candidate.id ?? candidate.$id ?? "") === fieldId,
@@ -300,6 +304,19 @@ export const proposalDisplayIssues = (
         Boolean(position) && typeof position === "object" && !Array.isArray(position),
     );
     const positions = proposalRecordsById(configuredPositions);
+    if (isPartialUnplaced) {
+      for (const link of [
+        graphMatch.previousLeftId,
+        graphMatch.previousRightId,
+        graphMatch.winnerNextMatchId,
+        graphMatch.loserNextMatchId,
+      ]) {
+        if (typeof link === "string" && !matchByKey.has(link)) {
+          errors.push(`${label} has an unresolved Match Graph link.`);
+        }
+      }
+      return;
+    }
     assignments.forEach((assignment) => {
       if (!assignment || typeof assignment !== "object") {
         errors.push(`${label} has an invalid officiating assignment.`);

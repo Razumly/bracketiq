@@ -46,6 +46,11 @@ type EventLike = {
   timeSlotIds?: unknown;
 };
 
+type EventSnapshotLike = EventLike & {
+  start: Date;
+  end: Date | null;
+};
+
 export type RegistrationRow = {
   id: string;
   eventId: string;
@@ -160,7 +165,22 @@ export type EventRegistrationStructure = {
   maxParticipants?: number | null;
   singleDivision?: boolean | null;
   divisionIds?: string[];
+  archivedAt?: Date | null;
+  parentEvent?: string | null;
+  start?: Date;
+  end?: Date | null;
+  timeSlotIds?: string[] | null;
 };
+
+export class EventRegistrationOccurrenceChangedError extends Error {
+  readonly code = 'EVENT_WEEKLY_OCCURRENCE_CHANGED';
+  readonly status = 409;
+
+  constructor(message = 'The selected weekly occurrence changed. Reload and try again.') {
+    super(message);
+    this.name = 'EventRegistrationOccurrenceChangedError';
+  }
+}
 
 export class EventConfigurationChangedError extends Error {
   readonly code = 'EVENT_CONFIGURATION_CHANGED';
@@ -169,6 +189,15 @@ export class EventConfigurationChangedError extends Error {
   constructor() {
     super('Event configuration changed while the registration was being processed. Reload and try again.');
     this.name = 'EventConfigurationChangedError';
+  }
+}
+export class EventRegistrationArchivedError extends Error {
+  readonly code = 'EVENT_REGISTRATION_EVENT_ARCHIVED';
+  readonly status = 409;
+
+  constructor() {
+    super('This weekly event is archived and no longer accepts registration changes.');
+    this.name = 'EventRegistrationArchivedError';
   }
 }
 
@@ -254,6 +283,15 @@ const normalizeEventTypeForRegistration = (value: unknown): string | null => {
   const normalized = value.trim().toUpperCase();
   return normalized.length ? normalized : null;
 };
+const isArchivedWeeklyParentRecord = (event: {
+  eventType?: unknown;
+  parentEvent?: unknown;
+  archivedAt?: unknown;
+} | null | undefined): boolean => (
+  normalizeEventTypeForRegistration(event?.eventType) === 'WEEKLY_EVENT' &&
+  !normalizeId(event?.parentEvent) &&
+  Boolean(event?.archivedAt)
+);
 
 
 export const assertEventTypeRegistrationUnit = (
@@ -268,11 +306,13 @@ export const assertEventTypeRegistrationUnit = (
     throw new EventRegistrationUnitError(normalizedEventType, normalizedTeamSignup);
   }
 };
-
 export const acquireEventLockAndLoadStructure = async (
   client: PrismaLike,
   eventId: string,
   expected?: Partial<Pick<EventRegistrationStructure, 'eventType' | 'teamSignup'>>,
+  options?: {
+    allowArchivedWeeklyReservation?: boolean;
+  },
 ): Promise<EventRegistrationStructure> => {
   await acquireEventLock(client, eventId);
   const event = await client.events.findUnique({
@@ -283,11 +323,43 @@ export const acquireEventLockAndLoadStructure = async (
       teamSignup: true,
       maxParticipants: true,
       singleDivision: true,
+      parentEvent: true,
+      archivedAt: true,
+      start: true,
+      end: true,
+      timeSlotIds: true,
     },
   });
   if (!event) {
     throw Object.assign(new Error('Event not found.'), { status: 404 });
   }
+
+  const parentEventId = normalizeId(event.parentEvent);
+  let parentEvent: {
+    id: string;
+    eventType: unknown;
+    parentEvent: unknown;
+    archivedAt: unknown;
+  } | null = null;
+  if (parentEventId) {
+    await acquireEventLock(client, parentEventId);
+    parentEvent = await client.events.findUnique({
+      where: { id: parentEventId },
+      select: {
+        id: true,
+        eventType: true,
+        parentEvent: true,
+        archivedAt: true,
+      },
+    });
+  }
+  const archivedWeeklyEvent = (
+    isArchivedWeeklyParentRecord(event) || isArchivedWeeklyParentRecord(parentEvent)
+  );
+  if (archivedWeeklyEvent && !options?.allowArchivedWeeklyReservation) {
+    throw new EventRegistrationArchivedError();
+  }
+
   assertEventTypeRegistrationUnit(event.eventType, event.teamSignup);
 
   const expectedEventType = expected && Object.prototype.hasOwnProperty.call(expected, 'eventType')
@@ -312,9 +384,12 @@ export const acquireEventLockAndLoadStructure = async (
     },
     select: { id: true },
   });
-  const divisionIds = normalizeIdList(
-    activeEntryDivisionRows.map((division) => division.id),
-  );
+  const divisionIds = normalizeIdList(activeEntryDivisionRows.map((row) => row.id));
+  const effectiveArchivedAt = archivedWeeklyEvent
+    ? event.archivedAt ?? (
+      parentEvent?.archivedAt instanceof Date ? parentEvent.archivedAt : null
+    )
+    : event.archivedAt ?? null;
   return {
     id: event.id,
     eventType: normalizeEventTypeForRegistration(event.eventType),
@@ -322,6 +397,11 @@ export const acquireEventLockAndLoadStructure = async (
     maxParticipants: event.maxParticipants ?? null,
     singleDivision: event.singleDivision ?? null,
     divisionIds,
+    archivedAt: effectiveArchivedAt,
+    parentEvent: normalizeId(event.parentEvent),
+    start: event.start,
+    end: event.end,
+    timeSlotIds: normalizeIdList(event.timeSlotIds),
   };
 };
 export const hasJoinedEventParticipant = async (
@@ -1135,17 +1215,63 @@ const assertRegistrationCapacity = async (
     throw new EventRegistrationCapacityError(capacity, projectedParticipantCount);
   }
 };
-
-const upsertEventRegistrationWithinTransaction = async (
-  params: EventRegistrationWriteParams,
+const resolveLockedWeeklyOccurrence = async (
+  params: Pick<EventRegistrationWriteParams, 'occurrence'>,
+  event: EventRegistrationStructure,
   client: PrismaLike,
-): Promise<RegistrationRow> => {
+  allowArchivedEvent = false,
+): Promise<WeeklyOccurrenceInput | null> => {
   const occurrence = params.occurrence
     ? {
       slotId: normalizeId(params.occurrence.slotId),
       occurrenceDate: normalizeId(params.occurrence.occurrenceDate),
     }
     : null;
+  if (!isWeeklyParentEvent(event)) {
+    return occurrence;
+  }
+  if (!occurrence) {
+    throw new EventRegistrationOccurrenceChangedError(
+      'A weekly registration must include a selected occurrence.',
+    );
+  }
+  if (
+    !(event.start instanceof Date) ||
+    Number.isNaN(event.start.getTime()) ||
+    !(event.end === null || event.end === undefined || event.end instanceof Date) ||
+    !Array.isArray(event.timeSlotIds)
+  ) {
+    throw new EventRegistrationOccurrenceChangedError();
+  }
+  const resolved = await resolveWeeklyOccurrence({
+    event: {
+      id: event.id,
+      start: event.start,
+      end: event.end ?? null,
+      eventType: event.eventType,
+      parentEvent: event.parentEvent ?? null,
+      timeSlotIds: event.timeSlotIds,
+      archivedAt: event.archivedAt ?? null,
+    },
+    occurrence,
+    allowArchivedEvent,
+  }, client);
+  if (!resolved.ok) {
+    throw new EventRegistrationOccurrenceChangedError(resolved.error);
+  }
+  return {
+    slotId: resolved.value.slotId,
+    occurrenceDate: resolved.value.occurrenceDate,
+  };
+};
+
+
+const upsertEventRegistrationWithinTransaction = async (
+  params: EventRegistrationWriteParams,
+  client: PrismaLike,
+): Promise<RegistrationRow> => {
+  const event = await acquireEventLockAndLoadStructure(client, params.eventId);
+  const occurrence = await resolveLockedWeeklyOccurrence(params, event, client);
   const registrationId = normalizeId(params.registrationId) ?? buildEventRegistrationId({
     eventId: params.eventId,
     registrantType: params.registrantType,
@@ -1153,8 +1279,11 @@ const upsertEventRegistrationWithinTransaction = async (
     slotId: occurrence?.slotId ?? null,
     occurrenceDate: occurrence?.occurrenceDate ?? null,
   });
-  const event = await acquireEventLockAndLoadStructure(client, params.eventId);
-  const resolvedParams = await resolveParticipantEntryDivision(params, event, client);
+  const resolvedParams = await resolveParticipantEntryDivision(
+    { ...params, occurrence },
+    event,
+    client,
+  );
   assertEventRegistrationUnit(event, resolvedParams);
   const now = new Date();
   const acceptedRegistration =
@@ -1237,6 +1366,7 @@ export type EventRegistrationStatusTransition = {
   current?: RegistrationRow;
   fallbackCurrent?: RegistrationRow;
   event?: EventRegistrationStructure;
+  allowArchivedWeeklyReservation?: boolean;
   create?: Omit<EventRegistrationWriteParams, 'registrationId' | 'status'>;
 };
 
@@ -1296,8 +1426,31 @@ const transitionEventRegistrationStatusWithinTransaction = async (
       registrationId: params.registrationId,
       status: params.status,
     };
-  const event = params.event ?? await acquireEventLockAndLoadStructure(client, eventId);
-  const writeParams = await resolveParticipantEntryDivision(baseWriteParams, event, client);
+  const allowArchivedWeeklyReservation = params.allowArchivedWeeklyReservation === true;
+  const event = typeof (client as any).events?.findUnique === 'function'
+    ? await acquireEventLockAndLoadStructure(
+      client,
+      eventId,
+      undefined,
+      { allowArchivedWeeklyReservation },
+    )
+    : params.event ?? await acquireEventLockAndLoadStructure(
+      client,
+      eventId,
+      undefined,
+      { allowArchivedWeeklyReservation },
+    );
+  const lockedOccurrence = await resolveLockedWeeklyOccurrence(
+    baseWriteParams,
+    event,
+    client,
+    allowArchivedWeeklyReservation,
+  );
+  const writeParams = await resolveParticipantEntryDivision(
+    { ...baseWriteParams, occurrence: lockedOccurrence },
+    event,
+    client,
+  );
   assertEventRegistrationUnit(event, writeParams);
   const now = new Date();
   const acceptedRegistration = (
@@ -1380,19 +1533,31 @@ type EventRegistrationDeleteParams = {
   registrantType: RegistrationRegistrantType;
   registrantId: string;
   occurrence?: WeeklyOccurrenceInput | null;
+  allowArchivedWeeklyReservation?: boolean;
 };
 
 const deleteEventRegistrationWithinTransaction = async (
   params: EventRegistrationDeleteParams,
   client: PrismaLike,
 ): Promise<void> => {
-  await acquireEventLockAndLoadStructure(client, params.eventId);
+  const event = await acquireEventLockAndLoadStructure(
+    client,
+    params.eventId,
+    undefined,
+    { allowArchivedWeeklyReservation: params.allowArchivedWeeklyReservation === true },
+  );
+  const occurrence = await resolveLockedWeeklyOccurrence(
+    { occurrence: params.occurrence },
+    event,
+    client,
+    params.allowArchivedWeeklyReservation === true,
+  );
   const registrationId = buildEventRegistrationId({
     eventId: params.eventId,
     registrantType: params.registrantType,
     registrantId: params.registrantId,
-    slotId: params.occurrence?.slotId ?? null,
-    occurrenceDate: params.occurrence?.occurrenceDate ?? null,
+    slotId: occurrence?.slotId ?? null,
+    occurrenceDate: occurrence?.occurrenceDate ?? null,
   });
   await client.eventRegistrations.updateMany({
     where: { id: registrationId },
@@ -1582,7 +1747,7 @@ export const syncDivisionTeamMembershipFromRegistrations = async (
 };
 
 export const buildEventParticipantSnapshot = async (params: {
-  event: EventLike;
+  event: EventSnapshotLike;
   occurrence?: WeeklyOccurrenceInput | null;
   includeRegistrations?: boolean;
 }, client: PrismaLike = prisma): Promise<EventParticipantSnapshot> => {

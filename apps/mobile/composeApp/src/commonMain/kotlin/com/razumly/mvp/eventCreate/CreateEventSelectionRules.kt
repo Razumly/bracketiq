@@ -23,7 +23,6 @@ internal fun Event.applyCreateSelectionRules(): Event {
 
         EventType.WEEKLY_EVENT -> normalizedEvent.copy(
             singleDivision = false,
-            noFixedEndDateTime = false,
         )
 
         EventType.TRYOUT -> normalizedEvent.copy(

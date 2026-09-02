@@ -28,11 +28,13 @@ jest.mock("@/server/matchScheduleNotifications", () => ({
 import type { EventEditorCreateProposalGraph } from "@/contracts/eventEditor";
 import {
   EventScheduleProposalGraphError,
+  mergeProtectedMatches,
   persistCreateOnlyMatchGraph,
   persistSerializedScheduleGraph,
   reconcileEventSchedule,
   validateAndNormalizeSerializedGraph,
 } from "@/server/scheduler/eventScheduleMutation";
+import { EventBuilder } from "@/server/scheduler/EventBuilder";
 import {
   Division,
   League,
@@ -40,6 +42,7 @@ import {
   PlayingField,
   Team,
   TimeSlot,
+  UserData,
 } from "@/server/scheduler/types";
 import { loadEventScheduleState } from "@/server/events/eventEditorSnapshot";
 import {
@@ -315,7 +318,7 @@ describe("event schedule Match Graph persistence", () => {
     ).toThrow(EventScheduleProposalGraphError);
     expect(() =>
       validateAndNormalizeSerializedGraph("event_1", graph),
-    ).toThrow(/is not placed/);
+    ).toThrow(/has an unexpected proposed resource/);
   });
   it("rejects an unresolved officiating slot for a configured official position", () => {
     const graph = buildProposalValidationGraph();
@@ -330,6 +333,28 @@ describe("event schedule Match Graph persistence", () => {
       validateAndNormalizeSerializedGraph("event_1", graph),
     ).toThrow(/has an unresolved officiating slot for Referee 1/);
   });
+  it("accepts unresolved optional named-official slots under Best Available coverage", () => {
+    const graph = buildProposalValidationGraph();
+    graph.event.staffingPriority = "BEST_AVAILABLE_COVERAGE";
+    graph.event.officialPositions = [
+      { id: "referee", name: "Referee", count: 1, order: 0 },
+    ];
+    graph.matches[0]!.officialAssignments = [{
+      positionId: "referee",
+      slotIndex: 0,
+      holderType: "OFFICIAL",
+      userId: null,
+      eventOfficialId: null,
+      checkedIn: false,
+      hasConflict: false,
+    }];
+    graph.matches[0]!.officialIds = [];
+
+    expect(() =>
+      validateAndNormalizeSerializedGraph("event_1", graph),
+    ).not.toThrow();
+  });
+
   it("accepts a player as a team-officiating assignment holder", () => {
     const graph = buildProposalValidationGraph();
     const assignment = {
@@ -496,6 +521,326 @@ describe("event schedule Match Graph persistence", () => {
     }
     expect(tx.teams.upsert).toHaveBeenCalled();
     expect(saveMatches).toHaveBeenCalledWith(event.id, result.matches, tx);
+  });
+
+  it("keeps failed partial placements as unplaced graph nodes", () => {
+    const event = buildLeague("event_partial", false, 0, 4, 1);
+    const builder = new EventBuilder(event, context, {
+      allowPartialPlacement: true,
+      canUseCandidate: () => false,
+    });
+
+    const scheduled = builder.buildSchedule();
+    const matches = Object.values(scheduled.matches);
+
+    expect(builder.placementFailures).toHaveLength(matches.length);
+    expect(matches.every((match) => (
+      match.placementState === "UNPLACED"
+      && match.field === null
+      && match.officialAssignments.length === 0
+    ))).toBe(true);
+  });
+  it("rewires protected graph references by structural role after ID and order changes", () => {
+    const event = buildLeague("event_merge_protected", false, 0, 4, 1);
+    const division = event.divisions[0]!;
+    const start = new Date("2026-01-05T08:00:00.000Z");
+    const makeMatch = (id: string, matchId: number) => new Match({
+      id,
+      matchId,
+      start,
+      end: new Date(start.getTime() + 60 * 60 * 1000),
+      division,
+      bufferMs: 0,
+      eventId: event.id,
+    });
+
+    const oldProtected = makeMatch("old:protected", 101);
+    oldProtected.locked = true;
+    oldProtected.status = "COMPLETE";
+    oldProtected.team1Points = [7];
+    const oldReplaceable = makeMatch("old:replaceable", 202);
+    const regeneratedProtected = makeMatch("new:protected", 901);
+    const regeneratedReplaceable = makeMatch("new:replaceable", 703);
+    const regeneratedTail = makeMatch("new:tail", 1);
+
+    oldProtected.winnerNextMatch = oldReplaceable;
+    oldProtected.loserNextMatch = oldReplaceable;
+    regeneratedTail.previousLeftMatch = oldReplaceable;
+    regeneratedTail.previousRightMatch = oldReplaceable;
+    regeneratedTail.winnerNextMatch = regeneratedProtected;
+    regeneratedTail.loserNextMatch = regeneratedProtected;
+
+    const merged = mergeProtectedMatches(
+      event,
+      [regeneratedTail, regeneratedReplaceable, regeneratedProtected],
+      [oldProtected, oldReplaceable],
+      new Set([oldProtected.id]),
+    );
+    const mergedById = new Map(merged.map((match) => [match.id, match]));
+
+    expect(mergedById.get(oldProtected.id)).toBe(oldProtected);
+    expect(oldProtected.locked).toBe(true);
+    expect(oldProtected.status).toBe("COMPLETE");
+    expect(oldProtected.team1Points).toEqual([7]);
+    expect(mergedById.has(oldReplaceable.id)).toBe(true);
+    expect(mergedById.has(regeneratedReplaceable.id)).toBe(false);
+    expect(mergedById.has(regeneratedTail.id)).toBe(false);
+    expect(oldProtected.winnerNextMatch).toBe(oldReplaceable);
+    expect(oldProtected.loserNextMatch).toBe(oldReplaceable);
+    expect(Object.keys(event.matches).sort()).toEqual([...mergedById.keys()].sort());
+
+    const mergedIds = new Set(merged.map((match) => match.id));
+    for (const match of merged) {
+      for (const reference of [
+        match.winnerNextMatch,
+        match.loserNextMatch,
+        match.previousLeftMatch,
+        match.previousRightMatch,
+      ]) {
+        expect(reference === null || mergedIds.has(reference.id)).toBe(true);
+      }
+    }
+  });
+  it("renumbers mutable matches when regeneration collides with a protected match number", () => {
+    const event = buildLeague("event_merge_match_numbers", false, 0, 2, 1);
+    const division = event.divisions[0]!;
+    const start = new Date("2026-01-05T08:00:00.000Z");
+    const makeMatch = (id: string, matchId: number) => new Match({
+      id,
+      matchId,
+      start,
+      end: new Date(start.getTime() + 60 * 60 * 1000),
+      division,
+      bufferMs: 0,
+      eventId: event.id,
+    });
+
+    const oldProtected = makeMatch("old:protected", 2);
+    oldProtected.locked = true;
+    const regeneratedProtected = makeMatch("new:protected", 99);
+    const regeneratedMutable = makeMatch("new:mutable", 2);
+    regeneratedMutable.losersBracket = true;
+
+    const merged = mergeProtectedMatches(
+      event,
+      [regeneratedProtected, regeneratedMutable],
+      [oldProtected],
+      new Set([oldProtected.id]),
+    );
+    const mergedById = new Map(merged.map((match) => [match.id, match]));
+
+    expect(mergedById.get(oldProtected.id)).toBe(oldProtected);
+    expect(oldProtected.matchId).toBe(2);
+    expect(new Set(merged.map((match) => match.matchId)).size).toBe(merged.length);
+    expect(mergedById.get(regeneratedMutable.id)).toBeUndefined();
+  });
+
+
+  it("reserves protected field occupancy while rebuilding the graph", async () => {
+    const event = buildLeague("event_protected_collision", false, 0, 4, 1);
+    const graphBuilder = new EventBuilder(event, context, {
+      includePlaceholderTeams: false,
+    });
+    graphBuilder.buildMatchGraph();
+    const protectedMatch = Object.values(event.matches)[0]!;
+    const protectedEnd = new Date(event.start.getTime() + 60 * 60 * 1000);
+    protectedMatch.start = event.start;
+    protectedMatch.end = protectedEnd;
+    protectedMatch.field = event.fields.field_1!;
+    protectedMatch.placementState = "PLACED";
+    protectedMatch.locked = true;
+    event.fields.field_1!.matches = [protectedMatch];
+
+    const previousMatchIds = Object.keys(event.matches);
+    const tx = {
+      events: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: event.id,
+          eventType: "LEAGUE",
+        }),
+      },
+    } as unknown as Parameters<typeof reconcileEventSchedule>[0]["tx"];
+    (loadEventWithRelations as jest.Mock).mockResolvedValue(event);
+
+    const result = await reconcileEventSchedule({
+      tx,
+      eventId: event.id,
+      mode: "REBUILD",
+      historyPolicy: "ALLOW_PROTECTED",
+      includePlaceholderTeams: false,
+      persist: false,
+
+      protectedMatchIds: new Set([protectedMatch.id]),
+      regenerateGraph: true,
+    });
+
+    const retainedProtected = result.matches.find(
+      (match) => match.id === protectedMatch.id,
+    );
+    expect(retainedProtected).toBe(protectedMatch);
+    expect(retainedProtected?.start).toEqual(event.start);
+    expect(result.matches.filter((match) => previousMatchIds.includes(match.id))).toHaveLength(
+      previousMatchIds.length,
+    );
+    expect(retainedProtected?.end).toEqual(protectedEnd);
+    const overlapsProtected = result.matches.some((match) => (
+      match.id !== protectedMatch.id
+      && match.placementState === "PLACED"
+      && match.field?.id === protectedMatch.field?.id
+      && match.start.getTime() < protectedMatch.end.getTime()
+      && match.end.getTime() > protectedMatch.start.getTime()
+    ));
+    expect(overlapsProtected).toBe(false);
+  });
+  it("reports final staffing gaps after retaining protected Best Available assignments", async () => {
+    const event = buildLeague("event_best_available_rebuild", false, 0, 4, 2);
+    event.timeSlots.forEach((slot) => {
+      slot.repeating = false;
+      slot.endTimeMinutes = 9 * 60;
+    });
+    const division = event.divisions[0]!;
+    const protectedDivision = buildDivision("protected_phase", "LEAGUE");
+    const official = new UserData({
+      id: "official_1",
+      divisions: [division, protectedDivision],
+    });
+    const officialPosition = {
+      id: "referee",
+      name: "Referee",
+      count: 1,
+      order: 0,
+    };
+    const eventOfficial = {
+      id: "event_official_1",
+      userId: official.id,
+      positionIds: [officialPosition.id],
+      fieldIds: [],
+      isActive: true,
+    };
+    event.staffingPriority = "BEST_AVAILABLE_COVERAGE";
+    event.officials = [official];
+    event.officialPositions = [officialPosition];
+    event.eventOfficials = [eventOfficial];
+    const protectedEnd = new Date(event.start.getTime() + 60 * 60 * 1000);
+    event.registeredTeamIds = Object.keys(event.teams);
+    division.teamIds = [...event.registeredTeamIds];
+    const protectedMatch = new Match({
+      id: `${event.id}:protected`,
+      matchId: 1,
+      placementState: "PLACED",
+      start: event.start,
+      end: protectedEnd,
+      division: protectedDivision,
+      field: event.fields.field_1!,
+      bufferMs: 0,
+      eventId: event.id,
+      official,
+      officialAssignments: [{
+        positionId: officialPosition.id,
+        slotIndex: 0,
+        holderType: "OFFICIAL",
+        userId: official.id,
+        eventOfficialId: eventOfficial.id,
+        checkedIn: false,
+        hasConflict: false,
+      }],
+    });
+    event.matches = { [protectedMatch.id]: protectedMatch };
+    event.fields.field_1!.matches = [protectedMatch];
+
+    const tx = {
+      events: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: event.id,
+          eventType: "LEAGUE",
+        }),
+      },
+      matches: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: "stored_field_blocker_1",
+            eventId: "other_event",
+            fieldId: "field_1",
+            start: new Date("2026-01-05T09:00:00.000Z"),
+            end: new Date("2026-01-05T22:00:00.000Z"),
+            placementState: "PLACED",
+          },
+          {
+            id: "stored_field_blocker_2",
+            eventId: "other_event",
+            fieldId: "field_2",
+            start: new Date("2026-01-05T09:00:00.000Z"),
+            end: new Date("2026-01-05T22:00:00.000Z"),
+            placementState: "PLACED",
+          },
+        ]),
+      },
+    } as unknown as Parameters<typeof reconcileEventSchedule>[0]["tx"];
+    (loadEventWithRelations as jest.Mock).mockResolvedValue(event);
+
+    const result = await reconcileEventSchedule({
+      tx,
+      eventId: event.id,
+      mode: "REBUILD",
+      historyPolicy: "ALLOW_PROTECTED",
+      includePlaceholderTeams: false,
+      allowPartialPlacement: true,
+      persist: false,
+      protectedMatchIds: new Set([protectedMatch.id]),
+      regenerateGraph: true,
+    });
+    const retained = result.matches.find((match) => match.id === protectedMatch.id);
+
+    const generatedWithGap = result.matches.find((match) => (
+      match.id !== protectedMatch.id
+      && match.placementState === "PLACED"
+      && match.start.getTime() === protectedMatch.start.getTime()
+      && match.field?.id === "field_2"
+      && match.officialAssignments.some((assignment) => (
+        assignment.positionId === officialPosition.id
+        && assignment.userId === null
+      ))
+    ));
+    expect(retained?.officialAssignments).toEqual([
+      expect.objectContaining({
+        positionId: officialPosition.id,
+        userId: official.id,
+        eventOfficialId: eventOfficial.id,
+      }),
+    ]);
+    expect(result.matches.some((match) => match.placementState === "UNPLACED")).toBe(true);
+    expect(generatedWithGap).toBeDefined();
+    const unresolvedTeamDutyMatchIds = result.matches
+      .filter((match) => (
+        match.field !== null
+        && match.placementState !== "UNPLACED"
+        && match.requiresTeamOfficial
+        && match.teamOfficial === null
+      ))
+      .map((match) => match.id)
+      .sort((left, right) => left.localeCompare(right));
+    const unresolvedNamedOfficialMatchIds = result.matches
+      .filter((match) => (
+        match.field !== null
+        && match.placementState !== "UNPLACED"
+        && match.officialAssignments.some((assignment) => (
+          assignment.userId === null
+        ))
+      ))
+      .map((match) => match.id)
+      .sort((left, right) => left.localeCompare(right));
+    expect(result.warnings).toEqual([
+      {
+        code: "UNRESOLVED_TEAM_DUTY",
+        message: "Some placed matches do not have a Team-duty assignment.",
+        matchIds: unresolvedTeamDutyMatchIds,
+      },
+      {
+        code: "UNRESOLVED_NAMED_OFFICIAL_POSITION",
+        message: "Some placed matches have an unbound named Official Position.",
+        matchIds: unresolvedNamedOfficialMatchIds,
+      },
+    ]);
   });
 
   it("places a persisted graph by readiness without waiting for every opening Match", async () => {
@@ -711,6 +1056,52 @@ describe("event schedule Match Graph persistence", () => {
     expect(result.event.end.getTime()).toBeLessThanOrEqual(
       recurringSlotEnd.getTime(),
     );
+  });
+
+  it("restores the original open-ended Event end when every partial Match is unplaced", async () => {
+    const event = buildLeague("event_partial_end_restore", false, 0, 4, 1);
+    event.noFixedEndDateTime = true;
+    const originalEnd = new Date("2026-01-04T22:00:00.000Z");
+    const originalGeneratedEnd = new Date("2026-01-04T21:30:00.000Z");
+    event.end = originalEnd;
+    event.generatedScheduleEnd = originalGeneratedEnd;
+    const tx = {
+      events: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: event.id,
+          eventType: "LEAGUE",
+        }),
+      },
+      matches: {
+        findMany: jest.fn().mockResolvedValue([{
+          id: "stored_full_day_blocker",
+          eventId: "other_event",
+          fieldId: "field_1",
+          start: new Date("2026-01-01T00:00:00.000Z"),
+          end: new Date("2030-01-01T00:00:00.000Z"),
+          placementState: "PLACED",
+        }]),
+      },
+    } as unknown as Parameters<typeof reconcileEventSchedule>[0]["tx"];
+    (loadEventWithRelations as jest.Mock).mockResolvedValue(event);
+
+    const result = await reconcileEventSchedule({
+      tx,
+      eventId: event.id,
+      mode: "BUILD",
+      allowPartialPlacement: true,
+      includePlaceholderTeams: false,
+      persist: false,
+    });
+
+    expect(result.matches.length).toBeGreaterThan(0);
+    expect(result.matches.every((match) => (
+      match.placementState === "UNPLACED"
+      && match.field === null
+    ))).toBe(true);
+    expect(result.placementFailures.length).toBe(result.matches.length);
+    expect(result.event.end).toEqual(originalEnd);
+    expect(result.event.generatedScheduleEnd).toEqual(originalGeneratedEnd);
   });
 
   it("avoids a stored Field blocker before persisting a proposed match", async () => {

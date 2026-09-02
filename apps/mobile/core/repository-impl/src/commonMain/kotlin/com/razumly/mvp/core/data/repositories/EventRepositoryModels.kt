@@ -45,6 +45,7 @@ data class EventEditorSession(
     val baseline: EventEditorCanonicalState = canonicalState,
     val createOperationId: String? = null,
     val pendingCreate: PendingEventCreate? = null,
+    val catalogFields: List<Field> = emptyList(),
 )
 
 data class EventEditorMutation(
@@ -57,6 +58,7 @@ data class EventEditorSaveOutcome(
     val staffEmailDelivery: String,
     val scheduleOutcome: EventEditorScheduleOutcomeDto,
     val proposal: EventEditorCreateProposalDto? = null,
+    val acceptanceOperationId: String? = null,
 )
 
 data class EventScheduleOutcome(

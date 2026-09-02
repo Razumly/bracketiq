@@ -13,9 +13,11 @@ import {
 } from "@/server/events/eventRegistrations";
 import { eventRegistrationErrorResponse } from "@/server/events/eventRegistrationErrorResponse";
 import {
-  isWeeklyParentEvent,
+  isActiveWeeklyParentEvent,
+  isArchivedWeeklyParentEvent,
   isWeeklyOccurrenceJoinClosed,
   resolveWeeklyOccurrence,
+  WEEKLY_EVENT_ARCHIVED_ERROR,
   WEEKLY_OCCURRENCE_JOIN_CLOSED_ERROR,
 } from "@/server/events/weeklyOccurrences";
 import { dispatchRequiredEventDocuments } from "@/lib/eventConsentDispatch";
@@ -64,6 +66,8 @@ export async function POST(
     select: {
       id: true,
       start: true,
+      end: true,
+      archivedAt: true,
       minAge: true,
       maxAge: true,
       sportIds: true,
@@ -81,11 +85,17 @@ export async function POST(
   if (!event) {
     return NextResponse.json({ error: "Event not found" }, { status: 404 });
   }
+  if (isArchivedWeeklyParentEvent(event)) {
+    return NextResponse.json(
+      { error: WEEKLY_EVENT_ARCHIVED_ERROR },
+      { status: 409 },
+    );
+  }
 
   const hasOccurrenceInput = Boolean(
     parsed.data.slotId || parsed.data.occurrenceDate,
   );
-  const occurrence = isWeeklyParentEvent(event)
+  const occurrence = isActiveWeeklyParentEvent(event)
     ? await resolveWeeklyOccurrence({
         event,
         occurrence: parsed.data,
@@ -94,7 +104,7 @@ export async function POST(
   if (occurrence && !occurrence.ok) {
     return NextResponse.json({ error: occurrence.error }, { status: 400 });
   }
-  if (!isWeeklyParentEvent(event) && hasOccurrenceInput) {
+  if (!isActiveWeeklyParentEvent(event) && hasOccurrenceInput) {
     return NextResponse.json(
       { error: "Weekly occurrence selection is only valid for weekly events." },
       { status: 400 },

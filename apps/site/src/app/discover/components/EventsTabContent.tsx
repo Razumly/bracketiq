@@ -263,8 +263,8 @@ export default function EventsTabContent<TEventType extends string = Event['even
     const sorted = [...sourceEvents];
 
     const compareByStart = (a: Event, b: Event) => {
-      const aTime = new Date(a.start).getTime();
-      const bTime = new Date(b.start).getTime();
+      const aTime = new Date(a.nextOccurrence?.start ?? a.start).getTime();
+      const bTime = new Date(b.nextOccurrence?.start ?? b.start).getTime();
       return aTime - bTime;
     };
 

@@ -355,6 +355,10 @@ class DefaultEventDetailComponent(
     override var editedEvent = editDraftCoordinator.editedEvent
     override var isEditing = editDraftCoordinator.isEditing
     override val eventEditorControlLocks = editDraftCoordinator.controlLocks
+    override val eventEditorSnapshot
+        get() = eventEditActionHandler.eventEditorSnapshot
+    override val scheduleMaintenanceReview
+        get() = eventEditActionHandler.scheduleMaintenanceReview
     override val eventTypeTransitionConfirmation
         get() = eventEditActionHandler.eventTypeTransitionConfirmation
 
@@ -1171,7 +1175,7 @@ class DefaultEventDetailComponent(
         event: Event = selectedEvent.value,
         errorMessage: String = "Select an occurrence before continuing.",
     ): EventOccurrenceSelection? {
-        if (!isWeeklyParentEvent(event)) {
+        if (!isWeeklyEventShape(event)) {
             return null
         }
         return currentWeeklyOccurrenceSelection() ?: run {
@@ -1373,6 +1377,20 @@ class DefaultEventDetailComponent(
 
     override fun confirmEventTypeTransition() =
         eventEditActionHandler.confirmEventTypeTransition()
+
+    override fun acceptScheduleMaintenanceProposal() =
+        eventEditActionHandler.acceptScheduleMaintenanceProposal()
+    override fun retryAcceptedScheduleSync() =
+        eventEditActionHandler.retryAcceptedScheduleSync()
+
+    override fun rejectScheduleMaintenanceProposal() =
+        eventEditActionHandler.rejectScheduleMaintenanceProposal()
+
+    override fun dismissScheduleMaintenanceReview() =
+        eventEditActionHandler.dismissScheduleMaintenanceReview()
+
+    override fun requestFreshScheduleMaintenanceProposal() =
+        eventEditActionHandler.requestFreshScheduleMaintenanceProposal()
 
     override fun rescheduleEvent() = eventEditActionHandler.rescheduleEvent()
 

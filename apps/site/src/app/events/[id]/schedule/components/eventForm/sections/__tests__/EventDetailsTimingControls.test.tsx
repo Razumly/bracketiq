@@ -5,10 +5,18 @@ import { renderWithMantine } from "../../../../../../../../../test/utils/renderW
 import type { EventFormValues } from "../../formTypes";
 import { EventDetailsTimingControls } from "../EventDetailsTimingControls";
 
-const TimingHarness = () => {
+type TimingHarnessProps = {
+  eventType?: EventFormValues["eventType"];
+  supportsNoFixedEndDateTime?: boolean;
+};
+
+const TimingHarness = ({
+  eventType = "LEAGUE",
+  supportsNoFixedEndDateTime = true,
+}: TimingHarnessProps = {}) => {
   const form = useForm<EventFormValues>({
     defaultValues: {
-      eventType: "LEAGUE",
+      eventType,
       start: new Date("2026-08-15T09:00:00"),
       end: new Date("2026-08-15T17:00:00"),
       noFixedEndDateTime: false,
@@ -18,10 +26,10 @@ const TimingHarness = () => {
   return (
     <EventDetailsTimingControls
       control={form.control}
-      eventType="LEAGUE"
+      eventType={eventType}
       startValue={form.getValues("start")}
       noFixedEndDateTime={false}
-      supportsNoFixedEndDateTime
+      supportsNoFixedEndDateTime={supportsNoFixedEndDateTime}
       automaticRefundsAvailable={false}
       manualPaymentsEnabled={false}
       todaysDate={new Date("2026-08-01T00:00:00")}
@@ -44,5 +52,17 @@ describe("EventDetailsTimingControls", () => {
       screen.queryByLabelText("Set the end date during match generation"),
     ).not.toBeInTheDocument();
     expect(screen.getByLabelText("End Date & Time")).toBeInTheDocument();
+  });
+
+  it("shows a planned end for Tryouts without a no-end checkbox", () => {
+    renderWithMantine(
+      <TimingHarness
+        eventType="TRYOUT"
+        supportsNoFixedEndDateTime={false}
+      />,
+    );
+
+    expect(screen.getByLabelText("End Date & Time")).toBeInTheDocument();
+    expect(screen.queryByLabelText("No Planned End")).not.toBeInTheDocument();
   });
 });

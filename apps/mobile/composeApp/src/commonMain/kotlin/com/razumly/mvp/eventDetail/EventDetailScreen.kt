@@ -41,6 +41,7 @@ import com.razumly.mvp.core.data.dataTypes.usesTeamOfficialScheduling
 import com.razumly.mvp.core.data.dataTypes.withDoTeamsOfficiate
 import com.razumly.mvp.core.data.dataTypes.withStaffingPriority
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
+import com.razumly.mvp.core.network.dto.EventEditorMaintenanceOperation
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.presentation.EventDetailInitialTab
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
@@ -98,6 +99,8 @@ fun EventDetailScreen(
     val eventEditorControlLocks by component.eventEditorControlLocks.collectAsState()
     val eventTypeTransitionConfirmation by
         component.eventTypeTransitionConfirmation.collectAsState()
+    val eventEditorSnapshot by component.eventEditorSnapshot.collectAsState()
+    val scheduleMaintenanceReview by component.scheduleMaintenanceReview.collectAsState()
     val showMap by mapComponent.showMap.collectAsState()
     val editableMatches by component.editableMatches.collectAsState()
     val eventFields by component.eventFields.collectAsState()
@@ -643,6 +646,7 @@ fun EventDetailScreen(
                                 topInset = innerPadding.calculateTopPadding(),
                                 editView = isEditing,
                                 eventEditorControlLocks = eventEditorControlLocks,
+                                eventEditorSnapshot = eventEditorSnapshot,
                                 showOfficialsPanel = showOfficialsPanel,
                                 showMap = showMap,
                                 imageScheme = imageScheme,
@@ -1024,6 +1028,7 @@ fun EventDetailScreen(
                     isUserInEvent = isUserInEvent,
                     directionsEnabled = hasDirectionsTarget,
                     selectedWeeklyOccurrenceLabel = selectedWeeklyOccurrence?.label,
+                    isArchivedEvent = selectedEvent.event.isArchived(),
                 ),
                 actions = EventDetailOverviewStickyActionActions(
                     onAffiliateJoin = component::joinEvent,
@@ -1083,8 +1088,10 @@ fun EventDetailScreen(
                 eventRegistrationQuestionDialog = eventRegistrationQuestionDialog,
                 paymentPlanPreviewDialog = paymentPlanPreviewDialog,
                 showStandingsConfirmDialog = showStandingsConfirmDialog,
+                scheduleMaintenanceReview = scheduleMaintenanceReview,
                 eventTypeTransitionConfirmation = eventTypeTransitionConfirmation,
-                buildScheduleIsRebuild = selectedEvent.matches.isNotEmpty(),
+                buildScheduleIsRebuild = EventEditorMaintenanceOperation.BUILD !in
+                    eventEditorSnapshot?.scheduleState?.availableMaintenanceOperations.orEmpty(),
                 showBuildScheduleConfirmDialog = showBuildScheduleConfirmDialog,
                 showRebuildWithoutPlaceholdersConfirmDialog =
                     showRebuildWithoutPlaceholdersConfirmDialog,
@@ -1180,6 +1187,12 @@ fun EventDetailScreen(
                 onDismissEventTypeTransitionConfirmation =
                     component::dismissEventTypeTransitionConfirmation,
                 onConfirmEventTypeTransition = component::confirmEventTypeTransition,
+                onAcceptScheduleMaintenanceProposal = component::acceptScheduleMaintenanceProposal,
+                onRejectScheduleMaintenanceProposal = component::rejectScheduleMaintenanceProposal,
+                onDismissScheduleMaintenanceReview = component::dismissScheduleMaintenanceReview,
+                onRequestFreshScheduleMaintenanceProposal =
+                    component::requestFreshScheduleMaintenanceProposal,
+                onRetryAcceptedScheduleSync = component::retryAcceptedScheduleSync,
                 onDismissBuildScheduleConfirmation = {
                     showBuildScheduleConfirmDialog = false
                 },

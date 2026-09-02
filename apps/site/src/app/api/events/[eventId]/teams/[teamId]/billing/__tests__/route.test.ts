@@ -239,5 +239,23 @@ describe('GET /api/events/[eventId]/teams/[teamId]/billing', () => {
       prismaMock,
       { slotId: 'slot_1', occurrenceDate: '2026-05-19' },
     );
+    expect(prismaMock.bills.findMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          slotId: 'slot_1',
+          occurrenceDate: '2026-05-19',
+        }),
+      }),
+    );
+    expect(prismaMock.bills.findMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          slotId: 'slot_1',
+          occurrenceDate: '2026-05-19',
+        }),
+      }),
+    );
   });
 });
