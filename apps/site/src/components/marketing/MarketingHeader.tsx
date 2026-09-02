@@ -31,6 +31,151 @@ const resolveAnchorHref = (href: string, prefix: string) => (
   prefix && href.startsWith('#') ? `${prefix}${href}` : href
 );
 
+type MarketingActionProps = {
+  appHref: string;
+  showAppCta: boolean;
+  hideRequestDemoCta: boolean;
+};
+
+function MarketingDesktopActions({
+  appHref,
+  showAppCta,
+  hideRequestDemoCta,
+}: MarketingActionProps) {
+  return (
+    <div className="landing-header-actions landing-header-pill hidden items-center justify-end gap-2 xl:flex">
+      {showAppCta ? (
+        <>
+          {!hideRequestDemoCta ? (
+            <Link href="/request-demo" className="landing-btn-secondary landing-btn-compact">
+              Request demo
+            </Link>
+          ) : null}
+          <Link href={appHref} className="landing-btn-primary landing-btn-compact">
+            Go to app
+            <ArrowRight aria-hidden="true" className="h-4 w-4" />
+          </Link>
+        </>
+      ) : (
+        <>
+          <Link href="/login" className="landing-btn-secondary landing-btn-compact">
+            Sign in
+          </Link>
+          {!hideRequestDemoCta ? (
+            <Link href="/request-demo" className="landing-btn-secondary landing-btn-compact">
+              Request demo
+            </Link>
+          ) : null}
+          <Link href="/login" className="landing-btn-primary landing-btn-compact">
+            Sign up
+            <ArrowRight aria-hidden="true" className="h-4 w-4" />
+          </Link>
+        </>
+      )}
+    </div>
+  );
+}
+
+function MarketingMobileActions({
+  appHref,
+  showAppCta,
+  hideRequestDemoCta,
+  closeMobileMenu,
+}: MarketingActionProps & { closeMobileMenu: () => void }) {
+  return (
+    <div className="mt-4 grid gap-2">
+      {showAppCta ? (
+        <>
+          {!hideRequestDemoCta ? (
+            <Link href="/request-demo" className="landing-btn-secondary landing-btn-full" onClick={closeMobileMenu}>
+              Request demo
+            </Link>
+          ) : null}
+          <Link href={appHref} className="landing-btn-primary landing-btn-full" onClick={closeMobileMenu}>
+            Go to app
+            <ArrowRight aria-hidden="true" className="h-4 w-4" />
+          </Link>
+        </>
+      ) : (
+        <>
+          <Link href="/login" className="landing-btn-secondary landing-btn-full" onClick={closeMobileMenu}>
+            Sign in
+          </Link>
+          {!hideRequestDemoCta ? (
+            <Link href="/request-demo" className="landing-btn-secondary landing-btn-full" onClick={closeMobileMenu}>
+              Request demo
+            </Link>
+          ) : null}
+          <Link href="/login" className="landing-btn-primary landing-btn-full" onClick={closeMobileMenu}>
+            Sign up
+            <ArrowRight aria-hidden="true" className="h-4 w-4" />
+          </Link>
+        </>
+      )}
+    </div>
+  );
+}
+
+function MarketingMobileControls({
+  isMobileMenuOpen,
+  showAppCta,
+  toggleMobileMenu,
+}: {
+  isMobileMenuOpen: boolean;
+  showAppCta: boolean;
+  toggleMobileMenu: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-2 xl:hidden">
+      {showAppCta ? (
+        <div
+          id="mobile-navigation-chat-action"
+          data-mobile-chat-action-slot=""
+          className="flex size-11 items-center justify-center lg:hidden"
+        />
+      ) : null}
+      <button
+        type="button"
+        className="landing-menu-button inline-flex xl:hidden"
+        aria-label={isMobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
+        aria-expanded={isMobileMenuOpen}
+        onClick={toggleMobileMenu}
+      >
+        {isMobileMenuOpen ? <X aria-hidden="true" className="h-5 w-5" /> : <Menu aria-hidden="true" className="h-5 w-5" />}
+      </button>
+    </div>
+  );
+}
+
+function MarketingMobileNavigation({
+  navItems,
+  showAppCta,
+  appHref,
+  hideRequestDemoCta,
+  closeMobileMenu,
+}: MarketingActionProps & {
+  navItems: MarketingNavItem[];
+  closeMobileMenu: () => void;
+}) {
+  return (
+    <div className="landing-mobile-menu xl:hidden">
+      <nav className="grid gap-2" aria-label="Mobile navigation">
+        {navItems.map((item) => (
+          <a key={item.href} href={item.href} className="landing-mobile-nav-link" onClick={closeMobileMenu}>
+            {item.label}
+          </a>
+        ))}
+      </nav>
+      <MarketingMobileActions
+        appHref={appHref}
+        showAppCta={showAppCta}
+        hideRequestDemoCta={hideRequestDemoCta}
+        closeMobileMenu={closeMobileMenu}
+      />
+    </div>
+  );
+}
+
 export default function MarketingHeader({
   brandHref = '/',
   anchorHrefPrefix = '',
@@ -75,6 +220,7 @@ export default function MarketingHeader({
   }, []);
 
   const closeMobileMenu = () => setIsMobileMenuOpen(false);
+  const toggleMobileMenu = () => setIsMobileMenuOpen((open) => !open);
   const navItems = (providedNavItems ?? marketingNavItems).map((item) => ({
     ...item,
     href: resolveAnchorHref(item.href, anchorHrefPrefix),
@@ -104,88 +250,27 @@ export default function MarketingHeader({
             ))}
           </nav>
 
-          <div className="landing-header-actions landing-header-pill hidden items-center justify-end gap-2 xl:flex">
-            {showAppCta ? (
-              <>
-                {!hideRequestDemoCta ? (
-                  <Link href="/request-demo" className="landing-btn-secondary landing-btn-compact">
-                    Request demo
-                  </Link>
-                ) : null}
-                <Link href={appHref} className="landing-btn-primary landing-btn-compact">
-                  Go to app
-                  <ArrowRight aria-hidden="true" className="h-4 w-4" />
-                </Link>
-              </>
-            ) : (
-              <>
-                <Link href="/login" className="landing-btn-secondary landing-btn-compact">
-                  Sign in
-                </Link>
-                {!hideRequestDemoCta ? (
-                  <Link href="/request-demo" className="landing-btn-secondary landing-btn-compact">
-                    Request demo
-                  </Link>
-                ) : null}
-                <Link href="/login" className="landing-btn-primary landing-btn-compact">
-                  Sign up
-                  <ArrowRight aria-hidden="true" className="h-4 w-4" />
-                </Link>
-              </>
-            )}
-          </div>
+          <MarketingDesktopActions
+            appHref={appHref}
+            showAppCta={showAppCta}
+            hideRequestDemoCta={hideRequestDemoCta}
+          />
 
-          <button
-            type="button"
-            className="landing-menu-button inline-flex xl:hidden"
-            aria-label={isMobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
-            aria-expanded={isMobileMenuOpen}
-            onClick={() => setIsMobileMenuOpen((open) => !open)}
-          >
-            {isMobileMenuOpen ? <X aria-hidden="true" className="h-5 w-5" /> : <Menu aria-hidden="true" className="h-5 w-5" />}
-          </button>
+          <MarketingMobileControls
+            isMobileMenuOpen={isMobileMenuOpen}
+            showAppCta={showAppCta}
+            toggleMobileMenu={toggleMobileMenu}
+          />
         </div>
 
         {isMobileMenuOpen ? (
-          <div className="landing-mobile-menu xl:hidden">
-            <nav className="grid gap-2" aria-label="Mobile navigation">
-              {navItems.map((item) => (
-                <a key={item.href} href={item.href} className="landing-mobile-nav-link" onClick={closeMobileMenu}>
-                  {item.label}
-                </a>
-              ))}
-            </nav>
-            <div className="mt-4 grid gap-2">
-              {showAppCta ? (
-                <>
-                  {!hideRequestDemoCta ? (
-                    <Link href="/request-demo" className="landing-btn-secondary landing-btn-full" onClick={closeMobileMenu}>
-                      Request demo
-                    </Link>
-                  ) : null}
-                  <Link href={appHref} className="landing-btn-primary landing-btn-full" onClick={closeMobileMenu}>
-                    Go to app
-                    <ArrowRight aria-hidden="true" className="h-4 w-4" />
-                  </Link>
-                </>
-              ) : (
-                <>
-                  <Link href="/login" className="landing-btn-secondary landing-btn-full" onClick={closeMobileMenu}>
-                    Sign in
-                  </Link>
-                  {!hideRequestDemoCta ? (
-                    <Link href="/request-demo" className="landing-btn-secondary landing-btn-full" onClick={closeMobileMenu}>
-                      Request demo
-                    </Link>
-                  ) : null}
-                  <Link href="/login" className="landing-btn-primary landing-btn-full" onClick={closeMobileMenu}>
-                    Sign up
-                    <ArrowRight aria-hidden="true" className="h-4 w-4" />
-                  </Link>
-                </>
-              )}
-            </div>
-          </div>
+          <MarketingMobileNavigation
+            navItems={navItems}
+            appHref={appHref}
+            showAppCta={showAppCta}
+            hideRequestDemoCta={hideRequestDemoCta}
+            closeMobileMenu={closeMobileMenu}
+          />
         ) : null}
       </div>
     </header>
