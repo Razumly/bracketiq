@@ -38,9 +38,26 @@ const INTRO_MESSAGE: AgentChatMessage = {
 
 const readJsonResponse = async <T,>(response: Response): Promise<T> => {
   const text = await response.text();
-  const body = text ? JSON.parse(text) : {};
+  let body: unknown = {};
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      if (!response.ok) {
+        throw new Error(text);
+      }
+      throw new Error('AI request returned an invalid JSON response.');
+    }
+  }
   if (!response.ok) {
-    throw new Error(typeof body?.error === 'string' ? body.error : response.statusText || 'AI request failed.');
+    const errorMessage =
+      typeof body === 'object' &&
+      body !== null &&
+      'error' in body &&
+      typeof body.error === 'string'
+        ? body.error
+        : undefined;
+    throw new Error(errorMessage ?? (response.statusText || 'AI request failed.'));
   }
   return body as T;
 };
@@ -454,6 +471,7 @@ export function AIAssistantDrawer({ enabled = true }: AIAssistantDrawerProps) {
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  const loadStartedRef = useRef(false);
   const initialFocus = useAssistantFocus(isAssistantOpen);
 
   const pageContext = useMemo<AgentPageContext>(() => ({
@@ -500,7 +518,12 @@ export function AIAssistantDrawer({ enabled = true }: AIAssistantDrawerProps) {
   }, [enabled]);
 
   useEffect(() => {
-    if (!isAssistantOpen || loaded || loading) return;
+    if (!isAssistantOpen) {
+      loadStartedRef.current = false;
+      return;
+    }
+    if (loaded || loading || loadStartedRef.current) return;
+    loadStartedRef.current = true;
     void loadConversation();
   }, [isAssistantOpen, loadConversation, loaded, loading]);
 
