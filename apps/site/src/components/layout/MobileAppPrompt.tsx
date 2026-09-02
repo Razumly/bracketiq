@@ -1,8 +1,9 @@
 'use client';
 
-import { Button, Group, Paper, Text } from '@mantine/core';
 import { useEffect, useMemo, useState } from 'react';
 import { usePathname } from 'next/navigation';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import {
   getMobileAppLinks,
 } from '@/lib/mobileAppLinks';
@@ -48,6 +49,23 @@ export const supportsNativeIosSmartAppBanner = (ua: string, maxTouchPoints: numb
   return isSafariEngine && !isOtherIosBrowser;
 };
 
+const shouldSuppressMobileAppPrompt = (
+  onboardingPromptPath: boolean,
+  showAppPrompt: string | undefined,
+): boolean => {
+  if (onboardingPromptPath) return true;
+  return showAppPrompt === '0';
+};
+
+const isSupportedMobilePlatform = (
+  platform: MobilePlatform,
+): platform is Exclude<MobilePlatform, 'other'> => platform !== 'other';
+
+const isDismissedUntilActive = (dismissedUntilValue: string | null, now: number): boolean => {
+  const dismissedUntil = Number(dismissedUntilValue || '0');
+  return Number.isFinite(dismissedUntil) && dismissedUntil > now;
+};
+
 export default function MobileAppPrompt() {
   const pathname = usePathname();
   const [platform, setPlatform] = useState<MobilePlatform>('other');
@@ -69,19 +87,16 @@ export default function MobileAppPrompt() {
   }, [androidDeepLink, iosDeepLink, platform]);
 
   useEffect(() => {
-    if (onboardingPromptPath) return;
-    if (process.env.NEXT_PUBLIC_SHOW_APP_PROMPT === '0') return;
+    if (shouldSuppressMobileAppPrompt(onboardingPromptPath, process.env.NEXT_PUBLIC_SHOW_APP_PROMPT)) return;
     if (typeof window === 'undefined') return;
 
     const userAgent = window.navigator.userAgent || '';
     const maxTouchPoints = window.navigator.maxTouchPoints || 0;
     const detected = detectMobilePlatform(userAgent, maxTouchPoints);
-    if (detected === 'other') return;
+    if (!isSupportedMobilePlatform(detected)) return;
     if (isStandaloneDisplayMode()) return;
     if (supportsNativeIosSmartAppBanner(userAgent, maxTouchPoints)) return;
-
-    const dismissedUntil = Number(window.localStorage.getItem(DISMISSED_UNTIL_KEY) || '0');
-    if (Number.isFinite(dismissedUntil) && dismissedUntil > Date.now()) {
+    if (isDismissedUntilActive(window.localStorage.getItem(DISMISSED_UNTIL_KEY), Date.now())) {
       return;
     }
 
@@ -119,11 +134,10 @@ export default function MobileAppPrompt() {
   };
 
   return (
-    <Paper
-      withBorder
-      shadow="sm"
-      p="sm"
-      radius="md"
+    <Card
+      role="region"
+      aria-label="Mobile app prompt"
+      className="rounded-md p-3"
       style={{
         position: 'fixed',
         left: 12,
@@ -132,21 +146,35 @@ export default function MobileAppPrompt() {
         zIndex: 1200,
         margin: '0 auto',
         maxWidth: 520,
+        overflow: 'visible',
       }}
     >
-      <Group justify="space-between" align="center" wrap="nowrap">
-        <div>
-          <Text fw={600} size="sm">Use the BracketIQ app</Text>
-          <Text size="xs" c="dimmed">Open this page in the mobile app for a better experience.</Text>
+      <div className="flex min-w-0 flex-col gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold">Use the BracketIQ app</p>
+          <p className="text-xs text-muted-foreground">
+            Open this page in the mobile app for a better experience.
+          </p>
         </div>
-        <Group gap="xs" wrap="nowrap">
-          <Button size="xs" variant="default" onClick={dismiss}>Not now</Button>
-          <Button size="xs" variant="light" onClick={() => { if (storeUrl) window.location.href = storeUrl; }}>
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+          <Button type="button" size="xs" variant="outline" onClick={dismiss}>
+            Not now
+          </Button>
+          <Button
+            type="button"
+            size="xs"
+            variant="secondary"
+            onClick={() => {
+              if (storeUrl) window.location.href = storeUrl;
+            }}
+          >
             Get App
           </Button>
-          <Button size="xs" onClick={openApp}>Open App</Button>
-        </Group>
-      </Group>
-    </Paper>
+          <Button type="button" size="xs" onClick={openApp}>
+            Open App
+          </Button>
+        </div>
+      </div>
+    </Card>
   );
 }

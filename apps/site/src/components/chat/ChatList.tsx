@@ -1,12 +1,211 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useChat } from '@/context/ChatContext';
 import { useChatUI } from '@/context/ChatUIContext';
 import { useApp } from '@/app/providers';
 import { formatDisplayDate, formatDisplayTime } from '@/lib/dateUtils';
 import { chatService } from '@/lib/chatService';
+import { Button } from '@/components/ui/button';
+import { EllipsisVerticalIcon, PlusIcon, XIcon } from 'lucide-react';
+import { type ChatGroup } from '@/lib/chatService';
 import { resolveChatGroupInitial, resolveChatGroupTitle } from './chatGroupDisplay';
+
+
+type ChatGroupRowProps = {
+    chatGroup: ChatGroup;
+    formatTime: (timestamp: string) => string;
+    isActionsOpen: boolean;
+    isOpen: boolean;
+    onHide: (chatId: string, currentTitle: string, userIds: string[]) => void | Promise<void>;
+    onRename: (chatId: string, currentTitle: string) => void | Promise<void>;
+    onReport: (chatId: string, currentTitle: string) => void | Promise<void>;
+    onSelect: (chatId: string) => void;
+    onToggleActions: (chatId: string) => void;
+};
+
+function ChatGroupActions({
+    chatGroup,
+    chatTitle,
+    isActionsOpen,
+    onHide,
+    onRename,
+    onReport,
+    onToggleActions,
+}: {
+    chatGroup: ChatGroup;
+    chatTitle: string;
+    isActionsOpen: boolean;
+    onHide: (chatId: string, currentTitle: string, userIds: string[]) => void | Promise<void>;
+    onRename: (chatId: string, currentTitle: string) => void | Promise<void>;
+    onReport: (chatId: string, currentTitle: string) => void | Promise<void>;
+    onToggleActions: (chatId: string) => void;
+}) {
+    const actionButtonRef = React.useRef<HTMLButtonElement>(null);
+    const handleActionsKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+        if (event.key !== 'Escape' || !isActionsOpen) {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        onToggleActions(chatGroup.$id);
+        actionButtonRef.current?.focus();
+    };
+
+    return (
+        <div className="relative z-10" onClick={(event) => event.stopPropagation()} onKeyDown={handleActionsKeyDown}>
+            <Button
+                ref={actionButtonRef}
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`Chat actions for ${chatTitle}`}
+                aria-expanded={isActionsOpen}
+                aria-controls={`chat-actions-${chatGroup.$id}`}
+                onClick={(event) => {
+                    event.stopPropagation();
+                    onToggleActions(chatGroup.$id);
+                }}
+            >
+                <EllipsisVerticalIcon aria-hidden="true" />
+            </Button>
+            {isActionsOpen && (
+                <div
+                    id={`chat-actions-${chatGroup.$id}`}
+                    className="absolute right-0 mt-1 w-40 rounded-md border border-border bg-popover py-1 text-popover-foreground shadow-lg"
+                >
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="w-full justify-start rounded-none px-3 text-left text-sm"
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            void onRename(chatGroup.$id, chatTitle);
+                        }}
+                    >
+                        Rename chat
+                    </Button>
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="w-full justify-start rounded-none px-3 text-left text-sm"
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            void onReport(chatGroup.$id, chatTitle);
+                        }}
+                    >
+                        Report chat
+                    </Button>
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="w-full justify-start rounded-none px-3 text-left text-sm text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            void onHide(chatGroup.$id, chatTitle, chatGroup.userIds);
+                        }}
+                    >
+                        Leave chat
+                    </Button>
+                </div>
+            )}
+        </div>
+    );
+}
+
+function ChatGroupRow({
+    chatGroup,
+    formatTime,
+    isActionsOpen,
+    isOpen,
+    onHide,
+    onRename,
+    onReport,
+    onSelect,
+    onToggleActions,
+}: ChatGroupRowProps) {
+    const chatTitle = resolveChatGroupTitle(chatGroup, 'Unnamed Chat');
+    const chatInitial = resolveChatGroupInitial(chatGroup, 'C');
+    const unreadCount = Math.max(0, Number(chatGroup.unreadCount ?? 0));
+
+    return (
+        <div
+            className={`relative flex items-center gap-1 p-1 transition-colors ${
+                isOpen ? 'bg-muted/60' : 'hover:bg-muted/50'
+            }`}
+        >
+            <Button
+                type="button"
+                variant="ghost"
+                className={`min-w-0 flex-1 justify-start gap-3 rounded-md p-2 text-left ${
+                    isOpen ? 'text-muted-foreground' : 'text-foreground'
+                }`}
+                onClick={() => onSelect(chatGroup.$id)}
+                data-chat-entry-id={chatGroup.$id}
+                aria-label={`Open ${chatTitle}, ${unreadCount} unread messages`}
+            >
+                <span
+                    className={`flex size-10 shrink-0 items-center justify-center rounded-full font-medium ${
+                        isOpen
+                            ? 'bg-muted-foreground/50 text-background'
+                            : 'bg-primary text-primary-foreground'
+                    }`}
+                    aria-hidden="true"
+                >
+                    {chatInitial}
+                </span>
+
+                <span className="min-w-0 flex-1">
+                    <span className="flex items-center justify-between gap-2">
+                        <span className="truncate text-sm font-medium">{chatTitle}</span>
+                        {chatGroup.lastMessage && (
+                            <span className="shrink-0 text-xs text-muted-foreground">
+                                {formatTime(chatGroup.lastMessage.sentTime)}
+                            </span>
+                        )}
+                    </span>
+
+                    <span className="mt-1 flex items-center justify-between gap-2">
+                        <span className="truncate text-xs text-muted-foreground">
+                            {chatGroup.lastMessage?.body || 'No messages yet'}
+                        </span>
+                        <span className="ml-2 flex shrink-0 items-center gap-2">
+                            {unreadCount > 0 ? (
+                                <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-destructive px-1.5 py-0.5 text-[10px] font-semibold text-destructive-foreground">
+                                    {unreadCount}
+                                </span>
+                            ) : null}
+                            <span className="text-xs text-muted-foreground">
+                                {chatGroup.userIds.length} members
+                            </span>
+                        </span>
+                    </span>
+                </span>
+            </Button>
+
+            <ChatGroupActions
+                chatGroup={chatGroup}
+                chatTitle={chatTitle}
+                isActionsOpen={isActionsOpen}
+                onHide={onHide}
+                onRename={onRename}
+                onReport={onReport}
+                onToggleActions={onToggleActions}
+            />
+
+            {isOpen && (
+                <span
+                    className="absolute right-2 top-2 size-2 rounded-full bg-primary"
+                    aria-hidden="true"
+                />
+            )}
+        </div>
+    );
+}
 
 export function ChatList() {
     const { chatGroups, loading, loadChatGroups, markChatViewed, hideChatGroups } = useChat();
@@ -14,6 +213,14 @@ export function ChatList() {
     const { user } = useApp();
     const [actionError, setActionError] = useState<string | null>(null);
     const [openActionsChatId, setOpenActionsChatId] = useState<string | null>(null);
+    const firstActionRef = React.useRef<HTMLButtonElement>(null);
+
+    useEffect(() => {
+        if (!loading) {
+            firstActionRef.current?.focus();
+        }
+    }, [loading]);
+
 
     const handleChatSelect = (chatId: string) => {
         setOpenActionsChatId(null);
@@ -23,9 +230,14 @@ export function ChatList() {
             openChatWindow(chatId);
         }
     };
+    const handleToggleActions = (chatId: string) => {
+        setOpenActionsChatId((previous) => (previous === chatId ? null : chatId));
+    };
+
 
     const handleRenameChat = async (chatId: string, currentTitle: string) => {
         const nextLabel = window.prompt('Rename chat', currentTitle === 'Unnamed Chat' ? '' : currentTitle);
+
         if (nextLabel === null) {
             setOpenActionsChatId(null);
             return;
@@ -103,12 +315,28 @@ export function ChatList() {
             await loadChatGroups();
             setOpenActionsChatId(null);
         } catch (error) {
+
             const message = error instanceof Error ? error.message : 'Failed to report chat.';
             setActionError(message);
         }
     };
 
     const handleClose = () => {
+        closeChatList();
+    };
+    const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+        const activeElement = typeof document !== 'undefined' ? document.activeElement : null;
+        if (
+            event.key !== 'Escape'
+            || !(event.target instanceof Node)
+            || !(activeElement instanceof Node)
+            || !event.currentTarget.contains(event.target)
+            || !event.currentTarget.contains(activeElement)
+        ) {
+            return;
+        }
+
+        event.preventDefault();
         closeChatList();
     };
 
@@ -125,170 +353,82 @@ export function ChatList() {
         }
     };
 
-    if (loading) {
-        return (
-            <div className="flex items-center justify-center h-full">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-            </div>
-        );
-    }
 
     return (
-        <div className="flex flex-col h-full" onClick={() => setOpenActionsChatId(null)}>
-            {/* Header */}
-            <div className="flex items-center justify-between p-3 border-b border-gray-200 bg-gray-50 flex-shrink-0">
-                <h2 className="font-semibold text-gray-900">Messages</h2>
-                <div className="flex items-center space-x-2">
-                    <button
+        <div
+            role="dialog"
+            aria-labelledby="chat-list-title"
+            aria-busy={loading}
+            onKeyDown={handleKeyDown}
+            onClick={() => setOpenActionsChatId(null)}
+            className="flex h-full flex-col bg-background text-foreground"
+        >
+            <div className="flex flex-shrink-0 items-center justify-between border-b border-border bg-muted/50 p-3">
+                <h2 id="chat-list-title" className="font-semibold text-foreground">Messages</h2>
+                <div className="flex items-center gap-2">
+                    <Button
+                        ref={firstActionRef}
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
                         onClick={() => setInviteModalOpen(true)}
-                        className="p-1 hover:bg-gray-200 rounded-full transition-colors"
-                        title="Start new chat"
+                        aria-label="Start a new chat"
                     >
-                        <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                        </svg>
-                    </button>
-                    <button
+                        <PlusIcon aria-hidden="true" />
+                    </Button>
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
                         onClick={handleClose}
-                        className="p-1 hover:bg-gray-200 rounded-full transition-colors"
+                        aria-label="Close chat list"
                     >
-                        <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                    </button>
+                        <XIcon aria-hidden="true" />
+                    </Button>
                 </div>
             </div>
             {actionError && (
-                <div className="px-3 py-2 text-xs text-red-600 border-b border-red-100 bg-red-50">
+                <div className="border-b border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive" role="alert">
                     {actionError}
                 </div>
             )}
 
-            {/* Chat Groups List */}
-            <div className="flex-1 overflow-y-auto">
-                {chatGroups.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-full text-center p-4">
-                        <div className="text-gray-500 text-sm mb-2">No conversations yet</div>
-                        <button
+            <div className="min-h-0 flex-1 overflow-y-auto">
+                {loading ? (
+                    <div className="flex h-full items-center justify-center" role="status" aria-label="Loading messages">
+                        <div
+                            className="h-8 w-8 animate-spin rounded-full border-b-2 border-primary motion-reduce:animate-none"
+                            aria-hidden="true"
+                        />
+                    </div>
+                ) : chatGroups.length === 0 ? (
+                    <div className="flex h-full flex-col items-center justify-center p-4 text-center">
+                        <div className="mb-2 text-sm text-muted-foreground">No conversations yet</div>
+                        <Button
+                            type="button"
+                            variant="link"
+                            size="sm"
                             onClick={() => setInviteModalOpen(true)}
-                            className="text-blue-500 text-sm hover:text-blue-600"
                         >
                             Start your first chat
-                        </button>
+                        </Button>
                     </div>
                 ) : (
-                    <div className="divide-y divide-gray-100">
-                        {chatGroups.map((chatGroup) => {
-                            const isOpen = openChatWindows.includes(chatGroup.$id);
-                            const chatTitle = resolveChatGroupTitle(chatGroup, 'Unnamed Chat');
-                            const chatInitial = resolveChatGroupInitial(chatGroup, 'C');
-                            const isActionsOpen = openActionsChatId === chatGroup.$id;
-                            const unreadCount = Math.max(0, Number(chatGroup.unreadCount ?? 0));
-
-                            return (
-                                <div
-                                    key={chatGroup.$id}
-                                    onClick={() => handleChatSelect(chatGroup.$id)}
-                                    className={`p-3 flex items-center space-x-3 transition-colors relative ${isOpen
-                                            ? 'bg-gray-100 cursor-not-allowed'
-                                            : 'hover:bg-gray-50 cursor-pointer'
-                                        }`}
-                                >
-                                    <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-medium ${isOpen ? 'bg-gray-400' : 'bg-blue-500'
-                                        }`}>
-                                        {chatInitial}
-                                    </div>
-
-                                    <div className={`flex-1 min-w-0 ${isOpen ? 'text-gray-400' : 'text-gray-900'}`}>
-                                        <div className="flex items-center justify-between">
-                                            <p className={`text-sm font-medium truncate ${isOpen ? 'text-gray-400' : 'text-gray-900'}`}>
-                                                {chatTitle}
-                                            </p>
-                                            {chatGroup.lastMessage && (
-                                                <span className={`text-xs ml-2 flex-shrink-0 ${isOpen ? 'text-gray-300' : 'text-gray-500'}`}>
-                                                    {formatTime(chatGroup.lastMessage.sentTime)}
-                                                </span>
-                                            )}
-                                        </div>
-
-                                        <div className="flex items-center justify-between mt-1">
-                                            <p className={`text-xs truncate ${isOpen ? 'text-gray-300' : 'text-gray-500'}`}>
-                                                {chatGroup.lastMessage?.body || 'No messages yet'}
-                                            </p>
-                                            <div className="ml-2 flex flex-shrink-0 items-center gap-2">
-                                                {unreadCount > 0 ? (
-                                                    <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                                                        {unreadCount}
-                                                    </span>
-                                                ) : null}
-                                                <span className={`text-xs ${isOpen ? 'text-gray-300' : 'text-gray-500'}`}>
-                                                    {chatGroup.userIds.length} members
-                                                </span>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div className="relative z-10" onClick={(event) => event.stopPropagation()}>
-                                        <button
-                                            type="button"
-                                            aria-label={`Chat actions for ${chatTitle}`}
-                                            className={`p-1 rounded-full transition-colors ${
-                                                isOpen ? 'text-gray-300 hover:bg-gray-200' : 'text-gray-500 hover:bg-gray-100'
-                                            }`}
-                                            onClick={(event) => {
-                                                event.stopPropagation();
-                                                setOpenActionsChatId((previous) => (previous === chatGroup.$id ? null : chatGroup.$id));
-                                            }}
-                                        >
-                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6h.01M12 12h.01M12 18h.01" />
-                                            </svg>
-                                        </button>
-                                        {isActionsOpen && (
-                                            <div className="absolute right-0 mt-1 w-40 rounded-md border border-gray-200 bg-white py-1 shadow-lg">
-                                                <button
-                                                    type="button"
-                                                    className="block w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100"
-                                                    onClick={(event) => {
-                                                        event.stopPropagation();
-                                                        void handleRenameChat(chatGroup.$id, chatTitle);
-                                                    }}
-                                                >
-                                                    Rename chat
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    className="block w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100"
-                                                    onClick={(event) => {
-                                                        event.stopPropagation();
-                                                        void handleReportChat(chatGroup.$id, chatTitle);
-                                                    }}
-                                                >
-                                                    Report chat
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    className="block w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
-                                                    onClick={(event) => {
-                                                        event.stopPropagation();
-                                                        void handleHideChat(chatGroup.$id, chatTitle, chatGroup.userIds);
-                                                    }}
-                                                >
-                                                    Leave chat
-                                                </button>
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    {/* Visual indicator for open chats */}
-                                    {isOpen && (
-                                        <div className="absolute right-2 top-2">
-                                            <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                                        </div>
-                                    )}
-                                </div>
-                            );
-                        })}
+                    <div className="divide-y divide-border/60">
+                        {chatGroups.map((chatGroup) => (
+                            <ChatGroupRow
+                                key={chatGroup.$id}
+                                chatGroup={chatGroup}
+                                formatTime={formatTime}
+                                isActionsOpen={openActionsChatId === chatGroup.$id}
+                                isOpen={openChatWindows.includes(chatGroup.$id)}
+                                onHide={handleHideChat}
+                                onRename={handleRenameChat}
+                                onReport={handleReportChat}
+                                onSelect={handleChatSelect}
+                                onToggleActions={handleToggleActions}
+                            />
+                        ))}
                     </div>
                 )}
             </div>
