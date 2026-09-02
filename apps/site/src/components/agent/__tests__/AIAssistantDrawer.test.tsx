@@ -80,6 +80,13 @@ const response = (body: unknown, status = 200): Response =>
     statusText: status === 200 ? 'OK' : 'Request failed',
     text: async () => JSON.stringify(body),
   }) as Response;
+const textResponse = (body: string, status: number): Response =>
+  ({
+    ok: status >= 200 && status < 300,
+    status,
+    statusText: 'Request failed',
+    text: async () => body,
+  }) as Response;
 const mockRendered = (element: HTMLElement) => {
   const rect = element.getBoundingClientRect();
   Object.defineProperty(element, 'getClientRects', {
@@ -217,6 +224,18 @@ describe('AIAssistantDrawer', () => {
 
     resolveLoad?.(response(loadResponse()));
     expect(await screen.findByText('Loaded assistant response.')).toBeInTheDocument();
+  });
+
+  it('shows a plain-text load error once without retrying in a loop', async () => {
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValue(textResponse('AI assistant is not configured.', 503));
+    renderDrawer();
+
+    await user.click(screen.getByRole('button', { name: 'Open assistant' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('AI assistant is not configured.');
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   it('posts a new chat request and renders the returned conversation', async () => {
