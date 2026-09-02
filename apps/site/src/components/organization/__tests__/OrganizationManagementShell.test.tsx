@@ -42,6 +42,25 @@ describe('OrganizationManagementShell', () => {
     expect(onTabChange.mock.calls[0]?.[0]).toBe('reviews');
   });
 
+  it('keeps the organization shell visible while a tab is loading', () => {
+    render(
+      <OrganizationManagementShell
+        organization={organization}
+        status="ready"
+        availableTabs={availableTabs}
+        activeTab="reviews"
+        onTabChange={jest.fn()}
+        isTabLoading
+      >
+        <p>Reviews content</p>
+      </OrganizationManagementShell>,
+    );
+
+    expect(screen.getByRole('heading', { name: 'Austin Hoops' })).toBeInTheDocument();
+    expect(screen.getByTestId('organization-tab-loading')).toBeInTheDocument();
+    expect(screen.queryByText('Reviews content')).not.toBeInTheDocument();
+  });
+
   it('opens a searchable mobile section drawer and closes after selecting a section', async () => {
     const user = userEvent.setup();
     const onTabChange = jest.fn();

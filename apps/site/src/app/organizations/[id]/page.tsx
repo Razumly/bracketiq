@@ -70,6 +70,7 @@ import {
   buildOrganizationTabs,
   pushOrganizationHistoryState,
   resolveOrganizationRouteTab,
+  resolveOrganizationTabSelection,
   type OrganizationCustomerRouteType,
   type OrganizationTab,
 } from './organizationTabs';
@@ -788,6 +789,7 @@ function OrganizationDetailContent() {
   const [loading, setLoading] = useState(true);
   const [organizationLoadError, setOrganizationLoadError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<OrganizationTab>(() => requestedTab ?? 'overview');
+  const [loadingTab, setLoadingTab] = useState<OrganizationTab | null>(null);
   const [showCreateTeamModal, setShowCreateTeamModal] = useState(false);
   const [showEditOrganizationModal, setShowEditOrganizationModal] = useState(false);
   const sportOptions = useMemo(() => sports.map((sport) => sport.name), [sports]);
@@ -1915,7 +1917,7 @@ function OrganizationDetailContent() {
     if (!authLoading) {
       if (id) loadOrg(id);
     }
-  }, [activeTab, authLoading, id, loadOrg]);
+  }, [authLoading, id, loadOrg]);
 
   useEffect(() => {
     if (authLoading || !isAuthenticated || !user || !id) {
@@ -2122,6 +2124,7 @@ function OrganizationDetailContent() {
     if (!requestedCustomerKey || !requestedCustomerType) {
       return;
     }
+    setLoadingTab('users');
     setActiveTab('users');
     setCustomerSearch('');
     setCustomerTypeFilters((current) => (
@@ -2139,6 +2142,7 @@ function OrganizationDetailContent() {
         organizationId: id,
         queryTab: new URLSearchParams(window.location.search).get('tab'),
       });
+      setLoadingTab(nextTab ?? 'overview');
       setActiveTab(nextTab ?? 'overview');
     };
     window.addEventListener('popstate', handlePopState);
@@ -2146,10 +2150,23 @@ function OrganizationDetailContent() {
   }, [id]);
 
   useEffect(() => {
-    if (!availableTabs.some((tab) => tab.value === activeTab) && availableTabs.length > 0) {
-      setActiveTab(availableTabs[0].value);
+    const nextTab = resolveOrganizationTabSelection({
+      activeTab,
+      availableTabs,
+      organizationLoaded: Boolean(org && !loading),
+    });
+    if (nextTab !== activeTab) {
+      setActiveTab(nextTab);
     }
-  }, [activeTab, availableTabs]);
+  }, [activeTab, availableTabs, loading, org]);
+
+  useEffect(() => {
+    if (loadingTab === null || loadingTab !== activeTab) {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => setLoadingTab(null), 180);
+    return () => window.clearTimeout(timeoutId);
+  }, [activeTab, loadingTab]);
 
   useEffect(() => {
     if (!eventTemplateCreateModalOpen || selectedCreateEventTemplateId || eventTemplates.length === 0) {
@@ -2488,6 +2505,7 @@ function OrganizationDetailContent() {
 
   const handleOrganizationTabChange = useCallback((value: string) => {
     const nextTab = value as OrganizationTab;
+    setLoadingTab(nextTab);
     setActiveTab(nextTab);
     if (id) {
       pushOrganizationHistoryState(buildOrganizationTabPath(id, nextTab));
@@ -4435,6 +4453,13 @@ function OrganizationDetailContent() {
       && (org.teams?.length ?? 0) === 0
       && (org.divisions?.length ?? 0) === 0,
   );
+  const isActiveTabDataLoading = (
+    (activeTab === 'events' && eventsTabLoadingInitial)
+    || (activeTab === 'eventTemplates' && eventTemplatesLoading)
+    || (activeTab === 'templates' && templatesLoading)
+    || (activeTab === 'users' && organizationUsersLoading)
+  );
+  const isActiveTabLoading = loadingTab === activeTab || isActiveTabDataLoading;
   const shellStatus = loading
     ? 'loading'
     : requestedTabIsUnavailable
@@ -4475,6 +4500,7 @@ function OrganizationDetailContent() {
         createEventHelperText={createEventHelperText}
         onCreateEvent={handleCreateEvent}
         isOverviewEmpty={overviewEmpty}
+        isTabLoading={isActiveTabLoading}
       >
         <div className="org-tab-content">
         {org ? (

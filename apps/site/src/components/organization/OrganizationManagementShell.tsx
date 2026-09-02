@@ -112,6 +112,7 @@ export type OrganizationManagementShellProps = {
   createEventHelperText?: string | null;
   onCreateEvent?: () => void;
   isOverviewEmpty?: boolean;
+  isTabLoading?: boolean;
   onShareOrganization?: () => void;
   children?: ReactNode;
 };
@@ -120,16 +121,30 @@ function OrganizationShellLoadingState() {
   return (
     <div className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8" data-testid="organization-shell-loading" role="status" aria-live="polite">
       <span className="sr-only">Loading Organization overview</span>
-      <div className="h-36 animate-pulse rounded-2xl bg-muted motion-reduce:animate-none sm:h-52" />
+      <div className="h-36 animate-pulse rounded-lg bg-muted motion-reduce:animate-none sm:h-52" />
       <div className="-mt-10 space-y-4 px-2 sm:-mt-14 sm:px-6">
         <div className="h-24 w-24 animate-pulse rounded-full border-4 border-background bg-muted motion-reduce:animate-none sm:h-28 sm:w-28" />
         <div className="h-8 w-64 animate-pulse rounded-lg bg-muted motion-reduce:animate-none" />
         <div className="h-11 w-full animate-pulse rounded-lg bg-muted motion-reduce:animate-none" />
         <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
-          <div className="h-72 animate-pulse rounded-xl bg-muted motion-reduce:animate-none" />
-          <div className="h-72 animate-pulse rounded-xl bg-muted motion-reduce:animate-none" />
+          <div className="h-72 animate-pulse rounded-lg bg-muted motion-reduce:animate-none" />
+          <div className="h-72 animate-pulse rounded-lg bg-muted motion-reduce:animate-none" />
         </div>
       </div>
+    </div>
+  );
+}
+
+function OrganizationTabLoadingState({ tabLabel }: { tabLabel: string }) {
+  return (
+    <div className="grid gap-4" data-testid="organization-tab-loading" role="status" aria-live="polite">
+      <span className="sr-only">Loading {tabLabel}</span>
+      <div className="h-8 w-48 animate-pulse rounded-lg bg-muted motion-reduce:animate-none" />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="h-40 animate-pulse rounded-lg bg-muted motion-reduce:animate-none" />
+        <div className="h-40 animate-pulse rounded-lg bg-muted motion-reduce:animate-none" />
+      </div>
+      <div className="h-56 animate-pulse rounded-lg bg-muted motion-reduce:animate-none" />
     </div>
   );
 }
@@ -143,7 +158,7 @@ function OrganizationShellErrorState({
 }) {
   return (
     <main className="mx-auto flex min-h-[50vh] w-full max-w-xl items-center px-4 py-12 sm:px-6">
-      <Card className="w-full border-destructive/30 bg-destructive/5">
+      <Card className="w-full rounded-lg border-destructive/30 bg-destructive/5">
         <CardHeader>
           <CardTitle>We could not load this overview</CardTitle>
           <CardDescription>
@@ -170,7 +185,7 @@ function OrganizationShellPermissionState({
 }) {
   return (
     <main className="mx-auto flex min-h-[55vh] w-full max-w-xl items-center px-4 py-12 sm:px-6">
-      <Card className="w-full text-center">
+      <Card className="w-full rounded-lg text-center">
         <CardContent className="flex flex-col items-center gap-4 p-8 sm:p-12">
           <div className="grid size-16 place-content-center rounded-full bg-muted text-muted-foreground">
             <LockKeyhole aria-hidden="true" className="size-8" />
@@ -206,7 +221,7 @@ function OrganizationShellEmptyOverview({
 }: Pick<OrganizationManagementShellProps, 'organization' | 'canCreateEvent' | 'isCreateEventDisabled' | 'onCreateEvent' | 'onEditOrganization'> & { canEditOrganization?: boolean }) {
   return (
     <div className="grid gap-4 lg:grid-cols-3" data-testid="organization-overview-empty">
-      <Card className="lg:col-span-2">
+      <Card className="rounded-lg lg:col-span-2">
         <CardContent className="flex flex-col items-center gap-4 px-6 py-12 text-center sm:px-12">
           <div className="grid size-14 place-content-center rounded-full bg-accent/15 text-accent-foreground">
             <CalendarDays aria-hidden="true" className="size-7" />
@@ -233,7 +248,7 @@ function OrganizationShellEmptyOverview({
           </div>
         </CardContent>
       </Card>
-      <Card>
+      <Card className="rounded-lg">
         <CardHeader>
           <CardTitle>Finish Organization setup</CardTitle>
           <CardDescription>Complete these steps to make the profile ready for your community.</CardDescription>
@@ -289,7 +304,7 @@ function OrganizationSectionDrawer({
         side="bottom"
         showCloseButton={false}
         aria-labelledby={titleId}
-        className="max-h-[min(90dvh,48rem)] gap-0 rounded-t-3xl p-0"
+        className="max-h-[min(90dvh,48rem)] gap-0 rounded-t-xl p-0"
       >
         <SheetHeader className="border-b border-border pb-4">
           <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-muted-foreground/30" aria-hidden="true" />
@@ -388,6 +403,7 @@ export function OrganizationManagementShell({
   createEventHelperText,
   onCreateEvent,
   isOverviewEmpty = false,
+  isTabLoading = false,
   onShareOrganization,
   children,
 }: OrganizationManagementShellProps) {
@@ -411,7 +427,7 @@ export function OrganizationManagementShell({
   if (status === 'empty' || !organization) {
     return (
       <main className="mx-auto flex min-h-[50vh] w-full max-w-xl items-center px-4 py-12 sm:px-6">
-        <Card className="w-full text-center">
+        <Card className="w-full rounded-lg text-center">
           <CardContent className="p-8">
             <h1 className="text-2xl font-semibold tracking-tight">Organization not found</h1>
             <p className="mt-2 text-sm text-muted-foreground">This Organization is no longer available.</p>
@@ -428,7 +444,7 @@ export function OrganizationManagementShell({
       : `/api/avatars/initials?name=${encodeURIComponent(organization.name)}&size=160`);
 
   return (
-    <div className="min-w-0 bg-background text-foreground" data-testid="organization-management-shell">
+    <div className="org-page-shell organization-management-shell min-w-0 bg-background text-foreground" data-testid="organization-management-shell">
       <section className="relative overflow-hidden bg-background">
         <div
           aria-hidden="true"
@@ -450,8 +466,7 @@ export function OrganizationManagementShell({
                   <Image src={logoUrl} alt={`${organization.name} logo`} width={128} height={128} unoptimized className="size-full object-contain" />
                 </div>
                 <div className="min-w-0 pb-1 text-foreground">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Organization</p>
-                  <h1 className="mt-1 break-words text-2xl font-semibold tracking-tight sm:text-3xl">{organization.name}</h1>
+                  <h1 className="break-words text-2xl font-semibold tracking-tight sm:text-3xl">{organization.name}</h1>
                   <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
                     {organization.location && (
                       <span className="inline-flex min-w-0 items-center gap-1.5">
@@ -579,7 +594,11 @@ export function OrganizationManagementShell({
           </div>
         )}
 
-        {activeTab === 'overview' && isOverviewEmpty ? (
+        {isTabLoading ? (
+          <div className="mt-6 min-w-0" data-slot="organization-tab-content">
+            <OrganizationTabLoadingState tabLabel={getOrganizationTabLabel(availableTabs, activeTab)} />
+          </div>
+        ) : activeTab === 'overview' && isOverviewEmpty ? (
           <div className="mt-6">
             <OrganizationShellEmptyOverview
               organization={organization}

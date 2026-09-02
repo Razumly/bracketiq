@@ -7029,3 +7029,13 @@ body:has(.landing-root) .site-footer-muted {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Keep organization surfaces on one compact corner radius. */
+.organization-management-shell {
+  --organization-surface-radius: 0.5rem;
+}
+
+.organization-management-shell [data-slot="card"],
+.organization-management-shell .org-tab-content .mantine-Paper-root {
+  border-radius: var(--organization-surface-radius);
+}
