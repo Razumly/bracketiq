@@ -81,4 +81,51 @@ describe('OrganizationManagementShell', () => {
 
     expect(onBackToOrganizations).toHaveBeenCalledTimes(1);
   });
+
+  it('renders accessible loading and retry states', async () => {
+    const user = userEvent.setup();
+    const onRetry = jest.fn();
+
+    const { rerender } = render(
+      <OrganizationManagementShell
+        status="loading"
+        availableTabs={availableTabs}
+        activeTab="overview"
+        onTabChange={jest.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Loading Organization overview')).toBeInTheDocument();
+
+    rerender(
+      <OrganizationManagementShell
+        status="error"
+        availableTabs={availableTabs}
+        activeTab="overview"
+        onTabChange={jest.fn()}
+        onRetry={onRetry}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not offer profile editing in the empty state without edit permission', () => {
+    render(
+      <OrganizationManagementShell
+        organization={organization}
+        status="ready"
+        availableTabs={availableTabs}
+        activeTab="overview"
+        onTabChange={jest.fn()}
+        isOverviewEmpty
+        onEditOrganization={jest.fn()}
+        canEditOrganization={false}
+      />,
+    );
+
+    expect(screen.getByTestId('organization-overview-empty')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Complete profile' })).not.toBeInTheDocument();
+  });
 });

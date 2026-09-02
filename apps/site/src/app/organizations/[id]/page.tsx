@@ -85,6 +85,7 @@ import DiscountManager from '@/components/discounts/DiscountManager';
 import { describeDeleteOutcome } from '@/lib/deleteOutcome';
 import { resolveOrganizationEventCreationState } from './organizationEventCreation';
 import { OrganizationManagementShell } from '@/components/organization/OrganizationManagementShell';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 export default function OrganizationDetailPage() {
   return (
@@ -2132,6 +2133,19 @@ function OrganizationDetailContent() {
   }, [requestedCustomerKey, requestedCustomerType]);
 
   useEffect(() => {
+    const handlePopState = () => {
+      const nextTab = resolveOrganizationRouteTab({
+        pathname: window.location.pathname,
+        organizationId: id,
+        queryTab: new URLSearchParams(window.location.search).get('tab'),
+      });
+      setActiveTab(nextTab ?? 'overview');
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [id]);
+
+  useEffect(() => {
     if (!availableTabs.some((tab) => tab.value === activeTab) && availableTabs.length > 0) {
       setActiveTab(availableTabs[0].value);
     }
@@ -2479,6 +2493,26 @@ function OrganizationDetailContent() {
       pushOrganizationHistoryState(buildOrganizationTabPath(id, nextTab));
     }
   }, [id]);
+
+  const handleShareOrganization = useCallback(async () => {
+    if (typeof window === 'undefined' || !org) {
+      return;
+    }
+    const shareData = { title: org.name, url: window.location.href };
+    try {
+      if (navigator.share) {
+        await navigator.share(shareData);
+        return;
+      }
+      await navigator.clipboard.writeText(shareData.url);
+      notifications.show({ color: 'green', message: 'Organization link copied.' });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return;
+      }
+      notifications.show({ color: 'red', message: 'Could not share this Organization link.' });
+    }
+  }, [org]);
 
   const openOrganizationCustomer = useCallback((row: OrganizationCustomerRow) => {
     setSelectedCustomerKey(row.key);
@@ -4429,37 +4463,48 @@ function OrganizationDetailContent() {
           </>
         ) : null}
         headerActions={org ? <OrganizationClaimButton organization={org} /> : null}
+        onShareOrganization={() => { void handleShareOrganization(); }}
         canEditOrganization={isOwner}
         onEditOrganization={() => setShowEditOrganizationModal(true)}
         canToggleHomePagePreference={canToggleHomePagePreference}
         isCurrentOrganizationHomePage={isCurrentOrganizationHomePage}
-        updatingHomePagePreference={updatingHomePagePreference}
+        isUpdatingHomePagePreference={updatingHomePagePreference}
         onSetHomePage={(checked) => { void handleSetHomePage(checked); }}
         canCreateEvent={canManageEvents}
-        createEventDisabled={!canCreateOrganizationEvents}
+        isCreateEventDisabled={!canCreateOrganizationEvents}
         createEventHelperText={createEventHelperText}
         onCreateEvent={handleCreateEvent}
-        overviewEmpty={overviewEmpty}
+        isOverviewEmpty={overviewEmpty}
       >
         <div className="org-tab-content">
         {org ? (
           <>
             {activeTab === 'overview' && (
-              <SimpleGrid cols={{ base: 1, lg: 3 }} spacing="lg">
-                <div style={{ gridColumn: 'span 2' }}>
-                  <Paper withBorder p="md" radius="md" mb="md" className="org-tab-surface">
-                    <Group justify="space-between" align="flex-start" mb="xs">
-                      <Title order={5}>About</Title>
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
+                <div className="space-y-4">
+                  <Card>
+                    <CardHeader className="flex flex-row items-start justify-between gap-4">
+                      <CardTitle>About {org.name}</CardTitle>
                       {isOwner && (
                         <Button variant="light" size="xs" onClick={() => setShowEditOrganizationModal(true)}>
                           Edit Organization
                         </Button>
                       )}
-                    </Group>
-                    <Text size="sm" c="dimmed" style={{ whiteSpace: 'pre-line' }}>{org.description || 'No description'}</Text>
-                  </Paper>
-                  <Paper withBorder p="md" radius="md" className="org-tab-surface">
-                    <Title order={5} mb="md">Recent Events</Title>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="whitespace-pre-line text-sm text-muted-foreground">{org.description || 'No description'}</p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader className="flex flex-row items-center justify-between gap-4">
+                      <CardTitle>Upcoming events</CardTitle>
+                      {availableTabs.some((tab) => tab.value === 'events') && (
+                        <Button variant="subtle" size="compact-sm" onClick={() => handleOrganizationTabChange('events')}>
+                          View all events
+                        </Button>
+                      )}
+                    </CardHeader>
+                    <CardContent>
                     {overviewRecentEvents.length > 0 ? (
                       <ResponsiveCardGrid>
                         {overviewRecentEvents.slice(0, 4).map((e) => (
@@ -4479,119 +4524,138 @@ function OrganizationDetailContent() {
                     ) : (
                       <Text size="sm" c="dimmed">No events yet.</Text>
                     )}
-                  </Paper>
+                    </CardContent>
+                  </Card>
                   {(org.enabledFeatures?.includes('CLUB_TEAMS') || (org.divisions?.length ?? 0) > 0) && (
-                    <div style={{ marginTop: 16 }}>
-                      <OrganizationDivisionsPanel
-                        organization={org}
-                        summary
-                        onChanged={(divisions) => setOrg((current) => current ? { ...current, divisions } : current)}
-                      />
-                    </div>
-                  )}
-                  <div style={{ marginTop: 16 }}>
-                    <OrganizationReviewsPanel
-                      organizationId={org.$id}
-                      mode="summary"
-                      onViewAll={() => handleOrganizationTabChange('reviews')}
+                    <OrganizationDivisionsPanel
+                      organization={org}
+                      summary
+                      onChanged={(divisions) => setOrg((current) => current ? { ...current, divisions } : current)}
                     />
-                  </div>
-                </div>
-                <div>
-                  {isOwner && (
-                    <Paper withBorder p="md" radius="md" mb="md" className="org-tab-surface">
-                      <Title order={5} mb="sm">Payments</Title>
-                      <Text size="sm" c="dimmed" mb="sm">
-                        {organizationVerificationStatus === 'VERIFIED'
-                          ? 'Stripe onboarding is complete. This organization can accept payouts and display the verified badge.'
-                          : organizationVerificationStatus === 'LEGACY_CONNECTED'
-                            ? 'Stripe is connected through the legacy flow. Reconnect through the new verification flow to earn the verified badge.'
-                            : organizationVerificationStatus === 'ACTION_REQUIRED'
-                              ? 'Stripe still needs more information before this organization can be verified.'
-                              : organizationVerificationStatus === 'PENDING'
-                                ? 'Stripe onboarding has started. Finish the remaining steps to complete verification.'
-                                : 'Connect a Stripe account to verify this organization and accept payouts.'}
-                      </Text>
-                      <Group gap="xs" mb="sm">
-                        <Badge
-                          color={
-                            organizationVerificationStatus === 'VERIFIED'
-                              ? 'teal'
-                              : organizationVerificationStatus === 'ACTION_REQUIRED'
-                                ? 'yellow'
-                                : organizationVerificationStatus === 'LEGACY_CONNECTED'
-                                  ? 'blue'
-                                  : 'gray'
-                          }
-                          variant="light"
-                        >
-                          {organizationVerificationStatusLabel(organizationVerificationStatus)}
-                        </Badge>
-                        {syncingOrganizationVerification && <Text size="xs" c="dimmed">Refreshing verification…</Text>}
-                      </Group>
-                      <Stack gap="xs">
-                        {requiresStripeVerificationEmail && (
-                          <TextInput
-                            label="Stripe payout email"
-                            type="email"
-                            placeholder="billing@example.com"
-                            value={stripeEmail}
-                            error={stripeEmailError ?? undefined}
-                            onChange={(e) => {
-                              const next = e.currentTarget.value;
-                              setStripeEmail(next);
-                              if (stripeEmailError && EMAIL_REGEX.test(next.trim())) {
-                                setStripeEmailError(null);
-                              }
-                            }}
-                            disabled={connectingStripe}
-                            required
-                          />
-                        )}
-                        <Button
-                          size="sm"
-                          loading={organizationVerificationStatus === 'VERIFIED' ? managingStripe : connectingStripe}
-                          disabled={requiresStripeVerificationEmail && !stripeEmailValid}
-                          onClick={organizationVerificationStatus === 'VERIFIED' ? handleManageStripeAccount : handleConnectStripeAccount}
-                        >
-                          {stripePrimaryActionLabel}
-                        </Button>
-                        {organizationVerificationStatus !== 'VERIFIED' && (
-                          <Text size="xs" c="dimmed">
-                            The verified badge appears only after Stripe finishes all required checks for this organization.
-                          </Text>
-                        )}
-                      </Stack>
-                    </Paper>
                   )}
-                  <Paper withBorder p="md" radius="md" className="org-tab-surface org-tab-surface--grouped">
-                    <Title order={5} mb="md">Teams</Title>
-                    {org.teams && org.teams.length > 0 ? (
-                      <div className="space-y-3">
-                        {org.teams.slice(0, 3).map((t) => (
-                          <TeamCard key={t.$id} team={t} className="org-tab-item" />
-                        ))}
-                      </div>
-                    ) : (
-                      <Text size="sm" c="dimmed">No teams yet.</Text>
-                    )}
-                  </Paper>
+                </div>
+                <div className="space-y-4">
+                  <Card>
+                    <CardHeader><CardTitle>Organization details</CardTitle></CardHeader>
+                    <CardContent className="space-y-3 text-sm">
+                      {org.website && <a className="flex items-center justify-between gap-4 text-accent hover:underline" href={org.website} target="_blank" rel="noreferrer"><span>Website</span><span className="truncate">{org.website}</span></a>}
+                      {org.location && <div className="flex items-center justify-between gap-4"><span className="text-muted-foreground">Location</span><span className="text-right">{org.location}</span></div>}
+                      {org.sports && org.sports.length > 0 && <div className="flex items-center justify-between gap-4"><span className="text-muted-foreground">Sports</span><span className="text-right">{org.sports.join(', ')}</span></div>}
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader><CardTitle>Reviews</CardTitle></CardHeader>
+                    <CardContent>
+                      <OrganizationReviewsPanel organizationId={org.$id} mode="summary" onViewAll={() => handleOrganizationTabChange('reviews')} />
+                    </CardContent>
+                  </Card>
                   {isOwner && (
-                    <Paper withBorder p="md" radius="md" mt="md" className="org-tab-surface org-tab-surface--grouped">
-                      <Title order={5} mb="md">Officials</Title>
-                      {currentOfficials.length > 0 ? (
+                    <Card>
+                      <CardHeader><CardTitle>Payments status</CardTitle></CardHeader>
+                      <CardContent>
+                        <p className="mb-3 text-sm text-muted-foreground">
+                          {organizationVerificationStatus === 'VERIFIED'
+                            ? 'Stripe onboarding is complete. This organization can accept payouts and display the verified badge.'
+                            : organizationVerificationStatus === 'LEGACY_CONNECTED'
+                              ? 'Stripe is connected through the legacy flow. Reconnect through the new verification flow to earn the verified badge.'
+                              : organizationVerificationStatus === 'ACTION_REQUIRED'
+                                ? 'Stripe still needs more information before this organization can be verified.'
+                                : organizationVerificationStatus === 'PENDING'
+                                  ? 'Stripe onboarding has started. Finish the remaining steps to complete verification.'
+                                  : 'Connect a Stripe account to verify this organization and accept payouts.'}
+                        </p>
+                        <Group gap="xs" mb="sm">
+                          <Badge
+                            color={
+                              organizationVerificationStatus === 'VERIFIED'
+                                ? 'teal'
+                                : organizationVerificationStatus === 'ACTION_REQUIRED'
+                                  ? 'yellow'
+                                  : organizationVerificationStatus === 'LEGACY_CONNECTED'
+                                    ? 'blue'
+                                    : 'gray'
+                            }
+                            variant="light"
+                          >
+                            {organizationVerificationStatusLabel(organizationVerificationStatus)}
+                          </Badge>
+                          {syncingOrganizationVerification && <Text size="xs" c="dimmed">Refreshing verification…</Text>}
+                        </Group>
+                        <Stack gap="xs">
+                          {requiresStripeVerificationEmail && (
+                            <TextInput
+                              label="Stripe payout email"
+                              type="email"
+                              placeholder="billing@example.com"
+                              value={stripeEmail}
+                              error={stripeEmailError ?? undefined}
+                              onChange={(e) => {
+                                const next = e.currentTarget.value;
+                                setStripeEmail(next);
+                                if (stripeEmailError && EMAIL_REGEX.test(next.trim())) {
+                                  setStripeEmailError(null);
+                                }
+                              }}
+                              disabled={connectingStripe}
+                              required
+                            />
+                          )}
+                          <Button
+                            size="sm"
+                            loading={organizationVerificationStatus === 'VERIFIED' ? managingStripe : connectingStripe}
+                            disabled={requiresStripeVerificationEmail && !stripeEmailValid}
+                            onClick={organizationVerificationStatus === 'VERIFIED' ? handleManageStripeAccount : handleConnectStripeAccount}
+                          >
+                            {stripePrimaryActionLabel}
+                          </Button>
+                          {organizationVerificationStatus !== 'VERIFIED' && (
+                            <Text size="xs" c="dimmed">
+                              The verified badge appears only after Stripe finishes all required checks for this organization.
+                            </Text>
+                          )}
+                        </Stack>
+                      </CardContent>
+                    </Card>
+                  )}
+                  <Card>
+                    <CardHeader className="flex flex-row items-center justify-between gap-4">
+                      <CardTitle>Teams</CardTitle>
+                      {availableTabs.some((tab) => tab.value === 'teams') && (
+                        <Button variant="subtle" size="compact-sm" onClick={() => handleOrganizationTabChange('teams')}>
+                          View all teams
+                        </Button>
+                      )}
+                    </CardHeader>
+                    <CardContent>
+                      {org.teams && org.teams.length > 0 ? (
                         <div className="space-y-3">
-                          {currentOfficials.slice(0, 4).map((ref) => (
-                            <UserCard key={ref.$id} user={ref} className="org-tab-item !shadow-none" />
+                          {org.teams.slice(0, 3).map((t) => (
+                            <TeamCard key={t.$id} team={t} className="org-tab-item" />
                           ))}
                         </div>
                       ) : (
-                        <Text size="sm" c="dimmed">No officials yet.</Text>
+                        <Text size="sm" c="dimmed">No teams yet.</Text>
                       )}
-                    </Paper>
+                    </CardContent>
+                  </Card>
+                  {isOwner && (
+                    <Card>
+                      <CardHeader><CardTitle>Staff &amp; officials</CardTitle></CardHeader>
+                      <CardContent>
+                        {currentOfficials.length > 0 ? (
+                          <div className="space-y-3">
+                            {currentOfficials.slice(0, 4).map((ref) => (
+                              <UserCard key={ref.$id} user={ref} className="org-tab-item !shadow-none" />
+                            ))}
+                          </div>
+                        ) : (
+                          <Text size="sm" c="dimmed">No officials yet.</Text>
+                        )}
+                      </CardContent>
+                    </Card>
                   )}
                 </div>
-              </SimpleGrid>
+              </div>
             )}
 
             {activeTab === 'reviews' && org && (
