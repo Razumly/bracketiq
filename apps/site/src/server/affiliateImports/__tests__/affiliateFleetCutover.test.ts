@@ -99,9 +99,11 @@ const runnerContainer = {
     'AFFILIATE_AGENT_RUNNER_CHILD_GID=1001',
     'AFFILIATE_AGENT_RUNNER_CGROUP_RELATIVE_PATH=affiliate-agent-runner',
     'AFFILIATE_AGENT_GATEWAY_ADDRESS=http://gateway:8080',
-    'AFFILIATE_AGENT_MODEL_ADDRESS=http://model:8080',
-    'AFFILIATE_AGENT_MODEL_CREDENTIAL=redacted',
+    'AFFILIATE_AGENT_CODEX_AUTH_SEED=/run/secrets/codex-auth.json',
+    'AFFILIATE_AGENT_CODEX_MODEL=gpt-5.6-luna',
   ],
+  volumes: ['/reviewed/auth.json:/run/secrets/codex-auth.json:ro'],
+  networks: ['affiliate_gateway_internal', 'affiliate_gateway_egress'],
   ipcMode: 'none',
   capAdd: ['CHOWN', 'DAC_OVERRIDE', 'FOWNER', 'KILL', 'SETGID', 'SETUID'],
   groupAdd: ['1001'],
@@ -1165,6 +1167,16 @@ describe('affiliate fleet cutover contracts', () => {
 
     expect(inspection.isSafe).toBe(true);
     expect(inspection.findings).toEqual([]);
+  });
+  it('rejects a runner without the reviewed Codex egress network', () => {
+    const inspection = inspectAffiliateAgentRunnerContainer({
+      ...runnerContainer,
+      networks: ['affiliate_gateway_internal'],
+    });
+
+    expect(inspection.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'PRODUCTION_NETWORK_ACCESS' }),
+    ]));
   });
   it('rejects a runner when supervisor and child UIDs collapse', () => {
     const inspection = inspectAffiliateAgentRunnerContainer({

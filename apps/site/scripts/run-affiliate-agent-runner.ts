@@ -553,6 +553,97 @@ const requiredEnvironment = (name: string, fallback?: string): string => {
   if (!value) throw new Error(`${name} is required.`);
   return value;
 };
+
+const DEFAULT_CODEX_MODEL = "gpt-5.6-luna";
+const CODEX_AUTH_SEED_ENV = "AFFILIATE_AGENT_CODEX_AUTH_SEED";
+const CODEX_MODEL_ENV = "AFFILIATE_AGENT_CODEX_MODEL";
+const CODEX_AUTH_FILE_NAME = "auth.json";
+
+const requiredCodexAuthSeed = (seedPath: string): string => {
+  const resolvedPath = resolve(seedPath);
+  const entry = lstatSync(resolvedPath);
+  if (entry.isSymbolicLink() || !entry.isFile()) {
+    throw new Error("The Codex auth seed must be a regular file.");
+  }
+  const contents = readFileSync(resolvedPath, "utf8");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(contents);
+  } catch {
+    throw new Error("The Codex auth seed must contain valid JSON.");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("The Codex auth seed must contain a JSON object.");
+  }
+  const auth = parsed as Record<string, unknown>;
+  const tokens = auth.tokens && typeof auth.tokens === "object" && !Array.isArray(auth.tokens)
+    ? auth.tokens as Record<string, unknown>
+    : auth;
+  if (
+    auth.auth_mode !== "chatgpt"
+    || typeof tokens.access_token !== "string"
+    || !tokens.access_token.trim()
+    || typeof tokens.refresh_token !== "string"
+    || !tokens.refresh_token.trim()
+  ) {
+    throw new Error("The Codex auth seed must contain reviewed ChatGPT credentials.");
+  }
+  return resolvedPath;
+};
+
+export const seedCodexAuthForWorkspace = (
+  seedPath: string,
+  workspacePath: string,
+  childUid?: number,
+  childGid?: number,
+): string => {
+  const sourcePath = requiredCodexAuthSeed(seedPath);
+  const codexHome = join(resolve(workspacePath), ".codex");
+  const targetPath = join(codexHome, CODEX_AUTH_FILE_NAME);
+  let targetEntry: Stats | null = null;
+  try {
+    targetEntry = lstatSync(targetPath);
+  } catch (error) {
+    const errorCode = (
+      typeof error === "object"
+      && error !== null
+      && "code" in error
+      && typeof error.code === "string"
+    )
+      ? error.code
+      : undefined;
+    if (errorCode !== "ENOENT") throw error;
+  }
+  const sourceContents = readFileSync(sourcePath, "utf8");
+  if (targetEntry !== null) {
+    if (targetEntry.isSymbolicLink() || !targetEntry.isFile()) {
+      throw new Error("The workspace Codex auth file must be a regular file.");
+    }
+    if (readFileSync(targetPath, "utf8") !== sourceContents) {
+      throw new Error("The workspace Codex auth file does not match the reviewed seed.");
+    }
+    if (childUid !== undefined) chownSync(targetPath, childUid, childGid ?? -1);
+    chmodSync(targetPath, 0o600);
+    return targetPath;
+  }
+  writeFileSync(targetPath, sourceContents, {
+    encoding: "utf8",
+    mode: 0o600,
+    flag: "wx",
+  });
+  if (childUid !== undefined) chownSync(targetPath, childUid, childGid ?? -1);
+  chmodSync(targetPath, 0o600);
+  return targetPath;
+};
+
+const requiredCodexModel = (value: string): string => {
+  const normalized = value.trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/.test(normalized)) {
+    throw new Error("The Codex model must be a bounded identifier.");
+  }
+  return normalized;
+};
+
 const requiredChildId = (name: string): number => {
   const value = Number(requiredEnvironment(name));
   if (!Number.isInteger(value) || value < 1 || value > 65_534) {
@@ -646,23 +737,26 @@ const environmentFrom = (value: unknown): RunnerEnvironment | null => {
   return Object.fromEntries(entries) as RunnerEnvironment;
 };
 
-const CODEX_ARGUMENTS = [
+const codexArgumentsFor = (model: string): readonly string[] => [
   "exec",
   "--ephemeral",
   "--skip-git-repo-check",
+  "--model",
+  model,
   "--sandbox",
   "workspace-write",
   "-c",
   "sandbox_workspace_write.network_access=true",
   "-",
-] as const;
-
+];
 
 const childLaunchFor = (
   containmentPath: string | null,
+  model: string,
 ): Readonly<{ command: string; args: readonly string[]; cgroupProcsPath?: string }> => {
+  const args = codexArgumentsFor(model);
   if (containmentPath === null) {
-    return { command: "codex", args: CODEX_ARGUMENTS };
+    return { command: "codex", args };
   }
   return {
     command: "sh",
@@ -672,7 +766,7 @@ const childLaunchFor = (
       "IFS= read -r _; exec \"$@\"",
       "affiliate-agent-cgroup-wrapper",
       "codex",
-      ...CODEX_ARGUMENTS,
+      ...args,
     ],
     cgroupProcsPath: cgroupFilePath(containmentPath, "cgroup.procs"),
   };
@@ -680,8 +774,6 @@ const childLaunchFor = (
 
 const childEnvironmentFor = (
   environment: RunnerEnvironment,
-  modelAddress: string,
-  modelCredential: string,
   workspacePath: string,
 ): NodeJS.ProcessEnv => {
   const safeEnvironment = Object.fromEntries(
@@ -697,8 +789,6 @@ const childEnvironmentFor = (
     HOME: codexHome,
     CODEX_HOME: codexHome,
     LANG: "C.UTF-8",
-    OPENAI_BASE_URL: modelAddress,
-    OPENAI_API_KEY: modelCredential,
     ...safeEnvironment,
     TMPDIR: temporaryDirectory,
     TMP: temporaryDirectory,
@@ -1070,23 +1160,18 @@ const releaseChildCgroupGate = (
 
 const childSpawnOptionsFor = (
   active: ActiveInvocation,
-  modelAddress: string,
-  modelCredential: string,
   childUid: number | undefined,
   childGid: number | undefined,
 ): SpawnOptions => ({
   cwd: active.workspacePath,
   env: childEnvironmentFor(
     active.environment,
-    modelAddress,
-    modelCredential,
     active.workspacePath,
   ),
   detached: process.platform !== "win32",
   ...(childUid === undefined ? {} : { uid: childUid }),
   ...(childGid === undefined ? {} : { gid: childGid }),
 });
-
 const cleanupFailedChildSpawn = (
   active: ActiveInvocation,
   child: ChildProcess | null,
@@ -1100,8 +1185,8 @@ const cleanupFailedChildSpawn = (
 
 const spawnChildProcess = (
   active: ActiveInvocation,
-  modelAddress: string,
-  modelCredential: string,
+  codexAuthSeedPath: string | undefined,
+  codexModel: string,
   spawnProcess: typeof spawn,
   containment: RunnerContainment | undefined,
   childUid: number | undefined,
@@ -1110,19 +1195,25 @@ const spawnChildProcess = (
 ): SpawnedChild => {
   const containmentPath = containment?.createInvocationPath() ?? null;
   active.containmentPath = containmentPath;
-  const launch = childLaunchFor(containmentPath);
+  const launch = childLaunchFor(containmentPath, codexModel);
   let child: ChildProcess | null = null;
   try {
     if (containment !== undefined) {
       ensureChildCodexHome(active.workspacePath, childGid!, supervisorUid!);
+    }
+    if (codexAuthSeedPath !== undefined) {
+      seedCodexAuthForWorkspace(
+        codexAuthSeedPath,
+        active.workspacePath,
+        childUid,
+        childGid,
+      );
     }
     child = spawnProcess(
       launch.command,
       launch.args,
       childSpawnOptionsFor(
         active,
-        modelAddress,
-        modelCredential,
         childUid,
         childGid,
       ),
@@ -1135,13 +1226,12 @@ const spawnChildProcess = (
   if (child === null) throw new Error("The Codex child was not created.");
   return { child, containmentPath };
 };
-
 const spawnChild = (
   active: ActiveInvocation,
   prompt: string,
   eventRequestId: string,
-  modelAddress: string,
-  modelCredential: string,
+  codexAuthSeedPath: string | undefined,
+  codexModel: string,
   spawnProcess: typeof spawn = spawn,
   startedRequestId = eventRequestId,
   containment?: RunnerContainment,
@@ -1164,8 +1254,8 @@ const spawnChild = (
   active.childClose = childClosed.promise;
   const { child, containmentPath } = spawnChildProcess(
     active,
-    modelAddress,
-    modelCredential,
+    codexAuthSeedPath,
+    codexModel,
     spawnProcess,
     containment,
     childUid,
@@ -2306,8 +2396,8 @@ export type RunnerServerContext = Readonly<{
   cleanupPromises?: Set<Promise<void>>;
   seenRequestIds: Map<string, number>;
   protocolPublicKeys: ReadonlyMap<string, KeyObject>;
-  modelAddress: string;
-  modelCredential: string;
+  codexAuthSeedPath?: string;
+  codexModel?: string;
   childUid?: number;
   childGid?: number;
   supervisorUid?: number;
@@ -2587,8 +2677,8 @@ const handleLaunchRequest = (
       active,
       request.prompt,
       request.requestId,
-      context.modelAddress,
-      context.modelCredential,
+      context.codexAuthSeedPath,
+      context.codexModel ?? DEFAULT_CODEX_MODEL,
       context.spawnProcess,
       request.requestId,
       context.containment,
@@ -2842,18 +2932,17 @@ const cleanupActiveRunnerConnection = async (
 const cleanupRunnerConnection = async (
   state: RunnerConnectionState,
   context: RunnerServerContext,
-): Promise<void> => {
+): Promise<boolean> => {
   state.isClosing = true;
   clearPreReservationTimeout(state);
   clearReservationTimeout(state);
   const active = state.active;
   if (active === null) {
     releaseRunnerReservation(state, context);
-    return;
+    return true;
   }
-  await cleanupActiveRunnerConnection(state, context, active);
+  return cleanupActiveRunnerConnection(state, context, active);
 };
-
 export const configureRunnerConnection = (
   socket: Socket,
   context: RunnerServerContext,
@@ -2887,10 +2976,12 @@ export const configureRunnerConnection = (
       void cleanup;
       return;
     }
-    void cleanup.then(
-      () => context.cleanupPromises?.delete(cleanup),
+    const trackedCleanup = cleanup.then(() => undefined);
+    context.cleanupPromises.add(trackedCleanup);
+    void trackedCleanup.then(
+      () => context.cleanupPromises?.delete(trackedCleanup),
       (error: unknown) => {
-        context.cleanupPromises?.delete(cleanup);
+        context.cleanupPromises?.delete(trackedCleanup);
         context.onFatal?.(error);
       },
     );
@@ -2902,8 +2993,8 @@ export const configureRunnerConnection = (
 type RunnerStartupConfig = Readonly<{
   socketPath: string;
   protocolPublicKeys: ReadonlyMap<string, KeyObject>;
-  modelAddress: string;
-  modelCredential: string;
+  codexAuthSeedPath: string;
+  codexModel: string;
   maxConcurrentInvocations: number;
   childUid: number;
   childGid: number;
@@ -2919,8 +3010,12 @@ const runnerStartupConfig = (): RunnerStartupConfig => {
   const protocolPublicKeys = parseRunnerPublicKeys(
     requiredEnvironment("AFFILIATE_AGENT_RUNNER_PROTOCOL_PUBLIC_KEYS"),
   );
-  const modelAddress = requiredEnvironment("AFFILIATE_AGENT_MODEL_ADDRESS");
-  const modelCredential = requiredEnvironment("AFFILIATE_AGENT_MODEL_CREDENTIAL");
+  const codexAuthSeedPath = requiredCodexAuthSeed(
+    requiredEnvironment(CODEX_AUTH_SEED_ENV),
+  );
+  const codexModel = requiredCodexModel(
+    requiredEnvironment(CODEX_MODEL_ENV),
+  );
   const maxConcurrentInvocations = Number(
     process.env.AFFILIATE_AGENT_MAX_CONCURRENT_INVOCATIONS ?? "1",
   );
@@ -2943,8 +3038,8 @@ const runnerStartupConfig = (): RunnerStartupConfig => {
   return {
     socketPath,
     protocolPublicKeys,
-    modelAddress,
-    modelCredential,
+    codexAuthSeedPath,
+    codexModel,
     maxConcurrentInvocations,
     childUid,
     childGid,
@@ -2957,8 +3052,8 @@ const run = async (): Promise<void> => {
   const {
     socketPath,
     protocolPublicKeys,
-    modelAddress,
-    modelCredential,
+    codexAuthSeedPath,
+    codexModel,
     maxConcurrentInvocations,
     childUid,
     childGid,
@@ -3119,8 +3214,8 @@ const run = async (): Promise<void> => {
       childGid,
       supervisorUid,
       protocolPublicKeys,
-      modelAddress,
-      modelCredential,
+      codexAuthSeedPath,
+      codexModel,
       maxConcurrentInvocations,
       spawnProcess: spawn,
       destroyWorkspace: async (workspacePath) => {

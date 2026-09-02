@@ -1275,10 +1275,40 @@ const addContractReferenceMismatch = (
   });
 };
 
+const affiliateAgentPolicySupplyContractSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    version: positiveIntegerSchema,
+    rolloutCohort: z.string().trim().min(1),
+    hash: sha256Schema,
+    freshnessWindows: z.array(
+      z.object({
+        sourceProfile: z.string().trim().min(1),
+        maximumAgeHours: positiveIntegerSchema,
+      }).strict(),
+    ),
+    targets: z.array(
+      z.object({
+        marketKey: z.string().trim().min(1).nullable().optional(),
+        sportId: z.string().trim().min(1).nullable().optional(),
+        sourceProfile: z.string().trim().min(1),
+        minimumFreshPublishedSupply: positiveIntegerSchema,
+      }).strict(),
+    ),
+    requiredMappingEvidenceKinds: z.array(z.string().trim().min(1)),
+    requiredLifecycleEvidenceKinds: z.array(z.string().trim().min(1)),
+    searchSaturationMinimumCycles: positiveIntegerSchema.optional(),
+  })
+  .strict()
+  .superRefine(assertSelfHash);
+
 export const affiliateAgentContractBundleSchema = z
   .object({
     schemaVersion: z.literal(1),
-    supplyContract: affiliateAgentSupplyContractSchema,
+    supplyContract: z.union([
+      affiliateAgentSupplyContractSchema,
+      affiliateAgentPolicySupplyContractSchema,
+    ]),
     roleContracts: affiliateAgentRoleContractBundleTupleSchema,
     promptTemplates: affiliateAgentPromptTemplateBundleTupleSchema,
     deploymentContract: affiliateAgentDeploymentContractSchema,

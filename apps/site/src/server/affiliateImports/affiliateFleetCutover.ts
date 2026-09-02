@@ -2130,6 +2130,7 @@ export type AffiliateAgentContainerInput = Readonly<{
   privileged?: boolean;
   tmpfs?: Readonly<Record<string, string>>;
   environment?: readonly string[] | Readonly<Record<string, string>>;
+  volumes?: readonly string[];
   networks?: readonly string[];
   isNetworkInternal?: boolean;
   capDrop?: readonly string[];
@@ -2550,19 +2551,54 @@ const runnerCgroupFindings = (
       )]
 );
 
-const runnerModelCredentialFindings = (
+const runnerNetworkFindings = (
+  input: AffiliateAgentContainerInput,
+  expectedNetwork: string,
+  expectedEgressNetwork = 'affiliate_gateway_egress',
+): AffiliateCutoverFinding[] => {
+  const networks = (input.networks ?? []).map((network) => stringValue(network) ?? '');
+  const normalizedExpectedNetwork = stringValue(expectedNetwork) ?? '';
+  const normalizedEgressNetwork = stringValue(expectedEgressNetwork) ?? '';
+  const isRestricted = Boolean(
+    normalizedExpectedNetwork
+    && normalizedEgressNetwork
+    && networks.length === 2
+    && networks.includes(normalizedExpectedNetwork)
+    && networks.includes(normalizedEgressNetwork)
+    && input.isNetworkInternal === true
+  );
+  return isRestricted
+    ? []
+    : [finding(
+        'PRODUCTION_NETWORK_ACCESS',
+        'BLOCKING',
+        `The runner ${input.id} must use only the internal gateway and reviewed Codex egress networks.`,
+        [input.id, normalizedExpectedNetwork || '(missing-reviewed-network)', normalizedEgressNetwork || '(missing-reviewed-egress-network)', ...networks],
+        'Attach the runner only to the reviewed internal gateway and Codex egress networks.',
+      )];
+};
+
+const runnerCodexHandoffFindings = (
   input: AffiliateAgentContainerInput,
   environment: readonly string[],
 ): AffiliateCutoverFinding[] => {
-  const hasModelCredential = environment.some((entry) => (
-    upper(entry.split('=', 1)[0]) === 'AFFILIATE_AGENT_MODEL_CREDENTIAL'
+  const hasAuthSeed = environment.some((entry) => (
+    upper(entry.split('=', 1)[0]) === 'AFFILIATE_AGENT_CODEX_AUTH_SEED'
   ));
-  if (hasModelCredential) return [];
+  const hasModel = environment.some((entry) => (
+    upper(entry.split('=', 1)[0]) === 'AFFILIATE_AGENT_CODEX_MODEL'
+  ));
+  const hasAuthMount = (input.volumes ?? []).some((volume) => {
+    const parts = volume.split(':');
+    return parts[1] === '/run/secrets/codex-auth.json'
+      && parts[parts.length - 1] === 'ro';
+  });
+  if (hasAuthSeed && hasModel && hasAuthMount) return [];
   return [runnerBoundaryFinding(
     input,
-    'RUNNER_MODEL_CREDENTIAL_MISSING',
-    'The governed runner does not expose the reviewed model credential handoff.',
-    'Provide only the reviewed model credential to the root control process for one fresh Codex child.',
+    'RUNNER_CODEX_HANDOFF',
+    'The governed runner does not prove the reviewed Codex auth seed, model, and read-only auth mount.',
+    'Mount the reviewed auth.json read-only, set the Codex auth seed path, and set the reviewed Codex model.',
   )];
 };
 
@@ -2571,16 +2607,14 @@ const runnerContainmentFindings = (
   environment: readonly string[],
   expectedNetwork: string,
 ): AffiliateCutoverFinding[] => [
-  ...forbiddenContainerEnvironmentFindings(input, environment, {
-    allowReviewedModelCredential: true,
-  }),
-  ...containerNetworkFindings(input, expectedNetwork),
+  ...forbiddenContainerEnvironmentFindings(input, environment, {}),
+  ...runnerNetworkFindings(input, expectedNetwork),
   ...runnerIdentityFindings(input),
   ...runnerFilesystemFindings(input),
   ...runnerCapabilityFindings(input),
   ...runnerChildIdentityFindings(input),
   ...runnerCgroupFindings(input),
-  ...runnerModelCredentialFindings(input, environment),
+  ...runnerCodexHandoffFindings(input, environment),
 ];
 
 const auxiliaryIdentityFindings = (
@@ -2609,6 +2643,7 @@ const normalizedContainerInput = (
   const normalized: Record<string, unknown> = {
     ...input,
     environment: [...environment].sort(),
+    volumes: [...(input.volumes ?? [])].sort(),
     networks: [...(input.networks ?? [])].map((network) => stringValue(network) ?? '').sort(),
     capDrop: sortedUnique((input.capDrop ?? []).map(upper)),
     capAdd: sortedUnique((input.capAdd ?? []).map(upper)),

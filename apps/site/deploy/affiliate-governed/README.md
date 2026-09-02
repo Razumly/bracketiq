@@ -125,14 +125,13 @@ receive it and must not call this route. `/admission/open` and
 these requests inside the gateway container as shown in **Staged startup** and
 **Rollback boundary**.
 
-The Compose file launches one runner sidecar. The runner has the model
-credential and no role or supervisor-halt credential. Each supervisor has one
-role credential plus the dedicated supervisor-halt credential, and no model
-credential. Start the gateway before attaching the reviewed model
-relay: its startup creates the internal-only network named by
-`AFFILIATE_AGENT_GATEWAY_NETWORK`. Attach the relay to that network, give it
-the `affiliate-model.internal` network alias, and set
-`AFFILIATE_AGENT_MODEL_ADDRESS` to its HTTP address before starting the runner.
+The Compose file launches one runner sidecar. The runner starts Codex CLI with
+the reviewed model `gpt-5.6-luna` and no role or supervisor-halt credential.
+The runner receives a read-only host mount for the reviewed ChatGPT Codex
+`auth.json`. It copies that file into each fresh invocation `CODEX_HOME` with
+mode `0600`. The runner joins the internal gateway network and the reviewed
+egress network. Supervisors keep only their role and supervisor-halt
+credentials and cannot access the Codex auth seed.
 
 ## Prepare the manifest
 
@@ -253,8 +252,8 @@ Use `deployment.env.example` as the source when creating the file; the
 resulting `deployment.env` is ignored by git. Set the immutable gateway and
 worker image digests, operator token, dedicated supervisor-halt credential,
 token-signing/workspace keys, deployment contract JSON, token key version,
-preflight report JSON, Spaces settings, model address and credential, all five
-role credentials, and the existing workspace root. Keep
+preflight report JSON, Spaces settings, the reviewed Codex model and auth file,
+all five role credentials, and the existing workspace root. Keep
 `AFFILIATE_GATEWAY_DATABASE_URL` pointed at the reviewed
 `postgres` service on `bracketiq-production_backend`, with the URL-encoded
 runtime password and database name `bracketiq`. Keep
@@ -593,12 +592,13 @@ jq -e --arg expected "$REVIEWED_GATEWAY_USER" '
   and $services["affiliate-replenishment-controller"].user == $expected
   and ($expected | test("^[1-9][0-9]*:[1-9][0-9]*$"))
 ' /path/to/affiliate-governed-private/governed-compose.redacted.json
-jq -e '[.services[]?.environment[]?] | all(test("^[^=]+=<redacted>$"))' \
-  /path/to/affiliate-governed-private/governed-compose.redacted.json
+```text
 jq -e '
   .services["affiliate-gateway"].environment
   | if type != "array" then false
-    else any(. == "AFFILIATE_OPERATIONAL_ALERT_WEBHOOK_URL=<redacted>")
+    else any(. == "AFFILIATE_OPERATIONAL_ALERT_EMAIL_TO=<redacted>")
+      and any(. == "SMTP_HOST=<redacted>")
+      and any(. == "SMTP_PASS=<redacted>")
       and any(. == "AFFILIATE_AGENT_SUPERVISOR_HALT_CREDENTIAL=<redacted>")
     end
 ' /path/to/affiliate-governed-private/governed-compose.redacted.json
@@ -750,17 +750,16 @@ jq -e '
     and all(.[]; grace_seconds > 1200)
 ' /path/to/affiliate-governed-private/governed-compose.redacted.json
 ```
-
 The redaction keeps environment names and removes every environment value. It
 keeps only reviewed network names and their internal flags. The validation must
-succeed. The gateway environment check proves the required operational alert,
-human-directed, and dedicated supervisor-halt names remain present in redacted
-form; the following placement check proves the halt name is absent from the
-runner, its Codex child environment, and the non-supervisor helpers. Do not
-copy an alert URL or any other value from the raw stream into another artifact.
-Use the redacted file for topology review. The runner's private cgroup mode and
-namespace-relative target are retained; no host cgroup source or bind path is
-retained or accepted.
+succeed. The gateway environment check proves the required operational email,
+SMTP, human-directed, and dedicated supervisor-halt names remain present in
+redacted form; the following placement check proves the halt name is absent
+from the runner, its Codex child environment, and the non-supervisor helpers.
+Do not copy SMTP values or any other secret from the raw stream into another
+artifact. Use the redacted file for topology review. The runner's private
+cgroup mode and namespace-relative target are retained; no host cgroup source
+or bind path is retained or accepted.
 ```text
 jq -e --arg expected "$REVIEWED_GATEWAY_IMAGE" \
   '.services["affiliate-gateway"].image == $expected
@@ -810,7 +809,7 @@ The controller uses the gateway image only as a protected cadence client. The
 shell loop starts one authenticated gateway request per protected interval and
 exits on a request error or invalid interval; the reviewed restart policy then
 determines whether Docker restarts the exact container. It has no database URL,
-production-backend network, provider key, model credential, runner socket, or
+production-backend network, provider key, Codex auth seed, runner socket, or
 artifact volume. The gateway selects the reviewed active contract cohort and
 performs the persistence operation.
 ```text
@@ -822,7 +821,7 @@ jq -e '
   and all(.[]; contains("PRODUCTION_BACKEND") | not)
   and all(.[]; contains("AFFILIATE_SCRAPINGDOG_API_KEY") | not)
   and all(.[]; contains("AFFILIATE_FIRECRAWL_API_KEY") | not)
-  and all(.[]; contains("AFFILIATE_AGENT_MODEL_CREDENTIAL") | not)
+  and all(.[]; contains("AFFILIATE_AGENT_CODEX") | not)
 ' /path/to/affiliate-governed-private/governed-compose.redacted.json
 ```
 
@@ -2004,7 +2003,7 @@ docker inspect "$REPLENISHMENT_CONTAINER_ID" |
           or startswith("AFFILIATE_GATEWAY_DATABASE_URL=")
           or startswith("AFFILIATE_SCRAPINGDOG_API_KEY=")
           or startswith("AFFILIATE_FIRECRAWL_API_KEY=")
-          or startswith("AFFILIATE_AGENT_MODEL_CREDENTIAL=")) | not
+          or startswith("AFFILIATE_AGENT_CODEX_")) | not
       ))
     ))
     | length == 1
@@ -4404,7 +4403,7 @@ jq -e --arg id "$REPLENISHMENT_CONTAINER_ID" \
     and (all(.environment[];
       contains("AFFILIATE_FIRECRAWL_API_KEY") | not))
     and (all(.environment[];
-      contains("AFFILIATE_AGENT_MODEL_CREDENTIAL") | not))
+      contains("AFFILIATE_AGENT_CODEX_") | not))
 ' "$REVIEWED_CONTAINERS_OUTPUT"
 grep -Fx "$GATEWAY_CONTAINER_ID" \
   /path/to/affiliate-governed-private/reviewed-affiliate-container-ids.txt
@@ -4505,61 +4504,27 @@ shasum -a 256 "$GATEWAY_DATABASE_IDENTITY_OUTPUT" \
 ```
 
 2. Before this production state change, obtain separate current authorization.
-   Attach the reviewed model relay to `$REVIEWED_AGENT_NETWORK`, the gateway
-   network name derived from the redacted Compose output above, using its
-   deployment procedure. It must use the `affiliate-model.internal` alias and
-   must not join `production_backend` or `gateway_egress`.
-
-After the relay is attached, do not start the runner until its exact full
-container ID, immutable image digest, alias, and network pass this check. The
-deployment procedure must provide the approved full container ID and write the
-approved image reference to a protected file. Do not retain raw Docker
-inspection output:
+   Verify the reviewed Codex ChatGPT auth seed and model settings. Do not put
+   the auth contents in deployment evidence:
 
 ```text
-export REVIEWED_MODEL_RELAY_CONTAINER_ID=REPLACE_WITH_REVIEWED_FULL_CONTAINER_ID
-export REVIEWED_MODEL_RELAY_IMAGE_FILE=/path/to/affiliate-governed-private/reviewed-model-relay-image.txt
-install -m 0600 /dev/null "$REVIEWED_MODEL_RELAY_IMAGE_FILE"
-# Write the approved model relay image reference with its immutable digest.
-export REVIEWED_MODEL_RELAY_IMAGE="$(cat "$REVIEWED_MODEL_RELAY_IMAGE_FILE")"
-test -n "$REVIEWED_MODEL_RELAY_IMAGE"
-printf '%s\n' "$REVIEWED_MODEL_RELAY_IMAGE" \
-  | grep -Eq '^.+@sha256:[a-fA-F0-9]{64}$'
-export REVIEWED_MODEL_RELAY_OUTPUT=/path/to/affiliate-governed-private/reviewed-model-relay.redacted.json
-install -m 0600 /dev/null "$REVIEWED_MODEL_RELAY_OUTPUT"
-docker inspect "$REVIEWED_MODEL_RELAY_CONTAINER_ID" \
-  | jq '.[0] | {
-      id: .Id,
-      image: .Config.Image,
-      imageId: .Image,
-      networks: ((.NetworkSettings.Networks // {})
-        | with_entries(.value |= {aliases: (.Aliases // [])}))
-    }' > "$REVIEWED_MODEL_RELAY_OUTPUT"
-jq -e --arg id "$REVIEWED_MODEL_RELAY_CONTAINER_ID" \
-  --arg image "$REVIEWED_MODEL_RELAY_IMAGE" \
-  --arg network "$REVIEWED_AGENT_NETWORK" '
-  .id == $id
-  and (.id | test("^[a-f0-9]{64}$"; "i"))
-  and .image == $image
-  and (.image | test("@sha256:[a-f0-9]{64}$"; "i"))
-  and (.imageId | test("^sha256:[a-f0-9]{64}$"; "i"))
-  and ((.networks | keys) == [$network])
-  and ((.networks[$network].aliases // [])
-    | index("affiliate-model.internal") != null)
-' "$REVIEWED_MODEL_RELAY_OUTPUT"
-shasum -a 256 "$REVIEWED_MODEL_RELAY_OUTPUT" \
-  > /path/to/affiliate-governed-private/reviewed-model-relay.redacted.sha256
-shasum -a 256 \
-  "$REVIEWED_MODEL_RELAY_IMAGE_FILE" \
-  "$REVIEWED_MODEL_RELAY_OUTPUT" \
-  /path/to/affiliate-governed-private/reviewed-model-relay.redacted.sha256 \
-  >> "$DEPLOYMENT_EVIDENCE_HASH"
+CODEX_AUTH_FILE="$(sed -n 's/^AFFILIATE_AGENT_CODEX_AUTH_FILE=//p' "$DEPLOYMENT_ENV")"
+test -n "$CODEX_AUTH_FILE"
+test -f "$CODEX_AUTH_FILE"
+test "$(stat -c '%a' "$CODEX_AUTH_FILE")" = "600"
+jq -e '
+  .auth_mode == "chatgpt"
+  and (.access_token | type == "string" and length > 0)
+  and (.refresh_token | type == "string" and length > 0)
+' "$CODEX_AUTH_FILE" >/dev/null
+test "$(sed -n 's/^AFFILIATE_AGENT_CODEX_MODEL=//p' "$DEPLOYMENT_ENV")" = "gpt-5.6-luna"
 ```
 
-The inspection artifact contains no environment values. The exact full ID and
-digest must match the reviewed deployment record. The relay must list only
-`$REVIEWED_AGENT_NETWORK`, with the `affiliate-model.internal` alias. A missing
-alias, digest, or network match blocks runner startup.
+The runner mounts this file read-only. It validates the reviewed ChatGPT auth
+shape at startup. It copies the file into a fresh workspace `CODEX_HOME` and
+starts Codex CLI with `--model gpt-5.6-luna`. The runner joins only the
+internal gateway network and the reviewed egress network. Supervisors do not
+receive the auth file or the Codex model setting.
 
 3. Before this production state change, obtain separate current authorization.
    Start the runner and exactly two Mapping Producers plus two independent
