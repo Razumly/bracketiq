@@ -83,6 +83,11 @@ Use an ExecPlan for complex features and significant refactors. Follow `PLANS.md
 - Prefix future mobile release tags with `mobile-`.
 - Do not publish a production image or deploy production without separate current authorization.
 
+## UI direction
+
+- Never add eyebrow text anywhere in the product.
+- Do not place small label text above a page, organization, or entity name.
+
 ## Agent skills
 
 ### Issue tracker and workstream execution
