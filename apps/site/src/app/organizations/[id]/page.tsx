@@ -1,14 +1,13 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import Image from 'next/image';
 import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
 import Navigation from '@/components/layout/Navigation';
 import Loading from '@/components/ui/Loading';
 import OrganizationVerificationBadge from '@/components/ui/OrganizationVerificationBadge';
 import OrganizationOwnershipBadges from '@/components/ui/OrganizationOwnershipBadges';
 import { OrganizationClaimButton } from '@/components/ui/OrganizationClaimCallout';
-import { Avatar, Badge, Checkbox, Chip, Container, Group, Title, Text, Button, Paper, ScrollArea, SegmentedControl, SimpleGrid, Stack, TextInput, PasswordInput, Select, NumberInput, Modal, Textarea, Switch, FileInput, Table, Loader } from '@mantine/core';
+import { Avatar, Badge, Checkbox, Chip, Group, Title, Text, Button, Paper, ScrollArea, SegmentedControl, SimpleGrid, Stack, TextInput, PasswordInput, Select, NumberInput, Modal, Textarea, Switch, FileInput, Table, Loader } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import EventCard from '@/components/ui/EventCard';
 import ResponsiveCardGrid from '@/components/ui/ResponsiveCardGrid';
@@ -85,6 +84,7 @@ import { buildTeamManagementPath } from '@/app/teams/teamRoutes';
 import DiscountManager from '@/components/discounts/DiscountManager';
 import { describeDeleteOutcome } from '@/lib/deleteOutcome';
 import { resolveOrganizationEventCreationState } from './organizationEventCreation';
+import { OrganizationManagementShell } from '@/components/organization/OrganizationManagementShell';
 
 export default function OrganizationDetailPage() {
   return (
@@ -785,6 +785,7 @@ function OrganizationDetailContent() {
     : null;
   const [org, setOrg] = useState<Organization | undefined>(undefined);
   const [loading, setLoading] = useState(true);
+  const [organizationLoadError, setOrganizationLoadError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<OrganizationTab>(() => requestedTab ?? 'overview');
   const [showCreateTeamModal, setShowCreateTeamModal] = useState(false);
   const [showEditOrganizationModal, setShowEditOrganizationModal] = useState(false);
@@ -1339,15 +1340,26 @@ function OrganizationDetailContent() {
     const silent = Boolean(options?.silent);
     if (!silent) {
       setLoading(true);
+      setOrganizationLoadError(null);
     }
     try {
       const data = await organizationService.getOrganizationById(
         orgId,
         options?.isRelationsIncluded ?? requestedTab !== 'users',
       );
-      if (data) setOrg(data);
+      if (data) {
+        setOrg(data);
+        if (!silent) {
+          setOrganizationLoadError(null);
+        }
+      } else if (!silent) {
+        setOrganizationLoadError('The Organization was not found or is not available to this account.');
+      }
     } catch (e) {
       console.error('Failed to load organization', e);
+      if (!silent) {
+        setOrganizationLoadError(e instanceof Error ? e.message : 'The Organization overview is not available right now.');
+      }
     } finally {
       if (!silent) {
         setLoading(false);
@@ -2131,12 +2143,6 @@ function OrganizationDetailContent() {
     }
     setSelectedCreateEventTemplateId(eventTemplates[0].id);
   }, [eventTemplateCreateModalOpen, eventTemplates, selectedCreateEventTemplateId]);
-
-  useEffect(() => {
-    if (requestedTab && availableTabs.some((tab) => tab.value === requestedTab)) {
-      setActiveTab(requestedTab);
-    }
-  }, [availableTabs, requestedTab]);
 
   useEffect(() => {
     const teamIdParam = searchParams?.get('teamId')?.trim();
@@ -4383,72 +4389,61 @@ function OrganizationDetailContent() {
 
   if (authLoading) return <Loading fullScreen text="Loading organization..." />;
 
-  const logoUrl = org?.logoId
-    ? `/api/files/${org.logoId}/preview?w=64&h=64&fit=contain`
-    : org?.name
-      ? `/api/avatars/initials?name=${encodeURIComponent(org.name)}&size=64`
-      : '';
+  const requestedTabIsUnavailable = Boolean(
+    org
+      && requestedTab
+      && !availableTabs.some((tab) => tab.value === requestedTab),
+  );
+  const overviewEmpty = Boolean(
+    org
+      && !org.description?.trim()
+      && overviewRecentEvents.length === 0
+      && (org.teams?.length ?? 0) === 0
+      && (org.divisions?.length ?? 0) === 0,
+  );
+  const shellStatus = loading
+    ? 'loading'
+    : requestedTabIsUnavailable
+      ? 'permission-denied'
+      : organizationLoadError
+        ? 'error'
+        : org
+          ? 'ready'
+          : 'empty';
   return (
     <>
       <Navigation />
-      <Container fluid py="xl" className="discover-shell org-page-shell">
-        {loading || !org ? (
-          <Loading fullScreen={false} text="Loading organization..." />
-        ) : (
+      <OrganizationManagementShell
+        organization={org}
+        status={shellStatus}
+        availableTabs={availableTabs}
+        activeTab={activeTab}
+        onTabChange={handleOrganizationTabChange}
+        onRetry={() => { if (id) void loadOrg(id); }}
+        errorMessage={organizationLoadError}
+        onBackToOrganizations={() => router.push('/organizations')}
+        headerBadges={org ? (
           <>
-            {/* Header */}
-            <Group justify="space-between" align="flex-start" gap="md" mb="lg">
-              <Group gap="md" className="min-w-0">
-                {logoUrl && (
-                  <Image
-                    src={logoUrl}
-                    alt={org.name}
-                    width={64}
-                    height={64}
-                    unoptimized
-                    style={{ width: 64, height: 64, borderRadius: '9999px', border: '1px solid var(--mvp-border)' }}
-                  />
-                )}
-                <div>
-                  <Group gap="md" align="center" mb={2}>
-                    <Title order={1} size="h2" className="discover-title">{org.name}</Title>
-                    {canToggleHomePagePreference && (
-                      <Checkbox
-                        label="Set as home page"
-                        checked={isCurrentOrganizationHomePage}
-                        disabled={updatingHomePagePreference}
-                        onChange={(event) => { void handleSetHomePage(event.currentTarget.checked); }}
-                      />
-                    )}
-                  </Group>
-                  <Group gap="md">
-                    {org.website && (
-                      <a href={org.website} target="_blank" rel="noreferrer"><Text c="blue">{org.website}</Text></a>
-                    )}
-                    {org.location && (
-                      <Text size="sm" c="dimmed">{org.location}</Text>
-                    )}
-                  </Group>
-                  <Group gap="xs" mt="xs" wrap="wrap">
-                    <OrganizationOwnershipBadges organization={org} compact />
-                    <OrganizationVerificationBadge organization={org} />
-                  </Group>
-                </div>
-              </Group>
-              <OrganizationClaimButton organization={org} />
-            </Group>
-
-            {/* Tabs */}
-            <SegmentedControl
-              value={activeTab}
-              onChange={handleOrganizationTabChange}
-              data={availableTabs}
-              className="org-tab-segmented"
-              radius="xl"
-              mb="lg"
-            />
-
-            <div className="org-tab-content">
+            <OrganizationOwnershipBadges organization={org} compact />
+            <OrganizationVerificationBadge organization={org} />
+          </>
+        ) : null}
+        headerActions={org ? <OrganizationClaimButton organization={org} /> : null}
+        canEditOrganization={isOwner}
+        onEditOrganization={() => setShowEditOrganizationModal(true)}
+        canToggleHomePagePreference={canToggleHomePagePreference}
+        isCurrentOrganizationHomePage={isCurrentOrganizationHomePage}
+        updatingHomePagePreference={updatingHomePagePreference}
+        onSetHomePage={(checked) => { void handleSetHomePage(checked); }}
+        canCreateEvent={canManageEvents}
+        createEventDisabled={!canCreateOrganizationEvents}
+        createEventHelperText={createEventHelperText}
+        onCreateEvent={handleCreateEvent}
+        overviewEmpty={overviewEmpty}
+      >
+        <div className="org-tab-content">
+        {org ? (
+          <>
             {activeTab === 'overview' && (
               <SimpleGrid cols={{ base: 1, lg: 3 }} spacing="lg">
                 <div style={{ gridColumn: 'span 2' }}>
@@ -5264,10 +5259,10 @@ function OrganizationDetailContent() {
                 onChanged={(divisions) => setOrg((current) => current ? { ...current, divisions } : current)}
               />
             )}
-            </div>
           </>
-        )}
-      </Container>
+        ) : null}
+        </div>
+      </OrganizationManagementShell>
 
       {/* Modals */}
       <CreateTeamModal
