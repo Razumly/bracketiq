@@ -5,6 +5,7 @@ import {
   Alert,
   Avatar,
   Button,
+  ConfirmDialog,
   Divider,
   Group,
   Loader,
@@ -16,9 +17,8 @@ import {
   Text,
   Textarea,
   Title,
-} from '@mantine/core';
-import { modals } from '@mantine/modals';
-import { notifications } from '@mantine/notifications';
+} from '@/components/organization/organization-operation-ui';
+import { notifications } from '@/lib/organizationNotifications';
 import { Flag, Pencil, Trash2 } from 'lucide-react';
 import {
   organizationReviewService,
@@ -93,6 +93,13 @@ export default function OrganizationReviewsPanel({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
+  const [confirmation, setConfirmation] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    destructive?: boolean;
+    onConfirm: () => void | Promise<void>;
+  } | null>(null);
   const [rating, setRating] = useState(0);
   const [body, setBody] = useState('');
   const [saving, setSaving] = useState(false);
@@ -225,20 +232,20 @@ export default function OrganizationReviewsPanel({
   };
 
   const confirmDelete = () => {
-    modals.openConfirmModal({
+    setConfirmation({
       title: 'Delete review?',
-      children: <Text size="sm">This removes your rating and written review from the organization.</Text>,
-      labels: { confirm: 'Delete review', cancel: 'Cancel' },
-      confirmProps: { color: 'red' },
+      message: 'This removes your rating and written review from the organization.',
+      confirmLabel: 'Delete review',
+      destructive: true,
       onConfirm: () => void deleteReview(),
     });
   };
 
   const reportReview = (reviewId: string) => {
-    modals.openConfirmModal({
+    setConfirmation({
       title: 'Report this review?',
-      children: <Text size="sm">BracketIQ moderators will review it for inappropriate or misleading content.</Text>,
-      labels: { confirm: 'Report review', cancel: 'Cancel' },
+      message: 'BracketIQ moderators will review it for inappropriate or misleading content.',
+      confirmLabel: 'Report review',
       onConfirm: async () => {
         try {
           await organizationReviewService.reportReview(reviewId);
@@ -403,6 +410,19 @@ export default function OrganizationReviewsPanel({
           </Group>
         </Stack>
       </Modal>
+      <ConfirmDialog
+        open={Boolean(confirmation)}
+        title={confirmation?.title ?? ''}
+        message={confirmation?.message ?? ''}
+        confirmLabel={confirmation?.confirmLabel ?? 'Confirm'}
+        destructive={confirmation?.destructive}
+        onCancel={() => setConfirmation(null)}
+        onConfirm={() => {
+          const action = confirmation?.onConfirm;
+          setConfirmation(null);
+          void action?.();
+        }}
+      />
     </Paper>
   );
 }

@@ -8,7 +8,7 @@ import {
   useMemo,
   useState,
 } from "react";
-import { notifications } from "@mantine/notifications";
+import { notifications } from '@/lib/organizationNotifications';
 import type { Field, TimeSlot, UserData } from "@/types";
 import {
   formatDisplayDateTime,

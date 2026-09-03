@@ -14,7 +14,7 @@ import {
   Stack,
   Text,
   Title,
-} from '@mantine/core';
+} from '@/components/organization/organization-operation-ui';
 import type { SlotGroupPropGetter, View } from 'react-big-calendar';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 import 'react-big-calendar/lib/addons/dragAndDrop/styles.css';
@@ -32,7 +32,7 @@ import {
 import { resolveFieldIdsForCalendarHydration } from './fieldCalendarHydration';
 import { formatDisplayDate, formatDisplayDateTime, formatDisplayTime, formatLocalDateTime, parseLocalDateTime } from '@/lib/dateUtils';
 import { getFacilityScopedFieldDisplayName, getFieldResolvedLocation, sortFieldsByCreatedAt } from '@/lib/fieldUtils';
-import { notifications } from '@mantine/notifications';
+import { notifications } from '@/lib/organizationNotifications';
 import { organizationService } from '@/lib/organizationService';
 import { createId } from '@/lib/id';
 import { getNextRentalOccurrence } from '@/app/discover/utils/rentals';

@@ -18,8 +18,8 @@ import {
   TextInput,
   Textarea,
   Title,
-} from "@mantine/core";
-import { notifications } from "@mantine/notifications";
+} from "@/components/organization/organization-operation-ui";
+import { notifications } from "@/lib/organizationNotifications";
 
 import CentsInput from "@/components/ui/CentsInput";
 import { apiRequest } from "@/lib/apiClient";

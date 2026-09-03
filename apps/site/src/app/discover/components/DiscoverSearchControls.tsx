@@ -22,20 +22,20 @@ export default function DiscoverSearchControls({
   searchLabel = 'Search',
 }: DiscoverSearchControlsProps) {
   return (
-    <Group align="center" gap="sm" wrap="wrap" style={{ flex: 1, minWidth: 320 }}>
+    <Group align="center" gap="sm" wrap="wrap" style={{ flex: '1 1 100%', minWidth: 0, width: '100%' }}>
       <form
         onSubmit={(event) => {
           event.preventDefault();
           onSearch();
         }}
-        style={{ display: 'flex', flex: '1 1 420px', minWidth: 300 }}
+        style={{ display: 'flex', flex: '1 1 420px', minWidth: 0, width: '100%' }}
       >
         <TextInput
           aria-label={searchLabel}
           value={value}
           onChange={(event) => onValueChange(event.currentTarget.value)}
           placeholder={placeholder}
-          style={{ flex: 1, minWidth: 160 }}
+          style={{ flex: 1, minWidth: 0 }}
           styles={{
             input: {
               borderTopRightRadius: 0,

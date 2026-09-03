@@ -5,7 +5,6 @@ const getReviewsMock = jest.fn();
 const saveReviewMock = jest.fn();
 const deleteReviewMock = jest.fn();
 const notificationShowMock = jest.fn();
-const openConfirmModalMock = jest.fn();
 
 jest.mock('@/lib/organizationReviewService', () => ({
   organizationReviewService: {
@@ -16,13 +15,10 @@ jest.mock('@/lib/organizationReviewService', () => ({
   },
 }));
 
-jest.mock('@mantine/notifications', () => ({
+jest.mock('@/lib/organizationNotifications', () => ({
   notifications: { show: (...args: unknown[]) => notificationShowMock(...args) },
 }));
 
-jest.mock('@mantine/modals', () => ({
-  modals: { openConfirmModal: (...args: unknown[]) => openConfirmModalMock(...args) },
-}));
 
 import OrganizationReviewsPanel from '@/app/organizations/[id]/OrganizationReviewsPanel';
 
@@ -71,7 +67,6 @@ const deferred = <T,>() => {
 describe('OrganizationReviewsPanel pagination', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    openConfirmModalMock.mockImplementation((options: { onConfirm: () => void }) => options.onConfirm());
   });
 
   it('appends the next page, deduplicates boundary rows, and stops at the terminal cursor', async () => {
@@ -172,6 +167,7 @@ describe('OrganizationReviewsPanel pagination', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Load more reviews' }));
     fireEvent.click(screen.getByRole('button', { name: 'Edit review' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete review' }));
 
     expect(await screen.findByText('No reviews yet. Be the first to share your experience.')).toBeInTheDocument();
     expect(deleteReviewMock).toHaveBeenCalledWith('org_1', original.id);

@@ -21,7 +21,7 @@ import {
   Textarea,
   TextInput,
   Title,
-} from '@mantine/core';
+} from '@/components/organization/organization-operation-ui';
 import { Download, ExternalLink, Pencil, Plus, Settings2, UserRound } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { apiRequest, isApiRequestError } from '@/lib/apiClient';

@@ -7,8 +7,32 @@ import Loading from '@/components/ui/Loading';
 import OrganizationVerificationBadge from '@/components/ui/OrganizationVerificationBadge';
 import OrganizationOwnershipBadges from '@/components/ui/OrganizationOwnershipBadges';
 import { OrganizationClaimButton } from '@/components/ui/OrganizationClaimCallout';
-import { Avatar, Badge, Checkbox, Chip, Group, Title, Text, Button, Paper, ScrollArea, SegmentedControl, SimpleGrid, Stack, TextInput, PasswordInput, Select, NumberInput, Modal, Textarea, Switch, FileInput, Table, Loader } from '@mantine/core';
-import { notifications } from '@mantine/notifications';
+import {
+  Avatar,
+  Badge,
+  Checkbox,
+  Chip,
+  Group,
+  Title,
+  Text,
+  Button,
+  Paper,
+  ScrollArea,
+  SegmentedControl,
+  SimpleGrid,
+  Stack,
+  TextInput,
+  PasswordInput,
+  Select,
+  NumberInput,
+  Modal,
+  Textarea,
+  Switch,
+  FileInput,
+  Table,
+  Loader,
+} from '@/components/organization/organization-operation-ui';
+import { notifications } from '@/lib/organizationNotifications';
 import EventCard from '@/components/ui/EventCard';
 import ResponsiveCardGrid from '@/components/ui/ResponsiveCardGrid';
 import TeamCard from '@/components/ui/TeamCard';

@@ -6,6 +6,7 @@ import {
   Badge,
   Button,
   Checkbox,
+  DateTimePicker,
   Group,
   Loader,
   Modal,
@@ -22,8 +23,7 @@ import {
   TextInput,
   Textarea,
   Title,
-} from '@mantine/core';
-import { DateTimePicker } from '@mantine/dates';
+} from '@/components/organization/organization-operation-ui';
 import {
   Calendar as BigCalendar,
   dateFnsLocalizer,

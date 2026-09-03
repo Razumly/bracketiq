@@ -6,7 +6,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   useContext,
 } from 'react';
-import { Loader, Paper, Text } from '@mantine/core';
+import { Loader, Paper, Text } from '@/components/organization/organization-operation-ui';
 import {
   Calendar as BigCalendar,
   dateFnsLocalizer,
