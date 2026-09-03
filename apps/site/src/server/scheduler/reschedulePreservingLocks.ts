@@ -31,6 +31,15 @@ import {
   OfficialStaffingPlanner,
   type StaffingDiagnostic,
 } from './officialStaffing';
+import {
+  compareRankedTeamDutyCandidates,
+  historyEndTime,
+  isMatchCompletedForTeamDuty,
+  matchHasPlayingTeam,
+  matchHasTeamActivity,
+  matchHasTeamDuty,
+  rankTeamDutyCandidate,
+} from './teamDutyRanking';
 import { ensureSplitPlayoffTimeSlotCoverage } from './timeSlotCoverage';
 import { ScheduleError, type ScheduleFailureFactor } from './scheduleErrors';
 import { captureSchedulerState, restoreSchedulerState } from './schedulerState';
@@ -278,33 +287,6 @@ const collectWarnings = (
 };
 
 
-const isMatchCompleted = (match: Match): boolean => {
-  const status = String(match.status ?? '').trim().toUpperCase();
-  const resultStatus = String(match.resultStatus ?? '').trim().toUpperCase();
-  if (
-    Boolean(match.winnerEventTeamId)
-    && (
-      ['COMPLETE', 'COMPLETED', 'FINISHED', 'FINAL'].includes(status)
-      || ['COMPLETE', 'COMPLETED', 'FINAL'].includes(resultStatus)
-      || Boolean(match.actualEnd)
-    )
-  ) {
-    return true;
-  }
-  const segments = Array.isArray(match.segments) ? match.segments : [];
-  if (!segments.length) {
-    return false;
-  }
-  const team1Wins = segments.filter((segment) => (
-    segment.status === 'COMPLETE' && segment.winnerEventTeamId === match.team1?.id
-  )).length;
-  const team2Wins = segments.filter((segment) => (
-    segment.status === 'COMPLETE' && segment.winnerEventTeamId === match.team2?.id
-  )).length;
-  const setsToWin = Math.ceil(segments.length / 2);
-  return team1Wins >= setsToWin || team2Wins >= setsToWin;
-};
-
 const detachMatchFromParticipant = (participant: { matches?: Match[] } | null | undefined, match: Match): void => {
   if (!participant?.matches) {
     return;
@@ -414,28 +396,12 @@ const EMPTY_TEAM_DUTY_REFLOW_CONTEXT: TeamDutyReflowContext = {
   checkedInTeamIdsByMatch: new Map<string, ReadonlySet<string>>(),
 };
 
-const matchHasPlayingTeam = (match: Match, teamId: string): boolean => (
-  match.team1?.id === teamId || match.team2?.id === teamId
-);
-
-const matchHasTeamDuty = (match: Match, teamId: string): boolean => (
-  match.teamOfficial?.id === teamId
-);
-
-const matchHasTeamActivity = (match: Match, teamId: string): boolean => (
-  matchHasPlayingTeam(match, teamId) || matchHasTeamDuty(match, teamId)
-);
-
 const rangesOverlap = (
   leftStart: Date,
   leftEnd: Date,
   rightStart: Date,
   rightEnd: Date,
 ): boolean => leftStart.getTime() < rightEnd.getTime() && leftEnd.getTime() > rightStart.getTime();
-
-const historyEndTime = (match: Match): number => (
-  match.actualEnd?.getTime() ?? match.end.getTime()
-);
 
 const teamCanServeMatchDivision = (team: Team, match: Match): boolean => {
   const targetDivisionId = normalizeDivisionId(match.division.id);
@@ -475,87 +441,6 @@ const teamIsCheckedInForDuty = (
     pendingMatches.push(...candidate.getDependencies());
   }
   return false;
-};
-
-type RankedTeamDutyCandidate = {
-  team: Team;
-  rankTier: number;
-  latestLossAt: number;
-  assignmentCount: number;
-  restMs: number;
-};
-
-const rankTeamDutyCandidate = (
-  team: Team,
-  target: Match,
-  matches: Match[],
-): RankedTeamDutyCandidate => {
-  const completedPlayingMatches = matches
-    .filter((match) => (
-      match.id !== target.id
-      && matchHasPlayingTeam(match, team.id)
-      && isMatchCompleted(match)
-      && historyEndTime(match) <= target.start.getTime()
-      && Boolean(match.winnerEventTeamId)
-    ))
-    .sort((left, right) => (
-      historyEndTime(right) - historyEndTime(left)
-      || left.id.localeCompare(right.id)
-    ));
-  const latestResult = completedPlayingMatches[0] ?? null;
-  const latestResultIsLoss = Boolean(
-    latestResult
-    && latestResult.winnerEventTeamId
-    && latestResult.winnerEventTeamId !== team.id,
-  );
-  const hasRemainingMatch = matches.some((match) => (
-    match.id !== target.id
-    && matchHasPlayingTeam(match, team.id)
-    && !isMatchCompleted(match)
-    && match.start.getTime() >= target.end.getTime()
-  ));
-  const latestActivityEnd = matches.reduce<number | null>((latest, match) => {
-    if (
-      match.id === target.id
-      || !matchHasTeamActivity(match, team.id)
-      || match.end.getTime() > target.start.getTime()
-    ) {
-      return latest;
-    }
-    const end = historyEndTime(match);
-    return latest == null || end > latest ? end : latest;
-  }, null);
-
-  return {
-    team,
-    rankTier: latestResultIsLoss ? (hasRemainingMatch ? 1 : 0) : 2,
-    latestLossAt: latestResultIsLoss && latestResult
-      ? historyEndTime(latestResult)
-      : Number.NEGATIVE_INFINITY,
-    assignmentCount: matches.filter((match) => (
-      match.id !== target.id && matchHasTeamDuty(match, team.id)
-    )).length,
-    restMs: latestActivityEnd == null
-      ? Number.POSITIVE_INFINITY
-      : target.start.getTime() - latestActivityEnd,
-  };
-};
-
-const compareRankedTeamDutyCandidates = (
-  left: RankedTeamDutyCandidate,
-  right: RankedTeamDutyCandidate,
-): number => {
-  const tierComparison = left.rankTier - right.rankTier;
-  if (tierComparison !== 0) {
-    return tierComparison;
-  }
-  const recentLossComparison = left.rankTier <= 1
-    ? right.latestLossAt - left.latestLossAt
-    : 0;
-  return recentLossComparison
-    || left.assignmentCount - right.assignmentCount
-    || right.restMs - left.restMs
-    || left.team.id.localeCompare(right.team.id);
 };
 
 const eligibleTeamDutyCandidates = (
@@ -753,7 +638,7 @@ export const rescheduleEventMatchesPreservingLocks = (
   const detachedPendingAssignments: PendingDependencyAssignment[] = [];
 
   for (const match of unlockedMatches) {
-    const hasUnresolvedDependency = match.getDependencies().some((dependency) => !isMatchCompleted(dependency));
+    const hasUnresolvedDependency = match.getDependencies().some((dependency) => !isMatchCompletedForTeamDuty(dependency));
     if (hasUnresolvedDependency) {
       detachedPendingAssignments.push(detachPendingDependencyAssignments(match));
     }

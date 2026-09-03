@@ -2,6 +2,7 @@
 
 import { OfficialStaffingPlanner } from '@/server/scheduler/officialStaffing';
 import { ScheduleError, scheduleEvent, type ScheduleResult } from '@/server/scheduler/scheduleEvent';
+import { rankTeamDutyCandidates } from '@/server/scheduler/teamDutyRanking';
 import { Division, Match, PlayingField, Team, Tournament, UserData } from '@/server/scheduler/types';
 
 const context = {
@@ -1092,6 +1093,66 @@ describe('official staffing modes', () => {
           && (other.team1?.id === teamOfficial.id || other.team2?.id === teamOfficial.id)
         ));
       })).toBe(true);
+    });
+
+    it('FULL_COVERAGE_REQUIRED reuses a Team for separated duties after checking activity', () => {
+      const tournament = buildPriorityTournament({
+        priority: 'FULL_COVERAGE_REQUIRED',
+        doTeamsOfficiate: true,
+        officialEligibility: [['r1'], ['r2']],
+        eventHours: 8,
+      });
+      tournament.doubleElimination = true;
+
+      const scheduled = scheduleEvent({ event: tournament }, context).event as Tournament;
+      const matches = Object.values(scheduled.matches);
+      const dutiesByTeam = new Map<string, number>();
+      for (const match of matches) {
+        expect(match.teamOfficial).not.toBeNull();
+        expect(match.teamOfficial?.id).not.toBe(match.team1?.id);
+        expect(match.teamOfficial?.id).not.toBe(match.team2?.id);
+        const teamId = match.teamOfficial?.id;
+        if (teamId) {
+          dutiesByTeam.set(teamId, (dutiesByTeam.get(teamId) ?? 0) + 1);
+        }
+      }
+
+      expect(matches.length).toBeGreaterThan(Object.keys(scheduled.teams).length);
+      expect(Array.from(dutiesByTeam.values()).some((count) => count > 1)).toBe(true);
+    });
+
+    it('ranks initial Team-duty candidates by assignment count and stable Team ID', () => {
+      const division = buildDivision();
+      const field = buildField('ranking_field', 1, division);
+      const teams = buildTeams(4, division);
+      const priorMatch = buildPlannerMatch(
+        'ranking_prior_match',
+        division,
+        field,
+        teams.team_3,
+        teams.team_4,
+        9,
+      );
+      priorMatch.teamOfficial = teams.team_1;
+      const target = buildPlannerMatch(
+        'ranking_target_match',
+        division,
+        field,
+        teams.team_3,
+        teams.team_4,
+        12,
+      );
+
+      expect(rankTeamDutyCandidates(
+        [teams.team_2, teams.team_1],
+        target,
+        [priorMatch, target],
+      ).map((team) => team.id)).toEqual(['team_2', 'team_1']);
+      expect(rankTeamDutyCandidates(
+        [teams.team_2, teams.team_1],
+        target,
+        [target],
+      ).map((team) => team.id)).toEqual(['team_1', 'team_2']);
     });
 
     it('keeps Placeholder Teams available for Team-duty assignments', () => {

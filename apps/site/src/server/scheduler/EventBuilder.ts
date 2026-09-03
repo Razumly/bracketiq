@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { MIN_BRACKET_TEAM_COUNT } from "@/lib/divisionTypes";
 import { Brackets } from "./Brackets";
 import { OfficialStaffingPlanner } from "./officialStaffing";
+import { rankTeamDutyCandidates } from "./teamDutyRanking";
 import { ScheduleError, type ScheduleFailureFactor } from "./scheduleErrors";
 import {
   diagnoseScheduleProposal,
@@ -2094,7 +2095,6 @@ export class EventBuilder {
 
   private assignTeamOfficials(matches: Match[]): void {
     const teams = Object.values(this.event.teams);
-    const unassigned = [...teams];
     const divisionById = new Map(
       this.schedulingDivisions().map((division) => [division.id, division]),
     );
@@ -2124,7 +2124,7 @@ export class EventBuilder {
         (team) =>
           team.id !== match.team1?.id && team.id !== match.team2?.id,
       );
-      const candidate = this.selectTeamOfficialCandidate(unassigned, filtered);
+      const candidate = rankTeamDutyCandidates(filtered, match, matches)[0] ?? null;
       if (candidate) {
         this.assignTeamOfficial(match, candidate);
       }
@@ -2207,22 +2207,6 @@ export class EventBuilder {
       }
     }
     return Array.from(availableTeamsById.values());
-  }
-
-  private selectTeamOfficialCandidate(
-    unassigned: Team[],
-    availableTeams: Team[],
-  ): Team | null {
-    for (let i = 0; i < unassigned.length; i += 1) {
-      const candidateTeam = unassigned[0];
-      unassigned.push(unassigned.shift() as Team);
-      if (availableTeams.includes(candidateTeam)) {
-        const idx = unassigned.indexOf(candidateTeam);
-        if (idx >= 0) unassigned.splice(idx, 1);
-        return candidateTeam;
-      }
-    }
-    return availableTeams[0] ?? null;
   }
 
   private assignTeamOfficial(match: Match, candidate: Team): void {
