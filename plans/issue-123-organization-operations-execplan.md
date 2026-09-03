@@ -20,7 +20,7 @@ The existing services, API routes, persistence rules, and permission rules remai
 - [x] (2026-09-02) Implemented the Events tab as the first review slice with BracketIQ-owned controls, responsive filters, loading, empty, recoverable-error, and accessible lifecycle states. Kept Past explicit because its data is not loaded by the current Organization route.
 - [x] (2026-09-02) Ran the required two-axis code review against the issue specification and corrected its actionable findings.
 - [x] (2026-09-02) Committed the implementation as `9e3626b26` and posted the verification record to issue #123.
-- [ ] Commit the Events review slice and stop before starting another tab.
+- [x] (2026-09-02) Committed the Events review slice as `649072069` and stopped before starting another tab for review.
 - [ ] Complete the issue close gate after browser smoke and the shared CI environment are available.
 
 ## Surprises & Discoveries
@@ -132,7 +132,7 @@ The migration is additive at the file level. Re-running the checks is safe. Do n
 
 ## Artifacts and Notes
 
-The canonical approved mobile references are in `docs/images/site-ui/data-management/`. The current worktree contains commit `1e1cb02b7` for those reference assets before this implementation work. The implementation commit for #123 will be recorded here when complete.
+The canonical approved mobile references are in `docs/images/site-ui/data-management/`. The current worktree contains commit `1e1cb02b7` for those reference assets before this implementation work. The Events review slice is committed as `649072069`.
 
 ## Interfaces and Dependencies
 
