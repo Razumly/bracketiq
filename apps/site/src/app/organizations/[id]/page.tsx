@@ -70,6 +70,7 @@ import OrganizationEventsTabContent from './OrganizationEventsTabContent';
 import OrganizationTeamsTabContent from './OrganizationTeamsTabContent';
 import OrganizationCustomersTabContent from './OrganizationCustomersTabContent';
 import OrganizationEventTemplatesTabContent from './OrganizationEventTemplatesTabContent';
+import OrganizationDocumentTemplatesTabContent from './OrganizationDocumentTemplatesTabContent';
 import { getNextRentalOccurrence } from '@/app/discover/utils/rentals';
 import {
   getRequiredSignerTypeLabel,
@@ -4838,137 +4839,22 @@ function OrganizationDetailContent() {
             )}
 
             {canManageTemplates && activeTab === 'templates' && (
-              <Paper withBorder p="md" radius="md" className="org-tab-surface">
-                <Group justify="space-between" mb="md">
-                  <Title order={5}>Document Templates</Title>
-                  <Group>
-                    <Button
-                      variant="default"
-                      onClick={() => org && loadTemplates(org.$id)}
-                      loading={templatesLoading}
-                    >
-                      Refresh
-                    </Button>
-                    <Button onClick={() => setTemplateModalOpen(true)}>
-                      Create Document Template
-                    </Button>
-                  </Group>
-                </Group>
-                <Text size="sm" c="dimmed" mb="md">
-                  Create reusable documents for participants to sign during event registration.
-                </Text>
-                {templatesError && (
-                  <Text size="sm" c="red" mb="md">
-                    {templatesError}
-                  </Text>
-                )}
-
-                {templatesLoading ? (
-                  <Text size="sm" c="dimmed">Loading templates...</Text>
-                ) : (pendingTemplateCreates.length > 0 || templateDocuments.length > 0) ? (
-                  <SimpleGrid cols={{ base: 1, md: 2, lg: 3 }} spacing="lg">
-                    {pendingTemplateCreates.map((pendingTemplate) => (
-                      <Paper key={pendingTemplate.localId} withBorder p="sm" radius="md" className="org-tab-item">
-                        <Text fw={600}>{pendingTemplate.title || 'Untitled Template'}</Text>
-                        <Text size="sm" c="dimmed">
-                          {pendingTemplate.signOnce ? 'Sign once per participant' : 'Sign for every event'}
-                        </Text>
-                        <Text size="xs" c="dimmed">
-                          Required signer: {getRequiredSignerTypeLabel(pendingTemplate.requiredSignerType)}
-                        </Text>
-                        <Text size="xs" c="dimmed">
-                          Type: PDF
-                        </Text>
-                        <Text size="xs" c={pendingTemplate.error ? 'red' : 'blue'}>
-                          Status: {pendingTemplate.error ? pendingTemplate.error : `Syncing (${pendingTemplate.status})`}
-                        </Text>
-                        {!pendingTemplate.error && (
-                          <Group gap="xs" mt="xs">
-                            <Loader size="xs" />
-                            <Text size="xs" c="dimmed">
-                              Creating template and waiting for projection\u2026
-                            </Text>
-                          </Group>
-                        )}
-                      </Paper>
-                    ))}
-                    {templateDocuments.map((template) => (
-                      <Paper key={template.$id} withBorder p="sm" radius="md" className="org-tab-item">
-                        <Text fw={600}>{template.title || 'Untitled Template'}</Text>
-                        <Text size="xs" c="dimmed">
-                          {`Version ${template.versionSequence}`}
-                          {template.documentRequirementId
-                            && selectedTemplateVersionByRequirement.get(template.documentRequirementId) === template.$id
-                            ? ' · Selected version'
-                            : ''}
-                        </Text>
-                        <Text size="xs" c={template.frozenAt ? 'orange' : 'green'}>
-                          {template.frozenAt ? 'Frozen: existing assignments stay pinned' : 'Editable until assigned or signed'}
-                        </Text>
-                        <Text size="sm" c="dimmed">
-                          {template.signOnce ? 'Sign once per participant' : 'Sign for every event'}
-                        </Text>
-                        <Text size="xs" c="dimmed">
-                          Required signer: {getRequiredSignerTypeLabel(template.requiredSignerType)}
-                        </Text>
-                        <Text size="xs" c="dimmed">
-                          Type: {template.type ?? 'PDF'}
-                        </Text>
-                        {template.status && (
-                          <Text size="xs" c="dimmed">
-                            Status: {template.status}
-                          </Text>
-                        )}
-                        <Group justify="flex-end" mt="sm">
-                          {template.type === 'TEXT' && (
-                            <Button
-                              size="xs"
-                              variant="light"
-                              onClick={() => handleEditTextTemplate(template)}
-                              disabled={deletingTemplateId === template.$id || savingTemplateVersion}
-                            >
-                              Edit
-                            </Button>
-                          )}
-                          {template.type === 'TEXT' && (
-                            <Button
-                              size="xs"
-                              variant="light"
-                              onClick={() => openTemplatePreview(template)}
-                              disabled={deletingTemplateId === template.$id}
-                            >
-                              Preview
-                            </Button>
-                          )}
-                          {(template.type ?? 'PDF') === 'PDF' && (
-                            <Button
-                              size="xs"
-                              variant="light"
-                              onClick={() => void handleEditPdfTemplate(template)}
-                              loading={editingTemplateId === template.$id}
-                              disabled={deletingTemplateId === template.$id}
-                            >
-                              Edit
-                            </Button>
-                          )}
-                          <Button
-                            size="xs"
-                            color="red"
-                            variant="light"
-                            onClick={() => void handleDeleteTemplate(template)}
-                            loading={deletingTemplateId === template.$id}
-                            disabled={editingTemplateId === template.$id}
-                          >
-                            Delete
-                          </Button>
-                        </Group>
-                      </Paper>
-                    ))}
-                  </SimpleGrid>
-                ) : (
-                  <Text size="sm" c="dimmed">No templates yet.</Text>
-                )}
-              </Paper>
+              <OrganizationDocumentTemplatesTabContent
+                templateDocuments={templateDocuments}
+                pendingTemplateCreates={pendingTemplateCreates}
+                selectedTemplateVersionByRequirement={selectedTemplateVersionByRequirement}
+                isLoading={templatesLoading}
+                error={templatesError}
+                editingTemplateId={editingTemplateId}
+                deletingTemplateId={deletingTemplateId}
+                savingTemplateVersion={savingTemplateVersion}
+                onRefresh={() => org ? loadTemplates(org.$id) : undefined}
+                onCreateTemplate={() => setTemplateModalOpen(true)}
+                onEditTextTemplate={handleEditTextTemplate}
+                onPreviewTemplate={openTemplatePreview}
+                onEditPdfTemplate={handleEditPdfTemplate}
+                onDeleteTemplate={handleDeleteTemplate}
+              />
             )}
             {canManageStaffSurface && activeTab === 'staff' && (
               <>
