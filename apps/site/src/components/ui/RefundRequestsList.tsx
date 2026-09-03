@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Badge, Button, Group, Loader, Paper, Stack, Table, Text, Title } from '@mantine/core';
+import { Alert, Badge, Button, Group, Loader, Paper, Stack, Table, Text, Title } from '@/components/organization/organization-operation-ui';
 import { refundRequestService } from '@/lib/refundRequestService';
 import type { RefundRequest } from '@/types';
 import { eventService } from '@/lib/eventService';
