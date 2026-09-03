@@ -99,14 +99,15 @@ import {
   type OrganizationCustomerRouteType,
   type OrganizationTab,
 } from './organizationTabs';
-import OrganizationPublicSettingsPanel from './OrganizationPublicSettingsPanel';
+import OrganizationPublicSettingsTabContent from './OrganizationPublicSettingsTabContent';
+import OrganizationDiscountsTabContent from './OrganizationDiscountsTabContent';
+import OrganizationDivisionsTabContent from './OrganizationDivisionsTabContent';
 import {
   IMPORTED_DOCUMENT_VIEW_PERMISSIONS,
   ORG_PERMISSIONS,
   type OrganizationPermission,
 } from '@/lib/organizationPermissions';
 import { buildTeamManagementPath } from '@/app/teams/teamRoutes';
-import DiscountManager from '@/components/discounts/DiscountManager';
 import { describeDeleteOutcome } from '@/lib/deleteOutcome';
 import { resolveOrganizationEventCreationState } from './organizationEventCreation';
 import { OrganizationManagementShell } from '@/components/organization/OrganizationManagementShell';
@@ -4882,7 +4883,7 @@ function OrganizationDetailContent() {
             )}
 
             {(isOwner || canManageDiscounts) && activeTab === 'discounts' && org && (
-              <DiscountManager
+              <OrganizationDiscountsTabContent
                 ownerType="ORGANIZATION"
                 ownerId={org.$id}
                 title={`${org.name} discounts`}
@@ -4902,7 +4903,7 @@ function OrganizationDetailContent() {
             )}
 
             {canManagePublicPage && activeTab === 'publicPage' && org && (
-              <OrganizationPublicSettingsPanel
+              <OrganizationPublicSettingsTabContent
                 organization={org}
                 onUpdated={async (updatedOrg) => {
                   setOrg(updatedOrg);
@@ -5066,7 +5067,7 @@ function OrganizationDetailContent() {
               />
             )}
             {activeTab === 'divisions' && org && (
-              <OrganizationDivisionsPanel
+              <OrganizationDivisionsTabContent
                 organization={org}
                 canManage={canManageTeams || isOwner}
                 onChanged={(divisions) => setOrg((current) => current ? { ...current, divisions } : current)}
