@@ -571,11 +571,12 @@ function DiscoverPageContent() {
     ],
   );
 
-  const loadFirstPage = useCallback(async (queryOverride?: string) => {
+  const loadFirstPage = useCallback(async (queryOverride?: string, options: { background?: boolean } = {}) => {
+    const isBackgroundRefresh = options.background === true;
     const requestId = latestFirstPageRequestRef.current + 1;
     latestFirstPageRequestRef.current = requestId;
     isFirstPageRequestInFlightRef.current = true;
-    const shouldShowInitialLoader = !hasLoadedEventsRef.current;
+    const shouldShowInitialLoader = !isBackgroundRefresh && !hasLoadedEventsRef.current;
 
     if (shouldShowInitialLoader) {
       setIsLoadingInitial(true);
@@ -609,11 +610,15 @@ function DiscoverPageContent() {
         return;
       }
       console.error('Failed to load events:', error);
-      setEventsError('Failed to load events. Please try again.');
+      if (!isBackgroundRefresh) {
+        setEventsError('Failed to load events. Please try again.');
+      }
     } finally {
       if (requestId === latestFirstPageRequestRef.current) {
         isFirstPageRequestInFlightRef.current = false;
-        setIsLoadingInitial(false);
+        if (!isBackgroundRefresh) {
+          setIsLoadingInitial(false);
+        }
       }
     }
   }, [buildEventFilters, hiddenEventIds, serverEventSort]);
@@ -848,6 +853,11 @@ function DiscoverPageContent() {
     }
   }, [activeTab, loadFirstPage, loadOrganizations, loadRentals, loadTeams, searchTerm]);
 
+  const loadFirstPageRef = useRef(loadFirstPage);
+  useEffect(() => {
+    loadFirstPageRef.current = loadFirstPage;
+  }, [loadFirstPage]);
+
   /**
    * Effects
    */
@@ -871,8 +881,8 @@ function DiscoverPageContent() {
     if (activeTab !== 'events') {
       return;
     }
-    loadFirstPage();
-  }, [isAuthenticated, hasGuestSession, authLoading, activeTab, loadFirstPage]);
+    loadFirstPageRef.current();
+  }, [isAuthenticated, hasGuestSession, authLoading, activeTab]);
 
   const presetLocationAppliedRef = useRef(false);
   useEffect(() => {
@@ -1306,6 +1316,7 @@ function DiscoverPageContent() {
               hasMoreEvents={hasMoreEvents}
               sentinelRef={sentinelRef}
               eventsError={eventsError}
+              onFilterChange={() => loadFirstPage(undefined, { background: true })}
               onEventClick={handleSelectEvent}
               onCreateEvent={handleCreateEventNavigation}
               eventSort={eventSort}

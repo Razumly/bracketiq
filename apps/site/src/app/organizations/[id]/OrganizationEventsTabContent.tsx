@@ -32,6 +32,10 @@ import ResponsiveCardGrid from '@/components/ui/ResponsiveCardGrid';
 import type { Event } from '@/types';
 import { getEventDivisionPriceRange } from '@/types';
 import { formatEnumDisplayLabel } from '@/lib/enumUtils';
+import {
+  eventListFilterKey,
+  useEventListFiltering,
+} from '@/components/events/event-list-filtering';
 
 const KM_PER_MILE = 1.60934;
 const DISTANCE_SLIDER_MIN_MILES = 10;
@@ -81,6 +85,7 @@ type OrganizationEventsTabContentProps<TEventType extends string = Event['eventT
   hasMoreEvents: boolean;
   sentinelRef: RefObject<HTMLDivElement | null>;
   eventsError: string | null;
+  onFilterChange?: () => Promise<void> | void;
   onRetry?: () => void;
   onEventClick: (event: Event) => void;
   onCreateEvent: () => void;
@@ -369,10 +374,10 @@ const OrganizationEventsControls = <TEventType extends string>({
   <>
     <div className="hidden items-end gap-3 rounded-lg border border-border bg-card p-3 lg:flex">
       <TextInput
-        aria-label="Search organization events"
+        aria-label="Search"
         value={searchTerm}
         onChange={(event) => setSearchTerm(event.currentTarget.value)}
-        placeholder="Search organization events"
+        placeholder="Search"
         leftSection={<Search aria-hidden="true" className="size-4" />}
         className="min-w-0 flex-1"
       />
@@ -427,10 +432,10 @@ const MobileEventFilterControls = <TEventType extends string>({
     <>
       <div className="flex gap-2">
         <TextInput
-          aria-label="Search organization events"
+          aria-label="Search"
           value={searchTerm}
           onChange={(event) => setSearchTerm(event.currentTarget.value)}
-          placeholder="Search events"
+          placeholder="Search"
           leftSection={<Search aria-hidden="true" className="size-5" />}
           className="min-w-0 flex-1"
         />
@@ -678,6 +683,7 @@ export default function OrganizationEventsTabContent<TEventType extends string =
     hasMoreEvents,
     sentinelRef,
     eventsError,
+    onFilterChange,
     onRetry,
     onEventClick,
     onCreateEvent,
@@ -716,11 +722,42 @@ export default function OrganizationEventsTabContent<TEventType extends string =
     return kmBetween(location, { lat, lng });
   }, [kmBetween, location]);
 
+  const eventFilters = useMemo(() => ({
+    searchTerm,
+    selectedEventTypes,
+    eventTypeOptions,
+    selectedSports,
+    selectedStartDate,
+    selectedEndDate,
+    location,
+    maxDistance,
+    hideWeeklyChildren,
+    getEventDistanceKm,
+  }), [
+    eventTypeOptions,
+    getEventDistanceKm,
+    hideWeeklyChildren,
+    location,
+    maxDistance,
+    searchTerm,
+    selectedEndDate,
+    selectedEventTypes,
+    selectedSports,
+    selectedStartDate,
+  ]);
+  const { visibleEvents } = useEventListFiltering({
+    events,
+    filters: eventFilters,
+    filterKey: eventListFilterKey(eventFilters),
+    hasMoreEvents,
+    onFilterChange,
+  });
+
   const segmentEvents = useMemo(() => ({
-    upcoming: events.filter((event) => !isDraftEvent(event)),
-    drafts: events.filter(isDraftEvent),
+    upcoming: visibleEvents.filter((event) => !isDraftEvent(event)),
+    drafts: visibleEvents.filter(isDraftEvent),
     past: [] as Event[],
-  }), [events]);
+  }), [visibleEvents]);
   const sortedEvents = useMemo(
     () => getSortedEvents(segmentEvents[eventSegment], eventSort, getEventDistanceKm, hideWeeklyChildren),
     [eventSegment, eventSort, getEventDistanceKm, hideWeeklyChildren, segmentEvents],
@@ -765,7 +802,7 @@ export default function OrganizationEventsTabContent<TEventType extends string =
     ? 'All event types'
     : selectedEventTypes.map((type) => formatEnumDisplayLabel(type, 'Event')).join(', ');
   const segmentCounts: Record<EventSegment, number> = {
-    upcoming: totalEvents ?? segmentEvents.upcoming.length,
+    upcoming: activeFilters.length > 0 ? segmentEvents.upcoming.length : totalEvents ?? segmentEvents.upcoming.length,
     drafts: segmentEvents.drafts.length,
     past: segmentEvents.past.length,
   };

@@ -3,11 +3,11 @@ import {
   Alert,
   Group,
   Loader,
-  MultiSelect,
   NumberInput,
   Stack,
   Text,
 } from "@mantine/core";
+import { MultiSelect } from "@/components/organization/organization-operation-ui";
 
 type DivisionOption = { id: string; name: string };
 type DivisionTypePayload = {

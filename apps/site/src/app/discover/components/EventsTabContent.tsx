@@ -21,12 +21,16 @@ import {
   Text,
   TextInput,
 } from '@mantine/core';
-import { DatePickerInput } from '@mantine/dates';
 import { ArrowUpDown, CalendarDays, X } from 'lucide-react';
 
 import EventCard from '@/components/ui/EventCard';
 import ResponsiveCardGrid from '@/components/ui/ResponsiveCardGrid';
 import Loading from '@/components/ui/Loading';
+import { DatePickerInput } from '@/components/organization/organization-operation-ui';
+import {
+  eventListFilterKey,
+  useEventListFiltering,
+} from '@/components/events/event-list-filtering';
 import { Event, EventTag, getEventDivisionPriceRange } from '@/types';
 import { formatEnumDisplayLabel } from '@/lib/enumUtils';
 import { trackEventClicked } from '@/lib/analytics/eventAnalytics';
@@ -102,6 +106,7 @@ type EventsTabContentProps<TEventType extends string = Event['eventType']> = {
   hasMoreEvents: boolean;
   sentinelRef: RefObject<HTMLDivElement | null>;
   eventsError: string | null;
+  onFilterChange?: () => Promise<void> | void;
   onEventClick: (event: Event) => void;
   onCreateEvent: () => void;
   showCreateEventButton?: boolean;
@@ -153,6 +158,7 @@ export default function EventsTabContent<TEventType extends string = Event['even
     hasMoreEvents,
     sentinelRef,
     eventsError,
+    onFilterChange,
     onEventClick,
     onCreateEvent,
     showCreateEventButton = true,
@@ -230,17 +236,6 @@ export default function EventsTabContent<TEventType extends string = Event['even
     setSelectedTags,
   ]);
 
-  const parsePickerDate = useCallback((value: unknown): Date | null => {
-    if (value instanceof Date) {
-      return Number.isNaN(value.getTime()) ? null : value;
-    }
-    if (typeof value === 'string' && value.trim()) {
-      const parsed = new Date(value);
-      return Number.isNaN(parsed.getTime()) ? null : parsed;
-    }
-    return null;
-  }, []);
-
   const getEventDistanceKm = useCallback((event: Event) => {
     if (!location || !Array.isArray(event.coordinates) || event.coordinates.length < 2) {
       return undefined;
@@ -256,10 +251,45 @@ export default function EventsTabContent<TEventType extends string = Event['even
     }
   }, [kmBetween, location]);
 
+  const eventFilters = useMemo(() => ({
+    searchTerm,
+    selectedEventTypes,
+    eventTypeOptions,
+    selectedSports,
+    selectedTags,
+    selectedStartDate,
+    selectedEndDate,
+    location,
+    maxDistance,
+    hideWeeklyChildren,
+    divisionFilters,
+    getEventDistanceKm,
+  }), [
+    divisionFilters,
+    eventTypeOptions,
+    getEventDistanceKm,
+    hideWeeklyChildren,
+    location,
+    maxDistance,
+    searchTerm,
+    selectedEndDate,
+    selectedEventTypes,
+    selectedSports,
+    selectedStartDate,
+    selectedTags,
+  ]);
+  const { visibleEvents } = useEventListFiltering({
+    events,
+    filters: eventFilters,
+    filterKey: eventListFilterKey(eventFilters),
+    hasMoreEvents,
+    onFilterChange,
+  });
+
   const sortedEvents = useMemo(() => {
     const sourceEvents = hideWeeklyChildren
-      ? events.filter((event) => !(event.eventType === 'WEEKLY_EVENT' && typeof event.parentEvent === 'string' && event.parentEvent.trim().length > 0))
-      : events;
+      ? visibleEvents.filter((event) => !(event.eventType === 'WEEKLY_EVENT' && typeof event.parentEvent === 'string' && event.parentEvent.trim().length > 0))
+      : visibleEvents;
     const sorted = [...sourceEvents];
 
     const compareByStart = (a: Event, b: Event) => {
@@ -303,7 +333,7 @@ export default function EventsTabContent<TEventType extends string = Event['even
     }
 
     return sorted;
-  }, [eventSort, events, getEventDistanceKm, hideWeeklyChildren]);
+  }, [eventSort, getEventDistanceKm, hideWeeklyChildren, visibleEvents]);
 
   const activeFilters: Array<{ key: string; label: string; onRemove: () => void }> = [];
 
@@ -523,7 +553,7 @@ export default function EventsTabContent<TEventType extends string = Event['even
         <div className="grid gap-2">
           <DatePickerInput
             value={selectedStartDate}
-            onChange={(value) => setSelectedStartDate(parsePickerDate(value))}
+            onChange={setSelectedStartDate}
             clearable
             leftSection={<CalendarDays size={16} />}
             placeholder="From today (default)"
@@ -533,7 +563,7 @@ export default function EventsTabContent<TEventType extends string = Event['even
           />
           <DatePickerInput
             value={selectedEndDate}
-            onChange={(value) => setSelectedEndDate(parsePickerDate(value))}
+            onChange={setSelectedEndDate}
             clearable
             leftSection={<CalendarDays size={16} />}
             minDate={
@@ -602,10 +632,10 @@ export default function EventsTabContent<TEventType extends string = Event['even
           <DiscoverSearchControls
             value={searchTerm}
             onValueChange={setSearchTerm}
-            placeholder="Search events..."
+            placeholder="Search"
             onSearch={onSearchSubmit}
             onOpenMap={onOpenMap}
-            searchLabel="Search events"
+            searchLabel="Search"
           />
           {showCreateEventButton && (
             <div className="w-full min-w-0 sm:w-auto sm:min-w-[16.25rem]">

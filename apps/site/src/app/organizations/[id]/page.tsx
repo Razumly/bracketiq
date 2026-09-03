@@ -839,6 +839,8 @@ function OrganizationDetailContent() {
   const [eventsTabOffset, setEventsTabOffset] = useState(0);
   const [eventsTabError, setEventsTabError] = useState<string | null>(null);
   const eventsTabSentinelRef = useRef<HTMLDivElement | null>(null);
+  const organizationEventsRequestRef = useRef({ id: 0, inFlight: false });
+  const organizationEventsLoaderRef = useRef<(() => Promise<void>) | null>(null);
   const loadedOrganizationIdRef = useRef<string | null>(null);
   const locationRequestAttemptedRef = useRef(false);
   const handledStripeStateRef = useRef<string | null>(null);
@@ -1586,7 +1588,8 @@ function OrganizationDetailContent() {
     });
   }, [eventsTabMaxDistance, kmBetween, location, selectedSports]);
 
-  const loadFirstPageOfOrganizationEvents = useCallback(async () => {
+  const loadFirstPageOfOrganizationEvents = useCallback(async (options: { background?: boolean } = {}) => {
+    const isBackgroundRefresh = options.background === true;
     const normalizedOrganizationId = typeof id === 'string' ? id.trim() : '';
     if (!normalizedOrganizationId) {
       setEventsTabEvents([]);
@@ -1596,11 +1599,17 @@ function OrganizationDetailContent() {
       return;
     }
 
-    setEventsTabLoadingInitial(true);
+    const requestId = organizationEventsRequestRef.current.id + 1;
+    organizationEventsRequestRef.current = { id: requestId, inFlight: true };
+    if (!isBackgroundRefresh) {
+      setEventsTabLoadingInitial(true);
+    }
     setEventsTabLoadingMore(false);
     setEventsTabError(null);
-    setEventsTabOffset(0);
-    setEventsTabHasMoreEvents(true);
+    if (!isBackgroundRefresh) {
+      setEventsTabOffset(0);
+      setEventsTabHasMoreEvents(true);
+    }
     try {
       const filters = buildEventFilters();
       const shouldLoadHostedEvents = selectedHostedEventTypes.length > 0;
@@ -1613,6 +1622,7 @@ function OrganizationDetailContent() {
         : Promise.resolve<Event[]>([]);
 
       const [hostedEvents, rentalEvents] = await Promise.all([hostedEventsPromise, rentalEventsPromise]);
+      if (requestId !== organizationEventsRequestRef.current.id) return;
       const hiddenEventIds = new Set(user?.hiddenEventIds ?? []);
       const mergedEvents = [...hostedEvents, ...rentalEvents];
       const dedupedEvents = mergedEvents.filter((event, index, all) => (
@@ -1623,10 +1633,18 @@ function OrganizationDetailContent() {
       setEventsTabOffset(hostedEvents.length);
       setEventsTabHasMoreEvents(shouldLoadHostedEvents && hostedEvents.length === ORG_EVENTS_LIMIT);
     } catch (error) {
+      if (requestId !== organizationEventsRequestRef.current.id) return;
       console.error('Failed to load organization events:', error);
-      setEventsTabError('Failed to load events. Please try again.');
+      if (!isBackgroundRefresh) {
+        setEventsTabError('Failed to load events. Please try again.');
+      }
     } finally {
-      setEventsTabLoadingInitial(false);
+      if (requestId === organizationEventsRequestRef.current.id) {
+        organizationEventsRequestRef.current.inFlight = false;
+      }
+      if (!isBackgroundRefresh && requestId === organizationEventsRequestRef.current.id) {
+        setEventsTabLoadingInitial(false);
+      }
     }
   }, [
     buildEventFilters,
@@ -1638,8 +1656,14 @@ function OrganizationDetailContent() {
     user?.hiddenEventIds,
   ]);
 
+  useEffect(() => {
+    organizationEventsLoaderRef.current = async () => {
+      await loadFirstPageOfOrganizationEvents();
+    };
+  }, [loadFirstPageOfOrganizationEvents]);
+
   const loadMoreOrganizationEvents = useCallback(async () => {
-    if (eventsTabLoadingInitial || eventsTabLoadingMore || !eventsTabHasMoreEvents) return;
+    if (eventsTabLoadingInitial || eventsTabLoadingMore || organizationEventsRequestRef.current.inFlight || !eventsTabHasMoreEvents) return;
     if (selectedHostedEventTypes.length === 0) return;
     setEventsTabLoadingMore(true);
     setEventsTabError(null);
@@ -2076,8 +2100,8 @@ function OrganizationDetailContent() {
     if (!id) {
       return;
     }
-    void loadFirstPageOfOrganizationEvents();
-  }, [activeTab, authLoading, id, loadFirstPageOfOrganizationEvents]);
+    void organizationEventsLoaderRef.current?.();
+  }, [activeTab, authLoading, id]);
 
   useEffect(() => {
     if (activeTab !== 'events') {
@@ -4757,6 +4781,7 @@ function OrganizationDetailContent() {
                 hasMoreEvents={eventsTabHasMoreEvents}
                 sentinelRef={eventsTabSentinelRef}
                 eventsError={eventsTabError}
+                onFilterChange={() => loadFirstPageOfOrganizationEvents({ background: true })}
                 onRetry={() => { void loadFirstPageOfOrganizationEvents(); }}
                 onEventClick={handleOrganizationEventClick}
                 onCreateEvent={handleCreateEvent}
