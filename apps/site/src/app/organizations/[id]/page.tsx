@@ -814,6 +814,7 @@ function OrganizationDetailContent() {
   const [organizationLoadError, setOrganizationLoadError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<OrganizationTab>(() => requestedTab ?? 'overview');
   const [loadingTab, setLoadingTab] = useState<OrganizationTab | null>(null);
+  const [organizationLoadingTab, setOrganizationLoadingTab] = useState<OrganizationTab | null>(null);
   const [showCreateTeamModal, setShowCreateTeamModal] = useState(false);
   const [showEditOrganizationModal, setShowEditOrganizationModal] = useState(false);
   const sportOptions = useMemo(() => sports.map((sport) => sport.name), [sports]);
@@ -838,6 +839,7 @@ function OrganizationDetailContent() {
   const [eventsTabOffset, setEventsTabOffset] = useState(0);
   const [eventsTabError, setEventsTabError] = useState<string | null>(null);
   const eventsTabSentinelRef = useRef<HTMLDivElement | null>(null);
+  const loadedOrganizationIdRef = useRef<string | null>(null);
   const locationRequestAttemptedRef = useRef(false);
   const handledStripeStateRef = useRef<string | null>(null);
   const handledQuickBooksStateRef = useRef<string | null>(null);
@@ -1362,10 +1364,14 @@ function OrganizationDetailContent() {
 
   const loadOrg = useCallback(async (
     orgId: string,
-    options?: { silent?: boolean; isRelationsIncluded?: boolean },
+    options?: { silent?: boolean; isRelationsIncluded?: boolean; tabRefresh?: OrganizationTab },
   ) => {
     const silent = Boolean(options?.silent);
-    if (!silent) {
+    const tabRefresh = options?.tabRefresh;
+    const isTabRefresh = Boolean(tabRefresh && loadedOrganizationIdRef.current === orgId);
+    if (isTabRefresh && tabRefresh) {
+      setOrganizationLoadingTab(tabRefresh);
+    } else if (!silent) {
       setLoading(true);
       setOrganizationLoadError(null);
     }
@@ -1376,6 +1382,7 @@ function OrganizationDetailContent() {
       );
       if (data) {
         setOrg(data);
+        loadedOrganizationIdRef.current = orgId;
         if (!silent) {
           setOrganizationLoadError(null);
         }
@@ -1388,7 +1395,9 @@ function OrganizationDetailContent() {
         setOrganizationLoadError(e instanceof Error ? e.message : 'The Organization overview is not available right now.');
       }
     } finally {
-      if (!silent) {
+      if (isTabRefresh && tabRefresh) {
+        setOrganizationLoadingTab((current) => current === tabRefresh ? null : current);
+      } else if (!silent) {
         setLoading(false);
       }
     }
@@ -1939,9 +1948,14 @@ function OrganizationDetailContent() {
 
   useEffect(() => {
     if (!authLoading) {
-      if (id) loadOrg(id);
+      if (id) {
+        void loadOrg(id, {
+          isRelationsIncluded: requestedTab !== 'users',
+          tabRefresh: loadedOrganizationIdRef.current === id ? (requestedTab ?? 'overview') : undefined,
+        });
+      }
     }
-  }, [authLoading, id, loadOrg]);
+  }, [authLoading, id, loadOrg, requestedTab]);
 
   useEffect(() => {
     if (authLoading || !isAuthenticated || !user || !id) {
@@ -4483,7 +4497,9 @@ function OrganizationDetailContent() {
     || (activeTab === 'templates' && templatesLoading)
     || (activeTab === 'users' && organizationUsersLoading)
   );
-  const isActiveTabLoading = loadingTab === activeTab || isActiveTabDataLoading;
+  const isActiveTabLoading = loadingTab === activeTab
+    || organizationLoadingTab === activeTab
+    || isActiveTabDataLoading;
   const shellStatus = loading
     ? 'loading'
     : requestedTabIsUnavailable
