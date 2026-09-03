@@ -5,6 +5,7 @@ import {
   type StaffingDiagnostic,
 } from './officialStaffing';
 import { ScheduleError } from './scheduleErrors';
+import type { EventEditorScheduleDiagnostics } from '@/contracts/eventEditor';
 import { validatePlayoffDivisionReferenceCapacities } from './standings';
 import { TimeSlotValidationError, type ResolvedOneTimeTimeSlot } from '@/lib/timeSlotAvailability';
 import {
@@ -50,6 +51,7 @@ export type ScheduleResult = {
   event: League | Tournament;
   matches: Match[];
   warnings: StaffingDiagnostic[];
+  diagnostics?: EventEditorScheduleDiagnostics;
 };
 
 
@@ -434,6 +436,7 @@ const buildLeagueSchedule = (
     );
   }
   let updated: League | null = null;
+  let diagnostics: EventEditorScheduleDiagnostics | undefined;
   let extensionAttempt = 0;
   const maxExtensions = 3;
   const baseTeams = { ...league.teams };
@@ -454,6 +457,7 @@ const buildLeagueSchedule = (
         throw new ScheduleError('Builder returned unexpected event type');
       }
       updated = scheduled;
+      diagnostics = builder.getScheduleDiagnostics();
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       context.error(`schedule_event: scheduling failed (${errMsg}), attempt ${extensionAttempt + 1}`);
@@ -515,6 +519,7 @@ const buildLeagueSchedule = (
     event: updated,
     matches,
     warnings: collectUnresolvedStaffingDiagnostics(matches),
+    diagnostics,
   };
 };
 
@@ -617,6 +622,7 @@ const buildTournamentSchedule = (
     event: scheduled,
     matches,
     warnings: collectUnresolvedStaffingDiagnostics(matches),
+    diagnostics: builder.getScheduleDiagnostics(),
   };
 };
 

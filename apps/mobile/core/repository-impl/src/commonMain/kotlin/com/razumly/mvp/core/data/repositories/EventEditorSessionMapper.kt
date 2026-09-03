@@ -25,6 +25,7 @@ import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.enums.normalizeAutomatedSchedulingForEventType
 import com.razumly.mvp.core.network.dto.EVENT_EDITOR_CONTRACT_VERSION
+import com.razumly.mvp.core.network.dto.isSupportedEventEditorContractVersion
 import com.razumly.mvp.core.network.dto.EventEditorBasicsDto
 import com.razumly.mvp.core.network.dto.EventEditorCompetitionDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateBootstrapDto
@@ -1503,7 +1504,7 @@ private fun EventEditorDraftDto.withMutation(
 object EventEditorSessionMapper {
     fun fromCreateBootstrap(bootstrap: EventEditorCreateBootstrapDto): EventEditorSession {
         validateSnapshot(bootstrap.snapshot, expectedMode = "CREATE")
-        require(bootstrap.contractVersion == EVENT_EDITOR_CONTRACT_VERSION) {
+        require(isSupportedEventEditorContractVersion(bootstrap.contractVersion)) {
             unsupportedVersionMessage(bootstrap.contractVersion)
         }
         require(bootstrap.createOperationId.normalizedId().isNotBlank()) { "Create bootstrap did not include an operation ID." }
@@ -1619,7 +1620,7 @@ object EventEditorSessionMapper {
     }
 
     private fun validateSnapshot(snapshot: EventEditorSnapshotDto, expectedMode: String? = null) {
-        require(snapshot.contractVersion == EVENT_EDITOR_CONTRACT_VERSION) {
+        require(isSupportedEventEditorContractVersion(snapshot.contractVersion)) {
             unsupportedVersionMessage(snapshot.contractVersion)
         }
         require(snapshot.mode == "CREATE" || snapshot.mode == "EDIT") { "Unsupported event editor mode ${snapshot.mode}." }

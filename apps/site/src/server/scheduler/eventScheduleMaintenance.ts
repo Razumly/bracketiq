@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import type { Prisma } from "@/generated/prisma/client";
 import {
+  EVENT_EDITOR_CONTRACT_VERSION,
   eventEditorMaintenanceAcceptedResultSchema,
   eventEditorMaintenanceProposalSchema,
   eventEditorMaintenanceRejectedResultSchema,
@@ -13,6 +14,7 @@ import {
   type EventEditorRejectMaintenanceProposal,
   type EventEditorRevisionBinding,
   type EventEditorScheduleWarning,
+  type EventEditorScheduleDiagnostics,
 } from "@/contracts/eventEditor";
 import { canManageEvent } from "@/server/accessControl";
 import {
@@ -302,6 +304,7 @@ const outcomeFor = (params: {
   event: League | Tournament;
   matches: Match[];
   warnings: EventEditorMaintenanceProposal["scheduleOutcome"]["warnings"];
+  diagnostics?: EventEditorScheduleDiagnostics;
 }): EventEditorMaintenanceProposal["scheduleOutcome"] => {
   const projections = editorMatchProjectionsFor(
     params.matches,
@@ -368,6 +371,7 @@ const outcomeFor = (params: {
       matches: projections,
       unscheduledMatches: [],
       affectedCompetitionPhases: [],
+      diagnostics: params.diagnostics,
       warnings: params.warnings,
     });
   }
@@ -380,6 +384,7 @@ const outcomeFor = (params: {
     matches: projections,
     unscheduledMatches,
     affectedCompetitionPhases: phases,
+    diagnostics: params.diagnostics,
     warnings: params.warnings,
   });
 };
@@ -392,6 +397,7 @@ const proposalFor = (params: {
   revisionBinding: EventEditorRevisionBinding;
   protectedMatchIds: Set<string>;
   warnings: EventEditorMaintenanceProposal["scheduleOutcome"]["warnings"];
+  diagnostics?: EventEditorScheduleDiagnostics;
 }): EventEditorMaintenanceProposal => {
   const graph = {
     event: serializeEvent(params.event),
@@ -409,7 +415,7 @@ const proposalFor = (params: {
   });
   return eventEditorMaintenanceProposalSchema.parse({
     status: "PROPOSED",
-    contractVersion: 3,
+    contractVersion: EVENT_EDITOR_CONTRACT_VERSION,
     eventId: params.event.id,
     operation: params.operation,
     operationId: params.operationId,
@@ -421,6 +427,7 @@ const proposalFor = (params: {
       event: params.event,
       matches: params.matches,
       warnings: params.warnings,
+      diagnostics: params.diagnostics,
     }),
   });
 };
@@ -683,6 +690,7 @@ export const createMaintenanceProposal = async (params: {
       ...mutation.warnings,
       ...placementFailureWarningsFor(mutation.placementFailures ?? []),
     ],
+    diagnostics: mutation.diagnostics,
   });
   await operations.create({
     data: {
@@ -1283,7 +1291,7 @@ export const rejectMaintenanceProposal = async (params: {
   if (row.status === "REJECTED") {
     return eventEditorMaintenanceRejectedResultSchema.parse({
       status: "REJECTED",
-      contractVersion: 3,
+      contractVersion: EVENT_EDITOR_CONTRACT_VERSION,
       eventId: request.eventId,
       operation: request.operation,
       operationId: request.operationId,
@@ -1298,7 +1306,7 @@ export const rejectMaintenanceProposal = async (params: {
   }
   const rejected = eventEditorMaintenanceRejectedResultSchema.parse({
     status: "REJECTED",
-    contractVersion: 3,
+    contractVersion: EVENT_EDITOR_CONTRACT_VERSION,
     eventId: request.eventId,
     operation: request.operation,
     operationId: request.operationId,

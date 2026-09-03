@@ -113,6 +113,7 @@ import {
   proposalFieldLabel,
   proposalRecordLabel,
 } from "./proposalDisplay";
+import { ScheduleDiagnosticsSummary } from "./scheduleDiagnosticsDisplay";
 import type {
   Event,
   Field,
@@ -8459,6 +8460,9 @@ function EventScheduleContent() {
                 </Text>
               </>
             ) : null}
+            <ScheduleDiagnosticsSummary
+              diagnostics={scheduleProposal?.scheduleOutcome.diagnostics}
+            />
             {isStaleScheduleProposal ? (
               <Alert color="orange" title="Proposal is stale">
                 This proposal can no longer be accepted. Refresh the proposal to
@@ -8884,6 +8888,9 @@ function EventScheduleContent() {
                 </Stack>
               </Alert>
             ) : null}
+            <ScheduleDiagnosticsSummary
+              diagnostics={maintenanceScheduleOutcome.diagnostics}
+            />
             <Stack gap="xs" mah={320} style={{ overflowY: "auto" }}>
               {maintenanceScheduleOutcome.matches.map((match, index) => {
                 const graphMatch = maintenanceProposal.graph.matches.find(

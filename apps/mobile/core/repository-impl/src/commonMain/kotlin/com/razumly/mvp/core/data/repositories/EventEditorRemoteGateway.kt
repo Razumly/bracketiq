@@ -3,6 +3,7 @@ package com.razumly.mvp.core.data.repositories
 import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.dto.EVENT_EDITOR_CONTRACT_VERSION
+import com.razumly.mvp.core.network.dto.isSupportedEventEditorContractVersion
 import com.razumly.mvp.core.network.dto.EventEditorBootstrapQueryDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateBootstrapDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateCommandDto
@@ -422,7 +423,7 @@ internal class EventEditorRemoteGateway(
         ?: throw IllegalArgumentException("Event id is required.")
 
     private fun requireVersion(version: Int) {
-        if (version != EVENT_EDITOR_CONTRACT_VERSION) {
+        if (!isSupportedEventEditorContractVersion(version)) {
             throw EventEditorContractException(
                 "Update BracketIQ to edit this event (contract version $version is not supported).",
             )
@@ -1166,6 +1167,9 @@ internal class EventEditorRemoteGateway(
         }
         validateMaintenanceObjectArray(value, "unscheduledMatches", path, ::validateUnscheduledMatch)
         validateMaintenanceObjectArray(value, "affectedCompetitionPhases", path, ::validateAffectedPhase)
+        value["diagnostics"]?.takeUnless { it is JsonNull }?.let {
+            validateDiagnostics(it, "$path.diagnostics")
+        }
         validateWarnings(value, path)
         when (status) {
             EventEditorMaintenanceScheduleOutcomeStatus.COMPLETE.name -> {
@@ -1259,6 +1263,100 @@ internal class EventEditorRemoteGateway(
             warningObject["matchIds"]?.let { validateStringArray(it, "$path.warnings[$index].matchIds") }
             warningObject["restrictingFactor"]?.let {
                 requireStringValue(it, "$path.warnings[$index].restrictingFactor")
+            }
+        }
+    }
+
+    private fun validateDiagnostics(value: JsonElement, path: String) {
+        val diagnostics = requireObjectKeys(
+            value,
+            requiredKeys = setOf(
+                "message",
+                "matchDemand",
+                "estimatedCapacity",
+                "estimatedCapacityIsUpperBound",
+                "minimumDeficitMatches",
+                "searchComplete",
+                "restrictingFactors",
+                "remedies",
+            ),
+            path = path,
+        )
+        requireString(diagnostics, "message", path)
+        val demand = requireObjectKeys(
+            requireObject(diagnostics, "matchDemand", path),
+            requiredKeys = setOf("total", "byDivision", "byPhase", "placed", "unplaced"),
+            path = "$path.matchDemand",
+        )
+        listOf("total", "placed", "unplaced").forEach { key ->
+            if (requireInt(demand, key, "$path.matchDemand") < 0) {
+                throw EventEditorContractException("Maintenance response $path.matchDemand.$key cannot be negative.")
+            }
+        }
+        listOf("byDivision", "byPhase").forEach { key ->
+            requireObject(demand, key, "$path.matchDemand").forEach { (entryKey, entryValue) ->
+                val number = entryValue as? JsonPrimitive
+                if (number == null || number.isString || number.content.toIntOrNull() == null || number.content.toInt() < 0) {
+                    throw EventEditorContractException("Maintenance response $path.matchDemand.$key.$entryKey must contain a non-negative integer.")
+                }
+            }
+        }
+        if (requireInt(diagnostics, "estimatedCapacity", path) < 0
+            || requireInt(diagnostics, "minimumDeficitMatches", path) < 0
+        ) {
+            throw EventEditorContractException("Maintenance response $path capacity values cannot be negative.")
+        }
+        if (!requireBoolean(diagnostics, "estimatedCapacityIsUpperBound", path)) {
+            throw EventEditorContractException("Maintenance response $path must mark Estimated Capacity as an upper bound.")
+        }
+        validateMaintenanceObjectArray(diagnostics, "restrictingFactors", path) { factor, factorPath ->
+            requireObjectKeys(factor, setOf("factor", "confidence", "message", "evidence"), factorPath)
+            requireString(factor, "factor", factorPath)
+            requireString(factor, "confidence", factorPath)
+            requireString(factor, "message", factorPath)
+            validateMaintenanceObjectArray(factor, "evidence", factorPath) { evidence, evidencePath ->
+                requireObjectKeys(evidence, setOf("kind", "message"), evidencePath, DIAGNOSTIC_EVIDENCE_KEYS)
+                requireString(evidence, "kind", evidencePath)
+                requireString(evidence, "message", evidencePath)
+                validateDiagnosticEvidenceValues(evidence, evidencePath)
+            }
+        }
+        validateMaintenanceObjectArray(diagnostics, "remedies", path) { remedy, remedyPath ->
+            requireObjectKeys(remedy, setOf("code", "factor", "message", "evidence"), remedyPath)
+            requireString(remedy, "code", remedyPath)
+            requireString(remedy, "factor", remedyPath)
+            requireString(remedy, "message", remedyPath)
+            validateMaintenanceObjectArray(remedy, "evidence", remedyPath) { evidence, evidencePath ->
+                requireObjectKeys(evidence, setOf("kind", "message"), evidencePath, DIAGNOSTIC_EVIDENCE_KEYS)
+                requireString(evidence, "kind", evidencePath)
+                requireString(evidence, "message", evidencePath)
+                validateDiagnosticEvidenceValues(evidence, evidencePath)
+            }
+        }
+    }
+
+    private fun validateDiagnosticEvidenceValues(value: JsonObject, path: String) {
+        listOf("matchIds", "resourceIds", "divisionIds", "teamIds", "dependencyIds", "officialIds", "timeSlotIds").forEach { key ->
+            value[key]?.let { validateStringArray(it, "$path.$key") }
+        }
+        value["intervals"]?.let { intervals ->
+            val intervalArray = intervals as? JsonArray
+                ?: throw EventEditorContractException("Maintenance response $path.intervals must be an array.")
+            intervalArray.forEachIndexed { index, intervalElement ->
+                val interval = intervalElement as? JsonObject
+                    ?: throw EventEditorContractException("Maintenance response $path.intervals[$index] must be an object.")
+                val intervalPath = "$path.intervals[$index]"
+                requireObjectKeys(interval, setOf("start", "end"), intervalPath)
+                requireString(interval, "start", intervalPath)
+                requireString(interval, "end", intervalPath)
+            }
+        }
+        listOf("demand", "capacity", "deficit", "candidateCount").forEach { key ->
+            value[key]?.let { number ->
+                val primitive = number as? JsonPrimitive
+                if (primitive == null || primitive.isString || primitive.content.toIntOrNull() == null || primitive.content.toInt() < 0) {
+                    throw EventEditorContractException("Maintenance response $path.$key must contain a non-negative integer.")
+                }
             }
         }
     }
@@ -1750,6 +1848,7 @@ private val MAINTENANCE_OUTCOME_KEYS = setOf(
     "matches",
     "unscheduledMatches",
     "affectedCompetitionPhases",
+    "diagnostics",
     "warnings",
 )
 
@@ -1758,6 +1857,23 @@ private val MAINTENANCE_WARNING_KEYS = setOf(
     "message",
     "matchIds",
     "restrictingFactor",
+)
+
+private val DIAGNOSTIC_EVIDENCE_KEYS = setOf(
+    "kind",
+    "message",
+    "matchIds",
+    "resourceIds",
+    "divisionIds",
+    "teamIds",
+    "dependencyIds",
+    "officialIds",
+    "timeSlotIds",
+    "intervals",
+    "demand",
+    "capacity",
+    "deficit",
+    "candidateCount",
 )
 
 

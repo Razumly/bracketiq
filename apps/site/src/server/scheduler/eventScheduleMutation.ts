@@ -49,6 +49,10 @@ import {
   rekeyMatchGraph,
   type MatchDemand,
 } from "./matchGraph";
+import {
+  diagnoseScheduleProposal,
+} from "./scheduleDiagnostics";
+import type { EventEditorScheduleDiagnostics } from "@/contracts/eventEditor";
 import { Division, League, Match, SchedulerContext, Tournament } from "./types";
 import {
   finalizeOpenEndedSchedule,
@@ -99,6 +103,7 @@ export type EventScheduleMutationResult = {
   matches: Match[];
   warnings: EventEditorScheduleWarning[];
   placementFailures: EventBuilderPlacementFailure[];
+  diagnostics?: EventEditorScheduleDiagnostics;
   previousMatchCount: number;
   notification: MatchScheduleNotificationPlan | null;
 };
@@ -1516,6 +1521,7 @@ const buildPartialSchedule = (
   event: League | Tournament;
   matches: Match[];
   placementFailures: EventBuilderPlacementFailure[];
+  diagnostics: EventEditorScheduleDiagnostics;
 } => {
   if (
     includePlaceholderTeams
@@ -1538,6 +1544,7 @@ const buildPartialSchedule = (
     event: scheduled,
     matches,
     placementFailures: builder.placementFailures,
+    diagnostics: builder.getScheduleDiagnostics(),
   };
 };
 
@@ -2093,6 +2100,7 @@ export const reconcileEventSchedule = async (
     matches: Match[];
     warnings?: EventEditorScheduleWarning[];
     placementFailures?: EventBuilderPlacementFailure[];
+    diagnostics?: EventEditorScheduleDiagnostics;
   };
   let scheduleWarnings: EventEditorScheduleWarning[] = [];
   if (
@@ -2113,6 +2121,7 @@ export const reconcileEventSchedule = async (
       event: placedEvent,
       matches: placedMatches,
       placementFailures: builder.placementFailures,
+      diagnostics: builder.getScheduleDiagnostics(),
     };
   } else if (
     (mode === "BUILD" || mode === "REBUILD")
@@ -2203,6 +2212,11 @@ export const reconcileEventSchedule = async (
       "The scheduler did not produce any matches.",
     );
   }
+  const diagnostics = scheduled.diagnostics ?? diagnoseScheduleProposal({
+    event: scheduled.event,
+    matches: scheduled.matches,
+    placementFailures: scheduled.placementFailures ?? [],
+  });
   if (blockerCatalog) {
     assertScheduledFieldConflicts(blockerCatalog, scheduled.matches);
   }
@@ -2222,6 +2236,7 @@ export const reconcileEventSchedule = async (
       matches: scheduled.matches,
       warnings: scheduleWarnings,
       placementFailures: scheduled.placementFailures ?? [],
+      diagnostics,
       previousMatchCount: previousMatches.length,
       notification: previousMatches.length
         ? {
@@ -2261,6 +2276,7 @@ export const reconcileEventSchedule = async (
     matches: scheduled.matches,
     warnings: scheduleWarnings,
     placementFailures: scheduled.placementFailures ?? [],
+    diagnostics,
     previousMatchCount: previousMatches.length,
     notification: previousMatches.length
       ? {

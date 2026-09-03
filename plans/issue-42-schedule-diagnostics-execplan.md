@@ -16,17 +16,17 @@ An organizer can verify the result in the web and mobile proposal review dialogs
 
 - [x] (2026-09-03 17:52Z) Review Issue 42, the current scheduler, proposal contracts, web proposal review, and mobile proposal review.
 - [x] (2026-09-03 17:52Z) Record the design decisions for in-search placement evidence and required Official coverage in this ExecPlan.
-- [ ] Claim Issue 42 and set its project Status to `In progress` when implementation starts.
-- [ ] Create a fresh Issue 42 Workstream branch after the prerequisite Issue 35 and Issue 36 work reaches `main`.
-- [ ] Add the canonical scheduling diagnostic types and the Resource capacity calculation.
-- [ ] Record structured candidate rejection evidence during Match placement.
-- [ ] Make required named Official and Team-duty coverage part of candidate feasibility.
-- [ ] Add evidence-based diagnostic aggregation and remedies.
-- [ ] Add the versioned site HTTP contract and both site proposal review displays.
-- [ ] Add mobile decoding, validation, review display, and accessibility behavior.
-- [ ] Add focused scheduler, contract, web, mobile, and backend-backed integration tests.
-- [ ] Run the complete site and Android JVM suites that cover the changed contract.
-- [ ] Run the final two-axis code review and resolve every finding.
+- [x] (2026-09-03 18:18Z) Claim Issue 42 and set its project Status to `In progress`.
+- [x] (2026-09-03 18:18Z) Create the Issue 42 Workstream branch while preserving the existing checkout edits.
+- [x] (2026-09-03 18:18Z) Add the canonical scheduling diagnostic types and the Resource capacity calculation.
+- [x] (2026-09-03) Record bounded candidate rejection evidence during Match placement.
+- [x] (2026-09-03) Make required named Official coverage part of candidate feasibility. Optional coverage remains non-blocking.
+- [x] (2026-09-03) Add evidence-based diagnostic aggregation and remedies.
+- [x] (2026-09-03) Add the version 4 site HTTP contract with a version 3 compatibility adapter and both site proposal review displays.
+- [x] (2026-09-03) Add mobile decoding, validation, review display, and accessibility behavior.
+- [x] (2026-09-03) Add focused scheduler, contract, web, and mobile tests. The backend-backed mobile test remains pending runtime authorization.
+- [x] (2026-09-03) Run the complete Android JVM suite and the changed site test suites. The Android suite retains three unrelated baseline failures.
+- [x] (2026-09-03) Run the final two-axis code review. No Issue 42 standards or specification findings remain.
 
 ## Surprises & Discoveries
 
@@ -86,13 +86,21 @@ An organizer can verify the result in the web and mobile proposal review dialogs
   Rationale: Issue 42 concerns truthful diagnostics. The search evidence must state whether it is global or local to the current placement state. The recorded blocker IDs can support a later conflict-directed repair issue without expanding this work into a new scheduler.
   Date/Author: 2026-09-03 / Codex.
 
-- Decision: Use Event Editor contract version 4 for required diagnostics and retain a temporary version 3 response adapter during the independent site and mobile release sequence.
-  Rationale: The maintenance parser is strict. Adding required fields under version 3 would break an existing mobile client. The site remains the HTTP contract owner.
+- Decision: Use Event Editor contract version 4 for generated proposal traffic and accept version 3 through a temporary compatibility adapter.
+  Rationale: Version 4 identifies the diagnostic response shape. Version 3 remains parseable during rollout. Generated version 4 outcomes include diagnostics when a proposal has scheduling results. The site remains the HTTP contract owner.
   Date/Author: 2026-09-03 / Codex.
 
 ## Outcomes & Retrospective
 
-The design and implementation sequence are recorded. No Issue 42 product code has been implemented. Update this section after each milestone. At completion, compare the observed proposal behavior with every Issue 42 acceptance criterion and record the final test results, commit references, and any retained version 3 compatibility work.
+The Issue 42 implementation is complete in the worktree. The scheduler now calculates demand from the complete Match Graph, calculates a de-duplicated Resource upper bound, records bounded candidate evidence, and applies hard named Official feasibility during placement. It does not emit a causal factor or remedy without supporting evidence. Optional Official coverage remains non-blocking. Version 4 is the generated Event Editor contract. Version 3 remains accepted by the site and mobile decoders during rollout.
+
+The web and mobile proposal reviews render the same diagnostic values. Mobile diagnostics remain transient. Accepted Event and Schedule data remains Room-authoritative. The focused site gate passed 6 suites and 105 tests. The full Android JVM suite passed 1,633 of 1,636 tests; the three failures are the existing weekly-date assertion and two SQLite reopen tests. The backend-backed mobile route test was not run because it needs an explicitly authorized local runtime and isolated database.
+
+The implementation records candidate evidence through the existing scheduler candidate guard and preserves structured failure context. It does not add a general shadow search or general scheduler backtracking. It emits an Official Time Slot remedy only when the existing evidence proves a static staffing shortage is not the cause; unproven causes remain non-causal.
+
+The final staged review found no Issue 42 defects. ESLint reported no errors in the changed site files. The type check passed. The fragmentation-remedy regression passed.
+
+Implementation commit: `81b0ee0d3`.
 
 ## Context and Orientation
 

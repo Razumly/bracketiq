@@ -40,6 +40,7 @@ import com.razumly.mvp.core.presentation.util.getEventQrCodeUrl
 import com.razumly.mvp.eventDetail.composables.MatchEditDialog
 import com.razumly.mvp.eventDetail.composables.SendNotificationDialog
 import com.razumly.mvp.eventDetail.composables.TeamSelectionDialog
+import com.razumly.mvp.schedule.ScheduleDiagnosticsReview
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 import kotlinx.datetime.TimeZone
@@ -728,6 +729,7 @@ internal fun EventScheduleMaintenanceReviewDialog(
                                 outcome.affectedCompetitionPhases.joinToString { phase -> phase.name },
                         )
                     }
+                    ScheduleDiagnosticsReview(outcome.diagnostics)
                     outcome.warnings.forEach { warning ->
                         Text("Warning: ${warning.message}")
                     }

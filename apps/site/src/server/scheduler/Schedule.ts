@@ -9,7 +9,7 @@ import {
   resolveOneTimeTimeSlot,
 } from '@/lib/timeSlotAvailability';
 import { enumerateRepeatingTimeSlotOccurrences } from '@/lib/repeatingTimeSlotAvailability';
-import { ScheduleError } from './scheduleErrors';
+import { ScheduleError, type ScheduleFailureFactor } from './scheduleErrors';
 
 type ParticipantAvailability = 'AVAILABLE' | 'UNAVAILABLE' | 'TEAM_DUTY';
 
@@ -367,6 +367,7 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
         start: Date;
         end: Date;
       }) => boolean;
+      candidateFailureFactor?: ScheduleFailureFactor;
     },
   ): void {
     this.currentGroups = event.getGroups() as G[];
@@ -388,18 +389,19 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
     let earliestStart = this.getEarliestStartTime(event);
     earliestStart = this.nextValidStartTime(earliestStart, durationMs);
 
-    let sawNamedOfficialCapacityFailure = false;
+    let sawCandidateGuardFailure = false;
     let sawTeamDutyCapacityFailure = false;
+    const candidateFailureFactor = opts?.candidateFailureFactor ?? 'NAMED_OFFICIAL_POSITION';
+    const candidateFailureMessage = candidateFailureFactor === 'NAMED_OFFICIAL_POSITION'
+      ? `${NOT_ENOUGH_TIME_ALLOTTED_MESSAGE} No complete position-eligible assignment exists for the scheduled match.`
+      : `${NOT_ENOUGH_TIME_ALLOTTED_MESSAGE} No candidate satisfied the scheduling restrictions.`;
     while (true) {
       let adjustedStart: Date;
       try {
         adjustedStart = this.nextValidStartTime(earliestStart, durationMs);
       } catch (error) {
-        if (sawNamedOfficialCapacityFailure) {
-          throw new ScheduleError(
-            `${NOT_ENOUGH_TIME_ALLOTTED_MESSAGE} No complete position-eligible assignment is available for the scheduled match.`,
-            'NAMED_OFFICIAL_POSITION',
-          );
+        if (sawCandidateGuardFailure) {
+          throw new ScheduleError(candidateFailureMessage, candidateFailureFactor);
         }
         if (sawTeamDutyCapacityFailure) {
           throw new ScheduleError(
@@ -413,11 +415,8 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
         earliestStart = adjustedStart;
       }
       if (earliestStart.getTime() + durationMs > this.endTime.getTime()) {
-        if (sawNamedOfficialCapacityFailure) {
-          throw new ScheduleError(
-            `${NOT_ENOUGH_TIME_ALLOTTED_MESSAGE} No complete position-eligible assignment is available for the scheduled match.`,
-            'NAMED_OFFICIAL_POSITION',
-          );
+        if (sawCandidateGuardFailure) {
+          throw new ScheduleError(candidateFailureMessage, candidateFailureFactor);
         }
         if (sawTeamDutyCapacityFailure) {
           throw new ScheduleError(
@@ -457,7 +456,7 @@ export class Schedule<E extends SchedulableEvent, R extends Resource, P extends 
           ? this.findAvailableResource(earliestStart, durationMs, event, opts.canUseCandidate)
           : rawResource;
         if (rawResource && opts?.canUseCandidate && !resource) {
-          sawNamedOfficialCapacityFailure = true;
+          sawCandidateGuardFailure = true;
         }
         if (resource) {
           event.setResource(resource);

@@ -3,6 +3,11 @@ import { MIN_BRACKET_TEAM_COUNT } from "@/lib/divisionTypes";
 import { Brackets } from "./Brackets";
 import { OfficialStaffingPlanner } from "./officialStaffing";
 import { ScheduleError, type ScheduleFailureFactor } from "./scheduleErrors";
+import {
+  diagnoseScheduleProposal,
+  type ScheduleDiagnosticEvidence,
+} from "./scheduleDiagnostics";
+import type { EventEditorScheduleDiagnostics } from "@/contracts/eventEditor";
 import { Schedule } from "./Schedule";
 import {
   applyDivisionPhaseRulesToMatch,
@@ -45,6 +50,9 @@ export type EventBuilderPlacementFailure = {
   matchId: string;
   message: string;
   restrictingFactor: ScheduleFailureFactor;
+  evidence?: ScheduleDiagnosticEvidence[];
+  candidateCount?: number;
+  searchExhaustive?: boolean;
 };
 
 type RegularSeasonMatchConfig = {
@@ -571,11 +579,27 @@ export class EventBuilder {
           match.unschedule();
           match.official = null;
           match.officialAssignments = [];
+          const teamIds = [match.team1?.id, match.team2?.id, match.teamOfficial?.id]
+            .filter((id): id is string => Boolean(id));
           match.teamOfficial = null;
+          const evidence = error.diagnosticEvidence.length > 0
+            ? error.diagnosticEvidence
+            : [{
+              kind: "PLACEMENT_SEARCH" as const,
+              message: error.message,
+              matchIds: [match.id],
+              divisionIds: [match.division.id],
+              teamIds,
+              dependencyIds: match.getDependencies().map((dependency) => dependency.id),
+              candidateCount: error.candidateCount,
+            }];
           this.placementFailures.push({
             matchId: match.id,
             message: error.message,
             restrictingFactor: error.restrictingFactor,
+            evidence,
+            candidateCount: error.candidateCount,
+            searchExhaustive: error.searchExhaustive,
           });
         }
       }
@@ -588,6 +612,14 @@ export class EventBuilder {
       this.schedule.advanceTo(maxEnd);
     }
     return orderedMatches;
+  }
+
+  getScheduleDiagnostics(): EventEditorScheduleDiagnostics {
+    return diagnoseScheduleProposal({
+      event: this.event,
+      matches: Object.values(this.event.matches),
+      placementFailures: this.placementFailures,
+    });
   }
 
   private finalizePlacement(
@@ -1873,15 +1905,70 @@ export class EventBuilder {
     planner: OfficialStaffingPlanner | null,
     requiresOfficialCoverage: boolean,
   ): void {
-    this.schedule.scheduleEventWithOptions(match, durationMs, {
-      canUseCandidate: ({ resource, start, end }) => (
-        (this.canUseCandidate?.({ event: match, resource, start, end }) ?? true) &&
-        (
-          !requiresOfficialCoverage
-          || planner?.previewSchedulingCandidate(match, resource, start, end) === true
-        )
-      ),
-    });
+    let candidateCount = 0;
+    const evidence: ScheduleDiagnosticEvidence[] = [];
+    try {
+      this.schedule.scheduleEventWithOptions(match, durationMs, {
+        canUseCandidate: ({ resource, start, end }) => {
+          candidateCount += 1;
+          const candidate = {
+            kind: "PLACEMENT_SEARCH" as const,
+            message: `Candidate Resource ${resource.id} at ${start.toISOString()} was rejected during placement.`,
+            matchIds: [match.id],
+            resourceIds: [resource.id],
+            divisionIds: [match.division.id],
+            intervals: [{ start: start.toISOString(), end: end.toISOString() }],
+            candidateCount,
+          };
+          if (
+            this.canUseCandidate
+            && !this.canUseCandidate({ event: match, resource, start, end })
+          ) {
+            evidence.push(candidate);
+            return false;
+          }
+          if (!requiresOfficialCoverage) return true;
+          try {
+            const staffable = planner?.previewSchedulingCandidate(match, resource, start, end) === true;
+            if (!staffable) evidence.push({
+              ...candidate,
+              kind: "OFFICIAL_MATCHING",
+              message: `Candidate Resource ${resource.id} at ${start.toISOString()} had no complete required Official assignment.`,
+              officialIds: planner?.userById ? Array.from(planner.userById.keys()).sort() : [],
+            });
+            return staffable;
+          } catch (error) {
+            if (error instanceof ScheduleError) {
+              evidence.push({
+                ...candidate,
+                kind: "OFFICIAL_MATCHING",
+                message: error.message,
+                officialIds: planner?.userById ? Array.from(planner.userById.keys()).sort() : [],
+              });
+              return false;
+            }
+            throw error;
+          }
+        },
+        candidateFailureFactor: requiresOfficialCoverage
+          ? "NAMED_OFFICIAL_POSITION"
+          : "RESOURCE",
+      });
+    } catch (error) {
+      if (!(error instanceof ScheduleError) || candidateCount === 0) {
+        throw error;
+      }
+      const restrictingFactor = error.restrictingFactor === "NAMED_OFFICIAL_POSITION"
+        && evidence.length > 0
+        && evidence.every((entry) => entry.kind === "PLACEMENT_SEARCH")
+        ? "RESOURCE"
+        : error.restrictingFactor;
+      throw new ScheduleError(error.message, restrictingFactor, {
+        diagnosticEvidence: evidence,
+        candidateCount,
+        searchExhaustive: true,
+      });
+    }
   }
 
   private resolvePlayoffParticipantCount(

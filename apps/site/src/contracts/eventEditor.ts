@@ -7,7 +7,20 @@ import {
   normalizeStaffingPriority,
   STAFFING_PRIORITIES,
 } from "@/server/officials/config";
-export const EVENT_EDITOR_CONTRACT_VERSION = 3 as const;
+export const EVENT_EDITOR_CONTRACT_VERSION = 4 as const;
+export const EVENT_EDITOR_LEGACY_CONTRACT_VERSION = 3 as const;
+
+const eventEditorContractVersionSchema = z.union([
+  z.literal(EVENT_EDITOR_CONTRACT_VERSION),
+  z.literal(EVENT_EDITOR_LEGACY_CONTRACT_VERSION),
+]);
+
+export const isSupportedEventEditorContractVersion = (
+  value: unknown,
+): value is typeof EVENT_EDITOR_CONTRACT_VERSION | typeof EVENT_EDITOR_LEGACY_CONTRACT_VERSION => (
+  value === EVENT_EDITOR_CONTRACT_VERSION
+  || value === EVENT_EDITOR_LEGACY_CONTRACT_VERSION
+);
 
 const id = z.string().trim().min(1);
 const nullableId = id.nullable();
@@ -729,6 +742,87 @@ const eventEditorMatchDemandSchema = z
   })
   .strict();
 
+const eventEditorScheduleDiagnosticEvidenceSchema = z
+  .object({
+    kind: z.enum(["CAPACITY_BOUND", "PLACEMENT_SEARCH", "OFFICIAL_MATCHING"]),
+    message: z.string().trim().min(1),
+    matchIds: z.array(id).optional(),
+    resourceIds: z.array(id).optional(),
+    divisionIds: z.array(id).optional(),
+    teamIds: z.array(id).optional(),
+    dependencyIds: z.array(id).optional(),
+    officialIds: z.array(id).optional(),
+    timeSlotIds: z.array(id).optional(),
+    intervals: z.array(
+      z
+        .object({
+          start: isoDateTime,
+          end: isoDateTime,
+        })
+        .strict(),
+    ).optional(),
+    demand: z.number().int().nonnegative().optional(),
+    capacity: z.number().int().nonnegative().optional(),
+    deficit: z.number().int().nonnegative().optional(),
+    candidateCount: z.number().int().nonnegative().optional(),
+  })
+  .strict();
+
+export type EventEditorScheduleDiagnosticEvidence = z.infer<
+  typeof eventEditorScheduleDiagnosticEvidenceSchema
+>;
+
+const scheduleDiagnosticFactorSchema = z.enum([
+  "RESOURCE",
+  "PLAYING_TEAM",
+  "TEAM_DUTY",
+  "NAMED_OFFICIAL_POSITION",
+  "DIVISION_ORDER",
+  "ELIGIBILITY",
+  "FRAGMENTED_WINDOWS",
+  "DEPENDENCY",
+  "UNKNOWN",
+]);
+
+const eventEditorScheduleDiagnosticSchema = z
+  .object({
+    factor: scheduleDiagnosticFactorSchema,
+    confidence: z.enum(["PROVEN_GLOBAL_BOUND", "PROVEN_FOR_ATTEMPT", "OBSERVED"]),
+    message: z.string().trim().min(1),
+    evidence: z.array(eventEditorScheduleDiagnosticEvidenceSchema),
+  })
+  .strict();
+
+const eventEditorScheduleRemedySchema = z
+  .object({
+    code: z.enum([
+      "ADD_OR_EXTEND_TIME_SLOTS",
+      "ADD_ELIGIBLE_OFFICIALS",
+      "REVIEW_RESOURCE_ELIGIBILITY",
+    ]),
+    factor: scheduleDiagnosticFactorSchema,
+    message: z.string().trim().min(1),
+    evidence: z.array(eventEditorScheduleDiagnosticEvidenceSchema),
+  })
+  .strict();
+
+export const eventEditorScheduleDiagnosticsSchema = z
+  .object({
+    message: z.string().trim().min(1),
+    matchDemand: eventEditorMatchDemandSchema,
+    estimatedCapacity: z.number().int().nonnegative(),
+    estimatedCapacityIsUpperBound: z.literal(true),
+    minimumDeficitMatches: z.number().int().nonnegative(),
+    searchComplete: z.boolean(),
+    restrictingFactors: z.array(eventEditorScheduleDiagnosticSchema),
+    remedies: z.array(eventEditorScheduleRemedySchema),
+  })
+  .strict();
+
+export type EventEditorScheduleDiagnostics = z.infer<
+  typeof eventEditorScheduleDiagnosticsSchema
+>;
+
 /**
  * Existing-Event schedule maintenance is deliberately separate from the
  * create-event proposal protocol.  The operation identity belongs to one
@@ -806,6 +900,9 @@ export const eventEditorScheduleWarningSchema = z
       "TEAM_DUTY",
       "NAMED_OFFICIAL_POSITION",
       "DIVISION_ORDER",
+      "ELIGIBILITY",
+      "FRAGMENTED_WINDOWS",
+      "DEPENDENCY",
       "UNKNOWN",
     ]).optional(),
   })
@@ -990,6 +1087,7 @@ export const eventEditorPartialScheduleOutcomeSchema = z
     affectedCompetitionPhases: z.array(
       eventEditorAffectedCompetitionPhaseSchema,
     ),
+    diagnostics: eventEditorScheduleDiagnosticsSchema.optional(),
     warnings: z.array(eventEditorScheduleWarningSchema),
   })
   .strict()
@@ -1028,6 +1126,7 @@ export const eventEditorScheduleOutcomeSchema = z.discriminatedUnion("status", [
       status: z.literal("NOT_REQUESTED"),
       matchCount: z.number().int().nonnegative(),
       matches: z.array(editorMatchProjectionSchema).optional(),
+      diagnostics: eventEditorScheduleDiagnosticsSchema.optional(),
       warnings: z.array(z.never()),
     })
     .strict(),
@@ -1036,6 +1135,7 @@ export const eventEditorScheduleOutcomeSchema = z.discriminatedUnion("status", [
       status: z.enum(["BUILT", "REBUILT"]),
       matchCount: z.number().int().positive(),
       matches: z.array(editorMatchProjectionSchema),
+      diagnostics: eventEditorScheduleDiagnosticsSchema.optional(),
       warnings: z.array(eventEditorScheduleWarningSchema),
     })
     .strict(),
@@ -1044,6 +1144,7 @@ export const eventEditorScheduleOutcomeSchema = z.discriminatedUnion("status", [
       status: z.literal("DELETED"),
       matchCount: z.literal(0),
       matches: z.array(z.never()),
+      diagnostics: z.never().optional(),
       warnings: z.array(z.never()),
     })
     .strict(),
@@ -1070,7 +1171,7 @@ export type EventEditorRevisionBinding = z.infer<
 
 export const eventEditorSnapshotSchema = z
   .object({
-    contractVersion: z.literal(EVENT_EDITOR_CONTRACT_VERSION),
+    contractVersion: eventEditorContractVersionSchema,
     draft: eventEditorBootstrapDraftSchema,
     mode: z.enum(["CREATE", "EDIT"]),
     eventId: nullableId,
@@ -1091,7 +1192,7 @@ export const eventEditorSnapshotSchema = z
   .strict();
 export const eventEditorCreateBootstrapSchema = z
   .object({
-    contractVersion: z.literal(EVENT_EDITOR_CONTRACT_VERSION),
+    contractVersion: eventEditorContractVersionSchema,
     createOperationId: id,
     snapshot: eventEditorSnapshotSchema,
   })
@@ -1132,7 +1233,7 @@ export const eventEditorBootstrapQuerySchema = z
 
 export const saveEventEditorCommandSchema = z
   .object({
-    contractVersion: z.literal(EVENT_EDITOR_CONTRACT_VERSION),
+    contractVersion: eventEditorContractVersionSchema,
     editorRevision: id,
     staffRevision: z.string().nullable(),
     draft: eventEditorDraftSchema,
@@ -1158,7 +1259,7 @@ export const eventEditorExpectedCreateRevisionsSchema = z
 
 export const createEventEditorCommandSchema = z
   .object({
-    contractVersion: z.literal(EVENT_EDITOR_CONTRACT_VERSION),
+    contractVersion: eventEditorContractVersionSchema,
     createOperationId: id,
     expectedRevisions: eventEditorExpectedCreateRevisionsSchema,
     draft: eventEditorDraftSchema,
@@ -1508,7 +1609,7 @@ export const eventEditorCreateProposalGraphSchema = z
 
 export const eventEditorMaintenanceRequestSchema = z
   .object({
-    contractVersion: z.literal(EVENT_EDITOR_CONTRACT_VERSION),
+    contractVersion: eventEditorContractVersionSchema,
     eventId: id,
     operation: eventEditorMaintenanceOperationSchema,
     operationId: id,
@@ -1549,6 +1650,7 @@ export const eventEditorMaintenanceScheduleOutcomeSchema =
         matches: z.array(editorMatchProjectionSchema),
         unscheduledMatches: z.array(z.never()),
         affectedCompetitionPhases: z.array(z.never()),
+        diagnostics: eventEditorScheduleDiagnosticsSchema.optional(),
         warnings: z.array(eventEditorScheduleWarningSchema),
       })
       .strict(),
@@ -1562,6 +1664,7 @@ export const eventEditorMaintenanceScheduleOutcomeSchema =
         matches: z.array(editorMatchProjectionSchema),
         unscheduledMatches: z.array(maintenanceUnscheduledMatchSchema),
         affectedCompetitionPhases: z.array(maintenanceAffectedPhaseSchema),
+        diagnostics: eventEditorScheduleDiagnosticsSchema.optional(),
         warnings: z.array(eventEditorScheduleWarningSchema),
       })
       .strict(),
@@ -1570,7 +1673,7 @@ export const eventEditorMaintenanceScheduleOutcomeSchema =
 export const eventEditorMaintenanceProposalSchema = z
   .object({
     status: z.literal("PROPOSED"),
-    contractVersion: z.literal(EVENT_EDITOR_CONTRACT_VERSION),
+    contractVersion: eventEditorContractVersionSchema,
     eventId: id,
     operation: eventEditorMaintenanceOperationSchema,
     operationId: id,
@@ -1584,7 +1687,7 @@ export const eventEditorMaintenanceProposalSchema = z
 
 export const eventEditorAcceptMaintenanceProposalSchema = z
   .object({
-    contractVersion: z.literal(EVENT_EDITOR_CONTRACT_VERSION),
+    contractVersion: eventEditorContractVersionSchema,
     eventId: id,
     operation: eventEditorMaintenanceOperationSchema,
     operationId: id,
@@ -1595,7 +1698,7 @@ export const eventEditorAcceptMaintenanceProposalSchema = z
 
 export const eventEditorRejectMaintenanceProposalSchema = z
   .object({
-    contractVersion: z.literal(EVENT_EDITOR_CONTRACT_VERSION),
+    contractVersion: eventEditorContractVersionSchema,
     eventId: id,
     operation: eventEditorMaintenanceOperationSchema,
     operationId: id,
@@ -1615,7 +1718,7 @@ export const eventEditorMaintenanceAcceptedResultSchema =
 export const eventEditorMaintenanceRejectedResultSchema = z
   .object({
     status: z.literal("REJECTED"),
-    contractVersion: z.literal(EVENT_EDITOR_CONTRACT_VERSION),
+    contractVersion: eventEditorContractVersionSchema,
     eventId: id,
     operation: eventEditorMaintenanceOperationSchema,
     operationId: id,
@@ -1687,6 +1790,7 @@ export const eventEditorCreateProposalScheduleOutcomeSchema =
         status: z.literal("BUILT"),
         matchCount: z.number().int().positive(),
         matches: z.array(editorMatchProjectionSchema),
+        diagnostics: eventEditorScheduleDiagnosticsSchema.optional(),
         warnings: z.array(eventEditorScheduleWarningSchema),
       })
       .strict(),
@@ -1709,7 +1813,7 @@ export const eventEditorCreateProposalSchema = z
   .strict();
 export const eventEditorProposalReferenceSchema = z
   .object({
-    contractVersion: z.literal(EVENT_EDITOR_CONTRACT_VERSION),
+    contractVersion: eventEditorContractVersionSchema,
     createOperationId: id,
     proposalRevision: id,
   })
@@ -1893,7 +1997,7 @@ export const parseSaveEventEditorCommand = (
     : null;
   if (
     isUnknownRecord(input)
-    && input.contractVersion === EVENT_EDITOR_CONTRACT_VERSION
+    && isSupportedEventEditorContractVersion(input.contractVersion)
     && isUnknownRecord(transition)
     && transition.mode === "BUILD_IF_MISSING"
   ) {

@@ -372,7 +372,7 @@ const buildEditorSnapshot = (
     ),
   );
   return {
-    contractVersion: 3,
+    contractVersion: 4,
     eventId: mode === 'CREATE' ? null : (sourceEvent.$id ?? sourceEvent.id ?? 'event_1'),
     mode,
     editorRevision: 'test-editor-revision',
@@ -489,7 +489,7 @@ const buildMaintenanceProposal = ({
   const unplaced = projections.filter((match: any) => match.placementState === 'UNPLACED');
   return {
     status: 'PROPOSED',
-    contractVersion: 3,
+    contractVersion: 4,
     eventId: 'event_1',
     operation,
     operationId: `maintenance-${operation.toLowerCase()}`,
@@ -3135,7 +3135,7 @@ describe('League schedule page', () => {
       expect(editorSaveCall).toBeDefined();
     });
     const command = editorSaveCall?.[1]?.body;
-    expect(command.contractVersion).toBe(3);
+    expect(command.contractVersion).toBe(4);
     expect(command.draft.basics.state).toBe('UNPUBLISHED');
     expect(command.draft.resources.timeSlots).toHaveLength(1);
     expect(command.draft).not.toHaveProperty('matches');
@@ -3445,7 +3445,7 @@ describe('League schedule page', () => {
     ).mock.calls[0][0];
     expect(proposalRequest).toEqual(
       expect.objectContaining({
-        contractVersion: 3,
+        contractVersion: 4,
         eventId: 'event_1',
         operation: 'BUILD',
         participantCount: 24,
@@ -3780,7 +3780,7 @@ describe('League schedule page', () => {
         eventService.acceptEventScheduleMaintenanceProposal as jest.Mock
       ).mock.calls[0][0];
       expect(acceptanceRequest).toEqual({
-        contractVersion: 3,
+        contractVersion: 4,
         eventId: proposal.eventId,
         operation: proposal.operation,
         operationId: proposal.operationId,
@@ -3894,7 +3894,7 @@ describe('League schedule page', () => {
     );
     (eventService.rejectEventScheduleMaintenanceProposal as jest.Mock).mockResolvedValue({
       status: 'REJECTED',
-      contractVersion: 3,
+      contractVersion: 4,
       eventId: proposal.eventId,
       operation: proposal.operation,
       operationId: proposal.operationId,
@@ -3913,7 +3913,7 @@ describe('League schedule page', () => {
 
     await waitFor(() =>
       expect(eventService.rejectEventScheduleMaintenanceProposal).toHaveBeenCalledWith({
-        contractVersion: 3,
+        contractVersion: 4,
         eventId: proposal.eventId,
         operation: proposal.operation,
         operationId: proposal.operationId,
@@ -3955,7 +3955,7 @@ describe('League schedule page', () => {
     );
     (eventService.rejectEventScheduleMaintenanceProposal as jest.Mock).mockResolvedValue({
       status: 'REJECTED',
-      contractVersion: 3,
+      contractVersion: 4,
       eventId: proposal.eventId,
       operation: proposal.operation,
       operationId: proposal.operationId,
@@ -4733,7 +4733,7 @@ describe('League schedule page', () => {
     );
     (eventService.rejectEventScheduleMaintenanceProposal as jest.Mock).mockResolvedValue({
       status: 'REJECTED',
-      contractVersion: 3,
+      contractVersion: 4,
       eventId: proposal.eventId,
       operation: proposal.operation,
       operationId: proposal.operationId,
@@ -5187,7 +5187,7 @@ describe('League schedule page', () => {
 
     const command = createCall()?.[1]?.body;
     expect(command).toEqual(expect.objectContaining({
-      contractVersion: 3,
+      contractVersion: 4,
       createOperationId: 'create-operation-test',
       expectedRevisions: {
         editorRevision: expect.any(String),

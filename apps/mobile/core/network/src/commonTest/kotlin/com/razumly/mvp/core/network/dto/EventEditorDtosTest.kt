@@ -148,7 +148,7 @@ class EventEditorDtosTest {
             """.trimIndent(),
         )
 
-        assertEquals(EVENT_EDITOR_CONTRACT_VERSION, command.contractVersion)
+        assertEquals(EVENT_EDITOR_LEGACY_CONTRACT_VERSION, command.contractVersion)
         assertEquals("create-operation-1", command.createOperationId)
         assertEquals("editor-revision-1", command.expectedRevisions.editorRevision)
         assertEquals(null, command.expectedRevisions.staffRevision)
@@ -358,7 +358,11 @@ class EventEditorDtosTest {
             decoded.map(EventEditorMaintenanceRequestDto::operation),
         )
         assertEquals(
-            listOf(EVENT_EDITOR_CONTRACT_VERSION, EVENT_EDITOR_CONTRACT_VERSION, EVENT_EDITOR_CONTRACT_VERSION),
+            listOf(
+                EVENT_EDITOR_LEGACY_CONTRACT_VERSION,
+                EVENT_EDITOR_LEGACY_CONTRACT_VERSION,
+                EVENT_EDITOR_LEGACY_CONTRACT_VERSION,
+            ),
             decoded.map(EventEditorMaintenanceRequestDto::contractVersion),
         )
     }

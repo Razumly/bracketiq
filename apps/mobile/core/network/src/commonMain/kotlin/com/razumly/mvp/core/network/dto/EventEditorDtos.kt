@@ -35,7 +35,11 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonPrimitive
 
-const val EVENT_EDITOR_CONTRACT_VERSION: Int = 3
+const val EVENT_EDITOR_CONTRACT_VERSION: Int = 4
+const val EVENT_EDITOR_LEGACY_CONTRACT_VERSION: Int = 3
+
+fun isSupportedEventEditorContractVersion(version: Int): Boolean =
+    version == EVENT_EDITOR_CONTRACT_VERSION || version == EVENT_EDITOR_LEGACY_CONTRACT_VERSION
 
 @Serializable
 data class EventEditorBootstrapQueryDto(
@@ -59,9 +63,19 @@ data class EventEditorCreateBootstrapDto(
 data class EventEditorScheduleStateDto(
     val sourceType: String? = null,
     val matchCount: Int,
+    val matchDemand: EventEditorMatchDemandDto? = null,
     val revision: String,
     val hasProtectedHistory: Boolean,
     val availableMaintenanceOperations: List<EventEditorMaintenanceOperation> = emptyList(),
+)
+
+@Serializable
+data class EventEditorMatchDemandDto(
+    val total: Int,
+    val byDivision: Map<String, Int> = emptyMap(),
+    val byPhase: Map<String, Int> = emptyMap(),
+    val placed: Int,
+    val unplaced: Int,
 )
 
 @Serializable
@@ -153,6 +167,58 @@ data class EventEditorScheduleWarningDto(
 )
 
 @Serializable
+data class EventEditorScheduleDiagnosticIntervalDto(
+    val start: String,
+    val end: String,
+)
+
+@Serializable
+data class EventEditorScheduleDiagnosticEvidenceDto(
+    val kind: String,
+    val message: String,
+    val matchIds: List<String>? = null,
+    val resourceIds: List<String>? = null,
+    val divisionIds: List<String>? = null,
+    val teamIds: List<String>? = null,
+    val dependencyIds: List<String>? = null,
+    val officialIds: List<String>? = null,
+    val timeSlotIds: List<String>? = null,
+    val intervals: List<EventEditorScheduleDiagnosticIntervalDto>? = null,
+    val demand: Int? = null,
+    val capacity: Int? = null,
+    val deficit: Int? = null,
+    val candidateCount: Int? = null,
+)
+
+@Serializable
+data class EventEditorScheduleRestrictingFactorDto(
+    val factor: String,
+    val confidence: String,
+    val message: String,
+    val evidence: List<EventEditorScheduleDiagnosticEvidenceDto> = emptyList(),
+)
+
+@Serializable
+data class EventEditorScheduleRemedyDto(
+    val code: String,
+    val factor: String,
+    val message: String,
+    val evidence: List<EventEditorScheduleDiagnosticEvidenceDto> = emptyList(),
+)
+
+@Serializable
+data class EventEditorScheduleDiagnosticsDto(
+    val message: String,
+    val matchDemand: EventEditorMatchDemandDto,
+    val estimatedCapacity: Int,
+    val estimatedCapacityIsUpperBound: Boolean,
+    val minimumDeficitMatches: Int,
+    val searchComplete: Boolean,
+    val restrictingFactors: List<EventEditorScheduleRestrictingFactorDto> = emptyList(),
+    val remedies: List<EventEditorScheduleRemedyDto> = emptyList(),
+)
+
+@Serializable
 enum class EventEditorCreateCompletionMode {
     CREATE_ONLY,
     CREATE_AND_BUILD_SCHEDULE,
@@ -228,6 +294,7 @@ data class EventEditorScheduleOutcomeDto(
     val placedMatchCount: Int = 0,
     val unplacedMatchCount: Int = 0,
     val isComplete: Boolean = status != EventEditorScheduleOutcomeStatus.PARTIAL,
+    val diagnostics: EventEditorScheduleDiagnosticsDto? = null,
     val warnings: List<EventEditorScheduleWarningDto> = emptyList(),
 ) {
     init {
@@ -333,6 +400,7 @@ data class EventEditorMaintenanceScheduleOutcomeDto(
     val matches: List<EventEditorMatchProjectionDto>,
     val unscheduledMatches: List<EventEditorMaintenanceUnscheduledMatchDto>,
     val affectedCompetitionPhases: List<EventEditorMaintenanceAffectedCompetitionPhaseDto>,
+    val diagnostics: EventEditorScheduleDiagnosticsDto? = null,
     val warnings: List<EventEditorScheduleWarningDto>,
 ) {
     init {

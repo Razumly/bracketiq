@@ -42,6 +42,8 @@ import com.razumly.mvp.core.network.dto.EventEditorRevisionBindingDto
 import com.razumly.mvp.core.network.dto.EventEditorSaveResultDto
 import com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeDto
 import com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeStatus
+import com.razumly.mvp.core.network.dto.EventEditorMatchDemandDto
+import com.razumly.mvp.core.network.dto.EventEditorScheduleDiagnosticsDto
 import com.razumly.mvp.core.network.dto.EventEditorAffectedCompetitionPhaseDto
 import com.razumly.mvp.core.network.dto.EventEditorUnscheduledMatchDto
 import com.razumly.mvp.core.network.dto.MatchApiDto
@@ -251,7 +253,7 @@ class EventEditorRemoteGatewayTest {
                 acceptDraft,
             ),
         )
-        assertEquals("3", acceptBody.getValue("contractVersion").jsonPrimitive.content)
+        assertEquals("4", acceptBody.getValue("contractVersion").jsonPrimitive.content)
         assertEquals(
             "proposal-operation-1",
             acceptBody.getValue("createOperationId").jsonPrimitive.content,
@@ -264,7 +266,7 @@ class EventEditorRemoteGatewayTest {
         val reject = requestBodies[1]
         assertEquals(HttpMethod.Delete, reject.first)
         val rejectBody = jsonMVP.parseToJsonElement(reject.second).jsonObject
-        assertEquals("3", rejectBody.getValue("contractVersion").jsonPrimitive.content)
+        assertEquals("4", rejectBody.getValue("contractVersion").jsonPrimitive.content)
         assertEquals(
             "proposal-operation-1",
             rejectBody.getValue("createOperationId").jsonPrimitive.content,
@@ -1124,6 +1126,7 @@ private fun scheduleProposal(command: EventEditorCreateCommandDto) = EventEditor
                 officialId = "official-1",
             ),
         ),
+        diagnostics = scheduleDiagnostics(),
     ),
     graph = EventEditorCreateProposalGraphDto(
         event = EventApiDto(
@@ -1199,8 +1202,24 @@ private fun maintenanceScheduleOutcome(): com.razumly.mvp.core.network.dto.Event
         matches = maintenanceMatches(),
         unscheduledMatches = emptyList(),
         affectedCompetitionPhases = emptyList(),
+        diagnostics = scheduleDiagnostics(),
         warnings = emptyList(),
     )
+
+private fun scheduleDiagnostics(): EventEditorScheduleDiagnosticsDto = EventEditorScheduleDiagnosticsDto(
+    message = "Total Resource capacity is not proven insufficient.",
+    matchDemand = EventEditorMatchDemandDto(
+        total = 1,
+        byDivision = mapOf("division-1" to 1),
+        byPhase = mapOf("LEAGUE" to 1),
+        placed = 1,
+        unplaced = 0,
+    ),
+    estimatedCapacity = 1,
+    estimatedCapacityIsUpperBound = true,
+    minimumDeficitMatches = 0,
+    searchComplete = true,
+)
 
 private fun maintenanceProposal(
     request: EventEditorMaintenanceRequestDto,

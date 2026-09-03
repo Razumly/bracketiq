@@ -63,6 +63,7 @@ import com.razumly.mvp.eventDetail.EventDetails
 import com.razumly.mvp.eventDetail.toEventWithFullRelations
 import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
+import com.razumly.mvp.schedule.ScheduleDiagnosticsReview
 import dev.icerock.moko.geo.LatLng
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format
@@ -802,6 +803,7 @@ internal fun ScheduleProposalDialog(
                         )
                     }
                 }
+                ScheduleDiagnosticsReview(schedule.diagnostics)
                 proposal.graph.matches.forEachIndexed { index, match ->
                     val team1 = match.team1Id?.let { teamNames[it] }
                         ?: if (match.team1Id == null) "TBD" else "Team unavailable"

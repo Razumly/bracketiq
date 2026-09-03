@@ -101,6 +101,7 @@ import {
   type EventEditorRevisionBinding,
   type EventEditorSaveResult,
   type EventEditorScheduleOutcome,
+  type EventEditorScheduleDiagnostics,
   type EventEditorScheduleWarning,
   type EventEditorSnapshot,
   type EventEditorUnscheduledMatch,
@@ -1999,6 +2000,9 @@ type PartialPlacementFailure = {
   restrictingFactor: NonNullable<
     EventEditorScheduleWarning["restrictingFactor"]
   >;
+  evidence?: import("@/server/scheduler/scheduleDiagnostics").ScheduleDiagnosticEvidence[];
+  candidateCount?: number;
+  searchExhaustive?: boolean;
 };
 
 const recordsFromUnknown = (value: unknown): Record<string, unknown>[] =>
@@ -2127,6 +2131,7 @@ const createBuildScheduleOutcomeFor = (params: {
   matches: Parameters<typeof editorMatchProjectionsFor>[0];
   projections: EventEditorMatchProjection[];
   warnings: EventEditorScheduleWarning[];
+  diagnostics?: EventEditorScheduleDiagnostics;
   placementFailures: readonly PartialPlacementFailure[];
 }): EventEditorScheduleOutcome => {
   const placementStates = params.matches.map((match, index) => {
@@ -2156,6 +2161,7 @@ const createBuildScheduleOutcomeFor = (params: {
       status: "BUILT",
       matchCount: params.projections.length,
       matches: params.projections,
+      diagnostics: params.diagnostics,
       warnings: params.warnings,
     };
   }
@@ -2172,6 +2178,7 @@ const createBuildScheduleOutcomeFor = (params: {
       params.event,
       unscheduledMatches,
     ),
+    diagnostics: params.diagnostics,
     warnings: [
       ...params.warnings,
       ...placementFailureWarningsFor(params.placementFailures),
@@ -2214,6 +2221,7 @@ const persistCreateBuildSchedule = async (
       matches: mutation.matches,
       projections,
       warnings: mutation.warnings ?? [],
+      diagnostics: mutation.diagnostics,
       placementFailures: mutation.placementFailures ?? [],
     }),
     scheduleNotification: mutation.notification,
