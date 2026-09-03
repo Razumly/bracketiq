@@ -46,7 +46,6 @@ import { buildOrganizationEventCreateUrl } from '@/lib/eventCreateNavigation';
 import CreateTeamModal from '@/components/ui/CreateTeamModal';
 import CreateOrganizationModal from '@/components/ui/CreateOrganizationModal';
 import BillingAddressModal from '@/components/ui/BillingAddressModal';
-import RefundRequestsList from '@/components/ui/RefundRequestsList';
 import HostPriceInput from '@/components/ui/HostPriceInput';
 import { isStripeConnectMfaRequiredError, paymentService } from '@/lib/paymentService';
 import { userService } from '@/lib/userService';
@@ -62,6 +61,7 @@ import { type RoleInviteRow, type RoleRosterEntry } from './RoleRosterManager';
 import OrganizationStaffTabContent from './OrganizationStaffTabContent';
 import OrganizationFacilitiesTabContent from './OrganizationFacilitiesTabContent';
 import OrganizationReviewsTabContent from './OrganizationReviewsTabContent';
+import OrganizationRefundsTabContent from './OrganizationRefundsTabContent';
 import { formatDisplayDate, formatDisplayDateTime } from '@/lib/dateUtils';
 import { useLocation } from '@/app/hooks/useLocation';
 import { useDebounce } from '@/app/hooks/useDebounce';
@@ -4898,7 +4898,7 @@ function OrganizationDetailContent() {
             )}
 
             {canManageRefunds && activeTab === 'refunds' && org && (
-              <RefundRequestsList organizationId={org.$id} />
+              <OrganizationRefundsTabContent organizationId={org.$id} />
             )}
 
             {canManagePublicPage && activeTab === 'publicPage' && org && (
