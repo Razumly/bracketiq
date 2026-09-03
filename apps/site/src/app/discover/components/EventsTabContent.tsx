@@ -278,7 +278,7 @@ export default function EventsTabContent<TEventType extends string = Event['even
     selectedStartDate,
     selectedTags,
   ]);
-  const { visibleEvents } = useEventListFiltering({
+  const { visibleEvents, isRefreshing } = useEventListFiltering({
     events,
     filters: eventFilters,
     filterKey: eventListFilterKey(eventFilters),
@@ -423,7 +423,11 @@ export default function EventsTabContent<TEventType extends string = Event['even
   }
 
   const activeFilterCount = activeFilters.length;
-  const eventReadoutCount = typeof totalEvents === 'number' ? totalEvents : sortedEvents.length;
+  const eventReadoutCount = activeFilterCount > 0
+    ? sortedEvents.length
+    : typeof totalEvents === 'number'
+      ? totalEvents
+      : sortedEvents.length;
   const hasActiveDistanceFilter = Boolean(location && typeof maxDistance === 'number');
 
   const filterPanel = (
@@ -719,6 +723,12 @@ export default function EventsTabContent<TEventType extends string = Event['even
             <Alert color="red">
               {eventsError}
             </Alert>
+          )}
+
+          {isRefreshing && !isLoadingInitial && (
+            <Text role="status" aria-live="polite" size="sm" c="dimmed">
+              Updating events…
+            </Text>
           )}
 
           {isLoadingInitial ? (

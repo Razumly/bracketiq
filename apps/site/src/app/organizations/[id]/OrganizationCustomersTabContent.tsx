@@ -42,7 +42,7 @@ export type OrganizationCustomersTabContentProps = {
   customerTypeFilters: OrganizationCustomerType[];
   setCustomerTypeFilters: Dispatch<SetStateAction<OrganizationCustomerType[]>>;
   resetCustomerFilters: () => void;
-  customerFilterIsDefault: boolean;
+  isCustomerFilterDefault: boolean;
   customers: OrganizationCustomerListRow[];
   visibleCustomers: OrganizationCustomerListRow[];
   selectedCustomerKey: string | null;
@@ -55,7 +55,7 @@ export type OrganizationCustomersTabContentProps = {
   ) => ReactNode;
   renderCustomerDetail: (customer: OrganizationCustomerListRow | null) => ReactNode;
   formatEventStart: (start?: string | null) => ReactNode;
-  customersLoading: boolean;
+  isCustomersLoading: boolean;
   customersError: string | null;
   onRefresh: () => void | Promise<void>;
   hasMoreCustomers: boolean;
@@ -127,7 +127,7 @@ export default function OrganizationCustomersTabContent({
   customerTypeFilters,
   setCustomerTypeFilters,
   resetCustomerFilters,
-  customerFilterIsDefault,
+  isCustomerFilterDefault,
   customers,
   visibleCustomers,
   selectedCustomerKey,
@@ -135,14 +135,14 @@ export default function OrganizationCustomersTabContent({
   renderCustomerAvatar,
   renderCustomerDetail,
   formatEventStart,
-  customersLoading,
+  isCustomersLoading,
   customersError,
   onRefresh,
   hasMoreCustomers,
   customerSentinelRef,
 }: OrganizationCustomersTabContentProps) {
-  const showUserCustomers = customerTypeFilters.includes('users');
-  const showTeamCustomers = customerTypeFilters.includes('teams');
+  const isShowingUserCustomers = customerTypeFilters.includes('users');
+  const isShowingTeamCustomers = customerTypeFilters.includes('teams');
   const selectedCustomer = customers.find((customer) => customer.key === selectedCustomerKey) ?? null;
 
   const toggleCustomerTypeFilter = (type: OrganizationCustomerType, checked: boolean) => {
@@ -164,7 +164,7 @@ export default function OrganizationCustomersTabContent({
         <Button
           variant="default"
           onClick={() => { void onRefresh(); }}
-          loading={customersLoading}
+          loading={isCustomersLoading}
         >
           Refresh
         </Button>
@@ -176,7 +176,7 @@ export default function OrganizationCustomersTabContent({
         </Text>
       )}
 
-      {customersLoading ? (
+      {isCustomersLoading ? (
         <Text size="sm" c="dimmed">Loading customers...</Text>
       ) : (
         <div className="grid gap-4 lg:grid-cols-[12rem_minmax(0,1fr)]">
@@ -189,7 +189,7 @@ export default function OrganizationCustomersTabContent({
                     variant="subtle"
                     size="compact-sm"
                     onClick={resetCustomerFilters}
-                    disabled={customerFilterIsDefault}
+                    disabled={isCustomerFilterDefault}
                   >
                     Reset
                   </Button>
@@ -198,21 +198,21 @@ export default function OrganizationCustomersTabContent({
                   <Group gap="xs" aria-label="Customer type filters">
                     <Chip
                       aria-label="All customer types"
-                      checked={showUserCustomers && showTeamCustomers}
+                      checked={isShowingUserCustomers && isShowingTeamCustomers}
                       onChange={(checked) => setCustomerTypeFilters(checked ? ['users', 'teams'] : [])}
                     >
                       All
                     </Chip>
                     <Chip
                       aria-label="User customers"
-                      checked={showUserCustomers}
+                      checked={isShowingUserCustomers}
                       onChange={(checked) => toggleCustomerTypeFilter('users', checked)}
                     >
                       Users
                     </Chip>
                     <Chip
                       aria-label="Team customers"
-                      checked={showTeamCustomers}
+                      checked={isShowingTeamCustomers}
                       onChange={(checked) => toggleCustomerTypeFilter('teams', checked)}
                     >
                       Teams

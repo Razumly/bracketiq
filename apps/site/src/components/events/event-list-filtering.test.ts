@@ -3,6 +3,7 @@ import { act, renderHook } from '@testing-library/react';
 import type { Event } from '@/types';
 import {
   filterLoadedEvents,
+  eventListFilterKey,
   useEventListFiltering,
   type EventListFilterState,
 } from './event-list-filtering';
@@ -61,6 +62,13 @@ describe('event list filtering', () => {
 
     expect(filterLoadedEvents(events, { ...filters, searchTerm: 'basketball' })).toEqual([events[0]]);
     expect(filterLoadedEvents(events, { ...filters, selectedSports: ['Soccer'] })).toEqual([events[1]]);
+  });
+
+  it('includes the user location in the refresh key', () => {
+    const firstKey = eventListFilterKey({ ...filters, location: { lat: 30.2672, lng: -97.7431 } });
+    const secondKey = eventListFilterKey({ ...filters, location: { lat: 31.2672, lng: -97.7431 } });
+
+    expect(firstKey).not.toBe(secondKey);
   });
 
   it('refreshes in the background when more pages are available', async () => {

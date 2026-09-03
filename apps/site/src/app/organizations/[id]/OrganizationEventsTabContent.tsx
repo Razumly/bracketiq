@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import {
   AlertCircle,
   ArrowUpDown,
@@ -137,6 +137,7 @@ type EventResultsProps = {
   eventsError: string | null;
   onRetry?: () => void;
   isLoadingInitial: boolean;
+  isRefreshing: boolean;
   sortedEvents: Event[];
   eventSegment: EventSegment;
   segmentCounts: Record<EventSegment, number>;
@@ -427,9 +428,19 @@ const MobileEventFilterControls = <TEventType extends string>({
   ...filterProps
 }: MobileEventFilterControlsProps<TEventType>) => {
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const filterLayerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!filtersOpen) return undefined;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!filterLayerRef.current?.contains(event.target as Node)) setFiltersOpen(false);
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [filtersOpen]);
 
   return (
-    <>
+    <div ref={filterLayerRef} className="space-y-3">
       <div className="flex gap-2">
         <TextInput
           aria-label="Search"
@@ -460,7 +471,7 @@ const MobileEventFilterControls = <TEventType extends string>({
           <OrganizationEventsFilterPanel {...filterProps} />
         </Paper>
       )}
-    </>
+    </div>
   );
 };
 
@@ -582,7 +593,7 @@ const LoadedEventResults = ({
   sentinelRef,
   isLoadingMore,
   hasMoreEvents,
-}: Omit<EventResultsProps, 'eventsError' | 'onRetry' | 'isLoadingInitial' | 'resetFilters'>) => (
+}: Omit<EventResultsProps, 'eventsError' | 'onRetry' | 'isLoadingInitial' | 'isRefreshing' | 'resetFilters'>) => (
   <>
     <div className="flex items-center justify-between gap-3 lg:hidden">
       <Text size="sm" c="dimmed">{segmentCounts[eventSegment]} event{segmentCounts[eventSegment] === 1 ? '' : 's'}</Text>
@@ -622,6 +633,7 @@ const OrganizationEventResults = ({
   eventsError,
   onRetry,
   isLoadingInitial,
+  isRefreshing,
   sortedEvents,
   eventSegment,
   segmentCounts,
@@ -633,22 +645,28 @@ const OrganizationEventResults = ({
   isLoadingMore,
   hasMoreEvents,
 }: EventResultsProps) => {
-  if (eventsError) return <EventErrorState onRetry={onRetry} />;
+  const refreshStatus = isRefreshing && !isLoadingInitial ? (
+    <Text role="status" aria-live="polite" size="sm" c="dimmed">Updating events…</Text>
+  ) : null;
+  if (eventsError) return <div className="space-y-3">{refreshStatus}<EventErrorState onRetry={onRetry} /></div>;
   if (isLoadingInitial) return <EventLoadingState />;
-  if (sortedEvents.length === 0) return <EventEmptyState eventSegment={eventSegment} resetFilters={resetFilters} />;
+  if (sortedEvents.length === 0) return <div className="space-y-3">{refreshStatus}<EventEmptyState eventSegment={eventSegment} resetFilters={resetFilters} /></div>;
   return (
-    <LoadedEventResults
-      sortedEvents={sortedEvents}
-      location={location}
-      eventSegment={eventSegment}
-      segmentCounts={segmentCounts}
-      eventSort={eventSort}
-      setEventSort={setEventSort}
-      onEventClick={onEventClick}
-      sentinelRef={sentinelRef}
-      isLoadingMore={isLoadingMore}
-      hasMoreEvents={hasMoreEvents}
-    />
+    <div className="space-y-3">
+      {refreshStatus}
+      <LoadedEventResults
+        sortedEvents={sortedEvents}
+        location={location}
+        eventSegment={eventSegment}
+        segmentCounts={segmentCounts}
+        eventSort={eventSort}
+        setEventSort={setEventSort}
+        onEventClick={onEventClick}
+        sentinelRef={sentinelRef}
+        isLoadingMore={isLoadingMore}
+        hasMoreEvents={hasMoreEvents}
+      />
+    </div>
   );
 };
 
@@ -745,7 +763,7 @@ export default function OrganizationEventsTabContent<TEventType extends string =
     selectedSports,
     selectedStartDate,
   ]);
-  const { visibleEvents } = useEventListFiltering({
+  const { visibleEvents, isRefreshing } = useEventListFiltering({
     events,
     filters: eventFilters,
     filterKey: eventListFilterKey(eventFilters),
@@ -861,6 +879,7 @@ export default function OrganizationEventsTabContent<TEventType extends string =
           eventsError={eventsError}
           onRetry={onRetry}
           isLoadingInitial={isLoadingInitial}
+          isRefreshing={isRefreshing}
           sortedEvents={sortedEvents}
           eventSegment={eventSegment}
           segmentCounts={segmentCounts}

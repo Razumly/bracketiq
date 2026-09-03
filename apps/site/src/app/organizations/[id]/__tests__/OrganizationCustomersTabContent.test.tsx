@@ -33,7 +33,7 @@ const baseProps = {
   customerTypeFilters: ['users', 'teams'] as OrganizationCustomerType[],
   setCustomerTypeFilters: jest.fn(),
   resetCustomerFilters: jest.fn(),
-  customerFilterIsDefault: true,
+  isCustomerFilterDefault: true,
   customers,
   visibleCustomers: customers,
   selectedCustomerKey: customers[0].key,
@@ -43,7 +43,7 @@ const baseProps = {
     <div>{customer ? `Details for ${customer.name}` : 'No customer selected'}</div>
   ),
   formatEventStart: (start?: string | null) => start ?? 'Unknown date',
-  customersLoading: false,
+  isCustomersLoading: false,
   customersError: null,
   onRefresh: jest.fn(),
   hasMoreCustomers: true,

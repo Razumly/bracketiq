@@ -122,7 +122,7 @@ describe('EventsTabContent', () => {
     expect(screen.getByRole('textbox', { name: 'Sort events' })).toHaveValue('Recommended');
   });
 
-  it('shows the server event total as near you when distance filtering is active', () => {
+  it('shows the loaded event count when distance filtering is active', () => {
     renderWithMantine(
       <EventsTabContent
         location={{ lat: 45.5152, lng: -122.6784 }}
@@ -157,7 +157,7 @@ describe('EventsTabContent', () => {
       />,
     );
 
-    expect(screen.getByText('12 events near you.')).toBeInTheDocument();
+    expect(screen.getByText('0 events near you.')).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Sort events' })).toHaveValue('Nearest');
   });
   it('sorts Weekly cards by next occurrence metadata instead of season start', () => {

@@ -51,7 +51,7 @@ describe('OrganizationTeamsTabContent', () => {
     const { rerender } = render(
       <OrganizationTeamsTabContent
         teams={[]}
-        canManageTeams
+        isTeamManagementAllowed
         onCreateTeam={onCreateTeam}
         onTeamClick={jest.fn()}
       />,
