@@ -8,7 +8,6 @@ import {
   Chip,
   Group,
   Paper,
-  ScrollArea,
   Stack,
   Table,
   Text,
@@ -16,6 +15,7 @@ import {
   Title,
 } from '@/components/organization/organization-operation-ui';
 import { buildOrganizationUsersSubtitle } from './organizationUsersCopy';
+import OrganizationCustomerDetailPanel from './OrganizationCustomerDetailPanel';
 
 export type OrganizationCustomerType = 'users' | 'teams';
 
@@ -268,11 +268,9 @@ export default function OrganizationCustomersTabContent({
               )}
             </Paper>
 
-            <Paper withBorder p="md" radius="md" className="org-customer-detail-panel min-w-0 xl:sticky xl:top-24 xl:self-start">
-              <ScrollArea.Autosize mah={720} type="auto">
-                {renderCustomerDetail(selectedCustomer)}
-              </ScrollArea.Autosize>
-            </Paper>
+            <OrganizationCustomerDetailPanel>
+              {renderCustomerDetail(selectedCustomer)}
+            </OrganizationCustomerDetailPanel>
           </div>
         </div>
       )}

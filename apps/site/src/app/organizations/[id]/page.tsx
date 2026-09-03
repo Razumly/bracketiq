@@ -69,6 +69,7 @@ import { useSports } from '@/app/hooks/useSports';
 import OrganizationEventsTabContent from './OrganizationEventsTabContent';
 import OrganizationTeamsTabContent from './OrganizationTeamsTabContent';
 import OrganizationCustomersTabContent from './OrganizationCustomersTabContent';
+import OrganizationEventTemplatesTabContent from './OrganizationEventTemplatesTabContent';
 import { getNextRentalOccurrence } from '@/app/discover/utils/rentals';
 import {
   getRequiredSignerTypeLabel,
@@ -4791,66 +4792,13 @@ function OrganizationDetailContent() {
             )}
 
             {canManageTemplates && activeTab === 'eventTemplates' && (
-              <Paper withBorder p="md" radius="md" className="org-tab-surface">
-                <Group justify="space-between" mb="md">
-                  <Title order={5}>Event Templates</Title>
-                  <Group>
-                    <Button
-                      variant="default"
-                      onClick={() => org && loadEventTemplates(org.$id)}
-                      loading={eventTemplatesLoading}
-                    >
-                      Refresh
-                    </Button>
-                  </Group>
-                </Group>
-                <Text size="sm" c="dimmed" mb="md">
-                  Organization-scoped templates for creating new events.
-                </Text>
-                {eventTemplatesError && (
-                  <Text size="sm" c="red" mb="md">
-                    {eventTemplatesError}
-                  </Text>
-                )}
-                {eventTemplatesLoading ? (
-                  <Text size="sm" c="dimmed">Loading event templates...</Text>
-                ) : eventTemplates.length > 0 ? (
-                  <ResponsiveCardGrid>
-                    {eventTemplates.map((eventTemplate) => (
-                      <Paper
-                        key={eventTemplate.id}
-                        withBorder
-                        radius="md"
-                        p="md"
-                        className="org-tab-item"
-                      >
-                        <Stack gap="sm">
-                          <Badge variant="light" color="blue" radius="xl">
-                            Event template
-                          </Badge>
-                          <div>
-                            <Text fw={700}>{eventTemplate.name}</Text>
-                            {eventTemplate.eventType && (
-                              <Text size="xs" c="dimmed" mt={4}>
-                                {eventTemplate.eventType}
-                              </Text>
-                            )}
-                          </div>
-                          <Button
-                            size="xs"
-                            variant="light"
-                            onClick={() => navigateToEventCreate(eventTemplate.id)}
-                          >
-                            Create event
-                          </Button>
-                        </Stack>
-                      </Paper>
-                    ))}
-                  </ResponsiveCardGrid>
-                ) : (
-                  <Text size="sm" c="dimmed">No event templates yet.</Text>
-                )}
-              </Paper>
+              <OrganizationEventTemplatesTabContent
+                eventTemplates={eventTemplates}
+                isLoading={eventTemplatesLoading}
+                error={eventTemplatesError}
+                onRefresh={() => org ? loadEventTemplates(org.$id) : undefined}
+                onCreateEvent={navigateToEventCreate}
+              />
             )}
 
             {activeTab === 'teams' && (

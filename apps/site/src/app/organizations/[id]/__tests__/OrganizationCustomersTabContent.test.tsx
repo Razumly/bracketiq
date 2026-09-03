@@ -67,6 +67,7 @@ describe('OrganizationCustomersTabContent', () => {
     expect(screen.getByText('No events')).toBeInTheDocument();
     expect(screen.getByText('Scroll for more customers.')).toBeInTheDocument();
     expect(screen.getByText('Details for Alex Morgan')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Customer details' })).toBeInTheDocument();
 
     await user.click(screen.getAllByText('Harbor Strikers')[0]);
 
