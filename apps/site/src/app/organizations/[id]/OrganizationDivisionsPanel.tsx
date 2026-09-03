@@ -18,8 +18,8 @@ import {
   TextInput,
   Title,
   Tooltip,
-} from '@mantine/core';
-import { notifications } from '@mantine/notifications';
+} from '@/components/organization/organization-operation-ui';
+import { notifications } from '@/lib/organizationNotifications';
 import { Archive, ExternalLink, Pencil, Plus } from 'lucide-react';
 import type { Division, Organization } from '@/types';
 import { organizationService } from '@/lib/organizationService';

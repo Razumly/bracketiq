@@ -598,7 +598,7 @@ export default function EventsTabContent<TEventType extends string = Event['even
   return (
     <>
       <div className="space-y-6 mb-8">
-        <Group justify="space-between" align="center" gap="md" wrap="wrap">
+        <Group justify="space-between" align="center" gap="md" wrap="wrap" className="w-full">
           <DiscoverSearchControls
             value={searchTerm}
             onValueChange={setSearchTerm}
@@ -608,7 +608,7 @@ export default function EventsTabContent<TEventType extends string = Event['even
             searchLabel="Search events"
           />
           {showCreateEventButton && (
-            <div style={{ minWidth: 260 }}>
+            <div className="w-full min-w-0 sm:w-auto sm:min-w-[16.25rem]">
               <Button size="md" fullWidth onClick={onCreateEvent} disabled={createEventDisabled}>
                 Create event
               </Button>

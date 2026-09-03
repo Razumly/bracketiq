@@ -20,7 +20,7 @@ jest.mock("@/lib/fieldService", function mockFieldServiceModule() {
   };
 });
 
-jest.mock("@mantine/notifications", function mockNotificationsModule() {
+jest.mock("@/lib/organizationNotifications", function mockNotificationsModule() {
   return {
     notifications: {
       show: function showNotification() {},

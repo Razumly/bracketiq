@@ -8,6 +8,7 @@ import {
   Checkbox,
   Chip,
   ColorInput,
+  DatePickerInput,
   Group,
   Loader,
   Paper,
@@ -19,9 +20,8 @@ import {
   TextInput,
   Textarea,
   Title,
-} from '@mantine/core';
-import { DatePickerInput } from '@mantine/dates';
-import { notifications } from '@mantine/notifications';
+} from '@/components/organization/organization-operation-ui';
+import { notifications } from '@/lib/organizationNotifications';
 import { eventService } from '@/lib/eventService';
 import { organizationService, type PublicSlugCheckResult } from '@/lib/organizationService';
 import { resolveClientPublicOrigin } from '@/lib/clientPublicOrigin';

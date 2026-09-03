@@ -1,6 +1,6 @@
 "use client";
 
-import { Alert, Button, Group, Modal, Stack, Text } from '@mantine/core';
+import { Alert, Button, Group, Modal, Stack, Text } from '@/components/organization/organization-operation-ui';
 
 type StaffAssignmentScope = 'occurrence' | 'all';
 type OpenStaffDeleteScope = 'following' | 'all';

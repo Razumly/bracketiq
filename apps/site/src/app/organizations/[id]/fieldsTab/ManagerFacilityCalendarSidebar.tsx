@@ -1,7 +1,7 @@
 "use client";
 
 import { type PointerEvent as ReactPointerEvent } from 'react';
-import { Button, Group, Select, Stack, Text } from '@mantine/core';
+import { Button, Group, Select, Stack, Text } from '@/components/organization/organization-operation-ui';
 import FieldCalendarFilter, { type FieldCalendarFilterItem } from '@/components/calendar/FieldCalendarFilter';
 import SharedCalendarEvent, { type SharedCalendarEventVariant } from '@/components/calendar/SharedCalendarEvent';
 import type { EntityColorReferenceValue } from '@/lib/entityColors';

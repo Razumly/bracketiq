@@ -1,7 +1,6 @@
 "use client";
 
-import { Alert, Button, Checkbox, Collapse, Group, Loader, Modal, MultiSelect, NumberInput, Select, Stack, Text, Textarea } from '@mantine/core';
-import { DatePickerInput } from '@mantine/dates';
+import { Alert, Button, Checkbox, Collapse, DatePickerInput, Group, Loader, Modal, MultiSelect, NumberInput, Select, Stack, Text, Textarea } from '@/components/organization/organization-operation-ui';
 
 type StaffTimeslotMode = 'staff_assignment' | 'official_assignment';
 

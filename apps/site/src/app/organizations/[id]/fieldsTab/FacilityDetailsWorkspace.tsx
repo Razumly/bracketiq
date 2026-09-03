@@ -14,8 +14,8 @@ import {
   Text,
   TextInput,
   Title,
-} from '@mantine/core';
-import { notifications } from '@mantine/notifications';
+} from '@/components/organization/organization-operation-ui';
+import { notifications } from '@/lib/organizationNotifications';
 import LocationSelector, { type LocationSelectionMeta } from '@/components/location/LocationSelector';
 import ResourceSportsInput, { type ResourceSportOption } from '@/components/ui/ResourceSportsInput';
 import { createId } from '@/lib/id';
@@ -293,6 +293,8 @@ export default function FacilityDetailsWorkspace({
   const [sportsError, setSportsError] = useState<string | null>(null);
   const [sportOptions, setSportOptions] = useState<ResourceSportOption[]>([]);
   const lastHistoryChangeKeyRef = useRef<string | null>(null);
+  const snapshotRef = useRef(snapshot);
+  snapshotRef.current = snapshot;
 
   const pendingChangeCount = useMemo(() => {
     const baselineFacilitiesById = new Map(baselineSnapshot.facilities.map((facility) => [facility.id, facility]));
@@ -307,13 +309,12 @@ export default function FacilityDetailsWorkspace({
   }, [baselineSnapshot, snapshot]);
 
   useEffect(() => {
-    if (pendingChangeCount > 0) {
-      return;
-    }
     setBaselineSnapshot(initialSnapshot);
     setSnapshot(initialSnapshot);
+    snapshotRef.current = initialSnapshot;
     setHistory([]);
-  }, [initialSnapshot, initialSnapshotKey, pendingChangeCount]);
+    lastHistoryChangeKeyRef.current = null;
+  }, [initialSnapshotKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -393,16 +394,16 @@ export default function FacilityDetailsWorkspace({
     updater: (current: FacilityDetailsSnapshot) => FacilityDetailsSnapshot,
     changeKey: string | null,
   ) => {
-    setSnapshot((current) => {
-      setHistory((entries) => (
-        changeKey && lastHistoryChangeKeyRef.current === changeKey
-          ? entries
-          : [...entries, current]
-      ));
-      lastHistoryChangeKeyRef.current = changeKey;
-      setFormError(null);
-      return updater(current);
+    const current = snapshotRef.current;
+    const next = updater(current);
+    const shouldRecordHistory = !(changeKey && lastHistoryChangeKeyRef.current === changeKey);
+    setHistory((entries) => {
+      return shouldRecordHistory ? [...entries, current] : entries;
     });
+    lastHistoryChangeKeyRef.current = changeKey;
+    setFormError(null);
+    snapshotRef.current = next;
+    setSnapshot(next);
   }, []);
 
   const handleUndo = useCallback(() => {
@@ -411,6 +412,7 @@ export default function FacilityDetailsWorkspace({
       if (!previous) {
         return entries;
       }
+      snapshotRef.current = previous;
       setSnapshot(previous);
       setFormError(null);
       lastHistoryChangeKeyRef.current = null;

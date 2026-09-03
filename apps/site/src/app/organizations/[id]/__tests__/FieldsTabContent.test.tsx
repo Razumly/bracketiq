@@ -242,7 +242,7 @@ jest.mock('@/app/discover/utils/rentals', () => ({
   getNextRentalOccurrence: (...args: any[]) => getNextRentalOccurrenceMock(...args),
 }));
 
-jest.mock('@mantine/notifications', () => ({
+jest.mock('@/lib/organizationNotifications', () => ({
   notifications: {
     show: (...args: any[]) => mockShowNotification(...args),
   },
@@ -2875,7 +2875,6 @@ describe('FieldsTabContent calendar navigation', () => {
     await user.clear(nameInput);
     await user.type(nameInput, 'Temporary Name');
     expect(screen.getByRole('button', { name: /Save changes/ })).toBeEnabled();
-
     await user.click(screen.getByRole('button', { name: 'Undo' }));
 
     expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('River City Sports Complex');

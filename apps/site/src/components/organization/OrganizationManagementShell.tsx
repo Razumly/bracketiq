@@ -3,7 +3,6 @@
 import Image from 'next/image';
 import { useId, useMemo, useState, type ReactNode } from 'react';
 import {
-  ArrowLeft,
   BarChart3,
   Building2,
   CalendarDays,
@@ -15,7 +14,6 @@ import {
   FileText,
   Globe2,
   LayoutDashboard,
-  LockKeyhole,
   MapPin,
   Pencil,
   Search,
@@ -42,6 +40,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { OrganizationOperationLoadingState, OrganizationOperationPermissionState } from '@/components/organization/OrganizationOperationStates';
 import type { Organization } from '@/types';
 import type { OrganizationTab, OrganizationTabOption } from '@/app/organizations/[id]/organizationTabs';
 
@@ -136,17 +135,7 @@ function OrganizationShellLoadingState() {
 }
 
 function OrganizationTabLoadingState({ tabLabel }: { tabLabel: string }) {
-  return (
-    <div className="grid gap-4" data-testid="organization-tab-loading" role="status" aria-live="polite">
-      <span className="sr-only">Loading {tabLabel}</span>
-      <div className="h-8 w-48 animate-pulse rounded-lg bg-muted motion-reduce:animate-none" />
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="h-40 animate-pulse rounded-lg bg-muted motion-reduce:animate-none" />
-        <div className="h-40 animate-pulse rounded-lg bg-muted motion-reduce:animate-none" />
-      </div>
-      <div className="h-56 animate-pulse rounded-lg bg-muted motion-reduce:animate-none" />
-    </div>
-  );
+  return <OrganizationOperationLoadingState label={tabLabel} />;
 }
 
 function OrganizationShellErrorState({
@@ -185,28 +174,9 @@ function OrganizationShellPermissionState({
 }) {
   return (
     <main className="mx-auto flex min-h-[55vh] w-full max-w-xl items-center px-4 py-12 sm:px-6">
-      <Card className="w-full rounded-lg text-center">
-        <CardContent className="flex flex-col items-center gap-4 p-8 sm:p-12">
-          <div className="grid size-16 place-content-center rounded-full bg-muted text-muted-foreground">
-            <LockKeyhole aria-hidden="true" className="size-8" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">You do not have permission</h1>
-            <p className="mt-2 text-sm text-muted-foreground">
-              You cannot open this Organization section{organizationName ? ` for ${organizationName}` : ''}.
-            </p>
-          </div>
-          <div className="flex w-full flex-col gap-3 sm:flex-row sm:justify-center">
-            <Button onClick={onBackToOrganizations}>
-              <ArrowLeft data-icon="inline-start" aria-hidden="true" />
-              Back to My organizations
-            </Button>
-            <Button variant="outline" onClick={() => window.location.assign('/organizations')}>
-              View organizations
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="w-full">
+        <OrganizationOperationPermissionState organizationName={organizationName} onBackToOrganizations={onBackToOrganizations} />
+      </div>
     </main>
   );
 }
@@ -533,7 +503,6 @@ export function OrganizationManagementShell({
             className="w-full justify-between bg-card text-left"
           >
             <span className="min-w-0 truncate">
-              <span className="mr-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Organization sections</span>
               <span>{getOrganizationTabLabel(availableTabs, activeTab)}</span>
             </span>
             <ChevronDown aria-hidden="true" className="size-4 shrink-0" />

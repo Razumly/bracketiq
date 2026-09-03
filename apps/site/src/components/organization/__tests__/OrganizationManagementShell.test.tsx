@@ -67,7 +67,7 @@ describe('OrganizationManagementShell', () => {
 
     renderReadyShell('overview', onTabChange);
 
-    await user.click(screen.getByRole('button', { name: /Organization sections Overview/i }));
+    await user.click(screen.getByRole('button', { name: 'Overview' }));
 
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     const search = screen.getByRole('textbox', { name: 'Find an Organization section' });

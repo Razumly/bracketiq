@@ -1,21 +1,12 @@
 "use client";
 
-import {
-  Alert,
-  Badge,
-  Button,
-  Collapse,
-  Group,
-  SimpleGrid,
-  Stack,
-  Text,
-} from "@mantine/core";
-import ResponsiveCardGrid from "@/components/ui/ResponsiveCardGrid";
-import type { Facility, Field } from "@/types";
-import type { FacilityCalendarSummary } from "../fieldCalendar";
+import { Alert, Badge, Button, Collapse, Group, SimpleGrid, Stack, Text } from '@/components/organization/organization-operation-ui';
+import ResponsiveCardGrid from '@/components/ui/ResponsiveCardGrid';
+import type { Facility, Field } from '@/types';
+import type { FacilityCalendarSummary } from '../fieldCalendar';
 
 const FACILITY_METRIC_CARD_STYLE = {
-  border: "1px solid var(--mantine-color-gray-3)",
+  border: '1px solid var(--border)',
   borderRadius: 8,
   padding: "12px",
   minHeight: 92,
