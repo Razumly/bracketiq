@@ -68,7 +68,7 @@ describe('OrganizationCustomersTabContent', () => {
     expect(screen.getByText('Scroll for more customers.')).toBeInTheDocument();
     expect(screen.getByText('Details for Alex Morgan')).toBeInTheDocument();
 
-    await user.click(screen.getByText('Harbor Strikers'));
+    await user.click(screen.getAllByText('Harbor Strikers')[0]);
 
     expect(onCustomerSelect).toHaveBeenCalledWith(customers[1]);
   });

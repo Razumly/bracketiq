@@ -11,13 +11,11 @@ import {
   Avatar,
   Badge,
   Checkbox,
-  Chip,
   Group,
   Title,
   Text,
   Button,
   Paper,
-  ScrollArea,
   SegmentedControl,
   SimpleGrid,
   Stack,
@@ -29,7 +27,6 @@ import {
   Textarea,
   Switch,
   FileInput,
-  Table,
   Loader,
 } from '@/components/organization/organization-operation-ui';
 import { notifications } from '@/lib/organizationNotifications';
@@ -70,6 +67,8 @@ import { useLocation } from '@/app/hooks/useLocation';
 import { useDebounce } from '@/app/hooks/useDebounce';
 import { useSports } from '@/app/hooks/useSports';
 import OrganizationEventsTabContent from './OrganizationEventsTabContent';
+import OrganizationTeamsTabContent from './OrganizationTeamsTabContent';
+import OrganizationCustomersTabContent from './OrganizationCustomersTabContent';
 import { getNextRentalOccurrence } from '@/app/discover/utils/rentals';
 import {
   getRequiredSignerTypeLabel,
@@ -98,7 +97,6 @@ import {
   type OrganizationCustomerRouteType,
   type OrganizationTab,
 } from './organizationTabs';
-import { buildOrganizationUsersSubtitle } from './organizationUsersCopy';
 import OrganizationPublicSettingsPanel from './OrganizationPublicSettingsPanel';
 import {
   IMPORTED_DOCUMENT_VIEW_PERMISSIONS,
@@ -3279,7 +3277,6 @@ function OrganizationDetailContent() {
   }, [filteredOrganizationTeamCustomers, filteredOrganizationUsers, showTeamCustomers, showUserCustomers]);
   const visibleOrganizationCustomerRows = organizationCustomerRows.slice(0, visibleCustomerCount);
   const hasMoreVisibleCustomers = visibleOrganizationCustomerRows.length < organizationCustomerRows.length;
-  const hasVisibleCustomerResults = organizationCustomerRows.length > 0;
   const customerFilterIsDefault = (
     customerTypeFilters.length === 2
     && showUserCustomers
@@ -4857,204 +4854,39 @@ function OrganizationDetailContent() {
             )}
 
             {activeTab === 'teams' && (
-              <Paper withBorder p="md" radius="md" className="org-tab-surface">
-                <Group justify="space-between" mb="md">
-                  <Title order={5}>Teams</Title>
-                  {canManageTeams && <Button onClick={() => setShowCreateTeamModal(true)}>Create Team</Button>}
-                </Group>
-                {org.teams && org.teams.length > 0 ? (
-                  <SimpleGrid cols={{ base: 1, md: 2, lg: 3 }} spacing="lg">
-                    {org.teams.map((t) => (
-                      <TeamCard
-                        key={t.$id}
-                        team={t}
-                        className="org-tab-item"
-                        onClick={() => router.push(buildTeamManagementPath(t.$id))}
-                      />
-                    ))}
-                  </SimpleGrid>
-                ) : (
-                  <Text size="sm" c="dimmed">No teams yet.</Text>
-                )}
-              </Paper>
+              <OrganizationTeamsTabContent
+                teams={org.teams}
+                canManageTeams={canManageTeams}
+                onCreateTeam={() => setShowCreateTeamModal(true)}
+                onTeamClick={(team) => router.push(buildTeamManagementPath(team.$id))}
+              />
             )}
 
             {activeTab === 'users' && (
-              <Stack gap="md">
-                <Group justify="space-between" align="flex-start">
-                  <Stack gap={2}>
-                    <Title order={5}>Customers</Title>
-                    <Text size="sm" c="dimmed">
-                      {buildOrganizationUsersSubtitle(org?.name)}
-                    </Text>
-                  </Stack>
-                  <Button
-                    variant="default"
-                    onClick={() => org && loadOrganizationUsers(org.$id)}
-                    loading={organizationUsersLoading}
-                  >
-                    Refresh
-                  </Button>
-                </Group>
-
-                {organizationUsersError && (
-                  <Text size="sm" c="red">
-                    {organizationUsersError}
-                  </Text>
-                )}
-
-                {organizationUsersLoading ? (
-                  <Text size="sm" c="dimmed">Loading customers...</Text>
-                ) : (
-                  <div className="grid gap-4 lg:grid-cols-[12rem_minmax(0,1fr)]">
-                    <aside className="lg:sticky lg:top-24 lg:self-start">
-                      <Paper withBorder p={0} radius="lg" className="overflow-hidden">
-                        <div className="discover-filter-panel p-4">
-                          <Group justify="space-between" align="center" mb="md">
-                            <Text fw={700} size="sm">
-                              Filters
-                            </Text>
-                            <Button
-                              variant="subtle"
-                              size="compact-sm"
-                              onClick={resetCustomerFilters}
-                              disabled={customerFilterIsDefault}
-                            >
-                              Reset
-                            </Button>
-                          </Group>
-                          <Stack gap="lg">
-                            <div>
-                              <Text size="xs" fw={700} c="dimmed" tt="uppercase" mb={8}>
-                                Customer Type
-                              </Text>
-                              <Group gap="xs">
-                                <Chip
-                                  radius="xl"
-                                  checked={showUserCustomers && showTeamCustomers}
-                                  onChange={(checked) => setCustomerTypeFilters(checked ? ['users', 'teams'] : [])}
-                                >
-                                  All
-                                </Chip>
-                                <Chip
-                                  radius="xl"
-                                  checked={showUserCustomers}
-                                  onChange={(checked) => toggleCustomerTypeFilter('users', checked)}
-                                >
-                                  Users
-                                </Chip>
-                                <Chip
-                                  radius="xl"
-                                  checked={showTeamCustomers}
-                                  onChange={(checked) => toggleCustomerTypeFilter('teams', checked)}
-                                >
-                                  Teams
-                                </Chip>
-                              </Group>
-                            </div>
-                            <div>
-                              <Text size="xs" fw={700} c="dimmed" tt="uppercase" mb={8}>
-                                Customer
-                              </Text>
-                              <TextInput
-                                placeholder="Search customers..."
-                                value={customerSearch}
-                                onChange={(event) => setCustomerSearch(event.currentTarget.value)}
-                              />
-                            </div>
-                          </Stack>
-                        </div>
-                      </Paper>
-                    </aside>
-
-                    <div className="min-w-0 grid gap-4 xl:grid-cols-[minmax(24rem,0.9fr)_minmax(32rem,1.35fr)]">
-                      <Paper withBorder p={0} radius="md" className="org-customer-table-card overflow-hidden">
-                        <div style={{ overflowX: 'auto' }}>
-                          <Table withColumnBorders highlightOnHover style={{ minWidth: '100%', tableLayout: 'fixed' }}>
-                            <Table.Thead>
-                              <Table.Tr>
-                                <Table.Th style={{ width: '42%' }}>Customer</Table.Th>
-                                <Table.Th style={{ width: '58%' }}>Events</Table.Th>
-                              </Table.Tr>
-                            </Table.Thead>
-                            <Table.Tbody>
-                              {hasVisibleCustomerResults ? (
-                                visibleOrganizationCustomerRows.map((row) => {
-                                  const selected = selectedOrganizationCustomer?.key === row.key;
-                                  const condensedEvents = row.events.slice(0, 3);
-                                  return (
-                                    <Table.Tr
-                                      key={row.key}
-                                      className="org-customer-list-row"
-                                      data-selected={selected ? 'true' : undefined}
-                                      onClick={() => openOrganizationCustomer(row)}
-                                    >
-                                      <Table.Td>
-                                        <Group gap="sm" align="center" className="min-w-0">
-                                          {renderCustomerAvatar(row.name, row.profileImageId, row.type)}
-                                          <Stack gap={2} className="min-w-0">
-                                            <Group gap={6}>
-                                              <Text fw={600} truncate>{row.name}</Text>
-                                              <Badge size="xs" variant="light" color={row.type === 'teams' ? 'blue' : 'gray'}>
-                                                {row.type === 'teams' ? 'Team' : 'User'}
-                                              </Badge>
-                                            </Group>
-                                            {row.subtitle && <Text size="xs" c="dimmed" truncate>{row.subtitle}</Text>}
-                                          </Stack>
-                                        </Group>
-                                      </Table.Td>
-                                      <Table.Td>
-                                        {condensedEvents.length > 0 ? (
-                                          <Stack gap={4}>
-                                            {condensedEvents.map((eventSummary) => (
-                                              <Stack key={`${row.key}-${eventSummary.eventId}`} gap={0}>
-                                                <Text size="sm" fw={500} lineClamp={2}>
-                                                  {eventSummary.eventName}
-                                                </Text>
-                                                <Text size="xs" c="dimmed">
-                                                  {formatSummaryDateTime(eventSummary.start)}
-                                                </Text>
-                                              </Stack>
-                                            ))}
-                                            {row.events.length > condensedEvents.length && (
-                                              <Text size="xs" c="dimmed">
-                                                +{row.events.length - condensedEvents.length} more
-                                              </Text>
-                                            )}
-                                          </Stack>
-                                        ) : (
-                                          <Text size="xs" c="dimmed">No events</Text>
-                                        )}
-                                      </Table.Td>
-                                    </Table.Tr>
-                                  );
-                                })
-                              ) : (
-                                <Table.Tr>
-                                  <Table.Td colSpan={2}>
-                                    <Text size="sm" c="dimmed">No customers found for the selected filters.</Text>
-                                  </Table.Td>
-                                </Table.Tr>
-                              )}
-                            </Table.Tbody>
-                          </Table>
-                        </div>
-                        {hasMoreVisibleCustomers && (
-                          <Group ref={customerSentinelRef} justify="center" py="sm">
-                            <Text size="xs" c="dimmed">Scroll for more customers.</Text>
-                          </Group>
-                        )}
-                      </Paper>
-
-                      <Paper withBorder p="md" radius="md" className="org-customer-detail-panel min-w-0 xl:sticky xl:top-24 xl:self-start">
-                        <ScrollArea.Autosize mah={720} type="auto">
-                          {renderSelectedCustomerDetail()}
-                        </ScrollArea.Autosize>
-                      </Paper>
-                    </div>
-                  </div>
-                )}
-              </Stack>
+              <OrganizationCustomersTabContent
+                organizationName={org?.name}
+                customerSearch={customerSearch}
+                setCustomerSearch={setCustomerSearch}
+                customerTypeFilters={customerTypeFilters}
+                setCustomerTypeFilters={setCustomerTypeFilters}
+                resetCustomerFilters={resetCustomerFilters}
+                customerFilterIsDefault={customerFilterIsDefault}
+                customers={organizationCustomerRows}
+                visibleCustomers={visibleOrganizationCustomerRows}
+                selectedCustomerKey={selectedCustomerKey}
+                onCustomerSelect={(customer) => {
+                  const nextCustomer = organizationCustomerRows.find((row) => row.key === customer.key);
+                  if (nextCustomer) openOrganizationCustomer(nextCustomer);
+                }}
+                renderCustomerAvatar={renderCustomerAvatar}
+                renderCustomerDetail={() => renderSelectedCustomerDetail()}
+                formatEventStart={(start) => formatSummaryDateTime(start ?? undefined)}
+                customersLoading={organizationUsersLoading}
+                customersError={organizationUsersError}
+                onRefresh={() => org ? loadOrganizationUsers(org.$id) : undefined}
+                hasMoreCustomers={hasMoreVisibleCustomers}
+                customerSentinelRef={customerSentinelRef}
+              />
             )}
 
             {canManageTemplates && activeTab === 'templates' && (
