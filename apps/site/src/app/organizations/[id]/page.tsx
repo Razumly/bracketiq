@@ -56,11 +56,11 @@ import { signedDocumentService, type DocumentAuditTrail } from '@/lib/signedDocu
 import { formatDocumentScopeLabel, formatDocumentStatusLabel } from '@/lib/profileDocumentService';
 import { boldsignService } from '@/lib/boldsignService';
 import PaymentModal from '@/components/ui/PaymentModal';
-import FieldsTabContent from './FieldsTabContent';
 import OrganizationDivisionsPanel from './OrganizationDivisionsPanel';
-import RentalReservationCheckout from '@/components/rentals/RentalReservationCheckout';
 import OrganizationFinancePanel from './OrganizationFinancePanel';
-import RoleRosterManager, { type RoleInviteRow, type RoleRosterEntry } from './RoleRosterManager';
+import { type RoleInviteRow, type RoleRosterEntry } from './RoleRosterManager';
+import OrganizationStaffTabContent from './OrganizationStaffTabContent';
+import OrganizationFacilitiesTabContent from './OrganizationFacilitiesTabContent';
 import OrganizationReviewsPanel from './OrganizationReviewsPanel';
 import { formatDisplayDate, formatDisplayDateTime } from '@/lib/dateUtils';
 import { useLocation } from '@/app/hooks/useLocation';
@@ -4857,30 +4857,28 @@ function OrganizationDetailContent() {
               />
             )}
             {canManageStaffSurface && activeTab === 'staff' && (
-              <>
-                {staffRosterNameError ? <Text c="red" size="sm" mb="sm">{staffRosterNameError}</Text> : null}
-                <RoleRosterManager
-                  rosterEntries={staffRosterEntries}
-                  searchValue={staffSearch}
-                  onSearchChange={(value) => { void handleSearchStaff(value); }}
-                  searchResults={staffResults}
-                  searchLoading={staffSearchLoading}
-                  searchError={staffError}
-                  onAddExisting={(candidate, roleId, types) => { void handleInviteExistingStaff(candidate, roleId, types); }}
-                  inviteRows={staffInvites}
-                  onInviteRowsChange={(rows) => setStaffInvites(rows)}
-                  inviteError={staffInviteError}
-                  inviting={invitingStaff}
-                  staffRoles={org.staffRoles ?? []}
-                  onSendInvites={() => { void handleInviteStaffEmails(); }}
-                  onRemoveFromRoster={(entryUserId) => { void handleRemoveStaffMember(entryUserId); }}
-                  onRoleChange={(entryUserId, roleId) => handleUpdateStaffRole(entryUserId, roleId)}
-                  onCreateRole={(name, permissions) => handleCreateStaffRole(name, permissions)}
-                  onUpdateRole={(roleId, data) => handleUpdateStaffRoleDefinition(roleId, data)}
-                  organizationId={org.$id}
-                  canManageCompensation={canManageStaffCompensation}
-                />
-              </>
+              <OrganizationStaffTabContent
+                rosterNameError={staffRosterNameError}
+                rosterEntries={staffRosterEntries}
+                searchValue={staffSearch}
+                onSearchChange={(value) => { void handleSearchStaff(value); }}
+                searchResults={staffResults}
+                searchLoading={staffSearchLoading}
+                searchError={staffError}
+                onAddExisting={(candidate, roleId, types) => { void handleInviteExistingStaff(candidate, roleId, types); }}
+                inviteRows={staffInvites}
+                onInviteRowsChange={(rows) => setStaffInvites(rows)}
+                inviteError={staffInviteError}
+                inviting={invitingStaff}
+                staffRoles={org.staffRoles ?? []}
+                onSendInvites={() => { void handleInviteStaffEmails(); }}
+                onRemoveFromRoster={(entryUserId) => { void handleRemoveStaffMember(entryUserId); }}
+                onRoleChange={(entryUserId, roleId) => handleUpdateStaffRole(entryUserId, roleId)}
+                onCreateRole={(name, permissions) => handleCreateStaffRole(name, permissions)}
+                onUpdateRole={(roleId, data) => handleUpdateStaffRoleDefinition(roleId, data)}
+                organizationId={org.$id}
+                canManageCompensation={canManageStaffCompensation}
+              />
             )}
 
             {(isOwner || canManageDiscounts) && activeTab === 'discounts' && org && (
@@ -5058,22 +5056,14 @@ function OrganizationDetailContent() {
             )}
 
             {activeTab === 'fields' && org && (
-              <RentalReservationCheckout
+              <OrganizationFacilitiesTabContent
                 organization={org}
+                organizationId={id ?? ''}
                 currentUser={user ?? null}
                 rentalOrderSlug={org.publicSlug}
-              >
-                {({ onRentalSelectionReady }) => (
-                  <FieldsTabContent
-                    organization={org}
-                    organizationId={id ?? ''}
-                    currentUser={user ?? null}
-                    canManageFields={canManageFields}
-                    showBackButton={!isOrganizationRoleMember}
-                    onRentalSelectionReady={onRentalSelectionReady}
-                  />
-                )}
-              </RentalReservationCheckout>
+                canManageFields={canManageFields}
+                showBackButton={!isOrganizationRoleMember}
+              />
             )}
             {activeTab === 'divisions' && org && (
               <OrganizationDivisionsPanel
