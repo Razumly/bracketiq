@@ -69,7 +69,7 @@ import { formatDisplayDate, formatDisplayDateTime } from '@/lib/dateUtils';
 import { useLocation } from '@/app/hooks/useLocation';
 import { useDebounce } from '@/app/hooks/useDebounce';
 import { useSports } from '@/app/hooks/useSports';
-import EventsTabContent from '@/app/discover/components/EventsTabContent';
+import OrganizationEventsTabContent from './OrganizationEventsTabContent';
 import { getNextRentalOccurrence } from '@/app/discover/utils/rentals';
 import {
   getRequiredSignerTypeLabel,
@@ -4729,7 +4729,8 @@ function OrganizationDetailContent() {
             )}
 
             {activeTab === 'events' && (
-              <EventsTabContent
+              <OrganizationEventsTabContent
+                organizationName={org.name}
                 location={location}
                 searchTerm={eventSearchTerm}
                 setSearchTerm={setEventSearchTerm}
@@ -4756,6 +4757,7 @@ function OrganizationDetailContent() {
                 hasMoreEvents={eventsTabHasMoreEvents}
                 sentinelRef={eventsTabSentinelRef}
                 eventsError={eventsTabError}
+                onRetry={() => { void loadFirstPageOfOrganizationEvents(); }}
                 onEventClick={handleOrganizationEventClick}
                 onCreateEvent={handleCreateEvent}
                 showCreateEventButton={canManageEvents}

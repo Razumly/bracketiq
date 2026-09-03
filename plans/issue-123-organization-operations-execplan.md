@@ -17,8 +17,10 @@ The existing services, API routes, persistence rules, and permission rules remai
 - [x] (2026-09-02) Migrated the Organization operation render paths without changing service, API, persistence, financial, or permission contracts.
 - [x] (2026-09-02) Updated focused tests for operation actions, confirmation dialogs, notifications, rental selection state, and the responsive Events path.
 - [x] (2026-09-02) Passed normal changed-file ESLint, focused tests, standalone TypeScript, and the production site build.
-- [ ] Run the required two-axis code review against the issue specification.
+- [x] (2026-09-02) Implemented the Events tab as the first review slice with BracketIQ-owned controls, responsive filters, loading, empty, recoverable-error, and accessible lifecycle states. Kept Past explicit because its data is not loaded by the current Organization route.
+- [x] (2026-09-02) Ran the required two-axis code review against the issue specification and corrected its actionable findings.
 - [x] (2026-09-02) Committed the implementation as `9e3626b26` and posted the verification record to issue #123.
+- [ ] Commit the Events review slice and stop before starting another tab.
 - [ ] Complete the issue close gate after browser smoke and the shared CI environment are available.
 
 ## Surprises & Discoveries
