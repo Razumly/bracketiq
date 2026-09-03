@@ -1,5 +1,5 @@
 import { createRef, type ReactNode } from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import OrganizationEventsTabContent from '../OrganizationEventsTabContent';
@@ -75,6 +75,19 @@ describe('OrganizationEventsTabContent', () => {
     await user.click(screen.getAllByRole('button', { name: 'Clear all filters' })[0]);
 
     expect(setSearchTerm).toHaveBeenCalledWith('');
+  });
+
+  it('dismisses the mobile filter panel when the user clicks outside it', async () => {
+    const user = userEvent.setup();
+
+    render(<OrganizationEventsTabContent {...baseProps} />);
+
+    await user.click(screen.getByRole('button', { name: 'Filters' }));
+    expect(screen.getByRole('button', { name: 'Close filters' })).toBeInTheDocument();
+
+    fireEvent.pointerDown(document.body);
+
+    expect(screen.queryByRole('button', { name: 'Close filters' })).not.toBeInTheDocument();
   });
 
   it('offers retry for a recoverable event loading error', async () => {

@@ -27,6 +27,8 @@ describe('organization operation filters', () => {
     expect(screen.getByRole('dialog', { name: 'Start date' })).toBeVisible();
     expect(screen.getByRole('button', { name: /previous month/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /next month/i })).toBeInTheDocument();
+    expect(screen.queryByRole('gridcell')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /2026/ }).length).toBeGreaterThan(0);
 
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('dialog', { name: 'Start date' })).not.toBeInTheDocument();

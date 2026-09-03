@@ -169,6 +169,9 @@ export const eventListFilterKey = <TEventType extends string>(filters: EventList
   selectedTags: [...(filters.selectedTags ?? [])].sort(),
   selectedStartDate: filters.selectedStartDate?.toISOString() ?? null,
   selectedEndDate: filters.selectedEndDate?.toISOString() ?? null,
+  location: filters.location
+    ? { lat: filters.location.lat, lng: filters.location.lng }
+    : null,
   maxDistance: filters.maxDistance,
   hideWeeklyChildren: filters.hideWeeklyChildren,
   divisionFilters: filters.divisionFilters ?? null,

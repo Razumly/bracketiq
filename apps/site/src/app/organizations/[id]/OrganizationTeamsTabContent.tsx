@@ -13,14 +13,14 @@ import type { Team } from '@/types';
 
 export type OrganizationTeamsTabContentProps = {
   teams?: Team[] | null;
-  canManageTeams?: boolean;
+  isTeamManagementAllowed?: boolean;
   onCreateTeam: () => void;
   onTeamClick: (team: Team) => void;
 };
 
 export default function OrganizationTeamsTabContent({
   teams,
-  canManageTeams = false,
+  isTeamManagementAllowed = false,
   onCreateTeam,
   onTeamClick,
 }: OrganizationTeamsTabContentProps) {
@@ -30,7 +30,7 @@ export default function OrganizationTeamsTabContent({
     <Paper withBorder p="md" radius="md" className="org-tab-surface">
       <Group justify="space-between" mb="md">
         <Title order={5}>Teams</Title>
-        {canManageTeams && (
+        {isTeamManagementAllowed && (
           <Button onClick={onCreateTeam}>Create Team</Button>
         )}
       </Group>

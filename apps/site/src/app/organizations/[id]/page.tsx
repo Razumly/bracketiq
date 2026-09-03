@@ -4856,7 +4856,7 @@ function OrganizationDetailContent() {
             {activeTab === 'teams' && (
               <OrganizationTeamsTabContent
                 teams={org.teams}
-                canManageTeams={canManageTeams}
+                isTeamManagementAllowed={canManageTeams}
                 onCreateTeam={() => setShowCreateTeamModal(true)}
                 onTeamClick={(team) => router.push(buildTeamManagementPath(team.$id))}
               />
@@ -4870,7 +4870,7 @@ function OrganizationDetailContent() {
                 customerTypeFilters={customerTypeFilters}
                 setCustomerTypeFilters={setCustomerTypeFilters}
                 resetCustomerFilters={resetCustomerFilters}
-                customerFilterIsDefault={customerFilterIsDefault}
+                isCustomerFilterDefault={customerFilterIsDefault}
                 customers={organizationCustomerRows}
                 visibleCustomers={visibleOrganizationCustomerRows}
                 selectedCustomerKey={selectedCustomerKey}
@@ -4881,7 +4881,7 @@ function OrganizationDetailContent() {
                 renderCustomerAvatar={renderCustomerAvatar}
                 renderCustomerDetail={() => renderSelectedCustomerDetail()}
                 formatEventStart={(start) => formatSummaryDateTime(start ?? undefined)}
-                customersLoading={organizationUsersLoading}
+                isCustomersLoading={organizationUsersLoading}
                 customersError={organizationUsersError}
                 onRefresh={() => org ? loadOrganizationUsers(org.$id) : undefined}
                 hasMoreCustomers={hasMoreVisibleCustomers}
