@@ -57,11 +57,11 @@ import { formatDocumentScopeLabel, formatDocumentStatusLabel } from '@/lib/profi
 import { boldsignService } from '@/lib/boldsignService';
 import PaymentModal from '@/components/ui/PaymentModal';
 import OrganizationDivisionsPanel from './OrganizationDivisionsPanel';
-import OrganizationFinancePanel from './OrganizationFinancePanel';
+import OrganizationFinanceTabContent from './OrganizationFinanceTabContent';
 import { type RoleInviteRow, type RoleRosterEntry } from './RoleRosterManager';
 import OrganizationStaffTabContent from './OrganizationStaffTabContent';
 import OrganizationFacilitiesTabContent from './OrganizationFacilitiesTabContent';
-import OrganizationReviewsPanel from './OrganizationReviewsPanel';
+import OrganizationReviewsTabContent from './OrganizationReviewsTabContent';
 import { formatDisplayDate, formatDisplayDateTime } from '@/lib/dateUtils';
 import { useLocation } from '@/app/hooks/useLocation';
 import { useDebounce } from '@/app/hooks/useDebounce';
@@ -4635,7 +4635,7 @@ function OrganizationDetailContent() {
                   <Card>
                     <CardHeader><CardTitle>Reviews</CardTitle></CardHeader>
                     <CardContent>
-                      <OrganizationReviewsPanel organizationId={org.$id} mode="summary" onViewAll={() => handleOrganizationTabChange('reviews')} />
+                      <OrganizationReviewsTabContent organizationId={org.$id} mode="summary" onViewAll={() => handleOrganizationTabChange('reviews')} />
                     </CardContent>
                   </Card>
                   {isOwner && (
@@ -4748,7 +4748,7 @@ function OrganizationDetailContent() {
             )}
 
             {activeTab === 'reviews' && org && (
-              <OrganizationReviewsPanel organizationId={org.$id} />
+              <OrganizationReviewsTabContent organizationId={org.$id} />
             )}
 
             {activeTab === 'events' && (
@@ -4890,7 +4890,7 @@ function OrganizationDetailContent() {
             )}
 
             {(isOwner || canManageFinance) && activeTab === 'finance' && org && (
-              <OrganizationFinancePanel
+              <OrganizationFinanceTabContent
                 organizationId={org.$id}
                 isActive={activeTab === 'finance'}
                 canManage={isOwner || canManageFinance}
