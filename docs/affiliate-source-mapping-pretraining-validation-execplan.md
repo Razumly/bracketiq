@@ -477,7 +477,6 @@ Run all commands from `/Users/elesesy/StudioProjects/mvp-site`.
 
 First reproduce the current read-only baseline:
 
-    npm run affiliate:mapping:baseline -- --dry-run
     npm run affiliate:mapping:dataset -- --dry-run
     npm run affiliate:mapping:backfill-plan -- --dry-run
 
@@ -519,15 +518,13 @@ After explicit authorization for intake captures, use the existing admin intake 
 
 These export commands read stored live data and object storage but make no public request and write no live row. Queueing or refreshing an intake is a separate authorized operation. Record the selected source key, run id, compliance result, pages, artifact kinds, and hashes in each review envelope.
 
-When running the locked cohort against a live database reached through an explicit tunnel, declare the object-storage boundary as part of the command:
-
-    npm run affiliate:mapping:gold-capture-cohort -- \
-      --apply \
-      --approve-existing \
-      --export-current-database \
-      --storage-provider=spaces
-
-The coordinator rejects evidence backed by the wrong active provider. Do not omit the storage provider for a live tunnel capture, and do not use `local` storage for live artifact rows.
+The former gold-capture queue wrappers are retired. Do not invoke
+`affiliate:mapping:gold-capture` or `affiliate:mapping:gold-capture-cohort`:
+they were direct Prisma/source-intake writers and are no longer package
+commands. Any live capture must use the governed Agent Gateway admission,
+role credential, claim, provider receipt, and terminal completion workflow
+documented in `apps/site/deploy/affiliate-governed/README.md`; this plan does
+not authorize a live queue write or supply a replacement command.
 
 Build the locked private test release:
 
@@ -555,10 +552,11 @@ Implement and run the end-to-end evaluator checks:
 
 The disposable transcript must show two successful runs, one stable candidate identity, an unvalidated mapping, zero published candidates, zero public scrape requests, zero live writes, and successful cleanup.
 
-Run the untouched model suite on the verified private OVH endpoint:
+Run the untouched model suite on the verified private OVH endpoint from
+`apps/site`:
 
     AFFILIATE_MAPPING_MODEL_TOKEN=<private-token> \
-      npm run affiliate:mapping:evaluate -- \
+      npx tsx scripts/evaluate-affiliate-mapping-agent.ts \
         --worker=llama \
         --suite=<private-gold-test-v1.json> \
         --model-endpoint=http://model:8080 \

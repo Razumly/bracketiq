@@ -1,6 +1,6 @@
 # Goal: Exhaust the eligible affiliate intake queue
 
-Work through every eligible `AffiliateSourceIntakes` mapping job and leave each one either fully configured for repeatable affiliate scraping and organization review, expanded into evidenced official organization intakes, accurately marked failed/blocked, or explicitly deferred with a concrete reason. Stop only when `npm run affiliate:mapping:queue-status -- --live` reports `claimableJobs = 0`, `eligibleReadyIntakesWithoutJob = 0`, `claimedWithoutLease = 0`, `queuedCaptureRuns = 0`, and `runningCaptureRuns = 0`.
+Work through every eligible `AffiliateSourceIntakes` mapping job and leave each one either fully configured for repeatable affiliate scraping and organization review, expanded into evidenced official organization intakes, accurately marked failed/blocked, or explicitly deferred with a concrete reason. Stop only when the read-only queue report from `npm run affiliate:mapping:queue-status -- --live` reports `claimableJobs = 0`, `eligibleReadyIntakesWithoutJob = 0`, `claimedWithoutLease = 0`, `queuedCaptureRuns = 0`, and `runningCaptureRuns = 0`. All claims, capture processing, directory expansion, and terminal mapping decisions must use the governed Agent Gateway; this goal no longer invokes retired direct-writer commands.
 
 Repository layout: this goal runs with `apps/site` as its working directory. Paths in result `generatedPaths` are relative to the repository root. Prefix site package paths with `apps/site/`; keep shared registry notes under root `docs/`.
 
@@ -33,15 +33,20 @@ Every checked-in setup script must define or clearly comment a `sourceEvidence` 
 The Luna x-high goal agent is the coordinator and source owner. It owns the queue lease, stored-evidence inspection, mapping, organization setup, official-logo work, validation, source-scoped commit, terminal job result, registry update, and progress report for one intake before it claims another.
 
 Multiple mapper agents may run at the same time only when each agent has a
-unique worker ID and a separate Git workspace. Each mapper must use the claim
-command as its only job-assignment tool. The database performs a conditional
-lease update, so concurrent claims cannot assign one job to two workers.
+unique worker ID and a separate Git workspace. Each mapper must use the Agent
+Gateway's bounded admission and claim APIs as its only job-assignment path. The
+database performs a conditional lease update, so concurrent claims cannot assign
+one job to two workers.
 
 Do not split a source across simultaneous agents or claim more than one source in the same worktree. An independent reviewer may inspect a finished package later, but reviewer approval is outside this ingestion goal.
 
 ## Queue Rules
 
-Begin with `npm run affiliate:mapping:queue-status -- --live`. Claim the oldest queued or expired job. When the report lists a ready intake with no job, claim that exact intake ID so the queue service creates its job. Do not rebuild completed sources unless their current setup fails validation.
+Begin with `npm run affiliate:mapping:queue-status -- --live`. Use the governed
+Agent Gateway admission and claim boundary for the oldest queued or expired job.
+When the report lists a ready intake with no job, admit that exact intake ID so
+the queue service creates its job. Do not rebuild completed sources unless their
+current setup fails validation.
 
 Never scrape a `Blocked` source. If robots, terms, authentication, bot protection, unstable pages, or disallowed paths make a source unsuitable, update the registry with exact evidence, disable automation, and continue to the next source. Do not bypass restrictions.
 
@@ -49,9 +54,21 @@ Exclude held-out test domains and `TEAM`-only sources. Never create affiliate te
 
 The registry and `output/affiliate-codex-ingestion/progress.jsonl` are the progress trackers. Update both after every source rather than waiting until the end of a batch.
 
-For a stored aggregator or club directory, extract all evidenced official organization websites to the proposal JSON contract in the repository-local skill. Submit them with the exact `affiliate:intakes:enqueue-urls` command in the active goal, then pass the schema-validated result file written by that command to `affiliate:mapping:complete` to complete the directory job as `EXPANDED`. The enqueue service owns canonicalization, deduplication, compliance reuse, and capture queueing. It queues ScrapingDog only for current `ALLOWED` domains; new or expired policies remain review-required and blocked policies remain blocked. Do not change policy decisions to force capture. Do not expand more than two directory levels or submit `TEAM` targets.
+For a stored aggregator or club directory, extract all evidenced official
+organization websites to the proposal JSON contract in the repository-local
+skill. Submit them through the governed URL-enqueue API, then pass the
+schema-validated result through the bounded mapping completion boundary to
+complete the directory job as `EXPANDED`. The enqueue service owns
+canonicalization, deduplication, compliance reuse, and capture queueing. It
+queues ScrapingDog only for current `ALLOWED` domains; new or expired policies
+remain review-required and blocked policies remain blocked. Do not change policy
+decisions to force capture. Do not expand more than two directory levels or
+submit `TEAM` targets.
 
-When queue status reports allowed queued/running captures, run the goal's `affiliate:intakes:process` command and recheck status. Successful captures create their own mapping jobs, which the same Luna goal must continue claiming without another prompt.
+When the queue report lists allowed queued/running captures, use the governed
+source-intake service and recheck status. Successful captures create their own
+mapping jobs, which the same Agent Gateway worker must continue claiming
+without another prompt.
 
 ## Per-Source Workflow
 
@@ -142,9 +159,8 @@ Complete those outcomes as governed `HUMAN_REVIEW_REQUIRED` without creating an
 approval job. A surface-specific resolved package must still use the exact
 injected catalog name and evidence-backed determination union.
 
-After committing, record the terminal queue result:
-
-    npm run affiliate:mapping:complete -- --live --job=<job-id> --result=<result-json>
+After committing, submit the terminal queue result through the governed Agent
+Gateway completion boundary with the exact claim generation and result JSON.
 
 Use `REVIEW_REQUIRED` only for a passing package. Use `HUMAN_REVIEW_REQUIRED`
 for the structured unsupported-sport stop described above. Use `EXPANDED` only

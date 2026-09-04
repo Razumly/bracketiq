@@ -65,6 +65,15 @@ Use an ExecPlan for complex features and significant refactors. Follow `PLANS.md
 - Do not start, stop, restart, enable, disable, deploy, or reconfigure a runtime unless the user explicitly requests that exact state change.
 - Inspection, debugging, status checks, database access, and log review do not authorize a runtime state change.
 - Limit an authorized operation to the named runtime.
+## Production VPS access
+
+- Use the SSH alias `bracketiq-prod` for the production VPS.
+- The alias resolves to `15.204.81.193` and user `bracketiq`.
+- The alias selects `~/.ssh/id_ed25519_bracketiq_prod` with `IdentitiesOnly yes`.
+- Keep the private key outside the repository and never expose its contents.
+- Use `ssh bracketiq-prod` for inspection, debugging, status checks, and log review.
+- Do not add a public PostgreSQL port. Production PostgreSQL uses the private Docker network.
+
 
 ## GitHub and release boundaries
 

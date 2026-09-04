@@ -61,46 +61,9 @@ services:
     stop_grace_period: 2m
     logging: *default-logging
 
-  controller:
-    image: ${CONTROLLER_IMAGE:?Set a digest-pinned CONTROLLER_IMAGE in deployment.env}
-    profiles: ["controller"]
-    env_file:
-      - ${CONTROLLER_ENV_FILE:-./controller.env}
-    environment:
-      AFFILIATE_MAPPING_MODEL_ENDPOINT: http://model:8080
-      AFFILIATE_MAPPING_MODEL_ID: ${MODEL_ALIAS:?Set MODEL_ALIAS in deployment.env}
-      AFFILIATE_MAPPING_MODEL_MANIFEST: /run/config/model-manifest.json
-      AFFILIATE_MAPPING_WORKTREE_PARENT: /var/lib/bracketiq-ai/worktrees
-      AFFILIATE_MAPPING_BASE_COMMIT: ${CONTROLLER_BASE_COMMIT:?Set CONTROLLER_BASE_COMMIT in deployment.env}
-      AFFILIATE_MAPPING_MODE: ${CONTROLLER_MODE:-disabled}
-    entrypoint:
-      - /workspace/apps/site/deploy/ai/bin/run-controller-once.sh
-    volumes:
-      - ${REPOSITORY_GIT_DIRECTORY:?Set REPOSITORY_GIT_DIRECTORY in deployment.env}:/workspace/.git
-      - ${AGENT_WORKTREE_DIRECTORY:-/var/lib/bracketiq-ai/worktrees}:/var/lib/bracketiq-ai/worktrees
-      - ${AGENT_OUTPUT_DIRECTORY:-/var/lib/bracketiq-ai/output}:/workspace/apps/site/output
-      - ${MODEL_MANIFEST_FILE:?Set MODEL_MANIFEST_FILE in deployment.env}:/run/config/model-manifest.json:ro
-    secrets:
-      - model_api_key
-    depends_on:
-      - model
-    networks:
-      - model_private
-      - controller_egress
-    read_only: true
-    tmpfs:
-      - /tmp:size=512m,mode=1777
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    pids_limit: 512
-    mem_limit: ${CONTROLLER_MEMORY_LIMIT:-2g}
-    init: true
-    logging: *default-logging
 
   evaluator:
-    image: ${CONTROLLER_IMAGE:?Set a digest-pinned CONTROLLER_IMAGE in deployment.env}
+    image: ${EVALUATOR_IMAGE:?Set a digest-pinned EVALUATOR_IMAGE in deployment.env}
     profiles: ["evaluator"]
     environment:
       AFFILIATE_MAPPING_MODEL_ENDPOINT: http://model:8080
@@ -133,7 +96,6 @@ services:
 networks:
   model_private:
     internal: true
-  controller_egress:
 
 secrets:
   model_api_key:

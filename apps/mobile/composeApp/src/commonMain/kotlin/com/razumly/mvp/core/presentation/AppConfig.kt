@@ -64,10 +64,8 @@ sealed class AppConfig {
     data object ProfileHome : AppConfig()
 
     @Serializable
-    data class ProfileDocument(val documentId: String) : AppConfig()
-
-    @Serializable
     data object ProfileInvites : AppConfig()
+
     @Serializable
     data object Schedule : AppConfig()
 

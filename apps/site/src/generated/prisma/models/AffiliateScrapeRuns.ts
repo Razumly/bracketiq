@@ -43,6 +43,7 @@ export type AffiliateScrapeRunsMinAggregateOutputType = {
   createdAt: Date | null
   updatedAt: Date | null
   sourceId: string | null
+  supplySourceId: string | null
   mappingId: string | null
   requestedByUserId: string | null
   status: string | null
@@ -61,6 +62,7 @@ export type AffiliateScrapeRunsMaxAggregateOutputType = {
   createdAt: Date | null
   updatedAt: Date | null
   sourceId: string | null
+  supplySourceId: string | null
   mappingId: string | null
   requestedByUserId: string | null
   status: string | null
@@ -79,6 +81,7 @@ export type AffiliateScrapeRunsCountAggregateOutputType = {
   createdAt: number
   updatedAt: number
   sourceId: number
+  supplySourceId: number
   mappingId: number
   requestedByUserId: number
   status: number
@@ -113,6 +116,7 @@ export type AffiliateScrapeRunsMinAggregateInputType = {
   createdAt?: true
   updatedAt?: true
   sourceId?: true
+  supplySourceId?: true
   mappingId?: true
   requestedByUserId?: true
   status?: true
@@ -131,6 +135,7 @@ export type AffiliateScrapeRunsMaxAggregateInputType = {
   createdAt?: true
   updatedAt?: true
   sourceId?: true
+  supplySourceId?: true
   mappingId?: true
   requestedByUserId?: true
   status?: true
@@ -149,6 +154,7 @@ export type AffiliateScrapeRunsCountAggregateInputType = {
   createdAt?: true
   updatedAt?: true
   sourceId?: true
+  supplySourceId?: true
   mappingId?: true
   requestedByUserId?: true
   status?: true
@@ -256,6 +262,7 @@ export type AffiliateScrapeRunsGroupByOutputType = {
   createdAt: Date
   updatedAt: Date
   sourceId: string
+  supplySourceId: string | null
   mappingId: string | null
   requestedByUserId: string | null
   status: string
@@ -299,6 +306,7 @@ export type AffiliateScrapeRunsWhereInput = {
   createdAt?: Prisma.DateTimeFilter<"AffiliateScrapeRuns"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"AffiliateScrapeRuns"> | Date | string
   sourceId?: Prisma.StringFilter<"AffiliateScrapeRuns"> | string
+  supplySourceId?: Prisma.StringNullableFilter<"AffiliateScrapeRuns"> | string | null
   mappingId?: Prisma.StringNullableFilter<"AffiliateScrapeRuns"> | string | null
   requestedByUserId?: Prisma.StringNullableFilter<"AffiliateScrapeRuns"> | string | null
   status?: Prisma.StringFilter<"AffiliateScrapeRuns"> | string
@@ -319,6 +327,7 @@ export type AffiliateScrapeRunsOrderByWithRelationInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   sourceId?: Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrderInput | Prisma.SortOrder
   mappingId?: Prisma.SortOrderInput | Prisma.SortOrder
   requestedByUserId?: Prisma.SortOrderInput | Prisma.SortOrder
   status?: Prisma.SortOrder
@@ -342,6 +351,7 @@ export type AffiliateScrapeRunsWhereUniqueInput = Prisma.AtLeast<{
   createdAt?: Prisma.DateTimeFilter<"AffiliateScrapeRuns"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"AffiliateScrapeRuns"> | Date | string
   sourceId?: Prisma.StringFilter<"AffiliateScrapeRuns"> | string
+  supplySourceId?: Prisma.StringNullableFilter<"AffiliateScrapeRuns"> | string | null
   mappingId?: Prisma.StringNullableFilter<"AffiliateScrapeRuns"> | string | null
   requestedByUserId?: Prisma.StringNullableFilter<"AffiliateScrapeRuns"> | string | null
   status?: Prisma.StringFilter<"AffiliateScrapeRuns"> | string
@@ -362,6 +372,7 @@ export type AffiliateScrapeRunsOrderByWithAggregationInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   sourceId?: Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrderInput | Prisma.SortOrder
   mappingId?: Prisma.SortOrderInput | Prisma.SortOrder
   requestedByUserId?: Prisma.SortOrderInput | Prisma.SortOrder
   status?: Prisma.SortOrder
@@ -390,6 +401,7 @@ export type AffiliateScrapeRunsScalarWhereWithAggregatesInput = {
   createdAt?: Prisma.DateTimeWithAggregatesFilter<"AffiliateScrapeRuns"> | Date | string
   updatedAt?: Prisma.DateTimeWithAggregatesFilter<"AffiliateScrapeRuns"> | Date | string
   sourceId?: Prisma.StringWithAggregatesFilter<"AffiliateScrapeRuns"> | string
+  supplySourceId?: Prisma.StringNullableWithAggregatesFilter<"AffiliateScrapeRuns"> | string | null
   mappingId?: Prisma.StringNullableWithAggregatesFilter<"AffiliateScrapeRuns"> | string | null
   requestedByUserId?: Prisma.StringNullableWithAggregatesFilter<"AffiliateScrapeRuns"> | string | null
   status?: Prisma.StringWithAggregatesFilter<"AffiliateScrapeRuns"> | string
@@ -410,6 +422,7 @@ export type AffiliateScrapeRunsCreateInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   sourceId: string
+  supplySourceId?: string | null
   mappingId?: string | null
   requestedByUserId?: string | null
   status?: string
@@ -430,6 +443,7 @@ export type AffiliateScrapeRunsUncheckedCreateInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   sourceId: string
+  supplySourceId?: string | null
   mappingId?: string | null
   requestedByUserId?: string | null
   status?: string
@@ -450,6 +464,7 @@ export type AffiliateScrapeRunsUpdateInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   sourceId?: Prisma.StringFieldUpdateOperationsInput | string
+  supplySourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   mappingId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   requestedByUserId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   status?: Prisma.StringFieldUpdateOperationsInput | string
@@ -470,6 +485,7 @@ export type AffiliateScrapeRunsUncheckedUpdateInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   sourceId?: Prisma.StringFieldUpdateOperationsInput | string
+  supplySourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   mappingId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   requestedByUserId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   status?: Prisma.StringFieldUpdateOperationsInput | string
@@ -490,6 +506,7 @@ export type AffiliateScrapeRunsCreateManyInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   sourceId: string
+  supplySourceId?: string | null
   mappingId?: string | null
   requestedByUserId?: string | null
   status?: string
@@ -510,6 +527,7 @@ export type AffiliateScrapeRunsUpdateManyMutationInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   sourceId?: Prisma.StringFieldUpdateOperationsInput | string
+  supplySourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   mappingId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   requestedByUserId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   status?: Prisma.StringFieldUpdateOperationsInput | string
@@ -530,6 +548,7 @@ export type AffiliateScrapeRunsUncheckedUpdateManyInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   sourceId?: Prisma.StringFieldUpdateOperationsInput | string
+  supplySourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   mappingId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   requestedByUserId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   status?: Prisma.StringFieldUpdateOperationsInput | string
@@ -550,6 +569,7 @@ export type AffiliateScrapeRunsCountOrderByAggregateInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   sourceId?: Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrder
   mappingId?: Prisma.SortOrder
   requestedByUserId?: Prisma.SortOrder
   status?: Prisma.SortOrder
@@ -576,6 +596,7 @@ export type AffiliateScrapeRunsMaxOrderByAggregateInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   sourceId?: Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrder
   mappingId?: Prisma.SortOrder
   requestedByUserId?: Prisma.SortOrder
   status?: Prisma.SortOrder
@@ -594,6 +615,7 @@ export type AffiliateScrapeRunsMinOrderByAggregateInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   sourceId?: Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrder
   mappingId?: Prisma.SortOrder
   requestedByUserId?: Prisma.SortOrder
   status?: Prisma.SortOrder
@@ -620,6 +642,7 @@ export type AffiliateScrapeRunsSelect<ExtArgs extends runtime.Types.Extensions.I
   createdAt?: boolean
   updatedAt?: boolean
   sourceId?: boolean
+  supplySourceId?: boolean
   mappingId?: boolean
   requestedByUserId?: boolean
   status?: boolean
@@ -640,6 +663,7 @@ export type AffiliateScrapeRunsSelectCreateManyAndReturn<ExtArgs extends runtime
   createdAt?: boolean
   updatedAt?: boolean
   sourceId?: boolean
+  supplySourceId?: boolean
   mappingId?: boolean
   requestedByUserId?: boolean
   status?: boolean
@@ -660,6 +684,7 @@ export type AffiliateScrapeRunsSelectUpdateManyAndReturn<ExtArgs extends runtime
   createdAt?: boolean
   updatedAt?: boolean
   sourceId?: boolean
+  supplySourceId?: boolean
   mappingId?: boolean
   requestedByUserId?: boolean
   status?: boolean
@@ -680,6 +705,7 @@ export type AffiliateScrapeRunsSelectScalar = {
   createdAt?: boolean
   updatedAt?: boolean
   sourceId?: boolean
+  supplySourceId?: boolean
   mappingId?: boolean
   requestedByUserId?: boolean
   status?: boolean
@@ -695,7 +721,7 @@ export type AffiliateScrapeRunsSelectScalar = {
   metadata?: boolean
 }
 
-export type AffiliateScrapeRunsOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "sourceId" | "mappingId" | "requestedByUserId" | "status" | "startedAt" | "finishedAt" | "fetchedUrl" | "finalUrl" | "httpStatus" | "itemCount" | "candidateCount" | "errorMessage" | "logs" | "metadata", ExtArgs["result"]["affiliateScrapeRuns"]>
+export type AffiliateScrapeRunsOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "sourceId" | "supplySourceId" | "mappingId" | "requestedByUserId" | "status" | "startedAt" | "finishedAt" | "fetchedUrl" | "finalUrl" | "httpStatus" | "itemCount" | "candidateCount" | "errorMessage" | "logs" | "metadata", ExtArgs["result"]["affiliateScrapeRuns"]>
 
 export type $AffiliateScrapeRunsPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "AffiliateScrapeRuns"
@@ -705,6 +731,7 @@ export type $AffiliateScrapeRunsPayload<ExtArgs extends runtime.Types.Extensions
     createdAt: Date
     updatedAt: Date
     sourceId: string
+    supplySourceId: string | null
     mappingId: string | null
     requestedByUserId: string | null
     status: string
@@ -1145,6 +1172,7 @@ export interface AffiliateScrapeRunsFieldRefs {
   readonly createdAt: Prisma.FieldRef<"AffiliateScrapeRuns", 'DateTime'>
   readonly updatedAt: Prisma.FieldRef<"AffiliateScrapeRuns", 'DateTime'>
   readonly sourceId: Prisma.FieldRef<"AffiliateScrapeRuns", 'String'>
+  readonly supplySourceId: Prisma.FieldRef<"AffiliateScrapeRuns", 'String'>
   readonly mappingId: Prisma.FieldRef<"AffiliateScrapeRuns", 'String'>
   readonly requestedByUserId: Prisma.FieldRef<"AffiliateScrapeRuns", 'String'>
   readonly status: Prisma.FieldRef<"AffiliateScrapeRuns", 'String'>

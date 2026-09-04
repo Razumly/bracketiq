@@ -9,6 +9,137 @@
 * 🟢 You can import this file directly.
 */
 
+export const AffiliateAgentGatewayJobStatus = {
+  QUEUED: 'QUEUED',
+  CLAIMED: 'CLAIMED',
+  RETRY_WAIT: 'RETRY_WAIT',
+  COMPLETED: 'COMPLETED',
+  PIPELINE_BLOCKED: 'PIPELINE_BLOCKED',
+  RECONCILIATION_REQUIRED: 'RECONCILIATION_REQUIRED'
+} as const
+
+export type AffiliateAgentGatewayJobStatus = (typeof AffiliateAgentGatewayJobStatus)[keyof typeof AffiliateAgentGatewayJobStatus]
+
+
+export const AffiliateAgentGatewayClaimStatus = {
+  ACTIVE: 'ACTIVE',
+  COMPLETED: 'COMPLETED',
+  FAILED: 'FAILED',
+  EXPIRED: 'EXPIRED',
+  REVOKED: 'REVOKED',
+  RECONCILIATION_REQUIRED: 'RECONCILIATION_REQUIRED'
+} as const
+
+export type AffiliateAgentGatewayClaimStatus = (typeof AffiliateAgentGatewayClaimStatus)[keyof typeof AffiliateAgentGatewayClaimStatus]
+
+
+export const AffiliateAgentGatewayReceiptStatus = {
+  PENDING: 'PENDING',
+  SUCCEEDED: 'SUCCEEDED',
+  FAILED: 'FAILED',
+  UNKNOWN: 'UNKNOWN'
+} as const
+
+export type AffiliateAgentGatewayReceiptStatus = (typeof AffiliateAgentGatewayReceiptStatus)[keyof typeof AffiliateAgentGatewayReceiptStatus]
+
+
+export const AffiliateSupplyLifecycleStage = {
+  PRE_MAPPED: 'PRE_MAPPED',
+  MAPPED: 'MAPPED',
+  APPROVED: 'APPROVED',
+  ACTIVATED: 'ACTIVATED',
+  PUBLISHED: 'PUBLISHED',
+  SOURCE_EXCLUDED: 'SOURCE_EXCLUDED',
+  HUMAN_REVIEW_REQUIRED: 'HUMAN_REVIEW_REQUIRED'
+} as const
+
+export type AffiliateSupplyLifecycleStage = (typeof AffiliateSupplyLifecycleStage)[keyof typeof AffiliateSupplyLifecycleStage]
+
+
+export const AffiliateSupplyLifecycleCommand = {
+  CREATE_ROOT: 'CREATE_ROOT',
+  RECORD_MAPPING: 'RECORD_MAPPING',
+  APPROVE: 'APPROVE',
+  ACTIVATE: 'ACTIVATE',
+  PUBLISH_TARGET: 'PUBLISH_TARGET',
+  RECORD_REFRESH: 'RECORD_REFRESH',
+  RECORD_EMPTY_REFRESH: 'RECORD_EMPTY_REFRESH',
+  RECORD_REFRESH_FAILURE: 'RECORD_REFRESH_FAILURE',
+  REVALIDATE_IDENTITY: 'REVALIDATE_IDENTITY',
+  EXCLUDE_SOURCE: 'EXCLUDE_SOURCE',
+  REJECT_TARGET: 'REJECT_TARGET',
+  CREATE_SUCCESSOR: 'CREATE_SUCCESSOR',
+  RECONCILE: 'RECONCILE',
+  LEGACY_RECONCILED: 'LEGACY_RECONCILED'
+} as const
+
+export type AffiliateSupplyLifecycleCommand = (typeof AffiliateSupplyLifecycleCommand)[keyof typeof AffiliateSupplyLifecycleCommand]
+
+
+export const AffiliateSupplyLifecycleOutcome = {
+  SOURCE_EXCLUDED: 'SOURCE_EXCLUDED',
+  HUMAN_REVIEW_REQUIRED: 'HUMAN_REVIEW_REQUIRED',
+  TARGET_REJECTED: 'TARGET_REJECTED',
+  AUTOMATION_HOLD: 'AUTOMATION_HOLD',
+  REPAIR_REQUIRED: 'REPAIR_REQUIRED',
+  NATURAL_EXPIRY: 'NATURAL_EXPIRY',
+  VALID_EMPTY_REFRESH: 'VALID_EMPTY_REFRESH'
+} as const
+
+export type AffiliateSupplyLifecycleOutcome = (typeof AffiliateSupplyLifecycleOutcome)[keyof typeof AffiliateSupplyLifecycleOutcome]
+
+
+export const AffiliateSupplyLifecycleActorKind = {
+  MAPPING_PRODUCER: 'MAPPING_PRODUCER',
+  SUPPLY_REVIEWER: 'SUPPLY_REVIEWER',
+  HUMAN_DIRECTED_EXECUTOR: 'HUMAN_DIRECTED_EXECUTOR',
+  SYSTEM: 'SYSTEM',
+  HUMAN: 'HUMAN'
+} as const
+
+export type AffiliateSupplyLifecycleActorKind = (typeof AffiliateSupplyLifecycleActorKind)[keyof typeof AffiliateSupplyLifecycleActorKind]
+
+
+export const AffiliateSupplyContractManifestStatus = {
+  DRAFT: 'DRAFT',
+  ACTIVE: 'ACTIVE',
+  RETIRED: 'RETIRED'
+} as const
+
+export type AffiliateSupplyContractManifestStatus = (typeof AffiliateSupplyContractManifestStatus)[keyof typeof AffiliateSupplyContractManifestStatus]
+
+
+export const AffiliateSupplyTargetStatus = {
+  PUBLISHED: 'PUBLISHED',
+  LAST_KNOWN_GOOD: 'LAST_KNOWN_GOOD',
+  REJECTED: 'REJECTED',
+  EXPIRED: 'EXPIRED'
+} as const
+
+export type AffiliateSupplyTargetStatus = (typeof AffiliateSupplyTargetStatus)[keyof typeof AffiliateSupplyTargetStatus]
+
+
+export const AffiliateReplenishmentDemandStatus = {
+  OPEN: 'OPEN',
+  CLOSED: 'CLOSED',
+  PAUSED: 'PAUSED'
+} as const
+
+export type AffiliateReplenishmentDemandStatus = (typeof AffiliateReplenishmentDemandStatus)[keyof typeof AffiliateReplenishmentDemandStatus]
+
+
+export const AffiliateReplenishmentWaveStatus = {
+  PLANNED: 'PLANNED',
+  ACTIVE: 'ACTIVE',
+  WAITING: 'WAITING',
+  SUCCEEDED: 'SUCCEEDED',
+  FAILED: 'FAILED',
+  PAUSED: 'PAUSED'
+} as const
+
+export type AffiliateReplenishmentWaveStatus = (typeof AffiliateReplenishmentWaveStatus)[keyof typeof AffiliateReplenishmentWaveStatus]
+
+
 export const BillsOwnerTypeEnum = {
   USER: 'USER',
   TEAM: 'TEAM',

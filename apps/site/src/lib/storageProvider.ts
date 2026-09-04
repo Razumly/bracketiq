@@ -15,6 +15,7 @@ export interface StoragePutParams {
   originalName: string;
   contentType?: string | null;
   organizationId?: string;
+  key?: string;
 }
 
 export interface StoragePutResult {
@@ -75,7 +76,7 @@ const createLocalProvider = (): StorageProvider => {
   return {
     async putObject(params) {
       const { writeLocalFile } = await import('./localStorageProvider');
-      const stored = await writeLocalFile(params.data, params.originalName, params.organizationId);
+      const stored = await writeLocalFile(params.data, params.originalName, params.organizationId, params.key);
       return {
         key: stored.relativePath,
         sizeBytes: params.data.length,
@@ -163,7 +164,7 @@ const createSpacesProvider = (): StorageProvider => {
 
   return {
     async putObject(params) {
-      const key = buildStoredName(params.originalName, params.organizationId);
+      const key = params.key ?? buildStoredName(params.originalName, params.organizationId);
       await client.send(
         new PutObjectCommand({
           Bucket: config.bucket,
@@ -221,9 +222,12 @@ const createSpacesProvider = (): StorageProvider => {
           contentType: response.ContentType,
           sizeBytes: response.ContentLength,
         };
-      } catch (error: any) {
-        const status = error?.$metadata?.httpStatusCode;
-        if (status === 404 || error?.name === 'NotFound') {
+      } catch (error: unknown) {
+        const details = error && typeof error === 'object'
+          ? error as { $metadata?: { httpStatusCode?: unknown }; name?: unknown }
+          : {};
+        const status = details.$metadata?.httpStatusCode;
+        if (status === 404 || details.name === 'NotFound') {
           return { exists: false };
         }
         throw error;

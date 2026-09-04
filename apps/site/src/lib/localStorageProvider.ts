@@ -34,8 +34,9 @@ export const writeLocalFile = async (
   data: Buffer,
   originalName: string,
   organizationId?: string,
+  key?: string,
 ): Promise<{ relativePath: string; absolutePath: string }> => {
-  const storedName = buildStoredName(originalName, organizationId);
+  const storedName = key ?? buildStoredName(originalName, organizationId);
   const relativePath = storedName;
   const absolutePath = getAbsolutePath(storedName);
   const root = getStorageRoot();
@@ -79,8 +80,11 @@ export const headLocalObject = async (
   try {
     const stats = await fs.stat(/*turbopackIgnore: true*/ absolutePath);
     return { exists: true, sizeBytes: stats.size };
-  } catch (error: any) {
-    if (error?.code === 'ENOENT') {
+  } catch (error: unknown) {
+    const code = error && typeof error === 'object' && 'code' in error
+      ? (error as { code?: unknown }).code
+      : undefined;
+    if (code === 'ENOENT') {
       return { exists: false };
     }
     throw error;

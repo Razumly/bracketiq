@@ -1,8 +1,8 @@
 import dotenv from 'dotenv';
 import { Client } from 'pg';
 import { configureAffiliateLiveDatabaseEnvironment } from '../src/server/affiliateImports/agentRepository';
-import { affiliateSourceMatchesIntakeEvidence } from '../src/server/affiliateImports/codexIngestionApproval';
-import { codexAffiliateIngestionResultSchema } from '../src/server/affiliateImports/codexIngestionResult';
+import { affiliateSourceMatchesIntakeEvidence } from '../src/server/affiliateImports/affiliateMappingApproval';
+import { codexAffiliateIngestionResultSchema } from '../src/server/affiliateImports/affiliateIngestionSchemas';
 import {
   affiliateSportsCatalogSnapshotSchema,
   loadAffiliateSportsCatalogSnapshot,

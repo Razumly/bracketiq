@@ -343,6 +343,41 @@ export type AffiliateSourceIntakeArtifacts = Prisma.AffiliateSourceIntakeArtifac
  */
 export type AffiliateSourceDiscoveryCampaigns = Prisma.AffiliateSourceDiscoveryCampaignsModel
 /**
+ * Model AffiliateAgentGatewayJobs
+ *
+ */
+export type AffiliateAgentGatewayJobs = Prisma.AffiliateAgentGatewayJobsModel
+/**
+ * Model AffiliateAgentGatewayClaims
+ *
+ */
+export type AffiliateAgentGatewayClaims = Prisma.AffiliateAgentGatewayClaimsModel
+/**
+ * Model AffiliateAgentGatewayArtifacts
+ *
+ */
+export type AffiliateAgentGatewayArtifacts = Prisma.AffiliateAgentGatewayArtifactsModel
+/**
+ * Model AffiliateAgentGatewayOperationReceipts
+ *
+ */
+export type AffiliateAgentGatewayOperationReceipts = Prisma.AffiliateAgentGatewayOperationReceiptsModel
+/**
+ * Model AffiliateAgentGatewayEvents
+ *
+ */
+export type AffiliateAgentGatewayEvents = Prisma.AffiliateAgentGatewayEventsModel
+/**
+ * Model AffiliateOperationalAlerts
+ *
+ */
+export type AffiliateOperationalAlerts = Prisma.AffiliateOperationalAlertsModel
+/**
+ * Model AffiliateOperationalAlertDeliveries
+ *
+ */
+export type AffiliateOperationalAlertDeliveries = Prisma.AffiliateOperationalAlertDeliveriesModel
+/**
  * Model AffiliateCoverageAgentJobs
  *
  */
@@ -397,6 +432,46 @@ export type AffiliateApprovalJobs = Prisma.AffiliateApprovalJobsModel
  *
  */
 export type AffiliateImportCandidates = Prisma.AffiliateImportCandidatesModel
+/**
+ * Model AffiliateSupplySources
+ *
+ */
+export type AffiliateSupplySources = Prisma.AffiliateSupplySourcesModel
+/**
+ * Model AffiliateSupplyContractManifests
+ *
+ */
+export type AffiliateSupplyContractManifests = Prisma.AffiliateSupplyContractManifestsModel
+/**
+ * Model AffiliateSupplyLifecycleTransitions
+ *
+ */
+export type AffiliateSupplyLifecycleTransitions = Prisma.AffiliateSupplyLifecycleTransitionsModel
+/**
+ * Model AffiliateSupplyReconciliationRuns
+ *
+ */
+export type AffiliateSupplyReconciliationRuns = Prisma.AffiliateSupplyReconciliationRunsModel
+/**
+ * Model AffiliateAgentWorkerHealth
+ *
+ */
+export type AffiliateAgentWorkerHealth = Prisma.AffiliateAgentWorkerHealthModel
+/**
+ * Model AffiliateSupplyTargets
+ *
+ */
+export type AffiliateSupplyTargets = Prisma.AffiliateSupplyTargetsModel
+/**
+ * Model AffiliateReplenishmentDemands
+ *
+ */
+export type AffiliateReplenishmentDemands = Prisma.AffiliateReplenishmentDemandsModel
+/**
+ * Model AffiliateReplenishmentWaves
+ *
+ */
+export type AffiliateReplenishmentWaves = Prisma.AffiliateReplenishmentWavesModel
 /**
  * Model EventTags
  *

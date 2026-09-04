@@ -26,6 +26,14 @@ function weeklyEvent() {
 }
 
 describe('useWeeklyEventSelectionModel', () => {
+    beforeEach(() => {
+        jest.useFakeTimers({ now: new Date('2026-07-01T12:00:00.000Z') });
+    });
+
+    afterEach(() => {
+        jest.useRealTimers();
+    });
+
     it('builds the public URL and optional organization logo for every event', () => {
         const event = weeklyEvent();
         const { result } = renderHook(() => useWeeklyEventSelectionModel({

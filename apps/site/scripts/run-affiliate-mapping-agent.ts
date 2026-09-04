@@ -31,6 +31,16 @@ import { AffiliateAgentValidationExecutor } from '../src/server/affiliateImports
 dotenv.config({ quiet: true });
 dotenv.config({ path: '.env.local', override: false, quiet: true });
 
+const mappingDryRun = process.argv.includes('--dry-run');
+if (
+  process.argv.includes('--live')
+  || (process.env.NODE_ENV?.trim().toLowerCase() === 'production' && !mappingDryRun)
+) {
+  throw new Error(
+    'Legacy affiliate mapping agent is paused for production writes; use governed gateway admission.',
+  );
+}
+
 const readOption = (name: string): string | undefined => {
   const equals = process.argv.find((argument) => argument.startsWith(`${name}=`));
   if (equals) return equals.slice(name.length + 1).trim() || undefined;

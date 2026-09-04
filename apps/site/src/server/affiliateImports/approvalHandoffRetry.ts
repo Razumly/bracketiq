@@ -1,7 +1,7 @@
 import {
   codexAffiliateIngestionResultSchema,
   type CodexAffiliateIngestionResult,
-} from './codexIngestionResult';
+} from './affiliateIngestionSchemas';
 
 export type AffiliateMappingHandoffRetryInput = {
   approvalStatus: string;

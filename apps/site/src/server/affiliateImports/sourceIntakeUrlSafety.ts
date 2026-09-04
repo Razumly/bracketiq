@@ -44,6 +44,7 @@ export type BoundedPublicResourceOptions = {
   headers?: Record<string, string>;
   resolver?: PublicUrlResolver;
   validateRedirect?: (from: URL, to: URL) => void;
+  signal?: AbortSignal;
 };
 
 const parseIpv4 = (value: string): number[] | null => {
@@ -194,52 +195,148 @@ export const createPinnedAddressLookup = (address: ResolvedAddress) => (
 const requestOnce = async (
   url: URL,
   address: ResolvedAddress,
-  options: Required<Pick<BoundedPublicResourceOptions, 'timeoutMs' | 'maxBytes'>> & Pick<BoundedPublicResourceOptions, 'headers'>,
+  options: Required<Pick<BoundedPublicResourceOptions, 'timeoutMs' | 'maxBytes'>>
+    & Pick<BoundedPublicResourceOptions, 'headers' | 'signal'>,
 ): Promise<BoundedPublicResource> => new Promise((resolve, reject) => {
   const transport = url.protocol === 'https:' ? https : http;
-  const request = transport.request(url, {
-    headers: {
-      'User-Agent': 'BracketIQ-Affiliate-Intake/1.0',
-      Accept: '*/*',
-      ...(options.headers ?? {}),
-    },
-    lookup: createPinnedAddressLookup(address) as any,
-  }, (response) => {
-    const statusCode = response.statusCode ?? 0;
-    const declaredLength = Number.parseInt(String(response.headers['content-length'] ?? ''), 10);
-    if (Number.isFinite(declaredLength) && declaredLength > options.maxBytes) {
-      response.resume();
-      reject(new Error(`Source response exceeds the ${options.maxBytes} byte limit.`));
-      return;
-    }
-
-    const chunks: Buffer[] = [];
-    let byteCount = 0;
-    response.on('data', (chunk: Buffer | Uint8Array | string) => {
-      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-      byteCount += buffer.length;
-      if (byteCount > options.maxBytes) {
-        request.destroy(new Error(`Source response exceeds the ${options.maxBytes} byte limit.`));
+  let settled = false;
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  const cleanup = (): void => {
+    if (timeout) clearTimeout(timeout);
+    options.signal?.removeEventListener('abort', onAbort);
+  };
+  const fail = (error: unknown): void => {
+    if (settled) return;
+    settled = true;
+    cleanup();
+    reject(error);
+  };
+  const succeed = (resource: BoundedPublicResource): void => {
+    if (settled) return;
+    settled = true;
+    cleanup();
+    resolve(resource);
+  };
+  let request: ReturnType<typeof transport.request>;
+  const onAbort = (): void => {
+    const error = new Error('Source request aborted.');
+    fail(error);
+    request?.destroy(error);
+  };
+  timeout = setTimeout(() => {
+    const error = new Error('Source request timed out.');
+    fail(error);
+    request?.destroy(error);
+  }, options.timeoutMs);
+  try {
+    request = transport.request(url, {
+      headers: {
+        'User-Agent': 'BracketIQ-Affiliate-Intake/1.0',
+        Accept: '*/*',
+        ...(options.headers ?? {}),
+      },
+      lookup: createPinnedAddressLookup(address) as any,
+      signal: options.signal,
+    }, (response) => {
+      const statusCode = response.statusCode ?? 0;
+      const declaredLength = Number.parseInt(String(response.headers['content-length'] ?? ''), 10);
+      if (Number.isFinite(declaredLength) && declaredLength > options.maxBytes) {
+        const error = new Error(`Source response exceeds the ${options.maxBytes} byte limit.`);
+        response.destroy(error);
+        request.destroy(error);
+        fail(error);
         return;
       }
-      chunks.push(buffer);
-    });
-    response.on('end', () => {
-      resolve({
-        body: Buffer.concat(chunks),
-        finalUrl: url.toString(),
-        statusCode,
-        contentType: typeof response.headers['content-type'] === 'string'
-          ? response.headers['content-type']
-          : null,
-        headers: headersToRecord(response.headers),
+
+      const chunks: Buffer[] = [];
+      let byteCount = 0;
+      response.on('data', (chunk: Buffer | Uint8Array | string) => {
+        if (settled) return;
+        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        byteCount += buffer.length;
+        if (byteCount > options.maxBytes) {
+          const error = new Error(`Source response exceeds the ${options.maxBytes} byte limit.`);
+          response.destroy(error);
+          request.destroy(error);
+          fail(error);
+          return;
+        }
+        chunks.push(buffer);
       });
+      response.on('end', () => {
+        succeed({
+          body: Buffer.concat(chunks),
+          finalUrl: url.toString(),
+          statusCode,
+          contentType: typeof response.headers['content-type'] === 'string'
+            ? response.headers['content-type']
+            : null,
+          headers: headersToRecord(response.headers),
+        });
+      });
+      response.on('error', fail);
+      response.on('aborted', () => fail(new Error('Source response aborted.')));
     });
-  });
-  request.setTimeout(options.timeoutMs, () => request.destroy(new Error('Source request timed out.')));
-  request.on('error', reject);
+  } catch (error) {
+    fail(error);
+    return;
+  }
+  request.on('error', fail);
+  options.signal?.addEventListener('abort', onAbort, { once: true });
   request.end();
 });
+
+
+const awaitWithinDeadline = async <T>(
+  operation: Promise<T>,
+  deadline: number,
+  signal?: AbortSignal,
+): Promise<T> => {
+  const remainingMs = deadline - Date.now();
+  if (remainingMs <= 0) throw new Error('Source request timed out.');
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const onAbort = (): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      reject(new Error('Source request aborted.'));
+    };
+    const cleanup = (): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+    };
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener('abort', onAbort);
+      reject(new Error('Source request timed out.'));
+    }, remainingMs);
+    const succeed = (value: T): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (Date.now() >= deadline) {
+        reject(new Error('Source request timed out.'));
+      } else {
+        resolve(value);
+      }
+    };
+    const fail = (error: unknown): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    signal?.addEventListener('abort', onAbort, { once: true });
+    operation.then(succeed, fail);
+  });
+};
 
 export const fetchBoundedPublicResource = async (
   value: string,
@@ -249,11 +346,29 @@ export const fetchBoundedPublicResource = async (
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
   const maxRedirects = options.maxRedirects ?? MAX_REDIRECTS;
   const resolver = options.resolver ?? defaultResolver;
+  const deadline = Date.now() + timeoutMs;
   let current = value;
 
   for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount += 1) {
-    const { url, addresses } = await assertSafePublicUrl(current, resolver);
-    const response = await requestOnce(url, addresses[0], { timeoutMs, maxBytes, headers: options.headers });
+    if (options.signal?.aborted) throw new Error('Source request aborted.');
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) throw new Error('Source request timed out.');
+    const { url, addresses } = await awaitWithinDeadline(
+      assertSafePublicUrl(current, resolver),
+      deadline,
+      options.signal,
+    );
+    if (options.signal?.aborted) throw new Error('Source request aborted.');
+    const remainingAfterResolveMs = deadline - Date.now();
+    if (remainingAfterResolveMs <= 0) throw new Error('Source request timed out.');
+    const response = await requestOnce(url, addresses[0], {
+      timeoutMs: remainingAfterResolveMs,
+      maxBytes,
+      headers: options.headers,
+      signal: options.signal,
+    });
+    if (options.signal?.aborted) throw new Error('Source request aborted.');
+    if (Date.now() >= deadline) throw new Error('Source request timed out.');
     if (response.statusCode < 300 || response.statusCode >= 400) {
       return response;
     }
@@ -264,6 +379,7 @@ export const fetchBoundedPublicResource = async (
       throw new Error('Source request exceeded the redirect limit.');
     }
     const redirectedUrl = new URL(location, url);
+    if (Date.now() >= deadline) throw new Error('Source request timed out.');
     options.validateRedirect?.(url, redirectedUrl);
     current = redirectedUrl.toString();
   }

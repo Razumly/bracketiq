@@ -400,7 +400,9 @@ Work from `/Users/elesesy/StudioProjects/mvp-site`. Do not run a live command fr
 ### Behavioral acceptance
 
 - Every claimed mapping job acquires a nonempty, deterministic current `Sports` snapshot before evidence inspection or generation. The selected intake run id and full validated catalog snapshot are persisted on the still-owned claim, and completion refuses a job without them.
-- The Codex mapper and `affiliate:mapping:agent --live` use the same claim/export/context-store/verifier/finish service. A live builder accepts exactly one claimed intake/run, and no model-agent shortcut can finish without the persisted context.
+- The Codex mapper and the former direct mapping-agent live path are retired.
+  Governed Agent Gateway admission, claim, provider receipt, and terminal
+  completion are the only live mapping workflow.
 - Every terminal mapping update atomically matches the active job id, worker id, claim generation, and unexpired lease. A stale process—including the same worker id after reclaim—changes neither job nor intake.
 - No live mapper path reads `DEFAULT_SPORTS` or treats discovery `sportHints` as canonical evidence.
 - Every new sport-bearing completion requires the matching claim-time run id, claim/current catalog hash, and source-owned citations; a review-ready package additionally requires proof that the disposable candidate validator consumed that exact snapshot and that emitted sports equal the resolved determination union. Validation failure writes no terminal result: reparable output stays `CLAIMED`, while catalog drift alone uses the claim-generation CAS to return the job to `QUEUED` for a fresh claim.

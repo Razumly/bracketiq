@@ -1,53 +1,20 @@
 /** @jest-environment node */
 
-import {
-  runAffiliateCoverageLoopCycle,
-  type AffiliateCoverageQueueStatus,
-} from '../coverageAgentLoop';
+import { spawnSync } from 'node:child_process';
+import path from 'node:path';
 
-const status = (claimableJobs: number): AffiliateCoverageQueueStatus => ({
-  totalJobs: claimableJobs,
-  claimableJobs,
-  activeLeases: 0,
-  claimedWithoutLease: 0,
-  statusCounts: claimableJobs ? { QUEUED: claimableJobs } : {},
-  typeCounts: claimableJobs ? { MARKET_COVERAGE: claimableJobs } : {},
-});
+const RETIREMENT_MESSAGE =
+  'Legacy affiliate launcher is paused pending governed cohort proof; use governed gateway admission.';
 
-describe('affiliate coverage agent loop cycle', () => {
-  it('does not launch Luna when the coverage queue is empty', async () => {
-    const launchGoal = jest.fn(async () => undefined);
-    const result = await runAffiliateCoverageLoopCycle({
-      reconcile: jest.fn(async () => ({ totalCreated: 0 })),
-      getStatus: jest.fn(async () => status(0)),
-      launchGoal,
-    });
+it('fails closed with the governed retirement message and exit 78', () => {
+  const siteRoot = path.resolve(__dirname, '../../../../');
+  const result = spawnSync(
+    path.join(siteRoot, 'node_modules/.bin/tsx'),
+    [path.join(__dirname, '..', 'coverageAgentLoop.ts')],
+    { cwd: siteRoot, encoding: 'utf8' },
+  );
 
-    expect(result.launchedGoal).toBe(false);
-    expect(launchGoal).not.toHaveBeenCalled();
-  });
-
-  it('waits for the active Luna goal before it checks or launches again', async () => {
-    let finishGoal: (() => void) | undefined;
-    const launchGoal = jest.fn(() => new Promise<void>((resolve) => {
-      finishGoal = resolve;
-    }));
-    const getStatus = jest.fn()
-      .mockResolvedValueOnce(status(2))
-      .mockResolvedValueOnce(status(0));
-    const reconcile = jest.fn(async () => ({ totalCreated: 0 }));
-    const pending = runAffiliateCoverageLoopCycle({ reconcile, getStatus, launchGoal });
-
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(launchGoal).toHaveBeenCalledTimes(1);
-    expect(getStatus).toHaveBeenCalledTimes(1);
-
-    finishGoal?.();
-    const result = await pending;
-    expect(result.launchedGoal).toBe(true);
-    expect(reconcile).toHaveBeenCalledTimes(2);
-    expect(getStatus).toHaveBeenCalledTimes(2);
-    expect(result.queueAfterLaunch.claimableJobs).toBe(0);
-  });
+  expect(result.status).toBe(78);
+  expect(result.stderr.trim()).toBe(RETIREMENT_MESSAGE);
+  expect(result.stdout).toBe('');
 });

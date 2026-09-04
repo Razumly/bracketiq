@@ -128,6 +128,6 @@ const main = async () => {
 };
 
 main().catch((error) => {
-  console.error('[affiliate:mapping:evaluate] failed', error);
+  console.error('[affiliate:mapping:evaluator] failed', error);
   process.exitCode = 1;
 });

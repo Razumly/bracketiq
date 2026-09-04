@@ -29,6 +29,7 @@ export type AffiliateSourceIntakePagesMinAggregateOutputType = {
   createdAt: Date | null
   updatedAt: Date | null
   intakeId: string | null
+  supplySourceId: string | null
   url: string | null
   canonicalUrl: string | null
   urlKey: string | null
@@ -45,6 +46,7 @@ export type AffiliateSourceIntakePagesMaxAggregateOutputType = {
   createdAt: Date | null
   updatedAt: Date | null
   intakeId: string | null
+  supplySourceId: string | null
   url: string | null
   canonicalUrl: string | null
   urlKey: string | null
@@ -61,6 +63,7 @@ export type AffiliateSourceIntakePagesCountAggregateOutputType = {
   createdAt: number
   updatedAt: number
   intakeId: number
+  supplySourceId: number
   url: number
   canonicalUrl: number
   urlKey: number
@@ -81,6 +84,7 @@ export type AffiliateSourceIntakePagesMinAggregateInputType = {
   createdAt?: true
   updatedAt?: true
   intakeId?: true
+  supplySourceId?: true
   url?: true
   canonicalUrl?: true
   urlKey?: true
@@ -97,6 +101,7 @@ export type AffiliateSourceIntakePagesMaxAggregateInputType = {
   createdAt?: true
   updatedAt?: true
   intakeId?: true
+  supplySourceId?: true
   url?: true
   canonicalUrl?: true
   urlKey?: true
@@ -113,6 +118,7 @@ export type AffiliateSourceIntakePagesCountAggregateInputType = {
   createdAt?: true
   updatedAt?: true
   intakeId?: true
+  supplySourceId?: true
   url?: true
   canonicalUrl?: true
   urlKey?: true
@@ -204,6 +210,7 @@ export type AffiliateSourceIntakePagesGroupByOutputType = {
   createdAt: Date
   updatedAt: Date
   intakeId: string
+  supplySourceId: string | null
   url: string
   canonicalUrl: string
   urlKey: string
@@ -243,6 +250,7 @@ export type AffiliateSourceIntakePagesWhereInput = {
   createdAt?: Prisma.DateTimeFilter<"AffiliateSourceIntakePages"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"AffiliateSourceIntakePages"> | Date | string
   intakeId?: Prisma.StringFilter<"AffiliateSourceIntakePages"> | string
+  supplySourceId?: Prisma.StringNullableFilter<"AffiliateSourceIntakePages"> | string | null
   url?: Prisma.StringFilter<"AffiliateSourceIntakePages"> | string
   canonicalUrl?: Prisma.StringFilter<"AffiliateSourceIntakePages"> | string
   urlKey?: Prisma.StringFilter<"AffiliateSourceIntakePages"> | string
@@ -261,6 +269,7 @@ export type AffiliateSourceIntakePagesOrderByWithRelationInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   intakeId?: Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrderInput | Prisma.SortOrder
   url?: Prisma.SortOrder
   canonicalUrl?: Prisma.SortOrder
   urlKey?: Prisma.SortOrder
@@ -283,6 +292,7 @@ export type AffiliateSourceIntakePagesWhereUniqueInput = Prisma.AtLeast<{
   createdAt?: Prisma.DateTimeFilter<"AffiliateSourceIntakePages"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"AffiliateSourceIntakePages"> | Date | string
   intakeId?: Prisma.StringFilter<"AffiliateSourceIntakePages"> | string
+  supplySourceId?: Prisma.StringNullableFilter<"AffiliateSourceIntakePages"> | string | null
   url?: Prisma.StringFilter<"AffiliateSourceIntakePages"> | string
   canonicalUrl?: Prisma.StringFilter<"AffiliateSourceIntakePages"> | string
   role?: Prisma.StringFilter<"AffiliateSourceIntakePages"> | string
@@ -300,6 +310,7 @@ export type AffiliateSourceIntakePagesOrderByWithAggregationInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   intakeId?: Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrderInput | Prisma.SortOrder
   url?: Prisma.SortOrder
   canonicalUrl?: Prisma.SortOrder
   urlKey?: Prisma.SortOrder
@@ -324,6 +335,7 @@ export type AffiliateSourceIntakePagesScalarWhereWithAggregatesInput = {
   createdAt?: Prisma.DateTimeWithAggregatesFilter<"AffiliateSourceIntakePages"> | Date | string
   updatedAt?: Prisma.DateTimeWithAggregatesFilter<"AffiliateSourceIntakePages"> | Date | string
   intakeId?: Prisma.StringWithAggregatesFilter<"AffiliateSourceIntakePages"> | string
+  supplySourceId?: Prisma.StringNullableWithAggregatesFilter<"AffiliateSourceIntakePages"> | string | null
   url?: Prisma.StringWithAggregatesFilter<"AffiliateSourceIntakePages"> | string
   canonicalUrl?: Prisma.StringWithAggregatesFilter<"AffiliateSourceIntakePages"> | string
   urlKey?: Prisma.StringWithAggregatesFilter<"AffiliateSourceIntakePages"> | string
@@ -342,6 +354,7 @@ export type AffiliateSourceIntakePagesCreateInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   intakeId: string
+  supplySourceId?: string | null
   url: string
   canonicalUrl: string
   urlKey: string
@@ -360,6 +373,7 @@ export type AffiliateSourceIntakePagesUncheckedCreateInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   intakeId: string
+  supplySourceId?: string | null
   url: string
   canonicalUrl: string
   urlKey: string
@@ -378,6 +392,7 @@ export type AffiliateSourceIntakePagesUpdateInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   intakeId?: Prisma.StringFieldUpdateOperationsInput | string
+  supplySourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   url?: Prisma.StringFieldUpdateOperationsInput | string
   canonicalUrl?: Prisma.StringFieldUpdateOperationsInput | string
   urlKey?: Prisma.StringFieldUpdateOperationsInput | string
@@ -396,6 +411,7 @@ export type AffiliateSourceIntakePagesUncheckedUpdateInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   intakeId?: Prisma.StringFieldUpdateOperationsInput | string
+  supplySourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   url?: Prisma.StringFieldUpdateOperationsInput | string
   canonicalUrl?: Prisma.StringFieldUpdateOperationsInput | string
   urlKey?: Prisma.StringFieldUpdateOperationsInput | string
@@ -414,6 +430,7 @@ export type AffiliateSourceIntakePagesCreateManyInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   intakeId: string
+  supplySourceId?: string | null
   url: string
   canonicalUrl: string
   urlKey: string
@@ -432,6 +449,7 @@ export type AffiliateSourceIntakePagesUpdateManyMutationInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   intakeId?: Prisma.StringFieldUpdateOperationsInput | string
+  supplySourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   url?: Prisma.StringFieldUpdateOperationsInput | string
   canonicalUrl?: Prisma.StringFieldUpdateOperationsInput | string
   urlKey?: Prisma.StringFieldUpdateOperationsInput | string
@@ -450,6 +468,7 @@ export type AffiliateSourceIntakePagesUncheckedUpdateManyInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   intakeId?: Prisma.StringFieldUpdateOperationsInput | string
+  supplySourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   url?: Prisma.StringFieldUpdateOperationsInput | string
   canonicalUrl?: Prisma.StringFieldUpdateOperationsInput | string
   urlKey?: Prisma.StringFieldUpdateOperationsInput | string
@@ -468,6 +487,7 @@ export type AffiliateSourceIntakePagesCountOrderByAggregateInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   intakeId?: Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrder
   url?: Prisma.SortOrder
   canonicalUrl?: Prisma.SortOrder
   urlKey?: Prisma.SortOrder
@@ -486,6 +506,7 @@ export type AffiliateSourceIntakePagesMaxOrderByAggregateInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   intakeId?: Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrder
   url?: Prisma.SortOrder
   canonicalUrl?: Prisma.SortOrder
   urlKey?: Prisma.SortOrder
@@ -502,6 +523,7 @@ export type AffiliateSourceIntakePagesMinOrderByAggregateInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   intakeId?: Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrder
   url?: Prisma.SortOrder
   canonicalUrl?: Prisma.SortOrder
   urlKey?: Prisma.SortOrder
@@ -529,6 +551,7 @@ export type AffiliateSourceIntakePagesSelect<ExtArgs extends runtime.Types.Exten
   createdAt?: boolean
   updatedAt?: boolean
   intakeId?: boolean
+  supplySourceId?: boolean
   url?: boolean
   canonicalUrl?: boolean
   urlKey?: boolean
@@ -547,6 +570,7 @@ export type AffiliateSourceIntakePagesSelectCreateManyAndReturn<ExtArgs extends 
   createdAt?: boolean
   updatedAt?: boolean
   intakeId?: boolean
+  supplySourceId?: boolean
   url?: boolean
   canonicalUrl?: boolean
   urlKey?: boolean
@@ -565,6 +589,7 @@ export type AffiliateSourceIntakePagesSelectUpdateManyAndReturn<ExtArgs extends 
   createdAt?: boolean
   updatedAt?: boolean
   intakeId?: boolean
+  supplySourceId?: boolean
   url?: boolean
   canonicalUrl?: boolean
   urlKey?: boolean
@@ -583,6 +608,7 @@ export type AffiliateSourceIntakePagesSelectScalar = {
   createdAt?: boolean
   updatedAt?: boolean
   intakeId?: boolean
+  supplySourceId?: boolean
   url?: boolean
   canonicalUrl?: boolean
   urlKey?: boolean
@@ -596,7 +622,7 @@ export type AffiliateSourceIntakePagesSelectScalar = {
   metadata?: boolean
 }
 
-export type AffiliateSourceIntakePagesOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "intakeId" | "url" | "canonicalUrl" | "urlKey" | "role" | "targetKindHints" | "status" | "discoverySource" | "robotsStatus" | "robotsCheckedAt" | "robotsNotes" | "metadata", ExtArgs["result"]["affiliateSourceIntakePages"]>
+export type AffiliateSourceIntakePagesOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "intakeId" | "supplySourceId" | "url" | "canonicalUrl" | "urlKey" | "role" | "targetKindHints" | "status" | "discoverySource" | "robotsStatus" | "robotsCheckedAt" | "robotsNotes" | "metadata", ExtArgs["result"]["affiliateSourceIntakePages"]>
 
 export type $AffiliateSourceIntakePagesPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "AffiliateSourceIntakePages"
@@ -606,6 +632,7 @@ export type $AffiliateSourceIntakePagesPayload<ExtArgs extends runtime.Types.Ext
     createdAt: Date
     updatedAt: Date
     intakeId: string
+    supplySourceId: string | null
     url: string
     canonicalUrl: string
     urlKey: string
@@ -1044,6 +1071,7 @@ export interface AffiliateSourceIntakePagesFieldRefs {
   readonly createdAt: Prisma.FieldRef<"AffiliateSourceIntakePages", 'DateTime'>
   readonly updatedAt: Prisma.FieldRef<"AffiliateSourceIntakePages", 'DateTime'>
   readonly intakeId: Prisma.FieldRef<"AffiliateSourceIntakePages", 'String'>
+  readonly supplySourceId: Prisma.FieldRef<"AffiliateSourceIntakePages", 'String'>
   readonly url: Prisma.FieldRef<"AffiliateSourceIntakePages", 'String'>
   readonly canonicalUrl: Prisma.FieldRef<"AffiliateSourceIntakePages", 'String'>
   readonly urlKey: Prisma.FieldRef<"AffiliateSourceIntakePages", 'String'>

@@ -34,6 +34,7 @@ tmp/
 .codex-artifacts/
 output/
 deploy/ai/deployment.env
+deploy/affiliate-governed/deployment.env
 deploy/ai/controller.env
 .playwright-cli/
 

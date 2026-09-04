@@ -16,6 +16,12 @@ import {
 
 const execFileAsync = promisify(execFile);
 const tsxPath = path.resolve('node_modules', '.bin', 'tsx');
+const LEGACY_RETIREMENT_MESSAGE =
+  'Legacy affiliate launcher is paused pending governed cohort proof; use governed gateway admission.';
+if (process.env.NODE_ENV === 'production' || process.argv.includes('--live')) {
+  console.error(LEGACY_RETIREMENT_MESSAGE);
+  process.exit(78);
+}
 
 const readOption = (name: string): string | undefined => {
   const equals = process.argv.find((argument) => argument.startsWith(`${name}=`));
