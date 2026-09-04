@@ -1,13 +1,16 @@
 "use client";
 
-import { SimpleGrid, Stack, Text } from "@mantine/core";
-
 import {
   calculateIncludedFeesFromTotalPrice,
   calculateInclusivePriceFromHostAmount,
 } from "@/lib/billingFees";
 import { normalizePriceCents } from "@/lib/priceUtils";
 import { formatBillAmount } from "@/types";
+import {
+  SimpleGrid,
+  Stack,
+  Text,
+} from "@/components/organization/organization-operation-ui";
 
 import CentsInput from "./CentsInput";
 

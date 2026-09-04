@@ -1,6 +1,8 @@
 "use client";
 
-import { TextInput, type TextInputProps } from "@mantine/core";
+import type { ComponentProps } from "react";
+
+import { TextInput } from "@/components/organization/organization-operation-ui";
 
 import {
   formatPriceInputValue,
@@ -8,10 +10,11 @@ import {
 } from "@/lib/priceUtils";
 
 type CentsInputProps = Omit<
-  TextInputProps,
+  ComponentProps<typeof TextInput>,
   "defaultValue" | "onChange" | "type" | "value"
 > & {
   blankWhenZero?: boolean;
+  maw?: number | string;
   maxCents?: number;
   onChange?: (value: number) => void;
   value?: number | null;
@@ -21,6 +24,7 @@ export default function CentsInput({
   blankWhenZero = true,
   inputMode = "numeric",
   leftSection = "$",
+  maw,
   maxCents,
   onChange,
   placeholder = "0.00",
@@ -39,6 +43,7 @@ export default function CentsInput({
         );
       }}
       placeholder={placeholder}
+      style={{ maxWidth: maw, ...props.style }}
       type="text"
       value={formatPriceInputValue(value, { blankWhenZero, maxCents })}
     />
