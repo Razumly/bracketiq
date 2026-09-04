@@ -17,7 +17,9 @@ function runAllowlist(directory: string, args: string[]) {
   });
 }
 
-describe('SSH management allowlist helper', () => {
+const posixOnlyDescribe = process.platform === 'win32' ? describe.skip : describe;
+
+posixOnlyDescribe('SSH management allowlist helper', () => {
   let fixtureDirectory: string;
 
   beforeEach(() => {
