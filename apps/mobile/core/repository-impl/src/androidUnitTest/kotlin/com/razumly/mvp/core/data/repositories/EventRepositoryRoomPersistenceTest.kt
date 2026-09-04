@@ -1882,8 +1882,15 @@ class EventRepositoryRoomPersistenceTest {
     }
 
     @Test
-    fun given_accepted_partial_proposal_when_room_reopens_offline_then_exact_placements_and_unscheduled_matches_remain() = kotlinx.coroutines.test.runTest {
+    fun given_partial_when_room_reopens_then_exact_schedule_remains() = kotlinx.coroutines.test.runTest {
         val fixture = eventRepositoryRoomPersistenceTournamentFixture()
+        val viewer = UserData(
+            id = "room-host", firstName = "Test", lastName = "Host", userName = "room-host",
+            friendIds = emptyList(), friendRequestIds = emptyList(), friendRequestSentIds = emptyList(),
+            followingIds = emptyList(), hasStripeAccount = false, uploadedImages = emptyList(),
+        )
+        val currentUserState = MutableStateFlow(Result.success(viewer))
+        val startupAuthState = MutableStateFlow<StartupAuthState>(StartupAuthState.Authenticated)
         val unplaced = fixture.proposal.graph.matches.single().copy(
             id = "match-room-unplaced", matchId = 2, start = null, end = null,
             fieldId = null, placementState = "UNPLACED",
@@ -1907,7 +1914,8 @@ class EventRepositoryRoomPersistenceTest {
         val graph = fixture.proposal.graph.copy(matches = fixture.proposal.graph.matches + unplaced)
         val proposal = fixture.proposal.copy(scheduleOutcome = outcome, graph = graph)
         val saved = fixture.saved.copy(scheduleOutcome = outcome, graph = graph, acceptanceOperationId = "partial-room-accept")
-        val databaseName = "issue39-${java.util.UUID.randomUUID()}.db"
+        // Keep the native SQLite path below the Windows path limit.
+        val databaseName = "i39-${java.util.UUID.randomUUID()}.db"
         fun openDatabase() = Room.databaseBuilder<MVPDatabaseService>(context, databaseName)
             .allowMainThreadQueries().build()
         var database = openDatabase()
@@ -1923,7 +1931,8 @@ class EventRepositoryRoomPersistenceTest {
                 else -> error("Unexpected proposal request.")
             }
         }) { configureMvpHttpClient() }
-        var repository = eventRepositoryRoomPersistenceRepository(database, http, UnconfinedTestDispatcher(testScheduler))
+        var repository = eventRepositoryRoomPersistenceRepository(database, http, UnconfinedTestDispatcher(testScheduler),
+            currentUserState = currentUserState, startupAuthState = startupAuthState)
         try {
             repository.createEventEditor(fixture.command).getOrThrow()
             assertNull(database.getEventDao.getEventById(fixture.eventId))
@@ -1937,11 +1946,20 @@ class EventRepositoryRoomPersistenceTest {
             repository.close()
             database.close()
             offline = true
+            startupAuthState.value = StartupAuthState.Checking
+            currentUserState.value = Result.failure(IllegalStateException("Restoring the cached account"))
             database = openDatabase()
-            repository = eventRepositoryRoomPersistenceRepository(database, http, UnconfinedTestDispatcher(testScheduler))
+            repository = eventRepositoryRoomPersistenceRepository(database, http, UnconfinedTestDispatcher(testScheduler),
+                currentUserState = currentUserState, startupAuthState = startupAuthState)
+            currentUserState.value = Result.success(viewer)
+            startupAuthState.value = StartupAuthState.Authenticated
 
             val cached = repository.getCachedEventWithRelationsFlow(fixture.eventId).first().getOrThrow()
             assertEquals(fixture.eventId, cached.event.id)
+            assertEquals(
+                listOf(fixture.timeSlotId),
+                database.getEventTimeSlotDao.getTimeSlotsByEventId(fixture.eventId).map { it.slotId },
+            )
             val matches = database.getMatchDao.getMatchesFlowOfTournament(fixture.eventId).first()
                 .associateBy { it.match.id }
             assertEquals(setOf("match-room-tournament", "match-room-unplaced"), matches.keys)
@@ -1957,6 +1975,10 @@ class EventRepositoryRoomPersistenceTest {
             assertNull(pending.end)
             assertNull(pending.fieldId)
             assertEquals(2, requestCount)
+            currentUserState.value = Result.success(viewer.copy(id = "another-account"))
+            repository.getCachedEventWithRelationsFlow(fixture.eventId).first { it.isFailure }
+            assertNull(database.getEventDao.getEventById(fixture.eventId))
+            assertTrue(database.getEventTimeSlotDao.getTimeSlotsByEventId(fixture.eventId).isEmpty())
         } finally {
             repository.close()
             http.close()
@@ -3400,10 +3422,13 @@ private fun eventRepositoryRoomPersistenceRepository(
     coroutineDispatcher: CoroutineDispatcher,
     teamRepository: ITeamRepository = mockk(relaxed = true),
     userRepository: IUserRepository = mockk(relaxed = true),
+    currentUserState: MutableStateFlow<Result<UserData>> = MutableStateFlow(
+        Result.failure(IllegalStateException("No test user")),
+    ),
+    startupAuthState: MutableStateFlow<StartupAuthState> = MutableStateFlow(StartupAuthState.Unauthenticated),
 ): EventRepository {
-    every { userRepository.currentUser } returns MutableStateFlow(
-        Result.failure<UserData>(IllegalStateException("No test user")),
-    )
+    every { userRepository.currentUser } returns currentUserState
+    every { userRepository.startupAuthState } returns startupAuthState
     return EventRepository(
         databaseService = database,
         api = MvpApiClient(

@@ -581,6 +581,14 @@ class DefaultCreateEventComponent(
                 return@launch
             }
             val loadingOperation = loadingHandler.newOperation()
+            val confirmation = _scheduleProposalState.value.requestAcceptanceConfirmation(
+                isPartial = proposal.scheduleOutcome.status ==
+                    com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeStatus.PARTIAL,
+            )
+            if (confirmation != _scheduleProposalState.value) {
+                _scheduleProposalState.value = confirmation
+                return@launch
+            }
             _scheduleProposalState.value = _scheduleProposalState.value.copy(
                 phase = ScheduleProposalReviewPhase.ACCEPTING, message = null,
             )
@@ -710,7 +718,15 @@ class DefaultCreateEventComponent(
 
     override fun returnToScheduleSetup() {
         if (_scheduleProposalState.value.phase.isBusy) return
-        clearScheduleProposal()
+        val review = _scheduleProposalState.value
+        if (review.phase == ScheduleProposalReviewPhase.CONFIRMING_PARTIAL) {
+            _scheduleProposalState.value = review.cancelConfirmation()
+            return
+        }
+        // Keep the request identity until setup changes or the server confirms rejection.
+        _scheduleProposalState.value = ScheduleProposalState(phase = ScheduleProposalReviewPhase.NONE)
+        _errorState.value = null
+        if (childStack.value.active.configuration == Config.Preview) navigation.pop()
     }
 
     private fun clearScheduleProposal() {

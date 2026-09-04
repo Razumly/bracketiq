@@ -2,6 +2,7 @@ package com.razumly.mvp.eventCreate
 
 import android.app.Application
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsEnabled
@@ -137,13 +138,16 @@ class ScheduleProposalDialogUiTest {
     @Test
     fun givenPartialProposal_when_dialogRenders_then_showsIncompleteData_and_partialAcceptInvokesCallback() {
         var accepted = false
+        val confirmation = mutableStateOf(false)
 
         composeRule.setContent {
             MaterialTheme {
                 ScheduleProposalDialog(
                     proposal = buildPartialProposal(),
-                    onAccept = { accepted = true },
+                    confirmPartial = confirmation.value,
+                    onAccept = { if (confirmation.value) accepted = true else confirmation.value = true },
                     onReject = {},
+                    onReturnToSetup = { confirmation.value = false },
                 )
             }
         }

@@ -1,10 +1,6 @@
 package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.schedule.PartialScheduleConfirmation
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
 import com.razumly.mvp.schedule.ScheduleProposalFailureDialog
 
 import androidx.compose.foundation.layout.Arrangement
@@ -583,6 +579,7 @@ internal fun EventScheduleMaintenanceReviewDialog(
     onRequestFreshProposal: () -> Unit,
     onRetryAcceptedScheduleSync: () -> Unit = {},
 ) {
+    if (!review.isVisible) return
     val proposal = review.proposal
     if (proposal == null) {
         ScheduleProposalFailureDialog(
@@ -594,14 +591,11 @@ internal fun EventScheduleMaintenanceReviewDialog(
         return
     }
     val outcome = proposal.scheduleOutcome
-    var confirmPartial by remember(proposal.operationId, proposal.proposalRevision, review.phase) {
-        mutableStateOf(false)
-    }
-    if (confirmPartial) {
+    if (review.phase == EventScheduleMaintenanceReviewPhase.CONFIRMING_PARTIAL) {
         PartialScheduleConfirmation(
             unscheduledMatchCount = outcome.unplacedMatchCount,
-            onConfirm = { confirmPartial = false; onAccept() },
-            onDismiss = { confirmPartial = false },
+            onConfirm = onAccept,
+            onDismiss = onDismiss,
         )
         return
     }
@@ -765,9 +759,7 @@ internal fun EventScheduleMaintenanceReviewDialog(
                 review.phase == EventScheduleMaintenanceReviewPhase.PROPOSED -> Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    TextButton(onClick = {
-                        if (outcome.isComplete) onAccept() else confirmPartial = true
-                    }) {
+                    TextButton(onClick = onAccept) {
                         Text(if (outcome.isComplete) "Accept" else "Review partial acceptance")
                     }
                     TextButton(onClick = onReject) {
@@ -780,10 +772,10 @@ internal fun EventScheduleMaintenanceReviewDialog(
                     }
                 }
                 isBusy -> Text(
-                    if (review.phase == EventScheduleMaintenanceReviewPhase.ACCEPTING) {
-                        "Accepting..."
-                    } else {
-                        "Rejecting..."
+                    when (review.phase) {
+                        EventScheduleMaintenanceReviewPhase.ACCEPTING -> "Accepting..."
+                        EventScheduleMaintenanceReviewPhase.REFRESHING -> "Refreshing proposal..."
+                        else -> "Rejecting..."
                     },
                 )
                 else -> TextButton(onClick = onRequestFreshProposal) {

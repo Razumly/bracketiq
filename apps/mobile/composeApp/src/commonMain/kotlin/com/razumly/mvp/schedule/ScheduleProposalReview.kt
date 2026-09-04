@@ -6,7 +6,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 
 enum class ScheduleProposalReviewPhase {
-    NONE, PROPOSED, REFRESHING, ACCEPTING, REJECTING, STALE, FAILED, REJECTED, ACCEPTED_SYNC_PENDING;
+    NONE, PROPOSED, CONFIRMING_PARTIAL, REFRESHING, ACCEPTING, REJECTING, STALE, FAILED, REJECTED, ACCEPTED_SYNC_PENDING;
 
     val isBusy: Boolean
         get() = this == REFRESHING || this == ACCEPTING || this == REJECTING
@@ -20,7 +20,18 @@ data class ScheduleProposalReview<T>(
     val acceptanceOperationId: String = "",
     val includePlaceholderTeams: Boolean? = null,
     val eventTimeZone: String = "UTC",
-)
+    val isVisible: Boolean = true,
+) {
+    fun requestAcceptanceConfirmation(isPartial: Boolean): ScheduleProposalReview<T> =
+        if (isPartial && phase == ScheduleProposalReviewPhase.PROPOSED) {
+            copy(phase = ScheduleProposalReviewPhase.CONFIRMING_PARTIAL)
+        } else this
+
+    fun cancelConfirmation(): ScheduleProposalReview<T> =
+        if (phase == ScheduleProposalReviewPhase.CONFIRMING_PARTIAL) {
+            copy(phase = ScheduleProposalReviewPhase.PROPOSED)
+        } else this
+}
 
 @Composable
 internal fun PartialScheduleConfirmation(

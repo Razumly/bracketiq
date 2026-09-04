@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
-/** Owns viewer-scoped event-cache projection, startup cleanup, and session invalidation. */
+/** Keeps cached Events available across restarts and clears them on account changes. */
 internal class EventSessionCacheCoordinator(
     private val databaseService: DatabaseService,
     private val userRepository: IUserRepository,
@@ -21,10 +21,6 @@ internal class EventSessionCacheCoordinator(
     private val scope = CoroutineScope(SupervisorJob() + coroutineDispatcher)
 
     init {
-        scope.launch {
-            databaseService.getEventDao.deleteAllEvents()
-            databaseService.getEventTimeSlotDao.deleteAllTimeSlots()
-        }
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
             var hasObservedUser = false
             var lastUserId: String? = null
@@ -33,6 +29,11 @@ internal class EventSessionCacheCoordinator(
                     ?.id
                     ?.trim()
                     ?.takeIf(String::isNotBlank)
+                if (!hasObservedUser && currentUserId == null &&
+                    userRepository.startupAuthState.value == StartupAuthState.Checking
+                ) {
+                    return@collect
+                }
                 if (!hasObservedUser) {
                     lastUserId = currentUserId
                     hasObservedUser = true

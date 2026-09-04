@@ -39,10 +39,24 @@ import kotlin.time.Instant
 import com.razumly.mvp.schedule.ScheduleProposalReviewPhase
 
 class DefaultCreateEventComponentTest : MainDispatcherTest() {
+    private fun confirmPartialProposal(harness: CreateEventHarness) {
+        val requestsBeforeConfirmation = harness.eventRepository.acceptedPartialEventEditorProposals.size
+        harness.component.acceptScheduleProposal()
+        advance()
+        assertEquals(ScheduleProposalReviewPhase.CONFIRMING_PARTIAL, harness.component.scheduleProposalState.value.phase)
+        assertEquals(requestsBeforeConfirmation, harness.eventRepository.acceptedPartialEventEditorProposals.size)
+        harness.component.acceptScheduleProposal()
+        advance()
+    }
+
     @Test
-    fun given_reviewed_proposal_when_back_returns_to_setup_then_configuration_is_retained_and_next_create_is_new() = runTest(testDispatcher) {
+    fun given_reviewed_proposal_when_back_returns_to_setup_then_configuration_and_unchanged_request_identity_are_retained() = runTest(testDispatcher) {
         val harness = partialProposalHarness()
         advance()
+        val setupStep = harness.component.childStack.value.active.configuration
+        harness.component.nextStep()
+        advance()
+        assertEquals(CreateEventComponent.Config.Preview, harness.component.childStack.value.active.configuration)
         harness.component.createEvent()
         advance()
         val setup = harness.component.newEventState.value
@@ -52,6 +66,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
 
         harness.component.onBackClicked()
         advance()
+        assertEquals(setupStep, harness.component.childStack.value.active.configuration)
         assertNull(harness.component.pendingScheduleProposal.value)
         assertEquals(setup, harness.component.newEventState.value)
         assertEquals(fields, harness.component.localFields.value)
@@ -62,7 +77,12 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         advance()
         val nextCommand = harness.eventRepository.attemptedCreateEventEditorCommands.last()
         assertEquals(firstCommand.draft, nextCommand.draft)
-        assertNotEquals(firstCommand.createOperationId, nextCommand.createOperationId)
+        assertEquals(firstCommand.createOperationId, nextCommand.createOperationId)
+        harness.component.returnToScheduleSetup()
+        harness.component.updateEventField { copy(name = "Corrected setup") }
+        harness.component.createEvent()
+        advance()
+        assertNotEquals(firstCommand.createOperationId, harness.eventRepository.attemptedCreateEventEditorCommands.last().createOperationId)
     }
 
     @Test
@@ -744,6 +764,15 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
 
             harness.component.acceptScheduleProposal()
             advance()
+            assertEquals(ScheduleProposalReviewPhase.CONFIRMING_PARTIAL, harness.component.scheduleProposalState.value.phase)
+            assertTrue(harness.eventRepository.acceptedPartialEventEditorProposals.isEmpty())
+            assertEquals(0, harness.onEventCreatedCount)
+            harness.component.returnToScheduleSetup()
+            assertEquals(ScheduleProposalReviewPhase.PROPOSED, harness.component.scheduleProposalState.value.phase)
+            harness.component.acceptScheduleProposal()
+            advance()
+            harness.component.acceptScheduleProposal()
+            advance()
 
             val command = harness.eventRepository.createEventEditorCalls.single()
             val accepted = harness.eventRepository.acceptedPartialEventEditorProposals.single()
@@ -764,16 +793,14 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
 
             harness.component.createEvent()
             advance()
-            harness.component.acceptScheduleProposal()
-            advance()
+            confirmPartialProposal(harness)
 
             val firstAttempt = harness.eventRepository.acceptedPartialEventEditorProposals.single()
             assertTrue(harness.component.pendingScheduleProposal.value != null)
             assertEquals(0, harness.onEventCreatedCount)
 
             harness.eventRepository.acceptEditorFailure = null
-            harness.component.acceptScheduleProposal()
-            advance()
+            confirmPartialProposal(harness)
 
             val attempts = harness.eventRepository.acceptedPartialEventEditorProposals
             assertEquals(2, attempts.size)
@@ -799,8 +826,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
 
             harness.component.createEvent()
             advance()
-            harness.component.acceptScheduleProposal()
-            advance()
+            confirmPartialProposal(harness)
 
             val firstProposal = harness.component.pendingScheduleProposal.value
             assertTrue(firstProposal != null)
@@ -831,8 +857,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
                 harness.component.pendingScheduleProposal.value?.proposal?.snapshot?.draft?.basics?.name,
             )
 
-            harness.component.acceptScheduleProposal()
-            advance()
+            confirmPartialProposal(harness)
             assertEquals(2, harness.eventRepository.acceptedPartialEventEditorProposals.size)
             assertEquals(1, harness.onEventCreatedCount)
             assertTrue(harness.component.pendingScheduleProposal.value == null)

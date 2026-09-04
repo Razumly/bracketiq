@@ -2,6 +2,7 @@ package com.razumly.mvp.eventDetail
 
 import android.app.Application
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -46,12 +47,16 @@ class EventDetailOverlayHostUiTest {
     fun given_incomplete_proposal_with_more_than_eight_unscheduled_matches_when_review_renders_then_all_rows_are_available_before_acceptance() {
         var accepted = false
         val review = maintenanceReviewWithUnscheduledMatches(count = 9)
+        val reviewState = mutableStateOf(review)
 
         composeRule.setContent {
             MaterialTheme {
                 EventScheduleMaintenanceReviewDialog(
-                    review = review,
-                    onAccept = { accepted = true },
+                    review = reviewState.value,
+                    onAccept = {
+                        val next = reviewState.value.requestAcceptanceConfirmation(isPartial = true)
+                        if (next == reviewState.value) accepted = true else reviewState.value = next
+                    },
                     onReject = {},
                     onDismiss = {},
                     onRequestFreshProposal = {},
@@ -143,14 +148,18 @@ class EventDetailOverlayHostUiTest {
         var accepted = false
         var rejected = false
         val review = maintenanceReviewWithUnscheduledMatches(count = 1)
+        val reviewState = mutableStateOf(review)
 
         composeRule.setContent {
             MaterialTheme {
                 EventScheduleMaintenanceReviewDialog(
-                    review = review,
-                    onAccept = { accepted = true },
+                    review = reviewState.value,
+                    onAccept = {
+                        val next = reviewState.value.requestAcceptanceConfirmation(isPartial = true)
+                        if (next == reviewState.value) accepted = true else reviewState.value = next
+                    },
                     onReject = { rejected = true },
-                    onDismiss = {},
+                    onDismiss = { reviewState.value = reviewState.value.cancelConfirmation() },
                     onRequestFreshProposal = {},
                 )
             }

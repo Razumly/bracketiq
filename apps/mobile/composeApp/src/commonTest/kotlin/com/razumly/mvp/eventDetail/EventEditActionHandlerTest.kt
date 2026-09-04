@@ -49,6 +49,93 @@ import kotlin.test.assertNull
 
 class EventEditActionHandlerTest {
     @Test
+    fun given_partial_maintenance_when_accepting_then_confirmation_is_required_before_the_request() = runTest {
+        val event = testEvent()
+        val session = editorSession(event = event, operations = listOf(EventEditorMaintenanceOperation.REBUILD))
+        val complete = maintenanceProposal(EventEditorMaintenanceOperation.REBUILD)
+        val unplaced = complete.graph.matches.single().copy(
+            placementState = "UNPLACED", fieldId = null, start = null, end = null,
+            phase = "POOL", phaseDivisionId = "pool-a",
+        )
+        val proposal = complete.copy(
+            graph = complete.graph.copy(matches = listOf(unplaced)),
+            scheduleOutcome = complete.scheduleOutcome.copy(
+                status = EventEditorMaintenanceScheduleOutcomeStatus.INCOMPLETE,
+                isComplete = false, placedMatchCount = 0, unplacedMatchCount = 1,
+                matches = listOf(unplaced),
+                unscheduledMatches = listOf(com.razumly.mvp.core.network.dto.EventEditorMaintenanceUnscheduledMatchDto(
+                    id = unplaced.id, matchId = unplaced.matchId, phase = "POOL", phaseDivisionId = "pool-a",
+                )),
+                affectedCompetitionPhases = listOf(com.razumly.mvp.core.network.dto.EventEditorMaintenanceAffectedCompetitionPhaseDto(
+                    id = "pool-a", name = "Pool A", phase = "POOL",
+                )),
+            ),
+        )
+        val repository = HandlerEventRepository(
+            editorSessions = ArrayDeque(listOf(session)),
+            saveOutcomes = ArrayDeque(listOf(saveOutcome(session))),
+            proposalResponses = ArrayDeque(listOf(EventEditorMaintenanceResponseDto.Proposed(proposal))),
+        )
+        repository.acceptMaintenanceResult = acceptedMaintenanceResult(proposal)
+        repository.batchEvents = listOf(event)
+        val handler = createHandler(this, event, repository, mutableListOf())
+        handler.startEditingEvent()
+        advanceUntilIdle()
+        handler.rebuildWithoutPlaceholderTeams()
+        advanceUntilIdle()
+        handler.acceptScheduleMaintenanceProposal()
+        advanceUntilIdle()
+        assertEquals(EventScheduleMaintenanceReviewPhase.CONFIRMING_PARTIAL, handler.scheduleMaintenanceReview.value?.phase)
+        assertTrue(repository.acceptanceRequests.isEmpty())
+        handler.dismissScheduleMaintenanceReview()
+        assertEquals(EventScheduleMaintenanceReviewPhase.PROPOSED, handler.scheduleMaintenanceReview.value?.phase)
+        handler.acceptScheduleMaintenanceProposal()
+        handler.acceptScheduleMaintenanceProposal()
+        advanceUntilIdle()
+        assertEquals(proposal.proposalRevision, repository.acceptanceRequests.single().proposalRevision)
+        assertNull(handler.scheduleMaintenanceReview.value)
+    }
+
+    @Test
+    fun given_offline_restore_when_back_is_selected_then_setup_remains_available_and_recovery_is_retained() = runTest {
+        val event = testEvent()
+        val session = editorSession(event = event, operations = listOf(EventEditorMaintenanceOperation.REBUILD))
+        val repository = HandlerEventRepository(
+            editorSessions = ArrayDeque(listOf(session)),
+            saveOutcomes = ArrayDeque(listOf(saveOutcome(session))),
+            proposalResponses = ArrayDeque(listOf(EventEditorMaintenanceResponseDto.Proposed(
+                maintenanceProposal(EventEditorMaintenanceOperation.REBUILD),
+            ))),
+            saveFailure = IllegalStateException("offline"),
+        )
+        val draft = EventEditDraftCoordinator(initialEvent = event, canEditInitial = false)
+        val handler = createHandler(this, event, repository, mutableListOf(), draftCoordinator = draft)
+        handler.startEditingEvent()
+        advanceUntilIdle()
+        handler.editEventField { copy(name = "Retained offline setup") }
+        val setup = draft.editedEvent.value
+        handler.rebuildWithoutPlaceholderTeams()
+        advanceUntilIdle()
+        handler.dismissScheduleMaintenanceReview()
+        advanceUntilIdle()
+
+        assertEquals(false, handler.scheduleMaintenanceReview.value?.isVisible)
+        assertEquals(EventScheduleMaintenanceReviewPhase.STALE, handler.scheduleMaintenanceReview.value?.phase)
+        assertEquals(setup, draft.editedEvent.value)
+        assertTrue(draft.isEditing.value)
+        handler.cancelEditingEvent()
+        assertTrue(draft.isEditing.value)
+        assertEquals(setup, draft.editedEvent.value)
+        assertEquals(true, handler.scheduleMaintenanceReview.value?.isVisible)
+        handler.dismissScheduleMaintenanceReview()
+        assertEquals(false, handler.scheduleMaintenanceReview.value?.isVisible)
+        handler.rebuildWithoutPlaceholderTeams()
+        assertEquals(true, handler.scheduleMaintenanceReview.value?.isVisible)
+        assertEquals(1, repository.maintenanceRequests.size)
+        assertTrue(repository.acceptanceRequests.isEmpty())
+    }
+
+    @Test
     fun given_edited_setup_when_proposal_is_dismissed_then_server_settings_restore_without_losing_the_draft() = runTest {
         val event = testEvent()
         val session = editorSession(event = event, operations = listOf(EventEditorMaintenanceOperation.REBUILD))

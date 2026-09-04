@@ -171,6 +171,7 @@ fun CreateEventScreen(
             isStale = isStale,
             isBusy = scheduleProposalState.phase.isBusy,
             message = scheduleProposalState.message,
+            confirmPartial = scheduleProposalState.phase == ScheduleProposalReviewPhase.CONFIRMING_PARTIAL,
             onAccept = component::acceptScheduleProposal,
             onRefresh = component::refreshScheduleProposal,
             onReject = component::rejectScheduleProposal,
@@ -741,20 +742,18 @@ internal fun ScheduleProposalDialog(
     isStale: Boolean = false,
     isBusy: Boolean = false,
     message: String? = null,
+    confirmPartial: Boolean = false,
     onAccept: () -> Unit,
     onRefresh: () -> Unit = {},
     onReject: () -> Unit,
     onReturnToSetup: () -> Unit = onReject,
 ) {
     val schedule = proposal.scheduleOutcome
-    var confirmPartial by remember(proposal.createOperationId, proposal.proposalRevision, isStale, isBusy) {
-        mutableStateOf(false)
-    }
     if (confirmPartial) {
         PartialScheduleConfirmation(
             unscheduledMatchCount = schedule.unplacedMatchCount,
-            onConfirm = { confirmPartial = false; onAccept() },
-            onDismiss = { confirmPartial = false },
+            onConfirm = onAccept,
+            onDismiss = onReturnToSetup,
         )
         return
     }
@@ -919,8 +918,6 @@ internal fun ScheduleProposalDialog(
                 onClick = {
                     when {
                         isStale -> onRefresh()
-                        schedule.status == com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeStatus.PARTIAL ->
-                            confirmPartial = true
                         else -> onAccept()
                     }
                 },

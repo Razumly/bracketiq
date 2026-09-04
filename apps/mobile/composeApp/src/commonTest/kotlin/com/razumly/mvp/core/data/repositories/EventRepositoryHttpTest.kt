@@ -6465,7 +6465,6 @@ class EventRepositoryHttpTest {
         }
         val repository = maintenanceHttpRepository(database, engine, StandardTestDispatcher(testScheduler))
         advanceUntilIdle()
-        timeSlotDao.entries += cachedTimeSlots
 
         val result = repository.proposeEventScheduleMaintenance(request)
         val proposed = result.getOrThrow() as? EventEditorMaintenanceResponseDto.Proposed
@@ -6966,7 +6965,6 @@ class EventRepositoryHttpTest {
             }
             val repository = maintenanceHttpRepository(database, engine, StandardTestDispatcher(testScheduler))
             advanceUntilIdle()
-            timeSlotDao.entries += cachedTimeSlots
 
             val staleResult = repository.acceptEventScheduleMaintenance(
                 maintenanceAcceptRequest(request, "maintenance-proposal-revision"),

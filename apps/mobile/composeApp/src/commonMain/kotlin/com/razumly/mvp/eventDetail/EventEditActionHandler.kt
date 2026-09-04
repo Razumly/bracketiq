@@ -278,6 +278,11 @@ internal class EventEditActionHandler(
     }
 
     fun cancelEditingEvent() {
+        if (maintenanceRollbackRecoveryRequired) {
+            _scheduleMaintenanceReview.value = _scheduleMaintenanceReview.value?.copy(isVisible = true)
+            setError(SCHEDULE_MAINTENANCE_ROLLBACK_REQUIRED_MESSAGE)
+            return
+        }
         if (isScheduleMaintenanceReviewDismissBlocked()) {
             return
         }
@@ -362,6 +367,11 @@ internal class EventEditActionHandler(
     }
 
     private fun requestEventUpdate(transitionConfirmed: Boolean) {
+        if (maintenanceRequestInFlight || maintenanceRollbackRecoveryRequired) {
+            _scheduleMaintenanceReview.value = _scheduleMaintenanceReview.value?.copy(isVisible = true)
+            setError("Resolve the pending schedule request before saving Event changes.")
+            return
+        }
         if (!transitionConfirmed) {
             buildEventTypeTransitionConfirmation()?.let { confirmation ->
                 _eventTypeTransitionConfirmation.value = confirmation
@@ -446,6 +456,7 @@ internal class EventEditActionHandler(
     private fun requestScheduleMaintenanceAction(action: EventScheduleEditAction) {
         if (maintenanceRequestInFlight) return
         if (maintenanceRollbackRecoveryRequired) {
+            _scheduleMaintenanceReview.value = _scheduleMaintenanceReview.value?.copy(isVisible = true)
             setError(SCHEDULE_MAINTENANCE_ROLLBACK_REQUIRED_MESSAGE)
             return
         }
@@ -753,9 +764,17 @@ internal class EventEditActionHandler(
     fun acceptScheduleMaintenanceProposal() {
         val currentReview = _scheduleMaintenanceReview.value ?: return
         if (
-            currentReview.phase != EventScheduleMaintenanceReviewPhase.PROPOSED ||
+            currentReview.phase !in setOf(EventScheduleMaintenanceReviewPhase.PROPOSED,
+                EventScheduleMaintenanceReviewPhase.CONFIRMING_PARTIAL) ||
                 maintenanceRequestInFlight
         ) {
+            return
+        }
+        val confirmation = currentReview.requestAcceptanceConfirmation(
+            isPartial = !currentReview.reviewedProposal.scheduleOutcome.isComplete,
+        )
+        if (confirmation != currentReview) {
+            _scheduleMaintenanceReview.value = confirmation
             return
         }
         val requestGeneration = maintenanceRequestGeneration
@@ -1038,13 +1057,16 @@ internal class EventEditActionHandler(
     }
 
     fun dismissScheduleMaintenanceReview() {
-        if (maintenanceRollbackRecoveryRequired) {
-            setError(SCHEDULE_MAINTENANCE_ROLLBACK_REQUIRED_MESSAGE)
+        val review = _scheduleMaintenanceReview.value ?: return
+        if (review.phase == EventScheduleMaintenanceReviewPhase.CONFIRMING_PARTIAL) {
+            _scheduleMaintenanceReview.value = review.cancelConfirmation()
             return
         }
         if (isScheduleMaintenanceReviewDismissBlocked()) {
             return
         }
+        _scheduleMaintenanceReview.value = review.copy(isVisible = false)
+        if (maintenanceRollbackRecoveryRequired) return
         if (maintenanceOriginalSession != null) {
             maintenanceRequestInFlight = true
             _scheduleMaintenanceReview.value = _scheduleMaintenanceReview.value?.copy(
@@ -1104,10 +1126,12 @@ internal class EventEditActionHandler(
                 val action = (if (review.proposal != null) review.requestedAction() else lastMaintenanceAction)
                     ?: return@launch
                 setEditorSession(freshSession)
-                seedEditableDraft(
-                    selectedEvent = freshSession.canonicalState.event,
-                    canonicalState = freshSession.canonicalState,
-                )
+                if (!requiresFreshRecovery) {
+                    seedEditableDraft(
+                        selectedEvent = freshSession.canonicalState.event,
+                        canonicalState = freshSession.canonicalState,
+                    )
+                }
                 if (requiresFreshRecovery) {
                     clearScheduleMaintenanceIdentities()
                 }
