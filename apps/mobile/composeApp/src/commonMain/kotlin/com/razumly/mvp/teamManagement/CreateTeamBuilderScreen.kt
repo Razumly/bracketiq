@@ -121,6 +121,7 @@ private enum class TeamBuilderStep(val label: String) {
 }
 
 private val TeamBuilderEmailRegex = Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")
+private val TeamBuilderDateOnlyRegex = Regex("^\\d{4}-\\d{2}-\\d{2}$")
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalTime::class)
 @Composable
@@ -226,6 +227,8 @@ fun CreateTeamBuilderScreen(
         val message = when {
             editor.firstName.isBlank() || editor.lastName.isBlank() -> "First and last name are required."
             editor.email.isNotBlank() && !TeamBuilderEmailRegex.matches(editor.email.trim()) -> "Enter a valid email or leave it blank."
+            editor.isMinor && !TeamBuilderDateOnlyRegex.matches(editor.dateOfBirth.trim()) -> "Select a date of birth for a minor."
+            editor.isMinor && !TeamBuilderEmailRegex.matches(editor.guardianEmail.trim()) -> "Enter a valid guardian email for a minor."
             editor.id !in personInvites.map(TeamBuilderPersonInvite::id) && isAtCapacity -> "This roster is full."
             else -> null
         }
@@ -240,6 +243,20 @@ fun CreateTeamBuilderScreen(
         }
         personEditor = null
         error = null
+    }
+
+    fun validatePersonInvites(): Boolean {
+        val invalid = personInvites.firstOrNull { invite ->
+            invite.isMinor && (
+                !TeamBuilderDateOnlyRegex.matches(invite.dateOfBirth.trim())
+                    || !TeamBuilderEmailRegex.matches(invite.guardianEmail.trim())
+            )
+        }
+        if (invalid != null) {
+            error = "Complete the date of birth and guardian email for every minor player."
+            return false
+        }
+        return true
     }
 
     fun addStaffPerson() {
@@ -292,11 +309,13 @@ fun CreateTeamBuilderScreen(
                             error = "Choose a manager before continuing. You will remain the temporary manager until they accept."
                             return@Button
                         }
+                        if (activeStep == TeamBuilderStep.INVITE && !validatePersonInvites()) return@Button
                         if (step < steps.lastIndex) {
                             error = null
                             step += 1
                         } else {
                             if (!validateBasics()) return@Button
+                            if (!validatePersonInvites()) return@Button
                             val activePlayerIds = if (isPlaying) listOf(currentUser.id) else emptyList()
                             onFinish(
                                 draft.team.copy(
@@ -617,7 +636,7 @@ fun CreateTeamBuilderScreen(
                                         Text("This player is a minor")
                                     }
                                     if (editor.isMinor) {
-                                        StandardTextField(value = editor.dateOfBirth, onValueChange = { personEditor = editor.copy(dateOfBirth = it) }, label = "Date of birth (YYYY-MM-DD)", modifier = Modifier.fillMaxWidth())
+                                        ManagedPlayerDateField(value = editor.dateOfBirth, onValueChange = { personEditor = editor.copy(dateOfBirth = it) }, label = "Date of birth", modifier = Modifier.fillMaxWidth())
                                         StandardTextField(value = editor.guardianEmail, onValueChange = { personEditor = editor.copy(guardianEmail = it) }, label = "Guardian email", keyboardType = "email", modifier = Modifier.fillMaxWidth())
                                         Text("The invitation will go to the guardian.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }

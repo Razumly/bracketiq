@@ -266,7 +266,7 @@ describe('managed player profiles', () => {
       invites: {
         findFirst: jest.fn().mockResolvedValue({
           id: 'invite_old', teamId: 'team_1', userId: 'profile_1', role: 'player', type: 'TEAM', status: 'PENDING',
-          email: 'old@example.com', phone: null, isMinor: false, dateOfBirth: new Date('1990-01-01T00:00:00.000Z'), guardianEmail: null,
+          email: 'old@example.com', playerEmail: 'old@example.com', phone: null, isMinor: false, dateOfBirth: new Date('1990-01-01T00:00:00.000Z'), guardianEmail: null,
         }),
         update: jest.fn(),
         create: jest.fn().mockResolvedValue({ id: 'invite_new', userId: 'profile_1', status: 'PENDING' }),
@@ -278,6 +278,8 @@ describe('managed player profiles', () => {
       $transaction: (callback: (transaction: any) => Promise<unknown>) => callback(tx),
     }, {
       profileId: 'profile_1',
+      inviteId: 'invite_old',
+      teamId: 'team_1',
       managerUserId: 'manager_1',
       email: 'new@example.com',
       now: NOW,

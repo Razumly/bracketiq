@@ -18,6 +18,7 @@ data class InviteResponseDto(
 data class InviteCreateDto(
     val type: String,
     val email: String? = null,
+    val playerEmail: String? = null,
     val status: String? = null,
     val staffTypes: List<String> = emptyList(),
     val replaceStaffTypes: Boolean? = null,
