@@ -74,7 +74,9 @@ The scoped implementation is complete. The final focused site run passed 82 test
 
 The full site run completed 931 suites: 884 passed, 42 failed, and five were skipped. It reported 6,050 passed tests, 82 failed tests, and 40 skipped tests. Failures include Windows path, socket, symlink, shell, and CRLF assumptions; older Event UI and search assertions; one existing pool-play duty assertion; and ten Playwright files collected by Jest. The issue 45 suites pass independently. The full JSON report is at `apps/site/test-results/issue-45-jest.json` and is not part of the implementation commit.
 
-The full Android/JVM run covered reports for 1,955 tests in 283 suites. It reported six failures and ten skips. One Reflow test expectation was corrected and now passes. The other five failures are unchanged Event-editor parity tests: their golden fixtures or wire assertions still expect contract version 3 instead of the current version 4. Native iOS tests did not run on Windows. Do not report the full suites as green.
+The full Android/JVM run covered reports for 1,955 tests in 283 suites. It reported six failures and ten skips. One Reflow test expectation was corrected and then passed. The other five failures were Event Editor parity tests. Their golden fixtures and wire oracle expected contract version 3 instead of the current version 4. Native iOS tests did not run on Windows. This run was not green when issue 45 closed.
+
+Follow-up on 2026-09-04: Update the three shared web goldens and the common mobile wire oracle to contract version 4. The 10 focused mobile parity tests passed. The two site parity suites passed all 6 tests. The complete Android/JVM test graph then passed. Native iOS tests did not run on Windows.
 
 ## Context and Orientation
 

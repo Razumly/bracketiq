@@ -1136,7 +1136,7 @@ private fun jsonObject(vararg entries: Pair<String, Any?>): JsonObject =
 internal val EXPECTED_TOURNAMENT_PARITY_WIRE =
     """
 {
-  "contractVersion": 3,
+  "contractVersion": 4,
   "createOperationId": "create-operation-tournament-parity",
   "expectedRevisions": {
     "editorRevision": "new",
