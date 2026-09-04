@@ -58,6 +58,12 @@ import {
 
 export const dynamic = 'force-dynamic';
 
+type InviteDeliveryRecord = {
+  id: string;
+  status?: string | null;
+  sentAt?: Date | string | null;
+};
+
 const inviteSchema = z.object({
   type: z.string(),
   email: z.string().optional(),
@@ -598,7 +604,11 @@ export async function POST(req: NextRequest) {
           throw new InviteRouteError(400, 'Invalid invite type');
         }
 
-        const normalizedStatus = normalizeInviteStatus(invite.status) ?? 'PENDING';
+        const requestedStatus = normalizeInviteStatus(invite.status);
+        if (requestedStatus && requestedStatus !== 'PENDING') {
+          throw new InviteRouteError(400, 'New invites must start with PENDING status');
+        }
+        const normalizedStatus = 'PENDING';
         const eventId = typeof invite.eventId === 'string' && invite.eventId.trim() ? invite.eventId.trim() : null;
         const organizationId = typeof invite.organizationId === 'string' && invite.organizationId.trim()
           ? invite.organizationId.trim()
@@ -996,7 +1006,7 @@ export async function POST(req: NextRequest) {
     });
 
     const baseUrl = getRequestOrigin(req);
-    let emailedInvites: any[] = [];
+    let emailedInvites: InviteDeliveryRecord[] = [];
     let inviteDeliveryFailed = false;
     try {
       emailedInvites = await sendInviteEmails(toEmail, baseUrl);

@@ -209,7 +209,7 @@ describe('POST /api/invites/[id]/accept', () => {
     expect(txMock.userData.updateMany).not.toHaveBeenCalled();
     expect(txMock.invites.update).toHaveBeenCalledWith({
       where: { id: 'invite_1' },
-      data: { status: 'ACCEPTED', updatedAt: expect.any(Date) },
+      data: { status: 'ACCEPTED', finalizedAt: expect.any(Date), updatedAt: expect.any(Date) },
     });
     expect(txMock.invites.delete).not.toHaveBeenCalled();
   });
@@ -265,7 +265,7 @@ describe('POST /api/invites/[id]/accept', () => {
     });
     expect(txMock.invites.update).toHaveBeenCalledWith({
       where: { id: 'invite_1' },
-      data: { status: 'ACCEPTED', updatedAt: expect.any(Date) },
+      data: { status: 'ACCEPTED', finalizedAt: expect.any(Date), updatedAt: expect.any(Date) },
     });
     expect(txMock.invites.delete).not.toHaveBeenCalled();
   });

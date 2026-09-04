@@ -100,7 +100,7 @@ class TeamDtosTest {
     }
 
     @Test
-    fun team_member_invite_response_preserves_delivery_failure_separately_from_save() {
+    fun given_team_member_invite_response_when_delivery_fails_then_save_remains_successful() {
         val dto = jsonMVP.decodeFromString<TeamMemberInviteResponseDto>(
             """
             {
