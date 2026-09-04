@@ -426,6 +426,7 @@ export const acceptTeamInviteWithGuardianRules = async ({
       where: { id: transactionInvite.id },
       data: {
         status: 'ACCEPTED',
+        finalizedAt: now,
         updatedAt: now,
       },
     });
@@ -518,6 +519,7 @@ export const declineTeamInviteWithGuardianRules = async ({
       where: { id: transactionInvite.id },
       data: {
         status: 'DECLINED',
+        finalizedAt: now,
         updatedAt: now,
       },
     });

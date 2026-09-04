@@ -47,6 +47,11 @@ export type CreateTeamMemberInviteResult = {
     ok: boolean;
     invite?: Invite;
     shareUrl?: string | null;
+    delivery?: {
+        attempted: boolean;
+        failed: boolean;
+        inviteIds: string[];
+    };
 };
 export type TeamRegistrationConsent = {
     documentId?: string | null;
@@ -710,7 +715,7 @@ class TeamService {
         try {
             const currentInviteId = inviteId?.trim() || (
                 await userService.listInvites({ userId, teamId })
-            ).find((invite) => ['PENDING', 'FAILED'].includes(String(invite.status ?? '').toUpperCase()) && invite.$id)?.$id;
+            ).find((invite) => ['PENDING', 'SENT', 'FAILED'].includes(String(invite.status ?? '').toUpperCase()) && invite.$id)?.$id;
 
             if (!currentInviteId) {
                 return false;

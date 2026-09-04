@@ -446,6 +446,27 @@ const protectPendingRoster = (
   };
 };
 
+const findRosterPatchError = (
+  existing: Record<string, unknown>,
+  next: TeamState,
+): string | null => {
+  const existingPlayerIds = toUniqueStrings(existing.playerIds);
+  const addedPlayerIds = next.playerIds.filter((userId) => !existingPlayerIds.includes(userId));
+  if (addedPlayerIds.length) {
+    return 'Use a team invite to add a player. The player joins the active roster after acceptance.';
+  }
+
+  const teamSize = Math.max(0, Math.trunc(normalizeNumber(next.teamSize, 0)));
+  if (teamSize > 0 && new Set([...next.playerIds, ...next.pending]).size > teamSize) {
+    return 'Team is full. Player invite was not sent.';
+  }
+
+  // A pending entry may be removed by the manager. New pending entries remain
+  // valid here because syncCanonicalTeamRoster creates the invitation in the
+  // same transaction.
+  return null;
+};
+
 const getTeamsDelegate = (client: any) => client?.teams;
 const updateTeamWithSchemaContract = async (
   teamsDelegate: any,
@@ -580,6 +601,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
 
     const nextState = buildTeamState(existingCanonical as Record<string, any>, payload);
+    const rosterPatchError = findRosterPatchError(existingCanonical as Record<string, any>, nextState);
+    if (rosterPatchError) {
+      return NextResponse.json({ error: rosterPatchError }, { status: 409 });
+    }
     const registrationSettingsTouched = hasOwn(payload, 'joinPolicy') || hasOwn(payload, 'openRegistration') || hasOwn(payload, 'registrationPriceCents');
     const registrationSettingsChanged = registrationSettingsTouched && (
       resolveSerializedTeamJoinPolicy(existingCanonical as Record<string, any>) !== nextState.joinPolicy
@@ -715,6 +740,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   const nextState = buildTeamState(existing as Record<string, any>, payload);
+  const rosterPatchError = findRosterPatchError(existing as Record<string, any>, nextState);
+  if (rosterPatchError) {
+    return NextResponse.json({ error: rosterPatchError }, { status: 409 });
+  }
   const registrationSettingsTouched = hasOwn(payload, 'joinPolicy') || hasOwn(payload, 'openRegistration') || hasOwn(payload, 'registrationPriceCents');
   const registrationSettingsChanged = registrationSettingsTouched && (
     resolveSerializedTeamJoinPolicy(existing as Record<string, any>) !== nextState.joinPolicy

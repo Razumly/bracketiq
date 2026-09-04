@@ -159,6 +159,39 @@ class TeamDetailsDialogUiTest {
         composeRule.onNodeWithText("Message").assertIsDisplayed()
     }
 
+    @Test
+    fun given_pending_player_when_team_details_opens_then_awaiting_player_label_is_visible() {
+        val currentUser = user(id = "manager", firstName = "Casey", lastName = "Manager")
+        val pendingPlayer = user(id = "pending", firstName = "Jordan", lastName = "Awaiting")
+
+        composeRule.setContent {
+            MaterialTheme {
+                TeamDetailsDialog(
+                    team = TeamWithPlayers(
+                        team = Team(
+                            division = "Open",
+                            name = "Pending roster team",
+                            captainId = currentUser.id,
+                            playerIds = emptyList(),
+                            pending = listOf(pendingPlayer.id),
+                            teamSize = 2,
+                            sport = "Volleyball",
+                            id = "pending-roster-team",
+                        ),
+                        captain = currentUser,
+                        players = emptyList(),
+                        pendingPlayers = listOf(pendingPlayer),
+                    ),
+                    currentUser = currentUser,
+                    onDismiss = {},
+                    onPlayerMessage = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Awaiting player").assertIsDisplayed()
+    }
+
     private fun user(
         id: String,
         firstName: String,

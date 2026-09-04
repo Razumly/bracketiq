@@ -572,6 +572,22 @@ describe('/api/teams/[id] PATCH canonical team sync', () => {
   });
 
   it('sends newly created pending invite rows after a canonical roster patch commits', async () => {
+    loadCanonicalTeamByIdMock.mockReset();
+    loadCanonicalTeamByIdMock.mockResolvedValue({
+      id: 'team_1',
+      name: 'Team One',
+      division: 'Open',
+      divisionTypeId: 'open',
+      sport: 'Beach Volleyball',
+      playerIds: ['manager_1', 'user_2'],
+      captainId: 'manager_1',
+      managerId: 'manager_1',
+      headCoachId: null,
+      coachIds: [],
+      pending: [],
+      teamSize: 3,
+      profileImageId: null,
+    });
     const createdInvite = {
       id: 'invite_1',
       type: 'TEAM',
@@ -591,5 +607,19 @@ describe('/api/teams/[id] PATCH canonical team sync', () => {
 
     expect(response.status).toBe(200);
     expect(sendInviteEmailsMock).toHaveBeenCalledWith([createdInvite], 'http://localhost');
+  });
+
+  it('requires a team invite before a player can be added through the roster patch', async () => {
+    const response = await PATCH(
+      patchJson({ team: { playerIds: ['manager_1', 'new_player'] } }),
+      { params: Promise.resolve({ id: 'team_1' }) },
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: 'Use a team invite to add a player. The player joins the active roster after acceptance.',
+    });
+    expect(canonicalUpdateMock).not.toHaveBeenCalled();
+    expect(syncCanonicalTeamRosterMock).not.toHaveBeenCalled();
   });
 });

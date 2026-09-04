@@ -27,6 +27,12 @@ import { acquireTeamRosterLock } from '@/server/repositories/locks';
 
 export const dynamic = 'force-dynamic';
 
+type InviteDeliveryRecord = {
+  id: string;
+  status?: string | null;
+  sentAt?: Date | string | null;
+};
+
 type InviteRole = 'player' | 'team_manager' | 'team_head_coach' | 'team_assistant_coach';
 
 const memberInviteSchema = z.object({
@@ -502,7 +508,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     });
 
     const baseUrl = getRequestOrigin(req);
-    let deliveredInvites: any[] = [];
+    let deliveredInvites: InviteDeliveryRecord[] = [];
     let inviteDeliveryFailed = false;
     if (inviteForEmail) {
       try {

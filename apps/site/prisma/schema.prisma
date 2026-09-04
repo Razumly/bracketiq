@@ -1174,6 +1174,7 @@ model Invites {
   createdAt      DateTime?
   updatedAt      DateTime?
   sentAt         DateTime?
+  finalizedAt    DateTime?
   type           String
   email          String?
   phone          String?
