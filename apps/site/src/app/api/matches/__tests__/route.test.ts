@@ -4,6 +4,7 @@ import { NextRequest } from 'next/server';
 
 const matchesFindManyMock = jest.fn();
 const eventsFindManyMock = jest.fn();
+const divisionsFindManyMock = jest.fn();
 const parseDateInputMock = jest.fn((value: string | null) => (value ? new Date(value) : null));
 
 jest.mock('@/lib/prisma', () => ({
@@ -14,6 +15,9 @@ jest.mock('@/lib/prisma', () => ({
     events: {
       findMany: (...args: any[]) => eventsFindManyMock(...args),
     },
+    divisions: {
+      findMany: (...args: any[]) => divisionsFindManyMock(...args),
+    },
   },
 }));
 
@@ -22,6 +26,7 @@ import { GET } from '@/app/api/matches/route';
 describe('/api/matches GET', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    divisionsFindManyMock.mockResolvedValue([]);
   });
 
   it('returns matches for public eventIds with optional field/range filters', async () => {
@@ -75,6 +80,45 @@ describe('/api/matches GET', () => {
       id: 'm1',
       start: '2026-03-01T10:00:00.000Z',
       end: '2026-03-01T11:00:00.000Z',
+    })]);
+  });
+
+  it('returns canonical phase references for phase-owned matches', async () => {
+    matchesFindManyMock.mockResolvedValueOnce([{
+      id: 'match_phase',
+      eventId: 'event_1',
+      division: 'phase_1',
+      placementState: 'PLACED',
+      start: new Date('2026-03-01T10:00:00.000Z'),
+      end: new Date('2026-03-01T11:00:00.000Z'),
+    }]);
+    eventsFindManyMock.mockResolvedValueOnce([{ id: 'event_1' }]);
+    divisionsFindManyMock.mockResolvedValueOnce([{
+      id: 'phase_1',
+      role: 'PHASE',
+      phase: 'LEAGUE',
+      sourceDivisionId: 'entry_1',
+    }]);
+
+    const response = await GET(new NextRequest('http://localhost/api/matches?eventIds=event_1'));
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(divisionsFindManyMock).toHaveBeenCalledWith({
+      where: { id: { in: ['phase_1'] } },
+      select: {
+        id: true,
+        role: true,
+        phase: true,
+        sourceDivisionId: true,
+      },
+    });
+    expect(json.matches).toEqual([expect.objectContaining({
+      id: 'match_phase',
+      division: 'entry_1',
+      phase: 'LEAGUE',
+      sourceDivisionId: 'entry_1',
+      phaseDivisionId: 'phase_1',
     })]);
   });
 

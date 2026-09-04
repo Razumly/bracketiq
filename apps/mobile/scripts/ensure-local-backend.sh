@@ -370,8 +370,14 @@ ensure_docker_daemon() {
 run_compose() {
   local backend_dir="$1"
   shift
-  if [[ -f "$backend_dir/.env.docker" ]]; then
-    (cd "$backend_dir" && env -u DATABASE_URL -u DATABASE_URL_LIVE docker compose --env-file .env.docker "$@")
+  local env_file=""
+  if [[ -f "$backend_dir/.env.docker.local" ]]; then
+    env_file=".env.docker.local"
+  elif [[ -f "$backend_dir/.env.docker" ]]; then
+    env_file=".env.docker"
+  fi
+  if [[ -n "$env_file" ]]; then
+    (cd "$backend_dir" && env -u DATABASE_URL -u DATABASE_URL_LIVE docker compose --env-file "$env_file" "$@")
   else
     (cd "$backend_dir" && env -u DATABASE_URL -u DATABASE_URL_LIVE docker compose "$@")
   fi

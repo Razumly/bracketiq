@@ -98,6 +98,6 @@ class DiscoverImageFallbackTest {
             now = Instant.parse("2026-04-15T12:00:00Z"),
         )
 
-        assertEquals("16 Apr", resolveEventCardDateLabel(projected, TimeZone.UTC))
+        assertEquals("16 Apr - 9:00 AM", resolveEventCardDateLabel(projected, TimeZone.UTC))
     }
 }

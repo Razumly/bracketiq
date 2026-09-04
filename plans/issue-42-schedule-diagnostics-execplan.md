@@ -24,9 +24,10 @@ An organizer can verify the result in the web and mobile proposal review dialogs
 - [x] (2026-09-03) Add evidence-based diagnostic aggregation and remedies.
 - [x] (2026-09-03) Add the version 4 site HTTP contract with a version 3 compatibility adapter and both site proposal review displays.
 - [x] (2026-09-03) Add mobile decoding, validation, review display, and accessibility behavior.
-- [x] (2026-09-03) Add focused scheduler, contract, web, and mobile tests. The backend-backed mobile test remains pending runtime authorization.
+- [x] (2026-09-03) Add focused scheduler, contract, web, and mobile tests. The backend-backed mobile test passed after runtime authorization.
 - [x] (2026-09-03) Run the complete Android JVM suite and the changed site test suites. The Android suite retains three unrelated baseline failures.
 - [x] (2026-09-03) Run the final two-axis code review. No Issue 42 standards or specification findings remain.
+- [x] (2026-09-03) Start the worktree-local Postgres service and backend, then run the mobile event-lifecycle integration class. All 8 tests passed with no skips.
 
 ## Surprises & Discoveries
 
@@ -94,13 +95,13 @@ An organizer can verify the result in the web and mobile proposal review dialogs
 
 The Issue 42 implementation is complete in the worktree. The scheduler now calculates demand from the complete Match Graph, calculates a de-duplicated Resource upper bound, records bounded candidate evidence, and applies hard named Official feasibility during placement. It does not emit a causal factor or remedy without supporting evidence. Optional Official coverage remains non-blocking. Version 4 is the generated Event Editor contract. Version 3 remains accepted by the site and mobile decoders during rollout.
 
-The web and mobile proposal reviews render the same diagnostic values. Mobile diagnostics remain transient. Accepted Event and Schedule data remains Room-authoritative. The focused site gate passed 6 suites and 105 tests. The full Android JVM suite passed 1,633 of 1,636 tests; the three failures are the existing weekly-date assertion and two SQLite reopen tests. The backend-backed mobile route test was not run because it needs an explicitly authorized local runtime and isolated database.
+The web and mobile proposal reviews render the same diagnostic values. Mobile diagnostics remain transient. Accepted Event and Schedule data remains Room-authoritative. The focused site gate passed 6 suites and 105 tests. The full Android JVM suite passed 1,633 of 1,636 tests; the three failures are the existing weekly-date assertion and two SQLite reopen tests. The backend-backed mobile event-lifecycle integration class passed 8 of 8 tests against the worktree-local backend and isolated Postgres database.
 
 The implementation records candidate evidence through the existing scheduler candidate guard and preserves structured failure context. It does not add a general shadow search or general scheduler backtracking. It emits an Official Time Slot remedy only when the existing evidence proves a static staffing shortage is not the cause; unproven causes remain non-causal.
 
 The final staged review found no Issue 42 defects. ESLint reported no errors in the changed site files. The type check passed. The fragmentation-remedy regression passed.
 
-Implementation commit: `81b0ee0d3`.
+Implementation commit: `ab2228b2df58`.
 
 ## Context and Orientation
 

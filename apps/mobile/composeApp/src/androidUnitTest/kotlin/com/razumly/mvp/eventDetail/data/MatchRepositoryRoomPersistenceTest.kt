@@ -4,6 +4,7 @@ package com.razumly.mvp.eventDetail.data
 
 import android.content.Context
 import androidx.room.Room
+import androidx.room.RoomDatabase
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchOfficialAssignment
 import com.razumly.mvp.core.data.dataTypes.OfficialAssignmentHolderType
@@ -132,6 +133,7 @@ class MatchRepositoryRoomPersistenceTest {
 
     private fun openDatabase(): MVPDatabaseService =
         Room.databaseBuilder<MVPDatabaseService>(context, databaseName)
+            .setJournalMode(RoomDatabase.JournalMode.TRUNCATE)
             .allowMainThreadQueries()
             .build()
 

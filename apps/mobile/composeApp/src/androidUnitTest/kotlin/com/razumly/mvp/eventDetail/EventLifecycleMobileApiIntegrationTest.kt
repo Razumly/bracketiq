@@ -49,6 +49,7 @@ import com.razumly.mvp.core.network.dto.EventParticipantsRequestDto
 import com.razumly.mvp.core.network.dto.EventParticipantsResponseDto
 import com.razumly.mvp.core.network.dto.EventParticipantsSnapshotResponseDto
 import com.razumly.mvp.core.network.dto.MatchIncidentOperationDto
+import com.razumly.mvp.core.network.dto.MatchLifecycleOperationDto
 import com.razumly.mvp.testing.MOBILE_TEST_HOST_EMAIL
 import com.razumly.mvp.testing.MOBILE_TEST_HOST_PASSWORD
 import com.razumly.mvp.testing.MOBILE_TEST_PARTICIPANT_EMAIL
@@ -415,41 +416,48 @@ class EventLifecycleMobileApiIntegrationTest {
                 loadedEvent = persistedEvent,
             )
             val scheduledEvent = if (variant.event.eventType.isSchedulable()) {
-                val maintenanceResponse = host.eventRepository.proposeEventScheduleMaintenance(
-                    EventEditorMaintenanceRequestDto(
-                        contractVersion = EVENT_EDITOR_CONTRACT_VERSION,
-                        eventId = publishedEvent.id,
-                        operation = EventEditorMaintenanceOperation.BUILD,
-                        operationId = "mobile-maintenance-build-${variant.key}",
-                        participantCount = publishedEvent.maxParticipants.takeIf { it > 0 },
-                        includePlaceholderTeams = true,
-                    ),
-                ).getOrElse { error ->
-                    error("Failed to propose schedule for ${variant.key}: ${error.backendSummary()}")
+                val existingMatches = host.matchRepository.getMatchesOfTournament(publishedEvent.id).getOrElse { error ->
+                    error("Failed to inspect existing schedule for ${variant.key}: ${error.backendSummary()}")
                 }
-                when (maintenanceResponse) {
-                    is EventEditorMaintenanceResponseDto.Proposed -> {
-                        val proposal = maintenanceResponse.proposal
-                        host.eventRepository.acceptEventScheduleMaintenance(
-                            EventEditorAcceptMaintenanceProposalDto(
-                                contractVersion = proposal.contractVersion,
-                                eventId = proposal.eventId,
-                                operation = proposal.operation,
-                                operationId = proposal.operationId,
-                                proposalRevision = proposal.proposalRevision,
-                                acceptanceOperationId = "mobile-maintenance-accept-${variant.key}",
-                            ),
-                        ).getOrElse { error ->
-                            error("Failed to accept schedule for ${variant.key}: ${error.backendSummary()}")
-                        }
-                        host.eventRepository.getEvent(publishedEvent.id).getOrThrow()
+                if (existingMatches.isNotEmpty()) {
+                    host.eventRepository.getEvent(publishedEvent.id).getOrThrow()
+                } else {
+                    val maintenanceResponse = host.eventRepository.proposeEventScheduleMaintenance(
+                        EventEditorMaintenanceRequestDto(
+                            contractVersion = EVENT_EDITOR_CONTRACT_VERSION,
+                            eventId = publishedEvent.id,
+                            operation = EventEditorMaintenanceOperation.BUILD,
+                            operationId = "mobile-maintenance-build-${variant.key}",
+                            participantCount = publishedEvent.maxParticipants.takeIf { it > 0 },
+                            includePlaceholderTeams = true,
+                        ),
+                    ).getOrElse { error ->
+                        error("Failed to propose schedule for ${variant.key}: ${error.backendSummary()}")
                     }
-                    is EventEditorMaintenanceResponseDto.Accepted ->
-                        host.eventRepository.getEvent(publishedEvent.id).getOrThrow()
-                    is EventEditorMaintenanceResponseDto.Rejected ->
-                        error("Schedule maintenance was rejected for ${variant.key}")
-                }.also { event ->
-                    assertCreatedEventShape(variant = variant, event = event)
+                    when (maintenanceResponse) {
+                        is EventEditorMaintenanceResponseDto.Proposed -> {
+                            val proposal = maintenanceResponse.proposal
+                            host.eventRepository.acceptEventScheduleMaintenance(
+                                EventEditorAcceptMaintenanceProposalDto(
+                                    contractVersion = proposal.contractVersion,
+                                    eventId = proposal.eventId,
+                                    operation = proposal.operation,
+                                    operationId = proposal.operationId,
+                                    proposalRevision = proposal.proposalRevision,
+                                    acceptanceOperationId = "mobile-maintenance-accept-${variant.key}",
+                                ),
+                            ).getOrElse { error ->
+                                error("Failed to accept schedule for ${variant.key}: ${error.backendSummary()}")
+                            }
+                            host.eventRepository.getEvent(publishedEvent.id).getOrThrow()
+                        }
+                        is EventEditorMaintenanceResponseDto.Accepted ->
+                            host.eventRepository.getEvent(publishedEvent.id).getOrThrow()
+                        is EventEditorMaintenanceResponseDto.Rejected ->
+                            error("Schedule maintenance was rejected for ${variant.key}")
+                    }.also { event ->
+                        assertCreatedEventShape(variant = variant, event = event)
+                    }
                 }
             } else {
                 null
@@ -610,6 +618,7 @@ class EventLifecycleMobileApiIntegrationTest {
                 eventId = eventFixture.event.id,
                 operation = EventEditorMaintenanceOperation.COMPLETE,
                 operationId = completeOperationId,
+                participantCount = eventFixture.event.maxParticipants,
             )
 
             val placedBeforeComplete = partialFixture.matches.first { match ->
@@ -698,6 +707,7 @@ class EventLifecycleMobileApiIntegrationTest {
                 host = host,
                 hostUserId = hostUser.id,
                 runId = runId,
+                singleDivision = false,
             )
             createdEventIds += eventFixture.event.id
             val dispatches = observeMaintenanceDispatches(host, eventFixture.event.id)
@@ -705,8 +715,17 @@ class EventLifecycleMobileApiIntegrationTest {
             val placedBeforeRebuild = partialFixture.matches.first { match ->
                 match.placementState.equals("PLACED", ignoreCase = true)
             }
+            val startedProtectedMatch = host.matchRepository.updateMatchOperations(
+                match = placedBeforeRebuild,
+                lifecycle = MatchLifecycleOperationDto(
+                    status = "IN_PROGRESS",
+                    actualStart = Clock.System.now().toString(),
+                ),
+            ).getOrElse { error ->
+                error("Failed to start the protected maintenance match: ${error.backendSummary()}")
+            }
             host.matchRepository.updateMatch(
-                placedBeforeRebuild.copy(locked = true),
+                startedProtectedMatch.copy(locked = true),
             ).getOrElse { error ->
                 error("Failed to mark the protected maintenance match: ${error.backendSummary()}")
             }
@@ -719,7 +738,7 @@ class EventLifecycleMobileApiIntegrationTest {
             assertTrue(protectedBeforeRebuild.locked)
 
             val replaceableBeforeRebuild = partialFixture.matches.first { match ->
-                match.id != protectedBeforeRebuild.id
+                match.division != protectedBeforeRebuild.division
             }
             host.matchRepository.saveMatchLocally(
                 replaceableBeforeRebuild.copy(
@@ -764,7 +783,12 @@ class EventLifecycleMobileApiIntegrationTest {
                 ?: error("Expected a REBUILD maintenance proposal, received $rebuildProposalResponse")
             assertEquals(EventEditorMaintenanceOperation.REBUILD, rebuildProposal.operation)
             assertEquals(eventFixture.event.id, rebuildProposal.eventId)
-            assertEquals(setOf(protectedBeforeRebuild.id), rebuildProposal.protectedMatchIds.toSet())
+            val protectedPhaseId = protectedBeforeRebuild.division
+            val expectedProtectedMatchIds = partialFixture.matches
+                .filter { match -> match.division == protectedPhaseId }
+                .map(MatchMVP::id)
+                .toSet()
+            assertEquals(expectedProtectedMatchIds, rebuildProposal.protectedMatchIds.toSet())
             assertIncompleteMaintenanceOutcome(rebuildProposal.scheduleOutcome)
             assertProjectionPreservesMatch(
                 projection = rebuildProposal.graph.matches.single { it.id == protectedBeforeRebuild.id },
@@ -778,6 +802,7 @@ class EventLifecycleMobileApiIntegrationTest {
                 eventId = eventFixture.event.id,
                 operation = EventEditorMaintenanceOperation.REBUILD,
                 operationId = rebuildOperationId,
+                participantCount = eventFixture.event.maxParticipants,
             )
 
             val rebuildAcceptanceOperationId = "${eventFixture.event.id}-rebuild-accept"
@@ -796,7 +821,7 @@ class EventLifecycleMobileApiIntegrationTest {
             assertEquals(EventEditorMaintenanceOperation.REBUILD, rebuildAccepted.operation)
             assertEquals(EventEditorMaintenanceResponseStatus.ACCEPTED, rebuildAccepted.status)
             assertEquals(rebuildAcceptanceOperationId, rebuildAccepted.acceptanceOperationId)
-            assertEquals(setOf(protectedBeforeRebuild.id), rebuildAccepted.protectedMatchIds.toSet())
+            assertEquals(expectedProtectedMatchIds, rebuildAccepted.protectedMatchIds.toSet())
             assertIncompleteMaintenanceOutcome(rebuildAccepted.scheduleOutcome)
             assertEquals(
                 rebuildAccepted.graph.matches.map(EventEditorMatchProjectionDto::id).toSet(),
@@ -882,6 +907,7 @@ class EventLifecycleMobileApiIntegrationTest {
         host: MobileApiTestSession,
         hostUserId: String,
         runId: String,
+        singleDivision: Boolean = true,
     ): MaintenanceLeagueEventFixture {
         val source = buildVariant(
             runId = runId,
@@ -889,41 +915,56 @@ class EventLifecycleMobileApiIntegrationTest {
             hostUserId = hostUserId,
             eventType = EventType.LEAGUE,
             sportId = "Basketball",
-            singleDivision = true,
+            singleDivision = singleDivision,
             includePlayoffs = false,
             officialCase = OfficialCase.NO_OFFICIALS,
             start = Instant.parse("2026-10-05T15:00:00Z"),
             end = Instant.parse("2026-10-31T23:00:00Z"),
         )
-        val divisionId = source.primaryDivisionId
-        val field = source.fields.first { divisionId in it.divisions }
-        val teams = source.event.teamIds
-        val slot = source.timeSlots.first().copy(
-            id = "${source.event.id}_maintenance_slot",
-            dayOfWeek = 1,
-            daysOfWeek = listOf(1),
-            divisions = listOf(divisionId),
-            startTimeMinutes = 8 * 60,
-            endTimeMinutes = 8 * 60 + 30,
-            startDate = source.event.start,
-            timeZone = "America/Los_Angeles",
-            repeating = false,
-            endDate = source.event.start + 30.minutes,
-            scheduledFieldId = field.id,
-            scheduledFieldIds = listOf(field.id),
-        )
-        val division = source.event.divisionDetails.single().copy(
-            maxParticipants = teams.size,
-            gamesPerOpponent = 1,
-            teamIds = teams,
-            fieldIds = listOf(field.id),
-        )
+        val teams = source.event.teamIds.ifEmpty {
+            source.event.divisionDetails.flatMap { division -> division.teamIds }.distinct()
+        }
+        val divisions = source.event.divisionDetails.map { division ->
+            val divisionTeams = division.teamIds
+            division.copy(
+                maxParticipants = divisionTeams.size,
+                gamesPerOpponent = 1,
+                teamIds = divisionTeams,
+                fieldIds = division.fieldIds,
+            )
+        }
+        val fields = if (singleDivision) {
+            listOf(source.fields.first { source.primaryDivisionId in it.divisions })
+        } else {
+            source.fields
+        }
+        val slots = if (singleDivision) {
+            val field = fields.single()
+            listOf(source.timeSlots.first().copy(
+                id = "${source.event.id}_maintenance_slot",
+                dayOfWeek = 1,
+                daysOfWeek = listOf(1),
+                divisions = listOf(source.primaryDivisionId),
+                startTimeMinutes = 8 * 60,
+                endTimeMinutes = 8 * 60 + 30,
+                startDate = source.event.start,
+                timeZone = "America/Los_Angeles",
+                repeating = false,
+                endDate = source.event.start + 30.minutes,
+                scheduledFieldId = field.id,
+                scheduledFieldIds = listOf(field.id),
+            ))
+        } else {
+            source.timeSlots.map { slot ->
+                slot.copy(id = "${slot.id}_maintenance_slot")
+            }
+        }
         val event = source.event.copy(
             name = "Mobile Maintenance ${runId.substringAfterLast('-')}",
-            divisions = listOf(divisionId),
-            divisionDetails = listOf(division),
-            fieldIds = listOf(field.id),
-            timeSlotIds = listOf(slot.id),
+            divisions = source.event.divisions,
+            divisionDetails = divisions,
+            fieldIds = fields.map(Field::id),
+            timeSlotIds = slots.map(TimeSlot::id),
             teamIds = teams,
             maxParticipants = teams.size,
             gamesPerOpponent = 1,
@@ -931,14 +972,27 @@ class EventLifecycleMobileApiIntegrationTest {
             includePlayoffs = false,
             playoffTeamCount = null,
             noFixedEndDateTime = false,
-            singleDivision = true,
+            singleDivision = singleDivision,
         )
         val prepared = host.prepareEventEditorCreate(
             event = event,
-            fields = listOf(field),
-            timeSlots = listOf(slot),
+            fields = fields,
+            timeSlots = slots,
             operationId = "${event.id}-create",
         )
+        check(prepared.command.draft.participation.maxParticipants == teams.size) {
+            "Mobile maintenance create dropped event participant capacity: " +
+                "actual=${prepared.command.draft.participation.maxParticipants}, expected=${teams.size}."
+        }
+        check(prepared.command.draft.competition.divisionDetails.all { detail ->
+            detail.maxParticipants?.let { it > 0 } == true
+        }) {
+            "Mobile maintenance create dropped division participant capacity."
+        }
+        check(prepared.command.draft.competition.divisionDetails.flatMap { detail -> detail.teamIds } == teams) {
+            "Mobile maintenance create dropped source division team ids: " +
+                "actual=${prepared.command.draft.competition.divisionDetails.flatMap { detail -> detail.teamIds }}, expected=$teams."
+        }
         val createOnlyOutcome = host.eventRepository.createEventEditor(
             prepared.command.copy(
                 completion = EventEditorCreateCompletionDto(EventEditorCreateCompletionMode.CREATE_ONLY),
@@ -951,8 +1005,8 @@ class EventLifecycleMobileApiIntegrationTest {
             "CREATE_ONLY maintenance fixture unexpectedly returned a schedule proposal."
         }
         val createdEvent = createOnlyOutcome.session.canonicalState.event
-        check(createdEvent.id == event.id) {
-            "Maintenance fixture Event id changed from ${event.id} to ${createdEvent.id}."
+        check(createdEvent.id.isNotBlank()) {
+            "Maintenance fixture did not receive a server-owned Event id."
         }
         val createOnlyMatches = host.matchRepository.getMatchesOfTournament(createdEvent.id).getOrElse { error ->
             error("Failed to reload CREATE_ONLY maintenance fixture matches: ${error.backendSummary()}")
@@ -965,7 +1019,7 @@ class EventLifecycleMobileApiIntegrationTest {
         )
         return MaintenanceLeagueEventFixture(
             event = createdEvent,
-            slot = slot,
+            slot = slots.first(),
             matches = createOnlyMatches,
         )
     }
@@ -1070,6 +1124,7 @@ class EventLifecycleMobileApiIntegrationTest {
         eventId: String,
         operation: EventEditorMaintenanceOperation,
         operationId: String,
+        participantCount: Int = 4,
         acceptanceOperationId: String? = null,
     ) {
         val dispatch = dispatches.getOrNull(index)
@@ -1100,7 +1155,7 @@ class EventLifecycleMobileApiIntegrationTest {
         assertEquals(operation.name, dispatch.body["operation"]?.jsonPrimitive?.content)
         assertEquals(operationId, dispatch.body["operationId"]?.jsonPrimitive?.content)
         if (method == HttpMethod.Post) {
-            assertEquals("4", dispatch.body["participantCount"]?.jsonPrimitive?.content)
+            assertEquals(participantCount.toString(), dispatch.body["participantCount"]?.jsonPrimitive?.content)
             assertEquals("true", dispatch.body["includePlaceholderTeams"]?.jsonPrimitive?.content)
         } else {
             assertNotNull(acceptanceOperationId)
@@ -1802,7 +1857,10 @@ class MobileEventEditorApiContractTest {
                 val createdEvent = createOnlyOutcome.session.canonicalState.event
                 prepared.resolvedEventId = createdEvent.id
                 createdEventIds += createdEvent.id
-                assertEquals(event.id, createdEvent.id, "The mobile editor must preserve the fixture Event id.")
+                assertTrue(
+                    createdEvent.id.isNotBlank(),
+                    "The mobile editor must return a server-owned Event id.",
+                )
                 assertEquals(EventType.LEAGUE, createdEvent.eventType)
                 assertTrue(createdEvent.isAutomatedScheduling)
 
@@ -4580,7 +4638,7 @@ private fun buildLifecycleVariants(
         officialCase = OfficialCase.NO_OFFICIALS,
         start = Instant.parse("2026-09-01T08:00:00Z"),
         end = Instant.parse("2026-10-27T21:00:00Z"),
-        occurrenceDate = "2026-09-02",
+        occurrenceDate = "2026-09-09",
     ),
     buildVariant(
         runId = runId,
@@ -4797,6 +4855,7 @@ private fun buildVariant(
         imageId = UPLOADED_DOCUMENT_IMAGE_ID,
         coordinates = listOf(-122.4194, 37.7749),
         noFixedEndDateTime = false,
+        isAutomatedScheduling = eventType.isSchedulable(),
         teamSignup = eventType.isSchedulable(),
         singleDivision = singleDivision,
         userIds = if (eventType.isSchedulable()) emptyList() else emptyList(),

@@ -52,6 +52,11 @@ const isLeagueEvent = (event: SchedulerEvent): event is League => (
   event instanceof League || event.eventType === 'LEAGUE'
 );
 
+const timestampForSort = (value: Date | null | undefined): number => (
+  value instanceof Date && Number.isFinite(value.getTime())
+    ? value.getTime()
+    : Number.POSITIVE_INFINITY
+);
 
 
 const normalizeDivisionId = (value: unknown): string | null => {
@@ -155,27 +160,41 @@ const compareMatches = (left: Match, right: Match): number => {
   if (leftMatchId !== rightMatchId) {
     return leftMatchId - rightMatchId;
   }
-  const startDiff = left.start.getTime() - right.start.getTime();
+  const startDiff = timestampForSort(left.start) - timestampForSort(right.start);
   if (startDiff !== 0) return startDiff;
-  const endDiff = left.end.getTime() - right.end.getTime();
+  const endDiff = timestampForSort(left.end) - timestampForSort(right.end);
   if (endDiff !== 0) return endDiff;
   return left.id.localeCompare(right.id);
 };
 
 const compareScheduledOrder = (left: Match, right: Match): number => {
-  const startDiff = left.start.getTime() - right.start.getTime();
+  const startDiff = timestampForSort(left.start) - timestampForSort(right.start);
   if (startDiff !== 0) return startDiff;
-  const endDiff = left.end.getTime() - right.end.getTime();
+  const endDiff = timestampForSort(left.end) - timestampForSort(right.end);
   if (endDiff !== 0) return endDiff;
   const fieldDiff = (left.field?.id ?? '').localeCompare(right.field?.id ?? '');
   if (fieldDiff !== 0) return fieldDiff;
   return left.id.localeCompare(right.id);
 };
 
-const durationForReschedule = (match: Match): number => {
-  const durationMs = match.end.getTime() - match.start.getTime();
+const durationForReschedule = (event: SchedulerEvent, match: Match): number => {
+  const durationMs = (
+    match.start instanceof Date && match.end instanceof Date
+      ? match.end.getTime() - match.start.getTime()
+      : Number.NaN
+  );
   if (durationMs >= MIN_SCHEDULE_DURATION_MS) {
     return durationMs;
+  }
+  const configuredDurationMinutes = match.division.kind === 'PLAYOFF'
+    ? match.division.playoffConfig?.matchDurationMinutes ?? event.matchDurationMinutes
+    : match.division.leagueConfig?.matchDurationMinutes ?? event.matchDurationMinutes;
+  if (
+    typeof configuredDurationMinutes === 'number'
+    && Number.isFinite(configuredDurationMinutes)
+    && configuredDurationMinutes > 0
+  ) {
+    return configuredDurationMinutes * MINUTE_MS;
   }
   return MIN_SCHEDULE_DURATION_MS;
 };
@@ -471,6 +490,8 @@ const eligibleTeamDutyCandidates = (
     .filter((team) => !matches.some((otherMatch) => (
       otherMatch.id !== match.id
       && matchHasTeamActivity(otherMatch, team.id)
+      && otherMatch.start instanceof Date
+      && otherMatch.end instanceof Date
       && rangesOverlap(otherMatch.start, otherMatch.end, match.start, match.end)
     )))
     .filter((team) => {
@@ -478,6 +499,7 @@ const eligibleTeamDutyCandidates = (
         if (
           otherMatch.id === match.id
           || !matchHasTeamActivity(otherMatch, team.id)
+          || !(otherMatch.end instanceof Date)
           || otherMatch.end.getTime() > match.start.getTime()
         ) {
           return latest;
@@ -490,6 +512,7 @@ const eligibleTeamDutyCandidates = (
     .filter((team) => !matches.some((otherMatch) => (
       otherMatch.id !== match.id
       && matchHasPlayingTeam(otherMatch, team.id)
+      && otherMatch.start instanceof Date
       && otherMatch.start.getTime() > match.end.getTime()
       && otherMatch.start.getTime() < imminentMatchWindowEnd
     )))
@@ -669,7 +692,7 @@ export const rescheduleEventMatchesPreservingLocks = (
             : [];
 
         for (const match of nextBatch) {
-          const matchDuration = durationForReschedule(match);
+          const matchDuration = durationForReschedule(event, match);
           const requiresStaffing = staffingPlanner.hasStaffingRequirement(match);
           try {
             if (requiresStaffing || canUseFieldCandidate) {
