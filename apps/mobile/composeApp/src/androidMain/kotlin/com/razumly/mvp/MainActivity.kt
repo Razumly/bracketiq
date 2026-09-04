@@ -228,6 +228,21 @@ class MainActivity : ComponentActivity() {
             return DeepLinkNav.Invites
         }
 
+        if (effectiveSegments.size >= 3
+            && effectiveSegments[0].equals("claim", ignoreCase = true)
+            && effectiveSegments[1].equals("player", ignoreCase = true)
+        ) {
+            val inviteId = effectiveSegments[2].trim()
+            if (inviteId.isNotEmpty()) {
+                return DeepLinkNav.ManagedPlayerClaim(
+                    inviteId = inviteId,
+                    version = getQueryParameter("v"),
+                    expiresAt = getQueryParameter("e"),
+                    signature = getQueryParameter("s"),
+                )
+            }
+        }
+
         val queryEventId = getQueryParameter("eventId")?.trim().orEmpty()
         val queryMatchId = getQueryParameter("matchId")?.trim().orEmpty()
         if (queryEventId.isNotEmpty() && queryMatchId.isNotEmpty()) {

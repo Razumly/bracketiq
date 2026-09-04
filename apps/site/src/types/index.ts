@@ -701,6 +701,7 @@ export interface Invite {
   type: InviteType;
   role?: TeamInviteRole | null;
   email?: string;
+  playerEmail?: string | null;
   phone?: string;
   isAssigned?: boolean;
   shareUrl?: string;

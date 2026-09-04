@@ -5,6 +5,7 @@ import { requireSession } from '@/lib/permissions';
 import { getRequestOrigin } from '@/lib/requestOrigin';
 import { buildManagedPlayerClaimUrl, buildTeamInviteShareUrl, TEAM_INVITE_LINK_TTL_MS } from '@/server/teamInviteLinks';
 import { correctManagedPlayerContact } from '@/server/managedPlayers';
+import { removeCanonicalPendingInvitee, rollbackTeamInviteEventSyncs } from '@/server/teams/teamInviteEventSync';
 import { loadCanonicalTeamById, normalizeId } from '@/server/teams/teamMembership';
 import {
   assertEditableAccountlessTeamPlayer,
@@ -73,7 +74,10 @@ export async function PATCH(
       try {
         const replacement = await correctManagedPlayerContact(prisma, {
           profileId: managedInvite.userId,
+          inviteId: normalizedInviteId,
+          teamId,
           managerUserId: session.userId,
+          authorize: (tx) => canManageTeamInvites(teamId, session, tx),
           email: parsed.data.email === undefined ? managedInvite.email : email,
           phone: parsed.data.phone === undefined ? managedInvite.phone : phone,
           now,
@@ -155,6 +159,28 @@ export async function DELETE(
       const existing = await tx.invites.findFirst({
         where: { id: normalizedInviteId, teamId },
       });
+      if (!existing) {
+        throw new MemberInviteRouteError(404, 'Invite not found');
+      }
+      const managedProfile = existing?.userId
+        ? await tx.userData?.findUnique?.({ where: { id: existing.userId }, select: { isManagedPlayer: true, mergedIntoProfileId: true } })
+        : null;
+      const hasClaimHistory = Boolean(existing.claimedBy)
+        || Boolean(tx.userProfileClaims?.findFirst && await tx.userProfileClaims.findFirst({
+          where: { inviteId: existing.id, status: 'COMPLETED' },
+          select: { id: true },
+        }))
+        || Boolean(tx.userProfileMerges?.findFirst && await tx.userProfileMerges.findFirst({
+          where: { invitationIds: { has: existing.id } },
+          select: { id: true },
+        }));
+      if (managedProfile?.isManagedPlayer || managedProfile?.mergedIntoProfileId || hasClaimHistory) {
+        const now = new Date();
+        await rollbackTeamInviteEventSyncs(tx, existing, 'CANCELLED', now);
+        await removeCanonicalPendingInvitee(tx, existing, session.userId, now);
+        await tx.invites.update({ where: { id: normalizedInviteId }, data: { status: 'CANCELLED', finalizedAt: now, updatedAt: now } });
+        return;
+      }
       assertEditableAccountlessTeamPlayer(existing);
       await tx.invites.delete({ where: { id: normalizedInviteId } });
     });

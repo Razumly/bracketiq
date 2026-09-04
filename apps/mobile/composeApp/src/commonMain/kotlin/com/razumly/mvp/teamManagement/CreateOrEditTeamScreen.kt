@@ -1714,11 +1714,11 @@ internal fun TeamInviteDialog(
                                 Text("This player is a minor")
                             }
                             if (isMinor) {
-                                StandardTextField(
+                                ManagedPlayerDateField(
                                     value = dateOfBirth,
                                     onValueChange = { dateOfBirth = it },
                                     modifier = Modifier.fillMaxWidth(),
-                                    label = "Date of birth (YYYY-MM-DD)",
+                                    label = "Date of birth",
                                 )
                                 StandardTextField(
                                     value = guardianEmail,

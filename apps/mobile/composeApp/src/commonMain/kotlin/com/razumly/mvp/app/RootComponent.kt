@@ -504,6 +504,7 @@ class RootComponent(
             is DeepLinkNav.Event -> navigateToDeepLinkedEvent(deepLinkNavVal.eventId)
             is DeepLinkNav.Match -> navigateToDeepLinkedMatch(deepLinkNavVal.eventId, deepLinkNavVal.matchId)
             is DeepLinkNav.Invites -> navigateToDeepLinkedInvites()
+            is DeepLinkNav.ManagedPlayerClaim -> navigateToManagedPlayerClaim(deepLinkNavVal)
             is DeepLinkNav.Refresh -> {
                 setDefaultNavigationDirection()
                 navigation.replaceAll(AppConfig.ProfileHome)
@@ -536,6 +537,18 @@ class RootComponent(
                     refreshPendingInviteCount(userId)
                 }
             }
+    }
+
+    private fun navigateToManagedPlayerClaim(claim: DeepLinkNav.ManagedPlayerClaim) {
+        setDefaultNavigationDirection()
+        navigation.replaceAll(
+            AppConfig.ManagedPlayerClaim(
+                inviteId = claim.inviteId,
+                version = claim.version,
+                expiresAt = claim.expiresAt,
+                signature = claim.signature,
+            ),
+        )
     }
 
     private fun navigateToDeepLinkedEvent(rawEventId: String) {
@@ -1204,6 +1217,14 @@ class RootComponent(
             }
         )
 
+        is AppConfig.ManagedPlayerClaim -> Child.ManagedPlayerClaim(
+            userRepository,
+            config.inviteId,
+            config.version,
+            config.expiresAt,
+            config.signature,
+        )
+
         AppConfig.Schedule -> Child.Profile(
             _koin.get {
                 parametersOf(
@@ -1262,11 +1283,24 @@ class RootComponent(
         data class EventManagement(val component: EventManagementComponent) : Child()
         data class RefundManager(val component: RefundManagerComponent) : Child()
         data class ProfileDetails(val component: ProfileDetailsComponent) : Child()
+        data class ManagedPlayerClaim(
+            val repository: IUserRepository,
+            val inviteId: String,
+            val version: String?,
+            val expiresAt: String?,
+            val signature: String?,
+        ) : Child()
     }
 
     sealed class DeepLinkNav {
         data class Event(val eventId: String) : DeepLinkNav()
         data class Match(val eventId: String, val matchId: String) : DeepLinkNav()
+        data class ManagedPlayerClaim(
+            val inviteId: String,
+            val version: String?,
+            val expiresAt: String?,
+            val signature: String?,
+        ) : DeepLinkNav()
         data object Invites : DeepLinkNav()
         data object Refresh : DeepLinkNav()
         data object Return : DeepLinkNav()

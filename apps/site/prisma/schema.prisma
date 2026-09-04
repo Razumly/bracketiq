@@ -1181,6 +1181,8 @@ model Invites {
   finalizedAt    DateTime?
   type           String
   email          String?
+  // For minor players, `email` is the guardian delivery address.
+  playerEmail    String?
   phone          String?
   status         String?
   staffTypes     String[]  @default([])

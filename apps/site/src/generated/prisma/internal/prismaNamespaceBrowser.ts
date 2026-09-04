@@ -695,6 +695,7 @@ export const InvitesScalarFieldEnum = {
   finalizedAt: 'finalizedAt',
   type: 'type',
   email: 'email',
+  playerEmail: 'playerEmail',
   phone: 'phone',
   status: 'status',
   staffTypes: 'staffTypes',

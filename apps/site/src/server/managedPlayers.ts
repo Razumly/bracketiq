@@ -4,6 +4,7 @@ import { normalizeOptionalName } from '@/lib/nameCase';
 import { isFutureDateOfBirth, parseDateOfBirth } from '@/lib/dateOfBirth';
 import { isMinorAtUtcDate, isUnknownDateOfBirth } from '@/server/userPrivacy';
 import { advisoryLockId } from '@/server/repositories/locks';
+import { rollbackTeamInviteEventSyncs } from '@/server/teams/teamInviteEventSync';
 
 type PrismaLike = any;
 
@@ -112,6 +113,22 @@ const isCurrentInvite = (status: unknown): boolean => {
   return value === '' || ['PENDING', 'SENT', 'FAILED', 'ACCEPTED'].includes(value);
 };
 
+const membershipStatusRank = (status: unknown): number => ({
+  ACTIVE: 6,
+  STARTED: 5,
+  PENDING: 4,
+  INVITED: 3,
+  LEFT: 2,
+  REMOVED: 1,
+}[String(status ?? '').trim().toUpperCase()] ?? 0);
+
+const inviteStatusRank = (status: unknown): number => ({
+  ACCEPTED: 4,
+  SENT: 3,
+  PENDING: 3,
+  FAILED: 2,
+}[String(status ?? '').trim().toUpperCase()] ?? 0);
+
 export type ClaimManagedPlayerInput = {
   profileId: string;
   inviteId: string;
@@ -165,6 +182,14 @@ const mergeAssociations = async (
       ? await tx.teamRegistrations.findUnique({ where: { teamId_userId: { teamId: registration.teamId, userId: targetId } } })
       : null;
     if (existing) {
+      const existingStatus = String(existing.status ?? '').toUpperCase();
+      const sourceStatus = String(registration.status ?? '').toUpperCase();
+      if (membershipStatusRank(sourceStatus) > membershipStatusRank(existingStatus)) {
+        await tx.teamRegistrations?.update?.({
+          where: { id: existing.id },
+          data: { status: registration.status, updatedAt: now, isCaptain: registration.isCaptain },
+        });
+      }
       await tx.teamRegistrations?.update?.({
         where: { id: registration.id },
         data: { status: 'REMOVED', updatedAt: now, isCaptain: false },
@@ -185,20 +210,52 @@ const mergeAssociations = async (
       where,
       select: delegateName === 'teamInviteEventSyncs'
         ? { id: true, inviteId: true, eventTeamId: true, userId: true }
+        : delegateName === 'invites'
+          ? { id: true, teamId: true, role: true, status: true, userId: true }
         : delegateName === 'eventRegistrations'
-          ? { id: true, eventId: true, registrantId: true }
+          ? {
+            id: true,
+            eventId: true,
+            registrantId: true,
+            registrantType: true,
+            rosterRole: true,
+            eventTeamId: true,
+            slotId: true,
+            occurrenceDate: true,
+            divisionId: true,
+            divisionTypeId: true,
+          }
           : { id: true },
     }) : [];
     if (delegateName === 'invites') {
       rows.forEach((row: { id?: string }) => { if (row.id) invitationIds.push(row.id); });
     }
     for (const row of rows) {
+      if (delegateName === 'invites' && row.teamId && String(row.role ?? '').toLowerCase() === 'player' && isCurrentInvite(row.status) && delegate.findFirst) {
+        const duplicate = await delegate.findFirst({
+          where: {
+            teamId: row.teamId,
+            userId: targetId,
+            role: row.role,
+            status: { in: ['PENDING', 'SENT', 'FAILED', 'ACCEPTED'] },
+          },
+          select: { id: true, status: true },
+        });
+        if (duplicate && duplicate.id !== row.id) {
+          if (inviteStatusRank(row.status) > inviteStatusRank(duplicate.status) && delegate.update) {
+            await delegate.update({ where: { id: duplicate.id }, data: { status: row.status, updatedAt: now } });
+          }
+          await delegate.update({ where: { id: row.id }, data: { status: 'CANCELLED', finalizedAt: now, updatedAt: now } });
+          continue;
+        }
+      }
       if (delegateName === 'teamInviteEventSyncs' && delegate.findFirst) {
         const duplicate = await delegate.findFirst({
           where: {
             inviteId: row.inviteId,
             eventTeamId: row.eventTeamId,
             userId: targetId,
+            status: { not: 'CANCELLED' },
           },
           select: { id: true },
         });
@@ -209,7 +266,18 @@ const mergeAssociations = async (
       }
       if (delegateName === 'eventRegistrations' && delegate.findFirst) {
         const duplicate = await delegate.findFirst({
-          where: { eventId: row.eventId, registrantId: targetId },
+          where: {
+            eventId: row.eventId,
+            registrantId: targetId,
+            registrantType: row.registrantType,
+            rosterRole: row.rosterRole,
+            eventTeamId: row.eventTeamId,
+            slotId: row.slotId,
+            occurrenceDate: row.occurrenceDate,
+            divisionId: row.divisionId,
+            divisionTypeId: row.divisionTypeId,
+            status: { not: 'CANCELLED' },
+          },
           select: { id: true },
         });
         if (duplicate && duplicate.id !== row.id) {
@@ -241,10 +309,9 @@ const mergeAssociations = async (
         continue;
       }
 
-      // Keep the source subject as history, but point its evidence at the
-      // primary subject when the target already has one. A conflicting signed
-      // record stays on the source subject so the unique import identity is
-      // not overwritten.
+      // Keep the source subject and all of its evidence together when the
+      // target has a conflicting record. Move the complete subject only when
+      // every signed document has an equivalent target record.
       if (tx.signedDocuments?.findMany && tx.signedDocuments?.update) {
         const sourceDocuments = await tx.signedDocuments.findMany({ where: { documentSubjectId: subject.id } });
         const targetDocuments = await tx.signedDocuments.findMany({ where: { documentSubjectId: existing.id } });
@@ -255,7 +322,7 @@ const mergeAssociations = async (
           document.scopeType,
           document.scopeId,
         ].map((value) => String(value ?? '')).join('|')));
-        for (const document of sourceDocuments) {
+        const hasConflict = sourceDocuments.some((document: any) => {
           const key = [
             document.organizationId,
             document.contentHash,
@@ -263,16 +330,22 @@ const mergeAssociations = async (
             document.scopeType,
             document.scopeId,
           ].map((value) => String(value ?? '')).join('|');
-          if (!targetKeys.has(key)) {
+          return !targetKeys.has(key);
+        });
+        if (!hasConflict) {
+          for (const document of sourceDocuments) {
             await tx.signedDocuments.update({ where: { id: document.id }, data: { documentSubjectId: existing.id, updatedAt: now } });
-            targetKeys.add(key);
           }
+          await tx.documentRequirementSatisfactions?.updateMany?.({
+            where: { documentSubjectId: subject.id },
+            data: { documentSubjectId: existing.id },
+          });
         }
+      } else {
+        // A client without the evidence delegate cannot prove a safe merge.
+        // Keep the source subject intact for later reconciliation.
+        continue;
       }
-      await tx.documentRequirementSatisfactions?.updateMany?.({
-        where: { documentSubjectId: subject.id },
-        data: { documentSubjectId: existing.id },
-      });
     }
   }
   for (const delegateName of ['signedDocuments']) {
@@ -512,10 +585,13 @@ export const claimManagedPlayerProfile = async (
 
 export type ManagedContactCorrectionInput = {
   profileId: string;
+  inviteId: string;
+  teamId: string;
   managerUserId: string;
   email?: string | null;
   phone?: string | null;
   now?: Date;
+  authorize?: (tx: PrismaLike) => Promise<boolean>;
 };
 
 export const correctManagedPlayerContact = async (
@@ -524,19 +600,30 @@ export const correctManagedPlayerContact = async (
 ) => client.$transaction(async (tx: PrismaLike) => {
   const now = input.now ?? new Date();
   await lockProfiles(tx, [input.profileId]);
+  if (input.authorize && !(await input.authorize(tx))) throw new Error('Forbidden');
   const profile = await tx.userData.findUnique({ where: { id: input.profileId } });
   if (!profile || !profile.isManagedPlayer) throw new Error('Only an unclaimed Managed Player can be corrected');
   const account = await tx.authUser.findUnique({ where: { id: input.profileId } });
   if (isActiveAccountForProfile(account)) throw new Error('Claimed profiles cannot be corrected by a manager');
   const invite = await tx.invites.findFirst({
-    where: { type: 'TEAM', userId: input.profileId, role: 'player', status: { in: ['PENDING', 'SENT', 'FAILED'] } },
-    orderBy: { createdAt: 'desc' },
+    where: {
+      id: input.inviteId,
+      teamId: input.teamId,
+      type: 'TEAM',
+      userId: input.profileId,
+      role: 'player',
+      status: { in: ['PENDING', 'SENT', 'FAILED'] },
+    },
   });
   if (!invite) throw new Error('No current Player invitation found');
-  const email = normalizeEmail(input.email);
-  const phone = normalizeContact(input.phone);
+  const email = input.email === undefined ? normalizeEmail(invite.email) : normalizeEmail(input.email);
+  const phone = input.phone === undefined ? normalizeContact(invite.phone) : normalizeContact(input.phone);
   if (!email && !phone) throw new Error('A corrected email or phone is required');
 
+  const pendingSyncRows = tx.teamInviteEventSyncs?.findMany
+    ? await tx.teamInviteEventSyncs.findMany({ where: { inviteId: invite.id, status: 'PENDING' } })
+    : [];
+  await rollbackTeamInviteEventSyncs(tx, invite, 'CANCELLED', now);
   await tx.invites.update({ where: { id: invite.id }, data: { status: 'CANCELLED', finalizedAt: now, updatedAt: now } });
   const replacement = await tx.invites.create({
     data: {
@@ -546,6 +633,7 @@ export const correctManagedPlayerContact = async (
       userId: input.profileId,
       email,
       phone,
+      playerEmail: input.email === undefined ? invite.playerEmail : email,
       status: 'PENDING',
       role: 'player',
       firstName: profile.firstName,
@@ -561,6 +649,40 @@ export const correctManagedPlayerContact = async (
       updatedAt: now,
     },
   });
+  if (pendingSyncRows.length && tx.teamInviteEventSyncs?.create) {
+    for (const row of pendingSyncRows) {
+      const eventTeam = await tx.teams?.findUnique?.({ where: { id: row.eventTeamId }, select: { playerIds: true, pending: true } });
+      if (eventTeam && tx.teams?.update) {
+        const playerIds = Array.isArray(eventTeam.playerIds) ? eventTeam.playerIds.map(String) : [];
+        const pending = Array.isArray(eventTeam.pending) ? eventTeam.pending.map(String) : [];
+        await tx.teams.update({
+          where: { id: row.eventTeamId },
+          data: {
+            playerIds,
+            pending: playerIds.includes(input.profileId) ? pending : Array.from(new Set([...pending, input.profileId])),
+            updatedAt: now,
+          },
+        });
+      }
+      await tx.teamInviteEventSyncs.create({
+        data: {
+          id: crypto.randomUUID(),
+          createdAt: now,
+          updatedAt: now,
+          inviteId: replacement.id,
+          canonicalTeamId: row.canonicalTeamId,
+          eventId: row.eventId,
+          eventTeamId: row.eventTeamId,
+          userId: input.profileId,
+          previousRegistrationSnapshot: row.previousRegistrationSnapshot,
+          eventTeamHadUser: row.eventTeamHadUser,
+          eventTeamHadPendingUser: row.eventTeamHadPendingUser,
+          sourceTeamRegistrationId: row.sourceTeamRegistrationId,
+          status: 'PENDING',
+        },
+      });
+    }
+  }
   await tx.userProfileContactCorrections.create({
     data: {
       id: crypto.randomUUID(),

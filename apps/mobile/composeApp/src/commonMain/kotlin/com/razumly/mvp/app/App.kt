@@ -86,6 +86,7 @@ import com.razumly.mvp.profile.profileDetails.ProfileDetailsScreen
 import com.razumly.mvp.profileCompletion.ProfileCompletionScreen
 import com.razumly.mvp.refundManager.RefundManagerScreen
 import com.razumly.mvp.teamManagement.TeamManagementScreen
+import com.razumly.mvp.teamManagement.ManagedPlayerClaimScreen
 import com.razumly.mvp.userAuth.AuthScreen
 import com.razumly.mvp.userAuth.DefaultAuthComponent
 import io.github.aakira.napier.Napier
@@ -478,6 +479,17 @@ private fun AppContent(
 
                 is RootComponent.Child.Profile -> {
                     ProfileScreen(instance.component)
+                }
+
+                is RootComponent.Child.ManagedPlayerClaim -> {
+                    ManagedPlayerClaimScreen(
+                        repository = instance.repository,
+                        inviteId = instance.inviteId,
+                        version = instance.version,
+                        expiresAt = instance.expiresAt,
+                        signature = instance.signature,
+                        onClaimed = { root.onTabSelected(com.razumly.mvp.core.presentation.AppConfig.ProfileInvites) },
+                    )
                 }
 
                 is RootComponent.Child.Teams -> {

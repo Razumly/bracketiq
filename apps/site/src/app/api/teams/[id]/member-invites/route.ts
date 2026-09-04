@@ -144,6 +144,7 @@ const resolveInviteUser = async (
 ): Promise<{
   userId: string | null;
   email: string | null;
+  playerEmail: string | null;
   shouldSendEmail: boolean;
   isUserIdInvite: boolean;
   isPersonInvite: boolean;
@@ -157,6 +158,7 @@ const resolveInviteUser = async (
 }> => {
   const inviteUserId = normalizeId(input.userId);
   let email = typeof input.email === 'string' ? input.email.trim().toLowerCase() : '';
+  let playerEmail: string | null = email || null;
 
   if (inviteUserId) {
     const authUser = await client.authUser.findUnique({
@@ -187,6 +189,7 @@ const resolveInviteUser = async (
     return {
       userId: inviteUserId,
       email,
+      playerEmail: email,
       shouldSendEmail: isInvitePlaceholderAuthUser(authUser),
       isUserIdInvite: true,
       isPersonInvite: false,
@@ -227,6 +230,7 @@ const resolveInviteUser = async (
     return {
       userId: null,
       email: email || null,
+      playerEmail,
       shouldSendEmail: Boolean(email),
       isUserIdInvite: false,
       isPersonInvite: true,
@@ -251,6 +255,7 @@ const resolveInviteUser = async (
   return {
     userId: ensured.userId,
     email,
+    playerEmail: email,
     shouldSendEmail: !ensured.authUserExisted,
     isUserIdInvite: false,
     isPersonInvite: false,
@@ -531,6 +536,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           where: { id: existingInvite.id },
           data: {
             email: resolvedUser.email,
+            playerEmail: resolvedUser.playerEmail,
             phone: normalizedPhone,
             status: 'PENDING',
             role: parsed.data.role,
@@ -556,6 +562,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             id: crypto.randomUUID(),
             type: 'TEAM',
             email: resolvedUser.email,
+            playerEmail: resolvedUser.playerEmail,
             phone: normalizedPhone,
             status: 'PENDING',
             role: parsed.data.role,

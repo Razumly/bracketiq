@@ -44,6 +44,7 @@ import com.razumly.mvp.core.network.dto.UserResponseDto
 import com.razumly.mvp.core.network.dto.UserProfileDto
 import com.razumly.mvp.core.network.dto.ManagedPlayerClaimRequestDto
 import com.razumly.mvp.core.network.dto.ManagedPlayerClaimResponseDto
+import com.razumly.mvp.core.network.dto.ManagedPlayerClaimPreviewResponseDto
 import com.razumly.mvp.core.network.dto.UserUpdateDto
 import com.razumly.mvp.core.network.dto.UsersResponseDto
 import com.razumly.mvp.core.network.dto.toTeamPlayerRegistrationOrNull
@@ -300,6 +301,12 @@ interface IUserRepository : IMVPRepository {
         expiresAt: String? = null,
         signature: String? = null,
     ): Result<ManagedPlayerClaimResult> = Result.failure(NotImplementedError("Managed player claims are not implemented."))
+    suspend fun previewManagedPlayerClaim(
+        inviteId: String,
+        version: String? = null,
+        expiresAt: String? = null,
+        signature: String? = null,
+    ): Result<ManagedPlayerClaimPreview> = Result.failure(NotImplementedError("Managed player claim previews are not implemented."))
     suspend fun isCurrentUserChild(minorAgeThreshold: Int = 18): Result<Boolean>
     suspend fun listChildren(): Result<List<FamilyChild>>
     suspend fun listPendingChildJoinRequests(): Result<List<FamilyJoinRequest>>
@@ -398,6 +405,17 @@ data class ManagedPlayerClaimResult(
     val primaryProfileId: String? = null,
     val sourceProfileId: String? = null,
     val mergeId: String? = null,
+)
+
+data class ManagedPlayerClaimPreview(
+    val available: Boolean,
+    val inviteId: String,
+    val profileId: String,
+    val displayName: String,
+    val hasAttachedEmail: Boolean,
+    val isMinor: Boolean,
+    val teamId: String?,
+    val teamName: String?,
 )
 
 class UserRepository(
@@ -1219,12 +1237,14 @@ class UserRepository(
                     databaseService.getUserDataDao.upsertUserData(current.copy(isManagedPlayer = false, mergedIntoProfileId = null))
                 }
             }
-            if (response.status == "MERGED" && response.sourceProfileId != null && response.primaryProfileId != null) {
-                databaseService.getUserDataDao.getUserDataById(response.sourceProfileId)?.let { source ->
+            val sourceProfileId = response.sourceProfileId
+            val primaryProfileId = response.primaryProfileId
+            if (response.status == "MERGED" && sourceProfileId != null && primaryProfileId != null) {
+                databaseService.getUserDataDao.getUserDataById(sourceProfileId)?.let { source ->
                     databaseService.getUserDataDao.upsertUserData(
                         source.copy(
                             isManagedPlayer = false,
-                            mergedIntoProfileId = response.primaryProfileId,
+                            mergedIntoProfileId = primaryProfileId,
                         ),
                     )
                 }
@@ -1235,6 +1255,36 @@ class UserRepository(
             primaryProfileId = response.primaryProfileId,
             sourceProfileId = response.sourceProfileId,
             mergeId = response.mergeId,
+        )
+    }
+
+    override suspend fun previewManagedPlayerClaim(
+        inviteId: String,
+        version: String?,
+        expiresAt: String?,
+        signature: String?,
+    ): Result<ManagedPlayerClaimPreview> = runCatching {
+        val normalizedInviteId = inviteId.trim().takeIf(String::isNotBlank)
+            ?: error("Invite id is required")
+        val query = buildList {
+            version?.trim()?.takeIf(String::isNotBlank)?.let { add("v=${it.encodeURLQueryComponent()}") }
+            expiresAt?.trim()?.takeIf(String::isNotBlank)?.let { add("e=${it.encodeURLQueryComponent()}") }
+            signature?.trim()?.takeIf(String::isNotBlank)?.let { add("s=${it.encodeURLQueryComponent()}") }
+        }.joinToString("&")
+        val response = api.get<ManagedPlayerClaimPreviewResponseDto>(
+            "api/public/profile-claims/${normalizedInviteId.encodeURLQueryComponent()}${if (query.isBlank()) "" else "?$query"}",
+        )
+        val invite = response.invite ?: error("Claim invitation is unavailable")
+        val profile = response.profile ?: error("Claim profile is unavailable")
+        ManagedPlayerClaimPreview(
+            available = response.available,
+            inviteId = invite.id,
+            profileId = invite.profileId,
+            displayName = profile.displayName,
+            hasAttachedEmail = invite.hasAttachedEmail,
+            isMinor = invite.isMinor,
+            teamId = invite.teamId,
+            teamName = response.team?.name,
         )
     }
 

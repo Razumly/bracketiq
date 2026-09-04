@@ -4,6 +4,7 @@ ALTER TABLE "UserData"
   ADD COLUMN "mergedAt" TIMESTAMP(3);
 
 ALTER TABLE "Invites"
+  ADD COLUMN "playerEmail" TEXT,
   ADD COLUMN "isMinor" BOOLEAN NOT NULL DEFAULT false,
   ADD COLUMN "dateOfBirth" TIMESTAMP(3),
   ADD COLUMN "guardianEmail" TEXT,

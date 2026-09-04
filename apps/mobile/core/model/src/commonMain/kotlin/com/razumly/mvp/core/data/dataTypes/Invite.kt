@@ -10,6 +10,7 @@ data class Invite(
     val type: String = "",
     val role: String = "player",
     val email: String = "",
+    val playerEmail: String? = null,
     val phone: String? = null,
     val status: String? = null,
     val staffTypes: List<String> = emptyList(),
