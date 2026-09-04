@@ -55,6 +55,9 @@ data class TeamMemberInviteDraft(
     val email: String? = null,
     val phone: String? = null,
     val shareOnly: Boolean = false,
+    val isMinor: Boolean = false,
+    val dateOfBirth: String? = null,
+    val guardianEmail: String? = null,
 )
 
 interface TeamManagementComponent {
@@ -459,6 +462,7 @@ class DefaultTeamManagementComponent(
                         email = invite.email.trim().takeIf(String::isNotBlank),
                         phone = invite.phone.trim().takeIf(String::isNotBlank),
                         shareOnly = invite.user == null && invite.email.isBlank(),
+                        isMinor = false,
                     ).getOrThrow()
                     result.shareUrl?.let { url ->
                         createdInviteLinks += TeamBuilderCreatedInviteLink(
@@ -480,6 +484,9 @@ class DefaultTeamManagementComponent(
                         lastName = invite.lastName,
                         phone = invite.phone.trim().takeIf(String::isNotBlank),
                         shareOnly = invite.email.isBlank(),
+                        isMinor = invite.isMinor,
+                        dateOfBirth = invite.dateOfBirth.trim().takeIf(String::isNotBlank),
+                        guardianEmail = invite.guardianEmail.trim().takeIf(String::isNotBlank),
                     ).getOrThrow()
                     result.shareUrl?.let { url ->
                         createdInviteLinks += TeamBuilderCreatedInviteLink(
@@ -653,6 +660,9 @@ class DefaultTeamManagementComponent(
                 lastName = invite.lastName,
                 phone = invite.phone,
                 shareOnly = invite.shareOnly,
+                isMinor = invite.isMinor,
+                dateOfBirth = invite.dateOfBirth,
+                guardianEmail = invite.guardianEmail,
             ).map { result ->
                 result.shareUrl?.let { url ->
                     TeamBuilderCreatedInviteLink(

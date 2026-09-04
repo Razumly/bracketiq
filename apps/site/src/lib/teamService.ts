@@ -42,11 +42,18 @@ export type CreateTeamMemberInviteInput = {
     email?: string;
     phone?: string;
     shareOnly?: boolean;
+    isMinor?: boolean;
+    dateOfBirth?: string;
+    guardianEmail?: string;
+    idempotencyKey?: string;
+    existingInviteId?: string;
 };
 export type CreateTeamMemberInviteResult = {
     ok: boolean;
     invite?: Invite;
     shareUrl?: string | null;
+    teamInviteUrl?: string | null;
+    claimUrl?: string | null;
     delivery?: {
         attempted: boolean;
         failed: boolean;

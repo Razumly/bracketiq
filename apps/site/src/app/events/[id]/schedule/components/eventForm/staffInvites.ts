@@ -695,7 +695,13 @@ export const STAFF_NAME_UNAVAILABLE_LABEL = 'Staff name unavailable';
 
 export const STAFF_NAME_LOAD_ERROR = 'Staff names could not be loaded. Refresh and try again.';
 
-export const getStaffFullName = (user?: Partial<UserData> | null): string | null => {
+type StaffNameSource = {
+    firstName?: string | null;
+    lastName?: string | null;
+    isIdentityHidden?: boolean;
+};
+
+export const getStaffFullName = (user?: StaffNameSource | null): string | null => {
     if (user?.isIdentityHidden) {
         return null;
     }

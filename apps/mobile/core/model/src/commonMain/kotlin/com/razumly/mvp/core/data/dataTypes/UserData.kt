@@ -30,6 +30,8 @@ data class UserData @Ignore constructor(
     val chatTermsVersion: String? = null,
     val notificationSettings: NotificationSettings = defaultNotificationSettings(),
     @PrimaryKey override val id: String,
+    val isManagedPlayer: Boolean = false,
+    val mergedIntoProfileId: String? = null,
 ) : MVPDocument, DisplayableEntity {
     constructor(
         firstName: String,
@@ -51,6 +53,8 @@ data class UserData @Ignore constructor(
         chatTermsVersion: String? = null,
         notificationSettings: NotificationSettings = defaultNotificationSettings(),
         id: String,
+        isManagedPlayer: Boolean = false,
+        mergedIntoProfileId: String? = null,
     ) : this(
         firstName = firstName,
         lastName = lastName,
@@ -72,6 +76,8 @@ data class UserData @Ignore constructor(
         chatTermsVersion = chatTermsVersion,
         notificationSettings = notificationSettings,
         id = id,
+        isManagedPlayer = isManagedPlayer,
+        mergedIntoProfileId = mergedIntoProfileId,
     )
 
     @Ignore
@@ -170,6 +176,8 @@ data class UserData @Ignore constructor(
             chatTermsVersion = chatTermsVersion,
             notificationSettings = notificationSettings,
             id = id,
+            isManagedPlayer = isManagedPlayer,
+            mergedIntoProfileId = mergedIntoProfileId,
         )
     }
 }

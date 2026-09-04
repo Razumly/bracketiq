@@ -67,6 +67,7 @@ import { POST } from '@/app/api/teams/[id]/member-invites/route';
 describe('/api/teams/[id]/member-invites POST', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    delete (txMock as any).userData;
     process.env.AUTH_SECRET = 'team-invite-route-test-secret';
     requireSessionMock.mockResolvedValue({ userId: 'manager_1', isAdmin: false });
     sendInviteEmailsMock.mockResolvedValue([]);
@@ -584,6 +585,66 @@ describe('/api/teams/[id]/member-invites POST', () => {
     expect(txMock.teamRegistrations.upsert).not.toHaveBeenCalled();
     expect(sendInviteEmailsMock).toHaveBeenCalledWith(
       [expect.objectContaining({ id: 'invite_manager_1' })],
+      'http://localhost',
+    );
+  });
+
+  it('creates a managed player profile and returns a profile claim link', async () => {
+    (txMock as any).userData = {
+      findFirst: jest.fn().mockResolvedValue(null),
+      create: jest.fn().mockResolvedValue({
+        id: 'managed_player_1',
+        firstName: 'Jordan',
+        lastName: 'Guest',
+        userName: 'jordan.guest0001',
+        dateOfBirth: new Date(0),
+        isManagedPlayer: true,
+      }),
+      findMany: jest.fn().mockResolvedValue([]),
+    };
+    txMock.invites.create.mockResolvedValueOnce({
+      id: 'invite_managed_1',
+      type: 'TEAM',
+      role: 'player',
+      isAssigned: true,
+      email: 'jordan@example.com',
+      phone: null,
+      status: 'PENDING',
+      teamId: 'team_1',
+      userId: 'managed_player_1',
+      createdBy: 'manager_1',
+      firstName: 'Jordan',
+      lastName: 'Guest',
+      linkVersion: 1,
+      linkExpiresAt: new Date(Date.now() + 60_000),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const response = await POST(
+      new NextRequest('http://localhost/api/teams/team_1/member-invites', {
+        method: 'POST',
+        body: JSON.stringify({
+          firstName: 'Jordan',
+          lastName: 'Guest',
+          email: 'jordan@example.com',
+          role: 'player',
+        }),
+      }),
+      { params: Promise.resolve({ id: 'team_1' }) },
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(201);
+    expect((txMock as any).userData.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ isManagedPlayer: true, firstName: 'Jordan', lastName: 'Guest' }),
+    });
+    expect(payload.invite.userId).toBe('managed_player_1');
+    expect(payload.shareUrl).toMatch(/^http:\/\/localhost\/claim\/player\/invite_managed_1\?/);
+    expect(payload.claimUrl).toBe(payload.shareUrl);
+    expect(payload.teamInviteUrl).toMatch(/^http:\/\/localhost\/i\/invite_managed_1\?/);
+    expect(sendInviteEmailsMock).toHaveBeenCalledWith(
+      [expect.objectContaining({ id: 'invite_managed_1' })],
       'http://localhost',
     );
   });

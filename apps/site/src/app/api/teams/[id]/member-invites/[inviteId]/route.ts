@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/permissions';
 import { getRequestOrigin } from '@/lib/requestOrigin';
-import { buildTeamInviteShareUrl, TEAM_INVITE_LINK_TTL_MS } from '@/server/teamInviteLinks';
+import { buildManagedPlayerClaimUrl, buildTeamInviteShareUrl, TEAM_INVITE_LINK_TTL_MS } from '@/server/teamInviteLinks';
+import { correctManagedPlayerContact } from '@/server/managedPlayers';
 import { loadCanonicalTeamById, normalizeId } from '@/server/teams/teamMembership';
 import {
   assertEditableAccountlessTeamPlayer,
@@ -57,6 +58,39 @@ export async function PATCH(
   }
   const phone = normalizeOptionalContact(parsed.data.phone);
   const now = new Date();
+
+  // Managed Players use the profile correction audit trail. Keep the legacy
+  // accountless route for old invitations and staff tooling.
+  const managedInvite = await (prisma as any).invites?.findFirst?.({
+    where: { id: normalizedInviteId, teamId },
+  });
+  if (managedInvite?.userId && (prisma as any).userData?.findUnique) {
+    const profile = await (prisma as any).userData.findUnique({ where: { id: managedInvite.userId } });
+    if (profile?.isManagedPlayer) {
+      if (!(await canManageTeamInvites(teamId, session, prisma as any))) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      }
+      try {
+        const replacement = await correctManagedPlayerContact(prisma, {
+          profileId: managedInvite.userId,
+          managerUserId: session.userId,
+          email: parsed.data.email === undefined ? managedInvite.email : email,
+          phone: parsed.data.phone === undefined ? managedInvite.phone : phone,
+          now,
+        });
+        const baseUrl = getRequestOrigin(req);
+        const claimUrl = buildManagedPlayerClaimUrl(replacement, baseUrl);
+        return NextResponse.json({
+          ok: true,
+          invite: replacement,
+          shareUrl: claimUrl,
+          claimUrl,
+        }, { status: 200 });
+      } catch (error) {
+        return errorResponse(error);
+      }
+    }
+  }
 
   try {
     const invite = await prisma.$transaction(async (tx) => {

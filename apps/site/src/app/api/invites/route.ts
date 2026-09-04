@@ -15,7 +15,7 @@ import {
 import { sendInviteEmails } from '@/server/inviteEmails';
 import { ensureAuthUserAndUserDataByEmail } from '@/server/inviteUsers';
 import { getRequestOrigin } from '@/lib/requestOrigin';
-import { buildTeamInviteShareUrl } from '@/server/teamInviteLinks';
+import { buildManagedPlayerClaimUrl, buildTeamInviteShareUrl } from '@/server/teamInviteLinks';
 import {
   canManageEvent,
   canManageOrganization,
@@ -453,6 +453,21 @@ export async function GET(req: NextRequest) {
     })
     : [];
   const childById = new Map(childProfiles.map((child) => [child.id, child]));
+  const managedPlayerIds = canListTeamInvites
+    ? invites
+      .filter((invite) => String(invite.type ?? '').toUpperCase() === 'TEAM'
+        && String(invite.role ?? '').toLowerCase() === 'player'
+        && invite.isAssigned === true
+        && Boolean(invite.userId))
+      .map((invite) => invite.userId as string)
+    : [];
+  const managedProfiles = managedPlayerIds.length
+    ? await prisma.userData.findMany({
+      where: { id: { in: Array.from(new Set(managedPlayerIds)) }, isManagedPlayer: true, mergedIntoProfileId: null },
+      select: { id: true },
+    })
+    : [];
+  const managedProfileIds = new Set(managedProfiles.map((profile) => profile.id));
 
   if (!cursor) {
     try {
@@ -488,6 +503,15 @@ export async function GET(req: NextRequest) {
         ...(canShareTeamLink
           ? {
             shareUrl: buildTeamInviteShareUrl({
+              id: String(invite.id),
+              linkVersion: invite.linkVersion,
+              linkExpiresAt: invite.linkExpiresAt,
+            }, getRequestOrigin(req)),
+          }
+          : {}),
+        ...(canShareTeamLink && invite.userId && managedProfileIds.has(invite.userId)
+          ? {
+            claimUrl: buildManagedPlayerClaimUrl({
               id: String(invite.id),
               linkVersion: invite.linkVersion,
               linkExpiresAt: invite.linkExpiresAt,

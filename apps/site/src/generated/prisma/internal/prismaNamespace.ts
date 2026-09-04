@@ -405,6 +405,9 @@ export const ModelName = {
   SensitiveUserData: 'SensitiveUserData',
   AuthMfaChallenges: 'AuthMfaChallenges',
   Invites: 'Invites',
+  UserProfileClaims: 'UserProfileClaims',
+  UserProfileMerges: 'UserProfileMerges',
+  UserProfileContactCorrections: 'UserProfileContactCorrections',
   TeamInviteEventSyncs: 'TeamInviteEventSyncs',
   StaffMembers: 'StaffMembers',
   OrganizationRoles: 'OrganizationRoles',
@@ -536,7 +539,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "appReleases" | "fields" | "facilities" | "matches" | "matchSegments" | "broadcastOverlays" | "broadcastOverlayStates" | "broadcastOverlayActions" | "broadcastOverlayAccessTokens" | "matchIncidents" | "matchOperationReceipts" | "eventEditorCreateOperations" | "eventEditorMaintenanceOperations" | "divisions" | "eventDivisionPhaseSources" | "eventDivisionPhaseParticipants" | "userData" | "userNotifications" | "sensitiveUserData" | "authMfaChallenges" | "invites" | "teamInviteEventSyncs" | "staffMembers" | "organizationRoles" | "organizationRolePermissions" | "organizationRoleCompensationRates" | "staffCompensationRates" | "eventStaffAssignments" | "staffScheduleAssignments" | "teamStaffLaborEntries" | "financialLineItems" | "staffPayRun" | "staffPayRunItem" | "eventOfficials" | "teamCheckIns" | "matchRosterEntries" | "teams" | "canonicalTeams" | "teamRegistrations" | "registrationQuestions" | "registrationQuestionResponses" | "teamJoinRequests" | "teamStaffAssignments" | "eventTeamStaffAssignments" | "messages" | "chatGroup" | "moderationReport" | "aiConversationPointer" | "aiPendingConfirmation" | "pushDeviceTarget" | "lockFiles" | "paymentIntents" | "bills" | "billPayments" | "billPaymentProofs" | "rentalBookings" | "rentalBookingItems" | "affiliateScrapeSources" | "affiliateScrapeMappings" | "affiliateScrapeRuns" | "affiliateSourceIntakes" | "affiliateSourceIntakePages" | "affiliateSourceIntakeRuns" | "affiliateSourceIntakeArtifacts" | "affiliateSourceDiscoveryCampaigns" | "affiliateAgentGatewayJobs" | "affiliateAgentGatewayClaims" | "affiliateAgentGatewayArtifacts" | "affiliateAgentGatewayOperationReceipts" | "affiliateAgentGatewayEvents" | "affiliateOperationalAlerts" | "affiliateOperationalAlertDeliveries" | "affiliateCoverageAgentJobs" | "affiliateCoverageCities" | "affiliateCoverageCells" | "affiliateCoverageCellAssessments" | "affiliateSourceDiscoveryQueryExecutions" | "affiliateSourceDiscoveryRuns" | "affiliateSourceDiscoveryResults" | "affiliateSourceDomainPolicies" | "affiliateSourceMappingJobs" | "affiliateApprovalJobs" | "affiliateImportCandidates" | "affiliateSupplySources" | "affiliateSupplyContractManifests" | "affiliateSupplyLifecycleTransitions" | "affiliateSupplyReconciliationRuns" | "affiliateAgentWorkerHealth" | "affiliateSupplyTargets" | "affiliateReplenishmentDemands" | "affiliateReplenishmentWaves" | "eventTags" | "eventTagAssignments" | "organizationTags" | "organizationTagAssignments" | "refundRequests" | "discounts" | "discountCodes" | "discountCodeRedemptions" | "discountCodeReservations" | "organizationAccountingConnections" | "accountingSyncRecords" | "organizationFinanceCategoryAccountingMappings" | "stripeAccounts" | "events" | "organizations" | "organizationReviews" | "organizationDomains" | "organizationClaims" | "organizationClaimEvidence" | "organizationClaimEvents" | "organizationReviewResponses" | "products" | "subscriptions" | "timeSlots" | "leagueScoringConfigs" | "eventTemplates" | "eventTemplateResources" | "eventTemplateTimeSlots" | "eventTemplateRentalResourceHints" | "eventTemplateLeagueScoringConfigs" | "sports" | "documentRequirements" | "templateDocuments" | "templateProviderQuarantines" | "signedDocuments" | "documentSubjects" | "documentRequirementSatisfactions" | "documentRequirementSatisfactionEvidence" | "documentEvidenceAuditEvents" | "boldSignWebhookEvents" | "boldSignSyncOperations" | "parentChildLinks" | "eventRegistrations" | "authUser" | "feedbackSubmissions" | "file"
+    modelProps: "appReleases" | "fields" | "facilities" | "matches" | "matchSegments" | "broadcastOverlays" | "broadcastOverlayStates" | "broadcastOverlayActions" | "broadcastOverlayAccessTokens" | "matchIncidents" | "matchOperationReceipts" | "eventEditorCreateOperations" | "eventEditorMaintenanceOperations" | "divisions" | "eventDivisionPhaseSources" | "eventDivisionPhaseParticipants" | "userData" | "userNotifications" | "sensitiveUserData" | "authMfaChallenges" | "invites" | "userProfileClaims" | "userProfileMerges" | "userProfileContactCorrections" | "teamInviteEventSyncs" | "staffMembers" | "organizationRoles" | "organizationRolePermissions" | "organizationRoleCompensationRates" | "staffCompensationRates" | "eventStaffAssignments" | "staffScheduleAssignments" | "teamStaffLaborEntries" | "financialLineItems" | "staffPayRun" | "staffPayRunItem" | "eventOfficials" | "teamCheckIns" | "matchRosterEntries" | "teams" | "canonicalTeams" | "teamRegistrations" | "registrationQuestions" | "registrationQuestionResponses" | "teamJoinRequests" | "teamStaffAssignments" | "eventTeamStaffAssignments" | "messages" | "chatGroup" | "moderationReport" | "aiConversationPointer" | "aiPendingConfirmation" | "pushDeviceTarget" | "lockFiles" | "paymentIntents" | "bills" | "billPayments" | "billPaymentProofs" | "rentalBookings" | "rentalBookingItems" | "affiliateScrapeSources" | "affiliateScrapeMappings" | "affiliateScrapeRuns" | "affiliateSourceIntakes" | "affiliateSourceIntakePages" | "affiliateSourceIntakeRuns" | "affiliateSourceIntakeArtifacts" | "affiliateSourceDiscoveryCampaigns" | "affiliateAgentGatewayJobs" | "affiliateAgentGatewayClaims" | "affiliateAgentGatewayArtifacts" | "affiliateAgentGatewayOperationReceipts" | "affiliateAgentGatewayEvents" | "affiliateOperationalAlerts" | "affiliateOperationalAlertDeliveries" | "affiliateCoverageAgentJobs" | "affiliateCoverageCities" | "affiliateCoverageCells" | "affiliateCoverageCellAssessments" | "affiliateSourceDiscoveryQueryExecutions" | "affiliateSourceDiscoveryRuns" | "affiliateSourceDiscoveryResults" | "affiliateSourceDomainPolicies" | "affiliateSourceMappingJobs" | "affiliateApprovalJobs" | "affiliateImportCandidates" | "affiliateSupplySources" | "affiliateSupplyContractManifests" | "affiliateSupplyLifecycleTransitions" | "affiliateSupplyReconciliationRuns" | "affiliateAgentWorkerHealth" | "affiliateSupplyTargets" | "affiliateReplenishmentDemands" | "affiliateReplenishmentWaves" | "eventTags" | "eventTagAssignments" | "organizationTags" | "organizationTagAssignments" | "refundRequests" | "discounts" | "discountCodes" | "discountCodeRedemptions" | "discountCodeReservations" | "organizationAccountingConnections" | "accountingSyncRecords" | "organizationFinanceCategoryAccountingMappings" | "stripeAccounts" | "events" | "organizations" | "organizationReviews" | "organizationDomains" | "organizationClaims" | "organizationClaimEvidence" | "organizationClaimEvents" | "organizationReviewResponses" | "products" | "subscriptions" | "timeSlots" | "leagueScoringConfigs" | "eventTemplates" | "eventTemplateResources" | "eventTemplateTimeSlots" | "eventTemplateRentalResourceHints" | "eventTemplateLeagueScoringConfigs" | "sports" | "documentRequirements" | "templateDocuments" | "templateProviderQuarantines" | "signedDocuments" | "documentSubjects" | "documentRequirementSatisfactions" | "documentRequirementSatisfactionEvidence" | "documentEvidenceAuditEvents" | "boldSignWebhookEvents" | "boldSignSyncOperations" | "parentChildLinks" | "eventRegistrations" | "authUser" | "feedbackSubmissions" | "file"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -2091,6 +2094,228 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         count: {
           args: Prisma.InvitesCountArgs<ExtArgs>
           result: runtime.Types.Utils.Optional<Prisma.InvitesCountAggregateOutputType> | number
+        }
+      }
+    }
+    UserProfileClaims: {
+      payload: Prisma.$UserProfileClaimsPayload<ExtArgs>
+      fields: Prisma.UserProfileClaimsFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.UserProfileClaimsFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserProfileClaimsPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.UserProfileClaimsFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserProfileClaimsPayload>
+        }
+        findFirst: {
+          args: Prisma.UserProfileClaimsFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserProfileClaimsPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.UserProfileClaimsFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserProfileClaimsPayload>
+        }
+        findMany: {
+          args: Prisma.UserProfileClaimsFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserProfileClaimsPayload>[]
+        }
+        create: {
+          args: Prisma.UserProfileClaimsCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserProfileClaimsPayload>
+        }
+        createMany: {
+          args: Prisma.UserProfileClaimsCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.UserProfileClaimsCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserProfileClaimsPayload>[]
+        }
+        delete: {
+          args: Prisma.UserProfileClaimsDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserProfileClaimsPayload>
+        }
+        update: {
+          args: Prisma.UserProfileClaimsUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserProfileClaimsPayload>
+        }
+        deleteMany: {
+          args: Prisma.UserProfileClaimsDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.UserProfileClaimsUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.UserProfileClaimsUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserProfileClaimsPayload>[]
+        }
+        upsert: {
+          args: Prisma.UserProfileClaimsUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserProfileClaimsPayload>
+        }
+        aggregate: {
+          args: Prisma.UserProfileClaimsAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateUserProfileClaims>
+        }
+        groupBy: {
+          args: Prisma.UserProfileClaimsGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.UserProfileClaimsGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.UserProfileClaimsCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.UserProfileClaimsCountAggregateOutputType> | number
+        }
+      }
+    }
+    UserProfileMerges: {
+      payload: Prisma.$UserProfileMergesPayload<ExtArgs>
+      fields: Prisma.UserProfileMergesFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.UserProfileMergesFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserProfileMergesPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.UserProfileMergesFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserProfileMergesPayload>
+        }
+        findFirst: {
+          args: Prisma.UserProfileMergesFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserProfileMergesPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.UserProfileMergesFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserProfileMergesPayload>
+        }
+        findMany: {
+          args: Prisma.UserProfileMergesFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserProfileMergesPayload>[]
+        }
+        create: {
+          args: Prisma.UserProfileMergesCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserProfileMergesPayload>
+        }
+        createMany: {
+          args: Prisma.UserProfileMergesCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.UserProfileMergesCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserProfileMergesPayload>[]
+        }
+        delete: {
+          args: Prisma.UserProfileMergesDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserProfileMergesPayload>
+        }
+        update: {
+          args: Prisma.UserProfileMergesUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserProfileMergesPayload>
+        }
+        deleteMany: {
+          args: Prisma.UserProfileMergesDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.UserProfileMergesUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.UserProfileMergesUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserProfileMergesPayload>[]
+        }
+        upsert: {
+          args: Prisma.UserProfileMergesUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserProfileMergesPayload>
+        }
+        aggregate: {
+          args: Prisma.UserProfileMergesAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateUserProfileMerges>
+        }
+        groupBy: {
+          args: Prisma.UserProfileMergesGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.UserProfileMergesGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.UserProfileMergesCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.UserProfileMergesCountAggregateOutputType> | number
+        }
+      }
+    }
+    UserProfileContactCorrections: {
+      payload: Prisma.$UserProfileContactCorrectionsPayload<ExtArgs>
+      fields: Prisma.UserProfileContactCorrectionsFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.UserProfileContactCorrectionsFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserProfileContactCorrectionsPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.UserProfileContactCorrectionsFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserProfileContactCorrectionsPayload>
+        }
+        findFirst: {
+          args: Prisma.UserProfileContactCorrectionsFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserProfileContactCorrectionsPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.UserProfileContactCorrectionsFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserProfileContactCorrectionsPayload>
+        }
+        findMany: {
+          args: Prisma.UserProfileContactCorrectionsFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserProfileContactCorrectionsPayload>[]
+        }
+        create: {
+          args: Prisma.UserProfileContactCorrectionsCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserProfileContactCorrectionsPayload>
+        }
+        createMany: {
+          args: Prisma.UserProfileContactCorrectionsCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.UserProfileContactCorrectionsCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserProfileContactCorrectionsPayload>[]
+        }
+        delete: {
+          args: Prisma.UserProfileContactCorrectionsDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserProfileContactCorrectionsPayload>
+        }
+        update: {
+          args: Prisma.UserProfileContactCorrectionsUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserProfileContactCorrectionsPayload>
+        }
+        deleteMany: {
+          args: Prisma.UserProfileContactCorrectionsDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.UserProfileContactCorrectionsUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.UserProfileContactCorrectionsUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserProfileContactCorrectionsPayload>[]
+        }
+        upsert: {
+          args: Prisma.UserProfileContactCorrectionsUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UserProfileContactCorrectionsPayload>
+        }
+        aggregate: {
+          args: Prisma.UserProfileContactCorrectionsAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateUserProfileContactCorrections>
+        }
+        groupBy: {
+          args: Prisma.UserProfileContactCorrectionsGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.UserProfileContactCorrectionsGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.UserProfileContactCorrectionsCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.UserProfileContactCorrectionsCountAggregateOutputType> | number
         }
       }
     }
@@ -11119,7 +11344,10 @@ export const UserDataScalarFieldEnum = {
   chatTermsVersion: 'chatTermsVersion',
   onboardingIntent: 'onboardingIntent',
   accountVisibility: 'accountVisibility',
-  notificationSettings: 'notificationSettings'
+  notificationSettings: 'notificationSettings',
+  isManagedPlayer: 'isManagedPlayer',
+  mergedIntoProfileId: 'mergedIntoProfileId',
+  mergedAt: 'mergedAt'
 } as const
 
 export type UserDataScalarFieldEnum = (typeof UserDataScalarFieldEnum)[keyof typeof UserDataScalarFieldEnum]
@@ -11214,10 +11442,62 @@ export const InvitesScalarFieldEnum = {
   lastName: 'lastName',
   linkVersion: 'linkVersion',
   linkExpiresAt: 'linkExpiresAt',
-  claimedBy: 'claimedBy'
+  claimedBy: 'claimedBy',
+  isMinor: 'isMinor',
+  dateOfBirth: 'dateOfBirth',
+  guardianEmail: 'guardianEmail',
+  idempotencyKey: 'idempotencyKey'
 } as const
 
 export type InvitesScalarFieldEnum = (typeof InvitesScalarFieldEnum)[keyof typeof InvitesScalarFieldEnum]
+
+
+export const UserProfileClaimsScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt',
+  profileId: 'profileId',
+  claimantUserId: 'claimantUserId',
+  inviteId: 'inviteId',
+  verificationMethod: 'verificationMethod',
+  verifiedEmail: 'verifiedEmail',
+  status: 'status',
+  confirmationAt: 'confirmationAt',
+  completedAt: 'completedAt',
+  failureReason: 'failureReason'
+} as const
+
+export type UserProfileClaimsScalarFieldEnum = (typeof UserProfileClaimsScalarFieldEnum)[keyof typeof UserProfileClaimsScalarFieldEnum]
+
+
+export const UserProfileMergesScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  sourceProfileId: 'sourceProfileId',
+  primaryProfileId: 'primaryProfileId',
+  claimantUserId: 'claimantUserId',
+  confirmationAt: 'confirmationAt',
+  rosterIds: 'rosterIds',
+  invitationIds: 'invitationIds',
+  metadata: 'metadata'
+} as const
+
+export type UserProfileMergesScalarFieldEnum = (typeof UserProfileMergesScalarFieldEnum)[keyof typeof UserProfileMergesScalarFieldEnum]
+
+
+export const UserProfileContactCorrectionsScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  profileId: 'profileId',
+  managerUserId: 'managerUserId',
+  previousEmail: 'previousEmail',
+  correctedEmail: 'correctedEmail',
+  previousPhone: 'previousPhone',
+  correctedPhone: 'correctedPhone',
+  inviteId: 'inviteId'
+} as const
+
+export type UserProfileContactCorrectionsScalarFieldEnum = (typeof UserProfileContactCorrectionsScalarFieldEnum)[keyof typeof UserProfileContactCorrectionsScalarFieldEnum]
 
 
 export const TeamInviteEventSyncsScalarFieldEnum = {
@@ -15585,6 +15865,9 @@ export type GlobalOmitConfig = {
   sensitiveUserData?: Prisma.SensitiveUserDataOmit
   authMfaChallenges?: Prisma.AuthMfaChallengesOmit
   invites?: Prisma.InvitesOmit
+  userProfileClaims?: Prisma.UserProfileClaimsOmit
+  userProfileMerges?: Prisma.UserProfileMergesOmit
+  userProfileContactCorrections?: Prisma.UserProfileContactCorrectionsOmit
   teamInviteEventSyncs?: Prisma.TeamInviteEventSyncsOmit
   staffMembers?: Prisma.StaffMembersOmit
   organizationRoles?: Prisma.OrganizationRolesOmit

@@ -42,6 +42,8 @@ import com.razumly.mvp.core.network.dto.TeamPlayerRegistrationApiDto
 import com.razumly.mvp.core.network.dto.UpdateUserRequestDto
 import com.razumly.mvp.core.network.dto.UserResponseDto
 import com.razumly.mvp.core.network.dto.UserProfileDto
+import com.razumly.mvp.core.network.dto.ManagedPlayerClaimRequestDto
+import com.razumly.mvp.core.network.dto.ManagedPlayerClaimResponseDto
 import com.razumly.mvp.core.network.dto.UserUpdateDto
 import com.razumly.mvp.core.network.dto.UsersResponseDto
 import com.razumly.mvp.core.network.dto.toTeamPlayerRegistrationOrNull
@@ -289,6 +291,15 @@ interface IUserRepository : IMVPRepository {
     suspend fun listInvites(userId: String, type: String? = null): Result<List<Invite>>
     suspend fun acceptInvite(inviteId: String): Result<Unit>
     suspend fun declineInvite(inviteId: String): Result<Unit>
+    suspend fun claimManagedPlayerProfile(
+        profileId: String,
+        inviteId: String,
+        confirmation: Boolean,
+        dateOfBirth: String? = null,
+        version: String? = null,
+        expiresAt: String? = null,
+        signature: String? = null,
+    ): Result<ManagedPlayerClaimResult> = Result.failure(NotImplementedError("Managed player claims are not implemented."))
     suspend fun isCurrentUserChild(minorAgeThreshold: Int = 18): Result<Boolean>
     suspend fun listChildren(): Result<List<FamilyChild>>
     suspend fun listPendingChildJoinRequests(): Result<List<FamilyJoinRequest>>
@@ -381,6 +392,13 @@ interface IUserRepository : IMVPRepository {
     suspend fun setCachedCurrentUserProfile(profile: UserData): Result<UserData> =
         Result.failure(NotImplementedError("Caching the current user profile is not implemented"))
 }
+
+data class ManagedPlayerClaimResult(
+    val status: String? = null,
+    val primaryProfileId: String? = null,
+    val sourceProfileId: String? = null,
+    val mergeId: String? = null,
+)
 
 class UserRepository(
     internal val databaseService: DatabaseService,
@@ -1168,6 +1186,56 @@ class UserRepository(
         val normalizedInviteId = inviteId.trim().takeIf(String::isNotBlank) ?: error("Invite id is required")
         api.postNoResponse("api/invites/${normalizedInviteId.encodeURLQueryComponent()}/decline")
         deleteCachedInvite(normalizedInviteId)
+    }
+
+    override suspend fun claimManagedPlayerProfile(
+        profileId: String,
+        inviteId: String,
+        confirmation: Boolean,
+        dateOfBirth: String?,
+        version: String?,
+        expiresAt: String?,
+        signature: String?,
+    ): Result<ManagedPlayerClaimResult> = runCatching {
+        val normalizedProfileId = profileId.trim().takeIf(String::isNotBlank)
+            ?: error("Profile id is required")
+        val normalizedInviteId = inviteId.trim().takeIf(String::isNotBlank)
+            ?: error("Invite id is required")
+        val response = api.post<ManagedPlayerClaimRequestDto, ManagedPlayerClaimResponseDto>(
+            path = "api/user-profiles/${normalizedProfileId.encodeURLQueryComponent()}/claim",
+            body = ManagedPlayerClaimRequestDto(
+                inviteId = normalizedInviteId,
+                confirmation = confirmation,
+                dateOfBirth = dateOfBirth,
+                version = version,
+                expiresAt = expiresAt,
+                signature = signature,
+            ),
+        )
+        if (!response.ok) error(response.error ?: "Profile claim failed")
+        if (response.status == "CLAIMED" || response.status == "MERGED") {
+            response.primaryProfileId?.let { primaryId ->
+                databaseService.getUserDataDao.getUserDataById(primaryId)?.let { current ->
+                    databaseService.getUserDataDao.upsertUserData(current.copy(isManagedPlayer = false, mergedIntoProfileId = null))
+                }
+            }
+            if (response.status == "MERGED" && response.sourceProfileId != null && response.primaryProfileId != null) {
+                databaseService.getUserDataDao.getUserDataById(response.sourceProfileId)?.let { source ->
+                    databaseService.getUserDataDao.upsertUserData(
+                        source.copy(
+                            isManagedPlayer = false,
+                            mergedIntoProfileId = response.primaryProfileId,
+                        ),
+                    )
+                }
+            }
+        }
+        ManagedPlayerClaimResult(
+            status = response.status,
+            primaryProfileId = response.primaryProfileId,
+            sourceProfileId = response.sourceProfileId,
+            mergeId = response.mergeId,
+        )
     }
 
     override suspend fun isCurrentUserChild(minorAgeThreshold: Int): Result<Boolean> = runCatching {

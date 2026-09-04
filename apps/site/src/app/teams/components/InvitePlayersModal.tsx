@@ -5,6 +5,7 @@ import {
   Alert,
   Avatar,
   Button,
+  Checkbox,
   Group,
   Modal,
   Paper,
@@ -52,6 +53,9 @@ type NewPersonInvite = {
   lastName: string;
   email: string;
   phone: string;
+  isMinor: boolean;
+  dateOfBirth: string;
+  guardianEmail: string;
 };
 
 type CreatedShareInvite = {
@@ -59,6 +63,7 @@ type CreatedShareInvite = {
   role: TeamInviteRoleType;
   shareUrl: string;
   emailSent: boolean;
+  claimUrl?: string | null;
 };
 
 const EMPTY_PERSON_INVITE: NewPersonInvite = {
@@ -66,6 +71,9 @@ const EMPTY_PERSON_INVITE: NewPersonInvite = {
   lastName: '',
   email: '',
   phone: '',
+  isMinor: false,
+  dateOfBirth: '',
+  guardianEmail: '',
 };
 
 type PendingRoleInvite = {
@@ -180,7 +188,8 @@ export default function InvitePlayersModal({
   const inviteEmailValid = normalizedInviteEmail.length === 0 || EMAIL_REGEX.test(normalizedInviteEmail);
   const personInviteValid = personInvite.firstName.trim().length > 0
     && personInvite.lastName.trim().length > 0
-    && inviteEmailValid;
+    && inviteEmailValid
+    && (!personInvite.isMinor || (personInvite.dateOfBirth.trim().length > 0 && EMAIL_REGEX.test(personInvite.guardianEmail.trim())));
   const selectedRoleLabel = getRoleLabel(selectedInviteRole);
   const normalizedSelectedFreeAgentId = selectedFreeAgentId?.trim() || null;
   const assistantCoachIds = useMemo(() => (
@@ -490,6 +499,9 @@ export default function InvitePlayersModal({
         email: normalizedInviteEmail || undefined,
         phone: personInvite.phone.trim() || undefined,
         shareOnly: !normalizedInviteEmail,
+        ...(selectedInviteRole === 'player' && personInvite.isMinor ? { isMinor: true } : {}),
+        ...(selectedInviteRole === 'player' && personInvite.dateOfBirth ? { dateOfBirth: personInvite.dateOfBirth } : {}),
+        ...(selectedInviteRole === 'player' && personInvite.guardianEmail.trim() ? { guardianEmail: personInvite.guardianEmail.trim().toLowerCase() } : {}),
       });
       const fullName = `${personInvite.firstName.trim()} ${personInvite.lastName.trim()}`;
 
@@ -525,6 +537,7 @@ export default function InvitePlayersModal({
           role: selectedInviteRole,
           shareUrl: result.shareUrl,
           emailSent: Boolean(normalizedInviteEmail),
+          claimUrl: result.claimUrl,
         });
       }
       notifications.show({
@@ -708,6 +721,33 @@ export default function InvitePlayersModal({
                   setPersonInvite((current) => ({ ...current, phone: formatPhoneInput(value) }));
                 }}
               />
+              {selectedInviteRole === 'player' ? (
+                <>
+                  <Checkbox
+                    label="Is a minor"
+                    checked={personInvite.isMinor}
+                    onChange={(event) => setPersonInvite((current) => ({ ...current, isMinor: event.currentTarget.checked }))}
+                  />
+                  {personInvite.isMinor ? (
+                    <Group grow align="flex-start">
+                      <TextInput
+                        label="Date of birth"
+                        type="date"
+                        required
+                        value={personInvite.dateOfBirth}
+                        onChange={(event) => setPersonInvite((current) => ({ ...current, dateOfBirth: event.currentTarget.value }))}
+                      />
+                      <TextInput
+                        label="Guardian email"
+                        type="email"
+                        required
+                        value={personInvite.guardianEmail}
+                        onChange={(event) => setPersonInvite((current) => ({ ...current, guardianEmail: event.currentTarget.value }))}
+                      />
+                    </Group>
+                  ) : null}
+                </>
+              ) : null}
               <Text size="xs" c="dimmed">
                 Adding an email sends the invite when you save. Without an email, save the person and copy their private invite link.
               </Text>
@@ -789,6 +829,14 @@ export default function InvitePlayersModal({
                 <Button size="xs" variant="light" onClick={() => { void copyCreatedInviteLink(); }}>
                   Copy Invite Link
                 </Button>
+                {createdShareInvite.claimUrl ? (
+                  <Button size="xs" variant="light" onClick={() => {
+                    void navigator.clipboard.writeText(createdShareInvite.claimUrl as string);
+                    notifications.show({ color: 'green', message: 'Profile claim link copied.' });
+                  }}>
+                    Copy Profile Claim Link
+                  </Button>
+                ) : null}
               </Group>
             </Stack>
           </Alert>

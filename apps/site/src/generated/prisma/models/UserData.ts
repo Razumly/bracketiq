@@ -43,6 +43,9 @@ export type UserDataMinAggregateOutputType = {
   chatTermsVersion: string | null
   onboardingIntent: string | null
   accountVisibility: string | null
+  isManagedPlayer: boolean | null
+  mergedIntoProfileId: string | null
+  mergedAt: Date | null
 }
 
 export type UserDataMaxAggregateOutputType = {
@@ -64,6 +67,9 @@ export type UserDataMaxAggregateOutputType = {
   chatTermsVersion: string | null
   onboardingIntent: string | null
   accountVisibility: string | null
+  isManagedPlayer: boolean | null
+  mergedIntoProfileId: string | null
+  mergedAt: Date | null
 }
 
 export type UserDataCountAggregateOutputType = {
@@ -94,6 +100,9 @@ export type UserDataCountAggregateOutputType = {
   onboardingIntent: number
   accountVisibility: number
   notificationSettings: number
+  isManagedPlayer: number
+  mergedIntoProfileId: number
+  mergedAt: number
   _all: number
 }
 
@@ -117,6 +126,9 @@ export type UserDataMinAggregateInputType = {
   chatTermsVersion?: true
   onboardingIntent?: true
   accountVisibility?: true
+  isManagedPlayer?: true
+  mergedIntoProfileId?: true
+  mergedAt?: true
 }
 
 export type UserDataMaxAggregateInputType = {
@@ -138,6 +150,9 @@ export type UserDataMaxAggregateInputType = {
   chatTermsVersion?: true
   onboardingIntent?: true
   accountVisibility?: true
+  isManagedPlayer?: true
+  mergedIntoProfileId?: true
+  mergedAt?: true
 }
 
 export type UserDataCountAggregateInputType = {
@@ -168,6 +183,9 @@ export type UserDataCountAggregateInputType = {
   onboardingIntent?: true
   accountVisibility?: true
   notificationSettings?: true
+  isManagedPlayer?: true
+  mergedIntoProfileId?: true
+  mergedAt?: true
   _all?: true
 }
 
@@ -271,6 +289,9 @@ export type UserDataGroupByOutputType = {
   onboardingIntent: string | null
   accountVisibility: string
   notificationSettings: runtime.JsonValue
+  isManagedPlayer: boolean
+  mergedIntoProfileId: string | null
+  mergedAt: Date | null
   _count: UserDataCountAggregateOutputType | null
   _min: UserDataMinAggregateOutputType | null
   _max: UserDataMaxAggregateOutputType | null
@@ -322,6 +343,9 @@ export type UserDataWhereInput = {
   onboardingIntent?: Prisma.StringNullableFilter<"UserData"> | string | null
   accountVisibility?: Prisma.StringFilter<"UserData"> | string
   notificationSettings?: Prisma.JsonFilter<"UserData">
+  isManagedPlayer?: Prisma.BoolFilter<"UserData"> | boolean
+  mergedIntoProfileId?: Prisma.StringNullableFilter<"UserData"> | string | null
+  mergedAt?: Prisma.DateTimeNullableFilter<"UserData"> | Date | string | null
 }
 
 export type UserDataOrderByWithRelationInput = {
@@ -352,6 +376,9 @@ export type UserDataOrderByWithRelationInput = {
   onboardingIntent?: Prisma.SortOrderInput | Prisma.SortOrder
   accountVisibility?: Prisma.SortOrder
   notificationSettings?: Prisma.SortOrder
+  isManagedPlayer?: Prisma.SortOrder
+  mergedIntoProfileId?: Prisma.SortOrderInput | Prisma.SortOrder
+  mergedAt?: Prisma.SortOrderInput | Prisma.SortOrder
 }
 
 export type UserDataWhereUniqueInput = Prisma.AtLeast<{
@@ -385,6 +412,9 @@ export type UserDataWhereUniqueInput = Prisma.AtLeast<{
   onboardingIntent?: Prisma.StringNullableFilter<"UserData"> | string | null
   accountVisibility?: Prisma.StringFilter<"UserData"> | string
   notificationSettings?: Prisma.JsonFilter<"UserData">
+  isManagedPlayer?: Prisma.BoolFilter<"UserData"> | boolean
+  mergedIntoProfileId?: Prisma.StringNullableFilter<"UserData"> | string | null
+  mergedAt?: Prisma.DateTimeNullableFilter<"UserData"> | Date | string | null
 }, "id">
 
 export type UserDataOrderByWithAggregationInput = {
@@ -415,6 +445,9 @@ export type UserDataOrderByWithAggregationInput = {
   onboardingIntent?: Prisma.SortOrderInput | Prisma.SortOrder
   accountVisibility?: Prisma.SortOrder
   notificationSettings?: Prisma.SortOrder
+  isManagedPlayer?: Prisma.SortOrder
+  mergedIntoProfileId?: Prisma.SortOrderInput | Prisma.SortOrder
+  mergedAt?: Prisma.SortOrderInput | Prisma.SortOrder
   _count?: Prisma.UserDataCountOrderByAggregateInput
   _max?: Prisma.UserDataMaxOrderByAggregateInput
   _min?: Prisma.UserDataMinOrderByAggregateInput
@@ -451,6 +484,9 @@ export type UserDataScalarWhereWithAggregatesInput = {
   onboardingIntent?: Prisma.StringNullableWithAggregatesFilter<"UserData"> | string | null
   accountVisibility?: Prisma.StringWithAggregatesFilter<"UserData"> | string
   notificationSettings?: Prisma.JsonWithAggregatesFilter<"UserData">
+  isManagedPlayer?: Prisma.BoolWithAggregatesFilter<"UserData"> | boolean
+  mergedIntoProfileId?: Prisma.StringNullableWithAggregatesFilter<"UserData"> | string | null
+  mergedAt?: Prisma.DateTimeNullableWithAggregatesFilter<"UserData"> | Date | string | null
 }
 
 export type UserDataCreateInput = {
@@ -481,6 +517,9 @@ export type UserDataCreateInput = {
   onboardingIntent?: string | null
   accountVisibility?: string
   notificationSettings?: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  isManagedPlayer?: boolean
+  mergedIntoProfileId?: string | null
+  mergedAt?: Date | string | null
 }
 
 export type UserDataUncheckedCreateInput = {
@@ -511,6 +550,9 @@ export type UserDataUncheckedCreateInput = {
   onboardingIntent?: string | null
   accountVisibility?: string
   notificationSettings?: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  isManagedPlayer?: boolean
+  mergedIntoProfileId?: string | null
+  mergedAt?: Date | string | null
 }
 
 export type UserDataUpdateInput = {
@@ -541,6 +583,9 @@ export type UserDataUpdateInput = {
   onboardingIntent?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   accountVisibility?: Prisma.StringFieldUpdateOperationsInput | string
   notificationSettings?: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  isManagedPlayer?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  mergedIntoProfileId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  mergedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
 }
 
 export type UserDataUncheckedUpdateInput = {
@@ -571,6 +616,9 @@ export type UserDataUncheckedUpdateInput = {
   onboardingIntent?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   accountVisibility?: Prisma.StringFieldUpdateOperationsInput | string
   notificationSettings?: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  isManagedPlayer?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  mergedIntoProfileId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  mergedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
 }
 
 export type UserDataCreateManyInput = {
@@ -601,6 +649,9 @@ export type UserDataCreateManyInput = {
   onboardingIntent?: string | null
   accountVisibility?: string
   notificationSettings?: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  isManagedPlayer?: boolean
+  mergedIntoProfileId?: string | null
+  mergedAt?: Date | string | null
 }
 
 export type UserDataUpdateManyMutationInput = {
@@ -631,6 +682,9 @@ export type UserDataUpdateManyMutationInput = {
   onboardingIntent?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   accountVisibility?: Prisma.StringFieldUpdateOperationsInput | string
   notificationSettings?: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  isManagedPlayer?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  mergedIntoProfileId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  mergedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
 }
 
 export type UserDataUncheckedUpdateManyInput = {
@@ -661,6 +715,9 @@ export type UserDataUncheckedUpdateManyInput = {
   onboardingIntent?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   accountVisibility?: Prisma.StringFieldUpdateOperationsInput | string
   notificationSettings?: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  isManagedPlayer?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  mergedIntoProfileId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  mergedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
 }
 
 export type UserDataCountOrderByAggregateInput = {
@@ -691,6 +748,9 @@ export type UserDataCountOrderByAggregateInput = {
   onboardingIntent?: Prisma.SortOrder
   accountVisibility?: Prisma.SortOrder
   notificationSettings?: Prisma.SortOrder
+  isManagedPlayer?: Prisma.SortOrder
+  mergedIntoProfileId?: Prisma.SortOrder
+  mergedAt?: Prisma.SortOrder
 }
 
 export type UserDataMaxOrderByAggregateInput = {
@@ -712,6 +772,9 @@ export type UserDataMaxOrderByAggregateInput = {
   chatTermsVersion?: Prisma.SortOrder
   onboardingIntent?: Prisma.SortOrder
   accountVisibility?: Prisma.SortOrder
+  isManagedPlayer?: Prisma.SortOrder
+  mergedIntoProfileId?: Prisma.SortOrder
+  mergedAt?: Prisma.SortOrder
 }
 
 export type UserDataMinOrderByAggregateInput = {
@@ -733,6 +796,9 @@ export type UserDataMinOrderByAggregateInput = {
   chatTermsVersion?: Prisma.SortOrder
   onboardingIntent?: Prisma.SortOrder
   accountVisibility?: Prisma.SortOrder
+  isManagedPlayer?: Prisma.SortOrder
+  mergedIntoProfileId?: Prisma.SortOrder
+  mergedAt?: Prisma.SortOrder
 }
 
 export type UserDataCreateteamIdsInput = {
@@ -837,6 +903,9 @@ export type UserDataSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs
   onboardingIntent?: boolean
   accountVisibility?: boolean
   notificationSettings?: boolean
+  isManagedPlayer?: boolean
+  mergedIntoProfileId?: boolean
+  mergedAt?: boolean
 }, ExtArgs["result"]["userData"]>
 
 export type UserDataSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
@@ -867,6 +936,9 @@ export type UserDataSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Exte
   onboardingIntent?: boolean
   accountVisibility?: boolean
   notificationSettings?: boolean
+  isManagedPlayer?: boolean
+  mergedIntoProfileId?: boolean
+  mergedAt?: boolean
 }, ExtArgs["result"]["userData"]>
 
 export type UserDataSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
@@ -897,6 +969,9 @@ export type UserDataSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Exte
   onboardingIntent?: boolean
   accountVisibility?: boolean
   notificationSettings?: boolean
+  isManagedPlayer?: boolean
+  mergedIntoProfileId?: boolean
+  mergedAt?: boolean
 }, ExtArgs["result"]["userData"]>
 
 export type UserDataSelectScalar = {
@@ -927,9 +1002,12 @@ export type UserDataSelectScalar = {
   onboardingIntent?: boolean
   accountVisibility?: boolean
   notificationSettings?: boolean
+  isManagedPlayer?: boolean
+  mergedIntoProfileId?: boolean
+  mergedAt?: boolean
 }
 
-export type UserDataOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "firstName" | "lastName" | "dateOfBirth" | "requiredProfileFieldsCompletedAt" | "dobVerified" | "dobVerifiedAt" | "ageVerificationProvider" | "teamIds" | "friendIds" | "userName" | "hasStripeAccount" | "followingIds" | "friendRequestIds" | "friendRequestSentIds" | "uploadedImages" | "profileImageId" | "homePageOrganizationId" | "blockedUserIds" | "hiddenEventIds" | "chatTermsAcceptedAt" | "chatTermsVersion" | "onboardingIntent" | "accountVisibility" | "notificationSettings", ExtArgs["result"]["userData"]>
+export type UserDataOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "firstName" | "lastName" | "dateOfBirth" | "requiredProfileFieldsCompletedAt" | "dobVerified" | "dobVerifiedAt" | "ageVerificationProvider" | "teamIds" | "friendIds" | "userName" | "hasStripeAccount" | "followingIds" | "friendRequestIds" | "friendRequestSentIds" | "uploadedImages" | "profileImageId" | "homePageOrganizationId" | "blockedUserIds" | "hiddenEventIds" | "chatTermsAcceptedAt" | "chatTermsVersion" | "onboardingIntent" | "accountVisibility" | "notificationSettings" | "isManagedPlayer" | "mergedIntoProfileId" | "mergedAt", ExtArgs["result"]["userData"]>
 
 export type $UserDataPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "UserData"
@@ -962,6 +1040,9 @@ export type $UserDataPayload<ExtArgs extends runtime.Types.Extensions.InternalAr
     onboardingIntent: string | null
     accountVisibility: string
     notificationSettings: runtime.JsonValue
+    isManagedPlayer: boolean
+    mergedIntoProfileId: string | null
+    mergedAt: Date | null
   }, ExtArgs["result"]["userData"]>
   composites: {}
 }
@@ -1412,6 +1493,9 @@ export interface UserDataFieldRefs {
   readonly onboardingIntent: Prisma.FieldRef<"UserData", 'String'>
   readonly accountVisibility: Prisma.FieldRef<"UserData", 'String'>
   readonly notificationSettings: Prisma.FieldRef<"UserData", 'Json'>
+  readonly isManagedPlayer: Prisma.FieldRef<"UserData", 'Boolean'>
+  readonly mergedIntoProfileId: Prisma.FieldRef<"UserData", 'String'>
+  readonly mergedAt: Prisma.FieldRef<"UserData", 'DateTime'>
 }
 
 

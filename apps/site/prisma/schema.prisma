@@ -1098,6 +1098,10 @@ model UserData {
   onboardingIntent                 String?
   accountVisibility                String    @default("PUBLIC")
   notificationSettings             Json      @default("{}")
+  // Durable roster identity before an Account claims the profile.
+  isManagedPlayer                 Boolean   @default(false)
+  mergedIntoProfileId             String?
+  mergedAt                        DateTime?
 
   @@index([accountVisibility])
 }
@@ -1192,11 +1196,67 @@ model Invites {
   linkVersion    Int       @default(1)
   linkExpiresAt  DateTime?
   claimedBy      String?
+  // Claim and guardian metadata are separate from Team Membership acceptance.
+  isMinor        Boolean   @default(false)
+  dateOfBirth    DateTime?
+  guardianEmail  String?
+  idempotencyKey String?
 
   @@index([userId, status, createdAt, id])
   @@index([teamId, status, createdAt, id])
   @@index([status, updatedAt])
   @@index([linkExpiresAt, status])
+  @@index([teamId, createdBy, idempotencyKey])
+}
+
+model UserProfileClaims {
+  id                 String    @id
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  profileId          String
+  claimantUserId     String
+  inviteId           String?
+  verificationMethod String
+  verifiedEmail      String?
+  status             String    @default("PENDING")
+  confirmationAt     DateTime?
+  completedAt        DateTime?
+  failureReason      String?
+
+  @@index([profileId, status])
+  @@index([claimantUserId, status])
+  @@index([inviteId])
+}
+
+model UserProfileMerges {
+  id               String   @id
+  createdAt        DateTime @default(now())
+  sourceProfileId  String
+  primaryProfileId String
+  claimantUserId   String
+  confirmationAt   DateTime
+  rosterIds        String[] @default([])
+  invitationIds    String[] @default([])
+  metadata         Json?
+
+  @@index([sourceProfileId])
+  @@index([primaryProfileId])
+  @@index([claimantUserId])
+}
+
+model UserProfileContactCorrections {
+  id             String   @id
+  createdAt      DateTime @default(now())
+  profileId      String
+  managerUserId  String
+  previousEmail  String?
+  correctedEmail String?
+  previousPhone  String?
+  correctedPhone String?
+  inviteId       String?
+
+  @@index([profileId, createdAt])
+  @@index([managerUserId, createdAt])
 }
 
 model TeamInviteEventSyncs {

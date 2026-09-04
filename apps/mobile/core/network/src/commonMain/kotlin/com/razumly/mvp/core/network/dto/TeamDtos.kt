@@ -191,6 +191,11 @@ data class TeamMemberInviteRequestDto(
     val lastName: String? = null,
     val phone: String? = null,
     val shareOnly: Boolean? = null,
+    val isMinor: Boolean? = null,
+    val dateOfBirth: String? = null,
+    val guardianEmail: String? = null,
+    val idempotencyKey: String? = null,
+    val existingInviteId: String? = null,
 )
 
 @Serializable
@@ -206,6 +211,8 @@ data class TeamMemberInviteResponseDto(
     val team: TeamApiDto? = null,
     val invite: Invite? = null,
     val shareUrl: String? = null,
+    val teamInviteUrl: String? = null,
+    val claimUrl: String? = null,
     val delivery: TeamInviteDeliveryDto? = null,
 )
 
