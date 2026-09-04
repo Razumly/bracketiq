@@ -9,8 +9,8 @@ const RETIREMENT_MESSAGE =
 it('fails closed with the governed retirement message and exit 78', () => {
   const siteRoot = path.resolve(__dirname, '../../../../');
   const result = spawnSync(
-    path.join(siteRoot, 'node_modules/.bin/tsx'),
-    [path.join(__dirname, '..', 'codexApprovalGoal.ts')],
+    process.execPath,
+    [path.join(siteRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs'), path.join(__dirname, '..', 'codexApprovalGoal.ts')],
     { cwd: siteRoot, encoding: 'utf8' },
   );
 
