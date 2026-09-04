@@ -46,7 +46,6 @@ import { buildOrganizationEventCreateUrl } from '@/lib/eventCreateNavigation';
 import CreateTeamModal from '@/components/ui/CreateTeamModal';
 import CreateOrganizationModal from '@/components/ui/CreateOrganizationModal';
 import BillingAddressModal from '@/components/ui/BillingAddressModal';
-import HostPriceInput from '@/components/ui/HostPriceInput';
 import { isStripeConnectMfaRequiredError, paymentService } from '@/lib/paymentService';
 import { userService } from '@/lib/userService';
 import { apiRequest, isApiRequestError } from '@/lib/apiClient';
@@ -71,6 +70,8 @@ import OrganizationTeamsTabContent from './OrganizationTeamsTabContent';
 import OrganizationCustomersTabContent from './OrganizationCustomersTabContent';
 import OrganizationEventTemplatesTabContent from './OrganizationEventTemplatesTabContent';
 import OrganizationDocumentTemplatesTabContent from './OrganizationDocumentTemplatesTabContent';
+import OrganizationStoreTabContent from './OrganizationStoreTabContent';
+import OrganizationProductEditorModal from './OrganizationProductEditorModal';
 import { getNextRentalOccurrence } from '@/app/discover/utils/rentals';
 import {
   getRequiredSignerTypeLabel,
@@ -79,8 +80,6 @@ import {
 import { resolveClientPublicOrigin } from '@/lib/clientPublicOrigin';
 import {
   defaultProductTypeForPeriod,
-  deriveProductTypeFromTaxCategory,
-  getProductTypeOptionsForPeriod,
 } from '@/lib/productTypes';
 import { normalizePriceCents } from '@/lib/priceUtils';
 import {
@@ -112,6 +111,13 @@ import { describeDeleteOutcome } from '@/lib/deleteOutcome';
 import { resolveOrganizationEventCreationState } from './organizationEventCreation';
 import { OrganizationManagementShell } from '@/components/organization/OrganizationManagementShell';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  maybeCarryDefaultProductType,
+  PRODUCT_PERIOD_OPTIONS,
+  resolveProductEditorPeriod,
+  resolveProductEditorType,
+  isSinglePurchasePeriod,
+} from './organizationStoreUtils';
 
 export default function OrganizationDetailPage() {
   return (
@@ -127,12 +133,6 @@ const CUSTOMER_PAGE_SIZE = 25;
 const ORG_EVENTS_DEFAULT_MAX_DISTANCE = 50;
 const ORG_HOSTED_EVENT_TYPE_OPTIONS = ['EVENT', 'TOURNAMENT', 'LEAGUE', 'WEEKLY_EVENT'] as const;
 const ORG_EVENT_TYPE_OPTIONS = [...ORG_HOSTED_EVENT_TYPE_OPTIONS, 'RENTAL'] as const;
-const PRODUCT_PERIOD_OPTIONS: Array<{ label: string; value: Product['period'] }> = [
-  { label: 'Single purchase', value: 'single' },
-  { label: 'Month', value: 'month' },
-  { label: 'Week', value: 'week' },
-  { label: 'Year', value: 'year' },
-];
 const DOCUMENT_VOID_REASON_OPTIONS = [
   'Wrong Document Subject',
   'Wrong Document Requirement or Version',
@@ -144,77 +144,6 @@ const DOCUMENT_VOID_REASON_OPTIONS = [
   'Other',
 ] as const;
 type OrganizationEventTypeFilter = (typeof ORG_EVENT_TYPE_OPTIONS)[number];
-
-const isSinglePurchasePeriod = (period: Product['period'] | string | null | undefined): boolean =>
-  String(period ?? '').trim().toLowerCase() === 'single';
-
-const resolveProductEditorPeriod = (period: Product['period'] | string | null | undefined): Product['period'] => {
-  const normalized = String(period ?? '').trim().toLowerCase();
-  if (
-    normalized === 'single'
-    || normalized === 'week'
-    || normalized === 'month'
-    || normalized === 'year'
-  ) {
-    return normalized as Product['period'];
-  }
-  return 'month';
-};
-
-const resolveProductEditorType = (
-  productType: ProductType | null | undefined,
-  taxCategory: Product['taxCategory'] | null | undefined,
-  period: Product['period'],
-): ProductType => {
-  if (productType) {
-    return productType;
-  }
-  return deriveProductTypeFromTaxCategory(taxCategory, period);
-};
-
-const maybeCarryDefaultProductType = (
-  currentProductType: ProductType,
-  previousPeriod: Product['period'],
-  nextPeriod: Product['period'],
-): ProductType => (
-  currentProductType === defaultProductTypeForPeriod(previousPeriod)
-    ? defaultProductTypeForPeriod(nextPeriod)
-    : currentProductType
-);
-
-const formatProductPeriodLabel = (period: Product['period'] | string | null | undefined): string => {
-  const normalized = resolveProductEditorPeriod(period);
-  if (normalized === 'single') return 'Single purchase';
-  if (normalized === 'week') return 'Weekly';
-  if (normalized === 'year') return 'Yearly';
-  return 'Monthly';
-};
-
-const formatProductRecurringSuffix = (period: Product['period'] | string | null | undefined): string => {
-  const normalized = resolveProductEditorPeriod(period);
-  if (normalized === 'week') return 'week';
-  if (normalized === 'year') return 'year';
-  return 'month';
-};
-
-const formatProductPriceLabel = (product: Product): string => (
-  isSinglePurchasePeriod(product.period)
-    ? formatPrice(product.priceCents)
-    : `${formatPrice(product.priceCents)} / ${formatProductRecurringSuffix(product.period)}`
-);
-
-const resolveProductCheckoutLabel = (product: Product, isOwner: boolean): string => {
-  if (isSinglePurchasePeriod(product.period)) {
-    return isOwner ? 'Preview purchase' : 'Buy now';
-  }
-  return isOwner ? 'Preview subscription' : 'Subscribe';
-};
-
-const isProductTypeTaxable = (productType: ProductType | null | undefined): boolean =>
-  productType !== 'NON_TAXABLE_ITEM';
-
-
-
 
 type TemplateDocumentWithVersionState = TemplateDocument & {
   documentRequirementId: string;
@@ -4915,145 +4844,31 @@ function OrganizationDetailContent() {
             )}
 
             {activeTab === 'store' && org && (
-              <Paper withBorder p="md" radius="md" className="org-tab-surface">
-                <Group justify="space-between" align="center" mb="md">
-                  <Title order={5}>Store</Title>
-                  {!organizationHasStripeAccount && (
-                    <Text size="sm" c="red">
-                      Connect Stripe to accept payments for products.
-                    </Text>
-                  )}
-                </Group>
-
-                  {canManageProducts && (
-                    <Paper withBorder radius="md" p="md" mb="lg" className="org-tab-item">
-                    <Title order={6} mb="xs">Add product</Title>
-                    <Text size="sm" c="dimmed" mb="md">
-                      Create a recurring or one-time product that users can purchase.
-                    </Text>
-                    <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
-                      <TextInput
-                        label="Name"
-                        placeholder="Product"
-                        value={productName}
-                        onChange={(e) => setProductName(e.currentTarget.value)}
-                        required
-                      />
-	                      <HostPriceInput
-	                        hostLabel="Host take-home"
-	                        totalLabel="Product price"
-	                        value={organizationHasStripeAccount ? productPriceCents : 0}
-	                        onChange={setProductPriceCents}
-	                        disabled={!organizationHasStripeAccount}
-	                        required
-	                      />
-                      <Select
-                        label="Billing period"
-                        data={PRODUCT_PERIOD_OPTIONS}
-                        value={productPeriod}
-                        onChange={handleProductPeriodChange}
-                      />
-                      <Select
-                        label="Product type"
-                        data={getProductTypeOptionsForPeriod(productPeriod)}
-                        value={productType}
-                        onChange={(value) => setProductType((value as ProductType) ?? defaultProductTypeForPeriod(productPeriod))}
-                      />
-                      <TextInput
-                        label="Description"
-                        placeholder="Optional description"
-                        value={productDescription}
-                        onChange={(e) => setProductDescription(e.currentTarget.value)}
-                      />
-                    </SimpleGrid>
-                    <Group justify="flex-end" mt="md">
-                      <Button
-                        onClick={handleCreateProduct}
-                        loading={creatingProduct}
-                        disabled={!organizationHasStripeAccount || !canCreateProduct}
-                      >
-                        Add Product
-                      </Button>
-                    </Group>
-                  </Paper>
-                )}
-
-                <Title order={6} mb="sm">Products</Title>
-                {products.length === 0 ? (
-                  <Text size="sm" c="dimmed">No products yet.</Text>
-                ) : (
-                  <SimpleGrid cols={{ base: 1, md: 2, lg: 3 }} spacing="md">
-                    {products.map((product) => (
-                      <Paper
-                        key={product.$id}
-                        withBorder
-                        radius="md"
-                        p="md"
-                        className="org-tab-item"
-                        onClick={() => {
-                          if (canManageProducts) {
-                            openProductModal(product);
-                          }
-                        }}
-                        style={{ cursor: canManageProducts ? 'pointer' : 'default' }}
-                      >
-                        <Group justify="space-between" align="flex-start" mb="xs">
-                          <div>
-                            <Text fw={600}>{product.name}</Text>
-                            {product.description && <Text size="sm" c="dimmed">{product.description}</Text>}
-                          </div>
-                          <div style={{ textAlign: 'right' }}>
-                            <Text size="sm" c="dimmed">{formatProductPeriodLabel(product.period)}</Text>
-                            {canManageProducts && (
-                              <Text size="xs" c="dimmed">Click card to edit</Text>
-                            )}
-                          </div>
-                        </Group>
-                        <Text fw={700} mb="xs">{formatProductPriceLabel(product)}</Text>
-                        {isSinglePurchasePeriod(product.period) ? (
-                          <TextInput
-                            label="Discount code"
-                            placeholder="Enter code"
-                            size="xs"
-                            mb="xs"
-                            value={productDiscountCodes[product.$id] ?? ''}
-                            onChange={(event) => {
-                              const value = event.currentTarget.value;
-                              setProductDiscountCodes((current) => ({
-                                ...current,
-                                [product.$id]: value,
-                              }));
-                            }}
-                            disabled={startingProductCheckoutId === product.$id}
-                            onClick={(event) => event.stopPropagation()}
-                          />
-                        ) : null}
-                        {product.isActive === false && (
-                          <Text size="xs" c="red" mb="xs">Inactive</Text>
-                        )}
-                        <Button
-                          fullWidth
-                          variant={canManageProducts ? 'outline' : 'filled'}
-                          loading={startingProductCheckoutId === product.$id}
-                          disabled={
-                            product.isActive === false
-                            || (!organizationHasStripeAccount && !canManageProducts)
-                            || startingProductCheckoutId !== null
-                          }
-                          onClick={(event) => {
-                            if (canManageProducts) {
-                              event.stopPropagation();
-                            }
-                            handlePurchaseProduct(product);
-                          }}
-                        >
-                          {resolveProductCheckoutLabel(product, canManageProducts)}
-                        </Button>
-                      </Paper>
-                    ))}
-                  </SimpleGrid>
-                )}
-              </Paper>
+              <OrganizationStoreTabContent
+                organizationHasStripeAccount={organizationHasStripeAccount}
+                canManageProducts={canManageProducts}
+                products={products}
+                productName={productName}
+                onProductNameChange={setProductName}
+                productDescription={productDescription}
+                onProductDescriptionChange={setProductDescription}
+                productPeriod={productPeriod}
+                onProductPeriodChange={handleProductPeriodChange}
+                productType={productType}
+                onProductTypeChange={(value) => setProductType((value as ProductType) ?? defaultProductTypeForPeriod(productPeriod))}
+                productPriceCents={productPriceCents}
+                onProductPriceChange={setProductPriceCents}
+                creatingProduct={creatingProduct}
+                canCreateProduct={canCreateProduct}
+                onCreateProduct={handleCreateProduct}
+                productDiscountCodes={productDiscountCodes}
+                onProductDiscountCodeChange={(productId, value) => {
+                  setProductDiscountCodes((current) => ({ ...current, [productId]: value }));
+                }}
+                startingProductCheckoutId={startingProductCheckoutId}
+                onProductPurchase={handlePurchaseProduct}
+                onProductEdit={openProductModal}
+              />
             )}
 
             {activeTab === 'fields' && org && (
@@ -5873,68 +5688,27 @@ function OrganizationDetailContent() {
           </Group>
         </Stack>
       </Modal>
-      <Modal
-        opened={productModalOpen && Boolean(selectedProduct)}
+      <OrganizationProductEditorModal
+        opened={productModalOpen}
+        selectedProduct={selectedProduct}
+        organizationHasStripeAccount={organizationHasStripeAccount}
+        editProductName={editProductName}
+        onEditProductNameChange={setEditProductName}
+        editProductDescription={editProductDescription}
+        onEditProductDescriptionChange={setEditProductDescription}
+        editProductPeriod={editProductPeriod}
+        onEditProductPeriodChange={handleEditProductPeriodChange}
+        editProductType={editProductType}
+        onEditProductTypeChange={(value) => setEditProductType((value as ProductType) ?? defaultProductTypeForPeriod(editProductPeriod))}
+        editProductPriceCents={editProductPriceCents}
+        onEditProductPriceChange={setEditProductPriceCents}
+        canUpdateProduct={canUpdateProduct}
+        updatingProduct={updatingProduct}
+        deletingProduct={deletingProduct}
         onClose={closeProductModal}
-        title="Edit product"
-        centered
-      >
-        {selectedProduct && (
-          <Stack gap="sm">
-            <TextInput
-              label="Name"
-              value={editProductName}
-              onChange={(e) => setEditProductName(e.currentTarget.value)}
-              required
-            />
-	            <HostPriceInput
-	              hostLabel="Host take-home"
-	              totalLabel="Product price"
-	              value={organizationHasStripeAccount ? editProductPriceCents : 0}
-	              onChange={setEditProductPriceCents}
-	              disabled={!organizationHasStripeAccount}
-	              required
-	            />
-            <Select
-              label="Billing period"
-              data={PRODUCT_PERIOD_OPTIONS}
-              value={editProductPeriod}
-              onChange={handleEditProductPeriodChange}
-            />
-            <Select
-              label="Product type"
-              data={getProductTypeOptionsForPeriod(editProductPeriod)}
-              value={editProductType}
-              onChange={(value) => setEditProductType((value as ProductType) ?? defaultProductTypeForPeriod(editProductPeriod))}
-            />
-            <Textarea
-              label="Description"
-              placeholder="Optional description"
-              value={editProductDescription}
-              onChange={(e) => setEditProductDescription(e.currentTarget.value)}
-              minRows={2}
-            />
-            <Group justify="space-between" mt="md">
-              <Button
-                variant="light"
-                color="red"
-                onClick={handleDeleteProduct}
-                loading={deletingProduct}
-              >
-                Delete product
-              </Button>
-              <Group gap="xs">
-                <Button variant="default" onClick={closeProductModal}>
-                  Cancel
-                </Button>
-                <Button onClick={handleUpdateProduct} loading={updatingProduct} disabled={!canUpdateProduct}>
-                  Save changes
-                </Button>
-              </Group>
-            </Group>
-          </Stack>
-        )}
-      </Modal>
+        onSave={handleUpdateProduct}
+        onDelete={handleDeleteProduct}
+      />
       <BillingAddressModal
         opened={showBillingAddressModal}
         onClose={() => {
