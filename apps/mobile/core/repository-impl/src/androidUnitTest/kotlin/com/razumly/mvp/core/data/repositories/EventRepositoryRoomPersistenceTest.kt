@@ -71,6 +71,10 @@ import com.razumly.mvp.core.network.dto.EventEditorTimeSlotDto
 import com.razumly.mvp.core.network.dto.EventApiDto
 import com.razumly.mvp.core.network.dto.TeamApiDto
 import com.razumly.mvp.core.network.dto.MatchApiDto
+import com.razumly.mvp.core.network.dto.ScheduleReflowRequestDto
+import com.razumly.mvp.core.network.dto.ScheduleReflowResultDto
+import com.razumly.mvp.core.network.dto.ScheduleReflowStatus
+import com.razumly.mvp.core.network.dto.ScheduleReflowFieldPolicy
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.util.jsonMVP
@@ -113,6 +117,9 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.test.assertIs
+import kotlin.time.Instant
+import java.io.File
+import java.util.concurrent.TimeUnit
 
 private object EventRepositoryRoomPersistence_AuthTokenStore : AuthTokenStore {
     override suspend fun get(): String = "room-test-token"
@@ -3149,6 +3156,158 @@ class EventRepositoryRoomPersistenceTest {
             }
         }
 
+    @Test
+    fun given_site_reflow_when_room_refresh_succeeds_then_time_and_assignment_changes_stay_distinct() =
+        kotlinx.coroutines.test.runTest {
+            for (assignmentOnly in listOf(false, true)) verifyReflowRoom(assignmentOnly, false, testScheduler)
+            verifyReflowRoom(true, false, testScheduler, namedOfficial = true)
+        }
+
+    @Test
+    fun given_site_reflow_when_match_save_fails_then_the_room_transaction_rolls_back() =
+        kotlinx.coroutines.test.runTest {
+            verifyReflowRoom(false, true, testScheduler)
+        }
+
+    private suspend fun verifyReflowRoom(
+        assignmentOnly: Boolean,
+        failSave: Boolean,
+        scheduler: kotlinx.coroutines.test.TestCoroutineScheduler,
+        namedOfficial: Boolean = false,
+    ) {
+        val eventId = if (namedOfficial) "reflow-named" else if (assignmentOnly) "reflow-assignment" else "reflow-time"
+        val request = ScheduleReflowRequestDto(1, eventId, listOf("$eventId:${if (assignmentOnly) 2 else 1}"),
+            "fixture-revision-1", ScheduleReflowFieldPolicy.KEEP_ASSIGNED_FIELDS)
+        val responseJson = reflowClientToSiteResult(request)
+        val response = jsonMVP.decodeFromString<ScheduleReflowResultDto>(responseJson)
+        response.validateFor(eventId)
+        assertEquals(assignmentOnly, response.isAssignmentOnly)
+        assertEquals(!assignmentOnly, response.hasPlacementChanges)
+        val graph = requireNotNull(response.graph)
+        val expectedMatches = requireNotNull(graph.event.matches).map {
+            val match = requireNotNull(it.toMatchOrNull())
+            match.copy(officialId = match.officialIds.firstOrNull { assignment -> assignment.userId != null }?.userId)
+        }
+        val beforeMatches = expectedMatches.map { match ->
+            val placement = response.placementChanges.find { it.matchId == match.id }?.before
+            val assignments = response.assignmentChanges.find { it.matchId == match.id }?.before
+            val primary = assignments?.officialAssignments?.firstOrNull { it.userId != null }
+            match.copy(start = placement?.start?.let(Instant::parse) ?: match.start,
+                end = placement?.end?.let(Instant::parse) ?: match.end, fieldId = placement?.fieldId ?: match.fieldId,
+                teamOfficialId = if (assignments != null) assignments.teamOfficialId else match.teamOfficialId,
+                officialId = if (assignments != null) primary?.userId else match.officialId,
+                officialCheckedIn = if (assignments != null) primary?.checkedIn == true else match.officialCheckedIn,
+                officialIds = assignments?.officialAssignments?.map { it.toModel() } ?: match.officialIds)
+        }
+        val realDatabase = Room.inMemoryDatabaseBuilder<MVPDatabaseService>(context).allowMainThreadQueries().build()
+        var transactions = 0
+        var matchWrites = 0
+        val database = object : DatabaseService by realDatabase {
+            override suspend fun <R> withTransaction(block: suspend () -> R): R {
+                transactions += 1
+                return realDatabase.withTransaction(block)
+            }
+            override val getMatchDao = object : MatchDao by realDatabase.getMatchDao {
+                override suspend fun upsertMatches(matches: List<MatchMVP>) {
+                    matchWrites += 1
+                    realDatabase.getMatchDao.upsertMatches(matches)
+                    if (failSave) error("injected Reflow cache failure")
+                }
+            }
+        }
+        val http = HttpClient(MockEngine { httpRequest ->
+            assertEquals("/api/events/$eventId/schedule/reflow", httpRequest.url.encodedPath)
+            respondJson(responseJson, HttpStatusCode.OK)
+        }) { configureMvpHttpClient() }
+        val repository = eventRepositoryRoomPersistenceRepository(database, http, UnconfinedTestDispatcher(scheduler))
+        try {
+            scheduler.advanceUntilIdle()
+            val event = requireNotNull(graph.event.toEventOrNull(requireOwnerIdentity = false)).copy(end = Instant.parse("2026-09-04T11:00:00Z"))
+            realDatabase.getEventDao.upsertEvent(event)
+            realDatabase.getMatchDao.upsertMatches(beforeMatches)
+            realDatabase.getFieldDao.upsertFields(graph.event.fields)
+            val teams = graph.event.teams.map { requireNotNull(it.toTeamOrNull()) }
+            realDatabase.getTeamDao.upsertTeamsWithRelations(teams)
+            val userIds = (listOf(event.hostId) + teams.map { it.captainId }
+                + expectedMatches.flatMap { it.officialIds.mapNotNull { assignment -> assignment.userId } })
+                .distinct().filter(String::isNotBlank)
+            realDatabase.getUserDataDao.upsertUsersData(userIds.map { UserData().copy(id = it, firstName = "Alex", lastName = "Morgan", userName = it) })
+            transactions = 0
+            val result = repository.reflowEventSchedule(request)
+            assertEquals(1, transactions)
+            assertEquals(1, matchWrites)
+            if (failSave) {
+                assertIs<ScheduleReflowSyncPending>(result.exceptionOrNull())
+                assertEquals(beforeMatches.sortedBy { it.id }, realDatabase.getMatchDao.getMatchesOfTournament(eventId).sortedBy { it.id })
+                assertEquals(event.end, realDatabase.getEventDao.getEventById(eventId)?.end)
+            } else {
+                assertEquals(response.status, result.getOrThrow().status)
+                assertEquals(expectedMatches.sortedBy { it.id }, realDatabase.getMatchDao.getMatchesOfTournament(eventId).sortedBy { it.id })
+                assertEquals(Instant.parse(graph.event.end!!), realDatabase.getEventDao.getEventById(eventId)?.end)
+            }
+        } finally {
+            repository.close()
+            http.close()
+            realDatabase.close()
+        }
+    }
+
+    @Test
+    fun given_unchanged_reflow_when_received_then_room_has_no_transaction_or_rewrite() =
+        kotlinx.coroutines.test.runTest {
+            for (status in listOf(ScheduleReflowStatus.NO_OP, ScheduleReflowStatus.INFEASIBLE,
+                ScheduleReflowStatus.SEARCH_LIMIT, ScheduleReflowStatus.STALE)) {
+                val fixture = eventRepositoryRoomPersistenceTournamentFixture()
+                val realDatabase = Room.inMemoryDatabaseBuilder<MVPDatabaseService>(context).allowMainThreadQueries().build()
+                var transactions = 0
+                val database = EventRepositoryRoomPersistence_NoStartupCleanupDatabase(realDatabase) { transactions += 1 }
+                val response = ScheduleReflowResultDto(1, fixture.eventId, status, "revision-1",
+                    listOf("match-room-tournament"), emptyList(), emptyList(), emptyList(), emptyList(), 0, null)
+                val http = HttpClient(MockEngine { request ->
+                    assertEquals("/api/events/${fixture.eventId}/schedule/reflow", request.url.encodedPath)
+                    assertEquals(HttpMethod.Post, request.method)
+                    respondJson(roomMaintenanceResponseJson.encodeToString(response), HttpStatusCode.OK)
+                }) { configureMvpHttpClient() }
+                val repository = eventRepositoryRoomPersistenceRepository(database, http, UnconfinedTestDispatcher(testScheduler))
+                try {
+                    advanceUntilIdle()
+                    val event = requireNotNull(fixture.eventResponse.toEventOrNull(requireOwnerIdentity = false))
+                    val matches = requireNotNull(fixture.saved.graph).matches.map { requireNotNull(it.toMatchOrNull()) }
+                    realDatabase.getEventDao.upsertEvent(event)
+                    realDatabase.getMatchDao.upsertMatches(matches)
+                    transactions = 0
+                    val result = repository.reflowEventSchedule(ScheduleReflowRequestDto(1, fixture.eventId,
+                        listOf("match-room-tournament"), "revision-1", ScheduleReflowFieldPolicy.KEEP_ASSIGNED_FIELDS))
+                    if (status == ScheduleReflowStatus.NO_OP) assertEquals(status, result.getOrThrow().status)
+                    else assertEquals(status, assertIs<ScheduleReflowFailure>(result.exceptionOrNull()).result.status)
+                    assertEquals(0, transactions)
+                    assertEquals(matches, realDatabase.getMatchDao.getMatchesOfTournament(fixture.eventId))
+                    assertEquals(event.end, realDatabase.getEventDao.getEventById(fixture.eventId)?.end)
+                } finally {
+                    repository.close()
+                    http.close()
+                    realDatabase.close()
+                }
+            }
+        }
+}
+
+private fun reflowClientToSiteResult(request: ScheduleReflowRequestDto): String {
+    val site = System.getenv("MVP_SITE_DIR")?.takeIf(String::isNotBlank)?.let(::File)
+        ?: generateSequence(File(System.getProperty("user.dir"))) { it.parentFile }
+            .map { File(it, "apps/site") }.firstOrNull { File(it, "package.json").isFile }
+        ?: error("Cannot find apps/site for the client-to-site Reflow contract check.")
+    val process = ProcessBuilder("node", "--import", "tsx", "scripts/test-schedule-reflow-contract.ts")
+        .directory(site).redirectErrorStream(true).start()
+    val outputReader = java.util.concurrent.CompletableFuture.supplyAsync { process.inputStream.bufferedReader().readText() }
+    process.outputStream.bufferedWriter().use { it.write(jsonMVP.encodeToString(request)) }
+    if (!process.waitFor(30, TimeUnit.SECONDS)) {
+        process.destroyForcibly()
+        error("The site Reflow parser did not finish.")
+    }
+    val output = outputReader.get(5, TimeUnit.SECONDS)
+    check(process.exitValue() == 0) { output }
+    return output
 }
 
 private fun eventRepositoryRoomPersistenceRepository(

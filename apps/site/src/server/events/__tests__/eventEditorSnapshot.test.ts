@@ -264,6 +264,16 @@ it("keeps competition create defaults on the generated-end schedule policy", asy
   expect(snapshot.draft.schedule.generatedScheduleEnd).toBeNull();
 });
 describe("loadEventScheduleState", () => {
+  it("changes the Schedule revision when an official assignment changes without a timestamp change", async () => {
+    const row: Record<string, unknown> = { id: "match_1", teamOfficialId: "pine", officialIds: [], updatedAt: null };
+    const client = { matches: { findMany: jest.fn(async ({ select }: { select: Record<string, boolean> }) => [
+      Object.fromEntries(Object.keys(select).map((key) => [key, row[key] ?? null])),
+    ]) } } as unknown as Prisma.TransactionClient;
+    const before = await loadEventScheduleState({}, "event_1", client);
+    row.teamOfficialId = "falcon";
+    const after = await loadEventScheduleState({}, "event_1", client);
+    expect(after.revision).not.toBe(before.revision);
+  });
   it("reports persisted Match Graph demand without requiring placements", async () => {
     const client = {
       matches: {

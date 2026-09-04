@@ -435,6 +435,7 @@ const assertActor = async (
   actor: { userId: string; isAdmin: boolean },
   eventId: string,
   client: MaintenanceClient,
+  retainedMatchIds?: string[],
 ): Promise<MaintenanceActorEvent> => {
   const eventAccess = await client.events.findUnique({
     where: { id: eventId },
@@ -451,7 +452,9 @@ const assertActor = async (
       "You are not authorized to maintain this Event schedule.",
     );
   }
-  const event = await loadEventWithRelations(eventId, client);
+  const event = retainedMatchIds
+    ? await loadEventWithRelations(eventId, client, { retainedMatchIds })
+    : await loadEventWithRelations(eventId, client);
   if (!event) {
     throw new MaintenanceOperationError(
       "EDITOR_MAINTENANCE_NOT_FOUND",
@@ -511,6 +514,7 @@ const lockMaintenanceResourcesAndReload = async (
   actor: { userId: string; isAdmin: boolean },
   eventId: string,
   initial: MaintenanceActorEvent,
+  retainedMatchIds?: string[],
 ): Promise<MaintenanceActorEvent> => {
   const locked = {
     fieldIds: new Set<string>(),
@@ -540,7 +544,7 @@ const lockMaintenanceResourcesAndReload = async (
     missing.bookingIds.forEach((id) => locked.bookingIds.add(id));
     missing.bookingItemIds.forEach((id) => locked.bookingItemIds.add(id));
 
-    const reloaded = await assertActor(actor, eventId, tx);
+    const reloaded = await assertActor(actor, eventId, tx, retainedMatchIds);
     const reloadedResources = await loadMaintenanceLockResourceIdsFor(reloaded.event, tx);
     const uncovered = missingMaintenanceResourceIds(locked, reloadedResources);
     if (
@@ -557,6 +561,19 @@ const lockMaintenanceResourcesAndReload = async (
   );
 };
 
+
+/** Load one authorized Event after its scheduling resources are locked. */
+export const loadLockedScheduleEvent = async (params: {
+  tx: MaintenanceClient;
+  actor: { userId: string; isAdmin: boolean };
+  eventId: string;
+}): Promise<MaintenanceActorEvent> => {
+  await acquireEventLock(params.tx, params.eventId);
+  const rows = await params.tx.matches.findMany({ where: { eventId: params.eventId }, select: { id: true } });
+  const retainedMatchIds = rows.map((row) => row.id);
+  const initial = await assertActor(params.actor, params.eventId, params.tx, retainedMatchIds);
+  return lockMaintenanceResourcesAndReload(params.tx, params.actor, params.eventId, initial, retainedMatchIds);
+};
 
 export const createMaintenanceProposal = async (params: {
   tx: MaintenanceClient;
