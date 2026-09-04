@@ -120,6 +120,7 @@ describe('team invite event-team sync lifecycle routes', () => {
       where: { id: 'invite_1' },
       data: {
         status: 'ACCEPTED',
+        finalizedAt: expect.any(Date),
         updatedAt: expect.any(Date),
       },
     });
@@ -154,6 +155,7 @@ describe('team invite event-team sync lifecycle routes', () => {
       where: { id: 'invite_1' },
       data: {
         status: 'DECLINED',
+        finalizedAt: expect.any(Date),
         updatedAt: expect.any(Date),
       },
     });
