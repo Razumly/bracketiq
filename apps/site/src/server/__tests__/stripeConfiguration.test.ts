@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 import { getConfiguredStripeSecretKey } from '@/server/stripeConfiguration';
 
 describe('getConfiguredStripeSecretKey', () => {

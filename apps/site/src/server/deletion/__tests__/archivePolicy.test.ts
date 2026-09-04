@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 jest.mock('@/server/realtime/broadcastOverlayRealtime', () => ({
   publishBroadcastOverlayRevocation: jest.fn(),
 }));

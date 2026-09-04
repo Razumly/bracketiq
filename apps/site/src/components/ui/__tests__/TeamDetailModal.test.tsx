@@ -316,7 +316,7 @@ describe('TeamDetailModal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Edit Team Details' }));
 
     const editDialog = await screen.findByRole('dialog', { name: 'Edit Team Details' });
-    expect(within(editDialog).getByLabelText('Sport')).toBeInTheDocument();
+    expect(within(editDialog).getByLabelText('Sport', { selector: 'input' })).toBeInTheDocument();
     expect(within(editDialog).getByLabelText('Team Size')).toBeInTheDocument();
     expect(within(editDialog).getByRole('button', { name: 'Save Team Details' })).toBeInTheDocument();
     expect(within(editDialog).queryByText('Player jersey numbers')).not.toBeInTheDocument();

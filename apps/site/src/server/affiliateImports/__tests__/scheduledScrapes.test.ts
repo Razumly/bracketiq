@@ -15,18 +15,15 @@ const prismaMock = {
     findMany: jest.fn(),
     count: jest.fn(),
   },
-  affiliateSourceDiscoveryRuns: {
-    findMany: jest.fn(),
-  },
-  affiliateSourceIntakeRuns: {
-    findMany: jest.fn(),
-  },
-  affiliateSourceMappingJobs: {
-    findMany: jest.fn(),
-    count: jest.fn(),
-  },
   organizations: {
     updateMany: jest.fn(),
+  },
+  affiliateOperationalAlerts: {
+    findUnique: jest.fn(),
+    create: jest.fn(),
+  },
+  affiliateOperationalAlertDeliveries: {
+    create: jest.fn(),
   },
 };
 
@@ -38,8 +35,7 @@ const mockPgClient = {
 const mockPgClientConstructor = jest.fn(() => mockPgClient);
 
 const runAffiliateSourceScrapeMock = jest.fn();
-const isEmailEnabledMock = jest.fn();
-const sendEmailMock = jest.fn();
+const emitAlertsMock = jest.fn();
 const lightweightFetchMock = jest.fn();
 
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
@@ -54,9 +50,8 @@ jest.mock('pg', () => ({ Client: mockPgClientConstructor }));
 jest.mock('@/server/affiliateImports/service', () => ({
   runAffiliateSourceScrape: (...args: any[]) => runAffiliateSourceScrapeMock(...args),
 }));
-jest.mock('@/server/email', () => ({
-  isEmailEnabled: () => isEmailEnabledMock(),
-  sendEmail: (...args: any[]) => sendEmailMock(...args),
+jest.mock('@/server/affiliateImports/affiliateOperationalAlerts', () => ({
+  emitAffiliateOperationalAlerts: (...args: unknown[]) => emitAlertsMock(...args),
 }));
 
 import {
@@ -67,9 +62,7 @@ import {
 describe('scheduled affiliate scrapes', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    delete process.env.AFFILIATE_SCRAPE_SUMMARY_EMAIL_TO;
-    delete process.env.ADMIN_NOTIFICATION_EMAIL_TO;
-    delete process.env.NEXT_PUBLIC_APP_URL;
+    emitAlertsMock.mockResolvedValue(undefined);
     mockPgClient.connect.mockResolvedValue(undefined);
     mockPgClient.query.mockImplementation(async (sql: string) => ({
       rows: sql.includes('pg_try_advisory_lock')
@@ -87,11 +80,10 @@ describe('scheduled affiliate scrapes', () => {
     }));
     prismaMock.affiliateImportCandidates.findMany.mockResolvedValue([]);
     prismaMock.affiliateImportCandidates.count.mockResolvedValue(0);
-    prismaMock.affiliateSourceDiscoveryRuns.findMany.mockResolvedValue([]);
-    prismaMock.affiliateSourceIntakeRuns.findMany.mockResolvedValue([]);
-    prismaMock.affiliateSourceMappingJobs.findMany.mockResolvedValue([]);
-    prismaMock.affiliateSourceMappingJobs.count.mockResolvedValue(0);
     prismaMock.organizations.updateMany.mockResolvedValue({ count: 0 });
+    prismaMock.affiliateOperationalAlerts.findUnique.mockResolvedValue(null);
+    prismaMock.affiliateOperationalAlerts.create.mockImplementation(async ({ data }: any) => data);
+    prismaMock.affiliateOperationalAlertDeliveries.create.mockResolvedValue({});
     runAffiliateSourceScrapeMock.mockResolvedValue({
       run: {
         id: 'run_1',
@@ -106,8 +98,6 @@ describe('scheduled affiliate scrapes', () => {
         { id: 'candidate_2', status: 'PUBLISHED' },
       ],
     });
-    isEmailEnabledMock.mockReturnValue(true);
-    sendEmailMock.mockResolvedValue(undefined);
     lightweightFetchMock.mockResolvedValue(new Response('<html><body>Baseline page</body></html>', {
       status: 200,
       headers: { etag: '"baseline"' },
@@ -128,6 +118,42 @@ describe('scheduled affiliate scrapes', () => {
       { startedAt: new Date('2026-07-03T11:59:00.000Z') },
       now,
     )).toBe(true);
+  });
+
+  it('batches immediate alerts for all failed sources', async () => {
+    const now = new Date('2026-07-04T12:00:00.000Z');
+    prismaMock.affiliateScrapeSources.findMany.mockResolvedValue([
+      {
+        id: 'source_failure_1',
+        name: 'First failing source',
+        sourceKey: 'first-failing-source',
+        listUrl: 'https://first.example.test/events',
+        targetKind: 'EVENT',
+        scrapeIntervalMinutes: 1440,
+        metadata: {},
+      },
+      {
+        id: 'source_failure_2',
+        name: 'Second failing source',
+        sourceKey: 'second-failing-source',
+        listUrl: 'https://second.example.test/events',
+        targetKind: 'EVENT',
+        scrapeIntervalMinutes: 1440,
+        metadata: {},
+      },
+    ]);
+    runAffiliateSourceScrapeMock.mockRejectedValue(new Error('ScrapingDog timeout'));
+
+    await runDueAffiliateScrapes({ now, fetchImpl: lightweightFetchMock });
+
+    expect(emitAlertsMock).toHaveBeenCalledTimes(1);
+    const [inputs, dependencies] = emitAlertsMock.mock.calls[0];
+    expect(inputs).toHaveLength(2);
+    expect(inputs.map((input: { subjectId?: string }) => input.subjectId)).toEqual([
+      'source_failure_1',
+      'source_failure_2',
+    ]);
+    expect(dependencies).toBeUndefined();
   });
 
   it('uses only successful runs when deciding whether a source is due', async () => {
@@ -174,7 +200,7 @@ describe('scheduled affiliate scrapes', () => {
     expect(runAffiliateSourceScrapeMock).not.toHaveBeenCalled();
   });
 
-  it('runs only due sources, continues after one source fails, and emails a summary', async () => {
+  it('runs only due sources and continues after one source fails', async () => {
     const now = new Date('2026-07-04T12:00:00.000Z');
     prismaMock.affiliateScrapeSources.findMany.mockResolvedValue([
       {
@@ -246,11 +272,6 @@ describe('scheduled affiliate scrapes', () => {
       requestedByUserId: null,
       importMode: 'AUTOMATIC',
     });
-    expect(sendEmailMock).toHaveBeenCalledWith(expect.objectContaining({
-      to: 'samuel.r@razumly.com',
-      subject: expect.stringContaining('5 pending approval'),
-      text: expect.stringContaining('Failing Source: failed (ScrapingDog timeout)'),
-    }));
     expect(mockPgClientConstructor).toHaveBeenCalledTimes(1);
     expect(mockPgClient.query).toHaveBeenNthCalledWith(
       1,
@@ -283,7 +304,6 @@ describe('scheduled affiliate scrapes', () => {
 
     const result = await runDueAffiliateScrapes({
       now: new Date('2026-07-04T12:00:00.000Z'),
-      sendSummary: false,
     });
 
     expect(prismaMock.affiliateImportCandidates.findMany).toHaveBeenCalledWith({
@@ -358,85 +378,10 @@ describe('scheduled affiliate scrapes', () => {
         }),
       },
     }));
-    expect(sendEmailMock).toHaveBeenCalledWith(expect.objectContaining({
-      to: 'samuel.r@razumly.com',
-      subject: expect.stringContaining('1 source changes'),
-      text: expect.stringContaining('Weekly Source: changed'),
-    }));
   });
 
-  it('sends the daily completion email even when no full scrape or lightweight check is due', async () => {
-    prismaMock.affiliateSourceDiscoveryRuns.findMany.mockResolvedValue([
-      { status: 'SUCCEEDED', newResultCount: 12, createdIntakeCount: 4 },
-      { status: 'PARTIAL', newResultCount: 3, createdIntakeCount: 1 },
-    ]);
-    prismaMock.affiliateSourceIntakeRuns.findMany.mockResolvedValue([
-      { status: 'SUCCEEDED', capturedPageCount: 8 },
-      { status: 'BLOCKED', capturedPageCount: 0 },
-    ]);
-    prismaMock.affiliateSourceMappingJobs.findMany.mockResolvedValue([
-      { status: 'APPROVED' },
-      { status: 'HUMAN_REVIEW_REQUIRED' },
-    ]);
-    prismaMock.affiliateSourceMappingJobs.count.mockResolvedValue(3);
-    const result = await runDueAffiliateScrapes({
-      now: new Date('2026-07-04T12:00:00.000Z'),
-      fetchImpl: lightweightFetchMock,
-    });
 
-    expect(result.dueSourceCount).toBe(0);
-    expect(result.lightweightSourceCount).toBe(0);
-    expect(sendEmailMock).toHaveBeenCalledWith(expect.objectContaining({
-      subject: expect.stringContaining('2 intake captures'),
-      text: expect.stringContaining('Intakes created: 5'),
-    }));
-    const email = sendEmailMock.mock.calls[0][0] as { subject: string; text: string };
-    expect(email.subject).toContain('0 source changes');
-    expect(email.text).toContain('Capture runs: 2 (blocked 1, succeeded 1)');
-    expect(email.text).toContain('Pages captured: 8');
-    expect(email.text).toContain('Current human-review backlog: 3');
-    expect(email.text).toContain('No full scrapes were due.');
-    expect(result.intakeDigest).toEqual(expect.objectContaining({
-      discoveryRunCount: 2,
-      newDiscoveryResultCount: 15,
-      createdIntakeCount: 5,
-      intakeRunCount: 2,
-      capturedPageCount: 8,
-      mappingJobUpdateCount: 2,
-      humanReviewRequiredJobs: 3,
-    }));
-    expect(prismaMock.affiliateSourceIntakeRuns.findMany).toHaveBeenCalledWith({
-      where: {
-        finishedAt: {
-          gte: new Date('2026-07-03T12:00:00.000Z'),
-          lt: new Date('2026-07-04T12:00:00.000Z'),
-        },
-      },
-      select: { status: true, capturedPageCount: true },
-    });
-  });
-
-  it('reports summary email failure without failing the completed scrape or leaking the lock', async () => {
-    sendEmailMock.mockRejectedValueOnce(new Error('Token has been expired or revoked'));
-
-    const result = await runDueAffiliateScrapes({
-      now: new Date('2026-08-06T12:00:00.000Z'),
-      fetchImpl: lightweightFetchMock,
-    });
-
-    expect(result).toEqual(expect.objectContaining({
-      lockAcquired: true,
-      emailSent: false,
-      emailError: 'Token has been expired or revoked',
-    }));
-    expect(mockPgClient.query).toHaveBeenLastCalledWith(
-      'SELECT pg_advisory_unlock($1) AS unlocked',
-      [4201042026],
-    );
-    expect(mockPgClient.end).toHaveBeenCalledTimes(1);
-  });
-
-  it('isolates a lightweight check failure and includes it in the daily summary', async () => {
+  it('isolates a lightweight check failure without a daily summary', async () => {
     prismaMock.affiliateScrapeSources.findMany.mockResolvedValue([
       {
         id: 'source_monthly',
@@ -467,10 +412,6 @@ describe('scheduled affiliate scrapes', () => {
         errorMessage: 'Connection reset',
       }),
     ]);
-    expect(sendEmailMock).toHaveBeenCalledWith(expect.objectContaining({
-      subject: expect.stringContaining('1 failed'),
-      text: expect.stringContaining('Monthly Source: check failed (Connection reset)'),
-    }));
   });
 
   it('skips work when another scheduler owns the advisory lock', async () => {
@@ -483,7 +424,6 @@ describe('scheduled affiliate scrapes', () => {
     expect(result.lockAcquired).toBe(false);
     expect(prismaMock.affiliateScrapeSources.findMany).not.toHaveBeenCalled();
     expect(runAffiliateSourceScrapeMock).not.toHaveBeenCalled();
-    expect(sendEmailMock).not.toHaveBeenCalled();
     expect(mockPgClient.end).toHaveBeenCalledTimes(1);
     expect(mockPgClient.query).not.toHaveBeenCalledWith(
       'SELECT pg_advisory_unlock($1) AS unlocked',
@@ -512,7 +452,7 @@ describe('scheduled affiliate scrapes', () => {
     expect(mockPgClient.end).toHaveBeenCalledTimes(1);
   });
 
-  it('dry-runs due sources without scraping or sending email', async () => {
+  it('dry-runs due sources without scraping', async () => {
     prismaMock.affiliateScrapeSources.findMany.mockResolvedValue([
       {
         id: 'source_daily',
@@ -534,6 +474,5 @@ describe('scheduled affiliate scrapes', () => {
       expect.objectContaining({ sourceId: 'source_daily', status: 'SKIPPED', reason: 'dry run' }),
     ]);
     expect(runAffiliateSourceScrapeMock).not.toHaveBeenCalled();
-    expect(sendEmailMock).not.toHaveBeenCalled();
   });
 });

@@ -12,6 +12,7 @@ deploy/vm/maintenance/enabled
 
 # testing
 /coverage
+/.cache/
 e2e/.auth/
 
 # next.js
@@ -34,6 +35,7 @@ tmp/
 .codex-artifacts/
 output/
 deploy/ai/deployment.env
+deploy/affiliate-governed/deployment.env
 deploy/ai/controller.env
 .playwright-cli/
 

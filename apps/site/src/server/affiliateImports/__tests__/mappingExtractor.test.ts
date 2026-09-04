@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 import { TextDecoder, TextEncoder } from 'util';
 import {
   parseAffiliateScrapeMapping,

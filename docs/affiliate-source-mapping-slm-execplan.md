@@ -325,7 +325,9 @@ At the end of this milestone, `docs/affiliate-source-mapping-model-bakeoff.md` c
 
 ### Milestone 6: Connect the selected model to the mapping queue
 
-Create `src/server/affiliateImports/agentRunner.ts` and `scripts/run-affiliate-mapping-agent.ts`, with package command `affiliate:mapping:agent`. The runner supports a specific intake or the next queued job, a worker name, a model endpoint, `--dry-run`, and an explicit local or live evidence environment. Dry run may claim nothing and must write no database state.
+Create the formerly proposed mapping-agent runner and fixture workflow only as
+historical context; that direct-writer entrypoint is retired. Live admission and
+completion must use the governed Agent Gateway contract instead.
 
 For a real job, the trusted controller uses the existing queue claim, exports the selected stored run, verifies every artifact hash, creates an isolated worktree from the configured base commit, and constructs the bounded model context. It drives a limited tool loop: list evidence, read an evidence chunk, read an allowlisted repository file, search the isolated worktree, validate a draft, render a generic mapping, run an allowlisted focused test, and request a local review-mode scrape. The loop has maximum turns, wall time, tokens, and tool calls.
 
@@ -421,7 +423,7 @@ Work from `/Users/elesesy/StudioProjects/mvp-site`. Begin in a clean isolated wo
 
        npx jest --runInBand src/server/affiliateImports/__tests__/agentGenerator.test.ts
        npx jest --runInBand src/server/affiliateImports/__tests__/agentEvaluation.test.ts
-       npm run affiliate:mapping:evaluate -- --worker=fixture --suite=smoke
+       npx tsx scripts/evaluate-affiliate-mapping-agent.ts --worker=fixture --suite=smoke
        npm run affiliate:mapping:disposable-scrape
 
    The allowed fixture passes and the blocked, invented-date, fake-logo, and internal-link fixtures fail or refuse exactly as expected. The disposable scrape runs the generated setup twice against digest-pinned PostgreSQL, retains one deduplicated review candidate, leaves the mapping unvalidated, publishes nothing, and cleans up both the database container and generated worktrees.
@@ -436,31 +438,28 @@ Work from `/Users/elesesy/StudioProjects/mvp-site`. Begin in a clean isolated wo
 
 6. Run the frozen model bakeoff.
 
-       npm run affiliate:mapping:evaluate -- --worker=llama --suite=<held-out-v1.json> --model-endpoint=http://model:8080 --model-manifest=<gpt-oss-manifest.json> --model-id=gpt-oss-20b-mxfp4 --output=<gpt-oss-evaluation.json>
-       npm run affiliate:mapping:evaluate -- --worker=llama --suite=<held-out-v1.json> --model-endpoint=http://model:8080 --model-manifest=<qwen-manifest.json> --model-id=qwen3-coder-30b-a3b-instruct-q4 --output=<qwen-evaluation.json>
-       npm run affiliate:mapping:evaluate -- --worker=llama --suite=<held-out-v1.json> --model-endpoint=http://model:8080 --model-manifest=<fallback-manifest.json> --model-id=<pinned-sub-10b-fallback> --output=<fallback-evaluation.json>
+       npx tsx scripts/evaluate-affiliate-mapping-agent.ts --worker=llama --suite=<held-out-v1.json> --model-endpoint=http://model:8080 --model-manifest=<gpt-oss-manifest.json> --model-id=gpt-oss-20b-mxfp4 --output=<gpt-oss-evaluation.json>
+       npx tsx scripts/evaluate-affiliate-mapping-agent.ts --worker=llama --suite=<held-out-v1.json> --model-endpoint=http://model:8080 --model-manifest=<qwen-manifest.json> --model-id=qwen3-coder-30b-a3b-instruct-q4 --output=<qwen-evaluation.json>
+       npx tsx scripts/evaluate-affiliate-mapping-agent.ts --worker=llama --suite=<held-out-v1.json> --model-endpoint=http://model:8080 --model-manifest=<fallback-manifest.json> --model-id=<pinned-sub-10b-fallback> --output=<fallback-evaluation.json>
 
    Save the reports and record the selection in `docs/affiliate-source-mapping-model-bakeoff.md`.
 
-7. Run one local worker job against fixture evidence.
+7. The historical local worker fixture and live-worker commands are retired.
+   Do not invoke a direct mapping writer; use the governed Agent Gateway
+   admission, claim, provider receipt, and terminal completion workflow.
 
-       npm run affiliate:mapping:agent -- --fixture=allowed-generic --worker=ovh-vps-smoke
-       npm run affiliate:mapping:agent -- --fixture=blocked-source --worker=ovh-vps-smoke
+8. After a governed mapping job completes, review its package explicitly:
 
-   The first produces a review-required worktree result. The second produces no executable mapping and records a policy refusal.
-
-8. With explicit authorization for live evidence access but not live source mutation, process one selected intake.
-
-       npm run affiliate:mapping:agent -- --live --intake=<reviewed-intake-id> --worker=ovh-vps-pilot
        npm run affiliate:mapping:review -- --job=<mapping-job-id> --reviewer=codex-sol
 
-   Confirm that live approved-source, mapping, candidate, and published-target counts did not change through claim, generation, testing, or review.
+   Confirm that live approved-source, mapping, candidate, and published-target
+   counts did not change through claim, generation, testing, or review.
 
 9. Build a reviewed dataset release and run one adapter experiment.
 
        npm run affiliate:mapping:sft-release -- --input=<approved-teaching-envelopes.jsonl> --release=<dataset-id>
        ovhai job run --name affiliate-mapping-smoke --gpu 1 --flavor l40s-1-gpu --volume <dataset-and-output-volume> -- <pinned-training-image> --config training/affiliate-source-mapping/<selected-model>.yaml --max-runtime=2h
-       npm run affiliate:mapping:evaluate -- --worker=llama --suite=held-out-v1 --model-id=<selected-model>-<adapter-id>
+       npx tsx scripts/evaluate-affiliate-mapping-agent.ts --worker=llama --suite=held-out-v1 --model-id=<selected-model>-<adapter-id>
 
    Treat the OVH AI Training command as a target interface whose exact supported flags must be verified against the installed OVH CLI before use. The controller records the provider job ID, observed per-minute price, runtime, projected full-run cost, and termination result.
 

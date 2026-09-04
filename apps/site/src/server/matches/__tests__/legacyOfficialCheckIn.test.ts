@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 import { normalizeLegacyOfficialCheckIn } from '@/server/matches/legacyOfficialCheckIn';
 
 describe('normalizeLegacyOfficialCheckIn', () => {

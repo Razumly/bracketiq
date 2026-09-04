@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 jest.mock('@/generated/prisma/client', () => ({
   Prisma: { JsonNull: null },
   ModerationReportStatusEnum: { OPEN: 'OPEN' },

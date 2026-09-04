@@ -1,15 +1,28 @@
 import { createHash } from 'crypto';
+import type { AffiliateSourceIntakes } from '@/generated/prisma/client';
 import { createId } from '@/lib/id';
 import { prisma } from '@/lib/prisma';
+import {
+  affiliateSupplyDatabase,
+  ensureAffiliateSupplySource,
+} from './affiliateSupplyPersistence';
+import { normalizeAffiliateSupplyIdentity } from './affiliateSupplyLifecycle';
 import {
   deriveAffiliateHtmlArtifacts,
   evaluateAffiliateHtmlQuality,
   type AffiliateHtmlArtifacts,
 } from './affiliateHtmlArtifacts';
-import type {
-  AffiliateProviderName,
-  AffiliateSourceCaptureClient,
-  AffiliateSourcePageCapture,
+import {
+  affiliateSourceCaptureDeadlineAt,
+  affiliateSourceCaptureTimeoutMs,
+  isAffiliateSourceCaptureTimeout,
+  type AffiliateProviderName,
+  type AffiliateSourceCaptureClient,
+  type AffiliateSourceCaptureOptions,
+  type AffiliateSourcePageCapture,
+  type AffiliateSourcePageScreenshotEvidence,
+  type AffiliateSourceScreenshot,
+  withAffiliateSourceCaptureDeadline,
 } from './affiliateProviderContracts';
 import {
   createAffiliateFallbackCaptureClient,
@@ -180,6 +193,190 @@ const intakePrisma = (client: unknown = prisma) => {
   };
 };
 
+const withAffiliateIntakeTransaction = async <T>(
+  client: any,
+  callback: (transactionClient: any) => Promise<T>,
+): Promise<T> => (
+  typeof client?.$transaction === 'function'
+    ? client.$transaction(
+      (transactionClient: any) => callback(transactionClient),
+      { isolationLevel: 'Serializable' },
+    )
+    : callback(client)
+);
+
+const linkAffiliateIntakeEvidence = async (input: Readonly<{
+  intakeId: string;
+  pageId: string;
+  supplySourceId: string;
+  expectedSupplySourceId?: string | null;
+  isIntakeLinkPending: boolean;
+  client?: any;
+}>): Promise<string> => {
+  const database = affiliateSupplyDatabase(input.client ?? prisma);
+  let linkedSupplySourceId = input.supplySourceId;
+  if (input.isIntakeLinkPending && database.intakes?.updateMany) {
+    const updated = await database.intakes.updateMany({
+      where: {
+        id: input.intakeId,
+        supplySourceId: input.expectedSupplySourceId ?? null,
+      },
+      data: { supplySourceId: input.supplySourceId },
+    });
+    if (updated.count !== 1 && database.intakes.findUnique) {
+      const current = await database.intakes.findUnique({
+        where: { id: input.intakeId },
+        select: { supplySourceId: true },
+      });
+      const currentSupplySourceId = stringValue(current?.supplySourceId);
+      if (currentSupplySourceId && currentSupplySourceId !== input.supplySourceId) {
+        linkedSupplySourceId = currentSupplySourceId;
+      } else if (!currentSupplySourceId) {
+        const retried = await database.intakes.updateMany({
+          where: { id: input.intakeId, supplySourceId: null },
+          data: { supplySourceId: input.supplySourceId },
+        });
+        if (retried.count !== 1) {
+          const afterRetry = await database.intakes.findUnique({
+            where: { id: input.intakeId },
+            select: { supplySourceId: true },
+          });
+          linkedSupplySourceId = stringValue(afterRetry?.supplySourceId) ?? input.supplySourceId;
+        }
+      }
+    }
+  }
+  if (database.pages?.update) {
+    await database.pages.update({
+      where: { id: input.pageId },
+      data: { supplySourceId: linkedSupplySourceId },
+    });
+  }
+  if (database.artifacts?.updateMany) {
+    await database.artifacts.updateMany({
+      where: { pageId: input.pageId, supplySourceId: null },
+      data: { supplySourceId: linkedSupplySourceId },
+    });
+  }
+  return linkedSupplySourceId;
+};
+
+const ensureAffiliateIntakeSupplySource = async (input: Readonly<{
+  intakeId: string;
+  pageId: string;
+  existingSupplySourceId?: string | null;
+  expectedIntakeSupplySourceId?: string | null;
+  pageUrl: string;
+  targetKindHints?: string[] | null;
+  isIntakeLinkPending?: boolean;
+  isRedirectVerified?: boolean;
+  db?: any;
+}>): Promise<string | null> => {
+  const database = affiliateSupplyDatabase(input.db ?? prisma);
+  if (!database.supplySources?.findUnique || !database.supplySources?.create) return null;
+
+  const canonicalUrl = canonicalizeAffiliateIntakeUrl(input.pageUrl);
+  const operatorDomain = new URL(canonicalUrl).hostname;
+  const isIntakeLinkPending = input.isIntakeLinkPending === true;
+  let supplySource;
+  if (input.existingSupplySourceId) {
+    const existing = await database.supplySources.findUnique({
+      where: { id: input.existingSupplySourceId },
+    });
+    if (existing) {
+      const identity = normalizeAffiliateSupplyIdentity({
+        requestedUrl: input.pageUrl,
+        resolvedCanonicalUrl: canonicalUrl,
+        isRedirectVerified: input.isRedirectVerified === true,
+        operatorDomain,
+        prior: {
+          canonicalUrl: existing.canonicalUrl,
+          operatorDomain: existing.operatorDomain,
+          identityKey: existing.identityKey,
+        },
+      });
+      if (
+        identity.rootDecision === 'SAME_ROOT'
+        && !identity.isRevalidationRequired
+        && identity.canonicalUrl === canonicalizeAffiliateIntakeUrl(String(existing.canonicalUrl))
+      ) {
+        supplySource = existing;
+      } else {
+        const successor = await ensureAffiliateSupplySource({
+          requestedUrl: input.pageUrl,
+          resolvedCanonicalUrl: canonicalUrl,
+          isRedirectVerified: input.isRedirectVerified === true,
+          operatorDomain,
+          targetKind: input.targetKindHints?.[0] ?? 'EVENT',
+          intakeId: isIntakeLinkPending ? input.intakeId : null,
+          expectedIntakeSupplySourceId: isIntakeLinkPending
+            ? input.expectedIntakeSupplySourceId
+            : undefined,
+          priorSupplySourceId: existing.id,
+          metadata: { sourceKey: affiliateIntakeUrlKey(canonicalUrl) },
+          db: database,
+        });
+        supplySource = successor.supplySource;
+      }
+    }
+  }
+  if (!supplySource) {
+    const created = await ensureAffiliateSupplySource({
+      requestedUrl: input.pageUrl,
+      resolvedCanonicalUrl: canonicalUrl,
+      isRedirectVerified: input.isRedirectVerified === true,
+      operatorDomain,
+      targetKind: input.targetKindHints?.[0] ?? 'EVENT',
+      intakeId: isIntakeLinkPending ? input.intakeId : null,
+      expectedIntakeSupplySourceId: isIntakeLinkPending
+        ? input.expectedIntakeSupplySourceId
+        : undefined,
+      metadata: { sourceKey: affiliateIntakeUrlKey(canonicalUrl) },
+      db: database,
+    });
+    supplySource = created.supplySource;
+  }
+  const linkedSupplySourceId = await linkAffiliateIntakeEvidence({
+    intakeId: input.intakeId,
+    pageId: input.pageId,
+    supplySourceId: supplySource.id,
+    expectedSupplySourceId: isIntakeLinkPending
+      ? input.expectedIntakeSupplySourceId
+      : undefined,
+    isIntakeLinkPending,
+    client: input.db ?? prisma,
+  });
+  return linkedSupplySourceId;
+};
+const reconcileCapturedAffiliateSupplySource = async (
+  intake: any,
+  page: any,
+  capture: AffiliateSourcePageCapture,
+): Promise<string | null> => {
+  const currentSupplySourceId = page.supplySourceId ?? intake.supplySourceId ?? null;
+  const finalUrl = stringValue(capture.finalUrl);
+  if (
+    !finalUrl
+    || finalUrl === String(page.url).trim()
+    || capture.isRedirectVerified !== true
+  ) {
+    return currentSupplySourceId;
+  }
+  await assertSafePublicUrl(finalUrl);
+  const targetKindHints = normalizedTargetKinds(intake.targetKindHints);
+  return ensureAffiliateIntakeSupplySource({
+    intakeId: intake.id,
+    pageId: page.id,
+    existingSupplySourceId: currentSupplySourceId,
+    expectedIntakeSupplySourceId: intake.supplySourceId ?? null,
+    pageUrl: finalUrl,
+    targetKindHints: targetKindHints.length ? targetKindHints : null,
+    isIntakeLinkPending: true,
+    isRedirectVerified: capture.isRedirectVerified === true,
+    db: prisma,
+  });
+};
+
 const stringValue = (value: unknown): string | null => (
   typeof value === 'string' && value.trim() ? value.trim() : null
 );
@@ -226,8 +423,9 @@ const upsertIntakePage = async (
   intakeId: string,
   input: AffiliateSourceIntakePageInput,
   discoverySource = 'MANUAL',
+  client: any = prisma,
 ) => {
-  const { pages } = intakePrisma();
+  const { pages } = intakePrisma(client);
   const url = stringValue(input.url);
   if (!url) throw new Error('Affiliate source intake page URL is required.');
   await assertSafePublicUrl(url);
@@ -252,53 +450,93 @@ const upsertIntakePage = async (
   }
   return pages.create({ data: { id: createId(), intakeId, ...data } });
 };
+const upsertAffiliateIntakePages = async (input: Readonly<{
+  intakeId: string;
+  pages: readonly AffiliateSourceIntakePageInput[];
+  targetKindHints: string[] | null;
+  initialSupplySourceId?: string | null;
+  isIntakeLinkPending: boolean;
+  client: any;
+}>): Promise<string | null> => {
+  let supplySourceId = input.initialSupplySourceId ?? null;
+  let isIntakeLinkPending = input.isIntakeLinkPending;
+  for (const pageInput of input.pages) {
+    const page = await upsertIntakePage(input.intakeId, pageInput, 'MANUAL', input.client);
+    const pageSupplySourceId = await ensureAffiliateIntakeSupplySource({
+      intakeId: input.intakeId,
+      pageId: page.id,
+      existingSupplySourceId: page.supplySourceId,
+      expectedIntakeSupplySourceId: isIntakeLinkPending
+        ? input.initialSupplySourceId ?? null
+        : undefined,
+      pageUrl: pageInput.url,
+      targetKindHints: input.targetKindHints,
+      isIntakeLinkPending,
+      db: input.client,
+    });
+    if (!supplySourceId && pageSupplySourceId) supplySourceId = pageSupplySourceId;
+    isIntakeLinkPending = false;
+  }
+  return supplySourceId;
+};
 
 export const createAffiliateSourceIntake = async (
   input: AffiliateSourceIntakeCreateInput,
   userId: string,
-) => {
-  const { intakes } = intakePrisma();
+): Promise<AffiliateSourceIntakes> => {
   const name = stringValue(input.name);
   if (!name) throw new Error('Affiliate source intake name is required.');
   if (!input.pages?.length) throw new Error('Affiliate source intake requires at least one page URL.');
   const sourceKey = deriveSourceKey(input);
-  const existing = await intakes.findUnique({ where: { sourceKey } });
-  if (existing) {
-    for (const page of input.pages) await upsertIntakePage(existing.id, page);
-    return intakes.update({
-      where: { id: existing.id },
+  return withAffiliateIntakeTransaction(prisma, async (transactionClient) => {
+    const { intakes } = intakePrisma(transactionClient);
+    const existing = await intakes.findUnique({ where: { sourceKey } });
+    if (existing) {
+      const supplySourceId = await upsertAffiliateIntakePages({
+        intakeId: existing.id,
+        pages: input.pages,
+        targetKindHints: normalizedTargetKinds(input.targetKindHints),
+        initialSupplySourceId: existing.supplySourceId,
+        isIntakeLinkPending: existing.supplySourceId === null,
+        client: transactionClient,
+      });
+      const updated = await intakes.update({
+        where: { id: existing.id },
+        data: {
+          name,
+          region: stringValue(input.region),
+          baseUrl: stringValue(input.baseUrl) ?? existing.baseUrl,
+          targetKindHints: normalizedTargetKinds(input.targetKindHints),
+          notes: stringValue(input.notes),
+        },
+      });
+      return supplySourceId ? { ...updated, supplySourceId } : updated;
+    }
+
+    const firstCanonicalUrl = canonicalizeAffiliateIntakeUrl(input.pages[0].url);
+    const intake = await intakes.create({
       data: {
+        id: createId(),
         name,
+        sourceKey,
         region: stringValue(input.region),
-        baseUrl: stringValue(input.baseUrl) ?? existing.baseUrl,
+        baseUrl: stringValue(input.baseUrl) ?? new URL(firstCanonicalUrl).origin,
+        status: 'REVIEW_REQUIRED',
+        complianceStatus: 'UNREVIEWED',
         targetKindHints: normalizedTargetKinds(input.targetKindHints),
         notes: stringValue(input.notes),
+        createdByUserId: userId,
       },
     });
-  }
-
-  const firstCanonicalUrl = canonicalizeAffiliateIntakeUrl(input.pages[0].url);
-  const intake = await intakes.create({
-    data: {
-      id: createId(),
-      name,
-      sourceKey,
-      region: stringValue(input.region),
-      baseUrl: stringValue(input.baseUrl) ?? new URL(firstCanonicalUrl).origin,
-      status: 'REVIEW_REQUIRED',
-      complianceStatus: 'UNREVIEWED',
+    const supplySourceId = await upsertAffiliateIntakePages({
+      intakeId: intake.id,
+      pages: input.pages,
       targetKindHints: normalizedTargetKinds(input.targetKindHints),
-      notes: stringValue(input.notes),
-      createdByUserId: userId,
-    },
+      isIntakeLinkPending: true,
+      client: transactionClient,
+    });
+    return supplySourceId ? { ...intake, supplySourceId } : intake;
   });
-  try {
-    for (const page of input.pages) await upsertIntakePage(intake.id, page);
-  } catch (error) {
-    await intakes.delete({ where: { id: intake.id } }).catch(() => undefined);
-    throw error;
-  }
-  return intake;
 };
 
 export const bulkUpsertAffiliateSourceIntakes = async (
@@ -338,11 +576,24 @@ export const bulkUpsertAffiliateSourceIntakes = async (
   return result;
 };
 
-export const addAffiliateSourceIntakePage = async (intakeId: string, input: AffiliateSourceIntakePageInput) => {
-  const intake = await intakePrisma().intakes.findUnique({ where: { id: intakeId } });
-  if (!intake) throw new Error('Affiliate source intake not found.');
-  return upsertIntakePage(intakeId, input);
-};
+export const addAffiliateSourceIntakePage = async (intakeId: string, input: AffiliateSourceIntakePageInput) => (
+  withAffiliateIntakeTransaction(prisma, async (transactionClient) => {
+    const intake = await intakePrisma(transactionClient).intakes.findUnique({ where: { id: intakeId } });
+    if (!intake) throw new Error('Affiliate source intake not found.');
+    const page = await upsertIntakePage(intakeId, input, 'MANUAL', transactionClient);
+    await ensureAffiliateIntakeSupplySource({
+      intakeId,
+      pageId: page.id,
+      existingSupplySourceId: page.supplySourceId,
+      expectedIntakeSupplySourceId: intake.supplySourceId ?? null,
+      pageUrl: input.url,
+      targetKindHints: input.targetKindHints ?? intake.targetKindHints,
+      isIntakeLinkPending: intake.supplySourceId === null,
+      db: transactionClient,
+    });
+    return page;
+  })
+);
 
 export const reviewAffiliateSourceIntakePolicy = async (
   intakeId: string,
@@ -646,6 +897,7 @@ export const queueAffiliateSourceIntakeRun = async (
     data: {
       id: createId(),
       intakeId,
+      ...(intake.supplySourceId ? { supplySourceId: intake.supplySourceId } : {}),
       requestedPageIds: pageIds,
       requestedByUserId: userId,
       provider: resolveAffiliateIntakeProvider(),
@@ -944,23 +1196,26 @@ const providerForClient = (client: IntakeCaptureClient): AffiliateProviderName =
 const captureWithClient = async (
   client: IntakeCaptureClient,
   url: string,
+  captureOptions: AffiliateSourceCaptureOptions = {},
 ): Promise<AffiliateSourcePageCapture> => {
-  if ('captureSourcePage' in client) return client.captureSourcePage(url);
+  if ('captureSourcePage' in client) return client.captureSourcePage(url, captureOptions);
   const startedAt = Date.now();
-  const legacy = await client.scrapeSourcePage(url);
+  const legacy = await client.scrapeSourcePage(url, captureOptions);
   return {
     provider: 'FIRECRAWL',
     request: legacy.request,
     response: legacy.response,
     requestedUrl: url,
     finalUrl: legacy.normalized.finalUrl,
+    isRedirectVerified: false,
+    inferredCanonicalUrl: null,
     providerStatusCode: 200,
     targetStatusCode: legacy.normalized.statusCode,
     rawHtml: legacy.normalized.rawHtml ?? '',
     renderMode: 'JAVASCRIPT',
     elapsedMs: Date.now() - startedAt,
     estimatedCredits: null,
-    warnings: [],
+    warnings: legacy.normalized.warnings,
     providerJobId: legacy.providerJobId,
     providerArtifacts: {
       markdown: legacy.normalized.markdown,
@@ -968,44 +1223,214 @@ const captureWithClient = async (
       images: legacy.normalized.images,
       branding: legacy.normalized.branding,
       screenshotUrl: legacy.normalized.screenshotUrl,
+      screenshotEvidence: legacy.normalized.screenshotEvidence,
       metadata: legacy.normalized.metadata,
     },
   };
+};
+
+const providerArtifactsWithScreenshot = (
+  capture: AffiliateSourcePageCapture,
+  screenshot: AffiliateSourceScreenshot,
+): AffiliateSourcePageCapture => {
+  const providerArtifacts = capture.providerArtifacts ?? {
+    markdown: null,
+    links: [],
+    images: [],
+    branding: null,
+    screenshotUrl: null,
+    metadata: {},
+  };
+  const screenshotEvidence: AffiliateSourcePageScreenshotEvidence = {
+    data: screenshot.data,
+    mimeType: screenshot.mimeType,
+    sourceUrl: screenshot.sourceUrl,
+    finalUrl: screenshot.finalUrl,
+    statusCode: screenshot.providerStatusCode,
+  };
+  const captureCredits = capture.estimatedCredits;
+  const screenshotCredits = screenshot.estimatedCredits;
+  return {
+    ...capture,
+    elapsedMs: capture.elapsedMs + screenshot.elapsedMs,
+    estimatedCredits: captureCredits === null && screenshotCredits === null
+      ? null
+      : (captureCredits ?? 0) + (screenshotCredits ?? 0),
+    providerArtifacts: {
+      ...providerArtifacts,
+      screenshotUrl: null,
+      screenshotEvidence,
+      metadata: {
+        ...recordValue(providerArtifacts.metadata),
+        screenshotRequest: screenshot.request,
+        screenshotResponse: screenshot.response,
+        screenshotProviderStatusCode: screenshot.providerStatusCode,
+        screenshotElapsedMs: screenshot.elapsedMs,
+        screenshotEstimatedCredits: screenshot.estimatedCredits,
+      },
+    },
+  };
+};
+
+type AffiliateSourceCaptureBudget = Readonly<{
+  timeoutMs: number;
+  deadlineAt: number;
+}>;
+
+const captureBudgetFor = (
+  captureOptions: AffiliateSourceCaptureOptions,
+): AffiliateSourceCaptureBudget => {
+  const timeoutMs = affiliateSourceCaptureTimeoutMs(captureOptions.profile);
+  return {
+    timeoutMs,
+    deadlineAt: affiliateSourceCaptureDeadlineAt(captureOptions),
+  };
+};
+
+const captureOptionsFor = (
+  captureOptions: AffiliateSourceCaptureOptions,
+  budget: AffiliateSourceCaptureBudget,
+  captureScreenshot: boolean,
+): AffiliateSourceCaptureOptions => ({
+  ...captureOptions,
+  captureScreenshot,
+  deadlineAt: budget.deadlineAt,
+});
+
+const captureWithDeferredScreenshot = async (
+  capture: AffiliateSourcePageCapture,
+  client: IntakeCaptureClient,
+  url: string,
+  captureOptions: AffiliateSourceCaptureOptions,
+  budget: AffiliateSourceCaptureBudget,
+): Promise<AffiliateSourcePageCapture> => {
+  if (captureOptions.captureScreenshot !== true) return capture;
+  if (capture.providerArtifacts?.screenshotEvidence) return capture;
+  const screenshotTarget = capture.isRedirectVerified === true && stringValue(capture.finalUrl)
+    ? capture.finalUrl
+    : url;
+  const providerArtifacts = capture.providerArtifacts ?? {
+    markdown: null,
+    links: [],
+    images: [],
+    branding: null,
+    screenshotUrl: null,
+    metadata: {},
+  };
+  const captureScreenshot = typeof client.captureScreenshot === 'function'
+    ? client.captureScreenshot.bind(client)
+    : null;
+  if (!captureScreenshot) {
+    return {
+      ...capture,
+      warnings: [...capture.warnings, `Screenshot capture unavailable for ${url}.`],
+      providerArtifacts: {
+        ...providerArtifacts,
+        screenshotUrl: null,
+        screenshotEvidence: null,
+      },
+    };
+  }
+  try {
+    let reviewedScreenshotUrl = screenshotTarget;
+    if (capture.isRedirectVerified === true) {
+      const validated = await withAffiliateSourceCaptureDeadline(
+        () => assertSafePublicUrl(screenshotTarget),
+        budget.deadlineAt,
+        budget.timeoutMs,
+      );
+      reviewedScreenshotUrl = validated.url.toString();
+    }
+    const screenshot = await withAffiliateSourceCaptureDeadline(
+      () => captureScreenshot(
+        reviewedScreenshotUrl,
+        captureOptionsFor(captureOptions, budget, true),
+      ),
+      budget.deadlineAt,
+      budget.timeoutMs,
+    );
+    return providerArtifactsWithScreenshot(capture, screenshot);
+  } catch (error) {
+    return {
+      ...capture,
+      warnings: [
+        ...capture.warnings,
+        `Screenshot capture failed for ${url}: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      ],
+      providerArtifacts: {
+        ...providerArtifacts,
+        screenshotUrl: null,
+        screenshotEvidence: null,
+      },
+    };
+  }
 };
 
 const captureWithFallback = async (
   primaryClient: IntakeCaptureClient,
   fallbackClient: AffiliateSourceCaptureClient | null,
   url: string,
+  captureOptions: AffiliateSourceCaptureOptions,
   state: IntakeRunSummary,
 ): Promise<{ capture: AffiliateSourcePageCapture; client: IntakeCaptureClient }> => {
+  const budget = captureBudgetFor(captureOptions);
+  const htmlCaptureOptions = captureOptionsFor(captureOptions, budget, false);
+  const captureSelectedProvider = (
+    capture: AffiliateSourcePageCapture,
+    client: IntakeCaptureClient,
+  ) => captureWithDeferredScreenshot(
+    capture,
+    client,
+    url,
+    captureOptionsFor(
+      captureOptions,
+      budget,
+      captureOptions.captureScreenshot === true,
+    ),
+    budget,
+  );
+  const capture = (client: IntakeCaptureClient): Promise<AffiliateSourcePageCapture> => (
+    withAffiliateSourceCaptureDeadline(
+      () => captureWithClient(client, url, htmlCaptureOptions),
+      budget.deadlineAt,
+      budget.timeoutMs,
+    )
+  );
   try {
-    const capture = await captureWithClient(primaryClient, url);
-    const quality = evaluateAffiliateHtmlQuality(capture.rawHtml, capture.finalUrl || url);
+    const primaryCapture = await capture(primaryClient);
+    const quality = evaluateAffiliateHtmlQuality(primaryCapture.rawHtml, primaryCapture.finalUrl || url);
     if (!quality.accepted && fallbackClient) {
       state.warnings.push(
         `${providerForClient(primaryClient)} capture quality was rejected for ${url}; `
         + `${fallbackClient.provider} fallback was attempted: ${quality.reasons.join('; ')}`,
       );
+      const fallbackCapture = await capture(fallbackClient);
       return {
-        capture: await fallbackClient.captureSourcePage(url),
+        capture: await captureSelectedProvider(fallbackCapture, fallbackClient),
         client: fallbackClient,
       };
     }
-    return { capture, client: primaryClient };
+    return {
+      capture: await captureSelectedProvider(primaryCapture, primaryClient),
+      client: primaryClient,
+    };
   } catch (primaryError) {
-    if (!fallbackClient) throw primaryError;
+    if (isAffiliateSourceCaptureTimeout(primaryError) || !fallbackClient) throw primaryError;
     state.warnings.push(
       `${providerForClient(primaryClient)} capture failed for ${url}; `
       + `${fallbackClient.provider} fallback was attempted: `
       + `${primaryError instanceof Error ? primaryError.message : 'unknown error'}`,
     );
+    const fallbackCapture = await capture(fallbackClient);
     return {
-      capture: await fallbackClient.captureSourcePage(url),
+      capture: await captureSelectedProvider(fallbackCapture, fallbackClient),
       client: fallbackClient,
     };
   }
 };
+
 
 const processCapturePage = async (
   intake: any,
@@ -1045,6 +1470,7 @@ const processCapturePage = async (
 
   await persistCaptureArtifact({
     intakeId: intake.id,
+    supplySourceId: page.supplySourceId ?? intake.supplySourceId ?? null,
     pageId: page.id,
     runId: run.id,
     kind: 'ROBOTS',
@@ -1081,6 +1507,7 @@ const processCapturePage = async (
       if (accessResponse.statusCode === 401 || accessResponse.statusCode === 403) {
         await persistCaptureArtifact({
           intakeId: intake.id,
+          supplySourceId: page.supplySourceId ?? intake.supplySourceId ?? null,
           pageId: page.id,
           runId: run.id,
           kind: 'PAGE_ACCESS_STATUS',
@@ -1108,8 +1535,15 @@ const processCapturePage = async (
   }
 
   try {
-    const captured = await captureWithFallback(primaryClient, fallbackClient, page.url, state);
+    const captured = await captureWithFallback(
+      primaryClient,
+      fallbackClient,
+      page.url,
+      { captureScreenshot },
+      state,
+    );
     const { capture } = captured;
+    const capturedSupplySourceId = await reconcileCapturedAffiliateSupplySource(intake, page, capture);
     const artifacts = deriveAffiliateHtmlArtifacts(capture.rawHtml, capture.finalUrl || page.url);
     const provider = capture.provider;
     const artifactMetadata = {
@@ -1119,9 +1553,14 @@ const processCapturePage = async (
       estimatedCredits: capture.estimatedCredits,
       attempts: capture.attempts ?? [],
       quality: artifacts.quality,
+      captureUrl: capture.requestedUrl,
+      isRedirectVerified: capture.isRedirectVerified,
+      inferredCanonicalUrl: artifacts.inferredCanonicalUrl ?? capture.inferredCanonicalUrl ?? null,
     };
+    const providerArtifactsMetadata = recordValue(capture.providerArtifacts?.metadata);
     const baseArtifact = {
       intakeId: intake.id,
+      supplySourceId: capturedSupplySourceId,
       pageId: page.id,
       runId: run.id,
       sourceUrl: page.url,
@@ -1194,43 +1633,26 @@ const processCapturePage = async (
       mimeType: 'application/json',
       metadata: artifactMetadata,
     }, state);
-    if (captureScreenshot && capture.providerArtifacts?.screenshotUrl) {
+    const screenshotEvidence = capture.providerArtifacts?.screenshotEvidence ?? null;
+    if (captureScreenshot && screenshotEvidence) {
       try {
-        const screenshot = await fetchResource(capture.providerArtifacts.screenshotUrl, { maxBytes: 3 * 1024 * 1024 });
         await persistCaptureArtifact({
           ...baseArtifact,
           kind: 'PAGE_SCREENSHOT',
-          data: screenshot.body,
-          sourceUrl: capture.providerArtifacts.screenshotUrl,
-          finalUrl: screenshot.finalUrl,
-          httpStatus: screenshot.statusCode,
-          mimeType: screenshot.contentType ?? 'image/png',
-          metadata: artifactMetadata,
-        }, state);
-      } catch (error) {
-        state.warnings.push(`Screenshot download failed for ${page.url}: ${error instanceof Error ? error.message : 'unknown error'}`);
-      }
-    } else if (captureScreenshot && 'captureScreenshot' in captured.client) {
-      try {
-        const screenshot = await captured.client.captureScreenshot(page.url);
-        await persistCaptureArtifact({
-          ...baseArtifact,
-          kind: 'PAGE_SCREENSHOT',
-          data: screenshot.data,
-          provider: screenshot.provider,
-          httpStatus: screenshot.providerStatusCode,
-          mimeType: screenshot.mimeType,
+          data: screenshotEvidence.data,
+          sourceUrl: screenshotEvidence.sourceUrl,
+          finalUrl: screenshotEvidence.finalUrl,
+          httpStatus: screenshotEvidence.statusCode,
+          mimeType: screenshotEvidence.mimeType,
           metadata: {
             ...artifactMetadata,
-            request: screenshot.request,
-            response: screenshot.response,
-            elapsedMs: screenshot.elapsedMs,
-            estimatedCredits: screenshot.estimatedCredits,
+            providerArtifactsMetadata,
           },
         }, state);
-        state.estimatedCredits += screenshot.estimatedCredits ?? 0;
       } catch (error) {
-        state.warnings.push(`Screenshot capture failed for ${page.url}: ${error instanceof Error ? error.message : 'unknown error'}`);
+        state.warnings.push(
+          `Screenshot persistence failed for ${page.url}: ${error instanceof Error ? error.message : 'unknown error'}`,
+        );
       }
     }
     for (const candidate of candidateLogoUrls(capture, artifacts)) {
@@ -1277,6 +1699,7 @@ const processCapturePage = async (
             providerBranding: capture.providerArtifacts?.branding ?? null,
           },
           screenshotUrl: capture.providerArtifacts?.screenshotUrl ?? null,
+          screenshotEvidence: capture.providerArtifacts?.screenshotEvidence ?? null,
           metadata: {
             ...recordValue(capture.providerArtifacts?.metadata),
             ...artifacts.metadata,
@@ -1499,7 +1922,12 @@ export const processNextAffiliateSourceIntakeRun = async (
       if (!activeJob) {
         try {
           await mappingJobs.create({
-            data: { id: createId(), intakeId: intake.id, status: 'QUEUED' },
+            data: {
+              id: createId(),
+              intakeId: intake.id,
+              ...(intake.supplySourceId ? { supplySourceId: intake.supplySourceId } : {}),
+              status: 'QUEUED',
+            },
           });
         } catch (error) {
           if (!isUniqueConstraintError(error)) throw error;

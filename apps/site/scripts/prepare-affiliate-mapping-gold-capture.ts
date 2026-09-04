@@ -20,6 +20,12 @@ import {
 
 dotenv.config({ quiet: true });
 dotenv.config({ path: '.env.local', override: false, quiet: true });
+const LEGACY_RETIREMENT_MESSAGE =
+  'Legacy affiliate launcher is paused pending governed cohort proof; use governed gateway admission.';
+if (process.env.NODE_ENV === 'production' || process.argv.includes('--live')) {
+  console.error(LEGACY_RETIREMENT_MESSAGE);
+  process.exit(78);
+}
 
 const operationMode = resolveGoldCaptureOperationMode(process.argv.slice(2));
 const shouldApply = operationMode === 'apply';

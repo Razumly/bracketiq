@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 import { claimMatchOperationReceipts } from "@/server/matches/clientOperationReplay";
 
 // Jest's node environment here does not install the Fetch Response global that

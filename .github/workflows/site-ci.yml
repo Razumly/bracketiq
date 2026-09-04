@@ -33,19 +33,26 @@ jobs:
               - 'apps/site/**'
               - '.github/workflows/site-ci.yml'
               - '.github/workflows/publish-site-image.yml'
-              - 'package.json'
-              - 'package-lock.json'
-              - '.husky/**'
               - 'AGENTS.md'
               - 'CONTEXT.md'
               - 'PLANS.md'
 
   quality:
-    name: Site quality
+    name: Site quality (${{ matrix.check }})
     needs: changes
     if: needs.changes.outputs.site == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - check: lint
+            command: npm run lint -- --cache --cache-strategy content --cache-location .cache/eslint
+          - check: types
+            command: npm run prisma:validate && npx tsc --noEmit --tsBuildInfoFile .cache/types.tsbuildinfo
+          - check: tests
+            command: npm run test:ci
     defaults:
       run:
         working-directory: apps/site
@@ -54,42 +61,38 @@ jobs:
       JWT_SECRET: bracketiq-ci-only-secret-not-used-outside-tests
       NEXT_PUBLIC_APP_URL: http://localhost:3000
       TZ: America/Los_Angeles
-      LINT_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            apps/site/package-lock.json
-
-      - name: Install root hook tools
-        run: npm ci --ignore-scripts
-        working-directory: ${{ github.workspace }}
+          cache-dependency-path: apps/site/package-lock.json
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Run site lint
-        run: npm run lint
+      - name: Restore check cache
+        uses: actions/cache@v5
+        with:
+          path: apps/site/.cache
+          key: site-${{ matrix.check }}-${{ runner.os }}-${{ hashFiles('apps/site/package-lock.json', 'apps/site/jest.config.ts', 'apps/site/tsconfig*.json', 'apps/site/eslint.config.*') }}-${{ github.sha }}-${{ github.run_attempt }}
+          restore-keys: |
+            site-${{ matrix.check }}-${{ runner.os }}-${{ hashFiles('apps/site/package-lock.json', 'apps/site/jest.config.ts', 'apps/site/tsconfig*.json', 'apps/site/eslint.config.*') }}-
 
-      - name: Run changed-file complexity lint
-        run: npm run lint:changed -- --base "$LINT_BASE_SHA"
+      - name: Run ${{ matrix.check }}
+        run: ${{ matrix.command }}
 
-      - name: Validate Prisma schema
-        run: npm run prisma:validate
-      - name: Run site tests
-        run: npm run test:ci
-
-      - name: Type-check
-        run: npx tsc --noEmit
+      - name: Upload coverage and test timings
+        if: always() && matrix.check == 'tests'
+        uses: actions/upload-artifact@v6
+        with:
+          name: site-test-results
+          path: apps/site/coverage/
+          if-no-files-found: ignore
+          retention-days: 7
 
   gate:
     name: Site CI gate

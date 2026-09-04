@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 import { parseAffiliateScrapeMapping } from '../types';
 import {
   createZeroCandidateReviewMapping,

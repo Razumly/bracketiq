@@ -23,7 +23,6 @@ fun getDatabase(): RoomDatabase.Builder<MVPDatabaseService> {
             .setDriver(BundledSQLiteDriver())
             .setQueryCoroutineContext(Dispatchers.Default)
             .fallbackToDestructiveMigration(dropAllTables = true)
-
             .also { Napier.d(tag = ROOM_DB_LOG_TAG) { "Database builder created successfully for $dbPath" } }
     } catch (e: Exception) {
         Napier.e(tag = ROOM_DB_LOG_TAG, throwable = e) { "Failed to create database builder for $dbPath" }

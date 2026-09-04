@@ -457,7 +457,13 @@ describe('affiliate source intake service', () => {
       },
     );
 
-    expect(captureClient.captureSourcePage).toHaveBeenCalledWith(page.url);
+    expect(captureClient.captureSourcePage).toHaveBeenCalledWith(
+      page.url,
+      expect.objectContaining({
+        captureScreenshot: false,
+        deadlineAt: expect.any(Number),
+      }),
+    );
     expect(captureClient.captureScreenshot).not.toHaveBeenCalled();
     expect(discoverPages).toHaveBeenCalledWith(expect.objectContaining({
       sourceUrl: page.url,
@@ -569,7 +575,7 @@ describe('affiliate source intake service', () => {
     }));
   });
 
-  it('uses an explicitly configured fallback when ScrapingDog capture quality is rejected', async () => {
+  it('defers screenshot capture until the configured fallback is selected', async () => {
     const run = {
       id: 'run_1',
       intakeId: 'intake_1',
@@ -593,6 +599,30 @@ describe('affiliate source intake service', () => {
       affiliateSourceId: null,
     });
     prismaMock.affiliateSourceIntakePages.findMany.mockResolvedValue([page]);
+    const primaryScreenshot = {
+      provider: 'SCRAPINGDOG' as const,
+      request: { url: page.url, endpoint: '/screenshot' },
+      response: { statusCode: 200 },
+      sourceUrl: page.url,
+      finalUrl: page.url,
+      data: Buffer.from('primary-image'),
+      mimeType: 'image/png',
+      providerStatusCode: 200,
+      elapsedMs: 25,
+      estimatedCredits: 5,
+    };
+    const fallbackScreenshot = {
+      provider: 'FIRECRAWL' as const,
+      request: { url: page.url, endpoint: '/screenshot' },
+      response: { statusCode: 200 },
+      sourceUrl: page.url,
+      finalUrl: page.url,
+      data: Buffer.from('fallback-image'),
+      mimeType: 'image/png',
+      providerStatusCode: 200,
+      elapsedMs: 40,
+      estimatedCredits: null,
+    };
     const captureClient = {
       provider: 'SCRAPINGDOG' as const,
       captureSourcePage: jest.fn().mockResolvedValue({
@@ -610,7 +640,7 @@ describe('affiliate source intake service', () => {
         warnings: [],
         providerJobId: 'scrapingdog_1',
       }),
-      captureScreenshot: jest.fn(),
+      captureScreenshot: jest.fn().mockResolvedValue(primaryScreenshot),
     };
     const fallbackCaptureClient = {
       provider: 'FIRECRAWL' as const,
@@ -619,7 +649,7 @@ describe('affiliate source intake service', () => {
         request: { provider: 'FIRECRAWL', endpoint: '/scrape' },
         response: { statusCode: 200 },
         requestedUrl: page.url,
-        finalUrl: page.url,
+        finalUrl: 'https://unreviewed.example.test/final',
         providerStatusCode: 200,
         targetStatusCode: 200,
         rawHtml: '<html><body><main><h1>Fall Volleyball League</h1><p>Registration is open for the September season. Teams play eight matches at the official facility.</p><a href="/register">Register</a></main></body></html>',
@@ -629,7 +659,7 @@ describe('affiliate source intake service', () => {
         warnings: [],
         providerJobId: 'firecrawl_1',
       }),
-      captureScreenshot: jest.fn(),
+      captureScreenshot: jest.fn().mockResolvedValue(fallbackScreenshot),
     };
     const fetchResource = jest.fn().mockResolvedValue({
       url: 'https://example.com/robots.txt',
@@ -651,13 +681,60 @@ describe('affiliate source intake service', () => {
       {
         captureClient,
         fallbackCaptureClient,
-        screenshotMode: 'none',
+        screenshotMode: 'first',
         fetchResource,
         discoverPages,
       },
     );
 
-    expect(fallbackCaptureClient.captureSourcePage).toHaveBeenCalledWith(page.url);
+
+    expect(captureClient.captureSourcePage).toHaveBeenCalledWith(
+      page.url,
+      expect.objectContaining({
+        captureScreenshot: false,
+        deadlineAt: expect.any(Number),
+      }),
+    );
+    expect(captureClient.captureScreenshot).not.toHaveBeenCalled();
+    expect(fallbackCaptureClient.captureScreenshot).toHaveBeenCalledTimes(1);
+    expect(fallbackCaptureClient.captureScreenshot).toHaveBeenCalledWith(
+      page.url,
+      expect.objectContaining({
+        captureScreenshot: true,
+        deadlineAt: expect.any(Number),
+      }),
+    );
+    const primaryCaptureOptions = captureClient.captureSourcePage.mock.calls[0][1];
+    const fallbackCaptureOptions = fallbackCaptureClient.captureSourcePage.mock.calls[0][1];
+    const screenshotOptions = fallbackCaptureClient.captureScreenshot.mock.calls[0][1];
+    expect(fallbackCaptureOptions.deadlineAt).toBe(primaryCaptureOptions.deadlineAt);
+    expect(screenshotOptions.deadlineAt).toBe(primaryCaptureOptions.deadlineAt);
+    expect(fetchResource).toHaveBeenCalledTimes(1);
+    expect(persistArtifactMock).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'PAGE_SCREENSHOT',
+      provider: 'FIRECRAWL',
+      data: fallbackScreenshot.data,
+      httpStatus: fallbackScreenshot.providerStatusCode,
+      mimeType: fallbackScreenshot.mimeType,
+      metadata: expect.objectContaining({
+        providerArtifactsMetadata: expect.objectContaining({
+          screenshotRequest: fallbackScreenshot.request,
+          screenshotResponse: fallbackScreenshot.response,
+          screenshotProviderStatusCode: fallbackScreenshot.providerStatusCode,
+        }),
+      }),
+    }));
+    expect(result?.summary.capturedPages[0]).toEqual(expect.objectContaining({
+      provider: 'FIRECRAWL',
+      estimatedCredits: fallbackScreenshot.estimatedCredits,
+    }));
+    expect(fallbackCaptureClient.captureSourcePage).toHaveBeenCalledWith(
+      page.url,
+      expect.objectContaining({
+        captureScreenshot: false,
+        deadlineAt: expect.any(Number),
+      }),
+    );
     expect(result?.summary.warnings).toEqual(expect.arrayContaining([
       expect.stringContaining('capture quality was rejected'),
     ]));
@@ -665,6 +742,224 @@ describe('affiliate source intake service', () => {
       kind: 'PAGE_HTML',
       provider: 'FIRECRAWL',
     }));
+  });
+
+  it('persists bounded capture-provided screenshot evidence without refetching its URL', async () => {
+    const run = {
+      id: 'run_screenshot',
+      intakeId: 'intake_1',
+      requestedPageIds: ['page_screenshot'],
+      provider: 'FIRECRAWL',
+      status: 'QUEUED',
+    };
+    const page = {
+      id: 'page_screenshot',
+      intakeId: 'intake_1',
+      url: 'https://example.com/events',
+      status: 'ACTIVE',
+      createdAt: new Date(),
+    };
+    const screenshotUrl = 'https://cdn.example.test/page.png';
+    const screenshotEvidence = {
+      data: Buffer.from('bounded-image'),
+      mimeType: 'image/png',
+      sourceUrl: screenshotUrl,
+      finalUrl: 'https://cdn.example.test/page-final.png',
+      statusCode: 200,
+    };
+    prismaMock.affiliateSourceIntakeRuns.findFirst.mockResolvedValue(run);
+    prismaMock.affiliateSourceIntakeRuns.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.affiliateSourceIntakeRuns.findUnique.mockResolvedValue({ ...run, status: 'RUNNING' });
+    prismaMock.affiliateSourceIntakes.findUnique.mockResolvedValue({
+      id: 'intake_1',
+      complianceStatus: 'ALLOWED',
+      affiliateSourceId: null,
+    });
+    prismaMock.affiliateSourceIntakePages.findMany.mockResolvedValue([page]);
+    const captureClient = {
+      provider: 'FIRECRAWL' as const,
+      captureSourcePage: jest.fn().mockResolvedValue({
+        provider: 'FIRECRAWL',
+        request: { url: page.url },
+        response: { statusCode: 200 },
+        requestedUrl: page.url,
+        finalUrl: page.url,
+        isRedirectVerified: false,
+        inferredCanonicalUrl: null,
+        providerStatusCode: 200,
+        targetStatusCode: 200,
+        rawHtml: '<html><head><link rel="canonical" href="/canonical-events"></head><body><main><h1>Summer soccer league</h1><p>Registration is open.</p></main></body></html>',
+        renderMode: 'JAVASCRIPT',
+        elapsedMs: 125,
+        estimatedCredits: null,
+        warnings: [],
+        providerJobId: 'firecrawl_screenshot',
+        providerArtifacts: {
+          markdown: '# Summer soccer league',
+          links: [],
+          images: [],
+          branding: null,
+          screenshotUrl,
+          screenshotEvidence,
+          metadata: {},
+        },
+      }),
+      captureScreenshot: jest.fn(),
+    };
+    const fetchResource = jest.fn().mockResolvedValue({
+      finalUrl: 'https://example.com/robots.txt',
+      statusCode: 200,
+      contentType: 'text/plain',
+      body: Buffer.from('User-agent: *\nDisallow:\n'),
+    });
+    const discoverPages = jest.fn().mockResolvedValue({
+      request: { sourceUrl: page.url },
+      response: { counts: { CAPTURED_LINK: 0 } },
+      links: [],
+      warnings: [],
+      providerJobId: null,
+    });
+
+    const result = await processNextAffiliateSourceIntakeRun(
+      { runId: run.id, workerId: 'worker_1' },
+      {
+        captureClient,
+        fallbackCaptureClient: null,
+        screenshotMode: 'first',
+        fetchResource,
+        discoverPages,
+      },
+    );
+    expect(captureClient.captureSourcePage).toHaveBeenCalledWith(
+      page.url,
+      expect.objectContaining({
+        captureScreenshot: false,
+        deadlineAt: expect.any(Number),
+      }),
+    );
+
+    expect(fetchResource).toHaveBeenCalledTimes(1);
+    expect(fetchResource).not.toHaveBeenCalledWith(screenshotUrl, expect.anything());
+    expect(captureClient.captureScreenshot).not.toHaveBeenCalled();
+    expect(persistArtifactMock).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'PAGE_SCREENSHOT',
+      data: screenshotEvidence.data,
+      sourceUrl: screenshotEvidence.sourceUrl,
+      finalUrl: screenshotEvidence.finalUrl,
+      httpStatus: screenshotEvidence.statusCode,
+      mimeType: screenshotEvidence.mimeType,
+    }));
+    expect(persistArtifactMock).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'PAGE_HTML',
+      finalUrl: page.url,
+      metadata: expect.objectContaining({
+        captureUrl: page.url,
+        isRedirectVerified: false,
+        inferredCanonicalUrl: 'https://example.com/canonical-events',
+      }),
+    }));
+    expect(result?.run.status).toBe('SUCCEEDED');
+  });
+  it('continues discovery and classification when screenshot evidence persistence fails', async () => {
+    const run = {
+      id: 'run_screenshot_failure',
+      intakeId: 'intake_1',
+      requestedPageIds: ['page_screenshot_failure'],
+      provider: 'FIRECRAWL',
+      status: 'QUEUED',
+    };
+    const page = {
+      id: 'page_screenshot_failure',
+      intakeId: 'intake_1',
+      url: 'https://example.com/events',
+      status: 'ACTIVE',
+      createdAt: new Date(),
+    };
+    const screenshotEvidence = {
+      data: Buffer.from('bounded-image'),
+      mimeType: 'image/png',
+      sourceUrl: 'https://cdn.example.test/page.png',
+      finalUrl: 'https://cdn.example.test/page-final.png',
+      statusCode: 200,
+    };
+    prismaMock.affiliateSourceIntakeRuns.findFirst.mockResolvedValue(run);
+    prismaMock.affiliateSourceIntakeRuns.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.affiliateSourceIntakeRuns.findUnique.mockResolvedValue({ ...run, status: 'RUNNING' });
+    prismaMock.affiliateSourceIntakes.findUnique.mockResolvedValue({
+      id: 'intake_1',
+      complianceStatus: 'ALLOWED',
+      affiliateSourceId: null,
+    });
+    prismaMock.affiliateSourceIntakePages.findMany.mockResolvedValue([page]);
+    const captureClient = {
+      provider: 'FIRECRAWL' as const,
+      captureSourcePage: jest.fn().mockResolvedValue({
+        provider: 'FIRECRAWL',
+        request: { url: page.url },
+        response: { statusCode: 200 },
+        requestedUrl: page.url,
+        finalUrl: page.url,
+        isRedirectVerified: false,
+        inferredCanonicalUrl: null,
+        providerStatusCode: 200,
+        targetStatusCode: 200,
+        rawHtml: '<html><body><main><h1>Summer soccer league</h1><p>Registration is open.</p></main></body></html>',
+        renderMode: 'JAVASCRIPT',
+        elapsedMs: 125,
+        estimatedCredits: null,
+        warnings: [],
+        providerJobId: 'firecrawl_screenshot_failure',
+        providerArtifacts: {
+          markdown: '# Summer soccer league',
+          links: [],
+          images: [],
+          branding: null,
+          screenshotUrl: 'https://cdn.example.test/page.png',
+          screenshotEvidence,
+          metadata: {},
+        },
+      }),
+      captureScreenshot: jest.fn(),
+    };
+    const fetchResource = jest.fn().mockResolvedValue({
+      finalUrl: 'https://example.com/robots.txt',
+      statusCode: 200,
+      contentType: 'text/plain',
+      body: Buffer.from('User-agent: *\nDisallow:\n'),
+    });
+    const discoverPages = jest.fn().mockResolvedValue({
+      request: { sourceUrl: page.url },
+      response: { counts: { CAPTURED_LINK: 0 } },
+      links: [],
+      warnings: [],
+      providerJobId: null,
+    });
+    persistArtifactMock.mockImplementation(async (artifact: { kind?: string }) => {
+      if (artifact.kind === 'PAGE_SCREENSHOT') {
+        throw new Error('artifact store unavailable');
+      }
+      return { id: 'artifact_1' };
+    });
+
+    const result = await processNextAffiliateSourceIntakeRun(
+      { runId: run.id, workerId: 'worker_1' },
+      {
+        captureClient,
+        fallbackCaptureClient: null,
+        screenshotMode: 'first',
+        fetchResource,
+        discoverPages,
+      },
+    );
+
+    expect(discoverPages).toHaveBeenCalledWith(expect.objectContaining({
+      sourceUrl: page.url,
+    }));
+    expect(result?.run.status).toBe('PARTIAL');
+    expect(result?.summary.warnings).toEqual(expect.arrayContaining([
+      expect.stringContaining('Screenshot persistence failed'),
+    ]));
+    expect(result?.summary.classification.type).not.toBe('UNKNOWN');
   });
 
   it('keeps source classification advisory and evidence-based', () => {

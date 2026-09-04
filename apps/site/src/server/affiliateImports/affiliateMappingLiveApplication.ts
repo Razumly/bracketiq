@@ -19,11 +19,11 @@ import {
 import {
   affiliateSourceMatchesIntakeEvidence,
   resolveApprovedAffiliateSetupScript,
-} from './codexIngestionApproval';
+} from './affiliateMappingApproval';
 import {
   codexAffiliateIngestionResultV2Schema,
   type CodexAffiliateIngestionResultV2,
-} from './codexIngestionResult';
+} from './affiliateIngestionSchemas';
 import {
   inspectAffiliateProducerPackage,
   materializeAffiliateProducerCommit,

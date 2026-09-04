@@ -21,11 +21,20 @@ const prismaMock = {
     findFirst: jest.fn(),
     findMany: jest.fn(),
     update: jest.fn(),
+    findUnique: jest.fn(),
   },
   affiliateScrapeSources: {
     findUnique: jest.fn(),
     findMany: jest.fn(),
     update: jest.fn(),
+  },
+  affiliateSupplySources: {
+    findUnique: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+  },
+  affiliateSupplyContractManifests: {
+    findFirst: jest.fn(),
   },
   organizations: {
     findUnique: jest.fn(),
@@ -66,6 +75,7 @@ const prismaMock = {
 };
 
 let idCounter = 0;
+let completedScrapeRun: any = null;
 
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 jest.mock('@/lib/id', () => ({
@@ -90,6 +100,15 @@ jest.mock('@/server/geocoding', () => ({
 jest.mock('@/server/timeZones', () => ({
   tryResolveTimeZoneFromCoordinates: jest.fn(),
 }));
+jest.mock('@/server/affiliateImports/affiliateSupplyPersistence', () => {
+  const actual = jest.requireActual('@/server/affiliateImports/affiliateSupplyPersistence');
+  return {
+    ...actual,
+    deriveAndPersistAffiliateSupplyAssessment: jest.fn(),
+    ensureAffiliateSupplySource: jest.fn(),
+    executeAffiliateSupplyLifecycleCommand: jest.fn(),
+  };
+});
 
 import {
   affiliateStaffingPrioritySchema,
@@ -105,6 +124,12 @@ import {
 } from '@/server/affiliateImports/service';
 import { geocodeAddressToCoordinates } from '@/server/geocoding';
 import { tryResolveTimeZoneFromCoordinates } from '@/server/timeZones';
+import {
+  deriveAndPersistAffiliateSupplyAssessment,
+  ensureAffiliateSupplySource,
+  executeAffiliateSupplyLifecycleCommand,
+} from '@/server/affiliateImports/affiliateSupplyPersistence';
+import { buildAffiliateSupplyContractManifest } from '../affiliateSupplyLifecycle';
 
 const geocodeAddressToCoordinatesMock = jest.mocked(geocodeAddressToCoordinates);
 const tryResolveTimeZoneFromCoordinatesMock = jest.mocked(tryResolveTimeZoneFromCoordinates);
@@ -142,7 +167,59 @@ const currentScheduledDateTimeProvenance = (timeZone: string, normalizedStartsAt
 describe('affiliate import service', () => {
   beforeEach(() => {
     jest.resetAllMocks();
+    jest.mocked(deriveAndPersistAffiliateSupplyAssessment).mockResolvedValue({
+      stage: 'PUBLISHED',
+      isAutomationEnabled: true,
+    } as any);
+    jest.mocked(ensureAffiliateSupplySource).mockImplementation(async (input) => {
+      const canonicalUrl = input.resolvedCanonicalUrl ?? input.requestedUrl;
+      const parsed = new URL(canonicalUrl);
+      return {
+        supplySource: { id: input.priorSupplySourceId ?? input.liveSourceId ?? 'supply-source' },
+        identity: {
+          canonicalUrl,
+          origin: parsed.origin,
+          pathKey: `${parsed.origin}${parsed.pathname}`,
+          identityKey: 'identity-key',
+          rootDecision: 'SAME_ROOT',
+          isRevalidationRequired: false,
+          reasonCodes: [],
+        },
+        created: false,
+        successorCreated: false,
+        predecessorId: null,
+      } as any;
+    });
+    jest.mocked(executeAffiliateSupplyLifecycleCommand).mockImplementation(async (input) => {
+      if (input.request?.runId) {
+        const data = {
+          status: 'SUCCEEDED',
+          finishedAt: input.now,
+          finalUrl: input.request.finalUrl,
+          httpStatus: input.request.httpStatus,
+          itemCount: input.request.itemCount,
+          candidateCount: input.request.candidateCount,
+          logs: input.request.runLogs,
+        };
+        completedScrapeRun = { id: input.request.runId, ...data };
+        await prismaMock.affiliateScrapeRuns.update({
+          where: { id: input.request.runId },
+          data,
+        });
+      }
+      return {
+        assessment: { stage: 'PUBLISHED', isAutomationEnabled: true },
+        transition: null,
+        isReplayed: false,
+      } as any;
+    });
     idCounter = 0;
+    completedScrapeRun = null;
+    prismaMock.affiliateScrapeRuns.findUnique.mockImplementation(async ({ where }) => (
+      completedScrapeRun?.id === where.id
+        ? completedScrapeRun
+        : { id: where.id, status: 'SUCCEEDED' }
+    ));
     prismaMock.$transaction.mockImplementation(async (callback: (client: typeof prismaMock) => unknown) => callback(prismaMock));
     prismaMock.$executeRaw.mockResolvedValue(0);
     geocodeAddressToCoordinatesMock.mockResolvedValue([-122.6765, 45.5231]);
@@ -327,7 +404,7 @@ describe('affiliate import service', () => {
       where: { id: 'mapping_1' }, data: expect.objectContaining({ validatedAt: expect.any(Date) }),
     }));
     expect(source).toEqual(expect.objectContaining({
-      autoScrapeEnabled: true,
+      autoScrapeEnabled: false,
       metadata: expect.objectContaining({
         automationBaseline: expect.objectContaining({ mappingId: 'mapping_1', mappingVersion: 3, candidateCount: 1 }),
       }),
@@ -2526,6 +2603,59 @@ describe('affiliate import service', () => {
     });
   });
 
+  it('accepts a declared empty state only when its selector contains the evidence text', async () => {
+    prismaMock.affiliateScrapeSources.findUnique.mockResolvedValue({
+      id: 'source_empty',
+      name: 'Empty Source',
+      activeMappingId: 'mapping_empty',
+      listUrl: 'https://example.com/events',
+      organizationId: 'org_empty',
+    });
+    prismaMock.organizations.findUnique.mockResolvedValue({ id: 'org_empty' });
+    prismaMock.affiliateScrapeMappings.findUnique.mockResolvedValue({
+      id: 'mapping_empty',
+      sourceId: 'source_empty',
+      mapping: {
+        kind: 'EVENT',
+        listUrl: 'https://example.com/events',
+        itemSelector: '.event',
+        emptyState: {
+          selector: '#empty',
+          textIncludes: ['No events are scheduled'],
+        },
+        fields: {
+          title: { selector: '.title' },
+          officialActionUrl: { selector: 'a', mode: 'attribute', attribute: 'href' },
+        },
+      },
+    });
+    prismaMock.affiliateScrapeRuns.create.mockResolvedValue({ id: 'run_empty' });
+    prismaMock.affiliateScrapeRuns.update.mockImplementation(async ({ data }) => ({ id: 'run_empty', ...data }));
+    prismaMock.affiliateScrapeSources.update.mockResolvedValue({});
+
+    await runAffiliateSourceScrape('source_empty', {
+      client: {
+        fetchPage: async () => ({
+          url: 'https://example.com/events',
+          finalUrl: 'https://example.com/events',
+          statusCode: 200,
+          fetchedAt: '2026-08-22T00:00:00.000Z',
+          body: '<main><div id="empty">No events are scheduled</div></main>',
+        }),
+      },
+    });
+
+    expect(prismaMock.affiliateScrapeRuns.update).toHaveBeenLastCalledWith({
+      where: { id: 'run_empty' },
+      data: expect.objectContaining({
+        status: 'SUCCEEDED',
+        itemCount: 0,
+        candidateCount: 0,
+        logs: expect.objectContaining({ isEmptyStateMatched: true }),
+      }),
+    });
+  });
+
   it('reports existing scraped candidates separately from newly created candidates', async () => {
     prismaMock.affiliateScrapeSources.findUnique.mockResolvedValue({
       id: 'source_1',
@@ -2607,9 +2737,36 @@ describe('affiliate import service', () => {
   });
 
   it('automatically publishes valid candidates for scheduled imports', async () => {
+    const activeContract = buildAffiliateSupplyContractManifest({
+      version: 1,
+      rolloutCohort: 'DEFAULT',
+      supplyContract: {
+        schemaVersion: 1,
+        version: 1,
+        rolloutCohort: 'DEFAULT',
+        freshnessWindows: [{ sourceProfile: 'EVENT', maximumAgeHours: 24 }],
+        targets: [{
+          marketKey: 'portland',
+          sportId: 'soccer',
+          sourceProfile: 'EVENT',
+          minimumFreshPublishedSupply: 1,
+        }],
+        requiredMappingEvidenceKinds: ['PAGE_HTML'],
+        requiredLifecycleEvidenceKinds: ['DURABLE_SOURCE_EVIDENCE', 'VALIDATION_OUTPUT'],
+        hash: undefined,
+      },
+    });
+    prismaMock.affiliateSupplyContractManifests.findFirst.mockResolvedValue({
+      status: 'ACTIVE',
+      version: activeContract.version,
+      rolloutCohort: activeContract.rolloutCohort,
+      contractHash: activeContract.hash,
+      contractJson: activeContract.supplyContract,
+    });
     prismaMock.affiliateScrapeSources.findUnique.mockResolvedValue({
       id: 'source_automatic',
       name: 'Automatic Source',
+      supplySourceId: 'supply_automatic',
       activeMappingId: 'mapping_automatic',
       listUrl: 'https://example.com/events',
       organizationId: 'org_automatic',
@@ -2628,6 +2785,23 @@ describe('affiliate import service', () => {
         },
       },
     });
+    prismaMock.affiliateSupplySources.findUnique.mockResolvedValue({
+      id: 'supply_automatic',
+      canonicalUrl: 'https://example.com/events',
+      operatorDomain: 'example.com',
+      targetKind: 'EVENT',
+      rolloutCohort: 'DEFAULT',
+      lifecycleGeneration: 0,
+    });
+    prismaMock.affiliateSupplySources.update.mockImplementation(async ({ data }) => ({
+      id: 'supply_automatic',
+      canonicalUrl: 'https://example.com/events',
+      operatorDomain: 'example.com',
+      targetKind: 'EVENT',
+      rolloutCohort: 'DEFAULT',
+      lifecycleGeneration: 0,
+      ...data,
+    }));
     prismaMock.organizations.findUnique.mockResolvedValue({
       id: 'org_automatic',
       name: 'Automatic Source',
@@ -2638,6 +2812,7 @@ describe('affiliate import service', () => {
       sourceId: 'source_automatic',
       version: 1,
       validatedAt: new Date('2026-07-01T00:00:00.000Z'),
+      metadata: { marketKey: 'portland', sportId: 'soccer' },
       mapping: {
         kind: 'EVENT',
         listUrl: 'https://example.com/events',
@@ -2676,6 +2851,16 @@ describe('affiliate import service', () => {
         }),
       },
     });
+    expect(executeAffiliateSupplyLifecycleCommand).toHaveBeenCalledWith(expect.objectContaining({
+      request: expect.objectContaining({
+        targets: expect.arrayContaining([
+          expect.objectContaining({
+            marketKey: 'portland',
+            sportId: 'soccer',
+          }),
+        ]),
+      }),
+    }));
 
     expect(prismaMock.affiliateImportCandidates.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ status: 'DISCOVERED', title: 'Automatic league' }),
@@ -2703,10 +2888,176 @@ describe('affiliate import service', () => {
     });
   });
 
+  it('stops a refresh after a verified same-origin canonical change', async () => {
+    const source = {
+      id: 'source_identity',
+      name: 'Identity Source',
+      supplySourceId: 'supply_identity',
+      activeMappingId: 'mapping_identity',
+      listUrl: 'https://example.com/events',
+      organizationId: 'org_identity',
+      metadata: {},
+    };
+    const mapping = {
+      id: 'mapping_identity',
+      sourceId: source.id,
+      version: 1,
+      mapping: {
+        kind: 'EVENT',
+        listUrl: source.listUrl,
+        itemSelector: 'body',
+        fields: {
+          title: { selector: 'body', mode: 'literal', value: 'Identity event' },
+          officialActionUrl: { selector: 'body', mode: 'literal', value: 'https://example.com/event' },
+        },
+      },
+    };
+    const root = {
+      id: 'supply_identity',
+      identityKey: 'identity-key',
+      canonicalUrl: source.listUrl,
+      origin: 'https://example.com',
+      pathKey: 'https://example.com/events',
+      operatorDomain: 'example.com',
+      targetKind: 'EVENT',
+      rolloutCohort: 'DEFAULT',
+      lifecycleGeneration: 3,
+    };
+    prismaMock.affiliateScrapeSources.findUnique.mockResolvedValue(source);
+    prismaMock.affiliateScrapeMappings.findUnique.mockResolvedValue(mapping);
+    prismaMock.organizations.findUnique.mockResolvedValue({
+      id: 'org_identity',
+      ownerId: 'owner_identity',
+      name: 'Identity Source',
+      location: 'Portland, OR',
+    });
+    prismaMock.affiliateScrapeRuns.create.mockResolvedValue({ id: 'run_identity' });
+    prismaMock.affiliateSupplySources.findUnique.mockResolvedValue(root);
+    jest.mocked(ensureAffiliateSupplySource).mockResolvedValue({
+      supplySource: root,
+      identity: {
+        canonicalUrl: 'https://example.com/events-canonical',
+        origin: 'https://example.com',
+        pathKey: 'https://example.com/events-canonical',
+        identityKey: 'identity-key',
+        rootDecision: 'SAME_ROOT',
+        isRevalidationRequired: true,
+        reasonCodes: ['VERIFIED_SAME_ORIGIN_CANONICAL_REDIRECT'],
+      },
+      created: false,
+      successorCreated: false,
+      predecessorId: null,
+    });
+    prismaMock.affiliateScrapeRuns.update.mockResolvedValue({ id: 'run_identity', status: 'FAILED' });
+
+    await expect(runAffiliateSourceScrape('source_identity', {
+      client: {
+        fetchPage: async () => ({
+          url: source.listUrl,
+          finalUrl: 'https://example.com/events-canonical',
+          isRedirectVerified: true,
+          statusCode: 200,
+          fetchedAt: '2026-08-22T12:00:00.000Z',
+          body: '<body>Identity event</body>',
+        }),
+      },
+    })).rejects.toThrow('requires revalidation');
+
+    expect(ensureAffiliateSupplySource).toHaveBeenCalledWith(expect.objectContaining({
+      requestedUrl: source.listUrl,
+      resolvedCanonicalUrl: 'https://example.com/events-canonical',
+      priorSupplySourceId: 'supply_identity',
+      isRedirectVerified: true,
+    }));
+    expect(executeAffiliateSupplyLifecycleCommand).toHaveBeenCalledWith(expect.objectContaining({
+      command: 'RECORD_REFRESH_FAILURE',
+      request: expect.objectContaining({ runId: 'run_identity' }),
+    }));
+    expect(prismaMock.affiliateImportCandidates.create).not.toHaveBeenCalled();
+  });
+
+  it('ignores an off-host HTML canonical without an observed transport redirect', async () => {
+    const source = {
+      id: 'source_inferred_canonical',
+      name: 'Inferred Canonical Source',
+      supplySourceId: 'supply_inferred_canonical',
+      activeMappingId: 'mapping_inferred_canonical',
+      listUrl: 'https://example.com/events',
+      organizationId: 'org_inferred_canonical',
+      metadata: {},
+    };
+    const mapping = {
+      id: 'mapping_inferred_canonical',
+      sourceId: source.id,
+      version: 1,
+      mapping: {
+        kind: 'EVENT',
+        listUrl: source.listUrl,
+        itemSelector: '.event',
+        emptyState: { textIncludes: ['no events'] },
+        fields: {
+          title: { selector: '.title' },
+          officialActionUrl: {
+            selector: 'a',
+            mode: 'attribute',
+            attribute: 'href',
+            transform: 'absoluteUrl',
+          },
+        },
+      },
+    };
+    const root = {
+      id: source.supplySourceId,
+      identityKey: 'inferred-canonical-identity',
+      canonicalUrl: source.listUrl,
+      origin: 'https://example.com',
+      pathKey: 'https://example.com/events',
+      operatorDomain: 'example.com',
+      targetKind: 'EVENT',
+      rolloutCohort: 'DEFAULT',
+      lifecycleGeneration: 2,
+    };
+    prismaMock.affiliateScrapeSources.findUnique.mockResolvedValue(source);
+    prismaMock.affiliateScrapeMappings.findUnique.mockResolvedValue(mapping);
+    prismaMock.organizations.findUnique.mockResolvedValue({
+      id: source.organizationId,
+      ownerId: 'owner_inferred_canonical',
+      name: source.name,
+      location: 'Portland, OR',
+    });
+    prismaMock.affiliateScrapeRuns.create.mockResolvedValue({
+      id: 'run_inferred_canonical',
+    });
+    prismaMock.affiliateSupplySources.findUnique.mockResolvedValue(root);
+
+    const result = await runAffiliateSourceScrape(source.id, {
+      client: {
+        fetchPage: async () => ({
+          url: source.listUrl,
+          finalUrl: 'https://publisher-controlled.example/private-events',
+          inferredCanonicalUrl: 'https://publisher-controlled.example/private-events',
+          isRedirectVerified: false,
+          statusCode: 200,
+          fetchedAt: '2026-08-22T12:00:00.000Z',
+          body: '<main>No events are currently scheduled.</main>',
+        }),
+      },
+    });
+
+    expect(result.candidates).toHaveLength(0);
+    expect(ensureAffiliateSupplySource).not.toHaveBeenCalled();
+    expect(prismaMock.affiliateSupplySources.update).not.toHaveBeenCalled();
+    expect(result.run).toEqual(expect.objectContaining({
+      status: 'SUCCEEDED',
+      finalUrl: source.listUrl,
+    }));
+  });
+
   it('does not mark a new automatic candidate published when location resolution fails', async () => {
     prismaMock.affiliateScrapeSources.findUnique.mockResolvedValue({
       id: 'source_automatic_unresolved',
       name: 'Automatic Source',
+      supplySourceId: 'supply_automatic_unresolved',
       activeMappingId: 'mapping_automatic_unresolved',
       listUrl: 'https://example.com/events',
       organizationId: 'org_automatic_unresolved',
@@ -2725,6 +3076,23 @@ describe('affiliate import service', () => {
         },
       },
     });
+    prismaMock.affiliateSupplySources.findUnique.mockResolvedValue({
+      id: 'supply_automatic_unresolved',
+      canonicalUrl: 'https://example.com/events',
+      operatorDomain: 'example.com',
+      targetKind: 'EVENT',
+      rolloutCohort: 'DEFAULT',
+      lifecycleGeneration: 0,
+    });
+    prismaMock.affiliateSupplySources.update.mockImplementation(async ({ data }) => ({
+      id: 'supply_automatic_unresolved',
+      canonicalUrl: 'https://example.com/events',
+      operatorDomain: 'example.com',
+      targetKind: 'EVENT',
+      rolloutCohort: 'DEFAULT',
+      lifecycleGeneration: 0,
+      ...data,
+    }));
     prismaMock.organizations.findUnique.mockResolvedValue({ id: 'org_automatic_unresolved' });
     prismaMock.affiliateScrapeMappings.findUnique.mockResolvedValue({
       id: 'mapping_automatic_unresolved',
@@ -2795,6 +3163,7 @@ describe('affiliate import service', () => {
   it('holds an automatic run for review when a nonzero baseline drops to zero', async () => {
     prismaMock.affiliateScrapeSources.findUnique.mockResolvedValue({
       id: 'source_drift',
+      supplySourceId: 'supply_drift',
       name: 'Drift Source',
       activeMappingId: 'mapping_drift',
       listUrl: 'https://example.com/events',
@@ -2802,12 +3171,35 @@ describe('affiliate import service', () => {
       metadata: {
         automationBaseline: {
           schemaVersion: 1,
-          mappingId: 'mapping_drift', mappingVersion: 1, approvedAt: '2026-07-01T00:00:00.000Z',
-          candidateCount: 10, rejectedCount: 0, listingKinds: ['EVENT'],
-          criticalMissingCount: 0, criticalMissingRate: 0, normalizedFieldsHash: 'baseline-hash',
+          mappingId: 'mapping_drift',
+          mappingVersion: 1,
+          approvedAt: '2026-07-01T00:00:00.000Z',
+          candidateCount: 10,
+          rejectedCount: 0,
+          listingKinds: ['EVENT'],
+          criticalMissingCount: 0,
+          criticalMissingRate: 0,
+          normalizedFieldsHash: 'baseline-hash',
         },
       },
     });
+    prismaMock.affiliateSupplySources.findUnique.mockResolvedValue({
+      id: 'supply_drift',
+      canonicalUrl: 'https://example.com/events',
+      operatorDomain: 'example.com',
+      targetKind: 'EVENT',
+      rolloutCohort: 'DEFAULT',
+      lifecycleGeneration: 0,
+    });
+    prismaMock.affiliateSupplySources.update.mockImplementation(async ({ data }) => ({
+      id: 'supply_drift',
+      canonicalUrl: 'https://example.com/events',
+      operatorDomain: 'example.com',
+      targetKind: 'EVENT',
+      rolloutCohort: 'DEFAULT',
+      lifecycleGeneration: 0,
+      ...data,
+    }));
     prismaMock.organizations.findUnique.mockResolvedValue({ id: 'org_drift' });
     prismaMock.affiliateScrapeMappings.findUnique.mockResolvedValue({
       id: 'mapping_drift', sourceId: 'source_drift', version: 1,
@@ -2850,6 +3242,145 @@ describe('affiliate import service', () => {
       }),
     }));
   });
+
+  it('does not emit lifecycle targets for an existing published candidate while automatic drift is held', async () => {
+    const existingCandidate = {
+      id: 'candidate_published',
+      sourceId: 'source_drift_existing',
+      status: 'PUBLISHED',
+      publishedEventId: 'event_published',
+      publishedTeamId: null,
+      publishedFacilityId: null,
+      publishedOrganizationId: null,
+    };
+    prismaMock.affiliateScrapeSources.findUnique.mockResolvedValue({
+      id: 'source_drift_existing',
+      supplySourceId: 'supply_drift_existing',
+      name: 'Drift Source',
+      activeMappingId: 'mapping_drift_existing',
+      listUrl: 'https://example.com/events',
+      organizationId: 'org_drift_existing',
+      metadata: {
+        automationBaseline: {
+          schemaVersion: 1,
+          mappingId: 'mapping_drift_existing',
+          mappingVersion: 1,
+          approvedAt: '2026-07-01T00:00:00.000Z',
+          candidateCount: 1,
+          rejectedCount: 0,
+          listingKinds: ['TEAM'],
+          criticalMissingCount: 0,
+          criticalMissingRate: 0,
+          normalizedFieldsHash: 'baseline-hash',
+        },
+      },
+    });
+    prismaMock.affiliateSupplySources.findUnique.mockResolvedValue({
+      id: 'supply_drift_existing',
+      canonicalUrl: 'https://example.com/events',
+      operatorDomain: 'example.com',
+      targetKind: 'EVENT',
+      rolloutCohort: 'DEFAULT',
+      lifecycleGeneration: 0,
+    });
+    prismaMock.affiliateSupplySources.update.mockImplementation(async ({ data }) => ({
+      id: 'supply_drift_existing',
+      canonicalUrl: 'https://example.com/events',
+      operatorDomain: 'example.com',
+      targetKind: 'EVENT',
+      rolloutCohort: 'DEFAULT',
+      lifecycleGeneration: 0,
+      ...data,
+    }));
+    prismaMock.organizations.findUnique.mockResolvedValue({
+      id: 'org_drift_existing',
+      name: 'Drift Source',
+      location: 'Portland, OR',
+    });
+    prismaMock.affiliateScrapeMappings.findUnique.mockResolvedValue({
+      id: 'mapping_drift_existing',
+      sourceId: 'source_drift_existing',
+      version: 1,
+      validatedAt: new Date('2026-07-01T00:00:00.000Z'),
+      mapping: {
+        kind: 'EVENT',
+        listUrl: 'https://example.com/events',
+        itemSelector: '.event',
+        fields: {
+          title: { selector: '.title' },
+          officialActionUrl: {
+            selector: 'a',
+            mode: 'attribute',
+            attribute: 'href',
+            transform: 'absoluteUrl',
+          },
+          startsAt: { selector: '.start', transform: 'dateTime' },
+          sportName: { selector: 'body', mode: 'literal', value: 'Basketball' },
+          city: { selector: 'body', mode: 'literal', value: 'Portland' },
+          venueName: {
+            selector: 'body',
+            mode: 'literal',
+            value: 'Example Sports Complex',
+          },
+        },
+      },
+    });
+    prismaMock.affiliateScrapeRuns.create.mockResolvedValue({
+      id: 'run_drift_existing',
+    });
+    prismaMock.affiliateScrapeRuns.update.mockImplementation(async ({ data }) => ({
+      id: 'run_drift_existing',
+      ...data,
+    }));
+    prismaMock.affiliateImportCandidates.findUnique.mockResolvedValue(existingCandidate);
+    prismaMock.affiliateImportCandidates.update.mockImplementation(async ({ where, data }) => ({
+      ...existingCandidate,
+      id: where.id,
+      ...data,
+    }));
+    prismaMock.sports.findFirst.mockResolvedValue({ id: 'Basketball' });
+    prismaMock.events.findUnique.mockResolvedValue(null);
+    prismaMock.events.findFirst.mockResolvedValue(null);
+    prismaMock.events.create.mockImplementation(async ({ data }) => ({
+      id: 'event_refreshed',
+      ...data,
+    }));
+    prismaMock.affiliateScrapeSources.update.mockResolvedValue({});
+
+    const result = await runAffiliateSourceScrape('source_drift_existing', {
+      importMode: 'AUTOMATIC',
+      client: {
+        fetchPage: async () => ({
+          url: 'https://example.com/events',
+          finalUrl: 'https://example.com/events',
+          statusCode: 200,
+          fetchedAt: '2026-07-21T00:00:00.000Z',
+          body: '<div class="event"><span class="title">Held published league</span><span class="start">2099-01-01T18:00:00.000Z</span><a href="/register">Register</a></div>',
+        }),
+      },
+    });
+
+    expect(result.candidates).toEqual([existingCandidate]);
+    expect(prismaMock.affiliateImportCandidates.update).not.toHaveBeenCalled();
+    expect(prismaMock.events.create).not.toHaveBeenCalled();
+    expect(prismaMock.events.update).not.toHaveBeenCalled();
+    expect(prismaMock.canonicalTeams.update).not.toHaveBeenCalled();
+    expect(prismaMock.facilities.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.organizations.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.organizations.update).not.toHaveBeenCalled();
+    expect(executeAffiliateSupplyLifecycleCommand).toHaveBeenCalledWith(expect.objectContaining({
+      command: 'RECORD_REFRESH',
+      request: expect.objectContaining({
+        targets: [],
+        automationReviewRequired: expect.objectContaining({
+          reasons: expect.arrayContaining([
+            expect.stringContaining('Listing kinds changed'),
+          ]),
+        }),
+      }),
+    }));
+  });
+
 
   it('rejects evergreen tryout candidates instead of creating stale affiliate events', async () => {
     prismaMock.affiliateScrapeSources.findUnique.mockResolvedValue({

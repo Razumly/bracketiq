@@ -43,6 +43,7 @@ export type AffiliateSourceIntakeRunsMinAggregateOutputType = {
   createdAt: Date | null
   updatedAt: Date | null
   intakeId: string | null
+  supplySourceId: string | null
   requestedByUserId: string | null
   provider: string | null
   status: string | null
@@ -62,6 +63,7 @@ export type AffiliateSourceIntakeRunsMaxAggregateOutputType = {
   createdAt: Date | null
   updatedAt: Date | null
   intakeId: string | null
+  supplySourceId: string | null
   requestedByUserId: string | null
   provider: string | null
   status: string | null
@@ -81,6 +83,7 @@ export type AffiliateSourceIntakeRunsCountAggregateOutputType = {
   createdAt: number
   updatedAt: number
   intakeId: number
+  supplySourceId: number
   requestedPageIds: number
   requestedByUserId: number
   provider: number
@@ -117,6 +120,7 @@ export type AffiliateSourceIntakeRunsMinAggregateInputType = {
   createdAt?: true
   updatedAt?: true
   intakeId?: true
+  supplySourceId?: true
   requestedByUserId?: true
   provider?: true
   status?: true
@@ -136,6 +140,7 @@ export type AffiliateSourceIntakeRunsMaxAggregateInputType = {
   createdAt?: true
   updatedAt?: true
   intakeId?: true
+  supplySourceId?: true
   requestedByUserId?: true
   provider?: true
   status?: true
@@ -155,6 +160,7 @@ export type AffiliateSourceIntakeRunsCountAggregateInputType = {
   createdAt?: true
   updatedAt?: true
   intakeId?: true
+  supplySourceId?: true
   requestedPageIds?: true
   requestedByUserId?: true
   provider?: true
@@ -264,6 +270,7 @@ export type AffiliateSourceIntakeRunsGroupByOutputType = {
   createdAt: Date
   updatedAt: Date
   intakeId: string
+  supplySourceId: string | null
   requestedPageIds: string[]
   requestedByUserId: string | null
   provider: string
@@ -309,6 +316,7 @@ export type AffiliateSourceIntakeRunsWhereInput = {
   createdAt?: Prisma.DateTimeFilter<"AffiliateSourceIntakeRuns"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"AffiliateSourceIntakeRuns"> | Date | string
   intakeId?: Prisma.StringFilter<"AffiliateSourceIntakeRuns"> | string
+  supplySourceId?: Prisma.StringNullableFilter<"AffiliateSourceIntakeRuns"> | string | null
   requestedPageIds?: Prisma.StringNullableListFilter<"AffiliateSourceIntakeRuns">
   requestedByUserId?: Prisma.StringNullableFilter<"AffiliateSourceIntakeRuns"> | string | null
   provider?: Prisma.StringFilter<"AffiliateSourceIntakeRuns"> | string
@@ -331,6 +339,7 @@ export type AffiliateSourceIntakeRunsOrderByWithRelationInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   intakeId?: Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrderInput | Prisma.SortOrder
   requestedPageIds?: Prisma.SortOrder
   requestedByUserId?: Prisma.SortOrderInput | Prisma.SortOrder
   provider?: Prisma.SortOrder
@@ -356,6 +365,7 @@ export type AffiliateSourceIntakeRunsWhereUniqueInput = Prisma.AtLeast<{
   createdAt?: Prisma.DateTimeFilter<"AffiliateSourceIntakeRuns"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"AffiliateSourceIntakeRuns"> | Date | string
   intakeId?: Prisma.StringFilter<"AffiliateSourceIntakeRuns"> | string
+  supplySourceId?: Prisma.StringNullableFilter<"AffiliateSourceIntakeRuns"> | string | null
   requestedPageIds?: Prisma.StringNullableListFilter<"AffiliateSourceIntakeRuns">
   requestedByUserId?: Prisma.StringNullableFilter<"AffiliateSourceIntakeRuns"> | string | null
   provider?: Prisma.StringFilter<"AffiliateSourceIntakeRuns"> | string
@@ -378,6 +388,7 @@ export type AffiliateSourceIntakeRunsOrderByWithAggregationInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   intakeId?: Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrderInput | Prisma.SortOrder
   requestedPageIds?: Prisma.SortOrder
   requestedByUserId?: Prisma.SortOrderInput | Prisma.SortOrder
   provider?: Prisma.SortOrder
@@ -408,6 +419,7 @@ export type AffiliateSourceIntakeRunsScalarWhereWithAggregatesInput = {
   createdAt?: Prisma.DateTimeWithAggregatesFilter<"AffiliateSourceIntakeRuns"> | Date | string
   updatedAt?: Prisma.DateTimeWithAggregatesFilter<"AffiliateSourceIntakeRuns"> | Date | string
   intakeId?: Prisma.StringWithAggregatesFilter<"AffiliateSourceIntakeRuns"> | string
+  supplySourceId?: Prisma.StringNullableWithAggregatesFilter<"AffiliateSourceIntakeRuns"> | string | null
   requestedPageIds?: Prisma.StringNullableListFilter<"AffiliateSourceIntakeRuns">
   requestedByUserId?: Prisma.StringNullableWithAggregatesFilter<"AffiliateSourceIntakeRuns"> | string | null
   provider?: Prisma.StringWithAggregatesFilter<"AffiliateSourceIntakeRuns"> | string
@@ -430,6 +442,7 @@ export type AffiliateSourceIntakeRunsCreateInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   intakeId: string
+  supplySourceId?: string | null
   requestedPageIds?: Prisma.AffiliateSourceIntakeRunsCreaterequestedPageIdsInput | string[]
   requestedByUserId?: string | null
   provider?: string
@@ -452,6 +465,7 @@ export type AffiliateSourceIntakeRunsUncheckedCreateInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   intakeId: string
+  supplySourceId?: string | null
   requestedPageIds?: Prisma.AffiliateSourceIntakeRunsCreaterequestedPageIdsInput | string[]
   requestedByUserId?: string | null
   provider?: string
@@ -474,6 +488,7 @@ export type AffiliateSourceIntakeRunsUpdateInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   intakeId?: Prisma.StringFieldUpdateOperationsInput | string
+  supplySourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   requestedPageIds?: Prisma.AffiliateSourceIntakeRunsUpdaterequestedPageIdsInput | string[]
   requestedByUserId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   provider?: Prisma.StringFieldUpdateOperationsInput | string
@@ -496,6 +511,7 @@ export type AffiliateSourceIntakeRunsUncheckedUpdateInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   intakeId?: Prisma.StringFieldUpdateOperationsInput | string
+  supplySourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   requestedPageIds?: Prisma.AffiliateSourceIntakeRunsUpdaterequestedPageIdsInput | string[]
   requestedByUserId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   provider?: Prisma.StringFieldUpdateOperationsInput | string
@@ -518,6 +534,7 @@ export type AffiliateSourceIntakeRunsCreateManyInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   intakeId: string
+  supplySourceId?: string | null
   requestedPageIds?: Prisma.AffiliateSourceIntakeRunsCreaterequestedPageIdsInput | string[]
   requestedByUserId?: string | null
   provider?: string
@@ -540,6 +557,7 @@ export type AffiliateSourceIntakeRunsUpdateManyMutationInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   intakeId?: Prisma.StringFieldUpdateOperationsInput | string
+  supplySourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   requestedPageIds?: Prisma.AffiliateSourceIntakeRunsUpdaterequestedPageIdsInput | string[]
   requestedByUserId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   provider?: Prisma.StringFieldUpdateOperationsInput | string
@@ -562,6 +580,7 @@ export type AffiliateSourceIntakeRunsUncheckedUpdateManyInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   intakeId?: Prisma.StringFieldUpdateOperationsInput | string
+  supplySourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   requestedPageIds?: Prisma.AffiliateSourceIntakeRunsUpdaterequestedPageIdsInput | string[]
   requestedByUserId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   provider?: Prisma.StringFieldUpdateOperationsInput | string
@@ -584,6 +603,7 @@ export type AffiliateSourceIntakeRunsCountOrderByAggregateInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   intakeId?: Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrder
   requestedPageIds?: Prisma.SortOrder
   requestedByUserId?: Prisma.SortOrder
   provider?: Prisma.SortOrder
@@ -612,6 +632,7 @@ export type AffiliateSourceIntakeRunsMaxOrderByAggregateInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   intakeId?: Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrder
   requestedByUserId?: Prisma.SortOrder
   provider?: Prisma.SortOrder
   status?: Prisma.SortOrder
@@ -631,6 +652,7 @@ export type AffiliateSourceIntakeRunsMinOrderByAggregateInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   intakeId?: Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrder
   requestedByUserId?: Prisma.SortOrder
   provider?: Prisma.SortOrder
   status?: Prisma.SortOrder
@@ -676,6 +698,7 @@ export type AffiliateSourceIntakeRunsSelect<ExtArgs extends runtime.Types.Extens
   createdAt?: boolean
   updatedAt?: boolean
   intakeId?: boolean
+  supplySourceId?: boolean
   requestedPageIds?: boolean
   requestedByUserId?: boolean
   provider?: boolean
@@ -698,6 +721,7 @@ export type AffiliateSourceIntakeRunsSelectCreateManyAndReturn<ExtArgs extends r
   createdAt?: boolean
   updatedAt?: boolean
   intakeId?: boolean
+  supplySourceId?: boolean
   requestedPageIds?: boolean
   requestedByUserId?: boolean
   provider?: boolean
@@ -720,6 +744,7 @@ export type AffiliateSourceIntakeRunsSelectUpdateManyAndReturn<ExtArgs extends r
   createdAt?: boolean
   updatedAt?: boolean
   intakeId?: boolean
+  supplySourceId?: boolean
   requestedPageIds?: boolean
   requestedByUserId?: boolean
   provider?: boolean
@@ -742,6 +767,7 @@ export type AffiliateSourceIntakeRunsSelectScalar = {
   createdAt?: boolean
   updatedAt?: boolean
   intakeId?: boolean
+  supplySourceId?: boolean
   requestedPageIds?: boolean
   requestedByUserId?: boolean
   provider?: boolean
@@ -759,7 +785,7 @@ export type AffiliateSourceIntakeRunsSelectScalar = {
   summary?: boolean
 }
 
-export type AffiliateSourceIntakeRunsOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "intakeId" | "requestedPageIds" | "requestedByUserId" | "provider" | "status" | "queuedAt" | "startedAt" | "finishedAt" | "claimedAt" | "workerId" | "attemptCount" | "providerJobIds" | "discoveredUrlCount" | "capturedPageCount" | "errorMessage" | "summary", ExtArgs["result"]["affiliateSourceIntakeRuns"]>
+export type AffiliateSourceIntakeRunsOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "intakeId" | "supplySourceId" | "requestedPageIds" | "requestedByUserId" | "provider" | "status" | "queuedAt" | "startedAt" | "finishedAt" | "claimedAt" | "workerId" | "attemptCount" | "providerJobIds" | "discoveredUrlCount" | "capturedPageCount" | "errorMessage" | "summary", ExtArgs["result"]["affiliateSourceIntakeRuns"]>
 
 export type $AffiliateSourceIntakeRunsPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "AffiliateSourceIntakeRuns"
@@ -769,6 +795,7 @@ export type $AffiliateSourceIntakeRunsPayload<ExtArgs extends runtime.Types.Exte
     createdAt: Date
     updatedAt: Date
     intakeId: string
+    supplySourceId: string | null
     requestedPageIds: string[]
     requestedByUserId: string | null
     provider: string
@@ -1211,6 +1238,7 @@ export interface AffiliateSourceIntakeRunsFieldRefs {
   readonly createdAt: Prisma.FieldRef<"AffiliateSourceIntakeRuns", 'DateTime'>
   readonly updatedAt: Prisma.FieldRef<"AffiliateSourceIntakeRuns", 'DateTime'>
   readonly intakeId: Prisma.FieldRef<"AffiliateSourceIntakeRuns", 'String'>
+  readonly supplySourceId: Prisma.FieldRef<"AffiliateSourceIntakeRuns", 'String'>
   readonly requestedPageIds: Prisma.FieldRef<"AffiliateSourceIntakeRuns", 'String[]'>
   readonly requestedByUserId: Prisma.FieldRef<"AffiliateSourceIntakeRuns", 'String'>
   readonly provider: Prisma.FieldRef<"AffiliateSourceIntakeRuns", 'String'>

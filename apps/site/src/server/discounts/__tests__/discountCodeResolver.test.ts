@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 var mockPrisma: any;
 
 jest.mock('@/lib/prisma', () => ({

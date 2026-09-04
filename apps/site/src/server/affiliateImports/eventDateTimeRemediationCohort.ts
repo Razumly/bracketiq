@@ -5,7 +5,7 @@ import type { AffiliateApprovalQueueStatus } from './approvalQueue';
 import { summarizeAffiliateApprovalQueue } from './approvalQueue';
 import type { AffiliateMappingQueueStatus } from './sourceMappingQueueStatus';
 import { summarizeAffiliateMappingQueue } from './sourceMappingQueueStatus';
-import { AFFILIATE_EVENT_DATETIME_REMEDIATION_CONTEXT } from './codexIngestionResult';
+import { AFFILIATE_EVENT_DATETIME_REMEDIATION_CONTEXT } from './affiliateIngestionSchemas';
 import { findCustomExtractorBySourceKey } from './customExtractorRegistry';
 
 export const AFFILIATE_EVENT_DATETIME_REMEDIATION_COHORT_SUBJECT_TYPE =

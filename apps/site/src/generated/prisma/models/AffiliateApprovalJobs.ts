@@ -39,6 +39,7 @@ export type AffiliateApprovalJobsMinAggregateOutputType = {
   createdAt: Date | null
   updatedAt: Date | null
   subjectType: string | null
+  supplySourceId: string | null
   subjectKey: string | null
   status: string | null
   claimedAt: Date | null
@@ -54,6 +55,7 @@ export type AffiliateApprovalJobsMaxAggregateOutputType = {
   createdAt: Date | null
   updatedAt: Date | null
   subjectType: string | null
+  supplySourceId: string | null
   subjectKey: string | null
   status: string | null
   claimedAt: Date | null
@@ -69,6 +71,7 @@ export type AffiliateApprovalJobsCountAggregateOutputType = {
   createdAt: number
   updatedAt: number
   subjectType: number
+  supplySourceId: number
   subjectKey: number
   status: number
   claimedAt: number
@@ -95,6 +98,7 @@ export type AffiliateApprovalJobsMinAggregateInputType = {
   createdAt?: true
   updatedAt?: true
   subjectType?: true
+  supplySourceId?: true
   subjectKey?: true
   status?: true
   claimedAt?: true
@@ -110,6 +114,7 @@ export type AffiliateApprovalJobsMaxAggregateInputType = {
   createdAt?: true
   updatedAt?: true
   subjectType?: true
+  supplySourceId?: true
   subjectKey?: true
   status?: true
   claimedAt?: true
@@ -125,6 +130,7 @@ export type AffiliateApprovalJobsCountAggregateInputType = {
   createdAt?: true
   updatedAt?: true
   subjectType?: true
+  supplySourceId?: true
   subjectKey?: true
   status?: true
   claimedAt?: true
@@ -228,6 +234,7 @@ export type AffiliateApprovalJobsGroupByOutputType = {
   createdAt: Date
   updatedAt: Date
   subjectType: string
+  supplySourceId: string | null
   subjectKey: string
   status: string
   claimedAt: Date | null
@@ -267,6 +274,7 @@ export type AffiliateApprovalJobsWhereInput = {
   createdAt?: Prisma.DateTimeFilter<"AffiliateApprovalJobs"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"AffiliateApprovalJobs"> | Date | string
   subjectType?: Prisma.StringFilter<"AffiliateApprovalJobs"> | string
+  supplySourceId?: Prisma.StringNullableFilter<"AffiliateApprovalJobs"> | string | null
   subjectKey?: Prisma.StringFilter<"AffiliateApprovalJobs"> | string
   status?: Prisma.StringFilter<"AffiliateApprovalJobs"> | string
   claimedAt?: Prisma.DateTimeNullableFilter<"AffiliateApprovalJobs"> | Date | string | null
@@ -283,6 +291,7 @@ export type AffiliateApprovalJobsOrderByWithRelationInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   subjectType?: Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrderInput | Prisma.SortOrder
   subjectKey?: Prisma.SortOrder
   status?: Prisma.SortOrder
   claimedAt?: Prisma.SortOrderInput | Prisma.SortOrder
@@ -303,6 +312,7 @@ export type AffiliateApprovalJobsWhereUniqueInput = Prisma.AtLeast<{
   createdAt?: Prisma.DateTimeFilter<"AffiliateApprovalJobs"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"AffiliateApprovalJobs"> | Date | string
   subjectType?: Prisma.StringFilter<"AffiliateApprovalJobs"> | string
+  supplySourceId?: Prisma.StringNullableFilter<"AffiliateApprovalJobs"> | string | null
   subjectKey?: Prisma.StringFilter<"AffiliateApprovalJobs"> | string
   status?: Prisma.StringFilter<"AffiliateApprovalJobs"> | string
   claimedAt?: Prisma.DateTimeNullableFilter<"AffiliateApprovalJobs"> | Date | string | null
@@ -319,6 +329,7 @@ export type AffiliateApprovalJobsOrderByWithAggregationInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   subjectType?: Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrderInput | Prisma.SortOrder
   subjectKey?: Prisma.SortOrder
   status?: Prisma.SortOrder
   claimedAt?: Prisma.SortOrderInput | Prisma.SortOrder
@@ -343,6 +354,7 @@ export type AffiliateApprovalJobsScalarWhereWithAggregatesInput = {
   createdAt?: Prisma.DateTimeWithAggregatesFilter<"AffiliateApprovalJobs"> | Date | string
   updatedAt?: Prisma.DateTimeWithAggregatesFilter<"AffiliateApprovalJobs"> | Date | string
   subjectType?: Prisma.StringWithAggregatesFilter<"AffiliateApprovalJobs"> | string
+  supplySourceId?: Prisma.StringNullableWithAggregatesFilter<"AffiliateApprovalJobs"> | string | null
   subjectKey?: Prisma.StringWithAggregatesFilter<"AffiliateApprovalJobs"> | string
   status?: Prisma.StringWithAggregatesFilter<"AffiliateApprovalJobs"> | string
   claimedAt?: Prisma.DateTimeNullableWithAggregatesFilter<"AffiliateApprovalJobs"> | Date | string | null
@@ -359,6 +371,7 @@ export type AffiliateApprovalJobsCreateInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   subjectType: string
+  supplySourceId?: string | null
   subjectKey: string
   status?: string
   claimedAt?: Date | string | null
@@ -375,6 +388,7 @@ export type AffiliateApprovalJobsUncheckedCreateInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   subjectType: string
+  supplySourceId?: string | null
   subjectKey: string
   status?: string
   claimedAt?: Date | string | null
@@ -391,6 +405,7 @@ export type AffiliateApprovalJobsUpdateInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   subjectType?: Prisma.StringFieldUpdateOperationsInput | string
+  supplySourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   subjectKey?: Prisma.StringFieldUpdateOperationsInput | string
   status?: Prisma.StringFieldUpdateOperationsInput | string
   claimedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -407,6 +422,7 @@ export type AffiliateApprovalJobsUncheckedUpdateInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   subjectType?: Prisma.StringFieldUpdateOperationsInput | string
+  supplySourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   subjectKey?: Prisma.StringFieldUpdateOperationsInput | string
   status?: Prisma.StringFieldUpdateOperationsInput | string
   claimedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -423,6 +439,7 @@ export type AffiliateApprovalJobsCreateManyInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   subjectType: string
+  supplySourceId?: string | null
   subjectKey: string
   status?: string
   claimedAt?: Date | string | null
@@ -439,6 +456,7 @@ export type AffiliateApprovalJobsUpdateManyMutationInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   subjectType?: Prisma.StringFieldUpdateOperationsInput | string
+  supplySourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   subjectKey?: Prisma.StringFieldUpdateOperationsInput | string
   status?: Prisma.StringFieldUpdateOperationsInput | string
   claimedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -455,6 +473,7 @@ export type AffiliateApprovalJobsUncheckedUpdateManyInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   subjectType?: Prisma.StringFieldUpdateOperationsInput | string
+  supplySourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   subjectKey?: Prisma.StringFieldUpdateOperationsInput | string
   status?: Prisma.StringFieldUpdateOperationsInput | string
   claimedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -476,6 +495,7 @@ export type AffiliateApprovalJobsCountOrderByAggregateInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   subjectType?: Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrder
   subjectKey?: Prisma.SortOrder
   status?: Prisma.SortOrder
   claimedAt?: Prisma.SortOrder
@@ -496,6 +516,7 @@ export type AffiliateApprovalJobsMaxOrderByAggregateInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   subjectType?: Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrder
   subjectKey?: Prisma.SortOrder
   status?: Prisma.SortOrder
   claimedAt?: Prisma.SortOrder
@@ -511,6 +532,7 @@ export type AffiliateApprovalJobsMinOrderByAggregateInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   subjectType?: Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrder
   subjectKey?: Prisma.SortOrder
   status?: Prisma.SortOrder
   claimedAt?: Prisma.SortOrder
@@ -532,6 +554,7 @@ export type AffiliateApprovalJobsSelect<ExtArgs extends runtime.Types.Extensions
   createdAt?: boolean
   updatedAt?: boolean
   subjectType?: boolean
+  supplySourceId?: boolean
   subjectKey?: boolean
   status?: boolean
   claimedAt?: boolean
@@ -548,6 +571,7 @@ export type AffiliateApprovalJobsSelectCreateManyAndReturn<ExtArgs extends runti
   createdAt?: boolean
   updatedAt?: boolean
   subjectType?: boolean
+  supplySourceId?: boolean
   subjectKey?: boolean
   status?: boolean
   claimedAt?: boolean
@@ -564,6 +588,7 @@ export type AffiliateApprovalJobsSelectUpdateManyAndReturn<ExtArgs extends runti
   createdAt?: boolean
   updatedAt?: boolean
   subjectType?: boolean
+  supplySourceId?: boolean
   subjectKey?: boolean
   status?: boolean
   claimedAt?: boolean
@@ -580,6 +605,7 @@ export type AffiliateApprovalJobsSelectScalar = {
   createdAt?: boolean
   updatedAt?: boolean
   subjectType?: boolean
+  supplySourceId?: boolean
   subjectKey?: boolean
   status?: boolean
   claimedAt?: boolean
@@ -591,7 +617,7 @@ export type AffiliateApprovalJobsSelectScalar = {
   finishedAt?: boolean
 }
 
-export type AffiliateApprovalJobsOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "subjectType" | "subjectKey" | "status" | "claimedAt" | "leaseExpiresAt" | "reviewerId" | "attemptCount" | "decision" | "errorMessage" | "finishedAt", ExtArgs["result"]["affiliateApprovalJobs"]>
+export type AffiliateApprovalJobsOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "subjectType" | "supplySourceId" | "subjectKey" | "status" | "claimedAt" | "leaseExpiresAt" | "reviewerId" | "attemptCount" | "decision" | "errorMessage" | "finishedAt", ExtArgs["result"]["affiliateApprovalJobs"]>
 
 export type $AffiliateApprovalJobsPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "AffiliateApprovalJobs"
@@ -601,6 +627,7 @@ export type $AffiliateApprovalJobsPayload<ExtArgs extends runtime.Types.Extensio
     createdAt: Date
     updatedAt: Date
     subjectType: string
+    supplySourceId: string | null
     subjectKey: string
     status: string
     claimedAt: Date | null
@@ -1037,6 +1064,7 @@ export interface AffiliateApprovalJobsFieldRefs {
   readonly createdAt: Prisma.FieldRef<"AffiliateApprovalJobs", 'DateTime'>
   readonly updatedAt: Prisma.FieldRef<"AffiliateApprovalJobs", 'DateTime'>
   readonly subjectType: Prisma.FieldRef<"AffiliateApprovalJobs", 'String'>
+  readonly supplySourceId: Prisma.FieldRef<"AffiliateApprovalJobs", 'String'>
   readonly subjectKey: Prisma.FieldRef<"AffiliateApprovalJobs", 'String'>
   readonly status: Prisma.FieldRef<"AffiliateApprovalJobs", 'String'>
   readonly claimedAt: Prisma.FieldRef<"AffiliateApprovalJobs", 'DateTime'>

@@ -1,6 +1,5 @@
 import { useCallback } from 'react';
 import type { SetStateAction } from 'react';
-import type { UseFormGetValues } from 'react-hook-form';
 
 import type { LeagueConfig, TournamentConfig } from '@/types';
 
@@ -21,9 +20,13 @@ type SetFormValue = (
     value: unknown,
     options?: Record<string, unknown>,
 ) => void;
+type EventFormGetValues = {
+    (): EventFormValues;
+    <Key extends keyof EventFormValues>(name: Key): EventFormValues[Key];
+};
 
 type UseEventFormFieldWritersParams = {
-    getValues: UseFormGetValues<EventFormValues>;
+    getValues: EventFormGetValues;
     setValue: SetFormValue;
 };
 

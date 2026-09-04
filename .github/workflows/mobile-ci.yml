@@ -56,8 +56,56 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-          cache: gradle
-          cache-dependency-path: apps/mobile/**/*.gradle*
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v5
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
+
+      - name: Install Android SDK packages
+        run: >-
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          "platforms;android-36"
+          "build-tools;36.0.0"
+
+      - name: Run Android unit tests
+        run: ./gradlew testDebugUnitTest --continue --stacktrace --profile
+
+      - name: Upload Android test results and build profile
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: android-test-results
+          path: |
+            apps/mobile/**/build/reports/tests/
+            apps/mobile/**/build/test-results/
+            apps/mobile/build/reports/profile/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  android-release:
+    name: Android release validation
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v5
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
 
       - name: Install Android SDK packages
         run: >-
@@ -66,13 +114,19 @@ jobs:
           "build-tools;36.0.0"
 
       - name: Verify release Google Sign-In resource
-        run: ./scripts/tests/google-sign-in-release-resource-contract.sh
+        run: ./scripts/tests/google-sign-in-release-resource-contract.sh --profile
 
       - name: Verify Android release API endpoint
-        run: ./scripts/tests/android-release-api-base-url-contract.sh
+        run: ./scripts/tests/android-release-api-base-url-contract.sh --profile
 
-      - name: Run Android unit tests
-        run: ./gradlew testDebugUnitTest --continue --stacktrace
+      - name: Upload release build profiles
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: android-release-profiles
+          path: apps/mobile/build/reports/profile/
+          if-no-files-found: ignore
+          retention-days: 7
 
 
   ios-tests:
@@ -93,8 +147,27 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-          cache: gradle
-          cache-dependency-path: apps/mobile/**/*.gradle*
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v5
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
+
+      - name: Identify native toolchain
+        id: native-toolchain
+        run: echo "xcode=$(xcodebuild -version | shasum -a 256 | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore native compiler and CocoaPods state
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.konan
+            ~/Library/Caches/CocoaPods
+            ~/.cocoapods
+            apps/mobile/composeApp/build/cocoapods
+          key: native-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.native-toolchain.outputs.xcode }}-${{ hashFiles('apps/mobile/gradle/libs.versions.toml', 'apps/mobile/gradle/wrapper/gradle-wrapper.properties', 'apps/mobile/gradle.properties', 'apps/mobile/composeApp/build.gradle.kts', 'apps/mobile/iosApp/Podfile', 'apps/mobile/iosApp/Podfile.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            native-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.native-toolchain.outputs.xcode }}-${{ hashFiles('apps/mobile/gradle/libs.versions.toml', 'apps/mobile/gradle/wrapper/gradle-wrapper.properties', 'apps/mobile/gradle.properties', 'apps/mobile/composeApp/build.gradle.kts', 'apps/mobile/iosApp/Podfile', 'apps/mobile/iosApp/Podfile.lock') }}-
 
       - name: Install Android SDK packages
         run: >-
@@ -132,12 +205,26 @@ jobs:
           -PiosDevice="$IOS_SIMULATOR_UDID"
           --continue
           --stacktrace
+          --profile
+
+      - name: Upload iOS test results and build profile
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ios-test-results
+          path: |
+            apps/mobile/**/build/reports/tests/
+            apps/mobile/**/build/test-results/
+            apps/mobile/build/reports/profile/
+          if-no-files-found: ignore
+          retention-days: 7
 
   gate:
     name: Mobile CI gate
     needs:
       - changes
       - android-tests
+      - android-release
       - ios-tests
     if: always()
     runs-on: ubuntu-latest
@@ -147,6 +234,7 @@ jobs:
           MOBILE_CHANGED: ${{ needs.changes.outputs.mobile }}
           CHANGES_RESULT: ${{ needs.changes.result }}
           ANDROID_RESULT: ${{ needs.android-tests.result }}
+          ANDROID_RELEASE_RESULT: ${{ needs.android-release.result }}
           IOS_RESULT: ${{ needs.ios-tests.result }}
         run: |
           if [[ "$CHANGES_RESULT" != "success" ]]; then
@@ -155,6 +243,10 @@ jobs:
           fi
           if [[ "$MOBILE_CHANGED" == "true" && "$ANDROID_RESULT" != "success" ]]; then
             echo "Android unit tests did not pass: $ANDROID_RESULT" >&2
+            exit 1
+          fi
+          if [[ "$MOBILE_CHANGED" == "true" && "$ANDROID_RELEASE_RESULT" != "success" ]]; then
+            echo "Android release validation did not pass: $ANDROID_RELEASE_RESULT" >&2
             exit 1
           fi
           if [[ "$MOBILE_CHANGED" == "true" && "$IOS_RESULT" != "success" ]]; then

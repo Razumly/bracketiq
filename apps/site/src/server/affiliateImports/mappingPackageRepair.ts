@@ -1,4 +1,4 @@
-import { codexAffiliateIngestionResultSchema } from './codexIngestionResult';
+import { codexAffiliateIngestionResultSchema } from './affiliateIngestionSchemas';
 import { hasAffiliateProducerHandoffBlocker } from './approvalHandoffRetry';
 
 type JsonRecord = Record<string, unknown>;

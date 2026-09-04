@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 import { buildDivisionDiscoveryWhere, summarizeOrganizationDivisions } from '@/server/divisionDiscovery';
 
 describe('buildDivisionDiscoveryWhere', () => {

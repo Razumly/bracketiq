@@ -45,7 +45,7 @@ const RegistrationPlanHarness = ({
       allowPaymentPlans: false,
     } as EventFormValues,
   });
-  const eventData = form.watch();
+  const eventData = form.getValues();
   return (
     <SimpleSetupPlanningPage
       pageId="format"

@@ -3,7 +3,6 @@ package com.razumly.mvp.core.data.repositories
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
 import com.razumly.mvp.core.network.dto.BillingTeamRefDto
-import com.razumly.mvp.core.data.dataTypes.ProfileDocumentCacheEntry
 import com.razumly.mvp.core.network.dto.RegistrationQuestionAnswerDto
 import kotlinx.serialization.Serializable
 
@@ -92,10 +91,8 @@ internal data class EventSignLinksResponseDto(
 
 @Serializable
 internal data class ProfileDocumentsResponseDto(
-    val viewerUserId: String,
-    val unsigned: List<ProfileDocumentCardDto>,
-    val signed: List<ProfileDocumentCardDto>,
-    val voided: List<ProfileDocumentCardDto>,
+    val unsigned: List<ProfileDocumentCardDto> = emptyList(),
+    val signed: List<ProfileDocumentCardDto> = emptyList(),
     val error: String? = null,
 )
 
@@ -112,12 +109,6 @@ internal data class ProfileDocumentCardDto(
     val templateId: String? = null,
     val title: String? = null,
     val type: String? = null,
-    val provenance: String? = null,
-    val documentRequirementTitle: String? = null,
-    val versionSequence: Int? = null,
-    val scopeType: String? = null,
-    val scopeId: String? = null,
-    val historicalSigningDate: String? = null,
     val requiredSignerType: String? = null,
     val requiredSignerLabel: String? = null,
     val signerContext: String? = null,
@@ -140,12 +131,7 @@ internal fun ProfileDocumentCardDto.toProfileDocumentCardOrNull(
     val resolvedTemplateId = templateId?.trim()?.takeIf(String::isNotBlank) ?: return null
     val resolvedSignerType = requiredSignerType?.trim()?.takeIf(String::isNotBlank) ?: "PARTICIPANT"
     val resolvedSignerLabel = requiredSignerLabel?.trim()?.takeIf(String::isNotBlank) ?: resolvedSignerType
-    val resolvedProvenance = provenance?.trim()?.takeIf(String::isNotBlank)
-    val resolvedViewUrl = viewUrl?.trim()?.takeIf(String::isNotBlank)
-    val resolvedType = resolveProfileDocumentType(
-        rawType = type,
-        provenance = resolvedProvenance,
-    )
+
     return ProfileDocumentCard(
         id = resolvedId,
         status = parseProfileDocumentStatus(status, defaultStatus),
@@ -157,13 +143,7 @@ internal fun ProfileDocumentCardDto.toProfileDocumentCardOrNull(
         organizationName = organizationName?.trim()?.takeIf(String::isNotBlank) ?: "Organization",
         templateId = resolvedTemplateId,
         title = title?.trim()?.takeIf(String::isNotBlank) ?: "Document",
-        type = resolvedType,
-        provenance = resolvedProvenance,
-        documentRequirementTitle = documentRequirementTitle?.trim()?.takeIf(String::isNotBlank),
-        versionSequence = versionSequence?.takeIf { it > 0 },
-        scopeType = scopeType?.trim()?.takeIf(String::isNotBlank),
-        scopeId = scopeId?.trim()?.takeIf(String::isNotBlank),
-        historicalSigningDate = historicalSigningDate?.trim()?.takeIf(String::isNotBlank),
+        type = parseProfileDocumentType(type),
         requiredSignerType = resolvedSignerType,
         requiredSignerLabel = resolvedSignerLabel,
         signerContext = parseSignerContext(signerContext),
@@ -175,10 +155,11 @@ internal fun ProfileDocumentCardDto.toProfileDocumentCardOrNull(
         statusNote = statusNote?.trim()?.takeIf(String::isNotBlank),
         signedAt = signedAt?.trim()?.takeIf(String::isNotBlank),
         signedDocumentRecordId = signedDocumentRecordId?.trim()?.takeIf(String::isNotBlank),
-        viewUrl = resolvedViewUrl,
+        viewUrl = viewUrl?.trim()?.takeIf(String::isNotBlank),
         content = content?.trim()?.takeIf(String::isNotBlank),
     )
 }
+
 internal fun parseProfileDocumentStatus(
     raw: String?,
     defaultStatus: ProfileDocumentStatus,
@@ -186,7 +167,6 @@ internal fun parseProfileDocumentStatus(
     return when (raw?.trim()?.uppercase()) {
         "UNSIGNED" -> ProfileDocumentStatus.UNSIGNED
         "SIGNED" -> ProfileDocumentStatus.SIGNED
-        "VOID" -> ProfileDocumentStatus.VOID
         else -> defaultStatus
     }
 }
@@ -198,17 +178,6 @@ internal fun parseProfileDocumentType(raw: String?): ProfileDocumentType {
     }
 }
 
-internal fun resolveProfileDocumentType(
-    rawType: String?,
-    provenance: String?,
-): ProfileDocumentType {
-    return if (provenance.equals("IMPORTED", ignoreCase = true)) {
-        ProfileDocumentType.PDF
-    } else {
-        parseProfileDocumentType(rawType)
-    }
-}
-
 internal fun parseSignerContext(raw: String?): SignerContext {
     return when (raw?.trim()?.lowercase()) {
         "parent_guardian" -> SignerContext.PARENT_GUARDIAN
@@ -216,76 +185,6 @@ internal fun parseSignerContext(raw: String?): SignerContext {
         else -> SignerContext.PARTICIPANT
     }
 }
-internal fun ProfileDocumentCard.toProfileDocumentCacheEntry(
-    viewerKey: String,
-    sortOrder: Int,
-): ProfileDocumentCacheEntry = ProfileDocumentCacheEntry(
-    viewerKey = viewerKey,
-    id = id,
-    sortOrder = sortOrder,
-    status = status.name,
-    eventId = eventId,
-    eventName = eventName,
-    teamId = teamId,
-    teamName = teamName,
-    organizationId = organizationId,
-    organizationName = organizationName,
-    templateId = templateId,
-    documentRequirementTitle = documentRequirementTitle,
-    versionSequence = versionSequence,
-    title = title,
-    type = type.name,
-    provenance = provenance,
-    scopeType = scopeType,
-    scopeId = scopeId,
-    historicalSigningDate = historicalSigningDate,
-    requiredSignerType = requiredSignerType,
-    requiredSignerLabel = requiredSignerLabel,
-    signerContext = signerContext.apiValue,
-    signerContextLabel = signerContextLabel,
-    childUserId = childUserId,
-    childEmail = childEmail,
-    consentStatus = consentStatus,
-    requiresChildEmail = requiresChildEmail,
-    statusNote = statusNote,
-    signedAt = signedAt,
-    signedDocumentRecordId = signedDocumentRecordId,
-    viewUrl = viewUrl,
-    content = content,
-)
-
-internal fun ProfileDocumentCacheEntry.toProfileDocumentCard(): ProfileDocumentCard = ProfileDocumentCard(
-    id = id,
-    status = parseProfileDocumentStatus(status, ProfileDocumentStatus.SIGNED),
-    eventId = eventId,
-    eventName = eventName,
-    teamId = teamId,
-    teamName = teamName,
-    organizationId = organizationId,
-    organizationName = organizationName,
-    templateId = templateId,
-    title = title,
-    type = resolveProfileDocumentType(rawType = type, provenance = provenance),
-    provenance = provenance,
-    documentRequirementTitle = documentRequirementTitle,
-    versionSequence = versionSequence,
-    scopeType = scopeType,
-    scopeId = scopeId,
-    historicalSigningDate = historicalSigningDate,
-    requiredSignerType = requiredSignerType,
-    requiredSignerLabel = requiredSignerLabel,
-    signerContext = parseSignerContext(signerContext),
-    signerContextLabel = signerContextLabel,
-    childUserId = childUserId,
-    childEmail = childEmail,
-    consentStatus = consentStatus,
-    requiresChildEmail = requiresChildEmail,
-    statusNote = statusNote,
-    signedAt = signedAt,
-    signedDocumentRecordId = signedDocumentRecordId,
-    viewUrl = viewUrl,
-    content = content,
-)
 
 @Serializable
 internal data class RecordSignatureRequestDto(

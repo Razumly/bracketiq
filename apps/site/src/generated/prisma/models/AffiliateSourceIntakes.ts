@@ -37,6 +37,7 @@ export type AffiliateSourceIntakesMinAggregateOutputType = {
   notes: string | null
   organizationId: string | null
   affiliateSourceId: string | null
+  supplySourceId: string | null
   selectedLogoArtifactId: string | null
   lastRunId: string | null
   createdByUserId: string | null
@@ -59,6 +60,7 @@ export type AffiliateSourceIntakesMaxAggregateOutputType = {
   notes: string | null
   organizationId: string | null
   affiliateSourceId: string | null
+  supplySourceId: string | null
   selectedLogoArtifactId: string | null
   lastRunId: string | null
   createdByUserId: string | null
@@ -83,6 +85,7 @@ export type AffiliateSourceIntakesCountAggregateOutputType = {
   suggestedClassification: number
   organizationId: number
   affiliateSourceId: number
+  supplySourceId: number
   selectedLogoArtifactId: number
   lastRunId: number
   createdByUserId: number
@@ -107,6 +110,7 @@ export type AffiliateSourceIntakesMinAggregateInputType = {
   notes?: true
   organizationId?: true
   affiliateSourceId?: true
+  supplySourceId?: true
   selectedLogoArtifactId?: true
   lastRunId?: true
   createdByUserId?: true
@@ -129,6 +133,7 @@ export type AffiliateSourceIntakesMaxAggregateInputType = {
   notes?: true
   organizationId?: true
   affiliateSourceId?: true
+  supplySourceId?: true
   selectedLogoArtifactId?: true
   lastRunId?: true
   createdByUserId?: true
@@ -153,6 +158,7 @@ export type AffiliateSourceIntakesCountAggregateInputType = {
   suggestedClassification?: true
   organizationId?: true
   affiliateSourceId?: true
+  supplySourceId?: true
   selectedLogoArtifactId?: true
   lastRunId?: true
   createdByUserId?: true
@@ -250,6 +256,7 @@ export type AffiliateSourceIntakesGroupByOutputType = {
   suggestedClassification: runtime.JsonValue | null
   organizationId: string | null
   affiliateSourceId: string | null
+  supplySourceId: string | null
   selectedLogoArtifactId: string | null
   lastRunId: string | null
   createdByUserId: string | null
@@ -295,6 +302,7 @@ export type AffiliateSourceIntakesWhereInput = {
   suggestedClassification?: Prisma.JsonNullableFilter<"AffiliateSourceIntakes">
   organizationId?: Prisma.StringNullableFilter<"AffiliateSourceIntakes"> | string | null
   affiliateSourceId?: Prisma.StringNullableFilter<"AffiliateSourceIntakes"> | string | null
+  supplySourceId?: Prisma.StringNullableFilter<"AffiliateSourceIntakes"> | string | null
   selectedLogoArtifactId?: Prisma.StringNullableFilter<"AffiliateSourceIntakes"> | string | null
   lastRunId?: Prisma.StringNullableFilter<"AffiliateSourceIntakes"> | string | null
   createdByUserId?: Prisma.StringNullableFilter<"AffiliateSourceIntakes"> | string | null
@@ -319,6 +327,7 @@ export type AffiliateSourceIntakesOrderByWithRelationInput = {
   suggestedClassification?: Prisma.SortOrderInput | Prisma.SortOrder
   organizationId?: Prisma.SortOrderInput | Prisma.SortOrder
   affiliateSourceId?: Prisma.SortOrderInput | Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrderInput | Prisma.SortOrder
   selectedLogoArtifactId?: Prisma.SortOrderInput | Prisma.SortOrder
   lastRunId?: Prisma.SortOrderInput | Prisma.SortOrder
   createdByUserId?: Prisma.SortOrderInput | Prisma.SortOrder
@@ -346,6 +355,7 @@ export type AffiliateSourceIntakesWhereUniqueInput = Prisma.AtLeast<{
   suggestedClassification?: Prisma.JsonNullableFilter<"AffiliateSourceIntakes">
   organizationId?: Prisma.StringNullableFilter<"AffiliateSourceIntakes"> | string | null
   affiliateSourceId?: Prisma.StringNullableFilter<"AffiliateSourceIntakes"> | string | null
+  supplySourceId?: Prisma.StringNullableFilter<"AffiliateSourceIntakes"> | string | null
   selectedLogoArtifactId?: Prisma.StringNullableFilter<"AffiliateSourceIntakes"> | string | null
   lastRunId?: Prisma.StringNullableFilter<"AffiliateSourceIntakes"> | string | null
   createdByUserId?: Prisma.StringNullableFilter<"AffiliateSourceIntakes"> | string | null
@@ -370,6 +380,7 @@ export type AffiliateSourceIntakesOrderByWithAggregationInput = {
   suggestedClassification?: Prisma.SortOrderInput | Prisma.SortOrder
   organizationId?: Prisma.SortOrderInput | Prisma.SortOrder
   affiliateSourceId?: Prisma.SortOrderInput | Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrderInput | Prisma.SortOrder
   selectedLogoArtifactId?: Prisma.SortOrderInput | Prisma.SortOrder
   lastRunId?: Prisma.SortOrderInput | Prisma.SortOrder
   createdByUserId?: Prisma.SortOrderInput | Prisma.SortOrder
@@ -400,6 +411,7 @@ export type AffiliateSourceIntakesScalarWhereWithAggregatesInput = {
   suggestedClassification?: Prisma.JsonNullableWithAggregatesFilter<"AffiliateSourceIntakes">
   organizationId?: Prisma.StringNullableWithAggregatesFilter<"AffiliateSourceIntakes"> | string | null
   affiliateSourceId?: Prisma.StringNullableWithAggregatesFilter<"AffiliateSourceIntakes"> | string | null
+  supplySourceId?: Prisma.StringNullableWithAggregatesFilter<"AffiliateSourceIntakes"> | string | null
   selectedLogoArtifactId?: Prisma.StringNullableWithAggregatesFilter<"AffiliateSourceIntakes"> | string | null
   lastRunId?: Prisma.StringNullableWithAggregatesFilter<"AffiliateSourceIntakes"> | string | null
   createdByUserId?: Prisma.StringNullableWithAggregatesFilter<"AffiliateSourceIntakes"> | string | null
@@ -424,6 +436,7 @@ export type AffiliateSourceIntakesCreateInput = {
   suggestedClassification?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   organizationId?: string | null
   affiliateSourceId?: string | null
+  supplySourceId?: string | null
   selectedLogoArtifactId?: string | null
   lastRunId?: string | null
   createdByUserId?: string | null
@@ -448,6 +461,7 @@ export type AffiliateSourceIntakesUncheckedCreateInput = {
   suggestedClassification?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   organizationId?: string | null
   affiliateSourceId?: string | null
+  supplySourceId?: string | null
   selectedLogoArtifactId?: string | null
   lastRunId?: string | null
   createdByUserId?: string | null
@@ -472,6 +486,7 @@ export type AffiliateSourceIntakesUpdateInput = {
   suggestedClassification?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   organizationId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   affiliateSourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  supplySourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   selectedLogoArtifactId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   lastRunId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdByUserId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -496,6 +511,7 @@ export type AffiliateSourceIntakesUncheckedUpdateInput = {
   suggestedClassification?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   organizationId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   affiliateSourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  supplySourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   selectedLogoArtifactId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   lastRunId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdByUserId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -520,6 +536,7 @@ export type AffiliateSourceIntakesCreateManyInput = {
   suggestedClassification?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   organizationId?: string | null
   affiliateSourceId?: string | null
+  supplySourceId?: string | null
   selectedLogoArtifactId?: string | null
   lastRunId?: string | null
   createdByUserId?: string | null
@@ -544,6 +561,7 @@ export type AffiliateSourceIntakesUpdateManyMutationInput = {
   suggestedClassification?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   organizationId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   affiliateSourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  supplySourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   selectedLogoArtifactId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   lastRunId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdByUserId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -568,6 +586,7 @@ export type AffiliateSourceIntakesUncheckedUpdateManyInput = {
   suggestedClassification?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   organizationId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   affiliateSourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  supplySourceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   selectedLogoArtifactId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   lastRunId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdByUserId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -592,6 +611,7 @@ export type AffiliateSourceIntakesCountOrderByAggregateInput = {
   suggestedClassification?: Prisma.SortOrder
   organizationId?: Prisma.SortOrder
   affiliateSourceId?: Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrder
   selectedLogoArtifactId?: Prisma.SortOrder
   lastRunId?: Prisma.SortOrder
   createdByUserId?: Prisma.SortOrder
@@ -614,6 +634,7 @@ export type AffiliateSourceIntakesMaxOrderByAggregateInput = {
   notes?: Prisma.SortOrder
   organizationId?: Prisma.SortOrder
   affiliateSourceId?: Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrder
   selectedLogoArtifactId?: Prisma.SortOrder
   lastRunId?: Prisma.SortOrder
   createdByUserId?: Prisma.SortOrder
@@ -636,6 +657,7 @@ export type AffiliateSourceIntakesMinOrderByAggregateInput = {
   notes?: Prisma.SortOrder
   organizationId?: Prisma.SortOrder
   affiliateSourceId?: Prisma.SortOrder
+  supplySourceId?: Prisma.SortOrder
   selectedLogoArtifactId?: Prisma.SortOrder
   lastRunId?: Prisma.SortOrder
   createdByUserId?: Prisma.SortOrder
@@ -671,6 +693,7 @@ export type AffiliateSourceIntakesSelect<ExtArgs extends runtime.Types.Extension
   suggestedClassification?: boolean
   organizationId?: boolean
   affiliateSourceId?: boolean
+  supplySourceId?: boolean
   selectedLogoArtifactId?: boolean
   lastRunId?: boolean
   createdByUserId?: boolean
@@ -695,6 +718,7 @@ export type AffiliateSourceIntakesSelectCreateManyAndReturn<ExtArgs extends runt
   suggestedClassification?: boolean
   organizationId?: boolean
   affiliateSourceId?: boolean
+  supplySourceId?: boolean
   selectedLogoArtifactId?: boolean
   lastRunId?: boolean
   createdByUserId?: boolean
@@ -719,6 +743,7 @@ export type AffiliateSourceIntakesSelectUpdateManyAndReturn<ExtArgs extends runt
   suggestedClassification?: boolean
   organizationId?: boolean
   affiliateSourceId?: boolean
+  supplySourceId?: boolean
   selectedLogoArtifactId?: boolean
   lastRunId?: boolean
   createdByUserId?: boolean
@@ -743,6 +768,7 @@ export type AffiliateSourceIntakesSelectScalar = {
   suggestedClassification?: boolean
   organizationId?: boolean
   affiliateSourceId?: boolean
+  supplySourceId?: boolean
   selectedLogoArtifactId?: boolean
   lastRunId?: boolean
   createdByUserId?: boolean
@@ -752,7 +778,7 @@ export type AffiliateSourceIntakesSelectScalar = {
   complianceNotes?: boolean
 }
 
-export type AffiliateSourceIntakesOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "name" | "sourceKey" | "region" | "baseUrl" | "status" | "complianceStatus" | "targetKindHints" | "notes" | "suggestedClassification" | "organizationId" | "affiliateSourceId" | "selectedLogoArtifactId" | "lastRunId" | "createdByUserId" | "complianceReviewedByUserId" | "complianceReviewedAt" | "complianceTermsUrl" | "complianceNotes", ExtArgs["result"]["affiliateSourceIntakes"]>
+export type AffiliateSourceIntakesOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "name" | "sourceKey" | "region" | "baseUrl" | "status" | "complianceStatus" | "targetKindHints" | "notes" | "suggestedClassification" | "organizationId" | "affiliateSourceId" | "supplySourceId" | "selectedLogoArtifactId" | "lastRunId" | "createdByUserId" | "complianceReviewedByUserId" | "complianceReviewedAt" | "complianceTermsUrl" | "complianceNotes", ExtArgs["result"]["affiliateSourceIntakes"]>
 
 export type $AffiliateSourceIntakesPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "AffiliateSourceIntakes"
@@ -772,6 +798,7 @@ export type $AffiliateSourceIntakesPayload<ExtArgs extends runtime.Types.Extensi
     suggestedClassification: runtime.JsonValue | null
     organizationId: string | null
     affiliateSourceId: string | null
+    supplySourceId: string | null
     selectedLogoArtifactId: string | null
     lastRunId: string | null
     createdByUserId: string | null
@@ -1216,6 +1243,7 @@ export interface AffiliateSourceIntakesFieldRefs {
   readonly suggestedClassification: Prisma.FieldRef<"AffiliateSourceIntakes", 'Json'>
   readonly organizationId: Prisma.FieldRef<"AffiliateSourceIntakes", 'String'>
   readonly affiliateSourceId: Prisma.FieldRef<"AffiliateSourceIntakes", 'String'>
+  readonly supplySourceId: Prisma.FieldRef<"AffiliateSourceIntakes", 'String'>
   readonly selectedLogoArtifactId: Prisma.FieldRef<"AffiliateSourceIntakes", 'String'>
   readonly lastRunId: Prisma.FieldRef<"AffiliateSourceIntakes", 'String'>
   readonly createdByUserId: Prisma.FieldRef<"AffiliateSourceIntakes", 'String'>

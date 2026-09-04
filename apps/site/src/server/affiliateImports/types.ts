@@ -6,7 +6,17 @@ export type AffiliateLocationSource = 'CANDIDATE' | 'SOURCE_ORGANIZATION';
 
 export type ScrapedPage = {
   url: string;
+  /**
+   * The URL reached by the transport. Providers must not replace this with
+   * an HTML-declared canonical URL.
+   */
   finalUrl: string;
+  /**
+   * Transport provenance. Missing legacy values are treated as false.
+   */
+  isRedirectVerified?: boolean;
+  /** HTML-declared canonical URL, retained as untrusted evidence only. */
+  inferredCanonicalUrl?: string | null;
   statusCode: number | null;
   body: string;
   fetchedAt: string;
@@ -167,6 +177,13 @@ export const affiliateScrapeMappingSchema = z.object({
     .object({
       fields: z.array(z.string().min(1)).min(1),
     })
+    .optional(),
+  emptyState: z
+    .object({
+      textIncludes: z.array(z.string().trim().min(1)).min(1),
+      selector: z.string().trim().min(1).optional(),
+    })
+    .strict()
     .optional(),
   manualCandidates: z.array(affiliateManualCandidateSchema).optional(),
 });

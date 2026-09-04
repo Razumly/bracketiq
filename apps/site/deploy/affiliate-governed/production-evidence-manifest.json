@@ -1,0 +1,409 @@
+{
+  "schemaVersion": 1,
+  "manifestId": "affiliate-governed-production-evidence-paths",
+  "entries": [
+    {
+      "key": "mapping_producer_mapping_producer_1_lease",
+      "path": "MAPPING_PRODUCER.mapping-producer-1.lease.json"
+    },
+    {
+      "key": "mapping_producer_mapping_producer_1_receipt",
+      "path": "MAPPING_PRODUCER.mapping-producer-1.receipt.json"
+    },
+    {
+      "key": "mapping_producer_mapping_producer_2_lease",
+      "path": "MAPPING_PRODUCER.mapping-producer-2.lease.json"
+    },
+    {
+      "key": "mapping_producer_mapping_producer_2_receipt",
+      "path": "MAPPING_PRODUCER.mapping-producer-2.receipt.json"
+    },
+    {
+      "key": "supply_reviewer_supply_reviewer_1_lease",
+      "path": "SUPPLY_REVIEWER.supply-reviewer-1.lease.json"
+    },
+    {
+      "key": "supply_reviewer_supply_reviewer_1_receipt",
+      "path": "SUPPLY_REVIEWER.supply-reviewer-1.receipt.json"
+    },
+    {
+      "key": "supply_reviewer_supply_reviewer_2_lease",
+      "path": "SUPPLY_REVIEWER.supply-reviewer-2.lease.json"
+    },
+    {
+      "key": "supply_reviewer_supply_reviewer_2_receipt",
+      "path": "SUPPLY_REVIEWER.supply-reviewer-2.receipt.json"
+    },
+    {
+      "key": "activeSupplyContract",
+      "path": "active-supply-contract.json"
+    },
+    {
+      "key": "reviewedSupplyContractManifest",
+      "path": "reviewed-supply-contract-manifest.json"
+    },
+    {
+      "key": "reviewedSupplyContractImpactReport",
+      "path": "reviewed-supply-contract-impact-report.json"
+    },
+    {
+      "key": "databaseIdentity",
+      "path": "affiliate-database-identity.tsv"
+    },
+    {
+      "key": "databaseUrlIdentity",
+      "path": "affiliate-database-url-identity.tsv"
+    },
+    {
+      "key": "gatewayDatabaseIdentity",
+      "path": "gateway-database-identity.json"
+    },
+    {
+      "key": "replenishmentControllerDatabaseIdentity",
+      "path": "replenishment-controller-database-identity.json"
+    },
+    {
+      "key": "databasePrivileges",
+      "path": "affiliate-database-privileges.tsv"
+    },
+    {
+      "key": "legacyUnitDetails",
+      "path": "affiliate-legacy-unit-details.txt"
+    },
+    {
+      "key": "legacyUnitStateInitial",
+      "path": "affiliate-legacy-unit-state.initial.txt"
+    },
+    {
+      "key": "legacyUnitStatePreflight",
+      "path": "affiliate-legacy-unit-state.preflight.txt"
+    },
+    {
+      "key": "legacyUnits",
+      "path": "affiliate-legacy-units.txt"
+    },
+    {
+      "key": "operationsDashboard",
+      "path": "affiliate-operations-dashboard.json"
+    },
+    {
+      "key": "operationsReplayDeepLink",
+      "path": "affiliate-operations-replay.deep-link.txt"
+    },
+    {
+      "key": "operationsReplay",
+      "path": "affiliate-operations-replay.json"
+    },
+    {
+      "key": "processIdentities",
+      "path": "affiliate-process-identities.tsv"
+    },
+    {
+      "key": "alertExceptionHistory",
+      "path": "alert-exception-history.redacted.json"
+    },
+    {
+      "key": "canaryAdmissionConsumed",
+      "path": "canary-admission-consumed.redacted.json"
+    },
+    {
+      "key": "canaryAdmissionLease",
+      "path": "canary-admission-lease.redacted.json"
+    },
+    {
+      "key": "canaryClaimAfterRestart",
+      "path": "canary-claim-after-restart.redacted.json"
+    },
+    {
+      "key": "canaryClaimBeforeRestart",
+      "path": "canary-claim-before-restart.redacted.json"
+    },
+    {
+      "key": "canaryReceipt",
+      "path": "canary-receipt.redacted.json"
+    },
+    {
+      "key": "canaryReplayReceipt",
+      "path": "canary-replay-receipt.redacted.json"
+    },
+    {
+      "key": "cutoverInventory",
+      "path": "cutover-inventory.json"
+    },
+    {
+      "key": "cutoverSession",
+      "path": "cutover-session.json"
+    },
+    {
+      "key": "dashboardAlertDelivery",
+      "path": "dashboard-alert-delivery.json"
+    },
+    {
+      "key": "dashboardProviderFailure",
+      "path": "dashboard-provider-failure.json"
+    },
+    {
+      "key": "dashboardRetry",
+      "path": "dashboard-retry.json"
+    },
+    {
+      "key": "dashboardStaleGeneration",
+      "path": "dashboard-stale-generation.json"
+    },
+    {
+      "key": "databasePermissionFlags",
+      "path": "database-permission-flags.json"
+    },
+    {
+      "key": "deploymentEvidenceHash",
+      "path": "deployment-evidence.sha256"
+    },
+    {
+      "key": "gatewayReplay",
+      "path": "gateway-replay.redacted.json"
+    },
+    {
+      "key": "gatewayReplayReconcile",
+      "path": "gateway-replay-reconcile.redacted.json"
+    },
+    {
+      "key": "gatewayReplayReceipt",
+      "path": "gateway-replay-receipt.redacted.json"
+    },
+    {
+      "key": "governedCompose",
+      "path": "governed-compose.redacted.json"
+    },
+    {
+      "key": "governedFullShutdown",
+      "path": "governed-full-shutdown.redacted.json"
+    },
+    {
+      "key": "humanExecutorAdmission",
+      "path": "human-executor-admission.redacted.json"
+    },
+    {
+      "key": "governedRestartEvents",
+      "path": "governed-restart-events.jsonl"
+    },
+    {
+      "key": "governedRestartPolicy",
+      "path": "governed-restart-policy.redacted.json"
+    },
+    {
+      "key": "governedRestartRecovery",
+      "path": "governed-restart-recovery.redacted.json"
+    },
+    {
+      "key": "invocationRetry",
+      "path": "invocation-retry.redacted.json"
+    },
+    {
+      "key": "lineageChain",
+      "path": "lineage-chain.redacted.json"
+    },
+    {
+      "key": "portlandVancouverCohort",
+      "path": "portland-vancouver-cohort.json"
+    },
+    {
+      "key": "seattleTacomaCohort",
+      "path": "seattle-tacoma-cohort.json"
+    },
+    {
+      "key": "startupPreflightReport",
+      "path": "preflight-report.json"
+    },
+    {
+      "key": "providerFailure",
+      "path": "provider-failure.redacted.json"
+    },
+    {
+      "key": "providerFailureDrill",
+      "path": "provider-failure-drill.redacted.json"
+    },
+    {
+      "key": "reconciliationApplyRun",
+      "path": "reconciliation-apply-run.redacted.json"
+    },
+    {
+      "key": "reconciliationApply",
+      "path": "reconciliation-apply.json"
+    },
+    {
+      "key": "reconciliationDryRun",
+      "path": "reconciliation-dry-run.json"
+    },
+    {
+      "key": "reconciliationReplay",
+      "path": "reconciliation-replay.json"
+    },
+    {
+      "key": "reconciliationReplayRun",
+      "path": "reconciliation-replay-run.redacted.json"
+    },
+    {
+      "key": "reviewedAffiliateWorkerContainerIds",
+      "path": "reviewed-affiliate-worker-container-ids.txt"
+    },
+    {
+      "key": "reviewedAffiliateContainerIds",
+      "path": "reviewed-affiliate-container-ids.txt"
+    },
+    {
+      "key": "reviewedAffiliateReplenishmentContainerId",
+      "path": "reviewed-affiliate-replenishment-container-id.txt"
+    },
+    {
+      "key": "reviewedAffiliateContainers",
+      "path": "reviewed-affiliate-containers.redacted.json"
+    },
+    {
+      "key": "reviewedAffiliateWorkers",
+      "path": "reviewed-affiliate-workers.redacted.json"
+    },
+    {
+      "key": "coveragePlannerIdentity",
+      "path": "coverage-planner-identity.redacted.json"
+    },
+    {
+      "key": "reviewedModelRelayImage",
+      "path": "reviewed-model-relay-image.txt"
+    },
+    {
+      "key": "reviewedModelRelay",
+      "path": "reviewed-model-relay.redacted.json"
+    },
+    {
+      "key": "reviewedModelRelayHash",
+      "path": "reviewed-model-relay.redacted.sha256"
+    },
+    {
+      "key": "reviewedAgentNetwork",
+      "path": "reviewed-agent-network.json"
+    },
+    {
+      "key": "reviewedCounts",
+      "path": "reviewed-counts.json"
+    },
+    {
+      "key": "reviewedLegacyProcessManifestArtifact",
+      "path": "reviewed-legacy-process-manifest.artifact.json"
+    },
+    {
+      "key": "reviewedLegacyProcessManifest",
+      "path": "reviewed-legacy-process-manifest.json"
+    },
+    {
+      "key": "rollbackDrillPostWrite",
+      "path": "rollback-drill-post-write.json"
+    },
+    {
+      "key": "rollbackDrillPreWrite",
+      "path": "rollback-drill-pre-write.json"
+    },
+    {
+      "key": "runningServicesAfterContainment",
+      "path": "running-services-after-containment.txt"
+    },
+    {
+      "key": "runningServicesAfterFullShutdown",
+      "path": "running-services-after-full-shutdown.txt"
+    },
+    {
+      "key": "schemaMigrationDeploy",
+      "path": "schema-migration-deploy.txt"
+    },
+    {
+      "key": "schemaMigrationStatus",
+      "path": "schema-migration-status.txt"
+    },
+    {
+      "key": "staleGeneration",
+      "path": "stale-generation.redacted.json"
+    }
+  ],
+  "paths": [
+    "MAPPING_PRODUCER.mapping-producer-1.lease.json",
+    "MAPPING_PRODUCER.mapping-producer-1.receipt.json",
+    "MAPPING_PRODUCER.mapping-producer-2.lease.json",
+    "MAPPING_PRODUCER.mapping-producer-2.receipt.json",
+    "SUPPLY_REVIEWER.supply-reviewer-1.lease.json",
+    "SUPPLY_REVIEWER.supply-reviewer-1.receipt.json",
+    "SUPPLY_REVIEWER.supply-reviewer-2.lease.json",
+    "SUPPLY_REVIEWER.supply-reviewer-2.receipt.json",
+    "active-supply-contract.json",
+    "reviewed-supply-contract-manifest.json",
+    "reviewed-supply-contract-impact-report.json",
+    "affiliate-database-identity.tsv",
+    "affiliate-database-url-identity.tsv",
+    "gateway-database-identity.json",
+    "replenishment-controller-database-identity.json",
+    "affiliate-database-privileges.tsv",
+    "affiliate-legacy-unit-details.txt",
+    "affiliate-legacy-unit-state.initial.txt",
+    "affiliate-legacy-unit-state.preflight.txt",
+    "affiliate-legacy-units.txt",
+    "affiliate-operations-dashboard.json",
+    "affiliate-operations-replay.deep-link.txt",
+    "affiliate-operations-replay.json",
+    "affiliate-process-identities.tsv",
+    "alert-exception-history.redacted.json",
+    "canary-admission-consumed.redacted.json",
+    "canary-admission-lease.redacted.json",
+    "canary-claim-after-restart.redacted.json",
+    "canary-claim-before-restart.redacted.json",
+    "canary-receipt.redacted.json",
+    "canary-replay-receipt.redacted.json",
+    "cutover-inventory.json",
+    "cutover-session.json",
+    "dashboard-alert-delivery.json",
+    "dashboard-provider-failure.json",
+    "dashboard-retry.json",
+    "dashboard-stale-generation.json",
+    "database-permission-flags.json",
+    "deployment-evidence.sha256",
+    "gateway-replay.redacted.json",
+    "gateway-replay-reconcile.redacted.json",
+    "gateway-replay-receipt.redacted.json",
+    "governed-compose.redacted.json",
+    "governed-full-shutdown.redacted.json",
+    "human-executor-admission.redacted.json",
+    "governed-restart-events.jsonl",
+    "governed-restart-policy.redacted.json",
+    "governed-restart-recovery.redacted.json",
+    "invocation-retry.redacted.json",
+    "lineage-chain.redacted.json",
+    "portland-vancouver-cohort.json",
+    "seattle-tacoma-cohort.json",
+    "coverage-planner-identity.redacted.json",
+    "reviewed-model-relay-image.txt",
+    "reviewed-model-relay.redacted.json",
+    "reviewed-model-relay.redacted.sha256",
+    "preflight-report.json",
+    "provider-failure.redacted.json",
+    "provider-failure-drill.redacted.json",
+    "reconciliation-apply-run.redacted.json",
+    "reconciliation-apply.json",
+    "reconciliation-dry-run.json",
+    "reconciliation-replay.json",
+    "reconciliation-replay-run.redacted.json",
+    "reviewed-affiliate-worker-container-ids.txt",
+    "reviewed-affiliate-container-ids.txt",
+    "reviewed-affiliate-replenishment-container-id.txt",
+    "reviewed-affiliate-workers.redacted.json",
+    "reviewed-affiliate-containers.redacted.json",
+    "reviewed-agent-network.json",
+    "reviewed-counts.json",
+    "reviewed-legacy-process-manifest.artifact.json",
+    "reviewed-legacy-process-manifest.json",
+    "rollback-drill-post-write.json",
+    "rollback-drill-pre-write.json",
+    "running-services-after-containment.txt",
+    "running-services-after-full-shutdown.txt",
+    "schema-migration-deploy.txt",
+    "schema-migration-status.txt",
+    "stale-generation.redacted.json"
+  ],
+  "pathsSha256": "34f0ef90505d430e5cee9ea5fa64e2f78253566fc01f931301bcc7259e0100c9"
+}

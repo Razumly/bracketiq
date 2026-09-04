@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 const loadCanonicalTeamByIdMock = jest.fn();
 
 jest.mock('@/lib/prisma', () => ({ prisma: {} }));

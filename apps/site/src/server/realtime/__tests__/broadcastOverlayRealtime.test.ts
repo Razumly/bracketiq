@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 jest.mock('@/lib/redis', () => ({
   getRedisClient: jest.fn(),
   getRedisKeyPrefix: jest.fn(() => 'bracketiq'),

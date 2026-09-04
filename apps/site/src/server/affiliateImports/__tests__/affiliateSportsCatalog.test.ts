@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 import { createHash } from 'node:crypto';
 import {
   affiliateSportsCatalogSha256,

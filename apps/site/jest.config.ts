@@ -2,6 +2,7 @@ import type { Config } from 'jest';
 
 const config: Config = {
   preset: 'ts-jest',
+  cacheDirectory: '<rootDir>/.cache/jest',
   testEnvironment: 'jsdom',
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
@@ -24,11 +25,13 @@ const config: Config = {
   },
   collectCoverageFrom: [
     'src/**/*.{ts,tsx}',
+    '!src/generated/**',
     '!src/**/*.d.ts',
     '!src/**/index.ts',
     '!src/app/**/*.d.ts',
   ],
-  coverageReporters: ['json', 'json-summary', 'text', 'lcov', 'clover'],
+  coveragePathIgnorePatterns: ['/node_modules/', '<rootDir>/src/generated/'],
+  coverageReporters: ['json', 'json-summary', 'text-summary', 'lcov', 'clover'],
   // These floors start below the measured route-inclusive baseline so CI is
   // stable while still rejecting a material coverage regression. Ratchet them
   // upward as additional authorization and failure branches gain coverage.

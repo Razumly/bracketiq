@@ -19,12 +19,6 @@ Pre-migration documents can refer to the former `mvp-site` and `mvp-app` reposit
 
 The root package provides stable entry points without combining the application dependency graphs:
 
-Install the root development tools once after checkout. This activates the shared Git hooks without combining the application dependency graphs.
-
-```bash
-npm ci
-```
-
 ```bash
 npm run build:site
 npm run lint:site

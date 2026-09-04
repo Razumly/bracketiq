@@ -25,6 +25,8 @@ export class ScrapingDogClient implements ScrapePageClient {
     return {
       url: params.url,
       finalUrl: params.url,
+      isRedirectVerified: false,
+      inferredCanonicalUrl: null,
       statusCode: response.statusCode,
       body: response.body,
       fetchedAt: new Date().toISOString(),

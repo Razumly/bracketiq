@@ -176,7 +176,9 @@ Do not infer allowed policy from `robots.txt`. Add a separate bounded preflight 
 
 After a capture run reaches `SUCCEEDED` or useful `PARTIAL`, set the intake status to `READY_FOR_MAPPING` when it contains at least one PAGE_HTML or PAGE_MARKDOWN artifact and no current mapping/source link. A blocked or failed capture remains reviewable and is not queued for mapping. Do this transition inside intake-run completion so it survives browser closure and process restarts.
 
-Add `scripts/run-affiliate-source-discovery.ts` and package command `affiliate:discovery:run`. It supports `--dry-run`, `--once`, `--limit`, `--campaign=<id>`, `--summary`, and `--live`. Dry run generates queries and duplicate decisions without calling Firecrawl or writing rows. `--live` requires `DATABASE_URL_LIVE`, configures managed-Postgres TLS using the established server helper, and uses Spaces for stored intake artifacts. Add a second orchestration command, `affiliate:intake:automation`, that claims a bounded number of discovery runs, promotes results, queues allowed intakes, and processes a bounded number of queued intake captures. Both commands use PostgreSQL advisory locks so overlapping invocations exit successfully with `lockAcquired: false`.
+The former discovery and intake automation launchers are retired and are not
+executable package commands. Production discovery, capture, and replenishment
+must use the governed Agent Gateway admission and its reviewed runbook.
 
 Add email summary output using the existing email module and the default recipient `samuel.r@razumly.com`. The summary includes campaigns run, provider queries, new results, review results, duplicates, rejected results, created intakes, policy-gated intakes, queued captures, completed captures, ready-for-mapping count, failures, and an admin URL. Send one summary per automation invocation only when there was work, a failure, or an intake needing policy review.
 
@@ -222,9 +224,10 @@ At the end of this milestone, an unvalidated source cannot be selected by the au
 
 ### Milestone 7: Schedule and verify the complete automation loop
 
-Keep scheduling outside the Next.js web process. The canonical entrypoint is `npm run affiliate:intake:automation -- --live --summary --no-email`. It uses advisory locks and campaign cadence, so it is safe to invoke every 15 minutes even though ordinary discovery campaigns run weekly or monthly. A frequent invocation drains capture queues promptly without repeatedly charging search credits. It does not send per-run email; the daily affiliate scrape job includes the preceding 24 hours of intake activity in its single operations summary.
-
-For the tracked VM deployment, add `deploy/vm/systemd/bracketiq-affiliate-intake-automation.service` and `.timer`. The service runs the command inside the deployed application container with the production environment; the timer runs every 15 minutes with randomized delay and persistent catch-up after downtime. Document installation, logs, manual start, disable, and rollback in `deploy/vm/README.md`. If production is still on DigitalOcean App Platform when this milestone ships, use the same command in its supported scheduled-job mechanism or a protected operator runner; do not add an in-process `setInterval` fallback.
+The former scheduled intake automation workflow is retired. Production
+discovery, capture, and replenishment must use the governed Agent Gateway and
+the runbook at `apps/site/deploy/affiliate-governed/README.md`; do not restore
+the legacy timer or direct-writer launcher.
 
 Seed no active campaigns in the migration. Add an idempotent setup script that creates paused Portland and San Francisco campaign templates from the canonical sport IDs and source types. The administrator reviews limits and enables each campaign from Source Intake. This prevents a deployment from immediately consuming Firecrawl credits.
 
