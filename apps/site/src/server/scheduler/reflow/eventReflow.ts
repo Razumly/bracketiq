@@ -4,22 +4,10 @@ import { loadEventScheduleState } from '@/server/events/eventEditorSnapshot';
 import { loadEventProtectedHistory } from '@/server/events/eventProtectedHistory';
 import { loadFieldBlockerCatalog, materializeFieldBlockerCatalog, type PrismaLike as FieldBlockerClient } from '@/server/repositories/fieldSchedulingConflicts';
 import { loadLockedScheduleEvent } from '../eventScheduleMaintenance';
-import { serializeEvent, serializeMatches } from '../serialize';
 import type { Tournament } from '../types';
 import { planCanonicalReflow, reflowWindow } from './canonicalReflow';
 import type { ReflowPlan } from './types';
-
-function graphFor(event: Tournament) {
-  const matches = Object.values(event.matches);
-  return {
-    event: serializeEvent(event),
-    matches: serializeMatches(matches).map((serialized, index) => {
-      // Do not normalize protected or unaffected assignments to a changed plan.
-      const assignments = matches[index]!.officialAssignments.map((assignment) => ({ ...assignment }));
-      return { ...serialized, officialAssignments: assignments, officialIds: assignments.filter((entry) => entry.userId !== null) };
-    }),
-  };
-}
+import { serializeReflowResult } from './response';
 
 async function saveDelta(tx: Prisma.TransactionClient, event: Tournament, plan: ReflowPlan, now: Date) {
   const placements = new Map(plan.placementChanges.map((change) => [change.matchId, change.after]));
@@ -104,12 +92,5 @@ export async function reflowEventSchedule(params: {
     ? (await loadEventScheduleState({ ...persistedEvent, end: event.end, generatedScheduleEnd: event.generatedScheduleEnd,
       updatedAt: event.updatedAt ?? persistedEvent.updatedAt }, event.id, tx)).revision
     : state.revision;
-  return scheduleReflowResultSchema.parse({
-    ...plan, contractVersion: 1, eventId: event.id, scheduleRevision: revision,
-    placementChanges: plan.placementChanges.map((change) => ({ matchId: change.matchId,
-      before: { ...change.before, start: new Date(change.before.start).toISOString(), end: new Date(change.before.end).toISOString() },
-      after: { ...change.after, start: new Date(change.after.start).toISOString(), end: new Date(change.after.end).toISOString() },
-    })),
-    graph: plan.status === 'CHANGED' ? graphFor(event) : null,
-  });
+  return serializeReflowResult(event, plan, revision);
 }

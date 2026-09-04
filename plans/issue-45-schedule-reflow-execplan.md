@@ -22,16 +22,18 @@ Issue: https://github.com/Razumly/bracketiq/issues/45. The user approved a share
   - [x] (2026-09-04 08:30Z) Pass 34 planner, adapter, and executable walkthrough tests. Benchmark connected 31, 127, and 511 Match graphs.
 - [x] Add the versioned HTTP contract and atomic persistence.
   - [x] Add the version 1 contract, transaction service, and route. Five focused service tests pass.
-  - [x] Verify real database rollback, authorization, revision races, assignment-only saves, and retained historical Resources. Five database tests pass.
+  - [x] Verify real database rollback, authorization, revision races, assignment-only saves, retained historical Resources, and protected conflict rejection with zero writes. Six database tests pass.
   - [x] Verify HTTP rejection and unchanged-state failures. Six route tests pass.
 - [x] Add mobile decoding and one-transaction Room refresh.
   - [x] Pass client-to-site serializer, time-change, Team Duty, no-op, failure, and Room rollback tests.
   - [x] Complete the named-official client-to-site case. All three focused Room tests pass, including time, Team Duty, and named-official variants.
-- [ ] Connect the HTML walkthrough to the shared planner.
+- [x] Connect the HTML walkthrough to the shared planner.
   - [x] Replace scripted outcomes with the real planner. Preserve explicit Team names and winner links. Correct the issue 46 transaction diagram.
-  - [ ] Restart and inspect the local walkthrough after current runtime permission is supplied.
+  - [x] Verify HTML interactions through the real planner in the automated walkthrough test.
+  - Local browser inspection is deferred. Port 3100 remains stopped. Start it only after current runtime permission is supplied. This presentation check is not an issue 45 acceptance criterion.
 - [x] Run performance checks, complete relevant suites, and client-to-site integration. Record unrelated full-suite failures below.
-- [ ] Complete the two-axis review. Fix findings. Commit and close issue 45 when its acceptance criteria pass.
+- [x] Complete the two-axis review. Fix the four Spec findings and the Standards findings. Pass 82 focused site tests after the fixes.
+- [ ] Commit the final review fixes and close issue 45.
 
 ## Surprises & Discoveries
 
@@ -50,6 +52,10 @@ The default Event loader omits Resources removed from the current configuration.
 
 The Windows client-to-site subprocess blocked when the test waited before reading stdout. Read stdout concurrently while the site parser runs.
 
+The Spec review found four protected-resource gaps. Fixed staffing did not block a known playing Team. Protected field and playing-Team conflicts did not reject the complete repair. Candidate times omitted the Team Duty check-in release boundary. Protected staffing assignments were not checked against each other. Eight regression cases first failed, then passed after the fixes. A real database case also proves zero Schedule writes for an independent protected field conflict.
+
+The Standards review required consistent Boolean names and one shared response conversion. Both changes are complete. The client-to-site bridge now uses the production response conversion. Protected and editable staffing also share one conflict-policy predicate.
+
 ## Decision Log
 
 
@@ -64,7 +70,7 @@ Decision: Report search exhaustion separately from proven infeasibility. Both re
 ## Outcomes & Retrospective
 
 
-Implementation is in final review. The final focused site run passed 73 tests across eight suites. This includes the real database tests and a walkthrough interaction test that calls the shared planner. All three focused mobile Room tests pass. TypeScript and focused ESLint checks pass. Full site lint reports zero errors and 51 warnings.
+The scoped implementation is complete. The final focused site run passed 82 tests across eight suites. This includes six real database tests and a walkthrough interaction test that calls the shared planner. All three focused mobile Room tests pass. TypeScript and focused ESLint checks pass. Full site lint reports zero errors and 51 warnings. The two-axis review has no unresolved Spec findings. All Standards findings and the final conflict-policy maintenance suggestion are addressed.
 
 The full site run completed 931 suites: 884 passed, 42 failed, and five were skipped. It reported 6,050 passed tests, 82 failed tests, and 40 skipped tests. Failures include Windows path, socket, symlink, shell, and CRLF assumptions; older Event UI and search assertions; one existing pool-play duty assertion; and ten Playwright files collected by Jest. The issue 45 suites pass independently. The full JSON report is at `apps/site/test-results/issue-45-jest.json` and is not part of the implementation commit.
 
@@ -163,7 +169,9 @@ Walkthrough URL: `http://localhost:3100/` when its existing server is available.
 
 Isolated database: `bracketiq_e2e_45_563b` on the already-running local PostgreSQL server at port 5543. All 224 migrations are applied. Do not expose its connection URL. Scope the URL to test processes.
 
-Run `node --import tsx scripts/benchmark-schedule-reflow.ts` from `apps/site`. One local run measured 63 ms for 31 Matches, 41 ms for 127 Matches, and 430 ms for 511 Matches. These fixtures include unresolved entrants, required fluid Team Duty, and four concurrent completed anchors. The test checks the 20,000-state limit and immutable input. These are single-run measurements, not service-level guarantees.
+Run `node --import tsx scripts/benchmark-schedule-reflow.ts` from `apps/site`. The post-review local run measured 75 ms for 31 Matches, 54 ms for 127 Matches, and 622 ms for 511 Matches. These fixtures include unresolved entrants, required fluid Team Duty, and four concurrent completed anchors. The test checks the 20,000-state limit and immutable input. These are single-run measurements, not service-level guarantees.
+
+Implementation checkpoint: `0658c24be` (`Feat: Add atomic affected Schedule Reflow (#45)`). The follow-up commit contains the review fixes and final verification record. No code was pushed or deployed.
 
 Review baseline: use `091b4e65c407ffbec1f87ed45b7ba3bb0faaa132`, the completed main merge, to isolate issue 45. The user did not supply a different baseline after the question. The local walkthrough restart still needs current authorization. No backend or walkthrough runtime was started or restarted during this implementation.
 

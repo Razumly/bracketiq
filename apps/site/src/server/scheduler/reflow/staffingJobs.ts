@@ -14,8 +14,8 @@ export type StaffJob = {
   slot: ReflowOfficialSlot | null;
   candidates: StaffHolder[];
   incumbent: StaffHolder | null;
-  required: boolean;
-  allowConflict: boolean;
+  isRequired: boolean;
+  isConflictAllowed: boolean;
 };
 
 const teamHolder = (id: string): StaffHolder => ({ key: `team:${id}`, teamId: id, official: null });
@@ -35,18 +35,18 @@ const incumbentOfficial = (assignment: MatchOfficialAssignment, slot: ReflowOffi
 export function staffingJobs(match: ReflowMatch, placement: ReflowPlacement): StaffJob[] {
   const jobs: StaffJob[] = (match.playingTeamSlots ?? []).map((candidates, index) => ({
     id: `${match.id}:playing:${index}`, kind: 'PLAYING', match, placement, slot: null,
-    candidates: [...new Set(candidates)].map(teamHolder), incumbent: null, required: true, allowConflict: false,
+    candidates: [...new Set(candidates)].map(teamHolder), incumbent: null, isRequired: true, isConflictAllowed: false,
   }));
   const staffing = match.staffing;
   if (!staffing) return jobs;
   const policy = getStaffingPriorityPolicy(staffing.priority);
-  if (staffing.requiresTeamDuty || staffing.assignments.teamOfficialId !== null) {
+  if (staffing.isTeamDutyRequired || staffing.assignments.teamOfficialId !== null) {
     jobs.push({
       id: `${match.id}:team-duty`, kind: 'TEAM_DUTY', match, placement, slot: null,
-      candidates: staffing.requiresTeamDuty ? staffing.eligibleTeamIds.map(teamHolder) : [],
+      candidates: staffing.isTeamDutyRequired ? staffing.eligibleTeamIds.map(teamHolder) : [],
       incumbent: staffing.assignments.teamOfficialId ? teamHolder(staffing.assignments.teamOfficialId) : null,
-      required: staffing.requiresTeamDuty && policy.isHardTeamCoverageRequired,
-      allowConflict: policy.isTeamDutyConflictAllowed,
+      isRequired: staffing.isTeamDutyRequired && policy.isHardTeamCoverageRequired,
+      isConflictAllowed: policy.isTeamDutyConflictAllowed,
     });
   }
   const slots = [...(staffing.officialSlots ?? [])];
@@ -59,15 +59,15 @@ export function staffingJobs(match: ReflowMatch, placement: ReflowPlacement): St
   for (const slot of slots) {
     const assignment = staffing.assignments.officialAssignments.find((entry) =>
       entry.positionId === slot.positionId && entry.slotIndex === slot.slotIndex);
-    const configured = staffing.officialSlots?.some((entry) =>
+    const isConfigured = staffing.officialSlots?.some((entry) =>
       entry.positionId === slot.positionId && entry.slotIndex === slot.slotIndex) === true;
     jobs.push({
       id: `${match.id}:official:${slot.positionId}:${slot.slotIndex}`, kind: 'OFFICIAL', match, placement, slot,
       candidates: slot.candidates.filter((entry) => !entry.fieldIds.length || entry.fieldIds.includes(placement.fieldId))
         .map(officialHolder),
       incumbent: assignment ? incumbentOfficial(assignment, slot, match) : null,
-      required: configured && policy.isHardOfficialCoverageRequired,
-      allowConflict: policy.isOfficialAssignmentConflictAllowed,
+      isRequired: isConfigured && policy.isHardOfficialCoverageRequired,
+      isConflictAllowed: policy.isOfficialAssignmentConflictAllowed,
     });
   }
   return jobs;

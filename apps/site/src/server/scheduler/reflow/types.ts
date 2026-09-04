@@ -23,7 +23,7 @@ export type ReflowOfficialSlot = {
 
 export type ReflowStaffing = {
   priority: StaffingPriority;
-  requiresTeamDuty: boolean;
+  isTeamDutyRequired: boolean;
   eligibleTeamIds: readonly string[];
   teamCheckInMs: number;
   assignments: ReflowAssignments;
@@ -35,7 +35,7 @@ export type ReflowMatch = {
   id: string;
   order: number;
   batch: number;
-  protected: boolean;
+  isProtected: boolean;
   placement: ReflowPlacement | null;
   actualEnd: number | null;
   /** Lower bound for a running Match. This does not change its published end. */
