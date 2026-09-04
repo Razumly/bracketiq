@@ -90,6 +90,16 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
         return { status: 403, body: { error: 'Forbidden' } };
       }
 
+      const managedProfile = lockedInvite.userId
+        ? await tx.userData?.findUnique?.({ where: { id: lockedInvite.userId }, select: { isManagedPlayer: true, mergedIntoProfileId: true } })
+        : null;
+      if (managedProfile?.isManagedPlayer || managedProfile?.mergedIntoProfileId) {
+        await tx.invites.update({
+          where: { id: lockedInvite.id },
+          data: { status: 'CANCELLED', finalizedAt: new Date(), updatedAt: new Date() },
+        });
+        return { status: 200, body: { deleted: true, cancelled: true } };
+      }
       await tx.invites.delete({ where: { id: lockedInvite.id } });
       return { status: 200, body: { deleted: true } };
     });
@@ -147,7 +157,23 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       await removeCanonicalPendingInvitee(tx, invite, session.userId, now);
     }
 
-    await tx.invites.delete({ where: { id: invite.id } });
+    const managedProfile = invite.userId
+      ? await tx.userData?.findUnique?.({ where: { id: invite.userId }, select: { isManagedPlayer: true, mergedIntoProfileId: true } })
+      : null;
+    const hasClaimHistory = Boolean(invite.claimedBy)
+      || Boolean(tx.userProfileClaims?.findFirst && await tx.userProfileClaims.findFirst({
+        where: { inviteId: invite.id, status: 'COMPLETED' },
+        select: { id: true },
+      }))
+      || Boolean(tx.userProfileMerges?.findFirst && await tx.userProfileMerges.findFirst({
+        where: { invitationIds: { has: invite.id } },
+        select: { id: true },
+      }));
+    if (managedProfile?.isManagedPlayer || managedProfile?.mergedIntoProfileId || hasClaimHistory) {
+      await tx.invites.update({ where: { id: invite.id }, data: { status: 'CANCELLED', finalizedAt: now, updatedAt: now } });
+    } else {
+      await tx.invites.delete({ where: { id: invite.id } });
+    }
   });
 
   return NextResponse.json({ deleted: true }, { status: 200 });

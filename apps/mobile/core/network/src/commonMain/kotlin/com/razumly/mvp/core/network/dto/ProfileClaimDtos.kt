@@ -21,3 +21,32 @@ data class ManagedPlayerClaimResponseDto(
     val mergeId: String? = null,
     val error: String? = null,
 )
+
+@Serializable
+data class ManagedPlayerClaimPreviewResponseDto(
+    val available: Boolean = false,
+    val invite: ManagedPlayerClaimPreviewInviteDto? = null,
+    val profile: ManagedPlayerClaimPreviewProfileDto? = null,
+    val team: ManagedPlayerClaimPreviewTeamDto? = null,
+)
+
+@Serializable
+data class ManagedPlayerClaimPreviewInviteDto(
+    val id: String = "",
+    val profileId: String = "",
+    val hasAttachedEmail: Boolean = false,
+    val isMinor: Boolean = false,
+    val teamId: String? = null,
+)
+
+@Serializable
+data class ManagedPlayerClaimPreviewProfileDto(
+    val displayName: String = "Player",
+    val isManaged: Boolean = false,
+)
+
+@Serializable
+data class ManagedPlayerClaimPreviewTeamDto(
+    val id: String = "",
+    val name: String = "",
+)

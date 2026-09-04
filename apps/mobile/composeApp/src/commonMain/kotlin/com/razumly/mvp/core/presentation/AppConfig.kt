@@ -67,6 +67,14 @@ sealed class AppConfig {
     data object ProfileInvites : AppConfig()
 
     @Serializable
+    data class ManagedPlayerClaim(
+        val inviteId: String,
+        val version: String? = null,
+        val expiresAt: String? = null,
+        val signature: String? = null,
+    ) : AppConfig()
+
+    @Serializable
     data object Schedule : AppConfig()
 
     @Serializable
