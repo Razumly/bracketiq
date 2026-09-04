@@ -37,6 +37,10 @@ const matchHistorySelect = {
   team2Id: true,
   team1Seed: true,
   team2Seed: true,
+  teamOfficialId: true,
+  officialId: true,
+  officialIds: true,
+  officialCheckedIn: true,
   status: true,
   resultStatus: true,
   resultType: true,
@@ -278,7 +282,8 @@ export const loadEventProtectedHistory = async (
       client,
       "teamCheckIns",
       {
-        where: matchWhere,
+        // Event-scoped check-ins also control Team Duty eligibility.
+        where: { eventId },
         select: checkInHistorySelect,
       },
     ),

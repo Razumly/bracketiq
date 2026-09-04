@@ -45,6 +45,9 @@ import com.razumly.mvp.core.network.dto.EventEditorMatchProjectionDto
 import com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeStatus
 import com.razumly.mvp.core.network.dto.EventEditorAcceptMaintenanceProposalDto
 import com.razumly.mvp.core.network.dto.MatchApiDto
+import com.razumly.mvp.core.network.dto.ScheduleReflowRequestDto
+import com.razumly.mvp.core.network.dto.ScheduleReflowResultDto
+import com.razumly.mvp.core.network.dto.ScheduleReflowStatus
 import com.razumly.mvp.core.network.dto.MatchSegmentApiDto
 import com.razumly.mvp.core.network.dto.EventEditorRejectMaintenanceProposalDto
 import com.razumly.mvp.core.network.dto.TeamApiDto
@@ -2132,6 +2135,72 @@ class EventRepository(
     ): Result<EventEditorMaintenanceAcceptedResultDto> = runCatching {
         editorRemoteGateway.acceptMaintenance(request).also { result ->
             persistAcceptedMaintenanceResultWithSyncPending(result)
+        }
+    }
+
+    override suspend fun reflowEventSchedule(request: ScheduleReflowRequestDto): Result<ScheduleReflowResultDto> = runCatching {
+        request.validate()
+        val before = databaseService.getMatchDao.getMatchesOfTournament(request.eventId).associateBy(MatchMVP::id)
+        val response = api.post<ScheduleReflowRequestDto, ScheduleReflowResultDto>(
+            "api/events/${request.eventId.encodeURLQueryComponent()}/schedule/reflow", request,
+        )
+        response.validateFor(request.eventId)
+        when (response.status) {
+            ScheduleReflowStatus.NO_OP -> response
+            ScheduleReflowStatus.CHANGED -> {
+                try {
+                    persistReflow(response, before)
+                } catch (error: kotlinx.coroutines.CancellationException) {
+                    throw error
+                } catch (error: Throwable) {
+                    throw ScheduleReflowSyncPending(response, error)
+                }
+                response
+            }
+            else -> throw ScheduleReflowFailure(response)
+        }
+    }.onFailure { error ->
+        if (error is kotlinx.coroutines.CancellationException) throw error
+    }
+
+    private suspend fun persistReflow(response: ScheduleReflowResultDto, before: Map<String, MatchMVP>) {
+        val graph = requireNotNull(response.graph).decodeOrThrow(response.eventId)
+        val matches = graph.matches.associateBy(MatchMVP::id)
+        response.placementChanges.forEach { change ->
+            val match = requireNotNull(matches[change.matchId])
+            require(match.start == Instant.parse(change.after.start) && match.end == Instant.parse(change.after.end)
+                && match.fieldId == change.after.fieldId) { "Reflow placement differs from its graph." }
+        }
+        response.assignmentChanges.forEach { change ->
+            val match = requireNotNull(matches[change.matchId])
+            require(match.teamOfficialId == change.after.teamOfficialId
+                && match.officialIds == change.after.officialAssignments.map { it.toModel() }) {
+                "Reflow assignment differs from its graph."
+            }
+        }
+        val hydration = prepareAcceptedRelationHydration(graph.event, graph.teams)
+        databaseService.withTransaction {
+            val cached = databaseService.getMatchDao.getMatchesOfTournament(response.eventId).associateBy(MatchMVP::id)
+            require(cached.keys.containsAll(before.keys)
+                && cached.all { (id, match) -> match == before[id] || match == matches[id] }) {
+                "The local Schedule changed during Reflow. Reload the Event."
+            }
+            val cachedEvent = roomStore.getEvent(response.eventId)
+            val event = cachedEvent?.copy(end = graph.event.end) ?: graph.event
+            if (cachedEvent == null || cachedEvent.end != event.end) {
+                roomStore.cacheAndReadEventInTransaction(event, response.eventId, protectedHistoryAuthoritative = false)
+            }
+            val cachedFields = databaseService.getFieldDao.getFieldsByIds(graph.fields.map(Field::id)).map(Field::id).toSet()
+            val missingFields = graph.fields.filterNot { it.id in cachedFields }
+            if (missingFields.isNotEmpty()) databaseService.getFieldDao.upsertFields(missingFields)
+            val cachedTeams = databaseService.getTeamDao.getTeams(graph.teams.map(Team::id)).map(Team::id).toSet()
+            val missingTeams = graph.teams.filterNot { it.id in cachedTeams }
+            if (missingTeams.isNotEmpty()) databaseService.getTeamDao.upsertTeamsWithRelations(missingTeams)
+            val cachedUsers = databaseService.getUserDataDao.getUserDatasById(hydration.relations.users.map(UserData::id)).map(UserData::id).toSet()
+            val missingUsers = hydration.relations.users.filterNot { it.id in cachedUsers }
+            if (missingUsers.isNotEmpty()) databaseService.getUserDataDao.upsertUsersData(missingUsers)
+            val changedMatches = graph.matches.filter { it != cached[it.id] }
+            if (changedMatches.isNotEmpty()) databaseService.getMatchDao.upsertMatches(changedMatches)
         }
     }
 

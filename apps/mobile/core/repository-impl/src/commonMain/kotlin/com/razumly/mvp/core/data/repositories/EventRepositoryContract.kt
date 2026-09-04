@@ -19,6 +19,8 @@ import com.razumly.mvp.core.network.dto.EventEditorMaintenanceResponseDto
 import com.razumly.mvp.core.network.dto.EventEditorAcceptMaintenanceProposalDto
 import com.razumly.mvp.core.network.dto.EventEditorRejectMaintenanceProposalDto
 import com.razumly.mvp.core.network.dto.EventEditorSaveCommandDto
+import com.razumly.mvp.core.network.dto.ScheduleReflowRequestDto
+import com.razumly.mvp.core.network.dto.ScheduleReflowResultDto
 import dev.icerock.moko.geo.LatLng
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -33,6 +35,8 @@ enum class EventSearchSort {
 }
 
 interface IEventRepository : IMVPRepository {
+    suspend fun reflowEventSchedule(request: ScheduleReflowRequestDto): Result<ScheduleReflowResultDto> =
+        Result.failure(UnsupportedOperationException("Schedule Reflow is not supported."))
     fun getCachedEventsFlow(): Flow<Result<List<Event>>>
     fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>>
     fun getCachedEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>> =

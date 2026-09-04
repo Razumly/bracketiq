@@ -422,7 +422,7 @@ const rangesOverlap = (
   rightEnd: Date,
 ): boolean => leftStart.getTime() < rightEnd.getTime() && leftEnd.getTime() > rightStart.getTime();
 
-const teamCanServeMatchDivision = (team: Team, match: Match): boolean => {
+export const teamCanServeMatchDivision = (team: Team, match: Match): boolean => {
   const targetDivisionId = normalizeDivisionId(match.division.id);
   if (!targetDivisionId) {
     return false;
@@ -438,7 +438,7 @@ const teamCanServeMatchDivision = (team: Team, match: Match): boolean => {
   );
 };
 
-const teamIsCheckedInForDuty = (
+export const teamIsCheckedInForDuty = (
   teamId: string,
   match: Match,
   context: TeamDutyReflowContext,
