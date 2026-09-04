@@ -367,7 +367,11 @@ private fun TeamInviteLinksDialog(
                                 Column(Modifier.weight(1f)) {
                                     Text(invite.name, fontWeight = FontWeight.SemiBold)
                                     Text(
-                                        "${invite.role} · ${if (invite.emailSent) "Email sent" else "Link ready"}",
+                                        "${invite.role} · ${when {
+                                            invite.deliveryFailed -> "Email delivery needs attention"
+                                            invite.emailSent -> "Email sent"
+                                            else -> "Link ready"
+                                        }}",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )

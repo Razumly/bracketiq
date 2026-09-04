@@ -123,14 +123,13 @@ class TeamService {
             eventId: visibilityContext.eventId,
         };
 
-        const [players, pendingPlayers] = await Promise.all([
-            team.playerIds.length > 0
-                ? userService.getUsersByIds(team.playerIds, scopedVisibilityContext)
-                : Promise.resolve<UserData[]>([]),
-            team.pending.length > 0
-                ? userService.getUsersByIds(team.pending, scopedVisibilityContext)
-                : Promise.resolve<UserData[]>([]),
-        ]);
+        const rosterUserIds = Array.from(new Set([...team.playerIds, ...team.pending]));
+        const rosterUsers = rosterUserIds.length > 0
+            ? await userService.getUsersByIds(rosterUserIds, scopedVisibilityContext)
+            : [];
+        const pendingUserIds = new Set(team.pending);
+        const players = rosterUsers.filter((player) => !pendingUserIds.has(player.$id));
+        const pendingPlayers = rosterUsers.filter((player) => pendingUserIds.has(player.$id));
 
         const playersById = new Map(players.map((player) => [player.$id, player]));
         const pendingById = new Map(pendingPlayers.map((player) => [player.$id, player]));
@@ -190,7 +189,7 @@ class TeamService {
             team.coaches = [];
         }
 
-        team.currentSize = team.playerIds.length;
+        team.currentSize = new Set([...team.playerIds, ...team.pending]).size;
         team.isFull = team.currentSize >= team.teamSize;
         team.avatarUrl = getTeamAvatarUrl(team);
     }
@@ -483,8 +482,8 @@ class TeamService {
                   : 'PUBLIC',
               $createdAt: row.createdAt ?? row.$createdAt,
               $updatedAt: row.updatedAt ?? row.$updatedAt,
-            currentSize: playerIds.length,
-            isFull: playerIds.length >= teamSize,
+            currentSize: new Set([...playerIds, ...pending]).size,
+            isFull: new Set([...playerIds, ...pending]).size >= teamSize,
             avatarUrl: '',
         };
 
@@ -707,22 +706,20 @@ class TeamService {
         }
     }
 
-    async acceptTeamInvitation(teamId: string, userId: string): Promise<boolean> {
+    async acceptTeamInvitation(teamId: string, userId: string, inviteId?: string): Promise<boolean> {
         try {
-            const team = await this.getTeamById(teamId);
-            if (!team) {
+            const currentInviteId = inviteId?.trim() || (
+                await userService.listInvites({ userId, teamId })
+            ).find((invite) => ['PENDING', 'FAILED'].includes(String(invite.status ?? '').toUpperCase()) && invite.$id)?.$id;
+
+            if (!currentInviteId) {
                 return false;
             }
 
-            const nextPlayerIds = Array.from(new Set([...team.playerIds, userId]));
-            const nextPending = team.pending.filter(id => id !== userId);
-
-            await apiRequest(`/api/teams/${teamId}`, {
-                method: 'PATCH',
-                body: { team: { playerIds: nextPlayerIds, pending: nextPending } },
-            });
-
-            await userService.removeTeamInvitation(userId, teamId);
+            // Acceptance is an invitation outcome. The server promotes the
+            // existing pending roster entry and membership in one transaction.
+            await userService.acceptInvite(currentInviteId);
+            await this.getTeamById(teamId, true, { teamId });
             return true;
         } catch (error) {
             console.error('Failed to accept team invitation:', error);

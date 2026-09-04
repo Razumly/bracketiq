@@ -9,6 +9,7 @@ import {
   syncCanonicalTeamRoster,
 } from '@/server/teams/teamMembership';
 import { verifyTeamInviteShareLink } from '@/server/teamInviteLinks';
+import { acquireTeamRosterLock } from '@/server/repositories/locks';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,7 +51,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { id } = await params;
   const now = new Date();
   let invite = await prisma.invites.findUnique({ where: { id } });
-  if (!invite || invite.type !== 'TEAM' || !invite.teamId || !['PENDING', 'FAILED'].includes(invite.status ?? '')) {
+  const inviteStatus = String(invite?.status ?? '').trim().toUpperCase();
+  if (!invite || invite.type !== 'TEAM' || !invite.teamId || !['', 'PENDING', 'SENT', 'FAILED'].includes(inviteStatus)) {
     return NextResponse.json({ error: 'Invite unavailable' }, { status: 404 });
   }
   if (!verifyTeamInviteShareLink(invite, {
@@ -68,6 +70,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!invite.userId) {
     try {
       invite = await prisma.$transaction(async (tx) => {
+        if (typeof tx?.$executeRaw === 'function') {
+          await acquireTeamRosterLock(tx, invite!.teamId!);
+        }
         const explicitStaffRole = inviteStaffRoleFromRole(invite!.role);
         const staffRoles = explicitStaffRole === 'PLAYER'
           ? []
@@ -75,7 +80,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             ? [explicitStaffRole]
             : inviteStaffRoles(invite!.staffTypes);
         const claimed = await tx.invites.updateMany({
-          where: { id: invite!.id, userId: null, status: { in: ['PENDING', 'FAILED'] } },
+          where: {
+            id: invite!.id,
+            userId: null,
+            OR: [
+              { status: null },
+              { status: { in: ['PENDING', 'SENT', 'FAILED'] } },
+            ],
+          },
           data: { userId: session.userId, claimedBy: session.userId, status: 'PENDING', updatedAt: now },
         });
         if (claimed.count !== 1) throw new Error('Invite unavailable');

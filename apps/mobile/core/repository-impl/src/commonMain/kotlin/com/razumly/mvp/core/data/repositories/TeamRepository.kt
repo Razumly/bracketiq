@@ -69,6 +69,7 @@ data class OrganizationTeamPage(
 data class TeamMemberInviteResult(
     val invite: Invite? = null,
     val shareUrl: String? = null,
+    val deliveryFailed: Boolean = false,
 )
 
 interface ITeamRepository : IMVPRepository {
@@ -1193,6 +1194,7 @@ class TeamRepository(
         TeamMemberInviteResult(
             invite = response.invite,
             shareUrl = response.shareUrl?.trim()?.takeIf(String::isNotBlank),
+            deliveryFailed = response.delivery?.failed == true,
         )
     }
 

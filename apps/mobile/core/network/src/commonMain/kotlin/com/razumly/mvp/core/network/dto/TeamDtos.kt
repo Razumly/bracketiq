@@ -194,11 +194,19 @@ data class TeamMemberInviteRequestDto(
 )
 
 @Serializable
+data class TeamInviteDeliveryDto(
+    val attempted: Boolean = false,
+    val failed: Boolean = false,
+    val inviteIds: List<String> = emptyList(),
+)
+
+@Serializable
 data class TeamMemberInviteResponseDto(
     val ok: Boolean = false,
     val team: TeamApiDto? = null,
     val invite: Invite? = null,
     val shareUrl: String? = null,
+    val delivery: TeamInviteDeliveryDto? = null,
 )
 
 @Serializable

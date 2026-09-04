@@ -100,6 +100,24 @@ class TeamDtosTest {
     }
 
     @Test
+    fun team_member_invite_response_preserves_delivery_failure_separately_from_save() {
+        val dto = jsonMVP.decodeFromString<TeamMemberInviteResponseDto>(
+            """
+            {
+              "ok": true,
+              "invite": { "id": "invite-1", "type": "TEAM", "status": "PENDING" },
+              "delivery": { "attempted": true, "failed": true, "inviteIds": ["invite-1"] }
+            }
+            """.trimIndent(),
+        )
+
+        assertTrue(dto.ok)
+        assertTrue(dto.delivery?.attempted == true)
+        assertTrue(dto.delivery?.failed == true)
+        assertEquals(listOf("invite-1"), dto.delivery?.inviteIds)
+    }
+
+    @Test
     fun to_update_dto_includes_player_registration_jersey_numbers() {
         val team = Team(
             division = "OPEN",

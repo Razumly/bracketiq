@@ -139,6 +139,36 @@ const withTeamRoleAliases = (team: Record<string, any>): Record<string, any> => 
   };
 };
 
+const canViewPendingRoster = (
+  team: Record<string, any>,
+  session: { userId: string; isAdmin: boolean } | null,
+): boolean => {
+  if (!session) return false;
+  if (session.isAdmin) return true;
+  return Boolean(
+    team.captainId === session.userId
+    || team.managerId === session.userId
+    || team.headCoachId === session.userId
+    || uniqueStrings(team.coachIds ?? team.assistantCoachIds).includes(session.userId),
+  );
+};
+
+const protectPendingRoster = (
+  team: Record<string, any>,
+  canView: boolean,
+): Record<string, any> => {
+  if (canView) return team;
+  return {
+    ...team,
+    pending: [],
+    playerRegistrations: Array.isArray(team.playerRegistrations)
+      ? team.playerRegistrations.filter((registration: any) => (
+        String(registration?.status ?? '').toUpperCase() !== 'INVITED'
+      ))
+      : team.playerRegistrations,
+  };
+};
+
 const withTeamRoleAliasesList = (teams: Record<string, any>[]) => (
   teams.map((team) => withTeamRoleAliases(team))
 );
@@ -235,6 +265,7 @@ export async function GET(req: NextRequest) {
     organizationRows.map((organization: Record<string, any>) => [organization.id, organization]),
   );
   const responseTeams = withTeamRoleAliasesList(pageRecordRows)
+    .map((team) => protectPendingRoster(team, canViewPendingRoster(team, session) || includeAdminOnly))
     .map((team) => ({
       ...team,
       organization: typeof team.organizationId === 'string'
@@ -349,6 +380,11 @@ export async function POST(req: NextRequest) {
 
   let responseTeam: Record<string, any> | null = null;
   let createdPendingInvites: CreatedPendingTeamInviteRecord[] = [];
+  let inviteDelivery = {
+    attempted: false,
+    failed: false,
+    inviteIds: [] as string[],
+  };
 
   if (canonicalTeamsDelegate?.create && teamRegistrationsDelegate?.upsert && teamStaffAssignmentsDelegate?.upsert) {
     const now = new Date();
@@ -395,7 +431,22 @@ export async function POST(req: NextRequest) {
     });
     responseTeam = await loadCanonicalTeamById(data.id, prisma) as Record<string, any> | null;
     if (createdPendingInvites.length) {
-      await sendInviteEmails(createdPendingInvites, getRequestOrigin(req));
+      inviteDelivery = {
+        attempted: true,
+        failed: false,
+        inviteIds: createdPendingInvites.map((invite) => invite.id),
+      };
+      try {
+        const deliveredInvites = await sendInviteEmails(createdPendingInvites, getRequestOrigin(req));
+        inviteDelivery.failed = deliveredInvites.some(
+          (invite) => String(invite.status ?? '').toUpperCase() === 'FAILED',
+        );
+      } catch (error) {
+        // The database transaction already committed. Keep that result and
+        // report delivery failure so the client can retry delivery safely.
+        inviteDelivery.failed = true;
+        console.warn('Team save committed but invite delivery failed', error);
+      }
     }
   } else {
     let team: Record<string, unknown>;
@@ -437,5 +488,8 @@ export async function POST(req: NextRequest) {
 
   await syncTeamChatByTeamId(String(responseTeam?.id ?? data.id));
 
-  return NextResponse.json(withTeamRoleAliases(responseTeam ?? { id: data.id }), { status: 201 });
+  return NextResponse.json({
+    ...withTeamRoleAliases(responseTeam ?? { id: data.id }),
+    delivery: inviteDelivery,
+  }, { status: 201 });
 }

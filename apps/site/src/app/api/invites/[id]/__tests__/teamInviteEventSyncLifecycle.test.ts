@@ -105,7 +105,7 @@ describe('team invite event-team sync lifecycle routes', () => {
     txMock.teams.update.mockResolvedValue({});
   });
 
-  it('accepting a team invite accepts pending event-team sync rows before deleting the invite', async () => {
+  it('accepting a team invite activates its roster and event-sync rows while retaining invite history', async () => {
     const response = await acceptInvite(
       new NextRequest('http://localhost/api/invites/invite_1/accept', { method: 'POST' }),
       { params: Promise.resolve({ id: 'invite_1' }) },
@@ -114,9 +114,31 @@ describe('team invite event-team sync lifecycle routes', () => {
     expect(response.status).toBe(200);
     expect(syncCanonicalTeamRosterMock).toHaveBeenCalled();
     expect(acceptTeamInviteEventSyncsMock).toHaveBeenCalledWith(txMock, invite, expect.any(Date), {
-      propagateToLinkedEventTeams: true,
+      propagateToLinkedEventTeams: false,
     });
-    expect(txMock.invites.delete).toHaveBeenCalledWith({ where: { id: 'invite_1' } });
+    expect(txMock.invites.update).toHaveBeenCalledWith({
+      where: { id: 'invite_1' },
+      data: {
+        status: 'ACCEPTED',
+        updatedAt: expect.any(Date),
+      },
+    });
+    expect(txMock.invites.delete).not.toHaveBeenCalled();
+  });
+
+  it('treats a repeated accept as an idempotent success after the invite is accepted', async () => {
+    prismaMock.invites.findUnique.mockResolvedValue({ ...invite, status: 'ACCEPTED' });
+
+    const response = await acceptInvite(
+      new NextRequest('http://localhost/api/invites/invite_1/accept', { method: 'POST' }),
+      { params: Promise.resolve({ id: 'invite_1' }) },
+    );
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(json).toEqual({ ok: true, alreadyAccepted: true });
+    expect(acceptTeamInviteEventSyncsMock).not.toHaveBeenCalled();
+    expect(txMock.invites.update).not.toHaveBeenCalled();
   });
 
   it('declining a team invite rolls back event-team sync rows and removes pending canonical membership', async () => {

@@ -6,6 +6,7 @@ const prismaMock = {
   invites: {
     findUnique: jest.fn(),
     delete: jest.fn(),
+    update: jest.fn(),
   },
   userData: {
     findUnique: jest.fn(),
@@ -62,6 +63,7 @@ describe('POST /api/invites/[id]/accept', () => {
     invites: {
       findUnique: jest.fn(),
       delete: jest.fn(),
+      update: jest.fn(),
     },
     teams: {
       update: jest.fn(),
@@ -82,6 +84,7 @@ describe('POST /api/invites/[id]/accept', () => {
     txMock.invites.findUnique.mockImplementation((args) => prismaMock.invites.findUnique(args));
     prismaMock.invites.delete.mockResolvedValue({ id: 'invite_1' });
     txMock.invites.delete.mockResolvedValue({ id: 'invite_1' });
+    txMock.invites.update.mockResolvedValue({ id: 'invite_1', status: 'ACCEPTED' });
     txMock.userData.updateMany.mockResolvedValue({ count: 1 });
     prismaMock.userData.findUnique.mockResolvedValue({
       dateOfBirth: new Date('2000-01-01T00:00:00.000Z'),
@@ -165,7 +168,7 @@ describe('POST /api/invites/[id]/accept', () => {
     expect(txMock.invites.delete).toHaveBeenCalledWith({ where: { id: 'invite_1' } });
   });
 
-  it('accepts a TEAM player invite by syncing the canonical roster and deleting the invite', async () => {
+  it('accepts a TEAM player invite by syncing the canonical roster and retaining the invite outcome', async () => {
     prismaMock.invites.findUnique.mockResolvedValue({
       id: 'invite_1',
       type: 'TEAM',
@@ -204,7 +207,11 @@ describe('POST /api/invites/[id]/accept', () => {
     expect(txMock.teams.update).not.toHaveBeenCalled();
     expect(txMock.userData.update).not.toHaveBeenCalled();
     expect(txMock.userData.updateMany).not.toHaveBeenCalled();
-    expect(txMock.invites.delete).toHaveBeenCalledWith({ where: { id: 'invite_1' } });
+    expect(txMock.invites.update).toHaveBeenCalledWith({
+      where: { id: 'invite_1' },
+      data: { status: 'ACCEPTED', updatedAt: expect.any(Date) },
+    });
+    expect(txMock.invites.delete).not.toHaveBeenCalled();
   });
 
   it('accepts a TEAM staff invite by activating its explicit role assignment', async () => {
@@ -256,7 +263,11 @@ describe('POST /api/invites/[id]/accept', () => {
       },
       data: { status: 'ACTIVE', updatedAt: expect.any(Date) },
     });
-    expect(txMock.invites.delete).toHaveBeenCalledWith({ where: { id: 'invite_1' } });
+    expect(txMock.invites.update).toHaveBeenCalledWith({
+      where: { id: 'invite_1' },
+      data: { status: 'ACCEPTED', updatedAt: expect.any(Date) },
+    });
+    expect(txMock.invites.delete).not.toHaveBeenCalled();
   });
   it('dispatches the transaction-read role when a TEAM invite changes before acceptance', async () => {
     const staleInvite = {

@@ -13,6 +13,16 @@ export const acquireEventLock = async (client: PrismaLike, eventId: string): Pro
   const lockId = advisoryLockId(eventId);
   await client.$executeRaw`SELECT pg_advisory_xact_lock(${lockId})`;
 };
+
+/**
+ * Serializes roster assignments, pending invitations, and membership changes
+ * for one canonical team inside a transaction.
+ */
+export const acquireTeamRosterLock = async (client: PrismaLike, teamId: string): Promise<void> => {
+  const lockId = advisoryLockId(`team-roster:${teamId}`);
+  await client.$executeRaw`SELECT pg_advisory_xact_lock(${lockId})`;
+};
+
 export const acquireOrganizationStaffMemberLock = async (
   client: PrismaLike,
   organizationId: string,
