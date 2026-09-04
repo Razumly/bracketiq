@@ -145,6 +145,21 @@ export type AuthMfaChallenges = Prisma.AuthMfaChallengesModel
  */
 export type Invites = Prisma.InvitesModel
 /**
+ * Model UserProfileClaims
+ *
+ */
+export type UserProfileClaims = Prisma.UserProfileClaimsModel
+/**
+ * Model UserProfileMerges
+ *
+ */
+export type UserProfileMerges = Prisma.UserProfileMergesModel
+/**
+ * Model UserProfileContactCorrections
+ *
+ */
+export type UserProfileContactCorrections = Prisma.UserProfileContactCorrectionsModel
+/**
  * Model TeamInviteEventSyncs
  *
  */

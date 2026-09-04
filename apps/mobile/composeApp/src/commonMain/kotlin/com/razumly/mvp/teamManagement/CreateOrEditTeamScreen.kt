@@ -1519,6 +1519,9 @@ internal fun TeamInviteDialog(
     var lastName by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
+    var isMinor by remember { mutableStateOf(false) }
+    var dateOfBirth by remember { mutableStateOf("") }
+    var guardianEmail by remember { mutableStateOf("") }
     var showContactsDialog by remember { mutableStateOf(false) }
     var isMatchingContact by remember { mutableStateOf(false) }
     var contactMatchError by remember { mutableStateOf<String?>(null) }
@@ -1550,7 +1553,9 @@ internal fun TeamInviteDialog(
     }
     val normalizedEmail = email.trim().lowercase()
     val emailValid = normalizedEmail.isBlank() || normalizedEmail.isProbablyEmail()
+    val guardianEmailValid = guardianEmail.trim().isBlank() || guardianEmail.trim().lowercase().isProbablyEmail()
     val newPersonValid = firstName.isNotBlank() && lastName.isNotBlank() && emailValid
+        && (!isMinor || (dateOfBirth.isNotBlank() && guardianEmail.trim().isProbablyEmail()))
     val playerInviteBlocked = inviteTarget == TeamInviteTarget.PLAYER && !canInvitePlayer
 
     fun chooseUser(user: UserData) {
@@ -1621,6 +1626,9 @@ internal fun TeamInviteDialog(
                                 lastName = ""
                                 email = ""
                                 phone = ""
+                                isMinor = false
+                                dateOfBirth = ""
+                                guardianEmail = ""
                             },
                             enabled = tab != TeamInviteDialogMode.FreeAgents || inviteTarget == TeamInviteTarget.PLAYER,
                             text = {
@@ -1700,6 +1708,29 @@ internal fun TeamInviteDialog(
                             inputFilter = ::sanitizePhoneInput,
                             inputVisualTransformation = PhoneInputVisualTransformation,
                         )
+                        if (inviteTarget == TeamInviteTarget.PLAYER) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(checked = isMinor, onCheckedChange = { isMinor = it })
+                                Text("This player is a minor")
+                            }
+                            if (isMinor) {
+                                StandardTextField(
+                                    value = dateOfBirth,
+                                    onValueChange = { dateOfBirth = it },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    label = "Date of birth (YYYY-MM-DD)",
+                                )
+                                StandardTextField(
+                                    value = guardianEmail,
+                                    onValueChange = { guardianEmail = it },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    label = "Guardian email",
+                                    keyboardType = "email",
+                                    supportingText = if (guardianEmail.isNotBlank() && !guardianEmailValid) "Enter a valid guardian email address." else "",
+                                )
+                                Text("The invitation will go to the guardian.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
                         Text(
                             text = "Add an email to send automatically, or save and share the private registration link.",
                             style = MaterialTheme.typography.bodySmall,
@@ -1788,6 +1819,9 @@ internal fun TeamInviteDialog(
                                 email = normalizedEmail.takeIf(String::isNotBlank),
                                 phone = formatPhoneInput(phone).takeIf(String::isNotBlank),
                                 shareOnly = normalizedEmail.isBlank(),
+                                isMinor = isMinor,
+                                dateOfBirth = dateOfBirth.trim().takeIf(String::isNotBlank),
+                                guardianEmail = guardianEmail.trim().lowercase().takeIf(String::isNotBlank),
                             )
                         )
                         else -> selectedUser?.let { user ->

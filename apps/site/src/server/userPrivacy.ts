@@ -22,6 +22,8 @@ export const publicUserSelect = {
   profileImageId: true,
   homePageOrganizationId: true,
   accountVisibility: true,
+  isManagedPlayer: true,
+  mergedIntoProfileId: true,
 } as const;
 
 export type SelectedPublicUser = Prisma.UserDataGetPayload<{ select: typeof publicUserSelect }>;
@@ -671,6 +673,11 @@ export const applyUserPrivacy = (user: PublicUser, context: VisibilityContext): 
     )
   );
   const isIdentityHidden = isMinor && !canViewScopedMinorIdentity;
+  const canViewManagedProfileState = Boolean(
+    context.isAdmin
+    || context.viewerId === user.id
+    || context.viewerManagesContextTeam,
+  );
 
   const normalizedUser: PublicUser = {
     ...user,
@@ -681,6 +688,10 @@ export const applyUserPrivacy = (user: PublicUser, context: VisibilityContext): 
 
   const privacyMinimizedUser = {
     ...normalizedUser,
+    // Managed-profile state is a roster-management signal. Do not expose it
+    // to generic public profile viewers.
+    isManagedPlayer: canViewManagedProfileState ? normalizedUser.isManagedPlayer : false,
+    mergedIntoProfileId: canViewManagedProfileState ? normalizedUser.mergedIntoProfileId : null,
     dateOfBirth: canViewPrivateProfile ? normalizedUser.dateOfBirth : null,
     dobVerified: canViewPrivateProfile ? normalizedUser.dobVerified : false,
     dobVerifiedAt: canViewPrivateProfile ? normalizedUser.dobVerifiedAt : null,

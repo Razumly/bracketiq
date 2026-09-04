@@ -79,6 +79,9 @@ data class TeamBuilderPersonInvite(
     val lastName: String = "",
     val email: String = "",
     val phone: String = "",
+    val isMinor: Boolean = false,
+    val dateOfBirth: String = "",
+    val guardianEmail: String = "",
 )
 
 enum class TeamBuilderStaffRole(val inviteType: String, val label: String) {
@@ -609,6 +612,15 @@ fun CreateTeamBuilderScreen(
                                     }
                                     StandardTextField(value = editor.email, onValueChange = { personEditor = editor.copy(email = it) }, label = "Email (optional)", keyboardType = "email", modifier = Modifier.fillMaxWidth())
                                     StandardTextField(value = editor.phone, onValueChange = { personEditor = editor.copy(phone = it) }, label = "Phone (optional)", keyboardType = "phone", inputFilter = ::sanitizePhoneInput, inputVisualTransformation = PhoneInputVisualTransformation, modifier = Modifier.fillMaxWidth())
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Checkbox(checked = editor.isMinor, onCheckedChange = { personEditor = editor.copy(isMinor = it) })
+                                        Text("This player is a minor")
+                                    }
+                                    if (editor.isMinor) {
+                                        StandardTextField(value = editor.dateOfBirth, onValueChange = { personEditor = editor.copy(dateOfBirth = it) }, label = "Date of birth (YYYY-MM-DD)", modifier = Modifier.fillMaxWidth())
+                                        StandardTextField(value = editor.guardianEmail, onValueChange = { personEditor = editor.copy(guardianEmail = it) }, label = "Guardian email", keyboardType = "email", modifier = Modifier.fillMaxWidth())
+                                        Text("The invitation will go to the guardian.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
                                     Button(onClick = ::addPerson, modifier = Modifier.fillMaxWidth().height(48.dp)) {
                                         Text(if (TeamBuilderEmailRegex.matches(editor.email.trim())) "Send email invite" else "Save invite")
                                     }

@@ -69,6 +69,8 @@ data class OrganizationTeamPage(
 data class TeamMemberInviteResult(
     val invite: Invite? = null,
     val shareUrl: String? = null,
+    val teamInviteUrl: String? = null,
+    val claimUrl: String? = null,
     val deliveryFailed: Boolean = false,
 )
 
@@ -177,6 +179,11 @@ interface ITeamRepository : IMVPRepository {
         lastName: String? = null,
         phone: String? = null,
         shareOnly: Boolean = false,
+        isMinor: Boolean = false,
+        dateOfBirth: String? = null,
+        guardianEmail: String? = null,
+        idempotencyKey: String? = null,
+        existingInviteId: String? = null,
     ): Result<TeamMemberInviteResult> = userId
         ?.takeIf(String::isNotBlank)
         ?.let {
@@ -1163,6 +1170,11 @@ class TeamRepository(
         lastName: String?,
         phone: String?,
         shareOnly: Boolean,
+        isMinor: Boolean,
+        dateOfBirth: String?,
+        guardianEmail: String?,
+        idempotencyKey: String?,
+        existingInviteId: String?,
     ): Result<TeamMemberInviteResult> = runCatching {
         val normalizedTeamId = teamId.trim().takeIf(String::isNotBlank)
             ?: error("Team id is required.")
@@ -1185,6 +1197,11 @@ class TeamRepository(
                 lastName = normalizedLastName,
                 phone = normalizedPhone,
                 shareOnly = shareOnly,
+                isMinor = isMinor,
+                dateOfBirth = dateOfBirth?.trim()?.takeIf(String::isNotBlank),
+                guardianEmail = guardianEmail?.trim()?.lowercase()?.takeIf(String::isNotBlank),
+                idempotencyKey = idempotencyKey?.trim()?.takeIf(String::isNotBlank),
+                existingInviteId = existingInviteId?.trim()?.takeIf(String::isNotBlank),
             ),
         )
         response.team?.toTeamOrNull()?.let { updatedTeam ->
@@ -1194,6 +1211,8 @@ class TeamRepository(
         TeamMemberInviteResult(
             invite = response.invite,
             shareUrl = response.shareUrl?.trim()?.takeIf(String::isNotBlank),
+            teamInviteUrl = response.teamInviteUrl?.trim()?.takeIf(String::isNotBlank),
+            claimUrl = response.claimUrl?.trim()?.takeIf(String::isNotBlank),
             deliveryFailed = response.delivery?.failed == true,
         )
     }

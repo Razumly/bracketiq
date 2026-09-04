@@ -8,7 +8,9 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class Invite(
     val type: String = "",
+    val role: String = "player",
     val email: String = "",
+    val phone: String? = null,
     val status: String? = null,
     val staffTypes: List<String> = emptyList(),
     val eventId: String? = null,
@@ -23,6 +25,11 @@ data class Invite(
     val childLastName: String? = null,
     val childFullName: String? = null,
     val viewerCanAcceptForChild: Boolean = false,
+    val isAssigned: Boolean = false,
+    val claimUrl: String? = null,
+    val isMinor: Boolean = false,
+    val dateOfBirth: String? = null,
+    val guardianEmail: String? = null,
     @PrimaryKey
     override val id: String = "",
 ) : MVPDocument

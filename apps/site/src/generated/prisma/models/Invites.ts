@@ -56,6 +56,10 @@ export type InvitesMinAggregateOutputType = {
   linkVersion: number | null
   linkExpiresAt: Date | null
   claimedBy: string | null
+  isMinor: boolean | null
+  dateOfBirth: Date | null
+  guardianEmail: string | null
+  idempotencyKey: string | null
 }
 
 export type InvitesMaxAggregateOutputType = {
@@ -80,6 +84,10 @@ export type InvitesMaxAggregateOutputType = {
   linkVersion: number | null
   linkExpiresAt: Date | null
   claimedBy: string | null
+  isMinor: boolean | null
+  dateOfBirth: Date | null
+  guardianEmail: string | null
+  idempotencyKey: string | null
 }
 
 export type InvitesCountAggregateOutputType = {
@@ -105,6 +113,10 @@ export type InvitesCountAggregateOutputType = {
   linkVersion: number
   linkExpiresAt: number
   claimedBy: number
+  isMinor: number
+  dateOfBirth: number
+  guardianEmail: number
+  idempotencyKey: number
   _all: number
 }
 
@@ -139,6 +151,10 @@ export type InvitesMinAggregateInputType = {
   linkVersion?: true
   linkExpiresAt?: true
   claimedBy?: true
+  isMinor?: true
+  dateOfBirth?: true
+  guardianEmail?: true
+  idempotencyKey?: true
 }
 
 export type InvitesMaxAggregateInputType = {
@@ -163,6 +179,10 @@ export type InvitesMaxAggregateInputType = {
   linkVersion?: true
   linkExpiresAt?: true
   claimedBy?: true
+  isMinor?: true
+  dateOfBirth?: true
+  guardianEmail?: true
+  idempotencyKey?: true
 }
 
 export type InvitesCountAggregateInputType = {
@@ -188,6 +208,10 @@ export type InvitesCountAggregateInputType = {
   linkVersion?: true
   linkExpiresAt?: true
   claimedBy?: true
+  isMinor?: true
+  dateOfBirth?: true
+  guardianEmail?: true
+  idempotencyKey?: true
   _all?: true
 }
 
@@ -300,6 +324,10 @@ export type InvitesGroupByOutputType = {
   linkVersion: number
   linkExpiresAt: Date | null
   claimedBy: string | null
+  isMinor: boolean
+  dateOfBirth: Date | null
+  guardianEmail: string | null
+  idempotencyKey: string | null
   _count: InvitesCountAggregateOutputType | null
   _avg: InvitesAvgAggregateOutputType | null
   _sum: InvitesSumAggregateOutputType | null
@@ -348,6 +376,10 @@ export type InvitesWhereInput = {
   linkVersion?: Prisma.IntFilter<"Invites"> | number
   linkExpiresAt?: Prisma.DateTimeNullableFilter<"Invites"> | Date | string | null
   claimedBy?: Prisma.StringNullableFilter<"Invites"> | string | null
+  isMinor?: Prisma.BoolFilter<"Invites"> | boolean
+  dateOfBirth?: Prisma.DateTimeNullableFilter<"Invites"> | Date | string | null
+  guardianEmail?: Prisma.StringNullableFilter<"Invites"> | string | null
+  idempotencyKey?: Prisma.StringNullableFilter<"Invites"> | string | null
 }
 
 export type InvitesOrderByWithRelationInput = {
@@ -373,6 +405,10 @@ export type InvitesOrderByWithRelationInput = {
   linkVersion?: Prisma.SortOrder
   linkExpiresAt?: Prisma.SortOrderInput | Prisma.SortOrder
   claimedBy?: Prisma.SortOrderInput | Prisma.SortOrder
+  isMinor?: Prisma.SortOrder
+  dateOfBirth?: Prisma.SortOrderInput | Prisma.SortOrder
+  guardianEmail?: Prisma.SortOrderInput | Prisma.SortOrder
+  idempotencyKey?: Prisma.SortOrderInput | Prisma.SortOrder
 }
 
 export type InvitesWhereUniqueInput = Prisma.AtLeast<{
@@ -401,6 +437,10 @@ export type InvitesWhereUniqueInput = Prisma.AtLeast<{
   linkVersion?: Prisma.IntFilter<"Invites"> | number
   linkExpiresAt?: Prisma.DateTimeNullableFilter<"Invites"> | Date | string | null
   claimedBy?: Prisma.StringNullableFilter<"Invites"> | string | null
+  isMinor?: Prisma.BoolFilter<"Invites"> | boolean
+  dateOfBirth?: Prisma.DateTimeNullableFilter<"Invites"> | Date | string | null
+  guardianEmail?: Prisma.StringNullableFilter<"Invites"> | string | null
+  idempotencyKey?: Prisma.StringNullableFilter<"Invites"> | string | null
 }, "id">
 
 export type InvitesOrderByWithAggregationInput = {
@@ -426,6 +466,10 @@ export type InvitesOrderByWithAggregationInput = {
   linkVersion?: Prisma.SortOrder
   linkExpiresAt?: Prisma.SortOrderInput | Prisma.SortOrder
   claimedBy?: Prisma.SortOrderInput | Prisma.SortOrder
+  isMinor?: Prisma.SortOrder
+  dateOfBirth?: Prisma.SortOrderInput | Prisma.SortOrder
+  guardianEmail?: Prisma.SortOrderInput | Prisma.SortOrder
+  idempotencyKey?: Prisma.SortOrderInput | Prisma.SortOrder
   _count?: Prisma.InvitesCountOrderByAggregateInput
   _avg?: Prisma.InvitesAvgOrderByAggregateInput
   _max?: Prisma.InvitesMaxOrderByAggregateInput
@@ -459,6 +503,10 @@ export type InvitesScalarWhereWithAggregatesInput = {
   linkVersion?: Prisma.IntWithAggregatesFilter<"Invites"> | number
   linkExpiresAt?: Prisma.DateTimeNullableWithAggregatesFilter<"Invites"> | Date | string | null
   claimedBy?: Prisma.StringNullableWithAggregatesFilter<"Invites"> | string | null
+  isMinor?: Prisma.BoolWithAggregatesFilter<"Invites"> | boolean
+  dateOfBirth?: Prisma.DateTimeNullableWithAggregatesFilter<"Invites"> | Date | string | null
+  guardianEmail?: Prisma.StringNullableWithAggregatesFilter<"Invites"> | string | null
+  idempotencyKey?: Prisma.StringNullableWithAggregatesFilter<"Invites"> | string | null
 }
 
 export type InvitesCreateInput = {
@@ -484,6 +532,10 @@ export type InvitesCreateInput = {
   linkVersion?: number
   linkExpiresAt?: Date | string | null
   claimedBy?: string | null
+  isMinor?: boolean
+  dateOfBirth?: Date | string | null
+  guardianEmail?: string | null
+  idempotencyKey?: string | null
 }
 
 export type InvitesUncheckedCreateInput = {
@@ -509,6 +561,10 @@ export type InvitesUncheckedCreateInput = {
   linkVersion?: number
   linkExpiresAt?: Date | string | null
   claimedBy?: string | null
+  isMinor?: boolean
+  dateOfBirth?: Date | string | null
+  guardianEmail?: string | null
+  idempotencyKey?: string | null
 }
 
 export type InvitesUpdateInput = {
@@ -534,6 +590,10 @@ export type InvitesUpdateInput = {
   linkVersion?: Prisma.IntFieldUpdateOperationsInput | number
   linkExpiresAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   claimedBy?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  isMinor?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  dateOfBirth?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  guardianEmail?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  idempotencyKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
 }
 
 export type InvitesUncheckedUpdateInput = {
@@ -559,6 +619,10 @@ export type InvitesUncheckedUpdateInput = {
   linkVersion?: Prisma.IntFieldUpdateOperationsInput | number
   linkExpiresAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   claimedBy?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  isMinor?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  dateOfBirth?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  guardianEmail?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  idempotencyKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
 }
 
 export type InvitesCreateManyInput = {
@@ -584,6 +648,10 @@ export type InvitesCreateManyInput = {
   linkVersion?: number
   linkExpiresAt?: Date | string | null
   claimedBy?: string | null
+  isMinor?: boolean
+  dateOfBirth?: Date | string | null
+  guardianEmail?: string | null
+  idempotencyKey?: string | null
 }
 
 export type InvitesUpdateManyMutationInput = {
@@ -609,6 +677,10 @@ export type InvitesUpdateManyMutationInput = {
   linkVersion?: Prisma.IntFieldUpdateOperationsInput | number
   linkExpiresAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   claimedBy?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  isMinor?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  dateOfBirth?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  guardianEmail?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  idempotencyKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
 }
 
 export type InvitesUncheckedUpdateManyInput = {
@@ -634,6 +706,10 @@ export type InvitesUncheckedUpdateManyInput = {
   linkVersion?: Prisma.IntFieldUpdateOperationsInput | number
   linkExpiresAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   claimedBy?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  isMinor?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  dateOfBirth?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  guardianEmail?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  idempotencyKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
 }
 
 export type InvitesCountOrderByAggregateInput = {
@@ -659,6 +735,10 @@ export type InvitesCountOrderByAggregateInput = {
   linkVersion?: Prisma.SortOrder
   linkExpiresAt?: Prisma.SortOrder
   claimedBy?: Prisma.SortOrder
+  isMinor?: Prisma.SortOrder
+  dateOfBirth?: Prisma.SortOrder
+  guardianEmail?: Prisma.SortOrder
+  idempotencyKey?: Prisma.SortOrder
 }
 
 export type InvitesAvgOrderByAggregateInput = {
@@ -687,6 +767,10 @@ export type InvitesMaxOrderByAggregateInput = {
   linkVersion?: Prisma.SortOrder
   linkExpiresAt?: Prisma.SortOrder
   claimedBy?: Prisma.SortOrder
+  isMinor?: Prisma.SortOrder
+  dateOfBirth?: Prisma.SortOrder
+  guardianEmail?: Prisma.SortOrder
+  idempotencyKey?: Prisma.SortOrder
 }
 
 export type InvitesMinOrderByAggregateInput = {
@@ -711,6 +795,10 @@ export type InvitesMinOrderByAggregateInput = {
   linkVersion?: Prisma.SortOrder
   linkExpiresAt?: Prisma.SortOrder
   claimedBy?: Prisma.SortOrder
+  isMinor?: Prisma.SortOrder
+  dateOfBirth?: Prisma.SortOrder
+  guardianEmail?: Prisma.SortOrder
+  idempotencyKey?: Prisma.SortOrder
 }
 
 export type InvitesSumOrderByAggregateInput = {
@@ -751,6 +839,10 @@ export type InvitesSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs 
   linkVersion?: boolean
   linkExpiresAt?: boolean
   claimedBy?: boolean
+  isMinor?: boolean
+  dateOfBirth?: boolean
+  guardianEmail?: boolean
+  idempotencyKey?: boolean
 }, ExtArgs["result"]["invites"]>
 
 export type InvitesSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
@@ -776,6 +868,10 @@ export type InvitesSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Exten
   linkVersion?: boolean
   linkExpiresAt?: boolean
   claimedBy?: boolean
+  isMinor?: boolean
+  dateOfBirth?: boolean
+  guardianEmail?: boolean
+  idempotencyKey?: boolean
 }, ExtArgs["result"]["invites"]>
 
 export type InvitesSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
@@ -801,6 +897,10 @@ export type InvitesSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Exten
   linkVersion?: boolean
   linkExpiresAt?: boolean
   claimedBy?: boolean
+  isMinor?: boolean
+  dateOfBirth?: boolean
+  guardianEmail?: boolean
+  idempotencyKey?: boolean
 }, ExtArgs["result"]["invites"]>
 
 export type InvitesSelectScalar = {
@@ -826,9 +926,13 @@ export type InvitesSelectScalar = {
   linkVersion?: boolean
   linkExpiresAt?: boolean
   claimedBy?: boolean
+  isMinor?: boolean
+  dateOfBirth?: boolean
+  guardianEmail?: boolean
+  idempotencyKey?: boolean
 }
 
-export type InvitesOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "sentAt" | "finalizedAt" | "type" | "email" | "phone" | "status" | "staffTypes" | "role" | "isAssigned" | "eventId" | "organizationId" | "teamId" | "userId" | "createdBy" | "firstName" | "lastName" | "linkVersion" | "linkExpiresAt" | "claimedBy", ExtArgs["result"]["invites"]>
+export type InvitesOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "sentAt" | "finalizedAt" | "type" | "email" | "phone" | "status" | "staffTypes" | "role" | "isAssigned" | "eventId" | "organizationId" | "teamId" | "userId" | "createdBy" | "firstName" | "lastName" | "linkVersion" | "linkExpiresAt" | "claimedBy" | "isMinor" | "dateOfBirth" | "guardianEmail" | "idempotencyKey", ExtArgs["result"]["invites"]>
 
 export type $InvitesPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "Invites"
@@ -856,6 +960,10 @@ export type $InvitesPayload<ExtArgs extends runtime.Types.Extensions.InternalArg
     linkVersion: number
     linkExpiresAt: Date | null
     claimedBy: string | null
+    isMinor: boolean
+    dateOfBirth: Date | null
+    guardianEmail: string | null
+    idempotencyKey: string | null
   }, ExtArgs["result"]["invites"]>
   composites: {}
 }
@@ -1301,6 +1409,10 @@ export interface InvitesFieldRefs {
   readonly linkVersion: Prisma.FieldRef<"Invites", 'Int'>
   readonly linkExpiresAt: Prisma.FieldRef<"Invites", 'DateTime'>
   readonly claimedBy: Prisma.FieldRef<"Invites", 'String'>
+  readonly isMinor: Prisma.FieldRef<"Invites", 'Boolean'>
+  readonly dateOfBirth: Prisma.FieldRef<"Invites", 'DateTime'>
+  readonly guardianEmail: Prisma.FieldRef<"Invites", 'String'>
+  readonly idempotencyKey: Prisma.FieldRef<"Invites", 'String'>
 }
 
 

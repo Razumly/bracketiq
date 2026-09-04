@@ -72,6 +72,9 @@ export const ModelName = {
   SensitiveUserData: 'SensitiveUserData',
   AuthMfaChallenges: 'AuthMfaChallenges',
   Invites: 'Invites',
+  UserProfileClaims: 'UserProfileClaims',
+  UserProfileMerges: 'UserProfileMerges',
+  UserProfileContactCorrections: 'UserProfileContactCorrections',
   TeamInviteEventSyncs: 'TeamInviteEventSyncs',
   StaffMembers: 'StaffMembers',
   OrganizationRoles: 'OrganizationRoles',
@@ -608,7 +611,10 @@ export const UserDataScalarFieldEnum = {
   chatTermsVersion: 'chatTermsVersion',
   onboardingIntent: 'onboardingIntent',
   accountVisibility: 'accountVisibility',
-  notificationSettings: 'notificationSettings'
+  notificationSettings: 'notificationSettings',
+  isManagedPlayer: 'isManagedPlayer',
+  mergedIntoProfileId: 'mergedIntoProfileId',
+  mergedAt: 'mergedAt'
 } as const
 
 export type UserDataScalarFieldEnum = (typeof UserDataScalarFieldEnum)[keyof typeof UserDataScalarFieldEnum]
@@ -703,10 +709,62 @@ export const InvitesScalarFieldEnum = {
   lastName: 'lastName',
   linkVersion: 'linkVersion',
   linkExpiresAt: 'linkExpiresAt',
-  claimedBy: 'claimedBy'
+  claimedBy: 'claimedBy',
+  isMinor: 'isMinor',
+  dateOfBirth: 'dateOfBirth',
+  guardianEmail: 'guardianEmail',
+  idempotencyKey: 'idempotencyKey'
 } as const
 
 export type InvitesScalarFieldEnum = (typeof InvitesScalarFieldEnum)[keyof typeof InvitesScalarFieldEnum]
+
+
+export const UserProfileClaimsScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt',
+  profileId: 'profileId',
+  claimantUserId: 'claimantUserId',
+  inviteId: 'inviteId',
+  verificationMethod: 'verificationMethod',
+  verifiedEmail: 'verifiedEmail',
+  status: 'status',
+  confirmationAt: 'confirmationAt',
+  completedAt: 'completedAt',
+  failureReason: 'failureReason'
+} as const
+
+export type UserProfileClaimsScalarFieldEnum = (typeof UserProfileClaimsScalarFieldEnum)[keyof typeof UserProfileClaimsScalarFieldEnum]
+
+
+export const UserProfileMergesScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  sourceProfileId: 'sourceProfileId',
+  primaryProfileId: 'primaryProfileId',
+  claimantUserId: 'claimantUserId',
+  confirmationAt: 'confirmationAt',
+  rosterIds: 'rosterIds',
+  invitationIds: 'invitationIds',
+  metadata: 'metadata'
+} as const
+
+export type UserProfileMergesScalarFieldEnum = (typeof UserProfileMergesScalarFieldEnum)[keyof typeof UserProfileMergesScalarFieldEnum]
+
+
+export const UserProfileContactCorrectionsScalarFieldEnum = {
+  id: 'id',
+  createdAt: 'createdAt',
+  profileId: 'profileId',
+  managerUserId: 'managerUserId',
+  previousEmail: 'previousEmail',
+  correctedEmail: 'correctedEmail',
+  previousPhone: 'previousPhone',
+  correctedPhone: 'correctedPhone',
+  inviteId: 'inviteId'
+} as const
+
+export type UserProfileContactCorrectionsScalarFieldEnum = (typeof UserProfileContactCorrectionsScalarFieldEnum)[keyof typeof UserProfileContactCorrectionsScalarFieldEnum]
 
 
 export const TeamInviteEventSyncsScalarFieldEnum = {

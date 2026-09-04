@@ -652,6 +652,8 @@ export interface UserData {
   chatTermsVersion?: string | null;
   onboardingIntent?: OnboardingIntent | null;
   accountVisibility?: AccountVisibility | null;
+  isManagedPlayer?: boolean;
+  mergedIntoProfileId?: string | null;
   notificationSettings?: NotificationSettings | null;
   stripeAccountId?: string | null;
   $createdAt?: string;
@@ -699,7 +701,12 @@ export interface Invite {
   role?: TeamInviteRole | null;
   email?: string;
   phone?: string;
+  isAssigned?: boolean;
   shareUrl?: string;
+  claimUrl?: string | null;
+  isMinor?: boolean;
+  dateOfBirth?: string | null;
+  guardianEmail?: string | null;
   status?: InviteStatus;
   staffTypes?: StaffMemberType[];
   userId?: string | null;

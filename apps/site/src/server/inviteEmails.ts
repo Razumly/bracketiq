@@ -3,7 +3,7 @@ import { buildInviteEmail } from '@/server/emailTemplates';
 import { isEmailEnabled, sendEmail } from '@/server/email';
 import { sendPushToUsers } from '@/server/pushNotifications';
 import { isUserNotificationChannelEnabled } from '@/server/notificationPreferences';
-import { buildTeamInviteShareUrl } from '@/server/teamInviteLinks';
+import { buildManagedPlayerClaimUrl, buildTeamInviteShareUrl } from '@/server/teamInviteLinks';
 
 interface InviteRecord {
   id: string;
@@ -19,6 +19,8 @@ interface InviteRecord {
   sentAt?: Date | string | null;
   linkVersion?: number | null;
   linkExpiresAt?: Date | string | null;
+  isAssigned?: boolean | null;
+  role?: string | null;
 }
 
 interface InviteDeliveryResult {
@@ -90,7 +92,9 @@ export const sendInviteEmails = async (invites: InviteRecord[], baseUrl: string)
         teamId: invite.teamId,
         teamName: invite.teamId ? teamNames.get(invite.teamId) : undefined,
         actionUrl: invite.type?.trim().toUpperCase() === 'TEAM' && invite.linkExpiresAt
-          ? buildTeamInviteShareUrl(invite as InviteRecord & { id: string; linkExpiresAt: Date | string }, baseUrl)
+          ? (invite.role?.trim().toLowerCase() === 'player' && invite.isAssigned && invite.userId
+            ? buildManagedPlayerClaimUrl(invite as InviteRecord & { id: string; linkExpiresAt: Date | string }, baseUrl)
+            : buildTeamInviteShareUrl(invite as InviteRecord & { id: string; linkExpiresAt: Date | string }, baseUrl))
           : undefined,
       });
 

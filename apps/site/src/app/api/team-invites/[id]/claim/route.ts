@@ -63,10 +63,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: 'Invite unavailable' }, { status: 404 });
   }
 
-  if (invite.userId && invite.userId !== session.userId && !session.isAdmin) {
-    return NextResponse.json({ error: 'This invite belongs to another account' }, { status: 403 });
-  }
-
   if (!invite.userId) {
     try {
       invite = await prisma.$transaction(async (tx) => {
