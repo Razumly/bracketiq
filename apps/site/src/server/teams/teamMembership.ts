@@ -998,6 +998,8 @@ type SyncCanonicalTeamRosterInput = {
 
 type ExistingPendingTeamInviteRecord = {
   id: string;
+  createdAt?: Date | string | null;
+  updatedAt?: Date | string | null;
   email?: string | null;
   status?: string | null;
   userId?: string | null;
@@ -1027,6 +1029,23 @@ const emptySyncCanonicalTeamRosterResult = (): SyncCanonicalTeamRosterResult => 
   createdPendingInvites: [],
 });
 
+// Legacy invite rows use null or SENT for a pending attempt. FAILED still
+// represents the same attempt because delivery can be retried without a new
+// roster assignment.
+const isCurrentPendingInviteStatus = (value: unknown): boolean => {
+  const status = String(value ?? '').trim().toUpperCase();
+  return status === '' || status === 'PENDING' || status === 'SENT' || status === 'FAILED';
+};
+
+const inviteSortTimestamp = (value: Date | string | null | undefined): number => {
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === 'string') {
+    const timestamp = Date.parse(value);
+    return Number.isNaN(timestamp) ? 0 : timestamp;
+  }
+  return 0;
+};
+
 const ensurePendingTeamInviteRecords = async (
   tx: PrismaLike,
   input: {
@@ -1055,6 +1074,8 @@ const ensurePendingTeamInviteRecords = async (
     },
     select: {
       id: true,
+      createdAt: true,
+      updatedAt: true,
       email: true,
       status: true,
       userId: true,
@@ -1062,18 +1083,26 @@ const ensurePendingTeamInviteRecords = async (
       lastName: true,
     },
   }) as ExistingPendingTeamInviteRecord[];
-  const existingByUserId = new Map(existingInvites
-    .map((invite) => [normalizeId(invite.userId), invite] as const)
-    .filter((entry): entry is readonly [string, ExistingPendingTeamInviteRecord] => Boolean(entry[0])));
+  // Keep terminal attempts as history. Reconcile only the newest current
+  // pending attempt for each user. A declined or accepted attempt must not be
+  // rewritten into a new pending attempt.
+  const existingByUserId = new Map<string, ExistingPendingTeamInviteRecord>();
+  existingInvites
+    .filter((invite) => isCurrentPendingInviteStatus(invite.status))
+    .sort((left, right) => (
+      inviteSortTimestamp(right.updatedAt ?? right.createdAt)
+      - inviteSortTimestamp(left.updatedAt ?? left.createdAt)
+      || String(right.id).localeCompare(String(left.id))
+    ))
+    .forEach((invite) => {
+      const userId = normalizeId(invite.userId);
+      if (!userId || existingByUserId.has(userId)) {
+        return;
+      }
+      existingByUserId.set(userId, invite);
+    });
 
-  const nonPendingInviteUserIds = existingInvites
-    .filter((invite) => String(invite.status ?? '').toUpperCase() !== 'PENDING')
-    .map((invite) => normalizeId(invite.userId))
-    .filter((userId): userId is string => Boolean(userId));
-  const userIdsToHydrate = uniqueStrings([
-    ...pendingPlayerIds.filter((userId) => !existingByUserId.has(userId)),
-    ...nonPendingInviteUserIds,
-  ]);
+  const userIdsToHydrate = pendingPlayerIds.filter((userId) => !existingByUserId.has(userId));
 
   if (!userIdsToHydrate.length) {
     return [];
@@ -1110,31 +1139,13 @@ const ensurePendingTeamInviteRecords = async (
   const createdInvites: CreatedPendingTeamInviteRecord[] = [];
 
   await Promise.all(userIdsToHydrate.map(async (userId) => {
-    const existingInvite = existingByUserId.get(userId);
     const profile = profileByUserId.get(userId);
     const email = authEmailByUserId.get(userId) ?? sensitiveEmailByUserId.get(userId);
     if (!email) {
       return;
     }
 
-    if (existingInvite) {
-      if (String(existingInvite.status ?? '').toUpperCase() === 'PENDING') {
-        return;
-      }
-      if (!invitesDelegate.update) {
-        return;
-      }
-      await invitesDelegate.update({
-        where: { id: existingInvite.id },
-        data: {
-          email,
-          status: 'PENDING',
-          createdBy: normalizeId(input.actingUserId),
-          firstName: normalizeOptionalName(profile?.firstName) ?? existingInvite.firstName,
-          lastName: normalizeOptionalName(profile?.lastName) ?? existingInvite.lastName,
-          updatedAt: input.now,
-        },
-      });
+    if (existingByUserId.has(userId)) {
       return;
     }
 

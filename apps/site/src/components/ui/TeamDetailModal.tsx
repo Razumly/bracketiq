@@ -1,6 +1,5 @@
 // components/ui/TeamDetailModal.tsx
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import Image from 'next/image';
 import { notifications } from '@mantine/notifications';
 import { Modal, Group, Text, Title, Button, Paper, SimpleGrid, Avatar, Badge, Alert, TextInput, ScrollArea, SegmentedControl, NumberInput, Select as MantineSelect, Checkbox, MultiSelect, Loader, Stack, Collapse } from '@mantine/core';
 import { Invite, Team, UserData, Event, SPORTS_LIST, getUserFullName, getUserAvatarUrl, getTeamAvatarUrl, getUserHandle, formatPrice } from '@/types';
@@ -432,7 +431,7 @@ export default function TeamDetailModal({
     }, [currentTeam.pending, currentTeam.playerIds, currentTeam.playerRegistrations, pendingPlayers, teamPlayers]);
     const playerInviteCapacityCount = playerInviteCapacityUserIds.size + pendingPlayerRoleInvites.length + accountlessPlayerRoleInvites.length;
     const pendingInvitationCount = pendingPlayers.length + pendingPlayerRoleInvites.length;
-    const rosterPlayerCount = teamPlayers.length + accountlessPlayerRoleInvites.length;
+    const rosterPlayerCount = teamPlayers.length + pendingPlayers.length + accountlessPlayerRoleInvites.length;
     const playerInviteLimit = Math.max(0, Math.trunc(currentTeam.teamSize || 0));
     const canInviteAnotherPlayer = playerInviteLimit <= 0 || playerInviteCapacityCount < playerInviteLimit;
     const showSelfServiceRegistrationActions = Boolean(user?.$id) && !canManageTeam;
@@ -650,19 +649,16 @@ export default function TeamDetailModal({
         try {
             setLoading(true);
 
-            if (currentTeam.playerIds.length > 0) {
-                const players = await userService.getUsersByIds(currentTeam.playerIds, { teamId: currentTeam.$id });
-                setTeamPlayers(players);
-            } else {
-                setTeamPlayers([]);
-            }
-
-            if (currentTeam.pending.length > 0) {
-                const pending = await userService.getUsersByIds(currentTeam.pending, { teamId: currentTeam.$id });
-                setPendingPlayers(pending);
-            } else {
-                setPendingPlayers([]);
-            }
+            const rosterUserIds = Array.from(new Set([
+                ...currentTeam.playerIds,
+                ...currentTeam.pending,
+            ].filter((value) => value.trim().length > 0)));
+            const rosterUsers = rosterUserIds.length > 0
+                ? await userService.getUsersByIds(rosterUserIds, { teamId: currentTeam.$id })
+                : [];
+            const pendingUserIds = new Set(currentTeam.pending);
+            setTeamPlayers(rosterUsers.filter((player) => !pendingUserIds.has(player.$id)));
+            setPendingPlayers(rosterUsers.filter((player) => pendingUserIds.has(player.$id)));
 
             const managerId = currentTeam.managerId ?? currentTeam.captainId;
             const roleUserIds = [managerId, currentTeam.headCoachId, ...assistantCoachIds]
@@ -1568,8 +1564,13 @@ export default function TeamDetailModal({
 
     const renderRosterPlayerCards = () => (
             <ResponsiveCardGrid maxCardWidth={352} className="team-roster-player-grid">
-            {teamPlayers.map(player => {
-                const playerRegistration = activePlayerRegistrationByUserId.get(player.$id);
+            {[
+                ...teamPlayers.map((player) => ({ player, isPending: false })),
+                ...pendingPlayers.map((player) => ({ player, isPending: true })),
+            ].map(({ player, isPending }) => {
+                const playerRegistration = isPending
+                    ? (currentTeam.playerRegistrations ?? []).find((registration) => registration.userId === player.$id)
+                    : activePlayerRegistrationByUserId.get(player.$id);
                 const compliance = complianceByUserId.get(player.$id);
                 const expanded = expandedComplianceUserIds.includes(player.$id);
                 const canExpandCompliance = canManageTeam && Boolean(compliance);
@@ -1609,8 +1610,11 @@ export default function TeamDetailModal({
                                         <Text fw={500} truncate>{playerName}</Text>
                                         {getUserHandle(player) && <Text size="xs" c="dimmed" truncate>{getUserHandle(player)}</Text>}
                                         <Group gap={6} mt={4} wrap="wrap">
-                                            {player.$id === currentTeam.captainId && (
+                                            {!isPending && player.$id === currentTeam.captainId && (
                                                 <Badge color="blue" variant="light" size="xs">Captain</Badge>
+                                            )}
+                                            {isPending && (
+                                                <Badge color="yellow" variant="light" size="xs">Awaiting player</Badge>
                                             )}
                                             {canManageTeam && compliance ? (
                                                 <>
@@ -1632,7 +1636,7 @@ export default function TeamDetailModal({
                                             ) : null}
                                         </Group>
                                         <Group gap="xs" mt="xs" align="flex-end" wrap="wrap" onClick={(event) => event.stopPropagation()}>
-                                            {canManageTeam ? (
+                                            {canManageTeam && !isPending ? (
                                                 <Group gap={6} align="flex-end" wrap="nowrap">
                                                     <TextInput
                                                         label="Jersey #"
@@ -1667,7 +1671,7 @@ export default function TeamDetailModal({
                                                         Save
                                                     </Button>
                                                 </Group>
-                                            ) : currentJerseyNumber ? (
+                                            ) : !isPending && currentJerseyNumber ? (
                                                 <Badge variant="light" color="gray">#{currentJerseyNumber}</Badge>
                                             ) : null}
                                             {canExpandCompliance ? (
@@ -1686,7 +1690,21 @@ export default function TeamDetailModal({
                                                     {expanded ? 'Collapse' : 'Details'}
                                                 </Button>
                                             ) : null}
-                                            {canManageTeam && (
+                                            {canManageTeam && isPending && (
+                                                <Button
+                                                    color="red"
+                                                    variant="subtle"
+                                                    size="xs"
+                                                    loading={cancellingInviteIds.has(player.$id)}
+                                                    onClick={(event) => {
+                                                        event.stopPropagation();
+                                                        void handleCancelInvite(player.$id);
+                                                    }}
+                                                >
+                                                    Cancel
+                                                </Button>
+                                            )}
+                                            {canManageTeam && !isPending && (
                                                 (player.$id !== currentTeam.captainId)
                                                 || (editingDetails && draftCaptainId.trim().length > 0 && draftCaptainId !== currentTeam.captainId)
                                             ) && (
@@ -1716,18 +1734,20 @@ export default function TeamDetailModal({
                                                 <Text size="sm" c={compliance.payment.isPaidInFull ? 'green' : 'yellow'}>
                                                     {formatCompliancePaymentLabel(compliance.payment)}
                                                 </Text>
-                                                <Button
-                                                    size="xs"
-                                                    variant="light"
-                                                    loading={billingPlayerIds.has(player.$id)}
-                                                    disabled={registrationPriceCents <= 0}
-                                                    onClick={(event) => {
-                                                        event.stopPropagation();
-                                                        void handleSendTeamMemberBill(player.$id);
-                                                    }}
-                                                >
-                                                    Send Bill
-                                                </Button>
+                                                {!isPending ? (
+                                                    <Button
+                                                        size="xs"
+                                                        variant="light"
+                                                        loading={billingPlayerIds.has(player.$id)}
+                                                        disabled={registrationPriceCents <= 0}
+                                                        onClick={(event) => {
+                                                            event.stopPropagation();
+                                                            void handleSendTeamMemberBill(player.$id);
+                                                        }}
+                                                    >
+                                                        Send Bill
+                                                    </Button>
+                                                ) : null}
                                             </Group>
                                         </Group>
                                         <Group justify="space-between" wrap="wrap">
@@ -1777,7 +1797,7 @@ export default function TeamDetailModal({
                         </Stack>
                     </Paper>
                 );
-            })}
+                            })}
             {accountlessPlayerRoleInvites.map(({ invite, invitedUser }) => {
                 const playerName = getAccountlessInviteDisplayName(invite);
                 const shareUrl = getInviteContactValue(invite, 'shareUrl');
@@ -2561,35 +2581,39 @@ export default function TeamDetailModal({
                     </div>
 
                     {/* Pending Invitations */}
-                    {pendingInvitationCount > 0 && (
+                    {pendingPlayerRoleInvites.length > 0 && (
                         <div className={rosterSectionClass('team-detail-roster-main')}>
-                            <h4 className="text-lg font-semibold mb-4">Pending Invitations ({pendingInvitationCount})</h4>
+                            <h4 className="text-lg font-semibold mb-4">Pending Invitations ({pendingPlayerRoleInvites.length})</h4>
                             <ResponsiveCardGrid maxCardWidth={352} className="team-roster-player-grid">
-                                {pendingPlayers.map(player => {
-                                    const isFromEvent = localFreeAgents.some(agent => agent.$id === player.$id);
-                                    const isCancelling = cancellingInviteIds.has(player.$id);
+                                {pendingPlayerRoleInvites.map(({ invite, invitedUser }) => {
+                                    const playerName = getPendingInviteDisplayName(invite, invitedUser);
+                                    const isFromEvent = invitedUser
+                                        ? localFreeAgents.some(agent => agent.$id === invitedUser.$id)
+                                        : false;
+                                    const isCancelling = cancellingRoleInviteIds.has(invite.$id);
 
                                     return (
                                         <div
-                                            key={player.$id}
+                                            key={invite.$id}
                                             className={`flex h-full items-start justify-between gap-3 p-3 rounded-lg border ${isFromEvent
                                                 ? 'bg-blue-50 border-blue-200'
                                                 : 'bg-yellow-50 border-yellow-200'
                                                 }`}
                                         >
                                             <div className="flex min-w-0 items-start space-x-3">
-                                                <Image
-                                                    src={getUserAvatarUrl(player, 40)}
-                                                    alt={getUserFullName(player)}
-                                                    width={40}
-                                                    height={40}
-                                                    unoptimized
-                                                    className="w-10 h-10 rounded-full object-cover shrink-0"
-                                                />
+                                                <Avatar
+                                                    src={invitedUser ? getUserAvatarUrl(invitedUser, 40) : undefined}
+                                                    alt={playerName}
+                                                    size={40}
+                                                    radius="xl"
+                                                    color="yellow"
+                                                >
+                                                    {!invitedUser ? 'P' : null}
+                                                </Avatar>
                                                 <div className="min-w-0">
-                                                    <p className="font-medium truncate">{getUserFullName(player)}</p>
-                                                    {getUserHandle(player) && (
-                                                        <p className="text-xs text-gray-500 truncate">{getUserHandle(player)}</p>
+                                                    <p className="font-medium truncate">{playerName}</p>
+                                                    {invitedUser && getUserHandle(invitedUser) && (
+                                                        <p className="text-xs text-gray-500 truncate">{getUserHandle(invitedUser)}</p>
                                                     )}
                                                     <span className={`text-xs font-medium ${isFromEvent ? 'text-blue-600' : 'text-yellow-600'
                                                         }`}>
@@ -2599,7 +2623,7 @@ export default function TeamDetailModal({
                                             </div>
                                             {canManageTeam && (
                                                 <button
-                                                    onClick={() => handleCancelInvite(player.$id)}
+                                                    onClick={() => handleCancelRoleInvite(invite.$id)}
                                                     disabled={isCancelling}
                                                     className={`flex shrink-0 items-center space-x-1 text-sm transition-colors ${isCancelling
                                                         ? 'text-gray-400 cursor-not-allowed'

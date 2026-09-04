@@ -104,6 +104,49 @@ describe('reserveTeamRegistrationSlot', () => {
     expect(syncCanonicalTeamFutureEventSnapshotsMock).not.toHaveBeenCalled();
   });
 
+  it('does not let an invited player bypass acceptance through open registration', async () => {
+    const teamRegistrationsFindUniqueMock = jest.fn().mockResolvedValue({
+      id: 'team_1__user_1',
+      teamId: 'team_1',
+      userId: 'user_1',
+      status: 'INVITED',
+    });
+    const teamRegistrationsUpdateMock = jest.fn();
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{
+        id: 'team_1',
+        teamSize: 6,
+        openRegistration: true,
+        joinPolicy: 'OPEN_REGISTRATION',
+        registrationPriceCents: 0,
+        organizationId: null,
+        createdBy: 'manager_1',
+      }]),
+      teamRegistrations: {
+        findMany: jest.fn().mockResolvedValue([]),
+        findUnique: teamRegistrationsFindUniqueMock,
+        update: teamRegistrationsUpdateMock,
+      },
+    };
+    prismaMock.$transaction.mockImplementation(async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx));
+
+    const result = await reserveTeamRegistrationSlot({
+      teamId: 'team_1',
+      userId: 'user_1',
+      actorUserId: 'user_1',
+      status: 'ACTIVE',
+      now: new Date('2026-04-21T18:02:00.000Z'),
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      status: 409,
+      error: 'Accept the team invitation before registering for this team.',
+    });
+    expect(teamRegistrationsUpdateMock).not.toHaveBeenCalled();
+    expect(syncTeamChatInTxMock).not.toHaveBeenCalled();
+  });
+
   it('marks a started team registration as pending when async payment is processing', async () => {
     const teamRegistrationsFindUniqueMock = jest.fn().mockResolvedValue({
       id: 'team_1__user_1',

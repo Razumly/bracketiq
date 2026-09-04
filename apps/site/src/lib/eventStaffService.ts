@@ -129,7 +129,7 @@ const normalizeEventOfficials = (value: unknown): EventOfficial[] => {
 
 const normalizeInviteStatus = (value: unknown): InviteStatus | undefined => {
   const normalized = typeof value === 'string' ? value.trim().toUpperCase() : '';
-  return normalized === 'PENDING' || normalized === 'DECLINED' || normalized === 'FAILED'
+  return normalized === 'PENDING' || normalized === 'DECLINED' || normalized === 'FAILED' || normalized === 'ACCEPTED'
     ? normalized
     : undefined;
 };

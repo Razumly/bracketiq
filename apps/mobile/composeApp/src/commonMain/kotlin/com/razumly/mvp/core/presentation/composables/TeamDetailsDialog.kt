@@ -182,7 +182,7 @@ fun TeamDetailsDialog(
                 )
 
                 Text(
-                    text = "${team.players.size}/${team.team.teamSize} Players",
+                    text = "$reservedOrActiveCount/${team.team.teamSize} Players",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -305,6 +305,7 @@ fun TeamDetailsDialog(
                             PlayerCard(
                                 player = player,
                                 isPending = true,
+                                pendingLabel = "Awaiting player",
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }

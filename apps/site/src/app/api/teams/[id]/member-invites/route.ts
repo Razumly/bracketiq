@@ -23,6 +23,7 @@ import {
   buildTeamInviteShareUrl,
   TEAM_INVITE_LINK_TTL_MS,
 } from '@/server/teamInviteLinks';
+import { acquireTeamRosterLock } from '@/server/repositories/locks';
 
 export const dynamic = 'force-dynamic';
 
@@ -219,10 +220,10 @@ const getPlayerCapacityUserIds = (team: Record<string, any>): Set<string> => {
     }
   });
 
-  if (ids.size === 0) {
-    normalizeIdList(team.playerIds).forEach((userId) => ids.add(userId));
-    normalizeIdList(team.pending).forEach((userId) => ids.add(userId));
-  }
+  // Legacy team rows can omit registrations or contain only active rows.
+  // Always include both serialized lists so pending assignments count too.
+  normalizeIdList(team.playerIds).forEach((userId) => ids.add(userId));
+  normalizeIdList(team.pending).forEach((userId) => ids.add(userId));
 
   return ids;
 };
@@ -346,6 +347,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   let inviteForEmail: Record<string, any> | null = null;
   try {
     const result = await prisma.$transaction(async (tx) => {
+      if (typeof tx?.$executeRaw === 'function') {
+        await acquireTeamRosterLock(tx, canonicalTeamId);
+      }
       const canonicalTeam = await loadCanonicalTeamById(canonicalTeamId, tx);
       if (!canonicalTeam) {
         throw new Error('Team not found');
@@ -367,6 +371,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             type: 'TEAM',
             teamId: canonicalTeamId,
             userId,
+            OR: [
+              { status: null },
+              { status: { in: ['PENDING', 'SENT', 'FAILED'] } },
+            ],
           },
         })
         : resolvedUser.email
@@ -376,6 +384,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
               teamId: canonicalTeamId,
               userId: null,
               email: resolvedUser.email,
+              OR: [
+                { status: null },
+                { status: { in: ['PENDING', 'SENT', 'FAILED'] } },
+              ],
             },
           })
           : null;
@@ -490,15 +502,36 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     });
 
     const baseUrl = getRequestOrigin(req);
+    let deliveredInvites: any[] = [];
+    let inviteDeliveryFailed = false;
     if (inviteForEmail) {
-      await sendInviteEmails([inviteForEmail], baseUrl);
+      try {
+        deliveredInvites = await sendInviteEmails([inviteForEmail], baseUrl);
+      } catch (error) {
+        // The database transaction already committed. Keep that result and
+        // report delivery failure so the client can retry delivery safely.
+        inviteDeliveryFailed = true;
+        console.warn('Team invite save committed but delivery failed', error);
+      }
     }
+    const deliveredInvite = deliveredInvites.find((invite) => invite.id === result.invite.id);
+    const responseInvite = deliveredInvite
+      ? { ...result.invite, status: deliveredInvite.status ?? result.invite.status, sentAt: deliveredInvite.sentAt ?? result.invite.sentAt }
+      : result.invite;
+    const inviteDeliveryId = (inviteForEmail as { id?: unknown } | null)?.id;
 
     return NextResponse.json({
       ok: true,
-      invite: mapInviteRecord(result.invite),
+      invite: mapInviteRecord(responseInvite),
       team: result.team,
       shareUrl: buildTeamInviteShareUrl(result.invite, baseUrl),
+      delivery: {
+        attempted: Boolean(inviteForEmail),
+        failed: inviteDeliveryFailed || deliveredInvites.some(
+          (invite) => String(invite.status ?? '').toUpperCase() === 'FAILED',
+        ),
+        inviteIds: typeof inviteDeliveryId === 'string' ? [inviteDeliveryId] : [],
+      },
     }, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to create member invite';
