@@ -164,7 +164,8 @@ export const pruneExpiredTerminalInvites = async ({
     ? Prisma.join(accessConditions, ' AND ')
     : Prisma.sql`TRUE`;
   const terminalSql = Prisma.sql`UPPER(invite."status") IN (${Prisma.join([...TERMINAL_INVITE_STATUSES])})`;
-  const ageSql = Prisma.sql`COALESCE(invite."updatedAt", invite."createdAt") < ${cutoff}`;
+  const outcomeTimeSql = Prisma.sql`COALESCE(invite."finalizedAt", invite."updatedAt", invite."createdAt")`;
+  const ageSql = Prisma.sql`${outcomeTimeSql} < ${cutoff}`;
 
   // NOT EXISTS is evaluated before LIMIT, so any number of protected team
   // reconciliation rows cannot starve later deletable terminal invitations.
@@ -181,7 +182,7 @@ export const pruneExpiredTerminalInvites = async ({
           WHERE sync."inviteId" = invite."id"
             AND sync."status" = 'PENDING'
         )
-      ORDER BY COALESCE(invite."updatedAt", invite."createdAt") ASC NULLS LAST, invite."id" ASC
+      ORDER BY ${outcomeTimeSql} ASC NULLS LAST, invite."id" ASC
       LIMIT ${TERMINAL_INVITE_CLEANUP_BATCH_SIZE}
     )
     DELETE FROM "Invites" AS invite

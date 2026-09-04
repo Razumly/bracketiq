@@ -592,6 +592,26 @@ describe('/api/invites', () => {
     }), prismaMock);
     expect(prismaMock.teamStaffAssignments.upsert).not.toHaveBeenCalled();
   });
+
+  it('does not allow a create request to mark an invite accepted', async () => {
+    requireSessionMock.mockResolvedValue({ userId: 'manager_1', isAdmin: false });
+    ensureAuthUserAndUserDataByEmailMock.mockResolvedValue({ userId: 'player_1', authUserExisted: true });
+
+    const response = await POST(jsonRequest({
+      invites: [{
+        type: 'TEAM',
+        teamId: 'team_1',
+        email: 'player@example.com',
+        role: 'player',
+        status: 'ACCEPTED',
+      }],
+    }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'New invites must start with PENDING status' });
+    expect(prismaMock.invites.create).not.toHaveBeenCalled();
+    expect(syncCanonicalTeamRosterMock).not.toHaveBeenCalled();
+  });
   it('cleans prior invited staff state when a TEAM invite changes to player', async () => {
     requireSessionMock.mockResolvedValue({ userId: 'manager_1', isAdmin: false });
     ensureAuthUserAndUserDataByEmailMock.mockResolvedValue({ userId: 'player_1', authUserExisted: true });

@@ -51,6 +51,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         where: { id },
         data: {
           status: 'DECLINED',
+          finalizedAt: now,
           updatedAt: now,
         },
       });
@@ -69,6 +70,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       where: { id },
       data: {
         status: 'DECLINED',
+        finalizedAt: now,
         updatedAt: now,
       },
     });
