@@ -171,16 +171,16 @@ describe('duplicate relationship array audit CLI boundaries', () => {
   });
 
   it('rejects artifact paths outside the ignored DATA-007 directory', () => {
-    const cwd = path.join(path.sep, 'tmp', 'mvp-site');
+    const cwd = path.resolve(path.sep, 'tmp', 'mvp-site');
 
     expect(resolveData007ArtifactPath('output/data007/report.json', cwd)).toBe(
       path.join(cwd, 'output', 'data007', 'report.json'),
     );
     expect(() => resolveData007ArtifactPath('output/report.json', cwd)).toThrow(
-      'Artifact paths must be files inside output/data007/.',
+      `Artifact paths must be files inside output${path.sep}data007/.`,
     );
     expect(() => resolveData007ArtifactPath('output/data007/../report.json', cwd)).toThrow(
-      'Artifact paths must be files inside output/data007/.',
+      `Artifact paths must be files inside output${path.sep}data007/.`,
     );
   });
 

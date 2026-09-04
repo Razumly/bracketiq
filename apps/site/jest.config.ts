@@ -16,8 +16,8 @@ const config: Config = {
   testMatch: ['**/?(*.)+(spec|test).[tj]s?(x)'],
   // Per-source affiliate mappings run through focused validation.
   testPathIgnorePatterns: [
-    '<rootDir>/e2e/',
-    '<rootDir>/src/server/affiliateImports/__tests__/.*Source\\.test\\.ts$',
+    'e2e',
+    'affiliateImports.*Source\\.test\\.ts$',
   ],
   transform: {
     '^.+\\.(ts|tsx)$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.jest.json' }],

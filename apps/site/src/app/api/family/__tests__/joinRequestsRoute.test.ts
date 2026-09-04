@@ -3,6 +3,7 @@
 import { NextRequest } from 'next/server';
 
 const prismaMock = {
+  $executeRaw: jest.fn(),
   $transaction: jest.fn(),
   eventRegistrations: {
     findMany: jest.fn(),
@@ -22,6 +23,9 @@ const prismaMock = {
     update: jest.fn(),
   },
   canonicalTeams: {
+    findMany: jest.fn(),
+  },
+  divisions: {
     findMany: jest.fn(),
   },
   userData: {
@@ -72,6 +76,7 @@ const jsonPatch = (url: string, body: unknown) =>
 describe('family join requests routes', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    prismaMock.$executeRaw.mockResolvedValue(0);
     prismaMock.$transaction.mockImplementation(async (callback: (tx: typeof prismaMock) => Promise<unknown>) => callback(prismaMock));
     acquireEventLockAndLoadStructureMock.mockResolvedValue({
       id: 'event_1',
@@ -92,6 +97,7 @@ describe('family join requests routes', () => {
     prismaMock.invites.findUnique.mockResolvedValue(null);
     prismaMock.parentChildLinks.findFirst.mockResolvedValue(null);
     prismaMock.canonicalTeams.findMany.mockResolvedValue([]);
+    prismaMock.divisions.findMany.mockResolvedValue([]);
   });
 
   it('lists pending guardian approval requests', async () => {
@@ -200,11 +206,13 @@ describe('family join requests routes', () => {
       registrantId: 'child_2',
       parentId: 'parent_1',
       registrantType: 'CHILD',
+      rosterRole: 'FREE_AGENT',
       status: 'STARTED',
       consentStatus: 'guardian_approval_required',
     });
     prismaMock.events.findUnique.mockResolvedValue({
       id: 'event_team_1',
+      eventType: 'TOURNAMENT',
       teamSignup: true,
       userIds: ['adult_1'],
       freeAgentIds: ['adult_2'],
@@ -230,7 +238,6 @@ describe('family join requests routes', () => {
       jsonPatch('http://localhost/api/family/join-requests/reg_team_1', { action: 'approve' }),
       { params: Promise.resolve({ registrationId: 'reg_team_1' }) },
     );
-
     expect(response.status).toBe(200);
     expect(prismaMock.eventRegistrations.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 'reg_team_1' },

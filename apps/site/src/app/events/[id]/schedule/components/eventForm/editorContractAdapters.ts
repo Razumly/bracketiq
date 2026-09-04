@@ -537,6 +537,7 @@ export const editorDraftToLegacyEvent = (draft: EventEditorDraft, eventId?: stri
       schedule.isAutomatedScheduling,
     ),
     ...normalizedStaff,
+    fieldIds: resources.fieldIds,
     fields: resources.fields,
     timeSlotIds: resources.timeSlotIds,
     timeSlots: resources.timeSlots,

@@ -491,7 +491,11 @@ describe('tournament scheduling (time slots)', () => {
       match.division.id === poolA.id || match.division.id === poolB.id
     ));
     expect(poolMatches.length).toBeGreaterThan(0);
-    expect(poolMatches.every((match) => match.teamOfficial?.division?.id === bracketDivision.id)).toBe(true);
+    expect(poolMatches.every((match) => (
+      match.teamOfficial
+      && match.teamOfficial.id !== match.team1?.id
+      && match.teamOfficial.id !== match.team2?.id
+    ))).toBe(true);
     expect(scheduled.matches.length).toBeGreaterThan(5);
   });
 

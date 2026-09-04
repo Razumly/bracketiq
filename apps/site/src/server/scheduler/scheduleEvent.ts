@@ -221,6 +221,51 @@ const hasConfiguredSplitDivisionMembership = (
   ));
 };
 
+export const applySplitDivisionRosterAssignments = (
+  league: League,
+  rosterTeamIds: string[],
+): void => {
+  if (league.singleDivision || league.divisions.length === 0) {
+    return;
+  }
+  if (!hasConfiguredSplitDivisionMembership(league, rosterTeamIds)) {
+    // Legacy callers may provide the division on each Team instead of on the
+    // Division membership list.
+    applyRosterToLeagueTeams(league, rosterTeamIds);
+    return;
+  }
+
+  const assignmentState = buildSplitDivisionAssignmentState(league, rosterTeamIds);
+  if (assignmentState.duplicateAssignments.length > 0) {
+    const divisionNameById = new Map<string, string>();
+    for (const division of league.divisions) {
+      divisionNameById.set(division.id, division.name || division.id);
+    }
+    const conflictSummary = assignmentState.duplicateAssignments
+      .map(({ teamId, divisionIds }) => {
+        const divisionNames = divisionIds
+          .map((divisionId) => divisionNameById.get(divisionId) ?? divisionId)
+          .join(', ');
+        return `${formatTeamLabel(league, teamId)} -> ${divisionNames}`;
+      })
+      .join('; ');
+    throw new ScheduleError(
+      `Cannot schedule split-division league because a team is assigned to multiple divisions: ${conflictSummary}.`,
+      'PLAYING_TEAM',
+    );
+  }
+  if (assignmentState.unassignedTeamIds.length > 0) {
+    const unassigned = assignmentState.unassignedTeamIds
+      .map((teamId) => formatTeamLabel(league, teamId))
+      .join(', ');
+    throw new ScheduleError(
+      `Cannot schedule split-division league until all teams are assigned to a division. Unassigned teams: ${unassigned}.`,
+      'PLAYING_TEAM',
+    );
+  }
+  applyRosterToLeagueTeams(league, rosterTeamIds, assignmentState.divisionByTeamId);
+};
+
 
 const OPEN_ENDED_WEEKS = 52;
 const NO_FIELDS_MESSAGE_REGEX = /^Unable to schedule event because no fields are available(?: for divisions:\s*(.+))?\.$/i;
@@ -384,45 +429,7 @@ const buildLeagueSchedule = (
   const splitDivisionMode = !league.singleDivision && league.divisions.length > 0;
 
   if (splitDivisionMode) {
-    const splitMembershipConfigured = hasConfiguredSplitDivisionMembership(league, rosterTeamIds);
-    if (splitMembershipConfigured) {
-      const assignmentState = buildSplitDivisionAssignmentState(league, rosterTeamIds);
-
-      if (assignmentState.duplicateAssignments.length > 0) {
-        const divisionNameById = new Map<string, string>();
-        for (const division of league.divisions) {
-          divisionNameById.set(division.id, division.name || division.id);
-        }
-        const conflictSummary = assignmentState.duplicateAssignments
-          .map(({ teamId, divisionIds }) => {
-            const divisionNames = divisionIds
-              .map((divisionId) => divisionNameById.get(divisionId) ?? divisionId)
-              .join(', ');
-            return `${formatTeamLabel(league, teamId)} -> ${divisionNames}`;
-          })
-          .join('; ');
-        throw new ScheduleError(
-          `Cannot schedule split-division league because a team is assigned to multiple divisions: ${conflictSummary}.`,
-          'PLAYING_TEAM',
-        );
-      }
-
-      if (assignmentState.unassignedTeamIds.length > 0) {
-        const unassigned = assignmentState.unassignedTeamIds
-          .map((teamId) => formatTeamLabel(league, teamId))
-          .join(', ');
-        throw new ScheduleError(
-          `Cannot schedule split-division league until all teams are assigned to a division. Unassigned teams: ${unassigned}.`,
-          'PLAYING_TEAM',
-        );
-      }
-
-      applyRosterToLeagueTeams(league, rosterTeamIds, assignmentState.divisionByTeamId);
-    } else {
-      // Legacy/synthetic callers may still only provide team.division without
-      // explicit division.teamIds membership payloads.
-      applyRosterToLeagueTeams(league, rosterTeamIds);
-    }
+    applySplitDivisionRosterAssignments(league, rosterTeamIds);
   } else {
     applyRosterToLeagueTeams(league, rosterTeamIds);
   }

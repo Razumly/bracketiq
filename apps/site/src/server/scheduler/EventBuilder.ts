@@ -727,8 +727,9 @@ export class EventBuilder {
     if (this.useSplitPlayoffDivisions) {
       const league = this.event as League;
       if (!league.playoffDivisions.length) {
-        throw new Error(
+        throw new ScheduleError(
           "Split playoff divisions are enabled but no playoff divisions are configured. Add at least one playoff division or disable split playoffs.",
+          "PLAYING_TEAM",
         );
       }
       return league.playoffDivisions.some(
@@ -757,8 +758,9 @@ export class EventBuilder {
     }
     const playoffDivisions = this.event.playoffDivisions ?? [];
     if (!playoffDivisions.length) {
-      throw new Error(
+      throw new ScheduleError(
         "Pool play is enabled but no bracket divisions are configured.",
+        "PLAYING_TEAM",
       );
     }
     return playoffDivisions.some(

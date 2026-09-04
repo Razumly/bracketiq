@@ -33,6 +33,13 @@ const defaultCommandRunner: AffiliateAgentCommandRunner = async (input) => {
   };
 };
 
+const resolveToolExecutable = (toolchainRoot: string, name: string): string => path.join(
+  toolchainRoot,
+  'node_modules',
+  '.bin',
+  process.platform === 'win32' ? `${name}.cmd` : name,
+);
+
 const safeSourceKey = (value: string): string => {
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value)) {
     throw new Error('Generated-source test id contains an unsafe source key.');
@@ -97,7 +104,7 @@ export class AffiliateAgentValidationExecutor {
     await fs.symlink(
       path.join(this.toolchainRoot, 'node_modules'),
       worktreeNodeModules,
-      'dir',
+      process.platform === 'win32' ? 'junction' : 'dir',
     );
   }
 
@@ -108,7 +115,7 @@ export class AffiliateAgentValidationExecutor {
     const testPaths = focusedTestPaths(testId);
     await this.ensurePinnedDependencies();
     const result = await this.commandRunner({
-      executable: path.join(this.toolchainRoot, 'node_modules/.bin/jest'),
+      executable: resolveToolExecutable(this.toolchainRoot, 'jest'),
       args: ['--runInBand', ...testPaths],
       cwd: this.worktreeRoot,
       timeoutMs: 5 * 60 * 1000,
@@ -135,7 +142,7 @@ export class AffiliateAgentValidationExecutor {
     const safeKey = safeSourceKey(sourceKey);
     const setupPath = `scripts/setup-${safeKey}-affiliate-source.ts`;
     const result = await this.commandRunner({
-      executable: path.join(this.toolchainRoot, 'node_modules/.bin/tsx'),
+      executable: resolveToolExecutable(this.toolchainRoot, 'tsx'),
       args: [setupPath, '--scrape'],
       cwd: this.worktreeRoot,
       timeoutMs: 10 * 60 * 1000,

@@ -15,8 +15,8 @@ describe("affiliate reconciliation post-apply snapshot migration", () => {
     expect(migration.trimEnd()).toMatch(/COMMIT;$/);
     expect(migration).toContain("NOT (OLD.\"reportJson\" ? 'postApplyLegacySnapshotHash')");
     expect(migration).toContain("NEW.\"reportJson\" ? 'postApplyLegacySnapshotHash'");
-    expect(migration).toContain(
-      "NEW.\"reportJson\" - 'cutoverSessionId' - 'cutoverSessionHash'\n      - 'postApplyLegacySnapshotHash' = OLD.\"reportJson\"",
+    expect(migration).toMatch(
+      /NEW\.\"reportJson\"\s+-\s+'cutoverSessionId'\s+-\s+'cutoverSessionHash'\s+-\s+'postApplyLegacySnapshotHash'\s*=\s*OLD\.\"reportJson\"/,
     );
     expect(migration).toContain(
       "NEW.\"reportJson\"->>'postApplyLegacySnapshotHash' ~* '^[0-9a-f]{64}$'",

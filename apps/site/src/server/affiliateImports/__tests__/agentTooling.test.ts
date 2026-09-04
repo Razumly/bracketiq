@@ -2,6 +2,7 @@
 
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { AffiliateAgentToolbox } from '../agentTooling';
 
@@ -81,7 +82,7 @@ describe('affiliate mapping bounded agent tools', () => {
   let artifactSha256: string;
 
   beforeEach(async () => {
-    temporaryDirectory = await fs.mkdtemp('/tmp/affiliate-agent-tools-');
+    temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'affiliate-agent-tools-'));
     evidenceDirectory = path.join(temporaryDirectory, 'evidence');
     repositoryRoot = path.join(temporaryDirectory, 'repository');
     writableRoot = path.join(temporaryDirectory, 'worktree');

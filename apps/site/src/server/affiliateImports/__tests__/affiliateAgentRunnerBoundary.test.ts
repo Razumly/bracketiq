@@ -218,7 +218,9 @@ const runSingleChildScenario = async (
     await rm(socketDirectory, { recursive: true, force: true });
   }
 };
-describe("executable affiliate agent runner boundary", () => {
+const posixOnlyDescribe = process.platform === 'win32' ? describe.skip : describe;
+
+posixOnlyDescribe("executable affiliate agent runner boundary", () => {
   it("emits the pinned Codex model and enables child network access", async () => {
     const terminal = {
       kind: "TERMINAL_SUBMISSION",

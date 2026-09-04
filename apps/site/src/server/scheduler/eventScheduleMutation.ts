@@ -56,6 +56,7 @@ import type { EventEditorScheduleDiagnostics } from "@/contracts/eventEditor";
 import { Division, League, Match, SchedulerContext, Tournament } from "./types";
 import {
   finalizeOpenEndedSchedule,
+  applySplitDivisionRosterAssignments,
   prepareSchedulePlacementWindow,
   scheduleEvent,
   ScheduleError,
@@ -1531,6 +1532,18 @@ const buildPartialSchedule = (
     event.maxParticipants = participantCount;
   }
   prepareSchedulePlacementWindow(event, includePlaceholderTeams);
+  if (event instanceof League) {
+    const rosterTeamIds = Array.from(
+      new Set(
+        (Array.isArray(event.registeredTeamIds) && event.registeredTeamIds.length
+          ? event.registeredTeamIds
+          : Object.keys(event.teams))
+          .map((teamId) => String(teamId).trim())
+          .filter((teamId) => teamId.length > 0 && Boolean(event.teams[teamId])),
+      ),
+    );
+    applySplitDivisionRosterAssignments(event, rosterTeamIds);
+  }
   const builder = new EventBuilder(event, context, {
     includePlaceholderTeams,
     canUseCandidate,

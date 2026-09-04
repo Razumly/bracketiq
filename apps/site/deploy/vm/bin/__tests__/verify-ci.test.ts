@@ -39,7 +39,9 @@ function workflowRun(overrides: Record<string, unknown> = {}) {
   };
 }
 
-describe('production CI gate', () => {
+const posixOnlyDescribe = process.platform === 'win32' ? describe.skip : describe;
+
+posixOnlyDescribe('production CI gate', () => {
   test('accepts an exact successful main push CI run', () => {
     const result = runVerifier({ workflow_runs: [workflowRun()] });
 

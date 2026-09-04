@@ -5,7 +5,7 @@ import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
 import { chmod, lstat, mkdir, readdir, mkdtemp, rm, stat } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
 
 import {
@@ -36,6 +36,7 @@ const runnerScriptPath = join(
   "scripts",
   "run-affiliate-agent-runner.ts",
 );
+const posixOnly = process.platform === 'win32' ? it.skip : it;
 
 const staleRecoveryReservation = {
   reservationId: "stale-recovery-test-reservation",
@@ -237,7 +238,7 @@ describe("affiliate agent supervisor CLI", () => {
     expect(control.admissionState.admissionHaltError).toBeNull();
   });
 
-  it("does not unlink another process's live runner socket when startup is rejected", async () => {
+  posixOnly("does not unlink another process's live runner socket when startup is rejected", async () => {
     const { publicKey } = generateKeyPairSync("ed25519");
     const root = await mkdtemp(join(tmpdir(), "affiliate-runner-live-"));
     const socketPath = join(root, "runner.sock");
@@ -682,9 +683,11 @@ describe("affiliate agent supervisor CLI", () => {
       });
       try {
         expect(await readdir(workspace.path)).toEqual([".codex"]);
-        expect((await stat(root)).mode & 0o777).toBe(0o710);
-        expect((await stat(workspace.path)).mode & 0o777).toBe(0o550);
-        expect((await stat(workspace.codexHome!)).mode & 0o777).toBe(0o770);
+        if (process.platform !== 'win32') {
+          expect((await stat(root)).mode & 0o777).toBe(0o710);
+          expect((await stat(workspace.path)).mode & 0o777).toBe(0o550);
+          expect((await stat(workspace.codexHome!)).mode & 0o777).toBe(0o770);
+        }
       } finally {
         await manager.destroy(workspace.path);
       }
@@ -709,7 +712,7 @@ describe("affiliate agent supervisor CLI", () => {
         mode: "READ_ONLY",
       });
       try {
-        expect(await readdir(root)).toEqual([workspace.path.split("/").pop()]);
+        expect(await readdir(root)).toEqual([basename(workspace.path)]);
         await expect(readdir(stalePath)).rejects.toMatchObject({ code: "ENOENT" });
       } finally {
         await manager.destroy(workspace.path);
@@ -732,7 +735,7 @@ describe("affiliate agent supervisor CLI", () => {
         mode: "READ_ONLY",
       });
       try {
-        expect(await readdir(root)).toEqual([workspace.path.split("/").pop()]);
+        expect(await readdir(root)).toEqual([basename(workspace.path)]);
         await expect(readdir(stalePath)).rejects.toMatchObject({ code: "ENOENT" });
       } finally {
         await manager.destroy(workspace.path);

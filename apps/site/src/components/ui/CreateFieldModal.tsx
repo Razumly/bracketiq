@@ -59,9 +59,16 @@ export default function CreateFieldModal(props: CreateFieldModalProps) {
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState<FieldFormState>(() => createEmptyState(organization, defaultFacilityId));
   const [locationSelected, setLocationSelected] = useState(false);
-  const [sportsLoading, setSportsLoading] = useState(false);
-  const [sportsError, setSportsError] = useState<string | null>(null);
-  const [sportOptions, setSportOptions] = useState<ResourceSportOption[]>([]);
+  // Keep the selector disabled until the first catalog request settles. This
+  // prevents a fast click from opening an empty menu during initial loading.
+  const [sportsCatalog, setSportsCatalog] = useState<{
+    status: 'loading' | 'ready' | 'error';
+    options: ResourceSportOption[];
+    error: string | null;
+  }>({ status: 'loading', options: [], error: null });
+  const sportsLoading = sportsCatalog.status === 'loading';
+  const sportsError = sportsCatalog.error;
+  const sportOptions = sportsCatalog.options;
 
   const isEditMode = useMemo(() => Boolean(field?.$id), [field]);
   const facilityOptions = useMemo(
@@ -81,32 +88,28 @@ export default function CreateFieldModal(props: CreateFieldModalProps) {
     }
 
     let cancelled = false;
-    setSportsLoading(true);
-    setSportsError(null);
+    setSportsCatalog({ status: 'loading', options: [], error: null });
     sportsService.getAll()
       .then((sports) => {
         if (cancelled) {
           return;
         }
-        setSportOptions(
-          sports
-            .filter((sport) => sport.$id || sport.name)
-            .map((sport) => ({
-              value: sport.$id || sport.name,
-              label: sport.name || sport.$id,
-            })),
-        );
+        const options = sports
+          .filter((sport) => sport.$id || sport.name)
+          .map((sport) => ({
+            value: sport.$id || sport.name,
+            label: sport.name || sport.$id,
+          }));
+        setSportsCatalog({ status: 'ready', options, error: null });
       })
       .catch((error) => {
         console.error('Failed to load sports for resource form:', error);
         if (!cancelled) {
-          setSportsError('Sports could not be loaded. You can save the resource and add sports later.');
-          setSportOptions([]);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setSportsLoading(false);
+          setSportsCatalog({
+            status: 'error',
+            options: [],
+            error: 'Sports could not be loaded. You can save the resource and add sports later.',
+          });
         }
       });
 

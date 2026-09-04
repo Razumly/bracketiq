@@ -24,7 +24,7 @@ describe('CI quality gates', () => {
     const workflow = fs.readFileSync(
       path.resolve(process.cwd(), '..', '..', '.github', 'workflows', 'site-ci.yml'),
       'utf8',
-    );
+    ).replace(/\r\n/g, '\n');
 
     expect(workflow).toMatch(/^on:\n  pull_request:\n  push:/m);
     expect(workflow).toContain('run: npm ci');
@@ -40,7 +40,7 @@ describe('CI quality gates', () => {
     expect(testCiScript).not.toContain('--runInBand');
     expect(testCiScript).toContain('coverage:check-routes');
     expect(jestConfig.testPathIgnorePatterns).toContain(
-      '<rootDir>/src/server/affiliateImports/__tests__/.*Source\\.test\\.ts$',
+      'affiliateImports.*Source\\.test\\.ts$',
     );
     expect(affiliateMappingScript).toContain('--testPathPatterns');
   });

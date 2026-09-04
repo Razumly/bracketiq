@@ -27,7 +27,7 @@ describe('affiliate logo fit preview controls', () => {
       '--output=tmp/one-logo-fit',
     ], '/repo')).toEqual({
       useLive: true,
-      outputRoot: '/repo/tmp/one-logo-fit',
+      outputRoot: path.resolve('/repo', 'tmp/one-logo-fit'),
       scope: { mode: 'ORGANIZATION', organizationId: 'affiliate_org_one' },
     });
     expect(parseAffiliateLogoFitOptions(['--all'], '/repo').scope).toEqual({ mode: 'ALL' });

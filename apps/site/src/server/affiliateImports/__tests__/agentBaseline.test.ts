@@ -1,5 +1,7 @@
 /** @jest-environment node */
 
+import os from 'node:os';
+import path from 'node:path';
 import {
   buildAffiliateMappingAgentBaseline,
   listAffiliateSetupScripts,
@@ -197,7 +199,7 @@ describe('affiliate mapping agent baseline', () => {
 
   it('discovers only source setup scripts', async () => {
     const fs = jest.requireActual<typeof import('node:fs/promises')>('node:fs/promises');
-    const temporaryDirectory = await fs.mkdtemp('/tmp/affiliate-agent-baseline-');
+    const temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'affiliate-agent-baseline-'));
     try {
       await Promise.all([
         fs.writeFile(`${temporaryDirectory}/setup-river-affiliate-source.ts`, ''),

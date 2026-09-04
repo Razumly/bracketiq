@@ -63,6 +63,9 @@ const prismaMock = {
     findUnique: jest.fn(),
     update: jest.fn(),
   },
+  divisions: {
+    update: jest.fn(),
+  },
   eventEditorMaintenanceOperations: {
     findUnique: operationFindUniqueMock,
     create: operationCreateMock,
@@ -151,7 +154,7 @@ type ProposalMatch = {
 
 type MaintenanceProposalResponse = {
   status: 'PROPOSED';
-  contractVersion: 3;
+  contractVersion: 4;
   eventId: string;
   operation: 'REBUILD';
   operationId: string;
@@ -337,7 +340,7 @@ const makeLeague = (variant: FixtureVariant): League => {
 };
 
 const maintenanceRequest = (operationId: string) => ({
-  contractVersion: 3,
+  contractVersion: 4,
   eventId,
   operation: 'REBUILD' as const,
   operationId,
@@ -374,6 +377,7 @@ describe('event schedule route - split divisions regression', () => {
       automatedScheduling: true,
     });
     prismaMock.events.update.mockResolvedValue(undefined);
+    prismaMock.divisions.update.mockResolvedValue(undefined);
     requireSessionMock.mockResolvedValue({ userId: 'host_1', isAdmin: false });
     acquireEventLockMock.mockResolvedValue(undefined);
     acquireFieldLocksMock.mockResolvedValue(undefined);
@@ -387,7 +391,11 @@ describe('event schedule route - split divisions regression', () => {
     loadEventProtectedHistoryMock.mockResolvedValue({
       protectedMatchIds: new Set<string>(),
     });
-    loadFieldBlockerCatalogMock.mockResolvedValue({});
+    loadFieldBlockerCatalogMock.mockResolvedValue({
+      lowerBound: new Date('2026-01-03T00:00:00.000Z'),
+      intervalsByFieldId: new Map(),
+      recurringByFieldId: new Map(),
+    });
     findFieldConflictsForIntervalMock.mockReturnValue([]);
     persistScheduledRosterTeamsMock.mockResolvedValue(undefined);
     saveMatchesMock.mockResolvedValue(undefined);
@@ -461,7 +469,7 @@ describe('event schedule route - split divisions regression', () => {
     expect(proposalResponse.status).toBe(200);
     expect(proposal).toEqual(expect.objectContaining({
       status: 'PROPOSED',
-      contractVersion: 3,
+      contractVersion: 4,
       eventId,
       operation: 'REBUILD',
       operationId: request.operationId,
@@ -494,7 +502,7 @@ describe('event schedule route - split divisions regression', () => {
     expect(prismaMock.events.update).not.toHaveBeenCalled();
 
     const acceptanceRequest = {
-      contractVersion: 3,
+      contractVersion: 4,
       eventId: proposal.eventId,
       operation: proposal.operation,
       operationId: proposal.operationId,

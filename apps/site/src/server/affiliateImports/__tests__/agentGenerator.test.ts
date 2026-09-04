@@ -1,6 +1,8 @@
 /** @jest-environment node */
 
 import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import ts from 'typescript';
 import {
   renderAffiliateSourceDraft,
@@ -149,7 +151,7 @@ describe('affiliate mapping deterministic generator', () => {
   });
 
   it('writes idempotently and refuses to overwrite human changes', async () => {
-    const temporaryDirectory = await fs.mkdtemp('/tmp/affiliate-agent-generator-');
+    const temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'affiliate-agent-generator-'));
     const files = renderAffiliateSourceDraft(draft, ['Grass Soccer']);
     try {
       const first = await writeAffiliateGeneratedFiles({

@@ -166,7 +166,7 @@ export const StaffManagementPanel = ({
             allowMatchRosterEdits={Boolean(eventData.allowMatchRosterEdits)}
             onRosterEditsChange={onRosterEditsChange}
         /> : null}
-        {showDedicatedOfficials || showCustomOfficialPositions ? <StaffOfficialPositionEditor
+        <StaffOfficialPositionEditor
             staffingPriority={eventData.staffingPriority}
             officialPositions={eventData.officialPositions || []}
             sportDefaultPositionCount={sportDefaultPositionCount}
@@ -178,8 +178,11 @@ export const StaffManagementPanel = ({
             onAddPosition={onAddPosition}
             onUpdatePosition={onUpdatePosition}
             onRemovePosition={onRemovePosition}
-            showPositions={showCustomOfficialPositions}
-        /> : null}
+            showPositions={
+                showCustomOfficialPositions
+                && eventData.staffingPriority !== 'TEAM_COVERAGE_REQUIRED'
+            }
+        />
 
         {showStaffAssignments || showDedicatedOfficials ? isOrganizationHostedEvent ? (
             <StaffOrganizationRosterPicker

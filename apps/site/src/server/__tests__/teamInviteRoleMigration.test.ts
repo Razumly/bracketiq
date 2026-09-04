@@ -9,7 +9,7 @@ describe('TEAM invite role migration', () => {
       __dirname,
       '../../../prisma/migrations/20260820100000_add_team_invite_role/migration.sql',
     );
-    const sql = fs.readFileSync(migrationPath, 'utf8');
+    const sql = fs.readFileSync(migrationPath, 'utf8').replace(/\r\n/g, '\n');
 
     const nullableAddIndex = sql.indexOf('ADD COLUMN IF NOT EXISTS "staffTypes" TEXT[]');
     const staffTypesBackfillIndex = sql.indexOf('SET "staffTypes" = ARRAY[]::TEXT[]');
