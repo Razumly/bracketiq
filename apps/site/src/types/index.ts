@@ -665,7 +665,7 @@ export interface UserData {
 
 export type StaffMemberType = 'HOST' | 'OFFICIAL' | 'STAFF';
 export type InviteType = 'STAFF' | 'TEAM' | 'EVENT';
-export type InviteStatus = 'PENDING' | 'DECLINED' | 'FAILED';
+export type InviteStatus = 'PENDING' | 'DECLINED' | 'FAILED' | 'ACCEPTED';
 export type TeamInviteRole = 'player' | 'team_manager' | 'team_head_coach' | 'team_assistant_coach';
 export type OrganizationRoleKind = 'OWNER' | 'STAFF' | 'HOST' | 'OFFICIAL';
 

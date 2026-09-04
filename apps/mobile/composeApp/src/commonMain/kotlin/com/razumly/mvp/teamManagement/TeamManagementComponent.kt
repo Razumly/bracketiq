@@ -290,6 +290,7 @@ class DefaultTeamManagementComponent(
         val playerIdsToExclude = buildSet {
             user.id.takeIf(String::isNotBlank)?.let(::add)
             team?.players?.forEach { add(it.id) }
+            team?.pendingPlayers?.forEach { add(it.id) }
         }
         val filteredFreeAgents = (context.users + eventUsers)
             .distinctBy(UserData::id)
@@ -464,7 +465,8 @@ class DefaultTeamManagementComponent(
                             name = invite.displayName,
                             role = invite.role.label,
                             url = url,
-                            emailSent = invite.email.trim().matches(Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")),
+                            emailSent = invite.email.trim().matches(Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")) && !result.deliveryFailed,
+                            deliveryFailed = result.deliveryFailed,
                         )
                     }
                 }
@@ -484,7 +486,8 @@ class DefaultTeamManagementComponent(
                             name = "${invite.firstName} ${invite.lastName}".trim(),
                             role = "Player",
                             url = url,
-                            emailSent = invite.email.trim().matches(Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")),
+                            emailSent = invite.email.trim().matches(Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")) && !result.deliveryFailed,
+                            deliveryFailed = result.deliveryFailed,
                         )
                     }
                 }
@@ -661,7 +664,8 @@ class DefaultTeamManagementComponent(
                             else -> "Player"
                         },
                         url = url,
-                        emailSent = !invite.email.isNullOrBlank(),
+                        emailSent = !invite.email.isNullOrBlank() && !result.deliveryFailed,
+                        deliveryFailed = result.deliveryFailed,
                     )
                 }
             }.onFailure {

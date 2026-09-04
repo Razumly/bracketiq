@@ -21,7 +21,9 @@ import {
 
 export const dynamic = 'force-dynamic';
 
-const ACTIVE_REGISTRATION_STATUSES = ['ACTIVE', 'PENDING', 'STARTED'] as const;
+// Pending roster entries need the same document readiness view as active
+// members. They reserve a slot but do not grant Team access.
+const ACTIVE_REGISTRATION_STATUSES = ['ACTIVE', 'PENDING', 'STARTED', 'INVITED'] as const;
 
 const normalizeId = (value: unknown): string | null => {
   if (typeof value !== 'string') return null;

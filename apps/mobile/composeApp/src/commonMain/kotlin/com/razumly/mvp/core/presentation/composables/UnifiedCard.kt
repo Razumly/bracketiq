@@ -26,6 +26,7 @@ fun UnifiedCard(
     leadingContent: @Composable (() -> Unit)? = null,
     trailingContent: @Composable (() -> Unit)? = null,
     isPending: Boolean = false,
+    pendingLabel: String = "Invite Sent",
     showDivider: Boolean = true,
 ) {
     val userHandle = (entity as? UserData)
@@ -87,7 +88,7 @@ fun UnifiedCard(
 
                 if (isPending) {
                     Text(
-                        text = "Invite Sent",
+                        text = pendingLabel,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

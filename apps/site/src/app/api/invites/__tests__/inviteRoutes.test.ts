@@ -64,6 +64,7 @@ const hasOrgPermissionMock = jest.fn();
 const hasDocumentEvidenceOwnerAccessMock = jest.fn();
 const loadCanonicalTeamByIdMock = jest.fn();
 const acquireEventLockMock = jest.fn();
+const acquireTeamRosterLockMock = jest.fn();
 const acquireOrganizationStaffMemberLockMock = jest.fn();
 const acquireOrganizationStaffAssignmentLockMock = jest.fn();
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
@@ -91,6 +92,7 @@ jest.mock('@/server/teams/teamMembership', () => ({
 }));
 jest.mock('@/server/repositories/locks', () => ({
   acquireEventLock: (...args: unknown[]) => acquireEventLockMock(...args),
+  acquireTeamRosterLock: (...args: unknown[]) => acquireTeamRosterLockMock(...args),
   acquireOrganizationStaffMemberLock: (...args: unknown[]) => acquireOrganizationStaffMemberLockMock(...args),
   acquireOrganizationStaffAssignmentLock: (...args: unknown[]) => acquireOrganizationStaffAssignmentLockMock(...args),
 }));
@@ -180,7 +182,7 @@ describe('/api/invites', () => {
       where: {
         AND: [
           { userId: 'user_1', type: 'TEAM' },
-          { OR: [{ status: null }, { status: { in: ['PENDING', 'SENT'] } }] },
+          { OR: [{ status: null }, { status: { in: ['PENDING', 'SENT', 'FAILED'] } }] },
         ],
       },
       orderBy: [
@@ -216,7 +218,7 @@ describe('/api/invites', () => {
       where: {
         AND: [
           { type: 'TEAM', teamId: 'team_1' },
-          { OR: [{ status: null }, { status: { in: ['PENDING', 'SENT'] } }] },
+          { OR: [{ status: null }, { status: { in: ['PENDING', 'SENT', 'FAILED'] } }] },
         ],
       },
       orderBy: [
@@ -264,7 +266,7 @@ describe('/api/invites', () => {
       where: {
         AND: [
           { userId: 'user_1' },
-          { status: { in: ['DECLINED', 'REJECTED', 'FAILED'] } },
+          { status: { in: ['DECLINED', 'REJECTED', 'FAILED', 'ACCEPTED'] } },
         ],
       },
       take: 11,
@@ -315,7 +317,7 @@ describe('/api/invites', () => {
   it('rejects invalid list filters and malformed cursors', async () => {
     requireSessionMock.mockResolvedValue({ userId: 'user_1', isAdmin: false });
 
-    const invalidStatus = await GET(new NextRequest('http://localhost/api/invites?status=ACCEPTED'));
+    const invalidStatus = await GET(new NextRequest('http://localhost/api/invites?status=UNKNOWN'));
     const conflictingMode = await GET(new NextRequest('http://localhost/api/invites?history=true&status=DECLINED'));
     const invalidCursor = await GET(new NextRequest('http://localhost/api/invites?cursor=not-a-json-cursor'));
 

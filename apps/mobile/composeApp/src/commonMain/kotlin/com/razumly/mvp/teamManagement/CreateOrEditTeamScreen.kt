@@ -68,8 +68,8 @@ import com.razumly.mvp.core.data.dataTypes.TeamStaffAssignment
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.activeStaffAssignments
+import com.razumly.mvp.core.data.dataTypes.countsTowardTeamCapacity
 import com.razumly.mvp.core.data.dataTypes.isActive
-import com.razumly.mvp.core.data.dataTypes.isStarted
 import com.razumly.mvp.core.data.dataTypes.normalizedRole
 import com.razumly.mvp.core.data.dataTypes.skillsForSport
 import com.razumly.mvp.core.data.dataTypes.toDropdownOptions
@@ -413,7 +413,7 @@ fun CreateOrEditTeamScreen(
             playersInTeam.map(UserData::id).filter(String::isNotBlank).forEach(::add)
             invitedPlayers.map(UserData::id).filter(String::isNotBlank).forEach(::add)
             syncedTeam.playerRegistrations
-                .filter(TeamPlayerRegistration::isStarted)
+                .filter(TeamPlayerRegistration::countsTowardTeamCapacity)
                 .map(TeamPlayerRegistration::userId)
                 .filter(String::isNotBlank)
                 .forEach(::add)
@@ -1885,6 +1885,7 @@ private fun TeamPlayerRosterRow(
                 PlayerCard(
                     player = player,
                     isPending = isPending,
+                    pendingLabel = "Awaiting player",
                     modifier = Modifier.fillMaxWidth(),
                     jerseyNumber = jerseyNumber,
                     trailingContent = {
@@ -1900,6 +1901,7 @@ private fun TeamPlayerRosterRow(
                     PlayerCard(
                         player = player,
                         isPending = isPending,
+                        pendingLabel = "Awaiting player",
                         modifier = Modifier.fillMaxWidth(),
                         jerseyNumber = jerseyNumber,
                         showDivider = false,
@@ -1926,6 +1928,7 @@ private fun TeamPlayerRosterRow(
                     PlayerCard(
                         player = player,
                         isPending = isPending,
+                        pendingLabel = "Awaiting player",
                         modifier = Modifier.weight(1f),
                         jerseyNumber = jerseyNumber,
                         showDivider = false,

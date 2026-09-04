@@ -11,6 +11,7 @@ fun PlayerCard(
     modifier: Modifier = Modifier,
     jerseyNumber: String? = null,
     trailingContent: @Composable (() -> Unit)? = null,
+    pendingLabel: String = "Invite Sent",
     showDivider: Boolean = true,
 ) {
     UnifiedCard(
@@ -19,6 +20,7 @@ fun PlayerCard(
         modifier = modifier,
         avatarJerseyNumber = jerseyNumber,
         trailingContent = trailingContent,
+        pendingLabel = pendingLabel,
         showDivider = showDivider,
     )
 }

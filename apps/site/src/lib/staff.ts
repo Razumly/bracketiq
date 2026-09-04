@@ -3,7 +3,7 @@ import type { Invite, InviteStatus, InviteType, StaffMember, StaffMemberType, Te
 export const STAFF_MEMBER_TYPES = ['HOST', 'OFFICIAL', 'STAFF'] as const;
 export const STAFF_ACCESS_TYPES = ['HOST', 'STAFF'] as const;
 export const INVITE_TYPES = ['STAFF', 'TEAM', 'EVENT'] as const;
-export const INVITE_STATUSES = ['PENDING', 'DECLINED', 'FAILED'] as const;
+export const INVITE_STATUSES = ['PENDING', 'DECLINED', 'FAILED', 'ACCEPTED'] as const;
 
 const LEGACY_TEAM_INVITE_TYPES = new Set([
   'PLAYER',
@@ -87,6 +87,9 @@ export const normalizeInviteStatus = (value: unknown): InviteStatus | null => {
   }
   if (normalized === 'FAILED') {
     return 'FAILED';
+  }
+  if (normalized === 'ACCEPTED') {
+    return 'ACCEPTED';
   }
   return null;
 };
@@ -181,6 +184,9 @@ export const getBlockingStaffInvite = (
       continue;
     }
     const status = normalizeInviteStatus(invite.status) ?? 'PENDING';
+    if (status === 'ACCEPTED') {
+      continue;
+    }
     return status;
   }
   return null;

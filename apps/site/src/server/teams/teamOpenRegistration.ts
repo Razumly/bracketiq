@@ -25,6 +25,7 @@ import {
   resolveSerializedTeamJoinPolicy,
 } from '@/server/teams/teamJoinPolicy';
 import { syncCanonicalTeamFutureEventSnapshots } from '@/server/teams/teamEventSnapshotSync';
+import { acquireTeamRosterLock } from '@/server/repositories/locks';
 
 type PrismaLike = any;
 
@@ -366,6 +367,11 @@ export const reserveTeamRegistrationSlot = async ({
 
   const cutoff = new Date(now.getTime() - TEAM_REGISTRATION_STARTED_TTL_MS);
   return prisma.$transaction(async (tx) => {
+    // Use the same transaction lock as manager invites and roster edits.
+    // This serializes capacity checks across every supported write path.
+    if (typeof tx?.$executeRaw === 'function') {
+      await acquireTeamRosterLock(tx, normalizedTeamId);
+    }
     const lockedTeams = await tx.$queryRaw<LockedTeamRow[]>`
       SELECT
         "id",
@@ -445,6 +451,9 @@ export const reserveTeamRegistrationSlot = async ({
     }
     if (existingStatus === PENDING_MEMBER_STATUS) {
       return { ok: false, status: 409, error: 'Payment is pending for this team registration.' };
+    }
+    if (existingStatus === 'INVITED') {
+      return { ok: false, status: 409, error: 'Accept the team invitation before registering for this team.' };
     }
     if (existing && existingStatus === STARTED_MEMBER_STATUS && status === STARTED_MEMBER_STATUS) {
       const existingCreatedAt = existing.createdAt ?? now;

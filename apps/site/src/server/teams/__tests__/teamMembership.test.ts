@@ -322,6 +322,8 @@ describe('syncCanonicalTeamRoster', () => {
       },
       select: {
         id: true,
+        createdAt: true,
+        updatedAt: true,
         email: true,
         status: true,
         userId: true,

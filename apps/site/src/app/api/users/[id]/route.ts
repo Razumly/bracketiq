@@ -12,7 +12,13 @@ import {
 import { resolveRequiredProfileFieldsCompletedAt } from '@/server/profileCompletion';
 import { mergeNotificationSettings } from '@/lib/notificationSettings';
 import { normalizeOnboardingIntent } from '@/lib/onboardingIntent';
-import { applyUserPrivacy, createVisibilityContext, currentUserSelect, publicUserSelect } from '@/server/userPrivacy';
+import {
+  applyUserPrivacy,
+  canViewPendingRosterIdentity,
+  createVisibilityContext,
+  currentUserSelect,
+  publicUserSelect,
+} from '@/server/userPrivacy';
 import { findPresentKeys, findUnknownKeys, parseStrictEnvelope } from '@/server/http/strictPatch';
 import { withDerivedCanonicalTeamIds } from '@/server/teams/teamMembership';
 import { isFutureDateOfBirth, parseDateOfBirth } from '@/lib/dateOfBirth';
@@ -124,6 +130,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     teamId: parseContextId(query.get('teamId')),
     eventId: parseContextId(query.get('eventId')),
   });
+  if (!canViewPendingRosterIdentity(visibilityContext, id)) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
   const [userWithDerivedTeamIds] = await withDerivedCanonicalTeamIds([user], prisma);
   return NextResponse.json({ user: applyUserPrivacy(userWithDerivedTeamIds, visibilityContext) }, { status: 200 });
 }

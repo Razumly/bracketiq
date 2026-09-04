@@ -106,6 +106,7 @@ data class TeamBuilderCreatedInviteLink(
     val role: String,
     val url: String,
     val emailSent: Boolean,
+    val deliveryFailed: Boolean = false,
 )
 
 private enum class TeamBuilderStep(val label: String) {

@@ -43,6 +43,7 @@ import {
   toDeleteOrArchiveResponse,
 } from '@/server/deletion/archivePolicy';
 import { protectAffiliateRow } from '@/server/affiliateOutbound';
+import { acquireTeamRosterLock } from '@/server/repositories/locks';
 
 export const dynamic = 'force-dynamic';
 
@@ -415,6 +416,36 @@ const withTeamRoleAliases = (team: Record<string, any>) => {
   };
 };
 
+const canViewPendingRoster = (
+  team: Record<string, any>,
+  session: { userId: string; isAdmin: boolean } | null,
+): boolean => {
+  if (!session) return false;
+  if (session.isAdmin) return true;
+  return Boolean(
+    team.captainId === session.userId
+    || team.managerId === session.userId
+    || team.headCoachId === session.userId
+    || toUniqueStrings(team.coachIds ?? team.assistantCoachIds).includes(session.userId),
+  );
+};
+
+const protectPendingRoster = (
+  team: Record<string, any>,
+  canView: boolean,
+): Record<string, any> => {
+  if (canView) return team;
+  return {
+    ...team,
+    pending: [],
+    playerRegistrations: Array.isArray(team.playerRegistrations)
+      ? team.playerRegistrations.filter((registration: any) => (
+        String(registration?.status ?? '').toUpperCase() !== 'INVITED'
+      ))
+      : team.playerRegistrations,
+  };
+};
+
 const getTeamsDelegate = (client: any) => client?.teams;
 const updateTeamWithSchemaContract = async (
   teamsDelegate: any,
@@ -487,7 +518,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       isAdmin: session.isAdmin,
     }, prisma)
     : false;
-  const responseTeam = withTeamRoleAliases(team as any);
+  const responseTeam = protectPendingRoster(
+    withTeamRoleAliases(team as any),
+    canExposeAffiliateDestination || canViewPendingRoster(team as Record<string, any>, session),
+  );
   return NextResponse.json(
     canExposeAffiliateDestination ? responseTeam : protectAffiliateRow(responseTeam, 'team'),
     { status: 200 },
@@ -585,6 +619,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const shouldSyncDerivedTeams = hasVersionedProfileChanges(payload, existingCanonical as Record<string, any>, nextState);
     let createdPendingInvites: CreatedPendingTeamInviteRecord[] = [];
     const updated = await prisma.$transaction(async (tx) => {
+      if (typeof tx?.$executeRaw === 'function') {
+        await acquireTeamRosterLock(tx, id);
+      }
       await tx.canonicalTeams.update({
         where: { id },
         data: {
@@ -633,11 +670,29 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
       await syncTeamChatInTx(tx, id, { previousMemberIds });
     });
+    let inviteDeliveryFailed = false;
+    let deliveredInvites: any[] = [];
     if (createdPendingInvites.length) {
-      await sendInviteEmails(createdPendingInvites, getRequestOrigin(req));
+      try {
+        deliveredInvites = await sendInviteEmails(createdPendingInvites, getRequestOrigin(req));
+      } catch (error) {
+        // The database transaction already committed. Keep that result and
+        // report delivery failure so the client can retry delivery safely.
+        inviteDeliveryFailed = true;
+        console.warn('Team roster save committed but invite delivery failed', error);
+      }
     }
     const refreshed = await loadCanonicalTeamById(id, prisma);
-    return NextResponse.json(withTeamRoleAliases((refreshed ?? updated) as any), { status: 200 });
+    return NextResponse.json({
+      ...withTeamRoleAliases((refreshed ?? updated) as any),
+      delivery: {
+        attempted: createdPendingInvites.length > 0,
+        failed: inviteDeliveryFailed || deliveredInvites.some(
+          (invite) => String(invite.status ?? '').toUpperCase() === 'FAILED',
+        ),
+        inviteIds: createdPendingInvites.map((invite) => invite.id),
+      },
+    }, { status: 200 });
   }
 
   const teamsDelegate = getTeamsDelegate(prisma);
@@ -700,6 +755,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   let updated: Record<string, unknown>;
   try {
     updated = await prisma.$transaction(async (tx) => {
+    if (typeof tx?.$executeRaw === 'function') {
+      await acquireTeamRosterLock(tx, id);
+    }
     const txTeams = getTeamsDelegate(tx);
     if (!txTeams?.update || !txTeams?.findMany) {
       throw new Error('Team storage is unavailable in transaction.');

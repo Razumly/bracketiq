@@ -34,6 +34,7 @@ import {
 import {
   acquireOrganizationStaffAssignmentLock,
   acquireOrganizationStaffMemberLock,
+  acquireTeamRosterLock,
 } from '@/server/repositories/locks';
 import {
   loadCanonicalTeamById,
@@ -236,6 +237,36 @@ const formatFullName = (firstName?: string | null, lastName?: string | null): st
   `${normalizeOptionalName(firstName) ?? ''} ${normalizeOptionalName(lastName) ?? ''}`.trim()
 );
 
+const PLAYER_CAPACITY_STATUSES = new Set(['ACTIVE', 'INVITED', 'STARTED', 'PENDING']);
+
+const getTeamPlayerCapacityUserIds = (team: Record<string, any>): Set<string> => {
+  const ids = new Set<string>();
+  const registrations = Array.isArray(team.playerRegistrations) ? team.playerRegistrations : [];
+  registrations.forEach((registration: any) => {
+    const userId = normalizeId(registration?.userId);
+    const status = String(registration?.status ?? '').trim().toUpperCase();
+    if (userId && PLAYER_CAPACITY_STATUSES.has(status)) {
+      ids.add(userId);
+    }
+  });
+  // Legacy team rows can omit registrations or contain only active rows.
+  // Always include both serialized lists so pending assignments count too.
+  normalizeIdList(team.playerIds).forEach((userId) => ids.add(userId));
+  normalizeIdList(team.pending).forEach((userId) => ids.add(userId));
+  return ids;
+};
+
+const assertTeamPlayerCapacity = (team: Record<string, any>, userId: string | null) => {
+  const teamSize = Number.isFinite(Number(team.teamSize)) ? Math.max(0, Math.trunc(Number(team.teamSize))) : 0;
+  if (teamSize <= 0 || !userId) {
+    return;
+  }
+  const occupied = getTeamPlayerCapacityUserIds(team);
+  if (!occupied.has(userId) && occupied.size >= teamSize) {
+    throw new InviteRouteError(409, 'Team is full. Player invite was not sent.');
+  }
+};
+
 const canManageTeamInvites = async (
   teamId: string,
   session: { userId: string; isAdmin: boolean },
@@ -390,9 +421,9 @@ export async function GET(req: NextRequest) {
   if (teamId) where.teamId = teamId;
   const requestedStatus = status ?? 'PENDING';
   const statusWhere = history
-    ? { status: { in: ['DECLINED', 'REJECTED', 'FAILED'] } }
+    ? { status: { in: ['DECLINED', 'REJECTED', 'FAILED', 'ACCEPTED'] } }
     : requestedStatus === 'PENDING'
-      ? { OR: [{ status: null }, { status: { in: ['PENDING', 'SENT'] } }] }
+      ? { OR: [{ status: null }, { status: { in: ['PENDING', 'SENT', 'FAILED'] } }] }
       : requestedStatus === 'DECLINED'
         ? { status: { in: ['DECLINED', 'REJECTED'] } }
         : { status: requestedStatus };
@@ -525,6 +556,15 @@ export async function POST(req: NextRequest) {
     return eventId ? [eventId] : [];
   }))).sort();
 
+  const teamRosterLockIds = Array.from(new Set<string>(invitesInput.flatMap((inviteInput): string[] => {
+    const parsedInvite = inviteSchema.safeParse(inviteInput);
+    if (!parsedInvite.success || normalizeInviteType(parsedInvite.data.type) !== 'TEAM') {
+      return [];
+    }
+    const teamId = normalizeId(parsedInvite.data.teamId);
+    return teamId ? [teamId] : [];
+  }))).sort();
+
   const now = new Date();
   try {
     const { created, toEmail } = await prisma.$transaction(async (tx) => {
@@ -533,6 +573,11 @@ export async function POST(req: NextRequest) {
       }
       for (const eventId of eventStaffLockIds) {
         await acquireEventLock(tx, eventId);
+      }
+      for (const teamId of teamRosterLockIds) {
+        if (typeof tx?.$executeRaw === 'function') {
+          await acquireTeamRosterLock(tx, teamId);
+        }
       }
 
       const createdRecords: any[] = [];
@@ -799,6 +844,10 @@ export async function POST(req: NextRequest) {
               type: 'TEAM',
               teamId,
               userId: inviteUserId,
+              OR: [
+                { status: null },
+                { status: { in: ['PENDING', 'SENT', 'FAILED'] } },
+              ],
             },
           });
           const teamRole = getTeamInviteRole(invite.role, invite.type)
@@ -807,6 +856,9 @@ export async function POST(req: NextRequest) {
           const previousRole = getTeamInviteRole(existingInvite?.role, existingInvite?.type);
           if (teamRole === 'player' && inviteUserId && normalizeIdList(team.playerIds).includes(inviteUserId)) {
             throw new InviteRouteError(409, 'User is already on this team');
+          }
+          if (teamRole === 'player') {
+            assertTeamPlayerCapacity(team as Record<string, any>, inviteUserId);
           }
           await reconcileTeamInviteRoleTransition(
             tx,
@@ -944,7 +996,16 @@ export async function POST(req: NextRequest) {
     });
 
     const baseUrl = getRequestOrigin(req);
-    const emailedInvites = await sendInviteEmails(toEmail, baseUrl);
+    let emailedInvites: any[] = [];
+    let inviteDeliveryFailed = false;
+    try {
+      emailedInvites = await sendInviteEmails(toEmail, baseUrl);
+    } catch (error) {
+      // The database transaction already committed. Keep that result and
+      // report delivery failure so the client can retry delivery safely.
+      inviteDeliveryFailed = true;
+      console.warn('Invite save committed but delivery failed', error);
+    }
     const emailedById = new Map(emailedInvites.map((invite) => [invite.id, invite]));
     const mergedInvites = created.map((invite) => {
       const emailed = emailedById.get(invite.id);
@@ -953,7 +1014,16 @@ export async function POST(req: NextRequest) {
         : invite;
     });
 
-    return NextResponse.json({ invites: mergedInvites.map((invite) => mapInviteRecord(invite)) }, { status: 201 });
+    return NextResponse.json({
+      invites: mergedInvites.map((invite) => mapInviteRecord(invite)),
+      delivery: {
+        attempted: toEmail.length > 0,
+        failed: inviteDeliveryFailed || emailedInvites.some(
+          (invite) => String(invite.status ?? '').toUpperCase() === 'FAILED',
+        ),
+        inviteIds: toEmail.map((invite) => invite.id),
+      },
+    }, { status: 201 });
   } catch (error) {
     if (error instanceof InviteRouteError) {
       const payload = error.details === undefined

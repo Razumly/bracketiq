@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { getOptionalSession, requireSession } from '@/lib/permissions';
 import {
   applyUserPrivacyList,
+  canViewPendingRosterIdentity,
   createVisibilityContext,
   isVisibleInGenericSearch,
   publicUserSelect,
@@ -59,8 +60,11 @@ export async function GET(req: NextRequest) {
     const orderedUsers = ids
       .map((id) => byId.get(id))
       .filter((user): user is NonNullable<typeof user> => Boolean(user));
+    const visibleOrderedUsers = orderedUsers.filter((user) =>
+      canViewPendingRosterIdentity(visibilityContext, user.id),
+    );
     return NextResponse.json(
-      { users: applyUserPrivacyList(orderedUsers, visibilityContext) },
+      { users: applyUserPrivacyList(visibleOrderedUsers, visibilityContext) },
       { status: 200 },
     );
   }
