@@ -362,11 +362,15 @@ export default function TeamDetailModal({
         return byUserId;
     }, [currentTeam.playerRegistrations]);
     const accountlessPlayerRoleInvites = useMemo(
-        () => pendingRoleInvites.filter(({ invite }) => isAssignedInvite(invite) && getPendingInviteRole(currentTeam, invite) === 'player'),
+        () => pendingRoleInvites.filter(({ invite }) => isAssignedInvite(invite) && !invite.userId && getPendingInviteRole(currentTeam, invite) === 'player'),
         [currentTeam, pendingRoleInvites],
     );
     const accountlessStaffRoleInvites = useMemo(
-        () => pendingRoleInvites.filter(({ invite }) => isAssignedInvite(invite) && getPendingInviteRole(currentTeam, invite) !== 'player'),
+        () => pendingRoleInvites.filter(({ invite }) => isAssignedInvite(invite) && !invite.userId && getPendingInviteRole(currentTeam, invite) !== 'player'),
+        [currentTeam, pendingRoleInvites],
+    );
+    const managedPlayerRoleInvites = useMemo(
+        () => pendingRoleInvites.filter(({ invite }) => isAssignedInvite(invite) && Boolean(invite.userId) && getPendingInviteRole(currentTeam, invite) === 'player'),
         [currentTeam, pendingRoleInvites],
     );
     const pendingPlayerRoleInvites = useMemo(
@@ -566,7 +570,8 @@ export default function TeamDetailModal({
             teamId: currentTeam.$id,
             types: TEAM_ROLE_INVITE_TYPES,
         });
-        const pendingInvites = invites.filter((invite) => invite.status === 'PENDING' && !currentTeam.pending.includes(invite.userId ?? ''));
+        const pendingInvites = invites.filter((invite) => invite.status === 'PENDING'
+            && (!currentTeam.pending.includes(invite.userId ?? '') || isAssignedInvite(invite)));
         const inviteUserIds = pendingInvites
             .map((invite) => invite.userId)
             .filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
@@ -1579,6 +1584,7 @@ export default function TeamDetailModal({
                 const jerseyDraftValue = jerseyNumbersByUserId[player.$id] ?? '';
                 const jerseyNumberChanged = jerseyDraftValue.trim() !== currentJerseyNumber;
                 const savingJerseyNumber = savingJerseyNumberIds.has(player.$id);
+                const managedInvite = managedPlayerRoleInvites.find(({ invite }) => invite.userId === player.$id)?.invite;
                 return (
                     <Paper
                         key={player.$id}
@@ -1616,6 +1622,9 @@ export default function TeamDetailModal({
                                             {isPending && (
                                                 <Badge color="yellow" variant="light" size="xs">Awaiting player</Badge>
                                             )}
+                                            {isPending && managedInvite ? (
+                                                <Badge color="violet" variant="light" size="xs">Managed · pending claim</Badge>
+                                            ) : null}
                                             {canManageTeam && compliance ? (
                                                 <>
                                                     <Badge
