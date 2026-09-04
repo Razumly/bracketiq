@@ -89,7 +89,7 @@ function staffingFor(input: CanonicalReflowInput): (match: Match) => ReflowStaff
       return { positionId: slot.positionId, slotIndex: slot.slotIndex, candidates };
     });
     return {
-      priority: event.staffingPriority, requiresTeamDuty: planner.isTeamDutyRequired(match),
+      priority: event.staffingPriority, isTeamDutyRequired: planner.isTeamDutyRequired(match),
       eligibleTeamIds: candidates.map((team) => team.id), teamCheckInMs: event.teamCheckInOpenMinutesBefore * 60_000,
       assignments: { teamOfficialId: match.teamOfficial?.id ?? null,
         officialAssignments: match.officialAssignments.map((assignment) => ({ ...assignment })) },
@@ -136,7 +136,7 @@ export function planCanonicalReflow(input: CanonicalReflowInput): ReflowPlan {
     changedMatchIds: input.changedMatchIds, now: +input.now, fieldPolicy: input.fieldPolicy, maxStates: input.maxStates,
     matches: batches.flatMap((batch, batchIndex) => batch.matches.map((match, order) => ({
       id: match.id, order, batch: batchIndex,
-      protected: classifyMaintenanceMatch(match, input.protectedHistoryIds) === 'PROTECTED',
+      isProtected: classifyMaintenanceMatch(match, input.protectedHistoryIds) === 'PROTECTED',
       placement: match.placementState === 'PLACED' && match.field
         ? { start: +match.start, end: +match.end, fieldId: match.field.id } : null,
       actualEnd: match.actualEnd ? +match.actualEnd : null,

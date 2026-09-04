@@ -23,7 +23,7 @@ export function validateReflowInput(input: ReflowInput): void {
     if ((match.placement && !validWindow(match.placement)) || match.windows.some((window) => !validWindow(window))) fail('A placement window is invalid.');
     if (match.actualEnd !== null && (!Number.isFinite(match.actualEnd)
       || (match.placement && match.actualEnd < match.placement.start))) fail('An actual end time is invalid.');
-    if (match.occupiedUntil !== undefined && (!match.protected || !Number.isFinite(match.occupiedUntil)
+    if (match.occupiedUntil !== undefined && (!match.isProtected || !Number.isFinite(match.occupiedUntil)
       || (match.placement && match.occupiedUntil < match.placement.end))) fail('A running Match occupancy is invalid.');
     if (match.staffing && !STAFFING_PRIORITIES.includes(match.staffing.priority)) fail('Unknown Staffing Priority.');
   }

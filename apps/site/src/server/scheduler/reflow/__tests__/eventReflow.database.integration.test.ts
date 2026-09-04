@@ -29,8 +29,8 @@ databaseTests('atomic Reflow database operation', () => {
   });
   afterAll(async () => { await prisma.$disconnect(); });
 
-  async function seed(assignmentOnly = false) {
-    const fixture = createCanonicalReflowFixture(`issue-45-${randomUUID()}`, assignmentOnly);
+  async function seed(isAssignmentOnly = false) {
+    const fixture = createCanonicalReflowFixture(`issue-45-${randomUUID()}`, isAssignmentOnly);
     const { event, division, field, teams } = fixture;
     fixtureIds.push(event.id);
     await prisma.$transaction(async (tx) => {
@@ -40,13 +40,13 @@ databaseTests('atomic Reflow database operation', () => {
         teamSignup: true, state: 'PUBLISHED', fieldIds: [field.id], timeSlotIds: [],
         winnerBracketPointsToVictory: [], loserBracketPointsToVictory: [], pointsToVictory: [],
         installmentDueDates: [], installmentAmounts: [], requiredTemplateIds: [],
-        restTimeMinutes: 5, matchDurationMinutes: 25, doTeamsOfficiate: assignmentOnly,
+        restTimeMinutes: 5, matchDurationMinutes: 25, doTeamsOfficiate: isAssignmentOnly,
         staffingPriority: event.staffingPriority, officialPositions: [], teamCheckInMode: 'EVENT',
       } });
       await tx.fields.create({ data: { id: field.id, name: field.name, rentalSlotIds: [] } });
       await tx.divisions.create({ data: { id: division.id, eventId: event.id, name: division.name,
         phase: 'BRACKET', fieldIds: [field.id], teamIds: teams.map((team) => team.id),
-        phaseSettings: { BRACKET: { doTeamsOfficiate: assignmentOnly } },
+        phaseSettings: { BRACKET: { doTeamsOfficiate: isAssignmentOnly } },
       } });
       await tx.teams.createMany({ data: teams.map((team) => ({ id: team.id, eventId: event.id, name: team.name,
         captainId: team.captainId, managerId: team.captainId, teamSize: 2, playerIds: [], pending: [], division: division.id })) });
@@ -59,7 +59,7 @@ databaseTests('atomic Reflow database operation', () => {
         previousLeftId: match.previousLeftMatch?.id, winnerNextMatchId: match.winnerNextMatch?.id,
         team1Points: [], team2Points: [], officialIds: [], teamOfficialId: match.teamOfficial?.id,
       })) });
-      if (assignmentOnly) await tx.teamCheckIns.create({ data: { id: `${event.id}:checkin`, eventId: event.id,
+      if (isAssignmentOnly) await tx.teamCheckIns.create({ data: { id: `${event.id}:checkin`, eventId: event.id,
         checkInKey: `${event.id}:event:${teams[3]!.id}`,
         checkedInAt: reflowFixtureTime(0),
         eventTeamId: teams[3]!.id, scope: 'EVENT', status: 'CHECKED_IN', checkedInByUserId: event.hostId,
@@ -68,9 +68,9 @@ databaseTests('atomic Reflow database operation', () => {
     const row = await prisma.events.findUniqueOrThrow({ where: { id: event.id } });
     const state = await loadEventScheduleState(row, event.id, prisma);
     const request: ScheduleReflowRequest = { contractVersion: 1, eventId: event.id,
-      changedMatchIds: [assignmentOnly ? fixture.next.id : fixture.first.id],
+      changedMatchIds: [isAssignmentOnly ? fixture.next.id : fixture.first.id],
       expectedScheduleRevision: state.revision, fieldPolicy: 'KEEP_ASSIGNED_FIELDS' };
-    const input = { request, actor: { userId: event.hostId, isAdmin: false }, now: reflowFixtureTime(assignmentOnly ? 25 : 35) };
+    const input = { request, actor: { userId: event.hostId, isAdmin: false }, now: reflowFixtureTime(isAssignmentOnly ? 25 : 35) };
     return { ...fixture, input };
   }
 
@@ -141,5 +141,29 @@ databaseTests('atomic Reflow database operation', () => {
     expect(result.placementChanges.every((change) => change.after.fieldId === fieldId)).toBe(true);
     expect(result.graph?.matches.find((match) => match.id === first.id)?.fieldId).toBe(`${event.id}:field`);
     expect(await prisma.matches.findUnique({ where: { id: first.id } })).toEqual(protectedBefore);
+  });
+
+  it('rejects an independent protected field conflict before any Schedule write', async () => {
+    const { event, input, field, division } = await seed();
+    await prisma.matches.create({ data: {
+      id: `${event.id}:locked`, eventId: event.id, matchId: 99, locked: true,
+      start: reflowFixtureTime(30), end: reflowFixtureTime(55), fieldId: field.id,
+      division: division.id, placementState: 'PLACED', team1Points: [], team2Points: [], officialIds: [],
+    } });
+    const row = await prisma.events.findUniqueOrThrow({ where: { id: event.id } });
+    input.request.expectedScheduleRevision = (await loadEventScheduleState(row, event.id, prisma)).revision;
+    const before = await prisma.matches.findMany({ where: { eventId: event.id }, orderBy: { id: 'asc' } });
+    let writes = 0;
+    const observed = prisma.$extends({ query: {
+      matches: { async update({ args, query }) { writes += 1; return query(args); } },
+      events: { async update({ args, query }) { writes += 1; return query(args); } },
+    } });
+    const result = await observed.$transaction((tx) => reflowEventSchedule({ tx, ...input }));
+    expect(result.status).toBe('INFEASIBLE');
+    expect(result.placementChanges).toEqual([]);
+    expect(result.assignmentChanges).toEqual([]);
+    expect(writes).toBe(0);
+    expect(await prisma.matches.findMany({ where: { eventId: event.id }, orderBy: { id: 'asc' } })).toEqual(before);
+    expect(await prisma.events.findUnique({ where: { id: event.id } })).toEqual(row);
   });
 });

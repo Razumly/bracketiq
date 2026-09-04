@@ -18,14 +18,14 @@ for (const teamCount of [32, 128, 512]) {
       const start = cursor + Math.floor(index / fields.length) * 30;
       const match: ReflowMatch = {
         id: `M${matches.length + index + 1}`, order: matches.length + index, batch: 0,
-        protected: !dependencies.length,
+        isProtected: !dependencies.length,
         placement: { fieldId: fields[index % fields.length]!, start: at(start), end: at(start + 25) },
         actualEnd: dependencies.length ? null : at(start + 25),
         teamIds: dependencies.length ? [] : entrants,
         playingTeamSlots: dependencies.map((entry) => entry.entrants),
         dependencyIds: dependencies.map((entry) => entry.match.id), restMs: 5 * minute,
         windows: fields.map((fieldId) => ({ fieldId, start: at(0), end: at(10_000) })),
-        staffing: { priority: 'FULL_COVERAGE_REQUIRED', requiresTeamDuty: true,
+        staffing: { priority: 'FULL_COVERAGE_REQUIRED', isTeamDutyRequired: true,
           teamCheckInMs: 0, eligibleTeamIds: teams,
           assignments: { teamOfficialId: null, officialAssignments: [] } },
       };
@@ -35,7 +35,7 @@ for (const teamCount of [32, 128, 512]) {
     previous = round;
     cursor += Math.ceil(count / fields.length) * 30;
   }
-  const changed = matches.filter((match) => match.protected).slice(-4);
+  const changed = matches.filter((match) => match.isProtected).slice(-4);
   changed.forEach((match) => { match.actualEnd! += 10 * minute; });
   const before = JSON.stringify(matches);
   const started = performance.now();

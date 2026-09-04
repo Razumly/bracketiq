@@ -14,7 +14,7 @@ export function runReflowDemo(scenario: DemoScenario, fieldPolicy: ReflowInput['
   const actualEnd = scenario === 'early' ? 45 : ['swap', 'optional', 'noop', 'fields'].includes(scenario) ? 55
     : scenario === 'infeasible' ? 100 : 65;
   const match = (id: string, order: number, time: number, fieldId: string, teamIds: string[], dependencies: string[], duty: string): ReflowMatch => ({
-    id, order, batch: 0, protected: order < 5,
+    id, order, batch: 0, isProtected: order < 5,
     placement: { start: at(time), end: at(time + 25), fieldId },
     actualEnd: order < 3 ? at(25) : order < 5 ? at(actualEnd) : null,
     teamIds, dependencyIds: dependencies, restMs: 5 * minute,
@@ -23,7 +23,7 @@ export function runReflowDemo(scenario: DemoScenario, fieldPolicy: ReflowInput['
     })),
     staffing: {
       priority: scenario === 'optional' ? 'BEST_AVAILABLE_COVERAGE' : 'FULL_COVERAGE_REQUIRED',
-      requiresTeamDuty: true, teamCheckInMs: 0, eligibleTeamIds: teams,
+      isTeamDutyRequired: true, teamCheckInMs: 0, eligibleTeamIds: teams,
       assignments: { teamOfficialId: duty, officialAssignments: [] },
     },
   });

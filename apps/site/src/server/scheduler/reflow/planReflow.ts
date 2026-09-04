@@ -1,6 +1,5 @@
 import type { ReflowInput, ReflowMatch, ReflowPlan, ReflowPlacement } from './types';
 import { repairStaffing } from './staffing';
-import { staffingJobs } from './staffingJobs';
 import { orderReflowMatches } from './matchOrder';
 import { validateReflowInput } from './validateInput';
 import { occupiedPlacement } from './occupancy';
@@ -19,16 +18,16 @@ const effectivePlacement = (match: ReflowMatch, state: PlacementState): ReflowPl
   return placement ? occupiedPlacement(match, placement) : null;
 };
 const conflicts = (a: ReflowMatch, ap: ReflowPlacement, b: ReflowMatch, bp: ReflowPlacement) => {
-  const resourceConflict = ap.fieldId === bp.fieldId && ap.start < bp.end && ap.end > bp.start;
+  const hasResourceConflict = ap.fieldId === bp.fieldId && ap.start < bp.end && ap.end > bp.start;
   const rest = Math.max(a.restMs, b.restMs);
-  return resourceConflict || (sharesTeam(a, b) && ap.start < bp.end + rest && ap.end + rest > bp.start);
+  return hasResourceConflict || (sharesTeam(a, b) && ap.start < bp.end + rest && ap.end + rest > bp.start);
 };
 
 export function planReflow(input: ReflowInput): ReflowPlan {
   validateReflowInput(input);
   const plan: ReflowPlan = {
     status: 'NO_OP', affectedMatchIds: [],
-    protectedMatchIds: input.matches.filter((match) => match.protected).map((match) => match.id),
+    protectedMatchIds: input.matches.filter((match) => match.isProtected).map((match) => match.id),
     placementChanges: [], assignmentChanges: [], warnings: [], exploredStates: 0,
   };
   const byId = new Map(input.matches.map((match) => [match.id, match]));
@@ -38,29 +37,28 @@ export function planReflow(input: ReflowInput): ReflowPlan {
     placements: new Map(input.matches.flatMap((match) => match.placement ? [[match.id, match.placement] as const] : [])),
     changed: new Set(input.changedMatchIds),
   };
-  let limited = false;
+  let hasReachedSearchLimit = false;
   const visit = (): boolean => {
-    if (plan.exploredStates >= (input.maxStates ?? 20_000)) { limited = true; return false; }
+    if (plan.exploredStates >= (input.maxStates ?? 20_000)) { hasReachedSearchLimit = true; return false; }
     plan.exploredStates += 1;
     return true;
   };
   const considered = new Set<string>();
   const forced = new Set<string>();
   const addStaffingFailures = (ids: string[]): boolean => {
-    let added = false;
+    let hasAdded = false;
     for (const id of ids) {
       const match = byId.get(id);
-      if (!match?.placement || match.protected || forced.has(id)) continue;
-      if (!staffingJobs(match, match.placement).some((job) => job.required)) continue;
+      if (!match?.placement || match.isProtected || forced.has(id)) continue;
       forced.add(id);
-      added = true;
+      hasAdded = true;
     }
-    return added;
+    return hasAdded;
   };
   const baselineStaffing = repairStaffing(input, initial.placements, initial.changed, visit);
   input.changedMatchIds.forEach((id) => considered.add(id));
   baselineStaffing.affectedMatchIds.forEach((id) => considered.add(id));
-  if (baselineStaffing.status === 'INFEASIBLE') addStaffingFailures(baselineStaffing.affectedMatchIds);
+  if (baselineStaffing.status === 'INFEASIBLE') addStaffingFailures(baselineStaffing.placementRepairMatchIds);
   const dependencyFloor = (match: ReflowMatch, state: PlacementState): number => Math.max(
     Number.NEGATIVE_INFINITY,
     ...match.dependencyIds.map((id) => {
@@ -92,7 +90,7 @@ export function planReflow(input: ReflowInput): ReflowPlan {
     if (!match.windows.some((window) => window.fieldId === candidate.fieldId
       && window.start <= candidate.start && window.end >= candidate.end)) return false;
     return !ordered.some((other) => {
-      if (other.id === match.id || (!other.protected && orderById.get(other.id)! > orderById.get(match.id)!)) return false;
+      if (other.id === match.id || (!other.isProtected && orderById.get(other.id)! > orderById.get(match.id)!)) return false;
       const placement = effectivePlacement(other, state);
       return placement !== null && conflicts(match, candidate, other, placement);
     });
@@ -100,13 +98,14 @@ export function planReflow(input: ReflowInput): ReflowPlan {
   const candidatesFor = (match: ReflowMatch, state: PlacementState): ReflowPlacement[] => {
     const before = match.placement!;
     const duration = before.end - before.start;
-    const earlier = dependencyFloor(match, state) < publishedFloor(match);
-    const mustMove = forced.has(match.id) || !candidateFits(match, before, state);
-    const floor = Math.max(input.now, dependencyFloor(match, state), earlier || mustMove ? input.now : before.start);
+    const isEarlierRelease = dependencyFloor(match, state) < publishedFloor(match);
+    const isMoveRequired = forced.has(match.id) || !candidateFits(match, before, state);
+    const floor = Math.max(input.now, dependencyFloor(match, state), isEarlierRelease || isMoveRequired ? input.now : before.start);
     const boundaries = ordered.flatMap((other) => {
       const placement = effectivePlacement(other, state);
       if (!placement || other.id === match.id) return [];
-      return [placement.end, placement.end + Math.max(match.restMs, other.restMs)];
+      return [placement.end, placement.end + Math.max(match.restMs, other.restMs),
+        placement.end + Math.max(match.restMs, other.restMs, other.staffing?.teamCheckInMs ?? 0)];
     });
     const newConflicts = (candidate: ReflowPlacement) => ordered.filter((other) => {
       if (other.id === match.id || state.changed.has(other.id)) return false;
@@ -123,7 +122,7 @@ export function planReflow(input: ReflowInput): ReflowPlan {
         || Number(b.placement.fieldId === before.fieldId) - Number(a.placement.fieldId === before.fieldId)
         || a.placement.fieldId.localeCompare(b.placement.fieldId))
       .map((candidate) => candidate.placement);
-    if (!earlier) candidates.unshift(before);
+    if (!isEarlierRelease) candidates.unshift(before);
     const seen = new Set<string>();
     return candidates.filter((candidate) => {
       const key = `${candidate.fieldId}:${candidate.start}`;
@@ -137,8 +136,14 @@ export function planReflow(input: ReflowInput): ReflowPlan {
       const match = ordered[index]!;
       if (!match.placement || !touched(match, state)) continue;
       considered.add(match.id);
-      if (match.protected) {
+      if (match.isProtected) {
         if (dependencyFloor(match, state) > match.placement.start) return null;
+        if (ordered.some((other) => {
+          if (other.id === match.id || !other.isProtected
+            || (!state.changed.has(match.id) && !state.changed.has(other.id))) return false;
+          const placement = effectivePlacement(other, state);
+          return placement !== null && conflicts(match, effectivePlacement(match, state)!, other, placement);
+        })) return null;
         continue;
       }
       for (const candidate of candidatesFor(match, state)) {
@@ -150,27 +155,27 @@ export function planReflow(input: ReflowInput): ReflowPlan {
         next.placements.set(match.id, candidate);
         if (!samePlacement(match.placement, candidate)) next.changed.add(match.id);
         const result = search(index + 1, next);
-        if (result || limited) return result;
+        if (result || hasReachedSearchLimit) return result;
       }
       return null;
     }
-    const retainedPlacements = ordered.every((match) => !match.placement
+    const hasRetainedPlacements = ordered.every((match) => !match.placement
       || samePlacement(match.placement, state.placements.get(match.id)!));
-    const staffing = baselineStaffing.status === 'FEASIBLE' && forced.size === 0 && retainedPlacements
+    const staffing = baselineStaffing.status === 'FEASIBLE' && forced.size === 0 && hasRetainedPlacements
       ? baselineStaffing
       : repairStaffing(input, state.placements, new Set([...state.changed, ...forced]), visit);
-    if (staffing.status === 'SEARCH_LIMIT') { limited = true; return null; }
-    if (staffing.status === 'INFEASIBLE') return addStaffingFailures(staffing.affectedMatchIds) ? 'EXPAND' : null;
+    if (staffing.status === 'SEARCH_LIMIT') { hasReachedSearchLimit = true; return null; }
+    if (staffing.status === 'INFEASIBLE') return addStaffingFailures(staffing.placementRepairMatchIds) ? 'EXPAND' : null;
     return { state, staffing };
   };
   let result: SearchResult = null;
-  if (!limited) {
-    do { result = search(0, initial); } while (result === 'EXPAND' && !limited);
+  if (!hasReachedSearchLimit) {
+    do { result = search(0, initial); } while (result === 'EXPAND' && !hasReachedSearchLimit);
   }
   plan.affectedMatchIds = [...considered];
-  if (!result || result === 'EXPAND') return { ...plan, status: limited ? 'SEARCH_LIMIT' : 'INFEASIBLE',
-    warnings: [{ code: limited ? 'REFLOW_SEARCH_LIMIT' : 'REFLOW_INFEASIBLE', matchIds: plan.affectedMatchIds,
-      message: limited ? 'The search budget was reached. No changes were saved.'
+  if (!result || result === 'EXPAND') return { ...plan, status: hasReachedSearchLimit ? 'SEARCH_LIMIT' : 'INFEASIBLE',
+    warnings: [{ code: hasReachedSearchLimit ? 'REFLOW_SEARCH_LIMIT' : 'REFLOW_INFEASIBLE', matchIds: plan.affectedMatchIds,
+      message: hasReachedSearchLimit ? 'The search budget was reached. No changes were saved.'
         : 'No complete repair fits the current constraints. No changes were saved.' }],
   };
   plan.placementChanges = ordered.flatMap((match) => {
