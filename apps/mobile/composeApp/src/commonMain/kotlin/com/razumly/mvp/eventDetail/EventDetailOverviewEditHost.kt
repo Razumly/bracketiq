@@ -350,11 +350,7 @@ internal fun EventDetailOverviewEditHost(
         topInset = if (state.editView) 0.dp else state.topInset,
         includeStatusBarInsetInStickyHeaders = !state.editView,
         editView = state.editView,
-        eventTypeLocked = state.eventEditorControlLocks.eventType,
-        eventTypeHasProtectedHistory =
-            state.eventEditorControlLocks.eventTypeHasProtectedHistory,
-        teamSignupLocked = state.eventEditorControlLocks.teamSignup,
-        automatedSchedulingLocked = state.eventEditorControlLocks.automatedScheduling,
+        eventEditorControlLocks = state.eventEditorControlLocks,
         showOfficialsPanel = state.showOfficialsPanel,
         isNewEvent = false,
         onOpenLocationMap = actions.onOpenLocationMap,

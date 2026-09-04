@@ -29,6 +29,9 @@ The result is visible in the shared Compose Event Editor and in the mobile-to-si
 - [x] (2026-08-26) Resolve the public-detail bootstrap finding. Non-manager detail decoding accepts the ownerless site projection, persists returned metadata to Room, and keeps managed decoding strict.
 - [x] (2026-08-26) Complete the post-review standards and spec re-review. Mapper, fixture, server retry, and public-detail findings returned correct with no open findings.
 - [x] (2026-08-26) Run the final focused, full mobile, and client-to-site checks. Android unit tests, iOS simulator tests, site tests, the membership suite, and the isolated mobile-to-site League integration passed.
+- [x] (2026-09-04) Reconcile Issue #32 against the current contract, issue body, and implementation commits.
+- [x] (2026-09-04) Fix the League end-policy wording and the current standards-review findings.
+- [x] (2026-09-04) Run focused site and mobile checks, TypeScript validation, and the full Android/JVM test graph.
 
 ## Surprises & Discoveries
 
@@ -37,6 +40,8 @@ The result is visible in the shared Compose Event Editor and in the mobile-to-si
 - The existing simple callback already clears `noFixedEndDateTime` when scheduling is disabled. The new advanced callback uses the same rule.
 - The mobile Android unit test task completed successfully after the first control edit: `:composeApp:testDebugUnitTest --tests 'com.razumly.mvp.eventCreate.CreateEventSelectionRulesTest'`.
 - The public site event-detail projection omits `hostId` and `affiliateUrl` for non-manager callers. The mobile detail decoder must relax only the ownership check for `manage=false`; strict collection and managed paths must remain unchanged.
+- The backend process on port 3000 still uses Event Editor contract version 3. It rejects the current version-4 command before League validation. The source contract and both clients use version 4.
+- The first full Android/JVM rerun reached a 30-second child-process startup timeout in a Reflow Room test. The isolated test passed. The complete rerun then passed.
 
 ## Decision Log
 
@@ -61,6 +66,14 @@ The shared Compose editor now exposes the League Automated Scheduling control in
 - Decision: Bind public event ownership validation to the detail request mode.
   Rationale: A public detail event is valid without owner identity. Managed detail still needs owner identity. Passing `requireOwnerIdentity = manage` preserves this boundary without weakening shared event-field validation.
   Date/Author: 2026-08-26 / Codex.
+
+- Decision: Use one end-policy copy source for Simple and Advanced Setup.
+  Rationale: Weekly Event uses `No Planned End`. League and Tournament use `Set End From Schedule`. Both screens now describe the same submitted policy.
+  Date/Author: 2026-09-04 / Codex.
+
+- Decision: Keep the Simple and Advanced schedule section wiring separate.
+  Rationale: The two modes have separate layouts. Both modes already call the same `LeagueScheduleFields` component and use the same visibility rules. Combining the section wiring would increase layout coupling without changing behavior.
+  Date/Author: 2026-09-04 / Codex.
 
 ## Context and Orientation
 
@@ -207,3 +220,27 @@ Plan update note (2026-08-27): Final standards review fixed `Issue32-ST-001` by 
 Plan update note (2026-08-27): Final spec and standards re-reviews returned correct with no open findings. Full Android, iOS simulator, and site checks passed.
 
 Plan update note (2026-08-26): The post-commit client-to-site check first failed against port 3000 because that backend rejected `hasScheduleProposalSupport`. The compatible isolated backend on port 3010 accepted the current mobile command after the retry and public-detail corrections.
+
+### Reconciliation review on 2026-09-04
+
+The review used commit `6bfeabe4bd86aa7cd2a920d264db32f815754000` as the historical fixed point. The review included the later contract-version fixture correction in commit `1cd8e84f4`.
+
+The review fixed the following findings:
+
+- League and Tournament now show `Set End From Schedule`. Weekly Event keeps `No Planned End`.
+- `EventDetails` now accepts one `EventEditorControlLocks` value.
+- The create component now calls time-slot initialization directly.
+- The League parity test builds its input without copying command envelope values from the expected result. It checks the full Match Demand oracle.
+- The phase-placeholder retry test now uses strong row and query types.
+- The new Issue #32 tests now use `given_when_then` names.
+- The Issue Tracker completion rule now uses one action per sentence.
+
+Focused checks passed:
+
+- `npm test -- --runInBand src/server/teams/__tests__/teamMembership.test.ts` — 27 tests passed.
+- `npm test -- --runInBand src/server/scheduler/__tests__/leagueEditorParity.test.ts` — 2 tests passed.
+- `npm exec tsc -- --noEmit --pretty false`.
+- `:core:repository-impl:testDebugUnitTest --tests 'com.razumly.mvp.core.data.repositories.EventEditorLeagueParityAndroidTest'`.
+- `:composeApp:testDebugUnitTest` for the schedule controls, locking, and validation classes.
+
+The full Android/JVM command `testDebugUnitTest --continue` passed with 284 suites, 1,965 tests, no failures, no errors, and 13 skipped tests. Native iOS checks were excluded on this Windows host as requested.

@@ -1,5 +1,6 @@
 package com.razumly.mvp.core.data.repositories
 
+import com.razumly.mvp.core.network.dto.EVENT_EDITOR_CONTRACT_VERSION
 import com.razumly.mvp.core.network.dto.EventEditorCapabilitiesDto
 import com.razumly.mvp.core.network.dto.EventEditorCatalogsDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateBootstrapDto
@@ -12,7 +13,6 @@ import com.razumly.mvp.core.util.jsonMVP
 import java.io.File
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.encodeToString
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -36,18 +36,17 @@ class EventEditorLeagueParityAndroidTest {
         val draft = sharedLeagueParityDraft()
         val golden = sharedLeagueParityWebGolden()
         val expectedCommand = golden.command
-        assertEquals(expectedCommand.draft, draft)
 
         val session = EventEditorSessionMapper.fromCreateBootstrap(
             EventEditorCreateBootstrapDto(
-                contractVersion = expectedCommand.contractVersion,
-                createOperationId = expectedCommand.createOperationId,
+                contractVersion = EVENT_EDITOR_CONTRACT_VERSION,
+                createOperationId = "create-operation-league-parity",
                 snapshot = EventEditorSnapshotDto(
-                    contractVersion = expectedCommand.contractVersion,
+                    contractVersion = EVENT_EDITOR_CONTRACT_VERSION,
                     draft = draft,
                     mode = "CREATE",
-                    editorRevision = expectedCommand.expectedRevisions.editorRevision,
-                    staffRevision = expectedCommand.expectedRevisions.staffRevision,
+                    editorRevision = "new",
+                    staffRevision = null,
                     capabilities = EventEditorCapabilitiesDto(
                         canUseOnlinePayments = true,
                         canManageStaff = true,
@@ -59,7 +58,7 @@ class EventEditorLeagueParityAndroidTest {
                     scheduleState = EventEditorScheduleStateDto(
                         sourceType = null,
                         matchCount = 0,
-                        revision = expectedCommand.expectedRevisions.scheduleRevision,
+                        revision = "new",
                         hasProtectedHistory = false,
                     ),
                 ),
@@ -73,10 +72,21 @@ class EventEditorLeagueParityAndroidTest {
 
         assertEquals(expectedCommand, command)
         assertEquals(
-            jsonMVP.encodeToString(expectedCommand),
-            jsonMVP.encodeToString(command),
+            LeagueParityMatchDemandDto(
+                total = 19,
+                byDivision = mapOf(
+                    "division-1" to 12,
+                    "playoff-division-1" to 7,
+                ),
+                byPhase = mapOf(
+                    "LEAGUE" to 12,
+                    "PLAYOFF" to 7,
+                ),
+                placed = 0,
+                unplaced = 19,
+            ),
+            golden.matchDemand,
         )
-        assertEquals(19, golden.matchDemand.total)
     }
 
     private fun sharedLeagueParityDraft(): EventEditorDraftDto {
@@ -92,7 +102,7 @@ class EventEditorLeagueParityAndroidTest {
     }
 
     private fun sharedParityFixture(fileName: String): String {
-        val workingDirectory = File(System.getProperty("user.dir", ".")).canonicalFile
+        val workingDirectory = File(System.getProperty("user.dir") ?: ".").canonicalFile
         val fixture = generateSequence(workingDirectory) { directory -> directory.parentFile }
             .map { directory -> File(directory, "test-fixtures/event-editor/$fileName") }
             .firstOrNull { candidate -> candidate.isFile }

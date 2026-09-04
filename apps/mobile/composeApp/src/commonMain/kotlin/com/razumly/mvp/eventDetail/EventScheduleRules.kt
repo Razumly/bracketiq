@@ -21,6 +21,24 @@ import kotlinx.datetime.toLocalDateTime
 import kotlin.time.Duration.Companion.days
 import kotlin.time.Instant
 
+internal data class GeneratedEndDateCopy(
+    val label: String,
+    val description: String,
+)
+
+internal fun generatedEndDateCopy(eventType: EventType): GeneratedEndDateCopy =
+    if (eventType == EventType.WEEKLY_EVENT) {
+        GeneratedEndDateCopy(
+            label = "No Planned End",
+            description = "Continue generating weekly occurrences without a planned end date.",
+        )
+    } else {
+        GeneratedEndDateCopy(
+            label = "Set End From Schedule",
+            description = "Use an open scheduling window. The generated match schedule sets the event end date.",
+        )
+    }
+
 internal fun isScheduleEditingLocked(
     event: Event,
     timeSlots: List<TimeSlot>,

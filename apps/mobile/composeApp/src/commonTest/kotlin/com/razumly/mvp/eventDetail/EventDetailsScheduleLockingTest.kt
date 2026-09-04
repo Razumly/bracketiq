@@ -17,6 +17,22 @@ import kotlin.time.Instant
 class EventDetailsScheduleLockingTest {
 
     @Test
+    fun given_weekly_event_when_end_policy_copy_is_built_then_no_planned_end_is_used() {
+        assertEquals(
+            "No Planned End",
+            generatedEndDateCopy(EventType.WEEKLY_EVENT).label,
+        )
+    }
+
+    @Test
+    fun given_league_when_end_policy_copy_is_built_then_set_end_from_schedule_is_used() {
+        assertEquals(
+            "Set End From Schedule",
+            generatedEndDateCopy(EventType.LEAGUE).label,
+        )
+    }
+
+    @Test
     fun rental_lock_always_locks_schedule_editing() {
         val locked = isScheduleEditingLocked(
             event = Event(organizationId = "org-1"),
@@ -203,7 +219,7 @@ class EventDetailsScheduleLockingTest {
     }
 
     @Test
-    fun field_count_validation_is_skipped_when_league_automation_is_off() {
+    fun given_league_automation_is_off_when_field_count_is_validated_then_validation_is_skipped() {
         assertFalse(
             requiresFieldCountValidation(
                 eventType = EventType.LEAGUE,

@@ -755,7 +755,7 @@ class DefaultCreateEventComponent(
                 updatedEvent = normalized,
             )
             if (synchronizeTypeSelection) {
-                synchronizeTypeSelection(updatedEvent = normalized)
+                ensureTypeSelectionTimeSlot(eventType = normalized.eventType)
             }
             if (sportChanged) {
                 initializeLeagueScoringConfig(normalized.sportIds.firstOrNull())
@@ -2619,10 +2619,6 @@ class DefaultCreateEventComponent(
             timeSlotIds = retainedSlots.map(TimeSlot::id),
         )
     }
-    private fun synchronizeTypeSelection(updatedEvent: Event) {
-        ensureTypeSelectionTimeSlot(updatedEvent.eventType)
-    }
-
     private fun ensureTypeSelectionTimeSlot(eventType: EventType) {
         if (
             eventType == EventType.LEAGUE ||

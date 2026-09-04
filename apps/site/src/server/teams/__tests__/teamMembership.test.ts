@@ -1251,9 +1251,64 @@ describe('claimOrCreateEventTeamSnapshot', () => {
   });
 
   it('reuses a claimed phase placeholder on an identical retry without replacing registration', async () => {
+    type PhasePlaceholderTeam = {
+      id: string;
+      eventId: string;
+      kind: string;
+      parentTeamId: string | null;
+      division: string;
+      divisionTypeId: string;
+      wins: number;
+      losses: number;
+      name: string;
+      captainId: string;
+      managerId: string;
+      headCoachId: string | null;
+      coachIds: string[];
+      pending: string[];
+      teamSize: number;
+      profileImageId: string | null;
+      sport: string | null;
+      playerIds: string[];
+      playerRegistrationIds: string[];
+      staffAssignmentIds: string[];
+      createdAt: Date;
+      updatedAt: Date;
+    };
+    type TeamLookupWhere = {
+      eventId?: string;
+      kind?: string;
+      id?: string;
+      parentTeamId?: string | null;
+    };
+    type RegistrationIdFilter = string | { in: string[] };
+    type RegistrationLookupWhere = {
+      eventId?: string;
+      registrantType?: string;
+      status?: { in: string[] };
+      parentId?: { not: string | null };
+      OR?: Array<{
+        registrantId?: RegistrationIdFilter;
+        eventTeamId?: RegistrationIdFilter;
+      }>;
+    };
+    type TeamRegistrationRow = {
+      eventId: string;
+      registrantType: string;
+      registrantId: string;
+      parentId: string | null;
+      rosterRole: string;
+      status: string;
+      eventTeamId: string;
+      divisionId: string | null;
+      divisionTypeId: string | null;
+      divisionTypeKey: string | null;
+      createdBy: string;
+      occurrence?: { slotId: string; occurrenceDate: string } | null;
+    };
     const phasePlaceholderDivisionId = 'phase_placeholder_l';
     const entryDivisionId = 'entry_division_e';
-    const placeholderBase = {
+    const placeholderBase: Omit<PhasePlaceholderTeam, 'id' | 'createdAt' | 'updatedAt'> = {
       eventId: 'event_1',
       kind: 'PLACEHOLDER',
       parentTeamId: null,
@@ -1274,7 +1329,7 @@ describe('claimOrCreateEventTeamSnapshot', () => {
       playerRegistrationIds: [],
       staffAssignmentIds: [],
     };
-    const storedTeams = new Map<string, Record<string, any>>([
+    const storedTeams = new Map<string, PhasePlaceholderTeam>([
       ['event_team_phase_1', {
         ...placeholderBase,
         id: 'event_team_phase_1',
@@ -1288,8 +1343,8 @@ describe('claimOrCreateEventTeamSnapshot', () => {
         updatedAt: new Date('2026-01-02T00:00:00.000Z'),
       }],
     ]);
-    const teamRegistrationRows: Array<Record<string, any>> = [];
-    const teamsFindManyMock = jest.fn(({ where }: { where: Record<string, any> }) => (
+    const teamRegistrationRows: TeamRegistrationRow[] = [];
+    const teamsFindManyMock = jest.fn(({ where }: { where: TeamLookupWhere }) => (
       Promise.resolve(Array.from(storedTeams.values()).filter((row) => (
         (!where.eventId || row.eventId === where.eventId)
         && (!where.kind || row.kind === where.kind)
@@ -1302,7 +1357,7 @@ describe('claimOrCreateEventTeamSnapshot', () => {
       data,
     }: {
       where: { id: string };
-      data: Record<string, any>;
+      data: Partial<PhasePlaceholderTeam>;
     }) => {
       const existing = storedTeams.get(where.id);
       if (!existing) {
@@ -1312,7 +1367,7 @@ describe('claimOrCreateEventTeamSnapshot', () => {
       storedTeams.set(where.id, updated);
       return Promise.resolve(updated);
     });
-    const eventRegistrationsFindManyMock = jest.fn(({ where }: { where: Record<string, any> }) => {
+    const eventRegistrationsFindManyMock = jest.fn(({ where }: { where: RegistrationLookupWhere }) => {
       if (where.registrantType !== 'TEAM') {
         return Promise.resolve([]);
       }
@@ -1329,17 +1384,20 @@ describe('claimOrCreateEventTeamSnapshot', () => {
         if (!Array.isArray(where.OR)) {
           return true;
         }
-        return where.OR.some((condition: Record<string, any>) => (
-          (typeof condition.registrantId === 'string' && row.registrantId === condition.registrantId)
-          || (condition.registrantId?.in?.includes(row.registrantId) ?? false)
-          || (typeof condition.eventTeamId === 'string' && row.eventTeamId === condition.eventTeamId)
-          || (condition.eventTeamId?.in?.includes(row.eventTeamId) ?? false)
-        ));
+        return where.OR.some((condition) => {
+          const matches = (value: string, filter?: RegistrationIdFilter) => (
+            typeof filter === 'string'
+              ? value === filter
+              : (filter?.in.includes(value) ?? false)
+          );
+          return matches(row.registrantId, condition.registrantId)
+            || matches(row.eventTeamId, condition.eventTeamId);
+        });
       });
       return Promise.resolve(rows);
     });
     const eventRegistrationsUpdateManyMock = jest.fn().mockResolvedValue({ count: 0 });
-    const upsertRegistration = (data: Record<string, any>) => {
+    const upsertRegistration = (data: TeamRegistrationRow) => {
       const existingIndex = teamRegistrationRows.findIndex((row) => (
         row.eventId === data.eventId
         && row.registrantType === data.registrantType

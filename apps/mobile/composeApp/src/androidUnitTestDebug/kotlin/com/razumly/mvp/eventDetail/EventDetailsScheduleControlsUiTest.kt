@@ -49,7 +49,7 @@ class EventDetailsScheduleControlsUiTest {
     val composeRule = createComposeRule()
 
     @Test
-    fun simple_enabled_schedule_state_shows_automation_and_generated_end_controls() {
+    fun given_simple_automated_league_when_options_render_then_schedule_controls_are_visible() {
         var changed: Boolean? = null
         composeRule.setContent {
             testTheme {
@@ -65,7 +65,7 @@ class EventDetailsScheduleControlsUiTest {
         }
 
         composeRule.onNodeWithText("Automated Scheduling").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("No Planned End").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Set End From Schedule").performScrollTo().assertIsDisplayed()
         composeRule.onNode(
             hasText("Automated Scheduling") and hasClickAction(),
         ).assertIsEnabled().performClick()
@@ -74,7 +74,7 @@ class EventDetailsScheduleControlsUiTest {
     }
 
     @Test
-    fun simple_disabled_schedule_state_hides_generated_end_control() {
+    fun given_simple_manual_league_when_options_render_then_generated_end_control_is_hidden() {
         composeRule.setContent {
             testTheme {
                 LazyColumn {
@@ -89,11 +89,11 @@ class EventDetailsScheduleControlsUiTest {
         }
 
         composeRule.onNodeWithText("Automated Scheduling").performScrollTo().assertIsDisplayed()
-        composeRule.onAllNodesWithText("No Planned End").assertCountEquals(0)
+        composeRule.onAllNodesWithText("Set End From Schedule").assertCountEquals(0)
     }
 
     @Test
-    fun simple_locked_schedule_state_shows_lock_reason_and_disables_automation() {
+    fun given_simple_locked_league_when_options_render_then_automation_is_disabled() {
         composeRule.setContent {
             testTheme {
                 LazyColumn {
@@ -116,7 +116,7 @@ class EventDetailsScheduleControlsUiTest {
     }
 
     @Test
-    fun advanced_enabled_schedule_state_shows_and_accepts_automation_toggle() {
+    fun given_advanced_automated_league_when_automation_is_toggled_then_change_is_sent() {
         var changed: Boolean? = null
         composeAdvancedScheduleState(
             event = leagueEvent(automatedScheduling = true),
@@ -130,7 +130,7 @@ class EventDetailsScheduleControlsUiTest {
     }
 
     @Test
-    fun advanced_disabled_schedule_state_removes_schedule_construction_controls() {
+    fun given_advanced_manual_league_when_schedule_renders_then_construction_controls_are_hidden() {
         composeAdvancedScheduleState(
             event = leagueEvent(automatedScheduling = false),
         )
@@ -141,7 +141,7 @@ class EventDetailsScheduleControlsUiTest {
     }
 
     @Test
-    fun advanced_locked_schedule_state_keeps_control_visible_but_disabled() {
+    fun given_advanced_locked_league_when_schedule_renders_then_automation_is_disabled() {
         composeAdvancedScheduleState(
             event = leagueEvent(automatedScheduling = true),
             automatedSchedulingLocked = true,

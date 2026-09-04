@@ -314,6 +314,7 @@ internal fun LazyListScope.eventDetailsBasicInfoSection(
                             state.editEvent.isAutomatedScheduling
                         )
             ) {
+                val copy = generatedEndDateCopy(state.editEvent.eventType)
                 val minimumFixedEnd = Instant.fromEpochMilliseconds(
                     state.editEvent.start.toEpochMilliseconds() + 60L * 60L * 1000L,
                 )
@@ -340,14 +341,14 @@ internal fun LazyListScope.eventDetailsBasicInfoSection(
                         },
                     )
                     Text(
-                        text = "No Planned End",
+                        text = copy.label,
                         style = MaterialTheme.typography.bodyMedium,
                         color = Color(localImageScheme.current.onSurface),
                     )
                 }
                 if (usesGeneratedEnd) {
                     Text(
-                        text = "Scheduling can extend past the displayed end date/time. Turn this off to enforce the end date/time.",
+                        text = copy.description,
                         style = MaterialTheme.typography.bodySmall,
                         color = Color(localImageScheme.current.onSurface),
                     )

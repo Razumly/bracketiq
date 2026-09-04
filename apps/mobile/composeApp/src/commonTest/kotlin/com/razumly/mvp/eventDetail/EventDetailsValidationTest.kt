@@ -87,7 +87,7 @@ class EventDetailsValidationTest {
     }
 
     @Test
-    fun unscheduled_league_does_not_require_resources_or_timeslots() {
+    fun given_unscheduled_league_when_event_is_validated_then_resources_and_timeslots_are_optional() {
         val event = baseLeagueEvent(maxParticipants = 2).copy(
             sportIds = listOf("sport-1"),
             isAutomatedScheduling = false,
