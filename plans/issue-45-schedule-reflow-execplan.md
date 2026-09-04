@@ -33,7 +33,7 @@ Issue: https://github.com/Razumly/bracketiq/issues/45. The user approved a share
   - Local browser inspection is deferred. Port 3100 remains stopped. Start it only after current runtime permission is supplied. This presentation check is not an issue 45 acceptance criterion.
 - [x] Run performance checks, complete relevant suites, and client-to-site integration. Record unrelated full-suite failures below.
 - [x] Complete the two-axis review. Fix the four Spec findings and the Standards findings. Pass 82 focused site tests after the fixes.
-- [ ] Commit the final review fixes and close issue 45.
+- [x] (2026-09-04 09:25Z) Commit the final review fixes as `0c13f9e93`. Record the verification limits. Mark issue 45 Done and close it.
 
 ## Surprises & Discoveries
 
@@ -171,7 +171,7 @@ Isolated database: `bracketiq_e2e_45_563b` on the already-running local PostgreS
 
 Run `node --import tsx scripts/benchmark-schedule-reflow.ts` from `apps/site`. The post-review local run measured 75 ms for 31 Matches, 54 ms for 127 Matches, and 622 ms for 511 Matches. These fixtures include unresolved entrants, required fluid Team Duty, and four concurrent completed anchors. The test checks the 20,000-state limit and immutable input. These are single-run measurements, not service-level guarantees.
 
-Implementation checkpoint: `0658c24be` (`Feat: Add atomic affected Schedule Reflow (#45)`). The follow-up commit contains the review fixes and final verification record. No code was pushed or deployed.
+Implementation checkpoint: `0658c24be` (`Feat: Add atomic affected Schedule Reflow (#45)`). Review fixes: `0c13f9e93` (`Fix: Preserve protected staffing constraints during Reflow (#45)`). Issue 45 was closed at 2026-09-04 09:25:54Z. Its close comment records the verification, full-suite limits, contract, and deferred local preview. No code was pushed or deployed.
 
 Review baseline: use `091b4e65c407ffbec1f87ed45b7ba3bb0faaa132`, the completed main merge, to isolate issue 45. The user did not supply a different baseline after the question. The local walkthrough restart still needs current authorization. No backend or walkthrough runtime was started or restarted during this implementation.
 
