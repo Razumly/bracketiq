@@ -96,15 +96,15 @@ private fun EventScheduleMaintenanceReview.asAcceptedMaintenanceResultForConflic
     EventEditorMaintenanceAcceptedResultDto =
     EventEditorMaintenanceAcceptedResultDto(
         status = EventEditorMaintenanceResponseStatus.ACCEPTED,
-        contractVersion = proposal.contractVersion,
-        eventId = proposal.eventId,
-        operation = proposal.operation,
-        operationId = proposal.operationId,
-        proposalRevision = proposal.proposalRevision,
-        revisionBinding = proposal.revisionBinding,
-        graph = proposal.graph,
-        protectedMatchIds = proposal.protectedMatchIds,
-        scheduleOutcome = proposal.scheduleOutcome,
+        contractVersion = reviewedProposal.contractVersion,
+        eventId = reviewedProposal.eventId,
+        operation = reviewedProposal.operation,
+        operationId = reviewedProposal.operationId,
+        proposalRevision = reviewedProposal.proposalRevision,
+        revisionBinding = reviewedProposal.revisionBinding,
+        graph = reviewedProposal.graph,
+        protectedMatchIds = reviewedProposal.protectedMatchIds,
+        scheduleOutcome = reviewedProposal.scheduleOutcome,
         acceptanceOperationId = acceptanceOperationId,
     )
 
@@ -118,7 +118,7 @@ private fun EventScheduleEditAction.isAvailableIn(
         maintenanceOperation in snapshot.scheduleState.availableMaintenanceOperations
 
 private fun EventScheduleMaintenanceReview.requestedAction(): EventScheduleEditAction =
-    when (proposal.operation) {
+    when (reviewedProposal.operation) {
         EventEditorMaintenanceOperation.BUILD -> EventScheduleEditAction.BUILD_SCHEDULE
         EventEditorMaintenanceOperation.COMPLETE -> EventScheduleEditAction.RESCHEDULE
         EventEditorMaintenanceOperation.REBUILD ->
@@ -165,6 +165,7 @@ internal class EventEditActionHandler(
     val scheduleMaintenanceReview = _scheduleMaintenanceReview.asStateFlow()
     private var maintenanceRequestGeneration = 0L
     private var maintenanceRequestInFlight = false
+    private var lastMaintenanceAction: EventScheduleEditAction? = null
     private var maintenanceOperationAttempt: EventScheduleMaintenanceOperationAttempt? = null
     private var maintenanceOriginalSession: EventEditorSession? = null
     private var maintenanceSavedSession: EventEditorSession? = null
@@ -188,9 +189,7 @@ internal class EventEditActionHandler(
     }
     private fun isScheduleMaintenanceReviewDismissBlocked(): Boolean {
         val phase = _scheduleMaintenanceReview.value?.phase
-        return acceptedMaintenanceResult != null ||
-            phase == EventScheduleMaintenanceReviewPhase.ACCEPTING ||
-            phase == EventScheduleMaintenanceReviewPhase.REJECTING ||
+        return phase?.isBusy == true || acceptedMaintenanceResult != null ||
             phase == EventScheduleMaintenanceReviewPhase.ACCEPTED_SYNC_PENDING
     }
 
@@ -470,6 +469,10 @@ internal class EventEditActionHandler(
         }
         val requestGeneration = ++maintenanceRequestGeneration
         maintenanceRequestInFlight = true
+        lastMaintenanceAction = action
+        _scheduleMaintenanceReview.value = EventScheduleMaintenanceReview(
+            phase = EventScheduleMaintenanceReviewPhase.REFRESHING,
+        )
         scope.launch {
             try {
                 handleScheduleMaintenanceActionResult(
@@ -646,6 +649,9 @@ internal class EventEditActionHandler(
             }
             is EventScheduleMaintenanceActionResult.Rejected -> {
                 clearScheduleMaintenanceIdentities()
+                _scheduleMaintenanceReview.value = EventScheduleMaintenanceReview(
+                    phase = EventScheduleMaintenanceReviewPhase.REJECTED, message = result.message,
+                )
                 setError(result.message)
             }
             is EventScheduleMaintenanceActionResult.Failure -> {
@@ -678,14 +684,17 @@ internal class EventEditActionHandler(
                     if (!result.settingsSaved) {
                         clearScheduleMaintenanceIdentities(clearAttempt = false)
                     }
-                    setError(
-                        when {
-                            result.throwable is EventScheduleMaintenanceUnavailableException ->
-                                SCHEDULE_MAINTENANCE_UNAVAILABLE_MESSAGE
-                            result.settingsSaved -> result.fallbackMessage
-                            else -> result.throwable.userMessage(result.fallbackMessage)
-                        },
+                    val message = when {
+                        result.throwable is EventScheduleMaintenanceUnavailableException ->
+                            SCHEDULE_MAINTENANCE_UNAVAILABLE_MESSAGE
+                        result.settingsSaved -> result.fallbackMessage
+                        else -> result.throwable.userMessage(result.fallbackMessage)
+                    }
+                    _scheduleMaintenanceReview.value = EventScheduleMaintenanceReview(
+                        phase = EventScheduleMaintenanceReviewPhase.FAILED,
+                        message = message,
                     )
+                    setError(message)
                 }
             }
         }
@@ -711,10 +720,7 @@ internal class EventEditActionHandler(
             throw throwable
         }
         setEditorSession(outcome.session)
-        seedEditableDraft(
-            selectedEvent = outcome.session.canonicalState.event,
-            canonicalState = outcome.session.canonicalState,
-        )
+        // Restore server settings without replacing the organizer's setup.
         maintenanceOriginalSession = null
         maintenanceSavedSession = null
         return true
@@ -764,7 +770,7 @@ internal class EventEditActionHandler(
             loadingOperation.showLoading("Accepting schedule proposal...")
             var acceptedResult: EventEditorMaintenanceAcceptedResultDto? = null
             try {
-                val proposal = currentReview.proposal
+                val proposal = currentReview.reviewedProposal
                 val result = eventRepository.acceptEventScheduleMaintenance(
                     EventEditorAcceptMaintenanceProposalDto(
                         contractVersion = proposal.contractVersion,
@@ -820,7 +826,7 @@ internal class EventEditActionHandler(
                     ?: (throwable as? EventEditorMaintenanceAcceptedSyncPendingException)?.result
                 if (throwable is EventEditorMaintenanceAcceptanceConflictException) {
                     recoverAcceptedByAnotherClient(
-                        eventId = currentReview.proposal.eventId,
+                        eventId = currentReview.reviewedProposal.eventId,
                         requestGeneration = requestGeneration,
                         expectedReview = acceptingReview,
                         pendingReview = currentReview,
@@ -902,11 +908,11 @@ internal class EventEditActionHandler(
                     eventRepository.syncAcceptedEventScheduleMaintenance(
                         acceptedResultForConflict,
                     ).getOrThrow()
-                    refreshAcceptedScheduleAndEditor(currentReview.proposal.eventId)
+                    refreshAcceptedScheduleAndEditor(currentReview.reviewedProposal.eventId)
                 } else {
                     val acceptedResult = accepted ?: return@launch
                     eventRepository.syncAcceptedEventScheduleMaintenance(acceptedResult).getOrThrow()
-                    refreshAcceptedSchedule(currentReview.proposal.eventId)
+                    refreshAcceptedSchedule(currentReview.reviewedProposal.eventId)
                 }
                 if (
                     requestGeneration != maintenanceRequestGeneration ||
@@ -918,7 +924,7 @@ internal class EventEditActionHandler(
                     acceptedByAnotherClientMessage()
                 } else {
                     val acceptedResult = accepted ?: return@launch
-                    maintenanceAcceptedMessage(currentReview.proposal.operation, acceptedResult)
+                    maintenanceAcceptedMessage(currentReview.reviewedProposal.operation, acceptedResult)
                 }
                 clearScheduleMaintenanceIdentities()
                 _scheduleMaintenanceReview.value = null
@@ -963,7 +969,7 @@ internal class EventEditActionHandler(
             val loadingOperation = loadingHandler().newOperation()
             loadingOperation.showLoading("Rejecting schedule proposal...")
             try {
-                val proposal = currentReview.proposal
+                val proposal = currentReview.reviewedProposal
                 eventRepository.rejectEventScheduleMaintenance(
                     EventEditorRejectMaintenanceProposalDto(
                         contractVersion = proposal.contractVersion,
@@ -994,7 +1000,7 @@ internal class EventEditActionHandler(
                 }
                 if (throwable is EventEditorMaintenanceAcceptanceConflictException) {
                     recoverAcceptedByAnotherClient(
-                        eventId = currentReview.proposal.eventId,
+                        eventId = currentReview.reviewedProposal.eventId,
                         requestGeneration = requestGeneration,
                         expectedReview = rejectingReview,
                         pendingReview = currentReview,
@@ -1039,6 +1045,28 @@ internal class EventEditActionHandler(
         if (isScheduleMaintenanceReviewDismissBlocked()) {
             return
         }
+        if (maintenanceOriginalSession != null) {
+            maintenanceRequestInFlight = true
+            _scheduleMaintenanceReview.value = _scheduleMaintenanceReview.value?.copy(
+                phase = EventScheduleMaintenanceReviewPhase.REJECTING,
+            )
+            scope.launch {
+                try {
+                    rollbackScheduleMaintenanceEvent()
+                    maintenanceRequestGeneration += 1
+                    clearScheduleMaintenanceIdentities()
+                    _scheduleMaintenanceReview.value = null
+                } catch (error: Throwable) {
+                    _scheduleMaintenanceReview.value = _scheduleMaintenanceReview.value?.copy(
+                        phase = EventScheduleMaintenanceReviewPhase.STALE,
+                        message = error.userMessage(SCHEDULE_MAINTENANCE_ROLLBACK_REQUIRED_MESSAGE),
+                    )
+                } finally {
+                    maintenanceRequestInFlight = false
+                }
+            }
+            return
+        }
         maintenanceRequestGeneration += 1
         clearScheduleMaintenanceIdentities()
         _scheduleMaintenanceReview.value = null
@@ -1046,6 +1074,10 @@ internal class EventEditActionHandler(
 
     fun requestFreshScheduleMaintenanceProposal() {
         val review = _scheduleMaintenanceReview.value ?: return
+        if (review.phase == EventScheduleMaintenanceReviewPhase.FAILED && !maintenanceRollbackRecoveryRequired) {
+            lastMaintenanceAction?.let(::requestScheduleMaintenanceAction)
+            return
+        }
         if (
             review.phase != EventScheduleMaintenanceReviewPhase.STALE &&
             review.phase != EventScheduleMaintenanceReviewPhase.REJECTED
@@ -1061,14 +1093,16 @@ internal class EventEditActionHandler(
         maintenanceRequestInFlight = true
         scope.launch {
             try {
-                val freshSession = eventRepository.getEventEditor(review.proposal.eventId).getOrThrow()
+                val eventId = review.proposal?.eventId ?: selectedEvent().id
+                val freshSession = eventRepository.getEventEditor(eventId).getOrThrow()
                 if (
                     requestGeneration != maintenanceRequestGeneration ||
                     _scheduleMaintenanceReview.value != review
                 ) {
                     return@launch
                 }
-                val action = review.requestedAction()
+                val action = (if (review.proposal != null) review.requestedAction() else lastMaintenanceAction)
+                    ?: return@launch
                 setEditorSession(freshSession)
                 seedEditableDraft(
                     selectedEvent = freshSession.canonicalState.event,
@@ -1084,11 +1118,9 @@ internal class EventEditActionHandler(
                     setError(SCHEDULE_MAINTENANCE_UNAVAILABLE_MESSAGE)
                     return@launch
                 }
+                _scheduleMaintenanceReview.value = review.copy(phase = EventScheduleMaintenanceReviewPhase.REFRESHING)
                 val result = runScheduleMaintenanceAction(action)
-                if (
-                    requestGeneration != maintenanceRequestGeneration ||
-                    _scheduleMaintenanceReview.value != review
-                ) {
+                if (requestGeneration != maintenanceRequestGeneration) {
                     return@launch
                 }
                 handleScheduleMaintenanceActionResult(
@@ -1096,10 +1128,7 @@ internal class EventEditActionHandler(
                     requestGeneration = requestGeneration,
                 )
             } catch (throwable: Throwable) {
-                if (
-                    requestGeneration != maintenanceRequestGeneration ||
-                    _scheduleMaintenanceReview.value != review
-                ) {
+                if (requestGeneration != maintenanceRequestGeneration) {
                     return@launch
                 }
                 val message = throwable.userMessage("Unable to refresh the schedule proposal.")

@@ -12,6 +12,8 @@ import com.razumly.mvp.core.network.dto.EventEditorMaintenanceResponseDto
 import com.razumly.mvp.core.network.dto.EventEditorMaintenanceScheduleOutcomeStatus
 import com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeStatus
 import com.razumly.mvp.core.network.dto.EventEditorScheduleWarningDto
+import com.razumly.mvp.schedule.ScheduleProposalReview
+import com.razumly.mvp.schedule.ScheduleProposalReviewPhase
 
 internal enum class EventScheduleEditAction(
     val loadingMessage: String,
@@ -67,23 +69,11 @@ internal sealed class EventSaveActionResult {
     ) : EventSaveActionResult()
 }
 
-enum class EventScheduleMaintenanceReviewPhase {
-    PROPOSED,
-    ACCEPTING,
-    REJECTING,
-    STALE,
-    REJECTED,
-    ACCEPTED_SYNC_PENDING,
-}
+typealias EventScheduleMaintenanceReviewPhase = ScheduleProposalReviewPhase
+typealias EventScheduleMaintenanceReview = ScheduleProposalReview<EventEditorMaintenanceProposalDto>
 
-data class EventScheduleMaintenanceReview(
-    val proposal: EventEditorMaintenanceProposalDto,
-    val acceptanceOperationId: String,
-    val includePlaceholderTeams: Boolean? = null,
-    val eventTimeZone: String = "UTC",
-    val phase: EventScheduleMaintenanceReviewPhase = EventScheduleMaintenanceReviewPhase.PROPOSED,
-    val message: String? = null,
-)
+internal val EventScheduleMaintenanceReview.reviewedProposal: EventEditorMaintenanceProposalDto
+    get() = requireNotNull(proposal) { "This review has no proposal." }
 
 internal sealed class EventScheduleMaintenanceActionResult {
     data class Proposed(

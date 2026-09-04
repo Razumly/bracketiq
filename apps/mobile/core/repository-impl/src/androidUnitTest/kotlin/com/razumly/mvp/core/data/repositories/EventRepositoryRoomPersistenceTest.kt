@@ -1882,6 +1882,90 @@ class EventRepositoryRoomPersistenceTest {
     }
 
     @Test
+    fun given_accepted_partial_proposal_when_room_reopens_offline_then_exact_placements_and_unscheduled_matches_remain() = kotlinx.coroutines.test.runTest {
+        val fixture = eventRepositoryRoomPersistenceTournamentFixture()
+        val unplaced = fixture.proposal.graph.matches.single().copy(
+            id = "match-room-unplaced", matchId = 2, start = null, end = null,
+            fieldId = null, placementState = "UNPLACED",
+        )
+        val projection = fixture.proposal.scheduleOutcome.matches.single().copy(
+            id = "match-room-unplaced", matchId = 2, start = null, end = null,
+            fieldId = null, placementState = "UNPLACED",
+        )
+        val outcome = fixture.proposal.scheduleOutcome.copy(
+            status = EventEditorScheduleOutcomeStatus.PARTIAL, isComplete = false,
+            matchCount = 2, placedMatchCount = 1, unplacedMatchCount = 1,
+            matches = fixture.proposal.scheduleOutcome.matches + projection,
+            unscheduledMatches = listOf(com.razumly.mvp.core.network.dto.EventEditorUnscheduledMatchDto(
+                id = "match-room-unplaced", matchId = 2, phaseDivisionId = fixture.phaseDivisionId,
+                phase = "POOL", sourceDivisionId = "division-open",
+            )),
+            affectedCompetitionPhases = listOf(com.razumly.mvp.core.network.dto.EventEditorAffectedCompetitionPhaseDto(
+                id = fixture.phaseDivisionId, name = "Open Pool Phase", phase = "POOL", sourceDivisionId = "division-open",
+            )),
+        )
+        val graph = fixture.proposal.graph.copy(matches = fixture.proposal.graph.matches + unplaced)
+        val proposal = fixture.proposal.copy(scheduleOutcome = outcome, graph = graph)
+        val saved = fixture.saved.copy(scheduleOutcome = outcome, graph = graph, acceptanceOperationId = "partial-room-accept")
+        val databaseName = "issue39-${java.util.UUID.randomUUID()}.db"
+        fun openDatabase() = Room.databaseBuilder<MVPDatabaseService>(context, databaseName)
+            .allowMainThreadQueries().build()
+        var database = openDatabase()
+        var offline = false
+        var requestCount = 0
+        val http = HttpClient(MockEngine { request ->
+            check(!offline) { "Room reload must not use the network." }
+            requestCount += 1
+            assertEquals("/api/events/editor", request.url.encodedPath)
+            when (request.method) {
+                HttpMethod.Post -> respondJson(jsonMVP.encodeToString(proposal), HttpStatusCode.Accepted)
+                HttpMethod.Put -> respondJson(jsonMVP.encodeToString(saved), HttpStatusCode.Created)
+                else -> error("Unexpected proposal request.")
+            }
+        }) { configureMvpHttpClient() }
+        var repository = eventRepositoryRoomPersistenceRepository(database, http, UnconfinedTestDispatcher(testScheduler))
+        try {
+            repository.createEventEditor(fixture.command).getOrThrow()
+            assertNull(database.getEventDao.getEventById(fixture.eventId))
+            assertTrue(database.getMatchDao.getMatchesOfTournament(fixture.eventId).isEmpty())
+            repository.acceptEventEditorPartialProposal(
+                createOperationId = proposal.createOperationId,
+                proposalRevision = proposal.proposalRevision,
+                acceptanceOperationId = "partial-room-accept",
+                draft = fixture.draft,
+            ).getOrThrow()
+            repository.close()
+            database.close()
+            offline = true
+            database = openDatabase()
+            repository = eventRepositoryRoomPersistenceRepository(database, http, UnconfinedTestDispatcher(testScheduler))
+
+            val cached = repository.getCachedEventWithRelationsFlow(fixture.eventId).first().getOrThrow()
+            assertEquals(fixture.eventId, cached.event.id)
+            val matches = database.getMatchDao.getMatchesFlowOfTournament(fixture.eventId).first()
+                .associateBy { it.match.id }
+            assertEquals(setOf("match-room-tournament", "match-room-unplaced"), matches.keys)
+            val placed = matches.getValue("match-room-tournament")
+            assertEquals(Instant.parse("2026-08-15T08:00:00Z"), placed.match.start)
+            assertEquals(Instant.parse("2026-08-15T08:45:00Z"), placed.match.end)
+            assertEquals(fixture.fieldId, placed.match.fieldId)
+            assertEquals("Tournament Court", placed.field?.name)
+            val pending = matches.getValue("match-room-unplaced").match
+            assertEquals("UNPLACED", pending.placementState)
+            assertEquals(fixture.phaseDivisionId, pending.phaseDivisionId)
+            assertNull(pending.start)
+            assertNull(pending.end)
+            assertNull(pending.fieldId)
+            assertEquals(2, requestCount)
+        } finally {
+            repository.close()
+            http.close()
+            database.close()
+            context.deleteDatabase(databaseName)
+        }
+    }
+
+    @Test
     fun given_newer_event_when_accepted_relation_refresh_runs_then_newer_relations_survive_and_only_missing_rows_are_fetched() =
         kotlinx.coroutines.test.runTest {
             val eventId = "event-room-relation-race"

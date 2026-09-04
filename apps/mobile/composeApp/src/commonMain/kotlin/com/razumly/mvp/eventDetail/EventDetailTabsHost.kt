@@ -387,6 +387,7 @@ private fun MatchSchedule(
     val scheduledMatches = scheduleMatches.filter { match -> match.match.start != null }
     ScheduleView(
         items = scheduledMatches.map { match -> ScheduleItem.MatchEntry(match) },
+        unscheduledMatches = scheduleMatches.filter { it.match.start == null },
         fields = state.eventFields,
         resourceLabels = state.resourceLabels,
         resourceLabelsByFieldId = state.resourceLabelsByFieldId,

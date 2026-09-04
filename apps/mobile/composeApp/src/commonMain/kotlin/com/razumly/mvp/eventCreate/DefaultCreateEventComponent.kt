@@ -117,18 +117,10 @@ import kotlinx.serialization.Serializable
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
+import com.razumly.mvp.schedule.ScheduleProposalReview
+import com.razumly.mvp.schedule.ScheduleProposalReviewPhase
 
-sealed interface ScheduleProposalState {
-    data object None : ScheduleProposalState
-
-    data class Review(
-        val outcome: com.razumly.mvp.core.data.repositories.EventEditorSaveOutcome,
-    ) : ScheduleProposalState
-
-    data class Stale(
-        val outcome: com.razumly.mvp.core.data.repositories.EventEditorSaveOutcome,
-    ) : ScheduleProposalState
-}
+typealias ScheduleProposalState = ScheduleProposalReview<com.razumly.mvp.core.data.repositories.EventEditorSaveOutcome>
 
 interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     val newEventState: StateFlow<Event>
@@ -168,6 +160,7 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     fun acceptScheduleProposal()
     fun refreshScheduleProposal()
     fun rejectScheduleProposal()
+    fun returnToScheduleSetup()
 
     fun onBackClicked()
     fun updateEventField(update: Event.() -> Event)
@@ -266,11 +259,10 @@ class DefaultCreateEventComponent(
     override val isTryoutAvailable = _isTryoutAvailable.asStateFlow()
     private val _isEditorReady = MutableStateFlow(false)
     override val isEditorReady = _isEditorReady.asStateFlow()
-    private val _pendingScheduleProposal =
-        MutableStateFlow<com.razumly.mvp.core.data.repositories.EventEditorSaveOutcome?>(null)
-    override val pendingScheduleProposal = _pendingScheduleProposal.asStateFlow()
-    private val _scheduleProposalState = MutableStateFlow<ScheduleProposalState>(ScheduleProposalState.None)
+    private val _scheduleProposalState = MutableStateFlow(ScheduleProposalState(phase = ScheduleProposalReviewPhase.NONE))
     override val scheduleProposalState = _scheduleProposalState.asStateFlow()
+    override val pendingScheduleProposal = scheduleProposalState.map { it.proposal }
+        .stateIn(scope, SharingStarted.Eagerly, null)
     private val _editorBootstrapError = MutableStateFlow<String?>(null)
     override val editorBootstrapError = _editorBootstrapError.asStateFlow()
     private var pendingCreateCommand: EventEditorCreateCommandDto? = null
@@ -436,6 +428,10 @@ class DefaultCreateEventComponent(
     }
 
     override fun onBackClicked() {
+        if (_scheduleProposalState.value.phase != ScheduleProposalReviewPhase.NONE) {
+            returnToScheduleSetup()
+            return
+        }
         if (childStack.value.backStack.isNotEmpty()) {
             navigation.pop()
         }
@@ -503,7 +499,7 @@ class DefaultCreateEventComponent(
     }
 
     override fun createEvent() {
-        if (createEventJob?.isActive == true) {
+        if (createEventJob?.isActive == true || _scheduleProposalState.value.phase.isBusy) {
             return
         }
         createEventJob = scope.launch {
@@ -560,7 +556,8 @@ class DefaultCreateEventComponent(
     }
     override fun acceptScheduleProposal() {
         scope.launch {
-            val pending = _pendingScheduleProposal.value
+            if (_scheduleProposalState.value.phase.isBusy) return@launch
+            val pending = _scheduleProposalState.value.proposal
             val proposal = pending?.proposal
             val pendingCommand = pendingCreateCommand
             if (proposal == null) {
@@ -568,7 +565,7 @@ class DefaultCreateEventComponent(
                 return@launch
             }
             val pendingOutcome = pending ?: return@launch
-            if (_scheduleProposalState.value is ScheduleProposalState.Stale) {
+            if (_scheduleProposalState.value.phase == ScheduleProposalReviewPhase.STALE) {
                 _errorState.value = staleProposalError()
                 return@launch
             }
@@ -584,6 +581,9 @@ class DefaultCreateEventComponent(
                 return@launch
             }
             val loadingOperation = loadingHandler.newOperation()
+            _scheduleProposalState.value = _scheduleProposalState.value.copy(
+                phase = ScheduleProposalReviewPhase.ACCEPTING, message = null,
+            )
             loadingOperation.showLoading("Accepting schedule proposal...")
             try {
                 val result = if (
@@ -607,8 +607,7 @@ class DefaultCreateEventComponent(
                     )
                 }
                 result.onSuccess { outcome ->
-                    _pendingScheduleProposal.value = null
-                    _scheduleProposalState.value = ScheduleProposalState.None
+                    _scheduleProposalState.value = ScheduleProposalState(phase = ScheduleProposalReviewPhase.NONE)
                     pendingCreateCommand = null
                     pendingCreateSubmission = null
                     pendingAcceptanceOperationId = null
@@ -640,9 +639,11 @@ class DefaultCreateEventComponent(
                         markProposalStale(pendingOutcome)
                         _errorState.value = staleProposalError()
                     } else {
-                        _errorState.value = ErrorMessage(
-                            error.userMessage("The schedule proposal is no longer valid."),
+                        val message = error.userMessage("Acceptance failed. Retry this proposal.")
+                        _scheduleProposalState.value = _scheduleProposalState.value.copy(
+                            phase = ScheduleProposalReviewPhase.PROPOSED, message = message,
                         )
+                        _errorState.value = ErrorMessage(message, actionLabel = "Retry acceptance", action = ::acceptScheduleProposal)
                     }
                 }
             } finally {
@@ -652,8 +653,13 @@ class DefaultCreateEventComponent(
     }
 
     override fun refreshScheduleProposal() {
+        if (_scheduleProposalState.value.phase == ScheduleProposalReviewPhase.FAILED) {
+            createEvent()
+            return
+        }
         scope.launch {
-            val pending = _pendingScheduleProposal.value
+            if (_scheduleProposalState.value.phase.isBusy) return@launch
+            val pending = _scheduleProposalState.value.proposal
             if (pending?.proposal == null) {
                 _errorState.value = ErrorMessage("There is no schedule proposal to refresh.")
                 return@launch
@@ -680,19 +686,21 @@ class DefaultCreateEventComponent(
 
     override fun rejectScheduleProposal() {
         scope.launch {
-            val proposal = _pendingScheduleProposal.value?.proposal
+            if (_scheduleProposalState.value.phase.isBusy) return@launch
+            val previousReview = _scheduleProposalState.value
+            val proposal = previousReview.proposal?.proposal
             if (proposal == null) {
                 _errorState.value = ErrorMessage("There is no schedule proposal to reject.")
                 return@launch
             }
+            _scheduleProposalState.value = previousReview.copy(phase = ScheduleProposalReviewPhase.REJECTING)
             eventRepository.rejectEventEditorProposal(
                 createOperationId = proposal.createOperationId,
                 proposalRevision = proposal.proposalRevision,
             ).onSuccess {
-                pendingAcceptanceOperationId = null
-                _pendingScheduleProposal.value = null
-                _scheduleProposalState.value = ScheduleProposalState.None
+                clearScheduleProposal()
             }.onFailure { error ->
+                _scheduleProposalState.value = previousReview
                 _errorState.value = ErrorMessage(
                     error.userMessage("The schedule proposal could not be rejected."),
                 )
@@ -700,8 +708,22 @@ class DefaultCreateEventComponent(
         }
     }
 
+    override fun returnToScheduleSetup() {
+        if (_scheduleProposalState.value.phase.isBusy) return
+        clearScheduleProposal()
+    }
+
+    private fun clearScheduleProposal() {
+        _scheduleProposalState.value = ScheduleProposalState(phase = ScheduleProposalReviewPhase.NONE)
+        pendingCreateCommand = null
+        pendingCreateSubmission = null
+        pendingAcceptanceOperationId = null
+        refreshProposalCommandConsumed = false
+        _errorState.value = null
+    }
+
     private fun markProposalStale(outcome: com.razumly.mvp.core.data.repositories.EventEditorSaveOutcome) {
-        _scheduleProposalState.value = ScheduleProposalState.Stale(outcome)
+        _scheduleProposalState.value = ScheduleProposalState(outcome, phase = ScheduleProposalReviewPhase.STALE)
     }
 
     private fun staleProposalError(): ErrorMessage = ErrorMessage(
@@ -1785,19 +1807,22 @@ class DefaultCreateEventComponent(
             },
         )
         pendingCreateCommand = command
+        _scheduleProposalState.value = _scheduleProposalState.value.copy(
+            phase = ScheduleProposalReviewPhase.REFRESHING, message = null,
+        )
         try {
             eventRepository.createEventEditor(command)
                 .onSuccess { outcome ->
                     if (outcome.proposal != null) {
                         pendingAcceptanceOperationId = null
-                        _pendingScheduleProposal.value = outcome
-                        _scheduleProposalState.value = ScheduleProposalState.Review(outcome)
+                        _scheduleProposalState.value = ScheduleProposalState(outcome)
                         refreshProposalCommandConsumed = false
                         return@onSuccess
                     }
                     pendingCreateCommand = null
                     pendingCreateSubmission = null
                     pendingAcceptanceOperationId = null
+                    _scheduleProposalState.value = ScheduleProposalState(phase = ScheduleProposalReviewPhase.NONE)
                     _editorSession.value = outcome.session
                     applyEditorSession(outcome.session)
                     val notices = buildList {
@@ -1831,14 +1856,23 @@ class DefaultCreateEventComponent(
             deferredError = createEventFailureMessage(error)
         } finally {
             loadingOperation.hideLoading()
-            deferredError?.let { error -> _errorState.value = error }
+            deferredError?.let { error ->
+                _errorState.value = error
+                _scheduleProposalState.value = ScheduleProposalState(
+                    phase = ScheduleProposalReviewPhase.FAILED, message = error.message,
+                )
+            }
         }
     }
 
     private fun createEventFailureMessage(
         error: Throwable,
     ): ErrorMessage {
-        return ErrorMessage(error.userMessage("Failed to create event."))
+        return ErrorMessage(
+            message = error.userMessage("Failed to create event."),
+            actionLabel = "Retry proposal",
+            action = ::createEvent,
+        )
     }
 
     private fun List<PendingStaffInviteDraft>.toCanonicalInvites(eventId: String): List<Invite> =

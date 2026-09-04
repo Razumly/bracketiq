@@ -25,6 +25,7 @@ import com.razumly.mvp.core.network.dto.EventEditorRevisionBindingDto
 import kotlin.test.assertEquals
 import kotlinx.datetime.TimeZone
 import kotlin.test.assertTrue
+import kotlin.test.assertFalse
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -63,13 +64,15 @@ class EventDetailOverlayHostUiTest {
         composeRule.onNodeWithText("9 matches remain unscheduled.")
             .performScrollTo()
             .assertIsDisplayed()
-        review.proposal.scheduleOutcome.unscheduledMatches.forEach { match ->
+        review.reviewedProposal.scheduleOutcome.unscheduledMatches.forEach { match ->
             composeRule.onNodeWithText(maintenanceUnscheduledMatchLabel(match))
                 .performScrollTo()
                 .assertIsDisplayed()
         }
 
-        composeRule.onNodeWithText("Accept").performClick()
+        composeRule.onNodeWithText("Review partial acceptance").performClick()
+        assertFalse(accepted)
+        composeRule.onNodeWithText("Accept partial schedule").performClick()
         assertTrue(accepted)
     }
 
@@ -153,9 +156,11 @@ class EventDetailOverlayHostUiTest {
             }
         }
 
-        composeRule.onNodeWithText("Accept").assertIsDisplayed().performClick()
+        composeRule.onNodeWithText("Review partial acceptance").assertIsDisplayed().performClick()
+        assertFalse(accepted)
+        composeRule.onNodeWithText("Back to proposal").performClick()
         composeRule.onNodeWithText("Reject").assertIsDisplayed().performClick()
-        assertTrue(accepted)
+        assertFalse(accepted)
         assertTrue(rejected)
     }
 
@@ -180,6 +185,33 @@ class EventDetailOverlayHostUiTest {
 
         composeRule.onNodeWithText("Request new proposal").assertIsDisplayed().performClick()
         assertTrue(refreshed)
+    }
+
+    @Test
+    fun given_failed_request_when_review_renders_then_retry_and_setup_are_available_without_acceptance() {
+        var retried = false
+        var returned = false
+        composeRule.setContent {
+            MaterialTheme {
+                EventScheduleMaintenanceReviewDialog(
+                    review = EventScheduleMaintenanceReview(
+                        phase = EventScheduleMaintenanceReviewPhase.FAILED,
+                        message = "Connection failed. Your setup is retained.",
+                    ),
+                    onAccept = { error("Failed proposals cannot be accepted.") },
+                    onReject = {},
+                    onDismiss = { returned = true },
+                    onRequestFreshProposal = { retried = true },
+                )
+            }
+        }
+        composeRule.onNodeWithText("Connection failed. Your setup is retained.").assertIsDisplayed()
+        composeRule.onNodeWithText("Retry proposal").performClick()
+        composeRule.onNodeWithText("Return to setup").performClick()
+        composeRule.onNodeWithText("Accept").assertDoesNotExist()
+        composeRule.onNodeWithText("Save without schedule").assertDoesNotExist()
+        assertTrue(retried)
+        assertTrue(returned)
     }
 
     @Test

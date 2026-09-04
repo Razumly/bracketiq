@@ -1,5 +1,12 @@
 package com.razumly.mvp.eventDetail
 
+import com.razumly.mvp.schedule.PartialScheduleConfirmation
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import com.razumly.mvp.schedule.ScheduleProposalFailureDialog
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -577,11 +584,30 @@ internal fun EventScheduleMaintenanceReviewDialog(
     onRetryAcceptedScheduleSync: () -> Unit = {},
 ) {
     val proposal = review.proposal
+    if (proposal == null) {
+        ScheduleProposalFailureDialog(
+            message = review.message ?: "Requesting a schedule proposal...",
+            isBusy = review.phase.isBusy,
+            onRetry = onRequestFreshProposal,
+            onReturnToSetup = onDismiss,
+        )
+        return
+    }
     val outcome = proposal.scheduleOutcome
+    var confirmPartial by remember(proposal.operationId, proposal.proposalRevision, review.phase) {
+        mutableStateOf(false)
+    }
+    if (confirmPartial) {
+        PartialScheduleConfirmation(
+            unscheduledMatchCount = outcome.unplacedMatchCount,
+            onConfirm = { confirmPartial = false; onAccept() },
+            onDismiss = { confirmPartial = false },
+        )
+        return
+    }
     val isAcceptedSyncPending =
         review.phase == EventScheduleMaintenanceReviewPhase.ACCEPTED_SYNC_PENDING
-    val isBusy = review.phase == EventScheduleMaintenanceReviewPhase.ACCEPTING ||
-        review.phase == EventScheduleMaintenanceReviewPhase.REJECTING
+    val isBusy = review.phase.isBusy
     val reviewMessage = review.message
         ?.trim()
         ?.takeIf(String::isNotBlank)
@@ -624,6 +650,7 @@ internal fun EventScheduleMaintenanceReviewDialog(
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Revision: ${proposal.proposalRevision}")
                 reviewBanner?.let { message ->
                     Text(
                         text = message,
@@ -654,7 +681,7 @@ internal fun EventScheduleMaintenanceReviewDialog(
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("Graph summary")
                         Text("Proposed matches (${proposal.graph.matches.size}):")
-                        proposal.graph.matches.take(8).forEachIndexed { index, match ->
+                        proposal.graph.matches.forEachIndexed { index, match ->
                             val canonicalMatch = maintenanceCanonicalMatch(
                                 graph = proposal.graph,
                                 match = match,
@@ -703,9 +730,6 @@ internal fun EventScheduleMaintenanceReviewDialog(
                                 }
                             }
                         }
-                        if (proposal.graph.matches.size > 8) {
-                            Text("…and ${proposal.graph.matches.size - 8} more proposed matches.")
-                        }
                         Text("Protected matches (${proposal.protectedMatchIds.size}):")
                         proposal.protectedMatchIds.take(8).forEach { matchId ->
                             Text(matchId)
@@ -741,8 +765,10 @@ internal fun EventScheduleMaintenanceReviewDialog(
                 review.phase == EventScheduleMaintenanceReviewPhase.PROPOSED -> Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    TextButton(onClick = onAccept) {
-                        Text("Accept")
+                    TextButton(onClick = {
+                        if (outcome.isComplete) onAccept() else confirmPartial = true
+                    }) {
+                        Text(if (outcome.isComplete) "Accept" else "Review partial acceptance")
                     }
                     TextButton(onClick = onReject) {
                         Text("Reject")

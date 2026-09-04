@@ -155,9 +155,27 @@ class ScheduleProposalDialogUiTest {
         composeRule.onNodeWithText(
             "playoff-phase: Playoffs (PLAYOFF, sourceDivisionId division-1)",
         ).assertIsDisplayed()
-        composeRule.onNodeWithText("Accept partial schedule").assertIsEnabled().performClick()
-
+        composeRule.onNodeWithText("Review partial acceptance").assertIsEnabled().performClick()
+        assertFalse(accepted)
+        composeRule.onNodeWithText("Back to proposal").performClick()
+        assertFalse(accepted)
+        composeRule.onNodeWithText("Review partial acceptance").performClick()
+        composeRule.onNodeWithText("Accept partial schedule").performClick()
         assertTrue(accepted)
+    }
+    @Test
+    fun given_optional_staffing_gap_when_reviewed_then_acceptance_remains_enabled() {
+        val proposal = buildProposal().let { complete ->
+            complete.copy(graph = complete.graph.copy(matches = complete.graph.matches.map {
+                it.copy(officialId = null, officialAssignments = emptyList(), officialIds = emptyList(), teamOfficialId = null)
+            }))
+        }
+        composeRule.setContent {
+            MaterialTheme {
+                ScheduleProposalDialog(proposal = proposal, onAccept = {}, onReject = {})
+            }
+        }
+        composeRule.onNodeWithText("Accept and create").assertIsEnabled()
     }
     @Test
     fun givenMissingReferencedResourceName_when_dialogRenders_then_acceptanceIsBlocked() {

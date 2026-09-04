@@ -36,8 +36,61 @@ import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Instant
+import com.razumly.mvp.schedule.ScheduleProposalReviewPhase
 
 class DefaultCreateEventComponentTest : MainDispatcherTest() {
+    @Test
+    fun given_reviewed_proposal_when_back_returns_to_setup_then_configuration_is_retained_and_next_create_is_new() = runTest(testDispatcher) {
+        val harness = partialProposalHarness()
+        advance()
+        harness.component.createEvent()
+        advance()
+        val setup = harness.component.newEventState.value
+        val fields = harness.component.localFields.value
+        val slots = harness.component.leagueSlots.value
+        val firstCommand = harness.eventRepository.attemptedCreateEventEditorCommands.single()
+
+        harness.component.onBackClicked()
+        advance()
+        assertNull(harness.component.pendingScheduleProposal.value)
+        assertEquals(setup, harness.component.newEventState.value)
+        assertEquals(fields, harness.component.localFields.value)
+        assertEquals(slots, harness.component.leagueSlots.value)
+        assertEquals(0, harness.onEventCreatedCount)
+
+        harness.component.createEvent()
+        advance()
+        val nextCommand = harness.eventRepository.attemptedCreateEventEditorCommands.last()
+        assertEquals(firstCommand.draft, nextCommand.draft)
+        assertNotEquals(firstCommand.createOperationId, nextCommand.createOperationId)
+    }
+
+    @Test
+    fun given_failed_schedule_creation_when_retry_selected_then_setup_and_request_identity_are_preserved() = runTest(testDispatcher) {
+        val harness = partialProposalHarness()
+        advance()
+        val setup = harness.component.newEventState.value
+        harness.eventRepository.createEditorFailure = IllegalStateException("No schedule response. Try again.")
+        harness.component.createEvent()
+        advance()
+
+        val firstCommand = harness.eventRepository.attemptedCreateEventEditorCommands.single()
+        val failure = harness.component.errorState.value
+        assertEquals("Retry proposal", failure?.actionLabel)
+        // Create adds the Event type tag before submission.
+        val submittedSetup = harness.component.newEventState.value
+        assertEquals(setup.copy(tags = submittedSetup.tags), submittedSetup)
+        assertEquals(0, harness.onEventCreatedCount)
+        harness.eventRepository.createEditorFailure = null
+        failure?.action?.invoke()
+        advance()
+
+        assertEquals(firstCommand, harness.eventRepository.attemptedCreateEventEditorCommands.last())
+        assertEquals(submittedSetup, harness.component.newEventState.value)
+        assertTrue(harness.component.pendingScheduleProposal.value?.proposal != null)
+        assertEquals(0, harness.onEventCreatedCount)
+    }
+
     @Test
     fun given_failed_image_delete_when_retrying_then_selection_is_preserved() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
@@ -751,7 +804,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
 
             val firstProposal = harness.component.pendingScheduleProposal.value
             assertTrue(firstProposal != null)
-            assertTrue(harness.component.scheduleProposalState.value is ScheduleProposalState.Stale)
+            assertEquals(ScheduleProposalReviewPhase.STALE, harness.component.scheduleProposalState.value.phase)
             assertTrue(harness.component.errorState.value?.message?.contains("stale") == true)
             assertEquals("Refresh proposal", harness.component.errorState.value?.actionLabel)
             assertEquals(1, harness.eventRepository.acceptedPartialEventEditorProposals.size)
@@ -772,7 +825,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
                 harness.eventRepository.createEventEditorCalls[0].createOperationId,
                 harness.eventRepository.createEventEditorCalls[1].createOperationId,
             )
-            assertTrue(harness.component.scheduleProposalState.value is ScheduleProposalState.Review)
+            assertEquals(ScheduleProposalReviewPhase.PROPOSED, harness.component.scheduleProposalState.value.phase)
             assertEquals(
                 firstProposal?.proposal?.snapshot?.draft?.basics?.name,
                 harness.component.pendingScheduleProposal.value?.proposal?.snapshot?.draft?.basics?.name,
@@ -783,7 +836,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
             assertEquals(2, harness.eventRepository.acceptedPartialEventEditorProposals.size)
             assertEquals(1, harness.onEventCreatedCount)
             assertTrue(harness.component.pendingScheduleProposal.value == null)
-            assertTrue(harness.component.scheduleProposalState.value is ScheduleProposalState.None)
+            assertEquals(ScheduleProposalReviewPhase.NONE, harness.component.scheduleProposalState.value.phase)
         }
 
     @Test
@@ -827,7 +880,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
 
             assertTrue(harness.eventRepository.acceptedEventEditorProposals.isEmpty())
             assertTrue(harness.component.errorState.value?.message?.contains("stale") == true)
-            assertTrue(harness.component.scheduleProposalState.value is ScheduleProposalState.Stale)
+            assertEquals(ScheduleProposalReviewPhase.STALE, harness.component.scheduleProposalState.value.phase)
             assertEquals("Changed after proposal", harness.component.newEventState.value.name)
             assertEquals(0, harness.onEventCreatedCount)
 
@@ -3629,7 +3682,8 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
                 harness.eventRepository.attemptedCreateEventEditorCommands[1]
             assertNotEquals(initialCommand.createOperationId, failedRefreshCommand.createOperationId)
             assertEquals(1, harness.eventRepository.createEventEditorCalls.size)
-            assertTrue(harness.component.pendingScheduleProposal.value != null)
+            assertNull(harness.component.pendingScheduleProposal.value)
+            assertEquals(ScheduleProposalReviewPhase.FAILED, harness.component.scheduleProposalState.value.phase)
 
             harness.eventRepository.createEditorFailure = null
             harness.component.refreshScheduleProposal()

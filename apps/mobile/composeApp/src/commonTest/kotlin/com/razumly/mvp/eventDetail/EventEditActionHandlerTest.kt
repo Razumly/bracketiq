@@ -49,6 +49,38 @@ import kotlin.test.assertNull
 
 class EventEditActionHandlerTest {
     @Test
+    fun given_edited_setup_when_proposal_is_dismissed_then_server_settings_restore_without_losing_the_draft() = runTest {
+        val event = testEvent()
+        val session = editorSession(event = event, operations = listOf(EventEditorMaintenanceOperation.REBUILD))
+        val changedSession = editorSession(event = event.copy(name = "My revised setup"),
+            operations = listOf(EventEditorMaintenanceOperation.REBUILD))
+        val repository = HandlerEventRepository(
+            editorSessions = ArrayDeque(listOf(session)),
+            saveOutcomes = ArrayDeque(listOf(saveOutcome(changedSession), saveOutcome(session))),
+            proposalResponses = ArrayDeque(listOf(EventEditorMaintenanceResponseDto.Proposed(
+                maintenanceProposal(EventEditorMaintenanceOperation.REBUILD),
+            ))),
+        )
+        val draft = EventEditDraftCoordinator(initialEvent = event, canEditInitial = false)
+        val handler = createHandler(this, event, repository, mutableListOf(), draftCoordinator = draft)
+        handler.startEditingEvent()
+        advanceUntilIdle()
+        handler.editEventField { copy(name = "My revised setup") }
+        val setup = draft.editedEvent.value
+        handler.rebuildWithoutPlaceholderTeams()
+        advanceUntilIdle()
+        handler.dismissScheduleMaintenanceReview()
+        advanceUntilIdle()
+
+        assertNull(handler.scheduleMaintenanceReview.value)
+        assertEquals(setup, draft.editedEvent.value)
+        assertTrue(draft.isEditing.value)
+        assertEquals(listOf("My revised setup", event.name), repository.saveCommands.map { it.draft.basics.name })
+        assertEquals(listOf(false, false), repository.savePersistenceModes)
+        assertTrue(repository.acceptanceRequests.isEmpty())
+    }
+
+    @Test
     fun given_failed_proposal_transport_when_retrying_unchanged_action_then_reuses_operation_id() = runTest {
         val event = testEvent().copy(maxParticipants = 8)
         val session = editorSession(
@@ -79,7 +111,9 @@ class EventEditActionHandlerTest {
         advanceUntilIdle()
         handler.rescheduleEvent()
         advanceUntilIdle()
-        handler.rescheduleEvent()
+        assertEquals(EventScheduleMaintenanceReviewPhase.FAILED, handler.scheduleMaintenanceReview.value?.phase)
+        assertEquals("proposal transport failed", handler.scheduleMaintenanceReview.value?.message)
+        handler.requestFreshScheduleMaintenanceProposal()
         advanceUntilIdle()
 
         assertEquals(2, repository.maintenanceRequests.size)
@@ -270,7 +304,7 @@ class EventEditActionHandlerTest {
         advanceUntilIdle()
         assertEquals(EventScheduleMaintenanceReviewPhase.STALE, handler.scheduleMaintenanceReview.value?.phase)
         assertEquals(
-            originalReview.proposal.operationId,
+            originalReview.reviewedProposal.operationId,
             repository.acceptanceRequests.single().operationId,
         )
         assertEquals(
@@ -284,7 +318,7 @@ class EventEditActionHandlerTest {
         assertEquals(listOf("event-1", "event-1"), repository.editorRequests)
         assertEquals(1, repository.maintenanceRequests.size)
         assertEquals(
-            originalReview.proposal.operationId,
+            originalReview.reviewedProposal.operationId,
             handler.scheduleMaintenanceReview.value?.proposal?.operationId,
         )
         assertEquals(
@@ -885,15 +919,13 @@ class EventEditActionHandlerTest {
         errors: MutableList<String>,
         matchRepository: IMatchRepository = HandlerMatchRepository(),
         refreshLeagueStandingsAfterSchedule: suspend (Event) -> Unit = {},
+        draftCoordinator: EventEditDraftCoordinator = EventEditDraftCoordinator(initialEvent = event, canEditInitial = false),
     ): EventEditActionHandler {
         val loadingHandler = CreateEvent_FakeLoadingHandler()
         return EventEditActionHandler(
             scope = scope,
             editActionCoordinator = EventEditActionCoordinator(),
-            editDraftCoordinator = EventEditDraftCoordinator(
-                initialEvent = event,
-                canEditInitial = false,
-            ),
+            editDraftCoordinator = draftCoordinator,
             rentalResourcesCoordinator = EventRentalResourcesCoordinator(),
             sportsCatalogCoordinator = EventSportsCatalogCoordinator(),
             inviteCoordinator = EventInviteCoordinator(),

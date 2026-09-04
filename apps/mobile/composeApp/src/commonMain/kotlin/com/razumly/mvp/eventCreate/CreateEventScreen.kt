@@ -2,6 +2,11 @@
 
 package com.razumly.mvp.eventCreate
 
+import com.razumly.mvp.schedule.PartialScheduleConfirmation
+import androidx.compose.material3.MaterialTheme
+import com.razumly.mvp.schedule.ScheduleProposalFailureDialog
+import com.razumly.mvp.schedule.ScheduleProposalReviewPhase
+
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -137,8 +142,8 @@ fun CreateEventScreen(
     val isTryoutAvailable by component.isTryoutAvailable.collectAsState()
     val editorBootstrapError by component.editorBootstrapError.collectAsState()
     val termsConsentLoading by component.termsConsentLoading.collectAsState()
-    val pendingScheduleProposal by component.pendingScheduleProposal.collectAsState()
     val scheduleProposalState by component.scheduleProposalState.collectAsState()
+    val pendingScheduleProposal = scheduleProposalState.proposal
     val showMap by mapComponent.showMap.collectAsState()
     val isEditing = true
     val showOfficialsPanel = newEventState.eventType != EventType.TRYOUT
@@ -160,13 +165,26 @@ fun CreateEventScreen(
     }
 
     pendingScheduleProposal?.proposal?.let { proposal ->
-        val isStale = scheduleProposalState is ScheduleProposalState.Stale
+        val isStale = scheduleProposalState.phase == ScheduleProposalReviewPhase.STALE
         ScheduleProposalDialog(
             proposal = proposal,
             isStale = isStale,
+            isBusy = scheduleProposalState.phase.isBusy,
+            message = scheduleProposalState.message,
             onAccept = component::acceptScheduleProposal,
             onRefresh = component::refreshScheduleProposal,
             onReject = component::rejectScheduleProposal,
+            onReturnToSetup = component::returnToScheduleSetup,
+        )
+    }
+    if (scheduleProposalState.phase == ScheduleProposalReviewPhase.FAILED ||
+        (scheduleProposalState.phase == ScheduleProposalReviewPhase.REFRESHING && pendingScheduleProposal == null)
+    ) {
+        ScheduleProposalFailureDialog(
+            message = scheduleProposalState.message ?: "Requesting a schedule proposal...",
+            isBusy = scheduleProposalState.phase.isBusy,
+            onRetry = component::createEvent,
+            onReturnToSetup = component::returnToScheduleSetup,
         )
     }
 
@@ -721,11 +739,25 @@ fun CreateEventScreen(
 internal fun ScheduleProposalDialog(
     proposal: com.razumly.mvp.core.network.dto.EventEditorCreateProposalDto,
     isStale: Boolean = false,
+    isBusy: Boolean = false,
+    message: String? = null,
     onAccept: () -> Unit,
     onRefresh: () -> Unit = {},
     onReject: () -> Unit,
+    onReturnToSetup: () -> Unit = onReject,
 ) {
     val schedule = proposal.scheduleOutcome
+    var confirmPartial by remember(proposal.createOperationId, proposal.proposalRevision, isStale, isBusy) {
+        mutableStateOf(false)
+    }
+    if (confirmPartial) {
+        PartialScheduleConfirmation(
+            unscheduledMatchCount = schedule.unplacedMatchCount,
+            onConfirm = { confirmPartial = false; onAccept() },
+            onDismiss = { confirmPartial = false },
+        )
+        return
+    }
     val graphEvent = proposal.graph.event
     val eventTimeZone = remember(proposal.snapshot.draft.basics.timeZone) {
         runCatching { TimeZone.of(proposal.snapshot.draft.basics.timeZone) }.getOrNull()
@@ -761,7 +793,7 @@ internal fun ScheduleProposalDialog(
     val displayErrors = displayIssues.errors
     val displayWarnings = displayIssues.warnings
     AlertDialog(
-        onDismissRequest = {},
+        onDismissRequest = { if (!isBusy) onReturnToSetup() },
         title = { Text("Review schedule proposal") },
         text = {
             Column(
@@ -770,6 +802,8 @@ internal fun ScheduleProposalDialog(
                     .verticalScroll(rememberScrollState()),
             ) {
                 Text(proposal.snapshot.draft.basics.name)
+                Text("Revision: ${proposal.proposalRevision}")
+                message?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 Spacer(Modifier.height(8.dp))
                 val isPartial = schedule.status ==
                     com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeStatus.PARTIAL
@@ -815,7 +849,7 @@ internal fun ScheduleProposalDialog(
                         } else {
                             "Resource unavailable"
                         }
-                    Text("Match ${index + 1}: $team1 vs $team2")
+                    Text("Match ${match.matchId ?: index + 1}: $team1 vs $team2")
                     Text("Resource: $field")
                     Text(
                         "Time: ${
@@ -871,6 +905,7 @@ internal fun ScheduleProposalDialog(
                     Spacer(Modifier.height(8.dp))
                     Text("Cannot accept: ${displayErrors.take(3).joinToString("; ")}")
                 }
+                displayWarnings.forEach { Text("Warning: $it") }
                 if (schedule.warnings.isNotEmpty()) {
                     Spacer(Modifier.height(8.dp))
                     schedule.warnings.forEach { warning ->
@@ -881,8 +916,15 @@ internal fun ScheduleProposalDialog(
         },
         confirmButton = {
             TextButton(
-                onClick = if (isStale) onRefresh else onAccept,
-                enabled = isStale || displayErrors.isEmpty(),
+                onClick = {
+                    when {
+                        isStale -> onRefresh()
+                        schedule.status == com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeStatus.PARTIAL ->
+                            confirmPartial = true
+                        else -> onAccept()
+                    }
+                },
+                enabled = !isBusy && (isStale || displayErrors.isEmpty()),
             ) {
                 Text(
                     if (isStale) {
@@ -890,7 +932,7 @@ internal fun ScheduleProposalDialog(
                     } else if (schedule.status ==
                         com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeStatus.PARTIAL
                     ) {
-                        "Accept partial schedule"
+                        "Review partial acceptance"
                     } else {
                         "Accept and create"
                     },
@@ -898,8 +940,9 @@ internal fun ScheduleProposalDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onReject) {
-                Text("Reject")
+            Column {
+                TextButton(onClick = onReturnToSetup, enabled = !isBusy) { Text("Return to setup") }
+                TextButton(onClick = onReject, enabled = !isBusy) { Text("Reject") }
             }
         },
     )
@@ -1002,7 +1045,7 @@ private fun proposalMatchLabels(
     matches: List<com.razumly.mvp.core.network.dto.MatchApiDto>,
 ): Map<String, String> = matches.flatMapIndexed { index, match ->
     listOfNotNull(match.id, match.matchId?.toString())
-        .map { it to "Match ${index + 1}" }
+        .map { it to "Match ${match.matchId ?: index + 1}" }
 }.toMap()
 
 @OptIn(ExperimentalTime::class)
@@ -1101,7 +1144,7 @@ private fun proposalDisplayIssues(
                     }
                     val holderId = assignment?.userId?.trim()?.takeIf(String::isNotBlank)
                         ?: assignment?.eventOfficialId?.trim()?.takeIf(String::isNotBlank)
-                    if (holderId == null) errors += "$matchLabel has an unassigned officiating slot."
+                    if (holderId == null) warnings += "$matchLabel has an unassigned officiating slot."
                 }
             }
             assignments.forEach { assignment ->
@@ -1111,7 +1154,7 @@ private fun proposalDisplayIssues(
                 val holderId = assignment.userId?.trim()?.takeIf(String::isNotBlank)
                     ?: assignment.eventOfficialId?.trim()?.takeIf(String::isNotBlank)
                 if (holderId == null) {
-                    errors += "$matchLabel has an unassigned officiating slot."
+                    warnings += "$matchLabel has an unassigned officiating slot."
                 } else if (!officialNames.containsKey(holderId)) {
                     errors += "$matchLabel has an unavailable official."
                 }
@@ -1122,7 +1165,7 @@ private fun proposalDisplayIssues(
             val requiresTeamOfficial =
                 phaseSettings?.doTeamsOfficiate ?: proposal.graph.event.doTeamsOfficiate == true
             if (requiresTeamOfficial && match.teamOfficialId.isNullOrBlank()) {
-                errors += "$matchLabel has no proposed team official."
+                warnings += "$matchLabel has no proposed team official."
             } else {
                 match.teamOfficialId?.let { teamId ->
                     if (!teamNames.containsKey(teamId)) errors += "$matchLabel has an unavailable team official."
