@@ -22,7 +22,7 @@ Issue: https://github.com/Razumly/bracketiq/issues/46. Its only native blocker, 
 - [x] Update the mobile request, decoding, action gates, stable operation identity, and atomic Room refresh. Run a real client-to-site contract check.
 - [x] (2026-09-04) Run affected checks and complete the site and Android/JVM suites. Record the existing failures.
 - [x] (2026-09-04) Review against the fixed issue baseline on both Standards and Spec axes. Fix all hard and specification findings.
-- [ ] Commit the verified change and close issue 46.
+- [x] (2026-09-04) Commit the verified change. Set the project item to Done. Close issue 46 with verification context.
 
 ## Surprises & Discoveries
 
@@ -53,7 +53,7 @@ Decision: Expose the latest typed terminal result from the mobile repository. Ma
 ## Outcomes & Retrospective
 
 
-Implementation and verification are complete. Nineteen real database/API and notification tests passed. They cover all four outcomes, legacy lifecycle writes, site and server replay, rollback and retry, disabled automation, protected advancement, the Event end rule, bypass rejection, input validation, durable notification values, and push failure. Sixty route and site client tests passed. Fifty-one Reflow tests passed. TypeScript and lint passed. Three real Kotlin-to-site route tests prove one Room transaction, recovery after a Room write failure, replay after a lost response, and an observable typed replay result. Seventy-six Match component tests passed. The complete Android/JVM run has the same five issue 45 Event Editor parity failures and no issue 46 failure. The complete site run passed 885 suites. It had the known baseline failures and two issue 46 failures in files that changed while the run was active. Both current issue 46 suites then passed with 60 tests. The final review reports no specification findings and no hard standards findings. All 224 migrations are applied in `bracketiq_e2e_46_563b`. The issue 45 full-suite reports remain untracked and must not enter this commit.
+Implementation and verification are complete. Nineteen real database/API and notification tests passed. They cover all four outcomes, legacy lifecycle writes, site and server replay, rollback and retry, disabled automation, protected advancement, the Event end rule, bypass rejection, input validation, durable notification values, and push failure. Sixty route and site client tests passed. Fifty-one Reflow tests passed. TypeScript and lint passed. Three real Kotlin-to-site route tests prove one Room transaction, recovery after a Room write failure, replay after a lost response, and an observable typed replay result. Seventy-six Match component tests passed. The complete Android/JVM run has the same five issue 45 Event Editor parity failures and no issue 46 failure. The complete site run passed 885 suites. It had the known baseline failures and two issue 46 failures in files that changed while the run was active. Both current issue 46 suites then passed with 60 tests. The final review reports no specification findings and no hard standards findings. The implementation is committed on the Workstream branch. Issue 46 is closed, and its project Status is Done. All 224 migrations are applied in `bracketiq_e2e_46_563b`. The issue 45 full-suite reports remain untracked and are not part of either issue 46 commit.
 
 ## Context and Orientation
 
