@@ -30,7 +30,17 @@ describe('tournamentService', () => {
   });
 
   it('uses the extended timeout when finalizing a match', async () => {
-    apiRequestMock.mockResolvedValue({});
+    apiRequestMock.mockImplementation(async (_path, options) => {
+      const command = options?.body as { matchId: string; update: { clientOperationId: string } };
+      return {
+        match: { id: command.matchId },
+        terminalResult: { contractVersion: 1, operationId: command.update.clientOperationId,
+          eventId: 'event_1', matchId: command.matchId, status: 'REPLAYED',
+          event: { id: 'event_1', end: '2026-09-04T10:00:00.000Z', generatedScheduleEnd: null },
+          matches: [], affectedMatchIds: [], protectedMatchIds: [], placementChanges: [], assignmentChanges: [],
+          warnings: [], exploredStates: 0 },
+      } as never;
+    });
 
     await tournamentService.completeMatch('event_1', 'match_1', {
       team1Points: [25],
@@ -38,12 +48,14 @@ describe('tournamentService', () => {
     } as any);
 
     expect(apiRequestMock).toHaveBeenCalledWith(
-      '/api/events/event_1/matches/match_1',
+      '/api/events/event_1/matches/terminal',
       expect.objectContaining({
         method: 'PATCH',
         timeoutMs: 60_000,
         body: expect.objectContaining({
-          finalize: true,
+          matchId: 'match_1',
+          update: expect.objectContaining({ finalize: true, terminalContractVersion: 1,
+            clientOperationId: expect.any(String) }),
         }),
       }),
     );

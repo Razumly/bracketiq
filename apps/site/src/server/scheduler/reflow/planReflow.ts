@@ -63,10 +63,10 @@ export function planReflow(input: ReflowInput): ReflowPlan {
     Number.NEGATIVE_INFINITY,
     ...match.dependencyIds.map((id) => {
       const dependency = byId.get(id);
-      return dependency ? (effectivePlacement(dependency, state)?.end ?? Number.POSITIVE_INFINITY) + Math.max(match.restMs, dependency.restMs)
+      return dependency ? (dependency.actualEnd ?? effectivePlacement(dependency, state)?.end ?? Number.POSITIVE_INFINITY) + Math.max(match.restMs, dependency.restMs)
         : Number.POSITIVE_INFINITY;
     }),
-    ...ordered.filter((other) => other.batch < match.batch).map((other) => effectivePlacement(other, state)?.end
+    ...ordered.filter((other) => other.batch < match.batch).map((other) => other.actualEnd ?? effectivePlacement(other, state)?.end
       ?? Number.NEGATIVE_INFINITY),
   );
   const publishedFloor = (match: ReflowMatch): number => {
@@ -77,6 +77,7 @@ export function planReflow(input: ReflowInput): ReflowPlan {
       ...ordered.filter((other) => other.batch < match.batch).map((other) => end(other) ?? Number.NEGATIVE_INFINITY));
   };
   const touched = (match: ReflowMatch, state: PlacementState): boolean => {
+    if (input.releasedCapacityMatchIds?.includes(match.id)) return true;
     if (state.changed.has(match.id) || forced.has(match.id) || match.dependencyIds.some((id) => state.changed.has(id))) return true;
     if (ordered.some((other) => other.batch < match.batch && state.changed.has(other.id))) return true;
     return input.matches.some((other) => {
@@ -98,7 +99,8 @@ export function planReflow(input: ReflowInput): ReflowPlan {
   const candidatesFor = (match: ReflowMatch, state: PlacementState): ReflowPlacement[] => {
     const before = match.placement!;
     const duration = before.end - before.start;
-    const isEarlierRelease = dependencyFloor(match, state) < publishedFloor(match);
+    const isEarlierRelease = dependencyFloor(match, state) < publishedFloor(match)
+      || input.releasedCapacityMatchIds?.includes(match.id) === true;
     const isMoveRequired = forced.has(match.id) || !candidateFits(match, before, state);
     const floor = Math.max(input.now, dependencyFloor(match, state), isEarlierRelease || isMoveRequired ? input.now : before.start);
     const boundaries = ordered.flatMap((other) => {

@@ -8,8 +8,6 @@ import { acquireEventLock, acquireFieldLocks } from '@/server/repositories/locks
 import {
   applyMatchUpdates,
   applyPersistentAutoLock,
-  finalizeMatchWithTeamOfficialCapacityFallback,
-  isScheduleWindowExceededError,
   type MatchUpdate,
 } from '@/server/scheduler/updateMatch';
 import { serializeMatches } from '@/server/scheduler/serialize';
@@ -17,13 +15,10 @@ import { publishEventMatchChanges } from '@/server/realtime/matchRealtime';
 import {
   collectMatchScheduleChanges,
   notifyTeamsOfMatchScheduleUpdate,
+  persistTerminalMatchScheduleNotifications,
   snapshotMatchScheduleState,
 } from '@/server/matchScheduleNotifications';
-import { SchedulerContext } from '@/server/scheduler/types';
 import { canManageEvent } from '@/server/accessControl';
-import { isEmailEnabled, sendEmail } from '@/server/email';
-import { sendPushToUsers } from '@/server/pushNotifications';
-import { isUserNotificationChannelEnabled } from '@/server/notificationPreferences';
 import {
   normalizeMatchOfficialAssignments,
 } from '@/server/officials/config';
@@ -48,8 +43,10 @@ import {
   assertSetSegmentOperationsAllowed,
 } from '@/server/matches/setScoringRules';
 import { claimMatchOperationReceipts } from '@/server/matches/clientOperationReplay';
+import { commitTerminalMatch, replayTerminalMatch, snapshotTerminalMatches } from '@/server/matches/terminalMatch';
 import { assertMatchParticipantsReady } from '@/server/matches/participantReadiness';
 import type { MatchIncident, MatchSegment } from '@/types';
+import { updateSchema, terminalActionOf, lifecycleSchema, segmentOperationSchema, incidentOperationSchema, officialCheckInSchema, matchActionSchema } from '@/contracts/matchUpdate';
 import {
   loadEventProtectedHistory,
   PROTECTED_MATCH_HISTORY_DELETE_CONFIRMATION,
@@ -62,106 +59,6 @@ const MATCH_UPDATE_TRANSACTION_OPTIONS = {
   timeout: 60_000,
 } as const;
 
-const scoreMapSchema = z.record(z.string(), z.number());
-const clientOperationFields = {
-  clientOperationId: z.string().optional(),
-  clientDeviceId: z.string().optional(),
-  clientCreatedAt: z.string().optional(),
-  clientSequence: z.number().int().nonnegative().optional(),
-  sourceDevice: z.string().optional(),
-} as const;
-const lifecycleSchema = z.object({
-  status: z.string().nullable().optional(),
-  resultStatus: z.string().nullable().optional(),
-  resultType: z.string().nullable().optional(),
-  actualStart: z.string().nullable().optional(),
-  actualEnd: z.string().nullable().optional(),
-  statusReason: z.string().nullable().optional(),
-  winnerEventTeamId: z.string().nullable().optional(),
-}).optional();
-const segmentOperationSchema = z.object({
-  id: z.string().optional(),
-  sequence: z.number().int().positive(),
-  status: z.string().optional(),
-  scores: scoreMapSchema.optional(),
-  winnerEventTeamId: z.string().nullable().optional(),
-  startedAt: z.string().nullable().optional(),
-  endedAt: z.string().nullable().optional(),
-  resultType: z.string().nullable().optional(),
-  statusReason: z.string().nullable().optional(),
-  metadata: z.record(z.string(), z.unknown()).nullable().optional(),
-  clockStoppedAt: z.string().nullable().optional(),
-  clockStoppedDurationSeconds: z.number().int().nonnegative().optional(),
-  ...clientOperationFields,
-});
-const incidentOperationSchema = z.object({
-  action: z.enum(['CREATE', 'UPDATE', 'DELETE']),
-  id: z.string().optional(),
-  segmentId: z.string().nullable().optional(),
-  eventTeamId: z.string().nullable().optional(),
-  eventRegistrationId: z.string().nullable().optional(),
-  participantUserId: z.string().nullable().optional(),
-  officialUserId: z.string().nullable().optional(),
-  incidentType: z.string().optional(),
-  sequence: z.number().int().positive().optional(),
-  minute: z.number().int().nullable().optional(),
-  clock: z.string().nullable().optional(),
-  clockSeconds: z.number().int().nullable().optional(),
-  linkedPointDelta: z.number().int().nullable().optional(),
-  note: z.string().nullable().optional(),
-  metadata: z.record(z.string(), z.unknown()).nullable().optional(),
-  ...clientOperationFields,
-});
-const officialCheckInSchema = z.object({
-  positionId: z.string().optional(),
-  slotIndex: z.number().int().nonnegative().optional(),
-  userId: z.string().optional(),
-  checkedIn: z.boolean(),
-}).optional();
-const matchPolicySchema = z.object({
-  scoringModel: z.enum(['SETS', 'PERIODS', 'INNINGS', 'POINTS_ONLY']).nullable().optional(),
-  segmentCount: z.number().int().positive().nullable().optional(),
-  setPointTargets: z.array(z.number().int().positive()).nullable().optional(),
-  matchDurationMinutes: z.number().int().positive().nullable().optional(),
-  setDurationMinutes: z.number().int().positive().nullable().optional(),
-  timekeeping: z.record(z.string(), z.unknown()).nullable().optional(),
-}).optional();
-const matchRulesSnapshotSchema = z.record(z.string(), z.unknown()).nullable().optional();
-const matchActionSchema = z.object({
-  action: z.enum(['FORFEIT', 'CANCEL', 'SUSPEND', 'RESUME']),
-  forfeitingEventTeamId: z.string().nullable().optional(),
-  winnerEventTeamId: z.string().nullable().optional(),
-  reason: z.string().nullable().optional(),
-}).optional();
-
-const updateSchema = z.object({
-  locked: z.boolean().optional(),
-  team1Points: z.array(z.number()).optional(),
-  team2Points: z.array(z.number()).optional(),
-  lifecycle: lifecycleSchema,
-  segmentOperations: z.array(segmentOperationSchema).optional(),
-  incidentOperations: z.array(incidentOperationSchema).optional(),
-  officialCheckIn: officialCheckInSchema,
-  team1Id: z.string().nullable().optional(),
-  team2Id: z.string().nullable().optional(),
-  officialId: z.string().nullable().optional(),
-  officialIds: z.any().optional(),
-  teamOfficialId: z.string().nullable().optional(),
-  fieldId: z.string().nullable().optional(),
-  previousLeftId: z.string().nullable().optional(),
-  previousRightId: z.string().nullable().optional(),
-  winnerNextMatchId: z.string().nullable().optional(),
-  loserNextMatchId: z.string().nullable().optional(),
-  side: z.string().nullable().optional(),
-  officialCheckedIn: z.boolean().optional(),
-  matchId: z.number().int().nullable().optional(),
-  finalize: z.boolean().optional(),
-  time: z.string().optional(),
-  matchPolicy: matchPolicySchema,
-  matchRulesSnapshot: matchRulesSnapshotSchema,
-  matchAction: matchActionSchema,
-  ...clientOperationFields,
-});
 
 const startsMatch = (lifecycle: z.infer<typeof lifecycleSchema>): boolean => {
   if (!lifecycle || !Object.prototype.hasOwnProperty.call(lifecycle, 'actualStart')) {
@@ -197,7 +94,7 @@ const isOfficiatingMutation = (update: z.infer<typeof updateSchema>): boolean =>
   );
   const hasMatchAction = Boolean(
     update.matchAction
-    && update.matchAction.action !== 'CANCEL',
+    && !['CANCEL', 'NO_CONTEST'].includes(update.matchAction.action),
   );
   return update.officialCheckIn?.checkedIn === true
     || update.officialCheckedIn === true
@@ -211,43 +108,6 @@ const isOfficiatingMutation = (update: z.infer<typeof updateSchema>): boolean =>
 
 const hasOwn = (value: object, key: string): boolean => Object.prototype.hasOwnProperty.call(value, key);
 
-const buildContext = (): SchedulerContext => {
-  const debug = process.env.SCHEDULER_DEBUG === 'true';
-  return {
-    log: (message) => {
-      if (debug) console.log(message);
-    },
-    error: (message) => {
-      console.error(message);
-    },
-  };
-};
-
-type AutoRescheduleHostNotification = {
-  eventId: string;
-  eventName: string;
-  eventEndIso: string;
-  hostId: string;
-  matchId: string;
-};
-
-class AutoRescheduleWindowExceededError extends Error {
-  notification: AutoRescheduleHostNotification;
-
-  constructor(notification: AutoRescheduleHostNotification) {
-    super('Auto-reschedule exceeded event end date/time');
-    this.name = 'AutoRescheduleWindowExceededError';
-    this.notification = notification;
-  }
-}
-
-const formatHostName = (profile?: { firstName: string | null; lastName: string | null } | null): string => {
-  const firstName = profile?.firstName?.trim() ?? '';
-  const lastName = profile?.lastName?.trim() ?? '';
-  return firstName.length > 0 && lastName.length > 0
-    ? `${firstName} ${lastName}`
-    : 'Host name unavailable';
-};
 
 const normalizeIdToken = (value: unknown): string | null => {
   if (typeof value !== 'string') {
@@ -874,13 +734,15 @@ const applyLifecycleOperation = (match: any, lifecycle: NonNullable<z.infer<type
 
 const isTerminalMatchStatus = (match: any): boolean => {
   const status = typeof match.status === 'string' ? match.status.toUpperCase() : '';
-  return status === 'COMPLETE' || status === 'CANCELLED';
+  return ['COMPLETE', 'COMPLETED', 'CANCELLED'].includes(status)
+    || ['FINAL', 'NO_CONTEST'].includes(String(match.resultStatus ?? '').toUpperCase());
 };
 
 const applyMatchActionOperation = (
   match: any,
   actionInput: NonNullable<z.infer<typeof matchActionSchema>>,
   actorIsHostOrOfficial: boolean,
+  now: Date = new Date(),
 ) => {
   if (!actorIsHostOrOfficial) {
     throw new Response('Forbidden', { status: 403 });
@@ -888,7 +750,6 @@ const applyMatchActionOperation = (
   if (isTerminalMatchStatus(match)) {
     throw new Response('Completed or cancelled matches cannot be changed from match actions.', { status: 409 });
   }
-  const now = new Date();
   const reason = typeof actionInput.reason === 'string' && actionInput.reason.trim().length > 0
     ? actionInput.reason.trim()
     : null;
@@ -900,7 +761,8 @@ const applyMatchActionOperation = (
     const winnerEventTeamId = explicitWinnerId ?? (
       forfeitingTeamId ? teamIds.find((teamId) => teamId !== forfeitingTeamId) ?? null : null
     );
-    if (!winnerEventTeamId || !teamIds.includes(winnerEventTeamId)) {
+    if (new Set(teamIds).size !== 2 || !winnerEventTeamId || !teamIds.includes(winnerEventTeamId)
+      || (forfeitingTeamId && (!teamIds.includes(forfeitingTeamId) || forfeitingTeamId === winnerEventTeamId))) {
       throw new Response('Forfeit requires a match winner or forfeiting team.', { status: 400 });
     }
     match.status = 'COMPLETE';
@@ -912,13 +774,13 @@ const applyMatchActionOperation = (
     match.locked = true;
     return;
   }
-  if (actionInput.action === 'CANCEL') {
+  if (actionInput.action === 'CANCEL' || actionInput.action === 'NO_CONTEST') {
     match.status = 'CANCELLED';
     match.resultStatus = 'NO_CONTEST';
     match.resultType = 'NO_CONTEST';
     match.winnerEventTeamId = null;
     match.actualEnd = match.actualEnd ?? now;
-    match.statusReason = reason ?? 'Cancelled';
+    match.statusReason = reason ?? (actionInput.action === 'CANCEL' ? 'Cancelled' : 'No contest');
     match.locked = true;
     return;
   }
@@ -1188,63 +1050,6 @@ const isUserOnTeam = (team: unknown, userId: string): boolean => {
   return memberIds.has(userId);
 };
 
-const notifyHostOfAutoRescheduleFailure = async (
-  payload: AutoRescheduleHostNotification,
-): Promise<void> => {
-  if (!payload.hostId.trim()) {
-    return;
-  }
-  const [hostProfile, sensitiveProfile] = await Promise.all([
-    prisma.userData.findUnique({
-      where: { id: payload.hostId },
-      select: { firstName: true, lastName: true, userName: true },
-    }),
-    prisma.sensitiveUserData.findFirst({
-      where: { userId: payload.hostId },
-      select: { email: true },
-    }),
-  ]);
-  const hostName = formatHostName(hostProfile);
-  const title = `Auto-reschedule failed for ${payload.eventName}`;
-  const body = `A finalized match could not be auto-rescheduled before ${payload.eventEndIso}. Extend the event end date/time for auto-rescheduling or reschedule manually.`;
-
-  if (await isUserNotificationChannelEnabled(payload.hostId, 'hostActionRequired', 'push')) {
-    await sendPushToUsers({
-      userIds: [payload.hostId],
-      notificationType: 'hostActionRequired',
-      title,
-      body,
-      data: {
-        eventId: payload.eventId,
-        matchId: payload.matchId,
-        reason: 'fixed_end_limit',
-      },
-    }).catch((error) => {
-      console.warn('Failed to send auto-reschedule failure push notification', {
-        eventId: payload.eventId,
-        hostId: payload.hostId,
-        error,
-      });
-    });
-  }
-
-  const hostEmail = sensitiveProfile?.email?.trim();
-  const emailAllowed = await isUserNotificationChannelEnabled(payload.hostId, 'hostActionRequired', 'email');
-  if (!emailAllowed || !hostEmail || !isEmailEnabled()) {
-    return;
-  }
-  await sendEmail({
-    to: hostEmail,
-    subject: title,
-    text: `Hello ${hostName},\n\n${body}\n\nEvent: ${payload.eventName}\nEvent ID: ${payload.eventId}\nMatch ID: ${payload.matchId}\n\nYou can extend the event end date/time to continue auto-rescheduling, or reschedule this match manually.`,
-  }).catch((error) => {
-    console.warn('Failed to send auto-reschedule failure email notification', {
-      eventId: payload.eventId,
-      hostId: payload.hostId,
-      error,
-    });
-  });
-};
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ eventId: string; matchId: string }> }) {
   try {
@@ -1294,7 +1099,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ ev
     }
 
     const { eventId, matchId } = await params;
-    const context = buildContext();
+    const terminalAction = terminalActionOf(parsed.data);
+    const hasTerminalAction = terminalAction !== null;
 
     const result = await prisma.$transaction(async (tx) => {
       await acquireEventLock(tx, eventId);
@@ -1306,7 +1112,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ ev
         throw new Response('Event not found', { status: 404 });
       }
       const isHostOrAdmin = await canManageEvent(session, eventAccess, tx);
-      const event = await loadEventForMatchMutation(eventId, matchId, tx);
+      const event = hasTerminalAction ? await loadEventWithRelations(eventId, tx)
+        : await loadEventForMatchMutation(eventId, matchId, tx);
       await acquireFieldLocks(tx, Object.keys(event.fields ?? {}));
       const beforeMatchSnapshot = snapshotMatchScheduleState(Object.values(event.matches));
       const officialPositions = Array.isArray(event.officialPositions) ? event.officialPositions : [];
@@ -1364,6 +1171,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ ev
       if (!isHostOrAdmin && !isOfficial && !canEventTeamSwap) {
         throw new Response('Forbidden', { status: 403 });
       }
+      const beforeTerminalMatches = hasTerminalAction ? snapshotTerminalMatches(event) : new Map();
 
       let matchUpdate: z.infer<typeof updateSchema> = normalizeLegacyOfficialCheckIn(parsed.data, {
         isHostOrAdmin,
@@ -1412,7 +1220,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ ev
           match: targetMatch,
           replayed: true,
           matchScheduleNotification: null,
+          terminalResult: hasTerminalAction ? replayTerminalMatch(event, matchId, operationClaim.operationIds[0]!) : null,
         };
+      }
+
+      if (hasTerminalAction && isTerminalMatchStatus(targetMatch)) {
+        throw Response.json({ code: 'TERMINAL_MATCH_ALREADY_ENDED',
+          error: 'Completed or cancelled matches cannot be ended again.' }, { status: 409 });
       }
 
       if (matchUpdate.officialCheckIn) {
@@ -1545,7 +1359,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ ev
       assertLegacyScoreArraysAllowed(targetMatch, event, matchUpdate);
       applyMatchUpdates(event, targetMatch, updates);
       if (matchUpdate.matchAction) {
-        applyMatchActionOperation(targetMatch, matchUpdate.matchAction, isHostOrAdmin || isOfficial);
+        const actionTime = matchUpdate.time ? new Date(matchUpdate.time) : new Date();
+        if (Number.isNaN(actionTime.getTime())) throw new Response('Invalid time', { status: 400 });
+        applyMatchActionOperation(targetMatch, matchUpdate.matchAction, isHostOrAdmin || isOfficial, actionTime);
       }
       if (shouldFreezeMatchRulesSnapshot({
         segmentOperations: matchUpdate.segmentOperations,
@@ -1611,30 +1427,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ ev
         return new Date();
       })();
 
-      if (updates.finalize) {
-        const currentTime = updates.time ? new Date(updates.time) : new Date();
-        if (Number.isNaN(currentTime.getTime())) {
-          throw new Response('Invalid time', { status: 400 });
-        }
-        try {
-          finalizeMatchWithTeamOfficialCapacityFallback(event, targetMatch, context, currentTime);
-        } catch (error) {
-          const noFixedEndDateTime = typeof event.noFixedEndDateTime === 'boolean'
-            ? event.noFixedEndDateTime
-            : false;
-          if (!noFixedEndDateTime && isScheduleWindowExceededError(error)) {
-            throw new AutoRescheduleWindowExceededError({
-              eventId: event.id,
-              eventName: event.name || 'Untitled event',
-              eventEndIso: event.end.toISOString(),
-              hostId: event.hostId,
-              matchId: targetMatch.id,
-            });
-          }
-          throw error;
-        }
-      }
-
       applyPersistentAutoLock(targetMatch, {
         now: lockEvaluationTime,
         explicitLockedValue: updates.locked,
@@ -1649,20 +1441,33 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ ev
         });
       }
 
-      await saveMatches(eventId, Object.values(event.matches), tx);
+      const terminalResult = hasTerminalAction ? await commitTerminalMatch({
+        tx, event, match: targetMatch, before: beforeTerminalMatches,
+        operationId: operationClaim.operationIds[0]!, now: lockEvaluationTime, action: terminalAction!,
+      }) : null;
+      if (!hasTerminalAction) await saveMatches(eventId, Object.values(event.matches), tx);
 
+      const matchScheduleNotification = {
+        eventId,
+        eventName: String((event as { name?: unknown }).name ?? 'Event'),
+        forceBatch: false,
+        changes: collectMatchScheduleChanges({
+          before: beforeMatchSnapshot,
+          after: snapshotMatchScheduleState(Object.values(event.matches)),
+        }),
+      };
+      if (terminalResult) {
+        await persistTerminalMatchScheduleNotifications(
+          matchScheduleNotification,
+          operationClaim.operationIds[0]!,
+          tx,
+        );
+      }
       return {
         match: targetMatch,
         replayed: false,
-        matchScheduleNotification: {
-          eventId,
-          eventName: String((event as { name?: unknown }).name ?? 'Event'),
-          forceBatch: false,
-          changes: collectMatchScheduleChanges({
-            before: beforeMatchSnapshot,
-            after: snapshotMatchScheduleState(Object.values(event.matches)),
-          }),
-        },
+        terminalResult,
+        matchScheduleNotification,
       };
     }, MATCH_UPDATE_TRANSACTION_OPTIONS);
 
@@ -1670,7 +1475,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ ev
     if (!result.replayed) {
       publishEventMatchChanges({
         eventId,
-        matches: serializedMatch ? [serializedMatch] : [],
+        matches: result.terminalResult?.matches ?? (serializedMatch ? [serializedMatch] : []),
       });
       await notifyTeamsOfMatchScheduleUpdate(result.matchScheduleNotification!).catch((error) => {
         console.warn('Failed to send match schedule update notifications', {
@@ -1680,16 +1485,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ ev
         });
       });
     }
-    return NextResponse.json({ match: serializedMatch, replayed: result.replayed }, { status: 200 });
+    return NextResponse.json({ match: serializedMatch, replayed: result.replayed,
+      ...(result.terminalResult ? { terminalResult: result.terminalResult } : {}),
+    }, { status: 200 });
   } catch (error) {
     if (error instanceof Response) return error;
-    if (error instanceof AutoRescheduleWindowExceededError) {
-      await notifyHostOfAutoRescheduleFailure(error.notification);
-      return NextResponse.json({
-        error: 'Auto-reschedule failed because the event end date/time has been reached. Extend the end date/time for auto-rescheduling, or reschedule manually.',
-        code: 'AUTO_RESCHEDULE_END_LIMIT',
-      }, { status: 409 });
-    }
     console.error('Match update failed', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }

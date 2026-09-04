@@ -197,6 +197,11 @@ const normalizeBulkMatchSegments = (
     });
 };
 
+const isTerminalSnapshot = (value: { status?: string | null; resultStatus?: string | null; resultType?: string | null }) =>
+  ['COMPLETE', 'COMPLETED', 'CANCELLED'].includes(value.status?.toUpperCase() ?? '')
+  || ['FINAL', 'NO_CONTEST'].includes(value.resultStatus?.toUpperCase() ?? '')
+  || ['FORFEIT', 'NO_CONTEST'].includes(value.resultType?.toUpperCase() ?? '');
+
 const applyBulkStatusSnapshot = (
   target: SchedulerMatch,
   entry: BulkMatchUpdateInput | BulkMatchCreateInput,
@@ -204,6 +209,17 @@ const applyBulkStatusSnapshot = (
   matchId: string,
   label: string,
 ) => {
+  if (!isTerminalSnapshot(target) && (
+    (hasOwn(entry, 'actualEnd') && entry.actualEnd != null)
+    || (hasOwn(entry, 'winnerEventTeamId') && entry.winnerEventTeamId != null)
+  )) throw Response.json({ code: 'TERMINAL_ACTION_REQUIRED',
+    error: 'End one Match through its terminal action. Bulk updates cannot save terminal result fields.' }, { status: 409 });
+  if (!isTerminalSnapshot(target) && isTerminalSnapshot({
+    status: entry.status === undefined ? target.status : entry.status,
+    resultStatus: entry.resultStatus === undefined ? target.resultStatus : entry.resultStatus,
+    resultType: entry.resultType === undefined ? target.resultType : entry.resultType,
+  })) throw Response.json({ code: 'TERMINAL_ACTION_REQUIRED',
+    error: 'End one Match through its terminal action. Bulk updates cannot end a Match.' }, { status: 409 });
   if (hasOwn(entry, 'status')) target.status = entry.status ?? null;
   if (hasOwn(entry, 'resultStatus')) target.resultStatus = entry.resultStatus ?? null;
   if (hasOwn(entry, 'resultType')) target.resultType = entry.resultType ?? null;

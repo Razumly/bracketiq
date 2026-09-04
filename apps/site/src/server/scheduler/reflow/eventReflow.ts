@@ -9,7 +9,10 @@ import { planCanonicalReflow, reflowWindow } from './canonicalReflow';
 import type { ReflowPlan } from './types';
 import { serializeReflowResult } from './response';
 
-async function saveDelta(tx: Prisma.TransactionClient, event: Tournament, plan: ReflowPlan, now: Date) {
+export async function saveReflowDelta(tx: Prisma.TransactionClient, event: Tournament, plan: ReflowPlan, now: Date) {
+  const latestScheduledEnd = () => Math.max(+event.start, ...Object.values(event.matches)
+    .filter((match) => match.placementState === 'PLACED').map((match) => +match.end));
+  const previousLatestEnd = latestScheduledEnd();
   const placements = new Map(plan.placementChanges.map((change) => [change.matchId, change.after]));
   const assignments = new Map(plan.assignmentChanges.map((change) => [change.matchId, change.after]));
   for (const id of [...new Set([...placements.keys(), ...assignments.keys()])].sort()) {
@@ -38,9 +41,8 @@ async function saveDelta(tx: Prisma.TransactionClient, event: Tournament, plan: 
     }
   }
   if (event.noFixedEndDateTime && plan.placementChanges.length) {
-    const latest = Math.max(+event.start, ...Object.values(event.matches).filter((match) =>
-      match.placementState === 'PLACED').map((match) => +(match.actualEnd ?? match.end)));
-    if (+event.end !== latest || +(event.generatedScheduleEnd ?? event.end) !== latest) {
+    const latest = latestScheduledEnd();
+    if (latest !== previousLatestEnd) {
       event.end = new Date(latest);
       event.generatedScheduleEnd = new Date(latest);
       event.updatedAt = now;
@@ -66,6 +68,21 @@ export async function reflowEventSchedule(params: {
     warnings: [{ code: 'STALE', matchIds: [], message: 'The Schedule changed. Load its current revision and try again.' }],
     exploredStates: 0, graph: null,
   });
+  const plan = await planStoredEventReflow(tx, event, request.changedMatchIds, now, request.fieldPolicy,
+    Array.isArray(persistedEvent.fieldIds) ? persistedEvent.fieldIds : undefined);
+  if (plan.status === 'CHANGED') await saveReflowDelta(tx, event, plan, now);
+  const revision = plan.status === 'CHANGED'
+    ? (await loadEventScheduleState({ ...persistedEvent, end: event.end, generatedScheduleEnd: event.generatedScheduleEnd,
+      updatedAt: event.updatedAt ?? persistedEvent.updatedAt }, event.id, tx)).revision
+    : state.revision;
+  return serializeReflowResult(event, plan, revision);
+}
+
+/** The caller holds the Event and Resource locks and owns the complete transaction. */
+export async function planStoredEventReflow(
+  tx: Prisma.TransactionClient, event: Tournament, changedMatchIds: string[], now: Date,
+  fieldPolicy: ScheduleReflowRequest['fieldPolicy'], eligibleFieldIds?: string[],
+): Promise<ReflowPlan> {
   const window = reflowWindow(event, now);
   const [history, catalog] = await Promise.all([
     loadEventProtectedHistory(event.id, tx),
@@ -82,15 +99,7 @@ export async function reflowEventSchedule(params: {
       checkedInTeamIdsByMatch.set(checkIn.matchId, ids);
     }
   }
-  const plan = planCanonicalReflow({ event, changedMatchIds: request.changedMatchIds, now, fieldPolicy: request.fieldPolicy,
-    eligibleFieldIds: Array.isArray(persistedEvent.fieldIds)
-      ? persistedEvent.fieldIds.filter((id): id is string => typeof id === 'string') : undefined,
+  return planCanonicalReflow({ event, changedMatchIds, now, fieldPolicy, eligibleFieldIds,
     protectedHistoryIds: history.protectedMatchIds, checkIns: { eventCheckedInTeamIds, checkedInTeamIdsByMatch },
     blockers: materializeFieldBlockerCatalog(catalog, window.start, window.end) });
-  if (plan.status === 'CHANGED') await saveDelta(tx, event, plan, now);
-  const revision = plan.status === 'CHANGED'
-    ? (await loadEventScheduleState({ ...persistedEvent, end: event.end, generatedScheduleEnd: event.generatedScheduleEnd,
-      updatedAt: event.updatedAt ?? persistedEvent.updatedAt }, event.id, tx)).revision
-    : state.revision;
-  return serializeReflowResult(event, plan, revision);
 }

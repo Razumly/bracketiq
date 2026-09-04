@@ -12,6 +12,7 @@ import com.razumly.mvp.core.db.MVPDatabaseService
 import com.razumly.mvp.core.network.AuthTokenStore
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.configureMvpHttpClient
+import com.razumly.mvp.core.network.dto.MatchActionOperationDto
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -123,6 +124,34 @@ class MatchRepositoryRoomPersistenceTest {
 
             assertTrue(result.isSuccess)
             assertEquals(listOf(expected), result.getOrThrow())
+            assertEquals(expected, database.getMatchDao.getMatchById(expected.id)?.match)
+            assertEquals(listOf(expected), database.getMatchDao.getMatchesOfTournament(expected.eventId))
+        } finally {
+            http.close()
+            database.close()
+        }
+    }
+
+    @Test
+    fun given_terminal_action_when_server_rejects_reflow_then_room_schedule_is_unchanged() = runTest {
+        val expected = roomBackedSchedule().copy(status = "IN_PROGRESS")
+        val database = openDatabase()
+        var requests = 0
+        val http = HttpClient(MockEngine { request ->
+            requests += 1
+            assertEquals(HttpMethod.Patch, request.method)
+            assertEquals(expected, database.getMatchDao.getMatchById(expected.id)?.match)
+            respond("""{"code":"TERMINAL_REFLOW_INFEASIBLE","error":"No valid Schedule","warnings":[]}""",
+                HttpStatusCode.Conflict, headersOf(HttpHeaders.ContentType, "application/json"))
+        }) { configureMvpHttpClient() }
+        try {
+            database.getMatchDao.upsertMatch(expected)
+            val repository = MatchRepository(MvpApiClient(http, "http://example.test",
+                MatchRepositoryRoomPersistence_EmptyAuthTokenStore), database, autoSyncOperations = false)
+            val result = repository.updateMatchOperations(expected,
+                matchAction = MatchActionOperationDto("FORFEIT", forfeitingEventTeamId = expected.team2Id))
+            assertTrue(result.isFailure)
+            assertEquals(1, requests)
             assertEquals(expected, database.getMatchDao.getMatchById(expected.id)?.match)
             assertEquals(listOf(expected), database.getMatchDao.getMatchesOfTournament(expected.eventId))
         } finally {

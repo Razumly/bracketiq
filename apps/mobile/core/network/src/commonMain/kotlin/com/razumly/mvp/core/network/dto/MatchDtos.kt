@@ -214,6 +214,7 @@ data class MatchesResponseDto(
 @Serializable
 data class MatchResponseDto(
     val match: MatchApiDto? = null,
+    val terminalResult: TerminalMatchResultDto? = null,
 )
 
 @Serializable
@@ -408,6 +409,7 @@ data class MatchRosterResponseDto(
 
 @Serializable
 data class MatchUpdateDto(
+    val terminalContractVersion: Int? = null,
     val lifecycle: MatchLifecycleOperationDto? = null,
     val segmentOperations: List<MatchSegmentOperationDto>? = null,
     val incidentOperations: List<MatchIncidentOperationDto>? = null,
@@ -447,6 +449,7 @@ data class MatchUpdateDto(
 )
 
 fun MatchUpdateDto.toMatchOperationsJsonObject(): JsonObject = buildJsonObject {
+    terminalContractVersion?.let { put("terminalContractVersion", JsonPrimitive(it)) }
     lifecycle
         ?.toJsonObject()
         ?.takeIf { it.isNotEmpty() }

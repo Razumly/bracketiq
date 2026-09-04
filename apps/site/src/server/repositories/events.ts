@@ -7143,6 +7143,8 @@ const buildLoadedEventBaseParams = (params: {
     hostId: readLoadedEventValue(event, "hostId", ""),
     assistantHostIds: ensureStringArray(event.assistantHostIds),
     noFixedEndDateTime: timeline.noFixedEndDateTime,
+    generatedScheduleEnd: toOptionalDate(event.generatedScheduleEnd),
+    scheduleEndConstraint: toOptionalDate(event.scheduleEndConstraint),
     imageId: readLoadedEventValue(event, "imageId", ""),
     loserBracketPointsToVictory: ensureNumberArray(
       event.loserBracketPointsToVictory,

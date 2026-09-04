@@ -15,6 +15,8 @@ import { eventService } from './eventService';
 import { authService } from './auth';
 import { apiRequest } from './apiClient';
 import { normalizeApiMatch } from './apiMappers';
+import { terminalActionOf, updateSchema } from '@/contracts/matchUpdate';
+import { sendTerminalMatch } from './terminalMatchClient';
 
 const MATCH_UPDATE_TIMEOUT_MS = 60_000;
 
@@ -381,7 +383,9 @@ class TournamentService {
                 }
             });
 
-            const response = await apiRequest<{ match: Match }>(`/api/events/${eventId}/matches/${matchId}`, {
+            const terminalAction = terminalActionOf(updateSchema.parse(payload));
+            const response = terminalAction ? await sendTerminalMatch(eventId, matchId, payload)
+                : await apiRequest<{ match: Match }>(`/api/events/${eventId}/matches/${matchId}`, {
                 method: 'PATCH',
                 body: payload,
                 timeoutMs: MATCH_UPDATE_TIMEOUT_MS,
@@ -407,7 +411,7 @@ class TournamentService {
             incidentOperations?: MatchIncidentOperation[];
             officialCheckIn?: MatchOfficialCheckInOperation;
             matchAction?: {
-                action: 'FORFEIT' | 'CANCEL' | 'SUSPEND' | 'RESUME';
+                action: 'FORFEIT' | 'CANCEL' | 'NO_CONTEST' | 'SUSPEND' | 'RESUME';
                 forfeitingEventTeamId?: string | null;
                 winnerEventTeamId?: string | null;
                 reason?: string | null;
@@ -499,16 +503,12 @@ class TournamentService {
     ): Promise<void> {
         try {
             const nowIso = new Date().toISOString();
-            await apiRequest(`/api/events/${eventId}/matches/${matchId}`, {
-                method: 'PATCH',
-                body: {
+            await sendTerminalMatch(eventId, matchId, {
                     finalize: true,
                     segmentOperations: payload.segmentOperations,
                     team1Points: payload.team1Points,
                     team2Points: payload.team2Points,
                     time: nowIso,
-                },
-                timeoutMs: MATCH_UPDATE_TIMEOUT_MS,
             });
         } catch (error) {
             console.error('Failed to finalize match via event manager:', error);

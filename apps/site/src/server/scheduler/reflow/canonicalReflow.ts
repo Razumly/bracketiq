@@ -111,6 +111,29 @@ export function planCanonicalReflow(input: CanonicalReflowInput): ReflowPlan {
     !event.divisions.some((existing) => existing.id === division.id))];
   const matches = Object.values(event.matches).sort((left, right) =>
     (left.matchId ?? Number.MAX_SAFE_INTEGER) - (right.matchId ?? Number.MAX_SAFE_INTEGER) || left.id.localeCompare(right.id));
+  const cancelled = new Set(matches.filter((match) => match.status === 'CANCELLED'
+    || match.resultType === 'NO_CONTEST').map((match) => match.id));
+  const unplayedTerminalIds = new Set(matches.filter((match) => !match.actualStart
+    && (cancelled.has(match.id) || match.resultType === 'FORFEIT')).map((match) => match.id));
+  const unresolved = new Set(cancelled);
+  let hasExpanded = true;
+  while (hasExpanded) {
+    hasExpanded = false;
+    for (const match of matches) {
+      if (!unresolved.has(match.id) && match.getDependencies().some((dependency) => unresolved.has(dependency.id))) {
+        unresolved.add(match.id);
+        hasExpanded = true;
+      }
+    }
+  }
+  const released = matches.filter((match) => cancelled.has(match.id) && input.changedMatchIds.includes(match.id)
+    && +match.end > +input.now);
+  const holderIds = (match: Match) => [match.team1?.id, match.team2?.id, match.teamOfficial?.id,
+    ...match.officialAssignments.map((assignment) => assignment.userId)].filter((id): id is string => Boolean(id));
+  const releasedCapacityMatchIds = matches.filter((match) => !unresolved.has(match.id) && released.some((source) =>
+    (source.field && (input.fieldPolicy === 'KEEP_ASSIGNED_FIELDS' ? match.field?.id === source.field.id
+      : windows(match).some((window) => window.fieldId === source.field!.id)))
+    || holderIds(match).some((id) => holderIds(source).includes(id)))).map((match) => match.id);
   const batches = buildMatchSchedulingBatches(event, matches, divisions);
   const entrantSlots = (match: Match): string[][] => {
     const pool = Object.values(event.teams).filter((team) => teamCanServeMatchDivision(team, match)).map((team) => team.id);
@@ -133,19 +156,19 @@ export function planCanonicalReflow(input: CanonicalReflowInput): ReflowPlan {
     ];
   };
   const result = planReflow({
-    changedMatchIds: input.changedMatchIds, now: +input.now, fieldPolicy: input.fieldPolicy, maxStates: input.maxStates,
+    changedMatchIds: input.changedMatchIds, releasedCapacityMatchIds, now: +input.now, fieldPolicy: input.fieldPolicy, maxStates: input.maxStates,
     matches: batches.flatMap((batch, batchIndex) => batch.matches.map((match, order) => ({
       id: match.id, order, batch: batchIndex,
-      isProtected: classifyMaintenanceMatch(match, input.protectedHistoryIds) === 'PROTECTED',
-      placement: match.placementState === 'PLACED' && match.field
+      isProtected: unresolved.has(match.id) || classifyMaintenanceMatch(match, input.protectedHistoryIds) === 'PROTECTED',
+      placement: match.placementState === 'PLACED' && match.field && !unplayedTerminalIds.has(match.id)
         ? { start: +match.start, end: +match.end, fieldId: match.field.id } : null,
       actualEnd: match.actualEnd ? +match.actualEnd : null,
       occupiedUntil: !match.actualEnd && (match.actualStart
         || ['STARTED', 'IN_PROGRESS', 'SUSPENDED'].includes(match.status ?? ''))
         ? Math.max(+match.end, +input.now) : undefined,
       teamIds: [match.team1?.id, match.team2?.id].filter((id): id is string => Boolean(id)),
-      dependencyIds: match.getDependencies().map((dependency) => dependency.id),
-      playingTeamSlots: entrantSlots(match),
+      dependencyIds: unresolved.has(match.id) ? [] : match.getDependencies().map((dependency) => dependency.id),
+      playingTeamSlots: unresolved.has(match.id) ? [] : entrantSlots(match),
       restMs: Math.max(0, match.bufferMs, event.restTimeMinutes * 60_000),
       windows: windows(match), staffing: staffing(match),
     }))),

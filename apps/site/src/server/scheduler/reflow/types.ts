@@ -50,6 +50,7 @@ export type ReflowMatch = {
 };
 
 export type ReflowInput = {
+  releasedCapacityMatchIds?: readonly string[];
   matches: readonly ReflowMatch[];
   changedMatchIds: readonly string[];
   now: number;

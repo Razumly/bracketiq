@@ -14,6 +14,9 @@ const prismaMock = {
     findFirst: jest.fn(),
     createMany: jest.fn(),
   },
+  userNotifications: {
+    createMany: jest.fn(),
+  },
   teams: {
     create: jest.fn(),
     deleteMany: jest.fn(),
@@ -66,6 +69,8 @@ const rescheduleEventMatchesPreservingLocksMock = jest.fn();
 const applyMatchUpdatesMock = jest.fn();
 const applyPersistentAutoLockMock = jest.fn();
 const finalizeMatchMock = jest.fn();
+const commitTerminalMatchMock = jest.fn();
+const snapshotTerminalMatchesMock = jest.fn();
 const isScheduleWindowExceededErrorMock = jest.fn();
 const sendPushToUsersMock = jest.fn();
 const isEmailEnabledMock = jest.fn();
@@ -130,6 +135,11 @@ jest.mock('@/server/scheduler/updateMatch', () => ({
   finalizeMatch: (...args: any[]) => finalizeMatchMock(...args),
   finalizeMatchWithTeamOfficialCapacityFallback: (...args: any[]) => finalizeMatchMock(...args),
   isScheduleWindowExceededError: (...args: any[]) => isScheduleWindowExceededErrorMock(...args),
+}));
+jest.mock('@/server/matches/terminalMatch', () => ({
+  commitTerminalMatch: (...args: any[]) => commitTerminalMatchMock(...args),
+  replayTerminalMatch: jest.fn(),
+  snapshotTerminalMatches: (...args: any[]) => snapshotTerminalMatchesMock(...args),
 }));
 jest.mock('@/server/pushNotifications', () => ({
   sendPushToUsers: (...args: any[]) => sendPushToUsersMock(...args),
@@ -300,6 +310,27 @@ describe('schedule routes', () => {
     clearOriginEnv();
     jest.clearAllMocks();
     applyPersistentAutoLockMock.mockReturnValue(false);
+    snapshotTerminalMatchesMock.mockReturnValue(new Map());
+    commitTerminalMatchMock.mockImplementation(async ({ event, match, operationId, now }: any) => {
+      match.status = 'COMPLETE';
+      match.resultStatus = 'FINAL';
+      match.actualEnd = now;
+      return {
+        contractVersion: 1,
+        operationId,
+        eventId: event.id,
+        matchId: match.id,
+        status: 'CHANGED',
+        event: { id: event.id, end: new Date(event.end ?? now).toISOString(), generatedScheduleEnd: null },
+        matches: [{ id: match.id, status: match.status }],
+        affectedMatchIds: [match.id],
+        protectedMatchIds: [],
+        placementChanges: [],
+        assignmentChanges: [],
+        warnings: [],
+        exploredStates: 0,
+      };
+    });
     prismaMock.$transaction.mockImplementation(async (fn: any) => fn(prismaMock));
     matchOperationReceiptRows = [];
     prismaMock.matchOperationReceipts.findMany.mockImplementation(async ({ where }: any) => {
@@ -327,6 +358,7 @@ describe('schedule routes', () => {
       }
       return { count };
     });
+    prismaMock.userNotifications.createMany.mockResolvedValue({ count: 0 });
     prismaMock.organizations.findUnique.mockResolvedValue(null);
     persistScheduledRosterTeamsMock.mockResolvedValue([]);
     prismaMock.teams.findMany.mockResolvedValue([]);
@@ -1008,7 +1040,7 @@ describe('schedule routes', () => {
         winnerEventTeamId: 'team_1',
       }],
     }],
-    ['match finalization', { finalize: true, time: '2026-04-19T11:00:00.000Z' }],
+    ['match finalization', { finalize: true, time: '2026-04-19T11:00:00.000Z', clientOperationId: 'operation-unresolved' }],
   ])('rejects %s until both match teams resolve', async (_label, update) => {
     requireSessionMock.mockResolvedValue({ userId: 'official_1', isAdmin: false });
     prismaMock.events.findUnique.mockResolvedValue({
@@ -1122,17 +1154,12 @@ describe('schedule routes', () => {
       fields: {},
       timeSlots: [],
     });
-    finalizeMatchMock.mockImplementation((_event: any, match: any) => {
-      match.status = 'COMPLETE';
-      match.resultStatus = 'OFFICIAL';
-      match.actualEnd = new Date('2026-04-19T11:00:00.000Z');
-      return { updatedMatch: match, seededTeamIds: [] };
-    });
     serializeMatchesMock.mockReturnValue([{ id: 'match_1', status: 'COMPLETE' }]);
 
     const res = await matchPatch(
       patchRequest('http://localhost/api/events/event_1/matches/match_1', {
         finalize: true,
+        clientOperationId: 'operation-final-segment',
         time: '2026-04-19T11:00:00.000Z',
         segmentOperations: [
           {
@@ -1156,9 +1183,11 @@ describe('schedule routes', () => {
         timeout: 60_000,
       }),
     );
-    expect(finalizeMatchMock).toHaveBeenCalledWith(
-      expect.anything(),
+    expect(commitTerminalMatchMock).toHaveBeenCalledWith(
       expect.objectContaining({
+        action: 'COMPLETE',
+        operationId: 'operation-final-segment',
+        match: expect.objectContaining({
         id: 'match_1',
         winnerEventTeamId: 'team_1',
         team1Points: [1, 2],
@@ -1175,14 +1204,13 @@ describe('schedule routes', () => {
             winnerEventTeamId: 'team_1',
           }),
         ],
+        }),
       }),
-      expect.anything(),
-      expect.any(Date),
     );
-    const savedMatch = saveMatchesMock.mock.calls[0][1][0];
-    expect(savedMatch.status).toBe('COMPLETE');
-    expect(savedMatch.resultStatus).toBe('OFFICIAL');
-    expect(savedMatch.actualEnd).toEqual(new Date('2026-04-19T11:00:00.000Z'));
+    const committedMatch = commitTerminalMatchMock.mock.calls[0][0].match;
+    expect(committedMatch.status).toBe('COMPLETE');
+    expect(committedMatch.resultStatus).toBe('FINAL');
+    expect(committedMatch.actualEnd).toEqual(new Date('2026-04-19T11:00:00.000Z'));
   });
 
   it('does not resolve a period match winner before all configured segments are complete', async () => {
@@ -2436,6 +2464,38 @@ describe('schedule routes', () => {
     expect(json.matches).toHaveLength(2);
   });
 
+  it.each([
+    ['actual end', { actualEnd: '2026-05-01T11:00:00.000Z' }],
+    ['winner', { winnerEventTeamId: 'team_1' }],
+  ])('rejects a bulk update that adds a terminal %s', async (_label, terminalFields) => {
+    requireSessionMock.mockResolvedValue({ userId: 'host_1', isAdmin: false });
+    prismaMock.events.findUnique.mockResolvedValue({
+      id: 'event_1',
+      hostId: 'host_1',
+      assistantHostIds: [],
+      organizationId: null,
+    });
+    loadEventWithRelationsMock.mockResolvedValue({
+      id: 'event_1',
+      eventType: 'TOURNAMENT',
+      hostId: 'host_1',
+      matches: { match_1: { id: 'match_1', status: 'IN_PROGRESS' } },
+      teams: {},
+    });
+
+    const res = await matchesPatch(
+      patchRequest('http://localhost/api/events/event_1/matches', {
+        matches: [{ id: 'match_1', ...terminalFields }],
+      }),
+      { params: Promise.resolve({ eventId: 'event_1' }) },
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(json.code).toBe('TERMINAL_ACTION_REQUIRED');
+    expect(saveMatchesMock).not.toHaveBeenCalled();
+  });
+
   it('bulk unconfirms a set and clears stale winners while preserving actual end and segment metadata', async () => {
     requireSessionMock.mockResolvedValue({ userId: 'host_1', isAdmin: false });
     prismaMock.events.findUnique.mockResolvedValue({
@@ -3346,8 +3406,24 @@ describe('schedule routes', () => {
       },
       timeSlots: [],
     });
-    finalizeMatchMock.mockImplementation(() => {
+    commitTerminalMatchMock.mockImplementation(async ({ event, match, operationId, now }: any) => {
       nextMatch.team1 = team1;
+      match.status = 'COMPLETE';
+      return {
+        contractVersion: 1,
+        operationId,
+        eventId: event.id,
+        matchId: match.id,
+        status: 'CHANGED',
+        event: { id: event.id, end: new Date(event.end ?? now).toISOString(), generatedScheduleEnd: null },
+        matches: [{ id: match.id }, { id: nextMatch.id }],
+        affectedMatchIds: [match.id, nextMatch.id],
+        protectedMatchIds: [],
+        placementChanges: [],
+        assignmentChanges: [],
+        warnings: [],
+        exploredStates: 0,
+      };
     });
     prismaMock.teams.findMany.mockResolvedValue([
       { id: 'team_1', captainId: 'captain_1', managerId: 'manager_1', headCoachId: null, coachIds: [], playerIds: ['player_1'] },
@@ -3356,7 +3432,10 @@ describe('schedule routes', () => {
     serializeMatchesMock.mockReturnValue([{ id: 'match_1' }]);
 
     const res = await matchPatch(
-      patchRequest('http://localhost/api/events/event_1/matches/match_1', { finalize: true }),
+      patchRequest('http://localhost/api/events/event_1/matches/match_1', {
+        finalize: true,
+        clientOperationId: 'operation-bracket-advance',
+      }),
       { params: Promise.resolve({ eventId: 'event_1', matchId: 'match_1' }) },
     );
 
@@ -3375,7 +3454,7 @@ describe('schedule routes', () => {
     }));
   });
 
-  it('notifies the host when auto-reschedule fails because fixed end time was reached', async () => {
+  it('rolls back without notification when terminal Reflow reaches the fixed end', async () => {
     requireSessionMock.mockResolvedValue({ userId: 'host_1', isAdmin: false });
     prismaMock.events.findUnique.mockResolvedValue({
       id: 'event_1',
@@ -3408,25 +3487,23 @@ describe('schedule routes', () => {
       fields: {},
       timeSlots: [],
     });
-    finalizeMatchMock.mockImplementation(() => {
-      throw new Error('No available time slots remaining for scheduling');
-    });
+    commitTerminalMatchMock.mockRejectedValue(Response.json({
+      code: 'TERMINAL_REFLOW_INFEASIBLE',
+      error: 'No available time slots remaining for scheduling.',
+    }, { status: 409 }));
 
     const res = await matchPatch(
-      patchRequest('http://localhost/api/events/event_1/matches/match_1', { finalize: true }),
+      patchRequest('http://localhost/api/events/event_1/matches/match_1', {
+        finalize: true,
+        clientOperationId: 'operation-end-limit',
+      }),
       { params: Promise.resolve({ eventId: 'event_1', matchId: 'match_1' }) },
     );
     const json = await res.json();
 
     expect(res.status).toBe(409);
-    expect(json.code).toBe('AUTO_RESCHEDULE_END_LIMIT');
-    expect(sendPushToUsersMock).toHaveBeenCalledWith(expect.objectContaining({
-      userIds: ['host_1'],
-      data: expect.objectContaining({
-        eventId: 'event_1',
-        matchId: 'match_1',
-      }),
-    }));
+    expect(json.code).toBe('TERMINAL_REFLOW_INFEASIBLE');
+    expect(sendPushToUsersMock).not.toHaveBeenCalled();
     expect(sendEmailMock).not.toHaveBeenCalled();
   });
 });

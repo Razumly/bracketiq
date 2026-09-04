@@ -9,6 +9,7 @@ import com.razumly.mvp.core.data.dataTypes.MATCH_OPERATION_KIND_SCORE_SET
 import com.razumly.mvp.core.data.dataTypes.MATCH_OPERATION_KIND_UPDATE
 import com.razumly.mvp.core.data.dataTypes.MATCH_OPERATION_STATUS_FAILED
 import com.razumly.mvp.core.data.dataTypes.MATCH_OPERATION_STATUS_RECONCILING
+import com.razumly.mvp.core.data.dataTypes.MATCH_OPERATION_STATUS_REJECTED
 import com.razumly.mvp.core.data.dataTypes.MatchOperationOutboxEntry
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.OfficialAssignmentHolderType
@@ -47,9 +48,12 @@ import com.razumly.mvp.core.network.dto.TeamCheckInDto
 import com.razumly.mvp.core.network.dto.TeamCheckInRequestDto
 import com.razumly.mvp.core.network.dto.TeamCheckInResponseDto
 import com.razumly.mvp.core.network.dto.TeamCheckInsResponseDto
+import com.razumly.mvp.core.network.dto.TerminalMatchResultDto
 import com.razumly.mvp.core.network.dto.toBulkMatchCreateEntryDto
 import com.razumly.mvp.core.network.dto.toBulkMatchUpdateEntryDto
 import com.razumly.mvp.core.network.dto.toMatchOperationsJsonObject
+import com.razumly.mvp.core.network.dto.isTerminalOperation
+import com.razumly.mvp.core.network.dto.TerminalMatchStatus
 import com.razumly.mvp.core.util.jsonMVP
 import com.razumly.mvp.core.util.newId
 import io.ktor.http.encodeURLQueryComponent
@@ -66,6 +70,8 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -89,6 +95,8 @@ import kotlin.time.Instant
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.days
 
+private val EMPTY_TERMINAL_MATCH_OUTCOME = MutableStateFlow<TerminalMatchResultDto?>(null).asStateFlow()
+
 data class StagedMatchCreate(
     val clientId: String,
     val match: MatchMVP,
@@ -98,6 +106,9 @@ data class StagedMatchCreate(
 
 @OptIn(ExperimentalTime::class)
 interface IMatchRepository : IMVPRepository {
+    val terminalMatchOutcome: StateFlow<TerminalMatchResultDto?>
+        get() = EMPTY_TERMINAL_MATCH_OUTCOME
+
     suspend fun getMatch(matchId: String): Result<MatchMVP>
     fun getMatchFlow(matchId: String): Flow<Result<MatchWithRelations>>
     suspend fun saveMatchLocally(match: MatchMVP): Result<Unit>
@@ -185,11 +196,14 @@ class MatchRepository(
         const val CLIENT_MATCH_PREFIX = "client:"
         const val LOCAL_PLACEHOLDER_PREFIX = "placeholder-local:"
         const val LOCAL_OPERATION_SOURCE_DEVICE = "PHONE"
+        const val TERMINAL_OPERATION_KIND = "TERMINAL_MATCH"
         val ACKED_OPERATION_RETENTION = 7.days
         val processOutboxEnqueueMutex = Mutex()
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val _terminalMatchOutcome = MutableStateFlow<TerminalMatchResultDto?>(null)
+    override val terminalMatchOutcome = _terminalMatchOutcome.asStateFlow()
     private val outboxSyncMutex = Mutex()
     private var outboxRetryJob: Job? = null
     private var _ignoreMatch = MutableStateFlow<MatchMVP?>(null)
@@ -588,6 +602,117 @@ class MatchRepository(
         return localMatch
     }
 
+    private suspend fun submitTerminalMatchUpdate(match: MatchMVP, update: MatchUpdateDto): MatchMVP =
+        outboxSyncMutex.withLock {
+            val dao = databaseService.getMatchOperationOutboxDao
+            val pending = dao.getPendingOperationsForMatch(match.id)
+            for (operation in pending.filter { it.operationKind != TERMINAL_OPERATION_KIND }) {
+                if (!syncOutboxOperation(operation)) throw TerminalMatchFailure(operation.id, "PRIOR_OPERATION_PENDING",
+                    "Save the pending scoring operations before ending this Match.")
+            }
+            val entry = processOutboxEnqueueMutex.withLock {
+                val existing = pending.firstOrNull { it.operationKind == TERMINAL_OPERATION_KIND }
+                if (existing != null) {
+                    val previous = matchUpdateDtoFromPayload(existing.payloadJson)
+                    val requested = update.copy(terminalContractVersion = 1, time = previous.time).withClientOperation(existing)
+                    if (previous.toMatchOperationsJsonObject() != requested.toMatchOperationsJsonObject()) {
+                        throw TerminalMatchFailure(existing.id, "TERMINAL_ACTION_PENDING",
+                            "Retry the pending terminal action before sending a different action.")
+                    }
+                    existing
+                } else {
+                    val provisional = newOutboxEntry(match, TERMINAL_OPERATION_KIND, "{}")
+                    val payload = update.copy(terminalContractVersion = 1, time = update.time ?: provisional.clientCreatedAt)
+                        .withClientOperation(provisional)
+                    provisional.copy(payloadJson = payload.toMatchOperationsJsonObject().toString())
+                        .also { dao.upsertOperation(it) }
+                }
+            }
+            sendTerminalOperation(entry)
+        }
+
+    private suspend fun sendTerminalOperation(operation: MatchOperationOutboxEntry): MatchMVP {
+        val dao = databaseService.getMatchOperationOutboxDao
+        val before = databaseService.getMatchDao.getMatchesOfTournament(operation.eventId).associateBy(MatchMVP::id)
+        val beforeEvent = databaseService.getEventDao.getEventById(operation.eventId)
+        dao.markAttempting(operation.id, Clock.System.now().toString())
+        try {
+            val payload = jsonMVP.parseToJsonElement(operation.payloadJson).jsonObject
+            val savedCommit = payload["_terminalCommit"]
+            val commit = if (savedCommit != null) {
+                jsonMVP.decodeFromJsonElement<TerminalMatchCommit>(savedCommit)
+            } else {
+                val response = api.patch<JsonObject, MatchResponseDto>(
+                    "api/events/${operation.eventId}/matches/terminal",
+                    buildJsonObject {
+                        put("matchId", JsonPrimitive(operation.matchId))
+                        put("update", payload)
+                    },
+                )
+                val result = requireNotNull(response.terminalResult) { "Terminal operation response is missing." }
+                result.decodeMatches(operation.id, operation.eventId, operation.matchId)
+                if (result.status != TerminalMatchStatus.CHANGED) {
+                    dao.markAcked(operation.id, Clock.System.now().toString())
+                    _terminalMatchOutcome.value = result
+                    throw TerminalMatchNoChange(result)
+                }
+                TerminalMatchCommit(result, before.values.toList(), beforeEvent?.end?.toString()).also { accepted ->
+                    try {
+                        val current = dao.getOperationsByIds(listOf(operation.id)).single()
+                        dao.upsertOperation(current.copy(payloadJson = JsonObject(payload +
+                            ("_terminalCommit" to jsonMVP.encodeToJsonElement(accepted))).toString()))
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Throwable) {
+                        throw TerminalMatchSyncPending(result, error)
+                    }
+                }
+            }
+            val result = commit.result
+            val matches = result.decodeMatches(operation.id, operation.eventId, operation.matchId)
+            val committedBefore = commit.beforeMatches.associateBy(MatchMVP::id)
+            try {
+                databaseService.withTransaction {
+                    val cached = databaseService.getMatchDao.getMatchesOfTournament(operation.eventId).associateBy(MatchMVP::id)
+                    require(matches.all { cached[it.id] == committedBefore[it.id] || cached[it.id] == it }) {
+                        "The local Schedule changed during the terminal operation. Refresh the Schedule."
+                    }
+                    val event = requireNotNull(databaseService.getEventDao.getEventById(operation.eventId)) {
+                        "Load the Event before saving its terminal operation."
+                    }
+                    val end = Instant.parse(result.event.end)
+                    require(event.end.toString() == commit.beforeEventEnd || event.end == end) { "The local Event end changed." }
+                    if (event.end != end) databaseService.getEventDao.upsertEvent(event.copy(end = end))
+                    val changed = matches.filter { it != cached[it.id] }
+                    if (changed.isNotEmpty()) databaseService.getMatchDao.upsertMatches(changed)
+                    dao.markAcked(operation.id, Clock.System.now().toString())
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                throw TerminalMatchSyncPending(result, error)
+            }
+            _terminalMatchOutcome.value = result
+            return requireNotNull(databaseService.getMatchDao.getMatchById(operation.matchId)).match
+        } catch (error: TerminalMatchNoChange) {
+            throw error
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: ApiException) {
+            val rejected = error.statusCode in 400..499 && error.statusCode !in setOf(408, 429)
+            dao.markFailed(operation.id, error.message.orEmpty(), Clock.System.now().toString(),
+                if (rejected) MATCH_OPERATION_STATUS_REJECTED else MATCH_OPERATION_STATUS_FAILED)
+            val code = runCatching { jsonMVP.parseToJsonElement(error.responseBody.orEmpty()).jsonObject["code"]
+                ?.let { (it as? JsonPrimitive)?.content } }.getOrNull() ?: "HTTP_${error.statusCode}"
+            throw TerminalMatchFailure(operation.id, code, error.message ?: "Terminal operation failed.", error)
+        } catch (error: Throwable) {
+            markOutboxOperationFailed(dao, operation, error)
+            if (error is TerminalMatchSyncPending) throw error
+            throw TerminalMatchFailure(operation.id, "DELIVERY_UNCERTAIN",
+                "The terminal result is not confirmed. Retry the same action.", error)
+        }
+    }
+
     private suspend fun enqueueScoreSet(
         match: MatchMVP,
         scoreSet: MatchScoreSetDto,
@@ -636,6 +761,7 @@ class MatchRepository(
 
     private fun applyOutboxOperationLocally(match: MatchMVP, operation: MatchOperationOutboxEntry): MatchMVP =
         when (operation.operationKind) {
+            TERMINAL_OPERATION_KIND -> match
             MATCH_OPERATION_KIND_SCORE_SET -> {
                 val scoreSet = jsonMVP.decodeFromString<MatchScoreSetDto>(operation.payloadJson)
                 match.applyLocalScoreSet(scoreSet)
@@ -685,6 +811,20 @@ class MatchRepository(
         }
 
     private suspend fun syncOutboxOperation(operation: MatchOperationOutboxEntry): Boolean {
+        if (operation.operationKind == TERMINAL_OPERATION_KIND) {
+            return try {
+                sendTerminalOperation(operation)
+                true
+            } catch (_: TerminalMatchNoChange) {
+                true
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                Napier.w("Terminal operation ${operation.id} needs attention: ${error.message}")
+                databaseService.getMatchOperationOutboxDao.getOperationsByIds(listOf(operation.id))
+                    .singleOrNull()?.status == MATCH_OPERATION_STATUS_REJECTED
+            }
+        }
         val dao = databaseService.getMatchOperationOutboxDao
         if (operation.status == MATCH_OPERATION_STATUS_RECONCILING) {
             return reconcileRejectedOperation(dao, operation)
@@ -1062,19 +1202,19 @@ class MatchRepository(
         matchAction: MatchActionOperationDto?,
         finalize: Boolean,
         time: Instant?,
-    ): Result<MatchMVP> = runCatching {
-        enqueueMatchUpdate(
-            match = match,
-            update = MatchUpdateDto(
-                lifecycle = lifecycle,
-                segmentOperations = segmentOperations,
-                incidentOperations = incidentOperations,
-                officialCheckIn = officialCheckIn,
-                matchAction = matchAction,
-                finalize = finalize,
-                time = time?.toString(),
-            ),
+    ): Result<MatchMVP> = try {
+        val update = MatchUpdateDto(
+            lifecycle = lifecycle, segmentOperations = segmentOperations, incidentOperations = incidentOperations,
+            officialCheckIn = officialCheckIn, matchAction = matchAction, finalize = finalize, time = time?.toString(),
         )
+        Result.success(if (update.isTerminalOperation()) submitTerminalMatchUpdate(match, update) else enqueueMatchUpdate(
+            match = match,
+            update = update,
+        ))
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Throwable) {
+        Result.failure(error)
     }
 
     override suspend fun setMatchScore(
