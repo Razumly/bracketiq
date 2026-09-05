@@ -29,8 +29,9 @@ If an API caller, API path, request or response field, DTO, encoder, or mapper c
 - [x] (2026-09-04) Add the Schedule entry point through failing action and UI tests. Verify all three operations, capability restrictions, and cancelled loading.
 - [x] (2026-09-04) Verify stale acceptance and offline Room reload for Build, Complete, and Rebuild. Check Match links, assignments, placements, protected state, and the server Event end.
 - [x] (2026-09-04) Fix the three Spec findings through failing regressions. Verify fresh proposal revisions, accepted protected Match values, and current-graph recovery after offline reload.
-- [ ] Run focused checks during implementation. Run the complete Android/JVM suite at the final gate. Exclude iOS execution as previously requested.
-- [ ] Complete independent Standards and Spec reviews. Resolve findings and commit the issue changes.
+- [x] (2026-09-04) Run focused checks and the complete Android/JVM suite. Final result: 1,982 tests, 1,969 passed, 13 live-backend tests skipped, zero failures or errors. Exclude iOS execution as previously requested.
+- [x] (2026-09-04) Complete independent Standards and Spec reviews through `07ef50d44`. Both axes report zero remaining findings. Commit the implementation and review fixes.
+- [ ] Run the live mobile-to-site maintenance checks with an isolated issue 41 database and outbound providers disabled. Obtain runtime-operation approval first.
 - [ ] Record verification and contract changes on the issue. Close only when all scoped criteria pass.
 
 ## Surprises & Discoveries
@@ -142,7 +143,7 @@ Focused action-handler results: 20 passed. The initial UI regression and existin
 ## Outcomes & Retrospective
 
 
-The Schedule entry point is implemented. It loads permitted operations from the server and does not save Event settings. The canonical proposal review remains in use. Accepted Matches use server values. Recovery reads the current full detail snapshot instead of replaying an old accepted graph. Offline maintenance persistence is verified. Final full verification and repeat independent review remain.
+The Schedule entry point is implemented. It loads permitted operations from the server and does not save Event settings. The canonical proposal review remains in use. Accepted Matches use server values. Recovery reads the current full detail snapshot instead of replaying an old accepted graph. Offline maintenance persistence is verified. The Android/JVM suite and both independent reviews pass. Live mobile-to-site maintenance verification remains before closure.
 
 Revision note (2026-09-04): Created the plan after issue claim and the initial acceptance audit. Recorded the pending skill-required confirmations and existing implementation to avoid duplicate work.
 
@@ -155,3 +156,7 @@ Revision note (2026-09-04): Recorded the independent review findings and the rec
 Revision note (2026-09-04): The user paused the work. The active test run stopped. Work resumed after the user requested continuation. The focused action-handler, coordinator, and UI suites now pass all 45 tests. The Room suite passed 26 tests. The new recovery test initially exceeded the Windows SQLite path limit, then passed with a shorter name. All 27 Room cases have now passed against the fixes. The recovery test verifies that failed refresh retains the cache and that a newer graph replaces old Match IDs before offline reload.
 
 Revision note (2026-09-04): The review-fix commit is `fddbce1a7`. The next complete suite found two additional legacy assertions in `EventRepositoryHttpTest` that expected stale local Match values. Align them with the accepted server graph. Keep the stale-row deletion and Unscheduled Match checks. The repeat Spec review found no remaining implementation gap. The Standards review suggested shared Match assertion helpers. Apply that test-only cleanup and rerun the complete Android/JVM suite.
+
+Revision note (2026-09-04): Commit `07ef50d44` contains the final test corrections. The complete Android/JVM command exited successfully. XML reports contain 1,982 tests, zero failures, zero errors, and 13 skips. The skipped tests require a live backend, including the existing Complete and Rebuild API checks. Standards and Spec reviewers report zero remaining findings through this commit. Local `main` remains the clean ancestor `a877f70c849298c1eb1f0362209a7ff2c4badbfd`.
+
+Revision note (2026-09-04): The issue tracker runbook requires client-to-site verification for a changed site/mobile workflow. The current `.env.local` points to local database `bracketiq_e2e_40_563b` on port 5543. Its configuration does not set the outbound-provider test guard. Ports 3000 and 5543 respond, but this does not prove that the process configuration matches the worktree file. Do not run fixture writes against that database. Prepare `bracketiq_e2e_41_563b` and a separately configured local test backend only after the user approves the runtime operation. No backend or database process was started, stopped, or reconfigured. Keep issue 41 open until the live maintenance check passes.
