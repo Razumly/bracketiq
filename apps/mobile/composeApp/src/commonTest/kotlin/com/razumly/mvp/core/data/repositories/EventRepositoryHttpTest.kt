@@ -6735,8 +6735,16 @@ class EventRepositoryHttpTest {
             assertTrue(matchDao.matches[canonicalMatch.id]?.segments?.isEmpty() == true)
         }
 
+    private fun assertAcceptedMaintenancePlacement(match: MatchMVP) {
+        assertEquals("field-proposed", match.fieldId)
+        assertEquals(Instant.parse(MAINTENANCE_START), match.start)
+        assertEquals(Instant.parse(MAINTENANCE_END), match.end)
+        assertEquals("POOL", match.phase)
+        assertFalse(match.locked)
+    }
+
     @Test
-    fun given_complete_maintenance_graph_when_accepted_then_placed_match_projection_is_preserved() =
+    fun given_complete_maintenance_when_cache_is_stale_then_accepted_match_values_replace_it() =
         runTest {
             val eventId = "maintenance-complete"
             val request = maintenanceRequest(
@@ -6810,7 +6818,7 @@ class EventRepositoryHttpTest {
 
             result.getOrThrow()
             assertEquals(1, database.transactionCalls)
-            assertEquals(localPlaced, matchDao.matches["match-placed"])
+            assertAcceptedMaintenancePlacement(requireNotNull(matchDao.matches["match-placed"]))
             assertEquals("match-new-unplaced", matchDao.matches["match-new-unplaced"]?.id)
             assertEquals("UNPLACED", matchDao.matches["match-new-unplaced"]?.placementState)
             assertEquals(
@@ -6820,7 +6828,7 @@ class EventRepositoryHttpTest {
         }
 
     @Test
-    fun given_rebuild_maintenance_graph_when_accepted_then_protected_match_is_preserved_and_replaceable_stale_rows_are_removed() =
+    fun given_rebuild_maintenance_when_cache_is_stale_then_accepted_graph_replaces_it() =
         runTest {
             val eventId = "maintenance-rebuild"
             val request = maintenanceRequest(
@@ -6898,7 +6906,7 @@ class EventRepositoryHttpTest {
             ).getOrThrow()
 
             assertEquals(1, database.transactionCalls)
-            assertEquals(localProtected, matchDao.matches[localProtected.id])
+            assertAcceptedMaintenancePlacement(requireNotNull(matchDao.matches[localProtected.id]))
             assertNull(matchDao.matches["match-stale"])
             assertEquals("UNPLACED", matchDao.matches["match-rebuild-new"]?.placementState)
             assertEquals(

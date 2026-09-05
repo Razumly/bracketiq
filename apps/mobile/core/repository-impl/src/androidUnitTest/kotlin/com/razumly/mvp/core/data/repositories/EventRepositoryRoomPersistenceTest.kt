@@ -2995,14 +2995,7 @@ class EventRepositoryRoomPersistenceTest {
                 val persistedMatches = database.getMatchDao.getMatchesOfTournament(fixture.eventId)
                     .associateBy(MatchMVP::id)
                 val persistedProtected = persistedMatches.getValue(protectedMatch.id)
-                assertEquals("2026-08-15T08:00:00Z", persistedProtected.start?.toString())
-                assertEquals("2026-08-15T08:45:00Z", persistedProtected.end?.toString())
-                assertEquals("field-graph", persistedProtected.fieldId)
-                assertNull(persistedProtected.team1Id)
-                assertNull(persistedProtected.team2Id)
-                assertNull(persistedProtected.teamOfficialId)
-                assertFalse(persistedProtected.locked)
-                assertTrue(persistedProtected.officialIds.isEmpty())
+                assertAcceptedRoomMaintenanceMatch(persistedProtected)
                 assertEquals(unprotectedMatch.id, persistedProtected.winnerNextMatchId)
                 assertEquals(unprotectedMatch.id, persistedProtected.loserNextMatchId)
 
@@ -3123,14 +3116,7 @@ class EventRepositoryRoomPersistenceTest {
                 val persistedMatches = database.getMatchDao.getMatchesOfTournament(fixture.eventId)
                     .associateBy(MatchMVP::id)
                 val persistedProtected = persistedMatches.getValue(protectedMatch.id)
-                assertEquals("2026-08-15T08:00:00Z", persistedProtected.start?.toString())
-                assertEquals("2026-08-15T08:45:00Z", persistedProtected.end?.toString())
-                assertEquals("field-graph", persistedProtected.fieldId)
-                assertNull(persistedProtected.team1Id)
-                assertNull(persistedProtected.team2Id)
-                assertNull(persistedProtected.teamOfficialId)
-                assertFalse(persistedProtected.locked)
-                assertTrue(persistedProtected.officialIds.isEmpty())
+                assertAcceptedRoomMaintenanceMatch(persistedProtected)
                 assertEquals(generatedMatchId, persistedProtected.winnerNextMatchId)
                 assertEquals(generatedMatchId, persistedProtected.loserNextMatchId)
                 assertFalse(persistedMatches.containsKey(staleMatch.id))
@@ -4111,6 +4097,17 @@ private fun roomMaintenanceGraphEvent(
         timeSlots = emptyList(),
         officials = emptyList(),
     )
+}
+
+private fun assertAcceptedRoomMaintenanceMatch(match: MatchMVP) {
+    assertEquals("2026-08-15T08:00:00Z", match.start?.toString())
+    assertEquals("2026-08-15T08:45:00Z", match.end?.toString())
+    assertEquals("field-graph", match.fieldId)
+    assertNull(match.team1Id)
+    assertNull(match.team2Id)
+    assertNull(match.teamOfficialId)
+    assertFalse(match.locked)
+    assertTrue(match.officialIds.isEmpty())
 }
 
 private fun roomMaintenanceProtectedMatch(
