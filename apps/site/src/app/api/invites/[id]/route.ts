@@ -1,18 +1,17 @@
+import { expireTeamInvitation } from '@/server/teams/teamInvitationState';
+import { withTeamInvitationViews } from '@/server/teams/teamInvitationViews';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/permissions';
 import { normalizeInviteType } from '@/lib/staff';
 import { canManageEvent, canManageOrganization } from '@/server/accessControl';
 import { listActiveChildIdsForParent } from '@/server/teams/teamGuardianInvites';
-import {
-  removeCanonicalPendingInvitee,
-  rollbackTeamInviteEventSyncs,
-} from '@/server/teams/teamInviteEventSync';
 import { acquireEventLock } from '@/server/repositories/locks';
+import { cancelTeamInvitation } from '@/server/teams/teamInvitationCommands';
+import { declineTeamInviteWithGuardianRules } from '@/server/teams/teamGuardianInvites';
 
 export const dynamic = 'force-dynamic';
 
-const getTeamsDelegate = (client: any) => client?.teams;
 
 /**
  * Returns one invitation only to its recipient (or a linked guardian for an
@@ -30,7 +29,6 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const inviteeId = invite.userId?.trim() || null;
   const isDirectRecipient = inviteeId === session.userId;
   const isPendingChildTeamInvite = normalizeInviteType(invite.type) === 'TEAM'
-    && String(invite.status ?? '').toUpperCase() === 'PENDING'
     && !!inviteeId;
   const childInviteeIds = !session.isAdmin && !isDirectRecipient && isPendingChildTeamInvite
     ? await listActiveChildIdsForParent(prisma, session.userId)
@@ -43,7 +41,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 
-  return NextResponse.json({ invite: invite }, { status: 200 });
+  const current = invite.type === 'TEAM' ? await expireTeamInvitation(prisma, invite) : invite;
+  const [view] = await withTeamInvitationViews(prisma, current ? [current] : []);
+  return NextResponse.json({ invite: isLinkedGuardian ? { ...view, viewerCanAcceptForChild: true, childUserId: inviteeId } : view }, { status: 200 });
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -53,6 +53,14 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   const invite = await prisma.invites.findUnique({ where: { id } });
   if (!invite) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
+
+  if (normalizeInviteType(invite.type) === 'TEAM' && invite.teamId) {
+    const childIds = invite.userId !== session.userId ? await listActiveChildIdsForParent(prisma, session.userId) : [];
+    const result = invite.userId === session.userId || (invite.userId && childIds.includes(invite.userId))
+      ? await declineTeamInviteWithGuardianRules({ invite, session })
+      : await cancelTeamInvitation(invite.id, session);
+    return NextResponse.json(result.body, { status: result.status });
   }
 
   const eventStaffId = normalizeInviteType(invite.type) === 'STAFF'
@@ -139,24 +147,6 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
 
   const now = new Date();
   await prisma.$transaction(async (tx) => {
-    if (normalizeInviteType(invite.type) === 'TEAM' && invite.teamId && invite.userId) {
-      const teamsDelegate = getTeamsDelegate(tx);
-      const team = await teamsDelegate?.findUnique({ where: { id: invite.teamId } });
-      if (team && Array.isArray(team.pending) && team.pending.includes(invite.userId)) {
-        const pending = Array.isArray(team.pending) ? team.pending : [];
-        const nextPending = pending.filter((userId: string) => userId !== invite.userId);
-        await teamsDelegate.update({
-            where: { id: invite.teamId },
-            data: {
-              pending: nextPending,
-              updatedAt: now,
-            },
-          });
-      }
-      await rollbackTeamInviteEventSyncs(tx, invite, 'CANCELLED', now);
-      await removeCanonicalPendingInvitee(tx, invite, session.userId, now);
-    }
-
     const managedProfile = invite.userId
       ? await tx.userData?.findUnique?.({ where: { id: invite.userId }, select: { isManagedPlayer: true, mergedIntoProfileId: true } })
       : null;

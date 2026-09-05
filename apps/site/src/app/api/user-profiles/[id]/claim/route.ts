@@ -12,6 +12,7 @@ const bodySchema = z.object({
   confirmation: z.literal(true),
   guardianDeclaration: z.boolean().optional(),
   acceptTeamInvitation: z.boolean().optional(),
+  reviewGuardianInvitation: z.boolean().optional(),
   dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   version: z.string().optional(),
   expiresAt: z.string().optional(),
@@ -45,6 +46,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       confirmation: parsed.data.confirmation,
       guardianDeclaration: parsed.data.guardianDeclaration,
       acceptTeamInvitation: parsed.data.acceptTeamInvitation,
+      reviewGuardianInvitation: parsed.data.reviewGuardianInvitation,
       claimantUserId: session.userId,
       verifyLink: verifyTeamInviteShareLink,
     });

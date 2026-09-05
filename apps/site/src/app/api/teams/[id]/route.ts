@@ -1,3 +1,6 @@
+import { InvitationRequestError } from '@/server/teams/teamInvitationRequests';
+import { withRosterInvitationViews } from '@/server/teams/teamRosterInvitationViews';
+import { TeamInvitationRestrictionError } from '@/server/teams/teamInvitationRestrictions';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
@@ -543,8 +546,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     withTeamRoleAliases(team as any),
     canExposeAffiliateDestination || canViewPendingRoster(team as Record<string, any>, session),
   );
+  const [invitationView] = await withRosterInvitationViews(prisma, [responseTeam]);
   return NextResponse.json(
-    canExposeAffiliateDestination ? responseTeam : protectAffiliateRow(responseTeam, 'team'),
+    canExposeAffiliateDestination ? invitationView : protectAffiliateRow(invitationView, 'team'),
     { status: 200 },
   );
 }
@@ -643,7 +647,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
     const shouldSyncDerivedTeams = hasVersionedProfileChanges(payload, existingCanonical as Record<string, any>, nextState);
     let createdPendingInvites: CreatedPendingTeamInviteRecord[] = [];
-    const updated = await prisma.$transaction(async (tx) => {
+    try {
+      await prisma.$transaction(async (tx) => {
       if (typeof tx?.$executeRaw === 'function') {
         await acquireTeamRosterLock(tx, id);
       }
@@ -695,11 +700,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
       await syncTeamChatInTx(tx, id, { previousMemberIds });
     });
+    } catch (error) {
+      if (error instanceof TeamInvitationRestrictionError || error instanceof InvitationRequestError) return NextResponse.json({ error: error.message }, { status: error.status });
+      throw error;
+    }
     let inviteDeliveryFailed = false;
     let deliveredInvites: any[] = [];
     if (createdPendingInvites.length) {
       try {
-        deliveredInvites = await sendInviteEmails(createdPendingInvites, getRequestOrigin(req));
+        deliveredInvites = await sendInviteEmails(createdPendingInvites, getRequestOrigin(req), { requestedBy: session.userId, requestedByIsAdmin: session.isAdmin });
       } catch (error) {
         // The database transaction already committed. Keep that result and
         // report delivery failure so the client can retry delivery safely.
@@ -709,11 +718,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
     const refreshed = await loadCanonicalTeamById(id, prisma);
     return NextResponse.json({
-      ...withTeamRoleAliases((refreshed ?? updated) as any),
+      ...withTeamRoleAliases((refreshed ?? existingCanonical) as any),
       delivery: {
         attempted: createdPendingInvites.length > 0,
         failed: inviteDeliveryFailed || deliveredInvites.some(
-          (invite) => String(invite.status ?? '').toUpperCase() === 'FAILED',
+          (invite) => invite.delivery?.failed === true,
         ),
         inviteIds: createdPendingInvites.map((invite) => invite.id),
       },
@@ -865,6 +874,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return canonical;
     });
   } catch (error) {
+    if (error instanceof TeamInvitationRestrictionError || error instanceof InvitationRequestError) return NextResponse.json({ error: error.message }, { status: error.status });
     if (isPrismaSchemaContractError(error)) {
       return NextResponse.json(
         { error: error.message, code: 'PRISMA_SCHEMA_CONTRACT_MISMATCH', field: error.field },

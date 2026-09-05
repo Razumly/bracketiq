@@ -26,6 +26,12 @@ import kotlin.time.Instant
 
 @OptIn(ExperimentalTime::class)
 class Converters {
+    @TypeConverter
+    fun fromInviteDeliveries(value: List<com.razumly.mvp.core.data.dataTypes.InviteDelivery>): String = Json.encodeToString(value)
+
+    @TypeConverter
+    fun toInviteDeliveries(value: String): List<com.razumly.mvp.core.data.dataTypes.InviteDelivery> = Json.decodeFromString(value)
+
     // List<String> converter
     @TypeConverter
     fun fromStringList(value: List<String>): String {

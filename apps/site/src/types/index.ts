@@ -358,6 +358,8 @@ export interface MatchOfficialCheckInOperation {
 }
 
 export interface TeamPlayerRegistration {
+  invitationId?: string | null;
+  invitationLabel?: string | null;
   id: string;
   teamId?: string | null;
   userId: string;
@@ -627,6 +629,7 @@ export type TimeSlotPayload = Omit<TimeSlot, 'event' | 'field' | '$id'> & {
 };
 
 export interface UserData {
+  hasActiveAccount?: boolean;
   $id: string;
   firstName: string;
   lastName: string;
@@ -667,7 +670,7 @@ export interface UserData {
 
 export type StaffMemberType = 'HOST' | 'OFFICIAL' | 'STAFF';
 export type InviteType = 'STAFF' | 'TEAM' | 'EVENT';
-export type InviteStatus = 'PENDING' | 'DECLINED' | 'FAILED' | 'ACCEPTED';
+export type InviteStatus = 'PENDING' | 'DECLINED' | 'FAILED' | 'ACCEPTED' | 'CANCELLED' | 'EXPIRED';
 export type TeamInviteRole = 'player' | 'team_manager' | 'team_head_coach' | 'team_assistant_coach';
 export type OrganizationRoleKind = 'OWNER' | 'STAFF' | 'HOST' | 'OFFICIAL';
 
@@ -697,6 +700,19 @@ export interface StaffMember {
   $updatedAt?: string;
 }
 export interface Invite {
+  finalizedAt?: string | null;
+  actedBy?: string | null;
+  actingGuardianId?: string | null;
+  senderName?: string | null;
+  actingGuardianName?: string | null;
+  declineBlockScope?: 'sender' | 'team' | null;
+  linkExpiresAt?: string | null;
+  sentAt?: string | null;
+  canBlockSender?: boolean;
+  isCurrentAttempt?: boolean;
+  invitationLabel?: string;
+  deliveries?: Array<{ id: string; kind: string; status: string; createdAt: string; completedAt?: string | null; sentAt?: string | null }>;
+  delivery?: { failed: boolean; status: string; error?: string };
   $id: string;
   type: InviteType;
   role?: TeamInviteRole | null;

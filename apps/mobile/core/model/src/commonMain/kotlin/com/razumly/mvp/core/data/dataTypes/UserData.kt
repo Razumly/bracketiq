@@ -31,6 +31,7 @@ data class UserData @Ignore constructor(
     val notificationSettings: NotificationSettings = defaultNotificationSettings(),
     @PrimaryKey override val id: String,
     val isManagedPlayer: Boolean = false,
+    val hasActiveAccount: Boolean = false,
     val mergedIntoProfileId: String? = null,
 ) : MVPDocument, DisplayableEntity {
     constructor(
@@ -54,6 +55,7 @@ data class UserData @Ignore constructor(
         notificationSettings: NotificationSettings = defaultNotificationSettings(),
         id: String,
         isManagedPlayer: Boolean = false,
+        hasActiveAccount: Boolean = false,
         mergedIntoProfileId: String? = null,
     ) : this(
         firstName = firstName,
@@ -77,6 +79,7 @@ data class UserData @Ignore constructor(
         notificationSettings = notificationSettings,
         id = id,
         isManagedPlayer = isManagedPlayer,
+        hasActiveAccount = hasActiveAccount,
         mergedIntoProfileId = mergedIntoProfileId,
     )
 
@@ -177,6 +180,7 @@ data class UserData @Ignore constructor(
             notificationSettings = notificationSettings,
             id = id,
             isManagedPlayer = isManagedPlayer,
+        hasActiveAccount = hasActiveAccount,
             mergedIntoProfileId = mergedIntoProfileId,
         )
     }

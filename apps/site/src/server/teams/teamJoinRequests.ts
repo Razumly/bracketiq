@@ -1,3 +1,5 @@
+import { acquireTeamRosterLock } from '@/server/repositories/locks';
+import { assertTeamInvitationAllowed } from './teamInvitationRestrictions';
 import { prisma } from '@/lib/prisma';
 import { getTeamChatBaseMemberIds, syncTeamChatInTx } from '@/server/teamChatSync';
 import {
@@ -304,6 +306,7 @@ export const reviewTeamJoinRequest = async (params: {
 
   try {
     const reviewed = await prisma.$transaction(async (tx) => {
+      await acquireTeamRosterLock(tx, teamId);
       const lockedTeams = await tx.$queryRaw<Array<{
         id: string;
         teamSize: number | null;
@@ -343,6 +346,7 @@ export const reviewTeamJoinRequest = async (params: {
         }) as Promise<TeamJoinRequestRow>;
       }
 
+      await assertTeamInvitationAllowed(tx, { teamId, playerIds: [request.registrantUserId], senderId: reviewerUserId }, now);
       const registrationId = buildTeamRegistrationId(teamId, request.registrantUserId);
       const existingRegistration = await tx.teamRegistrations.findUnique({
         where: {
@@ -354,6 +358,7 @@ export const reviewTeamJoinRequest = async (params: {
         select: { id: true, status: true, createdAt: true, createdBy: true },
       });
       const existingStatus = String(existingRegistration?.status ?? '').toUpperCase();
+      if (existingStatus === 'INVITED') throw Object.assign(new Error('The Player or guardian must resolve the current invitation before this request can be approved.'), { status: 409 });
       const alreadyCountsTowardCapacity = ACTIVE_CAPACITY_STATUSES.includes(existingStatus);
       const teamSize = Number.isFinite(Number(team.teamSize)) ? Math.max(0, Math.trunc(Number(team.teamSize))) : 0;
       if (teamSize > 0 && !alreadyCountsTowardCapacity) {

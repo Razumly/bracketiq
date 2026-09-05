@@ -1,3 +1,8 @@
+jest.mock('@/server/teams/teamInvitationRestrictions', () => {
+  const actual = jest.requireActual('@/server/teams/teamInvitationRestrictions');
+  return { ...actual, assertTeamInvitationAllowed: jest.fn() };
+});
+
 import {
   claimManagedPlayerProfile,
   createManagedPlayerProfile,
@@ -40,7 +45,9 @@ describe('managed player profiles', () => {
   it('requires explicit confirmation and matching verified email before a claim', async () => {
     const transaction = jest.fn(async (callback: (tx: any) => Promise<unknown>) => callback(tx));
     const tx = {
+      $executeRaw: jest.fn(),
       invites: {
+        findMany: jest.fn().mockResolvedValue([]),
         findUnique: jest.fn().mockResolvedValue({
           id: 'invite_1', type: 'TEAM', role: 'player', userId: 'profile_1', status: 'PENDING',
           email: 'jordan@example.com', linkVersion: 1, linkExpiresAt: new Date('2030-01-03T00:00:00.000Z'),
@@ -99,6 +106,7 @@ describe('managed player profiles', () => {
       isManagedPlayer: false,
     };
     const tx: any = {
+      $executeRaw: jest.fn(),
       invites: {
         findUnique: jest.fn().mockResolvedValue({
           id: 'invite_1', type: 'TEAM', role: 'player', userId: 'profile_1', status: 'PENDING',
@@ -163,7 +171,9 @@ describe('managed player profiles', () => {
 
   it('allows an authenticated account to claim a no-email profile with the signed link and confirmation', async () => {
     const tx: any = {
+      $executeRaw: jest.fn(),
       invites: {
+        findMany: jest.fn().mockResolvedValue([]),
         findUnique: jest.fn().mockResolvedValue({
           id: 'invite_no_email', type: 'TEAM', role: 'player', userId: 'profile_no_email', status: 'PENDING',
           email: null, linkVersion: 1, linkExpiresAt: new Date('2030-01-03T00:00:00.000Z'),
@@ -211,7 +221,9 @@ describe('managed player profiles', () => {
       blockedUserIds: [],
     };
     const tx: any = {
+      $executeRaw: jest.fn(),
       invites: {
+        findMany: jest.fn().mockResolvedValue([]),
         findUnique: jest.fn().mockResolvedValue({
           id: 'invite_unknown_age', type: 'TEAM', role: 'player', userId: source.id, status: 'PENDING',
           email: null, linkVersion: 1, linkExpiresAt: new Date('2030-01-03T00:00:00.000Z'),
@@ -261,9 +273,11 @@ describe('managed player profiles', () => {
 
   it('replaces only the latest unclaimed invitation during contact correction', async () => {
     const tx: any = {
+      $executeRaw: jest.fn(),
       userData: { findUnique: jest.fn().mockResolvedValue({ id: 'profile_1', isManagedPlayer: true, firstName: 'Jordan', lastName: 'Guest' }) },
       authUser: { findUnique: jest.fn().mockResolvedValue(null) },
       invites: {
+        findMany: jest.fn().mockResolvedValue([]),
         findFirst: jest.fn().mockResolvedValue({
           id: 'invite_old', teamId: 'team_1', userId: 'profile_1', role: 'player', type: 'TEAM', status: 'PENDING',
           email: 'old@example.com', playerEmail: 'old@example.com', phone: null, isMinor: false, dateOfBirth: new Date('1990-01-01T00:00:00.000Z'), guardianEmail: null,
@@ -297,7 +311,9 @@ describe('managed player profiles', () => {
 
   it('requires a guardian declaration and team acceptance before activating authority', async () => {
     const tx: any = {
+      $executeRaw: jest.fn(),
       invites: {
+        findMany: jest.fn().mockResolvedValue([]),
         findUnique: jest.fn().mockResolvedValue({
           id: 'invite_minor', type: 'TEAM', role: 'player', userId: 'child_1', status: 'PENDING',
           isMinor: true, guardianEmail: 'guardian@example.com', email: 'guardian@example.com',

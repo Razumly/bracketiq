@@ -259,7 +259,7 @@ private fun PlayerActionPopup(
                     Spacer(Modifier.width(8.dp))
                     Text("Unblock user")
                 }
-            } else {
+            } else if (player.hasActiveAccount) {
                 OutlinedButton(
                     onClick = onBlock,
                     modifier = Modifier.fillMaxWidth()

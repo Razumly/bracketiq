@@ -1,3 +1,6 @@
+import { assertTeamInvitationAllowed, TeamInvitationRestrictionError } from './teamInvitationRestrictions';
+import { findGuardianAuthority } from '@/server/guardianAuthority';
+import { expireTeamInvitation, isInvitationExpired, isPendingInvitation } from '@/server/teams/teamInvitationState';
 import { prisma } from '@/lib/prisma';
 import {
   upsertRegistrationQuestionResponse,
@@ -336,6 +339,7 @@ export const reserveTeamRegistrationSlot = async ({
   consentStatus,
   answersSnapshot,
   allowStartedWithoutPayment = false,
+  acceptedInvitation,
   now,
 }: {
   teamId: string | null;
@@ -349,6 +353,7 @@ export const reserveTeamRegistrationSlot = async ({
   consentStatus?: string | null;
   answersSnapshot?: RegistrationQuestionAnswerSnapshotItem[];
   allowStartedWithoutPayment?: boolean;
+  acceptedInvitation?: { id: string; guardianId: string };
   now: Date;
 }): Promise<RegistrationResult> => {
   const normalizedTeamId = normalizeId(teamId);
@@ -371,6 +376,16 @@ export const reserveTeamRegistrationSlot = async ({
     // This serializes capacity checks across every supported write path.
     if (typeof tx?.$executeRaw === 'function') {
       await acquireTeamRosterLock(tx, normalizedTeamId);
+    }
+    if (acceptedInvitation) {
+      if (!(await findGuardianAuthority(tx, acceptedInvitation.guardianId, normalizedUserId, now))) return { ok: false, status: 403, error: 'An active guardian relationship is required.' };
+      const invite = await tx.invites.findUnique({ where: { id: acceptedInvitation.id } });
+      if (!invite || invite.teamId !== normalizedTeamId || invite.userId !== normalizedUserId) return { ok: false, status: 409, error: 'Invitation changed.' };
+      if (isInvitationExpired(invite, now)) {
+        await expireTeamInvitation(tx, invite, now);
+        return { ok: false, status: 410, error: 'Invitation expired.' };
+      }
+      if (!isPendingInvitation(invite.status)) return { ok: false, status: 409, error: 'This invitation already has a final outcome.' };
     }
     const lockedTeams = await tx.$queryRaw<LockedTeamRow[]>`
       SELECT
@@ -396,6 +411,12 @@ export const reserveTeamRegistrationSlot = async ({
       return { ok: false, status: 409, error: 'This team is not open for registration.' };
     }
 
+    try {
+      await assertTeamInvitationAllowed(tx, { teamId: normalizedTeamId, playerIds: [normalizedUserId], senderId: actorUserId }, now);
+    } catch (error) {
+      if (error instanceof TeamInvitationRestrictionError) return { ok: false, status: error.status, error: error.message };
+      throw error;
+    }
     const priceCents = normalizeCents(team.registrationPriceCents);
     if (status === ACTIVE_MEMBER_STATUS && priceCents > 0) {
       return { ok: false, status: 402, error: 'Payment is required to register for this team.' };
@@ -597,6 +618,10 @@ export const reserveTeamRegistrationSlot = async ({
       });
       await syncTeamChatInTx(tx, normalizedTeamId, { previousMemberIds });
     }
+
+    if (acceptedInvitation) await tx.invites.update({ where: { id: acceptedInvitation.id }, data: {
+      status: 'ACCEPTED', finalizedAt: now, actedBy: actorUserId, actingGuardianId: acceptedInvitation.guardianId, updatedAt: now,
+    } });
 
     return {
       ok: true,

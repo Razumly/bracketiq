@@ -1,3 +1,4 @@
+import { withAccountState } from '@/server/accountState';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { parseAccountVisibility } from '@/lib/accountVisibility';
@@ -134,7 +135,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
   const [userWithDerivedTeamIds] = await withDerivedCanonicalTeamIds([user], prisma);
-  return NextResponse.json({ user: applyUserPrivacy(userWithDerivedTeamIds, visibilityContext) }, { status: 200 });
+  return NextResponse.json({ user: applyUserPrivacy((await withAccountState(prisma, [userWithDerivedTeamIds]))[0], visibilityContext) }, { status: 200 });
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

@@ -6,6 +6,9 @@ const requireSessionMock = jest.fn();
 const sendInviteEmailsMock = jest.fn();
 
 const txMock = {
+  $executeRaw: jest.fn(),
+  teamBlocks: { findMany: jest.fn() },
+  invitationRequests: { findUnique: jest.fn(), create: jest.fn() },
   canonicalTeams: {
     findUnique: jest.fn(),
   },
@@ -21,6 +24,8 @@ const txMock = {
     updateMany: jest.fn(),
   },
   invites: {
+    findMany: jest.fn(),
+    findUnique: jest.fn(),
     findFirst: jest.fn(),
     count: jest.fn(),
     create: jest.fn(),
@@ -67,7 +72,8 @@ import { POST } from '@/app/api/teams/[id]/member-invites/route';
 describe('/api/teams/[id]/member-invites POST', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    delete (txMock as any).userData;
+    (txMock as any).userData = { findMany: jest.fn().mockResolvedValue([]) };
+    txMock.invitationRequests.findUnique.mockResolvedValue(null);
     process.env.AUTH_SECRET = 'team-invite-route-test-secret';
     requireSessionMock.mockResolvedValue({ userId: 'manager_1', isAdmin: false });
     sendInviteEmailsMock.mockResolvedValue([]);
@@ -106,6 +112,8 @@ describe('/api/teams/[id]/member-invites POST', () => {
       },
     ]);
     txMock.invites.findFirst.mockResolvedValue(null);
+    txMock.invites.findMany.mockResolvedValue([]);
+    txMock.teamBlocks.findMany.mockResolvedValue([]);
     txMock.invites.count.mockResolvedValue(0);
     txMock.invites.create.mockResolvedValue({
       id: 'invite_1',
@@ -589,9 +597,43 @@ describe('/api/teams/[id]/member-invites POST', () => {
     );
   });
 
+  it('returns the saved decline when an earlier creation request is retried', async () => {
+    const closedInvite = {
+      id: 'old_attempt', type: 'TEAM', role: 'player', userId: 'free_1',
+      teamId: 'team_1', createdBy: 'manager_1', status: 'DECLINED',
+      idempotencyKey: 'first_add', finalizedAt: new Date('2026-08-01T10:00:00Z'),
+      linkVersion: 1, linkExpiresAt: new Date('2026-08-10T10:00:00Z'),
+    };
+    txMock.invitationRequests.findUnique.mockResolvedValue({ inviteId: closedInvite.id, fingerprint: null });
+    txMock.invites.findUnique.mockResolvedValue(closedInvite);
+    txMock.invites.update.mockImplementation(async ({ data }) => ({ ...closedInvite, ...data }));
+
+    const response = await POST(new NextRequest('http://localhost/api/teams/team_1/member-invites', {
+      method: 'POST',
+      body: JSON.stringify({ userId: 'free_1', idempotencyKey: 'first_add' }),
+    }), { params: Promise.resolve({ id: 'team_1' }) });
+
+    expect(response.status).toBe(201);
+    const result = await response.json();
+    expect(result.invite.id).toBe('old_attempt');
+    expect(result.invite.status).toBe('DECLINED');
+    expect(result.invite.finalizedAt).toBe('2026-08-01T10:00:00.000Z');
+    expect(result.team.pending).not.toContain('free_1');
+  });
+
+  it('rejects a direct invitation from a manager when the Player has blocked the Team', async () => {
+    txMock.teamBlocks.findMany.mockResolvedValue([{ id: 'team_block' }]);
+    (txMock as any).userData = { findUnique: jest.fn().mockResolvedValue({ dateOfBirth: new Date('1990-01-01') }), findMany: jest.fn().mockResolvedValue([]) };
+    const response = await POST(new NextRequest('http://localhost/api/teams/team_1/member-invites', {
+      method: 'POST', body: JSON.stringify({ userId: 'free_1' }),
+    }), { params: Promise.resolve({ id: 'team_1' }) });
+    expect(response.status).toBe(403);
+    expect((await response.json()).error).toContain('blocked');
+  });
+
   it('creates a managed player profile and returns a profile claim link', async () => {
     (txMock as any).userData = {
-      findFirst: jest.fn().mockResolvedValue(null),
+      findMany: jest.fn().mockResolvedValue([]),      findFirst: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockResolvedValue({
         id: 'managed_player_1',
         firstName: 'Jordan',

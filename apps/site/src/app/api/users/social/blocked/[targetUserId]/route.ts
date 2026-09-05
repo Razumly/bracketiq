@@ -5,6 +5,7 @@ import { applyNameCaseToUserFields } from '@/lib/nameCase';
 import { clearBlockReports } from '@/server/moderation';
 import { toSocialErrorResponse } from '@/app/api/users/social/shared';
 import { withDerivedCanonicalTeamIds } from '@/server/teams/teamMembership';
+import { acquireUserSocialLocks } from '@/server/repositories/locks';
 
 const removeId = (value: string[] | null | undefined, id: string): string[] => (
   Array.from(new Set((value ?? []).map((entry) => entry.trim()).filter(Boolean)))
@@ -24,6 +25,7 @@ export async function DELETE(
 
   try {
     const updatedUser = await prisma.$transaction(async (tx) => {
+      await acquireUserSocialLocks(tx, [session.userId, normalizedTargetUserId]);
       const actor = await tx.userData.findUnique({ where: { id: session.userId } });
       if (!actor) {
         throw new Response('User not found.', { status: 404 });

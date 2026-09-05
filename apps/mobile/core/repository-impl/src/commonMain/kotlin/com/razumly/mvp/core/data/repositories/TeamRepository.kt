@@ -22,6 +22,8 @@ import com.razumly.mvp.core.network.dto.EventCompliancePaymentSummaryDto
 import com.razumly.mvp.core.network.dto.EventComplianceRequiredDocumentDto
 import com.razumly.mvp.core.network.dto.EventComplianceUserSummaryDto
 import com.razumly.mvp.core.network.dto.EventTeamComplianceSummaryDto
+import com.razumly.mvp.core.network.dto.InvitationActionResponseDto
+import com.razumly.mvp.core.network.dto.InvitationRequestKeyDto
 import com.razumly.mvp.core.network.dto.InviteCreateDto
 import com.razumly.mvp.core.network.dto.InvitesResponseDto
 import com.razumly.mvp.core.network.dto.RegistrationQuestionAnswerSnapshotDto
@@ -50,6 +52,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -198,6 +201,10 @@ interface ITeamRepository : IMVPRepository {
         inviteType: String = "player",
     ): Result<Unit>
     suspend fun deleteInvite(inviteId: String): Result<Unit>
+    fun observeTeamInvitations(teamId: String): Flow<List<Invite>> = flowOf(emptyList())
+    suspend fun refreshTeamInvitations(teamId: String): Result<Unit> = Result.success(Unit)
+    suspend fun actOnTeamInvitation(inviteId: String, action: String, requestKey: String): Result<String> = Result.failure(UnsupportedOperationException())
+
     suspend fun acceptTeamInvite(inviteId: String, teamId: String): Result<Unit>
 }
 
@@ -868,7 +875,7 @@ class TeamRepository(
     }
 
     override suspend fun createTeam(newTeam: Team): Result<Team> {
-        val id = newId()
+        val id = newTeam.id.trim().takeIf(String::isNotBlank) ?: return Result.failure(IllegalArgumentException("A Team draft ID is required."))
         val currentUser = userRepository.currentUser.value.getOrThrow()
         val syncedNewTeam = newTeam.withSynchronizedMembership()
 
@@ -1186,6 +1193,9 @@ class TeamRepository(
         if (normalizedUserId == null && normalizedEmail == null && normalizedPhone == null && !shareOnly) {
             error("A user, email, phone, or share-only invite is required.")
         }
+        val requestIdentity = listOf(teamId, userId, email, roleInviteType, firstName, lastName, phone, shareOnly, isMinor, dateOfBirth, guardianEmail, existingInviteId).joinToString("\u001f")
+        val viewerId = userRepository.currentUser.value.getOrThrow().id
+        val requestKey = idempotencyKey ?: databaseService.getInviteDao.reserveOperation(viewerId, requestIdentity, newId())
         val encodedTeamId = normalizedTeamId.encodeURLQueryComponent()
         val response = api.post<TeamMemberInviteRequestDto, TeamMemberInviteResponseDto>(
             path = "api/teams/$encodedTeamId/member-invites",
@@ -1200,7 +1210,7 @@ class TeamRepository(
                 isMinor = isMinor,
                 dateOfBirth = dateOfBirth?.trim()?.takeIf(String::isNotBlank),
                 guardianEmail = guardianEmail?.trim()?.lowercase()?.takeIf(String::isNotBlank),
-                idempotencyKey = idempotencyKey?.trim()?.takeIf(String::isNotBlank),
+                idempotencyKey = requestKey,
                 existingInviteId = existingInviteId?.trim()?.takeIf(String::isNotBlank),
             ),
         )
@@ -1208,6 +1218,8 @@ class TeamRepository(
             ensureUsersCachedForTeam(updatedTeam)
             databaseService.getTeamDao.upsertTeamWithRelations(updatedTeam)
         }
+        response.invite?.let { databaseService.getInviteDao.saveInvitationAttempt(it.copy(viewerId = viewerId)) }
+        if (idempotencyKey == null) databaseService.getInviteDao.completeOperation(viewerId, requestIdentity, requestKey)
         TeamMemberInviteResult(
             invite = response.invite,
             shareUrl = response.shareUrl?.trim()?.takeIf(String::isNotBlank),
@@ -1222,25 +1234,42 @@ class TeamRepository(
         userId: String,
         createdBy: String,
         inviteType: String,
-    ): Result<Unit> = runCatching {
-        api.post<CreateInvitesRequestDto, InvitesResponseDto>(
-            path = "api/invites",
-            body = CreateInvitesRequestDto(
-                invites = listOf(
-                    InviteCreateDto(
-                        type = inviteType,
-                        status = "pending",
-                        teamId = teamId,
-                        userId = userId,
-                        createdBy = createdBy,
-                    )
-                )
-            ),
+    ): Result<Unit> = createTeamMemberInvite(teamId = teamId, userId = userId, roleInviteType = inviteType).map { Unit }
+
+    override fun observeTeamInvitations(teamId: String): Flow<List<Invite>> = userRepository.currentUser.flatMapLatest { user ->
+        val viewerId = user.getOrNull()?.id ?: return@flatMapLatest flowOf(emptyList())
+        databaseService.getInviteDao.observeTeamInvitations(teamId, viewerId)
+    }
+
+    override suspend fun refreshTeamInvitations(teamId: String): Result<Unit> = runCatching {
+        val viewerId = userRepository.currentUser.value.getOrThrow().id
+        val pending = fetchAllPendingInvitePages(api, type = "TEAM", teamId = teamId)
+        val history = fetchAllPendingInvitePages(api, type = "TEAM", teamId = teamId, history = true)
+        databaseService.getInviteDao.replaceTeamInvitations(teamId, (pending + history).map { it.copy(viewerId = viewerId) })
+    }
+
+    override suspend fun actOnTeamInvitation(inviteId: String, action: String, requestKey: String): Result<String> = runCatching {
+        val viewerId = userRepository.currentUser.value.getOrThrow().id
+        require(action in setOf("remind", "reinvite"))
+        val response = api.post<InvitationRequestKeyDto, InvitationActionResponseDto>(
+            "api/invites/${inviteId.encodeURLQueryComponent()}/$action", InvitationRequestKeyDto(requestKey),
         )
-    }.map { Unit }
+        try { response.invite?.let { databaseService.getInviteDao.saveInvitationAttempt(it.copy(viewerId = viewerId)) } }
+        catch (error: Exception) { throw IllegalStateException("The invitation is saved. Reload to update local data.", error) }
+        when {
+            response.delivery?.failed == true -> "The invitation is saved. Delivery failed. Use Remind to try delivery again."
+            response.delivery?.status == "DISPATCHING" -> "The delivery request is saved. Its result is not yet confirmed."
+            response.delivery?.status == "SKIPPED" -> "The invitation is saved. No message was sent."
+            action == "remind" -> "Reminder sent."
+            else -> "New invitation saved."
+        }
+    }
 
     override suspend fun deleteInvite(inviteId: String): Result<Unit> = runCatching {
-        api.deleteNoResponse("api/invites/$inviteId")
+        val viewerId = userRepository.currentUser.value.getOrThrow().id
+        val response = api.delete<JsonObject, InvitationActionResponseDto>("api/invites/${inviteId.encodeURLQueryComponent()}", JsonObject(emptyMap()))
+        try { response.invite?.let { databaseService.getInviteDao.saveInvitationAttempt(it.copy(viewerId = viewerId)) } }
+        catch (error: Exception) { throw IllegalStateException("The invitation was cancelled. Reload to update local data.", error) }
     }
 
     override suspend fun acceptTeamInvite(inviteId: String, teamId: String): Result<Unit> = runCatching {

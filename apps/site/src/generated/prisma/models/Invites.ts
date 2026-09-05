@@ -40,6 +40,9 @@ export type InvitesMinAggregateOutputType = {
   updatedAt: Date | null
   sentAt: Date | null
   finalizedAt: Date | null
+  actedBy: string | null
+  actingGuardianId: string | null
+  declineBlockScope: string | null
   type: string | null
   email: string | null
   playerEmail: string | null
@@ -69,6 +72,9 @@ export type InvitesMaxAggregateOutputType = {
   updatedAt: Date | null
   sentAt: Date | null
   finalizedAt: Date | null
+  actedBy: string | null
+  actingGuardianId: string | null
+  declineBlockScope: string | null
   type: string | null
   email: string | null
   playerEmail: string | null
@@ -98,6 +104,9 @@ export type InvitesCountAggregateOutputType = {
   updatedAt: number
   sentAt: number
   finalizedAt: number
+  actedBy: number
+  actingGuardianId: number
+  declineBlockScope: number
   type: number
   email: number
   playerEmail: number
@@ -138,6 +147,9 @@ export type InvitesMinAggregateInputType = {
   updatedAt?: true
   sentAt?: true
   finalizedAt?: true
+  actedBy?: true
+  actingGuardianId?: true
+  declineBlockScope?: true
   type?: true
   email?: true
   playerEmail?: true
@@ -167,6 +179,9 @@ export type InvitesMaxAggregateInputType = {
   updatedAt?: true
   sentAt?: true
   finalizedAt?: true
+  actedBy?: true
+  actingGuardianId?: true
+  declineBlockScope?: true
   type?: true
   email?: true
   playerEmail?: true
@@ -196,6 +211,9 @@ export type InvitesCountAggregateInputType = {
   updatedAt?: true
   sentAt?: true
   finalizedAt?: true
+  actedBy?: true
+  actingGuardianId?: true
+  declineBlockScope?: true
   type?: true
   email?: true
   playerEmail?: true
@@ -313,6 +331,9 @@ export type InvitesGroupByOutputType = {
   updatedAt: Date | null
   sentAt: Date | null
   finalizedAt: Date | null
+  actedBy: string | null
+  actingGuardianId: string | null
+  declineBlockScope: string | null
   type: string
   email: string | null
   playerEmail: string | null
@@ -366,6 +387,9 @@ export type InvitesWhereInput = {
   updatedAt?: Prisma.DateTimeNullableFilter<"Invites"> | Date | string | null
   sentAt?: Prisma.DateTimeNullableFilter<"Invites"> | Date | string | null
   finalizedAt?: Prisma.DateTimeNullableFilter<"Invites"> | Date | string | null
+  actedBy?: Prisma.StringNullableFilter<"Invites"> | string | null
+  actingGuardianId?: Prisma.StringNullableFilter<"Invites"> | string | null
+  declineBlockScope?: Prisma.StringNullableFilter<"Invites"> | string | null
   type?: Prisma.StringFilter<"Invites"> | string
   email?: Prisma.StringNullableFilter<"Invites"> | string | null
   playerEmail?: Prisma.StringNullableFilter<"Invites"> | string | null
@@ -396,6 +420,9 @@ export type InvitesOrderByWithRelationInput = {
   updatedAt?: Prisma.SortOrderInput | Prisma.SortOrder
   sentAt?: Prisma.SortOrderInput | Prisma.SortOrder
   finalizedAt?: Prisma.SortOrderInput | Prisma.SortOrder
+  actedBy?: Prisma.SortOrderInput | Prisma.SortOrder
+  actingGuardianId?: Prisma.SortOrderInput | Prisma.SortOrder
+  declineBlockScope?: Prisma.SortOrderInput | Prisma.SortOrder
   type?: Prisma.SortOrder
   email?: Prisma.SortOrderInput | Prisma.SortOrder
   playerEmail?: Prisma.SortOrderInput | Prisma.SortOrder
@@ -429,6 +456,9 @@ export type InvitesWhereUniqueInput = Prisma.AtLeast<{
   updatedAt?: Prisma.DateTimeNullableFilter<"Invites"> | Date | string | null
   sentAt?: Prisma.DateTimeNullableFilter<"Invites"> | Date | string | null
   finalizedAt?: Prisma.DateTimeNullableFilter<"Invites"> | Date | string | null
+  actedBy?: Prisma.StringNullableFilter<"Invites"> | string | null
+  actingGuardianId?: Prisma.StringNullableFilter<"Invites"> | string | null
+  declineBlockScope?: Prisma.StringNullableFilter<"Invites"> | string | null
   type?: Prisma.StringFilter<"Invites"> | string
   email?: Prisma.StringNullableFilter<"Invites"> | string | null
   playerEmail?: Prisma.StringNullableFilter<"Invites"> | string | null
@@ -459,6 +489,9 @@ export type InvitesOrderByWithAggregationInput = {
   updatedAt?: Prisma.SortOrderInput | Prisma.SortOrder
   sentAt?: Prisma.SortOrderInput | Prisma.SortOrder
   finalizedAt?: Prisma.SortOrderInput | Prisma.SortOrder
+  actedBy?: Prisma.SortOrderInput | Prisma.SortOrder
+  actingGuardianId?: Prisma.SortOrderInput | Prisma.SortOrder
+  declineBlockScope?: Prisma.SortOrderInput | Prisma.SortOrder
   type?: Prisma.SortOrder
   email?: Prisma.SortOrderInput | Prisma.SortOrder
   playerEmail?: Prisma.SortOrderInput | Prisma.SortOrder
@@ -497,6 +530,9 @@ export type InvitesScalarWhereWithAggregatesInput = {
   updatedAt?: Prisma.DateTimeNullableWithAggregatesFilter<"Invites"> | Date | string | null
   sentAt?: Prisma.DateTimeNullableWithAggregatesFilter<"Invites"> | Date | string | null
   finalizedAt?: Prisma.DateTimeNullableWithAggregatesFilter<"Invites"> | Date | string | null
+  actedBy?: Prisma.StringNullableWithAggregatesFilter<"Invites"> | string | null
+  actingGuardianId?: Prisma.StringNullableWithAggregatesFilter<"Invites"> | string | null
+  declineBlockScope?: Prisma.StringNullableWithAggregatesFilter<"Invites"> | string | null
   type?: Prisma.StringWithAggregatesFilter<"Invites"> | string
   email?: Prisma.StringNullableWithAggregatesFilter<"Invites"> | string | null
   playerEmail?: Prisma.StringNullableWithAggregatesFilter<"Invites"> | string | null
@@ -527,6 +563,9 @@ export type InvitesCreateInput = {
   updatedAt?: Date | string | null
   sentAt?: Date | string | null
   finalizedAt?: Date | string | null
+  actedBy?: string | null
+  actingGuardianId?: string | null
+  declineBlockScope?: string | null
   type: string
   email?: string | null
   playerEmail?: string | null
@@ -557,6 +596,9 @@ export type InvitesUncheckedCreateInput = {
   updatedAt?: Date | string | null
   sentAt?: Date | string | null
   finalizedAt?: Date | string | null
+  actedBy?: string | null
+  actingGuardianId?: string | null
+  declineBlockScope?: string | null
   type: string
   email?: string | null
   playerEmail?: string | null
@@ -587,6 +629,9 @@ export type InvitesUpdateInput = {
   updatedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   sentAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   finalizedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  actedBy?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  actingGuardianId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  declineBlockScope?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   type?: Prisma.StringFieldUpdateOperationsInput | string
   email?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   playerEmail?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -617,6 +662,9 @@ export type InvitesUncheckedUpdateInput = {
   updatedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   sentAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   finalizedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  actedBy?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  actingGuardianId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  declineBlockScope?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   type?: Prisma.StringFieldUpdateOperationsInput | string
   email?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   playerEmail?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -647,6 +695,9 @@ export type InvitesCreateManyInput = {
   updatedAt?: Date | string | null
   sentAt?: Date | string | null
   finalizedAt?: Date | string | null
+  actedBy?: string | null
+  actingGuardianId?: string | null
+  declineBlockScope?: string | null
   type: string
   email?: string | null
   playerEmail?: string | null
@@ -677,6 +728,9 @@ export type InvitesUpdateManyMutationInput = {
   updatedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   sentAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   finalizedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  actedBy?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  actingGuardianId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  declineBlockScope?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   type?: Prisma.StringFieldUpdateOperationsInput | string
   email?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   playerEmail?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -707,6 +761,9 @@ export type InvitesUncheckedUpdateManyInput = {
   updatedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   sentAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   finalizedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  actedBy?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  actingGuardianId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  declineBlockScope?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   type?: Prisma.StringFieldUpdateOperationsInput | string
   email?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   playerEmail?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -737,6 +794,9 @@ export type InvitesCountOrderByAggregateInput = {
   updatedAt?: Prisma.SortOrder
   sentAt?: Prisma.SortOrder
   finalizedAt?: Prisma.SortOrder
+  actedBy?: Prisma.SortOrder
+  actingGuardianId?: Prisma.SortOrder
+  declineBlockScope?: Prisma.SortOrder
   type?: Prisma.SortOrder
   email?: Prisma.SortOrder
   playerEmail?: Prisma.SortOrder
@@ -771,6 +831,9 @@ export type InvitesMaxOrderByAggregateInput = {
   updatedAt?: Prisma.SortOrder
   sentAt?: Prisma.SortOrder
   finalizedAt?: Prisma.SortOrder
+  actedBy?: Prisma.SortOrder
+  actingGuardianId?: Prisma.SortOrder
+  declineBlockScope?: Prisma.SortOrder
   type?: Prisma.SortOrder
   email?: Prisma.SortOrder
   playerEmail?: Prisma.SortOrder
@@ -800,6 +863,9 @@ export type InvitesMinOrderByAggregateInput = {
   updatedAt?: Prisma.SortOrder
   sentAt?: Prisma.SortOrder
   finalizedAt?: Prisma.SortOrder
+  actedBy?: Prisma.SortOrder
+  actingGuardianId?: Prisma.SortOrder
+  declineBlockScope?: Prisma.SortOrder
   type?: Prisma.SortOrder
   email?: Prisma.SortOrder
   playerEmail?: Prisma.SortOrder
@@ -844,6 +910,9 @@ export type InvitesSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs 
   updatedAt?: boolean
   sentAt?: boolean
   finalizedAt?: boolean
+  actedBy?: boolean
+  actingGuardianId?: boolean
+  declineBlockScope?: boolean
   type?: boolean
   email?: boolean
   playerEmail?: boolean
@@ -874,6 +943,9 @@ export type InvitesSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Exten
   updatedAt?: boolean
   sentAt?: boolean
   finalizedAt?: boolean
+  actedBy?: boolean
+  actingGuardianId?: boolean
+  declineBlockScope?: boolean
   type?: boolean
   email?: boolean
   playerEmail?: boolean
@@ -904,6 +976,9 @@ export type InvitesSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Exten
   updatedAt?: boolean
   sentAt?: boolean
   finalizedAt?: boolean
+  actedBy?: boolean
+  actingGuardianId?: boolean
+  declineBlockScope?: boolean
   type?: boolean
   email?: boolean
   playerEmail?: boolean
@@ -934,6 +1009,9 @@ export type InvitesSelectScalar = {
   updatedAt?: boolean
   sentAt?: boolean
   finalizedAt?: boolean
+  actedBy?: boolean
+  actingGuardianId?: boolean
+  declineBlockScope?: boolean
   type?: boolean
   email?: boolean
   playerEmail?: boolean
@@ -958,7 +1036,7 @@ export type InvitesSelectScalar = {
   idempotencyKey?: boolean
 }
 
-export type InvitesOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "sentAt" | "finalizedAt" | "type" | "email" | "playerEmail" | "phone" | "status" | "staffTypes" | "role" | "isAssigned" | "eventId" | "organizationId" | "teamId" | "userId" | "createdBy" | "firstName" | "lastName" | "linkVersion" | "linkExpiresAt" | "claimedBy" | "isMinor" | "dateOfBirth" | "guardianEmail" | "idempotencyKey", ExtArgs["result"]["invites"]>
+export type InvitesOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "sentAt" | "finalizedAt" | "actedBy" | "actingGuardianId" | "declineBlockScope" | "type" | "email" | "playerEmail" | "phone" | "status" | "staffTypes" | "role" | "isAssigned" | "eventId" | "organizationId" | "teamId" | "userId" | "createdBy" | "firstName" | "lastName" | "linkVersion" | "linkExpiresAt" | "claimedBy" | "isMinor" | "dateOfBirth" | "guardianEmail" | "idempotencyKey", ExtArgs["result"]["invites"]>
 
 export type $InvitesPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "Invites"
@@ -969,6 +1047,9 @@ export type $InvitesPayload<ExtArgs extends runtime.Types.Extensions.InternalArg
     updatedAt: Date | null
     sentAt: Date | null
     finalizedAt: Date | null
+    actedBy: string | null
+    actingGuardianId: string | null
+    declineBlockScope: string | null
     type: string
     email: string | null
     playerEmail: string | null
@@ -1419,6 +1500,9 @@ export interface InvitesFieldRefs {
   readonly updatedAt: Prisma.FieldRef<"Invites", 'DateTime'>
   readonly sentAt: Prisma.FieldRef<"Invites", 'DateTime'>
   readonly finalizedAt: Prisma.FieldRef<"Invites", 'DateTime'>
+  readonly actedBy: Prisma.FieldRef<"Invites", 'String'>
+  readonly actingGuardianId: Prisma.FieldRef<"Invites", 'String'>
+  readonly declineBlockScope: Prisma.FieldRef<"Invites", 'String'>
   readonly type: Prisma.FieldRef<"Invites", 'String'>
   readonly email: Prisma.FieldRef<"Invites", 'String'>
   readonly playerEmail: Prisma.FieldRef<"Invites", 'String'>

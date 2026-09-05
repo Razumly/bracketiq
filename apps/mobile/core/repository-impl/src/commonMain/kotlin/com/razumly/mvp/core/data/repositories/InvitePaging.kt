@@ -10,13 +10,16 @@ private const val INVITE_PAGE_LIMIT = 100
 /** Fetches the complete actionable invite set before callers replace Room state. */
 internal suspend fun fetchAllPendingInvitePages(
     api: MvpApiClient,
-    userId: String,
+    userId: String? = null,
     type: String? = null,
+    teamId: String? = null,
+    history: Boolean = false,
 ): List<Invite> {
     val baseParams = buildList {
-        add("userId=${userId.encodeURLQueryComponent()}")
+        userId?.let { add("userId=${it.encodeURLQueryComponent()}") }
+        teamId?.let { add("teamId=${it.encodeURLQueryComponent()}") }
         type?.let { inviteType -> add("type=${inviteType.encodeURLQueryComponent()}") }
-        add("status=PENDING")
+        add(if (history) "history=true" else "status=PENDING")
         add("limit=$INVITE_PAGE_LIMIT")
     }
     val invitesById = linkedMapOf<String, Invite>()

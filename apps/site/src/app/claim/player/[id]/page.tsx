@@ -5,6 +5,7 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Alert, Button, Checkbox, Center, Container, Loader, Paper, Stack, Text, TextInput, Title } from '@mantine/core';
 import { useApp } from '@/app/providers';
 import { apiRequest } from '@/lib/apiClient';
+import TeamInvitationRecipientActions from '@/components/ui/TeamInvitationRecipientActions';
 
 type Preview = {
   available: boolean;
@@ -25,6 +26,8 @@ export default function ManagedPlayerClaimPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { isAuthenticated, loading: authLoading } = useApp();
+  const [recipientRefreshKey, setRecipientRefreshKey] = useState(0);
+  const [declined, setDeclined] = useState(false);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [guardianDeclared, setGuardianDeclared] = useState(false);
@@ -53,8 +56,8 @@ export default function ManagedPlayerClaimPage() {
     return () => { cancelled = true; };
   }, [params.id, signedQuery, isAuthenticated]);
 
-  const claim = async () => {
-    if (!preview || !confirmed) return;
+  const claim = async (review = false) => {
+    if (!preview || (!review && !confirmed)) return;
     setClaiming(true);
     setError(null);
     try {
@@ -63,7 +66,7 @@ export default function ManagedPlayerClaimPage() {
         body: {
           inviteId: preview.invite.id,
           confirmation: true,
-          ...(preview.invite.isMinor ? { guardianDeclaration: guardianDeclared, acceptTeamInvitation: true } : {}),
+          ...(preview.invite.isMinor ? { guardianDeclaration: guardianDeclared, acceptTeamInvitation: !review, reviewGuardianInvitation: review } : {}),
           ...(dateOfBirth ? { dateOfBirth } : {}),
         },
       });
@@ -82,7 +85,9 @@ export default function ManagedPlayerClaimPage() {
         setClaiming(false);
         return;
       }
-      if (result.status === 'GUARDIAN_ACCEPTED') {
+      if (result.status === 'GUARDIAN_READY') {
+        setRecipientRefreshKey((key) => key + 1); setClaiming(false);
+      } else if (result.status === 'GUARDIAN_ACCEPTED') {
         setAccepted(true);
         setClaiming(false);
       } else if (preview.team?.id) {
@@ -97,6 +102,7 @@ export default function ManagedPlayerClaimPage() {
   };
 
   if (loading || authLoading) return <Center mih="70vh"><Loader /></Center>;
+  if (declined) return <Container size="xs" py={64}><Text>Invitation declined.</Text><Button onClick={() => router.replace('/profile')}>Open profile</Button></Container>;
   if (accepted) return <Container size="xs" py={64}><Stack>
     <Title order={1}>Invitation accepted</Title>
     <Text>{preview?.profile.displayName} has joined {preview?.team?.name ?? 'the team'}. Their Player profile remains separate from yours.</Text>
@@ -136,6 +142,10 @@ export default function ManagedPlayerClaimPage() {
                 </> : null}
                 <Checkbox checked={confirmed} onChange={(event) => setConfirmed(event.currentTarget.checked)} label={preview.invite.isMinor ? `I accept this team invitation for ${preview.profile.displayName}.` : 'I confirm that this profile belongs to me.'} />
                 <Button onClick={() => { void claim(); }} loading={claiming} disabled={!confirmed || (preview.invite.guardianSetupRequired && !guardianDeclared) || (needsBirthdate && !dateOfBirth)}>{preview.invite.isMinor ? 'Accept team invitation' : 'Claim profile'}</Button>
+                {preview.invite.isMinor ? <>
+                  {preview.invite.guardianSetupRequired ? <Button variant="subtle" disabled={!guardianDeclared || claiming} onClick={() => { void claim(true); }}>Confirm guardian relationship to review decline options</Button> : null}
+                  <TeamInvitationRecipientActions inviteId={params.id} refreshKey={recipientRefreshKey} onSaved={() => setDeclined(true)} />
+                </> : null}
               </>
             )) : (
               <Stack gap="xs">

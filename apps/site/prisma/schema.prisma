@@ -1179,6 +1179,9 @@ model Invites {
   updatedAt      DateTime?
   sentAt         DateTime?
   finalizedAt    DateTime?
+  actedBy        String?
+  actingGuardianId String?
+  declineBlockScope String?
   type           String
   email          String?
   // For minor players, `email` is the guardian delivery address.
@@ -1209,6 +1212,52 @@ model Invites {
   @@index([status, updatedAt])
   @@index([linkExpiresAt, status])
   @@index([teamId, createdBy, idempotencyKey])
+}
+
+model TeamBlocks {
+  id        String   @id
+  playerId  String
+  teamId    String
+  createdBy String
+  createdAt DateTime @default(now())
+
+  @@unique([playerId, teamId])
+  @@index([teamId, playerId])
+}
+
+model InviteDeliveries {
+  id             String   @id
+  inviteId       String
+  idempotencyKey String
+  kind           String
+  requestedBy    String?
+  status         String
+  createdAt      DateTime @default(now())
+  completedAt    DateTime?
+  sentAt         DateTime?
+  failureCode    String?
+
+  @@unique([inviteId, idempotencyKey])
+  @@index([inviteId, createdAt, id])
+}
+
+model TeamCreationRequests {
+  teamId      String   @id
+  senderId    String
+  fingerprint String
+  createdAt   DateTime @default(now())
+}
+
+model InvitationRequests {
+  teamId       String
+  senderId     String
+  requestKey   String
+  inviteId     String
+  fingerprint  String?
+  createdAt    DateTime @default(now())
+
+  @@id([teamId, senderId, requestKey])
+  @@index([inviteId])
 }
 
 model UserProfileClaims {

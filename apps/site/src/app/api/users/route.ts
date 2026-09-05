@@ -1,3 +1,4 @@
+import { withAccountState } from '@/server/accountState';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
@@ -64,7 +65,7 @@ export async function GET(req: NextRequest) {
       canViewPendingRosterIdentity(visibilityContext, user.id),
     );
     return NextResponse.json(
-      { users: applyUserPrivacyList(visibleOrderedUsers, visibilityContext) },
+      { users: applyUserPrivacyList(await withAccountState(prisma, visibleOrderedUsers), visibilityContext) },
       { status: 200 },
     );
   }
@@ -114,7 +115,7 @@ export async function GET(req: NextRequest) {
     .filter((user) => isVisibleInGenericSearch(user, visibilityContext) && !excludedEmailUserIds.has(user.id))
     .slice(0, 20);
   return NextResponse.json(
-    { users: applyUserPrivacyList(filteredUsers, visibilityContext) },
+    { users: applyUserPrivacyList(await withAccountState(prisma, filteredUsers), visibilityContext) },
     { status: 200 },
   );
 }

@@ -56,6 +56,7 @@ export const reserveChildTeamRegistrationForGuardian = async ({
   actorUserId,
   teamRow,
   answersSnapshot,
+  acceptedInvitation,
   now = new Date(),
 }: {
   teamId: string;
@@ -64,6 +65,7 @@ export const reserveChildTeamRegistrationForGuardian = async ({
   actorUserId: string;
   teamRow?: Record<string, any> | null;
   answersSnapshot?: RegistrationQuestionAnswerSnapshotItem[];
+  acceptedInvitation?: { id: string; guardianId: string };
   now?: Date;
 }): Promise<ChildTeamRegistrationResult> => {
   const resolvedTeamRow = teamRow ?? await loadCanonicalTeamById(teamId);
@@ -125,6 +127,7 @@ export const reserveChildTeamRegistrationForGuardian = async ({
     consentStatus: nextConsentStatus,
     answersSnapshot,
     allowStartedWithoutPayment: !requiresPayment,
+    acceptedInvitation,
     now,
   });
   if (!result.ok) {

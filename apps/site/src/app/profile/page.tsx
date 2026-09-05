@@ -1140,6 +1140,7 @@ function ProfilePageContent() {
 
   const runBlockAction = useCallback(
     async (targetUser: UserData, currentlyBlocked: boolean) => {
+      if (!currentlyBlocked && targetUser.hasActiveAccount !== true) return;
       const targetUserId = targetUser.$id;
       const targetName = getUserFullName(targetUser);
       setSocialActionUserId(targetUserId);
@@ -3183,7 +3184,7 @@ function ProfilePageContent() {
                         >
                           {isFollowing ? "Unfollow" : "Follow"}
                         </Button>
-                        {!isBlocked && (
+                        {!isBlocked && candidate.hasActiveAccount === true && (
                           <Button
                             size="xs"
                             variant="light"

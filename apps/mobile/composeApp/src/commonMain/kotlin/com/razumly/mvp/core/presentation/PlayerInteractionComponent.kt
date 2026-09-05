@@ -58,6 +58,7 @@ class DefaultPlayerInteractionComponent(
     }
 
     override fun blockUser(user: UserData, leaveSharedChats: Boolean) {
+        if (!user.hasActiveAccount) return
         launchPlayerAction("Blocking User ...") {
             userRepository.blockUser(user.id, leaveSharedChats)
         }

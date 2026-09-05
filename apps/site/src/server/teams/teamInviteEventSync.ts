@@ -613,8 +613,14 @@ export const rollbackTeamInviteEventSyncs = async (
     return;
   }
 
+  await lockTeamRegistrationEvents(tx, rows.map((row) => row.eventId));
+  const completedEvents = await tx.events.findMany({
+    where: { id: { in: uniqueStrings(rows.map((row) => row.eventId)) }, end: { lte: now } },
+    select: { id: true },
+  }) as Array<{ id: string }>;
+  const completedIds = new Set(completedEvents.map((event) => event.id));
   const eventTeamsDelegate = getEventTeamsDelegate(tx);
-  await Promise.all(rows.map(async (row) => {
+  await Promise.all(rows.filter((row) => !completedIds.has(row.eventId)).map(async (row) => {
     const eventTeam = await eventTeamsDelegate?.findUnique?.({
       where: { id: row.eventTeamId },
       select: {

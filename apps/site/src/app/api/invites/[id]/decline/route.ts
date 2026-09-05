@@ -4,6 +4,7 @@ import { requireSession } from '@/lib/permissions';
 import { normalizeInviteType } from '@/lib/staff';
 import { declineTeamInviteWithGuardianRules } from '@/server/teams/teamGuardianInvites';
 import { acquireEventLock } from '@/server/repositories/locks';
+import { declineTeamInvitationSchema } from '@/contracts/teamInvitations';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,12 +20,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const now = new Date();
   const inviteType = normalizeInviteType(invite.type);
   if (inviteType === 'TEAM' && invite.teamId && invite.userId) {
-    const result = await declineTeamInviteWithGuardianRules({
-      invite,
-      session,
-      now,
-    });
-    return NextResponse.json(result.body, { status: result.status });
+    const body = await req.text();
+    let input: unknown = {};
+    try { input = body ? JSON.parse(body) : {}; } catch { return NextResponse.json({ error: 'Invalid input' }, { status: 400 }); }
+    const parsed = declineTeamInvitationSchema.safeParse(input);
+    if (!parsed.success) return NextResponse.json({ error: 'Invalid input', details: parsed.error.flatten() }, { status: 400 });
+    try {
+      const result = await declineTeamInviteWithGuardianRules({ invite, session, now, input: parsed.data });
+      return NextResponse.json(result.body, { status: result.status });
+    } catch (error) {
+      if (error instanceof Response) return NextResponse.json({ error: await error.text(), saved: false }, { status: error.status });
+      console.error('Invitation decline failed', error);
+      return NextResponse.json({ error: 'The invitation and block were not saved. Try again.', saved: false }, { status: 500 });
+    }
   }
 
   const eventStaffId = inviteType === 'STAFF'

@@ -1,3 +1,7 @@
+import { acquireTeamRosterLock } from '@/server/repositories/locks';
+import { invitationRequestFingerprint, InvitationRequestError } from '@/server/teams/teamInvitationRequests';
+import { TeamInvitationRestrictionError } from '@/server/teams/teamInvitationRestrictions';
+import { withRosterInvitationViews } from '@/server/teams/teamRosterInvitationViews';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
@@ -274,7 +278,7 @@ export async function GET(req: NextRequest) {
     }))
     .map((team) => (includeAdminOnly ? team : protectAffiliateRow(team, 'team')));
   return NextResponse.json({
-    teams: responseTeams,
+    teams: await withRosterInvitationViews(prisma, responseTeams),
     pagination: {
       limit: normalizedLimit,
       offset: normalizedOffset,
@@ -388,7 +392,20 @@ export async function POST(req: NextRequest) {
 
   if (canonicalTeamsDelegate?.create && teamRegistrationsDelegate?.upsert && teamStaffAssignmentsDelegate?.upsert) {
     const now = new Date();
-    await prisma.$transaction(async (tx) => {
+    try {
+      await prisma.$transaction(async (tx) => {
+      await acquireTeamRosterLock(tx, data.id);
+      const fingerprint = invitationRequestFingerprint(data);
+      const receipt = await tx.teamCreationRequests.findUnique({ where: { teamId: data.id } });
+      if (receipt) {
+        if (receipt.senderId !== session.userId || receipt.fingerprint !== fingerprint) {
+          throw new InvitationRequestError('This Team draft was already saved with different details. Open the saved Team to make changes.');
+        }
+        if (!await tx.canonicalTeams.findUnique({ where: { id: data.id }, select: { id: true } })) {
+          throw new InvitationRequestError('The saved Team no longer exists. Start a new Team draft.', 410);
+        }
+        return;
+      }
       await tx.canonicalTeams.create({
         data: {
           id: data.id,
@@ -428,7 +445,14 @@ export async function POST(req: NextRequest) {
         playerRegistrations: data.playerRegistrations,
         now,
       });
-    });
+      await tx.teamCreationRequests.create({ data: { teamId: data.id, senderId: session.userId, fingerprint } });
+      });
+    } catch (error) {
+      if (error instanceof InvitationRequestError || error instanceof TeamInvitationRestrictionError) {
+        return NextResponse.json({ error: error.message }, { status: error.status });
+      }
+      throw error;
+    }
     responseTeam = await loadCanonicalTeamById(data.id, prisma) as Record<string, any> | null;
     if (createdPendingInvites.length) {
       inviteDelivery = {
@@ -437,9 +461,9 @@ export async function POST(req: NextRequest) {
         inviteIds: createdPendingInvites.map((invite) => invite.id),
       };
       try {
-        const deliveredInvites = await sendInviteEmails(createdPendingInvites, getRequestOrigin(req));
+        const deliveredInvites = await sendInviteEmails(createdPendingInvites, getRequestOrigin(req), { requestedBy: session.userId, requestedByIsAdmin: session.isAdmin });
         inviteDelivery.failed = deliveredInvites.some(
-          (invite) => String(invite.status ?? '').toUpperCase() === 'FAILED',
+          (invite) => invite.delivery?.failed === true,
         );
       } catch (error) {
         // The database transaction already committed. Keep that result and

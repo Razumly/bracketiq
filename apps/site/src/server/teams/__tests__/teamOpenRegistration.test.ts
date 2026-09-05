@@ -7,6 +7,11 @@ const prismaMock = {
 const syncTeamChatInTxMock = jest.fn();
 const syncCanonicalTeamFutureEventSnapshotsMock = jest.fn();
 
+jest.mock('@/server/teams/teamInvitationRestrictions', () => {
+  const actual = jest.requireActual('@/server/teams/teamInvitationRestrictions');
+  return { ...actual, assertTeamInvitationAllowed: jest.fn() };
+});
+
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 jest.mock('@/lib/stripeConnectAccounts', () => ({
   resolveConnectedAccountId: jest.fn().mockResolvedValue(null),

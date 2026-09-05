@@ -72,6 +72,10 @@ export const acquireFieldLocks = async (
   fieldIds: string[],
 ): Promise<void> => acquireResourceLocks(client, "field", fieldIds);
 
+export const acquireUserSocialLocks = async (client: PrismaLike, userIds: string[]): Promise<void> => (
+  acquireResourceLocks(client, 'user-social', userIds)
+);
+
 export const acquireTimeSlotLocks = async (
   client: PrismaLike,
   timeSlotIds: string[],

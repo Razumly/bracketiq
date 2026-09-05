@@ -783,6 +783,7 @@ internal class InvitePushInvalidationRefresher(
     }
 
     private suspend fun refreshInviteById(inviteId: String) {
+        val viewerId = userDataSource.getUserId().first().trim()
         val canonicalInvite = try {
             api.get<InviteResponseDto>("api/invites/${inviteId.encodeURLPathPart()}").invite
         } catch (throwable: ApiException) {
@@ -811,14 +812,8 @@ internal class InvitePushInvalidationRefresher(
             return
         }
 
-        val canonicalStatus = canonicalInvite.status?.trim()?.uppercase() ?: "PENDING"
-        if (canonicalStatus !in setOf("PENDING", "SENT")) {
-            deleteCachedInvite(canonicalInvite.id)
-            return
-        }
-
         try {
-            databaseService.getInviteDao.upsertInvite(canonicalInvite)
+            databaseService.getInviteDao.saveInvitationAttempt(canonicalInvite.copy(viewerId = viewerId))
         } catch (throwable: Throwable) {
             if (throwable is CancellationException) throw throwable
             Napier.w(
@@ -830,8 +825,7 @@ internal class InvitePushInvalidationRefresher(
 
     private suspend fun deleteCachedInvite(inviteId: String) {
         try {
-            // A verified 404 or a canonical terminal status means this row is
-            // no longer actionable. Never remove it for transient/auth errors.
+            // Remove a cached row only after an authorized read returns 404.
             databaseService.getInviteDao.deleteInviteById(inviteId)
         } catch (throwable: Throwable) {
             if (throwable is CancellationException) throw throwable

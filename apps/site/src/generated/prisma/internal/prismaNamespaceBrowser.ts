@@ -72,6 +72,10 @@ export const ModelName = {
   SensitiveUserData: 'SensitiveUserData',
   AuthMfaChallenges: 'AuthMfaChallenges',
   Invites: 'Invites',
+  TeamBlocks: 'TeamBlocks',
+  InviteDeliveries: 'InviteDeliveries',
+  TeamCreationRequests: 'TeamCreationRequests',
+  InvitationRequests: 'InvitationRequests',
   UserProfileClaims: 'UserProfileClaims',
   UserProfileMerges: 'UserProfileMerges',
   UserProfileContactCorrections: 'UserProfileContactCorrections',
@@ -693,6 +697,9 @@ export const InvitesScalarFieldEnum = {
   updatedAt: 'updatedAt',
   sentAt: 'sentAt',
   finalizedAt: 'finalizedAt',
+  actedBy: 'actedBy',
+  actingGuardianId: 'actingGuardianId',
+  declineBlockScope: 'declineBlockScope',
   type: 'type',
   email: 'email',
   playerEmail: 'playerEmail',
@@ -718,6 +725,55 @@ export const InvitesScalarFieldEnum = {
 } as const
 
 export type InvitesScalarFieldEnum = (typeof InvitesScalarFieldEnum)[keyof typeof InvitesScalarFieldEnum]
+
+
+export const TeamBlocksScalarFieldEnum = {
+  id: 'id',
+  playerId: 'playerId',
+  teamId: 'teamId',
+  createdBy: 'createdBy',
+  createdAt: 'createdAt'
+} as const
+
+export type TeamBlocksScalarFieldEnum = (typeof TeamBlocksScalarFieldEnum)[keyof typeof TeamBlocksScalarFieldEnum]
+
+
+export const InviteDeliveriesScalarFieldEnum = {
+  id: 'id',
+  inviteId: 'inviteId',
+  idempotencyKey: 'idempotencyKey',
+  kind: 'kind',
+  requestedBy: 'requestedBy',
+  status: 'status',
+  createdAt: 'createdAt',
+  completedAt: 'completedAt',
+  sentAt: 'sentAt',
+  failureCode: 'failureCode'
+} as const
+
+export type InviteDeliveriesScalarFieldEnum = (typeof InviteDeliveriesScalarFieldEnum)[keyof typeof InviteDeliveriesScalarFieldEnum]
+
+
+export const TeamCreationRequestsScalarFieldEnum = {
+  teamId: 'teamId',
+  senderId: 'senderId',
+  fingerprint: 'fingerprint',
+  createdAt: 'createdAt'
+} as const
+
+export type TeamCreationRequestsScalarFieldEnum = (typeof TeamCreationRequestsScalarFieldEnum)[keyof typeof TeamCreationRequestsScalarFieldEnum]
+
+
+export const InvitationRequestsScalarFieldEnum = {
+  teamId: 'teamId',
+  senderId: 'senderId',
+  requestKey: 'requestKey',
+  inviteId: 'inviteId',
+  fingerprint: 'fingerprint',
+  createdAt: 'createdAt'
+} as const
+
+export type InvitationRequestsScalarFieldEnum = (typeof InvitationRequestsScalarFieldEnum)[keyof typeof InvitationRequestsScalarFieldEnum]
 
 
 export const UserProfileClaimsScalarFieldEnum = {

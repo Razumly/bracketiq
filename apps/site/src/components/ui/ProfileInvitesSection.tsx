@@ -11,6 +11,8 @@ import { organizationService } from '@/lib/organizationService';
 import { paymentService } from '@/lib/paymentService';
 import { teamService, type TeamRegistrationCheckoutTarget } from '@/lib/teamService';
 import { eventService } from '@/lib/eventService';
+import DeclineTeamInvitationButton from '@/components/ui/DeclineTeamInvitationButton';
+import TeamBlockList from '@/components/ui/TeamBlockList';
 import BillingAddressModal from '@/components/ui/BillingAddressModal';
 import PaymentModal, { type PaymentEventSummary } from '@/components/ui/PaymentModal';
 import OrganizationCard from '@/components/ui/OrganizationCard';
@@ -96,6 +98,7 @@ const buildUserFullName = (user?: UserData | null): string | null => {
 
 export default function ProfileInvitesSection({ userId, currentUser }: ProfileInvitesSectionProps) {
   const router = useRouter();
+  const [blockRefreshKey, setBlockRefreshKey] = useState(0);
   const [invites, setInvites] = useState<Invite[]>([]);
   const [organizationsById, setOrganizationsById] = useState<Record<string, Organization>>({});
   const [teamsById, setTeamsById] = useState<Record<string, Team>>({});
@@ -258,6 +261,8 @@ export default function ProfileInvitesSection({ userId, currentUser }: ProfileIn
     try {
       await userService.declineInvite(inviteId);
       await loadInvites();
+    } catch (error) {
+      setPaymentError(error instanceof Error ? error.message : 'The invitation was not declined. Try again.');
     } finally {
       setActingInviteId(null);
     }
@@ -285,6 +290,8 @@ export default function ProfileInvitesSection({ userId, currentUser }: ProfileIn
           {paymentError}
         </Alert>
       ) : null}
+
+      <TeamBlockList refreshKey={blockRefreshKey} />
 
       {!hasInvites ? (
         <Paper withBorder radius="md" p="md">
@@ -349,6 +356,7 @@ export default function ProfileInvitesSection({ userId, currentUser }: ProfileIn
                     }}>
                       Decline
                     </Button>
+                    <DeclineTeamInvitationButton invite={invite} onSaved={async () => { setBlockRefreshKey((key) => key + 1); await loadInvites(); }} disabled={actingInviteId === invite.$id || isChildSelfInvite} />
                   </Stack>
                 )}
               />

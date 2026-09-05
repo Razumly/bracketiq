@@ -30,6 +30,7 @@ data class UserDataDTO(
     val chatTermsVersion: String? = null,
     val notificationSettings: NotificationSettings = defaultNotificationSettings(),
     val isManagedPlayer: Boolean = false,
+    val hasActiveAccount: Boolean = false,
     val mergedIntoProfileId: String? = null,
     @Transient val id: String = "",
 ) {
@@ -85,6 +86,7 @@ suspend fun UserDataDTO.toUserData(id: String): UserData {
         chatTermsVersion = chatTermsVersion,
         notificationSettings = normalizeNotificationSettings(notificationSettings),
         isManagedPlayer = isManagedPlayer,
+        hasActiveAccount = hasActiveAccount,
         mergedIntoProfileId = mergedIntoProfileId,
         id = id
     )

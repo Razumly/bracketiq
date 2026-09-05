@@ -1,5 +1,6 @@
 // components/ui/TeamDetailModal.tsx
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import TeamInvitationManager from '@/components/ui/TeamInvitationManager';
 import { notifications } from '@mantine/notifications';
 import { Modal, Group, Text, Title, Button, Paper, SimpleGrid, Avatar, Badge, Alert, TextInput, ScrollArea, SegmentedControl, NumberInput, Select as MantineSelect, Checkbox, MultiSelect, Loader, Stack, Collapse } from '@mantine/core';
 import { Invite, Team, UserData, Event, SPORTS_LIST, getUserFullName, getUserAvatarUrl, getTeamAvatarUrl, getUserHandle, formatPrice } from '@/types';
@@ -299,6 +300,8 @@ export default function TeamDetailModal({
     const [reviewingRequestIds, setReviewingRequestIds] = useState<Set<string>>(new Set());
     const [editingAccountlessInvite, setEditingAccountlessInvite] = useState<AccountlessInviteDraft | null>(null);
     const [savingAccountlessInvite, setSavingAccountlessInvite] = useState(false);
+    const [teamInvitationAttempts, setTeamInvitationAttempts] = useState<Invite[]>([]);
+    const reminderKeys = useRef(new Map<string, string>());
     const [resendingAccountlessInviteId, setResendingAccountlessInviteId] = useState<string | null>(null);
     const [removingAccountlessInviteId, setRemovingAccountlessInviteId] = useState<string | null>(null);
     const [draftRequiredTemplateIds, setDraftRequiredTemplateIds] = useState<string[]>(
@@ -1275,11 +1278,11 @@ export default function TeamDetailModal({
         }
         setResendingAccountlessInviteId(invite.$id);
         try {
-            await apiRequest(
-                `/api/teams/${encodeURIComponent(currentTeam.$id)}/member-invites/${encodeURIComponent(invite.$id)}/resend`,
-                { method: 'POST', body: {} },
-            );
-            notifications.show({ color: 'green', message: 'Invite email resent.' });
+            const key = reminderKeys.current.get(invite.$id) ?? crypto.randomUUID();
+            reminderKeys.current.set(invite.$id, key);
+            const result = await userService.remindTeamInvitation(invite.$id, key);
+            reminderKeys.current.delete(invite.$id);
+            notifications.show({ color: result.delivery.failed ? 'yellow' : 'green', message: result.delivery.failed ? 'Invitation saved. Delivery failed.' : 'Reminder request saved.' });
         } catch (resendError) {
             const message = resendError instanceof Error ? resendError.message : 'Failed to resend invite email.';
             notifications.show({ color: 'red', message });
@@ -1516,7 +1519,10 @@ export default function TeamDetailModal({
         setCancellingInviteIds(prev => new Set(prev).add(playerId));
 
         try {
-            const success = await teamService.removeTeamInvitation(currentTeam.$id, playerId);
+            const attempt = teamInvitationAttempts.find((invite) => invite.userId === playerId && invite.status === 'PENDING');
+            const success = attempt
+                ? await teamService.removeTeamInvitation(attempt.$id)
+                : Boolean(await teamService.removePlayerFromTeam(currentTeam.$id, playerId));
 
             if (success) {
                 // Update local state
@@ -1620,7 +1626,7 @@ export default function TeamDetailModal({
                                                 <Badge color="blue" variant="light" size="xs">Captain</Badge>
                                             )}
                                             {canManageTeam && isPending && (
-                                                <Badge color="yellow" variant="light" size="xs">{player.isMinor ? 'Awaiting guardian' : 'Awaiting player'}</Badge>
+                                                <Badge color="yellow" variant="light" size="xs">{teamInvitationAttempts.find((invite) => invite.userId === player.$id && invite.isCurrentAttempt !== false)?.invitationLabel || 'Invitation pending'}</Badge>
                                             )}
                                             {canManageTeam && player.isManagedPlayer ? (
                                                 <Badge color="violet" variant="light" size="xs">Managed profile</Badge>
@@ -2676,6 +2682,9 @@ export default function TeamDetailModal({
                     )}
 
                     {/* Add Team Role Invites Section */}
+                    {canManageTeam ? <div className={rosterSectionClass('team-detail-roster-main')}>
+                        <TeamInvitationManager teamId={currentTeam.$id} onChanged={refreshTeamRoleDetails} onInvitesLoaded={setTeamInvitationAttempts} />
+                    </div> : null}
                     {canManageTeam && (
                         <div className={rosterSectionClass('team-detail-roster-main')}>
                             <Button onClick={() => setShowAddPlayers(true)} mb="sm">

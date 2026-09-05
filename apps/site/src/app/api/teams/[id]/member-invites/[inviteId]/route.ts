@@ -1,11 +1,13 @@
+import { acquireTeamRosterLock } from '@/server/repositories/locks';
+import { isInvitationExpired } from '@/server/teams/teamInvitationState';
 import { NextRequest, NextResponse } from 'next/server';
+import { cancelTeamInvitation } from '@/server/teams/teamInvitationCommands';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/permissions';
 import { getRequestOrigin } from '@/lib/requestOrigin';
 import { buildManagedPlayerClaimUrl, buildTeamInviteShareUrl, TEAM_INVITE_LINK_TTL_MS } from '@/server/teamInviteLinks';
 import { correctManagedPlayerContact } from '@/server/managedPlayers';
-import { removeCanonicalPendingInvitee, rollbackTeamInviteEventSyncs } from '@/server/teams/teamInviteEventSync';
 import { loadCanonicalTeamById, normalizeId } from '@/server/teams/teamMembership';
 import {
   assertEditableAccountlessTeamPlayer,
@@ -98,6 +100,7 @@ export async function PATCH(
 
   try {
     const invite = await prisma.$transaction(async (tx) => {
+      await acquireTeamRosterLock(tx, teamId);
       const team = await loadCanonicalTeamById(teamId, tx);
       if (!team) throw new MemberInviteRouteError(404, 'Team not found');
       if (!(await canManageTeamInvites(teamId, session, tx))) {
@@ -107,6 +110,7 @@ export async function PATCH(
         where: { id: normalizedInviteId, teamId },
       });
       const editable = assertEditableAccountlessTeamPlayer(existing);
+      if (existing && isInvitationExpired(existing, now)) throw new MemberInviteRouteError(409, 'Invitation expired. Create a new invitation.');
       const nextEmail = parsed.data.email === undefined
         ? (typeof editable.email === 'string' ? editable.email : null)
         : email;
@@ -120,8 +124,6 @@ export async function PATCH(
           lastName,
           email: nextEmail,
           phone: nextPhone,
-          status: 'PENDING',
-          linkExpiresAt: new Date(now.getTime() + TEAM_INVITE_LINK_TTL_MS),
           updatedAt: now,
         },
       });
@@ -150,41 +152,10 @@ export async function DELETE(
   }
 
   try {
-    await prisma.$transaction(async (tx) => {
-      const team = await loadCanonicalTeamById(teamId, tx);
-      if (!team) throw new MemberInviteRouteError(404, 'Team not found');
-      if (!(await canManageTeamInvites(teamId, session, tx))) {
-        throw new MemberInviteRouteError(403, 'Forbidden');
-      }
-      const existing = await tx.invites.findFirst({
-        where: { id: normalizedInviteId, teamId },
-      });
-      if (!existing) {
-        throw new MemberInviteRouteError(404, 'Invite not found');
-      }
-      const managedProfile = existing?.userId
-        ? await tx.userData?.findUnique?.({ where: { id: existing.userId }, select: { isManagedPlayer: true, mergedIntoProfileId: true } })
-        : null;
-      const hasClaimHistory = Boolean(existing.claimedBy)
-        || Boolean(tx.userProfileClaims?.findFirst && await tx.userProfileClaims.findFirst({
-          where: { inviteId: existing.id, status: 'COMPLETED' },
-          select: { id: true },
-        }))
-        || Boolean(tx.userProfileMerges?.findFirst && await tx.userProfileMerges.findFirst({
-          where: { invitationIds: { has: existing.id } },
-          select: { id: true },
-        }));
-      if (managedProfile?.isManagedPlayer || managedProfile?.mergedIntoProfileId || hasClaimHistory) {
-        const now = new Date();
-        await rollbackTeamInviteEventSyncs(tx, existing, 'CANCELLED', now);
-        await removeCanonicalPendingInvitee(tx, existing, session.userId, now);
-        await tx.invites.update({ where: { id: normalizedInviteId }, data: { status: 'CANCELLED', finalizedAt: now, updatedAt: now } });
-        return;
-      }
-      assertEditableAccountlessTeamPlayer(existing);
-      await tx.invites.delete({ where: { id: normalizedInviteId } });
-    });
-    return NextResponse.json({ ok: true, inviteId: normalizedInviteId }, { status: 200 });
+    const scopedInvite = await prisma.invites.findFirst({ where: { id: normalizedInviteId, teamId } });
+    if (!scopedInvite) return NextResponse.json({ error: 'Invite not found' }, { status: 404 });
+    const result = await cancelTeamInvitation(normalizedInviteId, session);
+    return NextResponse.json(result.body, { status: result.status });
   } catch (error) {
     return errorResponse(error);
   }

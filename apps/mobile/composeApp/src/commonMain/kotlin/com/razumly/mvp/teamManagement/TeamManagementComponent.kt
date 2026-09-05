@@ -1,5 +1,6 @@
 package com.razumly.mvp.teamManagement
 
+import com.razumly.mvp.core.data.dataTypes.isCaptainOrManager
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.backhandler.BackCallback
 import com.arkivanov.essenty.backhandler.BackHandler
@@ -33,6 +34,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
+import com.razumly.mvp.core.data.dataTypes.Invite
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -71,6 +73,8 @@ interface TeamManagementComponent {
     val currentTeams: StateFlow<List<TeamWithPlayers>>
     val isCurrentTeamsLoading: StateFlow<Boolean>
     val selectedTeam: StateFlow<TeamWithPlayers?>
+    val teamInvitations: StateFlow<List<Invite>> get() = MutableStateFlow(emptyList())
+    fun actOnInvitation(invite: Invite, action: String, requestKey: String, onResult: (Result<String>) -> Unit) { onResult(Result.failure(UnsupportedOperationException())) }
     val errorState: StateFlow<String?>
     val staffUsersById: StateFlow<Map<String, UserData>>
     val teamMemberCompliance: StateFlow<Map<String, EventTeamComplianceSummary>>
@@ -224,6 +228,23 @@ class DefaultTeamManagementComponent(
 
     private val _selectedTeam = MutableStateFlow<TeamWithPlayers?>(null)
     override val selectedTeam = _selectedTeam.asStateFlow()
+    override val teamInvitations = selectedTeam.flatMapLatest { team ->
+        team?.team?.id?.let(teamRepository::observeTeamInvitations) ?: flowOf(emptyList())
+    }.stateIn(scope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    override fun actOnInvitation(invite: Invite, action: String, requestKey: String, onResult: (Result<String>) -> Unit) {
+        scope.launch {
+            val result = if (action == "cancel") teamRepository.deleteInvite(invite.id).map { "Invitation cancelled." }
+                else teamRepository.actOnTeamInvitation(invite.id, action, requestKey)
+            onResult(result)
+            if (result.isSuccess) invite.teamId?.let { teamId ->
+                teamRepository.refreshTeamInvitations(teamId).onFailure { _errorState.value = "The action was saved. Invitation history could not be reloaded." }
+                teamRepository.getTeamWithPlayers(teamId).onSuccess { _selectedTeam.value = it }
+                loadTeamMemberCompliance(teamId)
+            }
+        }
+    }
+
     private val isSelectedTeamDraft = MutableStateFlow(false)
 
     private val _staffUsersById = MutableStateFlow<Map<String, UserData>>(emptyMap())
@@ -409,6 +430,9 @@ class DefaultTeamManagementComponent(
         _selectedTeam.value = resolvedTeam
         teamEditorBackCallback.isEnabled = true
         refreshSelectedTeamStaffUsers(resolvedTeam)
+        if (team != null && team.team.isCaptainOrManager(currentUser.id)) scope.launch {
+            teamRepository.refreshTeamInvitations(team.team.id).onFailure { _errorState.value = it.userMessage("Invitation history could not be loaded.") }
+        }
     }
 
     override fun createTeam(team: Team, onResult: (Result<Unit>) -> Unit) {
@@ -440,7 +464,7 @@ class DefaultTeamManagementComponent(
                 val createdTeam = createResult.getOrThrow()
                 val createdInviteLinks = mutableListOf<TeamBuilderCreatedInviteLink>()
 
-                createdTeam.pending
+                team.pending
                     .map(String::trim)
                     .filter(String::isNotBlank)
                     .distinct()
@@ -449,14 +473,16 @@ class DefaultTeamManagementComponent(
                             teamId = createdTeam.id,
                             userId = userId,
                             roleInviteType = "player",
+                            idempotencyKey = "${createdTeam.id}:player:$userId",
                         ).getOrThrow()
                     }
 
-                staffInvites.forEach { invite ->
+                staffInvites.forEachIndexed { index, invite ->
                     val result = teamRepository.createTeamMemberInvite(
                         teamId = createdTeam.id,
                         userId = invite.user?.id,
                         roleInviteType = invite.role.inviteType,
+                        idempotencyKey = "${createdTeam.id}:staff:$index",
                         firstName = invite.firstName,
                         lastName = invite.lastName,
                         email = invite.email.trim().takeIf(String::isNotBlank),
@@ -475,11 +501,12 @@ class DefaultTeamManagementComponent(
                     }
                 }
 
-                personInvites.forEach { invite ->
+                personInvites.forEachIndexed { index, invite ->
                     val result = teamRepository.createTeamMemberInvite(
                         teamId = createdTeam.id,
                         email = invite.email.trim().takeIf(String::isNotBlank),
                         roleInviteType = "player",
+                        idempotencyKey = "${createdTeam.id}:person:$index",
                         firstName = invite.firstName,
                         lastName = invite.lastName,
                         phone = invite.phone.trim().takeIf(String::isNotBlank),

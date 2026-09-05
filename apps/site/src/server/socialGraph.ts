@@ -1,3 +1,4 @@
+import { withAccountState } from '@/server/accountState';
 import type { Prisma } from '@/generated/prisma/client';
 import { prisma } from '@/lib/prisma';
 import {
@@ -63,7 +64,7 @@ const findUsersByIds = async (tx: SocialTx, ids: string[]): Promise<PublicUser[]
     where: { id: { in: normalizedIds } },
     select: publicUserSelect,
   });
-  return withDerivedCanonicalTeamIds(users, tx);
+  return withAccountState(tx, await withDerivedCanonicalTeamIds(users, tx));
 };
 
 const findSocialUsersByIds = async (tx: SocialTx, ids: string[]): Promise<StoredCurrentUser[]> => {

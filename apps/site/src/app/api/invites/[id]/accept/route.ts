@@ -1,3 +1,4 @@
+import { TeamInvitationRestrictionError } from '@/server/teams/teamInvitationRestrictions';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/permissions';
@@ -91,10 +92,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: 'Invalid invite' }, { status: 400 });
   }
 
+  try {
   const result = await acceptTeamInviteWithGuardianRules({
     invite,
     session,
     now: new Date(),
   });
   return NextResponse.json(result.body, { status: result.status });
+  } catch (error) {
+    if (error instanceof TeamInvitationRestrictionError) return NextResponse.json({ error: error.message }, { status: error.status });
+    throw error;
+  }
 }

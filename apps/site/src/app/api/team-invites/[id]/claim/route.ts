@@ -1,3 +1,4 @@
+import { assertTeamInvitationAllowed, TeamInvitationRestrictionError } from '@/server/teams/teamInvitationRestrictions';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/permissions';
@@ -49,6 +50,8 @@ const inviteStaffRoleFromRole = (value: unknown): TeamStaffRole | 'PLAYER' | nul
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await requireSession(req);
   const { id } = await params;
+  const body = await req.json().catch(() => ({}));
+  if (body.action && !['accept', 'review'].includes(body.action)) return NextResponse.json({ error: 'Invalid invitation action.' }, { status: 400 });
   const now = new Date();
   let invite = await prisma.invites.findUnique({ where: { id } });
   const inviteStatus = String(invite?.status ?? '').trim().toUpperCase();
@@ -69,6 +72,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         if (typeof tx?.$executeRaw === 'function') {
           await acquireTeamRosterLock(tx, invite!.teamId!);
         }
+        const current = await tx.invites.findUnique({ where: { id } });
+        if (!current || !verifyTeamInviteShareLink(current, {
+          version: req.nextUrl.searchParams.get('v'), expiresAt: req.nextUrl.searchParams.get('e'), signature: req.nextUrl.searchParams.get('s'),
+        }, new Date())) throw new Error('Invite unavailable');
+        if (current.createdBy) await assertTeamInvitationAllowed(tx, { teamId: current.teamId!, playerIds: [session.userId], senderId: current.createdBy }, now);
         const explicitStaffRole = inviteStaffRoleFromRole(invite!.role);
         const staffRoles = explicitStaffRole === 'PLAYER'
           ? []
@@ -150,6 +158,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Invite unavailable';
+      if (error instanceof TeamInvitationRestrictionError) return NextResponse.json({ error: message }, { status: error.status });
       if (message === 'Team is full') {
         return NextResponse.json({ error: message }, { status: 409 });
       }
@@ -164,6 +173,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   if (!invite) return NextResponse.json({ error: 'Invite unavailable' }, { status: 404 });
-  const result = await acceptTeamInviteWithGuardianRules({ invite, session, now });
-  return NextResponse.json(result.body, { status: result.status });
+  if (body.action === 'review') return NextResponse.json({ ok: true });
+  try {
+    const result = await acceptTeamInviteWithGuardianRules({ invite, session, now });
+    return NextResponse.json(result.body, { status: result.status });
+  } catch (error) {
+    if (error instanceof TeamInvitationRestrictionError) return NextResponse.json({ error: error.message }, { status: error.status });
+    throw error;
+  }
 }
