@@ -1,3 +1,4 @@
+import { assertEventRegistrationConfiguration } from '@/lib/eventRegistration';
 import type { Prisma, PrismaClient } from "../../generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePrismaSchemaContract } from "@/lib/prismaSchemaContract";
@@ -362,7 +363,11 @@ const upsertEventWithSchemaContract = async (
   requirePrismaSchemaContract("Events", () =>
     client.events.upsert({
       where: { id },
-      create: { ...eventData, createdAt: new Date() } as any,
+      create: {
+        ...eventData,
+        sourceType: eventData.organizationId ? "ORGANIZATION_CREATED" : "USER_CREATED",
+        createdAt: new Date(),
+      } as any,
       update: eventData as any,
     }),
   );
@@ -11035,6 +11040,8 @@ const resolveEventUpsertState = (params: {
     params.existingEvent?.eventType,
   );
   const payloadEventType = normalizeUpsertEventType(params.payload.eventType);
+  const nextEventType = payloadEventType ?? existingEventType;
+  assertEventRegistrationConfiguration(nextEventType, normalizedAffiliateUrl);
   return {
     normalizedState,
     isTemplateState: normalizedState === "TEMPLATE",
@@ -11042,7 +11049,7 @@ const resolveEventUpsertState = (params: {
     isAffiliateExternalEvent: normalizedAffiliateUrl.length > 0,
     existingEventType,
     payloadEventType,
-    nextEventType: payloadEventType ?? existingEventType,
+    nextEventType,
   };
 };
 
@@ -11414,7 +11421,6 @@ const resolveEventUpsertDivisionDetails = (params: {
 };
 
 const canonicalizeEventUpsertTimeSlots = (params: {
-  isAffiliateExternalEvent: boolean;
   eventId: string;
   timeSlotsWithResolvedTimeZones: any[];
   start: Date;
@@ -11423,9 +11429,7 @@ const canonicalizeEventUpsertTimeSlots = (params: {
   singleDivisionEnabled: boolean;
   isTournamentPoolPlay: boolean;
 }) =>
-  params.isAffiliateExternalEvent
-    ? []
-    : canonicalizeTimeSlots({
+  canonicalizeTimeSlots({
         eventId: params.eventId,
         slots: params.timeSlotsWithResolvedTimeZones,
         fallbackStartDate: params.start,
@@ -11674,9 +11678,7 @@ const resolveEventUpsertPlaceholderTeamIds = (teams: any[]): string[] =>
 const resolveEventUpsertTimeSlotIds = (
   payload: any,
   canonicalTimeSlots: any[],
-  isAffiliateExternalEvent: boolean,
 ): string[] => {
-  if (isAffiliateExternalEvent) return [];
   const derivedTimeSlotIds = canonicalTimeSlots
     .map((slot) => slot.id)
     .filter(Boolean);
@@ -11690,14 +11692,12 @@ const resolveEventUpsertTeamAndSlotIds = (params: {
   payload: any;
   teams: any[];
   canonicalTimeSlots: any[];
-  isAffiliateExternalEvent: boolean;
 }) => {
   const teamIds = resolveEventUpsertTeamIds(params.payload, params.teams);
   const placeholderTeamIds = resolveEventUpsertPlaceholderTeamIds(params.teams);
   const timeSlotIds = resolveEventUpsertTimeSlotIds(
     params.payload,
     params.canonicalTimeSlots,
-    params.isAffiliateExternalEvent,
   );
   return { teamIds, placeholderTeamIds, timeSlotIds };
 };
@@ -11780,7 +11780,6 @@ const resolveEventUpsertSchedulingFlags = (params: {
   nextEventType: string | null;
   payloadEventType: string | null;
   includePlayoffsOrPools: boolean;
-  isAffiliateExternalEvent: boolean;
 }) => {
   const isAutomatedScheduling = resolveEventUpsertAutomatedScheduling(
     params.payload,
@@ -11793,8 +11792,7 @@ const resolveEventUpsertSchedulingFlags = (params: {
   const isWeeklyParent =
     params.nextEventType === "WEEKLY_EVENT" && !normalizedParentEvent;
   const supportsNoFixedEndDateTime =
-    !params.isAffiliateExternalEvent &&
-    (isWeeklyParent || isBracketEventType(params.nextEventType));
+    isWeeklyParent || isBracketEventType(params.nextEventType);
   const splitLeaguePlayoffDivisions =
     resolveEventUpsertSplitLeaguePlayoffDivisions(params);
   const shouldClearLeaguePlayoffDivisionMappings =
@@ -11995,7 +11993,6 @@ const resolveEventUpsertScheduleEnds = (params: {
   };
 };
 const assertEventUpsertScheduling = async (params: {
-  isAffiliateExternalEvent: boolean;
   isTemplateState: boolean;
   isWeeklyParent: boolean;
   canonicalTimeSlots: any[];
@@ -12016,14 +12013,12 @@ const assertEventUpsertScheduling = async (params: {
     throw new Error("Tryout events require a Planned End.");
   }
   if (
-    !params.isAffiliateExternalEvent &&
     !params.isTemplateState &&
     params.isWeeklyParent &&
     !hasWeeklyRepeatingTimeSlot(params.canonicalTimeSlots)
   ) {
     throw new Error(WEEKLY_REPEATING_TIME_SLOT_REQUIRED_MESSAGE);
   }
-  if (!params.isAffiliateExternalEvent) {
     assertValidOneTimeTimeSlots({
       slots: params.canonicalTimeSlots,
       fallbackTimeZone: params.eventTimeZone,
@@ -12042,8 +12037,7 @@ const assertEventUpsertScheduling = async (params: {
       params.id,
       params.canonicalTimeSlots,
     );
-  }
-  if (!params.isAffiliateExternalEvent && params.normalizedEnd) {
+  if (params.normalizedEnd) {
     await assertNoEventFieldSchedulingConflicts({
       client: params.client,
       eventId: params.id,
@@ -12074,7 +12068,6 @@ const resolveEventUpsertLeagueScoringConfigId = async (params: {
   existingEvent: any;
   client: PrismaLike;
   nextEventType: string | null;
-  isAffiliateExternalEvent: boolean;
 }): Promise<string | null> => {
   const normalizedLeagueScoringConfig = normalizeLeagueScoringConfigPayload(
     params.payload.leagueScoringConfig,
@@ -12087,7 +12080,7 @@ const resolveEventUpsertLeagueScoringConfigId = async (params: {
   );
   const fallbackId =
     payloadLeagueScoringConfigId ?? existingLeagueScoringConfigId ?? null;
-  if (params.isAffiliateExternalEvent || params.nextEventType !== "LEAGUE") {
+  if (params.nextEventType !== "LEAGUE") {
     return null;
   }
   const {
@@ -12167,9 +12160,9 @@ const resolveEventUpsertInstallmentFields = (params: {
 };
 
 const resolveEventUpsertEventPricing = (params: {
+  isAffiliateExternalEvent: boolean;
   payload: any;
   canPersistEventPricing: boolean;
-  isAffiliateExternalEvent: boolean;
   isManualRegistrationPayment: boolean;
   isWeeklyParent: boolean;
   eventTimeZone: string;
@@ -12231,9 +12224,9 @@ const resolveEventUpsertDivisionInstallmentFields = (params: {
 };
 
 const resolveEventUpsertDivisionPricingDefaults = (params: {
+  isAffiliateExternalEvent: boolean;
   payload: any;
   canPersistEventPricing: boolean;
-  isAffiliateExternalEvent: boolean;
   isManualRegistrationPayment: boolean;
   isWeeklyParent: boolean;
   normalizedEventPrice: number;
@@ -12258,12 +12251,8 @@ const resolveEventUpsertDivisionPricingDefaults = (params: {
 const resolveEventUpsertStaffingPriority = (params: {
   payload: any;
   existingEvent: any;
-  isAffiliateExternalEvent: boolean;
   hasLegacyOfficialSchedulingModeInput: boolean;
 }) => {
-  if (params.isAffiliateExternalEvent) {
-    return "FULL_COVERAGE_WITH_CONFLICTS_ALLOWED";
-  }
   const staffingPriorityInput =
     params.payload.staffingPriority ??
     (params.hasLegacyOfficialSchedulingModeInput
@@ -12282,7 +12271,6 @@ const resolveEventUpsertStaffingPriority = (params: {
 const resolveEventUpsertDoTeamsOfficiate = (params: {
   payload: any;
   existingEvent: any;
-  isAffiliateExternalEvent: boolean;
 }) => {
   const requestedDoTeamsOfficiate = coerceNullableBoolean(
     resolveEventUpsertPayloadOrExisting(
@@ -12291,17 +12279,14 @@ const resolveEventUpsertDoTeamsOfficiate = (params: {
       "doTeamsOfficiate",
     ),
   );
-  return params.isAffiliateExternalEvent
-    ? false
-    : requestedDoTeamsOfficiate;
+  return requestedDoTeamsOfficiate;
 };
 
 const resolveEventUpsertNormalizedTeamSignup = (
-  isAffiliateExternalEvent: boolean,
   normalizedTeamSignupInput: unknown,
   nextEventType: string | null,
 ): boolean =>
-  isAffiliateExternalEvent || nextEventType === "TRYOUT"
+  nextEventType === "TRYOUT"
     ? false
     : coerceBoolean(normalizedTeamSignupInput, true);
 
@@ -12347,7 +12332,6 @@ const resolveEventUpsertRosterEditFlags = (
 const resolveEventUpsertStaffing = (params: {
   payload: any;
   existingEvent: any;
-  isAffiliateExternalEvent: boolean;
   normalizedTeamSignupInput: unknown;
   nextEventType: string | null;
 }) => {
@@ -12360,7 +12344,6 @@ const resolveEventUpsertStaffing = (params: {
   const staffingPriority = resolveEventUpsertStaffingPriority({
     payload: params.payload,
     existingEvent: params.existingEvent,
-    isAffiliateExternalEvent: params.isAffiliateExternalEvent,
     hasLegacyOfficialSchedulingModeInput,
   });
   const normalizedDoTeamsOfficiate = params.nextEventType === "TRYOUT"
@@ -12368,14 +12351,12 @@ const resolveEventUpsertStaffing = (params: {
     : resolveEventUpsertDoTeamsOfficiate({
       payload: params.payload,
       existingEvent: params.existingEvent,
-      isAffiliateExternalEvent: params.isAffiliateExternalEvent,
     });
   const normalizedTeamOfficialsMaySwap =
     normalizedDoTeamsOfficiate === true
       ? coerceBoolean(params.payload.teamOfficialsMaySwap, false)
       : false;
   const normalizedTeamSignup = resolveEventUpsertNormalizedTeamSignup(
-    params.isAffiliateExternalEvent,
     params.normalizedTeamSignupInput,
     params.nextEventType,
   );
@@ -12426,12 +12407,10 @@ const resolveEventUpsertExistingMatchRulesOverride = (value: any) => {
 const resolveEventUpsertMatchRulesOverride = (params: {
   payload: any;
   existingEvent: any;
-  isAffiliateExternalEvent: boolean;
   nextEventType: string | null;
 }) => {
   if (
-    params.isAffiliateExternalEvent ||
-    (params.nextEventType !== "LEAGUE" && params.nextEventType !== "TOURNAMENT")
+    params.nextEventType !== "LEAGUE" && params.nextEventType !== "TOURNAMENT"
   ) {
     return null;
   }
@@ -12458,7 +12437,6 @@ const resolveEventUpsertMaxParticipants = (
 const resolveEventUpsertIncidentAndTaxData = (params: {
   payload: any;
   existingEvent: any;
-  isAffiliateExternalEvent: boolean;
   nextEventType: string | null;
 }) => {
   const payloadIncludesAutoCreatePointMatchIncidents =
@@ -12467,7 +12445,7 @@ const resolveEventUpsertIncidentAndTaxData = (params: {
       "autoCreatePointMatchIncidents",
     );
   const normalizedAutoCreatePointMatchIncidents =
-    params.isAffiliateExternalEvent || params.nextEventType === "TRYOUT"
+    params.nextEventType === "TRYOUT"
       ? false
       : payloadIncludesAutoCreatePointMatchIncidents
         ? coerceBoolean(params.payload.autoCreatePointMatchIncidents, false)
@@ -12516,16 +12494,11 @@ const buildEventUpsertRegistrationFields = (params: {
 });
 
 const buildEventUpsertAssignmentFields = (params: {
-  isAffiliateExternalEvent: boolean;
   normalizedAssistantHostIds: string[];
   resolvedOfficialPositions: any[];
 }) => ({
-  assistantHostIds: params.isAffiliateExternalEvent
-    ? []
-    : params.normalizedAssistantHostIds,
-  officialPositions: params.isAffiliateExternalEvent
-    ? []
-    : params.resolvedOfficialPositions,
+  assistantHostIds: params.normalizedAssistantHostIds,
+  officialPositions: params.resolvedOfficialPositions,
 });
 
 const buildEventUpsertOptionalFields = (params: {
@@ -12721,7 +12694,6 @@ const buildEventUpsertData = (params: EventUpsertDataParams) => ({
   maxParticipants: params.normalizedEventMaxParticipants,
   hostId: params.normalizedHostId,
   ...buildEventUpsertAssignmentFields({
-    isAffiliateExternalEvent: params.isAffiliateExternalEvent,
     normalizedAssistantHostIds: params.normalizedAssistantHostIds,
     resolvedOfficialPositions: params.resolvedOfficialPositions,
   }),
@@ -12922,7 +12894,6 @@ const syncEventUpsertParticipantRegistrations = async (params: {
 const persistEventUpsertOfficials = async (params: {
   client: PrismaLike;
   id: string;
-  isAffiliateExternalEvent: boolean;
   hasExplicitEventOfficials: boolean;
   existingEvent: any;
   existingEventOfficials: any[];
@@ -12930,19 +12901,14 @@ const persistEventUpsertOfficials = async (params: {
   resolvedOfficialPositions: any[];
 }): Promise<void> => {
   if (
-    !params.isAffiliateExternalEvent &&
     !params.hasExplicitEventOfficials &&
     params.existingEvent &&
     params.existingEventOfficials.length > 0
   ) {
     return;
   }
-  const eventOfficialsToPersist = params.isAffiliateExternalEvent
-    ? []
-    : params.resolvedEventOfficials;
-  const officialPositions = params.isAffiliateExternalEvent
-    ? []
-    : params.resolvedOfficialPositions;
+  const eventOfficialsToPersist = params.resolvedEventOfficials;
+  const officialPositions = params.resolvedOfficialPositions;
   await persistEventOfficialRows(
     params.client,
     params.id,
@@ -12967,7 +12933,6 @@ const persistEventUpsertCore = async (params: {
   teams: any[];
   compatibilityDivisionIdByRegistrantId: Record<string, string | null>;
   placeholderTeamIds: string[];
-  isAffiliateExternalEvent: boolean;
   hasExplicitEventOfficials: boolean;
   existingEventOfficials: any[];
   resolvedEventOfficials: any[];
@@ -12998,7 +12963,6 @@ const persistEventUpsertCore = async (params: {
   await persistEventUpsertOfficials({
     client: params.client,
     id: params.id,
-    isAffiliateExternalEvent: params.isAffiliateExternalEvent,
     hasExplicitEventOfficials: params.hasExplicitEventOfficials,
     existingEvent: params.existingEvent,
     existingEventOfficials: params.existingEventOfficials,
@@ -13586,7 +13550,6 @@ export const upsertEventFromPayload = async (
   } = upsertDivisions;
   const start = resolveEventUpsertStart(payload, eventTimeZone);
   const canonicalTimeSlots = canonicalizeEventUpsertTimeSlots({
-    isAffiliateExternalEvent,
     eventId: id,
     timeSlotsWithResolvedTimeZones,
     start,
@@ -13646,7 +13609,6 @@ const allowedFieldIdSet = new Set(fieldIds);
       payload,
       teams,
       canonicalTimeSlots,
-      isAffiliateExternalEvent,
     });
   const divisionFieldMap = buildDivisionFieldMap(
     normalizedEventDivisionIds,
@@ -13668,7 +13630,6 @@ const allowedFieldIdSet = new Set(fieldIds);
     nextEventType,
     payloadEventType,
     includePlayoffsOrPools,
-    isAffiliateExternalEvent,
   });
   const {
     isAutomatedScheduling,
@@ -13738,7 +13699,6 @@ const allowedFieldIdSet = new Set(fieldIds);
     start,
   });
   await assertEventUpsertScheduling({
-    isAffiliateExternalEvent,
     isTemplateState,
     isWeeklyParent,
     canonicalTimeSlots,
@@ -13761,12 +13721,11 @@ const allowedFieldIdSet = new Set(fieldIds);
       existingEvent,
       client,
       nextEventType,
-      isAffiliateExternalEvent,
     });
   const eventPricing = resolveEventUpsertEventPricing({
+      isAffiliateExternalEvent,
     payload,
     canPersistEventPricing,
-    isAffiliateExternalEvent,
     isManualRegistrationPayment,
     isWeeklyParent,
     eventTimeZone,
@@ -13786,7 +13745,6 @@ const allowedFieldIdSet = new Set(fieldIds);
   const staffing = resolveEventUpsertStaffing({
     payload,
     existingEvent,
-    isAffiliateExternalEvent,
     normalizedTeamSignupInput: payload.teamSignup,
     nextEventType,
   });
@@ -13805,7 +13763,6 @@ const allowedFieldIdSet = new Set(fieldIds);
   const normalizedMatchRulesOverride = resolveEventUpsertMatchRulesOverride({
     payload,
     existingEvent,
-    isAffiliateExternalEvent,
     nextEventType,
   });
   const {
@@ -13815,7 +13772,6 @@ const allowedFieldIdSet = new Set(fieldIds);
   } = resolveEventUpsertIncidentAndTaxData({
     payload,
     existingEvent,
-    isAffiliateExternalEvent,
     nextEventType,
   });
   const eventData = buildEventUpsertData({
@@ -13871,9 +13827,9 @@ const allowedFieldIdSet = new Set(fieldIds);
   });
   const divisionPricingDefaults =
     resolveEventUpsertDivisionPricingDefaults({
+      isAffiliateExternalEvent,
       payload,
       canPersistEventPricing,
-      isAffiliateExternalEvent,
       isManualRegistrationPayment,
       isWeeklyParent,
       normalizedEventPrice,
@@ -13914,7 +13870,6 @@ const allowedFieldIdSet = new Set(fieldIds);
     teams,
     compatibilityDivisionIdByRegistrantId,
     placeholderTeamIds,
-    isAffiliateExternalEvent,
     hasExplicitEventOfficials,
     existingEventOfficials,
     resolvedEventOfficials,

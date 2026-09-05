@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.isAffiliateEvent
 import com.razumly.mvp.core.data.dataTypes.MANUAL_PAYMENT_PROVIDER_CASH_APP
 import com.razumly.mvp.core.data.dataTypes.MANUAL_PAYMENT_PROVIDER_OTHER
 import com.razumly.mvp.core.data.dataTypes.MANUAL_PAYMENT_PROVIDER_PAYPAL
@@ -168,6 +169,7 @@ internal fun LazyListScope.eventDetailsRegistrationSection(
                 event = state.event,
                 divisionDetails = state.divisionDetails,
             )
+            if (!state.event.isAffiliateEvent()) {
             EventRegistrationQuestionsSection(
                 questions = state.eventRegistrationQuestions,
                 answers = state.eventRegistrationQuestionAnswers,
@@ -175,6 +177,7 @@ internal fun LazyListScope.eventDetailsRegistrationSection(
                 onToggleExpanded = actions.onToggleEventRegistrationQuestions,
                 onAnswerChange = actions.onEventRegistrationQuestionAnswerChange,
             )
+            }
         },
         editContent = {
             Row(
@@ -336,58 +339,60 @@ internal fun LazyListScope.eventDetailsRegistrationSection(
             }
             FormSectionDivider()
 
-            val manualPaymentsEnabled = state.editEvent.usesManualRegistrationPayments()
-            ManualPaymentSettingsSection(
-                event = state.editEvent,
-                onEditEvent = actions.onEditEvent,
-            )
-            FormSectionDivider()
+            if (!state.editEvent.isAffiliateEvent()) {
+                val manualPaymentsEnabled = state.editEvent.usesManualRegistrationPayments()
+                ManualPaymentSettingsSection(
+                    event = state.editEvent,
+                    onEditEvent = actions.onEditEvent,
+                )
+                FormSectionDivider()
 
-            val automaticRefundsEnabled = if (manualPaymentsEnabled) {
-                false
-            } else if (state.editEvent.singleDivision) {
-                state.editEvent.priceCents > 0
-            } else {
-                state.divisionDetails.any { detail -> (detail.price ?: 0) > 0 }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.Top,
-            ) {
-                RegistrationOptions(
-                    cutoffHours = state.editEvent.registrationCutoffHours,
-                    onCutoffHoursChange = {
-                        actions.onEditEvent { copy(registrationCutoffHours = it) }
+                val automaticRefundsEnabled = if (manualPaymentsEnabled) {
+                    false
+                } else if (state.editEvent.singleDivision) {
+                    state.editEvent.priceCents > 0
+                } else {
+                    state.divisionDetails.any { detail -> (detail.price ?: 0) > 0 }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    RegistrationOptions(
+                        cutoffHours = state.editEvent.registrationCutoffHours,
+                        onCutoffHoursChange = {
+                            actions.onEditEvent { copy(registrationCutoffHours = it) }
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                    CancellationRefundOptions(
+                        refundHours = state.editEvent.cancellationRefundHours,
+                        onRefundHoursChange = {
+                            actions.onEditEvent { copy(cancellationRefundHours = it) }
+                        },
+                        modifier = Modifier.weight(1f),
+                        enabled = automaticRefundsEnabled,
+                        disabledMessage = if (manualPaymentsEnabled) {
+                            "Manual payments are refunded directly by the host."
+                        } else {
+                            "Add a paid division to enable automatic refunds."
+                        },
+                    )
+                }
+                RequiredDocumentsSection(
+                    isOrganizationEvent = state.isOrganizationEvent,
+                    rentalTimeLocked = state.rentalTimeLocked,
+                    organizationTemplatesLoading = state.organizationTemplatesLoading,
+                    organizationTemplatesError = state.organizationTemplatesError,
+                    requiredTemplateOptions = state.requiredTemplateOptions,
+                    selectedRequiredTemplateIds = state.selectedRequiredTemplateIds,
+                    selectedRequiredTemplateLabels = state.selectedRequiredTemplateLabels,
+                    onRequiredTemplateIdsChange = { normalizedTemplateIds ->
+                        actions.onEditEvent { copy(requiredTemplateIds = normalizedTemplateIds) }
                     },
-                    modifier = Modifier.weight(1f),
                 )
-                CancellationRefundOptions(
-                    refundHours = state.editEvent.cancellationRefundHours,
-                    onRefundHoursChange = {
-                        actions.onEditEvent { copy(cancellationRefundHours = it) }
-                    },
-                    modifier = Modifier.weight(1f),
-                    enabled = automaticRefundsEnabled,
-                    disabledMessage = if (manualPaymentsEnabled) {
-                        "Manual payments are refunded directly by the host."
-                    } else {
-                        "Add a paid division to enable automatic refunds."
-                    },
-                )
             }
-            RequiredDocumentsSection(
-                isOrganizationEvent = state.isOrganizationEvent,
-                rentalTimeLocked = state.rentalTimeLocked,
-                organizationTemplatesLoading = state.organizationTemplatesLoading,
-                organizationTemplatesError = state.organizationTemplatesError,
-                requiredTemplateOptions = state.requiredTemplateOptions,
-                selectedRequiredTemplateIds = state.selectedRequiredTemplateIds,
-                selectedRequiredTemplateLabels = state.selectedRequiredTemplateLabels,
-                onRequiredTemplateIdsChange = { normalizedTemplateIds ->
-                    actions.onEditEvent { copy(requiredTemplateIds = normalizedTemplateIds) }
-                },
-            )
         },
     )
 }

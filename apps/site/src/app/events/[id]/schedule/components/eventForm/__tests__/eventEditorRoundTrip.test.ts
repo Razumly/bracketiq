@@ -600,9 +600,9 @@ describe('event editor draft round trips', () => {
     const affiliateDraft = build({
       ...formValues,
       isAffiliateEvent: true,
-      eventType: 'AFFILIATE',
+      eventType: 'EVENT',
       affiliateUrl: 'https://example.com/external-event',
     });
-    expect(affiliateDraft.pendingStaffInvites).toEqual([]);
+    expect(affiliateDraft.pendingStaffInvites).toEqual(builtDraft.pendingStaffInvites);
   });
 });

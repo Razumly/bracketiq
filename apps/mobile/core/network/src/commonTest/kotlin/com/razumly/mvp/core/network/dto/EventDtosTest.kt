@@ -3,6 +3,7 @@ package com.razumly.mvp.core.network.dto
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.DivisionPhaseSettingsMVP
 import com.razumly.mvp.core.data.dataTypes.EventOfficial
+import com.razumly.mvp.core.data.dataTypes.isAffiliateEvent
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.core.data.dataTypes.MANUAL_PAYMENT_PROVIDER_CASH_APP
@@ -21,8 +22,37 @@ import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import com.razumly.mvp.core.util.jsonMVP
+import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 class EventDtosTest {
+    @Test
+    fun given_each_external_event_type_when_hydrated_then_provenance_and_read_only_authority_survive() {
+        EventType.entries.forEach { type ->
+            val dto = jsonMVP.decodeFromString<EventApiDto>(
+                """{
+                    "id":"external-event", "name":"External Event", "eventType":"${type.name}",
+                    "start":"2026-09-05T12:00:00Z", "end":"2026-09-05T13:00:00Z",
+                    "affiliateUrl":"https://partner.example/register", "organizationId":"org-1",
+                    "sourceType":"AFFILIATE_IMPORT", "sourceId":"source-1", "sourceUrl":"https://source.example/event",
+                    "capabilities":{"canEdit":false,"canManageStaff":false,"canDelegateHost":false,
+                        "readOnly":true,"readOnlyReason":"MANAGEMENT_AUTHORITY_UNVERIFIED",
+                        "managementAuthority":null,"eventHostId":null,"viewerIsEventHost":false}
+                }""",
+            )
+            val event = assertNotNull(dto.toEventOrNull())
+            assertEquals(type, event.eventType)
+            assertTrue(event.isAffiliateEvent())
+            val stored = jsonMVP.encodeToJsonElement(event).jsonObject
+            assertEquals("AFFILIATE_IMPORT", stored["sourceType"]?.jsonPrimitive?.content)
+            assertEquals("source-1", stored["sourceId"]?.jsonPrimitive?.content)
+            assertEquals("https://source.example/event", stored["sourceUrl"]?.jsonPrimitive?.content)
+            assertEquals("MANAGEMENT_AUTHORITY_UNVERIFIED", stored["capabilities"]?.jsonObject?.get("readOnlyReason")?.jsonPrimitive?.content)
+        }
+    }
+
     @Test
     fun given_each_canonical_priority_when_api_data_is_loaded_then_the_exact_priority_and_duties_survive() {
         StaffingPriority.entries.forEach { priority ->

@@ -80,7 +80,6 @@ type UseEventResourceControllerOptions = {
     hasImmutableFields: boolean;
     immutableFields: Field[];
     immutableTimeSlotsFromDefaults: TimeSlot[];
-    isAffiliateEvent: boolean;
     isCreateMode: boolean;
     isEditMode: boolean;
     open: boolean;
@@ -105,7 +104,6 @@ export const useEventResourceController = ({
     hasImmutableFields,
     immutableFields,
     immutableTimeSlotsFromDefaults,
-    isAffiliateEvent,
     isCreateMode,
     isEditMode,
     open,
@@ -166,19 +164,17 @@ export const useEventResourceController = ({
         || ''
     );
     const isOrganizationHostedEvent = organizationHostedEventId.length > 0;
-    const eventSupportsScheduleSlots = !isAffiliateEvent && supportsScheduleSlotsForEvent(
+    const eventSupportsScheduleSlots = supportsScheduleSlotsForEvent(
         eventData.eventType,
         eventData.parentEvent,
     );
     const hasRestrictedImmutableFields = hasImmutableFields && !eventSupportsScheduleSlots;
-    const supportsOrganizationFieldSelection = !isAffiliateEvent && supportsOrganizationFieldSelectionForEvent(
+    const supportsOrganizationFieldSelection = supportsOrganizationFieldSelectionForEvent(
         eventData.eventType,
         eventData.parentEvent,
     );
-    const shouldLoadRentalResources = !isAffiliateEvent
-        && (supportsOrganizationFieldSelection || eventSupportsScheduleSlots);
-    const shouldManageLocalFields = !isAffiliateEvent
-        && !hasRestrictedImmutableFields
+    const shouldLoadRentalResources = (supportsOrganizationFieldSelection || eventSupportsScheduleSlots);
+    const shouldManageLocalFields = !hasRestrictedImmutableFields
         && supportsFieldCountForEvent(eventData.eventType, eventData.parentEvent);
     const shouldProvisionFields = shouldManageLocalFields;
     const isOrganizationManagedEvent = isOrganizationHostedEvent && !shouldManageLocalFields;

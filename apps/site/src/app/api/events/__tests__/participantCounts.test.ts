@@ -22,6 +22,7 @@ describe('withEventAttendeeCounts', () => {
       {
         id: 'affiliate_event',
         sourceType: 'AFFILIATE_IMPORT',
+        affiliateUrl: 'https://organizer.example/register',
         statusText: '13 spots available',
         maxParticipants: 14,
       },
@@ -43,6 +44,7 @@ describe('withEventAttendeeCounts', () => {
       {
         id: 'affiliate_event',
         sourceType: 'AFFILIATE_IMPORT',
+        affiliateUrl: 'https://organizer.example/register',
         statusText: '7 spots available',
         maxParticipants: 7,
       },
@@ -53,6 +55,18 @@ describe('withEventAttendeeCounts', () => {
       participantCount: 0,
       participantCapacity: 7,
     }));
+  });
+
+  it('uses BracketIQ registrations after an imported Event changes registration destination', async () => {
+    getEventParticipantAggregatesMock.mockResolvedValue(new Map([
+      ['imported_event', { participantCount: 3, participantCapacity: 14 }],
+    ]));
+    const [event] = await withEventAttendeeCounts([{
+      id: 'imported_event', sourceType: 'AFFILIATE_IMPORT', affiliateUrl: null,
+      statusText: '13 spots available', maxParticipants: 14,
+    }]);
+    expect(event).toMatchObject({ attendees: 3, participantCount: 3, participantCapacity: 14 });
+    expect(event.sourceType).toBe('AFFILIATE_IMPORT');
   });
 
   it('keeps normal event registration aggregates unchanged', async () => {

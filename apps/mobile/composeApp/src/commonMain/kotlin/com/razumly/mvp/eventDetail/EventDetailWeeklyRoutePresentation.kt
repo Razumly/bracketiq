@@ -114,7 +114,6 @@ internal fun buildEventDetailWeeklyRoutePresentation(
         selectedWeeklyOccurrenceJoined = selectedWeeklyOccurrenceJoined,
         isAffiliateEvent = isAffiliateEvent,
         shouldShowViewSchedulePrimaryAction = shouldShowViewSchedulePrimaryAction,
-        showOverviewOpenDetailsAction = !isAffiliateEvent &&
-            (weeklyParentEvent || !shouldShowViewSchedulePrimaryAction),
+        showOverviewOpenDetailsAction = weeklyParentEvent || !shouldShowViewSchedulePrimaryAction,
     )
 }

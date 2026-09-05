@@ -80,19 +80,14 @@ describe('useEventFormSectionsController', () => {
         expect(result.current.visibleSectionNavItems.map((item) => item.label)).not.toContain('Schedule');
     });
 
-    it('hides operational sections for affiliate listings', () => {
+    it('keeps operational sections for external registration', () => {
         const { result } = renderController({ isAffiliateEvent: true });
 
         expect(result.current.showManualPaymentsSection).toBe(false);
-        expect(result.current.showMatchRulesSection).toBe(false);
-        expect(result.current.showStaffSection).toBe(false);
-        expect(result.current.showScoringConfigSection).toBe(false);
-        expect(result.current.showScheduleConfig).toBe(false);
-        expect(result.current.visibleSectionNavItems.map((item) => item.label)).toEqual([
-            'Basic Information',
-            'Event Details',
-            'Divisions',
-        ]);
+        expect(result.current.showMatchRulesSection).toBe(true);
+        expect(result.current.showStaffSection).toBe(true);
+        expect(result.current.showScoringConfigSection).toBe(true);
+        expect(result.current.showScheduleConfig).toBe(true);
     });
 
     it('expands manual payment settings when they are enabled', () => {

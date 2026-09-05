@@ -3,6 +3,7 @@
 package com.razumly.mvp.core.network.dto
 
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.EventAuthorityCapabilities
 import com.razumly.mvp.core.data.dataTypes.EventSearchOccurrence
 import com.razumly.mvp.core.data.dataTypes.isBracketTeamCountEnabled
 import com.razumly.mvp.core.data.dataTypes.normalizeBracketTeamCount
@@ -133,6 +134,10 @@ data class EventApiDto(
     val leagueScoringConfig: LeagueScoringConfigDTO? = null,
     val organizationId: String? = null,
     val affiliateUrl: String? = null,
+    val sourceType: String? = null,
+    val sourceId: String? = null,
+    val sourceUrl: String? = null,
+    val capabilities: EventAuthorityCapabilities? = null,
     val scheduleText: String? = null,
     val dateDisplayMode: String? = null,
     val dateDisplayText: String? = null,
@@ -240,7 +245,7 @@ data class EventApiDto(
 
         val normalizedEventType = eventType?.trim()?.uppercase()
         val resolvedEventType = runCatching { EventType.valueOf(normalizedEventType ?: EventType.EVENT.name) }
-            .getOrDefault(EventType.EVENT)
+            .getOrNull() ?: return null
         val resolvedNoFixedEndDateTime = noFixedEndDateTime ?: false
         val resolvedAutomatedScheduling = normalizeAutomatedSchedulingForEventType(
             resolvedEventType,
@@ -478,6 +483,10 @@ data class EventApiDto(
             leagueScoringConfigId = leagueScoringConfigId,
             organizationId = organizationId,
             affiliateUrl = resolvedAffiliateUrl,
+            sourceType = sourceType,
+            sourceId = sourceId,
+            sourceUrl = sourceUrl,
+            capabilities = capabilities,
             scheduleText = resolvedScheduleText,
             dateDisplayMode = resolvedDateDisplayMode,
             dateDisplayText = resolvedDateDisplayText,
@@ -999,6 +1008,7 @@ data class ProfileScheduleNextActionResponseDto(
 @Serializable
 data class EventDetailBootstrapResponseDto(
     val event: EventApiDto? = null,
+    val capabilities: EventAuthorityCapabilities? = null,
     val participantSnapshot: EventParticipantsSnapshotResponseDto? = null,
     val matches: List<MatchApiDto> = emptyList(),
     val fields: List<Field> = emptyList(),

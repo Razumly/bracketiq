@@ -8,6 +8,10 @@ import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.DivisionPhaseSettingsMVP
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.EventAuthorityCapabilities
+import com.razumly.mvp.core.data.dataTypes.EventManagementAuthority
+import com.razumly.mvp.core.data.dataTypes.isAffiliateEvent
+import com.razumly.mvp.core.network.dto.EventProvenanceDto
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
@@ -68,6 +72,7 @@ import com.razumly.mvp.core.network.dto.EventEditorSaveResultDto
 import com.razumly.mvp.core.network.dto.EventEditorSnapshotDto
 import com.razumly.mvp.core.network.dto.EventEditorStaffDto
 import com.razumly.mvp.core.network.dto.EventEditorTimeSlotDto
+import com.razumly.mvp.core.network.dto.EventParticipantsSnapshotResponseDto
 import com.razumly.mvp.core.network.dto.EventApiDto
 import com.razumly.mvp.core.network.dto.EventDetailBootstrapResponseDto
 import com.razumly.mvp.core.network.dto.TeamApiDto
@@ -315,6 +320,216 @@ class EventRepositoryRoomPersistenceTest {
         // Room in-memory databases are closed by each test. The application context remains shared
         // across Robolectric tests, so no file cleanup is required.
     }
+
+    @Test
+    fun given_unclaimed_external_events_when_refreshed_then_room_retains_read_only_state_offline() =
+        kotlinx.coroutines.test.runTest {
+            val fixture = eventRepositoryRoomPersistenceTournamentFixture()
+            val database = Room.inMemoryDatabaseBuilder<MVPDatabaseService>(context).allowMainThreadQueries().build()
+            var offline = false
+            var remoteEvent = fixture.eventResponse.copy(
+                affiliateUrl = "https://partner.example/register",
+                hostId = null,
+                sourceType = "AFFILIATE_IMPORT", sourceId = "source-1", sourceUrl = "https://source.example/event",
+                capabilities = EventAuthorityCapabilities(readOnlyReason = "MANAGEMENT_AUTHORITY_UNVERIFIED"),
+            )
+            val http = HttpClient(MockEngine { request ->
+                check(!offline) { "Offline access must use Room." }
+                if (request.url.encodedPath.endsWith("/participants")) {
+                    val partialEvent = remoteEvent.copy(
+                        affiliateUrl = null, sourceType = null, sourceId = null, sourceUrl = null, capabilities = null,
+                    )
+                    respondJson(jsonMVP.encodeToString(EventParticipantsSnapshotResponseDto(event = partialEvent)), HttpStatusCode.OK)
+                } else respondJson(jsonMVP.encodeToString(EventDetailBootstrapResponseDto(
+                    event = remoteEvent, capabilities = remoteEvent.capabilities,
+                )), HttpStatusCode.OK)
+            }) { configureMvpHttpClient() }
+            val repository = eventRepositoryRoomPersistenceRepository(
+                EventRepositoryRoomPersistence_NoStartupCleanupDatabase(database), http,
+                UnconfinedTestDispatcher(testScheduler),
+            )
+            try {
+                for (type in EventType.entries) {
+                    offline = false
+                    remoteEvent = remoteEvent.copy(eventType = type.name, capabilities = EventAuthorityCapabilities(
+                        viewerUserId = "host-1", canEdit = true, readOnly = false,
+                    ))
+                    repository.syncEventDetail(Event(id = fixture.eventId), null, false).getOrThrow()
+                    remoteEvent = remoteEvent.copy(capabilities = EventAuthorityCapabilities(
+                        viewerUserId = "host-1", readOnlyReason = "MANAGEMENT_AUTHORITY_UNVERIFIED",
+                    ))
+                    repository.syncEventDetail(Event(id = fixture.eventId), null, false).getOrThrow()
+                    val refreshed = repository.getCachedEventWithRelationsFlow(fixture.eventId).first().getOrThrow().event
+                    repository.syncEventParticipants(refreshed, null).getOrThrow()
+                    offline = true
+                    val cached = repository.getCachedEventWithRelationsFlow(fixture.eventId).first().getOrThrow().event
+                    assertEquals(type, cached.eventType)
+                    assertTrue(cached.isAffiliateEvent())
+                    assertEquals("AFFILIATE_IMPORT", cached.sourceType)
+                    assertEquals("source-1", cached.sourceId)
+                    assertEquals("https://source.example/event", cached.sourceUrl)
+                    assertTrue(assertNotNull(cached.capabilities).readOnly)
+                    assertFalse(cached.capabilities!!.canEditFor("host-1"))
+                }
+            } finally {
+                repository.close()
+                http.close()
+                database.close()
+            }
+        }
+
+    @Test
+    fun given_live_site_when_registration_destination_changes_then_api_and_room_preserve_the_event() =
+        kotlinx.coroutines.test.runTest(timeout = kotlin.time.Duration.parse("5m")) {
+            val apiUrl = System.getenv("MVP_ISSUE48_API_URL").orEmpty()
+            val eventIds = System.getenv("MVP_ISSUE48_EVENT_IDS").orEmpty().split(',').filter(String::isNotBlank)
+            val token = System.getenv("MVP_ISSUE48_TOKEN").orEmpty()
+            org.junit.Assume.assumeTrue("Issue 48 live API fixtures are not configured.", apiUrl.isNotBlank() && eventIds.isNotEmpty() && token.isNotBlank())
+            require(java.net.URI(apiUrl).host in setOf("localhost", "127.0.0.1")) { "Use a local issue database and API." }
+            require(eventIds.size == EventType.entries.size && eventIds.all { it.startsWith("issue-48-") })
+            val database = Room.inMemoryDatabaseBuilder<MVPDatabaseService>(context).allowMainThreadQueries().build()
+            val http = HttpClient { configureMvpHttpClient() }
+            val tokens = mockk<AuthTokenStore>()
+            coEvery { tokens.get() } returns token
+            val repository = eventRepositoryRoomPersistenceRepository(
+                EventRepositoryRoomPersistence_NoStartupCleanupDatabase(database), http,
+                UnconfinedTestDispatcher(testScheduler),
+                api = MvpApiClient(http, apiUrl, tokens),
+            )
+            val eventTypes = mutableSetOf<EventType>()
+            try {
+                for (eventId in eventIds) {
+                    val original = repository.getEventEditor(eventId).getOrThrow()
+                    val originalUrl = original.canonicalState.event.affiliateUrl
+                    eventTypes += original.canonicalState.event.eventType
+                    val before = repository.getCachedEventWithRelationsFlow(eventId).first().getOrThrow().event
+                    assertTrue(assertNotNull(before.capabilities).canEdit)
+                    try {
+                        for (destination in listOf("https://new-organizer.example/register", null, originalUrl)) {
+                            val session = repository.getEventEditor(eventId).getOrThrow()
+                            val desired = session.canonicalState.copy(event = session.canonicalState.event.copy(affiliateUrl = destination))
+                            repository.saveEventEditor(eventId, EventEditorSessionMapper.toSaveCommand(session, EventEditorMutation(desired))).getOrThrow()
+                            val reloaded = repository.getEventEditor(eventId).getOrThrow()
+                            val after = repository.getCachedEventWithRelationsFlow(eventId).first().getOrThrow().event
+                            assertEquals(destination.orEmpty(), reloaded.snapshot.draft.basics.affiliateUrl)
+                            assertEquals(before.id, after.id)
+                            assertEquals(before.eventType, after.eventType)
+                            assertEquals(before.sourceType, after.sourceType)
+                            assertEquals(before.sourceId, after.sourceId)
+                            assertEquals(before.sourceUrl, after.sourceUrl)
+                            assertEquals(before.capabilities, after.capabilities)
+                            assertEquals(original.snapshot.draft.competition, reloaded.snapshot.draft.competition)
+                            assertEquals(original.snapshot.draft.resources, reloaded.snapshot.draft.resources)
+                            assertEquals(original.snapshot.draft.staff, reloaded.snapshot.draft.staff)
+                        }
+                    } finally {
+                        val session = repository.getEventEditor(eventId).getOrThrow()
+                        if (session.canonicalState.event.affiliateUrl != originalUrl) {
+                            val restored = session.canonicalState.copy(event = session.canonicalState.event.copy(affiliateUrl = originalUrl))
+                            repository.saveEventEditor(eventId, EventEditorSessionMapper.toSaveCommand(session, EventEditorMutation(restored))).getOrThrow()
+                        }
+                    }
+                }
+                assertEquals(EventType.entries.toSet(), eventTypes)
+            } finally {
+                repository.close()
+                http.close()
+                database.close()
+            }
+        }
+
+    @Test
+    fun given_each_event_type_when_registration_changes_then_site_and_room_preserve_identity_and_operations() =
+        kotlinx.coroutines.test.runTest(timeout = kotlin.time.Duration.parse("5m")) {
+            val fixture = eventRepositoryRoomPersistenceTournamentFixture()
+            val site = clientContractSiteDirectory()
+            val sharedDraft = jsonMVP.decodeFromString<EventEditorDraftDto>(
+                File(site.parentFile.parentFile, "test-fixtures/event-editor/staffing-priority-draft.json").readText(),
+            )
+            for (type in EventType.entries) {
+                var snapshot = fixture.saved.snapshot.copy(
+                    mode = "EDIT",
+                    draft = sharedDraft.copy(basics = sharedDraft.basics.copy(
+                        eventType = type.name, affiliateUrl = "https://partner.example/register",
+                    ), schedule = sharedDraft.schedule.copy(
+                        isAutomatedScheduling = type != EventType.EVENT && type != EventType.TRYOUT,
+                    )),
+                    provenance = EventProvenanceDto("AFFILIATE_IMPORT", "source-1", "https://source.example/event"),
+                    capabilities = fixture.saved.snapshot.capabilities.copy(
+                        viewerUserId = "owner-1", canEdit = true, canManageStaff = true, readOnly = false,
+                        managementAuthority = EventManagementAuthority("ORGANIZATION", "org-1", "owner-1"),
+                    ),
+                )
+                val database = Room.inMemoryDatabaseBuilder<MVPDatabaseService>(context).allowMainThreadQueries().build()
+                var offline = false
+                val http = HttpClient(MockEngine { request ->
+                    check(!offline) { "Offline access must use Room." }
+                    when (request.method) {
+                        HttpMethod.Get -> respondJson(jsonMVP.encodeToString(snapshot), HttpStatusCode.OK)
+                        HttpMethod.Put -> {
+                            val body = (request.body as io.ktor.http.content.OutgoingContent.ByteArrayContent).bytes().decodeToString()
+                            val command = jsonMVP.decodeFromString<EventEditorSaveCommandDto>(body)
+                            val result = jsonMVP.parseToJsonElement(runSiteContract(
+                                site, "scripts/test-external-registration-contract.ts",
+                                jsonMVP.encodeToString(JsonObject(mapOf(
+                                    "before" to com.razumly.mvp.core.network.dto.encodeEventEditorSaveCommand(
+                                        command.copy(draft = snapshot.draft),
+                                    ).getValue("draft"),
+                                    "command" to jsonMVP.parseToJsonElement(body),
+                                    "affiliateUrl" to kotlinx.serialization.json.JsonPrimitive(command.draft.basics.affiliateUrl),
+                                ))),
+                            )).jsonObject
+                            snapshot = snapshot.copy(draft = jsonMVP.decodeFromJsonElement(EventEditorDraftDto.serializer(), result.getValue("draft")))
+                            respondJson(jsonMVP.encodeToString(fixture.saved.copy(
+                                snapshot = snapshot, graph = null,
+                                scheduleOutcome = fixture.saved.scheduleOutcome.copy(
+                                    status = EventEditorScheduleOutcomeStatus.NOT_REQUESTED, matches = emptyList(),
+                                ),
+                            )), HttpStatusCode.OK)
+                        }
+                        else -> error("Unexpected request ${request.method}")
+                    }
+                }) { configureMvpHttpClient() }
+                val repository = eventRepositoryRoomPersistenceRepository(
+                    EventRepositoryRoomPersistence_NoStartupCleanupDatabase(database), http,
+                    UnconfinedTestDispatcher(testScheduler),
+                )
+                try {
+                    repository.getEventEditor(fixture.eventId).getOrThrow()
+                    val baseline = repository.getCachedEventWithRelationsFlow(fixture.eventId).first().getOrThrow().event
+                    for (destination in listOf("https://new-partner.example/register", "", "https://partner.example/register")) {
+                        offline = false
+                        val opened = repository.getEventEditor(fixture.eventId).getOrThrow()
+                        val desired = opened.canonicalState.copy(event = opened.canonicalState.event.copy(
+                            affiliateUrl = destination.takeIf(String::isNotBlank),
+                            name = if (destination.contains("new-partner")) opened.canonicalState.event.name + " Updated" else opened.canonicalState.event.name,
+                        ))
+                        val command = EventEditorSessionMapper.toSaveCommand(opened, EventEditorMutation(desired))
+                        repository.saveEventEditor(fixture.eventId, command).getOrThrow()
+                        val reloaded = repository.getEventEditor(fixture.eventId).getOrThrow().canonicalState.event
+                        offline = true
+                        val cached = repository.getCachedEventWithRelationsFlow(fixture.eventId).first().getOrThrow().event
+                        assertEquals(baseline.id, cached.id)
+                        assertEquals(type, cached.eventType)
+                        assertEquals(destination.isNotBlank(), cached.isAffiliateEvent())
+                        assertEquals(baseline.sourceType, cached.sourceType)
+                        assertEquals(baseline.sourceId, cached.sourceId)
+                        assertEquals(baseline.sourceUrl, cached.sourceUrl)
+                        assertEquals(baseline.capabilities, cached.capabilities)
+                        assertEquals(baseline.fieldIds, cached.fieldIds)
+                        assertEquals(baseline.timeSlotIds, cached.timeSlotIds)
+                        assertEquals(baseline.divisionDetails, cached.divisionDetails)
+                        assertEquals(baseline.officialPositions, cached.officialPositions)
+                        assertEquals(baseline.doTeamsOfficiate, cached.doTeamsOfficiate)
+                        assertEquals(reloaded.affiliateUrl, cached.affiliateUrl)
+                    }
+                } finally {
+                    repository.close()
+                    http.close()
+                    database.close()
+                }
+            }
+        }
 
     @Test
     fun given_all_five_priorities_when_saved_reloaded_and_read_offline_then_site_and_room_preserve_the_officiating_plan() =
@@ -3738,16 +3953,13 @@ private fun eventRepositoryRoomPersistenceRepository(
         Result.failure(IllegalStateException("No test user")),
     ),
     startupAuthState: MutableStateFlow<StartupAuthState> = MutableStateFlow(StartupAuthState.Unauthenticated),
+    api: MvpApiClient = MvpApiClient(http, "http://example.test", EventRepositoryRoomPersistence_AuthTokenStore),
 ): EventRepository {
     every { userRepository.currentUser } returns currentUserState
     every { userRepository.startupAuthState } returns startupAuthState
     return EventRepository(
         databaseService = database,
-        api = MvpApiClient(
-            http = http,
-            baseUrl = "http://example.test",
-            tokenStore = EventRepositoryRoomPersistence_AuthTokenStore,
-        ),
+        api = api,
         teamRepository = teamRepository,
         userRepository = userRepository,
         coroutineDispatcher = coroutineDispatcher,

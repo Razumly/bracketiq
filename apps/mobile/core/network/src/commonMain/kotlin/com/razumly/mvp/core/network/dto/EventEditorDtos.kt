@@ -87,10 +87,18 @@ data class EventEditorSnapshotDto(
     val editorRevision: String,
     val staffRevision: String? = null,
     val capabilities: EventEditorCapabilitiesDto,
+    val provenance: EventProvenanceDto? = null,
     val catalogs: EventEditorCatalogsDto,
     val immutable: EventEditorImmutableDto,
     val scheduleState: EventEditorScheduleStateDto,
     val revisionBinding: EventEditorRevisionBindingDto? = null,
+)
+
+@Serializable
+data class EventProvenanceDto(
+    val sourceType: String? = null,
+    val sourceId: String? = null,
+    val sourceUrl: String? = null,
 )
 
 @Serializable
@@ -99,7 +107,26 @@ data class EventEditorCapabilitiesDto(
     val canManageStaff: Boolean,
     val canEdit: Boolean,
     val supportsTeamStaffing: Boolean,
-)
+    val viewerUserId: String? = null,
+    val canDelegateHost: Boolean = false,
+    val readOnly: Boolean = !canEdit,
+    val readOnlyReason: String? = null,
+    val managementAuthority: com.razumly.mvp.core.data.dataTypes.EventManagementAuthority? = null,
+    val eventHostId: String? = null,
+    val viewerIsEventHost: Boolean = false,
+) {
+    fun toDomain() = com.razumly.mvp.core.data.dataTypes.EventAuthorityCapabilities(
+        viewerUserId = viewerUserId,
+        canEdit = canEdit,
+        canManageStaff = canManageStaff,
+        canDelegateHost = canDelegateHost,
+        readOnly = readOnly,
+        readOnlyReason = readOnlyReason,
+        managementAuthority = managementAuthority,
+        eventHostId = eventHostId,
+        viewerIsEventHost = viewerIsEventHost,
+    )
+}
 
 @Serializable
 data class EventEditorCatalogsDto(
@@ -1406,7 +1433,8 @@ data class EventEditorScheduleDto(
     val mode: String,
     val endConstraint: String? = null,
     val generatedScheduleEnd: String? = null,
-    @SerialName("automatedScheduling")
+    @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+    @kotlinx.serialization.json.JsonNames("automatedScheduling")
     val isAutomatedScheduling: Boolean = true,
 )
 

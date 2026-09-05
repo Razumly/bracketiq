@@ -639,7 +639,7 @@ fun EventDetails(
         divisionEditorReady = divisionEditorReady,
         divisionPriceCents = divisionEditor.priceCents,
     )
-    val isInclusivePriceQuoteConfirmed = isEventInclusivePriceReady(
+    val isInclusivePriceQuoteConfirmed = editEvent.isAffiliateEvent() || isEventInclusivePriceReady(
         editView = editView,
         manualPaymentsEnabled = editEvent.usesManualRegistrationPayments() ||
             (useSimpleSectionContent && !simplePaidRegistrationEnabled),
@@ -1676,7 +1676,7 @@ fun EventDetails(
                 divisionDetailsForSettings = divisionDetailsForSettings,
                 isColorLoaded = isColorLoaded,
                 scheduleTimeLocked = scheduleTimeLocked,
-                requiresPositiveRegistrationPrice = useSimpleSectionContent &&
+                requiresPositiveRegistrationPrice = !editEvent.isAffiliateEvent() && useSimpleSectionContent &&
                     simplePaidRegistrationEnabled,
                 leagueScoringConfig = leagueScoringConfig,
                 selectedSport = sports.firstOrNull { sport -> sport.id == editEventSportId },

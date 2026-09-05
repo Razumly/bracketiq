@@ -723,7 +723,6 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
       hasImmutableFields,
       immutableFields,
       immutableTimeSlotsFromDefaults,
-      isAffiliateEvent,
       isCreateMode,
       isEditMode,
       open,
@@ -788,7 +787,6 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
       hasImmutableTimeSlots,
       immutableFields,
       immutableTimeSlots,
-      isAffiliateEvent,
       isEditMode,
       leagueSlots,
       parentEvent: eventData.parentEvent,
@@ -931,7 +929,6 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
       clearLeagueSlotErrors,
       eventData,
       getValues,
-      isAffiliateEvent,
       leagueData,
       selectedSport: selectedSportForOfficials,
       setEventData,
@@ -990,7 +987,6 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
       [isRentalCreateFlow, resolvedOrganizationId],
     );
     const supportsNoFixedEndDateTime =
-      !isAffiliateEvent &&
       eventData.eventType !== 'TRYOUT' &&
       supportsScheduleSlotsForEvent(eventData.eventType, eventData.parentEvent);
     useEventFormInvariantSynchronization({

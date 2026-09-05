@@ -436,7 +436,10 @@ class DefaultEventDetailComponent(
     private val eventTimeSlots = bootstrapResourcesCoordinator.eventTimeSlots
     private val eventLeagueScoringConfig = bootstrapResourcesCoordinator.eventLeagueScoringConfig
 
-    override val isHost = selectedEvent.map { it.hostId == currentUser.value.id }
+    override val isHost = combine(selectedEvent, currentUser) { event, user ->
+        event.capabilities?.let { it.canEditFor(user.id) && it.viewerIsEventHost }
+            ?: (!event.isAffiliateEvent() && user.id.isNotBlank() && event.hostId == user.id)
+    }
         .stateIn(scope, SharingStarted.Eagerly, false)
 
     private val selectedEventId = relationStateCoordinator.selectedEventId
@@ -1199,6 +1202,8 @@ class DefaultEventDetailComponent(
             put("event_id", event.id)
             put("event_type", event.eventType.name)
             put("registration_type", "affiliate")
+            event.sourceType?.takeIf(String::isNotBlank)?.let { put("source_type", it) }
+            event.sourceId?.takeIf(String::isNotBlank)?.let { put("source_id", it) }
             put("source", "event_detail")
             put("team_signup", event.teamSignup.toString())
             event.organizationId?.trim()?.takeIf(String::isNotBlank)?.let { put("organization_id", it) }

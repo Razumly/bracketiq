@@ -18,6 +18,8 @@ import com.razumly.mvp.core.data.util.evaluatePlayoffDivisionPlacementCapacities
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.resolveCanonicalPlayoffPlacementSources
 import com.razumly.mvp.eventDetail.composables.leagueScoringValidationErrors
+import com.razumly.mvp.eventDetail.shared.externalRegistrationUrlError
+import com.razumly.mvp.core.data.dataTypes.isAffiliateEvent
 import kotlinx.datetime.LocalDate
 
 internal fun eventAgeRangeErrors(event: Event): Pair<String?, String?> {
@@ -95,6 +97,7 @@ internal fun validatePaymentPlans(
     event: Event,
     divisionDetails: List<DivisionDetail> = emptyList(),
 ): List<String> {
+    if (event.isAffiliateEvent()) return emptyList()
     fun validatePlan(
         label: String,
         priceCents: Int,
@@ -281,9 +284,10 @@ internal fun computeEventValidationResult(
     val isTeamSizeValid = !editEvent.teamSignup || editEvent.teamSizeLimit >= 1
     val ageRangeErrors = eventAgeRangeErrors(editEvent)
     val isAgeRangeValid = ageRangeErrors.first == null && ageRangeErrors.second == null
-    val isRegistrationCutoffValid = editEvent.registrationCutoffHours >= 0
-    val isRefundCutoffValid = editEvent.cancellationRefundHours?.let { hours -> hours >= 0 } ?: true
-    val manualPaymentLinkErrors = if (editEvent.usesManualRegistrationPayments()) {
+    val isRegistrationCutoffValid = editEvent.isAffiliateEvent() || editEvent.registrationCutoffHours >= 0
+    val isRefundCutoffValid = editEvent.isAffiliateEvent() ||
+        (editEvent.cancellationRefundHours?.let { hours -> hours >= 0 } ?: true)
+    val manualPaymentLinkErrors = if (!editEvent.isAffiliateEvent() && editEvent.usesManualRegistrationPayments()) {
         editEvent.manualPaymentLinks.mapNotNull(::manualPaymentLinkError)
     } else {
         emptyList()
@@ -598,7 +602,8 @@ internal fun computeEventValidationResult(
     }
     val isLeagueScoringValid = leagueScoringErrors.isEmpty()
 
-    val isValid = isNameValid &&
+    val registrationWebsiteError = externalRegistrationUrlError(editEvent.affiliateUrl)
+    val isValid = registrationWebsiteError == null && isNameValid &&
         isPriceValid &&
         isMaxParticipantsValid &&
         isTeamSizeValid &&
@@ -628,6 +633,7 @@ internal fun computeEventValidationResult(
         isImageValid
 
     val validationErrors = buildList {
+        registrationWebsiteError?.let(::add)
         if (!isNameValid) {
             add("Event name is required.")
         }

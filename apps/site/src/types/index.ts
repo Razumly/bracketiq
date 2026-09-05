@@ -794,7 +794,7 @@ export interface Field {
   rentalSlots?: TimeSlot[];
 }
 
-export type EventType = 'EVENT' | 'TOURNAMENT' | 'LEAGUE' | 'WEEKLY_EVENT' | 'TRYOUT' | 'AFFILIATE';
+export type EventType = 'EVENT' | 'TOURNAMENT' | 'LEAGUE' | 'WEEKLY_EVENT' | 'TRYOUT';
 export type RegistrationPaymentMode = 'ONLINE' | 'MANUAL';
 export type ManualPaymentProvider = 'CASH_APP' | 'VENMO' | 'PAYPAL' | 'STRIPE' | 'ZELLE' | 'OTHER';
 

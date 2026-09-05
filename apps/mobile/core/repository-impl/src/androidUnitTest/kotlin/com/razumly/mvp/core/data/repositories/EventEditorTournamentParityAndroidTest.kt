@@ -15,10 +15,6 @@ import kotlinx.serialization.json.Json
 import java.io.File
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -53,8 +49,7 @@ class EventEditorTournamentParityAndroidTest {
         val golden = sharedTournamentParityWebGolden()
         val expectedCommand = golden.command
 
-        // The root fixture is a neutral editor shape. Map its neutral schedule key
-        // to the mobile DTO's canonical serial name before decoding it.
+        // Decode the shared site fixture without field-name conversion.
         assertFalse(draft.schedule.isAutomatedScheduling)
         assertEquals(expectedCommand.draft, draft)
         assertFalse(expectedCommand.draft.schedule.isAutomatedScheduling)
@@ -211,7 +206,7 @@ class EventEditorTournamentParityAndroidTest {
         assertFalse(renamedFixture == rawFixture)
         assertFailsWith<SerializationException> {
             strictFixtureJson.decodeFromString<TournamentParityWebGoldenDto>(
-                canonicalizeNeutralScheduleKey(renamedFixture).toString(),
+                renamedFixture,
             )
         }
     }
@@ -227,34 +222,8 @@ class EventEditorTournamentParityAndroidTest {
 
     private inline fun <reified T> decodeNeutralFixture(fileName: String): T =
         strictFixtureJson.decodeFromString(
-            canonicalizeNeutralScheduleKey(sharedParityFixture(fileName)).toString(),
+            sharedParityFixture(fileName),
         )
-
-    private fun canonicalizeNeutralScheduleKey(raw: String): JsonElement =
-        canonicalizeNeutralScheduleKey(jsonMVP.parseToJsonElement(raw))
-
-    private fun canonicalizeNeutralScheduleKey(element: JsonElement): JsonElement = when (element) {
-        is JsonObject -> buildJsonObject {
-            element.forEach { (key, value) ->
-                if (key == "schedule" && value is JsonObject) {
-                    put(key, buildJsonObject {
-                        value.forEach { (scheduleKey, scheduleValue) ->
-                            if (scheduleKey == "isAutomatedScheduling") {
-                                put("automatedScheduling", scheduleValue)
-                            } else {
-                                put(scheduleKey, canonicalizeNeutralScheduleKey(scheduleValue))
-                            }
-                        }
-                    })
-                } else {
-                    put(key, canonicalizeNeutralScheduleKey(value))
-                }
-            }
-        }
-
-        is JsonArray -> JsonArray(element.map(::canonicalizeNeutralScheduleKey))
-        else -> element
-    }
 
     private fun sharedParityFixture(fileName: String): String {
         val workingDirectory = File(System.getProperty("user.dir", ".")).canonicalFile

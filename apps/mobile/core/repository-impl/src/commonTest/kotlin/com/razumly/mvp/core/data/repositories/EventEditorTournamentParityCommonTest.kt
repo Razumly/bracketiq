@@ -1495,7 +1495,7 @@ internal val EXPECTED_TOURNAMENT_PARITY_WIRE =
     "schedule": {
       "mode": "FIXED_END",
       "endConstraint": "2026-10-03T20:00:00Z",
-      "automatedScheduling": false
+      "isAutomatedScheduling": false
     },
     "resources": {
       "fieldIds": [
@@ -1624,7 +1624,7 @@ private fun scheduledTournamentParityWire(): JsonObject =
     jsonMVP.parseToJsonElement(
         EXPECTED_TOURNAMENT_PARITY_WIRE
             .replace("\"createOperationId\": \"$TOURNAMENT_OPERATION_ID\"", "\"createOperationId\": \"$SCHEDULED_TOURNAMENT_OPERATION_ID\"")
-            .replace("\"automatedScheduling\": false", "\"automatedScheduling\": true")
+            .replace("\"isAutomatedScheduling\": false", "\"isAutomatedScheduling\": true")
             .replace("\"mode\": \"CREATE_ONLY\"", "\"mode\": \"CREATE_AND_BUILD_SCHEDULE\"")
             .replace("\"hasScheduleProposalSupport\": false", "\"hasScheduleProposalSupport\": true"),
     ).jsonObject

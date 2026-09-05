@@ -1445,6 +1445,11 @@ export const buildEventEditorSnapshot = async (
     catalogs,
     immutable,
     scheduleState: resolvedScheduleState,
+    provenance: {
+      sourceType: typeof event.sourceType === "string" ? event.sourceType : null,
+      sourceId: typeof event.sourceId === "string" ? event.sourceId : null,
+      sourceUrl: typeof event.sourceUrl === "string" ? event.sourceUrl : null,
+    },
   };
   return parseEventEditorSnapshot(snapshot);
 };

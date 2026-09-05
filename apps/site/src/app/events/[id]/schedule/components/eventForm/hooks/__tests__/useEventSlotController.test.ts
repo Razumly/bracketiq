@@ -145,7 +145,6 @@ const useSlotHarness = ({
         hasImmutableTimeSlots,
         immutableFields: [],
         immutableTimeSlots,
-        isAffiliateEvent: false,
         isEditMode: true,
         leagueSlots: formValues.leagueSlots,
         parentEvent: formValues.parentEvent,

@@ -159,6 +159,99 @@ const baseEventPayload = () => ({
 const divisionId = (token: string) => buildEventDivisionId("event_1", token);
 
 describe("upsertEventFromPayload", () => {
+  it.each([
+    [null, "USER_CREATED"],
+    ["organization_1", "ORGANIZATION_CREATED"],
+  ])("records external Event provenance for organization %s without a pixel", async (organizationId, sourceType) => {
+    const client = createMockClient();
+    await upsertEventFromPayload({
+      ...baseEventPayload(),
+      organizationId,
+      affiliateUrl: "https://organizer.example/register",
+    }, client as any);
+    expect(client.events.upsert.mock.calls[0][0].create).toMatchObject({
+      sourceType,
+      affiliateUrl: "https://organizer.example/register",
+      eventType: "LEAGUE",
+    });
+  });
+
+  it.each(["javascript:alert(1)", "ftp://organizer.example/register", "invalid"])(
+    "rejects an invalid external destination %s before writes", async (affiliateUrl) => {
+      const client = createMockClient();
+      await expect(upsertEventFromPayload({ ...baseEventPayload(), affiliateUrl }, client as any))
+        .rejects.toThrow("Enter a valid external registration URL.");
+      expect(client.events.upsert).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    "https://partner.example/register",
+    "https://new-partner.example/register",
+    "",
+  ])("preserves external Event operations when the destination is %s", async (affiliateUrl) => {
+    const client = createMockClient();
+    const payload = {
+      ...baseEventPayload(),
+      affiliateUrl,
+      divisions: ["OPEN"],
+      teamSignup: true,
+      doTeamsOfficiate: true,
+      teamOfficialsMaySwap: true,
+      staffingPriority: "TEAM_COVERAGE_REQUIRED",
+      officialPositions: [{ id: "referee", name: "Referee", required: true }],
+      assistantHostIds: ["assistant_1"],
+      matchRulesOverride: { scoringModel: "POINTS_ONLY" },
+      autoCreatePointMatchIncidents: true,
+      noFixedEndDateTime: true,
+      leagueScoringConfigId: "scoring_1",
+      timeSlots: [{
+        id: "slot_1",
+        daysOfWeek: [1],
+        divisions: ["OPEN"],
+        startTimeMinutes: 540,
+        endTimeMinutes: 600,
+        repeating: true,
+        scheduledFieldId: "field_1",
+        startDate: "2026-01-05T09:00:00.000Z",
+        endDate: "2026-03-05T10:00:00.000Z",
+      }],
+    };
+    client.events.findUnique.mockResolvedValue({
+      ...payload,
+      affiliateUrl: "https://partner.example/register",
+      fieldIds: ["field_1"],
+      sourceType: "AFFILIATE_IMPORT",
+      sourceId: "source_1",
+      sourceUrl: "https://original.example/event",
+    });
+
+    await upsertEventFromPayload(payload, client as any);
+
+    const saved = client.events.upsert.mock.calls[0][0].update;
+    expect(saved).toMatchObject({
+      affiliateUrl: affiliateUrl || null,
+      eventType: "LEAGUE",
+      teamSignup: true,
+      doTeamsOfficiate: true,
+      teamOfficialsMaySwap: true,
+      staffingPriority: "TEAM_COVERAGE_REQUIRED",
+      assistantHostIds: ["assistant_1"],
+      matchRulesOverride: { scoringModel: "POINTS_ONLY" },
+      autoCreatePointMatchIncidents: true,
+      noFixedEndDateTime: true,
+      leagueScoringConfigId: "scoring_1",
+      timeSlotIds: ["slot_1"],
+      fieldIds: ["field_1"],
+    });
+    expect(saved.officialPositions).toHaveLength(1);
+    expect(saved).not.toHaveProperty("sourceType");
+    expect(saved).not.toHaveProperty("sourceId");
+    expect(saved).not.toHaveProperty("sourceUrl");
+    expect(client.timeSlots.upsert).toHaveBeenCalledTimes(1);
+    expect(client.matches.deleteMany).not.toHaveBeenCalled();
+  });
+
   it("rejects a Weekly Event that has only fixed timeslots", async () => {
     const client = createMockClient();
     const payload = {

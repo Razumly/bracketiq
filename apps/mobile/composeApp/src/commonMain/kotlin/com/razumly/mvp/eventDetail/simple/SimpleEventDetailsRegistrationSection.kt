@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.isAffiliateEvent
 import com.razumly.mvp.core.data.dataTypes.MANUAL_PAYMENT_PROVIDER_CASH_APP
 import com.razumly.mvp.core.data.dataTypes.MANUAL_PAYMENT_PROVIDER_OTHER
 import com.razumly.mvp.core.data.dataTypes.MANUAL_PAYMENT_PROVIDER_PAYPAL
@@ -125,6 +126,7 @@ internal fun LazyListScope.simpleEventDetailsRegistrationSection(
                 event = state.event,
                 divisionDetails = state.divisionDetails,
             )
+            if (!state.event.isAffiliateEvent()) {
             EventRegistrationQuestionsSection(
                 questions = state.eventRegistrationQuestions,
                 answers = state.eventRegistrationQuestionAnswers,
@@ -132,6 +134,7 @@ internal fun LazyListScope.simpleEventDetailsRegistrationSection(
                 onToggleExpanded = actions.onToggleEventRegistrationQuestions,
                 onAnswerChange = actions.onEventRegistrationQuestionAnswerChange,
             )
+            }
         },
         editContent = {
             if (state.editEvent.teamSignup) {
@@ -187,48 +190,50 @@ internal fun LazyListScope.simpleEventDetailsRegistrationSection(
             }
             FormSectionDivider()
 
-            RegistrationOptions(
-                cutoffHours = state.editEvent.registrationCutoffHours,
-                onCutoffHoursChange = { hours ->
-                    actions.onEditEvent { copy(registrationCutoffHours = hours) }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                showValidationErrors = state.showValidationErrors,
-            )
-
-            if (state.editEvent.usesManualRegistrationPayments()) {
-                FormSectionDivider()
-                ManualPaymentSettingsSection(
-                    event = state.editEvent,
-                    onEditEvent = actions.onEditEvent,
-                    showValidationErrors = state.showValidationErrors,
-                )
-            }
-
-            if (state.editEvent.cancellationRefundHours != null) {
-                FormSectionDivider()
-                StandardTextField(
-                    value = state.editEvent.cancellationRefundHours?.toString().orEmpty(),
-                    onValueChange = { newValue ->
-                        if (!newValue.all(Char::isDigit)) return@StandardTextField
-                        actions.onEditEvent {
-                            copy(cancellationRefundHours = newValue.toIntOrNull() ?: 0)
-                        }
+            if (!state.editEvent.isAffiliateEvent()) {
+                RegistrationOptions(
+                    cutoffHours = state.editEvent.registrationCutoffHours,
+                    onCutoffHoursChange = { hours ->
+                        actions.onEditEvent { copy(registrationCutoffHours = hours) }
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    label = "Automatic refund cutoff (hours) *",
-                    keyboardType = "number",
-                    isError = state.showValidationErrors &&
-                        (state.editEvent.cancellationRefundHours ?: 0) < 0,
-                    supportingText = if (
-                        state.showValidationErrors &&
-                        (state.editEvent.cancellationRefundHours ?: 0) < 0
-                    ) {
-                        "Enter 0 or more hours."
-                    } else {
-                        "Use 0 to allow refunds until the event starts."
-                    },
+                    showValidationErrors = state.showValidationErrors,
                 )
+
+                if (state.editEvent.usesManualRegistrationPayments()) {
+                    FormSectionDivider()
+                    ManualPaymentSettingsSection(
+                        event = state.editEvent,
+                        onEditEvent = actions.onEditEvent,
+                        showValidationErrors = state.showValidationErrors,
+                    )
+                }
+
+                if (state.editEvent.cancellationRefundHours != null) {
+                    FormSectionDivider()
+                    StandardTextField(
+                        value = state.editEvent.cancellationRefundHours?.toString().orEmpty(),
+                        onValueChange = { newValue ->
+                            if (!newValue.all(Char::isDigit)) return@StandardTextField
+                            actions.onEditEvent {
+                                copy(cancellationRefundHours = newValue.toIntOrNull() ?: 0)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = "Automatic refund cutoff (hours) *",
+                        keyboardType = "number",
+                        isError = state.showValidationErrors &&
+                            (state.editEvent.cancellationRefundHours ?: 0) < 0,
+                        supportingText = if (
+                            state.showValidationErrors &&
+                            (state.editEvent.cancellationRefundHours ?: 0) < 0
+                        ) {
+                            "Enter 0 or more hours."
+                        } else {
+                            "Use 0 to allow refunds until the event starts."
+                        },
+                    )
+                }
             }
         },
     )

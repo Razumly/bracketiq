@@ -165,7 +165,7 @@ A registration journey completed outside BracketIQ on the Event operator's site.
 _Avoid_: Affiliate Event Type
 
 **Affiliate Event**:
-An Event with an externally completed, tracked registration journey. Affiliate Event is a commercial context independent of Event Type.
+An Event with an externally completed registration journey. Affiliate Event is a commercial context independent of Event Type.
 _Avoid_: Affiliate Event Type
 
 **Discovery Coverage**:
@@ -269,7 +269,7 @@ A Sport's singular and plural user-facing names for a Resource, such as Court an
 _Avoid_: Resource type
 
 **Tracking Pixel**:
-A verified integration on an external registration domain that attributes Affiliate Event conversions. An Organization must verify a Tracking Pixel before enabling External Registration for that domain.
+A verified integration on an external registration domain that attributes Affiliate Event conversions.
 _Avoid_: Affiliate source
 
 **Management Authority**:

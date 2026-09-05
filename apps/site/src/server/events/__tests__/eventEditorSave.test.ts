@@ -248,7 +248,7 @@ const commandFor = (questions: unknown[]) =>
     editorRevision: "revision_1",
     staffRevision: "staff_revision_1",
     draft: {
-      basics: { eventType: "EVENT", hostId: "host_1", organizationId: null },
+      basics: { eventType: "EVENT", hostId: "host_1", organizationId: null, affiliateUrl: "" },
       registration: {
         payment: { mode: "FREE", priceCents: 0 },
         questions,

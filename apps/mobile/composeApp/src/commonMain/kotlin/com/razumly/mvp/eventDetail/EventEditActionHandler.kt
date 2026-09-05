@@ -267,6 +267,10 @@ internal class EventEditActionHandler(
             if (requestId != editStartRequestId || editDraftCoordinator.isEditing.value) {
                 return@launch
             }
+            if (!session.snapshot.capabilities.canEdit || session.snapshot.capabilities.readOnly) {
+                setError("Event management is read-only.")
+                return@launch
+            }
             setEventEditMode(enabled = true, seedSession = session)
         }
     }

@@ -458,6 +458,7 @@ export const canManageEvent = async (
 };
 
 export type EventAuthorityCapabilities = {
+  viewerUserId?: string | null;
   canEdit: boolean;
   canManageStaff: boolean;
   canDelegateHost: boolean;
@@ -509,6 +510,7 @@ export const projectEventAuthorityCapabilities = async (
 
   if (!session) {
     return {
+      viewerUserId: null,
       canEdit: false,
       canManageStaff: false,
       canDelegateHost: false,
@@ -550,6 +552,7 @@ export const projectEventAuthorityCapabilities = async (
       : 'NOT_AUTHORIZED';
 
   return {
+    viewerUserId: session.userId,
     canEdit,
     canManageStaff: canEdit,
     canDelegateHost,

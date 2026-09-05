@@ -10,6 +10,7 @@ jest.mock("@/lib/permissions", () => ({
 }));
 
 import { prisma } from "@/lib/prisma";
+import { PUT as updateEventEditor } from "@/app/api/events/[eventId]/editor/route";
 import {
   parseEventEditorAcceptMaintenanceProposal,
   parseEventEditorCreateProposal,
@@ -610,6 +611,57 @@ describeDatabase("Issue 95 Event Editor and schedule persistence", () => {
       await cleanupIssue95Fixture(eventId);
     }
     requireSessionMock.mockReset();
+  });
+
+  it("preserves identity, provenance, Resources, and Matches through external registration changes", async () => {
+    const fixture = await createIssue95Fixture("external-registration", { reusableGraph: true });
+    const source = {
+      sourceType: "AFFILIATE_IMPORT",
+      sourceId: "issue-48-source",
+      sourceUrl: "https://source.example/league",
+    };
+    // The host owns this claimed listing. Provenance is independent from authority.
+    await prisma.events.update({
+      where: { id: fixture.eventId },
+      data: { ...source, affiliateUrl: "https://organizer.example/register" },
+    });
+    const actor = { userId: ISSUE95_HOST_ID, isAdmin: false };
+    requireSessionMock.mockResolvedValue(actor);
+    const original = await loadEventEditorSnapshot(fixture.eventId, { actor });
+    const before = await prisma.matches.findMany({
+      where: { eventId: fixture.eventId }, orderBy: { id: "asc" },
+    });
+    for (const affiliateUrl of ["https://new-organizer.example/join", "", "https://organizer.example/register"]) {
+      const snapshot = await loadEventEditorSnapshot(fixture.eventId, { actor });
+      const response = await updateEventEditor(new NextRequest(
+        `http://localhost/api/events/${fixture.eventId}/editor`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contractVersion: snapshot.contractVersion,
+            editorRevision: snapshot.editorRevision,
+            staffRevision: snapshot.staffRevision,
+            draft: { ...snapshot.draft, basics: { ...snapshot.draft.basics, affiliateUrl } },
+            scheduleTransition: { mode: "PRESERVE" },
+          }),
+        },
+      ), { params: Promise.resolve({ eventId: fixture.eventId }) });
+      const result = await response.json();
+      expect({ status: response.status, error: result.error }).toEqual({ status: 200, error: undefined });
+      const saved = await loadEventEditorSnapshot(fixture.eventId, { actor });
+      expect(saved.eventId).toBe(fixture.eventId);
+      expect(saved.provenance).toEqual(source);
+      expect(saved.draft.basics.eventType).toBe("LEAGUE");
+      expect(saved.draft.basics.affiliateUrl).toBe(affiliateUrl);
+      expect(saved.draft.resources).toEqual(original.draft.resources);
+      expect(saved.draft.competition).toEqual(original.draft.competition);
+      expect(saved.draft.staff).toEqual(original.draft.staff);
+      expect(saved.capabilities.canEdit).toBe(true);
+      expect(saved.capabilities.viewerUserId).toBe(ISSUE95_HOST_ID);
+      expect(await prisma.matches.findMany({
+        where: { eventId: fixture.eventId }, orderBy: { id: "asc" },
+      })).toEqual(before);
+    }
   });
 
   it("preserves a reusable Match Graph during a same-type PRESERVE Save", async () => {

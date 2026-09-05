@@ -203,7 +203,7 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
             .transform((value) => value ?? ''),
         timeZone: z.string().trim().default('UTC'),
         state: z.string().default('DRAFT'),
-        eventType: z.enum(['EVENT', 'TOURNAMENT', 'LEAGUE', 'WEEKLY_EVENT', 'TRYOUT', 'AFFILIATE']),
+        eventType: z.enum(['EVENT', 'TOURNAMENT', 'LEAGUE', 'WEEKLY_EVENT', 'TRYOUT']),
         parentEvent: z.string().optional().nullable(),
         sportIds: z.array(z.string().trim().min(1)).default([]).refine(
             (sportIds) => sportIds.length > 0,
@@ -424,7 +424,7 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
 
         const isAffiliateEvent = Boolean(values.isAffiliateEvent || hasAffiliateUrl(values.affiliateUrl));
 
-        if (!isAffiliateEvent && values.singleDivision && values.maxParticipants == null) {
+        if (values.singleDivision && values.maxParticipants == null) {
             ctx.addIssue({
                 code: 'custom',
                 message: values.teamSignup ? 'Max teams is required' : 'Max participants is required',
@@ -542,7 +542,7 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
             }
         }
 
-        if (!isAffiliateEvent && supportsScheduleSlotsForEvent(values.eventType, values.parentEvent) && !values.noFixedEndDateTime) {
+        if (supportsScheduleSlotsForEvent(values.eventType, values.parentEvent) && !values.noFixedEndDateTime) {
             const parsedStart = parseLocalDateTime(values.start);
             const parsedEnd = parseLocalDateTime(values.end);
             if (!parsedStart || !parsedEnd || parsedEnd.getTime() <= parsedStart.getTime()) {
@@ -567,7 +567,7 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
                 path: ['divisionDetails'],
             });
         }
-        if (!isAffiliateEvent && requiresOrganizationEventFieldSelection(values.eventType, values.organizationId, values.selectedFieldIds)) {
+        if (requiresOrganizationEventFieldSelection(values.eventType, values.organizationId, values.selectedFieldIds)) {
             ctx.addIssue({
                 code: "custom",
                 message: `Select at least one organization ${resourceLabels.singular.toLocaleLowerCase()} for this event.`,
@@ -583,7 +583,7 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
             || localFieldCount > 0
             || scheduledFieldCount > 0
             || values.fieldCount > 0;
-        if (!isAffiliateEvent && (values.eventType === 'EVENT' || values.eventType === 'WEEKLY_EVENT') && !hasAtLeastOneField) {
+        if ((values.eventType === 'EVENT' || values.eventType === 'WEEKLY_EVENT') && !hasAtLeastOneField) {
             ctx.addIssue({
                 code: "custom",
                 message: `Select or create at least one ${resourceLabels.singular.toLocaleLowerCase()} for this event.`,
@@ -694,7 +694,7 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
             }
         }
 
-        if (!isAffiliateEvent && values.eventType === 'TOURNAMENT') {
+        if (values.eventType === 'TOURNAMENT') {
             if (!(typeof values.maxParticipants === 'number' && values.maxParticipants >= MIN_BRACKET_TEAM_COUNT)) {
                 ctx.addIssue({
                     code: "custom",
@@ -714,7 +714,7 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
                 });
             }
         }
-        if (!isAffiliateEvent && (values.eventType === 'LEAGUE' || values.eventType === 'TOURNAMENT') && values.isAutomatedScheduling === false) {
+        if ((values.eventType === 'LEAGUE' || values.eventType === 'TOURNAMENT') && values.isAutomatedScheduling === false) {
             const plannedEnd = parseDateTimeInTimeZone(values.end, values.timeZone);
             const plannedStart = parseDateTimeInTimeZone(values.start, values.timeZone);
             if (!plannedEnd) {
@@ -732,7 +732,7 @@ export const buildEventFormSchema = (options: EventFormSchemaOptions = {}) => z
             }
         }
 
-        if (!isAffiliateEvent && supportsScheduleSlotsForEvent(values.eventType, values.parentEvent) && values.isAutomatedScheduling !== false) {
+        if (supportsScheduleSlotsForEvent(values.eventType, values.parentEvent) && values.isAutomatedScheduling !== false) {
             const slotDivisionLookup = buildSlotDivisionLookup(
                 values.divisionDetails,
                 values.eventType === 'LEAGUE' && values.leagueData.includePlayoffs && values.splitLeaguePlayoffDivisions

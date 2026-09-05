@@ -616,7 +616,7 @@ describe('Weekly Event schedule validation', () => {
 });
 
 describe('affiliate event form helpers', () => {
-  it('keeps affiliate division metadata while stripping BIQ-only setup from the draft', () => {
+  it('keeps external Event operations while removing inapplicable payment setup from the command', () => {
     const source = makeAffiliateEventFormValues();
     const schema = buildEventFormSchema({ allowMissingEventImage: true, allowMissingEventDivisions: true });
 
@@ -644,7 +644,10 @@ describe('affiliate event form helpers', () => {
       resolvedOrganization: {
         $id: 'org_1',
         ownerId: 'user_1',
-        staffMembers: [],
+        staffMembers: [
+          { organizationId: 'org_1', userId: 'assistant_1', types: ['HOST'] },
+          { organizationId: 'org_1', userId: 'official_1', types: ['OFFICIAL'] },
+        ],
         staffInvites: [],
       } as any,
       selectedRentedFieldIds: [],
@@ -660,21 +663,21 @@ describe('affiliate event form helpers', () => {
       price: 9900,
       allowPaymentPlans: false,
       allowTeamSplitDefault: false,
-      teamSignup: false,
+      teamSignup: true,
       singleDivision: false,
       splitLeaguePlayoffDivisions: false,
-      registrationByDivisionType: false,
+      registrationByDivisionType: true,
       divisions: ['stale_division'],
       playoffDivisionDetails: [],
       requiredTemplateIds: [],
-      officialIds: [],
-      officialPositions: [],
-      eventOfficials: [],
-      assistantHostIds: [],
-      doTeamsOfficiate: false,
-      teamOfficialsMaySwap: false,
-      matchRulesOverride: null,
-      autoCreatePointMatchIncidents: false,
+      officialIds: ['official_1'],
+      officialPositions: [expect.objectContaining({ id: 'ref', name: 'Referee', count: 1 })],
+      eventOfficials: [expect.objectContaining({ userId: 'official_1', positionIds: ['ref'] })],
+      assistantHostIds: ['assistant_1'],
+      doTeamsOfficiate: true,
+      teamOfficialsMaySwap: true,
+      matchRulesOverride: { scoringModel: 'POINTS_ONLY' },
+      autoCreatePointMatchIncidents: true,
       taxHandling: 'INHERIT_ORG',
       organizerManualTaxRateBps: 0,
     });
@@ -749,7 +752,7 @@ describe('affiliate event form helpers', () => {
       expect.objectContaining({
         id: 'single_affiliate_division',
         price: 15800,
-        maxParticipants: 99,
+        maxParticipants: 24,
         allowPaymentPlans: false,
         installmentCount: 0,
         installmentAmounts: [],

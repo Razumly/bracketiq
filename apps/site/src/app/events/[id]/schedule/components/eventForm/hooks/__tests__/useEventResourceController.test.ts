@@ -94,7 +94,6 @@ const useResourceHarness = ({
         hasImmutableFields: false,
         immutableFields: EMPTY_FIELDS,
         immutableTimeSlotsFromDefaults: EMPTY_TIME_SLOTS,
-        isAffiliateEvent: false,
         isCreateMode: true,
         isEditMode: false,
         open,

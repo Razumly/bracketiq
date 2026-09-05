@@ -331,6 +331,7 @@ internal class EventParticipantSyncCoordinator(
         baseEvent: Event,
         snapshot: EventParticipantsSnapshotResponseDto,
         protectedHistoryAuthoritative: Boolean = false,
+        completeEventProjection: Boolean = false,
     ): EventParticipantsSyncResult {
         snapshot.error?.takeIf(String::isNotBlank)?.let { error(it) }
         val divisionWarnings = snapshot.divisionWarnings
@@ -368,6 +369,19 @@ internal class EventParticipantSyncCoordinator(
         val snapshotEvent = snapshot.event
             ?.toEventOrNull()
             ?.withCachedDivisionStateForPartialSnapshot(participantBaseEvent)
+            ?.let { incoming ->
+                if (completeEventProjection) incoming else {
+                    // Participant responses omit registration destination, provenance, and authority.
+                    val retained = latestCachedEvent ?: baseEvent
+                    incoming.copy(
+                        affiliateUrl = retained.affiliateUrl,
+                        sourceType = retained.sourceType,
+                        sourceId = retained.sourceId,
+                        sourceUrl = retained.sourceUrl,
+                        capabilities = retained.capabilities,
+                    )
+                }
+            }
         val mergedEvent = mergePersistedEventEditorLocks(
             incoming = (snapshotEvent ?: participantBaseEvent).copy(
                 teamIds = normalizedParticipantIds(participantIds.teamIds),

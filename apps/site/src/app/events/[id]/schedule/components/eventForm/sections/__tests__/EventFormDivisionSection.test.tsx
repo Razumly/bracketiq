@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
     fireEvent,
     render,
@@ -30,9 +31,6 @@ jest.mock('../DivisionEditorHeader', () => ({
 }));
 jest.mock('../DivisionEditorLeaguePanel', () => ({
     DivisionEditorLeaguePanel: () => <div data-testid="division-editor-league" />,
-}));
-jest.mock('../DivisionEditorPlayoffDivisionControls', () => ({
-    DivisionEditorPlayoffDivisionControls: () => <div data-testid="playoff-controls" />,
 }));
 jest.mock('../DivisionEditorActionsAndErrors', () => ({
     DivisionEditorActionsAndErrors: () => <div data-testid="division-actions" />,
@@ -121,19 +119,28 @@ const renderSection = ({
     eventData = buildEventData(),
     paymentController = buildPaymentController(),
     setValue = jest.fn(),
+    playoffDivision = false,
 }: {
     isAffiliateEvent?: boolean;
     eventData?: EventFormValues;
     paymentController?: ReturnType<typeof buildPaymentController>;
     setValue?: jest.Mock;
+    playoffDivision?: boolean;
 } = {}) => {
-    render(
+    function Section() {
+        const controller = buildDivisionController();
+        const [divisionEditor, setDivisionEditor] = useState({
+            ...controller.divisionEditor,
+            divisionKind: playoffDivision ? 'PLAYOFF' : 'LEAGUE',
+            phaseSettings: {},
+        });
+        return (
         <MantineProvider>
             <EventFormDivisionSection
             collapsed={false}
             comboboxProps={{}}
             control={{} as never}
-            divisionController={buildDivisionController() as never}
+            divisionController={{ ...controller, divisionEditor, setDivisionEditor, splitDivisionEditorEnabled: playoffDivision } as never}
             divisionTypeOptions={[]}
             errors={{}}
             eventData={eventData}
@@ -158,8 +165,10 @@ const renderSection = ({
             supportsEditableTeamSignup
             tournamentData={eventData.tournamentData}
             />
-        </MantineProvider>,
-    );
+        </MantineProvider>
+        );
+    }
+    render(<Section />);
     return { paymentController, setValue };
 };
 
@@ -168,7 +177,6 @@ describe('EventFormDivisionSection', () => {
         const { paymentController, setValue } = renderSection();
 
         expect(screen.getByTestId('division-mode')).toBeInTheDocument();
-        expect(screen.getByTestId('playoff-controls')).toBeInTheDocument();
         expect(screen.getByTestId('division-summary')).toHaveAttribute('data-affiliate-mode', 'false');
 
         fireEvent.click(screen.getByRole('button', { name: 'Enable payment plans' }));
@@ -179,14 +187,16 @@ describe('EventFormDivisionSection', () => {
         expect(paymentController.syncInstallmentCount).toHaveBeenCalledWith(1);
     });
 
-    it('uses the restricted affiliate summary and hides playoff-only controls', () => {
+    it('keeps playoff controls and hides payment controls with external registration', () => {
         renderSection({
             isAffiliateEvent: true,
-            eventData: buildEventData({ singleDivision: false }),
+            eventData: buildEventData({ eventType: 'LEAGUE', singleDivision: false }),
+            playoffDivision: true,
         });
 
         expect(screen.queryByRole('button', { name: 'Enable payment plans' })).not.toBeInTheDocument();
-        expect(screen.queryByTestId('playoff-controls')).not.toBeInTheDocument();
-        expect(screen.getByTestId('division-summary')).toHaveAttribute('data-affiliate-mode', 'true');
+        const nameInput = screen.getByRole('textbox', { name: 'Playoff Division Name' });
+        fireEvent.change(nameInput, { target: { value: 'Championship' } });
+        expect(nameInput).toHaveValue('Championship');
     });
 });

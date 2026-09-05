@@ -316,7 +316,7 @@ export function buildEventDraft(input: BuildEventDraftInput): BuiltEventDraft {
             );
         }
         const singleDivisionEnabled = Boolean(source.singleDivision);
-        const useEventLevelDivisionDefaults = singleDivisionEnabled && !isAffiliateEvent;
+        const useEventLevelDivisionDefaults = singleDivisionEnabled;
         const tournamentBracketConfig = normalizeTournamentConfigForSetMode(
             source.tournamentData,
             tournamentRequiresSets,
@@ -544,9 +544,7 @@ export function buildEventDraft(input: BuildEventDraftInput): BuiltEventDraft {
             organizationAssignments ? organizationAssignments.officialIds.includes(official.userId) : true
         ));
         const normalizedOfficialIds = getEventOfficialUserIds(normalizedEventOfficials);
-        const normalizedPendingStaffInvites = isAffiliateEvent
-            ? []
-            : (Array.isArray(source.pendingStaffInvites) ? source.pendingStaffInvites : [])
+        const normalizedPendingStaffInvites = (Array.isArray(source.pendingStaffInvites) ? source.pendingStaffInvites : [])
                 .map((invite) => normalizePendingStaffInvite(invite));
         const officialPoolById = new Map<string, UserData>();
         (source.officials || []).forEach((official) => {
@@ -585,8 +583,7 @@ export function buildEventDraft(input: BuildEventDraftInput): BuiltEventDraft {
             timeZone: normalizeTimeZone(source.timeZone, getSystemTimeZone()),
             eventType: source.eventType,
             parentEvent: source.parentEvent || undefined,
-            noFixedEndDateTime: !isAffiliateEvent
-                && source.eventType !== 'TRYOUT'
+            noFixedEndDateTime: source.eventType !== 'TRYOUT'
                 && supportsScheduleSlotsForEvent(source.eventType, source.parentEvent)
                 ? Boolean(source.noFixedEndDateTime)
                 : false,
@@ -619,10 +616,10 @@ export function buildEventDraft(input: BuildEventDraftInput): BuiltEventDraft {
                 ? Math.trunc(source.maxParticipants)
                 : minimumDivisionParticipants,
             teamSizeLimit: source.teamSizeLimit ?? undefined,
-            teamSignup: isAffiliateEvent ? false : source.teamSignup,
+            teamSignup: source.teamSignup,
             singleDivision: source.singleDivision,
-            splitLeaguePlayoffDivisions: isAffiliateEvent ? false : splitLeaguePlayoffDivisions,
-            registrationByDivisionType: isAffiliateEvent ? false : source.registrationByDivisionType,
+            splitLeaguePlayoffDivisions,
+            registrationByDivisionType: source.registrationByDivisionType,
             divisions: normalizedDivisionKeys,
             divisionDetails: normalizedDivisionDetailsForPayload.map((detail) => ({
                 ...detail,
@@ -646,7 +643,7 @@ export function buildEventDraft(input: BuildEventDraftInput): BuiltEventDraft {
                         : [])
                     : [],
             })),
-            playoffDivisionDetails: (isAffiliateEvent ? [] : normalizedPlayoffDivisionDetails).map((division) => ({
+            playoffDivisionDetails: normalizedPlayoffDivisionDetails.map((division) => ({
                 id: division.id,
                 key: division.key,
                 kind: 'PLAYOFF' as const,
@@ -716,28 +713,26 @@ export function buildEventDraft(input: BuildEventDraftInput): BuiltEventDraft {
             freeAgentIds: source.freeAgents,
             teams: source.teams,
             players: source.players,
-            officials: isAffiliateEvent ? [] : normalizedOfficials,
-            officialIds: isAffiliateEvent ? [] : normalizedOfficialIds,
-            staffingPriority: isAffiliateEvent
-                ? 'FULL_COVERAGE_WITH_CONFLICTS_ALLOWED'
-                : normalizeStaffingPriority(source.staffingPriority),
-            officialPositions: isAffiliateEvent ? [] : normalizedOfficialPositionsForPayload,
-            eventOfficials: isAffiliateEvent ? [] : normalizedEventOfficials,
-            assistantHostIds: isAffiliateEvent ? [] : normalizedAssistantHostIds,
+            officials: normalizedOfficials,
+            officialIds: normalizedOfficialIds,
+            staffingPriority: normalizeStaffingPriority(source.staffingPriority),
+            officialPositions: normalizedOfficialPositionsForPayload,
+            eventOfficials: normalizedEventOfficials,
+            assistantHostIds: normalizedAssistantHostIds,
             pendingStaffInvites: normalizedPendingStaffInvites,
-            doTeamsOfficiate: isAffiliateEvent ? false : source.doTeamsOfficiate,
-            teamOfficialsMaySwap: isAffiliateEvent ? false : source.doTeamsOfficiate ? Boolean(source.teamOfficialsMaySwap) : false,
-            teamCheckInMode: isAffiliateEvent || !source.teamSignup ? 'OFF' : source.teamCheckInMode,
+            doTeamsOfficiate: source.doTeamsOfficiate,
+            teamOfficialsMaySwap: source.doTeamsOfficiate ? Boolean(source.teamOfficialsMaySwap) : false,
+            teamCheckInMode: !source.teamSignup ? 'OFF' : source.teamCheckInMode,
             teamCheckInOpenMinutesBefore: Number.isFinite(Number(source.teamCheckInOpenMinutesBefore))
                 ? Math.max(0, Math.trunc(Number(source.teamCheckInOpenMinutesBefore)))
                 : 60,
-            allowMatchRosterEdits: isAffiliateEvent || !source.teamSignup ? false : Boolean(source.allowMatchRosterEdits),
+            allowMatchRosterEdits: !source.teamSignup ? false : Boolean(source.allowMatchRosterEdits),
             allowTemporaryMatchPlayers:
-                isAffiliateEvent || !source.teamSignup || !source.allowMatchRosterEdits
+                !source.teamSignup || !source.allowMatchRosterEdits
                     ? false
                     : Boolean(source.allowTemporaryMatchPlayers),
-            matchRulesOverride: isAffiliateEvent ? null : source.matchRulesOverride ?? null,
-            autoCreatePointMatchIncidents: isAffiliateEvent ? false : Boolean(source.autoCreatePointMatchIncidents),
+            matchRulesOverride: source.matchRulesOverride ?? null,
+            autoCreatePointMatchIncidents: Boolean(source.autoCreatePointMatchIncidents),
             coordinates: baseCoordinates,
         };
 
@@ -961,7 +956,7 @@ export function buildEventDraft(input: BuildEventDraftInput): BuiltEventDraft {
             }
         }
 
-        if (!isAffiliateEvent && !hasImmutableTimeSlots && supportsScheduleSlotsForEvent(source.eventType, source.parentEvent)) {
+        if (!hasImmutableTimeSlots && supportsScheduleSlotsForEvent(source.eventType, source.parentEvent)) {
             const rentalLockedSlotDocuments = rentalLockedSlotsForDraft.map((slot) => {
                 const slotDivisions = normalizeSlotDivisionIdsWithLookup(slot.divisions, slotDivisionLookupForDraft);
                 return {

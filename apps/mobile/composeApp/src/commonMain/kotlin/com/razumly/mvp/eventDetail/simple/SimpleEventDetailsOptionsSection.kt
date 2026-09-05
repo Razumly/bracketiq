@@ -1,5 +1,6 @@
 package com.razumly.mvp.eventDetail
 
+import com.razumly.mvp.core.data.dataTypes.isAffiliateEvent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -180,43 +181,45 @@ internal fun LazyListScope.simpleEventDetailsOptionsSection(
                 }
             }
 
-            OptionsCategory(title = "Registration & payments") {
-                OptionCheckboxRow(
-                    checked = state.paidRegistrationEnabled,
-                    label = "Paid registration",
-                    description = "Show price inputs for the event or each division.",
-                    onCheckedChange = actions.onPaidRegistrationChange,
-                )
-                val manualPaymentsEnabled = state.editEvent.registrationPaymentMode == "MANUAL"
-                OptionCheckboxRow(
-                    checked = manualPaymentsEnabled,
-                    label = "Collect payments manually",
-                    description = "Provide Venmo, PayPal, cash, or other host payment instructions.",
-                    enabled = state.paidRegistrationEnabled,
-                    onCheckedChange = actions.onManualPaymentsChange,
-                )
-                OptionCheckboxRow(
-                    checked = state.editEvent.cancellationRefundHours != null,
-                    label = "Automatic refunds",
-                    description = if (manualPaymentsEnabled) {
-                        "Manual payments must be refunded directly by the host."
-                    } else {
-                        "Refund eligible online payments automatically."
-                    },
-                    enabled = state.paidRegistrationEnabled && !manualPaymentsEnabled,
-                    onCheckedChange = actions.onAutomaticRefundsChange,
-                )
-                OptionCheckboxRow(
-                    checked = state.editEvent.allowPaymentPlans == true,
-                    label = "Payment plans",
-                    description = if (!state.hostHasAccount) {
-                        "Finish payment account setup before enabling installments."
-                    } else {
-                        "Split online registration into scheduled installments."
-                    },
-                    enabled = state.paidRegistrationEnabled && !manualPaymentsEnabled && state.hostHasAccount,
-                    onCheckedChange = actions.onPaymentPlansChange,
-                )
+            if (!state.editEvent.isAffiliateEvent()) {
+                OptionsCategory(title = "Registration & payments") {
+                    OptionCheckboxRow(
+                        checked = state.paidRegistrationEnabled,
+                        label = "Paid registration",
+                        description = "Show price inputs for the event or each division.",
+                        onCheckedChange = actions.onPaidRegistrationChange,
+                    )
+                    val manualPaymentsEnabled = state.editEvent.registrationPaymentMode == "MANUAL"
+                    OptionCheckboxRow(
+                        checked = manualPaymentsEnabled,
+                        label = "Collect payments manually",
+                        description = "Provide Venmo, PayPal, cash, or other host payment instructions.",
+                        enabled = state.paidRegistrationEnabled,
+                        onCheckedChange = actions.onManualPaymentsChange,
+                    )
+                    OptionCheckboxRow(
+                        checked = state.editEvent.cancellationRefundHours != null,
+                        label = "Automatic refunds",
+                        description = if (manualPaymentsEnabled) {
+                            "Manual payments must be refunded directly by the host."
+                        } else {
+                            "Refund eligible online payments automatically."
+                        },
+                        enabled = state.paidRegistrationEnabled && !manualPaymentsEnabled,
+                        onCheckedChange = actions.onAutomaticRefundsChange,
+                    )
+                    OptionCheckboxRow(
+                        checked = state.editEvent.allowPaymentPlans == true,
+                        label = "Payment plans",
+                        description = if (!state.hostHasAccount) {
+                            "Finish payment account setup before enabling installments."
+                        } else {
+                            "Split online registration into scheduled installments."
+                        },
+                        enabled = state.paidRegistrationEnabled && !manualPaymentsEnabled && state.hostHasAccount,
+                        onCheckedChange = actions.onPaymentPlansChange,
+                    )
+                }
             }
 
             if (state.editEvent.teamSignup) {

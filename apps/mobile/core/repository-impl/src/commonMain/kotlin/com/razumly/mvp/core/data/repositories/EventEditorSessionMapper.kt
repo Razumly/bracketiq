@@ -680,6 +680,10 @@ private fun EventEditorSnapshotDto.toCanonicalState(operationId: String?): Event
         .filter(String::isNotBlank)
         .toSet()
     val event = draft.toEvent(eventId).copy(
+        sourceType = provenance?.sourceType ?: scheduleState.sourceType,
+        sourceId = provenance?.sourceId,
+        sourceUrl = provenance?.sourceUrl,
+        capabilities = capabilities.toDomain(),
         eventTypeLocked = protectedHistory || immutableFields.contains("eventType"),
         registrationUnitLocked = immutableFields.contains("teamSignup"),
         eventTypeHasProtectedHistory = protectedHistory,
@@ -745,8 +749,9 @@ private fun Event.toBasicsDto(
 private fun Event.toParticipationDto(
     existing: com.razumly.mvp.core.network.dto.EventEditorParticipationDto,
     baseline: Event,
+    preserveEventTypeConfiguration: Boolean = false,
 ) = existing.copy(
-    teamSignup = if (eventType == EventType.TRYOUT) {
+    teamSignup = if (eventType == EventType.TRYOUT && !preserveEventTypeConfiguration) {
         false
     } else if (teamSignup != baseline.teamSignup) {
         teamSignup
@@ -837,7 +842,11 @@ private fun Event.toPaymentDto(
 private fun Event.toScheduleDto(
     existing: EventEditorScheduleDto,
     baseline: Event,
+    preserveEventTypeConfiguration: Boolean = false,
 ): EventEditorScheduleDto {
+    if (preserveEventTypeConfiguration && isAutomatedScheduling == baseline.isAutomatedScheduling &&
+        noFixedEndDateTime == baseline.noFixedEndDateTime && end == baseline.end
+    ) return existing
     val normalizedAutomatedScheduling = normalizeAutomatedSchedulingForEventType(
         eventType,
         isAutomatedScheduling,
@@ -1234,8 +1243,9 @@ private fun Event.toStaffDto(
     baseline: Event,
     pendingStaffInvites: List<Invite>,
     pendingStaffInvitesChanged: Boolean,
+    preserveEventTypeConfiguration: Boolean = false,
 ): EventEditorStaffDto {
-    val isTryout = eventType == EventType.TRYOUT
+    val isTryout = eventType == EventType.TRYOUT && !preserveEventTypeConfiguration
     fun tryoutStaffTypes(staffTypes: List<String>): List<String> = staffTypes
         .map(String::trim)
         .map(String::uppercase)
@@ -1252,10 +1262,14 @@ private fun Event.toStaffDto(
     return existing.copy(
         staffingPriority = if (isTryout) {
             com.razumly.mvp.core.data.dataTypes.StaffingPriority.FULL_COVERAGE_WITH_CONFLICTS_ALLOWED.name
+        } else if (preserveEventTypeConfiguration && staffingPriority == baseline.staffingPriority) {
+            existing.staffingPriority
         } else {
             staffingPriority.name
         },
-        doTeamsOfficiate = if (isTryout) false else doTeamsOfficiate == true,
+        doTeamsOfficiate = if (isTryout) false else if (
+            preserveEventTypeConfiguration && doTeamsOfficiate == baseline.doTeamsOfficiate
+        ) existing.doTeamsOfficiate else doTeamsOfficiate == true,
         teamOfficialsMaySwap = if (isTryout) {
             false
         } else if (teamOfficialsMaySwap != baseline.teamOfficialsMaySwap) {
@@ -1394,6 +1408,7 @@ private fun Map<String, List<String>>.withFieldDivisionAssignments(
 private fun EventEditorDraftDto.withMutation(
     baseline: EventEditorCanonicalState,
     mutation: EventEditorCanonicalState,
+    preserveEventTypeConfiguration: Boolean = false,
 ): EventEditorDraftDto {
     val fieldsChanged = mutation.fields != baseline.fields
     val slotsChanged = mutation.timeSlots != baseline.timeSlots
@@ -1450,7 +1465,7 @@ private fun EventEditorDraftDto.withMutation(
         leagueScoringConfig = mutation.leagueScoringConfig,
         scoringChanged = scoringChanged,
     ).let { projected ->
-        if (mutation.event.eventType == EventType.LEAGUE ||
+        if (preserveEventTypeConfiguration || mutation.event.eventType == EventType.LEAGUE ||
             mutation.event.eventType == EventType.TOURNAMENT
         ) {
             projected
@@ -1482,16 +1497,17 @@ private fun EventEditorDraftDto.withMutation(
 
     return copy(
         basics = mutation.event.toBasicsDto(basics, baseline.event),
-        participation = mutation.event.toParticipationDto(participation, baseline.event),
+        participation = mutation.event.toParticipationDto(participation, baseline.event, preserveEventTypeConfiguration),
         registration = nextRegistration,
         competition = nextCompetition,
-        schedule = mutation.event.toScheduleDto(schedule, baseline.event),
+        schedule = mutation.event.toScheduleDto(schedule, baseline.event, preserveEventTypeConfiguration),
         resources = nextResources,
         staff = mutation.event.toStaffDto(
             existing = staff,
             baseline = baseline.event,
             pendingStaffInvites = mutation.pendingStaffInvites,
             pendingStaffInvitesChanged = invitesChanged,
+            preserveEventTypeConfiguration = preserveEventTypeConfiguration,
         ),
     )
 }
@@ -1583,7 +1599,14 @@ object EventEditorSessionMapper {
 
     fun toSaveCommand(session: EventEditorSession, mutation: EventEditorMutation): com.razumly.mvp.core.network.dto.EventEditorSaveCommandDto {
         require(session.snapshot.mode == "EDIT") { "Save command requires an edit editor session." }
-        val draft = session.snapshot.draft.withMutation(session.baseline, mutation.canonicalState)
+        val desired = mutation.canonicalState
+        val destinationChanged = desired.event.affiliateUrl != session.baseline.event.affiliateUrl
+        // A registration change must not reset configuration from the server's Event Type.
+        val draft = session.snapshot.draft.withMutation(
+            session.baseline,
+            desired,
+            preserveEventTypeConfiguration = destinationChanged && desired.event.eventType == session.baseline.event.eventType,
+        )
         val transition = EventEditorSaveScheduleTransitionDto(mode = EventEditorScheduleTransitionMode.PRESERVE)
         return com.razumly.mvp.core.network.dto.EventEditorSaveCommandDto(
             contractVersion = EVENT_EDITOR_CONTRACT_VERSION,

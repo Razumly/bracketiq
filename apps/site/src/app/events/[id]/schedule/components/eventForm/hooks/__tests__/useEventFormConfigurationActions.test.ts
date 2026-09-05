@@ -199,7 +199,7 @@ describe('useEventFormConfigurationActions', () => {
         });
     });
 
-    it('clears incompatible configuration when affiliate mode is enabled', async () => {
+    it('preserves operations when external registration is enabled', async () => {
         const { result } = renderHook(() => useConfigurationActionsHarness(buildEventData({
             teamSignup: true,
             registrationByDivisionType: true,
@@ -215,11 +215,11 @@ describe('useEventFormConfigurationActions', () => {
 
         await waitFor(() => {
             expect(result.current.eventData.isAffiliateEvent).toBe(true);
-            expect(result.current.eventData.teamSignup).toBe(false);
-            expect(result.current.eventData.registrationByDivisionType).toBe(false);
+            expect(result.current.eventData.teamSignup).toBe(true);
+            expect(result.current.eventData.registrationByDivisionType).toBe(true);
             expect(result.current.eventData.allowPaymentPlans).toBe(false);
-            expect(result.current.eventData.officialIds).toEqual([]);
-            expect(result.current.eventData.noFixedEndDateTime).toBe(false);
+            expect(result.current.eventData.officialIds).toEqual(['official_1']);
+            expect(result.current.eventData.noFixedEndDateTime).toBe(true);
         });
     });
 

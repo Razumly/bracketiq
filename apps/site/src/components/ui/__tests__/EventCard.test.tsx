@@ -47,7 +47,7 @@ const createEvent = (overrides: Partial<Event> = {}): Event => ({
   singleDivision: true,
   waitListIds: [],
   freeAgentIds: [],
-  eventType: 'AFFILIATE',
+  eventType: 'EVENT',
   sport: {
     $id: 'sport_volleyball',
     name: 'Indoor Volleyball',

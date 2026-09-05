@@ -2185,25 +2185,25 @@ class EventRepository(
             manage = manage,
         )
         val cachedEvent = roomStore.getEvent(normalizedEventId)
-        val bootstrapEvent = bootstrap.event
+        val canonicalEventDto = bootstrap.event?.let { eventDto ->
+            eventDto.copy(capabilities = bootstrap.capabilities ?: eventDto.capabilities)
+        }
+        val bootstrapEvent = canonicalEventDto
             ?.toEventOrNull(requireOwnerIdentity = manage)
         val baseEvent = bootstrapEvent ?: cachedEvent ?: event
         val protectedHistoryAuthoritative = bootstrap.event?.eventTypeHasProtectedHistory != null
         val participantSnapshot = bootstrap.participantSnapshot
             ?.let { snapshot ->
-                if (protectedHistoryAuthoritative) {
-                    snapshot.copy(event = bootstrap.event)
-                } else {
-                    snapshot
-                }
+                snapshot.copy(event = canonicalEventDto ?: snapshot.event)
             }
-            ?: EventParticipantsSnapshotResponseDto(event = bootstrap.event)
+            ?: EventParticipantsSnapshotResponseDto(event = canonicalEventDto)
 
         databaseService.withTransaction {
             val participantResult = participantSyncCoordinator.mergeParticipantsSnapshot(
                 baseEvent = baseEvent,
                 snapshot = participantSnapshot,
                 protectedHistoryAuthoritative = protectedHistoryAuthoritative,
+            completeEventProjection = canonicalEventDto != null,
             )
             participantSyncCoordinator.persistDetailCaches(
                 eventId = normalizedEventId,

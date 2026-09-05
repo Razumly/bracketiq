@@ -19,6 +19,16 @@ import kotlin.test.assertTrue
 
 class EventEditorDtosTest {
     @Test
+    fun given_site_schedule_when_decoded_then_explicit_automation_state_survives_reload() {
+        for (key in listOf("isAutomatedScheduling", "automatedScheduling")) {
+            val schedule = jsonMVP.decodeFromString<EventEditorScheduleDto>(
+                """{"mode":"FIXED_END","endConstraint":"2026-09-01T14:00:00Z","$key":false}""",
+            )
+            assertFalse(schedule.isAutomatedScheduling)
+        }
+    }
+
+    @Test
     fun given_editor_command_json_when_decoded_then_operation_identity_and_nested_state_round_trip() {
         val command = jsonMVP.decodeFromString<EventEditorCreateCommandDto>(
             """
@@ -228,8 +238,8 @@ class EventEditorDtosTest {
         assertEquals(JsonNull, savePlayoffDetail.getValue("playoffConfig"))
         assertFalse(savePlayoffDetail.containsKey("price"))
         val wireSchedule = wireDraft.getValue("schedule").jsonObject
-        assertEquals(true, wireSchedule.getValue("automatedScheduling").toString().toBoolean())
-        assertFalse(wireSchedule.containsKey("isAutomatedScheduling"))
+        assertEquals(true, wireSchedule.getValue("isAutomatedScheduling").toString().toBoolean())
+        assertFalse(wireSchedule.containsKey("automatedScheduling"))
         val wireResources = wireDraft.getValue("resources").jsonObject
 
         assertEquals(JsonNull, wireBasics.getValue("parentEvent"))

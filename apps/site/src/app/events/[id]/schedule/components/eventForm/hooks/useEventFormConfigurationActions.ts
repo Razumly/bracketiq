@@ -51,7 +51,6 @@ type UseEventFormConfigurationActionsParams = {
     clearLeagueSlotErrors: () => void;
     eventData: EventFormValues;
     getValues: EventFormGetValues;
-    isAffiliateEvent: boolean;
     leagueData: LeagueConfig;
     selectedSport: Sport | null | undefined;
     setEventData: EventDataSetter;
@@ -65,7 +64,6 @@ export const useEventFormConfigurationActions = ({
     clearLeagueSlotErrors,
     eventData,
     getValues,
-    isAffiliateEvent,
     leagueData,
     selectedSport,
     setEventData,
@@ -162,9 +160,8 @@ export const useEventFormConfigurationActions = ({
         applyValue: (eventType: Event['eventType']) => void,
     ) => {
         clearLeagueSlotErrors();
-        const enforcingTeamSettings = !isAffiliateEvent
-            && (nextType === 'LEAGUE' || nextType === 'TOURNAMENT');
-        const enforcingTryoutSettings = !isAffiliateEvent && nextType === 'TRYOUT';
+        const enforcingTeamSettings = nextType === 'LEAGUE' || nextType === 'TOURNAMENT';
+        const enforcingTryoutSettings = nextType === 'TRYOUT';
         const ensureFiniteEndAfterStart = () => {
             const parsedStart = parseLocalDateTime(getValues('start'));
             const parsedEnd = parseLocalDateTime(getValues('end'));
@@ -174,8 +171,7 @@ export const useEventFormConfigurationActions = ({
             }
         };
         const nextIsAutomatedScheduling =
-            !isAffiliateEvent
-            && (nextType === 'LEAGUE' || nextType === 'TOURNAMENT' || nextType === 'WEEKLY_EVENT');
+            nextType === 'LEAGUE' || nextType === 'TOURNAMENT' || nextType === 'WEEKLY_EVENT';
         applyValue(nextType);
         setValue(
             'isAutomatedScheduling',
@@ -205,7 +201,7 @@ export const useEventFormConfigurationActions = ({
 
         setValue('noFixedEndDateTime', false, { shouldDirty: true, shouldValidate: true });
         ensureFiniteEndAfterStart();
-    }, [clearLeagueSlotErrors, getValues, isAffiliateEvent, setValue]);
+    }, [clearLeagueSlotErrors, getValues, setValue]);
 
     const handleAffiliateEventChange = useCallback((
         checked: boolean,
@@ -218,9 +214,6 @@ export const useEventFormConfigurationActions = ({
             return;
         }
         const resetValues: Array<[string, unknown]> = [
-            ['teamSignup', false],
-            ['registrationByDivisionType', false],
-            ['splitLeaguePlayoffDivisions', false],
             ['allowPaymentPlans', false],
             ['installmentCount', 0],
             ['installmentAmounts', []],
@@ -228,18 +221,6 @@ export const useEventFormConfigurationActions = ({
             ['installmentDueRelativeDays', []],
             ['allowTeamSplitDefault', false],
             ['requiredTemplateIds', []],
-            ['playoffDivisionDetails', []],
-            ['assistantHostIds', []],
-            ['officialIds', []],
-            ['eventOfficials', []],
-            ['pendingStaffInvites', []],
-            ['doTeamsOfficiate', false],
-            ['teamOfficialsMaySwap', false],
-            ['staffingPriority', 'FULL_COVERAGE_WITH_CONFLICTS_ALLOWED'],
-            ['officialPositions', []],
-            ['matchRulesOverride', null],
-            ['autoCreatePointMatchIncidents', false],
-            ['noFixedEndDateTime', false],
         ];
         resetValues.forEach(([name, value]) => {
             setValue(name, value, { shouldDirty: true, shouldValidate: true });

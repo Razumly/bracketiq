@@ -1,5 +1,6 @@
 package com.razumly.mvp.eventDetail
 
+import com.razumly.mvp.core.data.dataTypes.isAffiliateEvent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -230,8 +231,9 @@ private fun DivisionSingleDivisionDefaults(
                 maxParticipants = editEvent.maxParticipants.takeIf { value -> value > 0 },
                 maxParticipantsLabel = if (editEvent.teamSignup) "Max Teams" else "Max Participants",
                 priceLabel = "Price",
-                showPrice = state.paidRegistrationEnabled,
+                showPrice = state.paidRegistrationEnabled || editEvent.isAffiliateEvent(),
                 manualPaymentsEnabled = manualPaymentsEnabled,
+                externalRegistration = editEvent.isAffiliateEvent(),
                 hostHasAccount = state.hostHasAccount,
                 enabled = true,
                 inclusivePriceEditorKey = state.inclusivePriceEditorKey,
@@ -308,7 +310,7 @@ private fun DivisionSingleDivisionDefaults(
                 minimumMaxParticipants = minimumMaxParticipants,
                 isMaxParticipantsError = state.showValidationErrors &&
                     editEvent.maxParticipants < minimumMaxParticipants,
-                isPriceError = state.showValidationErrors &&
+                isPriceError = !editEvent.isAffiliateEvent() && state.showValidationErrors &&
                     state.paidRegistrationEnabled &&
                     editEvent.priceCents <= 0,
             )
@@ -544,8 +546,9 @@ private fun DivisionInfoFields(
                     "Division Max Participants"
                 },
                 priceLabel = "Division price",
-                showPrice = state.paidRegistrationEnabled,
+                showPrice = state.paidRegistrationEnabled || editEvent.isAffiliateEvent(),
                 manualPaymentsEnabled = manualPaymentsEnabled,
+                externalRegistration = editEvent.isAffiliateEvent(),
                 hostHasAccount = state.hostHasAccount,
                 enabled = state.divisionEditorReady,
                 inclusivePriceEditorKey = state.inclusivePriceEditorKey,
@@ -575,7 +578,7 @@ private fun DivisionInfoFields(
                     state.showValidationErrors &&
                         (maxParticipants == null || maxParticipants < minimumMaxParticipants)
                 },
-                isPriceError = state.showValidationErrors &&
+                isPriceError = !editEvent.isAffiliateEvent() && state.showValidationErrors &&
                     state.paidRegistrationEnabled &&
                     divisionEditor.priceCents <= 0,
             )
@@ -591,6 +594,7 @@ private fun DivisionPriceAndMaxTeamsFields(
     priceLabel: String,
     showPrice: Boolean,
     manualPaymentsEnabled: Boolean,
+    externalRegistration: Boolean,
     hostHasAccount: Boolean,
     enabled: Boolean,
     inclusivePriceEditorKey: String,
@@ -623,7 +627,7 @@ private fun DivisionPriceAndMaxTeamsFields(
             errorMessage = "Required and must be at least $minimumMaxParticipants.",
         )
         if (!showPrice) return@Row
-        if (manualPaymentsEnabled) {
+        if (manualPaymentsEnabled || externalRegistration) {
             MoneyInputField(
                 value = centsInputValue(priceCents),
                 onValueChange = { value ->

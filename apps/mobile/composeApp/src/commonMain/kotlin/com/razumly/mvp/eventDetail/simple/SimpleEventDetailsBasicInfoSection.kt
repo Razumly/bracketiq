@@ -54,6 +54,7 @@ import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import com.razumly.mvp.eventDetail.composables.TextInputField
 import com.razumly.mvp.eventDetail.readonly.HostedByReadOnlyRow
+import com.razumly.mvp.eventDetail.shared.EventRegistrationWebsiteField
 import com.razumly.mvp.eventDetail.shared.DetailKeyValueList
 import com.razumly.mvp.eventDetail.shared.DetailRowSpec
 import com.razumly.mvp.eventDetail.shared.FormSectionDivider
@@ -107,6 +108,9 @@ internal fun LazyListScope.simpleEventDetailsBasicInfoSection(
                 thickness = 1.dp,
             )
             DetailKeyValueList(rows = state.readOnlyBasicsRows)
+            if (state.event.capabilities?.readOnlyReason == "MANAGEMENT_AUTHORITY_UNVERIFIED") {
+                Text("Event management is read-only. Use the organizer's website to register.")
+            }
             if (state.event.description.isNotBlank()) {
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
@@ -124,6 +128,9 @@ internal fun LazyListScope.simpleEventDetailsBasicInfoSection(
             }
         },
         editContent = {
+            EventRegistrationWebsiteField(state.editEvent.affiliateUrl) { website ->
+                actions.onEditEvent { copy(affiliateUrl = website) }
+            }
             TextInputField(
                 value = state.editEvent.description,
                 label = "Description",

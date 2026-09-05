@@ -1288,6 +1288,35 @@ describe('EventForm dirty state', () => {
     expect(screen.queryByRole('heading', { name: 'Event Details' })).not.toBeInTheDocument();
   });
 
+  it.each(['SIMPLE', 'ADVANCED'] as const)('preserves operations when External Registration changes in %s Setup', async (initialSetupMode) => {
+    const formRef = React.createRef<EventFormHandle>();
+    renderForm(jest.fn(), formRef, {
+      eventType: 'LEAGUE',
+      teamSignup: true,
+      doTeamsOfficiate: true,
+      teamOfficialsMaySwap: true,
+      staffingPriority: 'TEAM_COVERAGE_REQUIRED',
+      matchRulesOverride: { scoringModel: 'POINTS_ONLY' },
+    }, null, { isCreateMode: true, initialSetupMode });
+
+    fireEvent.click(screen.getByLabelText('External registration'));
+    if (initialSetupMode === 'SIMPLE') {
+      fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    }
+    fireEvent.change(await screen.findByPlaceholderText('https://example.com/event'), {
+      target: { value: 'https://partner.example/register' },
+    });
+    const draft = formRef.current!.captureCurrentEventConfiguration().draft;
+    expect(draft.basics).toMatchObject({ eventType: 'LEAGUE', affiliateUrl: 'https://partner.example/register' });
+    expect(draft.participation.teamSignup).toBe(true);
+    expect(draft.staff).toMatchObject({
+      doTeamsOfficiate: true,
+      teamOfficialsMaySwap: true,
+      staffingPriority: 'TEAM_COVERAGE_REQUIRED',
+    });
+    expect(draft.competition.matchRulesOverride).toEqual({ scoringModel: 'POINTS_ONLY' });
+  });
+
   it('preserves the event draft when switching from Simple to Advanced Setup', async () => {
     renderForm(jest.fn(), undefined, {}, null, {
       isCreateMode: true,
@@ -3071,7 +3100,7 @@ describe('EventForm dirty state', () => {
     expect(within(locationMapColumn).queryByRole('button', { name: /show map|hide map/i })).not.toBeInTheDocument();
   });
 
-  it('keeps affiliate capacity in Event Details while pricing affiliate divisions in the division editor', async () => {
+  it('keeps external event operations available with shared capacity and per-division listing prices', async () => {
     const onDirtyStateChange = jest.fn();
     const baseDivision = buildEvent().divisionDetails[0];
 
@@ -3116,18 +3145,18 @@ describe('EventForm dirty state', () => {
     expect(mapSideControls).toContainElement(maxParticipantsInput);
     expect(within(mapSideControls).queryByTestId('cents-input')).not.toBeInTheDocument();
     expect(divisionModeSwitches).toContainElement(screen.getByText('Single Division (all skill levels play together)'));
-    expect(divisionModeSwitches).not.toContainElement(screen.queryByText('Register by Division Type'));
+    expect(divisionModeSwitches).toContainElement(screen.getByText('Register by Division Type'));
     expect(divisionSettingsSection).toContainElement(divisionPriceInput);
     expect(screen.getByText('New Division')).toBeInTheDocument();
     expect(screen.getByLabelText('Gender')).toBeInTheDocument();
     expect(screen.getByLabelText('Skill Division')).toBeInTheDocument();
     expect(screen.getByLabelText('Age Division')).toBeInTheDocument();
-    expect(screen.getByLabelText('Division Max Participants')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Division Max Participants')).not.toBeInTheDocument();
     expect(screen.getByText('Open Division')).toBeInTheDocument();
     expect(screen.queryByText('Capacity & Price')).not.toBeInTheDocument();
     expect(screen.queryByText('Listing Capacity')).not.toBeInTheDocument();
     expect(screen.queryByText('Payment Plans')).not.toBeInTheDocument();
-    expect(screen.getByText('Price: $99.00 • Max participants: 99')).toBeInTheDocument();
+    expect(screen.getByText('Price: $99.00 • Max teams: 40')).toBeInTheDocument();
     expect(screen.queryByText(/Payment plan:/)).not.toBeInTheDocument();
   });
 

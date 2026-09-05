@@ -115,7 +115,7 @@ export default function EventCard({
     }
 
     return {
-      label: normalizedEventType === 'AFFILIATE' ? 'Event' : formatEnumDisplayLabel(event.eventType, 'Event'),
+      label: formatEnumDisplayLabel(event.eventType, 'Event'),
       className: 'discover-badge-event',
       icon: '📅',
     };

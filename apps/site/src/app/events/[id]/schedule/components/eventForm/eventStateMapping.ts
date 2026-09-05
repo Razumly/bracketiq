@@ -118,7 +118,7 @@ export const mapEventToFormState = (event: Event): EventFormState => {
     const defaultEventPrice = defaultEventAllowPaymentPlans && defaultEventInstallmentAmounts.length
         ? sumInstallmentAmounts(defaultEventInstallmentAmounts)
         : normalizePriceCents(event.price);
-    const normalizedEventType = event.eventType === 'AFFILIATE' ? 'EVENT' : event.eventType;
+    const normalizedEventType = event.eventType;
 
     const normalizedDivisionIds = Array.isArray(event.divisions)
         ? Array.from(
@@ -411,7 +411,7 @@ export const mapEventToFormState = (event: Event): EventFormState => {
     $id: event.$id,
     name: event.name,
     description: event.description ?? '',
-    isAffiliateEvent: existingAffiliateUrl.trim().length > 0 || event.eventType === 'AFFILIATE',
+    isAffiliateEvent: existingAffiliateUrl.trim().length > 0,
     affiliateUrl: existingAffiliateUrl,
     registrationPaymentMode: normalizeRegistrationPaymentMode(event.registrationPaymentMode),
     manualPaymentLinks: normalizeManualPaymentLinks(event.manualPaymentLinks).map((link) => ({

@@ -10,6 +10,7 @@ import androidx.room.TypeConverters
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.enums.isScheduleConstructionAutomationType
 import com.razumly.mvp.core.data.util.DivisionConverters
+import com.razumly.mvp.core.data.util.EventAuthorityConverters
 import com.razumly.mvp.core.data.util.DivisionDetailConverters
 import com.razumly.mvp.core.data.util.findDivisionDetailByIdentifier
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
@@ -82,6 +83,11 @@ data class Event(
     val leagueScoringConfigId: String? = null,
     val organizationId: String? = null,
     val affiliateUrl: String? = null,
+    val sourceType: String? = null,
+    val sourceId: String? = null,
+    val sourceUrl: String? = null,
+    @field:TypeConverters(EventAuthorityConverters::class)
+    val capabilities: EventAuthorityCapabilities? = null,
     val scheduleText: String? = null,
     val dateDisplayMode: String? = null,
     val dateDisplayText: String? = null,

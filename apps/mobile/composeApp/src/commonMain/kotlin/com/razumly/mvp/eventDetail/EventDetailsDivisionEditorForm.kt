@@ -1,5 +1,6 @@
 package com.razumly.mvp.eventDetail
 
+import com.razumly.mvp.core.data.dataTypes.isAffiliateEvent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -492,6 +493,7 @@ private fun DivisionSingleDivisionDefaults(
                 maxParticipantsLabel = if (editEvent.teamSignup) "Max Teams" else "Max Participants",
                 priceLabel = "Price",
                 manualPaymentsEnabled = manualPaymentsEnabled,
+                externalRegistration = editEvent.isAffiliateEvent(),
                 hostHasAccount = state.hostHasAccount,
                 enabled = true,
                 inclusivePriceEditorKey = state.inclusivePriceEditorKey,
@@ -795,6 +797,7 @@ private fun DivisionInfoFields(
                 },
                 priceLabel = "Division price",
                 manualPaymentsEnabled = manualPaymentsEnabled,
+                externalRegistration = editEvent.isAffiliateEvent(),
                 hostHasAccount = state.hostHasAccount,
                 enabled = state.divisionEditorReady,
                 inclusivePriceEditorKey = state.inclusivePriceEditorKey,
@@ -836,6 +839,7 @@ private fun DivisionPriceAndMaxTeamsFields(
     maxParticipantsLabel: String,
     priceLabel: String,
     manualPaymentsEnabled: Boolean,
+    externalRegistration: Boolean,
     hostHasAccount: Boolean,
     enabled: Boolean,
     inclusivePriceEditorKey: String,
@@ -866,7 +870,7 @@ private fun DivisionPriceAndMaxTeamsFields(
             isError = isMaxParticipantsError,
             errorMessage = "Required and must be at least $minimumMaxParticipants.",
         )
-        if (manualPaymentsEnabled) {
+        if (manualPaymentsEnabled || externalRegistration) {
             MoneyInputField(
                 value = centsInputValue(priceCents),
                 onValueChange = { value ->
@@ -1006,7 +1010,7 @@ private fun DivisionPaymentPlanFields(
     val editEvent = state.editEvent
     val divisionEditor = state.divisionEditor
 
-    if (state.isNewEvent || editEvent.singleDivision) {
+    if (state.isNewEvent || editEvent.singleDivision || editEvent.isAffiliateEvent()) {
         return
     }
 

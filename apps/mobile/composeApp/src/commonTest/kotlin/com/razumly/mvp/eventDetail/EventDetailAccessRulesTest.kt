@@ -2,6 +2,7 @@ package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.EventAuthorityCapabilities
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
@@ -11,6 +12,36 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class EventDetailAccessRulesTest {
+    @Test
+    fun given_unclaimed_external_event_when_local_host_matches_then_server_read_only_state_blocks_management() {
+        val event = Event(
+            hostId = "host-1",
+            organizationId = "org-1",
+            affiliateUrl = "https://partner.example/register",
+            capabilities = EventAuthorityCapabilities(
+                viewerUserId = "host-1",
+                readOnlyReason = "MANAGEMENT_AUTHORITY_UNVERIFIED",
+            ),
+        )
+        assertFalse(canManageEventForUser(event, user("host-1"), organization(ownerId = "host-1")))
+        assertFalse(canManageEventForUser(event.copy(capabilities = null), user("host-1"), null))
+        assertFalse(canManageEventForUser(event.copy(affiliateUrl = null), user("host-1"), null))
+    }
+
+    @Test
+    fun given_claimed_event_when_authority_changes_then_only_the_server_authorized_viewer_can_manage_it() {
+        val event = Event(
+            hostId = "old-host",
+            affiliateUrl = "https://partner.example/register",
+            capabilities = EventAuthorityCapabilities(
+                viewerUserId = "new-owner", canEdit = true, canManageStaff = true, readOnly = false,
+            ),
+        )
+        assertTrue(canManageEventForUser(event, user("new-owner"), null))
+        assertFalse(canManageEventForUser(event, user("old-host"), null))
+        assertTrue(canManageEventForUser(event.copy(affiliateUrl = null), user("new-owner"), null))
+    }
+
     @Test
     fun can_edit_event_details_rejects_mobile_unsupported_features() {
         assertTrue(canEditEventDetails(Event()))

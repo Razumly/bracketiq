@@ -68,7 +68,6 @@ type UseEventSlotControllerOptions = {
   hasImmutableTimeSlots: boolean;
   immutableFields: Field[];
   immutableTimeSlots: TimeSlot[];
-  isAffiliateEvent: boolean;
   isEditMode: boolean;
   leagueSlots: LeagueSlotForm[];
   parentEvent?: string | null;
@@ -139,7 +138,6 @@ export const useEventSlotController = ({
   hasImmutableTimeSlots,
   immutableFields,
   immutableTimeSlots,
-  isAffiliateEvent,
   isEditMode,
   leagueSlots,
   parentEvent,
@@ -335,7 +333,6 @@ export const useEventSlotController = ({
   const { hasPendingExternalConflictChecks, hasExternalSlotConflictWarnings } =
     useMemo(() => {
       if (
-        isAffiliateEvent ||
         !supportsScheduleSlotsForEvent(eventType, parentEvent)
       ) {
         return {
@@ -367,8 +364,7 @@ export const useEventSlotController = ({
       };
     }, [
       eventType,
-      isAffiliateEvent,
-      leagueSlots,
+        leagueSlots,
       parentEvent,
       slotConflictContext,
     ]);

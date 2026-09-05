@@ -4,6 +4,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.canManageEventsForViewer
+import com.razumly.mvp.core.data.dataTypes.isAffiliateEvent
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 
@@ -21,6 +22,8 @@ internal fun canManageEventForUser(
     if (currentUserId.isBlank()) {
         return false
     }
+    event.capabilities?.let { return it.canEditFor(currentUserId) }
+    if (event.isAffiliateEvent()) return false
     return event.hostId.trim() == currentUserId ||
         event.assistantHostIds.any { assistantHostId -> assistantHostId.trim() == currentUserId } ||
         organization?.canManageEventsForViewer(currentUserId) == true

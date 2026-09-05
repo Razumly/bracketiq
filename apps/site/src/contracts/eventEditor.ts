@@ -697,6 +697,7 @@ export const eventEditorBootstrapDraftSchema = eventEditorDraftSchema
 
 export const editorCapabilitiesSchema = z
   .object({
+    viewerUserId: nullableId.optional(),
     canUseOnlinePayments: z.boolean(),
     canManageStaff: z.boolean(),
     canEdit: z.boolean(),
@@ -1178,6 +1179,11 @@ export const eventEditorSnapshotSchema = z
     editorRevision: id,
     staffRevision: z.string().nullable(),
     capabilities: editorCapabilitiesSchema,
+    provenance: z.object({
+      sourceType: z.string().nullable(),
+      sourceId: z.string().nullable(),
+      sourceUrl: z.string().nullable(),
+    }).strict().optional(),
     catalogs: editorCatalogsSchema,
     immutable: z
       .object({

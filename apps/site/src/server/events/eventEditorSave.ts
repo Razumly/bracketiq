@@ -1,3 +1,4 @@
+import { assertEventRegistrationConfiguration, EventRegistrationConfigurationError } from '@/lib/eventRegistration';
 import type { Prisma } from "@/generated/prisma/client";
 import type {
   Fields,
@@ -850,6 +851,7 @@ const upsertEditorEvent = async (
     draft.basics.eventType.trim().toUpperCase(),
   );
   try {
+    assertEventRegistrationConfiguration(draft.basics.eventType, draft.basics.affiliateUrl);
     await upsertEventFromPayload(
       {
         ...eventPayload,
@@ -869,7 +871,7 @@ const upsertEditorEvent = async (
       { preserveOperationalState: true, preserveStaffState: true },
     );
   } catch (error) {
-    if (error instanceof EventDivisionNameValidationError) {
+    if (error instanceof EventDivisionNameValidationError || error instanceof EventRegistrationConfigurationError) {
       throw new EditorInputError(error.message);
     }
     throw error;
