@@ -12,12 +12,16 @@ Use issue 150 and its comments, root and application AGENTS files, the issue wor
 
 ## Progress
 
-- [x] Read all issue requirements and audit current code. Claim issue 150.
-- [x] Implement routine retention and minimal report evidence storage.
-- [x] Integrate report creation, review, closure, Account deletion, and unblock.
-- [ ] Verify site and mobile history after erasure.
-- [ ] Run focused checks, database checks, full suites, and independent reviews.
-- [ ] Commit issue 150 on the current branch.
+- [x] (2026-09-05 22:33Z) Read the issue and comments. Claim issue 150.
+- [x] (2026-09-05 22:33Z) Implement routine retention and minimal report evidence.
+- [x] (2026-09-05 22:33Z) Integrate reports, review, closure, Account deletion, and unblock.
+- [x] (2026-09-05 22:33Z) Verify site and mobile history after erasure with PostgreSQL and Room.
+- [x] (2026-09-05 22:33Z) Commit the initial implementation as `14f2d5bc1`.
+- [x] (2026-09-05 22:33Z) Complete independent Standards and Spec reviews. Implement their fixes.
+- [x] (2026-09-05 22:33Z) Merge current clean local main as `2f8ea55b6`. Pass typechecking and 101 focused tests.
+- [x] (2026-09-05 22:43Z) Pass all 14 database tests, the live mobile-to-site test, three Room tests, and final typechecking after review fixes.
+- [ ] Finish the full site suite. Record full-suite failures and review closure.
+- [ ] Commit the final issue 150 changes.
 
 ## Context and Orientation
 
@@ -57,9 +61,9 @@ Use Prisma and existing authentication, moderation, and Team authority services.
 
 ## Artifacts and Notes
 
-The user approved the issue 150 test runtimes. Reuse existing `mvp-site-db` on port 5433. Create `bracketiq_e2e_150_codex`. All 230 migrations applied and migration status is current. The issue site server runs on port 3150. No production runtime changed.
+The user approved the issue 150 test runtimes. Initial checks used `bracketiq_e2e_150_codex` in existing `mvp-site-db` on port 5433. All 230 migrations applied. The interruption ended the test processes and Docker. Recovery uses a separate PostgreSQL 16 instance in Ubuntu, with the same database name and port. Its files are under `/home/camka/.cache/bracketiq-issue150`. The new UTC migration brings the count to 231. All 231 migrations applied. Migration status reports that the database is current. No production runtime changed.
 
-The first cutoff test failed with HTTP 200 at the 90-day boundary, then passed with HTTP 404. Six initial PostgreSQL behavioral tests pass. The first typecheck passes. The focused suite had 16 passing tests and two old Account deletion mock failures. Update those mocks with an empty invitation collection, then repeat. Native compilation is in progress. The old SQL-text retention tests were removed; the database tests cover their intended behavior.
+The first cutoff test failed with HTTP 200 at the 90-day boundary, then passed with HTTP 404. Eight PostgreSQL behavioral tests passed before review. The live mobile-to-site retention test and three Room tests passed. Account deletion mocks were updated, and all nine existing route tests passed. After merge resolution, typechecking and 101 focused tests passed. The old SQL-text retention tests were removed. The database tests cover their intended behavior. The final 14 database tests pass. They include bounded expiry, concurrent delivery capture, and selected-target expiry outside the batch for both creation routes, reinvitation, and request replay. The live mobile-to-site test and three Room tests pass again against the recovered server. Final typechecking passes.
 
 HTTP inventory: `/api/invites` and `/api/invites/[id]` keep their request and response shape. Their results omit closed attempts at the retention cutoff. `isCurrentAttempt` now uses a stored supersession marker so deletion cannot promote an old attempt. Prisma adds optional `supersededAt`; raw invitation action records may include that additive field. Existing site mapping and mobile JSON parsers accept extra fields. No field becomes required and no Room field changes. `/api/invites/[id]/decline` keeps its existing block payload and response. A block now also creates an independent invitation report in the same transaction.
 
@@ -69,6 +73,12 @@ HTTP inventory: `/api/invites` and `/api/invites/[id]` keep their request and re
 
 ## Outcomes & Retrospective
 
-Implementation is in progress. Database validation and runtime authorization are not yet complete.
+The implementation and review fixes are present. Final verification is in progress. The user approved the test runtimes. Initial database and live mobile checks passed. The post-merge full mobile suite ran 1629 tests: 1614 passed, one failed, and 14 were skipped. Its remaining failure is the existing TeamDetailsDialogUiTest pending-player label check. The original full site run was interrupted before it produced a final report. Its replacement full run is in progress. Both independent reviewers have no remaining findings after the fixes.
 
 Initial revision: record scope, existing behavior, test boundaries, and the evidence snapshot design.
+
+Review revision: share terminal-status and Team-type lists between visibility and cleanup. Move the admin evidence HTTP call into a client service. Bound pending expiry to 100 records in a stable order. Hide unprocessed expired attempts from pending results. Lock the invitation before all delivery writes so report capture cannot miss a concurrent result. Preserve explicit UTC offsets in delivery snapshots.
+
+Merge resolution: keep both public bracket helper imports and the Node test environment. Keep the runner UID and gateway fields required by the current cutover contract. Keep the Windows-safe path expression in the logo test. Remove the static CI configuration test, as current main intentionally removed it. The three retained conflict suites pass.
+
+Final target-expiry revision: resolve the selected attempt before reuse, reinvitation, and request replay. Compute roster expiry labels from the deadline even when the attempt is outside the background batch. Four database cases use a target after 300 earlier expired recipients. All four pass.
