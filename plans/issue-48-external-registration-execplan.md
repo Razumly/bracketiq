@@ -14,14 +14,14 @@ An authorized organizer can use or change an external registration link without 
 - [x] (2026-09-05) Preserve external Event configuration and provenance through server saves. Remove conflicting Affiliate Event Type handling from supported paths.
 - [x] (2026-09-05) Retain server authority and provenance through mobile DTOs, Room, and shared Compose actions.
 - [x] (2026-09-05) Verify mobile commands with the site parser. Verify destination changes, registration switches, offline reads, and click tracking.
-- [ ] Execute the prepared mobile-to-site HTTP and database test after local runtime approval.
+- [x] (2026-09-05) Pass the mobile-to-site HTTP matrix for all five Event Types. Pass the database preservation test with complete Match-row equality.
 - [x] (2026-09-05) Run affected suites and type checks. Review Standards and Spec. Resolve code findings.
-- [x] (2026-09-05) Commit the implementation on the current workstream branch. Keep the live integration gate open.
-- [ ] Record completion evidence and close issue #48 when all scoped acceptance criteria pass.
+- [x] (2026-09-05) Commit the initial implementation on the current workstream branch. Track the live integration gate separately.
+- [x] (2026-09-05) Record completion evidence for issue #48. All scoped acceptance criteria passed.
 
 ## Context and Orientation
 
-`apps/site` owns the HTTP contract. `src/contracts/eventEditor.ts` defines editor commands and results. Web input passes through `src/app/events/[id]/schedule/components/eventForm/buildEventDraft.ts` and `editorContractAdapters.ts`. `src/server/events/eventEditorSave.ts` saves a command in a transaction. `src/server/repositories/events.ts` currently clears operational values when `affiliateUrl` is present. `src/server/accessControl.ts` already projects server authority. Public responses use signed outbound links from `src/server/affiliateOutbound.ts`.
+`apps/site` owns the HTTP contract. `src/contracts/eventEditor.ts` defines editor commands and results. Web input passes through `src/app/events/[id]/schedule/components/eventForm/buildEventDraft.ts` and `editorContractAdapters.ts`. `src/server/events/eventEditorSave.ts` saves a command in a transaction. `src/server/repositories/events.ts` persists Event configuration. `src/server/accessControl.ts` projects server authority. Public responses use signed outbound links from `src/server/affiliateOutbound.ts`.
 
 Mobile `core/network/.../dto/EventDtos.kt` hydrates the Room `Event` entity. `EventEditorDtos.kt` holds editor responses. `core/repository-impl/.../EventEditorSessionMapper.kt`, `EventDetailRemoteGateway.kt`, `EventRepository.kt`, and `EventRoomStore.kt` map and persist remote state. Shared Compose Event detail and editor code lives under `composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail`. Room is the source of rendered fetched state.
 
@@ -71,7 +71,7 @@ The first draft and server tests failed because an external link cleared Team du
 
 The first mobile hydration test failed because source fields were absent from the stored Event. It passed after adding provenance and authority hydration for all five Event Types. The focused access suite passed all nine cases. The accessible registration input test also passed. The five-type Room/real-site-parser matrix passed, including combined name and link edits.
 
-Docker is not running on this host. No native Postgres process was found. No application or database service was started. A live database API check still needs an available authorized test runtime. The parser checks do not claim to verify a live database transaction.
+The initial inspection found no running Docker or native Postgres service. The user later approved the local test runtimes. The follow-up section records the setup and execution. The parser checks do not claim to verify a live database transaction.
 
 Existing `eventFormHelpers.test.ts` expects Affiliate drafts to remove staff, Team duties, and Match rules. The preceding audit ran four site suites with 86 passing tests, including that conflicting expectation. Passing existing tests does not establish issue acceptance.
 
@@ -87,11 +87,11 @@ New Events record `ORGANIZATION_CREATED` or `USER_CREATED` only in the database 
 
 Prefer existing `affiliateUrl`, source metadata, authority capabilities, editor contracts, signed outbound action, and analytics modules. Add no purchase-attribution schema. Do not make a response field required under an unchanged contract version. Document exact field changes and compatibility decisions here as implementation proceeds.
 
-## Review and Remaining Verification
+## Initial Review and Verification
 
 The independent Spec review found two defects. A partial participant refresh removed External Registration and cached authority. Imported availability also replaced BracketIQ registration counts after a registration switch. Both code paths now preserve the intended state. The reviewer confirmed both fixes. The offline regression includes participant refresh and replacement of a cached grant with an explicit server denial.
 
-The Standards review requested a real playoff input interaction and removal of obsolete server flags. The UI test now edits the actual Playoff Division Name input. Fifteen server helpers no longer accept unused registration flags. The live client-to-site API gate remains open.
+The Standards review requested a real playoff input interaction and removal of obsolete server flags. The UI test now edits the actual Playoff Division Name input. Fifteen server helpers no longer accept unused registration flags. The live client-to-site API gate was open at the first commit. The follow-up section records its successful execution.
 
 The five-type matrix also found unconditional mobile normalization during a registration change. The mapper now retains unchanged Event Type configuration when the destination changes and the Event Type stays the same. The matrix includes a combined name and link change. Explicit Event Type transitions still use the existing normalization.
 
@@ -105,8 +105,52 @@ The public source URL remains redacted by the existing outbound protection. Mobi
 
 ## Outcomes & Retrospective
 
-The code is implemented. The Standards review has one open verification gate: execute the prepared real HTTP and database test. The Spec review has no remaining code findings. The user has not yet approved starting Docker Desktop, the local Postgres service, and the local site on port 3108. No test runtime was started. Issue #48 remains open until the live integration gate is complete. Native iOS execution also remains unverified on this Windows host.
+Issue #48 is complete on the current workstream branch. The rebase includes `main` at `86283ca5e`. The real mobile HTTP matrix passed for all five Event Types. The database test confirmed complete Match-row preservation. The full affected mobile run passed 1,890 tests. Standards and Spec reviews have no remaining findings. Site type checking and changed-file lint passed. Six pre-existing EventForm failures and the earlier full-site and Android lint limits remain documented. Native iOS execution remains unverified on this Windows host.
+
+The user approved Docker Desktop, local Postgres, and the local site on port 3108. Docker restored the existing worktree Postgres container on port 5543. The user approved removal of the duplicate `site-db-1`; that duplicate was removed. The live tests used the isolated `bracketiq_e2e_48_samue` database. After the desktop interruption, no port 3108 site process was found. The completed test reports and code were intact.
 
 The implementation removes registration-dependent operational resets. It retains provenance and viewer-scoped authority in Room. It keeps outbound clicks and requires no pixel. The registration switch and destination-change matrix covers all five Event Types. The full-site and Android lint limits above remain part of the validation record.
 
 Plan created on 2026-09-05 from the revised issue and the completed read-only audit.
+
+## Rebase and Live Verification Follow-up
+
+The user requested a rebase onto current `main` and completion of issue #48. `main` and `origin/main` both resolved to `86283ca5e`. The rebase preserved merge history. Its old Room-cache merge required conflict resolution. The original merge decisions were retained, including schema 105 and removal of obsolete explicit migrations. The Node test-environment annotation from `main` was retained. Independent review confirmed that the issue #48 patch is unchanged by the rebase. Its new commit is `6bce2e34e`; its issue base is `3f31b8a6d`.
+
+Runtime approval was explicit. Verification used `bracketiq-563b-db-1` on local port 5543. The test site PID was recorded in `apps/site/test-results/issue-48-site.pid`. During verification, the site listened on `http://127.0.0.1:3108`. Both migrations and migration status completed before seeding. Status reported no pending migrations.
+
+Run the fixture setup from `apps/site` with the isolated `DATABASE_URL` and the same test-only `AUTH_SECRET` as the local site:
+
+    node --import tsx scripts/seed-external-registration-contract.ts
+
+The script requires a local issue-48 database. It creates five fresh Event fixtures in one transaction. It writes the temporary local session and Event IDs to `test-results/issue-48-session.json`. The file is test output and must not be committed. The Tryout uses a real Organization Division. The Weekly Event uses repeating availability. League and Tournament fixtures include persisted Match Graphs.
+
+The first database regression exposed an empty-playoff normalization defect. The backend treated empty persisted point arrays as configured playoff rules and supplied defaults on save. Empty arrays now do not establish a playoff configuration. Explicit scalar values still do. The database regression passed after the fix, including full Match-row equality for destination changes and registration switches.
+
+The first real mobile HTTP run found inapplicable non-bracket Division durations in the fixture. The fixture now uses Event Type-appropriate settings. The live test also compares `draft.schedule`, in addition to identity, competition, Resources, staff, provenance, and authority. A subsequent run exceeded the site's five-second transaction limit while other checks ran. The final sequential run passed without changing that limit.
+
+Run the database regression from `apps/site` with the isolated `DATABASE_URL`:
+
+    $env:RUN_DATABASE_INTEGRATION = '1'
+    node node_modules/jest/bin/jest.js --runInBand --runTestsByPath src/server/events/__tests__/eventEditorSave.database.integration.test.ts --testNamePattern 'external registration'
+    Remove-Item Env:RUN_DATABASE_INTEGRATION
+
+Run the mobile HTTP matrix from `apps/mobile` after fixture setup:
+
+    $session = Get-Content ../site/test-results/issue-48-session.json -Raw | ConvertFrom-Json
+    $env:MVP_ISSUE48_API_URL = 'http://127.0.0.1:3108'
+    $env:MVP_ISSUE48_EVENT_IDS = $session.eventIds -join ','
+    $env:MVP_ISSUE48_TOKEN = $session.token
+    .\gradlew.bat :core:repository-impl:testDebugUnitTest --tests '*given_live_site_when_registration_destination_changes_then_api_and_room_preserve_the_event' --offline --console=plain
+
+The test must execute with zero skips. It must visit all five Event Types. Each type must pass a destination change, a switch to BracketIQ registration, and restoration of the original destination.
+
+The site type check passed after the rebase. The first attempt raced with Next.js generation of development type files. The second attempt completed with exit code zero. Concurrent Jest and type checks caused memory pressure on this 16 GB host. Automatic approval review rejected cancellation of the Jest process as an unauthorized runtime stop. No process was stopped. Subsequent checks run sequentially.
+
+The Tryout fixture must use a persisted active Organization field. Creating a local Event field is insufficient under the existing editor contract. The seed script now creates the Organization field before the Event. The corrected five-type HTTP matrix passed in 16.715 seconds, with zero skips. The complete repository suite passed 148 tests and skipped three unrelated runtime-gated cases. The Room persistence class passed all 31 cases. Standards review confirmed that the real API verification gate is resolved. Spec review found no issue in the empty-playoff normalization fix.
+
+The final mobile command used `--max-workers=1` and completed successfully in 10 minutes 32 seconds. Network passed 106 tests. Repository passed 148 tests and skipped three gated Terminal Match cases. Compose passed 1,636 tests and skipped ten cases. The total is 1,890 passed and 13 skipped. Room schema copying required no new source output. Native iOS execution remains unavailable on this Windows host.
+
+The final affected site run passed 462 tests, failed eight, and skipped six database cases. Six failures match the saved pre-issue baseline exactly. Two additional EventForm cases exceeded their 20-second limit under memory pressure. Both cases passed on a focused sequential rerun. All External Registration cases in the affected run passed. The separate real database run passed its External Registration case and skipped five unrelated cases.
+
+After the interruption, the final type and lint checks were repeated because their completion status was unavailable. Both exited with code zero. ESLint reported one existing `no-img-element` warning in `EventCard.test.tsx`. The final diff check passed. Temporary session tokens, process records, and test output are excluded from the commit.

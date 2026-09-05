@@ -418,6 +418,7 @@ class EventRepositoryRoomPersistenceTest {
                             assertEquals(before.sourceId, after.sourceId)
                             assertEquals(before.sourceUrl, after.sourceUrl)
                             assertEquals(before.capabilities, after.capabilities)
+                            assertEquals(original.snapshot.draft.schedule, reloaded.snapshot.draft.schedule)
                             assertEquals(original.snapshot.draft.competition, reloaded.snapshot.draft.competition)
                             assertEquals(original.snapshot.draft.resources, reloaded.snapshot.draft.resources)
                             assertEquals(original.snapshot.draft.staff, reloaded.snapshot.draft.staff)

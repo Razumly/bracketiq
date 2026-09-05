@@ -1676,7 +1676,9 @@ const normalizePlayoffDivisionConfig = (
     (key) =>
       Object.prototype.hasOwnProperty.call(row, key) &&
       row[key] !== null &&
-      row[key] !== undefined,
+      row[key] !== undefined &&
+      // Empty persisted arrays do not establish a playoff configuration.
+      (!Array.isArray(row[key]) || row[key].length > 0),
   );
   if (!hasConfigValue) {
     return null;
