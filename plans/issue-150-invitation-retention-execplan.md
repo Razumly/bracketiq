@@ -20,8 +20,8 @@ Use issue 150 and its comments, root and application AGENTS files, the issue wor
 - [x] (2026-09-05 22:33Z) Complete independent Standards and Spec reviews. Implement their fixes.
 - [x] (2026-09-05 22:33Z) Merge current clean local main as `2f8ea55b6`. Pass typechecking and 101 focused tests.
 - [x] (2026-09-05 22:43Z) Pass all 14 database tests, the live mobile-to-site test, three Room tests, and final typechecking after review fixes.
-- [ ] Finish the full site suite. Record full-suite failures and review closure.
-- [ ] Commit the final issue 150 changes.
+- [x] (2026-09-05 23:05Z) Finish the full site suite. Compare its failures with the prior report. Pass all 17 focused regression checks after fixture updates.
+- [x] (2026-09-05 23:05Z) Commit the reviewed production fixes as `abae20dad`. Record the final verification and test fixture updates in the completion commit.
 
 ## Context and Orientation
 
@@ -73,7 +73,7 @@ HTTP inventory: `/api/invites` and `/api/invites/[id]` keep their request and re
 
 ## Outcomes & Retrospective
 
-The implementation and review fixes are present. Final verification is in progress. The user approved the test runtimes. Initial database and live mobile checks passed. The post-merge full mobile suite ran 1629 tests: 1614 passed, one failed, and 14 were skipped. Its remaining failure is the existing TeamDetailsDialogUiTest pending-player label check. The original full site run was interrupted before it produced a final report. Its replacement full run is in progress. Both independent reviewers have no remaining findings after the fixes.
+The issue 150 implementation is complete. Its focused acceptance checks pass. The complete suites still contain pre-existing failures, as recorded below. The user approved the test runtimes. Initial database and live mobile checks passed. The post-merge full mobile suite ran 1629 tests: 1614 passed, one failed, and 14 were skipped. Its remaining failure is the existing TeamDetailsDialogUiTest pending-player label check. The original full site run was interrupted before it produced a final report. The replacement full run completed in 1211 seconds. It ran 6028 tests: 5869 passed, 59 failed, and 100 were skipped. Of the 59 failures, 45 also failed in `issue-149-full.json`. The other 14 exposed old query assertions, missing mock operations, stale expiry dates, and an old exact response assertion. These test fixtures are corrected. All 17 focused regression checks pass after the corrections. Both independent reviewers have no remaining findings after the fixes.
 
 Initial revision: record scope, existing behavior, test boundaries, and the evidence snapshot design.
 
@@ -82,3 +82,7 @@ Review revision: share terminal-status and Team-type lists between visibility an
 Merge resolution: keep both public bracket helper imports and the Node test environment. Keep the runner UID and gateway fields required by the current cutover contract. Keep the Windows-safe path expression in the logo test. Remove the static CI configuration test, as current main intentionally removed it. The three retained conflict suites pass.
 
 Final target-expiry revision: resolve the selected attempt before reuse, reinvitation, and request replay. Compute roster expiry labels from the deadline even when the attempt is outside the background batch. Four database cases use a target after 300 earlier expired recipients. All four pass.
+
+Final verification artifacts: `apps/site/test-results/issue-150-full-final.json` records the full site run. `apps/site/test-results/issue-150-final-regressions.log` records the 17 passing follow-up checks. `apps/site/test-results/issue-150-database-final.log` records all 14 passing PostgreSQL tests. `.scratch/issue-150-mobile-final.log` records the passing live mobile and Room checks. `.scratch/issue-150-mobile-after-merge.log` records the full mobile run. The remaining mobile UI test and component have no diff from base `b05876333`.
+
+The runtime interruption required a fresh issue database in Ubuntu. All 231 migrations applied there. The test server uses port 3150 with outbound providers disabled. The final test-only corrections do not change production behavior or the HTTP contract. Public privacy wording and full Event signup rollout remain under the final integration gate.
