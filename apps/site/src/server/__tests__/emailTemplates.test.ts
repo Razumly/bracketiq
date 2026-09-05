@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 import { buildInviteEmail } from '@/server/emailTemplates';
 
 describe('buildInviteEmail', () => {

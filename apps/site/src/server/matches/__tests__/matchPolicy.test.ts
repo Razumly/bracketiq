@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 import { buildMatchRulesSnapshot, resolveMatchSetPointTargets } from '../matchPolicy';
 import type { ResolvedMatchRules } from '@/types';
 

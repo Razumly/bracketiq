@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 import { serializeEvent, serializeMatches } from '../serialize';
 import { Division, Match, Team, Tournament, UserData } from '../types';
 

@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 import {
   AFFILIATE_CLUB_SPORT_REPAIRS,
   affiliateClubSportRepairEntries,

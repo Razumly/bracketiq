@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 import {
   CENSUS_CITY_CAMPAIGN_SOURCE,
   US_CITY_DISCOVERY_CAMPAIGN_TEMPLATES,

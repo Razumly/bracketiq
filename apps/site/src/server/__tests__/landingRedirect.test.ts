@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 import { verifySessionToken } from '@/lib/authServer';
 import { resolveLandingRedirectPathFromToken } from '../landingRedirect';
 

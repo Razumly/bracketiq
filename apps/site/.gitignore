@@ -12,6 +12,7 @@ deploy/vm/maintenance/enabled
 
 # testing
 /coverage
+/.cache/
 e2e/.auth/
 
 # next.js

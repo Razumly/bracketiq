@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 jest.mock('@/lib/prisma', () => ({ prisma: {} }));
 
 import { normalizeOrganizationDivisionInput, OrganizationDivisionValidationError } from '@/server/organizationDivisions';

@@ -80,8 +80,8 @@ fi
     :composeApp:generateReleaseBuildConfig \
     :core:network:generateReleaseBuildConfig \
     :wearApp:generateReleaseBuildConfig \
-    --no-daemon \
-    --console=plain
+    --console=plain \
+    "$@"
 )
 
 for build_file in "${build_files[@]}"; do

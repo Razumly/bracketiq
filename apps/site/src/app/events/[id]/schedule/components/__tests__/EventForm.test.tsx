@@ -1,7 +1,7 @@
 import React from 'react';
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { renderWithMantine } from '../../../../../../../test/utils/renderWithMantine';
+import { MantineProvider } from '@mantine/core';
 import EventForm, { buildDefaultSetupChoices, EventFormHandle } from '../EventForm';
 import { userService } from '@/lib/userService';
 import { eventService } from '@/lib/eventService';
@@ -12,6 +12,8 @@ import { editorDraftToLegacyEvent, emptyEditorSnapshot, legacyEventToEditorDraft
 import { CONFIRMED_ORGANIZER_LIABLE_EVENT_TAX_RULES } from '@/lib/taxPolicy';
 
 jest.setTimeout(20000);
+const renderFormContent = (ui: React.ReactElement) =>
+  render(<MantineProvider env="test">{ui}</MantineProvider>);
 const latestDraftByRef = new WeakMap<object, unknown>();
 const getLegacyDraft = (formRef: React.RefObject<EventFormHandle>) => {
   const draft = latestDraftByRef.get(formRef);
@@ -525,7 +527,7 @@ describe('EventForm dirty state', () => {
       snapshot.catalogs.organizations = [organization];
     }
     snapshot.catalogs.fields = Array.isArray(event.fields) ? event.fields : [];
-    return renderWithMantine(
+    return renderFormContent(
       <EventForm
         ref={ref}
         isOpen
@@ -1956,7 +1958,7 @@ describe('EventForm dirty state', () => {
       );
     };
 
-    renderWithMantine(<Harness />);
+    renderFormContent(<Harness />);
 
     await waitFor(() => {
       expect(onDirtyStateChange).toHaveBeenCalledWith(false);
@@ -2088,7 +2090,7 @@ describe('EventForm dirty state', () => {
     };
     mockUseSportsState = buildMockUseSportsState({ sports: [], loading: true });
 
-    renderWithMantine(<Harness />);
+    renderFormContent(<Harness />);
 
     await waitForStableDirtyState(onDirtyStateChange, false);
 
