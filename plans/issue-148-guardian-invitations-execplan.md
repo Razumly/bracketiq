@@ -21,6 +21,7 @@ Use Issue 148 and its comments, root and application AGENTS.md, ADR-0013 and ADR
 - [x] Run the live browser guardian journey at desktop and phone widths. Inspect both screenshots.
 - [x] Review both standards and spec. Address transactional permission checks, login continuation, and the unknown-birthdate transition.
 - [x] Commit the implementation and verification fixes on the current branch.
+- [x] (2026-09-04) Complete the requested verification continuation: fix the 12 existing Android lint errors, rerun Android checks, and review the focused changes.
 - [ ] Run native iOS validation on macOS before the final close review.
 
 ## Context and Orientation
@@ -91,6 +92,8 @@ The real mobile-to-site check passed all three `TeamRegistrationMobileApiIntegra
 
 The final site type check passed. The local site server stopped after verification. The isolated database container stopped and remains available with its data. No production runtime changed. The parity fixture correction is commit `27c52ddab`. The Issue 148 implementation commit contains this final verification record. Native iOS execution and the unrelated Android lint errors remain outside the completed Windows test results.
 
+The requested continuation resolved all 12 Android lint errors. The three affected UI test classes passed all 13 tests. `:composeApp:lintDebug` passed with zero errors and the same 83 warnings. The combined focused run finished in 7 minutes 18 seconds. The final `testDebugUnitTest --continue --max-workers=1` run passed in 2 minutes 11 seconds. Its reports contain 1950 passed tests, zero failures or errors, and 12 backend-gated skips. The main app reran 1622 tests; unchanged core and Wear OS tasks reused their passing results. Both review axes found no actionable issues in the four changed Kotlin files. The site and database remained stopped. No source outside Android code and UI tests changed in this continuation. Native iOS validation remains open. The branch has no pull request. Permission to push and open a draft pull request for macOS CI remains pending.
+
 ## Artifacts and Notes
 
 Baseline user-owned changes: CONTEXT.md, .scratch/, docs/adr/0013-separate-user-profiles-rosters-and-invitations.md, and docs/event-signup-team-roster-spec.md. Preserve them and exclude them from commits.
@@ -98,3 +101,7 @@ Baseline user-owned changes: CONTEXT.md, .scratch/, docs/adr/0013-separate-user-
 Revision: Resume verification after the user pause. Record runtime approval, migration evidence, and review fixes. The local browser script is `apps/site/scripts/check-guardian-claim.mjs`. It requires local test URLs and disabled outbound providers. It checks desktop and phone widths without sending provider email.
 
 Final revision: Record the full suite results, focused reruns, real mobile-to-site checks, browser checks, review fixes, and authorized runtime shutdown. Preserve the separate iOS and existing lint limits. Keep all baseline user documents outside the commits.
+
+Continuation revision (2026-09-04): The user requested continued verification. The existing lint report is the failure signal for 12 `UnrememberedMutableState` errors. Four marker constructors already use retained maps, but lint cannot prove their state lifetime. Add explicit `remember` calls around those cache lookups. Retain the existing keys, position updates, and cache cleanup. Eight test state declarations need `remember` inside their Compose content. Run the three affected UI test classes and `:composeApp:lintDebug`, then the complete Android unit suite. No HTTP contract changes. Keep this correction in a separate commit from Issue 148. The local site and database remain stopped. The macOS CI workflow requires a pull request; request permission before pushing or opening one.
+
+Continuation result: Record the passing focused tests, lint, full Android suite, and both reviews. Keep the native iOS gate and external publication permission separate from local completion.
