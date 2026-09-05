@@ -110,6 +110,30 @@ These tasks also compile the affected Kotlin test and production sources. Run Gr
 
 Record the actual counts and failures below. Do not start, stop, or reconfigure the backend or DB without a current explicit request for that runtime operation.
 
+### Live maintenance check
+
+Use the isolated PostgreSQL database `bracketiq_e2e_41_563b` on `127.0.0.1:5543`. Apply migrations before seeding. Confirm that migration status reports no pending migrations. Seed the existing host, participant, organization, and sport fixtures with `npm run seed:dev`. Scope `DATABASE_URL` to this issue database for each database command.
+
+The test backend must already run at `http://127.0.0.1:3111`. It must use this database and set `MVP_TEST_DISABLE_OUTBOUND_PROVIDERS=1`. The app-version isolation probe must confirm both the database URL hash and the outbound-provider guard before the tests run.
+
+For this worktree, run the following exact command from `C:/Users/samue/.codex/worktrees/563b/BracketIQ/apps/site`:
+
+    node .tmp/issue41/run-mobile-tests.mjs '*EventLifecycleMobileApiIntegrationTest.given_mobile_complete_maintenance_when_accepted_then_placed_rows_are_preserved_and_event_batch_is_refreshed' '*EventLifecycleMobileApiIntegrationTest.mobile_rebuild_maintenance_preserves_protected_rows_and_refreshes_replacements'
+
+The ignored local runner starts Gradle from `apps/mobile`. Its `environment.mjs` reads the local PostgreSQL credentials from `apps/site/.env.local`. It validates the loopback host and port. It selects only `bracketiq_e2e_41_563b`. It sets these test environment variables:
+
+- `MVP_TEST_BACKEND_URL=http://127.0.0.1:3111`
+- `MVP_TEST_DATABASE_URL`: the validated issue 41 PostgreSQL URL, with local credentials.
+- `MVP_TEST_DISABLE_OUTBOUND_PROVIDERS=1`
+- `MVP_TEST_REQUIRE_BACKEND=1`
+- `MVP_TEST_ALLOW_DB_SEED=0`
+
+For a checkout without the local runner, set those same variables in the test process. Do not print or commit the database credentials. Run this equivalent command from `apps/mobile`:
+
+    .\gradlew.bat :composeApp:testDebugUnitTest --tests '*EventLifecycleMobileApiIntegrationTest.given_mobile_complete_maintenance_when_accepted_then_placed_rows_are_preserved_and_event_batch_is_refreshed' --tests '*EventLifecycleMobileApiIntegrationTest.mobile_rebuild_maintenance_preserves_protected_rows_and_refreshes_replacements' --console=plain -q
+
+Require a successful command exit. Require two tests, zero failures, and zero skips in `composeApp/build/test-results/testDebugUnitTest/TEST-com.razumly.mvp.eventDetail.EventLifecycleMobileApiIntegrationTest.xml`. Do not count a skipped live test as passing verification.
+
 ## Validation and Acceptance
 
 
