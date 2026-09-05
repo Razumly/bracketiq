@@ -692,6 +692,13 @@ class EventLifecycleMobileApiIntegrationTest {
                 projection = completeAccepted.graph.matches.single { it.id == placedBeforeComplete.id },
                 match = batchMatches.single { it.id == placedBeforeComplete.id },
             )
+            val detail = host.eventRepository.syncEventDetail(refreshedEvent, manage = true).getOrThrow()
+            assertEquals(refreshedEvent.end, detail.event.end)
+            assertMaintenanceGraphMatches(
+                projections = completeAccepted.graph.matches,
+                matches = detail.matches,
+                context = "COMPLETE detail recovery graph",
+            )
         }
 
     // Requires MVP_TEST_BACKEND_URL and the seeded host account/bootstrap fixtures. The existing
@@ -883,6 +890,13 @@ class EventLifecycleMobileApiIntegrationTest {
             assertProjectionPreservesMatch(
                 projection = rebuildAccepted.graph.matches.single { it.id == protectedBeforeRebuild.id },
                 match = batchMatches.single { it.id == protectedBeforeRebuild.id },
+            )
+            val detail = host.eventRepository.syncEventDetail(refreshedEvent, manage = true).getOrThrow()
+            assertEquals(refreshedEvent.end, detail.event.end)
+            assertMaintenanceGraphMatches(
+                projections = rebuildAccepted.graph.matches,
+                matches = detail.matches,
+                context = "REBUILD detail recovery graph",
             )
         }
 
