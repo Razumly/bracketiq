@@ -10,6 +10,7 @@ import { applyRateLimit, RATE_LIMIT_POLICIES } from '@/server/rateLimit';
 
 const requestSchema = z.object({
   email: z.string().email(),
+  returnTo: z.string().max(8192).optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -46,6 +47,7 @@ export async function POST(req: NextRequest) {
       userId: authUser.id,
       email: authUser.email,
       origin: getRequestOrigin(req),
+      returnTo: parsed.data.returnTo,
     });
   } catch (error) {
     console.error('Failed to resend verification email', error);

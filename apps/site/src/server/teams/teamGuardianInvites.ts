@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { getTeamChatBaseMemberIds, syncTeamChatInTx } from '@/server/teamChatSync';
 import { isMinorAtUtcDate } from '@/server/userPrivacy';
+import { findGuardianAuthority, listGuardianChildIds } from '@/server/guardianAuthority';
 import { getTeamInviteRole } from '@/lib/staff';
 import {
   loadCanonicalTeamById,
@@ -78,28 +79,8 @@ export const listActiveChildIdsForParent = async (
   client: PrismaLike,
   parentId: string,
 ): Promise<string[]> => {
-  const links = await client.parentChildLinks.findMany({
-    where: {
-      parentId,
-      status: 'ACTIVE',
-    },
-    select: { childId: true },
-  });
-  return normalizeIdList(links.map((link: { childId?: string | null }) => link.childId));
+  return listGuardianChildIds(client, parentId);
 };
-
-const findActiveParentLink = async (
-  client: PrismaLike,
-  parentId: string,
-  childId: string,
-): Promise<{ id: string } | null> => client.parentChildLinks.findFirst({
-  where: {
-    parentId,
-    childId,
-    status: 'ACTIVE',
-  },
-  select: { id: true },
-});
 
 const hasAnyActiveParentLink = async (
   client: PrismaLike,
@@ -175,7 +156,7 @@ export const authorizeTeamInviteAction = async ({
     };
   }
 
-  if (targetIsMinor && await findActiveParentLink(client, session.userId, targetUserId)) {
+  if (targetIsMinor && await findGuardianAuthority(client, session.userId, targetUserId, now)) {
     return {
       ok: true,
       teamId,
@@ -189,15 +170,20 @@ export const authorizeTeamInviteAction = async ({
 };
 
 export const acceptTeamInviteWithGuardianRules = async ({
+  client = prisma,
+  inTransaction = false,
   invite,
   session,
   now = new Date(),
 }: {
+  client?: PrismaLike;
+  inTransaction?: boolean;
   invite: TeamInviteRecord;
   session: SessionLike;
   now?: Date;
 }): Promise<InviteActionResult> => {
   const auth = await authorizeTeamInviteAction({
+    client,
     invite,
     session,
     action: 'accept',
@@ -215,7 +201,7 @@ export const acceptTeamInviteWithGuardianRules = async ({
     return { status: 404, body: { error: 'Invite is no longer available.' } };
   }
 
-  const team = await loadCanonicalTeamById(auth.teamId);
+  const team = await loadCanonicalTeamById(auth.teamId, client);
   if (!team) {
     return { status: 404, body: { error: 'Team not found' } };
   }
@@ -230,6 +216,7 @@ export const acceptTeamInviteWithGuardianRules = async ({
   );
 
   if (isChildOpenJoinRequest && auth.actingParentId) {
+    if (inTransaction) throw new Error('Open join requests cannot use profile claim acceptance');
     const registration = await reserveChildTeamRegistrationForGuardian({
       teamId: auth.teamId,
       childId: auth.targetUserId,
@@ -252,7 +239,7 @@ export const acceptTeamInviteWithGuardianRules = async ({
     };
   }
 
-  const result = await prisma.$transaction(async (tx) => {
+  const save = async (tx: PrismaLike) => {
     if (typeof tx?.$executeRaw === 'function') {
       await acquireTeamRosterLock(tx, auth.teamId);
     }
@@ -285,6 +272,12 @@ export const acceptTeamInviteWithGuardianRules = async ({
         ?? transactionInviteRole;
     } else if (!isCurrentTeamInviteStatus(initialInviteStatus)) {
       return { ok: false };
+    }
+
+    const currentAuth = await authorizeTeamInviteAction({ client: tx, invite: transactionInvite, session, action: 'accept', now });
+    if (!currentAuth.ok) return { ok: false, status: currentAuth.status, error: currentAuth.error };
+    if (currentAuth.teamId !== auth.teamId || currentAuth.targetUserId !== auth.targetUserId) {
+      return { ok: false, status: 409, error: 'Invitation changed. Reload it before acceptance.' };
     }
 
     const previousMemberIds = getTeamChatBaseMemberIds(txTeam);
@@ -431,10 +424,11 @@ export const acceptTeamInviteWithGuardianRules = async ({
       },
     });
     return { ok: true, alreadyAccepted: false };
-  });
+  };
+  const result = inTransaction ? await save(client) : await client.$transaction(save);
 
   if (!result.ok) {
-    return { status: 404, body: { error: 'Team not found' } };
+    return { status: result.status ?? 404, body: { error: result.error ?? 'Team not found' } };
   }
 
   return {
@@ -504,6 +498,11 @@ export const declineTeamInviteWithGuardianRules = async ({
       };
     }
 
+    const currentAuth = await authorizeTeamInviteAction({ client: tx, invite: transactionInvite, session, action: 'decline', now });
+    if (!currentAuth.ok) return { ok: false, status: currentAuth.status, error: currentAuth.error };
+    if (currentAuth.teamId !== auth.teamId || currentAuth.targetUserId !== auth.targetUserId) {
+      return { ok: false, status: 409, error: 'Invitation changed. Reload it before declining.' };
+    }
     await rollbackTeamInviteEventSyncs(tx, transactionInvite, 'DECLINED', now);
     await removeCanonicalPendingInvitee(tx, transactionInvite, session.userId, now);
     await tx.teamStaffAssignments?.updateMany?.({

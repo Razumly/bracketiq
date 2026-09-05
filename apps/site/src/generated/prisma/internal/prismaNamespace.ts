@@ -14206,7 +14206,11 @@ export const ParentChildLinksScalarFieldEnum = {
   relationship: 'relationship',
   linkMethod: 'linkMethod',
   createdBy: 'createdBy',
-  endedAt: 'endedAt'
+  endedAt: 'endedAt',
+  declarationVersion: 'declarationVersion',
+  declarationText: 'declarationText',
+  declarationConfirmedAt: 'declarationConfirmedAt',
+  declarationInviteId: 'declarationInviteId'
 } as const
 
 export type ParentChildLinksScalarFieldEnum = (typeof ParentChildLinksScalarFieldEnum)[keyof typeof ParentChildLinksScalarFieldEnum]

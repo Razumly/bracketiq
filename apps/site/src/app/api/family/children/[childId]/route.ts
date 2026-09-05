@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { normalizeOptionalName } from '@/lib/nameCase';
 import { requireSession } from '@/lib/permissions';
 import { isFutureDateOfBirth, parseDateOfBirth } from '@/lib/dateOfBirth';
+import { findGuardianAuthority } from '@/server/guardianAuthority';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,18 +25,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ ch
     return NextResponse.json({ error: 'Invalid input', details: parsed.error.flatten() }, { status: 400 });
   }
 
-  const link = await prisma.parentChildLinks.findFirst({
-    where: {
-      parentId: session.userId,
-      childId,
-      status: { in: ['ACTIVE', 'PENDING'] },
-    },
-  });
-
-  if (!link) {
-    return NextResponse.json({ error: 'Child link not found' }, { status: 404 });
-  }
-
   const dob = parseDateOfBirth(parsed.data.dateOfBirth);
   if (!dob) {
     return NextResponse.json({ error: 'Invalid dateOfBirth' }, { status: 400 });
@@ -52,7 +41,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ ch
   const now = new Date();
   const normalizedEmail = parsed.data.email?.trim().toLowerCase();
 
-  await prisma.$transaction(async (tx) => {
+  const link = await prisma.$transaction(async (tx) => {
+    const authority = await findGuardianAuthority(tx, session.userId, childId, now);
+    if (!authority) return null;
     await tx.userData.update({
       where: { id: childId },
       data: {
@@ -65,7 +56,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ ch
 
     if (parsed.data.relationship !== undefined) {
       await tx.parentChildLinks.update({
-        where: { id: link.id },
+        where: { id: authority.id },
         data: {
           relationship: parsed.data.relationship || null,
           updatedAt: now,
@@ -113,7 +104,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ ch
         });
       }
     }
+    return authority;
   });
+  if (!link) {
+    return NextResponse.json({ error: 'Active guardian authority for a child under 18 is required' }, { status: 403 });
+  }
 
   return NextResponse.json(
     {

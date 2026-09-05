@@ -489,6 +489,7 @@ private fun AppContent(
                         expiresAt = instance.expiresAt,
                         signature = instance.signature,
                         onClaimed = { root.onTabSelected(com.razumly.mvp.core.presentation.AppConfig.ProfileInvites) },
+                        onGuardianAccepted = { root.onTabSelected(com.razumly.mvp.core.presentation.AppConfig.ProfileHome) },
                     )
                 }
 

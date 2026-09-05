@@ -1,6 +1,7 @@
 import { Readable } from 'stream';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { findGuardianAuthority } from '@/server/guardianAuthority';
 import { requireSession } from '@/lib/permissions';
 import { getStorageProvider } from '@/lib/storageProvider';
 import { downloadSignedDocumentPdf, isBoldSignConfigured } from '@/lib/boldsignServer';
@@ -149,14 +150,7 @@ const hasImportedDocumentAccess = async (params: {
   }
 
   if (subjectUserId) {
-    const parentChildLink = await prisma.parentChildLinks.findFirst({
-      where: {
-        parentId: params.sessionUserId,
-        childId: subjectUserId,
-        status: 'ACTIVE',
-      },
-      select: { id: true },
-    });
+    const parentChildLink = await findGuardianAuthority(prisma, params.sessionUserId, subjectUserId);
     if (parentChildLink) {
       return true;
     }
@@ -227,14 +221,9 @@ const hasOrganizationDocumentAccess = async (params: {
       if (documentSubject.userId === params.sessionUserId) {
         return true;
       }
-      const guardianLink = await prisma.parentChildLinks.findFirst({
-        where: {
-          parentId: params.sessionUserId,
-          childId: documentSubject.userId,
-          status: 'ACTIVE',
-        },
-        select: { id: true },
-      });
+      const guardianLink = documentSubject.userId
+        ? await findGuardianAuthority(prisma, params.sessionUserId, documentSubject.userId)
+        : null;
       if (guardianLink) {
         return true;
       }

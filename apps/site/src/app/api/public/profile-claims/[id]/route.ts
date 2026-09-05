@@ -3,6 +3,9 @@ import { prisma } from '@/lib/prisma';
 import { verifyTeamInviteShareLink } from '@/server/teamInviteLinks';
 import { normalizeOptionalName } from '@/lib/nameCase';
 import { isActiveAccountForProfile } from '@/server/managedPlayers';
+import { getOptionalSession } from '@/lib/permissions';
+import { findGuardianAuthority, GUARDIAN_DECLARATION } from '@/server/guardianAuthority';
+import { isMinorAtUtcDate, isUnknownDateOfBirth } from '@/server/userPrivacy';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,7 +26,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   }
   const profile = await prisma.userData.findUnique({
     where: { id: invite.userId },
-    select: { id: true, firstName: true, lastName: true, isManagedPlayer: true, mergedIntoProfileId: true },
+    select: { id: true, firstName: true, lastName: true, isManagedPlayer: true, mergedIntoProfileId: true, dateOfBirth: true },
   });
   if (!profile || profile.mergedIntoProfileId) {
     return NextResponse.json({ available: false }, { status: 404 });
@@ -32,11 +35,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     where: { id: profile.id },
     select: { id: true, email: true, passwordHash: true, lastLogin: true, emailVerifiedAt: true, disabledAt: true },
   });
-  if (!profile.isManagedPlayer || isActiveAccountForProfile(auth)) {
+  const isMinor = !isUnknownDateOfBirth(profile.dateOfBirth) && isMinorAtUtcDate(profile.dateOfBirth);
+  if (!isMinor && (!profile.isManagedPlayer || isActiveAccountForProfile(auth))) {
     return NextResponse.json({ available: false }, { status: 404 });
   }
   const team = invite.teamId
     ? await prisma.canonicalTeams.findUnique({ where: { id: invite.teamId }, select: { id: true, name: true } })
+    : null;
+  const session = await getOptionalSession(req);
+  const activeGuardian = isMinor && session
+    ? await findGuardianAuthority(prisma, session.userId, profile.id)
     : null;
   return NextResponse.json({
     available: true,
@@ -45,15 +53,20 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       profileId: profile.id,
       firstName: normalizeOptionalName(profile.firstName),
       lastName: normalizeOptionalName(profile.lastName),
-      hasAttachedEmail: Boolean(invite.email),
-      isMinor: invite.isMinor === true,
+      hasAttachedEmail: Boolean(isMinor ? invite.guardianEmail : invite.email),
+      isMinor,
+      guardianSetupRequired: isMinor && !activeGuardian,
+      guardianContactRequired: isMinor && !activeGuardian && !invite.guardianEmail?.trim(),
+      guardianDeclaration: isMinor ? GUARDIAN_DECLARATION : null,
+      birthdateRequired: isUnknownDateOfBirth(profile.dateOfBirth),
       expiresAt: invite.linkExpiresAt,
       teamId: team?.id ?? null,
     },
     profile: {
       id: profile.id,
       displayName: `${normalizeOptionalName(profile.firstName) ?? ''} ${normalizeOptionalName(profile.lastName) ?? ''}`.trim() || 'Player',
-      isManaged: true,
+      isManaged: profile.isManagedPlayer,
+      dateOfBirth: session && isMinor ? profile.dateOfBirth.toISOString().slice(0, 10) : null,
     },
     team,
   });

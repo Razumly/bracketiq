@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/prisma';
-import { isMinorAtUtcDate } from '@/server/userPrivacy';
+import { hasGuardianAge } from '@/server/guardianAuthority';
 import { loadCanonicalTeamById } from '@/server/teams/teamMembership';
 
 const TEAM_CHAT_GROUP_ID_PREFIX = 'team:';
@@ -183,7 +183,7 @@ const getActiveParentIdsForMinorMembers = async (
   }
 
   const minorMemberIds = members
-    .filter((member: { dateOfBirth: Date | null }) => isMinorAtUtcDate(member.dateOfBirth))
+    .filter((member: { dateOfBirth: Date | null }) => hasGuardianAge(member.dateOfBirth))
     .map((member: { id: string }) => member.id);
 
   if (!minorMemberIds.length) {

@@ -73,7 +73,9 @@ function LoginPageContent() {
   // Redirect if already authenticated
   useEffect(() => {
     if (!authLoading && user && !optionalMfaAuthResult && !isOauthMfaOffer) {
-      router.push(requiresProfileCompletion ? '/complete-profile' : requestedNextPath || getHomePathForUser(user));
+      router.push(requiresProfileCompletion
+        ? `/complete-profile${requestedNextPath ? `?next=${encodeURIComponent(requestedNextPath)}` : ''}`
+        : requestedNextPath || getHomePathForUser(user));
     }
   }, [authLoading, isOauthMfaOffer, optionalMfaAuthResult, requestedNextPath, requiresProfileCompletion, router, user]);
 
@@ -170,7 +172,7 @@ function LoginPageContent() {
     setAuthUser(authResult.user);
     router.push(
       authResult.requiresProfileCompletion
-        ? '/complete-profile'
+        ? `/complete-profile${returnPath ? `?next=${encodeURIComponent(returnPath)}` : ''}`
         : returnPath || getHomePathForUser(extendedUser),
     );
   };
@@ -315,7 +317,7 @@ function LoginPageContent() {
 
       let authResult: Awaited<ReturnType<typeof authService.login>> | null = null;
       if (isLogin) {
-        authResult = await authService.login(formData.email, formData.password);
+        authResult = await authService.login(formData.email, formData.password, requestedNextPath ?? undefined);
       } else {
         // Basic validation for signup fields
         if (!formData.firstName || !formData.lastName || !formData.userName || !formData.dateOfBirth) {
@@ -329,6 +331,7 @@ function LoginPageContent() {
           formData.userName,
           formData.dateOfBirth,
           requestedOnboardingIntent,
+          requestedNextPath ?? undefined,
         );
         authResult = await attachProfileImageToAuthResult(authResult);
       }
@@ -381,7 +384,7 @@ function LoginPageContent() {
     setResendingVerification(true);
     setError('');
     try {
-      await authService.resendVerification(verificationPendingEmail);
+      await authService.resendVerification(verificationPendingEmail, requestedNextPath ?? undefined);
       setVerificationMessage(`Verification email sent to ${verificationPendingEmail}.`);
       setVerificationMessageType('info');
     } catch (resendError: any) {
