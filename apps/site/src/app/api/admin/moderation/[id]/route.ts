@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { ModerationReportStatusEnum, ModerationReportTargetTypeEnum, OrganizationReviewStatusEnum } from '@/generated/prisma/client';
 import { prisma } from '@/lib/prisma';
 import { requireRazumlyAdmin } from '@/server/razumlyAdmin';
+import { readInvitationEvidence, pruneInvitationEvidence } from '@/server/invitationEvidence';
 
 const updateSchema = z.object({
   status: z.nativeEnum(ModerationReportStatusEnum).optional(),
@@ -32,6 +33,23 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const nextStatus = parsed.data.status;
     const reviewedStatus = nextStatus && nextStatus !== ModerationReportStatusEnum.OPEN;
     const now = new Date();
+
+    if (report.targetType === 'TEAM_INVITATION') {
+      const updated = await prisma.$transaction(async (tx) => {
+        const evidence = await readInvitationEvidence(tx, id, now);
+        if (!evidence && (nextStatus === 'OPEN' || nextStatus === 'IN_REVIEW')) {
+          throw new Response('The invitation evidence has been removed. This report cannot be reopened.', { status: 409 });
+        }
+        const saved = await tx.moderationReport.update({ where: { id }, data: {
+          ...(nextStatus ? { status: nextStatus } : {}),
+          ...(Object.prototype.hasOwnProperty.call(parsed.data, 'reviewNotes') ? { reviewNotes: parsed.data.reviewNotes?.trim() || null } : {}),
+          ...(reviewedStatus ? { reviewedAt: now, reviewedByUserId: session.userId } : {}), updatedAt: now,
+        } });
+        await pruneInvitationEvidence(tx, now, id);
+        return saved;
+      });
+      return NextResponse.json(updated);
+    }
 
     const updated = await prisma.moderationReport.update({
       where: { id },

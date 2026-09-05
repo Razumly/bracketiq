@@ -72,6 +72,7 @@ export const ModelName = {
   SensitiveUserData: 'SensitiveUserData',
   AuthMfaChallenges: 'AuthMfaChallenges',
   Invites: 'Invites',
+  InvitationEvidence: 'InvitationEvidence',
   TeamBlocks: 'TeamBlocks',
   InviteDeliveries: 'InviteDeliveries',
   TeamCreationRequests: 'TeamCreationRequests',
@@ -697,6 +698,7 @@ export const InvitesScalarFieldEnum = {
   updatedAt: 'updatedAt',
   sentAt: 'sentAt',
   finalizedAt: 'finalizedAt',
+  supersededAt: 'supersededAt',
   actedBy: 'actedBy',
   actingGuardianId: 'actingGuardianId',
   declineBlockScope: 'declineBlockScope',
@@ -725,6 +727,26 @@ export const InvitesScalarFieldEnum = {
 } as const
 
 export type InvitesScalarFieldEnum = (typeof InvitesScalarFieldEnum)[keyof typeof InvitesScalarFieldEnum]
+
+
+export const InvitationEvidenceScalarFieldEnum = {
+  reportId: 'reportId',
+  inviteId: 'inviteId',
+  capturedAt: 'capturedAt',
+  attemptCreatedAt: 'attemptCreatedAt',
+  senderId: 'senderId',
+  playerId: 'playerId',
+  teamId: 'teamId',
+  status: 'status',
+  finalizedAt: 'finalizedAt',
+  sentAt: 'sentAt',
+  actedBy: 'actedBy',
+  actingGuardianId: 'actingGuardianId',
+  declineBlockScope: 'declineBlockScope',
+  deliveries: 'deliveries'
+} as const
+
+export type InvitationEvidenceScalarFieldEnum = (typeof InvitationEvidenceScalarFieldEnum)[keyof typeof InvitationEvidenceScalarFieldEnum]
 
 
 export const TeamBlocksScalarFieldEnum = {
