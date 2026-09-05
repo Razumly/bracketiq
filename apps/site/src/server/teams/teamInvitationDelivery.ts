@@ -12,6 +12,7 @@ export const reserveTeamInvitationDelivery = async (inviteId: string, request: T
     const original = await tx.invites.findUnique({ where: { id: inviteId } });
     if (!original?.teamId || original.type !== 'TEAM' || !isRoutineInvitationVisible(original)) throw new Response('Invitation not found.', { status: 404 });
     await acquireTeamRosterLock(tx, original.teamId);
+    await tx.$queryRaw`SELECT "id" FROM "Invites" WHERE "id" = ${inviteId} FOR UPDATE`;
     let invite = await tx.invites.findUnique({ where: { id: inviteId } });
     if (!invite || invite.teamId !== original.teamId) throw new Response('Invitation changed. Reload it before sending.', { status: 409 });
     const senderId = request.requestedBy ?? invite.createdBy;
@@ -44,9 +45,10 @@ export const completeTeamInvitationDelivery = async (
   inviteId: string,
   result: { status: string; sentAt?: Date | string | null },
 ) => prisma.$transaction(async (tx) => {
+  await tx.$queryRaw`SELECT "id" FROM "Invites" WHERE "id" = ${inviteId} FOR UPDATE`;
   const now = new Date();
   await tx.inviteDeliveries.updateMany({
-    where: { id: deliveryId, status: 'DISPATCHING' },
+    where: { id: deliveryId, inviteId, status: 'DISPATCHING' },
     data: { status: result.status, completedAt: now, sentAt: result.sentAt ? new Date(result.sentAt) : null,
       failureCode: result.status === 'FAILED' ? 'DELIVERY_FAILED' : null },
   });

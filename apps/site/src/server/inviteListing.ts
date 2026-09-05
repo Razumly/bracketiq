@@ -1,6 +1,6 @@
 import { Prisma } from '@/generated/prisma/client';
 import { pruneInvitationEvidence } from './invitationEvidence';
-import { invitationRetentionCutoff } from './invitationRetention';
+import { FINAL_TEAM_INVITATION_STATUSES, TEAM_INVITE_TYPE_ALIASES, invitationRetentionCutoff } from './invitationRetention';
 export { TERMINAL_INVITE_RETENTION_DAYS } from './invitationRetention';
 
 const DEFAULT_INVITE_PAGE_LIMIT = 50;
@@ -13,8 +13,6 @@ const MAX_INVITE_CURSOR_LENGTH = 1024;
  * invite while a pending event-sync row may still need reconciliation.
  */
 const TERMINAL_INVITE_CLEANUP_BATCH_SIZE = 250;
-const TERMINAL_INVITE_STATUSES = ['DECLINED', 'REJECTED', 'ACCEPTED', 'CANCELLED', 'EXPIRED'] as const;
-const TEAM_INVITE_TYPE_ALIASES = ['TEAM', 'PLAYER', 'TEAM_MANAGER', 'TEAM_HEAD_COACH', 'TEAM_ASSISTANT_COACH'];
 const STAFF_INVITE_TYPE_ALIASES = ['STAFF', 'HOST', 'OFFICIAL'];
 
 export type InviteRetentionScope = {
@@ -165,7 +163,7 @@ export const pruneExpiredTerminalInvites = async ({
   const accessSql = accessConditions.length
     ? Prisma.join(accessConditions, ' AND ')
     : Prisma.sql`TRUE`;
-  const terminalSql = Prisma.sql`(UPPER(invite."status") IN (${Prisma.join([...TERMINAL_INVITE_STATUSES])})
+  const terminalSql = Prisma.sql`(UPPER(invite."status") IN (${Prisma.join(FINAL_TEAM_INVITATION_STATUSES)})
     OR (UPPER(invite."status") = 'FAILED' AND UPPER(invite."type") NOT IN (${Prisma.join(TEAM_INVITE_TYPE_ALIASES)})))`;
   const outcomeTimeSql = Prisma.sql`COALESCE(invite."finalizedAt", invite."updatedAt", invite."createdAt")`;
   const ageSql = Prisma.sql`${outcomeTimeSql} <= ${cutoff}`;

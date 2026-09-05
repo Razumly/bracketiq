@@ -8,13 +8,19 @@ jest.mock('@/server/razumlyAdmin', () => ({ requireRazumlyAdmin: async (req: Nex
 } }));
 jest.mock('@/server/email', () => ({ isEmailEnabled: () => false, sendEmail: jest.fn() }));
 import { prisma } from '@/lib/prisma';
+import { reportInvitation } from '@/server/invitationEvidence';
+import { completeTeamInvitationDelivery } from '@/server/teams/teamInvitationDelivery';
+import { INVITATION_EXPIRY_BATCH_SIZE } from '@/server/teams/teamInvitationState';
 import { hashPassword } from '@/lib/authServer';
 import { pruneExpiredTerminalInvites } from '@/server/inviteListing';
 import { POST as report } from '@/app/api/moderation/reports/route';
 import { GET as evidence } from '@/app/api/admin/moderation/[id]/evidence/route';
 import { PATCH as closeReport } from '@/app/api/admin/moderation/[id]/route';
 import { GET as readInvite } from '@/app/api/invites/[id]/route';
-import { GET as listInvites } from '@/app/api/invites/route';
+import { POST as createMemberInvite } from '@/app/api/teams/[id]/member-invites/route';
+import { withRosterInvitationViews } from '@/server/teams/teamRosterInvitationViews';
+import { recordInvitationRequest } from '@/server/teams/teamInvitationRequests';
+import { GET as listInvites, POST as createGenericInvite } from '@/app/api/invites/route';
 import { DELETE as deleteAccount } from '@/app/api/auth/account/route';
 import { DELETE as unblock } from '@/app/api/users/social/blocked/[targetUserId]/route';
 
@@ -56,9 +62,10 @@ databaseTests('invitation retention through application reads', () => {
   afterEach(async () => {
     jest.useRealTimers();
     await prisma.moderationReport.deleteMany({ where: { reporterUserId: { startsWith: prefix } } });
+    await prisma.invitationRequests.deleteMany({ where: { teamId: id('team') } });
     await prisma.inviteDeliveries.deleteMany({ where: { inviteId: { startsWith: prefix } } });
     await prisma.teamInviteEventSyncs.deleteMany({ where: { canonicalTeamId: id('team') } });
-    await prisma.invites.deleteMany({ where: { teamId: id('team') } });
+    await prisma.invites.deleteMany({ where: { OR: [{ teamId: id('team') }, { id: { startsWith: prefix } }] } });
     await prisma.teamRegistrations.deleteMany({ where: { teamId: id('team') } });
     await prisma.canonicalTeams.deleteMany({ where: { id: id('team') } });
     await prisma.authUser.deleteMany({ where: { id: { startsWith: prefix } } });
@@ -167,7 +174,7 @@ databaseTests('invitation retention through application reads', () => {
     expect(response.status).toBe(401);
     const pendingEvidence = (await readEvidence(reportId)).body.evidence;
     expect(pendingEvidence.status).toBe('PENDING');
-    expect(pendingEvidence.deliveries).toEqual([expect.objectContaining({ id: id('reminder'), status: 'SENT' })]);
+    expect(pendingEvidence.deliveries).toEqual([expect.objectContaining({ id: id('reminder'), status: 'SENT', createdAt: '2026-01-01T00:00:00.000Z', sentAt: '2026-01-01T00:00:00.000Z', completedAt: '2026-01-01T00:00:00.000Z' })]);
     await prisma.authUser.update({ where: { id: id('sender') }, data: { passwordHash: await hashPassword('password123!') } });
     expect((await deleteAccount(req('sender', { confirmationText: 'delete my account', currentPassword: 'password123!' }, false, 'DELETE'))).status).toBe(200);
     expect((await readEvidence(reportId)).body.evidence).toMatchObject({ status: 'CANCELLED', finalizedAt: '2026-01-01T00:00:00.000Z' });
@@ -185,4 +192,75 @@ databaseTests('invitation retention through application reads', () => {
     const response = await readInvite(req('player', undefined, false, 'GET'), params(old.id));
     expect((await response.json()).invite.isCurrentAttempt).toBe(false);
   });
+  it('bounds pending expiry while hiding the remaining expired backlog and cleaning closed history', async () => {
+    await prisma.invites.createMany({ data: Array.from({ length: INVITATION_EXPIRY_BATCH_SIZE * 2 + 1 }, (_, index) => ({
+      id: id(`backlog-${index}`), type: 'TEAM', userId: id('player'), createdBy: id('sender'), status: 'PENDING',
+      createdAt: new Date('2025-12-01'), linkExpiresAt: new Date('2026-01-01'),
+    })) });
+    const closed = await attempt('closed');
+    jest.setSystemTime(new Date('2026-04-02'));
+    const response = await listInvites(req('player', undefined, false, 'GET', `/api/invites?userId=${id('player')}&status=PENDING`));
+    expect(response.status).toBe(200);
+    expect((await response.json()).invites).toEqual([]);
+    expect(await prisma.invites.count({ where: { userId: id('player'), status: 'PENDING' } })).toBe(INVITATION_EXPIRY_BATCH_SIZE + 1);
+    expect(await prisma.invites.findUnique({ where: { id: closed.id } })).toBeNull();
+    expect(await prisma.teamRegistrations.findUnique({ where: { id: id('membership') } })).toMatchObject({ status: 'ACTIVE' });
+  });
+
+  it('keeps a delivery completion that races with report capture', async () => {
+    jest.setSystemTime(new Date('2026-01-01'));
+    const invite = await attempt('pending', 'PENDING');
+    const delivery = await prisma.inviteDeliveries.create({ data: {
+      id: id('racing-delivery'), inviteId: invite.id, idempotencyKey: 'race', kind: 'INITIAL', status: 'DISPATCHING', createdAt: new Date(),
+    } });
+    let completion: ReturnType<typeof completeTeamInvitationDelivery> | undefined;
+    let capturedReportId: string;
+    try {
+      capturedReportId = await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "Invites" WHERE "id" = ${invite.id} FOR UPDATE`;
+        const [connection] = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`;
+        completion = completeTeamInvitationDelivery(delivery.id, invite.id, { status: 'SENT', sentAt: new Date() });
+        // Wait until completion reaches the held row, not for an arbitrary delay.
+        let blocked = false;
+        for (let attempt = 0; attempt < 200 && !blocked; attempt++) {
+          const [waiting] = await prisma.$queryRaw<Array<{ blocked: boolean }>>`
+            SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE ${connection.pid} = ANY(pg_blocking_pids(pid))) AS blocked`;
+          blocked = waiting.blocked;
+          if (!blocked) await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        expect(blocked).toBe(true);
+        return (await reportInvitation(tx, { inviteId: invite.id, reporterUserId: id('player') })).id;
+      }, { timeout: 15000 });
+    } finally {
+      await completion;
+    }
+    const retained = (await readEvidence(capturedReportId!)).body.evidence;
+    expect(retained.deliveries).toEqual([expect.objectContaining({ id: delivery.id, status: 'SENT', sentAt: '2026-01-01T00:00:00.000Z' })]);
+  });
+
+  it.each(['member', 'generic', 'reinvite', 'replay'])('resolves the selected expired attempt outside the batch for %s', async (path) => {
+    jest.setSystemTime(new Date('2026-01-03'));
+    await prisma.teamRegistrations.update({ where: { id: id('membership') }, data: { status: 'INVITED' } });
+    await prisma.invites.createMany({ data: Array.from({ length: INVITATION_EXPIRY_BATCH_SIZE * 3 }, (_, index) => ({
+      id: id(`backlog-${index}`), type: 'TEAM', teamId: id('team'), userId: id(`other-${index}`), createdBy: id('sender'), status: 'PENDING',
+      createdAt: new Date('2025-12-01'), linkExpiresAt: new Date('2026-01-01'),
+    })) });
+    const invite = await attempt('selected', 'PENDING');
+    await prisma.invites.update({ where: { id: invite.id }, data: { linkExpiresAt: new Date('2026-01-02'), role: 'player' } });
+    const registrations = [...Array.from({ length: INVITATION_EXPIRY_BATCH_SIZE * 3 }, (_, index) => ({ userId: id(`other-${index}`), status: 'INVITED' })), { userId: id('player'), status: 'INVITED' }];
+    const roster = await withRosterInvitationViews(prisma, [{ id: id('team'), playerRegistrations: registrations }]);
+    expect(roster[0].playerRegistrations.find((row) => row.userId === id('player'))).toMatchObject({ invitationLabel: 'Invitation expired' });
+    const payload = { userId: id('player'), role: 'player', idempotencyKey: 'selected', ...(path === 'reinvite' ? { reinviteId: invite.id } : {}) };
+    if (path === 'replay') await recordInvitationRequest(prisma, { teamId: id('team'), senderId: id('sender'), requestKey: 'selected', payload }, invite.id);
+    const response = path === 'generic'
+      ? await createGenericInvite(req('sender', { invites: [{ ...payload, type: 'TEAM', teamId: id('team') }] }, true))
+      : await createMemberInvite(req('sender', payload, true), params(id('team')));
+    const body = await response.json();
+    expect({ status: response.status, error: body.error }).toEqual({ status: 201, error: undefined });
+    const result = path === 'generic' ? body.invites[0] : body.invite;
+    expect(result.id ?? result.$id).toEqual(path === 'replay' ? invite.id : expect.not.stringMatching(invite.id));
+    expect(result.status).toBe(path === 'replay' ? 'EXPIRED' : 'PENDING');
+    expect(await prisma.invites.findUnique({ where: { id: invite.id } })).toMatchObject({ status: 'EXPIRED', finalizedAt: new Date('2026-01-02') });
+  });
+
 });

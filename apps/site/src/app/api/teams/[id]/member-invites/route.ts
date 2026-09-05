@@ -32,7 +32,7 @@ import {
   UNKNOWN_MANAGED_PLAYER_DATE_OF_BIRTH,
 } from '@/server/managedPlayers';
 import { isMinorAtUtcDate } from '@/server/userPrivacy';
-import { expireTeamInvitations } from '@/server/teams/teamInvitationState';
+import { expireTeamInvitation, expireTeamInvitations, isInvitationExpired, resolvePendingTeamInvitation } from '@/server/teams/teamInvitationState';
 import { assertTeamInvitationAllowed, TeamInvitationRestrictionError } from '@/server/teams/teamInvitationRestrictions';
 
 export const dynamic = 'force-dynamic';
@@ -424,9 +424,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       const replay = await replayInvitationRequest(tx, requestScope);
       if (replay) return { invite: replay, team: canonicalTeam };
 
-      const sourceInvite = parsed.data.reinviteId
+      let sourceInvite = parsed.data.reinviteId
         ? await tx.invites.findFirst({ where: { id: parsed.data.reinviteId, teamId: canonicalTeamId, type: 'TEAM' } })
         : null;
+      if (sourceInvite && isInvitationExpired(sourceInvite, now)) sourceInvite = await expireTeamInvitation(tx, sourceInvite, now);
       if (parsed.data.reinviteId) {
         if (!sourceInvite || !['DECLINED', 'CANCELLED', 'EXPIRED'].includes(sourceInvite.status ?? '')) {
           throw new Error('Only a declined, cancelled, or expired invitation can be replaced.');
@@ -455,6 +456,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         })
         : null;
 
+      existingInvite = await resolvePendingTeamInvitation(tx, existingInvite, now);
       if (parsed.data.existingInviteId && !existingInvite) throw new Error('This invitation is no longer pending. Start a new invitation.');
 
       // A real Player gets a durable User Profile before the invitation is
@@ -472,6 +474,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             },
           });
         }
+        existingInvite = await resolvePendingTeamInvitation(tx, existingInvite, now);
         if (existingInvite?.userId) {
           userId = existingInvite.userId;
         } else if (!userId && typeof tx.userData?.create === 'function') {
@@ -519,6 +522,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             },
           })
           : null);
+      existingInvite = await resolvePendingTeamInvitation(tx, existingInvite, now);
       if (staffType === 'MANAGER' || staffType === 'HEAD_COACH') {
         await replaceSingletonTeamStaffAssignment({
           tx,

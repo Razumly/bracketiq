@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { expireTeamInvitation, isInvitationExpired } from './teamInvitationState';
 import { isRoutineInvitationVisible } from '@/server/invitationRetention';
 import type { Prisma } from '@/generated/prisma/client';
 
@@ -22,7 +23,8 @@ export const replayInvitationRequest = async (tx: Prisma.TransactionClient, inpu
   } } });
   if (!receipt) return null;
   if (receipt.fingerprint && receipt.fingerprint !== invitationRequestFingerprint(input.payload)) throw new InvitationRequestError('This request key belongs to another invitation request.');
-  const invite = await tx.invites.findUnique({ where: { id: receipt.inviteId } });
+  let invite = await tx.invites.findUnique({ where: { id: receipt.inviteId } });
+  if (invite?.type === 'TEAM' && isInvitationExpired(invite)) invite = await expireTeamInvitation(tx, invite);
   if (!invite || !isRoutineInvitationVisible(invite)) throw new InvitationRequestError('This saved invitation is no longer available. Start a new invitation.', 410);
   return invite;
 };

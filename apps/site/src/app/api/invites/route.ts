@@ -15,7 +15,7 @@ import {
   normalizeStaffMemberTypes,
 } from '@/lib/staff';
 import { sendInviteEmails } from '@/server/inviteEmails';
-import { expireTeamInvitations } from '@/server/teams/teamInvitationState';
+import { expireTeamInvitations, isInvitationExpired, resolvePendingTeamInvitation } from '@/server/teams/teamInvitationState';
 import { routineInvitationWhere } from '@/server/invitationRetention';
 import { assertTeamInvitationAllowed, TeamInvitationRestrictionError } from '@/server/teams/teamInvitationRestrictions';
 import { ensureAuthUserAndUserDataByEmail } from '@/server/inviteUsers';
@@ -487,7 +487,11 @@ export async function GET(req: NextRequest) {
       : requestedStatus === 'DECLINED'
         ? { status: { in: ['DECLINED', 'REJECTED'] } }
         : { status: requestedStatus };
-  const listingWhere = { AND: [where, statusWhere, routineInvitationWhere()] };
+  const listingWhere = { AND: [where, statusWhere, routineInvitationWhere(), {
+    // The next expiry batch must not expose expired attempts as pending.
+    NOT: { type: 'TEAM', linkExpiresAt: { lte: new Date() },
+      OR: [{ status: null }, { status: { in: ['PENDING', 'SENT', 'FAILED'] } }] },
+  }] };
 
   let page: { invites: Array<Record<string, any>>; nextCursor: string | null };
   try {
@@ -704,7 +708,7 @@ export async function POST(req: NextRequest) {
 
         if (inviteType === 'TEAM' && invite.existingInviteId) {
           const requested = await tx.invites.findUnique({ where: { id: invite.existingInviteId } });
-          if (!requested || requested.teamId !== teamId || requested.type !== 'TEAM' || !['PENDING', 'SENT', 'FAILED'].includes(requested.status ?? 'PENDING')) {
+          if (!requested || requested.teamId !== teamId || requested.type !== 'TEAM' || isInvitationExpired(requested, now) || !['PENDING', 'SENT', 'FAILED'].includes(requested.status ?? 'PENDING')) {
             throw new InviteRouteError(409, 'The requested invitation is no longer pending.');
           }
         }
@@ -1018,6 +1022,7 @@ export async function POST(req: NextRequest) {
               },
             });
           }
+          existingInvite = await resolvePendingTeamInvitation(tx, existingInvite, now);
           const teamRole = getTeamInviteRole(invite.role, invite.type)
             ?? getTeamInviteRole(existingInvite?.role, existingInvite?.type)
             ?? 'player';
