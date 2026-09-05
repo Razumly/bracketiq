@@ -1,7 +1,7 @@
 import type { Prisma } from '@/generated/prisma/client';
 import { isActiveBlockAccount } from '@/server/accountState';
 
-type InviteViewRow = { id: string; type?: string | null; teamId?: string | null; userId?: string | null; createdBy?: string | null; actingGuardianId?: string | null; status?: string | null };
+type InviteViewRow = { id: string; type?: string | null; teamId?: string | null; userId?: string | null; createdBy?: string | null; actingGuardianId?: string | null; status?: string | null; supersededAt?: Date | null };
 
 // The caller must authorize the invitation rows before it requests this view.
 export const withTeamInvitationViews = async <T extends InviteViewRow>(client: Prisma.TransactionClient, invites: T[]) => {
@@ -23,7 +23,7 @@ export const withTeamInvitationViews = async <T extends InviteViewRow>(client: P
     ...invite,
     senderName: invite.createdBy ? names.get(invite.createdBy) ?? null : null,
     actingGuardianName: invite.actingGuardianId ? names.get(invite.actingGuardianId) ?? null : null,
-    isCurrentAttempt: invite.userId ? currentIds.has(invite.id) : true,
+    isCurrentAttempt: !invite.supersededAt && (invite.userId ? currentIds.has(invite.id) : true),
     canBlockSender: Boolean(invite.createdBy && activeSenderIds.has(invite.createdBy)),
     deliveries: deliveries.filter((delivery) => delivery.inviteId === invite.id),
     invitationLabel: invite.status === 'EXPIRED' ? 'Invitation expired' : invite.status === 'PENDING' ? 'Invitation pending' : `Invitation ${String(invite.status ?? 'pending').toLowerCase()}`,

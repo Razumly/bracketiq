@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { setAuthCookie, verifyPassword } from '@/lib/authServer';
 import { revokeAppleRefreshToken } from '@/lib/appleAuth';
 import { requireSession } from '@/lib/permissions';
+import { closeAccountInvitations } from '@/server/accountInvitationDeletion';
 import { AuthMfaChallengePurpose } from '@/server/authMfaPurpose';
 import {
   confirmTotpMfaChallenge,
@@ -406,6 +407,7 @@ export async function DELETE(req: NextRequest) {
       },
     });
 
+    await closeAccountInvitations(tx, userId, normalizedEmail, now);
     await Promise.all([
       tx.subscriptions.updateMany({
         where: {
@@ -416,23 +418,6 @@ export async function DELETE(req: NextRequest) {
           status: 'CANCELLED',
           updatedAt: now,
         },
-      }),
-      tx.invites.updateMany({
-        where: normalizedEmail
-          ? {
-              OR: [
-                { userId },
-                { email: normalizedEmail },
-              ],
-            }
-          : { userId },
-        data: {
-          status: 'DECLINED',
-          updatedAt: now,
-        },
-      }),
-      tx.invites.deleteMany({
-        where: { createdBy: userId },
       }),
       tx.parentChildLinks.updateMany({
         where: {

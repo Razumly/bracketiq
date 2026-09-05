@@ -16,6 +16,7 @@ import {
 } from '@/lib/staff';
 import { sendInviteEmails } from '@/server/inviteEmails';
 import { expireTeamInvitations } from '@/server/teams/teamInvitationState';
+import { routineInvitationWhere } from '@/server/invitationRetention';
 import { assertTeamInvitationAllowed, TeamInvitationRestrictionError } from '@/server/teams/teamInvitationRestrictions';
 import { ensureAuthUserAndUserDataByEmail } from '@/server/inviteUsers';
 import { getRequestOrigin } from '@/lib/requestOrigin';
@@ -486,7 +487,7 @@ export async function GET(req: NextRequest) {
       : requestedStatus === 'DECLINED'
         ? { status: { in: ['DECLINED', 'REJECTED'] } }
         : { status: requestedStatus };
-  const listingWhere = { AND: [where, statusWhere] };
+  const listingWhere = { AND: [where, statusWhere, routineInvitationWhere()] };
 
   let page: { invites: Array<Record<string, any>>; nextCursor: string | null };
   try {

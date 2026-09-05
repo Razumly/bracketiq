@@ -1,3 +1,4 @@
+import { isRoutineInvitationVisible } from '@/server/invitationRetention';
 import { expireTeamInvitation } from '@/server/teams/teamInvitationState';
 import { withTeamInvitationViews } from '@/server/teams/teamInvitationViews';
 import { NextRequest, NextResponse } from 'next/server';
@@ -22,7 +23,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const session = await requireSession(_req);
   const { id } = await params;
   const invite = await prisma.invites.findUnique({ where: { id } });
-  if (!invite) {
+  if (!invite || !isRoutineInvitationVisible(invite)) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 
@@ -51,7 +52,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   const { id } = await params;
 
   const invite = await prisma.invites.findUnique({ where: { id } });
-  if (!invite) {
+  if (!invite || !isRoutineInvitationVisible(invite)) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 

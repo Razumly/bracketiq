@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma';
+import { isRoutineInvitationVisible } from '@/server/invitationRetention';
 import { acquireTeamRosterLock } from '@/server/repositories/locks';
 import { canManageTeamInvites } from '@/app/api/teams/[id]/member-invites/inviteHelpers';
 import { removeCanonicalPendingInvitee, rollbackTeamInviteEventSyncs } from './teamInviteEventSync';
@@ -8,7 +9,7 @@ type InvitationActor = { userId: string; isAdmin: boolean };
 
 export const cancelTeamInvitation = async (inviteId: string, actor: InvitationActor, now = new Date()) => {
   const original = await prisma.invites.findUnique({ where: { id: inviteId } });
-  if (!original?.teamId || original.type !== 'TEAM') {
+  if (!original?.teamId || original.type !== 'TEAM' || !isRoutineInvitationVisible(original, now)) {
     return { status: 404, body: { error: 'Invitation not found.' } };
   }
   return prisma.$transaction(async (tx) => {

@@ -1,3 +1,4 @@
+import { isRoutineInvitationVisible } from '@/server/invitationRetention';
 import { TeamInvitationRestrictionError } from '@/server/teams/teamInvitationRestrictions';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
@@ -13,7 +14,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { id } = await params;
 
   const invite = await prisma.invites.findUnique({ where: { id } });
-  if (!invite) {
+  if (!invite || !isRoutineInvitationVisible(invite)) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 

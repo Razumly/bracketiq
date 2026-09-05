@@ -405,6 +405,7 @@ export const ModelName = {
   SensitiveUserData: 'SensitiveUserData',
   AuthMfaChallenges: 'AuthMfaChallenges',
   Invites: 'Invites',
+  InvitationEvidence: 'InvitationEvidence',
   TeamBlocks: 'TeamBlocks',
   InviteDeliveries: 'InviteDeliveries',
   TeamCreationRequests: 'TeamCreationRequests',
@@ -543,7 +544,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "appReleases" | "fields" | "facilities" | "matches" | "matchSegments" | "broadcastOverlays" | "broadcastOverlayStates" | "broadcastOverlayActions" | "broadcastOverlayAccessTokens" | "matchIncidents" | "matchOperationReceipts" | "eventEditorCreateOperations" | "eventEditorMaintenanceOperations" | "divisions" | "eventDivisionPhaseSources" | "eventDivisionPhaseParticipants" | "userData" | "userNotifications" | "sensitiveUserData" | "authMfaChallenges" | "invites" | "teamBlocks" | "inviteDeliveries" | "teamCreationRequests" | "invitationRequests" | "userProfileClaims" | "userProfileMerges" | "userProfileContactCorrections" | "teamInviteEventSyncs" | "staffMembers" | "organizationRoles" | "organizationRolePermissions" | "organizationRoleCompensationRates" | "staffCompensationRates" | "eventStaffAssignments" | "staffScheduleAssignments" | "teamStaffLaborEntries" | "financialLineItems" | "staffPayRun" | "staffPayRunItem" | "eventOfficials" | "teamCheckIns" | "matchRosterEntries" | "teams" | "canonicalTeams" | "teamRegistrations" | "registrationQuestions" | "registrationQuestionResponses" | "teamJoinRequests" | "teamStaffAssignments" | "eventTeamStaffAssignments" | "messages" | "chatGroup" | "moderationReport" | "aiConversationPointer" | "aiPendingConfirmation" | "pushDeviceTarget" | "lockFiles" | "paymentIntents" | "bills" | "billPayments" | "billPaymentProofs" | "rentalBookings" | "rentalBookingItems" | "affiliateScrapeSources" | "affiliateScrapeMappings" | "affiliateScrapeRuns" | "affiliateSourceIntakes" | "affiliateSourceIntakePages" | "affiliateSourceIntakeRuns" | "affiliateSourceIntakeArtifacts" | "affiliateSourceDiscoveryCampaigns" | "affiliateAgentGatewayJobs" | "affiliateAgentGatewayClaims" | "affiliateAgentGatewayArtifacts" | "affiliateAgentGatewayOperationReceipts" | "affiliateAgentGatewayEvents" | "affiliateOperationalAlerts" | "affiliateOperationalAlertDeliveries" | "affiliateCoverageAgentJobs" | "affiliateCoverageCities" | "affiliateCoverageCells" | "affiliateCoverageCellAssessments" | "affiliateSourceDiscoveryQueryExecutions" | "affiliateSourceDiscoveryRuns" | "affiliateSourceDiscoveryResults" | "affiliateSourceDomainPolicies" | "affiliateSourceMappingJobs" | "affiliateApprovalJobs" | "affiliateImportCandidates" | "affiliateSupplySources" | "affiliateSupplyContractManifests" | "affiliateSupplyLifecycleTransitions" | "affiliateSupplyReconciliationRuns" | "affiliateAgentWorkerHealth" | "affiliateSupplyTargets" | "affiliateReplenishmentDemands" | "affiliateReplenishmentWaves" | "eventTags" | "eventTagAssignments" | "organizationTags" | "organizationTagAssignments" | "refundRequests" | "discounts" | "discountCodes" | "discountCodeRedemptions" | "discountCodeReservations" | "organizationAccountingConnections" | "accountingSyncRecords" | "organizationFinanceCategoryAccountingMappings" | "stripeAccounts" | "events" | "organizations" | "organizationReviews" | "organizationDomains" | "organizationClaims" | "organizationClaimEvidence" | "organizationClaimEvents" | "organizationReviewResponses" | "products" | "subscriptions" | "timeSlots" | "leagueScoringConfigs" | "eventTemplates" | "eventTemplateResources" | "eventTemplateTimeSlots" | "eventTemplateRentalResourceHints" | "eventTemplateLeagueScoringConfigs" | "sports" | "documentRequirements" | "templateDocuments" | "templateProviderQuarantines" | "signedDocuments" | "documentSubjects" | "documentRequirementSatisfactions" | "documentRequirementSatisfactionEvidence" | "documentEvidenceAuditEvents" | "boldSignWebhookEvents" | "boldSignSyncOperations" | "parentChildLinks" | "eventRegistrations" | "authUser" | "feedbackSubmissions" | "file"
+    modelProps: "appReleases" | "fields" | "facilities" | "matches" | "matchSegments" | "broadcastOverlays" | "broadcastOverlayStates" | "broadcastOverlayActions" | "broadcastOverlayAccessTokens" | "matchIncidents" | "matchOperationReceipts" | "eventEditorCreateOperations" | "eventEditorMaintenanceOperations" | "divisions" | "eventDivisionPhaseSources" | "eventDivisionPhaseParticipants" | "userData" | "userNotifications" | "sensitiveUserData" | "authMfaChallenges" | "invites" | "invitationEvidence" | "teamBlocks" | "inviteDeliveries" | "teamCreationRequests" | "invitationRequests" | "userProfileClaims" | "userProfileMerges" | "userProfileContactCorrections" | "teamInviteEventSyncs" | "staffMembers" | "organizationRoles" | "organizationRolePermissions" | "organizationRoleCompensationRates" | "staffCompensationRates" | "eventStaffAssignments" | "staffScheduleAssignments" | "teamStaffLaborEntries" | "financialLineItems" | "staffPayRun" | "staffPayRunItem" | "eventOfficials" | "teamCheckIns" | "matchRosterEntries" | "teams" | "canonicalTeams" | "teamRegistrations" | "registrationQuestions" | "registrationQuestionResponses" | "teamJoinRequests" | "teamStaffAssignments" | "eventTeamStaffAssignments" | "messages" | "chatGroup" | "moderationReport" | "aiConversationPointer" | "aiPendingConfirmation" | "pushDeviceTarget" | "lockFiles" | "paymentIntents" | "bills" | "billPayments" | "billPaymentProofs" | "rentalBookings" | "rentalBookingItems" | "affiliateScrapeSources" | "affiliateScrapeMappings" | "affiliateScrapeRuns" | "affiliateSourceIntakes" | "affiliateSourceIntakePages" | "affiliateSourceIntakeRuns" | "affiliateSourceIntakeArtifacts" | "affiliateSourceDiscoveryCampaigns" | "affiliateAgentGatewayJobs" | "affiliateAgentGatewayClaims" | "affiliateAgentGatewayArtifacts" | "affiliateAgentGatewayOperationReceipts" | "affiliateAgentGatewayEvents" | "affiliateOperationalAlerts" | "affiliateOperationalAlertDeliveries" | "affiliateCoverageAgentJobs" | "affiliateCoverageCities" | "affiliateCoverageCells" | "affiliateCoverageCellAssessments" | "affiliateSourceDiscoveryQueryExecutions" | "affiliateSourceDiscoveryRuns" | "affiliateSourceDiscoveryResults" | "affiliateSourceDomainPolicies" | "affiliateSourceMappingJobs" | "affiliateApprovalJobs" | "affiliateImportCandidates" | "affiliateSupplySources" | "affiliateSupplyContractManifests" | "affiliateSupplyLifecycleTransitions" | "affiliateSupplyReconciliationRuns" | "affiliateAgentWorkerHealth" | "affiliateSupplyTargets" | "affiliateReplenishmentDemands" | "affiliateReplenishmentWaves" | "eventTags" | "eventTagAssignments" | "organizationTags" | "organizationTagAssignments" | "refundRequests" | "discounts" | "discountCodes" | "discountCodeRedemptions" | "discountCodeReservations" | "organizationAccountingConnections" | "accountingSyncRecords" | "organizationFinanceCategoryAccountingMappings" | "stripeAccounts" | "events" | "organizations" | "organizationReviews" | "organizationDomains" | "organizationClaims" | "organizationClaimEvidence" | "organizationClaimEvents" | "organizationReviewResponses" | "products" | "subscriptions" | "timeSlots" | "leagueScoringConfigs" | "eventTemplates" | "eventTemplateResources" | "eventTemplateTimeSlots" | "eventTemplateRentalResourceHints" | "eventTemplateLeagueScoringConfigs" | "sports" | "documentRequirements" | "templateDocuments" | "templateProviderQuarantines" | "signedDocuments" | "documentSubjects" | "documentRequirementSatisfactions" | "documentRequirementSatisfactionEvidence" | "documentEvidenceAuditEvents" | "boldSignWebhookEvents" | "boldSignSyncOperations" | "parentChildLinks" | "eventRegistrations" | "authUser" | "feedbackSubmissions" | "file"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -2098,6 +2099,80 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         count: {
           args: Prisma.InvitesCountArgs<ExtArgs>
           result: runtime.Types.Utils.Optional<Prisma.InvitesCountAggregateOutputType> | number
+        }
+      }
+    }
+    InvitationEvidence: {
+      payload: Prisma.$InvitationEvidencePayload<ExtArgs>
+      fields: Prisma.InvitationEvidenceFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.InvitationEvidenceFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$InvitationEvidencePayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.InvitationEvidenceFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$InvitationEvidencePayload>
+        }
+        findFirst: {
+          args: Prisma.InvitationEvidenceFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$InvitationEvidencePayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.InvitationEvidenceFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$InvitationEvidencePayload>
+        }
+        findMany: {
+          args: Prisma.InvitationEvidenceFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$InvitationEvidencePayload>[]
+        }
+        create: {
+          args: Prisma.InvitationEvidenceCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$InvitationEvidencePayload>
+        }
+        createMany: {
+          args: Prisma.InvitationEvidenceCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.InvitationEvidenceCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$InvitationEvidencePayload>[]
+        }
+        delete: {
+          args: Prisma.InvitationEvidenceDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$InvitationEvidencePayload>
+        }
+        update: {
+          args: Prisma.InvitationEvidenceUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$InvitationEvidencePayload>
+        }
+        deleteMany: {
+          args: Prisma.InvitationEvidenceDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.InvitationEvidenceUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.InvitationEvidenceUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$InvitationEvidencePayload>[]
+        }
+        upsert: {
+          args: Prisma.InvitationEvidenceUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$InvitationEvidencePayload>
+        }
+        aggregate: {
+          args: Prisma.InvitationEvidenceAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateInvitationEvidence>
+        }
+        groupBy: {
+          args: Prisma.InvitationEvidenceGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.InvitationEvidenceGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.InvitationEvidenceCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.InvitationEvidenceCountAggregateOutputType> | number
         }
       }
     }
@@ -11726,6 +11801,7 @@ export const InvitesScalarFieldEnum = {
   updatedAt: 'updatedAt',
   sentAt: 'sentAt',
   finalizedAt: 'finalizedAt',
+  supersededAt: 'supersededAt',
   actedBy: 'actedBy',
   actingGuardianId: 'actingGuardianId',
   declineBlockScope: 'declineBlockScope',
@@ -11754,6 +11830,26 @@ export const InvitesScalarFieldEnum = {
 } as const
 
 export type InvitesScalarFieldEnum = (typeof InvitesScalarFieldEnum)[keyof typeof InvitesScalarFieldEnum]
+
+
+export const InvitationEvidenceScalarFieldEnum = {
+  reportId: 'reportId',
+  inviteId: 'inviteId',
+  capturedAt: 'capturedAt',
+  attemptCreatedAt: 'attemptCreatedAt',
+  senderId: 'senderId',
+  playerId: 'playerId',
+  teamId: 'teamId',
+  status: 'status',
+  finalizedAt: 'finalizedAt',
+  sentAt: 'sentAt',
+  actedBy: 'actedBy',
+  actingGuardianId: 'actingGuardianId',
+  declineBlockScope: 'declineBlockScope',
+  deliveries: 'deliveries'
+} as const
+
+export type InvitationEvidenceScalarFieldEnum = (typeof InvitationEvidenceScalarFieldEnum)[keyof typeof InvitationEvidenceScalarFieldEnum]
 
 
 export const TeamBlocksScalarFieldEnum = {
@@ -16222,6 +16318,7 @@ export type GlobalOmitConfig = {
   sensitiveUserData?: Prisma.SensitiveUserDataOmit
   authMfaChallenges?: Prisma.AuthMfaChallengesOmit
   invites?: Prisma.InvitesOmit
+  invitationEvidence?: Prisma.InvitationEvidenceOmit
   teamBlocks?: Prisma.TeamBlocksOmit
   inviteDeliveries?: Prisma.InviteDeliveriesOmit
   teamCreationRequests?: Prisma.TeamCreationRequestsOmit

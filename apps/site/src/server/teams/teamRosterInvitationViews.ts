@@ -16,7 +16,7 @@ export const withRosterInvitationViews = async <T extends RosterView>(client: Pr
   if (!scopes.length) return teams;
   await expireTeamInvitations(client, { OR: scopes });
   const latest = await client.invites.findMany({
-    where: { type: 'TEAM', OR: scopes }, distinct: ['teamId', 'userId'],
+    where: { type: 'TEAM', supersededAt: null, OR: scopes }, distinct: ['teamId', 'userId'],
     orderBy: [{ createdAt: { sort: 'desc', nulls: 'last' } }, { id: 'desc' }], select: { id: true, teamId: true, userId: true, status: true },
   });
   const byPlayer = new Map(latest.map((invite) => [`${invite.teamId}:${invite.userId}`, invite]));

@@ -1,4 +1,5 @@
 'use client';
+import { InvitationEvidenceReview } from '@/components/moderation/InvitationEvidenceReview';
 
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
@@ -146,7 +147,7 @@ type AdminChatMessageRow = {
 
 type AdminModerationReportRow = {
   $id: string;
-  targetType: 'CHAT_GROUP' | 'EVENT' | 'BLOCK_USER';
+  targetType: 'CHAT_GROUP' | 'EVENT' | 'BLOCK_USER' | 'ORGANIZATION_REVIEW' | 'TEAM_INVITATION';
   targetId: string;
   targetOwnerUserId?: string | null;
   category?: string | null;
@@ -2156,6 +2157,7 @@ export default function AdminDashboardClient({ initialAdminEmail }: AdminDashboa
                                 </Group>
                                 <Text size="sm" fw={600}>{report.category || 'Uncategorized'}</Text>
                                 <Text size="xs" c="dimmed">{report.targetId}</Text>
+                                {report.targetType === 'TEAM_INVITATION' ? <InvitationEvidenceReview reportId={report.$id} reportStatus={report.status} /> : null}
                                 {report.notes ? (
                                   <Text size="sm" mt={4} lineClamp={3}>{report.notes}</Text>
                                 ) : null}

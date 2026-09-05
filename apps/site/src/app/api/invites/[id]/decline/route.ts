@@ -1,3 +1,4 @@
+import { isRoutineInvitationVisible } from '@/server/invitationRetention';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/permissions';
@@ -13,7 +14,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { id } = await params;
 
   const invite = await prisma.invites.findUnique({ where: { id } });
-  if (!invite) {
+  if (!invite || !isRoutineInvitationVisible(invite)) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 

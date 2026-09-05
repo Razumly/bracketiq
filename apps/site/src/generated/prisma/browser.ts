@@ -123,6 +123,11 @@ export type AuthMfaChallenges = Prisma.AuthMfaChallengesModel
  */
 export type Invites = Prisma.InvitesModel
 /**
+ * Model InvitationEvidence
+ *
+ */
+export type InvitationEvidence = Prisma.InvitationEvidenceModel
+/**
  * Model TeamBlocks
  *
  */

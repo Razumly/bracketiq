@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma';
+import { isRoutineInvitationVisible } from '@/server/invitationRetention';
 import { acquireTeamRosterLock } from '@/server/repositories/locks';
 import { canManageTeamInvites } from '@/app/api/teams/[id]/member-invites/inviteHelpers';
 import { assertTeamInvitationAllowed } from './teamInvitationRestrictions';
@@ -9,7 +10,7 @@ export type TeamInvitationDeliveryRequest = { idempotencyKey?: string; requested
 export const reserveTeamInvitationDelivery = async (inviteId: string, request: TeamInvitationDeliveryRequest) => (
   prisma.$transaction(async (tx) => {
     const original = await tx.invites.findUnique({ where: { id: inviteId } });
-    if (!original?.teamId || original.type !== 'TEAM') throw new Response('Invitation not found.', { status: 404 });
+    if (!original?.teamId || original.type !== 'TEAM' || !isRoutineInvitationVisible(original)) throw new Response('Invitation not found.', { status: 404 });
     await acquireTeamRosterLock(tx, original.teamId);
     let invite = await tx.invites.findUnique({ where: { id: inviteId } });
     if (!invite || invite.teamId !== original.teamId) throw new Response('Invitation changed. Reload it before sending.', { status: 409 });

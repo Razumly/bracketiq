@@ -751,6 +751,7 @@ export type BoldSignSyncOperationStatusEnum = (typeof BoldSignSyncOperationStatu
 
 
 export const ModerationReportTargetTypeEnum = {
+  TEAM_INVITATION: 'TEAM_INVITATION',
   CHAT_GROUP: 'CHAT_GROUP',
   EVENT: 'EVENT',
   BLOCK_USER: 'BLOCK_USER',
