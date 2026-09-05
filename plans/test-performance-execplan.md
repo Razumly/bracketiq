@@ -23,6 +23,10 @@ The user approved the fixes identified in `docs/test-performance-audit-2026-09-0
 - [x] (2026-09-05) Run the complete site coverage diagnostic and affected UI and Node checks. Record the remaining baseline and platform failures.
 - [x] (2026-09-05) Run focused checks, the complete affected site suite, available mobile validation, and independent code reviews.
 - [x] (2026-09-05) Record outcomes and prepare the completed changes for the final commit.
+- [x] (2026-09-05) Push the branch and open pull request 154 after the user requested integration into `main`.
+- [x] (2026-09-05) Repair the stale runner fixture behind the sole Site CI failure. Both complete affiliate suites pass, with 148 tests.
+- [x] (2026-09-05) Pass focused ESLint and both independent reviews for the fixture repair.
+- [ ] Complete hosted CI for the final revision and integrate into `main`.
 
 ## Surprises & Discoveries
 
@@ -55,6 +59,10 @@ The local profile attributes 3m 46.99s to application Kotlin compilation, 2m 58.
 Actionlint 1.7.12 accepted both workflows. A temporary harness executed the actual gate shell scripts for 22 success, failure, cancellation, and skip cases. All 22 passed. The Android release scripts passed Bash syntax checks. Gradle 9.4.1 starts with JDK 17 on this host.
 
 ## Decision Log
+
+Decision: repair the existing affiliate cutover test fixture before integration. The first PR run failed only this case. Diagnostic findings show a retired credential, a missing reviewed egress network, and missing Codex auth handoff evidence. The fixture now uses the same current runner contract as the passing cutover suite. All readiness and cutover assertions remain. Both complete suites pass, with 148 tests in 23.187 seconds. Production validation remains unchanged. Date: 2026-09-05.
+
+Decision: let the first mobile CI run finish before pushing the fixture repair. A new push cancels the current PR workflows. Completion lets the cold native build save its caches for the next revision. Date: 2026-09-05.
 
 Decision: retain all release checks and the existing site coverage floors. Run Android release validation as a separate required job when mobile checks run. Reason: the resource check protects the packaged release APK. Moving it must not remove its protection. Date: 2026-09-05.
 
