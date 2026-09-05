@@ -49,6 +49,85 @@ import kotlin.test.assertNull
 
 class EventEditActionHandlerTest {
     @Test
+    fun given_schedule_view_when_an_operation_is_selected_then_reviews_without_saving_event_settings() = runTest {
+        for (operation in EventEditorMaintenanceOperation.entries) {
+            val event = testEvent()
+            val session = editorSession(event, listOf(operation))
+            val proposal = maintenanceProposal(operation)
+            val repository = HandlerEventRepository(
+                editorSessions = ArrayDeque(listOf(session)),
+                saveOutcomes = ArrayDeque(),
+                proposalResponses = ArrayDeque(listOf(EventEditorMaintenanceResponseDto.Proposed(proposal))),
+            )
+            val draft = EventEditDraftCoordinator(initialEvent = event, canEditInitial = false)
+            val handler = createHandler(this, event, repository, mutableListOf(), draftCoordinator = draft)
+
+            handler.openScheduleMaintenance()
+            advanceUntilIdle()
+            assertEquals(listOf(operation), handler.scheduleMaintenanceOptions.value?.operations)
+            handler.selectScheduleMaintenanceOperation(operation)
+            advanceUntilIdle()
+
+            assertEquals(proposal, handler.scheduleMaintenanceReview.value?.proposal)
+            assertEquals(operation, repository.maintenanceRequests.single().operation)
+            assertEquals(session.snapshot.revisionBinding, repository.maintenanceRequests.single().expectedRevisions)
+            assertTrue(repository.saveCommands.isEmpty())
+            assertEquals(false, draft.isEditing.value)
+        }
+    }
+
+    @Test
+    fun given_ineligible_schedule_snapshot_when_an_operation_is_requested_then_no_proposal_is_submitted() = runTest {
+        val event = testEvent()
+        val permitted = editorSession(event, listOf(EventEditorMaintenanceOperation.BUILD))
+        val readOnly = EventEditorSessionMapper.fromEditSnapshot(permitted.snapshot.copy(
+            capabilities = permitted.snapshot.capabilities.copy(canEdit = false),
+        ))
+        val sessions = listOf(
+            readOnly,
+            editorSession(event.copy(isAutomatedScheduling = false), listOf(EventEditorMaintenanceOperation.BUILD)),
+            editorSession(event.copy(eventType = EventType.EVENT), listOf(EventEditorMaintenanceOperation.BUILD)),
+            editorSession(event.copy(state = "TEMPLATE"), listOf(EventEditorMaintenanceOperation.BUILD)),
+            editorSession(event.copy(id = "another-event"), listOf(EventEditorMaintenanceOperation.BUILD)),
+            editorSession(event, emptyList()),
+        )
+        for (session in sessions) {
+            val repository = HandlerEventRepository(ArrayDeque(listOf(session)), ArrayDeque(), ArrayDeque())
+            val handler = createHandler(this, event, repository, mutableListOf())
+            handler.openScheduleMaintenance()
+            advanceUntilIdle()
+            assertEquals(emptyList(), handler.scheduleMaintenanceOptions.value?.operations)
+            assertNotNull(handler.scheduleMaintenanceOptions.value?.message)
+            handler.selectScheduleMaintenanceOperation(EventEditorMaintenanceOperation.BUILD)
+            advanceUntilIdle()
+            assertTrue(repository.maintenanceRequests.isEmpty())
+            assertTrue(repository.saveCommands.isEmpty())
+            assertNull(handler.scheduleMaintenanceReview.value)
+        }
+    }
+
+    @Test
+    fun given_schedule_actions_loading_when_cancelled_then_a_late_response_does_not_reopen_them() = runTest {
+        val event = testEvent()
+        val session = editorSession(event, listOf(EventEditorMaintenanceOperation.COMPLETE))
+        val gate = CompletableDeferred<Unit>()
+        val repository = HandlerEventRepository(ArrayDeque(listOf(session, session)), ArrayDeque(), ArrayDeque())
+        repository.refreshEditorGate = gate
+        val handler = createHandler(this, event, repository, mutableListOf())
+        handler.openScheduleMaintenance()
+        advanceUntilIdle()
+        handler.dismissScheduleMaintenanceOptions()
+        handler.openScheduleMaintenance()
+        advanceUntilIdle()
+        assertEquals(true, handler.scheduleMaintenanceOptions.value?.isLoading)
+        handler.dismissScheduleMaintenanceOptions()
+        gate.complete(Unit)
+        advanceUntilIdle()
+        assertNull(handler.scheduleMaintenanceOptions.value)
+        assertTrue(repository.maintenanceRequests.isEmpty())
+    }
+
+    @Test
     fun given_partial_maintenance_when_accepting_then_confirmation_is_required_before_the_request() = runTest {
         val event = testEvent()
         val session = editorSession(event = event, operations = listOf(EventEditorMaintenanceOperation.REBUILD))

@@ -92,6 +92,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val eventEditorControlLocks: StateFlow<EventEditorControlLocks>
     val eventEditorSnapshot: StateFlow<EventEditorSnapshotDto?>
     val scheduleMaintenanceReview: StateFlow<EventScheduleMaintenanceReview?>
+    val scheduleMaintenanceOptions: StateFlow<EventScheduleMaintenanceOptions?>
     val eventTypeTransitionConfirmation: StateFlow<EventTypeTransitionConfirmation?>
     val isUserInEvent: StateFlow<Boolean>
     val isRegistrationPaymentPending: StateFlow<Boolean>
@@ -197,6 +198,9 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun dismissEventTypeTransitionConfirmation()
     fun confirmEventTypeTransition()
     fun acceptScheduleMaintenanceProposal()
+    fun openScheduleMaintenance()
+    fun dismissScheduleMaintenanceOptions()
+    fun selectScheduleMaintenanceOperation(operation: com.razumly.mvp.core.network.dto.EventEditorMaintenanceOperation)
     fun retryAcceptedScheduleSync()
     fun rejectScheduleMaintenanceProposal()
     fun dismissScheduleMaintenanceReview()

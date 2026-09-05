@@ -101,6 +101,7 @@ fun EventDetailScreen(
         component.eventTypeTransitionConfirmation.collectAsState()
     val eventEditorSnapshot by component.eventEditorSnapshot.collectAsState()
     val scheduleMaintenanceReview by component.scheduleMaintenanceReview.collectAsState()
+    val scheduleMaintenanceOptions by component.scheduleMaintenanceOptions.collectAsState()
     val showMap by mapComponent.showMap.collectAsState()
     val editableMatches by component.editableMatches.collectAsState()
     val eventFields by component.eventFields.collectAsState()
@@ -900,6 +901,17 @@ fun EventDetailScreen(
                 ) {
                     Column(Modifier.padding(innerPadding).padding(top = 4.dp)) {
                         EventDetailTabsRouteHost(
+                            scheduleActions = {
+                                EventScheduleMaintenanceActions(
+                                    canRequest = showScheduleMatchManagement && !isEditingMatches && !isEditing &&
+                                        selectedEvent.event.isAutomatedScheduling &&
+                                        !selectedEvent.event.isArchived() && !isTemplateEvent,
+                                    options = scheduleMaintenanceOptions,
+                                    onOpen = component::openScheduleMaintenance,
+                                    onDismiss = component::dismissScheduleMaintenanceOptions,
+                                    onSelect = component::selectScheduleMaintenanceOperation,
+                                )
+                            },
                             state = EventDetailTabsRouteState(
                                 initialTab = initialTab,
                                 showDetails = showDetails,

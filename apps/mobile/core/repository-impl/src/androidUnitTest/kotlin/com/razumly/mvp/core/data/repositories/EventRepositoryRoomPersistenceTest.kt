@@ -150,6 +150,13 @@ private inline fun <reified T> encodeRoomMaintenanceResponse(value: T): String {
                 "timeZone",
             )
         } + mapOf(
+            "teams" to JsonArray(
+                event["teams"]?.jsonArray?.map { team ->
+                    JsonObject(team.jsonObject + mapOf(
+                        "captainId" to (team.jsonObject["captainId"] ?: JsonNull),
+                    ))
+                } ?: emptyList(),
+            ),
             "fields" to JsonArray(
                 event["fields"]?.jsonArray?.map { field ->
                     JsonObject(
@@ -197,6 +204,9 @@ private inline fun <reified T> encodeRoomMaintenanceResponse(value: T): String {
         val matchObject = match.jsonObject
         JsonObject(
             matchObject + mapOf(
+                "start" to (matchObject["start"] ?: JsonNull),
+                "end" to (matchObject["end"] ?: JsonNull),
+                "fieldId" to (matchObject["fieldId"] ?: JsonNull),
                 "field" to (matchObject["field"] ?: JsonNull),
                 "official" to (matchObject["official"] ?: JsonNull),
                 "officialAssignments" to (matchObject["officialAssignments"] ?: JsonArray(emptyList())),
@@ -1986,6 +1996,143 @@ class EventRepositoryRoomPersistenceTest {
             context.deleteDatabase(databaseName)
         }
     }
+
+    @Test
+    fun given_maintenance_when_room_reopens_then_schedule_remains() =
+        kotlinx.coroutines.test.runTest {
+            for (operation in EventEditorMaintenanceOperation.entries) {
+                val fixture = eventRepositoryRoomPersistenceTournamentFixture()
+                val databaseName = "i41-${java.util.UUID.randomUUID()}.db"
+                fun openDatabase() = Room.databaseBuilder<MVPDatabaseService>(context, databaseName)
+                    .allowMainThreadQueries().build()
+                var database = openDatabase()
+                var offline = false
+                var rejectAcceptance = true
+                val assignment = com.razumly.mvp.core.network.dto.EventEditorMaintenanceGraphOfficialAssignmentDto(
+                    positionId = "line-official", slotIndex = 0, holderType = "OFFICIAL",
+                    userId = "official-1", eventOfficialId = "event-official-1",
+                    checkedIn = true, hasConflict = false,
+                )
+                val scheduled = roomMaintenanceGraphMatch(fixture.eventId, "match-1", 1, fixture.fieldId).copy(
+                    team1Id = "team-left", team2Id = "team-right", teamOfficialId = "team-duty",
+                    officialIds = listOf(assignment), officialAssignments = listOf(assignment),
+                    locked = operation != EventEditorMaintenanceOperation.BUILD,
+                    winnerNextMatchId = "match-2",
+                )
+                val unplaced = roomMaintenanceGraphMatch(fixture.eventId, "match-2", 2, fixture.fieldId).copy(
+                    placementState = "UNPLACED", start = null, end = null, fieldId = null, field = null,
+                    previousLeftId = "match-1",
+                )
+                val projections = listOf(
+                    roomMaintenanceProjection(fixture.eventId, "match-1", 1, fixture.fieldId).copy(locked = scheduled.locked),
+                    roomMaintenanceProjection(fixture.eventId, "match-2", 2, fixture.fieldId).copy(
+                        placementState = "UNPLACED", start = null, end = null, fieldId = null,
+                    ),
+                )
+                val eventEnd = if (operation == EventEditorMaintenanceOperation.COMPLETE) {
+                    "2026-08-15T18:00:00Z"
+                } else {
+                    "2026-08-15T08:45:00Z"
+                }
+                val graphEvent = roomMaintenanceGraphEvent(fixture.eventId, fieldId = fixture.fieldId).copy(
+                    end = eventEnd,
+                    teams = listOf("team-left", "team-right", "team-duty").map { id ->
+                        EventEditorMaintenanceGraphTeamDto(
+                            id = id, captainId = null, division = "division-open", kind = "PLACEHOLDER",
+                            name = id, playerIds = emptyList(), players = emptyList(), playerRegistrations = emptyList(),
+                        )
+                    },
+                )
+                val graph = EventEditorMaintenanceGraphDto(
+                    event = fixture.eventResponse, matches = projections,
+                    canonicalEvent = graphEvent, canonicalMatches = listOf(scheduled, unplaced),
+                )
+                val request = roomMaintenanceRequest(fixture, operation, "offline-${operation.name}")
+                val accepted = EventEditorMaintenanceAcceptedResultDto(
+                    status = EventEditorMaintenanceResponseStatus.ACCEPTED,
+                    contractVersion = request.contractVersion, eventId = request.eventId, operation = operation,
+                    operationId = request.operationId, proposalRevision = "offline-proposal",
+                    revisionBinding = requireNotNull(request.expectedRevisions), graph = graph,
+                    protectedMatchIds = if (scheduled.locked) listOf("match-1") else emptyList(),
+                    acceptanceOperationId = "offline-acceptance",
+                    scheduleOutcome = EventEditorMaintenanceScheduleOutcomeDto(
+                        status = EventEditorMaintenanceScheduleOutcomeStatus.INCOMPLETE,
+                        isComplete = false, matchCount = 2, placedMatchCount = 1, unplacedMatchCount = 1,
+                        matches = projections, warnings = emptyList(),
+                        unscheduledMatches = listOf(com.razumly.mvp.core.network.dto.EventEditorMaintenanceUnscheduledMatchDto(
+                            id = "match-2", matchId = 2, phaseDivisionId = "division-open", phase = "POOL",
+                            sourceDivisionId = "division-open",
+                        )),
+                        affectedCompetitionPhases = listOf(com.razumly.mvp.core.network.dto.EventEditorMaintenanceAffectedCompetitionPhaseDto(
+                            id = "division-open", name = "Open Pool", phase = "POOL", sourceDivisionId = "division-open",
+                        )),
+                    ),
+                )
+                val http = HttpClient(MockEngine { httpRequest ->
+                    check(!offline) { "Offline reload must not use HTTP." }
+                    assertEquals("/api/events/${fixture.eventId}/schedule", httpRequest.url.encodedPath)
+                    assertEquals(HttpMethod.Put, httpRequest.method)
+                    if (rejectAcceptance) {
+                        respondJson("""{"code":"EDITOR_MAINTENANCE_STALE","error":"Schedule changed."}""", HttpStatusCode.Conflict)
+                    } else {
+                        respondJson(encodeRoomMaintenanceResponse(accepted), HttpStatusCode.OK)
+                    }
+                }) { configureMvpHttpClient() }
+                var repository = eventRepositoryRoomPersistenceRepository(database, http, UnconfinedTestDispatcher(testScheduler))
+                fun matchRepository() = com.razumly.mvp.eventDetail.data.MatchRepository(
+                    api = MvpApiClient(http, "http://example.test", EventRepositoryRoomPersistence_AuthTokenStore),
+                    databaseService = database, autoSyncOperations = false,
+                )
+                val acceptance = EventEditorAcceptMaintenanceProposalDto(
+                    contractVersion = request.contractVersion, eventId = request.eventId, operation = operation,
+                    operationId = request.operationId, proposalRevision = accepted.proposalRevision,
+                    acceptanceOperationId = accepted.acceptanceOperationId,
+                )
+                try {
+                    val priorEvent = Event(id = fixture.eventId, eventType = EventType.TOURNAMENT,
+                        end = Instant.parse("2026-08-15T18:00:00Z"), isAutomatedScheduling = true)
+                    repository.updateLocalEvent(priorEvent).getOrThrow()
+                    assertIs<EventEditorProposalStaleException>(repository.acceptEventScheduleMaintenance(acceptance).exceptionOrNull())
+                    assertEquals(priorEvent.end, repository.getCachedEventWithRelationsFlow(fixture.eventId).first().getOrThrow().event.end)
+                    assertTrue(matchRepository().getCachedMatchesOfTournamentFlow(fixture.eventId).first().getOrThrow().isEmpty())
+
+                    rejectAcceptance = false
+                    repository.acceptEventScheduleMaintenance(acceptance).getOrThrow()
+                    repository.close()
+                    database.close()
+                    offline = true
+                    database = openDatabase()
+                    repository = eventRepositoryRoomPersistenceRepository(database, http, UnconfinedTestDispatcher(testScheduler))
+                    assertEquals(Instant.parse(eventEnd), repository.getCachedEventWithRelationsFlow(fixture.eventId).first().getOrThrow().event.end)
+                    val matches = matchRepository().getCachedMatchesOfTournamentFlow(fixture.eventId).first().getOrThrow()
+                        .associateBy { it.match.id }
+                    assertEquals(setOf("match-1", "match-2"), matches.keys)
+                    val placed = matches.getValue("match-1").match
+                    assertEquals(Instant.parse("2026-08-15T08:00:00Z"), placed.start)
+                    assertEquals(Instant.parse("2026-08-15T08:45:00Z"), placed.end)
+                    assertEquals(fixture.fieldId, placed.fieldId)
+                    assertEquals("team-left", placed.team1Id)
+                    assertEquals("team-right", placed.team2Id)
+                    assertEquals("team-duty", placed.teamOfficialId)
+                    assertEquals("official-1", placed.officialIds.single().userId)
+                    assertEquals("line-official", placed.officialIds.single().positionId)
+                    assertTrue(placed.officialIds.single().checkedIn)
+                    assertEquals(operation != EventEditorMaintenanceOperation.BUILD, placed.locked)
+                    assertEquals("match-2", placed.winnerNextMatchId)
+                    val pending = matches.getValue("match-2").match
+                    assertEquals("UNPLACED", pending.placementState)
+                    assertNull(pending.start)
+                    assertNull(pending.end)
+                    assertNull(pending.fieldId)
+                    assertEquals("match-1", pending.previousLeftId)
+                } finally {
+                    repository.close()
+                    http.close()
+                    database.close()
+                    context.deleteDatabase(databaseName)
+                }
+            }
+        }
 
     @Test
     fun given_newer_event_when_accepted_relation_refresh_runs_then_newer_relations_survive_and_only_missing_rows_are_fetched() =

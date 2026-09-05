@@ -135,6 +135,13 @@ data class EventTypeTransitionConfirmation(
     val actionLabel: String,
     val destinationEventType: EventType,
 )
+
+data class EventScheduleMaintenanceOptions(
+    val isLoading: Boolean = false,
+    val operations: List<EventEditorMaintenanceOperation> = emptyList(),
+    val message: String? = null,
+)
+
 internal class EventEditActionHandler(
     private val scope: CoroutineScope,
     private val editActionCoordinator: EventEditActionCoordinator,
@@ -163,6 +170,9 @@ internal class EventEditActionHandler(
     val eventEditorSnapshot = _eventEditorSnapshot.asStateFlow()
     private val _scheduleMaintenanceReview = MutableStateFlow<EventScheduleMaintenanceReview?>(null)
     val scheduleMaintenanceReview = _scheduleMaintenanceReview.asStateFlow()
+    private val _scheduleMaintenanceOptions = MutableStateFlow<EventScheduleMaintenanceOptions?>(null)
+    val scheduleMaintenanceOptions = _scheduleMaintenanceOptions.asStateFlow()
+    private var scheduleOptionsRequestGeneration = 0L
     private var maintenanceRequestGeneration = 0L
     private var maintenanceRequestInFlight = false
     private var lastMaintenanceAction: EventScheduleEditAction? = null
@@ -260,6 +270,7 @@ internal class EventEditActionHandler(
 
     fun startEditingEvent() {
         if (editDraftCoordinator.isEditing.value) return
+        dismissScheduleMaintenanceOptions()
         val requestId = ++editStartRequestId
         val currentEvent = selectedEvent()
         scope.launch {
@@ -287,6 +298,7 @@ internal class EventEditActionHandler(
             return
         }
         editStartRequestId += 1
+        dismissScheduleMaintenanceOptions()
         maintenanceRequestGeneration += 1
         clearScheduleMaintenanceIdentities()
         _scheduleMaintenanceReview.value = null
@@ -426,6 +438,64 @@ internal class EventEditActionHandler(
         )
     }
 
+    fun openScheduleMaintenance() {
+        if (editDraftCoordinator.isEditing.value) return
+        _scheduleMaintenanceReview.value?.let { review ->
+            _scheduleMaintenanceReview.value = review.copy(isVisible = true)
+            return
+        }
+        if (_scheduleMaintenanceOptions.value?.isLoading == true) return
+        val eventId = selectedEvent().id
+        val generation = ++scheduleOptionsRequestGeneration
+        _scheduleMaintenanceOptions.value = EventScheduleMaintenanceOptions(isLoading = true)
+        scope.launch {
+            val result = eventRepository.getEventEditor(eventId)
+            if (generation != scheduleOptionsRequestGeneration || selectedEvent().id != eventId) return@launch
+            result.fold(
+                onSuccess = { session ->
+                    val event = session.canonicalState.event
+                    val snapshot = session.snapshot
+                    val operations = snapshot.scheduleState.availableMaintenanceOperations.takeIf {
+                        snapshot.mode == "EDIT" && snapshot.eventId == eventId && event.id == eventId &&
+                            snapshot.capabilities.canEdit && event.isAutomatedScheduling &&
+                            event.eventType.isScheduleConstructionAutomationType() &&
+                            !event.state.equals("TEMPLATE", ignoreCase = true)
+                    }.orEmpty()
+                    if (operations.isNotEmpty()) {
+                        setEditorSession(session)
+                        seedEditableDraft(event, session.canonicalState)
+                    }
+                    _scheduleMaintenanceOptions.value = EventScheduleMaintenanceOptions(
+                        operations = operations,
+                        message = SCHEDULE_MAINTENANCE_UNAVAILABLE_MESSAGE.takeIf { operations.isEmpty() },
+                    )
+                },
+                onFailure = { error ->
+                    _scheduleMaintenanceOptions.value = EventScheduleMaintenanceOptions(
+                        message = error.userMessage("Unable to load Schedule actions. Try again."),
+                    )
+                },
+            )
+        }
+    }
+
+    fun dismissScheduleMaintenanceOptions() {
+        scheduleOptionsRequestGeneration += 1
+        _scheduleMaintenanceOptions.value = null
+    }
+
+    fun selectScheduleMaintenanceOperation(operation: EventEditorMaintenanceOperation) {
+        if (operation !in _scheduleMaintenanceOptions.value?.operations.orEmpty()) return
+        dismissScheduleMaintenanceOptions()
+        requestScheduleMaintenanceAction(
+            when (operation) {
+                EventEditorMaintenanceOperation.BUILD -> EventScheduleEditAction.BUILD_SCHEDULE
+                EventEditorMaintenanceOperation.COMPLETE -> EventScheduleEditAction.RESCHEDULE
+                EventEditorMaintenanceOperation.REBUILD -> EventScheduleEditAction.REBUILD_SCHEDULE
+            },
+        )
+    }
+
     fun rescheduleEvent() {
         requestScheduleMaintenanceAction(EventScheduleEditAction.RESCHEDULE)
     }
@@ -503,28 +573,47 @@ internal class EventEditActionHandler(
         val loadingOperation = loadingHandler().newOperation()
         return editActionCoordinator.runScheduleMaintenanceAction(
             action = action,
-            prepareEventForUpdate = ::prepareEventForUpdate,
+            prepareEventForUpdate = {
+                if (editDraftCoordinator.isEditing.value) {
+                    prepareEventForUpdate()
+                } else {
+                    PreparedEventForUpdate(event = requireNotNull(editorSession).canonicalState.event)
+                }
+            },
             logPreparedFieldOwnership = ::logPreparedFieldOwnership,
             updateEvent = { prepared ->
                 if (!isCurrentDraftScheduleMaintenanceCapable()) {
                     throw EventScheduleMaintenanceUnavailableException()
                 }
-                val hadUnsavedChanges = editDraftCoordinator.hasUnsavedChanges()
-                val originalSession = editorSession ?: eventRepository.getEventEditor(prepared.event.id)
-                    .getOrThrow()
-                    .also { loaded -> setEditorSession(loaded) }
-                savePreparedEventThroughEditor(
-                    prepared = prepared,
-                    pendingStaffInvites = inviteCoordinator.pendingStaffInvites.value,
-                    scheduleTransitionOverride = EventEditorSaveScheduleTransitionDto(
-                        mode = EventEditorScheduleTransitionMode.PRESERVE,
-                    ),
-                    persistLocally = false,
-                ).also { outcome ->
-                    savedSnapshot = outcome.session.snapshot
-                    if (hadUnsavedChanges) {
-                        maintenanceOriginalSession = originalSession
-                        maintenanceSavedSession = outcome.session
+                if (!editDraftCoordinator.isEditing.value) {
+                    val session = requireNotNull(editorSession)
+                    savedSnapshot = session.snapshot
+                    EventEditorSaveOutcome(
+                        session = session,
+                        staffEmailDelivery = "NOT_REQUESTED",
+                        scheduleOutcome = com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeDto(
+                            status = com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeStatus.NOT_REQUESTED,
+                            matchCount = session.snapshot.scheduleState.matchCount,
+                        ),
+                    )
+                } else {
+                    val hadUnsavedChanges = editDraftCoordinator.hasUnsavedChanges()
+                    val originalSession = editorSession ?: eventRepository.getEventEditor(prepared.event.id)
+                        .getOrThrow()
+                        .also { loaded -> setEditorSession(loaded) }
+                    savePreparedEventThroughEditor(
+                        prepared = prepared,
+                        pendingStaffInvites = inviteCoordinator.pendingStaffInvites.value,
+                        scheduleTransitionOverride = EventEditorSaveScheduleTransitionDto(
+                            mode = EventEditorScheduleTransitionMode.PRESERVE,
+                        ),
+                        persistLocally = false,
+                    ).also { outcome ->
+                        savedSnapshot = outcome.session.snapshot
+                        if (hadUnsavedChanges) {
+                            maintenanceOriginalSession = originalSession
+                            maintenanceSavedSession = outcome.session
+                        }
                     }
                 }
             },

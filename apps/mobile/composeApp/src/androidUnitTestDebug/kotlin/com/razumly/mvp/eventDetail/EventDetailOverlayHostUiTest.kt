@@ -44,6 +44,63 @@ class EventDetailOverlayHostUiTest {
     val composeRule = createComposeRule()
 
     @Test
+    fun given_schedule_actions_when_opened_then_only_server_permitted_operations_can_be_selected() {
+        val options = mutableStateOf<EventScheduleMaintenanceOptions?>(null)
+        var selected: EventEditorMaintenanceOperation? = null
+        composeRule.setContent {
+            MaterialTheme {
+                EventScheduleMaintenanceActions(
+                    canRequest = true,
+                    options = options.value,
+                    onOpen = { options.value = EventScheduleMaintenanceOptions(
+                        operations = listOf(EventEditorMaintenanceOperation.COMPLETE),
+                    ) },
+                    onDismiss = { options.value = null },
+                    onSelect = { selected = it; options.value = null },
+                )
+            }
+        }
+        composeRule.onNodeWithText("Schedule actions").performClick()
+        composeRule.onNodeWithText("Build Schedule").assertDoesNotExist()
+        composeRule.onNodeWithText("Rebuild Schedule").assertDoesNotExist()
+        composeRule.onNodeWithText("Complete Schedule").performClick()
+        assertEquals(EventEditorMaintenanceOperation.COMPLETE, selected)
+        composeRule.onNodeWithText("Complete Schedule").assertDoesNotExist()
+    }
+
+    @Test
+    fun given_schedule_actions_load_failure_when_retried_then_only_fresh_operations_are_available() {
+        val options = mutableStateOf<EventScheduleMaintenanceOptions?>(EventScheduleMaintenanceOptions(
+            isLoading = true, operations = listOf(EventEditorMaintenanceOperation.BUILD),
+        ))
+        var selected: EventEditorMaintenanceOperation? = null
+        composeRule.setContent {
+            MaterialTheme {
+                EventScheduleMaintenanceActions(
+                    canRequest = true,
+                    options = options.value,
+                    onOpen = { options.value = EventScheduleMaintenanceOptions(
+                        operations = listOf(EventEditorMaintenanceOperation.REBUILD),
+                    ) },
+                    onDismiss = { options.value = null },
+                    onSelect = { selected = it },
+                )
+            }
+        }
+        composeRule.onNodeWithText("Loading permitted Schedule actions...").assertIsDisplayed()
+        composeRule.onNodeWithText("Build Schedule").assertDoesNotExist()
+        composeRule.runOnIdle { options.value = EventScheduleMaintenanceOptions(message = "Connection failed.") }
+        composeRule.onNodeWithText("Connection failed.").assertIsDisplayed()
+        composeRule.onNodeWithText("Retry").performClick()
+        composeRule.onNodeWithText("Build Schedule").assertDoesNotExist()
+        composeRule.onNodeWithText("Complete Schedule").assertDoesNotExist()
+        composeRule.onNodeWithText("Rebuild Schedule").performClick()
+        assertEquals(EventEditorMaintenanceOperation.REBUILD, selected)
+        composeRule.onNodeWithText("Cancel").performClick()
+        composeRule.onNodeWithText("Maintain Schedule").assertDoesNotExist()
+    }
+
+    @Test
     fun given_incomplete_proposal_with_more_than_eight_unscheduled_matches_when_review_renders_then_all_rows_are_available_before_acceptance() {
         var accepted = false
         val review = maintenanceReviewWithUnscheduledMatches(count = 9)

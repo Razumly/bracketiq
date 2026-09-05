@@ -359,6 +359,8 @@ class DefaultEventDetailComponent(
         get() = eventEditActionHandler.eventEditorSnapshot
     override val scheduleMaintenanceReview
         get() = eventEditActionHandler.scheduleMaintenanceReview
+    override val scheduleMaintenanceOptions
+        get() = eventEditActionHandler.scheduleMaintenanceOptions
     override val eventTypeTransitionConfirmation
         get() = eventEditActionHandler.eventTypeTransitionConfirmation
 
@@ -1334,6 +1336,13 @@ class DefaultEventDetailComponent(
     override fun toggleEdit() = eventEditActionHandler.toggleEdit()
 
     override fun startEditingEvent() = eventEditActionHandler.startEditingEvent()
+
+    override fun openScheduleMaintenance() = eventEditActionHandler.openScheduleMaintenance()
+
+    override fun dismissScheduleMaintenanceOptions() = eventEditActionHandler.dismissScheduleMaintenanceOptions()
+
+    override fun selectScheduleMaintenanceOperation(operation: com.razumly.mvp.core.network.dto.EventEditorMaintenanceOperation) =
+        eventEditActionHandler.selectScheduleMaintenanceOperation(operation)
 
     override fun cancelEditingEvent() = eventEditActionHandler.cancelEditingEvent()
 
