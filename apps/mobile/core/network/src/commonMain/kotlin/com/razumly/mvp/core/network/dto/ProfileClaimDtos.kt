@@ -12,6 +12,7 @@ data class ManagedPlayerClaimRequestDto(
     val signature: String? = null,
     val guardianDeclaration: Boolean? = null,
     val acceptTeamInvitation: Boolean? = null,
+    val reviewGuardianInvitation: Boolean? = null,
 )
 
 @Serializable

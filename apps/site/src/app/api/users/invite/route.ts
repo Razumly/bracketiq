@@ -1,3 +1,4 @@
+import { POST as createTeamMemberInvite } from '@/app/api/teams/[id]/member-invites/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
@@ -113,6 +114,20 @@ export async function POST(req: NextRequest) {
 
     if (!(await canInviteToScope(session, invite))) {
       failed.push({ email, reason: 'forbidden_scope' });
+      continue;
+    }
+
+    if (type === 'player') {
+      const headers = new Headers(req.headers);
+      headers.set('content-type', 'application/json');
+      headers.delete('content-length');
+      const forwarded = new NextRequest(new URL(`/api/teams/${encodeURIComponent(invite.teamId!)}/member-invites`, req.url), {
+        method: 'POST', headers, body: JSON.stringify({ email, firstName: invite.firstName, lastName: invite.lastName, role: 'player', idempotencyKey: typeof invite.idempotencyKey === 'string' ? invite.idempotencyKey : undefined }),
+      });
+      const response = await createTeamMemberInvite(forwarded, { params: Promise.resolve({ id: invite.teamId! }) });
+      const saved = await response.json();
+      if (!response.ok) failed.push({ email, reason: saved.error || 'invitation_not_saved' });
+      else notEmailedRecords.push({ ...saved.invite, delivery: saved.delivery, reason: saved.delivery?.failed ? 'saved_delivery_failed' : 'saved' });
       continue;
     }
 

@@ -10,7 +10,7 @@ import type {
     TeamJoinRequest,
     TeamPlayerRegistration,
 } from '@/types';
-import { userService, type UserVisibilityContext } from './userService';
+import { userService, normalizeInviteNames, type UserVisibilityContext } from './userService';
 import { inferDivisionDetails } from '@/lib/divisionTypes';
 import type { DeleteOrArchiveResult } from '@/lib/deleteOutcome';
 import { deleteOutcomeSucceeded } from '@/lib/deleteOutcome';
@@ -101,6 +101,7 @@ export type TeamJoinRequestContext = {
 };
 
 class TeamService {
+    private readonly invitationKeys = new Map<string, string>();
     async getTeamById(
         id: string,
         includeRelations: boolean = false,
@@ -260,12 +261,14 @@ class TeamService {
                   requiredTemplateIds: Array.isArray(options?.requiredTemplateIds) ? options.requiredTemplateIds : [],
               };
 
+            const identity = JSON.stringify(['create-team', teamData]);
+            const { key, storageKey } = await this.reserveRequestKey(identity);
             const response = await apiRequest<any>('/api/teams', {
-                method: 'POST',
-                body: { ...teamData, id: createId() },
+                method: 'POST', body: { ...teamData, id: key },
             });
-
-            return this.mapRowToTeam(response);
+            const team = this.mapRowToTeam(response);
+            this.completeRequestKey(identity, storageKey);
+            return team;
         } catch (error) {
             console.error('Failed to create team:', error);
             throw error;
@@ -307,13 +310,7 @@ class TeamService {
                 }
             }
 
-            await apiRequest(`/api/teams/${encodeURIComponent(team.$id)}/member-invites`, {
-                method: 'POST',
-                body: {
-                    userId: user.$id,
-                    role: inviteType,
-                },
-            });
+            await this.createTeamMemberInvite(team.$id, { userId: user.$id, role: inviteType });
             return true;
         } catch (error) {
             if (
@@ -334,13 +331,7 @@ class TeamService {
         inviteType: TeamInviteRoleType,
     ): Promise<boolean> {
         try {
-            await apiRequest(`/api/teams/${encodeURIComponent(team.$id)}/member-invites`, {
-                method: 'POST',
-                body: {
-                    email: email.trim().toLowerCase(),
-                    role: inviteType,
-                },
-            });
+            await this.createTeamMemberInvite(team.$id, { email: email.trim().toLowerCase(), role: inviteType });
             return true;
         } catch (error) {
             console.error('Failed to invite email to team:', error);
@@ -352,13 +343,33 @@ class TeamService {
         teamId: string,
         input: CreateTeamMemberInviteInput,
     ): Promise<CreateTeamMemberInviteResult> {
-        return apiRequest<CreateTeamMemberInviteResult>(
+        const identity = JSON.stringify([teamId, input]);
+        const { key: idempotencyKey, storageKey } = await this.reserveRequestKey(identity, input.idempotencyKey);
+        const response = await apiRequest<CreateTeamMemberInviteResult>(
             `/api/teams/${encodeURIComponent(teamId)}/member-invites`,
-            {
-                method: 'POST',
-                body: input,
-            },
+            { method: 'POST', body: { ...input, idempotencyKey } },
         );
+        this.completeRequestKey(identity, storageKey);
+        return { ...response, invite: response.invite ? normalizeInviteNames(response.invite) : response.invite };
+    }
+
+    private async reserveRequestKey(identity: string, explicitKey?: string): Promise<{ key: string; storageKey?: string }> {
+        let storageKey: string | undefined;
+        let storedKey: string | null = null;
+        try {
+            const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(identity));
+            storageKey = `invitation-request:${Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+            storedKey = sessionStorage.getItem(storageKey);
+        } catch { /* Keep the retry key in memory when browser storage is unavailable. */ }
+        const key = explicitKey ?? storedKey ?? this.invitationKeys.get(identity) ?? createId();
+        this.invitationKeys.set(identity, key);
+        try { if (storageKey) sessionStorage.setItem(storageKey, key); } catch { /* The memory key remains available. */ }
+        return { key, storageKey };
+    }
+
+    private completeRequestKey(identity: string, storageKey?: string): void {
+        this.invitationKeys.delete(identity);
+        try { if (storageKey) sessionStorage.removeItem(storageKey); } catch { /* A later retry returns the saved result. */ }
     }
 
     private mapRowToPlayerRegistrations(value: unknown): TeamPlayerRegistration[] {
@@ -390,6 +401,8 @@ class TeamService {
                       id,
                       teamId,
                       userId,
+                      invitationId: row?.invitationId ?? null,
+                      invitationLabel: row?.invitationLabel ?? null,
                       registrantId: typeof row?.registrantId === 'string' ? row.registrantId : userId,
                       parentId: typeof row?.parentId === 'string' ? row.parentId : null,
                       registrantType: typeof row?.registrantType === 'string' ? row.registrantType : 'SELF',
@@ -739,28 +752,8 @@ class TeamService {
         }
     }
 
-    async removeTeamInvitation(teamId: string, userId: string, inviteType: TeamInviteRoleType = 'player'): Promise<boolean> {
-        try {
-            const team = await this.getTeamById(teamId);
-            if (!team) {
-                return false;
-            }
-
-            if (inviteType === 'player') {
-                const nextPending = team.pending.filter(id => id !== userId);
-
-                await apiRequest(`/api/teams/${teamId}`, {
-                    method: 'PATCH',
-                    body: { team: { pending: nextPending } },
-                });
-            }
-
-            await userService.removeTeamInvitation(userId, teamId, inviteType);
-            return true;
-        } catch (error) {
-            console.error('Failed to remove team invitation:', error);
-            return false;
-        }
+    async removeTeamInvitation(inviteId: string): Promise<boolean> {
+        return userService.removeTeamInvitation(inviteId);
     }
 
     async removePlayerFromTeam(teamId: string, userId: string): Promise<Team | undefined> {
@@ -774,7 +767,7 @@ class TeamService {
 
             const response = await apiRequest<any>(`/api/teams/${teamId}`, {
                 method: 'PATCH',
-                body: { team: { playerIds: nextPlayerIds } },
+                body: { team: { playerIds: nextPlayerIds, pending: team.pending.filter(id => id !== userId) } },
             });
 
             return this.mapRowToTeam(response);
@@ -999,12 +992,6 @@ class TeamService {
             );
             if (response?.error) {
                 throw new Error(response.error);
-            }
-
-            if (team) {
-                await Promise.all(team.pending.map(async (userId) => {
-                    await userService.removeTeamInvitation(userId, teamId);
-                }));
             }
 
             return response ?? { deleted: true, action: 'deleted' };

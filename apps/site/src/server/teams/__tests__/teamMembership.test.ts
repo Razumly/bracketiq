@@ -1,5 +1,10 @@
 /** @jest-environment node */
 
+jest.mock('@/server/teams/teamInvitationRestrictions', () => {
+  const actual = jest.requireActual('@/server/teams/teamInvitationRestrictions');
+  return { ...actual, assertTeamInvitationAllowed: jest.fn() };
+});
+
 const upsertEventRegistrationMock = jest.fn();
 const acquireEventLockAndLoadStructureMock = jest.fn();
 
@@ -104,7 +109,7 @@ describe('singleton team staff replacement', () => {
         status: { in: ['PENDING', 'INVITED'] },
         id: { not: 'invite_new' },
       },
-      data: { status: 'CANCELLED', updatedAt: now },
+      data: { status: 'CANCELLED', finalizedAt: now, updatedAt: now },
     });
     expect(assignmentUpdateMany).toHaveBeenCalledWith({
       where: {
@@ -393,10 +398,10 @@ describe('syncCanonicalTeamRoster', () => {
     expect(result.createdPendingInvites).toEqual([]);
   });
 
-  it('deletes pending invite rows when invited players are removed from the pending roster', async () => {
+  it('requires cancellation by invitation ID before removing a pending roster place', async () => {
     const invitesDeleteManyMock = jest.fn().mockResolvedValue({ count: 1 });
 
-    const result = await syncCanonicalTeamRoster({
+    await expect(syncCanonicalTeamRoster({
       teamId: 'team_1',
       captainId: 'captain_1',
       playerIds: ['captain_1'],
@@ -426,18 +431,11 @@ describe('syncCanonicalTeamRoster', () => {
       },
       invites: {
         deleteMany: invitesDeleteManyMock,
+        findFirst: jest.fn().mockResolvedValue({ id: 'pending-attempt' }),
       },
-    });
+    })).rejects.toThrow('Cancel the invitation by its invitation ID');
 
-    expect(invitesDeleteManyMock).toHaveBeenCalledWith({
-      where: {
-        type: 'TEAM',
-        teamId: 'team_1',
-        status: 'PENDING',
-        userId: { in: ['player_2'] },
-      },
-    });
-    expect(result.createdPendingInvites).toEqual([]);
+    expect(invitesDeleteManyMock).not.toHaveBeenCalled();
   });
 });
 

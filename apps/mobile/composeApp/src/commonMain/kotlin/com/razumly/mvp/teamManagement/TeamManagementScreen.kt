@@ -72,6 +72,7 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
     val selectedFreeAgent by component.selectedFreeAgent.collectAsState()
     val selectedEvent by component.selectedEvent.collectAsState()
     val selectedTeam by component.selectedTeam.collectAsState()
+    val teamInvitations by component.teamInvitations.collectAsState()
     val componentError by component.errorState.collectAsState()
     val staffUsersById by component.staffUsersById.collectAsState()
     val teamMemberCompliance by component.teamMemberCompliance.collectAsState()
@@ -146,6 +147,8 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
         }
         CreateOrEditTeamScreen(
             team = team,
+            invitations = teamInvitations,
+            onInvitationAction = component::actOnInvitation,
             sports = sports,
             divisionTypeParameters = divisionTypeParameters,
             friends = friends,

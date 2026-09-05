@@ -21,6 +21,8 @@ private const val TEAM_KIND_PLACEHOLDER = "PLACEHOLDER"
 
 @Serializable
 data class TeamPlayerRegistration(
+    val invitationId: String? = null,
+    val invitationLabel: String? = null,
     val id: String = "",
     val teamId: String? = null,
     val userId: String = "",

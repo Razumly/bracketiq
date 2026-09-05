@@ -1,4 +1,7 @@
+import { InvitationRequestError } from './teamInvitationRequests';
 import { randomUUID } from 'crypto';
+import { assertTeamInvitationAllowed } from './teamInvitationRestrictions';
+import { TEAM_INVITE_LINK_TTL_MS } from '@/server/teamInviteLinks';
 import { prisma } from '@/lib/prisma';
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { normalizeOptionalName } from '@/lib/nameCase';
@@ -205,6 +208,7 @@ export const replaceSingletonTeamStaffAssignment = async ({
       },
       data: {
         status: 'CANCELLED',
+        finalizedAt: now,
         updatedAt: now,
       },
     });
@@ -1141,10 +1145,6 @@ const ensurePendingTeamInviteRecords = async (
   await Promise.all(userIdsToHydrate.map(async (userId) => {
     const profile = profileByUserId.get(userId);
     const email = authEmailByUserId.get(userId) ?? sensitiveEmailByUserId.get(userId);
-    if (!email) {
-      return;
-    }
-
     if (existingByUserId.has(userId)) {
       return;
     }
@@ -1157,6 +1157,8 @@ const ensurePendingTeamInviteRecords = async (
         status: 'PENDING',
         teamId,
         userId,
+        linkVersion: 1,
+        linkExpiresAt: new Date(input.now.getTime() + TEAM_INVITE_LINK_TTL_MS),
         createdBy: normalizeId(input.actingUserId),
         firstName: normalizeOptionalName(profile?.firstName),
         lastName: normalizeOptionalName(profile?.lastName),
@@ -1214,6 +1216,26 @@ export const syncCanonicalTeamRoster = async (
     }) as Promise<CanonicalStaffAssignment[]>,
   ]);
 
+  const existingRosterIds = new Set(existingPlayerRegistrations
+    .filter((row) => ['ACTIVE', 'INVITED', 'PENDING', 'STARTED'].includes(String(row.status).toUpperCase()))
+    .map((row) => row.userId));
+  const newPlayerIds = desiredPlayerUserIds.filter((id) => !existingRosterIds.has(id));
+  const existingStaffKeys = new Set(existingStaffAssignments.filter((row) => row.status === 'ACTIVE' || row.status === 'INVITED').map((row) => `${row.role}:${row.userId}`));
+  const newStaffIds = [...desiredStaffKeys.entries()].filter(([key]) => !existingStaffKeys.has(key)).map(([, row]) => row.userId);
+  const addedIds = uniqueStrings([...newPlayerIds, ...newStaffIds]);
+  if (addedIds.length) {
+    if (!input.actingUserId) throw new Error('An acting Account is required to add Team members.');
+    await assertTeamInvitationAllowed(tx, { teamId: input.teamId, playerIds: addedIds, senderId: input.actingUserId }, now);
+  }
+  if (input.cleanupRemovedPendingInvites !== false) {
+    const promoted = existingPlayerRegistrations.some((row) => isInvitedRegistration(row) && activePlayerIds.includes(row.userId));
+    if (promoted) throw new InvitationRequestError('The Player or guardian must accept the invitation before Team access is granted.');
+    const removedPending = existingPlayerRegistrations.filter((row) => isInvitedRegistration(row) && !pendingPlayerIds.includes(row.userId)).map((row) => row.userId);
+    if (removedPending.length && await tx.invites.findFirst({ where: { type: 'TEAM', teamId: input.teamId, userId: { in: removedPending }, status: 'PENDING', OR: [{ linkExpiresAt: null }, { linkExpiresAt: { gt: now } }] }, select: { id: true } })) {
+      throw new InvitationRequestError('Cancel the invitation by its invitation ID before removing this Player.');
+    }
+  }
+
   await Promise.all(activePlayerIds.map((userId) => teamRegistrationsDelegate.upsert({
     where: {
       teamId_userId: {
@@ -1268,25 +1290,10 @@ export const syncCanonicalTeamRoster = async (
 
   const createdPendingInvites = await ensurePendingTeamInviteRecords(tx, {
     teamId: input.teamId,
-    pendingPlayerIds,
+    pendingPlayerIds: pendingPlayerIds.filter((id) => !existingRosterIds.has(id)),
     actingUserId: input.actingUserId,
     now,
   });
-
-  const removedPendingPlayerUserIds = existingPlayerRegistrations
-    .filter((row) => isInvitedRegistration(row))
-    .map((row) => row.userId)
-    .filter((userId) => !pendingPlayerIds.includes(userId));
-  if (input.cleanupRemovedPendingInvites !== false && removedPendingPlayerUserIds.length && tx?.invites?.deleteMany) {
-    await tx.invites.deleteMany({
-      where: {
-        type: 'TEAM',
-        teamId: input.teamId,
-        status: 'PENDING',
-        userId: { in: removedPendingPlayerUserIds },
-      },
-    });
-  }
 
   const removedPlayerUserIds = existingPlayerRegistrations
     .map((row) => row.userId)

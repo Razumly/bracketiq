@@ -1,3 +1,4 @@
+import { assertTeamInvitationAllowed } from '@/server/teams/teamInvitationRestrictions';
 import { prisma } from '@/lib/prisma';
 import { getTeamChatBaseMemberIds, syncTeamChatInTx } from '@/server/teamChatSync';
 import { isMinorAtUtcDate } from '@/server/userPrivacy';
@@ -17,6 +18,10 @@ import {
   rollbackTeamInviteEventSyncs,
 } from '@/server/teams/teamInviteEventSync';
 import { reserveChildTeamRegistrationForGuardian } from '@/server/teams/teamChildRegistration';
+import { expireTeamInvitation, isInvitationExpired } from './teamInvitationState';
+import type { DeclineTeamInvitationInput } from '@/contracts/teamInvitations';
+import { blockUserInTransaction } from '@/server/userBlocking';
+import { sendModerationAlert } from '@/server/moderation';
 
 type PrismaLike = any;
 
@@ -33,6 +38,7 @@ type TeamInviteRecord = {
   role?: string | null;
   userId?: string | null;
   createdBy?: string | null;
+  linkExpiresAt?: Date | string | null;
 };
 
 type InviteActionResult = {
@@ -194,8 +200,14 @@ export const acceptTeamInviteWithGuardianRules = async ({
   }
 
   const initialInviteStatus = String(invite.status ?? '').toUpperCase();
+  if (initialInviteStatus === 'EXPIRED' || isInvitationExpired(invite, now)) {
+    const refresh = async (tx: PrismaLike) => expireTeamInvitation(tx, invite, now);
+    const current = inTransaction ? await refresh(client) : await client.$transaction(refresh);
+    if (current?.status === 'ACCEPTED') return { status: 200, body: { ok: true, alreadyAccepted: true, invite: current } };
+    return { status: 410, body: { error: 'Invitation expired. Ask a Team manager for a new invitation.', invite: current } };
+  }
   if (initialInviteStatus === 'ACCEPTED') {
-    return { status: 200, body: { ok: true, alreadyAccepted: true } };
+    return { status: 200, body: { ok: true, alreadyAccepted: true, invite } };
   }
   if (!isCurrentTeamInviteStatus(initialInviteStatus)) {
     return { status: 404, body: { error: 'Invite is no longer available.' } };
@@ -223,18 +235,19 @@ export const acceptTeamInviteWithGuardianRules = async ({
       parentId: auth.actingParentId,
       actorUserId: session.userId,
       teamRow: team as Record<string, any>,
+      acceptedInvitation: { id: invite.id, guardianId: auth.actingParentId },
       now,
     });
     if (!registration.ok) {
       return { status: registration.status, body: { error: registration.error } };
     }
-    await prisma.invites.delete({ where: { id: invite.id } });
     return {
       status: 200,
       body: {
         ok: true,
         requestType: 'TEAM',
         ...registration.payload,
+        invite: await client.invites.findUnique({ where: { id: invite.id } }),
       },
     };
   }
@@ -257,7 +270,7 @@ export const acceptTeamInviteWithGuardianRules = async ({
         return { ok: false };
       }
       if (currentStatus === 'ACCEPTED') {
-        return { ok: true, alreadyAccepted: true };
+        return { ok: true, alreadyAccepted: true, invite: currentInvite };
       }
       if (!isCurrentTeamInviteStatus(currentStatus)) {
         return { ok: false };
@@ -274,6 +287,10 @@ export const acceptTeamInviteWithGuardianRules = async ({
       return { ok: false };
     }
 
+    if (isInvitationExpired(transactionInvite, now)) {
+      await expireTeamInvitation(tx, transactionInvite, now);
+      return { ok: false, status: 410, error: 'Invitation expired.' };
+    }
     const currentAuth = await authorizeTeamInviteAction({ client: tx, invite: transactionInvite, session, action: 'accept', now });
     if (!currentAuth.ok) return { ok: false, status: currentAuth.status, error: currentAuth.error };
     if (currentAuth.teamId !== auth.teamId || currentAuth.targetUserId !== auth.targetUserId) {
@@ -282,6 +299,10 @@ export const acceptTeamInviteWithGuardianRules = async ({
 
     const previousMemberIds = getTeamChatBaseMemberIds(txTeam);
     const txPending = normalizeIdList((txTeam as any).pending);
+    if (transactionInvite.createdBy) await assertTeamInvitationAllowed(tx, {
+      teamId: auth.teamId, playerIds: [auth.targetUserId], senderId: transactionInvite.createdBy,
+    }, now);
+
     const txIsPlayerInvite = transactionInviteRole === 'player'
       || (!transactionInviteRole && txPending.includes(auth.targetUserId));
     const invitedStaffAssignments = (Array.isArray((txTeam as any).staffAssignments) ? (txTeam as any).staffAssignments : [])
@@ -415,15 +436,17 @@ export const acceptTeamInviteWithGuardianRules = async ({
       propagateToLinkedEventTeams: false,
     });
 
-    await tx.invites.update({
+    const savedInvite = await tx.invites.update({
       where: { id: transactionInvite.id },
       data: {
         status: 'ACCEPTED',
         finalizedAt: now,
+        actedBy: session.userId,
+        actingGuardianId: currentAuth.actingParentId,
         updatedAt: now,
       },
     });
-    return { ok: true, alreadyAccepted: false };
+    return { ok: true, alreadyAccepted: false, invite: savedInvite };
   };
   const result = inTransaction ? await save(client) : await client.$transaction(save);
 
@@ -435,6 +458,7 @@ export const acceptTeamInviteWithGuardianRules = async ({
     status: 200,
     body: {
       ok: true,
+      invite: result.invite,
       ...(result.alreadyAccepted ? { alreadyAccepted: true } : {}),
     },
   };
@@ -444,10 +468,12 @@ export const declineTeamInviteWithGuardianRules = async ({
   invite,
   session,
   now = new Date(),
+  input = {},
 }: {
   invite: TeamInviteRecord;
   session: SessionLike;
   now?: Date;
+  input?: DeclineTeamInvitationInput;
 }): Promise<InviteActionResult> => {
   const auth = await authorizeTeamInviteAction({
     invite,
@@ -459,49 +485,53 @@ export const declineTeamInviteWithGuardianRules = async ({
     return { status: auth.status, body: { error: auth.error } };
   }
 
-  const initialInviteStatus = String(invite.status ?? '').toUpperCase();
-  if (initialInviteStatus === 'ACCEPTED') {
-    return { status: 409, body: { error: 'Invite has already been accepted.' } };
-  }
-  if (initialInviteStatus === 'DECLINED') {
-    return { status: 200, body: { ok: true, alreadyDeclined: true } };
-  }
-  if (!isCurrentTeamInviteStatus(initialInviteStatus)) {
-    return { status: 404, body: { error: 'Invite is no longer available.' } };
-  }
-
   const result = await prisma.$transaction(async (tx) => {
     if (typeof tx?.$executeRaw === 'function') {
       await acquireTeamRosterLock(tx, auth.teamId);
     }
-    let transactionInvite: TeamInviteRecord = invite;
-    if (tx.invites?.findUnique) {
-      const currentInvite = await tx.invites.findUnique({ where: { id: invite.id } });
-      const currentStatus = String(currentInvite?.status ?? '').toUpperCase();
-      if (!currentInvite) {
-        return { ok: false, status: 404 as const, error: 'Invite not found.' };
-      }
-      if (currentStatus === 'ACCEPTED') {
-        return { ok: false, status: 409 as const, error: 'Invite has already been accepted.' };
-      }
-      if (currentStatus === 'DECLINED') {
-        return { ok: true, alreadyDeclined: true };
-      }
-      if (!isCurrentTeamInviteStatus(currentStatus)) {
-        return { ok: false, status: 404 as const, error: 'Invite is no longer available.' };
-      }
-      transactionInvite = {
-        ...invite,
-        ...currentInvite,
-        role: currentInvite.role ?? invite.role,
-        type: currentInvite.type ?? invite.type,
-      };
-    }
-
+    const transactionInvite = await tx.invites.findUnique({ where: { id: invite.id } });
+    if (!transactionInvite) return { status: 404, body: { error: 'Invite not found.' } };
     const currentAuth = await authorizeTeamInviteAction({ client: tx, invite: transactionInvite, session, action: 'decline', now });
-    if (!currentAuth.ok) return { ok: false, status: currentAuth.status, error: currentAuth.error };
+    if (!currentAuth.ok) return { status: currentAuth.status, body: { error: currentAuth.error } };
     if (currentAuth.teamId !== auth.teamId || currentAuth.targetUserId !== auth.targetUserId) {
-      return { ok: false, status: 409, error: 'Invitation changed. Reload it before declining.' };
+      return { status: 409, body: { error: 'Invitation changed. Reload it before declining.' } };
+    }
+    if (transactionInvite.status === 'DECLINED') {
+      if (input.blockScope && (transactionInvite.declineBlockScope !== input.blockScope || transactionInvite.actedBy !== session.userId)) {
+        return { status: 409, body: { error: 'This invitation already has a final outcome.', invite: transactionInvite } };
+      }
+      const teamBlock = transactionInvite.declineBlockScope === 'team'
+        ? await tx.teamBlocks.findUnique({ where: { playerId_teamId: { playerId: auth.targetUserId, teamId: auth.teamId } } }) : null;
+      const actor = transactionInvite.declineBlockScope === 'sender'
+        ? await tx.userData.findUnique({ where: { id: session.userId }, select: { blockedUserIds: true } }) : null;
+      const block = transactionInvite.declineBlockScope === 'team'
+        ? { scope: 'team', active: Boolean(teamBlock), playerId: auth.targetUserId, teamId: auth.teamId }
+        : transactionInvite.declineBlockScope === 'sender'
+          ? { scope: 'sender', active: Boolean(transactionInvite.createdBy && actor?.blockedUserIds.includes(transactionInvite.createdBy)), targetUserId: transactionInvite.createdBy }
+          : undefined;
+      return { status: 200, body: { ok: true, alreadyDeclined: true, invite: transactionInvite, block, teamBlock } };
+    }
+    if (isInvitationExpired(transactionInvite, now)) {
+      const expired = await expireTeamInvitation(tx, transactionInvite, now);
+      return { status: 410, body: { error: 'Invitation expired.', invite: expired } };
+    }
+    if (!isCurrentTeamInviteStatus(transactionInvite.status)) {
+      return { status: 409, body: { error: 'This invitation already has a final outcome.', invite: transactionInvite } };
+    }
+    let block: Record<string, unknown> | undefined;
+    let teamBlock: Awaited<ReturnType<typeof tx.teamBlocks.upsert>> | undefined;
+    let senderBlock: Awaited<ReturnType<typeof blockUserInTransaction>> | undefined;
+    if (input.blockScope === 'team') {
+      teamBlock = await tx.teamBlocks.upsert({
+        where: { playerId_teamId: { playerId: auth.targetUserId, teamId: auth.teamId } },
+        create: { id: crypto.randomUUID(), playerId: auth.targetUserId, teamId: auth.teamId, createdBy: session.userId, createdAt: now },
+        update: {},
+      });
+      block = { scope: 'team', active: true, playerId: auth.targetUserId, teamId: auth.teamId };
+    } else if (input.blockScope === 'sender') {
+      if (!transactionInvite.createdBy) throw new Response('This invitation has no sender Account to block.', { status: 409 });
+      senderBlock = await blockUserInTransaction(tx, session.userId, transactionInvite.createdBy, input.leaveSharedChats === true, now);
+      block = { scope: 'sender', active: true, targetUserId: transactionInvite.createdBy };
     }
     await rollbackTeamInviteEventSyncs(tx, transactionInvite, 'DECLINED', now);
     await removeCanonicalPendingInvitee(tx, transactionInvite, session.userId, now);
@@ -514,28 +544,19 @@ export const declineTeamInviteWithGuardianRules = async ({
       data: { status: 'REMOVED', updatedAt: now },
     });
 
-    await tx.invites.update({
+    const saved = await tx.invites.update({
       where: { id: transactionInvite.id },
       data: {
         status: 'DECLINED',
         finalizedAt: now,
+        actedBy: session.userId,
+        actingGuardianId: currentAuth.actingParentId,
+        declineBlockScope: input.blockScope ?? null,
         updatedAt: now,
       },
     });
-    return { ok: true, alreadyDeclined: false };
+    return { status: 200, body: { ok: true, invite: saved, block, teamBlock, removedChatIds: senderBlock?.removedChatIds ?? [], user: senderBlock?.user }, report: senderBlock?.report };
   });
-
-  if (!result.ok) {
-    return {
-      status: result.status ?? 404,
-      body: { error: result.error ?? 'Invite is no longer available.' },
-    };
-  }
-  return {
-    status: 200,
-    body: {
-      ok: true,
-      ...(result.alreadyDeclined ? { alreadyDeclined: true } : {}),
-    },
-  };
+  if (result.report) await sendModerationAlert(result.report).catch((error) => console.warn('Failed to send block moderation alert', error));
+  return { status: result.status, body: result.body };
 };

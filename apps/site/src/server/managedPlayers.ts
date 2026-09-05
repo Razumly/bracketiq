@@ -1,3 +1,6 @@
+import { acquireTeamRosterLock } from '@/server/repositories/locks';
+import { assertTeamInvitationAllowed } from '@/server/teams/teamInvitationRestrictions';
+import { isInvitationExpired } from '@/server/teams/teamInvitationState';
 import crypto from 'crypto';
 import { isInvitePlaceholderAuthUser } from '@/lib/authUserPlaceholders';
 import { normalizeOptionalName } from '@/lib/nameCase';
@@ -127,13 +130,6 @@ const membershipStatusRank = (status: unknown): number => ({
   REMOVED: 1,
 }[String(status ?? '').trim().toUpperCase()] ?? 0);
 
-const inviteStatusRank = (status: unknown): number => ({
-  ACCEPTED: 4,
-  SENT: 3,
-  PENDING: 3,
-  FAILED: 2,
-}[String(status ?? '').trim().toUpperCase()] ?? 0);
-
 export type ClaimManagedPlayerInput = {
   profileId: string;
   inviteId: string;
@@ -142,13 +138,14 @@ export type ClaimManagedPlayerInput = {
   confirmation: boolean;
   guardianDeclaration?: boolean;
   acceptTeamInvitation?: boolean;
+  reviewGuardianInvitation?: boolean;
   claimantUserId: string;
   now?: Date;
   verifyLink: (invite: any, link: ClaimManagedPlayerInput['link'], now: Date) => boolean;
 };
 
 export type ClaimManagedPlayerResult = {
-  status: 'CLAIMED' | 'MERGED' | 'GUARDIAN_ACCEPTED' | 'ALREADY_CLAIMED' | 'BIRTHDATE_REQUIRED' | 'GUARDIAN_REQUIRED';
+  status: 'CLAIMED' | 'MERGED' | 'GUARDIAN_ACCEPTED' | 'GUARDIAN_READY' | 'ALREADY_CLAIMED' | 'BIRTHDATE_REQUIRED' | 'GUARDIAN_REQUIRED';
   primaryProfileId: string;
   sourceProfileId: string;
   mergeId?: string;
@@ -238,7 +235,7 @@ const mergeAssociations = async (
       rows.forEach((row: { id?: string }) => { if (row.id) invitationIds.push(row.id); });
     }
     for (const row of rows) {
-      if (delegateName === 'invites' && row.teamId && String(row.role ?? '').toLowerCase() === 'player' && isCurrentInvite(row.status) && delegate.findFirst) {
+      if (delegateName === 'invites' && row.teamId && String(row.role ?? '').toLowerCase() === 'player' && isCurrentInvite(row.status) && row.status !== 'ACCEPTED' && delegate.findFirst) {
         const duplicate = await delegate.findFirst({
           where: {
             teamId: row.teamId,
@@ -249,10 +246,7 @@ const mergeAssociations = async (
           select: { id: true, status: true },
         });
         if (duplicate && duplicate.id !== row.id) {
-          if (inviteStatusRank(row.status) > inviteStatusRank(duplicate.status) && delegate.update) {
-            await delegate.update({ where: { id: duplicate.id }, data: { status: row.status, updatedAt: now } });
-          }
-          await delegate.update({ where: { id: row.id }, data: { status: 'CANCELLED', finalizedAt: now, updatedAt: now } });
+          await delegate.update({ where: { id: row.id }, data: { userId: targetId, status: 'CANCELLED', finalizedAt: now, actedBy: targetId, updatedAt: now } });
           continue;
         }
       }
@@ -294,6 +288,15 @@ const mergeAssociations = async (
       }
       await delegate.update({ where: { id: row.id }, data });
     }
+  }
+
+  if (tx.teamBlocks?.findMany) {
+    const blocks = await tx.teamBlocks.findMany({ where: { playerId: sourceId } });
+    for (const block of blocks) {
+      await tx.teamBlocks.upsert({ where: { playerId_teamId: { playerId: targetId, teamId: block.teamId } },
+        create: { ...block, id: crypto.randomUUID(), playerId: targetId }, update: {} });
+    }
+    await tx.teamBlocks.deleteMany({ where: { playerId: sourceId } });
   }
 
   if (tx.teamRegistrations?.updateMany) {
@@ -396,6 +399,10 @@ export const claimManagedPlayerProfile = async (
   if (!input.confirmation) throw new Error('Profile claim confirmation is required');
   const now = input.now ?? new Date();
   return client.$transaction(async (tx: PrismaLike) => {
+    const scopedInvites = await tx.invites.findMany({ where: { type: 'TEAM', userId: { in: [input.profileId, input.claimantUserId] } }, select: { teamId: true } });
+    for (const teamId of [...new Set(scopedInvites.map((row: { teamId: string | null }) => row.teamId).filter(Boolean))].sort()) {
+      await acquireTeamRosterLock(tx, teamId as string);
+    }
     await lockProfiles(tx, [input.profileId, input.claimantUserId]);
     const invite = await tx.invites.findUnique({ where: { id: input.inviteId } });
     const inviteRole = String(invite?.role ?? 'player').trim().toLowerCase();
@@ -485,7 +492,7 @@ export const claimManagedPlayerProfile = async (
     sourceIsMinor = isMinorAtUtcDate(sourceBirthDate, now);
     if (sourceIsMinor) {
       if (input.profileId === input.claimantUserId) throw new Error('A minor cannot accept their own team invitation');
-      if (!input.acceptTeamInvitation) throw new Error('Explicit team invitation acceptance is required');
+      if (!input.acceptTeamInvitation && !input.reviewGuardianInvitation) throw new Error('Explicit team invitation acceptance is required');
       if (sourceHasUnknownBirthdate) {
         throw new Error('A valid date of birth is required before guardian approval');
       }
@@ -525,6 +532,9 @@ export const claimManagedPlayerProfile = async (
           status: 'COMPLETED', confirmationAt: now, completedAt: now,
         } });
       }
+      if (input.reviewGuardianInvitation) return {
+        status: 'GUARDIAN_READY', primaryProfileId: input.profileId, sourceProfileId: input.profileId,
+      };
       const acceptance = await acceptTeamInviteWithGuardianRules({
         client: tx,
         inTransaction: true,
@@ -617,6 +627,7 @@ export const correctManagedPlayerContact = async (
   input: ManagedContactCorrectionInput,
 ) => client.$transaction(async (tx: PrismaLike) => {
   const now = input.now ?? new Date();
+  await acquireTeamRosterLock(tx, input.teamId);
   await lockProfiles(tx, [input.profileId]);
   if (input.authorize && !(await input.authorize(tx))) throw new Error('Forbidden');
   const profile = await tx.userData.findUnique({ where: { id: input.profileId } });
@@ -633,7 +644,8 @@ export const correctManagedPlayerContact = async (
       status: { in: ['PENDING', 'SENT', 'FAILED'] },
     },
   });
-  if (!invite) throw new Error('No current Player invitation found');
+  if (!invite || isInvitationExpired(invite, now)) throw new Error('No current Player invitation found');
+  await assertTeamInvitationAllowed(tx, { teamId: input.teamId, playerIds: [input.profileId], senderId: input.managerUserId, guardianEmail: invite.guardianEmail }, now);
   const minor = !isUnknownDateOfBirth(profile.dateOfBirth ?? invite.dateOfBirth)
     && isMinorAtUtcDate(profile.dateOfBirth ?? invite.dateOfBirth, now);
   if (minor && await tx.parentChildLinks.findFirst({ where: { childId: input.profileId, status: 'ACTIVE' } })) {
@@ -652,8 +664,7 @@ export const correctManagedPlayerContact = async (
   const pendingSyncRows = tx.teamInviteEventSyncs?.findMany
     ? await tx.teamInviteEventSyncs.findMany({ where: { inviteId: invite.id, status: 'PENDING' } })
     : [];
-  await rollbackTeamInviteEventSyncs(tx, invite, 'CANCELLED', now);
-  await tx.invites.update({ where: { id: invite.id }, data: { status: 'CANCELLED', finalizedAt: now, updatedAt: now } });
+  await tx.invites.update({ where: { id: invite.id }, data: { status: 'CANCELLED', finalizedAt: now, actedBy: input.managerUserId, updatedAt: now } });
   const replacement = await tx.invites.create({
     data: {
       id: crypto.randomUUID(),
@@ -678,40 +689,7 @@ export const correctManagedPlayerContact = async (
       updatedAt: now,
     },
   });
-  if (pendingSyncRows.length && tx.teamInviteEventSyncs?.create) {
-    for (const row of pendingSyncRows) {
-      const eventTeam = await tx.teams?.findUnique?.({ where: { id: row.eventTeamId }, select: { playerIds: true, pending: true } });
-      if (eventTeam && tx.teams?.update) {
-        const playerIds = Array.isArray(eventTeam.playerIds) ? eventTeam.playerIds.map(String) : [];
-        const pending = Array.isArray(eventTeam.pending) ? eventTeam.pending.map(String) : [];
-        await tx.teams.update({
-          where: { id: row.eventTeamId },
-          data: {
-            playerIds,
-            pending: playerIds.includes(input.profileId) ? pending : Array.from(new Set([...pending, input.profileId])),
-            updatedAt: now,
-          },
-        });
-      }
-      await tx.teamInviteEventSyncs.create({
-        data: {
-          id: crypto.randomUUID(),
-          createdAt: now,
-          updatedAt: now,
-          inviteId: replacement.id,
-          canonicalTeamId: row.canonicalTeamId,
-          eventId: row.eventId,
-          eventTeamId: row.eventTeamId,
-          userId: input.profileId,
-          previousRegistrationSnapshot: row.previousRegistrationSnapshot,
-          eventTeamHadUser: row.eventTeamHadUser,
-          eventTeamHadPendingUser: row.eventTeamHadPendingUser,
-          sourceTeamRegistrationId: row.sourceTeamRegistrationId,
-          status: 'PENDING',
-        },
-      });
-    }
-  }
+  if (pendingSyncRows.length) await tx.teamInviteEventSyncs.updateMany({ where: { inviteId: invite.id, status: 'PENDING' }, data: { inviteId: replacement.id, updatedAt: now } });
   await tx.userProfileContactCorrections.create({
     data: {
       id: crypto.randomUUID(),

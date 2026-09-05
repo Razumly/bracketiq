@@ -1,5 +1,10 @@
 /** @jest-environment node */
 
+jest.mock('@/server/teams/teamInvitationRestrictions', () => {
+  const actual = jest.requireActual('@/server/teams/teamInvitationRestrictions');
+  return { ...actual, assertTeamInvitationAllowed: jest.fn() };
+});
+
 const loadCanonicalTeamByIdMock = jest.fn();
 const updateManyMock = jest.fn();
 const inviteDeleteManyMock = jest.fn();
@@ -12,6 +17,7 @@ const txMock: any = {
   parentChildLinks: { findFirst: jest.fn() },
   teamStaffAssignments: { updateMany: (...args: any[]) => updateManyMock(...args) },
   invites: {
+    findUnique: jest.fn(),
     deleteMany: (...args: any[]) => inviteDeleteManyMock(...args),
     update: (...args: any[]) => inviteUpdateMock(...args),
   },
@@ -68,6 +74,7 @@ describe('team staff invite lifecycle', () => {
     updateManyMock.mockResolvedValue({ count: 1 });
     inviteDeleteManyMock.mockResolvedValue({ count: 1 });
     inviteUpdateMock.mockResolvedValue({});
+    txMock.invites.findUnique.mockResolvedValue({ id: 'invite_1', type: 'TEAM', teamId: 'team_1', userId: 'manager_2', createdBy: 'creator_1', status: 'PENDING' });
     syncCanonicalTeamRosterMock.mockResolvedValue({ createdPendingInvites: [] });
   });
 

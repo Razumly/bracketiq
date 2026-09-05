@@ -599,6 +599,7 @@ describe('/api/teams/[id] PATCH canonical team sync', () => {
     syncCanonicalTeamRosterMock.mockResolvedValueOnce({
       createdPendingInvites: [createdInvite],
     });
+    sendInviteEmailsMock.mockResolvedValueOnce([{ ...createdInvite, delivery: { status: 'FAILED', failed: true } }]);
 
     const response = await PATCH(
       patchJson({ team: { pending: ['user_3'] } }),
@@ -606,7 +607,8 @@ describe('/api/teams/[id] PATCH canonical team sync', () => {
     );
 
     expect(response.status).toBe(200);
-    expect(sendInviteEmailsMock).toHaveBeenCalledWith([createdInvite], 'http://localhost');
+    expect(sendInviteEmailsMock).toHaveBeenCalledWith([createdInvite], 'http://localhost', { requestedBy: 'manager_1', requestedByIsAdmin: false });
+    expect((await response.json()).delivery.failed).toBe(true);
   });
 
   it('requires a team invite before a player can be added through the roster patch', async () => {

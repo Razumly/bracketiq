@@ -78,6 +78,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.suspendCancellableCoroutine
+import com.razumly.mvp.core.data.dataTypes.TeamBlock
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -671,6 +676,11 @@ interface ProfileComponent : IPaymentProcessor {
     fun refreshInvites()
     fun acceptInvite(invite: Invite)
     fun declineInvite(invite: Invite)
+    val teamBlocks: StateFlow<List<TeamBlock>> get() = MutableStateFlow(emptyList())
+    fun refreshTeamBlocks() {}
+    fun removeTeamBlock(block: TeamBlock, onResult: (Result<Unit>) -> Unit) { onResult(Result.failure(UnsupportedOperationException())) }
+    fun declineAndBlockInvite(invite: Invite, blockScope: String, leaveSharedChats: Boolean, onResult: (Result<Unit>) -> Unit) { onResult(Result.failure(UnsupportedOperationException())) }
+
     fun openInviteEvent(eventId: String)
     fun signDocument(document: ProfileDocumentCard)
     fun openSignedDocument(document: ProfileDocumentCard)
@@ -825,6 +835,22 @@ class DefaultProfileComponent(
     private val _notificationSettingsState = MutableStateFlow(ProfileNotificationSettingsState())
     override val notificationSettingsState = _notificationSettingsState.asStateFlow()
 
+    override val teamBlocks = userRepository.observeTeamBlocks().stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    override fun refreshTeamBlocks() { scope.launch { userRepository.refreshTeamBlocks().onFailure { _errorState.value = ErrorMessage(it.userMessage("Team Blocks could not be loaded.")) } } }
+
+    override fun removeTeamBlock(block: TeamBlock, onResult: (Result<Unit>) -> Unit) {
+        scope.launch { onResult(userRepository.removeTeamBlock(block.teamId, block.playerId)) }
+    }
+
+    override fun declineAndBlockInvite(invite: Invite, blockScope: String, leaveSharedChats: Boolean, onResult: (Result<Unit>) -> Unit) {
+        scope.launch {
+            val result = userRepository.declineAndBlockInvite(invite.id, blockScope, leaveSharedChats)
+            onResult(result)
+            if (result.isSuccess) { refreshInviteCount(); refreshInvites(); refreshTeamBlocks() }
+        }
+    }
+
     private val _invitesState = MutableStateFlow(ProfileInvitesState())
     override val invitesState = _invitesState.asStateFlow()
 
@@ -881,6 +907,15 @@ class DefaultProfileComponent(
     )
 
     init {
+        scope.launch {
+            userRepository.currentUser.flatMapLatest { user ->
+                user.getOrNull()?.id?.let(userRepository::observeRecipientInvitations) ?: flowOf(emptyList())
+            }.collect { savedInvites ->
+                val pending = savedInvites.filter { it.status == null || it.status?.uppercase() in setOf("PENDING", "SENT", "FAILED") }
+                _invitesState.value = _invitesState.value.copy(invites = pending)
+                updatePendingInviteCount(pending.size)
+            }
+        }
         scope.launch {
             userRepository.observeChildren().collect { children ->
                 _childrenState.value = _childrenState.value.copy(children = children.map { it.toProfileChild() })
@@ -1388,7 +1423,7 @@ class DefaultProfileComponent(
             userRepository.listInvites(currentUserId)
                 .onSuccess { invites ->
                     val pendingInvites = invites.filter { invite ->
-                        invite.status?.equals("DECLINED", ignoreCase = true) != true
+                        invite.status == null || invite.status?.uppercase() in setOf("PENDING", "SENT", "FAILED")
                     }
 
                     val organizationIds = pendingInvites.mapNotNull { it.organizationId }
@@ -1416,7 +1451,7 @@ class DefaultProfileComponent(
 
                     _invitesState.value = ProfileInvitesState(
                         isLoading = false,
-                        invites = pendingInvites,
+                        invites = _invitesState.value.invites,
                         currentUserId = currentUserId,
                         currentUserIsMinor = currentUser.isMinor,
                         organizationsById = organizationsById,
@@ -1634,7 +1669,7 @@ class DefaultProfileComponent(
             userRepository.listInvites(currentUserId)
                 .onSuccess { invites ->
                     updatePendingInviteCount(invites.count { invite ->
-                        invite.status?.equals("DECLINED", ignoreCase = true) != true
+                        invite.status == null || invite.status?.uppercase() in setOf("PENDING", "SENT", "FAILED")
                     })
                 }
                 .onFailure { throwable ->
@@ -2396,6 +2431,7 @@ class DefaultProfileComponent(
     }
 
     override fun blockUser(user: UserData, leaveSharedChats: Boolean) {
+        if (!user.hasActiveAccount) return;
         performConnectionAction(
             user = user,
             successMessage = if (leaveSharedChats) {
