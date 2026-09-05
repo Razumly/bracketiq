@@ -1,4 +1,5 @@
 import { assertTeamInvitationAllowed } from '@/server/teams/teamInvitationRestrictions';
+import { reportInvitation } from '@/server/invitationEvidence';
 import { prisma } from '@/lib/prisma';
 import { getTeamChatBaseMemberIds, syncTeamChatInTx } from '@/server/teamChatSync';
 import { isMinorAtUtcDate } from '@/server/userPrivacy';
@@ -555,7 +556,10 @@ export const declineTeamInviteWithGuardianRules = async ({
         updatedAt: now,
       },
     });
-    return { status: 200, body: { ok: true, invite: saved, block, teamBlock, removedChatIds: senderBlock?.removedChatIds ?? [], user: senderBlock?.user }, report: senderBlock?.report };
+    const invitationReport = input.blockScope ? await reportInvitation(tx, {
+      inviteId: saved.id, reporterUserId: session.userId, category: `invitation_block_${input.blockScope}`,
+    }, now) : undefined;
+    return { status: 200, body: { ok: true, invite: saved, block, teamBlock, removedChatIds: senderBlock?.removedChatIds ?? [], user: senderBlock?.user }, report: invitationReport ?? senderBlock?.report };
   });
   if (result.report) await sendModerationAlert(result.report).catch((error) => console.warn('Failed to send block moderation alert', error));
   return { status: result.status, body: result.body };

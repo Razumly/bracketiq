@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { ModerationReportTargetTypeEnum, Prisma } from '@/generated/prisma/client';
 import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/permissions';
+import { reportInvitation } from '@/server/invitationEvidence';
+import { authorizeTeamInviteAction } from '@/server/teams/teamGuardianInvites';
 import {
   createModerationReport,
   removeUserFromChatGroup,
@@ -13,6 +15,7 @@ export const dynamic = 'force-dynamic';
 
 const reportSchema = z.object({
   targetType: z.enum([
+    'TEAM_INVITATION',
     ModerationReportTargetTypeEnum.CHAT_GROUP,
     ModerationReportTargetTypeEnum.EVENT,
     ModerationReportTargetTypeEnum.ORGANIZATION_REVIEW,
@@ -48,6 +51,16 @@ export async function POST(req: NextRequest) {
     }
 
     const result = await prisma.$transaction(async (tx) => {
+      if (parsed.data.targetType === 'TEAM_INVITATION') {
+        await tx.$queryRaw`SELECT "id" FROM "Invites" WHERE "id" = ${parsed.data.targetId} FOR UPDATE`;
+        const invite = await tx.invites.findUnique({ where: { id: parsed.data.targetId } });
+        if (!invite || invite.type !== 'TEAM') throw new Response('Not found', { status: 404 });
+        const authority = await authorizeTeamInviteAction({ client: tx, invite, session, action: 'decline' });
+        if (!authority.ok) throw new Response('Not found', { status: 404 });
+        const report = await reportInvitation(tx, { inviteId: invite.id, reporterUserId: session.userId,
+          category: parsed.data.category, notes: parsed.data.notes });
+        return { report, hiddenEventIds: [] as string[], removedChatIds: [] as string[] };
+      }
       if (parsed.data.targetType === ModerationReportTargetTypeEnum.ORGANIZATION_REVIEW) {
         const review = await tx.organizationReviews.findUnique({
           where: { id: parsed.data.targetId },

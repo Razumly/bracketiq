@@ -514,6 +514,7 @@ enum BoldSignSyncOperationStatusEnum {
 }
 
 enum ModerationReportTargetTypeEnum {
+  TEAM_INVITATION
   CHAT_GROUP
   EVENT
   BLOCK_USER
@@ -1172,6 +1173,7 @@ model Invites {
   updatedAt      DateTime?
   sentAt         DateTime?
   finalizedAt    DateTime?
+  supersededAt   DateTime?
   actedBy        String?
   actingGuardianId String?
   declineBlockScope String?
@@ -1205,6 +1207,26 @@ model Invites {
   @@index([status, updatedAt])
   @@index([linkExpiresAt, status])
   @@index([teamId, createdBy, idempotencyKey])
+}
+
+model InvitationEvidence {
+  reportId          String   @id
+  inviteId          String
+  capturedAt        DateTime @default(now())
+  attemptCreatedAt  DateTime?
+  senderId          String?
+  playerId          String?
+  teamId            String?
+  status            String
+  finalizedAt       DateTime?
+  sentAt            DateTime?
+  actedBy           String?
+  actingGuardianId  String?
+  declineBlockScope String?
+  deliveries        Json
+
+  @@index([inviteId])
+  @@index([finalizedAt, reportId])
 }
 
 model TeamBlocks {

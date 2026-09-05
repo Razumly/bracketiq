@@ -1,4 +1,7 @@
 import { Prisma } from '@/generated/prisma/client';
+import { pruneInvitationEvidence } from './invitationEvidence';
+import { invitationRetentionCutoff } from './invitationRetention';
+export { TERMINAL_INVITE_RETENTION_DAYS } from './invitationRetention';
 
 const DEFAULT_INVITE_PAGE_LIMIT = 50;
 export const MAX_INVITE_PAGE_LIMIT = 100;
@@ -9,9 +12,8 @@ const MAX_INVITE_CURSOR_LENGTH = 1024;
  * scoped by the caller's authorized listing boundary and never removes a team
  * invite while a pending event-sync row may still need reconciliation.
  */
-export const TERMINAL_INVITE_RETENTION_DAYS = 90;
 const TERMINAL_INVITE_CLEANUP_BATCH_SIZE = 250;
-const TERMINAL_INVITE_STATUSES = ['DECLINED', 'REJECTED', 'FAILED', 'ACCEPTED'] as const;
+const TERMINAL_INVITE_STATUSES = ['DECLINED', 'REJECTED', 'ACCEPTED', 'CANCELLED', 'EXPIRED'] as const;
 const TEAM_INVITE_TYPE_ALIASES = ['TEAM', 'PLAYER', 'TEAM_MANAGER', 'TEAM_HEAD_COACH', 'TEAM_ASSISTANT_COACH'];
 const STAFF_INVITE_TYPE_ALIASES = ['STAFF', 'HOST', 'OFFICIAL'];
 
@@ -134,7 +136,7 @@ export const pruneExpiredTerminalInvites = async ({
   ));
   if (!scope.allowGlobal && !userId && !teamId) return 0;
 
-  const cutoff = new Date(now.getTime() - TERMINAL_INVITE_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+  const cutoff = invitationRetentionCutoff(now);
   const accessConditions: Prisma.Sql[] = [];
   const viewerConditions: Prisma.Sql[] = [];
   if (userId) viewerConditions.push(Prisma.sql`invite."userId" = ${userId}`);
@@ -163,9 +165,10 @@ export const pruneExpiredTerminalInvites = async ({
   const accessSql = accessConditions.length
     ? Prisma.join(accessConditions, ' AND ')
     : Prisma.sql`TRUE`;
-  const terminalSql = Prisma.sql`UPPER(invite."status") IN (${Prisma.join([...TERMINAL_INVITE_STATUSES])})`;
+  const terminalSql = Prisma.sql`(UPPER(invite."status") IN (${Prisma.join([...TERMINAL_INVITE_STATUSES])})
+    OR (UPPER(invite."status") = 'FAILED' AND UPPER(invite."type") NOT IN (${Prisma.join(TEAM_INVITE_TYPE_ALIASES)})))`;
   const outcomeTimeSql = Prisma.sql`COALESCE(invite."finalizedAt", invite."updatedAt", invite."createdAt")`;
-  const ageSql = Prisma.sql`${outcomeTimeSql} < ${cutoff}`;
+  const ageSql = Prisma.sql`${outcomeTimeSql} <= ${cutoff}`;
 
   // NOT EXISTS is evaluated before LIMIT, so any number of protected team
   // reconciliation rows cannot starve later deletable terminal invitations.
@@ -184,6 +187,9 @@ export const pruneExpiredTerminalInvites = async ({
         )
       ORDER BY ${outcomeTimeSql} ASC NULLS LAST, invite."id" ASC
       LIMIT ${TERMINAL_INVITE_CLEANUP_BATCH_SIZE}
+      FOR UPDATE OF invite SKIP LOCKED
+    ), deliveries AS (
+      DELETE FROM "InviteDeliveries" WHERE "inviteId" IN (SELECT "id" FROM candidates)
     )
     DELETE FROM "Invites" AS invite
     USING candidates
@@ -193,5 +199,6 @@ export const pruneExpiredTerminalInvites = async ({
       AND ${ageSql}
   `;
   const deleted = await client.$executeRaw(query);
+  await pruneInvitationEvidence(client, now);
   return typeof deleted === 'number' ? deleted : 0;
 };

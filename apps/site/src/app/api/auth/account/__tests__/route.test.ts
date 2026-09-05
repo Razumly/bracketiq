@@ -28,6 +28,7 @@ const prismaMock = {
     updateMany: jest.fn(),
   },
   invites: {
+    findMany: jest.fn(async () => []),
     updateMany: jest.fn(),
     deleteMany: jest.fn(),
   },
