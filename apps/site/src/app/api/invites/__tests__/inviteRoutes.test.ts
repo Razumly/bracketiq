@@ -232,6 +232,7 @@ describe('/api/invites', () => {
   it('authorizes terminal cleanup for guardian-visible child TEAM invites without a pending-only scope', async () => {
     requireSessionMock.mockResolvedValue({ userId: 'parent_1', isAdmin: false });
     prismaMock.parentChildLinks.findMany.mockResolvedValue([{ childId: 'child_1' }]);
+    prismaMock.userData.findMany.mockResolvedValue([{ id: 'child_1', dateOfBirth: new Date('2015-01-01') }]);
 
     const res = await GET(new NextRequest('http://localhost/api/invites?type=TEAM'));
 

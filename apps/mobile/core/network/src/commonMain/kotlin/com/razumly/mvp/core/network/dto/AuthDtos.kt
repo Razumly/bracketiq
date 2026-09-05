@@ -16,6 +16,7 @@ import kotlin.time.Clock
 data class LoginRequestDto(
     val email: String,
     val password: String,
+    val returnTo: String? = null,
 )
 
 @Serializable
@@ -78,6 +79,7 @@ data class RegisterRequestDto(
     val dateOfBirth: String? = null,
     val enforceProfileConflictSelection: Boolean? = null,
     val profileSelection: RegisterProfileSelectionDto? = null,
+    val returnTo: String? = null,
 )
 
 @Serializable

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
+import { findGuardianAuthority } from '@/server/guardianAuthority';
 import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { requireSession } from '@/lib/permissions';
 import {
@@ -133,28 +134,14 @@ export async function POST(request: NextRequest) {
   }
 
   if (!session.isAdmin && userId !== session.userId) {
-    const parentLink = await prisma.parentChildLinks.findFirst({
-      where: {
-        parentId: session.userId,
-        childId: userId,
-        status: 'ACTIVE',
-      },
-      select: { id: true },
-    });
+    const parentLink = await findGuardianAuthority(prisma, session.userId, userId);
     if (!parentLink) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
   }
 
   if (!session.isAdmin && signerContext === 'parent_guardian' && childUserId) {
-    const parentLink = await prisma.parentChildLinks.findFirst({
-      where: {
-        parentId: session.userId,
-        childId: childUserId,
-        status: 'ACTIVE',
-      },
-      select: { id: true },
-    });
+    const parentLink = await findGuardianAuthority(prisma, session.userId, childUserId);
     if (!parentLink) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
@@ -163,14 +150,7 @@ export async function POST(request: NextRequest) {
   if (!session.isAdmin && signerContext === 'child') {
     const resolvedChildUserId = childUserId ?? userId;
     if (session.userId !== resolvedChildUserId) {
-      const parentLink = await prisma.parentChildLinks.findFirst({
-        where: {
-          parentId: session.userId,
-          childId: resolvedChildUserId,
-          status: 'ACTIVE',
-        },
-        select: { id: true },
-      });
+      const parentLink = await findGuardianAuthority(prisma, session.userId, resolvedChildUserId);
       if (!parentLink) {
         return NextResponse.json({ error: 'Child signatures must be completed by the child account.' }, { status: 403 });
       }

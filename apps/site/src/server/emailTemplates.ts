@@ -11,6 +11,7 @@ export interface InviteEmailInput {
   teamId?: string | null;
   teamName?: string | null;
   actionUrl?: string | null;
+  isMinor?: boolean;
 }
 
 export interface InviteEmailContent {
@@ -21,6 +22,9 @@ export interface InviteEmailContent {
 }
 
 const normalizeBaseUrl = (value: string): string => value.replace(/\/+$/, '');
+const escapeHtml = (value: string): string => value.replace(/[&<>"']/g, (character) => ({
+  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+}[character] ?? character));
 
 const buildInviteActionUrl = (input: InviteEmailInput): string => {
   if (input.actionUrl?.trim()) {
@@ -40,6 +44,7 @@ const buildInviteActionUrl = (input: InviteEmailInput): string => {
 };
 
 const buildSubject = (input: InviteEmailInput): string => {
+  if (input.isMinor) return `BracketIQ: Team invitation for ${[input.firstName, input.lastName].filter(Boolean).join(' ') || 'your child'}`;
   const prefix = 'BracketIQ: Staff Invite';
   const inviteType = (input.inviteType ?? '').trim().toUpperCase();
   if (inviteType === 'STAFF') {
@@ -67,7 +72,7 @@ const buildSubject = (input: InviteEmailInput): string => {
 
 export const buildInviteEmail = (input: InviteEmailInput): InviteEmailContent => {
   const name = [input.firstName, input.lastName].filter(Boolean).join(' ').trim();
-  const greeting = name ? `Hi ${name},` : 'Hi,';
+  const greeting = input.isMinor ? 'Hello parent or guardian,' : name ? `Hi ${name},` : 'Hi,';
   const actionUrl = buildInviteActionUrl(input);
   const subject = buildSubject(input);
 
@@ -77,7 +82,9 @@ export const buildInviteEmail = (input: InviteEmailInput): InviteEmailContent =>
   if (input.teamName) contextLines.push(`Team: ${input.teamName}`);
 
   const detailsText = contextLines.length ? `\n${contextLines.join('\n')}\n` : '\n';
-  const introLine = 'You have a new invite on BracketIQ.';
+  const introLine = input.isMinor
+    ? `${name || 'Your child'} has a team invitation. Sign in with your own guardian account to review the child and accept for them. Do not claim the child’s profile as your own.`
+    : 'You have a new invite on BracketIQ.';
 
   const text = [
     greeting,
@@ -93,14 +100,14 @@ export const buildInviteEmail = (input: InviteEmailInput): InviteEmailContent =>
     .join('\n');
 
   const detailsHtml = contextLines.length
-    ? `<ul>${contextLines.map((line) => `<li>${line}</li>`).join('')}</ul>`
+    ? `<ul>${contextLines.map((line) => `<li>${escapeHtml(line)}</li>`).join('')}</ul>`
     : '';
 
   const html = [
-    `<p>${greeting}</p>`,
-    `<p>${introLine}</p>`,
+    `<p>${escapeHtml(greeting)}</p>`,
+    `<p>${escapeHtml(introLine)}</p>`,
     detailsHtml,
-    `<p><a href="${actionUrl}">View the invite</a></p>`,
+    `<p><a href="${escapeHtml(actionUrl)}">View the invite</a></p>`,
     `<p>If you do not have an account yet, the link will guide you through registration.</p>`,
   ].join('');
 

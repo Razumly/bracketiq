@@ -36,6 +36,7 @@ const profileSelectionSchema = z.object({
 
 const registerSchema = z.object({
   email: z.string().email(),
+  returnTo: z.string().max(8192).optional(),
   password: z.string().min(8),
   name: z.string().optional(),
   firstName: z.string().optional(),
@@ -437,6 +438,7 @@ export async function POST(req: NextRequest) {
         userId: authUser.id,
         email: authUser.email,
         origin: getRequestOrigin(req),
+        returnTo: parsed.data.returnTo,
       });
       verificationEmailSent = true;
     } catch (error) {

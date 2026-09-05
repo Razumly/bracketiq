@@ -8,6 +8,8 @@ const syncCanonicalTeamRosterMock = jest.fn();
 const replaceSingletonTeamStaffAssignmentMock = jest.fn();
 
 const txMock: any = {
+  userData: { findUnique: jest.fn() },
+  parentChildLinks: { findFirst: jest.fn() },
   teamStaffAssignments: { updateMany: (...args: any[]) => updateManyMock(...args) },
   invites: {
     deleteMany: (...args: any[]) => inviteDeleteManyMock(...args),
@@ -59,6 +61,8 @@ describe('team staff invite lifecycle', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     prismaMock.userData.findUnique.mockResolvedValue({ dateOfBirth: new Date('1990-01-01T00:00:00.000Z') });
+    txMock.userData.findUnique.mockResolvedValue({ dateOfBirth: new Date('1990-01-01T00:00:00.000Z') });
+    txMock.parentChildLinks.findFirst.mockResolvedValue(null);
     prismaMock.$transaction.mockImplementation(async (callback: (tx: any) => unknown) => callback(txMock));
     loadCanonicalTeamByIdMock.mockResolvedValue(team);
     updateManyMock.mockResolvedValue({ count: 1 });
