@@ -141,8 +141,25 @@ gh run view 33590071911 --repo Razumly/bracketiq --log-failed
 
 **Implementation follow-up**
 
+The hosted application checks passed on 2026-09-05 at `bd0e4a60b`. The [passed Site CI run](https://github.com/Razumly/bracketiq/actions/runs/33985806277) passed 780 suites and 5,549 tests. Four suites and 32 tests were skipped. Both coverage gates passed. The [passed Mobile CI run](https://github.com/Razumly/bracketiq/actions/runs/33985806290) passed Android unit tests, Android release validation, and iOS simulator tests.
+
+| Check | Primary historical sample | First PR run | Repeat PR run |
+| --- | ---: | ---: | ---: |
+| Site quality elapsed time | 13m19s | 9m18s | 8m39s |
+| Android required checks, longest job | 15m21s | 15m59s | 2m05s |
+| Android unit-test feedback | Included in the 15m21s job | 8m48s | 1m58s |
+| iOS simulator job | 41m11s | 51m53s | 15m19s |
+
+The first site run failed only the stale affiliate cutover fixture. The repair uses the current runner evidence and preserves every assertion. Both complete affected suites passed locally, with 148 tests. The repeat hosted site run passed all active tests. Jest itself took 449.252 seconds, close to the historical 446-second test step. Parallel quality checks provide the measured site elapsed-time saving. The local EventForm improvement is not a measured hosted suite improvement.
+
+The repeated mobile runs used unchanged mobile inputs. They measure cache reuse. They do not establish the duration of a future application change. Android's repeat unit build restored 130 of 211 actionable tasks and took 40 seconds inside Gradle. Its repeat release build restored 121 of 301 actionable tasks and took 46 seconds. The first Android run passed 1,718 tests and skipped six.
+
+The first iOS run passed all 1,359 tests. Its native build profile records 46m11.71s for the build and 26m55.61s for application test linking. The repeat run restored the saved native cache and 12 Gradle task outputs. Its build took 10m7.44s. Application test linking took 3m19.01s. Application test execution took 23.293 seconds in the first run and 7.779 seconds in the repeat run. The large delay was native build work.
+
+The repeat lint job exposed one cache configuration limit. ESLint's default metadata strategy treats fresh checkout timestamps as file changes. The follow-up uses `--cache-strategy content`. A probe with installed ESLint confirmed reuse after a timestamp-only change and invalidation after a content change. Actionlint and both code reviewers accepted the change. Its hosted timing improvement has not yet been measured. [ESLint cache strategy](https://eslint.org/docs/latest/use/command-line-interface#--cache-strategy).
+
 The user approved implementation after this audit. The changes enable Gradle task caching, preserve native compiler state, separate Android release validation, and run independent site checks in a matrix. Site coverage now excludes generated code. Backend suites use Node where no browser is required. The EventForm wrapper omits unused providers. Mantine uses test mode. Realtime cleanup now cancels a pending refresh and prevents a late reconnect after unmount.
 
 The implementation retains the release checks and coverage floors. The local site diagnostic passed both coverage gates. Local UI and backend validation found test assumptions about transitions and Windows paths. The follow-up repairs those assumptions and preserves application behavior checks. The original CI worker warning was not reproduced; a separate cleanup race was reproduced and fixed.
 
-See `plans/test-performance-execplan.md` for exact local test results, the review outcome, and platform validation limits. Hosted cache reuse and CI time savings require later Linux and macOS runs.
+See `plans/test-performance-execplan.md` for exact local test results, hosted validation, review outcomes, and the remaining Windows validation limits.

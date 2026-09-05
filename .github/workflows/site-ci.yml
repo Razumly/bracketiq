@@ -48,7 +48,7 @@ jobs:
       matrix:
         include:
           - check: lint
-            command: npm run lint -- --cache --cache-location .cache/eslint
+            command: npm run lint -- --cache --cache-strategy content --cache-location .cache/eslint
           - check: types
             command: npm run prisma:validate && npx tsc --noEmit --tsBuildInfoFile .cache/types.tsbuildinfo
           - check: tests

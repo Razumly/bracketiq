@@ -26,7 +26,10 @@ The user approved the fixes identified in `docs/test-performance-audit-2026-09-0
 - [x] (2026-09-05) Push the branch and open pull request 154 after the user requested integration into `main`.
 - [x] (2026-09-05) Repair the stale runner fixture behind the sole Site CI failure. Both complete affiliate suites pass, with 148 tests.
 - [x] (2026-09-05) Pass focused ESLint and both independent reviews for the fixture repair.
-- [ ] Complete hosted CI for the final revision and integrate into `main`.
+- [x] (2026-09-05) Pass hosted Site CI and Mobile CI at `bd0e4a60b`. Confirm Android and native cache reuse in a repeat run.
+- [x] (2026-09-05) Validate the lint content-cache follow-up with installed ESLint, actionlint, and both independent reviews.
+- [x] (2026-09-05) Pass the full lint command with `--cache-strategy content`. It reports zero errors and 55 warnings. Three warnings concern downloaded coverage report helpers; hosted lint reports the other 52 warnings.
+- [ ] Integrate the reviewed branch into `main`.
 
 ## Surprises & Discoveries
 
@@ -60,6 +63,10 @@ Actionlint 1.7.12 accepted both workflows. A temporary harness executed the actu
 
 ## Decision Log
 
+Decision: use `--cache-strategy content` for ESLint in CI. The repeat lint job took 2m52s, compared with 2m54s in the first run. ESLint defaults to metadata comparison, and a fresh checkout changes file timestamps. A probe with installed ESLint 9.39.1 executed a custom rule twice with metadata caching after a timestamp-only change. Content caching executed the rule once. Both strategies executed the rule again after a content change. Actionlint and both reviewers accepted the follow-up. No lint rule or gate was removed. See [ESLint cache strategy](https://eslint.org/docs/latest/use/command-line-interface#--cache-strategy). Date: 2026-09-05.
+
+Decision: validate the final lint-only workflow follow-up with full local lint, the cache behavior probe, actionlint, and both reviews. The hosted application checks passed at `bd0e4a60b`, and their application inputs remain unchanged. The `main` workflows will check the integrated commit. Date: 2026-09-05.
+
 Decision: repair the existing affiliate cutover test fixture before integration. The first PR run failed only this case. Diagnostic findings show a retired credential, a missing reviewed egress network, and missing Codex auth handoff evidence. The fixture now uses the same current runner contract as the passing cutover suite. All readiness and cutover assertions remain. Both complete suites pass, with 148 tests in 23.187 seconds. Production validation remains unchanged. Date: 2026-09-05.
 
 Decision: let the first mobile CI run finish before pushing the fixture repair. A new push cancels the current PR workflows. Completion lets the cold native build save its caches for the next revision. Date: 2026-09-05.
@@ -80,7 +87,11 @@ The implementation is complete on `codex/test-performance`. All required CI gate
 
 Site workflow validation, gate execution checks, Prisma validation, TypeScript, ESLint, and both coverage gates passed. All changed Node environment suites and affected UI checks passed across the full and focused runs. The complete site run still has the recorded baseline and platform failures. Android compilation completed and 1,716 tests passed, but two unchanged Room persistence cases failed on Windows.
 
-Hosted cache reuse, release APK checks, iOS simulator validation, and CI time savings require the next Linux and macOS workflow runs. No production image was published. No deployment was run. Large native module changes remain deferred until the stored profiles identify a useful boundary.
+Hosted Site CI and Mobile CI passed at `bd0e4a60b`. Site CI passed 780 suites and 5,549 tests, with four suites and 32 tests skipped. Both coverage gates passed. Android passed 1,718 tests and skipped six. The first iOS run passed all 1,359 tests. The repeat run confirmed Gradle and native cache restoration. See the measured follow-up in `docs/test-performance-audit-2026-09-05.md`.
+
+The site test job fell from the historical combined quality job's 13m19s to 8m39s. The repeat Android unit job took 1m58s. Its separate release validation took 2m05s. The repeat iOS job took 15m19s, compared with 51m53s in the first PR run and 41m11s in the primary historical sample. The repeated mobile runs used unchanged mobile inputs. These measurements show cache reuse, not a guaranteed duration after application changes.
+
+No production image was published. No deployment was run. Large native module changes remain deferred. Native caching reduced application test linking from 26m55.61s to 3m19.01s in the measured repeat run.
 
 ## Context and Orientation
 
