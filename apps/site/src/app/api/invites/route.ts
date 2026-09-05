@@ -699,9 +699,9 @@ export async function POST(req: NextRequest) {
           if (!managedPlayerInput) throw new InviteRouteError(400, 'Managed Player details are required');
           const contactMatches = [
             ...(invite.existingInviteId ? [{ id: invite.existingInviteId }] : []),
-            ...(resolvedUser.email ? [{ email: resolvedUser.email }] : []),
-            ...(resolvedUser.playerEmail ? [{ playerEmail: resolvedUser.playerEmail }] : []),
-            ...(invite.phone ? [{ phone: invite.phone.trim() }] : []),
+            ...(!managedPlayerInput.isMinor && resolvedUser.email ? [{ email: resolvedUser.email }] : []),
+            ...(!managedPlayerInput.isMinor && resolvedUser.playerEmail ? [{ playerEmail: resolvedUser.playerEmail }] : []),
+            ...(!managedPlayerInput.isMinor && invite.phone ? [{ phone: invite.phone.trim() }] : []),
           ];
           const priorInvite = teamId && contactMatches.length > 0
             ? await tx.invites.findFirst({

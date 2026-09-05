@@ -295,7 +295,7 @@ describe('managed player profiles', () => {
     }));
   });
 
-  it('links a verified guardian without replacing the minor roster identity', async () => {
+  it('requires a guardian declaration and team acceptance before activating authority', async () => {
     const tx: any = {
       invites: {
         findUnique: jest.fn().mockResolvedValue({
@@ -322,7 +322,7 @@ describe('managed player profiles', () => {
       userProfileClaims: { create: jest.fn().mockResolvedValue({ id: 'claim_guardian' }) },
     };
 
-    const result = await claimManagedPlayerProfile({
+    await expect(claimManagedPlayerProfile({
       $transaction: (callback: (transaction: any) => Promise<unknown>) => callback(tx),
     }, {
       profileId: 'child_1',
@@ -332,15 +332,7 @@ describe('managed player profiles', () => {
       link: { version: '1', expiresAt: String(new Date('2030-01-03T00:00:00.000Z').getTime()), signature: 'sig' },
       verifyLink: () => true,
       now: NOW,
-    });
-
-    expect(result).toMatchObject({ status: 'GUARDIAN_LINKED', primaryProfileId: 'child_1' });
-    expect(tx.parentChildLinks.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ parentId: 'guardian_1', childId: 'child_1', status: 'ACTIVE' }),
-    }));
-    expect(tx.invites.update).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'invite_minor' },
-      data: expect.objectContaining({ claimedBy: 'guardian_1' }),
-    }));
+    })).rejects.toThrow('acceptance');
+    expect(tx.parentChildLinks.create).not.toHaveBeenCalled();
   });
 });

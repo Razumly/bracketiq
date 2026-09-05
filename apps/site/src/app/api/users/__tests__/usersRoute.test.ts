@@ -306,6 +306,7 @@ describe('users list route', () => {
   it('limits parent event visibility to their child team and keeps other minors hidden', async () => {
     getOptionalSessionMock.mockReturnValue({ userId: 'parent_1', isAdmin: false, rawToken: 'token' });
     parentChildLinksFindManyMock.mockResolvedValue([{ childId: 'child_1' }]);
+    findManyMock.mockResolvedValueOnce([{ id: 'child_1', dateOfBirth: new Date('2012-01-01T00:00:00.000Z') }]);
     eventsFindUniqueMock.mockResolvedValue({
       hostId: 'host_1',
       organizationId: null,

@@ -54,6 +54,14 @@ extension URL {
         }
 
         let queryItems = URLComponents(url: self, resolvingAgainstBaseURL: false)?.queryItems
+        if effectiveSegments.count == 3 && effectiveSegments[0] == "claim" && effectiveSegments[1] == "player" {
+            return RootComponent.DeepLinkNavManagedPlayerClaim(
+                inviteId: effectiveSegments[2],
+                version: queryItems?.first(where: { $0.name == "v" })?.value,
+                expiresAt: queryItems?.first(where: { $0.name == "e" })?.value,
+                signature: queryItems?.first(where: { $0.name == "s" })?.value
+            )
+        }
         let queryScreen = queryItems?
             .first(where: { $0.name.caseInsensitiveCompare("screen") == .orderedSame })?
             .value?

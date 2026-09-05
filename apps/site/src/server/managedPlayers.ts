@@ -5,6 +5,8 @@ import { isFutureDateOfBirth, parseDateOfBirth } from '@/lib/dateOfBirth';
 import { isMinorAtUtcDate, isUnknownDateOfBirth } from '@/server/userPrivacy';
 import { advisoryLockId } from '@/server/repositories/locks';
 import { rollbackTeamInviteEventSyncs } from '@/server/teams/teamInviteEventSync';
+import { acceptTeamInviteWithGuardianRules } from '@/server/teams/teamGuardianInvites';
+import { GUARDIAN_DECLARATION, GUARDIAN_DECLARATION_VERSION } from '@/server/guardianAuthority';
 
 type PrismaLike = any;
 
@@ -75,6 +77,9 @@ export const createManagedPlayerProfile = async (
   const isMinor = input.isMinor === true || isMinorAtUtcDate(dateOfBirth, now);
   const guardianEmail = normalizeEmail(input.guardianEmail);
   const hasKnownBirthDate = dateOfBirth.getTime() !== UNKNOWN_MANAGED_PLAYER_DATE_OF_BIRTH.getTime();
+  if (input.isMinor && hasKnownBirthDate && !isMinorAtUtcDate(dateOfBirth, now)) {
+    throw new Error('Minor players must be under 18');
+  }
   if ((input.isMinor === true || (isMinor && hasKnownBirthDate))
     && (!guardianEmail || !input.dateOfBirth)) {
     throw new Error('Minor players require a date of birth and guardian email');
@@ -135,13 +140,15 @@ export type ClaimManagedPlayerInput = {
   dateOfBirth?: string | Date | null;
   link: { version: string | null; expiresAt: string | null; signature: string | null };
   confirmation: boolean;
+  guardianDeclaration?: boolean;
+  acceptTeamInvitation?: boolean;
   claimantUserId: string;
   now?: Date;
   verifyLink: (invite: any, link: ClaimManagedPlayerInput['link'], now: Date) => boolean;
 };
 
 export type ClaimManagedPlayerResult = {
-  status: 'CLAIMED' | 'MERGED' | 'GUARDIAN_LINKED' | 'ALREADY_CLAIMED' | 'BIRTHDATE_REQUIRED' | 'GUARDIAN_REQUIRED';
+  status: 'CLAIMED' | 'MERGED' | 'GUARDIAN_ACCEPTED' | 'ALREADY_CLAIMED' | 'BIRTHDATE_REQUIRED' | 'GUARDIAN_REQUIRED';
   primaryProfileId: string;
   sourceProfileId: string;
   mergeId?: string;
@@ -401,7 +408,7 @@ export const claimManagedPlayerProfile = async (
     if (!source) throw new Error('Profile not found');
     const claimant = await tx.userData.findUnique({ where: { id: input.claimantUserId } });
     if (!claimant) throw new Error('Claimant profile not found');
-    if (source.mergedIntoProfileId || source.isManagedPlayer === false) {
+    if (source.mergedIntoProfileId || (source.isManagedPlayer === false && !isMinorAtUtcDate(source.dateOfBirth, now))) {
       if (invite.claimedBy === input.claimantUserId) {
         return {
           status: 'ALREADY_CLAIMED',
@@ -419,18 +426,24 @@ export const claimManagedPlayerProfile = async (
     if (sourceIsMinor && invite.isMinor !== true && !sourceHasUnknownBirthdate) {
       throw new Error('Guardian authority is required for a minor profile');
     }
-    const attachedEmail = normalizeEmail(sourceIsMinor ? (invite.guardianEmail ?? invite.email) : invite.email);
-    if (attachedEmail && !claimantAuth.emailVerifiedAt) {
+    const existingGuardianLink = sourceIsMinor && !sourceHasUnknownBirthdate
+      ? await tx.parentChildLinks.findFirst({ where: { childId: input.profileId, parentId: input.claimantUserId, status: 'ACTIVE' } })
+      : null;
+    const attachedEmail = normalizeEmail(sourceIsMinor && !sourceHasUnknownBirthdate ? invite.guardianEmail : (invite.isMinor ? invite.playerEmail : invite.email));
+    if (!sourceIsMinor && invite.isMinor && (!attachedEmail || attachedEmail === normalizeEmail(invite.guardianEmail ?? invite.email))) {
+      throw new Error('This Player is now 18. Ask the team manager for a new Player claim link or an invitation to their personal email.');
+    }
+    if (!existingGuardianLink && attachedEmail && !claimantAuth.emailVerifiedAt) {
       throw new Error('Email verification is required for an attached Player email');
     }
-    if (attachedEmail && claimantAuth.email.trim().toLowerCase() !== attachedEmail) {
+    if (!existingGuardianLink && attachedEmail && claimantAuth.email.trim().toLowerCase() !== attachedEmail) {
       throw new Error(sourceIsMinor
         ? 'The Account email does not match the guardian email'
         : 'The Account email does not match the attached Player email');
     }
 
     const sourceAuth = await tx.authUser.findUnique({ where: { id: input.profileId } });
-    if (isActiveAccountForProfile(sourceAuth)) {
+    if (!sourceIsMinor && isActiveAccountForProfile(sourceAuth)) {
       if (input.profileId === input.claimantUserId) {
         return { status: 'ALREADY_CLAIMED', primaryProfileId: input.profileId, sourceProfileId: input.profileId };
       }
@@ -459,67 +472,72 @@ export const claimManagedPlayerProfile = async (
         where: { id: input.inviteId },
         data: { dateOfBirth: collectedBirthDate, isMinor: isMinorAtUtcDate(collectedBirthDate, now), updatedAt: now },
       });
+      if (isMinorAtUtcDate(collectedBirthDate, now)) {
+        // Refresh guardian proof from the saved invitation in the next request.
+        // The previous personal email cannot authorize guardian acceptance.
+        return {
+          status: 'GUARDIAN_REQUIRED',
+          primaryProfileId: input.profileId,
+          sourceProfileId: input.profileId,
+        };
+      }
     }
     sourceIsMinor = isMinorAtUtcDate(sourceBirthDate, now);
-    if (sourceIsMinor && invite.isMinor !== true && !sourceHasUnknownBirthdate) {
-      // A newly discovered minor must not be claimed as the acting Account.
-      // The guardian journey completes in the next invitation slice.
-      return {
-        status: 'GUARDIAN_REQUIRED',
-        primaryProfileId: input.profileId,
-        sourceProfileId: input.profileId,
-      };
-    }
     if (sourceIsMinor) {
+      if (input.profileId === input.claimantUserId) throw new Error('A minor cannot accept their own team invitation');
+      if (!input.acceptTeamInvitation) throw new Error('Explicit team invitation acceptance is required');
       if (sourceHasUnknownBirthdate) {
         throw new Error('A valid date of birth is required before guardian approval');
       }
-      if (!attachedEmail) {
+      if (!existingGuardianLink && !attachedEmail) {
         throw new Error('Guardian email is required for a minor profile');
       }
-      const existingGuardianLink = tx.parentChildLinks?.findFirst
-        ? await tx.parentChildLinks.findFirst({
-          where: { childId: input.profileId, status: 'ACTIVE' },
-          select: { id: true, parentId: true },
-        })
-        : null;
-      if (existingGuardianLink && existingGuardianLink.parentId !== input.claimantUserId) {
-        throw new Error('Profile is already controlled by another Account');
-      }
-      const claim = await tx.userProfileClaims.create({
-        data: {
-          id: crypto.randomUUID(),
-          profileId: input.profileId,
-          claimantUserId: input.claimantUserId,
-          inviteId: input.inviteId,
-          verificationMethod: 'GUARDIAN_EMAIL',
-          verifiedEmail: attachedEmail,
-          status: 'COMPLETED',
-          confirmationAt: now,
-          completedAt: now,
-        },
-      });
-      if (!existingGuardianLink && tx.parentChildLinks?.create) {
-        await tx.parentChildLinks.create({
-          data: {
+      if (!existingGuardianLink) {
+        if (!input.guardianDeclaration) throw new Error('Guardian Declaration is required');
+        const otherGuardian = await tx.parentChildLinks.findFirst({ where: { childId: input.profileId, status: 'ACTIVE' } });
+        if (otherGuardian) throw new Error('Profile is already controlled by another Account');
+        const pending = await tx.parentChildLinks.findFirst({ where: { childId: input.profileId, parentId: input.claimantUserId, status: 'PENDING' } });
+        const declaration = {
+          status: 'ACTIVE',
+          declarationVersion: GUARDIAN_DECLARATION_VERSION,
+          declarationText: GUARDIAN_DECLARATION,
+          declarationConfirmedAt: now,
+          declarationInviteId: input.inviteId,
+          linkMethod: 'MANAGED_PLAYER_INVITE',
+          updatedAt: now,
+        };
+        if (pending) {
+          await tx.parentChildLinks.update({ where: { id: pending.id }, data: declaration });
+        } else {
+          await tx.parentChildLinks.create({ data: {
+            ...declaration,
             id: crypto.randomUUID(),
             parentId: input.claimantUserId,
             childId: input.profileId,
-            status: 'ACTIVE',
             relationship: 'guardian',
-            linkMethod: 'MANAGED_PLAYER_INVITE',
             createdBy: input.claimantUserId,
             createdAt: now,
-            updatedAt: now,
-          },
-        });
+          } });
+        }
+        await tx.userProfileClaims.create({ data: {
+          id: crypto.randomUUID(), profileId: input.profileId, claimantUserId: input.claimantUserId,
+          inviteId: input.inviteId, verificationMethod: 'GUARDIAN_EMAIL', verifiedEmail: attachedEmail,
+          status: 'COMPLETED', confirmationAt: now, completedAt: now,
+        } });
       }
+      const acceptance = await acceptTeamInviteWithGuardianRules({
+        client: tx,
+        inTransaction: true,
+        invite,
+        session: { userId: input.claimantUserId },
+        now,
+      });
+      if (acceptance.status !== 200) throw new Error(String(acceptance.body.error ?? 'Team acceptance failed'));
       await tx.invites.update({ where: { id: input.inviteId }, data: { claimedBy: input.claimantUserId, updatedAt: now } });
       return {
-        status: 'GUARDIAN_LINKED',
+        status: 'GUARDIAN_ACCEPTED',
         primaryProfileId: input.profileId,
         sourceProfileId: input.profileId,
-        mergeId: claim.id,
       };
     }
     if (sourceHasUnknownBirthdate) {
@@ -616,9 +634,20 @@ export const correctManagedPlayerContact = async (
     },
   });
   if (!invite) throw new Error('No current Player invitation found');
-  const email = input.email === undefined ? normalizeEmail(invite.email) : normalizeEmail(input.email);
+  const minor = !isUnknownDateOfBirth(profile.dateOfBirth ?? invite.dateOfBirth)
+    && isMinorAtUtcDate(profile.dateOfBirth ?? invite.dateOfBirth, now);
+  if (minor && await tx.parentChildLinks.findFirst({ where: { childId: input.profileId, status: 'ACTIVE' } })) {
+    throw new Error('The active guardian must manage this contact');
+  }
+  const email = input.email === undefined
+    ? normalizeEmail(!minor && invite.isMinor ? invite.playerEmail : invite.email)
+    : normalizeEmail(input.email);
   const phone = input.phone === undefined ? normalizeContact(invite.phone) : normalizeContact(input.phone);
   if (!email && !phone) throw new Error('A corrected email or phone is required');
+  if (minor && !email) throw new Error('Guardian email is required');
+  if (!minor && invite.isMinor && email && email === normalizeEmail(invite.guardianEmail)) {
+    throw new Error('The guardian contact cannot prove the adult Player identity');
+  }
 
   const pendingSyncRows = tx.teamInviteEventSyncs?.findMany
     ? await tx.teamInviteEventSyncs.findMany({ where: { inviteId: invite.id, status: 'PENDING' } })
@@ -633,15 +662,15 @@ export const correctManagedPlayerContact = async (
       userId: input.profileId,
       email,
       phone,
-      playerEmail: input.email === undefined ? invite.playerEmail : email,
+      playerEmail: minor || input.email === undefined ? invite.playerEmail : email,
       status: 'PENDING',
       role: 'player',
       firstName: profile.firstName,
       lastName: profile.lastName,
       isAssigned: true,
-      isMinor: Boolean(invite.isMinor),
-      dateOfBirth: invite.dateOfBirth,
-      guardianEmail: invite.guardianEmail,
+      isMinor: minor,
+      dateOfBirth: profile.dateOfBirth ?? invite.dateOfBirth,
+      guardianEmail: minor ? email : null,
       createdBy: input.managerUserId,
       linkVersion: 1,
       linkExpiresAt: new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000),

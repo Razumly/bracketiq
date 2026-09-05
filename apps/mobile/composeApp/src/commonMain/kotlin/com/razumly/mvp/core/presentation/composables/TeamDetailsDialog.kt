@@ -128,6 +128,7 @@ fun TeamDetailsDialog(
                     .associateBy(TeamPlayerRegistration::userId)
                 val currentUserRegistration = syncedTeam.playerRegistrations
                     .firstOrNull { registration -> registration.userId == currentUser.id }
+                val canManageRoster = syncedTeam.managerId == currentUser.id || syncedTeam.captainId == currentUser.id
                 val isCurrentUserPaymentPending = currentUserRegistration?.isPaymentPending() == true
                 val isCurrentUserActive = currentUserRegistration?.isActive() == true ||
                     (syncedTeam.playerIds.contains(currentUser.id) && !isCurrentUserPaymentPending)
@@ -274,6 +275,9 @@ fun TeamDetailsDialog(
                                 jerseyNumber = playerRegistration?.jerseyNumber,
                                 modifier = Modifier.fillMaxWidth(),
                             )
+                            if (canManageRoster && player.isManagedPlayer) {
+                                Text("Managed profile", style = MaterialTheme.typography.labelSmall)
+                            }
                             if (compliance != null) {
                                 TeamMemberComplianceStrip(
                                     userSummary = compliance,
@@ -294,7 +298,7 @@ fun TeamDetailsDialog(
                     if (team.pendingPlayers.isNotEmpty()) {
                         item {
                             Text(
-                                text = "Pending Invitations",
+                                text = if (canManageRoster) "Invited players" else "Players",
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Medium,
                                 modifier = Modifier.padding(top = 8.dp)
@@ -304,10 +308,13 @@ fun TeamDetailsDialog(
                         items(team.pendingPlayers) { player ->
                             PlayerCard(
                                 player = player,
-                                isPending = true,
-                                pendingLabel = "Awaiting player",
+                                isPending = canManageRoster,
+                                pendingLabel = if (player.isMinor) "Awaiting guardian" else "Awaiting player",
                                 modifier = Modifier.fillMaxWidth()
                             )
+                            if (canManageRoster && player.isManagedPlayer) {
+                                Text("Managed profile", style = MaterialTheme.typography.labelSmall)
+                            }
                         }
                     }
                 }

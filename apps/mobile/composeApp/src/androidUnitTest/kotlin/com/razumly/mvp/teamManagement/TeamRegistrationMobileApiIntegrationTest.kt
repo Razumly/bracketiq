@@ -29,12 +29,58 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.minutes
+import kotlinx.coroutines.flow.first
+import java.net.URI
+import java.net.URLDecoder
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class TeamRegistrationMobileApiIntegrationTest {
     private var session: MobileApiTestSession? = null
     private var createdTeamId: String? = null
+
+    @Test
+    fun givenSiblingsWithOneGuardianContact_whenInvitationsAreAccepted_thenRoomKeepsSeparateProfiles() = runTest(timeout = 5.minutes) {
+        val mobile = MobileApiTestSession.create().also { session = it }
+        val guardian = mobile.userRepository.login(MOBILE_TEST_HOST_EMAIL, MOBILE_TEST_HOST_PASSWORD).getOrThrow()
+        val team = mobile.teamRepository.createTeam(Team(guardian.id).copy(
+            name = "Guardian Acceptance Test", teamSize = 6,
+        ).withSynchronizedMembership()).getOrThrow()
+        createdTeamId = team.id
+        val childIds = mutableSetOf<String>()
+        for (name in listOf("Casey", "Jamie")) {
+            val invitation = mobile.teamRepository.createTeamMemberInvite(
+                teamId = team.id, firstName = name, lastName = "River", shareOnly = true,
+                isMinor = true, dateOfBirth = "2015-01-01", guardianEmail = MOBILE_TEST_HOST_EMAIL,
+            ).getOrThrow()
+            val url = URI(assertNotNull(invitation.claimUrl))
+            val fields = url.rawQuery.split('&').associate { field ->
+                val pair = field.split('=', limit = 2)
+                pair[0] to URLDecoder.decode(pair[1], "UTF-8")
+            }
+            val inviteId = url.path.substringAfterLast('/')
+            val preview = mobile.userRepository.previewManagedPlayerClaim(inviteId, fields["v"], fields["e"], fields["s"]).getOrThrow()
+            assertTrue(preview.isMinor)
+            assertTrue(preview.guardianSetupRequired)
+            assertTrue(childIds.add(preview.profileId), "Siblings must not share a Player profile")
+            val result = mobile.userRepository.claimManagedPlayerProfile(
+                profileId = preview.profileId, inviteId = inviteId, confirmation = true,
+                version = fields["v"], expiresAt = fields["e"], signature = fields["s"],
+                guardianDeclaration = true, acceptTeamInvitation = true,
+            ).getOrThrow()
+            assertEquals("GUARDIAN_ACCEPTED", result.status)
+            assertEquals(preview.profileId, result.primaryProfileId)
+            val retry = mobile.userRepository.claimManagedPlayerProfile(
+                profileId = preview.profileId, inviteId = inviteId, confirmation = true,
+                version = fields["v"], expiresAt = fields["e"], signature = fields["s"],
+                guardianDeclaration = false, acceptTeamInvitation = true,
+            ).getOrThrow()
+            assertEquals("GUARDIAN_ACCEPTED", retry.status)
+        }
+        val cached = mobile.userRepository.observeChildren().first()
+        assertTrue(cached.map { it.userId }.containsAll(childIds))
+        assertEquals(guardian.id, mobile.userRepository.currentUser.value.getOrThrow().id)
+    }
 
     @Before
     fun ensureBackendFixtures() {
@@ -57,6 +103,42 @@ class TeamRegistrationMobileApiIntegrationTest {
                 "Automatic backend seeding is disabled unless MVP_TEST_ALLOW_DB_SEED=1.",
             fixturesPrepared,
         )
+    }
+
+    @Test
+    fun givenUnknownBirthdate_whenMinorBirthdateIsSubmitted_thenGuardianContactIsRequired() = runTest(timeout = 5.minutes) {
+        val mobile = MobileApiTestSession.create().also { session = it }
+        val manager = mobile.userRepository.login(MOBILE_TEST_HOST_EMAIL, MOBILE_TEST_HOST_PASSWORD).getOrThrow()
+        val team = mobile.teamRepository.createTeam(Team(manager.id).copy(
+            name = "Unknown Birthdate Test", teamSize = 6,
+        ).withSynchronizedMembership()).getOrThrow()
+        createdTeamId = team.id
+        val invitation = mobile.teamRepository.createTeamMemberInvite(
+            teamId = team.id, firstName = "Taylor", lastName = "River", shareOnly = true,
+        ).getOrThrow()
+        val url = URI(assertNotNull(invitation.claimUrl))
+        val fields = url.rawQuery.split('&').associate { field ->
+            val pair = field.split('=', limit = 2)
+            pair[0] to URLDecoder.decode(pair[1], "UTF-8")
+        }
+        val inviteId = url.path.substringAfterLast('/')
+        val initial = mobile.userRepository.previewManagedPlayerClaim(inviteId, fields["v"], fields["e"], fields["s"]).getOrThrow()
+        assertTrue(initial.birthdateRequired)
+        val result = mobile.userRepository.claimManagedPlayerProfile(
+            profileId = initial.profileId, inviteId = inviteId, confirmation = true,
+            dateOfBirth = "2015-01-01", version = fields["v"], expiresAt = fields["e"], signature = fields["s"],
+        ).getOrThrow()
+        assertEquals("GUARDIAN_REQUIRED", result.status)
+        val refreshed = mobile.userRepository.previewManagedPlayerClaim(inviteId, fields["v"], fields["e"], fields["s"]).getOrThrow()
+        assertTrue(refreshed.isMinor)
+        assertTrue(refreshed.guardianContactRequired)
+        val rejected = mobile.userRepository.claimManagedPlayerProfile(
+            profileId = initial.profileId, inviteId = inviteId, confirmation = true,
+            version = fields["v"], expiresAt = fields["e"], signature = fields["s"],
+            guardianDeclaration = true, acceptTeamInvitation = true,
+        )
+        assertTrue(rejected.isFailure)
+        assertEquals(manager.id, mobile.userRepository.currentUser.value.getOrThrow().id)
     }
 
     @After

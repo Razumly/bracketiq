@@ -10,6 +10,8 @@ data class ManagedPlayerClaimRequestDto(
     val version: String? = null,
     val expiresAt: String? = null,
     val signature: String? = null,
+    val guardianDeclaration: Boolean? = null,
+    val acceptTeamInvitation: Boolean? = null,
 )
 
 @Serializable
@@ -36,6 +38,10 @@ data class ManagedPlayerClaimPreviewInviteDto(
     val profileId: String = "",
     val hasAttachedEmail: Boolean = false,
     val isMinor: Boolean = false,
+    val guardianSetupRequired: Boolean = false,
+    val guardianContactRequired: Boolean = false,
+    val guardianDeclaration: String? = null,
+    val birthdateRequired: Boolean = false,
     val teamId: String? = null,
 )
 
@@ -43,6 +49,7 @@ data class ManagedPlayerClaimPreviewInviteDto(
 data class ManagedPlayerClaimPreviewProfileDto(
     val displayName: String = "Player",
     val isManaged: Boolean = false,
+    val dateOfBirth: String? = null,
 )
 
 @Serializable

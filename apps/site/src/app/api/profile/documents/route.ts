@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { listGuardianChildIds } from '@/server/guardianAuthority';
 import { requireSession } from '@/lib/permissions';
 import {
   canViewerProxyChildSignature,
@@ -193,12 +194,13 @@ export async function GET(_req: NextRequest) {
   const session = await requireSession(_req);
   const userId = session.userId;
 
-  const [registrations, linkedChildren, parentLinksForSelf, selfSensitive] = await Promise.all([
+  const linkedChildIds = await listGuardianChildIds(prisma, userId);
+  const [registrations, parentLinksForSelf, selfSensitive] = await Promise.all([
     prisma.eventRegistrations.findMany({
       where: {
         OR: [
           { registrantId: userId },
-          { parentId: userId },
+          { parentId: userId, registrantId: { in: linkedChildIds } },
         ],
       },
       select: {
@@ -210,15 +212,6 @@ export async function GET(_req: NextRequest) {
         rosterRole: true,
         status: true,
         consentStatus: true,
-      },
-    }),
-    prisma.parentChildLinks.findMany({
-      where: {
-        parentId: userId,
-        status: 'ACTIVE',
-      },
-      select: {
-        childId: true,
       },
     }),
     prisma.parentChildLinks.findMany({
@@ -239,11 +232,6 @@ export async function GET(_req: NextRequest) {
     }),
   ]);
 
-  const linkedChildIds = Array.from(new Set(
-    linkedChildren
-      .map((link) => normalizeText(link.childId))
-      .filter((value): value is string => Boolean(value)),
-  ));
   const teamIdsByUserId = await getCanonicalTeamIdsByUserIds(
     [userId, ...linkedChildIds],
     prisma,
@@ -314,7 +302,7 @@ export async function GET(_req: NextRequest) {
       status: { in: ['STARTED', 'PENDING', 'ACTIVE'] },
       OR: [
         { userId: { in: relevantProfileUserIds } },
-        { parentId: userId },
+        { parentId: userId, userId: { in: linkedChildIds } },
       ],
     },
     select: {

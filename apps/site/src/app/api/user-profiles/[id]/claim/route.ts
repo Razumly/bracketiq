@@ -10,6 +10,8 @@ export const dynamic = 'force-dynamic';
 const bodySchema = z.object({
   inviteId: z.string().min(1),
   confirmation: z.literal(true),
+  guardianDeclaration: z.boolean().optional(),
+  acceptTeamInvitation: z.boolean().optional(),
   dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   version: z.string().optional(),
   expiresAt: z.string().optional(),
@@ -41,6 +43,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         signature: parsed.data.signature ?? null,
       },
       confirmation: parsed.data.confirmation,
+      guardianDeclaration: parsed.data.guardianDeclaration,
+      acceptTeamInvitation: parsed.data.acceptTeamInvitation,
       claimantUserId: session.userId,
       verifyLink: verifyTeamInviteShareLink,
     });

@@ -20,8 +20,18 @@ export type ParentChildLinksModel = runtime.Types.Result.DefaultSelection<Prisma
 
 export type AggregateParentChildLinks = {
   _count: ParentChildLinksCountAggregateOutputType | null
+  _avg: ParentChildLinksAvgAggregateOutputType | null
+  _sum: ParentChildLinksSumAggregateOutputType | null
   _min: ParentChildLinksMinAggregateOutputType | null
   _max: ParentChildLinksMaxAggregateOutputType | null
+}
+
+export type ParentChildLinksAvgAggregateOutputType = {
+  declarationVersion: number | null
+}
+
+export type ParentChildLinksSumAggregateOutputType = {
+  declarationVersion: number | null
 }
 
 export type ParentChildLinksMinAggregateOutputType = {
@@ -35,6 +45,10 @@ export type ParentChildLinksMinAggregateOutputType = {
   linkMethod: string | null
   createdBy: string | null
   endedAt: Date | null
+  declarationVersion: number | null
+  declarationText: string | null
+  declarationConfirmedAt: Date | null
+  declarationInviteId: string | null
 }
 
 export type ParentChildLinksMaxAggregateOutputType = {
@@ -48,6 +62,10 @@ export type ParentChildLinksMaxAggregateOutputType = {
   linkMethod: string | null
   createdBy: string | null
   endedAt: Date | null
+  declarationVersion: number | null
+  declarationText: string | null
+  declarationConfirmedAt: Date | null
+  declarationInviteId: string | null
 }
 
 export type ParentChildLinksCountAggregateOutputType = {
@@ -61,9 +79,21 @@ export type ParentChildLinksCountAggregateOutputType = {
   linkMethod: number
   createdBy: number
   endedAt: number
+  declarationVersion: number
+  declarationText: number
+  declarationConfirmedAt: number
+  declarationInviteId: number
   _all: number
 }
 
+
+export type ParentChildLinksAvgAggregateInputType = {
+  declarationVersion?: true
+}
+
+export type ParentChildLinksSumAggregateInputType = {
+  declarationVersion?: true
+}
 
 export type ParentChildLinksMinAggregateInputType = {
   id?: true
@@ -76,6 +106,10 @@ export type ParentChildLinksMinAggregateInputType = {
   linkMethod?: true
   createdBy?: true
   endedAt?: true
+  declarationVersion?: true
+  declarationText?: true
+  declarationConfirmedAt?: true
+  declarationInviteId?: true
 }
 
 export type ParentChildLinksMaxAggregateInputType = {
@@ -89,6 +123,10 @@ export type ParentChildLinksMaxAggregateInputType = {
   linkMethod?: true
   createdBy?: true
   endedAt?: true
+  declarationVersion?: true
+  declarationText?: true
+  declarationConfirmedAt?: true
+  declarationInviteId?: true
 }
 
 export type ParentChildLinksCountAggregateInputType = {
@@ -102,6 +140,10 @@ export type ParentChildLinksCountAggregateInputType = {
   linkMethod?: true
   createdBy?: true
   endedAt?: true
+  declarationVersion?: true
+  declarationText?: true
+  declarationConfirmedAt?: true
+  declarationInviteId?: true
   _all?: true
 }
 
@@ -143,6 +185,18 @@ export type ParentChildLinksAggregateArgs<ExtArgs extends runtime.Types.Extensio
   /**
    * {@link https://www.prisma.io/docs/concepts/components/prisma-client/aggregations Aggregation Docs}
    *
+   * Select which fields to average
+  **/
+  _avg?: ParentChildLinksAvgAggregateInputType
+  /**
+   * {@link https://www.prisma.io/docs/concepts/components/prisma-client/aggregations Aggregation Docs}
+   *
+   * Select which fields to sum
+  **/
+  _sum?: ParentChildLinksSumAggregateInputType
+  /**
+   * {@link https://www.prisma.io/docs/concepts/components/prisma-client/aggregations Aggregation Docs}
+   *
    * Select which fields to find the minimum value
   **/
   _min?: ParentChildLinksMinAggregateInputType
@@ -173,6 +227,8 @@ export type ParentChildLinksGroupByArgs<ExtArgs extends runtime.Types.Extensions
   take?: number
   skip?: number
   _count?: ParentChildLinksCountAggregateInputType | true
+  _avg?: ParentChildLinksAvgAggregateInputType
+  _sum?: ParentChildLinksSumAggregateInputType
   _min?: ParentChildLinksMinAggregateInputType
   _max?: ParentChildLinksMaxAggregateInputType
 }
@@ -188,7 +244,13 @@ export type ParentChildLinksGroupByOutputType = {
   linkMethod: string | null
   createdBy: string
   endedAt: Date | null
+  declarationVersion: number | null
+  declarationText: string | null
+  declarationConfirmedAt: Date | null
+  declarationInviteId: string | null
   _count: ParentChildLinksCountAggregateOutputType | null
+  _avg: ParentChildLinksAvgAggregateOutputType | null
+  _sum: ParentChildLinksSumAggregateOutputType | null
   _min: ParentChildLinksMinAggregateOutputType | null
   _max: ParentChildLinksMaxAggregateOutputType | null
 }
@@ -222,6 +284,10 @@ export type ParentChildLinksWhereInput = {
   linkMethod?: Prisma.StringNullableFilter<"ParentChildLinks"> | string | null
   createdBy?: Prisma.StringFilter<"ParentChildLinks"> | string
   endedAt?: Prisma.DateTimeNullableFilter<"ParentChildLinks"> | Date | string | null
+  declarationVersion?: Prisma.IntNullableFilter<"ParentChildLinks"> | number | null
+  declarationText?: Prisma.StringNullableFilter<"ParentChildLinks"> | string | null
+  declarationConfirmedAt?: Prisma.DateTimeNullableFilter<"ParentChildLinks"> | Date | string | null
+  declarationInviteId?: Prisma.StringNullableFilter<"ParentChildLinks"> | string | null
 }
 
 export type ParentChildLinksOrderByWithRelationInput = {
@@ -235,6 +301,10 @@ export type ParentChildLinksOrderByWithRelationInput = {
   linkMethod?: Prisma.SortOrderInput | Prisma.SortOrder
   createdBy?: Prisma.SortOrder
   endedAt?: Prisma.SortOrderInput | Prisma.SortOrder
+  declarationVersion?: Prisma.SortOrderInput | Prisma.SortOrder
+  declarationText?: Prisma.SortOrderInput | Prisma.SortOrder
+  declarationConfirmedAt?: Prisma.SortOrderInput | Prisma.SortOrder
+  declarationInviteId?: Prisma.SortOrderInput | Prisma.SortOrder
 }
 
 export type ParentChildLinksWhereUniqueInput = Prisma.AtLeast<{
@@ -251,6 +321,10 @@ export type ParentChildLinksWhereUniqueInput = Prisma.AtLeast<{
   linkMethod?: Prisma.StringNullableFilter<"ParentChildLinks"> | string | null
   createdBy?: Prisma.StringFilter<"ParentChildLinks"> | string
   endedAt?: Prisma.DateTimeNullableFilter<"ParentChildLinks"> | Date | string | null
+  declarationVersion?: Prisma.IntNullableFilter<"ParentChildLinks"> | number | null
+  declarationText?: Prisma.StringNullableFilter<"ParentChildLinks"> | string | null
+  declarationConfirmedAt?: Prisma.DateTimeNullableFilter<"ParentChildLinks"> | Date | string | null
+  declarationInviteId?: Prisma.StringNullableFilter<"ParentChildLinks"> | string | null
 }, "id">
 
 export type ParentChildLinksOrderByWithAggregationInput = {
@@ -264,9 +338,15 @@ export type ParentChildLinksOrderByWithAggregationInput = {
   linkMethod?: Prisma.SortOrderInput | Prisma.SortOrder
   createdBy?: Prisma.SortOrder
   endedAt?: Prisma.SortOrderInput | Prisma.SortOrder
+  declarationVersion?: Prisma.SortOrderInput | Prisma.SortOrder
+  declarationText?: Prisma.SortOrderInput | Prisma.SortOrder
+  declarationConfirmedAt?: Prisma.SortOrderInput | Prisma.SortOrder
+  declarationInviteId?: Prisma.SortOrderInput | Prisma.SortOrder
   _count?: Prisma.ParentChildLinksCountOrderByAggregateInput
+  _avg?: Prisma.ParentChildLinksAvgOrderByAggregateInput
   _max?: Prisma.ParentChildLinksMaxOrderByAggregateInput
   _min?: Prisma.ParentChildLinksMinOrderByAggregateInput
+  _sum?: Prisma.ParentChildLinksSumOrderByAggregateInput
 }
 
 export type ParentChildLinksScalarWhereWithAggregatesInput = {
@@ -283,6 +363,10 @@ export type ParentChildLinksScalarWhereWithAggregatesInput = {
   linkMethod?: Prisma.StringNullableWithAggregatesFilter<"ParentChildLinks"> | string | null
   createdBy?: Prisma.StringWithAggregatesFilter<"ParentChildLinks"> | string
   endedAt?: Prisma.DateTimeNullableWithAggregatesFilter<"ParentChildLinks"> | Date | string | null
+  declarationVersion?: Prisma.IntNullableWithAggregatesFilter<"ParentChildLinks"> | number | null
+  declarationText?: Prisma.StringNullableWithAggregatesFilter<"ParentChildLinks"> | string | null
+  declarationConfirmedAt?: Prisma.DateTimeNullableWithAggregatesFilter<"ParentChildLinks"> | Date | string | null
+  declarationInviteId?: Prisma.StringNullableWithAggregatesFilter<"ParentChildLinks"> | string | null
 }
 
 export type ParentChildLinksCreateInput = {
@@ -296,6 +380,10 @@ export type ParentChildLinksCreateInput = {
   linkMethod?: string | null
   createdBy: string
   endedAt?: Date | string | null
+  declarationVersion?: number | null
+  declarationText?: string | null
+  declarationConfirmedAt?: Date | string | null
+  declarationInviteId?: string | null
 }
 
 export type ParentChildLinksUncheckedCreateInput = {
@@ -309,6 +397,10 @@ export type ParentChildLinksUncheckedCreateInput = {
   linkMethod?: string | null
   createdBy: string
   endedAt?: Date | string | null
+  declarationVersion?: number | null
+  declarationText?: string | null
+  declarationConfirmedAt?: Date | string | null
+  declarationInviteId?: string | null
 }
 
 export type ParentChildLinksUpdateInput = {
@@ -322,6 +414,10 @@ export type ParentChildLinksUpdateInput = {
   linkMethod?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdBy?: Prisma.StringFieldUpdateOperationsInput | string
   endedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  declarationVersion?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  declarationText?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  declarationConfirmedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  declarationInviteId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
 }
 
 export type ParentChildLinksUncheckedUpdateInput = {
@@ -335,6 +431,10 @@ export type ParentChildLinksUncheckedUpdateInput = {
   linkMethod?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdBy?: Prisma.StringFieldUpdateOperationsInput | string
   endedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  declarationVersion?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  declarationText?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  declarationConfirmedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  declarationInviteId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
 }
 
 export type ParentChildLinksCreateManyInput = {
@@ -348,6 +448,10 @@ export type ParentChildLinksCreateManyInput = {
   linkMethod?: string | null
   createdBy: string
   endedAt?: Date | string | null
+  declarationVersion?: number | null
+  declarationText?: string | null
+  declarationConfirmedAt?: Date | string | null
+  declarationInviteId?: string | null
 }
 
 export type ParentChildLinksUpdateManyMutationInput = {
@@ -361,6 +465,10 @@ export type ParentChildLinksUpdateManyMutationInput = {
   linkMethod?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdBy?: Prisma.StringFieldUpdateOperationsInput | string
   endedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  declarationVersion?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  declarationText?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  declarationConfirmedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  declarationInviteId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
 }
 
 export type ParentChildLinksUncheckedUpdateManyInput = {
@@ -374,6 +482,10 @@ export type ParentChildLinksUncheckedUpdateManyInput = {
   linkMethod?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdBy?: Prisma.StringFieldUpdateOperationsInput | string
   endedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  declarationVersion?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  declarationText?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  declarationConfirmedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  declarationInviteId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
 }
 
 export type ParentChildLinksCountOrderByAggregateInput = {
@@ -387,6 +499,14 @@ export type ParentChildLinksCountOrderByAggregateInput = {
   linkMethod?: Prisma.SortOrder
   createdBy?: Prisma.SortOrder
   endedAt?: Prisma.SortOrder
+  declarationVersion?: Prisma.SortOrder
+  declarationText?: Prisma.SortOrder
+  declarationConfirmedAt?: Prisma.SortOrder
+  declarationInviteId?: Prisma.SortOrder
+}
+
+export type ParentChildLinksAvgOrderByAggregateInput = {
+  declarationVersion?: Prisma.SortOrder
 }
 
 export type ParentChildLinksMaxOrderByAggregateInput = {
@@ -400,6 +520,10 @@ export type ParentChildLinksMaxOrderByAggregateInput = {
   linkMethod?: Prisma.SortOrder
   createdBy?: Prisma.SortOrder
   endedAt?: Prisma.SortOrder
+  declarationVersion?: Prisma.SortOrder
+  declarationText?: Prisma.SortOrder
+  declarationConfirmedAt?: Prisma.SortOrder
+  declarationInviteId?: Prisma.SortOrder
 }
 
 export type ParentChildLinksMinOrderByAggregateInput = {
@@ -413,6 +537,14 @@ export type ParentChildLinksMinOrderByAggregateInput = {
   linkMethod?: Prisma.SortOrder
   createdBy?: Prisma.SortOrder
   endedAt?: Prisma.SortOrder
+  declarationVersion?: Prisma.SortOrder
+  declarationText?: Prisma.SortOrder
+  declarationConfirmedAt?: Prisma.SortOrder
+  declarationInviteId?: Prisma.SortOrder
+}
+
+export type ParentChildLinksSumOrderByAggregateInput = {
+  declarationVersion?: Prisma.SortOrder
 }
 
 export type EnumParentChildLinksStatusEnumFieldUpdateOperationsInput = {
@@ -432,6 +564,10 @@ export type ParentChildLinksSelect<ExtArgs extends runtime.Types.Extensions.Inte
   linkMethod?: boolean
   createdBy?: boolean
   endedAt?: boolean
+  declarationVersion?: boolean
+  declarationText?: boolean
+  declarationConfirmedAt?: boolean
+  declarationInviteId?: boolean
 }, ExtArgs["result"]["parentChildLinks"]>
 
 export type ParentChildLinksSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
@@ -445,6 +581,10 @@ export type ParentChildLinksSelectCreateManyAndReturn<ExtArgs extends runtime.Ty
   linkMethod?: boolean
   createdBy?: boolean
   endedAt?: boolean
+  declarationVersion?: boolean
+  declarationText?: boolean
+  declarationConfirmedAt?: boolean
+  declarationInviteId?: boolean
 }, ExtArgs["result"]["parentChildLinks"]>
 
 export type ParentChildLinksSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
@@ -458,6 +598,10 @@ export type ParentChildLinksSelectUpdateManyAndReturn<ExtArgs extends runtime.Ty
   linkMethod?: boolean
   createdBy?: boolean
   endedAt?: boolean
+  declarationVersion?: boolean
+  declarationText?: boolean
+  declarationConfirmedAt?: boolean
+  declarationInviteId?: boolean
 }, ExtArgs["result"]["parentChildLinks"]>
 
 export type ParentChildLinksSelectScalar = {
@@ -471,9 +615,13 @@ export type ParentChildLinksSelectScalar = {
   linkMethod?: boolean
   createdBy?: boolean
   endedAt?: boolean
+  declarationVersion?: boolean
+  declarationText?: boolean
+  declarationConfirmedAt?: boolean
+  declarationInviteId?: boolean
 }
 
-export type ParentChildLinksOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "parentId" | "childId" | "status" | "relationship" | "linkMethod" | "createdBy" | "endedAt", ExtArgs["result"]["parentChildLinks"]>
+export type ParentChildLinksOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "parentId" | "childId" | "status" | "relationship" | "linkMethod" | "createdBy" | "endedAt" | "declarationVersion" | "declarationText" | "declarationConfirmedAt" | "declarationInviteId", ExtArgs["result"]["parentChildLinks"]>
 
 export type $ParentChildLinksPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "ParentChildLinks"
@@ -489,6 +637,10 @@ export type $ParentChildLinksPayload<ExtArgs extends runtime.Types.Extensions.In
     linkMethod: string | null
     createdBy: string
     endedAt: Date | null
+    declarationVersion: number | null
+    declarationText: string | null
+    declarationConfirmedAt: Date | null
+    declarationInviteId: string | null
   }, ExtArgs["result"]["parentChildLinks"]>
   composites: {}
 }
@@ -922,6 +1074,10 @@ export interface ParentChildLinksFieldRefs {
   readonly linkMethod: Prisma.FieldRef<"ParentChildLinks", 'String'>
   readonly createdBy: Prisma.FieldRef<"ParentChildLinks", 'String'>
   readonly endedAt: Prisma.FieldRef<"ParentChildLinks", 'DateTime'>
+  readonly declarationVersion: Prisma.FieldRef<"ParentChildLinks", 'Int'>
+  readonly declarationText: Prisma.FieldRef<"ParentChildLinks", 'String'>
+  readonly declarationConfirmedAt: Prisma.FieldRef<"ParentChildLinks", 'DateTime'>
+  readonly declarationInviteId: Prisma.FieldRef<"ParentChildLinks", 'String'>
 }
 
 

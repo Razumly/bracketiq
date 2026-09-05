@@ -84,7 +84,7 @@ describe('family join requests routes', () => {
       teamSignup: false,
     });
     requireSessionMock.mockResolvedValue({ userId: 'parent_1', isAdmin: false });
-    listActiveChildIdsForParentMock.mockResolvedValue([]);
+    listActiveChildIdsForParentMock.mockResolvedValue(['child_1']);
     acceptTeamInviteWithGuardianRulesMock.mockResolvedValue({ status: 200, body: { ok: true } });
     declineTeamInviteWithGuardianRulesMock.mockResolvedValue({ status: 200, body: { ok: true } });
     dispatchRequiredEventDocumentsMock.mockResolvedValue({
@@ -95,9 +95,28 @@ describe('family join requests routes', () => {
     });
     prismaMock.invites.findMany.mockResolvedValue([]);
     prismaMock.invites.findUnique.mockResolvedValue(null);
-    prismaMock.parentChildLinks.findFirst.mockResolvedValue(null);
+    prismaMock.parentChildLinks.findFirst.mockResolvedValue({ id: 'link_1', status: 'ACTIVE' });
+    prismaMock.userData.findUnique.mockResolvedValue({ id: 'child_1', dateOfBirth: new Date('2015-01-01') });
     prismaMock.canonicalTeams.findMany.mockResolvedValue([]);
     prismaMock.divisions.findMany.mockResolvedValue([]);
+  });
+
+  it.each(['approve', 'decline'])('denies %s when guardian authority ends before the save', async (action) => {
+    prismaMock.eventRegistrations.findFirst.mockResolvedValue({
+      id: 'reg_1', eventId: 'event_1', registrantId: 'child_1', parentId: 'parent_1',
+      registrantType: 'CHILD', status: 'STARTED', consentStatus: 'guardian_approval_required',
+    });
+    prismaMock.events.findUnique.mockResolvedValue({
+      id: 'event_1', eventType: 'EVENT', teamSignup: false, requiredTemplateIds: [], start: new Date('2026-10-01'),
+    });
+    prismaMock.sensitiveUserData.findFirst.mockResolvedValue(null);
+    prismaMock.parentChildLinks.findFirst.mockResolvedValueOnce({ id: 'link_1', status: 'ACTIVE' }).mockResolvedValueOnce(null);
+    const response = await PATCH(jsonPatch('http://localhost/api/family/join-requests/reg_1', { action }), {
+      params: Promise.resolve({ registrationId: 'reg_1' }),
+    });
+    expect(response.status).toBe(403);
+    expect(prismaMock.eventRegistrations.update).not.toHaveBeenCalled();
+    expect(prismaMock.events.update).not.toHaveBeenCalled();
   });
 
   it('lists pending guardian approval requests', async () => {

@@ -69,12 +69,14 @@ describe('POST /api/invites/[id]/accept', () => {
       update: jest.fn(),
     },
     userData: {
+      findUnique: jest.fn((args) => prismaMock.userData.findUnique(args)),
       update: jest.fn(),
       updateMany: jest.fn(),
     },
     teamStaffAssignments: {
       updateMany: jest.fn(),
     },
+    parentChildLinks: prismaMock.parentChildLinks,
   };
 
   beforeEach(() => {

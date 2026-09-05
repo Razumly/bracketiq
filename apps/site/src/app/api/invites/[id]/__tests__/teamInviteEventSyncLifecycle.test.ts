@@ -11,6 +11,8 @@ const removeCanonicalPendingInviteeMock = jest.fn();
 const syncTeamChatInTxMock = jest.fn();
 
 const txMock = {
+  userData: { findUnique: jest.fn() },
+  parentChildLinks: { findFirst: jest.fn() },
   invites: {
     delete: jest.fn(),
     update: jest.fn(),
@@ -82,6 +84,8 @@ describe('team invite event-team sync lifecycle routes', () => {
       dateOfBirth: new Date('2000-01-01T00:00:00.000Z'),
     });
     prismaMock.parentChildLinks.findFirst.mockResolvedValue(null);
+    txMock.userData.findUnique.mockResolvedValue({ dateOfBirth: new Date('2000-01-01T00:00:00.000Z') });
+    txMock.parentChildLinks.findFirst.mockResolvedValue(null);
     loadCanonicalTeamByIdMock.mockResolvedValue({
       id: 'team_1',
       playerIds: ['manager_1'],

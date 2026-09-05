@@ -7,6 +7,7 @@ import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.RegistrationProgressDraft
 import com.razumly.mvp.core.data.dataTypes.Invite
+import com.razumly.mvp.core.data.dataTypes.FamilyCacheEntry
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
@@ -14,6 +15,7 @@ import com.razumly.mvp.core.data.dataTypes.daos.ChatGroupDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventRegistrationDao
 import com.razumly.mvp.core.data.dataTypes.daos.FieldDao
+import com.razumly.mvp.core.data.dataTypes.daos.FamilyCacheDao
 import com.razumly.mvp.core.data.dataTypes.daos.InviteDao
 import com.razumly.mvp.core.data.dataTypes.daos.MatchDao
 import com.razumly.mvp.core.data.dataTypes.daos.MessageDao
@@ -130,6 +132,13 @@ private class UserRepositoryAuth_FakeDatabaseService(
     override val getUserDataDao: UserDataDao,
     private val inviteDao: InviteDao? = null,
 ) : DatabaseService {
+    override val getFamilyCacheDao = object : FamilyCacheDao {
+        private val entries = MutableStateFlow<Map<String, FamilyCacheEntry>>(emptyMap())
+        override suspend fun upsert(entry: FamilyCacheEntry) { entries.value = entries.value + (entry.parentId to entry) }
+        override fun observe(parentId: String): Flow<FamilyCacheEntry?> = entries.map { it[parentId] }
+        override suspend fun get(parentId: String): FamilyCacheEntry? = entries.value[parentId]
+        override suspend fun clear() { entries.value = emptyMap() }
+    }
     override val getMatchDao: MatchDao get() = error("unused")
     override val getTeamDao: TeamDao get() = error("unused")
     override val getFieldDao: FieldDao get() = error("unused")
@@ -1372,9 +1381,11 @@ class UserRepositoryAuthTest {
         val api = MvpApiClient(http, "http://example.test", tokenStore)
         val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
 
+        repo.getCurrentAccount().getOrThrow()
         val children = repo.listChildren().getOrThrow()
 
         assertEquals(1, children.size)
+        assertEquals(children, repo.observeChildren().first())
         assertEquals("child_1", children.first().userId)
         assertEquals("Kid", children.first().firstName)
         assertEquals("active", children.first().linkStatus)

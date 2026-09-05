@@ -4213,6 +4213,10 @@ model ParentChildLinks {
   linkMethod   String?
   createdBy    String
   endedAt      DateTime?
+  declarationVersion Int?
+  declarationText String?
+  declarationConfirmedAt DateTime?
+  declarationInviteId String?
 }
 
 model EventRegistrations {

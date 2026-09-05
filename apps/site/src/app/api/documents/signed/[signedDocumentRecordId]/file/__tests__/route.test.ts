@@ -4,6 +4,7 @@ import { Readable } from 'stream';
 import { NextRequest } from 'next/server';
 
 const prismaMock = {
+  userData: { findUnique: jest.fn() },
   signedDocuments: { findUnique: jest.fn() },
   documentSubjects: { findUnique: jest.fn() },
   parentChildLinks: { findFirst: jest.fn() },
@@ -156,6 +157,7 @@ describe('GET /api/documents/signed/[signedDocumentRecordId]/file', () => {
       organizationId: 'org_1',
     });
     prismaMock.parentChildLinks.findFirst.mockResolvedValue({ id: 'link_1' });
+    prismaMock.userData.findUnique.mockResolvedValue({ dateOfBirth: new Date('2015-01-01') });
 
     const response = await GET(request(), routeParams);
 
@@ -166,7 +168,6 @@ describe('GET /api/documents/signed/[signedDocumentRecordId]/file', () => {
         childId: 'child_1',
         status: 'ACTIVE',
       },
-      select: { id: true },
     });
   });
 

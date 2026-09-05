@@ -24,7 +24,7 @@ const toIso = (value?: Date | string | null): string | null => {
 export async function GET(req: NextRequest) {
   const session = await requireSession(req);
 
-  const [requests, activeChildIds] = await Promise.all([
+  const [allRequests, activeChildIds] = await Promise.all([
     prisma.eventRegistrations.findMany({
       where: {
         parentId: session.userId,
@@ -51,6 +51,7 @@ export async function GET(req: NextRequest) {
     }),
     listActiveChildIdsForParent(prisma, session.userId),
   ]);
+  const requests = allRequests.filter((request) => activeChildIds.includes(request.registrantId));
 
   const teamInvites = activeChildIds.length
     ? await prisma.invites.findMany({

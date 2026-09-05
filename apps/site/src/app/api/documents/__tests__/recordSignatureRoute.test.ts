@@ -3,6 +3,7 @@
 import { NextRequest } from 'next/server';
 
 const prismaMock = {
+  userData: { findUnique: jest.fn() },
   sensitiveUserData: {
     findFirst: jest.fn(),
   },
@@ -88,6 +89,7 @@ describe('POST /api/documents/record-signature', () => {
     });
     prismaMock.canonicalTeams.findUnique.mockResolvedValue(null);
     prismaMock.parentChildLinks.findFirst.mockResolvedValue({ id: 'link_1' });
+    prismaMock.userData.findUnique.mockResolvedValue({ dateOfBirth: new Date('2015-01-01') });
     prismaMock.signedDocuments.findFirst.mockResolvedValue({
       id: 'signed_1',
       templateId: 'template_1',

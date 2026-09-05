@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma';
+import { listGuardianChildIds } from '@/server/guardianAuthority';
 import {
   buildChatTermsRequiredPayload,
   hasAcceptedCurrentChatTerms,
@@ -125,17 +126,10 @@ export const getChatTeamIdsForUser = async (
   }
 
   try {
-    const childLinks = client?.parentChildLinks?.findMany
-      ? await client.parentChildLinks.findMany({
-        where: { parentId: normalizedUserId, status: 'ACTIVE' },
-        select: { childId: true },
-      })
-      : [];
+    const childIds = await listGuardianChildIds(client, normalizedUserId);
     const relatedUserIds = Array.from(new Set([
       normalizedUserId,
-      ...childLinks
-        .map((link: { childId?: unknown }) => String(link.childId ?? '').trim())
-        .filter(Boolean),
+      ...childIds,
     ]));
     const teamIdsByUserId = await getCanonicalTeamIdsByUserIds(relatedUserIds, client);
     return Array.from(new Set(

@@ -1,6 +1,7 @@
 import type { Prisma } from '@/generated/prisma/client';
 import { isPrivateToOrganizationsVisibility, normalizeAccountVisibility } from '@/lib/accountVisibility';
 import { formatNameParts, normalizeOptionalName } from '@/lib/nameCase';
+import { hasGuardianAge } from '@/server/guardianAuthority';
 
 export const publicUserSelect = {
   id: true,
@@ -136,6 +137,7 @@ const resolveDisplayName = (user: Pick<PublicUser, 'firstName' | 'lastName' | 'u
 
 export const createVisibilityContext = async (
   client: {
+    userData?: { findMany: (args: any) => Promise<Array<{ id: string; dateOfBirth?: Date | null }>> };
     parentChildLinks: { findMany: (args: any) => Promise<Array<{ childId: string }>> };
     staffMembers: { findMany: (args: any) => Promise<Array<{ organizationId?: string; userId?: string | null }>> };
     teams: {
@@ -291,7 +293,10 @@ export const createVisibilityContext = async (
     },
     select: { childId: true },
   });
-  const activeChildIds = new Set(normalizeIdList(childLinks.map((row) => row.childId)));
+  const childProfiles = childLinks.length && client.userData
+    ? await client.userData.findMany({ where: { id: { in: childLinks.map((row) => row.childId) } }, select: { id: true, dateOfBirth: true } })
+    : [];
+  const activeChildIds = new Set(childProfiles.filter((child) => hasGuardianAge(child.dateOfBirth, now)).map((child) => child.id));
 
   const [ownedOrganizations, staffMemberships] = await Promise.all([
     client.organizations.findMany({

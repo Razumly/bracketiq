@@ -14,6 +14,7 @@ import { buildAuthSessionPayload } from '@/server/authSessionPayload';
 const loginSchema = z.object({
   email: z.string().trim().min(1),
   password: z.string().min(8),
+  returnTo: z.string().max(8192).optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -67,6 +68,7 @@ export async function POST(req: NextRequest) {
         userId: authUser.id,
         email: authUser.email,
         origin: getRequestOrigin(req),
+        returnTo: parsed.data.returnTo,
       });
       verificationEmailSent = true;
     } catch (error) {

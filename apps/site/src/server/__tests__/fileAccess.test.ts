@@ -8,6 +8,7 @@ jest.mock('@/lib/prisma', () => ({
     signedDocuments: { findFirst: jest.fn() },
     documentSubjects: { findUnique: jest.fn() },
     parentChildLinks: { findFirst: jest.fn() },
+    userData: { findUnique: jest.fn() },
     organizations: { findUnique: jest.fn() },
   },
 }));
@@ -30,6 +31,7 @@ const prismaMock = jest.requireMock('@/lib/prisma').prisma as {
   signedDocuments: { findFirst: jest.Mock };
   documentSubjects: { findUnique: jest.Mock };
   parentChildLinks: { findFirst: jest.Mock };
+  userData: { findUnique: jest.Mock };
   organizations: { findUnique: jest.Mock };
 };
 const requireSessionMock = jest.requireMock('@/lib/permissions').requireSession as jest.Mock;
@@ -46,6 +48,7 @@ describe('assertFileReadAccess', () => {
     jest.clearAllMocks();
     prismaMock.billPaymentProofs.findFirst.mockResolvedValue(null);
     prismaMock.signedDocuments.findFirst.mockResolvedValue(null);
+    prismaMock.userData.findUnique.mockResolvedValue(null);
   });
   it('keeps normal public images readable without a session', async () => {
     await expect(assertFileReadAccess(fileRequest('public_file'), 'public_file')).resolves.toBeUndefined();

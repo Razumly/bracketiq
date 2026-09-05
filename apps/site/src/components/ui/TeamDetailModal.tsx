@@ -1619,11 +1619,11 @@ export default function TeamDetailModal({
                                             {!isPending && player.$id === currentTeam.captainId && (
                                                 <Badge color="blue" variant="light" size="xs">Captain</Badge>
                                             )}
-                                            {isPending && (
-                                                <Badge color="yellow" variant="light" size="xs">Awaiting player</Badge>
+                                            {canManageTeam && isPending && (
+                                                <Badge color="yellow" variant="light" size="xs">{player.isMinor ? 'Awaiting guardian' : 'Awaiting player'}</Badge>
                                             )}
-                                            {isPending && managedInvite ? (
-                                                <Badge color="violet" variant="light" size="xs">Managed · pending claim</Badge>
+                                            {canManageTeam && player.isManagedPlayer ? (
+                                                <Badge color="violet" variant="light" size="xs">Managed profile</Badge>
                                             ) : null}
                                             {canManageTeam && compliance ? (
                                                 <>

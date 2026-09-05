@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/permissions';
 import { getCanonicalTeamIdsByUserIds } from '@/server/teams/teamMembership';
+import { listGuardianChildIds } from '@/server/guardianAuthority';
 
 export const dynamic = 'force-dynamic';
 
@@ -47,15 +48,7 @@ export async function GET(req: NextRequest) {
         id: true,
       },
     }),
-    prisma.parentChildLinks.findMany({
-      where: {
-        parentId: session.userId,
-        status: 'ACTIVE',
-      },
-      select: {
-        childId: true,
-      },
-    }),
+    listGuardianChildIds(prisma, session.userId),
   ]);
 
   const teamIdsByUserId = await getCanonicalTeamIdsByUserIds(
@@ -65,7 +58,7 @@ export async function GET(req: NextRequest) {
   const teamIds = profile?.id
     ? (teamIdsByUserId.get(profile.id) ?? [])
     : [];
-  const childIds = uniqueIds(linkedChildren.map((link) => normalizeId(link.childId)));
+  const childIds = linkedChildren;
 
   const teamsDelegate = getTeamsDelegate(prisma);
   const slotTeamRows = teamIds.length && teamsDelegate?.findMany
@@ -82,7 +75,6 @@ export async function GET(req: NextRequest) {
     {
       OR: [
         { registrantId: session.userId },
-        { parentId: session.userId },
         ...(childIds.length ? [{ registrantId: { in: childIds } }] : []),
         ...(relevantTeamIds.length ? [{ registrantType: 'TEAM', registrantId: { in: relevantTeamIds } }] : []),
       ],

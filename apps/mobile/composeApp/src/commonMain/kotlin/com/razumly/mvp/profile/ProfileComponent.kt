@@ -881,6 +881,11 @@ class DefaultProfileComponent(
     )
 
     init {
+        scope.launch {
+            userRepository.observeChildren().collect { children ->
+                _childrenState.value = _childrenState.value.copy(children = children.map { it.toProfileChild() })
+            }
+        }
         lifecycle.doOnDestroy {
             checkoutLoadingOperations.finishAllLoadingOperations()
             paymentPlansRefreshes.cancel()
@@ -2048,10 +2053,9 @@ class DefaultProfileComponent(
             )
 
             userRepository.listChildren()
-                .onSuccess { children ->
+                .onSuccess {
                     _childrenState.value = _childrenState.value.copy(
                         isLoading = false,
-                        children = children.map { it.toProfileChild() },
                         error = null,
                     )
                 }

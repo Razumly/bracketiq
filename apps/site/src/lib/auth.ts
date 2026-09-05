@@ -304,6 +304,7 @@ export const authService = {
     userName: string,
     dateOfBirth: string,
     onboardingIntent?: OnboardingIntent,
+    returnTo?: string,
   ): Promise<AuthSessionResult> {
     const normalizedFirstName = normalizeOptionalName(firstName) ?? firstName.trim();
     const normalizedLastName = normalizeOptionalName(lastName) ?? lastName.trim();
@@ -318,6 +319,7 @@ export const authService = {
         userName,
         dateOfBirth,
         onboardingIntent,
+        returnTo,
       }),
     });
     if (isVerificationRequiredPayload(data) && (!data.user || !data.session)) {
@@ -326,10 +328,10 @@ export const authService = {
     return buildAuthSessionResult(data as AuthPayload);
   },
 
-  async login(email: string, password: string): Promise<AuthSessionResult> {
+  async login(email: string, password: string, returnTo?: string): Promise<AuthSessionResult> {
     const data = await apiFetch<AuthPayload | VerificationRequiredPayload | MfaRequiredPayload>('/api/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ email, password, clientType: 'web' }),
+      body: JSON.stringify({ email, password, clientType: 'web', returnTo }),
     });
     if (isMfaRequiredPayload(data)) {
       throw new ApiError(data.error || 'Authenticator verification required', 200, data);
@@ -428,10 +430,10 @@ export const authService = {
     });
   },
 
-  async resendVerification(email: string): Promise<void> {
+  async resendVerification(email: string, returnTo?: string): Promise<void> {
     await apiFetch('/api/auth/verify/resend', {
       method: 'POST',
-      body: JSON.stringify({ email }),
+      body: JSON.stringify({ email, returnTo }),
     });
   },
 

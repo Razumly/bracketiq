@@ -6,6 +6,7 @@ import { isUserNotificationChannelEnabled } from '@/server/notificationPreferenc
 import { buildManagedPlayerClaimUrl, buildTeamInviteShareUrl } from '@/server/teamInviteLinks';
 
 interface InviteRecord {
+  isMinor?: boolean | null;
   id: string;
   email?: string | null;
   userId?: string | null;
@@ -83,6 +84,7 @@ export const sendInviteEmails = async (invites: InviteRecord[], baseUrl: string)
         baseUrl,
         email: hasValidEmail ? email : (invite.email?.trim() ?? ''),
         inviteType: invite.type,
+        isMinor: invite.isMinor === true,
         firstName: invite.firstName,
         lastName: invite.lastName,
         eventId: invite.eventId,

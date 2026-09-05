@@ -15,12 +15,14 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import com.razumly.mvp.core.data.repositories.IUserRepository
@@ -33,10 +35,13 @@ fun ManagedPlayerClaimScreen(
     expiresAt: String?,
     signature: String?,
     onClaimed: () -> Unit,
+    onGuardianAccepted: () -> Unit = onClaimed,
 ) {
     var preview by remember(inviteId, version, expiresAt, signature) { mutableStateOf<com.razumly.mvp.core.data.repositories.ManagedPlayerClaimPreview?>(null) }
     var dateOfBirth by remember(inviteId) { mutableStateOf("") }
     var confirmed by remember(inviteId) { mutableStateOf(false) }
+    var guardianDeclared by remember(inviteId) { mutableStateOf(false) }
+    var accepted by remember(inviteId) { mutableStateOf(false) }
     var needsBirthDate by remember(inviteId) { mutableStateOf(false) }
     var loading by remember(inviteId, version, expiresAt, signature) { mutableStateOf(true) }
     var saving by remember(inviteId) { mutableStateOf(false) }
@@ -47,7 +52,7 @@ fun ManagedPlayerClaimScreen(
         loading = true
         error = null
         repository.previewManagedPlayerClaim(inviteId, version, expiresAt, signature)
-            .onSuccess { value -> preview = value }
+            .onSuccess { value -> preview = value; needsBirthDate = value.birthdateRequired }
             .onFailure { throwable -> error = throwable.message ?: "This claim link is unavailable." }
         loading = false
     }
@@ -59,17 +64,36 @@ fun ManagedPlayerClaimScreen(
             .padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text("Claim Player profile", style = MaterialTheme.typography.headlineSmall)
+        if (accepted) {
+            Text("Invitation accepted", style = MaterialTheme.typography.headlineSmall)
+            Text("${preview?.displayName} has joined ${preview?.teamName ?: "the team"}. Their Player profile remains separate from yours.")
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            Button(onClick = onGuardianAccepted) { Text("Open profile") }
+            return@Column
+        }
+        Text(if (preview?.isMinor == true) "Accept for your child" else "Claim Player profile", style = MaterialTheme.typography.headlineSmall)
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         when {
             loading -> CircularProgressIndicator()
-            error != null -> Text(error.orEmpty(), color = MaterialTheme.colorScheme.error)
             preview != null -> {
                 val currentPreview = preview ?: return@Column
                 Text(
-                    "${currentPreview.displayName} is a managed Player profile. Claim it to keep the roster history with your account.",
+                    if (currentPreview.isMinor) "Review ${currentPreview.displayName}’s invitation to ${currentPreview.teamName ?: "the team"}. This child keeps a separate Player profile."
+                    else "${currentPreview.displayName} is a managed Player profile. Claim it to keep the roster history with your account.",
                 )
+                currentPreview.dateOfBirth?.let { Text("Date of birth: $it") }
+                if (currentPreview.guardianContactRequired) {
+                    Text("Ask the team manager to add a guardian contact and issue a new invitation.")
+                    return@Column
+                }
+                if (currentPreview.guardianSetupRequired) {
+                    ConfirmationRow(guardianDeclared, currentPreview.guardianDeclaration.orEmpty()) { guardianDeclared = it }
+                    Text("We record your declaration. Email verification and this declaration do not independently verify guardianship.", style = MaterialTheme.typography.bodySmall)
+                }
                 Text(
-                    if (currentPreview.hasAttachedEmail) {
+                    if (currentPreview.isMinor && !currentPreview.guardianSetupRequired) {
+                        "Your active guardian relationship is ready. Review and accept the invitation below."
+                    } else if (currentPreview.hasAttachedEmail) {
                         "Your verified account email must match the attached ${if (currentPreview.isMinor) "guardian" else "Player"} email."
                     } else {
                         "This signed link proves the invitation. You must still confirm the profile belongs to you."
@@ -84,9 +108,9 @@ fun ManagedPlayerClaimScreen(
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
-                RowConfirmation(
+                ConfirmationRow(
                     checked = confirmed,
-                    isMinor = currentPreview.isMinor,
+                    label = if (currentPreview.isMinor) "I accept this team invitation for ${currentPreview.displayName}." else "I confirm that this profile belongs to me.",
                     onCheckedChange = { confirmed = it },
                 )
                 Button(
@@ -103,20 +127,33 @@ fun ManagedPlayerClaimScreen(
                                 version = version,
                                 expiresAt = expiresAt,
                                 signature = signature,
+                                guardianDeclaration = guardianDeclared.takeIf { currentPreview.isMinor },
+                                acceptTeamInvitation = true.takeIf { currentPreview.isMinor },
                             ).onSuccess { result ->
                                 when (result.status) {
+                                    "GUARDIAN_ACCEPTED" -> {
+                                        accepted = true
+                                        result.refreshError?.let { error = "Invitation accepted. Family data could not refresh: $it" }
+                                    }
                                     "BIRTHDATE_REQUIRED" -> needsBirthDate = true
-                                    "GUARDIAN_REQUIRED" -> error = "A guardian must complete this claim."
+                                    "GUARDIAN_REQUIRED" -> {
+                                        confirmed = false
+                                        guardianDeclared = false
+                                        preview = null
+                                        repository.previewManagedPlayerClaim(inviteId, version, expiresAt, signature)
+                                            .onSuccess { value -> preview = value; needsBirthDate = value.birthdateRequired }
+                                            .onFailure { throwable -> error = throwable.message ?: "The guardian invitation could not load." }
+                                    }
                                     else -> onClaimed()
                                 }
                             }.onFailure { throwable -> error = throwable.message ?: "The profile could not be claimed." }
                             saving = false
                         }
                     },
-                    enabled = confirmed && !saving && (!needsBirthDate || dateOfBirth.isNotBlank()),
+                    enabled = confirmed && !saving && (!needsBirthDate || dateOfBirth.isNotBlank()) && (!currentPreview.guardianSetupRequired || guardianDeclared),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text(if (saving) "Claiming…" else "Claim profile")
+                    Text(if (saving) "Saving…" else if (currentPreview.isMinor) "Accept team invitation" else "Claim profile")
                 }
             }
         }
@@ -124,14 +161,14 @@ fun ManagedPlayerClaimScreen(
 }
 
 @Composable
-private fun RowConfirmation(
+private fun ConfirmationRow(
     checked: Boolean,
-    isMinor: Boolean,
+    label: String,
     onCheckedChange: (Boolean) -> Unit,
 ) {
-    androidx.compose.foundation.layout.Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Checkbox(checked = checked, onCheckedChange = onCheckedChange)
-        Text(if (isMinor) "I confirm that I am authorized to act for this Player." else "I confirm that this profile belongs to me.")
+    androidx.compose.foundation.layout.Row(modifier = Modifier.toggleable(value = checked, role = Role.Checkbox, onValueChange = onCheckedChange), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Checkbox(checked = checked, onCheckedChange = null)
+        Text(label)
     }
     Spacer(Modifier.height(1.dp))
 }

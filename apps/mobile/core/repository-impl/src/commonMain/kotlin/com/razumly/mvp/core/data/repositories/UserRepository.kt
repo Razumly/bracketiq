@@ -68,6 +68,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.delay
+import kotlinx.serialization.encodeToString
+import com.razumly.mvp.core.data.dataTypes.FamilyCacheEntry
 import kotlinx.coroutines.launch
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
@@ -300,6 +307,8 @@ interface IUserRepository : IMVPRepository {
         version: String? = null,
         expiresAt: String? = null,
         signature: String? = null,
+        guardianDeclaration: Boolean? = null,
+        acceptTeamInvitation: Boolean? = null,
     ): Result<ManagedPlayerClaimResult> = Result.failure(NotImplementedError("Managed player claims are not implemented."))
     suspend fun previewManagedPlayerClaim(
         inviteId: String,
@@ -309,6 +318,7 @@ interface IUserRepository : IMVPRepository {
     ): Result<ManagedPlayerClaimPreview> = Result.failure(NotImplementedError("Managed player claim previews are not implemented."))
     suspend fun isCurrentUserChild(minorAgeThreshold: Int = 18): Result<Boolean>
     suspend fun listChildren(): Result<List<FamilyChild>>
+    fun observeChildren(): Flow<List<FamilyChild>> = flowOf(emptyList())
     suspend fun listPendingChildJoinRequests(): Result<List<FamilyJoinRequest>>
     suspend fun resolveChildJoinRequest(
         registrationId: String,
@@ -405,6 +415,7 @@ data class ManagedPlayerClaimResult(
     val primaryProfileId: String? = null,
     val sourceProfileId: String? = null,
     val mergeId: String? = null,
+    val refreshError: String? = null,
 )
 
 data class ManagedPlayerClaimPreview(
@@ -416,6 +427,11 @@ data class ManagedPlayerClaimPreview(
     val isMinor: Boolean,
     val teamId: String?,
     val teamName: String?,
+    val guardianSetupRequired: Boolean = false,
+    val guardianContactRequired: Boolean = false,
+    val guardianDeclaration: String? = null,
+    val dateOfBirth: String? = null,
+    val birthdateRequired: Boolean = false,
 )
 
 class UserRepository(
@@ -1214,6 +1230,8 @@ class UserRepository(
         version: String?,
         expiresAt: String?,
         signature: String?,
+        guardianDeclaration: Boolean?,
+        acceptTeamInvitation: Boolean?,
     ): Result<ManagedPlayerClaimResult> = runCatching {
         val normalizedProfileId = profileId.trim().takeIf(String::isNotBlank)
             ?: error("Profile id is required")
@@ -1228,9 +1246,15 @@ class UserRepository(
                 version = version,
                 expiresAt = expiresAt,
                 signature = signature,
+                guardianDeclaration = guardianDeclaration,
+                acceptTeamInvitation = acceptTeamInvitation,
             ),
         )
         if (!response.ok) error(response.error ?: "Profile claim failed")
+        val refreshError = if (response.status == "GUARDIAN_ACCEPTED") runCatching {
+            deleteCachedInvite(normalizedInviteId)
+            listChildren().getOrThrow()
+        }.exceptionOrNull()?.message else null
         if (response.status == "CLAIMED" || response.status == "MERGED") {
             response.primaryProfileId?.let { primaryId ->
                 databaseService.getUserDataDao.getUserDataById(primaryId)?.let { current ->
@@ -1255,6 +1279,7 @@ class UserRepository(
             primaryProfileId = response.primaryProfileId,
             sourceProfileId = response.sourceProfileId,
             mergeId = response.mergeId,
+            refreshError = refreshError,
         )
     }
 
@@ -1285,6 +1310,11 @@ class UserRepository(
             isMinor = invite.isMinor,
             teamId = invite.teamId,
             teamName = response.team?.name,
+            guardianSetupRequired = invite.guardianSetupRequired,
+            guardianContactRequired = invite.guardianContactRequired,
+            guardianDeclaration = invite.guardianDeclaration,
+            dateOfBirth = profile.dateOfBirth,
+            birthdateRequired = invite.birthdateRequired,
         )
     }
 
@@ -1301,12 +1331,37 @@ class UserRepository(
     }
 
     override suspend fun listChildren(): Result<List<FamilyChild>> = runCatching {
+        val parentId = currentUser.value.getOrThrow().id
         val response = api.get<FamilyChildrenResponseDto>(path = "api/family/children")
         response.error?.takeIf(String::isNotBlank)?.let { error(it) }
-        response.children.mapIndexed { index, child ->
+        response.children.forEachIndexed { index, child ->
             child.toFamilyChildOrNull()
                 ?: error("Family children response row ${index + 1} is missing canonical userId.")
         }
+        check(currentUser.value.getOrNull()?.id == parentId) { "Account changed during family refresh" }
+        databaseService.getFamilyCacheDao.upsert(FamilyCacheEntry(parentId, jsonMVP.encodeToString(response)))
+        cachedChildren(databaseService.getFamilyCacheDao.get(parentId))
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    override fun observeChildren(): Flow<List<FamilyChild>> = currentUser.flatMapLatest { user ->
+        val parentId = user.getOrNull()?.id
+        if (parentId == null) flowOf(emptyList())
+        else combine(databaseService.getFamilyCacheDao.observe(parentId), flow {
+            while (true) {
+                emit(Unit)
+                val dayMillis = 86_400_000L
+                delay(dayMillis - Clock.System.now().toEpochMilliseconds() % dayMillis)
+            }
+        }) { entry, _ -> cachedChildren(entry) }
+    }
+
+    private fun cachedChildren(entry: FamilyCacheEntry?): List<FamilyChild> {
+        if (entry == null) return emptyList()
+        return jsonMVP.decodeFromString<FamilyChildrenResponseDto>(entry.childrenJson).children
+            .filter { child -> child.linkStatus == "active" && child.dateOfBirth != null &&
+                isMinorDateOfBirth(child.dateOfBirth, 18) }
+            .mapNotNull { it.toFamilyChildOrNull() }
     }
 
     override suspend fun listPendingChildJoinRequests(): Result<List<FamilyJoinRequest>> = runCatching {
