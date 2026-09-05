@@ -320,7 +320,7 @@ class EventRepositoryRoomPersistenceTest {
     fun given_all_five_priorities_when_saved_reloaded_and_read_offline_then_site_and_room_preserve_the_officiating_plan() =
         kotlinx.coroutines.test.runTest(timeout = kotlin.time.Duration.parse("5m")) {
             val fixture = eventRepositoryRoomPersistenceTournamentFixture()
-            val site = staffingContractSiteDirectory()
+            val site = clientContractSiteDirectory()
             val sharedDraft = jsonMVP.decodeFromString<EventEditorDraftDto>(
                 File(site.parentFile.parentFile, "test-fixtures/event-editor/staffing-priority-draft.json").readText(),
             )
@@ -3721,23 +3721,12 @@ class EventRepositoryRoomPersistenceTest {
         }
 }
 
-private fun reflowClientToSiteResult(request: ScheduleReflowRequestDto): String {
-    val site = System.getenv("MVP_SITE_DIR")?.takeIf(String::isNotBlank)?.let(::File)
-        ?: generateSequence(File(System.getProperty("user.dir"))) { it.parentFile }
-            .map { File(it, "apps/site") }.firstOrNull { File(it, "package.json").isFile }
-        ?: error("Cannot find apps/site for the client-to-site Reflow contract check.")
-    val process = ProcessBuilder("node", "--import", "tsx", "scripts/test-schedule-reflow-contract.ts")
-        .directory(site).redirectErrorStream(true).start()
-    val outputReader = java.util.concurrent.CompletableFuture.supplyAsync { process.inputStream.bufferedReader().readText() }
-    process.outputStream.bufferedWriter().use { it.write(jsonMVP.encodeToString(request)) }
-    if (!process.waitFor(30, TimeUnit.SECONDS)) {
-        process.destroyForcibly()
-        error("The site Reflow parser did not finish.")
-    }
-    val output = outputReader.get(5, TimeUnit.SECONDS)
-    check(process.exitValue() == 0) { output }
-    return output
-}
+private fun reflowClientToSiteResult(request: ScheduleReflowRequestDto): String =
+    runSiteContract(
+        site = clientContractSiteDirectory(),
+        script = "scripts/test-schedule-reflow-contract.ts",
+        input = jsonMVP.encodeToString(request),
+    )
 
 private fun eventRepositoryRoomPersistenceRepository(
     database: DatabaseService,
@@ -4363,22 +4352,30 @@ private fun roomMaintenanceAcceptedResult(
     )
 }
 
-private fun staffingContractSiteDirectory(): File =
+private fun clientContractSiteDirectory(): File =
     System.getenv("MVP_SITE_DIR")?.takeIf(String::isNotBlank)?.let(::File)
-        ?: generateSequence(File(System.getProperty("user.dir"))) { it.parentFile }
+        ?: generateSequence(File(requireNotNull(System.getProperty("user.dir")))) { it.parentFile }
             .map { File(it, "apps/site") }.firstOrNull { File(it, "package.json").isFile }
         ?: error("Cannot find apps/site for the Staffing Priority contract check.")
 
-private fun staffingClientToSiteResult(site: File, caseIndex: Int, command: String): JsonObject {
-    val process = ProcessBuilder("node", "--import", "tsx", "scripts/test-staffing-priority-contract.ts")
+private fun staffingClientToSiteResult(site: File, caseIndex: Int, command: String): JsonObject =
+    jsonMVP.parseToJsonElement(runSiteContract(
+        site = site,
+        script = "scripts/test-staffing-priority-contract.ts",
+        input = "{\"caseIndex\":$caseIndex,\"command\":$command}",
+    )).jsonObject
+
+private fun runSiteContract(site: File, script: String, input: String): String {
+    val process = ProcessBuilder("node", "--import", "tsx", script)
         .directory(site).redirectErrorStream(true).start()
     val outputReader = java.util.concurrent.CompletableFuture.supplyAsync { process.inputStream.bufferedReader().readText() }
-    process.outputStream.bufferedWriter().use { it.write("{\"caseIndex\":$caseIndex,\"command\":$command}") }
-    if (!process.waitFor(30, TimeUnit.SECONDS)) {
-        process.destroyForcibly()
-        error("The site Staffing Priority check did not finish.")
+    try {
+        process.outputStream.bufferedWriter().use { it.write(input) }
+        check(process.waitFor(30, TimeUnit.SECONDS)) { "The site contract check did not finish: $script" }
+        val output = outputReader.get(5, TimeUnit.SECONDS)
+        check(process.exitValue() == 0) { output }
+        return output
+    } finally {
+        if (process.isAlive) process.destroyForcibly()
     }
-    val output = outputReader.get(5, TimeUnit.SECONDS)
-    check(process.exitValue() == 0) { output }
-    return jsonMVP.parseToJsonElement(output).jsonObject
 }

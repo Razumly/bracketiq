@@ -12,8 +12,8 @@ Hosts must retain the exact Staffing Priority when they save an Event. They must
 - [x] (2026-09-05) Trace mobile state, DTOs, Room, proposal review, and the site response contract.
 - [x] (2026-09-05) Remove mobile scheduling-mode types, conversions, and fallback parsing. Generate Room schema 106.
 - [x] (2026-09-05) Add one shared proposal coverage summary. Expose accessible radio selection.
-- [ ] Verify all five priorities through serialization, Room, the site parser and scheduler, and review interactions.
-- [ ] Run the affected complete suites. Run independent Standards and Spec reviews. Commit the work.
+- [x] (2026-09-05) Verify all five priorities through serialization, Room, the site parser and scheduler, and both review interactions.
+- [x] (2026-09-05) Run the complete mobile suites. Fix the remaining graph validator dependency. Rerun the affected checks. Run the site suite and focused contract checks. Complete independent Standards and Spec reviews. Commit the work.
 
 ## Surprises & Discoveries
 
@@ -77,6 +77,25 @@ The site test fixture must set a fixed end. The scheduler model defaults to an o
 
 ## Outcomes & Retrospective
 
-Implementation is in progress. No acceptance criterion is marked complete without executed evidence.
+Issue #44 is implemented. Mobile has one canonical Staffing Priority. Both review paths explain required and optional coverage. The selector exposes one radio row for each priority. Room schema 106 removes only the obsolete Event column. No server response field was removed. No scheduler was added.
+
+The complete mobile run covered 104 network tests, 148 repository tests, and 1,643 application tests. It found 14 failures caused by the remaining required graph key. After that fix, all 145 runnable repository tests passed, with three skipped. All 96 affected application tests passed. This includes all prior application failures and both five-priority review tests. The 104 network tests passed. The other application tests passed in the complete run; ten integration tests were skipped because no backend was configured.
+
+The 20-case test sends a mobile-serialized save command to the real site parser and scheduler. It compares the site editor output, assignments, outcomes, and warnings. It saves the returned draft through the repository. It reloads the Event. It then reads from Room while the transport rejects all requests. Every priority and all four combinations of Team duties and named positions passed.
+
+Site typechecking and ESLint for the new script passed. Five site contract and scheduler suites passed all 75 tests. The broad site run did not pass. It was stopped after at least 30 failing suites in unchanged code. Failures included sandbox process-launch failures, timeouts, and old UI and scheduler expectations. This task does not claim a green full site suite. The focused site checks ran outside the sandbox and passed in 4.913 seconds.
+
+Standards review found no documented breaches. Its one Duplicated Code concern was resolved by sharing the site test-process helper. The follow-up review found no remaining concern. Spec review found no remaining gaps after the graph key became optional.
+
+All new product UI code is shared Compose code. Android JVM semantics tests passed. Native TalkBack and VoiceOver device checks were not available in this Windows workspace. No deployment or production state change was made.
 
 Plan created on 2026-09-05 after the contract trace. The response compatibility decision limits the cutover to mobile while retaining the supported site wire shape.
+
+
+## Final Verification Commands
+
+From `apps/mobile`, the complete run used `.\gradlew.bat :core:network:testDebugUnitTest :core:repository-impl:testDebugUnitTest :composeApp:testDebugUnitTest :core:database:copyRoomSchemas --offline --continue --console=plain`. The final rerun used `.\gradlew.bat :core:repository-impl:testDebugUnitTest :composeApp:testDebugUnitTest --tests '*EventRepositoryHttpTest' --tests '*StaffingPrioritySelectorUiTest' --tests '*ScheduleProposalDialogUiTest' --tests '*EventDetailOverlayHostUiTest' --offline --continue --console=plain`. It completed with `BUILD SUCCESSFUL`.
+
+From `apps/site`, run `node node_modules/typescript/bin/tsc --noEmit --pretty false`. Run `node node_modules/eslint/bin/eslint.js scripts/test-staffing-priority-contract.ts`. The focused Jest command is `node node_modules/jest/bin/jest.js --runInBand --runTestsByPath src/contracts/__tests__/eventEditor.test.ts src/server/scheduler/__tests__/officialStaffingModes.test.ts src/server/scheduler/__tests__/serialize.test.ts src/server/scheduler/__tests__/leagueEditorParity.test.ts src/server/scheduler/__tests__/tournamentEditorParity.test.ts`. It reported five passed suites and 75 passed tests.
+
+Plan updated on 2026-09-05 with final verification, the graph validator fix, independent review results, and the broad site-suite limitation. The current local main branch is already an ancestor of this Workstream; no merge was required.
