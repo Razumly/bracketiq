@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 import { createAffiliateGatewayHealthChecks } from "../affiliateGatewayHealth";
 
 describe("affiliate gateway health checks", () => {

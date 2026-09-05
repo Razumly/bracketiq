@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 import { inferAffiliateParticipantAvailability, parseAffiliateMaxParticipants } from '../participantAvailability';
 
 describe('affiliate participant availability parsing', () => {

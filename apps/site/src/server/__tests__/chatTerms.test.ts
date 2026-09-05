@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 import {
   buildChatTermsPayload,
   CHAT_TERMS_VERSION,

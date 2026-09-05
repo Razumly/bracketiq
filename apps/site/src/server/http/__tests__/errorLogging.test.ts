@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 import { logServerError, sanitizeErrorLogContext } from '@/server/http/errorLogging';
 
 describe('server error logging', () => {

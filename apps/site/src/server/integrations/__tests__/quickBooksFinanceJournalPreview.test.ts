@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 import { buildQuickBooksFinanceJournalEntryPreview } from '@/server/integrations/quickBooksFinanceJournalPreview';
 
 describe('quickBooksFinanceJournalPreview', () => {

@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 const prismaMock = {
   eventTags: {
     findMany: jest.fn(),

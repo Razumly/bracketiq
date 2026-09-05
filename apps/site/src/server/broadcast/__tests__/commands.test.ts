@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 const tx = {
   broadcastOverlays: { findFirst: jest.fn() },
   broadcastOverlayStates: { findUnique: jest.fn(), updateMany: jest.fn() },

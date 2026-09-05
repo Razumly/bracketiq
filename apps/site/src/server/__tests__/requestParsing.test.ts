@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 import { findDollarPrefixedFields, parseDateInput } from '@/server/requestParsing';
 
 describe('findDollarPrefixedFields', () => {

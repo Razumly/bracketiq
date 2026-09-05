@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 import { projectRelationalEventDivisionIds } from '@/server/events/eventDivisionProjection';
 
 describe('projectRelationalEventDivisionIds', () => {

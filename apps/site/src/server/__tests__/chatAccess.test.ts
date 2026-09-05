@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 const getCurrentTeamChatMemberIdsMock = jest.fn();
 const getCanonicalTeamIdsByUserIdsMock = jest.fn();
 

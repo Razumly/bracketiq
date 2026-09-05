@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 import { serializeEvent, serializeMatches } from '../serialize';
 import { Division, League, Match, PlayingField, Team, Tournament, UserData } from '../types';
 import { eventEditorCreateProposalGraphSchema } from "@/contracts/eventEditor";

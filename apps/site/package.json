@@ -22,7 +22,7 @@
     "security:audit": "npm audit --omit=dev --audit-level=high",
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:ci": "jest --maxWorkers=2 --coverage && npm run coverage:check-routes",
+    "test:ci": "jest --maxWorkers=2 --coverage --json --outputFile=coverage/test-results.json && npm run coverage:check-routes",
     "coverage:check-routes": "node scripts/check-route-coverage.mjs",
     "test:affiliate-mappings": "jest --runInBand --testPathPatterns='src/server/affiliateImports/__tests__/.*Source.test.ts$' --testPathIgnorePatterns='/e2e/'",
     "audit:duplicate-relationships": "tsx scripts/audit-duplicate-relationship-arrays.ts",

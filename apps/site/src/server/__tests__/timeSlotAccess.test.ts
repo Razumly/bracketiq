@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 import { canManageScheduledFields, canManageTimeSlot } from '@/server/timeSlotAccess';
 
 const canManageOrganizationMock = jest.fn();

@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 import { applyMatchUpdates, applyPersistentAutoLock, shouldAutoLockMatch } from '../updateMatch';
 
 type MatchShape = {

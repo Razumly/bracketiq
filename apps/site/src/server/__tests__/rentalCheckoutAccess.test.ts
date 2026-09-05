@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 const canManageEventMock = jest.fn();
 const canManageOrganizationMock = jest.fn();
 
