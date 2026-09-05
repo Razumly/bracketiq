@@ -16,9 +16,13 @@ The user approved the fixes identified in `docs/test-performance-audit-2026-09-0
 - [x] (2026-09-05) Configure mobile build caches, independent release validation, and timing artifacts.
 - [x] (2026-09-05) Configure parallel site quality checks and remove unnecessary coverage work.
 - [x] (2026-09-05) Use Mantine test mode, remove unused form providers, and select Node for 73 backend suites.
-- [ ] Investigate and repair the reproducible test teardown leak.
-- [ ] Run focused checks, the complete affected site suite, available mobile validation, and independent code reviews.
-- [ ] Record outcomes and commit the completed changes.
+- [x] (2026-09-05) Complete independent Standards and Spec reviews of the configuration changes. Both found no issues.
+- [x] (2026-09-05) Validate both workflows, 22 gate outcomes, both release scripts, and the Prisma schema.
+- [x] (2026-09-05) Pass the TypeScript check and ESLint. ESLint reports zero errors and 52 warnings.
+- [x] (2026-09-05) Reproduce and repair a reconnect timer race after unmount. All three focused cleanup cases pass.
+- [x] (2026-09-05) Run the complete site coverage diagnostic and affected UI and Node checks. Record the remaining baseline and platform failures.
+- [x] (2026-09-05) Run focused checks, the complete affected site suite, available mobile validation, and independent code reviews.
+- [x] (2026-09-05) Record outcomes and prepare the completed changes for the final commit.
 
 ## Surprises & Discoveries
 
@@ -27,6 +31,26 @@ The checkout has no site dependencies or mobile test reports. Existing CI logs p
 The first local EventForm run took 384.722 seconds. It passed 129 of 130 cases. The unchanged manual-payment assertion failed. Mantine test mode alone took 371.636 seconds and exposed another dirty-state failure. Both cases passed in a focused 7.669-second run after removing unused modal and notification providers from the EventForm wrapper. These runs do not yet establish a reliable overall speedup.
 
 The focused open-handle check ran three server suites. It reported no open handles, but two suites failed on Linux-only socket paths, file modes, and no-follow file access. These files were not changed by this task. The complete site run must distinguish these platform failures from regressions.
+
+The complete diagnostic run exposed two test assumptions about Mantine transitions. One label query also matched the select option list. Three modal assertions queried a dialog after its removal. The revised queries retain the input and visibility checks. Both complete affected suites pass after these changes.
+
+Inspection found a cleanup race in `useEventMatchRealtime`. A pending refresh can finish after unmount and call `scheduleReconnect` or `connect`. Before the repair, the regression test found one remaining timer and a late connection attempt. The repair passes the cleanup signal to the refresh request and checks cancellation before reconnect work. All three cases pass, including the normal mounted reconnect. The complete diagnostic run reported no open handles. This race is not established as the source of the earlier CI worker warning.
+
+The complete site diagnostic ran 784 suites with coverage and open-handle tracing. It passed 756 suites, failed 24, and skipped 4. It passed 5,490 tests, failed 58, and skipped 32. It took 1,482.223 seconds. This Windows diagnostic is not comparable to the two-worker Linux CI duration.
+
+All global coverage floors passed: statements 68.54%, branches 58.27%, functions 69.05%, and lines 69.27%. The route gate passed for 333 files: statements 68.12%, branches 55.57%, functions 68.96%, and lines 69.19%. The coverage map contains no generated source.
+
+All 130 EventForm cases passed in that diagnostic. A later run without coverage took 231.294 seconds for the form suite, compared with 363.114 seconds before the wrapper changes. Test-body totals were 222.907 and 330.527 seconds. Both runs failed the same pre-existing manual-payment clear assertion. This is an indicative local comparison with different cache and load conditions. The final test dispatches both value changes directly and retains the empty-value, invalid-value, and disabled-submit checks. All nine related cases pass.
+
+The complete follow-up UI run passed all 80 schedule page cases, all 22 team modal cases, all five registration phase cases, and all three cleanup cases. All 73 Node environment suites passed across the full run and focused follow-up. One expected POSIX path needed `path.resolve` for Windows. The unchanged route coverage gate tests also passed.
+
+The remaining full-run failures concern Unix sockets, file permissions, symlinks, POSIX paths, shell commands, CRLF-sensitive source assertions, and the affiliate cutover readiness failure already present in CI run 33590071911. This task does not claim a clean Linux or full Windows run.
+
+The Android validation used JDK 17, SDK 36, two workers, a 3 GiB Gradle heap, and in-process Kotlin compilation to limit memory use on this host. It took 16 minutes 2 seconds. Gradle reported 211 actionable tasks: 163 executed and 48 restored from cache. This proves local task cache use, not the later hosted native-cache saving.
+
+Android XML reports contain 1,724 tests: 1,716 passed, two failed, and six skipped. Both failures are in the unchanged `MatchRepositoryRoomPersistenceTest`. They throw `SQLiteCantOpenDatabaseException` while opening the database on this Windows host. Compilation and the other test suites completed. The opt-in backend test URL was unset. No backend runtime was started. The profile is saved under `apps/mobile/build/reports/profile/profile-2026-09-05-10-13-37.html`.
+
+The local profile attributes 3m 46.99s to application Kotlin compilation, 2m 58.94s to application unit tests, and 57.854s to project configuration. Task durations can overlap. Do not add them to estimate elapsed build time.
 
 Actionlint 1.7.12 accepted both workflows. A temporary harness executed the actual gate shell scripts for 22 success, failure, cancellation, and skip cases. All 22 passed. The Android release scripts passed Bash syntax checks. Gradle 9.4.1 starts with JDK 17 on this host.
 
@@ -38,11 +62,17 @@ Decision: use a dedicated branch in the current checkout. This is a direct user 
 
 Decision: implement measured configuration and test changes before any large mobile module refactor. Reason: the audit establishes missing native caches, but does not isolate the marginal link cost of each library. Date: 2026-09-05.
 
+Decision: remove the two static tests in `test/ciConfiguration.test.ts`. Reason: they inspect raw configuration text and fail after the matrix change. The Standards reviewer identified them as implementation checks under `CODING_STANDARDS.md`. Actionlint, 22 executed workflow gate cases, and the retained behavioral route coverage tests provide validation. No application behavior case was removed. Date: 2026-09-05.
+
 Decision: use setup-gradle v5 for the Gradle cache and a separate native cache for `.konan` and CocoaPods state. Include the native catalog, wrapper, build properties, Podfile inputs, architecture, and Xcode hash in its restore prefix. Use a unique run key so successful runs save new state. Reason: fixed dependency keys cannot retain new compiled outputs after an exact hit. Date: 2026-09-05.
 
 ## Outcomes & Retrospective
 
-Implementation is in progress. No new performance saving is established yet.
+The implementation is complete on `codex/test-performance`. All required CI gates, release assertions, and application coverage floors remain. Standards and Spec reviews found no remaining issues. The follow-up removed only static CI configuration checks; application behavior cases remain.
+
+Site workflow validation, gate execution checks, Prisma validation, TypeScript, ESLint, and both coverage gates passed. All changed Node environment suites and affected UI checks passed across the full and focused runs. The complete site run still has the recorded baseline and platform failures. Android compilation completed and 1,716 tests passed, but two unchanged Room persistence cases failed on Windows.
+
+Hosted cache reuse, release APK checks, iOS simulator validation, and CI time savings require the next Linux and macOS workflow runs. No production image was published. No deployment was run. Large native module changes remain deferred until the stored profiles identify a useful boundary.
 
 ## Context and Orientation
 
@@ -105,3 +135,5 @@ Use the existing Jest, ts-jest, Mantine, Gradle, Kotlin, and GitHub Actions inte
 Plan created on 2026-09-05 to execute the approved test performance audit fixes.
 
 Plan updated on 2026-09-05 with implemented configuration changes, local benchmark results, gate validation, and Windows test limitations.
+
+Plan updated on 2026-09-05 with final site checks, the reproduced cleanup race, Android cache use and test results, and both review outcomes.

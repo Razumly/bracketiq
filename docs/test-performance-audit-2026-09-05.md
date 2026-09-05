@@ -138,3 +138,11 @@ gh run view 33488361375 --repo Razumly/bracketiq --log
 gh run view 33480165247 --repo Razumly/bracketiq --log
 gh run view 33590071911 --repo Razumly/bracketiq --log-failed
 ```
+
+**Implementation follow-up**
+
+The user approved implementation after this audit. The changes enable Gradle task caching, preserve native compiler state, separate Android release validation, and run independent site checks in a matrix. Site coverage now excludes generated code. Backend suites use Node where no browser is required. The EventForm wrapper omits unused providers. Mantine uses test mode. Realtime cleanup now cancels a pending refresh and prevents a late reconnect after unmount.
+
+The implementation retains the release checks and coverage floors. The local site diagnostic passed both coverage gates. Local UI and backend validation found test assumptions about transitions and Windows paths. The follow-up repairs those assumptions and preserves application behavior checks. The original CI worker warning was not reproduced; a separate cleanup race was reproduced and fixed.
+
+See `plans/test-performance-execplan.md` for exact local test results, the review outcome, and platform validation limits. Hosted cache reuse and CI time savings require later Linux and macOS runs.
