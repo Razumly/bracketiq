@@ -29,7 +29,7 @@ The user approved the fixes identified in `docs/test-performance-audit-2026-09-0
 - [x] (2026-09-05) Pass hosted Site CI and Mobile CI at `bd0e4a60b`. Confirm Android and native cache reuse in a repeat run.
 - [x] (2026-09-05) Validate the lint content-cache follow-up with installed ESLint, actionlint, and both independent reviews.
 - [x] (2026-09-05) Pass the full lint command with `--cache-strategy content`. It reports zero errors and 55 warnings. Three warnings concern downloaded coverage report helpers; hosted lint reports the other 52 warnings.
-- [ ] Integrate the reviewed branch into `main`.
+- [x] (2026-09-05) Fast-forward local `main` to the reviewed branch at `f3ee8905f`. Publish the integrated state for the `main` workflow checks.
 
 ## Surprises & Discoveries
 
@@ -82,6 +82,8 @@ Decision: remove the two static tests in `test/ciConfiguration.test.ts`. Reason:
 Decision: use setup-gradle v5 for the Gradle cache and a separate native cache for `.konan` and CocoaPods state. Include the native catalog, wrapper, build properties, Podfile inputs, architecture, and Xcode hash in its restore prefix. Use a unique run key so successful runs save new state. Reason: fixed dependency keys cannot retain new compiled outputs after an exact hit. Date: 2026-09-05.
 
 ## Outcomes & Retrospective
+
+The user requested integration into `main`. The coordinator refreshed `origin/main`, confirmed a clean checkout, and fast-forwarded local `main` to `f3ee8905f`. The application checks passed in both PR workflows. The later lint cache strategy change passed full local lint, the cache behavior probe, actionlint, and both reviews. The `main` workflows check the integrated commit after publication.
 
 The implementation is complete on `codex/test-performance`. All required CI gates, release assertions, and application coverage floors remain. Standards and Spec reviews found no remaining issues. The follow-up removed only static CI configuration checks; application behavior cases remain.
 
