@@ -2,16 +2,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Button, Stack, Text } from '@mantine/core';
-
-type Evidence = {
-  inviteId: string; status: string; attemptCreatedAt: string | null; finalizedAt: string | null;
-  senderName: string | null; playerName: string | null; teamName: string | null;
-  actingGuardianName: string | null;
-  deliveries: Array<{ id: string; kind: string; status: string; createdAt: string }>;
-};
+import { invitationEvidenceService, type InvitationEvidence } from '@/lib/invitationEvidenceService';
 
 export function InvitationEvidenceReview({ reportId, reportStatus }: { reportId: string; reportStatus: string }) {
-  const [evidence, setEvidence] = useState<Evidence | null | undefined>();
+  const [evidence, setEvidence] = useState<InvitationEvidence | null | undefined>();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const requestVersion = useRef(0);
@@ -23,10 +17,8 @@ export function InvitationEvidenceReview({ reportId, reportStatus }: { reportId:
     const version = ++requestVersion.current;
     setLoading(true); setError(null);
     try {
-      const response = await fetch(`/api/admin/moderation/${encodeURIComponent(reportId)}/evidence`, { credentials: 'include' });
-      if (!response.ok) throw new Error('Invitation evidence could not be loaded.');
-      const payload = await response.json();
-      if (requestVersion.current === version) setEvidence(payload.evidence);
+      const result = await invitationEvidenceService.getEvidence(reportId);
+      if (requestVersion.current === version) setEvidence(result);
     } catch (failure) {
       if (requestVersion.current === version) setError(failure instanceof Error ? failure.message : 'Invitation evidence could not be loaded.');
     } finally { if (requestVersion.current === version) setLoading(false); }

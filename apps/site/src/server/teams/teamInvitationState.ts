@@ -2,6 +2,7 @@ import type { Prisma } from '@/generated/prisma/client';
 
 export const PENDING_INVITATION_STATUSES = ['PENDING', 'SENT', 'FAILED'];
 export const FINAL_INVITATION_STATUSES = ['ACCEPTED', 'DECLINED', 'CANCELLED', 'EXPIRED'];
+export const INVITATION_EXPIRY_BATCH_SIZE = 100;
 
 type InvitationState = { id: string; status?: string | null; linkExpiresAt?: Date | string | null };
 type InvitationClient = Pick<Prisma.TransactionClient, 'invites'>;
@@ -37,6 +38,18 @@ export const expireTeamInvitations = async (
         OR: [{ status: null }, { status: { in: PENDING_INVITATION_STATUSES } }] }],
     },
     select: { id: true, status: true, linkExpiresAt: true },
+    orderBy: [{ linkExpiresAt: 'asc' }, { id: 'asc' }],
+    take: INVITATION_EXPIRY_BATCH_SIZE,
   });
   for (const invite of expired) await expireTeamInvitation(client, invite, now);
+};
+
+// Resolve the selected attempt even when it was outside the background batch.
+export const resolvePendingTeamInvitation = async <T extends InvitationState>(
+  client: InvitationClient, invite: T | null, now = new Date(),
+): Promise<T | null> => {
+  if (!invite || !isPendingInvitation(invite.status)) return null;
+  if (!isInvitationExpired(invite, now)) return invite;
+  await expireTeamInvitation(client, invite, now);
+  return null;
 };
