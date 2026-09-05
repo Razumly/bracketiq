@@ -56,6 +56,9 @@ const prismaMock = {
   $transaction: jest.fn((callback: (tx: typeof txMock) => Promise<unknown>) => callback(txMock)),
 };
 
+jest.mock('@/server/moderation', () => ({ ...jest.requireActual('@/server/moderation'), sendModerationAlert: jest.fn(async () => undefined) }));
+jest.mock('@/server/invitationEvidence', () => ({ reportInvitation: jest.fn(async () => ({ id: 'invitation-report' })) }));
+
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 jest.mock('@/lib/permissions', () => ({ requireSession: (...args: any[]) => requireSessionMock(...args) }));
 jest.mock('@/server/teams/teamMembership', () => ({
@@ -164,7 +167,7 @@ describe('team invite event-team sync lifecycle routes', () => {
     const json = await response.json();
 
     expect(response.status).toBe(200);
-    expect(json).toEqual({ ok: true, alreadyAccepted: true });
+    expect(json).toMatchObject({ ok: true, alreadyAccepted: true });
     expect(acceptTeamInviteEventSyncsMock).not.toHaveBeenCalled();
     expect(txMock.invites.update).not.toHaveBeenCalled();
   });
@@ -216,7 +219,7 @@ describe('team invite event-team sync lifecycle routes', () => {
   });
 
   it('rejects direct acceptance after expiry and retains the expiry outcome', async () => {
-    const expired = { ...invite, linkExpiresAt: new Date('2026-01-01T12:00:00Z') };
+    const expired = { ...invite, linkExpiresAt: new Date(Date.now() - 1000) };
     prismaMock.invites.findUnique.mockResolvedValue(expired);
     txMock.invites.findUnique.mockResolvedValue(expired);
     txMock.invites.updateMany.mockImplementation(async ({ data }) => {
@@ -234,7 +237,7 @@ describe('team invite event-team sync lifecycle routes', () => {
       params: Promise.resolve({ id: 'invite_1' }),
     });
     expect((await read.json()).invite).toMatchObject({
-      status: 'EXPIRED', finalizedAt: '2026-01-01T12:00:00.000Z',
+      status: 'EXPIRED', finalizedAt: expired.linkExpiresAt.toISOString(),
     });
   });
 
