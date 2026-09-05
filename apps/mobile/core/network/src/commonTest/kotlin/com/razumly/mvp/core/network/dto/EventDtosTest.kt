@@ -9,7 +9,6 @@ import com.razumly.mvp.core.data.dataTypes.MANUAL_PAYMENT_PROVIDER_CASH_APP
 import com.razumly.mvp.core.data.dataTypes.MANUAL_PAYMENT_PROVIDER_PAYPAL
 import com.razumly.mvp.core.data.dataTypes.MANUAL_PAYMENT_PROVIDER_VENMO
 import com.razumly.mvp.core.data.dataTypes.ManualPaymentLink
-import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.StaffingPriority
 import com.razumly.mvp.core.data.dataTypes.REGISTRATION_PAYMENT_MODE_MANUAL
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
@@ -24,6 +23,50 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class EventDtosTest {
+    @Test
+    fun given_each_canonical_priority_when_api_data_is_loaded_then_the_exact_priority_and_duties_survive() {
+        StaffingPriority.entries.forEach { priority ->
+            listOf(false, true).forEach { hasTeamDuties ->
+                val dto = EventApiDto(
+                    id = "priority-event", name = "Priority Event", hostId = "host-1",
+                    start = "2026-02-10T00:00:00Z", end = "2026-02-10T01:00:00Z",
+                    staffingPriority = priority.name, doTeamsOfficiate = hasTeamDuties,
+                    officialPositions = listOf(EventOfficialPosition("line-judge", "Line Judge", 2)),
+                )
+                val event = assertNotNull(dto.toEventOrNull())
+                assertEquals(priority, event.staffingPriority)
+                assertEquals(hasTeamDuties, event.doTeamsOfficiate)
+                assertEquals(listOf(EventOfficialPosition("line-judge", "Line Judge", 2)), event.officialPositions)
+            }
+        }
+    }
+
+    @Test
+    fun given_invalid_explicit_priority_when_api_data_is_loaded_then_the_event_is_rejected() {
+        val dto = EventApiDto(
+            id = "priority-event", name = "Priority Event", hostId = "host-1",
+            start = "2026-02-10T00:00:00Z", end = "2026-02-10T01:00:00Z",
+            staffingPriority = "STAFFING",
+        )
+        assertFailsWith<IllegalArgumentException> { dto.toEventOrThrow() }
+    }
+
+    @Test
+    fun given_obsolete_wire_mode_when_event_is_loaded_then_it_cannot_change_team_duties() {
+        val dto = com.razumly.mvp.core.util.jsonMVP.decodeFromString<EventApiDto>(
+            """{
+                "id":"event-cutover", "name":"Staffing", "hostId":"host-1",
+                "start":"2026-02-10T00:00:00Z", "end":"2026-02-10T01:00:00Z",
+                "officialSchedulingMode":"TEAM_STAFFING", "doTeamsOfficiate":false
+            }""",
+        )
+
+        val event = assertNotNull(dto.toEventOrNull())
+
+        assertEquals(StaffingPriority.BEST_AVAILABLE_COVERAGE, event.staffingPriority)
+        assertEquals(false, event.doTeamsOfficiate)
+    }
+
     @Test
     fun given_event_type_when_automated_scheduling_is_missing_then_dto_uses_event_type_default() {
         fun event(type: EventType, isAutomatedScheduling: Boolean? = null) =
@@ -595,7 +638,7 @@ class EventDtosTest {
             hostId = "host-22",
             start = "2026-02-10T00:00:00Z",
             end = "2026-02-10T01:00:00Z",
-            officialSchedulingMode = "OFF",
+            staffingPriority = "FULL_COVERAGE_WITH_CONFLICTS_ALLOWED",
             officialPositions = listOf(
                 EventOfficialPosition(
                     id = "position-1",
@@ -617,14 +660,14 @@ class EventDtosTest {
 
         val event = dto.toEventOrNull()
 
-        assertEquals(OfficialSchedulingMode.OFF, event?.officialSchedulingMode)
+        assertEquals(StaffingPriority.FULL_COVERAGE_WITH_CONFLICTS_ALLOWED, event?.staffingPriority)
         assertEquals(listOf("Line Judge"), event?.officialPositions?.map(EventOfficialPosition::name))
         assertEquals(listOf("official-1"), event?.eventOfficials?.map(EventOfficial::userId))
         assertEquals(listOf("official-1"), event?.officialIds)
     }
 
     @Test
-    fun given_canonical_staffing_priority_when_event_api_dto_is_converted_then_it_overrides_legacy_mode() {
+    fun given_canonical_staffing_priority_when_event_api_dto_is_converted_then_it_preserves_the_priority() {
         val dto = EventApiDto(
             id = "event-canonical-staffing",
             name = "API Event",
@@ -632,38 +675,36 @@ class EventDtosTest {
             start = "2026-02-10T00:00:00Z",
             end = "2026-02-10T01:00:00Z",
             staffingPriority = "OFFICIAL_COVERAGE_REQUIRED",
-            officialSchedulingMode = "OFF",
         )
 
         val event = dto.toEventOrNull()
 
         assertEquals(StaffingPriority.OFFICIAL_COVERAGE_REQUIRED, event?.staffingPriority)
-        assertEquals(OfficialSchedulingMode.STAFFING, event?.officialSchedulingMode)
     }
 
     @Test
-    fun given_team_staffing_when_event_api_dto_is_converted_then_team_officials_are_enabled() {
+    fun given_team_coverage_required_when_event_is_loaded_then_team_duties_remain_independent() {
         val dto = EventApiDto(
             id = "event-team-staffing",
             name = "API Event",
             hostId = "host-team-staffing",
             start = "2026-02-10T00:00:00Z",
             end = "2026-02-10T01:00:00Z",
-            officialSchedulingMode = "TEAM_STAFFING",
+            staffingPriority = "TEAM_COVERAGE_REQUIRED",
             doTeamsOfficiate = false,
             teamOfficialsMaySwap = true,
         )
 
         val event = dto.toEventOrNull()
 
-        assertEquals(OfficialSchedulingMode.TEAM_STAFFING, event?.officialSchedulingMode)
-        assertEquals(true, event?.doTeamsOfficiate)
-        assertEquals(true, event?.teamOfficialsMaySwap)
+        assertEquals(StaffingPriority.TEAM_COVERAGE_REQUIRED, event?.staffingPriority)
+        assertEquals(false, event?.doTeamsOfficiate)
+        assertEquals(false, event?.teamOfficialsMaySwap)
     }
 
 
     @Test
-    fun given_missing_official_scheduling_mode_when_event_api_dto_is_converted_then_schedule_is_used() {
+    fun given_missing_priority_when_event_is_loaded_then_best_available_coverage_is_used() {
         val dto = EventApiDto(
             id = "event-23",
             name = "API Event",
@@ -674,7 +715,7 @@ class EventDtosTest {
 
         val event = dto.toEventOrNull()
 
-        assertEquals(OfficialSchedulingMode.SCHEDULE, event?.officialSchedulingMode)
+        assertEquals(StaffingPriority.BEST_AVAILABLE_COVERAGE, event?.staffingPriority)
     }
 
     @Test

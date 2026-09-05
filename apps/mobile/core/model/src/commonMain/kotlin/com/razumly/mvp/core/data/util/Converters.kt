@@ -11,7 +11,6 @@ import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
 import com.razumly.mvp.core.data.dataTypes.MatchSegmentMVP
 import com.razumly.mvp.core.data.dataTypes.ManualPaymentLink
 import com.razumly.mvp.core.data.dataTypes.NotificationSettings
-import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
 import com.razumly.mvp.core.data.dataTypes.TeamStaffAssignment
@@ -95,14 +94,6 @@ class Converters {
 
     @TypeConverter
     fun toEventType(value: String): EventType = EventType.valueOf(value)
-
-    @TypeConverter
-    fun fromOfficialSchedulingMode(value: OfficialSchedulingMode): String = value.name
-
-    @TypeConverter
-    fun toOfficialSchedulingMode(value: String): OfficialSchedulingMode =
-        runCatching { OfficialSchedulingMode.valueOf(value.trim().uppercase()) }
-            .getOrDefault(OfficialSchedulingMode.SCHEDULE)
 
     @TypeConverter
     fun fromEventOfficialPositions(value: List<EventOfficialPosition>): String =

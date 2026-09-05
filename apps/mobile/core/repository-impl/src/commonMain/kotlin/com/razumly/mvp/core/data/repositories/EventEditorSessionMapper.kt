@@ -15,9 +15,7 @@ import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.ManualPaymentLink
 import com.razumly.mvp.core.data.dataTypes.normalizeManualPaymentUrl
 import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
-import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
-import com.razumly.mvp.core.data.dataTypes.resolveStaffingPriority
-import com.razumly.mvp.core.data.dataTypes.toLegacyOfficialSchedulingMode
+import com.razumly.mvp.core.data.dataTypes.StaffingPriority
 import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.TimeSlotDTO
@@ -491,11 +489,9 @@ private fun EventEditorDraftDto.toEvent(eventId: String): Event {
         eventType,
         schedule.isAutomatedScheduling,
     )
-    val resolvedStaffingPriority = resolveStaffingPriority(
-        staffingPriority = staff.staffingPriority,
-        legacyOfficialSchedulingMode = null,
-    )
-    val officialMode = resolvedStaffingPriority.toLegacyOfficialSchedulingMode()
+    val resolvedStaffingPriority = staff.staffingPriority
+        ?.let(StaffingPriority::valueOf)
+        ?: StaffingPriority.BEST_AVAILABLE_COVERAGE
     val effectiveDoTeamsOfficiate = staff.doTeamsOfficiate ?: false
     val isBracketCountEnabled = isBracketTeamCountEnabled(
         eventType,
@@ -606,7 +602,6 @@ private fun EventEditorDraftDto.toEvent(eventId: String): Event {
         setsPerMatch = competition.setsPerMatch,
         teamOfficialsMaySwap = staff.teamOfficialsMaySwap,
         doTeamsOfficiate = effectiveDoTeamsOfficiate,
-        officialSchedulingMode = officialMode,
         teamCheckInMode = runCatching {
             TeamCheckInMode.valueOf(staff.teamCheckInMode.trim().uppercase())
         }.getOrDefault(TeamCheckInMode.OFF),

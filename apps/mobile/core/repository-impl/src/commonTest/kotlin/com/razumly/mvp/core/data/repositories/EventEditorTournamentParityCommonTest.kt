@@ -1738,7 +1738,6 @@ private fun tournamentMaintenanceCanonicalEvent(): EventEditorMaintenanceGraphEv
         fieldIds = listOf(TOURNAMENT_MAINTENANCE_FIELD_ID),
         timeSlotIds = listOf(TOURNAMENT_MAINTENANCE_SLOT_ID),
         officialIds = emptyList(),
-        officialSchedulingMode = "SCHEDULE",
         staffingPriority = "BEST_AVAILABLE_COVERAGE",
         officialPositions = emptyList(),
         eventOfficials = emptyList(),

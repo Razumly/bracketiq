@@ -671,7 +671,6 @@ data class EventEditorMaintenanceGraphEventDto(
     val fieldIds: List<String>,
     val timeSlotIds: List<String>,
     val officialIds: List<String>,
-    val officialSchedulingMode: String,
     val staffingPriority: String,
     val officialPositions: List<EventEditorOfficialPositionDto>,
     val eventOfficials: List<EventEditorMaintenanceGraphEventOfficialDto>,
@@ -966,7 +965,6 @@ private fun EventEditorMaintenanceGraphEventDto.toLegacyEvent(base: EventApiDto)
         fieldIds = fieldIds,
         timeSlotIds = timeSlotIds,
         officialIds = officialIds,
-        officialSchedulingMode = officialSchedulingMode,
         staffingPriority = staffingPriority,
         officialPositions = officialPositions.map(
             EventEditorOfficialPositionDto::toLegacyOfficialPosition,

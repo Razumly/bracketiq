@@ -317,6 +317,81 @@ class EventRepositoryRoomPersistenceTest {
     }
 
     @Test
+    fun given_all_five_priorities_when_saved_reloaded_and_read_offline_then_site_and_room_preserve_the_officiating_plan() =
+        kotlinx.coroutines.test.runTest(timeout = kotlin.time.Duration.parse("5m")) {
+            val fixture = eventRepositoryRoomPersistenceTournamentFixture()
+            val site = staffingContractSiteDirectory()
+            val sharedDraft = jsonMVP.decodeFromString<EventEditorDraftDto>(
+                File(site.parentFile.parentFile, "test-fixtures/event-editor/staffing-priority-draft.json").readText(),
+            )
+            val priorities = com.razumly.mvp.core.data.dataTypes.StaffingPriority.entries
+            for ((priorityIndex, priority) in priorities.withIndex()) {
+                for (configuration in 0..3) {
+                    val hasTeamDuties = configuration >= 2
+                    val hasPositions = configuration % 2 == 1
+                    val initialDraft = sharedDraft.copy(staff = sharedDraft.staff.copy(
+                        doTeamsOfficiate = hasTeamDuties,
+                        teamOfficialsMaySwap = hasTeamDuties,
+                        officialPositions = if (hasPositions) sharedDraft.staff.officialPositions else emptyList(),
+                        eventOfficials = if (hasPositions) sharedDraft.staff.eventOfficials else emptyList(),
+                        officialIds = if (hasPositions) sharedDraft.staff.officialIds else emptyList(),
+                    ))
+                    var snapshot = fixture.saved.snapshot.copy(mode = "EDIT", draft = initialDraft)
+                    val database = Room.inMemoryDatabaseBuilder<MVPDatabaseService>(context).allowMainThreadQueries().build()
+                    var isOffline = false
+                    val http = HttpClient(MockEngine { request ->
+                        check(!isOffline) { "The offline read must use Room." }
+                        when (request.method) {
+                            HttpMethod.Get -> respondJson(jsonMVP.encodeToString(snapshot), HttpStatusCode.OK)
+                            HttpMethod.Put -> {
+                                val body = (request.body as io.ktor.http.content.OutgoingContent.ByteArrayContent)
+                                    .bytes().decodeToString()
+                                assertFalse(body.contains("officialSchedulingMode"))
+                                val result = staffingClientToSiteResult(site, priorityIndex * 4 + configuration, body)
+                                val returnedDraft = jsonMVP.decodeFromJsonElement(EventEditorDraftDto.serializer(), result.getValue("draft"))
+                                assertEquals(priority.name, returnedDraft.staff.staffingPriority)
+                                assertEquals(initialDraft.staff.copy(staffingPriority = priority.name), returnedDraft.staff)
+                                snapshot = snapshot.copy(draft = returnedDraft)
+                                respondJson(jsonMVP.encodeToString(fixture.saved.copy(
+                                    snapshot = snapshot,
+                                    graph = null,
+                                    scheduleOutcome = fixture.saved.scheduleOutcome.copy(
+                                        status = EventEditorScheduleOutcomeStatus.NOT_REQUESTED, matches = emptyList(),
+                                    ),
+                                )), HttpStatusCode.OK)
+                            }
+                            else -> error("Unexpected request ${request.method}")
+                        }
+                    }) { configureMvpHttpClient() }
+                    val repository = eventRepositoryRoomPersistenceRepository(
+                        EventRepositoryRoomPersistence_NoStartupCleanupDatabase(database), http,
+                        UnconfinedTestDispatcher(testScheduler),
+                    )
+                    try {
+                        val opened = repository.getEventEditor(fixture.eventId).getOrThrow()
+                        val selected = opened.canonicalState.copy(event = opened.canonicalState.event.copy(staffingPriority = priority))
+                        val command = EventEditorSessionMapper.toSaveCommand(opened, EventEditorMutation(selected))
+                        val saved = repository.saveEventEditor(fixture.eventId, command).getOrThrow()
+                        assertEquals(priority, saved.session.canonicalState.event.staffingPriority)
+                        val reloaded = repository.getEventEditor(fixture.eventId).getOrThrow().canonicalState.event
+                        assertEquals(priority, reloaded.staffingPriority)
+                        isOffline = true
+                        val cached = repository.getCachedEventWithRelationsFlow(fixture.eventId).first().getOrThrow().event
+                        assertEquals(priority, cached.staffingPriority)
+                        assertEquals(hasTeamDuties, cached.doTeamsOfficiate)
+                        assertEquals(hasTeamDuties, cached.teamOfficialsMaySwap)
+                        assertEquals(if (hasPositions) listOf("Referee", "Line Judge") else emptyList(), cached.officialPositions.map { it.name })
+                        assertEquals(if (hasPositions) listOf("r1") else emptyList(), cached.eventOfficials.flatMap { it.positionIds })
+                    } finally {
+                        repository.close()
+                        http.close()
+                        database.close()
+                    }
+                }
+            }
+        }
+
+    @Test
     fun stale_event_projection_preserves_cached_locks_inside_room_transaction() =
         kotlinx.coroutines.test.runTest {
             val realDatabase = Room.inMemoryDatabaseBuilder<MVPDatabaseService>(context)
@@ -2561,7 +2636,6 @@ class EventRepositoryRoomPersistenceTest {
                 teamIds = emptyList(),
                 userIds = emptyList(),
                 officialIds = emptyList(),
-                officialSchedulingMode = "SCHEDULE",
                 staffingPriority = "BEST_AVAILABLE_COVERAGE",
                 officialPositions = emptyList(),
                 eventOfficials = emptyList(),
@@ -4067,7 +4141,6 @@ private fun roomMaintenanceGraphEvent(
         fieldIds = listOf(fieldId),
         timeSlotIds = emptyList(),
         officialIds = emptyList(),
-        officialSchedulingMode = "SCHEDULE",
         staffingPriority = "BEST_AVAILABLE_COVERAGE",
         officialPositions = emptyList(),
         eventOfficials = emptyList(),
@@ -4288,4 +4361,24 @@ private fun roomMaintenanceAcceptedResult(
         scheduleOutcome = roomMaintenanceScheduleOutcome(graph.matches),
         acceptanceOperationId = "room-maintenance-acceptance",
     )
+}
+
+private fun staffingContractSiteDirectory(): File =
+    System.getenv("MVP_SITE_DIR")?.takeIf(String::isNotBlank)?.let(::File)
+        ?: generateSequence(File(System.getProperty("user.dir"))) { it.parentFile }
+            .map { File(it, "apps/site") }.firstOrNull { File(it, "package.json").isFile }
+        ?: error("Cannot find apps/site for the Staffing Priority contract check.")
+
+private fun staffingClientToSiteResult(site: File, caseIndex: Int, command: String): JsonObject {
+    val process = ProcessBuilder("node", "--import", "tsx", "scripts/test-staffing-priority-contract.ts")
+        .directory(site).redirectErrorStream(true).start()
+    val outputReader = java.util.concurrent.CompletableFuture.supplyAsync { process.inputStream.bufferedReader().readText() }
+    process.outputStream.bufferedWriter().use { it.write("{\"caseIndex\":$caseIndex,\"command\":$command}") }
+    if (!process.waitFor(30, TimeUnit.SECONDS)) {
+        process.destroyForcibly()
+        error("The site Staffing Priority check did not finish.")
+    }
+    val output = outputReader.get(5, TimeUnit.SECONDS)
+    check(process.exitValue() == 0) { output }
+    return jsonMVP.parseToJsonElement(output).jsonObject
 }

@@ -885,7 +885,7 @@ class EventEditorDtosTest {
         assertEquals(42, event.price)
         assertEquals(10, event.restTimeMinutes)
         assertEquals(12, event.registrationCutoffHours)
-        assertEquals("SCHEDULE", event.officialSchedulingMode)
+        assertEquals("BEST_AVAILABLE_COVERAGE", event.staffingPriority)
         assertEquals(listOf("division-1"), event.divisions)
         assertEquals(listOf("division-1"), event.divisionDetails?.map { detail -> detail.id })
         assertEquals(listOf("field-1"), event.fields.map { field -> field.id })
@@ -1079,7 +1079,6 @@ class EventEditorDtosTest {
             fieldIds = listOf(field.id),
             timeSlotIds = listOf(timeSlot.id),
             officialIds = listOf(user.id),
-            officialSchedulingMode = "SCHEDULE",
             staffingPriority = "BEST_AVAILABLE_COVERAGE",
             officialPositions = listOf(position),
             eventOfficials = listOf(eventOfficial),

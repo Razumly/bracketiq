@@ -69,6 +69,7 @@ import com.razumly.mvp.eventDetail.toEventWithFullRelations
 import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
 import com.razumly.mvp.schedule.ScheduleDiagnosticsReview
+import com.razumly.mvp.schedule.StaffingPriorityReview
 import dev.icerock.moko.geo.LatLng
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format
@@ -817,6 +818,7 @@ internal fun ScheduleProposalDialog(
                 Text("Proposed schedule: ${schedule.matchCount} matches")
                 Text("Resource assignments: $assignedFields")
                 Text("Officiating assignments: $assignedOfficials")
+                StaffingPriorityReview(proposal.snapshot.draft.staff.staffingPriority)
                 if (isPartial) {
                     Spacer(Modifier.height(8.dp))
                     Text("Unscheduled matches")

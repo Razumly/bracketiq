@@ -44,6 +44,7 @@ import com.razumly.mvp.eventDetail.composables.MatchEditDialog
 import com.razumly.mvp.eventDetail.composables.SendNotificationDialog
 import com.razumly.mvp.eventDetail.composables.TeamSelectionDialog
 import com.razumly.mvp.schedule.ScheduleDiagnosticsReview
+import com.razumly.mvp.schedule.StaffingPriorityReview
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 import kotlinx.datetime.TimeZone
@@ -672,6 +673,7 @@ internal fun EventScheduleMaintenanceReviewDialog(
                                 "${outcome.unplacedMatchCount} unplaced matches."
                         },
                     )
+                    StaffingPriorityReview(proposal.graph.event.staffingPriority)
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("Graph summary")
                         Text("Proposed matches (${proposal.graph.matches.size}):")

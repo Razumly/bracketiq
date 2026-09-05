@@ -744,9 +744,6 @@ internal class EventEditorRemoteGateway(
         requireString(event, "end", path).also { requireNonBlank(it, "$path.end") }
         requireString(event, "location", path)
         requireString(event, "state", path).also { requireNonBlank(it, "$path.state") }
-        requireString(event, "officialSchedulingMode", path).also {
-            requireNonBlank(it, "$path.officialSchedulingMode")
-        }
         requireString(event, "staffingPriority", path).also {
             requireNonBlank(it, "$path.staffingPriority")
         }
@@ -1688,7 +1685,7 @@ private val MAINTENANCE_GRAPH_EVENT_REQUIRED_KEYS = setOf(
     "fieldIds",
     "timeSlotIds",
     "officialIds",
-    "officialSchedulingMode",
+    "officialSchedulingMode", // Accept the existing site response field without using it.
     "staffingPriority",
     "officialPositions",
     "eventOfficials",

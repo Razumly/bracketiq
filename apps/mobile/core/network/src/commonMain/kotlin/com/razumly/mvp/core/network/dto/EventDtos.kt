@@ -16,10 +16,7 @@ import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.EventTag
 import com.razumly.mvp.core.data.dataTypes.ManualPaymentLink
 import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
-import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.StaffingPriority
-import com.razumly.mvp.core.data.dataTypes.toLegacyOfficialSchedulingMode
-import com.razumly.mvp.core.data.dataTypes.resolveStaffingPriority
 import com.razumly.mvp.core.data.dataTypes.REGISTRATION_PAYMENT_MODE_ONLINE
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
@@ -186,7 +183,6 @@ data class EventApiDto(
     val archivedAt: String? = null,
     val pointsToVictory: List<Int>? = null,
     val staffingPriority: String? = null,
-    val officialSchedulingMode: String? = null,
     val officialPositions: List<EventOfficialPosition>? = null,
     val eventOfficials: List<EventOfficial>? = null,
     val officialIds: List<String>? = null,
@@ -418,36 +414,13 @@ data class EventApiDto(
             )
         }
 
-        val resolvedStaffingPriority = resolveStaffingPriority(
-            staffingPriority = staffingPriority,
-            legacyOfficialSchedulingMode = officialSchedulingMode,
-        )
-        val hasCanonicalStaffingPriority = staffingPriority
-            ?.trim()
-            ?.uppercase()
-            ?.let { normalized ->
-                StaffingPriority.entries.any { priority -> priority.name == normalized }
-            }
-            ?: false
-        val legacyOfficialSchedulingMode = runCatching {
-            officialSchedulingMode
-                ?.trim()
-                ?.uppercase()
-                ?.let(OfficialSchedulingMode::valueOf)
-        }.getOrNull()
-        val resolvedOfficialSchedulingMode = if (hasCanonicalStaffingPriority) {
-            resolvedStaffingPriority.toLegacyOfficialSchedulingMode()
+        val priorityName = staffingPriority
+        val resolvedStaffingPriority = if (priorityName == null) {
+            StaffingPriority.BEST_AVAILABLE_COVERAGE
         } else {
-            legacyOfficialSchedulingMode ?: resolvedStaffingPriority.toLegacyOfficialSchedulingMode()
+            runCatching { StaffingPriority.valueOf(priorityName) }.getOrNull() ?: return null
         }
-        val effectiveDoTeamsOfficiate = if (
-            !hasCanonicalStaffingPriority &&
-            legacyOfficialSchedulingMode == OfficialSchedulingMode.TEAM_STAFFING
-        ) {
-            true
-        } else {
-            doTeamsOfficiate ?: false
-        }
+        val effectiveDoTeamsOfficiate = doTeamsOfficiate ?: false
         val normalizedEventOfficials = when {
             !eventOfficials.isNullOrEmpty() -> eventOfficials
             !officialIds.isNullOrEmpty() -> officialIds.mapNotNull { officialId ->
@@ -558,7 +531,6 @@ data class EventApiDto(
             archivedAt = archivedAt,
             pointsToVictory = pointsToVictory ?: emptyList(),
             staffingPriority = resolvedStaffingPriority,
-            officialSchedulingMode = resolvedOfficialSchedulingMode,
             officialPositions = officialPositions ?: emptyList(),
             eventOfficials = normalizedEventOfficials,
             officialIds = normalizedEventOfficials.map(EventOfficial::userId),

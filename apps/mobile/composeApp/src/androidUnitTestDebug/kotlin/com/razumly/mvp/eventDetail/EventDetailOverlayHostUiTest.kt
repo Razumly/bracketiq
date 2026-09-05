@@ -44,6 +44,40 @@ class EventDetailOverlayHostUiTest {
     val composeRule = createComposeRule()
 
     @Test
+    fun given_each_priority_when_maintenance_is_reviewed_then_required_and_optional_coverage_remain_readable() {
+        val state = mutableStateOf(maintenanceReviewWithPlacedAndProtectedMatches())
+        var accepted = 0
+        composeRule.setContent {
+            MaterialTheme {
+                EventScheduleMaintenanceReviewDialog(
+                    review = state.value, onAccept = { accepted += 1 }, onReject = {},
+                    onDismiss = {}, onRequestFreshProposal = {},
+                )
+            }
+        }
+        val optionalCoverage = listOf(
+            "None. Missing required coverage can leave Matches unscheduled.",
+            "Named Official Positions. Gaps remain warnings.",
+            "Team duties. Gaps remain warnings.",
+            "Team duties and named Official Positions. Gaps remain warnings.",
+            "None. Missing required coverage can leave Matches unscheduled.",
+        )
+        com.razumly.mvp.core.data.dataTypes.StaffingPriority.entries.forEachIndexed { index, priority ->
+            composeRule.runOnIdle {
+                val review = maintenanceReviewWithPlacedAndProtectedMatches()
+                val proposal = review.reviewedProposal
+                state.value = review.copy(proposal = proposal.copy(graph = proposal.graph.copy(
+                    event = proposal.graph.event.copy(staffingPriority = priority.name),
+                )))
+            }
+            composeRule.onNodeWithText("Optional coverage: ${optionalCoverage[index]}")
+                .performScrollTo().assertIsDisplayed()
+            composeRule.onNodeWithText("Accept").performClick()
+            assertEquals(index + 1, accepted)
+        }
+    }
+
+    @Test
     fun given_schedule_actions_when_opened_then_only_server_permitted_operations_can_be_selected() {
         val options = mutableStateOf<EventScheduleMaintenanceOptions?>(null)
         var selected: EventEditorMaintenanceOperation? = null

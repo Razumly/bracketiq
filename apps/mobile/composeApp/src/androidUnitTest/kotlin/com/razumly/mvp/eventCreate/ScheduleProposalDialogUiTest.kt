@@ -9,6 +9,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import com.razumly.mvp.core.data.dataTypes.MatchOfficialAssignment
 import com.razumly.mvp.core.data.dataTypes.OfficialAssignmentHolderType
 import com.razumly.mvp.core.network.dto.EventEditorBasicsDto
@@ -57,6 +58,33 @@ class ScheduleProposalDialogUiTest {
     val composeRule = createComposeRule()
 
     @Test
+    fun given_each_priority_when_proposal_is_reviewed_then_coverage_is_explained_before_acceptance() {
+        val proposal = mutableStateOf(buildProposal())
+        var accepted = 0
+        composeRule.setContent {
+            MaterialTheme {
+                ScheduleProposalDialog(proposal = proposal.value, onAccept = { accepted += 1 }, onReject = {})
+            }
+        }
+        val requiredCoverage = listOf(
+            "Team duties and named Official Positions.", "Team duties.", "Named Official Positions.",
+            "None. Staffing gaps do not block Match placement.",
+            "Team duties and named Official Positions. Assignment conflicts are allowed.",
+        )
+        com.razumly.mvp.core.data.dataTypes.StaffingPriority.entries.forEachIndexed { index, priority ->
+            composeRule.runOnIdle {
+                proposal.value = buildProposal().let { current -> current.copy(snapshot = current.snapshot.copy(
+                    draft = current.snapshot.draft.copy(staff = current.snapshot.draft.staff.copy(staffingPriority = priority.name)),
+                )) }
+            }
+            composeRule.onNodeWithText("Required coverage: ${requiredCoverage[index]}")
+                .performScrollTo().assertIsDisplayed()
+            composeRule.onNodeWithText("Accept and create").assertIsEnabled().performClick()
+            org.junit.Assert.assertEquals(index + 1, accepted)
+        }
+    }
+
+    @Test
     fun given_completeProposal_when_dialogRenders_then_showsGraphAssignmentsAndActions() {
         var accepted = false
 
@@ -71,7 +99,9 @@ class ScheduleProposalDialogUiTest {
         }
 
         proposalSnapshotLabels().forEach { label ->
-            composeRule.onNodeWithText(label, substring = true).assertIsDisplayed()
+            val node = composeRule.onNodeWithText(label, substring = true)
+            if (label != "Review schedule proposal") node.performScrollTo()
+            node.assertIsDisplayed()
         }
 
         composeRule.onNodeWithText("Accept and create").performClick()
@@ -155,10 +185,10 @@ class ScheduleProposalDialogUiTest {
         composeRule.onNodeWithText("Incomplete schedule: 1 placed, 1 unscheduled").assertIsDisplayed()
         composeRule.onNodeWithText(
             "match-unplaced (match 2, phaseDivisionId playoff-phase, phase PLAYOFF, sourceDivisionId division-1)",
-        ).assertIsDisplayed()
+        ).performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText(
             "playoff-phase: Playoffs (PLAYOFF, sourceDivisionId division-1)",
-        ).assertIsDisplayed()
+        ).performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText("Review partial acceptance").assertIsEnabled().performClick()
         assertFalse(accepted)
         composeRule.onNodeWithText("Back to proposal").performClick()
@@ -226,7 +256,7 @@ class ScheduleProposalDialogUiTest {
 
         composeRule.onNodeWithText(
             "This schedule proposal is stale and cannot be accepted. Refresh to review the current proposal; your event setup is still here.",
-        ).assertIsDisplayed()
+        ).performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText("Refresh proposal").assertIsEnabled().performClick()
         composeRule.onNodeWithText("Reject").assertIsDisplayed().performClick()
         composeRule.onNodeWithText("Accept and create").assertDoesNotExist()
@@ -292,6 +322,7 @@ private fun buildProposal(): EventEditorCreateProposalDto {
         ),
         resources = EventEditorResourcesDto(),
         staff = EventEditorStaffDto(
+            staffingPriority = "BEST_AVAILABLE_COVERAGE",
             teamCheckInMode = "NONE",
             teamCheckInOpenMinutesBefore = 0,
             allowMatchRosterEdits = false,

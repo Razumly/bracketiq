@@ -5,11 +5,11 @@ package com.razumly.mvp.eventDetail
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.StaffingPriority
 import com.razumly.mvp.core.data.dataTypes.EventOfficial
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
-import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
@@ -20,7 +20,6 @@ import com.razumly.mvp.core.util.jsonMVP
 import com.razumly.mvp.core.data.dataTypes.buildEventOfficialPositionId
 import com.razumly.mvp.core.data.dataTypes.buildEventOfficialRecordId
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
-import com.razumly.mvp.core.data.dataTypes.toStaffingPriority
 import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.repositories.EventEditorApiException
 import com.razumly.mvp.core.data.repositories.EventEditorCanonicalState
@@ -3241,9 +3240,9 @@ class MobileTournamentEventEditorApiContractTest {
             "${variant.key} scoring model drifted",
         )
         assertEquals(
-            variant.event.officialSchedulingMode,
-            event.officialSchedulingMode,
-            "${variant.key} official scheduling mode drifted",
+            variant.event.staffingPriority,
+            event.staffingPriority,
+            "${variant.key} Staffing Priority drifted",
         )
         when (variant.officialCase) {
             OfficialCase.NAMED_OFFICIALS -> {
@@ -3256,7 +3255,7 @@ class MobileTournamentEventEditorApiContractTest {
 
             OfficialCase.NO_OFFICIALS -> {
                 assertTrue(event.officialIds.isEmpty(), "${variant.key} should not persist named officials")
-                assertEquals(OfficialSchedulingMode.SCHEDULE, event.officialSchedulingMode)
+                assertEquals(StaffingPriority.BEST_AVAILABLE_COVERAGE, event.staffingPriority)
             }
         }
         if (variant.event.includePlayoffs) {
@@ -3519,7 +3518,6 @@ private fun assertTournamentEventValues(
     assertEquals(expected.gamesPerOpponent, event.gamesPerOpponent)
     assertEquals(expected.isAutomatedScheduling, event.isAutomatedScheduling)
     assertEquals(expected.noFixedEndDateTime, event.noFixedEndDateTime)
-    assertEquals(expected.officialSchedulingMode, event.officialSchedulingMode)
     assertEquals(expected.staffingPriority, event.staffingPriority)
     assertEquals(expected.doTeamsOfficiate, event.doTeamsOfficiate)
     assertEquals(expected.teamOfficialsMaySwap, event.teamOfficialsMaySwap)
@@ -4609,8 +4607,7 @@ private fun buildTournamentContractVariant(
         pointsToVictory = listOf(21, 21, 15),
         restTimeMinutes = 10,
         state = "UNPUBLISHED",
-        officialSchedulingMode = officialBundle.schedulingMode,
-        staffingPriority = officialBundle.schedulingMode.toStaffingPriority(),
+        staffingPriority = officialBundle.staffingPriority,
         officialPositions = officialBundle.positions,
         eventOfficials = officialBundle.eventOfficials,
         officialIds = officialBundle.officialIds,
@@ -4901,8 +4898,7 @@ private fun buildVariant(
         },
         restTimeMinutes = 0,
         state = "PUBLISHED",
-        officialSchedulingMode = officialBundle.schedulingMode,
-        staffingPriority = officialBundle.schedulingMode.toStaffingPriority(),
+        staffingPriority = officialBundle.staffingPriority,
         officialPositions = officialBundle.positions,
         eventOfficials = officialBundle.eventOfficials,
         officialIds = officialBundle.officialIds,
@@ -5111,7 +5107,7 @@ private fun buildOfficialBundle(
 ): OfficialBundle {
     if (officialCase == OfficialCase.NO_OFFICIALS) {
         return OfficialBundle(
-            schedulingMode = OfficialSchedulingMode.SCHEDULE,
+            staffingPriority = StaffingPriority.BEST_AVAILABLE_COVERAGE,
             positions = emptyList(),
             eventOfficials = emptyList(),
             officialIds = emptyList(),
@@ -5129,7 +5125,7 @@ private fun buildOfficialBundle(
     )
     if (officialCase == OfficialCase.TEAM_OFFICIALS) {
         return OfficialBundle(
-            schedulingMode = OfficialSchedulingMode.TEAM_STAFFING,
+            staffingPriority = StaffingPriority.TEAM_COVERAGE_REQUIRED,
             positions = positions,
             eventOfficials = emptyList(),
             officialIds = emptyList(),
@@ -5138,7 +5134,7 @@ private fun buildOfficialBundle(
 
     val officialIds = listOf(OFFICIAL_ONE_ID, OFFICIAL_TWO_ID)
     return OfficialBundle(
-        schedulingMode = OfficialSchedulingMode.SCHEDULE,
+        staffingPriority = StaffingPriority.BEST_AVAILABLE_COVERAGE,
         positions = positions,
         eventOfficials = officialIds.map { userId ->
             EventOfficial(
@@ -5222,7 +5218,7 @@ private data class PointIncidentTarget(
 )
 
 private data class OfficialBundle(
-    val schedulingMode: OfficialSchedulingMode,
+    val staffingPriority: StaffingPriority,
     val positions: List<EventOfficialPosition>,
     val eventOfficials: List<EventOfficial>,
     val officialIds: List<String>,

@@ -954,7 +954,6 @@ private fun maintenanceGraph(
             fieldIds = listOf(fieldId),
             timeSlotIds = listOf(timeSlotId),
             officialIds = emptyList(),
-            officialSchedulingMode = "SCHEDULE",
             staffingPriority = "BEST_AVAILABLE_COVERAGE",
             officialPositions = emptyList(),
             eventOfficials = emptyList(),
