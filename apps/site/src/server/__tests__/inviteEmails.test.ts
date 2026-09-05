@@ -4,6 +4,7 @@ const storedInvites = new Map<string, any>();
 const deliveries = new Map<string, any>();
 const prismaMock = {
   $executeRaw: jest.fn(),
+  $queryRaw: jest.fn(),
   $transaction: jest.fn((callback: any) => callback(prismaMock)),
   teamBlocks: { findMany: jest.fn() },
   parentChildLinks: { findMany: jest.fn() },
@@ -48,6 +49,7 @@ describe('sendInviteEmails', () => {
     jest.clearAllMocks();
     storedInvites.clear(); deliveries.clear();
     prismaMock.$executeRaw.mockResolvedValue(0);
+    prismaMock.$queryRaw.mockResolvedValue([]);
     prismaMock.teamBlocks.findMany.mockResolvedValue([]);
     prismaMock.authUser.findMany.mockResolvedValue([]);
     prismaMock.parentChildLinks.findMany.mockResolvedValue([]);

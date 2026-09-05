@@ -70,7 +70,11 @@ jest.mock('@/lib/requestOrigin', () => ({ getRequestOrigin: () => 'http://localh
 import { POST } from '@/app/api/teams/[id]/member-invites/route';
 
 describe('/api/teams/[id]/member-invites POST', () => {
+  afterEach(() => jest.useRealTimers());
+
   beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-04-30T12:00:00Z'));
     jest.clearAllMocks();
     (txMock as any).userData = { findMany: jest.fn().mockResolvedValue([]) };
     txMock.invitationRequests.findUnique.mockResolvedValue(null);
