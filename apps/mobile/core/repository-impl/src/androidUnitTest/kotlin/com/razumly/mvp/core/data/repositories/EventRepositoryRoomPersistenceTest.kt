@@ -69,6 +69,7 @@ import com.razumly.mvp.core.network.dto.EventEditorSnapshotDto
 import com.razumly.mvp.core.network.dto.EventEditorStaffDto
 import com.razumly.mvp.core.network.dto.EventEditorTimeSlotDto
 import com.razumly.mvp.core.network.dto.EventApiDto
+import com.razumly.mvp.core.network.dto.EventDetailBootstrapResponseDto
 import com.razumly.mvp.core.network.dto.TeamApiDto
 import com.razumly.mvp.core.network.dto.MatchApiDto
 import com.razumly.mvp.core.network.dto.ScheduleReflowRequestDto
@@ -2772,7 +2773,129 @@ class EventRepositoryRoomPersistenceTest {
             }
         }
     @Test
-    fun given_complete_maintenance_when_protected_placed_match_differs_from_graph_then_room_preserves_state_and_updates_links() =
+    fun given_rebuild_when_sync_retries_then_room_is_current() =
+        kotlinx.coroutines.test.runTest {
+            val fixture = eventRepositoryRoomPersistenceTournamentFixture()
+            val databaseName = "i41-sync-${java.util.UUID.randomUUID()}.db"
+            var database = Room.databaseBuilder<MVPDatabaseService>(context, databaseName)
+                .allowMainThreadQueries().build()
+            var databaseService = EventRepositoryRoomPersistence_NoStartupCleanupDatabase(database)
+            val event = requireNotNull(fixture.eventResponse.toEventOrNull(requireOwnerIdentity = true))
+            databaseService.getEventDao.upsertEvent(event)
+            val request = roomMaintenanceRequest(
+                fixture, EventEditorMaintenanceOperation.REBUILD, "older-rebuild",
+            )
+            val graph = EventEditorMaintenanceGraphDto(
+                event = fixture.eventResponse,
+                matches = listOf(roomMaintenanceProjection(fixture.eventId, "old-match", 1, "field-old")),
+                canonicalEvent = roomMaintenanceGraphEvent(fixture.eventId, fieldId = "field-old"),
+                canonicalMatches = listOf(roomMaintenanceGraphMatch(fixture.eventId, "old-match", 1, "field-old")),
+            )
+            val accepted = roomMaintenanceAcceptedResult(request, graph, protectedMatchIds = emptyList())
+            val latest = EventDetailBootstrapResponseDto(
+                event = fixture.eventResponse.copy(
+                    end = "2026-08-15T20:00:00Z", fieldIds = listOf("field-current"),
+                ),
+                fields = listOf(Field(id = "field-current", name = "Current court")),
+                matches = listOf(
+                    MatchApiDto(
+                        id = "current-placed", eventId = fixture.eventId, matchId = 2,
+                        start = "2026-08-15T19:00:00Z", end = "2026-08-15T20:00:00Z",
+                        fieldId = "field-current", placementState = "PLACED", locked = true,
+                        team1Id = "team-left", team2Id = "team-right", teamOfficialId = "team-duty",
+                        winnerNextMatchId = "current-unplaced",
+                    ),
+                    MatchApiDto(
+                        id = "current-unplaced", eventId = fixture.eventId, matchId = 3,
+                        start = null, end = null, fieldId = null, placementState = "UNPLACED",
+                        previousLeftId = "current-placed",
+                    ),
+                ),
+            )
+            var failRefresh = true
+            val http = HttpClient(MockEngine { httpRequest ->
+                when (httpRequest.url.encodedPath) {
+                    "/api/events/${fixture.eventId}/schedule" -> {
+                        assertEquals(HttpMethod.Put, httpRequest.method)
+                        respondJson(encodeRoomMaintenanceResponse(accepted), HttpStatusCode.OK)
+                    }
+                    "/api/events/${fixture.eventId}/detail" -> {
+                        assertEquals(HttpMethod.Get, httpRequest.method)
+                        assertEquals("true", httpRequest.url.parameters["manage"])
+                        if (failRefresh) {
+                            respondJson("{\"error\":\"Refresh failed\"}", HttpStatusCode.ServiceUnavailable)
+                        } else {
+                            respondJson(jsonMVP.encodeToString(latest), HttpStatusCode.OK)
+                        }
+                    }
+                    else -> error("Unexpected request: ${httpRequest.url.encodedPath}")
+                }
+            }) { configureMvpHttpClient() }
+            var repository = eventRepositoryRoomPersistenceRepository(
+                databaseService, http, UnconfinedTestDispatcher(testScheduler),
+            )
+            try {
+                repository.acceptEventScheduleMaintenance(EventEditorAcceptMaintenanceProposalDto(
+                    contractVersion = request.contractVersion, eventId = request.eventId,
+                    operation = request.operation, operationId = request.operationId,
+                    proposalRevision = accepted.proposalRevision,
+                    acceptanceOperationId = accepted.acceptanceOperationId,
+                )).getOrThrow()
+                val prior = repository.getCachedEventWithRelationsFlow(event.id).first().getOrThrow()
+                assertTrue(repository.syncEventDetail(event, null, manage = true).isFailure)
+                assertEquals(prior, repository.getCachedEventWithRelationsFlow(event.id).first().getOrThrow())
+                assertEquals(listOf("old-match"), database.getMatchDao.getMatchesOfTournament(event.id).map(MatchMVP::id))
+
+                failRefresh = false
+                repository.syncEventDetail(event, null, manage = true).getOrThrow()
+                repository.close()
+                database.close()
+                http.close()
+                database = Room.databaseBuilder<MVPDatabaseService>(context, databaseName)
+                    .allowMainThreadQueries().build()
+                databaseService = EventRepositoryRoomPersistence_NoStartupCleanupDatabase(database)
+                val offlineHttp = HttpClient(MockEngine { error("Offline reload must use Room.") }) {
+                    configureMvpHttpClient()
+                }
+                try {
+                    repository = eventRepositoryRoomPersistenceRepository(
+                        databaseService, offlineHttp, UnconfinedTestDispatcher(testScheduler),
+                    )
+                    val matches = com.razumly.mvp.eventDetail.data.MatchRepository(
+                        api = MvpApiClient(offlineHttp, "http://example.test", EventRepositoryRoomPersistence_AuthTokenStore),
+                        databaseService = databaseService, autoSyncOperations = false,
+                    ).getCachedMatchesOfTournamentFlow(event.id).first().getOrThrow()
+                        .map { it.match }.associateBy(MatchMVP::id)
+                    assertEquals(setOf("current-placed", "current-unplaced"), matches.keys)
+                    val placed = matches.getValue("current-placed")
+                    assertEquals("field-current", placed.fieldId)
+                    assertEquals("2026-08-15T19:00:00Z", placed.start?.toString())
+                    assertEquals("team-left", placed.team1Id)
+                    assertEquals("team-right", placed.team2Id)
+                    assertEquals("team-duty", placed.teamOfficialId)
+                    assertTrue(placed.locked)
+                    assertEquals("current-unplaced", placed.winnerNextMatchId)
+                    val unplaced = matches.getValue("current-unplaced")
+                    assertEquals("UNPLACED", unplaced.placementState)
+                    assertEquals("current-placed", unplaced.previousLeftId)
+                    assertNull(unplaced.start)
+                    assertNull(unplaced.end)
+                    assertNull(unplaced.fieldId)
+                    assertEquals("2026-08-15T20:00:00Z",
+                        repository.getCachedEventWithRelationsFlow(event.id).first().getOrThrow().event.end.toString())
+                } finally {
+                    offlineHttp.close()
+                }
+            } finally {
+                repository.close()
+                http.close()
+                database.close()
+                context.deleteDatabase(databaseName)
+            }
+        }
+
+    @Test
+    fun given_complete_maintenance_when_cache_is_stale_then_room_uses_accepted_protected_match() =
         kotlinx.coroutines.test.runTest {
             val fixture = eventRepositoryRoomPersistenceTournamentFixture()
             val database = Room.inMemoryDatabaseBuilder<MVPDatabaseService>(context)
@@ -2872,25 +2995,14 @@ class EventRepositoryRoomPersistenceTest {
                 val persistedMatches = database.getMatchDao.getMatchesOfTournament(fixture.eventId)
                     .associateBy(MatchMVP::id)
                 val persistedProtected = persistedMatches.getValue(protectedMatch.id)
-                assertEquals(protectedMatch.start, persistedProtected.start)
-                assertEquals(protectedMatch.end, persistedProtected.end)
-                assertEquals(protectedMatch.fieldId, persistedProtected.fieldId)
-                assertEquals(protectedMatch.team1Id, persistedProtected.team1Id)
-                assertEquals(protectedMatch.team2Id, persistedProtected.team2Id)
-                assertEquals(protectedMatch.team1Seed, persistedProtected.team1Seed)
-                assertEquals(protectedMatch.team2Seed, persistedProtected.team2Seed)
-                assertEquals(protectedMatch.placementState, persistedProtected.placementState)
-                assertEquals(protectedMatch.locked, persistedProtected.locked)
-                assertEquals(protectedMatch.status, persistedProtected.status)
-                assertEquals(protectedMatch.resultStatus, persistedProtected.resultStatus)
-                assertEquals(protectedMatch.resultType, persistedProtected.resultType)
-                assertEquals(protectedMatch.actualStart, persistedProtected.actualStart)
-                assertEquals(protectedMatch.actualEnd, persistedProtected.actualEnd)
-                assertEquals(protectedMatch.winnerEventTeamId, persistedProtected.winnerEventTeamId)
-                assertEquals(protectedMatch.team1Points, persistedProtected.team1Points)
-                assertEquals(protectedMatch.team2Points, persistedProtected.team2Points)
-                assertEquals(protectedMatch.officialId, persistedProtected.officialId)
-                assertEquals(protectedMatch.officialCheckedIn, persistedProtected.officialCheckedIn)
+                assertEquals("2026-08-15T08:00:00Z", persistedProtected.start?.toString())
+                assertEquals("2026-08-15T08:45:00Z", persistedProtected.end?.toString())
+                assertEquals("field-graph", persistedProtected.fieldId)
+                assertNull(persistedProtected.team1Id)
+                assertNull(persistedProtected.team2Id)
+                assertNull(persistedProtected.teamOfficialId)
+                assertFalse(persistedProtected.locked)
+                assertTrue(persistedProtected.officialIds.isEmpty())
                 assertEquals(unprotectedMatch.id, persistedProtected.winnerNextMatchId)
                 assertEquals(unprotectedMatch.id, persistedProtected.loserNextMatchId)
 
@@ -2910,7 +3022,7 @@ class EventRepositoryRoomPersistenceTest {
         }
 
     @Test
-    fun given_rebuild_maintenance_when_protected_placed_match_differs_from_graph_then_room_preserves_state_and_updates_links() =
+    fun given_rebuild_maintenance_when_cache_is_stale_then_room_uses_accepted_protected_match() =
         kotlinx.coroutines.test.runTest {
             val fixture = eventRepositoryRoomPersistenceTournamentFixture()
             val database = Room.inMemoryDatabaseBuilder<MVPDatabaseService>(context)
@@ -3010,13 +3122,17 @@ class EventRepositoryRoomPersistenceTest {
 
                 val persistedMatches = database.getMatchDao.getMatchesOfTournament(fixture.eventId)
                     .associateBy(MatchMVP::id)
-                assertEquals(
-                    protectedMatch.copy(
-                        winnerNextMatchId = generatedMatchId,
-                        loserNextMatchId = generatedMatchId,
-                    ),
-                    persistedMatches.getValue(protectedMatch.id),
-                )
+                val persistedProtected = persistedMatches.getValue(protectedMatch.id)
+                assertEquals("2026-08-15T08:00:00Z", persistedProtected.start?.toString())
+                assertEquals("2026-08-15T08:45:00Z", persistedProtected.end?.toString())
+                assertEquals("field-graph", persistedProtected.fieldId)
+                assertNull(persistedProtected.team1Id)
+                assertNull(persistedProtected.team2Id)
+                assertNull(persistedProtected.teamOfficialId)
+                assertFalse(persistedProtected.locked)
+                assertTrue(persistedProtected.officialIds.isEmpty())
+                assertEquals(generatedMatchId, persistedProtected.winnerNextMatchId)
+                assertEquals(generatedMatchId, persistedProtected.loserNextMatchId)
                 assertFalse(persistedMatches.containsKey(staleMatch.id))
 
                 val persistedGenerated = persistedMatches.getValue(generatedMatchId)

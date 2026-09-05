@@ -18,7 +18,7 @@ import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.network.dto.EventEditorMaintenanceOperation
 
 @Composable
-internal fun EventScheduleMaintenanceActions(
+internal fun EventScheduleMaintenanceScreen(
     canRequest: Boolean,
     options: EventScheduleMaintenanceOptions?,
     onOpen: () -> Unit,
@@ -44,15 +44,13 @@ internal fun EventScheduleMaintenanceActions(
                 if (options.isLoading) Text("Loading permitted Schedule actions...")
                 options.message?.let { Text(it) }
                 if (!options.isLoading) options.operations.forEach { operation ->
-                    val label = when (operation) {
-                        EventEditorMaintenanceOperation.BUILD -> "Build Schedule"
-                        EventEditorMaintenanceOperation.COMPLETE -> "Complete Schedule"
-                        EventEditorMaintenanceOperation.REBUILD -> "Rebuild Schedule"
-                    }
-                    val description = when (operation) {
-                        EventEditorMaintenanceOperation.BUILD -> "Generate Matches and propose their placements."
-                        EventEditorMaintenanceOperation.COMPLETE -> "Place Unscheduled Matches. Keep placed Matches fixed."
-                        EventEditorMaintenanceOperation.REBUILD -> "Replace eligible Matches. Keep protected Matches fixed."
+                    val (label, description) = when (operation) {
+                        EventEditorMaintenanceOperation.BUILD ->
+                            "Build Schedule" to "Generate Matches and propose their placements."
+                        EventEditorMaintenanceOperation.COMPLETE ->
+                            "Complete Schedule" to "Place Unscheduled Matches. Keep placed Matches fixed."
+                        EventEditorMaintenanceOperation.REBUILD ->
+                            "Rebuild Schedule" to "Replace eligible Matches. Keep protected Matches fixed."
                     }
                     TextButton(
                         onClick = { onSelect(operation) },

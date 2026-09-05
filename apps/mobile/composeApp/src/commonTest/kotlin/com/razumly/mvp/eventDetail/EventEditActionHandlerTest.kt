@@ -3,6 +3,9 @@ package com.razumly.mvp.eventDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.EventEditorSaveOutcome
+import com.razumly.mvp.core.data.repositories.EventDetailSyncResult
+import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
+import com.razumly.mvp.core.data.repositories.EventParticipantsSyncResult
 import com.razumly.mvp.core.data.repositories.EventEditorSession
 import com.razumly.mvp.core.data.repositories.EventEditorSessionMapper
 import com.razumly.mvp.core.data.repositories.IEventRepository
@@ -128,6 +131,32 @@ class EventEditActionHandlerTest {
     }
 
     @Test
+    fun given_stale_schedule_proposal_when_retried_then_uses_fresh_server_revisions() = runTest {
+        val event = testEvent()
+        val original = editorSession(event, listOf(EventEditorMaintenanceOperation.COMPLETE))
+        val fresh = editorSession(event, listOf(EventEditorMaintenanceOperation.COMPLETE),
+            editorRevision = "fresh-editor", scheduleRevision = "fresh-schedule")
+        val repository = HandlerEventRepository(
+            editorSessions = ArrayDeque(listOf(original, fresh)), saveOutcomes = ArrayDeque(),
+            proposalResponses = ArrayDeque(listOf(EventEditorMaintenanceResponseDto.Proposed(
+                maintenanceProposal(EventEditorMaintenanceOperation.COMPLETE),
+            ))),
+            proposalFailures = ArrayDeque(listOf(staleMaintenanceFailure())),
+        )
+        val handler = createHandler(this, event, repository, mutableListOf())
+        handler.openScheduleMaintenance()
+        advanceUntilIdle()
+        handler.selectScheduleMaintenanceOperation(EventEditorMaintenanceOperation.COMPLETE)
+        advanceUntilIdle()
+        handler.requestFreshScheduleMaintenanceProposal()
+        advanceUntilIdle()
+
+        assertEquals(fresh.snapshot.revisionBinding, repository.maintenanceRequests.last().expectedRevisions)
+        assertEquals(EventScheduleMaintenanceReviewPhase.PROPOSED, handler.scheduleMaintenanceReview.value?.phase)
+        assertTrue(repository.saveCommands.isEmpty())
+    }
+
+    @Test
     fun given_partial_maintenance_when_accepting_then_confirmation_is_required_before_the_request() = runTest {
         val event = testEvent()
         val session = editorSession(event = event, operations = listOf(EventEditorMaintenanceOperation.REBUILD))
@@ -156,7 +185,7 @@ class EventEditActionHandlerTest {
             proposalResponses = ArrayDeque(listOf(EventEditorMaintenanceResponseDto.Proposed(proposal))),
         )
         repository.acceptMaintenanceResult = acceptedMaintenanceResult(proposal)
-        repository.batchEvents = listOf(event)
+        repository.detailEvents = listOf(event)
         val handler = createHandler(this, event, repository, mutableListOf())
         handler.startEditingEvent()
         advanceUntilIdle()
@@ -704,7 +733,7 @@ class EventEditActionHandlerTest {
     }
 
     @Test
-    fun given_accepted_maintenance_when_refreshing_then_uses_fresh_batch_event_and_match_reads_before_exposing_success() = runTest {
+    fun given_accepted_maintenance_when_refreshing_then_uses_atomic_detail_sync_before_exposing_success() = runTest {
         val event = testEvent()
         val initialSession = editorSession(
             event = event,
@@ -725,7 +754,7 @@ class EventEditActionHandlerTest {
             ),
         )
         repository.acceptMaintenanceResult = acceptedMaintenanceResult(proposal)
-        repository.batchEvents = listOf(event.copy(name = "Accepted fresh event"))
+        repository.detailEvents = listOf(event.copy(name = "Accepted fresh event"))
         val matchRepository = HandlerMatchRepository()
         val errors = mutableListOf<String>()
         var handlerReference: EventEditActionHandler? = null
@@ -749,8 +778,9 @@ class EventEditActionHandlerTest {
         handler.acceptScheduleMaintenanceProposal()
         advanceUntilIdle()
 
-        assertEquals(listOf(listOf(event.id)), repository.eventBatchRequests)
-        assertEquals(listOf(listOf(event.id)), matchRepository.batchRequests)
+        assertEquals(listOf(event.id), repository.detailSyncRequests)
+        assertTrue(repository.eventBatchRequests.isEmpty())
+        assertTrue(matchRepository.batchRequests.isEmpty())
         assertEquals(emptyList(), matchRepository.singularRequests)
         assertEquals(listOf<EventScheduleMaintenanceReviewPhase?>(EventScheduleMaintenanceReviewPhase.ACCEPTING), reviewPhasesDuringSync)
         assertNull(handler.scheduleMaintenanceReview.value)
@@ -770,10 +800,10 @@ class EventEditActionHandlerTest {
             proposalResponses = ArrayDeque(
                 listOf(EventEditorMaintenanceResponseDto.Proposed(proposal)),
             ),
-            batchFailures = ArrayDeque(listOf(IllegalStateException("schedule sync failed"))),
+            detailSyncFailures = ArrayDeque(listOf(IllegalStateException("schedule sync failed"))),
         )
         repository.acceptMaintenanceResult = acceptedMaintenanceResult(proposal)
-        repository.batchEvents = listOf(event)
+        repository.detailEvents = listOf(event)
         val matchRepository = HandlerMatchRepository()
         val errors = mutableListOf<String>()
         val handler = createHandler(
@@ -812,7 +842,8 @@ class EventEditActionHandlerTest {
 
         assertNull(handler.scheduleMaintenanceReview.value)
         assertEquals(1, repository.acceptanceRequests.size)
-        assertEquals(2, repository.eventBatchRequests.size)
+        assertEquals(2, repository.detailSyncRequests.size)
+        assertTrue(repository.acceptedSyncRequests.isEmpty())
     }
 
     @Test
@@ -837,7 +868,7 @@ class EventEditActionHandlerTest {
             ),
         )
         repository.acceptMaintenanceFailure = acceptanceConflictFailure()
-        repository.batchEvents = listOf(event.copy(name = "Accepted server event"))
+        repository.detailEvents = listOf(event.copy(name = "Accepted server event"))
         val matchRepository = HandlerMatchRepository()
         val errors = mutableListOf<String>()
         val handler = createHandler(
@@ -856,13 +887,10 @@ class EventEditActionHandlerTest {
         advanceUntilIdle()
 
         assertNull(handler.scheduleMaintenanceReview.value)
-        assertEquals(1, repository.acceptedSyncRequests.size)
-        assertEquals(
-            listOf("generated-placeholder"),
-            repository.acceptedSyncRequests.single().graph.event.teams.mapNotNull { team -> team.id },
-        )
-        assertEquals(listOf(listOf(event.id)), repository.eventBatchRequests)
-        assertEquals(listOf(listOf(event.id)), matchRepository.batchRequests)
+        assertTrue(repository.acceptedSyncRequests.isEmpty())
+        assertEquals(listOf(event.id), repository.detailSyncRequests)
+        assertTrue(repository.eventBatchRequests.isEmpty())
+        assertTrue(matchRepository.batchRequests.isEmpty())
         assertEquals(2, repository.editorRequests.size)
         assertTrue(errors.last().contains("accepted by another client"))
 
@@ -891,10 +919,10 @@ class EventEditActionHandlerTest {
             proposalResponses = ArrayDeque(
                 listOf(EventEditorMaintenanceResponseDto.Proposed(proposal)),
             ),
-            batchFailures = ArrayDeque(listOf(IllegalStateException("schedule sync failed"))),
+            detailSyncFailures = ArrayDeque(listOf(IllegalStateException("schedule sync failed"))),
         )
         repository.rejectMaintenanceFailure = acceptanceConflictFailure()
-        repository.batchEvents = listOf(event.copy(name = "Accepted server event"))
+        repository.detailEvents = listOf(event.copy(name = "Accepted server event"))
         val matchRepository = HandlerMatchRepository()
         val errors = mutableListOf<String>()
         val handler = createHandler(
@@ -917,8 +945,8 @@ class EventEditActionHandlerTest {
             handler.scheduleMaintenanceReview.value?.phase,
         )
         assertEquals(1, repository.rejectionRequests.size)
-        assertEquals(1, repository.eventBatchRequests.size)
-        assertEquals(1, repository.acceptedSyncRequests.size)
+        assertEquals(1, repository.detailSyncRequests.size)
+        assertTrue(repository.acceptedSyncRequests.isEmpty())
         assertTrue(errors.last().contains("accepted by another client"))
 
         handler.rejectScheduleMaintenanceProposal()
@@ -929,9 +957,9 @@ class EventEditActionHandlerTest {
         advanceUntilIdle()
 
         assertNull(handler.scheduleMaintenanceReview.value)
-        assertEquals(2, repository.eventBatchRequests.size)
+        assertEquals(2, repository.detailSyncRequests.size)
         assertEquals(2, repository.editorRequests.size)
-        assertEquals(2, repository.acceptedSyncRequests.size)
+        assertTrue(repository.acceptedSyncRequests.isEmpty())
         assertTrue(errors.last().contains("accepted by another client"))
     }
 
@@ -1039,7 +1067,7 @@ class EventEditActionHandlerTest {
                         result = accepted,
                         cause = IllegalStateException("Room write failed"),
                     )
-                handlerRepository.batchEvents = listOf(event)
+                handlerRepository.detailEvents = listOf(event)
             }
             val errors = mutableListOf<String>()
             val handler = createHandler(
@@ -1073,9 +1101,8 @@ class EventEditActionHandlerTest {
 
             assertNull(handler.scheduleMaintenanceReview.value)
             assertEquals(1, repository.acceptanceRequests.size)
-            assertEquals(1, repository.acceptedSyncRequests.size)
-            assertEquals(accepted, repository.acceptedSyncRequests.single())
-            assertEquals(1, repository.eventBatchRequests.size)
+            assertTrue(repository.acceptedSyncRequests.isEmpty())
+            assertEquals(1, repository.detailSyncRequests.size)
         }
 
     private fun createHandler(
@@ -1122,7 +1149,7 @@ private class HandlerEventRepository(
     private val saveOutcomes: ArrayDeque<EventEditorSaveOutcome>,
     private val proposalResponses: ArrayDeque<EventEditorMaintenanceResponseDto>,
     private val proposalFailures: ArrayDeque<Throwable> = ArrayDeque(),
-    private val batchFailures: ArrayDeque<Throwable> = ArrayDeque(),
+    private val detailSyncFailures: ArrayDeque<Throwable> = ArrayDeque(),
     private val saveFailure: Throwable? = null,
 ) : IEventRepository by CreateEvent_FakeEventRepository() {
     val editorRequests = mutableListOf<String>()
@@ -1132,12 +1159,13 @@ private class HandlerEventRepository(
     val acceptanceRequests = mutableListOf<EventEditorAcceptMaintenanceProposalDto>()
     val rejectionRequests = mutableListOf<EventEditorRejectMaintenanceProposalDto>()
     val eventBatchRequests = mutableListOf<List<String>>()
+    val detailSyncRequests = mutableListOf<String>()
     val acceptedSyncRequests = mutableListOf<EventEditorMaintenanceAcceptedResultDto>()
     var acceptMaintenanceFailure: Throwable? = null
     var acceptMaintenanceResult: EventEditorMaintenanceAcceptedResultDto? = null
     var rejectMaintenanceFailure: Throwable? = null
     var rejectMaintenanceResult: EventEditorMaintenanceRejectedResultDto? = null
-    var batchEvents: List<Event> = emptyList()
+    var detailEvents: List<Event> = emptyList()
     var refreshEditorGate: CompletableDeferred<Unit>? = null
     private var lastSaveOutcome: EventEditorSaveOutcome? = null
 
@@ -1205,13 +1233,29 @@ private class HandlerEventRepository(
         Result.failure(IllegalStateException("singular event refresh should not be used"))
     override suspend fun getEventsByIds(eventIds: List<String>): Result<List<Event>> {
         eventBatchRequests += eventIds
-        if (batchFailures.isNotEmpty()) {
-            return Result.failure(batchFailures.removeFirst())
+        if (detailSyncFailures.isNotEmpty()) {
+            return Result.failure(detailSyncFailures.removeFirst())
         }
-        return Result.success(batchEvents)
+        return Result.success(detailEvents)
     }
 
     override suspend fun updateLocalEvent(newEvent: Event): Result<Event> = Result.success(newEvent)
+
+    override suspend fun syncEventDetail(
+        event: Event,
+        occurrence: EventOccurrenceSelection?,
+        manage: Boolean,
+    ): Result<EventDetailSyncResult> {
+        assertNull(occurrence)
+        assertTrue(manage)
+        detailSyncRequests += event.id
+        if (detailSyncFailures.isNotEmpty()) {
+            return Result.failure(detailSyncFailures.removeFirst())
+        }
+        return Result.success(EventDetailSyncResult(
+            participants = EventParticipantsSyncResult(detailEvents.single { it.id == event.id }),
+        ))
+    }
 }
 
 private class HandlerMatchRepository : IMatchRepository by CreateEvent_FakeMatchRepository() {

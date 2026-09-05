@@ -92,23 +92,6 @@ private fun EventEditorMaintenanceAcceptedResultDto.asMaintenanceProposal(): Eve
         protectedMatchIds = protectedMatchIds,
         scheduleOutcome = scheduleOutcome,
     )
-private fun EventScheduleMaintenanceReview.asAcceptedMaintenanceResultForConflict():
-    EventEditorMaintenanceAcceptedResultDto =
-    EventEditorMaintenanceAcceptedResultDto(
-        status = EventEditorMaintenanceResponseStatus.ACCEPTED,
-        contractVersion = reviewedProposal.contractVersion,
-        eventId = reviewedProposal.eventId,
-        operation = reviewedProposal.operation,
-        operationId = reviewedProposal.operationId,
-        proposalRevision = reviewedProposal.proposalRevision,
-        revisionBinding = reviewedProposal.revisionBinding,
-        graph = reviewedProposal.graph,
-        protectedMatchIds = reviewedProposal.protectedMatchIds,
-        scheduleOutcome = reviewedProposal.scheduleOutcome,
-        acceptanceOperationId = acceptanceOperationId,
-    )
-
-
 
 private fun EventScheduleEditAction.isAvailableIn(
     snapshot: EventEditorSnapshotDto,
@@ -569,7 +552,7 @@ internal class EventEditActionHandler(
     private suspend fun runScheduleMaintenanceAction(
         action: EventScheduleEditAction,
     ): EventScheduleMaintenanceActionResult {
-        var savedSnapshot: EventEditorSnapshotDto? = null
+        var preparedSnapshot: EventEditorSnapshotDto? = null
         val loadingOperation = loadingHandler().newOperation()
         return editActionCoordinator.runScheduleMaintenanceAction(
             action = action,
@@ -581,20 +564,16 @@ internal class EventEditActionHandler(
                 }
             },
             logPreparedFieldOwnership = ::logPreparedFieldOwnership,
-            updateEvent = { prepared ->
+            prepareSettings = { prepared ->
                 if (!isCurrentDraftScheduleMaintenanceCapable()) {
                     throw EventScheduleMaintenanceUnavailableException()
                 }
                 if (!editDraftCoordinator.isEditing.value) {
                     val session = requireNotNull(editorSession)
-                    savedSnapshot = session.snapshot
-                    EventEditorSaveOutcome(
-                        session = session,
-                        staffEmailDelivery = "NOT_REQUESTED",
-                        scheduleOutcome = com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeDto(
-                            status = com.razumly.mvp.core.network.dto.EventEditorScheduleOutcomeStatus.NOT_REQUESTED,
-                            matchCount = session.snapshot.scheduleState.matchCount,
-                        ),
+                    preparedSnapshot = session.snapshot
+                    EventScheduleMaintenancePreparation(
+                        event = session.canonicalState.event,
+                        settingsSaved = false,
                     )
                 } else {
                     val hadUnsavedChanges = editDraftCoordinator.hasUnsavedChanges()
@@ -608,17 +587,21 @@ internal class EventEditActionHandler(
                             mode = EventEditorScheduleTransitionMode.PRESERVE,
                         ),
                         persistLocally = false,
-                    ).also { outcome ->
-                        savedSnapshot = outcome.session.snapshot
+                    ).let { outcome ->
+                        preparedSnapshot = outcome.session.snapshot
                         if (hadUnsavedChanges) {
                             maintenanceOriginalSession = originalSession
                             maintenanceSavedSession = outcome.session
                         }
+                        EventScheduleMaintenancePreparation(
+                            event = outcome.session.canonicalState.event,
+                            settingsSaved = true,
+                        )
                     }
                 }
             },
             proposeMaintenance = { maintenanceAction, updated ->
-                val authoritativeSnapshot = savedSnapshot
+                val authoritativeSnapshot = preparedSnapshot
                 if (
                     authoritativeSnapshot == null ||
                     !maintenanceAction.isAvailableIn(authoritativeSnapshot)
@@ -791,7 +774,11 @@ internal class EventEditActionHandler(
                         else -> result.throwable.userMessage(result.fallbackMessage)
                     }
                     _scheduleMaintenanceReview.value = EventScheduleMaintenanceReview(
-                        phase = EventScheduleMaintenanceReviewPhase.FAILED,
+                        phase = if (result.throwable is EventEditorProposalStaleException) {
+                            EventScheduleMaintenanceReviewPhase.STALE
+                        } else {
+                            EventScheduleMaintenanceReviewPhase.FAILED
+                        },
                         message = message,
                     )
                     setError(message)
@@ -1009,17 +996,8 @@ internal class EventEditActionHandler(
             loadingOperation.showLoading("Refreshing accepted schedule...")
             try {
                 if (acceptedByAnotherClient) {
-                    val acceptedResultForConflict = accepted
-                        ?: currentReview.asAcceptedMaintenanceResultForConflict().also {
-                            acceptedMaintenanceResult = it
-                        }
-                    eventRepository.syncAcceptedEventScheduleMaintenance(
-                        acceptedResultForConflict,
-                    ).getOrThrow()
                     refreshAcceptedScheduleAndEditor(currentReview.reviewedProposal.eventId)
                 } else {
-                    val acceptedResult = accepted ?: return@launch
-                    eventRepository.syncAcceptedEventScheduleMaintenance(acceptedResult).getOrThrow()
                     refreshAcceptedSchedule(currentReview.reviewedProposal.eventId)
                 }
                 if (
@@ -1031,8 +1009,7 @@ internal class EventEditActionHandler(
                 val successMessage = if (acceptedByAnotherClient) {
                     acceptedByAnotherClientMessage()
                 } else {
-                    val acceptedResult = accepted ?: return@launch
-                    maintenanceAcceptedMessage(currentReview.reviewedProposal.operation, acceptedResult)
+                    "Schedule accepted. The current schedule is now shown."
                 }
                 clearScheduleMaintenanceIdentities()
                 _scheduleMaintenanceReview.value = null
@@ -1254,11 +1231,10 @@ internal class EventEditActionHandler(
     }
 
     private suspend fun refreshAcceptedSchedule(eventId: String): Event {
-        val refreshedEvent = eventRepository.getEventsByIds(listOf(eventId))
-            .getOrThrow()
-            .firstOrNull { event -> event.id == eventId }
-            ?: error("Event $eventId was not returned when refreshing the accepted schedule.")
-        matchRepository.getMatchesByEventIds(listOf(eventId)).getOrThrow()
+        val event = selectedEvent()
+        require(event.id == eventId) { "The selected Event changed during Schedule recovery." }
+        val refreshedEvent = eventRepository.syncEventDetail(event, occurrence = null, manage = true)
+            .getOrThrow().event
         refreshLeagueStandingsAfterSchedule(refreshedEvent)
         return refreshedEvent
     }
@@ -1281,12 +1257,7 @@ internal class EventEditActionHandler(
         expectedReview: EventScheduleMaintenanceReview,
         pendingReview: EventScheduleMaintenanceReview,
     ) {
-        val acceptedResultForConflict = pendingReview.asAcceptedMaintenanceResultForConflict()
-        acceptedMaintenanceResult = acceptedResultForConflict
         val refreshFailure = runCatching {
-            eventRepository.syncAcceptedEventScheduleMaintenance(
-                acceptedResultForConflict,
-            ).getOrThrow()
             refreshAcceptedScheduleAndEditor(eventId)
         }.exceptionOrNull()
         if (

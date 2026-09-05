@@ -49,7 +49,7 @@ class EventDetailOverlayHostUiTest {
         var selected: EventEditorMaintenanceOperation? = null
         composeRule.setContent {
             MaterialTheme {
-                EventScheduleMaintenanceActions(
+                EventScheduleMaintenanceScreen(
                     canRequest = true,
                     options = options.value,
                     onOpen = { options.value = EventScheduleMaintenanceOptions(
@@ -76,7 +76,7 @@ class EventDetailOverlayHostUiTest {
         var selected: EventEditorMaintenanceOperation? = null
         composeRule.setContent {
             MaterialTheme {
-                EventScheduleMaintenanceActions(
+                EventScheduleMaintenanceScreen(
                     canRequest = true,
                     options = options.value,
                     onOpen = { options.value = EventScheduleMaintenanceOptions(

@@ -28,6 +28,7 @@ If an API caller, API path, request or response field, DTO, encoder, or mapper c
 - [x] (2026-09-04) The user approved both test boundaries and review base `1c758491b`.
 - [x] (2026-09-04) Add the Schedule entry point through failing action and UI tests. Verify all three operations, capability restrictions, and cancelled loading.
 - [x] (2026-09-04) Verify stale acceptance and offline Room reload for Build, Complete, and Rebuild. Check Match links, assignments, placements, protected state, and the server Event end.
+- [x] (2026-09-04) Fix the three Spec findings through failing regressions. Verify fresh proposal revisions, accepted protected Match values, and current-graph recovery after offline reload.
 - [ ] Run focused checks during implementation. Run the complete Android/JVM suite at the final gate. Exclude iOS execution as previously requested.
 - [ ] Complete independent Standards and Spec reviews. Resolve findings and commit the issue changes.
 - [ ] Record verification and contract changes on the issue. Close only when all scoped criteria pass.
@@ -47,6 +48,10 @@ Existing tests cover partial confirmation, proposal retries, stale acceptance, a
 
 The new disk test initially failed on invalid test data. The response helper omitted explicit null captain and placement fields. Add those fields to the test helper; retain the strict production parser. The long test name also exceeded the Windows native SQLite path limit. A shorter test name fixed the path. The final focused Room test passed for all three operations.
 
+The first Spec review found three recovery gaps. A proposal-time stale response retried with old revisions. Accepted protected Matches retained stale Room values. Accepted-sync recovery replayed an old graph before upsert-only collection reads. The last path could retain Matches removed by a newer Rebuild.
+
+The first full Android/JVM run confirmed the stale-revision regression. An existing Reflow contract bridge also timed out. The bridge test passed when run alone. Do not change its timeout without a repeatable failure.
+
 ## Decision Log
 
 
@@ -59,6 +64,10 @@ Keep PostgreSQL authoritative. Reuse the existing accepted-result Room transacti
 Use the UI skill for accessible controls and review content. Keep the existing Compose theme, platform controls, and navigation patterns. Do not apply the skill's React Native examples to this Kotlin project.
 
 Read the site Schedule route and maintenance contract before adding the UI entry point. The API path, request fields, response fields, DTOs, encoders, and repository API callers remain unchanged. The test-response helper now includes existing required nullable fields. This is not an HTTP contract change. No Prisma or Room schema changed. No backend or DB runtime operation is needed.
+
+For the review fixes, use the accepted server graph for every Match. Match protection constrains the server operation, not cache refresh. Use `syncEventDetail` for authoritative recovery. Read the existing site detail route before changing the handler caller. This endpoint returns the full graph. Its Room writer removes absent Match IDs in the same transaction. Do not replay a stored or synthetic accepted result during recovery. No endpoint, request field, response field, DTO, or encoder changes. The detail response has no Schedule revision token. Do not claim that its separate server reads represent one revision under concurrent writes.
+
+The Standards review required the `Screen` suffix for the new composable. Use one operation-label mapping. Replace the artificial save outcome with an explicit preparation result that records whether settings were saved. Keep the two small UI test setups explicit. The reviewer accepted that choice because the scenarios use different state transitions and callbacks.
 
 ## Context and Orientation
 
@@ -115,7 +124,7 @@ Keep stable operation identity for an unchanged retry. Use the existing accepted
 ## Interfaces and Dependencies
 
 
-Reuse `IEventRepository.proposeEventScheduleMaintenance`, `acceptEventScheduleMaintenance`, and `syncAcceptedEventScheduleMaintenance`. Reuse `EventEditorMaintenanceOperation` and the existing proposal DTOs. Use `EventEditorSnapshotDto.scheduleState.availableMaintenanceOperations` as the server operation result. Do not add a new API or duplicate server scheduling rules.
+Reuse `IEventRepository.proposeEventScheduleMaintenance` and `acceptEventScheduleMaintenance`. Use `syncEventDetail` for recovery from a current full snapshot. Reuse `EventEditorMaintenanceOperation` and the existing proposal DTOs. Use `EventEditorSnapshotDto.scheduleState.availableMaintenanceOperations` as the server operation result. Do not add a new API or duplicate server scheduling rules.
 
 ## Artifacts and Notes
 
@@ -133,10 +142,14 @@ Focused action-handler results: 20 passed. The initial UI regression and existin
 ## Outcomes & Retrospective
 
 
-The Schedule entry point is implemented. It loads permitted operations from the server and does not save Event settings. The existing proposal review, acceptance, and recovery paths remain in use. Offline maintenance persistence is verified. Full verification and independent review remain.
+The Schedule entry point is implemented. It loads permitted operations from the server and does not save Event settings. The canonical proposal review remains in use. Accepted Matches use server values. Recovery reads the current full detail snapshot instead of replaying an old accepted graph. Offline maintenance persistence is verified. Final full verification and repeat independent review remain.
 
 Revision note (2026-09-04): Created the plan after issue claim and the initial acceptance audit. Recorded the pending skill-required confirmations and existing implementation to avoid duplicate work.
 
 Revision note (2026-09-04): Recorded user approval and the first test-first cycle. The new Schedule flow must use saved server settings without an Event save.
 
 Revision note (2026-09-04): Recorded the implementation, focused verification, unchanged contract boundary, and test-fixture repairs before the final gate.
+
+Revision note (2026-09-04): Recorded the independent review findings and the recovery decisions. The first implementation commit is `fc79fa6c2`. The protected-Match regressions failed with the old cached start time. Verification of the fixes remains in progress.
+
+Revision note (2026-09-04): The user paused the work. The active test run stopped. Work resumed after the user requested continuation. The focused action-handler, coordinator, and UI suites now pass all 45 tests. The Room suite passed 26 tests. The new recovery test initially exceeded the Windows SQLite path limit, then passed with a shorter name. All 27 Room cases have now passed against the fixes. The recovery test verifies that failed refresh retains the cache and that a newer graph replaces old Match IDs before offline reload.

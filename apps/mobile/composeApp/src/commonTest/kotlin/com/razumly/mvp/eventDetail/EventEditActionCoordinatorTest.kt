@@ -178,9 +178,9 @@ class EventEditActionCoordinatorTest {
                 PreparedEventForUpdate(event = Event(id = "event-1"))
             },
             logPreparedFieldOwnership = { action, _ -> events += "log:$action" },
-            updateEvent = { prepared ->
+            prepareSettings = { prepared ->
                 events += "update:${prepared.event.id}"
-                saveOutcome(prepared.event)
+                EventScheduleMaintenancePreparation(prepared.event, settingsSaved = true)
             },
             proposeMaintenance = { action, event ->
                 events += "propose:${action.maintenanceOperation}:${event.id}"
@@ -237,9 +237,9 @@ class EventEditActionCoordinatorTest {
                 PreparedEventForUpdate(event = updated)
             },
             logPreparedFieldOwnership = { action, _ -> events += "log:$action" },
-            updateEvent = {
+            prepareSettings = {
                 events += "update"
-                saveOutcome(updated)
+                EventScheduleMaintenancePreparation(updated, settingsSaved = true)
             },
             proposeMaintenance = { _, _ ->
                 EventEditorMaintenanceResponseDto.Accepted(accepted)
@@ -270,7 +270,7 @@ class EventEditActionCoordinatorTest {
             action = EventScheduleEditAction.RESCHEDULE,
             prepareEventForUpdate = { PreparedEventForUpdate(event = updated) },
             logPreparedFieldOwnership = { _, _ -> },
-            updateEvent = { saveOutcome(updated) },
+            prepareSettings = { EventScheduleMaintenancePreparation(updated, settingsSaved = true) },
             proposeMaintenance = { _, _ ->
                 EventEditorMaintenanceResponseDto.Accepted(accepted)
             },
@@ -298,7 +298,7 @@ class EventEditActionCoordinatorTest {
             action = EventScheduleEditAction.REBUILD_SCHEDULE,
             prepareEventForUpdate = { PreparedEventForUpdate(event = Event(id = "event-1")) },
             logPreparedFieldOwnership = { _, _ -> },
-            updateEvent = { prepared -> saveOutcome(prepared.event) },
+            prepareSettings = { prepared -> EventScheduleMaintenancePreparation(prepared.event, settingsSaved = true) },
             proposeMaintenance = { _, _ ->
                 EventEditorMaintenanceResponseDto.Rejected(maintenanceRejectedResult(proposal))
             },
@@ -333,7 +333,7 @@ class EventEditActionCoordinatorTest {
             action = EventScheduleEditAction.RESCHEDULE,
             prepareEventForUpdate = { PreparedEventForUpdate(event = Event(id = "event-1")) },
             logPreparedFieldOwnership = { _, _ -> },
-            updateEvent = { prepared -> saveOutcome(prepared.event) },
+            prepareSettings = { prepared -> EventScheduleMaintenancePreparation(prepared.event, settingsSaved = true) },
             proposeMaintenance = { _, _ -> throw stale },
             rollbackEvent = { true },
             refreshAcceptedSchedule = { error("stale proposal must not refresh") },
@@ -364,7 +364,7 @@ class EventEditActionCoordinatorTest {
             action = EventScheduleEditAction.RESCHEDULE,
             prepareEventForUpdate = { PreparedEventForUpdate(event = Event(id = "event-1")) },
             logPreparedFieldOwnership = { _, _ -> },
-            updateEvent = { prepared -> saveOutcome(prepared.event) },
+            prepareSettings = { prepared -> EventScheduleMaintenancePreparation(prepared.event, settingsSaved = true) },
             proposeMaintenance = { _, _ -> throw stale },
             rollbackEvent = { false },
             refreshAcceptedSchedule = { error("stale proposal must not refresh") },
@@ -390,7 +390,7 @@ class EventEditActionCoordinatorTest {
             action = EventScheduleEditAction.REBUILD_WITHOUT_PLACEHOLDER_TEAMS,
             prepareEventForUpdate = { PreparedEventForUpdate(event = Event(id = "event-1")) },
             logPreparedFieldOwnership = { _, _ -> },
-            updateEvent = { prepared -> saveOutcome(prepared.event) },
+            prepareSettings = { prepared -> EventScheduleMaintenancePreparation(prepared.event, settingsSaved = true) },
             proposeMaintenance = { _, _ ->
                 EventEditorMaintenanceResponseDto.Proposed(proposal)
             },

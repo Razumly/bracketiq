@@ -902,7 +902,7 @@ fun EventDetailScreen(
                     Column(Modifier.padding(innerPadding).padding(top = 4.dp)) {
                         EventDetailTabsRouteHost(
                             scheduleActions = {
-                                EventScheduleMaintenanceActions(
+                                EventScheduleMaintenanceScreen(
                                     canRequest = showScheduleMatchManagement && !isEditingMatches && !isEditing &&
                                         selectedEvent.event.isAutomatedScheduling &&
                                         !selectedEvent.event.isArchived() && !isTemplateEvent,

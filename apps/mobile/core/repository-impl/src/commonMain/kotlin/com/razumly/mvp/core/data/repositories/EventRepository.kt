@@ -309,13 +309,6 @@ private fun com.razumly.mvp.core.network.dto.EventEditorSaveResultDto.matchesFor
     return matches
 }
 
-private fun MatchMVP.mergeAcceptedMaintenanceStructure(graph: MatchMVP): MatchMVP = copy(
-    winnerNextMatchId = graph.winnerNextMatchId,
-    loserNextMatchId = graph.loserNextMatchId,
-    previousLeftId = graph.previousLeftId,
-    previousRightId = graph.previousRightId,
-)
-
 private fun requireResolvedMatchGraph(matches: List<MatchMVP>) {
     val matchIds = matches.map(MatchMVP::id).toSet()
     matches.forEach { match ->
@@ -1144,49 +1137,9 @@ class EventRepository(
     private suspend fun persistAcceptedMaintenanceMatches(
         eventId: String,
         matches: List<MatchMVP>,
-        operation: EventEditorMaintenanceOperation,
-        protectedMatchIds: Set<String>,
     ) {
-        val normalizedEventId = eventId.trim().takeIf(String::isNotBlank)
-            ?: error("Accepted maintenance result contained a blank Event id.")
-        val matchDao = databaseService.getMatchDao
-        val localMatches = matchDao.getMatchesOfTournament(normalizedEventId)
-        val fixedMatchIds = when (operation) {
-            EventEditorMaintenanceOperation.BUILD -> emptySet()
-            EventEditorMaintenanceOperation.COMPLETE,
-            EventEditorMaintenanceOperation.REBUILD -> protectedMatchIds
-                .map(String::trim)
-                .filter(String::isNotBlank)
-                .toSet()
-        }
-        val graphMatchIds = matches
-            .map { match -> match.id.trim() }
-            .filter(String::isNotBlank)
-            .toSet()
-        val preservedMatchesById = localMatches
-            .asSequence()
-            .filter { match ->
-                val normalizedId = match.id.trim()
-                normalizedId in fixedMatchIds && normalizedId in graphMatchIds
-            }
-            .associateBy { match -> match.id.trim() }
-        val staleIds = localMatches
-            .asSequence()
-            .map(MatchMVP::id)
-            .filter { localId -> localId.trim() !in graphMatchIds }
-            .toList()
-        if (staleIds.isNotEmpty()) {
-            matchDao.deleteMatchesById(staleIds)
-        }
-        val matchesToWrite = matches.map { graphMatch ->
-            preservedMatchesById[graphMatch.id.trim()]?.let { localMatch ->
-                localMatch.mergeAcceptedMaintenanceStructure(graphMatch)
-            } ?: graphMatch
-        }
-        requireResolvedMatchGraph(matchesToWrite)
-        if (matchesToWrite.isNotEmpty()) {
-            matchDao.upsertMatches(matchesToWrite)
-        }
+        requireResolvedMatchGraph(matches)
+        persistBootstrapMatches(eventId, matches)
     }
     private fun Event.maintenanceRelatedUserIds(teams: List<Team>): List<String> {
         val eventTeamIds = teamIds
@@ -1472,8 +1425,6 @@ class EventRepository(
             persistAcceptedMaintenanceMatches(
                 eventId = persisted.id,
                 matches = graph.matches,
-                operation = result.operation,
-                protectedMatchIds = result.protectedMatchIds.toSet(),
             )
             AcceptedRoomRelationCache(
                 event = persisted,

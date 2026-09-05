@@ -123,6 +123,11 @@ internal sealed class EventPublishResult {
     ) : EventPublishResult()
 }
 
+internal data class EventScheduleMaintenancePreparation(
+    val event: Event,
+    val settingsSaved: Boolean,
+)
+
 internal class EventEditActionCoordinator {
 
     suspend fun runSaveEventAction(
@@ -169,7 +174,7 @@ internal class EventEditActionCoordinator {
         prepareEventForUpdate: () -> PreparedEventForUpdate,
         validatePreparedEvent: (PreparedEventForUpdate) -> Unit = {},
         logPreparedFieldOwnership: (String, PreparedEventForUpdate) -> Unit,
-        updateEvent: suspend (PreparedEventForUpdate) -> EventEditorSaveOutcome,
+        prepareSettings: suspend (PreparedEventForUpdate) -> EventScheduleMaintenancePreparation,
         proposeMaintenance: suspend (EventScheduleEditAction, Event) -> EventEditorMaintenanceResponseDto,
         rollbackEvent: suspend () -> Boolean = { false },
         refreshAcceptedSchedule: suspend (String) -> Event,
@@ -199,9 +204,9 @@ internal class EventEditActionCoordinator {
             val prepared = prepareEventForUpdate()
             validatePreparedEvent(prepared)
             logPreparedFieldOwnership(action.logAction, prepared)
-            val saveOutcome = updateEvent(prepared)
-            val updated = saveOutcome.session.canonicalState.event
-            settingsSaved = true
+            val preparation = prepareSettings(prepared)
+            val updated = preparation.event
+            settingsSaved = preparation.settingsSaved
             when (val response = proposeMaintenance(action, updated)) {
                 is EventEditorMaintenanceResponseDto.Proposed ->
                     EventScheduleMaintenanceActionResult.Proposed(
