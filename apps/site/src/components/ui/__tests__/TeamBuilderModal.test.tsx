@@ -73,6 +73,7 @@ describe('TeamBuilderModal', () => {
       ok: true,
       invite: { $id: 'invite_link_1' },
       shareUrl: 'http://localhost/i/invite_link_1?v=1&e=2&s=signed',
+      delivery: { failed: false, status: 'SENT' },
     });
     userServiceMock.searchUsers.mockResolvedValue([]);
   });
@@ -210,19 +211,27 @@ describe('TeamBuilderModal', () => {
     await user.click(screen.getByRole('button', { name: 'Review team' }));
     await user.click(screen.getByRole('button', { name: 'Create team' }));
 
-    await waitFor(() => expect(teamServiceMock.inviteUserToTeamRole).toHaveBeenCalledTimes(2));
-    expect(teamServiceMock.inviteUserToTeamRole).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({ $id: 'created_team_1' }),
-      expect.objectContaining({ $id: 'search_match_1' }),
-      'player',
-    );
-    expect(teamServiceMock.inviteUserToTeamRole).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({ $id: 'created_team_1' }),
-      expect.objectContaining({ $id: 'search_match_1' }),
-      'team_manager',
-    );
+    await waitFor(() => expect(teamServiceMock.createTeamMemberInvite).toHaveBeenCalledTimes(2));
+    expect(teamServiceMock.createTeamMemberInvite).toHaveBeenNthCalledWith(1, 'created_team_1', { userId: 'search_match_1', role: 'player' });
+    expect(teamServiceMock.createTeamMemberInvite).toHaveBeenNthCalledWith(2, 'created_team_1', { userId: 'search_match_1', role: 'team_manager' });
+  });
+
+  it('shows a saved delivery failure for an existing Account without recreating the Team', async () => {
+    const user = userEvent.setup();
+    const onClose = jest.fn();
+    teamServiceMock.createTeamMemberInvite.mockResolvedValue({ invite: { id: 'saved-account-invite' }, delivery: { failed: true, status: 'FAILED' } });
+    renderWithMantine(<TeamBuilderModal isOpen onClose={onClose} currentUser={buildUser({ $id: 'creator' })} eventId="event_1" />);
+    await screen.findByText('Summer Open');
+    await user.type(screen.getByLabelText(/Team name/i), 'Delivery Team');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.click(screen.getByRole('button', { name: 'Review team' }));
+    await user.click(screen.getByRole('button', { name: 'Create team' }));
+    expect(await screen.findByText(/could not be delivered. The invitations are saved./)).toBeInTheDocument();
+    expect(teamServiceMock.createTeam).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('creates a link-backed staff invite with optional contact information', async () => {

@@ -1,3 +1,4 @@
+import { replayInvitationRequest, recordInvitationRequest, InvitationRequestError } from '@/server/teams/teamInvitationRequests';
 import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
@@ -31,10 +32,14 @@ import {
   UNKNOWN_MANAGED_PLAYER_DATE_OF_BIRTH,
 } from '@/server/managedPlayers';
 import { isMinorAtUtcDate } from '@/server/userPrivacy';
+import { expireTeamInvitations } from '@/server/teams/teamInvitationState';
+import { assertTeamInvitationAllowed, TeamInvitationRestrictionError } from '@/server/teams/teamInvitationRestrictions';
 
 export const dynamic = 'force-dynamic';
 
 type InviteDeliveryRecord = {
+  type?: string | null;
+  delivery?: { failed: boolean; status: string };
   id: string;
   status?: string | null;
   sentAt?: Date | string | null;
@@ -55,6 +60,7 @@ const memberInviteSchema = z.object({
   guardianEmail: z.string().optional(),
   idempotencyKey: z.string().optional(),
   existingInviteId: z.string().optional(),
+  reinviteId: z.string().optional(),
 }).passthrough();
 
 const emailSchema = z.string().email();
@@ -412,7 +418,28 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         throw new Error('Forbidden');
       }
 
-      const resolvedUser = await resolveInviteUser(tx, parsed.data, now);
+      await expireTeamInvitations(tx, { teamId: canonicalTeamId }, now);
+
+      const requestScope = { teamId: canonicalTeamId, senderId: session.userId, requestKey: parsed.data.idempotencyKey, payload: parsed.data };
+      const replay = await replayInvitationRequest(tx, requestScope);
+      if (replay) return { invite: replay, team: canonicalTeam };
+
+      const sourceInvite = parsed.data.reinviteId
+        ? await tx.invites.findFirst({ where: { id: parsed.data.reinviteId, teamId: canonicalTeamId, type: 'TEAM' } })
+        : null;
+      if (parsed.data.reinviteId) {
+        if (!sourceInvite || !['DECLINED', 'CANCELLED', 'EXPIRED'].includes(sourceInvite.status ?? '')) {
+          throw new Error('Only a declined, cancelled, or expired invitation can be replaced.');
+        }
+        const latest = await tx.invites.findFirst({ where: { type: 'TEAM', teamId: canonicalTeamId, userId: sourceInvite.userId }, orderBy: [{ createdAt: { sort: 'desc', nulls: 'last' } }, { id: 'desc' }] });
+        if (latest?.id !== sourceInvite.id) throw new Error('A later invitation exists. Reload before reinviting.');
+      }
+      const resolvedUser = sourceInvite ? {
+        userId: sourceInvite.userId, email: sourceInvite.email, playerEmail: sourceInvite.playerEmail,
+        isPersonInvite: sourceInvite.isAssigned === true, isUserIdInvite: Boolean(sourceInvite.userId),
+        shouldSendEmail: Boolean(sourceInvite.email),
+        managedPlayerInput: { isMinor: sourceInvite.isMinor === true },
+      } : await resolveInviteUser(tx, parsed.data, now);
       let userId = resolvedUser.userId;
       const normalizedPhone = normalizeOptionalContact(parsed.data.phone);
       let existingInvite = parsed.data.existingInviteId
@@ -423,13 +450,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             teamId: canonicalTeamId,
             role: 'player',
             userId: null,
+            OR: [{ status: null }, { status: { in: ['PENDING', 'SENT', 'FAILED'] } }],
           },
         })
-        : parsed.data.idempotencyKey
-        ? await tx.invites.findFirst({
-          where: { teamId: canonicalTeamId, createdBy: session.userId, idempotencyKey: parsed.data.idempotencyKey },
-        })
         : null;
+
+      if (parsed.data.existingInviteId && !existingInvite) throw new Error('This invitation is no longer pending. Start a new invitation.');
 
       // A real Player gets a durable User Profile before the invitation is
       // written. Staff-only invitations keep their existing accountless path.
@@ -462,6 +488,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       const activePlayerIdsForInvite = parsed.data.role === 'player'
         ? normalizeIdList((canonicalTeam as any).playerIds)
         : [];
+      if (userId) await assertTeamInvitationAllowed(tx, {
+        teamId: canonicalTeamId, playerIds: [userId], senderId: session.userId,
+        guardianEmail: parsed.data.guardianEmail,
+      }, now);
       const staffType = roleToStaffType(parsed.data.role);
       existingInvite = existingInvite ?? (userId
         ? await tx.invites.findFirst({
@@ -542,7 +572,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             role: parsed.data.role,
             isAssigned: resolvedUser.isPersonInvite,
             ...(parsed.data.role === 'player' && resolvedUser.isPersonInvite ? { userId } : {}),
-            createdBy: session.userId,
             firstName: normalizeOptionalName(parsed.data.firstName) ?? existingInvite.firstName,
             lastName: normalizeOptionalName(parsed.data.lastName) ?? existingInvite.lastName,
             staffTypes: staffType ? [staffType] : normalizeIdList(existingInvite.staffTypes),
@@ -551,9 +580,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
               ? new Date(`${parsed.data.dateOfBirth.trim().split('T')[0]}T00:00:00.000Z`)
               : existingInvite.dateOfBirth,
             guardianEmail: parsed.data.guardianEmail?.trim().toLowerCase() || existingInvite.guardianEmail,
-            ...(parsed.data.idempotencyKey ? { idempotencyKey: parsed.data.idempotencyKey } : {}),
-            linkExpiresAt,
-            claimedBy: null,
             updatedAt: now,
           },
         })
@@ -585,6 +611,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             updatedAt: now,
           },
         });
+
+      await recordInvitationRequest(tx, requestScope, invite.id);
 
       const shouldSendEmail = resolvedUser.isUserIdInvite || resolvedUser.shouldSendEmail;
       inviteForEmail = wasCreated && shouldSendEmail ? invite : null;
@@ -620,7 +648,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     let inviteDeliveryFailed = false;
     if (inviteForEmail) {
       try {
-        deliveredInvites = await sendInviteEmails([inviteForEmail], baseUrl);
+        deliveredInvites = await sendInviteEmails([inviteForEmail], baseUrl, { requestedBy: session.userId, requestedByIsAdmin: session.isAdmin });
       } catch (error) {
         // The database transaction already committed. Keep that result and
         // report delivery failure so the client can retry delivery safely.
@@ -630,12 +658,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
     const deliveredInvite = deliveredInvites.find((invite) => invite.id === result.invite.id);
     const responseInvite = deliveredInvite
-      ? { ...result.invite, status: deliveredInvite.status ?? result.invite.status, sentAt: deliveredInvite.sentAt ?? result.invite.sentAt }
+      ? { ...result.invite, status: deliveredInvite.status ?? result.invite.status, sentAt: deliveredInvite.sentAt ?? result.invite.sentAt, delivery: deliveredInvite.delivery }
       : result.invite;
     const inviteDeliveryId = (inviteForEmail as { id?: unknown } | null)?.id;
 
-    const teamInviteUrl = buildTeamInviteShareUrl(result.invite, baseUrl);
-    const claimUrl = parsed.data.role === 'player' && result.invite.userId && result.invite.isAssigned
+    const canShare = result.invite.status === 'PENDING' && result.invite.linkExpiresAt && new Date(result.invite.linkExpiresAt).getTime() > Date.now();
+    const teamInviteUrl = canShare ? buildTeamInviteShareUrl(result.invite, baseUrl) : undefined;
+    const claimUrl = canShare && parsed.data.role === 'player' && result.invite.userId && result.invite.isAssigned
       ? buildManagedPlayerClaimUrl(result.invite, baseUrl)
       : undefined;
     return NextResponse.json({
@@ -650,12 +679,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       delivery: {
         attempted: Boolean(inviteForEmail),
         failed: inviteDeliveryFailed || deliveredInvites.some(
-          (invite) => String(invite.status ?? '').toUpperCase() === 'FAILED',
+          (invite) => invite.delivery?.failed === true || (invite.type !== 'TEAM' && String(invite.status ?? '').toUpperCase() === 'FAILED'),
         ),
         inviteIds: typeof inviteDeliveryId === 'string' ? [inviteDeliveryId] : [],
       },
     }, { status: 201 });
   } catch (error) {
+    if (error instanceof InvitationRequestError) return NextResponse.json({ error: error.message }, { status: error.status });
+    if (error instanceof TeamInvitationRestrictionError) return NextResponse.json({ error: error.message }, { status: error.status });
     const message = error instanceof Error ? error.message : 'Failed to create member invite';
     const status = message === 'Forbidden'
       ? 403

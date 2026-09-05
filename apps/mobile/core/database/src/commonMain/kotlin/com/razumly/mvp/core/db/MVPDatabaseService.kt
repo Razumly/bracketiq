@@ -57,7 +57,7 @@ import com.razumly.mvp.core.data.dataTypes.daos.PendingRentalOrderDao
 import com.razumly.mvp.core.data.dataTypes.daos.RefundRequestDao
 import com.razumly.mvp.core.data.dataTypes.daos.TeamDao
 import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
-const val MVP_DATABASE_VERSION = 108
+const val MVP_DATABASE_VERSION = 109
 
 @Database(
     entities = [
@@ -85,6 +85,8 @@ const val MVP_DATABASE_VERSION = 108
         DiscountCodeCacheEntry::class,
         DiscountTargetCacheEntry::class,
         Invite::class,
+        com.razumly.mvp.core.data.dataTypes.InvitationOperation::class,
+        com.razumly.mvp.core.data.dataTypes.TeamBlock::class,
         OrganizationCacheEntry::class,
         ProductCacheEntry::class,
         OrganizationReviewsCacheEntry::class,

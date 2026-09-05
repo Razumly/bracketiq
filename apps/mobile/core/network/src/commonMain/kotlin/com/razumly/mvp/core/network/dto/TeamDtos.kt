@@ -10,6 +10,8 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class TeamPlayerRegistrationApiDto(
+    val invitationId: String? = null,
+    val invitationLabel: String? = null,
     val id: String? = null,
     val teamId: String? = null,
     val userId: String? = null,
@@ -131,6 +133,8 @@ data class TeamApiDto(
 fun TeamPlayerRegistrationApiDto.toTeamPlayerRegistrationOrNull(): TeamPlayerRegistration? {
     val normalizedUserId = userId?.trim()?.takeIf(String::isNotBlank) ?: return null
     return TeamPlayerRegistration(
+        invitationId = invitationId,
+        invitationLabel = invitationLabel,
         id = id?.trim().orEmpty(),
         teamId = teamId?.trim()?.takeIf(String::isNotBlank),
         userId = normalizedUserId,

@@ -6,6 +6,8 @@ import androidx.datastore.preferences.core.emptyPreferences
 import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.RegistrationProgressDraft
+import com.razumly.mvp.core.data.dataTypes.TeamBlock
+import com.razumly.mvp.core.data.dataTypes.InvitationOperation
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.FamilyCacheEntry
 import com.razumly.mvp.core.data.dataTypes.UserData
@@ -132,6 +134,7 @@ private class UserRepositoryAuth_FakeDatabaseService(
     override val getUserDataDao: UserDataDao,
     private val inviteDao: InviteDao? = null,
 ) : DatabaseService {
+    override suspend fun <R> withTransaction(block: suspend () -> R): R = block()
     override val getFamilyCacheDao = object : FamilyCacheDao {
         private val entries = MutableStateFlow<Map<String, FamilyCacheEntry>>(emptyMap())
         override suspend fun upsert(entry: FamilyCacheEntry) { entries.value = entries.value + (entry.parentId to entry) }
@@ -154,6 +157,23 @@ private class UserRepositoryAuth_FakeInviteDao(
     invites: List<Invite> = emptyList(),
 ) : InviteDao {
     val stored = invites.associateBy { it.id }.toMutableMap()
+    private val operations = mutableMapOf<Pair<String, String>, String>()
+    override suspend fun insertOperation(operation: InvitationOperation) { operations.getOrPut(operation.viewerId to operation.identity) { operation.requestKey } }
+    override suspend fun getOperationKey(viewerId: String, identity: String) = operations[viewerId to identity]
+    override suspend fun completeOperation(viewerId: String, identity: String, requestKey: String) { if (operations[viewerId to identity] == requestKey) operations.remove(viewerId to identity) }
+    override suspend fun getLatestTeamAttempt(teamId: String, userId: String) = stored.values.filter { it.teamId == teamId && it.userId == userId }.maxWithOrNull(compareBy<Invite> { it.createdAt }.thenBy { it.id })
+    override suspend fun clearPreviousAttempts(teamId: String, userId: String, currentId: String) { stored.toMap().forEach { (id, invite) -> if (invite.teamId == teamId && invite.userId == userId && id != currentId) stored[id] = invite.copy(isCurrentAttempt = false) } }
+    override suspend fun getRecipientInvitations(userId: String, type: String?) = stored.values.filter { (it.userId == userId || it.viewerCanAcceptForChild && it.viewerId == userId) && (type == null || it.type.equals(type, true)) }
+    override suspend fun getInvite(id: String) = stored[id]
+    override fun observeTeamInvitations(teamId: String, viewerId: String) = flowOf(stored.values.filter { it.teamId == teamId && it.viewerId == viewerId })
+    override fun observeRecipientInvitations(userId: String) = flowOf(stored.values.filter { it.userId == userId || it.viewerCanAcceptForChild && it.viewerId == userId })
+    override suspend fun deleteTeamInvitations(teamId: String) { stored.entries.removeAll { it.value.teamId == teamId } }
+    private val blocks = mutableListOf<TeamBlock>()
+    override suspend fun upsertTeamBlocks(blocks: List<TeamBlock>) { this.blocks.removeAll { old -> blocks.any { it.id == old.id && it.viewerId == old.viewerId } }; this.blocks.addAll(blocks) }
+    override fun observeTeamBlocks(viewerId: String) = flowOf(blocks.filter { it.viewerId == viewerId })
+    override suspend fun deleteTeamBlocks(viewerId: String) { blocks.removeAll { it.viewerId == viewerId } }
+    override suspend fun deleteTeamBlock(teamId: String, playerId: String) { blocks.removeAll { it.teamId == teamId && it.playerId == playerId } }
+
 
     override suspend fun upsertInvite(invite: Invite) {
         stored[invite.id] = invite
@@ -1099,7 +1119,7 @@ class UserRepositoryAuthTest {
     fun listInvites_decodes_staff_types() = runTest {
         val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("t123")
         val userDao = FakeUserDataDao()
-        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao, UserRepositoryAuth_FakeInviteDao())
         val prefsStore = InMemoryPreferencesDataStore()
         val currentUserDataSource = CurrentUserDataSource(prefsStore)
 
@@ -1183,7 +1203,7 @@ class UserRepositoryAuthTest {
     }
 
     @Test
-    fun listInvites_follows_every_pending_page_before_replacing_the_cache() = runTest {
+    fun listInvites_fetches_pending_pages_and_keeps_confirmed_history_in_the_cache() = runTest {
         val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("t123")
         val inviteDao = UserRepositoryAuth_FakeInviteDao(
             invites = listOf(
@@ -1205,6 +1225,11 @@ class UserRepositoryAuthTest {
         val engine = MockEngine { request ->
             when (request.url.encodedPath) {
                 "/api/invites" -> {
+                    if (request.url.parameters["history"] == "true") return@MockEngine respond(
+                        content = """{"invites":[{"id":"stale_declined","type":"TEAM","status":"DECLINED","userId":"u1"}]}""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
                     assertEquals("u1", request.url.parameters["userId"])
                     assertEquals("TEAM", request.url.parameters["type"])
                     assertEquals("PENDING", request.url.parameters["status"])
@@ -1262,12 +1287,12 @@ class UserRepositoryAuthTest {
         val invites = repo.listInvites(userId = "u1", type = "TEAM").getOrThrow()
 
         assertEquals(listOf(null, "page_2"), requestedCursors)
-        assertEquals(listOf("invite_1", "invite_2", "invite_3"), invites.map(Invite::id))
-        assertEquals(setOf("invite_1", "invite_2", "invite_3"), inviteDao.stored.keys)
+        assertEquals(setOf("invite_1", "invite_2", "invite_3", "stale_declined"), invites.map(Invite::id).toSet())
+        assertEquals(setOf("invite_1", "invite_2", "invite_3", "stale_declined"), inviteDao.stored.keys)
     }
 
     @Test
-    fun declineInvite_removes_the_terminal_invite_from_room_after_server_success() = runTest {
+    fun declineInvite_keeps_the_final_outcome_in_room_after_server_success() = runTest {
         val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("t123")
         val inviteDao = UserRepositoryAuth_FakeInviteDao(
             invites = listOf(
@@ -1281,14 +1306,18 @@ class UserRepositoryAuthTest {
                 "/api/invites/invite_1/decline" -> {
                     assertEquals(HttpMethod.Post, request.method)
                     respond(
-                        content = """{"ok":true}""",
+                        content = """{"ok":true,"invite":{"id":"invite_1","type":"TEAM","userId":"u1","status":"DECLINED","finalizedAt":"2026-09-05T12:00:00Z"}}""",
                         status = HttpStatusCode.OK,
                         headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
                     )
                 }
 
                 "/api/auth/me" -> respond(
-                    content = """{"user":null,"session":null}""",
+                    content = """{
+                        "user":{"id":"u1","email":"u1@example.com","name":"U1"},
+                        "session":{"userId":"u1","isAdmin":false},"token":"t123",
+                        "profile":{"id":"u1","firstName":"A","lastName":"B","userName":"ab","teamIds":[],"friendIds":[],"friendRequestIds":[],"friendRequestSentIds":[],"followingIds":[],"uploadedImages":[],"hasStripeAccount":false}
+                    }""",
                     status = HttpStatusCode.OK,
                     headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
                 )
@@ -1306,9 +1335,11 @@ class UserRepositoryAuthTest {
             currentUserDataSource = currentUserDataSource,
         )
 
+        repo.getCurrentAccount().getOrThrow()
         repo.declineInvite("invite_1").getOrThrow()
 
-        assertTrue("invite_1" !in inviteDao.stored)
+        assertEquals("DECLINED", inviteDao.stored["invite_1"]?.status)
+        assertEquals("2026-09-05T12:00:00Z", inviteDao.stored["invite_1"]?.finalizedAt)
     }
 
     @Test

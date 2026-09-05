@@ -55,6 +55,8 @@ describe('POST /api/users/social/blocked', () => {
   it('adds the block relation, removes shared chats, and opens a moderation report', async () => {
     prismaMock.$transaction.mockImplementation(async (callback: any) => {
       const tx = {
+        $executeRaw: jest.fn(),
+        authUser: { findUnique: jest.fn().mockResolvedValue({ id: 'user_2', passwordHash: 'active-test-account', disabledAt: null }) },
         userData: {
           findUnique: jest.fn()
             .mockResolvedValueOnce({

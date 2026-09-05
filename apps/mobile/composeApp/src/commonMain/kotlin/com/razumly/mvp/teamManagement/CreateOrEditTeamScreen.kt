@@ -43,6 +43,7 @@ import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import com.razumly.mvp.core.data.dataTypes.Invite
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -299,6 +300,8 @@ private fun String.isProbablyEmail(): Boolean {
 @Composable
 fun CreateOrEditTeamScreen(
     team: TeamWithPlayers,
+    invitations: List<Invite> = emptyList(),
+    onInvitationAction: ((Invite, String, String, (Result<String>) -> Unit) -> Unit)? = null,
     sports: List<Sport>,
     divisionTypeParameters: DivisionTypeParameters = DivisionTypeParameters(),
     friends: List<UserData>,
@@ -338,6 +341,7 @@ fun CreateOrEditTeamScreen(
         Result.failure(UnsupportedOperationException("Inclusive price quotes are unavailable."))
     },
 ) {
+    var invitationActionError by remember { mutableStateOf<String?>(null) }
     val navBottomPadding = LocalNavBarPadding.current.calculateBottomPadding()
     val syncedTeam = remember(team.team) { team.team.withSynchronizedMembership() }
     var teamName by remember { mutableStateOf(team.team.name) }
@@ -1144,6 +1148,7 @@ fun CreateOrEditTeamScreen(
                     TeamPlayerRosterRow(
                         player = player,
                         isPending = true,
+                        pendingLabel = invitations.firstOrNull { it.userId == player.id && it.isCurrentAttempt }?.invitationLabel ?: "Invitation pending",
                         jerseyNumber = jerseyNumber,
                         showEditDetails = showEditDetails,
                         canEditFields = canEditFields,
@@ -1160,7 +1165,13 @@ fun CreateOrEditTeamScreen(
                             }
                         },
                         onJerseyNumberChange = { updateJerseyNumber(player.id, it) },
-                        onRemove = { invitedPlayers = invitedPlayers - player },
+                        onRemove = {
+                            val invite = invitations.firstOrNull { it.userId == player.id && it.isCurrentAttempt && it.status == "PENDING" }
+                            if (invite != null && onInvitationAction != null) onInvitationAction(invite, "cancel", invite.id) { result ->
+                                result.onSuccess { invitedPlayers = invitedPlayers - player; invitationActionError = null }
+                                    .onFailure { invitationActionError = it.userMessage("The invitation was not cancelled.") }
+                            }
+                        },
                     )
                 }
                 if (canEditFields && canInvitePlayer) {
@@ -1233,6 +1244,11 @@ fun CreateOrEditTeamScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+
+            if (!isNewTeam && isCaptain && onInvitationAction != null) {
+                invitationActionError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                TeamInvitationHistory(invitations, onInvitationAction)
             }
 
             if (!showEditDetails) {
@@ -1898,6 +1914,7 @@ private fun UserInviteRow(
 @Composable
 private fun TeamPlayerRosterRow(
     player: UserData,
+    pendingLabel: String = "Invitation pending",
     isPending: Boolean = false,
     jerseyNumber: String,
     showEditDetails: Boolean,
@@ -1919,7 +1936,7 @@ private fun TeamPlayerRosterRow(
                 PlayerCard(
                     player = player,
                     isPending = isPending,
-                    pendingLabel = "Awaiting player",
+                    pendingLabel = pendingLabel,
                     modifier = Modifier.fillMaxWidth(),
                     jerseyNumber = jerseyNumber,
                     trailingContent = {
@@ -1935,7 +1952,7 @@ private fun TeamPlayerRosterRow(
                     PlayerCard(
                         player = player,
                         isPending = isPending,
-                        pendingLabel = "Awaiting player",
+                        pendingLabel = pendingLabel,
                         modifier = Modifier.fillMaxWidth(),
                         jerseyNumber = jerseyNumber,
                         showDivider = false,
@@ -1962,7 +1979,7 @@ private fun TeamPlayerRosterRow(
                     PlayerCard(
                         player = player,
                         isPending = isPending,
-                        pendingLabel = "Awaiting player",
+                        pendingLabel = pendingLabel,
                         modifier = Modifier.weight(1f),
                         jerseyNumber = jerseyNumber,
                         showDivider = false,

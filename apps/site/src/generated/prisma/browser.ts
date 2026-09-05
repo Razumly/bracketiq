@@ -123,6 +123,26 @@ export type AuthMfaChallenges = Prisma.AuthMfaChallengesModel
  */
 export type Invites = Prisma.InvitesModel
 /**
+ * Model TeamBlocks
+ *
+ */
+export type TeamBlocks = Prisma.TeamBlocksModel
+/**
+ * Model InviteDeliveries
+ *
+ */
+export type InviteDeliveries = Prisma.InviteDeliveriesModel
+/**
+ * Model TeamCreationRequests
+ *
+ */
+export type TeamCreationRequests = Prisma.TeamCreationRequestsModel
+/**
+ * Model InvitationRequests
+ *
+ */
+export type InvitationRequests = Prisma.InvitationRequestsModel
+/**
  * Model UserProfileClaims
  *
  */
