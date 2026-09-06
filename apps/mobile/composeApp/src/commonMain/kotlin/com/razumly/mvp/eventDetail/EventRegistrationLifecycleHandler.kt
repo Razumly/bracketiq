@@ -16,6 +16,10 @@ import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.data.repositories.SelfRegistrationResult
 import com.razumly.mvp.core.presentation.PaymentResult
 import io.github.aakira.napier.Napier
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.withLock
 
 internal class EventRegistrationLifecycleHandler(
     private val userRepository: IUserRepository,
@@ -50,40 +54,141 @@ internal class EventRegistrationLifecycleHandler(
             occurrence = currentWeeklyOccurrenceSelection(),
         )
 
+    private val draftMutex = kotlinx.coroutines.sync.Mutex()
+    private val _signupState = kotlinx.coroutines.flow.MutableStateFlow<com.razumly.mvp.core.data.dataTypes.EventSignupState?>(null)
+    val signupState = _signupState.asStateFlow()
+    private val _signupBusy = kotlinx.coroutines.flow.MutableStateFlow(false)
+    val signupBusy = _signupBusy.asStateFlow()
+    private var loadedScope: EventRegistrationProgressScope? = null
+
+    fun clearVisibleSignupProgress() {
+        _signupState.value = null
+        loadedScope = null
+        registrationFlowCoordinator.clearForMissingRegistrationScope()
+    }
+
+    suspend fun observeCurrentRegistrationProgress() {
+        val scope = currentRegistrationProgressScope()
+        if (scope != loadedScope) clearVisibleSignupProgress()
+        if (scope.userId.isBlank() || scope.eventId.isBlank()) return
+        eventRepository.observeRegistrationDraft(scope.eventId, scope.occurrence).collect { state ->
+            if (scope != currentRegistrationProgressScope()) return@collect
+            if (state == null) {
+                _signupState.value = null
+                loadedScope = null
+                registrationFlowCoordinator.applyRegistrationProgressDraft(null)
+                divisionContentCoordinator.restoreSelectedDivision(null)
+            } else if (loadedScope != scope) {
+                _signupState.value = state.copy(available = false, unavailableReason = "Checking registration progress.")
+            } else if (_signupBusy.value) {
+                _signupState.value = state
+            } else {
+                applySharedProgress(state, scope)
+            }
+        }
+    }
+
+    private fun applySharedProgress(state: com.razumly.mvp.core.data.dataTypes.EventSignupState, scope: EventRegistrationProgressScope) {
+        _signupState.value = state
+        loadedScope = scope
+        val draft = state.draft
+        val divisionId = registrationFlowCoordinator.applyRegistrationProgressDraft(com.razumly.mvp.core.data.RegistrationProgressDraft(
+            scope = "event", userId = scope.userId, eventId = scope.eventId,
+            step = draft?.step, answers = draft?.answers.orEmpty(),
+            selectedDivisionId = draft?.selectedDivisionId, registrationId = draft?.registrationId,
+            holdExpiresAt = draft?.holdExpiresAt, completedSteps = draft?.completedSteps.orEmpty(),
+            updatedAt = draft?.updatedAt ?: kotlin.time.Clock.System.now().toString(),
+        ))
+        divisionContentCoordinator.restoreSelectedDivision(divisionId)
+    }
+
+    private suspend fun loadSharedProgress(scope: EventRegistrationProgressScope): Boolean {
+        if (scope.userId.isBlank()) { _signupState.value = null; return false }
+        val result = eventRepository.loadRegistrationDraft(scope.eventId, scope.occurrence)
+        if (scope != currentRegistrationProgressScope()) return false
+        return result.fold(onSuccess = { state ->
+            applySharedProgress(state, scope)
+            state.unavailableReason?.let(setMessage)
+            state.invalidations.firstOrNull()?.let(setMessage)
+            true
+        }, onFailure = { failure ->
+            setMessage(failure.message ?: "Could not load registration progress.")
+            false
+        })
+    }
+
+    suspend fun loadCurrentRegistrationProgress() = draftMutex.withLock {
+        _signupBusy.value = true
+        try { loadSharedProgress(currentRegistrationProgressScope()) }
+        finally { _signupBusy.value = false }
+    }
+
+    suspend fun saveDraft(change: (com.razumly.mvp.core.data.dataTypes.EventSignupDraft) -> com.razumly.mvp.core.data.dataTypes.EventSignupDraft): Boolean = draftMutex.withLock {
+        _signupBusy.value = true
+        try {
+            val scope = currentRegistrationProgressScope()
+            if (loadedScope != scope && !loadSharedProgress(scope)) return@withLock false
+            val state = _signupState.value ?: return@withLock false
+            if (!state.available) { state.unavailableReason?.let(setMessage); return@withLock false }
+            val draft = state.draft ?: com.razumly.mvp.core.data.dataTypes.EventSignupDraft(
+                id = "", eventId = scope.eventId, revision = 0, selectedTeamId = state.selectedTeamId,
+                slotId = scope.occurrence?.slotId, occurrenceDate = scope.occurrence?.occurrenceDate,
+                updatedAt = kotlin.time.Clock.System.now().toString(),
+            )
+            val currentDivisionId = selectedDivisionId()
+            val selectedDraft = draft.copy(
+                selectedDivisionId = currentDivisionId,
+                selectedDivisionTypeKey = if (currentDivisionId == draft.selectedDivisionId) draft.selectedDivisionTypeKey else null,
+            )
+            val result = eventRepository.saveRegistrationDraft(scope.eventId, scope.occurrence, draft.revision, change(selectedDraft))
+            if (scope != currentRegistrationProgressScope()) return@withLock false
+            result.fold(onSuccess = { _signupState.value = it; true }, onFailure = { failure ->
+                val current = eventRepository.observeRegistrationDraft(scope.eventId, scope.occurrence).first()
+                if (current != null && (current.draft?.revision ?: 0) > draft.revision) applySharedProgress(current, scope)
+                setMessage(failure.message ?: "Could not save registration progress.")
+                false
+            })
+        } finally { _signupBusy.value = false }
+    }
+
+    suspend fun saveQuestionProgress(): Boolean = saveDraft { draft ->
+        draft.copy(answers = registrationFlowCoordinator.answers.value, selectedDivisionId = selectedDivisionId(),
+            step = if (registrationFlowCoordinator.areQuestionsConfirmed()) "signing" else "questions",
+            completedSteps = if (registrationFlowCoordinator.areQuestionsConfirmed()) (draft.completedSteps + "questions").distinct()
+                else draft.completedSteps - "questions")
+    }
+
     suspend fun saveCurrentRegistrationProgress(
         step: String? = null,
         registrationId: String? = null,
         holdExpiresAt: String? = registrationFlowCoordinator.holdExpiresAt.value,
     ) {
-        registrationFlowCoordinator.saveRegistrationProgress(
-            scope = currentRegistrationProgressScope(),
-            selectedDivisionId = selectedDivisionId(),
-            step = step,
-            registrationId = registrationId,
-            holdExpiresAt = holdExpiresAt,
-        ) { key, draft ->
-            currentUserDataSource?.saveRegistrationProgress(
-                key = key,
-                draft = draft,
-            )
-        }
+        saveDraft { draft -> draft.copy(
+            answers = registrationFlowCoordinator.answers.value, selectedDivisionId = selectedDivisionId(),
+            step = step ?: draft.step, registrationId = registrationId ?: draft.registrationId,
+            completedSteps = if (registrationFlowCoordinator.areQuestionsConfirmed()) (draft.completedSteps + "questions").distinct() else draft.completedSteps - "questions",
+        ) }
     }
 
-    private suspend fun loadCurrentRegistrationProgress() {
-        registrationFlowCoordinator.loadRegistrationProgress(
-            scope = currentRegistrationProgressScope(),
-        ) { key ->
-            currentUserDataSource?.loadRegistrationProgress(key)
-        }
-            ?.let(divisionContentCoordinator::restoreSelectedDivision)
+    suspend fun createRegistrationTeam(team: Team): Result<Team> = draftMutex.withLock {
+        val scope = currentRegistrationProgressScope()
+        val revision = _signupState.value?.draft?.revision ?: return@withLock Result.failure(IllegalStateException("Load the Team draft first."))
+        _signupBusy.value = true
+        try {
+            eventRepository.createRegistrationTeam(scope.eventId, scope.occurrence, revision, team).also { result ->
+                loadSharedProgress(scope)
+                result.exceptionOrNull()?.message?.let(setMessage)
+            }
+        } finally { _signupBusy.value = false }
     }
 
-    suspend fun clearCurrentRegistrationProgress() {
-        registrationFlowCoordinator.clearRegistrationProgress(
-            scope = currentRegistrationProgressScope(),
-        ) { key ->
-            currentUserDataSource?.clearRegistrationProgress(key)
-        }
+    suspend fun clearCurrentRegistrationProgress() = draftMutex.withLock {
+        val scope = currentRegistrationProgressScope()
+        eventRepository.clearRegistrationDraft(scope.eventId, scope.occurrence).onSuccess {
+            _signupState.value = null
+            loadedScope = null
+            registrationFlowCoordinator.clearRegistrationProgressState()
+        }.onFailure { setMessage(it.message ?: "Could not clear completed registration progress.") }
     }
 
     suspend fun addCurrentUserToEventWithRegistrationAnswers(

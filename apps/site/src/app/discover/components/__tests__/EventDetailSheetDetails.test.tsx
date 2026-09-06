@@ -26,6 +26,15 @@ jest.mock('@/lib/apiClient', () => ({
   isApiRequestError: jest.fn(() => false),
 }));
 
+jest.mock('@/lib/eventRegistrationDraftService', () => ({
+  eventRegistrationDraftService: {
+    get: jest.fn(async () => ({
+      version: 1, draft: null, eligibleTeams: [], selectedTeamId: null, selectionSource: null,
+      available: true, unavailableReason: null, invalidations: [],
+    })),
+  },
+}));
+
 jest.mock('@/lib/eventService', () => ({
   eventService: {
     getEventWithRelations: jest.fn(),

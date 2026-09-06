@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Alert, Button, Paper, Select as MantineSelect, Text } from '@mantine/core';
 
 import type { Team } from '@/types';
@@ -37,6 +37,8 @@ type EventTeamRegistrationPanelProps = {
     onToggleTeamOptions: () => void;
     onSelectedTeamChange: (teamId: string) => void;
     onManageTeams: () => void;
+    onAddPlayers?: () => void;
+    hasDraft?: boolean;
     onJoinTeamWaitlist: () => void;
     onJoinAsTeam: () => void;
     onWithdrawTeam: () => void;
@@ -78,6 +80,8 @@ export function EventTeamRegistrationPanel({
     onToggleTeamOptions,
     onSelectedTeamChange,
     onManageTeams,
+    onAddPlayers,
+    hasDraft,
     onJoinTeamWaitlist,
     onJoinAsTeam,
     onWithdrawTeam,
@@ -85,6 +89,7 @@ export function EventTeamRegistrationPanel({
     onJoinFreeAgents,
     onViewBracket,
 }: EventTeamRegistrationPanelProps) {
+    const [changingTeam, setChangingTeam] = useState(false);
     return (
         <div className="space-y-6">
             {eventHasStarted ? (
@@ -94,9 +99,7 @@ export function EventTeamRegistrationPanel({
                         : 'This event has already started. Joining and leaving are no longer available.'}
                 </Alert>
             ) : null}
-            <Button fullWidth disabled={eventHasStarted} onClick={onToggleTeamOptions}>
-                {showTeamJoinOptions ? 'Hide Team Options' : 'View Team Options'}
-            </Button>
+
 
             {showTeamJoinOptions ? (
                 <Paper withBorder p="md" radius="md" className="space-y-4">
@@ -104,7 +107,7 @@ export function EventTeamRegistrationPanel({
                         <div className="text-sm text-gray-600">Loading your teams...</div>
                     ) : userTeams.length > 0 ? (
                         <div className="space-y-4">
-                            <div>
+                            {!selectedTeamId || changingTeam ? <div>
                                 <label className="mb-2 block text-sm font-medium text-gray-700">
                                     Select your team
                                 </label>
@@ -115,16 +118,16 @@ export function EventTeamRegistrationPanel({
                                         label: team.name || 'Team',
                                     }))}
                                     value={selectedTeamId}
-                                    onChange={(value) => onSelectedTeamChange(value || '')}
+                                    onChange={(value) => { onSelectedTeamChange(value || ''); setChangingTeam(false); }}
                                     searchable
                                     comboboxProps={comboboxProps}
                                 />
-                            </div>
+                            </div> : <Text fw={600}>{userTeams.find((team) => team.$id === selectedTeamId)?.name}</Text>}
 
-                            <div className="flex justify-center">
-                                <Button variant="default" onClick={onManageTeams}>
-                                    Manage Teams
-                                </Button>
+                            <div className="flex flex-wrap gap-2">
+                                <Button variant="subtle" onClick={() => setChangingTeam(true)}>Change team</Button>
+                                <Button variant="default" onClick={onAddPlayers} disabled={!selectedTeamId || joining || eventHasStarted || weeklySelectionRequired}>Add players</Button>
+                                <Button variant="subtle" onClick={onManageTeams} disabled={joining || eventHasStarted || weeklySelectionRequired}>Create team</Button>
                             </div>
 
                             <div className="flex flex-col items-center gap-2 pt-2">
@@ -176,7 +179,7 @@ export function EventTeamRegistrationPanel({
                                                                 ? (selectedTeamPaymentFailed
                                                                     ? 'Complete payment'
                                                                     : `Join for ${formatPrice(priceCents)}`)
-                                                                : 'Join Event'}
+                                                                : hasDraft ? 'Continue registration' : 'Join Event'}
                                     </Button>
                                 )}
                                 {selectedTeamIsRegistered ? (
@@ -201,7 +204,7 @@ export function EventTeamRegistrationPanel({
                             <p className="text-sm text-gray-600">
                                 You have no managed teams{sportName ? ` for ${sportName}` : ''}.
                             </p>
-                            <Button variant="default" onClick={onManageTeams}>
+                            <Button variant="default" onClick={onManageTeams} disabled={joining || eventHasStarted || weeklySelectionRequired}>
                                 Create Team
                             </Button>
                             <div className="text-center">

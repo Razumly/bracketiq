@@ -45,6 +45,8 @@ import {
   getUserHandle,
 } from '@/types';
 
+import type { EventTeamCreationContext } from '@/lib/contracts/eventRegistrationDraft';
+
 type BuilderStepKey = 'team' | 'freeAgents' | 'staff' | 'invite' | 'review';
 type StaffInviteRole = 'team_manager' | 'team_head_coach' | 'team_assistant_coach';
 type CreatorCoachRole = 'NONE' | 'HEAD_COACH' | 'ASSISTANT_COACH';
@@ -110,7 +112,8 @@ type TeamBuilderModalProps = {
   isOpen: boolean;
   onClose: () => void;
   currentUser: UserData | null;
-  onTeamCreated?: (team: Team) => void;
+  onTeamCreated?: (team: Team) => void | Promise<void>;
+  registrationDraft?: EventTeamCreationContext & { teamId: string };
   organizationId?: string;
   eventId?: string | null;
   initialFreeAgentId?: string | null;
@@ -164,6 +167,7 @@ export default function TeamBuilderModal({
   organizationId,
   eventId,
   initialFreeAgentId,
+  registrationDraft,
 }: TeamBuilderModalProps) {
   const [step, setStep] = useState(0);
   const [teamName, setTeamName] = useState('');
@@ -198,16 +202,17 @@ export default function TeamBuilderModal({
   const [creating, setCreating] = useState(false);
 
   const currentUserId = normalizedUserId(currentUser);
+  const isEventRegistration = Boolean(registrationDraft);
   const hasFreeAgentStep = eventContextResolved
     && Boolean(event?.start && new Date(event.start).getTime() > Date.now())
     && freeAgents.length > 0;
-  const steps = useMemo<Array<{ key: BuilderStepKey; label: string }>>(() => [
+  const steps = useMemo<Array<{ key: BuilderStepKey; label: string }>>(() => registrationDraft ? [{ key: 'team', label: 'Team details' }] : [
     { key: 'team', label: 'Team' },
     ...(hasFreeAgentStep ? [{ key: 'freeAgents' as const, label: 'Free agents' }] : []),
     { key: 'staff', label: 'Staff' },
     { key: 'invite', label: 'Invite players' },
     { key: 'review', label: 'Review' },
-  ], [hasFreeAgentStep]);
+  ], [hasFreeAgentStep, registrationDraft]);
   const activeStep = steps[step]?.key ?? 'team';
   const resolvedTeamSize = typeof teamSize === 'number' ? Math.trunc(teamSize) : Number(teamSize);
   const selectedFreeAgents = useMemo(() => {
@@ -276,11 +281,11 @@ export default function TeamBuilderModal({
       setLoadingEvent(true);
       setEventContextResolved(false);
       try {
-        const snapshot = await eventService.getEventParticipants(eventId);
+        const snapshot = isEventRegistration ? null : await eventService.getEventParticipants(eventId);
         if (cancelled) return;
-        const nextEvent = snapshot.event ?? await eventService.getEventById(eventId) ?? null;
-        const freeAgentIdSet = new Set(snapshot.participants.freeAgentIds ?? []);
-        const nextFreeAgents = (snapshot.users ?? []).filter((user) => freeAgentIdSet.has(user.$id));
+        const nextEvent = snapshot?.event ?? await eventService.getEventById(eventId) ?? null;
+        const freeAgentIdSet = new Set(snapshot?.participants.freeAgentIds ?? []);
+        const nextFreeAgents = (snapshot?.users ?? []).filter((user) => freeAgentIdSet.has(user.$id));
         setEvent(nextEvent);
         setFreeAgents(nextFreeAgents);
         const eventTeamSize = Number(nextEvent?.teamSizeLimit);
@@ -303,7 +308,7 @@ export default function TeamBuilderModal({
     };
     void loadEventContext();
     return () => { cancelled = true; };
-  }, [eventId, initialFreeAgentId, isOpen]);
+  }, [eventId, initialFreeAgentId, isOpen, isEventRegistration]);
 
   useEffect(() => {
     if (!isOpen || activeStep !== 'invite' || searchQuery.trim().length < 2) {
@@ -491,6 +496,7 @@ export default function TeamBuilderModal({
         resolvedTeamSize,
         undefined,
         {
+          ...(registrationDraft ? { teamId: registrationDraft.teamId, registrationDraft: { eventId: registrationDraft.eventId, slotId: registrationDraft.slotId, occurrenceDate: registrationDraft.occurrenceDate, baseRevision: registrationDraft.baseRevision } } : {}),
           addSelfAsPlayer,
           creatorIsCaptain,
           creatorCoachRole,
@@ -499,6 +505,13 @@ export default function TeamBuilderModal({
           openRegistration: false,
         },
       );
+
+      if (registrationDraft) {
+        await onTeamCreated?.(team);
+        reset();
+        onClose();
+        return;
+      }
 
       const accountUsers = [
         ...selectedFreeAgents,
@@ -1122,7 +1135,7 @@ export default function TeamBuilderModal({
             </Button>
           ) : (
             <Button leftSection={<IconCheck size={16} />} onClick={() => { void createTeam(); }} loading={creating} size="md">
-              Create team
+              {registrationDraft ? 'Save team and continue' : 'Create team'}
             </Button>
           )}
         </Group>

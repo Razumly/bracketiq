@@ -1,4 +1,7 @@
 import React, { useState, useCallback } from 'react';
+import { Alert, Button, Group, Modal, Stack, Text } from '@mantine/core';
+import type { JoinIntent } from './eventDetail/eventRegistrationCommands';
+import { useEventSignupJourney } from './eventDetail/hooks/useEventSignupJourney';
 import { useRouter } from 'next/navigation';
 import {
     Event,
@@ -84,8 +87,8 @@ export default function EventDetailSheet({
         children,
         childrenLoading,
         childrenError,
-        userTeams,
-        isLoadingTeams,
+        userTeams: locallyManagedTeams,
+        isLoadingTeams: localTeamsLoading,
         registrationQuestions,
         registrationQuestionAnswers,
         setRegistrationQuestionAnswers,
@@ -106,6 +109,8 @@ export default function EventDetailSheet({
         closeFreeAgentActions,
     } = presentationController;
     const [joining, setJoining] = useState(false);
+    const [finalReview, setFinalReview] = useState<JoinIntent | null>(null);
+    React.useEffect(() => { setFinalReview(null); }, [isActive, currentEvent.$id, selectedOccurrence?.slotId, selectedOccurrence?.occurrenceDate]);
     const [joinError, setJoinError] = useState<string | null>(null);
     const [joinNotice, setJoinNotice] = useState<string | null>(null);
     const [selectedTeamId, setSelectedTeamId] = useState('');
@@ -158,6 +163,10 @@ export default function EventDetailSheet({
         clearProgress: clearEventRegistrationProgress,
         prepareCheckout: prepareEventCheckout,
     } = checkoutController;
+    const signupJourney = useEventSignupJourney({ event: currentEvent, user, progress: checkoutController.progress, selectedTeamId });
+    const userTeams = currentEvent.teamSignup ? signupJourney.teams : locallyManagedTeams;
+    const isLoadingTeams = currentEvent.teamSignup
+        ? checkoutController.progress.loading || signupJourney.loadingTeams : localTeamsLoading;
     const divisionRegistrationModel = useEventDivisionRegistrationModel({
         event: currentEvent,
         user,
@@ -262,9 +271,17 @@ export default function EventDetailSheet({
         setRegisteringChild,
         childRegistrationChildId,
         ensureWeeklyOccurrenceSelected,
-        finalizeJoin,
+        finalizeJoin: commitJoin,
         resetChildRegistrationState,
     } = joinFinalizationController;
+    const finalizeJoin = useCallback(async (intent: JoinIntent) => {
+        if (intent.mode === 'team') {
+            setFinalReview(intent);
+            setJoining(false);
+        } else {
+            await commitJoin(intent);
+        }
+    }, [commitJoin]);
     const registrationConfirmationController = useRegistrationConfirmationController({
         event: currentEvent,
         user,
@@ -427,6 +444,10 @@ export default function EventDetailSheet({
         userTeams,
         paymentPlanPreview,
         timeoutMs: JOIN_API_TIMEOUT_MS,
+        resumedTeamAnswers: checkoutController.progress.state?.draft?.completedSteps.includes('questions')
+            && registrationQuestions.every((question) => !question.required || registrationQuestionAnswers[question.id]?.trim())
+            ? registrationQuestions.map((question) => ({ questionId: question.id, answer: registrationQuestionAnswers[question.id] ?? '' }))
+            : undefined,
         ensureWeeklyOccurrenceSelected,
         shouldAskRegistrationQuestions,
         openRegistrationQuestionsStep,
@@ -459,6 +480,13 @@ export default function EventDetailSheet({
         setJoinNotice,
     });
     const registrationPanel = (
+        <Stack gap="sm">
+        {checkoutController.progress.error || signupJourney.error ? <Alert color="red">
+            {checkoutController.progress.error || signupJourney.error}
+            <Button variant="subtle" onClick={() => { void signupJourney.reload(); }}>Reload saved progress</Button>
+        </Alert> : null}
+        {checkoutController.progress.state?.unavailableReason ? <Alert color="yellow">{checkoutController.progress.state.unavailableReason}</Alert> : null}
+        {checkoutController.progress.state?.invalidations.map((message) => <Alert key={message} color="yellow">{message}</Alert>)}
         <EventDetailRegistrationPanels
             childrenError={childrenError}
             childrenLoading={childrenLoading}
@@ -468,13 +496,14 @@ export default function EventDetailSheet({
             eventTeams={teams}
             isLoadingTeams={isLoadingTeams}
             joinActions={joinActions}
-            joining={joining}
+            joining={joining || checkoutController.progress.saving || checkoutController.progress.loading
+                || checkoutController.progress.state?.available === false || Boolean(checkoutController.progress.error)}
             joiningChildFreeAgent={joiningChildFreeAgent}
             joinFinalizationController={joinFinalizationController}
-            onManageTeams={() => {
-                router.push(`/teams?event=${currentEvent.$id}`);
-                onClose();
-            }}
+            onManageTeams={() => { void signupJourney.createTeam(); }}
+            onAddPlayers={() => { void signupJourney.addPlayers(); }}
+            hasDraft={Boolean(checkoutController.progress.state?.draft && !checkoutController.progress.state.draft.completedAt)}
+            onResumePreparation={signupJourney.preparationStep ? () => { void signupJourney.resumePreparation(); } : undefined}
             onSelectedChildChange={setSelectedChildId}
             onSelectedTeamChange={(teamId) => {
                 setSelectedTeamId(teamId);
@@ -495,6 +524,28 @@ export default function EventDetailSheet({
             userTeams={userTeams}
             weeklyModel={weeklyModel}
         />
+        {signupJourney.dialogs}
+        <Modal opened={Boolean(finalReview)} onClose={() => setFinalReview(null)} title="Review Event registration" centered zIndex={2000}>
+            <Stack>
+                <Text fw={600}>{currentEvent.name}</Text>
+                <Text>{finalReview?.team?.name}</Text>
+                {selectedDivisionOption?.name ? <Text>{selectedDivisionOption.name}</Text> : null}
+                <Text size="sm">Confirm to continue with the Event registration and payment requirements.</Text>
+                <Group>
+                    <Button variant="default" onClick={() => setFinalReview(null)}>Back</Button>
+                    <Button loading={joining} onClick={async () => {
+                        if (!finalReview) return;
+                        const intent = finalReview;
+                        setFinalReview(null);
+                        setJoining(true);
+                        try { await commitJoin(intent); }
+                        catch (failure) { setJoinError(failure instanceof Error ? failure.message : 'Registration could not be completed.'); }
+                        finally { setJoining(false); }
+                    }}>Confirm registration</Button>
+                </Group>
+            </Stack>
+        </Modal>
+        </Stack>
     );
     const content = (
         <EventDetailMainContent
@@ -578,4 +629,3 @@ export default function EventDetailSheet({
         </>
     );
 }
-

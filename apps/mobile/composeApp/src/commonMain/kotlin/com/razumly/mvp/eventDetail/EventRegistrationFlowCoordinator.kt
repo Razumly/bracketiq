@@ -1174,18 +1174,19 @@ internal class EventRegistrationFlowCoordinator {
         clearSignaturePrompts()
     }
 
+    fun areQuestionsConfirmed(): Boolean = questionsConfirmed
+
     fun applyRegistrationProgressDraft(draft: RegistrationProgressDraft?): String? {
         if (draft == null) {
+            _answers.value = emptyMap()
             _holdExpiresAt.value = null
             questionsConfirmed = false
             return null
         }
 
-        questionsConfirmed = draft.step == "checkout" ||
+        questionsConfirmed = "questions" in draft.completedSteps || draft.step == "checkout" ||
             !draft.holdExpiresAt.isNullOrBlank()
-        if (draft.answers.isNotEmpty()) {
-            _answers.value = _answers.value + draft.answers
-        }
+        _answers.value = draft.answers
         _holdExpiresAt.value = draft.holdExpiresAt
         return draft.selectedDivisionId
             ?.trim()
