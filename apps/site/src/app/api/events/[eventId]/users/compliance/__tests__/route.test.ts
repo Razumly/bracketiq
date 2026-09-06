@@ -162,6 +162,7 @@ describe('GET /api/events/[eventId]/users/compliance', () => {
     prismaMock.bills.findMany.mockResolvedValue([]);
     prismaMock.signedDocuments.findMany.mockResolvedValue([{
       id: 'imported_evidence_1',
+      status: 'SIGNED',
       signedAt: '2026-04-30T10:00:00.000Z',
     }]);
     prismaMock.documentRequirementSatisfactions.findMany.mockResolvedValue([

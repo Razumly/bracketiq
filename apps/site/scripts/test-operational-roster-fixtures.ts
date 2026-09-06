@@ -1,6 +1,7 @@
 import { prisma } from '../src/lib/prisma';
 import { hashPassword } from '../src/lib/authServer';
-import { createDocumentRequirementSatisfaction } from '../src/server/documentEvidence';
+
+import { PDFDocument } from 'pdf-lib';
 
 async function main() {
   const database = new URL(process.env.DATABASE_URL ?? '');
@@ -10,30 +11,48 @@ async function main() {
   const [action = 'seed', eventId = 'issue152-roster'] = process.argv.slice(2);
   if (!eventId.startsWith('issue152-')) throw new Error('Use an issue 152 fixture Event.');
   const id = (suffix: string) => `${eventId}-${suffix}`;
-  if (action === 'satisfy') {
-    for (const [player, role, provenance] of [
-      ['accepted', 'participant', 'BRACKETIQ'], ['managed', 'participant', 'IMPORTED'], ['child', 'parent_guardian', 'BRACKETIQ'],
-    ] as const) {
-      const version = id(role === 'parent_guardian' ? 'guardian-version' : 'version');
-      const requirement = id(role === 'parent_guardian' ? 'guardian-requirement' : 'requirement');
-      await prisma.signedDocuments.upsert({ where: { id: id(`${player}-evidence`) },
-        create: { id: id(`${player}-evidence`), signedDocumentId: id(`${player}-evidence`), templateId: version,
-          documentName: 'Event waiver', organizationId: id('org'), userId: id(player), signerUserId: role === 'parent_guardian' ? 'user_host' : id(player),
-          documentSubjectId: id(`${player}-subject`), scopeType: 'EVENT_PARTICIPATION', scopeId: eventId,
-          provenance, status: 'SIGNED', signedAt: '2026-08-01T00:00:00.000Z', signerRole: role }, update: {} });
-      await createDocumentRequirementSatisfaction({ evidenceId: id(`${player}-evidence`), templateDocumentId: version,
-        documentRequirementId: requirement, organizationId: id('org'), documentSubjectId: id(`${player}-subject`),
-        scopeType: 'EVENT_PARTICIPATION', scopeId: eventId, requiredSignerRoles: [role], completedSignerRoles: [role] });
+  if (action === 'complete') {
+    const base = 'http://127.0.0.1:3152';
+    const login = async (email: string) => {
+      const response = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email, password: 'password123!' }) });
+      if (!response.ok) throw new Error(`Login failed: ${response.status} ${await response.text()}`);
+      return response.headers.getSetCookie().map((value) => value.split(';')[0]).join('; ');
+    };
+    const post = async (cookie: string, path: string, body: unknown) => {
+      const response = await fetch(base + path, { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      if (!response.ok) throw new Error(`${path}: ${response.status} ${await response.text()}`);
+      return response.json();
+    };
+    const hostCookie = await login('host@example.com');
+    for (const player of ['accepted', 'child']) {
+      const cookie = player === 'child' ? hostCookie : await login(`${id(player)}@example.test`);
+      const templateId = id(player === 'child' ? 'guardian-version' : 'version');
+      const signerContext = player === 'child' ? 'parent_guardian' : 'participant';
+      const context = { templateId, signerContext, ...(player === 'child' ? { childUserId: id('child') } : {}) };
+      const issued = await post(cookie, `/api/events/${eventId}/sign`, context);
+      const documentId = issued.signLinks?.[0]?.documentId;
+      if (!documentId) throw new Error(`No signing document for ${player}`);
+      await post(cookie, '/api/documents/record-signature', { ...context, documentId, eventId, type: 'TEXT' });
     }
+    const pdf = await PDFDocument.create();
+    pdf.addPage().drawText('Fixture signed waiver: Sam River. Participant signature present.');
+    const form = new FormData();
+    form.set('file', new Blob([new Uint8Array(await pdf.save())], { type: 'application/pdf' }), 'signed-waiver.pdf');
+    for (const [key, value] of Object.entries({ subjectUserId: id('managed'), templateId: id('version'),
+      attestationAccepted: 'true', scopeType: 'EVENT_PARTICIPATION', scopeId: eventId, sourceNote: 'Local issue 152 test evidence.' })) form.set(key, value);
+    const imported = await fetch(`${base}/api/organizations/${id('org')}/documents/import`, { method: 'POST', headers: { cookie: hostCookie }, body: form });
+    if (!imported.ok) throw new Error(`Import failed: ${imported.status} ${await imported.text()}`);
+    console.log('Player signing, guardian signing, and attested staff import passed through HTTP.');
     return;
   }
-  if (action !== 'seed') throw new Error('Use seed or satisfy.');
+  if (action !== 'seed') throw new Error('Use seed or complete.');
   const passwordHash = await hashPassword('password123!');
   for (const [userId, email] of [['user_host', 'host@example.com'], ['user_participant', 'player@example.com'], ['user_member', 'member@example.com']]) {
     await prisma.userData.upsert({ where: { id: userId }, create: { id: userId, userName: userId, firstName: 'Taylor', lastName: 'River', dateOfBirth: new Date('1990-01-01'), onboardingIntent: 'DISCOVER_EVENTS' }, update: {} });
     await prisma.authUser.upsert({ where: { id: userId }, create: { id: userId, email, passwordHash, emailVerifiedAt: new Date() }, update: { passwordHash, emailVerifiedAt: new Date() } });
   }
-  await prisma.organizations.upsert({ where: { id: id('org') }, create: { id: id('org'), name: 'River City Sports Club', ownerId: 'user_host', ownershipStatus: 'CLAIMED' }, update: {} });
+  await prisma.organizations.upsert({ where: { id: id('org') }, create: { id: id('org'), name: 'River City Sports Club', ownerId: 'user_host', originType: 'FIRST_PARTY', ownershipStatus: 'CLAIMED' }, update: {} });
   for (const [suffix, role, title] of [['', 'PARTICIPANT', 'Event waiver'], ['guardian-', 'PARENT_GUARDIAN', 'Guardian consent']]) {
     await prisma.documentRequirements.upsert({ where: { id: id(`${suffix}requirement`) }, create: { id: id(`${suffix}requirement`), organizationId: id('org'), title }, update: {} });
     await prisma.templateDocuments.upsert({ where: { id: id(`${suffix}version`) }, create: { id: id(`${suffix}version`), organizationId: id('org'), documentRequirementId: id(`${suffix}requirement`), versionSequence: 1, title, type: 'TEXT', signOnce: false, requiredSignerType: role, roleIndexes: [], signerRoles: [], frozenAt: new Date() }, update: {} });
@@ -48,6 +67,7 @@ async function main() {
     await prisma.eventRegistrations.upsert({ where: { id: id(`${team}-registration`) }, create: { id: id(`${team}-registration`), eventId, eventTeamId: id(team), registrantId: id(team), registrantType: 'TEAM', rosterRole: 'PARTICIPANT', status: 'ACTIVE', createdBy: 'user_host' }, update: {} });
   }
   await prisma.authUser.upsert({ where: { id: id('accepted') }, create: { id: id('accepted'), email: `${id('accepted')}@example.test`, passwordHash, emailVerifiedAt: new Date() }, update: {} });
+  await prisma.parentChildLinks.upsert({ where: { id: id('guardian-link') }, create: { id: id('guardian-link'), parentId: 'user_host', childId: id('child'), status: 'ACTIVE', createdBy: 'user_host' }, update: {} });
   await prisma.eventRegistrations.upsert({ where: { id: id('accepted-registration') }, create: { id: id('accepted-registration'), eventId,
     eventTeamId: id('team1'), registrantId: id('accepted'), registrantType: 'SELF', rosterRole: 'PARTICIPANT', status: 'ACTIVE',
     createdBy: 'user_host', acceptedAt: new Date() }, update: {} });

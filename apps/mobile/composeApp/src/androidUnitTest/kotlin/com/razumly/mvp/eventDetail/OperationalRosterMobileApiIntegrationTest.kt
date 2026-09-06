@@ -28,7 +28,7 @@ class OperationalRosterMobileApiIntegrationTest {
         try {
             val process = ProcessBuilder("node", "node_modules/tsx/dist/cli.mjs", "scripts/test-operational-roster-fixtures.ts", action, eventId)
                 .directory(directory).redirectErrorStream(true).redirectOutput(output).start()
-            check(process.waitFor(90, TimeUnit.SECONDS)) { "The roster fixture did not finish." }
+            check(process.waitFor(240, TimeUnit.SECONDS)) { "The roster fixture did not finish." }
             check(process.exitValue() == 0) { output.readText() }
         } finally { output.delete() }
     }
@@ -55,7 +55,7 @@ class OperationalRosterMobileApiIntegrationTest {
             assertTrue(officialRoster.rosters.flatMap { it.entries }.all { it.documentReadiness?.documents?.requiredCount == 1 })
             assertEquals(officialRoster, official.matchRepository.observeMatchRosters(eventId, matchId).first())
             assertTrue(member.matchRepository.getMatchRosters(eventId, matchId).isFailure)
-            fixture("satisfy", eventId)
+            fixture("complete", eventId)
             val completed = official.matchRepository.getMatchRosters(eventId, matchId).getOrThrow()
             assertEquals(completed, official.matchRepository.observeMatchRosters(eventId, matchId).first())
             val players = completed.rosters.flatMap { it.entries }.associateBy { it.userId }

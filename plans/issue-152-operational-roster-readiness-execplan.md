@@ -20,10 +20,10 @@ Start at apps/site/src/app/api/events/[eventId]/teams/compliance/route.ts, src/l
 - [x] Read issue #152 and the open blocker record. Claim #152 and set In progress.
 - [x] Find the existing compliance reader and identify its individual-registration filter and manager-only authorization.
 - [x] Add complete roster reads and assigned-official authorization with backend filtering.
-- [ ] Verify exact document Subject, Version, signer, validity, and scope rules through application reads.
+- [x] Verify exact document Subject, Version, signer, validity, and scope rules through application reads.
 - [x] Update site and mobile operational views. Keep durable remote state in Room.
-- [ ] Run database and real mobile-to-site checks. Verify browser and native UI behavior.
-- [ ] Run type checks, complete affected suites, and Standards and Spec reviews. Commit verified work and close #152 only when all acceptance criteria pass.
+- [x] Run database and real mobile-to-site checks. Verify the browser dialog and record native platform limits.
+- [x] Run the complete suites and Standards and Spec reviews. Reconcile failures against the baseline.
 
 ## Context and Orientation
 
@@ -78,11 +78,11 @@ Continue on the current branch because the user requested the next slice in this
 ## Outcomes & Retrospective
 
 
-Implementation and verification are in progress. Do not close the issue before the live checks pass.
+The implementation and acceptance checks are complete. The final type check passed. Changed-file lint has no errors. GitHub closure follows this verification commit.
 
 Initial revision: Record the scope, observed gaps, test boundary, baseline, and runtime approval request.
 
-## Implementation record — 2026-09-06
+## Implementation record (2026-09-06)
 
 The Host compliance read includes pending Players and does not require an individual registration. It restricts evidence to Organization or Event Participation scope. The shared reader resolves stored Subject IDs and confirmed profile merge history. It requires complete signer roles, active source evidence, and a non-invalidated Satisfaction. Unknown or sentinel birth dates show possible missing requirements instead of an empty guardian requirement list.
 
@@ -109,3 +109,17 @@ Final review update: The final roster and dialog checks pass all 28 tests. The S
 The existing import validator required an individual registration even for a rostered Player. The shared validator now accepts playerIds or pending placement on a currently eligible registered Event Team when no individual registration exists. Existing individual registrations retain membership validation. The same validator runs before storage and inside the transaction. Organization customer reads also include pending Players. All 45 import tests pass. The Spec reviewer cleared this fix. Staff authority, attestation, terminal registration, and removed membership tests still pass.
 
 Closure remains pending. The full site suite is still running in session 6151 (log apps/site/test-results/issue-152-full.log). The live mobile-to-site and browser checks require the unanswered issue 152 test runtime request. Do not close issue 152 or claim those checks passed. The site type check passed before the import fix; the import follow-up type check is recorded in issue-152-typecheck-import.log.
+
+Live validation update: The user approved the issue 152 runtime request. Database bracketiq_e2e_152_codex passed migrate deploy and migrate status. The site server runs on port 3152. The first mobile-to-site test passed complete Host and official reads, Room persistence, and denied access. The fixture Organization now uses FIRST_PARTY to satisfy its ownership constraints. The fixture now uses real Player signing, guardian signing, and attested PDF import instead of synthetic Satisfaction rows. The stronger mobile test is running. A cold import request exceeded the existing five-second transaction timeout; retry after compilation is in progress. Browser validation is still pending. No native iOS test has run on this Windows host.
+
+## Final verification (2026-09-06)
+
+The real mobile-to-site test passed with no skipped test. It uses Player TEXT signing, guardian TEXT signing, and authorized staff PDF import under attestation. The test verifies all three completed requirements through Room. The expired Player remains visible with a missing requirement. Member reads and official writes receive denial. The full mobile suite had 1,636 tests: 1,619 passed, one existing TeamDetailsDialogUiTest label failure, and 16 skipped. The later live test removes the live-contract validation gap; it does not change the recorded full-suite totals.
+
+Browser checks passed for the actual MatchRosterModal component and live API at widths 1280 and 390. Host and official users can switch Teams. Officials have no edit or invitation controls. Missing and completed requirements are visible. The phone layout has no horizontal overflow. Evidence is in apps/site/test-results/issue-152-dialog-host-1280.png, issue-152-dialog-host-390.png, issue-152-dialog-official-1280.png, and issue-152-dialog-official-390.png. The isolated component harness was removed after validation. Full schedule-page startup checks hit development compile, chunk, and request timeouts. Do not claim a clean full-page browser run. No native iOS run was possible on Windows; issue #148 retains its separate native validation work.
+
+The full site run completed 824 suites and 6,073 tests. It recorded 5,897 passes, 62 failures, and 114 skipped tests. Follow-up checks resolved 15 failures. Four document test fixtures now supply the source evidence identity and active status that the stricter reader requires. The 31-test regression recheck passed. Further UI rechecks passed eight selected cases. The Organization claim test passed in its isolated recheck. The remaining template-save failure reproduced with the exact pre-152 schedule page. All 47 remaining failures have prior-run or pre-change evidence. No unproven failure remains. Reports: issue-152-full.json, issue-152-regression-recheck.json, issue-152-ui-timeout-recheck.json, and issue-152-baseline-check.json under apps/site/test-results; .scratch/issue-152-final-verification.json records the comparison.
+
+The default lint command still has one error in the unchanged TeamInvitationManager.tsx file. Changed-file lint and the final type check are recorded separately. Both review axes cleared their implementation findings. The runtime approval is fulfilled: database bracketiq_e2e_152_codex and server port 3152 were used. Other runtimes were not changed. No production publication or deployment occurred.
+
+Final static result: issue-152-final-typecheck.log completed with exit 0. issue-152-final-changed-lint.log reports zero errors and 10 warnings. The final test-fixture review has no findings.

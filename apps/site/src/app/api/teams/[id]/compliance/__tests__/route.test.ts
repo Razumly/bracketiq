@@ -92,7 +92,7 @@ describe('GET /api/teams/[id]/compliance', () => {
       },
     ]);
     prismaMock.signedDocuments.findMany.mockResolvedValue([
-      { id: 'evidence_1', signedAt: new Date('2026-08-02T00:00:00.000Z') },
+      { id: 'evidence_1', status: 'SIGNED', signedAt: new Date('2026-08-02T00:00:00.000Z') },
     ]);
 
     const response = await GET(
@@ -111,7 +111,7 @@ describe('GET /api/teams/[id]/compliance', () => {
     expect(json.team.users[0].documents).toEqual({ signedCount: 1, requiredCount: 1 });
     expect(prismaMock.signedDocuments.findMany).toHaveBeenCalledWith({
       where: { id: { in: ['evidence_1'] } },
-      select: { id: true, signedAt: true },
+      select: { id: true, signedAt: true, status: true },
     });
   });
 
