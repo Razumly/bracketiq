@@ -115,6 +115,7 @@ data class EventEditorCapabilitiesDto(
     val managementAuthority: com.razumly.mvp.core.data.dataTypes.EventManagementAuthority? = null,
     val eventHostId: String? = null,
     val viewerIsEventHost: Boolean = false,
+    val organizationOwnershipStatus: String? = null,
 ) {
     fun toDomain() = com.razumly.mvp.core.data.dataTypes.EventAuthorityCapabilities(
         viewerUserId = viewerUserId,
@@ -126,6 +127,7 @@ data class EventEditorCapabilitiesDto(
         managementAuthority = managementAuthority,
         eventHostId = eventHostId,
         viewerIsEventHost = viewerIsEventHost,
+        organizationOwnershipStatus = organizationOwnershipStatus,
     )
 }
 

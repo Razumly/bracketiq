@@ -20,6 +20,7 @@ data class EventAuthorityCapabilities(
     val managementAuthority: EventManagementAuthority? = null,
     val eventHostId: String? = null,
     val viewerIsEventHost: Boolean = false,
+    val organizationOwnershipStatus: String? = null,
 ) {
     fun canEditFor(userId: String): Boolean =
         userId.isNotBlank() && viewerUserId == userId && canEdit && !readOnly

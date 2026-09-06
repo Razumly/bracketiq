@@ -702,6 +702,7 @@ export const eventEditorBootstrapDraftSchema = eventEditorDraftSchema
 export const editorCapabilitiesSchema = z
   .object({
     viewerUserId: nullableId.optional(),
+    organizationOwnershipStatus: z.string().nullable().optional(),
     canUseOnlinePayments: z.boolean(),
     canManageStaff: z.boolean(),
     canEdit: z.boolean(),

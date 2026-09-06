@@ -49,8 +49,101 @@ import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertFalse
 
 class EventEditActionHandlerTest {
+    @Test
+    fun given_open_editor_when_authority_is_invalidated_then_editing_and_pending_requests_close() = runTest {
+        val event = testEvent()
+        val session = editorSession(event, emptyList())
+        val repository = HandlerEventRepository(ArrayDeque(listOf(session, session)), ArrayDeque(), ArrayDeque())
+        val draft = EventEditDraftCoordinator(initialEvent = event, canEditInitial = false)
+        val handler = createHandler(this, event, repository, mutableListOf(), draftCoordinator = draft)
+        handler.startEditingEvent()
+        advanceUntilIdle()
+        assertTrue(draft.isEditing.value)
+        handler.invalidateAuthority()
+        assertFalse(draft.isEditing.value)
+        val pending = CompletableDeferred<Unit>()
+        repository.openEditorGate = pending
+        handler.startEditingEvent()
+        advanceUntilIdle()
+        handler.invalidateAuthority()
+        pending.complete(Unit)
+        advanceUntilIdle()
+        assertFalse(draft.isEditing.value)
+        assertNull(handler.eventEditorSnapshot.value)
+    }
+
+    @Test
+    fun given_pending_editor_when_viewer_changes_then_previous_viewer_cannot_open_it() = runTest {
+        val event = testEvent()
+        val repository = HandlerEventRepository(ArrayDeque(listOf(editorSession(event, emptyList()))), ArrayDeque(), ArrayDeque())
+        val pending = CompletableDeferred<Unit>()
+        repository.openEditorGate = pending
+        var viewerId = "viewer"
+        val draft = EventEditDraftCoordinator(initialEvent = event, canEditInitial = false)
+        val handler = createHandler(this, event, repository, mutableListOf(), draftCoordinator = draft, currentUserId = { viewerId })
+        handler.startEditingEvent()
+        advanceUntilIdle()
+        viewerId = "another-viewer"
+        pending.complete(Unit)
+        advanceUntilIdle()
+        assertFalse(draft.isEditing.value)
+    }
+
+    @Test
+    fun given_revoked_authority_when_opening_editor_then_fresh_denial_blocks_editing_and_explains_permission() = runTest {
+        val event = testEvent()
+        val permitted = editorSession(event, emptyList())
+        val denied = EventEditorSessionMapper.fromEditSnapshot(permitted.snapshot.copy(
+            capabilities = permitted.snapshot.capabilities.copy(canEdit = false, readOnly = true, readOnlyReason = "NOT_AUTHORIZED"),
+        ))
+        val repository = HandlerEventRepository(ArrayDeque(listOf(denied)), ArrayDeque(), ArrayDeque())
+        val draft = EventEditDraftCoordinator(initialEvent = event, canEditInitial = false)
+        val errors = mutableListOf<String>()
+        createHandler(this, event, repository, errors, draftCoordinator = draft).startEditingEvent()
+        advanceUntilIdle()
+        assertEquals(false, draft.isEditing.value)
+        assertEquals(listOf("Your account does not have permission to manage this Event."), errors)
+        assertTrue(repository.saveCommands.isEmpty())
+    }
+
+    @Test
+    fun given_authorized_split_playoffs_when_opening_editor_then_playoff_configuration_is_retained() = runTest {
+        val event = testEvent().copy(includePlayoffs = true, splitLeaguePlayoffDivisions = true,
+            divisionDetails = listOf(com.razumly.mvp.core.data.dataTypes.DivisionDetail(
+                id = "playoff", kind = "PLAYOFF", maxParticipants = 4, playoffTeamCount = 4)))
+        val session = editorSession(event, emptyList())
+        val repository = HandlerEventRepository(ArrayDeque(listOf(session)), ArrayDeque(), ArrayDeque())
+        val draft = EventEditDraftCoordinator(initialEvent = event, canEditInitial = false)
+        val handler = createHandler(this, event, repository, mutableListOf(), draftCoordinator = draft)
+        handler.startEditingEvent()
+        advanceUntilIdle()
+        assertTrue(draft.isEditing.value)
+        assertEquals(session.canonicalState.event.divisionDetails, draft.editedEvent.value.divisionDetails)
+    }
+
+    @Test
+    fun given_authorized_external_event_with_payment_plans_when_editing_destination_then_configuration_is_retained() = runTest {
+        val event = testEvent().copy(
+            affiliateUrl = "https://organizer.example/register",
+            allowPaymentPlans = true, installmentCount = 2, installmentAmounts = listOf(2500, 2500),
+        )
+        val session = editorSession(event, emptyList())
+        val repository = HandlerEventRepository(ArrayDeque(listOf(session)), ArrayDeque(), ArrayDeque())
+        val draft = EventEditDraftCoordinator(initialEvent = event, canEditInitial = false)
+        val errors = mutableListOf<String>()
+        val handler = createHandler(this, event, repository, errors, draftCoordinator = draft)
+        handler.startEditingEvent()
+        advanceUntilIdle()
+        assertTrue(draft.isEditing.value)
+        val before = draft.editedEvent.value
+        handler.editEventField { copy(affiliateUrl = "https://new-organizer.example/join") }
+        assertEquals(before.copy(affiliateUrl = "https://new-organizer.example/join"), draft.editedEvent.value)
+        assertTrue(errors.isEmpty())
+    }
+
     @Test
     fun given_schedule_view_when_an_operation_is_selected_then_reviews_without_saving_event_settings() = runTest {
         for (operation in EventEditorMaintenanceOperation.entries) {
@@ -1113,9 +1206,11 @@ class EventEditActionHandlerTest {
         matchRepository: IMatchRepository = HandlerMatchRepository(),
         refreshLeagueStandingsAfterSchedule: suspend (Event) -> Unit = {},
         draftCoordinator: EventEditDraftCoordinator = EventEditDraftCoordinator(initialEvent = event, canEditInitial = false),
+        currentUserId: () -> String = { "viewer" },
     ): EventEditActionHandler {
         val loadingHandler = CreateEvent_FakeLoadingHandler()
         return EventEditActionHandler(
+            currentUserId = currentUserId,
             scope = scope,
             editActionCoordinator = EventEditActionCoordinator(),
             editDraftCoordinator = draftCoordinator,
@@ -1167,11 +1262,13 @@ private class HandlerEventRepository(
     var rejectMaintenanceResult: EventEditorMaintenanceRejectedResultDto? = null
     var detailEvents: List<Event> = emptyList()
     var refreshEditorGate: CompletableDeferred<Unit>? = null
+    var openEditorGate: CompletableDeferred<Unit>? = null
     private var lastSaveOutcome: EventEditorSaveOutcome? = null
 
     override suspend fun getEventEditor(eventId: String): Result<EventEditorSession> {
         editorRequests += eventId
         val session = editorSessions.removeFirst()
+        openEditorGate?.await()
         if (editorRequests.size > 1) {
             refreshEditorGate?.await()
         }
@@ -1297,6 +1394,7 @@ private fun editorSession(
     val createSession = createEventEditorSession(event = event)
     return EventEditorSessionMapper.fromEditSnapshot(
         createSession.snapshot.copy(
+            capabilities = createSession.snapshot.capabilities.copy(viewerUserId = "viewer"),
             mode = "EDIT",
             eventId = event.id,
             editorRevision = editorRevision,

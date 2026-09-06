@@ -114,6 +114,75 @@ const isManagementTypeCheck = (allowedTypes: readonly StaffMemberType[]): boolea
   allowedTypes.includes('HOST') || allowedTypes.includes('STAFF')
 );
 
+const loadStaffMembership = (organizationId: string, userId: string, client: OrganizationLookupClient) =>
+  client.staffMembers?.findUnique({
+    where: { organizationId_userId: { organizationId, userId } },
+    select: { organizationId: true, userId: true, types: true, roleId: true },
+  }) ?? Promise.resolve(null);
+
+const loadStaffInvites = (organizationId: string, userId: string, client: OrganizationLookupClient) =>
+  client.invites?.findMany({
+    where: { organizationId, userId, type: 'STAFF' },
+    select: { organizationId: true, userId: true, type: true, status: true },
+  }) ?? Promise.resolve([]);
+
+const hasRolePermission = async (
+  roleId: string,
+  organizationId: string,
+  requestedPermissions: OrganizationPermission[],
+  client: OrganizationLookupClient,
+): Promise<boolean> => {
+  const role = await client.organizationRoles?.findFirst({
+    where: { id: roleId, organizationId },
+    select: { id: true, organizationId: true },
+  });
+  if (!role) return false;
+  if (client.organizationRolePermissions?.findMany) {
+    const permissions = await client.organizationRolePermissions.findMany({
+      where: { organizationRoleId: role.id, permission: { in: requestedPermissions } },
+      select: { permission: true },
+    });
+    return permissions.length > 0;
+  }
+  for (const permission of requestedPermissions) {
+    const allowed = await client.organizationRolePermissions?.findFirst({
+      where: { organizationRoleId: role.id, permission },
+      select: { permission: true },
+    });
+    if (allowed) return true;
+  }
+  return false;
+};
+
+const nonBlankId = (value: unknown): string | null =>
+  typeof value === 'string' ? value.trim() || null : null;
+
+const hasStaffPermissions = async (
+  session: SessionLike,
+  organizationId: string,
+  requestedPermissions: OrganizationPermission[],
+  client: OrganizationLookupClient,
+): Promise<boolean> => {
+  const [staffMember, invites] = await Promise.all([
+    loadStaffMembership(organizationId, session.userId, client),
+    loadStaffInvites(organizationId, session.userId, client),
+  ]);
+
+  if (!staffMember) {
+    return false;
+  }
+  if (getBlockingStaffInvite(invites, organizationId, session.userId)) {
+    return false;
+  }
+
+  const roleId = nonBlankId(staffMember.roleId);
+  if (roleId && canUseRolePermissions(client)) {
+    return hasRolePermission(staffMember.roleId!, organizationId, requestedPermissions, client);
+  }
+  return requestedPermissions.includes(ORG_PERMISSIONS.ORGANIZATION_MANAGE)
+    && hasLegacyStaffTypeAccess(staffMember, STAFF_ACCESS_TYPES);
+};
+
 const hasOrganizationPermissions = async (
   session: SessionLike,
   organization: OrganizationAccessRecord | null | undefined,
@@ -142,95 +211,7 @@ const hasOrganizationPermissions = async (
     return true;
   }
 
-  const [staffMember, invites] = await Promise.all([
-    client.staffMembers?.findUnique
-      ? client.staffMembers.findUnique({
-        where: {
-          organizationId_userId: {
-            organizationId,
-            userId: session.userId,
-          },
-        },
-        select: {
-          organizationId: true,
-          userId: true,
-          types: true,
-          roleId: true,
-        },
-      })
-      : Promise.resolve(null),
-    client.invites?.findMany
-      ? client.invites.findMany({
-        where: {
-          organizationId,
-          userId: session.userId,
-          type: 'STAFF',
-        },
-        select: {
-          organizationId: true,
-          userId: true,
-          type: true,
-          status: true,
-        },
-      })
-      : Promise.resolve([]),
-  ]);
-
-  if (!staffMember) {
-    return false;
-  }
-  if (getBlockingStaffInvite(invites, organizationId, session.userId)) {
-    return false;
-  }
-
-  const roleId = typeof staffMember.roleId === 'string' && staffMember.roleId.trim().length > 0
-    ? staffMember.roleId
-    : null;
-  if (roleId && canUseRolePermissions(client)) {
-    const role = await client.organizationRoles?.findFirst({
-      where: {
-        id: roleId,
-        organizationId,
-      },
-      select: {
-        id: true,
-        organizationId: true,
-      },
-    });
-    if (!role) {
-      return false;
-    }
-    if (client.organizationRolePermissions?.findMany) {
-      const rolePermissions = await client.organizationRolePermissions.findMany({
-        where: {
-          organizationRoleId: role.id,
-          permission: { in: requestedPermissions },
-        },
-        select: {
-          permission: true,
-        },
-      });
-      return rolePermissions.length > 0;
-    }
-    for (const permission of requestedPermissions) {
-      const rolePermission = await client.organizationRolePermissions?.findFirst({
-        where: {
-          organizationRoleId: role.id,
-          permission,
-        },
-        select: {
-          permission: true,
-        },
-      });
-      if (rolePermission) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  return requestedPermissions.includes(ORG_PERMISSIONS.ORGANIZATION_MANAGE)
-    && hasLegacyStaffTypeAccess(staffMember, STAFF_ACCESS_TYPES);
+  return hasStaffPermissions(session, organizationId, requestedPermissions, client);
 };
 
 export const hasOrgPermission = async (
@@ -293,36 +274,8 @@ export const hasOrganizationStaffAccess = async (
   }
 
   const [staffMember, invites] = await Promise.all([
-    client.staffMembers?.findUnique
-      ? client.staffMembers.findUnique({
-        where: {
-          organizationId_userId: {
-            organizationId,
-            userId: session.userId,
-          },
-        },
-        select: {
-          organizationId: true,
-          userId: true,
-          types: true,
-        },
-      })
-      : Promise.resolve(null),
-    client.invites?.findMany
-      ? client.invites.findMany({
-        where: {
-          organizationId,
-          userId: session.userId,
-          type: 'STAFF',
-        },
-        select: {
-          organizationId: true,
-          userId: true,
-          type: true,
-          status: true,
-        },
-      })
-      : Promise.resolve([]),
+    loadStaffMembership(organizationId, session.userId, client),
+    loadStaffInvites(organizationId, session.userId, client),
   ]);
 
   if (!hasLegacyStaffTypeAccess(staffMember, allowedTypes)) {
@@ -392,9 +345,9 @@ export const resolveEffectiveOrganizationEventHosts = async (
   organization: OrganizationAccessRecord,
   client: OrganizationLookupClient = prisma,
 ): Promise<EffectiveOrganizationEventHosts> => {
-  const organizationId = organization.id?.trim() || null;
-  const ownerId = organization.ownerId?.trim() || null;
-  const storedHostId = typeof event.hostId === 'string' ? event.hostId.trim() || null : null;
+  const organizationId = nonBlankId(organization.id);
+  const ownerId = nonBlankId(organization.ownerId);
+  const storedHostId = nonBlankId(event.hostId);
   const assignedIds = new Set([
     ...(storedHostId ? [storedHostId] : []),
     ...normalizeIdList(event.assistantHostIds),
@@ -458,6 +411,7 @@ export const canManageEvent = async (
 };
 
 export type EventAuthorityCapabilities = {
+  organizationOwnershipStatus?: string | null;
   viewerUserId?: string | null;
   canEdit: boolean;
   canManageStaff: boolean;
@@ -473,94 +427,111 @@ export type EventAuthorityCapabilities = {
   viewerIsEventHost: boolean;
 };
 
+const authorityOrganizationId = (
+  event: EventAccessRecord | null | undefined,
+  organization: OrganizationAccessRecord | null,
+): string | null => typeof organization?.id === 'string' ? organization.id : event?.organizationId ?? null;
+
+const managementAuthorityFor = (
+  verified: boolean,
+  organizationId: string | null,
+  ownerUserId: string | null,
+): EventAuthorityCapabilities['managementAuthority'] =>
+  verified && organizationId && ownerUserId
+    ? { type: 'ORGANIZATION', organizationId, ownerUserId }
+    : null;
+
+const verifiedEventHosts = async (
+  session: SessionLike | null | undefined,
+  event: EventAccessRecord | null | undefined,
+  organization: OrganizationAccessRecord | null,
+  client: OrganizationLookupClient,
+): Promise<EffectiveOrganizationEventHosts | null> => {
+  if (!event || !organization || !hasVerifiedOrganizationAuthority(organization)) return null;
+  return resolveEffectiveOrganizationEventHosts(session ?? null, event, organization, client);
+};
+
+const projectedEventHostId = (
+  event: EventAccessRecord | null | undefined,
+  hosts: EffectiveOrganizationEventHosts | null,
+): string | null => hosts?.eventHostId ?? (event?.organizationId ? null : nonBlankId(event?.hostId));
+
+const loadAuthorityContext = async (
+  session: SessionLike | null | undefined,
+  event: EventAccessRecord | null | undefined,
+  client: OrganizationLookupClient,
+) => {
+  const organization = await loadEventOrganization(event, client);
+  const organizationId = authorityOrganizationId(event, organization);
+  const ownerUserId = typeof organization?.ownerId === 'string' ? organization.ownerId : null;
+  const hasVerifiedAuthority = Boolean(organization && hasVerifiedOrganizationAuthority(organization));
+  const effectiveHosts = await verifiedEventHosts(session, event, organization, client);
+  return {
+    organization,
+    organizationId,
+    ownerUserId,
+    hasVerifiedAuthority,
+    effectiveHosts,
+    organizationOwnershipStatus: organization?.ownershipStatus ?? null,
+    managementAuthority: managementAuthorityFor(hasVerifiedAuthority, organizationId, ownerUserId),
+    eventHostId: projectedEventHostId(event, effectiveHosts),
+  };
+};
+
+type AuthorityContext = Awaited<ReturnType<typeof loadAuthorityContext>>;
+
+const canDelegateEventHost = async (
+  session: SessionLike,
+  event: EventAccessRecord | null | undefined,
+  context: AuthorityContext,
+  client: OrganizationLookupClient,
+): Promise<boolean> => {
+  if (context.organizationId && context.hasVerifiedAuthority && context.organization) {
+    return hasOrgPermission(session, context.organization, ORG_PERMISSIONS.ORGANIZATION_MANAGE, client);
+  }
+  if (!context.organizationId && event?.hostId === session.userId) return true;
+  return session.isAdmin || await hasRazumlyAdminAccess(session, client);
+};
+
+const viewerIsEventHost = (
+  session: SessionLike | null | undefined,
+  event: EventAccessRecord | null | undefined,
+  context: AuthorityContext,
+): boolean => {
+  if (!session) return false;
+  const directHost = context.effectiveHosts
+    ? context.effectiveHosts.viewerIsAssignedHost
+    : event?.hostId === session.userId || normalizeIdList(event?.assistantHostIds).includes(session.userId);
+  return directHost || (context.hasVerifiedAuthority && context.ownerUserId === session.userId);
+};
+
+const authorityRestriction = (
+  canEdit: boolean,
+  authenticated: boolean,
+  context: AuthorityContext,
+): EventAuthorityCapabilities['readOnlyReason'] => {
+  if (canEdit) return null;
+  if (context.organizationId && !context.hasVerifiedAuthority) return 'MANAGEMENT_AUTHORITY_UNVERIFIED';
+  return authenticated ? 'NOT_AUTHORIZED' : 'AUTHENTICATION_REQUIRED';
+};
+
 export const projectEventAuthorityCapabilities = async (
   session: SessionLike | null | undefined,
   event: EventAccessRecord | null | undefined,
   client: OrganizationLookupClient = prisma,
 ): Promise<EventAuthorityCapabilities> => {
-  const organization = await loadEventOrganization(event, client);
-  const hasVerifiedAuthority = Boolean(
-    organization && hasVerifiedOrganizationAuthority(organization),
-  );
-  const organizationId = typeof organization?.id === 'string'
-    ? organization.id
-    : event?.organizationId ?? null;
-  const ownerUserId = typeof organization?.ownerId === 'string'
-    ? organization.ownerId
-    : null;
-  const storedHostId = typeof event?.hostId === 'string' && event.hostId.trim().length > 0
-    ? event.hostId.trim()
-    : null;
-  const effectiveHosts = (
-    event && organization && hasVerifiedAuthority
-      ? await resolveEffectiveOrganizationEventHosts(session ?? null, event, organization, client)
-      : null
-  );
-  const eventHostId = effectiveHosts?.eventHostId
-    ?? (event?.organizationId ? null : storedHostId);
-  const managementAuthority = (
-    hasVerifiedAuthority && organizationId && ownerUserId
-      ? {
-          type: 'ORGANIZATION' as const,
-          organizationId,
-          ownerUserId,
-        }
-      : null
-  );
-
-  if (!session) {
-    return {
-      viewerUserId: null,
-      canEdit: false,
-      canManageStaff: false,
-      canDelegateHost: false,
-      readOnly: true,
-      readOnlyReason: organizationId && !hasVerifiedAuthority
-        ? 'MANAGEMENT_AUTHORITY_UNVERIFIED'
-        : 'AUTHENTICATION_REQUIRED',
-      managementAuthority,
-      eventHostId,
-      viewerIsEventHost: false,
-    };
-  }
-
-  const canEdit = await canManageEvent(session, event, client);
-  const isDirectEventHost = effectiveHosts
-    ? effectiveHosts.viewerIsAssignedHost
-    : event?.hostId === session.userId
-      || normalizeIdList(event?.assistantHostIds).includes(session.userId);
-  const isAuthorityOwner = Boolean(
-    hasVerifiedAuthority && ownerUserId === session.userId,
-  );
-  let canDelegateHost = false;
-  if (organizationId && hasVerifiedAuthority && organization) {
-    canDelegateHost = await hasOrgPermission(
-      session,
-      organization,
-      ORG_PERMISSIONS.ORGANIZATION_MANAGE,
-      client,
-    );
-  } else if (!organizationId && event?.hostId === session.userId) {
-    canDelegateHost = true;
-  } else {
-    canDelegateHost = session.isAdmin || await hasRazumlyAdminAccess(session, client);
-  }
-  const readOnlyReason = canEdit
-    ? null
-    : organizationId && !hasVerifiedAuthority
-      ? 'MANAGEMENT_AUTHORITY_UNVERIFIED'
-      : 'NOT_AUTHORIZED';
-
+  const context = await loadAuthorityContext(session, event, client);
+  const canEdit = session ? await canManageEvent(session, event, client) : false;
   return {
-    viewerUserId: session.userId,
+    viewerUserId: session?.userId ?? null,
+    organizationOwnershipStatus: context.organizationOwnershipStatus,
     canEdit,
     canManageStaff: canEdit,
-    canDelegateHost,
+    canDelegateHost: session ? await canDelegateEventHost(session, event, context, client) : false,
     readOnly: !canEdit,
-    readOnlyReason,
-    managementAuthority,
-    eventHostId,
-    viewerIsEventHost: Boolean(isDirectEventHost || isAuthorityOwner),
+    readOnlyReason: authorityRestriction(canEdit, Boolean(session), context),
+    managementAuthority: context.managementAuthority,
+    eventHostId: context.eventHostId,
+    viewerIsEventHost: viewerIsEventHost(session, event, context),
   };
 };
-

@@ -188,7 +188,9 @@ fun EventDetailScreen(
     val isCaptain by component.isUserCaptain.collectAsState()
     val isDark = isSystemInDarkTheme()
     val isEditingMatches by component.isEditingMatches.collectAsState()
+    val authorityVerified by component.authorityVerified.collectAsState()
     val accessPresentation = remember(
+        authorityVerified,
         selectedEvent,
         editedEvent,
         sports,
@@ -198,6 +200,7 @@ fun EventDetailScreen(
         isEditingMatches,
     ) {
         buildEventDetailAccessPresentation(
+            authorityVerified = authorityVerified,
             selectedEvent = selectedEvent,
             editedEvent = editedEvent,
             sports = sports,

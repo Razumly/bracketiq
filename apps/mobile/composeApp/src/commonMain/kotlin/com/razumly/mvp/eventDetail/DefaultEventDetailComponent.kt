@@ -136,7 +136,7 @@ class DefaultEventDetailComponent(
     }
 
     private fun canManageMatchEditing(): Boolean =
-        canManageEventForUser(
+        authoritySession.isVerified(selectedEvent.value, currentUser.value.id) && canManageEventForUser(
             event = selectedEvent.value,
             user = currentUser.value,
             organization = eventWithRelations.value.organization,
@@ -146,7 +146,7 @@ class DefaultEventDetailComponent(
         event: Event = selectedEvent.value,
         user: UserData = currentUser.value,
         organization: Organization? = eventWithRelations.value.organization,
-    ): Boolean = canManageEventForUser(
+    ): Boolean = authoritySession.isVerified(event, user.id) && canManageEventForUser(
         event = event,
         user = user,
         organization = organization,
@@ -350,7 +350,7 @@ class DefaultEventDetailComponent(
     private val editActionCoordinator = EventEditActionCoordinator()
     private val editDraftCoordinator = EventEditDraftCoordinator(
         initialEvent = event,
-        canEditInitial = event.state.equals("TEMPLATE", ignoreCase = true) && canEditEventDetails(event),
+        canEditInitial = false,
     )
     override var editedEvent = editDraftCoordinator.editedEvent
     override var isEditing = editDraftCoordinator.isEditing
@@ -427,6 +427,10 @@ class DefaultEventDetailComponent(
     override val divisionTypeParameters = sportsCatalogCoordinator.divisionTypeParameters
 
     override val selectedEvent = relationStateCoordinator.selectedEvent
+    private val authoritySession = EventAuthoritySession()
+    override val authorityVerified = combine(authoritySession.verified, selectedEvent, currentUser) { verified, event, user ->
+        verified?.matches(event, user.id) == true
+    }.stateIn(scope, SharingStarted.Eagerly, false)
 
     private val bootstrapResourcesCoordinator = EventBootstrapResourcesCoordinator(
         eventRelations = eventRelations,
@@ -436,9 +440,8 @@ class DefaultEventDetailComponent(
     private val eventTimeSlots = bootstrapResourcesCoordinator.eventTimeSlots
     private val eventLeagueScoringConfig = bootstrapResourcesCoordinator.eventLeagueScoringConfig
 
-    override val isHost = combine(selectedEvent, currentUser) { event, user ->
-        event.capabilities?.let { it.canEditFor(user.id) && it.viewerIsEventHost }
-            ?: (!event.isAffiliateEvent() && user.id.isNotBlank() && event.hostId == user.id)
+    override val isHost = combine(selectedEvent, currentUser, authorityVerified) { event, user, verified ->
+        verified && event.capabilities?.let { it.canEditFor(user.id) && it.viewerIsEventHost } == true
     }
         .stateIn(scope, SharingStarted.Eagerly, false)
 
@@ -604,7 +607,9 @@ class DefaultEventDetailComponent(
         participantManagementCoordinator = participantManagementCoordinator,
         weeklyOccurrenceCoordinator = weeklyOccurrenceCoordinator,
         operations = EventParticipantBootstrapOperations(
-            getEvent = eventRepository::getEvent,
+            getEvent = { eventId ->
+                authoritySession.refresh(eventId, currentUser.value.id, eventRepository::getEvent)
+            },
             syncCurrentUserRegistrationCacheForEvent = eventRepository::syncCurrentUserRegistrationCacheForEvent,
             syncEventParticipants = eventRepository::syncEventParticipants,
             syncEventDetail = eventRepository::syncEventDetail,
@@ -686,6 +691,7 @@ class DefaultEventDetailComponent(
         setError = { error -> _errorState.value = error },
     )
     private val eventEditActionHandler = EventEditActionHandler(
+        currentUserId = { currentUser.value.id },
         scope = scope,
         editActionCoordinator = editActionCoordinator,
         editDraftCoordinator = editDraftCoordinator,
@@ -951,13 +957,28 @@ class DefaultEventDetailComponent(
             selectedEvent,
             resourceLifecycleHandler::loadOrganizationTemplates,
         )
-        lifecycleBindings.bindSelectedEventResources(selectedEvent) { eventId ->
-            participantBootstrapCoordinator.hydrateMobileEventDetail(
-                showDetailsOnSuccess = false,
-                showLoading = false,
-                reportErrors = false,
-            )
-            eventEditActionHandler.loadAvailableRentalResources(eventId)
+        scope.launch {
+            combine(selectedEvent, currentUser) { selected, viewer -> selected.id to viewer.id }
+                .distinctUntilChanged()
+                .collect { (eventId, _) ->
+                    participantBootstrapCoordinator.hydrateMobileEventDetail(
+                        showDetailsOnSuccess = false,
+                        showLoading = false,
+                        reportErrors = false,
+                    )
+                    eventEditActionHandler.loadAvailableRentalResources(eventId)
+                }
+        }
+        scope.launch {
+            authorityVerified.collect { verified ->
+                if (verified && selectedEvent.value.state.equals("TEMPLATE", ignoreCase = true)) {
+                    eventEditActionHandler.startEditingEvent()
+                }
+                if (!verified) {
+                    matchEditingCoordinator.cancelEditing()
+                    eventEditActionHandler.invalidateAuthority()
+                }
+            }
         }
         lifecycleBindings.bindScheduleTrackedUser(
             currentUser,
@@ -995,6 +1016,7 @@ class DefaultEventDetailComponent(
             participantBootstrapCoordinator.managedBootstrapTargetFlow(
                 currentUser,
                 eventOrganization,
+                authorityVerified,
             ) { eventValue, user, organization ->
                 canManageParticipantData(
                     event = eventValue,
@@ -1218,7 +1240,7 @@ class DefaultEventDetailComponent(
             eventProperties + mapOf("destination_selected" to "true"),
         )
         scope.launch {
-            val result = urlHandler?.openUrlInWebView(affiliateUrl)
+            val result = urlHandler?.openRegistrationUrl(affiliateUrl)
             if (result == null) {
                 _errorState.value = ErrorMessage("Unable to open registration link.")
                 return@launch

@@ -43,9 +43,9 @@ class EventDetailAccessRulesTest {
     }
 
     @Test
-    fun can_edit_event_details_rejects_mobile_unsupported_features() {
+    fun given_payment_configuration_when_checking_edit_support_then_mobile_does_not_add_a_restriction() {
         assertTrue(canEditEventDetails(Event()))
-        assertFalse(
+        assertTrue(
             canEditEventDetails(
                 Event(
                     allowPaymentPlans = true,

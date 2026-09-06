@@ -2,15 +2,12 @@ package com.razumly.mvp.eventDetail.shared
 
 import androidx.compose.runtime.Composable
 import com.razumly.mvp.eventDetail.composables.TextInputField
-import io.ktor.http.Url
+import com.razumly.mvp.core.util.registrationUrlOrNull
 
 internal fun externalRegistrationUrlError(value: String?): String? {
     val candidate = value?.trim().orEmpty()
     if (candidate.isEmpty()) return null
-    val url = runCatching { Url(candidate) }.getOrNull()
-    val hasHttpScheme = candidate.startsWith("https://", ignoreCase = true) ||
-        candidate.startsWith("http://", ignoreCase = true)
-    return if (hasHttpScheme && url != null && url.host.isNotBlank() && candidate.none(Char::isWhitespace)) {
+    return if (registrationUrlOrNull(candidate) != null) {
         null
     } else {
         "Enter a valid http:// or https:// registration website."

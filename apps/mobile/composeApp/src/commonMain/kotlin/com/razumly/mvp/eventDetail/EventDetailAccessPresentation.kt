@@ -43,6 +43,7 @@ internal fun buildEventDetailAccessPresentation(
     currentUserManagedEventTeamId: String?,
     isHost: Boolean,
     isEditingMatches: Boolean,
+    authorityVerified: Boolean,
 ): EventDetailAccessPresentation {
     val event = selectedEvent.event
     val isArchivedEvent = event.isArchived()
@@ -69,12 +70,8 @@ internal fun buildEventDetailAccessPresentation(
         currentUserId = currentUser.id,
         event = event,
     )
-    val canManageTemplate = !isArchivedEvent && canManageEventForUser(event, currentUser, selectedEvent.organization)
-    val canEditEventDetails = !isArchivedEvent && canEditEventDetailsOnMobile(
-        event = event,
-        isHost = if (event.capabilities != null) canManageTemplate else isHost && canManageTemplate,
-        canManageTemplate = canManageTemplate,
-    )
+    val canManageTemplate = authorityVerified && !isArchivedEvent && canManageEventForUser(event, currentUser, selectedEvent.organization)
+    val canEditEventDetails = canManageTemplate
     val canDeleteEvent = canManageTemplate && (isTemplateEvent || event.capabilities != null || isHost)
     val showCreateTemplateFromCurrentEvent = canManageTemplate && isHost && !isTemplateEvent
     val canManageLeagueStandings = canManageTemplate

@@ -328,6 +328,10 @@ describe("event template privacy routes", () => {
       id: "event_1",
       name: "Public Event",
       state: "PUBLISHED",
+      sourceType: "AFFILIATE_IMPORT",
+      sourceId: "private-source-id",
+      sourceUrl: "https://partner.example/source",
+      affiliateUrl: "https://partner.example/register",
       hostId: "host_1",
       assistantHostIds: ["assistant_1"],
       manualPaymentInstructions: "Send payment to private@example.com",
@@ -359,6 +363,10 @@ describe("event template privacy routes", () => {
     expect(payload).not.toHaveProperty("staffInvites");
     expect(payload).not.toHaveProperty("manualPaymentInstructions");
     expect(payload).not.toHaveProperty("manualPaymentLinks");
+    expect(payload.sourceType).toBe("AFFILIATE_IMPORT");
+    expect(payload).not.toHaveProperty("sourceId");
+    expect(payload.sourceUrl).toBeUndefined();
+    expect(JSON.stringify(payload)).not.toContain("partner.example");
     expect(prismaMock.invites.findMany).not.toHaveBeenCalled();
   });
 

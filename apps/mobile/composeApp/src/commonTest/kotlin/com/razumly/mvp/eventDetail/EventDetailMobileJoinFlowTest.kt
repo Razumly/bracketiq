@@ -2251,7 +2251,18 @@ private class EventDetailFakeEventRepository(
 
     override suspend fun getEvent(eventId: String): Result<Event> {
         refreshRequests += eventId
-        return Result.success(refreshedEvent ?: eventFlow.value.getOrThrow().event)
+        val relations = eventFlow.value.getOrThrow()
+        val event = withServerAuthority(refreshedEvent ?: relations.event)
+        eventFlow.value = Result.success(relations.copy(event = event))
+        return Result.success(event)
+    }
+
+    private fun withServerAuthority(event: Event): Event {
+        val canEdit = currentUser.id == host.id
+        return event.copy(capabilities = com.razumly.mvp.core.data.dataTypes.EventAuthorityCapabilities(
+            viewerUserId = currentUser.id, canEdit = canEdit, readOnly = !canEdit,
+            viewerIsEventHost = canEdit, canManageStaff = canEdit,
+        ))
     }
 
     override suspend fun getEventEditor(eventId: String): Result<com.razumly.mvp.core.data.repositories.EventEditorSession> {
@@ -2260,7 +2271,11 @@ private class EventDetailFakeEventRepository(
         val createSession = createEventEditorSession(event = sourceEvent)
         return Result.success(
             EventEditorSessionMapper.fromEditSnapshot(
-                createSession.snapshot.copy(mode = "EDIT"),
+                createSession.snapshot.copy(mode = "EDIT", capabilities = createSession.snapshot.capabilities.copy(
+                    viewerUserId = currentUser.id,
+                    canEdit = currentUser.id == host.id,
+                    readOnly = currentUser.id != host.id,
+                )),
             ),
         )
     }

@@ -108,8 +108,8 @@ internal fun LazyListScope.simpleEventDetailsBasicInfoSection(
                 thickness = 1.dp,
             )
             DetailKeyValueList(rows = state.readOnlyBasicsRows)
-            if (state.event.capabilities?.readOnlyReason == "MANAGEMENT_AUTHORITY_UNVERIFIED") {
-                Text("Event management is read-only. Use the organizer's website to register.")
+            state.event.capabilities?.managementRestrictionMessage()?.let { message ->
+                Text(message)
             }
             if (state.event.description.isNotBlank()) {
                 Spacer(modifier = Modifier.height(4.dp))

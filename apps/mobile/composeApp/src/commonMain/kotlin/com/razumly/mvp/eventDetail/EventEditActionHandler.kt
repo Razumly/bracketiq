@@ -95,9 +95,10 @@ private fun EventEditorMaintenanceAcceptedResultDto.asMaintenanceProposal(): Eve
 
 private fun EventScheduleEditAction.isAvailableIn(
     snapshot: EventEditorSnapshotDto,
+    viewerId: String,
 ): Boolean =
     snapshot.mode == "EDIT" &&
-        snapshot.capabilities.canEdit &&
+        snapshot.capabilities.toDomain().canEditFor(viewerId) &&
         maintenanceOperation in snapshot.scheduleState.availableMaintenanceOperations
 
 private fun EventScheduleMaintenanceReview.requestedAction(): EventScheduleEditAction =
@@ -126,6 +127,7 @@ data class EventScheduleMaintenanceOptions(
 )
 
 internal class EventEditActionHandler(
+    private val currentUserId: () -> String,
     private val scope: CoroutineScope,
     private val editActionCoordinator: EventEditActionCoordinator,
     private val editDraftCoordinator: EventEditDraftCoordinator,
@@ -256,6 +258,7 @@ internal class EventEditActionHandler(
         dismissScheduleMaintenanceOptions()
         val requestId = ++editStartRequestId
         val currentEvent = selectedEvent()
+        val viewerId = currentUserId()
         scope.launch {
             val session = eventRepository.getEventEditor(currentEvent.id)
                 .getOrElse { throwable ->
@@ -264,11 +267,12 @@ internal class EventEditActionHandler(
                     }
                     return@launch
                 }
-            if (requestId != editStartRequestId || editDraftCoordinator.isEditing.value) {
+            if (requestId != editStartRequestId || editDraftCoordinator.isEditing.value || viewerId != currentUserId()) {
                 return@launch
             }
-            if (!session.snapshot.capabilities.canEdit || session.snapshot.capabilities.readOnly) {
-                setError("Event management is read-only.")
+            if (!session.snapshot.capabilities.toDomain().canEditFor(viewerId)) {
+                setError(session.snapshot.capabilities.toDomain().managementRestrictionMessage()
+                    ?: "Event management is read-only for this account.")
                 return@launch
             }
             setEventEditMode(enabled = true, seedSession = session)
@@ -292,6 +296,19 @@ internal class EventEditActionHandler(
         _eventTypeTransitionConfirmation.value = null
         setEventEditMode(enabled = false)
     }
+
+    fun invalidateAuthority() {
+        editStartRequestId += 1
+        scheduleOptionsRequestGeneration += 1
+        maintenanceRequestGeneration += 1
+        _scheduleMaintenanceOptions.value = null
+        _scheduleMaintenanceReview.value = null
+        _eventTypeTransitionConfirmation.value = null
+        clearScheduleMaintenanceIdentities()
+        setEditorSession(null)
+        inviteCoordinator.clearPendingStaffInvites()
+        editDraftCoordinator.forceExitEditing(selectedEvent())
+    }
     private fun setEditorSession(session: EventEditorSession?) {
         editorSession = session
         _eventEditorSnapshot.value = session?.snapshot
@@ -313,11 +330,6 @@ internal class EventEditActionHandler(
                 ),
             )
             .withDefaultPlayoffTeamCounts()
-        val unsupportedFeatures = mobileEventEditUnsupportedFeatures(normalizedSelected)
-        if (enabled && unsupportedFeatures.isNotEmpty()) {
-            setError(mobileEventEditUnsupportedMessage(unsupportedFeatures))
-            return
-        }
         if (editDraftCoordinator.isEditing.value == enabled) return
         if (enabled && !sportsCatalogCoordinator.isCatalogLoaded()) {
             loadSports(true)
@@ -339,9 +351,11 @@ internal class EventEditActionHandler(
 
     fun editEventField(update: Event.() -> Event) {
         editDraftCoordinator.updateEditedEvent { previous ->
-            sportsCatalogCoordinator.syncOfficialStaffingForSportTransition(
+            val updated = previous.update()
+            if (updated.copy(affiliateUrl = previous.affiliateUrl) == previous) updated
+            else sportsCatalogCoordinator.syncOfficialStaffingForSportTransition(
                 previous = previous,
-                updated = previous.update().withDefaultPlayoffTeamCounts(),
+                updated = updated.withDefaultPlayoffTeamCounts(),
             )
         }
     }
@@ -444,7 +458,7 @@ internal class EventEditActionHandler(
                     val snapshot = session.snapshot
                     val operations = snapshot.scheduleState.availableMaintenanceOperations.takeIf {
                         snapshot.mode == "EDIT" && snapshot.eventId == eventId && event.id == eventId &&
-                            snapshot.capabilities.canEdit && event.isAutomatedScheduling &&
+                            snapshot.capabilities.toDomain().canEditFor(currentUserId()) && event.isAutomatedScheduling &&
                             event.eventType.isScheduleConstructionAutomationType() &&
                             !event.state.equals("TEMPLATE", ignoreCase = true)
                     }.orEmpty()
@@ -454,7 +468,8 @@ internal class EventEditActionHandler(
                     }
                     _scheduleMaintenanceOptions.value = EventScheduleMaintenanceOptions(
                         operations = operations,
-                        message = SCHEDULE_MAINTENANCE_UNAVAILABLE_MESSAGE.takeIf { operations.isEmpty() },
+                        message = if (operations.isEmpty()) snapshot.capabilities.toDomain().managementRestrictionMessage()
+                            ?: SCHEDULE_MAINTENANCE_UNAVAILABLE_MESSAGE else null,
                     )
                 },
                 onFailure = { error ->
@@ -528,7 +543,7 @@ internal class EventEditActionHandler(
             return
         }
         val snapshot = _eventEditorSnapshot.value
-        if (snapshot == null || !action.isAvailableIn(snapshot)) {
+        if (snapshot == null || !action.isAvailableIn(snapshot, currentUserId())) {
             setError(SCHEDULE_MAINTENANCE_UNAVAILABLE_MESSAGE)
             return
         }
@@ -608,7 +623,7 @@ internal class EventEditActionHandler(
                 val authoritativeSnapshot = preparedSnapshot
                 if (
                     authoritativeSnapshot == null ||
-                    !maintenanceAction.isAvailableIn(authoritativeSnapshot)
+                    !maintenanceAction.isAvailableIn(authoritativeSnapshot, currentUserId())
                 ) {
                     throw EventScheduleMaintenanceUnavailableException()
                 }
@@ -1205,7 +1220,7 @@ internal class EventEditActionHandler(
                 if (requiresFreshRecovery) {
                     clearScheduleMaintenanceIdentities()
                 }
-                if (!action.isAvailableIn(freshSession.snapshot)) {
+                if (!action.isAvailableIn(freshSession.snapshot, currentUserId())) {
                     _scheduleMaintenanceReview.value = review.copy(
                         message = SCHEDULE_MAINTENANCE_UNAVAILABLE_MESSAGE,
                     )

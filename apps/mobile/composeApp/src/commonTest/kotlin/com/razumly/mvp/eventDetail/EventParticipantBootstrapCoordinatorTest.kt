@@ -106,6 +106,7 @@ class EventParticipantBootstrapCoordinatorTest {
             fixture.coordinator.managedBootstrapTargetFlow(
                 currentUser = currentUser,
                 eventOrganization = organization,
+                authorityVerified = MutableStateFlow(true),
                 canManage = { _, _, loadedOrganization -> loadedOrganization != null },
             ).collect { target ->
                 fixture.coordinator.refreshManagedBootstrap(target)
@@ -157,10 +158,11 @@ class EventParticipantBootstrapCoordinatorTest {
     }
 
     @Test
-    fun mobile_hydration_marks_managed_target_before_launching_and_suppresses_duplicate_bootstrap() = runTest {
+    fun given_authority_refresh_when_hydration_succeeds_then_management_loads_once() = runTest {
         val fixture = fixture(Event(id = "event-1", teamSignup = true))
         val eventResponse = CompletableDeferred<Result<Event>>()
-        fixture.getEventHandler = { eventResponse.await() }
+        fixture.canManage = false
+        fixture.getEventHandler = { eventResponse.await().also { fixture.canManage = true } }
         var managedBootstrapCalls = 0
         fixture.syncEventDetailHandler = { event, _, _ ->
             managedBootstrapCalls += 1
@@ -178,7 +180,7 @@ class EventParticipantBootstrapCoordinatorTest {
             showLoading = false,
             reportErrors = false,
         )
-        fixture.coordinator.refreshManagedBootstrap(target)
+        backgroundScope.launch { fixture.coordinator.refreshManagedBootstrap(target) }
 
         assertEquals(0, managedBootstrapCalls)
         runCurrent()
@@ -187,6 +189,33 @@ class EventParticipantBootstrapCoordinatorTest {
 
         assertEquals(0, managedBootstrapCalls)
         assertFalse(fixture.matchesLoading.value)
+    }
+
+    @Test
+    fun given_authority_refresh_when_participant_hydration_fails_then_management_bootstrap_retries() = runTest {
+        val fixture = fixture(Event(id = "event-1", teamSignup = true))
+        val eventResponse = CompletableDeferred<Result<Event>>()
+        fixture.canManage = false
+        fixture.getEventHandler = { eventResponse.await().also { fixture.canManage = true } }
+        fixture.syncParticipantHandler = { _, _ -> Result.failure(IllegalStateException("Participants unavailable")) }
+        var managedBootstrapCalls = 0
+        fixture.syncEventDetailHandler = { event, _, manage ->
+            assertTrue(manage)
+            managedBootstrapCalls += 1
+            Result.success(EventDetailSyncResult(EventParticipantsSyncResult(event)))
+        }
+        val target = ParticipantManagementRoomTarget("event-1", null, null, true)
+
+        fixture.coordinator.hydrateMobileEventDetail(false, false, false)
+        backgroundScope.launch { fixture.coordinator.refreshManagedBootstrap(target) }
+        runCurrent()
+        assertEquals(0, managedBootstrapCalls)
+
+        eventResponse.complete(Result.success(fixture.selectedEvent.value))
+        runCurrent()
+        assertEquals(1, managedBootstrapCalls)
+        fixture.coordinator.refreshManagedBootstrap(target)
+        assertEquals(1, managedBootstrapCalls)
     }
 
     @Test

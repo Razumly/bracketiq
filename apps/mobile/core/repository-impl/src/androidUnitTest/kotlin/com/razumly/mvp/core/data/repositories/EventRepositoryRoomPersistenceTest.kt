@@ -382,12 +382,15 @@ class EventRepositoryRoomPersistenceTest {
     }
 
     @Test
-    fun given_unclaimed_external_events_when_refreshed_then_room_retains_read_only_state_offline() =
+    fun given_unclaimed_event_when_restarted_then_authority_persists() =
         kotlinx.coroutines.test.runTest {
             val fixture = eventRepositoryRoomPersistenceTournamentFixture()
-            val database = Room.inMemoryDatabaseBuilder<MVPDatabaseService>(context).allowMainThreadQueries().build()
+            val databaseName = "i49.db"
+            fun openDatabase() = Room.databaseBuilder<MVPDatabaseService>(context, databaseName).allowMainThreadQueries().build()
+            var database = openDatabase()
             var offline = false
             var remoteEvent = fixture.eventResponse.copy(
+                state = "PUBLISHED",
                 affiliateUrl = "https://partner.example/register",
                 hostId = null,
                 sourceType = "AFFILIATE_IMPORT", sourceId = "source-1", sourceUrl = "https://source.example/event",
@@ -404,49 +407,65 @@ class EventRepositoryRoomPersistenceTest {
                     event = remoteEvent, capabilities = remoteEvent.capabilities,
                 )), HttpStatusCode.OK)
             }) { configureMvpHttpClient() }
-            val repository = eventRepositoryRoomPersistenceRepository(
+            fun openRepository() = eventRepositoryRoomPersistenceRepository(
                 EventRepositoryRoomPersistence_NoStartupCleanupDatabase(database), http,
                 UnconfinedTestDispatcher(testScheduler),
             )
+            var repository = openRepository()
             try {
                 for (type in EventType.entries) {
                     offline = false
                     remoteEvent = remoteEvent.copy(eventType = type.name, capabilities = EventAuthorityCapabilities(
                         viewerUserId = "host-1", canEdit = true, readOnly = false,
+                        organizationOwnershipStatus = "CLAIMED",
+                        managementAuthority = com.razumly.mvp.core.data.dataTypes.EventManagementAuthority("ORGANIZATION", "org-1", "host-1"),
                     ))
                     repository.syncEventDetail(Event(id = fixture.eventId), null, false).getOrThrow()
+                    val claimed = repository.getCachedEventWithRelationsFlow(fixture.eventId).first().getOrThrow().event
+                    assertEquals("CLAIMED", claimed.capabilities?.organizationOwnershipStatus)
+                    assertEquals("host-1", claimed.capabilities?.managementAuthority?.ownerUserId)
                     remoteEvent = remoteEvent.copy(capabilities = EventAuthorityCapabilities(
                         viewerUserId = "host-1", readOnlyReason = "MANAGEMENT_AUTHORITY_UNVERIFIED",
+                        organizationOwnershipStatus = "UNCLAIMED",
                     ))
                     repository.syncEventDetail(Event(id = fixture.eventId), null, false).getOrThrow()
                     val refreshed = repository.getCachedEventWithRelationsFlow(fixture.eventId).first().getOrThrow().event
                     repository.syncEventParticipants(refreshed, null).getOrThrow()
                     offline = true
+                    repository.close()
+                    database.close()
+                    database = openDatabase()
+                    repository = openRepository()
                     val cached = repository.getCachedEventWithRelationsFlow(fixture.eventId).first().getOrThrow().event
                     assertEquals(type, cached.eventType)
+                    assertEquals("PUBLISHED", cached.state)
                     assertTrue(cached.isAffiliateEvent())
                     assertEquals("AFFILIATE_IMPORT", cached.sourceType)
                     assertEquals("source-1", cached.sourceId)
                     assertEquals("https://source.example/event", cached.sourceUrl)
                     assertTrue(assertNotNull(cached.capabilities).readOnly)
+                    assertEquals("UNCLAIMED", cached.capabilities?.organizationOwnershipStatus)
+                    assertNull(cached.capabilities?.managementAuthority)
                     assertFalse(cached.capabilities!!.canEditFor("host-1"))
                 }
             } finally {
                 repository.close()
                 http.close()
                 database.close()
+                context.deleteDatabase(databaseName)
             }
         }
 
     @Test
     fun given_live_site_when_registration_destination_changes_then_api_and_room_preserve_the_event() =
         kotlinx.coroutines.test.runTest(timeout = kotlin.time.Duration.parse("5m")) {
-            val apiUrl = System.getenv("MVP_ISSUE48_API_URL").orEmpty()
-            val eventIds = System.getenv("MVP_ISSUE48_EVENT_IDS").orEmpty().split(',').filter(String::isNotBlank)
-            val token = System.getenv("MVP_ISSUE48_TOKEN").orEmpty()
-            org.junit.Assume.assumeTrue("Issue 48 live API fixtures are not configured.", apiUrl.isNotBlank() && eventIds.isNotEmpty() && token.isNotBlank())
+            val issue = if (System.getenv("MVP_ISSUE49_API_URL").isNullOrBlank()) "48" else "49"
+            val apiUrl = System.getenv("MVP_ISSUE${issue}_API_URL").orEmpty()
+            val eventIds = System.getenv("MVP_ISSUE${issue}_EVENT_IDS").orEmpty().split(',').filter(String::isNotBlank)
+            val token = System.getenv("MVP_ISSUE${issue}_TOKEN").orEmpty()
+            org.junit.Assume.assumeTrue("Live API fixtures are not configured.", apiUrl.isNotBlank() && eventIds.isNotEmpty() && token.isNotBlank())
             require(java.net.URI(apiUrl).host in setOf("localhost", "127.0.0.1")) { "Use a local issue database and API." }
-            require(eventIds.size == EventType.entries.size && eventIds.all { it.startsWith("issue-48-") })
+            require(eventIds.size == EventType.entries.size && eventIds.all { it.startsWith("issue-$issue-") })
             val database = Room.inMemoryDatabaseBuilder<MVPDatabaseService>(context).allowMainThreadQueries().build()
             val http = HttpClient { configureMvpHttpClient() }
             val tokens = mockk<AuthTokenStore>()
@@ -464,8 +483,9 @@ class EventRepositoryRoomPersistenceTest {
                     eventTypes += original.canonicalState.event.eventType
                     val before = repository.getCachedEventWithRelationsFlow(eventId).first().getOrThrow().event
                     assertTrue(assertNotNull(before.capabilities).canEdit)
+                    if (issue == "49") assertEquals("CLAIMED", before.capabilities?.organizationOwnershipStatus)
                     try {
-                        for (destination in listOf("https://new-organizer.example/register", null, originalUrl)) {
+                        for (destination in listOf("http://new-organizer.example/register", "https://new-organizer.example/register", null, originalUrl)) {
                             val session = repository.getEventEditor(eventId).getOrThrow()
                             val desired = session.canonicalState.copy(event = session.canonicalState.event.copy(affiliateUrl = destination))
                             repository.saveEventEditor(eventId, EventEditorSessionMapper.toSaveCommand(session, EventEditorMutation(desired))).getOrThrow()
@@ -492,6 +512,33 @@ class EventRepositoryRoomPersistenceTest {
                     }
                 }
                 assertEquals(EventType.entries.toSet(), eventTypes)
+                if (issue == "49") {
+                    val unclaimedId = System.getenv("MVP_ISSUE49_UNCLAIMED_EVENT_ID").orEmpty()
+                    require(unclaimedId.startsWith("issue-49-"))
+                    repository.syncEventDetail(Event(id = unclaimedId), null, false).getOrThrow()
+                    val unclaimed = repository.getCachedEventWithRelationsFlow(unclaimedId).first().getOrThrow().event
+                    assertEquals("UNCLAIMED", unclaimed.capabilities?.organizationOwnershipStatus)
+                    assertEquals("MANAGEMENT_AUTHORITY_UNVERIFIED", unclaimed.capabilities?.readOnlyReason)
+                    assertEquals(false, unclaimed.capabilities?.canEdit)
+                    assertEquals("AFFILIATE_IMPORT", unclaimed.sourceType)
+                    assertNull(unclaimed.sourceId)
+                    assertNull(unclaimed.sourceUrl)
+                    assertTrue(unclaimed.affiliateUrl.orEmpty().contains("/out/event/$unclaimedId/"))
+                    assertTrue(unclaimed.isAffiliateEvent())
+                    assertEquals("PUBLISHED", unclaimed.state)
+                    val deniedSession = repository.getEventEditor(unclaimedId).getOrThrow()
+                    assertFalse(deniedSession.snapshot.capabilities.canEdit)
+                    val deniedChange = deniedSession.canonicalState.copy(
+                        event = deniedSession.canonicalState.event.copy(affiliateUrl = "https://new-organizer.example/join"),
+                    )
+                    assertTrue(repository.saveEventEditor(unclaimedId,
+                        EventEditorSessionMapper.toSaveCommand(deniedSession, EventEditorMutation(deniedChange))).isFailure)
+                    val afterDeniedSave = repository.getCachedEventWithRelationsFlow(unclaimedId).first().getOrThrow().event
+                    assertEquals(deniedSession.canonicalState.event.affiliateUrl, afterDeniedSave.affiliateUrl)
+                    assertFalse(afterDeniedSave.capabilities!!.canEdit)
+                    http.close()
+                    assertEquals(afterDeniedSave, repository.getCachedEventWithRelationsFlow(unclaimedId).first().getOrThrow().event)
+                }
             } finally {
                 repository.close()
                 http.close()

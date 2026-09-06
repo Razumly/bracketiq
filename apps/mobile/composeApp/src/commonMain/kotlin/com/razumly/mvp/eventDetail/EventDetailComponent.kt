@@ -57,6 +57,7 @@ import kotlin.time.Instant
 
 interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val selectedEvent: StateFlow<Event>
+    val authorityVerified: StateFlow<Boolean>
     val divisionMatches: StateFlow<Map<String, MatchWithRelations>>
     val divisionTeams: StateFlow<Map<String, TeamWithPlayers>>
     val selectedDivision: StateFlow<String?>
