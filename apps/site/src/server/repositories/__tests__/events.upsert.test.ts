@@ -894,8 +894,7 @@ describe("upsertEventFromPayload", () => {
 
   it("reserves the exact rental booking item for a rental-backed timeslot", async () => {
     const client = createMockClient();
-    client.rentalBookingItems.findMany.mockResolvedValueOnce([
-      {
+    const bookingItem = {
         id: "booking_item_1",
         bookingId: "booking_1",
         fieldId: "field_1",
@@ -904,8 +903,8 @@ describe("upsertEventFromPayload", () => {
         status: "CONFIRMED",
         eventId: null,
         eventTimeSlotId: null,
-      },
-    ]);
+    };
+    client.rentalBookingItems.findMany.mockResolvedValueOnce([bookingItem]);
     client.rentalBookingItems.updateMany.mockResolvedValueOnce({ count: 1 });
     client.rentalBookings.updateMany.mockResolvedValueOnce({ count: 1 });
     const payload = {
@@ -961,6 +960,15 @@ describe("upsertEventFromPayload", () => {
       }),
     );
     expect(client.timeSlots.upsert).toHaveBeenCalledTimes(1);
+    client.rentalBookingItems.updateMany.mockClear();
+    client.rentalBookings.updateMany.mockClear();
+    client.rentalBookingItems.findMany.mockResolvedValueOnce([{
+      ...bookingItem,
+      eventId: "event_1", eventTimeSlotId: "slot_rental_1",
+    }]);
+    await upsertEventFromPayload(payload, client as any);
+    expect(client.rentalBookingItems.updateMany).not.toHaveBeenCalled();
+    expect(client.rentalBookings.updateMany).not.toHaveBeenCalled();
   });
 
   it("rejects a rental booking item already attached to another event", async () => {

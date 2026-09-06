@@ -534,14 +534,7 @@ export const useEventResourceController = ({
         selectedRentalLockedSlots,
     ]);
 
-    const restrictLocalFieldCreationForRentalEvent = eventData.eventType === 'EVENT' && (
-        hasSelectedRentalResource
-        || hasImmutableTimeSlots
-        || Boolean(rentalPurchaseFieldId)
-        || (activeEditingEvent?.timeSlots ?? []).some(isRentalLockedTimeSlot)
-    );
-    const showLocalFieldCreationControls = shouldManageLocalFields
-        && !restrictLocalFieldCreationForRentalEvent;
+    const showLocalFieldCreationControls = shouldManageLocalFields;
     const fieldsReferencedInSlots = useMemo(() => resolveFieldsReferencedInSlots({
         selectedFields,
         immutableFields,

@@ -49,6 +49,38 @@ class EventDetailsScheduleControlsUiTest {
     val composeRule = createComposeRule()
 
     @Test
+    fun given_attached_rental_when_selecting_an_addition_then_booked_selection_stays_locked() {
+        val booked = scheduleSlot().copy(rentalBookingId = "booking", rentalBookingItemId = "attached-item", rentalLocked = true)
+        val bookedField = com.razumly.mvp.core.data.dataTypes.Field(id = "booked", name = "Booked court")
+        val availableField = bookedField.copy(id = "available", name = "Available court")
+        val option = com.razumly.mvp.core.data.repositories.RentalResourceOption(
+            id = "attached", bookingId = "booking", bookingItemId = "attached-item", organizationId = "facility",
+            field = bookedField, start = booked.startDate, end = requireNotNull(booked.endDate),
+            timeZone = "UTC", priceCents = 1000, eventId = "event", eventTimeSlotId = booked.id,
+        )
+        val selected = androidx.compose.runtime.mutableStateOf(setOf("attached"))
+        composeRule.setContent {
+            testTheme {
+                com.razumly.mvp.eventDetail.composables.LeagueScheduleFields(
+                    fieldCount = 1, fields = emptyList(), slots = listOf(booked),
+                    availableRentalResources = listOf(option, option.copy(
+                        id = "available", bookingItemId = "available-item", field = availableField, eventId = null, eventTimeSlotId = null,
+                    )), selectedRentalResourceIds = selected.value,
+                    onRentalResourceSelectionChange = { id, checked -> selected.value = if (checked) selected.value + id else selected.value - id },
+                    eventStart = booked.startDate, eventEnd = booked.endDate, eventTimeZone = TimeZone.UTC,
+                    onFieldCountChange = {}, onFieldNameChange = { _, _ -> }, onAddSlot = {},
+                    onUpdateSlot = { _, _ -> }, onRemoveSlot = {}, slotErrors = emptyMap(), showSlotEditor = false,
+                    allowLocalResourceCreationWithRentalResources = true,
+                )
+            }
+        }
+        composeRule.onNode(hasText("Booked court") and isToggleable()).assertIsNotEnabled()
+        composeRule.onNode(hasText("Available court") and isToggleable()).assertIsEnabled().performClick()
+        assertEquals(setOf("attached", "available"), selected.value)
+        composeRule.onNodeWithText("Set Count").assertIsDisplayed()
+    }
+
+    @Test
     fun given_simple_automated_league_when_options_render_then_schedule_controls_are_visible() {
         var changed: Boolean? = null
         composeRule.setContent {

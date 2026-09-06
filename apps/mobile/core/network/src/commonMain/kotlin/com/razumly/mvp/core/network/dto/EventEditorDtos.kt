@@ -35,11 +35,12 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonPrimitive
 
-const val EVENT_EDITOR_CONTRACT_VERSION: Int = 4
+const val EVENT_EDITOR_CONTRACT_VERSION: Int = 5
+const val EVENT_EDITOR_PREVIOUS_CONTRACT_VERSION: Int = 4
 const val EVENT_EDITOR_LEGACY_CONTRACT_VERSION: Int = 3
 
 fun isSupportedEventEditorContractVersion(version: Int): Boolean =
-    version == EVENT_EDITOR_CONTRACT_VERSION || version == EVENT_EDITOR_LEGACY_CONTRACT_VERSION
+    version == EVENT_EDITOR_CONTRACT_VERSION || version == EVENT_EDITOR_PREVIOUS_CONTRACT_VERSION || version == EVENT_EDITOR_LEGACY_CONTRACT_VERSION
 
 @Serializable
 data class EventEditorBootstrapQueryDto(
@@ -1448,6 +1449,7 @@ data class EventEditorResourcesDto(
     val immutableFieldIds: List<String> = emptyList(),
     val rentalBookingId: String? = null,
     val rentalBookingItemId: String? = null,
+    val sourceTemplateId: String? = null,
 )
 
 @Serializable
@@ -1854,7 +1856,7 @@ private fun JsonObject.toEventEditorDraftWire(): JsonObject {
     val resources = this["resources"]?.jsonObject?.let { value ->
         value
             .withoutNulls()
-            .withRequiredNulls("rentalBookingId", "rentalBookingItemId")
+            .withRequiredNulls("rentalBookingId", "rentalBookingItemId", "sourceTemplateId")
             .withArray("fields") { it.map(::withoutNulls) }
             .withArray("timeSlots") { it.map(::withoutNulls) }
     }

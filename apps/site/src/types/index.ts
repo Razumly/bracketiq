@@ -896,6 +896,7 @@ export interface EventOccurrencePreview {
 
 // Core Event interface with relationships
 export interface Event {
+  sourceTemplateId?: string | null;
   $id: string;
   name: string;
   description: string;

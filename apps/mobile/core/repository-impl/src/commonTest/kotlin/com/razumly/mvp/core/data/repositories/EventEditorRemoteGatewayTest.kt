@@ -253,7 +253,7 @@ class EventEditorRemoteGatewayTest {
                 acceptDraft,
             ),
         )
-        assertEquals("4", acceptBody.getValue("contractVersion").jsonPrimitive.content)
+        assertEquals("5", acceptBody.getValue("contractVersion").jsonPrimitive.content)
         assertEquals(
             "proposal-operation-1",
             acceptBody.getValue("createOperationId").jsonPrimitive.content,
@@ -266,7 +266,7 @@ class EventEditorRemoteGatewayTest {
         val reject = requestBodies[1]
         assertEquals(HttpMethod.Delete, reject.first)
         val rejectBody = jsonMVP.parseToJsonElement(reject.second).jsonObject
-        assertEquals("4", rejectBody.getValue("contractVersion").jsonPrimitive.content)
+        assertEquals("5", rejectBody.getValue("contractVersion").jsonPrimitive.content)
         assertEquals(
             "proposal-operation-1",
             rejectBody.getValue("createOperationId").jsonPrimitive.content,

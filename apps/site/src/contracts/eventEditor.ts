@@ -7,18 +7,21 @@ import {
   normalizeStaffingPriority,
   STAFFING_PRIORITIES,
 } from "@/server/officials/config";
-export const EVENT_EDITOR_CONTRACT_VERSION = 4 as const;
+export const EVENT_EDITOR_CONTRACT_VERSION = 5 as const;
+export const EVENT_EDITOR_PREVIOUS_CONTRACT_VERSION = 4 as const;
 export const EVENT_EDITOR_LEGACY_CONTRACT_VERSION = 3 as const;
 
 const eventEditorContractVersionSchema = z.union([
   z.literal(EVENT_EDITOR_CONTRACT_VERSION),
+  z.literal(EVENT_EDITOR_PREVIOUS_CONTRACT_VERSION),
   z.literal(EVENT_EDITOR_LEGACY_CONTRACT_VERSION),
 ]);
 
 export const isSupportedEventEditorContractVersion = (
   value: unknown,
-): value is typeof EVENT_EDITOR_CONTRACT_VERSION | typeof EVENT_EDITOR_LEGACY_CONTRACT_VERSION => (
+): value is typeof EVENT_EDITOR_CONTRACT_VERSION | typeof EVENT_EDITOR_PREVIOUS_CONTRACT_VERSION | typeof EVENT_EDITOR_LEGACY_CONTRACT_VERSION => (
   value === EVENT_EDITOR_CONTRACT_VERSION
+  || value === EVENT_EDITOR_PREVIOUS_CONTRACT_VERSION
   || value === EVENT_EDITOR_LEGACY_CONTRACT_VERSION
 );
 
@@ -625,6 +628,7 @@ export const editorResourcesSchema = z
     timeSlots: z.array(editorTimeSlotSchema),
     requiredTemplateIds: z.array(id),
     immutableFieldIds: z.array(id),
+    sourceTemplateId: nullableId.optional(),
     rentalBookingId: nullableId,
     rentalBookingItemId: nullableId,
   })

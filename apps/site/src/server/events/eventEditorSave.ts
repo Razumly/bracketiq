@@ -138,15 +138,8 @@ export class EditorRevisionConflictError extends Error {
   }
 }
 
-export class EditorImmutableFieldError extends Error {
-  readonly fieldName: string;
-
-  constructor(fieldName: string) {
-    super(`Immutable field ${fieldName} cannot be updated.`);
-    this.name = "EditorImmutableFieldError";
-    this.fieldName = fieldName;
-  }
-}
+export { EditorImmutableFieldError } from "./eventEditorAuthority";
+import { assertBookedEditorResources, assertRentalBookingAuthority, EditorImmutableFieldError } from "./eventEditorAuthority";
 
 export class EditorInputError extends Error {
   constructor(message: string) {
@@ -648,24 +641,7 @@ const assertImmutableFields = (
 ) => {
   const protectedFields = new Set(snapshot.immutable.fieldNames);
   if (snapshot.immutable.rental) {
-    [
-      "start",
-      "end",
-      "timeZone",
-      "location",
-      "address",
-      "coordinates",
-      "fields",
-      "fieldIds",
-      "timeSlots",
-      "timeSlotIds",
-      "requiredTemplateIds",
-      "rentalBookingId",
-      "rentalBookingItemId",
-    ].forEach((fieldName) => protectedFields.add(fieldName));
-  }
-  if (snapshot.immutable.template) {
-    protectedFields.add("requiredTemplateIds");
+    assertBookedEditorResources(snapshot.draft, draft);
   }
   if (!protectedFields.size) return;
   const current = editorDraftToLegacyEvent(snapshot.draft, eventId);
@@ -831,6 +807,7 @@ const prepareEventPayloadForSave = async (
   delete eventPayload.staffInvites;
   delete eventPayload.divisionDetails;
   delete eventPayload.immutableFieldIds;
+  delete eventPayload.sourceTemplateId;
   delete eventPayload.rentalBookingId;
   delete eventPayload.rentalBookingItemId;
   eventPayload.hostId = resolvedHostId ?? draft.basics.hostId ?? actor.userId;
@@ -940,6 +917,7 @@ const saveWithinTransaction = async (
     rentalResourceIds.bookingIds,
     rentalResourceIds.bookingItemIds,
   );
+  await assertRentalBookingAuthority(tx, draft, actor);
   await upsertEditorEvent(tx, draft, eventId, eventPayload);
   const questionIdMap = await reconcileQuestions(
     tx,
@@ -1616,7 +1594,7 @@ const revisionBindingResourceIds = (
 const templateIdsForDraft = (draft: EventEditorDraft): string[] =>
   Array.from(
     new Set(
-      draft.resources.requiredTemplateIds
+      [draft.resources.sourceTemplateId]
         .map((templateId) => normalizeEntityId(templateId))
         .filter((templateId): templateId is string => Boolean(templateId)),
     ),
@@ -2280,7 +2258,8 @@ const createBootstrapQueryFor = (
   eventType: command.draft.basics.eventType,
   sportId: command.draft.basics.sportIds[0],
   parentEventId: command.draft.basics.parentEvent ?? undefined,
-  templateId: command.draft.resources.requiredTemplateIds[0],
+  templateId: command.draft.resources.sourceTemplateId ??
+    (command.contractVersion < 5 ? command.draft.resources.requiredTemplateIds[0] : undefined),
   rentalBookingId: command.draft.resources.rentalBookingId ?? undefined,
   start: command.draft.basics.start,
 });
@@ -2372,6 +2351,7 @@ const createProposalForTransaction = (params: {
   }
   const proposalSnapshot: EventEditorSnapshot = {
     ...params.createSnapshot,
+    contractVersion: params.command.contractVersion,
     mode: "CREATE",
     eventId: null,
     draft: params.command.draft,
@@ -3035,7 +3015,10 @@ const loadProposalAcceptanceSnapshot = async (
       sportId: proposal.snapshot.draft.basics.sportIds[0],
       parentEventId: proposal.snapshot.draft.basics.parentEvent ?? undefined,
       templateId:
-        proposal.snapshot.draft.resources.requiredTemplateIds[0],
+        proposal.snapshot.draft.resources.sourceTemplateId ??
+        (proposal.snapshot.contractVersion < 5
+          ? proposal.snapshot.draft.resources.requiredTemplateIds[0]
+          : undefined),
       rentalBookingId:
         proposal.snapshot.draft.resources.rentalBookingId ?? undefined,
       start: proposal.snapshot.draft.basics.start,

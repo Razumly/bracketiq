@@ -132,6 +132,7 @@ import { eventEditorFixtures } from "@/test/eventEditor/fixtures";
 import { prisma } from "@/lib/prisma";
 import type { CreateEventEditorCommand } from "@/contracts/eventEditor";
 import type * as EditorContractAdapters from "@/app/events/[id]/schedule/components/eventForm/editorContractAdapters";
+import { editorDraftToLegacyEvent } from "@/app/events/[id]/schedule/components/eventForm/editorContractAdapters";
 import { EventDivisionNameValidationError } from "@/lib/divisionTypes";
 import { acquireEventLock } from "@/server/repositories/locks";
 import { upsertEventFromPayload } from "@/server/repositories/events";
@@ -633,6 +634,83 @@ describe("saveEventEditor", () => {
     (computeEventEditorRevision as jest.Mock).mockReturnValue("revision");
     (loadEventEditorSnapshot as jest.Mock).mockResolvedValue(snapshot());
   });
+  it("saves organizer additions while retaining the booked resource and interval", async () => {
+    const tx = txFor();
+    tx.rentalBookings = { findMany: jest.fn().mockResolvedValue([
+      { id: "booking-1", renterOrganizationId: null, renterUserId: "host_1" },
+    ]) };
+    tx.rentalBookingItems = { findMany: jest.fn().mockResolvedValue([
+      { id: "item-1", bookingId: "booking-1", fieldId: "court-booked", timeZone: "UTC",
+        start: new Date("2026-08-24T09:00:00Z"), end: new Date("2026-08-24T10:00:00Z"),
+        requiredTemplateIds: [], hostRequiredTemplateIds: [] },
+    ]) };
+    const command = commandFor([]);
+    command.draft = structuredClone(createDraft);
+    command.draft.basics.hostId = "host_1";
+    command.draft.resources = {
+      ...command.draft.resources,
+      rentalBookingId: "booking-1",
+      rentalBookingItemId: "item-1",
+      fieldIds: ["court-booked"],
+      fields: [{ id: "court-booked", name: "Booked court" }],
+      timeSlotIds: ["slot-booked"],
+      timeSlots: [{
+        id: "slot-booked", scheduledFieldIds: ["court-booked"],
+        startDate: "2026-08-24T09:00:00.000Z", endDate: "2026-08-24T10:00:00.000Z",
+        timeZone: "UTC", rentalBookingId: "booking-1", rentalBookingItemId: "item-1",
+        sourceType: "RENTAL_BOOKING", rentalLocked: true,
+      }],
+    };
+    const current = snapshot();
+    current.draft = structuredClone(command.draft);
+    current.immutable.rental = true;
+    (buildEventEditorSnapshot as jest.Mock).mockResolvedValue(current);
+    (loadEventEditorSnapshot as jest.Mock).mockResolvedValue(current);
+    const adapter = editorDraftToLegacyEvent as jest.Mock;
+    adapter.mockImplementation(actualEditorAdapters.editorDraftToLegacyEvent);
+    (upsertEventFromPayload as jest.Mock).mockResolvedValue("event_1");
+    command.draft.resources.fieldIds.push("court-added");
+    command.draft.resources.fields.push({ id: "court-added", name: "Organizer court" });
+    command.draft.resources.timeSlotIds.push("slot-added");
+    command.draft.resources.timeSlots.push({
+      id: "slot-added", scheduledFieldIds: ["court-added"],
+      startDate: "2026-08-24T09:00:00.000Z", endDate: "2026-08-24T10:00:00.000Z",
+      timeZone: "UTC",
+    });
+    try {
+      await saveEventEditor({ userId: "host_1" }, command, "event_1");
+      expect(upsertEventFromPayload).toHaveBeenCalledWith(expect.objectContaining({
+        fieldIds: ["court-booked", "court-added"],
+        timeSlots: expect.arrayContaining([current.draft.resources.timeSlots[0]]),
+      }), expect.anything(), expect.anything());
+      for (const [field, change] of [
+        ["timeSlots", (draft: typeof command.draft) => { draft.resources.timeSlots = []; }],
+        ["fieldIds", (draft: typeof command.draft) => { draft.resources.fieldIds = []; }],
+        ["organizationId", (draft: typeof command.draft) => { draft.basics.organizationId = "other-org"; }],
+        ["rentalBookingId", (draft: typeof command.draft) => { draft.resources.rentalBookingId = "other-booking"; }],
+        ["timeSlots", (draft: typeof command.draft) => { draft.resources.timeSlots[0].startTimeMinutes = 570; }],
+        ["fields", (draft: typeof command.draft) => {
+          draft.resources.fields.push({ ...draft.resources.fields[0], name: "Changed booked court" });
+        }],
+        ["timeSlots", (draft: typeof command.draft) => {
+          draft.resources.timeSlots.unshift({
+            ...draft.resources.timeSlots[0],
+            rentalBookingId: null, rentalBookingItemId: null,
+            rentalLocked: false, sourceType: "CUSTOM",
+          });
+        }],
+      ] as const) {
+        (upsertEventFromPayload as jest.Mock).mockClear();
+        const rejected = { ...command, draft: structuredClone(current.draft) };
+        change(rejected.draft);
+        await expect(saveEventEditor({ userId: "host_1" }, rejected, "event_1"))
+          .rejects.toMatchObject({ name: "EditorImmutableFieldError", fieldName: field });
+        expect(upsertEventFromPayload).not.toHaveBeenCalled();
+      }
+    } finally {
+      adapter.mockImplementation(() => ({}));
+    }
+  });
   it("treats a retry of an already completed rejection as a no-op", async () => {
     createEventEditorTxFor();
 
@@ -1067,7 +1145,7 @@ describe("saveEventEditor", () => {
     });
     expect(mockedPersistSerializedScheduleGraph).not.toHaveBeenCalled();
   });
-  it("returns a revision-bound proposal and accepts it without rebuilding", async () => {
+  it("accepts a template-based revision-bound proposal without rebuilding or using its document requirement as the source", async () => {
     const fieldRows = [
       { id: "field_fixture", updatedAt: new Date("2026-08-24T08:00:00.000Z") },
     ];
@@ -1137,10 +1215,17 @@ describe("saveEventEditor", () => {
     mockedPersistSerializedScheduleGraph.mockResolvedValue(undefined);
 
     const command = {
-      contractVersion: 3,
+      contractVersion: 5,
       createOperationId: "proposal-operation",
       expectedRevisions: expectedCreateRevisions,
-      draft: leagueCreateDraft,
+      draft: {
+        ...leagueCreateDraft,
+        resources: {
+          ...leagueCreateDraft.resources,
+          sourceTemplateId: "event-template-source",
+          requiredTemplateIds: ["document-requirement"],
+        },
+      },
       completion: { mode: "CREATE_AND_BUILD_SCHEDULE" },
     } satisfies CreateEventEditorCommand;
     const actor = { userId: "user_fixture_host" };
@@ -1186,7 +1271,7 @@ describe("saveEventEditor", () => {
       expect.objectContaining({
         mode: "CREATE",
         eventId: null,
-        draft: leagueCreateDraft,
+        draft: command.draft,
       }),
     );
     expect(proposal.revisionBinding).toEqual(
@@ -1245,6 +1330,10 @@ describe("saveEventEditor", () => {
 
 
     expect(accepted.status).toBe("SAVED");
+    expect(loadCreateEventEditorSnapshot).toHaveBeenLastCalledWith(
+      expect.objectContaining({ templateId: "event-template-source" }),
+      expect.anything(),
+    );
     expect(upsertEventFromPayload).toHaveBeenCalledTimes(2);
     expect(mockedReconcileEventSchedule).toHaveBeenCalledTimes(1);
     expect(mockedPersistSerializedScheduleGraph).toHaveBeenCalledWith(

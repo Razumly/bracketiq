@@ -1136,7 +1136,7 @@ private fun jsonObject(vararg entries: Pair<String, Any?>): JsonObject =
 internal val EXPECTED_TOURNAMENT_PARITY_WIRE =
     """
 {
-  "contractVersion": 4,
+  "contractVersion": 5,
   "createOperationId": "create-operation-tournament-parity",
   "expectedRevisions": {
     "editorRevision": "new",
@@ -1555,7 +1555,8 @@ internal val EXPECTED_TOURNAMENT_PARITY_WIRE =
       ],
       "immutableFieldIds": [],
       "rentalBookingId": null,
-      "rentalBookingItemId": null
+      "rentalBookingItemId": null,
+      "sourceTemplateId": null
     },
     "staff": {
       "staffingPriority": "OFFICIAL_COVERAGE_REQUIRED",

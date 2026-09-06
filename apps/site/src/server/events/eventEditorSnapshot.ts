@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { EditorImmutableFieldError } from "./eventEditorAuthority";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
 import type { Event } from "@/types";
@@ -921,10 +922,10 @@ const normalizedCreateRevisionQuery = (
     eventType: eventType.toUpperCase(),
     sportId: stringValue(query.sportId) ?? firstString(event.sportIds),
     parentEventId: stringValue(query.parentEventId) ?? stringValue(event.parentEvent),
-    templateId: stringValue(query.templateId) ?? firstString(event.requiredTemplateIds),
+    templateId: stringValue(query.templateId) ?? stringValue(event.sourceTemplateId),
     rentalBookingId:
       stringValue(query.rentalBookingId) ?? stringValue(event.rentalBookingId),
-    start: effectiveStart?.toISOString() ?? null,
+    start: query.templateId ? null : effectiveStart?.toISOString() ?? null,
   };
 };
 
@@ -996,8 +997,10 @@ const loadCreateSourceEvent = async (
       event = {
         ...(seeded as unknown as Record<string, unknown>),
         id: "",
-        organizationId: seeded.organizationId ?? query.organizationId ?? null,
-        requiredTemplateIds: [query.templateId],
+        organizationId: query.organizationId ?? seeded.organizationId ?? null,
+        eventType: query.eventType ?? seeded.eventType,
+        sportIds: query.sportId ? [query.sportId] : seeded.sportIds,
+        sourceTemplateId: query.templateId,
       };
     }
   }
@@ -1019,18 +1022,13 @@ const loadCreateSourceEvent = async (
     (item): item is Record<string, unknown> =>
       Boolean(item) && typeof item === "object",
   );
-  if (!rentalItems.length) {
-    return setNormalizedCreateRevisionSource(
-      { ...event, rentalBookingId: query.rentalBookingId },
-      {
-        ...revisionSource,
-        rental: {
-          booking,
-          items: canonicalizeSourceCollection(rentalItems),
-        },
-      },
-      query,
-    );
+  if (!booking || !rentalItems.length) {
+    throw new EditorImmutableFieldError("rentalBookingId", "The Rental Booking or its booked resources are missing. Select an available booking.");
+  }
+  const destinationOrganizationId = typeof booking.renterOrganizationId === "string"
+    ? booking.renterOrganizationId : null;
+  if (query.organizationId && query.organizationId !== destinationOrganizationId) {
+    throw new EditorImmutableFieldError("organizationId", "The selected Organization conflicts with the Rental Booking owner. Use the booking's destination Organization.");
   }
 
   const fieldIds = Array.from(
@@ -1043,17 +1041,16 @@ const loadCreateSourceEvent = async (
   const storedFields = await callFindMany(client, "fields", {
     where: { id: { in: fieldIds } },
   });
-  const fields = (
-    storedFields.length
-      ? storedFields
-      : fieldIds.map((id) => ({ id, $id: id, name: "" }))
-  ).filter(
+  const fields = storedFields.filter(
     (field): field is Record<string, unknown> =>
       Boolean(field) && typeof field === "object",
   );
   const fieldById = new Map(
     fields.map((field) => [String(field.id ?? field.$id), field]),
   );
+  if (fieldIds.some((id) => !fieldById.has(id))) {
+    throw new EditorImmutableFieldError("fields", "A booked Resource is missing. Restore the Resource through the rental workflow.");
+  }
   const timeSlots = rentalItems.map((item, index) => {
     const itemId = String(item.id ?? `rental-item-${index + 1}`);
     const fieldId = String(item.fieldId ?? "");
@@ -1101,11 +1098,7 @@ const loadCreateSourceEvent = async (
   };
   return setNormalizedCreateRevisionSource({
     ...event,
-    organizationId:
-      booking?.organizationId ??
-      event.organizationId ??
-      query.organizationId ??
-      null,
+    organizationId: destinationOrganizationId,
     rentalBookingId: query.rentalBookingId,
     rentalBookingItemId: String(rentalItems[0].id ?? ""),
     start: (
@@ -1313,6 +1306,11 @@ export const buildEventEditorSnapshot = async (
         ? event.isAutomatedScheduling
         : event.automatedScheduling,
     ...resources,
+    immutableFieldIds: Array.from(new Set([
+      ...(Array.isArray(event.immutableFieldIds) ? event.immutableFieldIds : []),
+      ...rentalSlots.flatMap((slot) => Array.isArray(slot.scheduledFieldIds)
+        ? slot.scheduledFieldIds : typeof slot.scheduledFieldId === "string" ? [slot.scheduledFieldId] : []),
+    ])),
     divisions: divisionDetails.length
       ? divisionDetails
           .filter((division) => division.kind === "LEAGUE")

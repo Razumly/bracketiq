@@ -369,13 +369,10 @@ export const scheduleEvent = (request: ScheduleRequest, context: SchedulerContex
 };
 
 
-const buildLeagueSchedule = (
+export const prepareLeagueScheduleRoster = (
   league: League,
-  context: SchedulerContext,
-  isOpenEndedSchedule: boolean,
   includePlaceholderTeams: boolean,
-  canUseCandidate?: ScheduleRequest["canUseCandidate"],
-): ScheduleResult => {
+): void => {
   const playoffMappingErrors = validatePlayoffDivisionReferenceCapacities(league);
   if (playoffMappingErrors.length > 0) {
     throw new ScheduleError(playoffMappingErrors.join(' '), 'PLAYING_TEAM');
@@ -426,6 +423,16 @@ const buildLeagueSchedule = (
   } else {
     applyRosterToLeagueTeams(league, rosterTeamIds);
   }
+};
+
+const buildLeagueSchedule = (
+  league: League,
+  context: SchedulerContext,
+  isOpenEndedSchedule: boolean,
+  includePlaceholderTeams: boolean,
+  canUseCandidate?: ScheduleRequest["canUseCandidate"],
+): ScheduleResult => {
+  prepareLeagueScheduleRoster(league, includePlaceholderTeams);
 
   ensureSplitPlayoffTimeSlotCoverage(league);
 

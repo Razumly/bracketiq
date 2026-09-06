@@ -56,6 +56,7 @@ import type { EventEditorScheduleDiagnostics } from "@/contracts/eventEditor";
 import { Division, League, Match, SchedulerContext, Tournament } from "./types";
 import {
   finalizeOpenEndedSchedule,
+  prepareLeagueScheduleRoster,
   prepareSchedulePlacementWindow,
   scheduleEvent,
   ScheduleError,
@@ -1531,6 +1532,9 @@ const buildPartialSchedule = (
     event.maxParticipants = participantCount;
   }
   prepareSchedulePlacementWindow(event, includePlaceholderTeams);
+  if (event instanceof League) {
+    prepareLeagueScheduleRoster(event, includePlaceholderTeams);
+  }
   const builder = new EventBuilder(event, context, {
     includePlaceholderTeams,
     canUseCandidate,

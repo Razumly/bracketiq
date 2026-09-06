@@ -1430,11 +1430,18 @@ private fun EventEditorDraftDto.withMutation(
     val divisionFieldIdsChanged = effectiveDivisionFieldIds != baseline.divisionFieldIds
     val existingFieldsById = resources.fields.mapNotNull { field -> field.toDomainKey()?.let { it to field } }.toMap()
     val existingSlotsById = resources.timeSlots.mapNotNull { slot -> slot.resolvedId()?.let { it to slot } }.toMap()
+    val baselineFieldsById = baseline.fields.associateBy { it.id }
 
     val nextResources = resources.copy(
         fieldIds = if (mutation.event.fieldIds != baseline.event.fieldIds) mutation.event.fieldIds else resources.fieldIds,
         fields = if (fieldsChanged) {
-            mutation.fields.map { field -> field.toDto(existingFieldsById[field.id]) }
+            mutation.fields.map { field ->
+                val existing = existingFieldsById[field.id]
+                val baselineField = baselineFieldsById[field.id]
+                if (existing != null && field.copy(fieldNumber = 0, divisions = emptyList()) ==
+                    baselineField?.copy(fieldNumber = 0, divisions = emptyList())) existing
+                else field.toDto(existing)
+            }
         } else {
             resources.fields
         },
@@ -1444,7 +1451,11 @@ private fun EventEditorDraftDto.withMutation(
             resources.timeSlotIds
         },
         timeSlots = if (slotsChanged) {
-            mutation.timeSlots.map { slot -> slot.toDto(existingSlotsById[slot.id]) }
+            mutation.timeSlots.map { slot ->
+                val existing = existingSlotsById[slot.id]
+                if (existing != null && slot == baseline.timeSlots.firstOrNull { it.id == slot.id }) existing
+                else slot.toDto(existing)
+            }
         } else {
             resources.timeSlots
         },

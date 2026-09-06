@@ -34,7 +34,7 @@ class EventEditPayloadBuilderTest {
     }
 
     @Test
-    fun prepareForUpdate_preserves_selected_rental_fields_and_returns_only_custom_field_drafts() {
+    fun prepareForUpdate_preserves_selected_rental_fields_in_the_complete_command_collection() {
         val event = leagueEvent(
             divisions = listOf("division-a"),
             fieldIds = emptyList(),
@@ -64,7 +64,8 @@ class EventEditPayloadBuilderTest {
         )
 
         assertEquals(listOf("rental-field-1", "custom-field-1"), result.prepared.event.fieldIds)
-        assertEquals(listOf("custom-field-1"), result.prepared.fields?.map(Field::id))
+        assertEquals(listOf("rental-field-1", "custom-field-1"), result.prepared.fields?.map(Field::id))
+        assertEquals(rentalField, result.prepared.fields?.first())
         assertEquals(listOf("rental-field-1", "custom-field-1"), result.editableFields?.map(Field::id))
         assertEquals(listOf(1, 2), result.editableFields?.map(Field::fieldNumber))
         assertEquals(LeagueScoringConfigDTO(pointsForWin = 3), result.prepared.leagueScoringConfig)

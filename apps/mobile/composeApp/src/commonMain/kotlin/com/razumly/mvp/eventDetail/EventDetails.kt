@@ -1556,7 +1556,8 @@ fun EventDetails(
     }
     val hasAvailableRentalResources = availableRentalResources.isNotEmpty()
     val allowLockedSlotDivisionEdits = (scheduleTimeLocked || hasRentalBackedSlots) && splitByDivisionScheduling
-    val allowLocalResourceCreationWithRentalResources = editEvent.eventType == EventType.LEAGUE ||
+    val allowLocalResourceCreationWithRentalResources = editEvent.eventType == EventType.EVENT ||
+        editEvent.eventType == EventType.LEAGUE ||
         editEvent.eventType == EventType.TOURNAMENT ||
         editEvent.eventType == EventType.WEEKLY_EVENT
     val supportsOptionalManualTimeSlots = remember(

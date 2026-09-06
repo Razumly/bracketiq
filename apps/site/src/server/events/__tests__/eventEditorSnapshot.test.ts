@@ -364,7 +364,7 @@ it("hydrates rental booking slots as immutable create resources", async () => {
     rentalBookings: {
       findUnique: jest
         .fn()
-        .mockResolvedValue({ id: "booking_1", organizationId: "org_1" }),
+        .mockResolvedValue({ id: "booking_1", organizationId: "facility_org", renterOrganizationId: "org_1" }),
     },
     rentalBookingItems: {
       findMany: jest.fn().mockResolvedValue([rentalItem]),
@@ -398,6 +398,13 @@ it("hydrates rental booking slots as immutable create resources", async () => {
   );
 
   expect(snapshot.immutable.rental).toBe(true);
+  expect(snapshot.draft.basics.organizationId).toBe("org_1");
+  expect(snapshot.draft.resources.immutableFieldIds).toEqual(["field_1"]);
+  await expect(loadCreateEventEditorSnapshot({
+    organizationId: "other_org", rentalBookingId: "booking_1",
+  }, { client })).rejects.toMatchObject({
+    name: "EditorImmutableFieldError", fieldName: "organizationId",
+  });
   expect(snapshot.draft.resources.rentalBookingId).toBe("booking_1");
   expect(snapshot.draft.resources.timeSlots).toEqual([
     expect.objectContaining({
@@ -498,11 +505,16 @@ it("hydrates template source values and resources in create snapshots", async ()
 
   expect(snapshot.immutable.template).toBe(true);
   expect(snapshot.draft.basics.name).toBe("Template event");
-  expect(snapshot.draft.resources.requiredTemplateIds).toEqual(["template_1"]);
+  expect(snapshot.draft.resources.sourceTemplateId).toBe("template_1");
+  expect(snapshot.draft.resources.requiredTemplateIds).toEqual([]);
   expect(snapshot.draft.resources.fields).toEqual([
     expect.objectContaining({ name: "Court 1" }),
   ]);
   expect(snapshot.draft.resources.timeSlots).toHaveLength(1);
+  const explicitOrganization = await loadCreateEventEditorSnapshot({
+    organizationId: "organizer_org", templateId: "template_1",
+  }, { client });
+  expect(explicitOrganization.draft.basics.organizationId).toBe("organizer_org");
   expect(snapshot.editorRevision).not.toBe("new");
   expect(snapshot.scheduleState.revision).not.toBe("new");
   const repeatedSourceSnapshot = await loadCreateEventEditorSnapshot(
@@ -513,6 +525,10 @@ it("hydrates template source values and resources in create snapshots", async ()
     { client },
   );
   expect(repeatedSourceSnapshot.editorRevision).toBe(snapshot.editorRevision);
+  const movedStart = await loadCreateEventEditorSnapshot({
+    organizationId: "org_1", templateId: "template_1", start: "2027-02-02T10:00:00Z",
+  }, { client });
+  expect(movedStart.editorRevision).toBe(snapshot.editorRevision);
   expect(repeatedSourceSnapshot.scheduleState.revision).toBe(
     snapshot.scheduleState.revision,
   );

@@ -571,6 +571,7 @@ export function buildEventDraft(input: BuildEventDraftInput): BuiltEventDraft {
 
         const draft: BuiltEventDraft = {
             $id: activeEditingEvent?.$id,
+            sourceTemplateId: activeEditingEvent?.sourceTemplateId ?? null,
             hostId: normalizedHostId,
             name: (source.name ?? '').trim(),
             description: source.description,

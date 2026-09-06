@@ -2,6 +2,11 @@
 
 import { NextRequest } from 'next/server';
 import {
+  EVENT_EDITOR_CONTRACT_VERSION,
+  type EventEditorMaintenanceProposal as MaintenanceProposalResponse,
+} from '@/contracts/eventEditor';
+import type { FieldBlockerCatalog } from '@/server/repositories/fieldSchedulingConflicts';
+import {
   Division,
   League,
   Match,
@@ -61,6 +66,9 @@ const prismaMock = {
   $transaction: jest.fn(),
   events: {
     findUnique: jest.fn(),
+    update: jest.fn(),
+  },
+  divisions: {
     update: jest.fn(),
   },
   eventEditorMaintenanceOperations: {
@@ -145,28 +153,6 @@ import {
 
 type FixtureVariant = 'split' | 'unassigned' | 'missingPlayoffDivisions';
 
-type ProposalMatch = {
-  division: string | null;
-};
-
-type MaintenanceProposalResponse = {
-  status: 'PROPOSED';
-  contractVersion: 3;
-  eventId: string;
-  operation: 'REBUILD';
-  operationId: string;
-  proposalRevision: string;
-  graph: {
-    event: {
-      divisionDetails: Array<{ id: string; name: string }>;
-    };
-    matches: ProposalMatch[];
-  };
-  scheduleOutcome: {
-    matches: ProposalMatch[];
-  };
-};
-
 type MaintenanceAcceptedResponse = {
   status: 'ACCEPTED';
   eventId: string;
@@ -246,7 +232,9 @@ const makeLeague = (variant: FixtureVariant): League => {
       new Team({
         id,
         captainId: `captain_${id}`,
-        division,
+        division: variant === 'unassigned' && id === 'team_beginner_2'
+          ? new Division('open', 'Open')
+          : division,
         name,
         playerIds: [],
       }),
@@ -337,7 +325,7 @@ const makeLeague = (variant: FixtureVariant): League => {
 };
 
 const maintenanceRequest = (operationId: string) => ({
-  contractVersion: 3,
+  contractVersion: EVENT_EDITOR_CONTRACT_VERSION,
   eventId,
   operation: 'REBUILD' as const,
   operationId,
@@ -374,6 +362,7 @@ describe('event schedule route - split divisions regression', () => {
       automatedScheduling: true,
     });
     prismaMock.events.update.mockResolvedValue(undefined);
+    prismaMock.divisions.update.mockResolvedValue(undefined);
     requireSessionMock.mockResolvedValue({ userId: 'host_1', isAdmin: false });
     acquireEventLockMock.mockResolvedValue(undefined);
     acquireFieldLocksMock.mockResolvedValue(undefined);
@@ -387,7 +376,13 @@ describe('event schedule route - split divisions regression', () => {
     loadEventProtectedHistoryMock.mockResolvedValue({
       protectedMatchIds: new Set<string>(),
     });
-    loadFieldBlockerCatalogMock.mockResolvedValue({});
+    loadFieldBlockerCatalogMock.mockImplementation(
+      async ({ lowerBound }: { lowerBound: Date }): Promise<FieldBlockerCatalog> => ({
+        lowerBound,
+        intervalsByFieldId: new Map(),
+        recurringByFieldId: new Map(),
+      }),
+    );
     findFieldConflictsForIntervalMock.mockReturnValue([]);
     persistScheduledRosterTeamsMock.mockResolvedValue(undefined);
     saveMatchesMock.mockResolvedValue(undefined);
@@ -461,7 +456,7 @@ describe('event schedule route - split divisions regression', () => {
     expect(proposalResponse.status).toBe(200);
     expect(proposal).toEqual(expect.objectContaining({
       status: 'PROPOSED',
-      contractVersion: 3,
+      contractVersion: EVENT_EDITOR_CONTRACT_VERSION,
       eventId,
       operation: 'REBUILD',
       operationId: request.operationId,
@@ -492,9 +487,10 @@ describe('event schedule route - split divisions regression', () => {
     expect(saveMatchesMock).not.toHaveBeenCalled();
     expect(saveEventScheduleMock).not.toHaveBeenCalled();
     expect(prismaMock.events.update).not.toHaveBeenCalled();
+    expect(prismaMock.divisions.update).not.toHaveBeenCalled();
 
     const acceptanceRequest = {
-      contractVersion: 3,
+      contractVersion: EVENT_EDITOR_CONTRACT_VERSION,
       eventId: proposal.eventId,
       operation: proposal.operation,
       operationId: proposal.operationId,
@@ -511,7 +507,6 @@ describe('event schedule route - split divisions regression', () => {
     );
     const accepted = await acceptanceResponse.json() as MaintenanceAcceptedResponse;
 
-    expect(acceptanceResponse.status).toBe(200);
     expect(accepted).toEqual(expect.objectContaining({
       status: 'ACCEPTED',
       eventId,
@@ -520,9 +515,17 @@ describe('event schedule route - split divisions regression', () => {
       proposalRevision: proposal.proposalRevision,
       acceptanceOperationId: acceptanceRequest.acceptanceOperationId,
     }));
+    expect(acceptanceResponse.status).toBe(200);
     expect(persistScheduledRosterTeamsMock).toHaveBeenCalledTimes(1);
     expect(saveMatchesMock).toHaveBeenCalledTimes(1);
     expect(saveEventScheduleMock).toHaveBeenCalledTimes(1);
+    expect(prismaMock.divisions.update.mock.calls.map(([input]) => ({
+      id: input.where.id,
+      teamIds: input.data.teamIds,
+    }))).toEqual(proposal.graph.event.divisionDetails.map((division) => ({
+      id: division.id,
+      teamIds: division.teamIds,
+    })));
     const persistedMatches = saveMatchesMock.mock.calls[0][1] as Array<{
       division: { id: string };
     }>;
@@ -550,6 +553,7 @@ describe('event schedule route - split divisions regression', () => {
     expect(String(json.error ?? '')).toContain('Unassigned teams');
     expect(String(json.error ?? '')).toContain('Beginner Team 2');
     expect(String(json.error ?? '')).not.toContain('team_beginner_2');
+    expect(prismaMock.divisions.update).not.toHaveBeenCalled();
     expect(operationCreateMock).not.toHaveBeenCalled();
     expect(operationRows.size).toBe(0);
     expect(persistScheduledRosterTeamsMock).not.toHaveBeenCalled();
@@ -569,6 +573,8 @@ describe('event schedule route - split divisions regression', () => {
 
     expect(response.status).toBe(400);
     expect(String(json.error ?? '')).toContain('Split playoff divisions are enabled');
+    expect(json.code).toBe('EDITOR_MAINTENANCE_INVALID');
+    expect(prismaMock.divisions.update).not.toHaveBeenCalled();
     expect(operationCreateMock).not.toHaveBeenCalled();
     expect(operationRows.size).toBe(0);
     expect(persistScheduledRosterTeamsMock).not.toHaveBeenCalled();

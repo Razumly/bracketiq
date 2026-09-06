@@ -1431,7 +1431,8 @@ internal class EventEditActionHandler(
                 .onSuccess { options ->
                     val changedSelection = rentalResourcesCoordinator.applyLoadedResources(
                         options = options,
-                        slots = editDraftCoordinator.editableLeagueTimeSlots.value,
+                        slots = editorSession?.canonicalState?.timeSlots
+                            ?: editDraftCoordinator.editableLeagueTimeSlots.value,
                         eventId = eventId,
                     )
                     if (changedSelection && editDraftCoordinator.isEditing.value) {

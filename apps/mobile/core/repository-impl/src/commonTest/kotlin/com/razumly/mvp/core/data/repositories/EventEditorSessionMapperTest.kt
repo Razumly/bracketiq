@@ -1,6 +1,7 @@
 package com.razumly.mvp.core.data.repositories
 
 import com.razumly.mvp.core.data.dataTypes.DEFAULT_EVENT_SEED_COLOR_ARGB
+import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.ManualPaymentLink
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.network.dto.EVENT_EDITOR_CONTRACT_VERSION
@@ -690,6 +691,42 @@ class EventEditorSessionMapperTest {
             val expectedTeamIds = if (eventType == EventType.TRYOUT) emptyList() else listOf("team-1")
             assertEquals(expectedTeamIds, command.draft.competition.divisionDetails.single().teamIds)
         }
+    }
+
+    @Test
+    fun given_a_resource_addition_when_existing_fields_are_renumbered_then_their_stored_descriptors_survive_the_command() {
+        val base = editorProtocolSnapshot()
+        val originalField = base.draft.resources.fields.first().copy(address = "Canonical Facility address")
+        val snapshot = base.copy(draft = base.draft.copy(resources = base.draft.resources.copy(fields = listOf(originalField))))
+        val session = EventEditorSessionMapper.fromCreateBootstrap(editorProtocolBootstrap(snapshot))
+        val added = Field(id = "added", name = "Organizer court")
+        val command = EventEditorSessionMapper.toCreateCommand(session, EventEditorMutation(
+            session.canonicalState.copy(
+                event = session.canonicalState.event.copy(fieldIds = listOf(added.id) + session.canonicalState.event.fieldIds),
+                fields = listOf(added) + session.canonicalState.fields.map { it.copy(fieldNumber = it.fieldNumber + 1) },
+            ),
+        )).command
+        assertEquals(originalField, command.draft.resources.fields.last())
+        assertEquals("added", command.draft.resources.fields.first().id)
+    }
+
+    @Test
+    fun given_template_defaults_when_current_values_change_then_source_identity_and_current_values_survive_encoding() {
+        val base = editorProtocolSnapshot()
+        val snapshot = base.copy(draft = base.draft.copy(resources = base.draft.resources.copy(
+            sourceTemplateId = "event-template", requiredTemplateIds = listOf("document-default"),
+        )))
+        val session = EventEditorSessionMapper.fromCreateBootstrap(editorProtocolBootstrap(snapshot))
+        val command = EventEditorSessionMapper.toCreateCommand(session, EventEditorMutation(
+            session.canonicalState.copy(event = session.canonicalState.event.copy(
+                name = "Organizer current name", requiredTemplateIds = emptyList(),
+            )),
+        )).command
+        val decoded = jsonMVP.decodeFromString<EventEditorCreateCommandDto>(jsonMVP.encodeToString(command))
+        assertEquals("event-template", decoded.draft.resources.sourceTemplateId)
+        assertEquals(emptyList(), decoded.draft.resources.requiredTemplateIds)
+        assertEquals("Organizer current name", decoded.draft.basics.name)
+        assertEquals(5, decoded.contractVersion)
     }
 
     @Test

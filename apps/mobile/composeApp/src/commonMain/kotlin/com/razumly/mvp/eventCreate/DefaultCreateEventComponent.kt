@@ -1346,10 +1346,6 @@ class DefaultCreateEventComponent(
     }
 
     override fun selectFieldCount(count: Int) {
-        if (shouldRestrictLocalResourceCreationForRentalEvent()) {
-            syncSelectedRentalResourcesIntoDraft()
-            return
-        }
         val rentalFields = selectedRentalResourceFields()
         val rentalFieldIds = rentalFields.map { field -> field.id }.toSet()
         val currentEvent = newEventState.value
@@ -1539,12 +1535,7 @@ class DefaultCreateEventComponent(
             .distinct()
         val rentalFieldIdSet = rentalFieldIds.toSet()
         val rentalFields = selectedRentalResourceFields(selectedOptions)
-        val restrictLocalResourceCreation = shouldRestrictLocalResourceCreationForRentalEvent()
-        val customFields = if (restrictLocalResourceCreation) {
-            emptyList()
-        } else {
-            _localFields.value.filterNot { field -> rentalFieldIdSet.contains(field.id.trim()) }
-        }
+        val customFields = _localFields.value.filterNot { field -> rentalFieldIdSet.contains(field.id.trim()) }
         val nextFields = (rentalFields + customFields)
             .distinctBy { field -> field.id.trim() }
             .mapIndexed { index, field -> field.copy(fieldNumber = index + 1) }
@@ -1559,24 +1550,10 @@ class DefaultCreateEventComponent(
                             slot.id == baseSlot.id
                         )
             }
-            val additionalRegularFieldIds = previousSlot
-                ?.normalizedScheduledFieldIds()
-                ?.filter { fieldId ->
-                    fieldId != option.field.id &&
-                        !rentalFieldIdSet.contains(fieldId) &&
-                        validFieldIds.contains(fieldId)
-                }
-                .orEmpty()
-            baseSlot.copy(
-                scheduledFieldId = option.field.id,
-                scheduledFieldIds = (listOf(option.field.id) + additionalRegularFieldIds).distinct(),
-            )
+            previousSlot ?: baseSlot
         }
         val rentalSlotIds = rentalSlots.map { slot -> slot.id }.toSet()
-        val customSlots = if (restrictLocalResourceCreation) {
-            emptyList()
-        } else {
-            _leagueSlots.value
+        val customSlots = _leagueSlots.value
                 .filterNot { slot -> slot.isRentalBacked() || rentalSlotIds.contains(slot.id) }
                 .map { slot ->
                     val remainingFieldIds = slot.normalizedScheduledFieldIds().filter { fieldId ->
@@ -1591,7 +1568,6 @@ class DefaultCreateEventComponent(
                     slot.normalizedScheduledFieldIds().isNotEmpty() ||
                         (_newEventState.value.eventType != EventType.LEAGUE && _newEventState.value.eventType != EventType.TOURNAMENT)
                 }
-        }
 
         _localFields.value = nextFields
         _fieldCount.value = nextFields.size
@@ -1604,11 +1580,6 @@ class DefaultCreateEventComponent(
             fieldIds = nextFields.map { field -> field.id },
             timeSlotIds = _leagueSlots.value.map { slot -> slot.id },
         )
-    }
-
-    private fun shouldRestrictLocalResourceCreationForRentalEvent(): Boolean {
-        return _newEventState.value.eventType == EventType.EVENT &&
-            _availableRentalResources.value.isNotEmpty()
     }
 
     private fun rentalOptionMatchesSlot(option: RentalResourceOption, slot: TimeSlot): Boolean {
@@ -1698,13 +1669,17 @@ class DefaultCreateEventComponent(
         val slots = _leagueSlots.value.toMutableList()
         if (index !in slots.indices) return
         val validFieldIds = _localFields.value.map { field -> field.id }.toSet()
-        slots[index] = normalizeRentalSlotResourceSelection(slots[index].update(), validFieldIds)
+        val current = slots[index]
+        val changed = current.update()
+        slots[index] = if (current.isRentalBacked()) current.copy(divisions = changed.divisions)
+            else normalizeRentalSlotResourceSelection(changed, validFieldIds)
         _leagueSlots.value = slots
     }
 
     override fun removeLeagueTimeSlot(index: Int) {
         val slots = _leagueSlots.value.toMutableList()
         if (index !in slots.indices) return
+        if (slots[index].isRentalBacked()) return
         slots.removeAt(index)
         _leagueSlots.value = slots
     }
@@ -1939,16 +1914,19 @@ class DefaultCreateEventComponent(
             selectedRentalResourceIds = submission.selectedRentalResourceIds,
         )
 
+        val hasRentalBackedSlots = submission.leagueSlots.any { slot -> slot.isRentalBacked() }
         val shouldManageLocalFields =
             (
-                preparedEvent.eventType == EventType.LEAGUE ||
+                (preparedEvent.eventType == EventType.EVENT && hasRentalBackedSlots) ||
+                    preparedEvent.eventType == EventType.LEAGUE ||
                     preparedEvent.eventType == EventType.TOURNAMENT ||
                     preparedEvent.eventType == EventType.WEEKLY_EVENT
                 ) &&
             submission.fieldCount > 0
 
-        val selectedRentalFieldIds = selectedRentalResourceFields(selectedRentalOptions)
-            .map { field -> field.id.trim() }
+        val selectedRentalFieldIds = (selectedRentalResourceFields(selectedRentalOptions).map { it.id } +
+            submission.leagueSlots.filter(TimeSlot::isRentalBacked).flatMap { it.normalizedScheduledFieldIds() })
+            .map(String::trim)
             .filter(String::isNotBlank)
             .distinct()
         val selectedRentalFieldIdSet = selectedRentalFieldIds.toSet()
@@ -1972,9 +1950,12 @@ class DefaultCreateEventComponent(
             preparedEvent = preparedEvent.copy(
                 fieldIds = selectedRentalFieldIds + preparedFields.map { it.id },
             )
+            preparedFields = (
+                submission.localFields.filter { it.id in selectedRentalFieldIdSet } +
+                    selectedRentalResourceFields(selectedRentalOptions) + preparedFields
+                ).distinctBy(Field::id)
         }
 
-        val hasRentalBackedSlots = submission.leagueSlots.any { slot -> slot.isRentalBacked() }
         val shouldPersistManagedSlots = if (hasRentalBackedSlots) {
             preparedEvent.eventType == EventType.EVENT ||
                 preparedEvent.eventType == EventType.LEAGUE ||
@@ -2735,8 +2716,11 @@ class DefaultCreateEventComponent(
     private fun syncLocalFieldsForEvent(previousEvent: Event, event: Event) {
         val currentFields = _localFields.value
         if (currentFields.isEmpty()) return
+        val bookedFieldIds = _leagueSlots.value.filter(TimeSlot::isRentalBacked)
+            .flatMap { it.normalizedScheduledFieldIds() }.toSet()
 
         _localFields.value = currentFields.mapIndexed { index, field ->
+            if (field.id in bookedFieldIds) return@mapIndexed field
             field.copy(
                 fieldNumber = index + 1,
                 divisions = field.divisions

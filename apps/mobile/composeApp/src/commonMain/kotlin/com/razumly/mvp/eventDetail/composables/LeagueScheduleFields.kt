@@ -1,5 +1,8 @@
 package com.razumly.mvp.eventDetail.composables
 
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.semantics.Role
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -417,6 +420,12 @@ fun LeagueScheduleFields(
         RentalResourceGroupList(
             groups = rentalResourceGroups,
             selectedIds = selectedRentalResourceIds,
+            lockedIds = availableRentalResources.filter { option ->
+                !option.eventId.isNullOrBlank() || slots.any { slot ->
+                    slot.rentalBookingItemId == option.bookingItemId &&
+                        (slot.id == option.eventTimeSlotId || slot.id == option.bookingItemId)
+                }
+            }.map { it.id }.toSet(),
             resourceLabels = resourceLabels,
             expandedKeys = expandedRentalResourceGroupKeys,
             onToggleGroup = { groupKey ->
@@ -708,6 +717,7 @@ private fun FacilityResourceGroupList(
 private fun RentalResourceGroupList(
     groups: List<FacilityRentalResourceGroup>,
     selectedIds: Set<String>,
+    lockedIds: Set<String>,
     expandedKeys: List<String>,
     onToggleGroup: (String) -> Unit,
     enabled: Boolean,
@@ -757,7 +767,7 @@ private fun RentalResourceGroupList(
                             RentalResourceRow(
                                 item = item,
                                 selected = selectedIds.contains(item.option.id),
-                                enabled = enabled,
+                                enabled = enabled && item.option.id !in lockedIds,
                                 onSelectionChange = onSelectionChange,
                                 resourceSingular = resourceLabels.singular,
                             )
@@ -784,7 +794,7 @@ private fun RentalResourceRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(enabled = enabled) { onSelectionChange(option.id, !selected) }
+            .toggleable(value = selected, enabled = enabled, role = Role.Checkbox) { onSelectionChange(option.id, it) }
             .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -792,7 +802,7 @@ private fun RentalResourceRow(
         Checkbox(
             checked = selected,
             enabled = enabled,
-            onCheckedChange = { checked -> onSelectionChange(option.id, checked) },
+            onCheckedChange = null,
         )
         Column(modifier = Modifier.weight(1f)) {
             Text(option.field.resourceLabel(resourceSingular), style = MaterialTheme.typography.titleSmall)
@@ -892,7 +902,7 @@ private fun TimeslotCard(
                 val slotTimeZone = slot.timeZone.toTimeZoneOrUtc(eventTimeZone)
                 val slotIsRentalBacked = slot.isRentalBacked()
                 val slotTimingReadOnly = readOnly || slotIsRentalBacked
-                val slotResourceReadOnly = readOnly
+                val slotResourceReadOnly = readOnly || slotIsRentalBacked
                 val fieldOptionsForSlot = remember(slot, fieldOptions, rentalOptionsByFieldId) {
                     buildFieldOptionsForSlot(slot, fieldOptions, rentalOptionsByFieldId)
                 }
@@ -956,7 +966,7 @@ private fun TimeslotCard(
                     },
                     isError = selectedFieldIds.isEmpty(),
                     supportingText = if (slotIsRentalBacked) {
-                        "Rental date and time are locked. Add regular ${resourceLabels.plural.lowercase()} here; rentals with different times are disabled."
+                        "The booked resources, date, and time are locked. Use a separate timeslot for additional resources."
                     } else {
                         ""
                     },

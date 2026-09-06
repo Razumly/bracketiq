@@ -1,6 +1,6 @@
 {
   "command": {
-    "contractVersion": 4,
+    "contractVersion": 5,
     "createOperationId": "create-operation-tournament-parity",
     "expectedRevisions": {
       "editorRevision": "new",

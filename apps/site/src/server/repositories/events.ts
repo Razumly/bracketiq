@@ -3092,6 +3092,7 @@ const persistRentalBookingReservations = async (
 ): Promise<void> => {
   for (const [bookingItemId, slot] of slotsByBookingItemId.entries()) {
     const item = bookingItemById.get(bookingItemId);
+    if (item?.eventId === eventId && item.eventTimeSlotId === slot.id) continue;
     const bookingId = normalizeEntityId(item?.bookingId);
     const updateResult = await client.rentalBookingItems.updateMany({
       where: {

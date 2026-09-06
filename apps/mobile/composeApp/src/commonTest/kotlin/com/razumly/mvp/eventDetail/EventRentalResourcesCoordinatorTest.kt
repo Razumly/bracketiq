@@ -13,6 +13,44 @@ import kotlin.time.Instant
 
 class EventRentalResourcesCoordinatorTest {
     @Test
+    fun attached_booking_cannot_be_deselected_and_survives_an_empty_option_refresh() {
+        val coordinator = EventRentalResourcesCoordinator()
+        val bookedField = field("booked-field")
+        val bookedSlot = slot("booked-slot", listOf(bookedField.id), "booking-1", "item-1")
+        val option = rentalOption("booked", "booking-1", "item-1", field = bookedField)
+        val addition = rentalOption("addition", "booking-1", "item-2")
+        val anotherAddition = rentalOption("another-addition", "booking-2", "item-3")
+        coordinator.applyLoadedResources(listOf(option, addition, anotherAddition), listOf(bookedSlot), "event-1")
+
+        assertEquals(setOf("booked"), coordinator.selectedResourceIds.value)
+        assertFalse(coordinator.setSelected("booked", false))
+        assertTrue(coordinator.setSelected("addition", true))
+        val currentSlot = bookedSlot.copy(divisions = listOf("organizer-division"))
+        val withAddition = coordinator.buildEditDraft(
+            Event(id = "event-1"), listOf(bookedField), listOf(currentSlot), listOf("division-a"),
+        )
+        assertEquals(currentSlot, withAddition.timeSlots.first { it.id == bookedSlot.id })
+        assertTrue(coordinator.setSelected("another-addition", true))
+        val currentSlots = withAddition.timeSlots.map {
+            if (it.rentalBookingItemId == addition.bookingItemId) it.copy(divisions = listOf("addition-division")) else it
+        }
+        val withAnotherAddition = coordinator.buildEditDraft(
+            Event(id = "event-1"), withAddition.fields, currentSlots, listOf("division-a"),
+        )
+        assertEquals(listOf("addition-division"), withAnotherAddition.timeSlots.first {
+            it.rentalBookingItemId == addition.bookingItemId
+        }.divisions)
+        coordinator.applyLoadedResources(listOf(option, addition), listOf(bookedSlot), "event-1")
+        assertTrue(coordinator.setSelected("addition", false))
+        coordinator.applyLoadedResources(emptyList(), listOf(bookedSlot), "event-1")
+        val draft = coordinator.buildEditDraft(
+            Event(id = "event-1"), listOf(bookedField, field("custom")),
+            listOf(bookedSlot, slot("custom-slot", listOf("custom"))), listOf("division-a"),
+        )
+        assertEquals(bookedSlot, draft.timeSlots.first { it.id == "booked-slot" })
+        assertEquals(setOf("booked-field", "custom"), draft.event.fieldIds.toSet())
+    }
+    @Test
     fun loaded_resources_keep_available_ids_and_attach_existing_event_rentals() {
         val coordinator = EventRentalResourcesCoordinator()
         val option = rentalOption(

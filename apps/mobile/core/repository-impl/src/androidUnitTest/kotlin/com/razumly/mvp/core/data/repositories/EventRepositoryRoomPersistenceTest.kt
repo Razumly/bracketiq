@@ -308,6 +308,66 @@ private data class EventRepositoryRoomPersistence_TournamentFixture(
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class EventRepositoryRoomPersistenceTest {
+    @Test
+    fun given_live_rental_event_when_adding_resources_then_api_and_room_preserve_booking_authority() =
+        kotlinx.coroutines.test.runTest(timeout = kotlin.time.Duration.parse("5m")) {
+            val apiUrl = System.getenv("MVP_ISSUE50_API_URL").orEmpty()
+            val eventId = System.getenv("MVP_ISSUE50_EVENT_ID").orEmpty()
+            val token = System.getenv("MVP_ISSUE50_TOKEN").orEmpty()
+            org.junit.Assume.assumeTrue("Issue 50 live API fixtures are not configured.", apiUrl.isNotBlank() && eventId.isNotBlank() && token.isNotBlank())
+            require(java.net.URI(apiUrl).host in setOf("localhost", "127.0.0.1") && eventId.startsWith("issue-50-"))
+            val database = Room.inMemoryDatabaseBuilder<MVPDatabaseService>(context).allowMainThreadQueries().build()
+            val http = HttpClient { configureMvpHttpClient() }
+            val tokens = mockk<AuthTokenStore>()
+            coEvery { tokens.get() } returns token
+            val repository = eventRepositoryRoomPersistenceRepository(
+                EventRepositoryRoomPersistence_NoStartupCleanupDatabase(database), http,
+                UnconfinedTestDispatcher(testScheduler), api = MvpApiClient(http, apiUrl, tokens),
+            )
+            try {
+                val opened = repository.getEventEditor(eventId).getOrThrow()
+                val original = opened.canonicalState
+                val bookedSlot = original.timeSlots.single()
+                val field = Field(id = "$eventId-added-field", name = "Organizer court", organizationId = original.event.organizationId)
+                val slot = bookedSlot.copy(
+                    id = "$eventId-added-slot", scheduledFieldId = field.id, scheduledFieldIds = listOf(field.id),
+                    rentalBookingId = null, rentalBookingItemId = null, rentalLocked = false, sourceType = "CUSTOM",
+                )
+                val desired = original.copy(
+                    event = original.event.copy(
+                        name = "Organizer current name", fieldIds = original.event.fieldIds + field.id,
+                        timeSlotIds = original.event.timeSlotIds + slot.id,
+                    ), fields = original.fields + field, timeSlots = original.timeSlots + slot,
+                )
+                repository.saveEventEditor(eventId, EventEditorSessionMapper.toSaveCommand(opened, EventEditorMutation(desired))).getOrThrow()
+                val saved = repository.getEventEditor(eventId).getOrThrow()
+                assertEquals("Organizer current name", saved.canonicalState.event.name)
+                assertEquals(original.event.organizationId, saved.canonicalState.event.organizationId)
+                assertEquals(bookedSlot, saved.canonicalState.timeSlots.first { it.id == bookedSlot.id })
+                assertEquals(opened.snapshot.draft.resources.rentalBookingId, saved.snapshot.draft.resources.rentalBookingId)
+                val cachedBefore = repository.getCachedEventWithRelationsFlow(eventId).first().getOrThrow()
+                for (invalid in listOf(
+                    saved.canonicalState.copy(event = saved.canonicalState.event.copy(organizationId = "conflicting-organization")),
+                    saved.canonicalState.copy(timeSlots = saved.canonicalState.timeSlots.filterNot { it.id == bookedSlot.id }),
+                    saved.canonicalState.copy(timeSlots = saved.canonicalState.timeSlots.map {
+                        if (it.id == bookedSlot.id) it.copy(startTimeMinutes = 570) else it
+                    }),
+                )) {
+                    val failure = repository.saveEventEditor(eventId, EventEditorSessionMapper.toSaveCommand(saved, EventEditorMutation(invalid))).exceptionOrNull()
+                    val apiFailure = kotlin.test.assertIs<EventEditorApiException>(failure)
+                    assertEquals("EDITOR_IMMUTABLE_FIELD", apiFailure.payload?.code)
+                    assertEquals(cachedBefore, repository.getCachedEventWithRelationsFlow(eventId).first().getOrThrow())
+                }
+                http.close()
+                val offline = repository.getCachedEventWithRelationsFlow(eventId).first().getOrThrow()
+                assertEquals(cachedBefore, offline)
+                assertEquals(setOf(bookedSlot.id, slot.id), offline.event.timeSlotIds.toSet())
+            } finally {
+                repository.close()
+                http.close()
+                database.close()
+            }
+        }
     private lateinit var context: Context
 
     @Before

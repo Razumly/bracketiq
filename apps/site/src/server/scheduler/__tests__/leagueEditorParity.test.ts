@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
+  EVENT_EDITOR_CONTRACT_VERSION,
   parseCreateEventEditorCommand,
   type CreateEventEditorCommand,
   type EventEditorDraft,
@@ -154,6 +155,7 @@ const buildParityLeague = (draft: EventEditorDraft): League => {
 describe("League editor parity", () => {
   it("matches the canonical web command fields used by mobile", () => {
     const command = sharedParityCommand;
+    expect(command.contractVersion).toBe(EVENT_EDITOR_CONTRACT_VERSION);
     expect(command.draft).toEqual(sharedParityDraft);
 
     expect(command.draft).toMatchObject({

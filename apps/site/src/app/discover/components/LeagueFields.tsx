@@ -1283,7 +1283,7 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
             const hasOvernightWindow = isRepeating
               && repeatingTimeSlotHasOvernightWindow(slot.startTimeMinutes, slot.endTimeMinutes);
             const divisionsReadOnly = readOnly && !allowDivisionEditsWhenReadOnly;
-            const resourcesReadOnly = readOnly && !allowResourceEditsWhenReadOnly;
+            const resourcesReadOnly = slot.rentalLocked === true || (readOnly && !allowResourceEditsWhenReadOnly);
             const resourceError = isRentalSlotMismatchError(slot.error) ? slot.error : null;
             const hasConflicts = conflictCount > 0;
             const slotTimingReadOnly = readOnly || slot.rentalLocked === true;
@@ -1314,7 +1314,7 @@ const LeagueFields: React.FC<LeagueFieldsProps> = ({
                         variant="subtle"
                         color="red"
                         onClick={() => onRemoveSlot(index)}
-                        disabled={slots.length === 1 || readOnly}
+                        disabled={slots.length === 1 || slotTimingReadOnly}
                       >
                         Remove
                       </Button>}

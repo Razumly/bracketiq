@@ -14,6 +14,36 @@ import kotlin.time.Instant
 
 class EventEditDraftCoordinatorTest {
     @Test
+    fun given_booked_resource_when_event_defaults_change_and_a_resource_is_added_then_the_command_preserves_the_booked_row() {
+        val event = leagueEvent(fieldIds = listOf("booked"), location = "Old Park")
+        val bookedField = field(id = "booked", location = "Old Park").copy(organizationId = "facility")
+        val bookedSlot = slot("booked-slot", scheduledFieldIds = listOf("booked")).copy(
+            rentalBookingId = "booking", rentalBookingItemId = "item", rentalLocked = true,
+            repeating = false,
+        )
+        val coordinator = EventEditDraftCoordinator(event, canEditInitial = true)
+        coordinator.seedDraftForEditing(
+            event = event, sourceFields = listOf(bookedField), timeSlots = listOf(bookedSlot),
+            leagueScoringConfig = LeagueScoringConfigDTO(),
+        )
+        coordinator.updateEditedEvent { it.copy(location = "New Park") }
+        coordinator.selectFieldCount(2, idFactory = { "added" })
+        val result = EventEditPayloadBuilder.prepareForUpdate(EventEditPayloadInput(
+            editedEvent = coordinator.editedEvent.value,
+            editableFields = coordinator.editableFields.value,
+            editableLeagueTimeSlots = coordinator.editableLeagueTimeSlots.value,
+            selectedRentalFields = emptyList(),
+            leagueScoringConfig = LeagueScoringConfigDTO(),
+            originalEventStart = event.start,
+        ))
+        assertEquals(bookedField, result.prepared.fields?.first())
+        assertEquals(listOf("booked", "added"), result.prepared.event.fieldIds)
+        assertEquals("New Park", result.prepared.fields?.last()?.location)
+        assertEquals(bookedSlot.startDate, result.prepared.timeSlots?.first()?.startDate)
+        assertEquals(bookedSlot.endDate, result.prepared.timeSlots?.first()?.endDate)
+    }
+
+    @Test
     fun given_readonly_draft_when_seeded_and_refreshed_then_event_fields_and_scoring_are_populated() {
         val coordinator = EventEditDraftCoordinator(
             initialEvent = leagueEvent(fieldIds = emptyList()),

@@ -259,7 +259,7 @@ describe('useEventResourceController', () => {
             'home_field_1',
             'rental:booking_item_1',
         ]);
-        expect(result.current.showLocalFieldCreationControls).toBe(false);
+        expect(result.current.showLocalFieldCreationControls).toBe(true);
     });
 
     it('surfaces rental loading failures without replacing organization resources', async () => {

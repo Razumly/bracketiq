@@ -77,9 +77,9 @@ internal object EventEditPayloadBuilder {
         } else {
             null
         }
-        val preparedFields = fieldDraftResult?.drafts
+        val preparedFields = fieldDraftResult?.allFields
         val preparedEventWithFields = if (preparedFields != null) {
-            eventDraft.copy(fieldIds = selectedRentalFieldIds + preparedFields.map { field -> field.id })
+            eventDraft.copy(fieldIds = (selectedRentalFieldIds + preparedFields.map { field -> field.id }).distinct())
         } else {
             eventDraft
         }
@@ -293,6 +293,7 @@ internal fun syncEditableLeagueSlotBoundaries(
     }
 
     return slots.map { slot ->
+        if (slot.isRentalBacked()) return@map slot
         if (!slot.repeating) {
             if (updatedEvent.eventType == EventType.TRYOUT) {
                 slot.copy(
@@ -381,10 +382,12 @@ internal fun syncEditableFieldsForEvent(
     previousEvent: Event,
     updatedEvent: Event,
     fields: List<Field>,
+    bookedFieldIds: Set<String> = emptySet(),
 ): List<Field> {
     if (fields.isEmpty()) return fields
 
     return fields.mapIndexed { index, field ->
+        if (field.id in bookedFieldIds) return@mapIndexed field
         field.copy(
             fieldNumber = index + 1,
             divisions = field.divisions

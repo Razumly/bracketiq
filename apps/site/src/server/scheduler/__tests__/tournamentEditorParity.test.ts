@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
+  EVENT_EDITOR_CONTRACT_VERSION,
   parseCreateEventEditorCommand,
   type CreateEventEditorCommand,
   type EventEditorDraft,
@@ -711,6 +712,7 @@ const expectedPlayoffConfigs: Record<string, PlayoffConfigOracle> = {
 
 describe("Tournament editor parity", () => {
   it("matches the intentionally unscheduled Tournament command fields used by mobile", () => {
+    expect(sharedParityCommand.contractVersion).toBe(EVENT_EDITOR_CONTRACT_VERSION);
     expect(rawSharedParityDraft.schedule).toHaveProperty("isAutomatedScheduling", false);
     expect(sharedParityCommand.draft).toEqual(sharedParityDraft);
     expect(sharedParityCommand.draft.schedule.isAutomatedScheduling).toBe(false);
@@ -826,6 +828,7 @@ describe("Tournament editor parity", () => {
   });
 
   it("matches the scheduled Tournament command and exact Match Demand", async () => {
+    expect(scheduledParityCommand.contractVersion).toBe(EVENT_EDITOR_CONTRACT_VERSION);
     expect(scheduledParityCommand.createOperationId).toBe(
       "create-operation-tournament-parity-scheduled",
     );

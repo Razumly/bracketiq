@@ -1412,7 +1412,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun given_loaded_rental_resource_when_selected_then_create_event_attaches_locked_slot_without_checkout() = runTest(testDispatcher) {
+    fun given_loaded_rental_resource_when_an_organizer_adds_a_resource_then_create_preserves_booking_values_without_checkout() = runTest(testDispatcher) {
         val rentalField = Field(
             fieldNumber = 1,
             organizationId = "owner-org",
@@ -1449,8 +1449,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.selectFieldCount(3)
         advance()
 
-        assertEquals(emptyList(), harness.component.localFields.value)
-        assertEquals(emptyList(), harness.component.newEventState.value.fieldIds)
+        assertEquals(3, harness.component.localFields.value.size)
 
         harness.component.setRentalResourceSelected("rental-option-1", true)
         advance()
@@ -1460,13 +1459,18 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
 
         val selectedSlot = harness.component.leagueSlots.value.single()
         assertEquals(setOf("rental-option-1"), harness.component.selectedRentalResourceIds.value)
-        assertEquals(listOf("field-rental-main"), harness.component.localFields.value.map { field -> field.id })
-        assertEquals(listOf("field-rental-main"), harness.component.newEventState.value.fieldIds)
+        assertEquals(3, harness.component.localFields.value.size)
+        assertTrue(harness.component.newEventState.value.fieldIds.contains("field-rental-main"))
         assertEquals("RENTAL_BOOKING", selectedSlot.sourceType)
         assertEquals("booking-1", selectedSlot.rentalBookingId)
         assertEquals("booking-item-1", selectedSlot.rentalBookingItemId)
         assertEquals(true, selectedSlot.rentalLocked)
         assertEquals(listOf("field-rental-main"), selectedSlot.scheduledFieldIds)
+
+        harness.component.updateEventField { copy(location = "Organizer location") }
+        advance()
+        assertEquals("owner-org", harness.component.localFields.value.first { it.id == rentalField.id }.organizationId)
+        assertEquals(rentalField.location, harness.component.localFields.value.first { it.id == rentalField.id }.location)
 
         harness.component.createEvent()
         advance()
@@ -1476,7 +1480,10 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         assertEquals(1, harness.eventRepository.createEditorCalls.size)
         val createCall = harness.eventRepository.createEditorCalls.single()
         val payloadSlot = createCall.timeSlots.orEmpty().single()
-        assertEquals(listOf("field-rental-main"), createCall.event.fieldIds)
+        assertEquals(3, createCall.event.fieldIds.size)
+        assertEquals(3, createCall.fields.orEmpty().size)
+        assertEquals("owner-org", createCall.fields.orEmpty().first { it.id == rentalField.id }.organizationId)
+        assertEquals(rentalField.location, createCall.fields.orEmpty().first { it.id == rentalField.id }.location)
         assertEquals(listOf(payloadSlot.id), createCall.event.timeSlotIds)
         assertEquals("RENTAL_BOOKING", payloadSlot.sourceType)
         assertEquals("booking-1", payloadSlot.rentalBookingId)
@@ -1777,7 +1784,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun given_loaded_rental_resource_for_league_when_regular_resource_added_to_locked_slot_then_payload_preserves_regular_resource() = runTest(testDispatcher) {
+    fun given_loaded_rental_resource_for_league_when_regular_resource_added_to_locked_slot_then_booked_resource_stays_fixed() = runTest(testDispatcher) {
         val rentalField = Field(
             fieldNumber = 1,
             organizationId = "owner-org",
@@ -1837,7 +1844,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         advance()
 
         assertEquals(
-            listOf("field-rental-main", regularFieldId),
+            listOf("field-rental-main"),
             harness.component.leagueSlots.value.first().scheduledFieldIds,
         )
 
@@ -1846,11 +1853,9 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
 
         val createCall = harness.eventRepository.createEditorCalls.single()
         val payloadSlot = createCall.timeSlots.orEmpty().single()
-        val createdRegularFieldId = createCall.fields.orEmpty()
-            .first { field -> field.id != "field-rental-main" }
-            .id
+        assertTrue(createCall.fields.orEmpty().any { it.id == regularFieldId })
         assertEquals("field-rental-main", payloadSlot.scheduledFieldId)
-        assertEquals(listOf("field-rental-main", createdRegularFieldId), payloadSlot.scheduledFieldIds)
+        assertEquals(listOf("field-rental-main"), payloadSlot.scheduledFieldIds)
     }
 
     @Test

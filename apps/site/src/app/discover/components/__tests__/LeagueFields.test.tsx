@@ -719,7 +719,7 @@ describe("LeagueFields", () => {
     );
   });
 
-  it("allows adding resources to a rental-locked readonly slot when resource edits are explicitly allowed", () => {
+  it("keeps booked Resources locked when organizer Resource edits are allowed", () => {
     const onUpdateSlot = jest.fn();
     const rentalField: Field = {
       ...field,
@@ -797,18 +797,10 @@ describe("LeagueFields", () => {
 
     expect(
       screen.getByPlaceholderText("Search resources..."),
-    ).not.toBeDisabled();
+    ).toBeDisabled();
     expect(screen.getByLabelText(/Repeats weekly/i)).toBeDisabled();
-
-    fireEvent.click(screen.getByRole("button", { name: /Court B/i }));
-
-    expect(onUpdateSlot).toHaveBeenCalledWith(
-      0,
-      expect.objectContaining({
-        scheduledFieldId: "rental_field_1",
-        scheduledFieldIds: ["rental_field_1", "field_2"],
-      }),
-    );
+    expect(screen.getByRole("button", { name: /Remove/i })).toBeDisabled();
+    expect(onUpdateSlot).not.toHaveBeenCalled();
   });
 
   it("does not offer a rental booking item on another timeslot once it is selected", () => {

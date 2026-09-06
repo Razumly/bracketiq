@@ -227,7 +227,11 @@ internal class EventEditDraftCoordinator(
         } else {
             updated
         }
-        _editableFields.value = syncEditableFieldsForEvent(previous, updated, _editableFields.value)
+        _editableFields.value = syncEditableFieldsForEvent(
+            previous, updated, _editableFields.value,
+            bookedFieldIds = _editableLeagueTimeSlots.value.filter(TimeSlot::isRentalBacked)
+                .flatMap { it.normalizedScheduledFieldIds() }.toSet(),
+        )
         _editableLeagueTimeSlots.value = nextTimeSlots
     }
 
@@ -237,13 +241,17 @@ internal class EventEditDraftCoordinator(
         idFactory: () -> String = ::newId,
     ) {
         draftHasUnsavedChanges = true
-        val normalized = count.coerceAtLeast(0)
+        val bookedIds = _editableLeagueTimeSlots.value.filter(TimeSlot::isRentalBacked)
+            .flatMap { it.normalizedScheduledFieldIds() }.toSet()
+        val bookedFields = _editableFields.value.filter { it.id in bookedIds }
+        val normalized = count.coerceAtLeast(bookedFields.size)
         _fieldCount.value = normalized
 
         val currentEvent = _editedEvent.value
-        val resized = _editableFields.value
-            .take(normalized)
+        val resized = (bookedFields + _editableFields.value.filterNot { it.id in bookedIds }
+            .take(normalized - bookedFields.size))
             .mapIndexed { index, field ->
+                if (field.id in bookedIds) return@mapIndexed field
                 field.copy(
                     id = if (field.id.isBlank()) idFactory() else field.id,
                     fieldNumber = index + 1,
@@ -289,6 +297,7 @@ internal class EventEditDraftCoordinator(
     fun updateLocalFieldName(index: Int, name: String) {
         val fields = _editableFields.value.toMutableList()
         if (index !in fields.indices) return
+        if (_editableLeagueTimeSlots.value.any { it.isRentalBacked() && fields[index].id in it.normalizedScheduledFieldIds() }) return
         draftHasUnsavedChanges = true
         fields[index] = fields[index].copy(name = name)
         _editableFields.value = fields
@@ -320,13 +329,17 @@ internal class EventEditDraftCoordinator(
         if (index !in slots.indices) return
         draftHasUnsavedChanges = true
         val validFieldIds = editableFieldIds()
-        slots[index] = normalizeSlotResourceSelection(slots[index].update(), validFieldIds)
+        val current = slots[index]
+        val changed = current.update()
+        slots[index] = if (current.isRentalBacked()) current.copy(divisions = changed.divisions)
+            else normalizeSlotResourceSelection(changed, validFieldIds)
         _editableLeagueTimeSlots.value = slots
     }
 
     fun removeLeagueTimeSlot(index: Int) {
         val slots = _editableLeagueTimeSlots.value.toMutableList()
         if (index !in slots.indices) return
+        if (slots[index].isRentalBacked()) return
         draftHasUnsavedChanges = true
         slots.removeAt(index)
         _editableLeagueTimeSlots.value = slots

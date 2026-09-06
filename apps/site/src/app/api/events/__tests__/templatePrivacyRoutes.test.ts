@@ -1204,9 +1204,10 @@ describe("event template privacy routes", () => {
       const andClauses = Array.isArray(callArgs?.where?.AND)
         ? callArgs.where.AND
         : [];
-      const dateFloorClause = andClauses.find(
-        (clause: any) => clause?.start?.gte instanceof Date,
-      );
+      const dateFloorClause = andClauses
+        .flatMap((clause: any) => clause?.OR ?? [])
+        .find((clause: any) => clause?.eventType?.not === "WEEKLY_EVENT"
+          && clause?.start?.gte instanceof Date);
       const startGte = dateFloorClause?.start?.gte as Date | undefined;
       const expectedStart = new Date(
         new Date().getFullYear(),
@@ -1283,9 +1284,10 @@ describe("event template privacy routes", () => {
     const andClauses = Array.isArray(callArgs?.where?.AND)
       ? callArgs.where.AND
       : [];
-    const dateFloorClause = andClauses.find(
-      (clause: any) => clause?.start?.gte instanceof Date,
-    );
+    const dateFloorClause = andClauses
+      .flatMap((clause: any) => clause?.OR ?? [])
+      .find((clause: any) => clause?.eventType?.not === "WEEKLY_EVENT"
+        && clause?.start?.gte instanceof Date);
     const startGte = dateFloorClause?.start?.gte;
     expect(startGte).toBeInstanceOf(Date);
     expect(startGte.getHours()).toBe(0);

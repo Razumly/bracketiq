@@ -1193,7 +1193,7 @@ function EventScheduleContent() {
       const fallbackSportId =
         typeof defaultSport === "string" ? defaultSport : defaultSport.$id;
       const organizationValue = hasDraft
-        ? isRentalFlow
+        ? isRentalFlow && !draft?.resources.rentalBookingId
           ? undefined
           : draft?.basics.organizationId
         : (activeEvent?.organizationId as string | Organization | undefined);
@@ -1209,7 +1209,7 @@ function EventScheduleContent() {
         ? draft?.basics.parentEvent
         : parentEventIdParam;
       const templateId = hasDraft
-        ? draft?.resources.requiredTemplateIds[0]
+        ? draft?.resources.sourceTemplateId
         : templateIdParam;
       const rentalBookingId = hasDraft
         ? draft?.resources.rentalBookingId
@@ -5615,7 +5615,7 @@ function EventScheduleContent() {
       snapshot: EventEditorSnapshot;
       proposal?: EventEditorCreateProposal;
     }> => {
-      const contractDraft = isRentalFlow
+      const contractDraft = isRentalFlow && !draft.resources.rentalBookingId
         ? {
             ...draft,
             basics: {
