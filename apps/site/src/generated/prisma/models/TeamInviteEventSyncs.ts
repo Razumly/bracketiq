@@ -33,6 +33,7 @@ export type TeamInviteEventSyncsMinAggregateOutputType = {
   eventId: string | null
   eventTeamId: string | null
   userId: string | null
+  registrationId: string | null
   eventTeamHadUser: boolean | null
   eventTeamHadPendingUser: boolean | null
   sourceTeamRegistrationId: string | null
@@ -48,6 +49,7 @@ export type TeamInviteEventSyncsMaxAggregateOutputType = {
   eventId: string | null
   eventTeamId: string | null
   userId: string | null
+  registrationId: string | null
   eventTeamHadUser: boolean | null
   eventTeamHadPendingUser: boolean | null
   sourceTeamRegistrationId: string | null
@@ -63,6 +65,7 @@ export type TeamInviteEventSyncsCountAggregateOutputType = {
   eventId: number
   eventTeamId: number
   userId: number
+  registrationId: number
   previousRegistrationSnapshot: number
   eventTeamHadUser: number
   eventTeamHadPendingUser: number
@@ -81,6 +84,7 @@ export type TeamInviteEventSyncsMinAggregateInputType = {
   eventId?: true
   eventTeamId?: true
   userId?: true
+  registrationId?: true
   eventTeamHadUser?: true
   eventTeamHadPendingUser?: true
   sourceTeamRegistrationId?: true
@@ -96,6 +100,7 @@ export type TeamInviteEventSyncsMaxAggregateInputType = {
   eventId?: true
   eventTeamId?: true
   userId?: true
+  registrationId?: true
   eventTeamHadUser?: true
   eventTeamHadPendingUser?: true
   sourceTeamRegistrationId?: true
@@ -111,6 +116,7 @@ export type TeamInviteEventSyncsCountAggregateInputType = {
   eventId?: true
   eventTeamId?: true
   userId?: true
+  registrationId?: true
   previousRegistrationSnapshot?: true
   eventTeamHadUser?: true
   eventTeamHadPendingUser?: true
@@ -200,6 +206,7 @@ export type TeamInviteEventSyncsGroupByOutputType = {
   eventId: string
   eventTeamId: string
   userId: string
+  registrationId: string | null
   previousRegistrationSnapshot: runtime.JsonValue | null
   eventTeamHadUser: boolean
   eventTeamHadPendingUser: boolean
@@ -237,6 +244,7 @@ export type TeamInviteEventSyncsWhereInput = {
   eventId?: Prisma.StringFilter<"TeamInviteEventSyncs"> | string
   eventTeamId?: Prisma.StringFilter<"TeamInviteEventSyncs"> | string
   userId?: Prisma.StringFilter<"TeamInviteEventSyncs"> | string
+  registrationId?: Prisma.StringNullableFilter<"TeamInviteEventSyncs"> | string | null
   previousRegistrationSnapshot?: Prisma.JsonNullableFilter<"TeamInviteEventSyncs">
   eventTeamHadUser?: Prisma.BoolFilter<"TeamInviteEventSyncs"> | boolean
   eventTeamHadPendingUser?: Prisma.BoolFilter<"TeamInviteEventSyncs"> | boolean
@@ -253,6 +261,7 @@ export type TeamInviteEventSyncsOrderByWithRelationInput = {
   eventId?: Prisma.SortOrder
   eventTeamId?: Prisma.SortOrder
   userId?: Prisma.SortOrder
+  registrationId?: Prisma.SortOrderInput | Prisma.SortOrder
   previousRegistrationSnapshot?: Prisma.SortOrderInput | Prisma.SortOrder
   eventTeamHadUser?: Prisma.SortOrder
   eventTeamHadPendingUser?: Prisma.SortOrder
@@ -273,6 +282,7 @@ export type TeamInviteEventSyncsWhereUniqueInput = Prisma.AtLeast<{
   eventId?: Prisma.StringFilter<"TeamInviteEventSyncs"> | string
   eventTeamId?: Prisma.StringFilter<"TeamInviteEventSyncs"> | string
   userId?: Prisma.StringFilter<"TeamInviteEventSyncs"> | string
+  registrationId?: Prisma.StringNullableFilter<"TeamInviteEventSyncs"> | string | null
   previousRegistrationSnapshot?: Prisma.JsonNullableFilter<"TeamInviteEventSyncs">
   eventTeamHadUser?: Prisma.BoolFilter<"TeamInviteEventSyncs"> | boolean
   eventTeamHadPendingUser?: Prisma.BoolFilter<"TeamInviteEventSyncs"> | boolean
@@ -289,6 +299,7 @@ export type TeamInviteEventSyncsOrderByWithAggregationInput = {
   eventId?: Prisma.SortOrder
   eventTeamId?: Prisma.SortOrder
   userId?: Prisma.SortOrder
+  registrationId?: Prisma.SortOrderInput | Prisma.SortOrder
   previousRegistrationSnapshot?: Prisma.SortOrderInput | Prisma.SortOrder
   eventTeamHadUser?: Prisma.SortOrder
   eventTeamHadPendingUser?: Prisma.SortOrder
@@ -311,6 +322,7 @@ export type TeamInviteEventSyncsScalarWhereWithAggregatesInput = {
   eventId?: Prisma.StringWithAggregatesFilter<"TeamInviteEventSyncs"> | string
   eventTeamId?: Prisma.StringWithAggregatesFilter<"TeamInviteEventSyncs"> | string
   userId?: Prisma.StringWithAggregatesFilter<"TeamInviteEventSyncs"> | string
+  registrationId?: Prisma.StringNullableWithAggregatesFilter<"TeamInviteEventSyncs"> | string | null
   previousRegistrationSnapshot?: Prisma.JsonNullableWithAggregatesFilter<"TeamInviteEventSyncs">
   eventTeamHadUser?: Prisma.BoolWithAggregatesFilter<"TeamInviteEventSyncs"> | boolean
   eventTeamHadPendingUser?: Prisma.BoolWithAggregatesFilter<"TeamInviteEventSyncs"> | boolean
@@ -327,6 +339,7 @@ export type TeamInviteEventSyncsCreateInput = {
   eventId: string
   eventTeamId: string
   userId: string
+  registrationId?: string | null
   previousRegistrationSnapshot?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   eventTeamHadUser?: boolean
   eventTeamHadPendingUser?: boolean
@@ -343,6 +356,7 @@ export type TeamInviteEventSyncsUncheckedCreateInput = {
   eventId: string
   eventTeamId: string
   userId: string
+  registrationId?: string | null
   previousRegistrationSnapshot?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   eventTeamHadUser?: boolean
   eventTeamHadPendingUser?: boolean
@@ -359,6 +373,7 @@ export type TeamInviteEventSyncsUpdateInput = {
   eventId?: Prisma.StringFieldUpdateOperationsInput | string
   eventTeamId?: Prisma.StringFieldUpdateOperationsInput | string
   userId?: Prisma.StringFieldUpdateOperationsInput | string
+  registrationId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   previousRegistrationSnapshot?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   eventTeamHadUser?: Prisma.BoolFieldUpdateOperationsInput | boolean
   eventTeamHadPendingUser?: Prisma.BoolFieldUpdateOperationsInput | boolean
@@ -375,6 +390,7 @@ export type TeamInviteEventSyncsUncheckedUpdateInput = {
   eventId?: Prisma.StringFieldUpdateOperationsInput | string
   eventTeamId?: Prisma.StringFieldUpdateOperationsInput | string
   userId?: Prisma.StringFieldUpdateOperationsInput | string
+  registrationId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   previousRegistrationSnapshot?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   eventTeamHadUser?: Prisma.BoolFieldUpdateOperationsInput | boolean
   eventTeamHadPendingUser?: Prisma.BoolFieldUpdateOperationsInput | boolean
@@ -391,6 +407,7 @@ export type TeamInviteEventSyncsCreateManyInput = {
   eventId: string
   eventTeamId: string
   userId: string
+  registrationId?: string | null
   previousRegistrationSnapshot?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   eventTeamHadUser?: boolean
   eventTeamHadPendingUser?: boolean
@@ -407,6 +424,7 @@ export type TeamInviteEventSyncsUpdateManyMutationInput = {
   eventId?: Prisma.StringFieldUpdateOperationsInput | string
   eventTeamId?: Prisma.StringFieldUpdateOperationsInput | string
   userId?: Prisma.StringFieldUpdateOperationsInput | string
+  registrationId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   previousRegistrationSnapshot?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   eventTeamHadUser?: Prisma.BoolFieldUpdateOperationsInput | boolean
   eventTeamHadPendingUser?: Prisma.BoolFieldUpdateOperationsInput | boolean
@@ -423,6 +441,7 @@ export type TeamInviteEventSyncsUncheckedUpdateManyInput = {
   eventId?: Prisma.StringFieldUpdateOperationsInput | string
   eventTeamId?: Prisma.StringFieldUpdateOperationsInput | string
   userId?: Prisma.StringFieldUpdateOperationsInput | string
+  registrationId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   previousRegistrationSnapshot?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   eventTeamHadUser?: Prisma.BoolFieldUpdateOperationsInput | boolean
   eventTeamHadPendingUser?: Prisma.BoolFieldUpdateOperationsInput | boolean
@@ -445,6 +464,7 @@ export type TeamInviteEventSyncsCountOrderByAggregateInput = {
   eventId?: Prisma.SortOrder
   eventTeamId?: Prisma.SortOrder
   userId?: Prisma.SortOrder
+  registrationId?: Prisma.SortOrder
   previousRegistrationSnapshot?: Prisma.SortOrder
   eventTeamHadUser?: Prisma.SortOrder
   eventTeamHadPendingUser?: Prisma.SortOrder
@@ -461,6 +481,7 @@ export type TeamInviteEventSyncsMaxOrderByAggregateInput = {
   eventId?: Prisma.SortOrder
   eventTeamId?: Prisma.SortOrder
   userId?: Prisma.SortOrder
+  registrationId?: Prisma.SortOrder
   eventTeamHadUser?: Prisma.SortOrder
   eventTeamHadPendingUser?: Prisma.SortOrder
   sourceTeamRegistrationId?: Prisma.SortOrder
@@ -476,6 +497,7 @@ export type TeamInviteEventSyncsMinOrderByAggregateInput = {
   eventId?: Prisma.SortOrder
   eventTeamId?: Prisma.SortOrder
   userId?: Prisma.SortOrder
+  registrationId?: Prisma.SortOrder
   eventTeamHadUser?: Prisma.SortOrder
   eventTeamHadPendingUser?: Prisma.SortOrder
   sourceTeamRegistrationId?: Prisma.SortOrder
@@ -497,6 +519,7 @@ export type TeamInviteEventSyncsSelect<ExtArgs extends runtime.Types.Extensions.
   eventId?: boolean
   eventTeamId?: boolean
   userId?: boolean
+  registrationId?: boolean
   previousRegistrationSnapshot?: boolean
   eventTeamHadUser?: boolean
   eventTeamHadPendingUser?: boolean
@@ -513,6 +536,7 @@ export type TeamInviteEventSyncsSelectCreateManyAndReturn<ExtArgs extends runtim
   eventId?: boolean
   eventTeamId?: boolean
   userId?: boolean
+  registrationId?: boolean
   previousRegistrationSnapshot?: boolean
   eventTeamHadUser?: boolean
   eventTeamHadPendingUser?: boolean
@@ -529,6 +553,7 @@ export type TeamInviteEventSyncsSelectUpdateManyAndReturn<ExtArgs extends runtim
   eventId?: boolean
   eventTeamId?: boolean
   userId?: boolean
+  registrationId?: boolean
   previousRegistrationSnapshot?: boolean
   eventTeamHadUser?: boolean
   eventTeamHadPendingUser?: boolean
@@ -545,6 +570,7 @@ export type TeamInviteEventSyncsSelectScalar = {
   eventId?: boolean
   eventTeamId?: boolean
   userId?: boolean
+  registrationId?: boolean
   previousRegistrationSnapshot?: boolean
   eventTeamHadUser?: boolean
   eventTeamHadPendingUser?: boolean
@@ -552,7 +578,7 @@ export type TeamInviteEventSyncsSelectScalar = {
   status?: boolean
 }
 
-export type TeamInviteEventSyncsOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "inviteId" | "canonicalTeamId" | "eventId" | "eventTeamId" | "userId" | "previousRegistrationSnapshot" | "eventTeamHadUser" | "eventTeamHadPendingUser" | "sourceTeamRegistrationId" | "status", ExtArgs["result"]["teamInviteEventSyncs"]>
+export type TeamInviteEventSyncsOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "createdAt" | "updatedAt" | "inviteId" | "canonicalTeamId" | "eventId" | "eventTeamId" | "userId" | "registrationId" | "previousRegistrationSnapshot" | "eventTeamHadUser" | "eventTeamHadPendingUser" | "sourceTeamRegistrationId" | "status", ExtArgs["result"]["teamInviteEventSyncs"]>
 
 export type $TeamInviteEventSyncsPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "TeamInviteEventSyncs"
@@ -566,6 +592,7 @@ export type $TeamInviteEventSyncsPayload<ExtArgs extends runtime.Types.Extension
     eventId: string
     eventTeamId: string
     userId: string
+    registrationId: string | null
     previousRegistrationSnapshot: runtime.JsonValue | null
     eventTeamHadUser: boolean
     eventTeamHadPendingUser: boolean
@@ -1002,6 +1029,7 @@ export interface TeamInviteEventSyncsFieldRefs {
   readonly eventId: Prisma.FieldRef<"TeamInviteEventSyncs", 'String'>
   readonly eventTeamId: Prisma.FieldRef<"TeamInviteEventSyncs", 'String'>
   readonly userId: Prisma.FieldRef<"TeamInviteEventSyncs", 'String'>
+  readonly registrationId: Prisma.FieldRef<"TeamInviteEventSyncs", 'String'>
   readonly previousRegistrationSnapshot: Prisma.FieldRef<"TeamInviteEventSyncs", 'Json'>
   readonly eventTeamHadUser: Prisma.FieldRef<"TeamInviteEventSyncs", 'Boolean'>
   readonly eventTeamHadPendingUser: Prisma.FieldRef<"TeamInviteEventSyncs", 'Boolean'>

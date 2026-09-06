@@ -1,5 +1,7 @@
 package com.razumly.mvp.core.data.repositories
 
+import com.razumly.mvp.core.network.dto.EventRegistrationScopeDto
+
 import com.razumly.mvp.core.analytics.AnalyticsEvent
 import com.razumly.mvp.core.analytics.AnalyticsTracker
 import com.razumly.mvp.core.data.DatabaseService
@@ -173,6 +175,8 @@ interface ITeamRepository : IMVPRepository {
     suspend fun getInviteFreeAgentContext(teamId: String): Result<TeamInviteFreeAgentContext> =
         getInviteFreeAgents(teamId).map { users -> TeamInviteFreeAgentContext(users = users) }
     suspend fun getInviteFreeAgents(teamId: String): Result<List<UserData>>
+    suspend fun createEventTeamMemberInvite(teamId: String, eventRegistration: EventRegistrationScopeDto, input: TeamMemberInviteRequestDto): Result<TeamMemberInviteResult> =
+        Result.failure(UnsupportedOperationException("Event Player preparation is not supported."))
     suspend fun createTeamMemberInvite(
         teamId: String,
         userId: String? = null,
@@ -1182,6 +1186,28 @@ class TeamRepository(
         guardianEmail: String?,
         idempotencyKey: String?,
         existingInviteId: String?,
+    ): Result<TeamMemberInviteResult> = createTeamMemberInviteForScope(teamId, userId, email, roleInviteType, firstName, lastName, phone, shareOnly, isMinor, dateOfBirth, guardianEmail, idempotencyKey, existingInviteId, null)
+
+    override suspend fun createEventTeamMemberInvite(teamId: String, eventRegistration: EventRegistrationScopeDto, input: TeamMemberInviteRequestDto): Result<TeamMemberInviteResult> =
+        createTeamMemberInviteForScope(teamId, input.userId, input.email, "player", input.firstName, input.lastName,
+            input.phone, input.shareOnly == true, input.isMinor == true, input.dateOfBirth, input.guardianEmail,
+            input.idempotencyKey, input.existingInviteId, eventRegistration)
+
+    private suspend fun createTeamMemberInviteForScope(
+        teamId: String,
+        userId: String?,
+        email: String?,
+        roleInviteType: String,
+        firstName: String?,
+        lastName: String?,
+        phone: String?,
+        shareOnly: Boolean,
+        isMinor: Boolean,
+        dateOfBirth: String?,
+        guardianEmail: String?,
+        idempotencyKey: String?,
+        existingInviteId: String?,
+        eventRegistration: EventRegistrationScopeDto?,
     ): Result<TeamMemberInviteResult> = runCatching {
         val normalizedTeamId = teamId.trim().takeIf(String::isNotBlank)
             ?: error("Team id is required.")
@@ -1193,13 +1219,15 @@ class TeamRepository(
         if (normalizedUserId == null && normalizedEmail == null && normalizedPhone == null && !shareOnly) {
             error("A user, email, phone, or share-only invite is required.")
         }
-        val requestIdentity = listOf(teamId, userId, email, roleInviteType, firstName, lastName, phone, shareOnly, isMinor, dateOfBirth, guardianEmail, existingInviteId).joinToString("\u001f")
+        val baseIdentity = listOf(teamId, userId, email, roleInviteType, firstName, lastName, phone, shareOnly, isMinor, dateOfBirth, guardianEmail, existingInviteId).joinToString("\u001f")
+        val requestIdentity = if (eventRegistration == null) baseIdentity else "$baseIdentity\u001f$eventRegistration"
         val viewerId = userRepository.currentUser.value.getOrThrow().id
         val requestKey = idempotencyKey ?: databaseService.getInviteDao.reserveOperation(viewerId, requestIdentity, newId())
         val encodedTeamId = normalizedTeamId.encodeURLQueryComponent()
         val response = api.post<TeamMemberInviteRequestDto, TeamMemberInviteResponseDto>(
             path = "api/teams/$encodedTeamId/member-invites",
             body = TeamMemberInviteRequestDto(
+                eventRegistration = eventRegistration,
                 userId = normalizedUserId,
                 email = normalizedEmail,
                 role = roleInviteType.trim().ifBlank { "player" },

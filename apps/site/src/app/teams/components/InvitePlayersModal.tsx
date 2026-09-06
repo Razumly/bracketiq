@@ -34,6 +34,8 @@ import {
 import { userService } from '@/lib/userService';
 import { formatPhoneInput } from '@/lib/phoneInput';
 
+import type { EventRegistrationScope } from '@/lib/contracts/eventRegistrationDraft';
+
 const EMAIL_REGEX = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const PLAYER_INVITE_CAPACITY_ERROR_MESSAGE = 'Team is full. Player invite was not sent.';
 
@@ -80,8 +82,10 @@ type PendingRoleInvite = {
   invite: Invite;
   invitedUser?: UserData;
 };
+const EMPTY_PENDING_ROLE_INVITES: PendingRoleInvite[] = [];
 
 interface InvitePlayersModalProps {
+  eventRegistration?: EventRegistrationScope;
   isOpen: boolean;
   onClose: () => void;
   team: Team;
@@ -165,13 +169,15 @@ export default function InvitePlayersModal({
   freeAgentContext = EMPTY_INVITE_CONTEXT,
   selectedFreeAgentId,
   selectedFreeAgentUser,
-  pendingRoleInvites = [],
+  pendingRoleInvites = EMPTY_PENDING_ROLE_INVITES,
   onPlayerInviteSent,
   onRoleInvitesChanged,
   onTeamUpdated,
   onInvitesSent,
+  eventRegistration,
 }: InvitePlayersModalProps) {
-  const [inviteMode, setInviteMode] = useState<InviteMode>('free_agents');
+  const isEventRegistration = Boolean(eventRegistration);
+  const [inviteMode, setInviteMode] = useState<InviteMode>(eventRegistration ? 'user' : 'free_agents');
   const [selectedInviteRole, setSelectedInviteRole] = useState<TeamInviteRoleType>('player');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<UserData[]>([]);
@@ -385,11 +391,11 @@ export default function InvitePlayersModal({
     }
     if (normalizedSelectedFreeAgentId) {
       setSelectedInviteRole('player');
-      setInviteMode('free_agents');
+      setInviteMode(isEventRegistration ? 'user' : 'free_agents');
       setSearchQuery('');
       setSearchResults([]);
     }
-  }, [isOpen, normalizedSelectedFreeAgentId]);
+  }, [isOpen, normalizedSelectedFreeAgentId, isEventRegistration]);
 
   useEffect(() => {
     if (!isOpen || inviteMode !== 'user') {
@@ -449,7 +455,10 @@ export default function InvitePlayersModal({
         return;
       }
 
-      const success = await teamService.inviteUserToTeamRole(team, invitee, selectedInviteRole);
+      const result = eventRegistration
+        ? await teamService.createTeamMemberInvite(team.$id, { userId: invitee.$id, role: 'player', eventRegistration })
+        : null;
+      const success = result ?? await teamService.inviteUserToTeamRole(team, invitee, selectedInviteRole);
       if (!success) {
         notifications.show({ color: 'red', message: 'Failed to send invite.' });
         return;
@@ -463,7 +472,9 @@ export default function InvitePlayersModal({
         setLocalInvitedRoleKeys((current) => new Set(current).add(key));
         await onRoleInvitesChanged?.();
       }
-      notifications.show({ color: 'green', message: `${selectedRoleLabel} invite sent to ${getUserFullName(invitee)}.` });
+      notifications.show({ color: result?.delivery?.failed ? 'yellow' : 'green', message: result?.delivery?.failed
+        ? 'Player saved. Invitation delivery failed. Use the saved invitation to retry delivery.'
+        : `${selectedRoleLabel} invite sent to ${getUserFullName(invitee)}.` });
     } catch (error) {
       console.error('Failed to invite user:', error);
       const message = isApiRequestError(error)
@@ -493,6 +504,7 @@ export default function InvitePlayersModal({
     setInvitingPerson(true);
     try {
       const result = await teamService.createTeamMemberInvite(team.$id, {
+        eventRegistration,
         role: selectedInviteRole,
         firstName: personInvite.firstName.trim(),
         lastName: personInvite.lastName.trim(),
@@ -536,13 +548,13 @@ export default function InvitePlayersModal({
           name: fullName,
           role: selectedInviteRole,
           shareUrl: result.shareUrl,
-          emailSent: Boolean(normalizedInviteEmail),
+          emailSent: Boolean(normalizedInviteEmail) && !result.delivery?.failed,
           claimUrl: result.claimUrl,
         });
       }
       notifications.show({
-        color: 'green',
-        message: normalizedInviteEmail
+        color: result.delivery?.failed ? 'yellow' : 'green',
+        message: result.delivery?.failed ? 'Player saved. Invitation delivery failed. Use the saved invitation to retry delivery.' : normalizedInviteEmail
           ? `${selectedRoleLabel} invite emailed to ${normalizedInviteEmail}.`
           : `${selectedRoleLabel} invite saved. Copy the link to share it.`,
       });
@@ -616,10 +628,11 @@ export default function InvitePlayersModal({
       title={`Invite to ${team?.name ?? 'Team'}`}
       size="lg"
       centered
+      zIndex={eventRegistration ? 1950 : undefined}
       scrollAreaComponent={ScrollArea.Autosize}
     >
       <Stack gap="sm">
-        <SegmentedControl
+        {!eventRegistration ? <SegmentedControl
           value={selectedInviteRole}
           onChange={(value) => {
             const nextRole = value as TeamInviteRoleType;
@@ -639,7 +652,7 @@ export default function InvitePlayersModal({
             { label: 'Assistant Coach', value: 'team_assistant_coach' },
           ]}
           fullWidth
-        />
+        /> : null}
 
         <Tabs
           value={inviteMode}
@@ -654,7 +667,7 @@ export default function InvitePlayersModal({
           keepMounted={false}
         >
           <Tabs.List grow mb="sm">
-            <Tabs.Tab value="free_agents" disabled={selectedInviteRole !== 'player'}>Free Agents</Tabs.Tab>
+            {!eventRegistration ? <Tabs.Tab value="free_agents" disabled={selectedInviteRole !== 'player'}>Free Agents</Tabs.Tab> : null}
             <Tabs.Tab value="user">Invite User</Tabs.Tab>
             <Tabs.Tab value="person">New Person</Tabs.Tab>
           </Tabs.List>
@@ -726,7 +739,10 @@ export default function InvitePlayersModal({
                   <Checkbox
                     label="Is a minor"
                     checked={personInvite.isMinor}
-                    onChange={(event) => setPersonInvite((current) => ({ ...current, isMinor: event.currentTarget.checked }))}
+                    onChange={(event) => {
+                      const { checked } = event.currentTarget;
+                      setPersonInvite((current) => ({ ...current, isMinor: checked }));
+                    }}
                   />
                   {personInvite.isMinor ? (
                     <Group grow align="flex-start">
@@ -735,14 +751,20 @@ export default function InvitePlayersModal({
                         type="date"
                         required
                         value={personInvite.dateOfBirth}
-                        onChange={(event) => setPersonInvite((current) => ({ ...current, dateOfBirth: event.currentTarget.value }))}
+                        onChange={(event) => {
+                          const { value } = event.currentTarget;
+                          setPersonInvite((current) => ({ ...current, dateOfBirth: value }));
+                        }}
                       />
                       <TextInput
                         label="Guardian email"
                         type="email"
                         required
                         value={personInvite.guardianEmail}
-                        onChange={(event) => setPersonInvite((current) => ({ ...current, guardianEmail: event.currentTarget.value }))}
+                        onChange={(event) => {
+                          const { value } = event.currentTarget;
+                          setPersonInvite((current) => ({ ...current, guardianEmail: value }));
+                        }}
                       />
                     </Group>
                   ) : null}

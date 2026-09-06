@@ -1,3 +1,5 @@
+import { eventTeamCreationContextSchema } from '@/lib/contracts/eventRegistrationDraft';
+import { RegistrationDraftError, saveRegistrationDraft } from '@/server/events/eventRegistrationDrafts';
 import { acquireTeamRosterLock } from '@/server/repositories/locks';
 import { invitationRequestFingerprint, InvitationRequestError } from '@/server/teams/teamInvitationRequests';
 import { TeamInvitationRestrictionError } from '@/server/teams/teamInvitationRestrictions';
@@ -55,6 +57,7 @@ const playerRegistrationInputSchema = z.object({
 }).strict();
 
 const createSchema = z.object({
+  registrationDraft: eventTeamCreationContextSchema.optional(),
   id: z.string(),
   name: z.string().trim().min(1, 'Team name is required.'),
   division: z.string().optional(),
@@ -395,7 +398,8 @@ export async function POST(req: NextRequest) {
     try {
       await prisma.$transaction(async (tx) => {
       await acquireTeamRosterLock(tx, data.id);
-      const fingerprint = invitationRequestFingerprint(data);
+      const { registrationDraft, ...teamInput } = data;
+      const fingerprint = invitationRequestFingerprint(teamInput);
       const receipt = await tx.teamCreationRequests.findUnique({ where: { teamId: data.id } });
       if (receipt) {
         if (receipt.senderId !== session.userId || receipt.fingerprint !== fingerprint) {
@@ -446,10 +450,16 @@ export async function POST(req: NextRequest) {
         now,
       });
       await tx.teamCreationRequests.create({ data: { teamId: data.id, senderId: session.userId, fingerprint } });
+      if (registrationDraft) {
+        await saveRegistrationDraft({ accountId: session.userId, ...registrationDraft }, {
+          baseRevision: registrationDraft.baseRevision,
+          patch: { selectedTeamId: data.id, teamCreationId: data.id, step: 'players', completedSteps: ['team'] },
+        }, tx);
+      }
       });
     } catch (error) {
-      if (error instanceof InvitationRequestError || error instanceof TeamInvitationRestrictionError) {
-        return NextResponse.json({ error: error.message }, { status: error.status });
+      if (error instanceof InvitationRequestError || error instanceof TeamInvitationRestrictionError || error instanceof RegistrationDraftError) {
+        return NextResponse.json({ error: error.message, ...(error instanceof RegistrationDraftError ? { state: error.state } : {}) }, { status: error.status });
       }
       throw error;
     }
