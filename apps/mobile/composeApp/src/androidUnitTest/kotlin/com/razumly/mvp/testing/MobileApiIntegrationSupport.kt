@@ -197,6 +197,7 @@ internal class MobileApiTestSession private constructor(
             val matchRepository = MatchRepository(
                 api = api,
                 databaseService = database,
+                currentUserDataSource = currentUserDataSource,
             )
             val sportsRepository = SportsRepository(api = api)
 
