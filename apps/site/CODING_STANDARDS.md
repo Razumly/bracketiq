@@ -16,6 +16,22 @@ Do not add tests that only:
 
 A UI test should perform the relevant interaction and assert the resulting state, output, or side effect. A static page, metadata, or route-presence check belongs in browser or deployment smoke validation when it is an externally important contract. Do not preserve a unit test only to satisfy a coverage number.
 
+## Complexity standard
+
+Changed site JavaScript and TypeScript files must pass `npm run lint:changed`.
+The shared policy is in `eslint.complexity.config.mjs`:
+
+- Non-JSX JavaScript and TypeScript functions have a complexity limit of 10. A higher score is an error.
+- JSX and TSX functions have a complexity threshold of 20. A higher score is an advisory warning.
+- Control-flow nesting must not exceed four levels in any file. Deeper nesting is an error.
+
+The distinction is file-based. JSX and TSX files remain subject to the other lint rules, including React Hooks rules. Keep scheduling, payment, validation, and data-processing logic in focused non-JSX modules when it has a separate responsibility. Keep component-specific rendering and interaction logic near the UI.
+
+Review complexity warnings for unclear responsibilities or difficult state transitions. Extract cohesive logic when that improves understanding, reuse, or testability. A warning alone does not require an extraction or block a commit. Simple conditional rendering, optional values, and defaults can raise the score without making the UI hard to understand.
+
+The check analyzes each complete changed file. Resolve errors before commit. Keep files in the check; do not add rule suppressions, disable comments, or file exclusions to avoid a finding.
+
+The local command includes staged, unstaged, and untracked files. The pre-commit hook and CI use the same policy. Complexity warnings remain non-blocking in these commands.
 
 ## Failure and fallback standard
 

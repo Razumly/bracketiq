@@ -8,9 +8,17 @@
     "lint:site": "npm --prefix apps/site run lint",
     "test:site": "npm --prefix apps/site run test:ci",
     "typecheck:site": "npm --prefix apps/site exec -- tsc --noEmit",
-    "test:mobile": "./apps/mobile/gradlew -p apps/mobile testDebugUnitTest --continue --stacktrace"
+    "test:mobile": "./apps/mobile/gradlew -p apps/mobile testDebugUnitTest --continue --stacktrace",
+    "prepare": "husky"
   },
   "engines": {
     "node": ">=20.9.0"
+  },
+  "devDependencies": {
+    "husky": "^9.1.7",
+    "lint-staged": "^15.5.2"
+  },
+  "lint-staged": {
+    "apps/site/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}": "npm --prefix apps/site run lint:complexity:staged --"
   }
 }
