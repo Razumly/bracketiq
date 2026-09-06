@@ -1035,6 +1035,25 @@ describe('EventForm dirty state', () => {
       fireEvent.click(within(progress).getByRole('button', { name: 'Staff & Operations: Available' }));
       expect(await screen.findByLabelText('Staffing Priority')).toHaveValue('OFFICIAL_COVERAGE_REQUIRED');
       expect(screen.queryByRole('heading', { name: 'Official Positions' })).not.toBeInTheDocument();
+      const teamDuties = screen.getByRole('switch', { name: /Teams provide officials/i });
+      expect(teamDuties).toBeChecked();
+      fireEvent.click(teamDuties);
+      await waitFor(() => {
+        expect(getEditorDraft(formRef).staff.doTeamsOfficiate).toBe(false);
+      });
+      fireEvent.change(screen.getByLabelText('Staffing Priority'), {
+        target: { value: 'BEST_AVAILABLE_COVERAGE' },
+      });
+      await waitFor(() => {
+        expect(getEditorDraft(formRef).staff).toEqual(expect.objectContaining({
+          staffingPriority: 'BEST_AVAILABLE_COVERAGE',
+          doTeamsOfficiate: false,
+          teamOfficialsMaySwap: false,
+          officialIds: [],
+          eventOfficials: [],
+          officialPositions: [{ id: 'position_r1', name: 'R1', count: 2, order: 0 }],
+        }));
+      });
     } finally {
       confirmSpy.mockRestore();
     }
@@ -1421,6 +1440,7 @@ describe('EventForm dirty state', () => {
 
     fireEvent.click(screen.getByLabelText('Advanced Setup'));
     const cashAppInput = await screen.findByLabelText('Cash App username');
+    await waitFor(() => expect(cashAppInput).toHaveValue('$camka14'));
     fireEvent.change(cashAppInput, { target: { value: '' } });
     await waitFor(() => expect(screen.getByLabelText('Cash App username')).toHaveValue(''));
     fireEvent.change(screen.getByLabelText('Cash App username'), { target: { value: '$' } });
@@ -1511,7 +1531,14 @@ describe('EventForm dirty state', () => {
 
     await waitFor(() => {
       expect(getLegacyDraft(formRef).divisionDetails?.[0]?.price).toBe(3500);
+      expect(getEditorDraft(formRef).staff).toEqual(expect.objectContaining({
+        doTeamsOfficiate: false,
+        staffingPriority: 'FULL_COVERAGE_WITH_CONFLICTS_ALLOWED',
+      }));
     });
+    expect(screen.queryByRole('switch', { name: /Teams provide officials/i })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Staffing Priority')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Official Positions' })).not.toBeInTheDocument();
   });
 
   it('allows event payment plan totals to drive price instead of matching the existing price', async () => {
@@ -1741,7 +1768,7 @@ describe('EventForm dirty state', () => {
     expect(screen.queryByLabelText('Official scheduling mode')).not.toBeInTheDocument();
   });
 
-  it('preserves team policy and named positions when priority changes hide and restore them', async () => {
+  it('preserves team policy and named positions while priority changes', async () => {
     const onDirtyStateChange = jest.fn();
     const formRef = React.createRef<EventFormHandle>();
     renderForm(onDirtyStateChange, formRef, {
@@ -1761,7 +1788,7 @@ describe('EventForm dirty state', () => {
     });
 
     await waitForStableDirtyState(onDirtyStateChange, true);
-    expect(screen.queryByRole('heading', { name: 'Official Positions' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Official Positions' })).toBeInTheDocument();
     expect(screen.getByRole('switch', { name: /Teams provide officials/i })).toBeChecked();
     expect(getLegacyDraft(formRef)).toEqual(expect.objectContaining({
       staffingPriority: 'TEAM_COVERAGE_REQUIRED',

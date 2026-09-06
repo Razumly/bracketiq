@@ -22,6 +22,22 @@ const expectedCreateRevisions = {
 };
 
 describe('event editor draft round trips', () => {
+  it('preserves selected Resource IDs when the available Resource pool is larger', () => {
+    const draft = legacyEventToEditorDraft(eventEditorFixtures[0].event);
+    draft.resources.fieldIds = ['organization-court', 'rental-court'];
+    draft.resources.fields = [
+      { id: 'organization-court', name: 'Organization Court' },
+      { id: 'rental-court', name: 'Rental Court' },
+      { id: 'unselected-court', name: 'Unselected Court' },
+    ];
+
+    const projected = editorDraftToLegacyEvent(draft);
+    const reloaded = legacyEventToEditorDraft(projected);
+
+    expect(projected.fieldIds).toEqual(['organization-court', 'rental-court']);
+    expect(reloaded.resources.fieldIds).toEqual(draft.resources.fieldIds);
+  });
+
   it.each(eventEditorFixtures)('preserves editable values for $name', ({ event }) => {
     const initialDraft = legacyEventToEditorDraft(event);
     const persistedProjection = editorDraftToLegacyEvent(initialDraft, event.$id ?? event.id);
