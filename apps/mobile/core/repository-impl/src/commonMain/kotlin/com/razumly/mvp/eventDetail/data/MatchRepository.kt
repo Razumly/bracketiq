@@ -67,7 +67,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import com.razumly.mvp.core.data.dataTypes.MatchRosterCacheEntry
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -144,6 +146,7 @@ interface IMatchRepository : IMVPRepository {
     suspend fun checkInEventTeam(eventId: String, eventTeamId: String): Result<TeamCheckInDto>
     suspend fun getMatchTeamCheckIns(eventId: String, matchId: String): Result<TeamCheckInsResponseDto>
     suspend fun checkInMatchTeam(eventId: String, matchId: String, eventTeamId: String): Result<TeamCheckInDto>
+    fun observeMatchRosters(eventId: String, matchId: String): Flow<MatchRostersResponseDto?> = flowOf(null)
     suspend fun getMatchRosters(eventId: String, matchId: String): Result<MatchRostersResponseDto>
     suspend fun removeMatchRosterPlayer(
         eventId: String,
@@ -1384,13 +1387,32 @@ class MatchRepository(
         ).checkIn ?: error("Match check-in response missing check-in")
     }
 
+    override fun observeMatchRosters(eventId: String, matchId: String): Flow<MatchRostersResponseDto?> =
+        (currentUserDataSource?.getUserId() ?: flowOf("")).flatMapLatest { accountId ->
+            if (accountId.isBlank()) flowOf(null)
+            else databaseService.getMatchRosterDao.observe(accountId, eventId, matchId).map { entry ->
+                entry?.let { jsonMVP.decodeFromString<MatchRostersResponseDto>(it.payloadJson) }
+            }
+        }
+
     override suspend fun getMatchRosters(eventId: String, matchId: String): Result<MatchRostersResponseDto> =
         runCatching {
-            val normalizedEventId = normalizeOptionalToken(eventId)
-                ?: error("Match rosters require an event id")
-            val normalizedMatchId = normalizeOptionalToken(matchId)
-                ?: error("Match rosters require a match id")
-            api.get("api/events/$normalizedEventId/matches/$normalizedMatchId/roster")
+            val normalizedEventId = normalizeOptionalToken(eventId) ?: error("Match rosters require an event id")
+            val normalizedMatchId = normalizeOptionalToken(matchId) ?: error("Match rosters require a match id")
+            val accountId = currentUserDataSource?.getUserIdNow()?.takeIf(String::isNotBlank)
+                ?: error("Match rosters require an Account")
+            try {
+                val response = api.get<MatchRostersResponseDto>("api/events/$normalizedEventId/matches/$normalizedMatchId/roster")
+                check(currentUserDataSource.getUserIdNow() == accountId) { "Account changed during roster refresh" }
+                databaseService.getMatchRosterDao.upsert(MatchRosterCacheEntry(accountId, normalizedEventId, normalizedMatchId,
+                    jsonMVP.encodeToString(response)))
+                response
+            } catch (error: ApiException) {
+                if (error.statusCode in setOf(401, 403, 404)) {
+                    databaseService.getMatchRosterDao.delete(accountId, normalizedEventId, normalizedMatchId)
+                }
+                throw error
+            }
         }
 
     override suspend fun removeMatchRosterPlayer(
@@ -1455,10 +1477,12 @@ class MatchRepository(
             ?: error("Match roster update requires an event id")
         val normalizedMatchId = normalizeOptionalToken(matchId)
             ?: error("Match roster update requires a match id")
-        api.post<MatchRosterOperationRequestDto, MatchRosterResponseDto>(
+        val roster = api.post<MatchRosterOperationRequestDto, MatchRosterResponseDto>(
             path = "api/events/$normalizedEventId/matches/$normalizedMatchId/roster",
             body = buildOperation(),
         ).roster ?: error("Match roster response missing roster")
+        getMatchRosters(normalizedEventId, normalizedMatchId).getOrThrow()
+        roster
     }
 
     private fun requireRosterEventTeamId(eventTeamId: String): String =

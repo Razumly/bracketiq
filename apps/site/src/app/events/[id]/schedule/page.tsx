@@ -3592,9 +3592,6 @@ function EventScheduleContent() {
   const openRosterForMatch = useCallback(
     (match: Match) => {
       const managedTeam = findUserManagedMatchTeam(match);
-      if (!managedTeam) {
-        return;
-      }
       closeScoreModal();
       setRosterModalMatch(match);
       setRosterModalTeam(managedTeam);
@@ -3602,24 +3599,13 @@ function EventScheduleContent() {
     [closeScoreModal, findUserManagedMatchTeam],
   );
 
-  const canUserEditMatchRoster = useCallback(
-    (match: Match) =>
-      Boolean(
-        activeEvent?.teamSignup === true &&
-          activeEvent?.allowMatchRosterEdits === true &&
-          (isTeamCheckInOpen(match.start) ||
-            Boolean(match.actualEnd) ||
-            String(match.status ?? "").toUpperCase() === "COMPLETE" ||
-            String(match.status ?? "").toUpperCase() === "CANCELLED" ||
-            String(match.resultType ?? "").toUpperCase() === "FORFEIT") &&
-          findUserManagedMatchTeam(match),
-      ),
-    [
-      activeEvent?.allowMatchRosterEdits,
-      activeEvent?.teamSignup,
-      findUserManagedMatchTeam,
-      isTeamCheckInOpen,
-    ],
+  const canUserViewMatchRoster = useCallback(
+    (match: Match) => Boolean(activeEvent?.teamSignup && (
+      canManageEvent || findUserManagedMatchTeam(match) ||
+      (user?.$id && collectMatchAssignmentUserIds(match).includes(user.$id)) ||
+      userOnTeam(resolveTeam(match.teamOfficial ?? match.teamOfficialId))
+    )),
+    [activeEvent?.teamSignup, canManageEvent, findUserManagedMatchTeam, user?.$id, userOnTeam, resolveTeam],
   );
 
   useEffect(() => {
@@ -9695,7 +9681,7 @@ function EventScheduleContent() {
         scoreUpdateMatch={scoreUpdateMatch}
         isScoreModalOpen={isScoreModalOpen}
         canManageScore={canUserManageScore}
-        canEditRoster={canUserEditMatchRoster}
+        canEditRoster={canUserViewMatchRoster}
         onOpenRoster={openRosterForMatch}
         onScoreChange={handleScoreChange}
         onSetComplete={handleSetComplete}
@@ -9714,7 +9700,7 @@ function EventScheduleContent() {
         onMatchDelete={handleMatchDelete}
       />
       <MatchRosterModal
-        opened={Boolean(rosterModalMatch && rosterModalTeam)}
+        opened={Boolean(rosterModalMatch)}
         eventId={normalizeIdToken(activeEvent?.$id ?? eventId)}
         match={rosterModalMatch}
         team={rosterModalTeam}

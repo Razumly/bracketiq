@@ -427,8 +427,12 @@ class DefaultMatchContentComponent(
     private val _currentUserManagedMatchTeamId = MutableStateFlow<String?>(null)
     override val currentUserManagedMatchTeamId = _currentUserManagedMatchTeamId.asStateFlow()
 
-    private val _matchRosters = MutableStateFlow<MatchRostersResponseDto?>(null)
-    override val matchRosters = _matchRosters.asStateFlow()
+    override val matchRosters = combine(event, matchWithTeams) { currentEvent, currentMatch ->
+        currentEvent?.id to currentMatch.match.id
+    }.flatMapLatest { (eventId, matchId) ->
+        if (eventId.isNullOrBlank()) flowOf(null)
+        else matchRepository.observeMatchRosters(eventId, matchId)
+    }.stateIn(scope, SharingStarted.WhileSubscribed(5_000), null)
 
     private val _matchRosterLoading = MutableStateFlow(false)
     override val matchRosterLoading = _matchRosterLoading.asStateFlow()
@@ -617,9 +621,7 @@ class DefaultMatchContentComponent(
                 matchRepository.getMatchRosters(
                     eventId = currentEvent.id,
                     matchId = currentMatch.id,
-                ).onSuccess { rosters ->
-                    _matchRosters.value = rosters
-                }.onFailure { error ->
+                ).onFailure { error ->
                     _errorState.value = "Failed to load match roster: ${error.userMessage()}"
                 }
             } finally {
@@ -675,26 +677,12 @@ class DefaultMatchContentComponent(
         _matchRosterSaving.value = true
         scope.launch {
             try {
-                updateCall().onSuccess { roster ->
-                    mergeRoster(roster)
-                }.onFailure { error ->
+                updateCall().onFailure { error ->
                     _errorState.value = "Failed to update match roster: ${error.userMessage()}"
                 }
             } finally {
                 _matchRosterSaving.value = false
             }
-        }
-    }
-
-    private fun mergeRoster(roster: MatchRosterDto) {
-        val existing = _matchRosters.value
-        _matchRosters.value = if (existing == null) {
-            MatchRostersResponseDto(rosters = listOf(roster))
-        } else {
-            existing.copy(
-                rosters = existing.rosters
-                    .filterNot { it.eventTeamId == roster.eventTeamId } + roster,
-            )
         }
     }
 
@@ -1519,10 +1507,10 @@ class DefaultMatchContentComponent(
     private fun canOpenMatchRoster(): Boolean {
         val currentEvent = event.value ?: return false
         val currentMatch = matchWithTeams.value.match
-        return currentEvent.teamSignup &&
-            currentEvent.allowMatchRosterEdits &&
-            (_matchFinished.value || isTeamCheckInWindowOpen(currentMatch, currentEvent)) &&
-            !resolveCurrentUserManagedMatchTeamId().isNullOrBlank()
+        return currentEvent.teamSignup && (
+            currentEvent.hostId == currentUser.id || currentUser.id in currentEvent.assistantHostIds ||
+            _isOfficial.value || !resolveCurrentUserManagedMatchTeamId().isNullOrBlank()
+        )
     }
 
     private fun teamCheckInPromptKey(matchId: String, eventTeamId: String): String =

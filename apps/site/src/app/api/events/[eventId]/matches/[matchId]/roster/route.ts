@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/permissions';
 import { canManageEvent } from '@/server/accessControl';
+import { readOperationalMatchRosters } from '@/server/matches/operationalRosters';
 import {
   addTemporaryMatchRosterPlayer,
   getMatchRoster,
@@ -38,31 +39,29 @@ const toErrorResponse = (error: unknown) => {
   return NextResponse.json({ error: 'Failed to update match roster.' }, { status: 500 });
 };
 
-const canViewRoster = async (
-  session: { userId: string; isAdmin?: boolean },
-  event: {
-    id: string;
-    hostId: string | null;
-    assistantHostIds: string[];
-    organizationId: string | null;
-  },
-  teamIds: string[],
+const isAssignedOfficial = async (
+  userId: string,
+  eventId: string,
+  match: { officialId: string | null; officialIds: unknown; teamOfficialId: string | null },
 ) => {
-  if (await canManageEvent({ ...session, isAdmin: Boolean(session.isAdmin) }, event)) {
-    return true;
-  }
-  const [official, teamAccess] = await Promise.all([
-    prisma.eventOfficials.findFirst({
-      where: {
-        eventId: event.id,
-        userId: session.userId,
-        isActive: { not: false },
-      },
+  const assignments = Array.isArray(match.officialIds) ? match.officialIds : [];
+  const assigned = assignments.filter((entry) => entry && typeof entry === 'object' && entry.userId === userId);
+  if (assigned.some((entry) => entry.holderType === 'PLAYER')) return true;
+  if (match.officialId === userId || assigned.length) {
+    const official = await prisma.eventOfficials.findFirst({
+      where: { eventId, userId, isActive: { not: false },
+        ...(match.officialId === userId ? {} : { id: { in: assigned.map((entry) => entry.eventOfficialId).filter((id): id is string => typeof id === 'string') } }) },
       select: { id: true },
-    }),
-    Promise.all(teamIds.map((teamId) => isTeamManagerOrCoach(prisma, teamId, session.userId))),
-  ]);
-  return Boolean(official) || teamAccess.some(Boolean);
+    });
+    if (official) return true;
+  }
+  if (!match.teamOfficialId) return false;
+  if (await isTeamManagerOrCoach(prisma, match.teamOfficialId, userId)) return true;
+  return Boolean(await prisma.eventRegistrations.findFirst({
+    where: { eventId, eventTeamId: match.teamOfficialId, registrantId: userId,
+      registrantType: { in: ['SELF', 'CHILD'] }, rosterRole: 'PARTICIPANT', status: 'ACTIVE', acceptedAt: { not: null } },
+    select: { id: true },
+  }));
 };
 
 const loadRosterContext = async (eventId: string, matchId: string) => {
@@ -75,6 +74,8 @@ const loadRosterContext = async (eventId: string, matchId: string) => {
         assistantHostIds: true,
         organizationId: true,
         teamSignup: true,
+        start: true,
+        requiredTemplateIds: true,
         allowMatchRosterEdits: true,
         allowTemporaryMatchPlayers: true,
       },
@@ -86,6 +87,9 @@ const loadRosterContext = async (eventId: string, matchId: string) => {
         eventId: true,
         team1Id: true,
         team2Id: true,
+        officialId: true,
+        officialIds: true,
+        teamOfficialId: true,
         start: true,
         status: true,
         resultType: true,
@@ -107,13 +111,16 @@ export async function GET(
   const session = await requireSession(req);
   const { eventId, matchId } = await params;
   try {
-    const { event, teamIds } = await loadRosterContext(eventId, matchId);
-    if (!await canViewRoster(session, event, teamIds)) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
-    const rosters = await Promise.all(teamIds.map((eventTeamId) => (
-      getMatchRoster(prisma, { eventId, matchId, eventTeamId })
-    )));
+    const { event, match, teamIds } = await loadRosterContext(eventId, matchId);
+    const isHost = await canManageEvent(session, event);
+    const managed = await Promise.all(teamIds.map(async (id) => ({ id, allowed: await isTeamManagerOrCoach(prisma, id, session.userId) })));
+    const managedIds = new Set(managed.filter((team) => team.allowed).map((team) => team.id));
+    const isOfficial = !isHost && await isAssignedOfficial(session.userId, eventId, match);
+    const visibleIds = isHost || isOfficial ? teamIds : teamIds.filter((id) => managedIds.has(id));
+    if (!visibleIds.length) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    const rosters = (await readOperationalMatchRosters(prisma, event, matchId, visibleIds)).map((roster) => ({
+      ...roster, canEdit: isHost || managedIds.has(roster.eventTeamId),
+    }));
     return NextResponse.json({
       rosters,
       allowMatchRosterEdits: event.allowMatchRosterEdits === true,

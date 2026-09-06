@@ -96,6 +96,7 @@ const normalizeIdList = (values: unknown): string[] => {
 };
 type ImportedTeamMemberFields = {
   playerIds: readonly string[] | null;
+  pending?: readonly string[] | null;
   captainId: string | null;
   managerId: string | null;
   headCoachId: string | null;
@@ -105,6 +106,7 @@ type ImportedTeamMemberFields = {
 
 const teamMemberIds = (team: ImportedTeamMemberFields): string[] => normalizeIdList([
   ...(team.playerIds ?? []),
+  ...(team.pending ?? []),
   team.captainId,
   team.managerId,
   team.headCoachId,
@@ -278,12 +280,26 @@ const validateEventParticipation = async (params: {
       parentTeamId: true,
       kind: true,
       playerIds: true,
+      pending: true,
       captainId: true,
       managerId: true,
       headCoachId: true,
       coachIds: true,
     },
   }) as ImportEventTeam[];
+  const hasRosterParticipation = eventTeams.some((team) => {
+    const teamRegistration = latestRegistration(registrations.filter((registration) => (
+      registration.registrantType === 'TEAM'
+      && (normalizeId(registration.eventTeamId) ?? registration.registrantId) === team.id
+    )));
+    const isRegisteredTeam = teamRegistration && eligibleStatusSet.has(String(teamRegistration.status ?? '').trim().toUpperCase());
+    const isRosterPlayer = [...(team.playerIds ?? []), ...(team.pending ?? [])].includes(params.subjectUserId);
+    if (!isRegisteredTeam || !isRosterPlayer) return false;
+    const latestPerson = latestRegistration(personRegistrations.filter((registration) => registration.eventTeamId === team.id));
+    // Existing individual participation retains its membership validation below.
+    return !latestPerson;
+  });
+  if (hasRosterParticipation) return { eventId: params.eventId };
   const canonicalTeamIdsByEventTeamId = new Map<string, Set<string>>();
   eventTeams.forEach((team) => {
     const eventTeamId = normalizeId(team.id);
@@ -674,6 +690,7 @@ export async function POST(
         select: {
           id: true,
           playerIds: true,
+          pending: true,
           captainId: true,
           managerId: true,
           headCoachId: true,

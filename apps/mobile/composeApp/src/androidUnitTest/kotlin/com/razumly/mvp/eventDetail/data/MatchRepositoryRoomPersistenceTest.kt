@@ -2,6 +2,14 @@
 
 package com.razumly.mvp.eventDetail.data
 
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.emptyPreferences
+import com.razumly.mvp.core.data.CurrentUserDataSource
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlin.test.assertNull
 import android.content.Context
 import androidx.room.Room
 import androidx.room.RoomDatabase
@@ -131,6 +139,39 @@ class MatchRepositoryRoomPersistenceTest {
         }
     }
 
+    @Test
+    fun given_private_roster_when_refreshed_and_reopened_then_room_preserves_readiness_and_account_scope() = runTest {
+        val accounts = CurrentUserDataSource(RosterPreferences())
+        accounts.saveUserId("official")
+        var forbidden = false
+        val http = HttpClient(MockEngine {
+            respond(
+                content = if (forbidden) """{"error":"Forbidden"}""" else """{"rosters":[{"eventTeamId":"team","canEdit":false,"teamName":"River Crew","entries":[{"userId":"managed","firstName":"Alex","documentReadiness":{"documents":{"signedCount":0,"requiredCount":1},"requiredDocuments":[{"templateId":"version","title":"Waiver","signerContext":"participant","status":"UNSIGNED"}]}}]}]}""",
+                status = if (forbidden) HttpStatusCode.Forbidden else HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }) { configureMvpHttpClient() }
+        val api = MvpApiClient(http, "http://example.test", MatchRepositoryRoomPersistence_EmptyAuthTokenStore)
+        val first = openDatabase()
+        try {
+            val repository = MatchRepository(api, first, currentUserDataSource = accounts, autoSyncOperations = false)
+            val response = repository.getMatchRosters("event", "match").getOrThrow()
+            assertEquals(response, repository.observeMatchRosters("event", "match").first())
+            assertEquals(0, response.rosters.single().entries.single().documentReadiness?.documents?.signedCount)
+        } finally { first.close() }
+        val reopened = openDatabase()
+        try {
+            val repository = MatchRepository(api, reopened, currentUserDataSource = accounts, autoSyncOperations = false)
+            assertEquals("managed", repository.observeMatchRosters("event", "match").first()?.rosters?.single()?.entries?.single()?.userId)
+            accounts.saveUserId("member")
+            assertNull(repository.observeMatchRosters("event", "match").first())
+            accounts.saveUserId("official")
+            forbidden = true
+            assertTrue(repository.getMatchRosters("event", "match").isFailure)
+            assertNull(repository.observeMatchRosters("event", "match").first())
+        } finally { reopened.close(); http.close() }
+    }
+
     private fun openDatabase(): MVPDatabaseService =
         Room.databaseBuilder<MVPDatabaseService>(context, databaseName)
             .setJournalMode(RoomDatabase.JournalMode.TRUNCATE)
@@ -167,4 +208,11 @@ class MatchRepositoryRoomPersistenceTest {
         ),
         teamOfficialId = "placeholder-team-duty",
     )
+}
+
+private class RosterPreferences : DataStore<Preferences> {
+    private val state = MutableStateFlow<Preferences>(emptyPreferences())
+    override val data: Flow<Preferences> = state
+    override suspend fun updateData(transform: suspend (Preferences) -> Preferences): Preferences =
+        transform(state.value).also { state.value = it }
 }
