@@ -506,6 +506,7 @@ it("hydrates template source values and resources in create snapshots", async ()
   expect(snapshot.immutable.template).toBe(true);
   expect(snapshot.draft.basics.name).toBe("Template event");
   expect(snapshot.draft.resources.sourceTemplateId).toBe("template_1");
+  expect(snapshot.draft.basics.state).toBe("UNPUBLISHED");
   expect(snapshot.draft.resources.requiredTemplateIds).toEqual([]);
   expect(snapshot.draft.resources.fields).toEqual([
     expect.objectContaining({ name: "Court 1" }),

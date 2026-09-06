@@ -231,7 +231,7 @@ describe('dedicated event templates', () => {
     expect(seeded.$id).toBe('event_new');
     expect(seeded.staffingPriority).toBe('FULL_COVERAGE_REQUIRED');
     expect(seeded).not.toHaveProperty('officialSchedulingMode');
-    expect(seeded.state).toBe('DRAFT');
+    expect(seeded.state).toBe('UNPUBLISHED');
     expect(seeded.hostId).toBe('host_2');
     expect(seeded.start).toBe('2026-02-02T10:00:00');
     expect(seeded.end).toBe('2026-02-02T14:00:00');

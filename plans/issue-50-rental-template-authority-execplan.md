@@ -16,7 +16,7 @@ Use issue #50 and its parent #14. Blockers #24, #26, and #47 are closed. Read ro
 - [x] (2026-09-05) Identify blanket collection locks and mobile removal of attached rental resources.
 - [x] (2026-09-05) Add failing command-boundary tests and implement source authority checks. The first 65 focused site tests pass.
 - [x] (2026-09-05) Preserve booked selections in mobile and expose editable additions in shared controls. Focused coordinator tests pass after a 15-minute Android build.
-- [ ] Verify API compatibility, Room preservation, template defaults, and real database reservation races.
+- [x] (2026-09-06) Verify API compatibility, Room preservation, template defaults, and real database reservation races against the isolated issue database. All live checks pass.
 - [x] (2026-09-05) Run the focused Android create, edit, rental selection, and shared control tests: 128 passed, no failures or skips. Fix review findings for complete Resource collections, booked field defaults, and template proposal source identity.
 - [x] (2026-09-05) Pass the latest site type check. Pass 128 focused site control and repository tests. Complete the Spec follow-up for current Division assignments on attached and unsaved rental selections. The Standards review reports no remaining breach.
 - [x] (2026-09-05) Pass 100 schedule-page tests and 41 Event search tests. Pass all three split-division route tests after fixing proposal validation and test fixtures.
@@ -26,6 +26,9 @@ Use issue #50 and its parent #14. Blockers #24, #26, and #47 are closed. Read ro
 - [x] (2026-09-05) Pass Android lint with 68 warnings and no errors. The combined run took 16 minutes and failed only on the mapper test import that was then fixed.
 - [x] (2026-09-05) Pass all 149 repository Android tests after updating the shared contract fixtures. Five tests require live or environment-specific fixtures and were skipped. The live #50 test compiled but did not run.
 - [x] (2026-09-05) Complete local checks and both final review follow-ups. Prepare the implementation commit. Keep #50 open until live acceptance checks pass.
+- [x] (2026-09-06) Recover local test access after Docker Desktop became available. Apply all 224 migrations to bracketiq_e2e_50_samue. Confirm no pending migrations. Pass three real database concurrency tests and the actual mobile API and Room test with no skips.
+- [x] (2026-09-06) Fix the template seed state exposed by live creation. Pass all 38 template and snapshot tests. Pass live template current-value, create replay, and complete booking-row equality checks. Both final reviews have no findings.
+- [x] (2026-09-06) Pass the final TypeScript check, targeted lint, and diff check after the live-test fixes.
 
 ## Context and Orientation
 
@@ -73,7 +76,11 @@ The Event Editor contract now uses version 5. Its parser accepts versions 3 and 
 
 The server compared entire `fields` and `timeSlots` arrays for rental immutability. Mobile selected every item that shared a booking ID. Both behaviors conflict with #50. Booking `organizationId` identifies the facility; `renterOrganizationId` identifies the destination. Template bootstrap also confused an Event Template ID with document requirements. Version 5 separates these values.
 
-Docker Desktop failed during the approved start. It could not remove `AppData/Local/Docker/run/userAnalyticsOtlpHttp.sock`. A separate approval request is pending to close Docker Desktop, remove only that stale socket, and start Docker Desktop again. No container or volume deletion is proposed.
+Docker Desktop failed during the approved start. It could not remove `AppData/Local/Docker/run/userAnalyticsOtlpHttp.sock`. Recovery required separate approval. The automatic review then blocked socket deletion. No container or volume was deleted.
+
+On 2026-09-06 Docker Desktop and the existing Postgres container became available. The user authorized continued verification. The approved local site runs on port 3108 with outbound providers disabled. The fixture seed initially failed because its document version did not exist. Add the real Document Requirement and Document Template Version inside the fixture transaction.
+
+Live template creation exposed an invalid Event state. buildSeedEventFromTemplate returned DRAFT, but EventsStateEnum accepts UNPUBLISHED for this workflow. Two regression assertions failed before the source changed to UNPUBLISHED. All 38 focused tests and the live create check then passed.
 
 ## Artifacts and Notes
 
@@ -97,10 +104,14 @@ The full repository Android run found six stale version 4 expectations in shared
 
 The implementation preserves booked rows and permits separate organizer additions. Template defaults remain editable. Site and mobile use contract version 5 and retain parsers for versions 3 and 4. The relevant site tests, type checks, lint, and Android unit tests pass. Both final reviews have no findings.
 
-Live acceptance is incomplete. Docker Desktop failed during its approved start. The separate recovery approval remains pending. The client-to-site Room test, booking-row comparison, and real database reservation races still require the isolated local database and site. Keep #50 open. The full site suite has confirmed Windows platform failures. No full-suite coverage pass or native iOS execution is claimed.
+Live acceptance is complete. The actual mobile client saved organizer additions, reloaded protected booking values, received typed errors for invalid changes, and retained unchanged offline Room data. The live template API preserved organizer values and replayed one create operation to the same Event. Complete booking and item records match the baseline after Event editing. Real Postgres tests proved concurrent disjoint and adjacent requests, one overlapping winner, idempotent retry, and complete rollback for conflicting multi-window replacement. The implementation commit is 3caec25d5. The final fixture and template-state fix is a follow-up commit.
+
+The full site suite has confirmed Windows platform failures. No full-suite coverage pass or native iOS execution is claimed. Shared Compose code implements the iOS controls; Android supplies the executed shared-control evidence.
 
 Plan created on 2026-09-05 to record the accepted authority rules and verification boundaries.
 
 Plan updated on 2026-09-05 to record source identity, contract version 5, focused test evidence, and the Docker startup failure.
 
 Plan updated on 2026-09-05 to record all local checks, parity fixture updates, final reviews, and the remaining live acceptance gate.
+
+Plan updated on 2026-09-06 to record completed live acceptance and the template-state regression fix.

@@ -35,6 +35,13 @@ async function main() {
         originType: 'FIRST_PARTY', ownershipStatus: 'CLAIMED', claimVerificationLevel: 'MANUAL_REVIEW', ownershipVerifiedAt: new Date(),
       } });
     }
+    await tx.documentRequirements.create({ data: {
+      id: `${run}-requirement`, organizationId: facilityOrganizationId, title: 'Template waiver', createdBy: userId,
+    } });
+    await tx.templateDocuments.create({ data: {
+      id: `${run}-document-default`, documentRequirementId: `${run}-requirement`, versionSequence: 1,
+      organizationId: facilityOrganizationId, title: 'Template waiver', roleIndexes: [], signerRoles: [],
+    } });
     await tx.eventTemplates.create({ data: {
       id: templateId, name: 'Template default name', description: 'Template default description',
       createdByUserId: userId, ownerUserId: userId, organizationId: facilityOrganizationId,

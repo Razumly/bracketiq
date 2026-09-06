@@ -647,7 +647,7 @@ export const buildSeedEventFromTemplate = (
     imageId: template.imageId ?? '',
     hostId: params.hostId,
     noFixedEndDateTime: template.noFixedEndDateTime !== false,
-    state: 'DRAFT',
+    state: 'UNPUBLISHED',
     maxParticipants: template.maxParticipants ?? 0,
     teamSizeLimit: template.teamSizeLimit ?? 1,
     restTimeMinutes: template.restTimeMinutes ?? undefined,
