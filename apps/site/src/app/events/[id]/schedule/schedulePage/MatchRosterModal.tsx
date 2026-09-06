@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Badge,
   Button,
@@ -8,37 +8,13 @@ import {
   Modal,
   Paper,
   Stack,
+  Select,
   Text,
   TextInput,
 } from '@mantine/core';
 
-import { apiRequest } from '@/lib/apiClient';
+import { matchRosterService, type MatchRosterEntry, type MatchRosterResponse } from '@/lib/matchRosterService';
 import type { Match, Team } from '@/types';
-
-type MatchRosterEntry = {
-  id: string | null;
-  source: 'BASE' | 'TEMPORARY' | string;
-  status: 'ACTIVE' | 'REMOVED' | string;
-  userId: string | null;
-  firstName: string | null;
-  lastName: string | null;
-  userName: string | null;
-  email: string | null;
-  noAccount?: boolean;
-};
-
-type MatchRosterResponse = {
-  rosters?: Array<{
-    eventTeamId: string;
-    entries: MatchRosterEntry[];
-  }>;
-  roster?: {
-    eventTeamId: string;
-    entries: MatchRosterEntry[];
-  };
-  allowMatchRosterEdits?: boolean;
-  allowTemporaryMatchPlayers?: boolean;
-};
 
 type MatchRosterModalProps = {
   opened: boolean;
@@ -69,7 +45,12 @@ export default function MatchRosterModal({
   team,
   onClose,
 }: MatchRosterModalProps) {
-  const [entries, setEntries] = useState<MatchRosterEntry[]>([]);
+  const [rosters, setRosters] = useState<NonNullable<MatchRosterResponse['rosters']>>([]);
+  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
+  const roster = rosters.find((row) => row.eventTeamId === selectedTeamId) ?? rosters[0];
+  const entries = roster?.entries ?? [];
+  const [allowEdits, setCanEdit] = useState(false);
+  const [allowAdds, setCanAdd] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -77,7 +58,9 @@ export default function MatchRosterModal({
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [linkEmailByEntryId, setLinkEmailByEntryId] = useState<Record<string, string>>({});
-  const eventTeamId = team?.$id ?? null;
+  const eventTeamId = roster?.eventTeamId ?? team?.$id ?? null;
+  const canEdit = roster?.canEdit === true && allowEdits;
+  const canAdd = roster?.canEdit === true && allowAdds;
   const completed = isCompletedMatch(match);
 
   const endpoint = useMemo(() => {
@@ -85,57 +68,66 @@ export default function MatchRosterModal({
     return `/api/events/${encodeURIComponent(eventId)}/matches/${encodeURIComponent(match.$id)}/roster`;
   }, [eventId, match?.$id]);
 
+  const requestVersion = useRef(0);
+  const viewVersion = useRef(0);
   const loadRoster = async () => {
-    if (!endpoint || !eventTeamId) return;
+    if (!endpoint) return;
+    const request = ++requestVersion.current;
     setLoading(true);
     setError(null);
     try {
-      const response = await apiRequest<MatchRosterResponse>(endpoint);
-      const roster = response.roster ?? response.rosters?.find((row) => row.eventTeamId === eventTeamId);
-      setEntries(roster?.entries ?? []);
+      const response = await matchRosterService.getRosters(endpoint);
+      if (request !== requestVersion.current) return;
+      setRosters(response.rosters ?? []);
+      setCanEdit(response.allowMatchRosterEdits === true);
+      setCanAdd(response.allowTemporaryMatchPlayers === true);
     } catch (err) {
+      if (request !== requestVersion.current) return;
+      setRosters([]);
+      setCanEdit(false);
+      setCanAdd(false);
       console.error('Failed to load match roster', err);
       setError('Failed to load match roster.');
     } finally {
-      setLoading(false);
+      if (request === requestVersion.current) setLoading(false);
     }
   };
 
   useEffect(() => {
-    if (opened) {
-      void loadRoster();
-    } else {
-      setEntries([]);
-      setError(null);
-      setFirstName('');
-      setLastName('');
-      setEmail('');
-      setLinkEmailByEntryId({});
-    }
-  }, [opened, endpoint, eventTeamId]);
+    viewVersion.current += 1;
+    setSaving(false);
+    setRosters([]);
+    setSelectedTeamId(team?.$id ?? null);
+    setCanEdit(false);
+    setCanAdd(false);
+    setError(null);
+    setFirstName('');
+    setLastName('');
+    setEmail('');
+    setLinkEmailByEntryId({});
+    if (opened) void loadRoster();
+    return () => { requestVersion.current += 1; viewVersion.current += 1; };
+  }, [opened, endpoint]);
 
   const submitOperation = async (body: Record<string, unknown>) => {
     if (!endpoint || !eventTeamId) return;
+    const view = viewVersion.current;
     setSaving(true);
     setError(null);
     try {
-      const response = await apiRequest<MatchRosterResponse>(endpoint, {
-        method: 'POST',
-        body: {
-          eventTeamId,
-          ...body,
-        },
-      });
-      setEntries(response.roster?.entries ?? entries);
+      await matchRosterService.updateRoster(endpoint, { eventTeamId, ...body });
+      if (view === viewVersion.current) await loadRoster();
     } catch (err) {
+      if (view !== viewVersion.current) return;
       console.error('Failed to update match roster', err);
       setError(err instanceof Error ? err.message : 'Failed to update match roster.');
     } finally {
-      setSaving(false);
+      if (view === viewVersion.current) setSaving(false);
     }
   };
 
   const addTemporaryPlayer = async () => {
+    const view = viewVersion.current;
     await submitOperation({
       addPlayer: {
         firstName,
@@ -143,6 +135,7 @@ export default function MatchRosterModal({
         email: email.trim() || undefined,
       },
     });
+    if (view !== viewVersion.current) return;
     setFirstName('');
     setLastName('');
     setEmail('');
@@ -163,11 +156,14 @@ export default function MatchRosterModal({
     <Modal
       opened={opened}
       onClose={onClose}
-      title={team?.name ? `${team.name} match roster` : 'Match roster'}
+      title="Match roster"
       centered
       size="lg"
     >
       <Stack gap="md">
+        {rosters.length > 1 && <Select label="Team" value={roster?.eventTeamId ?? null}
+          data={rosters.map((row) => ({ value: row.eventTeamId, label: row.teamName ?? 'Team name unavailable' }))}
+          onChange={(id) => { setSelectedTeamId(id); }} />}
         {error && <Text c="red" size="sm">{error}</Text>}
         <Stack gap="xs">
           {loading ? (
@@ -183,10 +179,10 @@ export default function MatchRosterModal({
                     <Group gap="xs" style={{ minWidth: 0 }}>
                       <Text fw={600} style={{ minWidth: 0 }}>{entryName(entry)}</Text>
                       {temporary && <Badge variant="light">Temporary</Badge>}
-                      {entry.noAccount && <Badge color="yellow" variant="light">No account</Badge>}
+
                       {removed && <Badge color="red" variant="light">Removed</Badge>}
                     </Group>
-                    {!completed && !temporary && entry.userId && (
+                    {canEdit && !completed && !temporary && entry.userId && (
                       <Button
                         size="xs"
                         variant={removed ? 'light' : 'subtle'}
@@ -200,7 +196,15 @@ export default function MatchRosterModal({
                       </Button>
                     )}
                   </Group>
-                  {temporary && !entry.userId && entry.id && (
+                  {entry.documentReadiness ? (
+                    <Stack gap={2}>
+                      <Text size="sm">Signatures: {entry.documentReadiness.documents.signedCount}/{entry.documentReadiness.documents.requiredCount}</Text>
+                      {entry.documentReadiness.requiredDocuments.filter((document) => document.status !== 'SIGNED').map((document) => (
+                        <Text key={document.key} size="sm" c="orange">Missing: {document.title} ({document.signerLabel})</Text>
+                      ))}
+                    </Stack>
+                  ) : <Text size="sm" c="dimmed">Document readiness unavailable</Text>}
+                  {canAdd && !completed && temporary && !entry.userId && entry.id && (
                     <Group align="flex-end" gap="xs">
                       <TextInput
                         label="Link email"
@@ -224,7 +228,7 @@ export default function MatchRosterModal({
             <Text size="sm" c="dimmed">No roster entries found.</Text>
           )}
         </Stack>
-        {!completed && (
+        {canAdd && !completed && (
           <Paper withBorder p="sm" radius="sm">
             <Stack gap="xs">
               <Text fw={700} size="sm">Add temporary player</Text>

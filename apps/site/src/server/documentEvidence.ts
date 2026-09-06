@@ -273,6 +273,7 @@ export type CompletedDocumentSatisfaction = {
   scopeId: string;
   sourceEvidenceId: string;
   signedAt: string | null;
+  completedSignerRoles: string[];
   updatedAt: Date | null;
 };
 
@@ -308,6 +309,7 @@ export const findCompletedDocumentSatisfactions = async (params: {
             templateDocumentId: { in: templateIds },
             status: 'SATISFIED',
             isComplete: true,
+            invalidatedAt: null,
             OR: scopeChunk.map((scope) => ({
               scopeType: scope.scopeType,
               scopeId: scope.scopeId,
@@ -319,6 +321,7 @@ export const findCompletedDocumentSatisfactions = async (params: {
             scopeType: true,
             scopeId: true,
             sourceEvidenceId: true,
+            completedSignerRoles: true,
             updatedAt: true,
           },
         }));
@@ -335,13 +338,13 @@ export const findCompletedDocumentSatisfactions = async (params: {
     sourceEvidenceIds,
     (ids) => evidenceDelegate.findMany({
       where: { id: { in: ids } },
-      select: { id: true, signedAt: true },
+      select: { id: true, signedAt: true, status: true },
     }),
   );
   const signedAtByEvidenceId = new Map(
-    evidenceRows.map((row) => [row.id, row.signedAt] as const),
+    evidenceRows.filter((row) => isActiveEvidenceStatus(row.status)).map((row) => [row.id, row.signedAt] as const),
   );
-  return rows.map((row) => ({
+  return rows.filter((row) => signedAtByEvidenceId.has(row.sourceEvidenceId)).map((row) => ({
     ...row,
     signedAt: signedAtByEvidenceId.get(row.sourceEvidenceId) ?? null,
   }));

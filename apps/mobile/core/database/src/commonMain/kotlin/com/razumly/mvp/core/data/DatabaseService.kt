@@ -22,9 +22,12 @@ import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchOperationOutboxEntry
 
 interface DatabaseService {
+    val getMatchRosterDao: com.razumly.mvp.core.data.dataTypes.daos.MatchRosterDao
+        get() = error("MatchRosterDao is not configured.")
     val getEventSignupDao: com.razumly.mvp.core.data.dataTypes.daos.EventSignupDao
         get() = error("EventSignupDao is not configured.")
     suspend fun clearEventSignupCache() {}
+    suspend fun clearMatchRosterCache() {}
     val getFamilyCacheDao: com.razumly.mvp.core.data.dataTypes.daos.FamilyCacheDao
         get() = error("FamilyCacheDao is not configured.")
     suspend fun <R> withTransaction(block: suspend () -> R): R = block()
