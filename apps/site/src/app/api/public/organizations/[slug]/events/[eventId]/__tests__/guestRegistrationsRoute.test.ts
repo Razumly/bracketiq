@@ -420,8 +420,10 @@ describe('public guest event registration route', () => {
         isComplete: true,
         requiredSignerRoles: ['participant'],
         completedSignerRoles: ['participant'],
+        sourceEvidenceId: 'participant_evidence',
       },
     ]);
+    txMock.signedDocuments.findMany.mockResolvedValueOnce([{ id: 'participant_evidence', status: 'SIGNED' }]);
     upsertEventRegistrationMock.mockResolvedValueOnce({
       id: 'registration_1',
       eventId: 'event_1',

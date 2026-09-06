@@ -164,6 +164,7 @@ describe('GET /api/profile/documents', () => {
         scopeId: 'event_1',
         status: 'SATISFIED',
         isComplete: true,
+        sourceEvidenceId: 'signed_1',
       },
     ]);
     prismaMock.signedDocuments.findMany.mockResolvedValue([
