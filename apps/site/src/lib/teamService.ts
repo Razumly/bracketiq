@@ -1,3 +1,4 @@
+import type { EventTeamCreationContext, EventRegistrationScope } from './contracts/eventRegistrationDraft';
 import { ApiRequestError, apiRequest } from '@/lib/apiClient';
 import { createId } from '@/lib/id';
 import { Bill, Invite, Team, UserData, getTeamAvatarUrl } from '@/types';
@@ -35,6 +36,7 @@ export type TeamInviteFreeAgentContext = {
     freeAgentEventTeamIdsByUserId: Record<string, string[]>;
 };
 export type CreateTeamMemberInviteInput = {
+    eventRegistration?: EventRegistrationScope;
     role?: TeamInviteRoleType;
     userId?: string;
     firstName?: string;
@@ -215,6 +217,8 @@ class TeamService {
         maxPlayers: number = 6,
         profileImageId?: string,
           options?: {
+              teamId?: string;
+              registrationDraft?: EventTeamCreationContext;
               divisionTypeId?: string | null;
               addSelfAsPlayer?: boolean;
               organizationId?: string;
@@ -262,9 +266,9 @@ class TeamService {
               };
 
             const identity = JSON.stringify(['create-team', teamData]);
-            const { key, storageKey } = await this.reserveRequestKey(identity);
+            const { key, storageKey } = await this.reserveRequestKey(identity, options?.teamId);
             const response = await apiRequest<any>('/api/teams', {
-                method: 'POST', body: { ...teamData, id: key },
+                method: 'POST', body: { ...teamData, id: key, registrationDraft: options?.registrationDraft },
             });
             const team = this.mapRowToTeam(response);
             this.completeRequestKey(identity, storageKey);

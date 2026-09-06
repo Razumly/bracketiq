@@ -1,4 +1,7 @@
 import { replayInvitationRequest, recordInvitationRequest, InvitationRequestError } from '@/server/teams/teamInvitationRequests';
+import { eventRegistrationScopeSchema } from '@/lib/contracts/eventRegistrationDraft';
+import { prepareEventPlayer } from '@/server/events/eventRegistrationPreparation';
+import { RegistrationDraftError } from '@/server/events/eventRegistrationDrafts';
 import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
@@ -48,6 +51,7 @@ type InviteDeliveryRecord = {
 type InviteRole = 'player' | 'team_manager' | 'team_head_coach' | 'team_assistant_coach';
 
 const memberInviteSchema = z.object({
+  eventRegistration: eventRegistrationScopeSchema.optional(),
   userId: z.string().optional(),
   email: z.string().optional(),
   role: z.enum(['player', 'team_manager', 'team_head_coach', 'team_assistant_coach']).default('player'),
@@ -641,10 +645,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         await updateStaffInviteAssignment(tx, parsed.data.role, canonicalTeamId, userId, session.userId, now);
       }
 
-      return {
-        invite,
-        team: await loadCanonicalTeamById(canonicalTeamId, tx),
-      };
+      if (parsed.data.eventRegistration) {
+        if (parsed.data.role !== 'player') throw new RegistrationDraftError('Event preparation adds Players only.', 400);
+        await prepareEventPlayer(tx, parsed.data.eventRegistration, invite, now);
+      }
+      return { invite, team: await loadCanonicalTeamById(canonicalTeamId, tx) };
     });
 
     const baseUrl = getRequestOrigin(req);
@@ -689,7 +694,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       },
     }, { status: 201 });
   } catch (error) {
-    if (error instanceof InvitationRequestError) return NextResponse.json({ error: error.message }, { status: error.status });
+    if (error instanceof InvitationRequestError || error instanceof RegistrationDraftError) return NextResponse.json({ error: error.message }, { status: error.status });
     if (error instanceof TeamInvitationRestrictionError) return NextResponse.json({ error: error.message }, { status: error.status });
     const message = error instanceof Error ? error.message : 'Failed to create member invite';
     const status = message === 'Forbidden'

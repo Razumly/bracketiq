@@ -315,6 +315,15 @@ class EventDetailPresentationHostsTest {
         )
     }
 
+    @Test
+    fun givenSavedRegistration_whenResolvingStickyAction_thenOffersContinueRegistration() {
+        assertEquals("Continue registration", stickyAction(hasSavedRegistration = true).label)
+        assertEquals(EventDetailStickyPrimaryIntent.OPEN_JOIN_OPTIONS, stickyAction(hasSavedRegistration = true).intent)
+        assertEquals("Archived", stickyAction(hasSavedRegistration = true, isArchivedEvent = true).label)
+        assertEquals(EventDetailStickyPrimaryIntent.OPEN_JOIN_OPTIONS,
+            stickyAction(hasSavedRegistration = true, shouldShowViewSchedulePrimaryAction = true).intent)
+    }
+
     private fun stickyAction(
         isAffiliateEvent: Boolean = false,
         isRegistrationPaymentPending: Boolean = false,
@@ -324,6 +333,7 @@ class EventDetailPresentationHostsTest {
         shouldShowViewSchedulePrimaryAction: Boolean = false,
         isUserInEvent: Boolean = false,
         isArchivedEvent: Boolean = false,
+        hasSavedRegistration: Boolean = false,
     ): EventDetailStickyPrimaryAction = resolveEventDetailStickyPrimaryAction(
         isAffiliateEvent = isAffiliateEvent,
         isRegistrationPaymentPending = isRegistrationPaymentPending,
@@ -333,6 +343,7 @@ class EventDetailPresentationHostsTest {
         shouldShowViewSchedulePrimaryAction = shouldShowViewSchedulePrimaryAction,
         isUserInEvent = isUserInEvent,
         isArchivedEvent = isArchivedEvent,
+        hasSavedRegistration = hasSavedRegistration,
     )
 }
 

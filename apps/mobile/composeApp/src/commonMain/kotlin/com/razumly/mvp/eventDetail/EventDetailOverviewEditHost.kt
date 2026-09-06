@@ -223,6 +223,7 @@ internal data class EventDetailOverviewStickyActionState(
     val directionsEnabled: Boolean,
     val selectedWeeklyOccurrenceLabel: String?,
     val isArchivedEvent: Boolean = false,
+    val hasSavedRegistration: Boolean = false,
 )
 
 internal data class EventDetailOverviewStickyActionActions(
@@ -257,12 +258,14 @@ internal fun resolveEventDetailStickyPrimaryAction(
     shouldShowViewSchedulePrimaryAction: Boolean,
     isUserInEvent: Boolean,
     isArchivedEvent: Boolean = false,
+    hasSavedRegistration: Boolean = false,
 ): EventDetailStickyPrimaryAction {
     val label = when {
         isArchivedEvent -> "Archived"
         isAffiliateEvent -> "Register on website"
         isRegistrationPaymentPending -> "Payment pending"
         isRegistrationPaymentFailed && !joinBlockedByStart -> "Complete payment"
+        hasSavedRegistration && !isUserInEvent && !joinBlockedByStart -> "Continue registration"
         isWeeklyParentEvent && !joinBlockedByStart -> "Join Event"
         shouldShowViewSchedulePrimaryAction -> "View Schedule and Participants"
         !isUserInEvent && !joinBlockedByStart -> "Join options"
@@ -292,6 +295,7 @@ internal fun resolveEventDetailStickyPrimaryAction(
             EventDetailStickyPrimaryIntent.OPEN_JOIN_OPTIONS
         isWeeklyParentEvent && !joinBlockedByStart ->
             EventDetailStickyPrimaryIntent.OPEN_JOIN_OPTIONS
+        hasSavedRegistration && !isUserInEvent && !joinBlockedByStart -> EventDetailStickyPrimaryIntent.OPEN_JOIN_OPTIONS
         shouldShowViewSchedulePrimaryAction -> EventDetailStickyPrimaryIntent.VIEW_EVENT
         !isUserInEvent && !joinBlockedByStart -> EventDetailStickyPrimaryIntent.OPEN_JOIN_OPTIONS
         else -> EventDetailStickyPrimaryIntent.NONE
@@ -884,6 +888,7 @@ internal fun BoxScope.EventDetailOverviewStickyActionHost(
         shouldShowViewSchedulePrimaryAction = state.shouldShowViewSchedulePrimaryAction,
         isUserInEvent = state.isUserInEvent,
         isArchivedEvent = state.isArchivedEvent,
+        hasSavedRegistration = state.hasSavedRegistration,
     )
     StickyActionBar(
         primaryLabel = primaryAction.label,

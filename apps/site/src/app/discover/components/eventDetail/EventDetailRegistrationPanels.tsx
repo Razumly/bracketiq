@@ -33,6 +33,9 @@ type EventDetailRegistrationPanelsProps = {
     joiningChildFreeAgent: boolean;
     joinFinalizationController: ReturnType<typeof useEventJoinFinalizationController>;
     onManageTeams: () => void;
+    onAddPlayers?: () => void;
+    hasDraft?: boolean;
+    onResumePreparation?: () => void;
     onSelectedChildChange: (childId: string) => void;
     onSelectedTeamChange: (teamId: string) => void;
     onViewBracket: () => void;
@@ -89,6 +92,9 @@ export const EventDetailRegistrationPanels = ({
     joiningChildFreeAgent,
     joinFinalizationController,
     onManageTeams,
+    onAddPlayers,
+    hasDraft,
+    onResumePreparation,
     onSelectedChildChange,
     onSelectedTeamChange,
     onViewBracket,
@@ -188,7 +194,7 @@ export const EventDetailRegistrationPanels = ({
             <EventTeamRegistrationPanel
                 eventHasStarted={divisionModel.eventHasStarted}
                 selectedWeeklySession={Boolean(weeklyModel.isWeeklyParentEvent && weeklyModel.selectedWeeklyOccurrenceOption)}
-                showTeamJoinOptions={presentationController.teamJoinOptionsOpened}
+                showTeamJoinOptions={true}
                 isLoadingTeams={isLoadingTeams}
                 userTeams={userTeams}
                 selectedTeamId={selectedTeamId}
@@ -220,8 +226,10 @@ export const EventDetailRegistrationPanels = ({
                 onToggleTeamOptions={presentationController.toggleTeamJoinOptions}
                 onSelectedTeamChange={onSelectedTeamChange}
                 onManageTeams={onManageTeams}
+                onAddPlayers={onAddPlayers}
+                hasDraft={hasDraft}
                 onJoinTeamWaitlist={() => { void joinActions.handleJoinTeamWaitlist(); }}
-                onJoinAsTeam={() => { void joinActions.handleJoinAsTeam(); }}
+                onJoinAsTeam={onResumePreparation ?? (() => { void joinActions.handleJoinAsTeam(); })}
                 onWithdrawTeam={() => { void joinActions.handleWithdrawTeam(); }}
                 onLeaveFreeAgents={() => { void participantActions.handleLeaveFreeAgents(); }}
                 onJoinFreeAgents={() => { void participantActions.handleJoinFreeAgents(); }}

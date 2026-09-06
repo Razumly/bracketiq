@@ -135,6 +135,9 @@ fun CreateTeamBuilderScreen(
     onDismiss: () -> Unit,
     currentUser: UserData,
     selectedEvent: Event?,
+    eventSignupStep: String? = null,
+    onSavePerson: (suspend (TeamBuilderPersonInvite) -> Result<Unit>)? = null,
+    onSaveAccount: (suspend (UserData) -> Result<Unit>)? = null,
     isSaving: Boolean = false,
     saveError: String? = null,
     onMatchContact: suspend (String?, String?) -> Result<UserData?> = { _, _ ->
@@ -143,6 +146,7 @@ fun CreateTeamBuilderScreen(
 ) {
     val navBottomPadding = LocalNavBarPadding.current.calculateBottomPadding()
     val scope = rememberCoroutineScope()
+    var savingPlayer by remember(draft.team.id) { mutableStateOf(false) }
     var step by remember(draft.team.id) { mutableStateOf(0) }
     var teamName by remember(draft.team.id) { mutableStateOf(draft.team.name) }
     var teamSizeInput by remember(draft.team.id, selectedEvent?.id) {
@@ -171,8 +175,10 @@ fun CreateTeamBuilderScreen(
 
     val showFreeAgents = selectedEvent?.start?.let { it > Clock.System.now() } == true &&
         (selectedEvent.freeAgentIds.isNotEmpty() || freeAgents.isNotEmpty())
-    val steps = remember(showFreeAgents) {
-        listOf(TeamBuilderStep.TEAM) +
+    val steps = remember(showFreeAgents, eventSignupStep) {
+        if (eventSignupStep == "team") listOf(TeamBuilderStep.TEAM)
+        else if (eventSignupStep == "players") listOf(TeamBuilderStep.INVITE)
+        else listOf(TeamBuilderStep.TEAM) +
             (if (showFreeAgents) listOf(TeamBuilderStep.FREE_AGENTS) else emptyList()) +
             listOf(TeamBuilderStep.STAFF, TeamBuilderStep.INVITE, TeamBuilderStep.REVIEW)
     }
@@ -188,13 +194,14 @@ fun CreateTeamBuilderScreen(
         if (selectedEventSportName.isNotBlank()) sportInput = selectedEventSportName
     }
 
-    val resolvedTeamSize = teamSizeInput.toIntOrNull() ?: 0
+    val resolvedTeamSize = if (eventSignupStep == "players") draft.team.teamSize else teamSizeInput.toIntOrNull() ?: 0
     val selectedFreeAgents = freeAgents.filter { it.id in selectedFreeAgentIds }
-    val rosterCount = (if (isPlaying) 1 else 0) + selectedFreeAgents.size + selectedAccountInvites.size + personInvites.size
+    val rosterCount = if (eventSignupStep == "players") (draft.team.playerIds + draft.team.pending).distinct().size else (if (isPlaying) 1 else 0) + selectedFreeAgents.size + selectedAccountInvites.size + personInvites.size
     val openSlots = (resolvedTeamSize - rosterCount).coerceAtLeast(0)
     val isAtCapacity = resolvedTeamSize > 0 && rosterCount >= resolvedTeamSize
     val excludedIds = buildSet {
         add(currentUser.id)
+        if (eventSignupStep == "players") { addAll(draft.team.playerIds); addAll(draft.team.pending) }
         addAll(selectedFreeAgentIds)
         addAll(selectedAccountInvites.map(UserData::id))
     }
@@ -223,6 +230,7 @@ fun CreateTeamBuilderScreen(
     }
 
     fun addPerson() {
+        if (savingPlayer || isSaving) return
         val editor = personEditor ?: return
         val message = when {
             editor.firstName.isBlank() || editor.lastName.isBlank() -> "First and last name are required."
@@ -234,6 +242,16 @@ fun CreateTeamBuilderScreen(
         }
         if (message != null) {
             error = message
+            return
+        }
+        if (onSavePerson != null) {
+            savingPlayer = true
+            scope.launch {
+                try {
+                    onSavePerson(editor).onSuccess { personEditor = null; error = null }
+                        .onFailure { error = it.message ?: "Could not save the Player." }
+                } finally { savingPlayer = false }
+            }
             return
         }
         personInvites = if (personInvites.any { it.id == editor.id }) {
@@ -285,7 +303,7 @@ fun CreateTeamBuilderScreen(
         contentWindowInsets = NoScaffoldContentInsets,
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("Create Team") },
+                title = { Text(if (eventSignupStep == "players") "Add players (optional)" else "Create Team") },
                 navigationIcon = { PlatformBackButton(onBack = onDismiss, arrow = true) },
             )
         },
@@ -314,6 +332,10 @@ fun CreateTeamBuilderScreen(
                             error = null
                             step += 1
                         } else {
+                            if (eventSignupStep == "players") {
+                                onFinish(draft.team, emptyList(), emptyList())
+                                return@Button
+                            }
                             if (!validateBasics()) return@Button
                             if (!validatePersonInvites()) return@Button
                             val activePlayerIds = if (isPlaying) listOf(currentUser.id) else emptyList()
@@ -338,8 +360,8 @@ fun CreateTeamBuilderScreen(
                         }
                     },
                     modifier = Modifier.weight(1f).height(48.dp),
-                    enabled = !isSaving,
-                ) { Text(if (step == steps.lastIndex) "Create team" else if (activeStep == TeamBuilderStep.INVITE) "Review team" else "Continue") }
+                    enabled = !isSaving && !savingPlayer,
+                ) { Text(if (eventSignupStep == "players") "Continue to event" else if (eventSignupStep == "team") "Save team and continue" else if (step == steps.lastIndex) "Create team" else if (activeStep == TeamBuilderStep.INVITE) "Review team" else "Continue") }
             }
         },
     ) { paddingValues ->
@@ -362,7 +384,7 @@ fun CreateTeamBuilderScreen(
             LinearProgressIndicator(progress = { (step + 1f) / steps.size }, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(16.dp))
 
-            (error ?: saveError)?.let {
+            (error ?: saveError)?.takeIf { personEditor == null }?.let {
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 Spacer(Modifier.height(12.dp))
             }
@@ -609,8 +631,19 @@ fun CreateTeamBuilderScreen(
                                         player = user,
                                         trailingContent = {
                                             TextButton(
-                                                onClick = { if (!isAtCapacity) { selectedAccountInvites = selectedAccountInvites + user; searchQuery = "" } },
-                                                enabled = !isAtCapacity,
+                                                onClick = {
+                                                    if (!isAtCapacity && !savingPlayer) {
+                                                        if (onSaveAccount == null) { selectedAccountInvites = selectedAccountInvites + user; searchQuery = "" }
+                                                        else {
+                                                            savingPlayer = true
+                                                            scope.launch {
+                                                                try { onSaveAccount(user).onSuccess { searchQuery = "" }.onFailure { error = it.message } }
+                                                                finally { savingPlayer = false }
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                enabled = !isAtCapacity && !savingPlayer && !isSaving,
                                                 modifier = Modifier.testTag("team-builder-player-add-${user.id}"),
                                             ) { Text("Add") }
                                         },
@@ -640,7 +673,10 @@ fun CreateTeamBuilderScreen(
                                         StandardTextField(value = editor.guardianEmail, onValueChange = { personEditor = editor.copy(guardianEmail = it) }, label = "Guardian email", keyboardType = "email", modifier = Modifier.fillMaxWidth())
                                         Text("The invitation will go to the guardian.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
-                                    Button(onClick = ::addPerson, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+                                    (error ?: saveError)?.let {
+                                        Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                                    }
+                                    Button(onClick = ::addPerson, enabled = !savingPlayer && !isSaving, modifier = Modifier.fillMaxWidth().height(48.dp)) {
                                         Text(if (TeamBuilderEmailRegex.matches(editor.email.trim())) "Send email invite" else "Save invite")
                                     }
                                 }
@@ -650,13 +686,13 @@ fun CreateTeamBuilderScreen(
                         Text("Roster", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                         BuilderRoster(
                             currentUser = currentUser,
-                            includeCurrentUser = isPlaying,
+                            includeCurrentUser = eventSignupStep != "players" && isPlaying,
                             currentUserIsCaptain = isCaptain,
                             freeAgents = selectedFreeAgents,
-                            accounts = selectedAccountInvites,
+                            accounts = if (eventSignupStep == "players") (draft.players + draft.pendingPlayers).distinctBy { it.id } else selectedAccountInvites,
                             people = personInvites,
                             openSlots = openSlots,
-                            editable = true,
+                            editable = eventSignupStep == null,
                             onEditAccount = { user -> selectedAccountInvites = selectedAccountInvites - user; searchQuery = user.fullName },
                             onRemoveAccount = { user -> selectedAccountInvites = selectedAccountInvites - user },
                             onEditPerson = { personEditor = it },

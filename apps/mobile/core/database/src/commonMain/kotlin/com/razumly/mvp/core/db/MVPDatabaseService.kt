@@ -57,10 +57,11 @@ import com.razumly.mvp.core.data.dataTypes.daos.PendingRentalOrderDao
 import com.razumly.mvp.core.data.dataTypes.daos.RefundRequestDao
 import com.razumly.mvp.core.data.dataTypes.daos.TeamDao
 import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
-const val MVP_DATABASE_VERSION = 109
+const val MVP_DATABASE_VERSION = 110
 
 @Database(
     entities = [
+        com.razumly.mvp.core.data.dataTypes.EventSignupCacheEntry::class,
         com.razumly.mvp.core.data.dataTypes.FamilyCacheEntry::class,
         Event::class,
         EventRegistrationCacheEntry::class,
@@ -100,6 +101,8 @@ const val MVP_DATABASE_VERSION = 109
 @TypeConverters(Converters::class)
 @ConstructedBy(MVPDatabaseCtor::class)
 abstract class MVPDatabaseService : RoomDatabase(), DatabaseService {
+    abstract override val getEventSignupDao: com.razumly.mvp.core.data.dataTypes.daos.EventSignupDao
+    override suspend fun clearEventSignupCache() = getEventSignupDao.clearAll()
     abstract override val getFamilyCacheDao: com.razumly.mvp.core.data.dataTypes.daos.FamilyCacheDao
     override suspend fun <R> withTransaction(block: suspend () -> R): R =
         useWriterConnection { connection ->

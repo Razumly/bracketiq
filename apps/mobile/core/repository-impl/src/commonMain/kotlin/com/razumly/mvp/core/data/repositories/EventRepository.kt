@@ -1026,6 +1026,13 @@ class EventRepository(
     currentUserDataSource: CurrentUserDataSource? = null,
     coroutineDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : IEventRepository {
+    private val signupRepository = EventSignupRepository(databaseService, api,
+        currentUserDataSource?.getUserId() ?: userRepository.currentUser.map { it.getOrNull()?.id.orEmpty() }, teamRepository)
+    override fun observeRegistrationDraft(eventId: String, occurrence: EventOccurrenceSelection?) = signupRepository.observe(eventId, occurrence)
+    override suspend fun loadRegistrationDraft(eventId: String, occurrence: EventOccurrenceSelection?) = signupRepository.load(eventId, occurrence)
+    override suspend fun saveRegistrationDraft(eventId: String, occurrence: EventOccurrenceSelection?, baseRevision: Int, draft: com.razumly.mvp.core.data.dataTypes.EventSignupDraft) = signupRepository.save(eventId, occurrence, baseRevision, draft)
+    override suspend fun createRegistrationTeam(eventId: String, occurrence: EventOccurrenceSelection?, baseRevision: Int, team: Team) = signupRepository.createTeam(eventId, occurrence, baseRevision, team)
+    override suspend fun clearRegistrationDraft(eventId: String, occurrence: EventOccurrenceSelection?) = signupRepository.clear(eventId, occurrence)
     private val roomStore = EventRoomStore(databaseService)
     private val detailRemoteGateway = EventDetailRemoteGateway(api)
     private val editorRemoteGateway = EventEditorRemoteGateway(api)

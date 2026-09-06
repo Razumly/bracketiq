@@ -128,7 +128,7 @@ fun TeamSelectionDialog(
         },
         confirmButton = {
             Button(onClick = onCreateTeam) {
-                Text("Manage Teams")
+                Text("Create team")
             }
         })
 }

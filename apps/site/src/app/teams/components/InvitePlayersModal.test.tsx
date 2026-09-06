@@ -135,12 +135,35 @@ const openUserSearch = async (
 };
 
 describe('InvitePlayersModal player invite failures', () => {
+  it('keeps minor and guardian values when React repeats a state update', () => {
+    renderWithMantine(<React.StrictMode><InvitePlayersModal
+      isOpen onClose={jest.fn()} team={buildTeam()} eventRegistration={{ eventId: 'event_1' }}
+    /></React.StrictMode>);
+    fireEvent.click(screen.getByRole('tab', { name: 'New Person' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Is a minor' }));
+    fireEvent.change(screen.getByLabelText(/Date of birth/), { target: { value: '2015-01-01' } });
+    fireEvent.change(screen.getByLabelText(/Guardian email/), { target: { value: 'guardian@example.com' } });
+    expect(screen.getByRole('checkbox', { name: 'Is a minor' })).toBeChecked();
+    expect(screen.getByLabelText(/Date of birth/)).toHaveValue('2015-01-01');
+    expect(screen.getByLabelText(/Guardian email/)).toHaveValue('guardian@example.com');
+  });
+
   beforeEach(() => {
     mockShowNotification.mockReset();
     teamServiceMock.inviteUserToTeamRole.mockReset();
     userServiceMock.getUserById.mockReset();
     userServiceMock.searchUsers.mockReset();
     teamServiceMock.inviteUserToTeamRole.mockResolvedValue(true);
+  });
+
+  it('searches once in Event signup when no pending-invitation list is supplied', async () => {
+    userServiceMock.searchUsers.mockResolvedValue([buildUser()]);
+    renderWithMantine(<InvitePlayersModal isOpen onClose={jest.fn()} team={buildTeam()}
+      eventRegistration={{ eventId: 'event_1' }} />);
+    expect(screen.queryByRole('tab', { name: 'Free Agents' })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText('Search player (min 2 characters)'), { target: { value: 'Jane' } });
+    await waitFor(() => expect(screen.getByText('Jane Doe')).toBeInTheDocument());
+    expect(userServiceMock.searchUsers).toHaveBeenCalledTimes(1);
   });
 
   it('surfaces the exact capacity conflict and does not report success', async () => {

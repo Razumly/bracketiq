@@ -56,6 +56,18 @@ import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
 interface EventDetailComponent : ComponentContext, IPaymentProcessor {
+    val registrationSignup: StateFlow<com.razumly.mvp.core.data.dataTypes.EventSignupState?> get() = kotlinx.coroutines.flow.MutableStateFlow(null)
+    val registrationSignupBusy: StateFlow<Boolean> get() = kotlinx.coroutines.flow.MutableStateFlow(false)
+    val registrationTeams: StateFlow<List<TeamWithPlayers>> get() = kotlinx.coroutines.flow.MutableStateFlow(emptyList())
+    val registrationPlayerSuggestions: StateFlow<List<UserData>> get() = kotlinx.coroutines.flow.MutableStateFlow(emptyList())
+    fun selectRegistrationTeam(teamId: String, onReady: () -> Unit) {}
+    fun prepareRegistrationTeam(onReady: (TeamWithPlayers) -> Unit) {}
+    fun searchRegistrationPlayers(query: String) {}
+    suspend fun saveRegistrationTeam(team: Team): Result<Team> = Result.failure(UnsupportedOperationException("Event Team creation is not supported."))
+    suspend fun addRegistrationPlayer(teamId: String, input: com.razumly.mvp.core.network.dto.TeamMemberInviteRequestDto): Result<Unit> = Result.failure(UnsupportedOperationException("Event Player preparation is not supported."))
+    fun setRegistrationPlayersStep(onReady: () -> Unit) {}
+    fun continueRegistrationReview(onReady: () -> Unit) {}
+
     val selectedEvent: StateFlow<Event>
     val divisionMatches: StateFlow<Map<String, MatchWithRelations>>
     val divisionTeams: StateFlow<Map<String, TeamWithPlayers>>

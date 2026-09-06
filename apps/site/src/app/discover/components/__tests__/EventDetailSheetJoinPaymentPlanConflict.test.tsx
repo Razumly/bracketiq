@@ -23,6 +23,21 @@ jest.mock('@/app/providers', () => ({
 
 jest.mock('@/lib/apiClient', () => ({
   apiRequest: jest.fn(),
+  isApiRequestError: () => false,
+}));
+
+jest.mock('@/lib/eventRegistrationDraftService', () => ({
+  eventRegistrationDraftService: {
+    get: jest.fn(async () => ({
+      version: 1, draft: null, eligibleTeams: [], selectedTeamId: null, selectionSource: null,
+      available: true, unavailableReason: null, invalidations: [],
+    })),
+    save: jest.fn(async () => ({
+      version: 1, draft: null, eligibleTeams: [], selectedTeamId: null, selectionSource: null,
+      available: true, unavailableReason: null, invalidations: [],
+    })),
+    clear: jest.fn(async () => undefined),
+  },
 }));
 
 jest.mock('@/lib/eventService', () => ({

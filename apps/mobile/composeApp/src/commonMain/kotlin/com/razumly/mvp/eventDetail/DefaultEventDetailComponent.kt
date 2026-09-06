@@ -80,6 +80,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emitAll
@@ -332,14 +333,13 @@ class DefaultEventDetailComponent(
         }
 
         scope.launch {
-            registrationLifecycleHandler.saveCurrentRegistrationProgress(step = "questions")
-            result.continuation?.invoke()
+            if (registrationLifecycleHandler.saveQuestionProgress()) result.continuation?.invoke()
         }
     }
 
     override fun registrationHoldExpired() {
         scope.launch {
-            registrationLifecycleHandler.clearCurrentRegistrationProgress()
+            registrationLifecycleHandler.saveDraft { it.copy(registrationId = null, step = "review") }
             registrationFlowCoordinator.clearPendingJoinConfirmationTarget()
             registrationFlowCoordinator.clearTeamRegistrationState()
             registrationFlowCoordinator.clearAfterRegistrationHoldExpired()
@@ -933,9 +933,79 @@ class DefaultEventDetailComponent(
         registrationFlowCoordinator.dismissDiscountCodePrompt()
     }
 
+    override val registrationSignup get() = registrationLifecycleHandler.signupState
+    override val registrationSignupBusy get() = registrationLifecycleHandler.signupBusy
+    private val _registrationTeams = MutableStateFlow<List<TeamWithPlayers>>(emptyList())
+    override val registrationTeams = _registrationTeams.asStateFlow()
+    private val _registrationPlayerSuggestions = MutableStateFlow<List<UserData>>(emptyList())
+    override val registrationPlayerSuggestions = _registrationPlayerSuggestions.asStateFlow()
+    override fun selectRegistrationTeam(teamId: String, onReady: () -> Unit) {
+        scope.launch {
+            if (registrationLifecycleHandler.saveDraft { draft ->
+                if (draft.selectedTeamId == teamId) draft
+                else draft.copy(selectedTeamId = teamId, step = "review", registrationId = null, completedSteps = emptyList())
+            }) onReady()
+        }
+    }
+    override fun prepareRegistrationTeam(onReady: (TeamWithPlayers) -> Unit) {
+        scope.launch {
+            val current = registrationSignup.value?.draft
+            val id = current?.teamCreationId?.takeIf { current.step == "team" } ?: com.razumly.mvp.core.util.newId()
+            if (registrationLifecycleHandler.saveDraft { it.copy(selectedTeamId = null, teamCreationId = id, step = "team", completedSteps = emptyList(), registrationId = null) }) {
+                onReady(TeamWithPlayers(Team(currentUser.value.id).copy(id = id, name = "", sport = selectedEvent.value.sportIds.firstOrNull()), currentUser.value, emptyList(), emptyList()))
+            }
+        }
+    }
+    override suspend fun saveRegistrationTeam(team: Team): Result<Team> = registrationLifecycleHandler.createRegistrationTeam(team)
+    override fun setRegistrationPlayersStep(onReady: () -> Unit) {
+        scope.launch { if (registrationLifecycleHandler.saveDraft { it.copy(step = "players") }) onReady() }
+    }
+    override fun continueRegistrationReview(onReady: () -> Unit) {
+        scope.launch { if (registrationLifecycleHandler.saveDraft { it.copy(step = "review", completedSteps = (it.completedSteps + listOf("team", "players")).distinct()) }) onReady() }
+    }
+    private var registrationSearchJob: kotlinx.coroutines.Job? = null
+
+    // Search suggestions are transient. Saved Players enter Room through the invitation save.
+    override fun searchRegistrationPlayers(query: String) {
+        registrationSearchJob?.cancel()
+        _registrationPlayerSuggestions.value = emptyList()
+        if (query.trim().length < 2) return
+        val accountId = currentUser.value.id
+        val eventId = selectedEvent.value.id
+        val occurrence = currentWeeklyOccurrenceSelection()
+        registrationSearchJob = scope.launch {
+            userRepository.searchPlayers(query).onSuccess { suggestions ->
+                if (accountId == currentUser.value.id && eventId == selectedEvent.value.id
+                    && occurrence == currentWeeklyOccurrenceSelection()) {
+                    _registrationPlayerSuggestions.value = suggestions
+                }
+            }
+        }
+    }
+    override suspend fun addRegistrationPlayer(teamId: String, input: com.razumly.mvp.core.network.dto.TeamMemberInviteRequestDto): Result<Unit> {
+        val occurrence = currentWeeklyOccurrenceSelection()
+        val context = com.razumly.mvp.core.network.dto.EventRegistrationScopeDto(selectedEvent.value.id, occurrence?.slotId, occurrence?.occurrenceDate)
+        return teamRepository.createEventTeamMemberInvite(teamId, context, input).map { saved ->
+            if (saved.deliveryFailed) _errorState.value = ErrorMessage("The Player and invitation are saved. Delivery failed. Use Remind from the Team to try delivery again.")
+        }
+    }
+
     private val lifecycleBindings = EventDetailLifecycleBindings(scope)
 
     init {
+        scope.launch {
+            registrationSignup.map { state -> state?.eligibleTeams.orEmpty().map { it.id } }.distinctUntilChanged().collectLatest { ids ->
+                _registrationTeams.value = emptyList()
+                if (ids.isNotEmpty()) {
+                    teamRepository.getTeamsWithPlayers(ids).onFailure {
+                        _errorState.value = ErrorMessage(it.message ?: "Could not load eligible Teams.")
+                    }
+                    teamRepository.getCachedTeamsFlow(ids).collect { result ->
+                        result.onSuccess { _registrationTeams.value = it }
+                    }
+                }
+            }
+        }
         backHandler.register(backCallback)
         lifecycle.doOnDestroy(::finishRegistrationPaymentLoading)
         if (editDraftCoordinator.isEditing.value) {
@@ -962,7 +1032,23 @@ class DefaultEventDetailComponent(
             selectedEvent = selectedEvent,
             currentUser = currentUser,
             selectedWeeklyOccurrence = weeklyOccurrenceCoordinator.selectedWeeklyOccurrence,
-            onMissingScope = registrationFlowCoordinator::clearForMissingRegistrationScope,
+            onMissingScope = {
+                searchRegistrationPlayers("")
+                registrationLifecycleHandler.clearVisibleSignupProgress()
+            },
+            onScopeChanged = {
+                searchRegistrationPlayers("")
+                registrationLifecycleHandler.observeCurrentRegistrationProgress()
+            },
+        )
+        lifecycleBindings.bindRegistrationScope(
+            selectedEvent = selectedEvent,
+            currentUser = currentUser,
+            selectedWeeklyOccurrence = weeklyOccurrenceCoordinator.selectedWeeklyOccurrence,
+            onMissingScope = {
+                searchRegistrationPlayers("")
+                registrationLifecycleHandler.clearVisibleSignupProgress()
+            },
             onScopeChanged = registrationLifecycleHandler::loadRegistrationLifecycleScope,
         )
         lifecycleBindings.bindSelectedEventMode(

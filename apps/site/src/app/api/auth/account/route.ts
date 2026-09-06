@@ -451,6 +451,8 @@ export async function DELETE(req: NextRequest) {
       tx.feedbackSubmissions.deleteMany({
         where: { submitterUserId: userId },
       }),
+      tx.eventRegistrationDrafts.deleteMany({ where: { accountId: userId } }),
+      tx.eventRegistrationTeamPreferences.deleteMany({ where: { accountId: userId } }),
       tx.authUser.deleteMany({
         where: { id: userId },
       }),

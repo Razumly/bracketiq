@@ -525,6 +525,8 @@ export const ModelName = {
   BoldSignWebhookEvents: 'BoldSignWebhookEvents',
   BoldSignSyncOperations: 'BoldSignSyncOperations',
   ParentChildLinks: 'ParentChildLinks',
+  EventRegistrationDrafts: 'EventRegistrationDrafts',
+  EventRegistrationTeamPreferences: 'EventRegistrationTeamPreferences',
   EventRegistrations: 'EventRegistrations',
   AuthUser: 'AuthUser',
   FeedbackSubmissions: 'FeedbackSubmissions',
@@ -544,7 +546,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "appReleases" | "fields" | "facilities" | "matches" | "matchSegments" | "broadcastOverlays" | "broadcastOverlayStates" | "broadcastOverlayActions" | "broadcastOverlayAccessTokens" | "matchIncidents" | "matchOperationReceipts" | "eventEditorCreateOperations" | "eventEditorMaintenanceOperations" | "divisions" | "eventDivisionPhaseSources" | "eventDivisionPhaseParticipants" | "userData" | "userNotifications" | "sensitiveUserData" | "authMfaChallenges" | "invites" | "invitationEvidence" | "teamBlocks" | "inviteDeliveries" | "teamCreationRequests" | "invitationRequests" | "userProfileClaims" | "userProfileMerges" | "userProfileContactCorrections" | "teamInviteEventSyncs" | "staffMembers" | "organizationRoles" | "organizationRolePermissions" | "organizationRoleCompensationRates" | "staffCompensationRates" | "eventStaffAssignments" | "staffScheduleAssignments" | "teamStaffLaborEntries" | "financialLineItems" | "staffPayRun" | "staffPayRunItem" | "eventOfficials" | "teamCheckIns" | "matchRosterEntries" | "teams" | "canonicalTeams" | "teamRegistrations" | "registrationQuestions" | "registrationQuestionResponses" | "teamJoinRequests" | "teamStaffAssignments" | "eventTeamStaffAssignments" | "messages" | "chatGroup" | "moderationReport" | "aiConversationPointer" | "aiPendingConfirmation" | "pushDeviceTarget" | "lockFiles" | "paymentIntents" | "bills" | "billPayments" | "billPaymentProofs" | "rentalBookings" | "rentalBookingItems" | "affiliateScrapeSources" | "affiliateScrapeMappings" | "affiliateScrapeRuns" | "affiliateSourceIntakes" | "affiliateSourceIntakePages" | "affiliateSourceIntakeRuns" | "affiliateSourceIntakeArtifacts" | "affiliateSourceDiscoveryCampaigns" | "affiliateAgentGatewayJobs" | "affiliateAgentGatewayClaims" | "affiliateAgentGatewayArtifacts" | "affiliateAgentGatewayOperationReceipts" | "affiliateAgentGatewayEvents" | "affiliateOperationalAlerts" | "affiliateOperationalAlertDeliveries" | "affiliateCoverageAgentJobs" | "affiliateCoverageCities" | "affiliateCoverageCells" | "affiliateCoverageCellAssessments" | "affiliateSourceDiscoveryQueryExecutions" | "affiliateSourceDiscoveryRuns" | "affiliateSourceDiscoveryResults" | "affiliateSourceDomainPolicies" | "affiliateSourceMappingJobs" | "affiliateApprovalJobs" | "affiliateImportCandidates" | "affiliateSupplySources" | "affiliateSupplyContractManifests" | "affiliateSupplyLifecycleTransitions" | "affiliateSupplyReconciliationRuns" | "affiliateAgentWorkerHealth" | "affiliateSupplyTargets" | "affiliateReplenishmentDemands" | "affiliateReplenishmentWaves" | "eventTags" | "eventTagAssignments" | "organizationTags" | "organizationTagAssignments" | "refundRequests" | "discounts" | "discountCodes" | "discountCodeRedemptions" | "discountCodeReservations" | "organizationAccountingConnections" | "accountingSyncRecords" | "organizationFinanceCategoryAccountingMappings" | "stripeAccounts" | "events" | "organizations" | "organizationReviews" | "organizationDomains" | "organizationClaims" | "organizationClaimEvidence" | "organizationClaimEvents" | "organizationReviewResponses" | "products" | "subscriptions" | "timeSlots" | "leagueScoringConfigs" | "eventTemplates" | "eventTemplateResources" | "eventTemplateTimeSlots" | "eventTemplateRentalResourceHints" | "eventTemplateLeagueScoringConfigs" | "sports" | "documentRequirements" | "templateDocuments" | "templateProviderQuarantines" | "signedDocuments" | "documentSubjects" | "documentRequirementSatisfactions" | "documentRequirementSatisfactionEvidence" | "documentEvidenceAuditEvents" | "boldSignWebhookEvents" | "boldSignSyncOperations" | "parentChildLinks" | "eventRegistrations" | "authUser" | "feedbackSubmissions" | "file"
+    modelProps: "appReleases" | "fields" | "facilities" | "matches" | "matchSegments" | "broadcastOverlays" | "broadcastOverlayStates" | "broadcastOverlayActions" | "broadcastOverlayAccessTokens" | "matchIncidents" | "matchOperationReceipts" | "eventEditorCreateOperations" | "eventEditorMaintenanceOperations" | "divisions" | "eventDivisionPhaseSources" | "eventDivisionPhaseParticipants" | "userData" | "userNotifications" | "sensitiveUserData" | "authMfaChallenges" | "invites" | "invitationEvidence" | "teamBlocks" | "inviteDeliveries" | "teamCreationRequests" | "invitationRequests" | "userProfileClaims" | "userProfileMerges" | "userProfileContactCorrections" | "teamInviteEventSyncs" | "staffMembers" | "organizationRoles" | "organizationRolePermissions" | "organizationRoleCompensationRates" | "staffCompensationRates" | "eventStaffAssignments" | "staffScheduleAssignments" | "teamStaffLaborEntries" | "financialLineItems" | "staffPayRun" | "staffPayRunItem" | "eventOfficials" | "teamCheckIns" | "matchRosterEntries" | "teams" | "canonicalTeams" | "teamRegistrations" | "registrationQuestions" | "registrationQuestionResponses" | "teamJoinRequests" | "teamStaffAssignments" | "eventTeamStaffAssignments" | "messages" | "chatGroup" | "moderationReport" | "aiConversationPointer" | "aiPendingConfirmation" | "pushDeviceTarget" | "lockFiles" | "paymentIntents" | "bills" | "billPayments" | "billPaymentProofs" | "rentalBookings" | "rentalBookingItems" | "affiliateScrapeSources" | "affiliateScrapeMappings" | "affiliateScrapeRuns" | "affiliateSourceIntakes" | "affiliateSourceIntakePages" | "affiliateSourceIntakeRuns" | "affiliateSourceIntakeArtifacts" | "affiliateSourceDiscoveryCampaigns" | "affiliateAgentGatewayJobs" | "affiliateAgentGatewayClaims" | "affiliateAgentGatewayArtifacts" | "affiliateAgentGatewayOperationReceipts" | "affiliateAgentGatewayEvents" | "affiliateOperationalAlerts" | "affiliateOperationalAlertDeliveries" | "affiliateCoverageAgentJobs" | "affiliateCoverageCities" | "affiliateCoverageCells" | "affiliateCoverageCellAssessments" | "affiliateSourceDiscoveryQueryExecutions" | "affiliateSourceDiscoveryRuns" | "affiliateSourceDiscoveryResults" | "affiliateSourceDomainPolicies" | "affiliateSourceMappingJobs" | "affiliateApprovalJobs" | "affiliateImportCandidates" | "affiliateSupplySources" | "affiliateSupplyContractManifests" | "affiliateSupplyLifecycleTransitions" | "affiliateSupplyReconciliationRuns" | "affiliateAgentWorkerHealth" | "affiliateSupplyTargets" | "affiliateReplenishmentDemands" | "affiliateReplenishmentWaves" | "eventTags" | "eventTagAssignments" | "organizationTags" | "organizationTagAssignments" | "refundRequests" | "discounts" | "discountCodes" | "discountCodeRedemptions" | "discountCodeReservations" | "organizationAccountingConnections" | "accountingSyncRecords" | "organizationFinanceCategoryAccountingMappings" | "stripeAccounts" | "events" | "organizations" | "organizationReviews" | "organizationDomains" | "organizationClaims" | "organizationClaimEvidence" | "organizationClaimEvents" | "organizationReviewResponses" | "products" | "subscriptions" | "timeSlots" | "leagueScoringConfigs" | "eventTemplates" | "eventTemplateResources" | "eventTemplateTimeSlots" | "eventTemplateRentalResourceHints" | "eventTemplateLeagueScoringConfigs" | "sports" | "documentRequirements" | "templateDocuments" | "templateProviderQuarantines" | "signedDocuments" | "documentSubjects" | "documentRequirementSatisfactions" | "documentRequirementSatisfactionEvidence" | "documentEvidenceAuditEvents" | "boldSignWebhookEvents" | "boldSignSyncOperations" | "parentChildLinks" | "eventRegistrationDrafts" | "eventRegistrationTeamPreferences" | "eventRegistrations" | "authUser" | "feedbackSubmissions" | "file"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -10982,6 +10984,154 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         }
       }
     }
+    EventRegistrationDrafts: {
+      payload: Prisma.$EventRegistrationDraftsPayload<ExtArgs>
+      fields: Prisma.EventRegistrationDraftsFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.EventRegistrationDraftsFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventRegistrationDraftsPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.EventRegistrationDraftsFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventRegistrationDraftsPayload>
+        }
+        findFirst: {
+          args: Prisma.EventRegistrationDraftsFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventRegistrationDraftsPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.EventRegistrationDraftsFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventRegistrationDraftsPayload>
+        }
+        findMany: {
+          args: Prisma.EventRegistrationDraftsFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventRegistrationDraftsPayload>[]
+        }
+        create: {
+          args: Prisma.EventRegistrationDraftsCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventRegistrationDraftsPayload>
+        }
+        createMany: {
+          args: Prisma.EventRegistrationDraftsCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.EventRegistrationDraftsCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventRegistrationDraftsPayload>[]
+        }
+        delete: {
+          args: Prisma.EventRegistrationDraftsDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventRegistrationDraftsPayload>
+        }
+        update: {
+          args: Prisma.EventRegistrationDraftsUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventRegistrationDraftsPayload>
+        }
+        deleteMany: {
+          args: Prisma.EventRegistrationDraftsDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.EventRegistrationDraftsUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.EventRegistrationDraftsUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventRegistrationDraftsPayload>[]
+        }
+        upsert: {
+          args: Prisma.EventRegistrationDraftsUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventRegistrationDraftsPayload>
+        }
+        aggregate: {
+          args: Prisma.EventRegistrationDraftsAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateEventRegistrationDrafts>
+        }
+        groupBy: {
+          args: Prisma.EventRegistrationDraftsGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.EventRegistrationDraftsGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.EventRegistrationDraftsCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.EventRegistrationDraftsCountAggregateOutputType> | number
+        }
+      }
+    }
+    EventRegistrationTeamPreferences: {
+      payload: Prisma.$EventRegistrationTeamPreferencesPayload<ExtArgs>
+      fields: Prisma.EventRegistrationTeamPreferencesFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.EventRegistrationTeamPreferencesFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventRegistrationTeamPreferencesPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.EventRegistrationTeamPreferencesFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventRegistrationTeamPreferencesPayload>
+        }
+        findFirst: {
+          args: Prisma.EventRegistrationTeamPreferencesFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventRegistrationTeamPreferencesPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.EventRegistrationTeamPreferencesFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventRegistrationTeamPreferencesPayload>
+        }
+        findMany: {
+          args: Prisma.EventRegistrationTeamPreferencesFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventRegistrationTeamPreferencesPayload>[]
+        }
+        create: {
+          args: Prisma.EventRegistrationTeamPreferencesCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventRegistrationTeamPreferencesPayload>
+        }
+        createMany: {
+          args: Prisma.EventRegistrationTeamPreferencesCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.EventRegistrationTeamPreferencesCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventRegistrationTeamPreferencesPayload>[]
+        }
+        delete: {
+          args: Prisma.EventRegistrationTeamPreferencesDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventRegistrationTeamPreferencesPayload>
+        }
+        update: {
+          args: Prisma.EventRegistrationTeamPreferencesUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventRegistrationTeamPreferencesPayload>
+        }
+        deleteMany: {
+          args: Prisma.EventRegistrationTeamPreferencesDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.EventRegistrationTeamPreferencesUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.EventRegistrationTeamPreferencesUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventRegistrationTeamPreferencesPayload>[]
+        }
+        upsert: {
+          args: Prisma.EventRegistrationTeamPreferencesUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$EventRegistrationTeamPreferencesPayload>
+        }
+        aggregate: {
+          args: Prisma.EventRegistrationTeamPreferencesAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateEventRegistrationTeamPreferences>
+        }
+        groupBy: {
+          args: Prisma.EventRegistrationTeamPreferencesGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.EventRegistrationTeamPreferencesGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.EventRegistrationTeamPreferencesCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.EventRegistrationTeamPreferencesCountAggregateOutputType> | number
+        }
+      }
+    }
     EventRegistrations: {
       payload: Prisma.$EventRegistrationsPayload<ExtArgs>
       fields: Prisma.EventRegistrationsFieldRefs
@@ -11958,6 +12108,7 @@ export const TeamInviteEventSyncsScalarFieldEnum = {
   eventId: 'eventId',
   eventTeamId: 'eventTeamId',
   userId: 'userId',
+  registrationId: 'registrationId',
   previousRegistrationSnapshot: 'previousRegistrationSnapshot',
   eventTeamHadUser: 'eventTeamHadUser',
   eventTeamHadPendingUser: 'eventTeamHadPendingUser',
@@ -14666,6 +14817,40 @@ export const ParentChildLinksScalarFieldEnum = {
 export type ParentChildLinksScalarFieldEnum = (typeof ParentChildLinksScalarFieldEnum)[keyof typeof ParentChildLinksScalarFieldEnum]
 
 
+export const EventRegistrationDraftsScalarFieldEnum = {
+  id: 'id',
+  accountId: 'accountId',
+  eventId: 'eventId',
+  slotId: 'slotId',
+  occurrenceDate: 'occurrenceDate',
+  revision: 'revision',
+  selectedTeamId: 'selectedTeamId',
+  selectedDivisionId: 'selectedDivisionId',
+  selectedDivisionTypeKey: 'selectedDivisionTypeKey',
+  answers: 'answers',
+  step: 'step',
+  completedSteps: 'completedSteps',
+  registrationId: 'registrationId',
+  teamCreationId: 'teamCreationId',
+  completedAt: 'completedAt',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type EventRegistrationDraftsScalarFieldEnum = (typeof EventRegistrationDraftsScalarFieldEnum)[keyof typeof EventRegistrationDraftsScalarFieldEnum]
+
+
+export const EventRegistrationTeamPreferencesScalarFieldEnum = {
+  accountId: 'accountId',
+  sport: 'sport',
+  teamId: 'teamId',
+  registrationId: 'registrationId',
+  completedAt: 'completedAt'
+} as const
+
+export type EventRegistrationTeamPreferencesScalarFieldEnum = (typeof EventRegistrationTeamPreferencesScalarFieldEnum)[keyof typeof EventRegistrationTeamPreferencesScalarFieldEnum]
+
+
 export const EventRegistrationsScalarFieldEnum = {
   id: 'id',
   createdAt: 'createdAt',
@@ -16438,6 +16623,8 @@ export type GlobalOmitConfig = {
   boldSignWebhookEvents?: Prisma.BoldSignWebhookEventsOmit
   boldSignSyncOperations?: Prisma.BoldSignSyncOperationsOmit
   parentChildLinks?: Prisma.ParentChildLinksOmit
+  eventRegistrationDrafts?: Prisma.EventRegistrationDraftsOmit
+  eventRegistrationTeamPreferences?: Prisma.EventRegistrationTeamPreferencesOmit
   eventRegistrations?: Prisma.EventRegistrationsOmit
   authUser?: Prisma.AuthUserOmit
   feedbackSubmissions?: Prisma.FeedbackSubmissionsOmit

@@ -1341,6 +1341,7 @@ model TeamInviteEventSyncs {
   eventId                      String
   eventTeamId                  String
   userId                       String
+  registrationId               String?
   previousRegistrationSnapshot Json?
   eventTeamHadUser             Boolean                       @default(false)
   eventTeamHadPendingUser      Boolean                       @default(false)
@@ -4288,6 +4289,39 @@ model ParentChildLinks {
   declarationText String?
   declarationConfirmedAt DateTime?
   declarationInviteId String?
+}
+
+model EventRegistrationDrafts {
+  id                      String   @id
+  accountId               String
+  eventId                 String
+  slotId                  String   @default("")
+  occurrenceDate          String   @default("")
+  revision                Int      @default(1)
+  selectedTeamId          String?
+  selectedDivisionId      String?
+  selectedDivisionTypeKey String?
+  answers                 Json     @default("{}")
+  step                    String   @default("review")
+  completedSteps          String[] @default([])
+  registrationId          String?
+  teamCreationId          String?
+  completedAt             DateTime?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@unique([accountId, eventId, slotId, occurrenceDate])
+  @@index([accountId, updatedAt])
+}
+
+model EventRegistrationTeamPreferences {
+  accountId      String
+  sport          String
+  teamId         String
+  registrationId String
+  completedAt    DateTime
+
+  @@id([accountId, sport])
 }
 
 model EventRegistrations {

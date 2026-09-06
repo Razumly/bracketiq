@@ -11,6 +11,7 @@ import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.DivisionTypeParameters
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventRegistrationCacheEntry
+import com.razumly.mvp.core.data.dataTypes.EventSignupState
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
@@ -2238,6 +2239,11 @@ private class EventDetailFakeEventRepository(
     var managementSnapshotCallCount = 0
     var teamComplianceCallCount = 0
     var userComplianceCallCount = 0
+
+    override suspend fun loadRegistrationDraft(
+        eventId: String,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<EventSignupState> = Result.success(EventSignupState(available = true))
 
     override fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>> {
         eventWithRelationsFlowRequests += eventId

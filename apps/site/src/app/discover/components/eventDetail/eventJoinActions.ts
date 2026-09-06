@@ -3,7 +3,7 @@ import { resolveEventParticipantCapacity } from '@/lib/eventCapacity';
 import { eventService, type WeeklyOccurrenceSelection } from '@/lib/eventService';
 import { paymentService } from '@/lib/paymentService';
 import { registrationService, type DivisionRegistrationSelection } from '@/lib/registrationService';
-import type { Event, Team, UserData } from '@/types';
+import type { Event, Team, UserData, RegistrationQuestionAnswerInput } from '@/types';
 
 import { normalizePriceCents } from './divisionRegistration';
 import type { JoinIntent, RegistrationBillingPlan } from './eventRegistrationCommands';
@@ -37,6 +37,7 @@ type EventJoinActionInputs = {
     userTeams: Team[];
     paymentPlanPreview: PaymentPlanPreviewState | null;
     timeoutMs: number;
+    resumedTeamAnswers?: RegistrationQuestionAnswerInput[];
     ensureWeeklyOccurrenceSelected: (message?: string) => boolean;
     shouldAskRegistrationQuestions: (intent: JoinIntent) => boolean;
     openRegistrationQuestionsStep: (intent: JoinIntent) => void;
@@ -75,6 +76,7 @@ export function createEventJoinActions({
     userTeams,
     paymentPlanPreview,
     timeoutMs,
+    resumedTeamAnswers,
     ensureWeeklyOccurrenceSelected,
     shouldAskRegistrationQuestions,
     openRegistrationQuestionsStep,
@@ -416,7 +418,7 @@ export function createEventJoinActions({
         const team = teamOverride
             ?? userTeams.find((candidate) => candidate.$id === selectedTeamId)
             ?? ({ $id: selectedTeamId } as Team);
-        const joinIntent: JoinIntent = { mode: 'team', team };
+        const joinIntent: JoinIntent = { mode: 'team', team, answers: resumedTeamAnswers };
         if (
             !skipPaymentPlanPreview
             && billing.allowPaymentPlans

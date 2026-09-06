@@ -188,6 +188,7 @@ data class TeamInviteEventTeamOptionDto(
 
 @Serializable
 data class TeamMemberInviteRequestDto(
+    val eventRegistration: EventRegistrationScopeDto? = null,
     val userId: String? = null,
     val email: String? = null,
     val role: String = "player",

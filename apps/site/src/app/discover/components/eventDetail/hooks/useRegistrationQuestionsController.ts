@@ -8,7 +8,7 @@ import type { Event, RegistrationQuestion, RegistrationQuestionAnswerInput, User
 
 import type { JoinIntent } from '../eventRegistrationCommands';
 import type { RegistrationWorkflowPhase } from '../registrationWorkflow';
-import type { RegistrationProgressPatch } from './useEventRegistrationProgress';
+import type { useEventRegistrationProgress } from './useEventRegistrationProgress';
 
 type SetWorkflowPhase = (
     phase: Exclude<RegistrationWorkflowPhase, 'idle'>,
@@ -24,7 +24,7 @@ type UseRegistrationQuestionsControllerArgs = {
     isMinor: boolean;
     selection: DivisionRegistrationSelection;
     occurrence?: WeeklyOccurrenceSelection;
-    saveProgress: (patch?: RegistrationProgressPatch) => void;
+    saveProgress: ReturnType<typeof useEventRegistrationProgress>['save'];
     beginSigning: (intent: JoinIntent) => Promise<boolean>;
     finalizeJoin: (intent: JoinIntent) => void | Promise<void>;
     reload: () => void | Promise<void>;
@@ -113,10 +113,10 @@ export function useRegistrationQuestionsController({
             ...intent,
             answers: buildAnswers(),
         };
-        saveProgress({
-            step: 'signing',
-            answers,
+        const saved = await saveProgress({
+            step: 'signing', answers, completedSteps: ['team', 'players', 'review', 'questions'],
         });
+        if (saved === null) return;
         setWorkflowPhase('questions', false);
         setIntent(null);
         setJoining(true);

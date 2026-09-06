@@ -183,6 +183,7 @@ class EventRegistrationFlowCoordinatorTest {
         assertTrue(coordinator.ensureQuestionsAnswered(eventName = "Event") {})
 
         assertNull(coordinator.applyRegistrationProgressDraft(null))
+        assertEquals(emptyMap(), coordinator.answers.value)
         assertNull(coordinator.holdExpiresAt.value)
         assertFalse(coordinator.ensureQuestionsAnswered(eventName = "Event") {})
     }

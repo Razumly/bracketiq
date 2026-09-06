@@ -1742,6 +1742,7 @@ async function updateParticipants(
               divisionTypeKey: divisionSelection.divisionTypeKey,
               placeholderDivisionIds: tournamentPoolIds,
               enforceProvisionedPlaceholderScope: isSchedulableTeamSignupEvent(event),
+              registrationStatus: isManualRegistrationPaymentMode(event.registrationPaymentMode) ? 'PENDING' : 'ACTIVE',
               occurrence: resolvedOccurrence,
             });
             const registeredEventTeamId = normalizeId((eventTeam as any)?.id) ?? teamId;

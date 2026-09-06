@@ -1,141 +1,96 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { useState } from 'react';
-
-import {
-    buildRegistrationProgressKey,
-    clearRegistrationProgress,
-    loadRegistrationProgress,
-    saveRegistrationProgress,
-} from '@/lib/registrationProgressStorage';
-
+import { ApiRequestError } from '@/lib/apiClient';
+import type { EventRegistrationDraftState } from '@/lib/contracts/eventRegistrationDraft';
+import { eventRegistrationDraftService } from '@/lib/eventRegistrationDraftService';
 import { useEventRegistrationProgress } from '../useEventRegistrationProgress';
 
-jest.mock('@/lib/registrationProgressStorage', () => ({
-    buildRegistrationProgressKey: jest.fn(),
-    clearRegistrationProgress: jest.fn(),
-    loadRegistrationProgress: jest.fn(),
-    saveRegistrationProgress: jest.fn(),
+jest.mock('@/lib/eventRegistrationDraftService', () => ({
+    eventRegistrationDraftService: { get: jest.fn(), save: jest.fn(), clear: jest.fn() },
 }));
 
-const mockedBuildKey = buildRegistrationProgressKey as jest.MockedFunction<
-    typeof buildRegistrationProgressKey
->;
-const mockedClear = clearRegistrationProgress as jest.MockedFunction<
-    typeof clearRegistrationProgress
->;
-const mockedLoad = loadRegistrationProgress as jest.MockedFunction<
-    typeof loadRegistrationProgress
->;
-const mockedSave = saveRegistrationProgress as jest.MockedFunction<
-    typeof saveRegistrationProgress
->;
-
-function useProgressHarness() {
-    const [answers, setAnswers] = useState<Record<string, string>>({ existing: 'answer' });
-    const [selectedTeamId, setSelectedTeamId] = useState('team_initial');
-    const [selectedDivisionId, setSelectedDivisionId] = useState('division_initial');
-    const [selectedDivisionTypeKey, setSelectedDivisionTypeKey] = useState('type_initial');
+function useHarness({ account = 'account', event = 'event' } = {}) {
+    const [answers, setAnswers] = useState<Record<string, string>>({});
+    const [selectedTeamId, setSelectedTeamId] = useState('');
+    const [selectedDivisionId, setSelectedDivisionId] = useState('');
+    const [selectedDivisionTypeKey, setSelectedDivisionTypeKey] = useState('');
     const progress = useEventRegistrationProgress({
-        userId: 'user_1',
-        eventId: 'event_1',
-        slotId: 'slot_1',
-        occurrenceDate: '2026-07-15',
-        answers,
-        selectedTeamId,
-        selectedDivisionId,
-        selectedDivisionTypeKey,
-        registrationId: 'registration_1',
-        setAnswers,
-        setSelectedTeamId,
-        setSelectedDivisionId,
-        setSelectedDivisionTypeKey,
+        userId: account, eventId: event, answers, selectedTeamId, selectedDivisionId,
+        selectedDivisionTypeKey, setAnswers, setSelectedTeamId, setSelectedDivisionId, setSelectedDivisionTypeKey,
     });
-
-    return {
-        answers,
-        selectedTeamId,
-        selectedDivisionId,
-        selectedDivisionTypeKey,
-        progress,
-    };
+    return { progress, answers, selectedTeamId };
 }
 
-describe('useEventRegistrationProgress', () => {
-    beforeEach(() => {
-        jest.clearAllMocks();
-        mockedBuildKey.mockReturnValue('progress_key');
-        mockedLoad.mockReturnValue(null);
+const savedState = (): EventRegistrationDraftState => ({
+            version: 1, available: true, unavailableReason: null, invalidations: [],
+            eligibleTeams: [{ id: 'saved-team', name: 'Saved Team', sport: 'Volleyball' }],
+            selectedTeamId: 'saved-team', selectionSource: 'draft',
+            draft: {
+                id: 'draft', eventId: 'event', revision: 4, slotId: null, occurrenceDate: null,
+                selectedTeamId: 'saved-team', selectedDivisionId: null, selectedDivisionTypeKey: null,
+                answers: { travel: 'Bus' }, step: 'signing', completedSteps: ['questions'],
+                registrationId: null, holdExpiresAt: null, teamCreationId: null, completedAt: null,
+                updatedAt: '2026-09-05T23:00:00Z',
+            },
+        });
+
+describe('shared Event registration progress', () => {
+    beforeEach(() => jest.clearAllMocks());
+
+    it('restores the server draft Team instead of a different remembered default', async () => {
+        jest.mocked(eventRegistrationDraftService.get).mockResolvedValue(savedState());
+        const { result } = renderHook(useHarness);
+        await waitFor(() => expect(result.current.selectedTeamId).toBe('saved-team'));
+        expect(result.current.answers).toEqual({ travel: 'Bus' });
     });
 
-    it('hydrates the current workflow from the scoped registration draft', async () => {
-        mockedLoad.mockReturnValue({
-            version: 1,
-            scope: 'event',
-            userId: 'user_1',
-            subjectId: 'event_1',
-            answers: { restored: 'yes' },
-            selectedTeamId: 'team_restored',
-            selectedDivisionId: 'division_restored',
-            selectedDivisionTypeKey: 'type_restored',
-            holdExpiresAt: '2026-07-15T20:00:00.000Z',
-            updatedAt: '2026-07-14T20:00:00.000Z',
+    it('serializes step saves with the last server revision', async () => {
+        jest.mocked(eventRegistrationDraftService.get).mockResolvedValue(savedState());
+        jest.mocked(eventRegistrationDraftService.save).mockImplementation(async (_event, input) => ({
+            ...savedState(), draft: { ...savedState().draft!, ...input.patch, revision: input.baseRevision + 1 },
+        }));
+        const { result } = renderHook(() => useHarness());
+        await waitFor(() => expect(result.current.progress.loading).toBe(false));
+        await act(async () => {
+            await Promise.all([result.current.progress.save({ answers: { travel: 'Train' } }), result.current.progress.save({ step: 'review' })]);
         });
-
-        const { result } = renderHook(() => useProgressHarness());
-
-        await waitFor(() => expect(result.current.selectedTeamId).toBe('team_restored'));
-        expect(result.current.answers).toEqual({ existing: 'answer', restored: 'yes' });
-        expect(result.current.selectedDivisionId).toBe('division_restored');
-        expect(result.current.selectedDivisionTypeKey).toBe('type_restored');
-        expect(result.current.progress.holdExpiresAt).toBe('2026-07-15T20:00:00.000Z');
-        expect(mockedBuildKey).toHaveBeenCalledWith({
-            scope: 'event',
-            userId: 'user_1',
-            subjectId: 'event_1',
-            slotId: 'slot_1',
-            occurrenceDate: '2026-07-15',
-        });
+        expect(jest.mocked(eventRegistrationDraftService.save).mock.calls.map(([, input]) => input.baseRevision)).toEqual([4, 5]);
+        expect(result.current.progress.state?.draft?.revision).toBe(6);
     });
 
-    it('saves the latest defaults with explicit patch values taking precedence', () => {
-        const { result } = renderHook(() => useProgressHarness());
-        act(() => {
-            result.current.progress.setHoldExpiresAt('2026-07-15T21:00:00.000Z');
+    it('shows actual saved progress after a conflict and cancels queued stale edits', async () => {
+        jest.mocked(eventRegistrationDraftService.get).mockResolvedValue(savedState());
+        const current = savedState();
+        current.draft = { ...current.draft!, revision: 5, answers: { travel: 'Train from mobile' } };
+        jest.mocked(eventRegistrationDraftService.save).mockRejectedValue(new ApiRequestError('Review the saved progress.', 409, { state: current }));
+        const { result } = renderHook(() => useHarness());
+        await waitFor(() => expect(result.current.progress.loading).toBe(false));
+        await act(async () => {
+            await Promise.all([result.current.progress.save({ answers: { travel: 'Old edit' } }), result.current.progress.save({ step: 'checkout' })]);
         });
-        act(() => {
-            result.current.progress.save({
-                step: 'checkout',
-                selectedTeamId: 'team_override',
-                registrationId: 'registration_override',
-            });
-        });
-
-        expect(mockedSave).toHaveBeenCalledWith('progress_key', {
-            scope: 'event',
-            userId: 'user_1',
-            subjectId: 'event_1',
-            step: 'checkout',
-            answers: { existing: 'answer' },
-            selectedTeamId: 'team_override',
-            selectedDivisionId: 'division_initial',
-            selectedDivisionTypeKey: 'type_initial',
-            slotId: 'slot_1',
-            occurrenceDate: '2026-07-15',
-            registrationId: 'registration_override',
-            holdExpiresAt: '2026-07-15T21:00:00.000Z',
-        });
+        expect(eventRegistrationDraftService.save).toHaveBeenCalledTimes(1);
+        expect(result.current.answers).toEqual({ travel: 'Train from mobile' });
+        expect(result.current.progress.error).toBe('Review the saved progress.');
     });
 
-    it('clears both storage and the active hold', () => {
-        const { result } = renderHook(() => useProgressHarness());
-        act(() => {
-            result.current.progress.setHoldExpiresAt('2026-07-15T21:00:00.000Z');
-        });
-        act(() => {
-            result.current.progress.clear();
-        });
+    it('reports an offline read without inventing a local registration draft', async () => {
+        jest.mocked(eventRegistrationDraftService.get).mockRejectedValue(new Error('Network unavailable.'));
+        const { result } = renderHook(() => useHarness());
+        await waitFor(() => expect(result.current.progress.error).toBe('Network unavailable.'));
+        expect(result.current.progress.state).toBeNull();
+        expect(result.current.selectedTeamId).toBe('');
+        await act(async () => { expect(await result.current.progress.save({ step: 'checkout' })).toBeNull(); });
+        expect(eventRegistrationDraftService.save).not.toHaveBeenCalled();
+    });
 
-        expect(mockedClear).toHaveBeenCalledWith('progress_key');
-        expect(result.current.progress.holdExpiresAt).toBeNull();
+    it('clears visible progress when the Account changes', async () => {
+        jest.mocked(eventRegistrationDraftService.get).mockResolvedValueOnce(savedState());
+        const { result, rerender } = renderHook(useHarness, { initialProps: { account: 'account', event: 'event' } });
+        await waitFor(() => expect(result.current.selectedTeamId).toBe('saved-team'));
+        jest.mocked(eventRegistrationDraftService.get).mockResolvedValue({ ...savedState(), draft: null, selectedTeamId: null, eligibleTeams: [], selectionSource: null });
+        rerender({ account: 'another-account', event: 'event' });
+        await waitFor(() => expect(result.current.progress.loading).toBe(false));
+        expect(result.current.selectedTeamId).toBe('');
+        expect(result.current.answers).toEqual({});
     });
 });

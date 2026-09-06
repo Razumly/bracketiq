@@ -192,6 +192,8 @@ export const ModelName = {
   BoldSignWebhookEvents: 'BoldSignWebhookEvents',
   BoldSignSyncOperations: 'BoldSignSyncOperations',
   ParentChildLinks: 'ParentChildLinks',
+  EventRegistrationDrafts: 'EventRegistrationDrafts',
+  EventRegistrationTeamPreferences: 'EventRegistrationTeamPreferences',
   EventRegistrations: 'EventRegistrations',
   AuthUser: 'AuthUser',
   FeedbackSubmissions: 'FeedbackSubmissions',
@@ -855,6 +857,7 @@ export const TeamInviteEventSyncsScalarFieldEnum = {
   eventId: 'eventId',
   eventTeamId: 'eventTeamId',
   userId: 'userId',
+  registrationId: 'registrationId',
   previousRegistrationSnapshot: 'previousRegistrationSnapshot',
   eventTeamHadUser: 'eventTeamHadUser',
   eventTeamHadPendingUser: 'eventTeamHadPendingUser',
@@ -3561,6 +3564,40 @@ export const ParentChildLinksScalarFieldEnum = {
 } as const
 
 export type ParentChildLinksScalarFieldEnum = (typeof ParentChildLinksScalarFieldEnum)[keyof typeof ParentChildLinksScalarFieldEnum]
+
+
+export const EventRegistrationDraftsScalarFieldEnum = {
+  id: 'id',
+  accountId: 'accountId',
+  eventId: 'eventId',
+  slotId: 'slotId',
+  occurrenceDate: 'occurrenceDate',
+  revision: 'revision',
+  selectedTeamId: 'selectedTeamId',
+  selectedDivisionId: 'selectedDivisionId',
+  selectedDivisionTypeKey: 'selectedDivisionTypeKey',
+  answers: 'answers',
+  step: 'step',
+  completedSteps: 'completedSteps',
+  registrationId: 'registrationId',
+  teamCreationId: 'teamCreationId',
+  completedAt: 'completedAt',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type EventRegistrationDraftsScalarFieldEnum = (typeof EventRegistrationDraftsScalarFieldEnum)[keyof typeof EventRegistrationDraftsScalarFieldEnum]
+
+
+export const EventRegistrationTeamPreferencesScalarFieldEnum = {
+  accountId: 'accountId',
+  sport: 'sport',
+  teamId: 'teamId',
+  registrationId: 'registrationId',
+  completedAt: 'completedAt'
+} as const
+
+export type EventRegistrationTeamPreferencesScalarFieldEnum = (typeof EventRegistrationTeamPreferencesScalarFieldEnum)[keyof typeof EventRegistrationTeamPreferencesScalarFieldEnum]
 
 
 export const EventRegistrationsScalarFieldEnum = {

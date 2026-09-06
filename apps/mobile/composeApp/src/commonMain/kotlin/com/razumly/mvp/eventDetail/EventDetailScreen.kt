@@ -30,6 +30,7 @@ import com.razumly.mvp.core.data.dataTypes.addOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.addOfficialUser
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.TeamCheckInMode
+import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.hasAnyPaidDivision
 import com.razumly.mvp.core.data.dataTypes.removeOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.removeOfficialUser
@@ -91,6 +92,9 @@ fun EventDetailScreen(
     }
     val scheduleTrackedUserIds by component.scheduleTrackedUserIds.collectAsState()
     val validTeams by component.validTeams.collectAsState()
+    val registrationSignup by component.registrationSignup.collectAsState()
+    val registrationSignupBusy by component.registrationSignupBusy.collectAsState()
+    val registrationTeams by component.registrationTeams.collectAsState()
     val showDetails by component.showDetails.collectAsState()
     val eventTeamsAndParticipantsLoading by component.eventTeamsAndParticipantsLoading.collectAsState()
     val participantDivisionWarnings by component.participantDivisionWarnings.collectAsState()
@@ -232,6 +236,34 @@ fun EventDetailScreen(
     val currentUserManagedEventTeam = accessPresentation.currentUserManagedEventTeam
 
     var showTeamSelectionDialog by remember { mutableStateOf(false) }
+    var signupForm by remember(selectedEvent.event.id, currentUser.id, selectedWeeklyOccurrence) { mutableStateOf<TeamWithPlayers?>(null) }
+    var signupFormStep by remember { mutableStateOf("team") }
+    var signupReview by remember(selectedEvent.event.id, currentUser.id, selectedWeeklyOccurrence) { mutableStateOf<TeamWithPlayers?>(null) }
+    fun createSignupTeam() {
+        component.prepareRegistrationTeam { draft ->
+            showTeamSelectionDialog = false
+            signupForm = draft
+            signupFormStep = "team"
+        }
+    }
+    fun selectSignupTeam(team: TeamWithPlayers) {
+        component.selectRegistrationTeam(team.team.id) {
+            showTeamSelectionDialog = false
+            if (registrationSignup?.draft?.step == "players") {
+                signupForm = team
+                signupFormStep = "players"
+            } else signupReview = team
+        }
+    }
+    fun openTeamSignup(divisionId: String? = null) {
+        divisionId?.let(component::selectDivision)
+        if (registrationSignupBusy || registrationSignup?.available != true) return
+        val selected = registrationTeams.firstOrNull { it.team.id == registrationSignup?.selectedTeamId }
+        if (registrationSignup?.draft?.let { it.step == "team" && it.teamCreationId != null } == true) createSignupTeam()
+        else if (selected != null) selectSignupTeam(selected)
+        else if (registrationSignup?.eligibleTeams?.isEmpty() == true) createSignupTeam()
+        else showTeamSelectionDialog = true
+    }
     var showOptionsDropdown by remember { mutableStateOf(false) }
     var showQrCodeDialog by remember { mutableStateOf(false) }
     var showEventStateDropdown by remember { mutableStateOf(false) }
@@ -476,6 +508,7 @@ fun EventDetailScreen(
         }
     }
     val joinPresentation = remember(
+        registrationSignup, registrationSignupBusy, registrationTeams,
         selectedEvent.event,
         selectedDivision,
         selectedJoinOptionDivisionId,
@@ -505,10 +538,7 @@ fun EventDetailScreen(
             isAffiliateEvent = isAffiliateEvent,
             isRegistrationPaymentFailed = isRegistrationPaymentFailed,
             onJoinEvent = component::joinEvent,
-            onSelectTeam = { divisionId ->
-                divisionId?.let(component::selectDivision)
-                showTeamSelectionDialog = true
-            },
+            onSelectTeam = ::openTeamSignup,
         )
     }
     val joinOptions = joinPresentation.options
@@ -1029,10 +1059,14 @@ fun EventDetailScreen(
                     directionsEnabled = hasDirectionsTarget,
                     selectedWeeklyOccurrenceLabel = selectedWeeklyOccurrence?.label,
                     isArchivedEvent = selectedEvent.event.isArchived(),
+                    hasSavedRegistration = registrationSignup?.draft?.let { it.completedAt == null } == true,
                 ),
                 actions = EventDetailOverviewStickyActionActions(
                     onAffiliateJoin = component::joinEvent,
-                    onOpenJoinOptions = { showJoinOptionsSheet = true },
+                    onOpenJoinOptions = {
+                        if (selectedEvent.event.teamSignup && registrationSignup?.draft?.let { it.completedAt == null } == true) openTeamSignup()
+                        else showJoinOptionsSheet = true
+                    },
                     onViewEvent = component::viewEvent,
                     onMapClick = mapComponent::toggleMap,
                     onDirectionsClick = component::openEventDirections,
@@ -1045,7 +1079,10 @@ fun EventDetailScreen(
                 }
         }
 
-        EventDetailOverlayHost(
+        EventSignupDialogs(component, selectedEvent.event, currentUser, sports, signupForm, signupFormStep, signupReview,
+        onFormChange = { form, step -> signupForm = form; signupFormStep = step },
+        onReviewChange = { signupReview = it }, onChangeTeam = { showTeamSelectionDialog = true })
+    EventDetailOverlayHost(
             state = EventDetailOverlayHostState(
                 showWithdrawTargetDialog = showWithdrawTargetDialog,
                 withdrawTargets = actionWithdrawTargets,
@@ -1074,7 +1111,7 @@ fun EventDetailScreen(
                 resourceLabelsByFieldId = resourceLabelsByFieldId,
                 showTeamSelectionDialog = showTeamSelectionDialog,
                 teamSelectionSportLabel = teamSelectionSportLabel,
-                validTeams = validTeams,
+                validTeams = registrationTeams,
                 showEventTeamCheckInDialog = showEventTeamCheckInDialog,
                 eventTeamCheckInSaving = eventTeamCheckInSaving,
                 eventTeamName = currentUserManagedEventTeam
@@ -1158,12 +1195,9 @@ fun EventDetailScreen(
                 onDismissMatchEdit = component::dismissMatchEditDialog,
                 onConfirmMatchEdit = component::updateMatchFromDialog,
                 onDeleteMatch = component::deleteMatchFromDialog,
-                onJoinTeamSelected = { selectedTeam ->
-                    showTeamSelectionDialog = false
-                    component.joinEventAsTeam(selectedTeam)
-                },
+                onJoinTeamSelected = ::selectSignupTeam,
                 onDismissJoinTeamSelection = { showTeamSelectionDialog = false },
-                onCreateTeam = component::createNewTeam,
+                onCreateTeam = ::createSignupTeam,
                 onDismissEventTeamCheckIn = component::dismissEventTeamCheckInDialog,
                 onConfirmEventTeamCheckIn = component::confirmEventTeamCheckIn,
                 onDismissJoinChoice = component::dismissJoinChoiceDialog,

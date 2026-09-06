@@ -745,6 +745,16 @@ export type BoldSignSyncOperations = Prisma.BoldSignSyncOperationsModel
  */
 export type ParentChildLinks = Prisma.ParentChildLinksModel
 /**
+ * Model EventRegistrationDrafts
+ *
+ */
+export type EventRegistrationDrafts = Prisma.EventRegistrationDraftsModel
+/**
+ * Model EventRegistrationTeamPreferences
+ *
+ */
+export type EventRegistrationTeamPreferences = Prisma.EventRegistrationTeamPreferencesModel
+/**
  * Model EventRegistrations
  *
  */

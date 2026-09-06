@@ -71,6 +71,7 @@ internal class EventSessionCacheCoordinator(
     }
 
     private suspend fun clearForSessionChange() {
+        databaseService.clearEventSignupCache()
         databaseService.getEventDao.clearAllEventsWithCrossRefs()
         databaseService.getEventTimeSlotDao.deleteAllTimeSlots()
         databaseService.getEventParticipantManagementDao.clearAll()

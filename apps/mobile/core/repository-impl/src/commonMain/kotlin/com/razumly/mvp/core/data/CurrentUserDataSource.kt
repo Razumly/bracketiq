@@ -26,6 +26,7 @@ private val REGISTRATION_PROGRESS_MAX_AGE = 24.hours
 
 @Serializable
 data class RegistrationProgressDraft(
+    val completedSteps: List<String> = emptyList(),
     val version: Int = 1,
     val scope: String,
     val userId: String,
