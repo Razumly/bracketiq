@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 const prismaMock = {
   organizationTags: {
     findMany: jest.fn(),

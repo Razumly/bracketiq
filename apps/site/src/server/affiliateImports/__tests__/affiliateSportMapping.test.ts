@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 import {
   BLACKLISTED_AFFILIATE_SPORT_NAMES,
   affiliateAgentCanonicalSportNames,

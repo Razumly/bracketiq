@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 import { resolveSetCompletionForMatch } from '../setScoringRules';
 
 describe('resolveSetCompletionForMatch', () => {

@@ -5573,7 +5573,7 @@ describe('affiliate supply persistence seams', () => {
           'AFFILIATE_AGENT_CODEX_AUTH_SEED=/run/secrets/codex-auth.json',
           'AFFILIATE_AGENT_CODEX_MODEL=gpt-5.6-luna',
         ],
-        volumes: ['reviewed-auth:/run/secrets/codex-auth.json:ro'],
+        volumes: ['/reviewed/auth.json:/run/secrets/codex-auth.json:ro'],
         networks: ['affiliate_gateway_internal', 'affiliate_gateway_egress'],
         isNetworkInternal: true,
         capDrop: ['ALL'],

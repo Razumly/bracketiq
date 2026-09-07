@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 import { ensureDefaultSports } from '../defaultSports';
 import { dedupeCanonicalSports } from '../canonicalSports';
 

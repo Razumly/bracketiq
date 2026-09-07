@@ -66,7 +66,7 @@ fi
 
 (
   cd "$repo_root"
-  ./gradlew :composeApp:assembleRelease --no-daemon --console=plain --stacktrace
+  ./gradlew :composeApp:assembleRelease --console=plain --stacktrace "$@"
 )
 
 release_apk="$repo_root/composeApp/build/outputs/apk/release/composeApp-release-unsigned.apk"

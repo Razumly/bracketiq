@@ -238,7 +238,7 @@ describe('EventDetailSheet payment-plan join conflicts', () => {
     fireEvent.click(within(questionsDialog).getByRole('button', { name: 'Continue' }));
 
     const passwordDialog = await screen.findByRole('dialog', { name: 'Confirm your password' });
-    expect(screen.getByRole('dialog', { name: 'Registration questions' })).not.toBeVisible();
+    expect(questionsDialog).not.toBeVisible();
     expect(screen.queryByRole('dialog', { name: 'Sign required documents' })).not.toBeInTheDocument();
     fireEvent.change(within(passwordDialog).getByLabelText(/Password/), { target: { value: 'test-password' } });
     fireEvent.click(within(passwordDialog).getByRole('button', { name: 'Continue' }));
@@ -248,13 +248,13 @@ describe('EventDetailSheet payment-plan join conflicts', () => {
     if (questionsDialogAfterSigning) {
       expect(questionsDialogAfterSigning).not.toBeVisible();
     }
-    expect(screen.getByRole('dialog', { name: 'Confirm your password' })).not.toBeVisible();
+    expect(passwordDialog).not.toBeVisible();
     const signingCloseButton = signingDialog.querySelector<HTMLButtonElement>('.mantine-Modal-close');
     expect(signingCloseButton).not.toBeNull();
     fireEvent.click(signingCloseButton!);
 
     await waitFor(() => {
-      expect(screen.getByRole('dialog', { name: 'Sign required documents' })).not.toBeVisible();
+      expect(signingDialog).not.toBeVisible();
       expect(screen.getByText('Signature process canceled.')).toBeInTheDocument();
     });
     expect(registrationService.registerSelfForEvent).not.toHaveBeenCalled();

@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 import { buildPublicBracketWidgetView } from '@/server/publicWidgetBracket';
 
 type TestMatch = {

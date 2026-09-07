@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 import type { AgentPageContext } from '@/lib/agent/types';
 import type { AgentConversationOwner } from '../conversations';
 import type * as AgentTools from '../tools';

@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 import { checkInTeam } from '../teamCheckIns';
 
 if (typeof globalThis.Response === 'undefined') {

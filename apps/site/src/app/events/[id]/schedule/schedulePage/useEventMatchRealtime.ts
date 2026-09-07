@@ -156,7 +156,7 @@ export default function useEventMatchRealtime({
       try {
         const response = await apiRequest<{ matches?: Match[] }>(
           `/api/events/${realtimeEventId}/matches`,
-          { timeoutMs: 15_000 },
+          { timeoutMs: 15_000, signal: realtimeAbortController.signal },
         );
         if (!cancelled) {
           applyRealtimeMatchSnapshot(response.matches ?? []);
@@ -169,6 +169,7 @@ export default function useEventMatchRealtime({
     };
 
     const scheduleReconnect = () => {
+      if (cancelled) return;
       clearReconnectTimer();
       reconnectTimer = setTimeout(() => {
         void connect();
@@ -176,6 +177,7 @@ export default function useEventMatchRealtime({
     };
 
     async function connect() {
+      if (cancelled) return;
       try {
         const nextSocket = await connectEventMatchSocket({
           eventId: realtimeEventId,

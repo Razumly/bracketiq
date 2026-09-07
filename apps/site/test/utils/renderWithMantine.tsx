@@ -12,7 +12,7 @@ export const renderWithMantine = (
   providerOptions?: MantineProviderOptions,
 ) =>
   render(
-    <MantineProvider {...providerOptions}>
+    <MantineProvider env="test" {...providerOptions}>
       <ModalsProvider>
         <Notifications />
         {ui}

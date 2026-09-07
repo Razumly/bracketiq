@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 import { loadBillDiscountSummaries } from '@/server/billing/billDiscountSummaries';
 
 describe('loadBillDiscountSummaries', () => {

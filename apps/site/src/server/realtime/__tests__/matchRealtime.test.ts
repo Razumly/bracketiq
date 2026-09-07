@@ -1,3 +1,5 @@
+/** @jest-environment node */
+
 const refreshBroadcastPresentationForEventMock = jest.fn();
 
 jest.mock('@/server/broadcast/presentation', () => ({
