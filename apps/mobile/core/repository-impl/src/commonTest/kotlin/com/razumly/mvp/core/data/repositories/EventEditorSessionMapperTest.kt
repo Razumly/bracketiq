@@ -803,29 +803,37 @@ class EventEditorSessionMapperTest {
     }
 
     @Test
-    fun given_unscheduled_league_generated_end_bootstrap_when_create_command_is_built_then_generated_end_is_normalized_to_fixed_end() {
+    fun given_unscheduled_league_generated_end_bootstrap_when_create_command_is_built_then_it_is_rejected() {
         val session = EventEditorSessionMapper.fromCreateBootstrap(
-            editorProtocolBootstrap(
-                editorProtocolSnapshot(
-                    generatedEnd = true,
-                    isAutomatedScheduling = false,
-                ),
-            ),
+            editorProtocolBootstrap(editorProtocolSnapshot(generatedEnd = true, isAutomatedScheduling = false)),
         )
-
         assertFalse(session.canonicalState.event.isAutomatedScheduling)
-        assertFalse(session.canonicalState.event.noFixedEndDateTime)
+        assertTrue(session.canonicalState.event.noFixedEndDateTime)
+        assertFailsWith<IllegalArgumentException> {
+            EventEditorSessionMapper.toCreateCommand(session, EventEditorMutation(session.canonicalState))
+        }
+    }
 
-        val command = EventEditorSessionMapper.toCreateCommand(
-            session = session,
-            mutation = EventEditorMutation(session.canonicalState),
-        ).command
-
-        assertEquals(EventEditorCreateCompletionMode.CREATE_ONLY, command.completion.mode)
+    @Test
+    fun given_generated_policy_when_automation_is_disabled_then_save_preserves_policy_and_end() {
+        val session = EventEditorSessionMapper.fromEditSnapshot(editorProtocolSnapshot(mode = "EDIT", generatedEnd = true))
+        val edited = session.canonicalState.copy(event = session.canonicalState.event.copy(isAutomatedScheduling = false))
+        val command = EventEditorSessionMapper.toSaveCommand(session, EventEditorMutation(edited))
         assertFalse(command.draft.schedule.isAutomatedScheduling)
-        assertEquals("FIXED_END", command.draft.schedule.mode)
-        assertEquals("2026-09-30T00:00:00Z", command.draft.schedule.endConstraint)
-        assertNull(command.draft.schedule.generatedScheduleEnd)
+        assertEquals("GENERATED_END", command.draft.schedule.mode)
+        assertEquals(session.snapshot.draft.schedule.generatedScheduleEnd, command.draft.schedule.generatedScheduleEnd)
+        val saved = EventEditorSessionMapper.fromEditSnapshot(session.snapshot.copy(draft = command.draft))
+        assertTrue(saved.canonicalState.event.noFixedEndDateTime)
+        assertEquals(session.canonicalState.event.end, saved.canonicalState.event.end)
+    }
+
+    @Test
+    fun given_planned_policy_when_generated_policy_is_selected_without_automation_then_save_is_rejected() {
+        val session = EventEditorSessionMapper.fromEditSnapshot(editorProtocolSnapshot(mode = "EDIT", isAutomatedScheduling = false))
+        val edited = session.canonicalState.copy(event = session.canonicalState.event.copy(noFixedEndDateTime = true))
+        assertFailsWith<IllegalArgumentException> {
+            EventEditorSessionMapper.toSaveCommand(session, EventEditorMutation(edited))
+        }
     }
 
     @Test

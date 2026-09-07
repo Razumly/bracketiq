@@ -368,6 +368,101 @@ class EventRepositoryRoomPersistenceTest {
                 database.close()
             }
         }
+    @Test
+    fun given_live_site_when_end_policy_and_matches_change_then_server_and_room_enforce_bounds() =
+        kotlinx.coroutines.test.runTest(timeout = kotlin.time.Duration.parse("10m")) {
+            val apiUrl = System.getenv("MVP_ISSUE52_API_URL").orEmpty()
+            val token = System.getenv("MVP_ISSUE52_TOKEN").orEmpty()
+            val ids = System.getenv("MVP_ISSUE52_EVENT_IDS").orEmpty().split(',').filter(String::isNotBlank)
+            org.junit.Assume.assumeTrue("Issue 52 live fixture is not configured.", apiUrl.isNotBlank() && token.isNotBlank())
+            require(java.net.URI(apiUrl).host in setOf("localhost", "127.0.0.1") && ids.all { it.startsWith("issue-52-") })
+            val database = Room.inMemoryDatabaseBuilder<MVPDatabaseService>(context).allowMainThreadQueries().build()
+            database.getUserDataDao.upsertUsersData(listOf(UserData().copy(
+                id = "issue-52-host", firstName = "Test", lastName = "Host", userName = "issue52host",
+            )))
+            val http = HttpClient { configureMvpHttpClient() }
+            val tokens = mockk<AuthTokenStore>()
+            coEvery { tokens.get() } returns token
+            val api = MvpApiClient(http, apiUrl, tokens)
+            val repository = eventRepositoryRoomPersistenceRepository(
+                EventRepositoryRoomPersistence_NoStartupCleanupDatabase(database), http,
+                UnconfinedTestDispatcher(testScheduler), api = api,
+            )
+            val matches = com.razumly.mvp.eventDetail.data.MatchRepository(api, database, autoSyncOperations = false)
+            suspend fun propose(id: String, operation: EventEditorMaintenanceOperation): com.razumly.mvp.core.network.dto.EventEditorMaintenanceProposalDto {
+                val response = repository.proposeEventScheduleMaintenance(EventEditorMaintenanceRequestDto(
+                    contractVersion = com.razumly.mvp.core.network.dto.EVENT_EDITOR_CONTRACT_VERSION,
+                    eventId = id, operation = operation, operationId = java.util.UUID.randomUUID().toString(), includePlaceholderTeams = true,
+                )).getOrThrow()
+                return kotlin.test.assertIs<com.razumly.mvp.core.network.dto.EventEditorMaintenanceResponseDto.Proposed>(response).proposal
+            }
+            fun acceptance(proposal: com.razumly.mvp.core.network.dto.EventEditorMaintenanceProposalDto) = EventEditorAcceptMaintenanceProposalDto(
+                contractVersion = proposal.contractVersion, eventId = proposal.eventId, operation = proposal.operation,
+                operationId = proposal.operationId, proposalRevision = proposal.proposalRevision,
+                acceptanceOperationId = java.util.UUID.randomUUID().toString(),
+            )
+            suspend fun cachedEnd(id: String) = repository.getCachedEventWithRelationsFlow(id).first().getOrThrow().event.end
+            try {
+                val plannedId = ids.single { it.endsWith("-league") }
+                val planned = repository.getEventEditor(plannedId).getOrThrow()
+                for (operation in listOf(EventEditorMaintenanceOperation.BUILD, EventEditorMaintenanceOperation.REBUILD)) {
+                    val result = repository.acceptEventScheduleMaintenance(acceptance(propose(plannedId, operation))).getOrThrow()
+                    assertEquals(planned.canonicalState.event.end, Instant.parse(requireNotNull(result.graph.event.end)))
+                    assertEquals(planned.canonicalState.event.end, cachedEnd(plannedId))
+                }
+                val eventId = ids.single { it.endsWith("-tournament") }
+                val generated = repository.acceptEventScheduleMaintenance(acceptance(propose(eventId, EventEditorMaintenanceOperation.REBUILD))).getOrThrow()
+                val graphEnd = generated.graph.matches.mapNotNull { it.end?.let(Instant::parse) }.max()
+                assertEquals(graphEnd, Instant.parse(requireNotNull(generated.graph.event.end)))
+                assertEquals(graphEnd, cachedEnd(eventId))
+                val initial = repository.getEventEditor(eventId).getOrThrow()
+                val disabled = repository.saveEventEditor(eventId, EventEditorSessionMapper.toSaveCommand(initial,
+                    EventEditorMutation(initial.canonicalState.copy(event = initial.canonicalState.event.copy(isAutomatedScheduling = false))),
+                )).getOrThrow().session
+                assertTrue(disabled.canonicalState.event.noFixedEndDateTime)
+                assertEquals(graphEnd, disabled.canonicalState.event.end)
+                assertEquals(graphEnd, cachedEnd(eventId))
+                val enabled = repository.saveEventEditor(eventId, EventEditorSessionMapper.toSaveCommand(disabled,
+                    EventEditorMutation(disabled.canonicalState.copy(event = disabled.canonicalState.event.copy(isAutomatedScheduling = true))),
+                )).getOrThrow().session
+                val stale = propose(eventId, EventEditorMaintenanceOperation.REBUILD)
+                val explicitEnd = planned.canonicalState.event.end
+                val fixed = repository.saveEventEditor(eventId, EventEditorSessionMapper.toSaveCommand(enabled,
+                    EventEditorMutation(enabled.canonicalState.copy(event = enabled.canonicalState.event.copy(noFixedEndDateTime = false, end = explicitEnd))),
+                )).getOrThrow().session
+                val beforeStale = database.getMatchDao.getMatchesOfTournament(eventId).sortedBy { it.id }
+                val staleError = repository.acceptEventScheduleMaintenance(acceptance(stale)).exceptionOrNull()
+                assertEquals("EDITOR_MAINTENANCE_STALE", kotlin.test.assertIs<EventEditorApiException>(staleError).payload?.code)
+                assertEquals(beforeStale, database.getMatchDao.getMatchesOfTournament(eventId).sortedBy { it.id })
+                val remoteMatches = matches.getMatchesOfTournament(eventId).getOrThrow()
+                val latest = remoteMatches.filter { it.end != null }.maxBy { it.end!! }
+                val moved = latest.copy(start = explicitEnd + kotlin.time.Duration.parse("10m"), end = explicitEnd + kotlin.time.Duration.parse("40m"))
+                val before = database.getMatchDao.getMatchesOfTournament(eventId).sortedBy { it.id }
+                val rejected = matches.updateMatchesBulk(listOf(moved)).exceptionOrNull()
+                val boundary = kotlin.test.assertIs<com.razumly.mvp.core.network.ApiException>(rejected).matchBoundaryError
+                assertNotNull(boundary)
+                assertEquals("MATCH_OUTSIDE_EVENT_BOUNDS", boundary.code)
+                assertEquals(listOf(latest.id), boundary.matchIds)
+                assertEquals(before, database.getMatchDao.getMatchesOfTournament(eventId).sortedBy { it.id })
+                assertEquals(explicitEnd, cachedEnd(eventId))
+                val extendedEnd = explicitEnd + kotlin.time.Duration.parse("1h")
+                repository.saveEventEditor(eventId, EventEditorSessionMapper.toSaveCommand(fixed,
+                    EventEditorMutation(fixed.canonicalState.copy(event = fixed.canonicalState.event.copy(end = extendedEnd))),
+                )).getOrThrow()
+                matches.updateMatchesBulk(listOf(moved)).getOrThrow()
+                assertEquals(moved.end, database.getMatchDao.getMatchById(latest.id)?.match?.end)
+                assertEquals(extendedEnd, cachedEnd(eventId))
+                matches.updateMatchesBulk(emptyList(), deletes = listOf(latest.id)).getOrThrow()
+                assertNull(database.getMatchDao.getMatchById(latest.id))
+                assertEquals(extendedEnd, cachedEnd(eventId))
+                assertEquals(extendedEnd, repository.getEventEditor(eventId).getOrThrow().canonicalState.event.end)
+            } finally {
+                repository.close()
+                http.close()
+                database.close()
+            }
+        }
+
     private lateinit var context: Context
 
     @Before

@@ -318,7 +318,7 @@ class EventEditDraftCoordinatorTest {
     }
 
     @Test
-    fun given_unscheduled_league_update_when_generated_end_is_still_set_then_it_is_cleared() {
+    fun given_unscheduled_league_update_when_generated_end_is_still_set_then_it_is_preserved() {
         val coordinator = EventEditDraftCoordinator(
             initialEvent = leagueEvent().copy(
                 isAutomatedScheduling = true,
@@ -341,11 +341,11 @@ class EventEditDraftCoordinatorTest {
         }
 
         assertEquals(false, coordinator.editedEvent.value.isAutomatedScheduling)
-        assertEquals(false, coordinator.editedEvent.value.noFixedEndDateTime)
+        assertEquals(true, coordinator.editedEvent.value.noFixedEndDateTime)
     }
 
     @Test
-    fun given_generated_end_when_start_moves_past_end_then_disabling_automation_repairs_fixed_end() {
+    fun given_generated_end_when_start_moves_past_end_then_disabling_automation_preserves_the_end() {
         val storedEnd = Instant.parse("2026-05-13T12:00:00Z")
         val coordinator = EventEditDraftCoordinator(
             initialEvent = leagueEvent(
@@ -370,9 +370,9 @@ class EventEditDraftCoordinatorTest {
         coordinator.updateEditedEvent { it.withAutomatedScheduling(false) }
 
         assertEquals(false, coordinator.editedEvent.value.isAutomatedScheduling)
-        assertEquals(false, coordinator.editedEvent.value.noFixedEndDateTime)
+        assertEquals(true, coordinator.editedEvent.value.noFixedEndDateTime)
         assertEquals(
-            Instant.parse("2026-05-14T13:00:00Z"),
+            storedEnd,
             coordinator.editedEvent.value.end,
         )
     }

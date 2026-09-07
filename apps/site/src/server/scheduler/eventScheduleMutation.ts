@@ -1,4 +1,4 @@
-import type { Prisma } from "@/generated/prisma/client";
+import { proposalDivisionPersistence } from "./proposalDivisionPersistence";import type { Prisma } from "@/generated/prisma/client";
 import {
   deletePristineScheduleByEvent,
   loadEventWithRelations,
@@ -36,7 +36,10 @@ import {
 } from "./standings";
 import { rescheduleEventMatchesPreservingLocks } from "./reschedulePreservingLocks";
 import { acquireFieldLocks } from "@/server/repositories/locks";
-import { EventBuilder, type EventBuilderPlacementFailure } from "./EventBuilder";
+import {
+  EventBuilder,
+  type EventBuilderPlacementFailure,
+} from "./EventBuilder";
 import {
   collectUnresolvedStaffingDiagnostics,
   OfficialStaffingPlanner,
@@ -49,9 +52,7 @@ import {
   rekeyMatchGraph,
   type MatchDemand,
 } from "./matchGraph";
-import {
-  diagnoseScheduleProposal,
-} from "./scheduleDiagnostics";
+import { diagnoseScheduleProposal } from "./scheduleDiagnostics";
 import type { EventEditorScheduleDiagnostics } from "@/contracts/eventEditor";
 import { Division, League, Match, SchedulerContext, Tournament } from "./types";
 import {
@@ -177,7 +178,9 @@ export const validateAndNormalizeSerializedGraph = (
 ): EventEditorCreateProposalGraph => {
   const normalizedEventId = eventId.trim();
   if (!normalizedEventId || graph.event.id !== normalizedEventId) {
-    return proposalGraphError("the graph event does not match the create operation.");
+    return proposalGraphError(
+      "the graph event does not match the create operation.",
+    );
   }
   const eventType = graph.event.eventType.trim().toUpperCase();
   if (!["LEAGUE", "TOURNAMENT"].includes(eventType)) {
@@ -188,19 +191,24 @@ export const validateAndNormalizeSerializedGraph = (
   }
 
   const matchIds = new Set<string>();
-  for (const match of graph.matches) {
-    const matchId = match.id.trim();
-    if (!matchId) {
-      return proposalGraphError("a Match Graph node has no identity.");
+  const assertMatchIdentities = () => {
+    for (const match of graph.matches) {
+      const matchId = match.id.trim();
+      if (!matchId) {
+        return proposalGraphError("a Match Graph node has no identity.");
+      }
+      if (matchIds.has(matchId)) {
+        return proposalGraphError(
+          `the Match Graph contains duplicate node ${matchId}.`,
+        );
+      }
+      if (match.eventId !== normalizedEventId) {
+        return proposalGraphError(`Match ${matchId} belongs to another event.`);
+      }
+      matchIds.add(matchId);
     }
-    if (matchIds.has(matchId)) {
-      return proposalGraphError(`the Match Graph contains duplicate node ${matchId}.`);
-    }
-    if (match.eventId !== normalizedEventId) {
-      return proposalGraphError(`Match ${matchId} belongs to another event.`);
-    }
-    matchIds.add(matchId);
-  }
+  };
+  assertMatchIdentities();
 
   const divisionDetails = [
     ...graph.event.divisionDetails,
@@ -215,7 +223,9 @@ export const validateAndNormalizeSerializedGraph = (
   ]);
   const fieldIds = new Set(graph.event.fields.map((field) => field.id));
   const teamIds = new Set(graph.event.teams.map((team) => team.id));
-  const officialIds = new Set(graph.event.officials.map((official) => official.id));
+  const officialIds = new Set(
+    graph.event.officials.map((official) => official.id),
+  );
   const eventOfficialIds = new Set(
     graph.event.eventOfficials.map((official) => official.id),
   );
@@ -237,29 +247,27 @@ export const validateAndNormalizeSerializedGraph = (
     ...graph.event.officialPositions.map((position) => position.id),
     ...divisionDetails.flatMap((division) =>
       Object.values(division.phaseSettings).flatMap(
-        (settings) => settings.officialPositions?.map((position) => position.id) ?? [],
+        (settings) =>
+          settings.officialPositions?.map((position) => position.id) ?? [],
       ),
     ),
   ]);
-  const staffingPriority: StaffingPriority = (
-    typeof graph.event.staffingPriority === "string"
-    && graph.event.staffingPriority.trim().length > 0
-  )
-    ? normalizeStaffingPriority(
-      graph.event.staffingPriority,
-      graph.event.officialSchedulingMode,
-    )
-    : "FULL_COVERAGE_REQUIRED";
+  const staffingPriority: StaffingPriority =
+    typeof graph.event.staffingPriority === "string" &&
+    graph.event.staffingPriority.trim().length > 0
+      ? normalizeStaffingPriority(
+          graph.event.staffingPriority,
+          graph.event.officialSchedulingMode,
+        )
+      : "FULL_COVERAGE_REQUIRED";
   const staffingPolicy = getStaffingPriorityPolicy(staffingPriority);
 
-  const phaseSettingsForMatch = (
-    match: typeof graph.matches[number],
-  ) => {
+  const phaseSettingsForMatch = (match: (typeof graph.matches)[number]) => {
     const division = divisionDetails.find(
       (candidate) =>
-        candidate.id === match.division
-        || candidate.id === match.phaseDivisionId
-        || candidate.id === match.sourceDivisionId,
+        candidate.id === match.division ||
+        candidate.id === match.phaseDivisionId ||
+        candidate.id === match.sourceDivisionId,
     );
     const phase = (match.phase ?? division?.phase ?? "").trim().toUpperCase();
     return Object.entries(division?.phaseSettings ?? {}).find(
@@ -267,33 +275,34 @@ export const validateAndNormalizeSerializedGraph = (
     )?.[1];
   };
 
-  const officialPositionsForMatch = (
-    match: typeof graph.matches[number],
-  ) => phaseSettingsForMatch(match)?.officialPositions
-    ?? graph.event.officialPositions;
+  const officialPositionsForMatch = (match: (typeof graph.matches)[number]) =>
+    phaseSettingsForMatch(match)?.officialPositions ??
+    graph.event.officialPositions;
 
-  const assertPlacement = (
-    match: typeof graph.matches[number],
+  const assertUnplacedMatch = (
+    match: (typeof graph.matches)[number],
     label: string,
   ): void => {
-    const placementState = String(match.placementState ?? "").trim().toUpperCase();
-    if (placementState === "UNPLACED") {
-      if (match.fieldId !== null) {
-        proposalGraphError(`${label} has an unexpected proposed resource.`);
-      }
-      if (match.start !== null || match.end !== null) {
-        proposalGraphError(`${label} has unexpected proposed time.`);
-      }
-      if (
-        match.teamOfficialId !== null
-        || match.official !== null
-        || match.officialAssignments.length > 0
-        || match.officialIds.length > 0
-      ) {
-        proposalGraphError(`${label} has unexpected proposed officiating.`);
-      }
-      return;
+    if (match.fieldId !== null) {
+      proposalGraphError(`${label} has an unexpected proposed resource.`);
     }
+    if (match.start !== null || match.end !== null) {
+      proposalGraphError(`${label} has unexpected proposed time.`);
+    }
+    if (
+      match.teamOfficialId !== null ||
+      match.official !== null ||
+      match.officialAssignments.length > 0 ||
+      match.officialIds.length > 0
+    ) {
+      proposalGraphError(`${label} has unexpected proposed officiating.`);
+    }
+  };
+  const assertPlacedTime = (
+    match: (typeof graph.matches)[number],
+    label: string,
+    placementState: string,
+  ): void => {
     if (placementState !== "PLACED") {
       proposalGraphError(`${label} has an unsupported placement state.`);
     }
@@ -308,9 +317,22 @@ export const validateAndNormalizeSerializedGraph = (
     if (!Number.isFinite(start) || !Number.isFinite(end) || start >= end) {
       proposalGraphError(`${label} has an invalid proposed time.`);
     }
+  };
+  const assertPlacement = (
+    match: (typeof graph.matches)[number],
+    label: string,
+  ): void => {
+    const placementState = String(match.placementState ?? "")
+      .trim()
+      .toUpperCase();
+    if (placementState === "UNPLACED") {
+      assertUnplacedMatch(match, label);
+      return;
+    }
+    assertPlacedTime(match, label, placementState);
     const teamDutyConfigured =
-      phaseSettingsForMatch(match)?.doTeamsOfficiate
-      ?? graph.event.doTeamsOfficiate === true;
+      phaseSettingsForMatch(match)?.doTeamsOfficiate ??
+      graph.event.doTeamsOfficiate === true;
     const requiresTeamOfficial =
       teamDutyConfigured && staffingPolicy.isHardTeamCoverageRequired;
     if (requiresTeamOfficial && !match.teamOfficialId) {
@@ -319,7 +341,7 @@ export const validateAndNormalizeSerializedGraph = (
   };
 
   const assertCompleteOfficiating = (
-    match: typeof graph.matches[number],
+    match: (typeof graph.matches)[number],
     label: string,
   ): void => {
     const positions = officialPositionsForMatch(match);
@@ -335,7 +357,10 @@ export const validateAndNormalizeSerializedGraph = (
     positions.forEach((position) => {
       Array.from({ length: position.count }, (_, slotIndex) => {
         const assignment = assignmentsBySlot.get(`${position.id}:${slotIndex}`);
-        if (!assignment || (!assignment.userId && !assignment.eventOfficialId)) {
+        if (
+          !assignment ||
+          (!assignment.userId && !assignment.eventOfficialId)
+        ) {
           proposalGraphError(
             `${label} has an unresolved officiating slot for ${position.name} ${slotIndex + 1}.`,
           );
@@ -362,8 +387,39 @@ export const validateAndNormalizeSerializedGraph = (
       proposalGraphError(`${label} does not match its serialized identifier.`);
     }
   };
+  const assertAssignmentHolder = (
+    assignment: (typeof graph.matches)[number]["officialAssignments"][number],
+    label: string,
+    index: number,
+    holderType: string,
+  ): void => {
+    if (holderType === "PLAYER" && assignment.eventOfficialId) {
+      proposalGraphError(
+        `${label} player assignment has an event official at slot ${index + 1}.`,
+      );
+    }
+    if (assignment.userId && assignment.eventOfficialId) {
+      const eventOfficial = graph.event.eventOfficials.find(
+        (candidate) => candidate.id === assignment.eventOfficialId,
+      );
+      if (eventOfficial?.userId !== assignment.userId) {
+        proposalGraphError(
+          `${label} event official does not match its user at slot ${index + 1}.`,
+        );
+      }
+    }
+    if (
+      !assignment.userId &&
+      !assignment.eventOfficialId &&
+      staffingPolicy.isHardOfficialCoverageRequired
+    ) {
+      proposalGraphError(
+        `${label} has an unresolved officiating slot at slot ${index + 1}.`,
+      );
+    }
+  };
   const assertAssignments = (
-    assignments: typeof graph.matches[number]["officialAssignments"],
+    assignments: (typeof graph.matches)[number]["officialAssignments"],
     label: string,
   ): void => {
     assignments.forEach((assignment, index) => {
@@ -388,30 +444,7 @@ export const validateAndNormalizeSerializedGraph = (
         eventOfficialIds,
         `${label} event official at slot ${index + 1}`,
       );
-      if (holderType === "PLAYER" && assignment.eventOfficialId) {
-        proposalGraphError(
-          `${label} player assignment has an event official at slot ${index + 1}.`,
-        );
-      }
-      if (assignment.userId && assignment.eventOfficialId) {
-        const eventOfficial = graph.event.eventOfficials.find(
-          (candidate) => candidate.id === assignment.eventOfficialId,
-        );
-        if (eventOfficial?.userId !== assignment.userId) {
-          proposalGraphError(
-            `${label} event official does not match its user at slot ${index + 1}.`,
-          );
-        }
-      }
-      if (
-        !assignment.userId
-        && !assignment.eventOfficialId
-        && staffingPolicy.isHardOfficialCoverageRequired
-      ) {
-        proposalGraphError(
-          `${label} has an unresolved officiating slot at slot ${index + 1}.`,
-        );
-      }
+      assertAssignmentHolder(assignment, label, index, holderType);
     });
   };
 
@@ -422,7 +455,11 @@ export const validateAndNormalizeSerializedGraph = (
       proposalGraphError(`${label} has no division.`);
     }
     assertKnown(match.division, divisionIds, `${label} division`);
-    assertKnown(match.sourceDivisionId, divisionIds, `${label} source division`);
+    assertKnown(
+      match.sourceDivisionId,
+      divisionIds,
+      `${label} source division`,
+    );
     assertKnown(match.phaseDivisionId, divisionIds, `${label} phase division`);
     assertKnown(match.fieldId, fieldIds, `${label} resource`);
     assertKnown(match.team1Id, teamIds, `${label} first team`);
@@ -626,7 +663,6 @@ const loadPersistedGraphDemand = async (
   );
 };
 
-
 export const persistCreateOnlyMatchGraph = async (
   options: CreateOnlyMatchGraphPersistenceOptions,
 ): Promise<CreateOnlyMatchGraphPersistenceResult> => {
@@ -661,11 +697,7 @@ export const persistCreateOnlyMatchGraph = async (
     matches.map((match) => [match.id, match]),
   );
   await persistGraphPlaceholderTeams(options.tx, options.eventId, graphEvent);
-  await persistGraphPhaseParticipants(
-    options.tx,
-    options.eventId,
-    graphEvent,
-  );
+  await persistGraphPhaseParticipants(options.tx, options.eventId, graphEvent);
   await saveMatches(options.eventId, matches, options.tx);
 
   return {
@@ -765,45 +797,10 @@ export const persistSerializedScheduleGraph = async (options: {
   const fieldReference = (
     id: string | null | undefined,
   ): { id: string } | null => (id == null ? null : { id });
-  const divisionForMatch = (
-    row: ProposalMatch,
-  ): MatchPersistenceInput["division"] => {
-    const divisionId = row.phaseDivisionId ?? row.division ?? row.sourceDivisionId;
-    if (!divisionId) {
-      throw new EventScheduleInputError(
-        `Match ${row.id} has no division in the reviewed Match Graph.`,
-      );
-    }
-    const sourceDivision = row.sourceDivisionId
-      ? divisionById.get(row.sourceDivisionId)
-      : undefined;
-    const division = divisionById.get(divisionId);
-    if (!division && !sourceDivision) {
-      throw new EventScheduleInputError(
-        `Match ${row.id} references unknown division ${divisionId}.`,
-      );
-    }
-    const source = division ?? sourceDivision;
-    if (!source) {
-      throw new EventScheduleInputError(
-        `Match ${row.id} has no source division.`,
-      );
-    }
-    return {
-      id: division?.id ?? divisionId,
-      kind: division?.kind ?? source.kind,
-      role: division?.role ?? (row.phaseDivisionId ? "PHASE" : null),
-      phase: division?.phase ?? row.phase ?? source.phase,
-      sourceDivisionId:
-        division?.sourceDivisionId ?? row.sourceDivisionId ?? null,
-      phaseSettings: Object.fromEntries(
-        Object.entries(source.phaseSettings).map(([phase, settings]) => [
-          phase,
-          { officialPositions: settings.officialPositions },
-        ]),
-      ),
-    };
-  };
+  const divisionForMatch = (row: ProposalMatch) =>
+    proposalDivisionPersistence(row, divisionById, (message) => {
+      throw new EventScheduleInputError(message);
+    });
   const matches: MatchPersistenceInput[] = matchRows.map(
     (row: ProposalMatch, index) => ({
       id: row.id,
@@ -844,7 +841,9 @@ export const persistSerializedScheduleGraph = async (options: {
       previousRightMatch: matchReference(row.previousRightId),
     }),
   );
-  await saveMatches(options.eventId, matches, options.tx);
+  await saveMatches(options.eventId, matches, options.tx, {
+    approvedScheduleEnd: new Date(eventRecord.end),
+  });
 
   const eventSchedule: EventSchedulePersistenceInput = {
     id: options.eventId,
@@ -918,16 +917,20 @@ const updateConfirmedPlayoffDivisions = async (
   protectedDivisionIds: ReadonlySet<string> = new Set<string>(),
 ): Promise<void> => {
   if (!shouldApplyConfirmedAdvancementReassignments(event)) return;
-  const applied = reassignment ?? applyConfirmedAdvancementReassignments(event, context);
-  const affectedPlayoffDivisionIds = applied.affectedPlayoffDivisionIds
-    .filter((divisionId) => !protectedDivisionIds.has(divisionId));
+  const applied =
+    reassignment ?? applyConfirmedAdvancementReassignments(event, context);
+  const affectedPlayoffDivisionIds = applied.affectedPlayoffDivisionIds.filter(
+    (divisionId) => !protectedDivisionIds.has(divisionId),
+  );
   const phaseTeamIdsByDivision = Object.fromEntries(
-    Object.entries(applied.phaseTeamIdsByDivision)
-      .filter(([divisionId]) => !protectedDivisionIds.has(divisionId)),
+    Object.entries(applied.phaseTeamIdsByDivision).filter(
+      ([divisionId]) => !protectedDivisionIds.has(divisionId),
+    ),
   );
   const teamIdsByPlayoffDivision = Object.fromEntries(
-    Object.entries(applied.teamIdsByPlayoffDivision)
-      .filter(([divisionId]) => !protectedDivisionIds.has(divisionId)),
+    Object.entries(applied.teamIdsByPlayoffDivision).filter(
+      ([divisionId]) => !protectedDivisionIds.has(divisionId),
+    ),
   );
   const divisionIds = Array.from(
     new Set([
@@ -952,8 +955,7 @@ const updateConfirmedPlayoffDivisions = async (
     ),
   );
   // Prisma transaction delegates share the phase persistence contract.
-  const phasePersistenceClient =
-    tx as unknown as PhasePersistenceClient;
+  const phasePersistenceClient = tx as unknown as PhasePersistenceClient;
   await persistPhaseParticipantAssignments({
     client: phasePersistenceClient,
     eventId: event.id,
@@ -1121,11 +1123,16 @@ const scheduledFieldIdsFor = (
 
 const scheduleConflictLowerBound = (event: League | Tournament): Date => {
   const candidates = [
-    ...(event.start instanceof Date && !Number.isNaN(event.start.getTime()) ? [event.start] : []),
+    ...(event.start instanceof Date && !Number.isNaN(event.start.getTime())
+      ? [event.start]
+      : []),
     ...(Array.isArray(event.timeSlots)
       ? event.timeSlots
-        .map((slot) => slot.startDate)
-        .filter((value): value is Date => value instanceof Date && !Number.isNaN(value.getTime()))
+          .map((slot) => slot.startDate)
+          .filter(
+            (value): value is Date =>
+              value instanceof Date && !Number.isNaN(value.getTime()),
+          )
       : []),
   ];
   return new Date(Math.min(...candidates.map((value) => value.getTime())));
@@ -1218,12 +1225,11 @@ const windowsOverlap = (
   left: MatchPlacementWindow,
   right: MatchPlacementWindow,
   includeBuffers = true,
-): boolean => (
-  left.start.getTime() < right.end.getTime()
-    + (includeBuffers ? right.bufferMs : 0)
-  && left.end.getTime() + (includeBuffers ? left.bufferMs : 0)
-    > right.start.getTime()
-);
+): boolean =>
+  left.start.getTime() <
+    right.end.getTime() + (includeBuffers ? right.bufferMs : 0) &&
+  left.end.getTime() + (includeBuffers ? left.bufferMs : 0) >
+    right.start.getTime();
 
 const teamIdsForMatch = (match: Match): Set<string> => new Set(
   [match.team1, match.team2, match.teamOfficial]
@@ -1322,39 +1328,42 @@ const assignGeneratedOfficialsAroundProtectedMatches = (
 ): void => {
   const protectedPlacements = placedMatchesFor(protectedMatches);
   if (
-    protectedPlacements.length === 0
-    || !protectedPlacements.some(({ match }) => officialIdsForMatch(match).size > 0)
+    protectedPlacements.length === 0 ||
+    !protectedPlacements.some(
+      ({ match }) => officialIdsForMatch(match).size > 0,
+    )
   ) {
     return;
   }
 
-  const plannerEvent = event.staffingPriority === "FULL_COVERAGE_WITH_CONFLICTS_ALLOWED"
-    ? Object.assign(
-      Object.create(Object.getPrototypeOf(event)),
-      event,
-      // Protected occupancy is never negotiable in the legacy mode that
-      // allows generated official assignment conflicts.
-      { staffingPriority: "OFFICIAL_COVERAGE_REQUIRED" },
-    ) as League | Tournament
-    : event;
+  const plannerEvent =
+    event.staffingPriority === "FULL_COVERAGE_WITH_CONFLICTS_ALLOWED"
+      ? (Object.assign(
+          Object.create(Object.getPrototypeOf(event)),
+          event,
+          // Protected occupancy is never negotiable in the legacy mode that
+          // allows generated official assignment conflicts.
+          { staffingPriority: "OFFICIAL_COVERAGE_REQUIRED" },
+        ) as League | Tournament)
+      : event;
   const planner = new OfficialStaffingPlanner(plannerEvent);
   const protectedClones = protectedPlacements.map(({ match }) =>
     cloneMatchForReservation(match),
   );
-  const protectedTeamMatches = new Map<
-    NonNullable<Match["team1"]>,
-    Match[]
-  >();
-  for (const { match } of protectedPlacements) {
-    for (const team of [match.team1, match.team2, match.teamOfficial]) {
-      if (!team) continue;
-      const existing = protectedTeamMatches.get(team) ?? [...team.matches];
-      if (!existing.some((entry) => entry.id === match.id)) {
-        existing.push(match);
+  const protectedTeamMatches = new Map<NonNullable<Match["team1"]>, Match[]>();
+  const reserveProtectedTeams = () => {
+    for (const { match } of protectedPlacements) {
+      for (const team of [match.team1, match.team2, match.teamOfficial]) {
+        if (!team) continue;
+        const existing = protectedTeamMatches.get(team) ?? [...team.matches];
+        if (!existing.some((entry) => entry.id === match.id)) {
+          existing.push(match);
+        }
+        protectedTeamMatches.set(team, existing);
       }
-      protectedTeamMatches.set(team, existing);
     }
-  }
+  };
+  reserveProtectedTeams();
   const originalTeamMatches = new Map(
     Array.from(protectedTeamMatches.keys()).map((team) => [
       team,
@@ -1362,10 +1371,9 @@ const assignGeneratedOfficialsAroundProtectedMatches = (
     ]),
   );
   const originalOfficialMatches = new Map(
-    event.officials.map((official) => [
-      official,
-      [...official.matches],
-    ] as const),
+    event.officials.map(
+      (official) => [official, [...official.matches]] as const,
+    ),
   );
   const protectedCloneIds = new Set(protectedClones.map((match) => match.id));
   try {
@@ -1374,18 +1382,18 @@ const assignGeneratedOfficialsAroundProtectedMatches = (
     }
     planner.seedCommittedMatches(protectedClones);
     const ordered = matches
-      .filter((match) => (
-        placementWindowFor(match)
-        && (
-          (match.officialAssignments ?? []).length > 0
-          || planner.hasStaffingRequirement(match)
-        )
-      ))
-      .sort((left, right) => (
-        left.start.getTime() - right.start.getTime()
-        || left.end.getTime() - right.end.getTime()
-        || left.id.localeCompare(right.id)
-      ));
+      .filter(
+        (match) =>
+          placementWindowFor(match) &&
+          ((match.officialAssignments ?? []).length > 0 ||
+            planner.hasStaffingRequirement(match)),
+      )
+      .sort(
+        (left, right) =>
+          left.start.getTime() - right.start.getTime() ||
+          left.end.getTime() - right.end.getTime() ||
+          left.id.localeCompare(right.id),
+      );
     for (const match of ordered) {
       planner.assignMatch(match);
     }
@@ -1416,48 +1424,56 @@ const assertIntraEventConflicts = (
   const placed = placedMatchesFor(matches);
   if (placed.length < 2) return;
   const protectedIds = protectedMatchIds ?? new Set<string>();
-  const allowOfficialConflicts =
-    new OfficialStaffingPlanner(event).isOfficialAssignmentConflictAllowed();
+  const allowOfficialConflicts = new OfficialStaffingPlanner(
+    event,
+  ).isOfficialAssignmentConflictAllowed();
+  const assertPair = (
+    left: (typeof placed)[number],
+    right: (typeof placed)[number],
+  ): void => {
+    const pairHasProtectedMatch =
+      protectedIds.has(left.match.id) || protectedIds.has(right.match.id);
+    if (
+      left.window.fieldId === right.window.fieldId &&
+      windowsOverlap(left.window, right.window, false)
+    ) {
+      throw new ScheduleError(
+        `Matches ${left.match.id} and ${right.match.id} overlap on field ${left.window.fieldId}.`,
+        "RESOURCE",
+      );
+    }
+    if (
+      windowsOverlap(left.window, right.window) &&
+      hasSharedId(teamIdsForMatch(left.match), teamIdsForMatch(right.match))
+    ) {
+      throw new ScheduleError(
+        `Matches ${left.match.id} and ${right.match.id} overlap for a team.`,
+        "PLAYING_TEAM",
+      );
+    }
+    if (
+      windowsOverlap(left.window, right.window) &&
+      hasSharedId(
+        officialIdsForMatch(left.match),
+        officialIdsForMatch(right.match),
+      ) &&
+      (pairHasProtectedMatch || !allowOfficialConflicts)
+    ) {
+      throw new ScheduleError(
+        `Matches ${left.match.id} and ${right.match.id} overlap for an official.`,
+        "NAMED_OFFICIAL_POSITION",
+      );
+    }
+  };
   for (let leftIndex = 0; leftIndex < placed.length; leftIndex += 1) {
     const left = placed[leftIndex]!;
-    for (let rightIndex = leftIndex + 1; rightIndex < placed.length; rightIndex += 1) {
+    for (
+      let rightIndex = leftIndex + 1;
+      rightIndex < placed.length;
+      rightIndex += 1
+    ) {
       const right = placed[rightIndex]!;
-      const pairHasProtectedMatch =
-        protectedIds.has(left.match.id) || protectedIds.has(right.match.id);
-      if (
-        left.window.fieldId === right.window.fieldId
-        && windowsOverlap(left.window, right.window, false)
-      ) {
-        throw new ScheduleError(
-          `Matches ${left.match.id} and ${right.match.id} overlap on field ${left.window.fieldId}.`,
-          "RESOURCE",
-        );
-      }
-      if (
-        windowsOverlap(left.window, right.window)
-        && hasSharedId(
-          teamIdsForMatch(left.match),
-          teamIdsForMatch(right.match),
-        )
-      ) {
-        throw new ScheduleError(
-          `Matches ${left.match.id} and ${right.match.id} overlap for a team.`,
-          "PLAYING_TEAM",
-        );
-      }
-      if (
-        windowsOverlap(left.window, right.window)
-        && hasSharedId(
-          officialIdsForMatch(left.match),
-          officialIdsForMatch(right.match),
-        )
-        && (pairHasProtectedMatch || !allowOfficialConflicts)
-      ) {
-        throw new ScheduleError(
-          `Matches ${left.match.id} and ${right.match.id} overlap for an official.`,
-          "NAMED_OFFICIAL_POSITION",
-        );
-      }
+      assertPair(left, right);
     }
   }
 };
@@ -1472,11 +1488,12 @@ const setGeneratedScheduleEnd = (
 ): void => {
   if (!event.noFixedEndDateTime) return;
   const placedMatchEnds = matches
-    .filter((match) => (
-      match.placementState === "PLACED"
-      && match.end instanceof Date
-      && !Number.isNaN(match.end.getTime())
-    ))
+    .filter(
+      (match) =>
+        match.placementState === "PLACED" &&
+        match.end instanceof Date &&
+        !Number.isNaN(match.end.getTime()),
+    )
     .map((match) => match.end.getTime());
   if (!placedMatchEnds.length) {
     if (restoreWhenUnplaced) {
@@ -1607,10 +1624,7 @@ const structuralShapeFor = (
         ? structuralShapeFor(match.previousRightMatch, cache, active)
         : null,
     },
-    seeds: [
-      structuralSeed(match.team1Seed),
-      structuralSeed(match.team2Seed),
-    ],
+    seeds: [structuralSeed(match.team1Seed), structuralSeed(match.team2Seed)],
   };
   active.delete(match);
   const key = JSON.stringify(shape);
@@ -1644,24 +1658,24 @@ const chooseStructuralMatch = (
   candidates: Match[],
   consumed: Set<string>,
 ): Match | undefined => {
-  const available = candidates.filter((candidate) => !consumed.has(candidate.id));
+  const available = candidates.filter(
+    (candidate) => !consumed.has(candidate.id),
+  );
   if (!available.length) return undefined;
   const participantKey = participantKeyFor(previous);
   const unorderedParticipantKey = unorderedParticipantKeyFor(previous);
   const seedKey = seedKeyFor(previous);
-  return available
-    .slice()
-    .sort((left, right) => {
-      const score = (candidate: Match): number => {
-        let value = 0;
-        if (participantKeyFor(candidate) === participantKey) value += 8;
-        if (unorderedParticipantKeyFor(candidate) === unorderedParticipantKey) value += 4;
-        if (seedKeyFor(candidate) === seedKey) value += 2;
-        return value;
-      };
-      return score(right) - score(left)
-        || left.id.localeCompare(right.id);
-    })[0];
+  return available.slice().sort((left, right) => {
+    const score = (candidate: Match): number => {
+      let value = 0;
+      if (participantKeyFor(candidate) === participantKey) value += 8;
+      if (unorderedParticipantKeyFor(candidate) === unorderedParticipantKey)
+        value += 4;
+      if (seedKeyFor(candidate) === seedKey) value += 2;
+      return value;
+    };
+    return score(right) - score(left) || left.id.localeCompare(right.id);
+  })[0];
 };
 const renumberMutableMatches = (
   matches: Match[],
@@ -1669,64 +1683,68 @@ const renumberMutableMatches = (
 ): void => {
   const protectedMatchNumbers = new Set<number>();
   const mutableMatchNumberCounts = new Map<number, number>();
-  for (const match of matches) {
-    if (protectedMatchIds.has(match.id)) {
-      if (
-        Number.isInteger(match.matchId)
-        && (match.matchId as number) > 0
-      ) {
-        protectedMatchNumbers.add(match.matchId as number);
+  const collectMatchNumbers = () => {
+    for (const match of matches) {
+      if (protectedMatchIds.has(match.id)) {
+        if (Number.isInteger(match.matchId) && (match.matchId as number) > 0) {
+          protectedMatchNumbers.add(match.matchId as number);
+        }
+        continue;
       }
-      continue;
+      if (Number.isInteger(match.matchId) && (match.matchId as number) > 0) {
+        mutableMatchNumberCounts.set(
+          match.matchId as number,
+          (mutableMatchNumberCounts.get(match.matchId as number) ?? 0) + 1,
+        );
+      }
     }
-    if (Number.isInteger(match.matchId) && (match.matchId as number) > 0) {
-      mutableMatchNumberCounts.set(
-        match.matchId as number,
-        (mutableMatchNumberCounts.get(match.matchId as number) ?? 0) + 1,
-      );
-    }
-  }
+  };
+  collectMatchNumbers();
 
   const orderedMutableMatches = matches
     .filter((match) => !protectedMatchIds.has(match.id))
-    .sort((left, right) => (
-      (left.matchId ?? Number.POSITIVE_INFINITY) - (right.matchId ?? Number.POSITIVE_INFINITY)
-      || left.id.localeCompare(right.id)
-    ));
+    .sort(
+      (left, right) =>
+        (left.matchId ?? Number.POSITIVE_INFINITY) -
+          (right.matchId ?? Number.POSITIVE_INFINITY) ||
+        left.id.localeCompare(right.id),
+    );
   const usedNumbers = new Set(protectedMatchNumbers);
   const preservedMutableNumbers = new Set<number>();
   for (const match of orderedMutableMatches) {
     const matchId = match.matchId;
     if (
-      Number.isInteger(matchId)
-      && (matchId as number) > 0
-      && !protectedMatchNumbers.has(matchId as number)
-      && mutableMatchNumberCounts.get(matchId as number) === 1
+      Number.isInteger(matchId) &&
+      (matchId as number) > 0 &&
+      !protectedMatchNumbers.has(matchId as number) &&
+      mutableMatchNumberCounts.get(matchId as number) === 1
     ) {
       preservedMutableNumbers.add(matchId as number);
       usedNumbers.add(matchId as number);
     }
   }
 
-  let nextNumber = 1;
-  for (const match of orderedMutableMatches) {
-    const matchId = match.matchId;
-    if (
-      Number.isInteger(matchId)
-      && (matchId as number) > 0
-      && preservedMutableNumbers.has(matchId as number)
-    ) {
-      continue;
-    }
-    while (usedNumbers.has(nextNumber)) {
+  const assignMissingNumbers = () => {
+    let nextNumber = 1;
+    for (const match of orderedMutableMatches) {
+      const matchId = match.matchId;
+      if (
+        Number.isInteger(matchId) &&
+        (matchId as number) > 0 &&
+        preservedMutableNumbers.has(matchId as number)
+      ) {
+        continue;
+      }
+      while (usedNumbers.has(nextNumber)) {
+        nextNumber += 1;
+      }
+      match.matchId = nextNumber;
+      usedNumbers.add(nextNumber);
       nextNumber += 1;
     }
-    match.matchId = nextNumber;
-    usedNumbers.add(nextNumber);
-    nextNumber += 1;
-  }
+  };
+  assignMissingNumbers();
 };
-
 
 export const mergeProtectedMatches = (
   event: League | Tournament,
@@ -1743,9 +1761,10 @@ export const mergeProtectedMatches = (
       .map((match) => match.division?.id ?? "")
       .filter((divisionId) => divisionId.length > 0),
   );
-  const protectedMatches = previousMatches.filter((match) =>
-    protectedMatchIds.has(match.id)
-    || protectedPhaseDivisionIds.has(match.division?.id ?? ""),
+  const protectedMatches = previousMatches.filter(
+    (match) =>
+      protectedMatchIds.has(match.id) ||
+      protectedPhaseDivisionIds.has(match.division?.id ?? ""),
   );
   const effectiveProtectedMatchIds = new Set(
     protectedMatches.map((match) => match.id),
@@ -1767,9 +1786,10 @@ export const mergeProtectedMatches = (
   const previousToGenerated = new Map<string, Match>();
   const pairPreviousMatches = (matches: Match[]): void => {
     for (const previous of matches) {
-      const candidates = generatedByStructuralKey.get(
-        structuralKeyFor(previous, structuralCache),
-      ) ?? [];
+      const candidates =
+        generatedByStructuralKey.get(
+          structuralKeyFor(previous, structuralCache),
+        ) ?? [];
       const generated = chooseStructuralMatch(
         previous,
         candidates,
@@ -1783,9 +1803,11 @@ export const mergeProtectedMatches = (
   // Protected nodes claim their structural slots first. Replacements then
   // consume the remaining one-to-one slots.
   pairPreviousMatches(protectedMatches);
-  pairPreviousMatches(previousMatches.filter((match) =>
-    !effectiveProtectedMatchIds.has(match.id),
-  ));
+  pairPreviousMatches(
+    previousMatches.filter(
+      (match) => !effectiveProtectedMatchIds.has(match.id),
+    ),
+  );
 
   const generatedById = new Map(
     generatedMatches.map((match) => [match.id, match] as const),
@@ -1793,7 +1815,9 @@ export const mergeProtectedMatches = (
   const replacementByGeneratedId = new Map<string, Match>();
   const mergedById = new Map(
     generatedMatches
-      .filter((match) => !protectedPhaseDivisionIds.has(match.division?.id ?? ""))
+      .filter(
+        (match) => !protectedPhaseDivisionIds.has(match.division?.id ?? ""),
+      )
       .map((match) => [match.id, match]),
   );
   for (const protectedMatch of protectedMatches) {
@@ -1806,23 +1830,28 @@ export const mergeProtectedMatches = (
   }
 
   const previousToRetained = new Map<string, Match>();
-  for (const previous of previousMatches) {
-    const generated = previousToGenerated.get(previous.id);
-    const retained = generated
-      ? replacementByGeneratedId.get(generated.id) ?? generated
-      : effectiveProtectedMatchIds.has(previous.id)
-        ? previous
-        : undefined;
-    if (retained) previousToRetained.set(previous.id, retained);
-  }
+  const retainPreviousIdentities = () => {
+    for (const previous of previousMatches) {
+      const generated = previousToGenerated.get(previous.id);
+      const retained = generated
+        ? (replacementByGeneratedId.get(generated.id) ?? generated)
+        : effectiveProtectedMatchIds.has(previous.id)
+          ? previous
+          : undefined;
+      if (retained) previousToRetained.set(previous.id, retained);
+    }
+  };
+  retainPreviousIdentities();
   const resolve = (match: Match | null): Match | null => {
     if (!match) return null;
     const previousRetained = previousToRetained.get(match.id);
     if (previousRetained) return previousRetained;
     const generated = generatedById.get(match.id);
     if (generated) {
-      return replacementByGeneratedId.get(generated.id)
-        ?? (mergedById.has(generated.id) ? generated : null);
+      return (
+        replacementByGeneratedId.get(generated.id) ??
+        (mergedById.has(generated.id) ? generated : null)
+      );
     }
     return mergedById.get(match.id) ?? null;
   };
@@ -1875,9 +1904,7 @@ const snapshotProtectedMatches = (
     })),
   }));
 };
-const restoreProtectedMatches = (
-  snapshots: ProtectedMatchSnapshot[],
-): void => {
+const restoreProtectedMatches = (snapshots: ProtectedMatchSnapshot[]): void => {
   const restoredTeams = new Set<NonNullable<Match["team1"]>>();
   const restoredDivisions = new Set<Division>();
   for (const snapshot of snapshots) {
@@ -1906,10 +1933,11 @@ const protectedMatchIdsForWholePhases = (
   );
   return new Set(
     matches
-      .filter((match) => (
-        directlyProtectedMatchIds.has(match.id)
-        || protectedPhaseDivisionIds.has(match.division?.id ?? "")
-      ))
+      .filter(
+        (match) =>
+          directlyProtectedMatchIds.has(match.id) ||
+          protectedPhaseDivisionIds.has(match.division?.id ?? ""),
+      )
       .map((match) => match.id),
   );
 };
@@ -1920,9 +1948,11 @@ const retainedMatchIdsForProtectedPhases = async (
 ): Promise<string[]> => {
   const directIds = Array.from(directlyProtectedMatchIds ?? []).sort();
   if (!directIds.length) return [];
-  const matches = (tx as unknown as Record<string, unknown>).matches as {
-    findMany?: (args: unknown) => Promise<unknown>;
-  } | undefined;
+  const matches = (tx as unknown as Record<string, unknown>).matches as
+    | {
+        findMany?: (args: unknown) => Promise<unknown>;
+      }
+    | undefined;
   if (typeof matches?.findMany !== "function") return directIds;
   const rows = await matches.findMany({
     where: { eventId },
@@ -1932,16 +1962,17 @@ const retainedMatchIdsForProtectedPhases = async (
   const directIdSet = new Set(directIds);
   const protectedDivisions = new Set(
     rows
-      .filter((row) => (
-        row
-        && typeof row === "object"
-        && directIdSet.has(String((row as { id?: unknown }).id ?? ""))
-      ))
-      .map((row) => (
+      .filter(
+        (row) =>
+          row &&
+          typeof row === "object" &&
+          directIdSet.has(String((row as { id?: unknown }).id ?? "")),
+      )
+      .map((row) =>
         row && typeof row === "object"
           ? String((row as { division?: unknown }).division ?? "")
-          : ""
-      ))
+          : "",
+      )
       .filter((divisionId) => divisionId.length > 0),
   );
   const retainedIds = rows
@@ -1949,31 +1980,35 @@ const retainedMatchIdsForProtectedPhases = async (
       if (!row || typeof row !== "object") return false;
       const typedRow = row as { id?: unknown; division?: unknown };
       const id = String(typedRow.id ?? "");
-      return directIdSet.has(id)
-        || protectedDivisions.has(String(typedRow.division ?? ""));
+      return (
+        directIdSet.has(id) ||
+        protectedDivisions.has(String(typedRow.division ?? ""))
+      );
     })
     .map((row) => String((row as { id?: unknown }).id ?? ""))
     .filter((id) => id.length > 0);
   return Array.from(new Set([...directIds, ...retainedIds])).sort();
 };
 
+const normalizedMutationOptions = (options: EventScheduleMutationOptions) => ({
+  ...options,
+  historyPolicy: options.historyPolicy ?? "REJECT_PROTECTED",
+  includePlaceholderTeams: options.includePlaceholderTeams ?? true,
+  allowPartialPlacement: options.allowPartialPlacement ?? false,
+  persist: options.persist ?? true,
+  regenerateGraph: options.regenerateGraph ?? false,
+});
 
-export const reconcileEventSchedule = async (
-  options: EventScheduleMutationOptions,
-): Promise<EventScheduleMutationResult> => {
+const loadMutationContext = async (options: EventScheduleMutationOptions) => {
   const {
     tx,
     eventId,
     mode,
     expectedScheduleRevision,
-    historyPolicy = "REJECT_PROTECTED",
-    includePlaceholderTeams = true,
-    participantCount,
-    allowPartialPlacement = false,
-    persist = true,
+    historyPolicy,
     protectedMatchIds: directlyProtectedMatchIds,
-    regenerateGraph = false,
-  } = options;
+    regenerateGraph,
+  } = normalizedMutationOptions(options);
   const eventRow = await tx.events.findUnique({ where: { id: eventId } });
   if (!eventRow) throw new EventScheduleUnsupportedError("Event not found.");
   const scheduleState = await loadEventScheduleState(
@@ -1982,49 +2017,52 @@ export const reconcileEventSchedule = async (
     tx,
   );
   if (
-    expectedScheduleRevision
-    && expectedScheduleRevision !== scheduleState.revision
+    expectedScheduleRevision &&
+    expectedScheduleRevision !== scheduleState.revision
   ) {
     throw new EventScheduleRevisionConflictError(scheduleState.revision);
   }
 
   const eventRowRecord = eventRow as unknown as Record<string, unknown>;
-  const shouldRetainProtectedMatches =
-    mode === "RESCHEDULE_PRESERVING_LOCKS"
-    || (mode === "REBUILD" && regenerateGraph);
-  const retainedMatchIds = shouldRetainProtectedMatches
-    ? await retainedMatchIdsForProtectedPhases(
-      tx,
-      eventId,
-      directlyProtectedMatchIds,
-    )
-    : [];
-  const event = retainedMatchIds.length
-    ? await loadEventWithRelations(eventId, tx, { retainedMatchIds })
-    : await loadEventWithRelations(eventId, tx);
+  const loadRetainedEvent = async () => {
+    const shouldRetainProtectedMatches =
+      mode === "RESCHEDULE_PRESERVING_LOCKS" ||
+      (mode === "REBUILD" && regenerateGraph);
+    const retainedMatchIds = shouldRetainProtectedMatches
+      ? await retainedMatchIdsForProtectedPhases(
+          tx,
+          eventId,
+          directlyProtectedMatchIds,
+        )
+      : [];
+    return retainedMatchIds.length
+      ? await loadEventWithRelations(eventId, tx, { retainedMatchIds })
+      : await loadEventWithRelations(eventId, tx);
+  };
+  const event = await loadRetainedEvent();
   const fieldIds = scheduledFieldIdsFor(event, eventRowRecord.fieldIds);
   await acquireFieldLocks(tx, fieldIds);
-  const blockerCatalog = mode === "DELETE"
-    ? null
-    : await loadFieldBlockerCatalog({
-      client: tx as unknown as PrismaLike,
-      fieldIds,
-      lowerBound: scheduleConflictLowerBound(event),
-      excludeEventId: eventId,
-    });
+  const blockerCatalog =
+    mode === "DELETE"
+      ? null
+      : await loadFieldBlockerCatalog({
+          client: tx as unknown as PrismaLike,
+          fieldIds,
+          lowerBound: scheduleConflictLowerBound(event),
+          excludeEventId: eventId,
+        });
   const baseFieldCandidateGuard = buildFieldCandidateGuard(blockerCatalog);
   const currentFieldIds = new Set(fieldIds);
-  const fieldCandidateGuard: FieldCandidateGuard = (candidate) => (
-    currentFieldIds.has(candidate.resource.id)
-    && (baseFieldCandidateGuard?.(candidate) ?? true)
-  );
+  const fieldCandidateGuard: FieldCandidateGuard = (candidate) =>
+    currentFieldIds.has(candidate.resource.id) &&
+    (baseFieldCandidateGuard?.(candidate) ?? true);
   const previousMatches = Object.values(event.matches);
   const effectiveProtectedMatchIds =
     mode === "REBUILD" && regenerateGraph
       ? protectedMatchIdsForWholePhases(
-        previousMatches,
-        directlyProtectedMatchIds ?? new Set<string>(),
-      )
+          previousMatches,
+          directlyProtectedMatchIds ?? new Set<string>(),
+        )
       : new Set(directlyProtectedMatchIds ?? []);
   const protectedMatches = previousMatches.filter((match) =>
     effectiveProtectedMatchIds.has(match.id),
@@ -2034,23 +2072,60 @@ export const reconcileEventSchedule = async (
       .map((match) => match.division?.id ?? "")
       .filter((divisionId) => divisionId.length > 0),
   );
-  if (
-    mode !== "RESCHEDULE_PRESERVING_LOCKS" &&
-    historyPolicy === "REJECT_PROTECTED" &&
-    scheduleState.hasProtectedHistory
-  ) {
-    throw new EventScheduleProtectedHistoryError();
-  }
-  if (
-    mode === "BUILD" &&
-    previousMatches.length > 0 &&
-    !isReusableUnplacedMatchGraph(previousMatches)
-  ) {
-    throw new EventScheduleUnsupportedError(
-      "A schedule already exists; use rebuild.",
-    );
-  }
-  if (mode === "DELETE") {
+  const assertMutationMode = () => {
+    if (
+      mode !== "RESCHEDULE_PRESERVING_LOCKS" &&
+      historyPolicy === "REJECT_PROTECTED" &&
+      scheduleState.hasProtectedHistory
+    ) {
+      throw new EventScheduleProtectedHistoryError();
+    }
+    if (
+      mode === "BUILD" &&
+      previousMatches.length > 0 &&
+      !isReusableUnplacedMatchGraph(previousMatches)
+    ) {
+      throw new EventScheduleUnsupportedError(
+        "A schedule already exists; use rebuild.",
+      );
+    }
+  };
+  assertMutationMode();
+  return {
+    event,
+    scheduleState,
+    blockerCatalog,
+    fieldCandidateGuard,
+    previousMatches,
+    effectiveProtectedMatchIds,
+    protectedMatches,
+    protectedPhaseDivisionIds,
+  };
+};
+
+export const reconcileEventSchedule = async (
+  options: EventScheduleMutationOptions,
+): Promise<EventScheduleMutationResult> => {
+  const {
+    tx,
+    eventId,
+    mode,
+    includePlaceholderTeams,
+    participantCount,
+    allowPartialPlacement,
+    persist,
+    regenerateGraph,
+  } = normalizedMutationOptions(options);
+  const {
+    event,
+    blockerCatalog,
+    fieldCandidateGuard,
+    previousMatches,
+    effectiveProtectedMatchIds,
+    protectedMatches,
+    protectedPhaseDivisionIds,
+  } = await loadMutationContext(options);
+  const deleteSchedule = async (): Promise<EventScheduleMutationResult> => {
     await deletePristineScheduleByEvent(eventId, tx);
     await deleteSyntheticScheduleTeams(tx, eventId);
     await tx.events.update({
@@ -2076,30 +2151,32 @@ export const reconcileEventSchedule = async (
           }
         : null,
     };
-  }
+  };
+  if (mode === "DELETE") return deleteSchedule();
+  const isRegenerating = mode === "REBUILD" && regenerateGraph;
   const context = buildContext();
-  const canUseCandidate =
-    mode === "REBUILD" && regenerateGraph
-      ? buildProtectedCandidateGuard(
-          fieldCandidateGuard,
-          protectedMatches,
-        )
-      : fieldCandidateGuard;
+  const canUseCandidate = isRegenerating
+    ? buildProtectedCandidateGuard(fieldCandidateGuard, protectedMatches)
+    : fieldCandidateGuard;
   const originalScheduleEnd = {
     end: event.end,
     generatedScheduleEnd: event.generatedScheduleEnd,
   };
-  const protectedSnapshots = snapshotProtectedMatches(protectedMatches);
-  const advancement = shouldApplyConfirmedAdvancementReassignments(event)
-    ? applyConfirmedAdvancementReassignments(event, context)
-    : undefined;
-  if (protectedSnapshots.length) {
-    restoreProtectedMatches(protectedSnapshots);
-  }
-  if (mode === "REBUILD" && regenerateGraph) {
-    event.matches = {};
-  }
-  let scheduled: {
+  const prepareAdvancement = () => {
+    const protectedSnapshots = snapshotProtectedMatches(protectedMatches);
+    const advancement = shouldApplyConfirmedAdvancementReassignments(event)
+      ? applyConfirmedAdvancementReassignments(event, context)
+      : undefined;
+    if (protectedSnapshots.length) {
+      restoreProtectedMatches(protectedSnapshots);
+    }
+    if (isRegenerating) {
+      event.matches = {};
+    }
+    return advancement;
+  };
+  const advancement = prepareAdvancement();
+  let scheduled!: {
     event: League | Tournament;
     matches: Match[];
     warnings?: EventEditorScheduleWarning[];
@@ -2107,59 +2184,36 @@ export const reconcileEventSchedule = async (
     diagnostics?: EventEditorScheduleDiagnostics;
   };
   let scheduleWarnings: EventEditorScheduleWarning[] = [];
-  if (
-    (mode === "BUILD" || mode === "REBUILD")
-    && !regenerateGraph
-    && isReusableUnplacedMatchGraph(previousMatches)
-  ) {
-    prepareSchedulePlacementWindow(event, false);
-    const builder = new EventBuilder(event, context, {
-      includePlaceholderTeams: false,
-      canUseCandidate,
-      allowPartialPlacement,
-    });
-    const placedEvent = builder.placeMatchGraph({ preserveMatchIds: true });
-    const placedMatches = Object.values(placedEvent.matches);
-    finalizeOpenEndedSchedule(placedEvent, placedMatches);
-    scheduled = {
-      event: placedEvent,
-      matches: placedMatches,
-      placementFailures: builder.placementFailures,
-      diagnostics: builder.getScheduleDiagnostics(),
-    };
-  } else if (
-    (mode === "BUILD" || mode === "REBUILD")
-    && allowPartialPlacement
-  ) {
-    scheduled = buildPartialSchedule(
-      event,
-      context,
-      includePlaceholderTeams,
-      participantCount,
-      canUseCandidate,
-    );
-  } else if (mode === "RESCHEDULE_PRESERVING_LOCKS" && previousMatches.length > 0) {
+  const reschedulePreservingLocks = async () => {
     try {
       const checkIns = await loadTeamCheckIns(tx, eventId);
       const eventCheckedInTeamIds = new Set<string>();
       const checkedInTeamIdsByMatch = new Map<string, Set<string>>();
-      for (const checkIn of checkIns) {
-        if (String(checkIn.status ?? "").trim().toUpperCase() !== "CHECKED_IN") {
-          continue;
+      const collectCheckIns = () => {
+        for (const checkIn of checkIns) {
+          if (
+            String(checkIn.status ?? "")
+              .trim()
+              .toUpperCase() !== "CHECKED_IN"
+          ) {
+            continue;
+          }
+          const teamId = String(checkIn.eventTeamId ?? "").trim();
+          if (!teamId) {
+            continue;
+          }
+          const matchId = String(checkIn.matchId ?? "").trim();
+          if (!matchId) {
+            eventCheckedInTeamIds.add(teamId);
+            continue;
+          }
+          const checkedInTeamIds =
+            checkedInTeamIdsByMatch.get(matchId) ?? new Set<string>();
+          checkedInTeamIds.add(teamId);
+          checkedInTeamIdsByMatch.set(matchId, checkedInTeamIds);
         }
-        const teamId = String(checkIn.eventTeamId ?? "").trim();
-        if (!teamId) {
-          continue;
-        }
-        const matchId = String(checkIn.matchId ?? "").trim();
-        if (!matchId) {
-          eventCheckedInTeamIds.add(teamId);
-          continue;
-        }
-        const checkedInTeamIds = checkedInTeamIdsByMatch.get(matchId) ?? new Set<string>();
-        checkedInTeamIds.add(teamId);
-        checkedInTeamIdsByMatch.set(matchId, checkedInTeamIds);
-      }
+      };
+      collectCheckIns();
       scheduled = rescheduleEventMatchesPreservingLocks(
         event,
         {
@@ -2181,80 +2235,123 @@ export const reconcileEventSchedule = async (
           : "Unable to reschedule while preserving existing matches.",
       );
     }
-  } else {
-    scheduled = scheduleEvent(
-      {
-        event,
-        participantCount,
-        includePlaceholderTeams,
+  };
+  const constructSchedule = async () => {
+    const isBuildOperation = mode === "BUILD" || mode === "REBUILD";
+    if (
+      isBuildOperation &&
+      !regenerateGraph &&
+      isReusableUnplacedMatchGraph(previousMatches)
+    ) {
+      prepareSchedulePlacementWindow(event, false);
+      const builder = new EventBuilder(event, context, {
+        includePlaceholderTeams: false,
         canUseCandidate,
-      },
-      context,
+        allowPartialPlacement,
+      });
+      const placedEvent = builder.placeMatchGraph({ preserveMatchIds: true });
+      const placedMatches = Object.values(placedEvent.matches);
+      finalizeOpenEndedSchedule(placedEvent, placedMatches);
+      scheduled = {
+        event: placedEvent,
+        matches: placedMatches,
+        placementFailures: builder.placementFailures,
+        diagnostics: builder.getScheduleDiagnostics(),
+      };
+    } else if (isBuildOperation && allowPartialPlacement) {
+      scheduled = buildPartialSchedule(
+        event,
+        context,
+        includePlaceholderTeams,
+        participantCount,
+        canUseCandidate,
+      );
+    } else if (
+      mode === "RESCHEDULE_PRESERVING_LOCKS" &&
+      previousMatches.length > 0
+    ) {
+      await reschedulePreservingLocks();
+    } else {
+      scheduled = scheduleEvent(
+        {
+          event,
+          participantCount,
+          includePlaceholderTeams,
+          canUseCandidate,
+        },
+        context,
+      );
+    }
+  };
+  await constructSchedule();
+  const finalizeSchedule = () => {
+    if (isRegenerating) {
+      assignGeneratedOfficialsAroundProtectedMatches(
+        scheduled.event,
+        scheduled.matches,
+        protectedMatches,
+      );
+    }
+    if (isRegenerating) {
+      scheduled.matches = mergeProtectedMatches(
+        scheduled.event,
+        scheduled.matches,
+        previousMatches,
+        effectiveProtectedMatchIds,
+      );
+    }
+    scheduleWarnings = mergeScheduleWarnings(
+      scheduleWarnings,
+      collectUnresolvedStaffingDiagnostics(scheduled.matches),
     );
-  }
-  if (mode === "REBUILD" && regenerateGraph) {
-    assignGeneratedOfficialsAroundProtectedMatches(
+    if (!scheduled.matches.length) {
+      throw new EventScheduleInputError(
+        "The scheduler did not produce any matches.",
+      );
+    }
+    const diagnostics =
+      scheduled.diagnostics ??
+      diagnoseScheduleProposal({
+        event: scheduled.event,
+        matches: scheduled.matches,
+        placementFailures: scheduled.placementFailures ?? [],
+      });
+    if (blockerCatalog) {
+      assertScheduledFieldConflicts(blockerCatalog, scheduled.matches);
+    }
+    assertIntraEventConflicts(
       scheduled.event,
       scheduled.matches,
-      protectedMatches,
-    );
-  }
-  if (mode === "REBUILD" && regenerateGraph) {
-    scheduled.matches = mergeProtectedMatches(
-      scheduled.event,
-      scheduled.matches,
-      previousMatches,
       effectiveProtectedMatchIds,
     );
-  }
-  scheduleWarnings = mergeScheduleWarnings(
-    scheduleWarnings,
-    collectUnresolvedStaffingDiagnostics(scheduled.matches),
-  );
-  if (!scheduled.matches.length) {
-    throw new EventScheduleInputError(
-      "The scheduler did not produce any matches.",
+    setGeneratedScheduleEnd(
+      scheduled.event,
+      scheduled.matches,
+      allowPartialPlacement ? originalScheduleEnd : undefined,
     );
-  }
-  const diagnostics = scheduled.diagnostics ?? diagnoseScheduleProposal({
+    return diagnostics;
+  };
+  const diagnostics = finalizeSchedule();
+  const result = (): EventScheduleMutationResult => ({
     event: scheduled.event,
     matches: scheduled.matches,
+    warnings: scheduleWarnings,
     placementFailures: scheduled.placementFailures ?? [],
+    diagnostics,
+    previousMatchCount: previousMatches.length,
+    notification: previousMatches.length
+      ? {
+          eventId,
+          eventName: String(scheduled.event.name ?? event.name ?? "Event"),
+          forceBatch: true,
+          changes: collectMatchScheduleChanges({
+            before: snapshotMatchScheduleState(previousMatches),
+            after: snapshotMatchScheduleState(scheduled.matches),
+          }),
+        }
+      : null,
   });
-  if (blockerCatalog) {
-    assertScheduledFieldConflicts(blockerCatalog, scheduled.matches);
-  }
-  assertIntraEventConflicts(
-    scheduled.event,
-    scheduled.matches,
-    effectiveProtectedMatchIds,
-  );
-  setGeneratedScheduleEnd(
-    scheduled.event,
-    scheduled.matches,
-    allowPartialPlacement ? originalScheduleEnd : undefined,
-  );
-  if (!persist) {
-    return {
-      event: scheduled.event,
-      matches: scheduled.matches,
-      warnings: scheduleWarnings,
-      placementFailures: scheduled.placementFailures ?? [],
-      diagnostics,
-      previousMatchCount: previousMatches.length,
-      notification: previousMatches.length
-        ? {
-            eventId,
-            eventName: String(scheduled.event.name ?? event.name ?? "Event"),
-            forceBatch: true,
-            changes: collectMatchScheduleChanges({
-              before: snapshotMatchScheduleState(previousMatches),
-              after: snapshotMatchScheduleState(scheduled.matches),
-            }),
-          }
-        : null,
-    };
-  }
+  if (!persist) return result();
   await updateConfirmedPlayoffDivisions(
     tx,
     scheduled.event,
@@ -2273,27 +2370,11 @@ export const reconcileEventSchedule = async (
   if (mode !== "RESCHEDULE_PRESERVING_LOCKS" || previousMatches.length === 0) {
     await deletePristineScheduleByEvent(eventId, tx);
   }
-  await saveMatches(eventId, scheduled.matches, tx);
+  await saveMatches(eventId, scheduled.matches, tx, {
+    approvedScheduleEnd: scheduled.event.end,
+  });
   await saveEventSchedule(scheduled.event, tx);
-  return {
-    event: scheduled.event,
-    matches: scheduled.matches,
-    warnings: scheduleWarnings,
-    placementFailures: scheduled.placementFailures ?? [],
-    diagnostics,
-    previousMatchCount: previousMatches.length,
-    notification: previousMatches.length
-      ? {
-          eventId,
-          eventName: String(scheduled.event.name ?? event.name ?? "Event"),
-          forceBatch: true,
-          changes: collectMatchScheduleChanges({
-            before: snapshotMatchScheduleState(previousMatches),
-            after: snapshotMatchScheduleState(scheduled.matches),
-          }),
-        }
-      : null,
-  };
+  return result();
 };
 
 export { editorMatchProjectionsFor };

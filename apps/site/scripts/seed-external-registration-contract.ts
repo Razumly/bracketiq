@@ -12,17 +12,17 @@ const fixtureDivision = (
   clubDivisionId: string,
   competition: boolean,
 ) => ({
-id: divisionId, key: 'open', name: 'Open', kind: eventType,
-          sourceDivisionId: eventType === 'TRYOUT' ? clubDivisionId : null,
-          maxParticipants: 4, fieldIds: [fieldId], teamIds: [],
-          playoffTeamCount: eventType === 'TOURNAMENT' ? 4 : null,
-          gamesPerOpponent: 1, matchDurationMinutes: competition ? 30 : 0, restTimeMinutes: competition ? 5 : 0,
-          pointsToVictory: [21],
+  id: divisionId, key: 'open', name: 'Open', kind: eventType,
+  sourceDivisionId: eventType === 'TRYOUT' ? clubDivisionId : null,
+  maxParticipants: 4, fieldIds: [fieldId], teamIds: [],
+  playoffTeamCount: eventType === 'TOURNAMENT' ? 4 : null,
+  gamesPerOpponent: 1, matchDurationMinutes: competition ? 30 : 0, restTimeMinutes: competition ? 5 : 0,
+  pointsToVictory: [21],
 });
 
 async function main() {
   const issue = process.env.MVP_CONTRACT_ISSUE ?? '48';
-  if (!['48', '49', '51'].includes(issue)) throw new Error('Use issue 48, 49, or 51.');
+  if (!['48', '49', '51', '52'].includes(issue)) throw new Error('Use issue 48, 49, 51, or 52.');
   const database = new URL(process.env.DATABASE_URL ?? '');
   if (!['localhost', '127.0.0.1'].includes(database.hostname)
     || !database.pathname.startsWith(`/bracketiq_e2e_${issue}_`)) {
@@ -62,17 +62,19 @@ async function main() {
       where: { id: clubDivisionId }, update: {},
       create: { id: clubDivisionId, name: 'Club Open', organizationId, scope: 'ORGANIZATION' },
     });
-    for (const [index, eventType] of eventTypes.entries()) {
+    const seedEvent = async (index: number, eventType: typeof eventTypes[number]) => {
       const id = eventIds[index];
       const fieldId = `${id}-court`;
       const slotId = `${id}-slot`;
       const divisionId = buildEventDivisionId(id, 'open');
       const competition = eventType === 'LEAGUE' || eventType === 'TOURNAMENT';
       if (eventType === 'TRYOUT') {
-        await tx.fields.create({ data: {
-          id: fieldId, name: 'Court 1', location: `Issue ${issue} Gym`,
-          organizationId, createdBy: userId, rentalSlotIds: [],
-        } });
+        await tx.fields.create({
+          data: {
+            id: fieldId, name: 'Court 1', location: `Issue ${issue} Gym`,
+            organizationId, createdBy: userId, rentalSlotIds: [],
+          }
+        });
       }
       await upsertEventFromPayload({
         id, name: `Issue ${issue} ${eventType}`, eventType, hostId: userId, organizationId,
@@ -105,25 +107,41 @@ async function main() {
         userIds: [], teamIds: [], waitListIds: [], freeAgentIds: [], tags: [],
       }, tx);
       if (index % 2 === 1) {
-        await tx.events.update({ where: { id }, data: {
-          sourceType: 'AFFILIATE_IMPORT', sourceId: `${id}-source`,
-          sourceUrl: 'https://source.example/event',
-        } });
+        await tx.events.update({
+          where: { id }, data: {
+            sourceType: 'AFFILIATE_IMPORT', sourceId: `${id}-source`,
+            sourceUrl: 'https://source.example/event',
+          }
+        });
       }
-      if (competition) {
-        await persistCreateOnlyMatchGraph({ tx, eventId: id, includePlaceholderTeams: true });
-      }
+      const seedBoundaryGraph = async () => {
+        if (issue === '52' && eventType === 'TOURNAMENT') {
+          await tx.events.update({
+            where: { id }, data: {
+              noFixedEndDateTime: true, scheduleEndConstraint: null,
+              generatedScheduleEnd: new Date('2027-01-04T20:00:00Z'),
+            }
+          });
+        }
+        if (competition && !(issue === '52' && eventType === 'LEAGUE')) {
+          await persistCreateOnlyMatchGraph({ tx, eventId: id, includePlaceholderTeams: true });
+        }
+      };
+      await seedBoundaryGraph();
       if (eventType === protectedEventType) {
         const match = await tx.matches.findFirstOrThrow({ where: { eventId: id } });
         await tx.matches.update({ where: { id: match.id }, data: { status: 'IN_PROGRESS', actualStart: new Date('2027-01-04T08:00:00Z') } });
       }
-    }
+    };
+    for (const [index, eventType] of eventTypes.entries()) await seedEvent(index, eventType);
     if (issue === '49') {
       const unclaimedOrganizationId = `${unclaimedEventId}-organization`;
-      await tx.organizations.create({ data: {
-        id: unclaimedOrganizationId, name: 'Unclaimed operator', ownerId: userId,
-        originType: 'AFFILIATE_IMPORTED', ownershipStatus: 'UNCLAIMED', enabledFeatures: ['EVENT_MANAGEMENT'],
-      } });
+      await tx.organizations.create({
+        data: {
+          id: unclaimedOrganizationId, name: 'Unclaimed operator', ownerId: userId,
+          originType: 'AFFILIATE_IMPORTED', ownershipStatus: 'UNCLAIMED', enabledFeatures: ['EVENT_MANAGEMENT'],
+        }
+      });
       await upsertEventFromPayload({
         id: unclaimedEventId, name: 'Unclaimed Event', eventType: 'EVENT', hostId: userId,
         organizationId: unclaimedOrganizationId, affiliateUrl: 'http://organizer.example/register',
@@ -132,9 +150,11 @@ async function main() {
         maxParticipants: 8, teamSizeLimit: 1, teamSignup: false, singleDivision: true, price: 0,
         automatedScheduling: false, sportIds: [], fieldIds: [], timeSlotIds: [],
       }, tx);
-      await tx.events.update({ where: { id: unclaimedEventId }, data: {
-        sourceType: 'AFFILIATE_IMPORT', sourceId: `${unclaimedEventId}-source`, sourceUrl: 'https://source.example/event',
-      } });
+      await tx.events.update({
+        where: { id: unclaimedEventId }, data: {
+          sourceType: 'AFFILIATE_IMPORT', sourceId: `${unclaimedEventId}-source`, sourceUrl: 'https://source.example/event',
+        }
+      });
     }
   }, { timeout: 60_000 });
   const token = signSessionToken({ userId, isAdmin: false, sessionVersion: 0, device: 'mobile' });

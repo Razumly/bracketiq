@@ -37,12 +37,14 @@ const buildMaintenanceSnapshot = async ({
   matches = [],
   eventType = "LEAGUE",
   automatedScheduling,
+  generatedEnd,
   state = "PUBLISHED",
   actor = { userId: "host_maintenance" },
 }: {
   matches?: Array<Record<string, unknown>>;
   eventType?: string;
   automatedScheduling?: unknown;
+  generatedEnd?: Date;
   state?: string;
   actor?: { userId: string; isAdmin?: boolean } | null;
 } = { automatedScheduling: true }) => {
@@ -67,6 +69,7 @@ const buildMaintenanceSnapshot = async ({
       sourceType: null,
       start: "2026-08-20T09:00:00.000Z",
       end: "2026-08-20T17:00:00.000Z",
+      ...(generatedEnd ? { noFixedEndDateTime: true, end: generatedEnd, generatedScheduleEnd: generatedEnd } : {}),
       sportIds: [],
       fieldIds: [],
       timeSlotIds: [],
@@ -79,6 +82,14 @@ const buildMaintenanceSnapshot = async ({
 };
 
 describe("maintenance operation projection", () => {
+  it.each([true, false])('preserves persisted Date ends in the editor with automation %s', async (automatedScheduling) => {
+    const end = new Date('2026-08-20T19:35:00.000Z');
+    const snapshot = await buildMaintenanceSnapshot({ automatedScheduling, generatedEnd: end });
+    expect(snapshot.draft.schedule).toEqual({
+      mode: 'GENERATED_END', endConstraint: null, generatedScheduleEnd: end.toISOString(), isAutomatedScheduling: automatedScheduling,
+    });
+  });
+
   const placedMatch = {
     id: "event_maintenance:match:1",
     division: "division_1",

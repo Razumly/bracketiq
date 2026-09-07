@@ -192,25 +192,14 @@ fun Event.usableLatitudeLongitude(): Pair<Double, Double>? {
 
 fun Event.hasUsableCoordinates(): Boolean = usableLatitudeLongitude() != null
 
-fun Event.withAutomatedScheduling(enabled: Boolean): Event {
-    val fixedEnd = if (!enabled && noFixedEndDateTime && end <= start) {
-        start + 1.hours
-    } else {
-        end
-    }
-    return copy(
-        isAutomatedScheduling = enabled,
-        noFixedEndDateTime = if (enabled) noFixedEndDateTime else false,
-        end = fixedEnd,
-    )
-}
+fun Event.withAutomatedScheduling(enabled: Boolean): Event = copy(isAutomatedScheduling = enabled)
 
 fun Event.showsScheduleConstructionControls(): Boolean =
     !eventType.isScheduleConstructionAutomationType() || isAutomatedScheduling
 
 fun Event.showsGeneratedEndDateControl(): Boolean = when (eventType) {
     EventType.LEAGUE,
-    EventType.TOURNAMENT -> isAutomatedScheduling
+    EventType.TOURNAMENT -> isAutomatedScheduling || noFixedEndDateTime
     EventType.WEEKLY_EVENT -> true
     EventType.EVENT,
     EventType.TRYOUT -> false

@@ -1,4 +1,4 @@
-import crypto from "node:crypto";
+import { proposalDivisionPersistence } from "./proposalDivisionPersistence";import crypto from "node:crypto";
 import type { Prisma } from "@/generated/prisma/client";
 import {
   EVENT_EDITOR_CONTRACT_VERSION,
@@ -117,9 +117,8 @@ const jsonSafe = (value: unknown): unknown => {
 
 const hash = (value: unknown): string =>
   crypto.createHash("sha256").update(JSON.stringify(jsonSafe(value))).digest("hex");
-const operationRequestHash = (
-  request: EventEditorMaintenanceRequest,
-): string => hash(request);
+const operationRequestHash = (request: EventEditorMaintenanceRequest): string =>
+  hash(request);
 
 const equalJson = (left: unknown, right: unknown): boolean =>
   JSON.stringify(jsonSafe(left)) === JSON.stringify(jsonSafe(right));
@@ -133,10 +132,7 @@ export class MaintenanceOperationError extends Error {
     | "EDITOR_MAINTENANCE_ACCEPTANCE_CONFLICT"
     | "EDITOR_MAINTENANCE_UNAUTHORIZED";
 
-  constructor(
-    code: MaintenanceOperationError["code"],
-    message: string,
-  ) {
+  constructor(code: MaintenanceOperationError["code"], message: string) {
     super(message);
     this.name = "MaintenanceOperationError";
     this.code = code;
@@ -164,12 +160,22 @@ export const assertMaintenanceCapability = (
     );
   }
   const eventRecord = event as unknown as Record<string, unknown>;
-  if (String(eventRecord.state ?? "").trim().toUpperCase() === "TEMPLATE") {
+  if (
+    String(eventRecord.state ?? "")
+      .trim()
+      .toUpperCase() === "TEMPLATE"
+  ) {
     throw new MaintenanceOperationError(
       "EDITOR_MAINTENANCE_INVALID",
       "Schedule maintenance is not available for Template events.",
     );
   }
+  assertMaintenanceGraphCapability(event, operation);
+};
+const assertMaintenanceGraphCapability = (
+  event: League | Tournament,
+  operation: EventEditorMaintenanceOperation,
+): void => {
   const matches = Object.values(event.matches ?? {});
   const matchCount = matches.length;
   if (operation === "BUILD" && matchCount > 0) {
@@ -178,15 +184,18 @@ export const assertMaintenanceCapability = (
       "Build is available only for an Event without an existing Match Graph.",
     );
   }
-  if ((operation === "COMPLETE" || operation === "REBUILD") && matchCount === 0) {
+  if (
+    (operation === "COMPLETE" || operation === "REBUILD") &&
+    matchCount === 0
+  ) {
     throw new MaintenanceOperationError(
       "EDITOR_MAINTENANCE_INVALID",
       `${operation} requires an existing Match Graph.`,
     );
   }
   if (
-    operation === "COMPLETE"
-    && !matches.some((match) => match.placementState === "UNPLACED")
+    operation === "COMPLETE" &&
+    !matches.some((match) => match.placementState === "UNPLACED")
   ) {
     throw new MaintenanceOperationError(
       "EDITOR_MAINTENANCE_INVALID",
@@ -199,27 +208,14 @@ const maintenanceCapabilityDrifted = (
   event: League | Tournament,
   automatedScheduling: boolean,
 ): boolean => {
-  if (asEventType(event) !== asEventType(proposal.graph.event)) {
-    return true;
+  if (asEventType(event) !== asEventType(proposal.graph.event)) return true;
+  try {
+    assertMaintenanceCapability(event, proposal.operation, automatedScheduling);
+    return false;
+  } catch (error) {
+    if (error instanceof MaintenanceOperationError) return true;
+    throw error;
   }
-  if (automatedScheduling !== true) {
-    return true;
-  }
-  const eventRecord = event as unknown as Record<string, unknown>;
-  if (String(eventRecord.state ?? "").trim().toUpperCase() === "TEMPLATE") {
-    return true;
-  }
-  const matches = Object.values(event.matches ?? {});
-  if (proposal.operation === "BUILD" && matches.length > 0) {
-    return true;
-  }
-  if (
-    proposal.operation === "COMPLETE"
-    && !matches.some((match) => match.placementState === "UNPLACED")
-  ) {
-    return true;
-  }
-  return proposal.operation === "REBUILD" && matches.length === 0;
 };
 
 const protectedStatus = new Set([
@@ -266,7 +262,10 @@ export const protectedMaintenanceMatchIds = (
 ): Set<string> => {
   const directlyProtected = new Set(
     matches
-      .filter((match) => classifyMaintenanceMatch(match, protectedHistoryIds) === "PROTECTED")
+      .filter(
+        (match) =>
+          classifyMaintenanceMatch(match, protectedHistoryIds) === "PROTECTED",
+      )
       .map((match) => match.id),
   );
   const protectedPhaseDivisionIds = new Set(
@@ -277,10 +276,11 @@ export const protectedMaintenanceMatchIds = (
   );
   return new Set(
     matches
-      .filter((match) => (
-        directlyProtected.has(match.id)
-        || protectedPhaseDivisionIds.has(match.division?.id ?? "")
-      ))
+      .filter(
+        (match) =>
+          directlyProtected.has(match.id) ||
+          protectedPhaseDivisionIds.has(match.division?.id ?? ""),
+      )
       .map((match) => match.id),
   );
 };
@@ -299,7 +299,6 @@ const placementFailureWarningsFor = (
     restrictingFactor: failure.restrictingFactor,
   }));
 
-
 const outcomeFor = (params: {
   event: League | Tournament;
   matches: Match[];
@@ -311,18 +310,29 @@ const outcomeFor = (params: {
     params.event.officialPositions,
     params.event.eventType,
   );
-  const unplaced = projections.filter((match) => match.placementState === "UNPLACED");
+  const unplaced = projections.filter(
+    (match) => match.placementState === "UNPLACED",
+  );
   const details = [
-    ...((params.event as unknown as Record<string, unknown>).divisionDetails as unknown[] ?? []),
-    ...((params.event as unknown as Record<string, unknown>).playoffDivisionDetails as unknown[] ?? []),
-  ].filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object");
-  const detailsById = new Map(details.map((detail) => [String(detail.id), detail]));
+    ...(((params.event as unknown as Record<string, unknown>)
+      .divisionDetails as unknown[]) ?? []),
+    ...(((params.event as unknown as Record<string, unknown>)
+      .playoffDivisionDetails as unknown[]) ?? []),
+  ].filter(
+    (entry): entry is Record<string, unknown> =>
+      Boolean(entry) && typeof entry === "object",
+  );
+  const detailsById = new Map(
+    details.map((detail) => [String(detail.id), detail]),
+  );
   const unscheduledMatches = unplaced.map((match) => {
     const phaseDivisionId = [
       match.phaseDivisionId,
       match.division,
       match.sourceDivisionId,
-    ].find((value): value is string => Boolean(value?.trim()))?.trim();
+    ]
+      .find((value): value is string => Boolean(value?.trim()))
+      ?.trim();
     if (!phaseDivisionId) {
       throw new MaintenanceOperationError(
         "EDITOR_MAINTENANCE_INVALID",
@@ -333,7 +343,9 @@ const outcomeFor = (params: {
     const phase = [
       match.phase,
       typeof detail?.phase === "string" ? detail.phase : null,
-    ].find((value): value is string => Boolean(value?.trim()))?.trim();
+    ]
+      .find((value): value is string => Boolean(value?.trim()))
+      ?.trim();
     if (!phase) {
       throw new MaintenanceOperationError(
         "EDITOR_MAINTENANCE_INVALID",
@@ -348,19 +360,27 @@ const outcomeFor = (params: {
       sourceDivisionId: match.sourceDivisionId,
     };
   });
-  const phases = Array.from(new Map(
-    unscheduledMatches.map((match) => {
-      const detail = detailsById.get(match.phaseDivisionId);
-      return [match.phaseDivisionId, {
-        id: match.phaseDivisionId,
-        name: String(detail?.name ?? "Competition Phase details unavailable"),
-        phase: String(detail?.phase ?? match.phase),
-        sourceDivisionId: detail?.sourceDivisionId == null
-          ? match.sourceDivisionId
-          : String(detail.sourceDivisionId),
-      }];
-    }),
-  ).values());
+  const phases = Array.from(
+    new Map(
+      unscheduledMatches.map((match) => {
+        const detail = detailsById.get(match.phaseDivisionId);
+        return [
+          match.phaseDivisionId,
+          {
+            id: match.phaseDivisionId,
+            name: String(
+              detail?.name ?? "Competition Phase details unavailable",
+            ),
+            phase: String(detail?.phase ?? match.phase),
+            sourceDivisionId:
+              detail?.sourceDivisionId == null
+                ? match.sourceDivisionId
+                : String(detail.sourceDivisionId),
+          },
+        ];
+      }),
+    ).values(),
+  );
   if (unplaced.length === 0) {
     return eventEditorMaintenanceScheduleOutcomeSchema.parse({
       status: "COMPLETE",
@@ -474,9 +494,7 @@ type MaintenanceResourceLocks = MaintenanceLockResourceIds;
 const resourceIdsEqual = (
   left: MaintenanceResourceLocks,
   right: MaintenanceResourceLocks,
-): boolean => (
-  equalJson(left, right)
-);
+): boolean => equalJson(left, right);
 
 const missingMaintenanceResourceIds = (
   locked: {
@@ -495,11 +513,13 @@ const missingMaintenanceResourceIds = (
   ),
 });
 
-const hasMaintenanceResourceIds = (resources: MaintenanceResourceLocks): boolean =>
-  resources.fieldIds.length > 0
-  || resources.timeSlotIds.length > 0
-  || resources.bookingIds.length > 0
-  || resources.bookingItemIds.length > 0;
+const hasMaintenanceResourceIds = (
+  resources: MaintenanceResourceLocks,
+): boolean =>
+  resources.fieldIds.length > 0 ||
+  resources.timeSlotIds.length > 0 ||
+  resources.bookingIds.length > 0 ||
+  resources.bookingItemIds.length > 0;
 
 const acquireMaintenanceRentalLocks = async (
   tx: MaintenanceClient,
@@ -545,11 +565,14 @@ const lockMaintenanceResourcesAndReload = async (
     missing.bookingItemIds.forEach((id) => locked.bookingItemIds.add(id));
 
     const reloaded = await assertActor(actor, eventId, tx, retainedMatchIds);
-    const reloadedResources = await loadMaintenanceLockResourceIdsFor(reloaded.event, tx);
+    const reloadedResources = await loadMaintenanceLockResourceIdsFor(
+      reloaded.event,
+      tx,
+    );
     const uncovered = missingMaintenanceResourceIds(locked, reloadedResources);
     if (
-      !hasMaintenanceResourceIds(uncovered)
-      && resourceIdsEqual(observed, reloadedResources)
+      !hasMaintenanceResourceIds(uncovered) &&
+      resourceIdsEqual(observed, reloadedResources)
     ) {
       return reloaded;
     }
@@ -561,7 +584,6 @@ const lockMaintenanceResourcesAndReload = async (
   );
 };
 
-
 /** Load one authorized Event after its scheduling resources are locked. */
 export const loadLockedScheduleEvent = async (params: {
   tx: MaintenanceClient;
@@ -569,10 +591,24 @@ export const loadLockedScheduleEvent = async (params: {
   eventId: string;
 }): Promise<MaintenanceActorEvent> => {
   await acquireEventLock(params.tx, params.eventId);
-  const rows = await params.tx.matches.findMany({ where: { eventId: params.eventId }, select: { id: true } });
+  const rows = await params.tx.matches.findMany({
+    where: { eventId: params.eventId },
+    select: { id: true },
+  });
   const retainedMatchIds = rows.map((row) => row.id);
-  const initial = await assertActor(params.actor, params.eventId, params.tx, retainedMatchIds);
-  return lockMaintenanceResourcesAndReload(params.tx, params.actor, params.eventId, initial, retainedMatchIds);
+  const initial = await assertActor(
+    params.actor,
+    params.eventId,
+    params.tx,
+    retainedMatchIds,
+  );
+  return lockMaintenanceResourcesAndReload(
+    params.tx,
+    params.actor,
+    params.eventId,
+    initial,
+    retainedMatchIds,
+  );
 };
 
 export const createMaintenanceProposal = async (params: {
@@ -587,8 +623,13 @@ export const createMaintenanceProposal = async (params: {
   const existing = await operations.findUnique({
     where: { operationId: request.operationId },
   });
-  if (existing) {
-    if (existing.eventId !== request.eventId || existing.actorUserId !== actor.userId) {
+  const replayExistingOperation = async (
+    existing: NonNullable<Awaited<ReturnType<typeof operations.findUnique>>>,
+  ) => {
+    if (
+      existing.eventId !== request.eventId ||
+      existing.actorUserId !== actor.userId
+    ) {
       throw new MaintenanceOperationError(
         "EDITOR_MAINTENANCE_UNAUTHORIZED",
         "The maintenance operation belongs to another Event organizer.",
@@ -608,7 +649,9 @@ export const createMaintenanceProposal = async (params: {
       );
     }
     if (existing.status === "ACCEPTED" && existing.acceptedResponseJson) {
-      return eventEditorMaintenanceAcceptedResultSchema.parse(existing.acceptedResponseJson);
+      return eventEditorMaintenanceAcceptedResultSchema.parse(
+        existing.acceptedResponseJson,
+      );
     }
     if (existing.proposalJson) {
       return eventEditorMaintenanceProposalSchema.parse(existing.proposalJson);
@@ -617,12 +660,9 @@ export const createMaintenanceProposal = async (params: {
       "EDITOR_MAINTENANCE_INVALID",
       "The maintenance operation is still being computed.",
     );
-  }
-  const eventUnderEventLock = await assertActor(
-    actor,
-    request.eventId,
-    tx,
-  );
+  };
+  if (existing) return replayExistingOperation(existing);
+  const eventUnderEventLock = await assertActor(actor, request.eventId, tx);
   const locked = await lockMaintenanceResourcesAndReload(
     tx,
     actor,
@@ -634,7 +674,11 @@ export const createMaintenanceProposal = async (params: {
     persistedEvent,
     automatedScheduling: lockedAutomatedScheduling,
   } = locked;
-  assertMaintenanceCapability(event, request.operation, lockedAutomatedScheduling);
+  assertMaintenanceCapability(
+    event,
+    request.operation,
+    lockedAutomatedScheduling,
+  );
   const scheduleState = await loadEventScheduleState(
     persistedEvent,
     request.eventId,
@@ -657,8 +701,8 @@ export const createMaintenanceProposal = async (params: {
     },
   );
   if (
-    request.expectedRevisions !== undefined
-    && !equalJson(request.expectedRevisions, revisionBinding)
+    request.expectedRevisions !== undefined &&
+    !equalJson(request.expectedRevisions, revisionBinding)
   ) {
     throw new MaintenanceOperationError(
       "EDITOR_MAINTENANCE_STALE",
@@ -667,23 +711,29 @@ export const createMaintenanceProposal = async (params: {
   }
   const history = await loadEventProtectedHistory(request.eventId, tx);
   const currentMatches = Object.values(event.matches);
-  const protectedIds = request.operation === "REBUILD"
-    ? new Set(
-      currentMatches
-        .filter((match) =>
-          classifyMaintenanceMatch(match, history.protectedMatchIds) === "PROTECTED",
+  const protectedIds =
+    request.operation === "REBUILD"
+      ? new Set(
+          currentMatches
+            .filter(
+              (match) =>
+                classifyMaintenanceMatch(match, history.protectedMatchIds) ===
+                "PROTECTED",
+            )
+            .map((match) => match.id),
         )
-        .map((match) => match.id),
-    )
-    : new Set(
-      currentMatches
-        .filter((match) => match.placementState === "PLACED")
-        .map((match) => match.id),
-    );
+      : new Set(
+          currentMatches
+            .filter((match) => match.placementState === "PLACED")
+            .map((match) => match.id),
+        );
   const mutation = await reconcileEventSchedule({
     tx: tx as Prisma.TransactionClient,
     eventId: request.eventId,
-    mode: request.operation === "COMPLETE" ? "RESCHEDULE_PRESERVING_LOCKS" : request.operation,
+    mode:
+      request.operation === "COMPLETE"
+        ? "RESCHEDULE_PRESERVING_LOCKS"
+        : request.operation,
     expectedScheduleRevision: revisionBinding.scheduleRevision,
     historyPolicy: "ALLOW_PROTECTED",
     includePlaceholderTeams: request.includePlaceholderTeams !== false,
@@ -693,9 +743,10 @@ export const createMaintenanceProposal = async (params: {
     protectedMatchIds: protectedIds,
     regenerateGraph: request.operation === "REBUILD",
   });
-  const proposalProtectedIds = request.operation === "REBUILD"
-    ? protectedMaintenanceMatchIds(mutation.matches, protectedIds)
-    : protectedIds;
+  const proposalProtectedIds =
+    request.operation === "REBUILD"
+      ? protectedMaintenanceMatchIds(mutation.matches, protectedIds)
+      : protectedIds;
   const proposal = proposalFor({
     event: mutation.event,
     matches: mutation.matches,
@@ -729,13 +780,22 @@ export const createMaintenanceProposal = async (params: {
 const loadProposalOperation = async (
   tx: MaintenanceClient,
   actor: { userId: string; isAdmin: boolean },
-  reference: EventEditorAcceptMaintenanceProposal | EventEditorRejectMaintenanceProposal,
+  reference:
+    | EventEditorAcceptMaintenanceProposal
+    | EventEditorRejectMaintenanceProposal,
   allowRejected = false,
-): Promise<{ row: MaintenanceOperationRow; proposal: EventEditorMaintenanceProposal }> => {
+): Promise<{
+  row: MaintenanceOperationRow;
+  proposal: EventEditorMaintenanceProposal;
+}> => {
   const row = await operationsFor(tx).findUnique({
     where: { operationId: reference.operationId },
   });
-  if (!row || row.eventId !== reference.eventId || row.operation !== reference.operation) {
+  if (
+    !row ||
+    row.eventId !== reference.eventId ||
+    row.operation !== reference.operation
+  ) {
     throw new MaintenanceOperationError(
       "EDITOR_MAINTENANCE_NOT_FOUND",
       "Maintenance proposal not found.",
@@ -765,9 +825,8 @@ const loadProposalOperation = async (
 
 type MaintenanceGraphMatch = EventEditorMaintenanceProposal["graph"]["matches"][number];
 
-const maintenanceRelationFor = (
-  id: string | null,
-): { id: string } | null => (id ? { id } : null);
+const maintenanceRelationFor = (id: string | null): { id: string } | null =>
+  id ? { id } : null;
 
 const maintenanceDateFor = (value: string | null): Date | null => {
   if (!value) return null;
@@ -811,14 +870,17 @@ const persistMaintenanceDivisionTeamAssignments = async (
 ): Promise<void> => {
   const divisionRows = Array.from(
     new Map(
-      [...event.divisionDetails, ...event.playoffDivisionDetails]
-        .map((division) => [division.id, division] as const),
+      [...event.divisionDetails, ...event.playoffDivisionDetails].map(
+        (division) => [division.id, division] as const,
+      ),
     ).values(),
   );
   if (!divisionRows.length) return;
-  const divisions = (tx as unknown as Record<string, unknown>).divisions as {
-    update?: (args: unknown) => Promise<unknown>;
-  } | undefined;
+  const divisions = (tx as unknown as Record<string, unknown>).divisions as
+    | {
+        update?: (args: unknown) => Promise<unknown>;
+      }
+    | undefined;
   if (typeof divisions?.update !== "function") {
     throw new MaintenanceOperationError(
       "EDITOR_MAINTENANCE_INVALID",
@@ -841,10 +903,7 @@ const persistMaintenanceDivisionTeamAssignments = async (
     collectPhaseDivisions({
       divisions: event.divisionDetails,
       playoffDivisions: event.playoffDivisionDetails,
-    }).map((division) => [
-      division.id,
-      Array.from(division.teamIds ?? []),
-    ]),
+    }).map((division) => [division.id, Array.from(division.teamIds ?? [])]),
   );
   await persistPhaseParticipantAssignments({
     client: tx as unknown as PhasePersistenceClient,
@@ -852,7 +911,6 @@ const persistMaintenanceDivisionTeamAssignments = async (
     teamIdsByPhaseDivision: phaseTeamIdsByDivision,
   });
 };
-
 
 const assertMaintenanceGraphReferences = (
   graph: EventEditorMaintenanceProposal["graph"],
@@ -882,13 +940,15 @@ const assertMaintenanceGraphReferences = (
       );
     }
   }
-  for (const match of graph.matches) {
+  graph.matches.forEach((match) => {
     const divisionIdsForMatch = [
       match.division,
       match.sourceDivisionId,
       match.phaseDivisionId,
     ].filter((id): id is string => Boolean(id));
-    const unknownDivision = divisionIdsForMatch.find((id) => !divisionIds.has(id));
+    const unknownDivision = divisionIdsForMatch.find(
+      (id) => !divisionIds.has(id),
+    );
     if (unknownDivision) {
       throw new MaintenanceOperationError(
         "EDITOR_MAINTENANCE_INVALID",
@@ -914,7 +974,7 @@ const assertMaintenanceGraphReferences = (
         `Match ${match.id} references unknown team ${unknownTeam}.`,
       );
     }
-  }
+  });
 };
 
 type MaintenanceGraphDivision =
@@ -926,30 +986,6 @@ const maintenanceMatchPersistenceFor = (
   index: number,
   divisionById: ReadonlyMap<string, MaintenanceGraphDivision>,
 ): MatchPersistenceInput => {
-  const divisionId = match.phaseDivisionId ?? match.division ?? match.sourceDivisionId;
-  if (!divisionId) {
-    throw new MaintenanceOperationError(
-      "EDITOR_MAINTENANCE_INVALID",
-      `Match ${match.id} has no Competition Phase or Division identity.`,
-    );
-  }
-  const sourceDivision = match.sourceDivisionId
-    ? divisionById.get(match.sourceDivisionId)
-    : undefined;
-  const division = divisionById.get(divisionId);
-  if (!division && !sourceDivision) {
-    throw new MaintenanceOperationError(
-      "EDITOR_MAINTENANCE_INVALID",
-      `Match ${match.id} references unknown Division ${divisionId}.`,
-    );
-  }
-  const source = division ?? sourceDivision;
-  if (!source) {
-    throw new MaintenanceOperationError(
-      "EDITOR_MAINTENANCE_INVALID",
-      `Match ${match.id} has no source Division.`,
-    );
-  }
   return {
     id: match.id,
     eventId,
@@ -962,19 +998,12 @@ const maintenanceMatchPersistenceFor = (
     team2Points: match.team2Points,
     start: maintenanceDateFor(match.start),
     end: maintenanceDateFor(match.end),
-    division: {
-      id: division?.id ?? divisionId,
-      kind: division?.kind ?? source.kind,
-      role: division?.role ?? (match.phaseDivisionId ? "PHASE" : null),
-      phase: division?.phase ?? match.phase ?? source.phase,
-      sourceDivisionId: division?.sourceDivisionId ?? match.sourceDivisionId ?? null,
-      phaseSettings: Object.fromEntries(
-        Object.entries(source.phaseSettings).map(([phase, settings]) => [
-          phase,
-          { officialPositions: settings.officialPositions },
-        ]),
-      ),
-    },
+    division: proposalDivisionPersistence(match, divisionById, (message) => {
+      throw new MaintenanceOperationError(
+        "EDITOR_MAINTENANCE_INVALID",
+        message,
+      );
+    }),
     field: maintenanceRelationFor(match.fieldId),
     team1: maintenanceRelationFor(match.team1Id),
     team2: maintenanceRelationFor(match.team2Id),
@@ -1018,6 +1047,13 @@ const assertProtectedMatchesRetained = (
   }
 };
 
+const currentGraphLinks = (current: Match) => ({
+  winnerNextMatchId: current.winnerNextMatch?.id ?? null,
+  loserNextMatchId: current.loserNextMatch?.id ?? null,
+  previousLeftId: current.previousLeftMatch?.id ?? null,
+  previousRightId: current.previousRightMatch?.id ?? null,
+});
+
 const persistMaintenanceProtectedGraphLinks = async (
   tx: MaintenanceClient,
   proposal: EventEditorMaintenanceProposal,
@@ -1025,9 +1061,11 @@ const persistMaintenanceProtectedGraphLinks = async (
   currentMatches: Match[],
 ): Promise<void> => {
   if (proposal.operation !== "REBUILD") return;
-  const update = (tx as unknown as Record<string, unknown>).matches as {
-    update?: (args: unknown) => Promise<unknown>;
-  } | undefined;
+  const update = (tx as unknown as Record<string, unknown>).matches as
+    | {
+        update?: (args: unknown) => Promise<unknown>;
+      }
+    | undefined;
   if (typeof update?.update !== "function") return;
   const currentById = new Map(currentMatches.map((match) => [match.id, match]));
   const graphById = new Map(graph.matches.map((match) => [match.id, match]));
@@ -1041,12 +1079,7 @@ const persistMaintenanceProtectedGraphLinks = async (
       previousLeftId: reviewed.previousLeftId,
       previousRightId: reviewed.previousRightId,
     };
-    const currentLinks = {
-      winnerNextMatchId: current.winnerNextMatch?.id ?? null,
-      loserNextMatchId: current.loserNextMatch?.id ?? null,
-      previousLeftId: current.previousLeftMatch?.id ?? null,
-      previousRightId: current.previousRightMatch?.id ?? null,
-    };
+    const currentLinks = currentGraphLinks(current);
     if (equalJson(currentLinks, links)) continue;
     await update.update({
       where: { id: matchId },
@@ -1106,7 +1139,9 @@ const persistMaintenanceScheduleGraph = async (params: {
     params.graph.event,
   );
   if (mutableMatches.length) {
-    await saveMatches(params.eventId, mutableMatches, params.tx);
+    await saveMatches(params.eventId, mutableMatches, params.tx, {
+      approvedScheduleEnd: end,
+    });
   }
   await persistMaintenanceProtectedGraphLinks(
     params.tx,
@@ -1114,13 +1149,20 @@ const persistMaintenanceScheduleGraph = async (params: {
     params.graph,
     params.currentMatches,
   );
-  await saveEventSchedule({
-    id: params.eventId,
-    end,
-    generatedScheduleEnd: maintenanceDateFor(params.graph.event.generatedScheduleEnd),
-    noFixedEndDateTime: params.graph.event.noFixedEndDateTime,
-    scheduleEndConstraint: maintenanceDateFor(params.graph.event.scheduleEndConstraint),
-  }, params.tx);
+  await saveEventSchedule(
+    {
+      id: params.eventId,
+      end,
+      generatedScheduleEnd: maintenanceDateFor(
+        params.graph.event.generatedScheduleEnd,
+      ),
+      noFixedEndDateTime: params.graph.event.noFixedEndDateTime,
+      scheduleEndConstraint: maintenanceDateFor(
+        params.graph.event.scheduleEndConstraint,
+      ),
+    },
+    params.tx,
+  );
 };
 
 const deleteRebuildReplacedMatches = async (
@@ -1138,9 +1180,11 @@ const deleteRebuildReplacedMatches = async (
     .sort();
   if (!removedIds.length) return;
   const client = tx as unknown as Record<string, unknown>;
-  const overlayStates = client.broadcastOverlayStates as {
-    updateMany?: (args: unknown) => Promise<unknown>;
-  } | undefined;
+  const overlayStates = client.broadcastOverlayStates as
+    | {
+        updateMany?: (args: unknown) => Promise<unknown>;
+      }
+    | undefined;
   if (typeof overlayStates?.updateMany === "function") {
     await overlayStates.updateMany({
       where: { eventId, activeMatchId: { in: removedIds } },
@@ -1152,16 +1196,20 @@ const deleteRebuildReplacedMatches = async (
     });
   }
   for (const model of ["matchSegments", "matchIncidents"]) {
-    const delegate = client[model] as {
-      deleteMany?: (args: unknown) => Promise<unknown>;
-    } | undefined;
+    const delegate = client[model] as
+      | {
+          deleteMany?: (args: unknown) => Promise<unknown>;
+        }
+      | undefined;
     if (typeof delegate?.deleteMany === "function") {
       await delegate.deleteMany({ where: { matchId: { in: removedIds } } });
     }
   }
-  const matches = client.matches as {
-    deleteMany?: (args: unknown) => Promise<unknown>;
-  } | undefined;
+  const matches = client.matches as
+    | {
+        deleteMany?: (args: unknown) => Promise<unknown>;
+      }
+    | undefined;
   if (typeof matches?.deleteMany === "function") {
     await matches.deleteMany({ where: { eventId, id: { in: removedIds } } });
   }
@@ -1187,15 +1235,13 @@ export const acceptMaintenanceProposal = async (params: {
       );
     }
     return {
-      response: eventEditorMaintenanceAcceptedResultSchema.parse(row.acceptedResponseJson),
+      response: eventEditorMaintenanceAcceptedResultSchema.parse(
+        row.acceptedResponseJson,
+      ),
       notification: null,
     };
   }
-  const eventUnderEventLock = await assertActor(
-    actor,
-    request.eventId,
-    tx,
-  );
+  const eventUnderEventLock = await assertActor(actor, request.eventId, tx);
   const locked = await lockMaintenanceResourcesAndReload(
     tx,
     actor,
@@ -1234,30 +1280,42 @@ export const acceptMaintenanceProposal = async (params: {
       "The Event schedule or scheduling inputs changed. Request a new proposal.",
     );
   }
-  if (maintenanceCapabilityDrifted(
-    proposal,
-    event,
-    lockedAutomatedScheduling,
-  )) {
+  if (
+    maintenanceCapabilityDrifted(proposal, event, lockedAutomatedScheduling)
+  ) {
     throw new MaintenanceOperationError(
       "EDITOR_MAINTENANCE_STALE",
       "The Event scheduling capability changed. Request a new proposal.",
     );
   }
-  assertMaintenanceCapability(event, request.operation, lockedAutomatedScheduling);
+  assertMaintenanceCapability(
+    event,
+    request.operation,
+    lockedAutomatedScheduling,
+  );
   let graph;
   try {
-    graph = validateAndNormalizeSerializedGraph(request.eventId, proposal.graph);
+    graph = validateAndNormalizeSerializedGraph(
+      request.eventId,
+      proposal.graph,
+    );
   } catch (error) {
     throw new MaintenanceOperationError(
       "EDITOR_MAINTENANCE_INVALID",
-      error instanceof Error ? error.message : "The stored proposal graph is invalid.",
+      error instanceof Error
+        ? error.message
+        : "The stored proposal graph is invalid.",
     );
   }
   const beforeMatches = Object.values(event.matches);
   assertProtectedMatchesRetained(proposal, graph);
   assertMaintenanceGraphReferences(graph);
-  await deleteRebuildReplacedMatches(tx, request.eventId, proposal, beforeMatches);
+  await deleteRebuildReplacedMatches(
+    tx,
+    request.eventId,
+    proposal,
+    beforeMatches,
+  );
   await persistMaintenanceScheduleGraph({
     tx,
     eventId: request.eventId,
@@ -1303,7 +1361,12 @@ export const rejectMaintenanceProposal = async (params: {
 }): Promise<EventEditorMaintenanceResponse> => {
   const { tx, actor, request } = params;
   await acquireEventLock(tx, request.eventId);
-  const { row, proposal } = await loadProposalOperation(tx, actor, request, true);
+  const { row, proposal } = await loadProposalOperation(
+    tx,
+    actor,
+    request,
+    true,
+  );
   await assertActor(actor, request.eventId, tx);
   if (row.status === "REJECTED") {
     return eventEditorMaintenanceRejectedResultSchema.parse({

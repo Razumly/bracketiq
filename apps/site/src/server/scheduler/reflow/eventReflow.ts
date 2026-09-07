@@ -3,11 +3,16 @@ import { scheduleReflowResultSchema, type ScheduleReflowRequest, type ScheduleRe
 import { loadEventScheduleState } from '@/server/events/eventEditorSnapshot';
 import { loadEventProtectedHistory } from '@/server/events/eventProtectedHistory';
 import { loadFieldBlockerCatalog, materializeFieldBlockerCatalog, type PrismaLike as FieldBlockerClient } from '@/server/repositories/fieldSchedulingConflicts';
-import { loadLockedScheduleEvent } from '../eventScheduleMaintenance';
+import { loadLockedScheduleEvent, MaintenanceOperationError } from '../eventScheduleMaintenance';
 import type { Tournament } from '../types';
 import { planCanonicalReflow, reflowWindow } from './canonicalReflow';
 import type { ReflowPlan } from './types';
 import { serializeReflowResult } from './response';
+
+const primaryOfficial = (staffing: ReflowPlan['assignmentChanges'][number]['after']) => {
+  const primary = staffing.officialAssignments.find((assignment) => assignment.userId !== null);
+  return { officialId: primary?.userId ?? null, officialCheckedIn: primary?.checkedIn ?? false };
+};
 
 export async function saveReflowDelta(tx: Prisma.TransactionClient, event: Tournament, plan: ReflowPlan, now: Date) {
   const latestScheduledEnd = () => Math.max(+event.start, ...Object.values(event.matches)
@@ -15,17 +20,18 @@ export async function saveReflowDelta(tx: Prisma.TransactionClient, event: Tourn
   const previousLatestEnd = latestScheduledEnd();
   const placements = new Map(plan.placementChanges.map((change) => [change.matchId, change.after]));
   const assignments = new Map(plan.assignmentChanges.map((change) => [change.matchId, change.after]));
-  for (const id of [...new Set([...placements.keys(), ...assignments.keys()])].sort()) {
+  const saveMatchDelta = async (id: string) => {
     const match = event.matches[id]!;
     const placement = placements.get(id);
     const staffing = assignments.get(id);
     const data: Prisma.MatchesUpdateInput = { updatedAt: now };
     if (placement) Object.assign(data, { start: new Date(placement.start), end: new Date(placement.end), fieldId: placement.fieldId });
     if (staffing) {
-      const primary = staffing.officialAssignments.find((assignment) => assignment.userId !== null);
-      Object.assign(data, { teamOfficialId: staffing.teamOfficialId,
+      Object.assign(data, {
+        teamOfficialId: staffing.teamOfficialId,
         officialIds: staffing.officialAssignments.map((assignment) => ({ ...assignment })),
-        officialId: primary?.userId ?? null, officialCheckedIn: primary?.checkedIn ?? false });
+        ...primaryOfficial(staffing)
+      });
     }
     await tx.matches.update({ where: { id }, data });
     if (placement) {
@@ -39,6 +45,9 @@ export async function saveReflowDelta(tx: Prisma.TransactionClient, event: Tourn
       match.official = event.officials.find((official) => official.id === data.officialId) ?? null;
       match.officialCheckedIn = data.officialCheckedIn === true;
     }
+  };
+  for (const id of [...new Set([...placements.keys(), ...assignments.keys()])].sort()) {
+    await saveMatchDelta(id);
   }
   if (event.noFixedEndDateTime && plan.placementChanges.length) {
     const latest = latestScheduledEnd();
@@ -60,7 +69,10 @@ export async function reflowEventSchedule(params: {
 }): Promise<ScheduleReflowResult> {
   const { tx, actor, request } = params;
   const now = params.now ?? new Date();
-  const { event, persistedEvent } = await loadLockedScheduleEvent({ tx, actor, eventId: request.eventId });
+  const { event, persistedEvent, automatedScheduling } = await loadLockedScheduleEvent({ tx, actor, eventId: request.eventId });
+  if (!automatedScheduling || event.eventType !== 'TOURNAMENT' || persistedEvent.state === 'TEMPLATE') {
+    throw new MaintenanceOperationError('EDITOR_MAINTENANCE_INVALID', 'Schedule Reflow requires a Tournament with Automated Scheduling enabled.');
+  }
   const state = await loadEventScheduleState(persistedEvent, event.id, tx);
   if (state.revision !== request.expectedScheduleRevision) return scheduleReflowResultSchema.parse({
     contractVersion: 1, eventId: event.id, status: 'STALE', scheduleRevision: state.revision,
@@ -72,8 +84,10 @@ export async function reflowEventSchedule(params: {
     Array.isArray(persistedEvent.fieldIds) ? persistedEvent.fieldIds : undefined);
   if (plan.status === 'CHANGED') await saveReflowDelta(tx, event, plan, now);
   const revision = plan.status === 'CHANGED'
-    ? (await loadEventScheduleState({ ...persistedEvent, end: event.end, generatedScheduleEnd: event.generatedScheduleEnd,
-      updatedAt: event.updatedAt ?? persistedEvent.updatedAt }, event.id, tx)).revision
+    ? (await loadEventScheduleState({
+      ...persistedEvent, end: event.end, generatedScheduleEnd: event.generatedScheduleEnd,
+      updatedAt: event.updatedAt ?? persistedEvent.updatedAt
+    }, event.id, tx)).revision
     : state.revision;
   return serializeReflowResult(event, plan, revision);
 }
@@ -99,7 +113,9 @@ export async function planStoredEventReflow(
       checkedInTeamIdsByMatch.set(checkIn.matchId, ids);
     }
   }
-  return planCanonicalReflow({ event, changedMatchIds, now, fieldPolicy, eligibleFieldIds,
+  return planCanonicalReflow({
+    event, changedMatchIds, now, fieldPolicy, eligibleFieldIds,
     protectedHistoryIds: history.protectedMatchIds, checkIns: { eventCheckedInTeamIds, checkedInTeamIdsByMatch },
-    blockers: materializeFieldBlockerCatalog(catalog, window.start, window.end) });
+    blockers: materializeFieldBlockerCatalog(catalog, window.start, window.end)
+  });
 }

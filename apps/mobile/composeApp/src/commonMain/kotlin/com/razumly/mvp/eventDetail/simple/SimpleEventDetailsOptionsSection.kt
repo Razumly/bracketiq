@@ -148,10 +148,10 @@ internal fun LazyListScope.simpleEventDetailsOptionsSection(
                 if (showsGeneratedEndDate) {
                     val copy = generatedEndDateCopy(state.editEvent.eventType)
                     OptionCheckboxRow(
-                        checked = supportsGeneratedEndDate && state.editEvent.noFixedEndDateTime,
+                        checked = state.editEvent.noFixedEndDateTime,
                         label = copy.label,
                         description = copy.description,
-                        enabled = supportsGeneratedEndDate,
+                        enabled = supportsGeneratedEndDate || state.editEvent.noFixedEndDateTime,
                         onCheckedChange = actions.onNoFixedEndDateChange,
                     )
                 }

@@ -125,8 +125,7 @@ internal fun LazyListScope.simpleEventDetailsScheduleSection(
         },
         editContent = {
             val showScheduleConstructionControls = state.editEvent.showsScheduleConstructionControls()
-            val usesGeneratedEnd = state.editEvent.isAutomatedScheduling &&
-                state.editEvent.noFixedEndDateTime
+            val usesGeneratedEnd = state.editEvent.noFixedEndDateTime
             LeagueScheduleFields(
                 fieldCount = state.fieldCount,
                 fields = state.fields,

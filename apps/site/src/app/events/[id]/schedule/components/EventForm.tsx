@@ -1393,10 +1393,7 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
           resolvedUpdates.scheduleStyle === "FIXED_WINDOW" &&
           !isImmutableField("noFixedEndDateTime")
         ) {
-          setValue("noFixedEndDateTime", false, {
-            shouldDirty: true,
-            shouldValidate: true,
-          });
+          configurationActions.handleNoFixedEndDateTimeChange(false);
         }
         if (resolvedUpdates.useRequiredDocuments === false) {
           setValue("requiredTemplateIds", [], {
@@ -1474,6 +1471,7 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
         }));
       },
       [
+        configurationActions,
         eventData,
         isImmutableField,
         registrationQuestionDrafts.length,
@@ -1482,26 +1480,6 @@ const EventForm = React.forwardRef<EventFormHandle, EventFormProps>(
         simpleSetupChoices.scheduleStyle,
       ],
     );
-
-    useEffect(() => {
-      if (
-        setupMode === "SIMPLE" &&
-        simpleSetupChoices.scheduleStyle === "FIXED_WINDOW" &&
-        eventData.noFixedEndDateTime &&
-        !isImmutableField("noFixedEndDateTime")
-      ) {
-        setValue("noFixedEndDateTime", false, {
-          shouldDirty: true,
-          shouldValidate: true,
-        });
-      }
-    }, [
-      eventData.noFixedEndDateTime,
-      isImmutableField,
-      setValue,
-      setupMode,
-      simpleSetupChoices.scheduleStyle,
-    ]);
 
     const validateSimpleSetupPage = useCallback(
       async (pageId: EventSetupPageId): Promise<boolean> => {

@@ -121,6 +121,15 @@ const useConfigurationActionsHarness = (
 };
 
 describe('useEventFormConfigurationActions', () => {
+    it('requires a selected end when the organizer changes to Planned End', () => {
+        const { result } = renderHook(() => useConfigurationActionsHarness(
+            buildEventData({ noFixedEndDateTime: true, end: '2026-07-20T12:00' }), jest.fn(),
+        ));
+        act(() => result.current.actions.handleNoFixedEndDateTimeChange(false));
+        expect(result.current.eventData.noFixedEndDateTime).toBe(false);
+        expect(result.current.eventData.end).toBe('');
+    });
+
     it('applies league event-type invariants as one action', async () => {
         const clearLeagueSlotErrors = jest.fn();
         const { result } = renderHook(() => useConfigurationActionsHarness(

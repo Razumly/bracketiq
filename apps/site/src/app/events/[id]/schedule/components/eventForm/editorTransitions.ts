@@ -39,6 +39,11 @@ export const changeSport = (
   basics: { ...draft.basics, sportIds: [...sportIds] },
 });
 
+const canSelectGeneratedEnd = (draft: EventEditorDraft): boolean => {
+  const type = draft.basics.eventType.toUpperCase();
+  return type === 'WEEKLY_EVENT' || (['LEAGUE', 'TOURNAMENT'].includes(type) && draft.schedule.isAutomatedScheduling);
+};
+
 /** Switch the explicit schedule mode. Clearing an end constraint is intentional. */
 export const changeScheduleMode = (
   draft: EventEditorDraft,
@@ -49,10 +54,10 @@ export const changeScheduleMode = (
     const candidateEnd = endConstraint ?? (
       draft.schedule.mode === 'FIXED_END'
         ? draft.schedule.endConstraint
-        : draft.schedule.generatedScheduleEnd
+        : null
     );
-    const nextEnd = candidateEnd instanceof Date ? candidateEnd.toISOString() : candidateEnd;
-    if (!nextEnd) {
+    const nextEnd = candidateEnd;
+    if (!nextEnd || !Number.isFinite(Date.parse(nextEnd)) || Date.parse(nextEnd) <= Date.parse(draft.basics.start)) {
       return result(draft, ['A fixed end date/time is required before switching to fixed-end scheduling.'], ['schedule.endConstraint']);
     }
     return result({
@@ -63,6 +68,10 @@ export const changeScheduleMode = (
         isAutomatedScheduling: draft.schedule.isAutomatedScheduling,
       },
     });
+  }
+
+  if (draft.schedule.mode !== mode && !canSelectGeneratedEnd(draft)) {
+    return result(draft, ['Set End From Schedule requires Automated Scheduling for a League or Tournament.']);
   }
 
   return result({

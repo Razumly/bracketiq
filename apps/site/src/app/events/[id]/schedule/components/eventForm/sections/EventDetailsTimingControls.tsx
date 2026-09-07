@@ -82,7 +82,6 @@ export const EventDetailsTimingControls = ({
                   if (isImmutableField("isAutomatedScheduling")) return;
                   const checked = event.currentTarget.checked;
                   field.onChange(checked);
-                  if (!checked) onNoFixedEndDateTimeChange(false);
                 }}
               />
             )}
@@ -161,7 +160,7 @@ export const EventDetailsTimingControls = ({
                   />
                 ) : null}
                 {supportsNoFixedEndDateTime
-                  && showScheduleConstructionControls
+                  && (showScheduleConstructionControls || noFixedEndDateTime)
                   && showGeneratedEndDateControl ? (
                   <div className="space-y-1">
                     <Checkbox
@@ -177,7 +176,7 @@ export const EventDetailsTimingControls = ({
                           : "Use an open scheduling window now. The generated match schedule will determine the event end date."
                       }
                       checked={noFixedEndDateTime}
-                      disabled={generatedEndDateDisabled}
+                      disabled={generatedEndDateDisabled || (!showScheduleConstructionControls && !noFixedEndDateTime)}
                       onChange={(event) => {
                         if (generatedEndDateDisabled) return;
                         onNoFixedEndDateTimeChange(event.currentTarget.checked);

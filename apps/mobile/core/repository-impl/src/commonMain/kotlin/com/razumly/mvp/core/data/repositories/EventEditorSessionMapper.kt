@@ -558,7 +558,7 @@ private fun EventEditorDraftDto.toEvent(eventId: String): Event {
         coordinates = basics.coordinates,
         hostId = basics.hostId.orEmpty(),
         assistantHostIds = staff.assistantHostIds,
-        noFixedEndDateTime = resolvedAutomatedScheduling &&
+        noFixedEndDateTime =
             schedule.mode.trim().uppercase() == "GENERATED_END",
         isAutomatedScheduling = resolvedAutomatedScheduling,
         teamSignup = participation.teamSignup,
@@ -852,9 +852,7 @@ private fun Event.toScheduleDto(
         isAutomatedScheduling,
     )
     val effectiveNoFixedEndDateTime =
-        normalizedAutomatedScheduling &&
-            noFixedEndDateTime &&
-            eventType != EventType.TRYOUT
+        noFixedEndDateTime && eventType in setOf(EventType.LEAGUE, EventType.TOURNAMENT, EventType.WEEKLY_EVENT)
     val generatedEndMustBeCleared =
         existing.mode.trim().uppercase() == "GENERATED_END" &&
             !effectiveNoFixedEndDateTime
@@ -886,7 +884,11 @@ private fun Event.toScheduleDto(
         effectiveNoFixedEndDateTime -> withAutomatedScheduling.copy(
             mode = "GENERATED_END",
             endConstraint = null,
-            generatedScheduleEnd = if (eventType == EventType.WEEKLY_EVENT) null else end.toString(),
+            generatedScheduleEnd = when {
+                eventType == EventType.WEEKLY_EVENT -> null
+                existing.mode == "GENERATED_END" -> existing.generatedScheduleEnd
+                else -> end.toString()
+            },
         )
         else -> withAutomatedScheduling.copy(
             mode = "FIXED_END",
@@ -1552,6 +1554,18 @@ object EventEditorSessionMapper {
         val canonical = snapshot.toCanonicalState(operationId = null)
         return EventEditorSession(snapshot = snapshot, canonicalState = canonical, baseline = canonical)
     }
+    private fun requireValidEndPolicy(event: Event, baseline: Event) {
+        if (!event.noFixedEndDateTime) {
+            require(event.end > event.start) { "Planned End must be after the Event start." }
+            return
+        }
+        val supportsPolicy = event.eventType in setOf(EventType.LEAGUE, EventType.TOURNAMENT, EventType.WEEKLY_EVENT)
+        require(supportsPolicy) { "This Event Type requires a Planned End." }
+        require(event.eventType == EventType.WEEKLY_EVENT || event.isAutomatedScheduling || baseline.noFixedEndDateTime) {
+            "Set End From Schedule requires Automated Scheduling."
+        }
+    }
+
     fun toCreateCommand(session: EventEditorSession, mutation: EventEditorMutation): PendingEventCreate {
         val operationId = session.createOperationId?.normalizedIdOrNull()
             ?: error("Create editor session did not include an operation ID.")
@@ -1618,6 +1632,7 @@ object EventEditorSessionMapper {
             desired,
             preserveEventTypeConfiguration = destinationChanged && desired.event.eventType == session.baseline.event.eventType,
         )
+        requireValidEndPolicy(desired.event, session.baseline.event)
         val transition = EventEditorSaveScheduleTransitionDto(mode = EventEditorScheduleTransitionMode.PRESERVE)
         return com.razumly.mvp.core.network.dto.EventEditorSaveCommandDto(
             contractVersion = EVENT_EDITOR_CONTRACT_VERSION,
