@@ -217,6 +217,21 @@ memberships. The application login still connects. Evidence is stored under
 and `issue70-role-provision-output.txt`, both mode 0600. Do not use the old
 fixed-boolean inventory as proof of permissions.
 
+The complete stopped-fleet inventory contains 25 processes, including 20 legacy
+container or systemd entries. It found one abandoned discovery run,
+`aa588b87-115d-4192-9397-f2b01c8ef0e1`, still RUNNING since 2026-08-15.
+The operator separately authorized scoped stale-run recovery without changing
+the campaign schedule, and resetting only the recorded failure of the disabled
+intake service. The service is now disabled, inactive, and has MainPID zero.
+The recovery module accepts an exact `runId` with `requeueCampaign: false`.
+Recovery uses ownership/state compare-and-set and one transaction.
+
+The protected pre-apply database backup is
+`/home/bracketiq/.config/bracketiq-affiliate-agents/pre-legacy-repair-336c08594.dump`.
+Its SHA-256 is
+`3f29a00cc609465cc9f8a76fa433d3018abf582439063d1af19d2f9d4919a092`.
+Do not omit the abandoned run from preflight evidence before recovery.
+
 ## Change Note
 
 Created after correcting the model execution assumption. The current production agents use Codex CLI with Luna authentication. The earlier open-weight model VM interpretation was removed from the active rollout path.

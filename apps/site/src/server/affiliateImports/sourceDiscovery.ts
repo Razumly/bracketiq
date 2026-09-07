@@ -1528,7 +1528,12 @@ export const recoverStaleAffiliateSourceDiscoveryRuns = async (options: {
   now?: Date;
   maxAgeMs?: number;
   limit?: number;
+  runId?: string;
+  requeueCampaign?: boolean;
 } = {}): Promise<RecoveredAffiliateSourceDiscoveryRun[]> => {
+  const runId = options.runId?.trim();
+  if (options.runId !== undefined && !runId) throw new Error('A scoped discovery recovery requires a run ID.');
+  if (options.requeueCampaign === false && !runId) throw new Error('Preserving the campaign schedule requires an exact run ID.');
   const now = options.now ?? new Date();
   const requestedMaxAgeMs = options.maxAgeMs ?? DEFAULT_STALE_DISCOVERY_RUN_AGE_MS;
   const maxAgeMs = Number.isFinite(requestedMaxAgeMs)
@@ -1539,8 +1544,9 @@ export const recoverStaleAffiliateSourceDiscoveryRuns = async (options: {
   const limit = Number.isFinite(requestedLimit)
     ? Math.max(1, Math.min(Math.trunc(requestedLimit), MAX_STALE_DISCOVERY_RUNS_PER_PASS))
     : MAX_STALE_DISCOVERY_RUNS_PER_PASS;
-  const staleRuns = await db().runs.findMany({
+  const staleRuns = await prisma.affiliateSourceDiscoveryRuns.findMany({
     where: {
+      ...(runId ? { id: runId } : {}),
       status: 'RUNNING',
       startedAt: { lt: staleBefore },
     },
@@ -1554,26 +1560,43 @@ export const recoverStaleAffiliateSourceDiscoveryRuns = async (options: {
       run.workerId ? `owned by ${run.workerId}` : 'with no recorded worker',
       `after exceeding the ${Math.round(maxAgeMs / 60_000)} minute limit.`,
     ].join(' ');
-    const updated = await db().runs.updateMany({
-      where: { id: run.id, status: 'RUNNING' },
-      data: {
-        status: 'FAILED',
-        finishedAt: now,
-        errorMessage: reason,
-        summary: {
-          ...recordValue(run.summary),
-          recovery: {
-            reason,
-            recoveredAt: now.toISOString(),
+    const recoveredRow = await prisma.$transaction(async (transaction) => {
+      const previousSummary = run.summary && typeof run.summary === 'object' && !Array.isArray(run.summary)
+        ? run.summary
+        : {};
+      const updated = await transaction.affiliateSourceDiscoveryRuns.updateMany({
+        where: {
+          id: run.id,
+          status: 'RUNNING',
+          startedAt: run.startedAt,
+          claimedAt: run.claimedAt,
+          workerId: run.workerId,
+          updatedAt: run.updatedAt,
+        },
+        data: {
+          status: 'FAILED',
+          finishedAt: now,
+          errorMessage: reason,
+          summary: {
+            ...previousSummary,
+            recovery: {
+              reason,
+              recoveredAt: now.toISOString(),
+              campaignSchedulePreserved: options.requeueCampaign === false,
+            },
           },
         },
-      },
+      });
+      if (updated.count !== 1) return false;
+      if (options.requeueCampaign !== false) {
+        await transaction.affiliateSourceDiscoveryCampaigns.updateMany({
+          where: { id: run.campaignId },
+          data: { nextRunAt: now },
+        });
+      }
+      return true;
     });
-    if (updated.count !== 1) continue;
-    await db().campaigns.updateMany({
-      where: { id: run.campaignId },
-      data: { nextRunAt: now },
-    });
+    if (!recoveredRow) continue;
     recovered.push({
       discoveryRunId: run.id,
       campaignId: run.campaignId,
