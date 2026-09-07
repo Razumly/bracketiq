@@ -1,18 +1,17 @@
 import { prisma } from '../src/lib/prisma';
 import { hashPassword } from '../src/lib/authServer';
+import { requireEventSignupTestServer } from './event-signup-test-environment';
+import { claimOperationalRosterPlayer } from './test-operational-roster-claim';
 
 import { PDFDocument } from 'pdf-lib';
 
-async function main() {
-  const database = new URL(process.env.DATABASE_URL ?? '');
-  if (!['127.0.0.1', 'localhost'].includes(database.hostname) || database.pathname !== '/bracketiq_e2e_152_codex') {
-    throw new Error('Use the isolated issue 152 database.');
-  }
-  const [action = 'seed', eventId = 'issue152-roster'] = process.argv.slice(2);
-  if (!eventId.startsWith('issue152-')) throw new Error('Use an issue 152 fixture Event.');
+function issuedDocumentId(issued: { signLinks?: Array<{ documentId?: string }> }) {
+  return issued.signLinks?.[0]?.documentId;
+}
+
+async function completeFixture(server: URL, eventId: string) {
   const id = (suffix: string) => `${eventId}-${suffix}`;
-  if (action === 'complete') {
-    const base = 'http://127.0.0.1:3152';
+    const base = server.origin;
     const login = async (email: string) => {
       const response = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ email, password: 'password123!' }) });
@@ -31,7 +30,7 @@ async function main() {
       const signerContext = player === 'child' ? 'parent_guardian' : 'participant';
       const context = { templateId, signerContext, ...(player === 'child' ? { childUserId: id('child') } : {}) };
       const issued = await post(cookie, `/api/events/${eventId}/sign`, context);
-      const documentId = issued.signLinks?.[0]?.documentId;
+      const documentId = issuedDocumentId(issued);
       if (!documentId) throw new Error(`No signing document for ${player}`);
       await post(cookie, '/api/documents/record-signature', { ...context, documentId, eventId, type: 'TEXT' });
     }
@@ -44,9 +43,10 @@ async function main() {
     const imported = await fetch(`${base}/api/organizations/${id('org')}/documents/import`, { method: 'POST', headers: { cookie: hostCookie }, body: form });
     if (!imported.ok) throw new Error(`Import failed: ${imported.status} ${await imported.text()}`);
     console.log('Player signing, guardian signing, and attested staff import passed through HTTP.');
-    return;
-  }
-  if (action !== 'seed') throw new Error('Use seed or complete.');
+}
+
+async function seedFixture(eventId: string) {
+  const id = (suffix: string) => `${eventId}-${suffix}`;
   const passwordHash = await hashPassword('password123!');
   for (const [userId, email] of [['user_host', 'host@example.com'], ['user_participant', 'player@example.com'], ['user_member', 'member@example.com']]) {
     await prisma.userData.upsert({ where: { id: userId }, create: { id: userId, userName: userId, firstName: 'Taylor', lastName: 'River', dateOfBirth: new Date('1990-01-01'), onboardingIntent: 'DISCOVER_EVENTS' }, update: {} });
@@ -76,6 +76,23 @@ async function main() {
     email: 'private-delivery@example.test', createdBy: 'user_host' }, update: {} });
   await prisma.matches.upsert({ where: { id: id('match') }, create: { id: id('match'), eventId, matchId: 1, team1Id: id('team1'), team2Id: id('team2'), officialId: 'user_participant', team1Points: [], team2Points: [], start: new Date('2026-09-07'), status: 'SCHEDULED' }, update: {} });
   await prisma.eventOfficials.upsert({ where: { eventId_userId: { eventId, userId: 'user_participant' } }, create: { id: id('official'), eventId, userId: 'user_participant', isActive: true }, update: {} });
+}
+
+async function main() {
+  const server = requireEventSignupTestServer(152);
+  const [action = 'seed', eventId = 'issue152-roster'] = process.argv.slice(2);
+  if (!eventId.startsWith('issue152-')) throw new Error('Use an issue 152 fixture Event.');
+  const id = (suffix: string) => `${eventId}-${suffix}`;
+  if (action === 'complete') {
+    await completeFixture(server, eventId);
+    return;
+  }
+  if (action === 'claim') {
+    await claimOperationalRosterPlayer(server, eventId);
+    return;
+  }
+  if (action !== 'seed') throw new Error('Use seed, complete, or claim.');
+  await seedFixture(eventId);
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1; }).finally(() => prisma.$disconnect());

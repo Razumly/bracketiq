@@ -693,6 +693,7 @@ fun CreateTeamBuilderScreen(
                             people = personInvites,
                             openSlots = openSlots,
                             editable = eventSignupStep == null,
+                            persistedTeam = draft.team.takeIf { eventSignupStep == "players" },
                             onEditAccount = { user -> selectedAccountInvites = selectedAccountInvites - user; searchQuery = user.fullName },
                             onRemoveAccount = { user -> selectedAccountInvites = selectedAccountInvites - user },
                             onEditPerson = { personEditor = it },
@@ -865,6 +866,7 @@ private fun BuilderRoster(
     people: List<TeamBuilderPersonInvite>,
     openSlots: Int,
     editable: Boolean,
+    persistedTeam: Team? = null,
     onEditAccount: (UserData) -> Unit = {},
     onRemoveAccount: (UserData) -> Unit = {},
     onEditPerson: (TeamBuilderPersonInvite) -> Unit = {},
@@ -881,12 +883,16 @@ private fun BuilderRoster(
         items(accounts, key = { "account-${it.id}" }) { user ->
             PlayerCard(
                 player = user,
-                isPending = true,
+                isPending = user.id !in persistedTeam?.playerIds.orEmpty(),
+                pendingLabel = persistedTeam?.playerRegistrations
+                    ?.firstOrNull { it.userId == user.id }?.invitationLabel ?: "Awaiting player",
                 trailingContent = if (editable) {{
                     Row {
                         TextButton(onClick = { onEditAccount(user) }) { Icon(Icons.Default.Edit, contentDescription = null); Spacer(Modifier.width(4.dp)); Text("Edit") }
                         IconButton(onClick = { onRemoveAccount(user) }, modifier = Modifier.semantics { contentDescription = "Remove ${user.fullName}" }) { Icon(Icons.Default.Close, contentDescription = null) }
                     }
+                }} else if (persistedTeam != null && user.isManagedPlayer) {{
+                    Text("Managed profile", style = MaterialTheme.typography.labelSmall)
                 }} else null,
             )
         }

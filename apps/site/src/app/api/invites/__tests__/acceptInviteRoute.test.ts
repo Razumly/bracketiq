@@ -211,7 +211,7 @@ describe('POST /api/invites/[id]/accept', () => {
     expect(txMock.userData.updateMany).not.toHaveBeenCalled();
     expect(txMock.invites.update).toHaveBeenCalledWith({
       where: { id: 'invite_1' },
-      data: { status: 'ACCEPTED', finalizedAt: expect.any(Date), updatedAt: expect.any(Date) },
+      data: { status: 'ACCEPTED', finalizedAt: expect.any(Date), updatedAt: expect.any(Date), actedBy: 'user_1', actingGuardianId: null },
     });
     expect(txMock.invites.delete).not.toHaveBeenCalled();
   });
@@ -267,7 +267,7 @@ describe('POST /api/invites/[id]/accept', () => {
     });
     expect(txMock.invites.update).toHaveBeenCalledWith({
       where: { id: 'invite_1' },
-      data: { status: 'ACCEPTED', finalizedAt: expect.any(Date), updatedAt: expect.any(Date) },
+      data: { status: 'ACCEPTED', finalizedAt: expect.any(Date), updatedAt: expect.any(Date), actedBy: 'user_1', actingGuardianId: null },
     });
     expect(txMock.invites.delete).not.toHaveBeenCalled();
   });
@@ -473,8 +473,9 @@ describe('POST /api/invites/[id]/accept', () => {
       childId: 'child_1',
       parentId: 'parent_1',
       actorUserId: 'parent_1',
+      acceptedInvitation: { id: 'invite_1', guardianId: 'parent_1' },
     }));
-    expect(prismaMock.invites.delete).toHaveBeenCalledWith({ where: { id: 'invite_1' } });
+    expect(prismaMock.invites.delete).not.toHaveBeenCalled();
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
   });
 });

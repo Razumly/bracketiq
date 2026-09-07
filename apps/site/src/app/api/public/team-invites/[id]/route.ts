@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { normalizeTeamInviteRole } from '@/lib/staff';
 import { verifyTeamInviteShareLink } from '@/server/teamInviteLinks';
+import { requiresPlayerProfileClaim } from '@/server/teams/playerInvitationClaim';
 
 export const dynamic = 'force-dynamic';
 
@@ -53,6 +54,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       firstName: invite.firstName,
       expiresAt: invite.linkExpiresAt,
       isAssigned: invite.isAssigned,
+      profileClaimRequired: await requiresPlayerProfileClaim(prisma, invite),
       role: inviteRole(invite.role, invite.staffTypes),
     },
     team,

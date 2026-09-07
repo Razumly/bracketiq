@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma';
+import { TeamInvitationRestrictionError } from '@/server/teams/teamInvitationRestrictions';
 import { hasGuardianAge } from '@/server/guardianAuthority';
 import { isActiveBlockAccount } from '@/server/accountState';
 import { buildInviteEmail } from '@/server/emailTemplates';
@@ -39,10 +40,8 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const normalizeEmail = (value?: string | null): string => (value ?? '').trim().toLowerCase();
 
-const dispatchInviteMessages = async (invites: InviteRecord[], baseUrl: string): Promise<InviteRecord[]> => {
-  if (!invites.length) {
-    return invites;
-  }
+
+async function resolveGuardianRecipients(invites: InviteRecord[]) {
   const playerIds = [...new Set(invites.flatMap((invite) => invite.type === 'TEAM' && invite.userId ? [invite.userId] : []))];
   const profiles = playerIds.length ? await prisma.userData.findMany({
     where: { id: { in: playerIds } }, select: { id: true, dateOfBirth: true },
@@ -53,15 +52,16 @@ const dispatchInviteMessages = async (invites: InviteRecord[], baseUrl: string):
   }) : [];
   const parents = links.length ? await prisma.authUser.findMany({ where: { id: { in: links.map((link) => link.parentId) } } }) : [];
   const parentById = new Map(parents.filter(isActiveBlockAccount).map((parent) => [parent.id, parent]));
-  invites = invites.map((invite) => {
+  return invites.map((invite) => {
     const profile = profiles.find((candidate) => candidate.id === invite.userId);
     const isMinor = profile?.dateOfBirth ? hasGuardianAge(profile.dateOfBirth) : invite.isMinor === true;
     if (!isMinor || invite.type !== 'TEAM') return invite;
     const parent = links.filter((link) => link.childId === invite.userId).map((link) => parentById.get(link.parentId)).find(Boolean);
     return { ...invite, isMinor: true, guardianEmail: invite.guardianEmail || parent?.email || null };
   });
-  const emailEnabled = isEmailEnabled();
+}
 
+async function loadInviteContext(invites: InviteRecord[]) {
   const eventIds = new Set<string>();
   const organizationIds = new Set<string>();
   const teamIds = new Set<string>();
@@ -100,12 +100,21 @@ const dispatchInviteMessages = async (invites: InviteRecord[], baseUrl: string):
   const organizationNames = new Map(organizations.map((org) => [org.id, org.name]));
   const teamNames = new Map(teams.map((team) => [team.id, team.name]));
 
-  const results: InviteDeliveryResult[] = await Promise.all(invites.map(async (invite) => {
-    try {
-      const email = normalizeEmail(invite.isMinor ? invite.guardianEmail : invite.email);
-      const hasValidEmail = Boolean(email && EMAIL_REGEX.test(email));
+  return { guardianByEmail, eventNames, organizationNames, teamNames };
+}
+type InviteContext = Awaited<ReturnType<typeof loadInviteContext>>;
 
-      const content = buildInviteEmail({
+function inviteActionUrl(invite: InviteRecord, baseUrl: string) {
+  return invite.type?.trim().toUpperCase() === 'TEAM' && invite.linkExpiresAt
+          ? (invite.role?.trim().toLowerCase() === 'player' && invite.isAssigned && invite.userId
+            ? buildManagedPlayerClaimUrl(invite as InviteRecord & { id: string; linkExpiresAt: Date | string }, baseUrl)
+            : buildTeamInviteShareUrl(invite as InviteRecord & { id: string; linkExpiresAt: Date | string }, baseUrl))
+          : undefined;
+}
+
+function inviteContent(invite: InviteRecord, baseUrl: string, context: InviteContext, email: string, hasValidEmail: boolean) {
+  const { eventNames, organizationNames, teamNames } = context;
+  return buildInviteEmail({
         baseUrl,
         email: hasValidEmail ? email : (invite.email?.trim() ?? ''),
         inviteType: invite.type,
@@ -118,14 +127,11 @@ const dispatchInviteMessages = async (invites: InviteRecord[], baseUrl: string):
         organizationName: invite.organizationId ? organizationNames.get(invite.organizationId) : undefined,
         teamId: invite.teamId,
         teamName: invite.teamId ? teamNames.get(invite.teamId) : undefined,
-        actionUrl: invite.type?.trim().toUpperCase() === 'TEAM' && invite.linkExpiresAt
-          ? (invite.role?.trim().toLowerCase() === 'player' && invite.isAssigned && invite.userId
-            ? buildManagedPlayerClaimUrl(invite as InviteRecord & { id: string; linkExpiresAt: Date | string }, baseUrl)
-            : buildTeamInviteShareUrl(invite as InviteRecord & { id: string; linkExpiresAt: Date | string }, baseUrl))
-          : undefined,
+        actionUrl: inviteActionUrl(invite, baseUrl),
       });
+}
 
-      const inviteUserId = invite.isMinor ? guardianByEmail.get(email) : invite.userId?.trim();
+async function dispatchInvitePush(invite: InviteRecord, inviteUserId: string | null | undefined, subject: string): Promise<InviteDeliveryResult | null> {
       const pushEnabled = inviteUserId
         ? await isUserNotificationChannelEnabled(inviteUserId, 'invitations', 'push')
         : false;
@@ -133,7 +139,7 @@ const dispatchInviteMessages = async (invites: InviteRecord[], baseUrl: string):
         const pushResult = await sendPushToUsers({
           userIds: [inviteUserId],
           notificationType: 'invitations',
-          title: content.subject,
+          title: subject,
           body: 'You have a new invitation in BracketIQ. Open the app to review it.',
           data: {
             notificationType: 'invitations',
@@ -165,6 +171,10 @@ const dispatchInviteMessages = async (invites: InviteRecord[], baseUrl: string):
         }
       }
 
+  return null;
+}
+
+async function dispatchInviteEmail(invite: InviteRecord, inviteUserId: string | null | undefined, emailEnabled: boolean, hasValidEmail: boolean, email: string, content: ReturnType<typeof buildInviteEmail>): Promise<InviteDeliveryResult> {
       const emailEnabledByPreference = inviteUserId
         ? await isUserNotificationChannelEnabled(inviteUserId, 'invitations', 'email')
         : true;
@@ -185,22 +195,54 @@ const dispatchInviteMessages = async (invites: InviteRecord[], baseUrl: string):
         console.error('Failed to send invite email', { inviteId: invite.id, error: message });
         return { id: invite.id, status: 'FAILED' };
       }
+}
+
+async function dispatchOneInvite(invite: InviteRecord, baseUrl: string, context: InviteContext, emailEnabled: boolean): Promise<InviteDeliveryResult> {
+    try {
+      const email = normalizeEmail(invite.isMinor ? invite.guardianEmail : invite.email);
+      const hasValidEmail = Boolean(email && EMAIL_REGEX.test(email));
+
+      const content = inviteContent(invite, baseUrl, context, email, hasValidEmail);
+
+      const inviteUserId = invite.isMinor ? context.guardianByEmail.get(email) : invite.userId?.trim();
+      const pushed = await dispatchInvitePush(invite, inviteUserId, content.subject);
+      if (pushed) return pushed;
+
+      return await dispatchInviteEmail(invite, inviteUserId, emailEnabled, hasValidEmail, email, content);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error('Failed to process invite delivery', { inviteId: invite.id, error: message });
       return { id: invite.id, status: 'FAILED' };
     }
-  }));
-  const resultMap = new Map(results.map((update) => [update.id, update]));
-  const nextInvites = invites.map((invite) => {
-    const result = resultMap.get(invite.id);
+
+}
+
+function deliveryOutcome(result: InviteDeliveryResult | undefined) {
+  const failed = result?.status === 'FAILED';
+  return { sentAt: result?.sentAt ?? null, failed, status: failed ? 'FAILED' : result?.sentAt ? 'SENT' : 'SKIPPED' };
+}
+function mergeDelivery(invite: InviteRecord, result: InviteDeliveryResult | undefined): InviteRecord {
     return {
       ...invite,
       status: invite.type?.toUpperCase() === 'TEAM' ? invite.status : result?.status ?? invite.status,
       sentAt: result?.sentAt ?? invite.sentAt,
-      delivery: { sentAt: result?.sentAt ?? null, failed: result?.status === 'FAILED', status: result?.status === 'FAILED' ? 'FAILED' : result?.sentAt ? 'SENT' : 'SKIPPED' },
+      delivery: deliveryOutcome(result),
     };
-  });
+
+}
+
+const dispatchInviteMessages = async (invites: InviteRecord[], baseUrl: string): Promise<InviteRecord[]> => {
+  if (!invites.length) {
+    return invites;
+  }
+  invites = await resolveGuardianRecipients(invites);
+  const emailEnabled = isEmailEnabled();
+
+  const context = await loadInviteContext(invites);
+
+  const results = await Promise.all(invites.map(invite => dispatchOneInvite(invite, baseUrl, context, emailEnabled)));
+  const resultMap = new Map(results.map((update) => [update.id, update]));
+  const nextInvites = invites.map(invite => mergeDelivery(invite, resultMap.get(invite.id)));
 
   const failedInviteIds = nextInvites
     .filter((invite) => invite.type?.toUpperCase() !== 'TEAM' && String(invite.status ?? '').toUpperCase() === 'FAILED')
@@ -238,17 +280,7 @@ const dispatchInviteMessages = async (invites: InviteRecord[], baseUrl: string):
   return nextInvites;
 };
 
-export const sendInviteEmails = async (
-  invites: InviteRecord[], baseUrl: string, request: TeamInvitationDeliveryRequest = {},
-): Promise<InviteRecord[]> => {
-  const results = new Map<string, InviteRecord>();
-  const reserved: Array<{ invite: InviteRecord; deliveryId: string }> = [];
-  const otherInvites: InviteRecord[] = [];
-  for (const invite of invites) {
-    if (invite.type?.toUpperCase() !== 'TEAM') {
-      otherInvites.push(invite);
-      continue;
-    }
+async function reserveInvite(invite: InviteRecord, request: TeamInvitationDeliveryRequest, results: Map<string, InviteRecord>, reserved: Array<{ invite: InviteRecord; deliveryId: string }>) {
     try {
       const reservation = await reserveTeamInvitationDelivery(invite.id, request);
       if (!reservation.invite || !reservation.delivery) {
@@ -265,8 +297,34 @@ export const sendInviteEmails = async (
     } catch (error) {
       const message = error instanceof Response ? await error.text() : error instanceof Error ? error.message : 'Delivery could not be saved.';
       results.set(invite.id, { ...invite, delivery: { failed: true, status: 'FAILED', error: message,
-        httpStatus: error instanceof Response ? error.status : 500 } });
+        httpStatus: error instanceof Response || error instanceof TeamInvitationRestrictionError ? error.status : 500 } });
     }
+}
+
+async function recordDelivery(invite: InviteRecord, deliveryId: string, results: Map<string, InviteRecord>) {
+    try {
+      const current = await completeTeamInvitationDelivery(deliveryId, invite.id, {
+        status: invite.delivery?.status ?? 'SKIPPED', sentAt: invite.delivery?.sentAt,
+      });
+      results.set(invite.id, { ...invite, ...current, delivery: { ...invite.delivery!, id: deliveryId } });
+    } catch (error) {
+      console.warn('Invitation delivery completion could not be recorded', { inviteId: invite.id, error });
+      results.set(invite.id, { ...invite, delivery: { id: deliveryId, status: 'UNKNOWN', failed: true } });
+    }
+}
+
+export const sendInviteEmails = async (
+  invites: InviteRecord[], baseUrl: string, request: TeamInvitationDeliveryRequest = {},
+): Promise<InviteRecord[]> => {
+  const results = new Map<string, InviteRecord>();
+  const reserved: Array<{ invite: InviteRecord; deliveryId: string }> = [];
+  const otherInvites: InviteRecord[] = [];
+  for (const invite of invites) {
+    if (invite.type?.toUpperCase() !== 'TEAM') {
+      otherInvites.push(invite);
+      continue;
+    }
+    await reserveInvite(invite, request, results, reserved);
   }
   const dispatchCandidates = [...otherInvites, ...reserved.map((entry) => entry.invite)];
   const dispatched = await dispatchInviteMessages(dispatchCandidates, baseUrl).catch((error) => {
@@ -279,15 +337,7 @@ export const sendInviteEmails = async (
       results.set(invite.id, invite);
       continue;
     }
-    try {
-      const current = await completeTeamInvitationDelivery(reservation.deliveryId, invite.id, {
-        status: invite.delivery?.status ?? 'SKIPPED', sentAt: invite.delivery?.sentAt,
-      });
-      results.set(invite.id, { ...invite, ...current, delivery: { ...invite.delivery!, id: reservation.deliveryId } });
-    } catch (error) {
-      console.warn('Invitation delivery completion could not be recorded', { inviteId: invite.id, error });
-      results.set(invite.id, { ...invite, delivery: { id: reservation.deliveryId, status: 'UNKNOWN', failed: true } });
-    }
+    await recordDelivery(invite, reservation.deliveryId, results);
   }
   return invites.map((invite) => results.get(invite.id) ?? invite);
 };

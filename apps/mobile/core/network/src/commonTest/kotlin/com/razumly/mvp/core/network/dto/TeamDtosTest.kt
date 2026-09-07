@@ -2,6 +2,7 @@ package com.razumly.mvp.core.network.dto
 
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
+import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.util.jsonMVP
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -10,8 +11,23 @@ import kotlin.test.assertFalse
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlin.test.assertNull
+import kotlin.test.assertNotNull
 
 class TeamDtosTest {
+    @Test
+    fun team_response_keeps_invitation_identity_and_label_after_membership_normalization() {
+        for (label in listOf("Awaiting player", "Awaiting guardian", "Invitation expired")) {
+            val dto = jsonMVP.decodeFromString<TeamApiDto>(
+                """{"id":"team-1","playerRegistrations":[{"id":"roster-1","userId":"player-1","status":"INVITED","invitationId":"attempt-1","invitationLabel":"$label"}]}""",
+            )
+            val team = assertNotNull(dto.toTeamOrNull())
+            val registration = team.playerRegistrations.single()
+            assertEquals("attempt-1", registration.invitationId)
+            assertEquals(label, registration.invitationLabel)
+            assertEquals(registration, team.withSynchronizedMembership().playerRegistrations.single())
+        }
+    }
+
     @Test
     fun team_api_dto_preserves_opaque_division_id() {
         val divisionId = "qa-official-match-camka14-open"

@@ -6,6 +6,7 @@ const requestMock = jest.fn();
 const pushMock = jest.fn();
 let authenticated = true;
 jest.mock('@/lib/apiClient', () => ({ apiRequest: (...args: unknown[]) => requestMock(...args) }));
+jest.mock('@/lib/userService', () => ({ userService: { getInviteById: jest.fn().mockResolvedValue(null) } }));
 jest.mock('@/app/providers', () => ({ useApp: () => ({ isAuthenticated: authenticated, loading: false }) }));
 jest.mock('next/navigation', () => ({
   useParams: () => ({ id: 'invite' }),
@@ -22,7 +23,7 @@ const preview = (needsSetup: boolean) => ({
 });
 
 describe('guardian invitation screen', () => {
-  beforeEach(() => { jest.clearAllMocks(); authenticated = true; });
+  beforeEach(() => { jest.clearAllMocks(); requestMock.mockReset(); authenticated = true; });
 
   it.each([true, false])('accepts the named child with setup required=%s', async (needsSetup) => {
     requestMock.mockResolvedValueOnce(preview(needsSetup)).mockResolvedValueOnce({ status: 'GUARDIAN_ACCEPTED' });

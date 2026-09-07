@@ -211,7 +211,7 @@ describe('/api/teams/[id]/member-invites POST', () => {
     expect(txMock.eventRegistrations.upsert).not.toHaveBeenCalled();
     expect(txMock.teamInviteEventSyncs.upsert).not.toHaveBeenCalled();
     expect(payload.eventSyncs).toBeUndefined();
-    expect(sendInviteEmailsMock).toHaveBeenCalledWith([expect.objectContaining({ id: 'invite_1' })], 'http://localhost');
+    expect(sendInviteEmailsMock).toHaveBeenCalledWith([expect.objectContaining({ id: 'invite_1' })], 'http://localhost', { requestedBy: 'manager_1', requestedByIsAdmin: false });
   });
 
   it('updates an existing canonical player invite without sending delivery again', async () => {
@@ -583,7 +583,7 @@ describe('/api/teams/[id]/member-invites POST', () => {
         role: { in: ['MANAGER', 'team_manager'] },
         status: { in: ['PENDING', 'INVITED'] },
       },
-      data: { status: 'CANCELLED', updatedAt: expect.any(Date) },
+      data: { status: 'CANCELLED', finalizedAt: expect.any(Date), updatedAt: expect.any(Date) },
     });
     expect(txMock.teamStaffAssignments.updateMany).toHaveBeenCalledWith({
       where: {
@@ -598,6 +598,7 @@ describe('/api/teams/[id]/member-invites POST', () => {
     expect(sendInviteEmailsMock).toHaveBeenCalledWith(
       [expect.objectContaining({ id: 'invite_manager_1' })],
       'http://localhost',
+      { requestedBy: 'manager_1', requestedByIsAdmin: false },
     );
   });
 
@@ -692,6 +693,7 @@ describe('/api/teams/[id]/member-invites POST', () => {
     expect(sendInviteEmailsMock).toHaveBeenCalledWith(
       [expect.objectContaining({ id: 'invite_managed_1' })],
       'http://localhost',
+      { requestedBy: 'manager_1', requestedByIsAdmin: false },
     );
   });
 });

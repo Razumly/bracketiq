@@ -93,6 +93,21 @@ describe('sendInviteEmails', () => {
     expect(buildInviteEmailMock).toHaveBeenCalledWith(expect.objectContaining({ isMinor: true, email: 'parent@example.com' }));
   });
 
+  it('keeps another delivery successful when one recipient preference lookup fails', async () => {
+    isUserNotificationChannelEnabledMock.mockImplementation(async (userId, _type, channel) => {
+      if (userId === 'unavailable-user' && channel === 'email') throw new Error('Preference lookup failed');
+      return false;
+    });
+    const invites = await sendInviteEmails([
+      { id: 'unavailable', type: 'EVENT', userId: 'unavailable-user', email: 'one@example.test', status: 'PENDING' },
+      { id: 'delivered', type: 'EVENT', email: 'two@example.test', status: 'PENDING' },
+    ], 'http://localhost');
+    expect(invites[0].delivery).toMatchObject({ status: 'FAILED', failed: true });
+    expect(invites[1].delivery).toMatchObject({ status: 'SENT', failed: false });
+    expect(sendEmailMock).toHaveBeenCalledTimes(1);
+    expect(sendEmailMock).toHaveBeenCalledWith(expect.objectContaining({ to: 'two@example.test' }));
+  });
+
   it('uses push delivery for user-id invites when push targets exist', async () => {
     const invites = await deliver([{
       id: 'invite_1',

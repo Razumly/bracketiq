@@ -1,17 +1,9 @@
 import { prisma } from '../src/lib/prisma';
 import { hashPassword } from '../src/lib/authServer';
 import { eventRegistrationDraftService } from '../src/lib/eventRegistrationDraftService';
+import { requireEventSignupTestServer } from './event-signup-test-environment';
 
-async function main() {
-  const database = new URL(process.env.DATABASE_URL ?? '');
-  const base = new URL(process.env.MVP_TEST_BACKEND_URL ?? 'http://127.0.0.1:3151');
-  if (!['127.0.0.1', 'localhost'].includes(database.hostname) || database.pathname !== '/bracketiq_e2e_151_codex'
-    || !['127.0.0.1', 'localhost'].includes(base.hostname) || base.port !== '3151') {
-    throw new Error('Use the isolated issue 151 database and test server.');
-  }
-  const [action, eventId = 'issue151-resume-event', teamId] = process.argv.slice(2);
-  if (!eventId.startsWith('issue151-')) throw new Error('Use an issue 151 fixture Event.');
-  if (action === 'seed') {
+async function seed(eventId: string, displayName = 'River City Cup') {
     const passwordHash = await hashPassword('password123!');
     for (const [id, email, firstName] of [['user_host', 'host@example.com', 'Taylor'], ['user_participant', 'player@example.com', 'Jordan']]) {
       await prisma.userData.upsert({ where: { id }, create: { id, userName: id, firstName, lastName: 'Test', dateOfBirth: new Date('1990-01-01'), onboardingIntent: 'DISCOVER_EVENTS' }, update: { onboardingIntent: 'DISCOVER_EVENTS' } });
@@ -19,6 +11,24 @@ async function main() {
     }
     await prisma.sports.upsert({ where: { id: 'Indoor Volleyball' }, create: { id: 'Indoor Volleyball', name: 'Indoor Volleyball' }, update: {} });
     await prisma.events.upsert({ where: { id: eventId }, create: { id: eventId, name: 'River City Cup', start: new Date('2035-01-01'), end: new Date('2035-01-02'), state: 'PUBLISHED', hostId: 'user_host', sportIds: ['Indoor Volleyball'], teamSignup: true, eventType: 'EVENT', teamSizeLimit: 8, maxParticipants: 16, price: 0, coordinates: [0, 0], location: 'River City' }, update: {} });
+    await prisma.events.update({ where: { id: eventId }, data: { singleDivision: true, name: displayName } });
+    await prisma.divisions.upsert({ where: { id: `${eventId}__division__open` }, create: {
+      id: `${eventId}__division__open`, eventId, name: 'Open', key: 'open', kind: 'LEAGUE', scope: 'EVENT',
+      role: 'ENTRY', status: 'ACTIVE', sportId: 'Indoor Volleyball', maxParticipants: 16, price: 0,
+    }, update: { sportId: 'Indoor Volleyball', maxParticipants: 16, price: 0 } });
+}
+
+function fixtureArguments() {
+  const [action, eventId = 'issue151-resume-event', teamId] = process.argv.slice(2);
+  return { action, eventId, teamId };
+}
+
+async function main() {
+  const base = requireEventSignupTestServer(151);
+  const { action, eventId, teamId } = fixtureArguments();
+  if (!eventId.startsWith('issue151-')) throw new Error('Use an issue 151 fixture Event.');
+  if (action === 'seed') {
+    await seed(eventId, teamId);
     return;
   }
   if (!['site-save', 'site-read'].includes(action)) throw new Error('Use seed, site-save, or site-read.');

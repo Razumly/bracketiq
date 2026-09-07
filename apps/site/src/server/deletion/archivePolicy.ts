@@ -147,6 +147,7 @@ export const countEventReferences = async (
       : { eventId })),
     reference('refund_requests', await countRows(client.refundRequests, { eventId })),
     reference('signed_documents', await countRows(client.signedDocuments, { eventId })),
+    reference('team_invitations', await countRows(client.invites, { eventId, type: 'TEAM' })),
     reference('event_registrations', await countRows(client.eventRegistrations, { eventId })),
     reference('matches', await countRows(client.matches, { eventId })),
     reference('broadcast_overlays', await countRows(client.broadcastOverlays, { eventId })),
@@ -383,17 +384,10 @@ const archiveEventInTransaction = async (
     data,
   });
 
-  // A program capability must stop working as soon as its event is archived.
-  // These delegates are optional so older focused archive-policy test doubles
-  // remain valid while the production Prisma client performs the cascade.
-  const overlays = typeof tx.broadcastOverlays?.findMany === 'function'
-    ? await tx.broadcastOverlays.findMany({ where: { eventId, archivedAt: null }, select: { id: true } })
-    : [];
-  const overlayIds = normalizeIdList(overlays.map((overlay: { id: string }) => overlay.id));
-  if (!overlayIds.length) {
-    return { revokedCapabilities: [] };
-  }
+  return archiveEventOverlays(tx, eventId, actorUserId, reason, now);
+};
 
+const readOverlayCapabilities = async (tx: PrismaLike, overlayIds: string[]) => {
   const activeTokens = typeof tx.broadcastOverlayAccessTokens?.findMany === 'function'
     ? await tx.broadcastOverlayAccessTokens.findMany({
       where: { overlayId: { in: overlayIds }, revokedAt: null },
@@ -405,6 +399,23 @@ const archiveEventInTransaction = async (
     const accessTokenId = normalizeId(token.id);
     return overlayId && accessTokenId ? [{ overlayId, accessTokenId }] : [];
   });
+
+  return revokedCapabilities;
+};
+
+const archiveEventOverlays = async (tx: PrismaLike, eventId: string, actorUserId: string, reason: string | null | undefined, now: Date): Promise<ArchivedEventTransactionResult> => {
+  // A program capability must stop working as soon as its event is archived.
+  // These delegates are optional so older focused archive-policy test doubles
+  // remain valid while the production Prisma client performs the cascade.
+  const overlays = typeof tx.broadcastOverlays?.findMany === 'function'
+    ? await tx.broadcastOverlays.findMany({ where: { eventId, archivedAt: null }, select: { id: true } })
+    : [];
+  const overlayIds = normalizeIdList(overlays.map((overlay: { id: string }) => overlay.id));
+  if (!overlayIds.length) {
+    return { revokedCapabilities: [] };
+  }
+
+  const revokedCapabilities = await readOverlayCapabilities(tx, overlayIds);
 
   await tx.broadcastOverlays?.updateMany?.({
     where: { id: { in: overlayIds }, archivedAt: null },
@@ -444,31 +455,7 @@ const publishArchivedEventRevocations = async (
 };
 
 
-const hardDeleteUnreferencedEvent = async ({
-  client,
-  event,
-  inTransaction = false,
-}: EventDeleteInput): Promise<DeleteOrArchiveResult> => {
-  const eventId = String(event.id);
-  const eventState = typeof event.state === 'string' ? event.state.toUpperCase() : '';
-  const eventFieldIds = normalizeIdList(event.fieldIds);
-  const eventTimeSlotIds = normalizeIdList(event.timeSlotIds);
-  const leagueScoringConfigId = normalizeId(event.leagueScoringConfigId);
-
-  const deleteInTransaction = async (tx: PrismaLike): Promise<void> => {
-    await acquireEventLock(
-      tx as Parameters<typeof acquireEventLock>[0],
-      eventId,
-    );
-    await acquireFieldLocks(
-      tx as Parameters<typeof acquireFieldLocks>[0],
-      eventFieldIds,
-    );
-    await acquireTimeSlotLocks(
-      tx as Parameters<typeof acquireTimeSlotLocks>[0],
-      eventTimeSlotIds,
-    );
-    if (eventState === 'TEMPLATE') {
+const unlinkEventTemplate = async (tx: PrismaLike, eventId: string): Promise<void> => {
       const [eventsUsingTemplate, timeSlotsUsingTemplate] = await Promise.all([
         tx.events.findMany({
           where: {
@@ -515,7 +502,71 @@ const hardDeleteUnreferencedEvent = async ({
           },
         });
       }
+
+};
+
+const loadEventOverlayIds = async (tx: PrismaLike, eventId: string): Promise<string[]> => {
+    const broadcastOverlays = typeof tx.broadcastOverlays?.findMany === 'function'
+      ? await tx.broadcastOverlays.findMany({ where: { eventId }, select: { id: true } })
+      : [];
+    return normalizeIdList(broadcastOverlays.map((overlay: { id: string }) => overlay.id));
+};
+
+const deleteEventOverlays = async (tx: PrismaLike, eventId: string): Promise<void> => {
+    const broadcastOverlayIds = await loadEventOverlayIds(tx, eventId);
+    if (broadcastOverlayIds.length) {
+      await tx.broadcastOverlayActions?.deleteMany?.({ where: { overlayId: { in: broadcastOverlayIds } } });
+      await tx.broadcastOverlayAccessTokens?.deleteMany?.({ where: { overlayId: { in: broadcastOverlayIds } } });
+      await tx.broadcastOverlayStates?.deleteMany?.({ where: { overlayId: { in: broadcastOverlayIds } } });
+      await tx.broadcastOverlays?.deleteMany?.({ where: { id: { in: broadcastOverlayIds } } });
     }
+
+};
+
+const deleteEventAssignments = async (tx: PrismaLike, eventId: string): Promise<void> => {
+    await tx.eventTagAssignments?.deleteMany?.({ where: { eventId } });
+    await tx.eventOfficials?.deleteMany?.({ where: { eventId } });
+    await tx.eventStaffAssignments?.deleteMany?.({ where: { eventId } });
+};
+
+const deleteUnusedScoringConfig = async (tx: PrismaLike, leagueScoringConfigId: string | null) => {
+    if (leagueScoringConfigId) {
+      const remainingEventsUsingConfig = await tx.events.count({
+        where: { leagueScoringConfigId },
+      });
+      if (remainingEventsUsingConfig === 0) {
+        await tx.leagueScoringConfigs.deleteMany({
+          where: { id: leagueScoringConfigId },
+        });
+      }
+    }
+};
+
+const hardDeleteUnreferencedEvent = async ({
+  client,
+  event,
+  inTransaction = false,
+}: EventDeleteInput): Promise<DeleteOrArchiveResult> => {
+  const eventId = String(event.id);
+  const eventState = typeof event.state === 'string' ? event.state.toUpperCase() : '';
+  const eventFieldIds = normalizeIdList(event.fieldIds);
+  const eventTimeSlotIds = normalizeIdList(event.timeSlotIds);
+  const leagueScoringConfigId = normalizeId(event.leagueScoringConfigId);
+
+  const deleteInTransaction = async (tx: PrismaLike): Promise<void> => {
+    await acquireEventLock(
+      tx as Parameters<typeof acquireEventLock>[0],
+      eventId,
+    );
+    await acquireFieldLocks(
+      tx as Parameters<typeof acquireFieldLocks>[0],
+      eventFieldIds,
+    );
+    await acquireTimeSlotLocks(
+      tx as Parameters<typeof acquireTimeSlotLocks>[0],
+      eventTimeSlotIds,
+    );
+    if (eventState === 'TEMPLATE') await unlinkEventTemplate(tx, eventId);
 
     const localFieldIds = eventFieldIds.length > 0
       ? (await tx.fields.findMany({
@@ -527,16 +578,7 @@ const hardDeleteUnreferencedEvent = async ({
         })).map((row: { id: string }) => row.id)
       : [];
 
-    const broadcastOverlays = typeof tx.broadcastOverlays?.findMany === 'function'
-      ? await tx.broadcastOverlays.findMany({ where: { eventId }, select: { id: true } })
-      : [];
-    const broadcastOverlayIds = normalizeIdList(broadcastOverlays.map((overlay: { id: string }) => overlay.id));
-    if (broadcastOverlayIds.length) {
-      await tx.broadcastOverlayActions?.deleteMany?.({ where: { overlayId: { in: broadcastOverlayIds } } });
-      await tx.broadcastOverlayAccessTokens?.deleteMany?.({ where: { overlayId: { in: broadcastOverlayIds } } });
-      await tx.broadcastOverlayStates?.deleteMany?.({ where: { overlayId: { in: broadcastOverlayIds } } });
-      await tx.broadcastOverlays?.deleteMany?.({ where: { id: { in: broadcastOverlayIds } } });
-    }
+    await deleteEventOverlays(tx, eventId);
 
     await tx.matches.deleteMany({ where: { eventId } });
     await tx.divisions.deleteMany({ where: { eventId } });
@@ -551,9 +593,7 @@ const hardDeleteUnreferencedEvent = async ({
     await tx.invites.deleteMany({ where: { eventId } });
     await tx.paymentIntents.deleteMany({ where: { eventId } });
     await tx.templateDocuments.deleteMany({ where: { templateId: eventId } });
-    await tx.eventTagAssignments?.deleteMany?.({ where: { eventId } });
-    await tx.eventOfficials?.deleteMany?.({ where: { eventId } });
-    await tx.eventStaffAssignments?.deleteMany?.({ where: { eventId } });
+    await deleteEventAssignments(tx, eventId);
 
     if (eventTimeSlotIds.length > 0) {
       await tx.timeSlots.deleteMany({
@@ -574,16 +614,7 @@ const hardDeleteUnreferencedEvent = async ({
 
     await tx.events.delete({ where: { id: eventId } });
 
-    if (leagueScoringConfigId) {
-      const remainingEventsUsingConfig = await tx.events.count({
-        where: { leagueScoringConfigId },
-      });
-      if (remainingEventsUsingConfig === 0) {
-        await tx.leagueScoringConfigs.deleteMany({
-          where: { id: leagueScoringConfigId },
-        });
-      }
-    }
+    await deleteUnusedScoringConfig(tx, leagueScoringConfigId);
   };
 
   if (!inTransaction && typeof client.$transaction === 'function') {

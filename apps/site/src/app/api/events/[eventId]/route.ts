@@ -68,7 +68,8 @@ const normalizeEventCheckInResponse = (response: Record<string, any>) => {
       ? Boolean((response as any).allowMatchRosterEdits)
       : false;
   (response as any).allowTemporaryMatchPlayers =
-    (response as any).allowMatchRosterEdits === true && typeof (response as any).allowTemporaryMatchPlayers === 'boolean'
+    (response as any).allowMatchRosterEdits === true &&
+    typeof (response as any).allowTemporaryMatchPlayers === 'boolean'
       ? Boolean((response as any).allowTemporaryMatchPlayers)
       : false;
 };
@@ -102,6 +103,7 @@ const PUBLIC_EVENT_FIELDS = [
   'noFixedEndDateTime', 'timeZone', 'location', 'address', 'coordinates',
   'imageId', 'sportIds', 'organizationId', 'organization', 'tags',
   'teamSignup', 'price', 'maxParticipants', 'minAge', 'maxAge', 'gender',
+  'teamSizeLimit', 'singleDivision', 'registrationPaymentMode',
   'registrationCutoffHours', 'cancellationRefundHours', 'affiliateUrl',
   'fieldIds', 'timeSlotIds', 'leagueScoringConfigId', 'divisionFieldIds',
   'divisionDetails', 'playoffDivisionDetails', 'divisions',
@@ -437,6 +439,7 @@ const compareDivisionNames = (
   const nameCompare = String(left.name ?? '').localeCompare(String(right.name ?? ''));
   return nameCompare || String(left.id ?? '').localeCompare(String(right.id ?? ''));
 };
+
 const compareDivisionRowsByStoredOrder = <T extends {
   id?: string | null;
   name?: string | null;
@@ -1210,7 +1213,6 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ eve
   const officialResponse = capabilities.canEdit
     ? await buildEventOfficialResponse(event)
     : {};
-  const canExposeAffiliateDestination = capabilities.canEdit;
   const response = toEventResponse({
     ...event,
     organization: eventOrganizationResponse(organization),
@@ -1226,12 +1228,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ eve
     tags,
     staffInvites: staffInvites.map((invite) => invite),
   });
-  const authorityResponse = capabilities.canEdit
-    ? response
-    : toPublicEventResponse(response);
-  const protectedResponse = canExposeAffiliateDestination
-    ? withAffiliateOutboundAction(authorityResponse, 'event')
-    : protectAffiliateRow(authorityResponse, 'event');
+  const protectedResponse = protectEventResponse(response, capabilities.canEdit);
   return NextResponse.json(
     { ...protectedResponse, capabilities },
     { status: 200 },
