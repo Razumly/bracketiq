@@ -75,7 +75,7 @@ jobs:
         run: npm ci
 
       - name: Restore check cache
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: apps/site/.cache
           key: site-${{ matrix.check }}-${{ runner.os }}-${{ hashFiles('apps/site/package-lock.json', 'apps/site/jest.config.ts', 'apps/site/tsconfig*.json', 'apps/site/eslint.config.*') }}-${{ github.sha }}-${{ github.run_attempt }}
