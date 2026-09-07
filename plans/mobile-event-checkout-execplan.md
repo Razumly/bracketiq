@@ -17,7 +17,7 @@ Read root and mobile AGENTS.md, this plan, and `apps/mobile/composeApp/src/commo
 - [x] (2026-09-07) Integrate requirements and explicit final review into existing execution paths.
 - [x] (2026-09-07) Compile the final source and run unit tests. The suite has 1,629 passed tests, 16 skipped tests, and no failures. Updated four old immediate-submit or label expectations to prove the confirmation boundary.
 - [x] (2026-09-07) Finish Android lint and APK packaging. The combined Gradle run passed in 10 minutes 5 seconds. Lint reports no errors and 83 warnings. No warning names the new checkout files.
-- [ ] Run emulator checks. Current runtime approval is pending.
+- [ ] Finish emulator checks. The user approved the emulator and local server. Installation, sign-in, saved Team checkout, Team editor save, roster cancel, and final review passed. Final Team confirmation returns HTTP 500. The backend reports concurrent nested transactions while it copies Player registrations. Questions, signing, payment, and successful completion remain unverified in this checkout build.
 - [x] (2026-09-07) Prepare the implementation commit with test results and the open verification limit. Standards and Spec reviews passed after corrections.
 
 ## Surprises & Discoveries
@@ -64,7 +64,11 @@ Use Compose Material 3, current Event and TeamWithPlayers models, and existing p
 
 Implementation, both source reviews, compilation, unit tests, Android lint, and APK packaging are complete. The unit suite has 1,629 passed tests, 16 skipped tests, and no failures. Lint has no errors and 83 warnings. The debug APK is at `apps/mobile/composeApp/build/outputs/apk/debug/composeApp-debug.apk`. Logs are in `.scratch/mobile-checkout-final-validation.log`.
 
-Visual evidence is not yet available for the new full-screen checkout. The current request to install and run the Android build and use the local site server on port 3153 has no answer. Runtime checks remain open under the operational process rule. No production deployment or push was performed.
+The user approved the Android emulator and local site server on port 3153. Both runtimes are running. The new APK installed and opened. The existing test account signed in. Cedar Cup resumed the Cascade Team draft. Team identity is readable in the Team card. The Team editor saved and returned to checkout. Canceling roster setup returned to the selected Team. Final review appeared before submission.
+
+Final confirmation returned HTTP 500 from `/api/events/issue151-final-native-labels/participants`. The server reports `Concurrent nested transactions are not supported`. The compiled stack points to the parallel Player registration writes in `claimOrCreateEventTeamSnapshot`, which call `upsertEventRegistration` on the same transaction. No successful registration result was shown. This backend failure blocks completion of the Team walkthrough. Questions, signing, payment, and successful completion still need checks in this build. No production deployment or push was performed.
+
+Screenshots are in `.scratch/mobile-checkout-team.png` and `.scratch/mobile-checkout-review.png`. UI dumps use the same prefix. The server error is in `.scratch/mobile-checkout-site-error.log`.
 
 Plan created on 2026-09-07 to record the approved mobile checkout design and its execution boundary.
 
