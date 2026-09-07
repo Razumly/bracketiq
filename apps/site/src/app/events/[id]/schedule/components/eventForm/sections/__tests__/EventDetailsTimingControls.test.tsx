@@ -8,14 +8,14 @@ import { EventDetailsTimingControls } from "../EventDetailsTimingControls";
 type TimingHarnessProps = {
   eventType?: EventFormValues["eventType"];
   supportsNoFixedEndDateTime?: boolean;
-  generated?: boolean;
+  hasGeneratedEnd?: boolean;
   onPolicyChange?: (value: boolean) => void;
 };
 
 const TimingHarness = ({
   eventType = "LEAGUE",
   supportsNoFixedEndDateTime = true,
-  generated = false,
+  hasGeneratedEnd = false,
   onPolicyChange = jest.fn(),
 }: TimingHarnessProps = {}) => {
   const form = useForm<EventFormValues>({
@@ -23,7 +23,7 @@ const TimingHarness = ({
       eventType,
       start: new Date("2026-08-15T09:00:00"),
       end: new Date("2026-08-15T17:00:00"),
-      noFixedEndDateTime: generated,
+      noFixedEndDateTime: hasGeneratedEnd,
       isAutomatedScheduling: true,
     } as EventFormValues,
   });
@@ -33,7 +33,7 @@ const TimingHarness = ({
       control={form.control}
       eventType={eventType}
       startValue={form.getValues("start")}
-      noFixedEndDateTime={generated}
+      noFixedEndDateTime={hasGeneratedEnd}
       supportsNoFixedEndDateTime={supportsNoFixedEndDateTime}
       automaticRefundsAvailable={false}
       manualPaymentsEnabled={false}
@@ -52,7 +52,7 @@ const TimingHarness = ({
 describe("EventDetailsTimingControls", () => {
   it.each(['LEAGUE', 'TOURNAMENT'] as const)('preserves the selected policy when %s automation is disabled', (eventType) => {
     const onPolicyChange = jest.fn();
-    renderWithMantine(<TimingHarness eventType={eventType} generated onPolicyChange={onPolicyChange} />);
+    renderWithMantine(<TimingHarness eventType={eventType} hasGeneratedEnd onPolicyChange={onPolicyChange} />);
     fireEvent.click(screen.getByLabelText('Automated Scheduling'));
     expect(screen.getByLabelText('Automated Scheduling')).not.toBeChecked();
     expect(screen.getByLabelText('Set the end date during match generation')).toBeChecked();

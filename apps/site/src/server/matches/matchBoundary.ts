@@ -8,7 +8,6 @@ type Placement = { id: string; start: Date; end: Date; fieldId: string };
 
 const placed = (match: MatchPersistenceInput): Placement[] => {
   if (
-    match.placementState === "UNPLACED" ||
     !match.field ||
     !match.start ||
     !match.end
@@ -32,7 +31,7 @@ const isSamePlacement = (
   previous?.end?.getTime() === next.end.getTime() &&
   previous.fieldId === next.fieldId;
 
-const outsideBounds = (
+const isOutsideBounds = (
   placement: Placement,
   start: Date,
   end: Date | null,
@@ -44,7 +43,7 @@ const outsideBounds = (
   +placement.end > +end ||
   +placement.end <= +placement.start;
 
-const permitsGeneratedEnd = (event: {
+const isGeneratedEndPermitted = (event: {
   noFixedEndDateTime: boolean;
   automatedScheduling: boolean;
   eventType: string | null;
@@ -80,13 +79,13 @@ export async function assertMatchSaveBoundaries(
   ]);
   if (!event)
     throw Response.json({ error: "Event not found." }, { status: 404 });
-  const canSetEnd = permitsGeneratedEnd(event);
-  const end = canSetEnd ? (policy.approvedScheduleEnd ?? event.end) : event.end;
+  const isEndChangePermitted = isGeneratedEndPermitted(event);
+  const end = isEndChangePermitted ? (policy.approvedScheduleEnd ?? event.end) : event.end;
   const previousById = new Map(previous.map((match) => [match.id, match]));
   const invalid = placements.filter(
     (match) =>
       !isSamePlacement(match, previousById.get(match.id)) &&
-      outsideBounds(match, event.start, end),
+      isOutsideBounds(match, event.start, end),
   );
   if (!invalid.length) return;
   throw Response.json(

@@ -2307,7 +2307,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun given_league_schedule_when_automated_scheduling_is_disabled_then_hidden_schedule_state_is_cleared() = runTest(testDispatcher) {
+    fun given_league_schedule_when_automated_scheduling_is_disabled_then_hidden_slots_clear_and_end_policy_is_preserved() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()
 
@@ -2319,6 +2319,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         advance()
 
         assertTrue(harness.component.leagueSlots.value.isNotEmpty())
+        val previousEnd = harness.component.newEventState.value.end
         harness.component.updateEventField {
             copy(
                 isAutomatedScheduling = false,
@@ -2328,7 +2329,8 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         advance()
 
         assertEquals(false, harness.component.newEventState.value.isAutomatedScheduling)
-        assertEquals(false, harness.component.newEventState.value.noFixedEndDateTime)
+        assertTrue(harness.component.newEventState.value.noFixedEndDateTime)
+        assertEquals(previousEnd, harness.component.newEventState.value.end)
         assertTrue(harness.component.leagueSlots.value.isEmpty())
         assertTrue(harness.component.newEventState.value.timeSlotIds.isEmpty())
         assertFalse(harness.component.useManualTimeSlots.value)

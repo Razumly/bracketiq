@@ -74,6 +74,8 @@ export const matchActionSchema = z.object({
 
 const matchUpdateSchema = z.object({
   terminalContractVersion: z.literal(1).optional(),
+  start: z.string().datetime({ offset: true }).transform((value) => new Date(value)).optional(),
+  end: z.string().datetime({ offset: true }).transform((value) => new Date(value)).optional(),
   locked: z.boolean().optional(),
   team1Points: z.array(z.number()).optional(),
   team2Points: z.array(z.number()).optional(),
@@ -104,17 +106,24 @@ const matchUpdateSchema = z.object({
 
 export type TerminalMatchAction = 'COMPLETE' | 'FORFEIT' | 'CANCEL' | 'NO_CONTEST';
 
+const upperCaseToken = (value: string | null | undefined): string => value?.toUpperCase() ?? '';
+
+const lifecycleTerminalAction = (lifecycle: z.infer<typeof lifecycleSchema>): TerminalMatchAction | null => {
+  const state = lifecycle ?? {};
+  const status = upperCaseToken(state.status);
+  const resultType = upperCaseToken(state.resultType);
+  const resultStatus = upperCaseToken(state.resultStatus);
+  if (resultType === 'NO_CONTEST' || resultStatus === 'NO_CONTEST') return 'NO_CONTEST';
+  if (status === 'CANCELLED') return 'CANCEL';
+  if (resultType === 'FORFEIT') return 'FORFEIT';
+  if (['COMPLETE', 'COMPLETED'].includes(status) || resultStatus === 'FINAL') return 'COMPLETE';
+  return null;
+};
+
 export function terminalActionOf(update: z.infer<typeof matchUpdateSchema>): TerminalMatchAction | null {
   const action = update.matchAction?.action;
   if (action === 'FORFEIT' || action === 'CANCEL' || action === 'NO_CONTEST') return action;
-  const lifecycle = update.lifecycle;
-  if (lifecycle?.resultType?.toUpperCase() === 'NO_CONTEST'
-    || lifecycle?.resultStatus?.toUpperCase() === 'NO_CONTEST') return 'NO_CONTEST';
-  if (lifecycle?.status?.toUpperCase() === 'CANCELLED') return 'CANCEL';
-  if (lifecycle?.resultType?.toUpperCase() === 'FORFEIT') return 'FORFEIT';
-  if (update.finalize || ['COMPLETE', 'COMPLETED'].includes(lifecycle?.status?.toUpperCase() ?? '')
-    || lifecycle?.resultStatus?.toUpperCase() === 'FINAL') return 'COMPLETE';
-  return null;
+  return lifecycleTerminalAction(update.lifecycle) ?? (update.finalize ? 'COMPLETE' : null);
 }
 
 export const updateSchema = matchUpdateSchema.superRefine((update, ctx) => {

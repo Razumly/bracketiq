@@ -45,7 +45,7 @@ class CreateEventSelectionRulesTest {
     }
 
     @Test
-    fun given_league_with_generated_end_when_automated_scheduling_is_disabled_then_selection_rules_remove_generated_end() {
+    fun given_league_with_generated_end_when_automated_scheduling_is_disabled_then_selection_rules_preserve_policy_and_end() {
         val end = Instant.fromEpochMilliseconds(2_000L)
         val draft = Event(
             eventType = EventType.LEAGUE,
@@ -57,7 +57,7 @@ class CreateEventSelectionRulesTest {
         val updated = draft.applyCreateSelectionRules()
 
         assertFalse(updated.isAutomatedScheduling)
-        assertFalse(updated.noFixedEndDateTime)
+        assertTrue(updated.noFixedEndDateTime)
         assertEquals(end, updated.end)
     }
 
@@ -87,7 +87,7 @@ class CreateEventSelectionRulesTest {
     }
 
     @Test
-    fun given_tournament_with_generated_end_when_automated_scheduling_is_disabled_then_selection_rules_remove_generated_end() {
+    fun given_tournament_with_generated_end_when_automated_scheduling_is_disabled_then_selection_rules_preserve_policy_and_end() {
         val start = Instant.fromEpochMilliseconds(5_000L)
         val end = Instant.fromEpochMilliseconds(8_000L)
         val draft = Event(
@@ -101,7 +101,7 @@ class CreateEventSelectionRulesTest {
         val updated = draft.applyCreateSelectionRules()
 
         assertFalse(updated.isAutomatedScheduling)
-        assertFalse(updated.noFixedEndDateTime)
+        assertTrue(updated.noFixedEndDateTime)
         assertEquals(end, updated.end)
     }
 
@@ -123,6 +123,7 @@ class CreateEventSelectionRulesTest {
             eventType = EventType.EVENT,
             teamSignup = false,
             singleDivision = false,
+            noFixedEndDateTime = true,
             start = start,
             end = end,
         )

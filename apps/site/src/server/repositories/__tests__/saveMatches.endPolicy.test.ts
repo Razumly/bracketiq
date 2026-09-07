@@ -27,9 +27,25 @@ it('rejects the complete manual save when a Match is outside the Event bounds', 
   expect(client.events.update).not.toHaveBeenCalled();
 });
 
-it.each([false, true])('preserves the Event end for an accepted manual move with generated policy %s', async (generated) => {
+it('rejects an out-of-bounds placement when the previous Match state is UNPLACED', async () => {
+  const { match, client } = setup();
+  client.matches.findMany.mockResolvedValue([
+    { id: 'match', start: null, end: null, fieldId: null },
+  ]);
+  const error = await saveMatches('event', [{
+    ...match, placementState: 'UNPLACED', start: at(13), end: at(14),
+  }], client).then(() => null, (failure: unknown) => failure);
+  expect(error).toBeInstanceOf(Response);
+  expect(await (error as Response).json()).toMatchObject({
+    code: 'MATCH_OUTSIDE_EVENT_BOUNDS', matchIds: ['match'],
+  });
+  expect(client.matches.upsert).not.toHaveBeenCalled();
+  expect(client.events.update).not.toHaveBeenCalled();
+});
+
+it.each([false, true])('preserves the Event end for an accepted manual move with generated policy %s', async (hasGeneratedEnd) => {
   const { event, match, client } = setup();
-  event.noFixedEndDateTime = generated;
+  event.noFixedEndDateTime = hasGeneratedEnd;
   await saveMatches('event', [{ ...match, start: at(11), end: at(12) }], client);
   expect(client.matches.upsert).toHaveBeenCalledTimes(1);
   expect(client.events.update).not.toHaveBeenCalled();
@@ -38,14 +54,14 @@ it.each([false, true])('preserves the Event end for an accepted manual move with
 
 it.each([
   [true, true, true], [true, false, false], [false, true, false],
-])('uses an approved schedule end only with generated policy %s and automation %s', async (generated, automated, accepted) => {
+])('uses an approved schedule end only with generated policy %s and automation %s', async (hasGeneratedEnd, isAutomated, isAccepted) => {
   const { event, match, client } = setup();
-  event.noFixedEndDateTime = generated;
-  event.automatedScheduling = automated;
+  event.noFixedEndDateTime = hasGeneratedEnd;
+  event.automatedScheduling = isAutomated;
   const operation = saveMatches('event', [{ ...match, end: at(14) }], client, { approvedScheduleEnd: at(14) });
-  if (accepted) await expect(operation).resolves.toBeUndefined();
+  if (isAccepted) await expect(operation).resolves.toBeUndefined();
   else await expect(operation).rejects.toBeInstanceOf(Response);
-  expect(client.matches.upsert).toHaveBeenCalledTimes(accepted ? 1 : 0);
+  expect(client.matches.upsert).toHaveBeenCalledTimes(isAccepted ? 1 : 0);
 });
 
 it('allows score edits on an unchanged placement without altering Event bounds', async () => {

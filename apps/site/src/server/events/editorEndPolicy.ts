@@ -32,8 +32,8 @@ export const editorEndPolicyError = (
   if (type === "WEEKLY_EVENT" && !draft.basics.parentEvent) return null;
   if (!["LEAGUE", "TOURNAMENT"].includes(type))
     return "This Event Type requires a Planned End.";
-  const retained = baseline?.draft.schedule?.mode === "GENERATED_END";
-  if (draft.schedule.isAutomatedScheduling === false && !retained) {
+  const hasGeneratedEnd = baseline?.draft.schedule?.mode === "GENERATED_END";
+  if (draft.schedule.isAutomatedScheduling === false && !hasGeneratedEnd) {
     return "Set End From Schedule requires Automated Scheduling.";
   }
   return null;
