@@ -80,19 +80,22 @@ internal class EventMatchEditActionHandler(
         matchEditingCoordinator.cancelEditing()
     }
 
-    fun commitMatchChanges() {
+    fun commitMatchChanges(confirmProtectedDeletion: Boolean = false) {
         if (!canEditMatchesNow()) return
         scope.launch {
             val loadingOperation = loadingHandler().newOperation()
             when (val result = matchEditingCoordinator.commitChanges(
                 isTournament = selectedEvent().eventType == EventType.TOURNAMENT,
                 updateMatchesBulk = { payload ->
-                    matchRepository.updateMatchesBulk(payload.updates, payload.creates, payload.deletes)
+                    matchRepository.updateMatchesBulk(payload.updates, payload.creates, payload.deletes, payload.confirmation)
                 },
                 onCommitStarted = { loadingOperation.showLoading("Updating matches...") },
                 onCommitFinished = loadingOperation::hideLoading,
+                confirmProtectedDeletion = confirmProtectedDeletion,
             )) {
                 MatchEditCommitResult.Success -> Unit
+                MatchEditCommitResult.ConfirmationRequired -> Unit
+                MatchEditCommitResult.Superseded -> Unit
                 is MatchEditCommitResult.Invalid -> setError(result.errorMessage)
                 is MatchEditCommitResult.Failure -> {
                     setError(result.throwable.userMessage("Failed to update matches"))

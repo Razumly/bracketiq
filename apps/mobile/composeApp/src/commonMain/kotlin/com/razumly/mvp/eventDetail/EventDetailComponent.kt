@@ -95,6 +95,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val scheduleMaintenanceReview: StateFlow<EventScheduleMaintenanceReview?>
     val scheduleMaintenanceOptions: StateFlow<EventScheduleMaintenanceOptions?>
     val eventTypeTransitionConfirmation: StateFlow<EventTypeTransitionConfirmation?>
+    val protectedMatchDeletionConfirmation: StateFlow<String?>
     val isUserInEvent: StateFlow<Boolean>
     val isRegistrationPaymentPending: StateFlow<Boolean>
     val isRegistrationPaymentFailed: StateFlow<Boolean>
@@ -269,6 +270,8 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun startEditingMatches()
     fun cancelEditingMatches()
     fun commitMatchChanges()
+    fun confirmProtectedMatchDeletion()
+    fun dismissProtectedMatchDeletionConfirmation()
     fun updateEditableMatch(matchId: String, updater: (MatchMVP) -> MatchMVP)
     fun setLockForEditableMatches(matchIds: List<String>, locked: Boolean)
     fun addScheduleMatch()

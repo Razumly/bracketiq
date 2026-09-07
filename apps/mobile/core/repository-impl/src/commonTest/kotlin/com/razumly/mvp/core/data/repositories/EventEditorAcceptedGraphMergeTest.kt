@@ -8,6 +8,25 @@ import kotlin.test.assertEquals
 
 class EventEditorAcceptedGraphMergeTest {
     @Test
+    fun given_preservedGraph_when_typeChangesAndSourceIsOmitted_then_cachedPhaseSurvives() {
+        val phase = DivisionDetail(
+            id = "phase-1", kind = "POOL", key = "pool", name = "Pool",
+            sourceDivisionId = "entry-1", isSystemGenerated = true,
+        )
+        val cached = Event(
+            id = "event-1", eventType = EventType.LEAGUE,
+            divisions = listOf(phase.id), divisionDetails = listOf(phase),
+        )
+        val incoming = Event(id = cached.id, eventType = EventType.EVENT)
+
+        val merged = incoming.withCachedEditorDivisionState(cached, preserveMatchGraph = true)
+
+        assertEquals(EventType.EVENT, merged.eventType)
+        assertEquals(listOf(phase), merged.divisionDetails)
+        assertEquals(listOf(phase.id), merged.divisions)
+    }
+
+    @Test
     fun given_canonicalAndGraphDetails_when_mergingAcceptedGraphDivisionDetails_then_preservesCanonicalDetailsAndAddsGraphOnlyPhases() {
         val canonical = DivisionDetail(
             id = "division-league",

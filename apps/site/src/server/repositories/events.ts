@@ -2579,6 +2579,31 @@ const divisionDetailTeamIdsProperty = (
   return {};
 };
 
+const divisionDetailLeagueFields = (values: DivisionDetailOptionalValues) => ({
+    gamesPerOpponent: nullableDivisionDetailValue(
+      values.rawLeagueConfig?.gamesPerOpponent,
+      null,
+    ),
+    restTimeMinutes: nullableDivisionDetailValue(
+      values.rawLeagueConfig?.restTimeMinutes,
+      null,
+    ),
+    usesSets: nullableDivisionDetailValue(values.rawLeagueConfig?.usesSets, null),
+    matchDurationMinutes: nullableDivisionDetailValue(
+      values.rawLeagueConfig?.matchDurationMinutes,
+      null,
+    ),
+    setDurationMinutes: nullableDivisionDetailValue(
+      values.rawLeagueConfig?.setDurationMinutes,
+      null,
+    ),
+    setsPerMatch: nullableDivisionDetailValue(
+      values.rawLeagueConfig?.setsPerMatch,
+      null,
+    ),
+    pointsToVictory: values.rawLeagueConfig?.pointsToVictory ?? [],
+});
+
 const buildDivisionDetailPayload = (
   identity: DivisionDetailIdentity,
   values: DivisionDetailOptionalValues,
@@ -2626,28 +2651,7 @@ const buildDivisionDetailPayload = (
     ),
     standingsOverrides: values.rawStandingsOverrides,
     playoffConfig: values.rawPlayoffConfig,
-    gamesPerOpponent: nullableDivisionDetailValue(
-      values.rawLeagueConfig?.gamesPerOpponent,
-      null,
-    ),
-    restTimeMinutes: nullableDivisionDetailValue(
-      values.rawLeagueConfig?.restTimeMinutes,
-      null,
-    ),
-    usesSets: nullableDivisionDetailValue(values.rawLeagueConfig?.usesSets, null),
-    matchDurationMinutes: nullableDivisionDetailValue(
-      values.rawLeagueConfig?.matchDurationMinutes,
-      null,
-    ),
-    setDurationMinutes: nullableDivisionDetailValue(
-      values.rawLeagueConfig?.setDurationMinutes,
-      null,
-    ),
-    setsPerMatch: nullableDivisionDetailValue(
-      values.rawLeagueConfig?.setsPerMatch,
-      null,
-    ),
-    pointsToVictory: values.rawLeagueConfig?.pointsToVictory ?? [],
+    ...divisionDetailLeagueFields(values),
     standingsConfirmedAt: values.rawStandingsConfirmedAt,
     standingsConfirmedBy: values.rawStandingsConfirmedBy,
     allowPaymentPlans: values.rawAllowPaymentPlans,
@@ -8731,6 +8735,7 @@ export const saveEventSchedule = async (
 };
 
 type SyncEventDivisionsParams = {
+  preserveMatchGraph?: boolean;
   eventId: string;
   divisionIds: string[];
   fieldIds: string[];
@@ -10689,6 +10694,7 @@ const persistSyncEventDivisions = async (params: {
       params.clearSingleDivisionTeamAssignments,
     now,
   });
+  if (params.values.preserveMatchGraph) return;
   await syncEventDivisionPhases({
     client: params.client,
     eventId: params.values.eventId,
@@ -10719,8 +10725,10 @@ export const syncEventDivisions = async (
   await persistSyncEventDivisions({
     client,
     values: params,
-    finalEntries,
-    staleDivisionIds,
+    finalEntries: params.preserveMatchGraph
+      ? finalEntries.filter((entry) => !state.persistedRows.some((row) => row.id === entry.id && row.role === "PHASE"))
+      : finalEntries,
+    staleDivisionIds: params.preserveMatchGraph ? [] : staleDivisionIds,
     tournamentPoolPlayEnabled: state.tournamentPoolPlayEnabled,
     clearSingleDivisionTeamAssignments:
       state.clearSingleDivisionTeamAssignments,
@@ -10731,6 +10739,7 @@ export const syncEventDivisions = async (
 };
 
 export type EventUpsertOptions = {
+  preserveMatchGraph?: boolean;
   preserveOperationalState?: boolean;
   preserveStaffState?: boolean;
 };
@@ -11346,6 +11355,20 @@ const resolveEventUpsertIncludePlayoffs = (payload: any): boolean =>
     false,
   );
 
+const eventUpsertPlayoffTeamCount = (
+  includePlayoffsOrPools: boolean, eventType: string | null,
+  parsedPlayoffTeamCount: ReturnType<typeof coerceNullableNumber>,
+) => {
+  return !includePlayoffsOrPools ||
+    (eventType !== "LEAGUE" &&
+      eventType !== "TOURNAMENT")
+      ? parsedPlayoffTeamCount ?? null
+      : resolveLeaguePlayoffTeamCount(
+          parsedPlayoffTeamCount,
+          `Playoff team count must be at least ${MIN_BRACKET_TEAM_COUNT} when playoffs are enabled.`,
+        );
+};
+
 const resolveEventUpsertDivisionDetails = (params: {
   payload: any;
   id: string;
@@ -11399,15 +11422,7 @@ const resolveEventUpsertDivisionDetails = (params: {
   const parsedPlayoffTeamCount = coerceNullableNumber(
     params.payload.playoffTeamCount,
   );
-  const normalizedEventPlayoffTeamCount =
-    !includePlayoffsOrPools ||
-    (params.nextEventType !== "LEAGUE" &&
-      params.nextEventType !== "TOURNAMENT")
-      ? parsedPlayoffTeamCount ?? null
-      : resolveLeaguePlayoffTeamCount(
-          parsedPlayoffTeamCount,
-          `Playoff team count must be at least ${MIN_BRACKET_TEAM_COUNT} when playoffs are enabled.`,
-        );
+  const normalizedEventPlayoffTeamCount = eventUpsertPlayoffTeamCount(includePlayoffsOrPools, params.nextEventType, parsedPlayoffTeamCount);
   const isTournamentPoolPlay = isBracketEvent && isTournamentPoolPlayEnabled({
     eventType: params.payload.eventType,
     includePlayoffs: includePlayoffsOrPools,
@@ -12629,24 +12644,25 @@ const buildEventUpsertPresentationFields = (params: EventUpsertDataParams) => ({
 });
 
 const buildEventUpsertBracketFields = (params: EventUpsertDataParams) => {
-  const isBracket = isBracketEventType(params.payload.eventType);
+  if (!isBracketEventType(params.payload.eventType)) {
+    return {
+      winnerBracketPointsToVictory: [], loserBracketPointsToVictory: [],
+      coordinates: params.payloadCoordinates, gamesPerOpponent: null,
+      includePlayoffs: false, playoffTeamCount: null, usesSets: false,
+      matchDurationMinutes: null, setDurationMinutes: null, setsPerMatch: null,
+    };
+  }
   return {
-    winnerBracketPointsToVictory: isBracket
-      ? ensureNumberArray(params.payload.winnerBracketPointsToVictory)
-      : [],
-    loserBracketPointsToVictory: isBracket
-      ? ensureNumberArray(params.payload.loserBracketPointsToVictory)
-      : [],
+    winnerBracketPointsToVictory: ensureNumberArray(params.payload.winnerBracketPointsToVictory),
+    loserBracketPointsToVictory: ensureNumberArray(params.payload.loserBracketPointsToVictory),
     coordinates: params.payloadCoordinates,
-    gamesPerOpponent: isBracket ? params.payload.gamesPerOpponent ?? null : null,
-    includePlayoffs: isBracket ? params.includePlayoffsOrPools : false,
-    playoffTeamCount: isBracket ? params.normalizedEventPlayoffTeamCount : null,
-    usesSets: isBracket ? params.payload.usesSets ?? false : false,
-    matchDurationMinutes: isBracket
-      ? params.payload.matchDurationMinutes ?? null
-      : null,
-    setDurationMinutes: isBracket ? params.payload.setDurationMinutes ?? null : null,
-    setsPerMatch: isBracket ? params.payload.setsPerMatch ?? null : null,
+    gamesPerOpponent: params.payload.gamesPerOpponent ?? null,
+    includePlayoffs: params.includePlayoffsOrPools,
+    playoffTeamCount: params.normalizedEventPlayoffTeamCount,
+    usesSets: params.payload.usesSets ?? false,
+    matchDurationMinutes: params.payload.matchDurationMinutes ?? null,
+    setDurationMinutes: params.payload.setDurationMinutes ?? null,
+    setsPerMatch: params.payload.setsPerMatch ?? null,
   };
 };
 
@@ -13878,6 +13894,7 @@ const allowedFieldIdSet = new Set(fieldIds);
     resolvedEventOfficials,
     resolvedOfficialPositions,
     divisionSyncInput: {
+      preserveMatchGraph: options.preserveMatchGraph === true,
       eventId: id,
       divisionIds: normalizedEventDivisionIds,
       fieldIds,

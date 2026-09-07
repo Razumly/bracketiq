@@ -549,7 +549,7 @@ const buildEditorScheduleOutcome = (
     : [];
   return {
     status,
-    matchCount: matches.length,
+    matchCount: status === 'NOT_REQUESTED' ? (sourceEvent.matches?.length ?? 0) : matches.length,
     matches,
     warnings: [],
   };
@@ -3583,6 +3583,7 @@ describe('League schedule page', () => {
       ),
     ).toBe(false);
     expect(acceptedEvent.matches?.[0]?.start).toBe('2026-03-01T10:00:00Z');
+
   });
 
   it('sends PRESERVE for an existing event type change and keeps its Match Graph for explicit Rebuild', async () => {
@@ -3616,6 +3617,8 @@ describe('League schedule page', () => {
     expect(
       within(confirmation).getByText(/preserving its 1 scheduled matches/i),
     ).toBeInTheDocument();
+    expect(within(confirmation).getByText(/has not been rebuilt and does not conform/i)).toBeInTheDocument();
+    expect(within(confirmation).getByText(/Pool, playoff, scoring, and Match duration settings/i)).toBeInTheDocument();
     fireEvent.click(
       within(confirmation).getByRole('button', {
         name: /change type & preserve schedule/i,
@@ -3644,6 +3647,10 @@ describe('League schedule page', () => {
       ),
     ).toBe(false);
     expect(acceptedEvent.matches?.[0]?.start).toBe('2026-03-01T10:00:00Z');
+    await waitFor(() => expect(screen.queryByRole('dialog', {
+      name: /change event type and preserve schedule/i,
+    })).not.toBeInTheDocument());
+    expect(await screen.findByText(/The Match Graph has not been rebuilt and does not conform/i)).toBeInTheDocument();
   });
 
 

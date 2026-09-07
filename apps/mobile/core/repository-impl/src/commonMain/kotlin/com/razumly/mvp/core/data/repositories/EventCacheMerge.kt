@@ -202,7 +202,7 @@ internal fun mergeRebuiltEditorGraphTimeSlots(
  * Editor snapshots intentionally omit generated graph phases. Keep only cached graph-owned rows
  * in Room while allowing every incoming editor row to replace its cached counterpart.
  */
-internal fun Event.withCachedEditorDivisionState(cached: Event?): Event {
+internal fun Event.withCachedEditorDivisionState(cached: Event?, preserveMatchGraph: Boolean = false): Event {
     if (cached == null) return this
 
     val incomingCanonicalDivisionIds = incomingEditorCanonicalDivisionIds()
@@ -211,7 +211,7 @@ internal fun Event.withCachedEditorDivisionState(cached: Event?): Event {
     }
     val cachedGraphDetails = cached.divisionDetails.filter(DivisionDetail::isEditorGraphOwned)
     val retainedCachedGraphDetails = cachedGraphDetails.filter { detail ->
-        detail.resolvesToIncomingCanonicalDivision(
+        preserveMatchGraph || detail.resolvesToIncomingCanonicalDivision(
             eventId = id,
             incomingCanonicalDivisionIds = incomingCanonicalDivisionIds,
             cachedDetailsById = cachedDetailsById,

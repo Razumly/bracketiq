@@ -457,6 +457,73 @@ class EventRepositoryRoomPersistenceTest {
         }
 
     @Test
+    fun given_live_site_when_type_changes_then_graph_survives_and_protected_deletion_needs_consent() =
+        kotlinx.coroutines.test.runTest(timeout = kotlin.time.Duration.parse("5m")) {
+            val apiUrl = System.getenv("MVP_ISSUE51_API_URL").orEmpty()
+            val token = System.getenv("MVP_ISSUE51_TOKEN").orEmpty()
+            val ids = System.getenv("MVP_ISSUE51_EVENT_IDS").orEmpty().split(',').filter(String::isNotBlank)
+            org.junit.Assume.assumeTrue("Issue 51 live fixture is not configured.", apiUrl.isNotBlank() && token.isNotBlank())
+            require(java.net.URI(apiUrl).host in setOf("localhost", "127.0.0.1"))
+            require(ids.size == 5 && ids.all { it.startsWith("issue-51-") })
+            val database = Room.inMemoryDatabaseBuilder<MVPDatabaseService>(context).allowMainThreadQueries().build()
+            val http = HttpClient { configureMvpHttpClient() }
+            val tokens = mockk<AuthTokenStore>()
+            coEvery { tokens.get() } returns token
+            val api = MvpApiClient(http, apiUrl, tokens)
+            val repository = eventRepositoryRoomPersistenceRepository(
+                EventRepositoryRoomPersistence_NoStartupCleanupDatabase(database), http,
+                UnconfinedTestDispatcher(testScheduler), api = api,
+            )
+            val matches = com.razumly.mvp.eventDetail.data.MatchRepository(api, database, autoSyncOperations = false)
+            try {
+                val eventId = ids.single { it.endsWith("-league") }
+                val initial = repository.getEventEditor(eventId).getOrThrow()
+                val graph = matches.getMatchesOfTournament(eventId).getOrThrow().sortedBy { it.id }
+                assertTrue(graph.isNotEmpty())
+                val desired = initial.canonicalState.copy(event = initial.canonicalState.event.copy(
+                    eventType = EventType.EVENT, isAutomatedScheduling = false,
+                ))
+                val saved = repository.saveEventEditor(eventId,
+                    EventEditorSessionMapper.toSaveCommand(initial, EventEditorMutation(desired))).getOrThrow()
+                assertTrue(saved.scheduleOutcome.warnings.isEmpty())
+                repository.updateLocalEvent(saved.session.canonicalState.event).getOrThrow()
+                assertEquals(graph, database.getMatchDao.getMatchesOfTournament(eventId).sortedBy { it.id })
+                assertEquals(graph, matches.getMatchesOfTournament(eventId).getOrThrow().sortedBy { it.id })
+                val reloaded = repository.getEventEditor(eventId).getOrThrow()
+                assertEquals(EventType.EVENT, reloaded.canonicalState.event.eventType)
+                assertEquals(initial.snapshot.draft.resources, reloaded.snapshot.draft.resources)
+                assertEquals(initial.snapshot.draft.staff, reloaded.snapshot.draft.staff)
+                assertEquals(EventType.EVENT, repository.getEvent(eventId).getOrThrow().eventType)
+                assertEquals(graph, database.getMatchDao.getMatchesOfTournament(eventId).sortedBy { it.id })
+
+                val protectedId = ids.single { it.endsWith("-tournament") }
+                val protected = repository.getEventEditor(protectedId).getOrThrow()
+                assertTrue(protected.snapshot.scheduleState.hasProtectedHistory)
+                val protectedGraph = matches.getMatchesOfTournament(protectedId).getOrThrow()
+                val target = protectedGraph.first { it.status == "IN_PROGRESS" }
+                val blocked = repository.saveEventEditor(protectedId, EventEditorSessionMapper.toSaveCommand(
+                    protected, EventEditorMutation(protected.canonicalState.copy(
+                        event = protected.canonicalState.event.copy(eventType = EventType.EVENT),
+                    )),
+                ))
+                assertTrue(blocked.isFailure)
+                assertEquals(protectedGraph.sortedBy { it.id }, database.getMatchDao.getMatchesOfTournament(protectedId).sortedBy { it.id })
+                val rejected = matches.updateMatchesBulk(emptyList(), deletes = listOf(target.id))
+                assertTrue(rejected.isFailure)
+                assertNotNull(database.getMatchDao.getMatchById(target.id))
+                matches.updateMatchesBulk(emptyList(), deletes = listOf(target.id), confirmation = "DELETE_PROTECTED_MATCH_HISTORY").getOrThrow()
+                assertNull(database.getMatchDao.getMatchById(target.id))
+                assertFalse(matches.getMatchesOfTournament(protectedId).getOrThrow().any { it.id == target.id })
+                val after = repository.getEventEditor(protectedId).getOrThrow()
+                assertEquals(protected.canonicalState.event.end, after.canonicalState.event.end)
+            } finally {
+                repository.close()
+                http.close()
+                database.close()
+            }
+        }
+
+    @Test
     fun given_live_site_when_registration_destination_changes_then_api_and_room_preserve_the_event() =
         kotlinx.coroutines.test.runTest(timeout = kotlin.time.Duration.parse("5m")) {
             val issue = if (System.getenv("MVP_ISSUE49_API_URL").isNullOrBlank()) "48" else "49"
@@ -1073,7 +1140,7 @@ class EventRepositoryRoomPersistenceTest {
         }
 
     @Test
-    fun given_accepted_graph_when_tournament_detail_get_omits_generated_rows_then_room_keeps_graph() =
+    fun given_accepted_graph_when_any_event_type_detail_omits_generated_rows_then_room_keeps_graph() =
         kotlinx.coroutines.test.runTest {
             val fixture = eventRepositoryRoomPersistenceTournamentFixture()
             val narrowEventResponse = fixture.eventResponse.copy(
@@ -1082,6 +1149,7 @@ class EventRepositoryRoomPersistenceTest {
                     detail.id.normalizeDivisionIdentifier() == "division-open".normalizeDivisionIdentifier()
                 },
             )
+            var responseEventType = "TOURNAMENT"
             val database = Room.inMemoryDatabaseBuilder<MVPDatabaseService>(context)
                 .allowMainThreadQueries()
                 .build()
@@ -1103,7 +1171,7 @@ class EventRepositoryRoomPersistenceTest {
                         request.method == HttpMethod.Get -> {
                         refreshRequestCount += 1
                         respondJson(
-                            jsonMVP.encodeToString(narrowEventResponse),
+                            jsonMVP.encodeToString(narrowEventResponse.copy(eventType = responseEventType)),
                             HttpStatusCode.OK,
                         )
                     }
@@ -1134,35 +1202,46 @@ class EventRepositoryRoomPersistenceTest {
                     .map(String::normalizeDivisionIdentifier)
                     .toSet()
 
-                val refreshed = repository.getEvent(fixture.eventId).getOrThrow()
-                val persistedAfterRefresh = requireNotNull(
-                    database.getEventDao.getEventById(fixture.eventId),
-                )
+                EventType.entries.forEachIndexed { index, eventType ->
+                    responseEventType = eventType.name
+                    repository.updateLocalEvent(requireNotNull(
+                        narrowEventResponse.copy(eventType = responseEventType).toEventOrNull(requireOwnerIdentity = false),
+                    )).getOrThrow()
+                    val refreshed = repository.getEvent(fixture.eventId).getOrThrow()
+                    val persistedAfterRefresh = requireNotNull(
+                        database.getEventDao.getEventById(fixture.eventId),
+                    )
 
-                assertEquals(2, editorRequestCount)
-                assertEquals(1, refreshRequestCount)
-                assertEquals(expectedDivisionIds, refreshed.divisions.map(String::normalizeDivisionIdentifier).toSet())
-                assertEquals(
-                    expectedDivisionDetailIds,
-                    refreshed.divisionDetails
-                        .map(DivisionDetail::id)
-                        .map(String::normalizeDivisionIdentifier)
-                        .toSet(),
-                )
-                assertEquals(expectedDivisionIds, persistedAfterRefresh.divisions.map(String::normalizeDivisionIdentifier).toSet())
-                assertEquals(
-                    expectedDivisionDetailIds,
-                    persistedAfterRefresh.divisionDetails
-                        .map(DivisionDetail::id)
-                        .map(String::normalizeDivisionIdentifier)
-                        .toSet(),
-                )
-                assertNotNull(
-                    refreshed.divisionDetails.firstOrNull { detail ->
-                        detail.id.normalizeDivisionIdentifier() ==
-                            fixture.phaseDivisionId.normalizeDivisionIdentifier()
-                    },
-                )
+                    assertEquals(2, editorRequestCount)
+                    assertEquals(index + 1, refreshRequestCount)
+                    assertEquals(eventType, refreshed.eventType)
+                    assertEquals(
+                        acceptedBeforeRefresh.divisionDetails.filter { it.isSystemGenerated == true },
+                        refreshed.divisionDetails.filter { it.isSystemGenerated == true },
+                    )
+                    assertEquals(expectedDivisionIds, refreshed.divisions.map(String::normalizeDivisionIdentifier).toSet())
+                    assertEquals(
+                        expectedDivisionDetailIds,
+                        refreshed.divisionDetails
+                            .map(DivisionDetail::id)
+                            .map(String::normalizeDivisionIdentifier)
+                            .toSet(),
+                    )
+                    assertEquals(expectedDivisionIds, persistedAfterRefresh.divisions.map(String::normalizeDivisionIdentifier).toSet())
+                    assertEquals(
+                        expectedDivisionDetailIds,
+                        persistedAfterRefresh.divisionDetails
+                            .map(DivisionDetail::id)
+                            .map(String::normalizeDivisionIdentifier)
+                            .toSet(),
+                    )
+                    assertNotNull(
+                        refreshed.divisionDetails.firstOrNull { detail ->
+                            detail.id.normalizeDivisionIdentifier() ==
+                                fixture.phaseDivisionId.normalizeDivisionIdentifier()
+                        },
+                    )
+                }
             } finally {
                 repository.close()
                 http.close()
@@ -1433,7 +1512,7 @@ class EventRepositoryRoomPersistenceTest {
                         .toSet(),
                 )
                 assertEquals(
-                    emptyList(),
+                    listOf(fixture.fieldId),
                     eventAfterSave.divisionDetails
                         .first { detail ->
                             detail.id.normalizeDivisionIdentifier() ==

@@ -11,6 +11,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
@@ -83,6 +86,7 @@ fun EventDetailScreen(
     val divisionTypeParameters by component.divisionTypeParameters.collectAsState()
     val currentUser by component.currentUser.collectAsState()
     val notificationPermissionPrimer by component.notificationPermissionPrimer.collectAsState()
+    val protectedMatchDeletionConfirmation by component.protectedMatchDeletionConfirmation.collectAsState()
     val showEventTeamCheckInDialog by component.showEventTeamCheckInDialog.collectAsState()
     val eventTeamCheckInSaving by component.eventTeamCheckInSaving.collectAsState()
     val currentUserManagedEventTeamId by component.currentUserManagedEventTeamId.collectAsState()
@@ -1294,6 +1298,24 @@ fun EventDetailScreen(
                 onDismissBillingAddress = component::dismissBillingAddressPrompt,
             ),
         )
+        protectedMatchDeletionConfirmation?.let { message ->
+            AlertDialog(
+                onDismissRequest = component::dismissProtectedMatchDeletionConfirmation,
+                title = { Text("Delete protected Match history?") },
+                text = { Text(message) },
+                confirmButton = {
+                    TextButton(onClick = component::confirmProtectedMatchDeletion) {
+                        Text("Delete protected Matches")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = component::dismissProtectedMatchDeletionConfirmation) {
+                        Text("Cancel")
+                    }
+                },
+            )
+        }
+
         notificationPermissionPrimer?.let { state ->
             PermissionPrimerDialog(
                 state = state,

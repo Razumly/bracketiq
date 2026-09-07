@@ -1573,6 +1573,11 @@ class DefaultEventDetailComponent(
     override fun cancelEditingMatches() = matchEditActionHandler.cancelEditingMatches()
 
     override fun commitMatchChanges() = matchEditActionHandler.commitMatchChanges()
+    override val protectedMatchDeletionConfirmation
+        get() = matchEditingCoordinator.protectedDeletionConfirmation
+    override fun confirmProtectedMatchDeletion() = matchEditActionHandler.commitMatchChanges(true)
+    override fun dismissProtectedMatchDeletionConfirmation() =
+        matchEditingCoordinator.dismissProtectedDeletionConfirmation()
 
     override fun updateEditableMatch(matchId: String, updater: (MatchMVP) -> MatchMVP) =
         matchEditActionHandler.updateEditableMatch(matchId, updater)

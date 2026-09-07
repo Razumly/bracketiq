@@ -752,6 +752,28 @@ const divisionDetailsForSave = (
     sanitizeNonBracketDivisionDetail(detail, isTryoutEvent)
   ));
 };
+const assertFixedEndApplicability = (draft: EventEditorDraft): void => {
+  const eventType = draft.basics.eventType.trim().toUpperCase();
+  const isWeeklyChild = eventType === "WEEKLY_EVENT" && Boolean(draft.basics.parentEvent?.trim());
+  if (eventType === "TRYOUT" && draft.schedule.mode !== "FIXED_END") {
+    throw new EditorInputError("Tryout events require a Planned End.");
+  }
+  if (isWeeklyChild && draft.schedule.mode !== "FIXED_END") {
+    throw new EditorInputError("Weekly child events require a Planned End.");
+  }
+};
+
+const assertTryoutEnd = (draft: EventEditorDraft): void => {
+  if (draft.basics.eventType.trim().toUpperCase() !== "TRYOUT") return;
+  const start = parseDateTimeInTimeZone(draft.basics.start, draft.basics.timeZone);
+  const end = draft.schedule.mode === "FIXED_END"
+    ? parseDateTimeInTimeZone(draft.schedule.endConstraint, draft.basics.timeZone)
+    : null;
+  if (!start || !end || end.getTime() <= start.getTime()) {
+    throw new EditorInputError("Tryout Planned End must be after the event start.");
+  }
+};
+
 const prepareEventPayloadForSave = async (
   actor: EditorActor,
   draft: EventEditorDraft,
@@ -764,22 +786,8 @@ const prepareEventPayloadForSave = async (
     await assertPaymentCapability(draft, existingSnapshot);
   }
   const eventType = draft.basics.eventType.trim().toUpperCase();
-  const isWeeklyChild = eventType === "WEEKLY_EVENT" && Boolean(draft.basics.parentEvent?.trim());
-  if (eventType === "TRYOUT" && draft.schedule.mode !== "FIXED_END") {
-    throw new EditorInputError("Tryout events require a Planned End.");
-  }
-  if (isWeeklyChild && draft.schedule.mode !== "FIXED_END") {
-    throw new EditorInputError("Weekly child events require a Planned End.");
-  }
-  if (eventType === "TRYOUT") {
-    const start = parseDateTimeInTimeZone(draft.basics.start, draft.basics.timeZone);
-    const end = draft.schedule.mode === "FIXED_END"
-      ? parseDateTimeInTimeZone(draft.schedule.endConstraint, draft.basics.timeZone)
-      : null;
-    if (!start || !end || end.getTime() <= start.getTime()) {
-      throw new EditorInputError("Tryout Planned End must be after the event start.");
-    }
-  }
+  assertFixedEndApplicability(draft);
+  assertTryoutEnd(draft);
   const eventPayload = editorDraftToLegacyEvent(draft, eventId);
   const timing = resolveMatchTimingPolicy(timingInputsFor(draft));
   if (
@@ -823,6 +831,7 @@ const upsertEditorEvent = async (
   draft: EventEditorDraft,
   eventId: string,
   eventPayload: LegacyEditorEventPayload,
+  preserveMatchGraph: boolean,
 ): Promise<void> => {
   const isBracketEvent = ['LEAGUE', 'TOURNAMENT'].includes(
     draft.basics.eventType.trim().toUpperCase(),
@@ -845,7 +854,7 @@ const upsertEditorEvent = async (
         tags: draft.basics.tags,
       },
       tx,
-      { preserveOperationalState: true, preserveStaffState: true },
+      { preserveOperationalState: true, preserveStaffState: true, preserveMatchGraph },
     );
   } catch (error) {
     if (error instanceof EventDivisionNameValidationError || error instanceof EventRegistrationConfigurationError) {
@@ -918,7 +927,7 @@ const saveWithinTransaction = async (
     rentalResourceIds.bookingItemIds,
   );
   await assertRentalBookingAuthority(tx, draft, actor);
-  await upsertEditorEvent(tx, draft, eventId, eventPayload);
+  await upsertEditorEvent(tx, draft, eventId, eventPayload, (existingSnapshot?.scheduleState.matchCount ?? 0) > 0);
   const questionIdMap = await reconcileQuestions(
     tx,
     eventId,
@@ -983,7 +992,7 @@ const assertSaveSnapshot = (
   draft: EventEditorDraft,
   eventId: string,
   currentSnapshot: EventEditorSnapshot,
-): string => {
+): void => {
   assertEventTypeRegistrationUnit(
     draft.basics.eventType,
     teamSignupForDraft(draft),
@@ -998,104 +1007,28 @@ const assertSaveSnapshot = (
       currentSnapshot.staffRevision,
     );
   }
-  const currentEventType = currentSnapshot.draft.basics.eventType
-    .trim()
-    .toUpperCase();
-  const nextEventType = draft.basics.eventType.trim().toUpperCase();
-  const eventTypeChanged = currentEventType !== nextEventType;
-  const transition = command.scheduleTransition;
-  if (!eventTypeChanged && transition.mode === "RECONCILE") {
+  if (command.scheduleTransition.mode !== "PRESERVE") {
     throw new EditorScheduleIntentError(
-      "Schedule reconciliation requires an event-type change.",
+      "Save preserves the Match Graph. Use the separate Rebuild Schedule operation to replace it.",
     );
   }
-  if (
-    transition.mode === "RECONCILE" &&
-    transition.expectedScheduleRevision !== currentSnapshot.scheduleState.revision
-  ) {
-    throw new EventScheduleRevisionConflictError(
-      currentSnapshot.scheduleState.revision,
-    );
-  }
-  return nextEventType;
 };
 
-type SaveScheduleMode = "BUILD" | "REBUILD" | "DELETE";
-
-const scheduleModeFor = (
-  eventType: string,
+const preservedSaveSchedule = (
   currentSnapshot: EventEditorSnapshot,
-): SaveScheduleMode =>
-  ["LEAGUE", "TOURNAMENT"].includes(eventType)
-    ? currentSnapshot.scheduleState.matchCount > 0
-      ? "REBUILD"
-      : "BUILD"
-    : "DELETE";
-
-const reconcileSaveSchedule = async (
-  tx: Prisma.TransactionClient,
-  eventId: string,
-  transition: SaveEventEditorCommand["scheduleTransition"],
-  nextEventType: string,
-  currentSnapshot: EventEditorSnapshot,
-): Promise<{
+): {
   scheduleOutcome: EventEditorScheduleOutcome;
   scheduleGraph: EventEditorSaveResult["graph"];
   scheduleNotification: MatchScheduleNotificationPlan | null;
-}> => {
-  if (transition.mode !== "RECONCILE") {
-    return {
-      scheduleOutcome: {
-        status: "NOT_REQUESTED",
-        matchCount: currentSnapshot.scheduleState.matchCount,
-        warnings: [],
-      },
-      scheduleGraph: undefined,
-      scheduleNotification: null,
-    };
-  }
-  const scheduleMode = scheduleModeFor(nextEventType, currentSnapshot);
-  const mutation = await reconcileEventSchedule({
-    tx,
-    eventId,
-    mode: scheduleMode,
-    includePlaceholderTeams: true,
-  });
-  if (scheduleMode === "DELETE") {
-    return {
-      scheduleOutcome: {
-        status: "DELETED",
-        matchCount: 0,
-        matches: [],
-        warnings: [],
-      },
-      scheduleGraph: undefined,
-      scheduleNotification: mutation.notification,
-    };
-  }
-  return {
-    scheduleOutcome: {
-      status: scheduleMode === "REBUILD" ? "REBUILT" : "BUILT",
-      matchCount: mutation.matches.length,
-      matches: editorMatchProjectionsFor(
-        mutation.matches,
-        mutation.event.officialPositions,
-        mutation.event.eventType,
-      ),
-      warnings: mutation.warnings,
-    },
-    scheduleGraph: {
-      event: serializeEvent(mutation.event),
-      matches: serializeMatches(
-        mutation.matches,
-        mutation.event.officialPositions,
-        mutation.event.eventType,
-      ),
-    },
-    scheduleNotification: mutation.notification,
-  };
-};
-
+} => ({
+  scheduleOutcome: {
+    status: "NOT_REQUESTED",
+    matchCount: currentSnapshot.scheduleState.matchCount,
+    warnings: [],
+  },
+  scheduleGraph: undefined,
+  scheduleNotification: null,
+});
 const saveEventEditorWithinTransaction = async (
   tx: Prisma.TransactionClient,
   actor: EditorActor,
@@ -1130,7 +1063,7 @@ const saveEventEditorWithinTransaction = async (
     currentEvent as unknown as Record<string, unknown>,
     { client: tx, actor, mode: "EDIT" },
   );
-  const nextEventType = assertSaveSnapshot(
+  assertSaveSnapshot(
     command,
     command.draft,
     eventId,
@@ -1143,13 +1076,7 @@ const saveEventEditorWithinTransaction = async (
     eventId,
     currentSnapshot,
   );
-  const schedule = await reconcileSaveSchedule(
-    tx,
-    eventId,
-    command.scheduleTransition,
-    nextEventType,
-    currentSnapshot,
-  );
+  const schedule = preservedSaveSchedule(currentSnapshot);
   const savedSnapshot = await loadEventEditorSnapshot(eventId, {
     actor,
     client: tx,
@@ -1781,27 +1708,10 @@ const assertOriginalStaffingAssignments = (
     ]),
   );
 
-  graph.matches.forEach((match) => {
-    const label = `Match ${match.id}`;
-    match.officialAssignments.forEach((assignment, index) => {
-      const holderType = assignment.holderType.trim().toUpperCase();
-      if (holderType !== "OFFICIAL" && holderType !== "PLAYER") {
-        throw new EventScheduleProposalGraphError(
-          `${label} has an unsupported officiating holder at slot ${index + 1}.`,
-        );
-      }
-      if (!officialPositionIds.has(assignment.positionId)) {
-        throw new EventScheduleProposalGraphError(
-          `${label} officiating position at slot ${index + 1} ${assignment.positionId} is not present in the proposal.`,
-        );
-      }
-      const knownHolderIds =
-        holderType === "PLAYER" ? knownPlayerIds : knownOfficialUserIds;
-      if (assignment.userId !== null && !knownHolderIds.has(assignment.userId)) {
-        throw new EventScheduleProposalGraphError(
-          `${label} ${holderType === "PLAYER" ? "player" : "official"} at slot ${index + 1} ${assignment.userId} is not present in the proposal.`,
-        );
-      }
+  const assertAssignedEventOfficial = (
+    assignment: (typeof graph.matches)[number]['officialAssignments'][number],
+    label: string, index: number, holderType: string,
+  ): void => {
       if (
         assignment.eventOfficialId !== null
         && !eventOfficialIds.has(assignment.eventOfficialId)
@@ -1825,14 +1735,35 @@ const assertOriginalStaffingAssignments = (
           );
         }
       }
+  };
+
+  graph.matches.forEach((match) => {
+    const label = `Match ${match.id}`;
+    match.officialAssignments.forEach((assignment, index) => {
+      const holderType = assignment.holderType.trim().toUpperCase();
+      if (holderType !== "OFFICIAL" && holderType !== "PLAYER") {
+        throw new EventScheduleProposalGraphError(
+          `${label} has an unsupported officiating holder at slot ${index + 1}.`,
+        );
+      }
+      if (!officialPositionIds.has(assignment.positionId)) {
+        throw new EventScheduleProposalGraphError(
+          `${label} officiating position at slot ${index + 1} ${assignment.positionId} is not present in the proposal.`,
+        );
+      }
+      const knownHolderIds =
+        holderType === "PLAYER" ? knownPlayerIds : knownOfficialUserIds;
+      if (assignment.userId !== null && !knownHolderIds.has(assignment.userId)) {
+        throw new EventScheduleProposalGraphError(
+          `${label} ${holderType === "PLAYER" ? "player" : "official"} at slot ${index + 1} ${assignment.userId} is not present in the proposal.`,
+        );
+      }
+      assertAssignedEventOfficial(assignment, label, index, holderType);
     });
   });
 };
 
-const graphForProposalValidation = (
-  graph: EventEditorCreateProposal["graph"],
-  staffingPriority: unknown,
-): EventEditorCreateProposal["graph"] => {
+const coverageRelaxationFor = (staffingPriority: unknown) => {
   const policy = isStaffingPriority(staffingPriority)
     ? getStaffingPriorityPolicy(staffingPriority)
     : null;
@@ -1840,6 +1771,14 @@ const graphForProposalValidation = (
     && !policy.isHardTeamCoverageRequired;
   const relaxOfficialCoverage = policy !== null
     && !policy.isHardOfficialCoverageRequired;
+  return { relaxTeamCoverage, relaxOfficialCoverage };
+};
+
+const graphForProposalValidation = (
+  graph: EventEditorCreateProposal["graph"],
+  staffingPriority: unknown,
+): EventEditorCreateProposal["graph"] => {
+  const { relaxTeamCoverage, relaxOfficialCoverage } = coverageRelaxationFor(staffingPriority);
   if (!relaxTeamCoverage && !relaxOfficialCoverage) return graph;
   if (relaxOfficialCoverage) {
     assertOriginalStaffingAssignments(graph);
@@ -2055,6 +1994,11 @@ const partialUnscheduledMatchesFor = (
       };
     });
 
+const sameAffectedPhase = (
+  left: EventEditorAffectedCompetitionPhase,
+  right: EventEditorAffectedCompetitionPhase,
+): boolean => left.name === right.name && left.phase === right.phase && left.sourceDivisionId === right.sourceDivisionId;
+
 const partialAffectedPhasesFor = (
   event: unknown,
   unscheduledMatches: EventEditorUnscheduledMatch[],
@@ -2075,14 +2019,7 @@ const partialAffectedPhasesFor = (
       sourceDivisionId,
     };
     const existing = phasesById.get(phaseRecord.id);
-    if (
-      existing
-      && (
-        existing.name !== phaseRecord.name
-        || existing.phase !== phaseRecord.phase
-        || existing.sourceDivisionId !== phaseRecord.sourceDivisionId
-      )
-    ) {
+    if (existing && !sameAffectedPhase(existing, phaseRecord)) {
       throw new EventScheduleMutationError(
         "EDITOR_SCHEDULE_INPUT_INVALID",
         `Unplaced matches disagree about Competition Phase ${phaseRecord.id}.`,
@@ -2785,11 +2722,7 @@ export const createEventEditor = async (
   return result;
 };
 
-export const createScheduleProposalFromEditor = async (
-  actor: EditorActor,
-  command: CreateEventEditorCommand,
-  options: EditorSaveOptions = {},
-): Promise<EventEditorCreateProposal | EventEditorCreateResult> => {
+const assertCreateProposalIntent = (command: CreateEventEditorCommand): void => {
   const eventType = command.draft.basics.eventType.trim().toUpperCase();
   if (!["LEAGUE", "TOURNAMENT"].includes(eventType)) {
     throw new EditorScheduleIntentError(
@@ -2802,6 +2735,14 @@ export const createScheduleProposalFromEditor = async (
     );
   }
   assertCreateSchedulingIntent(command);
+};
+
+export const createScheduleProposalFromEditor = async (
+  actor: EditorActor,
+  command: CreateEventEditorCommand,
+  options: EditorSaveOptions = {},
+): Promise<EventEditorCreateProposal | EventEditorCreateResult> => {
+  assertCreateProposalIntent(command);
   const client = options.client ?? prisma;
   const requestHash = eventEditorCreateRequestHash(command);
   const claim = await client.$transaction((tx: Prisma.TransactionClient) =>
