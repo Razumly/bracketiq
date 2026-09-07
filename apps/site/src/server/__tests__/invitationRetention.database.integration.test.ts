@@ -1,5 +1,6 @@
 /** @jest-environment node */
 import { randomUUID } from 'node:crypto';
+import { requireEventSignupTestDatabase } from '../../../scripts/event-signup-test-environment';
 import { NextRequest } from 'next/server';
 jest.mock('@/lib/permissions', () => ({ requireSession: async (req: NextRequest) => ({ userId: req.headers.get('x-test-user'), isAdmin: req.headers.get('x-reviewer') === 'true' }) }));
 jest.mock('@/server/razumlyAdmin', () => ({ requireRazumlyAdmin: async (req: NextRequest) => {
@@ -49,7 +50,7 @@ databaseTests('invitation retention through application reads', () => {
     return { status: result.status, body: result.status === 200 ? await result.json() : null };
   };
   beforeEach(async () => {
-    expect(new URL(process.env.DATABASE_URL!).pathname).toBe('/bracketiq_e2e_150_codex');
+    requireEventSignupTestDatabase(150);
     prefix = `issue150-${randomUUID()}`;
     process.env.AUTH_SECRET = 'issue-150-isolated-test-secret';
     await prisma.userData.createMany({ data: ['player', 'sender', 'stranger'].map((name) => ({ id: id(name), userName: id(name), firstName: name, lastName: 'Test', dateOfBirth: new Date('1990-01-01') })) });

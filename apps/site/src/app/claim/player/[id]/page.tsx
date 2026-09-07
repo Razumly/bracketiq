@@ -4,22 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Alert, Button, Checkbox, Center, Container, Loader, Paper, Stack, Text, TextInput, Title } from '@mantine/core';
 import { useApp } from '@/app/providers';
-import { apiRequest } from '@/lib/apiClient';
+import { profileClaimService, type ProfileClaimPreview as Preview } from '@/lib/profileClaimService';
 import TeamInvitationRecipientActions from '@/components/ui/TeamInvitationRecipientActions';
-
-type Preview = {
-  available: boolean;
-  invite: { id: string; profileId: string; hasAttachedEmail: boolean; isMinor?: boolean; teamId?: string | null;
-    guardianSetupRequired?: boolean; guardianContactRequired?: boolean; guardianDeclaration?: string; birthdateRequired?: boolean };
-  profile: { displayName: string; isManaged: boolean; dateOfBirth?: string | null };
-  team?: { id: string; name: string } | null;
-};
-
-type ClaimResponse = {
-  status?: string;
-  primaryProfileId?: string;
-  sourceProfileId?: string;
-};
 
 export default function ManagedPlayerClaimPage() {
   const params = useParams<{ id: string }>();
@@ -49,7 +35,7 @@ export default function ManagedPlayerClaimPage() {
 
   useEffect(() => {
     let cancelled = false;
-    void apiRequest<Preview>(`/api/public/profile-claims/${encodeURIComponent(params.id)}?${signedQuery}`)
+    void profileClaimService.preview(params.id, signedQuery)
       .then((value) => { if (!cancelled) { setPreview(value); setNeedsBirthdate(Boolean(value.invite.birthdateRequired)); } })
       .catch(() => { if (!cancelled) setError('This claim link is expired or unavailable.'); })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -61,14 +47,11 @@ export default function ManagedPlayerClaimPage() {
     setClaiming(true);
     setError(null);
     try {
-      const result = await apiRequest<ClaimResponse>(`/api/user-profiles/${encodeURIComponent(preview.invite.profileId)}/claim?${signedQuery}`, {
-        method: 'POST',
-        body: {
+      const result = await profileClaimService.claim(preview.invite.profileId, signedQuery, {
           inviteId: preview.invite.id,
           confirmation: true,
           ...(preview.invite.isMinor ? { guardianDeclaration: guardianDeclared, acceptTeamInvitation: !review, reviewGuardianInvitation: review } : {}),
           ...(dateOfBirth ? { dateOfBirth } : {}),
-        },
       });
       if (result.status === 'BIRTHDATE_REQUIRED') {
         setNeedsBirthdate(true);
@@ -79,7 +62,7 @@ export default function ManagedPlayerClaimPage() {
         setConfirmed(false);
         setGuardianDeclared(false);
         setPreview(null);
-        const updated = await apiRequest<Preview>(`/api/public/profile-claims/${encodeURIComponent(params.id)}?${signedQuery}`);
+        const updated = await profileClaimService.preview(params.id, signedQuery);
         setPreview(updated);
         setNeedsBirthdate(Boolean(updated.invite.birthdateRequired));
         setClaiming(false);

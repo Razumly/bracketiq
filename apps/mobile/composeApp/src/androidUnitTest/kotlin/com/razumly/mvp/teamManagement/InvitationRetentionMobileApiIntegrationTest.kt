@@ -47,6 +47,10 @@ class InvitationRetentionMobileApiIntegrationTest {
             val before = manager.teamRepository.observeTeamInvitations(team.id).first()
             val current = before.single { it.isCurrentAttempt }
             assertEquals(2, before.size)
+            manager.teamRepository.getTeams(listOf(team.id)).getOrThrow()
+            val roster = manager.database.getTeamDao.getTeam(team.id).playerRegistrations.single { it.userId == player.id }
+            assertEquals(current.id, roster.invitationId)
+            assertEquals("Awaiting player", roster.invitationLabel)
             recipient.userRepository.listInvites(player.id).getOrThrow()
             assertNotNull(recipient.database.getInviteDao.getInvite(old.id))
 

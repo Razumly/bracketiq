@@ -64,6 +64,14 @@ class OperationalRosterMobileApiIntegrationTest {
             }
             assertEquals(0, players["$eventId-expired"]?.documentReadiness?.documents?.signedCount)
             assertFalse(official.matchRepository.removeMatchRosterPlayer(eventId, matchId, "$eventId-team1", "$eventId-managed").isSuccess)
+            fixture("claim", eventId)
+            val merged = official.matchRepository.getMatchRosters(eventId, matchId).getOrThrow()
+            assertEquals(merged, official.matchRepository.observeMatchRosters(eventId, matchId).first())
+            val mergedPlayers = merged.rosters.flatMap { it.entries }
+            assertEquals(1, mergedPlayers.count { it.userId == "$eventId-claimant" })
+            assertFalse(mergedPlayers.any { it.userId == "$eventId-managed" })
+            assertEquals(1, mergedPlayers.single { it.userId == "$eventId-claimant" }.documentReadiness?.documents?.signedCount)
+            assertEquals(0, mergedPlayers.single { it.userId == "$eventId-expired" }.documentReadiness?.documents?.signedCount)
         } finally {
             member.close()
             official.close()
