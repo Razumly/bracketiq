@@ -14,7 +14,7 @@ Issue #52 requires stable Event boundaries. Build and Rebuild can set an Event e
 - [x] (2026-09-07) Add regression tests at the existing API, editor, scheduler, and Room boundaries. Fix the observed implementation failures.
 - [x] (2026-09-07) Run client-to-site validation for changed contracts. Run type checks, lint, and the affected complete suites. Record existing failures separately.
 - [x] (2026-09-07) Review the implementation against standards and issue #52. Fix all findings.
-- [ ] Commit the verified changes and reconcile issue #52.
+- [x] (2026-09-07) Commit the verified changes. Close issue #52. Set project Status to Done.
 
 ## Context Boundary
 
@@ -120,9 +120,9 @@ The authorized site server runs on port 3052. It uses `bracketiq_e2e_52_563b` on
 
 The first live failure came from an unseeded Room host dependency. The next exposed the Date conversion defect. The next correctly rejected a Planned End before an existing Time Slot end. The fixture now selects a Planned End that includes that Time Slot.
 
-Commit `14159e41c` records the initial implementation. The complete site and mobile suites and GitHub completion remain pending.
+Commit `14159e41c` records the initial implementation. The final results follow below.
 
-The complete live mobile-to-site and Room test passed in 54 seconds. Evidence: `apps/site/test-results/issue-52-live-fifth.txt`. It covered Planned End Build and Rebuild, generated Rebuild, automation off/on, an explicit Planned End, stale acceptance, typed manual rejection, unchanged Room after rejection, explicit end extension, accepted movement, and deletion with a stable end. The complete site suite and the mobile unit tests and lint are now running. TypeScript passes. Changed-file lint has no errors.
+The first complete live mobile-to-site and Room test passed in 54 seconds. Evidence: `apps/site/test-results/issue-52-live-fifth.txt`. It covered Planned End Build and Rebuild, generated Rebuild, automation off/on, an explicit Planned End, stale acceptance, typed manual rejection, unchanged Room after rejection, explicit end extension, accepted movement, and deletion with a stable end. Final verification follows below.
 
 The Standards review found one naming breach. New boolean identifiers now use the required `is` or `has` prefix. The Spec review found one placement bypass. An existing unplaced Match kept its old state when a manual request assigned dates and a field. Validation skipped that state, but persistence then marked the Match placed. The boundary check now uses the assigned field and dates. A regression checks the old state. The live test also checks both single and bulk routes and unchanged Room data. The Spec reviewer confirmed the fix by source review. Verification of these follow-up changes remains pending.
 
@@ -142,4 +142,4 @@ The complete site run finished in 2,393.866 seconds. It reported 898 passed suit
 
 The four focused suites for receipt replay, Match boundaries, email, and complexity pass all 27 tests. Evidence: `apps/site/test-results/issue-52-final-rechecks.json`. The final receipt rerun passes all five tests. TypeScript and changed-file lint pass after the final changes. The touched contract and receipt files needed small refactors to pass existing complexity limits. A direct comparison against the issue base verified identical terminal-action results for 540 input combinations. Evidence: `apps/site/test-results/issue-52-terminal-equivalence.txt`.
 
-All issue acceptance criteria are satisfied. The local test server remains available on port 3052 under the user's start authorization. The final commit and GitHub reconciliation follow this validation record.
+All issue acceptance criteria are satisfied. Local commits `14159e41c` and `87890eeb7` contain the implementation and review fixes. Issue #52 was closed on 2026-09-07. Its project Status is Done. The completion comment links the changes and verification. The local test server remains available on port 3052 under the user's start authorization.
