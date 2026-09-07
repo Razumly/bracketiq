@@ -17,6 +17,11 @@ The affiliate mapping agents must use the existing Codex CLI and Luna model fami
 - [x] Publish the changed governed agent image.
 - [x] Install the reviewed Codex auth seed on the production host without printing values.
 - [x] Create the private governed deployment environment and run governed preflight.
+- [x] Implement bounded legacy admission and claim-bound sport validation.
+- [x] Verify TypeScript and 465 tests across 12 focused suites.
+- [x] Complete Standards and specification reviews with no remaining known findings.
+- [x] Provision and verify governed database roles after separate operator approval.
+- [x] Verify a stable live read-only preview and exact stored artifact bytes.
 - [ ] Run governed preflight and one bounded mapping canary. The fleet passed preflight. The canary opened admission but found no claimable governed mapping job.
 - [ ] Verify terminal result and review state. Blocked because no governed claim ran.
 
@@ -32,6 +37,12 @@ The affiliate mapping agents must use the existing Codex CLI and Luna model fami
   supply lineage and evidence. The bounded canary therefore opened admission but
   produced no claim. Do not synthesize lineage; define and review a migration or
   enqueue contract first.
+- The continuation read-only inventory found zero Supply Source roots. Of the
+  306 sport-requeued jobs, 79 reference a source and mapping that still exist.
+  Only 56 also match the intake source key. All 306 have stored HTML rows.
+- The active policy targets Portland–Vancouver soccer events. The operator
+  selected backlog repair first. This does not authorize national publication
+  or automatic scraping.
 
 ## Decision Log
 
@@ -46,6 +57,16 @@ The affiliate mapping agents must use the existing Codex CLI and Luna model fami
 - Decision: Give only the root runner reviewed egress access for Codex CLI.
   Rationale: ChatGPT-authenticated Codex CLI must reach its hosted model service. The runner still has no production backend network, provider keys, or role credentials. Supervisors remain internal-only.
   Date/Author: 2026-09-01 / Main agent.
+- Decision: Repair the 306-job backlog through a bounded, preview-first gateway
+  operation. Admit only an exact existing source, mapping, intake, and evidence
+  run. Hold missing or conflicting identities. Preserve all archived results.
+  Rationale: Existing reconciliation is global and does not recover package
+  identity or enqueue producer jobs. A worker restart cannot fix this.
+- Decision: Carry the current sport catalog and stored run into repair claims.
+  Verify source citations and resolved sport output before package commit.
+  Hold activation and publication for these repair jobs.
+  Rationale: The current governed selector package lacks the legacy sport
+  evidence checks. Starting it unchanged would bypass the sport repair contract.
 
 The runner, Compose, preflight schema, and contract tests now use the existing
 Codex CLI ChatGPT authentication path. The changed runner image and gateway
@@ -126,6 +147,75 @@ Auth seed installation is exclusive and must refuse to overwrite an existing rev
 The runner configuration must expose one explicit model name and one private auth seed path. The runner must keep the existing Unix-socket protocol, signed runner requests, cgroup containment, workspace ownership, and terminal submission framing.
 
 The governed Compose file must mount the auth seed read-only into the runner only. Supervisors must continue to use the Agent Gateway role credential and runner protocol private key. The gateway remains the only service with production database and provider credentials.
+
+## Continuation milestones
+
+First, add a bounded legacy repair admission module. Preview must be read-only.
+It must classify all sport-requeued rows and hash the proposed writes. Apply
+must require the reviewed hash, a bounded job selection, active contracts,
+closed admission, no active claims, and a fresh preflight. It must repeat the
+identity checks in one transaction. It may create a PRE_MAPPED root and exact
+links, but must not infer approval from the historical result. It must create
+one deduplicated gateway job with real stored artifact keys and hashes.
+
+Second, add sport evidence to backlog repair claims and packages. Use the
+existing catalog snapshot and sport-determination validators. Reject stale
+catalogs, missing citations, and sport output that differs from resolved
+determinations. Keep ordinary producer history readable. A repair job must not
+reach activation or publication.
+
+Third, verify the new behavior locally. Produce a real preview on the VPS.
+Review the exact proposed changes before apply. Start one producer and one
+independent reviewer only for the bounded canary. Record terminal receipts and
+close admission. Missing identities remain held with explicit reasons.
+
+## Outcomes & Retrospective
+
+The prior image rollout proved runtime health but not mapping execution.
+The continuation must prove identity recovery, claim admission, sport
+validation, and independent review before it reports operational success.
+
+Continuation note: The operator selected backlog repair over the Portland
+discovery canary. Keep the active publication cohort unchanged.
+
+## Continuation review record
+
+Review base: `a877f70c849298c1eb1f0362209a7ff2c4badbfd`.
+Standards and specification reviews run separately for admission and sport
+validation. Production apply remains prohibited while a finding is open.
+
+The first real read-only preview reached all 306 sport-requeued jobs. It exposed
+a false live-state check: an active mapping pointer is not proof of publication
+or validation. Of 79 linked mappings, only six have `validatedAt`; only two
+sources have automatic scraping enabled. The corrected checks use actual public
+surfaces and preserve private, unlisted CLUB drafts.
+
+All reported findings are fixed, re-reviewed, and verified. These include sport
+reason codes, durable repair holds, atomic approval catalog checks, exact intake
+and artifact ownership, scoped replay, global active-claim exclusion, preserved
+root metadata, and legacy claim exclusion. TypeScript and 465 tests pass.
+
+The current read-only preview has five eligible jobs and 301 held jobs. The
+reviewed report hash is
+`778e0233ecb85e4424c4238026511ef6f7bc6871fc8ffc045970ff1b345219b0`.
+It selects mapping job `50957179-8e51-42f0-a0db-2fc4791bdc79` for Mission Valley
+CYO League. Its source and mapping already exist. Both selected artifacts match
+their stored byte hashes, sizes, intake, and capture run.
+
+The operator authorized publication of the verified governed images, deployment
+contract version 2 with hash
+`44361110db17d73ab9d70cf0b827d4c51e85f085f7538c3db2afc469be28ec39`,
+and this one-job apply and canary. The application, coverage, publication, and
+automatic scraping remain outside that operation.
+
+The actual database audit found the governed group roles missing. After separate
+approval, the DBA transaction created the three non-login roles and preserved
+existing login access before removing PUBLIC connection and schema usage.
+The agent role has no effective connection, schema usage, table writes, or role
+memberships. The application login still connects. Evidence is stored under
+`/home/bracketiq/.config/bracketiq-affiliate-agents/issue70-provision-roles.sql`
+and `issue70-role-provision-output.txt`, both mode 0600. Do not use the old
+fixed-boolean inventory as proof of permissions.
 
 ## Change Note
 

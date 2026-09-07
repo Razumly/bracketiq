@@ -1,5 +1,11 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { z } from 'zod';
+import {
+  previewAffiliateLegacyRepairAdmission,
+  applyAffiliateLegacyRepairAdmission,
+  AffiliateLegacyRepairAdmissionError,
+} from '../src/server/affiliateImports/affiliateLegacyRepairAdmission';
 
 import {
   affiliateAgentContractBundleSchema,
@@ -98,13 +104,18 @@ const readBoundedArtifactStream = async (
 type AffiliateAgentGatewayPrisma = typeof prisma;
 type AffiliateAgentGatewayStorage = ReturnType<typeof getStorageProvider>;
 
-const sourceArtifactFor = (
+const sourceArtifactFor = async (
   database: AffiliateAgentGatewayPrisma,
   fileId: string,
-) => database.affiliateSourceIntakeArtifacts.findFirst({
-  where: { fileId },
-  select: { sourceUrl: true, finalUrl: true },
-});
+) => {
+  const rows = await database.affiliateSourceIntakeArtifacts.findMany({
+    where: { fileId },
+    select: { sourceUrl: true, finalUrl: true },
+    take: 2,
+  });
+  if (rows.length > 1) throw new Error('Use an exact intake artifact handle for shared evidence files.');
+  return rows[0] ?? null;
+};
 
 const persistedGatewayArtifactMimeTypeFor = async (
   database: AffiliateAgentGatewayPrisma,
@@ -147,11 +158,41 @@ export const createAffiliateAgentGatewayArtifactStore = (
     fileId: string;
     maximumBytes: number;
   }) => {
-    const object = await storage.getObjectStream({ key: fileId });
+    if (fileId.startsWith('intake-artifact:')) {
+      const artifact = await database.affiliateSourceIntakeArtifacts.findUnique({
+        where: { id: fileId.slice('intake-artifact:'.length) },
+        select: { id: true, fileId: true, intakeId: true, runId: true, sourceUrl: true, finalUrl: true, mimeType: true },
+      });
+      if (!artifact) throw new Error('The admitted intake artifact was not found.');
+      const file = await database.file.findUnique({
+        where: { id: artifact.fileId },
+        select: { path: true, bucket: true, mimeType: true },
+      });
+      if (!file) throw new Error('The admitted intake artifact file was not found.');
+      const object = await storage.getObjectStream({ key: file.path, bucket: file.bucket });
+      const bytes = await readBoundedArtifactStream(object.stream, maximumBytes);
+      return {
+        bytes,
+        byteSize: bytes.length,
+        mimeType: object.contentType ?? artifact.mimeType ?? file.mimeType ?? 'application/octet-stream',
+        sourceUrl: artifact.sourceUrl,
+        finalUrl: artifact.finalUrl,
+        intakeId: artifact.intakeId,
+        runId: artifact.runId,
+      };
+    }
+    const files = await database.file.findMany({
+      where: { path: fileId },
+      select: { id: true, bucket: true, mimeType: true },
+      take: 2,
+    });
+    if (files.length > 1) throw new Error('The evidence storage key has ambiguous file ownership.');
+    const file = files[0];
+    const object = await storage.getObjectStream({ key: fileId, ...(file ? { bucket: file.bucket } : {}) });
     const bytes = await readBoundedArtifactStream(object.stream, maximumBytes);
     const [sourceArtifact, mimeType] = await Promise.all([
-      sourceArtifactFor(database, fileId),
-      artifactMimeTypeFor(database, fileId, object.contentType),
+      sourceArtifactFor(database, file?.id ?? fileId),
+      artifactMimeTypeFor(database, fileId, object.contentType ?? file?.mimeType ?? undefined),
     ]);
     return {
       bytes,
@@ -583,6 +624,7 @@ const workerRequestAuthorized = async (
 };
 
 export type AffiliateAgentGatewayHttpDependencies = Readonly<{
+  legacyRepairAdmission?: (request: LegacyRepairAdmissionRequest) => Promise<unknown>;
   gateway: AffiliateAgentGateway;
   replenishment: () => Promise<AffiliateGovernedReplenishmentControllerResult>;
   invocationReconciler: AffiliateAgentInvocationReconciler;
@@ -1048,6 +1090,50 @@ const handleReplenishmentRequest = async (
   return true;
 };
 
+const legacyRepairAdmissionRequestSchema = z.object({
+  mode: z.enum(['PREVIEW', 'APPLY']),
+  limit: z.number().int().min(1).max(20).default(1),
+  jobIds: z.array(z.string().trim().min(1).max(200)).min(1).max(20).optional(),
+  expectedReportHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+}).strict().superRefine((value, context) => {
+  if (value.mode === 'APPLY' && !value.expectedReportHash) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Apply requires a reviewed report hash.',
+    });
+  }
+});
+type LegacyRepairAdmissionRequest = z.infer<typeof legacyRepairAdmissionRequestSchema>;
+
+const handleLegacyRepairAdmissionRequest = async (
+  request: IncomingMessage,
+  httpRequest: AffiliateAgentGatewayHttpRequest,
+  response: ServerResponse,
+  input: AffiliateAgentGatewayHttpDependencies,
+  body: unknown,
+): Promise<boolean> => {
+  if (httpRequest.route !== '/legacy-repair/admission') return false;
+  if (!authorizeOperatorRequest(request, response, input.operatorToken)) return true;
+  const parsed = legacyRepairAdmissionRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    sendJson(response, 400, { error: 'Invalid legacy repair admission request.' });
+    return true;
+  }
+  if (!input.legacyRepairAdmission) {
+    sendJson(response, 503, { error: 'Legacy repair admission is unavailable.' });
+    return true;
+  }
+  try {
+    sendGatewayResult(response, await input.legacyRepairAdmission(parsed.data));
+  } catch (error) {
+    if (!(error instanceof AffiliateLegacyRepairAdmissionError)) throw error;
+    sendJson(response, 409, {
+      error: { code: error.code, safeMessage: error.message, isRetryable: false, details: error.details },
+    });
+  }
+  return true;
+};
+
 const handlePostRoute = async (
   request: IncomingMessage,
   httpRequest: AffiliateAgentGatewayHttpRequest,
@@ -1103,6 +1189,7 @@ const handlePostRequest = async (
   if (await handleWorkerReconcileRequest(httpRequest, response, input, body)) return;
   if (await handleWorkerAdmissionStatusRequest(httpRequest, response, input, body)) return;
   if (await handleReplenishmentRequest(request, httpRequest, response, input)) return;
+  if (await handleLegacyRepairAdmissionRequest(request, httpRequest, response, input, body)) return;
   await handlePostRoute(request, httpRequest, response, input, body);
 };
 
@@ -1238,6 +1325,7 @@ export const createAffiliateAgentGatewayRequestHandler = (
 };
 
 type AffiliateAgentGatewayRuntime = Readonly<{
+  legacyRepairAdmission: (request: LegacyRepairAdmissionRequest) => Promise<unknown>;
   gateway: AffiliateAgentGateway;
   replenishment: () => Promise<AffiliateGovernedReplenishmentControllerResult>;
   invocationReconciler: AffiliateAgentInvocationReconciler;
@@ -1404,6 +1492,31 @@ const createGateway = async (): Promise<AffiliateAgentGatewayRuntime> => {
   await healthChecks.startup();
   return {
     gateway,
+    legacyRepairAdmission: (request) => admission.withClaim(async () => {
+      if (admission.isOpen()) {
+        throw new Error('Close claim admission before legacy repair admission.');
+      }
+      const bundle = await contracts.loadActiveBundle();
+      const options = {
+        prisma,
+        bundle,
+        limit: request.limit,
+        jobIds: request.jobIds,
+      };
+      if (request.mode === 'PREVIEW') {
+        return previewAffiliateLegacyRepairAdmission(options);
+      }
+      if (!request.expectedReportHash) {
+        throw new Error('Legacy repair apply requires a reviewed hash.');
+      }
+      const active = await loadActiveAffiliateSupplyContract({ db: database, rolloutCohort });
+      assertStartupPreflight(active);
+      return applyAffiliateLegacyRepairAdmission({
+        ...options,
+        expectedReportHash: request.expectedReportHash,
+        operatorId: 'affiliate-gateway-operator',
+      });
+    }),
     replenishment: () => runAffiliateGovernedReplenishment({
       db: database,
       rolloutCohort,

@@ -10,10 +10,10 @@ protected replenishment-controller cadence client:
   authenticated replenishment operation.
 
 Each worker uses one claim through the governed supervisor command. Supervisors
-and the runner attach only to `gateway_internal`, which is an internal-only
-network. They do not receive a production database URL, object-storage
-credential, provider credential, repository token, or unrestricted backend
-network access.
+attach only to `gateway_internal`. The root runner also joins `gateway_egress`
+for the reviewed Codex authentication path. Neither receives a production
+database URL, object-storage credential, provider credential, repository token,
+or backend network access.
 
 The runner enforces one active invocation. It is a root-only control process
 with no database, gateway, role, or supervisor-halt credential; it owns the
@@ -49,6 +49,55 @@ The replenishment controller is only an authenticated gateway cadence client.
 Keep the legacy intake and mapped-source timers disabled and inactive. Do not
 run `npm run affiliate:scrape:due` or `npm run affiliate:intake:automation`
 against a production database.
+
+## Bounded legacy sport repair
+
+Use `POST /v1/affiliate-agent/legacy-repair/admission` inside the gateway network.
+Authenticate with `x-affiliate-gateway-operator-token`. Do not put the token in
+shell history or a report. The route has no host-published port.
+
+Send `{"mode":"PREVIEW","limit":1}` to inspect the sport-requeued cohort.
+Preview does not write application rows. Optional `jobIds` selects an exact
+subset. The limit is one by default and must be between one and twenty.
+Review `counts`, `rows`, `proposedWrites`, and `reportHash`. Missing identities,
+ambiguous roots, conflicting capture provenance, active authority, and public
+targets remain held. An active mapping pointer alone is not public authority.
+A promoted CLUB draft is private only when its exact source organization is
+unlisted and both public surface flags are false.
+
+After separate approval of the exact report, send the same selection with
+`"mode":"APPLY"` and `"expectedReportHash":"<reviewed SHA-256>"`.
+Do not send `operatorId`. The authenticated operator token records the fixed
+service actor `affiliate-gateway-operator`; it does not authenticate an arbitrary
+human account supplied in JSON.
+
+Apply requires closed admission, no active claims, the active contract, and a
+fresh verified preflight. It repeats the report checks in one serializable
+transaction. It links only existing source, mapping, and intake identities.
+It may create a held PRE_MAPPED Supply Source. It pins the selected stored
+artifacts and creates one deduplicated gateway producer job per selected row.
+It preserves prior result history. An exact retry returns the persisted report
+with `replayed: true` and `writeCount: 0`. A changed report returns HTTP 409 with
+`ADMISSION_REPORT_DRIFT`; obtain a new preview instead of retrying the old hash.
+
+Repair claims carry a fresh sports catalog and an exact intake/run context.
+Evidence handles use `intake-artifact:<artifact-row-id>` so shared file bytes
+cannot substitute another capture run's provenance. The gateway verifies
+actual bytes, both captured URLs, run ownership, and catalog freshness.
+Sport-coded gaps use `CONTRACT_GAP` with verified `sportEvidence`.
+Package validation and commit require the exact resolved sport union.
+
+Independent approval rechecks the committed evidence and catalog in the same
+transaction as approval. `LEGACY_SPORT_REPAIR` remains an automation hold.
+Approval does not enqueue activation. Activation and publication are denied
+for these repair claims. Run one bounded producer lease, then one bounded
+reviewer lease only when a reviewer job exists. Close admission and stop the
+canary workers after the result. Do not start coverage or replenishment.
+
+Capture effective database permissions. Fixed booleans in an inventory are not
+denial evidence. If group roles were absent when migrations ran, provision the
+roles and apply the migration's conditional grants before the canary.
+
 
 Run the build from `apps/site`:
 
@@ -1410,6 +1459,7 @@ psql --service="$PGADMIN_SERVICE" --no-psqlrc --set=ON_ERROR_STOP=1 \
 DO $$
 DECLARE
   governed_role text;
+  login_role record;
 BEGIN
   FOREACH governed_role IN ARRAY ARRAY[
     'bracketiq_affiliate_gateway',
@@ -1446,6 +1496,32 @@ BEGIN
       AND rolinherit
   ) THEN
     RAISE EXCEPTION 'The reviewed runtime role bracketiq_app is missing or unsafe.';
+  END IF;
+  -- Preserve effective access for existing logins before removing PUBLIC access.
+  FOR login_role IN
+    SELECT rolname,
+      has_database_privilege(rolname, current_database(), 'CONNECT') AS can_connect,
+      has_schema_privilege(rolname, 'public', 'USAGE') AS can_use_schema
+    FROM pg_roles WHERE rolcanlogin
+  LOOP
+    IF login_role.can_connect THEN
+      EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), login_role.rolname);
+    END IF;
+    IF login_role.can_use_schema THEN
+      EXECUTE format('GRANT USAGE ON SCHEMA public TO %I', login_role.rolname);
+    END IF;
+  END LOOP;
+  EXECUTE format('REVOKE CONNECT ON DATABASE %I FROM PUBLIC', current_database());
+  REVOKE USAGE ON SCHEMA public FROM PUBLIC;
+  GRANT USAGE ON SCHEMA public TO bracketiq_affiliate_gateway;
+  -- Restore conditional grants when the gateway schema predates the roles.
+  IF to_regclass('"AffiliateAgentGatewayJobs"') IS NOT NULL THEN
+    GRANT SELECT, INSERT, UPDATE ON TABLE
+      "AffiliateAgentGatewayJobs", "AffiliateAgentGatewayClaims",
+      "AffiliateAgentGatewayOperationReceipts" TO bracketiq_affiliate_gateway;
+    GRANT SELECT, INSERT ON TABLE
+      "AffiliateAgentGatewayArtifacts", "AffiliateAgentGatewayEvents"
+      TO bracketiq_affiliate_gateway;
   END IF;
   GRANT bracketiq_affiliate_gateway TO bracketiq_app;
 END
