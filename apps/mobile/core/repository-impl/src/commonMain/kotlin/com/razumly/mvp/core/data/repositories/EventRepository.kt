@@ -1509,9 +1509,11 @@ class EventRepository(
             event
         }
         val mergedEvent = editorProjection
-            .withCachedEditorDivisionState(cachedEvent)
+            .withCachedEditorDivisionState(cachedEvent, preserveMatchGraph = preserveEditorOmittedFields)
             .copy(archivedAt = event.archivedAt ?: cachedEvent?.archivedAt)
-        return if (divisionFieldIds != null && event.eventType == EventType.TOURNAMENT) {
+        return if (divisionFieldIds != null && event.eventType == EventType.TOURNAMENT &&
+            !preserveEditorOmittedFields
+        ) {
             mergedEvent.withReconciledEditorGraphFieldAssignments(divisionFieldIds)
         } else {
             mergedEvent
@@ -1558,16 +1560,12 @@ class EventRepository(
                 }
                 throw throwable
             }
-            if (event.eventType == EventType.TOURNAMENT) {
-                databaseService.withTransaction {
-                    roomStore.cacheAndReadEventInTransaction(
-                        event = mergeEditorEventForPersistence(event),
-                        expectedEventId = normalizedEventId,
-                    )
-                }
-            } else {
-                roomStore.cacheAndReadEvent(
-                    event = event,
+            databaseService.withTransaction {
+                roomStore.cacheAndReadEventInTransaction(
+                    event = event.withCachedEditorDivisionState(
+                        roomStore.getEvent(normalizedEventId),
+                        preserveMatchGraph = true,
+                    ),
                     expectedEventId = normalizedEventId,
                 )
             }
@@ -2351,16 +2349,12 @@ class EventRepository(
     }
 
     override suspend fun updateLocalEvent(newEvent: Event): Result<Event> = runCatching {
-        if (newEvent.eventType == EventType.TOURNAMENT) {
-            databaseService.withTransaction {
-                roomStore.cacheAndReadEventInTransaction(
-                    event = mergeEditorEventForPersistence(newEvent),
-                    expectedEventId = newEvent.id,
-                )
-            }
-        } else {
-            roomStore.cacheAndReadEvent(
-                event = newEvent,
+        databaseService.withTransaction {
+            roomStore.cacheAndReadEventInTransaction(
+                event = newEvent.withCachedEditorDivisionState(
+                    roomStore.getEvent(newEvent.id),
+                    preserveMatchGraph = true,
+                ),
                 expectedEventId = newEvent.id,
             )
         }

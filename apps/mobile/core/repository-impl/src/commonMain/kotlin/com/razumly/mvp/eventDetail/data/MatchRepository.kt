@@ -139,6 +139,7 @@ interface IMatchRepository : IMVPRepository {
         matches: List<MatchMVP>,
         creates: List<StagedMatchCreate> = emptyList(),
         deletes: List<String> = emptyList(),
+        confirmation: String? = null,
     ): Result<List<MatchMVP>>
     fun getMatchesOfTournamentFlow(tournamentId: String): Flow<Result<List<MatchWithRelations>>>
     fun getCachedMatchesOfTournamentFlow(tournamentId: String): Flow<Result<List<MatchWithRelations>>> =
@@ -1276,6 +1277,7 @@ class MatchRepository(
         matches: List<MatchMVP>,
         creates: List<StagedMatchCreate>,
         deletes: List<String>,
+        confirmation: String?,
     ): Result<List<MatchMVP>> {
         val normalizedUpdates = matches
             .filter { match -> match.id.isNotBlank() && !match.id.startsWith(CLIENT_MATCH_PREFIX) }
@@ -1343,6 +1345,7 @@ class MatchRepository(
                 }
                 if (normalizedDeletes.isNotEmpty()) {
                     put("deletes", JsonArray(normalizedDeletes.map(::JsonPrimitive)))
+                    confirmation?.let { put("confirmation", JsonPrimitive(it)) }
                 }
             }
             val response = api.patch<JsonObject, BulkMatchesResponseDto>(
@@ -1350,30 +1353,32 @@ class MatchRepository(
                 body = requestBody,
             )
 
-            persistEmbeddedFields(response.matches)
-            val updatedMatches = response.matches.mapNotNull { it.toMatchOrNull() }
-            if (updatedMatches.isNotEmpty()) {
-                upsertRemoteMatchesPreservingPendingIncidents(updatedMatches)
-            }
-            val deletedIds = response.deleted
-                .mapNotNull { deletedId -> normalizeOptionalToken(deletedId) }
-                .ifEmpty { normalizedDeletes }
-            if (deletedIds.isNotEmpty()) {
-                databaseService.getMatchDao.deleteMatchesById(deletedIds)
-            }
+            databaseService.withTransaction {
+                persistEmbeddedFields(response.matches)
+                val updatedMatches = response.matches.mapNotNull { it.toMatchOrNull() }
+                if (updatedMatches.isNotEmpty()) {
+                    upsertRemoteMatchesPreservingPendingIncidents(updatedMatches)
+                }
+                val deletedIds = response.deleted
+                    .mapNotNull { deletedId -> normalizeOptionalToken(deletedId) }
+                    .ifEmpty { normalizedDeletes }
+                if (deletedIds.isNotEmpty()) {
+                    databaseService.getMatchDao.deleteMatchesById(deletedIds)
+                }
 
-            val requestedIds = buildSet {
-                normalizedUpdates.forEach { add(it.id) }
-                response.created.values
-                    .mapNotNull { createdId -> normalizeOptionalToken(createdId) }
-                    .forEach { persistedId -> add(persistedId) }
-                updatedMatches.forEach { match -> add(match.id) }
-            }.toMutableSet().apply { removeAll(deletedIds.toSet()) }
-            if (requestedIds.isEmpty()) {
-                emptyList()
-            } else {
-                databaseService.getMatchDao.getMatchesOfTournament(eventId)
-                    .filter { match -> requestedIds.contains(match.id) }
+                val requestedIds = buildSet {
+                    normalizedUpdates.forEach { add(it.id) }
+                    response.created.values
+                        .mapNotNull { createdId -> normalizeOptionalToken(createdId) }
+                        .forEach { persistedId -> add(persistedId) }
+                    updatedMatches.forEach { match -> add(match.id) }
+                }.toMutableSet().apply { removeAll(deletedIds.toSet()) }
+                if (requestedIds.isEmpty()) {
+                    emptyList()
+                } else {
+                    databaseService.getMatchDao.getMatchesOfTournament(eventId)
+                        .filter { match -> requestedIds.contains(match.id) }
+                }
             }
         }
     }

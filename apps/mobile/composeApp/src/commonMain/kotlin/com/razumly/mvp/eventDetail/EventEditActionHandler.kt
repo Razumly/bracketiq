@@ -51,6 +51,9 @@ import kotlinx.coroutines.flow.asStateFlow
 
 private const val SCHEDULE_MAINTENANCE_UNAVAILABLE_MESSAGE =
     "Schedule maintenance is not available for this event."
+private const val EVENT_TYPE_MATCH_GRAPH_WARNING =
+    "The Match Graph has not been rebuilt and does not conform to the new Event Type. " +
+        "Use Rebuild Schedule with a supported Event Type to replace the graph."
 private const val SCHEDULE_MAINTENANCE_ROLLBACK_REQUIRED_MESSAGE =
     "The Event changes could not be restored. Refresh the editor before continuing."
 
@@ -380,6 +383,7 @@ internal class EventEditActionHandler(
     }
 
     private fun requestEventUpdate(transitionConfirmed: Boolean) {
+        val originalSession = editorSession
         if (maintenanceRequestInFlight || maintenanceRollbackRecoveryRequired) {
             _scheduleMaintenanceReview.value = _scheduleMaintenanceReview.value?.copy(isVisible = true)
             setError("Resolve the pending schedule request before saving Event changes.")
@@ -413,6 +417,10 @@ internal class EventEditActionHandler(
                             add("Event saved, but staff invite delivery needs attention.")
                         }
                         addAll(result.scheduleWarnings)
+                        if (originalSession != null && originalSession.snapshot.scheduleState.matchCount > 0 &&
+                            originalSession.baseline.event.eventType != result.finalEvent.eventType) {
+                            add(EVENT_TYPE_MATCH_GRAPH_WARNING)
+                        }
                     }
                     inviteCoordinator.clearPendingStaffInvites()
                     inviteCoordinator.clearSuggestedUsers()
@@ -433,7 +441,12 @@ internal class EventEditActionHandler(
         val nextLabel = nextType.name
         return EventTypeTransitionConfirmation(
             message = "Changing this event from $previousLabel to $nextLabel saves the event settings and " +
-                "preserves the current schedule. You can request Build or Rebuild explicitly after saving.",
+                "preserves the current schedule. Settings that do not apply to the new Event Type, " +
+                "including pool, playoff, scoring, and Match duration settings, will be cleared. " + if (session.snapshot.scheduleState.matchCount > 0) {
+                    EVENT_TYPE_MATCH_GRAPH_WARNING
+                } else {
+                    "You can request Build explicitly after saving when scheduling is available."
+                },
             actionLabel = "Change type",
             destinationEventType = nextType,
         )

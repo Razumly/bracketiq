@@ -6,6 +6,8 @@ import android.content.Context
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.DatabaseService
+import com.razumly.mvp.core.data.dataTypes.daos.MatchDao
 import com.razumly.mvp.core.data.dataTypes.MatchOfficialAssignment
 import com.razumly.mvp.core.data.dataTypes.OfficialAssignmentHolderType
 import com.razumly.mvp.core.db.MVPDatabaseService
@@ -154,6 +156,63 @@ class MatchRepositoryRoomPersistenceTest {
             assertEquals(1, requests)
             assertEquals(expected, database.getMatchDao.getMatchById(expected.id)?.match)
             assertEquals(listOf(expected), database.getMatchDao.getMatchesOfTournament(expected.eventId))
+        } finally {
+            http.close()
+            database.close()
+        }
+    }
+
+    @Test
+    fun given_confirmed_deletion_when_local_commit_fails_then_room_restores_the_match() = runTest {
+        val expected = roomBackedSchedule()
+        val real = openDatabase()
+        val database = object : DatabaseService by real {
+            override val getMatchDao = object : MatchDao by real.getMatchDao {
+                override suspend fun deleteMatchesById(ids: List<String>) {
+                    real.getMatchDao.deleteMatchesById(ids)
+                    error("Local commit failed")
+                }
+            }
+        }
+        val http = HttpClient(MockEngine {
+            respond("""{"matches":[],"created":{},"deleted":["match-room"]}""",
+                HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+        }) { configureMvpHttpClient() }
+        try {
+            real.getMatchDao.upsertMatch(expected)
+            val repository = MatchRepository(MvpApiClient(http, "http://example.test",
+                MatchRepositoryRoomPersistence_EmptyAuthTokenStore), database, autoSyncOperations = false)
+            val result = repository.updateMatchesBulk(emptyList(), deletes = listOf(expected.id),
+                confirmation = "DELETE_PROTECTED_MATCH_HISTORY")
+            assertTrue(result.isFailure)
+            assertEquals(expected, real.getMatchDao.getMatchById(expected.id)?.match)
+        } finally {
+            http.close()
+            real.close()
+        }
+        val reopened = openDatabase()
+        try {
+            assertEquals(expected, reopened.getMatchDao.getMatchById(expected.id)?.match)
+        } finally {
+            reopened.close()
+        }
+    }
+
+    @Test
+    fun given_protected_deletion_when_server_requires_confirmation_then_room_remains_unchanged() = runTest {
+        val expected = roomBackedSchedule()
+        val database = openDatabase()
+        val http = HttpClient(MockEngine {
+            respond("""{"code":"PROTECTED_MATCH_HISTORY","confirmation":"DELETE_PROTECTED_MATCH_HISTORY","matchIds":["match-room"],"error":"Confirmation required"}""",
+                HttpStatusCode.Conflict, headersOf(HttpHeaders.ContentType, "application/json"))
+        }) { configureMvpHttpClient() }
+        try {
+            database.getMatchDao.upsertMatch(expected)
+            val repository = MatchRepository(MvpApiClient(http, "http://example.test",
+                MatchRepositoryRoomPersistence_EmptyAuthTokenStore), database, autoSyncOperations = false)
+            val result = repository.updateMatchesBulk(emptyList(), deletes = listOf(expected.id))
+            assertTrue(result.isFailure)
+            assertEquals(expected, database.getMatchDao.getMatchById(expected.id)?.match)
         } finally {
             http.close()
             database.close()

@@ -440,69 +440,61 @@ const serializedProposalMatch = (eventId: string) => ({
   official: null,
   field: null,
 });
+const projectionString = (value: unknown) => typeof value === "string" ? value : null;
+const projectionNumber = (value: unknown) => typeof value === "number" ? value : null;
+const projectionArray = (value: unknown) => Array.isArray(value) ? value : [];
+const projectionRecord = (value: unknown) => value && typeof value === "object" && !Array.isArray(value) ? value : null;
 const partialProjectionFor = (match: Record<string, unknown>) => ({
   id: String(match.id),
-  matchId: typeof match.matchId === "number" ? match.matchId : null,
+  matchId: projectionNumber(match.matchId),
   eventId: String(match.eventId),
-  start: typeof match.start === "string" ? match.start : null,
-  end: typeof match.end === "string" ? match.end : null,
+  start: projectionString(match.start),
+  end: projectionString(match.end),
   locked: Boolean(match.locked),
   placementState: match.placementState,
-  phase: typeof match.phase === "string" ? match.phase : null,
+  phase: projectionString(match.phase),
   sourceDivisionId:
-    typeof match.sourceDivisionId === "string" ? match.sourceDivisionId : null,
+    projectionString(match.sourceDivisionId),
   phaseDivisionId:
-    typeof match.phaseDivisionId === "string" ? match.phaseDivisionId : null,
-  division: typeof match.division === "string" ? match.division : null,
-  fieldId: typeof match.fieldId === "string" ? match.fieldId : null,
-  team1Id: typeof match.team1Id === "string" ? match.team1Id : null,
-  team2Id: typeof match.team2Id === "string" ? match.team2Id : null,
-  team1Seed: typeof match.team1Seed === "number" ? match.team1Seed : null,
-  team2Seed: typeof match.team2Seed === "number" ? match.team2Seed : null,
-  status: typeof match.status === "string" ? match.status : null,
+    projectionString(match.phaseDivisionId),
+  division: projectionString(match.division),
+  fieldId: projectionString(match.fieldId),
+  team1Id: projectionString(match.team1Id),
+  team2Id: projectionString(match.team2Id),
+  team1Seed: projectionNumber(match.team1Seed),
+  team2Seed: projectionNumber(match.team2Seed),
+  status: projectionString(match.status),
   resultStatus:
-    typeof match.resultStatus === "string" ? match.resultStatus : null,
-  resultType: typeof match.resultType === "string" ? match.resultType : null,
-  actualStart: typeof match.actualStart === "string" ? match.actualStart : null,
-  actualEnd: typeof match.actualEnd === "string" ? match.actualEnd : null,
+    projectionString(match.resultStatus),
+  resultType: projectionString(match.resultType),
+  actualStart: projectionString(match.actualStart),
+  actualEnd: projectionString(match.actualEnd),
   statusReason:
-    typeof match.statusReason === "string" ? match.statusReason : null,
+    projectionString(match.statusReason),
   winnerEventTeamId:
-    typeof match.winnerEventTeamId === "string"
-      ? match.winnerEventTeamId
-      : null,
+    projectionString(match.winnerEventTeamId),
   matchRulesSnapshot:
-    match.matchRulesSnapshot &&
-    typeof match.matchRulesSnapshot === "object" &&
-    !Array.isArray(match.matchRulesSnapshot)
-      ? match.matchRulesSnapshot
-      : null,
+    projectionRecord(match.matchRulesSnapshot),
   resolvedMatchRules:
-    match.resolvedMatchRules &&
-    typeof match.resolvedMatchRules === "object" &&
-    !Array.isArray(match.resolvedMatchRules)
-      ? match.resolvedMatchRules
-      : null,
-  segments: Array.isArray(match.segments) ? match.segments : [],
-  incidents: Array.isArray(match.incidents) ? match.incidents : [],
-  officialId: typeof match.officialId === "string" ? match.officialId : null,
-  officialIds: Array.isArray(match.officialIds) ? match.officialIds : [],
+    projectionRecord(match.resolvedMatchRules),
+  segments: projectionArray(match.segments),
+  incidents: projectionArray(match.incidents),
+  officialId: projectionString(match.officialId),
+  officialIds: projectionArray(match.officialIds),
   teamOfficialId:
-    typeof match.teamOfficialId === "string" ? match.teamOfficialId : null,
-  team1Points: Array.isArray(match.team1Points) ? match.team1Points : [],
-  team2Points: Array.isArray(match.team2Points) ? match.team2Points : [],
+    projectionString(match.teamOfficialId),
+  team1Points: projectionArray(match.team1Points),
+  team2Points: projectionArray(match.team2Points),
   losersBracket: Boolean(match.losersBracket),
   winnerNextMatchId:
-    typeof match.winnerNextMatchId === "string"
-      ? match.winnerNextMatchId
-      : null,
+    projectionString(match.winnerNextMatchId),
   loserNextMatchId:
-    typeof match.loserNextMatchId === "string" ? match.loserNextMatchId : null,
+    projectionString(match.loserNextMatchId),
   previousLeftId:
-    typeof match.previousLeftId === "string" ? match.previousLeftId : null,
+    projectionString(match.previousLeftId),
   previousRightId:
-    typeof match.previousRightId === "string" ? match.previousRightId : null,
-  side: typeof match.side === "string" ? match.side : null,
+    projectionString(match.previousRightId),
+  side: projectionString(match.side),
   officialCheckedIn: Boolean(match.officialCheckedIn),
 });
 
@@ -2105,56 +2097,24 @@ describe("saveEventEditor", () => {
     );
     expect(operations.delete).not.toHaveBeenCalled();
   });
-  it("rebuilds the schedule for an event-type transition inside the save transaction", async () => {
+  it("rejects legacy reconciliation before any Event Type save writes", async () => {
     const tx = txFor();
     const current = snapshot();
     current.draft = { ...current.draft, basics: { eventType: "EVENT" } };
-    current.scheduleState = {
-      ...current.scheduleState,
-      matchCount: 0,
-      revision: "schedule_revision_event",
-    };
     (buildEventEditorSnapshot as jest.Mock).mockResolvedValue(current);
-    (loadEventEditorSnapshot as jest.Mock).mockResolvedValue(current);
-    (upsertEventFromPayload as jest.Mock).mockResolvedValue("event_1");
-    mockedReconcileEventSchedule.mockResolvedValue({
-      event: { id: "event_1", eventType: "LEAGUE" },
-      matches: [{ id: "match_1", eventId: "event_1", fieldId: null }],
-      warnings: [],
-      previousMatchCount: 0,
-      notification: null,
-    });
-
     const command = commandFor([]);
     command.draft.basics.eventType = "LEAGUE";
-    command.scheduleTransition = {
-      mode: "RECONCILE",
-      expectedScheduleRevision: "schedule_revision_event",
-    };
-    const result = await saveEventEditor(
-      { userId: "host_1" },
-      command,
-      "event_1",
-    );
-
-    expect(mockedReconcileEventSchedule).toHaveBeenCalledWith(
-      expect.objectContaining({
-        tx,
-        eventId: "event_1",
-        mode: "BUILD",
-        includePlaceholderTeams: true,
-      }),
-    );
-    expect(result.scheduleOutcome).toEqual(
-      expect.objectContaining({
-        status: "BUILT",
-        matchCount: 1,
-      }),
-    );
+    command.scheduleTransition = { mode: "RECONCILE", expectedScheduleRevision: current.scheduleState.revision };
+    await expect(saveEventEditor({ userId: "host_1" }, command, "event_1"))
+      .rejects.toMatchObject({ name: "EditorScheduleIntentError" });
+    expect(upsertEventFromPayload).not.toHaveBeenCalled();
+    expect(mockedReconcileEventSchedule).not.toHaveBeenCalled();
+    expect(tx.registrationQuestions.create).not.toHaveBeenCalled();
   });
-  it("preserves the existing schedule for an event-type transition with PRESERVE", async () => {
+  it.each(["EVENT", "WEEKLY_EVENT", "LEAGUE", "TOURNAMENT", "TRYOUT"])("preserves the Match Graph and response compatibility when changing to %s", async (eventType) => {
     const tx = txFor();
     const current = snapshot();
+    current.draft = { ...current.draft, basics: { ...current.draft.basics, eventType: eventType === "LEAGUE" ? "TOURNAMENT" : "LEAGUE" } };
     current.scheduleState = {
       ...current.scheduleState,
       matchCount: 3,
@@ -2165,7 +2125,18 @@ describe("saveEventEditor", () => {
     (upsertEventFromPayload as jest.Mock).mockResolvedValue("event_1");
 
     const command = commandFor([]);
-    command.draft.basics.eventType = "LEAGUE";
+    command.draft.basics.eventType = eventType;
+    command.draft.participation = { ...createDraft.participation, maxParticipants: 4, teamSignup: eventType !== "TRYOUT" };
+    if (eventType === "TRYOUT") {
+      command.draft.basics = { ...command.draft.basics, organizationId: "org-tryout", start: "2026-08-24T09:00:00.000Z", timeZone: "UTC" };
+      command.draft.schedule = { mode: "FIXED_END", endConstraint: "2026-08-24T17:00:00.000Z" };
+      command.draft.resources = {
+        fieldIds: ["field-tryout"], timeSlotIds: ["slot-tryout"],
+        fields: [{ id: "field-tryout", organizationId: "org-tryout" }],
+        timeSlots: [{ id: "slot-tryout", repeating: false, startDate: "2026-08-24", endDate: "2026-08-24", startTimeMinutes: 540, endTimeMinutes: 1020, timeZone: "UTC", scheduledFieldIds: ["field-tryout"] }],
+      };
+      tx.fields.findMany.mockResolvedValue([{ id: "field-tryout", organizationId: "org-tryout" }]);
+    }
     command.scheduleTransition = { mode: "PRESERVE" };
 
     const result = await saveEventEditor(
@@ -2179,6 +2150,7 @@ describe("saveEventEditor", () => {
       expect.objectContaining({
         status: "NOT_REQUESTED",
         matchCount: 3,
+        warnings: [],
       }),
     );
     expect(upsertEventFromPayload).toHaveBeenCalledWith(
@@ -2187,6 +2159,7 @@ describe("saveEventEditor", () => {
       expect.objectContaining({
         preserveOperationalState: true,
         preserveStaffState: true,
+        preserveMatchGraph: true,
       }),
     );
   });
@@ -2294,10 +2267,7 @@ describe("saveEventEditor", () => {
             fieldIds: ["field-assigned"],
           },
       };
-      command.scheduleTransition = {
-        mode: "RECONCILE",
-        expectedScheduleRevision: "schedule_revision_transition",
-      };
+      command.scheduleTransition = { mode: "PRESERVE" };
       if (eventType === "TRYOUT") {
         tx.fields.findMany.mockResolvedValue([
           { id: "field-tryout", organizationId: "org-tryout" },
@@ -2306,13 +2276,7 @@ describe("saveEventEditor", () => {
 
       await saveEventEditor({ userId: "host_1" }, command, "event_1");
 
-      expect(mockedReconcileEventSchedule).toHaveBeenCalledWith(
-        expect.objectContaining({
-          tx,
-          eventId: "event_1",
-          mode: "DELETE",
-        }),
-      );
+      expect(mockedReconcileEventSchedule).not.toHaveBeenCalled();
       expect(upsertEventFromPayload).toHaveBeenCalledTimes(1);
       const [payload] = (upsertEventFromPayload as jest.Mock).mock.calls[0];
       expect(payload.divisionDetails).toEqual([
@@ -2439,54 +2403,7 @@ describe("saveEventEditor", () => {
     expect(mockedReconcileEventSchedule).not.toHaveBeenCalled();
   });
 
-  it("deletes the schedule for a transition to a non-schedulable event type", async () => {
-    const tx = txFor();
-    const current = snapshot();
-    current.draft = { ...current.draft, basics: { eventType: "LEAGUE" } };
-    current.scheduleState = {
-      ...current.scheduleState,
-      matchCount: 3,
-      revision: "schedule_revision_league",
-    };
-    (buildEventEditorSnapshot as jest.Mock).mockResolvedValue(current);
-    (loadEventEditorSnapshot as jest.Mock).mockResolvedValue(current);
-    (upsertEventFromPayload as jest.Mock).mockResolvedValue("event_1");
-    mockedReconcileEventSchedule.mockResolvedValue({
-      event: { id: "event_1", eventType: "EVENT" },
-      matches: [],
-      warnings: [],
-      previousMatchCount: 3,
-      notification: null,
-    });
-
-    const command = commandFor([]);
-    command.draft.basics.eventType = "EVENT";
-    command.scheduleTransition = {
-      mode: "RECONCILE",
-      expectedScheduleRevision: "schedule_revision_league",
-    };
-    const result = await saveEventEditor(
-      { userId: "host_1" },
-      command,
-      "event_1",
-    );
-
-    expect(mockedReconcileEventSchedule).toHaveBeenCalledWith(
-      expect.objectContaining({
-        tx,
-        eventId: "event_1",
-        mode: "DELETE",
-      }),
-    );
-    expect(result.scheduleOutcome).toEqual({
-      status: "DELETED",
-      matchCount: 0,
-      matches: [],
-      warnings: [],
-    });
-  });
-
-  it("rejects a stale schedule revision before persisting an event-type transition", async () => {
+  it("rejects legacy reconciliation even with a stale schedule revision", async () => {
     const tx = txFor();
     const current = snapshot();
     current.draft = { ...current.draft, basics: { eventType: "EVENT" } };
@@ -2506,7 +2423,7 @@ describe("saveEventEditor", () => {
     await expect(
       saveEventEditor({ userId: "host_1" }, command, "event_1"),
     ).rejects.toMatchObject({
-      code: "EDITOR_SCHEDULE_REVISION_CONFLICT",
+      name: "EditorScheduleIntentError",
     });
 
     expect(upsertEventFromPayload).not.toHaveBeenCalled();

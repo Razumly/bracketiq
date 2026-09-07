@@ -1,5 +1,6 @@
 "use client";
 
+import { EVENT_TYPE_MATCH_GRAPH_WARNING } from "@/lib/eventTypeTransitionWarning";
 import {
   useCallback,
   useEffect,
@@ -5761,6 +5762,10 @@ function EventScheduleContent() {
       const scheduleWarnings = result.scheduleOutcome.warnings
         .map((warning) => warning.message)
         .filter((message) => message.trim().length > 0);
+      if (currentSnapshot && result.scheduleOutcome.matchCount > 0 &&
+        currentSnapshot.draft.basics.eventType !== result.snapshot.draft.basics.eventType) {
+        scheduleWarnings.push(EVENT_TYPE_MATCH_GRAPH_WARNING);
+      }
       if (scheduleWarnings.length) {
         setWarningMessage((current) =>
           current
@@ -6301,11 +6306,11 @@ function EventScheduleContent() {
           message:
             matchCount > 0
               ? nextSupportsSchedule
-                ? `Changing this event from ${previousLabel} to ${nextLabel} will save the new event type while preserving its ${matchCount} scheduled matches. Use the explicit Rebuild operation after saving when you need new placements.`
-                : `Changing this event from ${previousLabel} to ${nextLabel} will save the new event type while preserving its ${matchCount} scheduled matches. This change will not delete or regenerate the existing Match Graph.`
+                ? `Changing this event from ${previousLabel} to ${nextLabel} will save the new event type while preserving its ${matchCount} scheduled matches. Pool, playoff, scoring, and Match duration settings that do not apply to the new Event Type will be cleared. The Match Graph has not been rebuilt and does not conform to the new Event Type. Use Rebuild Schedule to replace the graph.`
+                : `Changing this event from ${previousLabel} to ${nextLabel} will save the new event type while preserving its ${matchCount} scheduled matches. Pool, playoff, scoring, and Match duration settings that do not apply to the new Event Type will be cleared. The Match Graph has not been rebuilt and does not conform to the new Event Type. Select an Event Type that supports Rebuild Schedule before replacing the graph.`
               : nextSupportsSchedule
-                ? `Changing this event from ${previousLabel} to ${nextLabel} will save the new event type without building a schedule. Use an explicit Build or Rebuild operation after saving when scheduling is available.`
-                : `Changing this event from ${previousLabel} to ${nextLabel} will save the new event type without creating a schedule.`,
+                ? `Changing this event from ${previousLabel} to ${nextLabel} will save the new event type without building a schedule. Pool, playoff, scoring, and Match duration settings that do not apply to the new Event Type will be cleared. Use an explicit Build or Rebuild operation after saving when scheduling is available.`
+                : `Changing this event from ${previousLabel} to ${nextLabel} will save the new event type without creating a schedule. Pool, playoff, scoring, and Match duration settings that do not apply to the new Event Type will be cleared.`,
           actionLabel: matchCount > 0
             ? "Change type & preserve schedule"
             : "Change type",
@@ -7937,6 +7942,20 @@ function EventScheduleContent() {
         return;
       }
 
+      const confirmOfficialCheckIn = async (candidate: Match): Promise<Match> => {
+        if (!window.confirm("Would you like to check in as official?")) return candidate;
+        return updateMatchOfficialState(candidate, { officialCheckedIn: true },
+          "Failed to check in as official. Please try again.");
+      };
+      const showRosterAfterCheckIn = (
+        checkedIn: boolean, candidate: Match,
+        team: NonNullable<ReturnType<typeof findUserManagedMatchTeam>>,
+      ): boolean => {
+        if (!checkedIn || activeEvent?.allowMatchRosterEdits !== true) return false;
+        setRosterModalMatch(candidate);
+        setRosterModalTeam(team);
+        return true;
+      };
       let modalMatch =
         activeMatches.find((candidate) => candidate.$id === match.$id) ?? match;
       const participantsReady = hasResolvedMatchParticipants(modalMatch);
@@ -7968,16 +7987,7 @@ function EventScheduleContent() {
         const officialWindowOpen = isOfficialMatchWindowOpen(modalMatch.start);
 
         if (!checkedIn && userIsCurrentOfficial && officialWindowOpen) {
-          const confirmCheckIn = window.confirm(
-            "Would you like to check in as official?",
-          );
-          if (confirmCheckIn) {
-            modalMatch = await updateMatchOfficialState(
-              modalMatch,
-              { officialCheckedIn: true },
-              "Failed to check in as official. Please try again.",
-            );
-          }
+          modalMatch = await confirmOfficialCheckIn(modalMatch);
         } else {
           const canSwapIntoRef =
             !checkedIn &&
@@ -8000,16 +8010,7 @@ function EventScheduleContent() {
                 },
                 "Failed to swap official for this match. Please try again.",
               );
-              const confirmCheckIn = window.confirm(
-                "Would you like to check in as official?",
-              );
-              if (confirmCheckIn) {
-                modalMatch = await updateMatchOfficialState(
-                  modalMatch,
-                  { officialCheckedIn: true },
-                  "Failed to check in as official. Please try again.",
-                );
-              }
+              modalMatch = await confirmOfficialCheckIn(modalMatch);
             }
           }
         }
@@ -8039,11 +8040,7 @@ function EventScheduleContent() {
                 managedMatchTeam,
                 modalMatch,
               );
-              if (checkedIn && activeEvent.allowMatchRosterEdits === true) {
-                setRosterModalMatch(modalMatch);
-                setRosterModalTeam(managedMatchTeam);
-                openedRosterAfterCheckIn = true;
-              }
+              openedRosterAfterCheckIn = showRosterAfterCheckIn(checkedIn, modalMatch, managedMatchTeam);
             }
           }
         }

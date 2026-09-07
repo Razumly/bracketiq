@@ -1066,14 +1066,18 @@ class EventEditActionHandlerTest {
         )
         val repository = HandlerEventRepository(
             editorSessions = ArrayDeque(listOf(session)),
-            saveOutcomes = ArrayDeque(),
+            saveOutcomes = ArrayDeque(listOf(saveOutcome(editorSession(
+                event = event.copy(eventType = EventType.TOURNAMENT),
+                operations = emptyList(),
+            )))),
             proposalResponses = ArrayDeque(),
         )
+        val notices = mutableListOf<String>()
         val handler = createHandler(
             scope = this,
             event = event,
             repository = repository,
-            errors = mutableListOf(),
+            errors = notices,
         )
 
         handler.startEditingEvent()
@@ -1084,8 +1088,17 @@ class EventEditActionHandlerTest {
         val confirmation = assertNotNull(handler.eventTypeTransitionConfirmation.value)
         assertEquals("Change type", confirmation.actionLabel)
         assertTrue(confirmation.message.contains("preserves the current schedule"))
-        assertTrue(confirmation.message.contains("Build or Rebuild explicitly"))
+        assertTrue(confirmation.message.contains("has not been rebuilt and does not conform"))
+        assertTrue(confirmation.message.contains("pool, playoff, scoring, and Match duration settings"))
+        assertTrue(confirmation.message.contains("Use Rebuild Schedule"))
         assertEquals(emptyList(), repository.saveCommands)
+        handler.dismissEventTypeTransitionConfirmation()
+        assertEquals(emptyList(), repository.saveCommands)
+        handler.updateEvent()
+        handler.confirmEventTypeTransition()
+        advanceUntilIdle()
+        assertEquals(1, repository.saveCommands.size)
+        assertTrue(notices.last().contains("has not been rebuilt and does not conform"))
     }
 
     @Test

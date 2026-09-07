@@ -206,11 +206,14 @@ internal class EventEditDraftCoordinator(
                 }
             }
         val clearScheduleConstructionState =
+            previous.eventType == updated.eventType &&
             previous.isAutomatedScheduling &&
                 !updated.isAutomatedScheduling &&
                 previous.eventType.isScheduleConstructionAutomationType()
         val transitionedTimeSlots = if (clearScheduleConstructionState) {
             _editableLeagueTimeSlots.value.filter { slot -> slot.isRentalBacked() }
+        } else if (previous.eventType != updated.eventType) {
+            _editableLeagueTimeSlots.value
         } else {
             syncEditableLeagueSlotBoundaries(
                 previousEvent = previous,

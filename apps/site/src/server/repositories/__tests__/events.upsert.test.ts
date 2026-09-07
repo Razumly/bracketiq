@@ -6,6 +6,7 @@ jest.mock("@/lib/prisma", () => ({
 
 import {
   persistScheduledRosterTeams,
+  syncEventDivisions,
   upsertEventFromPayload,
 } from "@/server/repositories/events";
 import { buildEventDivisionId } from "@/lib/divisionTypes";
@@ -159,6 +160,30 @@ const baseEventPayload = () => ({
 const divisionId = (token: string) => buildEventDivisionId("event_1", token);
 
 describe("upsertEventFromPayload", () => {
+  it.each(["EVENT", "WEEKLY_EVENT", "LEAGUE", "TOURNAMENT", "TRYOUT"])(
+    "preserves graph-owned phases and roster links when saving %s",
+    async (eventType) => {
+      const client = createMockClient();
+      const entryId = divisionId("open");
+      const phaseId = `${entryId}__phase__league`;
+      client.divisions.findMany.mockResolvedValue([
+        { id: entryId, key: "open", name: "Open", kind: "LEAGUE", role: "ENTRY", fieldIds: [], teamIds: [] },
+        { id: phaseId, key: "open-phase", name: "League phase", kind: "LEAGUE", role: "PHASE", phase: "LEAGUE", isSystemGenerated: true, fieldIds: [], teamIds: ["team_1"] },
+      ]);
+      await syncEventDivisions({
+        eventId: "event_1", eventType, divisionIds: [entryId], fieldIds: [],
+        preserveMatchGraph: true,
+        divisionDetails: [{ id: entryId, key: "open", name: "Open", maxParticipants: 4 }],
+      }, client as any);
+      expect(client.matches.deleteMany).not.toHaveBeenCalled();
+      expect(client.divisions.deleteMany).not.toHaveBeenCalled();
+      expect(client.divisions.upsert.mock.calls.some(([args]) => args.where.id === phaseId)).toBe(false);
+      expect(client.eventDivisionPhaseSources.deleteMany).not.toHaveBeenCalled();
+      expect(client.eventDivisionPhaseSources.upsert).not.toHaveBeenCalled();
+      expect(client.eventDivisionPhaseParticipants.deleteMany).not.toHaveBeenCalled();
+      expect(client.eventDivisionPhaseParticipants.upsert).not.toHaveBeenCalled();
+    },
+  );
   it.each([
     [null, "USER_CREATED"],
     ["organization_1", "ORGANIZATION_CREATED"],
@@ -1235,39 +1260,39 @@ describe("upsertEventFromPayload", () => {
     const openDivisionUpsertArgs = client.divisions.upsert.mock.calls.find(
       ([args]) => args.where.id === targetOpenDivisionId,
     )?.[0];
-    expect(openDivisionUpsertArgs?.create.divisionTypeId).toBe(
+    expect(openDivisionUpsertArgs.create.divisionTypeId).toBe(
       "skill_open_age_18plus",
     );
-    expect(openDivisionUpsertArgs?.create).not.toHaveProperty(
+    expect(openDivisionUpsertArgs.create).not.toHaveProperty(
       "divisionTypeName",
     );
-    expect(openDivisionUpsertArgs?.update).not.toHaveProperty(
+    expect(openDivisionUpsertArgs.update).not.toHaveProperty(
       "divisionTypeName",
     );
-    expect(openDivisionUpsertArgs?.create.ageCutoffDate).toEqual(
+    expect(openDivisionUpsertArgs.create.ageCutoffDate).toEqual(
       new Date("2026-08-01T19:00:00.000Z"),
     );
-    expect(openDivisionUpsertArgs?.create.ageCutoffLabel).toBe(
+    expect(openDivisionUpsertArgs.create.ageCutoffLabel).toBe(
       "Age 18+ as of 08/01/2026",
     );
-    expect(openDivisionUpsertArgs?.create.ageCutoffSource).toBe(
+    expect(openDivisionUpsertArgs.create.ageCutoffSource).toBe(
       "US Youth Soccer seasonal-year age grouping guidance.",
     );
-    expect(openDivisionUpsertArgs?.create).not.toHaveProperty("minAge");
-    expect(openDivisionUpsertArgs?.create).not.toHaveProperty("maxAge");
-    expect(openDivisionUpsertArgs?.update.divisionTypeId).toBe(
+    expect(openDivisionUpsertArgs.create).not.toHaveProperty("minAge");
+    expect(openDivisionUpsertArgs.create).not.toHaveProperty("maxAge");
+    expect(openDivisionUpsertArgs.update.divisionTypeId).toBe(
       "skill_open_age_18plus",
     );
-    expect(openDivisionUpsertArgs?.update.ageCutoffDate).toEqual(
+    expect(openDivisionUpsertArgs.update.ageCutoffDate).toEqual(
       new Date("2026-08-01T19:00:00.000Z"),
     );
-    expect(openDivisionUpsertArgs?.update).not.toHaveProperty("minAge");
-    expect(openDivisionUpsertArgs?.update).not.toHaveProperty("maxAge");
-    expect(openDivisionUpsertArgs?.create.playoffPlacementDivisionIds).toEqual([
+    expect(openDivisionUpsertArgs.update).not.toHaveProperty("minAge");
+    expect(openDivisionUpsertArgs.update).not.toHaveProperty("maxAge");
+    expect(openDivisionUpsertArgs.create.playoffPlacementDivisionIds).toEqual([
       targetAdvancedDivisionId,
       "",
     ]);
-    expect(openDivisionUpsertArgs?.update.playoffPlacementDivisionIds).toEqual([
+    expect(openDivisionUpsertArgs.update.playoffPlacementDivisionIds).toEqual([
       targetAdvancedDivisionId,
       "",
     ]);
@@ -1704,19 +1729,19 @@ describe("upsertEventFromPayload", () => {
     const playoffUpsert = client.divisions.upsert.mock.calls
       .map(([args]) => args)
       .find((args) => args.where.id === playoffDivisionId);
-    expect(playoffUpsert?.update.standingsOverrides).toBeNull();
-    expect(playoffUpsert?.update.playoffDoubleElimination).toBeNull();
-    expect(playoffUpsert?.update.playoffWinnerSetCount).toBeNull();
-    expect(playoffUpsert?.update.playoffLoserSetCount).toBeNull();
-    expect(playoffUpsert?.update.playoffWinnerBracketPointsToVictory).toEqual(
+    expect(playoffUpsert.update.standingsOverrides).toBeNull();
+    expect(playoffUpsert.update.playoffDoubleElimination).toBeNull();
+    expect(playoffUpsert.update.playoffWinnerSetCount).toBeNull();
+    expect(playoffUpsert.update.playoffLoserSetCount).toBeNull();
+    expect(playoffUpsert.update.playoffWinnerBracketPointsToVictory).toEqual(
       [],
     );
-    expect(playoffUpsert?.update.playoffLoserBracketPointsToVictory).toEqual([]);
-    expect(playoffUpsert?.update.playoffPrize).toBeNull();
-    expect(playoffUpsert?.update.playoffFieldCount).toBeNull();
-    expect(playoffUpsert?.update.playoffRestTimeMinutes).toBeNull();
-    expect(playoffUpsert?.update.playoffMatchDurationMinutes).toBeNull();
-    expect(playoffUpsert?.update.playoffSetDurationMinutes).toBeNull();
+    expect(playoffUpsert.update.playoffLoserBracketPointsToVictory).toEqual([]);
+    expect(playoffUpsert.update.playoffPrize).toBeNull();
+    expect(playoffUpsert.update.playoffFieldCount).toBeNull();
+    expect(playoffUpsert.update.playoffRestTimeMinutes).toBeNull();
+    expect(playoffUpsert.update.playoffMatchDurationMinutes).toBeNull();
+    expect(playoffUpsert.update.playoffSetDurationMinutes).toBeNull();
   });
   it("preserves an existing playoff config when a partial update omits it", async () => {
     const client = createMockClient();

@@ -22,7 +22,7 @@ id: divisionId, key: 'open', name: 'Open', kind: eventType,
 
 async function main() {
   const issue = process.env.MVP_CONTRACT_ISSUE ?? '48';
-  if (!['48', '49'].includes(issue)) throw new Error('Use issue 48 or 49.');
+  if (!['48', '49', '51'].includes(issue)) throw new Error('Use issue 48, 49, or 51.');
   const database = new URL(process.env.DATABASE_URL ?? '');
   if (!['localhost', '127.0.0.1'].includes(database.hostname)
     || !database.pathname.startsWith(`/bracketiq_e2e_${issue}_`)) {
@@ -32,6 +32,7 @@ async function main() {
   const organizationId = `issue-${issue}-organization`;
   const eventTypes = ['EVENT', 'WEEKLY_EVENT', 'LEAGUE', 'TOURNAMENT', 'TRYOUT'] as const;
   const fixtureRun = Date.now().toString(36);
+  const protectedEventType = issue === '51' ? 'TOURNAMENT' : null;
   const eventIds = eventTypes.map((type) => `issue-${issue}-${fixtureRun}-${type.toLowerCase()}`);
   const unclaimedEventId = `issue-${issue}-${fixtureRun}-unclaimed`;
   await prisma.$transaction(async (tx) => {
@@ -111,6 +112,10 @@ async function main() {
       }
       if (competition) {
         await persistCreateOnlyMatchGraph({ tx, eventId: id, includePlaceholderTeams: true });
+      }
+      if (eventType === protectedEventType) {
+        const match = await tx.matches.findFirstOrThrow({ where: { eventId: id } });
+        await tx.matches.update({ where: { id: match.id }, data: { status: 'IN_PROGRESS', actualStart: new Date('2027-01-04T08:00:00Z') } });
       }
     }
     if (issue === '49') {

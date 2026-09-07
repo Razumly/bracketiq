@@ -238,6 +238,37 @@ class EventEditDraftCoordinatorTest {
     }
 
     @Test
+    fun given_automated_competition_when_event_type_changes_then_all_time_slots_are_preserved() {
+        for (previousType in listOf(EventType.LEAGUE, EventType.TOURNAMENT)) {
+            for (nextType in listOf(EventType.EVENT, EventType.WEEKLY_EVENT, EventType.TRYOUT)) {
+                val manualSlot = slot("manual-slot")
+                val rentalSlot = slot("rental-slot").copy(
+                    sourceType = "RENTAL_BOOKING",
+                    rentalBookingId = "booking-1",
+                    rentalLocked = true,
+                )
+                val slots = listOf(manualSlot, rentalSlot)
+                val event = leagueEvent(eventType = previousType).copy(
+                    timeSlotIds = slots.map(TimeSlot::id),
+                )
+                val coordinator = EventEditDraftCoordinator(event, canEditInitial = true)
+                coordinator.seedDraftForEditing(
+                    event = event,
+                    sourceFields = listOf(field(id = "field-1")),
+                    timeSlots = slots,
+                    leagueScoringConfig = LeagueScoringConfigDTO(),
+                )
+
+                coordinator.updateEditedEvent { it.copy(eventType = nextType) }
+
+                assertEquals(nextType, coordinator.editedEvent.value.eventType)
+                assertEquals(slots, coordinator.editableLeagueTimeSlots.value)
+                assertEquals(slots.map(TimeSlot::id), coordinator.editedEvent.value.timeSlotIds)
+            }
+        }
+    }
+
+    @Test
     fun given_automated_scheduling_lock_when_updated_then_current_value_is_preserved() {
         val coordinator = EventEditDraftCoordinator(
             initialEvent = leagueEvent().copy(
