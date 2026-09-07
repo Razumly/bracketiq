@@ -10,12 +10,17 @@ Issue #53 requires a shared field inventory and complete wire fixtures. A wire f
 
 - [x] (2026-09-07) Read issue #53 and its comments. Confirm that all blockers are closed. Claim the issue and set its project status to In progress.
 - [x] (2026-09-07) Audit the existing League and Tournament fixtures, strict site schemas, and mobile DTOs.
-- [x] (2026-09-07) Add the 301-leaf command inventory. Add 1,436 source property classifications across 121 declarations. Prove addition, removal, and single-command draft drift detection.
-- [x] (2026-09-07) Add eight complete context fixtures, nine command envelopes, and thirteen typed results. Pass the web and mobile round trips and the client-to-site parser check.
+- [x] (2026-09-07) Add the 301-leaf command inventory. Add 1,669 source property classifications across 129 declarations. Prove addition, removal, and single-command draft drift detection.
+- [x] (2026-09-07) Add eight complete context fixtures, nine command envelopes, and eighteen typed results. Pass the web and mobile round trips and the client-to-site parser check.
 - [x] (2026-09-07) Add 26 pairwise cases and nine boundary cases. Exclude unsupported Tryout officiating combinations. Pass 113 focused site checks, including the existing save and revision failure paths.
 - [x] (2026-09-07) Fix canonical Tryout assistant-host invitation loss. Fix fractional timed Match duration loss in the web adapter. Pass both regression checks.
 - [x] (2026-09-07) Pass the focused site coverage command: 297 tests across eight suites. The source inventory then gained four UI state declarations.
 - [x] (2026-09-07) Apply 224 migrations to the isolated `bracketiq_e2e_53_563b` database. Confirm that the schema is current. Run six database checks: five pass and one existing Playoff-count assertion fails.
+- [x] (2026-09-07) Fix review findings for result branches and nested graph DTOs. Add Create revision fields and canonical graph retention. Pass 57 site result and identity checks. Pass TypeScript and the full-file lint check for the issue slice.
+- [x] (2026-09-07) Add a Create acceptance Room regression for nested incident metadata. Use the existing canonical persistence conversion. Keep legacy Create graph decoding compatible.
+- [x] (2026-09-07) Complete both independent review axes. Standards: no remaining findings. Spec: no remaining actionable findings.
+- [x] (2026-09-07) Pass the full Android checks with one Gradle worker: 2,016 tests pass and 17 are skipped. Android lint passes. The Create metadata Room regression and the existing Reflow client-to-site check pass.
+- [x] (2026-09-07) Pass the final `npx tsc --noEmit` check. Pass full-file lint for all nine changed site files against the issue base commit.
 - [ ] Run the full checks, review both axes, commit, and update GitHub.
 
 ## Context Boundary
@@ -58,6 +63,12 @@ The web adapter changed a timed Match duration from 42.5 minutes to 42 minutes. 
 
 The database suite passed five of six checks. The same-type PRESERVE test still expects every stored Playoff count to equal four. It failed before the site production adapter changed in this issue. The proposal rollback and create retry checks passed. The failure is separate from the field coverage work.
 
+The Spec review found missing Create and maintenance result fixtures. The added Create result fixture exposed four missing mobile fields: `createOperationId`, `editorRevision`, `staffRevision`, and `scheduleRevision`. They now remain in the result DTO. These fields already exist in the site contract. No field became required on mobile.
+
+Create proposal graphs now retain the canonical graph through the existing maintenance graph codec. Create persistence uses that canonical graph. The legacy Match conversion could discard incidents with object or array metadata. The shared fixture now contains such an incident. The Room regression checks its stored metadata. Existing legacy Create graph payloads keep their prior decoder when the canonical `officialSchedulingMode` field is absent.
+
+Concurrent builds in another checkout increased memory pressure. An earlier Reflow check timed out while starting its site parser. The serial mobile run passed that check. Use `--max-workers=1` on this host when other builds are active. The final command was `./gradlew.bat testDebugUnitTest :composeApp:lintDebug --continue --max-workers=1`.
+
 ## Decision Log
 
 Use the schema, encoder, and save/proposal boundaries named by issue #53 as the test seams. The user's issue instruction already authorizes these checks. Use test-driven development at these seams without an extra scope confirmation. Date: 2026-09-07.
@@ -66,7 +77,7 @@ Keep the inventory independent from production schemas. Tests may enumerate actu
 
 ## Outcomes & Retrospective
 
-Implementation is ready for full validation and independent review. The work includes two data-loss fixes found by the new guards. No HTTP field or contract version changed. No Room entity changed. No new application runtime was started. Native iOS execution remains in the macOS CI job because this host runs Windows.
+Final validation is in progress. The guards and review exposed losses in Tryout invitations, fractional timed Match durations, Create revision fields, and Create graph metadata. No site HTTP field or contract version changed. No Room entity changed. No new application runtime was started. Native iOS execution remains in the macOS CI job because this host runs Windows.
 
 ## Artifacts and Notes
 

@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import * as contract from '@/contracts/eventEditor';
 
+type Schema = z.core.$ZodType;
+
 // Draft leaves have one classification shared by all command envelopes.
 export const commandSchemas = {
   draft: contract.eventEditorDraftSchema,
@@ -23,6 +25,11 @@ export const resultSchemas: Record<string, z.ZodType> = {
   error: contract.eventEditorErrorSchema,
   schedule: contract.eventEditorScheduleOutcomeSchema,
   maintenanceRejected: contract.eventEditorMaintenanceRejectedResultSchema,
+  created: contract.eventEditorCreateResultSchema,
+  createProposal: contract.eventEditorCreateProposalSchema,
+  maintenanceProposal: contract.eventEditorMaintenanceProposalSchema,
+  maintenanceAccepted: contract.eventEditorMaintenanceAcceptedResultSchema,
+  partialAccepted: contract.eventEditorAcceptPartialProposalResultSchema,
 };
 
 export const protocolSchemas = z.object({
@@ -56,37 +63,37 @@ export const valuesAtPath = (value: unknown, path: string): unknown[] => {
     if (token === '*') return entry && typeof entry === 'object' ? Object.values(entry) : [];
     if (entry === null || typeof entry !== 'object') return [];
     const key = token.startsWith('[') ? token.slice(1, -1) : token;
-    return Object.hasOwn(entry, key) ? [(entry as Record<string, unknown>)[key]] : [];
+    return Object.prototype.hasOwnProperty.call(entry, key) ? [(entry as Record<string, unknown>)[key]] : [];
   }), [value]);
 };
 
-const wrappedSchema = (schema: z.ZodType): z.ZodType | undefined => {
+const wrappedSchema = (schema: Schema): Schema | undefined => {
   if (schema instanceof z.ZodPipe) {
     return schema.in instanceof z.ZodTransform ? schema.out : schema.in;
   }
   if (schema instanceof z.ZodOptional || schema instanceof z.ZodNullable || schema instanceof z.ZodDefault) {
-    return schema.unwrap() as z.ZodType;
+    return schema.unwrap();
   }
   return undefined;
 };
 
-const collectionLeaves = (schema: z.ZodType, path: string): string[] | undefined => {
+const collectionLeaves = (schema: Schema, path: string): string[] | undefined => {
   if (schema instanceof z.ZodArray) return schemaLeaves(schema.element, `${path}[]`);
   if (schema instanceof z.ZodRecord) return schemaLeaves(schema.valueType, `${path}.*`);
   if (schema instanceof z.ZodTuple) {
-    return schema.def.items.flatMap((item: z.ZodType, index: number) => schemaLeaves(item, `${path}[${index}]`));
+    return schema.def.items.flatMap((item, index) => schemaLeaves(item, `${path}[${index}]`));
   }
   return undefined;
 };
 
-export const schemaLeaves = (schema: z.ZodType, path: string): string[] => {
+export const schemaLeaves = (schema: Schema, path: string): string[] => {
   const wrapped = wrappedSchema(schema);
   if (wrapped) return schemaLeaves(wrapped, path);
   if (schema instanceof z.ZodObject) {
-    return Object.entries(schema.shape).flatMap(([key, value]) => schemaLeaves(value as z.ZodType, `${path}.${key}`)).sort();
+    return Object.entries(schema.shape).flatMap(([key, value]) => schemaLeaves(value as Schema, `${path}.${key}`)).sort();
   }
   if (schema instanceof z.ZodUnion) {
-    return [...new Set(schema.options.flatMap((option) => schemaLeaves(option as z.ZodType, path)))].sort();
+    return [...new Set(schema.options.flatMap((option) => schemaLeaves(option, path)))].sort();
   }
   return collectionLeaves(schema, path) ?? [path];
 };
@@ -97,7 +104,7 @@ export const assertFieldInventory = (
 ): void => {
   const actual = new Set(Object.entries(schemas).flatMap(([name, schema]) => schemaLeaves(schema, name)));
   const declared = new Set(entries.map(({ path }) => path));
-  const draftOwners = ['create', 'save', 'accept', 'acceptPartial'].filter((name) => Object.hasOwn(schemas, name));
+  const draftOwners = ['create', 'save', 'accept', 'acceptPartial'].filter((name) => Object.prototype.hasOwnProperty.call(schemas, name));
   const expected = new Set(entries.flatMap(({ path }) => path.startsWith('draft.')
     ? [path, ...draftOwners.map((name) => `${name}.${path}`)]
     : [path]));

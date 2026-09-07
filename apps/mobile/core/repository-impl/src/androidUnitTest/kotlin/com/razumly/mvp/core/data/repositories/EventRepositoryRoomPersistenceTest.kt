@@ -50,6 +50,7 @@ import com.razumly.mvp.core.network.dto.EventEditorCreateCompletionMode
 import com.razumly.mvp.core.network.dto.EventEditorCreateCommandDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateProposalDto
 import com.razumly.mvp.core.network.dto.EventEditorCreateProposalGraphDto
+import com.razumly.mvp.core.network.dto.completeEventEditorWireFixtures
 import com.razumly.mvp.core.network.dto.EventEditorDivisionDetailDto
 import com.razumly.mvp.core.network.dto.EventEditorDraftDto
 import com.razumly.mvp.core.network.dto.EventEditorExpectedCreateRevisionsDto
@@ -2326,6 +2327,54 @@ class EventRepositoryRoomPersistenceTest {
                 realDatabase.close()
             }
         }
+
+    @Test
+    fun given_canonical_create_incident_when_room_persists_then_nested_metadata_is_retained() = kotlinx.coroutines.test.runTest {
+        val fixtures = Json.parseToJsonElement(completeEventEditorWireFixtures).jsonObject
+        val saved = fixtures.getValue("results").jsonArray.first {
+            it.jsonObject.getValue("kind").toString() == "\"created\""
+        }.jsonObject.getValue("value").jsonObject
+        val snapshot = jsonMVP.decodeFromString<EventEditorSnapshotDto>(saved.getValue("snapshot").toString())
+        val userRepository = mockk<IUserRepository>(relaxed = true)
+        coEvery { userRepository.fetchUsers(any(), any()) } coAnswers {
+            Result.success(firstArg<List<String>>().map { id ->
+                UserData(
+                    id = id, firstName = "Coverage", lastName = "User", userName = id,
+                    friendIds = emptyList(), friendRequestIds = emptyList(), friendRequestSentIds = emptyList(),
+                    followingIds = emptyList(), hasStripeAccount = false, uploadedImages = emptyList(),
+                )
+            })
+        }
+        val database = Room.inMemoryDatabaseBuilder<MVPDatabaseService>(context)
+            .allowMainThreadQueries().build()
+        val http = HttpClient(MockEngine { request ->
+            assertEquals(HttpMethod.Put, request.method)
+            assertEquals("/api/events/editor", request.url.encodedPath)
+            respondJson(saved.toString(), HttpStatusCode.Created)
+        }) { configureMvpHttpClient() }
+        val repository = eventRepositoryRoomPersistenceRepository(
+            database = database,
+            http = http,
+            coroutineDispatcher = UnconfinedTestDispatcher(testScheduler),
+            userRepository = userRepository,
+        )
+        try {
+            repository.acceptEventEditorProposal(
+                createOperationId = "create-coverage-1",
+                proposalRevision = "proposal-r4",
+                draft = snapshot.draft,
+            ).getOrThrow()
+            val match = database.getMatchDao.getMatchesOfTournament("event-1").single()
+            val incident = match.incidents.single()
+            assertEquals("incident-coverage-1", incident.id)
+            assertEquals("{\"approved\":true}", incident.metadata?.get("review"))
+            assertEquals("[2,4]", incident.metadata?.get("positions"))
+        } finally {
+            repository.close()
+            http.close()
+            database.close()
+        }
+    }
 
     @Test
     fun given_accepted_tournament_graph_when_room_persists_then_all_rows_round_trip() = kotlinx.coroutines.test.runTest {

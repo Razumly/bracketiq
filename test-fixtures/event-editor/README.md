@@ -14,7 +14,7 @@ The allowed classifications are `covered`, `derived`, `immutable`, `server-owned
 
 ## Shared examples
 
-`complete-wire-fixtures.json` contains eight complete Event Type and context examples. They cover all five Event Types, payments, questions, documents, staffing, rental values, Organization authority, and External Registration. They also include nine command envelopes and thirteen typed result examples.
+`complete-wire-fixtures.json` contains eight complete Event Type and context examples. They cover all five Event Types, payments, questions, documents, staffing, rental values, Organization authority, and External Registration. They also include nine command envelopes and eighteen typed result examples.
 
 The pairwise matrix contains 26 cases. They cover every feasible pair among the declared Event Type, End Policy, Staffing Priority, payment, time zone, collection, phase, and authority factors. Tryout excludes Match officiating choices. The guard checks coverage against the full factor domain. It does not execute the full Cartesian product. Boundary cases cover leap dates, daylight-saving offsets, day and week limits, empty collections, fractional durations, and client integer limits. Invalid boundary cases must fail the site schema.
 
@@ -38,6 +38,8 @@ Use `gradlew.bat` on Windows. The network task reads the JSON fixtures and gener
 
 The Android client-to-site test sends the production Kotlin encoder output to the real site parser. It requires the site npm dependencies. `MVP_SITE_DIR` can override the default `apps/site` path. This check does not start a site server.
 
+Typed result fixtures include Create, Save, partial acceptance, and maintenance proposals and results. Create results retain the server's operation and revision fields. Create and maintenance graphs retain canonical wire values. Their legacy Event and Match projections use existing integer models. The inventory marks these numeric projections as derived. They do not replace the canonical graph or the editor draft.
+
 ## Failure paths
 
 The site coverage command runs `eventEditorSave.test.ts` and `eventEditorRevisionBinding.test.ts`. They check complete rollback, exact retries, changed payload identity, stale revisions, proposal invalidation, and notification or invitation deduplication after commit. The database integration suite also checks proposal rollback against PostgreSQL.
@@ -46,6 +48,6 @@ Mobile `DefaultCreateEventComponentTest` checks unchanged retry identity, change
 
 ## Change process
 
-Run the guard before changing an inventory. Review each reported path. Set its classification and reason. Confirm its mobile owner. Add a non-default example for an applicable context. Update the protocol snapshot after reviewing the contract shape. Run the site and mobile checks. Add a Room migration and schema snapshot if a persisted entity changes.
+Run the guard before changing an inventory. Review each reported path. Set its classification and reason. Confirm its mobile owner. Add a non-default example for an applicable context. Update the protocol snapshot after reviewing the contract shape. Run the site and mobile checks. If a persisted entity changes, increment the Room database version. Keep destructive migration enabled. Update the schema snapshot. Do not add manual migrations, auto-migrations, or migration edges.
 
 Do not regenerate expected classifications during tests. Do not replace a failed expected value with encoder output. A new fixture must describe the intended canonical value independently from the implementation.

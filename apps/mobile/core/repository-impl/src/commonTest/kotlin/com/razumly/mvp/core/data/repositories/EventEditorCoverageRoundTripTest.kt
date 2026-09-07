@@ -13,7 +13,7 @@ import kotlin.test.assertEquals
 
 class EventEditorCoverageRoundTripTest {
     @Test
-    fun tryout_retains_an_assistant_host_invitation_with_only_canonical_roles() {
+    fun given_canonical_tryout_roles_when_saved_then_assistant_host_invitations_are_retained() {
         val snapshot = editorProtocolSnapshot(mode = "EDIT")
         val draft = snapshot.draft.copy(
             basics = snapshot.draft.basics.copy(eventType = "TRYOUT"),
@@ -31,7 +31,7 @@ class EventEditorCoverageRoundTripTest {
     }
 
     @Test
-    fun unchanged_editor_state_preserves_the_complete_shared_draft() {
+    fun given_unchanged_editor_state_when_saved_then_the_complete_shared_draft_is_preserved() {
         val json = Json
         val fixtures = json.parseToJsonElement(completeEventEditorWireFixtures).jsonObject
         val snapshot = json.decodeFromJsonElement<EventEditorSnapshotDto>(fixtures.getValue("results").jsonArray[0].jsonObject.getValue("value").jsonObject.getValue("snapshot"))
