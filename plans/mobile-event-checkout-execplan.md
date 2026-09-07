@@ -19,6 +19,7 @@ Read root and mobile AGENTS.md, this plan, and `apps/mobile/composeApp/src/commo
 - [x] (2026-09-07) Finish Android lint and APK packaging. The combined Gradle run passed in 10 minutes 5 seconds. Lint reports no errors and 83 warnings. No warning names the new checkout files.
 - [ ] Finish emulator checks. The user approved the emulator and local server. Installation, sign-in, saved Team checkout, Team editor save, roster cancel, and final review passed. Final Team confirmation returns HTTP 500. The backend reports concurrent nested transactions while it copies Player registrations. Questions, signing, payment, and successful completion remain unverified in this checkout build.
 - [x] (2026-09-07) Prepare the implementation commit with test results and the open verification limit. Standards and Spec reviews passed after corrections.
+- [x] (2026-09-07) Fix the backend transaction overlap and resolve the 13 complexity lint failures. Preserve roster behavior through named helpers. Pass changed-file lint, type checking, focused regression tests, and the real database rollback check.
 
 ## Surprises & Discoveries
 
@@ -31,6 +32,8 @@ Review found that a price alone does not identify the submission action. Manager
 Use the Airbnb service reservation reference for clear sections and the Viator reference for visible progress. Use Register for the entry action. Use the existing TeamCard for identity. Keep Account authentication outside checkout. Reuse existing server behavior and Room observations.
 
 The Team editor changes name and roster capacity through the existing repository. The component owns its draft and save operation. Closing roster setup restores Team review. Billing and discount forms use a shared presentation interface so other callers retain their normal dialogs. No HTTP fields or Room schema changed.
+
+On 2026-09-07, the user requested the lint cleanup needed for the transaction fix. Extract named steps for metadata, fallback reads, roster validation, placeholder selection, snapshot writes, and stale roster removal. Keep the helpers private to their operation. Preserve existing inputs, outputs, write order, and transaction ownership. Keep Player registration writes sequential. Do not change invitation acceptance, document readiness, or registration status rules in this refactor.
 
 ## Context and Orientation
 
@@ -69,6 +72,20 @@ The user approved the Android emulator and local site server on port 3153. Both 
 Final confirmation returned HTTP 500 from `/api/events/issue151-final-native-labels/participants`. The server reports `Concurrent nested transactions are not supported`. The compiled stack points to the parallel Player registration writes in `claimOrCreateEventTeamSnapshot`, which call `upsertEventRegistration` on the same transaction. No successful registration result was shown. This backend failure blocks completion of the Team walkthrough. Questions, signing, payment, and successful completion still need checks in this build. No production deployment or push was performed.
 
 Screenshots are in `.scratch/mobile-checkout-team.png` and `.scratch/mobile-checkout-review.png`. UI dumps use the same prefix. The server error is in `.scratch/mobile-checkout-site-error.log`.
+
+## Team transaction fix follow-up
+
+On 2026-09-07, the user requested the backend fix. A new ordering regression test reproduced the nested transaction failure. A direct call to the real snapshot function against the existing issue #153 database reproduced the same error. The database has no pending migrations.
+
+Player registration writes now run sequentially on the caller's transaction. The roster fields and HTTP contract are unchanged. The real database check copied four Player registrations. An intentional failure after those writes rolled back the complete save. The two focused suites passed all 73 tests. Type checking passed.
+
+The required changed-file lint check failed with 13 complexity errors. Checking the original Team membership source at HEAD independently reproduced its 12 errors. The remaining error is in an existing test callback. The fix remains uncommitted because site coding standards require these errors to be resolved before commit. The running local server still uses the previous compiled build. A new build and an approved server restart are needed before repeating final confirmation in the emulator.
+
+Evidence: `.scratch/checkout-transaction-red.log`, `.scratch/checkout-transaction-green.log`, `.scratch/checkout-transaction-live.ts`, `.scratch/checkout-transaction-types.log`, `.scratch/checkout-transaction-lint.log`, and `.scratch/checkout-transaction-baseline-lint.log`.
+
+The user then requested the lint fixes. All 13 failures are resolved without suppressions or rule changes. The changed-file lint command passes. Type checking passes. The broader Team and participant route suite has 127 passed tests and 14 skipped tests. The real database check again copied four Player entries and verified complete rollback. The fix and refactor are ready for a local commit. The running server still needs a rebuilt artifact and an approved restart before an emulator recheck.
+
+Final lint-refactor evidence: `.scratch/team-refactor-lint-final.log`, `.scratch/team-refactor-types-final.log`, and `.scratch/team-refactor-regression.log`. Updated on 2026-09-07 to record the requested behavior-preserving refactor and its verification.
 
 Plan created on 2026-09-07 to record the approved mobile checkout design and its execution boundary.
 

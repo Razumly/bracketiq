@@ -907,6 +907,42 @@ describe('claimOrCreateEventTeamSnapshot', () => {
     upsertEventRegistrationMock.mockResolvedValue({});
   });
 
+  it('finishes each roster registration before starting the next on the shared transaction', async () => {
+    let pendingWrite = false;
+    const completed: string[] = [];
+    upsertEventRegistrationMock.mockImplementation(async (input: { registrantId: string }) => {
+      if (pendingWrite) throw new Error('Concurrent nested transactions are not supported');
+      pendingWrite = true;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      completed.push(input.registrantId);
+      pendingWrite = false;
+      return {};
+    });
+    const tx = {
+      $executeRaw: jest.fn(),
+      teams: {
+        findMany: jest.fn().mockResolvedValue([]),
+        create: jest.fn(({ data }) => Promise.resolve(data)),
+        update: jest.fn(({ where, data }) => Promise.resolve({ id: where.id, ...data })),
+      },
+      eventRegistrations: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    await claimOrCreateEventTeamSnapshot({
+      tx, eventId: 'event_1', canonicalTeamId: 'team_1', createdBy: 'manager_1',
+      canonicalTeam: {
+        id: 'team_1', name: 'Cascade', teamSize: 8,
+        playerRegistrations: [
+          { id: 'member_1', userId: 'player_1', status: 'ACTIVE' },
+          { id: 'member_2', userId: 'player_2', status: 'PENDING' },
+        ],
+        staffAssignments: [],
+      },
+    });
+    expect(completed.slice(1)).toEqual(['player_1', 'player_2']);
+    expect(upsertEventRegistrationMock).toHaveBeenCalledTimes(3);
+    for (const call of upsertEventRegistrationMock.mock.calls) expect(call[1]).toBe(tx);
+  });
+
   it('keeps the unscheduled fallback when no placeholder plan exists', async () => {
     const storedTeams = new Map<string, Record<string, unknown>>();
     const createMock = jest.fn(({ data }: { data: Record<string, unknown> }) => (
@@ -1329,11 +1365,12 @@ describe('claimOrCreateEventTeamSnapshot', () => {
         if (!Array.isArray(where.OR)) {
           return true;
         }
+        const matchesId = (value: any, id: string) => (
+          (typeof value === 'string' && id === value) || (value?.in?.includes(id) ?? false)
+        );
         return where.OR.some((condition: Record<string, any>) => (
-          (typeof condition.registrantId === 'string' && row.registrantId === condition.registrantId)
-          || (condition.registrantId?.in?.includes(row.registrantId) ?? false)
-          || (typeof condition.eventTeamId === 'string' && row.eventTeamId === condition.eventTeamId)
-          || (condition.eventTeamId?.in?.includes(row.eventTeamId) ?? false)
+          matchesId(condition.registrantId, row.registrantId)
+          || matchesId(condition.eventTeamId, row.eventTeamId)
         ));
       });
       return Promise.resolve(rows);
@@ -1658,14 +1695,14 @@ describe('claimOrCreateEventTeamSnapshot', () => {
           {
             id: 'slot_div_b_1',
             eventId: 'event_1',
-              kind: 'PLACEHOLDER',
-              parentTeamId: null,
-              division: 'div_b',
-              divisionTypeId: 'advanced',
-              name: 'Place Holder 7',
-              createdAt: new Date('2026-01-03T00:00:00.000Z'),
-            },
-          ]);
+            kind: 'PLACEHOLDER',
+            parentTeamId: null,
+            division: 'div_b',
+            divisionTypeId: 'advanced',
+            name: 'Place Holder 7',
+            createdAt: new Date('2026-01-03T00:00:00.000Z'),
+          },
+        ]);
       }
       return Promise.resolve([]);
     });

@@ -196,23 +196,26 @@ export const replaceSingletonTeamStaffAssignment = async ({
   if (typeof tx?.$executeRaw === 'function') {
     await acquireTeamStaffRoleLock(tx, teamId, role);
   }
-  const invites = tx?.invites;
-  if (invites?.updateMany) {
-    await invites.updateMany({
-      where: {
-        type: 'TEAM',
-        teamId,
-        role: { in: inviteRoles },
-        status: { in: ['PENDING', 'INVITED'] },
-        ...(replacementInviteId ? { id: { not: replacementInviteId } } : {}),
-      },
-      data: {
-        status: 'CANCELLED',
-        finalizedAt: now,
-        updatedAt: now,
-      },
-    });
-  }
+  const cancelReplacedStaffInvites = async () => {
+    const invites = tx?.invites;
+    if (invites?.updateMany) {
+      await invites.updateMany({
+        where: {
+          type: 'TEAM',
+          teamId,
+          role: { in: inviteRoles },
+          status: { in: ['PENDING', 'INVITED'] },
+          ...(replacementInviteId ? { id: { not: replacementInviteId } } : {}),
+        },
+        data: {
+          status: 'CANCELLED',
+          finalizedAt: now,
+          updatedAt: now,
+        },
+      });
+    }
+  };
+  await cancelReplacedStaffInvites();
 
   const assignments = getTeamStaffAssignmentsDelegate(tx);
   if (assignments?.updateMany) {
@@ -380,23 +383,28 @@ export const applyCanonicalTeamRegistrationMetadata = async (params: {
       return;
     }
 
-      const userId = normalizeId(registration.userId);
-      const registrantId = normalizeId(registration.registrantId);
-      const targetUserId = userId ?? registrantId;
-      if (!targetUserId) {
-        return;
-      }
+    const userId = normalizeId(registration.userId);
+    const registrantId = normalizeId(registration.registrantId);
+    const targetUserId = userId ?? registrantId;
+    if (!targetUserId) {
+      return;
+    }
 
+    const buildMetadataUpdate = () => {
       const data: Record<string, unknown> = { updatedAt: now };
-      if (hasOwn(registration, 'parentId')) {
-        data.parentId = normalizeId(registration.parentId);
-      }
-      if (hasOwn(registration, 'registrantType')) {
-        data.registrantType = normalizeId(registration.registrantType)?.toUpperCase() ?? 'SELF';
-      }
-      if (hasOwn(registration, 'rosterRole')) {
-        data.rosterRole = normalizeId(registration.rosterRole)?.toUpperCase() ?? 'PARTICIPANT';
-      }
+      const applyIdentityMetadata = () => {
+        if (hasOwn(registration, 'parentId')) {
+          data.parentId = normalizeId(registration.parentId);
+        }
+        if (hasOwn(registration, 'registrantType')) {
+          data.registrantType = normalizeId(registration.registrantType)?.toUpperCase() ?? 'SELF';
+        }
+        if (hasOwn(registration, 'rosterRole')) {
+          data.rosterRole = normalizeId(registration.rosterRole)?.toUpperCase() ?? 'PARTICIPANT';
+        }
+      };
+      applyIdentityMetadata();
+
       if (hasOwn(registration, 'jerseyNumber')) {
         data.jerseyNumber = normalizeJerseyNumber(registration.jerseyNumber);
       }
@@ -412,17 +420,21 @@ export const applyCanonicalTeamRegistrationMetadata = async (params: {
       if (hasOwn(registration, 'createdBy')) {
         data.createdBy = normalizeId(registration.createdBy);
       }
-      if (Object.keys(data).length === 1) {
-        return;
-      }
+      return { data };
+    };
+    const { data } = buildMetadataUpdate();
 
-      await teamRegistrationsDelegate.updateMany({
-        where: {
-          teamId: params.teamId,
-          userId: targetUserId,
-        },
-        data,
-      });
+    if (Object.keys(data).length === 1) {
+      return;
+    }
+
+    await teamRegistrationsDelegate.updateMany({
+      where: {
+        teamId: params.teamId,
+        userId: targetUserId,
+      },
+      data,
+    });
   }));
 };
 
@@ -443,9 +455,13 @@ export const serializeCanonicalTeam = (params: {
   const headCoachAssignment = params.staffAssignments.find((row) => (
     isActiveRegistration(row) && String(row.role ?? '').toUpperCase() === 'HEAD_COACH'
   ));
-  const managerUserId = normalizeId(managerAssignment?.userId);
-  const captainRegistration = activePlayerRegistrations.find((row) => Boolean(row.isCaptain))
-    ?? (managerUserId ? (activePlayerRegistrations.find((row) => row.userId === managerUserId) ?? null) : null);
+  const resolveCaptain = () => {
+    const managerUserId = normalizeId(managerAssignment?.userId);
+    const captainRegistration = activePlayerRegistrations.find((row) => Boolean(row.isCaptain))
+      ?? (managerUserId ? (activePlayerRegistrations.find((row) => row.userId === managerUserId) ?? null) : null);
+    return { captainRegistration };
+  };
+  const { captainRegistration } = resolveCaptain();
 
   return {
     ...params.team,
@@ -524,69 +540,73 @@ const buildFallbackCanonicalTeam = (team: EventTeamRow): ReturnType<typeof seria
       id: buildCanonicalTeamRegistrationId(team.id, userId),
       createdAt: team.createdAt ?? null,
       updatedAt: team.updatedAt ?? null,
-        teamId: team.id,
-        userId,
-        parentId: null,
-        registrantType: 'SELF',
-        rosterRole: 'PARTICIPANT',
-        status: 'ACTIVE',
-        jerseyNumber: null,
-        position: null,
-        isCaptain: userId === normalizeId(team.captainId),
-        consentDocumentId: null,
-        consentStatus: null,
-        createdBy: normalizeId(team.managerId),
-      })),
+      teamId: team.id,
+      userId,
+      parentId: null,
+      registrantType: 'SELF',
+      rosterRole: 'PARTICIPANT',
+      status: 'ACTIVE',
+      jerseyNumber: null,
+      position: null,
+      isCaptain: userId === normalizeId(team.captainId),
+      consentDocumentId: null,
+      consentStatus: null,
+      createdBy: normalizeId(team.managerId),
+    })),
     ...normalizeIdList(team.pending).map((userId) => ({
       id: buildCanonicalTeamRegistrationId(team.id, userId),
       createdAt: team.createdAt ?? null,
       updatedAt: team.updatedAt ?? null,
-        teamId: team.id,
-        userId,
-        parentId: null,
-        registrantType: 'SELF',
-        rosterRole: 'PARTICIPANT',
-        status: 'INVITED',
-        jerseyNumber: null,
-        position: null,
-        isCaptain: false,
-        consentDocumentId: null,
-        consentStatus: null,
-        createdBy: normalizeId(team.managerId),
-      })),
-  ];
-  const staffAssignments: CanonicalStaffAssignment[] = [
-    ...(normalizeId(team.managerId) ? [{
-      id: buildCanonicalTeamStaffAssignmentId(team.id, 'MANAGER', normalizeId(team.managerId)!),
-      createdAt: team.createdAt ?? null,
-      updatedAt: team.updatedAt ?? null,
-      teamId: team.id,
-      userId: normalizeId(team.managerId)!,
-      role: 'MANAGER',
-      status: 'ACTIVE',
-      createdBy: normalizeId(team.managerId),
-    }] : []),
-    ...(normalizeId(team.headCoachId) ? [{
-      id: buildCanonicalTeamStaffAssignmentId(team.id, 'HEAD_COACH', normalizeId(team.headCoachId)!),
-      createdAt: team.createdAt ?? null,
-      updatedAt: team.updatedAt ?? null,
-      teamId: team.id,
-      userId: normalizeId(team.headCoachId)!,
-      role: 'HEAD_COACH',
-      status: 'ACTIVE',
-      createdBy: normalizeId(team.managerId),
-    }] : []),
-    ...normalizeIdList(team.coachIds).map((userId) => ({
-      id: buildCanonicalTeamStaffAssignmentId(team.id, 'ASSISTANT_COACH', userId),
-      createdAt: team.createdAt ?? null,
-      updatedAt: team.updatedAt ?? null,
       teamId: team.id,
       userId,
-      role: 'ASSISTANT_COACH',
-      status: 'ACTIVE',
+      parentId: null,
+      registrantType: 'SELF',
+      rosterRole: 'PARTICIPANT',
+      status: 'INVITED',
+      jerseyNumber: null,
+      position: null,
+      isCaptain: false,
+      consentDocumentId: null,
+      consentStatus: null,
       createdBy: normalizeId(team.managerId),
     })),
   ];
+  const buildFallbackStaffAssignments = () => {
+    const staffAssignments: CanonicalStaffAssignment[] = [
+      ...(normalizeId(team.managerId) ? [{
+        id: buildCanonicalTeamStaffAssignmentId(team.id, 'MANAGER', normalizeId(team.managerId)!),
+        createdAt: team.createdAt ?? null,
+        updatedAt: team.updatedAt ?? null,
+        teamId: team.id,
+        userId: normalizeId(team.managerId)!,
+        role: 'MANAGER',
+        status: 'ACTIVE',
+        createdBy: normalizeId(team.managerId),
+      }] : []),
+      ...(normalizeId(team.headCoachId) ? [{
+        id: buildCanonicalTeamStaffAssignmentId(team.id, 'HEAD_COACH', normalizeId(team.headCoachId)!),
+        createdAt: team.createdAt ?? null,
+        updatedAt: team.updatedAt ?? null,
+        teamId: team.id,
+        userId: normalizeId(team.headCoachId)!,
+        role: 'HEAD_COACH',
+        status: 'ACTIVE',
+        createdBy: normalizeId(team.managerId),
+      }] : []),
+      ...normalizeIdList(team.coachIds).map((userId) => ({
+        id: buildCanonicalTeamStaffAssignmentId(team.id, 'ASSISTANT_COACH', userId),
+        createdAt: team.createdAt ?? null,
+        updatedAt: team.updatedAt ?? null,
+        teamId: team.id,
+        userId,
+        role: 'ASSISTANT_COACH',
+        status: 'ACTIVE',
+        createdBy: normalizeId(team.managerId),
+      })),
+    ];
+    return { staffAssignments };
+  };
+  const { staffAssignments } = buildFallbackStaffAssignments();
 
   return serializeCanonicalTeam({
     team: {
@@ -619,15 +639,19 @@ export const loadCanonicalTeamById = async (teamId: string, client: PrismaLike =
   const teamRegistrationsDelegate = getTeamRegistrationsDelegate(client);
   const teamStaffAssignmentsDelegate = getTeamStaffAssignmentsDelegate(client);
 
-  if (!canonicalTeamsDelegate?.findUnique || !teamRegistrationsDelegate?.findMany || !teamStaffAssignmentsDelegate?.findMany) {
-    const eventTeam = await getEventTeamsDelegate(client)?.findUnique?.({
-      where: { id: teamId },
-    });
-    if (!eventTeam) {
-      return null;
+  const loadFallbackWhenStorageMissing = async () => {
+    if (!canonicalTeamsDelegate?.findUnique || !teamRegistrationsDelegate?.findMany || !teamStaffAssignmentsDelegate?.findMany) {
+      const eventTeam = await getEventTeamsDelegate(client)?.findUnique?.({
+        where: { id: teamId },
+      });
+      if (!eventTeam) {
+        return null;
+      }
+      return buildFallbackCanonicalTeam(eventTeam as EventTeamRow);
     }
-    return buildFallbackCanonicalTeam(eventTeam as EventTeamRow);
-  }
+  };
+  const missingStorageTeam = await loadFallbackWhenStorageMissing();
+  if (missingStorageTeam !== undefined) return missingStorageTeam;
 
   const team = await canonicalTeamsDelegate.findUnique({
     where: { id: teamId },
@@ -679,77 +703,87 @@ export const listTeamsByIds = async (
   const eventId = normalizeId(options.eventId);
   const teamsById = new Map<string, ReturnType<typeof serializeCanonicalTeam> | ReturnType<typeof serializeEventTeam>>();
   const eventTeamsDelegate = getEventTeamsDelegate(client);
-  if (eventId && eventTeamsDelegate?.findMany) {
-    const rows = await eventTeamsDelegate.findMany({
-      where: {
-        id: { in: normalizedIds },
-        eventId,
-      },
-    }) as EventTeamRow[];
-    const serializedRows = await serializeEventTeamsWithRegistrationSettings(client, rows);
-    rows.forEach((row, index) => {
-      teamsById.set(row.id, serializedRows[index]);
-    });
-  }
+  const loadEventCandidates = async () => {
+    if (eventId && eventTeamsDelegate?.findMany) {
+      const rows = await eventTeamsDelegate.findMany({
+        where: {
+          id: { in: normalizedIds },
+          eventId,
+        },
+      }) as EventTeamRow[];
+      const serializedRows = await serializeEventTeamsWithRegistrationSettings(client, rows);
+      rows.forEach((row, index) => {
+        teamsById.set(row.id, serializedRows[index]);
+      });
+    }
+  };
+  await loadEventCandidates();
 
   const canonicalTeamsDelegate = getCanonicalTeamsDelegate(client);
   const teamRegistrationsDelegate = getTeamRegistrationsDelegate(client);
   const teamStaffAssignmentsDelegate = getTeamStaffAssignmentsDelegate(client);
   const canonicalCandidateIds = normalizedIds.filter((teamId) => !teamsById.has(teamId));
 
-  if (canonicalCandidateIds.length && canonicalTeamsDelegate?.findMany && teamRegistrationsDelegate?.findMany && teamStaffAssignmentsDelegate?.findMany) {
-    const canonicalRows = await canonicalTeamsDelegate.findMany({
-      where: { id: { in: canonicalCandidateIds } },
-    }) as CanonicalTeamRow[];
-    const canonicalIds = canonicalRows.map((row) => row.id).filter(Boolean);
+  const loadCanonicalCandidates = async () => {
+    if (canonicalCandidateIds.length && canonicalTeamsDelegate?.findMany && teamRegistrationsDelegate?.findMany && teamStaffAssignmentsDelegate?.findMany) {
+      const canonicalRows = await canonicalTeamsDelegate.findMany({
+        where: { id: { in: canonicalCandidateIds } },
+      }) as CanonicalTeamRow[];
+      const canonicalIds = canonicalRows.map((row) => row.id).filter(Boolean);
 
-    if (canonicalIds.length) {
-      const [playerRegistrations, staffAssignments] = await Promise.all([
-        teamRegistrationsDelegate.findMany({
-          where: { teamId: { in: canonicalIds } },
-          orderBy: [
-            { createdAt: 'asc' },
-            { id: 'asc' },
-          ],
-        }) as Promise<CanonicalPlayerRegistration[]>,
-        teamStaffAssignmentsDelegate.findMany({
-          where: { teamId: { in: canonicalIds } },
-          orderBy: [
-            { createdAt: 'asc' },
-            { id: 'asc' },
-          ],
-        }) as Promise<CanonicalStaffAssignment[]>,
-      ]);
+      if (canonicalIds.length) {
+        const groupCanonicalMemberships = async () => {
+          const [playerRegistrations, staffAssignments] = await Promise.all([
+            teamRegistrationsDelegate.findMany({
+              where: { teamId: { in: canonicalIds } },
+              orderBy: [
+                { createdAt: 'asc' },
+                { id: 'asc' },
+              ],
+            }) as Promise<CanonicalPlayerRegistration[]>,
+            teamStaffAssignmentsDelegate.findMany({
+              where: { teamId: { in: canonicalIds } },
+              orderBy: [
+                { createdAt: 'asc' },
+                { id: 'asc' },
+              ],
+            }) as Promise<CanonicalStaffAssignment[]>,
+          ]);
 
-      const playerRegistrationsByTeamId = new Map<string, CanonicalPlayerRegistration[]>();
-      playerRegistrations.forEach((row) => {
-        const existingRows = playerRegistrationsByTeamId.get(row.teamId);
-        if (existingRows) {
-          existingRows.push(row);
-          return;
-        }
-        playerRegistrationsByTeamId.set(row.teamId, [row]);
-      });
+          const playerRegistrationsByTeamId = new Map<string, CanonicalPlayerRegistration[]>();
+          playerRegistrations.forEach((row) => {
+            const existingRows = playerRegistrationsByTeamId.get(row.teamId);
+            if (existingRows) {
+              existingRows.push(row);
+              return;
+            }
+            playerRegistrationsByTeamId.set(row.teamId, [row]);
+          });
 
-      const staffAssignmentsByTeamId = new Map<string, CanonicalStaffAssignment[]>();
-      staffAssignments.forEach((row) => {
-        const existingRows = staffAssignmentsByTeamId.get(row.teamId);
-        if (existingRows) {
-          existingRows.push(row);
-          return;
-        }
-        staffAssignmentsByTeamId.set(row.teamId, [row]);
-      });
+          const staffAssignmentsByTeamId = new Map<string, CanonicalStaffAssignment[]>();
+          staffAssignments.forEach((row) => {
+            const existingRows = staffAssignmentsByTeamId.get(row.teamId);
+            if (existingRows) {
+              existingRows.push(row);
+              return;
+            }
+            staffAssignmentsByTeamId.set(row.teamId, [row]);
+          });
+          return { playerRegistrationsByTeamId, staffAssignmentsByTeamId };
+        };
+        const { playerRegistrationsByTeamId, staffAssignmentsByTeamId } = await groupCanonicalMemberships();
 
-      canonicalRows.forEach((row) => {
-        teamsById.set(row.id, serializeCanonicalTeam({
-          team: row,
-          playerRegistrations: playerRegistrationsByTeamId.get(row.id) ?? [],
-          staffAssignments: staffAssignmentsByTeamId.get(row.id) ?? [],
-        }));
-      });
+        canonicalRows.forEach((row) => {
+          teamsById.set(row.id, serializeCanonicalTeam({
+            team: row,
+            playerRegistrations: playerRegistrationsByTeamId.get(row.id) ?? [],
+            staffAssignments: staffAssignmentsByTeamId.get(row.id) ?? [],
+          }));
+        });
+      }
     }
-  }
+  };
+  await loadCanonicalCandidates();
 
   const remainingIds = normalizedIds.filter((teamId) => !teamsById.has(teamId));
   if (remainingIds.length && !eventId) {
@@ -802,47 +836,63 @@ export const listCanonicalTeamsForUser = async (params: {
       String(team[field] ?? '').toLowerCase().includes(normalizedQuery)
     ));
   };
-  if (!canonicalTeamsDelegate?.findMany || !teamRegistrationsDelegate?.findMany || !teamStaffAssignmentsDelegate?.findMany) {
-    if (params.organizationId) {
-      return [];
+  const loadTeamsWithoutCanonicalStorage = async () => {
+    if (!canonicalTeamsDelegate?.findMany || !teamRegistrationsDelegate?.findMany || !teamStaffAssignmentsDelegate?.findMany) {
+      if (params.organizationId) {
+        return [];
+      }
+      const buildFallbackFilters = () => {
+        const andFilters: Record<string, unknown>[] = [];
+        if (params.playerId && params.managerId) {
+          andFilters.push({
+            OR: [
+              { playerIds: { has: params.playerId } },
+              { managerId: params.managerId },
+            ]
+          });
+        } else if (params.playerId) {
+          andFilters.push({ playerIds: { has: params.playerId } });
+        } else if (params.managerId) {
+          andFilters.push({ managerId: params.managerId });
+        } else {
+          andFilters.push({
+            parentTeamId: null,
+            captainId: { not: '' },
+          });
+        }
+        if (params.openRegistrationOnly) {
+          andFilters.push({ openRegistration: true });
+        }
+        if (!params.includeArchived) {
+          andFilters.push({ archivedAt: null });
+        }
+        if (normalizedQuery) {
+          andFilters.push({
+            OR: [
+              { name: { contains: normalizedQuery, mode: 'insensitive' } },
+              { sport: { contains: normalizedQuery, mode: 'insensitive' } },
+              { division: { contains: normalizedQuery, mode: 'insensitive' } },
+            ]
+          });
+        }
+        return { andFilters };
+      };
+      const { andFilters } = buildFallbackFilters();
+
+      const loadFallbackTeams = async () => {
+        const rows = await getEventTeamsDelegate(client)?.findMany?.({
+          where: andFilters.length ? { AND: andFilters } : undefined,
+          take: params.limit ?? 100,
+          skip: params.offset ?? 0,
+          orderBy: { name: 'asc' },
+        }) ?? [];
+        return (rows as EventTeamRow[]).map((row) => serializeEventTeam(row));
+      };
+      return loadFallbackTeams();
     }
-    const andFilters: Record<string, unknown>[] = [];
-    if (params.playerId && params.managerId) {
-      andFilters.push({ OR: [
-        { playerIds: { has: params.playerId } },
-        { managerId: params.managerId },
-      ] });
-    } else if (params.playerId) {
-      andFilters.push({ playerIds: { has: params.playerId } });
-    } else if (params.managerId) {
-      andFilters.push({ managerId: params.managerId });
-    } else {
-      andFilters.push({
-        parentTeamId: null,
-        captainId: { not: '' },
-      });
-    }
-    if (params.openRegistrationOnly) {
-      andFilters.push({ openRegistration: true });
-    }
-    if (!params.includeArchived) {
-      andFilters.push({ archivedAt: null });
-    }
-    if (normalizedQuery) {
-      andFilters.push({ OR: [
-        { name: { contains: normalizedQuery, mode: 'insensitive' } },
-        { sport: { contains: normalizedQuery, mode: 'insensitive' } },
-        { division: { contains: normalizedQuery, mode: 'insensitive' } },
-      ] });
-    }
-    const rows = await getEventTeamsDelegate(client)?.findMany?.({
-      where: andFilters.length ? { AND: andFilters } : undefined,
-      take: params.limit ?? 100,
-      skip: params.offset ?? 0,
-      orderBy: { name: 'asc' },
-    }) ?? [];
-    return (rows as EventTeamRow[]).map((row) => serializeEventTeam(row));
-  }
+  };
+  const fallbackTeams = await loadTeamsWithoutCanonicalStorage();
+  if (fallbackTeams !== undefined) return fallbackTeams;
 
   let teamIds: string[] = [];
   if (params.playerId) {
@@ -866,47 +916,61 @@ export const listCanonicalTeamsForUser = async (params: {
     });
     teamIds = teamIds.concat(rows.map((row: { teamId: string }) => row.teamId));
   }
-  if (!params.playerId && !params.managerId) {
-    const where: Record<string, unknown> = params.includeAdminOnly
-      ? {}
-      : { visibility: TEAM_VISIBILITY_PUBLIC };
-    if (!params.includeArchived) {
-      where.archivedAt = null;
-    }
-    if (params.organizationId) {
-      where.organizationId = params.organizationId;
-    }
-    if (params.openRegistrationOnly) {
-      where.openRegistration = true;
-    }
-    if (normalizedQuery) {
-      where.OR = [
-        { name: { contains: normalizedQuery, mode: 'insensitive' } },
-        { sport: { contains: normalizedQuery, mode: 'insensitive' } },
-        { division: { contains: normalizedQuery, mode: 'insensitive' } },
-      ];
-    }
-    const rows = await canonicalTeamsDelegate.findMany({
-      where: Object.keys(where).length ? where : undefined,
-      take: params.limit ?? 100,
-      skip: params.offset ?? 0,
-      orderBy: [{ openRegistration: 'desc' }, { name: 'asc' }, { id: 'asc' }],
-    });
-    return Promise.all((rows as CanonicalTeamRow[]).map((row) => loadCanonicalTeamById(row.id, client))).then((items) => items.filter(Boolean));
-  }
+  const loadUnfilteredCanonicalTeams = async () => {
+    if (!params.playerId && !params.managerId) {
+      const buildCanonicalFilters = () => {
+        const where: Record<string, unknown> = params.includeAdminOnly
+          ? {}
+          : { visibility: TEAM_VISIBILITY_PUBLIC };
+        if (!params.includeArchived) {
+          where.archivedAt = null;
+        }
+        if (params.organizationId) {
+          where.organizationId = params.organizationId;
+        }
+        if (params.openRegistrationOnly) {
+          where.openRegistration = true;
+        }
+        if (normalizedQuery) {
+          where.OR = [
+            { name: { contains: normalizedQuery, mode: 'insensitive' } },
+            { sport: { contains: normalizedQuery, mode: 'insensitive' } },
+            { division: { contains: normalizedQuery, mode: 'insensitive' } },
+          ];
+        }
+        return { where };
+      };
+      const { where } = buildCanonicalFilters();
 
-  const uniqueTeamIds = Array.from(new Set(teamIds));
-  const teams = await Promise.all(uniqueTeamIds.map((teamId) => loadCanonicalTeamById(teamId, client)));
-  return teams
-    .filter((team): team is NonNullable<typeof team> => (
-      Boolean(team)
-      && (!params.organizationId || normalizeId((team as Record<string, unknown>).organizationId as string | null | undefined) === params.organizationId)
-      && (!params.openRegistrationOnly || (team as Record<string, unknown>).openRegistration === true)
-      && (params.includeArchived || !(team as Record<string, unknown>).archivedAt)
-      && teamMatchesQuery(team as Record<string, unknown>)
-      && (params.includeAdminOnly || !isAdminOnlyCanonicalTeam(team as Record<string, unknown>))
-    ))
-    .slice(params.offset ?? 0, (params.offset ?? 0) + (params.limit ?? 100));
+      const rows = await canonicalTeamsDelegate.findMany({
+        where: Object.keys(where).length ? where : undefined,
+        take: params.limit ?? 100,
+        skip: params.offset ?? 0,
+        orderBy: [{ openRegistration: 'desc' }, { name: 'asc' }, { id: 'asc' }],
+      });
+      return Promise.all((rows as CanonicalTeamRow[]).map((row) => loadCanonicalTeamById(row.id, client))).then((items) => items.filter(Boolean));
+    }
+  };
+  const unfilteredTeams = await loadUnfilteredCanonicalTeams();
+  if (unfilteredTeams !== undefined) return unfilteredTeams;
+
+  const loadMembershipTeams = async () => {
+    const uniqueTeamIds = Array.from(new Set(teamIds));
+    const teams = await Promise.all(uniqueTeamIds.map((teamId) => loadCanonicalTeamById(teamId, client)));
+    return teams
+      .filter((team): team is NonNullable<typeof team> => (
+        Boolean(team)
+        && (!params.organizationId || normalizeId((team as Record<string, unknown>).organizationId as string | null | undefined) === params.organizationId)
+        && (!params.openRegistrationOnly || (team as Record<string, unknown>).openRegistration === true)
+        && (params.includeArchived || !(team as Record<string, unknown>).archivedAt)
+        && teamMatchesQuery(team as Record<string, unknown>)
+        && (params.includeAdminOnly || !isAdminOnlyCanonicalTeam(team as Record<string, unknown>))
+      ))
+      .slice(params.offset ?? 0, (params.offset ?? 0) + (params.limit ?? 100));
+  };
+  return loadMembershipTeams();
+
+
 };
 
 export const getCanonicalTeamIdsByUserIds = async (
@@ -1112,30 +1176,34 @@ const ensurePendingTeamInviteRecords = async (
     return [];
   }
 
-  const [authUsers, sensitiveRows, profiles] = await Promise.all([
-    tx?.authUser?.findMany
-      ? tx.authUser.findMany({
-        where: { id: { in: userIdsToHydrate } },
-        select: { id: true, email: true },
-      })
-      : Promise.resolve([]),
-    tx?.sensitiveUserData?.findMany
-      ? tx.sensitiveUserData.findMany({
-        where: { userId: { in: userIdsToHydrate } },
-        select: { userId: true, email: true },
-      })
-      : Promise.resolve([]),
-    tx?.userData?.findMany
-      ? tx.userData.findMany({
-        where: { id: { in: userIdsToHydrate } },
-        select: { id: true, firstName: true, lastName: true },
-      })
-      : Promise.resolve([]),
-  ]) as [
-    Array<{ id: string; email?: string | null }>,
-    Array<{ userId: string; email?: string | null }>,
-    Array<{ id: string; firstName?: string | null; lastName?: string | null }>,
-  ];
+  const loadInviteContacts = async () => {
+    const [authUsers, sensitiveRows, profiles] = await Promise.all([
+      tx?.authUser?.findMany
+        ? tx.authUser.findMany({
+          where: { id: { in: userIdsToHydrate } },
+          select: { id: true, email: true },
+        })
+        : Promise.resolve([]),
+      tx?.sensitiveUserData?.findMany
+        ? tx.sensitiveUserData.findMany({
+          where: { userId: { in: userIdsToHydrate } },
+          select: { userId: true, email: true },
+        })
+        : Promise.resolve([]),
+      tx?.userData?.findMany
+        ? tx.userData.findMany({
+          where: { id: { in: userIdsToHydrate } },
+          select: { id: true, firstName: true, lastName: true },
+        })
+        : Promise.resolve([]),
+    ]) as [
+        Array<{ id: string; email?: string | null }>,
+        Array<{ userId: string; email?: string | null }>,
+        Array<{ id: string; firstName?: string | null; lastName?: string | null }>,
+      ];
+    return { authUsers, sensitiveRows, profiles };
+  };
+  const { authUsers, sensitiveRows, profiles } = await loadInviteContacts();
 
   const authEmailByUserId = new Map(authUsers.map((row) => [row.id, normalizeId(row.email)]));
   const sensitiveEmailByUserId = new Map(sensitiveRows.map((row) => [row.userId, normalizeId(row.email)]));
@@ -1172,16 +1240,20 @@ const ensurePendingTeamInviteRecords = async (
   return createdInvites;
 };
 
+const supportsRosterWrites = (delegate: any): boolean => Boolean(
+  delegate?.findMany && delegate?.upsert && delegate?.updateMany,
+);
+
 export const syncCanonicalTeamRoster = async (
   input: SyncCanonicalTeamRosterInput,
   tx: PrismaLike,
 ): Promise<SyncCanonicalTeamRosterResult> => {
   const teamRegistrationsDelegate = getTeamRegistrationsDelegate(tx);
   const teamStaffAssignmentsDelegate = getTeamStaffAssignmentsDelegate(tx);
-  if (!teamRegistrationsDelegate?.findMany || !teamRegistrationsDelegate?.upsert || !teamRegistrationsDelegate?.updateMany) {
+  if (!supportsRosterWrites(teamRegistrationsDelegate)) {
     return emptySyncCanonicalTeamRosterResult();
   }
-  if (!teamStaffAssignmentsDelegate?.findMany || !teamStaffAssignmentsDelegate?.upsert || !teamStaffAssignmentsDelegate?.updateMany) {
+  if (!supportsRosterWrites(teamStaffAssignmentsDelegate)) {
     return emptySyncCanonicalTeamRosterResult();
   }
 
@@ -1192,20 +1264,24 @@ export const syncCanonicalTeamRoster = async (
     ...(captainId ? [captainId] : []),
   ]);
   const pendingPlayerIds = normalizeIdList(input.pendingPlayerIds).filter((userId) => !activePlayerIds.includes(userId));
-  const managerId = normalizeId(input.managerId);
-  const headCoachId = normalizeId(input.headCoachId);
-  const assistantCoachIds = normalizeIdList(input.assistantCoachIds).filter((userId) => userId !== headCoachId);
-  const desiredPlayerUserIds = uniqueStrings([...activePlayerIds, ...pendingPlayerIds]);
-  const desiredStaffKeys = new Map<string, { userId: string; role: 'MANAGER' | 'HEAD_COACH' | 'ASSISTANT_COACH' }>();
-  if (managerId) {
-    desiredStaffKeys.set(`MANAGER:${managerId}`, { userId: managerId, role: 'MANAGER' });
-  }
-  if (headCoachId) {
-    desiredStaffKeys.set(`HEAD_COACH:${headCoachId}`, { userId: headCoachId, role: 'HEAD_COACH' });
-  }
-  assistantCoachIds.forEach((userId) => {
-    desiredStaffKeys.set(`ASSISTANT_COACH:${userId}`, { userId, role: 'ASSISTANT_COACH' });
-  });
+  const buildDesiredStaff = () => {
+    const managerId = normalizeId(input.managerId);
+    const headCoachId = normalizeId(input.headCoachId);
+    const assistantCoachIds = normalizeIdList(input.assistantCoachIds).filter((userId) => userId !== headCoachId);
+    const desiredPlayerUserIds = uniqueStrings([...activePlayerIds, ...pendingPlayerIds]);
+    const desiredStaffKeys = new Map<string, { userId: string; role: 'MANAGER' | 'HEAD_COACH' | 'ASSISTANT_COACH' }>();
+    if (managerId) {
+      desiredStaffKeys.set(`MANAGER:${managerId}`, { userId: managerId, role: 'MANAGER' });
+    }
+    if (headCoachId) {
+      desiredStaffKeys.set(`HEAD_COACH:${headCoachId}`, { userId: headCoachId, role: 'HEAD_COACH' });
+    }
+    assistantCoachIds.forEach((userId) => {
+      desiredStaffKeys.set(`ASSISTANT_COACH:${userId}`, { userId, role: 'ASSISTANT_COACH' });
+    });
+    return { desiredPlayerUserIds, desiredStaffKeys };
+  };
+  const { desiredPlayerUserIds, desiredStaffKeys } = buildDesiredStaff();
 
   const [existingPlayerRegistrations, existingStaffAssignments] = await Promise.all([
     teamRegistrationsDelegate.findMany({
@@ -1216,25 +1292,33 @@ export const syncCanonicalTeamRoster = async (
     }) as Promise<CanonicalStaffAssignment[]>,
   ]);
 
-  const existingRosterIds = new Set(existingPlayerRegistrations
-    .filter((row) => ['ACTIVE', 'INVITED', 'PENDING', 'STARTED'].includes(String(row.status).toUpperCase()))
-    .map((row) => row.userId));
-  const newPlayerIds = desiredPlayerUserIds.filter((id) => !existingRosterIds.has(id));
-  const existingStaffKeys = new Set(existingStaffAssignments.filter((row) => row.status === 'ACTIVE' || row.status === 'INVITED').map((row) => `${row.role}:${row.userId}`));
-  const newStaffIds = [...desiredStaffKeys.entries()].filter(([key]) => !existingStaffKeys.has(key)).map(([, row]) => row.userId);
-  const addedIds = uniqueStrings([...newPlayerIds, ...newStaffIds]);
-  if (addedIds.length) {
-    if (!input.actingUserId) throw new Error('An acting Account is required to add Team members.');
-    await assertTeamInvitationAllowed(tx, { teamId: input.teamId, playerIds: addedIds, senderId: input.actingUserId }, now);
-  }
-  if (input.cleanupRemovedPendingInvites !== false) {
-    const promoted = existingPlayerRegistrations.some((row) => isInvitedRegistration(row) && activePlayerIds.includes(row.userId));
-    if (promoted) throw new InvitationRequestError('The Player or guardian must accept the invitation before Team access is granted.');
-    const removedPending = existingPlayerRegistrations.filter((row) => isInvitedRegistration(row) && !pendingPlayerIds.includes(row.userId)).map((row) => row.userId);
-    if (removedPending.length && await tx.invites.findFirst({ where: { type: 'TEAM', teamId: input.teamId, userId: { in: removedPending }, status: 'PENDING', OR: [{ linkExpiresAt: null }, { linkExpiresAt: { gt: now } }] }, select: { id: true } })) {
-      throw new InvitationRequestError('Cancel the invitation by its invitation ID before removing this Player.');
+  const validateRosterChanges = async () => {
+    const existingRosterIds = new Set(existingPlayerRegistrations
+      .filter((row) => ['ACTIVE', 'INVITED', 'PENDING', 'STARTED'].includes(String(row.status).toUpperCase()))
+      .map((row) => row.userId));
+    const newPlayerIds = desiredPlayerUserIds.filter((id) => !existingRosterIds.has(id));
+    const existingStaffKeys = new Set(existingStaffAssignments.filter((row) => row.status === 'ACTIVE' || row.status === 'INVITED').map((row) => `${row.role}:${row.userId}`));
+    const newStaffIds = [...desiredStaffKeys.entries()].filter(([key]) => !existingStaffKeys.has(key)).map(([, row]) => row.userId);
+    const addedIds = uniqueStrings([...newPlayerIds, ...newStaffIds]);
+    if (addedIds.length) {
+      if (!input.actingUserId) throw new Error('An acting Account is required to add Team members.');
+      await assertTeamInvitationAllowed(tx, { teamId: input.teamId, playerIds: addedIds, senderId: input.actingUserId }, now);
     }
-  }
+    const validatePendingInvitations = async () => {
+      if (input.cleanupRemovedPendingInvites !== false) {
+        const promoted = existingPlayerRegistrations.some((row) => isInvitedRegistration(row) && activePlayerIds.includes(row.userId));
+        if (promoted) throw new InvitationRequestError('The Player or guardian must accept the invitation before Team access is granted.');
+        const removedPending = existingPlayerRegistrations.filter((row) => isInvitedRegistration(row) && !pendingPlayerIds.includes(row.userId)).map((row) => row.userId);
+        if (removedPending.length && await tx.invites.findFirst({ where: { type: 'TEAM', teamId: input.teamId, userId: { in: removedPending }, status: 'PENDING', OR: [{ linkExpiresAt: null }, { linkExpiresAt: { gt: now } }] }, select: { id: true } })) {
+          throw new InvitationRequestError('Cancel the invitation by its invitation ID before removing this Player.');
+        }
+      }
+    };
+    await validatePendingInvitations();
+
+    return { existingRosterIds };
+  };
+  const { existingRosterIds } = await validateRosterChanges();
 
   await Promise.all(activePlayerIds.map((userId) => teamRegistrationsDelegate.upsert({
     where: {
@@ -1369,10 +1453,15 @@ export const canManageCanonicalTeam = async (params: {
   if (!team) {
     return false;
   }
-  const playerRegistrations = Array.isArray((team as any).playerRegistrations) ? (team as any).playerRegistrations : [];
-  const staffAssignments = Array.isArray((team as any).staffAssignments) ? (team as any).staffAssignments : [];
-  const isCaptain = playerRegistrations.some((row: any) => row.userId === params.userId && row.status === 'ACTIVE' && Boolean(row.isCaptain));
-  const isManager = staffAssignments.some((row: any) => row.userId === params.userId && row.status === 'ACTIVE' && String(row.role ?? '').toUpperCase() === 'MANAGER');
+  const resolveManagerRoles = () => {
+    const playerRegistrations = Array.isArray((team as any).playerRegistrations) ? (team as any).playerRegistrations : [];
+    const staffAssignments = Array.isArray((team as any).staffAssignments) ? (team as any).staffAssignments : [];
+    const isCaptain = playerRegistrations.some((row: any) => row.userId === params.userId && row.status === 'ACTIVE' && Boolean(row.isCaptain));
+    const isManager = staffAssignments.some((row: any) => row.userId === params.userId && row.status === 'ACTIVE' && String(row.role ?? '').toUpperCase() === 'MANAGER');
+    return { isCaptain, isManager };
+  };
+  const { isCaptain, isManager } = resolveManagerRoles();
+
   return isCaptain || isManager;
 };
 
@@ -1382,20 +1471,25 @@ export const findRegisteredEventTeamForCanonical = async (params: {
   targetDivisionId?: string | null;
   targetDivisionTypeId?: string | null;
 }, client: PrismaLike = prisma) => {
-  const eventTeamsDelegate = getEventTeamsDelegate(client);
-  const rows = await eventTeamsDelegate?.findMany?.({
-    where: {
-      eventId: params.eventId,
-      parentTeamId: params.canonicalTeamId,
-      kind: 'REGISTERED',
-    },
-    orderBy: [
-      { updatedAt: 'desc' },
-      { createdAt: 'asc' },
-      { id: 'asc' },
-    ],
-  }) as EventTeamRow[] | undefined;
-  const candidates = (rows ?? []).filter((row) => normalizeId(row.parentTeamId) === params.canonicalTeamId);
+  const loadRegisteredCandidates = async () => {
+    const eventTeamsDelegate = getEventTeamsDelegate(client);
+    const rows = await eventTeamsDelegate?.findMany?.({
+      where: {
+        eventId: params.eventId,
+        parentTeamId: params.canonicalTeamId,
+        kind: 'REGISTERED',
+      },
+      orderBy: [
+        { updatedAt: 'desc' },
+        { createdAt: 'asc' },
+        { id: 'asc' },
+      ],
+    }) as EventTeamRow[] | undefined;
+    const candidates = (rows ?? []).filter((row) => normalizeId(row.parentTeamId) === params.canonicalTeamId);
+    return { candidates };
+  };
+  const { candidates } = await loadRegisteredCandidates();
+
   if (!candidates.length) {
     return null;
   }
@@ -1589,38 +1683,43 @@ export const claimOrCreateEventTeamSnapshot = async (params: {
       teamSignup: true,
     });
   }
-  const canonicalTeam = params.canonicalTeam ?? await loadCanonicalTeamById(params.canonicalTeamId, params.tx);
-  if (!canonicalTeam) {
-    throw new Error('Canonical team not found.');
-  }
+  const loadSnapshotSource = async () => {
+    const canonicalTeam = params.canonicalTeam ?? await loadCanonicalTeamById(params.canonicalTeamId, params.tx);
+    if (!canonicalTeam) {
+      throw new Error('Canonical team not found.');
+    }
 
-  const playerRegistrations = Array.isArray((canonicalTeam as any).playerRegistrations) ? (canonicalTeam as any).playerRegistrations : [];
-  const staffAssignments = Array.isArray((canonicalTeam as any).staffAssignments) ? (canonicalTeam as any).staffAssignments : [];
-  const activePlayerRegistrations = playerRegistrations.filter((row: any) => ACTIVE_TEAM_MEMBER_STATUSES.has(String(row.status ?? '').toUpperCase()));
-  const activeStaffAssignments = staffAssignments.filter((row: any) => row.status === 'ACTIVE');
-  const now = new Date();
-  const eventTeamsDelegate = getEventTeamsDelegate(params.tx);
-  if (!eventTeamsDelegate?.findMany) {
-    throw new Error('Event team storage is unavailable.');
-  }
+    const playerRegistrations = Array.isArray((canonicalTeam as any).playerRegistrations) ? (canonicalTeam as any).playerRegistrations : [];
+    const staffAssignments = Array.isArray((canonicalTeam as any).staffAssignments) ? (canonicalTeam as any).staffAssignments : [];
+    const activePlayerRegistrations = playerRegistrations.filter((row: any) => ACTIVE_TEAM_MEMBER_STATUSES.has(String(row.status ?? '').toUpperCase()));
+    const activeStaffAssignments = staffAssignments.filter((row: any) => row.status === 'ACTIVE');
+    const now = new Date();
+    const eventTeamsDelegate = getEventTeamsDelegate(params.tx);
+    if (!eventTeamsDelegate?.findMany) {
+      throw new Error('Event team storage is unavailable.');
+    }
+    return { canonicalTeam, activePlayerRegistrations, activeStaffAssignments, now, eventTeamsDelegate };
+  };
+  const { canonicalTeam, activePlayerRegistrations, activeStaffAssignments, now, eventTeamsDelegate } = await loadSnapshotSource();
 
   const explicitEventTeamId = normalizeId(params.eventTeamId);
   const targetDivisionId = normalizeId(params.divisionId);
   const targetDivisionTypeId = normalizeId(params.divisionTypeId);
   const canonicalTeamIdentityId = normalizeId((canonicalTeam as any).parentTeamId) ?? params.canonicalTeamId;
-  const explicitRegisteredEventTeam = explicitEventTeamId
-    ? await findRegisteredEventTeamByIdForEvent({
+  const findExistingRegistration = async () => {
+    const explicitRegisteredEventTeam = explicitEventTeamId
+      ? await findRegisteredEventTeamByIdForEvent({
         eventId: params.eventId,
         eventTeamId: explicitEventTeamId,
       }, params.tx)
-    : null;
-  const existingRegisteredEventTeam = explicitEventTeamId
-    ? (
-      normalizeId(explicitRegisteredEventTeam?.parentTeamId) === canonicalTeamIdentityId
-        ? explicitRegisteredEventTeam
-        : null
-    )
-    : await findRegisteredEventTeamByIdForEvent({
+      : null;
+    const existingRegisteredEventTeam = explicitEventTeamId
+      ? (
+        normalizeId(explicitRegisteredEventTeam?.parentTeamId) === canonicalTeamIdentityId
+          ? explicitRegisteredEventTeam
+          : null
+      )
+      : await findRegisteredEventTeamByIdForEvent({
         eventId: params.eventId,
         eventTeamId: params.canonicalTeamId,
       }, params.tx) ?? await findRegisteredEventTeamForCanonical({
@@ -1629,18 +1728,27 @@ export const claimOrCreateEventTeamSnapshot = async (params: {
         targetDivisionId,
         targetDivisionTypeId,
       }, params.tx);
-  const registeredSiblingEventTeams = explicitEventTeamId
-    ? []
-    : canonicalTeamIdentityId
-      ? newestFirst(((await eventTeamsDelegate.findMany({
+    return { existingRegisteredEventTeam };
+  };
+  const { existingRegisteredEventTeam } = await findExistingRegistration();
+
+  const loadSiblingTeams = async () => {
+    const registeredSiblingEventTeams = explicitEventTeamId
+      ? []
+      : canonicalTeamIdentityId
+        ? newestFirst(((await eventTeamsDelegate.findMany({
           where: {
             eventId: params.eventId,
             parentTeamId: canonicalTeamIdentityId,
             kind: 'REGISTERED',
           },
         }) as EventTeamRow[]) ?? [])
-        .filter((row) => normalizeId(row.parentTeamId) === canonicalTeamIdentityId))
-      : [];
+          .filter((row) => normalizeId(row.parentTeamId) === canonicalTeamIdentityId))
+        : [];
+    return { registeredSiblingEventTeams };
+  };
+  const { registeredSiblingEventTeams } = await loadSiblingTeams();
+
   const requestedPlaceholderDivisionIds = normalizeIdList(params.placeholderDivisionIds);
   const phasePlaceholderDivisionIds = await loadPhasePlaceholderDivisionIds({
     client: params.tx,
@@ -1652,22 +1760,28 @@ export const claimOrCreateEventTeamSnapshot = async (params: {
     [...requestedPlaceholderDivisionIds, ...phasePlaceholderDivisionIds]
       .map((divisionId) => divisionId.toLowerCase()),
   );
-  const existingDivisionId = normalizeId(existingRegisteredEventTeam?.division);
-  const existingDivisionTypeId = normalizeId(existingRegisteredEventTeam?.divisionTypeId);
-  const targetMatchesExistingDivision = Boolean(
-    existingRegisteredEventTeam
-    && (
-      (targetDivisionId && existingDivisionId === targetDivisionId)
-      || (existingDivisionId && placeholderDivisionIdSet.has(existingDivisionId.toLowerCase()))
-      || (!targetDivisionId && targetDivisionTypeId && existingDivisionTypeId === targetDivisionTypeId)
-    ),
-  );
-  const shouldInspectPlaceholders = Boolean(explicitEventTeamId)
+  const resolveExistingDivision = () => {
+    const existingDivisionId = normalizeId(existingRegisteredEventTeam?.division);
+    const existingDivisionTypeId = normalizeId(existingRegisteredEventTeam?.divisionTypeId);
+    const targetMatchesExistingDivision = Boolean(
+      existingRegisteredEventTeam
+      && (
+        (targetDivisionId && existingDivisionId === targetDivisionId)
+        || (existingDivisionId && placeholderDivisionIdSet.has(existingDivisionId.toLowerCase()))
+        || (!targetDivisionId && targetDivisionTypeId && existingDivisionTypeId === targetDivisionTypeId)
+      ),
+    );
+    return { existingDivisionId, existingDivisionTypeId, targetMatchesExistingDivision };
+  };
+  const { existingDivisionId, existingDivisionTypeId, targetMatchesExistingDivision } = resolveExistingDivision();
+
+  const needsPlaceholderLookup = () => Boolean(explicitEventTeamId)
     || !existingRegisteredEventTeam
     || (
       !targetMatchesExistingDivision
       && Boolean(targetDivisionId || targetDivisionTypeId || placeholderDivisionIdSet.size > 0)
     );
+  const shouldInspectPlaceholders = needsPlaceholderLookup();
   const placeholderRows = shouldInspectPlaceholders
     ? await eventTeamsDelegate.findMany({
       where: {
@@ -1678,318 +1792,349 @@ export const claimOrCreateEventTeamSnapshot = async (params: {
       },
     }) as EventTeamRow[]
     : [];
-  const placeholderIds = placeholderRows
-    .map((row) => normalizeId(row.id))
-    .filter((eventTeamId): eventTeamId is string => Boolean(eventTeamId));
-  const placeholderHolds = placeholderIds.length && params.tx?.eventRegistrations?.findMany
-    ? await params.tx.eventRegistrations.findMany({
-      where: {
-        eventId: params.eventId,
-        registrantType: 'TEAM',
-        rosterRole: 'PARTICIPANT',
-        status: { in: ACTIVE_EVENT_TEAM_REGISTRATION_STATUSES },
-        parentId: { not: null },
-        OR: [
-          { registrantId: { in: placeholderIds } },
-          { eventTeamId: { in: placeholderIds } },
-        ],
-      },
-      select: {
-        registrantId: true,
-        eventTeamId: true,
-        parentId: true,
-      },
-    }) as Array<{
-      registrantId?: string | null;
-      eventTeamId?: string | null;
-      parentId?: string | null;
-    }>
-    : [];
-  const heldPlaceholderIdsForCanonicalTeam = new Set<string>();
-  const unavailablePlaceholderIds = new Set<string>();
-  placeholderHolds.forEach((hold) => {
-    const ownerId = normalizeId(hold.parentId);
-    if (!ownerId) {
-      return;
-    }
-    const heldIds = [normalizeId(hold.eventTeamId), normalizeId(hold.registrantId)]
-      .filter((eventTeamId): eventTeamId is string => Boolean(eventTeamId && placeholderIds.includes(eventTeamId)));
-    if (ownerId === canonicalTeamIdentityId || ownerId === params.canonicalTeamId) {
-      heldIds.forEach((eventTeamId) => heldPlaceholderIdsForCanonicalTeam.add(eventTeamId));
-      return;
-    }
-    heldIds.forEach((eventTeamId) => unavailablePlaceholderIds.add(eventTeamId));
-  });
-  const matchingPlaceholder = placeholderRows
-    .filter((row) => !unavailablePlaceholderIds.has(row.id))
-    .filter((row) => {
-      if (explicitEventTeamId) {
-        return normalizeId(row.id) === explicitEventTeamId
-          && normalizeId(row.eventId) === params.eventId
-          && String(row.kind ?? '').toUpperCase() === 'PLACEHOLDER'
-          && normalizeId(row.parentTeamId) === null;
-      }
-      const rowDivision = normalizeId(row.division);
-      const rowDivisionTypeId = normalizeId(row.divisionTypeId);
-      if (rowDivision && placeholderDivisionIdSet.has(rowDivision.toLowerCase())) {
-        return true;
-      }
-      if (targetDivisionId && rowDivision && rowDivision === targetDivisionId) {
-        return true;
-      }
-      if (targetDivisionTypeId && rowDivisionTypeId && rowDivisionTypeId === targetDivisionTypeId) {
-        return true;
-      }
-      if (!existingRegisteredEventTeam && !targetDivisionId && !targetDivisionTypeId && placeholderDivisionIdSet.size === 0) {
-        return true;
-      }
-      return false;
-    })
-    .sort((left: any, right: any) => {
-      const ownedHoldOrderDelta = Number(!heldPlaceholderIdsForCanonicalTeam.has(left.id))
-        - Number(!heldPlaceholderIdsForCanonicalTeam.has(right.id));
-      if (ownedHoldOrderDelta !== 0) {
-        return ownedHoldOrderDelta;
-      }
-      const claimOrderDelta = placeholderClaimOrder(left) - placeholderClaimOrder(right);
-      if (claimOrderDelta !== 0) {
-        return claimOrderDelta;
-      }
-      const leftCreatedAt = left.createdAt ? new Date(left.createdAt).getTime() : Number.MAX_SAFE_INTEGER;
-      const rightCreatedAt = right.createdAt ? new Date(right.createdAt).getTime() : Number.MAX_SAFE_INTEGER;
-      if (leftCreatedAt !== rightCreatedAt) {
-        return leftCreatedAt - rightCreatedAt;
-      }
-      return String(left.id).localeCompare(String(right.id));
-    })[0] ?? null;
-  if (explicitEventTeamId && !matchingPlaceholder && !existingRegisteredEventTeam) {
-    throw new Error('Reserved Placeholder Team is no longer available.');
-  }
-  if (
-    params.enforceProvisionedPlaceholderScope
-    && shouldInspectPlaceholders
-    && placeholderRows.length > 0
-    && !matchingPlaceholder
-  ) {
-    throw Object.assign(
-      new Error('No compatible Placeholder Team is available for this registration.'),
-      { code: 'EVENT_TEAM_SLOT_UNAVAILABLE' },
-    );
-  }
-  const matchingSwapTarget = matchingPlaceholder;
-  const sourcePlaceholderEventTeamId = existingRegisteredEventTeam && matchingSwapTarget
-    ? normalizeId(existingRegisteredEventTeam.id)
-    : null;
-  const eventTeamId = normalizeId(matchingSwapTarget?.id)
-    ?? normalizeId(existingRegisteredEventTeam?.id)
-    ?? (eventTeamsDelegate.create ? crypto.randomUUID() : params.canonicalTeamId);
-  const duplicateRegisteredEventTeams = registeredSiblingEventTeams.filter((row) => {
-    const duplicateId = normalizeId(row.id);
-    return Boolean(
-      duplicateId
-      && duplicateId !== eventTeamId
-      && duplicateId !== sourcePlaceholderEventTeamId
-    );
-  });
-  const matchingPlaceholderDivisionId = normalizeId(matchingSwapTarget?.division);
-  const shouldPreservePlaceholderDivision = Boolean(
-    matchingPlaceholderDivisionId
-    && (
-      Boolean(explicitEventTeamId)
-      || placeholderDivisionIdSet.has(matchingPlaceholderDivisionId.toLowerCase())
-    ),
-  );
-  const parentTeamId = normalizeId(existingRegisteredEventTeam?.parentTeamId)
-    ?? canonicalTeamIdentityId
-    ?? params.canonicalTeamId;
-  const shouldPreserveExistingDivision = Boolean(
-    existingRegisteredEventTeam
-    && targetMatchesExistingDivision
-    && existingDivisionId,
-  );
-  const teamData = {
-    eventId: params.eventId,
-    kind: 'REGISTERED',
-    playerIds: activePlayerRegistrations.map((row: any) => row.userId),
-    playerRegistrationIds: [],
-    division: explicitEventTeamId
-      ? matchingPlaceholderDivisionId
-      : (shouldPreservePlaceholderDivision ? matchingPlaceholderDivisionId : null)
-        ?? (shouldPreserveExistingDivision ? existingDivisionId : null)
-        ?? normalizeId(params.divisionId)
-        ?? normalizeId((canonicalTeam as any).division)
-        ?? null,
-    divisionTypeId: explicitEventTeamId
-      ? normalizeId(matchingSwapTarget?.divisionTypeId)
-      : normalizeId(params.divisionTypeId) ?? normalizeId((canonicalTeam as any).divisionTypeId) ?? null,
-    wins: (canonicalTeam as any).wins ?? null,
-    losses: (canonicalTeam as any).losses ?? null,
-    name: String((canonicalTeam as any).name ?? '').trim(),
-    captainId: normalizeId((canonicalTeam as any).captainId) ?? '',
-    managerId: normalizeId((canonicalTeam as any).managerId) ?? '',
-    headCoachId: normalizeId((canonicalTeam as any).headCoachId),
-    coachIds: normalizeIdList((canonicalTeam as any).coachIds),
-    staffAssignmentIds: [],
-    parentTeamId,
-    pending: [],
-    teamSize: Number((canonicalTeam as any).teamSize ?? activePlayerRegistrations.length ?? 0),
-    profileImageId: normalizeId((canonicalTeam as any).profileImageId),
-    sport: normalizeId((canonicalTeam as any).sport),
-    updatedAt: now,
-  };
-
-  const sourcePlaceholderDivisionId = sourcePlaceholderEventTeamId
-    ? (existingDivisionId ?? normalizeId((canonicalTeam as any).division) ?? null)
-    : null;
-  const sourcePlaceholderDivisionTypeId = sourcePlaceholderEventTeamId
-    ? (existingDivisionTypeId ?? normalizeId((canonicalTeam as any).divisionTypeId) ?? null)
-    : null;
-  const sourcePlaceholderData = sourcePlaceholderEventTeamId
-    ? {
-      eventId: params.eventId,
-      kind: 'PLACEHOLDER',
-      playerIds: [],
-      playerRegistrationIds: [],
-      division: sourcePlaceholderDivisionId,
-      divisionTypeId: sourcePlaceholderDivisionTypeId,
-      wins: 0,
-      losses: 0,
-      name: String(matchingSwapTarget?.kind === 'PLACEHOLDER' ? matchingSwapTarget?.name : '').trim() || 'Place Holder',
-      captainId: '',
-      managerId: '',
-      headCoachId: null,
-      coachIds: [],
-      staffAssignmentIds: [],
-      parentTeamId: null,
-      pending: [],
-      teamSize: normalizeNonNegativeInt(
-        existingRegisteredEventTeam?.teamSize
-        ?? (canonicalTeam as any).teamSize
-        ?? activePlayerRegistrations.length,
-      ),
-      profileImageId: null,
-      sport: null,
-      updatedAt: now,
-    }
-    : null;
-
-  const eventTeam = await ((matchingPlaceholder || existingRegisteredEventTeam)
-    ? (async () => {
-      if (!eventTeamsDelegate.update) {
-        throw new Error('Event team update storage is unavailable.');
-      }
-      const updatedEventTeam = await eventTeamsDelegate.update({
-        where: { id: eventTeamId },
-        data: teamData,
-      });
-      if (sourcePlaceholderEventTeamId && sourcePlaceholderData) {
-        await eventTeamsDelegate.update({
-          where: { id: sourcePlaceholderEventTeamId },
-          data: sourcePlaceholderData,
-        });
-      }
-      if (duplicateRegisteredEventTeams.length) {
-        await Promise.all(duplicateRegisteredEventTeams.map((row) => eventTeamsDelegate.update({
-          where: { id: row.id },
-          data: {
-            eventId: params.eventId,
-            kind: 'PLACEHOLDER',
-            playerIds: [],
-            playerRegistrationIds: [],
-            division: normalizeId(row.division),
-            divisionTypeId: normalizeId(row.divisionTypeId),
-            wins: 0,
-            losses: 0,
-            name: 'Place Holder',
-            captainId: '',
-            managerId: '',
-            headCoachId: null,
-            coachIds: [],
-            staffAssignmentIds: [],
-            parentTeamId: null,
-            pending: [],
-            teamSize: normalizeNonNegativeInt(row.teamSize),
-            profileImageId: null,
-            sport: null,
-            updatedAt: now,
-          },
-        })));
-      }
-      return updatedEventTeam;
-    })()
-    : (() => {
-      if (!eventTeamsDelegate.create) {
-        return {
-          id: params.canonicalTeamId,
-          ...teamData,
-        };
-      }
-      return eventTeamsDelegate.create({
-        data: {
-          id: eventTeamId,
-          createdAt: now,
-          ...teamData,
-        },
-      });
-    })());
-
-  if (params.upsertRegistration === false && matchingPlaceholder) {
-    await deleteUnparentedPlaceholderEventTeamRegistrations({
-      tx: params.tx,
-      eventId: params.eventId,
-      eventTeamIds: [matchingPlaceholder.id],
-      now,
-    });
-  }
-
-  if (params.upsertRegistration !== false) {
-    await upsertEventRegistration({
-      eventId: params.eventId,
-      registrantType: 'TEAM',
-      registrantId: eventTeamId,
-      parentId: parentTeamId,
-      rosterRole: 'PARTICIPANT',
-      status: params.registrationStatus ?? 'ACTIVE',
-      eventTeamId: eventTeamId,
-      divisionId: normalizeId(params.divisionId) ?? normalizeId((eventTeam as any).division) ?? null,
-      divisionTypeId: normalizeId(params.divisionTypeId) ?? normalizeId((eventTeam as any).divisionTypeId) ?? null,
-      divisionTypeKey: normalizeId(params.divisionTypeKey),
-      createdBy: params.createdBy,
-      occurrence: params.occurrence,
-      }, params.tx);
-  }
-
-  if (params.upsertRegistration !== false && sourcePlaceholderEventTeamId && params.tx?.eventRegistrations?.updateMany) {
-    await params.tx.eventRegistrations.updateMany({
-      where: {
-        eventId: params.eventId,
-        registrantType: 'TEAM',
-        status: { in: ACTIVE_EVENT_TEAM_REGISTRATION_STATUSES },
-        OR: [
-          { registrantId: sourcePlaceholderEventTeamId },
-          { eventTeamId: sourcePlaceholderEventTeamId },
-        ],
-      },
-      data: {
-        status: 'CANCELLED',
-        updatedAt: now,
-      },
-    });
-  }
-
-  if (params.upsertRegistration !== false && duplicateRegisteredEventTeams.length && params.tx?.eventRegistrations?.updateMany) {
-    const duplicateEventTeamIds = duplicateRegisteredEventTeams
+  const loadPlaceholderOwnership = async () => {
+    const placeholderIds = placeholderRows
       .map((row) => normalizeId(row.id))
-      .filter((teamId): teamId is string => Boolean(teamId));
-    if (duplicateEventTeamIds.length) {
+      .filter((eventTeamId): eventTeamId is string => Boolean(eventTeamId));
+    const placeholderHolds = placeholderIds.length && params.tx?.eventRegistrations?.findMany
+      ? await params.tx.eventRegistrations.findMany({
+        where: {
+          eventId: params.eventId,
+          registrantType: 'TEAM',
+          rosterRole: 'PARTICIPANT',
+          status: { in: ACTIVE_EVENT_TEAM_REGISTRATION_STATUSES },
+          parentId: { not: null },
+          OR: [
+            { registrantId: { in: placeholderIds } },
+            { eventTeamId: { in: placeholderIds } },
+          ],
+        },
+        select: {
+          registrantId: true,
+          eventTeamId: true,
+          parentId: true,
+        },
+      }) as Array<{
+        registrantId?: string | null;
+        eventTeamId?: string | null;
+        parentId?: string | null;
+      }>
+      : [];
+    const heldPlaceholderIdsForCanonicalTeam = new Set<string>();
+    const unavailablePlaceholderIds = new Set<string>();
+    placeholderHolds.forEach((hold) => {
+      const ownerId = normalizeId(hold.parentId);
+      if (!ownerId) {
+        return;
+      }
+      const heldIds = [normalizeId(hold.eventTeamId), normalizeId(hold.registrantId)]
+        .filter((eventTeamId): eventTeamId is string => Boolean(eventTeamId && placeholderIds.includes(eventTeamId)));
+      if (ownerId === canonicalTeamIdentityId || ownerId === params.canonicalTeamId) {
+        heldIds.forEach((eventTeamId) => heldPlaceholderIdsForCanonicalTeam.add(eventTeamId));
+        return;
+      }
+      heldIds.forEach((eventTeamId) => unavailablePlaceholderIds.add(eventTeamId));
+    });
+    return { heldPlaceholderIdsForCanonicalTeam, unavailablePlaceholderIds };
+  };
+  const { heldPlaceholderIdsForCanonicalTeam, unavailablePlaceholderIds } = await loadPlaceholderOwnership();
+
+  const selectPlaceholder = () => {
+    const matchingPlaceholder = placeholderRows
+      .filter((row) => !unavailablePlaceholderIds.has(row.id))
+      .filter((row) => {
+        if (explicitEventTeamId) {
+          return normalizeId(row.id) === explicitEventTeamId
+            && normalizeId(row.eventId) === params.eventId
+            && String(row.kind ?? '').toUpperCase() === 'PLACEHOLDER'
+            && normalizeId(row.parentTeamId) === null;
+        }
+        const matchesPlaceholderDivision = () => {
+          const rowDivision = normalizeId(row.division);
+          const rowDivisionTypeId = normalizeId(row.divisionTypeId);
+          if (rowDivision && placeholderDivisionIdSet.has(rowDivision.toLowerCase())) {
+            return true;
+          }
+          if (targetDivisionId && rowDivision && rowDivision === targetDivisionId) {
+            return true;
+          }
+          if (targetDivisionTypeId && rowDivisionTypeId && rowDivisionTypeId === targetDivisionTypeId) {
+            return true;
+          }
+          const acceptsAnyDivision = () => !existingRegisteredEventTeam && !targetDivisionId && !targetDivisionTypeId && placeholderDivisionIdSet.size === 0;
+          if (acceptsAnyDivision()) {
+            return true;
+          }
+          return false;
+        };
+        return matchesPlaceholderDivision();
+
+      })
+      .sort((left: any, right: any) => {
+        const ownedHoldOrderDelta = Number(!heldPlaceholderIdsForCanonicalTeam.has(left.id))
+          - Number(!heldPlaceholderIdsForCanonicalTeam.has(right.id));
+        if (ownedHoldOrderDelta !== 0) {
+          return ownedHoldOrderDelta;
+        }
+        const claimOrderDelta = placeholderClaimOrder(left) - placeholderClaimOrder(right);
+        if (claimOrderDelta !== 0) {
+          return claimOrderDelta;
+        }
+        const leftCreatedAt = left.createdAt ? new Date(left.createdAt).getTime() : Number.MAX_SAFE_INTEGER;
+        const rightCreatedAt = right.createdAt ? new Date(right.createdAt).getTime() : Number.MAX_SAFE_INTEGER;
+        if (leftCreatedAt !== rightCreatedAt) {
+          return leftCreatedAt - rightCreatedAt;
+        }
+        return String(left.id).localeCompare(String(right.id));
+      })[0] ?? null;
+    return { matchingPlaceholder };
+  };
+  const { matchingPlaceholder } = selectPlaceholder();
+
+  const validatePlaceholderAvailability = () => {
+    if (explicitEventTeamId && !matchingPlaceholder && !existingRegisteredEventTeam) {
+      throw new Error('Reserved Placeholder Team is no longer available.');
+    }
+    if (
+      params.enforceProvisionedPlaceholderScope
+      && shouldInspectPlaceholders
+      && placeholderRows.length > 0
+      && !matchingPlaceholder
+    ) {
+      throw Object.assign(
+        new Error('No compatible Placeholder Team is available for this registration.'),
+        { code: 'EVENT_TEAM_SLOT_UNAVAILABLE' },
+      );
+    }
+  };
+  validatePlaceholderAvailability();
+
+  const resolveSnapshotIdentity = () => {
+    const matchingSwapTarget = matchingPlaceholder;
+    const sourcePlaceholderEventTeamId = existingRegisteredEventTeam && matchingSwapTarget
+      ? normalizeId(existingRegisteredEventTeam.id)
+      : null;
+    const eventTeamId = normalizeId(matchingSwapTarget?.id)
+      ?? normalizeId(existingRegisteredEventTeam?.id)
+      ?? (eventTeamsDelegate.create ? crypto.randomUUID() : params.canonicalTeamId);
+    const duplicateRegisteredEventTeams = registeredSiblingEventTeams.filter((row) => {
+      const duplicateId = normalizeId(row.id);
+      return Boolean(
+        duplicateId
+        && duplicateId !== eventTeamId
+        && duplicateId !== sourcePlaceholderEventTeamId
+      );
+    });
+    return { matchingSwapTarget, sourcePlaceholderEventTeamId, eventTeamId, duplicateRegisteredEventTeams };
+  };
+  const { matchingSwapTarget, sourcePlaceholderEventTeamId, eventTeamId, duplicateRegisteredEventTeams } = resolveSnapshotIdentity();
+
+  const resolveSnapshotDivisions = () => {
+    const matchingPlaceholderDivisionId = normalizeId(matchingSwapTarget?.division);
+    const shouldPreservePlaceholderDivision = Boolean(
+      matchingPlaceholderDivisionId
+      && (
+        Boolean(explicitEventTeamId)
+        || placeholderDivisionIdSet.has(matchingPlaceholderDivisionId.toLowerCase())
+      ),
+    );
+    const parentTeamId = normalizeId(existingRegisteredEventTeam?.parentTeamId)
+      ?? canonicalTeamIdentityId
+      ?? params.canonicalTeamId;
+    const shouldPreserveExistingDivision = Boolean(
+      existingRegisteredEventTeam
+      && targetMatchesExistingDivision
+      && existingDivisionId,
+    );
+    return { matchingPlaceholderDivisionId, shouldPreservePlaceholderDivision, parentTeamId, shouldPreserveExistingDivision };
+  };
+  const { matchingPlaceholderDivisionId, shouldPreservePlaceholderDivision, parentTeamId, shouldPreserveExistingDivision } = resolveSnapshotDivisions();
+
+  const resolveSnapshotDivision = () => explicitEventTeamId
+    ? matchingPlaceholderDivisionId
+    : (shouldPreservePlaceholderDivision ? matchingPlaceholderDivisionId : null)
+    ?? (shouldPreserveExistingDivision ? existingDivisionId : null)
+    ?? normalizeId(params.divisionId)
+    ?? normalizeId((canonicalTeam as any).division)
+    ?? null;
+  const resolveSnapshotDivisionType = () => explicitEventTeamId
+    ? normalizeId(matchingSwapTarget?.divisionTypeId)
+    : normalizeId(params.divisionTypeId) ?? normalizeId((canonicalTeam as any).divisionTypeId) ?? null;
+
+  const buildSnapshotData = () => {
+    const teamData = {
+      eventId: params.eventId,
+      kind: 'REGISTERED',
+      playerIds: activePlayerRegistrations.map((row: any) => row.userId),
+      playerRegistrationIds: [],
+      division: resolveSnapshotDivision(),
+      divisionTypeId: resolveSnapshotDivisionType(),
+      wins: (canonicalTeam as any).wins ?? null,
+      losses: (canonicalTeam as any).losses ?? null,
+      name: String((canonicalTeam as any).name ?? '').trim(),
+      captainId: normalizeId((canonicalTeam as any).captainId) ?? '',
+      managerId: normalizeId((canonicalTeam as any).managerId) ?? '',
+      headCoachId: normalizeId((canonicalTeam as any).headCoachId),
+      coachIds: normalizeIdList((canonicalTeam as any).coachIds),
+      staffAssignmentIds: [],
+      parentTeamId,
+      pending: [],
+      teamSize: Number((canonicalTeam as any).teamSize ?? activePlayerRegistrations.length ?? 0),
+      profileImageId: normalizeId((canonicalTeam as any).profileImageId),
+      sport: normalizeId((canonicalTeam as any).sport),
+      updatedAt: now,
+    };
+    return { teamData };
+  };
+  const { teamData } = buildSnapshotData();
+
+  const buildSourcePlaceholderData = () => {
+    const resolveSourceDivisions = () => {
+      const sourcePlaceholderDivisionId = sourcePlaceholderEventTeamId
+        ? (existingDivisionId ?? normalizeId((canonicalTeam as any).division) ?? null)
+        : null;
+      const sourcePlaceholderDivisionTypeId = sourcePlaceholderEventTeamId
+        ? (existingDivisionTypeId ?? normalizeId((canonicalTeam as any).divisionTypeId) ?? null)
+        : null;
+      return { sourcePlaceholderDivisionId, sourcePlaceholderDivisionTypeId };
+    };
+    const { sourcePlaceholderDivisionId, sourcePlaceholderDivisionTypeId } = resolveSourceDivisions();
+
+    const sourcePlaceholderData = sourcePlaceholderEventTeamId
+      ? {
+        eventId: params.eventId,
+        kind: 'PLACEHOLDER',
+        playerIds: [],
+        playerRegistrationIds: [],
+        division: sourcePlaceholderDivisionId,
+        divisionTypeId: sourcePlaceholderDivisionTypeId,
+        wins: 0,
+        losses: 0,
+        name: String(matchingSwapTarget?.kind === 'PLACEHOLDER' ? matchingSwapTarget?.name : '').trim() || 'Place Holder',
+        captainId: '',
+        managerId: '',
+        headCoachId: null,
+        coachIds: [],
+        staffAssignmentIds: [],
+        parentTeamId: null,
+        pending: [],
+        teamSize: normalizeNonNegativeInt(
+          existingRegisteredEventTeam?.teamSize
+          ?? (canonicalTeam as any).teamSize
+          ?? activePlayerRegistrations.length,
+        ),
+        profileImageId: null,
+        sport: null,
+        updatedAt: now,
+      }
+      : null;
+    return { sourcePlaceholderData };
+  };
+  const { sourcePlaceholderData } = buildSourcePlaceholderData();
+
+  const saveSnapshotTeams = async () => {
+    const eventTeam = await ((matchingPlaceholder || existingRegisteredEventTeam)
+      ? (async () => {
+        if (!eventTeamsDelegate.update) {
+          throw new Error('Event team update storage is unavailable.');
+        }
+        const updatedEventTeam = await eventTeamsDelegate.update({
+          where: { id: eventTeamId },
+          data: teamData,
+        });
+        if (sourcePlaceholderEventTeamId && sourcePlaceholderData) {
+          await eventTeamsDelegate.update({
+            where: { id: sourcePlaceholderEventTeamId },
+            data: sourcePlaceholderData,
+          });
+        }
+        if (duplicateRegisteredEventTeams.length) {
+          await Promise.all(duplicateRegisteredEventTeams.map((row) => eventTeamsDelegate.update({
+            where: { id: row.id },
+            data: {
+              eventId: params.eventId,
+              kind: 'PLACEHOLDER',
+              playerIds: [],
+              playerRegistrationIds: [],
+              division: normalizeId(row.division),
+              divisionTypeId: normalizeId(row.divisionTypeId),
+              wins: 0,
+              losses: 0,
+              name: 'Place Holder',
+              captainId: '',
+              managerId: '',
+              headCoachId: null,
+              coachIds: [],
+              staffAssignmentIds: [],
+              parentTeamId: null,
+              pending: [],
+              teamSize: normalizeNonNegativeInt(row.teamSize),
+              profileImageId: null,
+              sport: null,
+              updatedAt: now,
+            },
+          })));
+        }
+        return updatedEventTeam;
+      })()
+      : (() => {
+        if (!eventTeamsDelegate.create) {
+          return {
+            id: params.canonicalTeamId,
+            ...teamData,
+          };
+        }
+        return eventTeamsDelegate.create({
+          data: {
+            id: eventTeamId,
+            createdAt: now,
+            ...teamData,
+          },
+        });
+      })());
+    return { eventTeam };
+  };
+  const { eventTeam } = await saveSnapshotTeams();
+
+  const saveTeamRegistration = async () => {
+    if (params.upsertRegistration === false && matchingPlaceholder) {
+      await deleteUnparentedPlaceholderEventTeamRegistrations({
+        tx: params.tx,
+        eventId: params.eventId,
+        eventTeamIds: [matchingPlaceholder.id],
+        now,
+      });
+    }
+
+    if (params.upsertRegistration !== false) {
+      await upsertEventRegistration({
+        eventId: params.eventId,
+        registrantType: 'TEAM',
+        registrantId: eventTeamId,
+        parentId: parentTeamId,
+        rosterRole: 'PARTICIPANT',
+        status: params.registrationStatus ?? 'ACTIVE',
+        eventTeamId: eventTeamId,
+        divisionId: normalizeId(params.divisionId) ?? normalizeId((eventTeam as any).division) ?? null,
+        divisionTypeId: normalizeId(params.divisionTypeId) ?? normalizeId((eventTeam as any).divisionTypeId) ?? null,
+        divisionTypeKey: normalizeId(params.divisionTypeKey),
+        createdBy: params.createdBy,
+        occurrence: params.occurrence,
+      }, params.tx);
+    }
+  };
+  await saveTeamRegistration();
+
+  const cancelSourceRegistration = async () => {
+    if (params.upsertRegistration !== false && sourcePlaceholderEventTeamId && params.tx?.eventRegistrations?.updateMany) {
       await params.tx.eventRegistrations.updateMany({
         where: {
           eventId: params.eventId,
           registrantType: 'TEAM',
           status: { in: ACTIVE_EVENT_TEAM_REGISTRATION_STATUSES },
           OR: [
-            { registrantId: { in: duplicateEventTeamIds } },
-            { eventTeamId: { in: duplicateEventTeamIds } },
+            { registrantId: sourcePlaceholderEventTeamId },
+            { eventTeamId: sourcePlaceholderEventTeamId },
           ],
         },
         data: {
@@ -1998,122 +2143,162 @@ export const claimOrCreateEventTeamSnapshot = async (params: {
         },
       });
     }
-  }
+  };
+  await cancelSourceRegistration();
 
-  if (params.upsertRegistration !== false && params.tx?.eventRegistrations?.findMany && params.tx?.eventRegistrations?.updateMany) {
-    const playerEventTeamIds = Array.from(new Set(
-      [eventTeamId, sourcePlaceholderEventTeamId]
-        .map((teamId) => normalizeId(teamId))
-        .filter((teamId): teamId is string => Boolean(teamId)),
-    ));
-    const currentEventPlayerRows = await params.tx.eventRegistrations.findMany({
-      where: {
-        eventTeamId: playerEventTeamIds.length > 1 ? { in: playerEventTeamIds } : eventTeamId,
-        registrantType: { not: 'TEAM' },
-      },
-      select: { id: true, registrantId: true },
-    });
+  const cancelDuplicateRegistrations = async () => {
+    if (params.upsertRegistration !== false && duplicateRegisteredEventTeams.length && params.tx?.eventRegistrations?.updateMany) {
+      const duplicateEventTeamIds = duplicateRegisteredEventTeams
+        .map((row) => normalizeId(row.id))
+        .filter((teamId): teamId is string => Boolean(teamId));
+      if (duplicateEventTeamIds.length) {
+        await params.tx.eventRegistrations.updateMany({
+          where: {
+            eventId: params.eventId,
+            registrantType: 'TEAM',
+            status: { in: ACTIVE_EVENT_TEAM_REGISTRATION_STATUSES },
+            OR: [
+              { registrantId: { in: duplicateEventTeamIds } },
+              { eventTeamId: { in: duplicateEventTeamIds } },
+            ],
+          },
+          data: {
+            status: 'CANCELLED',
+            updatedAt: now,
+          },
+        });
+      }
+    }
+  };
+  await cancelDuplicateRegistrations();
 
-    const activeEventPlayerIds = activePlayerRegistrations.map((row: any) => row.userId);
-    const cancelledRegistrantIds = currentEventPlayerRows
-      .map((row: { registrantId: string }) => row.registrantId)
-      .filter((registrantId: string) => !activeEventPlayerIds.includes(registrantId));
-    if (cancelledRegistrantIds.length) {
-      await params.tx.eventRegistrations.updateMany({
+  const canReconcileEventPlayers = () => params.upsertRegistration !== false && params.tx?.eventRegistrations?.findMany && params.tx?.eventRegistrations?.updateMany;
+  const cancelRemovedPlayers = async () => {
+    if (canReconcileEventPlayers()) {
+      const playerEventTeamIds = Array.from(new Set(
+        [eventTeamId, sourcePlaceholderEventTeamId]
+          .map((teamId) => normalizeId(teamId))
+          .filter((teamId): teamId is string => Boolean(teamId)),
+      ));
+      const currentEventPlayerRows = await params.tx.eventRegistrations.findMany({
         where: {
           eventTeamId: playerEventTeamIds.length > 1 ? { in: playerEventTeamIds } : eventTeamId,
-          registrantId: { in: cancelledRegistrantIds },
           registrantType: { not: 'TEAM' },
         },
-        data: {
-          status: 'CANCELLED',
+        select: { id: true, registrantId: true },
+      });
+
+      const activeEventPlayerIds = activePlayerRegistrations.map((row: any) => row.userId);
+      const cancelledRegistrantIds = currentEventPlayerRows
+        .map((row: { registrantId: string }) => row.registrantId)
+        .filter((registrantId: string) => !activeEventPlayerIds.includes(registrantId));
+      if (cancelledRegistrantIds.length) {
+        await params.tx.eventRegistrations.updateMany({
+          where: {
+            eventTeamId: playerEventTeamIds.length > 1 ? { in: playerEventTeamIds } : eventTeamId,
+            registrantId: { in: cancelledRegistrantIds },
+            registrantType: { not: 'TEAM' },
+          },
+          data: {
+            status: 'CANCELLED',
+            updatedAt: now,
+          },
+        });
+      }
+    }
+  };
+  await cancelRemovedPlayers();
+
+  const savePlayerRegistrations = async () => {
+    if (params.upsertRegistration !== false) {
+      // Each write can open a nested transaction. Finish it before the next write.
+      for (const row of activePlayerRegistrations) {
+        await upsertEventRegistration({
+          eventId: params.eventId,
+          registrantType: 'SELF',
+          registrantId: row.userId,
+          parentId: parentTeamId,
+          rosterRole: 'PARTICIPANT',
+          status: 'ACTIVE',
+          eventTeamId,
+          sourceTeamRegistrationId: row.id,
+          divisionId: normalizeId(params.divisionId) ?? normalizeId((eventTeam as any).division) ?? null,
+          divisionTypeId: normalizeId(params.divisionTypeId) ?? normalizeId((eventTeam as any).divisionTypeId) ?? null,
+          divisionTypeKey: normalizeId(params.divisionTypeKey),
+          jerseyNumber: normalizeJerseyNumber(row.jerseyNumber),
+          position: normalizeId(row.position),
+          isCaptain: Boolean(row.isCaptain),
+          createdBy: params.createdBy,
+          occurrence: params.occurrence,
+        }, params.tx);
+      }
+    }
+  };
+  await savePlayerRegistrations();
+
+  const syncEventStaff = async () => {
+    const eventTeamStaffAssignmentsDelegate = getEventTeamStaffAssignmentsDelegate(params.tx);
+    if (eventTeamStaffAssignmentsDelegate?.findMany && eventTeamStaffAssignmentsDelegate?.upsert && eventTeamStaffAssignmentsDelegate?.updateMany) {
+      const existingEventStaffAssignments = await eventTeamStaffAssignmentsDelegate.findMany({
+        where: { eventTeamId },
+      }) as Array<{ userId: string; role: string }>;
+      const desiredStaffKeys = new Set(activeStaffAssignments.map((row: any) => `${String(row.role).toUpperCase()}:${row.userId}`));
+
+      await Promise.all(activeStaffAssignments.map((row: any) => eventTeamStaffAssignmentsDelegate.upsert({
+        where: {
+          eventTeamId_userId_role: {
+            eventTeamId,
+            userId: row.userId,
+            role: String(row.role).toUpperCase(),
+          },
+        },
+        create: {
+          id: buildEventTeamStaffAssignmentId(eventTeamId, String(row.role).toUpperCase(), row.userId),
+          eventTeamId,
+          userId: row.userId,
+          role: String(row.role).toUpperCase(),
+          status: 'ACTIVE',
+          sourceStaffAssignmentId: row.id,
+          createdAt: now,
           updatedAt: now,
         },
-      });
-    }
-  }
-
-  if (params.upsertRegistration !== false) {
-    await Promise.all(activePlayerRegistrations.map((row: any) => upsertEventRegistration({
-      eventId: params.eventId,
-      registrantType: 'SELF',
-      registrantId: row.userId,
-      parentId: parentTeamId,
-      rosterRole: 'PARTICIPANT',
-      status: 'ACTIVE',
-      eventTeamId,
-      sourceTeamRegistrationId: row.id,
-      divisionId: normalizeId(params.divisionId) ?? normalizeId((eventTeam as any).division) ?? null,
-      divisionTypeId: normalizeId(params.divisionTypeId) ?? normalizeId((eventTeam as any).divisionTypeId) ?? null,
-      divisionTypeKey: normalizeId(params.divisionTypeKey),
-      jerseyNumber: normalizeJerseyNumber(row.jerseyNumber),
-      position: normalizeId(row.position),
-      isCaptain: Boolean(row.isCaptain),
-      createdBy: params.createdBy,
-      occurrence: params.occurrence,
-    }, params.tx)));
-  }
-
-  const eventTeamStaffAssignmentsDelegate = getEventTeamStaffAssignmentsDelegate(params.tx);
-  if (eventTeamStaffAssignmentsDelegate?.findMany && eventTeamStaffAssignmentsDelegate?.upsert && eventTeamStaffAssignmentsDelegate?.updateMany) {
-    const existingEventStaffAssignments = await eventTeamStaffAssignmentsDelegate.findMany({
-      where: { eventTeamId },
-    }) as Array<{ userId: string; role: string }>;
-    const desiredStaffKeys = new Set(activeStaffAssignments.map((row: any) => `${String(row.role).toUpperCase()}:${row.userId}`));
-
-    await Promise.all(activeStaffAssignments.map((row: any) => eventTeamStaffAssignmentsDelegate.upsert({
-      where: {
-        eventTeamId_userId_role: {
-          eventTeamId,
-          userId: row.userId,
-          role: String(row.role).toUpperCase(),
-        },
-      },
-      create: {
-        id: buildEventTeamStaffAssignmentId(eventTeamId, String(row.role).toUpperCase(), row.userId),
-        eventTeamId,
-        userId: row.userId,
-        role: String(row.role).toUpperCase(),
-        status: 'ACTIVE',
-        sourceStaffAssignmentId: row.id,
-        createdAt: now,
-        updatedAt: now,
-      },
-      update: {
-        status: 'ACTIVE',
-        sourceStaffAssignmentId: row.id,
-        updatedAt: now,
-      },
-    })));
-
-    const staleStaffAssignments = existingEventStaffAssignments.filter((row) => !desiredStaffKeys.has(`${String(row.role).toUpperCase()}:${row.userId}`));
-    if (staleStaffAssignments.length) {
-      await Promise.all(staleStaffAssignments.map((row) => eventTeamStaffAssignmentsDelegate.updateMany({
-        where: {
-          eventTeamId,
-          userId: row.userId,
-          role: String(row.role).toUpperCase(),
-        },
-        data: {
-          status: 'CANCELLED',
+        update: {
+          status: 'ACTIVE',
+          sourceStaffAssignmentId: row.id,
           updatedAt: now,
         },
       })));
-    }
 
-    if (sourcePlaceholderEventTeamId) {
-      await eventTeamStaffAssignmentsDelegate.updateMany({
-        where: {
-          eventTeamId: sourcePlaceholderEventTeamId,
-          status: 'ACTIVE',
-        },
-        data: {
-          status: 'CANCELLED',
-          updatedAt: now,
-        },
-      });
+      const staleStaffAssignments = existingEventStaffAssignments.filter((row) => !desiredStaffKeys.has(`${String(row.role).toUpperCase()}:${row.userId}`));
+      if (staleStaffAssignments.length) {
+        await Promise.all(staleStaffAssignments.map((row) => eventTeamStaffAssignmentsDelegate.updateMany({
+          where: {
+            eventTeamId,
+            userId: row.userId,
+            role: String(row.role).toUpperCase(),
+          },
+          data: {
+            status: 'CANCELLED',
+            updatedAt: now,
+          },
+        })));
+      }
+
+      if (sourcePlaceholderEventTeamId) {
+        await eventTeamStaffAssignmentsDelegate.updateMany({
+          where: {
+            eventTeamId: sourcePlaceholderEventTeamId,
+            status: 'ACTIVE',
+          },
+          data: {
+            status: 'CANCELLED',
+            updatedAt: now,
+          },
+        });
+      }
     }
-  }
+  };
+  await syncEventStaff();
 
   await updateEventTeamSnapshotReferences({
     tx: params.tx,
