@@ -933,22 +933,24 @@ private fun EventEditorCreateProposalGraphDto.decodeOrThrow(
     expectedEventId: String,
     requireMatches: Boolean = true,
 ): DecodedProposalGraph {
-    val graphEvent = event.toEventOrNull()
+    val graphEventDto = canonicalGraph?.eventForPersistence() ?: event
+    val graphEvent = graphEventDto.toEventOrNull()
         ?: error("Accepted schedule proposal contained an invalid Event graph.")
     require(graphEvent.id == expectedEventId) {
         "Accepted schedule proposal contained the wrong Event id."
     }
-    val graphTeams = event.teams.map { teamDto ->
+    val graphTeams = graphEventDto.teams.map { teamDto ->
         teamDto.toTeamOrNull()
             ?: error("Accepted schedule proposal contained an invalid Team graph.")
     }
-    val graphFields = event.fields
-    val graphTimeSlots = event.timeSlots.map { slotDto ->
+    val graphFields = graphEventDto.fields
+    val graphTimeSlots = graphEventDto.timeSlots.map { slotDto ->
         val slotId = slotDto.id?.trim()?.takeIf(String::isNotBlank)
             ?: error("Accepted schedule proposal contained a time slot without an id.")
         slotDto.toTimeSlot(slotId)
     }
-    val graphMatches = matches.toAcceptedMatchesOrThrow()
+    val graphMatches = canonicalGraph?.canonicalMatches?.toCanonicalMaintenanceMatchesOrThrow()
+        ?: matches.toAcceptedMatchesOrThrow()
     if (requireMatches) {
         require(graphMatches.isNotEmpty()) {
             "Accepted schedule proposal contained no Match Graph nodes."

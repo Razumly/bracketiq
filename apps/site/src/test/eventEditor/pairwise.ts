@@ -4,7 +4,7 @@ const isRecord = (value: unknown): value is JsonRecord => value !== null && type
 export const mergeFixturePatch = (value: unknown, patch: unknown): unknown => {
   if (!isRecord(value) || !isRecord(patch)) return patch;
   return Object.fromEntries([...new Set([...Object.keys(value), ...Object.keys(patch)])].map((key) => {
-    if (!Object.hasOwn(patch, key)) return [key, value[key]];
+    if (!Object.prototype.hasOwnProperty.call(patch, key)) return [key, value[key]];
     // A schedule patch supplies the complete discriminated union branch.
     return [key, key === 'schedule' ? patch[key] : mergeFixturePatch(value[key], patch[key])];
   }));

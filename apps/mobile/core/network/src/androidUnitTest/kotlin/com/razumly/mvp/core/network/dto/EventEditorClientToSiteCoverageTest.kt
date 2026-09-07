@@ -15,7 +15,7 @@ import kotlin.test.assertEquals
 
 class EventEditorClientToSiteCoverageTest {
     @Test
-    fun mobile_commands_reach_the_real_site_parser_without_field_loss() {
+    fun given_mobile_commands_when_sent_to_the_site_parser_then_no_fields_are_lost() {
         val json = Json
         val fixtures = json.parseToJsonElement(completeEventEditorWireFixtures).jsonObject
         val cases = fixtures.getValue("cases").jsonArray

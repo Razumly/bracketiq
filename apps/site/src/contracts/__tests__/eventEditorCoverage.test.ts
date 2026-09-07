@@ -28,6 +28,17 @@ describe('Event Editor command field inventory', () => {
     expect(resultSchemas[kind].parse(value)).toEqual(value);
   });
 
+  it.each(fixtures.results.filter(({ value }) => 'graph' in value))('keeps $name graph identities and counts consistent', ({ value }) => {
+    if (!('graph' in value)) throw new Error('Missing graph fixture.');
+    expect(value.scheduleOutcome.matchCount).toBe(value.graph.matches.length);
+    expect(value.scheduleOutcome.matches.map(({ id }) => id)).toEqual(value.graph.matches.map(({ id }) => id));
+    value.graph.matches.forEach((match) => expect(match.eventId).toBe(value.graph.event.id));
+    if ('snapshot' in value) {
+      expect(value.snapshot.mode).toBe('CREATE');
+      expect(value.snapshot.eventId).toBe(value.graph.event.id);
+    }
+  });
+
   it.each(fixtures.operations)('preserves the $name command envelope', (operation) => {
     const command = 'draftCase' in operation
       ? { ...operation.command, draft: fixtures.cases[operation.draftCase].command.draft }

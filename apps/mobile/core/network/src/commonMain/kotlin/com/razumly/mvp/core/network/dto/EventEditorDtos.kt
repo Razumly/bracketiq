@@ -1638,6 +1638,10 @@ data class EventEditorSaveResultDto(
     val scheduleOutcome: EventEditorScheduleOutcomeDto,
     val graph: EventEditorCreateProposalGraphDto? = null,
     val acceptanceOperationId: String? = null,
+    val createOperationId: String? = null,
+    val editorRevision: String? = null,
+    val staffRevision: String? = null,
+    val scheduleRevision: String? = null,
 )
 @Serializable
 data class EventEditorRevisionBindingDto(
@@ -1660,11 +1664,50 @@ data class EventEditorProposalGraphUserDto(
     val userName: String = "",
 )
 
-@Serializable
+@Serializable(with = EventEditorCreateProposalGraphDtoSerializer::class)
 data class EventEditorCreateProposalGraphDto(
     val event: EventApiDto,
     val matches: List<MatchApiDto> = emptyList(),
+    @Transient val canonicalGraph: EventEditorMaintenanceGraphDto? = null,
 )
+
+object EventEditorCreateProposalGraphDtoSerializer : KSerializer<EventEditorCreateProposalGraphDto> {
+    override val descriptor = JsonElement.serializer().descriptor
+
+    override fun deserialize(decoder: Decoder): EventEditorCreateProposalGraphDto {
+        val jsonDecoder = decoder as? JsonDecoder
+            ?: throw SerializationException("Create graph can only be decoded from JSON.")
+        val payload = jsonDecoder.decodeJsonElement().jsonObject
+        val event = payload.getValue("event").jsonObject
+        // Preserve the supported legacy graph shape used by older Create responses.
+        if ("officialSchedulingMode" !in event) {
+            return EventEditorCreateProposalGraphDto(
+                event = jsonMVP.decodeFromJsonElement(EventApiDto.serializer(), event),
+                matches = jsonMVP.decodeFromJsonElement(ListSerializer(MatchApiDto.serializer()), payload.getValue("matches")),
+            )
+        }
+        val graph = jsonMVP.decodeFromJsonElement(EventEditorMaintenanceGraphDtoSerializer, payload)
+        return EventEditorCreateProposalGraphDto(
+            event = graph.event,
+            matches = graph.canonicalMatches.map(EventEditorMaintenanceGraphMatchDto::toLegacyMatch),
+            canonicalGraph = graph,
+        )
+    }
+
+    override fun serialize(encoder: Encoder, value: EventEditorCreateProposalGraphDto) {
+        val canonical = value.canonicalGraph
+        if (canonical != null) {
+            EventEditorMaintenanceGraphDtoSerializer.serialize(encoder, canonical)
+            return
+        }
+        val jsonEncoder = encoder as? JsonEncoder
+            ?: throw SerializationException("Create graph can only be encoded as JSON.")
+        jsonEncoder.encodeJsonElement(JsonObject(mapOf(
+            "event" to jsonMVP.encodeToJsonElement(EventApiDto.serializer(), value.event),
+            "matches" to jsonMVP.encodeToJsonElement(ListSerializer(MatchApiDto.serializer()), value.matches),
+        )))
+    }
+}
 
 @Serializable
 data class EventEditorCreateProposalDto(

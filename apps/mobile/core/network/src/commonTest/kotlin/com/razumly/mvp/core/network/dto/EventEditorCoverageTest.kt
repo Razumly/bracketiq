@@ -23,7 +23,7 @@ class EventEditorCoverageTest {
     private val fixtures get() = json.parseToJsonElement(completeEventEditorWireFixtures).jsonObject
 
     @Test
-    fun complete_commands_preserve_every_canonical_value() {
+    fun given_complete_fixtures_when_commands_are_encoded_then_canonical_values_are_preserved() {
         assertEquals(EventType.entries.map { it.name }.toSet(), fixtures.getValue("cases").jsonArray.map {
             it.jsonObject.getValue("command").jsonObject.getValue("draft").jsonObject.getValue("basics").jsonObject.getValue("eventType").jsonPrimitive.content
         }.toSet())
@@ -35,7 +35,7 @@ class EventEditorCoverageTest {
     }
 
     @Test
-    fun pairwise_commands_preserve_every_canonical_value() {
+    fun given_pairwise_fixtures_when_commands_are_encoded_then_canonical_values_are_preserved() {
         fixtures.getValue("pairwise").jsonObject.getValue("rows").jsonArray.forEach { row ->
             val expected = coveragePairwiseCommand(fixtures, row.jsonObject)
             val command = json.decodeFromJsonElement<EventEditorCreateCommandDto>(expected)
@@ -44,7 +44,7 @@ class EventEditorCoverageTest {
     }
 
     @Test
-    fun boundary_commands_preserve_every_canonical_value() {
+    fun given_boundary_fixtures_when_commands_are_encoded_then_canonical_values_are_preserved() {
         fixtures.getValue("boundaries").jsonArray.filter { it.jsonObject.getValue("isValid").jsonPrimitive.boolean }.forEach { row ->
             val expected = coveragePairwiseCommand(fixtures, row.jsonObject)
             val command = json.decodeFromJsonElement<EventEditorCreateCommandDto>(expected)
@@ -53,12 +53,15 @@ class EventEditorCoverageTest {
     }
 
     @Test
-    fun typed_results_preserve_every_canonical_value() {
+    fun given_typed_results_when_decoded_and_encoded_then_canonical_values_are_preserved() {
         fixtures.getValue("results").jsonArray.forEach { entry ->
             val value = entry.jsonObject.getValue("value")
             val encoded = when (entry.jsonObject.getValue("kind").jsonPrimitive.content) {
                 "error" -> json.encodeToJsonElement(json.decodeFromJsonElement<EventEditorErrorDto>(value))
-                "saved" -> json.encodeToJsonElement(json.decodeFromJsonElement<EventEditorSaveResultDto>(value))
+                "created", "partialAccepted", "saved" -> json.encodeToJsonElement(json.decodeFromJsonElement<EventEditorSaveResultDto>(value))
+                "createProposal" -> json.encodeToJsonElement(json.decodeFromJsonElement<EventEditorCreateProposalDto>(value))
+                "maintenanceProposal" -> json.encodeToJsonElement(json.decodeFromJsonElement<EventEditorMaintenanceProposalDto>(value))
+                "maintenanceAccepted" -> json.encodeToJsonElement(json.decodeFromJsonElement<EventEditorMaintenanceAcceptedResultDto>(value))
                 "schedule" -> json.encodeToJsonElement(json.decodeFromJsonElement<EventEditorScheduleOutcomeDto>(value))
                 "maintenanceRejected" -> json.encodeToJsonElement(json.decodeFromJsonElement<EventEditorMaintenanceRejectedResultDto>(value))
                 else -> error("Unclassified result kind.")
@@ -68,7 +71,7 @@ class EventEditorCoverageTest {
     }
 
     @Test
-    fun all_command_envelopes_preserve_canonical_values() {
+    fun given_command_envelopes_when_encoded_then_canonical_values_are_preserved() {
         fixtures.getValue("operations").jsonArray.forEach { entry ->
             val operation = entry.jsonObject
             val command = coverageOperationCommand(fixtures, operation)
