@@ -28,6 +28,21 @@ fun String.asBuildConfigString(): String =
 
 val productionApiBaseUrl = "https://bracket-iq.com"
 
+val sharedEditorFixtures = rootProject.file("../../test-fixtures/event-editor/complete-wire-fixtures.json")
+val generatedEditorFixtureDirectory = layout.buildDirectory.dir("generated/eventEditorFixtures")
+val generateEventEditorFixtures by tasks.registering {
+    inputs.file(sharedEditorFixtures)
+    outputs.dir(generatedEditorFixtureDirectory)
+    doLast {
+        val output = generatedEditorFixtureDirectory.get().file("com/razumly/mvp/core/network/dto/EventEditorWireFixtures.kt").asFile
+        output.parentFile.mkdirs()
+        val chunks = sharedEditorFixtures.readText().chunked(12000).joinToString(",\n") {
+            it.asBuildConfigString().replace("$", "\\$").replace("\r", "\\r").replace("\n", "\\n")
+        }
+        output.writeText("package com.razumly.mvp.core.network.dto\n\ninternal val completeEventEditorWireFixtures = listOf(\n$chunks\n).joinToString(\"\")\n")
+    }
+}
+
 kotlin {
     compilerOptions {
         freeCompilerArgs.add("-Xexpect-actual-classes")
@@ -72,6 +87,7 @@ kotlin {
             }
         }
         commonTest {
+            kotlin.srcDir(generateEventEditorFixtures.map { generatedEditorFixtureDirectory.get() })
             dependencies {
                 implementation(libs.kotlin.test)
                 implementation(libs.kotlinx.coroutines.test)

@@ -1,0 +1,1811 @@
+{
+  "version": 1,
+  "commands": [
+    {
+      "path": "draft.basics.address",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.basics.affiliateUrl",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.basics.coordinates[0]",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.basics.coordinates[1]",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.basics.description",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.basics.eventType",
+      "classification": "immutable",
+      "reason": "The server checks authority or booking locks before accepting a change. The client preserves the canonical value.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.basics.hostId",
+      "classification": "immutable",
+      "reason": "The server checks authority or booking locks before accepting a change. The client preserves the canonical value.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.basics.imageId",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.basics.location",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.basics.name",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.basics.organizationId",
+      "classification": "immutable",
+      "reason": "The server checks authority or booking locks before accepting a change. The client preserves the canonical value.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.basics.parentEvent",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.basics.sportIds[]",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.basics.start",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.basics.state",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.basics.tags[].$id",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.basics.tags[].id",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.basics.tags[].label",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.basics.tags[].name",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.basics.tags[].slug",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.basics.timeZone",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].ageCutoffDate",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].ageCutoffLabel",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].ageCutoffSource",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].ageDivisionTypeId",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].allowPaymentPlans",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].divisionTypeId",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].divisionTypeName",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].fieldIds[]",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].gamesPerOpponent",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].gender",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].id",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].installmentAmounts[]",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].installmentCount",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].installmentDueDates[]",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].installmentDueRelativeDays[]",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].isSystemGenerated",
+      "classification": "server-owned",
+      "reason": "The server owns this history or status value. The editor must preserve it without inventing a value.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].key",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].kind",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].matchDurationMinutes",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].maxParticipants",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].name",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].phaseSettings.*",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].playoffConfig.*",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].playoffPlacementDivisionIds[]",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].playoffTeamCount",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].pointsToVictory[]",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].poolCount",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].poolPlay",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].poolTeamCount",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].price",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].ratingType",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].restTimeMinutes",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].setDurationMinutes",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].setsPerMatch",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].skillDivisionTypeId",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].sourceDivisionId",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].standingsConfirmedAt",
+      "classification": "server-owned",
+      "reason": "The server owns this history or status value. The editor must preserve it without inventing a value.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].standingsConfirmedBy",
+      "classification": "server-owned",
+      "reason": "The server owns this history or status value. The editor must preserve it without inventing a value.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].standingsOverrides.*",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].teamIds[]",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionDetails[].usesSets",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionFieldIds.*[]",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.divisionIds[]",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.doubleElimination",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.gamesPerOpponent",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.includePlayoffs",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.leagueScoringConfig.*",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.loserBracketPointsToVictory[]",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.loserSetCount",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.matchDurationMinutes",
+      "classification": "derived",
+      "reason": "Set scoring derives duration from whole-minute segment settings. Timed Matches preserve their explicit duration, including fractions.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.matchRulesOverride.*",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].ageCutoffDate",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].ageCutoffLabel",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].ageCutoffSource",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].ageDivisionTypeId",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].allowPaymentPlans",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].divisionTypeId",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].divisionTypeName",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].fieldIds[]",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].gamesPerOpponent",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].gender",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].id",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].installmentAmounts[]",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].installmentCount",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].installmentDueDates[]",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].installmentDueRelativeDays[]",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].isSystemGenerated",
+      "classification": "server-owned",
+      "reason": "The server owns this history or status value. The editor must preserve it without inventing a value.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].key",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].kind",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].matchDurationMinutes",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].maxParticipants",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].name",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].phaseSettings.*",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].playoffConfig.*",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].playoffPlacementDivisionIds[]",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].playoffTeamCount",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].pointsToVictory[]",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].poolCount",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].poolPlay",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].poolTeamCount",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].price",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].ratingType",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].restTimeMinutes",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].setDurationMinutes",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].setsPerMatch",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].skillDivisionTypeId",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].sourceDivisionId",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].standingsConfirmedAt",
+      "classification": "server-owned",
+      "reason": "The server owns this history or status value. The editor must preserve it without inventing a value.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].standingsConfirmedBy",
+      "classification": "server-owned",
+      "reason": "The server owns this history or status value. The editor must preserve it without inventing a value.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].standingsOverrides.*",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].teamIds[]",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffDivisionDetails[].usesSets",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.playoffTeamCount",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.pointsToVictory[]",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.restTimeMinutes",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.setDurationMinutes",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.setsPerMatch",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.splitLeaguePlayoffDivisions",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.usesSets",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.winnerBracketPointsToVictory[]",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.competition.winnerSetCount",
+      "classification": "conditional",
+      "reason": "League and Tournament configurations carry this Competition Phase value. Other Event Types do not use it to build Matches.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventDivisionEditorLogic.kt"
+    },
+    {
+      "path": "draft.participation.allowTeamSplitDefault",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.participation.cancellationRefundHours",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.participation.freeAgentIds[]",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.participation.maxAge",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.participation.maxParticipants",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.participation.minAge",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.participation.registrationByDivisionType",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.participation.registrationCutoffHours",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.participation.singleDivision",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.participation.teamSignup",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.participation.teamSizeLimit",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.participation.waitListIds[]",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.registration.payment.allowPaymentPlans",
+      "classification": "conditional",
+      "reason": "The selected payment mode and installment plan determine whether this value applies.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.registration.payment.installmentAmounts[]",
+      "classification": "conditional",
+      "reason": "The selected payment mode and installment plan determine whether this value applies.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.registration.payment.installmentCount",
+      "classification": "conditional",
+      "reason": "The selected payment mode and installment plan determine whether this value applies.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.registration.payment.installmentDueDates[]",
+      "classification": "conditional",
+      "reason": "The selected payment mode and installment plan determine whether this value applies.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.registration.payment.installmentDueRelativeDays[]",
+      "classification": "conditional",
+      "reason": "The selected payment mode and installment plan determine whether this value applies.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.registration.payment.manualPaymentInstructions",
+      "classification": "conditional",
+      "reason": "The selected payment mode and installment plan determine whether this value applies.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.registration.payment.manualPaymentLinks[].id",
+      "classification": "conditional",
+      "reason": "The selected payment mode and installment plan determine whether this value applies.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.registration.payment.manualPaymentLinks[].label",
+      "classification": "conditional",
+      "reason": "The selected payment mode and installment plan determine whether this value applies.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.registration.payment.manualPaymentLinks[].provider",
+      "classification": "conditional",
+      "reason": "The selected payment mode and installment plan determine whether this value applies.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.registration.payment.manualPaymentLinks[].url",
+      "classification": "conditional",
+      "reason": "The selected payment mode and installment plan determine whether this value applies.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.registration.payment.mode",
+      "classification": "conditional",
+      "reason": "The selected payment mode and installment plan determine whether this value applies.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.registration.payment.organizerManualTaxRateBps",
+      "classification": "conditional",
+      "reason": "The selected payment mode and installment plan determine whether this value applies.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.registration.payment.priceCents",
+      "classification": "conditional",
+      "reason": "The selected payment mode and installment plan determine whether this value applies.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.registration.payment.taxHandling",
+      "classification": "conditional",
+      "reason": "The selected payment mode and installment plan determine whether this value applies.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.registration.questions[].answerType",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.registration.questions[].clientId",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.registration.questions[].id",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.registration.questions[].prompt",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.registration.questions[].required",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.registration.questions[].sortOrder",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.registration.requiredDocumentIds[]",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.resources.fieldIds[]",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.fields[].$id",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.fields[].address",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.fields[].archiveReason",
+      "classification": "server-owned",
+      "reason": "The server owns this history or status value. The editor must preserve it without inventing a value.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.fields[].archivedAt",
+      "classification": "server-owned",
+      "reason": "The server owns this history or status value. The editor must preserve it without inventing a value.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.fields[].archivedByUserId",
+      "classification": "server-owned",
+      "reason": "The server owns this history or status value. The editor must preserve it without inventing a value.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.fields[].createdBy",
+      "classification": "server-owned",
+      "reason": "The server owns this history or status value. The editor must preserve it without inventing a value.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.fields[].facilityId",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.fields[].heading",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.fields[].id",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.fields[].inUse",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.fields[].lat",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.fields[].latitude",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.fields[].location",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.fields[].long",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.fields[].longitude",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.fields[].name",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.fields[].organizationId",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.fields[].rentalSlotIds[]",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.fields[].sportIds[]",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.immutableFieldIds[]",
+      "classification": "immutable",
+      "reason": "The server checks authority or booking locks before accepting a change. The client preserves the canonical value.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.rentalBookingId",
+      "classification": "immutable",
+      "reason": "The server checks authority or booking locks before accepting a change. The client preserves the canonical value.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.rentalBookingItemId",
+      "classification": "immutable",
+      "reason": "The server checks authority or booking locks before accepting a change. The client preserves the canonical value.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.requiredTemplateIds[]",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.sourceTemplateId",
+      "classification": "immutable",
+      "reason": "The server checks authority or booking locks before accepting a change. The client preserves the canonical value.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.timeSlotIds[]",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.timeSlots[].$id",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.timeSlots[].archiveReason",
+      "classification": "server-owned",
+      "reason": "The server owns this history or status value. The editor must preserve it without inventing a value.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.timeSlots[].archivedAt",
+      "classification": "server-owned",
+      "reason": "The server owns this history or status value. The editor must preserve it without inventing a value.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.timeSlots[].archivedByUserId",
+      "classification": "server-owned",
+      "reason": "The server owns this history or status value. The editor must preserve it without inventing a value.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.timeSlots[].dayOfWeek",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.timeSlots[].daysOfWeek[]",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.timeSlots[].division",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.timeSlots[].divisionKeys[]",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.timeSlots[].divisions[]",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.timeSlots[].end",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.timeSlots[].endDate",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.timeSlots[].endTimeMinutes",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.timeSlots[].eventId",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.timeSlots[].fieldId",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.timeSlots[].fieldIds[]",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.timeSlots[].hostRequiredTemplateIds[]",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.timeSlots[].id",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.timeSlots[].price",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.timeSlots[].rentalBookingId",
+      "classification": "immutable",
+      "reason": "The server checks authority or booking locks before accepting a change. The client preserves the canonical value.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.timeSlots[].rentalBookingItemId",
+      "classification": "immutable",
+      "reason": "The server checks authority or booking locks before accepting a change. The client preserves the canonical value.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.timeSlots[].rentalLocked",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.timeSlots[].repeating",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.timeSlots[].requiredTemplateIds[]",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.timeSlots[].scheduledFieldId",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.timeSlots[].scheduledFieldIds[]",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.timeSlots[].sourceType",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.timeSlots[].start",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.timeSlots[].startDate",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.timeSlots[].startTimeMinutes",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.timeSlots[].taxHandling",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.resources.timeSlots[].timeZone",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventRentalResourcesCoordinator.kt"
+    },
+    {
+      "path": "draft.schedule.endConstraint",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.schedule.generatedScheduleEnd",
+      "classification": "derived",
+      "reason": "The accepted Schedule supplies the generated end. It applies to GENERATED_END only.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.schedule.isAutomatedScheduling",
+      "classification": "conditional",
+      "reason": "Weekly Event requires true. One-Time Event and Tryout require false. League and Tournament preserve the organizer choice.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.schedule.mode",
+      "classification": "covered",
+      "reason": "The organizer value must survive command encoding and decoding.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "draft.staff.allowMatchRosterEdits",
+      "classification": "conditional",
+      "reason": "The staffing context supplies this value. Tryout permits assistant hosts but excludes Match officiating.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.allowTemporaryMatchPlayers",
+      "classification": "conditional",
+      "reason": "The staffing context supplies this value. Tryout permits assistant hosts but excludes Match officiating.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.assistantHostIds[]",
+      "classification": "conditional",
+      "reason": "The staffing context supplies this value. Tryout permits assistant hosts but excludes Match officiating.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.autoCreatePointMatchIncidents",
+      "classification": "conditional",
+      "reason": "The staffing context supplies this value. Tryout permits assistant hosts but excludes Match officiating.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.doTeamsOfficiate",
+      "classification": "conditional",
+      "reason": "The staffing context supplies this value. Tryout permits assistant hosts but excludes Match officiating.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.eventOfficials[].fieldIds[]",
+      "classification": "conditional",
+      "reason": "The staffing context supplies this value. Tryout permits assistant hosts but excludes Match officiating.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.eventOfficials[].id",
+      "classification": "conditional",
+      "reason": "The staffing context supplies this value. Tryout permits assistant hosts but excludes Match officiating.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.eventOfficials[].isActive",
+      "classification": "conditional",
+      "reason": "The staffing context supplies this value. Tryout permits assistant hosts but excludes Match officiating.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.eventOfficials[].positionIds[]",
+      "classification": "conditional",
+      "reason": "The staffing context supplies this value. Tryout permits assistant hosts but excludes Match officiating.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.eventOfficials[].userId",
+      "classification": "conditional",
+      "reason": "The staffing context supplies this value. Tryout permits assistant hosts but excludes Match officiating.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.officialIds[]",
+      "classification": "conditional",
+      "reason": "The staffing context supplies this value. Tryout permits assistant hosts but excludes Match officiating.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.officialPositions[].count",
+      "classification": "conditional",
+      "reason": "The staffing context supplies this value. Tryout permits assistant hosts but excludes Match officiating.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.officialPositions[].id",
+      "classification": "conditional",
+      "reason": "The staffing context supplies this value. Tryout permits assistant hosts but excludes Match officiating.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.officialPositions[].name",
+      "classification": "conditional",
+      "reason": "The staffing context supplies this value. Tryout permits assistant hosts but excludes Match officiating.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.officialPositions[].order",
+      "classification": "conditional",
+      "reason": "The staffing context supplies this value. Tryout permits assistant hosts but excludes Match officiating.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.pendingInvites[].createdAt",
+      "classification": "server-owned",
+      "reason": "The server owns this history or status value. The editor must preserve it without inventing a value.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.pendingInvites[].createdBy",
+      "classification": "server-owned",
+      "reason": "The server owns this history or status value. The editor must preserve it without inventing a value.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.pendingInvites[].email",
+      "classification": "conditional",
+      "reason": "The staffing context supplies this value. Tryout permits assistant hosts but excludes Match officiating.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.pendingInvites[].eventId",
+      "classification": "conditional",
+      "reason": "The staffing context supplies this value. Tryout permits assistant hosts but excludes Match officiating.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.pendingInvites[].firstName",
+      "classification": "conditional",
+      "reason": "The staffing context supplies this value. Tryout permits assistant hosts but excludes Match officiating.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.pendingInvites[].id",
+      "classification": "conditional",
+      "reason": "The staffing context supplies this value. Tryout permits assistant hosts but excludes Match officiating.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.pendingInvites[].lastName",
+      "classification": "conditional",
+      "reason": "The staffing context supplies this value. Tryout permits assistant hosts but excludes Match officiating.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.pendingInvites[].organizationId",
+      "classification": "conditional",
+      "reason": "The staffing context supplies this value. Tryout permits assistant hosts but excludes Match officiating.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.pendingInvites[].resolvedUserId",
+      "classification": "server-owned",
+      "reason": "The server owns this history or status value. The editor must preserve it without inventing a value.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.pendingInvites[].roles[]",
+      "classification": "conditional",
+      "reason": "The staffing context supplies this value. Tryout permits assistant hosts but excludes Match officiating.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.pendingInvites[].sentAt",
+      "classification": "server-owned",
+      "reason": "The server owns this history or status value. The editor must preserve it without inventing a value.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.pendingInvites[].staffTypes[]",
+      "classification": "conditional",
+      "reason": "The staffing context supplies this value. Tryout permits assistant hosts but excludes Match officiating.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.pendingInvites[].status",
+      "classification": "server-owned",
+      "reason": "The server owns this history or status value. The editor must preserve it without inventing a value.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.pendingInvites[].teamId",
+      "classification": "conditional",
+      "reason": "The staffing context supplies this value. Tryout permits assistant hosts but excludes Match officiating.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.pendingInvites[].type",
+      "classification": "conditional",
+      "reason": "The staffing context supplies this value. Tryout permits assistant hosts but excludes Match officiating.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.pendingInvites[].updatedAt",
+      "classification": "server-owned",
+      "reason": "The server owns this history or status value. The editor must preserve it without inventing a value.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.pendingInvites[].userId",
+      "classification": "conditional",
+      "reason": "The staffing context supplies this value. Tryout permits assistant hosts but excludes Match officiating.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.staffingPriority",
+      "classification": "conditional",
+      "reason": "The staffing context supplies this value. Tryout permits assistant hosts but excludes Match officiating.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.teamCheckInMode",
+      "classification": "conditional",
+      "reason": "The staffing context supplies this value. Tryout permits assistant hosts but excludes Match officiating.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.teamCheckInOpenMinutesBefore",
+      "classification": "conditional",
+      "reason": "The staffing context supplies this value. Tryout permits assistant hosts but excludes Match officiating.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "draft.staff.teamOfficialsMaySwap",
+      "classification": "conditional",
+      "reason": "The staffing context supplies this value. Tryout permits assistant hosts but excludes Match officiating.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/EventStaffModels.kt"
+    },
+    {
+      "path": "create.completion.mode",
+      "classification": "derived",
+      "reason": "The editor session supplies this operation identity, revision, or explicit action.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "create.contractVersion",
+      "classification": "derived",
+      "reason": "The protocol supplies this version, revision, or stable action identity. Retries preserve it.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "create.createOperationId",
+      "classification": "derived",
+      "reason": "The protocol supplies this version, revision, or stable action identity. Retries preserve it.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "create.expectedRevisions.editorRevision",
+      "classification": "derived",
+      "reason": "The protocol supplies this version, revision, or stable action identity. Retries preserve it.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "create.expectedRevisions.scheduleRevision",
+      "classification": "derived",
+      "reason": "The protocol supplies this version, revision, or stable action identity. Retries preserve it.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "create.expectedRevisions.staffRevision",
+      "classification": "derived",
+      "reason": "The protocol supplies this version, revision, or stable action identity. Retries preserve it.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "create.hasScheduleProposalSupport",
+      "classification": "derived",
+      "reason": "The editor session supplies this operation identity, revision, or explicit action.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "save.contractVersion",
+      "classification": "derived",
+      "reason": "The protocol supplies this version, revision, or stable action identity. Retries preserve it.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "save.editorRevision",
+      "classification": "derived",
+      "reason": "The protocol supplies this version, revision, or stable action identity. Retries preserve it.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "save.scheduleTransition.expectedScheduleRevision",
+      "classification": "intentionally-excluded",
+      "reason": "This field exists only in the legacy RECONCILE branch. Current Save uses PRESERVE. The site rejects legacy reconciliation before writes.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "save.scheduleTransition.mode",
+      "classification": "derived",
+      "reason": "The editor session supplies this operation identity, revision, or explicit action.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "save.staffRevision",
+      "classification": "derived",
+      "reason": "The protocol supplies this version, revision, or stable action identity. Retries preserve it.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "accept.contractVersion",
+      "classification": "derived",
+      "reason": "The protocol supplies this version, revision, or stable action identity. Retries preserve it.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "accept.createOperationId",
+      "classification": "derived",
+      "reason": "The protocol supplies this version, revision, or stable action identity. Retries preserve it.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "accept.proposalRevision",
+      "classification": "derived",
+      "reason": "The protocol supplies this version, revision, or stable action identity. Retries preserve it.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "acceptPartial.acceptanceMode",
+      "classification": "derived",
+      "reason": "The editor session supplies this operation identity, revision, or explicit action.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "acceptPartial.acceptanceOperationId",
+      "classification": "derived",
+      "reason": "The protocol supplies this version, revision, or stable action identity. Retries preserve it.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "acceptPartial.contractVersion",
+      "classification": "derived",
+      "reason": "The protocol supplies this version, revision, or stable action identity. Retries preserve it.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "acceptPartial.createOperationId",
+      "classification": "derived",
+      "reason": "The protocol supplies this version, revision, or stable action identity. Retries preserve it.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "acceptPartial.proposalRevision",
+      "classification": "derived",
+      "reason": "The protocol supplies this version, revision, or stable action identity. Retries preserve it.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "reject.contractVersion",
+      "classification": "derived",
+      "reason": "The protocol supplies this version, revision, or stable action identity. Retries preserve it.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "reject.createOperationId",
+      "classification": "derived",
+      "reason": "The protocol supplies this version, revision, or stable action identity. Retries preserve it.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "reject.proposalRevision",
+      "classification": "derived",
+      "reason": "The protocol supplies this version, revision, or stable action identity. Retries preserve it.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "maintenance.contractVersion",
+      "classification": "derived",
+      "reason": "The protocol supplies this version, revision, or stable action identity. Retries preserve it.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "maintenance.eventId",
+      "classification": "derived",
+      "reason": "The editor session supplies this operation identity, revision, or explicit action.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "maintenance.expectedRevisions.availabilityRevision",
+      "classification": "derived",
+      "reason": "The protocol supplies this version, revision, or stable action identity. Retries preserve it.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "maintenance.expectedRevisions.editorRevision",
+      "classification": "derived",
+      "reason": "The protocol supplies this version, revision, or stable action identity. Retries preserve it.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "maintenance.expectedRevisions.fieldRevisions.*",
+      "classification": "derived",
+      "reason": "The protocol supplies this version, revision, or stable action identity. Retries preserve it.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "maintenance.expectedRevisions.rentalBookingItemRevisions.*",
+      "classification": "immutable",
+      "reason": "The server checks authority or booking locks before accepting a change. The client preserves the canonical value.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "maintenance.expectedRevisions.rentalBookingRevision",
+      "classification": "immutable",
+      "reason": "The server checks authority or booking locks before accepting a change. The client preserves the canonical value.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "maintenance.expectedRevisions.rentalBookingRevisions.*",
+      "classification": "immutable",
+      "reason": "The server checks authority or booking locks before accepting a change. The client preserves the canonical value.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "maintenance.expectedRevisions.scheduleRevision",
+      "classification": "derived",
+      "reason": "The protocol supplies this version, revision, or stable action identity. Retries preserve it.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "maintenance.expectedRevisions.staffRevision",
+      "classification": "derived",
+      "reason": "The protocol supplies this version, revision, or stable action identity. Retries preserve it.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "maintenance.expectedRevisions.timeSlotRevisions.*",
+      "classification": "derived",
+      "reason": "The protocol supplies this version, revision, or stable action identity. Retries preserve it.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "maintenance.includePlaceholderTeams",
+      "classification": "derived",
+      "reason": "The editor session supplies this operation identity, revision, or explicit action.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "maintenance.operation",
+      "classification": "derived",
+      "reason": "The editor session supplies this operation identity, revision, or explicit action.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "maintenance.operationId",
+      "classification": "derived",
+      "reason": "The editor session supplies this operation identity, revision, or explicit action.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "maintenance.participantCount",
+      "classification": "derived",
+      "reason": "The editor session supplies this operation identity, revision, or explicit action.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "acceptMaintenance.acceptanceOperationId",
+      "classification": "derived",
+      "reason": "The protocol supplies this version, revision, or stable action identity. Retries preserve it.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "acceptMaintenance.contractVersion",
+      "classification": "derived",
+      "reason": "The protocol supplies this version, revision, or stable action identity. Retries preserve it.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "acceptMaintenance.eventId",
+      "classification": "derived",
+      "reason": "The editor session supplies this operation identity, revision, or explicit action.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "acceptMaintenance.operation",
+      "classification": "derived",
+      "reason": "The editor session supplies this operation identity, revision, or explicit action.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "acceptMaintenance.operationId",
+      "classification": "derived",
+      "reason": "The editor session supplies this operation identity, revision, or explicit action.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "acceptMaintenance.proposalRevision",
+      "classification": "derived",
+      "reason": "The protocol supplies this version, revision, or stable action identity. Retries preserve it.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "rejectMaintenance.contractVersion",
+      "classification": "derived",
+      "reason": "The protocol supplies this version, revision, or stable action identity. Retries preserve it.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "rejectMaintenance.eventId",
+      "classification": "derived",
+      "reason": "The editor session supplies this operation identity, revision, or explicit action.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "rejectMaintenance.operation",
+      "classification": "derived",
+      "reason": "The editor session supplies this operation identity, revision, or explicit action.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "rejectMaintenance.operationId",
+      "classification": "derived",
+      "reason": "The editor session supplies this operation identity, revision, or explicit action.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    },
+    {
+      "path": "rejectMaintenance.proposalRevision",
+      "classification": "derived",
+      "reason": "The protocol supplies this version, revision, or stable action identity. Retries preserve it.",
+      "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt"
+    }
+  ]
+}

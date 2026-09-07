@@ -1251,7 +1251,7 @@ private fun Event.toStaffDto(
     fun tryoutStaffTypes(staffTypes: List<String>): List<String> = staffTypes
         .map(String::trim)
         .map(String::uppercase)
-        .filter { staffType -> staffType == "HOST" }
+        .filter { staffType -> staffType == "HOST" || staffType == "ASSISTANT_HOST" }
         .distinct()
     val canonicalPendingInvites = if (isTryout) {
         pendingStaffInvites.mapNotNull { invite ->
@@ -1366,8 +1366,10 @@ private fun Event.toStaffDto(
             }
         } else if (isTryout) {
             existing.pendingInvites.mapNotNull { invite ->
-                val staffTypes = tryoutStaffTypes(invite.staffTypes)
-                staffTypes.takeIf { it.isNotEmpty() }?.let { invite.copy(staffTypes = it) }
+                val staffTypes = tryoutStaffTypes(invite.staffTypes).ifEmpty { tryoutStaffTypes(invite.roles) }
+                staffTypes.takeIf { it.isNotEmpty() }?.let {
+                    invite.copy(staffTypes = it, roles = invite.roles.filter { role -> role == "ASSISTANT_HOST" })
+                }
             }
         } else {
             existing.pendingInvites

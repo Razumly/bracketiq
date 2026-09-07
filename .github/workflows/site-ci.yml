@@ -31,6 +31,12 @@ jobs:
           filters: |
             site:
               - 'apps/site/**'
+              - 'test-fixtures/event-editor/**'
+              - 'apps/mobile/core/model/**'
+              - 'apps/mobile/core/network/**'
+              - 'apps/mobile/core/repository-impl/**'
+              - 'apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/**'
+              - 'apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/**'
               - '.github/workflows/site-ci.yml'
               - '.github/workflows/publish-site-image.yml'
               - 'package.json'
