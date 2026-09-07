@@ -794,12 +794,15 @@ internal fun EventDetailOverlayHost(
     if (state.showJoinOptionsSheet &&
         (state.joinSheetsState.isWeeklyParentEvent || state.joinSheetsState.options.isNotEmpty())
     ) {
-        ModalBottomSheet(onDismissRequest = actions.joinSheetsActions.onDismiss) {
-            JoinOptionsSheet(
+        EventCheckoutDialog(
+            onDismissRequest = actions.joinSheetsActions.onDismiss,
+            title = { Text("How would you like to register?") },
+            confirmButton = {},
+            text = { JoinOptionsSheet(
                 state = state.joinSheetsState,
                 actions = actions.joinSheetsActions,
-            )
-        }
+            ) },
+        )
     }
 
     state.showTeamDialog?.let { dialogState ->
@@ -865,7 +868,7 @@ internal fun EventDetailOverlayHost(
         )
     }
     state.joinChoiceDialog?.let {
-        AlertDialog(
+        EventCheckoutDialog(
             onDismissRequest = actions.onDismissJoinChoice,
             title = { Text("Join Event") },
             text = { Text("You have linked children. Do you want to join yourself or register a child instead?") },

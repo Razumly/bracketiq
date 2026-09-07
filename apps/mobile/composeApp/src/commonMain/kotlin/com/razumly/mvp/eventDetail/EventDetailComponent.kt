@@ -56,6 +56,17 @@ import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
 interface EventDetailComponent : ComponentContext, IPaymentProcessor {
+    val checkoutReview: StateFlow<EventCheckoutReviewState?> get() = kotlinx.coroutines.flow.MutableStateFlow(null)
+    val checkoutCompleted: StateFlow<Boolean> get() = kotlinx.coroutines.flow.MutableStateFlow(false)
+    fun confirmCheckoutReview() {}
+    fun dismissCheckoutReview() {}
+    fun dismissCheckoutCompleted() {}
+    val checkoutTeamEditor: StateFlow<EventCheckoutTeamEditorState?> get() = kotlinx.coroutines.flow.MutableStateFlow(null)
+    fun editCheckoutTeam(team: TeamWithPlayers) {}
+    fun dismissCheckoutTeamEditor() {}
+    fun changeCheckoutTeamName(value: String) {}
+    fun changeCheckoutTeamSize(value: String) {}
+    fun saveCheckoutTeamEditor() {}
     val registrationSignup: StateFlow<com.razumly.mvp.core.data.dataTypes.EventSignupState?> get() = kotlinx.coroutines.flow.MutableStateFlow(null)
     val registrationSignupBusy: StateFlow<Boolean> get() = kotlinx.coroutines.flow.MutableStateFlow(false)
     val registrationTeams: StateFlow<List<TeamWithPlayers>> get() = kotlinx.coroutines.flow.MutableStateFlow(emptyList())

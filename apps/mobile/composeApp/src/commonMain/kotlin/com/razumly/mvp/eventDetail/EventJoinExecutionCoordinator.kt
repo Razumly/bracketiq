@@ -66,6 +66,7 @@ internal class EventJoinExecutionCoordinator(
         refreshAfterParticipantMutation: suspend (eventId: String, warningMessage: String) -> Unit,
         showLoading: (String) -> Unit,
         setError: (String) -> Unit,
+        onSubmitted: () -> Unit = {},
     ) {
         showLoading("Submitting Join Request ...")
         requestCurrentUserRegistration(
@@ -73,6 +74,7 @@ internal class EventJoinExecutionCoordinator(
             selectedDivisionId,
             weeklyOccurrence,
         ).onSuccess { registration ->
+            onSubmitted()
             showLoading("Reloading Event")
             refreshAfterParticipantMutation(
                 event.id,
@@ -130,18 +132,15 @@ internal class EventJoinExecutionCoordinator(
             event = event,
             preferredDivisionId = selectedDivisionId,
         )
-        val action = if (currentUserCanManageEvent && !currentUserIsMinor) {
-            JoinExecutionAction.JOIN_DIRECTLY
-        } else {
-            registrationFlowCoordinator.determineJoinExecutionAction(
+        val action = registrationFlowCoordinator.determineJoinExecutionAction(
                 paymentPlan = paymentPlan,
                 currentUserIsMinor = currentUserIsMinor,
                 isEventFull = isEventFull,
                 isTeamSignup = event.teamSignup,
                 forTeamJoin = false,
                 manualPayment = event.usesManualRegistrationPayments(),
+                currentUserCanManageEvent = currentUserCanManageEvent,
             )
-        }
         when (action) {
             JoinExecutionAction.REQUEST_PARENT_APPROVAL -> {
                 submitMinorJoinRequest()
@@ -264,18 +263,15 @@ internal class EventJoinExecutionCoordinator(
             event = event,
             preferredDivisionId = selectedDivisionId,
         )
-        val action = if (currentUserCanManageEvent && !currentUserIsMinor) {
-            JoinExecutionAction.JOIN_DIRECTLY
-        } else {
-            registrationFlowCoordinator.determineJoinExecutionAction(
+        val action = registrationFlowCoordinator.determineJoinExecutionAction(
                 paymentPlan = paymentPlan,
                 currentUserIsMinor = currentUserIsMinor,
                 isEventFull = isEventFull,
                 isTeamSignup = event.teamSignup,
                 forTeamJoin = true,
                 manualPayment = event.usesManualRegistrationPayments(),
+                currentUserCanManageEvent = currentUserCanManageEvent,
             )
-        }
         when (action) {
             JoinExecutionAction.REQUEST_PARENT_APPROVAL -> {
                 submitMinorJoinRequest()

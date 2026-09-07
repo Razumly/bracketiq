@@ -44,7 +44,7 @@ fun DiscountCodeDialog(
     val codeIsApplied = normalizedCode.isNotBlank() && appliedCode.equals(normalizedCode, ignoreCase = true)
     val canContinue = !loading && (normalizedCode.isBlank() || codeIsApplied)
 
-    AlertDialog(
+    FormDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {

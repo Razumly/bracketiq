@@ -428,7 +428,7 @@ internal fun JoinOptionsSheet(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                text = "Join options",
+                text = "Registration options",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold
             )
@@ -641,7 +641,7 @@ internal fun ChildJoinSelectionDialog(
     onDismiss: () -> Unit,
     onChildSelected: (String) -> Unit,
 ) {
-    AlertDialog(
+    EventCheckoutDialog(
         onDismissRequest = onDismiss,
         title = { Text("Select Child") },
         text = {
@@ -724,7 +724,8 @@ internal fun EventRegistrationQuestionsDialog(
         mutableStateOf<String?>(null)
     }
 
-    AlertDialog(
+    EventCheckoutDialog(
+        step = EventCheckoutStep.REQUIREMENTS,
         onDismissRequest = onDismiss,
         title = { Text("Registration questions") },
         text = {

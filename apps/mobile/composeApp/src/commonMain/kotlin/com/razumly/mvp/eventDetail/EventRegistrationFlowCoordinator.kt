@@ -148,6 +148,9 @@ internal data class WithdrawalActionDecision(
 
 @OptIn(ExperimentalTime::class)
 internal class EventRegistrationFlowCoordinator {
+    val checkout = EventCheckoutReviewCoordinator()
+    var checkoutDocuments: List<EventCheckoutDocument> = emptyList()
+        private set
     private val _questionDialog = MutableStateFlow<EventRegistrationQuestionDialogState?>(null)
     val questionDialog = _questionDialog.asStateFlow()
 
@@ -844,7 +847,9 @@ internal class EventRegistrationFlowCoordinator {
         isTeamSignup: Boolean,
         forTeamJoin: Boolean,
         manualPayment: Boolean = false,
+        currentUserCanManageEvent: Boolean = false,
     ): JoinExecutionAction {
+        if (currentUserCanManageEvent && !currentUserIsMinor) return JoinExecutionAction.JOIN_DIRECTLY
         if (currentUserIsMinor) {
             return JoinExecutionAction.REQUEST_PARENT_APPROVAL
         }
@@ -1091,6 +1096,7 @@ internal class EventRegistrationFlowCoordinator {
         teamId: String?,
         onReady: suspend () -> Unit,
     ) {
+        checkoutDocuments = emptyList()
         pendingSignatureContexts = buildSignatureContextQueue(
             baseContext = signerContext,
             child = child,
@@ -1126,6 +1132,20 @@ internal class EventRegistrationFlowCoordinator {
         )
 
     fun replacePendingSignatureSteps(steps: List<SignStep>) {
+        val prefix = "${pendingSignatureContext}:${pendingSignatureChild?.userId}:${pendingSignatureTeamId}:"
+        val pending = steps.map { step ->
+            EventCheckoutDocument(
+                key = prefix + step.templateId,
+                title = step.title?.takeIf(String::isNotBlank) ?: "Required document",
+                signer = step.requiredSignerLabel ?: pendingSignatureContext.name.replace('_', ' '),
+                complete = false,
+            )
+        }
+        val pendingKeys = pending.map { it.key }.toSet()
+        checkoutDocuments = checkoutDocuments.map { document ->
+            if (document.key.startsWith(prefix) && document.key !in pendingKeys) document.copy(complete = true)
+            else document
+        }.filter { it.key !in pendingKeys } + pending
         pendingSignatureSteps = steps
         pendingSignatureStepIndex = 0
     }
@@ -1176,6 +1196,8 @@ internal class EventRegistrationFlowCoordinator {
 
     fun areQuestionsConfirmed(): Boolean = questionsConfirmed
 
+    fun requireQuestionReview() { questionsConfirmed = false }
+
     fun applyRegistrationProgressDraft(draft: RegistrationProgressDraft?): String? {
         if (draft == null) {
             _answers.value = emptyMap()
@@ -1194,6 +1216,7 @@ internal class EventRegistrationFlowCoordinator {
     }
 
     fun clearRegistrationProgressState() {
+        checkout.cancel()
         _holdExpiresAt.value = null
         questionsConfirmed = false
     }
