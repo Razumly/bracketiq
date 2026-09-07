@@ -216,8 +216,7 @@ internal fun LazyListScope.simpleEventDetailsBasicInfoSection(
                 state.editEvent.eventType == EventType.LEAGUE ||
                     state.editEvent.eventType == EventType.TOURNAMENT ||
                     state.editEvent.eventType == EventType.WEEKLY_EVENT
-            val usesGeneratedEnd = state.editEvent.isAutomatedScheduling &&
-                state.editEvent.noFixedEndDateTime
+            val usesGeneratedEnd = state.editEvent.noFixedEndDateTime
 
             if (
                 state.editEvent.eventType == EventType.EVENT ||

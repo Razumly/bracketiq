@@ -1,4 +1,5 @@
 import { assertEventRegistrationConfiguration } from '@/lib/eventRegistration';
+import { assertMatchSaveBoundaries, type MatchSavePolicy } from '@/server/matches/matchBoundary';
 import type { Prisma, PrismaClient } from "../../generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePrismaSchemaContract } from "@/lib/prismaSchemaContract";
@@ -8094,7 +8095,9 @@ export const saveMatches = async (
   eventId: string,
   matches: MatchPersistenceInput[],
   client: PrismaLike = prisma,
+  policy: MatchSavePolicy = {},
 ): Promise<void> => {
+  await assertMatchSaveBoundaries(eventId, matches, client, policy);
   const now = new Date();
   const segmentMatchIds = new Set<string>();
   const incidentMatchIds = new Set<string>();

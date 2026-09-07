@@ -962,6 +962,7 @@ describe("event schedule Match Graph persistence", () => {
       firstFixture.event.id,
       firstResult.matches,
       expect.anything(),
+      { approvedScheduleEnd: firstResult.event.end },
     );
     expect(persistScheduledRosterTeams).toHaveBeenCalled();
     expect(saveEventSchedule).toHaveBeenCalled();
@@ -1140,7 +1141,7 @@ describe("event schedule Match Graph persistence", () => {
           match.start.getTime() >= new Date("2026-01-05T09:00:00.000Z").getTime(),
       ),
     ).toBe(true);
-    expect(saveMatches).toHaveBeenCalledWith(event.id, result.matches, tx);
+    expect(saveMatches).toHaveBeenCalledWith(event.id, result.matches, tx, { approvedScheduleEnd: result.event.end });
   });
 
   it("rejects a far-future Match blocked by one unbounded Weekly Event rule", async () => {

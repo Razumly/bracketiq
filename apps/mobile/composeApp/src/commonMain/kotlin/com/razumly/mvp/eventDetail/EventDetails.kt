@@ -1571,7 +1571,7 @@ fun EventDetails(
     ) {
         isNewEvent &&
             !scheduleTimeLocked &&
-            !(editEvent.isAutomatedScheduling && editEvent.noFixedEndDateTime) &&
+            !editEvent.noFixedEndDateTime &&
             editEvent.end > editEvent.start &&
             (
                 editEvent.eventType == EventType.LEAGUE ||
@@ -2546,7 +2546,9 @@ fun EventDetails(
                                 }
                             },
                             onNoFixedEndDateChange = { enabled ->
-                                if (
+                                if (!enabled) {
+                                    showEndPicker = true
+                                } else if (
                                     editEvent.eventType == EventType.WEEKLY_EVENT ||
                                         editEvent.eventType.isScheduleConstructionAutomationType()
                                 ) {
@@ -3098,7 +3100,7 @@ fun EventDetails(
                 )
                 copy(
                     start = selected,
-                    end = if (!(isAutomatedScheduling && noFixedEndDateTime) && end <= selected) minimumEnd else end,
+                    end = if (!noFixedEndDateTime && end <= selected) minimumEnd else end,
                 )
             }
             showStartPicker = false
@@ -3114,13 +3116,11 @@ fun EventDetails(
         onDateSelected = { selectedInstant ->
             val selected = selectedInstant?.reinterpretSystemLocalSelectionIn(editEventTimeZone)
                 ?: return@PlatformDateTimePicker
-            onEditEvent { copy(end = selected) }
+            onEditEvent { copy(end = selected, noFixedEndDateTime = false) }
             showEndPicker = false
         },
         onDismissRequest = { showEndPicker = false },
-        showPicker = showEndPicker &&
-            !scheduleTimeLocked &&
-            !(editEvent.isAutomatedScheduling && editEvent.noFixedEndDateTime),
+        showPicker = showEndPicker && !scheduleTimeLocked,
         getTime = true,
         canSelectPast = false,
         initialDate = editEvent.end.asSystemLocalPickerInstant(editEventTimeZone),

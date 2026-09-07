@@ -33,13 +33,13 @@ describe('editor transitions', () => {
     expect(next.registration.questions).toHaveLength(2);
   });
 
-  it('requires an explicit end before entering fixed-end mode', () => {
+  it.each([null, '2026-09-10T20:00:00.000Z'])('requires an explicit end before entering fixed-end mode with generated end %s', (generatedScheduleEnd) => {
     const generated = {
       ...draft,
       schedule: {
         mode: 'GENERATED_END' as const,
         endConstraint: null,
-        generatedScheduleEnd: null,
+        generatedScheduleEnd,
         isAutomatedScheduling: draft.schedule.isAutomatedScheduling,
       },
     };

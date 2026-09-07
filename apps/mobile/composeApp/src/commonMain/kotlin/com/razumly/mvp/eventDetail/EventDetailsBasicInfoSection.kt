@@ -247,8 +247,7 @@ internal fun LazyListScope.eventDetailsBasicInfoSection(
                 state.editEvent.eventType == EventType.LEAGUE ||
                     state.editEvent.eventType == EventType.TOURNAMENT ||
                     state.editEvent.eventType == EventType.WEEKLY_EVENT
-            val usesGeneratedEnd = state.editEvent.isAutomatedScheduling &&
-                state.editEvent.noFixedEndDateTime
+            val usesGeneratedEnd = state.editEvent.noFixedEndDateTime
             val canEditNoFixedEndDateTime = supportsNoFixedEndDateTime
 
             if (
@@ -318,34 +317,29 @@ internal fun LazyListScope.eventDetailsBasicInfoSection(
                 supportsNoFixedEndDateTime &&
                     (
                         state.editEvent.eventType == EventType.WEEKLY_EVENT ||
-                            state.editEvent.isAutomatedScheduling
+                            state.editEvent.isAutomatedScheduling || state.editEvent.noFixedEndDateTime
                         )
             ) {
                 val copy = generatedEndDateCopy(state.editEvent.eventType)
-                val minimumFixedEnd = Instant.fromEpochMilliseconds(
-                    state.editEvent.start.toEpochMilliseconds() + 60L * 60L * 1000L,
-                )
+                val onPolicyChange: (Boolean) -> Unit = { checked ->
+                    if (checked) {
+                        actions.onEditEvent { copy(noFixedEndDateTime = true) }
+                    } else {
+                        actions.onShowEndPicker()
+                    }
+                }
+                val canChangePolicy = canEditNoFixedEndDateTime && !state.scheduleTimeLocked
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().clickable(enabled = canChangePolicy) {
+                        onPolicyChange(!usesGeneratedEnd)
+                    },
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Checkbox(
                         checked = canEditNoFixedEndDateTime && usesGeneratedEnd,
-                        enabled = canEditNoFixedEndDateTime && !state.scheduleTimeLocked,
-                        onCheckedChange = { checked ->
-                            if (canEditNoFixedEndDateTime) {
-                                actions.onEditEvent {
-                                    copy(
-                                        noFixedEndDateTime = checked,
-                                        end = when {
-                                            end <= start -> minimumFixedEnd
-                                            else -> end
-                                        },
-                                    )
-                                }
-                            }
-                        },
+                        enabled = canChangePolicy,
+                        onCheckedChange = null,
                     )
                     Text(
                         text = copy.label,

@@ -51,6 +51,7 @@ import {
   EventHostDelegationError,
 } from "./eventHostDelegation";
 import { editorDraftToLegacyEvent } from "@/app/events/[id]/schedule/components/eventForm/editorContractAdapters";
+import { editorEndPolicyError, retainedEditorSchedule } from './editorEndPolicy';
 import {
   claimEventEditorCreateOperation,
   completeEventEditorCreateOperation,
@@ -788,7 +789,11 @@ const prepareEventPayloadForSave = async (
   const eventType = draft.basics.eventType.trim().toUpperCase();
   assertFixedEndApplicability(draft);
   assertTryoutEnd(draft);
-  const eventPayload = editorDraftToLegacyEvent(draft, eventId);
+  const endPolicyError = editorEndPolicyError(draft, existingSnapshot);
+  if (endPolicyError) throw new EditorInputError(endPolicyError);
+  const eventPayload = editorDraftToLegacyEvent({
+    ...draft, schedule: retainedEditorSchedule(draft.schedule, existingSnapshot),
+  }, eventId);
   const timing = resolveMatchTimingPolicy(timingInputsFor(draft));
   if (
     ["LEAGUE", "TOURNAMENT"].includes(eventType) &&

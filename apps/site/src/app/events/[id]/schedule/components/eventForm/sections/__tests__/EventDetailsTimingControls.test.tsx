@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { useForm } from "react-hook-form";
 
 import { renderWithMantine } from "../../../../../../../../../test/utils/renderWithMantine";
@@ -8,18 +8,23 @@ import { EventDetailsTimingControls } from "../EventDetailsTimingControls";
 type TimingHarnessProps = {
   eventType?: EventFormValues["eventType"];
   supportsNoFixedEndDateTime?: boolean;
+  generated?: boolean;
+  onPolicyChange?: (value: boolean) => void;
 };
 
 const TimingHarness = ({
   eventType = "LEAGUE",
   supportsNoFixedEndDateTime = true,
+  generated = false,
+  onPolicyChange = jest.fn(),
 }: TimingHarnessProps = {}) => {
   const form = useForm<EventFormValues>({
     defaultValues: {
       eventType,
       start: new Date("2026-08-15T09:00:00"),
       end: new Date("2026-08-15T17:00:00"),
-      noFixedEndDateTime: false,
+      noFixedEndDateTime: generated,
+      isAutomatedScheduling: true,
     } as EventFormValues,
   });
 
@@ -28,7 +33,7 @@ const TimingHarness = ({
       control={form.control}
       eventType={eventType}
       startValue={form.getValues("start")}
-      noFixedEndDateTime={false}
+      noFixedEndDateTime={generated}
       supportsNoFixedEndDateTime={supportsNoFixedEndDateTime}
       automaticRefundsAvailable={false}
       manualPaymentsEnabled={false}
@@ -37,32 +42,22 @@ const TimingHarness = ({
       isImmutableField={() => false}
       onStartChange={jest.fn()}
       onEndChange={jest.fn()}
-      onNoFixedEndDateTimeChange={jest.fn()}
+      onNoFixedEndDateTimeChange={onPolicyChange}
       showRegistrationControls={false}
-      showGeneratedEndDateControl={false}
+      showGeneratedEndDateControl
     />
   );
 };
 
 describe("EventDetailsTimingControls", () => {
-  it("hides generated-end selection when the options page owns it", () => {
-    renderWithMantine(<TimingHarness />);
-
-    expect(
-      screen.queryByLabelText("Set the end date during match generation"),
-    ).not.toBeInTheDocument();
-    expect(screen.getByLabelText("End Date & Time")).toBeInTheDocument();
-  });
-
-  it("shows a planned end for Tryouts without a no-end checkbox", () => {
-    renderWithMantine(
-      <TimingHarness
-        eventType="TRYOUT"
-        supportsNoFixedEndDateTime={false}
-      />,
-    );
-
-    expect(screen.getByLabelText("End Date & Time")).toBeInTheDocument();
-    expect(screen.queryByLabelText("No Planned End")).not.toBeInTheDocument();
+  it.each(['LEAGUE', 'TOURNAMENT'] as const)('preserves the selected policy when %s automation is disabled', (eventType) => {
+    const onPolicyChange = jest.fn();
+    renderWithMantine(<TimingHarness eventType={eventType} generated onPolicyChange={onPolicyChange} />);
+    fireEvent.click(screen.getByLabelText('Automated Scheduling'));
+    expect(screen.getByLabelText('Automated Scheduling')).not.toBeChecked();
+    expect(screen.getByLabelText('Set the end date during match generation')).toBeChecked();
+    expect(onPolicyChange).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByLabelText('Set the end date during match generation'));
+    expect(onPolicyChange).toHaveBeenCalledWith(false);
   });
 });

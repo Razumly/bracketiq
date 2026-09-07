@@ -249,7 +249,8 @@ const commandFor = (questions: unknown[]) =>
     editorRevision: "revision_1",
     staffRevision: "staff_revision_1",
     draft: {
-      basics: { eventType: "EVENT", hostId: "host_1", organizationId: null, affiliateUrl: "" },
+      basics: { eventType: "EVENT", hostId: "host_1", organizationId: null, affiliateUrl: "", start: "2026-09-01T09:00:00.000Z" },
+      schedule: { mode: "FIXED_END", endConstraint: "2026-09-01T12:00:00.000Z", isAutomatedScheduling: true },
       registration: {
         payment: { mode: "FREE", priceCents: 0 },
         questions,
@@ -620,6 +621,41 @@ const createEventEditorTxFor = (
 };
 
 describe("saveEventEditor", () => {
+  it('preserves the accepted generated end when automation is disabled', async () => {
+    const tx = txFor();
+    const current = snapshot();
+    const command = commandFor([]);
+    command.draft = structuredClone(leagueCreateDraft);
+    command.draft.basics.hostId = 'host_1';
+    command.draft.schedule = { mode: 'GENERATED_END', endConstraint: null,
+      generatedScheduleEnd: '2026-09-12T18:00:00.000Z', isAutomatedScheduling: true };
+    current.draft = structuredClone(command.draft);
+    (buildEventEditorSnapshot as jest.Mock).mockResolvedValue(current);
+    (loadEventEditorSnapshot as jest.Mock).mockResolvedValue(current);
+    (editorDraftToLegacyEvent as jest.Mock).mockImplementation(actualEditorAdapters.editorDraftToLegacyEvent);
+    command.draft.schedule.isAutomatedScheduling = false;
+    command.draft.schedule.generatedScheduleEnd = '2026-09-30T18:00:00.000Z';
+    await saveEventEditor({ userId: 'host_1' }, command, 'event_1');
+    expect(upsertEventFromPayload).toHaveBeenCalledWith(expect.objectContaining({
+      noFixedEndDateTime: true, isAutomatedScheduling: false,
+      end: '2026-09-12T18:00:00.000Z', generatedScheduleEnd: '2026-09-12T18:00:00.000Z',
+    }), tx, expect.anything());
+  });
+
+  it('rejects a new generated policy while automation is disabled', async () => {
+    txFor();
+    const current = snapshot();
+    current.draft = { ...commandFor([]).draft };
+    (buildEventEditorSnapshot as jest.Mock).mockResolvedValue(current);
+    const command = commandFor([]);
+    command.draft.basics.eventType = 'LEAGUE';
+    command.draft.schedule = { mode: 'GENERATED_END', endConstraint: null,
+      generatedScheduleEnd: '2026-09-12T18:00:00.000Z', isAutomatedScheduling: false };
+    await expect(saveEventEditor({ userId: 'host_1' }, command, 'event_1'))
+      .rejects.toThrow('Set End From Schedule requires Automated Scheduling.');
+    expect(upsertEventFromPayload).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
     (buildEventEditorSnapshot as jest.Mock).mockResolvedValue(snapshot());
@@ -1965,7 +2001,7 @@ describe("saveEventEditor", () => {
         ...leagueCreateDraft.schedule,
         isAutomatedScheduling: false,
         mode: "FIXED_END" as const,
-        endConstraint: "2026-09-01T18:00:00.000Z",
+        endConstraint: "2026-09-11T18:00:00.000Z",
       },
     };
 

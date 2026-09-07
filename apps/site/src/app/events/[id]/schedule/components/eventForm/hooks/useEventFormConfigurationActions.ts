@@ -60,6 +60,17 @@ type UseEventFormConfigurationActionsParams = {
     tournamentData: TournamentConfig;
 };
 
+const countUpDuration = (template: MatchRulesConfig | null, override: MatchRulesConfig | null, fallbackCount: number | undefined): number | null => {
+    const timekeeping = (config: MatchRulesConfig | null) => config?.timekeeping ?? {};
+    const templateTimekeeping = timekeeping(template);
+    const overrideTimekeeping = timekeeping(override);
+    const timerMode = overrideTimekeeping.timerMode ?? templateTimekeeping.timerMode;
+    const segmentDuration = normalizeNumber(overrideTimekeeping.segmentDurationMinutes ?? templateTimekeeping.segmentDurationMinutes);
+    const segmentCount = normalizeNumber(template?.segmentCount) ?? fallbackCount ?? 1;
+    if (timerMode !== 'COUNT_UP' || !segmentDuration || segmentCount <= 0) return null;
+    return Math.max(1, Math.trunc(segmentDuration * segmentCount));
+};
+
 export const useEventFormConfigurationActions = ({
     clearLeagueSlotErrors,
     eventData,
@@ -96,22 +107,10 @@ export const useEventFormConfigurationActions = ({
         const sanitized = sanitizeMatchRulesOverrideForEditor(nextValue);
         setValue('matchRulesOverride', sanitized, { shouldDirty: true, shouldValidate: false });
         const template = (selectedSport?.matchRulesTemplate ?? null) as MatchRulesConfig | null;
-        const templateTimekeeping = template?.timekeeping ?? null;
-        const overrideTimekeeping = sanitized?.timekeeping ?? null;
-        const timerMode = overrideTimekeeping?.timerMode ?? templateTimekeeping?.timerMode;
-        const segmentDuration = normalizeNumber(
-            overrideTimekeeping?.segmentDurationMinutes
-            ?? templateTimekeeping?.segmentDurationMinutes,
-        );
-        const segmentCount = normalizeNumber(template?.segmentCount)
-            ?? (eventData.eventType === 'TOURNAMENT'
-                ? normalizeNumber(tournamentData.winnerSetCount)
-                : normalizeNumber(leagueData.setsPerMatch))
-            ?? 1;
-        if (timerMode !== 'COUNT_UP' || !segmentDuration || segmentCount <= 0) {
-            return;
-        }
-        const totalMatchDuration = Math.max(1, Math.trunc(segmentDuration * segmentCount));
+        const fallbackCount = eventData.eventType === 'TOURNAMENT'
+            ? normalizeNumber(tournamentData.winnerSetCount) : normalizeNumber(leagueData.setsPerMatch);
+        const totalMatchDuration = countUpDuration(template, sanitized, fallbackCount);
+        if (totalMatchDuration === null) return;
         if (eventData.eventType === 'LEAGUE') {
             setLeagueData((previous) => ({
                 ...previous,
@@ -260,15 +259,10 @@ export const useEventFormConfigurationActions = ({
     }, [setValue]);
 
     const handleNoFixedEndDateTimeChange = useCallback((checked: boolean) => {
+        const wasGenerated = getValues('noFixedEndDateTime');
         setValue('noFixedEndDateTime', checked, { shouldDirty: true, shouldValidate: true });
-        if (checked) {
-            return;
-        }
-        const parsedStart = parseLocalDateTime(getValues('start'));
-        const parsedEnd = parseLocalDateTime(getValues('end'));
-        if (parsedStart && (!parsedEnd || parsedEnd.getTime() <= parsedStart.getTime())) {
-            const minimumEnd = new Date(parsedStart.getTime() + 60 * 60 * 1000);
-            setValue('end', formatLocalDateTime(minimumEnd), { shouldDirty: true, shouldValidate: true });
+        if (wasGenerated && !checked) {
+            setValue('end', '', { shouldDirty: true, shouldValidate: true });
         }
     }, [getValues, setValue]);
 

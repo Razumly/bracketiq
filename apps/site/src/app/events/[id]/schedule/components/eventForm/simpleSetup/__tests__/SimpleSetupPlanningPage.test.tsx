@@ -231,7 +231,7 @@ describe("SimpleSetupPlanningPage operations plan", () => {
     expect(onNoFixedEndDateTimeChange).toHaveBeenCalledWith(true);
   });
 
-  it("clears generated end-date mode when automated scheduling is disabled", () => {
+  it("preserves generated end-date mode when automated scheduling is disabled", () => {
     const onNoFixedEndDateTimeChange = jest.fn();
     const leagueCapabilities = resolveEventSetupCapabilities({
       eventType: "LEAGUE",
@@ -282,7 +282,8 @@ describe("SimpleSetupPlanningPage operations plan", () => {
 
     fireEvent.click(screen.getByLabelText("Automated Scheduling"));
 
-    expect(onNoFixedEndDateTimeChange).toHaveBeenCalledWith(false);
+    expect(onNoFixedEndDateTimeChange).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Set end date during match generation")).toBeChecked();
   });
 });
 

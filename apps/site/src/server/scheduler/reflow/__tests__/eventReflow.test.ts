@@ -44,6 +44,16 @@ function setup() {
 
 beforeEach(() => jest.resetAllMocks());
 
+it('rejects direct Reflow when Automated Scheduling is disabled', async () => {
+  const { run, event, tx } = setup();
+  jest.mocked(loadLockedScheduleEvent).mockResolvedValue({
+    event, persistedEvent: { id: event.id }, automatedScheduling: false,
+  });
+  await expect(run()).rejects.toMatchObject({ code: 'EDITOR_MAINTENANCE_INVALID' });
+  expect(tx.matches.update).not.toHaveBeenCalled();
+  expect(tx.events.update).not.toHaveBeenCalled();
+});
+
 it('saves only the changed placement and returns the complete canonical graph', async () => {
   const { run, tx } = setup();
   jest.mocked(loadEventScheduleState).mockResolvedValueOnce({ revision: 'revision-1' } as Awaited<ReturnType<typeof loadEventScheduleState>>)
@@ -77,4 +87,26 @@ it('propagates a save failure to the caller-owned transaction', async () => {
   const { run, tx } = setup();
   tx.matches.update.mockRejectedValueOnce(new Error('write failed'));
   await expect(run()).rejects.toThrow('write failed');
+});
+
+it('sets the generated end in the same transaction when the latest Match moves', async () => {
+  const { run, event, tx } = setup();
+  event.noFixedEndDateTime = true;
+  event.end = at(55);
+  const result = await run();
+  expect(result.graph?.event.end).toBe(at(65).toISOString());
+  expect(tx.events.update).toHaveBeenCalledWith(expect.objectContaining({
+    data: expect.objectContaining({ end: at(65), generatedScheduleEnd: at(65) }),
+  }));
+});
+
+it('preserves the generated end when an earlier Match moves', async () => {
+  const { run, event, next, tx } = setup();
+  event.noFixedEndDateTime = true;
+  event.matches.later = new Match({ ...next, id: 'later', matchId: 3,
+    previousLeftMatch: null, start: at(100), end: at(125), locked: true });
+  const result = await run();
+  expect(result.status).toBe('CHANGED');
+  expect(tx.events.update).not.toHaveBeenCalled();
+  expect(result.graph?.event.end).toBe(at(180).toISOString());
 });

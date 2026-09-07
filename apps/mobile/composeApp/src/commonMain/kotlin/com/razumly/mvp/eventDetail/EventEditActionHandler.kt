@@ -1411,10 +1411,8 @@ internal class EventEditActionHandler(
                 eventType = type,
                 isAutomatedScheduling = isAutomatedScheduling,
                 noFixedEndDateTime = when {
-                    type == EventType.TRYOUT -> false
-                    type == EventType.WEEKLY_EVENT -> noFixedEndDateTime
-                    isAutomatedScheduling -> noFixedEndDateTime
-                    else -> false
+                    type == EventType.TRYOUT || type == EventType.EVENT -> false
+                    else -> noFixedEndDateTime
                 },
             )
         }

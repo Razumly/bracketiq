@@ -180,12 +180,14 @@ describe("saveMatches", () => {
     const client = {
       events: {
         findUnique: jest.fn().mockResolvedValue({
+          start: new Date("2026-04-22T17:00:00.000Z"),
+          end: new Date("2026-04-22T20:00:00.000Z"),
           officialPositions: [
             { id: "event_referee", name: "Event Referee", count: 1, order: 0 },
           ],
         }),
       },
-      matches: { upsert },
+      matches: { upsert, findMany: jest.fn().mockResolvedValue([]) },
     };
     const phasePositions = [
       { id: "bracket_referee", name: "Bracket Referee", count: 2, order: 0 },

@@ -413,7 +413,6 @@ export const SimpleSetupPlanningPage = ({
                   if (isImmutableField("isAutomatedScheduling")) return;
                   const checked = event.currentTarget.checked;
                   field.onChange(checked);
-                  if (!checked) onNoFixedEndDateTimeChange(false);
                 }}
               />
             )}
@@ -454,8 +453,7 @@ export const SimpleSetupPlanningPage = ({
             </SimpleGrid>
           </Radio.Group>
         ) : null}
-        {showScheduleConstructionControls
-        && (capabilities.isLeague || capabilities.isTournament) ? (
+        {(capabilities.isLeague || capabilities.isTournament) ? (
           <Controller
             name="noFixedEndDateTime"
             control={control}
@@ -465,12 +463,12 @@ export const SimpleSetupPlanningPage = ({
                 description="The generated match schedule will determine the event end date."
                 checked={Boolean(field.value)}
                 disabled={
-                  !showScheduleConstructionControls
+                  (!showScheduleConstructionControls && !field.value)
                   || isImmutableField("noFixedEndDateTime")
                 }
                 onChange={(event) => {
                   if (
-                    !showScheduleConstructionControls
+                    (!showScheduleConstructionControls && !field.value)
                     || isImmutableField("noFixedEndDateTime")
                   ) return;
                   onNoFixedEndDateTimeChange(event.currentTarget.checked);
