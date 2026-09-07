@@ -51,6 +51,11 @@ const update = jest.fn(async (args: any) => {
 });
 
 const prismaMock: any = {
+  authUser: {
+    findMany: jest.fn(async (args: any) => args.where.id.in
+      .filter((id: string) => users.has(id))
+      .map((id: string) => ({ id, passwordHash: 'active-test-account', disabledAt: null }))),
+  },
   userData: {
     findMany,
     findUnique,

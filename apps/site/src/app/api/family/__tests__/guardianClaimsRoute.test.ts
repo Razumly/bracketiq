@@ -9,6 +9,7 @@ const matches = (row: any, where: any): boolean => Object.entries(where).every((
     ? (value as { in: unknown[] }).in.includes(row[key]) : row[key] === value
 ));
 const prismaMock: any = {
+  $executeRaw: async () => 0,
   userData: {
     findUnique: async ({ where }: any) => state.profiles.find((row: any) => row.id === where.id),
     findMany: async ({ where }: any) => state.profiles.filter((row: any) => where.id.in.includes(row.id)),
@@ -23,6 +24,7 @@ const prismaMock: any = {
     update: async ({ where, data }: any) => Object.assign(state.links.find((row: any) => row.id === where.id), data),
   },
   invites: {
+    findMany: async () => [structuredClone(state.invite)],
     findUnique: async () => structuredClone(state.invite),
     update: async ({ data }: any) => {
       if (failAcceptance && data.status === 'ACCEPTED') throw new Error('Test save failure');

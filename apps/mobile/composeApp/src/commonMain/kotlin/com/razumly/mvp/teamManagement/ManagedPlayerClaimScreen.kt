@@ -21,15 +21,13 @@ import kotlinx.coroutines.flow.flowOf
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.launch
 import com.razumly.mvp.core.data.repositories.IUserRepository
 
 @Composable
@@ -42,36 +40,31 @@ fun ManagedPlayerClaimScreen(
     onClaimed: () -> Unit,
     onGuardianAccepted: () -> Unit = onClaimed,
 ) {
-    var preview by remember(inviteId, version, expiresAt, signature) { mutableStateOf<com.razumly.mvp.core.data.repositories.ManagedPlayerClaimPreview?>(null) }
-    var dateOfBirth by remember(inviteId) { mutableStateOf("") }
-    var confirmed by remember(inviteId) { mutableStateOf(false) }
-    var guardianDeclared by remember(inviteId) { mutableStateOf(false) }
-    var reviewed by remember(inviteId) { mutableStateOf(false) }
-    var declined by remember(inviteId) { mutableStateOf(false) }
     val currentUser by repository.currentUser.collectAsState()
     val viewerId = currentUser.getOrNull()?.id
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val component = remember(repository, inviteId, version, expiresAt, signature, viewerId) {
+        ManagedPlayerClaimComponent(repository, inviteId, version, expiresAt, signature, scope, onClaimed)
+    }
+    DisposableEffect(component) { onDispose { component.close() } }
+    val preview = component.preview
+    val dateOfBirth = component.dateOfBirth
+    val confirmed = component.confirmed
+    val guardianDeclared = component.guardianDeclared
+    val reviewed = component.reviewed
+    val declined = component.declined
+    val accepted = component.accepted
+    val needsBirthDate = component.needsBirthDate
+    val loading = component.loading
+    val saving = component.saving
+    val error = component.error
     val invitationFlow = remember(viewerId) { viewerId?.let(repository::observeRecipientInvitations) ?: flowOf(emptyList<Invite>()) }
     val invitations by invitationFlow.collectAsState(emptyList())
     val invitation = invitations.firstOrNull { it.id == inviteId }
-    var accepted by remember(inviteId) { mutableStateOf(false) }
-    var needsBirthDate by remember(inviteId) { mutableStateOf(false) }
-    var loading by remember(inviteId, version, expiresAt, signature) { mutableStateOf(true) }
-    var saving by remember(inviteId) { mutableStateOf(false) }
-    var error by remember(inviteId) { mutableStateOf<String?>(null) }
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
-
-    LaunchedEffect(inviteId, version, expiresAt, signature) {
-        loading = true
-        error = null
-        repository.previewManagedPlayerClaim(inviteId, version, expiresAt, signature)
-            .onSuccess { value -> preview = value; needsBirthDate = value.birthdateRequired }
-            .onFailure { throwable -> error = throwable.message ?: "This claim link is unavailable." }
-        loading = false
-    }
-
-    LaunchedEffect(viewerId, preview, reviewed) {
+    LaunchedEffect(component) { component.load() }
+    LaunchedEffect(component, viewerId, preview, reviewed) {
         if (viewerId != null && preview?.isMinor == true && (reviewed || preview?.guardianSetupRequired == false)) {
-            repository.listInvites(viewerId, "TEAM").onFailure { error = "Invitation actions could not load. Review the invitation again." }
+            component.refreshActions(viewerId)
         }
     }
 
@@ -110,7 +103,7 @@ fun ManagedPlayerClaimScreen(
                     return@Column
                 }
                 if (currentPreview.guardianSetupRequired && !reviewed) {
-                    ConfirmationRow(guardianDeclared, currentPreview.guardianDeclaration.orEmpty()) { guardianDeclared = it }
+                    ConfirmationRow(guardianDeclared, currentPreview.guardianDeclaration.orEmpty()) { component.guardianDeclared = it }
                     Text("We record your declaration. Email verification and this declaration do not independently verify guardianship.", style = MaterialTheme.typography.bodySmall)
                 }
                 Text(
@@ -126,104 +119,29 @@ fun ManagedPlayerClaimScreen(
                 if (needsBirthDate) {
                     ManagedPlayerDateField(
                         value = dateOfBirth,
-                        onValueChange = { dateOfBirth = it },
+                        onValueChange = { component.dateOfBirth = it },
                         label = "Date of birth",
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
                 if (currentPreview.isMinor) {
                     if (invitation?.status == "PENDING") {
-                        TextButton(enabled = !saving, onClick = {
-                            saving = true; error = null
-                            scope.launch {
-                                repository.declineInvite(inviteId)
-                                    .onSuccess { declined = true }
-                                    .onFailure { error = it.message ?: "The decline could not be confirmed. Retry the same action." }
-                                saving = false
-                            }
-                        }) { Text("Decline") }
-                        InvitationBlockAction(invitation, enabled = !saving) { blockScope, leaveChats, onResult ->
-                            saving = true
-                            scope.launch {
-                                val result = repository.declineAndBlockInvite(inviteId, blockScope, leaveChats)
-                                result.onSuccess { declined = true }
-                                saving = false
-                                onResult(result)
-                            }
-                        }
+                        TextButton(enabled = !saving, onClick = component::decline) { Text("Decline") }
+                        InvitationBlockAction(invitation, enabled = !saving, onSave = component::declineAndBlock)
                     } else if (invitation != null) {
                         Text(invitation.invitationLabel ?: "Invitation ${invitation.status?.lowercase()}")
                     } else {
-                        Button(enabled = !saving && (!currentPreview.guardianSetupRequired || reviewed || guardianDeclared) && (invitation == null || invitation.status == "PENDING"), onClick = {
-                            saving = true; error = null
-                            scope.launch {
-                                repository.claimManagedPlayerProfile(
-                                    profileId = currentPreview.profileId, inviteId = currentPreview.inviteId,
-                                    confirmation = true, dateOfBirth = dateOfBirth.takeIf(String::isNotBlank),
-                                    version = version, expiresAt = expiresAt, signature = signature,
-                                    guardianDeclaration = guardianDeclared,
-                                    acceptTeamInvitation = false, reviewGuardianInvitation = true,
-                                ).onSuccess { result ->
-                                    when (result.status) {
-                                        "GUARDIAN_READY" -> reviewed = true
-                                        "BIRTHDATE_REQUIRED" -> needsBirthDate = true
-                                        "GUARDIAN_REQUIRED" -> {
-                                            confirmed = false; guardianDeclared = false
-                                            repository.previewManagedPlayerClaim(inviteId, version, expiresAt, signature)
-                                                .onSuccess { value -> preview = value; needsBirthDate = value.birthdateRequired }
-                                                .onFailure { error = it.message ?: "The guardian invitation could not load." }
-                                        }
-                                        else -> error = "The invitation could not be reviewed. Open your profile and reload the invitation."
-                                    }
-                                    result.refreshError?.let { error = "Guardian review saved. Invitation actions could not refresh: $it" }
-                                }.onFailure { error = it.message ?: "The invitation could not be reviewed." }
-                                saving = false
-                            }
-                        }) { Text("Review decline options") }
+                        Button(enabled = !saving && (!currentPreview.guardianSetupRequired || reviewed || guardianDeclared),
+                            onClick = { component.claim(review = true) }) { Text("Review decline options") }
                     }
                 }
                 ConfirmationRow(
                     checked = confirmed,
                     label = if (currentPreview.isMinor) "I accept this team invitation for ${currentPreview.displayName}." else "I confirm that this profile belongs to me.",
-                    onCheckedChange = { confirmed = it },
+                    onCheckedChange = { component.confirmed = it },
                 )
                 Button(
-                    onClick = {
-                        saving = true
-                        error = null
-                        scope.launch {
-                            // The server performs email, guardian, signature, and merge checks atomically.
-                            repository.claimManagedPlayerProfile(
-                                profileId = currentPreview.profileId,
-                                inviteId = currentPreview.inviteId,
-                                confirmation = true,
-                                dateOfBirth = dateOfBirth.takeIf(String::isNotBlank),
-                                version = version,
-                                expiresAt = expiresAt,
-                                signature = signature,
-                                guardianDeclaration = guardianDeclared.takeIf { currentPreview.isMinor },
-                                acceptTeamInvitation = true.takeIf { currentPreview.isMinor },
-                            ).onSuccess { result ->
-                                when (result.status) {
-                                    "GUARDIAN_ACCEPTED" -> {
-                                        accepted = true
-                                        result.refreshError?.let { error = "Invitation accepted. Family data could not refresh: $it" }
-                                    }
-                                    "BIRTHDATE_REQUIRED" -> needsBirthDate = true
-                                    "GUARDIAN_REQUIRED" -> {
-                                        confirmed = false
-                                        guardianDeclared = false
-                                        preview = null
-                                        repository.previewManagedPlayerClaim(inviteId, version, expiresAt, signature)
-                                            .onSuccess { value -> preview = value; needsBirthDate = value.birthdateRequired }
-                                            .onFailure { throwable -> error = throwable.message ?: "The guardian invitation could not load." }
-                                    }
-                                    else -> onClaimed()
-                                }
-                            }.onFailure { throwable -> error = throwable.message ?: "The profile could not be claimed." }
-                            saving = false
-                        }
-                    },
+                    onClick = { component.claim() },
                     enabled = confirmed && !saving && (!needsBirthDate || dateOfBirth.isNotBlank()) && (!currentPreview.guardianSetupRequired || reviewed || guardianDeclared) && (invitation == null || invitation.status == "PENDING"),
                     modifier = Modifier.fillMaxWidth(),
                 ) {

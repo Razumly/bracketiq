@@ -10,11 +10,16 @@ const prismaMock = {
     deleteMany: jest.fn(),
     findFirst: jest.fn(),
     findMany: jest.fn(),
+    findUnique: jest.fn(),
+    updateMany: jest.fn(),
     update: jest.fn(),
   },
   authUser: {
     findUnique: jest.fn(),
+    findMany: jest.fn().mockResolvedValue([]),
   },
+  teamBlocks: { findMany: jest.fn().mockResolvedValue([]) },
+  inviteDeliveries: { findMany: jest.fn().mockResolvedValue([]) },
   sensitiveUserData: {
     findFirst: jest.fn(),
   },
@@ -91,6 +96,7 @@ jest.mock('@/server/teams/teamMembership', () => ({
   ),
 }));
 jest.mock('@/server/repositories/locks', () => ({
+  acquireUserSocialLocks: jest.fn().mockResolvedValue(undefined),
   acquireEventLock: (...args: unknown[]) => acquireEventLockMock(...args),
   acquireTeamRosterLock: (...args: unknown[]) => acquireTeamRosterLockMock(...args),
   acquireOrganizationStaffMemberLock: (...args: unknown[]) => acquireOrganizationStaffMemberLockMock(...args),
@@ -180,10 +186,10 @@ describe('/api/invites', () => {
     expect(res.status).toBe(200);
     expect(prismaMock.invites.findMany).toHaveBeenCalledWith({
       where: {
-        AND: [
+        AND: expect.arrayContaining([
           { userId: 'user_1', type: 'TEAM' },
           { OR: [{ status: null }, { status: { in: ['PENDING', 'SENT', 'FAILED'] } }] },
-        ],
+        ]),
       },
       orderBy: [
         { createdAt: { sort: 'desc', nulls: 'last' } },
@@ -232,7 +238,7 @@ describe('/api/invites', () => {
   it('authorizes terminal cleanup for guardian-visible child TEAM invites without a pending-only scope', async () => {
     requireSessionMock.mockResolvedValue({ userId: 'parent_1', isAdmin: false });
     prismaMock.parentChildLinks.findMany.mockResolvedValue([{ childId: 'child_1' }]);
-    prismaMock.userData.findMany.mockResolvedValue([{ id: 'child_1', dateOfBirth: new Date('2015-01-01') }]);
+    prismaMock.userData.findMany.mockResolvedValue([{ id: 'child_1', dateOfBirth: new Date('2015-01-01'), blockedUserIds: [] }]);
 
     const res = await GET(new NextRequest('http://localhost/api/invites?type=TEAM'));
 
@@ -245,6 +251,7 @@ describe('/api/invites', () => {
     requireSessionMock.mockResolvedValue({ userId: 'user_1', isAdmin: false });
     const createdAt = new Date('2026-01-01T00:00:00.000Z');
     prismaMock.invites.findMany
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{
         id: 'declined_1',
         type: 'TEAM',
@@ -263,10 +270,10 @@ describe('/api/invites', () => {
     expect(json.invites.map((invite: { id: string }) => invite.id)).toEqual(['declined_1']);
     expect(prismaMock.invites.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: {
-        AND: [
+        AND: expect.arrayContaining([
           { userId: 'user_1' },
-          { status: { in: ['DECLINED', 'REJECTED', 'FAILED', 'ACCEPTED'] } },
-        ],
+          { status: { in: ['DECLINED', 'REJECTED', 'ACCEPTED', 'CANCELLED', 'EXPIRED'] } },
+        ]),
       },
       take: 11,
     }));
@@ -293,6 +300,7 @@ describe('/api/invites', () => {
     requireSessionMock.mockResolvedValue({ userId: 'user_1', isAdmin: false });
     const createdAt = new Date('2026-01-01T00:00:00.000Z');
     prismaMock.invites.findMany
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce(['invite_3', 'invite_2', 'invite_1'].map((id) => ({
         id,
         type: 'TEAM',
@@ -486,7 +494,7 @@ describe('/api/invites', () => {
     );
     expect(prismaMock.teams.findUnique).toHaveBeenCalledWith({ where: { id: 'team_1' } });
     expect(prismaMock.invites.create).toHaveBeenCalledTimes(1);
-    expect(sendInviteEmailsMock).toHaveBeenCalledWith([], 'http://localhost');
+    expect(sendInviteEmailsMock).toHaveBeenCalledWith([], 'http://localhost', { requestedBy: expect.any(String), requestedByIsAdmin: false });
   });
 
   it('dispatches an explicit TEAM staff role to an invited staff assignment', async () => {
@@ -714,7 +722,7 @@ describe('/api/invites', () => {
     expect(res.status).toBe(201);
     expect(json.invites[0].id).toBe('invite_placeholder');
     expect(ensureAuthUserAndUserDataByEmailMock).not.toHaveBeenCalled();
-    expect(sendInviteEmailsMock).toHaveBeenCalledWith([createdInvite], 'http://localhost');
+    expect(sendInviteEmailsMock).toHaveBeenCalledWith([createdInvite], 'http://localhost', { requestedBy: expect.any(String), requestedByIsAdmin: false });
   });
 
   it('does not send delivery again when a TEAM user-id invite already exists', async () => {
@@ -773,7 +781,7 @@ describe('/api/invites', () => {
         status: 'PENDING',
       }),
     });
-    expect(sendInviteEmailsMock).toHaveBeenCalledWith([], 'http://localhost');
+    expect(sendInviteEmailsMock).toHaveBeenCalledWith([], 'http://localhost', { requestedBy: expect.any(String), requestedByIsAdmin: false });
   });
 
   it('uses forwarded request origin when sending EVENT invite emails', async () => {
@@ -810,7 +818,7 @@ describe('/api/invites', () => {
       );
 
       expect(res.status).toBe(201);
-      expect(sendInviteEmailsMock).toHaveBeenCalledWith([createdInvite], 'https://bracket-iq.com');
+      expect(sendInviteEmailsMock).toHaveBeenCalledWith([createdInvite], 'https://bracket-iq.com', { requestedBy: expect.any(String), requestedByIsAdmin: false });
     } finally {
       if (originalBaseUrl === undefined) {
         delete process.env.PUBLIC_WEB_BASE_URL;
@@ -1162,7 +1170,7 @@ describe('/api/invites', () => {
         staffTypes: ['HOST'],
       }),
     });
-    expect(sendInviteEmailsMock).toHaveBeenCalledWith([], 'http://localhost');
+    expect(sendInviteEmailsMock).toHaveBeenCalledWith([], 'http://localhost', { requestedBy: expect.any(String), requestedByIsAdmin: false });
   });
 
   it('silently skips STAFF invite entries by userId when no email can be resolved', async () => {
@@ -1187,7 +1195,7 @@ describe('/api/invites', () => {
     expect(json.invites).toEqual([]);
     expect(prismaMock.invites.create).not.toHaveBeenCalled();
     expect(prismaMock.invites.update).not.toHaveBeenCalled();
-    expect(sendInviteEmailsMock).toHaveBeenCalledWith([], 'http://localhost');
+    expect(sendInviteEmailsMock).toHaveBeenCalledWith([], 'http://localhost', { requestedBy: expect.any(String), requestedByIsAdmin: false });
   });
 
   it('locks event-scoped STAFF invites before the generic bulk delete re-authorizes and mutates', async () => {

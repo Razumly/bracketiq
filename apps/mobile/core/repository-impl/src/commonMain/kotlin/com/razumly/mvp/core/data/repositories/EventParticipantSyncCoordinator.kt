@@ -18,6 +18,7 @@ import com.razumly.mvp.core.network.dto.EventParticipantRegistrationSectionsDto
 import com.razumly.mvp.core.network.dto.EventParticipantsSnapshotResponseDto
 import com.razumly.mvp.core.network.dto.EventTeamComplianceSummaryDto
 import com.razumly.mvp.core.network.dto.toUserDataOrNull
+import com.razumly.mvp.core.network.dto.mergeParticipantHeader
 import com.razumly.mvp.core.util.jsonMVP
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -366,7 +367,7 @@ internal class EventParticipantSyncCoordinator(
         val participantBaseEvent = baseEvent
             .withCachedDivisionStateForPartialSnapshot(latestCachedEvent)
         val snapshotEvent = snapshot.event
-            ?.toEventOrNull()
+            ?.mergeParticipantHeader(participantBaseEvent)
             ?.withCachedDivisionStateForPartialSnapshot(participantBaseEvent)
         val mergedEvent = mergePersistedEventEditorLocks(
             incoming = (snapshotEvent ?: participantBaseEvent).copy(

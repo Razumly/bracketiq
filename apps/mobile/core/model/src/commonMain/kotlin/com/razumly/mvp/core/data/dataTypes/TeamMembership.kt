@@ -155,6 +155,8 @@ private fun Team.normalizeExplicitPlayerRegistrations(): List<TeamPlayerRegistra
             val userId = normalizeIdToken(row.userId) ?: return@mapNotNull null
             val normalizedStatus = normalizeTeamMembershipStatus(row.status)
             TeamPlayerRegistration(
+                invitationId = row.invitationId,
+                invitationLabel = row.invitationLabel,
                 id = normalizeIdToken(row.id) ?: buildTeamPlayerRegistrationId(
                     teamId = id,
                     userId = userId,

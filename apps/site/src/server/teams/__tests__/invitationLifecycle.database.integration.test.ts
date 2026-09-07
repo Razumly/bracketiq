@@ -1,6 +1,7 @@
 /** @jest-environment node */
 
 import { randomUUID } from 'node:crypto';
+import { requireEventSignupTestDatabase } from '../../../../scripts/event-signup-test-environment';
 import { NextRequest } from 'next/server';
 
 jest.mock('@/lib/permissions', () => ({
@@ -54,15 +55,15 @@ databaseTests('issue 149 invitation commands with PostgreSQL', () => {
   };
 
   const eventPlacement = async (inviteId: string, completed: boolean) => {
-    const event = await prisma.events.create({ data: { id: id('event'), name: 'Invitation history', start: new Date('2025-01-01'), end: new Date(completed ? '2025-01-02' : '2035-01-02'), location: 'Test', teamSizeLimit: 6, price: 0, coordinates: [0, 0] } });
+    const event = await prisma.events.create({ data: { id: id('event'), name: 'Invitation history', teamSignup: true, start: new Date('2025-01-01'), end: new Date(completed ? '2025-01-02' : '2035-01-02'), location: 'Test', teamSizeLimit: 6, price: 0, coordinates: [0, 0] } });
     const team = await prisma.teams.create({ data: { id: id('event-team'), eventId: event.id, parentTeamId: id('team'), name: 'Event roster', captainId: id('manager'), managerId: id('manager'), playerIds: [], pending: [id('player')], teamSize: 6 } });
-    const registration = await prisma.eventRegistrations.create({ data: { id: id('event-registration'), eventId: event.id, eventTeamId: team.id, registrantId: id('player'), registrantType: 'SELF', status: 'INVITED', createdBy: id('manager') } });
+    const registration = await prisma.eventRegistrations.create({ data: { id: id('event-registration'), eventId: event.id, eventTeamId: team.id, registrantId: id('player'), registrantType: 'SELF', status: 'PENDING', createdBy: id('manager') } });
     await prisma.teamInviteEventSyncs.create({ data: { id: id('event-sync'), inviteId, canonicalTeamId: id('team'), eventId: event.id, eventTeamId: team.id, userId: id('player'), status: 'PENDING', eventTeamHadUser: false, eventTeamHadPendingUser: false } });
     return { team, registration };
   };
 
   beforeEach(async () => {
-    expect(new URL(process.env.DATABASE_URL!).pathname).toBe('/bracketiq_e2e_149_codex');
+    requireEventSignupTestDatabase(149);
     process.env.AUTH_SECRET = 'issue-149-isolated-integration-secret';
     prefix = `issue149-${randomUUID()}`;
     const users = ['manager', 'alternate', 'player', 'guardian', 'child1', 'child2', 'unclaimed'];
@@ -118,7 +119,7 @@ databaseTests('issue 149 invitation commands with PostgreSQL', () => {
     expect(approval).toMatchObject({ ok: false, status: 403 });
     const registration = await reserveTeamRegistrationSlot({ teamId: id('team'), userId: id('player'), actorUserId: id('manager'), status: 'ACTIVE', now: new Date() });
     expect(registration).toMatchObject({ ok: false, status: 403 });
-    expect(await prisma.teamRegistrations.count({ where: { teamId: id('team'), userId: id('player') } })).toBe(0);
+    expect(await prisma.teamRegistrations.count({ where: { teamId: id('team'), userId: id('player'), status: { in: ['INVITED', 'STARTED', 'PENDING', 'ACTIVE'] } } })).toBe(0);
     expect((await prisma.teamJoinRequests.findUniqueOrThrow({ where: { id: id('old-request') } })).status).toBe('PENDING');
   });
 

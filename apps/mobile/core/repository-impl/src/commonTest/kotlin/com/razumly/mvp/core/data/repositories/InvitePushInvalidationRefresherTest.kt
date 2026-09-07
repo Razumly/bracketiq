@@ -6,6 +6,8 @@ import androidx.datastore.preferences.core.emptyPreferences
 import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.Invite
+import com.razumly.mvp.core.data.dataTypes.InvitationOperation
+import com.razumly.mvp.core.data.dataTypes.TeamBlock
 import com.razumly.mvp.core.data.dataTypes.daos.ChatGroupDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventRegistrationDao
@@ -67,6 +69,29 @@ private class InvitePushTestInviteDao(
     val deletedInviteIds = mutableListOf<String>()
     var replaceDeleteCount = 0
     var replaceInvocationCount = 0
+
+    override suspend fun insertOperation(operation: InvitationOperation): Unit = error("unused")
+    override suspend fun getOperationKey(viewerId: String, identity: String): String? = error("unused")
+    override suspend fun completeOperation(viewerId: String, identity: String, requestKey: String): Unit = error("unused")
+    override suspend fun getLatestTeamAttempt(teamId: String, userId: String): Invite? =
+        stored.values.filter { it.teamId == teamId && it.userId == userId }
+            .maxWithOrNull(compareBy<Invite> { it.createdAt }.thenBy { it.id })
+    override suspend fun clearPreviousAttempts(teamId: String, userId: String, currentId: String) {
+        stored.entries.forEach { entry ->
+            if (entry.value.teamId == teamId && entry.value.userId == userId && entry.key != currentId) {
+                entry.setValue(entry.value.copy(isCurrentAttempt = false))
+            }
+        }
+    }
+    override suspend fun getRecipientInvitations(userId: String, type: String?): List<Invite> = error("unused")
+    override suspend fun getInvite(id: String): Invite? = error("unused")
+    override fun observeTeamInvitations(teamId: String, viewerId: String): Flow<List<Invite>> = error("unused")
+    override fun observeRecipientInvitations(userId: String): Flow<List<Invite>> = error("unused")
+    override suspend fun deleteTeamInvitations(teamId: String): Unit = error("unused")
+    override suspend fun upsertTeamBlocks(blocks: List<TeamBlock>): Unit = error("unused")
+    override fun observeTeamBlocks(viewerId: String): Flow<List<TeamBlock>> = error("unused")
+    override suspend fun deleteTeamBlocks(viewerId: String): Unit = error("unused")
+    override suspend fun deleteTeamBlock(teamId: String, playerId: String): Unit = error("unused")
 
     override suspend fun upsertInvite(invite: Invite) {
         upserted += invite
@@ -281,13 +306,14 @@ class InvitePushInvalidationRefresherTest {
                 teamId = "team_from_server",
                 userId = "child_from_server",
                 createdBy = "host_from_server",
+                viewerId = "viewer_1",
             ),
             dao.stored["invite_1"],
         )
     }
 
     @Test
-    fun canonical_terminal_invite_from_push_is_removed_instead_of_cached() = runTest {
+    fun canonical_terminal_invite_from_push_keeps_the_authorized_outcome() = runTest {
         val dao = InvitePushTestInviteDao(
             invites = listOf(
                 Invite(
@@ -325,13 +351,14 @@ class InvitePushInvalidationRefresherTest {
 
         refresher.refreshFromPayload(mapOf("inviteId" to "invite_1"))
 
-        assertTrue(dao.stored.isEmpty())
-        assertTrue(dao.upserted.isEmpty())
-        assertEquals(listOf("invite_1"), dao.deletedInviteIds)
+        assertEquals("DECLINED", dao.stored["invite_1"]?.status)
+        assertEquals("viewer_1", dao.stored["invite_1"]?.viewerId)
+        assertEquals(1, dao.upserted.size)
+        assertTrue(dao.deletedInviteIds.isEmpty())
     }
 
     @Test
-    fun idless_invitation_hint_pages_all_pending_invites_before_replacing_current_user_cache() = runTest {
+    fun idless_invitation_hint_keeps_authorized_history_when_replacing_current_user_cache() = runTest {
         val dao = InvitePushTestInviteDao(
             invites = listOf(
                 Invite(
@@ -348,9 +375,17 @@ class InvitePushInvalidationRefresherTest {
         val dataSource = CurrentUserDataSource(InvitePushTestPreferencesDataStore())
         dataSource.saveUserId("viewer_1")
         val requestedCursors = mutableListOf<String?>()
+        var historyRequested = false
         val api = invitePushTestApi(MockEngine { request ->
             assertEquals("/api/invites", request.url.encodedPath)
             assertEquals("viewer_1", request.url.parameters["userId"])
+            if (request.url.parameters["history"] == "true") {
+                historyRequested = true
+                assertEquals(null, request.url.parameters["status"])
+                return@MockEngine invitePushJsonResponse(
+                    """{"invites":[{"id":"retained_decline","type":"TEAM","email":"one@example.test","status":"DECLINED","userId":"viewer_1"},{"id":"invite_1","type":"TEAM","status":"ACCEPTED","userId":"viewer_1"}],"nextCursor":null}""",
+                )
+            }
             assertEquals("PENDING", request.url.parameters["status"])
             assertEquals("100", request.url.parameters["limit"])
             val cursor = request.url.parameters["cursor"]
@@ -360,7 +395,8 @@ class InvitePushInvalidationRefresherTest {
                     """
                     {
                       "invites":[
-                        {"id":"invite_1","type":"TEAM","email":"one@example.test","status":"PENDING","userId":"viewer_1"}
+                        {"id":"invite_1","type":"TEAM","email":"one@example.test","status":"PENDING","userId":"viewer_1"},
+                        {"id":"child_invite","type":"TEAM","email":"guardian@example.test","status":"PENDING","userId":"child_1","viewerCanAcceptForChild":true}
                       ],
                       "nextCursor":"push_page_2"
                     }
@@ -390,7 +426,10 @@ class InvitePushInvalidationRefresherTest {
         refresher.refreshFromPayload(mapOf("notificationType" to "invitations"))
 
         assertEquals(listOf(null, "push_page_2"), requestedCursors)
-        assertEquals(setOf("invite_1", "invite_2"), dao.stored.keys)
+        assertTrue(historyRequested)
+        assertEquals(setOf("invite_1", "invite_2", "child_invite", "retained_decline"), dao.stored.keys)
+        assertEquals("viewer_1", dao.stored["child_invite"]?.viewerId)
+        assertEquals("ACCEPTED", dao.stored["invite_1"]?.status)
         assertEquals(1, dao.replaceInvocationCount)
         assertEquals(0, dao.replaceDeleteCount)
     }

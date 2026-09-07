@@ -1,5 +1,6 @@
 /** @jest-environment node */
 import { randomUUID } from 'node:crypto';
+import { requireEventSignupTestDatabase } from '../../../scripts/event-signup-test-environment';
 import { NextRequest } from 'next/server';
 
 jest.mock('@/lib/permissions', () => ({
@@ -34,7 +35,7 @@ databaseTests('shared Event registration drafts', () => {
 
   beforeEach(async () => {
     prefix = `issue151-${randomUUID()}`;
-    expect(new URL(process.env.DATABASE_URL!).pathname).toBe('/bracketiq_e2e_151_codex');
+    requireEventSignupTestDatabase(151);
     await prisma.userData.createMany({ data: ['manager', 'other'].map((name) => ({
       id: id(name), userName: id(name), firstName: name, lastName: 'Test', dateOfBirth: new Date('1990-01-01'),
     })) });

@@ -10,6 +10,9 @@ const replaceSingletonTeamStaffAssignmentMock = jest.fn();
 const acceptTeamInviteWithGuardianRulesMock = jest.fn();
 
 const txMock = {
+  $executeRaw: jest.fn(),
+  teamBlocks: { findMany: jest.fn() },
+  userData: { findMany: jest.fn() },
   invites: {
     updateMany: jest.fn(),
     findUnique: jest.fn(),
@@ -47,6 +50,9 @@ import { POST } from '@/app/api/team-invites/[id]/claim/route';
 describe('/api/team-invites/[id]/claim POST', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    txMock.$executeRaw.mockResolvedValue(0);
+    txMock.teamBlocks.findMany.mockResolvedValue([]);
+    txMock.userData.findMany.mockResolvedValue([]);
     requireSessionMock.mockResolvedValue({ userId: 'new_manager_1', isAdmin: false });
     verifyTeamInviteShareLinkMock.mockReturnValue(true);
     txMock.invites.updateMany.mockResolvedValue({ count: 1 });
@@ -79,7 +85,7 @@ describe('/api/team-invites/[id]/claim POST', () => {
     };
     const claimedInvite = { ...pendingInvite, userId: 'new_manager_1', claimedBy: 'new_manager_1' };
     prismaMock.invites.findUnique.mockResolvedValue(pendingInvite);
-    txMock.invites.findUnique.mockResolvedValue(claimedInvite);
+    txMock.invites.findUnique.mockResolvedValueOnce(pendingInvite).mockResolvedValue(claimedInvite);
 
     const response = await POST(
       new NextRequest('http://localhost/api/team-invites/invite_manager_1/claim?v=1&e=1&s=signed', { method: 'POST' }),

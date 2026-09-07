@@ -1226,7 +1226,7 @@ class UserRepositoryAuthTest {
             when (request.url.encodedPath) {
                 "/api/invites" -> {
                     if (request.url.parameters["history"] == "true") return@MockEngine respond(
-                        content = """{"invites":[{"id":"stale_declined","type":"TEAM","status":"DECLINED","userId":"u1"}]}""",
+                        content = """{"invites":[{"id":"stale_declined","type":"TEAM","status":"DECLINED","userId":"u1"},{"id":"invite_1","type":"TEAM","status":"DECLINED","userId":"u1"}]}""",
                         status = HttpStatusCode.OK,
                         headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
                     )
@@ -1289,6 +1289,7 @@ class UserRepositoryAuthTest {
         assertEquals(listOf(null, "page_2"), requestedCursors)
         assertEquals(setOf("invite_1", "invite_2", "invite_3", "stale_declined"), invites.map(Invite::id).toSet())
         assertEquals(setOf("invite_1", "invite_2", "invite_3", "stale_declined"), inviteDao.stored.keys)
+        assertEquals("DECLINED", inviteDao.stored["invite_1"]?.status)
     }
 
     @Test

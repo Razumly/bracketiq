@@ -25,6 +25,7 @@ jest.mock('@/lib/userService', () => ({
     searchUsers: jest.fn(),
     getUserById: jest.fn(),
     deleteInviteById: jest.fn(),
+    remindTeamInvitation: jest.fn(),
   },
 }));
 
@@ -111,6 +112,7 @@ const userServiceMock = jest.requireMock('@/lib/userService').userService as {
   searchUsers: jest.Mock;
   getUserById: jest.Mock;
   deleteInviteById: jest.Mock;
+  remindTeamInvitation: jest.Mock;
 };
 const apiRequestMock = jest.requireMock('@/lib/apiClient').apiRequest as jest.Mock;
 const teamServiceMock = jest.requireMock('@/lib/teamService').teamService as {
@@ -139,6 +141,8 @@ describe('TeamDetailModal', () => {
     });
     userServiceMock.deleteInviteById.mockReset();
     userServiceMock.deleteInviteById.mockResolvedValue(true);
+    userServiceMock.remindTeamInvitation.mockReset();
+    userServiceMock.remindTeamInvitation.mockResolvedValue({ delivery: { failed: false } });
     apiRequestMock.mockClear();
     userServiceMock.getUsersByIds.mockReset();
     userServiceMock.listInvites.mockReset();
@@ -512,7 +516,7 @@ describe('TeamDetailModal', () => {
     expect(screen.queryByTestId('team-finance-panel')).not.toBeInTheDocument();
     expect(screen.queryByText('Player Slots')).not.toBeInTheDocument();
     await waitFor(() => {
-      expect(userServiceMock.listInvites).toHaveBeenCalledTimes(2);
+      expect(userServiceMock.listInvites).toHaveBeenCalledWith(expect.objectContaining({ teamId: 'team_1', types: expect.any(Array) }));
     });
     await act(async () => {
       await Promise.resolve();
@@ -966,14 +970,14 @@ describe('TeamDetailModal', () => {
       });
     });
     await waitFor(() => {
-      expect(userServiceMock.listInvites).toHaveBeenCalledTimes(2);
+      expect(userServiceMock.listInvites).toHaveBeenCalledWith(expect.objectContaining({ teamId: 'team_1', types: expect.any(Array) }));
     });
-    expect(await screen.findByText('Alex Player')).toBeInTheDocument();
+    expect(await within(document.querySelector<HTMLElement>('.responsive-card-grid.team-roster-player-grid')!).findByText('Alex Player')).toBeInTheDocument();
     expect(screen.getByText('Role: Player')).toBeInTheDocument();
     expect(screen.queryByText('Unknown user')).not.toBeInTheDocument();
     expect(await screen.findByText(/Roster \(1\)/i)).toBeInTheDocument();
     expect(screen.queryByText(/Pending Invitations \(/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Invitation pending/i)).not.toBeInTheDocument();
+    expect(within(document.querySelector<HTMLElement>('.responsive-card-grid.team-roster-player-grid')!).queryByText(/Invitation pending/i)).not.toBeInTheDocument();
   });
   it('keeps accountless players in the roster grid with copy, resend, edit, and remove actions', async () => {
     const manager = buildUser({
@@ -1044,7 +1048,7 @@ describe('TeamDetailModal', () => {
     );
 
     expect(await screen.findByText('Regular Player')).toBeInTheDocument();
-    expect(await screen.findByText('Alex Player')).toBeInTheDocument();
+    expect(await within(document.querySelector<HTMLElement>('.responsive-card-grid.team-roster-player-grid')!).findByText('Alex Player')).toBeInTheDocument();
     const rosterGrid = document.querySelector('.responsive-card-grid.team-roster-player-grid');
     expect(rosterGrid).not.toBeNull();
     expect(rosterGrid?.querySelectorAll('.team-roster-player-card')).toHaveLength(2);
@@ -1054,7 +1058,7 @@ describe('TeamDetailModal', () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(invite.shareUrl));
     expect(screen.getByRole('button', { name: 'Resend invite email for Alex Player' })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByText('Alex Player'));
+    fireEvent.click(within(document.querySelector<HTMLElement>('.responsive-card-grid.team-roster-player-grid')!).getByText('Alex Player'));
     await screen.findByRole('dialog', { name: 'Edit player invite' });
     await screen.findByLabelText(/first name/i);
     expect(screen.getByLabelText(/first name/i)).toHaveValue('Alex');
@@ -1082,9 +1086,9 @@ describe('TeamDetailModal', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Resend invite email for Updated Player' }));
     await waitFor(() => {
-      expect(apiRequestMock).toHaveBeenCalledWith(
-        '/api/teams/team_1/member-invites/invite_player_1/resend',
-        expect.objectContaining({ method: 'POST' }),
+      expect(userServiceMock.remindTeamInvitation).toHaveBeenCalledWith(
+        'invite_player_1',
+        expect.any(String),
       );
     });
     fireEvent.click(screen.getByRole('button', { name: 'Remove invite for Updated Player' }));
@@ -1175,7 +1179,7 @@ describe('TeamDetailModal', () => {
       expect(screen.getByText('2/2')).toBeInTheDocument();
     });
     expect(screen.queryByText(/Pending Invitations \(/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Invitation pending/i)).not.toBeInTheDocument();
+    expect(within(document.querySelector<HTMLElement>('.responsive-card-grid.team-roster-player-grid')!).queryByText(/Invitation pending/i)).not.toBeInTheDocument();
   });
 
   it('shows only the replacement accountless manager', async () => {

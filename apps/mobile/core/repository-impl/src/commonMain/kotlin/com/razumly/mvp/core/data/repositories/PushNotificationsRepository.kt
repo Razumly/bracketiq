@@ -838,7 +838,9 @@ internal class InvitePushInvalidationRefresher(
 
     private suspend fun refreshCurrentUserInvites(userId: String) {
         val canonicalInvites = try {
-            fetchAllPendingInvitePages(api = api, userId = userId)
+            val pending = fetchAllPendingInvitePages(api = api, userId = userId)
+            val history = fetchAllPendingInvitePages(api = api, userId = userId, history = true)
+            (history + pending).distinctBy { it.id }
         } catch (throwable: Throwable) {
             if (throwable is CancellationException) throw throwable
             Napier.w(
@@ -849,7 +851,7 @@ internal class InvitePushInvalidationRefresher(
         }
 
         val normalizedInvites = canonicalInvites.map { invite ->
-            if (invite.userId.isNullOrBlank()) invite.copy(userId = userId) else invite
+            invite.copy(userId = invite.userId?.takeIf(String::isNotBlank) ?: userId, viewerId = userId)
         }
         try {
             // Replace rather than append so older payload-created rows disappear

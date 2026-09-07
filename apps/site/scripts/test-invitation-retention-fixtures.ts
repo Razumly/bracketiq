@@ -1,12 +1,10 @@
 import { prisma } from '../src/lib/prisma';
 import { hashPassword } from '../src/lib/authServer';
 import { pruneExpiredTerminalInvites } from '../src/server/inviteListing';
+import { requireEventSignupTestDatabase } from './event-signup-test-environment';
 
 async function main() {
-  const url = new URL(process.env.DATABASE_URL ?? '');
-  if (!['127.0.0.1', 'localhost'].includes(url.hostname) || url.pathname !== '/bracketiq_e2e_150_codex') {
-    throw new Error('Use the isolated issue 150 test database.');
-  }
+  requireEventSignupTestDatabase(150);
   const [action, teamId] = process.argv.slice(2);
   if (action === 'seed') {
     const passwordHash = await hashPassword('password123!');

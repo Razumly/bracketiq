@@ -13,6 +13,10 @@ const requireSessionMock = jest.fn();
 const canManageEventMock = jest.fn();
 const canManageOrganizationMock = jest.fn();
 const ensureUserMock = jest.fn();
+const createTeamMemberInviteMock = jest.fn();
+jest.mock('@/app/api/teams/[id]/member-invites/route', () => ({
+  POST: (...args: unknown[]) => createTeamMemberInviteMock(...args),
+}));
 
 jest.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 jest.mock('@/lib/permissions', () => ({ requireSession: (...args: any[]) => requireSessionMock(...args) }));
@@ -29,7 +33,7 @@ import { POST } from '@/app/api/users/invite/route';
 
 const request = (body: unknown) => new NextRequest('http://localhost/api/users/invite', {
   method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
+  headers: { 'Content-Type': 'application/json', cookie: 'session=test-session' },
   body: JSON.stringify(body),
 });
 
@@ -93,7 +97,10 @@ describe('POST /api/users/invite authorization', () => {
     expect(prismaMock.invites.create).not.toHaveBeenCalled();
   });
 
-  it('uses the authenticated caller as createdBy for an authorized team invite', async () => {
+  it('forwards an authorized Player invite to the canonical member route', async () => {
+    createTeamMemberInviteMock.mockResolvedValue(new Response(JSON.stringify({
+      invite: { id: 'invite_1', userId: 'invited_1' },
+    }), { status: 201 }));
     prismaMock.teams.findUnique.mockResolvedValue({
       captainId: 'captain_1',
       managerId: 'manager_1',
@@ -107,16 +114,11 @@ describe('POST /api/users/invite authorization', () => {
     }));
 
     expect(response.status).toBe(200);
-    expect(prismaMock.invites.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        createdBy: 'manager_1',
-        teamId: 'team_1',
-        type: 'TEAM',
-        status: 'PENDING',
-      }),
-    }));
-    expect(prismaMock.invites.findFirst).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ type: 'TEAM' }),
-    }));
+    const [forwarded, context] = createTeamMemberInviteMock.mock.calls[0];
+    expect(await context.params).toEqual({ id: 'team_1' });
+    expect(forwarded.headers.get('cookie')).toBe('session=test-session');
+    expect(await forwarded.json()).toEqual({ email: 'player@test.com', role: 'player' });
+    expect((await response.json()).failed).toEqual([]);
+    expect(prismaMock.invites.create).not.toHaveBeenCalled();
   });
 });

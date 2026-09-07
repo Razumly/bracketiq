@@ -1214,7 +1214,7 @@ class UserRepository(
             cacheInvitesForUser(
                 userId = normalizedUserId,
                 type = normalizedType,
-                invites = (invites + history).distinctBy { it.id },
+                invites = (history + invites).distinctBy { it.id },
             )
             databaseService.getInviteDao.getRecipientInvitations(normalizedUserId, normalizedType)
         }.recoverCatching { throwable ->

@@ -46,48 +46,11 @@ import { resolveRelationalEventDivisionIds } from '@/lib/eventApiDivisionIds';
 export const dynamic = 'force-dynamic';
 const RESTRICTED_EVENT_STATES = new Set(['TEMPLATE', 'UNPUBLISHED', 'DRAFT']);
 
-const toEventResponse = (row: any) => {
-  const response = { ...row };
-  (response as any).divisions = resolveRelationalEventDivisionIds((response as any).divisionDetails);
-  if (!Array.isArray(response.waitListIds)) {
-    (response as any).waitListIds = [];
-  }
-  if (!Array.isArray(response.freeAgentIds)) {
-    (response as any).freeAgentIds = [];
-  }
-  if (!Array.isArray(response.officialIds)) {
-    (response as any).officialIds = [];
-  }
-  if (!Array.isArray((response as any).officialPositions)) {
-    (response as any).officialPositions = [];
-  }
-  if (!Array.isArray((response as any).eventOfficials)) {
-    (response as any).eventOfficials = [];
-  }
-  normalizeEventStaffingResponse(response as Record<string, unknown>);
-
-  if (!Array.isArray((response as any).assistantHostIds)) {
-    (response as any).assistantHostIds = [];
-  }
-  if (!Array.isArray(response.requiredTemplateIds)) {
-    (response as any).requiredTemplateIds = [];
-  }
-  (response as any).registrationPaymentMode = normalizeRegistrationPaymentMode((response as any).registrationPaymentMode);
-  (response as any).manualPaymentLinks = normalizeManualPaymentLinks((response as any).manualPaymentLinks);
-  (response as any).manualPaymentInstructions = normalizeManualPaymentInstructions(
-    (response as any).manualPaymentInstructions,
-  );
-  if (typeof (response as any).noFixedEndDateTime !== 'boolean') {
-    (response as any).noFixedEndDateTime = false;
-  }
-  if ((response as any).doTeamsOfficiate !== true) {
-    (response as any).teamOfficialsMaySwap = false;
-  } else if (typeof (response as any).teamOfficialsMaySwap !== 'boolean') {
-    (response as any).teamOfficialsMaySwap = false;
-  }
-  const legacyTeamCheckInMode = typeof (response as any).teamCheckInMode === 'string'
-    ? (response as any).teamCheckInMode.trim().toUpperCase()
-    : 'OFF';
+const normalizeEventCheckInResponse = (response: any) => {
+  const legacyTeamCheckInMode =
+    typeof (response as any).teamCheckInMode === 'string'
+      ? (response as any).teamCheckInMode.trim().toUpperCase()
+      : 'OFF';
   (response as any).teamCheckInMode =
     (response as any).teamSignup === true && ['OFF', 'EVENT', 'MATCH'].includes(legacyTeamCheckInMode)
       ? legacyTeamCheckInMode
@@ -101,9 +64,93 @@ const toEventResponse = (row: any) => {
       ? Boolean((response as any).allowMatchRosterEdits)
       : false;
   (response as any).allowTemporaryMatchPlayers =
-    (response as any).allowMatchRosterEdits === true && typeof (response as any).allowTemporaryMatchPlayers === 'boolean'
+    (response as any).allowMatchRosterEdits === true &&
+    typeof (response as any).allowTemporaryMatchPlayers === 'boolean'
       ? Boolean((response as any).allowTemporaryMatchPlayers)
       : false;
+};
+
+const loadEventOfficialRows = async (event: any) => {
+  const [eventOfficialRows, sportRow] = await Promise.all([
+    typeof (prisma as any).eventOfficials?.findMany === 'function'
+      ? (prisma as any).eventOfficials.findMany({
+          where: { eventId: event.id },
+          orderBy: { createdAt: 'asc' },
+        })
+      : Promise.resolve([]),
+    event.sportIds?.[0] && typeof (prisma as any).sports?.findUnique === 'function'
+      ? (prisma as any).sports.findUnique({
+          where: { id: event.sportIds[0] },
+          select: { officialPositionTemplates: true } as any,
+        })
+      : Promise.resolve(null),
+  ]);
+  return [eventOfficialRows, sportRow] as const;
+};
+
+const resolveLeagueUsesSets = (row: Record<string, unknown>) => {
+  const usesSets =
+    typeof row.usesSets === 'boolean'
+      ? row.usesSets
+      : Object.prototype.hasOwnProperty.call(row, 'setsPerMatch') ||
+          Object.prototype.hasOwnProperty.call(row, 'setDurationMinutes') ||
+          Object.prototype.hasOwnProperty.call(row, 'pointsToVictory')
+        ? true
+        : undefined;
+  return usesSets;
+};
+
+const loadPhaseParticipantTeamIds = async (eventId: string) => {
+  const phaseParticipantDelegate = (prisma as any).eventDivisionPhaseParticipants;
+  const phaseParticipantRows =
+    typeof phaseParticipantDelegate?.findMany === 'function'
+      ? await phaseParticipantDelegate.findMany({
+          where: { eventId },
+          select: { phaseDivisionId: true, eventTeamId: true },
+        })
+      : [];
+  const phaseParticipantTeamIdsByDivision = new Map<string, string[]>();
+  for (const participant of Array.isArray(phaseParticipantRows) ? phaseParticipantRows : []) {
+    const phaseDivisionId = normalizeDivisionKey(participant.phaseDivisionId);
+    const eventTeamId = normalizeEntityId(participant.eventTeamId);
+    if (!phaseDivisionId || !eventTeamId) continue;
+    const teamIds = phaseParticipantTeamIdsByDivision.get(phaseDivisionId) ?? [];
+    if (!teamIds.includes(eventTeamId)) teamIds.push(eventTeamId);
+    phaseParticipantTeamIdsByDivision.set(phaseDivisionId, teamIds);
+  }
+  return phaseParticipantTeamIdsByDivision;
+};
+
+const checkRestrictedEventAccess = async (_req: NextRequest, event: any) => {
+  if (RESTRICTED_EVENT_STATES.has(String(event.state ?? '').toUpperCase())) {
+    const session = await requireSession(_req);
+    if (!(await canManageEvent(session, event))) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+  }
+};
+
+const toEventResponse = (row: any) => {
+  const response = { ...row };
+  (response as any).divisions = resolveRelationalEventDivisionIds((response as any).divisionDetails);
+  for (const field of ['waitListIds', 'freeAgentIds', 'officialIds', 'officialPositions', 'eventOfficials', 'assistantHostIds', 'requiredTemplateIds']) {
+    if (!Array.isArray(response[field])) response[field] = [];
+  }
+  normalizeEventStaffingResponse(response as Record<string, unknown>);
+  (response as any).registrationPaymentMode = normalizeRegistrationPaymentMode((response as any).registrationPaymentMode);
+  (response as any).manualPaymentLinks = normalizeManualPaymentLinks((response as any).manualPaymentLinks);
+  (response as any).manualPaymentInstructions = normalizeManualPaymentInstructions(
+    (response as any).manualPaymentInstructions,
+  );
+  if (typeof (response as any).noFixedEndDateTime !== 'boolean') {
+    (response as any).noFixedEndDateTime = false;
+  }
+  if ((response as any).doTeamsOfficiate !== true) {
+    (response as any).teamOfficialsMaySwap = false;
+  } else if (typeof (response as any).teamOfficialsMaySwap !== 'boolean') {
+    (response as any).teamOfficialsMaySwap = false;
+  }
+  normalizeEventCheckInResponse(response);
   return response;
 };
 
@@ -112,6 +159,7 @@ const PUBLIC_EVENT_FIELDS = [
   'noFixedEndDateTime', 'timeZone', 'location', 'address', 'coordinates',
   'imageId', 'sportIds', 'organizationId', 'organization', 'tags',
   'teamSignup', 'price', 'maxParticipants', 'minAge', 'maxAge', 'gender',
+  'teamSizeLimit', 'singleDivision', 'registrationPaymentMode',
   'registrationCutoffHours', 'cancellationRefundHours', 'affiliateUrl',
   'fieldIds', 'timeSlotIds', 'leagueScoringConfigId', 'divisionFieldIds',
   'divisionDetails', 'playoffDivisionDetails', 'divisions',
@@ -155,17 +203,7 @@ const getEventTagsForResponse = async (eventId: string) => {
 };
 
 const buildEventOfficialResponse = async (event: any) => {
-  const [eventOfficialRows, sportRow] = await Promise.all([
-    typeof (prisma as any).eventOfficials?.findMany === 'function'
-      ? (prisma as any).eventOfficials.findMany({ where: { eventId: event.id }, orderBy: { createdAt: 'asc' } })
-      : Promise.resolve([]),
-    event.sportIds?.[0] && typeof (prisma as any).sports?.findUnique === 'function'
-      ? (prisma as any).sports.findUnique({
-          where: { id: event.sportIds[0] },
-          select: { officialPositionTemplates: true } as any,
-        })
-      : Promise.resolve(null),
-  ]);
+  const [eventOfficialRows, sportRow] = await loadEventOfficialRows(event);
   const templatePositions = buildEventOfficialPositionsFromTemplates(
     event.id,
     normalizeSportOfficialPositionTemplates((sportRow as any)?.officialPositionTemplates),
@@ -392,13 +430,7 @@ const normalizeLeagueDivisionConfig = (value: unknown): LeagueDivisionConfigPayl
     return next;
   };
 
-  const usesSets = typeof row.usesSets === 'boolean'
-    ? row.usesSets
-    : Object.prototype.hasOwnProperty.call(row, 'setsPerMatch')
-      || Object.prototype.hasOwnProperty.call(row, 'setDurationMinutes')
-      || Object.prototype.hasOwnProperty.call(row, 'pointsToVictory')
-        ? true
-        : undefined;
+  const usesSets = resolveLeagueUsesSets(row);
   const setsPerMatch = usesSets ? (normalizeSetCount(row.setsPerMatch) ?? 1) : undefined;
   const config: LeagueDivisionConfigPayload = {
     gamesPerOpponent: normalizeNumber(row.gamesPerOpponent, 1),
@@ -434,6 +466,14 @@ const normalizeDivisionSortOrder = (value: unknown): number | null => {
   return Number.isFinite(numeric) ? Math.trunc(numeric) : null;
 };
 
+const compareDivisionNames = (
+  left: { name?: string | null; id?: string | null },
+  right: { name?: string | null; id?: string | null },
+): number => {
+  const nameCompare = String(left.name ?? '').localeCompare(String(right.name ?? ''));
+  return nameCompare || String(left.id ?? '').localeCompare(String(right.id ?? ''));
+};
+
 const compareDivisionRowsByStoredOrder = <T extends {
   id?: string | null;
   name?: string | null;
@@ -446,8 +486,7 @@ const compareDivisionRowsByStoredOrder = <T extends {
     if (rightOrder === null) return -1;
     if (leftOrder !== rightOrder) return leftOrder - rightOrder;
   }
-  const nameCompare = String(left.name ?? '').localeCompare(String(right.name ?? ''));
-  return nameCompare || String(left.id ?? '').localeCompare(String(right.id ?? ''));
+  return compareDivisionNames(left, right);
 };
 
 const normalizePlacementDivisionIds = (value: unknown, eventId: string): string[] => {
@@ -563,6 +602,175 @@ const getDivisionFieldMapForEvent = async (
   return mapDivisionRowsToFieldMap(rows, normalizedKeys);
 };
 
+const resolveDivisionAge = (input: any, divisionId: string, eventStart?: Date | null) => {
+  const row = input ?? {};
+  const inferred = inferDivisionDetails({
+    identifier: row.key ?? row.id ?? divisionId,
+    sportInput: row.sportId ?? undefined,
+    fallbackName: row.name ?? undefined,
+  });
+  const ageEligibility = evaluateDivisionAgeEligibility({
+    divisionTypeId: inferred.divisionTypeId,
+    sportInput: row.sportId ?? undefined,
+    referenceDate: eventStart ?? null,
+  });
+  const ageCutoffDate = (() => {
+    if (row.ageCutoffDate instanceof Date && !Number.isNaN(row.ageCutoffDate.getTime())) {
+      return row.ageCutoffDate.toISOString();
+    }
+    return ageEligibility.applies ? ageEligibility.cutoffDate.toISOString() : null;
+  })();
+  return { inferred, ageEligibility, ageCutoffDate };
+};
+
+const resolveDivisionStandings = (row: any, kind: string) => {
+  const standingsConfirmedAt = (() => {
+    const parsed = parseDateInput((row as any)?.standingsConfirmedAt);
+    return parsed ? parsed.toISOString() : null;
+  })();
+  const standingsConfirmedBy =
+    typeof (row as any)?.standingsConfirmedBy === 'string'
+      ? (row as any).standingsConfirmedBy.trim() || null
+      : null;
+  const standingsOverrides = normalizeStandingsOverrides((row as any)?.standingsOverrides);
+  const playoffConfig =
+    kind === 'PLAYOFF'
+      ? (normalizePlayoffDivisionConfig((row as any)?.standingsOverrides) ??
+        normalizePlayoffDivisionConfig(row))
+      : normalizeDivisionPlayoffConfigFields(row);
+  return { standingsConfirmedAt, standingsConfirmedBy, standingsOverrides, playoffConfig };
+};
+
+const resolveDivisionPools = (row: any, kind: string, divisionId: string, hydratedPoolRows: any[]) => {
+  const generatedPools =
+    kind === 'PLAYOFF' ? generatedPoolsForBracket(hydratedPoolRows, row?.id ?? divisionId) : [];
+  const poolCount = generatedPools.length || null;
+  const poolTeamCounts = Array.from(
+    new Set(
+      generatedPools
+        .map((pool) => (typeof pool.maxParticipants === 'number' ? pool.maxParticipants : null))
+        .filter((value): value is number => typeof value === 'number'),
+    ),
+  );
+  const poolTeamCount = poolTeamCounts.length === 1 ? poolTeamCounts[0] : null;
+  return { poolCount, poolTeamCount };
+};
+
+const resolveDivisionType = (row: any, inferred: ReturnType<typeof inferDivisionDetails>) => {
+  const divisionTypeId = row?.divisionTypeId ?? inferred.divisionTypeId;
+  const ratingType = normalizeDivisionRatingType(row?.ratingType) ?? inferred.ratingType;
+  const gender = normalizeDivisionGender(row?.gender) ?? inferred.gender;
+  const divisionTypeName = deriveDivisionTypeDisplayName({
+    sportInput: row?.sportId ?? undefined,
+    gender,
+    ratingType,
+    divisionTypeId,
+  });
+  return { divisionTypeId, ratingType, gender, divisionTypeName };
+};
+
+const divisionIdentityAndLimits = (
+  input: any,
+  divisionId: string,
+  inferred: ReturnType<typeof inferDivisionDetails>,
+  kind: string,
+) => {
+  const row = input ?? {};
+  const { divisionTypeId, ratingType, gender, divisionTypeName } = resolveDivisionType(row, inferred);
+  return {
+    id: row.id ?? divisionId,
+    key: row.key ?? inferred.token,
+    name: cleanDivisionDisplayName(row.name, inferred.defaultName),
+    kind,
+    isSystemGenerated: row.isSystemGenerated ?? null,
+    divisionTypeId,
+    divisionTypeName,
+    ratingType,
+    gender,
+    sportId: row.sportId ?? null,
+    price: typeof row.price === 'number' ? row.price : null,
+    maxParticipants: typeof row.maxParticipants === 'number' ? row.maxParticipants : null,
+    playoffTeamCount: typeof row.playoffTeamCount === 'number' ? row.playoffTeamCount : null,
+  };
+};
+
+const divisionStandingsFields = (
+  row: any,
+  kind: string,
+  eventId: string,
+  standings: ReturnType<typeof resolveDivisionStandings>,
+) => {
+  const { standingsOverrides, standingsConfirmedAt, standingsConfirmedBy, playoffConfig } = standings;
+  return {
+    playoffPlacementDivisionIds:
+      kind === 'PLAYOFF'
+        ? []
+        : normalizePlacementDivisionIds((row as any)?.playoffPlacementDivisionIds, eventId),
+    standingsOverrides: kind === 'PLAYOFF' ? null : standingsOverrides,
+    standingsConfirmedAt: kind === 'PLAYOFF' ? null : standingsConfirmedAt,
+    standingsConfirmedBy: kind === 'PLAYOFF' ? null : standingsConfirmedBy,
+    playoffConfig,
+  };
+};
+
+const divisionLeagueFields = (leagueConfig: LeagueDivisionConfigPayload | null) => {
+  const config = leagueConfig ?? {};
+  return {
+    gamesPerOpponent: config.gamesPerOpponent ?? null,
+    restTimeMinutes: config.restTimeMinutes ?? null,
+    usesSets: config.usesSets ?? null,
+    matchDurationMinutes: config.matchDurationMinutes ?? null,
+    setDurationMinutes: config.setDurationMinutes ?? null,
+    setsPerMatch: config.setsPerMatch ?? null,
+    pointsToVictory: config.pointsToVictory ?? [],
+  };
+};
+
+const divisionPaymentFields = (input: any) => {
+  const row = input ?? {};
+  return {
+    allowPaymentPlans: typeof row.allowPaymentPlans === 'boolean' ? row.allowPaymentPlans : null,
+    installmentCount: typeof row.installmentCount === 'number' ? row.installmentCount : null,
+    installmentDueDates: Array.isArray(row.installmentDueDates)
+      ? row.installmentDueDates
+          .map((entry: unknown) => parseDateInput(entry))
+          .filter(
+            (entry: Date | null): entry is Date => entry instanceof Date && !Number.isNaN(entry.getTime()),
+          )
+          .map((entry: Date) => entry.toISOString())
+      : [],
+    installmentDueRelativeDays: Array.isArray((row as any)?.installmentDueRelativeDays)
+      ? normalizeInstallmentRelativeDayList((row as any).installmentDueRelativeDays)
+      : [],
+    installmentAmounts: Array.isArray(row.installmentAmounts)
+      ? normalizeInstallmentAmountList(row.installmentAmounts)
+      : [],
+  };
+};
+
+const divisionAgeFields = (row: any, age: ReturnType<typeof resolveDivisionAge>) => {
+  const { ageCutoffDate, ageEligibility } = age;
+  return {
+    ageCutoffDate,
+    ageCutoffLabel: row?.ageCutoffLabel ?? ageEligibility.message ?? null,
+    ageCutoffSource:
+      row?.ageCutoffSource ?? (ageEligibility.applies ? ageEligibility.cutoffRule.source : null),
+  };
+};
+
+const resolveStoredDivisionRow = <T,>(
+  divisionId: string,
+  rowsById: Map<string, T>,
+  rowsByKey: Map<string, T>,
+): T | null => {
+  const row =
+    rowsById.get(divisionId) ??
+    rowsByKey.get(divisionId) ??
+    rowsByKey.get(extractDivisionTokenFromId(divisionId) ?? '') ??
+    null;
+  return row;
+};
+
 const getDivisionDetailsForEvent = async (
   eventId: string,
   divisionKeys: string[],
@@ -660,22 +868,7 @@ const getDivisionDetailsForEvent = async (
       teamIds: true,
     },
   });
-  const phaseParticipantDelegate = (prisma as any).eventDivisionPhaseParticipants;
-  const phaseParticipantRows = typeof phaseParticipantDelegate?.findMany === 'function'
-    ? await phaseParticipantDelegate.findMany({
-      where: { eventId },
-      select: { phaseDivisionId: true, eventTeamId: true },
-    })
-    : [];
-  const phaseParticipantTeamIdsByDivision = new Map<string, string[]>();
-  for (const participant of Array.isArray(phaseParticipantRows) ? phaseParticipantRows : []) {
-    const phaseDivisionId = normalizeDivisionKey(participant.phaseDivisionId);
-    const eventTeamId = normalizeEntityId(participant.eventTeamId);
-    if (!phaseDivisionId || !eventTeamId) continue;
-    const teamIds = phaseParticipantTeamIdsByDivision.get(phaseDivisionId) ?? [];
-    if (!teamIds.includes(eventTeamId)) teamIds.push(eventTeamId);
-    phaseParticipantTeamIdsByDivision.set(phaseDivisionId, teamIds);
-  }
+  const phaseParticipantTeamIdsByDivision = await loadPhaseParticipantTeamIds(eventId);
   const hydratedRows = rows.map((row) => {
     if (String((row as any).role ?? '').toUpperCase() !== 'PHASE') return row;
     return {
@@ -705,119 +898,22 @@ const getDivisionDetailsForEvent = async (
   });
 
   return normalizedKeys.map((divisionId) => {
-    const row = rowsById.get(divisionId)
-      ?? rowsByKey.get(divisionId)
-      ?? rowsByKey.get(extractDivisionTokenFromId(divisionId) ?? '')
-      ?? null;
-    const inferred = inferDivisionDetails({
-      identifier: row?.key ?? row?.id ?? divisionId,
-      sportInput: row?.sportId ?? undefined,
-      fallbackName: row?.name ?? undefined,
-    });
-    const ageEligibility = evaluateDivisionAgeEligibility({
-      divisionTypeId: inferred.divisionTypeId,
-      sportInput: row?.sportId ?? undefined,
-      referenceDate: eventStart ?? null,
-    });
-    const ageCutoffDate = (() => {
-      if (row?.ageCutoffDate instanceof Date && !Number.isNaN(row.ageCutoffDate.getTime())) {
-        return row.ageCutoffDate.toISOString();
-      }
-      return ageEligibility.applies ? ageEligibility.cutoffDate.toISOString() : null;
-    })();
+    const row = resolveStoredDivisionRow(divisionId, rowsById, rowsByKey);
+    const age = resolveDivisionAge(row, divisionId, eventStart);
+    const { inferred } = age;
     const kind = normalizeDivisionKind((row as any)?.kind, 'LEAGUE');
     const isPhaseRow = String((row as any)?.role ?? '').toUpperCase() === 'PHASE';
-    const standingsConfirmedAt = (() => {
-      const parsed = parseDateInput((row as any)?.standingsConfirmedAt);
-      return parsed ? parsed.toISOString() : null;
-    })();
-    const standingsConfirmedBy = typeof (row as any)?.standingsConfirmedBy === 'string'
-      ? (row as any).standingsConfirmedBy.trim() || null
-      : null;
-    const standingsOverrides = normalizeStandingsOverrides((row as any)?.standingsOverrides);
-    const playoffConfig = kind === 'PLAYOFF'
-        ? (
-            normalizePlayoffDivisionConfig((row as any)?.standingsOverrides)
-            ?? normalizePlayoffDivisionConfig(row)
-          )
-        : normalizeDivisionPlayoffConfigFields(row);
+    const standings = resolveDivisionStandings(row, kind);
     const leagueConfig = normalizeLeagueDivisionConfig(row);
-    const generatedPools = kind === 'PLAYOFF'
-      ? generatedPoolsForBracket(hydratedPoolRows, row?.id ?? divisionId)
-      : [];
-    const poolCount = generatedPools.length || null;
-    const poolTeamCounts = Array.from(
-      new Set(
-        generatedPools
-          .map((pool) => typeof pool.maxParticipants === 'number' ? pool.maxParticipants : null)
-          .filter((value): value is number => typeof value === 'number'),
-      ),
-    );
-    const poolTeamCount = poolTeamCounts.length === 1 ? poolTeamCounts[0] : null;
-    const divisionTypeId = row?.divisionTypeId ?? inferred.divisionTypeId;
-    const ratingType = normalizeDivisionRatingType(row?.ratingType) ?? inferred.ratingType;
-    const gender = normalizeDivisionGender(row?.gender) ?? inferred.gender;
-    const divisionTypeName = deriveDivisionTypeDisplayName({
-      sportInput: row?.sportId ?? undefined,
-      gender,
-      ratingType,
-      divisionTypeId,
-    });
+    const { poolCount, poolTeamCount } = resolveDivisionPools(row, kind, divisionId, hydratedPoolRows);
     return {
-      id: row?.id ?? divisionId,
-      key: row?.key ?? inferred.token,
-      name: cleanDivisionDisplayName(row?.name, inferred.defaultName),
-      kind,
-      isSystemGenerated: row?.isSystemGenerated ?? null,
-      divisionTypeId,
-      divisionTypeName,
-      ratingType,
-      gender,
-      sportId: row?.sportId ?? null,
-      price: typeof row?.price === 'number'
-        ? row.price
-        : null,
-      maxParticipants: typeof row?.maxParticipants === 'number'
-        ? row.maxParticipants
-        : null,
-      playoffTeamCount: typeof row?.playoffTeamCount === 'number'
-        ? row.playoffTeamCount
-        : null,
+      ...divisionIdentityAndLimits(row, divisionId, inferred, kind),
       poolCount,
       poolTeamCount,
-      playoffPlacementDivisionIds: kind === 'PLAYOFF' ? [] : normalizePlacementDivisionIds((row as any)?.playoffPlacementDivisionIds, eventId),
-      standingsOverrides: kind === 'PLAYOFF' ? null : standingsOverrides,
-      standingsConfirmedAt: kind === 'PLAYOFF' ? null : standingsConfirmedAt,
-      standingsConfirmedBy: kind === 'PLAYOFF' ? null : standingsConfirmedBy,
-      playoffConfig,
-      gamesPerOpponent: leagueConfig?.gamesPerOpponent ?? null,
-      restTimeMinutes: leagueConfig?.restTimeMinutes ?? null,
-      usesSets: leagueConfig?.usesSets ?? null,
-      matchDurationMinutes: leagueConfig?.matchDurationMinutes ?? null,
-      setDurationMinutes: leagueConfig?.setDurationMinutes ?? null,
-      setsPerMatch: leagueConfig?.setsPerMatch ?? null,
-      pointsToVictory: leagueConfig?.pointsToVictory ?? [],
-      allowPaymentPlans: typeof row?.allowPaymentPlans === 'boolean'
-        ? row.allowPaymentPlans
-        : null,
-      installmentCount: typeof row?.installmentCount === 'number'
-        ? row.installmentCount
-        : null,
-      installmentDueDates: Array.isArray(row?.installmentDueDates)
-        ? row.installmentDueDates
-          .map((entry) => parseDateInput(entry))
-          .filter((entry): entry is Date => entry instanceof Date && !Number.isNaN(entry.getTime()))
-          .map((entry) => entry.toISOString())
-        : [],
-      installmentDueRelativeDays: Array.isArray((row as any)?.installmentDueRelativeDays)
-        ? normalizeInstallmentRelativeDayList((row as any).installmentDueRelativeDays)
-        : [],
-      installmentAmounts: Array.isArray(row?.installmentAmounts)
-        ? normalizeInstallmentAmountList(row.installmentAmounts)
-        : [],
-      ageCutoffDate,
-      ageCutoffLabel: row?.ageCutoffLabel ?? ageEligibility.message ?? null,
-      ageCutoffSource: row?.ageCutoffSource ?? (ageEligibility.applies ? ageEligibility.cutoffRule.source : null),
+      ...divisionStandingsFields(row, kind, eventId, standings),
+      ...divisionLeagueFields(leagueConfig),
+      ...divisionPaymentFields(row),
+      ...divisionAgeFields(row, age),
       fieldIds: normalizeFieldIds(row?.fieldIds ?? []),
       teamIds: isPhaseRow ? normalizeTeamIds((row as any)?.teamIds) : (kind === 'PLAYOFF' ? [] : normalizeTeamIds((row as any)?.teamIds)),
     };
@@ -990,6 +1086,51 @@ const collectEventBillIds = async (
   return Array.from(collected);
 };
 
+const refundEventPaymentIntent = async (
+  stripe: Stripe,
+  intentId: string,
+  eventId: string,
+  refundedPaymentIntentIds: string[],
+) => {
+  try {
+    await stripe!.refunds.create(
+      await buildRefundCreateParamsForPaymentIntent({
+        stripe: stripe!,
+        paymentIntentId: intentId,
+        reason: 'requested_by_customer',
+        metadata: {
+          event_id: eventId,
+          source: 'event_delete',
+        },
+      }),
+    );
+    refundedPaymentIntentIds.push(intentId);
+  } catch (error) {
+    if (isAlreadyRefundedStripeError(error)) {
+      refundedPaymentIntentIds.push(intentId);
+      return;
+    }
+    throw error;
+  }
+};
+
+const cancelEventPaymentIntent = async (
+  stripe: Stripe,
+  intentId: string,
+  cancelledPaymentIntentIds: string[],
+) => {
+  try {
+    const intent = await stripe.paymentIntents.retrieve(intentId);
+    if (!isCancellablePaymentIntentStatus(intent.status)) {
+      return;
+    }
+    await stripe.paymentIntents.cancel(intentId);
+    cancelledPaymentIntentIds.push(intentId);
+  } catch (error) {
+    console.warn(`Failed to cancel pending PaymentIntent ${intentId} before event delete.`, error);
+  }
+};
+
 const settleEventBillingBeforeDelete = async (params: {
   eventId: string;
   billIds: string[];
@@ -1046,24 +1187,7 @@ const settleEventBillingBeforeDelete = async (params: {
 
   for (const [intentId, state] of byIntentId.entries()) {
     if (state.hasPaid) {
-      try {
-        await stripe!.refunds.create(await buildRefundCreateParamsForPaymentIntent({
-          stripe: stripe!,
-          paymentIntentId: intentId,
-          reason: 'requested_by_customer',
-          metadata: {
-            event_id: params.eventId,
-            source: 'event_delete',
-          },
-        }));
-        refundedPaymentIntentIds.push(intentId);
-      } catch (error) {
-        if (isAlreadyRefundedStripeError(error)) {
-          refundedPaymentIntentIds.push(intentId);
-          continue;
-        }
-        throw error;
-      }
+      await refundEventPaymentIntent(stripe!, intentId, params.eventId, refundedPaymentIntentIds);
       continue;
     }
 
@@ -1071,16 +1195,7 @@ const settleEventBillingBeforeDelete = async (params: {
       continue;
     }
 
-    try {
-      const intent = await stripe.paymentIntents.retrieve(intentId);
-      if (!isCancellablePaymentIntentStatus(intent.status)) {
-        continue;
-      }
-      await stripe.paymentIntents.cancel(intentId);
-      cancelledPaymentIntentIds.push(intentId);
-    } catch (error) {
-      console.warn(`Failed to cancel pending PaymentIntent ${intentId} before event delete.`, error);
-    }
+    await cancelEventPaymentIntent(stripe, intentId, cancelledPaymentIntentIds);
   }
 
   return {
@@ -1089,18 +1204,31 @@ const settleEventBillingBeforeDelete = async (params: {
   };
 };
 
+const projectEventOrganization = (organization: any) =>
+  organization
+    ? {
+        ...organization,
+        publicSlug: organization.publicPageEnabled ? organization.publicSlug : null,
+        publicPageEnabled: organization.publicPageEnabled === true,
+      }
+    : undefined;
+
+const protectEventResponse = (response: Record<string, unknown>, canEdit: boolean) => {
+  const authorityResponse = canEdit ? response : toPublicEventResponse(response);
+  const protectedResponse = canEdit
+    ? withAffiliateOutboundAction(authorityResponse, 'event')
+    : protectAffiliateRow(authorityResponse, 'event');
+  return protectedResponse;
+};
+
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ eventId: string }> }) {
   const { eventId } = await params;
   const event = await prisma.events.findUnique({ where: { id: eventId } });
   if (!event) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
-  if (RESTRICTED_EVENT_STATES.has(String(event.state ?? '').toUpperCase())) {
-    const session = await requireSession(_req);
-    if (!(await canManageEvent(session, event))) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
-  }
+  const accessError = await checkRestrictedEventAccess(_req, event);
+  if (accessError) return accessError;
   const optionalSession = await getOptionalSession(_req);
   const capabilities = await projectEventAuthorityCapabilities(optionalSession, event);
   const [
@@ -1174,16 +1302,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ eve
   const officialResponse = capabilities.canEdit
     ? await buildEventOfficialResponse(event)
     : {};
-  const canExposeAffiliateDestination = capabilities.canEdit;
   const response = toEventResponse({
     ...event,
-    organization: organization
-      ? {
-          ...organization,
-          publicSlug: organization.publicPageEnabled ? organization.publicSlug : null,
-          publicPageEnabled: organization.publicPageEnabled === true,
-        }
-      : undefined,
+    organization: projectEventOrganization(organization),
     includePlayoffsOrPools: Boolean(event.includePlayoffs),
     eventTypeLocked: hasAcceptedParticipant || hasProtectedHistory,
     registrationUnitLocked: hasAcceptedParticipant,
@@ -1196,12 +1317,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ eve
     tags,
     staffInvites: staffInvites.map((invite) => invite),
   });
-  const authorityResponse = capabilities.canEdit
-    ? response
-    : toPublicEventResponse(response);
-  const protectedResponse = canExposeAffiliateDestination
-    ? withAffiliateOutboundAction(authorityResponse, 'event')
-    : protectAffiliateRow(authorityResponse, 'event');
+  const protectedResponse = protectEventResponse(response, capabilities.canEdit);
   return NextResponse.json(
     { ...protectedResponse, capabilities },
     { status: 200 },
