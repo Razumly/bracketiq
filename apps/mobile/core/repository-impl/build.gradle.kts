@@ -51,6 +51,8 @@ kotlin {
             }
         }
         commonTest {
+            kotlin.srcDir(files(project(":core:network").layout.buildDirectory.dir("generated/eventEditorFixtures"))
+                .builtBy(":core:network:generateEventEditorFixtures"))
             dependencies {
                 implementation(libs.kotlin.test)
                 implementation(libs.kotlinx.coroutines.test)

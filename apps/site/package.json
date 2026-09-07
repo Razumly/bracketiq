@@ -293,7 +293,8 @@
     "widget:test-server": "node scripts/widget-test-server.mjs",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "affiliate:logos:improve": "tsx scripts/improve-affiliate-org-logos.ts"
+    "affiliate:logos:improve": "tsx scripts/improve-affiliate-org-logos.ts",
+    "test:event-editor:coverage": "jest --runInBand --runTestsByPath src/contracts/__tests__/eventEditor.test.ts src/contracts/__tests__/eventEditorCoverage.test.ts src/contracts/__tests__/eventEditorSourceInventory.test.ts src/contracts/__tests__/eventEditorPairwise.test.ts src/app/events/[id]/schedule/components/eventForm/__tests__/eventEditorRoundTrip.test.ts src/server/events/__tests__/eventEditorSave.test.ts src/server/events/__tests__/eventEditorRevisionBinding.test.ts src/server/events/__tests__/eventEditorWireCompatibility.test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1030.0",

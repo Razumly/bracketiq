@@ -43,6 +43,10 @@ const numberOrNull = (value: unknown): number | null => {
   return Math.trunc(value);
 };
 
+const durationOrNull = (value: unknown): number | null => (
+  typeof value === 'number' && Number.isFinite(value) ? value : null
+);
+
 const positiveNumberOrNull = (value: unknown): number | null => {
   const normalized = numberOrNull(value);
   return normalized !== null && normalized > 0 ? normalized : null;
@@ -252,7 +256,7 @@ const draftFromRecord = (
       : null;
     const calculatedMatchDurationMinutes = calculateDuration();
     const matchDurationMinutes = isBracketEvent
-      ? calculatedMatchDurationMinutes ?? numberOrNull(event.matchDurationMinutes)
+      ? calculatedMatchDurationMinutes ?? durationOrNull(event.matchDurationMinutes)
       : null;
 
 
