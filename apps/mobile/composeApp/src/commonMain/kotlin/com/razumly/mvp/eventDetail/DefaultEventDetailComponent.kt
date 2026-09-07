@@ -192,6 +192,22 @@ class DefaultEventDetailComponent(
     override val inviteTeamsLoading = eventInviteCoordinator.inviteTeamsLoading
     override val pendingStaffInvites = eventInviteCoordinator.pendingStaffInvites
     override val billingAddressPrompt = registrationFlowCoordinator.billingAddressPrompt
+    override val checkoutReview = registrationFlowCoordinator.checkout.review
+    private val _checkoutCompleted = MutableStateFlow(false)
+    override val checkoutCompleted = _checkoutCompleted.asStateFlow()
+    override fun confirmCheckoutReview() = registrationFlowCoordinator.checkout.confirm()
+    override fun dismissCheckoutReview() {
+        registrationFlowCoordinator.checkout.cancel()
+        registrationFlowCoordinator.requireQuestionReview()
+    }
+    override fun dismissCheckoutCompleted() { _checkoutCompleted.value = false }
+    private val checkoutTeamEditorCoordinator by lazy { EventCheckoutTeamEditorCoordinator(scope, teamRepository::updateTeam) }
+    override val checkoutTeamEditor get() = checkoutTeamEditorCoordinator.state
+    override fun editCheckoutTeam(team: TeamWithPlayers) = checkoutTeamEditorCoordinator.open(team)
+    override fun dismissCheckoutTeamEditor() = checkoutTeamEditorCoordinator.dismiss()
+    override fun changeCheckoutTeamName(value: String) = checkoutTeamEditorCoordinator.changeName(value)
+    override fun changeCheckoutTeamSize(value: String) = checkoutTeamEditorCoordinator.changeSize(value)
+    override fun saveCheckoutTeamEditor() = checkoutTeamEditorCoordinator.save()
     override val discountCodePrompt = registrationFlowCoordinator.discountCodePrompt
     override val startingTeamRegistrationId = registrationFlowCoordinator.startingTeamRegistrationId
 
@@ -247,6 +263,7 @@ class DefaultEventDetailComponent(
     }
 
     private fun onSuccessfulJoin() {
+        _checkoutCompleted.value = true
         val permissionController = permissionsController ?: return
         val dataSource = currentUserDataSource ?: return
         if (_notificationPermissionPrimer.value != null || notificationPermissionRequestJob?.isActive == true) return

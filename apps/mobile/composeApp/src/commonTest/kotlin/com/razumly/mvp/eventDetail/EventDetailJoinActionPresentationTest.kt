@@ -76,7 +76,7 @@ class EventDetailJoinActionPresentationTest {
         )
 
         assertEquals(2_500, presentation.priceCents)
-        assertEquals(listOf("Join as Free Agent", "Complete payment"), presentation.options.map { it.label })
+        assertEquals(listOf("Continue as a free agent", "Complete payment"), presentation.options.map { it.label })
         presentation.options.first().onClick()
         assertTrue(joined)
         presentation.options.last().onClick()

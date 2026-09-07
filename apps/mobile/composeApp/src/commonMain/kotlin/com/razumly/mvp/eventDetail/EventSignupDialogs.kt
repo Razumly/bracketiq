@@ -4,8 +4,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -26,6 +30,7 @@ import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.network.dto.TeamMemberInviteRequestDto
+import com.razumly.mvp.core.presentation.composables.TeamCard
 import com.razumly.mvp.teamManagement.CreateTeamBuilderScreen
 import kotlinx.coroutines.launch
 
@@ -50,16 +55,31 @@ internal fun EventSignupDialogs(
     val suggestions by component.registrationPlayerSuggestions.collectAsState()
     val teams by component.registrationTeams.collectAsState()
     var error by remember(form?.team?.id) { mutableStateOf<String?>(null) }
+    val editingTeam by component.checkoutTeamEditor.collectAsState()
+    editingTeam?.let { state ->
+        EventCheckoutTeamEditor(
+            state = state,
+            onDismiss = component::dismissCheckoutTeamEditor,
+            onNameChange = component::changeCheckoutTeamName,
+            onSizeChange = component::changeCheckoutTeamSize,
+            onSave = component::saveCheckoutTeamEditor,
+        )
+    }
     val currentForm = teams.firstOrNull { it.team.id == form?.team?.id } ?: form
+    fun closeForm() {
+        if (busy) return
+        onFormChange(null, formStep)
+        if (formStep == "players") onReviewChange(currentForm)
+    }
     if (currentForm != null) {
-        Dialog(onDismissRequest = { if (!busy) onFormChange(null, formStep) }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Dialog(onDismissRequest = ::closeForm, properties = DialogProperties(usePlatformDefaultWidth = false)) {
             Surface(Modifier.fillMaxSize()) {
                 CreateTeamBuilderScreen(
                     draft = currentForm, sports = sports, freeAgents = emptyList(), suggestions = suggestions,
                     currentUser = currentUser, selectedEvent = event, eventSignupStep = formStep,
                     isSaving = busy, saveError = error,
                     onSearch = component::searchRegistrationPlayers,
-                    onDismiss = { if (!busy) onFormChange(null, formStep) },
+                    onDismiss = ::closeForm,
                     onSavePerson = { person ->
                         component.addRegistrationPlayer(currentForm.team.id, TeamMemberInviteRequestDto(
                             firstName = person.firstName, lastName = person.lastName,
@@ -92,16 +112,30 @@ internal fun EventSignupDialogs(
             }
         }
     }
-    if (review != null) {
+    if (review != null && editingTeam == null) {
         val currentReview = teams.firstOrNull { it.team.id == review.team.id } ?: review
-        AlertDialog(
+        EventCheckoutDialog(
             onDismissRequest = { onReviewChange(null) },
-            title = { Text("Review Event registration") },
+            title = { Text("Your team") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(event.name)
-                    Text(currentReview.team.name)
-                    Row {
+                Column(
+                    modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    Text(
+                        text = event.name,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Selected team", style = MaterialTheme.typography.labelLarge)
+                        TeamCard(team = currentReview, modifier = Modifier.fillMaxWidth())
+                        TextButton(onClick = { component.editCheckoutTeam(currentReview) }, enabled = !busy) { Text("Edit team") }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
                         TextButton(onClick = { onReviewChange(null); onChangeTeam() }) { Text("Change team") }
                         TextButton(onClick = {
                             component.setRegistrationPlayersStep {
@@ -110,12 +144,13 @@ internal fun EventSignupDialogs(
                             }
                         }, enabled = !busy) { Text("Add players") }
                     }
-                    Text("Confirm to continue with the Event requirements and payment options.")
+                    Text("Continue to the Event questions and required documents. You will review registration before confirming.")
                 }
             },
             confirmButton = {
-                Button(onClick = { onReviewChange(null); component.joinEventAsTeam(currentReview) }, enabled = !busy) {
-                    Text("Confirm registration")
+                Button(onClick = { onReviewChange(null); component.joinEventAsTeam(currentReview) }, enabled = !busy,
+                    modifier = Modifier.fillMaxWidth()) {
+                    Text("Continue")
                 }
             },
             dismissButton = { TextButton(onClick = { onReviewChange(null) }) { Text("Back") } },

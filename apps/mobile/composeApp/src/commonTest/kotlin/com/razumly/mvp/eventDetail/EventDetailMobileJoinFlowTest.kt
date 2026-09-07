@@ -409,7 +409,17 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
             assertTrue(eventRepository.staffInviteRequests.isEmpty())
 
             component.joinEvent()
+
             advance()
+
+            assertEquals(0, eventRepository.joinCallCount)
+
+            assertTrue(component.checkoutReview.value != null)
+
+            component.confirmCheckoutReview()
+
+            advance()
+
 
             assertEquals(1, eventRepository.joinCallCount)
             assertTrue(eventRepository.refreshRequests.isNotEmpty())
@@ -521,7 +531,17 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
         assertEquals(0, component.selectedWeeklyOccurrenceSummary.value?.participantCount)
 
         component.joinEvent()
+
         advance()
+
+        assertEquals(0, eventRepository.joinCallCount)
+
+        assertTrue(component.checkoutReview.value != null)
+
+        component.confirmCheckoutReview()
+
+        advance()
+
 
         assertEquals(1, eventRepository.joinCallCount)
         assertEquals(1, component.selectedWeeklyOccurrenceSummary.value?.participantCount)
@@ -606,6 +626,11 @@ class EventDetailMobileJoinFlowTest : MainDispatcherTest() {
         assertEquals(listOf(linkedChild.userId), component.childJoinSelectionDialog.value?.children?.map { it.userId })
 
         component.selectChildForJoin(linkedChild.userId)
+        advance()
+
+        assertTrue(eventRepository.childRegistrationRequests.isEmpty())
+        assertEquals(EventCheckoutAction.CHILD, component.checkoutReview.value?.action)
+        component.confirmCheckoutReview()
         advance()
 
         assertEquals(
