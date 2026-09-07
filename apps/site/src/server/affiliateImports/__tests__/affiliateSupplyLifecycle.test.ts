@@ -137,6 +137,31 @@ describe('affiliate supply lifecycle assessment', () => {
     expect(assessment.targetContribution).toBe(0);
     expect(assessment.reasonCodes).toEqual(expect.arrayContaining(['INDEPENDENT_REVIEW_APPROVED']));
   });
+  it('keeps a legacy sport repair hold after approval state is present', () => {
+    const assessment = deriveAffiliateSupplyAssessment(mappedSnapshot({
+      source: {
+        ...mappedSnapshot().source,
+        autoScrapeEnabled: false,
+        isAutomationEnabled: false,
+        isAutomationOnHold: true,
+        automationHoldReason: 'LEGACY_SPORT_REPAIR',
+      },
+      approval: {
+        id: 'approval-legacy-sport',
+        status: 'APPROVED',
+        decision: 'APPROVE',
+        isIndependent: true,
+        reviewerId: 'reviewer-legacy-sport',
+        reviewedPackageHash: 'package-hash',
+        evidenceRefs: ['legacy-sport-review'],
+      },
+    }));
+
+    expect(assessment.stage).toBe('APPROVED');
+    expect(assessment.isAutomationEnabled).toBe(false);
+    expect(assessment.automationHoldReason).toBe('LEGACY_SPORT_REPAIR');
+    expect(assessment.reasonCodes).toContain('AUTOMATION_HOLD');
+  });
 
   it('derives Published Supply only from fresh qualifying targets', () => {
     const assessment = deriveAffiliateSupplyAssessment(mappedSnapshot({

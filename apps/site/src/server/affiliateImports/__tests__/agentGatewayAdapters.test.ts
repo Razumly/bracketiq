@@ -9,8 +9,11 @@ import {
   canonicalizeAffiliateAgentValue,
   hashAffiliateAgentValue,
   type AffiliateAgentClaimEnvelope,
+  type AffiliateAgentSportEvidence,
 } from "../agentGatewayContracts";
+import { buildAffiliateSportsCatalogSnapshot } from "../affiliateSportsCatalog";
 import {
+  verifyAffiliateAgentLegacySportRepair,
   createProductionAffiliateAgentGatewayAdapters,
   type AffiliateAgentCommandAdapters,
   type AffiliateAgentReviewerTerminalResult,
@@ -221,6 +224,369 @@ const captureRecordSummaryFor = (value: Record<string, unknown>) => {
     byteSize: Buffer.byteLength(canonical, "utf8"),
   };
 };
+const legacySportRepairFixture = () => {
+  const bytes = Buffer.from(
+    '<a href="https://source.example/events/grass-soccer">Outdoor grass soccer registration</a>',
+    "utf8",
+  );
+  const artifactSha256 = createHash("sha256").update(bytes).digest("hex");
+  const catalog = buildAffiliateSportsCatalogSnapshot(
+    [{ id: "sport-grass", name: "Grass Soccer" }],
+    "2026-09-06T00:00:00.000Z",
+  );
+  const sportEvidence: AffiliateAgentSportEvidence = {
+    evidenceRunId: "evidence-run-1",
+    sportsCatalogSha256: catalog.sha256,
+    sportDeterminations: [{
+      sourceLabels: ["Soccer"],
+      status: "RESOLVED",
+      resolutionBasis: "SOURCE_EVIDENCE",
+      canonicalSportNames: ["Grass Soccer"],
+      rationale: "The original page explicitly identifies outdoor grass soccer.",
+      evidence: [{
+        artifactId: "sport-artifact-1",
+        artifactSha256,
+        artifactKind: "PAGE_HTML",
+        pageUrl: "https://source.example/events",
+        excerpt: "Outdoor grass soccer",
+      }],
+    }],
+  };
+  const manifestPreimage = {
+    schemaVersion: 1 as const,
+    entries: [{
+      evidenceRef: "sport-evidence-1",
+      kind: "PAGE_HTML" as const,
+      artifactId: "sport-artifact-1",
+      sha256: artifactSha256,
+      mimeType: "text/html",
+      byteSize: bytes.byteLength,
+      retention: "INDEFINITE" as const,
+    }],
+  };
+  const claim = {
+    role: "MAPPING_PRODUCER" as const,
+    subject: {
+      type: "MAPPING_PRODUCER" as const,
+      supplySourceId: "supply-source-1",
+      mappingJobId: "mapping-job-1",
+      pass: 1,
+      repairContext: {
+        kind: "LEGACY_SPORT_REPAIR" as const,
+        intakeId: "intake-1",
+        evidenceRunId: sportEvidence.evidenceRunId,
+        sportsCatalog: catalog,
+      },
+    },
+    evidenceManifest: {
+      ...manifestPreimage,
+      hash: hashAffiliateAgentValue(manifestPreimage),
+    },
+  } as unknown as AffiliateAgentClaimEnvelope;
+  const artifacts = {
+    readImmutable: jest.fn(async () => ({
+      bytes,
+      mimeType: "text/html",
+      byteSize: bytes.byteLength,
+      sourceUrl: "https://source.example/events",
+      runId: "evidence-run-1",
+      intakeId: "intake-1",
+    })),
+  };
+  let currentCatalog = catalog;
+  const findMany = jest.fn(async () => currentCatalog.sports);
+  const prisma = {
+    sports: { findMany },
+  } as unknown as Pick<PrismaClient, "sports">;
+  return {
+    catalog,
+    claim,
+    sportEvidence,
+    artifacts,
+    prisma,
+    setCurrentCatalog: (nextCatalog: typeof catalog) => {
+      currentCatalog = nextCatalog;
+    },
+  };
+};
+const legacyApprovalFixture = () => {
+  const evidence = legacySportRepairFixture();
+  const repairContext = (
+    evidence.claim.subject as Extract<
+      AffiliateAgentClaimEnvelope["subject"],
+      { type: "MAPPING_PRODUCER" }
+    >
+  ).repairContext!;
+  const candidatePackage = {
+    schemaVersion: 1 as const,
+    supplySourceId: "supply-source-1",
+    listingKind: "EVENT" as const,
+    listUrlRef: "sport-evidence-1",
+    itemSelector: "a",
+    fields: [
+      {
+        field: "officialActionUrl" as const,
+        selector: ":scope",
+        mode: "ATTRIBUTE" as const,
+        attribute: "href",
+        transform: "ABSOLUTE_URL" as const,
+      },
+      {
+        field: "sportName" as const,
+        mode: "CONSTANT" as const,
+        value: "Grass Soccer",
+      },
+      {
+        field: "title" as const,
+        selector: ":scope",
+        mode: "TEXT" as const,
+        attribute: null,
+        transform: "TRIM" as const,
+      },
+    ],
+    evidenceRefs: ["sport-evidence-1"],
+    sportEvidence: evidence.sportEvidence,
+  };
+  const listBytes = Buffer.from(
+    '<a href="https://source.example/events/grass-soccer">Outdoor grass soccer registration</a>',
+    "utf8",
+  );
+  const packageBytes = Buffer.from(
+    canonicalizeAffiliateAgentValue(candidatePackage),
+    "utf8",
+  );
+  const packageSha256 = createHash("sha256").update(packageBytes).digest("hex");
+  const reviewerManifestPreimage = {
+    schemaVersion: 1 as const,
+    entries: [{
+      evidenceRef: "committed-package-1",
+      kind: "COMMITTED_PACKAGE" as const,
+      artifactId: "reviewer-package-1",
+      sha256: packageSha256,
+      mimeType: "application/json",
+      byteSize: packageBytes.byteLength,
+      retention: "INDEFINITE" as const,
+    }],
+  };
+  const producerEnvelope = {
+    schemaVersion: 1 as const,
+    jobId: "producer-job-1",
+    claimId: "producer-claim-1",
+    supplySourceId: "supply-source-1",
+    claimGeneration: 1,
+    lifecycleGeneration: 8,
+    deploymentContractVersion: 1,
+    deploymentContractHash: "1".repeat(64),
+    supplyContractVersion: 1,
+    supplyContractHash: "2".repeat(64),
+    roleContractVersion: 1,
+    roleContractHash: "3".repeat(64),
+    promptTemplateVersion: 1,
+    promptTemplateHash: "4".repeat(64),
+    executionClass: "PRODUCTION_CODEX" as const,
+    workerId: "producer-worker-1",
+    invocationId: "producer-invocation-1",
+    workspaceId: "producer-workspace-1",
+    claimedAt: "2026-08-22T10:00:00.000Z",
+    expiresAt: "2026-08-22T11:00:00.000Z",
+    evidenceManifest: evidence.claim.evidenceManifest,
+    permittedCommands: [
+      "CAPTURE_CLAIM_URL",
+      "COMMIT_DECLARATIVE_PACKAGE",
+      "SUBMIT_TERMINAL_RESULT",
+      "VALIDATE_DECLARATIVE_PACKAGE",
+    ],
+    role: "MAPPING_PRODUCER" as const,
+    queue: "AFFILIATE_MAPPING" as const,
+    lane: "MAPPING_PRODUCTION" as const,
+    subject: {
+      type: "MAPPING_PRODUCER" as const,
+      supplySourceId: "supply-source-1",
+      mappingJobId: "mapping-job-1",
+      pass: 1,
+      repairContext,
+    },
+  };
+  const producerClaimRow = {
+    id: "producer-claim-1",
+    role: "MAPPING_PRODUCER",
+    claimGeneration: 1,
+    workerId: "producer-worker-1",
+    invocationId: "producer-invocation-1",
+    claimEnvelopeJson: producerEnvelope,
+    claimEnvelopeHash: hashAffiliateAgentValue(producerEnvelope),
+  };
+  const reviewerClaim = {
+    schemaVersion: 1 as const,
+    jobId: "reviewer-job-1",
+    claimId: "reviewer-claim-repair-1",
+    supplySourceId: "supply-source-1",
+    claimGeneration: 2,
+    lifecycleGeneration: 8,
+    deploymentContractVersion: 1,
+    deploymentContractHash: "5".repeat(64),
+    supplyContractVersion: 1,
+    supplyContractHash: "6".repeat(64),
+    roleContractVersion: 1,
+    roleContractHash: "7".repeat(64),
+    promptTemplateVersion: 1,
+    promptTemplateHash: "8".repeat(64),
+    executionClass: "PRODUCTION_CODEX" as const,
+    workerId: "reviewer-worker-repair-1",
+    invocationId: "reviewer-invocation-repair-1",
+    workspaceId: "reviewer-workspace-repair-1",
+    claimedAt: "2026-08-22T12:00:00.000Z",
+    expiresAt: "2026-08-22T13:00:00.000Z",
+    evidenceManifest: {
+      ...reviewerManifestPreimage,
+      hash: hashAffiliateAgentValue(reviewerManifestPreimage),
+    },
+    permittedCommands: ["SUBMIT_TERMINAL_RESULT"],
+    role: "SUPPLY_REVIEWER" as const,
+    queue: "AFFILIATE_REVIEW" as const,
+    lane: "SUPPLY_REVIEW" as const,
+    subject: {
+      type: "SUPPLY_REVIEWER" as const,
+      supplySourceId: "supply-source-1",
+      producerClaimId: "producer-claim-1",
+      producerWorkerId: "producer-worker-1",
+      producerInvocationId: "producer-invocation-1",
+      producerWorkspaceId: "producer-workspace-1",
+      committedPackageHash: hashAffiliateAgentValue(candidatePackage),
+      targetId: "target-1",
+      targetType: "EVENT" as const,
+      reviewPass: 1,
+      repairContext,
+    },
+  } as unknown as AffiliateAgentClaimEnvelope;
+  let currentCatalog = evidence.catalog;
+  const producerClaimLookup = jest.fn(async () => producerClaimRow);
+  const readImmutable = jest.fn(async ({ fileId }: { fileId: string }) => {
+    if (fileId === "reviewer-package-1") {
+      return {
+        bytes: packageBytes,
+        mimeType: "application/json",
+        byteSize: packageBytes.byteLength,
+        sourceUrl: null,
+      };
+    }
+    return {
+      bytes: listBytes,
+      mimeType: "text/html",
+      byteSize: listBytes.byteLength,
+      sourceUrl: "https://source.example/events",
+      runId: "evidence-run-1",
+      intakeId: "intake-1",
+    };
+  });
+  const sportsFindMany = jest.fn(async () => currentCatalog.sports);
+  const activationJobUpsert = jest.fn();
+  const transaction = {
+    affiliateAgentGatewayClaims: { findUnique: producerClaimLookup },
+    affiliateSupplySources: {
+      findUnique: jest.fn(async () => ({
+        id: "supply-source-1",
+        lifecycleGeneration: 8,
+      })),
+    },
+    sports: { findMany: sportsFindMany },
+  };
+  const prisma = {
+    $transaction: jest.fn(async <T>(callback: (value: typeof transaction) => Promise<T>) =>
+      callback(transaction)),
+    affiliateAgentGatewayJobs: { upsert: activationJobUpsert },
+  } as unknown as PrismaClient;
+  const result = {
+    claimId: reviewerClaim.claimId,
+    claimGeneration: reviewerClaim.claimGeneration,
+    invocationId: reviewerClaim.invocationId,
+    workerId: reviewerClaim.workerId,
+    role: "SUPPLY_REVIEWER",
+    disposition: "APPROVED",
+    payload: {
+      committedPackageHash: hashAffiliateAgentValue(candidatePackage),
+    },
+    evidenceRefs: ["committed-package-1"],
+    supplyContractVersion: 1,
+    supplyContractHash: "6".repeat(64),
+  } as unknown as AffiliateAgentReviewerTerminalResult;
+  return {
+    candidatePackage,
+    prisma,
+    reviewerClaim,
+    result,
+    setCurrentCatalog: (nextCatalog: typeof evidence.catalog) => {
+      currentCatalog = nextCatalog;
+    },
+    lifecycleCommandResult: {
+      assessment: {},
+      transition: { generation: 9 },
+      isReplayed: false,
+    } as unknown as AffiliateSupplyLifecycleCommandResult,
+    artifacts: { readImmutable },
+    activationJobUpsert,
+  };
+};
+
+
+describe("legacy sport repair evidence verifier", () => {
+  it("accepts exact catalog, manifest-owned bytes, source URL, and sport union", async () => {
+    const fixture = legacySportRepairFixture();
+    await expect(verifyAffiliateAgentLegacySportRepair({
+      ...fixture,
+      resultKind: "REVIEW_REQUIRED",
+      observedSportNames: ["Grass Soccer"],
+    })).resolves.toEqual(expect.objectContaining({
+      catalogHashMatched: true,
+      evidenceOwnershipPassed: true,
+      determinationCoveragePassed: true,
+      expectedSportNames: ["Grass Soccer"],
+      observedSportNames: ["Grass Soccer"],
+    }));
+  });
+
+  it("rejects a forged citation URL even when the artifact bytes hash matches", async () => {
+    const fixture = legacySportRepairFixture();
+    const determination = fixture.sportEvidence.sportDeterminations[0]!;
+    const sportEvidence = {
+      ...fixture.sportEvidence,
+      sportDeterminations: [{
+        ...determination,
+        evidence: [{
+          ...determination.evidence[0]!,
+          pageUrl: "https://attacker.example/forged",
+        }],
+      }],
+    };
+    await expect(verifyAffiliateAgentLegacySportRepair({
+      ...fixture,
+      sportEvidence,
+      resultKind: "REVIEW_REQUIRED",
+      observedSportNames: ["Grass Soccer"],
+    })).rejects.toMatchObject({
+      code: "EVIDENCE_REFERENCE_NOT_PERMITTED",
+      isRetryable: false,
+    });
+  });
+
+  it("rejects a stale current catalog during validation", async () => {
+    const fixture = legacySportRepairFixture();
+    const staleCatalog = buildAffiliateSportsCatalogSnapshot(
+      [{ id: "sport-indoor", name: "Indoor Soccer" }],
+      "2026-09-06T00:00:00.000Z",
+    );
+    fixture.setCurrentCatalog(staleCatalog);
+    await expect(verifyAffiliateAgentLegacySportRepair({
+      ...fixture,
+      resultKind: "REVIEW_REQUIRED",
+      observedSportNames: ["Grass Soccer"],
+    })).rejects.toMatchObject({
+      code: "EVIDENCE_REFERENCE_NOT_PERMITTED",
+      isRetryable: false,
+    });
+  });
+});
+
 describe("production Affiliate Agent activation effect", () => {
   afterEach(() => {
     jest.restoreAllMocks();
@@ -297,7 +663,20 @@ describe("production Affiliate Agent activation effect", () => {
       invocationId: "reviewer-invocation-1",
       workerId: "reviewer-worker-1",
       supplySourceId: "supply-source-1",
+      lifecycleGeneration: 8,
       role: "SUPPLY_REVIEWER",
+      subject: {
+        type: "SUPPLY_REVIEWER",
+        supplySourceId: "supply-source-1",
+        producerClaimId: "producer-claim-1",
+        producerWorkerId: "producer-worker-1",
+        producerInvocationId: "producer-invocation-1",
+        producerWorkspaceId: "producer-workspace-1",
+        committedPackageHash: "a".repeat(64),
+        targetId: "target-1",
+        targetType: "EVENT",
+        reviewPass: 1,
+      },
     } as unknown as AffiliateAgentClaimEnvelope;
     const result = {
       claimId: claim.claimId,
@@ -344,9 +723,75 @@ describe("production Affiliate Agent activation effect", () => {
       }),
     }));
   });
+  it("records legacy repair approval without enqueueing activation", async () => {
+    const fixture = legacyApprovalFixture();
+    const lifecycleCommand = jest
+      .spyOn(affiliateSupplyPersistence, "executeAffiliateSupplyLifecycleCommand")
+      .mockResolvedValue(fixture.lifecycleCommandResult);
+    const adapters = createProductionAffiliateAgentGatewayAdapters({
+      prisma: fixture.prisma,
+      artifacts: fixture.artifacts,
+      storage: {} as StorageProvider,
+    });
+
+    await expect(adapters.terminalEffects.APPROVED.execute({
+      receiptId: "approval-repair-receipt-1",
+      claim: fixture.reviewerClaim,
+      result: fixture.result,
+    })).resolves.toEqual({
+      command: "APPROVE",
+      lifecycleGeneration: 9,
+      receiptId: "approval-repair-receipt-1",
+      activationHeld: true,
+      holdReason: "LEGACY_SPORT_REPAIR",
+    });
+    expect(fixture.activationJobUpsert).not.toHaveBeenCalled();
+    expect(lifecycleCommand).toHaveBeenCalledWith(expect.objectContaining({
+      command: "APPROVE",
+    }));
+  });
+
+  it("rejects legacy approval against a stale catalog before any lifecycle effect", async () => {
+    const fixture = legacyApprovalFixture();
+    const lifecycleCommand = jest
+      .spyOn(affiliateSupplyPersistence, "executeAffiliateSupplyLifecycleCommand")
+      .mockResolvedValue(fixture.lifecycleCommandResult);
+    fixture.setCurrentCatalog(buildAffiliateSportsCatalogSnapshot(
+      [{ id: "sport-indoor", name: "Indoor Soccer" }],
+      "2026-09-06T00:00:00.000Z",
+    ));
+    const adapters = createProductionAffiliateAgentGatewayAdapters({
+      prisma: fixture.prisma,
+      artifacts: fixture.artifacts,
+      storage: {} as StorageProvider,
+    });
+
+    await expect(adapters.terminalEffects.APPROVED.execute({
+      receiptId: "approval-repair-stale-receipt-1",
+      claim: fixture.reviewerClaim,
+      result: fixture.result,
+    })).rejects.toMatchObject({
+      code: "EVIDENCE_REFERENCE_NOT_PERMITTED",
+      isRetryable: false,
+    });
+    expect(lifecycleCommand).not.toHaveBeenCalled();
+    expect(fixture.activationJobUpsert).not.toHaveBeenCalled();
+  });
   it("binds producer repair jobs to the committing lifecycle generation", async () => {
     const packageHash = "a".repeat(64);
-    const producerManifestPreimage = { schemaVersion: 1 as const, entries: [] as const };
+    const repairContext = {
+      kind: "LEGACY_SPORT_REPAIR" as const,
+      intakeId: "intake-1",
+      evidenceRunId: "evidence-run-1",
+      sportsCatalog: buildAffiliateSportsCatalogSnapshot(
+        [{ id: "sport-grass", name: "Grass Soccer" }],
+        "2026-09-06T00:00:00.000Z",
+      ),
+    };
+    const producerManifestPreimage = {
+      schemaVersion: 1 as const,
+      entries: [] as const,
+    };
     const producerEnvelope = {
       schemaVersion: 1,
       jobId: "producer-job-1",
@@ -380,6 +825,7 @@ describe("production Affiliate Agent activation effect", () => {
         supplySourceId: "supply-source-1",
         mappingJobId: "mapping-job-1",
         pass: 1,
+        repairContext,
       },
       permittedCommands: [
         "CAPTURE_CLAIM_URL",
@@ -440,6 +886,7 @@ describe("production Affiliate Agent activation effect", () => {
         targetId: "target-1",
         targetType: "EVENT",
         reviewPass: 1,
+        repairContext,
       },
       evidenceManifest: {
         schemaVersion: 1,
@@ -476,6 +923,7 @@ describe("production Affiliate Agent activation effect", () => {
     expect(repairJobUpsert).toHaveBeenCalledWith(expect.objectContaining({
       create: expect.objectContaining({
         expectedLifecycleGeneration: 9,
+        subjectJson: expect.objectContaining({ repairContext }),
       }),
     }));
     expect(supplySourceFindUnique).toHaveBeenCalledTimes(1);

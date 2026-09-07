@@ -1,6 +1,7 @@
 /** @jest-environment node */
 import { createServer, type Server } from "node:http";
 import { Readable } from "node:stream";
+import { AffiliateLegacyRepairAdmissionError } from "../affiliateLegacyRepairAdmission";
 
 import {
   AffiliateAgentGatewayError,
@@ -41,8 +42,9 @@ describe("affiliate agent gateway artifact store", () => {
       })),
     } as unknown as Parameters<typeof createAffiliateAgentGatewayArtifactStore>[1];
     const database = {
+      file: { findMany: jest.fn(async () => []) },
       affiliateSourceIntakeArtifacts: {
-        findFirst: jest.fn(async () => null),
+        findMany: jest.fn(async () => []),
       },
       affiliateAgentGatewayArtifacts: {
         findFirst: gatewayArtifactFindFirst,
@@ -64,6 +66,38 @@ describe("affiliate agent gateway artifact store", () => {
       where: { fileId: "capture-artifact" },
       select: { mimeType: true },
     });
+  });
+
+  it("binds shared file bytes to the exact admitted capture row", async () => {
+    const bytes = Buffer.from("<html>Stored official evidence</html>", "utf8");
+    const captures = [
+      { id: "old-capture", fileId: "shared-file", intakeId: "old-intake", runId: "old-run", sourceUrl: "https://official.example/old", finalUrl: "https://official.example/old-final", mimeType: "text/html" },
+      { id: "admitted-capture", fileId: "shared-file", intakeId: "current-intake", runId: "current-run", sourceUrl: "https://official.example/events", finalUrl: "https://official.example/calendar", mimeType: "text/html" },
+    ];
+    const database = {
+      file: {
+        findUnique: async () => ({ path: "intakes/run/page.html", bucket: "evidence", mimeType: "text/html" }),
+      },
+      affiliateSourceIntakeArtifacts: {
+        findUnique: async ({ where }: { where: { id: string } }) => captures.find((row) => row.id === where.id),
+      },
+    } as unknown as Parameters<typeof createAffiliateAgentGatewayArtifactStore>[0];
+    const storage = {
+      getObjectStream: async ({ key, bucket }: { key: string; bucket?: string }) => {
+        if (key !== "intakes/run/page.html" || bucket !== "evidence") throw new Error("Object not found");
+        return { stream: Readable.from([bytes]) };
+      },
+    } as unknown as Parameters<typeof createAffiliateAgentGatewayArtifactStore>[1];
+    const artifact = await createAffiliateAgentGatewayArtifactStore(database, storage).readImmutable({
+      fileId: "intake-artifact:admitted-capture",
+      maximumBytes: 1024,
+    });
+    expect(artifact.sourceUrl).toBe("https://official.example/events");
+    expect(artifact.mimeType).toBe("text/html");
+    expect(artifact.bytes).toEqual(bytes);
+    expect(artifact.finalUrl).toBe("https://official.example/calendar");
+    expect(artifact.intakeId).toBe("current-intake");
+    expect(artifact.runId).toBe("current-run");
   });
 });
 
@@ -316,6 +350,7 @@ describe("affiliate agent gateway admission HTTP boundary", () => {
   const invocationReconciler = {
     reconcileInvocation: jest.fn(async () => ({ kind: "TERMINAL_ACCEPTED" as const })),
   } as unknown as AffiliateAgentInvocationReconciler;
+  const legacyRepairAdmission = jest.fn(async () => ({ proposedWrites: [], reportHash: "a".repeat(64) }));
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -327,6 +362,7 @@ describe("affiliate agent gateway admission HTTP boundary", () => {
       _input: unknown,
     ): Promise<AffiliateAgentClaimAdmissionDecision> => "READY");
     running = await startServer(createAffiliateAgentGatewayRequestHandler({
+      legacyRepairAdmission,
       replenishment: gateway.replenishment,
       gateway,
       invocationReconciler,
@@ -405,6 +441,46 @@ describe("affiliate agent gateway admission HTTP boundary", () => {
       }),
     },
   );
+
+  it("keeps legacy repair admission operator-only and rejects unreviewed apply", async () => {
+    const denied = await request("/legacy-repair/admission", WORKER_ROLE_CREDENTIAL, "POST", {
+      mode: "PREVIEW",
+    });
+    expect(denied.status).toBe(401);
+    const unreviewed = await request("/legacy-repair/admission", OPERATOR_TOKEN, "POST", {
+      mode: "APPLY",
+      operatorId: "operator",
+    });
+    expect(unreviewed.status).toBe(400);
+    const oversized = await request("/legacy-repair/admission", OPERATOR_TOKEN, "POST", {
+      mode: "PREVIEW",
+      limit: 21,
+    });
+    expect(oversized.status).toBe(400);
+    const impersonated = await request("/legacy-repair/admission", OPERATOR_TOKEN, "POST", {
+      mode: "APPLY",
+      expectedReportHash: "a".repeat(64),
+      operatorId: "another-user",
+    });
+    expect(impersonated.status).toBe(400);
+    expect(legacyRepairAdmission).not.toHaveBeenCalled();
+  });
+
+  it("returns reviewed admission drift as a non-retryable conflict", async () => {
+    legacyRepairAdmission.mockRejectedValueOnce(new AffiliateLegacyRepairAdmissionError(
+      "ADMISSION_REPORT_DRIFT",
+      "The reviewed report no longer matches.",
+      { observedReportHash: "b".repeat(64) },
+    ));
+    const response = await request("/legacy-repair/admission", OPERATOR_TOKEN, "POST", {
+      mode: "APPLY",
+      expectedReportHash: "a".repeat(64),
+    });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: { code: "ADMISSION_REPORT_DRIFT", isRetryable: false },
+    });
+  });
 
   it("rejects routes outside the configured prefix before dispatching and dispatches prefixed routes", async () => {
     const gatewayRoutes = [

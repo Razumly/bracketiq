@@ -15,12 +15,16 @@ import type {
   AffiliateAgentCommand,
   AffiliateAgentEvidenceManifest,
   AffiliateAgentExecutionClass,
+  AffiliateAgentLegacySportRepairContext,
   AffiliateAgentRole,
+  AffiliateAgentSportEvidence,
   AffiliateAgentTerminalResultEnvelope,
 } from "./agentGatewayContracts";
 import {
   affiliateAgentClaimEnvelopeSchema,
+  affiliateAgentDeclarativePackageSchema,
   affiliateAgentEvidenceManifestSchema,
+  affiliateAgentSportEvidenceSchema,
   canonicalizeAffiliateAgentValue,
   hashAffiliateAgentValue,
   parseAffiliateAgentCaptureMetadata,
@@ -58,6 +62,15 @@ import {
   type AffiliateScrapeMapping,
   type ScrapedPage,
 } from "./types";
+import { loadAffiliateSportsCatalogSnapshot } from "./affiliateSportsCatalog";
+import {
+  sortUniqueAffiliateSportNames,
+  verifyAffiliateSportCompletion,
+  type AffiliateSportCitation,
+  type AffiliateSportCompletionStoredArtifact,
+  type AffiliateSportCompletionVerificationInput,
+  type VerifiedAffiliateSportCompletion,
+} from "./affiliateSportDetermination";
 import { assertSafePublicUrl, type PublicUrlResolver } from "./sourceIntakeUrlSafety";
 import {
   affiliateSourceCaptureDeadlineAt,
@@ -70,6 +83,7 @@ import {
   type AffiliateSourceSearchOptions,
 } from "./affiliateProviderContracts";
 import type { StorageGetResult, StorageProvider } from '@/lib/storageProvider';
+import { AffiliateAgentGatewayError } from "./agentGateway";
 import type {
   AffiliateAgentClaimOperation,
   AffiliateAgentGateway,
@@ -144,6 +158,9 @@ export type AffiliateAgentArtifactRead = Readonly<{
   mimeType: string;
   byteSize: number;
   sourceUrl: string | null;
+  finalUrl?: string | null;
+  runId?: string | null;
+  intakeId?: string | null;
 }>;
 
 export interface AffiliateAgentArtifactStore {
@@ -944,14 +961,179 @@ const productionEvidenceArtifact = async (
   return artifact;
 };
 
+export type AffiliateAgentLegacySportRepairVerificationInput = Readonly<{
+  prisma: Pick<PrismaClient, "sports">;
+  artifacts: AffiliateAgentArtifactStore;
+  claim: AffiliateAgentClaimEnvelope;
+  sportEvidence: AffiliateAgentSportEvidence;
+  resultKind: "REVIEW_REQUIRED" | "HUMAN_REVIEW_REQUIRED";
+  reasonCodes?: readonly string[];
+  observedSportNames?: readonly string[];
+}>;
+
+const legacySportRepairEvidenceError = (
+  message = "Legacy sport repair evidence is not permitted.",
+): AffiliateAgentGatewayError => new AffiliateAgentGatewayError({
+  code: "EVIDENCE_REFERENCE_NOT_PERMITTED",
+  isRetryable: false,
+  safeMessage: message,
+});
+const legacySportRepairContextFor = (
+  claim: AffiliateAgentClaimEnvelope,
+): AffiliateAgentLegacySportRepairContext => {
+  if (claim.role === "MAPPING_PRODUCER") {
+    if (claim.subject.repairContext?.kind === "LEGACY_SPORT_REPAIR") {
+      return claim.subject.repairContext;
+    }
+  } else if (
+    claim.role === "SUPPLY_REVIEWER"
+    && claim.subject.repairContext?.kind === "LEGACY_SPORT_REPAIR"
+  ) {
+    return claim.subject.repairContext;
+  }
+  throw new Error("Legacy sport evidence requires a legacy sport repair claim.");
+};
+
+const legacySportRepairArtifactFor = async (
+  input: AffiliateAgentLegacySportRepairVerificationInput,
+  citation: AffiliateSportCitation,
+): Promise<AffiliateSportCompletionStoredArtifact> => {
+  const context = legacySportRepairContextFor(input.claim);
+  const entry = input.claim.evidenceManifest.entries.find(
+    (candidate) => candidate.artifactId === citation.artifactId,
+  );
+  if (!entry) {
+    throw legacySportRepairEvidenceError();
+  }
+  if (entry.kind !== citation.artifactKind) {
+    throw legacySportRepairEvidenceError();
+  }
+  const artifact = await input.artifacts.readImmutable({
+    fileId: entry.artifactId,
+    maximumBytes: PRODUCTION_ADAPTER_MAX_ARTIFACT_BYTES,
+  });
+  try {
+    verifyProductionArtifact(entry, artifact);
+  } catch {
+    throw legacySportRepairEvidenceError();
+  }
+  const artifactRunId = artifact.runId;
+  const artifactIntakeId = artifact.intakeId;
+  if (
+    typeof artifactRunId !== "string"
+    || artifactRunId !== context.evidenceRunId
+    || typeof artifactIntakeId !== "string"
+    || artifactIntakeId !== context.intakeId
+  ) {
+    throw legacySportRepairEvidenceError();
+  }
+  return {
+    artifactId: entry.artifactId,
+    runId: artifactRunId,
+    intakeId: artifactIntakeId,
+    kind: citation.artifactKind,
+    sourceUrl: artifact.sourceUrl,
+    finalUrl: artifact.finalUrl,
+    mimeType: artifact.mimeType,
+    artifactSha256: entry.sha256,
+    bytes: artifact.bytes,
+  };
+};
+
+export const verifyAffiliateAgentLegacySportRepair = async (
+  input: AffiliateAgentLegacySportRepairVerificationInput,
+): Promise<VerifiedAffiliateSportCompletion> => {
+  let context: AffiliateAgentLegacySportRepairContext;
+  try {
+    context = legacySportRepairContextFor(input.claim);
+  } catch {
+    throw legacySportRepairEvidenceError();
+  }
+  let sportEvidence: AffiliateAgentSportEvidence;
+  try {
+    sportEvidence = affiliateAgentSportEvidenceSchema.parse(input.sportEvidence);
+  } catch {
+    throw legacySportRepairEvidenceError();
+  }
+  if (sportEvidence.evidenceRunId !== context.evidenceRunId) {
+    throw legacySportRepairEvidenceError();
+  }
+  if (sportEvidence.sportsCatalogSha256.toLowerCase() !== context.sportsCatalog.sha256.toLowerCase()) {
+    throw legacySportRepairEvidenceError();
+  }
+  const citations = sportEvidence.sportDeterminations.flatMap(
+    (determination) => determination.evidence,
+  );
+  const artifacts = new Map<string, AffiliateSportCompletionStoredArtifact>();
+  for (const citation of citations) {
+    const key = `${citation.artifactId}:${citation.artifactKind}`;
+    if (!artifacts.has(key)) {
+      artifacts.set(
+        key,
+        await legacySportRepairArtifactFor(input, citation),
+      );
+    }
+  }
+  if (input.resultKind === "REVIEW_REQUIRED" && input.observedSportNames === undefined) {
+    throw legacySportRepairEvidenceError();
+  }
+  const currentCatalog = await loadAffiliateSportsCatalogSnapshot(input.prisma);
+  let observedSportNames: readonly string[] | undefined;
+  if (input.observedSportNames !== undefined) {
+    try {
+      observedSportNames = sortUniqueAffiliateSportNames(input.observedSportNames);
+    } catch {
+      throw legacySportRepairEvidenceError();
+    }
+  }
+  const verificationInput: AffiliateSportCompletionVerificationInput = {
+    result: {
+      status: input.resultKind,
+      evidenceRunId: sportEvidence.evidenceRunId,
+      sportsCatalogSha256: sportEvidence.sportsCatalogSha256,
+      sportDeterminations: sportEvidence.sportDeterminations,
+      humanReviewRequired: input.resultKind === "HUMAN_REVIEW_REQUIRED"
+        ? {
+          reasonCodes: [...(input.reasonCodes ?? [])],
+          sourceSportLabels: sportEvidence.sportDeterminations.flatMap(
+            (determination) => determination.sourceLabels,
+          ),
+        }
+        : null,
+    },
+    resultKind: input.resultKind,
+    reasonCodes: input.reasonCodes,
+    determinations: sportEvidence.sportDeterminations,
+    claimEvidenceContext: {
+      intakeId: context.intakeId,
+      evidenceRunId: context.evidenceRunId,
+      sportsCatalog: context.sportsCatalog,
+    },
+    freshCatalog: currentCatalog,
+    expectedIntakeId: context.intakeId,
+    artifacts: [...artifacts.values()],
+    observedSportNames,
+  };
+  try {
+    return await verifyAffiliateSportCompletion(verificationInput);
+  } catch {
+    throw legacySportRepairEvidenceError();
+  }
+};
+
 const productionEvidence = async (
   input: ProductionAdapterInput,
   claim: AffiliateAgentClaimEnvelope,
   evidenceRef: string,
-): Promise<Readonly<{ sourceUrl: string | null; text: string }>> => {
+): Promise<Readonly<{
+  sourceUrl: string | null;
+  finalUrl: string | null;
+  text: string;
+}>> => {
   const artifact = await productionEvidenceArtifact(input, claim, evidenceRef);
   return {
     sourceUrl: artifact.sourceUrl,
+    finalUrl: artifact.finalUrl ?? null,
     text: Buffer.from(artifact.bytes).toString("utf8"),
   };
 };
@@ -1317,10 +1499,12 @@ const productionCaptureMetadataFrom = (
 };
 
 const productionUrlFromEvidence = (
-  evidence: Readonly<{ sourceUrl: string | null; text: string }>,
+  evidence: Readonly<{ sourceUrl: string | null; finalUrl?: string | null; text: string }>,
 ): string => {
+  const finalUrl = productionString(evidence.finalUrl);
   const sourceUrl = productionString(evidence.sourceUrl);
-  const candidate = sourceUrl
+  const candidate = finalUrl
+    ?? sourceUrl
     ?? evidence.text.match(/https?:\/\/[^\s"'<>]+/)?.[0]
     ?? evidence.text.trim();
   try {
@@ -1331,7 +1515,11 @@ const productionUrlFromEvidence = (
 };
 
 const productionUrlFromExternalEvidence = (
-  evidence: Readonly<{ sourceUrl: string | null; text: string }>,
+  evidence: Readonly<{
+    sourceUrl: string | null;
+    finalUrl?: string | null;
+    text: string;
+  }>,
 ): string => {
   let parsed: unknown = null;
   try {
@@ -1344,7 +1532,9 @@ const productionUrlFromExternalEvidence = (
     ? parsed.trim()
     : parsedUrl.success
       ? parsedUrl.data.url
-      : productionString(evidence.sourceUrl) ?? evidence.text.trim();
+      : productionString(evidence.finalUrl)
+        ?? productionString(evidence.sourceUrl)
+        ?? evidence.text.trim();
   if (!candidate) {
     throw new Error("The claim URL evidence has invalid settings.");
   }
@@ -2528,6 +2718,69 @@ const productionLifecycleRequest = (
   reviewerSupplySourceId: sourceId,
   reviewerWorkerId: effectInput.claim.workerId,
 });
+const assertLegacySportRepairApprovalFresh = async (
+  input: ProductionAdapterInput,
+  effectInput: AffiliateAgentTerminalEffectAdapterInput,
+  result: AffiliateAgentReviewerTerminalResult,
+  transaction: Prisma.TransactionClient,
+): Promise<void> => {
+  const reviewerSubject = effectInput.claim.subject;
+  if (
+    reviewerSubject.type !== "SUPPLY_REVIEWER"
+    || reviewerSubject.repairContext?.kind !== "LEGACY_SPORT_REPAIR"
+  ) return;
+  const producerClaimRow = await transaction.affiliateAgentGatewayClaims.findUnique({
+    where: { id: reviewerSubject.producerClaimId },
+  });
+  if (!producerClaimRow) {
+    throw legacySportRepairEvidenceError("The producer claim for this legacy sport repair was not found.");
+  }
+  if (
+    hashAffiliateAgentValue(producerClaimRow.claimEnvelopeJson) !== producerClaimRow.claimEnvelopeHash
+    || producerClaimRow.id !== reviewerSubject.producerClaimId
+  ) {
+    throw legacySportRepairEvidenceError("The producer claim envelope is not bound to its persisted hash.");
+  }
+  const producerEnvelope = affiliateAgentClaimEnvelopeSchema.parse(producerClaimRow.claimEnvelopeJson);
+  if (
+    producerClaimRow.role !== producerEnvelope.role
+    || producerClaimRow.claimGeneration !== producerEnvelope.claimGeneration
+    || producerClaimRow.workerId !== producerEnvelope.workerId
+    || producerClaimRow.invocationId !== producerEnvelope.invocationId
+  ) {
+    throw legacySportRepairEvidenceError("The producer claim row is not bound to its claim envelope.");
+  }
+  assertProductionProducerRepairEnvelope(producerEnvelope, reviewerSubject);
+  const committedPackageEntry = effectInput.claim.evidenceManifest.entries.find(
+    (entry) => entry.kind === "COMMITTED_PACKAGE",
+  );
+  if (!committedPackageEntry) {
+    throw legacySportRepairEvidenceError("The reviewer claim has no committed package artifact.");
+  }
+  const committedPackageArtifact = await productionEvidenceArtifact(input, effectInput.claim, committedPackageEntry.evidenceRef);
+  const committedPackage = affiliateAgentDeclarativePackageSchema.parse(
+    productionExternalJson(Buffer.from(committedPackageArtifact.bytes).toString("utf8"), "The committed mapping package"),
+  );
+  const committedPackageHash = productionString(productionRecord(result.payload).committedPackageHash)
+    ?? reviewerSubject.committedPackageHash;
+  if (productionHash(committedPackage) !== committedPackageHash) {
+    throw legacySportRepairEvidenceError("The committed mapping package changed after producer commit.");
+  }
+  const listEvidence = await productionEvidence(input, producerEnvelope, committedPackage.listUrlRef);
+  const extraction = extractProductionValidationCandidates(committedPackage, producerEnvelope, listEvidence);
+  if (!committedPackage.sportEvidence) {
+    throw legacySportRepairEvidenceError("Legacy sport repair packages require sportEvidence.");
+  }
+  await verifyAffiliateAgentLegacySportRepair({
+    prisma: transaction,
+    artifacts: input.artifacts,
+    claim: producerEnvelope,
+    sportEvidence: committedPackage.sportEvidence,
+    resultKind: "REVIEW_REQUIRED",
+    observedSportNames: extraction.observedSportNames,
+  });
+};
+
 
 const productionLifecycleApprovalFollowUp = async (
   input: ProductionAdapterInput,
@@ -2536,15 +2789,25 @@ const productionLifecycleApprovalFollowUp = async (
   result: AffiliateAgentReviewerTerminalResult,
   sourceId: string,
   lifecycleGeneration: number,
-) => command === "APPROVE"
-  ? await enqueueProductionApprovalActivation(
+): Promise<Readonly<Record<string, unknown>> | null> => {
+  if (command !== "APPROVE") return null;
+  if (
+    effectInput.claim.subject.type === "SUPPLY_REVIEWER"
+    && effectInput.claim.subject.repairContext?.kind === "LEGACY_SPORT_REPAIR"
+  ) {
+    return {
+      activationHeld: true,
+      holdReason: "LEGACY_SPORT_REPAIR",
+    };
+  }
+  return enqueueProductionApprovalActivation(
     input,
     effectInput,
     result,
     sourceId,
     lifecycleGeneration,
-  )
-  : null;
+  );
+};
 
 const productionLifecycleEffect = (
   input: ProductionAdapterInput,
@@ -2556,49 +2819,51 @@ const productionLifecycleEffect = (
 ) => async (effectInput: AffiliateAgentTerminalEffectAdapterInput) => {
   const result = effectInput.result as AffiliateAgentReviewerTerminalResult;
   const payload = productionRecord(result.payload);
+  const isLegacyRepair = effectInput.claim.subject.type === "SUPPLY_REVIEWER"
+    && effectInput.claim.subject.repairContext?.kind === "LEGACY_SPORT_REPAIR";
+  if (command === "ACTIVATE" && isLegacyRepair) {
+    throw legacySportRepairEvidenceError("Legacy sport repair cannot activate or publish.");
+  }
   const sourceId = productionString(effectInput.claim.supplySourceId)
     ?? productionString(payload.supplySourceId);
   if (!sourceId) throw new Error("Supply Reviewer terminal effect has no Supply Source.");
-  const source = await input.prisma.affiliateSupplySources.findUnique({
-    where: { id: sourceId },
-  });
-  if (!source) throw new Error(`Affiliate Supply Source ${sourceId} was not found.`);
-  const activationTargetWriter = productionLifecycleActivationTargetWriter(
-    input,
-    command,
-    effectInput,
-    result,
-  );
-  const lifecycleResult = await executeAffiliateSupplyLifecycleCommand({
-    supplySourceId: sourceId,
-    command,
-    authority: "SUPPLY_REVIEWER",
-    expectedLifecycleGeneration: effectInput.claim.lifecycleGeneration ?? source.lifecycleGeneration,
-    idempotencyKey: effectInput.receiptId,
-    request: productionLifecycleRequest(payload, effectInput, result, sourceId, requestFor),
-    actorKind: "SUPPLY_REVIEWER",
-    actorId: effectInput.claim.workerId,
-    executingAgentId: result.invocationId,
-    supplyContractVersion: result.supplyContractVersion,
-    supplyContractHash: result.supplyContractHash,
-    db: affiliateSupplyDatabase(input.prisma),
-    activationTargetWriter,
-    now: input.clock?.now() ?? new Date(),
-  });
-  const approvalFollowUp = await productionLifecycleApprovalFollowUp(
-    input,
-    command,
-    effectInput,
-    result,
-    sourceId,
-    lifecycleResult.transition.generation,
-  );
-  return {
-    command,
-    lifecycleGeneration: lifecycleResult.transition.generation,
-    receiptId: effectInput.receiptId,
-    ...(approvalFollowUp ?? {}),
+  const execute = async (database: PrismaClient | Prisma.TransactionClient) => {
+    const source = await database.affiliateSupplySources.findUnique({ where: { id: sourceId } });
+    if (!source) throw new Error(`Affiliate Supply Source ${sourceId} was not found.`);
+    const activationTargetWriter = productionLifecycleActivationTargetWriter(input, command, effectInput, result);
+    const lifecycleResult = await executeAffiliateSupplyLifecycleCommand({
+      supplySourceId: sourceId,
+      command,
+      authority: "SUPPLY_REVIEWER",
+      expectedLifecycleGeneration: effectInput.claim.lifecycleGeneration ?? source.lifecycleGeneration,
+      idempotencyKey: effectInput.receiptId,
+      request: productionLifecycleRequest(payload, effectInput, result, sourceId, requestFor),
+      actorKind: "SUPPLY_REVIEWER",
+      actorId: effectInput.claim.workerId,
+      executingAgentId: result.invocationId,
+      supplyContractVersion: result.supplyContractVersion,
+      supplyContractHash: result.supplyContractHash,
+      db: affiliateSupplyDatabase(database),
+      activationTargetWriter,
+      now: input.clock?.now() ?? new Date(),
+    });
+    const approvalFollowUp = await productionLifecycleApprovalFollowUp(
+      input, command, effectInput, result, sourceId, lifecycleResult.transition.generation,
+    );
+    return {
+      command,
+      lifecycleGeneration: lifecycleResult.transition.generation,
+      receiptId: effectInput.receiptId,
+      ...(approvalFollowUp ?? {}),
+    };
   };
+  if (command === "APPROVE" && isLegacyRepair) {
+    return input.prisma.$transaction(async (transaction) => {
+      await assertLegacySportRepairApprovalFresh(input, effectInput, result, transaction);
+      return execute(transaction);
+    }, { isolationLevel: "Serializable", maxWait: 10_000, timeout: 120_000 });
+  }
+  return execute(input.prisma);
 };
 
 const productionRepairEvidenceManifestFor = (
@@ -2644,12 +2909,29 @@ const assertProductionProducerRepairEnvelope = (
     { type: "SUPPLY_REVIEWER" }
   >,
 ): void => {
+  if (producerEnvelope.role !== "MAPPING_PRODUCER") {
+    throw new Error("The producer repair lineage is not bound to the reviewer claim.");
+  }
   if (
-    producerEnvelope.role !== "MAPPING_PRODUCER"
-    || producerEnvelope.subject.type !== "MAPPING_PRODUCER"
+    producerEnvelope.subject.type !== "MAPPING_PRODUCER"
     || producerEnvelope.subject.supplySourceId !== reviewerSubject.supplySourceId
+    || producerEnvelope.claimId !== reviewerSubject.producerClaimId
+    || producerEnvelope.workerId !== reviewerSubject.producerWorkerId
+    || producerEnvelope.invocationId !== reviewerSubject.producerInvocationId
+    || producerEnvelope.workspaceId !== reviewerSubject.producerWorkspaceId
   ) {
     throw new Error("The producer repair lineage is not bound to the reviewer claim.");
+  }
+  const producerContext = producerEnvelope.subject.repairContext;
+  const reviewerContext = reviewerSubject.repairContext;
+  if (
+    (producerContext === undefined) !== (reviewerContext === undefined)
+    || producerContext !== undefined
+      && reviewerContext !== undefined
+      && canonicalizeAffiliateAgentValue(producerContext)
+        !== canonicalizeAffiliateAgentValue(reviewerContext)
+  ) {
+    throw new Error("The producer repair context is not bound to the reviewer claim.");
   }
 };
 
@@ -2740,6 +3022,15 @@ const enqueueProducerRepairJob = async (
     packageHash,
     reviewerSubject.reviewPass,
   ].join(":");
+  const repairSubject = {
+    type: "MAPPING_PRODUCER" as const,
+    supplySourceId: reviewerSubject.supplySourceId,
+    mappingJobId,
+    pass: reviewerSubject.reviewPass,
+    ...(reviewerSubject.repairContext
+      ? { repairContext: reviewerSubject.repairContext }
+      : {}),
+  };
   const repairJob = await input.prisma.affiliateAgentGatewayJobs.upsert({
     where: { dedupeKey },
     create: {
@@ -2750,12 +3041,7 @@ const enqueueProducerRepairJob = async (
       role: "MAPPING_PRODUCER",
       subjectType: "MAPPING_PRODUCER",
       subjectId: mappingJobId,
-      subjectJson: {
-        type: "MAPPING_PRODUCER",
-        supplySourceId: reviewerSubject.supplySourceId,
-        mappingJobId,
-        pass: reviewerSubject.reviewPass,
-      } as unknown as Prisma.InputJsonValue,
+      subjectJson: repairSubject as unknown as Prisma.InputJsonValue,
       evidenceManifestJson: productionJson(repairEvidenceManifest),
       supplySourceId: reviewerSubject.supplySourceId,
       expectedLifecycleGeneration: lifecycleGeneration,
@@ -2904,6 +3190,7 @@ type ProductionValidationExtraction = Readonly<{
   listUrl: string;
   candidates: readonly AffiliateCandidateInput[];
   candidateHash: string;
+  observedSportNames: readonly string[];
 }>;
 
 type ProductionValidationEvidence = Readonly<{
@@ -2914,7 +3201,6 @@ type ProductionValidationEvidence = Readonly<{
   validationOutput: Readonly<Record<string, unknown>>;
   validationMetadata: Readonly<Record<string, unknown>>;
 }>;
-
 const assertProductionMappingPackage: (
   claim: AffiliateAgentClaimEnvelope,
   candidatePackage: ProductionValidationCommand["data"]["candidatePackage"],
@@ -2929,6 +3215,47 @@ const assertProductionMappingPackage: (
   const fields = new Set(candidatePackage.fields.map((field) => field.field));
   if (!fields.has("title") || !fields.has("officialActionUrl")) {
     throw new Error("The declarative package must map title and official action URL.");
+  }
+  const constantSportValues = candidatePackage.fields
+    .filter((field) => field.mode === "CONSTANT")
+    .map((field) => field.value);
+  const repairContext = claim.subject.repairContext;
+  if (!repairContext && candidatePackage.sportEvidence) {
+    throw new Error("sportEvidence is permitted only for legacy sport repairs.");
+  }
+  if (!repairContext && constantSportValues.length > 0) {
+    throw new Error("CONSTANT sportName fields are permitted only for legacy sport repairs.");
+  }
+  if (repairContext) {
+    const sportEvidence = candidatePackage.sportEvidence;
+    if (!sportEvidence) {
+      throw new Error("Legacy sport repair packages require sportEvidence.");
+    }
+    if (sportEvidence.evidenceRunId !== repairContext.evidenceRunId) {
+      throw new Error("The package sport evidence run does not match the repair context.");
+    }
+    if (sportEvidence.sportsCatalogSha256.toLowerCase() !== repairContext.sportsCatalog.sha256.toLowerCase()) {
+      throw new Error("The package sport evidence catalog does not match the repair context.");
+    }
+    const resolvedNames = new Set(
+      sportEvidence.sportDeterminations.flatMap((determination) => (
+        determination.status === "RESOLVED" ? determination.canonicalSportNames : []
+      )),
+    );
+    if (constantSportValues.some((sportName) => !resolvedNames.has(sportName))) {
+      throw new Error("A CONSTANT sportName field is not supported by sportEvidence.");
+    }
+    const packageEvidenceRefs = new Set(candidatePackage.evidenceRefs);
+    for (const citation of sportEvidence.sportDeterminations.flatMap(
+      (determination) => determination.evidence,
+    )) {
+      const manifestEntry = claim.evidenceManifest.entries.find(
+        (entry) => entry.artifactId === citation.artifactId,
+      );
+      if (!manifestEntry || !packageEvidenceRefs.has(manifestEntry.evidenceRef)) {
+        throw new Error("Legacy sport citations must be included in package evidenceRefs.");
+      }
+    }
   }
 };
 
@@ -2966,10 +3293,17 @@ const extractProductionValidationCandidates = (
   ))) {
     throw new Error("The declarative package output must include title and official action URL.");
   }
+  const observedSportNames = sortUniqueAffiliateSportNames(
+    candidates.flatMap((candidate) => [
+      ...(candidate.sportName ? [candidate.sportName] : []),
+      ...(candidate.sportNames ?? []),
+    ]),
+  );
   return {
     listUrl,
     candidates,
     candidateHash: productionHash(candidates),
+    observedSportNames,
   };
 };
 
@@ -2990,6 +3324,7 @@ const productionEvidenceRefsForPackage = (
 
 const prepareProductionValidation = async (
   input: ProductionAdapterInput,
+  transaction: Prisma.TransactionClient,
   claim: AffiliateAgentClaimEnvelope,
   command: ProductionValidationCommand,
   receiptId: string,
@@ -3022,6 +3357,24 @@ const prepareProductionValidation = async (
     claim,
     listEvidence,
   );
+  const sportVerification = claim.subject.repairContext
+    ? await verifyAffiliateAgentLegacySportRepair({
+      prisma: transaction,
+      artifacts: input.artifacts,
+      claim,
+      sportEvidence: candidatePackage.sportEvidence!,
+      resultKind: "REVIEW_REQUIRED",
+      observedSportNames: extraction.observedSportNames,
+    })
+    : undefined;
+  const sportVerificationOutput = sportVerification
+    ? {
+      evidenceRunId: sportVerification.evidenceRunId,
+      sportsCatalogSha256: sportVerification.sportsCatalogSha256,
+      expectedSportNames: sportVerification.expectedSportNames,
+      observedSportNames: sportVerification.observedSportNames,
+    }
+    : undefined;
   const validationOutput = {
     schemaVersion: 1,
     isValid: true,
@@ -3039,6 +3392,12 @@ const prepareProductionValidation = async (
     claimGeneration: claim.claimGeneration,
     invocationId: claim.invocationId,
     supplyContractHash: claim.supplyContractHash,
+    ...(candidatePackage.sportEvidence
+      ? { sportEvidence: candidatePackage.sportEvidence }
+      : {}),
+    ...(sportVerificationOutput
+      ? { sportVerification: sportVerificationOutput }
+      : {}),
   };
   return {
     listEvidence,
@@ -3343,6 +3702,16 @@ const productionMappingFields = (
       : value.field === "tags"
         ? "tagText"
         : String(value.field);
+    if (value.mode === "CONSTANT") {
+      return [
+        fieldName,
+        {
+          selector: ":scope",
+          mode: "literal",
+          value: value.value,
+        },
+      ];
+    }
     const transform = value.transform === "ABSOLUTE_URL"
       ? "absoluteUrl"
       : value.transform === "TRIM"
@@ -3369,23 +3738,26 @@ type ProductionCommitMapping = Readonly<{
 
 const buildProductionCommitMapping = async (
   input: ProductionAdapterInput,
+  transaction: Prisma.TransactionClient,
   claim: AffiliateAgentClaimEnvelope,
   command: ProductionCommitCommand,
   candidatePackage: Record<string, unknown>,
   validationMetadata: Record<string, unknown>,
   source: Record<string, unknown>,
 ): Promise<ProductionCommitMapping> => {
-  const listUrlRef = productionString(candidatePackage.listUrlRef);
+  const parsedCandidatePackage = affiliateAgentDeclarativePackageSchema.parse(candidatePackage);
+  assertProductionMappingPackage(claim, parsedCandidatePackage);
+  const listUrlRef = productionString(parsedCandidatePackage.listUrlRef);
   if (!listUrlRef) throw new Error("The committed package has no list URL evidence reference.");
   const listEvidence = await productionEvidence(input, claim, listUrlRef);
-  assertProductionSourceKind(source, candidatePackage);
   const listUrl = productionUrlFromEvidence(listEvidence);
-  const mapping = productionMappingFor(candidatePackage, listUrl);
+  assertProductionSourceKind(source, parsedCandidatePackage);
+  const mapping = productionMappingFor(parsedCandidatePackage, listUrl);
   const mappingFields = mapping.fields;
   if (!mappingFields.title || !mappingFields.officialActionUrl) {
     throw new Error("The committed package must map title and official action URL.");
   }
-  const evidenceRefs = productionEvidenceRefsForPackage(candidatePackage);
+  const evidenceRefs = productionEvidenceRefsForPackage(parsedCandidatePackage);
   const evidenceEntries = evidenceRefs.map((evidenceRef) =>
     claim.evidenceManifest.entries.find((entry) => entry.evidenceRef === evidenceRef));
   if (evidenceEntries.some((entry) => !entry)) {
@@ -3397,6 +3769,34 @@ const buildProductionCommitMapping = async (
     : [];
   if (productionHash(savedEvidenceKinds) !== productionHash(evidenceKinds)) {
     throw new Error("The committed package evidence kinds are not bound to validation.");
+  }
+  let sportVerificationOutput: Readonly<Record<string, unknown>> | undefined;
+  if (claim.subject.repairContext) {
+    const extraction = extractProductionValidationCandidates(
+      parsedCandidatePackage,
+      claim,
+      listEvidence,
+    );
+    const savedValidationOutput = productionRecord(validationMetadata.validationOutput);
+    if (
+      productionString(savedValidationOutput.candidateHash) !== extraction.candidateHash
+    ) {
+      throw new Error("The legacy sport repair evidence changed after validation.");
+    }
+    const sportVerification = await verifyAffiliateAgentLegacySportRepair({
+      prisma: transaction,
+      artifacts: input.artifacts,
+      claim,
+      sportEvidence: parsedCandidatePackage.sportEvidence!,
+      resultKind: "REVIEW_REQUIRED",
+      observedSportNames: extraction.observedSportNames,
+    });
+    sportVerificationOutput = {
+      evidenceRunId: sportVerification.evidenceRunId,
+      sportsCatalogSha256: sportVerification.sportsCatalogSha256,
+      expectedSportNames: sportVerification.expectedSportNames,
+      observedSportNames: sportVerification.observedSportNames,
+    };
   }
   const validationOutput = {
     ...productionRecord(validationMetadata.validationOutput),
@@ -3415,6 +3815,9 @@ const buildProductionCommitMapping = async (
     supplyContractHash: claim.supplyContractHash,
     roleContractVersion: claim.roleContractVersion,
     roleContractHash: claim.roleContractHash,
+    ...(sportVerificationOutput
+      ? { sportVerification: sportVerificationOutput }
+      : {}),
     promptTemplateVersion: claim.promptTemplateVersion,
     promptTemplateHash: claim.promptTemplateHash,
     validationMetadata,
@@ -3545,7 +3948,13 @@ export const createProductionAffiliateAgentGatewayAdapters = (
           if (!source) throw new Error("The package Supply Source does not exist.");
           const scrapeSource = await findProductionValidationSource(transaction, claim);
           assertProductionSourceKind(scrapeSource, candidatePackage);
-          const validation = await prepareProductionValidation(input, claim, command, receiptId);
+          const validation = await prepareProductionValidation(
+            input,
+            transaction,
+            claim,
+            command,
+            receiptId,
+          );
           await persistProductionValidation(
             input,
             transaction,
@@ -3573,6 +3982,7 @@ export const createProductionAffiliateAgentGatewayAdapters = (
           );
           const mapping = await buildProductionCommitMapping(
             input,
+            transaction,
             claim,
             command,
             commitState.candidatePackage,

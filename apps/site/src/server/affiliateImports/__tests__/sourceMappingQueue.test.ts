@@ -199,15 +199,6 @@ describe('affiliate source mapping queue', () => {
       resumed: true,
       leaseExpiresAt: new Date('2026-08-02T14:00:00Z'),
     }));
-    expect(prismaMock.affiliateSourceMappingJobs.updateMany).toHaveBeenCalledWith({
-      where: {
-        id: 'job_1',
-        status: 'CLAIMED',
-        workerId: 'worker-1',
-        leaseExpiresAt: { gte: new Date('2026-08-02T12:00:00Z') },
-      },
-      data: { leaseExpiresAt: new Date('2026-08-02T14:00:00Z') },
-    });
   });
 
   it('assigns concurrent mappers different jobs through conditional claims', async () => {

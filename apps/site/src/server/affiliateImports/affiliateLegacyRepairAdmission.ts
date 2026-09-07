@@ -1,0 +1,2350 @@
+import { createId } from '@/lib/id';
+import { Prisma, type PrismaClient } from '@/generated/prisma/client';
+import {
+  affiliateAgentContractBundleSchema,
+  affiliateAgentEvidenceManifestSchema,
+  affiliateAgentSubjectSchema,
+  type AffiliateAgentContractBundle,
+  type AffiliateAgentLegacySportRepairContext,
+  hashAffiliateAgentValue,
+} from './agentGatewayContracts';
+import {
+  buildAffiliateSportsCatalogSnapshot,
+  type AffiliateSportsCatalogSnapshot,
+} from './affiliateSportsCatalog';
+import {
+  normalizeAffiliateSupplyIdentity,
+  type AffiliateSupplyIdentity,
+} from './affiliateSupplyLifecycle';
+import {
+  affiliateSupplyDatabase,
+  ensureAffiliateSupplySource,
+  loadActiveAffiliateSupplyContract,
+} from './affiliateSupplyPersistence';
+
+export const AFFILIATE_LEGACY_REPAIR_ADMISSION_MAX_LIMIT = 20;
+export const AFFILIATE_LEGACY_REPAIR_ADMISSION_DEFAULT_LIMIT = 1;
+export const AFFILIATE_LEGACY_REPAIR_ADMISSION_SCHEMA_VERSION = 1 as const;
+export const AFFILIATE_LEGACY_REPAIR_STRATEGY_REVISION = 'sport-evidence-v1' as const;
+
+const ADMISSION_READ_BATCH_SIZE = 500;
+const SUCCESSFUL_INTAKE_RUN_STATUSES = new Set(['SUCCEEDED', 'PARTIAL']);
+const ACTIVE_MAPPING_JOB_STATUSES = new Set(['QUEUED', 'CLAIMED', 'REVIEW_REQUIRED']);
+const ACTIVE_APPROVAL_STATUSES = new Set(['QUEUED', 'CLAIMED']);
+const PUBLIC_SOURCE_STATUSES = new Set(['PUBLIC', 'PUBLISHED', 'LISTED', 'ACTIVE_PUBLIC']);
+const HASH_PATTERN = /^[a-f0-9]{64}$/i;
+
+type JsonRecord = Record<string, unknown>;
+type AdmissionClient = PrismaClient | Prisma.TransactionClient;
+
+export class AffiliateLegacyRepairAdmissionError extends Error {
+  readonly code: string;
+  readonly details: Readonly<Record<string, unknown>>;
+
+  constructor(code: string, message: string, details: Readonly<Record<string, unknown>> = {}) {
+    super(message);
+    this.name = 'AffiliateLegacyRepairAdmissionError';
+    this.code = code;
+    this.details = details;
+  }
+}
+
+export type AffiliateLegacyRepairAdmissionArtifact = Readonly<{
+  kind: 'PAGE_HTML' | 'PAGE_MARKDOWN';
+  artifactId: string;
+  sourceArtifactId: string;
+  storageKey: string;
+  sha256: string;
+  mimeType: string;
+  byteSize: number;
+  sourceUrl: string | null;
+  finalUrl: string | null;
+  intakeArtifactId: string;
+  runId: string;
+}>;
+
+export type AffiliateLegacyRepairAdmissionWrite = Readonly<{
+  jobId: string;
+  intakeId: string;
+  rootIdentityKey: string;
+  rootAction: 'CREATE_ROOT' | 'REUSE_ROOT';
+  sourceId: string;
+  mappingId: string | null;
+  evidenceRunId: string;
+  artifactIds: readonly string[];
+  gatewayDedupeKey: string;
+  writes: readonly string[];
+}>;
+
+export type AffiliateLegacyRepairAdmissionRow = Readonly<{
+  jobId: string;
+  intakeId: string | null;
+  status: string;
+  sourceKey: string | null;
+  sportRequeued: boolean;
+  eligible: boolean;
+  alreadyAdmitted: boolean;
+  reason: string;
+  reasonCodes: readonly string[];
+  sourceId: string | null;
+  mappingId: string | null;
+  rootId: string | null;
+  rootIdentityKey: string | null;
+  evidenceRunId: string | null;
+  sportsCatalogSha256: string | null;
+  sportsCatalogCapturedAt: string | null;
+  stateFingerprint: string;
+  artifacts: readonly AffiliateLegacyRepairAdmissionArtifact[];
+  gatewayDedupeKey: string | null;
+  write?: AffiliateLegacyRepairAdmissionWrite;
+  outcome?: 'HELD' | 'PROPOSED' | 'ALREADY_ADMITTED' | 'APPLIED';
+}>;
+
+export type AffiliateLegacyRepairAdmissionCounts = Readonly<{
+  total: number;
+  eligible: number;
+  held: number;
+  selected: number;
+  alreadyAdmitted: number;
+}>;
+
+export type AffiliateLegacyRepairAdmissionReport = Readonly<{
+  schemaVersion: 1;
+  mode: 'PREVIEW' | 'APPLY';
+  evaluatedAt: string;
+  contractVersion: number;
+  contractHash: string;
+  counts: AffiliateLegacyRepairAdmissionCounts;
+  requestedJobIds: readonly string[] | null;
+  selectionLimit: number;
+  selectedJobIds: readonly string[];
+  proposedJobIds: readonly string[];
+  rows: readonly AffiliateLegacyRepairAdmissionRow[];
+  proposedWrites: readonly AffiliateLegacyRepairAdmissionWrite[];
+  reportHash: string;
+  reviewedReportHash: string | null;
+  writeCount: number;
+  appliedJobIds: readonly string[];
+  replayed: boolean;
+}>;
+
+export type AffiliateLegacyRepairAdmissionPreview = AffiliateLegacyRepairAdmissionReport & {
+  mode: 'PREVIEW';
+};
+
+export type AffiliateLegacyRepairAdmissionApplyReport = AffiliateLegacyRepairAdmissionReport & {
+  mode: 'APPLY';
+};
+
+export type PreviewAffiliateLegacyRepairAdmissionInput = Readonly<{
+  prisma: PrismaClient;
+  bundle: AffiliateAgentContractBundle;
+  limit?: number;
+  jobIds?: readonly string[];
+}>;
+
+export type ApplyAffiliateLegacyRepairAdmissionInput = Readonly<{
+  prisma: PrismaClient;
+  bundle: AffiliateAgentContractBundle;
+  limit?: number;
+  jobIds?: readonly string[];
+  expectedReportHash: string;
+  operatorId: string;
+}>;
+
+type MappingJobRow = {
+  id: string;
+  intakeId: string;
+  supplySourceId: string | null;
+  sourceId: string | null;
+  mappingId: string | null;
+  legacyIdentityMigrationEligible: boolean;
+  status: string;
+  claimedAt: Date | null;
+  leaseExpiresAt: Date | null;
+  workerId: string | null;
+  resultSummary: unknown;
+  errorMessage: string | null;
+};
+
+type IntakeRow = {
+  id: string;
+  sourceKey: string;
+  baseUrl: string | null;
+  status: string;
+  affiliateSourceId: string | null;
+  supplySourceId: string | null;
+  lastRunId: string | null;
+  targetKindHints: string[];
+};
+
+type CaptureRunRow = {
+  id: string;
+  intakeId: string;
+  supplySourceId: string | null;
+  status: string;
+  createdAt: Date;
+  finishedAt: Date | null;
+};
+
+type IntakePageRow = {
+  id: string;
+  supplySourceId: string | null;
+  intakeId: string;
+  url: string;
+  canonicalUrl: string;
+  status: string;
+};
+
+type ArtifactRow = {
+  id: string;
+  supplySourceId: string | null;
+  intakeId: string;
+  pageId: string | null;
+  runId: string;
+  kind: string;
+  sourceUrl: string | null;
+  finalUrl: string | null;
+  contentHash: string;
+  fileId: string;
+  mimeType: string | null;
+  sizeBytes: number | null;
+  createdAt: Date;
+  isPinned: boolean;
+};
+
+type FileRow = {
+  id: string;
+  path: string;
+  mimeType: string | null;
+  sizeBytes: number | null;
+};
+
+type SourceRow = {
+  id: string;
+  sourceKey: string;
+  organizationId: string | null;
+  baseUrl: string | null;
+  listUrl: string;
+  targetKind: string;
+  status: string;
+  activeMappingId: string | null;
+  supplySourceId: string | null;
+  autoScrapeEnabled: boolean;
+  metadata: unknown;
+};
+
+type OrganizationRow = {
+  id: string;
+  status: string;
+  publicPageEnabled: boolean;
+  publicWidgetsEnabled: boolean;
+};
+
+type CandidateRow = {
+  id: string;
+  sourceId: string;
+  supplySourceId: string | null;
+  mappingId: string | null;
+  status: string;
+  listingKind: string;
+  publishedEventId: string | null;
+  publishedTeamId: string | null;
+  publishedFacilityId: string | null;
+  publishedOrganizationId: string | null;
+};
+
+type SupplyTargetRow = {
+  id: string;
+  supplySourceId: string;
+  status: string;
+  publishedAt: Date | null;
+  rejectedAt: Date | null;
+};
+
+type MappingRow = {
+  id: string;
+  sourceId: string;
+  supplySourceId: string | null;
+  version: number;
+  isActive: boolean;
+  validatedAt: Date | null;
+};
+type SupplyRootRow = {
+  id: string;
+  identityKey: string;
+  canonicalUrl: string;
+  origin: string;
+  pathKey: string;
+  targetKind: string;
+  rolloutCohort: string;
+  intakeId: string | null;
+  liveSourceId: string | null;
+  lifecycleGeneration: number;
+  activeSupplyContractVersion: number | null;
+  activeSupplyContractHash: string | null;
+  derivedStage: string;
+  isAutomationEnabled: boolean;
+  isExcluded: boolean;
+  automationHoldReason: string | null;
+  metadata: unknown;
+};
+
+type ApprovalRow = {
+  id: string;
+  subjectType: string;
+  subjectKey: string;
+  status: string;
+};
+type GatewayJobRow = {
+  id: string;
+  dedupeKey: string;
+  role: string;
+  subjectType: string;
+  subjectId: string;
+  subjectJson: unknown;
+  expectedLifecycleGeneration: number;
+  evidenceManifestJson: unknown;
+  supplySourceId: string | null;
+  status: string;
+  activeClaimId: string | null;
+};
+
+type GatewayClaimRow = {
+  id: string;
+  jobId: string;
+  status: string;
+};
+
+type IdentityPair = Readonly<{ sourceId: string; mappingId: string }>;
+type SportContext = Readonly<{
+  evidenceRunId: string;
+  sportsCatalog: AffiliateSportsCatalogSnapshot;
+  sportsCatalogSha256: string;
+  capturedAt: string;
+  sportDeterminations: unknown[];
+}>;
+
+type AdmissionPlan = Readonly<{
+  row: AffiliateLegacyRepairAdmissionRow;
+  job: MappingJobRow;
+  intake: IntakeRow;
+  source: SourceRow;
+  mapping: MappingRow | null;
+  root: SupplyRootRow | null;
+  identity: AffiliateSupplyIdentity;
+  context: SportContext;
+  run: CaptureRunRow;
+  artifacts: readonly ArtifactRow[];
+  filesById: ReadonlyMap<string, FileRow>;
+  pages: readonly IntakePageRow[];
+  manifest: Record<string, unknown>;
+  repairContext: AffiliateAgentLegacySportRepairContext;
+  gatewayDedupeKey: string;
+}>;
+type AdmissionSnapshot = Readonly<{
+  jobs: readonly MappingJobRow[];
+  intakes: readonly IntakeRow[];
+  runs: readonly CaptureRunRow[];
+  pages: readonly IntakePageRow[];
+  artifacts: readonly ArtifactRow[];
+  files: readonly FileRow[];
+  sources: readonly SourceRow[];
+  mappings: readonly MappingRow[];
+  roots: readonly SupplyRootRow[];
+  organizations: readonly OrganizationRow[];
+  candidates: readonly CandidateRow[];
+  targets: readonly SupplyTargetRow[];
+  approvals: readonly ApprovalRow[];
+  gatewayJobs: readonly GatewayJobRow[];
+  gatewayClaims: readonly GatewayClaimRow[];
+  sportsCatalog: AffiliateSportsCatalogSnapshot;
+}>;
+
+type ParsedBundle = AffiliateAgentContractBundle;
+
+const recordValue = (value: unknown): JsonRecord => (
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? value as JsonRecord
+    : {}
+);
+
+const stringValue = (value: unknown): string | null => (
+  typeof value === 'string' && value.trim() ? value.trim() : null
+);
+
+
+const normalizedUpper = (value: unknown): string => String(value ?? '').trim().toUpperCase();
+
+const sortedUnique = (values: readonly string[]): string[] => Array.from(new Set(
+  values.map((value) => value.trim()).filter(Boolean),
+)).sort();
+
+const compareById = (left: { id: string }, right: { id: string }): number => (
+  left.id < right.id ? -1 : left.id > right.id ? 1 : 0
+);
+
+const normalizeHash = (value: unknown): string | null => {
+  const text = stringValue(value)?.toLowerCase() ?? null;
+  return text && HASH_PATTERN.test(text) ? text : null;
+};
+
+const parseBundle = (bundle: AffiliateAgentContractBundle): ParsedBundle => {
+  const parsed = affiliateAgentContractBundleSchema.safeParse(bundle);
+  if (!parsed.success) {
+    throw new AffiliateLegacyRepairAdmissionError(
+      'INVALID_CONTRACT_BUNDLE',
+      `The supplied Affiliate Agent contract bundle is invalid: ${parsed.error.message}`,
+    );
+  }
+  return parsed.data;
+};
+
+const contractCohort = (bundle: ParsedBundle): string => {
+  const supply = bundle.supplyContract as Record<string, unknown>;
+  if (typeof supply.rolloutCohort === 'string' && supply.rolloutCohort.trim()) {
+    return supply.rolloutCohort.trim();
+  }
+  return 'DEFAULT';
+};
+
+const contractVersion = (bundle: ParsedBundle): number => bundle.supplyContract.version;
+const contractHash = (bundle: ParsedBundle): string => bundle.supplyContract.hash;
+
+const validateLimit = (value: number | undefined): number => {
+  const limit = value ?? AFFILIATE_LEGACY_REPAIR_ADMISSION_DEFAULT_LIMIT;
+  if (!Number.isInteger(limit) || limit < 1 || limit > AFFILIATE_LEGACY_REPAIR_ADMISSION_MAX_LIMIT) {
+    throw new AffiliateLegacyRepairAdmissionError(
+      'INVALID_LIMIT',
+      `limit must be an integer between 1 and ${AFFILIATE_LEGACY_REPAIR_ADMISSION_MAX_LIMIT}.`,
+    );
+  }
+  return limit;
+};
+
+const validateJobIds = (jobIds: readonly string[] | undefined): string[] | undefined => {
+  if (jobIds === undefined) return undefined;
+  const normalized = sortedUnique(jobIds);
+  if (normalized.length === 0 || normalized.length > AFFILIATE_LEGACY_REPAIR_ADMISSION_MAX_LIMIT) {
+    throw new AffiliateLegacyRepairAdmissionError(
+      'INVALID_JOB_IDS',
+      `jobIds must contain between 1 and ${AFFILIATE_LEGACY_REPAIR_ADMISSION_MAX_LIMIT} IDs.`,
+    );
+  }
+  return normalized;
+};
+
+const loadBatched = async <T>(
+  loader: (args: Record<string, unknown>) => Promise<readonly T[]>,
+  where: Record<string, unknown> = {},
+): Promise<T[]> => {
+  const result: T[] = [];
+  const seenIds = new Set<string>();
+  let skip = 0;
+  while (true) {
+    const batch = await loader({ where, orderBy: { id: 'asc' }, skip, take: ADMISSION_READ_BATCH_SIZE });
+    const unseen = batch.filter((row) => {
+      const id = recordValue(row).id;
+      if (typeof id !== 'string' || seenIds.has(id)) return false;
+      seenIds.add(id);
+      return true;
+    });
+    result.push(...unseen);
+    if (batch.length < ADMISSION_READ_BATCH_SIZE || unseen.length === 0) break;
+    skip += batch.length;
+  }
+  return result;
+};
+const readSnapshot = async (
+  client: AdmissionClient,
+  jobIds: readonly string[] | undefined,
+): Promise<AdmissionSnapshot> => {
+  const mappingJobSelect = {
+    id: true,
+    intakeId: true,
+    supplySourceId: true,
+    sourceId: true,
+    mappingId: true,
+    legacyIdentityMigrationEligible: true,
+    status: true,
+    claimedAt: true,
+    leaseExpiresAt: true,
+    workerId: true,
+    resultSummary: true,
+    errorMessage: true,
+  } as const;
+  const selectedJobWhere = {
+    resultSummary: {
+      path: ['sportReconciliationHistory'],
+      array_contains: [{ strategyRevision: AFFILIATE_LEGACY_REPAIR_STRATEGY_REVISION }],
+    },
+  };
+  const requestedJobs = jobIds
+    ? await client.affiliateSourceMappingJobs.findMany({
+      where: { id: { in: [...jobIds] } },
+      select: mappingJobSelect,
+      orderBy: { id: 'asc' },
+    })
+    : await loadBatched((args) => (
+      (client.affiliateSourceMappingJobs.findMany as unknown as (
+        query: Record<string, unknown>,
+      ) => Promise<readonly MappingJobRow[]> )({ ...args, select: mappingJobSelect })
+    ), selectedJobWhere);
+  const requestedTypedJobs = requestedJobs as unknown as MappingJobRow[];
+  const requestedIntakeIds = sortedUnique(requestedTypedJobs
+    .map((job) => job.intakeId)
+    .filter((id): id is string => Boolean(id)));
+  const siblingJobs = requestedIntakeIds.length > 0
+    ? await client.affiliateSourceMappingJobs.findMany({
+      where: { intakeId: { in: requestedIntakeIds } },
+      select: mappingJobSelect,
+      orderBy: { id: 'asc' },
+    })
+    : [];
+  const typedJobs = Array.from(new Map(
+    [...requestedTypedJobs, ...(siblingJobs as unknown as MappingJobRow[])]
+      .map((job) => [job.id, job]),
+  ).values());
+  const jobSubjectIds = sortedUnique(typedJobs.map((job) => job.id));
+  const intakeIds = sortedUnique(typedJobs.map((job) => job.intakeId).filter((id): id is string => Boolean(id)));
+  const intakes = intakeIds.length
+    ? await client.affiliateSourceIntakes.findMany({
+      where: { id: { in: intakeIds } },
+      select: {
+        id: true,
+        sourceKey: true,
+        baseUrl: true,
+        status: true,
+        affiliateSourceId: true,
+        supplySourceId: true,
+        lastRunId: true,
+        targetKindHints: true,
+      },
+    })
+    : [];
+  const typedIntakes = intakes as unknown as IntakeRow[];
+  const intakeSourceKeys = sortedUnique(typedIntakes.map((intake) => intake.sourceKey));
+  const intakeSourceIds = sortedUnique(typedIntakes
+    .map((intake) => intake.affiliateSourceId)
+    .filter((id): id is string => Boolean(id)));
+  const sourceReferenceIds = sortedUnique([
+    ...typedJobs.map((job) => job.sourceId).filter((id): id is string => Boolean(id)),
+    ...intakeSourceIds,
+  ]);
+  const sourceMetadataPredicates = [
+    ...intakeIds.flatMap((intakeId) => [
+      { metadata: { path: ['intakeId'], equals: intakeId } },
+      { metadata: { path: ['sourceEvidence', 'intakeId'], equals: intakeId } },
+    ]),
+    ...intakeSourceKeys.flatMap((sourceKey) => [
+      { metadata: { path: ['intakeSourceKey'], equals: sourceKey } },
+      { metadata: { path: ['sourceEvidence', 'intakeSourceKey'], equals: sourceKey } },
+    ]),
+  ];
+  const sourceWhere: Record<string, unknown> = {
+    OR: [
+      ...(sourceReferenceIds.length ? [{ id: { in: sourceReferenceIds } }] : []),
+      ...(intakeSourceKeys.length ? [{ sourceKey: { in: intakeSourceKeys } }] : []),
+      ...sourceMetadataPredicates,
+    ],
+  };
+  const [runs, pages, artifacts, sources, sportsCatalog] = await Promise.all([
+    intakeIds.length
+      ? client.affiliateSourceIntakeRuns.findMany({ where: { intakeId: { in: intakeIds } }, orderBy: { id: 'asc' } })
+      : Promise.resolve([]),
+    intakeIds.length
+      ? client.affiliateSourceIntakePages.findMany({ where: { intakeId: { in: intakeIds } }, orderBy: { id: 'asc' } })
+      : Promise.resolve([]),
+    intakeIds.length
+      ? client.affiliateSourceIntakeArtifacts.findMany({
+        where: { intakeId: { in: intakeIds }, kind: { in: ['PAGE_HTML', 'PAGE_MARKDOWN'] } },
+        orderBy: { id: 'asc' },
+      })
+      : Promise.resolve([]),
+    sourceReferenceIds.length || intakeSourceKeys.length
+      ? client.affiliateScrapeSources.findMany({
+        where: sourceWhere as never,
+        select: {
+          id: true,
+          sourceKey: true,
+          organizationId: true,
+          baseUrl: true,
+          listUrl: true,
+          targetKind: true,
+          status: true,
+          activeMappingId: true,
+          supplySourceId: true,
+          autoScrapeEnabled: true,
+          metadata: true,
+        },
+        orderBy: { id: 'asc' },
+      })
+      : Promise.resolve([]),
+    client.sports.findMany({ select: { id: true, name: true } })
+      .then((rows) => buildAffiliateSportsCatalogSnapshot(rows, new Date().toISOString())),
+  ]);
+  const typedSources = sources as unknown as SourceRow[];
+  const mappingReferenceIds = sortedUnique([
+    ...typedJobs.map((job) => job.mappingId).filter((id): id is string => Boolean(id)),
+    ...typedSources.map((source) => source.activeMappingId).filter((id): id is string => Boolean(id)),
+  ]);
+  const sourceIds = sortedUnique(typedSources.map((source) => source.id));
+  const mappings = sourceIds.length || mappingReferenceIds.length
+    ? await client.affiliateScrapeMappings.findMany({
+      where: {
+        OR: [
+          ...(mappingReferenceIds.length ? [{ id: { in: mappingReferenceIds } }] : []),
+          ...(sourceIds.length ? [{ sourceId: { in: sourceIds } }] : []),
+        ],
+      },
+      select: {
+        id: true,
+        sourceId: true,
+        supplySourceId: true,
+        version: true,
+        isActive: true,
+        validatedAt: true,
+      },
+      orderBy: { id: 'asc' },
+    })
+    : [];
+  const typedMappings = mappings as unknown as MappingRow[];
+  const rootReferenceIds = sortedUnique([
+    ...typedJobs.map((job) => job.supplySourceId).filter((id): id is string => Boolean(id)),
+    ...typedIntakes.map((intake) => intake.supplySourceId).filter((id): id is string => Boolean(id)),
+    ...typedSources.map((source) => source.supplySourceId).filter((id): id is string => Boolean(id)),
+    ...typedMappings.map((mapping) => mapping.supplySourceId).filter((id): id is string => Boolean(id)),
+  ]);
+  const rootIdentityKeys = sortedUnique(typedSources.flatMap((source) => {
+    const url = source.listUrl || source.baseUrl;
+    if (!url) return [];
+    try {
+      return [normalizeAffiliateSupplyIdentity({
+        requestedUrl: url,
+        resolvedCanonicalUrl: url,
+        operatorDomain: new URL(url).hostname,
+      }).identityKey];
+    } catch {
+      return [];
+    }
+  }));
+  const rootWhere: Record<string, unknown> = {
+    OR: [
+      ...(rootReferenceIds.length ? [{ id: { in: rootReferenceIds } }] : []),
+      ...(rootIdentityKeys.length ? [{ identityKey: { in: rootIdentityKeys } }] : []),
+    ],
+  };
+  const [roots, approvals, gatewayJobs, gatewayClaims] = await Promise.all([
+    rootReferenceIds.length || rootIdentityKeys.length
+      ? client.affiliateSupplySources.findMany({
+        where: rootWhere as never,
+        select: {
+          id: true,
+          identityKey: true,
+          canonicalUrl: true,
+          origin: true,
+          pathKey: true,
+          targetKind: true,
+          rolloutCohort: true,
+          intakeId: true,
+          liveSourceId: true,
+          lifecycleGeneration: true,
+          activeSupplyContractVersion: true,
+          activeSupplyContractHash: true,
+          derivedStage: true,
+          isAutomationEnabled: true,
+          isExcluded: true,
+          automationHoldReason: true,
+          metadata: true,
+        },
+        orderBy: { id: 'asc' },
+      })
+      : Promise.resolve([]),
+    jobSubjectIds.length
+      ? client.affiliateApprovalJobs.findMany({
+        where: { subjectType: 'MAPPING_PACKAGE', subjectKey: { in: jobSubjectIds } },
+        orderBy: { id: 'asc' },
+      })
+      : Promise.resolve([]),
+    client.affiliateAgentGatewayJobs.findMany({
+      where: {
+        OR: [
+          { subjectId: { in: jobSubjectIds } },
+          { activeClaimId: { not: null } },
+        ],
+      },
+      select: {
+        id: true,
+        dedupeKey: true,
+        role: true,
+        subjectType: true,
+        subjectId: true,
+        subjectJson: true,
+        expectedLifecycleGeneration: true,
+        evidenceManifestJson: true,
+        supplySourceId: true,
+        activeClaimId: true,
+        status: true,
+      },
+      orderBy: { id: 'asc' },
+    }),
+    client.affiliateAgentGatewayClaims.findMany({
+      where: { status: 'ACTIVE' },
+      select: { id: true, jobId: true, status: true },
+      orderBy: { id: 'asc' },
+    }),
+  ]);
+  const typedRoots = roots as unknown as SupplyRootRow[];
+  const organizationIds = sortedUnique(typedSources
+    .map((source) => source.organizationId)
+    .filter((id): id is string => Boolean(id)));
+  const rootIds = sortedUnique(typedRoots.map((root) => root.id));
+  const candidateMappingIds = sortedUnique(typedMappings.map((mapping) => mapping.id));
+  const [organizations, candidates, targets] = await Promise.all([
+    organizationIds.length
+      ? client.organizations.findMany({
+        where: { id: { in: organizationIds } },
+        select: { id: true, status: true, publicPageEnabled: true, publicWidgetsEnabled: true },
+      })
+      : Promise.resolve([]),
+    sourceIds.length || candidateMappingIds.length || rootIds.length
+      ? client.affiliateImportCandidates.findMany({
+        where: {
+          OR: [
+            ...(sourceIds.length ? [{ sourceId: { in: sourceIds } }] : []),
+            ...(candidateMappingIds.length ? [{ mappingId: { in: candidateMappingIds } }] : []),
+            ...(rootIds.length ? [{ supplySourceId: { in: rootIds } }] : []),
+          ],
+        },
+        select: {
+          id: true,
+          sourceId: true,
+          supplySourceId: true,
+          mappingId: true,
+          status: true,
+          listingKind: true,
+          publishedEventId: true,
+          publishedTeamId: true,
+          publishedFacilityId: true,
+          publishedOrganizationId: true,
+        },
+        orderBy: { id: 'asc' },
+      })
+      : Promise.resolve([]),
+    rootIds.length
+      ? client.affiliateSupplyTargets.findMany({
+        where: { supplySourceId: { in: rootIds } },
+        select: { id: true, supplySourceId: true, status: true, publishedAt: true, rejectedAt: true },
+        orderBy: { id: 'asc' },
+      })
+      : Promise.resolve([]),
+  ]);
+  const fileIds = sortedUnique((artifacts as unknown as ArtifactRow[]).map((artifact) => artifact.fileId));
+  const files = fileIds.length
+    ? await client.file.findMany({ where: { id: { in: fileIds } }, orderBy: { id: 'asc' } })
+    : [];
+  return {
+    jobs: typedJobs,
+    intakes: typedIntakes,
+    runs: runs as unknown as CaptureRunRow[],
+    pages: pages as unknown as IntakePageRow[],
+    files: files as unknown as FileRow[],
+    artifacts: artifacts as unknown as ArtifactRow[],
+    sources: typedSources,
+    mappings: typedMappings,
+    roots: typedRoots,
+    organizations: organizations as unknown as OrganizationRow[],
+    candidates: candidates as unknown as CandidateRow[],
+    targets: targets as unknown as SupplyTargetRow[],
+    approvals: approvals as unknown as ApprovalRow[],
+    gatewayJobs: gatewayJobs as unknown as GatewayJobRow[],
+    gatewayClaims: gatewayClaims as unknown as GatewayClaimRow[],
+    sportsCatalog: sportsCatalog as AffiliateSportsCatalogSnapshot,
+  };
+};
+
+const historyEntries = (summary: unknown): JsonRecord[] => {
+  const history = recordValue(summary).sportReconciliationHistory;
+  return Array.isArray(history)
+    ? history.map(recordValue).filter((entry) => entry.strategyRevision === AFFILIATE_LEGACY_REPAIR_STRATEGY_REVISION)
+    : [];
+};
+
+const hasSportRequeueMarker = (job: MappingJobRow): boolean => historyEntries(job.resultSummary).length > 0;
+
+const admissionHistoryEntries = (summary: unknown): JsonRecord[] => {
+  const history = recordValue(summary).legacyRepairAdmissionHistory;
+  return Array.isArray(history) ? history.map(recordValue) : [];
+};
+const stringArrayValue = (value: unknown): string[] | null => (
+  Array.isArray(value) && value.every((entry): entry is string => typeof entry === 'string')
+    ? [...value]
+    : null
+);
+
+const admissionEvidenceFor = (summary: unknown, reportHash: string): JsonRecord | null => (
+  admissionHistoryEntries(summary).find((entry) => entry.reportHash === reportHash) ?? null
+);
+
+const matchingAdmissionEvidence = (summary: unknown, reportHash: string): boolean => (
+  admissionEvidenceFor(summary, reportHash) !== null
+);
+
+const summaryEnvelopes = (summary: unknown): JsonRecord[] => {
+  const envelope = recordValue(summary);
+  const result = recordValue(envelope.result);
+  const history = historyEntries(summary);
+  const latestHistory = history.length > 0 ? history[history.length - 1] : null;
+  const archived = latestHistory ? recordValue(latestHistory.archivedPriorResultSummary) : {};
+  return [envelope, result, archived, recordValue(archived.result)];
+};
+
+const readIdentityPair = (value: unknown): IdentityPair | null | 'MALFORMED' => {
+  const candidate = recordValue(value);
+  const hasSource = Object.prototype.hasOwnProperty.call(candidate, 'sourceId');
+  const hasMapping = Object.prototype.hasOwnProperty.call(candidate, 'mappingId');
+  if (!hasSource && !hasMapping) return null;
+  const sourceId = stringValue(candidate.sourceId);
+  const mappingId = stringValue(candidate.mappingId);
+  if (!sourceId || !mappingId) return 'MALFORMED';
+  return { sourceId, mappingId };
+};
+
+const identitiesFromJob = (job: MappingJobRow): { pairs: IdentityPair[]; reasonCodes: string[] } => {
+  const pairs: IdentityPair[] = [];
+  const reasonCodes: string[] = [];
+  const envelopes = summaryEnvelopes(job.resultSummary);
+  for (const envelope of envelopes) {
+    for (const field of ['packageIdentity', 'liveApproval']) {
+      const parsed = readIdentityPair(envelope[field]);
+      if (parsed === 'MALFORMED') reasonCodes.push('MALFORMED_PACKAGE_IDENTITY');
+      else if (parsed) pairs.push(parsed);
+    }
+  }
+  const uniquePairs = Array.from(new Map(pairs.map((pair) => [`${pair.sourceId}:${pair.mappingId}`, pair])).values());
+  if (uniquePairs.length > 1) reasonCodes.push('CONFLICTING_PACKAGE_IDENTITIES');
+  return { pairs: uniquePairs, reasonCodes: sortedUnique(reasonCodes) };
+};
+
+const archiveLineageValid = (job: MappingJobRow, intake: IntakeRow): boolean => historyEntries(job.resultSummary).every((entry) => {
+  const archived = recordValue(entry.archivedPriorResultSummary);
+  const result = recordValue(archived.result);
+  const archivedJobId = stringValue(result.jobId ?? archived.jobId);
+  const archivedIntakeId = stringValue(result.intakeId ?? archived.intakeId);
+  return (!archivedJobId || archivedJobId === job.id) && (!archivedIntakeId || archivedIntakeId === intake.id);
+});
+
+const metadataSourceEvidence = (source: SourceRow): JsonRecord => {
+  const metadata = recordValue(source.metadata);
+  const nested = recordValue(metadata.sourceEvidence);
+  return {
+    ...metadata,
+    ...nested,
+    intakeId: nested.intakeId ?? metadata.intakeId,
+    runId: nested.runId ?? metadata.runId,
+    evidenceRunId: nested.evidenceRunId ?? metadata.evidenceRunId,
+    intakeSourceKey: nested.intakeSourceKey ?? metadata.intakeSourceKey,
+  };
+};
+const sourceEvidenceConflict = (source: SourceRow): boolean => {
+  const metadata = recordValue(source.metadata);
+  const nested = recordValue(metadata.sourceEvidence);
+  const citedRuns = [
+    metadata.runId,
+    metadata.evidenceRunId,
+    nested.runId,
+    nested.evidenceRunId,
+  ].map(stringValue).filter((value): value is string => Boolean(value));
+  const citedIntakes = [
+    metadata.intakeId,
+    nested.intakeId,
+  ].map(stringValue).filter((value): value is string => Boolean(value));
+  const citedKeys = [
+    metadata.intakeSourceKey,
+    nested.intakeSourceKey,
+  ].map(stringValue).filter((value): value is string => Boolean(value));
+  return new Set(citedRuns).size > 1 || new Set(citedIntakes).size > 1 || new Set(citedKeys).size > 1;
+};
+
+const sourceBindsToIntake = (source: SourceRow, intake: IntakeRow): boolean => {
+  const evidence = metadataSourceEvidence(source);
+  return evidence.intakeId === intake.id || evidence.intakeSourceKey === intake.sourceKey;
+};
+
+const sourceIsPublicOrLive = (
+  source: SourceRow,
+  mapping: MappingRow | null,
+  activeMapping: MappingRow | null = null,
+): boolean => {
+  const metadata = recordValue(source.metadata);
+  const publicationStatus = normalizedUpper(
+    metadata.publicationStatus ?? metadata.publicStatus ?? metadata.lifecycleStatus,
+  );
+  return source.autoScrapeEnabled === true
+    || PUBLIC_SOURCE_STATUSES.has(normalizedUpper(source.status))
+    || PUBLIC_SOURCE_STATUSES.has(publicationStatus)
+    || metadata.isPublic === true
+    || metadata.public === true
+    || Boolean(mapping?.validatedAt)
+    || Boolean(activeMapping?.validatedAt);
+};
+const sourceHoldReason = (source: SourceRow): string | null => {
+  const review = recordValue(recordValue(source.metadata).automationReviewRequired);
+  return review.hold === true ? stringValue(review.reason) : null;
+};
+const publicationReasonCodes = (
+  snapshot: AdmissionSnapshot,
+  source: SourceRow,
+  mapping: MappingRow | null,
+  root: SupplyRootRow | null,
+): string[] => {
+  const reasons: string[] = [];
+  if (source.organizationId) {
+    const organization = snapshot.organizations.find((candidate) => candidate.id === source.organizationId);
+    if (organization && (
+      normalizedUpper(organization.status) !== 'UNLISTED'
+      || organization.publicPageEnabled
+      || organization.publicWidgetsEnabled
+    )) {
+      reasons.push('PUBLIC_ORGANIZATION_PAGE');
+    }
+  }
+  const candidates = snapshot.candidates.filter((candidate) => (
+    candidate.sourceId === source.id
+    || Boolean(mapping && candidate.mappingId === mapping.id)
+    || Boolean(root && candidate.supplySourceId === root.id)
+  ));
+  if (candidates.some((candidate) => {
+    if (candidate.publishedEventId || candidate.publishedTeamId || candidate.publishedFacilityId) return true;
+    if (candidate.publishedOrganizationId) {
+      const organization = snapshot.organizations.find((row) => row.id === candidate.publishedOrganizationId);
+      // A promoted CLUB draft can still be private. Check its actual public surfaces.
+      return candidate.listingKind !== 'CLUB'
+        || candidate.publishedOrganizationId !== source.organizationId
+        || !organization
+        || normalizedUpper(organization.status) !== 'UNLISTED'
+        || organization.publicPageEnabled
+        || organization.publicWidgetsEnabled;
+    }
+    return normalizedUpper(candidate.status) === 'PUBLISHED';
+  })) {
+    reasons.push('PUBLISHED_AFFILIATE_CANDIDATE');
+  }
+  if (root && snapshot.targets.some((target) => (
+    target.supplySourceId === root.id
+    && !target.rejectedAt
+    && (
+      normalizedUpper(target.status) === 'PUBLISHED'
+      || normalizedUpper(target.status) === 'ACTIVE'
+      || normalizedUpper(target.status) === 'LAST_KNOWN_GOOD'
+    )
+  ))) {
+    reasons.push('PUBLISHED_AFFILIATE_TARGET');
+  }
+  return reasons;
+};
+
+const urlOrigin = (value: string | null): string | null => {
+  if (!value) return null;
+  try {
+    return new URL(value).origin.toLowerCase();
+  } catch {
+    return null;
+  }
+};
+
+const urlOwnedBySource = (value: string | null, ownedOrigins: ReadonlySet<string>): boolean => {
+  const origin = urlOrigin(value);
+  return Boolean(origin && ownedOrigins.has(origin));
+};
+
+const sourceEvidenceRunId = (source: SourceRow | null): string | null => {
+  if (!source) return null;
+  const evidence = metadataSourceEvidence(source);
+  return stringValue(evidence.runId ?? evidence.evidenceRunId);
+};
+
+const selectedSuccessfulRun = (
+  intake: IntakeRow,
+  source: SourceRow | null,
+  runs: readonly CaptureRunRow[],
+): CaptureRunRow | null => {
+  const intakeRuns = runs
+    .filter((run) => run.intakeId === intake.id && SUCCESSFUL_INTAKE_RUN_STATUSES.has(normalizedUpper(run.status)))
+    .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime() || (left.id < right.id ? 1 : -1));
+  const citedRunId = sourceEvidenceRunId(source);
+  if (citedRunId) return intakeRuns.find((run) => run.id === citedRunId) ?? null;
+  if (intake.lastRunId) {
+    const last = intakeRuns.find((run) => run.id === intake.lastRunId);
+    if (last) return last;
+  }
+  return intakeRuns[0] ?? null;
+};
+
+
+const sourceForJob = (
+  snapshot: AdmissionSnapshot,
+  intake: IntakeRow,
+  job: MappingJobRow,
+  identity: IdentityPair | null,
+): { source: SourceRow | null; reasonCodes: string[] } => {
+  const reasons: string[] = [];
+  const exactKeyCandidates = snapshot.sources.filter((source) => source.sourceKey === intake.sourceKey);
+  const metadataCandidates = snapshot.sources.filter((source) => sourceBindsToIntake(source, intake));
+  if (identity) {
+    const source = snapshot.sources.find((candidate) => candidate.id === identity.sourceId) ?? null;
+    if (!source) return { source: null, reasonCodes: ['IDENTITY_SOURCE_MISSING'] };
+    if (sourceEvidenceConflict(source)) reasons.push('CONFLICTING_SOURCE_PROVENANCE');
+    if (exactKeyCandidates.length !== 1) {
+      reasons.push(exactKeyCandidates.length === 0 ? 'SOURCE_NOT_FOUND_BY_EXACT_KEY' : 'AMBIGUOUS_SOURCE_IDENTITY');
+    }
+    if (exactKeyCandidates.length === 1 && exactKeyCandidates[0].id !== source.id) reasons.push('SOURCE_KEY_IDENTITY_CONFLICT');
+    if (metadataCandidates.some((candidate) => candidate.id !== source.id)) reasons.push('AMBIGUOUS_SOURCE_IDENTITY');
+    if (metadataCandidates.some((candidate) => sourceEvidenceConflict(candidate))) reasons.push('CONFLICTING_SOURCE_PROVENANCE');
+    if (intake.affiliateSourceId && intake.affiliateSourceId !== source.id) reasons.push('INTAKE_SOURCE_ID_CONFLICT');
+    if (job.sourceId && job.sourceId !== source.id) reasons.push('MAPPING_JOB_SOURCE_CONFLICT');
+    if (job.mappingId && job.mappingId !== identity.mappingId) reasons.push('MAPPING_JOB_MAPPING_CONFLICT');
+    return { source: reasons.length === 0 ? source : null, reasonCodes: reasons };
+  }
+  if (exactKeyCandidates.length > 1) reasons.push('AMBIGUOUS_SOURCE_IDENTITY');
+  if (exactKeyCandidates.length === 1 && metadataCandidates.some((candidate) => candidate.id !== exactKeyCandidates[0].id)) {
+    reasons.push('AMBIGUOUS_SOURCE_IDENTITY');
+  }
+  if (exactKeyCandidates.some((candidate) => sourceEvidenceConflict(candidate))) {
+    reasons.push('CONFLICTING_SOURCE_PROVENANCE');
+  }
+  if (intake.affiliateSourceId && exactKeyCandidates.length === 1 && intake.affiliateSourceId !== exactKeyCandidates[0].id) {
+    reasons.push('INTAKE_SOURCE_ID_CONFLICT');
+  }
+  if (job.sourceId && (exactKeyCandidates.length !== 1 || job.sourceId !== exactKeyCandidates[0].id)) {
+    reasons.push('MAPPING_JOB_SOURCE_CONFLICT');
+  }
+  return { source: reasons.length === 0 && exactKeyCandidates.length === 1 ? exactKeyCandidates[0] : null, reasonCodes: reasons };
+};
+const mappingForIdentity = (
+  snapshot: AdmissionSnapshot,
+  source: SourceRow | null,
+  identity: IdentityPair | null,
+): { mapping: MappingRow | null; reasonCodes: string[] } => {
+  if (identity) {
+    const mapping = snapshot.mappings.find((candidate) => candidate.id === identity.mappingId) ?? null;
+    if (!mapping) return { mapping: null, reasonCodes: ['IDENTITY_MAPPING_MISSING'] };
+    if (!source || mapping.sourceId !== source.id) return { mapping: null, reasonCodes: ['MAPPING_OWNERSHIP_CONFLICT'] };
+    if (mapping.validatedAt) return { mapping, reasonCodes: ['VALIDATED_MAPPING_LIVE_STATE'] };
+    return { mapping, reasonCodes: [] };
+  }
+  if (!source) return { mapping: null, reasonCodes: ['MAPPING_SOURCE_MISSING'] };
+  const mappings = snapshot.mappings.filter((candidate) => candidate.sourceId === source.id);
+  if (mappings.length === 0) return { mapping: null, reasonCodes: ['MAPPING_NOT_FOUND_FOR_SOURCE'] };
+  if (mappings.length > 1) return { mapping: null, reasonCodes: ['AMBIGUOUS_MAPPING_FOR_SOURCE'] };
+  const mapping = mappings[0];
+  if (mapping.validatedAt) return { mapping, reasonCodes: ['VALIDATED_MAPPING_LIVE_STATE'] };
+  return { mapping, reasonCodes: [] };
+};
+const rootForIdentity = (
+  snapshot: AdmissionSnapshot,
+  identity: AffiliateSupplyIdentity,
+  intake: IntakeRow,
+  source: SourceRow,
+  rolloutCohort: string,
+): { root: SupplyRootRow | null; reasonCodes: string[] } => {
+  const reasons: string[] = [];
+  const matching = snapshot.roots.filter((root) => root.identityKey === identity.identityKey).sort(compareById);
+  const linked = intake.supplySourceId
+    ? snapshot.roots.find((root) => root.id === intake.supplySourceId) ?? null
+    : null;
+  if (linked && linked.identityKey !== identity.identityKey) reasons.push('INTAKE_ROOT_IDENTITY_CONFLICT');
+  if (intake.supplySourceId && !linked) reasons.push('INTAKE_ROOT_MISSING');
+  if (matching.length > 1) reasons.push('AMBIGUOUS_ROOT_IDENTITY');
+  const root = matching.length === 1
+    ? matching[0]
+    : matching.length === 0 && linked?.identityKey === identity.identityKey
+      ? linked
+      : null;
+  const rootReview = root ? recordValue(recordValue(root.metadata).automationReviewRequired) : {};
+  if (root && rootReview.hold === true && stringValue(rootReview.reason) !== 'LEGACY_SPORT_REPAIR') reasons.push('ROOT_HOLD_CONFLICT');
+  if (root && root.intakeId && root.intakeId !== intake.id) reasons.push('ROOT_INTAKE_OWNERSHIP_CONFLICT');
+  if (root && normalizedUpper(root.targetKind) !== normalizedUpper(source.targetKind)) reasons.push('ROOT_TARGET_KIND_CONFLICT');
+  if (root && root.rolloutCohort !== rolloutCohort) reasons.push('ROOT_ROLLOUT_COHORT_CONFLICT');
+  if (root && root.automationHoldReason && root.automationHoldReason !== 'LEGACY_SPORT_REPAIR') reasons.push('ROOT_HOLD_CONFLICT');
+  if (root && (root.derivedStage !== 'PRE_MAPPED' || root.isAutomationEnabled || root.isExcluded)) {
+    reasons.push('ROOT_LIVE_STATE');
+  }
+  if (root && root.liveSourceId && root.liveSourceId !== source.id) reasons.push('ROOT_SOURCE_OWNERSHIP_CONFLICT');
+  if (source.supplySourceId && (!root || source.supplySourceId !== root.id)) reasons.push('SOURCE_ROOT_OWNERSHIP_CONFLICT');
+  return { root, reasonCodes: reasons };
+};
+
+
+const gatewayRepairJobsFor = (snapshot: AdmissionSnapshot, jobId: string): GatewayJobRow[] => snapshot.gatewayJobs
+  .filter((candidate) => (
+    candidate.role === 'MAPPING_PRODUCER'
+    && candidate.subjectId === jobId
+  ))
+  .sort(compareById);
+
+const admissionEvidenceForGateway = (
+  job: MappingJobRow,
+  rootId: string,
+  repairContext: unknown,
+  manifest: unknown,
+  dedupeKey: string,
+): JsonRecord | null => admissionHistoryEntries(job.resultSummary).find((entry) => (
+  stringValue(entry.rootId) === rootId
+  && stringValue(entry.gatewayDedupeKey) === dedupeKey
+  && sameRepairContext(entry.repairContext, repairContext)
+  && sameAdmissionValue(entry.manifest, manifest)
+)) ?? null;
+
+const gatewayIdentityMatches = (
+  gatewayJob: GatewayJobRow,
+  jobId: string,
+  rootId: string | null,
+  expectedLifecycleGeneration: number | null,
+  repairContext: unknown,
+  manifest: unknown,
+  dedupeKey: string | null,
+): boolean => {
+  const parsedSubject = affiliateAgentSubjectSchema.safeParse(gatewayJob.subjectJson);
+  if (!parsedSubject.success) return false;
+  const subject = recordValue(parsedSubject.data);
+  return gatewayJob.role === 'MAPPING_PRODUCER'
+    && subject.type === 'MAPPING_PRODUCER'
+    && gatewayJob.subjectType === 'MAPPING_PRODUCER'
+    && gatewayJob.subjectId === jobId
+    && gatewayJob.supplySourceId === rootId
+    && gatewayJob.expectedLifecycleGeneration === expectedLifecycleGeneration
+    && gatewayJob.dedupeKey === dedupeKey
+    && subject.mappingJobId === jobId
+    && subject.supplySourceId === rootId
+    && subject.pass === 1
+    && sameRepairContext(subject.repairContext, repairContext)
+    && sameAdmissionValue(gatewayJob.evidenceManifestJson, manifest);
+};
+
+const activeGatewayClaimFor = (snapshot: AdmissionSnapshot, gatewayJob: GatewayJobRow | null): boolean => {
+  if (!gatewayJob) return false;
+  if (gatewayJob.activeClaimId) return true;
+  return snapshot.gatewayClaims.some((claim) => claim.jobId === gatewayJob.id && claim.status === 'ACTIVE');
+};
+
+const gatewayDedupeKeyFor = (
+  jobId: string,
+  identityKey: string,
+  context: SportContext,
+  bundle: ParsedBundle,
+): string => [
+  'legacy-sport-repair',
+  jobId,
+  identityKey,
+  context.evidenceRunId,
+  contractVersion(bundle),
+  contractHash(bundle),
+].join(':');
+
+const artifactSort = (left: ArtifactRow, right: ArtifactRow): number => (
+  right.createdAt.getTime() - left.createdAt.getTime() || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
+);
+
+const artifactForKind = (
+  artifacts: readonly ArtifactRow[],
+  kind: 'PAGE_HTML' | 'PAGE_MARKDOWN',
+): ArtifactRow | null => artifacts
+  .filter((artifact) => artifact.kind === kind)
+  .sort(artifactSort)[0] ?? null;
+
+const artifactManifestEntry = (
+  artifact: ArtifactRow,
+  file: FileRow,
+  kind: 'PAGE_HTML' | 'PAGE_MARKDOWN',
+  jobId: string,
+): AffiliateLegacyRepairAdmissionArtifact => {
+  const sha256 = normalizeHash(artifact.contentHash);
+  if (!sha256) throw new AffiliateLegacyRepairAdmissionError('INVALID_ARTIFACT_HASH', `Artifact ${artifact.id} has an invalid content hash.`);
+  const byteSizeCandidate = artifact.sizeBytes ?? file.sizeBytes;
+  if (typeof byteSizeCandidate !== 'number' || !Number.isInteger(byteSizeCandidate) || byteSizeCandidate < 0) {
+    throw new AffiliateLegacyRepairAdmissionError('INVALID_ARTIFACT_SIZE', `Artifact ${artifact.id} has no durable byte size.`);
+  }
+  const byteSize = byteSizeCandidate;
+  const mimeType = stringValue(artifact.mimeType ?? file.mimeType)
+    ?? (kind === 'PAGE_HTML' ? 'text/html' : 'text/markdown');
+  return {
+    kind,
+    artifactId: `intake-artifact:${artifact.id}`,
+    sourceArtifactId: file.id,
+    storageKey: file.path,
+    sha256,
+    mimeType,
+    byteSize,
+    sourceUrl: artifact.sourceUrl,
+    finalUrl: artifact.finalUrl,
+    intakeArtifactId: artifact.id,
+    runId: artifact.runId,
+  };
+};
+
+const manifestFor = (
+  artifacts: readonly AffiliateLegacyRepairAdmissionArtifact[],
+  jobId: string,
+): Record<string, unknown> => {
+  const entries = artifacts.map((artifact) => ({
+    evidenceRef: `legacy-sport-repair:${jobId}:${artifact.kind.toLowerCase()}`,
+    kind: artifact.kind,
+    artifactId: artifact.artifactId,
+    sha256: artifact.sha256,
+    mimeType: artifact.mimeType,
+    byteSize: artifact.byteSize,
+    retention: 'INDEFINITE' as const,
+  })).sort((left, right) => left.evidenceRef < right.evidenceRef ? -1 : left.evidenceRef > right.evidenceRef ? 1 : 0);
+  const preimage = { schemaVersion: 1 as const, entries };
+  const manifest = { ...preimage, hash: hashAffiliateAgentValue(preimage) };
+  const parsed = affiliateAgentEvidenceManifestSchema.safeParse(manifest);
+  if (!parsed.success) {
+    throw new AffiliateLegacyRepairAdmissionError('INVALID_EVIDENCE_MANIFEST', `Initial evidence manifest is invalid: ${parsed.error.message}`);
+  }
+  return parsed.data as unknown as Record<string, unknown>;
+};
+
+const reportRowFor = (
+  input: Omit<AffiliateLegacyRepairAdmissionRow, 'outcome'> & { outcome?: AffiliateLegacyRepairAdmissionRow['outcome'] },
+): AffiliateLegacyRepairAdmissionRow => ({
+  ...input,
+  reasonCodes: sortedUnique(input.reasonCodes),
+  artifacts: [...input.artifacts].sort((left, right) => left.kind < right.kind ? -1 : left.kind > right.kind ? 1 : 0),
+});
+
+
+const normalizeAdmissionHashValue = (value: unknown): unknown => {
+  if (value instanceof Date) return value.toISOString();
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'bigint') return value.toString();
+  if (Array.isArray(value)) {
+    return value
+      .map(normalizeAdmissionHashValue)
+      .filter((nested) => nested !== undefined);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+        .flatMap(([key, nested]) => {
+          const normalized = normalizeAdmissionHashValue(nested);
+          return normalized === undefined ? [] : [[key, normalized]];
+        }),
+    );
+  }
+  return undefined;
+};
+const stableRepairContext = (value: unknown): unknown => {
+  const context = recordValue(value);
+  const catalog = recordValue(context.sportsCatalog);
+  return {
+    kind: context.kind,
+    intakeId: context.intakeId,
+    evidenceRunId: context.evidenceRunId,
+    sportsCatalog: {
+      schemaVersion: catalog.schemaVersion,
+      sha256: catalog.sha256,
+      sports: catalog.sports,
+    },
+  };
+};
+
+const sameAdmissionValue = (left: unknown, right: unknown): boolean => (
+  hashAffiliateAgentValue(normalizeAdmissionHashValue(left) ?? null)
+  === hashAffiliateAgentValue(normalizeAdmissionHashValue(right) ?? null)
+);
+
+const sameRepairContext = (left: unknown, right: unknown): boolean => (
+  sameAdmissionValue(stableRepairContext(left), stableRepairContext(right))
+);
+
+const stateFingerprintFor = (input: Readonly<{
+  job: MappingJobRow;
+  intake?: IntakeRow | null;
+  source?: SourceRow | null;
+  mapping?: MappingRow | null;
+  activeMapping?: MappingRow | null;
+  root?: SupplyRootRow | null;
+  run?: CaptureRunRow | null;
+  runArtifacts?: readonly ArtifactRow[];
+  files?: readonly FileRow[];
+  pages?: readonly IntakePageRow[];
+  gatewayJob?: GatewayJobRow | null;
+  gatewayClaims?: readonly GatewayClaimRow[];
+  organizations?: readonly OrganizationRow[];
+  candidates?: readonly CandidateRow[];
+  targets?: readonly SupplyTargetRow[];
+  sportsCatalog?: AffiliateSportsCatalogSnapshot;
+}>): string => {
+  const catalog = input.sportsCatalog
+    ? {
+      schemaVersion: input.sportsCatalog.schemaVersion,
+      sha256: input.sportsCatalog.sha256,
+      sports: input.sportsCatalog.sports,
+    }
+    : null;
+  const state = normalizeAdmissionHashValue({
+    job: input.job,
+    intake: input.intake ?? null,
+    source: input.source ?? null,
+    mapping: input.mapping ?? null,
+    activeMapping: input.activeMapping ?? null,
+    root: input.root ?? null,
+    run: input.run ?? null,
+    runArtifacts: input.runArtifacts ?? [],
+    files: input.files ?? [],
+    pages: input.pages ?? [],
+    gatewayJob: input.gatewayJob ?? null,
+    gatewayClaims: input.gatewayClaims ?? [],
+    organizations: input.organizations ?? [],
+    candidates: input.candidates ?? [],
+    targets: input.targets ?? [],
+    sportsCatalog: catalog,
+  });
+  return hashAffiliateAgentValue(state);
+};
+
+const deterministicRow = (row: AffiliateLegacyRepairAdmissionRow): Record<string, unknown> => ({
+  jobId: row.jobId,
+  intakeId: row.intakeId,
+  status: row.status,
+  sourceKey: row.sourceKey,
+  sportRequeued: row.sportRequeued,
+  eligible: row.eligible,
+  alreadyAdmitted: row.alreadyAdmitted,
+  reason: row.reason,
+  reasonCodes: row.reasonCodes,
+  sourceId: row.sourceId,
+  mappingId: row.mappingId,
+  rootId: row.rootId,
+  rootIdentityKey: row.rootIdentityKey,
+  evidenceRunId: row.evidenceRunId,
+  sportsCatalogSha256: row.sportsCatalogSha256,
+  stateFingerprint: row.stateFingerprint,
+  artifacts: row.artifacts,
+  gatewayDedupeKey: row.gatewayDedupeKey,
+  write: row.write ?? null,
+});
+
+const reportHashFor = (input: Readonly<{
+  contractVersion: number;
+  contractHash: string;
+  counts: AffiliateLegacyRepairAdmissionCounts;
+  selectedJobIds: readonly string[];
+  requestedJobIds?: readonly string[] | null;
+  selectionLimit?: number;
+  rows: readonly AffiliateLegacyRepairAdmissionRow[];
+  proposedWrites: readonly AffiliateLegacyRepairAdmissionWrite[];
+}>): string => hashAffiliateAgentValue({
+  schemaVersion: AFFILIATE_LEGACY_REPAIR_ADMISSION_SCHEMA_VERSION,
+  contractVersion: input.contractVersion,
+  contractHash: input.contractHash,
+  requestedJobIds: input.requestedJobIds ? [...input.requestedJobIds].sort() : null,
+  selectionLimit: input.selectionLimit ?? 0,
+  counts: input.counts,
+  selectedJobIds: [...input.selectedJobIds].sort(),
+  rows: [...input.rows]
+    .sort((left, right) => left.jobId < right.jobId ? -1 : left.jobId > right.jobId ? 1 : 0)
+    .map(deterministicRow),
+  proposedWrites: [...input.proposedWrites].sort((left, right) => left.jobId < right.jobId ? -1 : left.jobId > right.jobId ? 1 : 0),
+});
+const emptyWrite = (plan: AdmissionPlan): AffiliateLegacyRepairAdmissionWrite => ({
+  jobId: plan.job.id,
+  intakeId: plan.intake.id,
+  rootIdentityKey: plan.identity.identityKey,
+  rootAction: plan.root ? 'REUSE_ROOT' : 'CREATE_ROOT',
+  sourceId: plan.source.id,
+  mappingId: plan.mapping?.id ?? null,
+  evidenceRunId: plan.context.evidenceRunId,
+  artifactIds: plan.artifacts.map((artifact) => `intake-artifact:${artifact.id}`).sort(),
+  gatewayDedupeKey: plan.gatewayDedupeKey,
+  writes: [
+    'AFFILIATE_SUPPLY_ROOT',
+    'AFFILIATE_SOURCE_INTAKE_LINK',
+    'AFFILIATE_MAPPING_JOB_LINK',
+    'AFFILIATE_MAPPING_ROOT_LINK',
+    'AFFILIATE_SOURCE_ARTIFACT_PIN',
+    'AFFILIATE_SOURCE_ARTIFACT_ROOT_LINK',
+    'AFFILIATE_SOURCE_AUTOMATION_HOLD',
+    'AFFILIATE_GATEWAY_MAPPING_PRODUCER_JOB',
+    'AFFILIATE_REPAIR_ADMISSION_EVIDENCE',
+  ],
+});
+
+const reason = (codes: readonly string[]): string => codes[0] ?? 'ELIGIBLE';
+
+const evaluateJob = (
+  snapshot: AdmissionSnapshot,
+  job: MappingJobRow,
+  bundle: ParsedBundle,
+): { row: AffiliateLegacyRepairAdmissionRow; plan: AdmissionPlan | null } => {
+  const intake = snapshot.intakes.find((candidate) => candidate.id === job.intakeId) ?? null;
+  const sportRequeued = hasSportRequeueMarker(job);
+  if (!sportRequeued) {
+    return {
+      row: reportRowFor({
+        jobId: job.id,
+        intakeId: intake?.id ?? job.intakeId ?? null,
+        status: job.status,
+        sourceKey: intake?.sourceKey ?? null,
+        sportRequeued: false,
+        eligible: false,
+        alreadyAdmitted: false,
+        reason: 'OUT_OF_SCOPE_NOT_SPORT_REQUEUED',
+        reasonCodes: ['OUT_OF_SCOPE_NOT_SPORT_REQUEUED'],
+        sourceId: job.sourceId,
+        mappingId: job.mappingId,
+        rootId: null,
+        rootIdentityKey: null,
+        evidenceRunId: null,
+        sportsCatalogSha256: null,
+        sportsCatalogCapturedAt: null,
+        artifacts: [],
+        gatewayDedupeKey: null,
+        stateFingerprint: stateFingerprintFor({
+          job,
+          intake,
+          sportsCatalog: snapshot.sportsCatalog,
+        }),
+        outcome: 'HELD',
+      }),
+      plan: null,
+    };
+  }
+  const reasons: string[] = [];
+  if (!intake) reasons.push('INTAKE_MISSING');
+  if (intake && intake.status !== 'READY_FOR_MAPPING') reasons.push('INTAKE_NOT_READY_FOR_MAPPING');
+  if (normalizedUpper(job.status) !== 'QUEUED') reasons.push('MAPPING_JOB_NOT_QUEUED');
+  if (job.claimedAt || job.workerId || job.leaseExpiresAt) reasons.push('MAPPING_JOB_HAS_ACTIVE_LEASE');
+  const activeSibling = snapshot.jobs.some((candidate) => (
+    candidate.id !== job.id
+    && candidate.intakeId === intake?.id
+    && ACTIVE_MAPPING_JOB_STATUSES.has(normalizedUpper(candidate.status))
+  ));
+  if (activeSibling) reasons.push('ACTIVE_MAPPING_JOB_PRESENT');
+  if (snapshot.approvals.some((approval) => (
+    approval.subjectType === 'MAPPING_PACKAGE'
+    && approval.subjectKey === job.id
+    && ACTIVE_APPROVAL_STATUSES.has(normalizedUpper(approval.status))
+  ))) reasons.push('ACTIVE_APPROVAL_PRESENT');
+  if (!intake) {
+    return { row: reportRowFor({
+      jobId: job.id,
+      intakeId: job.intakeId ?? null,
+      status: job.status,
+      sourceKey: null,
+      sportRequeued: true,
+      eligible: false,
+      alreadyAdmitted: false,
+      reason: reason(reasons),
+      reasonCodes: reasons,
+      sourceId: job.sourceId,
+      mappingId: job.mappingId,
+      rootId: null,
+      rootIdentityKey: null,
+      evidenceRunId: null,
+      sportsCatalogSha256: null,
+      sportsCatalogCapturedAt: null,
+      artifacts: [],
+      gatewayDedupeKey: null,
+      stateFingerprint: stateFingerprintFor({
+        job,
+        intake: null,
+        sportsCatalog: snapshot.sportsCatalog,
+      }),
+      outcome: 'HELD',
+    }), plan: null };
+  }
+  if (!archiveLineageValid(job, intake)) reasons.push('ARCHIVE_LINEAGE_CONFLICT');
+  const identityState = identitiesFromJob(job);
+  reasons.push(...identityState.reasonCodes);
+  const identity = identityState.pairs.length === 1 ? identityState.pairs[0] : null;
+  const sourceState = sourceForJob(snapshot, intake, job, identity);
+  reasons.push(...sourceState.reasonCodes);
+  const source = sourceState.source;
+  const mappingState = mappingForIdentity(snapshot, source, identity);
+  reasons.push(...mappingState.reasonCodes);
+  const mapping = mappingState.mapping;
+  if (!identity && job.mappingId && mapping && job.mappingId !== mapping.id) {
+    reasons.push('MAPPING_JOB_MAPPING_CONFLICT');
+  }
+  const activeMapping = source?.activeMappingId
+    ? snapshot.mappings.find((candidate) => candidate.id === source.activeMappingId) ?? null
+    : null;
+  if (source?.activeMappingId && (!activeMapping || activeMapping.sourceId !== source.id)) {
+    reasons.push('ACTIVE_MAPPING_OWNERSHIP_CONFLICT');
+  }
+  const run = selectedSuccessfulRun(intake, source, snapshot.runs);
+  if (!run) reasons.push('SUCCESSFUL_CAPTURE_RUN_MISSING');
+  const context: SportContext | null = run
+    ? {
+      evidenceRunId: run.id,
+      sportsCatalog: snapshot.sportsCatalog,
+      sportsCatalogSha256: snapshot.sportsCatalog.sha256.toLowerCase(),
+      capturedAt: snapshot.sportsCatalog.capturedAt,
+      sportDeterminations: [],
+    } : null;
+  const pages = snapshot.pages.filter((page) => page.intakeId === intake.id && page.status === 'ACTIVE');
+  const runArtifacts = run ? snapshot.artifacts.filter((artifact) => artifact.intakeId === intake.id && artifact.runId === run.id) : [];
+  const ownedOrigins = new Set<string>([
+    urlOrigin(intake.baseUrl),
+    ...(source ? [urlOrigin(source.baseUrl), urlOrigin(source.listUrl)] : []),
+    ...pages.flatMap((page) => [urlOrigin(page.url), urlOrigin(page.canonicalUrl)]),
+  ].filter((value): value is string => Boolean(value)));
+  const artifacts: AffiliateLegacyRepairAdmissionArtifact[] = [];
+  const selectedArtifacts: ArtifactRow[] = [];
+  const filesById = new Map(snapshot.files.map((file) => [file.id, file]));
+  for (const kind of ['PAGE_HTML', 'PAGE_MARKDOWN'] as const) {
+    const artifact = artifactForKind(runArtifacts, kind);
+    if (!artifact) {
+      reasons.push(`MISSING_${kind}`);
+      continue;
+    }
+    const file = filesById.get(artifact.fileId);
+    if (!file || !file.path.trim()) reasons.push(`MISSING_STORAGE_FILE_${kind}`);
+    if (!artifact.sourceUrl && !artifact.finalUrl) reasons.push(`MISSING_SOURCE_URL_${kind}`);
+    if (artifact.sourceUrl && !urlOwnedBySource(artifact.sourceUrl, ownedOrigins)
+      || artifact.finalUrl && !urlOwnedBySource(artifact.finalUrl, ownedOrigins)) reasons.push(`SOURCE_EVIDENCE_URL_NOT_OWNED_${kind}`);
+    if (artifact.pageId && !pages.some((page) => page.id === artifact.pageId)) reasons.push(`ARTIFACT_PAGE_NOT_OWNED_${kind}`);
+    if (file) {
+      try {
+        artifacts.push(artifactManifestEntry(artifact, file, kind, job.id));
+        selectedArtifacts.push(artifact);
+      } catch (error) {
+        reasons.push(error instanceof AffiliateLegacyRepairAdmissionError ? error.code : `INVALID_${kind}`);
+      }
+    }
+  }
+  if (!source) reasons.push('SCRAPE_SOURCE_MISSING');
+  let normalizedIdentity: AffiliateSupplyIdentity | null = null;
+  if (source) {
+    try {
+      const exactSourceUrl = stringValue(source.listUrl) ?? stringValue(source.baseUrl) ?? stringValue(intake.baseUrl);
+      if (!exactSourceUrl) throw new Error('No source URL.');
+      normalizedIdentity = normalizeAffiliateSupplyIdentity({
+        requestedUrl: exactSourceUrl,
+        resolvedCanonicalUrl: exactSourceUrl,
+        operatorDomain: new URL(exactSourceUrl).hostname,
+      });
+    } catch {
+      reasons.push('SOURCE_IDENTITY_UNVERIFIABLE');
+    }
+  }
+  const rootState = normalizedIdentity && source
+    ? rootForIdentity(snapshot, normalizedIdentity, intake, source, contractCohort(bundle))
+    : { root: null, reasonCodes: [] as string[] };
+  if (mapping?.supplySourceId && (!rootState.root || mapping.supplySourceId !== rootState.root.id)) {
+    reasons.push('MAPPING_ROOT_OWNERSHIP_CONFLICT');
+  }
+  if (job.supplySourceId && (!rootState.root || job.supplySourceId !== rootState.root.id)) {
+    reasons.push('MAPPING_JOB_ROOT_OWNERSHIP_CONFLICT');
+  }
+  const evidenceRootIds = [
+    run?.supplySourceId ?? null,
+    ...pages.map((page) => page.supplySourceId ?? null),
+    ...runArtifacts.map((artifact) => artifact.supplySourceId ?? null),
+  ].filter((value): value is string => Boolean(value));
+  if (evidenceRootIds.some((value) => !rootState.root || value !== rootState.root.id)) {
+    reasons.push('EVIDENCE_ROOT_OWNERSHIP_CONFLICT');
+  }
+  reasons.push(...rootState.reasonCodes);
+  const gatewayCandidates = gatewayRepairJobsFor(snapshot, job.id);
+  const gatewayExisting = gatewayCandidates.length === 1 ? gatewayCandidates[0] : null;
+  if (gatewayCandidates.length > 1) reasons.push('CONFLICTING_GATEWAY_REPAIR_JOB');
+  if (gatewayExisting && activeGatewayClaimFor(snapshot, gatewayExisting)) reasons.push('ACTIVE_GATEWAY_CLAIM');
+  const gatewayDedupeKey = normalizedIdentity && context
+    ? gatewayDedupeKeyFor(job.id, normalizedIdentity.identityKey, context, bundle)
+    : null;
+  const candidateRepairContext = context
+    ? {
+      kind: 'LEGACY_SPORT_REPAIR' as const,
+      intakeId: intake.id,
+      evidenceRunId: context.evidenceRunId,
+      sportsCatalog: context.sportsCatalog,
+    }
+    : null;
+  let candidateManifest: Record<string, unknown> | null = null;
+  if (artifacts.length === 2) {
+    try {
+      candidateManifest = manifestFor(artifacts, job.id);
+    } catch {
+      reasons.push('INVALID_EVIDENCE_MANIFEST');
+    }
+  }
+  const gatewayHistory = rootState.root && candidateRepairContext && candidateManifest && gatewayDedupeKey
+    ? admissionEvidenceForGateway(job, rootState.root.id, candidateRepairContext, candidateManifest, gatewayDedupeKey)
+    : null;
+  const gatewayMatches = Boolean(
+    gatewayExisting
+    && rootState.root
+    && candidateRepairContext
+    && candidateManifest
+    && gatewayIdentityMatches(
+      gatewayExisting,
+      job.id,
+      rootState.root.id,
+      typeof gatewayHistory?.rootLifecycleGeneration === 'number'
+        ? gatewayHistory.rootLifecycleGeneration
+        : rootState.root.lifecycleGeneration,
+      candidateRepairContext,
+      candidateManifest,
+      gatewayDedupeKey,
+    )
+    && gatewayHistory !== null
+  );
+  const alreadyAdmitted = Boolean(gatewayMatches && gatewayExisting && !activeGatewayClaimFor(snapshot, gatewayExisting));
+  if (gatewayExisting && !gatewayMatches) reasons.push('CONFLICTING_GATEWAY_REPAIR_JOB');
+  if (source && sourceIsPublicOrLive(source, mapping, activeMapping)) reasons.push('PUBLIC_AUTOMATED_OR_VALIDATED_SOURCE');
+  if (source && sourceHoldReason(source) && sourceHoldReason(source) !== 'LEGACY_SPORT_REPAIR') {
+    reasons.push('SOURCE_AUTOMATION_HOLD_CONFLICT');
+  }
+  if (source) reasons.push(...publicationReasonCodes(snapshot, source, mapping, rootState.root));
+  if (alreadyAdmitted) reasons.push('ALREADY_ADMITTED');
+  const uniqueReasons = sortedUnique(reasons);
+  const eligible = uniqueReasons.length === 0 && Boolean(source && normalizedIdentity && context && run && artifacts.length === 2 && gatewayDedupeKey);
+  if (!eligible && uniqueReasons.length === 0) uniqueReasons.push('REPAIR_ADMISSION_NOT_READY');
+  const row = reportRowFor({
+    jobId: job.id,
+    intakeId: intake.id,
+    status: job.status,
+    sourceKey: intake.sourceKey,
+    sportRequeued: true,
+    eligible: eligible && !alreadyAdmitted,
+    alreadyAdmitted,
+    reason: alreadyAdmitted ? 'ALREADY_ADMITTED' : reason(uniqueReasons),
+    reasonCodes: alreadyAdmitted ? ['ALREADY_ADMITTED'] : uniqueReasons,
+    sourceId: source?.id ?? null,
+    mappingId: mapping?.id ?? identity?.mappingId ?? null,
+    rootId: rootState.root?.id ?? null,
+    rootIdentityKey: normalizedIdentity?.identityKey ?? null,
+    evidenceRunId: context?.evidenceRunId ?? null,
+    sportsCatalogSha256: context?.sportsCatalogSha256 ?? null,
+    sportsCatalogCapturedAt: context?.capturedAt ?? null,
+    stateFingerprint: stateFingerprintFor({
+      job,
+      intake,
+      source,
+      mapping,
+      activeMapping,
+      root: rootState.root,
+      run,
+      runArtifacts,
+      files: snapshot.files.filter((file) => runArtifacts.some((artifact) => artifact.fileId === file.id)),
+      pages,
+      gatewayJob: gatewayExisting,
+      gatewayClaims: gatewayExisting
+        ? snapshot.gatewayClaims.filter((claim) => claim.jobId === gatewayExisting.id)
+        : [],
+      organizations: source?.organizationId
+        ? snapshot.organizations.filter((organization) => organization.id === source.organizationId)
+        : [],
+      candidates: snapshot.candidates.filter((candidate) => (
+        candidate.sourceId === source?.id
+        || Boolean(mapping && candidate.mappingId === mapping.id)
+        || Boolean(rootState.root && candidate.supplySourceId === rootState.root.id)
+      )),
+      targets: rootState.root
+        ? snapshot.targets.filter((target) => target.supplySourceId === rootState.root?.id)
+        : [],
+      sportsCatalog: snapshot.sportsCatalog,
+    }),
+    artifacts,
+    gatewayDedupeKey,
+  });
+  if (!eligible || alreadyAdmitted || !source || !normalizedIdentity || !context || !run || !gatewayDedupeKey) return { row, plan: null };
+  const repairContext: AffiliateAgentLegacySportRepairContext = {
+    kind: 'LEGACY_SPORT_REPAIR',
+    intakeId: intake.id,
+    evidenceRunId: context.evidenceRunId,
+    sportsCatalog: context.sportsCatalog,
+  };
+  const write = emptyWrite({
+    row,
+    job,
+    intake,
+    source,
+    mapping,
+    root: rootState.root,
+    identity: normalizedIdentity,
+    context,
+    run,
+    artifacts: selectedArtifacts,
+    filesById,
+    pages,
+    manifest: manifestFor(artifacts, job.id),
+    repairContext,
+    gatewayDedupeKey,
+  });
+  const rowWithWrite = reportRowFor({ ...row, write, outcome: 'PROPOSED' });
+  const plan: AdmissionPlan = {
+    row: rowWithWrite,
+    job,
+    intake,
+    source,
+    mapping,
+    root: rootState.root,
+    identity: normalizedIdentity,
+    context,
+    run,
+    artifacts: selectedArtifacts,
+    filesById,
+    pages,
+    manifest: manifestFor(artifacts, job.id),
+    repairContext,
+    gatewayDedupeKey,
+  };
+  return { row: rowWithWrite, plan };
+};
+
+const buildReport = async (
+  client: AdmissionClient,
+  bundle: ParsedBundle,
+  limit: number,
+  jobIds: readonly string[] | undefined,
+  mode: 'PREVIEW' | 'APPLY',
+): Promise<{ report: AffiliateLegacyRepairAdmissionReport; plans: readonly AdmissionPlan[]; snapshot: AdmissionSnapshot }> => {
+  const snapshot = await readSnapshot(client, jobIds);
+  const candidateJobs = snapshot.jobs
+    .filter((job) => jobIds === undefined
+      ? hasSportRequeueMarker(job)
+      : jobIds.includes(job.id))
+    .sort(compareById);
+  const evaluated = candidateJobs.map((job) => evaluateJob(snapshot, job, bundle));
+  const plansByIdentity = new Map<string, readonly { jobId: string }[]>();
+  for (const { row, plan } of evaluated) {
+    if (!row.eligible || !plan) continue;
+    const existing = plansByIdentity.get(plan.identity.identityKey) ?? [];
+    plansByIdentity.set(plan.identity.identityKey, [...existing, { jobId: row.jobId }]);
+  }
+  const duplicateByJobId = new Map<string, string>();
+  for (const [identityKey, entries] of plansByIdentity) {
+    if (entries.length < 2) continue;
+    const conflictingIds = entries.map((entry) => entry.jobId).sort();
+    const marker = `DUPLICATE_ROOT_IDENTITY:${identityKey}:${conflictingIds.join(',')}`;
+    for (const entry of entries) duplicateByJobId.set(entry.jobId, marker);
+  }
+  const guardedEvaluated = evaluated.map((entry) => {
+    const marker = duplicateByJobId.get(entry.row.jobId);
+    if (!marker) return entry;
+    return {
+      row: {
+        ...entry.row,
+        eligible: false,
+        reason: marker,
+        reasonCodes: sortedUnique([...entry.row.reasonCodes, marker]),
+        outcome: 'HELD' as const,
+      },
+      plan: null,
+    };
+  });
+  const rows = guardedEvaluated.map(({ row }) => row);
+  const eligible = guardedEvaluated
+    .filter(({ row, plan }) => row.eligible && plan)
+    .sort((left, right) => left.row.jobId < right.row.jobId ? -1 : left.row.jobId > right.row.jobId ? 1 : 0);
+  const alreadyAdmitted = rows.filter((row) => row.alreadyAdmitted).length;
+  const selected = eligible.slice(0, limit);
+  const selectedJobIds = selected.map(({ row }) => row.jobId);
+  const plans = selected.map(({ plan }) => plan!).sort((left, right) => left.job.id < right.job.id ? -1 : left.job.id > right.job.id ? 1 : 0);
+  const proposedWrites = plans.map((plan) => emptyWrite(plan));
+  const counts: AffiliateLegacyRepairAdmissionCounts = {
+    total: rows.filter((row) => row.sportRequeued).length,
+    eligible: rows.filter((row) => row.eligible).length,
+    held: rows.filter((row) => row.sportRequeued && !row.eligible && !row.alreadyAdmitted).length,
+    selected: selected.length,
+    alreadyAdmitted,
+  };
+  const reportHash = reportHashFor({
+    contractVersion: contractVersion(bundle),
+    contractHash: contractHash(bundle),
+    counts,
+    requestedJobIds: jobIds ? [...jobIds].sort() : null,
+    selectionLimit: limit,
+    selectedJobIds,
+    rows,
+    proposedWrites,
+  });
+  const selectedSet = new Set(selectedJobIds);
+  const normalizedRows: AffiliateLegacyRepairAdmissionRow[] = rows.map((row) => {
+    if (!selectedSet.has(row.jobId)) return row;
+    return { ...row, outcome: mode === 'APPLY' ? ('APPLIED' as const) : ('PROPOSED' as const) };
+  });
+  return {
+    snapshot,
+    plans,
+    report: {
+      schemaVersion: AFFILIATE_LEGACY_REPAIR_ADMISSION_SCHEMA_VERSION,
+      contractVersion: contractVersion(bundle),
+      contractHash: contractHash(bundle),
+      mode,
+      evaluatedAt: new Date().toISOString(),
+      counts,
+      requestedJobIds: jobIds ? [...jobIds].sort() : null,
+      selectionLimit: limit,
+      selectedJobIds,
+      proposedJobIds: selectedJobIds,
+      rows: normalizedRows,
+      proposedWrites,
+      reportHash,
+      reviewedReportHash: null,
+      writeCount: mode === 'APPLY' ? plans.length : 0,
+      appliedJobIds: mode === 'APPLY' ? selectedJobIds : [],
+      replayed: false,
+    },
+  };
+};
+
+const appendAdmissionEvidence = (
+  summary: unknown,
+  evidence: Readonly<Record<string, unknown>>,
+): Record<string, unknown> => {
+  const envelope = recordValue(summary);
+  const history = Array.isArray(envelope.legacyRepairAdmissionHistory)
+    ? envelope.legacyRepairAdmissionHistory.map((entry) => recordValue(entry))
+    : [];
+  if (history.some((entry) => entry.reportHash === evidence.reportHash)) return envelope;
+  return {
+    ...envelope,
+    legacyRepairAdmissionHistory: [...history, evidence],
+  };
+};
+
+const assertActiveContract = async (client: AdmissionClient, bundle: ParsedBundle): Promise<void> => {
+  const active = await loadActiveAffiliateSupplyContract({
+    db: affiliateSupplyDatabase(client),
+    rolloutCohort: contractCohort(bundle),
+  });
+  if (
+    active.manifest.version !== contractVersion(bundle)
+    || active.manifest.supplyContract.hash !== contractHash(bundle)
+  ) {
+    throw new AffiliateLegacyRepairAdmissionError(
+      'ACTIVE_CONTRACT_DRIFT',
+      'The active Supply contract changed or is unavailable for this admission.',
+      {
+        expectedVersion: contractVersion(bundle),
+        expectedHash: contractHash(bundle),
+        observedVersion: active.manifest.version,
+        observedHash: active.manifest.supplyContract.hash,
+      },
+    );
+  }
+};
+
+const asPrismaJson = (value: unknown): Prisma.InputJsonValue => value as Prisma.InputJsonValue;
+
+const applyPlan = async (
+  client: Prisma.TransactionClient,
+  plan: AdmissionPlan,
+  bundle: ParsedBundle,
+  reportSnapshot: AffiliateLegacyRepairAdmissionReport,
+  reportHash: string,
+  operatorId: string,
+  selectedJobIds: readonly string[],
+  requestedJobIds: readonly string[] | undefined,
+  selectionLimit: number,
+): Promise<void> => {
+  const currentJob = await client.affiliateSourceMappingJobs.findUnique({ where: { id: plan.job.id } }) as unknown as MappingJobRow | null;
+  if (!currentJob || currentJob.status !== 'QUEUED'
+    || currentJob.sourceId !== plan.job.sourceId
+    || currentJob.mappingId !== plan.job.mappingId
+    || currentJob.legacyIdentityMigrationEligible !== plan.job.legacyIdentityMigrationEligible
+    || currentJob.supplySourceId !== plan.job.supplySourceId
+    || currentJob.intakeId !== plan.intake.id
+    || currentJob.claimedAt || currentJob.workerId || currentJob.leaseExpiresAt) {
+    throw new AffiliateLegacyRepairAdmissionError('IDENTITY_DRIFT', `Mapping job ${plan.job.id} changed after preview.`);
+  }
+  const currentIntake = await client.affiliateSourceIntakes.findUnique({ where: { id: plan.intake.id } }) as unknown as IntakeRow | null;
+  if (!currentIntake || currentIntake.status !== 'READY_FOR_MAPPING'
+    || currentIntake.sourceKey !== plan.intake.sourceKey
+    || (currentIntake.affiliateSourceId !== plan.intake.affiliateSourceId)
+    || (currentIntake.supplySourceId !== plan.intake.supplySourceId)) {
+    throw new AffiliateLegacyRepairAdmissionError('IDENTITY_DRIFT', `Intake ${plan.intake.id} changed after preview.`);
+  }
+  const source = await client.affiliateScrapeSources.findUnique({ where: { id: plan.source.id } }) as unknown as SourceRow | null;
+  if (!source
+    || source.sourceKey !== plan.source.sourceKey
+    || source.supplySourceId !== plan.source.supplySourceId
+    || source.autoScrapeEnabled !== plan.source.autoScrapeEnabled) {
+    throw new AffiliateLegacyRepairAdmissionError('IDENTITY_DRIFT', `Source ${plan.source.id} changed after preview.`);
+  }
+  if (source.organizationId) {
+    const organization = await client.organizations.findUnique({ where: { id: source.organizationId } }) as unknown as OrganizationRow | null;
+    if (organization && (
+      normalizedUpper(organization.status) !== 'UNLISTED'
+      || organization.publicPageEnabled
+      || organization.publicWidgetsEnabled
+    )) {
+      throw new AffiliateLegacyRepairAdmissionError('PUBLIC_STATE_DRIFT', `Organization ${organization.id} became public.`);
+    }
+  }
+  const activeMapping = source.activeMappingId
+    ? await client.affiliateScrapeMappings.findUnique({ where: { id: source.activeMappingId } }) as unknown as MappingRow | null
+    : null;
+  if (source.activeMappingId && (!activeMapping || activeMapping.sourceId !== source.id)) {
+    throw new AffiliateLegacyRepairAdmissionError('MAPPING_OWNERSHIP_DRIFT', `Source ${source.id} active mapping ownership changed.`);
+  }
+  const currentSourceHold = sourceHoldReason(source);
+  if (currentSourceHold && currentSourceHold !== 'LEGACY_SPORT_REPAIR') {
+    throw new AffiliateLegacyRepairAdmissionError('ROOT_HOLD_CONFLICT', `Source ${source.id} has an incompatible automation hold.`);
+  }
+  if (sourceIsPublicOrLive(source, plan.mapping, activeMapping)) {
+    throw new AffiliateLegacyRepairAdmissionError('PUBLIC_STATE_DRIFT', `Source ${source.id} became public, automated, or validated.`);
+  }
+  if (plan.mapping) {
+    const mapping = await client.affiliateScrapeMappings.findUnique({ where: { id: plan.mapping.id } }) as unknown as MappingRow | null;
+    if (!mapping
+      || mapping.sourceId !== plan.source.id
+      || mapping.supplySourceId !== plan.mapping.supplySourceId
+      || mapping.validatedAt) {
+      throw new AffiliateLegacyRepairAdmissionError('MAPPING_OWNERSHIP_DRIFT', `Mapping ${plan.mapping.id} changed after preview.`);
+    }
+  }
+  const existingGateway = await client.affiliateAgentGatewayJobs.findUnique({ where: { dedupeKey: plan.gatewayDedupeKey } });
+  if (existingGateway) {
+    const activeClaims = await client.affiliateAgentGatewayClaims.findMany({
+      where: { jobId: existingGateway.id, status: 'ACTIVE' },
+      take: 1,
+    });
+    if (existingGateway.activeClaimId || activeClaims.length > 0) {
+      throw new AffiliateLegacyRepairAdmissionError('CLAIM_DRIFT', `Gateway job ${existingGateway.id} is actively claimed.`);
+    }
+    const subject = recordValue(existingGateway.subjectJson);
+    if (recordValue(subject.repairContext).kind === 'LEGACY_SPORT_REPAIR') {
+      throw new AffiliateLegacyRepairAdmissionError('ALREADY_ADMITTED', `Mapping job ${plan.job.id} was already admitted.`);
+    }
+    throw new AffiliateLegacyRepairAdmissionError('GATEWAY_DEDUPE_CONFLICT', `Gateway dedupe key ${plan.gatewayDedupeKey} is occupied by another subject.`);
+  }
+  const priorRootMetadata = recordValue(plan.root?.metadata);
+  const admissionMetadata = {
+    ...priorRootMetadata,
+    automationReviewRequired: {
+      ...recordValue(priorRootMetadata.automationReviewRequired),
+      hold: true,
+      reason: 'LEGACY_SPORT_REPAIR',
+      reportHash,
+      jobId: plan.job.id,
+    },
+    legacyRepairAdmission: {
+      ...recordValue(priorRootMetadata.legacyRepairAdmission),
+      reportHash,
+      jobId: plan.job.id,
+      operatorId,
+      strategyRevision: AFFILIATE_LEGACY_REPAIR_STRATEGY_REVISION,
+    },
+  };
+  const supplyDb = affiliateSupplyDatabase(client);
+  const ensured = await ensureAffiliateSupplySource({
+    db: supplyDb,
+    requestedUrl: plan.identity.canonicalUrl,
+    resolvedCanonicalUrl: plan.identity.canonicalUrl,
+    isRedirectVerified: true,
+    operatorDomain: new URL(plan.identity.canonicalUrl).hostname,
+    targetKind: plan.source.targetKind || plan.intake.targetKindHints[0] || 'EVENT',
+    rolloutCohort: contractCohort(bundle),
+    intakeId: plan.intake.id,
+    expectedIntakeSupplySourceId: plan.intake.supplySourceId,
+    liveSourceId: plan.source.id,
+    metadata: admissionMetadata,
+  });
+  const root = ensured.supplySource as unknown as SupplyRootRow;
+  if (root.identityKey !== plan.identity.identityKey) {
+    throw new AffiliateLegacyRepairAdmissionError('IDENTITY_DRIFT', `Supply root identity changed for ${plan.job.id}.`);
+  }
+  const rootUpdate = await client.affiliateSupplySources.updateMany({
+    where: {
+      id: root.id,
+      identityKey: plan.identity.identityKey,
+      derivedStage: 'PRE_MAPPED',
+      isAutomationEnabled: false,
+      automationHoldReason: root.automationHoldReason,
+      lifecycleGeneration: plan.root?.lifecycleGeneration ?? root.lifecycleGeneration,
+    },
+    data: {
+      derivedStage: 'PRE_MAPPED',
+      isAutomationEnabled: false,
+      isExcluded: false,
+      automationHoldReason: 'LEGACY_SPORT_REPAIR',
+      activeSupplyContractVersion: contractVersion(bundle),
+      activeSupplyContractHash: contractHash(bundle),
+      metadata: asPrismaJson({
+        ...recordValue(root.metadata),
+        automationReviewRequired: {
+          ...recordValue(recordValue(root.metadata).automationReviewRequired),
+          hold: true,
+          reason: 'LEGACY_SPORT_REPAIR',
+          reportHash,
+          jobId: plan.job.id,
+        },
+        legacyRepairAdmission: {
+          ...recordValue(recordValue(root.metadata).legacyRepairAdmission),
+          reportHash,
+          jobId: plan.job.id,
+          operatorId,
+          strategyRevision: AFFILIATE_LEGACY_REPAIR_STRATEGY_REVISION,
+        },
+      }),
+    },
+  });
+  if (rootUpdate.count !== 1) {
+    throw new AffiliateLegacyRepairAdmissionError('ROOT_CAS_FAILED', `Supply root ${root.id} changed during admission.`);
+  }
+  const linkedSource = await client.affiliateScrapeSources.findUnique({
+    where: { id: plan.source.id },
+  }) as unknown as SourceRow | null;
+  if (!linkedSource || linkedSource.supplySourceId !== root.id) {
+    throw new AffiliateLegacyRepairAdmissionError('SOURCE_CAS_FAILED', `Source ${plan.source.id} could not be linked to the admitted root.`);
+  }
+  const currentActiveMapping = linkedSource.activeMappingId
+    ? await client.affiliateScrapeMappings.findUnique({ where: { id: linkedSource.activeMappingId } }) as unknown as MappingRow | null
+    : null;
+  const linkedSourceHold = sourceHoldReason(linkedSource);
+  if (linkedSourceHold && linkedSourceHold !== 'LEGACY_SPORT_REPAIR') {
+    throw new AffiliateLegacyRepairAdmissionError('SOURCE_HOLD_CONFLICT', `Source ${plan.source.id} acquired an incompatible automation hold.`);
+  }
+  if (sourceIsPublicOrLive(linkedSource, plan.mapping, currentActiveMapping)) {
+    throw new AffiliateLegacyRepairAdmissionError('PUBLIC_STATE_DRIFT', `Source ${plan.source.id} became public, automated, or validated.`);
+  }
+  const sourceUpdate = await client.affiliateScrapeSources.updateMany({
+    where: {
+      id: plan.source.id,
+      supplySourceId: root.id,
+      autoScrapeEnabled: false,
+      activeMappingId: linkedSource.activeMappingId,
+    },
+    data: {
+      autoScrapeEnabled: false,
+      metadata: asPrismaJson({
+        ...recordValue(linkedSource.metadata),
+        automationReviewRequired: {
+          ...recordValue(recordValue(linkedSource.metadata).automationReviewRequired),
+          hold: true,
+          reason: 'LEGACY_SPORT_REPAIR',
+          reportHash,
+          evidenceRefs: plan.artifacts.map((artifact) => `intake-artifact:${artifact.id}`).sort(),
+        },
+        legacyRepairAdmission: {
+          ...recordValue(recordValue(linkedSource.metadata).legacyRepairAdmission),
+          reportHash,
+          jobId: plan.job.id,
+          operatorId,
+          strategyRevision: AFFILIATE_LEGACY_REPAIR_STRATEGY_REVISION,
+        },
+      }),
+    },
+  });
+  if (sourceUpdate.count !== 1) {
+    throw new AffiliateLegacyRepairAdmissionError('SOURCE_CAS_FAILED', `Source ${plan.source.id} automation hold changed during admission.`);
+  }
+  if (plan.mapping) {
+    const mappingUpdate = await client.affiliateScrapeMappings.updateMany({
+      where: {
+        id: plan.mapping.id,
+        sourceId: plan.source.id,
+        supplySourceId: plan.mapping.supplySourceId,
+        validatedAt: null,
+      },
+      data: { supplySourceId: root.id },
+    });
+    if (mappingUpdate.count !== 1) {
+      throw new AffiliateLegacyRepairAdmissionError('MAPPING_CAS_FAILED', `Mapping ${plan.mapping.id} could not be linked to the admitted root.`);
+    }
+  }
+  const linkedIntake = await client.affiliateSourceIntakes.findUnique({
+    where: { id: plan.intake.id },
+  }) as unknown as IntakeRow | null;
+  if (!linkedIntake || linkedIntake.status !== 'READY_FOR_MAPPING' || linkedIntake.supplySourceId !== root.id) {
+    throw new AffiliateLegacyRepairAdmissionError('INTAKE_CAS_FAILED', `Intake ${plan.intake.id} could not be linked to the admitted root.`);
+  }
+  if (linkedIntake.affiliateSourceId && linkedIntake.affiliateSourceId !== plan.source.id) {
+    throw new AffiliateLegacyRepairAdmissionError('INTAKE_SOURCE_CAS_FAILED', `Intake ${plan.intake.id} changed source ownership.`);
+  }
+  if (!linkedIntake.affiliateSourceId) {
+    const intakeUpdate = await client.affiliateSourceIntakes.updateMany({
+      where: {
+        id: plan.intake.id,
+        status: 'READY_FOR_MAPPING',
+        sourceKey: plan.intake.sourceKey,
+        supplySourceId: root.id,
+        affiliateSourceId: null,
+      },
+      data: { affiliateSourceId: plan.source.id },
+    });
+    if (intakeUpdate.count !== 1) {
+      throw new AffiliateLegacyRepairAdmissionError('INTAKE_CAS_FAILED', `Intake ${plan.intake.id} source binding changed during admission.`);
+    }
+  }
+  const nextSummary = appendAdmissionEvidence(plan.job.resultSummary, {
+    strategyRevision: AFFILIATE_LEGACY_REPAIR_STRATEGY_REVISION,
+    reportHash,
+    reportSnapshot,
+    operatorId,
+    selectedJobIds: [...selectedJobIds].sort(),
+    requestedJobIds: requestedJobIds ? [...requestedJobIds].sort() : null,
+    selectionLimit,
+    selectedRow: plan.row,
+    selectedWrite: emptyWrite(plan),
+    repairContext: plan.repairContext,
+    manifest: plan.manifest,
+    rootId: root.id,
+    rootLifecycleGeneration: root.lifecycleGeneration,
+    sourceId: plan.source.id,
+    mappingId: plan.mapping?.id ?? null,
+    evidenceRunId: plan.context.evidenceRunId,
+    sportsCatalogSha256: plan.context.sportsCatalogSha256,
+    artifactIds: plan.artifacts.map((artifact) => `intake-artifact:${artifact.id}`).sort(),
+    gatewayDedupeKey: plan.gatewayDedupeKey,
+  });
+  const jobUpdate = await client.affiliateSourceMappingJobs.updateMany({
+    where: {
+      id: plan.job.id,
+      intakeId: plan.intake.id,
+      status: 'QUEUED',
+      sourceId: plan.job.sourceId,
+      mappingId: plan.job.mappingId,
+      legacyIdentityMigrationEligible: plan.job.legacyIdentityMigrationEligible,
+      supplySourceId: plan.job.supplySourceId,
+      claimedAt: null,
+      workerId: null,
+    },
+    data: {
+      supplySourceId: root.id,
+      sourceId: plan.source.id,
+      mappingId: plan.mapping?.id ?? null,
+      legacyIdentityMigrationEligible: false,
+      resultSummary: asPrismaJson(nextSummary),
+    },
+  });
+  if (jobUpdate.count !== 1) throw new AffiliateLegacyRepairAdmissionError('MAPPING_JOB_CAS_FAILED', `Mapping job ${plan.job.id} could not be linked atomically.`);
+  for (const artifact of plan.artifacts) {
+    const update = await client.affiliateSourceIntakeArtifacts.updateMany({
+      where: {
+        id: artifact.id,
+        intakeId: plan.intake.id,
+        runId: plan.run.id,
+        fileId: artifact.fileId,
+        supplySourceId: artifact.supplySourceId,
+      },
+      data: { isPinned: true, retainUntil: null, supplySourceId: root.id },
+    });
+    if (update.count !== 1) throw new AffiliateLegacyRepairAdmissionError('ARTIFACT_CAS_FAILED', `Artifact ${artifact.id} could not be pinned.`);
+  }
+  const subject = {
+    type: 'MAPPING_PRODUCER' as const,
+    supplySourceId: root.id,
+    mappingJobId: plan.job.id,
+    pass: 1,
+    repairContext: plan.repairContext,
+  };
+  await client.affiliateAgentGatewayJobs.upsert({
+    where: { dedupeKey: plan.gatewayDedupeKey },
+    create: {
+      id: createId(),
+      dedupeKey: plan.gatewayDedupeKey,
+      queue: 'AFFILIATE_MAPPING',
+      lane: 'MAPPING_PRODUCTION',
+      role: 'MAPPING_PRODUCER',
+      subjectType: 'MAPPING_PRODUCER',
+      subjectId: plan.job.id,
+      subjectJson: asPrismaJson(subject),
+      evidenceManifestJson: asPrismaJson(plan.manifest),
+      supplySourceId: root.id,
+      expectedLifecycleGeneration: root.lifecycleGeneration,
+      status: 'QUEUED',
+      priority: 0,
+      nextAttemptAt: new Date(),
+      claimGeneration: 0,
+      activeClaimId: null,
+      parentClaimId: null,
+    },
+    update: {},
+  });
+};
+const createReplayReport = (
+  expectedReportHash: string,
+  evidence: readonly JsonRecord[],
+): AffiliateLegacyRepairAdmissionApplyReport => {
+  const stored = recordValue(evidence[0]?.reportSnapshot);
+  if (
+    stored.reportHash !== expectedReportHash
+    || !Array.isArray(stored.rows)
+    || !Array.isArray(stored.proposedWrites)
+  ) {
+    throw new AffiliateLegacyRepairAdmissionError(
+      'ADMISSION_REPORT_DRIFT',
+      'Persisted admission report evidence is incomplete and cannot be replayed safely.',
+    );
+  }
+  const storedReport = stored as unknown as AffiliateLegacyRepairAdmissionReport;
+  const selectedJobIds = stringArrayValue(storedReport.selectedJobIds) ?? [];
+  return {
+    ...storedReport,
+    mode: 'APPLY',
+    reviewedReportHash: expectedReportHash,
+    writeCount: 0,
+    appliedJobIds: selectedJobIds,
+    replayed: true,
+  };
+};
+
+const withSerializableTransaction = async <T>(
+  prisma: PrismaClient,
+  callback: (transaction: Prisma.TransactionClient) => Promise<T>,
+): Promise<T> => prisma.$transaction(callback, {
+  isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+  maxWait: 10_000,
+  timeout: 120_000,
+});
+
+export const previewAffiliateLegacyRepairAdmission = async (
+  input: PreviewAffiliateLegacyRepairAdmissionInput,
+): Promise<AffiliateLegacyRepairAdmissionPreview> => {
+  const bundle = parseBundle(input.bundle);
+  const limit = validateLimit(input.limit);
+  const jobIds = validateJobIds(input.jobIds);
+  const { report } = await buildReport(input.prisma, bundle, limit, jobIds, 'PREVIEW');
+  return report as AffiliateLegacyRepairAdmissionPreview;
+};
+
+export const applyAffiliateLegacyRepairAdmission = async (
+  input: ApplyAffiliateLegacyRepairAdmissionInput,
+): Promise<AffiliateLegacyRepairAdmissionApplyReport> => {
+  const bundle = parseBundle(input.bundle);
+  const limit = validateLimit(input.limit);
+  const jobIds = validateJobIds(input.jobIds);
+  const operatorId = stringValue(input.operatorId);
+  if (!operatorId) throw new AffiliateLegacyRepairAdmissionError('OPERATOR_REQUIRED', 'operatorId is required for admission apply.');
+  const expectedReportHash = normalizeHash(input.expectedReportHash);
+  if (!expectedReportHash) throw new AffiliateLegacyRepairAdmissionError('REPORT_HASH_REQUIRED', 'expectedReportHash must be a SHA-256 hash.');
+  return withSerializableTransaction(input.prisma, async (transaction) => {
+    await assertActiveContract(transaction, bundle);
+    const current = await buildReport(transaction, bundle, limit, jobIds, 'APPLY');
+    if (
+      current.snapshot.gatewayClaims.some((claim) => normalizedUpper(claim.status) === 'ACTIVE')
+      || current.snapshot.gatewayJobs.some((gatewayJob) => gatewayJob.activeClaimId !== null)
+    ) {
+      throw new AffiliateLegacyRepairAdmissionError('CLAIM_DRIFT', 'An active gateway claim exists; legacy repair admission is paused.');
+    }
+    if (current.report.reportHash !== expectedReportHash) {
+      const admittedJobs = current.snapshot.jobs.filter((job) => (
+        hasSportRequeueMarker(job) && matchingAdmissionEvidence(job.resultSummary, expectedReportHash)
+      ));
+      const evidence = admittedJobs
+        .map((job) => admissionEvidenceFor(job.resultSummary, expectedReportHash))
+        .filter((entry): entry is JsonRecord => Boolean(entry));
+      const firstEvidence = evidence[0] ?? null;
+      const selectedJobIds = firstEvidence ? stringArrayValue(firstEvidence.selectedJobIds) : null;
+      const requestedJobIds = firstEvidence
+        ? (firstEvidence.requestedJobIds === null ? null : stringArrayValue(firstEvidence.requestedJobIds))
+        : null;
+      const selectionLimit = firstEvidence?.selectionLimit;
+      const evidenceByJobId = new Map<string, JsonRecord>();
+      for (const entry of evidence) {
+        const row = recordValue(entry.selectedRow);
+        if (typeof row.jobId === 'string') evidenceByJobId.set(row.jobId, entry);
+      }
+      const setsEqual = (left: readonly string[], right: readonly string[]): boolean => (
+        left.length === right.length && left.every((value, index) => value === right[index])
+      );
+      const storedSnapshot = recordValue(firstEvidence?.reportSnapshot);
+      const storedSelectedJobIds = stringArrayValue(storedSnapshot.selectedJobIds);
+      const storedProposedJobIds = stringArrayValue(storedSnapshot.proposedJobIds);
+      const reportSnapshotValid = Boolean(
+        firstEvidence
+        && storedSnapshot.reportHash === expectedReportHash
+        && storedSelectedJobIds
+        && storedProposedJobIds
+        && setsEqual(storedSelectedJobIds, selectedJobIds ?? [])
+        && setsEqual(storedProposedJobIds, selectedJobIds ?? [])
+        && Array.isArray(storedSnapshot.rows)
+        && Array.isArray(storedSnapshot.proposedWrites)
+        && reportHashFor(storedSnapshot as unknown as AffiliateLegacyRepairAdmissionReport) === expectedReportHash
+      );
+      const admittedJobIds = admittedJobs.map((job) => job.id).sort();
+      const selectedIdsMatch = Boolean(selectedJobIds && setsEqual(selectedJobIds, admittedJobIds));
+      const evidenceConsistent = Boolean(
+        firstEvidence
+        && reportSnapshotValid
+        && selectedJobIds
+        && evidence.length === selectedJobIds.length
+        && evidence.every((entry) => (
+          entry.operatorId === stringValue(firstEvidence.operatorId)
+          && sameAdmissionValue(entry.selectedJobIds, selectedJobIds)
+          && sameAdmissionValue(entry.requestedJobIds, requestedJobIds)
+          && entry.selectionLimit === selectionLimit
+        ))
+        && stringValue(firstEvidence.operatorId) === operatorId
+        && sameAdmissionValue(current.report.requestedJobIds, requestedJobIds)
+        && current.report.selectionLimit === selectionLimit
+      );
+      const gatewayEvidenceMatches = Boolean(selectedJobIds && selectedJobIds.every((jobId) => {
+        const entry = evidenceByJobId.get(jobId);
+        const gatewayCandidates = gatewayRepairJobsFor(current.snapshot, jobId);
+        const gatewayJob = gatewayCandidates.length === 1 ? gatewayCandidates[0] : null;
+        const rootLifecycleGeneration = typeof entry?.rootLifecycleGeneration === 'number'
+          ? entry.rootLifecycleGeneration
+          : null;
+        if (!entry || !gatewayJob || gatewayJob.activeClaimId !== null
+          || current.snapshot.gatewayClaims.some((claim) => claim.jobId === gatewayJob.id && normalizedUpper(claim.status) === 'ACTIVE')) {
+          return false;
+        }
+        return gatewayIdentityMatches(
+          gatewayJob,
+          jobId,
+          stringValue(entry.rootId),
+          rootLifecycleGeneration,
+          entry.repairContext,
+          entry.manifest,
+          stringValue(entry.gatewayDedupeKey),
+        );
+      }));
+      const canReplay = selectedIdsMatch && evidenceConsistent && gatewayEvidenceMatches;
+      if (canReplay) return createReplayReport(expectedReportHash, evidence);
+      throw new AffiliateLegacyRepairAdmissionError(
+        'ADMISSION_REPORT_DRIFT',
+        'The reviewed legacy repair admission report no longer matches current identity, capture, or contract state.',
+        { expectedReportHash, observedReportHash: current.report.reportHash },
+      );
+    }
+    if (current.plans.length === 0) {
+      return {
+        ...current.report,
+        mode: 'APPLY',
+        reviewedReportHash: expectedReportHash,
+        writeCount: 0,
+        appliedJobIds: [],
+        replayed: false,
+      };
+    }
+    for (const plan of current.plans) {
+      await applyPlan(
+        transaction,
+        plan,
+        bundle,
+        current.report,
+        expectedReportHash,
+        operatorId,
+        current.report.selectedJobIds,
+        jobIds,
+        limit,
+      );
+    }
+    return {
+      ...current.report,
+      mode: 'APPLY',
+      writeCount: current.plans.length,
+      reviewedReportHash: expectedReportHash,
+      appliedJobIds: current.plans.map((plan) => plan.job.id),
+      replayed: false,
+      rows: current.report.rows.map((row) => current.plans.some((plan) => plan.job.id === row.jobId)
+        ? { ...row, outcome: 'APPLIED' as const }
+        : row),
+    };
+  });
+};
+
+export const calculateAffiliateLegacyRepairAdmissionReportHash = (
+  report: Pick<AffiliateLegacyRepairAdmissionReport, 'contractVersion' | 'contractHash' | 'counts' | 'selectedJobIds' | 'rows' | 'proposedWrites'>
+    & Partial<Pick<AffiliateLegacyRepairAdmissionReport, 'requestedJobIds' | 'selectionLimit'>>,
+): string => reportHashFor(report);

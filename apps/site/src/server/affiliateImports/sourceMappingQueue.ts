@@ -4,6 +4,7 @@ import type {
 } from './affiliateSupplyPersistence';
 import { createId } from '@/lib/id';
 import { prisma } from '@/lib/prisma';
+import { Prisma } from '@/generated/prisma/client';
 import {
   affiliateSupplyDatabase,
   ensureAffiliateSupplySource,
@@ -536,6 +537,13 @@ const mappingClaimResult = (input: {
   repairContext: latestMappingRepairContext(input.job.resultSummary),
 });
 
+const legacyMappingOwnershipFilter: Prisma.AffiliateSourceMappingJobsWhereInput = {
+  OR: [
+    { resultSummary: { equals: Prisma.DbNull } },
+    { resultSummary: { path: ['legacyRepairAdmissionHistory', '0'], equals: Prisma.AnyNull } },
+  ],
+};
+
 const findActiveMappingJob = async (
   jobs: any,
   intakeId: string | undefined,
@@ -543,6 +551,7 @@ const findActiveMappingJob = async (
   now: Date,
 ) => jobs.findFirst({
   where: {
+    AND: [legacyMappingOwnershipFilter],
     ...(intakeId ? { intakeId } : {}),
     status: 'CLAIMED',
     workerId,
@@ -569,6 +578,7 @@ const resumeMappingClaim = async (input: {
     const transactionMappingDb = mappingDb(transactionClient);
     const renewed = await transactionMappingDb.jobs.updateMany({
       where: {
+        AND: [legacyMappingOwnershipFilter],
         id: activeJob.id,
         status: 'CLAIMED',
         workerId,
@@ -631,6 +641,8 @@ const createOrRecoverMappingJob = async (
       orderBy: { createdAt: 'asc' },
     });
     if (!existingActiveJob) return RETRY_MAPPING_JOB_SELECTION;
+    const admissionHistory = recordValue(existingActiveJob.resultSummary).legacyRepairAdmissionHistory;
+    if (Array.isArray(admissionHistory) && admissionHistory.length > 0) return null;
     if (existingActiveJob.status === 'REVIEW_REQUIRED' || mappingClaimLeaseIsValid(existingActiveJob, now)) {
       return null;
     }
@@ -647,6 +659,7 @@ const findNextMappingJob = async (input: {
   const { jobs, intakes, intakeId, now } = input;
   const job = await jobs.findFirst({
     where: {
+      AND: [legacyMappingOwnershipFilter],
       ...(intakeId ? { intakeId } : {}),
       OR: [
         { status: 'QUEUED' },
@@ -673,6 +686,7 @@ const claimMappingJob = async (input: {
   const transactionMappingDb = mappingDb(transactionClient);
   const claimed = await transactionMappingDb.jobs.updateMany({
     where: {
+      AND: [legacyMappingOwnershipFilter],
       id: input.job.id,
       OR: [
         { status: 'QUEUED' },

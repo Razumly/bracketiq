@@ -520,6 +520,19 @@ const normalizeAffiliateLifecycleJson = (value: unknown): unknown => {
 const stringValue = (value: unknown): string | null => (
   typeof value === 'string' && value.trim() ? value.trim() : null
 );
+const legacySportRepairHoldFor = (
+  metadata: unknown,
+): Record<string, unknown> | null => {
+  const review = recordValue(recordValue(metadata).automationReviewRequired);
+  return review.hold === true && stringValue(review.reason) === 'LEGACY_SPORT_REPAIR'
+    ? review
+    : null;
+};
+
+const preserveLegacySportRepairHold = (
+  metadata: unknown,
+  requestedReview: Record<string, unknown> | null,
+): Record<string, unknown> | null => legacySportRepairHoldFor(metadata) ?? requestedReview;
 
 const stringArray = (value: unknown): string[] => (
   Array.isArray(value)
@@ -1880,15 +1893,24 @@ const buildAffiliateSnapshotSourceAutomation = (
   | 'operatorDomain'
 > => {
   const { root, source } = input;
-  const automationReview = recordValue(sourceMetadata.automationReviewRequired);
+  const sourceReview = recordValue(sourceMetadata.automationReviewRequired);
+  const rootReview = recordValue(recordValue(root.metadata).automationReviewRequired);
+  const legacyHold = legacySportRepairHoldFor(root.metadata)
+    ?? legacySportRepairHoldFor(sourceMetadata);
+  const review = legacyHold ?? sourceReview;
+  const isAutomationOnHold = Boolean(legacyHold)
+    || Boolean(sourceReview.hold)
+    || Boolean(rootReview.hold);
   return {
     autoScrapeEnabled: source?.autoScrapeEnabled === true,
     isAutomationEnabled: root.isAutomationEnabled,
     activeSupplyContractVersion: root.activeSupplyContractVersion,
     activeSupplyContractHash: root.activeSupplyContractHash,
     activeMappingId: source?.activeMappingId ?? mapping?.id ?? null,
-    isAutomationOnHold: Boolean(automationReview.hold),
-    automationHoldReason: stringValue(automationReview.reason),
+    isAutomationOnHold,
+    automationHoldReason: legacyHold?.reason
+      ? stringValue(legacyHold.reason)
+      : stringValue(review.reason) ?? stringValue(rootReview.reason),
     lifecycleGeneration: root.lifecycleGeneration,
     operatorDomain: root.operatorDomain,
   };
@@ -3901,7 +3923,7 @@ const persistAffiliateApproval = async (
       metadata: prismaJsonValue({
         ...recordValue(approval.source.metadata),
         ...(approval.baseline ? { [AFFILIATE_AUTOMATION_BASELINE_METADATA_KEY]: approval.baseline } : {}),
-        automationReviewRequired: null,
+        automationReviewRequired: preserveLegacySportRepairHold(approval.source.metadata, null),
       }),
     },
   });
@@ -4455,7 +4477,7 @@ const affiliateRefreshSourceData = (
     autoScrapeEnabled: shouldHoldAutomation ? false : source?.autoScrapeEnabled,
     metadata: prismaJsonValue({
       ...recordValue(source?.metadata),
-      automationReviewRequired: reviewValue,
+      automationReviewRequired: preserveLegacySportRepairHold(source?.metadata, reviewValue),
     }),
   };
 };
@@ -4705,7 +4727,10 @@ const persistAffiliateReviewerDispositionSource = async (
         : false,
       metadata: prismaJsonValue({
         ...sourceMetadata,
-        automationReviewRequired: disposition.automationReviewRequired,
+        automationReviewRequired: preserveLegacySportRepairHold(
+          sourceMetadata,
+          disposition.automationReviewRequired,
+        ),
         exceptionHistory: [
           ...affiliateReviewerExceptionHistory(sourceMetadata),
           exceptionEntry,

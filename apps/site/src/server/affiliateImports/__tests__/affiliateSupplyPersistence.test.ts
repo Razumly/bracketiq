@@ -1584,7 +1584,14 @@ describe('affiliate supply persistence seams', () => {
       autoScrapeEnabled: false,
       status: 'ACTIVE',
       targetKind: 'EVENT',
-      metadata: {},
+      metadata: {
+        automationReviewRequired: {
+          hold: true,
+          reason: 'LEGACY_SPORT_REPAIR',
+          reportHash: 'legacy-report-hash',
+          evidenceRefs: ['intake-artifact:1'],
+        },
+      },
     };
     const root = {
       id: 'supply-approval',
@@ -1599,6 +1606,14 @@ describe('affiliate supply persistence seams', () => {
       lifecycleGeneration: 0,
       derivedStage: 'MAPPED',
       isExcluded: false,
+      metadata: {
+        automationReviewRequired: {
+          hold: true,
+          reason: 'LEGACY_SPORT_REPAIR',
+          reportHash: 'legacy-report-hash',
+          evidenceRefs: ['intake-artifact:1'],
+        },
+      },
     };
     let approval: Record<string, unknown> | null = null;
     let transition: Record<string, unknown> | null = null;
@@ -1677,6 +1692,11 @@ describe('affiliate supply persistence seams', () => {
     expect(result.assessment.targetContribution).toBe(0);
     expect(result.assessment.isAutomationEnabled).toBe(false);
     expect(source.autoScrapeEnabled).toBe(false);
+    expect((source.metadata as Record<string, unknown>).automationReviewRequired).toEqual(expect.objectContaining({
+      hold: true,
+      reason: 'LEGACY_SPORT_REPAIR',
+    }));
+    expect(result.assessment.outcome).toBe('AUTOMATION_HOLD');
     expect(mapping.isActive).toBe(false);
     expect(database.targets.upsert).not.toHaveBeenCalled();
     expect(approval).toEqual(expect.objectContaining({
@@ -5549,8 +5569,12 @@ describe('affiliate supply persistence seams', () => {
           '/tmp': 'rw,noexec,nosuid,nodev,size=256m,uid=0,gid=0,mode=0755',
           '/dev/shm': 'rw,noexec,nosuid,nodev,size=64m,uid=0,gid=0,mode=0755',
         },
-        environment: ['AFFILIATE_AGENT_MODEL_CREDENTIAL=redacted'],
-        networks: ['affiliate_gateway_internal'],
+        environment: [
+          'AFFILIATE_AGENT_CODEX_AUTH_SEED=/run/secrets/codex-auth.json',
+          'AFFILIATE_AGENT_CODEX_MODEL=gpt-5.6-luna',
+        ],
+        volumes: ['reviewed-auth:/run/secrets/codex-auth.json:ro'],
+        networks: ['affiliate_gateway_internal', 'affiliate_gateway_egress'],
         isNetworkInternal: true,
         capDrop: ['ALL'],
         capAdd: ['CHOWN', 'DAC_OVERRIDE', 'FOWNER', 'KILL', 'SETGID', 'SETUID'],

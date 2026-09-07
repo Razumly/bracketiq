@@ -48,6 +48,7 @@ import type {
   AffiliateAgentTerminalEffectAdapterInput,
   AffiliateAgentTerminalEffectHandler,
 } from "./agentGatewayAdapters";
+import { verifyAffiliateAgentLegacySportRepair } from "./agentGatewayAdapters";
 import {
   AFFILIATE_AGENT_PROMPT_TEMPLATES,
   AFFILIATE_AGENT_ROLE_CONTRACTS,
@@ -1599,6 +1600,8 @@ const isProducerClaimValid = (
     producerEnvelope !== null &&
       hashAffiliateAgentValue(producerEnvelope) === producerClaim?.claimEnvelopeHash,
     producerSubject?.supplySourceId === subject.supplySourceId,
+    hashAffiliateAgentValue(producerSubject?.repairContext ?? null)
+      === hashAffiliateAgentValue(subject.repairContext ?? null),
     job.parentClaimId === subject.producerClaimId,
     producerClaim?.workerId === subject.producerWorkerId,
     producerClaim?.invocationId === subject.producerInvocationId,
@@ -7748,6 +7751,28 @@ const validateTerminalResultScope = (
   validateReviewerCommittedPackage(authorized, result);
   validateReviewerSupplySource(authorized, result);
   validateNestedTerminalEvidence(result);
+  const subject = authorized.envelope.subject;
+  if (
+    result.role === "MAPPING_PRODUCER"
+    && result.disposition === "CONTRACT_GAP"
+    && (result.payload.sportEvidence || result.reasonCodes.some((code) => code.startsWith("SPORT_")))
+    && (subject.type !== "MAPPING_PRODUCER" || !subject.repairContext)
+  ) {
+    throw gatewayError(
+      "COMMAND_NOT_PERMITTED",
+      "Sport repair outcomes require a claim-bound legacy sport repair context.",
+    );
+  }
+  if (
+    subject.type === "SUPPLY_REVIEWER"
+    && subject.repairContext?.kind === "LEGACY_SPORT_REPAIR"
+    && !["APPROVED", "PRODUCER_REPAIR_REQUIRED", "HUMAN_REVIEW_REQUIRED"].includes(result.disposition)
+  ) {
+    throw gatewayError(
+      "COMMAND_NOT_PERMITTED",
+      "Legacy sport repair permits package review only, not activation or publication.",
+    );
+  }
 };
 const AFFILIATE_AGENT_TERMINAL_EFFECT_COMMAND =
   "SUPPLY_REVIEWER_TERMINAL_EFFECT";
@@ -9174,6 +9199,32 @@ const resolveRecoveredTerminalResultReplay = async (
   );
 };
 
+const verifyLegacySportRepairTerminal = async (
+  dependencies: AffiliateAgentGatewayDependencies,
+  database: Pick<PrismaClient, "sports">,
+  authorized: AuthorizedClaim,
+  result: AffiliateAgentTerminalResultEnvelope,
+): Promise<void> => {
+  if (
+    authorized.envelope.subject.type !== "MAPPING_PRODUCER"
+    || !authorized.envelope.subject.repairContext
+    || result.role !== "MAPPING_PRODUCER"
+    || result.disposition !== "CONTRACT_GAP"
+  ) return;
+  if (!result.payload.sportEvidence && !result.reasonCodes.some((code) => code.startsWith("SPORT_"))) return;
+  if (!result.payload.sportEvidence) {
+    throw gatewayError("EVIDENCE_REFERENCE_NOT_PERMITTED", "Sport review requires claim-owned sport evidence.");
+  }
+  await verifyAffiliateAgentLegacySportRepair({
+    prisma: database,
+    artifacts: dependencies.artifacts,
+    claim: authorized.envelope,
+    sportEvidence: result.payload.sportEvidence,
+    resultKind: "HUMAN_REVIEW_REQUIRED",
+    reasonCodes: result.reasonCodes,
+  });
+};
+
 const prepareTerminalResult = async (
   dependencies: AffiliateAgentGatewayDependencies,
   input: Extract<AffiliateAgentClaimOperation, { kind: "SUBMIT_RESULT" }>,
@@ -9231,7 +9282,7 @@ const prepareTerminalResult = async (
     postEffectCompletionReceiptId === undefined
       ? undefined
       : { postEffectCompletionReceiptId };
-  await authorizeClaimOperationInSerializableTransaction(
+  const initialAuthorization = await authorizeClaimOperationInSerializableTransaction(
     dependencies,
     input.authorization,
     dependencies.clock.now(),
@@ -9248,6 +9299,9 @@ const prepareTerminalResult = async (
   );
   if (recoveredReplay) {
     return { kind: "REPLAY", result: recoveredReplay };
+  }
+  if (parsedResult) {
+    await verifyLegacySportRepairTerminal(dependencies, dependencies.prisma, initialAuthorization, parsedResult);
   }
   let reviewerTerminalEffectReceiptId: string | undefined;
   if (existing === null && parsedResult?.role === "SUPPLY_REVIEWER") {
@@ -11772,6 +11826,10 @@ const upsertMappingReviewerJob = async (
         targetId: target.targetId,
         targetType: target.targetType,
         reviewPass,
+        ...(authorized.envelope.subject.type === "MAPPING_PRODUCER"
+          && authorized.envelope.subject.repairContext
+          ? { repairContext: authorized.envelope.subject.repairContext }
+          : {}),
       }),
       evidenceManifestJson: asPrismaJson(evidenceManifest),
       supplySourceId: lineage.supplySourceId,
@@ -12288,6 +12346,7 @@ const executePreparedTerminalResultTransaction = (
         );
       }
       validateTerminalResultScope(authorized, parsedResult.data);
+      await verifyLegacySportRepairTerminal(dependencies, transaction, authorized, parsedResult.data);
       await assertReviewerTerminalEffectCompleted(
         transaction,
         authorized,

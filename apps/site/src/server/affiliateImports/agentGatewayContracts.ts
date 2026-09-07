@@ -1,6 +1,12 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-
+import {
+  affiliateSportsCatalogSnapshotSchema,
+} from "./affiliateSportsCatalog";
+import {
+  affiliateSportDeterminationsSchema,
+  type AffiliateSportDetermination,
+} from "./affiliateSportDetermination";
 type CanonicalAffiliateAgentPrimitive = null | string | boolean | number;
 
 const isCanonicalAffiliateAgentPrimitive = (
@@ -720,7 +726,7 @@ const AFFILIATE_AGENT_TERMINAL_RESULT_PAYLOAD_SHAPES: Readonly<
     '- PACKAGE_COMMITTED: {"packageHash":"<sha256>","commitReceiptId":"<identifier>"}',
     '- BOUNDED_REPAIR_SUBMITTED: {"repairPass":<integer 1-3>,"packageHash":"<sha256>","commitReceiptId":"<identifier>"}',
     '- SOURCE_INCOMPATIBLE: {"incompatibilityCode":"<SOURCE_BLOCKED|SOURCE_POLICY_PROHIBITS_CAPTURE|UNSUPPORTED_LAYOUT>"}',
-    '- CONTRACT_GAP: {"contractArea":"<COVERAGE_APPLICABILITY|FRESHNESS|LIFECYCLE_EVIDENCE|MAPPING_EVIDENCE|SEARCH_STRATEGIES|SUPPLY_TARGETS_AND_MARKET_TIERS>","requestedChange":"<non-empty string>"}',
+    '- CONTRACT_GAP: {"contractArea":"<COVERAGE_APPLICABILITY|FRESHNESS|LIFECYCLE_EVIDENCE|MAPPING_EVIDENCE|SEARCH_STRATEGIES|SUPPLY_TARGETS_AND_MARKET_TIERS>","requestedChange":"<non-empty string>","sportEvidence":<optional legacy sport evidence>}',
   ],
   SUPPLY_REVIEWER: [
     '- APPROVED: {"committedPackageHash":"<sha256>"}',
@@ -773,6 +779,10 @@ const ROLE_PROMPT_INSTRUCTIONS: Readonly<
     "Build only the closed declarative package shape defined by the mapping contract.",
     "Validate the package before you commit it.",
     "Commit only the validated package receipt.",
+    "For a legacy sport repair, inspect the supplied catalog and original manifest-owned artifacts; never guess a sport surface or forge a citation.",
+    "Use the explicit CONSTANT sportName field only when sportEvidence proves the exact canonical sport union.",
+    "Include every sport citation's manifest evidence reference in package evidenceRefs.",
+    "Use a sport-coded contract gap when a sport remains unresolved, unsupported, or needs an authenticated user decision.",
     "Return one evidence-backed terminal disposition.",
     "Use only the listed terminal dispositions.",
     "Never submit executable code.",
@@ -785,6 +795,8 @@ const ROLE_PROMPT_INSTRUCTIONS: Readonly<
     "Review the package.",
     "Do not edit the package.",
     "Do not reuse producer context.",
+    "For a legacy sport repair, inspect the supplied catalog, sportEvidence, and original manifest-owned artifacts; never guess a sport surface.",
+    "Do not approve or activate a package whose sport evidence is unresolved, unsupported, or based on an unauthenticated user decision.",
     "Return one evidence-backed terminal disposition.",
     "Use only the listed terminal dispositions.",
     "Use human review or producer repair when the evidence does not support approval or activation.",
@@ -1381,11 +1393,9 @@ export const affiliateAgentContractBundleSchema = z
       }
     });
   });
-
 export type AffiliateAgentContractBundle = z.infer<
   typeof affiliateAgentContractBundleSchema
 >;
-
 const affiliateAgentEvidenceManifestEntrySchema = z
   .object({
     evidenceRef: identifierSchema,
@@ -1397,6 +1407,7 @@ const affiliateAgentEvidenceManifestEntrySchema = z
       "HUMAN_DECISION",
       "PAGE_HTML",
       "PAGE_MARKDOWN",
+      "PAGE_SCREENSHOT",
       "REVIEWER_EVIDENCE",
     ]),
     artifactId: identifierSchema,
@@ -1447,6 +1458,33 @@ export type AffiliateAgentEvidenceManifest = z.infer<
   typeof affiliateAgentEvidenceManifestSchema
 >;
 
+export const affiliateAgentLegacySportRepairContextSchema = z
+  .object({
+    kind: z.literal("LEGACY_SPORT_REPAIR"),
+    intakeId: identifierSchema,
+    evidenceRunId: identifierSchema,
+    sportsCatalog: affiliateSportsCatalogSnapshotSchema,
+  })
+  .strict();
+
+export type AffiliateAgentLegacySportRepairContext = z.infer<
+  typeof affiliateAgentLegacySportRepairContextSchema
+>;
+
+export const affiliateAgentSportEvidenceSchema = z
+  .object({
+    evidenceRunId: identifierSchema,
+    sportsCatalogSha256: sha256Schema,
+    sportDeterminations: affiliateSportDeterminationsSchema,
+  })
+  .strict();
+
+export type AffiliateAgentSportEvidence = Readonly<{
+  evidenceRunId: string;
+  sportsCatalogSha256: string;
+  sportDeterminations: AffiliateSportDetermination[];
+}>;
+
 const coveragePlannerSubjectSchema = z
   .object({
     type: z.literal("COVERAGE_PLANNER"),
@@ -1461,6 +1499,7 @@ const mappingProducerSubjectSchema = z
     supplySourceId: identifierSchema,
     mappingJobId: identifierSchema,
     pass: z.number().int().min(1).max(3),
+    repairContext: affiliateAgentLegacySportRepairContextSchema.optional(),
   })
   .strict();
 
@@ -1476,6 +1515,7 @@ const supplyReviewerSubjectSchema = z
     targetId: identifierSchema,
     targetType: z.enum(["EVENT", "FACILITY", "ORGANIZATION"]),
     reviewPass: z.number().int().min(1).max(3),
+    repairContext: affiliateAgentLegacySportRepairContextSchema.optional(),
   })
   .strict();
 
@@ -1680,7 +1720,61 @@ export type AffiliateAgentClaimEnvelope = z.infer<
   typeof affiliateAgentClaimEnvelopeSchema
 >;
 
-const affiliateAgentDeclarativePackageSchema = z
+const affiliateAgentDeclarativePackageFieldNames = [
+  "address",
+  "city",
+  "dateDisplayMode",
+  "dateDisplayText",
+  "divisions",
+  "officialActionUrl",
+  "sourceUrl",
+  "sportName",
+  "startsAt",
+  "tags",
+  "title",
+  "venueName",
+] as const;
+
+const affiliateAgentDeclarativePackageSelectorFieldSchema = z
+  .object({
+    field: z.enum(affiliateAgentDeclarativePackageFieldNames),
+    selector: z.string().trim().min(1).max(500),
+    mode: z.enum(["ATTRIBUTE", "TEXT"]),
+    attribute: z.string().trim().min(1).max(100).nullable(),
+    transform: z.enum(["ABSOLUTE_URL", "NONE", "TRIM"]),
+  })
+  .strict()
+  .superRefine((field, context) => {
+    if (field.mode === "ATTRIBUTE" && field.attribute === null) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Attribute mode requires one attribute name.",
+        path: ["attribute"],
+      });
+    }
+    if (field.mode === "TEXT" && field.attribute !== null) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Text mode cannot name an attribute.",
+        path: ["attribute"],
+      });
+    }
+  });
+
+const affiliateAgentDeclarativePackageConstantSportFieldSchema = z
+  .object({
+    field: z.literal("sportName"),
+    mode: z.literal("CONSTANT"),
+    value: z.string().trim().min(1).max(160),
+  })
+  .strict();
+
+const affiliateAgentDeclarativePackageFieldSchema = z.union([
+  affiliateAgentDeclarativePackageSelectorFieldSchema,
+  affiliateAgentDeclarativePackageConstantSportFieldSchema,
+]);
+
+export const affiliateAgentDeclarativePackageSchema = z
   .object({
     schemaVersion: z.literal(1),
     supplySourceId: identifierSchema,
@@ -1688,51 +1782,13 @@ const affiliateAgentDeclarativePackageSchema = z
     listUrlRef: identifierSchema,
     itemSelector: z.string().trim().min(1).max(500),
     fields: z
-      .array(
-        z
-          .object({
-            field: z.enum([
-              "address",
-              "city",
-              "dateDisplayMode",
-              "dateDisplayText",
-              "divisions",
-              "officialActionUrl",
-              "sourceUrl",
-              "sportName",
-              "startsAt",
-              "tags",
-              "title",
-              "venueName",
-            ]),
-            selector: z.string().trim().min(1).max(500),
-            mode: z.enum(["ATTRIBUTE", "TEXT"]),
-            attribute: z.string().trim().min(1).max(100).nullable(),
-            transform: z.enum(["ABSOLUTE_URL", "NONE", "TRIM"]),
-          })
-          .strict()
-          .superRefine((field, context) => {
-            if (field.mode === "ATTRIBUTE" && field.attribute === null) {
-              context.addIssue({
-                code: z.ZodIssueCode.custom,
-                message: "Attribute mode requires one attribute name.",
-                path: ["attribute"],
-              });
-            }
-            if (field.mode === "TEXT" && field.attribute !== null) {
-              context.addIssue({
-                code: z.ZodIssueCode.custom,
-                message: "Text mode cannot name an attribute.",
-                path: ["attribute"],
-              });
-            }
-          }),
-      )
+      .array(affiliateAgentDeclarativePackageFieldSchema)
       .max(MAX_DECLARATIVE_PACKAGE_FIELDS)
       .superRefine((fields, context) => {
         assertSortedUniqueObjects(fields, context, (field) => field.field);
       }),
     evidenceRefs: sortedUniqueStringsSchema(identifierSchema),
+    sportEvidence: affiliateAgentSportEvidenceSchema.optional(),
   })
   .strict()
   .superRefine((candidatePackage, context) => {
@@ -1744,6 +1800,10 @@ const affiliateAgentDeclarativePackageSchema = z
       "Declarative package",
     );
   });
+
+export type AffiliateAgentDeclarativePackage = z.infer<
+  typeof affiliateAgentDeclarativePackageSchema
+>;
 
 export const affiliateAgentCommandSchema = z.discriminatedUnion("type", [
   z
@@ -1829,6 +1889,25 @@ export type AffiliateAgentDeclarativePackageCommitOutput = z.infer<
 
 export type AffiliateAgentCommand = z.infer<typeof affiliateAgentCommandSchema>;
 
+const terminalReasonCodeValues = [
+  "CONTRACT_REQUIREMENT_MISSING",
+  "EVIDENCE_VERIFIED",
+  "NO_QUALIFIED_ACTION",
+  "POLICY_CONFLICT",
+  "SCHEMA_VALIDATED",
+  "SOURCE_UNSUPPORTED",
+  "TARGET_INVALID",
+] as const;
+
+const terminalReasonCodeSchema = z.enum(terminalReasonCodeValues);
+
+const mappingProducerReasonCodeSchema = z.enum([
+  ...terminalReasonCodeValues,
+  "SPORT_BLACKLISTED",
+  "SPORT_NOT_IN_CATALOG",
+  "SPORT_VARIANT_UNRESOLVED",
+] as const);
+
 const terminalResultBase = {
   schemaVersion: z.literal(1),
   jobId: identifierSchema,
@@ -1845,17 +1924,7 @@ const terminalResultBase = {
   promptTemplateHash: sha256Schema,
   workerId: identifierSchema,
   invocationId: identifierSchema,
-  reasonCodes: sortedUniqueStringsSchema(
-    z.enum([
-      "CONTRACT_REQUIREMENT_MISSING",
-      "EVIDENCE_VERIFIED",
-      "NO_QUALIFIED_ACTION",
-      "POLICY_CONFLICT",
-      "SCHEMA_VALIDATED",
-      "SOURCE_UNSUPPORTED",
-      "TARGET_INVALID",
-    ]),
-  ),
+  reasonCodes: sortedUniqueStringsSchema(terminalReasonCodeSchema),
   evidenceRefs: sortedUniqueStringsSchema(identifierSchema),
   summary: z.string().trim().min(1).max(2_000),
 };
@@ -1873,19 +1942,25 @@ const contractGapPayloadSchema = z
     requestedChange: z.string().trim().min(1).max(1_000),
   })
   .strict();
+const mappingProducerContractGapPayloadSchema = contractGapPayloadSchema.extend({
+  sportEvidence: affiliateAgentSportEvidenceSchema.optional(),
+}).strict();
 
 const terminalResultVariant = <
   R extends AffiliateAgentRole,
   D extends AffiliateAgentTerminalDisposition,
   P extends z.ZodType,
+  C extends z.ZodType = typeof terminalResultBase.reasonCodes,
 >(
   role: R,
   disposition: D,
   payload: P,
+  reasonCodes?: C,
 ) =>
   z
     .object({
       ...terminalResultBase,
+      reasonCodes: reasonCodes ?? terminalResultBase.reasonCodes,
       role: z.literal(role),
       disposition: z.literal(disposition),
       payload,
@@ -1993,7 +2068,8 @@ export const affiliateAgentTerminalResultEnvelopeSchema = z.union([
   terminalResultVariant(
     "MAPPING_PRODUCER",
     "CONTRACT_GAP",
-    contractGapPayloadSchema,
+    mappingProducerContractGapPayloadSchema,
+    sortedUniqueStringsSchema(mappingProducerReasonCodeSchema),
   ),
   terminalResultVariant(
     "SUPPLY_REVIEWER",
@@ -2221,6 +2297,20 @@ export const renderAffiliateAgentPrompt = (
   );
   const promptTemplate =
     AFFILIATE_AGENT_PROMPT_TEMPLATES[authorityProjection.role];
+  const isLegacySportRepair = authorityProjection.subject.type === "MAPPING_PRODUCER"
+    ? authorityProjection.subject.repairContext?.kind === "LEGACY_SPORT_REPAIR"
+    : authorityProjection.subject.type === "SUPPLY_REVIEWER"
+      && authorityProjection.subject.repairContext?.kind === "LEGACY_SPORT_REPAIR";
+  const repairInstructions = isLegacySportRepair
+    ? [
+      "",
+      "## Legacy Sport Repair",
+      "Inspect the supplied repairContext sports catalog and original manifest-owned artifacts before making a sport claim.",
+      "Do not guess a sport surface or forge a citation. Bind sportEvidence to the exact intakeId, evidenceRunId, catalog hash, artifact bytes, and source URLs.",
+      "Use CONSTANT only on the sportName package field and only for the exact evidence-supported canonical sport union.",
+      "Leave unresolved, unsupported, or unauthenticated user-decision sport determinations in a contract gap for human review; never approve, activate, or publish them.",
+    ]
+    : [];
 
   return [
     "# Affiliate Agent Invocation",
@@ -2232,6 +2322,7 @@ export const renderAffiliateAgentPrompt = (
     ...promptTemplate.roleInstructions.map(
       (instruction, index) => `${index + 1}. ${instruction}`,
     ),
+    ...repairInstructions,
     "",
     `Send ${promptTemplate.gatewayProtocol.method} JSON requests to the URL in ${promptTemplate.gatewayProtocol.gatewayAddressEnvironment}, using the path prefix in ${promptTemplate.gatewayProtocol.gatewayPathPrefixEnvironment} and appending ${promptTemplate.gatewayProtocol.pathSuffix}.`,
     `Read each permitted artifact with a READ_ARTIFACT request before using it. Use EXECUTE_COMMAND only for a command listed in the authority projection.`,

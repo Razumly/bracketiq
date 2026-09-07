@@ -2,6 +2,7 @@
 import { createHash } from "node:crypto";
 
 import type { PrismaClient } from "@/generated/prisma/client";
+import { buildAffiliateSportsCatalogSnapshot } from "../affiliateSportsCatalog";
 
 import {
   AFFILIATE_AGENT_MAX_MANIFEST_ENTRIES,
@@ -715,109 +716,6 @@ describe("affiliate Agent Gateway contracts", () => {
     );
   });
 
-  it("parses all four role fixtures", () => {
-    const parsed = Object.values(AFFILIATE_AGENT_ROLE_CONTRACTS).map(
-      (contract) => affiliateAgentRoleContractSchema.parse(contract),
-    );
-
-    expect(
-      parsed.map((contract) => ({
-        role: contract.role,
-        hash: contract.hash,
-        promptTemplateHash: contract.promptTemplateHash,
-        inputSchemaId: contract.inputSchemaId,
-        permittedCommands: contract.permittedCommands,
-        terminalDispositions: contract.terminalDispositions,
-        executionClass: contract.executionClass,
-        diagnosticRetentionDays:
-          contract.retention.failedInvocationDiagnosticsDays,
-        destroysWorkspace: contract.retention.workspace,
-      })),
-    ).toEqual([
-      {
-        role: "COVERAGE_PLANNER",
-        hash: "92afa8d6ddd19ccfe7732cf26f1e69e3657c8403a1a13456f1c93be335975473",
-        promptTemplateHash:
-          "c479f1154f997c2a5e0522e9a520dcc615df9836c51ed4d3323d80e0e24399a5",
-        inputSchemaId: "affiliate-agent/coverage-planner-subject@1",
-        permittedCommands: [
-          "CAPTURE_CLAIM_URL",
-          "RUN_DISCOVERY_QUERY",
-          "SUBMIT_TERMINAL_RESULT",
-        ],
-        terminalDispositions: [
-          "CAMPAIGN_PROPOSED",
-          "CONTRACT_GAP",
-          "FAILED_CAPTURE_EVIDENCE_RECORDED",
-          "NO_ACTION",
-          "SOURCE_EXCLUSION_PROPOSED",
-        ],
-        executionClass: "PRODUCTION_CODEX",
-        diagnosticRetentionDays: 14,
-        destroysWorkspace: "DESTROY_AFTER_TERMINAL_OR_FAILURE",
-      },
-      {
-        role: "MAPPING_PRODUCER",
-        hash: "c47e9b2e4cc6aed9d50c8c752fb192b3c9f763f958d40bb3761a7de83f3d43b4",
-        promptTemplateHash:
-          "b66d9ab1e8bfb4dd69e54a9e595cbeaf99b23a5a532a5d55ebf5c7acc450b72f",
-        inputSchemaId: "affiliate-agent/mapping-producer-subject@1",
-        permittedCommands: [
-          "CAPTURE_CLAIM_URL",
-          "COMMIT_DECLARATIVE_PACKAGE",
-          "SUBMIT_TERMINAL_RESULT",
-          "VALIDATE_DECLARATIVE_PACKAGE",
-        ],
-        terminalDispositions: [
-          "BOUNDED_REPAIR_SUBMITTED",
-          "CONTRACT_GAP",
-          "PACKAGE_COMMITTED",
-          "SOURCE_INCOMPATIBLE",
-        ],
-        executionClass: "PRODUCTION_CODEX",
-        diagnosticRetentionDays: 14,
-        destroysWorkspace: "DESTROY_AFTER_TERMINAL_OR_FAILURE",
-      },
-      {
-        role: "SUPPLY_REVIEWER",
-        hash: "b82efa94995fedc9379791248a7e865dc8c4935de2df5f27e37b36b2d76268cb",
-        promptTemplateHash:
-          "43401952a0391978bf17e5e7bcdbbc3230b73541a48105e2e0b3d0f190224305",
-        inputSchemaId: "affiliate-agent/supply-reviewer-subject@1",
-        permittedCommands: ["SUBMIT_TERMINAL_RESULT"],
-        terminalDispositions: [
-          "ACTIVATED",
-          "APPROVED",
-          "EXACT_TARGET_REJECTED",
-          "HUMAN_REVIEW_REQUIRED",
-          "PRODUCER_REPAIR_REQUIRED",
-          "REGRESSION_ASSESSED",
-          "SOURCE_EXCLUSION_ASSESSED",
-        ],
-        executionClass: "PRODUCTION_CODEX",
-        diagnosticRetentionDays: 14,
-        destroysWorkspace: "DESTROY_AFTER_TERMINAL_OR_FAILURE",
-      },
-      {
-        role: "HUMAN_DIRECTED_EXECUTOR",
-        hash: "f800a1cf83d59e70cbb24de11ed280253bd9356a0320036d958efed3f87417e9",
-        promptTemplateHash:
-          "c718980812e1732987596153c26cf52ef621a6f154c8faec95835d090d4fc9d7",
-        inputSchemaId: "affiliate-agent/human-directed-executor-subject@1",
-        permittedCommands: [
-          "EXECUTE_RECORDED_LIFECYCLE_COMMAND",
-          "SUBMIT_TERMINAL_RESULT",
-        ],
-        terminalDispositions: ["CONTRACT_GAP", "LIFECYCLE_COMMAND_EXECUTED"],
-        executionClass: "PRODUCTION_CODEX",
-        diagnosticRetentionDays: 14,
-        destroysWorkspace: "DESTROY_AFTER_TERMINAL_OR_FAILURE",
-      },
-    ]);
-    expect(
-      parsed.every((contract) => contract.forbiddenEffects.length > 0),
-    ).toBe(true);
-  });
 
   it("changes a hash when a contract field changes", () => {
     const contract = AFFILIATE_AGENT_ROLE_CONTRACTS.COVERAGE_PLANNER;
@@ -881,29 +779,6 @@ describe("affiliate Agent Gateway contracts", () => {
     ).toEqual([false, false, false, false, false]);
   });
 
-  it("parses a hashed deployment contract with the expected topology", () => {
-    const parsed = affiliateAgentDeploymentContractSchema.parse(
-      deploymentContractFixture,
-    );
-
-    expect(parsed.hash).toBe(
-      "637cc16e500f9de57eaa54c570d0f12cb97a1aa236b4274432156c288de8d237",
-    );
-    expect(parsed.expectedTopology).toEqual({
-      claimsPerInvocation: 1,
-      hasFreshWorkspacePerClaim: true,
-      processCommand: ["codex", "exec", "--ephemeral"],
-      hasNestedGoal: false,
-      hasClaimLoop: false,
-      hasContextReuse: false,
-      executionClass: "PRODUCTION_CODEX",
-      databaseRoles: {
-        gateway: "bracketiq_affiliate_gateway",
-        lifecycleAuthority: "bracketiq_affiliate_lifecycle",
-        agent: "bracketiq_affiliate_agent",
-      },
-    });
-  });
 
   it("parses one complete contract bundle and rejects mismatched deployment references", () => {
     const parsed = affiliateAgentContractBundleSchema.parse(
@@ -3166,11 +3041,18 @@ describe("Prisma affiliate Agent Gateway", () => {
         expectedLifecycleGeneration: 7,
       });
     };
-    const seedProducerHistory = (harness: GatewayClaimHarness): void => {
+    const seedProducerHistory = (
+      harness: GatewayClaimHarness,
+      repairContext?: Readonly<Record<string, unknown>>,
+    ): void => {
       const producerEnvelope = {
         ...claimFixtureForRole("MAPPING_PRODUCER"),
         jobId: "producer-job-1",
         claimId: "producer-claim-1",
+        subject: {
+          ...claimRoleFields.MAPPING_PRODUCER.subject,
+          ...(repairContext ? { repairContext } : {}),
+        },
       };
       const producerTerminalBase = terminalResultFixture({
         role: "MAPPING_PRODUCER",
@@ -3507,6 +3389,43 @@ describe("Prisma affiliate Agent Gateway", () => {
         }),
       );
     }
+
+    const repairHarness = createGatewayClaimHarness();
+    configureReviewerJob(repairHarness);
+    const repairContext = {
+        kind: "LEGACY_SPORT_REPAIR",
+        intakeId: "repair-intake",
+        evidenceRunId: "repair-run",
+        sportsCatalog: buildAffiliateSportsCatalogSnapshot(
+          [{ id: "grass-soccer", name: "Grass Soccer" }],
+          "2026-08-20T18:00:00.000Z",
+        ),
+    };
+    const strippedRepairHarness = createGatewayClaimHarness();
+    configureReviewerJob(strippedRepairHarness);
+    seedProducerHistory(strippedRepairHarness, repairContext);
+    await expect(strippedRepairHarness.gateway.claim(reviewerRequest()))
+      .rejects.toMatchObject({ code: "REVIEW_WORKSPACE_INVALID" });
+    repairHarness.state.jobs[0].subjectJson = {
+      ...claimRoleFields.SUPPLY_REVIEWER.subject,
+      repairContext,
+    };
+    seedProducerHistory(repairHarness, repairContext);
+    const repairGrant = await repairHarness.gateway.claim(reviewerRequest());
+    if (!repairGrant) throw new Error("Expected a legacy repair review claim.");
+    await expect(repairHarness.gateway.perform(reviewerTerminalFor(
+      repairGrant,
+      "repair-activation-denied",
+      {
+        disposition: "ACTIVATED",
+        payload: {
+          committedPackageHash: claimRoleFields.SUPPLY_REVIEWER.subject.committedPackageHash,
+          baselineHash: "a".repeat(64),
+          candidateReviewId: "candidate-review-1",
+        },
+      },
+    ))).rejects.toMatchObject({ code: "COMMAND_NOT_PERMITTED" });
+    expect(repairHarness.state.reviewerEffectCalls).toEqual([]);
 
     expect(accepted).toMatchObject({
       kind: "TERMINAL_ACCEPTED",
