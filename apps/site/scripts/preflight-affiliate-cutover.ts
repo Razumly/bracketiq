@@ -121,6 +121,7 @@ const agentContainerSchema = z.object({
   childGid: z.number().int().positive().optional(),
   supervisorUid: z.number().int().positive().optional(),
   securityOptions: z.array(nonEmptyStringSchema),
+  apparmorProfileSha256: hashSchema.optional(),
 }).strict();
 const affiliateCutoverInventorySchema = z.object({
   now: isoTimestampSchema,

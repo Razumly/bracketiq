@@ -4,6 +4,10 @@ import {
   normalizeAffiliateSupplyIdentity,
   type AffiliateSupplyLifecycleStage,
 } from './affiliateSupplyLifecycle';
+export const AFFILIATE_RUNNER_SECCOMP_SHA256 = '624a3cdf758efb74cd6de9c956ac344d99bf2255a5fc1e4bdf8df91a3550bf7a';
+export const AFFILIATE_RUNNER_APPARMOR_SHA256 = '19d5f94168ee26a8107fb75e391fe08003457734c2394829c4b6c25bc63f28ee';
+export const AFFILIATE_RUNNER_APPARMOR_PROFILE = 'bracketiq-affiliate-runner';
+
 
 export const AFFILIATE_GOVERNED_SUPERVISOR_COUNTS = Object.freeze({
   MAPPING_PRODUCER: 2,
@@ -2144,6 +2148,7 @@ export type AffiliateAgentContainerInput = Readonly<{
   childGid?: number;
   supervisorUid?: number;
   securityOptions?: readonly string[];
+  apparmorProfileSha256?: string;
 }>;
 
 export type AffiliateAgentContainerInspection = Readonly<{
@@ -2390,10 +2395,119 @@ const REVIEWED_RUNNER_CAPABILITIES = [
   'SETGID',
   'SETUID',
 ] as const;
-const REVIEWED_RUNNER_SECURITY_OPTIONS = [
-  'no-new-privileges:true',
-  'writable-cgroups=true',
-] as const;
+type RunnerSecurityOptionState = Readonly<{
+  optionCount: number;
+  noNewPrivilegesCount: number;
+  writableCgroupsCount: number;
+  apparmorProfiles: readonly string[];
+  seccompHashes: readonly string[];
+  invalidSeccompCount: number;
+  unknownOptionCount: number;
+}>;
+
+const runnerSecurityOptionStateFor = (
+  options: readonly string[] | undefined,
+): RunnerSecurityOptionState => {
+  const state = {
+    optionCount: 0,
+    noNewPrivilegesCount: 0,
+    writableCgroupsCount: 0,
+    apparmorProfiles: [] as string[],
+    seccompHashes: [] as string[],
+    invalidSeccompCount: 0,
+    unknownOptionCount: 0,
+  };
+  for (const option of options ?? []) {
+    state.optionCount += 1;
+    const trimmed = option.trim();
+    const equalsIndex = trimmed.indexOf('=');
+    const name = (equalsIndex < 0 ? trimmed : trimmed.slice(0, equalsIndex)).trim().toLowerCase();
+    const value = equalsIndex < 0 ? '' : trimmed.slice(equalsIndex + 1);
+    if (trimmed.toLowerCase() === 'no-new-privileges:true') {
+      state.noNewPrivilegesCount += 1;
+    } else if (trimmed.toLowerCase() === 'writable-cgroups=true') {
+      state.writableCgroupsCount += 1;
+    } else if (name === 'apparmor') {
+      state.apparmorProfiles.push(value);
+    } else if (name === 'seccomp') {
+      try {
+        state.seccompHashes.push(hashAffiliateAgentValue(JSON.parse(value)));
+      } catch {
+        state.invalidSeccompCount += 1;
+      }
+    } else {
+      state.unknownOptionCount += 1;
+    }
+  }
+  return state;
+};
+
+
+const runnerBoundaryFinding = (
+  input: AffiliateAgentContainerInput,
+  code: string,
+  detail: string,
+  resolution: string,
+): AffiliateCutoverFinding => finding(
+  code,
+  'BLOCKING',
+  detail,
+  [input.id],
+  resolution,
+);
+const runnerProfileFindings = (
+  input: AffiliateAgentContainerInput,
+): AffiliateCutoverFinding[] => {
+  const state = runnerSecurityOptionStateFor(input.securityOptions);
+  const findings: AffiliateCutoverFinding[] = [];
+  if (
+    state.optionCount !== 4
+    || state.apparmorProfiles.length !== 1
+    || state.seccompHashes.length !== 1
+    || state.invalidSeccompCount > 0
+    || state.unknownOptionCount > 0
+  ) {
+    findings.push(runnerBoundaryFinding(
+      input,
+      'RUNNER_SECURITY_OPTIONS',
+      'The governed runner must provide exactly no-new-privileges, writable-cgroups, the reviewed AppArmor profile, and one valid seccomp JSON policy.',
+      'Provide exactly one no-new-privileges:true option, one writable-cgroups=true option, one apparmor=bracketiq-affiliate-runner option, and one seccomp JSON option.',
+    ));
+  }
+  if (
+    state.seccompHashes.length !== 1
+    || state.invalidSeccompCount > 0
+    || state.seccompHashes[0] !== AFFILIATE_RUNNER_SECCOMP_SHA256
+  ) {
+    findings.push(runnerBoundaryFinding(
+      input,
+      'RUNNER_SECCOMP_PROFILE',
+      'The governed runner seccomp policy is missing, invalid, widened, or does not match the approved canonical profile digest.',
+      'Pass the approved runner seccomp JSON unchanged as seccomp=<JSON> and rerun preflight.',
+    ));
+  }
+  if (
+    state.apparmorProfiles.length !== 1
+    || state.apparmorProfiles[0] !== AFFILIATE_RUNNER_APPARMOR_PROFILE
+  ) {
+    findings.push(runnerBoundaryFinding(
+      input,
+      'RUNNER_APPARMOR_PROFILE',
+      'The governed runner does not select the reviewed AppArmor profile by its exact name.',
+      `Pass apparmor=${AFFILIATE_RUNNER_APPARMOR_PROFILE} and reject unconfined or arbitrary profiles.`,
+    ));
+  }
+  if (input.apparmorProfileSha256 !== AFFILIATE_RUNNER_APPARMOR_SHA256) {
+    findings.push(runnerBoundaryFinding(
+      input,
+      'RUNNER_APPARMOR_CONTENT',
+      'The independent AppArmor profile content digest is missing or does not match the approved profile.',
+      'Record the SHA-256 of the exact reviewed AppArmor profile bytes in apparmorProfileSha256.',
+    ));
+  }
+  return findings;
+};
+
 const REVIEWED_RUNNER_TMPFS = [
   [
     '/dev/shm',
@@ -2425,18 +2539,6 @@ const sameStringValues = (
   expected: readonly string[],
 ): boolean => JSON.stringify(values) === JSON.stringify(expected);
 
-const runnerBoundaryFinding = (
-  input: AffiliateAgentContainerInput,
-  code: string,
-  detail: string,
-  resolution: string,
-): AffiliateCutoverFinding => finding(
-  code,
-  'BLOCKING',
-  detail,
-  [input.id],
-  resolution,
-);
 
 const runnerIdentityFindings = (
   input: AffiliateAgentContainerInput,
@@ -2503,15 +2605,16 @@ const runnerCapabilityFindings = (
       'Drop ALL capabilities and add only CHOWN, DAC_OVERRIDE, FOWNER, KILL, SETGID, and SETUID.',
     ));
   }
-  const securityOptions = sortedUnique(
-    (input.securityOptions ?? []).map((option) => option.trim().toLowerCase()),
-  );
-  if (!sameStringValues(securityOptions, [...REVIEWED_RUNNER_SECURITY_OPTIONS])) {
+  const securityOptions = runnerSecurityOptionStateFor(input.securityOptions);
+  if (
+    securityOptions.noNewPrivilegesCount !== 1
+    || securityOptions.writableCgroupsCount !== 1
+  ) {
     findings.push(runnerBoundaryFinding(
       input,
       'RUNNER_SECURITY_BOUNDARY',
       'The governed runner does not prove private writable cgroups with no-new-privileges.',
-      'Require exactly no-new-privileges:true and writable-cgroups=true.',
+      'Require exactly one no-new-privileges:true option and one writable-cgroups=true option.',
     ));
   }
   return findings;
@@ -2611,6 +2714,7 @@ const runnerContainmentFindings = (
   ...runnerNetworkFindings(input, expectedNetwork),
   ...runnerIdentityFindings(input),
   ...runnerFilesystemFindings(input),
+  ...runnerProfileFindings(input),
   ...runnerCapabilityFindings(input),
   ...runnerChildIdentityFindings(input),
   ...runnerCgroupFindings(input),
@@ -2642,6 +2746,7 @@ const normalizedContainerInput = (
 ): Record<string, unknown> => {
   const normalized: Record<string, unknown> = {
     ...input,
+    apparmorProfileSha256: stringValue(input.apparmorProfileSha256),
     environment: [...environment].sort(),
     volumes: [...(input.volumes ?? [])].sort(),
     networks: [...(input.networks ?? [])].map((network) => stringValue(network) ?? '').sort(),
@@ -2649,7 +2754,14 @@ const normalizedContainerInput = (
     capAdd: sortedUnique((input.capAdd ?? []).map(upper)),
     groupAdd: sortedUnique((input.groupAdd ?? []).map((group) => group.trim())),
     securityOptions: sortedUnique(
-      (input.securityOptions ?? []).map((option) => option.trim().toLowerCase()),
+      (input.securityOptions ?? []).map((option) => {
+        const trimmed = option.trim();
+        const equalsIndex = trimmed.indexOf('=');
+        const name = equalsIndex < 0 ? trimmed : trimmed.slice(0, equalsIndex);
+        return name.trim().toLowerCase() === 'seccomp' && equalsIndex >= 0
+          ? `${name.trim().toLowerCase()}=${trimmed.slice(equalsIndex + 1)}`
+          : trimmed.toLowerCase();
+      }),
     ),
     tmpfs: normalizedTmpfs(input.tmpfs),
   };

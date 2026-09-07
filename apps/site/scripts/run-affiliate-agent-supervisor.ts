@@ -1283,6 +1283,12 @@ export const createWorkspaceManager = (
       const codexHome = join(path, ".codex");
       await mkdir(codexHome, { recursive: true, mode: 0o770 });
       await chmod(codexHome, 0o770);
+      if (input.mode === "READ_ONLY") {
+        // Create Codex policy mount targets before locking the reviewer root.
+        for (const name of [".git", ".agents"]) {
+          await mkdir(join(path, name), { mode: 0o770 });
+        }
+      }
       await applyWorkspacePermissions(path, input.mode);
       await chmod(codexHome, 0o770);
       const issuedAtDate = new Date(Date.now());

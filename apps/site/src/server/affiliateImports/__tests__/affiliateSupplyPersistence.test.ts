@@ -1,5 +1,9 @@
 /** @jest-environment node */
 
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+
 import {
   buildAffiliateSupplyContractManifest,
   normalizeAffiliateSupplyIdentity,
@@ -26,6 +30,7 @@ import {
   type AffiliateSupplyDatabase,
 } from '../affiliateSupplyPersistence';
 import {
+  AFFILIATE_RUNNER_APPARMOR_PROFILE,
   buildAffiliateCutoverPreflightReport,
   hashAffiliateLegacyProcessManifest,
   hashAffiliateCutoverProcessInventory,
@@ -33,6 +38,14 @@ import {
   type AffiliateCutoverPreflightInput,
 } from '../affiliateFleetCutover';
 import { hashAffiliateAgentValue } from '../agentGatewayContracts';
+const runnerProfileDirectory = path.resolve(process.cwd(), 'deploy/affiliate-governed');
+const runnerSeccompProfileJson = readFileSync(
+  path.join(runnerProfileDirectory, 'runner-seccomp.json'),
+  'utf8',
+);
+const runnerAppArmorProfileSha256 = createHash('sha256')
+  .update(readFileSync(path.join(runnerProfileDirectory, 'runner.apparmor')))
+  .digest('hex');
 const policy: AffiliateSupplyContractPolicy = {
   schemaVersion: 1,
   version: 3,
@@ -5585,7 +5598,13 @@ describe('affiliate supply persistence seams', () => {
         childUid: 1002,
         childGid: 1001,
         supervisorUid: 1001,
-        securityOptions: ['no-new-privileges:true', 'writable-cgroups=true'],
+        securityOptions: [
+          'no-new-privileges:true',
+          'writable-cgroups=true',
+          `apparmor=${AFFILIATE_RUNNER_APPARMOR_PROFILE}`,
+          `seccomp=${runnerSeccompProfileJson}`,
+        ],
+        apparmorProfileSha256: runnerAppArmorProfileSha256,
         ipcMode: 'none',
       },
       containers: governedContainers,

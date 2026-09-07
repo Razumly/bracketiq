@@ -1,6 +1,13 @@
 /** @jest-environment node */
 
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { hashAffiliateAgentValue } from '../agentGatewayContracts';
 import {
+  AFFILIATE_RUNNER_APPARMOR_PROFILE,
+  AFFILIATE_RUNNER_APPARMOR_SHA256,
+  AFFILIATE_RUNNER_SECCOMP_SHA256,
   buildAffiliateCutoverPreflightReport,
   isAffiliateCutoverPreflightApplySafe,
   isAffiliateCutoverPreflightReportIntact,
@@ -18,6 +25,14 @@ import {
 } from '../affiliateFleetCutover';
 import { normalizeAffiliateSupplyIdentity } from '../affiliateSupplyLifecycle';
 
+const runnerProfileDirectory = path.resolve(process.cwd(), 'deploy/affiliate-governed');
+const runnerSeccompProfileJson = readFileSync(
+  path.join(runnerProfileDirectory, 'runner-seccomp.json'),
+  'utf8',
+);
+const runnerAppArmorProfileSha256 = createHash('sha256')
+  .update(readFileSync(path.join(runnerProfileDirectory, 'runner.apparmor')))
+  .digest('hex');
 
 const source = (overrides: Partial<AffiliateLegacyReconciliationInput['sources'][number]> = {}) => ({
   id: 'source-1',
@@ -113,7 +128,13 @@ const runnerContainer = {
   childUid: 1002,
   childGid: 1001,
   supervisorUid: 1001,
-  securityOptions: ['no-new-privileges:true', 'writable-cgroups=true'],
+  securityOptions: [
+    'no-new-privileges:true',
+    'writable-cgroups=true',
+    `apparmor=${AFFILIATE_RUNNER_APPARMOR_PROFILE}`,
+    `seccomp=${runnerSeccompProfileJson}`,
+  ],
+  apparmorProfileSha256: runnerAppArmorProfileSha256,
 };
 const processInventory = [
   { id: 'legacy-goal', kind: 'LEGACY', processClass: 'GOAL', command: 'affiliate:intakes:codex-goal', status: 'STOPPED' },
@@ -1217,6 +1238,41 @@ describe('affiliate fleet cutover contracts', () => {
     expect(inspection.findings).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'RUNNER_TMPFS_BOUNDARY' }),
     ]));
+  });
+  it('binds runner policy evidence to the shipped profiles and rejects widened or renamed policies', () => {
+    expect(hashAffiliateAgentValue(JSON.parse(runnerSeccompProfileJson))).toBe(AFFILIATE_RUNNER_SECCOMP_SHA256);
+    expect(runnerAppArmorProfileSha256).toBe(AFFILIATE_RUNNER_APPARMOR_SHA256);
+
+    const widenedSeccomp = inspectAffiliateAgentRunnerContainer({
+      ...runnerContainer,
+      securityOptions: runnerContainer.securityOptions.map((option) => (
+        option.startsWith('seccomp=') ? 'seccomp={"defaultAction":"SCMP_ACT_ALLOW"}' : option
+      )),
+    });
+    expect(widenedSeccomp.isSafe).toBe(false);
+    expect(widenedSeccomp.findings.map((finding) => finding.code)).toContain('RUNNER_SECCOMP_PROFILE');
+
+    const wrongAppArmorName = inspectAffiliateAgentRunnerContainer({
+      ...runnerContainer,
+      securityOptions: runnerContainer.securityOptions.map((option) => (
+        option.startsWith('apparmor=') ? 'apparmor=unconfined' : option
+      )),
+    });
+    expect(wrongAppArmorName.isSafe).toBe(false);
+    expect(wrongAppArmorName.findings.map((finding) => finding.code)).toContain('RUNNER_APPARMOR_PROFILE');
+
+    const wrongAppArmorHash = inspectAffiliateAgentRunnerContainer({
+      ...runnerContainer,
+      apparmorProfileSha256: '0'.repeat(64),
+    });
+    expect(wrongAppArmorHash.isSafe).toBe(false);
+    expect(wrongAppArmorHash.findings.map((finding) => finding.code)).toContain('RUNNER_APPARMOR_CONTENT');
+    const missingAppArmorHash = inspectAffiliateAgentRunnerContainer({
+      ...runnerContainer,
+      apparmorProfileSha256: undefined,
+    });
+    expect(missingAppArmorHash.isSafe).toBe(false);
+    expect(missingAppArmorHash.findings.map((finding) => finding.code)).toContain('RUNNER_APPARMOR_CONTENT');
   });
   it('blocks incomplete contract, stopped-fleet, worker, and container evidence', () => {
     const incompleteContract = {

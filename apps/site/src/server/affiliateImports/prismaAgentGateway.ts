@@ -14187,7 +14187,7 @@ const reconcilePendingEffectsForClaim = async (
 const performReconciledFailure = async (
   dependencies: AffiliateAgentGatewayDependencies,
   input: AffiliateAgentInvocationReconciliationRequest,
-) => {
+): Promise<AffiliateAgentInvocationReconciliationResult> => {
   const result = await performFailure(dependencies, input, {
     isCompletedReplayAllowed: true,
     isTrustedFailureRecording: true,
@@ -14200,8 +14200,15 @@ const performReconciledFailure = async (
       input.failure.code,
       input.failure.safeSummary,
     );
+    return {
+      kind: "INVOCATION_FAILED",
+      failureCode: result.failureCode,
+      invocationFailureCount: result.invocationFailureCount,
+      nextAttemptAt: result.nextAttemptAt,
+      isPipelineBlocked: result.isPipelineBlocked,
+    };
   }
-  return result;
+  return { kind: "TERMINAL_ACCEPTED" };
 };
 
 

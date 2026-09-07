@@ -192,6 +192,8 @@ services:
     security_opt:
       - no-new-privileges:true
       - writable-cgroups=true
+      - apparmor=bracketiq-affiliate-runner
+      - seccomp=${AFFILIATE_AGENT_RUNNER_SECCOMP_PROFILE:?Set reviewed runner seccomp file}
     cap_add:
       - SETUID
       - SETGID

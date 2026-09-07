@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 
 const repositoryRoot = process.cwd();
@@ -10,6 +11,10 @@ const read = (relativePath: string) => fs.readFileSync(
   path.join(repositoryRoot, relativePath),
   'utf8',
 );
+const runnerSeccompProfileJson = read('deploy/affiliate-governed/runner-seccomp.json');
+const runnerAppArmorProfileSha256 = createHash('sha256')
+  .update(read('deploy/affiliate-governed/runner.apparmor'))
+  .digest('hex');
 const controllerLauncher = path.join(
   repositoryRoot,
   'deploy/ai/bin/run-controller-once.sh',
@@ -56,6 +61,7 @@ const renderAiCompose = (): RenderedCompose => {
 
 
 import {
+  AFFILIATE_RUNNER_APPARMOR_PROFILE,
   buildAffiliateCutoverPreflightReport,
   hashAffiliateCutoverProcessInventory,
   hashAffiliateLegacyProcessManifest,
@@ -243,7 +249,13 @@ const strictInventoryFixture = () => {
       childUid: 1002,
       childGid: 1001,
       supervisorUid: 1001,
-      securityOptions: ['no-new-privileges:true', 'writable-cgroups=true'],
+      securityOptions: [
+        'no-new-privileges:true',
+        'writable-cgroups=true',
+        `apparmor=${AFFILIATE_RUNNER_APPARMOR_PROFILE}`,
+        `seccomp=${runnerSeccompProfileJson}`,
+      ],
+      apparmorProfileSha256: runnerAppArmorProfileSha256,
       ipcMode: 'none',
     },
     containers: [

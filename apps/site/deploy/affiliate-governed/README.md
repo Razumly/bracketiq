@@ -99,6 +99,62 @@ denial evidence. If group roles were absent when migrations ran, provision the
 roles and apply the migration's conditional grants before the canary.
 
 
+## Runner sandbox profiles
+
+The reviewed Linux x86 runner uses the pinned Codex CLI with Bubblewrap.
+Install `runner-seccomp.json` and the named `runner.apparmor` profile only after
+current operator authorization. These files permit the namespace-local mount
+setup needed by Bubblewrap. They do not add `SYS_ADMIN`, privileged mode, or
+global kernel changes. The AppArmor profile requires ABI 5 support.
+
+```text
+sudo install -D -o root -g root -m 0644 \
+  deploy/affiliate-governed/runner-seccomp.json \
+  /etc/docker/seccomp/bracketiq-affiliate-runner.json
+sudo install -D -o root -g root -m 0644 \
+  deploy/affiliate-governed/runner.apparmor \
+  /etc/apparmor.d/bracketiq-affiliate-runner
+sudo apparmor_parser -r /etc/apparmor.d/bracketiq-affiliate-runner
+```
+
+Before attaching the profiles to production, run the credential-free smoke
+below. Do not mount the production workspace volume or auth file. Do not pass a
+production environment file. The probe first proves the sibling directory is
+writable by the child without Codex. It then requires a sandboxed workspace
+write, sibling denial, `NoNewPrivs=1`, and zero effective child capabilities.
+
+```text
+docker run --rm --network none --user 0:0 --read-only --ipc none \
+  --cgroupns private --cpus 1 --memory 2g --pids-limit 512 \
+  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,uid=0,gid=0,mode=0755 \
+  --tmpfs /workspaces:rw,noexec,nosuid,nodev,size=64m,uid=1001,gid=1001,mode=0710 \
+  --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER \
+  --cap-add KILL --cap-add SETGID --cap-add SETUID \
+  --security-opt no-new-privileges:true \
+  --security-opt writable-cgroups=true \
+  --security-opt seccomp=/etc/docker/seccomp/bracketiq-affiliate-runner.json \
+  --security-opt apparmor=bracketiq-affiliate-runner \
+  --entrypoint node "${AFFILIATE_AGENT_IMAGE:?Set the reviewed immutable image}" \
+  /usr/local/libexec/verify-runner-sandbox.mjs
+```
+
+The runner keeps `workspace-write` and sets
+`sandbox_workspace_write.exclude_slash_tmp=true`. Its writable temporary
+directory is inside the invocation workspace; the global `/tmp` remains
+root-owned. Do not replace this with `danger-full-access` or an unconfined
+security profile.
+
+Preflight binds the canonical seccomp JSON hash and the exact AppArmor file
+bytes to the approved constants in `affiliateFleetCutover.ts`. Record the
+actual Docker security options and the independent `apparmorProfileSha256`.
+Recheck both profiles after a Docker, kernel, or Codex version change.
+
+Repeat the same smoke command with `--reviewer` after the script path.
+This mode also requires a denied write to the reviewer root while allowing
+its private temporary directory. The supervisor creates empty `.git` and
+`.agents` policy mount targets before locking that root. It creates no Git
+history and does not make the reviewer workspace writable.
+
 Run the build from `apps/site`:
 
 ```text

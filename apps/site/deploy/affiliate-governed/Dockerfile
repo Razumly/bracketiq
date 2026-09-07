@@ -28,6 +28,8 @@ COPY prisma ./prisma
 RUN npm ci --omit=dev
 
 COPY src ./src
+COPY data ./data
+COPY deploy/affiliate-governed/verify-runner-sandbox.mjs /usr/local/libexec/verify-runner-sandbox.mjs
 COPY scripts/normalize-prisma-generated.mjs scripts/normalize-prisma-generated.mjs
 COPY scripts/run-affiliate-agent-supervisor.ts scripts/run-affiliate-agent-supervisor.ts
 COPY scripts/run-affiliate-agent-runner.ts scripts/run-affiliate-agent-runner.ts
