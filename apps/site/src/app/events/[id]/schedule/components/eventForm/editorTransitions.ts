@@ -39,7 +39,7 @@ export const changeSport = (
   basics: { ...draft.basics, sportIds: [...sportIds] },
 });
 
-const canSelectGeneratedEnd = (draft: EventEditorDraft): boolean => {
+const isGeneratedEndSelectable = (draft: EventEditorDraft): boolean => {
   const type = draft.basics.eventType.toUpperCase();
   return type === 'WEEKLY_EVENT' || (['LEAGUE', 'TOURNAMENT'].includes(type) && draft.schedule.isAutomatedScheduling);
 };
@@ -70,7 +70,7 @@ export const changeScheduleMode = (
     });
   }
 
-  if (draft.schedule.mode !== mode && !canSelectGeneratedEnd(draft)) {
+  if (draft.schedule.mode !== mode && !isGeneratedEndSelectable(draft)) {
     return result(draft, ['Set End From Schedule requires Automated Scheduling for a League or Tournament.']);
   }
 

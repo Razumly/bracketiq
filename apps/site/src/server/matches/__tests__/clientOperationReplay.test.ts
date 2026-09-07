@@ -1,6 +1,7 @@
 /** @jest-environment node */
 
 import { claimMatchOperationReceipts } from "@/server/matches/clientOperationReplay";
+import { updateSchema } from "@/contracts/matchUpdate";
 
 // Jest's node environment here does not install the Fetch Response global that
 // Next route handlers provide at runtime.
@@ -67,6 +68,22 @@ const claim = (client: any, payload: Record<string, unknown>) =>
   });
 
 describe("claimMatchOperationReceipts", () => {
+  it.each(['start', 'end'])('rejects an operation ID reused with a different placement %s', async (field) => {
+    const { client, receipts } = createClient();
+    const request = {
+      clientOperationId: 'phone:placement:1',
+      fieldId: 'court',
+      start: '2026-09-10T09:00:00Z',
+      end: '2026-09-10T10:00:00Z',
+    };
+    await claim(client, updateSchema.parse(request));
+    await expect(claim(client, updateSchema.parse(request))).resolves.toMatchObject({ replayed: true });
+    await expect(claim(client, updateSchema.parse({
+      ...request, [field]: '2026-09-10T18:00:00Z',
+    }))).rejects.toMatchObject({ status: 409 });
+    expect(receipts).toHaveLength(1);
+  });
+
   it("returns a replay instead of accepting an identical mobile retry", async () => {
     const { client, receipts } = createClient();
     const payload = {

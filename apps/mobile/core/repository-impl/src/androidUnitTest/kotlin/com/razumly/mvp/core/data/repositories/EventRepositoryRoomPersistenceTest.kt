@@ -411,6 +411,34 @@ class EventRepositoryRoomPersistenceTest {
                     assertEquals(planned.canonicalState.event.end, cachedEnd(plannedId))
                 }
                 val eventId = ids.single { it.endsWith("-tournament") }
+                val unbuilt = repository.getEventEditor(eventId).getOrThrow().canonicalState.event
+                val unplaced = matches.getMatchesOfTournament(eventId).getOrThrow().first { it.fieldId == null }
+                val outsidePlacement = unplaced.copy(
+                    fieldId = unbuilt.fieldIds.first(),
+                    start = unbuilt.end + kotlin.time.Duration.parse("10m"),
+                    end = unbuilt.end + kotlin.time.Duration.parse("40m"),
+                )
+                val beforePlacement = database.getMatchDao.getMatchesOfTournament(eventId).sortedBy { it.id }
+                for (isBulk in listOf(false, true)) {
+                    val failure = if (isBulk) matches.updateMatchesBulk(listOf(outsidePlacement)).exceptionOrNull()
+                        else runCatching {
+                            api.patch<com.razumly.mvp.core.network.dto.MatchUpdateDto, com.razumly.mvp.core.network.dto.MatchResponseDto>(
+                                "api/events/$eventId/matches/${unplaced.id}",
+                                com.razumly.mvp.core.network.dto.MatchUpdateDto(
+                                    fieldId = outsidePlacement.fieldId,
+                                    start = outsidePlacement.start?.toString(),
+                                    end = outsidePlacement.end?.toString(),
+                                ),
+                            )
+                        }.exceptionOrNull()
+                    val apiFailure = kotlin.test.assertIs<com.razumly.mvp.core.network.ApiException>(failure)
+                    val boundary = apiFailure.matchBoundaryError
+                    assertNotNull(boundary, apiFailure.message)
+                    assertEquals("MATCH_OUTSIDE_EVENT_BOUNDS", boundary.code)
+                    assertEquals(listOf(unplaced.id), boundary.matchIds)
+                    assertEquals(beforePlacement, database.getMatchDao.getMatchesOfTournament(eventId).sortedBy { it.id })
+                    assertEquals(unbuilt.end, cachedEnd(eventId))
+                }
                 val generated = repository.acceptEventScheduleMaintenance(acceptance(propose(eventId, EventEditorMaintenanceOperation.REBUILD))).getOrThrow()
                 val graphEnd = generated.graph.matches.mapNotNull { it.end?.let(Instant::parse) }.max()
                 assertEquals(graphEnd, Instant.parse(requireNotNull(generated.graph.event.end)))

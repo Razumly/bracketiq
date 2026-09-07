@@ -259,9 +259,9 @@ export const useEventFormConfigurationActions = ({
     }, [setValue]);
 
     const handleNoFixedEndDateTimeChange = useCallback((checked: boolean) => {
-        const wasGenerated = getValues('noFixedEndDateTime');
+        const hasGeneratedEnd = getValues('noFixedEndDateTime');
         setValue('noFixedEndDateTime', checked, { shouldDirty: true, shouldValidate: true });
-        if (wasGenerated && !checked) {
+        if (hasGeneratedEnd && !checked) {
             setValue('end', '', { shouldDirty: true, shouldValidate: true });
         }
     }, [getValues, setValue]);

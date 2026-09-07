@@ -11,9 +11,10 @@ Issue #52 requires stable Event boundaries. Build and Rebuild can set an Event e
 - [x] (2026-09-07) Read issue #52 and all comments. Confirm all five blockers are closed. Claim the issue. Set project Status to In progress and Area to Shared.
 - [x] (2026-09-07) Read the root, site, and mobile rules. Read the implement, TDD, and code-review skills.
 - [x] (2026-09-07) Trace End Policy through save, scheduling, manual Match operations, web, and mobile. Complete the requested implementation audit before application edits.
-- [ ] Add regression tests at the existing API, editor, scheduler, and Room boundaries. Fix each observed failure.
-- [ ] Run client-to-site validation for changed contracts. Run type checks, lint, and the affected complete suites.
-- [ ] Review the implementation against standards and issue #52. Fix findings. Commit the changes and reconcile the issue.
+- [x] (2026-09-07) Add regression tests at the existing API, editor, scheduler, and Room boundaries. Fix the observed implementation failures.
+- [x] (2026-09-07) Run client-to-site validation for changed contracts. Run type checks, lint, and the affected complete suites. Record existing failures separately.
+- [x] (2026-09-07) Review the implementation against standards and issue #52. Fix all findings.
+- [ ] Commit the verified changes and reconcile issue #52.
 
 ## Context Boundary
 
@@ -51,7 +52,7 @@ Prove that Build and Rebuild preserve Planned End and set only schedule-selected
 
 ## Interfaces and Dependencies
 
-`apps/site` owns every HTTP shape. Record each request and response field change here before editing clients. Preserve parser compatibility or increase the contract version before adding a required field. The manual Match error response adds `code`, `eventId`, `eventStart`, `eventEnd`, and `matchIds` beside the existing `error` field. The new code is `MATCH_OUTSIDE_EVENT_BOUNDS`. Existing success shapes and editor contract versions remain unchanged. Mobile `MatchBoundaryErrorDto`, `ApiException`, and `userMessage` decode and display this error. The existing Match repository callers receive the enriched exception before any Room write. No database or Room schema change is planned.
+`apps/site` owns every HTTP shape. Record each request and response field change here before editing clients. Preserve parser compatibility or increase the contract version before adding a required field. The manual Match error response adds `code`, `eventId`, `eventStart`, `eventEnd`, and `matchIds` beside the existing `error` field. The new code is `MATCH_OUTSIDE_EVENT_BOUNDS`. The single Match PATCH parser also accepts optional ISO `start` and `end` fields. Mobile `MatchUpdateDto` already defines those fields. Existing success shapes and editor contract versions remain unchanged. Mobile `MatchBoundaryErrorDto`, `ApiException`, and `userMessage` decode and display this error. The existing Match repository callers receive the enriched exception before any Room write. No database or Room schema change is planned.
 
 ## Idempotence and Recovery
 
@@ -75,7 +76,7 @@ On 2026-09-07, the user requested an implementation audit before application edi
 
 ## Outcomes & Retrospective
 
-The audit is complete. Implementation is in progress. Issue #52 remains open. No complete issue acceptance gate has run. Mobile behavior was inspected in source and existing tests; mobile tests and the mobile-to-site check have not run in this audit.
+The audit is complete. Its findings below describe the code before implementation. The implementation and validation results follow in the final section.
 
 Build and Rebuild already derive a generated end from placed Matches only when `noFixedEndDateTime` is true. `saveEventSchedule` does not write the concrete Event end for Planned End. Existing maintenance capability checks require automation. Reflow already compares the latest scheduled Match end before and after the operation and writes its changes through the caller transaction. These paths need focused End Policy regression coverage, not replacement scheduler logic.
 
@@ -117,8 +118,28 @@ Changed-file lint now passes with four advisory TSX warnings. The touched schedu
 
 The authorized site server runs on port 3052. It uses `bracketiq_e2e_52_563b` on the existing PostgreSQL server at port 5543. Migration deploy and migration status passed before seeding. `test-results/issue-52-runtime.cjs` holds local runtime configuration. No production runtime changed.
 
-The live mobile check has proved accepted Build and Rebuild bounds and generated-end preservation. Its fixture checks are still in progress. The first live failure came from an unseeded Room host dependency. The next exposed the Date conversion defect. The next correctly rejected a Planned End before an existing Time Slot end. The fixture now selects a Planned End that includes that Time Slot. Do not mark the full client-to-site gate complete until the complete test passes.
+The first live failure came from an unseeded Room host dependency. The next exposed the Date conversion defect. The next correctly rejected a Planned End before an existing Time Slot end. The fixture now selects a Planned End that includes that Time Slot.
 
-The complete site and mobile suites, final standards/specification review, commit, and GitHub completion remain pending.
+Commit `14159e41c` records the initial implementation. The complete site and mobile suites and GitHub completion remain pending.
 
 The complete live mobile-to-site and Room test passed in 54 seconds. Evidence: `apps/site/test-results/issue-52-live-fifth.txt`. It covered Planned End Build and Rebuild, generated Rebuild, automation off/on, an explicit Planned End, stale acceptance, typed manual rejection, unchanged Room after rejection, explicit end extension, accepted movement, and deletion with a stable end. The complete site suite and the mobile unit tests and lint are now running. TypeScript passes. Changed-file lint has no errors.
+
+The Standards review found one naming breach. New boolean identifiers now use the required `is` or `has` prefix. The Spec review found one placement bypass. An existing unplaced Match kept its old state when a manual request assigned dates and a field. Validation skipped that state, but persistence then marked the Match placed. The boundary check now uses the assigned field and dates. A regression checks the old state. The live test also checks both single and bulk routes and unchanged Room data. The Spec reviewer confirmed the fix by source review. Verification of these follow-up changes remains pending.
+
+The first complete mobile run checked 1,662 Compose tests, 161 repository tests, and 107 network tests. The repository and network tests passed. Seventeen tests were skipped across the complete run. Four creation tests failed. Three expected the old policy reset. Their assertions now require policy and end preservation. The fourth exposed an Event Type rule that depended on the removed reset. `CreateEventSelectionRules` now explicitly clears the unsupported policy for One-Time Events and Tryouts. The Spec reviewer confirmed that fix. The two creation test classes, expanded live test, and Android lint are running again.
+
+The first 20 failing site suites also failed in the saved earlier full run, `issue-49-full-site.json`. Failures include Windows process launch, socket, symbolic link, path, and line-ending assumptions. The family route fixture also lacks the existing transaction lock method. These failures do not involve an issue #52 change. Compare final results before recording the complete site gate.
+
+All 99 tests in the two creation classes now pass. TypeScript and changed-file lint pass after the review fixes. Android lint passes. The expanded live check exposed two single-route details. A full Match command includes score fields and triggers the existing scoring guard. The test now sends a placement-only `MatchUpdateDto`. The single-route parser then discarded its dates. Add optional `start` and `end` instant fields to that parser. The Event form staffing test also failed in `issue-51-full-site.txt` with the same false/true assertion, before this issue.
+
+## Final validation on 2026-09-07
+
+The complete expanded mobile-to-site test passed in 56 seconds. Evidence: `apps/site/test-results/issue-52-live-single-parser.txt`. It proves typed rejection of an unplaced Match through both single and bulk routes. It also proves the Build, Rebuild, policy, stale proposal, Room, movement, and deletion requirements listed above. The single route uses the mobile placement DTO. The bulk route uses the mobile Match repository. Android lint passed. Native iOS execution is not available on Windows; the shared Kotlin error and persistence paths were tested on Android.
+
+The final Spec review found a second defect. Date conversion in the single-route parser caused the receipt hash to discard the dates. A changed start or end could be treated as an exact retry. The hash now converts Date values to ISO strings. Both regressions failed before the fix and pass after it. Exact retries still pass. All five receipt tests pass after the final refactor. Both reviewers report no open finding. The review resolved one Standards finding and two Spec findings.
+
+The complete site run finished in 2,393.866 seconds. It reported 898 passed suites, 32 failed suites, and seven skipped suites. It reported 6,139 passed tests, 57 failed tests, and 62 skipped tests. Evidence: `apps/site/test-results/issue-52-full-site.json`. Thirty failing suites also failed in `issue-49-full-site.json`. The Event form staffing failure also occurred before this issue in `issue-51-full-site.txt`. The email failure came from the test runtime's disabled provider setting. The complexity timeout and email tests pass in the focused rerun with the normal test environment. The remaining failures are existing Windows, Playwright/Jest discovery, and fixture/UI failures. No issue #52 regression remains.
+
+The four focused suites for receipt replay, Match boundaries, email, and complexity pass all 27 tests. Evidence: `apps/site/test-results/issue-52-final-rechecks.json`. The final receipt rerun passes all five tests. TypeScript and changed-file lint pass after the final changes. The touched contract and receipt files needed small refactors to pass existing complexity limits. A direct comparison against the issue base verified identical terminal-action results for 540 input combinations. Evidence: `apps/site/test-results/issue-52-terminal-equivalence.txt`.
+
+All issue acceptance criteria are satisfied. The local test server remains available on port 3052 under the user's start authorization. The final commit and GitHub reconciliation follow this validation record.

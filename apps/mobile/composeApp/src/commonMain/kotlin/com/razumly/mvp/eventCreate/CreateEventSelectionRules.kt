@@ -28,8 +28,9 @@ internal fun Event.applyCreateSelectionRules(): Event {
         EventType.TRYOUT -> normalizedEvent.copy(
             teamSignup = false,
             singleDivision = false,
+            noFixedEndDateTime = false,
         )
 
-        EventType.EVENT -> normalizedEvent
+        EventType.EVENT -> normalizedEvent.copy(noFixedEndDateTime = false)
     }.syncEventTypeTagsForEventType()
 }
