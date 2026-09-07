@@ -1,5 +1,8 @@
 package com.razumly.mvp.eventDetail
 
+import androidx.compose.material3.Button
+import androidx.compose.material3.Text
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -284,6 +287,10 @@ fun EventDetailScreen(
     var refundReason by remember { mutableStateOf("") }
     var showNotifyDialog by remember { mutableStateOf(false) }
     var showJoinOptionsSheet by remember { mutableStateOf(false) }
+    fun returnToCheckoutRegistration() {
+        val team = registrationTeams.firstOrNull { it.team.id == registrationSignup?.selectedTeamId }
+        if (team != null) signupReview = team else showJoinOptionsSheet = true
+    }
     var showInviteTeamDialog by rememberSaveable { mutableStateOf(false) }
     var showInvitePlayerDialog by rememberSaveable { mutableStateOf(false) }
     var selectedJoinOptionDivisionId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -1098,6 +1105,29 @@ fun EventDetailScreen(
                 }
         }
 
+        androidx.compose.runtime.CompositionLocalProvider(
+            LocalCheckoutEventName provides selectedEvent.event.name,
+            com.razumly.mvp.core.presentation.composables.LocalFormDialogContent provides { dismiss, title, content, confirm, back ->
+                EventCheckoutDialog(dismiss, title, content, confirm, back, EventCheckoutStep.REVIEW)
+            },
+        ) {
+        val checkoutReview by component.checkoutReview.collectAsState()
+        val checkoutCompleted by component.checkoutCompleted.collectAsState()
+        checkoutReview?.let { review ->
+            EventCheckoutReview(review, component::confirmCheckoutReview, onBack = {
+                component.dismissCheckoutReview()
+                if (review.team != null) signupReview = review.team else showJoinOptionsSheet = true
+            })
+        }
+        if (checkoutCompleted) {
+            EventCheckoutDialog(
+                step = EventCheckoutStep.COMPLETE,
+                onDismissRequest = component::dismissCheckoutCompleted,
+                title = { Text("Registration saved") },
+                text = { Text("Your registration is saved. View the Event roster for Player and guardian actions that remain.") },
+                confirmButton = { Button(onClick = component::dismissCheckoutCompleted) { Text("View Event") } },
+            )
+        }
         EventSignupDialogs(component, selectedEvent.event, currentUser, sports, signupForm, signupFormStep, signupReview,
         onFormChange = { form, step -> signupForm = form; signupFormStep = step },
         onReviewChange = { signupReview = it }, onChangeTeam = { showTeamSelectionDialog = true })
@@ -1226,11 +1256,17 @@ fun EventDetailScreen(
                 onChildSelected = component::selectChildForJoin,
                 onDismissTeamJoinQuestions = component::dismissTeamJoinQuestionDialog,
                 onSubmitTeamJoinQuestions = component::submitTeamJoinQuestionAnswers,
-                onDismissRegistrationQuestions = component::dismissEventRegistrationQuestionDialog,
+                onDismissRegistrationQuestions = {
+                    component.dismissEventRegistrationQuestionDialog()
+                    returnToCheckoutRegistration()
+                },
                 onSubmitRegistrationQuestions =
                     component::submitEventRegistrationQuestionDialogAnswers,
                 onContinuePaymentPlan = component::confirmPaymentPlanPreviewDialog,
-                onCancelPaymentPlan = component::dismissPaymentPlanPreviewDialog,
+                onCancelPaymentPlan = {
+                    component.dismissPaymentPlanPreviewDialog()
+                    returnToCheckoutRegistration()
+                },
                 onDismissStandingsConfirmation = { showStandingsConfirmDialog = false },
                 onConfirmStandings = { applyReassignment ->
                     showStandingsConfirmDialog = false
@@ -1322,14 +1358,26 @@ fun EventDetailScreen(
                     selectedWithdrawalTarget = null
                 },
                 onConfirmTextSignature = component::confirmTextSignature,
-                onDismissTextSignature = component::dismissTextSignature,
-                onDismissWebSignature = component::dismissWebSignaturePrompt,
+                onDismissTextSignature = {
+                    component.dismissTextSignature()
+                    returnToCheckoutRegistration()
+                },
+                onDismissWebSignature = {
+                    component.dismissWebSignaturePrompt()
+                    returnToCheckoutRegistration()
+                },
                 onApplyDiscountCode = component::applyDiscountCodePrompt,
                 onDiscountCodeChanged = component::clearDiscountCodePromptFeedback,
                 onContinueDiscountCode = component::continueFromDiscountCodePrompt,
-                onDismissDiscountCode = component::dismissDiscountCodePrompt,
+                onDismissDiscountCode = {
+                    component.dismissDiscountCodePrompt()
+                    returnToCheckoutRegistration()
+                },
                 onSubmitBillingAddress = component::submitBillingAddress,
-                onDismissBillingAddress = component::dismissBillingAddressPrompt,
+                onDismissBillingAddress = {
+                    component.dismissBillingAddressPrompt()
+                    returnToCheckoutRegistration()
+                },
             ),
         )
         protectedMatchDeletionConfirmation?.let { message ->
@@ -1350,6 +1398,7 @@ fun EventDetailScreen(
             )
         }
 
+        }
         notificationPermissionPrimer?.let { state ->
             PermissionPrimerDialog(
                 state = state,

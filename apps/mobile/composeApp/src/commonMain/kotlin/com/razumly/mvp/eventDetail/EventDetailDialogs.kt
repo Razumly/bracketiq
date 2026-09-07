@@ -109,19 +109,22 @@ fun TeamSelectionDialog(
     onDismiss: () -> Unit,
     onCreateTeam: () -> Unit
 ) {
-    AlertDialog(
+    EventCheckoutDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Select a team for $eventSportLabel") },
+        title = { Text("Select a team") },
         text = {
-            LazyColumn {
-                items(teams) { team ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onTeamSelected(team) }
-                            .padding(8.dp)
-                    ) {
-                        TeamCard(team)
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(
+                    text = eventSportLabel,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f, fill = false)) {
+                    items(teams, key = { it.team.id }) { team ->
+                        TeamCard(
+                            team = team,
+                            modifier = Modifier.fillMaxWidth().clickable { onTeamSelected(team) },
+                        )
                     }
                 }
             }
@@ -130,7 +133,9 @@ fun TeamSelectionDialog(
             Button(onClick = onCreateTeam) {
                 Text("Create team")
             }
-        })
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Back") } },
+    )
 }
 
 private fun WithdrawTargetMembership.displayName(): String = when (this) {
@@ -190,7 +195,8 @@ fun TextSignatureDialog(
     var accepted by remember(prompt.step.templateId) { mutableStateOf(false) }
     val isSyncing = !progressMessage.isNullOrBlank()
 
-    AlertDialog(
+    EventCheckoutDialog(
+        step = EventCheckoutStep.REQUIREMENTS,
         onDismissRequest = { if (!isSyncing) onDismiss() },
         title = { Text(prompt.step.title ?: "Required Document Signature") },
         text = {
@@ -344,7 +350,8 @@ internal fun PaymentPlanPreviewDialog(
         dialogState.ownerLabel
     }
 
-    AlertDialog(
+    EventCheckoutDialog(
+        step = EventCheckoutStep.REVIEW,
         onDismissRequest = onCancel,
         title = { Text("Payment plan preview") },
         text = {
@@ -404,7 +411,7 @@ internal fun PaymentPlanPreviewDialog(
     )
 }
 
-private fun Int.toPaymentPlanPreviewAmount(): String = "$${coerceAtLeast(0).centsToDollars()} + fees"
+internal fun Int.toPaymentPlanPreviewAmount(): String = "$${coerceAtLeast(0).centsToDollars()} + fees"
 
 private fun formatPaymentPlanFixedDueDate(value: String?): String {
     val rawValue = value
