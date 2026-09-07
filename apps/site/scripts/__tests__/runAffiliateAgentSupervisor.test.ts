@@ -681,10 +681,12 @@ describe("affiliate agent supervisor CLI", () => {
         mode: "READ_ONLY",
       });
       try {
-        expect(await readdir(workspace.path)).toEqual([".codex"]);
         expect((await stat(root)).mode & 0o777).toBe(0o710);
         expect((await stat(workspace.path)).mode & 0o777).toBe(0o550);
         expect((await stat(workspace.codexHome!)).mode & 0o777).toBe(0o770);
+        for (const name of [".git", ".agents"]) {
+          expect((await stat(join(workspace.path, name))).mode & 0o777).toBe(0o550);
+        }
       } finally {
         await manager.destroy(workspace.path);
       }

@@ -18,12 +18,12 @@ The affiliate mapping agents must use the existing Codex CLI and Luna model fami
 - [x] Install the reviewed Codex auth seed on the production host without printing values.
 - [x] Create the private governed deployment environment and run governed preflight.
 - [x] Implement bounded legacy admission and claim-bound sport validation.
-- [x] Verify TypeScript and 465 tests across 12 focused suites.
+- [x] Verify TypeScript and 501 tests across 14 focused suites.
 - [x] Complete Standards and specification reviews with no remaining known findings.
 - [x] Provision and verify governed database roles after separate operator approval.
 - [x] Verify a stable live read-only preview and exact stored artifact bytes.
-- [ ] Run governed preflight and one bounded mapping canary. The fleet passed preflight. The canary opened admission but found no claimable governed mapping job.
-- [ ] Verify terminal result and review state. Blocked because no governed claim ran.
+- [ ] Complete the bounded mapping canary. One job is admitted; the first invocation failed and the verified runtime fixes are ready for deployment.
+- [ ] Verify a productive terminal result and independent review state.
 
 ## Surprises & Discoveries
 
@@ -231,6 +231,46 @@ The protected pre-apply database backup is
 Its SHA-256 is
 `3f29a00cc609465cc9f8a76fa433d3018abf582439063d1af19d2f9d4919a092`.
 Do not omit the abandoned run from preflight evidence before recovery.
+
+## Runtime compatibility findings
+
+The first admitted gateway job is `d7a1fe71-c76e-4191-a3f3-610c737d683e`.
+It references mapping job `50957179-8e51-42f0-a0db-2fc4791bdc79` and held Supply
+Source `a8764a56-2da2-4382-82d1-eee317b05143`. An exact admission replay returned
+zero writes and the original report hash. No second job was admitted.
+
+Claim `agw-claim-08d33de3-2b68-4734-ad19-89e0a3b60a81` failed with PROCESS_CRASH.
+The job remains RETRY_WAIT with one recorded invocation failure. Preserve this
+history. Admission is closed and the canary workers are stopped during repair.
+
+A real HTTP decoder regression reproduced an extra `receiptId` in the gateway
+reconciliation response. The server now returns exactly the declared
+reconciliation result. The stored receipt still retains its ID.
+
+The pinned Codex sandbox failed to create namespaces under Docker defaults.
+After separate operator approval, task agents prepared runner-only seccomp and
+AppArmor profiles. Independent security review found no actionable issue in the
+reviewed delta. Seccomp retains the exported Docker baseline and adds exact
+namespace clone/unshare flags plus namespace mount setup. AppArmor retains the
+proc/sys and socket protections. No SYS_ADMIN, privileged mode, unconfined
+profile, or global kernel setting was added.
+
+The approved canonical seccomp hash is
+`624a3cdf758efb74cd6de9c956ac344d99bf2255a5fc1e4bdf8df91a3550bf7a`.
+The AppArmor file hash is
+`19d5f94168ee26a8107fb75e391fe08003457734c2394829c4b6c25bc63f28ee`.
+Both are bound by preflight. The named AppArmor profile is enforcing.
+
+The credential-free sandbox smoke passes with the production noexec/0710
+workspace mount, CPU/memory/PID limits, UID separation, and capabilities. It
+proves workspace writes, denial of a DAC-writable sibling, NoNewPrivs=1, and
+zero effective child capabilities. Reviewer mode also proves root write denial
+and private temporary writes. The supervisor prepares read-only policy mount
+targets before locking reviewer roots. The CLI excludes the global /tmp path.
+
+Task-authored diagnostics retain only an 8 KiB stderr tail in memory. Logs
+contain fixed failure signals and bounded counts, never stdout/stderr contents,
+tokens, or token hashes. TypeScript and all 501 focused tests pass.
 
 ## Change Note
 

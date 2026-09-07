@@ -490,6 +490,239 @@ export const AFFILIATE_AGENT_RUNNER_MAX_CHILD_OUTPUT_BYTES =
   + AFFILIATE_AGENT_RUNNER_TERMINAL_SUBMISSION_FRAME_OVERHEAD_BYTES
   + 2;
 const MAX_CHILD_OUTPUT_BYTES = AFFILIATE_AGENT_RUNNER_MAX_CHILD_OUTPUT_BYTES;
+export const AFFILIATE_AGENT_RUNNER_MAX_STDERR_TAIL_BYTES = 8 * 1024;
+const MAX_STDERR_TAIL_BYTES = AFFILIATE_AGENT_RUNNER_MAX_STDERR_TAIL_BYTES;
+const MAX_DIAGNOSTIC_BYTE_COUNT = MAX_CHILD_OUTPUT_BYTES;
+
+const boundedDiagnosticByteCount = (value: number): number => {
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return Math.min(Math.floor(value), MAX_DIAGNOSTIC_BYTE_COUNT);
+};
+
+const addBoundedDiagnosticByteCount = (
+  current: number,
+  addition: number,
+): number => {
+  const boundedCurrent = boundedDiagnosticByteCount(current);
+  const boundedAddition = boundedDiagnosticByteCount(addition);
+  if (
+    boundedCurrent >= MAX_DIAGNOSTIC_BYTE_COUNT - boundedAddition
+  ) {
+    return MAX_DIAGNOSTIC_BYTE_COUNT;
+  }
+  return boundedCurrent + boundedAddition;
+};
+
+export const AFFILIATE_AGENT_RUNNER_CHILD_FAILURE_SIGNALS = [
+  "SANDBOX_NAMESPACE_DENIAL",
+  "AUTHENTICATION_FAILURE",
+  "MODEL_UNAVAILABLE",
+  "CLI_ARGUMENT_REJECTION",
+  "FILESYSTEM_DENIAL",
+  "RATE_LIMITING",
+  "NETWORK_FAILURE",
+] as const;
+export type AffiliateAgentRunnerChildFailureSignal =
+  typeof AFFILIATE_AGENT_RUNNER_CHILD_FAILURE_SIGNALS[number];
+
+const CHILD_FAILURE_SIGNATURES: ReadonlyArray<Readonly<{
+  signal: AffiliateAgentRunnerChildFailureSignal;
+  patterns: readonly RegExp[];
+}>> = [
+  {
+    signal: "SANDBOX_NAMESPACE_DENIAL",
+    patterns: [
+      /\b(?:user\s+)?namespace\b[\s\S]{0,120}\b(?:denied|not permitted|permission denied|operation not permitted|failed)\b/,
+      /\b(?:sandbox|unshare)\b[\s\S]{0,120}\b(?:denied|not permitted|permission denied|operation not permitted|failed)\b/,
+      /\b(?:failed|unable|cannot|could not)\b[\s\S]{0,120}\b(?:sandbox|namespace|unshare)\b/,
+      /\b(?:operation not permitted|permission denied)\b[\s\S]{0,120}\b(?:sandbox|namespace|unshare)\b/,
+    ],
+  },
+  {
+    signal: "AUTHENTICATION_FAILURE",
+    patterns: [
+      /\b(?:authentication|auth|credential|token)[\s_-]*(?:failed|failure|error|invalid|rejected|expired|required)\b/,
+      /\b(?:authentication|auth|credential|token)\b[\s\S]{0,80}\b(?:failed|failure|error|invalid|rejected|expired|required)\b/,
+      /\b(?:unauthorized|not authenticated|login required|invalid api key)\b/,
+    ],
+  },
+  {
+    signal: "MODEL_UNAVAILABLE",
+    patterns: [
+      /\b(?:no such model|model[\s_-]*(?:unavailable|not available|not found|does not exist|unsupported|overloaded))\b/,
+      /\bmodel\b[\s\S]{0,100}\b(?:unavailable|not available|not found|does not exist|unsupported|overloaded)\b/,
+    ],
+  },
+  {
+    signal: "CLI_ARGUMENT_REJECTION",
+    patterns: [
+      /\b(?:unknown|unrecognized|unexpected|invalid)[\s_-]+(?:command[- ]line[\s_-]+)?(?:option|argument|flag|parameter)\b/,
+      /\b(?:invalid|rejected)\s+value\b[\s\S]{0,80}\b(?:option|argument|flag|parameter)\b/,
+      /\b(?:option|argument|flag)\b[\s\S]{0,80}\b(?:unknown|invalid|unrecognized|rejected)\b/,
+    ],
+  },
+  {
+    signal: "FILESYSTEM_DENIAL",
+    patterns: [
+      /\b(?:permission[-_ ]denied|read[- ]only file system|read[- ]only filesystem|no space left on device)\b/,
+      /\b(?:eacces|eperm|enospc|erofs)\b/,
+      /\boperation not permitted\b/,
+    ],
+  },
+  {
+    signal: "RATE_LIMITING",
+    patterns: [
+      /\b(?:rate[- _]limit(?:ed|ing|[- _]?exceeded)?|too many requests|quota exceeded)\b/,
+      /\b(?:http\s*)?429\b/,
+    ],
+  },
+  {
+    signal: "NETWORK_FAILURE",
+    patterns: [
+      /\b(?:network[-_ ](?:error|failure)|network(?: error| failure)|connection (?:refused|reset|aborted|timed out)|fetch failed|socket hang up|tls handshake (?:failed|error))\b/,
+      /\bnetwork\b[\s\S]{0,80}\b(?:failed|failure|error)\b/,
+      /\b(?:econnrefused|econnreset|econnaborted|enotfound|enetunreach|ehostunreach|etimedout|dns)\b/,
+      /\b(?:request|network)\s+timed out\b/,
+    ],
+  },
+];
+export const classifyAffiliateAgentRunnerChildFailure = (
+  stderrTail: string | Uint8Array,
+): readonly AffiliateAgentRunnerChildFailureSignal[] => {
+  const tailBytes = typeof stderrTail === "string"
+    ? Buffer.from(stderrTail, "utf8")
+    : stderrTail;
+  const boundedTail = tailBytes.byteLength > MAX_STDERR_TAIL_BYTES
+    ? tailBytes.subarray(tailBytes.byteLength - MAX_STDERR_TAIL_BYTES)
+    : tailBytes;
+  const normalizedTail = Buffer.from(boundedTail).toString("utf8").toLowerCase();
+  const matchedSignals = CHILD_FAILURE_SIGNATURES.filter(({ patterns }) => (
+    patterns.some((pattern) => pattern.test(normalizedTail))
+  ));
+  const hasSandboxNamespaceDenial = matchedSignals.some(({ signal }) => (
+    signal === "SANDBOX_NAMESPACE_DENIAL"
+  ));
+  return matchedSignals
+    .filter(({ signal }) => (
+      signal !== "FILESYSTEM_DENIAL" || !hasSandboxNamespaceDenial
+    ))
+    .map(({ signal }) => signal);
+};
+
+export const AFFILIATE_AGENT_RUNNER_SPAWN_ERROR_CODES = [
+  "E2BIG",
+  "EACCES",
+  "EADDRINUSE",
+  "EADDRNOTAVAIL",
+  "ECONNABORTED",
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "EEXIST",
+  "EFAULT",
+  "EHOSTUNREACH",
+  "EIO",
+  "EISDIR",
+  "ELOOP",
+  "EMFILE",
+  "ENAMETOOLONG",
+  "ENETDOWN",
+  "ENETUNREACH",
+  "ENFILE",
+  "ENOENT",
+  "ENOMEM",
+  "ENOSPC",
+  "ENOTDIR",
+  "ENXIO",
+  "EOVERFLOW",
+  "EPIPE",
+  "EPERM",
+  "ETIMEDOUT",
+  "ETXTBSY",
+] as const;
+export type AffiliateAgentRunnerSpawnErrorCode =
+  typeof AFFILIATE_AGENT_RUNNER_SPAWN_ERROR_CODES[number] | "UNKNOWN";
+
+const publicSpawnErrorCodeFor = (
+  value: unknown,
+): AffiliateAgentRunnerSpawnErrorCode => {
+  if (
+    typeof value === "string"
+    && (AFFILIATE_AGENT_RUNNER_SPAWN_ERROR_CODES as readonly string[]).includes(value)
+  ) {
+    return value as AffiliateAgentRunnerSpawnErrorCode;
+  }
+  if (
+    value !== null
+    && typeof value === "object"
+    && "code" in value
+    && typeof value.code === "string"
+  ) {
+    return publicSpawnErrorCodeFor(value.code);
+  }
+  return "UNKNOWN";
+};
+
+const stderrTailBytesFor = (stderrTail: string | Uint8Array): number => (
+  Math.min(
+    typeof stderrTail === "string"
+      ? Buffer.byteLength(stderrTail, "utf8")
+      : stderrTail.byteLength,
+    MAX_STDERR_TAIL_BYTES,
+  )
+);
+
+export type AffiliateAgentRunnerChildFailureDiagnosticInput = Readonly<{
+  exitCode: number | null;
+  stdoutBytes: number;
+  stderrBytes: number;
+  stderrTail: string | Uint8Array;
+  hasOutputOverflow: boolean;
+  hasOutputDecodeError: boolean;
+  spawnErrorCode?: unknown;
+}>;
+
+export type AffiliateAgentRunnerChildFailureDiagnostic = Readonly<{
+  event: "affiliate-agent-runner-child-failure";
+  exitCode: number | null;
+  stdoutBytes: number;
+  stderrBytes: number;
+  stderrTailBytes: number;
+  hasOutputOverflow: boolean;
+  hasOutputDecodeError: boolean;
+  signals: readonly AffiliateAgentRunnerChildFailureSignal[];
+  spawnErrorCode: AffiliateAgentRunnerSpawnErrorCode | null;
+}>;
+
+export const affiliateAgentRunnerChildFailureDiagnosticFor = (
+  input: AffiliateAgentRunnerChildFailureDiagnosticInput,
+): AffiliateAgentRunnerChildFailureDiagnostic => ({
+  event: "affiliate-agent-runner-child-failure",
+  exitCode: input.exitCode === null || Number.isInteger(input.exitCode)
+    ? input.exitCode
+    : null,
+  stdoutBytes: boundedDiagnosticByteCount(input.stdoutBytes),
+  stderrBytes: boundedDiagnosticByteCount(input.stderrBytes),
+  stderrTailBytes: stderrTailBytesFor(input.stderrTail),
+  hasOutputOverflow: input.hasOutputOverflow,
+  hasOutputDecodeError: input.hasOutputDecodeError,
+  signals: classifyAffiliateAgentRunnerChildFailure(input.stderrTail),
+  spawnErrorCode: input.spawnErrorCode === undefined || input.spawnErrorCode === null
+    ? null
+    : publicSpawnErrorCodeFor(input.spawnErrorCode),
+});
+
+export const serializeAffiliateAgentRunnerChildFailureDiagnostic = (
+  input: AffiliateAgentRunnerChildFailureDiagnosticInput,
+): string => JSON.stringify(affiliateAgentRunnerChildFailureDiagnosticFor(input));
+const emitAffiliateAgentRunnerChildFailureDiagnostic = (
+  input: AffiliateAgentRunnerChildFailureDiagnosticInput,
+): void => {
+  try {
+    console.info(serializeAffiliateAgentRunnerChildFailureDiagnostic(input));
+  } catch {
+    // Diagnostics must not change child containment or cleanup.
+  }
+};
 const AFFILIATE_AGENT_RUNNER_REQUEST_TTL_MILLISECONDS =
   AFFILIATE_AGENT_WORKSPACE_ATTESTATION_LIFETIME_SECONDS * 1_000;
 const AFFILIATE_AGENT_MAX_SEEN_REQUEST_IDS = 1_024;
@@ -747,6 +980,8 @@ const codexArgumentsFor = (model: string): readonly string[] => [
   "workspace-write",
   "-c",
   "sandbox_workspace_write.network_access=true",
+  "-c",
+  "sandbox_workspace_write.exclude_slash_tmp=true",
   "-",
 ];
 
@@ -916,11 +1151,70 @@ type ChildRuntimeState = {
   childGeneration: number;
   decoder: TextDecoder;
   output: string;
+  stdoutBytes: number;
+  stderrTail: Buffer;
+  stderrBytes: number;
   hasOutputOverflow: boolean;
   hasOutputDecodeError: boolean;
   hasPublishedExit: boolean;
   hasPublishedStartFailure: boolean;
+  childStartFailureCode: AffiliateAgentRunnerSpawnErrorCode | null;
+  hasPublishedFailureDiagnostic: boolean;
   isFinalizing: boolean;
+};
+
+const publishChildFailureDiagnostic = (
+  state: ChildRuntimeState,
+  exitCode: number | null,
+): void => {
+  if (state.hasPublishedFailureDiagnostic) return;
+  state.hasPublishedFailureDiagnostic = true;
+  emitAffiliateAgentRunnerChildFailureDiagnostic({
+    exitCode,
+    stdoutBytes: state.stdoutBytes,
+    stderrBytes: state.stderrBytes,
+    stderrTail: state.stderrTail,
+    hasOutputOverflow: state.hasOutputOverflow,
+    hasOutputDecodeError: state.hasOutputDecodeError,
+    spawnErrorCode: state.childStartFailureCode,
+  });
+};
+
+const publishAffiliateAgentRunnerSpawnFailureDiagnostic = (
+  error: unknown,
+): void => {
+  emitAffiliateAgentRunnerChildFailureDiagnostic({
+    exitCode: null,
+    stdoutBytes: 0,
+    stderrBytes: 0,
+    stderrTail: "",
+    hasOutputOverflow: false,
+    hasOutputDecodeError: false,
+    spawnErrorCode: error,
+  });
+};
+
+const appendChildStderr = (
+  state: ChildRuntimeState,
+  chunk: Buffer | string,
+): void => {
+  const bytes = typeof chunk === "string"
+    ? Buffer.from(chunk, "utf8")
+    : chunk;
+  state.stderrBytes = addBoundedDiagnosticByteCount(
+    state.stderrBytes,
+    bytes.byteLength,
+  );
+  if (bytes.byteLength === 0) return;
+  if (bytes.byteLength >= MAX_STDERR_TAIL_BYTES) {
+    state.stderrTail = Buffer.from(
+      bytes.subarray(bytes.byteLength - MAX_STDERR_TAIL_BYTES),
+    );
+    return;
+  }
+  const combined = Buffer.concat([state.stderrTail, bytes]);
+  const start = Math.max(0, combined.byteLength - MAX_STDERR_TAIL_BYTES);
+  state.stderrTail = Buffer.from(combined.subarray(start));
 };
 
 const isCurrentChild = (state: ChildRuntimeState): boolean => (
@@ -1005,6 +1299,9 @@ const publishContainedChildExit = (
     || state.hasPublishedExit
     || state.isFinalizing
   ) return;
+  if (event.kind === "EXIT" && event.reason === "TIMEOUT") {
+    publishChildFailureDiagnostic(state, event.exitCode);
+  }
   state.isFinalizing = true;
   void finalizeContainedChildExit(state, event);
 };
@@ -1012,6 +1309,7 @@ const publishContainedChildExit = (
 const publishChildStartFailure = (
   state: ChildRuntimeState,
   message: string,
+  error?: unknown,
 ): void => {
   if (
     !isCurrentChild(state)
@@ -1019,6 +1317,8 @@ const publishChildStartFailure = (
     || state.hasPublishedExit
   ) return;
   state.hasPublishedStartFailure = true;
+  state.childStartFailureCode = publicSpawnErrorCodeFor(error);
+  publishChildFailureDiagnostic(state, state.child.exitCode);
   send(state.active.socket, {
     kind: "ERROR",
     requestId: state.startedRequestId,
@@ -1049,8 +1349,12 @@ const handleChildSpawn = (state: ChildRuntimeState): void => {
     state.child.stdin.write(state.prompt);
     state.child.stdin.end();
     send(state.active.socket, { kind: "STARTED", requestId: state.startedRequestId });
-  } catch {
-    publishChildStartFailure(state, "The Codex child could not receive its prompt.");
+  } catch (error) {
+    publishChildStartFailure(
+      state,
+      "The Codex child could not receive its prompt.",
+      error,
+    );
   }
 };
 
@@ -1063,6 +1367,12 @@ const handleChildStdout = (
     || state.hasOutputOverflow
     || state.hasOutputDecodeError
   ) return;
+  state.stdoutBytes = addBoundedDiagnosticByteCount(
+    state.stdoutBytes,
+    typeof chunk === "string"
+      ? Buffer.byteLength(chunk, "utf8")
+      : chunk.byteLength,
+  );
   if (typeof chunk === "string") {
     appendChildOutput(state, chunk);
     return;
@@ -1106,6 +1416,7 @@ const handleChildClose = (
   if (!isCurrentChild(state)) return;
   if (state.active.pendingExitReason === "TIMEOUT") return;
   if (state.hasPublishedStartFailure || state.hasOutputDecodeError) {
+    publishChildFailureDiagnostic(state, exitCode ?? state.child.exitCode ?? 1);
     publishContainedChildExit(state, { kind: "EXIT", exitCode: 1 });
     return;
   }
@@ -1113,22 +1424,35 @@ const handleChildClose = (
     appendChildOutput(state, state.decoder.decode());
   } catch {
     state.hasOutputDecodeError = true;
+    publishChildFailureDiagnostic(state, exitCode ?? state.child.exitCode ?? 1);
     publishContainedChildExit(state, { kind: "EXIT", exitCode: 1 });
     return;
   }
-  publishContainedChildExit(
-    state,
-    childExitEventFor(exitCode, state.output, state.hasOutputOverflow),
+  const event = childExitEventFor(
+    exitCode,
+    state.output,
+    state.hasOutputOverflow,
   );
+  if (event.kind === "EXIT") {
+    publishChildFailureDiagnostic(state, event.exitCode);
+  }
+  publishContainedChildExit(state, event);
 };
 
-const attachChildListeners = (state: ChildRuntimeState): void => {
-  state.child.stdin?.once("error", () => {
-    publishChildStartFailure(state, "The Codex child could not receive its prompt.");
+const attachChildRuntime = (state: ChildRuntimeState): void => {
+  state.child.stdin?.once("error", (error) => {
+    publishChildStartFailure(
+      state,
+      "The Codex child could not receive its prompt.",
+      error,
+    );
   });
   state.child.once("spawn", () => handleChildSpawn(state));
-  state.child.once("error", () => {
-    publishChildStartFailure(state, "The Codex child could not be started.");
+  state.child.once("error", (error) => {
+    publishChildStartFailure(state, "The Codex child could not be started.", error);
+  });
+  state.child.stderr?.on("data", (chunk: Buffer | string) => {
+    appendChildStderr(state, chunk);
   });
   state.child.stderr?.resume();
   state.child.stdout?.on("data", (chunk: Buffer | string) => {
@@ -1288,10 +1612,15 @@ const spawnChild = (
     childGeneration,
     decoder: new TextDecoder("utf-8", { fatal: true }),
     output: "",
+    stdoutBytes: 0,
+    stderrTail: Buffer.alloc(0),
+    stderrBytes: 0,
     hasOutputOverflow: false,
     hasOutputDecodeError: false,
     hasPublishedExit: false,
     hasPublishedStartFailure: false,
+    childStartFailureCode: null,
+    hasPublishedFailureDiagnostic: false,
     isFinalizing: false,
   };
   active.publishExit = (reason) => publishContainedChildExit(state, {
@@ -1299,7 +1628,7 @@ const spawnChild = (
     exitCode: 1,
     ...(reason === "TIMEOUT" ? { reason } : {}),
   });
-  attachChildListeners(state);
+  attachChildRuntime(state);
 };
 
 type ParsedRequestMetadata = Readonly<{
@@ -2687,9 +3016,10 @@ const handleLaunchRequest = (
       context.supervisorUid,
     );
     scheduleInvocationDeadline(active, context);
-  } catch {
+  } catch (error) {
     clearInvocationTimeoutFor(active);
     clearInvocationProcessTracker(active);
+    publishAffiliateAgentRunnerSpawnFailureDiagnostic(error);
     send(state.socket, {
       kind: "ERROR",
       requestId: request.requestId,

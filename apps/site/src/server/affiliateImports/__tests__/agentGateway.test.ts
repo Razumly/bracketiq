@@ -1,5 +1,7 @@
 /** @jest-environment node */
 import { createHash } from "node:crypto";
+import { createServer as createHttpServer } from "node:http";
+import { AffiliateAgentHttpGateway } from "../../../../scripts/run-affiliate-agent-supervisor";
 
 import type { PrismaClient } from "@/generated/prisma/client";
 import { buildAffiliateSportsCatalogSnapshot } from "../affiliateSportsCatalog";
@@ -5302,7 +5304,6 @@ describe("Prisma affiliate Agent Gateway", () => {
       invocationFailureCount: 1,
       nextAttemptAt: "2026-08-20T18:05:00.000Z",
       isPipelineBlocked: false,
-      receiptId: expect.any(String),
     });
     expect(harness.state.receipts).toEqual(
       expect.arrayContaining([
@@ -6169,7 +6170,13 @@ describe("Prisma affiliate Agent Gateway", () => {
           "2026-08-20T18:05:00.000Z",
         ),
       ),
-    ).resolves.toEqual(expiryReceipt.responseJson);
+    ).resolves.toEqual({
+      kind: "INVOCATION_FAILED",
+      failureCode: "TIMEOUT",
+      invocationFailureCount: 1,
+      nextAttemptAt: "2026-08-20T18:10:00.000Z",
+      isPipelineBlocked: false,
+    });
     expect(harness.state.receipts).toHaveLength(1);
     expect(harness.state.jobs[0]).toMatchObject({
       status: "RETRY_WAIT",
@@ -6682,6 +6689,37 @@ describe("Prisma affiliate Agent Gateway", () => {
     ).toBeNull();
   });
 
+  it("delivers real reconciliation failures through the supervisor HTTP decoder", async () => {
+    const harness = createGatewayClaimHarness();
+    const grant = await harness.gateway.claim(harness.request);
+    if (!grant) throw new Error("Expected a claim for reconciliation.");
+    const operation = failureOperationFor(grant, "http-reconcile-failure", "PROCESS_CRASH");
+    const result = await harness.reconciler.reconcileInvocation(operation);
+    const server = createHttpServer((_request, response) => {
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify({ result }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("Expected a TCP test server.");
+      const client = new AffiliateAgentHttpGateway(
+        `http://127.0.0.1:${address.port}`,
+        new AbortController().signal,
+        "role-credential",
+      );
+      await expect(client.reconcileInvocation(operation)).resolves.toMatchObject({
+        kind: "INVOCATION_FAILED",
+        failureCode: "PROCESS_CRASH",
+        invocationFailureCount: 1,
+        isPipelineBlocked: false,
+      });
+      expect(harness.state.jobs[0].status).toBe("RETRY_WAIT");
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
   it("validates invocation reconciliation input before Prisma access", async () => {
     const harness = createGatewayClaimHarness();
     const grant = await harness.gateway.claim(harness.request);
@@ -6897,7 +6935,6 @@ describe("Prisma affiliate Agent Gateway", () => {
       invocationFailureCount: 1,
       nextAttemptAt: "2026-08-20T18:05:00.000Z",
       isPipelineBlocked: false,
-      receiptId: expect.any(String),
     });
     await expect(
       reconciler.reconcileInvocation({

@@ -18,6 +18,7 @@ COPY prisma ./prisma
 RUN npm ci --omit=dev
 
 COPY src ./src
+COPY data ./data
 COPY scripts/normalize-prisma-generated.mjs scripts/normalize-prisma-generated.mjs
 COPY scripts/run-affiliate-agent-gateway.ts scripts/run-affiliate-agent-gateway.ts
 COPY scripts/run-affiliate-replenishment-controller.ts scripts/run-affiliate-replenishment-controller.ts
