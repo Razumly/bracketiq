@@ -508,7 +508,7 @@ contracts are version 3. The generated instructions remain inside the existing
 surface rules and a complete sport-assessment shape without loading ambient
 skills or context files.
 
-The source passed 360 tests across 10 focused suites, TypeScript, and targeted
+The source passed 366 tests across 10 focused suites, TypeScript, and targeted
 ESLint. These suites cover Gateway state transitions, artifact receipt replay,
 generic-gap correction, wrong-owned evidence, catalog drift, resolved
 non-sport gaps, HTTP transport, OMP paging, and runner diagnostic redaction,
@@ -530,3 +530,30 @@ silently becoming null. Independent review records are attached to Issue 70.
 No image was published, no runtime was restarted, and no completed job was
 reset or retried during this source correction. Deployment requires separate
 current authorization, matching version-3 contracts, and fresh preflight.
+
+### Review findings and additional proof
+
+The first independent review found four gaps. The final SDK wrapper now sends
+malformed `execute_command` input to the bridge's strict validator without
+changing its advertised schema. The root charges all diagnostic input before
+parsing, so malformed stderr cannot bypass the input budget. Empty legacy
+sport-determination arrays enter bounded correction. Package listing URLs
+require stored provenance and cannot fall back to page-body links.
+
+The real validation-to-commit regression found an additional source mismatch:
+the persisted validation summary omitted the receipt ID that commit binding
+requires. The source now persists that ID. Positive production-adapter
+validation-to-commit and missing-provenance rejection cases pass without a
+test-only summary patch.
+
+The pinned SDK regression passed with the exact bundled Luna model and no
+provider response. It checks the final wrapped AgentTool, unchanged schema,
+local diagnostic delivery, and zero Gateway/provider/network calls. The
+regression uses an empty required string because the SDK can coerce a numeric
+value to a valid string before bridge validation.
+
+    npm exec --yes --package=bun@1.3.14 -- bun scripts/test-affiliate-omp-agent-sdk-schema.ts
+
+The focused suites also passed with `--detectOpenHandles`; that diagnostic
+run reported no retained handle. The source and review-fix records remain on
+Issue 70. Production records remain held and unchanged by this source work.

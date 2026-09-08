@@ -502,6 +502,61 @@ const MAX_CHILD_OUTPUT_BYTES = AFFILIATE_AGENT_RUNNER_MAX_CHILD_OUTPUT_BYTES;
 export const AFFILIATE_AGENT_RUNNER_MAX_STDERR_TAIL_BYTES = 8 * 1024;
 const MAX_STDERR_TAIL_BYTES = AFFILIATE_AGENT_RUNNER_MAX_STDERR_TAIL_BYTES;
 const MAX_DIAGNOSTIC_BYTE_COUNT = MAX_CHILD_OUTPUT_BYTES;
+const MAX_DIAGNOSTIC_INPUT_BYTES =
+  AFFILIATE_AGENT_COMMAND_DIAGNOSTIC_MAX_TOTAL_BYTES;
+
+type DiagnosticInputChunk = Readonly<{
+  bytes: Buffer;
+  byteCount: number;
+}>;
+
+const utf8ByteCountForCodePoint = (codePoint: number): number => (
+  codePoint <= 0x7f
+    ? 1
+    : codePoint <= 0x7ff
+      ? 2
+      : codePoint <= 0xffff
+        ? 3
+        : 4
+);
+
+const boundedDiagnosticInputChunkFor = (
+  chunk: Buffer | string,
+  maximumBytes: number,
+): DiagnosticInputChunk => {
+  if (maximumBytes <= 0) {
+    return { bytes: Buffer.alloc(0), byteCount: 0 };
+  }
+  if (typeof chunk !== "string") {
+    const byteCount = Math.min(chunk.byteLength, maximumBytes);
+    return {
+      bytes: chunk.subarray(0, byteCount),
+      byteCount,
+    };
+  }
+  let byteCount = 0;
+  let offset = 0;
+  while (offset < chunk.length) {
+    const codePoint = chunk.codePointAt(offset);
+    if (codePoint === undefined) break;
+    const codeUnitCount = codePoint > 0xffff ? 2 : 1;
+    const codePointByteCount = utf8ByteCountForCodePoint(codePoint);
+    if (byteCount + codePointByteCount > maximumBytes) {
+      return {
+        bytes: Buffer.from(chunk.slice(0, offset), "utf8"),
+        byteCount: maximumBytes,
+      };
+    }
+    byteCount += codePointByteCount;
+    offset += codeUnitCount;
+    if (byteCount === maximumBytes) break;
+  }
+  return {
+    bytes: Buffer.from(chunk.slice(0, offset), "utf8"),
+    byteCount,
+  };
+};
+
 
 const boundedDiagnosticByteCount = (value: number): number => {
   if (!Number.isFinite(value) || value <= 0) return 0;
@@ -1102,6 +1157,7 @@ type ChildRuntimeState = {
   diagnosticDecoder: TextDecoder;
   diagnosticLineBuffer: string;
   diagnosticDroppingLine: boolean;
+  diagnosticInputBytes: number;
   diagnosticRecordCount: number;
   diagnosticRecordBytes: number;
   output: string;
@@ -1240,15 +1296,22 @@ const processChildDiagnosticLines = (state: ChildRuntimeState): void => {
     state.diagnosticDroppingLine = true;
   }
 };
-
 const appendChildCommandDiagnostics = (
   state: ChildRuntimeState,
   chunk: Buffer | string,
 ): void => {
+  const remainingBytes = (
+    MAX_DIAGNOSTIC_INPUT_BYTES - state.diagnosticInputBytes
+  );
+  if (remainingBytes <= 0) return;
+  const boundedChunk = boundedDiagnosticInputChunkFor(chunk, remainingBytes);
+  state.diagnosticInputBytes += boundedChunk.byteCount;
+  if (boundedChunk.bytes.byteLength === 0) return;
   try {
-    const text = typeof chunk === "string"
-      ? chunk
-      : state.diagnosticDecoder.decode(chunk, { stream: true });
+    const text = state.diagnosticDecoder.decode(
+      boundedChunk.bytes,
+      { stream: true },
+    );
     state.diagnosticLineBuffer += text;
     processChildDiagnosticLines(state);
   } catch {
@@ -1260,6 +1323,7 @@ const appendChildCommandDiagnostics = (
 };
 
 const flushChildCommandDiagnostics = (state: ChildRuntimeState): void => {
+  if (state.diagnosticInputBytes >= MAX_DIAGNOSTIC_INPUT_BYTES) return;
   try {
     const trailing = state.diagnosticDecoder.decode();
     if (trailing) state.diagnosticLineBuffer += trailing;
@@ -1666,6 +1730,7 @@ const spawnChild = (
     diagnosticDecoder: new TextDecoder("utf-8"),
     diagnosticLineBuffer: "",
     diagnosticDroppingLine: false,
+    diagnosticInputBytes: 0,
     diagnosticRecordCount: 0,
     diagnosticRecordBytes: 0,
     output: "",

@@ -17,6 +17,16 @@ import {
   type AffiliateAgentCommandRejectionDiagnostic,
 } from "../src/server/affiliateImports/affiliateAgentCommandDiagnostics";
 
+export const enableAffiliateOmpExecuteCommandLenientArgValidation = (
+  session: Pick<AgentSession, "agent">,
+): void => {
+  const executeCommandTool = session.agent.state.tools.find(
+    (tool) => tool.name === "execute_command",
+  );
+  if (executeCommandTool !== undefined) {
+    executeCommandTool.lenientArgValidation = true;
+  }
+};
 
 const requiredEnvironment = (name: string): string => {
   const value = process.env[name];
@@ -252,6 +262,7 @@ const run = async (): Promise<void> => {
       || session.sessionFile !== undefined
       || created.modelFallbackMessage
     ) throw new Error("OMP_SESSION_ISOLATION_INVALID");
+    enableAffiliateOmpExecuteCommandLenientArgValidation(session);
     timeout = setTimeout(stop, Math.max(1, deadline - Date.now()));
     timeout.unref();
     try {

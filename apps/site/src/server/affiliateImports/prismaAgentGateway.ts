@@ -9310,7 +9310,7 @@ const verifyLegacySportRepairTerminal = async (
     || result.disposition !== "CONTRACT_GAP"
   ) return;
   const sportEvidence = result.payload.sportEvidence;
-  if (!sportEvidence) {
+  if (!sportEvidence || sportEvidence.sportDeterminations.length === 0) {
     throw gatewayError(
       "EVIDENCE_REFERENCE_NOT_PERMITTED",
       "Legacy sport repair contract gaps require structured sport evidence.",

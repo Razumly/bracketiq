@@ -84,9 +84,9 @@ Repair claims carry a fresh sports catalog and an exact intake/run context.
 Evidence handles use `intake-artifact:<artifact-row-id>` so shared file bytes
 cannot substitute another capture run's provenance. The gateway verifies
 actual bytes, both captured URLs, run ownership, and catalog freshness.
-Every legacy producer `CONTRACT_GAP` requires verified `sportEvidence` and
-the manifest evidenceRef for each citation, including gaps with generic reason
-codes. Unresolved assessments require matching sport reason codes. A
+Every legacy producer `CONTRACT_GAP` requires at least one verified sport
+determination in `sportEvidence` and each citation's manifest evidenceRef, even
+with generic reason codes. Unresolved assessments require matching sport codes. A
 non-sport gap may carry verified resolved sports. Invalid assessments enter
 the bounded schema-correction path; they do not complete the job.
 Package validation and commit require the exact resolved sport union.
@@ -178,6 +178,8 @@ URL metadata remains null; the reader does not invent it from page links.
 For a declarative package, `listUrlRef` is the authorized page artifact's
 evidenceRef. It is not a raw URL or artifactId. Existing stored evidence does
 not require a new capture profile.
+Package validation and commit require at least one stored provenance URL.
+They never use a page-body link as a substitute listing URL.
 
 The isolated worker does not load repository skills, rules, or context files.
 Its generated prompt contains the applicable URL-reference and sport-evidence
@@ -190,11 +192,29 @@ Command rejections produce `affiliate-agent-command-rejection` records in
 the root runner's structured logs. The child reports only allowlisted stages,
 commands, reason/error codes, issue codes, and field paths. The root binds
 worker and invocation identity from its trusted launch state. It enforces
-4 KiB per record, at most 32 records, and 16 KiB of framed records per child
-invocation. It does not forward raw stderr, input values, URLs, credentials,
-prompts, or raw error messages. These records survive workspace cleanup,
-including successful terminal completion. Retention follows the configured
-container log policy; this is not a permanent database audit.
+4 KiB per record, at most 32 records, and 16 KiB of child diagnostic frames.
+It also inspects at most 16 KiB of stderr input per child before decoding and
+parsing; malformed and oversized input consumes this budget too. After that,
+diagnostic parsing stops while stdout and cleanup continue. The root does not
+forward raw stderr, input values, URLs, credentials, prompts, or raw error
+messages. Records survive workspace cleanup, including successful terminal
+completion. Retention follows the configured container log policy; this is
+not a permanent database audit.
+
+After SDK tool activation, the driver sets `lenientArgValidation` only on the
+final `execute_command` AgentTool wrapper. This routes malformed arguments to
+the trusted bridge's strict validator and diagnostic callback. The advertised
+schema and Gateway validation remain unchanged. Other tools keep normal SDK
+validation. Setting this flag on the earlier CustomTool definition is not
+sufficient in OMP 18.1.13 because that conversion drops the property.
+
+Run the real SDK boundary regression from `apps/site`:
+
+    npm exec --yes --package=bun@1.3.14 -- bun scripts/test-affiliate-omp-agent-sdk-schema.ts
+
+This probe uses an isolated temporary session and an unpaired malformed tool
+call. Throwing network and provider guards prevent provider requests. It
+checks that the bridge reports the local schema error without a Gateway call.
 
 The OMP runner does not use Bubblewrap. The shipped runner profiles remove
 the Codex-specific namespace and mount allowances. Keep the private cgroup,

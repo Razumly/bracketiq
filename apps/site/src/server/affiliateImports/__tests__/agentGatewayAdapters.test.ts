@@ -216,6 +216,199 @@ const storeJson = (
     contentType: "application/json",
   });
 };
+type PackageEvidenceMetadata = Readonly<{
+  sourceUrl: string | null;
+  finalUrl: string | null;
+}>;
+
+const packageAdapterFixtureFor = (initialMetadata: PackageEvidenceMetadata) => {
+  const evidenceBytes = Buffer.from(
+    '<div class="event"><span class="title">Sample event</span><a class="link" href="https://outbound.example.test/events/sample">Details</a></div>',
+    "utf8",
+  );
+  const evidenceHash = createHash("sha256").update(evidenceBytes).digest("hex");
+  const metadata = { ...initialMetadata };
+  const storedObjects = new Map<string, StoredObject>();
+  const storage: StorageProvider = {
+    async putObject({ data, contentType, key }) {
+      if (!key) throw new Error("Expected a deterministic storage key.");
+      const bytes = Buffer.from(data);
+      storedObjects.set(key, { bytes, contentType: contentType ?? undefined });
+      return {
+        key,
+        sizeBytes: bytes.byteLength,
+        contentType: contentType ?? undefined,
+      };
+    },
+    async getObjectStream({ key }) {
+      const stored = storedObjects.get(key);
+      if (!stored) {
+        throw Object.assign(new Error("missing"), { code: "ENOENT" });
+      }
+      return {
+        stream: Readable.from([Buffer.from(stored.bytes)]),
+        contentType: stored.contentType,
+        sizeBytes: stored.bytes.byteLength,
+      };
+    },
+    async deleteObject({ key }) {
+      storedObjects.delete(key);
+    },
+    async headObject({ key }) {
+      const stored = storedObjects.get(key);
+      return stored
+        ? {
+          exists: true,
+          contentType: stored.contentType,
+          sizeBytes: stored.bytes.byteLength,
+        }
+        : { exists: false };
+    },
+  };
+  const artifacts = {
+    readImmutable: jest.fn(async ({ fileId }: { fileId: string }) => {
+      const stored = fileId === "list-artifact"
+        ? { bytes: evidenceBytes, contentType: "text/html" }
+        : storedObjects.get(fileId);
+      if (!stored) throw new Error(`Missing artifact ${fileId}.`);
+      return {
+        bytes: stored.bytes,
+        mimeType: stored.contentType ?? "application/json",
+        byteSize: stored.bytes.byteLength,
+        sourceUrl: fileId === "list-artifact" ? metadata.sourceUrl : null,
+        finalUrl: fileId === "list-artifact" ? metadata.finalUrl : null,
+      };
+    }),
+  };
+  const artifactRows: Record<string, unknown>[] = [];
+  const mappingJob: Record<string, unknown> = {
+    id: "mapping-job-package",
+    supplySourceId: "supply-source-package",
+    sourceId: "scrape-source-package",
+    resultSummary: null,
+  };
+  const source = {
+    id: "scrape-source-package",
+    supplySourceId: "supply-source-package",
+    targetKind: "EVENT",
+    lifecycleGeneration: 7,
+  };
+  const mappingJobUpdate = jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+    mappingJob.resultSummary = data.resultSummary;
+    return mappingJob;
+  });
+  const transaction = {
+    affiliateSupplySources: {
+      findUnique: jest.fn(async () => ({ id: "supply-source-package" })),
+    },
+    affiliateSourceMappingJobs: {
+      findUnique: jest.fn(async () => mappingJob),
+      update: mappingJobUpdate,
+    },
+    affiliateScrapeSources: {
+      findUnique: jest.fn(async () => source),
+      update: jest.fn(),
+    },
+    affiliateScrapeMappings: {
+      findFirst: jest.fn(async () => null),
+      create: jest.fn(),
+    },
+    affiliateAgentGatewayArtifacts: {
+      findUnique: jest.fn(async ({
+        where,
+      }: {
+        where: { claimId_evidenceRef?: { evidenceRef?: string } };
+      }) => artifactRows.find(
+        (row) => row.evidenceRef === where.claimId_evidenceRef?.evidenceRef,
+      ) ?? null),
+      createMany: jest.fn(async ({ data }: { data: Record<string, unknown>[] }) => {
+        artifactRows.push(data[0]!);
+        return { count: 1 };
+      }),
+    },
+  };
+  const candidatePackage = {
+    schemaVersion: 1 as const,
+    supplySourceId: "supply-source-package",
+    listingKind: "EVENT" as const,
+    listUrlRef: "list-evidence",
+    itemSelector: ".event",
+    fields: [
+      {
+        field: "officialActionUrl" as const,
+        selector: ".link",
+        mode: "ATTRIBUTE" as const,
+        attribute: "href",
+        transform: "ABSOLUTE_URL" as const,
+      },
+      {
+        field: "title" as const,
+        selector: ".title",
+        mode: "TEXT" as const,
+        attribute: null,
+        transform: "TRIM" as const,
+      },
+    ],
+    evidenceRefs: ["list-evidence"] as const,
+  };
+  const manifestPreimage = {
+    schemaVersion: 1 as const,
+    entries: [{
+      evidenceRef: "list-evidence",
+      kind: "PAGE_HTML" as const,
+      artifactId: "list-artifact",
+      sha256: evidenceHash,
+      mimeType: "text/html",
+      byteSize: evidenceBytes.byteLength,
+      retention: "INDEFINITE" as const,
+    }],
+  };
+  const claim = {
+    claimId: "producer-claim-package",
+    claimGeneration: 1,
+    invocationId: "producer-invocation-package",
+    workerId: "producer-worker-package",
+    lifecycleGeneration: 7,
+    deploymentContractVersion: 1,
+    deploymentContractHash: "deployment-contract-package",
+    supplyContractVersion: 1,
+    supplyContractHash: "supply-contract-package",
+    roleContractVersion: AFFILIATE_AGENT_ROLE_CONTRACTS.MAPPING_PRODUCER.version,
+    roleContractHash: "role-contract-package",
+    promptTemplateVersion: AFFILIATE_AGENT_ROLE_CONTRACTS.MAPPING_PRODUCER.promptTemplateVersion,
+    promptTemplateHash: "prompt-template-package",
+    role: "MAPPING_PRODUCER" as const,
+    subject: {
+      type: "MAPPING_PRODUCER" as const,
+      supplySourceId: "supply-source-package",
+      mappingJobId: "mapping-job-package",
+      pass: 1,
+    },
+    evidenceManifest: {
+      ...manifestPreimage,
+      hash: hashAffiliateAgentValue(manifestPreimage),
+    },
+  } as unknown as AffiliateAgentClaimEnvelope;
+  const adapters = createProductionAffiliateAgentGatewayAdapters({
+    prisma: {} as PrismaClient,
+    artifacts,
+    storage,
+    identifiers: { create: () => "gateway-artifact-package" },
+  });
+  return {
+    adapters,
+    artifacts,
+    candidatePackage,
+    claim,
+    mappingJob,
+    mappingJobUpdate,
+    setMetadata: (nextMetadata: PackageEvidenceMetadata): void => {
+      metadata.sourceUrl = nextMetadata.sourceUrl;
+      metadata.finalUrl = nextMetadata.finalUrl;
+    },
+    transaction,
+  };
+};
 
 const captureRecordSummaryFor = (value: Record<string, unknown>) => {
   const canonical = canonicalizeAffiliateAgentValue(value);
@@ -1195,6 +1388,171 @@ describe("production Affiliate Agent activation effect", () => {
 
 });
 
+describe("production Affiliate Agent package URL provenance", () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it("rejects a page list reference without stored provenance during package validation", async () => {
+    const fixture = packageAdapterFixtureFor({
+      sourceUrl: null,
+      finalUrl: null,
+    });
+    const adapter = fixture.adapters.commands.transactional.VALIDATE_DECLARATIVE_PACKAGE;
+    if (!adapter) throw new Error("Expected the production validation adapter.");
+
+    let failure: unknown;
+    try {
+      await adapter.execute({
+        transaction: fixture.transaction as unknown as Prisma.TransactionClient,
+        claim: fixture.claim,
+        command: {
+          type: "VALIDATE_DECLARATIVE_PACKAGE",
+          data: {
+            candidatePackage: fixture.candidatePackage,
+            evidenceManifestHash: fixture.claim.evidenceManifest.hash,
+          },
+        },
+        receiptId: "validation-no-provenance",
+      });
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toBeInstanceOf(Error);
+    const message = failure instanceof Error ? failure.message : "";
+    expect(message).toBe(
+      "The package listing evidence must include stored source or final URL metadata.",
+    );
+    expect(message).not.toContain("https://outbound.example.test/events/sample");
+    expect(fixture.mappingJobUpdate).not.toHaveBeenCalled();
+  });
+  it("commits a page package after validation with final URL provenance", async () => {
+    const fixture = packageAdapterFixtureFor({
+      sourceUrl: "https://source.example.test/events",
+      finalUrl: "https://final.example.test/events",
+    });
+    const validationAdapter =
+      fixture.adapters.commands.transactional.VALIDATE_DECLARATIVE_PACKAGE;
+    const commitAdapter = fixture.adapters.commands.transactional.COMMIT_DECLARATIVE_PACKAGE;
+    if (!validationAdapter || !commitAdapter) {
+      throw new Error("Expected the production package adapters.");
+    }
+    const lifecycleResult = {
+      assessment: {},
+      transition: { generation: 8 },
+      isReplayed: false,
+    } as unknown as AffiliateSupplyLifecycleCommandResult;
+    const lifecycleCommand = jest
+      .spyOn(affiliateSupplyPersistence, "executeAffiliateSupplyLifecycleCommand")
+      .mockResolvedValue(lifecycleResult);
+    const validationReceiptId = "validation-with-provenance";
+    const packageHash = hashAffiliateAgentValue(fixture.candidatePackage);
+
+    await expect(validationAdapter.execute({
+      transaction: fixture.transaction as unknown as Prisma.TransactionClient,
+      claim: fixture.claim,
+      command: {
+        type: "VALIDATE_DECLARATIVE_PACKAGE",
+        data: {
+          candidatePackage: fixture.candidatePackage,
+          evidenceManifestHash: fixture.claim.evidenceManifest.hash,
+        },
+      },
+      receiptId: validationReceiptId,
+    })).resolves.toEqual({
+      isValid: true,
+      validatedPackageHash: packageHash,
+    });
+
+    await expect(commitAdapter.execute({
+      transaction: fixture.transaction as unknown as Prisma.TransactionClient,
+      claim: fixture.claim,
+      command: {
+        type: "COMMIT_DECLARATIVE_PACKAGE",
+        data: {
+          validationReceiptId,
+          validatedPackageHash: packageHash,
+        },
+      },
+      receiptId: "commit-with-provenance",
+    })).resolves.toEqual({ packageHash });
+
+    expect(fixture.transaction.affiliateScrapeMappings.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          mapping: expect.objectContaining({
+            listUrl: "https://final.example.test/events",
+          }),
+        }),
+      }),
+    );
+    expect(lifecycleCommand).toHaveBeenCalledWith(expect.objectContaining({
+      command: "RECORD_MAPPING",
+      idempotencyKey: "commit-with-provenance",
+    }));
+  });
+
+
+  it("rejects a page list reference without stored provenance during package commit", async () => {
+    const fixture = packageAdapterFixtureFor({
+      sourceUrl: "https://source.example.test/events",
+      finalUrl: "https://final.example.test/events",
+    });
+    const validationAdapter =
+      fixture.adapters.commands.transactional.VALIDATE_DECLARATIVE_PACKAGE;
+    const commitAdapter = fixture.adapters.commands.transactional.COMMIT_DECLARATIVE_PACKAGE;
+    if (!validationAdapter || !commitAdapter) {
+      throw new Error("Expected the production package adapters.");
+    }
+    const validationReceiptId = "validation-before-commit-no-provenance";
+    const packageHash = hashAffiliateAgentValue(fixture.candidatePackage);
+
+    await expect(validationAdapter.execute({
+      transaction: fixture.transaction as unknown as Prisma.TransactionClient,
+      claim: fixture.claim,
+      command: {
+        type: "VALIDATE_DECLARATIVE_PACKAGE",
+        data: {
+          candidatePackage: fixture.candidatePackage,
+          evidenceManifestHash: fixture.claim.evidenceManifest.hash,
+        },
+      },
+      receiptId: validationReceiptId,
+    })).resolves.toEqual({
+      isValid: true,
+      validatedPackageHash: packageHash,
+    });
+
+    fixture.setMetadata({ sourceUrl: null, finalUrl: null });
+    let failure: unknown;
+    try {
+      await commitAdapter.execute({
+        transaction: fixture.transaction as unknown as Prisma.TransactionClient,
+        claim: fixture.claim,
+        command: {
+          type: "COMMIT_DECLARATIVE_PACKAGE",
+          data: {
+            validationReceiptId,
+            validatedPackageHash: packageHash,
+          },
+        },
+        receiptId: "commit-no-provenance",
+      });
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toBeInstanceOf(Error);
+    const message = failure instanceof Error ? failure.message : "";
+    expect(message).toBe(
+      "The package listing evidence must include stored source or final URL metadata.",
+    );
+    expect(message).not.toContain("https://outbound.example.test/events/sample");
+    expect(fixture.transaction.affiliateScrapeMappings.create).not.toHaveBeenCalled();
+  });
+});
+
 describe("production Affiliate Agent capture adapter", () => {
   it("recovers a canonical internal output from a durable receipt", async () => {
     const fixture = createFixture();
@@ -1330,8 +1688,8 @@ describe("production Affiliate Agent capture adapter", () => {
           bytes,
           mimeType: fileId === "source-artifact" ? "text/html" : "application/json",
           byteSize: bytes.byteLength,
-          sourceUrl: "https://evidence.example.test/events",
-          finalUrl: "https://evidence.example.test/events",
+          sourceUrl: "https://evidence.example.test/source-events",
+          finalUrl: "https://evidence.example.test/final-events",
         };
       },
     };
@@ -1470,7 +1828,9 @@ describe("production Affiliate Agent capture adapter", () => {
     });
     expect(mappingUpdateData?.resultSummary).toEqual(expect.objectContaining({
       gatewayCandidatePackage: expect.objectContaining({
+        validationReceiptId: "validation-receipt-1",
         validationOutput: expect.objectContaining({
+          listUrl: "https://evidence.example.test/final-events",
           candidates: expect.arrayContaining([
             expect.objectContaining({
               divisionText: "Adults",

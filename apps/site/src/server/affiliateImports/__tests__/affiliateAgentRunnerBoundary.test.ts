@@ -40,6 +40,9 @@ import {
   type AffiliateAgentRunnerResponse,
 } from "../affiliateAgentRunnerProtocol";
 import { canonicalizeAffiliateAgentValue } from "../agentGatewayContracts";
+import {
+  AFFILIATE_AGENT_COMMAND_DIAGNOSTIC_MAX_TOTAL_BYTES,
+} from "../affiliateAgentCommandDiagnostics";
 import type { AffiliateAgentProcessEvent } from "../agentGatewayAdapters";
 
 class FakeAgentChild extends EventEmitter {
@@ -863,6 +866,111 @@ describe("executable affiliate agent runner boundary", () => {
       logger.mockRestore();
     }
   });
+  it("stops parsing after malformed diagnostic input budget and completes cleanup", async () => {
+    const diagnostic = JSON.stringify({
+      version: 1,
+      event: "affiliate-agent-command-rejection",
+      stage: "GATEWAY",
+      command: "VALIDATE_DECLARATIVE_PACKAGE",
+      errorCode: "COMMAND_NOT_PERMITTED",
+      reasonCode: "PACKAGE_SOURCE_MISMATCH",
+      issueCodes: [],
+      issuePaths: [],
+      isRetryable: false,
+    });
+    const malformedFrame = Buffer.from("{malformed}\n", "utf8");
+    const malformedFrameCount = Math.ceil(
+      (AFFILIATE_AGENT_COMMAND_DIAGNOSTIC_MAX_TOTAL_BYTES + 1)
+        / malformedFrame.byteLength,
+    );
+    const malformedFrames = Buffer.concat(
+      Array.from({ length: malformedFrameCount }, () => malformedFrame),
+    );
+    const logger = jest.spyOn(console, "info").mockImplementation(() => undefined);
+    try {
+      const terminal = JSON.stringify({
+        kind: "TERMINAL_SUBMISSION",
+        idempotencyKey: "child-terminal-key",
+        result: { disposition: "APPROVED" },
+      });
+      const { event, child } = await runSingleChildScenario(
+        terminal,
+        0,
+        (spawnedChild) => {
+          spawnedChild.stderr.emit("data", malformedFrames);
+          spawnedChild.stderr.emit("data", Buffer.from(`${diagnostic}\n`, "utf8"));
+        },
+      );
+      expect(event).toEqual({
+        kind: "TERMINAL_SUBMISSION",
+        idempotencyKey: "child-terminal-key",
+        result: { disposition: "APPROVED" },
+      });
+      expect(child.stdin.end).toHaveBeenCalledTimes(1);
+      expect(child.stderr.resume).toHaveBeenCalledTimes(1);
+      const commandLogs = logger.mock.calls
+        .map(([line]) => line)
+        .filter((line) => (
+          typeof line === "string"
+          && line.includes("\"affiliate-agent-command-rejection\"")
+        ));
+      expect(commandLogs).toHaveLength(0);
+    } finally {
+      logger.mockRestore();
+    }
+  });
+
+  it("spends the diagnostic input budget on an oversized incomplete frame", async () => {
+    const diagnostic = Buffer.from(`${JSON.stringify({
+      version: 1,
+      event: "affiliate-agent-command-rejection",
+      stage: "GATEWAY",
+      command: "VALIDATE_DECLARATIVE_PACKAGE",
+      errorCode: "COMMAND_NOT_PERMITTED",
+      reasonCode: "PACKAGE_SOURCE_MISMATCH",
+      issueCodes: [],
+      issuePaths: [],
+      isRetryable: false,
+    })}\n`, "utf8");
+    const oversizedIncompleteFrame = Buffer.alloc(
+      AFFILIATE_AGENT_COMMAND_DIAGNOSTIC_MAX_TOTAL_BYTES + 1,
+      "x",
+    );
+    const logger = jest.spyOn(console, "info").mockImplementation(() => undefined);
+    try {
+      const terminal = JSON.stringify({
+        kind: "TERMINAL_SUBMISSION",
+        idempotencyKey: "child-terminal-key",
+        result: { disposition: "APPROVED" },
+      });
+      const { event, child } = await runSingleChildScenario(
+        terminal,
+        0,
+        (spawnedChild) => {
+          spawnedChild.stderr.emit("data", oversizedIncompleteFrame);
+          spawnedChild.stderr.emit("data", diagnostic);
+          spawnedChild.stderr.emit("data", diagnostic);
+        },
+      );
+      expect(event).toEqual({
+        kind: "TERMINAL_SUBMISSION",
+        idempotencyKey: "child-terminal-key",
+        result: { disposition: "APPROVED" },
+      });
+      expect(child.stdin.end).toHaveBeenCalledTimes(1);
+      expect(child.stderr.resume).toHaveBeenCalledTimes(1);
+      const commandLogs = logger.mock.calls
+        .map(([line]) => line)
+        .filter((line) => (
+          typeof line === "string"
+          && line.includes("\"affiliate-agent-command-rejection\"")
+        ));
+      expect(commandLogs).toHaveLength(0);
+    } finally {
+      logger.mockRestore();
+    }
+  });
+
 
   it("preserves a terminal frame emitted before deadline containment completes", async () => {
     jest.useFakeTimers({ now: new Date(STARTED_AT), doNotFake: ["queueMicrotask"] });

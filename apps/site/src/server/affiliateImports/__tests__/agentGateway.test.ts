@@ -5288,6 +5288,97 @@ describe("Prisma affiliate Agent Gateway", () => {
       resultJson: null,
     });
   });
+  it("routes empty legacy sport assessments through bounded correction before terminal selection", async () => {
+    const harness = createGatewayClaimHarness();
+    const fixture = configureLegacySportProducerScenario(harness);
+    const grant = await harness.gateway.claim(fixture.request);
+    if (!grant) throw new Error("Expected one legacy sport producer claim.");
+    const emptySportEvidence: AffiliateAgentSportEvidence = {
+      ...fixture.sportEvidence,
+      sportDeterminations: [],
+    };
+    const submit = (idempotencyKey: string) =>
+      harness.gateway.perform({
+        kind: "SUBMIT_RESULT" as const,
+        idempotencyKey,
+        authorization: gatewayAuthorizationFor(grant),
+        result: legacySportContractGapResultFor(
+          grant,
+          emptySportEvidence,
+          {
+            evidenceRefs: [],
+            reasonCodes: ["CONTRACT_REQUIREMENT_MISSING"],
+          },
+        ),
+      });
+
+    const first = await submit("legacy-sport-empty-assessments-1");
+    expect(first).toMatchObject({
+      kind: "SCHEMA_CORRECTION_REQUIRED",
+      submissionNumber: 1,
+      remainingSubmissions: 2,
+      issues: expect.arrayContaining([
+        expect.objectContaining({
+          path: ["payload", "sportEvidence"],
+        }),
+      ]),
+    });
+    expect(harness.state.claims[0]).toMatchObject({
+      status: "ACTIVE",
+      schemaCorrectionCount: 1,
+      terminalReceiptId: null,
+    });
+    expect(harness.state.jobs[0]).toMatchObject({
+      status: "CLAIMED",
+      terminalReceiptId: null,
+      resultJson: null,
+    });
+    expect(
+      harness.state.receipts.filter(
+        (receipt) =>
+          receipt.operationKind === "TERMINAL_EFFECT"
+          && receipt.status === "SUCCEEDED",
+      ),
+    ).toHaveLength(0);
+
+    const second = await submit("legacy-sport-empty-assessments-2");
+    expect(second).toMatchObject({
+      kind: "SCHEMA_CORRECTION_REQUIRED",
+      submissionNumber: 2,
+      remainingSubmissions: 1,
+    });
+    expect(harness.state.claims[0]).toMatchObject({
+      status: "ACTIVE",
+      schemaCorrectionCount: 2,
+    });
+    expect(harness.state.jobs[0]?.status).toBe("CLAIMED");
+
+    const exhausted = await submit("legacy-sport-empty-assessments-3");
+    expect(exhausted).toMatchObject({
+      kind: "INVOCATION_FAILED",
+      failureCode: "SCHEMA_CORRECTIONS_EXHAUSTED",
+    });
+    expect(harness.state.claims[0]).toMatchObject({
+      status: "FAILED",
+      schemaCorrectionCount: 3,
+      terminalReceiptId: exhausted.receiptId,
+    });
+    expect(harness.state.receipts.find((receipt) => receipt.id === exhausted.receiptId))
+      .toMatchObject({ responseJson: { kind: "INVOCATION_FAILED" } });
+    expect(harness.state.jobs[0]).toMatchObject({
+      status: "RETRY_WAIT",
+      terminalReceiptId: exhausted.receiptId,
+      resultJson: null,
+    });
+    expect(
+      harness.state.receipts.filter(
+        (receipt) =>
+          receipt.operationKind === "TERMINAL_EFFECT"
+          && receipt.status === "SUCCEEDED",
+      ),
+    ).toHaveLength(0);
+  });
+
 
   it("routes wrong-owned sport evidence and catalog drift to bounded correction", async () => {
     for (const failure of ["WRONG_OWNED_EVIDENCE", "CATALOG_DRIFT"] as const) {

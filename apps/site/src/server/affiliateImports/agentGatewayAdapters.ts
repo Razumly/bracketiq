@@ -158,7 +158,7 @@ export type AffiliateAgentArtifactRead = Readonly<{
   mimeType: string;
   byteSize: number;
   sourceUrl: string | null;
-  finalUrl?: string | null;
+  finalUrl: string | null;
   runId?: string | null;
   intakeId?: string | null;
 }>;
@@ -729,6 +729,7 @@ const productionActiveContractArtifact = async (
     mimeType: "application/json",
     byteSize: bytes.byteLength,
     sourceUrl: null,
+    finalUrl: null,
   };
 };
 type ProductionGatewayCommandContext = Readonly<{
@@ -937,6 +938,7 @@ const productionGatewayCommandArtifact = async (
     mimeType: "application/json",
     byteSize: bytes.byteLength,
     sourceUrl: null,
+    finalUrl: null,
   };
 };
 
@@ -1499,25 +1501,29 @@ const productionCaptureMetadataFrom = (
 };
 
 const productionUrlFromEvidence = (
-  evidence: Readonly<{ sourceUrl: string | null; finalUrl?: string | null; text: string }>,
+  evidence: Readonly<{ sourceUrl: string | null; finalUrl: string | null }>,
 ): string => {
   const finalUrl = productionString(evidence.finalUrl);
   const sourceUrl = productionString(evidence.sourceUrl);
-  const candidate = finalUrl
-    ?? sourceUrl
-    ?? evidence.text.match(/https?:\/\/[^\s"'<>]+/)?.[0]
-    ?? evidence.text.trim();
+  const candidate = finalUrl ?? sourceUrl;
+  if (!candidate) {
+    throw new Error(
+      "The package listing evidence must include stored source or final URL metadata.",
+    );
+  }
   try {
     return new URL(candidate).toString();
   } catch {
-    throw new Error("The command evidence does not contain a valid source URL.");
+    throw new Error(
+      "The package listing evidence must include a valid stored source or final URL.",
+    );
   }
 };
 
 const productionUrlFromExternalEvidence = (
   evidence: Readonly<{
     sourceUrl: string | null;
-    finalUrl?: string | null;
+    finalUrl: string | null;
     text: string;
   }>,
 ): string => {
@@ -3194,7 +3200,11 @@ type ProductionValidationExtraction = Readonly<{
 }>;
 
 type ProductionValidationEvidence = Readonly<{
-  listEvidence: Readonly<{ sourceUrl: string | null; text: string }>;
+  listEvidence: Readonly<{
+    sourceUrl: string | null;
+    finalUrl: string | null;
+    text: string;
+  }>;
   validatedPackageHash: string;
   evidenceRefs: readonly string[];
   evidenceKinds: readonly string[];
@@ -3262,7 +3272,11 @@ const assertProductionMappingPackage: (
 const extractProductionValidationCandidates = (
   candidatePackage: ProductionValidationCommand["data"]["candidatePackage"],
   claim: AffiliateAgentClaimEnvelope,
-  listEvidence: Readonly<{ sourceUrl: string | null; text: string }>,
+  listEvidence: Readonly<{
+    sourceUrl: string | null;
+    finalUrl: string | null;
+    text: string;
+  }>,
 ): ProductionValidationExtraction => {
   const listUrl = productionUrlFromEvidence(listEvidence);
   const mapping = affiliateScrapeMappingSchema.parse({
@@ -3476,6 +3490,7 @@ const persistProductionValidation = async (
         gatewayCandidatePackage: {
           candidatePackage,
           validatedPackageHash: validation.validatedPackageHash,
+          validationReceiptId: validation.validationMetadata.validationReceiptId,
           validationMetadata: {
             ...validation.validationMetadata,
             deterministicValidationArtifact: validationArtifact,
