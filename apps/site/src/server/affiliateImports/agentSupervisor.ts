@@ -23,6 +23,7 @@ import type {
 import {
   AFFILIATE_AGENT_MAX_CLAIM_ENVELOPE_CANONICAL_BYTES,
   AFFILIATE_AGENT_MAX_ENVIRONMENT_VALUE_BYTES,
+  AFFILIATE_AGENT_MAX_PROMPT_BYTES,
   canonicalizeAffiliateAgentValue,
   hashAffiliateAgentValue,
   type AffiliateAgentRole,
@@ -30,6 +31,8 @@ import {
 import { AffiliateAgentProcessCapacityError } from "./agentGatewayAdapters";
 
 const AFFILIATE_AGENT_GATEWAY_RETRY_ATTEMPTS = 2;
+export const AFFILIATE_AGENT_TERMINAL_CONFIRMATION_TIMEOUT_MILLISECONDS =
+  30_000 as const;
 
 
 const boundedEnvironmentValue = (name: string, value: string): string => {
@@ -44,6 +47,16 @@ const boundedEnvironmentValue = (name: string, value: string): string => {
     });
   }
   return value;
+};
+const boundedPrompt = (prompt: string): string => {
+  if (Buffer.byteLength(prompt, "utf8") > AFFILIATE_AGENT_MAX_PROMPT_BYTES) {
+    throw new AffiliateAgentGatewayError({
+      code: "INTERNAL_ERROR",
+      isRetryable: false,
+      safeMessage: "The affiliate agent prompt is too large.",
+    });
+  }
+  return prompt;
 };
 
 const boundedClaimEnvelope = (envelope: unknown): string => {
@@ -233,9 +246,26 @@ const createSupervisorShutdown = (
   return { promise, isAborted: () => signal.aborted, remove };
 };
 
+// Once a terminal frame exists, only bounded Gateway confirmation remains; shutdown
+// must not replace that exact replay with a newly keyed failure record.
+const waitForTerminalConfirmation = <T>(
+  operation: Promise<T>,
+  timeoutMilliseconds: number =
+    AFFILIATE_AGENT_TERMINAL_CONFIRMATION_TIMEOUT_MILLISECONDS,
+): Promise<DeadlineWait<T>> => {
+  const timeout = createSupervisorTimer(
+    timeoutMilliseconds,
+    { kind: "DEADLINE" } as const,
+  );
+  return Promise.race([
+    settleSupervisorOperation(operation),
+    timeout.promise,
+  ]).finally(() => timeout.cancel());
+};
+
 type SupervisorWorkspace = Readonly<{
   path: string;
-  codexHome?: string;
+  ompConfigRoot?: string;
   attestation: AffiliateAgentWorkspaceAttestation;
 }>;
 
@@ -549,6 +579,7 @@ const performGatewayHeartbeat = async (
   deadlinePromise: Promise<Readonly<{ kind: "DEADLINE" }>>,
   shutdownPromise: Promise<Readonly<{ kind: "SHUTDOWN" }>> | null,
   includeShutdown: boolean,
+  hardDeadlineAt: number,
 ): Promise<DeadlineWait<undefined>> => {
   for (
     let heartbeatAttempt = 1;
@@ -556,7 +587,10 @@ const performGatewayHeartbeat = async (
     heartbeatAttempt += 1
   ) {
     const heartbeat = await waitForSupervisorHeartbeat(
-      dependencies.gateway.perform(heartbeatOperation).then(() => undefined),
+      dependencies.gateway.perform(
+        heartbeatOperation,
+        { deadlineAt: hardDeadlineAt },
+      ).then(() => undefined),
       deadlinePromise,
       shutdownPromise,
       includeShutdown,
@@ -614,6 +648,7 @@ const createSupervisorLease = (
       deadlineTimer.promise,
       shutdownPromise,
       includeShutdown,
+      hardDeadlineAt,
     );
   };
 
@@ -690,6 +725,7 @@ type SupervisorContext = Readonly<{
   state: SupervisorState;
   grant: AffiliateAgentClaimGrant;
   authorization: AffiliateAgentClaimAuthorization;
+  hardDeadlineAt: number;
   lease: SupervisorLease;
 }>;
 const FAILURE_IDEMPOTENCY_KEY_PREFIX = "supervisor-failure-";
@@ -786,7 +822,7 @@ const reconcileInvocationFailure = async (
 };
 
 type SupervisorLaunchInput = Readonly<{
-  command: readonly ["codex", "exec"];
+  command: readonly ["affiliate-omp-agent"];
   prompt: string;
   environment: Readonly<Record<string, string>>;
   workspacePath: string;
@@ -803,9 +839,9 @@ const createLaunchInput = (
   workspaceMode: "READ_ONLY" | "READ_WRITE",
 ): SupervisorLaunchInput => {
   const serializedClaimEnvelope = boundedClaimEnvelope(grant.envelope);
-  const processPrompt = boundedEnvironmentValue("prompt", grant.prompt);
+  const processPrompt = boundedPrompt(grant.prompt);
   return {
-    command: ["codex", "exec"],
+    command: ["affiliate-omp-agent"],
     prompt: processPrompt,
     environment: {
       AFFILIATE_AGENT_GATEWAY_ADDRESS: boundedEnvironmentValue(
@@ -824,7 +860,6 @@ const createLaunchInput = (
         "claim envelope",
         serializedClaimEnvelope,
       ),
-      AFFILIATE_AGENT_PROMPT: processPrompt,
     },
     workspacePath: workspace.path,
     workerId: input.workerId,
@@ -945,14 +980,28 @@ const submitProcessResult = async (
     result: event.result,
   };
   let terminalError: unknown;
+  const confirmationDeadlineAt =
+    Date.now() + AFFILIATE_AGENT_TERMINAL_CONFIRMATION_TIMEOUT_MILLISECONDS;
   for (
     let submissionAttempt = 1;
     submissionAttempt <= AFFILIATE_AGENT_GATEWAY_RETRY_ATTEMPTS;
     submissionAttempt += 1
   ) {
-    const submission = await context.lease.waitForDrain(
-      context.dependencies.gateway.perform(terminalOperation),
+    const remainingMilliseconds = confirmationDeadlineAt - Date.now();
+    if (remainingMilliseconds <= 0) {
+      return { kind: "FAILURE", failureCode: "TIMEOUT" };
+    }
+    const submissionOperation = context.dependencies.gateway.perform(
+      terminalOperation,
+      { deadlineAt: confirmationDeadlineAt },
     );
+    let submission = await context.lease.waitForDrain(submissionOperation);
+    if (submission.kind === "DEADLINE") {
+      submission = await waitForTerminalConfirmation(
+        submissionOperation,
+        remainingMilliseconds,
+      );
+    }
     if (submission.kind === "SHUTDOWN") {
       return { kind: "SHUTDOWN" };
     }
@@ -1029,7 +1078,10 @@ const superviseProcess = async (
     processSession.started;
   let isProcessReady = false;
   while (true) {
-    const wake = await context.lease.waitForDrain(processWake);
+    let wake = await context.lease.waitForDrain(processWake);
+    if (wake.kind === "DEADLINE" && isProcessReady) {
+      wake = await waitForTerminalConfirmation(processWake);
+    }
     const decision = processWakeDecision(wake, isProcessReady);
     if (decision.kind === "SHUTDOWN") {
       return reconcileInvocationFailure(context, "PROCESS_CRASH");
@@ -1423,6 +1475,7 @@ const runClaimedInvocation = async (
     state,
     grant,
     authorization,
+    hardDeadlineAt,
     lease,
   };
   if (lease.isExpired()) {

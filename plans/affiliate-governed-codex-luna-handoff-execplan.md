@@ -1,10 +1,10 @@
 # Wire Codex Luna authentication into the governed affiliate runner
 
-This ExecPlan is a living document. It follows `PLANS.md` and records the implementation and deployment of the governed Codex CLI authentication handoff.
+This ExecPlan follows `PLANS.md`. It records the historical Codex CLI handoff and bounded legacy repair work. The operator has replaced the active execution direction with OMP and two ChatGPT accounts. Continue runtime and canary work under `plans/affiliate-governed-omp-runner-execplan.md`. Do not deploy or restart Codex from this plan.
 
 ## Purpose / Big Picture
 
-The affiliate mapping agents must use the existing Codex CLI and Luna model family. The current governed runner launches Codex in a fresh per-invocation `CODEX_HOME`, so it cannot use the existing Codex authentication stored on the production host. This change will seed a reviewed Codex authentication file into each isolated invocation, select the Luna model explicitly, retain gateway claims and runner containment, and allow one bounded mapping canary for the 306 requeued sport-review jobs.
+The prior work connected the governed affiliate runner to Codex CLI and the Luna model family. It seeded a reviewed authentication file into each isolated invocation and retained Gateway claims and runner containment. The bounded repair path admitted one of the 306 requeued sport-review jobs. Two Codex invocations failed. The later authentication probe returned `refresh_token_reused`. The OMP plan now owns fresh authentication and the remaining canary.
 
 ## Progress
 
@@ -22,10 +22,12 @@ The affiliate mapping agents must use the existing Codex CLI and Luna model fami
 - [x] Complete Standards and specification reviews with no remaining known findings.
 - [x] Provision and verify governed database roles after separate operator approval.
 - [x] Verify a stable live read-only preview and exact stored artifact bytes.
-- [ ] Complete the bounded mapping canary. One job is admitted; the first invocation failed and the verified runtime fixes are ready for deployment.
-- [ ] Verify a productive terminal result and independent review state.
+- [ ] Continue the already admitted one-job canary under the OMP plan. Preserve both failed Codex invocations and the repair hold.
+- [ ] Verify a productive terminal result and independent review under the OMP plan.
 
 ## Surprises & Discoveries
+
+The Codex runtime direction is superseded as of 2026-09-07. The recorded authentication probe returned `refresh_token_reused`. Do not retry the stale seed. Earlier sandbox and test evidence does not prove OMP behavior.
 
 - The repository contains an optional `apps/site/deploy/ai` open-weight `llama.cpp` plan. That plan is not the current Luna Codex execution path.
 - Existing legacy Codex homes contain `auth.json` with `auth_mode: chatgpt`; the model cache contains `gpt-5.6-luna`.

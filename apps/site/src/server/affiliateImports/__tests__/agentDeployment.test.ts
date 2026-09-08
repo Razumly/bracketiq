@@ -190,6 +190,7 @@ const strictInventoryFixture = () => {
     },
     environment,
     networks: ['affiliate_gateway_internal'],
+    networkAttachments: networkAttachments.gateway,
     isNetworkInternal: true,
     capDrop: ['ALL'],
     capAdd: [],
@@ -198,6 +199,140 @@ const strictInventoryFixture = () => {
     ipcMode: 'private',
     securityOptions: ['no-new-privileges:true'],
   });
+  const reviewedAgentImage = `ghcr.io/razumly/bracketiq-affiliate-governed@sha256:${'a'.repeat(64)}`;
+  const reviewedAgentImageId = `sha256:${'b'.repeat(64)}`;
+  const reviewedWorkspaceVolume = 'affiliate-governed-workspaces';
+  const reviewedBrokerStateVolume = 'affiliate-model-auth-broker-state';
+  const networkAttachments = {
+    gateway: [{ name: 'affiliate_gateway_internal', id: 'a'.repeat(64) }],
+    modelAuth: [
+      { name: 'affiliate_model_auth_internal', id: 'b'.repeat(64) },
+      { name: 'affiliate_model_egress', id: 'c'.repeat(64) },
+    ],
+    modelClient: [
+      { name: 'affiliate_model_auth_internal', id: 'b'.repeat(64) },
+      { name: 'affiliate_model_client_internal', id: 'd'.repeat(64) },
+      { name: 'affiliate_model_egress', id: 'c'.repeat(64) },
+    ],
+    runner: [
+      { name: 'affiliate_gateway_internal', id: 'a'.repeat(64) },
+      { name: 'affiliate_model_client_internal', id: 'd'.repeat(64) },
+    ],
+    production: [{
+      name: 'bracketiq-production_backend',
+      id: 'e'.repeat(64),
+    }],
+  } as const;
+  const modelServiceBearerSources = {
+    broker: {
+      path: '/private/omp-auth-broker.token',
+      isRegularFile: true,
+      isSymlink: false,
+      uid: 0,
+      gid: 1003,
+      mode: '0640',
+      sizeBytes: 64,
+      sha256: 'c'.repeat(64),
+    },
+    gateway: {
+      path: '/private/omp-model-gateway.token',
+      isRegularFile: true,
+      isSymlink: false,
+      uid: 0,
+      gid: 1003,
+      mode: '0640',
+      sizeBytes: 64,
+      sha256: 'd'.repeat(64),
+    },
+  } as const;
+  const modelServiceContainer = (role: 'broker' | 'gateway') => {
+    const isBroker = role === 'broker';
+    const id = isBroker ? 'affiliate-model-auth-broker' : 'affiliate-model-gateway';
+    const containerId = isBroker ? '1'.repeat(64) : '2'.repeat(64);
+    const bearerSource = isBroker ? modelServiceBearerSources.broker : modelServiceBearerSources.gateway;
+    return {
+      id,
+      containerId,
+      image: reviewedAgentImage,
+      imageId: reviewedAgentImageId,
+      user: isBroker ? '1003:1003' : '1004:1004',
+      hasReadonlyRootFilesystem: true,
+      privileged: false,
+      tmpfs: isBroker
+        ? { '/tmp': 'rw,noexec,nosuid,nodev,size=256m' }
+        : {
+            '/tmp': 'rw,noexec,nosuid,nodev,size=256m',
+            '/var/lib/omp': 'rw,noexec,nosuid,nodev,size=512m,uid=1004,gid=1004,mode=0700',
+          },
+      environment: isBroker
+        ? [
+            'HOME=/var/lib/omp',
+            'NODE_ENV=production',
+            'NODE_VERSION=22.0.0',
+            'OMP_PROFILE=affiliate-model-auth-broker',
+            'PATH=/workspace/apps/site/node_modules/.bin:/usr/local/bin:/usr/bin:/bin',
+            'PI_CONFIG_DIR=.omp',
+            'YARN_VERSION=1.22.22',
+          ]
+        : [
+            'HOME=/var/lib/omp',
+            'NODE_ENV=production',
+            'NODE_VERSION=22.0.0',
+            'OMP_PROFILE=affiliate-model-gateway',
+            'PATH=/workspace/apps/site/node_modules/.bin:/usr/local/bin:/usr/bin:/bin',
+            'PI_CONFIG_DIR=.omp',
+            'YARN_VERSION=1.22.22',
+            'OMP_AUTH_BROKER_URL=http://affiliate-model-auth-broker:8765',
+          ],
+      entrypoint: [
+        '/usr/local/bin/prepare-omp-service',
+        isBroker ? 'broker' : 'gateway',
+      ],
+      command: isBroker
+        ? [
+            '/workspace/apps/site/node_modules/.bin/omp',
+            'auth-broker',
+            'serve',
+            '--bind=0.0.0.0:8765',
+          ]
+        : [
+            '/workspace/apps/site/node_modules/.bin/omp',
+            'auth-gateway',
+            'serve',
+            '--bind=0.0.0.0:4000',
+          ],
+      mounts: isBroker
+        ? [
+            { source: reviewedBrokerStateVolume, type: 'volume', target: '/var/lib/omp', readOnly: false },
+            { source: bearerSource.path, type: 'bind', target: '/run/secrets/affiliate-model-auth-broker-token', readOnly: true },
+          ]
+        : [
+            { source: modelServiceBearerSources.broker.path, type: 'bind', target: '/run/secrets/affiliate-model-auth-broker-token', readOnly: true },
+            { source: bearerSource.path, type: 'bind', target: '/run/secrets/affiliate-model-gateway-token', readOnly: true },
+          ],
+      networks: isBroker
+        ? ['affiliate_model_auth_internal', 'affiliate_model_egress']
+        : [
+            'affiliate_model_auth_internal',
+            'affiliate_model_client_internal',
+            'affiliate_model_egress',
+          ],
+      networkAttachments: isBroker ? networkAttachments.modelAuth : networkAttachments.modelClient,
+      internalNetworks: isBroker
+        ? ['affiliate_model_auth_internal']
+        : ['affiliate_model_auth_internal', 'affiliate_model_client_internal'],
+      exposedPorts: [isBroker ? '8765' : '4000'],
+      publishedPorts: [],
+      capDrop: ['ALL'],
+      capAdd: [],
+      groupAdd: isBroker ? [] : ['1003'],
+      securityOptions: ['no-new-privileges:true'],
+      status: 'created',
+      healthStatus: 'none',
+      restartPolicy: 'no',
+      hasProductionBackendAccess: false,
+    };
+  };
   const inventory = {
     now: '2026-08-25T12:00:00.000Z',
     expected: contractSnapshot,
@@ -223,6 +358,32 @@ const strictInventoryFixture = () => {
       isGatewayAllowedToWriteProductionDatabase: true,
     },
     reviewedAgentNetwork: 'affiliate_gateway_internal',
+    reviewedProductionBackendNetwork: 'bracketiq-production_backend',
+    reviewedProductionBackendNetworkId: networkAttachments.production[0].id,
+    productionDatabaseNetworkEvidence: {
+      containerId: 'f'.repeat(64),
+      networks: networkAttachments.production,
+    },
+    reviewedAgentImage,
+    reviewedAgentImageId,
+    reviewedBrokerStateVolume,
+    reviewedWorkspaceVolume,
+    brokerStateVolumeAttachments: [{
+      volumeName: reviewedBrokerStateVolume,
+      containerId: '1'.repeat(64),
+      serviceId: 'affiliate-model-auth-broker',
+      target: '/var/lib/omp',
+      readOnly: false,
+    }],
+    modelAuthBrokerBearerSource: modelServiceBearerSources.broker,
+    modelGatewayBearerSource: modelServiceBearerSources.gateway,
+    runnerModelGatewayBearerSha256: modelServiceBearerSources.gateway.sha256,
+    reviewedModelServiceState: 'STOPPED',
+    reviewedModelAuthNetwork: 'affiliate_model_auth_internal',
+    reviewedModelClientNetwork: 'affiliate_model_client_internal',
+    reviewedModelEgressNetwork: 'affiliate_model_egress',
+    modelAuthBrokerContainer: modelServiceContainer('broker'),
+    modelGatewayContainer: modelServiceContainer('gateway'),
     runnerContainer: {
       id: 'agent-runner',
       name: 'affiliate-agent-runner',
@@ -235,11 +396,18 @@ const strictInventoryFixture = () => {
       },
       environment: [
         'AFFILIATE_AGENT_GATEWAY_ADDRESS=http://gateway:8080',
-        'AFFILIATE_AGENT_CODEX_AUTH_SEED=/run/secrets/codex-auth.json',
-        'AFFILIATE_AGENT_CODEX_MODEL=gpt-5.6-luna',
+        'AFFILIATE_AGENT_MODEL_GATEWAY_ADDRESS=http://affiliate-model-gateway:4000',
+        'AFFILIATE_AGENT_MODEL_GATEWAY_TOKEN=<redacted>',
+        'AFFILIATE_AGENT_OMP_MODEL=openai-codex/gpt-5.6-luna',
       ],
-      volumes: ['/reviewed/auth.json:/run/secrets/codex-auth.json:ro'],
-      networks: ['affiliate_gateway_internal', 'affiliate_gateway_egress'],
+      mounts: [{
+        source: reviewedWorkspaceVolume,
+        target: '/workspaces',
+        readOnly: false,
+        type: 'volume' as const,
+      }],
+      networks: ['affiliate_gateway_internal', 'affiliate_model_client_internal'],
+      networkAttachments: networkAttachments.runner,
       isNetworkInternal: true,
       capDrop: ['ALL'],
       capAdd: ['CHOWN', 'DAC_OVERRIDE', 'FOWNER', 'KILL', 'SETGID', 'SETUID'],
@@ -510,7 +678,7 @@ describe('affiliate mapping VM deployment boundary', () => {
     );
   });
 
-  it('keeps Codex auth and egress access on the runner only', () => {
+  it('keeps OMP model-gateway access on the root runner only', () => {
     const compose = read('deploy/affiliate-governed/compose.yml');
     const runner = compose
       .split('\n  affiliate-agent-runner:\n')[1]
@@ -520,13 +688,29 @@ describe('affiliate mapping VM deployment boundary', () => {
       .split('\n  mapping-producer-2:\n')[0];
 
     expect(runner).toContain('- gateway_internal');
-    expect(runner).toContain('- gateway_egress');
-    expect(runner).toContain('AFFILIATE_AGENT_CODEX_AUTH_SEED');
-    expect(runner).toContain('AFFILIATE_AGENT_CODEX_MODEL');
-    expect(runner).toContain('${AFFILIATE_AGENT_CODEX_AUTH_FILE:?');
-    expect(supervisor).not.toContain('AFFILIATE_AGENT_CODEX');
+    expect(runner).toContain('- model_client_internal');
+    expect(runner).not.toContain('- gateway_egress');
+    expect(runner).toContain('AFFILIATE_AGENT_MODEL_GATEWAY_ADDRESS');
+    expect(runner).toContain('AFFILIATE_AGENT_MODEL_GATEWAY_TOKEN');
+    expect(runner).toContain('AFFILIATE_AGENT_OMP_MODEL');
+    expect(runner).not.toContain('CODEX_AUTH');
+    expect(runner).not.toContain('codex-auth.json');
+    expect(supervisor).not.toContain('AFFILIATE_AGENT_MODEL_GATEWAY');
+    expect(supervisor).not.toContain('AFFILIATE_AGENT_OMP_MODEL');
     expect(supervisor).not.toContain('codex-auth.json');
-    expect((compose.match(/AFFILIATE_AGENT_CODEX_AUTH_FILE/g) ?? []).length).toBe(1);
+    expect(compose).toContain('affiliate-model-auth-broker:');
+    expect(compose).toContain('affiliate-model-gateway:');
+    expect(compose).toContain('/usr/local/bin/prepare-omp-service');
+    expect(compose).toContain('target: /run/secrets/affiliate-model-auth-broker-token');
+    expect(compose).toContain('target: /run/secrets/affiliate-model-gateway-token');
+    expect(compose).not.toContain('target: /var/lib/omp/.omp/profiles/');
+    expect(compose).toContain('group_add:\n      - "1003"');
+    expect(compose).toContain('affiliate-model-auth-broker:\n    restart: "no"');
+    expect(compose).toContain('affiliate-model-gateway:\n    restart: "no"');
+    const agentDockerfile = read('deploy/affiliate-governed/Dockerfile');
+    expect(agentDockerfile).toContain(
+      'COPY deploy/affiliate-governed/prepare-omp-bearers.mjs /usr/local/libexec/prepare-omp-bearers.mjs',
+    );
   });
   it('gives the cadence controller only the replenishment credential', () => {
     const compose = read('deploy/affiliate-governed/compose.yml');
@@ -654,6 +838,19 @@ describe('cutover inventory schema boundary', () => {
         unexpectedContainerKey: true,
       },
     }, reviewedLegacyProcessManifest, new Date('2026-08-25T12:01:00.000Z'))).toThrow(/runnerContainer.*Unrecognized key/);
+  });
+  it('rejects a runner inventory without the reviewed workspace mount', () => {
+    const { inventory, reviewedLegacyProcessManifest } = strictInventoryFixture();
+
+    expect(() => parseAffiliateCutoverInventory({
+      ...inventory,
+      runnerContainer: {
+        ...inventory.runnerContainer,
+        mounts: [],
+      },
+    }, reviewedLegacyProcessManifest, new Date('2026-08-25T12:01:00.000Z'))).toThrow(
+      'exactly the reviewed workspace volume',
+    );
   });
 
   it('refreshes evaluatedAt from trusted execution time and rejects stale or future capture time', () => {

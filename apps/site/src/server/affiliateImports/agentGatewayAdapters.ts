@@ -347,7 +347,7 @@ export interface AffiliateAgentProcessSession {
 }
 
 export type AffiliateAgentProcessLaunchInput = Readonly<{
-  command: readonly ["codex", "exec"];
+  command: readonly ["affiliate-omp-agent"];
   prompt: string;
   environment: Readonly<Record<string, string>>;
   workspacePath: string;
@@ -393,7 +393,7 @@ export interface AffiliateAgentWorkspaceManager {
   ): Promise<
     Readonly<{
       path: string;
-      codexHome?: string;
+      ompConfigRoot?: string;
       attestation: AffiliateAgentWorkspaceAttestation;
     }>
   >;

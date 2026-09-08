@@ -42,11 +42,11 @@ const deployment = {
   expectedTopology: {
     claimsPerInvocation: 1,
     hasFreshWorkspacePerClaim: true,
-    processCommand: ['codex', 'exec', '--ephemeral'],
+    processCommand: ['affiliate-omp-agent'],
     hasNestedGoal: false,
     hasClaimLoop: false,
     hasContextReuse: false,
-    executionClass: 'PRODUCTION_CODEX',
+    executionClass: 'PRODUCTION_OMP',
     databaseRoles: { gateway: 'bracketiq_affiliate_gateway', lifecycleAuthority: 'bracketiq_affiliate_lifecycle', agent: 'bracketiq_affiliate_agent' },
   },
 };

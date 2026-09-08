@@ -16,19 +16,12 @@ profile "bracketiq-affiliate-runner" flags=(attach_disconnected,mediate_deleted)
   deny network vsock,
   capability,
   file,
-  # Bubblewrap creates its namespaces before Codex seccomp is applied. The
-  # user namespace gives setup CAP_SYS_ADMIN only inside that namespace; the
-  # container capability bounding set still excludes host CAP_SYS_ADMIN.
-  userns,
-  # Bubblewrap uses tmpfs, bind, read-only remount, /proc, and pivot_root
-  # mounts while constructing /newroot. Its source and target paths include
-  # policy-selected workspace paths, so AppArmor cannot safely enumerate them
-  # without breaking valid policies. The Docker capability set and private
-  # user/mount namespaces keep these permissions off the host mount namespace.
-  mount,
-  remount,
-  umount,
-  pivot_root,
+  # OMP is an in-process Bun SDK driver; it does not construct a nested
+  # namespace or mount tree. Keep Docker's container namespaces as the only
+  # namespace boundary and deny namespace setup from the runner.
+  deny capability sys_admin,
+  deny capability sys_chroot,
+  deny /proc/** w,
   # Host (privileged) processes may send signals to container processes.
   signal (receive) peer=unconfined,
   # runc may send signals to container processes (for "docker stop").
@@ -37,7 +30,7 @@ profile "bracketiq-affiliate-runner" flags=(attach_disconnected,mediate_deleted)
   signal (receive) peer=crun,
   # dockerd may send signals to container processes (for "docker kill").
   signal (receive) peer="unconfined",
-  # Runner and Codex processes may send signals amongst themselves.
+  # Runner and OMP child processes may send signals amongst themselves.
   signal (send,receive) peer="bracketiq-affiliate-runner",
 
   deny @{PROC}/* w,   # deny write for all files directly in /proc (not in a subdir)

@@ -37,6 +37,7 @@ import {
 } from "../agentGatewayAdapters";
 import {
   AFFILIATE_AGENT_RUNNER_RESERVATION_TIMEOUT_MILLISECONDS,
+  AFFILIATE_AGENT_TERMINAL_CONFIRMATION_TIMEOUT_MILLISECONDS,
   type AffiliateAgentSupervisorAdmissionState,
   type AffiliateAgentSupervisorInput,
   runAffiliateAgentInvocation,
@@ -98,11 +99,11 @@ const claimEnvelopeFor = (
     deploymentContractHash: SHA256,
     supplyContractVersion: 1,
     supplyContractHash: SHA256,
-    roleContractVersion: 1,
+    roleContractVersion: 2,
     roleContractHash: SHA256,
-    promptTemplateVersion: 1,
+    promptTemplateVersion: 2,
     promptTemplateHash: SHA256,
-    executionClass: "PRODUCTION_CODEX" as const,
+    executionClass: "PRODUCTION_OMP" as const,
     workerId: request.workerId,
     invocationId: request.invocationId,
     workspaceId: request.workspaceAttestation.workspaceId,
@@ -382,7 +383,7 @@ const createSupervisorHarness = (
         schemaVersion: 1 as const,
         workspaceId: `workspace-${workspaceSequence}`,
         mode: input.mode,
-        executionClass: "PRODUCTION_CODEX" as const,
+        executionClass: "PRODUCTION_OMP" as const,
         workerId: input.workerId,
         invocationId: input.invocationId,
         issuedAt: STARTED_AT,
@@ -489,7 +490,7 @@ describe("affiliate agent one-claim supervisor", () => {
     expect(harness.release).toHaveBeenCalledTimes(1);
   });
 
-  it("starts one exact Codex process for one claim and submits one terminal result", async () => {
+  it("starts one exact OMP process for one claim and submits one terminal result", async () => {
     const harness = createSupervisorHarness({
       processEvents: [terminalProcessEvent({ disposition: "NO_ACTION" })],
     });
@@ -504,7 +505,7 @@ describe("affiliate agent one-claim supervisor", () => {
       .calls[0][0] as AffiliateAgentClaimRequest;
     const grant = claimGrantFor(request);
     expect(harness.launch).toHaveBeenCalledWith({
-      command: ["codex", "exec"],
+      command: ["affiliate-omp-agent"],
       prompt: grant.prompt,
       environment: {
         AFFILIATE_AGENT_GATEWAY_ADDRESS:
@@ -514,7 +515,6 @@ describe("affiliate agent one-claim supervisor", () => {
         AFFILIATE_AGENT_CLAIM_ENVELOPE: canonicalizeAffiliateAgentValue(
           grant.envelope,
         ),
-        AFFILIATE_AGENT_PROMPT: grant.prompt,
       },
       workspacePath: "/isolated/affiliate-agent-workspace-1",
       workerId: request.workerId,
@@ -1126,6 +1126,11 @@ describe("affiliate agent one-claim supervisor", () => {
       );
       await jest.advanceTimersByTimeAsync(0);
       await jest.advanceTimersByTimeAsync(20 * 60 * 1_000);
+      await jest.advanceTimersByTimeAsync(0);
+      expect(harness.reconcileInvocation).not.toHaveBeenCalled();
+      await jest.advanceTimersByTimeAsync(
+        AFFILIATE_AGENT_TERMINAL_CONFIRMATION_TIMEOUT_MILLISECONDS,
+      );
 
       await expect(invocation).resolves.toBe("INVOCATION_FAILED");
       const operations = harness.gatewayPerform.mock.calls.map(
@@ -1147,6 +1152,134 @@ describe("affiliate agent one-claim supervisor", () => {
         harness.reconcileInvocation.mock.invocationCallOrder[0],
       );
       expect(harness.destroyWorkspace).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("drains a terminal frame after the model deadline for bounded confirmation", async () => {
+    jest.useFakeTimers({ now: new Date(STARTED_AT) });
+    try {
+      const processEvent = createDeferred<AffiliateAgentProcessEvent>();
+      const harness = createSupervisorHarness({
+        processEvents: [],
+        nextProcessEvent: () => processEvent.promise,
+        now: () => new Date(),
+        perform: async (operation) => {
+          if (operation.kind === "HEARTBEAT") {
+            return {
+              kind: "HEARTBEAT_ACCEPTED" as const,
+              receiptId: operation.idempotencyKey,
+              heartbeatAt: new Date().toISOString(),
+              leaseExpiresAt: HARD_DEADLINE_AT,
+            };
+          }
+          if (operation.kind !== "SUBMIT_RESULT") {
+            throw new Error(`Unexpected operation: ${operation.kind}`);
+          }
+          return {
+            kind: "INVOCATION_FAILED" as const,
+            receiptId: "terminal-failure-after-deadline",
+            failureCode: "TERMINAL_SUBMISSION_FAILURE" as const,
+            invocationFailureCount: 1,
+            nextAttemptAt: null,
+            isPipelineBlocked: false,
+          };
+        },
+      });
+      const invocation = runAffiliateAgentInvocation(
+        harness.dependencies,
+        supervisorInput(),
+      );
+
+      await jest.advanceTimersByTimeAsync(0);
+      await jest.advanceTimersByTimeAsync(20 * 60 * 1_000);
+      await jest.advanceTimersByTimeAsync(0);
+      await jest.advanceTimersByTimeAsync(1_000);
+      processEvent.resolve(
+        terminalProcessEvent({ disposition: "NO_ACTION" }, "late-terminal-key"),
+      );
+      await jest.advanceTimersByTimeAsync(0);
+
+      await expect(invocation).resolves.toBe("INVOCATION_FAILED");
+      const submitCall = harness.gatewayPerform.mock.calls.find(
+        ([operation]) => operation.kind === "SUBMIT_RESULT",
+      );
+      expect(submitCall?.[0]).toMatchObject({
+        kind: "SUBMIT_RESULT",
+        idempotencyKey: "late-terminal-key",
+      });
+      expect(submitCall?.[1].deadlineAt).toBeGreaterThan(
+        Date.parse(HARD_DEADLINE_AT),
+      );
+      expect(harness.reconcileInvocation).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("finishes failed terminal confirmation after shutdown begins", async () => {
+    jest.useFakeTimers({ now: new Date(STARTED_AT) });
+    try {
+      const processEvent = createDeferred<AffiliateAgentProcessEvent>();
+      const terminalResponse = createDeferred<{
+        kind: "INVOCATION_FAILED";
+        receiptId: string;
+        failureCode: "TERMINAL_SUBMISSION_FAILURE";
+        invocationFailureCount: 1;
+        nextAttemptAt: string | null;
+        isPipelineBlocked: boolean;
+      }>();
+      const shutdownController = new AbortController();
+      const harness = createSupervisorHarness({
+        processEvents: [],
+        nextProcessEvent: () => processEvent.promise,
+        now: () => new Date(),
+        perform: async (operation) => {
+          if (operation.kind === "HEARTBEAT") {
+            return {
+              kind: "HEARTBEAT_ACCEPTED" as const,
+              receiptId: operation.idempotencyKey,
+              heartbeatAt: STARTED_AT,
+              leaseExpiresAt: "2026-08-20T18:05:00.000Z",
+            };
+          }
+          if (operation.kind !== "SUBMIT_RESULT") {
+            throw new Error(`Unexpected operation: ${operation.kind}`);
+          }
+          return terminalResponse.promise;
+        },
+      });
+      const invocation = runAffiliateAgentInvocation(harness.dependencies, {
+        ...supervisorInput(),
+        shutdownSignal: shutdownController.signal,
+      });
+
+      await jest.advanceTimersByTimeAsync(0);
+      await jest.advanceTimersByTimeAsync(20 * 60 * 1_000);
+      await jest.advanceTimersByTimeAsync(0);
+      await jest.advanceTimersByTimeAsync(1_000);
+      processEvent.resolve(
+        terminalProcessEvent({ disposition: "NO_ACTION" }, "late-failed-key"),
+      );
+      await jest.advanceTimersByTimeAsync(0);
+      expect(
+        harness.gatewayPerform.mock.calls.filter(
+          ([operation]) => operation.kind === "SUBMIT_RESULT",
+        ),
+      ).toHaveLength(1);
+      shutdownController.abort();
+      terminalResponse.resolve({
+        kind: "INVOCATION_FAILED",
+        receiptId: "failed-receipt-after-shutdown",
+        failureCode: "TERMINAL_SUBMISSION_FAILURE",
+        invocationFailureCount: 1,
+        nextAttemptAt: null,
+        isPipelineBlocked: false,
+      });
+
+      await expect(invocation).resolves.toBe("INVOCATION_FAILED");
+      expect(harness.reconcileInvocation).not.toHaveBeenCalled();
     } finally {
       jest.useRealTimers();
     }
@@ -1516,7 +1649,7 @@ describe("affiliate agent one-claim supervisor", () => {
     const harness = createSupervisorHarness({
       claim: async (request) => ({
         ...claimGrantFor(request),
-        prompt: "x".repeat(100_000),
+        prompt: "x".repeat(131_073),
       }),
     });
 
@@ -1672,6 +1805,7 @@ describe("affiliate agent one-claim supervisor", () => {
         supervisorInput(),
       );
       await jest.advanceTimersByTimeAsync(20 * 60 * 1_000);
+      await jest.advanceTimersByTimeAsync(0);
       await expect(invocation).resolves.toBe("INVOCATION_FAILED");
 
       expect(
@@ -1698,7 +1832,7 @@ describe("affiliate agent one-claim supervisor", () => {
         schemaVersion: 1 as const,
         workspaceId: "workspace-late",
         mode: "READ_WRITE" as const,
-        executionClass: "PRODUCTION_CODEX" as const,
+        executionClass: "PRODUCTION_OMP" as const,
         workerId: "coverage_planner-worker-1",
         invocationId: "coverage_planner-invocation-1",
         issuedAt: STARTED_AT,
@@ -1751,7 +1885,7 @@ describe("affiliate agent one-claim supervisor", () => {
         schemaVersion: 1 as const,
         workspaceId: "workspace-slow",
         mode: "READ_WRITE" as const,
-        executionClass: "PRODUCTION_CODEX" as const,
+        executionClass: "PRODUCTION_OMP" as const,
         workerId: "coverage_planner-worker-1",
         invocationId: "coverage_planner-invocation-1",
         issuedAt: STARTED_AT,
@@ -1805,7 +1939,7 @@ describe("affiliate agent one-claim supervisor", () => {
         schemaVersion: 1 as const,
         workspaceId: "workspace-raced",
         mode: "READ_WRITE" as const,
-        executionClass: "PRODUCTION_CODEX" as const,
+        executionClass: "PRODUCTION_OMP" as const,
         workerId: "coverage_planner-worker-1",
         invocationId: "coverage_planner-invocation-1",
         issuedAt: STARTED_AT,
@@ -1895,6 +2029,11 @@ describe("affiliate agent one-claim supervisor", () => {
       await jest.advanceTimersByTimeAsync(0);
       expect(harness.gatewayPerform).toHaveBeenCalledTimes(1);
       await jest.advanceTimersByTimeAsync(20 * 60 * 1_000);
+      await jest.advanceTimersByTimeAsync(0);
+      expect(harness.reconcileInvocation).not.toHaveBeenCalled();
+      await jest.advanceTimersByTimeAsync(
+        AFFILIATE_AGENT_TERMINAL_CONFIRMATION_TIMEOUT_MILLISECONDS,
+      );
       await expect(invocation).resolves.toBe("INVOCATION_FAILED");
 
       expect(
@@ -1937,6 +2076,10 @@ describe("affiliate agent one-claim supervisor", () => {
       await jest.advanceTimersByTimeAsync(60_000);
       expect(harness.gatewayPerform).toHaveBeenCalledTimes(1);
       await jest.advanceTimersByTimeAsync(19 * 60 * 1_000);
+      await jest.advanceTimersByTimeAsync(0);
+      await jest.advanceTimersByTimeAsync(
+        AFFILIATE_AGENT_TERMINAL_CONFIRMATION_TIMEOUT_MILLISECONDS,
+      );
       await expect(invocation).resolves.toBe("INVOCATION_FAILED");
 
       expect(harness.launch).toHaveBeenCalledTimes(1);
@@ -1976,7 +2119,6 @@ describe("affiliate agent one-claim supervisor", () => {
         "AFFILIATE_AGENT_CLAIM_TOKEN",
         "AFFILIATE_AGENT_GATEWAY_ADDRESS",
         "AFFILIATE_AGENT_GATEWAY_PATH_PREFIX",
-        "AFFILIATE_AGENT_PROMPT",
       ]);
       const request = harness.gatewayClaim.mock
         .calls[0][0] as AffiliateAgentClaimRequest;
@@ -1987,7 +2129,6 @@ describe("affiliate agent one-claim supervisor", () => {
       expect(launchInput.environment.AFFILIATE_AGENT_CLAIM_ENVELOPE).toBe(
         canonicalizeAffiliateAgentValue(grant.envelope),
       );
-      expect(launchInput.environment.AFFILIATE_AGENT_PROMPT).toBe(grant.prompt);
       expect(launchInput.environment).not.toHaveProperty("roleCredential");
       expect(launchInput.environment).not.toHaveProperty("workerId");
       expect(harness.destroyWorkspace).toHaveBeenCalledTimes(1);
@@ -2146,7 +2287,6 @@ describe("affiliate agent one-claim supervisor", () => {
           "AFFILIATE_AGENT_CLAIM_TOKEN",
           "AFFILIATE_AGENT_GATEWAY_ADDRESS",
           "AFFILIATE_AGENT_GATEWAY_PATH_PREFIX",
-          "AFFILIATE_AGENT_PROMPT",
         ]),
         missingCredentialNames: forbiddenNames,
         directAccess: Object.fromEntries(

@@ -3,7 +3,7 @@
 import { generateKeyPairSync, sign, type KeyObject } from "node:crypto";
 import { EventEmitter, once } from "node:events";
 import { createConnection, createServer, type Socket } from "node:net";
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn as nodeSpawn } from "node:child_process";
@@ -29,7 +29,6 @@ const createDeferred = <T>(): Deferred<T> => {
 import {
   configureRunnerConnection,
   prepareWorkspaceForSupervisorCleanup,
-  seedCodexAuthForWorkspace,
   AFFILIATE_AGENT_RUNNER_PRE_RESERVATION_TIMEOUT_MILLISECONDS,
   AFFILIATE_AGENT_RUNNER_RESERVATION_LIFETIME_MILLISECONDS,
   AFFILIATE_AGENT_RUNNER_MAX_CHILD_OUTPUT_BYTES,
@@ -43,7 +42,7 @@ import {
 import { canonicalizeAffiliateAgentValue } from "../agentGatewayContracts";
 import type { AffiliateAgentProcessEvent } from "../agentGatewayAdapters";
 
-class FakeCodexChild extends EventEmitter {
+class FakeAgentChild extends EventEmitter {
   readonly stdout = new EventEmitter();
   readonly stderr = Object.assign(new EventEmitter(), {
     resume: jest.fn(),
@@ -56,7 +55,7 @@ class FakeCodexChild extends EventEmitter {
   });
   readonly kill = jest.fn(() => true);
 }
-class FakeCodexChildWithProcessGroup extends FakeCodexChild {
+class FakeAgentChildWithProcessGroup extends FakeAgentChild {
   readonly pid = 12_345;
 }
 
@@ -125,32 +124,44 @@ const responseReader = (socket: Socket) => {
   };
 };
 
+const TEST_MODEL_CONFIGURATION = {
+  modelGatewayAddress: "http://model-gateway.internal",
+  modelGatewayToken: "model-gateway-token",
+  ompModel: "openai-codex/gpt-5.6-luna",
+} as const;
+const STARTED_AT = "2026-08-20T18:00:00.000Z";
 const runSingleChildScenario = async (
   output: string | Buffer,
   exitCode: number | null,
-  triggerOnSpawn?: (child: FakeCodexChild) => void,
+  triggerOnSpawn?: (child: FakeAgentChild) => void,
+  deferClose = false,
+  environmentPatch: Readonly<Record<string, string>> = {},
 ): Promise<{
   event: AffiliateAgentProcessEvent;
-  child: FakeCodexChild;
+  child: FakeAgentChild;
+  command: string;
   environment: NodeJS.ProcessEnv;
   args: readonly string[];
   responses: AffiliateAgentRunnerResponse[];
 }> => {
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");
-  let child: FakeCodexChild | null = null;
+  let child: FakeAgentChild | null = null;
   const spawnProcessMock = jest.fn((..._args: unknown[]) => {
-    child = new FakeCodexChild();
+    child = new FakeAgentChild();
     queueMicrotask(() => {
       child?.emit("spawn");
       if (child) triggerOnSpawn?.(child);
-      child?.stdout.emit("data", output);
-      child?.exitCode = exitCode;
-      child?.emit("close", exitCode);
+      if (!deferClose) {
+        child?.stdout.emit("data", output);
+        child?.exitCode = exitCode;
+        child?.emit("close", exitCode);
+      }
     });
     return child;
   });
   const spawnProcess = spawnProcessMock as unknown as typeof nodeSpawn;
   const context: RunnerServerContext = {
+    ...TEST_MODEL_CONFIGURATION,
     activeInvocations: new Set(),
     activeReservations: new Set(),
     connections: new Set(),
@@ -184,7 +195,7 @@ const runSingleChildScenario = async (
     if (reserved.kind !== "RESERVED") {
       throw new Error("Expected a RESERVED response.");
     }
-    client.write(`${JSON.stringify(launchRequest(privateKey, reserved.reservationId))}\n`);
+    client.write(`${JSON.stringify(launchRequest(privateKey, reserved.reservationId, environmentPatch))}\n`);
     const responses = [await nextResponse(), await nextResponse()];
     if (responses[1]?.kind !== "EVENT") {
       responses.push(await nextResponse());
@@ -196,16 +207,19 @@ const runSingleChildScenario = async (
     if (!eventResponse) {
       throw new Error("Expected an EVENT response.");
     }
-    if (!child) throw new Error("The Codex child was not spawned.");
+    if (!child) throw new Error("The child was not spawned.");
+    const spawnCommand = spawnProcessMock.mock.calls[0]?.[0] as string | undefined;
+    if (!spawnCommand) throw new Error("The child command was not captured.");
     const spawnArgs = spawnProcessMock.mock.calls[0]?.[1] as readonly string[] | undefined;
-    if (!spawnArgs) throw new Error("The Codex child arguments were not captured.");
+    if (!spawnArgs) throw new Error("The child arguments were not captured.");
     const spawnOptions = spawnProcessMock.mock.calls[0]?.[2] as {
       env?: NodeJS.ProcessEnv;
     } | undefined;
-    if (!spawnOptions?.env) throw new Error("The Codex child environment was not captured.");
+    if (!spawnOptions?.env) throw new Error("The child environment was not captured.");
     return {
       event: eventResponse.event,
       child,
+      command: spawnCommand,
       environment: spawnOptions.env,
       args: spawnArgs,
       responses,
@@ -219,65 +233,38 @@ const runSingleChildScenario = async (
   }
 };
 describe("executable affiliate agent runner boundary", () => {
-  it("emits the pinned Codex model and enables child network access", async () => {
+  it("launches the fixed OMP child with root-owned model configuration", async () => {
     const terminal = {
       kind: "TERMINAL_SUBMISSION",
       idempotencyKey: "child-terminal-key",
       result: { disposition: "APPROVED" },
     };
-    const { event, child, environment, args } = await runSingleChildScenario(
+    const { event, child, command, environment, args } = await runSingleChildScenario(
       JSON.stringify(terminal),
       0,
     );
     expect(event).toEqual(terminal);
-    expect(args).toEqual(expect.arrayContaining([
-      "--model",
-      "gpt-5.6-luna",
-      "-c",
-      "sandbox_workspace_write.network_access=true",
-    ]));
-    expect(environment.HOME).toBe("/workspaces/workspace-1-session/.codex");
-    expect(environment.CODEX_HOME).toBe("/workspaces/workspace-1-session/.codex");
+    expect(command).toBe("/usr/local/bin/affiliate-omp-agent");
+    expect(args).toEqual([]);
+    expect(environment.HOME).toBe("/workspaces/workspace-1-session/.omp");
+    expect(environment.PI_CONFIG_DIR).toBe(".");
+    expect(environment.PI_CODING_AGENT_DIR).toBe(
+      "/workspaces/workspace-1-session/.omp/agent",
+    );
+    expect(environment.AFFILIATE_AGENT_MODEL_GATEWAY_ADDRESS).toBe(
+      TEST_MODEL_CONFIGURATION.modelGatewayAddress,
+    );
+    expect(environment.AFFILIATE_AGENT_MODEL_GATEWAY_TOKEN).toBe(
+      TEST_MODEL_CONFIGURATION.modelGatewayToken,
+    );
+    expect(environment.AFFILIATE_AGENT_OMP_MODEL).toBe(TEST_MODEL_CONFIGURATION.ompModel);
+    expect(environment.CODEX_HOME).toBeUndefined();
+    expect(environment.OMP_CONFIG_ROOT).toBeUndefined();
     expect(environment.TMPDIR).toBe("/workspaces/workspace-1-session/.tmp");
     expect(environment.TMP).toBe("/workspaces/workspace-1-session/.tmp");
     expect(environment.TEMP).toBe("/workspaces/workspace-1-session/.tmp");
     expect(child.stdin.end).toHaveBeenCalledTimes(1);
     expect(child.stderr.resume).toHaveBeenCalledTimes(1);
-  });
-  it("copies only reviewed Codex auth into the workspace home", async () => {
-    const temporaryDirectory = await mkdtemp(join(tmpdir(), "affiliate-runner-auth-"));
-    const seedPath = join(temporaryDirectory, "auth.json");
-    const workspacePath = join(temporaryDirectory, "workspace");
-    const targetPath = join(workspacePath, ".codex", "auth.json");
-    const seed = JSON.stringify({
-      auth_mode: "chatgpt",
-      access_token: "access-token",
-      refresh_token: "refresh-token",
-      account_id: "account-id",
-    });
-    try {
-      await mkdir(join(workspacePath, ".codex"), { recursive: true });
-      await writeFile(seedPath, seed, { mode: 0o600 });
-      expect(seedCodexAuthForWorkspace(seedPath, workspacePath)).toBe(targetPath);
-      expect(await readFile(targetPath, "utf8")).toBe(seed);
-      expect((await stat(targetPath)).mode & 0o777).toBe(0o600);
-    } finally {
-      await rm(temporaryDirectory, { recursive: true, force: true });
-    }
-  });
-  it("rejects an auth seed without reviewed ChatGPT credentials", async () => {
-    const temporaryDirectory = await mkdtemp(join(tmpdir(), "affiliate-runner-auth-"));
-    const seedPath = join(temporaryDirectory, "auth.json");
-    const workspacePath = join(temporaryDirectory, "workspace");
-    try {
-      await mkdir(join(workspacePath, ".codex"), { recursive: true });
-      await writeFile(seedPath, JSON.stringify({ auth_mode: "api_key" }));
-      expect(() => seedCodexAuthForWorkspace(seedPath, workspacePath)).toThrow(
-        "reviewed ChatGPT credentials",
-      );
-    } finally {
-      await rm(temporaryDirectory, { recursive: true, force: true });
-    }
   });
   it("fails closed for a workspace symlink and never changes its target", async () => {
     const temporaryDirectory = await mkdtemp(join(tmpdir(), "affiliate-runner-cleanup-"));
@@ -317,7 +304,7 @@ describe("executable affiliate agent runner boundary", () => {
       result: { disposition: "APPROVED" },
     });
     const spawnProcess = jest.fn(() => {
-      const child = new FakeCodexChildWithProcessGroup();
+      const child = new FakeAgentChildWithProcessGroup();
       queueMicrotask(() => {
         child.emit("spawn");
         child.stdout.emit("data", terminal);
@@ -327,6 +314,7 @@ describe("executable affiliate agent runner boundary", () => {
       return child;
     }) as unknown as typeof nodeSpawn;
     const context: RunnerServerContext = {
+      ...TEST_MODEL_CONFIGURATION,
       activeInvocations: new Set(),
       activeReservations: new Set(),
       connections: new Set(),
@@ -486,14 +474,15 @@ describe("executable affiliate agent runner boundary", () => {
   });
   it("rejects runner correction without starting a second child", async () => {
     const { privateKey, publicKey } = generateKeyPairSync("ed25519");
-    const children: FakeCodexChild[] = [];
+    const children: FakeAgentChild[] = [];
     const spawnProcess = jest.fn(() => {
-      const child = new FakeCodexChild();
+      const child = new FakeAgentChild();
       children.push(child);
       queueMicrotask(() => child.emit("spawn"));
       return child;
     }) as unknown as typeof nodeSpawn;
     const context: RunnerServerContext = {
+      ...TEST_MODEL_CONFIGURATION,
       activeInvocations: new Set(),
       activeReservations: new Set(),
       connections: new Set(),
@@ -538,7 +527,7 @@ describe("executable affiliate agent runner boundary", () => {
       await expect(nextResponse()).resolves.toEqual({
         kind: "ERROR",
         requestId: correction.requestId,
-        message: "Schema corrections must be submitted by the Codex child through the gateway.",
+        message: "Schema corrections must be submitted by the child through the gateway.",
       });
       expect(spawnProcess).toHaveBeenCalledTimes(1);
     } finally {
@@ -553,6 +542,7 @@ describe("executable affiliate agent runner boundary", () => {
     const first = generateKeyPairSync("ed25519");
     const second = generateKeyPairSync("ed25519");
     const context: RunnerServerContext = {
+      ...TEST_MODEL_CONFIGURATION,
       activeInvocations: new Set(),
       activeReservations: new Set(),
       connections: new Set(),
@@ -597,10 +587,11 @@ describe("executable affiliate agent runner boundary", () => {
     }
   });
 
-  it("rejects a signed launch frame with an unknown field before spawning", async () => {
+  it("rejects a signed launch frame that attempts to override root model configuration", async () => {
     const { privateKey, publicKey } = generateKeyPairSync("ed25519");
     const spawnProcess = jest.fn() as unknown as typeof nodeSpawn;
     const context: RunnerServerContext = {
+      ...TEST_MODEL_CONFIGURATION,
       activeInvocations: new Set(),
       activeReservations: new Set(),
       connections: new Set(),
@@ -634,9 +625,8 @@ describe("executable affiliate agent runner boundary", () => {
         ...launchRequest(
           privateKey,
           reserved.reservationId,
-          { CODEX_HOME: "/tmp/shared-codex" },
+          { AFFILIATE_AGENT_OMP_MODEL: "attacker/model" },
         ),
-        unexpectedField: "reject-me",
       };
       client.write(`${JSON.stringify(invalidRequest)}\n`);
       await expect(nextResponse()).resolves.toMatchObject({
@@ -655,11 +645,12 @@ describe("executable affiliate agent runner boundary", () => {
   it("does not start a second child while the first invocation is active", async () => {
     const { privateKey, publicKey } = generateKeyPairSync("ed25519");
     const spawnProcess = jest.fn(() => {
-      const child = new FakeCodexChild();
+      const child = new FakeAgentChild();
       queueMicrotask(() => child.emit("spawn"));
       return child;
     }) as unknown as typeof nodeSpawn;
     const context: RunnerServerContext = {
+      ...TEST_MODEL_CONFIGURATION,
       activeInvocations: new Set(),
       seenRequestIds: new Map(),
       activeReservations: new Set(),
@@ -723,6 +714,7 @@ describe("executable affiliate agent runner boundary", () => {
     const { privateKey, publicKey } = generateKeyPairSync("ed25519");
     const spawnProcess = jest.fn() as unknown as typeof nodeSpawn;
     const context: RunnerServerContext = {
+      ...TEST_MODEL_CONFIGURATION,
       activeInvocations: new Set(),
       activeReservations: new Set(),
       connections: new Set(),
@@ -803,6 +795,47 @@ describe("executable affiliate agent runner boundary", () => {
     expect(event).toEqual({ kind: "EXIT", exitCode: 7 });
   });
 
+  it("preserves a terminal frame emitted before deadline containment completes", async () => {
+    jest.useFakeTimers({ now: new Date(STARTED_AT), doNotFake: ["queueMicrotask"] });
+    try {
+      const expiresAt = new Date(
+        Date.parse(STARTED_AT) + 100,
+      ).toISOString();
+      const claimEnvelope = JSON.stringify({
+        role: "COVERAGE_PLANNER",
+        workerId: "worker-1",
+        invocationId: "invocation-1",
+        workspaceId: "workspace-1",
+        expiresAt,
+      });
+      const terminal = JSON.stringify({
+        kind: "TERMINAL_SUBMISSION",
+        idempotencyKey: "deadline-terminal-key",
+        result: { disposition: "NO_ACTION" },
+      });
+      const { event, child } = await runSingleChildScenario(
+        "",
+        137,
+        (child) => {
+          child.stdout.emit("data", terminal);
+          jest.advanceTimersByTime(100);
+          child.exitCode = 137;
+          child.emit("close", 137);
+        },
+        true,
+        { AFFILIATE_AGENT_CLAIM_ENVELOPE: claimEnvelope },
+      );
+      expect(event).toEqual({
+        kind: "TERMINAL_SUBMISSION",
+        idempotencyKey: "deadline-terminal-key",
+        result: { disposition: "NO_ACTION" },
+      });
+      expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it("delivers a terminal frame at the bounded framed-output limit", async () => {
     const terminal = JSON.stringify({
       kind: "TERMINAL_SUBMISSION",
@@ -858,9 +891,9 @@ describe("executable affiliate agent runner boundary", () => {
   });
   it("reaps an active child before releasing capacity after socket loss", async () => {
     const { privateKey, publicKey } = generateKeyPairSync("ed25519");
-    let child: FakeCodexChild | null = null;
+    let child: FakeAgentChild | null = null;
     const spawnProcess = jest.fn(() => {
-      child = new FakeCodexChild();
+      child = new FakeAgentChild();
       child.kill.mockImplementation(() => {
         expect(context.activeInvocations.size).toBe(1);
         child!.exitCode = 137;
@@ -871,6 +904,7 @@ describe("executable affiliate agent runner boundary", () => {
       return child;
     }) as unknown as typeof nodeSpawn;
     const context: RunnerServerContext = {
+      ...TEST_MODEL_CONFIGURATION,
       activeInvocations: new Set(),
       activeReservations: new Set(),
       connections: new Set(),
@@ -932,6 +966,7 @@ describe("executable affiliate agent runner boundary", () => {
     jest.useFakeTimers();
     const { publicKey } = generateKeyPairSync("ed25519");
     const context: RunnerServerContext = {
+      ...TEST_MODEL_CONFIGURATION,
       activeInvocations: new Set(),
       activeReservations: new Set(),
       connections: new Set(),

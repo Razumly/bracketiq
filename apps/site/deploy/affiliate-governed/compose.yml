@@ -7,10 +7,9 @@ x-agent-environment: &agent-environment
   AFFILIATE_AGENT_WORKSPACE_ROOT: /workspaces
   AFFILIATE_AGENT_EXTERNAL_NETWORK: "false"
   AFFILIATE_AGENT_ARTIFACT_ACCESS: "gateway-only"
-  # Keep one Codex child per runner. Shared runner users cannot be siblings.
+  # Keep one OMP child per runner. Shared runner users cannot be siblings.
   AFFILIATE_AGENT_MAX_CONCURRENT_INVOCATIONS: "1"
-  HOME: /tmp/codex
-  CODEX_HOME: /tmp/codex
+  HOME: /tmp/affiliate-agent
 x-agent-supervisor-environment: &agent-supervisor-environment
   <<: *agent-environment
   AFFILIATE_AGENT_WORKSPACE_SIGNING_KEY: ${AFFILIATE_AGENT_WORKSPACE_SIGNING_KEY:?Set the workspace signing key}
@@ -59,9 +58,105 @@ x-agent-worker-common: &agent-worker-common
       condition: service_healthy
     affiliate-agent-runner:
       condition: service_healthy
-
-
 services:
+  affiliate-model-auth-broker:
+    restart: "no"
+    image: ${AFFILIATE_AGENT_IMAGE:?Set AFFILIATE_AGENT_IMAGE}
+    working_dir: /workspace/apps/site
+    user: "${AFFILIATE_MODEL_AUTH_BROKER_UID:?Set reviewed OMP auth-broker UID}:${AFFILIATE_MODEL_AUTH_BROKER_GID:?Set reviewed OMP auth-broker GID}"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=256m
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cpus: 1.0
+    mem_limit: 2g
+    memswap_limit: 2g
+    pids_limit: 512
+    expose:
+      - "8765"
+    networks:
+      model_auth_internal:
+      model_egress:
+    volumes:
+      - type: volume
+        source: affiliate-model-auth-broker-state
+        target: /var/lib/omp
+    secrets:
+      - source: affiliate_model_auth_broker_token
+        target: /run/secrets/affiliate-model-auth-broker-token
+    environment:
+      HOME: /var/lib/omp
+      PI_CONFIG_DIR: .omp
+      OMP_PROFILE: affiliate-model-auth-broker
+    entrypoint:
+      - /usr/local/bin/prepare-omp-service
+      - broker
+    command:
+      - /workspace/apps/site/node_modules/.bin/omp
+      - auth-broker
+      - serve
+      - --bind=0.0.0.0:8765
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:8765/v1/healthz').then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+  affiliate-model-gateway:
+    restart: "no"
+    image: ${AFFILIATE_AGENT_IMAGE:?Set AFFILIATE_AGENT_IMAGE}
+    working_dir: /workspace/apps/site
+    user: "${AFFILIATE_MODEL_GATEWAY_UID:?Set reviewed OMP model-gateway UID}:${AFFILIATE_MODEL_GATEWAY_GID:?Set reviewed OMP model-gateway GID}"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=256m
+      - /var/lib/omp:rw,noexec,nosuid,nodev,size=512m,uid=1004,gid=1004,mode=0700
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    group_add:
+      - "1003"
+    cpus: 1.0
+    mem_limit: 2g
+    memswap_limit: 2g
+    pids_limit: 512
+    expose:
+      - "4000"
+    networks:
+      model_auth_internal:
+      model_client_internal:
+      model_egress:
+    secrets:
+      - source: affiliate_model_auth_broker_token
+        target: /run/secrets/affiliate-model-auth-broker-token
+      - source: affiliate_model_gateway_token
+        target: /run/secrets/affiliate-model-gateway-token
+    environment:
+      HOME: /var/lib/omp
+      PI_CONFIG_DIR: .omp
+      OMP_PROFILE: affiliate-model-gateway
+      OMP_AUTH_BROKER_URL: http://affiliate-model-auth-broker:8765
+    depends_on:
+      affiliate-model-auth-broker:
+        condition: service_healthy
+    entrypoint:
+      - /usr/local/bin/prepare-omp-service
+      - gateway
+    command:
+      - /workspace/apps/site/node_modules/.bin/omp
+      - auth-gateway
+      - serve
+      - --bind=0.0.0.0:4000
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:4000/healthz').then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
   affiliate-gateway:
     <<: *agent-restart-policy
     image: ${AFFILIATE_GATEWAY_IMAGE:?Set AFFILIATE_GATEWAY_IMAGE}
@@ -181,7 +276,12 @@ services:
     user: "0:0"
     networks:
       - gateway_internal
-      - gateway_egress
+      - model_client_internal
+    depends_on:
+      affiliate-gateway:
+        condition: service_healthy
+      affiliate-model-gateway:
+        condition: service_healthy
     group_add:
       - "${AFFILIATE_AGENT_GID:?Set reviewed agent group}"
     cgroup: private
@@ -203,15 +303,15 @@ services:
       - FOWNER
     volumes:
       - *agent-workspace-volume
-      - ${AFFILIATE_AGENT_CODEX_AUTH_FILE:?Set reviewed Codex auth file}:/run/secrets/codex-auth.json:ro
     environment:
       <<: *agent-environment
       AFFILIATE_AGENT_UID: ${AFFILIATE_AGENT_UID:?Set the supervisor workspace UID}
       AFFILIATE_AGENT_RUNNER_CHILD_UID: ${AFFILIATE_AGENT_RUNNER_CHILD_UID:?Set the runner child UID}
       AFFILIATE_AGENT_RUNNER_CHILD_GID: ${AFFILIATE_AGENT_RUNNER_CHILD_GID:?Set the runner child GID}
       AFFILIATE_AGENT_RUNNER_PROTOCOL_PUBLIC_KEYS: ${AFFILIATE_AGENT_RUNNER_PROTOCOL_PUBLIC_KEYS:?Set the runner worker public-key map}
-      AFFILIATE_AGENT_CODEX_AUTH_SEED: /run/secrets/codex-auth.json
-      AFFILIATE_AGENT_CODEX_MODEL: ${AFFILIATE_AGENT_CODEX_MODEL:?Set Codex model}
+      AFFILIATE_AGENT_MODEL_GATEWAY_ADDRESS: ${AFFILIATE_AGENT_MODEL_GATEWAY_ADDRESS:?Set the private OMP model gateway address}
+      AFFILIATE_AGENT_MODEL_GATEWAY_TOKEN: ${AFFILIATE_AGENT_MODEL_GATEWAY_TOKEN:?Set the private OMP model gateway bearer}
+      AFFILIATE_AGENT_OMP_MODEL: ${AFFILIATE_AGENT_OMP_MODEL:?Set the explicit OMP provider/model}
       AFFILIATE_AGENT_RUNNER_CGROUP_RELATIVE_PATH: ${AFFILIATE_AGENT_RUNNER_CGROUP_RELATIVE_PATH:?Set the runner relative cgroup path}
     command: ["/usr/local/bin/affiliate-agent-runner"]
     healthcheck:
@@ -376,6 +476,14 @@ volumes:
       type: tmpfs
       device: tmpfs
       o: "rw,noexec,nosuid,nodev,size=2g,uid=1001,gid=1001,mode=0710"
+  affiliate-model-auth-broker-state:
+    name: ${AFFILIATE_MODEL_AUTH_BROKER_STATE_VOLUME:?Set the private broker state volume name}
+    driver: local
+secrets:
+  affiliate_model_auth_broker_token:
+    file: ${AFFILIATE_MODEL_AUTH_BROKER_TOKEN_FILE:?Set the private auth-broker token file}
+  affiliate_model_gateway_token:
+    file: ${AFFILIATE_MODEL_GATEWAY_TOKEN_FILE:?Set the private model-gateway token file}
 
 networks:
   gateway_internal:
@@ -383,8 +491,17 @@ networks:
     internal: true
   gateway_egress:
     name: ${AFFILIATE_AGENT_GATEWAY_EGRESS_NETWORK:-bracketiq_affiliate_gateway_egress}
-# The production Compose project creates this private internal network for
-# postgres; this project joins it without creating a second database service.
+  model_auth_internal:
+    name: ${AFFILIATE_AGENT_MODEL_AUTH_NETWORK:-bracketiq_affiliate_model_auth_internal}
+    internal: true
+  model_client_internal:
+    name: ${AFFILIATE_AGENT_MODEL_CLIENT_NETWORK:-bracketiq_affiliate_model_client_internal}
+    internal: true
+  model_egress:
+    name: ${AFFILIATE_AGENT_MODEL_EGRESS_NETWORK:-bracketiq_affiliate_model_egress}
+  # The production Compose project creates this private internal network for
+  # postgres; this project joins it without creating a second database service.
   production_backend:
     external: true
     name: ${AFFILIATE_AGENT_PRODUCTION_BACKEND_NETWORK:-bracketiq-production_backend}
+

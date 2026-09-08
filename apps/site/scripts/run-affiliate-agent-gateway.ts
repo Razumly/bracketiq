@@ -323,7 +323,7 @@ const verifyWorkspaceAttestation = async (
   if (!Number.isFinite(issuedAt) || !Number.isFinite(expiresAt)) return false;
   if (issuedAt > now + ATTESTATION_CLOCK_SKEW_MS || expiresAt <= now) return false;
   if (expiresAt - issuedAt > MAX_ATTESTATION_LIFETIME_MS) return false;
-  if (attestation.executionClass !== 'PRODUCTION_CODEX') return false;
+  if (attestation.executionClass !== 'PRODUCTION_OMP') return false;
   if (attestation.mode !== 'READ_ONLY' && attestation.mode !== 'READ_WRITE') return false;
   const { signature, ...preimage } = attestation;
   const expected = createHmac('sha256', workspaceSigningKey)

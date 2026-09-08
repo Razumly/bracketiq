@@ -275,12 +275,19 @@ export class AffiliateAgentGatewayError extends Error {
   }
 }
 
+export type AffiliateAgentGatewayRequestOptions = Readonly<{
+  signal?: AbortSignal;
+  deadlineAt?: number;
+}>;
+
 export interface AffiliateAgentGateway {
   claim(
     input: AffiliateAgentClaimRequest,
+    options?: AffiliateAgentGatewayRequestOptions,
   ): Promise<AffiliateAgentClaimGrant | null>;
   perform<T extends AffiliateAgentClaimOperation>(
     input: T,
+    options?: AffiliateAgentGatewayRequestOptions,
   ): Promise<AffiliateAgentClaimOperationResult<T>>;
   reconcile(
     input?: AffiliateAgentReconcileRequest,

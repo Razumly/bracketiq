@@ -10,14 +10,20 @@ import {
 describe("affiliate agent runner child diagnostics", () => {
   it.each([
     ["sandbox namespace denial", "unshare: Operation not permitted", "SANDBOX_NAMESPACE_DENIAL"],
-    ["authentication failure", "Authentication failed for the Codex session", "AUTHENTICATION_FAILURE"],
-    ["model unavailable", "The selected model is not available", "MODEL_UNAVAILABLE"],
-    ["CLI argument rejection", "error: unknown option --ephemeral", "CLI_ARGUMENT_REJECTION"],
+    ["authentication failure", "Authentication failed for the OMP session", "AUTHENTICATION_FAILURE"],
+    ["model unavailable", "The selected OMP model is not available", "MODEL_UNAVAILABLE"],
+    ["CLI argument rejection", "error: unknown option --legacy-model", "CLI_ARGUMENT_REJECTION"],
     ["filesystem denial", "EACCES: permission denied", "FILESYSTEM_DENIAL"],
     ["rate limiting", "429 Too Many Requests", "RATE_LIMITING"],
     ["network failure", "connect ECONNRESET", "NETWORK_FAILURE"],
   ])("classifies %s without exposing the source text", (_name, stderr, signal) => {
     expect(classifyAffiliateAgentRunnerChildFailure(stderr)).toEqual([signal]);
+  });
+  it("ignores a nonfatal child warning", () => {
+    const warning = "warning: OMP child is using the configured model gateway. "
+      + "No terminal result has been submitted yet.";
+
+    expect(classifyAffiliateAgentRunnerChildFailure(warning)).toEqual([]);
   });
 
   it("serializes bounded public fields without stderr or spawn error messages", () => {

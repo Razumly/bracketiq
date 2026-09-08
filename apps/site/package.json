@@ -313,6 +313,8 @@
     "@mui/material": "^7.3.5",
     "@mui/x-date-pickers": "^8.19.0",
     "@next/mdx": "16.2.9",
+    "@oh-my-pi/omptype": "18.1.13",
+    "@oh-my-pi/pi-coding-agent": "18.1.13",
     "@popperjs/core": "^2.11.8",
     "@prisma/adapter-pg": "7.8.0",
     "@prisma/client": "7.8.0",
