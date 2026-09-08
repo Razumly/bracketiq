@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 
 import { OrganizationManagementShell } from '../OrganizationManagementShell';
 import type { OrganizationTabOption } from '@/app/organizations/[id]/organizationTabs';
+import OrganizationEventTemplatesTabContent from '@/app/organizations/[id]/OrganizationEventTemplatesTabContent';
 
 const organization = {
   $id: 'org_1',
@@ -31,6 +32,19 @@ const renderReadyShell = (activeTab: OrganizationTabOption['value'] = 'overview'
 );
 
 describe('OrganizationManagementShell', () => {
+  it('keeps refresh errors and retry available for an empty Organization', async () => {
+    const user = userEvent.setup();
+    const onRetry = jest.fn();
+    render(<OrganizationManagementShell
+      organization={organization} status="ready" availableTabs={availableTabs}
+      activeTab="overview" onTabChange={jest.fn()} isOverviewEmpty
+      errorMessage="Connection lost" onRetry={onRetry}
+    />);
+    expect(screen.getByRole('alert')).toHaveTextContent('Connection lost');
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
   it('changes the active section from desktop navigation without clipping the tab list', async () => {
     const user = userEvent.setup();
     const onTabChange = jest.fn();
@@ -42,23 +56,47 @@ describe('OrganizationManagementShell', () => {
     expect(onTabChange.mock.calls[0]?.[0]).toBe('reviews');
   });
 
-  it('keeps the organization shell visible while a tab is loading', () => {
-    render(
+  it('keeps tab filters and focus through an organization refresh', async () => {
+    const user = userEvent.setup();
+    const content = (loading: boolean) => (
       <OrganizationManagementShell
         organization={organization}
         status="ready"
         availableTabs={availableTabs}
-        activeTab="reviews"
+        activeTab="eventTemplates"
         onTabChange={jest.fn()}
-        isTabLoading
+        isTabLoading={loading}
       >
-        <p>Reviews content</p>
-      </OrganizationManagementShell>,
+        <OrganizationEventTemplatesTabContent
+          eventTemplates={[{ id: 'saturday', name: 'Saturday League' }, { id: 'sunday', name: 'Sunday League' }]}
+          isLoading={false}
+          error={null}
+          onRefresh={jest.fn()}
+          onCreateEvent={jest.fn()}
+        />
+      </OrganizationManagementShell>
     );
-
-    expect(screen.getByRole('heading', { name: 'Austin Hoops' })).toBeInTheDocument();
-    expect(screen.getByTestId('organization-tab-loading')).toBeInTheDocument();
-    expect(screen.queryByText('Reviews content')).not.toBeInTheDocument();
+    const { rerender } = render(content(false));
+    const search = screen.getByRole('textbox', { name: 'Search event templates' });
+    await user.type(search, 'Saturday');
+    rerender(content(true));
+    expect(search).toHaveFocus();
+    expect(search).toHaveValue('Saturday');
+    expect(screen.getByRole('status', { name: 'Loading event templates' })).toBeInTheDocument();
+    expect(screen.queryByText('Saturday League')).not.toBeInTheDocument();
+    await user.clear(search);
+    await user.type(search, 'Sunday');
+    rerender(content(false));
+    expect(search).toHaveFocus();
+    expect(screen.getByText('Sunday League')).toBeInTheDocument();
+    expect(screen.queryByText('Saturday League')).not.toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('combobox', { name: 'Sort templates' }));
+    rerender(content(true));
+    expect(screen.getByRole('option', { name: 'Name', exact: true })).toBeVisible();
+    await user.click(screen.getByRole('option', { name: 'Name', exact: true }));
+    rerender(content(false));
+    expect(screen.getByRole('combobox', { name: 'Sort templates' })).toHaveValue('Name');
   });
 
   it('opens a searchable mobile section drawer and closes after selecting a section', async () => {

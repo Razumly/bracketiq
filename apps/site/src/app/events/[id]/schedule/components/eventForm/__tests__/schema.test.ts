@@ -114,6 +114,26 @@ const buildValues = (eventType: 'LEAGUE' | 'TOURNAMENT') => {
 };
 
 describe('event form scheduling validation', () => {
+  it('accepts a next-day end derived from an overnight clock range', () => {
+    const result = buildEventFormSchema({ allowMissingEventImage: true }).safeParse({
+      ...buildValues('LEAGUE'),
+      start: '2035-06-11T00:00:00Z',
+      end: '2035-06-12T12:00:00Z',
+      isAutomatedScheduling: true,
+      fields: [{ $id: 'field-1', name: 'Court', divisions: ['division-1'] }],
+      selectedFieldIds: ['field-1'],
+      divisionFieldIds: { 'division-1': ['field-1'] },
+      leagueSlots: [{
+        key: 'overnight', repeating: false,
+        startDate: '2035-06-11T22:00:00', endDate: '2035-06-11T02:00:00',
+        startTimeMinutes: 1320, endTimeMinutes: 120, timeZone: 'UTC',
+        scheduledFieldId: 'field-1', scheduledFieldIds: ['field-1'],
+        divisions: ['division-1'], daysOfWeek: [0], dayOfWeek: 0,
+      }],
+    });
+    expect(result.success ? [] : result.error.issues).toEqual([]);
+  });
+
   it.each(['LEAGUE', 'TOURNAMENT'] as const)(
     'requires Planned End when %s Automated Scheduling is off',
     (eventType) => {

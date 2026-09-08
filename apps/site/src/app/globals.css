@@ -1,7 +1,28 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "./organization-reference.css";
 
 @custom-variant dark (&:is(.dark *));
+
+.org-radius-surface {
+  border-radius: var(--bq-radius-surface);
+}
+
+.org-radius-control {
+  border-radius: var(--bq-radius-control);
+}
+
+.org-radius-small {
+  border-radius: var(--bq-radius-small);
+}
+
+.org-radius-pill {
+  border-radius: 999px;
+}
+
+.org-radius-none {
+  border-radius: 0;
+}
 
 /* Custom scrollbar */
 ::-webkit-scrollbar {
@@ -764,13 +785,13 @@ svg {
   }
 }
 
-.org-page-shell .org-tab-content .mantine-Paper-root {
+.org-page-shell .org-tab-content .org-paper {
   background: var(--ocean-surface);
   border-color: var(--ocean-border);
-  border-radius: 1rem;
+  border-radius: var(--bq-radius-surface);
 }
 
-.org-page-shell .org-tab-content .mantine-Paper-root.org-customer-detail-panel {
+.org-page-shell .org-tab-content .org-paper.org-customer-detail-panel {
   background: var(--mvp-neutral-200);
   border-color: var(--mvp-neutral-300);
 }
@@ -779,13 +800,13 @@ svg {
   min-width: 0;
 }
 
-.org-page-shell .org-tab-content .mantine-Paper-root.org-customer-detail-item {
+.org-page-shell .org-tab-content .org-paper.org-customer-detail-item {
   background: var(--mvp-neutral-0);
   border-color: var(--mvp-neutral-200);
   box-shadow: 0 8px 18px -18px rgba(15, 23, 42, 0.35);
 }
 
-.org-page-shell .org-tab-content .mantine-Paper-root.org-customer-detail-item:hover {
+.org-page-shell .org-tab-content .org-paper.org-customer-detail-item:hover {
   border-color: var(--mvp-neutral-300);
 }
 
@@ -811,23 +832,23 @@ svg {
   padding: 0.75rem;
 }
 
-.org-page-shell .org-tab-content .mantine-Paper-root.org-tab-surface {
+.org-page-shell .org-tab-content .org-paper.org-tab-surface {
   background: var(--mvp-neutral-50);
   border-color: var(--mvp-neutral-200);
 }
 
-.org-page-shell .org-tab-content .mantine-Paper-root.org-tab-surface--grouped {
+.org-page-shell .org-tab-content .org-paper.org-tab-surface--grouped {
   background: var(--mvp-neutral-100);
   border-color: var(--mvp-neutral-200);
 }
 
-.org-page-shell .org-tab-content .mantine-Paper-root.org-tab-item,
+.org-page-shell .org-tab-content .org-paper.org-tab-item,
 .org-page-shell .org-tab-content .mantine-Card-root.org-tab-item {
   border: 1px solid var(--mvp-neutral-200);
   background: var(--mvp-neutral-0);
 }
 
-.org-page-shell .org-tab-content .mantine-Paper-root.org-tab-nested-item {
+.org-page-shell .org-tab-content .org-paper.org-tab-nested-item {
   background: var(--mvp-neutral-50);
   border-color: var(--mvp-neutral-200);
 }
@@ -888,6 +909,11 @@ svg {
   grid-template-columns: minmax(14rem, 18rem) minmax(0, 1fr);
   gap: 1rem;
   align-items: stretch;
+  min-width: 0;
+}
+
+.shared-calendar-layout > * {
+  min-width: 0;
 }
 
 .facility-calendar-create-grid {
@@ -896,10 +922,48 @@ svg {
   gap: 0.45rem;
 }
 
+.facility-calendar-layer-controls {
+  max-width: 100%;
+  align-items: stretch;
+}
+
+.facility-calendar-layer-controls > .org-radius-control {
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+}
+
+.org-facility-calendar-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+  min-width: 0;
+}
+
+.org-facility-calendar-workspace--editing {
+  grid-template-columns: minmax(0, 1fr) minmax(15rem, 17rem);
+}
+
+.org-facility-calendar-canvas {
+  min-width: 0;
+}
+
+.org-facility-create-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  min-width: 0;
+  padding: 0.85rem;
+  border: 1px solid var(--mvp-border);
+  border-radius: var(--bq-radius-surface);
+  background: var(--mvp-surface);
+}
+
 .facility-calendar-create-card {
   height: 3.65rem;
   min-width: 0;
-  border-radius: 0.68rem;
+  border-radius: var(--bq-radius-surface);
   cursor: grab;
   touch-action: none;
   user-select: none;
@@ -910,7 +974,7 @@ svg {
   height: 100%;
   min-height: 0;
   pointer-events: none;
-  border-radius: 0.68rem;
+  border-radius: var(--bq-radius-surface);
 }
 
 .facility-calendar-create-card .shared-calendar-event__resource-stack {
@@ -976,12 +1040,16 @@ svg {
   .shared-calendar-layout {
     grid-template-columns: minmax(0, 1fr);
   }
+
+  .org-facility-calendar-workspace--editing {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .field-calendar-filter {
   min-width: 0;
   border: 1px solid var(--mvp-border);
-  border-radius: 0.5rem;
+  border-radius: var(--bq-radius-surface);
   background: var(--mvp-surface);
   padding: 0.75rem;
 }
@@ -1000,7 +1068,7 @@ svg {
   gap: 0.65rem;
   align-items: center;
   border: 1px solid transparent;
-  border-radius: 0.5rem;
+  border-radius: var(--bq-radius-control);
   color: var(--mvp-text);
   padding: 0.55rem 0.6rem;
   text-align: left;
@@ -1079,11 +1147,419 @@ svg {
   --shared-calendar-border: var(--mvp-border);
   --shared-calendar-grid: color-mix(in srgb, var(--mvp-border) 72%, transparent);
   --shared-calendar-muted: var(--mvp-text-muted);
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
 }
 
 .shared-calendar-shell .rbc-calendar {
+  min-width: 46rem;
   color: var(--mvp-text);
   font-size: 0.86rem;
+}
+
+.facility-resource-calendar {
+  --facility-calendar-resource-width: 7.5rem;
+  --facility-calendar-grid-line: color-mix(in srgb, var(--mvp-border) 76%, transparent);
+  --facility-calendar-grid-strong: color-mix(in srgb, var(--mvp-border) 92%, transparent);
+  min-width: 0;
+  color: var(--mvp-text);
+}
+
+.facility-resource-calendar__toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.facility-resource-calendar__toolbar-nav,
+.facility-resource-calendar__view-switch {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 0;
+}
+
+.facility-resource-calendar__toolbar-nav button,
+.facility-resource-calendar__view-switch button {
+  min-height: 2.25rem;
+  border: 1px solid var(--mvp-border);
+  background: var(--mvp-surface);
+  color: var(--mvp-text);
+  padding: 0.45rem 0.8rem;
+  font-size: 0.82rem;
+  font-weight: 650;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.facility-resource-calendar__toolbar-nav button + button,
+.facility-resource-calendar__view-switch button + button {
+  margin-left: -1px;
+}
+
+.facility-resource-calendar__toolbar-nav button:first-child,
+.facility-resource-calendar__view-switch button:first-child {
+  border-top-left-radius: var(--bq-radius-control);
+  border-bottom-left-radius: var(--bq-radius-control);
+}
+
+.facility-resource-calendar__toolbar-nav button:last-child,
+.facility-resource-calendar__view-switch button:last-child {
+  border-top-right-radius: var(--bq-radius-control);
+  border-bottom-right-radius: var(--bq-radius-control);
+}
+
+.facility-resource-calendar__toolbar-nav button:hover,
+.facility-resource-calendar__toolbar-nav button:focus-visible,
+.facility-resource-calendar__view-switch button:hover,
+.facility-resource-calendar__view-switch button:focus-visible {
+  position: relative;
+  z-index: 1;
+  border-color: var(--mvp-primary-400);
+  background: var(--mvp-primary-0);
+}
+
+.facility-resource-calendar__view-switch button.is-active {
+  border-color: var(--mvp-primary-600);
+  background: var(--mvp-primary-600);
+  color: var(--mvp-primary-foreground);
+}
+
+.facility-resource-calendar__icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.4rem;
+  padding-inline: 0.55rem !important;
+}
+
+.facility-resource-calendar__range-label {
+  flex: 1 1 12rem;
+  min-width: 12rem;
+  text-align: center;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.facility-resource-calendar__loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--mvp-text-muted);
+  font-size: 0.78rem;
+}
+
+.facility-resource-calendar__viewport {
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  border: 1px solid var(--mvp-border);
+  border-radius: var(--bq-radius-surface);
+  background: var(--mvp-surface);
+}
+
+.facility-resource-calendar__viewport:focus-visible {
+  outline: 2px solid var(--mvp-primary-500);
+  outline-offset: 2px;
+}
+
+.facility-resource-calendar__grid {
+  min-width: max(68rem, calc(var(--facility-calendar-timeline-min-width) + var(--facility-calendar-resource-width)));
+}
+
+.facility-resource-calendar__header-row,
+.facility-resource-calendar__resource-row {
+  display: grid;
+  grid-template-columns: var(--facility-calendar-resource-width) minmax(0, 1fr);
+}
+
+.facility-resource-calendar__resource-header,
+.facility-resource-calendar__resource-label {
+  position: sticky;
+  left: 0;
+  z-index: 4;
+  min-width: 0;
+  border-right: 1px solid var(--facility-calendar-grid-strong);
+  background: var(--mvp-surface);
+}
+
+.facility-resource-calendar__resource-header {
+  display: flex;
+  align-items: center;
+  padding: 0.55rem 0.7rem;
+  color: var(--mvp-text);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.facility-resource-calendar__timeline-header,
+.facility-resource-calendar__timeline-row {
+  min-width: 0;
+}
+
+.facility-resource-calendar__day-header-row,
+.facility-resource-calendar__time-header-row,
+.facility-resource-calendar__timeline-row {
+  display: grid;
+  grid-template-columns: repeat(var(--facility-calendar-day-count), minmax(0, 1fr));
+}
+
+.facility-resource-calendar__day-header-row {
+  min-height: 2.25rem;
+  border-bottom: 1px solid var(--facility-calendar-grid-line);
+  background: var(--mvp-neutral-100);
+}
+
+.facility-resource-calendar__day-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  border-right: 1px solid var(--facility-calendar-grid-line);
+  color: var(--mvp-text);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.facility-resource-calendar__time-header-row {
+  min-height: 2rem;
+  border-bottom: 1px solid var(--facility-calendar-grid-strong);
+  background: var(--mvp-neutral-50);
+}
+
+.facility-resource-calendar__time-header-day {
+  display: grid;
+  grid-template-columns: repeat(var(--facility-calendar-time-label-count), minmax(0, 1fr));
+  min-width: 0;
+  border-right: 1px solid var(--facility-calendar-grid-strong);
+}
+
+.facility-resource-calendar__time-header-day span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  border-right: 1px solid var(--facility-calendar-grid-line);
+  color: var(--mvp-text-muted);
+  font-size: 0.68rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.facility-resource-calendar__body {
+  min-width: 0;
+}
+
+.facility-resource-calendar__resource-row {
+  min-height: var(--facility-calendar-row-height, 4.7rem);
+  border-top: 1px solid var(--facility-calendar-grid-line);
+}
+
+.facility-resource-calendar__resource-label {
+  display: flex;
+  align-items: center;
+  padding: 0.65rem 0.7rem;
+  color: var(--mvp-text);
+  font-size: 0.8rem;
+  font-weight: 650;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.facility-resource-calendar__timeline-row {
+  position: relative;
+  min-height: var(--facility-calendar-row-height, 4.7rem);
+  isolation: isolate;
+}
+
+.facility-resource-calendar__day-track {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(var(--facility-calendar-slots-per-day), minmax(0, 1fr));
+  min-width: 0;
+  min-height: 4.7rem;
+  border-right: 1px solid var(--facility-calendar-grid-strong);
+  background-image: repeating-linear-gradient(
+    to right,
+    transparent 0 calc(100% / var(--facility-calendar-time-label-count) - 1px),
+    var(--facility-calendar-grid-line) calc(100% / var(--facility-calendar-time-label-count) - 1px) calc(100% / var(--facility-calendar-time-label-count))
+  );
+  cursor: crosshair;
+}
+
+.facility-resource-calendar__day-track:focus-visible {
+  outline: 2px solid var(--mvp-primary-500);
+  outline-offset: -2px;
+  z-index: 3;
+}
+
+.facility-resource-calendar__time-cell {
+  min-width: 0;
+  min-height: 100%;
+  pointer-events: none;
+}
+
+.facility-resource-calendar__event {
+  position: absolute;
+  top: 0.55rem;
+  z-index: 2;
+  min-width: 1.75rem;
+  height: 3.55rem;
+  overflow: visible;
+  cursor: default;
+}
+
+.facility-resource-calendar__event--active {
+  z-index: 5;
+  opacity: 0.74;
+}
+
+.facility-resource-calendar__event > .shared-calendar-event {
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.facility-resource-calendar__event .shared-calendar-event__title,
+.facility-resource-calendar__event .shared-calendar-event__subtitle,
+.facility-resource-calendar__event .shared-calendar-event__meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.facility-resource-calendar__resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 6;
+  width: 1rem;
+  border-radius: var(--bq-radius-small);
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.facility-resource-calendar__resize-handle::after {
+  position: absolute;
+  top: 22%;
+  bottom: 22%;
+  left: 50%;
+  width: 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 70%, white);
+  content: '';
+  opacity: 0.68;
+  transform: translateX(-50%);
+}
+
+.facility-resource-calendar__resize-handle--start {
+  left: -0.2rem;
+}
+
+.facility-resource-calendar__resize-handle--end {
+  right: -0.2rem;
+}
+
+.facility-resource-calendar__resize-handle:focus-visible {
+  outline: 2px solid var(--mvp-primary-500);
+  outline-offset: 1px;
+}
+
+.facility-resource-calendar__empty-row {
+  min-height: 8rem;
+  padding: 2rem;
+  color: var(--mvp-text-muted);
+  text-align: center;
+}
+
+@media (max-width: 48rem) {
+  .facility-resource-calendar__toolbar {
+    align-items: stretch;
+  }
+
+  .facility-resource-calendar__range-label {
+    order: -1;
+    flex-basis: 100%;
+    min-width: 0;
+  }
+
+  .facility-resource-calendar__grid {
+    min-width: max(62rem, calc(var(--facility-calendar-timeline-min-width) + var(--facility-calendar-resource-width)));
+  }
+
+  .facility-resource-calendar__resource-header,
+  .facility-resource-calendar__resource-label {
+    width: var(--facility-calendar-resource-width);
+  }
+}
+
+.shared-calendar-shell .rbc-toolbar {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.shared-calendar-shell .rbc-toolbar .rbc-btn-group {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 0;
+}
+
+.shared-calendar-shell .rbc-toolbar .rbc-btn-group button {
+  min-height: 2.25rem;
+  border: 1px solid var(--mvp-border);
+  border-radius: 0;
+  background: var(--mvp-surface);
+  color: var(--mvp-text);
+  padding: 0.45rem 0.8rem;
+  font-size: 0.82rem;
+  font-weight: 650;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.shared-calendar-shell .rbc-toolbar .rbc-btn-group button + button {
+  margin-left: -1px;
+}
+
+.shared-calendar-shell .rbc-toolbar .rbc-btn-group button:first-of-type {
+  border-top-left-radius: var(--bq-radius-control);
+  border-bottom-left-radius: var(--bq-radius-control);
+}
+
+.shared-calendar-shell .rbc-toolbar .rbc-btn-group button:last-of-type {
+  border-top-right-radius: var(--bq-radius-control);
+  border-bottom-right-radius: var(--bq-radius-control);
+}
+
+.shared-calendar-shell .rbc-toolbar .rbc-btn-group button:hover,
+.shared-calendar-shell .rbc-toolbar .rbc-btn-group button:focus-visible {
+  position: relative;
+  z-index: 1;
+  border-color: var(--mvp-primary-400);
+  background: var(--mvp-primary-0);
+}
+
+.shared-calendar-shell .rbc-toolbar .rbc-btn-group button.rbc-active {
+  border-color: var(--mvp-primary-600);
+  background: var(--mvp-primary-600);
+  color: var(--mvp-primary-foreground);
+}
+
+.shared-calendar-shell .rbc-toolbar-label {
+  flex: 1 1 10rem;
+  min-width: 10rem;
+  text-align: center;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.field-calendar-filter .mantine-Button-root,
+.field-calendar-filter .mantine-TextInput-input {
+  border-radius: var(--bq-radius-control);
 }
 
 .shared-calendar-shell .rbc-month-view,
@@ -1091,7 +1567,7 @@ svg {
 .shared-calendar-shell .rbc-agenda-view {
   overflow: hidden;
   border: 1px solid var(--shared-calendar-border);
-  border-radius: 0.5rem;
+  border-radius: var(--bq-radius-surface);
   background: var(--mvp-surface);
 }
 
@@ -1152,7 +1628,7 @@ svg {
   z-index: 2;
   overflow: visible;
   border: 0;
-  border-radius: 0.5rem;
+  border-radius: var(--bq-radius-control);
   background: transparent;
   padding: 0;
   color: inherit;
@@ -1306,7 +1782,7 @@ svg {
   gap: 0.12rem;
   overflow: hidden;
   border: 1px solid var(--shared-calendar-event-border);
-  border-radius: 0.55rem;
+  border-radius: var(--bq-radius-control);
   background:
     linear-gradient(
       90deg,
@@ -1389,7 +1865,7 @@ svg {
 
 .shared-calendar-event--compact {
   gap: 0.06rem;
-  border-radius: 0.42rem;
+  border-radius: var(--bq-radius-small);
   padding: 0.28rem 0.4rem 0.28rem 0.56rem;
 }
 
@@ -1480,14 +1956,14 @@ svg {
   --shared-calendar-event-text: #111827;
 }
 
-.shared-calendar-event--conflict {
-  --shared-calendar-event-bg: #fff5f5;
-  --shared-calendar-event-border: #fca5a5;
-  --shared-calendar-event-text: #991b1b;
-  border-width: 1px;
-  box-shadow:
-    inset 0 0 0 1px rgba(220, 38, 38, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.42);
+.shared-calendar-event.shared-calendar-event--conflict {
+  border: 2px solid #dc2626;
+}
+
+.org-calendar-conflict-count {
+  color: #b91c1c;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .shared-calendar-event--selection {
@@ -2445,6 +2921,9 @@ summary::-webkit-details-marker {
 
 :root {
   --radius: 0.75rem;
+  --bq-radius-surface: 0.5rem;
+  --bq-radius-control: 0.375rem;
+  --bq-radius-small: 0.25rem;
 
   /* Mobile app palette mapped from composeApp ThemeTokens.kt (LightAppColorScheme) */
   --mvp-seed: #19497a;
@@ -7032,10 +7511,290 @@ body:has(.landing-root) .site-footer-muted {
 
 /* Keep organization surfaces on one compact corner radius. */
 .organization-management-shell {
-  --organization-surface-radius: 0.5rem;
+  --organization-surface-radius: var(--bq-radius-surface);
 }
 
 .organization-management-shell [data-slot="card"],
-.organization-management-shell .org-tab-content .mantine-Paper-root {
+.organization-management-shell .org-tab-content .org-paper {
   border-radius: var(--organization-surface-radius);
+}
+
+.organization-management-shell .org-tab-content .rounded-lg {
+  border-radius: var(--bq-radius-control);
+}
+
+.organization-management-shell .org-tab-content .rounded-xl {
+  border-radius: var(--bq-radius-surface);
+}
+
+/* Organization overview follows the generated desktop and mobile references. */
+.organization-management-shell .org-shell-sport {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--bq-ink-muted);
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.organization-management-shell .org-overview-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(18rem, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.organization-management-shell .org-overview-primary,
+.organization-management-shell .org-overview-secondary {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.organization-management-shell .org-overview-about,
+.organization-management-shell .org-overview-events,
+.organization-management-shell .org-overview-teams,
+.organization-management-shell .org-overview-detail-card,
+.organization-management-shell .org-overview-staff-card,
+.organization-management-shell .org-overview-payments-card {
+  padding: 1rem;
+  background: var(--bq-surface);
+  border-color: var(--bq-border);
+  box-shadow: none;
+}
+
+.organization-management-shell .org-overview-about-copy {
+  max-width: 52rem;
+  margin-top: 0.75rem;
+  white-space: pre-line;
+  color: var(--bq-ink);
+  line-height: 1.5;
+}
+
+.organization-management-shell .org-overview-section-heading {
+  min-height: 2rem;
+}
+
+.organization-management-shell .org-overview-event-list {
+  margin-top: 0.5rem;
+}
+
+.organization-management-shell .org-overview-event-row {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 5.5rem minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.7rem 0;
+  color: var(--bq-ink);
+  text-align: left;
+  border-top: 1px solid var(--bq-border);
+  outline: none;
+}
+
+.organization-management-shell .org-overview-event-row:first-child {
+  border-top: 0;
+}
+
+.organization-management-shell .org-overview-event-row:focus-visible {
+  border-radius: var(--bq-radius-control);
+  box-shadow: 0 0 0 3px var(--bq-focus);
+}
+
+.organization-management-shell .org-overview-event-image {
+  position: relative;
+  height: 3.5rem;
+  overflow: hidden;
+  border-radius: var(--bq-radius-control);
+  background: var(--bq-surface-muted);
+}
+
+.organization-management-shell .org-overview-event-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.organization-management-shell .org-overview-event-title {
+  overflow: hidden;
+  color: var(--ocean-primary);
+  font-size: 0.9375rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.organization-management-shell .org-overview-event-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--bq-ink-muted);
+  font-size: 0.8125rem;
+}
+
+.organization-management-shell .org-overview-event-status {
+  color: var(--bq-teal);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.organization-management-shell .org-overview-event-arrow {
+  color: var(--bq-ink-muted);
+  transition: transform 160ms ease-out;
+}
+
+.organization-management-shell .org-overview-event-row:hover .org-overview-event-arrow {
+  transform: translateX(0.15rem);
+}
+
+.organization-management-shell .org-overview-text-link {
+  width: fit-content;
+  margin-top: 0.75rem;
+  color: var(--bq-teal);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.organization-management-shell .org-overview-text-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.15rem;
+}
+
+.organization-management-shell .org-overview-team-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.organization-management-shell .org-overview-team-card {
+  padding: 0.75rem;
+  background: var(--bq-surface);
+  border-color: var(--bq-border);
+  box-shadow: none;
+}
+
+.organization-management-shell .org-overview-detail-row {
+  display: grid;
+  grid-template-columns: 1.25rem 5rem minmax(0, 1fr);
+  gap: 0.6rem;
+  align-items: center;
+  min-width: 0;
+  color: var(--bq-ink-muted);
+  font-size: 0.875rem;
+}
+
+.organization-management-shell a.org-overview-detail-row:hover {
+  color: var(--bq-teal);
+}
+
+.organization-management-shell .org-overview-detail-value {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--bq-ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.organization-management-shell .org-overview-staff-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.organization-management-shell .org-overview-glance {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.organization-management-shell .org-overview-glance-card {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 1rem 0;
+  background: var(--bq-surface);
+  border-color: var(--bq-border);
+  box-shadow: none;
+}
+
+.organization-management-shell .org-overview-glance-item {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  padding: 0 0.75rem;
+  text-align: center;
+}
+
+.organization-management-shell .org-overview-glance-item + .org-overview-glance-item {
+  border-left: 1px solid var(--bq-border);
+}
+
+.organization-management-shell .org-overview-glance-value {
+  margin-top: 0.2rem;
+  color: var(--bq-ink);
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.organization-management-shell .org-overview-review-card {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.organization-management-shell .org-overview-review-card > .org-paper {
+  width: 100%;
+}
+
+@media (max-width: 767px) {
+  .organization-management-shell .org-overview-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .organization-management-shell .org-overview-about,
+  .organization-management-shell .org-overview-events,
+  .organization-management-shell .org-overview-teams {
+    padding-right: 0;
+    padding-left: 0;
+    border-right: 0;
+    border-left: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .organization-management-shell .org-overview-event-row {
+    grid-template-columns: 7.5rem minmax(0, 1fr) auto;
+    gap: 0.75rem;
+    padding: 0.9rem 0;
+  }
+
+  .organization-management-shell .org-overview-event-image {
+    height: 6rem;
+  }
+
+  .organization-management-shell .org-overview-event-title {
+    font-size: 1.05rem;
+    white-space: normal;
+  }
+
+  .organization-management-shell .org-overview-team-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .organization-management-shell .org-overview-secondary {
+    gap: 0.75rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .organization-management-shell .org-overview-event-arrow {
+    transition: none;
+  }
 }

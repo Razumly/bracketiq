@@ -1,5 +1,7 @@
 'use client';
 
+import { OrganizationDataPlaceholder, OrganizationLoadingValue, useOrganizationDataLoading } from '@/components/organization/OrganizationDataLoading';
+
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import {
   AlertCircle,
@@ -21,14 +23,14 @@ import {
   Loader,
   MultiSelect,
   Paper,
+  Popover,
   Select,
   Stack,
   Text,
   TextInput,
   Title,
 } from '@/components/organization/organization-operation-ui';
-import EventCard from '@/components/ui/EventCard';
-import ResponsiveCardGrid from '@/components/ui/ResponsiveCardGrid';
+import OrganizationEventCard from '@/components/organization/OrganizationEventCard';
 import type { Event } from '@/types';
 import { getEventDivisionPriceRange } from '@/types';
 import { formatEnumDisplayLabel } from '@/lib/enumUtils';
@@ -83,6 +85,9 @@ type OrganizationEventsTabContentProps<TEventType extends string = Event['eventT
   isLoadingInitial: boolean;
   isLoadingMore: boolean;
   hasMoreEvents: boolean;
+  hasScopedEventCache?: boolean;
+  cacheStartDate?: string;
+  rentalEventIds?: readonly string[];
   sentinelRef: RefObject<HTMLDivElement | null>;
   eventsError: string | null;
   onFilterChange?: () => Promise<void> | void;
@@ -373,7 +378,7 @@ const OrganizationEventsControls = <TEventType extends string>({
   ...filterProps
 }: EventControlsProps<TEventType>) => (
   <>
-    <div className="hidden items-end gap-3 rounded-lg border border-border bg-card p-3 lg:flex">
+    <div className="org-event-filters hidden lg:flex">
       <TextInput
         aria-label="Search"
         value={searchTerm}
@@ -391,10 +396,15 @@ const OrganizationEventsControls = <TEventType extends string>({
         disabled={filterProps.sportsLoading}
         className="w-40"
       />
-      <div className="grid min-w-56 grid-cols-2 gap-2">
-        <DatePickerInput aria-label="Filter by start date" value={filterProps.selectedStartDate} onChange={filterProps.setSelectedStartDate} />
-        <DatePickerInput aria-label="Filter by end date" value={filterProps.selectedEndDate} minDate={filterProps.selectedStartDate ?? undefined} onChange={filterProps.setSelectedEndDate} />
-      </div>
+      <Popover>
+        <Popover.Target><Button variant="outline">Dates</Button></Popover.Target>
+        <Popover.Dropdown>
+          <Stack gap="sm">
+            <DatePickerInput label="Start date" aria-label="Filter by start date" value={filterProps.selectedStartDate} onChange={filterProps.setSelectedStartDate} />
+            <DatePickerInput label="End date" aria-label="Filter by end date" value={filterProps.selectedEndDate} minDate={filterProps.selectedStartDate ?? undefined} onChange={filterProps.setSelectedEndDate} />
+          </Stack>
+        </Popover.Dropdown>
+      </Popover>
       <MultiSelect
         aria-label="Filter by event type"
         placeholder={filterProps.selectedEventTypeLabels || 'Event type'}
@@ -404,8 +414,8 @@ const OrganizationEventsControls = <TEventType extends string>({
         className="w-44"
       />
       <Button variant="ghost" onClick={filterProps.resetFilters} disabled={!filterProps.hasActiveFilters}>Clear all</Button>
-      <div className="w-40">
-        <Text size="xs" c="dimmed" className="mb-1">Sort by</Text>
+      <div className="org-event-sort">
+        <Text size="xs" c="dimmed">Sort by</Text>
         <Select
           aria-label="Sort events"
           data={EVENT_SORT_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
@@ -501,10 +511,12 @@ const EventSegmentTabs = ({
   eventSegment,
   setEventSegment,
   segmentCounts,
+  loading,
 }: {
   eventSegment: EventSegment;
   setEventSegment: (segment: EventSegment) => void;
   segmentCounts: Record<EventSegment, number>;
+  loading: boolean;
 }) => (
   <div role="tablist" aria-label="Event status" className="flex min-w-0 overflow-x-auto border-b border-border">
     {EVENT_SEGMENTS.map((segment) => (
@@ -532,7 +544,7 @@ const EventSegmentTabs = ({
         className={`min-h-12 shrink-0 border-b-2 px-5 text-sm font-medium capitalize transition-colors ${eventSegment === segment ? 'border-accent text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
       >
         {segment}
-        <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-xs">{segmentCounts[segment]}</span>
+        <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-xs"><OrganizationLoadingValue loading={loading}>{segmentCounts[segment]}</OrganizationLoadingValue></span>
       </button>
     ))}
   </div>
@@ -553,15 +565,7 @@ const EventErrorState = ({ onRetry }: Pick<EventResultsProps, 'onRetry'>) => (
 );
 
 const EventLoadingState = () => (
-  <div role="status" aria-live="polite" className="space-y-4">
-    <Group justify="center" gap="sm" className="text-muted-foreground">
-      <Loader aria-hidden="true" />
-      <Text>Loading events</Text>
-    </Group>
-    {Array.from({ length: 3 }, (_, index) => (
-      <Paper key={index} withBorder className="h-44 animate-pulse bg-muted/40 motion-reduce:animate-none" />
-    ))}
-  </div>
+  <OrganizationDataPlaceholder label="events" layout="cards" />
 );
 
 const EventEmptyState = ({ eventSegment, resetFilters }: Pick<EventResultsProps, 'eventSegment' | 'resetFilters'>) => (
@@ -595,26 +599,15 @@ const LoadedEventResults = ({
   hasMoreEvents,
 }: Omit<EventResultsProps, 'eventsError' | 'onRetry' | 'isLoadingInitial' | 'isRefreshing' | 'resetFilters'>) => (
   <>
-    <div className="flex items-center justify-between gap-3 lg:hidden">
-      <Text size="sm" c="dimmed">{segmentCounts[eventSegment]} event{segmentCounts[eventSegment] === 1 ? '' : 's'}</Text>
-      <Select
-        aria-label="Sort events"
-        data={EVENT_SORT_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
-        value={eventSort}
-        onChange={(value) => setEventSort((value as EventSortValue) ?? 'soonest')}
-      />
-    </div>
-    <ResponsiveCardGrid>
+    <div className="org-event-grid">
       {sortedEvents.map((event) => (
-      <EventCard
+      <OrganizationEventCard
           key={event.$id}
           event={event}
-          showDistance={Boolean(location)}
-          userLocation={location}
           onClick={() => onEventClick(event)}
         />
       ))}
-    </ResponsiveCardGrid>
+    </div>
     <div ref={sentinelRef} style={{ height: 1 }} />
     {isLoadingMore && (
       <Group justify="center" gap="sm" className="text-muted-foreground">
@@ -699,6 +692,9 @@ export default function OrganizationEventsTabContent<TEventType extends string =
     isLoadingInitial,
     isLoadingMore,
     hasMoreEvents,
+    hasScopedEventCache,
+    cacheStartDate,
+    rentalEventIds,
     sentinelRef,
     eventsError,
     onFilterChange,
@@ -711,6 +707,7 @@ export default function OrganizationEventsTabContent<TEventType extends string =
     hideWeeklyChildren = false,
     setHideWeeklyChildren,
   } = props;
+  const isDataLoading = useOrganizationDataLoading(isLoadingInitial);
   const [eventSegment, setEventSegment] = useState<EventSegment>('upcoming');
   const [eventSort, setEventSort] = useState<EventSortValue>('soonest');
 
@@ -741,6 +738,7 @@ export default function OrganizationEventsTabContent<TEventType extends string =
   }, [kmBetween, location]);
 
   const eventFilters = useMemo(() => ({
+    rentalEventIds,
     searchTerm,
     selectedEventTypes,
     eventTypeOptions,
@@ -752,6 +750,7 @@ export default function OrganizationEventsTabContent<TEventType extends string =
     hideWeeklyChildren,
     getEventDistanceKm,
   }), [
+    rentalEventIds,
     eventTypeOptions,
     getEventDistanceKm,
     hideWeeklyChildren,
@@ -763,11 +762,13 @@ export default function OrganizationEventsTabContent<TEventType extends string =
     selectedSports,
     selectedStartDate,
   ]);
-  const { visibleEvents, isRefreshing } = useEventListFiltering({
+  const { visibleEvents, isRefreshing, refreshError } = useEventListFiltering({
     events,
     filters: eventFilters,
     filterKey: eventListFilterKey(eventFilters),
     hasMoreEvents,
+    hasScopedEventCache,
+    cacheStartDate,
     onFilterChange,
   });
 
@@ -851,7 +852,7 @@ export default function OrganizationEventsTabContent<TEventType extends string =
   };
 
   return (
-    <section aria-labelledby="organization-events-heading" className="space-y-6">
+    <section aria-labelledby="organization-events-heading" className="org-section org-events">
       <OrganizationEventsHeading
         organizationName={organizationName}
         onCreateEvent={onCreateEvent}
@@ -867,7 +868,11 @@ export default function OrganizationEventsTabContent<TEventType extends string =
         {...filterProps}
       />
       <ActiveEventFilters filters={activeFilters} />
-      <EventSegmentTabs eventSegment={eventSegment} setEventSegment={setEventSegment} segmentCounts={segmentCounts} />
+      <EventSegmentTabs eventSegment={eventSegment} setEventSegment={setEventSegment} segmentCounts={segmentCounts} loading={isDataLoading} />
+      <div className="flex items-center justify-between gap-3 lg:hidden">
+        <Text size="sm" c="dimmed"><OrganizationLoadingValue loading={isDataLoading}>{segmentCounts[eventSegment]}</OrganizationLoadingValue> events</Text>
+        <Select aria-label="Sort events" data={EVENT_SORT_OPTIONS.map((option) => ({ value: option.value, label: option.label }))} value={eventSort} onChange={(value) => setEventSort((value as EventSortValue) ?? 'soonest')} />
+      </div>
       <div
         id="organization-events-panel"
         role="tabpanel"
@@ -876,9 +881,9 @@ export default function OrganizationEventsTabContent<TEventType extends string =
       >
         <OrganizationEventResults
           location={location}
-          eventsError={eventsError}
+          eventsError={eventsError ?? refreshError}
           onRetry={onRetry}
-          isLoadingInitial={isLoadingInitial}
+          isLoadingInitial={isDataLoading}
           isRefreshing={isRefreshing}
           sortedEvents={sortedEvents}
           eventSegment={eventSegment}

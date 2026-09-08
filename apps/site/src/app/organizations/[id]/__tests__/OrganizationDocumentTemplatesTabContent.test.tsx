@@ -81,8 +81,8 @@ describe('OrganizationDocumentTemplatesTabContent', () => {
       />,
     );
 
-    expect(screen.getByText('Document Templates')).toBeInTheDocument();
-    expect(screen.getByText('Loading templates...')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Refresh' })).toBeDisabled();
 
     rerender(
       <OrganizationDocumentTemplatesTabContent
@@ -93,6 +93,8 @@ describe('OrganizationDocumentTemplatesTabContent', () => {
     );
 
     expect(screen.getByText('Request failed')).toBeInTheDocument();
-    expect(screen.getByText('No templates yet.')).toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Refresh' })).toBeEnabled();
+    expect(screen.queryByText('No templates yet.')).not.toBeInTheDocument();
   });
 });

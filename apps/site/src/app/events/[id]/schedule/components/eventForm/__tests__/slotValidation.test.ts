@@ -27,6 +27,24 @@ const buildSlot = (
 });
 
 describe("One-Time Time Slot editor validation", () => {
+  it("accepts an ongoing slot but rejects an end equal to or before now", () => {
+    jest.useFakeTimers().setSystemTime(new Date("2026-08-17T09:30:00Z"));
+    try {
+      const options = {
+        slot: buildSlot(),
+        eventStart: new Date("2026-08-17T00:00:00Z"),
+        eventEnd: new Date("2026-08-18T00:00:00Z"),
+      };
+      expect(computeOneTimeSlotBoundsError(options)).toBeUndefined();
+      jest.setSystemTime(new Date("2026-08-17T10:00:00Z"));
+      expect(computeOneTimeSlotBoundsError(options)).toMatch(/future/i);
+      jest.setSystemTime(new Date("2026-08-17T11:00:00Z"));
+      expect(computeOneTimeSlotBoundsError(options)).toMatch(/future/i);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it("identifies the conflicting Resource, local date, and both intervals", () => {
     const slots = [
       buildSlot(),

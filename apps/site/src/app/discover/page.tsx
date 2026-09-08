@@ -29,6 +29,7 @@ import ResponsiveCardGrid from '@/components/ui/ResponsiveCardGrid';
 import { useApp } from '@/app/providers';
 import { useLocation } from '@/app/hooks/useLocation';
 import { useDebounce } from '@/app/hooks/useDebounce';
+import { hasEventListFilters } from '@/components/events/event-list-filtering';
 import { Event, EventTag, Facility, Field, Organization, OrganizationTag, Team, TimeSlot } from '@/types';
 import { eventService, type EventSearchSort } from '@/lib/eventService';
 import { organizationService } from '@/lib/organizationService';
@@ -149,6 +150,8 @@ function DiscoverPageContent() {
   const [isLoadingInitial, setIsLoadingInitial] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMoreEvents, setHasMoreEvents] = useState(true);
+  const [eventCacheHasFilters, setEventCacheHasFilters] = useState(false);
+  const [eventCacheStartDate, setEventCacheStartDate] = useState<string>();
   const [eventOffset, setEventOffset] = useState(0);
   const [eventTotalCount, setEventTotalCount] = useState<number | null>(null);
   const [eventsError, setEventsError] = useState<string | null>(null);
@@ -506,7 +509,7 @@ function DiscoverPageContent() {
     (queryOverride?: string) => {
       const today = new Date();
       const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0);
-      const normalizedQuery = (queryOverride ?? debouncedSearch).trim();
+      const normalizedQuery = (queryOverride ?? searchTerm).trim();
       const normalizedStartDate =
         selectedStartDate instanceof Date && !Number.isNaN(selectedStartDate.getTime())
           ? selectedStartDate
@@ -564,7 +567,7 @@ function DiscoverPageContent() {
       eventDivisionFilters,
       location,
       maxDistance,
-      debouncedSearch,
+      searchTerm,
       selectedStartDate,
       selectedEndDate,
       EVENT_TYPE_OPTIONS,
@@ -576,6 +579,7 @@ function DiscoverPageContent() {
     const requestId = latestFirstPageRequestRef.current + 1;
     latestFirstPageRequestRef.current = requestId;
     isFirstPageRequestInFlightRef.current = true;
+    isLoadMoreRequestInFlightRef.current = false;
     const shouldShowInitialLoader = !isBackgroundRefresh && !hasLoadedEventsRef.current;
 
     if (shouldShowInitialLoader) {
@@ -601,6 +605,12 @@ function DiscoverPageContent() {
       }
 
       setEvents(page.events.filter((event) => !hiddenEventIds.has(event.$id)));
+      setEventCacheStartDate(filters.dateFrom);
+      setEventCacheHasFilters(hasEventListFilters({
+        searchTerm: filters.query ?? '', selectedEventTypes, eventTypeOptions: EVENT_TYPE_OPTIONS,
+        selectedSports, selectedTags: selectedEventTags, selectedStartDate, selectedEndDate,
+        location, maxDistance, hideWeeklyChildren: false, divisionFilters: eventDivisionFilters,
+      }));
       setEventOffset(page.pagination.nextOffset);
       setEventTotalCount(page.pagination.totalCount);
       setHasMoreEvents(page.pagination.hasMore);
@@ -610,18 +620,14 @@ function DiscoverPageContent() {
         return;
       }
       console.error('Failed to load events:', error);
-      if (!isBackgroundRefresh) {
-        setEventsError('Failed to load events. Please try again.');
-      }
+      setEventsError('Failed to load events. Please try again.');
     } finally {
       if (requestId === latestFirstPageRequestRef.current) {
         isFirstPageRequestInFlightRef.current = false;
-        if (!isBackgroundRefresh) {
-          setIsLoadingInitial(false);
-        }
+        setIsLoadingInitial(false);
       }
     }
-  }, [buildEventFilters, hiddenEventIds, serverEventSort]);
+  }, [buildEventFilters, hiddenEventIds, serverEventSort, selectedEventTypes, selectedSports, selectedEventTags, selectedStartDate, selectedEndDate, location, maxDistance, eventDivisionFilters, EVENT_TYPE_OPTIONS]);
 
   const loadMoreEvents = useCallback(async () => {
     if (
@@ -632,11 +638,13 @@ function DiscoverPageContent() {
       !hasMoreEvents
     ) return;
     isLoadMoreRequestInFlightRef.current = true;
+    const requestId = latestFirstPageRequestRef.current;
     setIsLoadingMore(true);
     setEventsError(null);
     try {
       const filters = buildEventFilters();
       const page = await eventService.getEventsPage(filters, EVENTS_LIMIT, eventOffset, serverEventSort);
+      if (requestId !== latestFirstPageRequestRef.current) return;
       const visiblePageEvents = page.events.filter((event) => !hiddenEventIds.has(event.$id));
       const addedVisibleEventCount = visiblePageEvents.filter((event) => !visibleEventIdsRef.current.has(event.$id)).length;
       setEvents((prev) => {
@@ -652,12 +660,15 @@ function DiscoverPageContent() {
       setEventTotalCount(page.pagination.totalCount);
       setHasMoreEvents(page.pagination.hasMore && addedVisibleEventCount > 0);
     } catch (error) {
+      if (requestId !== latestFirstPageRequestRef.current) return;
       console.error('Failed to load more events:', error);
       setEventsError('Failed to load more events. Please try again.');
       setHasMoreEvents(false);
     } finally {
-      isLoadMoreRequestInFlightRef.current = false;
-      setIsLoadingMore(false);
+      if (requestId === latestFirstPageRequestRef.current) {
+        isLoadMoreRequestInFlightRef.current = false;
+        setIsLoadingMore(false);
+      }
     }
   }, [buildEventFilters, eventOffset, isLoadingInitial, isLoadingMore, hasMoreEvents, hiddenEventIds, serverEventSort]);
 
@@ -1314,6 +1325,8 @@ function DiscoverPageContent() {
               isLoadingInitial={isLoadingInitial}
               isLoadingMore={isLoadingMore}
               hasMoreEvents={hasMoreEvents}
+              hasScopedEventCache={eventCacheHasFilters}
+              cacheStartDate={eventCacheStartDate}
               sentinelRef={sentinelRef}
               eventsError={eventsError}
               onFilterChange={() => loadFirstPage(undefined, { background: true })}

@@ -1,6 +1,7 @@
 import type { Event } from "@/types";
 import type { LeagueSlotForm } from "@/app/discover/components/LeagueFields";
 import {
+  assertOneTimeTimeSlotFutureEnd,
   assertOneTimeTimeSlotWithinEventBounds,
   describeOneTimeTimeSlotConflict,
   findOneTimeTimeSlotConflicts,
@@ -219,7 +220,7 @@ export const computeSlotError = (
   };
 
   const isRepeating = slot.repeating !== false;
-  if (!isRepeating) {
+  function computeOneTimeConflictError(): string | undefined {
     let resolvedSlot: ResolvedOneTimeTimeSlot;
     try {
       resolvedSlot = resolveOneTimeTimeSlot(slot, slot.timeZone);
@@ -263,42 +264,39 @@ export const computeSlotError = (
       return describeRepeatingResolutionError(error);
     }
   }
+  if (!isRepeating) return computeOneTimeConflictError();
 
-  const slotDays = normalizeWeekdays(slot);
-  if (
-    slotDays.length === 0 ||
-    typeof slot.startTimeMinutes !== "number" ||
-    typeof slot.endTimeMinutes !== "number"
-  ) {
-    return undefined;
-  }
+  function computeRepeatingConflictError(): string | undefined {
+    const slotDays = normalizeWeekdays(slot);
+    if (
+      slotDays.length === 0 ||
+      typeof slot.startTimeMinutes !== "number" ||
+      typeof slot.endTimeMinutes !== "number"
+    ) {
+      return undefined;
+    }
 
-  const slotStartTime = slot.startTimeMinutes;
-  const slotEndTime = slot.endTimeMinutes;
-  if (
-    !Number.isInteger(slotStartTime) ||
-    slotStartTime < 0 ||
-    slotStartTime >= 24 * 60 ||
-    !Number.isInteger(slotEndTime) ||
-    slotEndTime < 0 ||
-    slotEndTime > 24 * 60
-  ) {
-    return "Select valid start and end times for this timeslot.";
-  }
+    const slotStartTime = slot.startTimeMinutes;
+    const slotEndTime = slot.endTimeMinutes;
+    if (hasInvalidSlotClockRange(slotStartTime, slotEndTime)) {
+      return "Select valid start and end times for this timeslot.";
+    }
 
-  try {
-    const hasOverlap = slots.some(
-      (other, otherIndex) =>
-        otherIndex !== index &&
-        hasSharedResource(other) &&
-        slotIntervalsOverlap(slot, other, context),
-    );
-    return hasOverlap
-      ? "Overlaps with another timeslot in this form."
-      : undefined;
-  } catch (error) {
-    return describeRepeatingResolutionError(error);
+    try {
+      const hasOverlap = slots.some(
+        (other, otherIndex) =>
+          otherIndex !== index &&
+          hasSharedResource(other) &&
+          slotIntervalsOverlap(slot, other, context),
+      );
+      return hasOverlap
+        ? "Overlaps with another timeslot in this form."
+        : undefined;
+    } catch (error) {
+      return describeRepeatingResolutionError(error);
+    }
   }
+  return computeRepeatingConflictError();
 };
 
 export const computeRepeatingSlotTemporalError = (options: {
@@ -355,6 +353,7 @@ export const computeOneTimeSlotBoundsError = (options: {
       options.eventStart,
       options.eventEnd,
     );
+    assertOneTimeTimeSlotFutureEnd(resolved);
     return undefined;
   } catch (error) {
     return error instanceof TimeSlotValidationError
@@ -395,3 +394,17 @@ export const normalizeSlotState = (
 
   return mutated ? normalized : slots;
 };
+
+function hasInvalidSlotClockRange(
+  slotStartTime: number,
+  slotEndTime: number,
+): boolean {
+  return (
+    !Number.isInteger(slotStartTime) ||
+    slotStartTime < 0 ||
+    slotStartTime >= 24 * 60 ||
+    !Number.isInteger(slotEndTime) ||
+    slotEndTime < 0 ||
+    slotEndTime > 24 * 60
+  );
+}

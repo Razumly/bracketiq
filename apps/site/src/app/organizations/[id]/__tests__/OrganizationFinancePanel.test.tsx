@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { renderWithMantine } from '../../../../../test/utils/renderWithMantine';
 import { apiRequest, isApiRequestError } from '@/lib/apiClient';
 import OrganizationFinancePanel from '../OrganizationFinancePanel';
@@ -226,6 +226,24 @@ describe('OrganizationFinancePanel', () => {
     jest.restoreAllMocks();
   });
 
+  it('keeps payroll input and focus while finance data loads', async () => {
+    let resolveRequest!: (value: typeof financeResponse) => void;
+    const request = new Promise<typeof financeResponse>((resolve) => { resolveRequest = resolve; });
+    (apiRequest as jest.Mock).mockReturnValueOnce(request);
+    renderWithMantine(<OrganizationFinancePanel organizationId="org_1" isActive canManage />);
+    const title = screen.getByRole('textbox', { name: 'Pay run title' });
+    title.focus();
+    fireEvent.change(title, { target: { value: 'September payroll draft' } });
+    expect(screen.getByText('Loading finance line items')).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Payroll status' })).toBeEnabled();
+    expect(screen.queryByText('$300.00')).not.toBeInTheDocument();
+    await act(async () => { resolveRequest(financeResponse); await request; });
+    expect(title).toHaveFocus();
+    expect(title).toHaveValue('September payroll draft');
+    expect(screen.queryByText('Loading finance line items')).not.toBeInTheDocument();
+    expect(screen.getAllByText('$300.00').length).toBeGreaterThan(0);
+  });
+
   it('renders organization finance totals, line items, and pay runs', async () => {
     (apiRequest as jest.Mock).mockResolvedValueOnce(financeResponse);
 
@@ -233,9 +251,8 @@ describe('OrganizationFinancePanel', () => {
       <OrganizationFinancePanel organizationId="org_1" isActive canManage />,
     );
 
-    expect(await screen.findByText('Finance and payroll')).toBeInTheDocument();
     expect(await screen.findByText('Gross sales')).toBeInTheDocument();
-    expect(screen.getAllByText('$300.00').length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('$300.00')).length).toBeGreaterThan(0);
     expect(screen.getByText('Current profit')).toBeInTheDocument();
     expect(screen.getAllByText('$153.50').length).toBeGreaterThan(0);
     expect(screen.getByText('Summer League - Harbor Strikers')).toBeInTheDocument();
@@ -280,6 +297,50 @@ describe('OrganizationFinancePanel', () => {
     fireEvent.click(customerAction);
     expect(mockPush).toHaveBeenCalledWith('/organizations/org_1/customers/teams/team_1');
   });
+
+  it('keeps line-item validation local and retains the draft after invalid dates or quantity', async () => {
+    (apiRequest as jest.Mock).mockResolvedValue(financeResponse);
+    renderWithMantine(<OrganizationFinancePanel organizationId="org_1" isActive canManage />);
+    await screen.findByRole('button', { name: 'Edit Field rental' });
+    fireEvent.click(screen.getByRole('button', { name: 'Add line item' }));
+    fireEvent.change(screen.getByLabelText('Line item title'), { target: { value: 'Court supplies' } });
+    fireEvent.change(screen.getByLabelText('Line item amount'), { target: { value: '25' } });
+    fireEvent.change(screen.getByLabelText('Line item start date'), { target: { value: '2026-06-10' } });
+    fireEvent.change(screen.getByLabelText('Line item end date'), { target: { value: '2026-06-09' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save line item' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('End date must be on or after the start date.');
+    expect(apiRequest).toHaveBeenCalledTimes(1);
+    fireEvent.change(screen.getByLabelText('Line item end date'), { target: { value: '2026-06-10' } });
+    fireEvent.change(screen.getByLabelText('Line item quantity'), { target: { value: '0' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save line item' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Quantity must be greater than zero.');
+    expect(screen.getByLabelText('Line item title')).toHaveValue('Court supplies');
+    expect(apiRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains a failed line-item edit and retries the same request', async () => {
+    (apiRequest as jest.Mock)
+      .mockResolvedValueOnce(financeResponse)
+      .mockRejectedValueOnce(new Error('Save unavailable'))
+      .mockResolvedValueOnce({ lineItem: { id: 'line_1' } })
+      .mockResolvedValueOnce(financeResponse);
+    renderWithMantine(<OrganizationFinancePanel organizationId="org_1" isActive canManage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Field rental' }));
+    fireEvent.change(screen.getByLabelText('Line item title'), { target: { value: 'New court rental' } });
+    fireEvent.change(screen.getByLabelText('Line item amount'), { target: { value: '45.75' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save line item' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Save unavailable');
+    expect(screen.getByLabelText('Line item title')).toHaveValue('New court rental');
+    const failedRequest = (apiRequest as jest.Mock).mock.calls[1];
+    expect(failedRequest).toEqual([
+      '/api/organizations/org_1/finance/line-items/line_1',
+      { method: 'PATCH', body: expect.objectContaining({ title: 'New court rental', amountCents: 4575 }) },
+    ]);
+    fireEvent.click(screen.getByRole('button', { name: 'Save line item' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Edit financial line item' })).not.toBeInTheDocument());
+    expect((apiRequest as jest.Mock).mock.calls[2]).toEqual(failedRequest);
+  });
+
 
   it('creates organization custom line items from the finance panel', async () => {
     (apiRequest as jest.Mock)
@@ -529,7 +590,8 @@ describe('OrganizationFinancePanel', () => {
       <OrganizationFinancePanel organizationId="org_1" isActive canManage />,
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Export filtered CSV' }));
+    await screen.findByRole('button', { name: 'View pay run June payroll' });
+    fireEvent.click(screen.getByRole('button', { name: 'Export filtered CSV' }));
 
     await waitFor(() => {
       expect(apiRequest).toHaveBeenCalledWith('/api/organizations/org_1/finance/pay-runs/pay_run_1', {
@@ -558,7 +620,7 @@ describe('OrganizationFinancePanel', () => {
       <OrganizationFinancePanel organizationId="org_1" isActive canManage />,
     );
 
-    await screen.findByText('QuickBooks');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Connect' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
 
     await waitFor(() => {
@@ -629,7 +691,7 @@ describe('OrganizationFinancePanel', () => {
       <OrganizationFinancePanel organizationId="org_1" isActive canManage />,
     );
 
-    await screen.findByText('QuickBooks');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'QuickBooks settings' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'QuickBooks settings' }));
     await screen.findByText('QuickBooks account settings');
     await screen.findByRole('button', { name: 'Refresh accounts' });
@@ -662,6 +724,49 @@ describe('OrganizationFinancePanel', () => {
       });
     });
     expect(screen.getByLabelText('Expense account ID')).toHaveValue('63');
+  });
+
+  it('keeps unsaved account mappings on status refresh and resets them when saved mappings change', async () => {
+    const connection = financeResponse.accountingConnections[0];
+    (apiRequest as jest.Mock)
+      .mockResolvedValueOnce(financeResponse)
+      .mockResolvedValueOnce({ accounts: [{
+        id: '62', name: 'Payroll Expenses', displayName: 'Payroll Expenses',
+        accountType: 'Expense', active: true,
+      }] })
+      .mockResolvedValueOnce({
+        ...financeResponse,
+        accountingConnections: [{ ...connection, status: 'REAUTH_REQUIRED' }],
+      })
+      .mockResolvedValueOnce({
+        ...financeResponse,
+        accountingConnections: [{ ...connection, payrollExpenseAccountExternalId: '84' }],
+      });
+    renderWithMantine(<OrganizationFinancePanel organizationId="org_1" isActive canManage />);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'QuickBooks settings' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'QuickBooks settings' }));
+    await screen.findByRole('button', { name: 'Refresh accounts' });
+    fireEvent.click(screen.getByRole('button', { name: 'Manual entry' }));
+    const expenseId = screen.getByLabelText('Expense account ID');
+    expenseId.focus();
+    fireEvent.change(expenseId, { target: { value: '73' } });
+    expect(expenseId).toHaveFocus();
+    fireEvent.click(screen.getByRole('button', { name: 'Close', exact: true }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh', exact: true }));
+    await screen.findAllByText('Reconnect required');
+    fireEvent.click(screen.getByRole('button', { name: 'QuickBooks settings' }));
+    expect(screen.getByLabelText('Expense account ID')).toHaveValue('73');
+    expect(screen.getByLabelText('Expense account ID')).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Close', exact: true }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh', exact: true }));
+    await screen.findAllByText('Connected');
+    fireEvent.click(screen.getByRole('button', { name: 'QuickBooks settings' }));
+    expect(screen.getByLabelText('Expense account ID')).toHaveValue('84');
+    expect(screen.getByLabelText('Expense account ID')).toBeEnabled();
+    expect(apiRequest).toHaveBeenCalledTimes(4);
   });
 
   it('loads QuickBooks accounts for assisted payroll mapping choices', async () => {
@@ -709,7 +814,7 @@ describe('OrganizationFinancePanel', () => {
       <OrganizationFinancePanel organizationId="org_1" isActive canManage />,
     );
 
-    await screen.findByText('QuickBooks');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'QuickBooks settings' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'QuickBooks settings' }));
     await screen.findByText('QuickBooks account settings');
 
@@ -1120,7 +1225,7 @@ describe('OrganizationFinancePanel', () => {
     );
 
     await screen.findByText('QuickBooks');
-    fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Disconnect' }));
 
     await waitFor(() => {
       expect(apiRequest).toHaveBeenCalledWith('/api/organizations/org_1/finance/integrations/quickbooks/disconnect', {

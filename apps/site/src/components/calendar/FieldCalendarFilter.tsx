@@ -9,8 +9,7 @@ import {
   Stack,
   Text,
   TextInput,
-  UnstyledButton,
-} from '@mantine/core';
+} from '@/components/organization/organization-operation-ui';
 
 import {
   getEntityColorPair,
@@ -175,7 +174,8 @@ export default function FieldCalendarFilter({
               const isSelected = selectedSet.has(item.id);
               const cannotDeselect = isSelected && !allowEmptySelection && selectedIds.length === 1;
               return (
-                <UnstyledButton
+                <button
+                  type="button"
                   key={item.id}
                   className={[
                     'field-calendar-filter__row',
@@ -205,10 +205,10 @@ export default function FieldCalendarFilter({
                   <span className="field-calendar-filter__check" aria-hidden="true">
                     ✓
                   </span>
-                </UnstyledButton>
+                </button>
               );
             }) : (
-              <Text c="dimmed" size="sm" px="xs" py="sm">
+              <Text c="dimmed" size="sm" className="px-2" py="sm">
                 {emptyText}
               </Text>
             )}

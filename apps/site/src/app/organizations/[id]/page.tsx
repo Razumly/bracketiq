@@ -5,9 +5,9 @@ import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigat
 import Navigation from '@/components/layout/Navigation';
 import Loading from '@/components/ui/Loading';
 import OrganizationVerificationBadge from '@/components/ui/OrganizationVerificationBadge';
-import OrganizationOwnershipBadges from '@/components/ui/OrganizationOwnershipBadges';
 import { OrganizationClaimButton } from '@/components/ui/OrganizationClaimCallout';
 import {
+  Alert,
   Avatar,
   Badge,
   Checkbox,
@@ -30,14 +30,13 @@ import {
   Loader,
 } from '@/components/organization/organization-operation-ui';
 import { notifications } from '@/lib/organizationNotifications';
-import EventCard from '@/components/ui/EventCard';
-import ResponsiveCardGrid from '@/components/ui/ResponsiveCardGrid';
 import TeamCard from '@/components/ui/TeamCard';
-import UserCard from '@/components/ui/UserCard';
 import { useApp } from '@/app/providers';
-import type { BillingAddress, BillDiscountSummary, Event, Organization, OrganizationRole, Product, ProductType, Team, UserData, PaymentIntent, StaffMemberType, TemplateDocument } from '@/types';
+import type { BillingAddress, Event, Organization, OrganizationRole, Product, ProductType, Team, UserData, PaymentIntent, StaffMemberType, TemplateDocument } from '@/types';
 import { formatPrice, getEventImageFallbackUrl, getEventImageUrl } from '@/types';
-import { formatBillPaidProgress } from '@/lib/billDisplay';
+import OrganizationCustomerBills from './OrganizationCustomerBills';
+import OrganizationCustomerDocuments from './OrganizationCustomerDocuments';
+import { formatSummaryDateTime, getProfilePreviewUrl, getCustomerInitials, formatCustomerMetaToken, getStaffRoleLabel } from './organizationCustomerPresentation';
 import { organizationService } from '@/lib/organizationService';
 import { eventService } from '@/lib/eventService';
 import { getStaffMemberTypesForOrganizationRole } from '@/lib/staff';
@@ -51,14 +50,23 @@ import { userService } from '@/lib/userService';
 import { apiRequest, isApiRequestError } from '@/lib/apiClient';
 import { productService } from '@/lib/productService';
 import { signedDocumentService, type DocumentAuditTrail } from '@/lib/signedDocumentService';
-import { formatDocumentScopeLabel, formatDocumentStatusLabel } from '@/lib/profileDocumentService';
 import { boldsignService } from '@/lib/boldsignService';
 import PaymentModal from '@/components/ui/PaymentModal';
 import OrganizationDivisionsPanel from './OrganizationDivisionsPanel';
 import OrganizationFinanceTabContent from './OrganizationFinanceTabContent';
-import { type RoleInviteRow, type RoleRosterEntry } from './RoleRosterManager';
+import { type RoleInviteRow } from './RoleRosterManager';
+import { getOrganizationStaffPresentation } from './organizationStaffPresentation';
 import OrganizationStaffTabContent from './OrganizationStaffTabContent';
 import OrganizationFacilitiesTabContent from './OrganizationFacilitiesTabContent';
+import OrganizationOverviewTabContent from './OrganizationOverviewTabContent';
+import { useOrganizationData } from './useOrganizationData';
+import { useOrganizationEvents } from './useOrganizationEvents';
+import {
+  ORGANIZATION_EVENTS_DEFAULT_MAX_DISTANCE as ORG_EVENTS_DEFAULT_MAX_DISTANCE,
+  ORGANIZATION_EVENT_TYPES as ORG_EVENT_TYPE_OPTIONS,
+  kmBetween,
+  type OrganizationEventTypeFilter,
+} from './organizationEventSource';
 import OrganizationReviewsTabContent from './OrganizationReviewsTabContent';
 import OrganizationRefundsTabContent from './OrganizationRefundsTabContent';
 import { formatDisplayDate, formatDisplayDateTime } from '@/lib/dateUtils';
@@ -68,6 +76,7 @@ import { useSports } from '@/app/hooks/useSports';
 import OrganizationEventsTabContent from './OrganizationEventsTabContent';
 import OrganizationTeamsTabContent from './OrganizationTeamsTabContent';
 import OrganizationCustomersTabContent from './OrganizationCustomersTabContent';
+import OrganizationCustomerProfile, { type CustomerDetailTab } from './OrganizationCustomerProfile';
 import OrganizationEventTemplatesTabContent from './OrganizationEventTemplatesTabContent';
 import OrganizationDocumentTemplatesTabContent from './OrganizationDocumentTemplatesTabContent';
 import OrganizationStoreTabContent from './OrganizationStoreTabContent';
@@ -91,7 +100,6 @@ import {
   buildOrganizationCustomerPath,
   buildOrganizationCustomerSelectionPath,
   buildOrganizationTabPath,
-  buildOrganizationTabs,
   pushOrganizationHistoryState,
   resolveOrganizationRouteTab,
   resolveOrganizationTabSelection,
@@ -101,16 +109,10 @@ import {
 import OrganizationPublicSettingsTabContent from './OrganizationPublicSettingsTabContent';
 import OrganizationDiscountsTabContent from './OrganizationDiscountsTabContent';
 import OrganizationDivisionsTabContent from './OrganizationDivisionsTabContent';
-import {
-  IMPORTED_DOCUMENT_VIEW_PERMISSIONS,
-  ORG_PERMISSIONS,
-  type OrganizationPermission,
-} from '@/lib/organizationPermissions';
 import { buildTeamManagementPath } from '@/app/teams/teamRoutes';
 import { describeDeleteOutcome } from '@/lib/deleteOutcome';
-import { resolveOrganizationEventCreationState } from './organizationEventCreation';
+import { getOrganizationAccess } from './organizationAccess';
 import { OrganizationManagementShell } from '@/components/organization/OrganizationManagementShell';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   maybeCarryDefaultProductType,
   PRODUCT_PERIOD_OPTIONS,
@@ -128,11 +130,7 @@ export default function OrganizationDetailPage() {
 }
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const ORG_EVENTS_LIMIT = 18;
 const CUSTOMER_PAGE_SIZE = 25;
-const ORG_EVENTS_DEFAULT_MAX_DISTANCE = 50;
-const ORG_HOSTED_EVENT_TYPE_OPTIONS = ['EVENT', 'TOURNAMENT', 'LEAGUE', 'WEEKLY_EVENT'] as const;
-const ORG_EVENT_TYPE_OPTIONS = [...ORG_HOSTED_EVENT_TYPE_OPTIONS, 'RENTAL'] as const;
 const DOCUMENT_VOID_REASON_OPTIONS = [
   'Wrong Document Subject',
   'Wrong Document Requirement or Version',
@@ -143,7 +141,6 @@ const DOCUMENT_VOID_REASON_OPTIONS = [
   'Replaced by corrected evidence',
   'Other',
 ] as const;
-type OrganizationEventTypeFilter = (typeof ORG_EVENT_TYPE_OPTIONS)[number];
 
 type TemplateDocumentWithVersionState = TemplateDocument & {
   documentRequirementId: string;
@@ -182,484 +179,21 @@ type PendingTemplateCreateCard = {
   error?: string;
 };
 
-type OrganizationUserEventSummary = {
-  eventId: string;
-  eventName: string;
-  imageId?: string | null;
-  start?: string;
-  end?: string;
-  status?: string;
-  organizationId?: string | null;
-};
-
-type OrganizationUserDocumentSummary = {
-  signedDocumentRecordId: string;
-  documentId: string;
-  templateId: string;
-  documentRequirementTitle?: string;
-  versionSequence?: number;
-  eventId?: string;
-  eventName?: string;
-  teamId?: string;
-  title: string;
-  type: 'PDF' | 'TEXT';
-  provenance?: string;
-  status?: string;
-  signedAt?: string;
-  historicalSigningDate?: string;
-  scopeType?: string;
-  scopeId?: string;
-  viewUrl?: string;
-  content?: string;
-};
-type OrganizationUserDocumentApiRow = {
-  signedDocumentRecordId?: string | null;
-  documentId?: string | null;
-  templateId?: string | null;
-  documentRequirementTitle?: string | null;
-  versionSequence?: number | null;
-  eventId?: string | null;
-  eventName?: string | null;
-  teamId?: string | null;
-  title?: string | null;
-  type?: string | null;
-  provenance?: string | null;
-  status?: string | null;
-  signedAt?: string | null;
-  historicalSigningDate?: string | null;
-  scopeType?: string | null;
-  scopeId?: string | null;
-  viewUrl?: string | null;
-  content?: string | null;
-};
-
-type OrganizationTeamMembershipSummary = {
-  teamId: string;
-  teamName: string;
-  division?: string;
-  sport?: string;
-  status?: string;
-  rosterRole?: string;
-  jerseyNumber?: string | null;
-  position?: string | null;
-  isCaptain: boolean;
-};
-
-type OrganizationUserSummary = {
-  userId: string;
-  firstName?: string;
-  lastName?: string;
-  fullName: string;
-  userName?: string;
-  profileImageId?: string | null;
-  events: OrganizationUserEventSummary[];
-  documents: OrganizationUserDocumentSummary[];
-  bills: OrganizationBillSummary[];
-  teams: OrganizationTeamMembershipSummary[];
-};
-
-type OrganizationCustomerTypeFilter = 'users' | 'teams';
-
-type OrganizationTeamRegistrationSummary = OrganizationUserEventSummary & {
-  eventTeamId: string;
-  eventTeamName: string;
-  division?: string;
-  sport?: string;
-  memberCount: number;
-  billIds: string[];
-  totalAmountCents: number;
-  paidAmountCents: number;
-  originalAmountCents: number;
-  discountAmountCents: number;
-  discountedAmountCents: number;
-};
-
-type OrganizationBillPaymentSummary = {
-  paymentId: string;
-  billId: string;
-  sequence: number;
-  dueDate?: string;
-  amountCents: number;
-  paidAmountCents: number;
-  status?: string;
-  paidAt?: string;
-  paymentIntentId?: string | null;
-  payerUserId?: string | null;
-  refundedAmountCents: number;
-  refundableAmountCents: number;
-  isRefundable: boolean;
-};
-
-type OrganizationBillSummary = {
-  billId: string;
-  ownerType: 'USER' | 'TEAM';
-  ownerId: string;
-  ownerName: string;
-  eventId?: string | null;
-  sourceType?: string | null;
-  label?: string;
-  eventName?: string;
-  parentBillId?: string | null;
-  totalAmountCents: number;
-  paidAmountCents: number;
-  originalAmountCents: number;
-  discountAmountCents: number;
-  discountedAmountCents: number;
-  discounts: BillDiscountSummary[];
-  refundedAmountCents: number;
-  refundableAmountCents: number;
-  status?: string;
-  allowSplit?: boolean | null;
-  paymentPlanEnabled?: boolean | null;
-  createdAt?: string;
-  updatedAt?: string;
-  payments: OrganizationBillPaymentSummary[];
-};
-
-type OrganizationTeamMemberSummary = {
-  userId: string;
-  firstName?: string;
-  lastName?: string;
-  fullName: string;
-  userName?: string;
-  profileImageId?: string | null;
-  status?: string;
-  rosterRole?: string;
-  jerseyNumber?: string | null;
-  position?: string | null;
-  isCaptain: boolean;
-  bills: OrganizationBillSummary[];
-  documents: OrganizationUserDocumentSummary[];
-};
-
-type OrganizationTeamStaffSummary = {
-  userId: string;
-  firstName?: string;
-  lastName?: string;
-  fullName: string;
-  userName?: string;
-  profileImageId?: string | null;
-  role: 'MANAGER' | 'HEAD_COACH' | 'ASSISTANT_COACH';
-  status?: string;
-};
-
-type OrganizationTeamCustomerSummary = {
-  canonicalTeamId: string;
-  name: string;
-  division?: string;
-  sport?: string;
-  profileImageId?: string | null;
-  memberCount: number;
-  teamSize?: number;
-  captainId?: string;
-  manager?: OrganizationTeamStaffSummary | null;
-  headCoach?: OrganizationTeamStaffSummary | null;
-  assistantCoaches: OrganizationTeamStaffSummary[];
-  members: OrganizationTeamMemberSummary[];
-  registrations: OrganizationTeamRegistrationSummary[];
-  documents: OrganizationUserDocumentSummary[];
-  bills: OrganizationBillSummary[];
-  totals: {
-    totalAmountCents: number;
-    paidAmountCents: number;
-    refundedAmountCents: number;
-    refundableAmountCents: number;
-  };
-};
-
-type OrganizationCustomerRow = {
-  key: string;
-  type: OrganizationCustomerTypeFilter;
-  id: string;
-  name: string;
-  subtitle?: string;
-  profileImageId?: string | null;
-  events: OrganizationUserEventSummary[];
-  user?: OrganizationUserSummary;
-  team?: OrganizationTeamCustomerSummary;
-};
-const mapOrganizationUserDocumentSummary = (
-  documentRow: OrganizationUserDocumentApiRow,
-): OrganizationUserDocumentSummary => ({
-  signedDocumentRecordId: String(documentRow?.signedDocumentRecordId ?? ''),
-  documentRequirementTitle: typeof documentRow?.documentRequirementTitle === 'string'
-    && documentRow.documentRequirementTitle.trim()
-    ? documentRow.documentRequirementTitle.trim()
-    : undefined,
-  documentId: String(documentRow?.documentId ?? ''),
-  templateId: String(documentRow?.templateId ?? ''),
-  versionSequence: typeof documentRow?.versionSequence === 'number'
-    ? documentRow.versionSequence
-    : undefined,
-  eventId: typeof documentRow?.eventId === 'string' ? documentRow.eventId : undefined,
-  eventName: typeof documentRow?.eventName === 'string' ? documentRow.eventName : undefined,
-  teamId: typeof documentRow?.teamId === 'string' ? documentRow.teamId : undefined,
-  title: typeof documentRow?.title === 'string' && documentRow.title.trim()
-    ? documentRow.title.trim()
-    : 'Signed Document',
-  type: documentRow?.type === 'TEXT' ? 'TEXT' : 'PDF',
-  provenance: typeof documentRow?.provenance === 'string' ? documentRow.provenance : undefined,
-  status: typeof documentRow?.status === 'string' ? documentRow.status : undefined,
-  signedAt: typeof documentRow?.signedAt === 'string' ? documentRow.signedAt : undefined,
-  historicalSigningDate: typeof documentRow?.historicalSigningDate === 'string'
-    ? documentRow.historicalSigningDate
-    : undefined,
-  scopeType: typeof documentRow?.scopeType === 'string' ? documentRow.scopeType : undefined,
-  scopeId: typeof documentRow?.scopeId === 'string' ? documentRow.scopeId : undefined,
-  viewUrl: typeof documentRow?.viewUrl === 'string' ? documentRow.viewUrl : undefined,
-  content: typeof documentRow?.content === 'string' ? documentRow.content : undefined,
-});
-
-
-const mapOrganizationUserRow = (row: Record<string, any>): OrganizationUserSummary => {
-  const eventsRaw = Array.isArray(row?.events) ? row.events : [];
-  const documentsRaw = Array.isArray(row?.documents) ? row.documents : [];
-  const billsRaw = Array.isArray(row?.bills) ? row.bills : [];
-  const teamsRaw = Array.isArray(row?.teams) ? row.teams : [];
-
-  const events = eventsRaw
-    .map((eventRow: Record<string, any>): OrganizationUserEventSummary => ({
-      eventId: String(eventRow?.eventId ?? ''),
-      eventName: String(eventRow?.eventName ?? 'Untitled Event').trim() || 'Untitled Event',
-      imageId: typeof eventRow?.imageId === 'string' && eventRow.imageId.trim() ? eventRow.imageId.trim() : null,
-      start: typeof eventRow?.start === 'string' ? eventRow.start : undefined,
-      end: typeof eventRow?.end === 'string' ? eventRow.end : undefined,
-      status: typeof eventRow?.status === 'string' ? eventRow.status : undefined,
-      organizationId: typeof eventRow?.organizationId === 'string' ? eventRow.organizationId : null,
-    }))
-    .filter((eventRow) => Boolean(eventRow.eventId));
-
-  const documents = documentsRaw
-    .map(mapOrganizationUserDocumentSummary)
-    .filter((documentRow) => Boolean(documentRow.signedDocumentRecordId));
-
-  return {
-    userId: String(row?.userId ?? ''),
-    firstName: typeof row?.firstName === 'string' ? row.firstName : undefined,
-    lastName: typeof row?.lastName === 'string' ? row.lastName : undefined,
-    fullName: typeof row?.fullName === 'string' && row.fullName.trim() ? row.fullName.trim() : 'Unknown User',
-    userName: typeof row?.userName === 'string' ? row.userName : undefined,
-    profileImageId: typeof row?.profileImageId === 'string' ? row.profileImageId : null,
-    events,
-    documents,
-    bills: billsRaw
-      .map((billRow: Record<string, any>) => mapOrganizationBillRow(billRow))
-      .filter((bill) => Boolean(bill.billId)),
-    teams: teamsRaw
-      .map((teamRow: Record<string, any>): OrganizationTeamMembershipSummary => ({
-        teamId: String(teamRow?.teamId ?? ''),
-        teamName: typeof teamRow?.teamName === 'string' && teamRow.teamName.trim() ? teamRow.teamName.trim() : 'Unnamed Team',
-        division: typeof teamRow?.division === 'string' ? teamRow.division : undefined,
-        sport: typeof teamRow?.sport === 'string' ? teamRow.sport : undefined,
-        status: typeof teamRow?.status === 'string' ? teamRow.status : undefined,
-        rosterRole: typeof teamRow?.rosterRole === 'string' ? teamRow.rosterRole : undefined,
-        jerseyNumber: typeof teamRow?.jerseyNumber === 'string' ? teamRow.jerseyNumber : null,
-        position: typeof teamRow?.position === 'string' ? teamRow.position : null,
-        isCaptain: Boolean(teamRow?.isCaptain),
-      }))
-      .filter((team) => Boolean(team.teamId)),
-  };
-};
-
-const mapOrganizationTeamStaffRow = (row: Record<string, any>): OrganizationTeamStaffSummary => ({
-  userId: String(row?.userId ?? ''),
-  firstName: typeof row?.firstName === 'string' ? row.firstName : undefined,
-  lastName: typeof row?.lastName === 'string' ? row.lastName : undefined,
-  fullName: typeof row?.fullName === 'string' && row.fullName.trim() ? row.fullName.trim() : 'Staff name unavailable',
-  userName: typeof row?.userName === 'string' ? row.userName : undefined,
-  profileImageId: typeof row?.profileImageId === 'string' ? row.profileImageId : null,
-  role: row?.role === 'HEAD_COACH'
-    ? 'HEAD_COACH'
-    : row?.role === 'ASSISTANT_COACH'
-      ? 'ASSISTANT_COACH'
-      : 'MANAGER',
-  status: typeof row?.status === 'string' ? row.status : undefined,
-});
-
-const mapOrganizationTeamMemberRow = (row: Record<string, any>): OrganizationTeamMemberSummary => ({
-  userId: String(row?.userId ?? ''),
-  firstName: typeof row?.firstName === 'string' ? row.firstName : undefined,
-  lastName: typeof row?.lastName === 'string' ? row.lastName : undefined,
-  fullName: typeof row?.fullName === 'string' && row.fullName.trim() ? row.fullName.trim() : 'Staff name unavailable',
-  userName: typeof row?.userName === 'string' ? row.userName : undefined,
-  profileImageId: typeof row?.profileImageId === 'string' ? row.profileImageId : null,
-  status: typeof row?.status === 'string' ? row.status : undefined,
-  rosterRole: typeof row?.rosterRole === 'string' ? row.rosterRole : undefined,
-  jerseyNumber: typeof row?.jerseyNumber === 'string' ? row.jerseyNumber : null,
-  position: typeof row?.position === 'string' ? row.position : null,
-  isCaptain: Boolean(row?.isCaptain),
-  bills: Array.isArray(row?.bills)
-    ? row.bills.map((billRow: Record<string, any>) => mapOrganizationBillRow(billRow)).filter((bill) => Boolean(bill.billId))
-    : [],
-  documents: Array.isArray(row?.documents)
-    ? row.documents
-      .map(mapOrganizationUserDocumentSummary)
-      .filter((document) => Boolean(document.signedDocumentRecordId))
-    : [],
-});
-
-const mapOrganizationBillRow = (row: Record<string, any>): OrganizationBillSummary => {
-  const paymentsRaw = Array.isArray(row?.payments) ? row.payments : [];
-  const payments = paymentsRaw
-    .map((paymentRow: Record<string, any>): OrganizationBillPaymentSummary => ({
-      paymentId: String(paymentRow?.paymentId ?? paymentRow?.id ?? ''),
-      billId: String(paymentRow?.billId ?? row?.billId ?? ''),
-      sequence: Number.isFinite(Number(paymentRow?.sequence)) ? Number(paymentRow.sequence) : 0,
-      dueDate: typeof paymentRow?.dueDate === 'string' ? paymentRow.dueDate : undefined,
-      amountCents: Number.isFinite(Number(paymentRow?.amountCents)) ? Math.max(0, Math.round(Number(paymentRow.amountCents))) : 0,
-      paidAmountCents: Number.isFinite(Number(paymentRow?.paidAmountCents))
-        ? Math.max(0, Math.round(Number(paymentRow.paidAmountCents)))
-        : paymentRow?.status === 'PAID'
-          ? Number.isFinite(Number(paymentRow?.amountCents)) ? Math.max(0, Math.round(Number(paymentRow.amountCents))) : 0
-          : 0,
-      status: typeof paymentRow?.status === 'string' ? paymentRow.status : undefined,
-      paidAt: typeof paymentRow?.paidAt === 'string' ? paymentRow.paidAt : undefined,
-      paymentIntentId: typeof paymentRow?.paymentIntentId === 'string' ? paymentRow.paymentIntentId : null,
-      payerUserId: typeof paymentRow?.payerUserId === 'string' ? paymentRow.payerUserId : null,
-      refundedAmountCents: Number.isFinite(Number(paymentRow?.refundedAmountCents)) ? Math.max(0, Math.round(Number(paymentRow.refundedAmountCents))) : 0,
-      refundableAmountCents: Number.isFinite(Number(paymentRow?.refundableAmountCents)) ? Math.max(0, Math.round(Number(paymentRow.refundableAmountCents))) : 0,
-      isRefundable: Boolean(paymentRow?.isRefundable),
-    }))
-    .filter((payment) => Boolean(payment.paymentId));
-  const discountsRaw = Array.isArray(row?.discounts) ? row.discounts : [];
-  const discounts = discountsRaw
-    .filter((discountRow: Record<string, any>) => discountRow && typeof discountRow === 'object')
-    .map((discountRow: Record<string, any>): BillDiscountSummary => ({
-      id: String(discountRow?.id ?? ''),
-      discountId: String(discountRow?.discountId ?? ''),
-      discountCodeId: String(discountRow?.discountCodeId ?? ''),
-      code: String(discountRow?.code ?? ''),
-      name: typeof discountRow?.name === 'string' ? discountRow.name : null,
-      originalAmountCents: Number.isFinite(Number(discountRow?.originalAmountCents)) ? Math.max(0, Math.round(Number(discountRow.originalAmountCents))) : 0,
-      discountedAmountCents: Number.isFinite(Number(discountRow?.discountedAmountCents)) ? Math.max(0, Math.round(Number(discountRow.discountedAmountCents))) : 0,
-      discountAmountCents: Number.isFinite(Number(discountRow?.discountAmountCents)) ? Math.max(0, Math.round(Number(discountRow.discountAmountCents))) : 0,
-      paymentIntentId: typeof discountRow?.paymentIntentId === 'string' ? discountRow.paymentIntentId : null,
-      registrationId: typeof discountRow?.registrationId === 'string' ? discountRow.registrationId : null,
-    }))
-    .filter((discount) => Boolean(discount.id));
-  const totalAmountCents = Number.isFinite(Number(row?.totalAmountCents)) ? Math.max(0, Math.round(Number(row.totalAmountCents))) : 0;
-  const originalAmountCents = Number.isFinite(Number(row?.originalAmountCents)) ? Math.max(0, Math.round(Number(row.originalAmountCents))) : totalAmountCents;
-  const discountAmountCents = Number.isFinite(Number(row?.discountAmountCents)) ? Math.max(0, Math.round(Number(row.discountAmountCents))) : 0;
-
-  return {
-    billId: String(row?.billId ?? row?.id ?? ''),
-    ownerType: row?.ownerType === 'USER' ? 'USER' : 'TEAM',
-    ownerId: String(row?.ownerId ?? ''),
-    ownerName: typeof row?.ownerName === 'string' && row.ownerName.trim() ? row.ownerName.trim() : String(row?.ownerId ?? ''),
-    eventId: typeof row?.eventId === 'string' ? row.eventId : null,
-    sourceType: typeof row?.sourceType === 'string' ? row.sourceType : null,
-    eventName: typeof row?.eventName === 'string' ? row.eventName : undefined,
-    label: typeof row?.label === 'string' && row.label.trim() ? row.label.trim() : undefined,
-    parentBillId: typeof row?.parentBillId === 'string' ? row.parentBillId : null,
-    totalAmountCents,
-    paidAmountCents: Number.isFinite(Number(row?.paidAmountCents)) ? Math.max(0, Math.round(Number(row.paidAmountCents))) : 0,
-    originalAmountCents,
-    discountAmountCents,
-    discountedAmountCents: Number.isFinite(Number(row?.discountedAmountCents)) ? Math.max(0, Math.round(Number(row.discountedAmountCents))) : Math.max(0, originalAmountCents - discountAmountCents),
-    discounts,
-    refundedAmountCents: Number.isFinite(Number(row?.refundedAmountCents)) ? Math.max(0, Math.round(Number(row.refundedAmountCents))) : 0,
-    refundableAmountCents: Number.isFinite(Number(row?.refundableAmountCents)) ? Math.max(0, Math.round(Number(row.refundableAmountCents))) : 0,
-    status: typeof row?.status === 'string' ? row.status : undefined,
-    allowSplit: typeof row?.allowSplit === 'boolean' ? row.allowSplit : null,
-    paymentPlanEnabled: typeof row?.paymentPlanEnabled === 'boolean' ? row.paymentPlanEnabled : null,
-    createdAt: typeof row?.createdAt === 'string' ? row.createdAt : undefined,
-    updatedAt: typeof row?.updatedAt === 'string' ? row.updatedAt : undefined,
-    payments,
-  };
-};
-
-const mapOrganizationTeamCustomerRow = (row: Record<string, any>): OrganizationTeamCustomerSummary => {
-  const registrationsRaw = Array.isArray(row?.registrations) ? row.registrations : [];
-  const documentsRaw = Array.isArray(row?.documents) ? row.documents : [];
-  const billsRaw = Array.isArray(row?.bills) ? row.bills : [];
-  const totalsRaw = row?.totals && typeof row.totals === 'object' ? row.totals : {};
-
-  const registrations = registrationsRaw
-    .map((registrationRow: Record<string, any>): OrganizationTeamRegistrationSummary => ({
-      eventId: String(registrationRow?.eventId ?? ''),
-      eventName: String(registrationRow?.eventName ?? 'Untitled Event').trim() || 'Untitled Event',
-      imageId: typeof registrationRow?.imageId === 'string' && registrationRow.imageId.trim() ? registrationRow.imageId.trim() : null,
-      eventTeamId: String(registrationRow?.eventTeamId ?? ''),
-      eventTeamName: String(registrationRow?.eventTeamName ?? registrationRow?.eventTeamId ?? 'Event Team').trim() || 'Event Team',
-      start: typeof registrationRow?.start === 'string' ? registrationRow.start : undefined,
-      end: typeof registrationRow?.end === 'string' ? registrationRow.end : undefined,
-      status: typeof registrationRow?.status === 'string' ? registrationRow.status : undefined,
-      division: typeof registrationRow?.division === 'string' ? registrationRow.division : undefined,
-      sport: typeof registrationRow?.sport === 'string' ? registrationRow.sport : undefined,
-      memberCount: Number.isFinite(Number(registrationRow?.memberCount)) ? Math.max(0, Math.round(Number(registrationRow.memberCount))) : 0,
-      billIds: Array.isArray(registrationRow?.billIds)
-        ? registrationRow.billIds.filter((value: unknown): value is string => typeof value === 'string')
-        : [],
-      totalAmountCents: Number.isFinite(Number(registrationRow?.totalAmountCents)) ? Math.max(0, Math.round(Number(registrationRow.totalAmountCents))) : 0,
-      paidAmountCents: Number.isFinite(Number(registrationRow?.paidAmountCents)) ? Math.max(0, Math.round(Number(registrationRow.paidAmountCents))) : 0,
-      originalAmountCents: Number.isFinite(Number(registrationRow?.originalAmountCents)) ? Math.max(0, Math.round(Number(registrationRow.originalAmountCents))) : 0,
-      discountAmountCents: Number.isFinite(Number(registrationRow?.discountAmountCents)) ? Math.max(0, Math.round(Number(registrationRow.discountAmountCents))) : 0,
-      discountedAmountCents: Number.isFinite(Number(registrationRow?.discountedAmountCents)) ? Math.max(0, Math.round(Number(registrationRow.discountedAmountCents))) : 0,
-    }))
-    .filter((registration) => Boolean(registration.eventTeamId));
-
-  const documents = documentsRaw
-    .map(mapOrganizationUserDocumentSummary)
-    .filter((document) => Boolean(document.signedDocumentRecordId));
-  const bills = billsRaw
-    .map((billRow: Record<string, any>) => mapOrganizationBillRow(billRow))
-    .filter((bill) => Boolean(bill.billId));
-
-  return {
-    canonicalTeamId: String(row?.canonicalTeamId ?? ''),
-    name: typeof row?.name === 'string' && row.name.trim() ? row.name.trim() : 'Unnamed Team',
-    division: typeof row?.division === 'string' ? row.division : undefined,
-    sport: typeof row?.sport === 'string' ? row.sport : undefined,
-    profileImageId: typeof row?.profileImageId === 'string' ? row.profileImageId : null,
-    memberCount: Number.isFinite(Number(row?.memberCount)) ? Math.max(0, Math.round(Number(row.memberCount))) : 0,
-    teamSize: Number.isFinite(Number(row?.teamSize)) ? Math.max(0, Math.round(Number(row.teamSize))) : undefined,
-    captainId: typeof row?.captainId === 'string' ? row.captainId : undefined,
-    manager: row?.manager && typeof row.manager === 'object' ? mapOrganizationTeamStaffRow(row.manager) : null,
-    headCoach: row?.headCoach && typeof row.headCoach === 'object' ? mapOrganizationTeamStaffRow(row.headCoach) : null,
-    assistantCoaches: Array.isArray(row?.assistantCoaches)
-      ? row.assistantCoaches
-        .map((staffRow: Record<string, any>) => mapOrganizationTeamStaffRow(staffRow))
-        .filter((staff) => Boolean(staff.userId))
-      : [],
-    members: Array.isArray(row?.members)
-      ? row.members
-        .map((memberRow: Record<string, any>) => mapOrganizationTeamMemberRow(memberRow))
-        .filter((member) => Boolean(member.userId))
-      : [],
-    registrations,
-    documents,
-    bills,
-    totals: {
-      totalAmountCents: Number.isFinite(Number(totalsRaw?.totalAmountCents)) ? Math.max(0, Math.round(Number(totalsRaw.totalAmountCents))) : 0,
-      paidAmountCents: Number.isFinite(Number(totalsRaw?.paidAmountCents)) ? Math.max(0, Math.round(Number(totalsRaw.paidAmountCents))) : 0,
-      refundedAmountCents: Number.isFinite(Number(totalsRaw?.refundedAmountCents)) ? Math.max(0, Math.round(Number(totalsRaw.refundedAmountCents))) : 0,
-      refundableAmountCents: Number.isFinite(Number(totalsRaw?.refundableAmountCents)) ? Math.max(0, Math.round(Number(totalsRaw.refundableAmountCents))) : 0,
-    },
-  };
-};
-
-const formatSummaryDateTime = (value?: string): string => {
-  if (!value) {
-    return 'Unknown date';
-  }
-  const formatted = formatDisplayDateTime(value);
-  return formatted || 'Unknown date';
-};
-
-const formatSummaryDate = (value?: string): string => {
-  if (!value) {
-    return 'Unknown date';
-  }
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return 'Unknown date';
-  }
-  return parsed.toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
-};
+import {
+  mapOrganizationUserRow,
+  mapOrganizationTeamCustomerRow,
+  type OrganizationUserEventSummary,
+  type OrganizationUserDocumentSummary,
+  type OrganizationTeamMembershipSummary,
+  type OrganizationUserSummary,
+  type OrganizationCustomerTypeFilter,
+  type OrganizationBillPaymentSummary,
+  type OrganizationBillSummary,
+  type OrganizationTeamMemberSummary,
+  type OrganizationTeamStaffSummary,
+  type OrganizationTeamCustomerSummary,
+  type OrganizationCustomerRow,
+} from './organizationCustomerModel';
 
 const normalizeCustomerSearchValue = (value: unknown): string => (
   typeof value === 'string' ? value.trim().toLowerCase() : ''
@@ -670,40 +204,6 @@ const matchesCustomerSearch = (query: string, values: unknown[]): boolean => {
     return true;
   }
   return values.some((value) => normalizeCustomerSearchValue(value).includes(query));
-};
-
-const getProfilePreviewUrl = (profileImageId?: string | null, size = 48): string | undefined => (
-  profileImageId ? `/api/files/${profileImageId}/preview?w=${size}&h=${size}&fit=cover` : undefined
-);
-
-const getCustomerInitials = (name: string): string => {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) {
-    return '?';
-  }
-  return parts.slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join('');
-};
-
-const formatCustomerMetaToken = (value?: string | null): string | null => {
-  const normalized = typeof value === 'string' ? value.trim() : '';
-  if (!normalized) {
-    return null;
-  }
-  return normalized
-    .split('_')
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
-    .join(' ');
-};
-
-const getStaffRoleLabel = (role: OrganizationTeamStaffSummary['role']): string => {
-  if (role === 'HEAD_COACH') {
-    return 'Head Coach';
-  }
-  if (role === 'ASSISTANT_COACH') {
-    return 'Assistant Coach';
-  }
-  return 'Manager';
 };
 
 function OrganizationDetailContent() {
@@ -739,39 +239,30 @@ function OrganizationDetailContent() {
   const requestedCustomerKey = requestedCustomerType && requestedCustomerId
     ? `${requestedCustomerType}:${requestedCustomerId}`
     : null;
-  const [org, setOrg] = useState<Organization | undefined>(undefined);
-  const [loading, setLoading] = useState(true);
-  const [organizationLoadError, setOrganizationLoadError] = useState<string | null>(null);
+  const { org, setOrg, loading, organizationLoadError, organizationLoadingTab, loadOrg } = useOrganizationData(requestedTab ?? 'overview');
   const [activeTab, setActiveTab] = useState<OrganizationTab>(() => requestedTab ?? 'overview');
-  const [loadingTab, setLoadingTab] = useState<OrganizationTab | null>(null);
-  const [organizationLoadingTab, setOrganizationLoadingTab] = useState<OrganizationTab | null>(null);
   const [showCreateTeamModal, setShowCreateTeamModal] = useState(false);
   const [showEditOrganizationModal, setShowEditOrganizationModal] = useState(false);
   const sportOptions = useMemo(() => sports.map((sport) => sport.name), [sports]);
   const [eventSearchTerm, setEventSearchTerm] = useState('');
-  const debouncedEventSearch = useDebounce(eventSearchTerm, 500);
   const [selectedEventTypes, setSelectedEventTypes] =
     useState<OrganizationEventTypeFilter[]>([...ORG_EVENT_TYPE_OPTIONS]);
-  const selectedHostedEventTypes = useMemo(
-    () => selectedEventTypes.filter((value): value is (typeof ORG_HOSTED_EVENT_TYPE_OPTIONS)[number] => value !== 'RENTAL'),
-    [selectedEventTypes],
-  );
-  const includeRentalEventType = selectedEventTypes.includes('RENTAL');
   const [selectedSports, setSelectedSports] = useState<string[]>([]);
   const [hideWeeklyChildEvents, setHideWeeklyChildEvents] = useState(false);
   const [eventsTabMaxDistance, setEventsTabMaxDistance] = useState<number | null>(null);
   const [eventsTabSelectedStartDate, setEventsTabSelectedStartDate] = useState<Date | null>(null);
   const [eventsTabSelectedEndDate, setEventsTabSelectedEndDate] = useState<Date | null>(null);
-  const [eventsTabEvents, setEventsTabEvents] = useState<Event[]>([]);
-  const [eventsTabLoadingInitial, setEventsTabLoadingInitial] = useState(true);
-  const [eventsTabLoadingMore, setEventsTabLoadingMore] = useState(false);
-  const [eventsTabHasMoreEvents, setEventsTabHasMoreEvents] = useState(true);
-  const [eventsTabOffset, setEventsTabOffset] = useState(0);
-  const [eventsTabError, setEventsTabError] = useState<string | null>(null);
-  const eventsTabSentinelRef = useRef<HTMLDivElement | null>(null);
-  const organizationEventsRequestRef = useRef({ id: 0, inFlight: false });
-  const organizationEventsLoaderRef = useRef<(() => Promise<void>) | null>(null);
-  const loadedOrganizationIdRef = useRef<string | null>(null);
+  const organizationEvents = useOrganizationEvents({
+    organizationId: id,
+    fields: org?.fields ?? [],
+    hiddenEventIds: user?.hiddenEventIds ?? [],
+    enabled: !authLoading && activeTab === 'events' && org?.$id === id,
+    filters: {
+      searchTerm: eventSearchTerm, selectedEventTypes, selectedSports,
+      selectedStartDate: eventsTabSelectedStartDate, selectedEndDate: eventsTabSelectedEndDate,
+      location, maxDistance: eventsTabMaxDistance,
+    },
+  });
   const locationRequestAttemptedRef = useRef(false);
   const handledStripeStateRef = useRef<string | null>(null);
   const handledQuickBooksStateRef = useRef<string | null>(null);
@@ -806,143 +297,32 @@ function OrganizationDetailContent() {
   const [stripeEmail, setStripeEmail] = useState('');
   const [stripeEmailError, setStripeEmailError] = useState<string | null>(null);
   const [updatingHomePagePreference, setUpdatingHomePagePreference] = useState(false);
-  const viewerCanManageOrganization = Boolean(org?.viewerCanManageOrganization);
-  const viewerPermissions = useMemo(
-    () => (Array.isArray(org?.viewerPermissions) ? org.viewerPermissions : []),
-    [org?.viewerPermissions],
-  );
-  const viewerHasPermission = useCallback(
-    (permission: OrganizationPermission): boolean => (
-      viewerCanManageOrganization || viewerPermissions.includes(permission)
-    ),
-    [viewerCanManageOrganization, viewerPermissions],
-  );
-  const canManageEvents = viewerHasPermission(ORG_PERMISSIONS.EVENTS_MANAGE);
-  const canManageFields = viewerHasPermission(ORG_PERMISSIONS.FIELDS_MANAGE);
-  const canManageTeams = viewerHasPermission(ORG_PERMISSIONS.TEAMS_MANAGE);
-  const canManageProducts = viewerHasPermission(ORG_PERMISSIONS.PRODUCTS_MANAGE);
-  const canManageStaff = viewerHasPermission(ORG_PERMISSIONS.STAFF_MANAGE);
-  const canManageRoles = viewerHasPermission(ORG_PERMISSIONS.ROLES_MANAGE);
-  const canManageStaffSurface = canManageStaff || canManageRoles;
-  const canManageRefunds = viewerHasPermission(ORG_PERMISSIONS.REFUNDS_MANAGE);
-  const canManageStaffCompensation = canManageStaff && viewerHasPermission(ORG_PERMISSIONS.BILLING_MANAGE);
-  const canManageFinance = viewerHasPermission(ORG_PERMISSIONS.BILLING_MANAGE)
-    || viewerHasPermission(ORG_PERMISSIONS.PAYMENTS_MANAGE);
-  const canManageDiscounts = canManageEvents || canManageProducts || canManageTeams || canManageFinance;
-  const canManageTemplates = viewerHasPermission(ORG_PERMISSIONS.TEMPLATES_MANAGE);
-  const canImportDocuments = viewerHasPermission(ORG_PERMISSIONS.DOCUMENTS_IMPORT);
-  const canVoidDocuments = viewerHasPermission(ORG_PERMISSIONS.DOCUMENTS_VOID);
-  const canViewDocumentAudit = viewerPermissions.includes(ORG_PERMISSIONS.DOCUMENTS_AUDIT_VIEW);
-  const canViewImportedDocuments = IMPORTED_DOCUMENT_VIEW_PERMISSIONS.some(viewerHasPermission);
-  const canManagePublicPage = viewerHasPermission(ORG_PERMISSIONS.ORGANIZATION_MANAGE);
-  const isOwner = Boolean(
-    viewerCanManageOrganization
-      || (
-        user
-        && org
-        && user.$id === org.ownerId
-      ),
-  );
-  const isOrganizationRoleMember = Boolean(
-    viewerCanManageOrganization
-      || (
-        user
-          && org
-          && (
-            user.$id === org.ownerId
-            || (org.staffMembers ?? []).some((staffMember) => staffMember.userId === user.$id && !staffMember.invite)
-          )
-      ),
-  );
-  const isCurrentOrganizationHomePage = Boolean(
-    user?.homePageOrganizationId
-      && org
-      && user.homePageOrganizationId === org.$id,
-  );
-  const organizationFieldCount = useMemo(
-    () => (
-      Array.isArray(org?.fields)
-        ? org.fields.filter((field) => typeof field?.$id === 'string' && field.$id.trim().length > 0).length
-        : 0
-    ),
-    [org?.fields],
-  );
   const {
+    canManageEvents,
+    canManageFields,
+    canManageTeams,
+    canManageProducts,
+    canManageStaff,
+    canManageRoles,
+    canManageStaffSurface,
+    canManageRefunds,
+    canManageStaffCompensation,
+    canManageFinance,
+    canManageDiscounts,
+    canManageTemplates,
+    canImportDocuments,
+    canVoidDocuments,
+    canViewDocumentAudit,
+    canViewImportedDocuments,
+    canManagePublicPage,
+    isOwner,
+    isOrganizationRoleMember,
+    isCurrentOrganizationHomePage,
+    canToggleHomePagePreference,
     canCreateOrganizationEvents,
     createEventHelperText,
-  } = resolveOrganizationEventCreationState({
-    canManageEvents,
-    organizationFieldCount,
-  });
-  const canToggleHomePagePreference = Boolean(isOrganizationRoleMember || isCurrentOrganizationHomePage);
-  const hasVisibleTeams = useMemo(
-    () => Array.isArray(org?.teams) && org.teams.length > 0,
-    [org?.teams],
-  );
-  const hasVisibleEvents = useMemo(
-    () => Array.isArray(org?.events) && org.events.length > 0,
-    [org?.events],
-  );
-  const hasVisibleProducts = useMemo(
-    () => Array.isArray(org?.products) && org.products.length > 0,
-    [org?.products],
-  );
-  const hasVisibleRentals = useMemo(() => {
-    const fields = Array.isArray(org?.fields) ? org.fields : [];
-    if (!fields.length) {
-      return false;
-    }
-
-    const referenceDate = new Date();
-    return fields.some((field) => (
-      Array.isArray(field.rentalSlots)
-        && field.rentalSlots.some((slot) => Boolean(getNextRentalOccurrence(slot, referenceDate)))
-    ));
-  }, [org?.fields]);
-  const availableTabs = useMemo(
-    () => buildOrganizationTabs({
-      enabledFeatures: org?.enabledFeatures,
-      viewerCanAccessUsers: org?.viewerCanAccessUsers,
-      isOwner,
-      isOrganizationRoleMember,
-      canManageStaff: canManageStaffSurface,
-      canManageTemplates,
-      canManageRefunds,
-      canManageFinance,
-      canManagePublicPage,
-      canManageTeams,
-      canManageFields,
-      canManageProducts,
-      canManageDiscounts,
-      hasTeams: hasVisibleTeams,
-      hasEvents: hasVisibleEvents,
-      hasDivisions: Array.isArray((org as any)?.divisions) && (org as any).divisions.length > 0,
-      hasRentals: hasVisibleRentals,
-      hasResources: organizationFieldCount > 0,
-      hasProducts: hasVisibleProducts,
-    }),
-    [
-      hasVisibleProducts,
-      hasVisibleRentals,
-      hasVisibleTeams,
-      hasVisibleEvents,
-      organizationFieldCount,
-      canManageFields,
-      canManageProducts,
-      canManageDiscounts,
-      canManagePublicPage,
-      canManageRefunds,
-      canManageFinance,
-      canManageStaffSurface,
-      canManageTeams,
-      canManageTemplates,
-      isOrganizationRoleMember,
-      isOwner,
-      org?.viewerCanAccessUsers,
-      org?.enabledFeatures,
-      (org as any)?.divisions,
-    ],
-  );
+    availableTabs,
+  } = useMemo(() => getOrganizationAccess(org, user), [org, user]);
   const stripeEmailValid = useMemo(
     () => Boolean(stripeEmail && EMAIL_REGEX.test(stripeEmail.trim())),
     [stripeEmail],
@@ -971,160 +351,8 @@ function OrganizationDetailContent() {
     });
   }, [org?.events]);
 
-  const currentHostIds = useMemo(
-    () => (Array.isArray(org?.hosts)
-      ? org.hosts
-        .map((host) => host?.$id)
-        .filter((id): id is string => typeof id === 'string' && id.length > 0)
-      : []),
-    [org?.hosts],
-  );
-  const currentHosts = useMemo(() => org?.hosts ?? [], [org?.hosts]);
-  const ownerHost = useMemo(() => {
-    if (org?.owner?.$id) {
-      return org.owner;
-    }
-    if (org?.ownerId && user?.$id === org.ownerId) {
-      return user;
-    }
-    return null;
-  }, [org?.owner, org?.ownerId, user]);
-  const currentOfficials = useMemo(() => org?.officials ?? [], [org?.officials]);
-  const STAFF_NAME_UNAVAILABLE_LABEL = 'Staff name unavailable';
-  const userDisplayName = useCallback((candidate: Partial<UserData> | undefined): string => {
-    if (candidate?.isIdentityHidden) {
-      return STAFF_NAME_UNAVAILABLE_LABEL;
-    }
-    const firstName = typeof candidate?.firstName === 'string' ? candidate.firstName.trim() : '';
-    const lastName = typeof candidate?.lastName === 'string' ? candidate.lastName.trim() : '';
-    return firstName.length > 0 && lastName.length > 0
-      ? `${firstName} ${lastName}`
-      : STAFF_NAME_UNAVAILABLE_LABEL;
-  }, []);
-  const staffRosterEntries = useMemo<RoleRosterEntry[]>(() => {
-    const entries: RoleRosterEntry[] = [];
-    const seen = new Set<string>();
-    const staffMembers = Array.isArray(org?.staffMembers) ? org.staffMembers : [];
-    const organizationStaffInvites = Array.isArray(org?.staffInvites) ? org.staffInvites : [];
-
-    if (ownerHost?.$id) {
-      entries.push({
-        id: ownerHost.$id,
-        userId: ownerHost.$id,
-        fullName: userDisplayName(ownerHost),
-        userName: ownerHost.userName || null,
-        email: org?.staffEmailsByUserId?.[ownerHost.$id] ?? null,
-        user: ownerHost,
-        status: 'active',
-        subtitle: 'Owner',
-        types: ['HOST'],
-        roleId: null,
-        roleName: 'Owner',
-        canRemove: false,
-        locked: true,
-      });
-      seen.add(ownerHost.$id);
-    } else if (org?.ownerId) {
-      entries.push({
-        id: org.ownerId,
-        userId: org.ownerId,
-        fullName: STAFF_NAME_UNAVAILABLE_LABEL,
-        userName: null,
-        email: org?.staffEmailsByUserId?.[org.ownerId] ?? null,
-        user: null,
-        status: 'active',
-        subtitle: 'Owner',
-        types: ['HOST'],
-        roleId: null,
-        roleName: 'Owner',
-        canRemove: false,
-        locked: true,
-      });
-      seen.add(org.ownerId);
-    }
-
-    staffMembers.forEach((staffMember) => {
-      const userEntry = staffMember.user;
-      if (!staffMember.userId || seen.has(staffMember.userId) || staffMember.userId === org?.ownerId) {
-        return;
-      }
-      seen.add(staffMember.userId);
-      entries.push({
-        id: staffMember.$id,
-        staffMemberId: staffMember.$id,
-        userId: staffMember.userId,
-        fullName: userDisplayName(userEntry),
-        userName: userEntry?.userName || null,
-        email: org?.staffEmailsByUserId?.[staffMember.userId] ?? staffMember.invite?.email ?? null,
-        user: userEntry ?? null,
-        status: staffMember.invite?.status === 'DECLINED' ? 'declined' : staffMember.invite ? 'pending' : 'active',
-        subtitle: undefined,
-        types: staffMember.types,
-        roleId: staffMember.roleId ?? null,
-        roleName: staffMember.role?.name ?? org?.staffRoles?.find((role) => role.$id === staffMember.roleId)?.name ?? null,
-        canRemove: true,
-      });
-    });
-
-    organizationStaffInvites.forEach((invite) => {
-      if (!invite.userId || seen.has(invite.userId) || invite.userId === org?.ownerId) {
-        return;
-      }
-      entries.push({
-        id: invite.$id,
-        userId: invite.userId,
-        fullName: `${String(invite.firstName ?? '').trim()} ${String(invite.lastName ?? '').trim()}`.trim() || STAFF_NAME_UNAVAILABLE_LABEL,
-        userName: null,
-        email: invite.email ?? null,
-        user: null,
-        status: invite.status === 'DECLINED' ? 'declined' : 'pending',
-        subtitle: undefined,
-        types: invite.staffTypes ?? ['HOST'],
-        roleId: null,
-        roleName: 'Pending',
-        canRemove: true,
-      });
-      seen.add(invite.userId);
-    });
-
-    return entries;
-  }, [org?.ownerId, org?.staffEmailsByUserId, org?.staffInvites, org?.staffMembers, org?.staffRoles, ownerHost, userDisplayName]);
-  const staffRosterNameError = useMemo(
-    () => staffRosterEntries.some((entry) => (
-      Boolean(entry.userId) && entry.fullName === STAFF_NAME_UNAVAILABLE_LABEL
-    )) ? 'Staff names could not be loaded. Refresh and try again.' : null,
-    [staffRosterEntries],
-  );
-  const eventHostOptions = useMemo(() => {
-    const ids = new Set<string>();
-    if (typeof org?.ownerId === 'string' && org.ownerId.length > 0) {
-      ids.add(org.ownerId);
-    }
-    currentHostIds.forEach((hostId) => ids.add(hostId));
-
-    const labelById = new Map<string, string>();
-    if (org?.owner?.$id) {
-      labelById.set(org.owner.$id, `${userDisplayName(org.owner)} (Owner)`);
-    } else if (org?.ownerId) {
-      labelById.set(org.ownerId, `${STAFF_NAME_UNAVAILABLE_LABEL} (Owner)`);
-    }
-
-    currentHosts.forEach((host) => {
-      if (!host?.$id) return;
-      labelById.set(host.$id, userDisplayName(host));
-    });
-
-    if (user?.$id && !labelById.has(user.$id)) {
-      labelById.set(user.$id, userDisplayName(user));
-    }
-
-    return Array.from(ids)
-      .map((hostId) => ({
-        value: hostId,
-        label: labelById.get(hostId) ?? STAFF_NAME_UNAVAILABLE_LABEL,
-      }))
-      .sort((left, right) => left.label.localeCompare(right.label));
-  }, [currentHostIds, currentHosts, org?.owner, org?.ownerId, user, userDisplayName]);
+  const { staffRosterEntries, staffRosterNameError, eventHostOptions, currentOfficials } =
+    useMemo(() => getOrganizationStaffPresentation(org, user), [org, user]);
   const [products, setProducts] = useState<Product[]>([]);
   const [productName, setProductName] = useState('');
   const [productDescription, setProductDescription] = useState('');
@@ -1160,6 +388,8 @@ function OrganizationDetailContent() {
     name: string;
     eventType?: string | null;
     sportId?: string | null;
+    description?: string | null;
+    updatedAt?: string | null;
   }>>([]);
   const [eventTemplatesLoading, setEventTemplatesLoading] = useState(false);
   const [eventTemplatesError, setEventTemplatesError] = useState<string | null>(null);
@@ -1294,46 +524,6 @@ function OrganizationDetailContent() {
     setPreviewSignComplete(false);
   }, []);
 
-  const loadOrg = useCallback(async (
-    orgId: string,
-    options?: { silent?: boolean; isRelationsIncluded?: boolean; tabRefresh?: OrganizationTab },
-  ) => {
-    const silent = Boolean(options?.silent);
-    const tabRefresh = options?.tabRefresh;
-    const isTabRefresh = Boolean(tabRefresh && loadedOrganizationIdRef.current === orgId);
-    if (isTabRefresh && tabRefresh) {
-      setOrganizationLoadingTab(tabRefresh);
-    } else if (!silent) {
-      setLoading(true);
-      setOrganizationLoadError(null);
-    }
-    try {
-      const data = await organizationService.getOrganizationById(
-        orgId,
-        options?.isRelationsIncluded ?? requestedTab !== 'users',
-      );
-      if (data) {
-        setOrg(data);
-        loadedOrganizationIdRef.current = orgId;
-        if (!silent) {
-          setOrganizationLoadError(null);
-        }
-      } else if (!silent) {
-        setOrganizationLoadError('The Organization was not found or is not available to this account.');
-      }
-    } catch (e) {
-      console.error('Failed to load organization', e);
-      if (!silent) {
-        setOrganizationLoadError(e instanceof Error ? e.message : 'The Organization overview is not available right now.');
-      }
-    } finally {
-      if (isTabRefresh && tabRefresh) {
-        setOrganizationLoadingTab((current) => current === tabRefresh ? null : current);
-      } else if (!silent) {
-        setLoading(false);
-      }
-    }
-  }, [requestedTab]);
 
   const syncOrganizationVerification = useCallback(async (orgId: string) => {
     setSyncingOrganizationVerification(true);
@@ -1350,291 +540,13 @@ function OrganizationDetailContent() {
     } finally {
       setSyncingOrganizationVerification(false);
     }
-  }, []);
+  }, [setOrg]);
 
   useEffect(() => {
     if (sportsLoading) return;
     setSelectedSports((current) => current.filter((sport) => sportOptions.includes(sport)));
   }, [sportOptions, sportsLoading]);
 
-  const kmBetween = useCallback((a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
-    const toRad = (value: number) => (value * Math.PI) / 180;
-    const R = 6371; // km
-    const dLat = toRad(b.lat - a.lat);
-    const dLon = toRad(b.lng - a.lng);
-    const lat1 = toRad(a.lat);
-    const lat2 = toRad(b.lat);
-    const sinDLat = Math.sin(dLat / 2);
-    const sinDLon = Math.sin(dLon / 2);
-    const c = 2 * Math.asin(
-      Math.sqrt(sinDLat * sinDLat + Math.cos(lat1) * Math.cos(lat2) * sinDLon * sinDLon),
-    );
-    return R * c;
-  }, []);
-
-  const buildEventFilters = useCallback(() => {
-    const today = new Date();
-    const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0);
-    const normalizedQuery = debouncedEventSearch.trim();
-    const normalizedStartDate =
-      eventsTabSelectedStartDate instanceof Date && !Number.isNaN(eventsTabSelectedStartDate.getTime())
-        ? eventsTabSelectedStartDate
-        : null;
-    const normalizedEndDate =
-      eventsTabSelectedEndDate instanceof Date && !Number.isNaN(eventsTabSelectedEndDate.getTime())
-        ? eventsTabSelectedEndDate
-        : null;
-    const effectiveDate = normalizedStartDate
-      ? normalizedStartDate
-      : normalizedEndDate && normalizedEndDate < startOfToday
-        ? normalizedEndDate
-        : startOfToday;
-    const dateFrom = new Date(
-      effectiveDate.getFullYear(),
-      effectiveDate.getMonth(),
-      effectiveDate.getDate(),
-      0,
-      0,
-      0,
-      0,
-    ).toISOString();
-    const dateTo = normalizedEndDate
-      ? new Date(
-          normalizedEndDate.getFullYear(),
-          normalizedEndDate.getMonth(),
-          normalizedEndDate.getDate(),
-          23,
-          59,
-          59,
-          999,
-        ).toISOString()
-      : undefined;
-    const normalizedOrganizationId = typeof id === 'string' ? id.trim() : '';
-    const hostedEventTypes = selectedHostedEventTypes.length === ORG_HOSTED_EVENT_TYPE_OPTIONS.length
-      ? undefined
-      : selectedHostedEventTypes;
-
-    return {
-      organizationId: normalizedOrganizationId || undefined,
-      includeWeeklyChildren: true,
-      eventTypes: hostedEventTypes,
-      sports: selectedSports.length > 0 ? selectedSports : undefined,
-      userLocation: location || undefined,
-      maxDistance: location && typeof eventsTabMaxDistance === 'number' ? eventsTabMaxDistance : undefined,
-      dateFrom,
-      dateTo,
-      query: normalizedQuery || undefined,
-    };
-  }, [
-    debouncedEventSearch,
-    eventsTabMaxDistance,
-    eventsTabSelectedEndDate,
-    eventsTabSelectedStartDate,
-    id,
-    location,
-    selectedHostedEventTypes,
-    selectedSports,
-  ]);
-
-  const loadRentalEventsForOrganization = useCallback(async (
-    organizationId: string,
-    dateFrom?: string,
-    dateTo?: string,
-  ): Promise<Event[]> => {
-    const fieldIdsFromHydratedFields = Array.isArray(org?.fields)
-      ? org.fields
-        .map((field) => (typeof field?.$id === 'string' ? field.$id.trim() : ''))
-        .filter((value): value is string => value.length > 0)
-      : [];
-    const organizationFieldIds = Array.from(new Set(fieldIdsFromHydratedFields));
-    if (!organizationFieldIds.length) {
-      return [];
-    }
-
-    const rangeStart = dateFrom ?? new Date().toISOString();
-    const settled = await Promise.allSettled(
-      organizationFieldIds.map((fieldId) => eventService.getEventsForFieldInRange(fieldId, rangeStart, dateTo ?? null)),
-    );
-    const mergedEvents = new Map<string, Event>();
-    settled.forEach((result) => {
-      if (result.status === 'rejected') {
-        console.warn('Failed to load field events for organization rentals', result.reason);
-        return;
-      }
-      result.value.forEach((event) => {
-        const eventId = typeof event.$id === 'string' ? event.$id.trim() : '';
-        if (!eventId) {
-          return;
-        }
-        const eventOrganizationId = typeof event.organizationId === 'string' ? event.organizationId.trim() : '';
-        if (eventOrganizationId === organizationId) {
-          return;
-        }
-        mergedEvents.set(eventId, event);
-      });
-    });
-    return Array.from(mergedEvents.values());
-  }, [org?.fields]);
-
-  const filterRentalEventsForTab = useCallback((events: Event[], query: string): Event[] => {
-    const normalizedQuery = query.trim().toLowerCase();
-    const selectedSportSet = new Set(
-      selectedSports.map((sport) => sport.trim().toLowerCase()).filter((sport) => sport.length > 0),
-    );
-
-    return events.filter((event) => {
-      if (normalizedQuery.length > 0) {
-        const haystacks = [
-          event.name,
-          event.description,
-          event.location,
-        ].map((value) => (typeof value === 'string' ? value.trim().toLowerCase() : ''));
-        const hasMatch = haystacks.some((value) => value.includes(normalizedQuery));
-        if (!hasMatch) {
-          return false;
-        }
-      }
-
-      if (selectedSportSet.size > 0) {
-        const eventSport = typeof event.sport?.name === 'string' ? event.sport.name.trim().toLowerCase() : '';
-        if (!selectedSportSet.has(eventSport)) {
-          return false;
-        }
-      }
-
-      if (location && typeof eventsTabMaxDistance === 'number') {
-        const coordinates = Array.isArray(event.coordinates) ? event.coordinates : null;
-        if (coordinates && coordinates.length >= 2) {
-          const [lng, lat] = coordinates;
-          if (Number.isFinite(lat) && Number.isFinite(lng)) {
-            if (kmBetween(location, { lat, lng }) > eventsTabMaxDistance) {
-              return false;
-            }
-          }
-        }
-      }
-
-      return true;
-    });
-  }, [eventsTabMaxDistance, kmBetween, location, selectedSports]);
-
-  const loadFirstPageOfOrganizationEvents = useCallback(async (options: { background?: boolean } = {}) => {
-    const isBackgroundRefresh = options.background === true;
-    const normalizedOrganizationId = typeof id === 'string' ? id.trim() : '';
-    if (!normalizedOrganizationId) {
-      setEventsTabEvents([]);
-      setEventsTabOffset(0);
-      setEventsTabHasMoreEvents(false);
-      setEventsTabLoadingInitial(false);
-      return;
-    }
-
-    const requestId = organizationEventsRequestRef.current.id + 1;
-    organizationEventsRequestRef.current = { id: requestId, inFlight: true };
-    if (!isBackgroundRefresh) {
-      setEventsTabLoadingInitial(true);
-    }
-    setEventsTabLoadingMore(false);
-    setEventsTabError(null);
-    if (!isBackgroundRefresh) {
-      setEventsTabOffset(0);
-      setEventsTabHasMoreEvents(true);
-    }
-    try {
-      const filters = buildEventFilters();
-      const shouldLoadHostedEvents = selectedHostedEventTypes.length > 0;
-      const hostedEventsPromise = shouldLoadHostedEvents
-        ? eventService.getEventsPaginated(filters, ORG_EVENTS_LIMIT, 0, 'SOONEST')
-        : Promise.resolve<Event[]>([]);
-      const rentalEventsPromise = includeRentalEventType
-        ? loadRentalEventsForOrganization(normalizedOrganizationId, filters.dateFrom, filters.dateTo)
-          .then((events) => filterRentalEventsForTab(events, filters.query ?? ''))
-        : Promise.resolve<Event[]>([]);
-
-      const [hostedEvents, rentalEvents] = await Promise.all([hostedEventsPromise, rentalEventsPromise]);
-      if (requestId !== organizationEventsRequestRef.current.id) return;
-      const hiddenEventIds = new Set(user?.hiddenEventIds ?? []);
-      const mergedEvents = [...hostedEvents, ...rentalEvents];
-      const dedupedEvents = mergedEvents.filter((event, index, all) => (
-        all.findIndex((candidate) => candidate.$id === event.$id) === index
-      ));
-
-      setEventsTabEvents(dedupedEvents.filter((event) => !hiddenEventIds.has(event.$id)));
-      setEventsTabOffset(hostedEvents.length);
-      setEventsTabHasMoreEvents(shouldLoadHostedEvents && hostedEvents.length === ORG_EVENTS_LIMIT);
-    } catch (error) {
-      if (requestId !== organizationEventsRequestRef.current.id) return;
-      console.error('Failed to load organization events:', error);
-      if (!isBackgroundRefresh) {
-        setEventsTabError('Failed to load events. Please try again.');
-      }
-    } finally {
-      if (requestId === organizationEventsRequestRef.current.id) {
-        organizationEventsRequestRef.current.inFlight = false;
-      }
-      if (!isBackgroundRefresh && requestId === organizationEventsRequestRef.current.id) {
-        setEventsTabLoadingInitial(false);
-      }
-    }
-  }, [
-    buildEventFilters,
-    filterRentalEventsForTab,
-    id,
-    includeRentalEventType,
-    loadRentalEventsForOrganization,
-    selectedHostedEventTypes.length,
-    user?.hiddenEventIds,
-  ]);
-
-  useEffect(() => {
-    organizationEventsLoaderRef.current = async () => {
-      await loadFirstPageOfOrganizationEvents();
-    };
-  }, [loadFirstPageOfOrganizationEvents]);
-
-  const loadMoreOrganizationEvents = useCallback(async () => {
-    if (eventsTabLoadingInitial || eventsTabLoadingMore || organizationEventsRequestRef.current.inFlight || !eventsTabHasMoreEvents) return;
-    if (selectedHostedEventTypes.length === 0) return;
-    setEventsTabLoadingMore(true);
-    setEventsTabError(null);
-    try {
-      const filters = buildEventFilters();
-      const page = await eventService.getEventsPaginated(filters, ORG_EVENTS_LIMIT, eventsTabOffset, 'SOONEST');
-      const hiddenEventIds = new Set(user?.hiddenEventIds ?? []);
-      setEventsTabEvents((previous) => {
-        const merged = [...previous, ...page.filter((event) => !hiddenEventIds.has(event.$id))];
-        const seen = new Set<string>();
-        return merged.filter((event) => {
-          if (seen.has(event.$id)) return false;
-          seen.add(event.$id);
-          return true;
-        });
-      });
-      setEventsTabOffset((previous) => previous + page.length);
-      setEventsTabHasMoreEvents(page.length === ORG_EVENTS_LIMIT);
-    } catch (error) {
-      console.error('Failed to load more organization events:', error);
-      setEventsTabError('Failed to load more events. Please try again.');
-    } finally {
-      setEventsTabLoadingMore(false);
-    }
-  }, [
-    buildEventFilters,
-    eventsTabHasMoreEvents,
-    eventsTabLoadingInitial,
-    eventsTabLoadingMore,
-    eventsTabOffset,
-    selectedHostedEventTypes.length,
-    user?.hiddenEventIds,
-  ]);
-
-  useEffect(() => {
-    const hiddenEventIds = new Set(user?.hiddenEventIds ?? []);
-    if (hiddenEventIds.size === 0) {
-      return;
-    }
-    setEventsTabEvents((previous) => previous.filter((event) => !hiddenEventIds.has(event.$id)));
-  }, [user?.hiddenEventIds]);
 
   const handleSetHomePage = useCallback(async (checked: boolean) => {
     if (!user?.$id || !org || !canToggleHomePagePreference) {
@@ -1781,6 +693,8 @@ function OrganizationDetailContent() {
             name: String(row?.name ?? 'Untitled Template'),
             eventType: typeof row?.eventType === 'string' ? row.eventType : null,
             sportId: typeof row?.sportId === 'string' ? row.sportId : null,
+            description: typeof row?.description === 'string' ? row.description : null,
+            updatedAt: typeof row?.updatedAt === 'string' ? row.updatedAt : null,
           }))
           .filter((row) => row.id.length > 0),
       );
@@ -1905,7 +819,7 @@ function OrganizationDetailContent() {
       if (id) {
         void loadOrg(id, {
           isRelationsIncluded: requestedTab !== 'users',
-          tabRefresh: loadedOrganizationIdRef.current === id ? (requestedTab ?? 'overview') : undefined,
+          tabRefresh: requestedTab ?? 'overview',
         });
       }
     }
@@ -2020,37 +934,6 @@ function OrganizationDetailContent() {
     requestLocation().catch(() => {});
   }, [location, requestLocation]);
 
-  useEffect(() => {
-    if (authLoading) {
-      return;
-    }
-    if (activeTab !== 'events') {
-      return;
-    }
-    if (!id) {
-      return;
-    }
-    void organizationEventsLoaderRef.current?.();
-  }, [activeTab, authLoading, id]);
-
-  useEffect(() => {
-    if (activeTab !== 'events') {
-      return;
-    }
-    if (!eventsTabSentinelRef.current) return;
-    const el = eventsTabSentinelRef.current;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const [entry] = entries;
-        if (entry.isIntersecting) {
-          void loadMoreOrganizationEvents();
-        }
-      },
-      { rootMargin: '200px' },
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [activeTab, loadMoreOrganizationEvents]);
 
   useEffect(() => {
     if (!org || !user) return;
@@ -2114,11 +997,10 @@ function OrganizationDetailContent() {
 
   useEffect(() => {
     if (!requestedCustomerKey || !requestedCustomerType) {
+      setSelectedCustomerKey(null);
       return;
     }
-    setLoadingTab('users');
     setActiveTab('users');
-    setCustomerSearch('');
     setCustomerTypeFilters((current) => (
       current.includes(requestedCustomerType)
         ? current
@@ -2134,7 +1016,6 @@ function OrganizationDetailContent() {
         organizationId: id,
         queryTab: new URLSearchParams(window.location.search).get('tab'),
       });
-      setLoadingTab(nextTab ?? 'overview');
       setActiveTab(nextTab ?? 'overview');
     };
     window.addEventListener('popstate', handlePopState);
@@ -2151,14 +1032,6 @@ function OrganizationDetailContent() {
       setActiveTab(nextTab);
     }
   }, [activeTab, availableTabs, loading, org]);
-
-  useEffect(() => {
-    if (loadingTab === null || loadingTab !== activeTab) {
-      return;
-    }
-    const timeoutId = window.setTimeout(() => setLoadingTab(null), 180);
-    return () => window.clearTimeout(timeoutId);
-  }, [activeTab, loadingTab]);
 
   useEffect(() => {
     if (!eventTemplateCreateModalOpen || selectedCreateEventTemplateId || eventTemplates.length === 0) {
@@ -2497,7 +1370,6 @@ function OrganizationDetailContent() {
 
   const handleOrganizationTabChange = useCallback((value: string) => {
     const nextTab = value as OrganizationTab;
-    setLoadingTab(nextTab);
     setActiveTab(nextTab);
     if (id) {
       pushOrganizationHistoryState(buildOrganizationTabPath(id, nextTab));
@@ -2660,7 +1532,7 @@ function OrganizationDetailContent() {
         setProducts(latest.products ?? []);
       }
     },
-    [],
+    [setOrg],
   );
 
   const handleCreateProduct = useCallback(async () => {
@@ -3067,7 +1939,7 @@ function OrganizationDetailContent() {
         staffMembers: nextStaffMembers,
       };
     });
-  }, []);
+  }, [setOrg]);
 
   const handleCreateStaffRole = useCallback(
     async (name: string, permissions: string[]) => {
@@ -3111,7 +1983,7 @@ function OrganizationDetailContent() {
     } finally {
       setUpdatingEventHostId(null);
     }
-	  }, [canManageEvents, org]);
+	  }, [canManageEvents, org, setOrg]);
 
   const showUserCustomers = customerTypeFilters.includes('users');
   const showTeamCustomers = customerTypeFilters.includes('teams');
@@ -3260,7 +2132,7 @@ function OrganizationDetailContent() {
         ? current
         : requestedCustomerKey && organizationCustomerRows.some((row) => row.key === requestedCustomerKey)
           ? requestedCustomerKey
-        : organizationCustomerRows[0].key
+        : null
     ));
   }, [activeTab, organizationCustomerRows, requestedCustomerKey]);
 
@@ -3898,7 +2770,12 @@ function OrganizationDetailContent() {
             radius="md"
             p="xs"
             className="org-customer-detail-item org-customer-event-card"
+            role="link"
+            tabIndex={0}
             onClick={() => openOrganizationEvent(eventSummary.eventId)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') openOrganizationEvent(eventSummary.eventId);
+            }}
           >
             <Group gap="sm" wrap="nowrap" align="center">
               <Avatar
@@ -3936,313 +2813,27 @@ function OrganizationDetailContent() {
   );
 
   const renderCustomerBills = (bills: OrganizationBillSummary[], emptyText = 'No bills.') => (
-    bills.length > 0 ? (
-      <Stack gap="sm">
-        {bills.map((bill) => {
-          const payments = bill.payments.slice().sort((a, b) => a.sequence - b.sequence);
-          const billMeta = [
-            bill.ownerName,
-            bill.ownerType,
-            formatCustomerMetaToken(bill.status) ?? 'Open',
-            bill.paymentPlanEnabled ? 'Payment plan' : null,
-          ].filter(Boolean);
-          const paymentSummary = formatBillPaidProgress(bill);
-          const paymentLine = [
-            paymentSummary,
-            payments[0]?.dueDate ? `Due ${formatSummaryDate(payments[0].dueDate)}` : null,
-            bill.refundedAmountCents > 0 ? `${formatPrice(bill.refundedAmountCents)} refunded` : null,
-            bill.refundableAmountCents > 0 ? `${formatPrice(bill.refundableAmountCents)} refundable` : null,
-          ].filter(Boolean);
-          const hasUnpaidPlanPayments = payments.some((payment) => (
-            payment.status !== 'PAID' && payment.status !== 'VOID'
-          ));
-          const canCancelPaymentPlan = Boolean(
-            isOwner
-              && bill.paymentPlanEnabled
-              && bill.status !== 'CANCELLED'
-              && hasUnpaidPlanPayments,
-          );
-          const canEditCustomerBill = Boolean(
-            canManageFinance
-            && !bill.eventId
-            && (!bill.sourceType || bill.sourceType === 'MANUAL_CUSTOMER_BILL'),
-          );
-
-          return (
-            <Paper
-              key={bill.billId}
-              withBorder
-              radius="md"
-              p="sm"
-              className="org-customer-detail-item org-customer-bill-card"
-              onClick={canEditCustomerBill ? (event) => {
-                const target = event.target as HTMLElement;
-                if (target.closest('button, input, [role="button"]')) {
-                  return;
-                }
-                openCustomerBillEditModal(bill);
-              } : undefined}
-              onKeyDown={canEditCustomerBill ? (event) => {
-                const target = event.target as HTMLElement;
-                if (target.closest('button, input, [role="button"]')) {
-                  return;
-                }
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  openCustomerBillEditModal(bill);
-                }
-              } : undefined}
-              role={canEditCustomerBill ? 'button' : undefined}
-              tabIndex={canEditCustomerBill ? 0 : undefined}
-              aria-label={canEditCustomerBill ? `Edit bill ${bill.label ?? bill.eventName ?? bill.billId}` : undefined}
-              style={canEditCustomerBill ? { cursor: 'pointer' } : undefined}
-            >
-              <Group justify="space-between" align="flex-start" gap="xs" wrap="wrap">
-                <Stack gap={0} className="min-w-0">
-                  <Text size="sm" fw={500}>{bill.eventName ?? bill.label ?? 'Customer bill'}</Text>
-                  <Text size="xs" c="dimmed">{billMeta.join(' • ')}</Text>
-                  {paymentLine.length > 0 && (
-                    <Text size="xs" c="dimmed">{paymentLine.join(' • ')}</Text>
-                  )}
-                </Stack>
-                {canCancelPaymentPlan && (
-                  <Button
-                    size="compact-xs"
-                    variant="light"
-                    color="red"
-                    loading={cancellingCustomerPlanBillId === bill.billId}
-                    onClick={() => {
-                      void handleCancelCustomerPaymentPlan(bill);
-                    }}
-                  >
-                    Cancel plan
-                  </Button>
-                )}
-              </Group>
-
-              {payments.length > 0 && (
-                <Stack gap={6}>
-                  {payments.map((payment) => {
-                    const statusLabel = formatCustomerMetaToken(payment.status) ?? 'Pending';
-                    const canRefundPayment = Boolean(
-                      isOwner
-                        && payment.isRefundable
-                        && payment.paymentIntentId
-                        && payment.refundableAmountCents > 0,
-                    );
-                    const canCancelPendingPayment = Boolean(isOwner && payment.status === 'PROCESSING');
-                    const maxRefundDollars = payment.refundableAmountCents / 100;
-                    const draftRefundDollars = customerRefundAmountDraftByPaymentId[payment.paymentId] ?? maxRefundDollars;
-                    return (
-                      <Stack
-                        key={payment.paymentId}
-                        gap={6}
-                        className="rounded-md bg-slate-50 px-3 py-2"
-                      >
-                        <Group justify="space-between" gap="xs" wrap="wrap">
-                          <Group gap={6}>
-                            <Text size="xs" fw={600}>Payment #{payment.sequence || 1}</Text>
-                            <Badge size="xs" variant="light" color={payment.status === 'PAID' ? 'green' : payment.status === 'PROCESSING' ? 'yellow' : 'gray'}>
-                              {statusLabel}
-                            </Badge>
-                          </Group>
-                          <Text size="xs" c="dimmed">
-                            {formatPrice(payment.amountCents)}
-                            {payment.refundedAmountCents > 0 ? ` • ${formatPrice(payment.refundedAmountCents)} refunded` : ''}
-                          </Text>
-                        </Group>
-
-                        {(canRefundPayment || canCancelPendingPayment) && (
-                          <Group gap="xs" align="flex-end" wrap="wrap">
-                            {canRefundPayment && (
-                              <>
-                                <NumberInput
-                                  aria-label={`Refund amount for payment ${payment.sequence || 1}`}
-                                  min={0}
-                                  max={maxRefundDollars}
-                                  decimalScale={2}
-                                  fixedDecimalScale
-                                  prefix="$"
-                                  value={draftRefundDollars}
-                                  onChange={(value) => {
-                                    const numeric = typeof value === 'number' ? value : Number(value);
-                                    setCustomerRefundAmountDraftByPaymentId((current) => ({
-                                      ...current,
-                                      [payment.paymentId]: Number.isFinite(numeric)
-                                        ? Math.min(maxRefundDollars, Math.max(0, numeric))
-                                        : 0,
-                                    }));
-                                  }}
-                                  w={132}
-                                  size="xs"
-                                />
-                                <Button
-                                  size="compact-xs"
-                                  loading={refundingCustomerPaymentId === payment.paymentId}
-                                  disabled={Boolean(refundingCustomerPaymentId && refundingCustomerPaymentId !== payment.paymentId)}
-                                  onClick={() => {
-                                    void handleRefundCustomerBillPayment(bill, payment);
-                                  }}
-                                >
-                                  Refund
-                                </Button>
-                              </>
-                            )}
-                            {canCancelPendingPayment && (
-                              <Button
-                                size="compact-xs"
-                                variant="light"
-                                color="red"
-                                loading={cancellingCustomerPaymentId === payment.paymentId}
-                                disabled={Boolean(cancellingCustomerPaymentId && cancellingCustomerPaymentId !== payment.paymentId)}
-                                onClick={() => {
-                                  void handleCancelCustomerPendingBillPayment(bill, payment);
-                                }}
-                              >
-                                Cancel pending
-                              </Button>
-                            )}
-                          </Group>
-                        )}
-                      </Stack>
-                    );
-                  })}
-                </Stack>
-              )}
-            </Paper>
-          );
-        })}
-      </Stack>
-    ) : (
-      <Text size="xs" c="dimmed">{emptyText}</Text>
-    )
+    <OrganizationCustomerBills bills={bills} emptyText={emptyText} controls={{
+      isOwner, canManageFinance,
+      cancellingPlanId: cancellingCustomerPlanBillId,
+      cancellingPaymentId: cancellingCustomerPaymentId,
+      refundingPaymentId: refundingCustomerPaymentId,
+      refundAmounts: customerRefundAmountDraftByPaymentId,
+      setRefundAmounts: setCustomerRefundAmountDraftByPaymentId,
+      onEdit: openCustomerBillEditModal,
+      onCancelPlan: handleCancelCustomerPaymentPlan,
+      onRefund: handleRefundCustomerBillPayment,
+      onCancelPayment: handleCancelCustomerPendingBillPayment,
+    }} />
   );
 
   const renderCustomerDocuments = (documents: OrganizationUserDocumentSummary[], emptyText = 'No documents.') => (
-    documents.length > 0 ? (
-      <Stack gap={8}>
-        {documents.map((documentSummary) => {
-          const canViewDocument = documentSummary.provenance !== 'IMPORTED' || canViewImportedDocuments;
-          const canViewDocumentPdf = canViewDocument
-            && documentSummary.type === 'PDF'
-            && Boolean(documentSummary.viewUrl);
-          const importedSigningDate = documentSummary.historicalSigningDate;
-          return (
-          <Paper
-            key={documentSummary.signedDocumentRecordId}
-            withBorder
-            radius="md"
-            p="sm"
-            className="org-customer-detail-item org-customer-document-card"
-            onClick={canViewDocument ? () => openSignedDocumentPreview(documentSummary) : undefined}
-            onKeyDown={canViewDocument ? (event) => {
-              if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                openSignedDocumentPreview(documentSummary);
-              }
-            } : undefined}
-            role={canViewDocument ? 'button' : undefined}
-            tabIndex={canViewDocument ? 0 : undefined}
-          >
-            <Stack gap={2} className="min-w-0">
-              <Group gap={6} wrap="wrap">
-                <Text size="sm" fw={700}>{documentSummary.title}</Text>
-                {documentSummary.provenance === 'IMPORTED' && (
-                  <Badge size="xs" variant="light" color="teal">Imported</Badge>
-                )}
-                {(documentSummary.provenance === 'IMPORTED'
-                  || typeof documentSummary.versionSequence === 'number') && (
-                  <Badge size="xs" variant="light">
-                    Version {typeof documentSummary.versionSequence === 'number'
-                      ? documentSummary.versionSequence
-                      : 'Unknown'}
-                  </Badge>
-                )}
-                {documentSummary.status && (
-                  <Badge
-                    size="xs"
-                    variant="light"
-                    color={documentSummary.status.toUpperCase() === 'VOID' ? 'red' : 'blue'}
-                  >
-                    {formatDocumentStatusLabel(documentSummary.status)}
-                  </Badge>
-                )}
-              </Group>
-              <Text size="xs" c="dimmed">
-                Requirement: {documentSummary.provenance === 'IMPORTED'
-                  ? documentSummary.documentRequirementTitle || 'Unavailable'
-                  : documentSummary.documentRequirementTitle || documentSummary.title}
-              </Text>
-              <Text size="xs" c="dimmed">
-                Applies to: {formatDocumentScopeLabel(documentSummary.scopeType)}
-              </Text>
-              <Text size="xs" c="dimmed">
-                Status: {formatDocumentStatusLabel(documentSummary.status)}
-              </Text>
-              <Text size="xs" c="dimmed">
-                {documentSummary.provenance === 'IMPORTED'
-                  ? `Signing date ${importedSigningDate
-                    ? formatDisplayDate(importedSigningDate, { timeZone: 'UTC' }) || 'unknown'
-                    : 'unknown'}`
-                  : `Signed ${formatSummaryDate(documentSummary.signedAt)}`}
-              </Text>
-            </Stack>
-            {(
-              canViewDocumentPdf
-              || (documentSummary.provenance === 'IMPORTED' && canVoidDocuments)
-              || (documentSummary.provenance === 'IMPORTED' && canViewDocumentAudit)
-            ) && (
-              <Group gap={6} mt={4}>
-                {canViewDocumentPdf && documentSummary.viewUrl && (
-                  <Button
-                    size="compact-xs"
-                    variant="subtle"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      openSignedDocumentPreview(documentSummary);
-                    }}
-                    onKeyDown={(event) => event.stopPropagation()}
-                  >
-                    View PDF
-                  </Button>
-                )}
-                {documentSummary.provenance === 'IMPORTED' && canVoidDocuments && (
-                  <Button
-                    size="compact-xs"
-                    variant="light"
-                    color="red"
-                    disabled={documentSummary.status?.toUpperCase() === 'VOID'}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      openCustomerDocumentVoidModal(documentSummary);
-                    }}
-                    onKeyDown={(event) => event.stopPropagation()}
-                  >
-                    Void
-                  </Button>
-                )}
-                {documentSummary.provenance === 'IMPORTED' && canViewDocumentAudit && (
-                  <Button
-                    size="compact-xs"
-                    variant="subtle"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void openCustomerDocumentAuditModal(documentSummary);
-                    }}
-                    onKeyDown={(event) => event.stopPropagation()}
-                  >
-                    Audit trail
-                  </Button>
-                )}
-              </Group>
-            )}
-          </Paper>
-          );
-        })}
-      </Stack>
-    ) : (
-      <Text size="xs" c="dimmed">{emptyText}</Text>
-    )
+    <OrganizationCustomerDocuments documents={documents} emptyText={emptyText} controls={{
+      canViewImportedDocuments, canVoidDocuments, canViewDocumentAudit,
+      onView: openSignedDocumentPreview,
+      onVoid: openCustomerDocumentVoidModal,
+      onAudit: openCustomerDocumentAuditModal,
+    }} />
   );
 
   const renderCustomerAvatar = (
@@ -4274,7 +2865,7 @@ function OrganizationDetailContent() {
     </Group>
   );
 
-  const renderSelectedCustomerDetail = () => {
+  const renderSelectedCustomerDetail = (tab: CustomerDetailTab) => {
     if (!selectedOrganizationCustomer) {
       return (
         <Stack gap="xs">
@@ -4288,41 +2879,34 @@ function OrganizationDetailContent() {
       const summary = selectedOrganizationCustomer.user;
       return (
         <Stack gap="md">
-          <Group justify="space-between" align="flex-start" wrap="wrap">
-            <Group gap="sm" align="center">
-              {renderCustomerAvatar(summary.fullName, summary.profileImageId, 'users', 46)}
-              <Stack gap={2}>
-                <Group gap={6} align="center">
-                  <Title order={5}>{summary.fullName}</Title>
-                  <Badge size="sm" variant="light">User</Badge>
-                </Group>
-                {summary.userName && <Text size="sm" c="dimmed">@{summary.userName}</Text>}
-              </Stack>
-            </Group>
+          {tab === 'overview' && <div className="org-customer-overview-grid">
+            <Paper withBorder p="md"><Text fw={600}>Registrations</Text><Text size="xl">{summary.events.length}</Text></Paper>
+            <Paper withBorder p="md"><Text fw={600}>Teams</Text><Text size="xl">{summary.teams.length}</Text></Paper>
+            <Paper withBorder p="md"><Text fw={600}>Bills</Text><Text size="xl">{summary.bills.length}</Text></Paper>
+            <Paper withBorder p="md"><Text fw={600}>Documents</Text><Text size="xl">{summary.documents.length}</Text></Paper>
+          </div>}
+          {(tab === 'billing' || tab === 'documents') &&
             <Group gap="xs">
-              {canManageFinance && (
+              {tab === 'billing' && canManageFinance && (
                 <Button size="xs" onClick={openCustomerBillModal}>
                   Add bill
                 </Button>
               )}
-              {canManageTemplates && (
+              {tab === 'documents' && canManageTemplates && (
                 <Button size="xs" variant="light" onClick={openCustomerDocumentModal}>
                   Add document
                 </Button>
               )}
-              {canImportDocuments && (
+              {tab === 'documents' && canImportDocuments && (
                 <Button size="xs" variant="outline" onClick={openCustomerImportModal}>
                   Import signed document
                 </Button>
               )}
-            </Group>
-          </Group>
-          <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="md">
-            {renderCustomerDetailSection('Org teams', renderCustomerTeamCards(summary.teams))}
-            {renderCustomerDetailSection('Events', renderCustomerEvents(summary.events))}
-            {renderCustomerDetailSection('Bills', renderCustomerBills(summary.bills))}
-            {renderCustomerDetailSection('Signed documents', renderCustomerDocuments(summary.documents))}
-          </SimpleGrid>
+            </Group>}
+          {tab === 'roster' && renderCustomerDetailSection('Teams', renderCustomerTeamCards(summary.teams))}
+          {(tab === 'events' || tab === 'overview') && renderCustomerDetailSection('Events', renderCustomerEvents(tab === 'overview' ? summary.events.slice(0, 3) : summary.events))}
+          {tab === 'billing' && renderCustomerDetailSection('Bills', renderCustomerBills(summary.bills))}
+          {tab === 'documents' && renderCustomerDetailSection('Documents', renderCustomerDocuments(summary.documents))}
         </Stack>
       );
     }
@@ -4338,29 +2922,20 @@ function OrganizationDetailContent() {
     ].filter((entry): entry is OrganizationTeamStaffSummary & { label: string } => Boolean(entry));
     return (
       <Stack gap="md">
-        <Group justify="space-between" align="flex-start" wrap="wrap">
-          <Group gap="sm" align="center">
-            {renderCustomerAvatar(summary.name, summary.profileImageId, 'teams', 46)}
-            <Stack gap={2}>
-              <Group gap={6} align="center">
-                <Title order={5}>{summary.name}</Title>
-                <Badge size="sm" variant="light" color="blue">Team</Badge>
-              </Group>
-              <Text size="sm" c="dimmed">
-                {[summary.division, summary.sport, `${summary.memberCount}${summary.teamSize ? `/${summary.teamSize}` : ''} members`].filter(Boolean).join(' • ')}
-              </Text>
-            </Stack>
-          </Group>
+        {tab === 'overview' && <div className="org-customer-overview-grid">
+          <Paper withBorder p="md"><Text fw={600}>Registrations</Text><Text size="xl">{summary.registrations.length}</Text></Paper>
+          <Paper withBorder p="md"><Text fw={600}>Members</Text><Text size="xl">{summary.memberCount}{summary.teamSize ? ` / ${summary.teamSize}` : ''}</Text></Paper>
+          <Paper withBorder p="md"><Text fw={600}>Team bills</Text><Text size="xl">{summary.bills.length}</Text></Paper>
+        </div>}
+        {tab === 'billing' &&
           <Group gap="xs">
             {canManageFinance && (
               <Button size="xs" onClick={openCustomerBillModal}>
                 Add bill
               </Button>
             )}
-          </Group>
-        </Group>
-        <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="md">
-          {renderCustomerDetailSection('Team staff', (
+          </Group>}
+          {(tab === 'roster' || tab === 'overview') && renderCustomerDetailSection('Team staff', (
             staffRows.length > 0 ? (
               <Stack gap={8}>
                 {staffRows.map((staff) => (
@@ -4376,9 +2951,8 @@ function OrganizationDetailContent() {
               <Text size="xs" c="dimmed">No manager or coach assignments.</Text>
             )
           ))}
-          {renderCustomerDetailSection('Events', renderCustomerEvents(summary.registrations, 'No organization event registrations.'))}
-        </SimpleGrid>
-        {renderCustomerDetailSection('Players', (
+          {(tab === 'events' || tab === 'overview') && renderCustomerDetailSection('Events', renderCustomerEvents(tab === 'overview' ? summary.registrations.slice(0, 3) : summary.registrations, 'No organization event registrations.'))}
+        {(tab === 'roster' || tab === 'billing' || tab === 'documents') && renderCustomerDetailSection(tab === 'roster' ? 'Players' : `Player ${tab === 'billing' ? 'bills' : 'documents'}`, (
           summary.members.length > 0 ? (
             <Stack gap="sm">
               {summary.members.map((member) => {
@@ -4404,16 +2978,12 @@ function OrganizationDetailContent() {
                           </Group>
                         )}
                       </Group>
-                      <SimpleGrid cols={{ base: 1, md: 2 }} spacing="sm">
-                        <div className="org-customer-detail-subgroup">
-                          <Text size="xs" fw={700} c="dimmed" tt="uppercase" mb={4}>Bills</Text>
+                      {tab === 'billing' && <div className="org-customer-detail-subgroup">
                           {renderCustomerBills(member.bills, 'No player bills.')}
-                        </div>
-                        <div className="org-customer-detail-subgroup">
-                          <Text size="xs" fw={700} c="dimmed" tt="uppercase" mb={4}>Documents</Text>
+                        </div>}
+                        {tab === 'documents' && <div className="org-customer-detail-subgroup">
                           {renderCustomerDocuments(member.documents, 'No player documents.')}
-                        </div>
-                      </SimpleGrid>
+                        </div>}
                     </Stack>
                   </Paper>
                 );
@@ -4423,9 +2993,7 @@ function OrganizationDetailContent() {
             <Text size="xs" c="dimmed">No players found for this team.</Text>
           )
         ))}
-        <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="md">
-          {renderCustomerDetailSection('Team bills', renderCustomerBills(summary.bills))}
-        </SimpleGrid>
+          {tab === 'billing' && renderCustomerDetailSection('Team bills', renderCustomerBills(summary.bills))}
       </Stack>
     );
   };
@@ -4444,24 +3012,1255 @@ function OrganizationDetailContent() {
       && (org.teams?.length ?? 0) === 0
       && (org.divisions?.length ?? 0) === 0,
   );
-  const isActiveTabDataLoading = (
-    (activeTab === 'events' && eventsTabLoadingInitial)
-    || (activeTab === 'eventTemplates' && eventTemplatesLoading)
-    || (activeTab === 'templates' && templatesLoading)
-    || (activeTab === 'users' && organizationUsersLoading)
-  );
-  const isActiveTabLoading = loadingTab === activeTab
-    || organizationLoadingTab === activeTab
-    || isActiveTabDataLoading;
+  const isActiveTabLoading = organizationLoadingTab === activeTab;
   const shellStatus = loading
     ? 'loading'
     : requestedTabIsUnavailable
       ? 'permission-denied'
-      : organizationLoadError
+      : organizationLoadError && !org
         ? 'error'
         : org
           ? 'ready'
           : 'empty';
+  const renderOverviewTab = (org: Organization) => (
+    activeTab === 'overview' && (
+    <OrganizationOverviewTabContent
+      organization={org}
+      events={overviewRecentEvents}
+      teams={org.teams ?? []}
+      staffCount={(org.staffMembers?.length ?? 0) + (org.hosts?.length ?? 0)}
+      officialCount={currentOfficials.length}
+      canViewEvents={availableTabs.some((tab) => tab.value === 'events')}
+      canViewTeams={availableTabs.some((tab) => tab.value === 'teams')}
+      onViewEvents={() => handleOrganizationTabChange('events')}
+      onViewTeams={() => handleOrganizationTabChange('teams')}
+      onViewReviews={() => handleOrganizationTabChange('reviews')}
+      onEventClick={handleOrganizationEventClick}
+      reviewContent={(
+        <OrganizationReviewsTabContent
+          organizationId={org.$id}
+          mode="summary"
+          onViewAll={() => handleOrganizationTabChange('reviews')}
+        />
+      )}
+      paymentsContent={isOwner ? (
+        <Paper withBorder className="org-overview-payments-card">
+          <Title order={3}>Payments status</Title>
+          <Text size="sm" c="dimmed" mt="sm" mb="sm">
+            {organizationVerificationStatus === 'VERIFIED'
+              ? 'Stripe onboarding is complete. This organization can accept payouts and display the verified badge.'
+              : organizationVerificationStatus === 'LEGACY_CONNECTED'
+                ? 'Stripe is connected through the legacy flow. Reconnect through the new verification flow to earn the verified badge.'
+                : organizationVerificationStatus === 'ACTION_REQUIRED'
+                  ? 'Stripe still needs more information before this organization can be verified.'
+                  : organizationVerificationStatus === 'PENDING'
+                    ? 'Stripe onboarding has started. Finish the remaining steps to complete verification.'
+                    : 'Connect a Stripe account to verify this organization and accept payouts.'}
+          </Text>
+          <Group gap="xs" mb="sm">
+            <Badge
+              color={
+                organizationVerificationStatus === 'VERIFIED'
+                  ? 'teal'
+                  : organizationVerificationStatus === 'ACTION_REQUIRED'
+                    ? 'yellow'
+                    : organizationVerificationStatus === 'LEGACY_CONNECTED'
+                      ? 'blue'
+                      : 'gray'
+              }
+              variant="light"
+            >
+              {organizationVerificationStatusLabel(organizationVerificationStatus)}
+            </Badge>
+            {syncingOrganizationVerification && <Text size="xs" c="dimmed">Refreshing verification…</Text>}
+          </Group>
+          <Stack gap="xs">
+            {requiresStripeVerificationEmail && (
+              <TextInput
+                label="Stripe payout email"
+                type="email"
+                placeholder="billing@example.com"
+                value={stripeEmail}
+                error={stripeEmailError ?? undefined}
+                onChange={(e) => {
+                  const next = e.currentTarget.value;
+                  setStripeEmail(next);
+                  if (stripeEmailError && EMAIL_REGEX.test(next.trim())) {
+                    setStripeEmailError(null);
+                  }
+                }}
+                disabled={connectingStripe}
+                required
+              />
+            )}
+            <Button
+              size="sm"
+              loading={organizationVerificationStatus === 'VERIFIED' ? managingStripe : connectingStripe}
+              disabled={requiresStripeVerificationEmail && !stripeEmailValid}
+              onClick={organizationVerificationStatus === 'VERIFIED' ? handleManageStripeAccount : handleConnectStripeAccount}
+            >
+              {stripePrimaryActionLabel}
+            </Button>
+            {organizationVerificationStatus !== 'VERIFIED' && (
+              <Text size="xs" c="dimmed">
+                The verified badge appears only after Stripe finishes all required checks for this organization.
+              </Text>
+            )}
+          </Stack>
+        </Paper>
+      ) : undefined}
+    />
+  )
+  );
+
+  const renderReviewsTab = (org: Organization) => (
+    activeTab === 'reviews' && org && (
+    <OrganizationReviewsTabContent organizationId={org.$id} />
+  )
+  );
+
+  const renderEventsTab = (org: Organization) => (
+    activeTab === 'events' && (
+    <OrganizationEventsTabContent
+      organizationName={org.name}
+      location={location}
+      searchTerm={eventSearchTerm}
+      setSearchTerm={setEventSearchTerm}
+      selectedEventTypes={selectedEventTypes}
+      setSelectedEventTypes={setSelectedEventTypes}
+      eventTypeOptions={ORG_EVENT_TYPE_OPTIONS}
+      selectedSports={selectedSports}
+      setSelectedSports={setSelectedSports}
+      maxDistance={eventsTabMaxDistance}
+      setMaxDistance={setEventsTabMaxDistance}
+      selectedStartDate={eventsTabSelectedStartDate}
+      setSelectedStartDate={setEventsTabSelectedStartDate}
+      selectedEndDate={eventsTabSelectedEndDate}
+      setSelectedEndDate={setEventsTabSelectedEndDate}
+      sports={sportOptions}
+      sportsLoading={sportsLoading}
+      sportsError={sportsError?.message ?? null}
+      defaultMaxDistance={ORG_EVENTS_DEFAULT_MAX_DISTANCE}
+      kmBetween={kmBetween}
+      {...organizationEvents.data}
+      sentinelRef={organizationEvents.sentinelRef}
+      onFilterChange={() => organizationEvents.reload({ background: true })}
+      onRetry={() => { void organizationEvents.reload(); }}
+      onEventClick={handleOrganizationEventClick}
+      onCreateEvent={handleCreateEvent}
+      showCreateEventButton={canManageEvents}
+      createEventDisabled={!canCreateOrganizationEvents}
+      createEventHelperText={createEventHelperText}
+      hideWeeklyChildren={hideWeeklyChildEvents}
+      setHideWeeklyChildren={setHideWeeklyChildEvents}
+    />
+  )
+  );
+
+  const renderEventTemplatesTab = (org: Organization) => (
+    canManageTemplates && activeTab === 'eventTemplates' && (
+    <OrganizationEventTemplatesTabContent
+      eventTemplates={eventTemplates}
+      isLoading={eventTemplatesLoading}
+      error={eventTemplatesError}
+      onRefresh={() => org ? loadEventTemplates(org.$id) : undefined}
+      onCreateEvent={navigateToEventCreate}
+    />
+  )
+  );
+
+  const renderTeamsTab = (org: Organization) => (
+    activeTab === 'teams' && (
+    <OrganizationTeamsTabContent
+      teams={org.teams}
+      divisionDetails={org.divisions}
+      isTeamManagementAllowed={canManageTeams}
+      onCreateTeam={() => setShowCreateTeamModal(true)}
+      onTeamClick={(team) => router.push(buildTeamManagementPath(team.$id))}
+    />
+  )
+  );
+
+  const renderUsersTab = (org: Organization) => (
+    activeTab === 'users' && (
+    <OrganizationCustomersTabContent
+      organizationName={org?.name}
+      customerSearch={customerSearch}
+      setCustomerSearch={setCustomerSearch}
+      customerTypeFilters={customerTypeFilters}
+      setCustomerTypeFilters={setCustomerTypeFilters}
+      resetCustomerFilters={resetCustomerFilters}
+      isCustomerFilterDefault={customerFilterIsDefault}
+      customers={organizationCustomerRows}
+      visibleCustomers={visibleOrganizationCustomerRows}
+      selectedCustomerKey={selectedCustomerKey}
+      onCustomerClose={() => {
+        setSelectedCustomerKey(null);
+        pushOrganizationHistoryState(buildOrganizationTabPath(id, 'users'));
+      }}
+      onCustomerSelect={(customer) => {
+        const nextCustomer = organizationCustomerRows.find((row) => row.key === customer.key);
+        if (nextCustomer) openOrganizationCustomer(nextCustomer);
+      }}
+      renderCustomerAvatar={renderCustomerAvatar}
+      renderCustomerDetail={(customer) => customer && <OrganizationCustomerProfile
+        key={customer.key}
+        rosterLabel={customer.type === 'teams' ? 'Roster' : 'Teams'}
+        header={<Group gap="md" wrap="nowrap">
+          {renderCustomerAvatar(customer.name, customer.profileImageId, customer.type, 48)}
+          <Stack gap={4} className="min-w-0">
+            <Group gap="sm"><Title order={3}>{customer.name}</Title><Badge variant="light">{customer.type === 'teams' ? 'Team' : 'User'}</Badge></Group>
+            {customer.subtitle && <Text c="dimmed" size="sm">{customer.subtitle}</Text>}
+          </Stack>
+        </Group>}
+        renderContent={renderSelectedCustomerDetail}
+      />}
+      formatEventStart={(start) => formatSummaryDateTime(start ?? undefined)}
+      isCustomersLoading={organizationUsersLoading}
+      customersError={organizationUsersError}
+      onRefresh={() => org ? loadOrganizationUsers(org.$id) : undefined}
+      hasMoreCustomers={hasMoreVisibleCustomers}
+      customerSentinelRef={customerSentinelRef}
+    />
+  )
+  );
+
+  const renderTemplatesTab = (org: Organization) => (
+    canManageTemplates && activeTab === 'templates' && (
+    <OrganizationDocumentTemplatesTabContent
+      templateDocuments={templateDocuments}
+      pendingTemplateCreates={pendingTemplateCreates}
+      selectedTemplateVersionByRequirement={selectedTemplateVersionByRequirement}
+      isLoading={templatesLoading}
+      error={templatesError}
+      editingTemplateId={editingTemplateId}
+      deletingTemplateId={deletingTemplateId}
+      savingTemplateVersion={savingTemplateVersion}
+      onRefresh={() => org ? loadTemplates(org.$id) : undefined}
+      onCreateTemplate={() => setTemplateModalOpen(true)}
+      onEditTextTemplate={handleEditTextTemplate}
+      onPreviewTemplate={openTemplatePreview}
+      onEditPdfTemplate={handleEditPdfTemplate}
+      onDeleteTemplate={handleDeleteTemplate}
+    />
+  )
+  );
+
+  const renderStaffTab = (org: Organization) => (
+    canManageStaffSurface && activeTab === 'staff' && (
+    <OrganizationStaffTabContent
+      rosterNameError={staffRosterNameError}
+      rosterEntries={staffRosterEntries}
+      searchValue={staffSearch}
+      onSearchChange={(value) => { void handleSearchStaff(value); }}
+      searchResults={staffResults}
+      searchLoading={staffSearchLoading}
+      searchError={staffError}
+      onAddExisting={(candidate, roleId, types) => { void handleInviteExistingStaff(candidate, roleId, types); }}
+      inviteRows={staffInvites}
+      onInviteRowsChange={(rows) => setStaffInvites(rows)}
+      inviteError={staffInviteError}
+      inviting={invitingStaff}
+      staffRoles={org.staffRoles ?? []}
+      onSendInvites={() => { void handleInviteStaffEmails(); }}
+      onRemoveFromRoster={(entryUserId) => { void handleRemoveStaffMember(entryUserId); }}
+      onRoleChange={(entryUserId, roleId) => handleUpdateStaffRole(entryUserId, roleId)}
+      onCreateRole={(name, permissions) => handleCreateStaffRole(name, permissions)}
+      onUpdateRole={(roleId, data) => handleUpdateStaffRoleDefinition(roleId, data)}
+      organizationId={org.$id}
+      canManageCompensation={canManageStaffCompensation}
+    />
+  )
+  );
+
+  const renderDiscountsTab = (org: Organization) => (
+    (isOwner || canManageDiscounts) && activeTab === 'discounts' && org && (
+    <OrganizationDiscountsTabContent
+      ownerType="ORGANIZATION"
+      ownerId={org.$id}
+      title={`${org.name} discounts`}
+    />
+  )
+  );
+
+  const renderFinanceTab = (org: Organization) => (
+    (isOwner || canManageFinance) && activeTab === 'finance' && org && (
+    <OrganizationFinanceTabContent
+      organizationId={org.$id}
+      isActive={activeTab === 'finance'}
+      canManage={isOwner || canManageFinance}
+    />
+  )
+  );
+
+  const renderRefundsTab = (org: Organization) => (
+    canManageRefunds && activeTab === 'refunds' && org && (
+    <OrganizationRefundsTabContent organizationId={org.$id} />
+  )
+  );
+
+  const renderPublicPageTab = (org: Organization) => (
+    canManagePublicPage && activeTab === 'publicPage' && org && (
+    <OrganizationPublicSettingsTabContent
+      organization={org}
+      onUpdated={async (updatedOrg) => {
+        setOrg(updatedOrg);
+        if (id) {
+          await loadOrg(id);
+        }
+      }}
+    />
+  )
+  );
+
+  const renderStoreTab = (org: Organization) => (
+    activeTab === 'store' && org && (
+    <OrganizationStoreTabContent
+      organizationHasStripeAccount={organizationHasStripeAccount}
+      canManageProducts={canManageProducts}
+      products={products}
+      productName={productName}
+      onProductNameChange={setProductName}
+      productDescription={productDescription}
+      onProductDescriptionChange={setProductDescription}
+      productPeriod={productPeriod}
+      onProductPeriodChange={handleProductPeriodChange}
+      productType={productType}
+      onProductTypeChange={(value) => setProductType((value as ProductType) ?? defaultProductTypeForPeriod(productPeriod))}
+      productPriceCents={productPriceCents}
+      onProductPriceChange={setProductPriceCents}
+      creatingProduct={creatingProduct}
+      canCreateProduct={canCreateProduct}
+      onCreateProduct={handleCreateProduct}
+      productDiscountCodes={productDiscountCodes}
+      onProductDiscountCodeChange={(productId, value) => {
+        setProductDiscountCodes((current) => ({ ...current, [productId]: value }));
+      }}
+      startingProductCheckoutId={startingProductCheckoutId}
+      onProductPurchase={handlePurchaseProduct}
+      onProductEdit={openProductModal}
+    />
+  )
+  );
+
+  const renderFieldsTab = (org: Organization) => (
+    activeTab === 'fields' && org && (
+    <OrganizationFacilitiesTabContent
+      organization={org}
+      organizationId={id ?? ''}
+      currentUser={user ?? null}
+      rentalOrderSlug={org.publicSlug}
+      canManageFields={canManageFields}
+      showBackButton={!isOrganizationRoleMember}
+    />
+  )
+  );
+
+  const renderDivisionsTab = (org: Organization) => (
+    activeTab === 'divisions' && org && (
+    <OrganizationDivisionsTabContent
+      organization={org}
+      canManage={canManageTeams || isOwner}
+      onChanged={(divisions) => setOrg((current) => current ? { ...current, divisions } : current)}
+    />
+  )
+  );
+
+  const renderCreateTeamModal = () => (
+    <CreateTeamModal
+    isOpen={showCreateTeamModal}
+    onClose={() => setShowCreateTeamModal(false)}
+    currentUser={user}
+    organizationId={org?.$id}
+    onTeamCreated={async (team) => {
+      setShowCreateTeamModal(false);
+      if (!team) {
+        if (id) await loadOrg(id);
+        return;
+      }
+
+      setOrg((prev) => {
+        if (!prev) return prev;
+        return { ...prev, teams: [...(prev.teams ?? []), team] };
+      });
+
+      if (id) {
+        await loadOrg(id);
+      }
+    }}
+  />
+  );
+
+  const renderEditOrganizationModal = () => (
+    <CreateOrganizationModal
+    isOpen={showEditOrganizationModal}
+    onClose={() => setShowEditOrganizationModal(false)}
+    currentUser={user!}
+    organization={org}
+    onUpdated={async (updatedOrg) => {
+      setOrg(updatedOrg);
+      if (id) {
+        await loadOrg(id);
+      }
+    }}
+  />
+  );
+
+  const renderEventTemplatePicker = () => (
+    <Modal
+    opened={eventTemplateCreateModalOpen}
+    onClose={() => setEventTemplateCreateModalOpen(false)}
+    title="Create event"
+    centered
+  >
+    <Stack gap="sm">
+      <Text size="sm" c="dimmed">
+        Choose a template to prefill the new event or start with a blank event.
+      </Text>
+      <Select
+        label="Event template"
+        placeholder={eventTemplatesLoading ? 'Loading templates...' : 'Select a template'}
+        data={eventTemplateOptions}
+        value={selectedCreateEventTemplateId}
+        onChange={setSelectedCreateEventTemplateId}
+        searchable
+        clearable
+        disabled={eventTemplatesLoading || eventTemplateOptions.length === 0}
+        nothingFoundMessage="No templates found"
+      />
+      {eventTemplatesError && (
+        <Text size="sm" c="red">
+          {eventTemplatesError}
+        </Text>
+      )}
+      {!eventTemplatesLoading && eventTemplateOptions.length === 0 && (
+        <Text size="sm" c="dimmed">
+          No event templates yet. You can still create a blank event.
+        </Text>
+      )}
+      <Group justify="flex-end">
+        <Button variant="default" onClick={() => setEventTemplateCreateModalOpen(false)}>
+          Cancel
+        </Button>
+        <Button variant="default" onClick={handleCreateEventWithoutTemplate}>
+          Start blank
+        </Button>
+        <Button onClick={handleCreateEventWithTemplate} disabled={!selectedCreateEventTemplateId}>
+          Use template
+        </Button>
+      </Group>
+    </Stack>
+  </Modal>
+  );
+
+  const renderTemplateBuilder = () => (
+    <Modal
+    opened={templateBuilderOpen && Boolean(templateEmbedUrl)}
+    onClose={closeTemplateBuilder}
+    centered
+    size="75vw"
+    title="BoldSign Template Builder"
+    styles={{
+      content: {
+        width: '75vw',
+        maxWidth: '75vw',
+        height: '90vh',
+        maxHeight: '90vh',
+        display: 'flex',
+        flexDirection: 'column',
+      },
+      body: {
+        flex: 1,
+        minHeight: 0,
+        padding: 0,
+      },
+    }}
+  >
+    {templateEmbedUrl ? (
+      <div style={{ height: '100%', minHeight: 0 }}>
+        <iframe
+          src={templateEmbedUrl}
+          title="BoldSign Template Builder"
+          style={{ width: '100%', height: '100%', border: 'none' }}
+        />
+      </div>
+    ) : (
+      <Text size="sm" c="dimmed" p="md">Preparing builder...</Text>
+    )}
+  </Modal>
+  );
+
+  const renderTemplatePreview = () => (
+    <Modal
+    opened={Boolean(previewTemplate)}
+    onClose={() => setPreviewTemplate(null)}
+    centered
+    size="lg"
+    title={previewTemplate ? `Preview: ${previewTemplate.title || 'Untitled Template'}` : 'Preview template'}
+  >
+    {previewTemplate ? (
+      <Stack gap="sm">
+        <Group justify="space-between" align="center" gap="sm">
+          <Stack gap={2} style={{ flex: 1 }}>
+            <Text size="sm" c="dimmed">
+              Preview only. This will not record a signature.
+            </Text>
+            <Text size="xs" c="dimmed">
+              {previewTemplate.signOnce ? 'Sign once per participant' : 'Sign for every event'}
+            </Text>
+            <Text size="xs" c="dimmed">
+              Required signer: {getRequiredSignerTypeLabel(previewTemplate.requiredSignerType)}
+            </Text>
+          </Stack>
+          {previewTemplate.type === 'TEXT' && (
+            <SegmentedControl
+              value={previewMode}
+              onChange={(value) => {
+                setPreviewMode(value as 'read' | 'sign');
+                setPreviewAccepted(false);
+                setPreviewSignComplete(false);
+              }}
+              data={[
+                { label: 'Signing', value: 'sign' },
+                { label: 'Read', value: 'read' },
+              ]}
+            />
+          )}
+        </Group>
+
+        {previewTemplate.type !== 'TEXT' || previewMode === 'read' ? (
+          <Paper
+            withBorder
+            p="md"
+            radius="md"
+            style={{ maxHeight: '65vh', overflowY: 'auto' }}
+          >
+            <Text style={{ whiteSpace: 'pre-wrap' }}>
+              {previewTemplate.content || 'No waiver text provided.'}
+            </Text>
+          </Paper>
+        ) : previewSignComplete ? (
+          <Paper withBorder p="md" radius="md">
+            <Stack gap="sm">
+              <Text fw={600}>Preview complete</Text>
+              <Text size="sm" c="dimmed">
+                In the real flow, we would now record the signature and continue to the next required document.
+              </Text>
+              <Group justify="flex-end" gap="xs">
+                <Button
+                  variant="default"
+                  onClick={() => {
+                    setPreviewAccepted(false);
+                    setPreviewSignComplete(false);
+                  }}
+                >
+                  Start over
+                </Button>
+                <Button onClick={() => setPreviewTemplate(null)}>
+                  Close
+                </Button>
+              </Group>
+            </Stack>
+          </Paper>
+        ) : (
+          <Stack gap="sm">
+            <Text size="sm" c="dimmed">
+              Document 1 of 1{previewTemplate.title ? ` • ${previewTemplate.title}` : ''}
+            </Text>
+            <Paper withBorder p="md" style={{ maxHeight: 420, overflowY: 'auto' }}>
+              <Text style={{ whiteSpace: 'pre-wrap' }}>
+                {previewTemplate.content || 'No waiver text provided.'}
+              </Text>
+            </Paper>
+            <Checkbox
+              label="I agree to the waiver above."
+              checked={previewAccepted}
+              onChange={(event) => setPreviewAccepted(event.currentTarget.checked)}
+            />
+            <Group justify="flex-end">
+              <Button
+                onClick={() => setPreviewSignComplete(true)}
+                disabled={!previewAccepted}
+              >
+                Accept and continue
+              </Button>
+            </Group>
+          </Stack>
+        )}
+      </Stack>
+    ) : null}
+  </Modal>
+  );
+
+  const renderTextTemplateEditor = () => (
+    <Modal
+    opened={Boolean(editingTextTemplate)}
+    onClose={() => setEditingTextTemplate(null)}
+    centered
+    size="lg"
+    title={editingTextTemplate
+      ? `Edit Version ${editingTextTemplate.versionSequence}`
+      : 'Edit text template'}
+  >
+    {editingTextTemplate ? (
+      <Stack gap="sm">
+        {editingTextTemplate.frozenAt && (
+          <Text size="sm" c="orange">
+            This Version is frozen. Saving text changes creates the next Version and keeps existing assignments pinned.
+          </Text>
+        )}
+        <TextInput label="Requirement title" value={textEditTitle} onChange={(event) => setTextEditTitle(event.currentTarget.value)} />
+        <Textarea
+          label="Requirement description"
+          value={textEditDescription}
+          onChange={(event) => setTextEditDescription(event.currentTarget.value)}
+          minRows={2}
+        />
+        <Textarea
+          label="Text content"
+          value={textEditContent}
+          onChange={(event) => setTextEditContent(event.currentTarget.value)}
+          minRows={10}
+          required
+        />
+        <Group justify="flex-end">
+          <Button variant="default" onClick={() => setEditingTextTemplate(null)} disabled={savingTemplateVersion}>
+            Cancel
+          </Button>
+          <Button onClick={() => void handleSaveTextTemplate()} loading={savingTemplateVersion}>
+            Save Version
+          </Button>
+        </Group>
+      </Stack>
+    ) : null}
+  </Modal>
+  );
+
+  const renderSignedTextPreview = () => (
+    <Modal
+    opened={Boolean(previewSignedTextDocument)}
+    onClose={() => setPreviewSignedTextDocument(null)}
+    centered
+    size="lg"
+    title={previewSignedTextDocument ? `Signed text: ${previewSignedTextDocument.title}` : 'Signed text'}
+  >
+    {previewSignedTextDocument ? (
+      <Stack gap="sm">
+        <Text size="sm" c="dimmed">
+          {previewSignedTextDocument.signedAt
+            ? `Signed at ${formatSummaryDateTime(previewSignedTextDocument.signedAt)}`
+            : 'Signed time unavailable.'}
+        </Text>
+        {previewSignedTextDocument.eventName && (
+          <Group justify="space-between" align="center" wrap="wrap">
+            <Text size="sm" c="dimmed">Event: {previewSignedTextDocument.eventName}</Text>
+            {previewSignedTextDocument.eventId && (
+              <Button
+                size="xs"
+                variant="light"
+                onClick={() => openOrganizationEvent(previewSignedTextDocument.eventId as string)}
+              >
+                View event
+              </Button>
+            )}
+          </Group>
+        )}
+        <Paper withBorder p="md" radius="md" style={{ maxHeight: '65vh', overflowY: 'auto' }}>
+          <Text style={{ whiteSpace: 'pre-wrap' }}>
+            {previewSignedTextDocument.content || 'No text content is available for this signed record.'}
+          </Text>
+        </Paper>
+      </Stack>
+    ) : null}
+  </Modal>
+  );
+
+  const renderDocumentVoidModal = () => (
+    <Modal
+    opened={Boolean(customerDocumentToVoid)}
+    onClose={closeCustomerDocumentVoidModal}
+    centered
+    title={customerDocumentToVoid ? `Void ${customerDocumentToVoid.title}` : 'Void imported document'}
+  >
+    {customerDocumentToVoid ? (
+      <Stack gap="sm">
+        <Text size="sm" c="dimmed">
+          Voiding removes this evidence from requirement completion. It keeps the document and its audit trail.
+        </Text>
+        <PasswordInput
+          label="Confirm your password"
+          description="Enter a password or use a recent provider sign-in."
+          value={customerDocumentVoidPassword}
+          onChange={(event) => {
+            setCustomerDocumentVoidPassword(event.currentTarget.value);
+            setIsRecentProviderAuthUsed(false);
+          }}
+        />
+        <Button
+          variant="subtle"
+          size="xs"
+          onClick={() => {
+            setCustomerDocumentVoidPassword('');
+            setIsRecentProviderAuthUsed(true);
+          }}
+          disabled={isVoidingCustomerDocument}
+        >
+          Use recent provider sign-in
+        </Button>
+        {isRecentProviderAuthUsed ? (
+          <Text size="xs" c="dimmed">
+            This uses a provider login from the last ten minutes.
+          </Text>
+        ) : null}
+        <Select
+          label="Void reason"
+          data={DOCUMENT_VOID_REASON_OPTIONS.map((reason) => ({ value: reason, label: reason }))}
+          value={customerDocumentVoidReason}
+          onChange={setCustomerDocumentVoidReason}
+          allowDeselect={false}
+          searchable
+          required
+        />
+        <Textarea
+          label="Note"
+          description="A note is required for Other."
+          value={customerDocumentVoidNote}
+          onChange={(event) => setCustomerDocumentVoidNote(event.currentTarget.value)}
+          minRows={3}
+          maxLength={1000}
+        />
+        <Group justify="flex-end">
+          <Button
+            variant="default"
+            onClick={() => closeCustomerDocumentVoidModal()}
+            disabled={isVoidingCustomerDocument}
+          >
+            Cancel
+          </Button>
+          <Button
+            color="red"
+            onClick={() => void handleVoidCustomerDocument()}
+            loading={isVoidingCustomerDocument}
+            disabled={
+              !customerDocumentVoidReason
+              || (!customerDocumentVoidPassword.trim() && !isRecentProviderAuthUsed)
+            }
+          >
+            Void document
+          </Button>
+        </Group>
+      </Stack>
+    ) : null}
+  </Modal>
+  );
+
+  const renderDocumentAuditModal = () => (
+    <Modal
+    opened={Boolean(customerDocumentAuditTarget)}
+    onClose={() => {
+      if (!isLoadingCustomerDocumentAudit) {
+        setCustomerDocumentAuditTarget(null);
+        setCustomerDocumentAuditTrail(null);
+      }
+    }}
+    centered
+    size="lg"
+    title={customerDocumentAuditTarget
+      ? `Audit trail: ${customerDocumentAuditTarget.title}`
+      : 'Document audit trail'}
+  >
+    {isLoadingCustomerDocumentAudit ? (
+      <Group justify="center" py="xl">
+        <Loader size="sm" />
+        <Text size="sm" c="dimmed">Loading audit trail...</Text>
+      </Group>
+    ) : customerDocumentAuditTrail ? (
+      <Stack gap="md">
+        <Text size="sm" c="dimmed">
+          {customerDocumentAuditTrail.description}
+        </Text>
+        <Paper withBorder p="sm" radius="md">
+          <Stack gap={4}>
+            <Text fw={600}>Imported evidence</Text>
+            <Text size="sm">Document: {customerDocumentAuditTrail.evidence.documentName}</Text>
+            <Text size="sm">Provenance: {customerDocumentAuditTrail.evidence.provenance}</Text>
+            <Text size="sm">Lifecycle status: {customerDocumentAuditTrail.evidence.status || 'Unknown'}</Text>
+            <Text size="sm">
+              Historical signing date:{' '}
+              {customerDocumentAuditTrail.evidence.historicalSigningDate
+                ? formatSummaryDateTime(customerDocumentAuditTrail.evidence.historicalSigningDate)
+                : 'Signing date unknown'}
+            </Text>
+            <Text size="sm">
+              Imported: {formatSummaryDateTime(customerDocumentAuditTrail.evidence.importedAt ?? undefined)}
+            </Text>
+            <Text size="sm">
+              Uploader:{' '}
+              {customerDocumentAuditTrail.evidence.uploader?.displayName || 'Former user'}
+            </Text>
+            <Text size="sm">
+              Attestation version: {customerDocumentAuditTrail.evidence.attestationVersion || 'Not recorded'}
+            </Text>
+            <Text size="sm">
+              Content identity: {customerDocumentAuditTrail.evidence.contentHash || 'Not recorded'}
+            </Text>
+            {customerDocumentAuditTrail.evidence.attestationText ? (
+              <Text
+                size="sm"
+                component="pre"
+                style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
+              >
+                Attestation: {customerDocumentAuditTrail.evidence.attestationText}
+              </Text>
+            ) : null}
+            {customerDocumentAuditTrail.evidence.sourceNote ? (
+              <Text
+                size="sm"
+                component="pre"
+                style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
+              >
+                Source note: {customerDocumentAuditTrail.evidence.sourceNote}
+              </Text>
+            ) : null}
+          </Stack>
+        </Paper>
+        <Text fw={600}>Audit trail events</Text>
+        {customerDocumentAuditTrail.events.length > 0 ? (
+          <Stack gap="sm">
+            {customerDocumentAuditTrail.events.map((event) => (
+              <Paper key={event.id} withBorder p="sm" radius="md">
+                <Stack gap={4}>
+                  <Group justify="space-between" align="flex-start" wrap="wrap">
+                    <Badge size="sm" variant="light">{event.eventType}</Badge>
+                    <Text size="xs" c="dimmed">{formatSummaryDateTime(event.createdAt ?? undefined)}</Text>
+                  </Group>
+                  {event.actorUserId && (
+                    <Text size="xs" c="dimmed">
+                      Actor: {event.actorDisplayName || 'Former user'}
+                    </Text>
+                  )}
+                  {event.reason && <Text size="sm">Reason: {event.reason}</Text>}
+                  {event.note && <Text size="sm">Note: {event.note}</Text>}
+                  {event.payload !== undefined && event.payload !== null && (
+                    <Text
+                      size="xs"
+                      component="pre"
+                      style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
+                    >
+                      {JSON.stringify(event.payload, null, 2)}
+                    </Text>
+                  )}
+                </Stack>
+              </Paper>
+            ))}
+          </Stack>
+        ) : (
+          <Text size="sm" c="dimmed">No audit events found.</Text>
+        )}
+      </Stack>
+    ) : (
+      <Text size="sm" c="dimmed">No audit trail found.</Text>
+    )}
+  </Modal>
+  );
+
+  const renderCustomerBillModal = () => (
+    <Modal
+    opened={customerBillModalOpen}
+    onClose={closeCustomerBillModal}
+    title={selectedOrganizationCustomer
+      ? `${editingCustomerBill ? 'Edit' : 'Add'} bill for ${selectedOrganizationCustomer.name}`
+      : `${editingCustomerBill ? 'Edit' : 'Add'} bill`}
+    centered
+  >
+    <Stack gap="sm">
+      <Text size="sm" c="dimmed">
+        Record the bill amount, paid amount, and due date for this customer.
+      </Text>
+      <TextInput
+        label="Bill description"
+        value={customerBillLabel}
+        onChange={(event) => setCustomerBillLabel(event.currentTarget.value)}
+        required
+      />
+      <Group grow align="flex-start">
+        <NumberInput
+          label="Bill amount"
+          prefix="$"
+          min={0}
+          decimalScale={2}
+          fixedDecimalScale
+          value={customerBillAmount}
+          onChange={setCustomerBillAmount}
+          required
+        />
+        <NumberInput
+          label="Paid amount"
+          prefix="$"
+          min={0}
+          max={customerBillAmountCents > 0 ? customerBillAmountCents / 100 : undefined}
+          decimalScale={2}
+          fixedDecimalScale
+          value={customerBillPaidAmount}
+          onChange={setCustomerBillPaidAmount}
+          error={customerBillPaidAmountError}
+          required
+        />
+      </Group>
+      <TextInput
+        label="Due date"
+        type="date"
+        value={customerBillDueDate}
+        onChange={(event) => setCustomerBillDueDate(event.currentTarget.value)}
+        required
+      />
+      <Text size="xs" c="dimmed">
+        Remaining balance: {formatPrice(Math.max(0, customerBillAmountCents - customerBillPaidAmountCents))}
+      </Text>
+      <Group justify="flex-end">
+        <Button variant="default" onClick={closeCustomerBillModal} disabled={creatingCustomerBill}>
+          Cancel
+        </Button>
+        <Button
+          onClick={handleCreateCustomerBill}
+          loading={creatingCustomerBill}
+          disabled={
+            !customerBillLabel.trim()
+            || !customerBillDueDate
+            || !Number.isFinite(customerBillAmountCents)
+            || customerBillAmountCents <= 0
+            || !Number.isFinite(customerBillPaidAmountCents)
+            || customerBillPaidAmountCents < 0
+            || customerBillPaidAmountCents > customerBillAmountCents
+          }
+        >
+          {editingCustomerBill ? 'Save changes' : 'Add bill'}
+        </Button>
+      </Group>
+    </Stack>
+  </Modal>
+  );
+
+  const renderCustomerImportModal = () => (
+    <Modal
+    opened={isCustomerImportModalOpen}
+    onClose={closeCustomerImportModal}
+    title={selectedOrganizationCustomer
+      ? `Import signed document for ${selectedOrganizationCustomer.name}`
+      : 'Import signed document'}
+    centered
+    size="lg"
+  >
+    {selectedOrganizationCustomer?.user ? (
+      <Stack gap="sm">
+        <Text size="sm" c="dimmed">
+          Upload a complete PDF that the customer signed outside BracketIQ. Review the full file before you attest to it.
+        </Text>
+        <Select
+          label="Document Requirement and Template Version"
+          data={customerImportTemplateOptions}
+          value={selectedCustomerImportTemplateId}
+          onChange={handleCustomerImportTemplateChange}
+          searchable
+          allowDeselect={false}
+          nothingFoundMessage="No document requirement versions found"
+          required
+        />
+        {selectedCustomerImportTemplate?.signOnce ? (
+          <Text size="sm" c="dimmed">
+            Applies to: This Organization
+          </Text>
+        ) : (
+          <Select
+            label="Event"
+            data={customerImportScopeOptions}
+            value={selectedCustomerImportScopeId}
+            onChange={setSelectedCustomerImportScopeId}
+            searchable
+            allowDeselect={false}
+            nothingFoundMessage="No eligible events found"
+            required
+          />
+        )}
+        <FileInput
+          label="Signed PDF"
+          placeholder="Choose a PDF"
+          accept="application/pdf"
+          value={customerImportFile}
+          onChange={handleCustomerImportFileChange}
+          clearable
+          required
+        />
+        {customerImportPreviewUrl ? (
+          <Paper withBorder p="xs" radius="md">
+            <iframe
+              ref={customerImportPreviewFrameRef}
+              title="Imported signed document preview"
+              src={customerImportPreviewUrl}
+              onLoad={() => setIsCustomerImportPreviewReady(true)}
+              style={{ width: '100%', height: '52vh', border: 0 }}
+            />
+          </Paper>
+        ) : (
+          <Text size="xs" c="dimmed">
+            Choose a PDF to review the complete file here.
+          </Text>
+        )}
+        <TextInput
+          label="Historical signing date (optional)"
+          type="date"
+          value={customerImportHistoricalSigningDate}
+          onChange={(event) => setCustomerImportHistoricalSigningDate(event.currentTarget.value)}
+        />
+        <Textarea
+          label="Private source note (optional)"
+          description="Only authorized staff can view this note."
+          value={customerImportSourceNote}
+          onChange={(event) => setCustomerImportSourceNote(event.currentTarget.value)}
+          minRows={2}
+          maxRows={5}
+          autosize
+        />
+        <Checkbox
+          checked={isCustomerImportAttestationAccepted}
+          onChange={(event) => setIsCustomerImportAttestationAccepted(event.currentTarget.checked)}
+          disabled={!isCustomerImportPreviewReady}
+          label="Document Import Attestation"
+          description="I confirm that this file is a complete signed document for the shown customer, Document Template Version, and scope. I confirm that it contains all required signatures. I understand that BracketIQ did not verify the signatures."
+        />
+        <Group justify="flex-end">
+          <Button variant="default" onClick={() => closeCustomerImportModal()} disabled={isImportingCustomerDocument}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleImportCustomerDocument}
+            loading={isImportingCustomerDocument}
+            disabled={
+              !selectedCustomerImportTemplateId
+              || !selectedCustomerImportScopeId
+              || !customerImportFile
+              || !isCustomerImportPreviewReady
+              || !isCustomerImportAttestationAccepted
+            }
+          >
+            Import signed document
+          </Button>
+        </Group>
+      </Stack>
+    ) : (
+      <Text size="sm" c="dimmed">Select a User customer before importing a document.</Text>
+    )}
+  </Modal>
+  );
+
+  const renderCustomerDocumentModal = () => (
+    <Modal
+    opened={customerDocumentModalOpen}
+    onClose={closeCustomerDocumentModal}
+    title={selectedOrganizationCustomer ? `Add document for ${selectedOrganizationCustomer.name}` : 'Add document'}
+    centered
+  >
+    {selectedOrganizationCustomer?.user ? (
+      <Stack gap="sm">
+        <Text size="sm" c="dimmed">
+          Choose a participant document template. An event is optional for text documents.
+        </Text>
+        <Select
+          label="Document template"
+          data={customerDocumentTemplateOptions}
+          value={selectedCustomerDocumentTemplateId}
+          onChange={setSelectedCustomerDocumentTemplateId}
+          searchable
+          allowDeselect={false}
+          nothingFoundMessage="No participant templates found"
+        />
+        <Select
+          label={selectedCustomerDocumentRequiresEvent ? 'Event' : 'Event (optional for text documents)'}
+          data={selectedOrganizationCustomer.user.events.map((event) => ({
+            value: event.eventId,
+            label: `${event.eventName} • ${formatSummaryDateTime(event.start)}`,
+          }))}
+          value={selectedCustomerDocumentEventId}
+          onChange={setSelectedCustomerDocumentEventId}
+          searchable
+          clearable
+          allowDeselect
+          nothingFoundMessage="No organization events found"
+        />
+        {selectedCustomerDocumentRequiresEvent && !selectedCustomerDocumentEventId && (
+          <Text size="xs" c="dimmed">PDF documents use BoldSign and require an event.</Text>
+        )}
+        <Group justify="flex-end">
+          <Button variant="default" onClick={closeCustomerDocumentModal} disabled={sendingCustomerDocument}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleAddCustomerDocument}
+            loading={sendingCustomerDocument}
+            disabled={
+              !selectedCustomerDocumentTemplateId
+              || (selectedCustomerDocumentRequiresEvent && !selectedCustomerDocumentEventId)
+            }
+          >
+            Add document
+          </Button>
+        </Group>
+      </Stack>
+    ) : (
+      <Text size="sm" c="dimmed">Select a player before adding a document.</Text>
+    )}
+  </Modal>
+  );
+
+  const renderCreateTemplateModal = () => (
+    <Modal
+    opened={templateModalOpen}
+    onClose={() => setTemplateModalOpen(false)}
+    title="Create template"
+    centered
+  >
+    <Stack gap="sm">
+      <TextInput
+        label="Template title"
+        value={templateTitle}
+        onChange={(e) => setTemplateTitle(e.currentTarget.value)}
+        required
+      />
+      <SegmentedControl
+        value={templateType}
+        onChange={(value) => setTemplateType(value as 'PDF' | 'TEXT')}
+        data={[
+          { label: 'PDF (BoldSign)', value: 'PDF' },
+          { label: 'Text waiver', value: 'TEXT' },
+        ]}
+      />
+      <Textarea
+        label="Description"
+        value={templateDescription}
+        onChange={(e) => setTemplateDescription(e.currentTarget.value)}
+        minRows={3}
+      />
+      {templateType === 'PDF' && (
+        <FileInput
+          label="PDF file"
+          placeholder="Upload a PDF template"
+          accept="application/pdf,.pdf"
+          value={templatePdfFile}
+          onChange={setTemplatePdfFile}
+          clearable
+          required
+        />
+      )}
+      {templateType === 'TEXT' && (
+        <Textarea
+          label="Waiver text"
+          value={templateContent}
+          onChange={(e) => setTemplateContent(e.currentTarget.value)}
+          minRows={6}
+          required
+        />
+      )}
+      <Select
+        label="Required signer"
+        value={templateRequiredSignerType}
+        onChange={(value) => {
+          setTemplateRequiredSignerType(
+            normalizeRequiredSignerType(value) as
+              'PARTICIPANT' | 'PARENT_GUARDIAN' | 'CHILD' | 'PARENT_GUARDIAN_CHILD',
+          );
+        }}
+        data={[
+          { label: 'Participant', value: 'PARTICIPANT' },
+          { label: 'Parent/Guardian', value: 'PARENT_GUARDIAN' },
+          { label: 'Child', value: 'CHILD' },
+          { label: 'Parent/Guardian + Child', value: 'PARENT_GUARDIAN_CHILD' },
+        ]}
+        allowDeselect={false}
+        required
+      />
+      <Switch
+        label="Sign once per participant"
+        checked={templateSignOnce}
+        onChange={(e) => setTemplateSignOnce(e.currentTarget.checked)}
+      />
+      <Group justify="flex-end">
+        <Button variant="default" onClick={() => setTemplateModalOpen(false)}>
+          Cancel
+        </Button>
+        <Button
+          onClick={handleCreateTemplate}
+          loading={creatingTemplate}
+          disabled={!templateTitle.trim() || (templateType === 'PDF' && !templatePdfFile)}
+        >
+          Create
+        </Button>
+      </Group>
+    </Stack>
+  </Modal>
+  );
+
+  const renderProductEditor = () => (
+    <OrganizationProductEditorModal
+    opened={productModalOpen}
+    selectedProduct={selectedProduct}
+    organizationHasStripeAccount={organizationHasStripeAccount}
+    editProductName={editProductName}
+    onEditProductNameChange={setEditProductName}
+    editProductDescription={editProductDescription}
+    onEditProductDescriptionChange={setEditProductDescription}
+    editProductPeriod={editProductPeriod}
+    onEditProductPeriodChange={handleEditProductPeriodChange}
+    editProductType={editProductType}
+    onEditProductTypeChange={(value) => setEditProductType((value as ProductType) ?? defaultProductTypeForPeriod(editProductPeriod))}
+    editProductPriceCents={editProductPriceCents}
+    onEditProductPriceChange={setEditProductPriceCents}
+    canUpdateProduct={canUpdateProduct}
+    updatingProduct={updatingProduct}
+    deletingProduct={deletingProduct}
+    onClose={closeProductModal}
+    onSave={handleUpdateProduct}
+    onDelete={handleDeleteProduct}
+  />
+  );
+
+  const renderProductBillingAddress = () => (
+    <BillingAddressModal
+    opened={showBillingAddressModal}
+    onClose={() => {
+      setShowBillingAddressModal(false);
+      setPurchaseProduct(null);
+    }}
+    onSaved={async (billingAddress) => {
+      if (!purchaseProduct) {
+        setShowBillingAddressModal(false);
+        return;
+      }
+      await startProductCheckout(purchaseProduct, billingAddress, purchaseDiscountCode);
+    }}
+    title="Billing address required"
+    description="Enter your billing address so tax can be calculated before checkout."
+  />
+  );
+
+  const renderProductPayment = () => (
+    <PaymentModal
+    isOpen={showPurchaseModal && Boolean(purchaseProduct && purchasePaymentData)}
+    onClose={() => {
+      setShowPurchaseModal(false);
+      setPurchasePaymentData(null);
+      setPurchaseProduct(null);
+    }}
+    event={{
+      name: purchaseProduct?.name ?? 'Product',
+      location: org?.name ?? '',
+      eventType: 'EVENT',
+      price: purchaseProduct?.priceCents ?? 0,
+    } as any}
+    paymentData={purchasePaymentData}
+    onPaymentSuccess={handleProductPaymentSuccess}
+  />
+  );
+
   return (
     <>
       <Navigation />
@@ -4474,12 +4273,7 @@ function OrganizationDetailContent() {
         onRetry={() => { if (id) void loadOrg(id); }}
         errorMessage={organizationLoadError}
         onBackToOrganizations={() => router.push('/organizations')}
-        headerBadges={org ? (
-          <>
-            <OrganizationOwnershipBadges organization={org} compact />
-            <OrganizationVerificationBadge organization={org} />
-          </>
-        ) : null}
+        headerBadges={org ? <OrganizationVerificationBadge organization={org} /> : null}
         headerActions={org ? <OrganizationClaimButton organization={org} /> : null}
         onShareOrganization={() => { void handleShareOrganization(); }}
         canEditOrganization={isOwner}
@@ -4498,1249 +4292,55 @@ function OrganizationDetailContent() {
         <div className="org-tab-content">
         {org ? (
           <>
-            {activeTab === 'overview' && (
-              <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
-                <div className="space-y-4">
-                  <Card>
-                    <CardHeader className="flex flex-row items-start justify-between gap-4">
-                      <CardTitle>About {org.name}</CardTitle>
-                      {isOwner && (
-                        <Button variant="light" size="xs" onClick={() => setShowEditOrganizationModal(true)}>
-                          Edit Organization
-                        </Button>
-                      )}
-                    </CardHeader>
-                    <CardContent>
-                      <p className="whitespace-pre-line text-sm text-muted-foreground">{org.description || 'No description'}</p>
-                    </CardContent>
-                  </Card>
-                  <Card>
-                    <CardHeader className="flex flex-row items-center justify-between gap-4">
-                      <CardTitle>Upcoming events</CardTitle>
-                      {availableTabs.some((tab) => tab.value === 'events') && (
-                        <Button variant="subtle" size="compact-sm" onClick={() => handleOrganizationTabChange('events')}>
-                          View all events
-                        </Button>
-                      )}
-                    </CardHeader>
-                    <CardContent>
-                    {overviewRecentEvents.length > 0 ? (
-                      <ResponsiveCardGrid>
-                        {overviewRecentEvents.slice(0, 4).map((e) => (
-                          <EventCard
-                            key={e.$id}
-                            event={e}
-                            onClick={() => handleOrganizationEventClick(e)}
-                            hostOptions={canManageEvents ? eventHostOptions : undefined}
-                            selectedHostId={e.hostId ?? undefined}
-                            hostChangeDisabled={updatingEventHostId === e.$id}
-                            onHostChange={canManageEvents ? (hostId) => {
-                              void handleUpdateEventHost(e.$id, hostId);
-                            } : undefined}
-                          />
-                        ))}
-                      </ResponsiveCardGrid>
-                    ) : (
-                      <Text size="sm" c="dimmed">No events yet.</Text>
-                    )}
-                    </CardContent>
-                  </Card>
-                  {(org.enabledFeatures?.includes('CLUB_TEAMS') || (org.divisions?.length ?? 0) > 0) && (
-                    <OrganizationDivisionsPanel
-                      organization={org}
-                      summary
-                      onChanged={(divisions) => setOrg((current) => current ? { ...current, divisions } : current)}
-                    />
-                  )}
-                </div>
-                <div className="space-y-4">
-                  <Card>
-                    <CardHeader><CardTitle>Organization details</CardTitle></CardHeader>
-                    <CardContent className="space-y-3 text-sm">
-                      {org.website && <a className="flex items-center justify-between gap-4 text-accent hover:underline" href={org.website} target="_blank" rel="noreferrer"><span>Website</span><span className="truncate">{org.website}</span></a>}
-                      {org.location && <div className="flex items-center justify-between gap-4"><span className="text-muted-foreground">Location</span><span className="text-right">{org.location}</span></div>}
-                      {org.sports && org.sports.length > 0 && <div className="flex items-center justify-between gap-4"><span className="text-muted-foreground">Sports</span><span className="text-right">{org.sports.join(', ')}</span></div>}
-                    </CardContent>
-                  </Card>
-                  <Card>
-                    <CardHeader><CardTitle>Reviews</CardTitle></CardHeader>
-                    <CardContent>
-                      <OrganizationReviewsTabContent organizationId={org.$id} mode="summary" onViewAll={() => handleOrganizationTabChange('reviews')} />
-                    </CardContent>
-                  </Card>
-                  {isOwner && (
-                    <Card>
-                      <CardHeader><CardTitle>Payments status</CardTitle></CardHeader>
-                      <CardContent>
-                        <p className="mb-3 text-sm text-muted-foreground">
-                          {organizationVerificationStatus === 'VERIFIED'
-                            ? 'Stripe onboarding is complete. This organization can accept payouts and display the verified badge.'
-                            : organizationVerificationStatus === 'LEGACY_CONNECTED'
-                              ? 'Stripe is connected through the legacy flow. Reconnect through the new verification flow to earn the verified badge.'
-                              : organizationVerificationStatus === 'ACTION_REQUIRED'
-                                ? 'Stripe still needs more information before this organization can be verified.'
-                                : organizationVerificationStatus === 'PENDING'
-                                  ? 'Stripe onboarding has started. Finish the remaining steps to complete verification.'
-                                  : 'Connect a Stripe account to verify this organization and accept payouts.'}
-                        </p>
-                        <Group gap="xs" mb="sm">
-                          <Badge
-                            color={
-                              organizationVerificationStatus === 'VERIFIED'
-                                ? 'teal'
-                                : organizationVerificationStatus === 'ACTION_REQUIRED'
-                                  ? 'yellow'
-                                  : organizationVerificationStatus === 'LEGACY_CONNECTED'
-                                    ? 'blue'
-                                    : 'gray'
-                            }
-                            variant="light"
-                          >
-                            {organizationVerificationStatusLabel(organizationVerificationStatus)}
-                          </Badge>
-                          {syncingOrganizationVerification && <Text size="xs" c="dimmed">Refreshing verification…</Text>}
-                        </Group>
-                        <Stack gap="xs">
-                          {requiresStripeVerificationEmail && (
-                            <TextInput
-                              label="Stripe payout email"
-                              type="email"
-                              placeholder="billing@example.com"
-                              value={stripeEmail}
-                              error={stripeEmailError ?? undefined}
-                              onChange={(e) => {
-                                const next = e.currentTarget.value;
-                                setStripeEmail(next);
-                                if (stripeEmailError && EMAIL_REGEX.test(next.trim())) {
-                                  setStripeEmailError(null);
-                                }
-                              }}
-                              disabled={connectingStripe}
-                              required
-                            />
-                          )}
-                          <Button
-                            size="sm"
-                            loading={organizationVerificationStatus === 'VERIFIED' ? managingStripe : connectingStripe}
-                            disabled={requiresStripeVerificationEmail && !stripeEmailValid}
-                            onClick={organizationVerificationStatus === 'VERIFIED' ? handleManageStripeAccount : handleConnectStripeAccount}
-                          >
-                            {stripePrimaryActionLabel}
-                          </Button>
-                          {organizationVerificationStatus !== 'VERIFIED' && (
-                            <Text size="xs" c="dimmed">
-                              The verified badge appears only after Stripe finishes all required checks for this organization.
-                            </Text>
-                          )}
-                        </Stack>
-                      </CardContent>
-                    </Card>
-                  )}
-                  <Card>
-                    <CardHeader className="flex flex-row items-center justify-between gap-4">
-                      <CardTitle>Teams</CardTitle>
-                      {availableTabs.some((tab) => tab.value === 'teams') && (
-                        <Button variant="subtle" size="compact-sm" onClick={() => handleOrganizationTabChange('teams')}>
-                          View all teams
-                        </Button>
-                      )}
-                    </CardHeader>
-                    <CardContent>
-                      {org.teams && org.teams.length > 0 ? (
-                        <div className="space-y-3">
-                          {org.teams.slice(0, 3).map((t) => (
-                            <TeamCard key={t.$id} team={t} className="org-tab-item" />
-                          ))}
-                        </div>
-                      ) : (
-                        <Text size="sm" c="dimmed">No teams yet.</Text>
-                      )}
-                    </CardContent>
-                  </Card>
-                  {isOwner && (
-                    <Card>
-                      <CardHeader><CardTitle>Staff &amp; officials</CardTitle></CardHeader>
-                      <CardContent>
-                        {currentOfficials.length > 0 ? (
-                          <div className="space-y-3">
-                            {currentOfficials.slice(0, 4).map((ref) => (
-                              <UserCard key={ref.$id} user={ref} className="org-tab-item !shadow-none" />
-                            ))}
-                          </div>
-                        ) : (
-                          <Text size="sm" c="dimmed">No officials yet.</Text>
-                        )}
-                      </CardContent>
-                    </Card>
-                  )}
-                </div>
-              </div>
-            )}
+            {renderOverviewTab(org)}
 
-            {activeTab === 'reviews' && org && (
-              <OrganizationReviewsTabContent organizationId={org.$id} />
-            )}
+            {renderReviewsTab(org)}
 
-            {activeTab === 'events' && (
-              <OrganizationEventsTabContent
-                organizationName={org.name}
-                location={location}
-                searchTerm={eventSearchTerm}
-                setSearchTerm={setEventSearchTerm}
-                selectedEventTypes={selectedEventTypes}
-                setSelectedEventTypes={setSelectedEventTypes}
-                eventTypeOptions={ORG_EVENT_TYPE_OPTIONS}
-                selectedSports={selectedSports}
-                setSelectedSports={setSelectedSports}
-                maxDistance={eventsTabMaxDistance}
-                setMaxDistance={setEventsTabMaxDistance}
-                selectedStartDate={eventsTabSelectedStartDate}
-                setSelectedStartDate={setEventsTabSelectedStartDate}
-                selectedEndDate={eventsTabSelectedEndDate}
-                setSelectedEndDate={setEventsTabSelectedEndDate}
-                sports={sportOptions}
-                sportsLoading={sportsLoading}
-                sportsError={sportsError?.message ?? null}
-                defaultMaxDistance={ORG_EVENTS_DEFAULT_MAX_DISTANCE}
-                kmBetween={kmBetween}
-                events={eventsTabEvents}
-                totalEvents={eventsTabEvents.length}
-                isLoadingInitial={eventsTabLoadingInitial}
-                isLoadingMore={eventsTabLoadingMore}
-                hasMoreEvents={eventsTabHasMoreEvents}
-                sentinelRef={eventsTabSentinelRef}
-                eventsError={eventsTabError}
-                onFilterChange={() => loadFirstPageOfOrganizationEvents({ background: true })}
-                onRetry={() => { void loadFirstPageOfOrganizationEvents(); }}
-                onEventClick={handleOrganizationEventClick}
-                onCreateEvent={handleCreateEvent}
-                showCreateEventButton={canManageEvents}
-                createEventDisabled={!canCreateOrganizationEvents}
-                createEventHelperText={createEventHelperText}
-                hideWeeklyChildren={hideWeeklyChildEvents}
-                setHideWeeklyChildren={setHideWeeklyChildEvents}
-              />
-            )}
+            {renderEventsTab(org)}
 
-            {canManageTemplates && activeTab === 'eventTemplates' && (
-              <OrganizationEventTemplatesTabContent
-                eventTemplates={eventTemplates}
-                isLoading={eventTemplatesLoading}
-                error={eventTemplatesError}
-                onRefresh={() => org ? loadEventTemplates(org.$id) : undefined}
-                onCreateEvent={navigateToEventCreate}
-              />
-            )}
+            {renderEventTemplatesTab(org)}
 
-            {activeTab === 'teams' && (
-              <OrganizationTeamsTabContent
-                teams={org.teams}
-                isTeamManagementAllowed={canManageTeams}
-                onCreateTeam={() => setShowCreateTeamModal(true)}
-                onTeamClick={(team) => router.push(buildTeamManagementPath(team.$id))}
-              />
-            )}
+            {renderTeamsTab(org)}
 
-            {activeTab === 'users' && (
-              <OrganizationCustomersTabContent
-                organizationName={org?.name}
-                customerSearch={customerSearch}
-                setCustomerSearch={setCustomerSearch}
-                customerTypeFilters={customerTypeFilters}
-                setCustomerTypeFilters={setCustomerTypeFilters}
-                resetCustomerFilters={resetCustomerFilters}
-                isCustomerFilterDefault={customerFilterIsDefault}
-                customers={organizationCustomerRows}
-                visibleCustomers={visibleOrganizationCustomerRows}
-                selectedCustomerKey={selectedCustomerKey}
-                onCustomerSelect={(customer) => {
-                  const nextCustomer = organizationCustomerRows.find((row) => row.key === customer.key);
-                  if (nextCustomer) openOrganizationCustomer(nextCustomer);
-                }}
-                renderCustomerAvatar={renderCustomerAvatar}
-                renderCustomerDetail={() => renderSelectedCustomerDetail()}
-                formatEventStart={(start) => formatSummaryDateTime(start ?? undefined)}
-                isCustomersLoading={organizationUsersLoading}
-                customersError={organizationUsersError}
-                onRefresh={() => org ? loadOrganizationUsers(org.$id) : undefined}
-                hasMoreCustomers={hasMoreVisibleCustomers}
-                customerSentinelRef={customerSentinelRef}
-              />
-            )}
+            {renderUsersTab(org)}
 
-            {canManageTemplates && activeTab === 'templates' && (
-              <OrganizationDocumentTemplatesTabContent
-                templateDocuments={templateDocuments}
-                pendingTemplateCreates={pendingTemplateCreates}
-                selectedTemplateVersionByRequirement={selectedTemplateVersionByRequirement}
-                isLoading={templatesLoading}
-                error={templatesError}
-                editingTemplateId={editingTemplateId}
-                deletingTemplateId={deletingTemplateId}
-                savingTemplateVersion={savingTemplateVersion}
-                onRefresh={() => org ? loadTemplates(org.$id) : undefined}
-                onCreateTemplate={() => setTemplateModalOpen(true)}
-                onEditTextTemplate={handleEditTextTemplate}
-                onPreviewTemplate={openTemplatePreview}
-                onEditPdfTemplate={handleEditPdfTemplate}
-                onDeleteTemplate={handleDeleteTemplate}
-              />
-            )}
-            {canManageStaffSurface && activeTab === 'staff' && (
-              <OrganizationStaffTabContent
-                rosterNameError={staffRosterNameError}
-                rosterEntries={staffRosterEntries}
-                searchValue={staffSearch}
-                onSearchChange={(value) => { void handleSearchStaff(value); }}
-                searchResults={staffResults}
-                searchLoading={staffSearchLoading}
-                searchError={staffError}
-                onAddExisting={(candidate, roleId, types) => { void handleInviteExistingStaff(candidate, roleId, types); }}
-                inviteRows={staffInvites}
-                onInviteRowsChange={(rows) => setStaffInvites(rows)}
-                inviteError={staffInviteError}
-                inviting={invitingStaff}
-                staffRoles={org.staffRoles ?? []}
-                onSendInvites={() => { void handleInviteStaffEmails(); }}
-                onRemoveFromRoster={(entryUserId) => { void handleRemoveStaffMember(entryUserId); }}
-                onRoleChange={(entryUserId, roleId) => handleUpdateStaffRole(entryUserId, roleId)}
-                onCreateRole={(name, permissions) => handleCreateStaffRole(name, permissions)}
-                onUpdateRole={(roleId, data) => handleUpdateStaffRoleDefinition(roleId, data)}
-                organizationId={org.$id}
-                canManageCompensation={canManageStaffCompensation}
-              />
-            )}
+            {renderTemplatesTab(org)}
+            {renderStaffTab(org)}
 
-            {(isOwner || canManageDiscounts) && activeTab === 'discounts' && org && (
-              <OrganizationDiscountsTabContent
-                ownerType="ORGANIZATION"
-                ownerId={org.$id}
-                title={`${org.name} discounts`}
-              />
-            )}
+            {renderDiscountsTab(org)}
 
-            {(isOwner || canManageFinance) && activeTab === 'finance' && org && (
-              <OrganizationFinanceTabContent
-                organizationId={org.$id}
-                isActive={activeTab === 'finance'}
-                canManage={isOwner || canManageFinance}
-              />
-            )}
+            {renderFinanceTab(org)}
 
-            {canManageRefunds && activeTab === 'refunds' && org && (
-              <OrganizationRefundsTabContent organizationId={org.$id} />
-            )}
+            {renderRefundsTab(org)}
 
-            {canManagePublicPage && activeTab === 'publicPage' && org && (
-              <OrganizationPublicSettingsTabContent
-                organization={org}
-                onUpdated={async (updatedOrg) => {
-                  setOrg(updatedOrg);
-                  if (id) {
-                    await loadOrg(id);
-                  }
-                }}
-              />
-            )}
+            {renderPublicPageTab(org)}
 
-            {activeTab === 'store' && org && (
-              <OrganizationStoreTabContent
-                organizationHasStripeAccount={organizationHasStripeAccount}
-                canManageProducts={canManageProducts}
-                products={products}
-                productName={productName}
-                onProductNameChange={setProductName}
-                productDescription={productDescription}
-                onProductDescriptionChange={setProductDescription}
-                productPeriod={productPeriod}
-                onProductPeriodChange={handleProductPeriodChange}
-                productType={productType}
-                onProductTypeChange={(value) => setProductType((value as ProductType) ?? defaultProductTypeForPeriod(productPeriod))}
-                productPriceCents={productPriceCents}
-                onProductPriceChange={setProductPriceCents}
-                creatingProduct={creatingProduct}
-                canCreateProduct={canCreateProduct}
-                onCreateProduct={handleCreateProduct}
-                productDiscountCodes={productDiscountCodes}
-                onProductDiscountCodeChange={(productId, value) => {
-                  setProductDiscountCodes((current) => ({ ...current, [productId]: value }));
-                }}
-                startingProductCheckoutId={startingProductCheckoutId}
-                onProductPurchase={handlePurchaseProduct}
-                onProductEdit={openProductModal}
-              />
-            )}
+            {renderStoreTab(org)}
 
-            {activeTab === 'fields' && org && (
-              <OrganizationFacilitiesTabContent
-                organization={org}
-                organizationId={id ?? ''}
-                currentUser={user ?? null}
-                rentalOrderSlug={org.publicSlug}
-                canManageFields={canManageFields}
-                showBackButton={!isOrganizationRoleMember}
-              />
-            )}
-            {activeTab === 'divisions' && org && (
-              <OrganizationDivisionsTabContent
-                organization={org}
-                canManage={canManageTeams || isOwner}
-                onChanged={(divisions) => setOrg((current) => current ? { ...current, divisions } : current)}
-              />
-            )}
+            {renderFieldsTab(org)}
+            {renderDivisionsTab(org)}
           </>
         ) : null}
         </div>
       </OrganizationManagementShell>
 
       {/* Modals */}
-      <CreateTeamModal
-        isOpen={showCreateTeamModal}
-        onClose={() => setShowCreateTeamModal(false)}
-        currentUser={user}
-        organizationId={org?.$id}
-        onTeamCreated={async (team) => {
-          setShowCreateTeamModal(false);
-          if (!team) {
-            if (id) await loadOrg(id);
-            return;
-          }
-
-          setOrg((prev) => {
-            if (!prev) return prev;
-            return { ...prev, teams: [...(prev.teams ?? []), team] };
-          });
-
-          if (id) {
-            await loadOrg(id);
-          }
-        }}
-      />
-      <CreateOrganizationModal
-        isOpen={showEditOrganizationModal}
-        onClose={() => setShowEditOrganizationModal(false)}
-        currentUser={user!}
-        organization={org}
-        onUpdated={async (updatedOrg) => {
-          setOrg(updatedOrg);
-          if (id) {
-            await loadOrg(id);
-          }
-        }}
-      />
-      <Modal
-        opened={eventTemplateCreateModalOpen}
-        onClose={() => setEventTemplateCreateModalOpen(false)}
-        title="Create event"
-        centered
-      >
-        <Stack gap="sm">
-          <Text size="sm" c="dimmed">
-            Choose a template to prefill the new event or start with a blank event.
-          </Text>
-          <Select
-            label="Event template"
-            placeholder={eventTemplatesLoading ? 'Loading templates...' : 'Select a template'}
-            data={eventTemplateOptions}
-            value={selectedCreateEventTemplateId}
-            onChange={setSelectedCreateEventTemplateId}
-            searchable
-            clearable
-            disabled={eventTemplatesLoading || eventTemplateOptions.length === 0}
-            nothingFoundMessage="No templates found"
-          />
-          {eventTemplatesError && (
-            <Text size="sm" c="red">
-              {eventTemplatesError}
-            </Text>
-          )}
-          {!eventTemplatesLoading && eventTemplateOptions.length === 0 && (
-            <Text size="sm" c="dimmed">
-              No event templates yet. You can still create a blank event.
-            </Text>
-          )}
-          <Group justify="flex-end">
-            <Button variant="default" onClick={() => setEventTemplateCreateModalOpen(false)}>
-              Cancel
-            </Button>
-            <Button variant="default" onClick={handleCreateEventWithoutTemplate}>
-              Start blank
-            </Button>
-            <Button onClick={handleCreateEventWithTemplate} disabled={!selectedCreateEventTemplateId}>
-              Use template
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
-      <Modal
-        opened={templateBuilderOpen && Boolean(templateEmbedUrl)}
-        onClose={closeTemplateBuilder}
-        centered
-        size="75vw"
-        title="BoldSign Template Builder"
-        styles={{
-          content: {
-            width: '75vw',
-            maxWidth: '75vw',
-            height: '90vh',
-            maxHeight: '90vh',
-            display: 'flex',
-            flexDirection: 'column',
-          },
-          body: {
-            flex: 1,
-            minHeight: 0,
-            padding: 0,
-          },
-        }}
-      >
-        {templateEmbedUrl ? (
-          <div style={{ height: '100%', minHeight: 0 }}>
-            <iframe
-              src={templateEmbedUrl}
-              title="BoldSign Template Builder"
-              style={{ width: '100%', height: '100%', border: 'none' }}
-            />
-          </div>
-        ) : (
-          <Text size="sm" c="dimmed" p="md">Preparing builder...</Text>
-        )}
-      </Modal>
-      <Modal
-        opened={Boolean(previewTemplate)}
-        onClose={() => setPreviewTemplate(null)}
-        centered
-        size="lg"
-        title={previewTemplate ? `Preview: ${previewTemplate.title || 'Untitled Template'}` : 'Preview template'}
-      >
-        {previewTemplate ? (
-          <Stack gap="sm">
-            <Group justify="space-between" align="center" gap="sm">
-              <Stack gap={2} style={{ flex: 1 }}>
-                <Text size="sm" c="dimmed">
-                  Preview only. This will not record a signature.
-                </Text>
-                <Text size="xs" c="dimmed">
-                  {previewTemplate.signOnce ? 'Sign once per participant' : 'Sign for every event'}
-                </Text>
-                <Text size="xs" c="dimmed">
-                  Required signer: {getRequiredSignerTypeLabel(previewTemplate.requiredSignerType)}
-                </Text>
-              </Stack>
-              {previewTemplate.type === 'TEXT' && (
-                <SegmentedControl
-                  value={previewMode}
-                  onChange={(value) => {
-                    setPreviewMode(value as 'read' | 'sign');
-                    setPreviewAccepted(false);
-                    setPreviewSignComplete(false);
-                  }}
-                  data={[
-                    { label: 'Signing', value: 'sign' },
-                    { label: 'Read', value: 'read' },
-                  ]}
-                />
-              )}
-            </Group>
-
-            {previewTemplate.type !== 'TEXT' || previewMode === 'read' ? (
-              <Paper
-                withBorder
-                p="md"
-                radius="md"
-                style={{ maxHeight: '65vh', overflowY: 'auto' }}
-              >
-                <Text style={{ whiteSpace: 'pre-wrap' }}>
-                  {previewTemplate.content || 'No waiver text provided.'}
-                </Text>
-              </Paper>
-            ) : previewSignComplete ? (
-              <Paper withBorder p="md" radius="md">
-                <Stack gap="sm">
-                  <Text fw={600}>Preview complete</Text>
-                  <Text size="sm" c="dimmed">
-                    In the real flow, we would now record the signature and continue to the next required document.
-                  </Text>
-                  <Group justify="flex-end" gap="xs">
-                    <Button
-                      variant="default"
-                      onClick={() => {
-                        setPreviewAccepted(false);
-                        setPreviewSignComplete(false);
-                      }}
-                    >
-                      Start over
-                    </Button>
-                    <Button onClick={() => setPreviewTemplate(null)}>
-                      Close
-                    </Button>
-                  </Group>
-                </Stack>
-              </Paper>
-            ) : (
-              <Stack gap="sm">
-                <Text size="sm" c="dimmed">
-                  Document 1 of 1{previewTemplate.title ? ` • ${previewTemplate.title}` : ''}
-                </Text>
-                <Paper withBorder p="md" style={{ maxHeight: 420, overflowY: 'auto' }}>
-                  <Text style={{ whiteSpace: 'pre-wrap' }}>
-                    {previewTemplate.content || 'No waiver text provided.'}
-                  </Text>
-                </Paper>
-                <Checkbox
-                  label="I agree to the waiver above."
-                  checked={previewAccepted}
-                  onChange={(event) => setPreviewAccepted(event.currentTarget.checked)}
-                />
-                <Group justify="flex-end">
-                  <Button
-                    onClick={() => setPreviewSignComplete(true)}
-                    disabled={!previewAccepted}
-                  >
-                    Accept and continue
-                  </Button>
-                </Group>
-              </Stack>
-            )}
-          </Stack>
-        ) : null}
-      </Modal>
-      <Modal
-        opened={Boolean(editingTextTemplate)}
-        onClose={() => setEditingTextTemplate(null)}
-        centered
-        size="lg"
-        title={editingTextTemplate
-          ? `Edit Version ${editingTextTemplate.versionSequence}`
-          : 'Edit text template'}
-      >
-        {editingTextTemplate ? (
-          <Stack gap="sm">
-            {editingTextTemplate.frozenAt && (
-              <Text size="sm" c="orange">
-                This Version is frozen. Saving text changes creates the next Version and keeps existing assignments pinned.
-              </Text>
-            )}
-            <TextInput label="Requirement title" value={textEditTitle} onChange={(event) => setTextEditTitle(event.currentTarget.value)} />
-            <Textarea
-              label="Requirement description"
-              value={textEditDescription}
-              onChange={(event) => setTextEditDescription(event.currentTarget.value)}
-              minRows={2}
-            />
-            <Textarea
-              label="Text content"
-              value={textEditContent}
-              onChange={(event) => setTextEditContent(event.currentTarget.value)}
-              minRows={10}
-              required
-            />
-            <Group justify="flex-end">
-              <Button variant="default" onClick={() => setEditingTextTemplate(null)} disabled={savingTemplateVersion}>
-                Cancel
-              </Button>
-              <Button onClick={() => void handleSaveTextTemplate()} loading={savingTemplateVersion}>
-                Save Version
-              </Button>
-            </Group>
-          </Stack>
-        ) : null}
-      </Modal>
-      <Modal
-        opened={Boolean(previewSignedTextDocument)}
-        onClose={() => setPreviewSignedTextDocument(null)}
-        centered
-        size="lg"
-        title={previewSignedTextDocument ? `Signed text: ${previewSignedTextDocument.title}` : 'Signed text'}
-      >
-        {previewSignedTextDocument ? (
-          <Stack gap="sm">
-            <Text size="sm" c="dimmed">
-              {previewSignedTextDocument.signedAt
-                ? `Signed at ${formatSummaryDateTime(previewSignedTextDocument.signedAt)}`
-                : 'Signed time unavailable.'}
-            </Text>
-            {previewSignedTextDocument.eventName && (
-              <Group justify="space-between" align="center" wrap="wrap">
-                <Text size="sm" c="dimmed">Event: {previewSignedTextDocument.eventName}</Text>
-                {previewSignedTextDocument.eventId && (
-                  <Button
-                    size="xs"
-                    variant="light"
-                    onClick={() => openOrganizationEvent(previewSignedTextDocument.eventId as string)}
-                  >
-                    View event
-                  </Button>
-                )}
-              </Group>
-            )}
-            <Paper withBorder p="md" radius="md" style={{ maxHeight: '65vh', overflowY: 'auto' }}>
-              <Text style={{ whiteSpace: 'pre-wrap' }}>
-                {previewSignedTextDocument.content || 'No text content is available for this signed record.'}
-              </Text>
-            </Paper>
-          </Stack>
-        ) : null}
-      </Modal>
-      <Modal
-        opened={Boolean(customerDocumentToVoid)}
-        onClose={closeCustomerDocumentVoidModal}
-        centered
-        title={customerDocumentToVoid ? `Void ${customerDocumentToVoid.title}` : 'Void imported document'}
-      >
-        {customerDocumentToVoid ? (
-          <Stack gap="sm">
-            <Text size="sm" c="dimmed">
-              Voiding removes this evidence from requirement completion. It keeps the document and its audit trail.
-            </Text>
-            <PasswordInput
-              label="Confirm your password"
-              description="Enter a password or use a recent provider sign-in."
-              value={customerDocumentVoidPassword}
-              onChange={(event) => {
-                setCustomerDocumentVoidPassword(event.currentTarget.value);
-                setIsRecentProviderAuthUsed(false);
-              }}
-            />
-            <Button
-              variant="subtle"
-              size="xs"
-              onClick={() => {
-                setCustomerDocumentVoidPassword('');
-                setIsRecentProviderAuthUsed(true);
-              }}
-              disabled={isVoidingCustomerDocument}
-            >
-              Use recent provider sign-in
-            </Button>
-            {isRecentProviderAuthUsed ? (
-              <Text size="xs" c="dimmed">
-                This uses a provider login from the last ten minutes.
-              </Text>
-            ) : null}
-            <Select
-              label="Void reason"
-              data={DOCUMENT_VOID_REASON_OPTIONS.map((reason) => ({ value: reason, label: reason }))}
-              value={customerDocumentVoidReason}
-              onChange={setCustomerDocumentVoidReason}
-              allowDeselect={false}
-              searchable
-              required
-            />
-            <Textarea
-              label="Note"
-              description="A note is required for Other."
-              value={customerDocumentVoidNote}
-              onChange={(event) => setCustomerDocumentVoidNote(event.currentTarget.value)}
-              minRows={3}
-              maxLength={1000}
-            />
-            <Group justify="flex-end">
-              <Button
-                variant="default"
-                onClick={() => closeCustomerDocumentVoidModal()}
-                disabled={isVoidingCustomerDocument}
-              >
-                Cancel
-              </Button>
-              <Button
-                color="red"
-                onClick={() => void handleVoidCustomerDocument()}
-                loading={isVoidingCustomerDocument}
-                disabled={
-                  !customerDocumentVoidReason
-                  || (!customerDocumentVoidPassword.trim() && !isRecentProviderAuthUsed)
-                }
-              >
-                Void document
-              </Button>
-            </Group>
-          </Stack>
-        ) : null}
-      </Modal>
-      <Modal
-        opened={Boolean(customerDocumentAuditTarget)}
-        onClose={() => {
-          if (!isLoadingCustomerDocumentAudit) {
-            setCustomerDocumentAuditTarget(null);
-            setCustomerDocumentAuditTrail(null);
-          }
-        }}
-        centered
-        size="lg"
-        title={customerDocumentAuditTarget
-          ? `Audit trail: ${customerDocumentAuditTarget.title}`
-          : 'Document audit trail'}
-      >
-        {isLoadingCustomerDocumentAudit ? (
-          <Group justify="center" py="xl">
-            <Loader size="sm" />
-            <Text size="sm" c="dimmed">Loading audit trail...</Text>
-          </Group>
-        ) : customerDocumentAuditTrail ? (
-          <Stack gap="md">
-            <Text size="sm" c="dimmed">
-              {customerDocumentAuditTrail.description}
-            </Text>
-            <Paper withBorder p="sm" radius="md">
-              <Stack gap={4}>
-                <Text fw={600}>Imported evidence</Text>
-                <Text size="sm">Document: {customerDocumentAuditTrail.evidence.documentName}</Text>
-                <Text size="sm">Provenance: {customerDocumentAuditTrail.evidence.provenance}</Text>
-                <Text size="sm">Lifecycle status: {customerDocumentAuditTrail.evidence.status || 'Unknown'}</Text>
-                <Text size="sm">
-                  Historical signing date:{' '}
-                  {customerDocumentAuditTrail.evidence.historicalSigningDate
-                    ? formatSummaryDateTime(customerDocumentAuditTrail.evidence.historicalSigningDate)
-                    : 'Signing date unknown'}
-                </Text>
-                <Text size="sm">
-                  Imported: {formatSummaryDateTime(customerDocumentAuditTrail.evidence.importedAt ?? undefined)}
-                </Text>
-                <Text size="sm">
-                  Uploader:{' '}
-                  {customerDocumentAuditTrail.evidence.uploader?.displayName || 'Former user'}
-                </Text>
-                <Text size="sm">
-                  Attestation version: {customerDocumentAuditTrail.evidence.attestationVersion || 'Not recorded'}
-                </Text>
-                <Text size="sm">
-                  Content identity: {customerDocumentAuditTrail.evidence.contentHash || 'Not recorded'}
-                </Text>
-                {customerDocumentAuditTrail.evidence.attestationText ? (
-                  <Text
-                    size="sm"
-                    component="pre"
-                    style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
-                  >
-                    Attestation: {customerDocumentAuditTrail.evidence.attestationText}
-                  </Text>
-                ) : null}
-                {customerDocumentAuditTrail.evidence.sourceNote ? (
-                  <Text
-                    size="sm"
-                    component="pre"
-                    style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
-                  >
-                    Source note: {customerDocumentAuditTrail.evidence.sourceNote}
-                  </Text>
-                ) : null}
-              </Stack>
-            </Paper>
-            <Text fw={600}>Audit trail events</Text>
-            {customerDocumentAuditTrail.events.length > 0 ? (
-              <Stack gap="sm">
-                {customerDocumentAuditTrail.events.map((event) => (
-                  <Paper key={event.id} withBorder p="sm" radius="md">
-                    <Stack gap={4}>
-                      <Group justify="space-between" align="flex-start" wrap="wrap">
-                        <Badge size="sm" variant="light">{event.eventType}</Badge>
-                        <Text size="xs" c="dimmed">{formatSummaryDateTime(event.createdAt ?? undefined)}</Text>
-                      </Group>
-                      {event.actorUserId && (
-                        <Text size="xs" c="dimmed">
-                          Actor: {event.actorDisplayName || 'Former user'}
-                        </Text>
-                      )}
-                      {event.reason && <Text size="sm">Reason: {event.reason}</Text>}
-                      {event.note && <Text size="sm">Note: {event.note}</Text>}
-                      {event.payload !== undefined && event.payload !== null && (
-                        <Text
-                          size="xs"
-                          component="pre"
-                          style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
-                        >
-                          {JSON.stringify(event.payload, null, 2)}
-                        </Text>
-                      )}
-                    </Stack>
-                  </Paper>
-                ))}
-              </Stack>
-            ) : (
-              <Text size="sm" c="dimmed">No audit events found.</Text>
-            )}
-          </Stack>
-        ) : (
-          <Text size="sm" c="dimmed">No audit trail found.</Text>
-        )}
-      </Modal>
-      <Modal
-        opened={customerBillModalOpen}
-        onClose={closeCustomerBillModal}
-        title={selectedOrganizationCustomer
-          ? `${editingCustomerBill ? 'Edit' : 'Add'} bill for ${selectedOrganizationCustomer.name}`
-          : `${editingCustomerBill ? 'Edit' : 'Add'} bill`}
-        centered
-      >
-        <Stack gap="sm">
-          <Text size="sm" c="dimmed">
-            Record the bill amount, paid amount, and due date for this customer.
-          </Text>
-          <TextInput
-            label="Bill description"
-            value={customerBillLabel}
-            onChange={(event) => setCustomerBillLabel(event.currentTarget.value)}
-            required
-          />
-          <Group grow align="flex-start">
-            <NumberInput
-              label="Bill amount"
-              prefix="$"
-              min={0}
-              decimalScale={2}
-              fixedDecimalScale
-              value={customerBillAmount}
-              onChange={setCustomerBillAmount}
-              required
-            />
-            <NumberInput
-              label="Paid amount"
-              prefix="$"
-              min={0}
-              max={customerBillAmountCents > 0 ? customerBillAmountCents / 100 : undefined}
-              decimalScale={2}
-              fixedDecimalScale
-              value={customerBillPaidAmount}
-              onChange={setCustomerBillPaidAmount}
-              error={customerBillPaidAmountError}
-              required
-            />
-          </Group>
-          <TextInput
-            label="Due date"
-            type="date"
-            value={customerBillDueDate}
-            onChange={(event) => setCustomerBillDueDate(event.currentTarget.value)}
-            required
-          />
-          <Text size="xs" c="dimmed">
-            Remaining balance: {formatPrice(Math.max(0, customerBillAmountCents - customerBillPaidAmountCents))}
-          </Text>
-          <Group justify="flex-end">
-            <Button variant="default" onClick={closeCustomerBillModal} disabled={creatingCustomerBill}>
-              Cancel
-            </Button>
-            <Button
-              onClick={handleCreateCustomerBill}
-              loading={creatingCustomerBill}
-              disabled={
-                !customerBillLabel.trim()
-                || !customerBillDueDate
-                || !Number.isFinite(customerBillAmountCents)
-                || customerBillAmountCents <= 0
-                || !Number.isFinite(customerBillPaidAmountCents)
-                || customerBillPaidAmountCents < 0
-                || customerBillPaidAmountCents > customerBillAmountCents
-              }
-            >
-              {editingCustomerBill ? 'Save changes' : 'Add bill'}
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
-      <Modal
-        opened={isCustomerImportModalOpen}
-        onClose={closeCustomerImportModal}
-        title={selectedOrganizationCustomer
-          ? `Import signed document for ${selectedOrganizationCustomer.name}`
-          : 'Import signed document'}
-        centered
-        size="lg"
-      >
-        {selectedOrganizationCustomer?.user ? (
-          <Stack gap="sm">
-            <Text size="sm" c="dimmed">
-              Upload a complete PDF that the customer signed outside BracketIQ. Review the full file before you attest to it.
-            </Text>
-            <Select
-              label="Document Requirement and Template Version"
-              data={customerImportTemplateOptions}
-              value={selectedCustomerImportTemplateId}
-              onChange={handleCustomerImportTemplateChange}
-              searchable
-              allowDeselect={false}
-              nothingFoundMessage="No document requirement versions found"
-              required
-            />
-            {selectedCustomerImportTemplate?.signOnce ? (
-              <Text size="sm" c="dimmed">
-                Applies to: This Organization
-              </Text>
-            ) : (
-              <Select
-                label="Event"
-                data={customerImportScopeOptions}
-                value={selectedCustomerImportScopeId}
-                onChange={setSelectedCustomerImportScopeId}
-                searchable
-                allowDeselect={false}
-                nothingFoundMessage="No eligible events found"
-                required
-              />
-            )}
-            <FileInput
-              label="Signed PDF"
-              placeholder="Choose a PDF"
-              accept="application/pdf"
-              value={customerImportFile}
-              onChange={handleCustomerImportFileChange}
-              clearable
-              required
-            />
-            {customerImportPreviewUrl ? (
-              <Paper withBorder p="xs" radius="md">
-                <iframe
-                  ref={customerImportPreviewFrameRef}
-                  title="Imported signed document preview"
-                  src={customerImportPreviewUrl}
-                  onLoad={() => setIsCustomerImportPreviewReady(true)}
-                  style={{ width: '100%', height: '52vh', border: 0 }}
-                />
-              </Paper>
-            ) : (
-              <Text size="xs" c="dimmed">
-                Choose a PDF to review the complete file here.
-              </Text>
-            )}
-            <TextInput
-              label="Historical signing date (optional)"
-              type="date"
-              value={customerImportHistoricalSigningDate}
-              onChange={(event) => setCustomerImportHistoricalSigningDate(event.currentTarget.value)}
-            />
-            <Textarea
-              label="Private source note (optional)"
-              description="Only authorized staff can view this note."
-              value={customerImportSourceNote}
-              onChange={(event) => setCustomerImportSourceNote(event.currentTarget.value)}
-              minRows={2}
-              maxRows={5}
-              autosize
-            />
-            <Checkbox
-              checked={isCustomerImportAttestationAccepted}
-              onChange={(event) => setIsCustomerImportAttestationAccepted(event.currentTarget.checked)}
-              disabled={!isCustomerImportPreviewReady}
-              label="Document Import Attestation"
-              description="I confirm that this file is a complete signed document for the shown customer, Document Template Version, and scope. I confirm that it contains all required signatures. I understand that BracketIQ did not verify the signatures."
-            />
-            <Group justify="flex-end">
-              <Button variant="default" onClick={() => closeCustomerImportModal()} disabled={isImportingCustomerDocument}>
-                Cancel
-              </Button>
-              <Button
-                onClick={handleImportCustomerDocument}
-                loading={isImportingCustomerDocument}
-                disabled={
-                  !selectedCustomerImportTemplateId
-                  || !selectedCustomerImportScopeId
-                  || !customerImportFile
-                  || !isCustomerImportPreviewReady
-                  || !isCustomerImportAttestationAccepted
-                }
-              >
-                Import signed document
-              </Button>
-            </Group>
-          </Stack>
-        ) : (
-          <Text size="sm" c="dimmed">Select a User customer before importing a document.</Text>
-        )}
-      </Modal>
-      <Modal
-        opened={customerDocumentModalOpen}
-        onClose={closeCustomerDocumentModal}
-        title={selectedOrganizationCustomer ? `Add document for ${selectedOrganizationCustomer.name}` : 'Add document'}
-        centered
-      >
-        {selectedOrganizationCustomer?.user ? (
-          <Stack gap="sm">
-            <Text size="sm" c="dimmed">
-              Choose a participant document template. An event is optional for text documents.
-            </Text>
-            <Select
-              label="Document template"
-              data={customerDocumentTemplateOptions}
-              value={selectedCustomerDocumentTemplateId}
-              onChange={setSelectedCustomerDocumentTemplateId}
-              searchable
-              allowDeselect={false}
-              nothingFoundMessage="No participant templates found"
-            />
-            <Select
-              label={selectedCustomerDocumentRequiresEvent ? 'Event' : 'Event (optional for text documents)'}
-              data={selectedOrganizationCustomer.user.events.map((event) => ({
-                value: event.eventId,
-                label: `${event.eventName} • ${formatSummaryDateTime(event.start)}`,
-              }))}
-              value={selectedCustomerDocumentEventId}
-              onChange={setSelectedCustomerDocumentEventId}
-              searchable
-              clearable
-              allowDeselect
-              nothingFoundMessage="No organization events found"
-            />
-            {selectedCustomerDocumentRequiresEvent && !selectedCustomerDocumentEventId && (
-              <Text size="xs" c="dimmed">PDF documents use BoldSign and require an event.</Text>
-            )}
-            <Group justify="flex-end">
-              <Button variant="default" onClick={closeCustomerDocumentModal} disabled={sendingCustomerDocument}>
-                Cancel
-              </Button>
-              <Button
-                onClick={handleAddCustomerDocument}
-                loading={sendingCustomerDocument}
-                disabled={
-                  !selectedCustomerDocumentTemplateId
-                  || (selectedCustomerDocumentRequiresEvent && !selectedCustomerDocumentEventId)
-                }
-              >
-                Add document
-              </Button>
-            </Group>
-          </Stack>
-        ) : (
-          <Text size="sm" c="dimmed">Select a player before adding a document.</Text>
-        )}
-      </Modal>
-      <Modal
-        opened={templateModalOpen}
-        onClose={() => setTemplateModalOpen(false)}
-        title="Create template"
-        centered
-      >
-        <Stack gap="sm">
-          <TextInput
-            label="Template title"
-            value={templateTitle}
-            onChange={(e) => setTemplateTitle(e.currentTarget.value)}
-            required
-          />
-          <SegmentedControl
-            value={templateType}
-            onChange={(value) => setTemplateType(value as 'PDF' | 'TEXT')}
-            data={[
-              { label: 'PDF (BoldSign)', value: 'PDF' },
-              { label: 'Text waiver', value: 'TEXT' },
-            ]}
-          />
-          <Textarea
-            label="Description"
-            value={templateDescription}
-            onChange={(e) => setTemplateDescription(e.currentTarget.value)}
-            minRows={3}
-          />
-          {templateType === 'PDF' && (
-            <FileInput
-              label="PDF file"
-              placeholder="Upload a PDF template"
-              accept="application/pdf,.pdf"
-              value={templatePdfFile}
-              onChange={setTemplatePdfFile}
-              clearable
-              required
-            />
-          )}
-          {templateType === 'TEXT' && (
-            <Textarea
-              label="Waiver text"
-              value={templateContent}
-              onChange={(e) => setTemplateContent(e.currentTarget.value)}
-              minRows={6}
-              required
-            />
-          )}
-          <Select
-            label="Required signer"
-            value={templateRequiredSignerType}
-            onChange={(value) => {
-              setTemplateRequiredSignerType(
-                normalizeRequiredSignerType(value) as
-                  'PARTICIPANT' | 'PARENT_GUARDIAN' | 'CHILD' | 'PARENT_GUARDIAN_CHILD',
-              );
-            }}
-            data={[
-              { label: 'Participant', value: 'PARTICIPANT' },
-              { label: 'Parent/Guardian', value: 'PARENT_GUARDIAN' },
-              { label: 'Child', value: 'CHILD' },
-              { label: 'Parent/Guardian + Child', value: 'PARENT_GUARDIAN_CHILD' },
-            ]}
-            allowDeselect={false}
-            required
-          />
-          <Switch
-            label="Sign once per participant"
-            checked={templateSignOnce}
-            onChange={(e) => setTemplateSignOnce(e.currentTarget.checked)}
-          />
-          <Group justify="flex-end">
-            <Button variant="default" onClick={() => setTemplateModalOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              onClick={handleCreateTemplate}
-              loading={creatingTemplate}
-              disabled={!templateTitle.trim() || (templateType === 'PDF' && !templatePdfFile)}
-            >
-              Create
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
-      <OrganizationProductEditorModal
-        opened={productModalOpen}
-        selectedProduct={selectedProduct}
-        organizationHasStripeAccount={organizationHasStripeAccount}
-        editProductName={editProductName}
-        onEditProductNameChange={setEditProductName}
-        editProductDescription={editProductDescription}
-        onEditProductDescriptionChange={setEditProductDescription}
-        editProductPeriod={editProductPeriod}
-        onEditProductPeriodChange={handleEditProductPeriodChange}
-        editProductType={editProductType}
-        onEditProductTypeChange={(value) => setEditProductType((value as ProductType) ?? defaultProductTypeForPeriod(editProductPeriod))}
-        editProductPriceCents={editProductPriceCents}
-        onEditProductPriceChange={setEditProductPriceCents}
-        canUpdateProduct={canUpdateProduct}
-        updatingProduct={updatingProduct}
-        deletingProduct={deletingProduct}
-        onClose={closeProductModal}
-        onSave={handleUpdateProduct}
-        onDelete={handleDeleteProduct}
-      />
-      <BillingAddressModal
-        opened={showBillingAddressModal}
-        onClose={() => {
-          setShowBillingAddressModal(false);
-          setPurchaseProduct(null);
-        }}
-        onSaved={async (billingAddress) => {
-          if (!purchaseProduct) {
-            setShowBillingAddressModal(false);
-            return;
-          }
-          await startProductCheckout(purchaseProduct, billingAddress, purchaseDiscountCode);
-        }}
-        title="Billing address required"
-        description="Enter your billing address so tax can be calculated before checkout."
-      />
-      <PaymentModal
-        isOpen={showPurchaseModal && Boolean(purchaseProduct && purchasePaymentData)}
-        onClose={() => {
-          setShowPurchaseModal(false);
-          setPurchasePaymentData(null);
-          setPurchaseProduct(null);
-        }}
-        event={{
-          name: purchaseProduct?.name ?? 'Product',
-          location: org?.name ?? '',
-          eventType: 'EVENT',
-          price: purchaseProduct?.priceCents ?? 0,
-        } as any}
-        paymentData={purchasePaymentData}
-        onPaymentSuccess={handleProductPaymentSuccess}
-      />
+      {renderCreateTeamModal()}
+      {renderEditOrganizationModal()}
+      {renderEventTemplatePicker()}
+      {renderTemplateBuilder()}
+      {renderTemplatePreview()}
+      {renderTextTemplateEditor()}
+      {renderSignedTextPreview()}
+      {renderDocumentVoidModal()}
+      {renderDocumentAuditModal()}
+      {renderCustomerBillModal()}
+      {renderCustomerImportModal()}
+      {renderCustomerDocumentModal()}
+      {renderCreateTemplateModal()}
+      {renderProductEditor()}
+      {renderProductBillingAddress()}
+      {renderProductPayment()}
     </>
   );
 }

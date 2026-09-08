@@ -45,7 +45,8 @@ describe('OrganizationEventTemplatesTabContent', () => {
       />,
     );
 
-    expect(screen.getByText('Loading event templates...')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Refresh' })).toBeDisabled();
 
     rerender(
       <OrganizationEventTemplatesTabContent
@@ -58,6 +59,8 @@ describe('OrganizationEventTemplatesTabContent', () => {
     );
 
     expect(screen.getByText('Request failed')).toBeInTheDocument();
-    expect(screen.getByText('No event templates yet.')).toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Refresh' })).toBeEnabled();
+    expect(screen.queryByText('No event templates yet.')).not.toBeInTheDocument();
   });
 });

@@ -15,10 +15,10 @@ import {
   Text,
   Title,
 } from '@/components/organization/organization-operation-ui';
-import type { SlotGroupPropGetter, View } from 'react-big-calendar';
+import type { View } from 'react-big-calendar';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 import 'react-big-calendar/lib/addons/dragAndDrop/styles.css';
-import { addHours, endOfDay, endOfMonth, endOfWeek, startOfDay, startOfMonth, startOfWeek } from 'date-fns';
+import { addHours, differenceInCalendarDays, endOfDay, endOfMonth, endOfWeek, startOfDay, startOfMonth, startOfWeek } from 'date-fns';
 import Loading from '@/components/ui/Loading';
 import type { Facility, Field, Organization, TimeSlot, UserData } from '@/types';
 import { formatPrice } from '@/types';
@@ -43,8 +43,21 @@ import { buildUniqueColorReferenceList } from '@/lib/calendarColorReferences';
 import FieldCalendarFilter, { type FieldCalendarFilterItem } from '@/components/calendar/FieldCalendarFilter';
 import SharedCalendarEvent, { type SharedCalendarEventVariant } from '@/components/calendar/SharedCalendarEvent';
 import CreateRentalSlotModal, { type CreateRentalSlotModalSubmitPayload } from '@/components/ui/CreateRentalSlotModal';
+import { alignDateToWeekday, toValidDate, mondayDayOf, dateWithMinutes, parseCalendarDropRange, buildManagerCalendarDraftWithCalendarRange } from './fieldsTab/facilityCalendarRanges';
+import { saveFacilityCalendarChanges, type FacilityCalendarSaveResult } from './fieldsTab/facilityCalendarSave';
+import { getCalendarEventVariant, getCalendarEventLayer, type CalendarLayerType } from './fieldsTab/facilityCalendarClassification';
+import { canChangeFacilityEventRange, isStaffFeedEvent } from './fieldsTab/facilityCalendarEventPresentation';
 import FacilityCalendarPanel from './fieldsTab/FacilityCalendarPanel';
+import { calendarTargetResourceId, getFieldFacilityId, getFieldFacility, facilityCoordinatesToTuple } from './fieldsTab/facilityCalendarResources';
+import { buildRentalSelectionCheckout } from './fieldsTab/facilityRentalCheckout';
+import { prepareStaffTimeslot, planStaffDraftEdit, planStaffAssignmentEdit, planStaffOccurrenceEdit, type StaffTimeslotForm } from './fieldsTab/facilityStaffEdits';
+import { getStaffAssignmentOccurrenceRangeForDate, getStaffAssignmentPrimaryRange, getPreviousStaffAssignmentOccurrenceRange, staffAssignmentCanDeleteFollowing, findRestorableStaffUnassignments, isOpenParentStaffScheduleAssignment, isOpenParentStaffScheduleSeries } from './fieldsTab/facilityStaffOccurrences';
+import { prepareStaffCalendarRangeChange } from './fieldsTab/facilityStaffRangeChanges';
+import { compareRanges, mergePublicRentalIntervals, subtractIntervals, type PublicRentalInterval } from './fieldsTab/facilityCalendarIntervals';
+import { buildManagerCalendarDraftOccurrences, buildStaffScheduleCalendarItems } from './fieldsTab/facilityCalendarOccurrences';
+import { resolveFacilityCalendarDropPoint } from './fieldsTab/facilityCalendarDropPoint';
 import ManagerFacilityCalendarSidebar from './fieldsTab/ManagerFacilityCalendarSidebar';
+import FacilityScheduleLayout from './fieldsTab/FacilityScheduleLayout';
 import PublicRentalSelectionsPanel from './fieldsTab/PublicRentalSelectionsPanel';
 import FacilityDetailsWorkspace from './fieldsTab/FacilityDetailsWorkspace';
 import StaffTimeslotEditorModal from './fieldsTab/StaffTimeslotEditorModal';
@@ -75,14 +88,11 @@ import {
   usePublicRentalSelections,
 } from './fieldsTab/usePublicRentalSelections';
 import type {
-  BuildStaffAssignmentCalendarRangeOptions,
   CalendarEventData,
   FacilityFeedCalendarEntry,
   ManagerCalendarDraft,
-  ManagerCalendarDraftStaffOptions,
   ManagerCalendarSelectionMode,
   ManagerDraftDragState,
-  ManagerStaffAssignmentPendingOverride,
   OpenStaffDeleteScope,
   OpenStaffDeleteConfirmationState,
   RentalSelectionCheckoutPayload,
@@ -97,7 +107,6 @@ import type {
   StaffScheduleResponse,
   StaffScheduleStaffMember,
   StaffScheduleTimeSlot,
-  StaffScheduleUpdateResponse,
 } from './fieldsTab/facilityCalendarTypes';
 
 export type { RentalSelectionCheckoutPayload } from './fieldsTab/facilityCalendarTypes';
@@ -106,52 +115,6 @@ const fieldIdArraysEqual = (first: string[], second: string[]): boolean => (
   first.length === second.length && first.every((fieldId, index) => fieldId === second[index])
 );
 
-const getCalendarEventVariant = (event: CalendarEventData | null | undefined): SharedCalendarEventVariant => {
-  if (!event) {
-    return 'default';
-  }
-  if (event.metaType === 'selection') {
-    const selectionUserId = event.resource?.userId ?? null;
-    if (event.selectionMode === 'rental' || event.resource?.mode === 'rental') {
-      return 'availability';
-    }
-    if (event.selectionMode === 'official_assignment' || event.resource?.mode === 'official_assignment') {
-      return selectionUserId ? 'official-assigned' : 'official-open';
-    }
-    if (event.selectionMode === 'staff_assignment' || event.resource?.mode === 'staff_assignment') {
-      return selectionUserId ? 'staff-assigned' : 'staff-open';
-    }
-    return event.selectionMode || event.resource?.mode ? 'default' : 'selection';
-  }
-  if (event.metaType === 'facility-feed') {
-    if (event.feedType === 'conflict') {
-      return 'conflict';
-    }
-    if (event.feedType === 'maintenance_block') {
-      return 'unavailable';
-    }
-    if (event.feedType === 'official_assignment') {
-      return event.resource.userId || event.resource.staffMemberId ? 'official-assigned' : 'official-open';
-    }
-    if (event.feedType === 'staff_assignment') {
-      return event.resource.userId || event.resource.staffMemberId ? 'staff-assigned' : 'staff-open';
-    }
-    return 'default';
-  }
-  if (event.metaType === 'rental') {
-    return isPastRentalRangeStart(event.start) ? 'unavailable' : 'availability';
-  }
-
-  const sourceType = typeof (event.resource as { sourceType?: unknown } | undefined)?.sourceType === 'string'
-    ? String((event.resource as { sourceType?: unknown }).sourceType).toUpperCase()
-    : '';
-  if (sourceType === 'RENTAL_UNAVAILABLE') {
-    return 'unavailable';
-  }
-  return sourceType === 'RENTAL_BOOKING' ? 'reservation' : 'booked';
-};
-
-const MIN_FIELD_CALENDAR_HEIGHT = 800;
 const MIN_SELECTION_MS = PUBLIC_RENTAL_MIN_SELECTION_MS;
 const SLOT_STEP_MINUTES = 30;
 const MANAGER_CARD_DRAG_THRESHOLD_PX = 6;
@@ -164,10 +127,6 @@ const hasMovedPastDragThreshold = (
   >= MANAGER_CARD_DRAG_THRESHOLD_PX
 );
 
-const centsFromDollars = (value: string | number): number => {
-  const numericValue = typeof value === 'number' ? value : Number(String(value).replace(/^\$/, ''));
-  return Number.isFinite(numericValue) ? Math.round(numericValue * 100) : 0;
-};
 
 const dollarsFromCents = (amountCents: number | null | undefined): string => {
   if (!Number.isFinite(amountCents)) {
@@ -176,172 +135,7 @@ const dollarsFromCents = (amountCents: number | null | undefined): string => {
   return (Number(amountCents) / 100).toFixed(2);
 };
 
-const buildManagerCalendarDraftWithCalendarRange = (
-  draft: ManagerCalendarDraft,
-  start: Date,
-  end: Date,
-  options: BuildStaffAssignmentCalendarRangeOptions = {},
-): ManagerCalendarDraft | null => {
-  const nextStart = new Date(start);
-  const nextEnd = new Date(end);
-  if (
-    Number.isNaN(nextStart.getTime())
-    || Number.isNaN(nextEnd.getTime())
-    || nextEnd.getTime() <= nextStart.getTime()
-    || nextStart.toDateString() !== nextEnd.toDateString()
-  ) {
-    return null;
-  }
-
-  const dayOfWeek = mondayDayOf(nextStart);
-  const startTimeMinutes = nextStart.getHours() * 60 + nextStart.getMinutes();
-  const endTimeMinutes = nextEnd.getHours() * 60 + nextEnd.getMinutes();
-  if (draft.mode === 'rental') {
-    const existingRental = draft.rental ?? {};
-    const repeating = Boolean(existingRental.repeating);
-    const existingDaysOfWeek = Array.isArray(existingRental.daysOfWeek) && existingRental.daysOfWeek.length
-      ? existingRental.daysOfWeek
-      : [existingRental.dayOfWeek ?? dayOfWeek];
-    const nextDaysOfWeek = repeating && options.preserveRepeatingPattern
-      ? existingDaysOfWeek
-      : [dayOfWeek];
-    const plannedDate = repeating && options.preserveRepeatingPattern
-      ? alignDateToWeekday(parseLocalDateTime(existingRental.startDate ?? null) ?? draft.start, nextDaysOfWeek[0] ?? dayOfWeek)
-      : nextStart;
-    return {
-      ...draft,
-      start: repeating && options.preserveRepeatingPattern
-        ? dateWithMinutes(plannedDate, startTimeMinutes)
-        : nextStart,
-      end: repeating && options.preserveRepeatingPattern
-        ? dateWithMinutes(plannedDate, endTimeMinutes)
-        : nextEnd,
-      rental: {
-        ...existingRental,
-        repeating,
-        dayOfWeek: nextDaysOfWeek[0] as NonNullable<TimeSlot['dayOfWeek']>,
-        daysOfWeek: nextDaysOfWeek,
-        startDate: repeating && options.preserveRepeatingPattern
-          ? existingRental.startDate
-          : formatLocalDateTime(nextStart),
-        endDate: repeating
-          ? existingRental.endDate ?? null
-          : formatLocalDateTime(nextEnd),
-        startTimeMinutes,
-        endTimeMinutes,
-      },
-    };
-  }
-
-  const existingStaff = draft.staff ?? {};
-  const repeating = Boolean(existingStaff.repeating);
-  const existingDaysOfWeek = Array.isArray(existingStaff.daysOfWeek) && existingStaff.daysOfWeek.length
-    ? existingStaff.daysOfWeek
-    : [dayOfWeek];
-  const nextDaysOfWeek = repeating && options.preserveRepeatingPattern
-    ? existingDaysOfWeek
-    : [dayOfWeek];
-  const plannedDate = repeating && options.preserveRepeatingPattern
-    ? alignDateToWeekday(draft.start, nextDaysOfWeek[0] ?? dayOfWeek)
-    : nextStart;
-  return {
-    ...draft,
-    start: repeating && options.preserveRepeatingPattern
-      ? dateWithMinutes(plannedDate, startTimeMinutes)
-      : nextStart,
-    end: repeating && options.preserveRepeatingPattern
-      ? dateWithMinutes(plannedDate, endTimeMinutes)
-      : nextEnd,
-    staff: {
-      ...existingStaff,
-      repeating,
-      daysOfWeek: nextDaysOfWeek,
-    },
-  };
-};
-
-const buildStaffAssignmentWithCalendarRange = (
-  assignment: StaffScheduleAssignment,
-  start: Date,
-  end: Date,
-  options: BuildStaffAssignmentCalendarRangeOptions = {},
-): StaffScheduleAssignment | null => {
-  const nextStart = new Date(start);
-  const nextEnd = new Date(end);
-  if (
-    Number.isNaN(nextStart.getTime())
-    || Number.isNaN(nextEnd.getTime())
-    || nextEnd.getTime() <= nextStart.getTime()
-    || nextStart.toDateString() !== nextEnd.toDateString()
-  ) {
-    return null;
-  }
-
-  const dayOfWeek = mondayDayOf(nextStart);
-  const startTimeMinutes = nextStart.getHours() * 60 + nextStart.getMinutes();
-  const endTimeMinutes = nextEnd.getHours() * 60 + nextEnd.getMinutes();
-  const existingTimeSlot = assignment.timeSlot ?? null;
-  const repeating = Boolean(existingTimeSlot?.repeating);
-  const existingDaysOfWeek = Array.isArray(existingTimeSlot?.daysOfWeek) && existingTimeSlot.daysOfWeek.length
-    ? existingTimeSlot.daysOfWeek
-    : [dayOfWeek];
-  const nextDaysOfWeek = repeating && options.preserveRepeatingPattern
-    ? existingDaysOfWeek
-    : [dayOfWeek];
-  const plannedOccurrenceDate = repeating && options.preserveRepeatingPattern
-    ? alignDateToWeekday(toValidDate(existingTimeSlot?.startDate) ?? nextStart, nextDaysOfWeek[0] ?? dayOfWeek)
-    : nextStart;
-  const plannedStart = repeating && options.preserveRepeatingPattern
-    ? dateWithMinutes(plannedOccurrenceDate, startTimeMinutes)
-    : nextStart;
-  const plannedEnd = repeating && options.preserveRepeatingPattern
-    ? dateWithMinutes(plannedOccurrenceDate, endTimeMinutes)
-    : nextEnd;
-  const nextTimeSlot: StaffScheduleTimeSlot = {
-    startDate: repeating
-      ? (existingTimeSlot?.startDate ?? nextStart.toISOString())
-      : nextStart.toISOString(),
-    endDate: repeating
-      ? (existingTimeSlot?.endDate ?? nextEnd.toISOString())
-      : nextEnd.toISOString(),
-    repeating,
-    dayOfWeek: nextDaysOfWeek[0] ?? dayOfWeek,
-    daysOfWeek: nextDaysOfWeek,
-    startTimeMinutes,
-    endTimeMinutes,
-    timeZone: existingTimeSlot?.timeZone ?? null,
-  };
-
-  return {
-    ...assignment,
-    timeSlot: nextTimeSlot,
-    plannedStart: plannedStart.toISOString(),
-    plannedEnd: plannedEnd.toISOString(),
-    plannedMinutes: Math.max(0, Math.round((plannedEnd.getTime() - plannedStart.getTime()) / 60000)),
-  };
-};
-
-const buildStaffScheduleTimeSlotPayload = (timeSlot?: StaffScheduleTimeSlot | null) => {
-  if (!timeSlot) {
-    return undefined;
-  }
-  return {
-    startDate: timeSlot.startDate,
-    endDate: timeSlot.endDate ?? null,
-    repeating: Boolean(timeSlot.repeating),
-    daysOfWeek: Array.isArray(timeSlot.daysOfWeek) ? timeSlot.daysOfWeek : null,
-    startTimeMinutes: typeof timeSlot.startTimeMinutes === 'number' ? timeSlot.startTimeMinutes : null,
-    endTimeMinutes: typeof timeSlot.endTimeMinutes === 'number' ? timeSlot.endTimeMinutes : null,
-    timeZone: timeSlot.timeZone ?? null,
-  };
-};
-
-type CalendarLayerType =
-  | FacilityCalendarFeedItemType
-  | 'reservation';
-
 const CALENDAR_LAYER_ORDER: CalendarLayerType[] = [
-  'conflict',
   'rental',
   'reservation',
   'event',
@@ -363,14 +157,14 @@ const CALENDAR_LAYER_LABELS: Record<CalendarLayerType, string> = {
 };
 
 const CALENDAR_LAYER_COLORS: Record<CalendarLayerType, string> = {
-  conflict: 'red',
-  rental: 'teal',
-  reservation: 'orange',
-  maintenance_block: 'yellow',
-  event: 'blue',
-  game: 'indigo',
-  official_assignment: 'grape',
-  staff_assignment: 'cyan',
+  conflict: '#d13b4e',
+  rental: '#007f8c',
+  reservation: '#102958',
+  maintenance_block: '#d99a22',
+  event: '#e9462d',
+  game: '#4f5dc7',
+  official_assignment: '#7147a8',
+  staff_assignment: '#0e7490',
 };
 
 const MANAGER_SELECTION_TITLES: Record<ManagerCalendarSelectionMode, string> = {
@@ -414,35 +208,10 @@ const MANAGER_CREATE_TEMPLATES: Array<{
 ];
 
 const FACILITY_FEED_CALENDAR_TYPES = new Set<FacilityCalendarFeedItemType>([
-  'conflict',
   'maintenance_block',
   'official_assignment',
   'staff_assignment',
 ]);
-
-const getBookedEventSourceType = (event: FieldCalendarEntry | null | undefined): string => (
-  typeof (event?.resource as { sourceType?: unknown } | undefined)?.sourceType === 'string'
-    ? String((event?.resource as { sourceType?: unknown }).sourceType).toUpperCase()
-    : ''
-);
-
-const getCalendarEventLayer = (event: CalendarEventData): CalendarLayerType | null => {
-  if (event.metaType === 'selection') {
-    return null;
-  }
-  if (event.metaType === 'facility-feed') {
-    return event.feedType;
-  }
-  if (event.metaType === 'rental') {
-    return 'rental';
-  }
-
-  const sourceType = getBookedEventSourceType(event);
-  if (sourceType === 'RENTAL_BOOKING') {
-    return 'reservation';
-  }
-  return event.id.includes('field-booked-match-') ? 'game' : 'event';
-};
 
 const getFacilitySortOrder = (facility: Facility): number => (
   typeof facility.sortOrder === 'number' && Number.isFinite(facility.sortOrder)
@@ -471,27 +240,7 @@ const compareFacilitiesForManagement = (left: Facility, right: Facility): number
   return left.$id.localeCompare(right.$id);
 };
 
-const getFieldFacilityId = (field?: Field | null): string | null => {
-  if (typeof field?.facilityId === 'string' && field.facilityId.trim().length > 0) {
-    return field.facilityId.trim();
-  }
-  const facility = field?.facility;
-  if (typeof facility === 'string' && facility.trim().length > 0) {
-    return facility.trim();
-  }
-  if (facility && typeof facility === 'object' && typeof facility.$id === 'string') {
-    return facility.$id;
-  }
-  return null;
-};
 
-const getFieldFacility = (field?: Field | null): Facility | null => {
-  const facility = field?.facility;
-  if (facility && typeof facility === 'object' && typeof facility.$id === 'string') {
-    return facility;
-  }
-  return null;
-};
 
 const getFieldFacilityFilterValue = (field?: Field | null): string => (
   getFieldFacilityId(field) ?? UNASSIGNED_FACILITY_FILTER_VALUE
@@ -507,51 +256,7 @@ const getFacilityLabelForFilterValue = (facilities: Facility[], filterValue: str
   return facilities.find((facility) => facility.$id === filterValue)?.name || 'Facility';
 };
 
-const getFieldFacilityFromList = (
-  field: Field | null | undefined,
-  facilities: Facility[],
-): Facility | null => {
-  const expanded = getFieldFacility(field);
-  if (expanded) {
-    return expanded;
-  }
-  const facilityId = getFieldFacilityId(field);
-  return facilityId ? facilities.find((facility) => facility.$id === facilityId) ?? null : null;
-};
 
-const facilityCoordinatesToTuple = (value: Facility['coordinates'] | Organization['coordinates'] | unknown): [number, number] | null => {
-  if (Array.isArray(value) && value.length >= 2) {
-    const lng = Number(value[0]);
-    const lat = Number(value[1]);
-    if (Number.isFinite(lng) && Number.isFinite(lat) && !(lng === 0 && lat === 0)) {
-      return [lng, lat];
-    }
-  }
-  if (value && typeof value === 'object') {
-    const record = value as Record<string, unknown>;
-    const lat = Number(record.lat ?? record.latitude);
-    const lng = Number(record.lng ?? record.long ?? record.longitude);
-    if (Number.isFinite(lng) && Number.isFinite(lat) && !(lng === 0 && lat === 0)) {
-      return [lng, lat];
-    }
-  }
-  return null;
-};
-
-const getFieldCoordinatesWithFallback = (
-  field: Field | null | undefined,
-  facility?: Facility | null,
-  organization?: Organization | null,
-): [number, number] | undefined => {
-  const fieldLat = Number(field?.lat);
-  const fieldLng = Number(field?.long);
-  if (Number.isFinite(fieldLat) && Number.isFinite(fieldLng) && !(fieldLat === 0 && fieldLng === 0)) {
-    return [fieldLng, fieldLat];
-  }
-  return facilityCoordinatesToTuple(facility?.coordinates)
-    ?? facilityCoordinatesToTuple(organization?.coordinates)
-    ?? undefined;
-};
 
 const buildFacilityManagementList = (
   organization: Organization | null,
@@ -594,79 +299,6 @@ const minutesToDate = (base: Date, minutes: number): Date => {
   return copy;
 };
 
-const compareRanges = (startA: Date, endA: Date, startB: Date, endB: Date) =>
-  Math.max(startA.getTime(), startB.getTime()) < Math.min(endA.getTime(), endB.getTime());
-
-type PublicRentalInterval = {
-  start: Date;
-  end: Date;
-};
-
-const mergePublicRentalIntervals = (intervals: PublicRentalInterval[]): PublicRentalInterval[] => {
-  const sorted = [...intervals]
-    .filter((interval) => interval.end.getTime() > interval.start.getTime())
-    .sort((left, right) => left.start.getTime() - right.start.getTime());
-  const merged: PublicRentalInterval[] = [];
-
-  sorted.forEach((interval) => {
-    const last = merged[merged.length - 1];
-    if (!last || interval.start.getTime() > last.end.getTime()) {
-      merged.push({
-        start: new Date(interval.start.getTime()),
-        end: new Date(interval.end.getTime()),
-      });
-      return;
-    }
-    if (interval.end.getTime() > last.end.getTime()) {
-      last.end = new Date(interval.end.getTime());
-    }
-  });
-
-  return merged;
-};
-
-const subtractIntervals = (
-  base: PublicRentalInterval,
-  blockers: PublicRentalInterval[],
-): PublicRentalInterval[] => {
-  const overlaps = mergePublicRentalIntervals(
-    blockers.flatMap((blocker) => {
-      if (!compareRanges(base.start, base.end, blocker.start, blocker.end)) {
-        return [];
-      }
-      const start = new Date(Math.max(base.start.getTime(), blocker.start.getTime()));
-      const end = new Date(Math.min(base.end.getTime(), blocker.end.getTime()));
-      return end.getTime() > start.getTime() ? [{ start, end }] : [];
-    }),
-  );
-
-  if (!overlaps.length) {
-    return [{ start: new Date(base.start.getTime()), end: new Date(base.end.getTime()) }];
-  }
-
-  const gaps: PublicRentalInterval[] = [];
-  let cursor = new Date(base.start.getTime());
-  overlaps.forEach((overlap) => {
-    if (overlap.start.getTime() > cursor.getTime()) {
-      gaps.push({
-        start: new Date(cursor.getTime()),
-        end: new Date(overlap.start.getTime()),
-      });
-    }
-    if (overlap.end.getTime() > cursor.getTime()) {
-      cursor = new Date(overlap.end.getTime());
-    }
-  });
-
-  if (cursor.getTime() < base.end.getTime()) {
-    gaps.push({
-      start: new Date(cursor.getTime()),
-      end: new Date(base.end.getTime()),
-    });
-  }
-
-  return gaps;
-};
 
 const buildPublicRentalCalendarEvents = (events: FieldCalendarEntry[]): FieldCalendarEntry[] => {
   const rentalEntries = events.filter((event) => event.metaType === 'rental');
@@ -746,111 +378,70 @@ const fieldMatchesFacilityFilter = (field: Field, filterValue: string): boolean 
   return facilityId === filterValue;
 };
 
-const mondayDayOf = (date: Date): number => ((date.getDay() + 6) % 7);
 
-const alignDateToWeekday = (seed: Date, dayOfWeek: number): Date => {
-  const aligned = new Date(seed.getTime());
-  aligned.setHours(0, 0, 0, 0);
-  const current = mondayDayOf(aligned);
-  let diff = dayOfWeek - current;
-  if (diff < 0) diff += 7;
-  aligned.setDate(aligned.getDate() + diff);
-  return aligned;
+
+function closestCalendarElement(target: EventTarget | null, selector: string): Element | null {
+  const element = target as Element | null;
+  return typeof element?.closest === 'function' ? element.closest(selector) : null;
+}
+
+function isCalendarRangeHandle(target: EventTarget | null): boolean {
+  return Boolean(closestCalendarElement(target, [
+    '.shared-calendar-event__drag-handle',
+    '.rbc-addons-dnd-resize-ns-anchor',
+    '.rbc-addons-dnd-resize-ew-anchor',
+    '.facility-resource-calendar__resize-handle',
+  ].join(', ')));
+}
+
+function calendarStaffEventId(target: EventTarget | null): string {
+  const card = closestCalendarElement(target, '[data-staff-assignment-calendar-event-id]');
+  return card?.getAttribute('data-staff-assignment-calendar-event-id') ?? '';
+}
+
+function calendarEventClassName(event: CalendarEventData, canManage: boolean) {
+  const assignment = isStaffFeedEvent(event, canManage)
+    ? event.resource.source as StaffScheduleAssignment | undefined : undefined;
+  const isOpenSeries = assignment && isOpenParentStaffScheduleSeries(assignment);
+  return [
+    'field-calendar-rbc-event',
+    `field-calendar-rbc-event--${getCalendarEventVariant(event)}`,
+    isOpenSeries ? 'field-calendar-rbc-event--open-staff-series' : '',
+  ].filter(Boolean).join(' ');
+}
+
+function calendarEventCursor(event: CalendarEventData, canManage: boolean, editMode: boolean) {
+  if (canManage && canChangeFacilityEventRange(event, canManage, editMode)) return 'grab';
+  return isStaffFeedEvent(event, canManage) ? 'pointer' : 'default';
+}
+
+function calendarManagerDraftId(event: CalendarEventData): string {
+  const draftId = event.metaType === 'selection' ? event.resource?.slotKey : null;
+  return typeof draftId === 'string' ? draftId : '';
+}
+
+function calendarDraftDataAttributes(event: CalendarEventData) {
+  const draftId = calendarManagerDraftId(event);
+  return draftId ? { 'data-manager-draft-id': draftId } : {};
+}
+
+type CalendarRangeChange = {
+  event: CalendarEventData;
+  start: Date;
+  end: Date;
+  resourceId?: string | number;
 };
 
-const toValidDate = (value: unknown): Date | null => {
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return new Date(value.getTime());
-  }
-  if (typeof value === 'string' || typeof value === 'number') {
-    const parsed = new Date(value);
-    if (!Number.isNaN(parsed.getTime())) {
-      return parsed;
-    }
-  }
-  return null;
-};
+function calendarSelectionChangeOptions(
+  event: SelectionCalendarEntry, resourceId: CalendarRangeChange['resourceId'], interaction: 'move' | 'resize',
+) {
+  const slotKey = event.resource?.slotKey;
+  const options = { slotKey: typeof slotKey === 'string' ? slotKey : undefined, interaction };
+  return interaction === 'resize' ? options : {
+    ...options, resourceId: typeof resourceId === 'string' ? resourceId : event.resourceId,
+  };
+}
 
-const dateWithMinutes = (date: Date, minutes: number): Date => {
-  const next = new Date(date.getTime());
-  next.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
-  return next;
-};
-
-const getStaffAssignmentOccurrenceRangeForDate = (
-  assignment: StaffScheduleAssignment,
-  occurrenceDate: Date,
-): PublicRentalInterval | null => {
-  const timeSlot = assignment.timeSlot ?? null;
-  if (!timeSlot?.repeating) {
-    const start = toValidDate(assignment.plannedStart) ?? toValidDate(timeSlot?.startDate);
-    const end = toValidDate(assignment.plannedEnd) ?? toValidDate(timeSlot?.endDate);
-    if (!start || !end || end.getTime() <= start.getTime()) {
-      return null;
-    }
-    return startOfDay(start).getTime() === startOfDay(occurrenceDate).getTime()
-      ? { start, end }
-      : null;
-  }
-
-  const scheduleStart = toValidDate(timeSlot.startDate);
-  if (!scheduleStart) {
-    return null;
-  }
-  const targetDay = startOfDay(occurrenceDate);
-  const scheduleEnd = toValidDate(timeSlot.endDate);
-  const days = Array.isArray(timeSlot.daysOfWeek) && timeSlot.daysOfWeek.length
-    ? timeSlot.daysOfWeek
-    : [mondayDayOf(scheduleStart)];
-  if (
-    !days.includes(mondayDayOf(targetDay))
-    || targetDay.getTime() < startOfDay(scheduleStart).getTime()
-    || (scheduleEnd && targetDay.getTime() > endOfDay(scheduleEnd).getTime())
-  ) {
-    return null;
-  }
-  const startMinutes = typeof timeSlot.startTimeMinutes === 'number'
-    ? timeSlot.startTimeMinutes
-    : scheduleStart.getHours() * 60 + scheduleStart.getMinutes();
-  const endMinutes = typeof timeSlot.endTimeMinutes === 'number'
-    ? timeSlot.endTimeMinutes
-    : startMinutes + Math.max(30, assignment.plannedMinutes ?? 60);
-  const start = dateWithMinutes(targetDay, startMinutes);
-  const end = dateWithMinutes(targetDay, endMinutes);
-  return end.getTime() > start.getTime() ? { start, end } : null;
-};
-
-const getStaffAssignmentPrimaryRange = (assignment: StaffScheduleAssignment): PublicRentalInterval | null => {
-  const timeSlot = assignment.timeSlot ?? null;
-  const start = toValidDate(assignment.plannedStart) ?? toValidDate(timeSlot?.startDate);
-  const end = toValidDate(assignment.plannedEnd) ?? toValidDate(timeSlot?.endDate);
-  if (!start || !end || end.getTime() <= start.getTime()) {
-    return null;
-  }
-  return { start, end };
-};
-
-const staffAssignmentCanDeleteFollowing = (assignment: StaffScheduleAssignment): boolean => {
-  const timeSlot = assignment.timeSlot ?? null;
-  if (timeSlot?.repeating) {
-    return true;
-  }
-  const range = getStaffAssignmentPrimaryRange(assignment);
-  return Boolean(range && startOfDay(range.start).getTime() !== startOfDay(range.end).getTime());
-};
-
-const isOpenParentStaffScheduleAssignment = (assignment: StaffScheduleAssignment): boolean => (
-  !assignment.parentAssignmentId
-  && !assignment.userId
-  && !assignment.staffMemberId
-);
-
-const isOpenParentStaffScheduleSeries = (assignment: StaffScheduleAssignment): boolean => (
-  isOpenParentStaffScheduleAssignment(assignment)
-  && staffAssignmentCanDeleteFollowing(assignment)
-);
-
-const minutesFromCalendarDate = (date: Date): number => date.getHours() * 60 + date.getMinutes();
 
 const childStaffAssignmentTouchesDeleteScope = (
   assignment: StaffScheduleAssignment,
@@ -868,157 +459,6 @@ const childStaffAssignmentTouchesDeleteScope = (
   return range.end.getTime() > occurrenceStart.getTime();
 };
 
-const buildChildStaffAssignmentClippedToParentResize = ({
-  assignment,
-  parentStartMinutes,
-  parentEndMinutes,
-  shrinkStart,
-  shrinkEnd,
-}: {
-  assignment: StaffScheduleAssignment;
-  parentStartMinutes: number;
-  parentEndMinutes: number;
-  shrinkStart: boolean;
-  shrinkEnd: boolean;
-}): ManagerStaffAssignmentPendingOverride | null => {
-  const range = getStaffAssignmentPrimaryRange(assignment);
-  if (!range) {
-    return null;
-  }
-
-  const targetDay = startOfDay(range.start);
-  let nextStart = range.start;
-  let nextEnd = range.end;
-  if (shrinkStart) {
-    const parentStart = dateWithMinutes(targetDay, parentStartMinutes);
-    if (nextStart.getTime() < parentStart.getTime()) {
-      nextStart = parentStart;
-    }
-  }
-  if (shrinkEnd) {
-    const parentEnd = dateWithMinutes(targetDay, parentEndMinutes);
-    if (nextEnd.getTime() > parentEnd.getTime()) {
-      nextEnd = parentEnd;
-    }
-  }
-
-  if (nextEnd.getTime() <= nextStart.getTime()) {
-    return {
-      action: 'unassign',
-      assignmentId: assignment.id,
-    };
-  }
-  if (nextStart.getTime() === range.start.getTime() && nextEnd.getTime() === range.end.getTime()) {
-    return null;
-  }
-
-  const nextAssignment = buildStaffAssignmentWithCalendarRange(assignment, nextStart, nextEnd, {
-    preserveRepeatingPattern: Boolean(assignment.timeSlot?.repeating),
-  });
-  return nextAssignment ? {
-    action: 'update',
-    assignment: nextAssignment,
-  } : null;
-};
-
-const buildOpenParentStaffSeriesResizeOverrides = ({
-  assignment,
-  children,
-  originalStart,
-  originalEnd,
-  nextStart,
-  nextEnd,
-}: {
-  assignment: StaffScheduleAssignment;
-  children: StaffScheduleAssignment[];
-  originalStart: Date;
-  originalEnd: Date;
-  nextStart: Date;
-  nextEnd: Date;
-}): Array<{ assignmentId: string; override: ManagerStaffAssignmentPendingOverride }> | null => {
-  const parentAssignment = buildStaffAssignmentWithCalendarRange(assignment, nextStart, nextEnd, {
-    preserveRepeatingPattern: true,
-  });
-  if (!parentAssignment) {
-    return null;
-  }
-
-  const originalStartMinutes = minutesFromCalendarDate(originalStart);
-  const originalEndMinutes = minutesFromCalendarDate(originalEnd);
-  const nextStartMinutes = minutesFromCalendarDate(nextStart);
-  const nextEndMinutes = minutesFromCalendarDate(nextEnd);
-  const shrinkStart = nextStartMinutes > originalStartMinutes;
-  const shrinkEnd = nextEndMinutes < originalEndMinutes;
-  const childOverrides = shrinkStart || shrinkEnd
-    ? children.flatMap((child) => {
-        const override = buildChildStaffAssignmentClippedToParentResize({
-          assignment: child,
-          parentStartMinutes: nextStartMinutes,
-          parentEndMinutes: nextEndMinutes,
-          shrinkStart,
-          shrinkEnd,
-        });
-        return override ? [{ assignmentId: child.id, override }] : [];
-      })
-    : [];
-
-  return [
-    ...childOverrides,
-    {
-      assignmentId: assignment.id,
-      override: {
-        action: 'update',
-        assignment: parentAssignment,
-      },
-    },
-  ];
-};
-
-const getPreviousStaffAssignmentOccurrenceRange = (
-  assignment: StaffScheduleAssignment,
-  beforeStart: Date,
-): PublicRentalInterval | null => {
-  const timeSlot = assignment.timeSlot ?? null;
-  if (!timeSlot?.repeating) {
-    return null;
-  }
-  const scheduleStart = toValidDate(timeSlot.startDate);
-  if (!scheduleStart) {
-    return null;
-  }
-  const scheduleEnd = toValidDate(timeSlot.endDate);
-  const days = Array.isArray(timeSlot.daysOfWeek) && timeSlot.daysOfWeek.length
-    ? timeSlot.daysOfWeek
-    : [mondayDayOf(scheduleStart)];
-  const startMinutes = typeof timeSlot.startTimeMinutes === 'number'
-    ? timeSlot.startTimeMinutes
-    : scheduleStart.getHours() * 60 + scheduleStart.getMinutes();
-  const endMinutes = typeof timeSlot.endTimeMinutes === 'number'
-    ? timeSlot.endTimeMinutes
-    : startMinutes + Math.max(30, assignment.plannedMinutes ?? 60);
-  if (endMinutes <= startMinutes) {
-    return null;
-  }
-
-  let cursor = startOfDay(beforeStart);
-  const scheduleStartDay = startOfDay(scheduleStart);
-  for (let attempts = 0; cursor.getTime() >= scheduleStartDay.getTime() && attempts < 3660; attempts += 1) {
-    if (
-      days.includes(mondayDayOf(cursor))
-      && (!scheduleEnd || cursor.getTime() <= endOfDay(scheduleEnd).getTime())
-    ) {
-      const start = dateWithMinutes(cursor, startMinutes);
-      const end = dateWithMinutes(cursor, endMinutes);
-      if (start.getTime() < beforeStart.getTime() && end.getTime() > start.getTime()) {
-        return { start, end };
-      }
-    }
-    const previous = new Date(cursor.getTime());
-    previous.setDate(previous.getDate() - 1);
-    cursor = previous;
-  }
-  return null;
-};
 
 const buildStaffAssignmentEndingAfterOccurrence = (
   assignment: StaffScheduleAssignment,
@@ -1046,227 +486,29 @@ const formatStaffAssignmentDeleteChildLabel = (assignment: StaffScheduleAssignme
   return `${name}${resource}${time}`;
 };
 
-const buildStaffScheduleCalendarItems = ({
-  assignments,
-  fields,
-  facilities,
-  range,
-}: {
-  assignments: StaffScheduleAssignment[];
-  fields: Field[];
-  facilities: Facility[];
-  range: { start: Date; end: Date };
-}): FacilityCalendarFeedItem[] => {
-  const fieldsById = new Map(fields.map((field) => [field.$id, field]));
-  const facilitiesById = new Map(facilities.map((facility) => [facility.$id, facility]));
-
-  const expandAssignment = (assignment: StaffScheduleAssignment): FacilityCalendarFeedItem[] => {
-    const field = assignment.fieldId ? fieldsById.get(assignment.fieldId) ?? null : null;
-    if (!field) {
-      return [];
-    }
-    const timeSlot = assignment.timeSlot ?? null;
-    const assignmentType: FacilityCalendarFeedItemType = assignment.assignmentKind === 'OFFICIAL_SHIFT'
-      ? 'official_assignment'
-      : 'staff_assignment';
-    const facilityId = assignment.facilityId ?? getFieldFacilityId(field);
-    const facility = facilityId ? facilitiesById.get(facilityId) ?? null : null;
-    const facilityName = assignment.facilityName
-      ?? facility?.name
-      ?? getFieldFacility(field)?.name
-      ?? 'Unassigned facility';
-    const fieldName = assignment.fieldName ?? getFacilityScopedFieldDisplayName(field);
-    const title = assignment.userName
-      || (assignmentType === 'official_assignment' ? 'Open official shift' : 'Open staff shift');
-    const assignmentItems: FacilityCalendarFeedItem[] = [];
-
-    const pushItem = (start: Date, end: Date) => {
-      if (end.getTime() <= start.getTime() || !compareRanges(start, end, range.start, range.end)) {
-        return;
-      }
-      assignmentItems.push({
-        id: `facility-calendar-staff-schedule-${assignment.id}-${field.$id}-${start.getTime()}`,
-        type: assignmentType,
-        title,
-        start,
-        end,
-        facilityId: facilityId ?? null,
-        facilityName,
-        fieldId: field.$id,
-        fieldName,
-        sourceId: assignment.id,
-        parentId: assignment.parentAssignmentId ?? null,
-        userId: assignment.userId ?? null,
-        staffMemberId: assignment.staffMemberId ?? null,
-        status: assignment.status ?? null,
-        source: assignment,
-      });
-    };
-
-    if (!timeSlot?.repeating) {
-      const start = toValidDate(assignment.plannedStart) ?? toValidDate(timeSlot?.startDate);
-      const end = toValidDate(assignment.plannedEnd) ?? toValidDate(timeSlot?.endDate);
-      if (start && end) {
-        pushItem(start, end);
-      }
-      return assignmentItems;
-    }
-
-    const scheduleStart = toValidDate(timeSlot.startDate);
-    if (!scheduleStart) {
-      return assignmentItems;
-    }
-    const scheduleEnd = toValidDate(timeSlot.endDate);
-    const days = Array.isArray(timeSlot.daysOfWeek) && timeSlot.daysOfWeek.length
-      ? timeSlot.daysOfWeek
-      : [mondayDayOf(scheduleStart)];
-    const startMinutes = typeof timeSlot.startTimeMinutes === 'number'
-      ? timeSlot.startTimeMinutes
-      : scheduleStart.getHours() * 60 + scheduleStart.getMinutes();
-    const endMinutes = typeof timeSlot.endTimeMinutes === 'number'
-      ? timeSlot.endTimeMinutes
-      : startMinutes + Math.max(30, assignment.plannedMinutes ?? 60);
-
-    let cursor = startOfDay(range.start);
-    while (cursor.getTime() <= range.end.getTime()) {
-      const cursorDay = mondayDayOf(cursor);
-      if (
-        days.includes(cursorDay)
-        && cursor.getTime() >= startOfDay(scheduleStart).getTime()
-        && (!scheduleEnd || cursor.getTime() <= endOfDay(scheduleEnd).getTime())
-      ) {
-        pushItem(dateWithMinutes(cursor, startMinutes), dateWithMinutes(cursor, endMinutes));
-      }
-      const next = new Date(cursor.getTime());
-      next.setDate(next.getDate() + 1);
-      cursor = next;
-    }
-
-    return assignmentItems;
-  };
-
-  const childItems = assignments
-    .filter((assignment) => Boolean(assignment.parentAssignmentId))
-    .flatMap((assignment) => expandAssignment(assignment));
-  const coverageByParentId = childItems.reduce((acc, item) => {
-    if (!item.parentId) {
-      return acc;
-    }
-    const existing = acc.get(item.parentId) ?? [];
-    existing.push({
-      fieldId: item.fieldId,
-      start: item.start,
-      end: item.end,
-    });
-    acc.set(item.parentId, existing);
-    return acc;
-  }, new Map<string, Array<{ fieldId: string | null; start: Date; end: Date }>>());
-
-  const parentItems = assignments
-    .filter((assignment) => !assignment.parentAssignmentId)
-    .flatMap((assignment) => {
-      const coveredRanges = coverageByParentId.get(assignment.id) ?? [];
-      return expandAssignment(assignment).flatMap((item) => {
-        const relevantCoveredRanges = coveredRanges
-          .filter((covered) => (
-            covered.fieldId === item.fieldId
-            && compareRanges(covered.start, covered.end, item.start, item.end)
-          ))
-          .map((covered) => ({ start: covered.start, end: covered.end }));
-        if (!relevantCoveredRanges.length) {
-          return [item];
-        }
-        return subtractIntervals(item, relevantCoveredRanges).map((gap) => ({
-          ...item,
-          id: `${item.id}-open-gap-${gap.start.getTime()}-${gap.end.getTime()}`,
-          start: gap.start,
-          end: gap.end,
-        }));
-      });
-    });
-
-  return [...parentItems, ...childItems];
-};
-
-const buildManagerCalendarDraftOccurrences = (
-  draft: ManagerCalendarDraft,
-  rangeStart: Date,
-  rangeEnd: Date,
-): Array<{ start: Date; end: Date }> => {
-  const start = new Date(draft.start);
-  const end = new Date(draft.end);
-  if (
-    Number.isNaN(start.getTime())
-    || Number.isNaN(end.getTime())
-    || end.getTime() <= start.getTime()
-  ) {
-    return [];
-  }
-
-  const rentalOptions = draft.mode === 'rental' ? draft.rental : null;
-  const staffOptions = draft.mode !== 'rental' ? draft.staff : null;
-  const repeating = draft.mode === 'rental'
-    ? Boolean(rentalOptions?.repeating)
-    : Boolean(staffOptions?.repeating);
-
-  if (!repeating) {
-    return compareRanges(start, end, rangeStart, rangeEnd) ? [{ start, end }] : [];
-  }
-
-  const startMinutes = start.getHours() * 60 + start.getMinutes();
-  const fallbackEndMinutes = end.getHours() * 60 + end.getMinutes();
-  const endMinutes = draft.mode === 'rental' && typeof rentalOptions?.endTimeMinutes === 'number'
-    ? rentalOptions.endTimeMinutes
-    : fallbackEndMinutes;
-  const effectiveStartMinutes = draft.mode === 'rental' && typeof rentalOptions?.startTimeMinutes === 'number'
-    ? rentalOptions.startTimeMinutes
-    : startMinutes;
-  if (endMinutes <= effectiveStartMinutes) {
-    return [];
-  }
-
-  const fallbackDay = mondayDayOf(start);
-  const repeatDays = draft.mode === 'rental'
-    ? normalizeDaysOfWeek(rentalOptions?.daysOfWeek, rentalOptions?.dayOfWeek ?? fallbackDay)
-    : normalizeDaysOfWeek(staffOptions?.daysOfWeek, fallbackDay);
-  if (!repeatDays.length) {
-    return [];
-  }
-
-  const repeatEndDate = draft.mode === 'rental'
-    ? toValidDate(rentalOptions?.endDate)
-    : toValidDate(staffOptions?.repeatEndDate);
-  const scheduleStartDay = startOfDay(start);
-  const scheduleEndDay = repeatEndDate ? endOfDay(repeatEndDate) : endOfDay(rangeEnd);
-  const cursorStartMs = Math.max(startOfDay(rangeStart).getTime(), scheduleStartDay.getTime());
-  const cursorEndMs = Math.min(endOfDay(rangeEnd).getTime(), scheduleEndDay.getTime());
-  if (cursorEndMs < cursorStartMs) {
-    return [];
-  }
-
-  const occurrences: Array<{ start: Date; end: Date }> = [];
-  let cursor = startOfDay(new Date(cursorStartMs));
-  const cursorEnd = new Date(cursorEndMs);
-  while (cursor.getTime() <= cursorEnd.getTime()) {
-    if (repeatDays.includes(mondayDayOf(cursor))) {
-      const occurrenceStart = dateWithMinutes(cursor, effectiveStartMinutes);
-      const occurrenceEnd = dateWithMinutes(cursor, endMinutes);
-      if (
-        occurrenceEnd.getTime() > occurrenceStart.getTime()
-        && compareRanges(occurrenceStart, occurrenceEnd, rangeStart, rangeEnd)
-      ) {
-        occurrences.push({ start: occurrenceStart, end: occurrenceEnd });
-      }
-    }
-    const next = new Date(cursor.getTime());
-    next.setDate(next.getDate() + 1);
-    cursor = next;
-  }
-
-  return occurrences;
-};
-
 const getRentalSlotPendingUpdateKey = (fieldId: string, slotId: string) => `${fieldId}:${slotId}`;
+
+function rentalCalendarDropContext(event: CalendarEventData | null | undefined, start: unknown, end: unknown) {
+  if (event?.metaType !== 'rental' || !start || !end) return null;
+  const slot = event.resource as TimeSlot | undefined;
+  const range = parseCalendarDropRange(start, end);
+  return slot?.$id && range ? { slot, range } : null;
+}
+
+function rentalSlotModalChange(submission: CreateRentalSlotModalSubmitPayload) {
+  if (!submission.slot?.$id || !submission.field?.$id || !submission.updatePayload) return null;
+  return {
+    key: getRentalSlotPendingUpdateKey(submission.field.$id, submission.slot.$id),
+    action: 'update' as const,
+    fieldId: submission.field.$id,
+    slotId: submission.slot.$id,
+    slot: submission.updatePayload,
+  };
+}
+
+const rentalSlotTemplateIds = (value: TimeSlot['requiredTemplateIds']): string[] => (
+  Array.isArray(value) ? value : []
+);
 
 const buildRentalSlotUpdateFromCalendarRange = (
   slot: TimeSlot,
@@ -1292,13 +534,14 @@ const buildRentalSlotUpdateFromCalendarRange = (
     : [dayOfWeek];
   const baseUpdate: RentalSlotDragUpdate = {
     $id: slot.$id,
+    timeZone: slot.timeZone,
     dayOfWeek: repeatDays[0] as NonNullable<TimeSlot['dayOfWeek']>,
     daysOfWeek: repeatDays as NonNullable<TimeSlot['dayOfWeek']>[],
     repeating,
     scheduledFieldId: fieldId,
     scheduledFieldIds: [fieldId],
-    requiredTemplateIds: Array.isArray(slot.requiredTemplateIds) ? slot.requiredTemplateIds : [],
-    hostRequiredTemplateIds: Array.isArray(slot.hostRequiredTemplateIds) ? slot.hostRequiredTemplateIds : [],
+    requiredTemplateIds: rentalSlotTemplateIds(slot.requiredTemplateIds),
+    hostRequiredTemplateIds: rentalSlotTemplateIds(slot.hostRequiredTemplateIds),
     price: slot.price,
   };
 
@@ -1391,6 +634,36 @@ const mergeOrganizationPreservingFieldCalendarHydration = (
   };
 };
 
+function calendarIdsEqual(
+  current: { $id?: string }[] | null | undefined,
+  hydrated: { $id?: string }[] | null | undefined,
+): boolean {
+  const currentRows = current ?? [];
+  const hydratedRows = hydrated ?? [];
+  return currentRows.length === hydratedRows.length
+    && currentRows.every((item, index) => item?.$id === hydratedRows[index]?.$id);
+}
+
+function mergeHydratedCalendarField(field: Field, hydrated: Field | undefined): Field {
+  if (!hydrated) return field;
+  if (calendarIdsEqual(field.events, hydrated.events) && calendarIdsEqual(field.matches, hydrated.matches)) {
+    return field;
+  }
+  return { ...field, events: hydrated.events, matches: hydrated.matches };
+}
+
+type CalendarSelectionWindowOptions = {
+  slotKey?: string;
+  resourceId?: string | null;
+  interaction?: 'move' | 'resize';
+};
+
+function rentalCalendarSelectionResources(resourceId: unknown, visibleFieldIds: string[], fields: Field[]) {
+  const fieldIds = normalizeFieldIds(typeof resourceId === 'string' ? [resourceId] : visibleFieldIds);
+  const primaryFieldId = fieldIds[0] ?? fields[0]?.$id;
+  return { fieldIds, primaryFieldId };
+}
+
 type FieldsTabContentProps = {
   organization: Organization;
   organizationId: string;
@@ -1403,25 +676,122 @@ type FieldsTabContentProps = {
   onRentalSelectionReady?: (payload: RentalSelectionCheckoutPayload) => void;
 };
 
-export default function FieldsTabContent({
+function fieldsTabOptions(props: FieldsTabContentProps) {
+  return {
+    ...props,
+    backHref: props.backHref ?? '/discover',
+    backLabel: props.backLabel ?? 'Back to Discover',
+    showBackButton: props.showBackButton ?? true,
+    primaryActionLabel: props.primaryActionLabel ?? 'Reserve resources',
+    canManageFields: props.canManageFields ?? false,
+  };
+}
+
+function canManageFacilities(explicitPermission: boolean, user: UserData | null, organization: Organization | null) {
+  return Boolean(explicitPermission || (user && organization && user.$id === organization.ownerId));
+}
+
+function staffEditorState(
+  mode: Exclude<ManagerCalendarSelectionMode, 'rental'>,
+  assignment: StaffScheduleAssignment | null,
+  parent: StaffScheduleAssignment | null,
+) {
+  const staffTimeslotAssignmentKind: StaffScheduleAssignmentKind = mode === 'official_assignment'
+    ? 'OFFICIAL_SHIFT' : 'STAFF_SHIFT';
+  return {
+    staffTimeslotAssignmentKind,
+    isEditingStaffAssignment: Boolean(assignment),
+    isEditingChildStaffAssignment: Boolean(assignment?.parentAssignmentId),
+    isAssigningStaffOccurrence: Boolean(parent) && !assignment,
+  };
+}
+
+function initialManagerSelectionRange(previous: SelectionState | null) {
+  const start = previous?.start ? new Date(previous.start) : new Date();
+  start.setMinutes(0, 0, 0);
+  const end = previous?.end && previous.end.getTime() > start.getTime()
+    ? new Date(previous.end)
+    : new Date(start.getTime() + MIN_SELECTION_MS);
+  return { start, end };
+}
+
+function prepareCalendarEditorSelection(
+  selection: SelectionState | null,
+  label: 'Rental slots' | 'Staff timeslots',
+): { selection: SelectionState } | { error: string } {
+  if (!selection || !normalizeFieldIds(selection.fieldIds).length) {
+    return { error: 'Select at least one resource and a time range first.' };
+  }
+  if (selection.start.toDateString() !== selection.end.toDateString()) {
+    return { error: `${label} must stay within a single day. Adjust the selection.` };
+  }
+  return { selection };
+}
+
+function staffEditorValues(options: ManagerCalendarDraft['staff'], start: Date) {
+  const staff = options ?? {};
+  return {
+    userId: staff.userId ?? null,
+    overrideAmount: dollarsFromCents(staff.rateOverrideCents),
+    notes: staff.notes ?? '',
+    repeating: Boolean(staff.repeating),
+    repeatDays: Array.isArray(staff.daysOfWeek) && staff.daysOfWeek.length
+      ? staff.daysOfWeek : [mondayDayOf(start)],
+    repeatEndDate: staff.repeatEndDate ? toValidDate(staff.repeatEndDate) : null,
+  };
+}
+
+function staffAssignmentEditorValues(assignment: StaffScheduleAssignment, start: Date) {
+  const timeSlot = assignment.timeSlot;
+  return staffEditorValues({
+    userId: assignment.userId,
+    rateOverrideCents: assignment.rateOverrideCents,
+    notes: assignment.notes ?? '',
+    repeating: timeSlot?.repeating,
+    daysOfWeek: timeSlot?.daysOfWeek ?? undefined,
+    repeatEndDate: timeSlot?.endDate,
+  }, start);
+}
+
+function staffAssignmentEditorState(item: FacilityCalendarFeedItem, assignment: StaffScheduleAssignment, start: Date) {
+  const isOpen = isOpenParentStaffScheduleAssignment(assignment);
+  const mode: Exclude<ManagerCalendarSelectionMode, 'rental'> = item.type === 'official_assignment'
+    ? 'official_assignment' : 'staff_assignment';
+  return {
+    mode,
+    fieldId: isOpen ? item.fieldId : item.fieldId ?? assignment.fieldId ?? null,
+    editingAssignment: isOpen ? null : assignment,
+    parentAssignment: isOpen ? assignment : null,
+    values: isOpen
+      ? staffEditorValues({ notes: assignment.notes ?? '' }, start)
+      : staffAssignmentEditorValues(assignment, start),
+  };
+}
+
+export default function FieldsTabContent(props: FieldsTabContentProps) {
+  return <FieldsTabWorkspace {...fieldsTabOptions(props)} />;
+}
+
+function FieldsTabWorkspace({
   organization,
   organizationId,
   currentUser,
-  backHref = '/discover',
-  backLabel = 'Back to Discover',
-  showBackButton = true,
-  primaryActionLabel = 'Reserve resources',
-  canManageFields = false,
+  backHref,
+  backLabel,
+  showBackButton,
+  primaryActionLabel,
+  canManageFields,
   onRentalSelectionReady,
-}: FieldsTabContentProps) {
+}: ReturnType<typeof fieldsTabOptions>) {
   const router = useRouter();
   const [org, setOrg] = useState<Organization | null>(organization ?? null);
   const [orgLoading, setOrgLoading] = useState(!organization);
   const [orgError, setOrgError] = useState<string | null>(null);
   const organizationHasStripeAccount = canOrganizationUsePaidBilling(org);
-  const canManage = Boolean(canManageFields || (currentUser && org && currentUser.$id === org.ownerId));
+  const canManage = canManageFacilities(canManageFields, currentUser, org);
 
   const [selection, setSelection] = useState<SelectionState | null>(null);
+  const selectionFieldIds = selection?.fieldIds;
   const managerResourceSelectionHydratedKeyRef = useRef<string | null>(null);
   const [readonlyVisibleFieldIds, setReadonlyVisibleFieldIds] = useState<string[]>([]);
   const [calendarView, setCalendarView] = useState<View>('week');
@@ -1657,7 +1027,7 @@ export default function FieldsTabContent({
 
   useEffect(() => {
     if (canManage) return;
-    if (!rentalListings.length || (selection?.fieldIds?.length ?? 0) > 0) return;
+    if (!rentalListings.length || (selectionFieldIds?.length ?? 0) > 0) return;
 
     const firstListing = rentalListings[0];
     const baseDate = new Date(firstListing.nextOccurrence);
@@ -1675,11 +1045,11 @@ export default function FieldsTabContent({
       end: initialEnd,
     });
     setCalendarDate(new Date(firstListing.nextOccurrence.getTime()));
-  }, [canManage, rentalListings, selection?.fieldIds]);
+  }, [canManage, rentalListings, selectionFieldIds]);
 
   useEffect(() => {
     if (canManage) return;
-    if ((selection?.fieldIds?.length ?? 0) > 0) return;
+    if ((selectionFieldIds?.length ?? 0) > 0) return;
     if (!fields.length) return;
     if (rentalListings.length) return;
 
@@ -1689,7 +1059,7 @@ export default function FieldsTabContent({
       const end = new Date(start.getTime() + MIN_SELECTION_MS);
       return { fieldIds: [fields[0].$id], start, end };
     });
-  }, [canManage, fields, rentalListings.length, selection?.fieldIds]);
+  }, [canManage, fields, rentalListings.length, selectionFieldIds]);
 
   useEffect(() => {
     if (!canManage || !managerResourceSelectionStorageKey) {
@@ -1711,11 +1081,7 @@ export default function FieldsTabContent({
       setCalendarDate(new Date(firstListing.nextOccurrence.getTime()));
     }
     setSelection((prev) => {
-      const start = prev?.start ? new Date(prev.start) : new Date();
-      start.setMinutes(0, 0, 0);
-      const end = prev?.end && prev.end.getTime() > start.getTime()
-        ? new Date(prev.end)
-        : new Date(start.getTime() + MIN_SELECTION_MS);
+      const { start, end } = initialManagerSelectionRange(prev);
       const currentFieldIds = normalizeFieldIds(prev?.fieldIds ?? []).filter((fieldId) => allFieldIds.includes(fieldId));
       return fieldIdArraysEqual(currentFieldIds, nextFieldIds) && prev
         ? prev
@@ -1757,12 +1123,7 @@ export default function FieldsTabContent({
         return validIds.length === prev.fieldIds.length ? prev : { ...prev, fieldIds: validIds };
       }
 
-      const start = prev?.start ? new Date(prev.start) : new Date();
-      start.setMinutes(0, 0, 0);
-      const end = prev?.end && prev.end.getTime() > start.getTime()
-        ? new Date(prev.end)
-        : new Date(start.getTime() + MIN_SELECTION_MS);
-      return { fieldIds: facilityFilteredFieldIds, start, end };
+      return { fieldIds: facilityFilteredFieldIds, ...initialManagerSelectionRange(prev) };
     });
   }, [canManage, facilityFilteredFieldIds]);
 
@@ -1783,8 +1144,8 @@ export default function FieldsTabContent({
   }, [canManage, facilityFilteredFieldIds, rentalListings]);
 
   const selectedFieldIds = useMemo(
-    () => normalizeFieldIds(selection?.fieldIds ?? []),
-    [selection?.fieldIds],
+    () => normalizeFieldIds(selectionFieldIds ?? []),
+    [selectionFieldIds],
   );
   useEffect(() => {
     if (!canManage || !managerResourceSelectionStorageKey) {
@@ -1850,13 +1211,10 @@ export default function FieldsTabContent({
     }
   }, [calendarLayerFilters, canManage, loadStaffSchedule, staffScheduleLoaded]);
 
-  const staffTimeslotAssignmentKind: StaffScheduleAssignmentKind = staffTimeslotMode === 'official_assignment'
-    ? 'OFFICIAL_SHIFT'
-    : 'STAFF_SHIFT';
   const isEditingManagerDraft = Boolean(editingManagerDraftId);
-  const isEditingStaffAssignment = Boolean(editingStaffAssignment);
-  const isEditingChildStaffAssignment = Boolean(editingStaffAssignment?.parentAssignmentId);
-  const isAssigningStaffOccurrence = Boolean(staffTimeslotParentAssignment) && !isEditingStaffAssignment;
+  const {
+    staffTimeslotAssignmentKind, isEditingStaffAssignment, isEditingChildStaffAssignment, isAssigningStaffOccurrence,
+  } = staffEditorState(staffTimeslotMode, editingStaffAssignment, staffTimeslotParentAssignment);
   const staffTimeslotUserOptions = useMemo(() => staffScheduleMembers
     .filter((staffMember) => (
       staffTimeslotAssignmentKind === 'OFFICIAL_SHIFT'
@@ -2113,18 +1471,6 @@ export default function FieldsTabContent({
     [fieldIdsToHydrate, calendarRangeStartMs, calendarRangeEndMs],
   );
 
-  const handleCalendarRangeChange = useCallback((range: any, _view?: View) => {
-    if (!range) {
-      return;
-    }
-    const nextDate = Array.isArray(range)
-      ? toValidDate(range[0])
-      : toValidDate(range?.start);
-    if (nextDate) {
-      setCalendarDate(nextDate);
-    }
-  }, []);
-
   const selectionCalendarEvents = useMemo<SelectionCalendarEntry[]>(() => {
     if (!fields.length) {
       return [];
@@ -2296,6 +1642,9 @@ export default function FieldsTabContent({
     [calendarRange, facilityCalendarFieldsWithPendingRentalUpdates],
   );
   const facilityCalendarSummary = facilityCalendarFeed.summary;
+  const conflictingEventIds = useMemo(() => new Set(facilityCalendarSummary.conflicts.flatMap(
+    (conflict) => [conflict.rentalEntryId, conflict.bookingEntryId],
+  )), [facilityCalendarSummary.conflicts]);
   const staffScheduleCalendarItems = useMemo(
     () => buildStaffScheduleCalendarItems({
       assignments: visibleStaffScheduleAssignments,
@@ -2367,20 +1716,7 @@ export default function FieldsTabContent({
     [calendarRange.end, calendarRange.start],
   );
 
-  const defaultTimeRange = useMemo<[number, number]>(() => [0, 24], []);
-  const visibleHourSpan = useMemo(() => Math.max(1, defaultTimeRange[1] - defaultTimeRange[0]), [defaultTimeRange]);
-
-  const slotGroupPropGetter = useCallback<SlotGroupPropGetter>(() => {
-    const baseHeight = MIN_FIELD_CALENDAR_HEIGHT / visibleHourSpan;
-    return {
-      style: {
-        height: `${baseHeight}px`,
-        minHeight: `${baseHeight}px`,
-        flex: '0 0 auto',
-      },
-    };
-  }, [visibleHourSpan]);
-
+  const defaultTimeRange = useMemo<[number, number]>(() => [8, 22], []);
   const minTime = useMemo(() => new Date(1970, 0, 1, defaultTimeRange[0], 0, 0), [defaultTimeRange]);
   const maxTime = useMemo(() => {
     const hour = Math.min(24, Math.max(defaultTimeRange[1], defaultTimeRange[0] + 1));
@@ -2389,13 +1725,6 @@ export default function FieldsTabContent({
     }
     return new Date(1970, 0, 1, hour, 0, 0);
   }, [defaultTimeRange]);
-  const scrollToTime = useMemo(
-    () => {
-      const base = selection?.start ?? new Date();
-      return new Date(1970, 0, 1, base.getHours() || 0, base.getMinutes() || 0, 0);
-    },
-    [selection?.start],
-  );
   const calendarBlockers = useMemo(
     () => baseCalendarEvents.filter((event) => event.metaType === 'booked'),
     [baseCalendarEvents],
@@ -2425,93 +1754,44 @@ export default function FieldsTabContent({
       event.stopPropagation();
       return;
     }
-    const target = event.target as Element | null;
-    if (
-      managerCalendarEditMode
-      && typeof target?.closest === 'function'
-      && (
-        target.closest('.shared-calendar-event__drag-handle')
-        || target.closest('.rbc-addons-dnd-resize-ns-anchor')
-        || target.closest('.rbc-addons-dnd-resize-ew-anchor')
-      )
-    ) {
+    if (closestCalendarElement(event.target, 'button')) {
       return;
     }
-    const card = typeof target?.closest === 'function'
-      ? target.closest('[data-staff-assignment-calendar-event-id]')
-      : null;
-    const eventId = card?.getAttribute('data-staff-assignment-calendar-event-id') ?? '';
+    if (managerCalendarEditMode && isCalendarRangeHandle(event.target)) {
+      return;
+    }
+    const eventId = calendarStaffEventId(event.target);
     if (!eventId) {
       return;
     }
     const calendarEvent = staffAssignmentCalendarEventById.get(eventId);
-    const item = calendarEvent?.resource as FacilityCalendarFeedItem | undefined;
-    if (!calendarEvent || !item) {
+    if (!calendarEvent || !isStaffFeedEvent(calendarEvent, canManage)) {
       return;
     }
     event.stopPropagation();
-    openStaffAssignmentEditModalRef.current?.(item, calendarEvent.start, calendarEvent.end);
+    openStaffAssignmentEditModalRef.current?.(calendarEvent.resource, calendarEvent.start, calendarEvent.end);
   }, [canManage, isStaffAssignmentActivationSuppressed, managerCalendarEditMode, staffAssignmentCalendarEventById]);
 
   const handleCalendarShellStaffPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (!canManage || !managerCalendarEditMode) {
       return;
     }
-    const target = event.target as Element | null;
-    if (
-      typeof target?.closest === 'function'
-      && (
-        target.closest('.shared-calendar-event__drag-handle')
-        || target.closest('.rbc-addons-dnd-resize-ns-anchor')
-        || target.closest('.rbc-addons-dnd-resize-ew-anchor')
-      )
-    ) {
+    if (isCalendarRangeHandle(event.target)) {
       suppressStaffAssignmentActivation(1200);
     }
   }, [canManage, managerCalendarEditMode, suppressStaffAssignmentActivation]);
 
   const eventPropGetter = useCallback(
     (event: CalendarEventData) => {
-      const variant = getCalendarEventVariant(event);
-      const isEditableManagerEvent = canManage
-        && managerCalendarEditMode
-        && (
-          event.metaType === 'selection'
-          || event.metaType === 'rental'
-          || (
-            event.metaType === 'facility-feed'
-            && (event.feedType === 'staff_assignment' || event.feedType === 'official_assignment')
-          )
-        );
-      const managerDraftId = event.metaType === 'selection' && typeof event.resource?.slotKey === 'string'
-        ? event.resource.slotKey
-        : null;
-      const isStaffAssignmentEvent = canManage
-        && event.metaType === 'facility-feed'
-        && (event.feedType === 'staff_assignment' || event.feedType === 'official_assignment');
-      const staffAssignment = isStaffAssignmentEvent
-        ? ((event.resource as FacilityCalendarFeedItem | undefined)?.source as StaffScheduleAssignment | undefined)
-        : undefined;
-      const isOpenStaffSeriesEvent = Boolean(
-        staffAssignment
-        && isOpenParentStaffScheduleSeries(staffAssignment),
-      );
+      const isStaffAssignmentEvent = isStaffFeedEvent(event, canManage);
       return {
-        className: [
-          'field-calendar-rbc-event',
-          `field-calendar-rbc-event--${variant}`,
-          isOpenStaffSeriesEvent ? 'field-calendar-rbc-event--open-staff-series' : '',
-        ].filter(Boolean).join(' '),
+        className: calendarEventClassName(event, canManage),
         style: {
           backgroundColor: 'transparent',
           border: 0,
           color: 'inherit',
           padding: 0,
-          cursor: isEditableManagerEvent
-            ? 'grab'
-            : isStaffAssignmentEvent
-              ? 'pointer'
-              : 'default',
+          cursor: calendarEventCursor(event, canManage, managerCalendarEditMode),
         },
         onPointerUp: isStaffAssignmentEvent && !managerCalendarEditMode
           ? (pointerEvent: ReactPointerEvent<HTMLElement>) => {
@@ -2528,7 +1808,7 @@ export default function FieldsTabContent({
               }
           }
         : undefined,
-        ...(managerDraftId ? { 'data-manager-draft-id': managerDraftId } : {}),
+        ...calendarDraftDataAttributes(event),
       };
     },
     [canManage, isStaffAssignmentActivationSuppressed, managerCalendarEditMode],
@@ -2562,40 +1842,6 @@ export default function FieldsTabContent({
     },
     [canManage, isBlockedRange],
   );
-  const handleSelecting = useCallback((slotInfo: any) => {
-    if (canManage) {
-      return true;
-    }
-    if (!slotInfo?.start) {
-      return true;
-    }
-    const slotStart = new Date(slotInfo.start);
-    const slotEnd = slotInfo?.end
-      ? new Date(slotInfo.end)
-      : new Date(slotStart.getTime() + MIN_SELECTION_MS);
-    if (isPastRentalRangeStart(slotStart)) {
-      return false;
-    }
-    const resourceId =
-      typeof slotInfo.resourceId === 'string'
-        ? slotInfo.resourceId
-        : typeof slotInfo.resourceId === 'number'
-          ? String(slotInfo.resourceId)
-          : undefined;
-    return !isBlockedRange(slotStart, slotEnd, resourceId);
-  }, [canManage, isBlockedRange]);
-
-  const existingConflicts = useMemo(() => {
-    if (!selectedFieldIds.length || !selection) return [];
-    const selectionStart = selection.start;
-    const selectionEnd = selection.end;
-    return baseCalendarEvents.filter((event) => {
-      if (event.metaType === 'rental') return false;
-      return selectedFieldIds.includes(event.resourceId)
-        && compareRanges(selectionStart, selectionEnd, event.start, event.end);
-    });
-  }, [baseCalendarEvents, selection, selectedFieldIds]);
-
   useEffect(() => {
     if (!fieldEventsRequestKey || !fieldIdsToHydrate.length) return;
     if (lastLoadedFieldEventsKeyRef.current === fieldEventsRequestKey) return;
@@ -2629,25 +1875,10 @@ export default function FieldsTabContent({
 
         setOrg((prev) => {
           if (!prev || !prev.fields) return prev;
-          let changed = false;
           const nextFields = prev.fields.map((field) =>
-            hydratedById.has(field.$id)
-              ? (() => {
-                const hydrated = hydratedById.get(field.$id) as Field;
-                const eventsUnchanged =
-                  (field.events?.length ?? 0) === (hydrated.events?.length ?? 0) &&
-                  (field.events || []).every((event, idx) => event?.$id === hydrated.events?.[idx]?.$id);
-                const matchesUnchanged =
-                  (field.matches?.length ?? 0) === (hydrated.matches?.length ?? 0) &&
-                  (field.matches || []).every((match, idx) => match?.$id === hydrated.matches?.[idx]?.$id);
-                if (eventsUnchanged && matchesUnchanged) {
-                  return field;
-                }
-                changed = true;
-                return { ...field, events: hydrated.events, matches: hydrated.matches };
-              })()
-              : field,
+            mergeHydratedCalendarField(field, hydratedById.get(field.$id)),
           );
+          const changed = nextFields.some((field, index) => field !== prev.fields?.[index]);
           return changed ? { ...prev, fields: nextFields } : prev;
         });
         lastLoadedFieldEventsKeyRef.current = fieldEventsRequestKey;
@@ -2666,26 +1897,12 @@ export default function FieldsTabContent({
   }, [calendarRangeEndMs, calendarRangeStartMs, canManage, fieldEventsRequestKey, fieldIdsToHydrate, fields]);
 
   const summaryColor = useMemo(() => {
-    if (canManage) {
-      if (!selectedFieldIds.length || !selection) return 'dimmed';
-      return existingConflicts.length ? 'yellow' : 'teal';
-    }
     if (!currentUser) return 'dimmed';
     if (hasPendingConflictChecks) return 'yellow';
     return canReserveRentalResources ? 'teal' : 'red';
-  }, [canManage, canReserveRentalResources, currentUser, existingConflicts.length, hasPendingConflictChecks, selectedFieldIds.length, selection]);
+  }, [canReserveRentalResources, currentUser, hasPendingConflictChecks]);
 
   const summaryText = useMemo(() => {
-    if (canManage) {
-      if (!selectedFieldIds.length || !selection) {
-        return 'Select at least one resource to continue.';
-      }
-      const startLabel = formatDisplayDateTime(selection.start);
-      const endLabel = formatDisplayTime(selection.end);
-      const conflictSuffix = existingConflicts.length ? ' (overlaps an event or match on this date)' : '';
-      const fieldsSuffix = selectedFieldIds.length > 1 ? ` across ${selectedFieldIds.length} resources` : '';
-      return `Draft range: ${startLabel} – ${endLabel}${fieldsSuffix}${conflictSuffix}.`;
-    }
     if (!currentUser) {
       return 'Sign in to reserve resources.';
     }
@@ -2699,117 +1916,99 @@ export default function FieldsTabContent({
       return 'Resolve selection errors before reserving resources.';
     }
     return `${rentalSelections.length} selection${rentalSelections.length === 1 ? '' : 's'} ready • Total ${formatPrice(totalRentalCents)}`;
-  }, [canManage, canReserveRentalResources, currentUser, existingConflicts.length, hasPendingConflictChecks, rentalSelections.length, selectedFieldIds.length, selection, totalRentalCents]);
+  }, [canReserveRentalResources, currentUser, hasPendingConflictChecks, rentalSelections.length, totalRentalCents]);
+
+  const applyManagerSelectionWindow = useCallback(
+    (start: Date, end: Date, params: CalendarSelectionWindowOptions) => {
+      const nextStart = new Date(start);
+      const nextEnd = new Date(Math.max(end.getTime(), nextStart.getTime() + MIN_SELECTION_MS));
+      if (!params.slotKey) {
+        setSelection((prev) => {
+          if (!prev?.fieldIds.length) return prev;
+          return { ...prev, start: nextStart, end: nextEnd };
+        });
+        return;
+      }
+
+      const matchingDraft = managerCalendarDrafts.find((draft) => draft.id === params.slotKey);
+      const targetFieldIds = typeof params.resourceId === 'string' && params.resourceId.trim().length > 0
+        ? [params.resourceId.trim()]
+        : matchingDraft?.fieldIds;
+      stageManagerCalendarDraftUpdate(
+        params.slotKey,
+        (draft) => {
+          const nextDraft = buildManagerCalendarDraftWithCalendarRange(draft, nextStart, nextEnd, {
+            preserveRepeatingPattern: draft.mode === 'rental'
+              ? Boolean(draft.rental?.repeating)
+              : Boolean(draft.staff?.repeating),
+          });
+          return {
+            ...(nextDraft ?? draft),
+            fieldIds: targetFieldIds?.length ? targetFieldIds : normalizeFieldIds(draft.fieldIds),
+          };
+        },
+        params.interaction === 'resize' ? 'Resized draft card' : 'Moved draft card',
+      );
+      setSelection((prev) => ({
+        fieldIds: targetFieldIds?.length
+          ? normalizeFieldIds(targetFieldIds)
+          : normalizeFieldIds(prev?.fieldIds ?? []),
+        start: nextStart,
+        end: nextEnd,
+      }));
+    },
+    [managerCalendarDrafts, stageManagerCalendarDraftUpdate],
+  );
+
+  const applyPublicSelectionWindow = useCallback(
+    (start: Date, end: Date, slotKey: string) => {
+      if (isPastRentalRangeStart(start)) {
+        notifications.show({
+          color: 'red',
+          message: 'Rental selections must start in the future.',
+        });
+        return false;
+      }
+      const current = rentalSelections.find((item) => item.key === slotKey);
+      if (!current) return true;
+      const candidate = updateSelectionWithCalendarRange(current, start, end);
+      const isBlocked = normalizeFieldIds(candidate.scheduledFieldIds)
+        .some((fieldId) => isBlockedRange(start, end, fieldId));
+      if (isBlocked) {
+        notifications.show({
+          color: 'red',
+          message: 'That time range is already booked on at least one selected resource.',
+        });
+        return false;
+      }
+      setRentalSelections((prev) => prev.map((item) => (
+        item.key === slotKey ? updateSelectionWithCalendarRange(item, start, end) : item
+      )));
+      return true;
+    },
+    [isBlockedRange, rentalSelections, setRentalSelections],
+  );
 
   const applySelectionWindow = useCallback(
-    (
-      start: Date,
-      end: Date,
-      params?: {
-        slotKey?: string;
-        resourceId?: string | null;
-        interaction?: 'move' | 'resize';
-      },
-    ) => {
+    (start: Date, end: Date, params: CalendarSelectionWindowOptions = {}) => {
       if (canManage) {
-        const nextStart = new Date(start);
-        const nextEnd = new Date(end);
-        if (nextEnd.getTime() - nextStart.getTime() < MIN_SELECTION_MS) {
-          nextEnd.setTime(nextStart.getTime() + MIN_SELECTION_MS);
-        }
-        if (params?.slotKey) {
-          const matchingDraft = managerCalendarDrafts.find((draft) => draft.id === params.slotKey);
-          const targetFieldIds = typeof params.resourceId === 'string' && params.resourceId.trim().length > 0
-            ? [params.resourceId.trim()]
-            : matchingDraft?.fieldIds;
-          stageManagerCalendarDraftUpdate(
-            params.slotKey,
-            (draft) => {
-              const nextDraft = buildManagerCalendarDraftWithCalendarRange(draft, nextStart, nextEnd, {
-                preserveRepeatingPattern: (
-                  draft.mode === 'rental'
-                    ? Boolean(draft.rental?.repeating)
-                    : Boolean(draft.staff?.repeating)
-                ),
-              });
-              return {
-                ...(nextDraft ?? draft),
-                fieldIds: targetFieldIds?.length ? targetFieldIds : normalizeFieldIds(draft.fieldIds),
-              };
-            },
-            params.interaction === 'resize' ? 'Resized draft card' : 'Moved draft card',
-          );
-          setSelection((prev) => {
-            return {
-              fieldIds: targetFieldIds?.length
-                ? normalizeFieldIds(targetFieldIds)
-                : matchingDraft?.fieldIds?.length
-                  ? normalizeFieldIds(matchingDraft.fieldIds)
-                  : normalizeFieldIds(prev?.fieldIds ?? []),
-              start: nextStart,
-              end: nextEnd,
-            };
-          });
-        } else {
-          setSelection((prev) => {
-            if (!(prev?.fieldIds?.length)) return prev;
-            return { ...prev, start: nextStart, end: nextEnd };
-          });
-        }
-      } else if (params?.slotKey) {
-        if (isPastRentalRangeStart(start)) {
-          notifications.show({
-            color: 'red',
-            message: 'Rental selections must start in the future.',
-          });
-          return;
-        }
-        let blockedByOccupancy = false;
-        setRentalSelections((prev) => prev.map((item) => (
-          item.key === params.slotKey
-            ? (() => {
-              const candidate = updateSelectionWithCalendarRange(item, start, end);
-              const candidateFieldIds = normalizeFieldIds(candidate.scheduledFieldIds);
-              const isBlocked = candidateFieldIds.some((fieldId) => isBlockedRange(start, end, fieldId));
-              if (isBlocked) {
-                blockedByOccupancy = true;
-                return item;
-              }
-              return candidate;
-            })()
-            : item
-        )));
-        if (blockedByOccupancy) {
-          notifications.show({
-            color: 'red',
-            message: 'That time range is already booked on at least one selected resource.',
-          });
-          return;
-        }
+        applyManagerSelectionWindow(start, end, params);
+      } else if (params.slotKey && !applyPublicSelectionWindow(start, end, params.slotKey)) {
+        return;
       }
       setCalendarDate(new Date(start));
     },
-    [canManage, isBlockedRange, managerCalendarDrafts, setRentalSelections, stageManagerCalendarDraftUpdate],
+    [applyManagerSelectionWindow, applyPublicSelectionWindow, canManage],
   );
 
   const handleRentalSlotCalendarDrop = useCallback(
     ({ event, start, end, resourceId }: any) => {
-      if (!canManage || !event || event.metaType !== 'rental' || !start || !end) {
-        return;
-      }
-      const slot = event.resource as TimeSlot | undefined;
-      const nextStart = start instanceof Date ? start : new Date(start);
-      const nextEnd = end instanceof Date ? end : new Date(end);
-      if (!slot?.$id || Number.isNaN(nextStart.getTime()) || Number.isNaN(nextEnd.getTime())) {
-        return;
-      }
-
-      const fieldId =
-        typeof resourceId === 'string' && resourceId.trim().length > 0
-          ? resourceId.trim()
-          : typeof event.resourceId === 'string'
-            ? event.resourceId.trim()
-            : '';
+      if (!canManage) return;
+      const context = rentalCalendarDropContext(event, start, end);
+      if (!context) return;
+      const { slot, range } = context;
+      const { start: nextStart, end: nextEnd } = range;
+      const fieldId = calendarTargetResourceId(resourceId, event.resourceId) ?? '';
       const ownerField = fields.find((field) => field.$id === fieldId) ?? selectedField;
       if (!ownerField) {
         notifications.show({ color: 'red', message: 'Unable to resolve the rental slot resource.' });
@@ -2838,123 +2037,29 @@ export default function FieldsTabContent({
 
   const handleStaffAssignmentCalendarDrop = useCallback(
     ({ event, start, end, resourceId }: any, label: string, interaction: 'move' | 'resize' = 'move') => {
-      if (
-        !canManage
-        || !event
-        || event.metaType !== 'facility-feed'
-        || (event.feedType !== 'staff_assignment' && event.feedType !== 'official_assignment')
-        || !start
-        || !end
-      ) {
-        return;
-      }
-
+      if (!event || !isStaffFeedEvent(event, canManage) || !start || !end) return;
       suppressStaffAssignmentActivation(900);
-
-      const item = event.resource as FacilityCalendarFeedItem | undefined;
-      const assignment = item?.source as StaffScheduleAssignment | undefined;
-      const nextStart = start instanceof Date ? start : new Date(start);
-      const nextEnd = end instanceof Date ? end : new Date(end);
-      if (!assignment?.id || Number.isNaN(nextStart.getTime()) || Number.isNaN(nextEnd.getTime())) {
+      const prepared = prepareStaffCalendarRangeChange(
+        { event, start, end, resourceId }, visibleStaffScheduleAssignments, fields, interaction,
+      );
+      if (!prepared) return;
+      if ('error' in prepared) {
+        notifications.show(prepared.error);
         return;
       }
-
-      if (assignment.parentAssignmentId) {
-        const parentAssignment = visibleStaffScheduleAssignments.find((candidate) => (
-          candidate.id === assignment.parentAssignmentId
-        ));
-        const parentRange = parentAssignment
-          ? getStaffAssignmentOccurrenceRangeForDate(parentAssignment, nextStart)
-          : null;
-        if (
-          !parentRange
-          || nextStart.getTime() < parentRange.start.getTime()
-          || nextEnd.getTime() > parentRange.end.getTime()
-        ) {
-          notifications.show({
-            color: 'yellow',
-            message: 'Assigned coverage must stay inside the parent shift.',
-          });
-          return;
-        }
+      if (prepared.overrides.length === 1) {
+        const change = prepared.overrides[0];
+        stageStaffAssignmentOverride(change.assignmentId, change.override, label);
+      } else {
+        stageStaffAssignmentOverrideBatch(prepared.overrides, label);
       }
-
-      const originalStart = item?.start instanceof Date
-        ? item.start
-        : toValidDate(event.start);
-      const originalEnd = item?.end instanceof Date
-        ? item.end
-        : toValidDate(event.end);
-      if (
-        interaction === 'resize'
-        && originalStart
-        && originalEnd
-        && isOpenParentStaffScheduleSeries(assignment)
-      ) {
-        const childAssignments = visibleStaffScheduleAssignments.filter((candidate) => (
-          candidate.parentAssignmentId === assignment.id
-          && Boolean(candidate.userId || candidate.staffMemberId)
-        ));
-        const overrides = buildOpenParentStaffSeriesResizeOverrides({
-          assignment,
-          children: childAssignments,
-          originalStart,
-          originalEnd,
-          nextStart,
-          nextEnd,
-        });
-        if (!overrides?.length) {
-          notifications.show({ color: 'red', message: 'Unable to resize this staff assignment.' });
-          return;
-        }
-        if (overrides.length === 1) {
-          stageStaffAssignmentOverride(overrides[0].assignmentId, overrides[0].override, label);
-        } else {
-          stageStaffAssignmentOverrideBatch(overrides, label);
-        }
-        setCalendarDate(nextStart);
-        notifications.show({
-          color: 'blue',
-          message: overrides.length > 1
-            ? 'Staff assignment series changes staged.'
-            : 'Staff assignment change staged.',
-        });
-        return;
-      }
-
-      const preserveRepeatingPattern = Boolean(assignment.timeSlot?.repeating);
-      let nextAssignment = buildStaffAssignmentWithCalendarRange(assignment, nextStart, nextEnd, {
-        preserveRepeatingPattern,
+      setCalendarDate(prepared.start);
+      notifications.show({
+        color: 'blue',
+        message: prepared.overrides.length > 1
+          ? 'Staff assignment series changes staged.'
+          : 'Staff assignment change staged.',
       });
-      if (!nextAssignment) {
-        notifications.show({ color: 'red', message: 'Unable to move this staff assignment.' });
-        return;
-      }
-
-      const targetFieldId = typeof resourceId === 'string' && resourceId.trim().length > 0
-        ? resourceId.trim()
-        : typeof event.resourceId === 'string'
-          ? event.resourceId.trim()
-          : item?.fieldId ?? assignment.fieldId ?? null;
-      if (!assignment.parentAssignmentId && targetFieldId && targetFieldId !== assignment.fieldId) {
-        const targetField = fields.find((field) => field.$id === targetFieldId);
-        if (targetField) {
-          nextAssignment = {
-            ...nextAssignment,
-            fieldId: targetField.$id,
-            fieldName: getFacilityScopedFieldDisplayName(targetField),
-            facilityId: getFieldFacilityId(targetField),
-            facilityName: getFieldFacility(targetField)?.name ?? nextAssignment.facilityName ?? null,
-          };
-        }
-      }
-
-      stageStaffAssignmentOverride(assignment.id, {
-        action: 'update',
-        assignment: nextAssignment,
-      }, label);
-      setCalendarDate(nextStart);
-      notifications.show({ color: 'blue', message: 'Staff assignment change staged.' });
     },
     [canManage, fields, stageStaffAssignmentOverride, stageStaffAssignmentOverrideBatch, suppressStaffAssignmentActivation, visibleStaffScheduleAssignments],
   );
@@ -2965,6 +2070,9 @@ export default function FieldsTabContent({
       const slotStart = new Date(slotInfo.start);
       const slotEndRaw = slotInfo?.end ? new Date(slotInfo.end) : new Date(slotStart.getTime() + MIN_SELECTION_MS);
       if (canManage) {
+        if (managerCalendarEditMode && typeof slotInfo.resourceId === 'string') {
+          managerCreateDraftAdderRef.current?.('rental', { start: slotStart, end: slotEndRaw, fieldIds: [slotInfo.resourceId] });
+        }
         return;
       }
 
@@ -2976,11 +2084,8 @@ export default function FieldsTabContent({
         });
         return;
       }
-      const resourceFieldIds = typeof slotInfo.resourceId === 'string'
-        ? [slotInfo.resourceId]
-        : readonlyCalendarFieldIds;
-      const selectedResourceFieldIds = normalizeFieldIds(resourceFieldIds);
-      const primaryResourceFieldId = selectedResourceFieldIds[0] ?? fields[0]?.$id;
+      const { fieldIds: selectedResourceFieldIds, primaryFieldId: primaryResourceFieldId } =
+        rentalCalendarSelectionResources(slotInfo.resourceId, readonlyCalendarFieldIds, fields);
       if (!primaryResourceFieldId) {
         return;
       }
@@ -2998,64 +2103,42 @@ export default function FieldsTabContent({
       setRentalSelections((prev) => [nextSelection, ...prev]);
       setCalendarDate(slotStart);
     },
-    [canManage, fields, isBlockedRange, readonlyCalendarFieldIds, setRentalSelections],
+    [canManage, managerCalendarEditMode, fields, isBlockedRange, readonlyCalendarFieldIds, setRentalSelections],
+  );
+
+  const handleCalendarEventRangeChange = useCallback(
+    ({ event, start, end, resourceId }: CalendarRangeChange, interaction: 'move' | 'resize') => {
+      if (!event || !canChangeFacilityEventRange(event, canManage, managerCalendarEditMode)) return;
+      const targetResourceId = interaction === 'resize' ? event.resourceId : resourceId;
+      if (event.metaType === 'rental') {
+        handleRentalSlotCalendarDrop({ event, start, end, resourceId: targetResourceId });
+        return;
+      }
+      if (isStaffFeedEvent(event, canManage)) {
+        handleStaffAssignmentCalendarDrop(
+          { event, start, end, resourceId: targetResourceId },
+          interaction === 'resize' ? 'Resized staff assignment' : 'Moved staff assignment',
+          interaction,
+        );
+        return;
+      }
+      if (event.metaType !== 'selection' || !start || !end) return;
+      applySelectionWindow(
+        new Date(start), new Date(end), calendarSelectionChangeOptions(event, resourceId, interaction),
+      );
+    },
+    [applySelectionWindow, canManage, handleRentalSlotCalendarDrop, handleStaffAssignmentCalendarDrop, managerCalendarEditMode],
   );
 
   const handleEventDrop = useCallback(
-    ({ event, start, end, resourceId }: any) => {
-      const isPublicRentalSelection = !canManage && event?.metaType === 'selection';
-      if (!managerCalendarEditMode && !isPublicRentalSelection) {
-        return;
-      }
-      if (event?.metaType === 'rental') {
-        void handleRentalSlotCalendarDrop({ event, start, end, resourceId });
-        return;
-      }
-      if (
-        event?.metaType === 'facility-feed'
-        && (event.feedType === 'staff_assignment' || event.feedType === 'official_assignment')
-      ) {
-        handleStaffAssignmentCalendarDrop({ event, start, end, resourceId }, 'Moved staff assignment');
-        return;
-      }
-      if (!event || event.metaType !== 'selection' || !start || !end) return;
-      const slotKey = event.resource?.slotKey;
-      applySelectionWindow(new Date(start), new Date(end), {
-        slotKey: typeof slotKey === 'string' ? slotKey : undefined,
-        resourceId: typeof resourceId === 'string' ? resourceId : event.resourceId,
-        interaction: 'move',
-      });
-    },
-    [applySelectionWindow, canManage, handleRentalSlotCalendarDrop, handleStaffAssignmentCalendarDrop, managerCalendarEditMode],
+    (change: CalendarRangeChange) => handleCalendarEventRangeChange(change, 'move'),
+    [handleCalendarEventRangeChange],
   );
 
   const handleEventResize = useCallback(
-    ({ event, start, end }: any) => {
-      const isPublicRentalSelection = !canManage && event?.metaType === 'selection';
-      if (!managerCalendarEditMode && !isPublicRentalSelection) {
-        return;
-      }
-      if (event?.metaType === 'rental') {
-        handleRentalSlotCalendarDrop({ event, start, end, resourceId: event.resourceId });
-        return;
-      }
-      if (
-        event?.metaType === 'facility-feed'
-        && (event.feedType === 'staff_assignment' || event.feedType === 'official_assignment')
-      ) {
-        handleStaffAssignmentCalendarDrop({ event, start, end, resourceId: event.resourceId }, 'Resized staff assignment', 'resize');
-        return;
-      }
-      if (!event || event.metaType !== 'selection' || !start || !end) return;
-      const slotKey = event.resource?.slotKey;
-      applySelectionWindow(new Date(start), new Date(end), {
-        slotKey: typeof slotKey === 'string' ? slotKey : undefined,
-        interaction: 'resize',
-      });
-    },
-    [applySelectionWindow, canManage, handleRentalSlotCalendarDrop, handleStaffAssignmentCalendarDrop, managerCalendarEditMode],
+    (change: CalendarRangeChange) => handleCalendarEventRangeChange(change, 'resize'),
+    [handleCalendarEventRangeChange],
   );
-
   useEffect(() => {
     if (!currentUser) {
       setHostOrganizations([]);
@@ -3146,148 +2229,38 @@ export default function FieldsTabContent({
       return;
     }
 
-    let earliestSelectionStart: Date | null = null;
-    let latestSelectionEnd: Date | null = null;
-    serializedSelections.forEach((selectionItem) => {
-      const selectionStart = parseLocalDateTime(selectionItem.startDate);
-      const selectionEnd = parseLocalDateTime(selectionItem.endDate);
-      if (!selectionStart || !selectionEnd || selectionEnd.getTime() <= selectionStart.getTime()) {
-        return;
-      }
-      if (!earliestSelectionStart || selectionStart < earliestSelectionStart) {
-        earliestSelectionStart = selectionStart;
-      }
-      if (!latestSelectionEnd || selectionEnd > latestSelectionEnd) {
-        latestSelectionEnd = selectionEnd;
-      }
+    const checkout = buildRentalSelectionCheckout({
+      eventId: createId(),
+      rentalSelections: serializedSelections,
+      fields,
+      facilities,
+      organization: org,
+      hostSelection,
+      totalRentalCents,
+      requiredTemplateIds: rentalRequiredTemplateIds,
+      hostRequiredTemplateIds: rentalHostRequiredTemplateIds,
     });
-
-    const allFieldIds = Array.from(
-      new Set(serializedSelections.flatMap((selectionItem) => normalizeFieldIds(selectionItem.scheduledFieldIds))),
-    );
-    const primaryField = fields.find((field) => field.$id === allFieldIds[0]) ?? null;
-    const primaryFacility = getFieldFacilityFromList(primaryField, facilities);
-    const primaryFacilityLocation = primaryFacility?.location || primaryFacility?.address || null;
-    const primaryFieldLocation = getFieldResolvedLocation(primaryField, primaryFacilityLocation ?? org?.location ?? '');
-    const primaryCoordinates = getFieldCoordinatesWithFallback(primaryField, primaryFacility, org);
-    const newId = createId();
-    const params = new URLSearchParams();
-    params.set('create', '1');
-    if (earliestSelectionStart) {
-      params.set('rentalStart', formatLocalDateTime(earliestSelectionStart));
-    }
-    if (latestSelectionEnd) {
-      params.set('rentalEnd', formatLocalDateTime(latestSelectionEnd));
-    }
-    if (primaryField) {
-      params.set('rentalFieldId', primaryField.$id);
-      params.set(
-        'rentalFieldName',
-        getFacilityScopedFieldDisplayName(primaryField),
-      );
-      if (primaryFieldLocation) {
-        params.set('rentalLocation', primaryFieldLocation);
-      }
-      if (primaryCoordinates) {
-        params.set('rentalLng', String(primaryCoordinates[0]));
-        params.set('rentalLat', String(primaryCoordinates[1]));
-      }
-      if (primaryFacility?.$id) {
-        params.set('rentalFacilityId', primaryFacility.$id);
-      }
-      if (primaryFacility?.name) {
-        params.set('rentalFacilityName', primaryFacility.name);
-      }
-      if (primaryFacilityLocation) {
-        params.set('rentalFacilityLocation', primaryFacilityLocation);
-      }
-      if (primaryFacility?.address) {
-        params.set('rentalFacilityAddress', primaryFacility.address);
-      }
-    }
-    if (totalRentalCents > 0) {
-      params.set('rentalPriceCents', String(Math.round(totalRentalCents)));
-    }
-    if (rentalRequiredTemplateIds.length > 0) {
-      params.set('rentalRequiredTemplateIds', rentalRequiredTemplateIds.join(','));
-    }
-    if (rentalHostRequiredTemplateIds.length > 0) {
-      params.set('rentalHostRequiredTemplateIds', rentalHostRequiredTemplateIds.join(','));
-    }
-    if (serializedSelections.length > 0) {
-      params.set('rentalSelections', JSON.stringify(serializedSelections));
-    }
-    if (org?.$id) {
-      params.set('rentalOrgId', org.$id);
-    }
-    if (hostSelection && hostSelection !== 'self') {
-      params.set('hostOrgId', hostSelection);
-    }
-    const manageEventUrl = `/events/${newId}/schedule?${params.toString()}`;
     if (onRentalSelectionReady) {
-      onRentalSelectionReady({
-        eventId: newId,
-        manageEventUrl,
-        organizationId: org?.$id ?? null,
-        organizationName: org?.name ?? 'Organization',
-        renterOrganizationId: hostSelection && hostSelection !== 'self' ? hostSelection : null,
-        facilityId: primaryFacility?.$id ?? getFieldFacilityId(primaryField) ?? null,
-        facilityName: primaryFacility?.name ?? null,
-        facilityLocation: primaryFacilityLocation,
-        facilityAddress: primaryFacility?.address ?? null,
-        totalRentalCents: Math.round(totalRentalCents),
-        rentalStart: earliestSelectionStart ? formatLocalDateTime(earliestSelectionStart) : '',
-        rentalEnd: latestSelectionEnd ? formatLocalDateTime(latestSelectionEnd) : '',
-        rentalSelections: serializedSelections,
-        fieldIds: allFieldIds,
-        primaryFieldId: primaryField?.$id ?? null,
-        primaryFieldName: primaryField
-          ? getFacilityScopedFieldDisplayName(primaryField)
-          : null,
-        location: primaryFieldLocation,
-        coordinates: primaryCoordinates,
-        requiredTemplateIds: rentalRequiredTemplateIds,
-        hostRequiredTemplateIds: rentalHostRequiredTemplateIds,
-      });
+      onRentalSelectionReady(checkout);
       return;
     }
     notifications.show({
       color: 'red',
       message: 'Rental checkout is not available on this page.',
     });
-  }, [
-    canReserveRentalResources,
-    canManage,
-    currentUser,
-    fields,
-    facilities,
-    hostSelection,
-    org?.$id,
-    org?.coordinates,
-    org?.location,
-    org?.name,
-    rentalHostRequiredTemplateIds,
-    rentalRequiredTemplateIds,
-    rentalSelectionValidations,
-    totalRentalCents,
-    onRentalSelectionReady,
-  ]);
+  }, [currentUser, canManage, canReserveRentalResources, rentalSelectionValidations, fields, facilities, org, totalRentalCents, rentalRequiredTemplateIds, rentalHostRequiredTemplateIds, hostSelection, onRentalSelectionReady]);
 
   const openRentalSlotModalForSelection = useCallback((
     draftSelection?: SelectionState | null,
     options: { draftId?: string | null } = {},
   ) => {
     if (!canManage) return;
-    const activeSelection = draftSelection ?? selection;
-    const activeFieldIds = normalizeFieldIds(activeSelection?.fieldIds ?? []);
-    if (!activeFieldIds.length || !activeSelection) {
-      notifications.show({ color: 'red', message: 'Select at least one resource and a time range first.' });
+    const prepared = prepareCalendarEditorSelection(draftSelection ?? selection, 'Rental slots');
+    if ('error' in prepared) {
+      notifications.show({ color: 'red', message: prepared.error });
       return;
     }
-    if (activeSelection.start.toDateString() !== activeSelection.end.toDateString()) {
-      notifications.show({ color: 'red', message: 'Rental slots must stay within a single day. Adjust the selection.' });
-      return;
-    }
+    const activeSelection = prepared.selection;
 
     setSelectedManagerDraftId(options.draftId ?? null);
     setEditingManagerDraftId(options.draftId ?? null);
@@ -3295,7 +2268,7 @@ export default function FieldsTabContent({
     setEditingRentalField(null);
     setRentalDraftRange({ start: activeSelection.start, end: activeSelection.end });
     setCreateRentalOpen(true);
-  }, [canManage, selection]);
+  }, [canManage, selection, setEditingManagerDraftId, setSelectedManagerDraftId]);
 
   const resetStaffTimeslotModalState = useCallback(() => {
     setStaffTimeslotModalOpen(false);
@@ -3311,7 +2284,7 @@ export default function FieldsTabContent({
     setStaffTimeslotError(null);
     setOpenStaffDeleteConfirmation(null);
     setStaffAssignmentScopePrompt(null);
-  }, []);
+  }, [setEditingManagerDraftId]);
 
   const openStaffTimeslotModal = useCallback((
     mode: Exclude<ManagerCalendarSelectionMode, 'rental'>,
@@ -3321,37 +2294,29 @@ export default function FieldsTabContent({
     if (!canManage) {
       return;
     }
-    const activeSelection = draftSelection ?? selection;
-    const activeFieldIds = normalizeFieldIds(activeSelection?.fieldIds ?? []);
-    if (!activeFieldIds.length || !activeSelection) {
-      notifications.show({ color: 'red', message: 'Select at least one resource and a time range first.' });
+    const prepared = prepareCalendarEditorSelection(draftSelection ?? selection, 'Staff timeslots');
+    if ('error' in prepared) {
+      notifications.show({ color: 'red', message: prepared.error });
       return;
     }
-    if (activeSelection.start.toDateString() !== activeSelection.end.toDateString()) {
-      notifications.show({ color: 'red', message: 'Staff timeslots must stay within a single day. Adjust the selection.' });
-      return;
-    }
-    const selectionDay = mondayDayOf(activeSelection.start);
-    const draftStaff = options.draft?.staff ?? {};
+    const values = staffEditorValues(options.draft?.staff, prepared.selection.start);
     setSelectedManagerDraftId(options.draftId ?? null);
     setEditingManagerDraftId(options.draftId ?? null);
     setEditingStaffAssignment(null);
     setStaffTimeslotParentAssignment(null);
     setStaffTimeslotMode(mode);
-    setStaffTimeslotUserId(draftStaff.userId ?? null);
-    setStaffTimeslotOverrideAmount(dollarsFromCents(draftStaff.rateOverrideCents));
-    setStaffTimeslotNotes(draftStaff.notes ?? '');
-    setStaffTimeslotRepeating(Boolean(draftStaff.repeating));
-    setStaffTimeslotRepeatDays(Array.isArray(draftStaff.daysOfWeek) && draftStaff.daysOfWeek.length
-      ? draftStaff.daysOfWeek
-      : [selectionDay]);
-    setStaffTimeslotRepeatEndDate(draftStaff.repeatEndDate ? toValidDate(draftStaff.repeatEndDate) : null);
+    setStaffTimeslotUserId(values.userId);
+    setStaffTimeslotOverrideAmount(values.overrideAmount);
+    setStaffTimeslotNotes(values.notes);
+    setStaffTimeslotRepeating(values.repeating);
+    setStaffTimeslotRepeatDays(values.repeatDays);
+    setStaffTimeslotRepeatEndDate(values.repeatEndDate);
     setStaffTimeslotError(null);
     setStaffTimeslotModalOpen(true);
     if (!staffScheduleLoaded) {
       void loadStaffSchedule();
     }
-  }, [canManage, loadStaffSchedule, selection, staffScheduleLoaded]);
+  }, [canManage, loadStaffSchedule, selection, setEditingManagerDraftId, setSelectedManagerDraftId, staffScheduleLoaded]);
 
   const openManagerCalendarDraftEditor = useCallback((draftId: string, fallbackDraft: ManagerCalendarDraft | null = null) => {
     const draft = managerCalendarDrafts.find((candidate) => candidate.id === draftId) ?? fallbackDraft;
@@ -3371,7 +2336,7 @@ export default function FieldsTabContent({
       return;
     }
     openStaffTimeslotModal(draft.mode, draftSelection, { draftId: draft.id, draft });
-  }, [managerCalendarDrafts, openRentalSlotModalForSelection, openStaffTimeslotModal]);
+  }, [managerCalendarDrafts, openRentalSlotModalForSelection, openStaffTimeslotModal, setSelectedManagerDraftId]);
 
   openManagerCalendarDraftEditorRef.current = (draftId: string) => {
     openManagerCalendarDraftEditor(draftId);
@@ -3438,25 +2403,13 @@ export default function FieldsTabContent({
       return;
     }
 
-    if (managerCalendarEditMode && submitPayload.slot?.$id && submitPayload.field?.$id && submitPayload.updatePayload) {
-      const pendingKey = getRentalSlotPendingUpdateKey(submitPayload.field.$id, submitPayload.slot.$id);
-      stageRentalSlotUpdate({
-        key: pendingKey,
-        action: 'update',
-        fieldId: submitPayload.field.$id,
-        slotId: submitPayload.slot.$id,
-        slot: submitPayload.updatePayload,
-      }, 'Edited rental slot');
+    const change = rentalSlotModalChange(submitPayload);
+    if (managerCalendarEditMode && change) {
+      stageRentalSlotUpdate(change, 'Edited rental slot');
       notifications.show({ color: 'blue', message: 'Rental slot change staged.' });
       return;
     }
-  }, [
-    editingManagerDraftId,
-    managerCalendarEditMode,
-    resolveRentalModalPayloadRange,
-    stageManagerCalendarDraftUpdate,
-    stageRentalSlotUpdate,
-  ]);
+  }, [editingManagerDraftId, managerCalendarEditMode, resolveRentalModalPayloadRange, setEditingManagerDraftId, stageManagerCalendarDraftUpdate, stageRentalSlotUpdate]);
 
   const handleRentalSlotModalDelete = useCallback(async ({ field, slot }: { field: Field | null; slot: TimeSlot }) => {
     if (!managerCalendarEditMode || !field?.$id || !slot?.$id) {
@@ -3472,437 +2425,167 @@ export default function FieldsTabContent({
     notifications.show({ color: 'blue', message: 'Rental slot delete staged.' });
   }, [managerCalendarEditMode, stageRentalSlotUpdate]);
 
-  const submitStaffTimeslot = useCallback(async () => {
-    if (!canManage || !organizationId) {
-      setStaffTimeslotError('Missing organization context.');
-      return;
-    }
-    if (editingManagerDraftId) {
-      if (!selection || !selectedFields.length) {
-        setStaffTimeslotError('Select at least one resource and a time range first.');
-        return;
-      }
-      if (selection.end.getTime() <= selection.start.getTime()) {
-        setStaffTimeslotError('End time must be after the start time.');
-        return;
-      }
-      if (selection.start.toDateString() !== selection.end.toDateString()) {
-        setStaffTimeslotError('Staff timeslots must stay within a single day.');
-        return;
-      }
-      const overrideAmountCents = staffTimeslotOverrideAmount === ''
-        ? null
-        : centsFromDollars(staffTimeslotOverrideAmount);
-      if (overrideAmountCents !== null && overrideAmountCents <= 0) {
-        setStaffTimeslotError('Override amount must be greater than 0.');
-        return;
-      }
-      const dayOfWeek = mondayDayOf(selection.start);
-      const isRepeatingAssignment = staffTimeslotRepeating;
-      const repeatDays = isRepeatingAssignment
-        ? Array.from(new Set(staffTimeslotRepeatDays
-          .map((day) => Number(day))
-          .filter((day) => Number.isInteger(day) && day >= 0 && day <= 6)))
-          .sort((a, b) => a - b)
-        : [dayOfWeek];
-      if (isRepeatingAssignment && repeatDays.length === 0) {
-        setStaffTimeslotError('Select at least one repeat day.');
-        return;
-      }
-	      if (
-	        isRepeatingAssignment
-	        && staffTimeslotRepeatEndDate
-	        && startOfDay(staffTimeslotRepeatEndDate).getTime() < startOfDay(selection.start).getTime()
-	      ) {
-	        setStaffTimeslotError('Repeat end date must be on or after the start date.');
-	        return;
-	      }
-	      const targetFieldIds = normalizeFieldIds(selectedFieldIds);
-	      const repeatEndDate = isRepeatingAssignment && staffTimeslotRepeatEndDate
-	        ? endOfDay(staffTimeslotRepeatEndDate).toISOString()
-	        : null;
-	      const selectedStaffMember = staffTimeslotUserId
-	        ? staffScheduleMembers.find((member) => member.userId === staffTimeslotUserId) ?? null
-	        : null;
-	      if (staffTimeslotUserId && !selectedStaffMember) {
-	        setStaffTimeslotError('Choose a valid staff member for this assignment.');
-	        return;
-	      }
-	      const shouldAskAssignmentScope = Boolean(selectedStaffMember)
-	        && (isRepeatingAssignment || targetFieldIds.length > 1);
-	      const buildDraftWithStaff = (
-	        draft: ManagerCalendarDraft,
-	        staffUserId: string | null,
-	        extraStaffOptions: Partial<ManagerCalendarDraftStaffOptions> = {},
-	      ): ManagerCalendarDraft => ({
-	        ...draft,
-	        mode: staffTimeslotMode,
-	        fieldIds: targetFieldIds,
-	        start: new Date(selection.start),
-	        end: new Date(selection.end),
-	        staff: {
-	          userId: staffUserId,
-	          userName: staffUserId ? selectedStaffMember?.fullName ?? null : null,
-	          rateOverrideCents: overrideAmountCents,
-	          notes: staffTimeslotNotes,
-	          repeating: isRepeatingAssignment,
-	          daysOfWeek: repeatDays,
-	          repeatEndDate,
-	          ...extraStaffOptions,
-	        },
-	      });
+  const staffTimeslotForm = useMemo<StaffTimeslotForm>(() => ({
+    mode: staffTimeslotMode,
+    userId: staffTimeslotUserId ?? '',
+    overrideAmount: staffTimeslotOverrideAmount,
+    notes: staffTimeslotNotes,
+    repeating: staffTimeslotRepeating,
+    repeatDays: staffTimeslotRepeatDays,
+    repeatEndDate: staffTimeslotRepeatEndDate,
+  }), [
+    staffTimeslotMode, staffTimeslotUserId, staffTimeslotOverrideAmount, staffTimeslotNotes,
+    staffTimeslotRepeating, staffTimeslotRepeatDays, staffTimeslotRepeatEndDate,
+  ]);
 
-	      if (shouldAskAssignmentScope && selectedStaffMember) {
-	        const sourceDraft = managerCalendarDrafts.find((draft) => draft.id === editingManagerDraftId) ?? null;
-	        if (!sourceDraft) {
-	          setStaffTimeslotError('Unable to resolve this draft assignment.');
-	          return;
-	        }
-	        const allDraft = buildDraftWithStaff(sourceDraft, selectedStaffMember.userId);
-	        const parentDraft = buildDraftWithStaff(sourceDraft, null);
-	        const childDraft: ManagerCalendarDraft = {
-	          id: createId(),
-	          mode: staffTimeslotMode,
-	          fieldIds: targetFieldIds,
-	          start: new Date(selection.start),
-	          end: new Date(selection.end),
-	          staff: {
-	            parentDraftId: sourceDraft.id,
-	            userId: selectedStaffMember.userId,
-	            userName: selectedStaffMember.fullName,
-	            rateOverrideCents: overrideAmountCents,
-	            notes: staffTimeslotNotes,
-	            repeating: false,
-	            daysOfWeek: [dayOfWeek],
-	            repeatEndDate: null,
-	          },
-	        };
-	        setStaffAssignmentScopePrompt({
-	          source: 'draft',
-	          draftId: sourceDraft.id,
-	          previousDraft: sourceDraft,
-	          allDraft,
-	          parentDraft,
-	          childDraft,
-	          staffName: selectedStaffMember.fullName,
-	          occurrenceLabel: `${formatDisplayDateTime(selection.start)} - ${formatDisplayTime(selection.end)}`,
-	          kindLabel: staffTimeslotMode === 'official_assignment' ? 'official' : 'staff',
-	        });
-	        setStaffTimeslotError(null);
-	        return;
-	      }
-
-	      const updatedDraft = stageManagerCalendarDraftUpdate(
-	        editingManagerDraftId,
-	        (draft) => buildDraftWithStaff(draft, staffTimeslotUserId || null),
-	        'Edited draft assignment',
-	      );
-      resetStaffTimeslotModalState();
-      if (updatedDraft) {
-        notifications.show({ color: 'blue', message: 'Draft assignment change staged.' });
-      }
-      return;
-    }
-    if (editingStaffAssignment) {
-      const overrideAmountCents = staffTimeslotOverrideAmount === ''
-        ? null
-        : centsFromDollars(staffTimeslotOverrideAmount);
-      if (overrideAmountCents !== null && overrideAmountCents <= 0) {
-        setStaffTimeslotError('Override amount must be greater than 0.');
-        return;
-      }
+  const applyStaffDraftEdit = useCallback((draftId: string) => {
+    const draft = managerCalendarDrafts.find((candidate) => candidate.id === draftId);
+    if (!draft) throw new Error('Unable to resolve this draft assignment.');
+    const plan = planStaffDraftEdit({
+      draft, form: staffTimeslotForm, selection, fields: selectedFields,
+      fieldIds: selectedFieldIds, members: staffScheduleMembers,
+    });
+    if (plan.type === 'scope') {
+      setStaffAssignmentScopePrompt(plan.prompt);
       setStaffTimeslotError(null);
-      const nextUserId = isEditingChildStaffAssignment
-        ? editingStaffAssignment.userId ?? null
-        : staffTimeslotUserId || null;
-      const selectedStaffMember = nextUserId
-        ? staffScheduleMembers.find((member) => member.userId === nextUserId) ?? null
-        : null;
-      const nextField = isEditingChildStaffAssignment ? null : selectedFields[0] ?? null;
-      if (!isEditingChildStaffAssignment && !nextField) {
-        setStaffTimeslotError('Select a resource for this assignment.');
-        return;
-      }
-      const nextFacilityId = isEditingChildStaffAssignment
-        ? editingStaffAssignment.facilityId ?? null
-        : nextField
-          ? getFieldFacilityId(nextField)
-          : null;
-      const nextFacility = nextFacilityId
-        ? facilities.find((facility) => facility.$id === nextFacilityId) ?? null
-        : null;
-      const nextAssignment: StaffScheduleAssignment = {
-        ...editingStaffAssignment,
-        userId: nextUserId,
-        userName: nextUserId
-          ? selectedStaffMember?.fullName ?? 'Staff name unavailable'
-          : '',
-        isOpen: !nextUserId,
-        rateOverrideType: overrideAmountCents ? 'HOURLY' : null,
-        rateOverrideCents: overrideAmountCents,
-        facilityId: isEditingChildStaffAssignment ? editingStaffAssignment.facilityId ?? null : nextFacilityId,
-        facilityName: isEditingChildStaffAssignment ? editingStaffAssignment.facilityName ?? null : nextFacility?.name ?? null,
-        fieldId: isEditingChildStaffAssignment ? editingStaffAssignment.fieldId ?? null : nextField?.$id ?? null,
-        fieldName: isEditingChildStaffAssignment ? editingStaffAssignment.fieldName ?? null : nextField ? getFacilityScopedFieldDisplayName(nextField) : null,
-        notes: isEditingChildStaffAssignment ? editingStaffAssignment.notes : staffTimeslotNotes,
-      };
-      stageStaffAssignmentOverride(editingStaffAssignment.id, {
-        action: 'update',
-        assignment: nextAssignment,
-      });
-      resetStaffTimeslotModalState();
-      notifications.show({
-        color: 'blue',
-        message: 'Staff assignment change staged.',
-      });
       return;
     }
-    if (!selection || !selectedFields.length) {
-      setStaffTimeslotError('Select at least one resource and a time range first.');
-      return;
-    }
-    if (selection.end.getTime() <= selection.start.getTime()) {
-      setStaffTimeslotError('End time must be after the start time.');
-      return;
-    }
-    if (selection.start.toDateString() !== selection.end.toDateString()) {
-      setStaffTimeslotError('Staff timeslots must stay within a single day.');
-      return;
-    }
-    const overrideAmountCents = staffTimeslotOverrideAmount === ''
-      ? null
-      : centsFromDollars(staffTimeslotOverrideAmount);
-    if (overrideAmountCents !== null && overrideAmountCents <= 0) {
-      setStaffTimeslotError('Override amount must be greater than 0.');
-      return;
-    }
-    if (staffTimeslotParentAssignment && !staffTimeslotUserId) {
-      setStaffTimeslotError('Choose a staff member for this occurrence.');
-      return;
-    }
+    const updated = stageManagerCalendarDraftUpdate(draftId, () => plan.draft, 'Edited draft assignment');
+    resetStaffTimeslotModalState();
+    if (updated) notifications.show({ color: 'blue', message: 'Draft assignment change staged.' });
+  }, [
+    managerCalendarDrafts, staffTimeslotForm, selection, selectedFields, selectedFieldIds,
+    staffScheduleMembers, stageManagerCalendarDraftUpdate, resetStaffTimeslotModalState,
+  ]);
 
-    const assignmentKind: StaffScheduleAssignmentKind = staffTimeslotMode === 'official_assignment'
-      ? 'OFFICIAL_SHIFT'
-      : 'STAFF_SHIFT';
-    const dayOfWeek = mondayDayOf(selection.start);
-    const isRepeatingAssignment = staffTimeslotParentAssignment ? false : staffTimeslotRepeating;
-    const repeatDays = isRepeatingAssignment
-      ? Array.from(new Set(staffTimeslotRepeatDays
-        .map((day) => Number(day))
-        .filter((day) => Number.isInteger(day) && day >= 0 && day <= 6)))
-        .sort((a, b) => a - b)
-      : [dayOfWeek];
-    if (isRepeatingAssignment && repeatDays.length === 0) {
-      setStaffTimeslotError('Select at least one repeat day.');
+  const applyStaffAssignmentEdit = useCallback((assignment: StaffScheduleAssignment) => {
+    const next = planStaffAssignmentEdit({
+      assignment, isChild: isEditingChildStaffAssignment, form: staffTimeslotForm,
+      fields: selectedFields, facilities, members: staffScheduleMembers,
+    });
+    setStaffTimeslotError(null);
+    stageStaffAssignmentOverride(assignment.id, { action: 'update', assignment: next });
+    resetStaffTimeslotModalState();
+    notifications.show({ color: 'blue', message: 'Staff assignment change staged.' });
+  }, [
+    isEditingChildStaffAssignment, staffTimeslotForm, selectedFields, facilities,
+    staffScheduleMembers, stageStaffAssignmentOverride, resetStaffTimeslotModalState,
+  ]);
+
+  const restoreStaffTimeslot = useCallback((range: SelectionState) => {
+    const assignments = findRestorableStaffUnassignments(staffScheduleAssignments, managerStaffAssignmentOverrides, {
+      parent: staffTimeslotParentAssignment, userId: staffTimeslotForm.userId,
+      kind: staffTimeslotAssignmentKind, fieldIds: selectedFieldIds, selection: range,
+    });
+    const restoredCount = assignments.filter((assignment) => restorePendingStaffUnassignment(assignment.id)).length;
+    if (!restoredCount) return false;
+    resetStaffTimeslotModalState();
+    notifications.show({
+      color: 'blue',
+      message: `${restoredCount} pending staff unassignment${restoredCount === 1 ? '' : 's'} restored.`,
+    });
+    return true;
+  }, [
+    staffScheduleAssignments, managerStaffAssignmentOverrides, staffTimeslotParentAssignment,
+    staffTimeslotForm.userId, staffTimeslotAssignmentKind, selectedFieldIds,
+    restorePendingStaffUnassignment, resetStaffTimeslotModalState,
+  ]);
+
+  const applyStaffOccurrenceEdit = useCallback((parent: StaffScheduleAssignment) => {
+    const plan = planStaffOccurrenceEdit({
+      parent, form: staffTimeslotForm, selection, fields: selectedFields, facilities, members: staffScheduleMembers,
+    });
+    if (staffAssignmentCanDeleteFollowing(parent)) {
+      setStaffAssignmentScopePrompt(plan);
+      setStaffTimeslotError(null);
       return;
     }
-    if (
-      isRepeatingAssignment
-      && staffTimeslotRepeatEndDate
-      && startOfDay(staffTimeslotRepeatEndDate).getTime() < startOfDay(selection.start).getTime()
-    ) {
-      setStaffTimeslotError('Repeat end date must be on or after the start date.');
-      return;
-    }
-    const repeatEndDate = isRepeatingAssignment
-      ? (staffTimeslotRepeatEndDate ? endOfDay(staffTimeslotRepeatEndDate).toISOString() : null)
-      : selection.end.toISOString();
-    const restorablePendingUnassignments = staffTimeslotParentAssignment && staffTimeslotUserId
-      ? staffScheduleAssignments.filter((assignment) => {
-          const override = managerStaffAssignmentOverrides[assignment.id];
-          if (
-            override?.action !== 'unassign'
-            || assignment.parentAssignmentId !== staffTimeslotParentAssignment.id
-            || assignment.assignmentKind !== assignmentKind
-            || assignment.userId !== staffTimeslotUserId
-            || (assignment.fieldId && !selectedFieldIds.includes(assignment.fieldId))
-          ) {
-            return false;
-          }
-          const range = getStaffAssignmentOccurrenceRangeForDate(assignment, selection.start)
-            ?? getStaffAssignmentPrimaryRange(assignment);
-          return Boolean(
-            range
-            && range.start.getTime() === selection.start.getTime()
-            && range.end.getTime() === selection.end.getTime(),
-          );
-        })
-      : [];
-	    if (restorablePendingUnassignments.length > 0) {
-	      let restoredCount = 0;
-	      restorablePendingUnassignments.forEach((assignment) => {
-	        if (restorePendingStaffUnassignment(assignment.id)) {
-	          restoredCount += 1;
-        }
-      });
-      if (restoredCount > 0) {
-        resetStaffTimeslotModalState();
-        notifications.show({
-          color: 'blue',
-          message: `${restoredCount} pending staff unassignment${restoredCount === 1 ? '' : 's'} restored.`,
-        });
-	        return;
-	      }
-	    }
-	    if (staffTimeslotParentAssignment) {
-	      const targetField = selectedFields[0] ?? null;
-	      if (!targetField) {
-	        setStaffTimeslotError('Select a resource for this assignment.');
-	        return;
-	      }
-	      const selectedStaffMember = staffScheduleMembers.find((member) => member.userId === staffTimeslotUserId) ?? null;
-	      if (!selectedStaffMember) {
-	        setStaffTimeslotError('Choose a valid staff member for this occurrence.');
-	        return;
-	      }
-	      const startTimeMinutes = selection.start.getHours() * 60 + selection.start.getMinutes();
-	      const endTimeMinutes = selection.end.getHours() * 60 + selection.end.getMinutes();
-	      const occurrenceDay = mondayDayOf(selection.start);
-	      const facilityId = getFieldFacilityId(targetField);
-	      const facility = facilityId ? facilities.find((candidate) => candidate.$id === facilityId) ?? null : null;
-	      const fieldName = getFacilityScopedFieldDisplayName(targetField);
-	      const childAssignment: StaffScheduleAssignment = {
-	        id: createId(),
-	        parentAssignmentId: staffTimeslotParentAssignment.id,
-	        staffMemberId: selectedStaffMember.staffMemberId,
-	        userId: selectedStaffMember.userId,
-	        userName: selectedStaffMember.fullName,
-	        isOpen: false,
-	        isChildAssignment: true,
-	        assignmentKind,
-	        facilityId,
-	        facilityName: facility?.name ?? staffTimeslotParentAssignment.facilityName ?? null,
-	        fieldId: targetField.$id,
-	        fieldName,
-	        rateOverrideType: overrideAmountCents ? 'HOURLY' : null,
-	        rateOverrideCents: overrideAmountCents,
-	        notes: staffTimeslotNotes,
-	        status: staffTimeslotParentAssignment.status ?? 'PLANNED',
-	        timeSlot: {
-	          startDate: selection.start.toISOString(),
-	          endDate: selection.end.toISOString(),
-	          repeating: false,
-	          dayOfWeek: occurrenceDay,
-	          daysOfWeek: [occurrenceDay],
-	          startTimeMinutes,
-	          endTimeMinutes,
-	          timeZone: staffTimeslotParentAssignment.timeSlot?.timeZone ?? null,
-	        },
-	        plannedStart: selection.start.toISOString(),
-	        plannedEnd: selection.end.toISOString(),
-	        plannedMinutes: Math.max(0, Math.round((selection.end.getTime() - selection.start.getTime()) / 60000)),
-	      };
-	      const parentAssignment: StaffScheduleAssignment = {
-	        ...staffTimeslotParentAssignment,
-	        staffMemberId: selectedStaffMember.staffMemberId,
-	        userId: selectedStaffMember.userId,
-	        userName: selectedStaffMember.fullName,
-	        isOpen: false,
-	        rateOverrideType: overrideAmountCents ? 'HOURLY' : null,
-	        rateOverrideCents: overrideAmountCents,
-	        notes: staffTimeslotNotes,
-	      };
-	      const childOverride: ManagerStaffAssignmentPendingOverride = {
-	        action: 'create',
-	        assignment: childAssignment,
-	      };
-	      const parentOverride: ManagerStaffAssignmentPendingOverride = {
-	        action: 'update',
-	        assignment: parentAssignment,
-	      };
-	      const kindLabel = assignmentKind === 'OFFICIAL_SHIFT' ? 'official' : 'staff';
-	      if (staffAssignmentCanDeleteFollowing(staffTimeslotParentAssignment)) {
-	        setStaffAssignmentScopePrompt({
-	          source: 'assignment',
-	          parentAssignment: staffTimeslotParentAssignment,
-	          parentOverride,
-	          childOverride,
-	          staffName: selectedStaffMember.fullName,
-	          occurrenceLabel: `${formatDisplayDateTime(selection.start)} - ${formatDisplayTime(selection.end)}`,
-	          kindLabel,
-	        });
-	        setStaffTimeslotError(null);
-	        return;
-	      }
-	      stageStaffAssignmentOverride(childAssignment.id, childOverride, `Assigned ${kindLabel} coverage occurrence`);
-	      resetStaffTimeslotModalState();
-	      notifications.show({
-	        color: 'blue',
-	        message: `${selectedStaffMember.fullName} assignment staged for this occurrence.`,
-	      });
-	      return;
-	    }
-	    setStaffTimeslotSubmitting(true);
-	    setStaffTimeslotError(null);
-	    try {
+    stageStaffAssignmentOverride(plan.childOverride.assignment.id, plan.childOverride, `Assigned ${plan.kindLabel} coverage occurrence`);
+    resetStaffTimeslotModalState();
+    notifications.show({ color: 'blue', message: `${plan.staffName} assignment staged for this occurrence.` });
+  }, [
+    staffTimeslotForm, selection, selectedFields, facilities, staffScheduleMembers,
+    stageStaffAssignmentOverride, resetStaffTimeslotModalState,
+  ]);
+
+  const createStaffTimeslots = useCallback(async (prepared: ReturnType<typeof prepareStaffTimeslot>) => {
+    const { selection: range, rateOverrideCents, repeating, daysOfWeek } = prepared;
+    setStaffTimeslotSubmitting(true);
+    setStaffTimeslotError(null);
+    try {
       const created = await Promise.all(selectedFields.map(async (field) => {
-        const facilityId = getFieldFacilityId(field);
         const response = await apiRequest<StaffScheduleCreateResponse>(`/api/organizations/${organizationId}/staff/schedule`, {
           method: 'POST',
           body: {
-	            parentAssignmentId: null,
-            userId: staffTimeslotUserId || null,
-            assignmentKind,
-            facilityId,
+            parentAssignmentId: null,
+            userId: staffTimeslotForm.userId || null,
+            assignmentKind: staffTimeslotAssignmentKind,
+            facilityId: getFieldFacilityId(field),
             fieldId: field.$id,
-            rateOverrideType: overrideAmountCents ? 'HOURLY' : null,
-            rateOverrideCents: overrideAmountCents,
-            notes: staffTimeslotNotes,
+            rateOverrideType: rateOverrideCents ? 'HOURLY' : null,
+            rateOverrideCents,
+            notes: staffTimeslotForm.notes,
             timeSlot: {
-              startDate: selection.start.toISOString(),
-              endDate: repeatEndDate,
-              repeating: isRepeatingAssignment,
-              daysOfWeek: repeatDays,
-              startTimeMinutes: selection.start.getHours() * 60 + selection.start.getMinutes(),
-              endTimeMinutes: selection.end.getHours() * 60 + selection.end.getMinutes(),
+              startDate: range.start.toISOString(),
+              endDate: repeating ? prepared.repeatEndDate : range.end.toISOString(),
+              repeating,
+              daysOfWeek,
+              startTimeMinutes: range.start.getHours() * 60 + range.start.getMinutes(),
+              endTimeMinutes: range.end.getHours() * 60 + range.end.getMinutes(),
             },
           },
         });
         return response.assignment ?? null;
       }));
       const createdAssignments = created.filter((assignment): assignment is StaffScheduleAssignment => Boolean(assignment));
-      if (createdAssignments.length) {
-        setStaffScheduleAssignments((current) => [...createdAssignments, ...current]);
-      }
+      if (createdAssignments.length) setStaffScheduleAssignments((current) => [...createdAssignments, ...current]);
       resetStaffTimeslotModalState();
-      notifications.show({
-        color: 'green',
-        message: `${createdAssignments.length || selectedFields.length} ${assignmentKind === 'OFFICIAL_SHIFT' ? 'official' : 'staff'} timeslot${(createdAssignments.length || selectedFields.length) === 1 ? '' : 's'} added.`,
-      });
+      const count = createdAssignments.length || selectedFields.length;
+      const kind = staffTimeslotAssignmentKind === 'OFFICIAL_SHIFT' ? 'official' : 'staff';
+      notifications.show({ color: 'green', message: `${count} ${kind} timeslot${count === 1 ? '' : 's'} added.` });
       void loadStaffSchedule({ silent: true });
-    } catch (error) {
-      setStaffTimeslotError(error instanceof Error ? error.message : 'Failed to apply staff timeslot.');
     } finally {
       setStaffTimeslotSubmitting(false);
     }
   }, [
-    canManage,
-    editingManagerDraftId,
-    editingStaffAssignment,
-    facilities,
-    isEditingChildStaffAssignment,
-	    loadStaffSchedule,
-	    managerCalendarDrafts,
-	    managerStaffAssignmentOverrides,
-	    organizationId,
-    resetStaffTimeslotModalState,
-    restorePendingStaffUnassignment,
-    selectedFields,
-    selection,
-    selectedFieldIds,
-    stageStaffAssignmentOverride,
-    stageManagerCalendarDraftUpdate,
-    staffScheduleAssignments,
-    staffScheduleMembers,
-    staffTimeslotParentAssignment,
-    staffTimeslotRepeatDays,
-    staffTimeslotRepeatEndDate,
-    staffTimeslotRepeating,
-    staffTimeslotMode,
-    staffTimeslotNotes,
-    staffTimeslotOverrideAmount,
-    staffTimeslotUserId,
-	  ]);
+    selectedFields, organizationId, staffTimeslotForm, staffTimeslotAssignmentKind,
+    resetStaffTimeslotModalState, loadStaffSchedule,
+  ]);
+
+  const submitNewStaffTimeslot = useCallback(async () => {
+    const form = staffTimeslotParentAssignment ? { ...staffTimeslotForm, repeating: false } : staffTimeslotForm;
+    const prepared = prepareStaffTimeslot(form, selection, selectedFields);
+    if (staffTimeslotParentAssignment && !form.userId) throw new Error('Choose a staff member for this occurrence.');
+    if (restoreStaffTimeslot(prepared.selection)) return;
+    if (staffTimeslotParentAssignment) {
+      applyStaffOccurrenceEdit(staffTimeslotParentAssignment);
+      return;
+    }
+    await createStaffTimeslots(prepared);
+  }, [
+    staffTimeslotParentAssignment, staffTimeslotForm, selection, selectedFields,
+    restoreStaffTimeslot, applyStaffOccurrenceEdit, createStaffTimeslots,
+  ]);
+
+  const submitStaffTimeslot = useCallback(async () => {
+    try {
+      if (!canManage || !organizationId) throw new Error('Missing organization context.');
+      if (editingManagerDraftId) {
+        applyStaffDraftEdit(editingManagerDraftId);
+        return;
+      }
+      if (editingStaffAssignment) {
+        applyStaffAssignmentEdit(editingStaffAssignment);
+        return;
+      }
+      await submitNewStaffTimeslot();
+    } catch (error) {
+      setStaffTimeslotError(error instanceof Error ? error.message : 'Failed to apply staff timeslot.');
+    }
+  }, [
+    canManage, organizationId, editingManagerDraftId, editingStaffAssignment,
+    applyStaffDraftEdit, applyStaffAssignmentEdit, submitNewStaffTimeslot,
+  ]);
 
 		  const applyStaffAssignmentScopePrompt = useCallback((scope: 'all' | 'occurrence') => {
 		    if (!staffAssignmentScopePrompt) {
@@ -4131,250 +2814,47 @@ export default function FieldsTabContent({
     });
   }, [openStaffDeletePlan, resetStaffTimeslotModalState, stageStaffAssignmentOverrideBatch]);
 
-  const handleSaveManagerCalendarDrafts = useCallback(async () => {
-    if (!canManage || !organizationId || managerCalendarDraftsSaving || !managerCalendarPendingChangeCount) {
-      return;
-    }
-    const fieldById = new Map(fields.map((field) => [field.$id, field]));
-    const pendingRentalUpdates = Object.values(managerRentalSlotUpdates);
-	    const pendingStaffOverrides = Object.entries(managerStaffAssignmentOverrides)
-	      .sort(([leftAssignmentId, left], [rightAssignmentId, right]) => {
-	        const rank = (assignmentId: string, override: ManagerStaffAssignmentPendingOverride) => {
-	          if (override.action === 'create') return override.assignment.parentAssignmentId ? 2 : 3;
-	          if (override.action === 'unassign') return 0;
-	          if (override.action === 'delete') return 1;
-	          const pendingAssignment = override.assignment;
-	          if (pendingAssignment.parentAssignmentId) return 2;
-          const sourceAssignment = staffScheduleAssignments.find((assignment) => assignment.id === assignmentId);
-          if (sourceAssignment?.parentAssignmentId) return 2;
-          return 3;
+  const applyCalendarSaveResult = useCallback((result: FacilityCalendarSaveResult) => {
+    const {
+      updatedRentalFields, createdAssignments, updatedAssignments, removedAssignmentIds, deletedParentAssignmentIds,
+    } = result;
+    if (updatedRentalFields.length) {
+      const updatedById = new Map(updatedRentalFields.map((field) => [field.$id, field]));
+      setOrg((prev) => {
+        if (!prev) return prev;
+        const prevFields = Array.isArray(prev.fields) ? prev.fields : [];
+        return {
+          ...prev,
+          fields: prevFields.map((field) => {
+            const updatedField = updatedById.get(field.$id);
+            return updatedField ? mergeFieldPreservingCalendarHydration(field, updatedField) : field;
+          }),
         };
-        return rank(leftAssignmentId, left) - rank(rightAssignmentId, right);
       });
+    }
+    if (createdAssignments.length) {
+      setStaffScheduleAssignments((current) => [...createdAssignments, ...current]);
+    }
+    if (updatedAssignments.length || removedAssignmentIds.size || deletedParentAssignmentIds.size) {
+      const updatedById = new Map(updatedAssignments.map((assignment) => [assignment.id, assignment]));
+      setStaffScheduleAssignments((current) => current
+        .filter((assignment) => (
+          !removedAssignmentIds.has(assignment.id)
+          && !(assignment.parentAssignmentId && deletedParentAssignmentIds.has(assignment.parentAssignmentId))
+        ))
+        .map((assignment) => updatedById.get(assignment.id) ?? assignment));
+    }
+  }, []);
+
+  const handleSaveManagerCalendarDrafts = useCallback(async () => {
+    if (!canManage || !organizationId || managerCalendarDraftsSaving || !managerCalendarPendingChangeCount) return;
     setManagerCalendarDraftsSaving(true);
     try {
-      const updatedRentalFields: Field[] = [];
-	      const createdAssignments: StaffScheduleAssignment[] = [];
-	      const updatedAssignments: StaffScheduleAssignment[] = [];
-	      const removedAssignmentIds = new Set<string>();
-	      const deletedParentAssignmentIds = new Set<string>();
-	      const createdDraftAssignmentIds = new Map<string, string>();
-	      const draftsToSave = [...managerCalendarDrafts].sort((left, right) => {
-	        const leftIsChild = Boolean(left.staff?.parentDraftId);
-	        const rightIsChild = Boolean(right.staff?.parentDraftId);
-	        if (leftIsChild === rightIsChild) return 0;
-	        return leftIsChild ? 1 : -1;
-	      });
-
-	      for (const draft of draftsToSave) {
-	        const draftFields = normalizeFieldIds(draft.fieldIds)
-	          .map((fieldId) => fieldById.get(fieldId))
-	          .filter((field): field is Field => Boolean(field));
-        if (!draftFields.length) {
-          throw new Error('One draft no longer has a valid resource.');
-        }
-        const start = new Date(draft.start);
-        const end = new Date(draft.end);
-        if (end.getTime() <= start.getTime()) {
-          throw new Error('A draft has an invalid end time.');
-        }
-        if (start.toDateString() !== end.toDateString()) {
-          throw new Error('Drafts must stay within a single day.');
-        }
-        const dayOfWeek = mondayDayOf(start) as NonNullable<TimeSlot['dayOfWeek']>;
-        const startTimeMinutes = start.getHours() * 60 + start.getMinutes();
-        const endTimeMinutes = end.getHours() * 60 + end.getMinutes();
-
-        if (draft.mode === 'rental') {
-          const draftRental = draft.rental ?? {};
-          const normalizedDraftRentalDays = Array.isArray(draftRental.daysOfWeek)
-            ? draftRental.daysOfWeek.filter((day): day is NonNullable<TimeSlot['dayOfWeek']> => (
-                Number.isInteger(day) && day >= 0 && day <= 6
-              ))
-            : [];
-          const draftRentalDaysOfWeek = normalizedDraftRentalDays.length
-            ? normalizedDraftRentalDays
-            : [dayOfWeek];
-          const rentalRepeating = Boolean(draftRental.repeating);
-          const results = await Promise.all(draftFields.map((field) => (
-            fieldService.createRentalSlot(field, {
-              dayOfWeek: draftRental.dayOfWeek ?? dayOfWeek,
-              daysOfWeek: draftRentalDaysOfWeek,
-              repeating: rentalRepeating,
-              scheduledFieldId: field.$id,
-              scheduledFieldIds: [field.$id],
-              startDate: draftRental.startDate ?? formatLocalDateTime(start),
-              endDate: draftRental.endDate ?? (rentalRepeating ? null : formatLocalDateTime(end)),
-              startTimeMinutes: draftRental.startTimeMinutes ?? startTimeMinutes,
-              endTimeMinutes: draftRental.endTimeMinutes ?? endTimeMinutes,
-              price: draftRental.price ?? 0,
-              requiredTemplateIds: draftRental.requiredTemplateIds ?? [],
-              hostRequiredTemplateIds: draftRental.hostRequiredTemplateIds ?? [],
-            })
-          )));
-          updatedRentalFields.push(...results.map((result) => result.field));
-          continue;
-        }
-
-        const assignmentKind: StaffScheduleAssignmentKind = draft.mode === 'official_assignment'
-          ? 'OFFICIAL_SHIFT'
-          : 'STAFF_SHIFT';
-	        const draftStaff = draft.staff ?? {};
-	        const parentDraftId = draftStaff.parentDraftId ?? null;
-	        const staffRepeating = Boolean(draftStaff.repeating);
-	        const staffDaysOfWeek = Array.isArray(draftStaff.daysOfWeek) && draftStaff.daysOfWeek.length
-	          ? draftStaff.daysOfWeek
-	          : [dayOfWeek];
-	        const results = await Promise.all(draftFields.map(async (field) => {
-	          const parentAssignmentId = parentDraftId
-	            ? createdDraftAssignmentIds.get(`${parentDraftId}:${field.$id}`) ?? null
-	            : null;
-	          if (parentDraftId && !parentAssignmentId) {
-	            throw new Error('One draft child assignment no longer has a saved parent assignment.');
-	          }
-	          const response = await apiRequest<StaffScheduleCreateResponse>(`/api/organizations/${organizationId}/staff/schedule`, {
-	            method: 'POST',
-	            body: {
-	              parentAssignmentId,
-	              userId: draftStaff.userId || null,
-	              assignmentKind,
-	              facilityId: getFieldFacilityId(field),
-              fieldId: field.$id,
-              rateOverrideType: draftStaff.rateOverrideCents ? 'HOURLY' : null,
-              rateOverrideCents: draftStaff.rateOverrideCents ?? null,
-              notes: draftStaff.notes ?? '',
-              timeSlot: {
-                startDate: start.toISOString(),
-                endDate: staffRepeating ? draftStaff.repeatEndDate ?? null : end.toISOString(),
-                repeating: staffRepeating,
-                daysOfWeek: staffDaysOfWeek,
-                startTimeMinutes,
-                endTimeMinutes,
-              },
-	            },
-	          });
-	          if (response.assignment && !parentDraftId) {
-	            createdDraftAssignmentIds.set(`${draft.id}:${field.$id}`, response.assignment.id);
-	          }
-	          return response.assignment ?? null;
-	        }));
-        createdAssignments.push(...results.filter((assignment): assignment is StaffScheduleAssignment => Boolean(assignment)));
-      }
-
-      for (const update of pendingRentalUpdates) {
-        const ownerField = fieldById.get(update.fieldId);
-        if (!ownerField) {
-          throw new Error('One rental slot no longer has a valid resource.');
-        }
-        const result = update.action === 'delete'
-          ? { field: await fieldService.deleteRentalSlot(ownerField, update.slotId) }
-          : await fieldService.updateRentalSlot(ownerField, update.slot);
-        updatedRentalFields.push(result.field);
-      }
-
-	      for (const [assignmentId, override] of pendingStaffOverrides) {
-	        if (override.action === 'create') {
-	          const assignment = override.assignment;
-	          const timeSlotPayload = buildStaffScheduleTimeSlotPayload(assignment.timeSlot);
-	          const response = await apiRequest<StaffScheduleCreateResponse>(
-	            `/api/organizations/${organizationId}/staff/schedule`,
-	            {
-	              method: 'POST',
-	              body: {
-	                parentAssignmentId: assignment.parentAssignmentId ?? null,
-	                userId: assignment.userId || null,
-	                assignmentKind: assignment.assignmentKind,
-	                facilityId: assignment.facilityId || null,
-	                fieldId: assignment.fieldId || null,
-	                rateOverrideType: assignment.rateOverrideCents ? 'HOURLY' : null,
-	                rateOverrideCents: assignment.rateOverrideCents ?? null,
-	                notes: assignment.notes ?? '',
-	                ...(timeSlotPayload ? { timeSlot: timeSlotPayload } : {}),
-	              },
-	            },
-	          );
-	          if (response.assignment) {
-	            createdAssignments.push(response.assignment);
-	          }
-	          continue;
-	        }
-
-	        if (override.action === 'update') {
-	          const assignment = override.assignment;
-	          const timeSlotPayload = buildStaffScheduleTimeSlotPayload(assignment.timeSlot);
-          const response = await apiRequest<StaffScheduleUpdateResponse>(
-            `/api/organizations/${organizationId}/staff/schedule/${assignmentId}`,
-            {
-              method: 'PATCH',
-              body: assignment.parentAssignmentId
-                ? {
-                    rateOverrideType: assignment.rateOverrideCents ? 'HOURLY' : null,
-                    rateOverrideCents: assignment.rateOverrideCents ?? null,
-                    ...(timeSlotPayload ? { timeSlot: timeSlotPayload } : {}),
-                  }
-                : {
-                    userId: assignment.userId || null,
-                    facilityId: assignment.facilityId || null,
-                    fieldId: assignment.fieldId || null,
-                    rateOverrideType: assignment.rateOverrideCents ? 'HOURLY' : null,
-                    rateOverrideCents: assignment.rateOverrideCents ?? null,
-                    notes: assignment.notes ?? '',
-                    ...(timeSlotPayload ? { timeSlot: timeSlotPayload } : {}),
-                  },
-            },
-          );
-          if (response.assignment) {
-            updatedAssignments.push(response.assignment);
-          }
-          continue;
-        }
-
-        if (override.action === 'unassign') {
-          await apiRequest<StaffScheduleUpdateResponse>(
-            `/api/organizations/${organizationId}/staff/schedule/${assignmentId}`,
-            {
-              method: 'PATCH',
-              body: { action: 'UNASSIGN' },
-            },
-          );
-          removedAssignmentIds.add(assignmentId);
-          continue;
-        }
-
-        await apiRequest<{ id: string; deleted: boolean }>(
-          `/api/organizations/${organizationId}/staff/schedule/${assignmentId}`,
-          { method: 'DELETE' },
-        );
-        removedAssignmentIds.add(assignmentId);
-        deletedParentAssignmentIds.add(assignmentId);
-      }
-
-      if (updatedRentalFields.length) {
-        const updatedById = new Map(updatedRentalFields.map((field) => [field.$id, field]));
-        setOrg((prev) => {
-          if (!prev) return prev;
-          const prevFields = Array.isArray(prev.fields) ? prev.fields : [];
-          return {
-            ...prev,
-            fields: prevFields.map((field) => {
-              const updatedField = updatedById.get(field.$id);
-              return updatedField ? mergeFieldPreservingCalendarHydration(field, updatedField) : field;
-            }),
-          };
-        });
-      }
-      if (createdAssignments.length) {
-        setStaffScheduleAssignments((current) => [...createdAssignments, ...current]);
-      }
-      if (updatedAssignments.length || removedAssignmentIds.size || deletedParentAssignmentIds.size) {
-        const updatedById = new Map(updatedAssignments.map((assignment) => [assignment.id, assignment]));
-        setStaffScheduleAssignments((current) => current
-          .filter((assignment) => (
-            !removedAssignmentIds.has(assignment.id)
-            && !(assignment.parentAssignmentId && deletedParentAssignmentIds.has(assignment.parentAssignmentId))
-          ))
-          .map((assignment) => updatedById.get(assignment.id) ?? assignment));
-      }
+      const result = await saveFacilityCalendarChanges({
+        organizationId, fields, staffAssignments: staffScheduleAssignments,
+        drafts: managerCalendarDrafts, rentalUpdates: managerRentalSlotUpdates, staffOverrides: managerStaffAssignmentOverrides,
+      });
+      applyCalendarSaveResult(result);
       const savedChangeCount = managerCalendarPendingChangeCount;
       clearManagerCalendarPendingState();
       setManagerCalendarEditMode(false);
@@ -4383,7 +2863,7 @@ export default function FieldsTabContent({
         message: `${savedChangeCount} calendar change${savedChangeCount === 1 ? '' : 's'} saved.`,
       });
       await refreshOrganization();
-      if (createdAssignments.length || pendingStaffOverrides.length) {
+      if (result.createdAssignments.length || Object.keys(managerStaffAssignmentOverrides).length) {
         void loadStaffSchedule({ silent: true });
       }
     } catch (error) {
@@ -4395,20 +2875,7 @@ export default function FieldsTabContent({
     } finally {
       setManagerCalendarDraftsSaving(false);
     }
-  }, [
-    canManage,
-    clearManagerCalendarPendingState,
-    fields,
-    loadStaffSchedule,
-    managerCalendarDrafts,
-    managerCalendarDraftsSaving,
-    managerCalendarPendingChangeCount,
-    managerRentalSlotUpdates,
-    managerStaffAssignmentOverrides,
-    organizationId,
-    refreshOrganization,
-    staffScheduleAssignments,
-  ]);
+  }, [applyCalendarSaveResult, canManage, clearManagerCalendarPendingState, fields, loadStaffSchedule, managerCalendarDrafts, managerCalendarDraftsSaving, managerCalendarPendingChangeCount, managerRentalSlotUpdates, managerStaffAssignmentOverrides, organizationId, refreshOrganization, setManagerCalendarDraftsSaving, setManagerCalendarEditMode, staffScheduleAssignments]);
 
   const handleCancelManagerCalendarEditMode = useCallback(() => {
     if (managerCalendarPendingChangeCount && typeof window !== 'undefined' && !window.confirm('Discard all unsaved calendar changes?')) {
@@ -4426,7 +2893,7 @@ export default function FieldsTabContent({
     setEditingManagerDraftId(null);
     clearManagerCalendarPendingState();
     setManagerCalendarEditMode(false);
-  }, [clearManagerCalendarPendingState, managerCalendarPendingChangeCount]);
+  }, [clearManagerCalendarPendingState, managerCalendarPendingChangeCount, setEditingManagerDraftId, setManagerCalendarEditMode, setManagerDraftDragId, setSelectedManagerDraftId]);
 
   const resolveCalendarPointSelection = useCallback((
     clientX: number,
@@ -4435,64 +2902,23 @@ export default function FieldsTabContent({
     durationMs = MIN_SELECTION_MS,
   ): SelectionState | null => {
     const normalizedFieldIds = normalizeFieldIds(fieldIds);
-    if (!canManage || !normalizedFieldIds.length || !Number.isFinite(clientX) || !Number.isFinite(clientY)) {
-      return null;
-    }
-    const effectiveDurationMs = Math.max(MIN_SELECTION_MS, durationMs);
-
-    const shell = document.querySelector<HTMLElement>('.shared-calendar-shell--fields');
-    const timeContent = shell?.querySelector<HTMLElement>('.rbc-time-content');
-    const daySlots = timeContent
-      ? Array.from(timeContent.querySelectorAll<HTMLElement>('.rbc-day-slot'))
-      : [];
-    if (!timeContent || !daySlots.length) {
-      return null;
-    }
-
-    const contentRect = timeContent.getBoundingClientRect();
-    if (
-      clientX < contentRect.left
-      || clientX > contentRect.right
-      || clientY < contentRect.top
-      || clientY > contentRect.bottom
-    ) {
-      return null;
-    }
-
-    const targetSlot = daySlots.find((slot) => {
-      const rect = slot.getBoundingClientRect();
-      return clientX >= rect.left && clientX <= rect.right;
-    }) ?? daySlots.reduce((closest, slot) => {
-      const closestRect = closest.getBoundingClientRect();
-      const slotRect = slot.getBoundingClientRect();
-      const closestDistance = Math.abs(clientX - (closestRect.left + closestRect.width / 2));
-      const slotDistance = Math.abs(clientX - (slotRect.left + slotRect.width / 2));
-      return slotDistance < closestDistance ? slot : closest;
-    }, daySlots[0]);
-
-    const dayIndex = Math.max(0, daySlots.indexOf(targetSlot));
-    const targetDay = startOfDay(calendarRange.start);
-    targetDay.setDate(targetDay.getDate() + dayIndex);
-
-    const minMinutes = minTime.getHours() * 60 + minTime.getMinutes();
-    const maxMinutes = maxTime.getHours() * 60 + maxTime.getMinutes();
-    const visibleMinutes = Math.max(SLOT_STEP_MINUTES, maxMinutes - minMinutes);
-    const rawRatio = (clientY - contentRect.top) / Math.max(1, contentRect.height);
-    const ratio = Math.min(1, Math.max(0, rawRatio));
-    const rawMinutes = minMinutes + ratio * visibleMinutes;
-    const snappedMinutes = Math.floor(rawMinutes / SLOT_STEP_MINUTES) * SLOT_STEP_MINUTES;
-    const maxStartMinutes = Math.max(minMinutes, maxMinutes - Math.ceil(effectiveDurationMs / 60000));
-    const startMinutes = Math.min(maxStartMinutes, Math.max(minMinutes, snappedMinutes));
-    const start = dateWithMinutes(targetDay, startMinutes);
-    const end = new Date(start.getTime() + effectiveDurationMs);
-
-    return { fieldIds: normalizedFieldIds, start, end };
-  }, [
-    calendarRange.start,
-    canManage,
-    maxTime,
-    minTime,
-  ]);
+    if (!canManage || !normalizedFieldIds.length || !Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
+    const point = resolveFacilityCalendarDropPoint(
+      document.querySelector<HTMLElement>('.shared-calendar-shell--fields'),
+      clientX,
+      clientY,
+      {
+        rangeStart: calendarRange.start,
+        rangeEnd: calendarRange.end,
+        minTime,
+        maxTime,
+        stepMinutes: SLOT_STEP_MINUTES,
+        durationMs: Math.max(MIN_SELECTION_MS, durationMs),
+      },
+    );
+    if (!point || !normalizedFieldIds.includes(point.resourceId)) return null;
+    return { fieldIds: [point.resourceId], start: point.start, end: point.end };
+  }, [calendarRange.start, calendarRange.end, canManage, maxTime, minTime]);
 
   const resolveManagerCreateDropSelection = useCallback((clientX: number, clientY: number): SelectionState | null => {
     const fieldIds = selectedFieldIds.length ? selectedFieldIds : facilityFilteredFieldIds.slice(0, 1);
@@ -4687,15 +3113,12 @@ export default function FieldsTabContent({
     if (event.pointerType === 'mouse' && event.button !== 0) {
       return;
     }
-    const draftId = typeof draftEvent.resource?.slotKey === 'string' ? draftEvent.resource.slotKey : '';
+    const draftId = calendarManagerDraftId(draftEvent);
     const draft = managerCalendarDrafts.find((candidate) => candidate.id === draftId);
     if (!draft) {
       return;
     }
-    const target = event.target as Element | null;
-    const isDragHandle = typeof target?.closest === 'function'
-      && Boolean(target.closest('.shared-calendar-event__drag-handle'));
-    if (!isDragHandle) {
+    if (!closestCalendarElement(event.target, '.shared-calendar-event__drag-handle')) {
       return;
     }
     event.stopPropagation();
@@ -4715,7 +3138,7 @@ export default function FieldsTabContent({
     } catch {
       // Pointer capture can fail if the browser already released this interaction.
     }
-  }, [canManage, managerCalendarDrafts, managerCalendarEditMode]);
+  }, [canManage, managerCalendarDrafts, managerCalendarEditMode, setManagerDraftDragId]);
 
   const handleManagerDraftPointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (!managerDraftDragRef.current) {
@@ -4731,6 +3154,13 @@ export default function FieldsTabContent({
         || hasMovedPastDragThreshold(managerDraftDragRef.current.startPoint, nextPoint),
     };
   }, []);
+
+  const resolveManagerDraftDropSelection = useCallback((drag: ManagerDraftDragState): SelectionState | null => {
+    const target = resolveCalendarPointSelection(drag.lastPoint.clientX, drag.lastPoint.clientY, facilityFilteredFieldIds, drag.durationMs);
+    if (!target) return null;
+    if (Math.abs(drag.lastPoint.clientX - drag.startPoint.clientX) >= 4) return target;
+    return { ...target, start: new Date(drag.draft.start), end: new Date(drag.draft.end) };
+  }, [facilityFilteredFieldIds, resolveCalendarPointSelection]);
 
   const handleManagerDraftPointerUp = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const dragState = managerDraftDragRef.current;
@@ -4751,17 +3181,12 @@ export default function FieldsTabContent({
       return;
     }
     managerDraftSuppressNextClickRef.current = true;
-    const nextSelection = resolveCalendarPointSelection(
-      dragState.lastPoint.clientX,
-      dragState.lastPoint.clientY,
-      dragState.fieldIds,
-      dragState.durationMs,
-    );
+    const nextSelection = resolveManagerDraftDropSelection(dragState);
     if (!nextSelection) {
       return;
     }
-    applySelectionWindow(nextSelection.start, nextSelection.end, { slotKey: dragState.draftId });
-  }, [applySelectionWindow, openManagerCalendarDraftEditor, resolveCalendarPointSelection]);
+    applySelectionWindow(nextSelection.start, nextSelection.end, { slotKey: dragState.draftId, resourceId: nextSelection.fieldIds[0], interaction: 'move' });
+  }, [applySelectionWindow, openManagerCalendarDraftEditor, resolveManagerDraftDropSelection, setManagerDraftDragId]);
 
   const handleManagerDraftPointerCancel = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (!managerDraftDragRef.current) {
@@ -4776,7 +3201,7 @@ export default function FieldsTabContent({
     } catch {
       // No-op when capture was not active.
     }
-  }, []);
+  }, [setManagerDraftDragId]);
 
   useEffect(() => {
     if (!managerDraftDragId) {
@@ -4810,16 +3235,11 @@ export default function FieldsTabContent({
         return;
       }
       managerDraftSuppressNextClickRef.current = true;
-      const nextSelection = resolveCalendarPointSelection(
-        finalState.lastPoint.clientX,
-        finalState.lastPoint.clientY,
-        finalState.fieldIds,
-        finalState.durationMs,
-      );
+      const nextSelection = resolveManagerDraftDropSelection(finalState);
       if (!nextSelection) {
         return;
       }
-      applySelectionWindow(nextSelection.start, nextSelection.end, { slotKey: finalState.draftId });
+      applySelectionWindow(nextSelection.start, nextSelection.end, { slotKey: finalState.draftId, resourceId: nextSelection.fieldIds[0], interaction: 'move' });
     };
 
     const cancelDrag = () => {
@@ -4842,12 +3262,10 @@ export default function FieldsTabContent({
       window.removeEventListener('pointercancel', cancelDrag, true);
       window.removeEventListener('blur', cancelDrag);
     };
-  }, [applySelectionWindow, managerDraftDragId, openManagerCalendarDraftEditor, resolveCalendarPointSelection]);
+  }, [applySelectionWindow, managerDraftDragId, openManagerCalendarDraftEditor, resolveManagerDraftDropSelection, setManagerDraftDragId]);
 
   const openStaffAssignmentEditModal = useCallback((item: FacilityCalendarFeedItem, start: Date, end: Date) => {
-    if (!canManage) {
-      return;
-    }
+    if (!canManage) return;
     setSelectedManagerDraftId(null);
     setEditingManagerDraftId(null);
     const assignment = item.source as StaffScheduleAssignment | undefined;
@@ -4855,86 +3273,31 @@ export default function FieldsTabContent({
       notifications.show({ color: 'red', message: 'Unable to resolve this staff assignment.' });
       return;
     }
-    if (!assignment.parentAssignmentId && !assignment.userId && !assignment.staffMemberId) {
-      if (!item.fieldId) {
-        notifications.show({ color: 'red', message: 'Assigning coverage from the calendar requires a resource.' });
-        return;
-      }
-      setSelection({ fieldIds: [item.fieldId], start, end });
-      setCalendarDate(new Date(start));
-      setEditingStaffAssignment(null);
-      setStaffTimeslotParentAssignment(assignment);
-      setStaffTimeslotMode(item.type === 'official_assignment' ? 'official_assignment' : 'staff_assignment');
-      setStaffTimeslotUserId(null);
-      setStaffTimeslotOverrideAmount('');
-      setStaffTimeslotNotes(assignment.notes ?? '');
-      setStaffTimeslotRepeating(false);
-      setStaffTimeslotRepeatDays([mondayDayOf(start)]);
-      setStaffTimeslotRepeatEndDate(null);
-      setStaffTimeslotError(null);
-      setStaffTimeslotModalOpen(true);
-      if (!staffScheduleLoaded) {
-        void loadStaffSchedule();
-      }
-      return;
-    }
-
-    const fieldId = item.fieldId ?? assignment.fieldId ?? null;
-    if (!fieldId) {
+    const editor = staffAssignmentEditorState(item, assignment, start);
+    if (!editor.fieldId) {
       notifications.show({ color: 'red', message: 'Assigning coverage from the calendar requires a resource.' });
       return;
     }
-    const timeSlot = assignment.timeSlot ?? null;
-    const repeatEndDate = timeSlot?.endDate ? toValidDate(timeSlot.endDate) : null;
-    setSelection({ fieldIds: [fieldId], start, end });
+    setSelection({ fieldIds: [editor.fieldId], start, end });
     setCalendarDate(new Date(start));
-    setEditingStaffAssignment(assignment);
-    setStaffTimeslotParentAssignment(null);
-    setStaffTimeslotMode(item.type === 'official_assignment' ? 'official_assignment' : 'staff_assignment');
-    setStaffTimeslotUserId(assignment.userId ?? null);
-    setStaffTimeslotOverrideAmount(dollarsFromCents(assignment.rateOverrideCents));
-    setStaffTimeslotNotes(assignment.notes ?? '');
-    setStaffTimeslotRepeating(Boolean(timeSlot?.repeating));
-    setStaffTimeslotRepeatDays(Array.isArray(timeSlot?.daysOfWeek) && timeSlot.daysOfWeek.length
-      ? timeSlot.daysOfWeek
-      : [mondayDayOf(start)]);
-    setStaffTimeslotRepeatEndDate(repeatEndDate);
+    setEditingStaffAssignment(editor.editingAssignment);
+    setStaffTimeslotParentAssignment(editor.parentAssignment);
+    setStaffTimeslotMode(editor.mode);
+    setStaffTimeslotUserId(editor.values.userId);
+    setStaffTimeslotOverrideAmount(editor.values.overrideAmount);
+    setStaffTimeslotNotes(editor.values.notes);
+    setStaffTimeslotRepeating(editor.values.repeating);
+    setStaffTimeslotRepeatDays(editor.values.repeatDays);
+    setStaffTimeslotRepeatEndDate(editor.values.repeatEndDate);
     setStaffTimeslotError(null);
     setStaffTimeslotModalOpen(true);
-    if (!staffScheduleLoaded) {
-      void loadStaffSchedule();
-    }
-  }, [canManage, loadStaffSchedule, staffScheduleLoaded]);
-
+    if (!staffScheduleLoaded) void loadStaffSchedule();
+  }, [canManage, loadStaffSchedule, setEditingManagerDraftId, setSelectedManagerDraftId, staffScheduleLoaded]);
   useEffect(() => {
     openStaffAssignmentEditModalRef.current = openStaffAssignmentEditModal;
   }, [openStaffAssignmentEditModal]);
 
-  const handleSelectCalendarEvent = useCallback((event: any) => {
-    if (!canManage) return;
-    if (!event) return;
-    if (event.metaType === 'selection') {
-      const draftId = typeof event.resource?.slotKey === 'string' ? event.resource.slotKey : '';
-      if (draftId) {
-        openManagerCalendarDraftEditor(draftId);
-      }
-      return;
-    }
-    if (
-      event.metaType === 'facility-feed'
-      && (event.feedType === 'staff_assignment' || event.feedType === 'official_assignment')
-      && event.resource
-      && event.start
-      && event.end
-    ) {
-      if (isStaffAssignmentActivationSuppressed()) {
-        return;
-      }
-      openStaffAssignmentEditModal(event.resource as FacilityCalendarFeedItem, event.start, event.end);
-      return;
-    }
-    if (event.metaType !== 'rental') return;
-
+  const openRentalCalendarEvent = useCallback((event: CalendarEventData) => {
     const slot = event.resource as TimeSlot | undefined;
     if (!slot?.$id) return;
     const eventFieldId = typeof event.resourceId === 'string' ? event.resourceId : '';
@@ -4946,8 +3309,22 @@ export default function FieldsTabContent({
     setEditingRentalSlot(slot);
     setRentalDraftRange(null);
     setCreateRentalOpen(true);
-  }, [canManage, fields, isStaffAssignmentActivationSuppressed, openManagerCalendarDraftEditor, openStaffAssignmentEditModal, selectedField]);
+  }, [fields, selectedField, setEditingManagerDraftId, setSelectedManagerDraftId]);
 
+  const handleSelectCalendarEvent = useCallback((event: CalendarEventData) => {
+    if (!canManage || !event) return;
+    if (event.metaType === 'selection') {
+      const draftId = calendarManagerDraftId(event);
+      if (draftId) openManagerCalendarDraftEditor(draftId);
+      return;
+    }
+    if (isStaffFeedEvent(event, canManage)) {
+      if (isStaffAssignmentActivationSuppressed()) return;
+      openStaffAssignmentEditModal(event.resource, event.start, event.end);
+      return;
+    }
+    if (event.metaType === 'rental') openRentalCalendarEvent(event);
+  }, [canManage, isStaffAssignmentActivationSuppressed, openManagerCalendarDraftEditor, openRentalCalendarEvent, openStaffAssignmentEditModal]);
   const handleManagerDraftCalendarEventClick = useCallback((
     draftId: string,
     fallbackDraft: ManagerCalendarDraft | null,
@@ -4961,152 +3338,530 @@ export default function FieldsTabContent({
     }
   }, [openManagerCalendarDraftEditor]);
 
-  const canRenderCalendar = canManage
-    ? Boolean(selectedFieldIds.length > 0)
-    : readonlyCalendarFields.length > 0;
-  const managerCreateDragTemplate = managerCalendarEditMode && managerCreateDragMode
-    ? MANAGER_CREATE_TEMPLATES.find((template) => template.mode === managerCreateDragMode) ?? null
-    : null;
-  const fieldCalendarNode = (
-    <FacilityCalendarPanel
-      canRenderCalendar={canRenderCalendar}
-      emptyText={canManage ? 'Select at least one resource to view availability.' : 'No resources are available for rentals.'}
-      minHeight={MIN_FIELD_CALENDAR_HEIGHT}
-      events={calendarEvents}
-      calendarView={calendarView}
-      calendarDate={calendarDate}
-      onViewChange={setCalendarView}
-      onNavigateDate={(date) => {
-        const nextDate = toValidDate(date);
-        if (nextDate) {
-          setCalendarDate(nextDate);
+  const calendarResources = useMemo(
+    () => facilityCalendarFields.map((field) => ({
+      id: field.$id,
+      label: getFacilityScopedFieldDisplayName(field),
+    })),
+    [facilityCalendarFields],
+  );
+  const renderFieldCalendar = () => {
+    const canRenderCalendar = canManage ? Boolean(selectedFieldIds.length > 0) : readonlyCalendarFields.length > 0;
+    return (
+      <FacilityCalendarPanel
+        canRenderCalendar={canRenderCalendar}
+        emptyText={
+          canManage ? 'Select at least one resource to view availability.' : 'No resources are available for rentals.'
         }
+        events={calendarEvents}
+        conflictingEventIds={conflictingEventIds}
+        resources={calendarResources}
+        calendarView={calendarView}
+        calendarDate={calendarDate}
+        calendarRangeStart={calendarRange.start}
+        calendarRangeEnd={calendarRange.end}
+        onViewChange={setCalendarView}
+        onNavigateDate={(date) => {
+          const nextDate = toValidDate(date);
+          if (nextDate) {
+            setCalendarDate(nextDate);
+          }
+        }}
+        minTime={minTime}
+        maxTime={maxTime}
+        eventPropGetter={eventPropGetter}
+        slotPropGetter={slotPropGetter}
+        onEventDrop={handleEventDrop}
+        onEventResize={handleEventResize}
+        onSelectSlot={handleSlotSelect}
+        onSelectEvent={handleSelectCalendarEvent}
+        onShellPointerDownCapture={handleCalendarShellStaffPointerDown}
+        onShellPointerUpCapture={handleCalendarShellStaffEventActivation}
+        onShellClickCapture={handleCalendarShellStaffEventActivation}
+        canManage={canManage}
+        managerCalendarEditMode={managerCalendarEditMode}
+        fieldEventsLoading={fieldEventsLoading || orgLoading}
+        fieldColorReferenceList={fieldColorReferenceList}
+        managerDraftDragId={managerDraftDragId}
+        managerSelectionTitles={MANAGER_SELECTION_TITLES}
+        getCalendarEventVariant={getCalendarEventVariant}
+        onManagerDraftClick={handleManagerDraftCalendarEventClick}
+        onManagerDraftPointerDown={handleManagerDraftPointerDown}
+        onManagerDraftPointerMove={handleManagerDraftPointerMove}
+        onManagerDraftPointerUp={handleManagerDraftPointerUp}
+        onManagerDraftPointerCancel={handleManagerDraftPointerCancel}
+        isStaffAssignmentActivationSuppressed={isStaffAssignmentActivationSuppressed}
+        onOpenStaffAssignmentEdit={openStaffAssignmentEditModal}
+      />
+    );
+  };
+  const renderCreateDragPreview = () => {
+    const managerCreateDragTemplate =
+      managerCalendarEditMode && managerCreateDragMode
+        ? (MANAGER_CREATE_TEMPLATES.find((template) => template.mode === managerCreateDragMode) ?? null)
+        : null;
+    return managerCreateDragTemplate && managerCreateDragPreviewPoint ? (
+      <div
+        className="facility-calendar-create-drag-preview"
+        style={{
+          left: managerCreateDragPreviewPoint.clientX,
+          top: managerCreateDragPreviewPoint.clientY,
+        }}
+        aria-hidden="true"
+      >
+        <SharedCalendarEvent
+          title={managerCreateDragTemplate.title}
+          subtitle={managerCreateDragTemplate.subtitle}
+          meta={managerCreateDragTemplate.meta}
+          colorSeed={managerCreateDragTemplate.colorSeed}
+          colorReferenceList={fieldColorReferenceList}
+          colorMatchKey={selectedFieldIds[0] ?? undefined}
+          resourceColorMatchKeys={selectedFieldIds}
+          variant={managerCreateDragTemplate.variant}
+          draggable
+          selected
+        />
+      </div>
+    ) : null;
+  };
+
+  const renderManagerActions = () =>
+    canManage &&
+    facilityWorkspaceView === 'schedule' && (
+      <Group gap="xs" className="md:justify-end">
+        <Button
+          size="xs"
+          variant="light"
+          onClick={() => setFacilityWorkspaceView('details')}
+          disabled={managerCalendarDraftsSaving || managerCalendarPendingChangeCount > 0}
+        >
+          Facility details
+        </Button>
+        {managerCalendarEditMode ? (
+          <>
+            <Button
+              size="xs"
+              variant="default"
+              onClick={undoLastManagerCalendarChange}
+              disabled={managerCalendarDraftsSaving || !managerCalendarPendingChangeCount}
+            >
+              Undo
+            </Button>
+            <Button
+              size="xs"
+              variant="default"
+              onClick={handleCancelManagerCalendarEditMode}
+              disabled={managerCalendarDraftsSaving}
+            >
+              Discard changes
+            </Button>
+            <Button
+              size="xs"
+              onClick={() => void handleSaveManagerCalendarDrafts()}
+              loading={managerCalendarDraftsSaving}
+              disabled={!managerCalendarPendingChangeCount}
+              data-testid="facility-calendar-save-drafts"
+            >
+              Save changes
+            </Button>
+          </>
+        ) : (
+          <Button size="xs" variant="light" onClick={() => setManagerCalendarEditMode(true)}>
+            Edit schedule
+          </Button>
+        )}
+      </Group>
+    );
+
+  const renderHeading = () => (
+    <div className="org-section-heading">
+      <div>
+        <Title order={3} mb={4}>
+          Facilities
+        </Title>
+        <Text c="dimmed">
+          {canManage
+            ? 'Manage venues, courts, rentals, and availability.'
+            : 'Choose a resource and drag the calendar to set your rental time.'}
+        </Text>
+      </div>
+
+      {renderManagerActions()}
+    </div>
+  );
+
+  const renderManagerSchedule = () => (
+    <FacilityScheduleLayout
+      loading={fieldEventsLoading || orgLoading}
+      facilities={facilities}
+      resourceCount={calendarResources.length}
+      events={calendarEvents}
+    >
+      <ManagerFacilityCalendarSidebar
+        loading={fieldEventsLoading || orgLoading}
+        facilityFilterOptions={facilityFilterOptions}
+        selectedFacilityFilterValue={selectedFacilityFilterValue}
+        onFacilityFilterChange={handleFacilityFilterChange}
+        calendarLayerOrder={CALENDAR_LAYER_ORDER}
+        calendarLayerLabels={CALENDAR_LAYER_LABELS}
+        calendarLayerColors={CALENDAR_LAYER_COLORS}
+        calendarLayerCounts={calendarLayerCounts}
+        conflictCount={facilityCalendarSummary.conflictCount}
+        activeCalendarLayerSet={activeCalendarLayerSet}
+        allCalendarLayersSelected={allCalendarLayersSelected}
+        onSelectAllCalendarLayers={() => setCalendarLayerFilters(CALENDAR_LAYER_ORDER)}
+        onToggleCalendarLayer={toggleCalendarLayer}
+        editMode={managerCalendarEditMode}
+        createTemplates={MANAGER_CREATE_TEMPLATES}
+        selectedFieldIds={selectedFieldIds}
+        facilityFilteredFieldIds={facilityFilteredFieldIds}
+        fieldFilterItems={fieldFilterItems}
+        fieldColorReferenceList={fieldColorReferenceList}
+        createDragMode={managerCreateDragMode}
+        onCreatePointerDown={handleManagerCreatePointerDown}
+        onCreateActivate={(mode) => {
+          if (!managerCalendarEditMode || !selectedFieldIds.length) return;
+          const start = new Date(calendarDate);
+          start.setHours(8, 0, 0, 0);
+          const end = new Date(start.getTime() + 60 * 60 * 1000);
+          addManagerCalendarDraft(mode, { start, end, fieldIds: [selectedFieldIds[0]] });
+        }}
+        onCreatePointerMove={handleManagerCreatePointerMove}
+        onCreatePointerUp={handleManagerCreatePointerUp}
+        onCreatePointerCancel={handleManagerCreatePointerCancel}
+        onSelectedFieldIdsChange={handleSelectedFieldIdsChange}
+      >
+        <Stack gap="sm" className="min-w-0">
+          {renderFieldCalendar()}
+        </Stack>
+      </ManagerFacilityCalendarSidebar>
+    </FacilityScheduleLayout>
+  );
+
+  const renderPublicSelections = () => (
+    <PublicRentalSelectionsPanel
+      selections={rentalSelections}
+      validationByKey={rentalSelectionValidationByKey}
+      fields={fields}
+      facilityFieldsByFilterValue={facilityFieldsByFilterValue}
+      publicFacilityFilterOptions={publicFacilityFilterOptions}
+      allFacilitiesFilterValue={ALL_FACILITIES_FILTER_VALUE}
+      resolveSelectionDateRange={resolveSelectionDateRange}
+      getSelectionFacilityFilterValue={getSelectionFacilityFilterValue}
+      onAddSelection={handleAddRentalSelection}
+      onRemoveSelection={handleRemoveRentalSelection}
+      onSelectionFacilityChange={(selectionKey, normalizedValue) => {
+        const nextFieldIds = getPreferredFieldIdsForFacilityFilter(normalizedValue);
+        setSelectedFacilityFilterValue(normalizedValue);
+        setReadonlyVisibleFieldIds(nextFieldIds);
+        updateRentalSelection(selectionKey, (current) => ({
+          ...current,
+          scheduledFieldIds: nextFieldIds,
+        }));
       }}
-      onRangeChange={handleCalendarRangeChange}
-      slotGroupPropGetter={slotGroupPropGetter}
-      minTime={minTime}
-      maxTime={maxTime}
-      scrollToTime={scrollToTime}
-      eventPropGetter={eventPropGetter}
-      slotPropGetter={slotPropGetter}
-      onEventDrop={handleEventDrop}
-      onEventResize={handleEventResize}
-      onSelecting={handleSelecting}
-      onSelectSlot={handleSlotSelect}
-      onSelectEvent={handleSelectCalendarEvent}
-      onShellPointerDownCapture={handleCalendarShellStaffPointerDown}
-      onShellPointerUpCapture={handleCalendarShellStaffEventActivation}
-      onShellClickCapture={handleCalendarShellStaffEventActivation}
-      canManage={canManage}
-      managerCalendarEditMode={managerCalendarEditMode}
-      fieldEventsLoading={fieldEventsLoading}
-      fieldColorReferenceList={fieldColorReferenceList}
-      managerDraftDragId={managerDraftDragId}
-      managerSelectionTitles={MANAGER_SELECTION_TITLES}
-      getCalendarEventVariant={getCalendarEventVariant}
-      onManagerDraftClick={handleManagerDraftCalendarEventClick}
-      onManagerDraftPointerDown={handleManagerDraftPointerDown}
-      onManagerDraftPointerMove={handleManagerDraftPointerMove}
-      onManagerDraftPointerUp={handleManagerDraftPointerUp}
-      onManagerDraftPointerCancel={handleManagerDraftPointerCancel}
-      isStaffAssignmentActivationSuppressed={isStaffAssignmentActivationSuppressed}
-      onOpenStaffAssignmentEdit={openStaffAssignmentEditModal}
+      onSelectionFieldIdsChange={(selectionKey, nextValues) => {
+        updateRentalSelection(selectionKey, (current) => ({
+          ...current,
+          scheduledFieldIds: normalizeFieldIds(nextValues),
+        }));
+      }}
+      onSelectionRangeChange={(selectionKey, start, end) => {
+        updateRentalSelection(selectionKey, (current) => updateSelectionWithCalendarRange(current, start, end));
+      }}
     />
   );
 
-  if (orgLoading) {
-    return <Loading fullScreen={false} text="Loading resources..." />;
-  }
+  const renderPublicCalendar = () =>
+    !canManage && (
+      <div className="shared-calendar-layout">
+        <Stack gap="sm">
+          {currentUser ? (
+            <Select
+              label="Book rental as"
+              data={hostSelectOptions}
+              value={hostSelection}
+              onChange={(value) => setHostSelection(value ?? 'self')}
+              rightSection={hostOptionsLoading ? <Loader size="xs" /> : undefined}
+              rightSectionWidth={hostOptionsLoading ? 36 : undefined}
+              disabled={hostOptionsLoading && hostSelectOptions.length === 1}
+              allowDeselect={false}
+              size="sm"
+            />
+          ) : null}
+          <Select
+            label="Facility"
+            data={publicFacilityFilterOptions}
+            value={selectedFacilityFilterValue}
+            onChange={handleFacilityFilterChange}
+            allowDeselect={false}
+            size="sm"
+          />
+          <FieldCalendarFilter
+            items={fieldFilterItems}
+            selectedIds={readonlyCalendarFieldIds}
+            onSelectedIdsChange={handleReadonlyVisibleFieldIdsChange}
+            colorReferenceList={fieldColorReferenceList}
+            title="Resources"
+            ariaLabel="Facility resources"
+            searchPlaceholder="Search resources"
+            searchAriaLabel="Search resources"
+            emptyText="No resources match this facility."
+          />
+        </Stack>
+        <Stack gap="sm" className="min-w-0">
+          <Text size="sm" c="dimmed">
+            Click empty time ranges in the calendar to add selections. Drag or resize a highlighted selection to update
+            its date/time across selected resources.
+          </Text>
+          {renderFieldCalendar()}
+          <Text size="sm" c={summaryColor}>
+            {summaryText}
+          </Text>
+        </Stack>
+      </div>
+    );
+
+  const renderRentalTotal = () =>
+    !canManage && (
+      <Paper withBorder radius="md" p="sm">
+        <Stack gap="xs">
+          <Group justify="space-between" align="center">
+            <Text fw={600} size="sm">
+              Rental Total
+            </Text>
+            <Badge color={canReserveRentalResources ? 'teal' : 'red'} size="lg">
+              {formatPrice(totalRentalCents)}
+            </Badge>
+          </Group>
+          {rentalSelectionValidations.map((validation, index) => {
+            const selectionRange = resolveSelectionDateRange(validation.selection);
+            return (
+              <Group key={validation.selection.key} justify="space-between" align="center">
+                <Text size="sm">
+                  Selection {index + 1}:{' '}
+                  {selectionRange
+                    ? `${formatDisplayDateTime(selectionRange.start)} - ${formatDisplayDateTime(selectionRange.end)}`
+                    : 'Invalid date range'}
+                </Text>
+                <Badge color={validation.errors.length ? 'red' : 'teal'} variant="light">
+                  {formatPrice(validation.totalCents)}
+                </Badge>
+              </Group>
+            );
+          })}
+        </Stack>
+      </Paper>
+    );
+
+  const renderFooter = () => (
+    <Group justify="flex-end" mt="md">
+      {showBackButton && (
+        <Button variant="default" onClick={() => router.push(backHref)}>
+          {backLabel}
+        </Button>
+      )}
+      {!canManage ? (
+        <Button disabled={!canReserveRentalResources || !currentUser} onClick={handleReserveResourcesClick}>
+          {primaryActionLabel}
+        </Button>
+      ) : null}
+    </Group>
+  );
+
+  const renderWorkspaceContent = () =>
+    !org ? (
+      <Paper withBorder radius="md" p="lg">
+        <Text c="dimmed">Organization details are unavailable.</Text>
+      </Paper>
+    ) : canManage && facilityWorkspaceView === 'details' ? (
+      <FacilityDetailsWorkspace
+        organization={org}
+        facilities={facilities}
+        fields={fields}
+        canManage={canManage}
+        onSwitchToSchedule={() => setFacilityWorkspaceView('schedule')}
+        onSaved={refreshOrganization}
+      />
+    ) : !canManage && !(org.fields && org.fields.length) ? (
+      <Paper withBorder radius="md" p="lg">
+        <Stack gap="sm">
+          <Text c="dimmed">No resources available.</Text>
+          {canManage ? (
+            <Button size="sm" onClick={() => setFacilityWorkspaceView('details')} style={{ alignSelf: 'flex-start' }}>
+              Manage facilities
+            </Button>
+          ) : (
+            <Text size="sm" c="dimmed">
+              Sign in as the organization owner to add resources and rental slots.
+            </Text>
+          )}
+        </Stack>
+      </Paper>
+    ) : (
+      <Stack gap="md">
+        {canManage ? renderManagerSchedule() : renderPublicSelections()}
+
+        {renderPublicCalendar()}
+
+        {renderRentalTotal()}
+
+        {renderFooter()}
+      </Stack>
+    );
+
+  const staffEditorResourceLabel = () => {
+    if (selectedFields.length > 1) return `${selectedFields.length} selected resources`;
+    return selectedField ? getFacilityScopedFieldDisplayName(selectedField) : 'Selected resource';
+  };
+
+  const renderStaffEditor = () => (
+    <StaffTimeslotEditorModal
+      opened={staffTimeslotModalOpen}
+      mode={staffTimeslotMode}
+      error={staffTimeslotError}
+      selectedResourceLabel={staffEditorResourceLabel()}
+      selectedRangeLabel={
+        selection
+          ? `${formatDisplayDateTime(selection.start)} - ${formatDisplayTime(selection.end)}`
+          : 'Select a time range first.'
+      }
+      isEditingManagerDraft={isEditingManagerDraft}
+      isEditingStaffAssignment={isEditingStaffAssignment}
+      isEditingChildStaffAssignment={isEditingChildStaffAssignment}
+      isAssigningStaffOccurrence={isAssigningStaffOccurrence}
+      assignedUserName={editingStaffAssignment?.userName ?? null}
+      facilityOptions={facilityFilterOptions}
+      facilityValue={staffTimeslotResourceFacilityValue}
+      onFacilityChange={handleStaffTimeslotFacilityChange}
+      resourceOptions={staffTimeslotResourceOptions}
+      selectedResourceIds={selectedFieldIds.filter((fieldId) =>
+        staffTimeslotResourceFields.some((field) => field.$id === fieldId),
+      )}
+      onResourceIdsChange={handleStaffTimeslotResourceChange}
+      userOptions={staffTimeslotUserOptions}
+      userId={staffTimeslotUserId}
+      onUserIdChange={setStaffTimeslotUserId}
+      usersLoading={staffScheduleLoading}
+      overrideAmount={staffTimeslotOverrideAmount}
+      onOverrideAmountChange={setStaffTimeslotOverrideAmount}
+      showRepeatControls={!isAssigningStaffOccurrence && !isEditingStaffAssignment}
+      repeating={staffTimeslotRepeating}
+      onRepeatingChange={(checked) => {
+        setStaffTimeslotRepeating(checked);
+        if (checked && staffTimeslotRepeatDays.length === 0 && selection) {
+          setStaffTimeslotRepeatDays([mondayDayOf(selection.start)]);
+        }
+      }}
+      repeatDays={staffTimeslotRepeatDays}
+      onRepeatDaysChange={setStaffTimeslotRepeatDays}
+      repeatDayOptions={STAFF_TIMESLOT_REPEAT_DAY_OPTIONS}
+      repeatEndDate={staffTimeslotRepeatEndDate}
+      onRepeatEndDateChange={(value) => setStaffTimeslotRepeatEndDate(coerceDatePickerValue(value))}
+      repeatMinDate={selection ? startOfDay(selection.start) : undefined}
+      notes={staffTimeslotNotes}
+      onNotesChange={setStaffTimeslotNotes}
+      submitting={staffTimeslotSubmitting}
+      deleting={staffTimeslotDeleting}
+      submitDisabled={staffTimeslotSubmitting || staffTimeslotDeleting || !selection || !selectedFields.length}
+      onClose={resetStaffTimeslotModalState}
+      onSubmit={() => void submitStaffTimeslot()}
+      onDeleteOpenAssignment={() => void requestDeleteOpenStaffAssignment()}
+      onUnassignChildAssignment={() => void unassignChildStaffAssignment()}
+      onDeleteAssignment={() => void deleteStaffAssignment()}
+    />
+  );
+
+  const renderScopePrompt = () => (
+    <StaffAssignmentScopePromptModal
+      opened={Boolean(staffAssignmentScopePrompt)}
+      kindLabel={staffAssignmentScopePrompt?.kindLabel}
+      staffName={staffAssignmentScopePrompt?.staffName ?? null}
+      occurrenceLabel={staffAssignmentScopePrompt?.occurrenceLabel ?? null}
+      onClose={() => setStaffAssignmentScopePrompt(null)}
+      onApplyScope={applyStaffAssignmentScopePrompt}
+    />
+  );
+
+  const staffDeleteDialogFlags = () => ({
+    canDeleteFollowing: openStaffDeletePlan
+      ? staffAssignmentCanDeleteFollowing(openStaffDeletePlan.parentAssignment)
+      : false,
+    showShortenedAssignmentWarning: Boolean(
+      openStaffDeletePlan?.scope === 'following' && openStaffDeletePlan.shortenedAssignment,
+    ),
+    showDeletesParentWarning: Boolean(openStaffDeletePlan?.scope === 'following' && openStaffDeletePlan.deletesParent),
+  });
+
+  const renderDeleteConfirmation = () => (
+    <OpenStaffDeleteConfirmationModal
+      opened={Boolean(openStaffDeleteConfirmation)}
+      title={
+        openStaffDeletePlan?.parentAssignment.assignmentKind === 'OFFICIAL_SHIFT'
+          ? 'Delete open official shift'
+          : 'Delete open staff shift'
+      }
+      hasPlan={Boolean(openStaffDeletePlan)}
+      {...staffDeleteDialogFlags()}
+      scope={openStaffDeleteConfirmation?.scope ?? 'following'}
+      occurrenceLabel={
+        openStaffDeletePlan
+          ? `${formatDisplayDateTime(openStaffDeletePlan.occurrenceStart)} - ${formatDisplayTime(openStaffDeletePlan.occurrenceEnd)}`
+          : ''
+      }
+      childAssignments={
+        openStaffDeletePlan?.childAssignments.map((assignment) => ({
+          id: assignment.id,
+          label: formatStaffAssignmentDeleteChildLabel(assignment),
+        })) ?? []
+      }
+      onScopeChange={(scope) =>
+        setOpenStaffDeleteConfirmation((current) => (current ? { ...current, scope } : current))
+      }
+      onCancel={() => setOpenStaffDeleteConfirmation(null)}
+      onConfirm={() => void confirmOpenStaffAssignmentDelete()}
+    />
+  );
+
+  const renderRentalEditor = () => (
+    <CreateRentalSlotModal
+      opened={createRentalOpen}
+      onClose={() => {
+        setCreateRentalOpen(false);
+        setEditingRentalSlot(null);
+        setEditingRentalField(null);
+        setEditingManagerDraftId(null);
+        setRentalDraftRange(null);
+      }}
+      field={editingRentalField ?? selectedField}
+      selectedFields={!editingRentalSlot ? selectedFields : undefined}
+      slot={editingRentalSlot}
+      initialRange={editingRentalSlot ? null : rentalDraftRange}
+      onSubmitOverride={managerCalendarEditMode ? handleRentalSlotModalSubmit : undefined}
+      onDeleteOverride={managerCalendarEditMode ? handleRentalSlotModalDelete : undefined}
+      onSaved={async (updatedFields) => {
+        setOrg((prev) => {
+          if (!prev) return prev;
+          const prevFields = Array.isArray(prev.fields) ? prev.fields : [];
+          const updatedById = new Map(updatedFields.map((field) => [field.$id, field]));
+          const nextFields = prevFields.map((field) => {
+            const updatedField = updatedById.get(field.$id);
+            return updatedField ? mergeFieldPreservingCalendarHydration(field, updatedField) : field;
+          });
+          return { ...prev, fields: nextFields };
+        });
+        await refreshOrganization();
+      }}
+      organizationHasStripeAccount={organizationHasStripeAccount}
+      organizationId={organizationId}
+      fieldColorReferenceList={fieldColorReferenceList}
+    />
+  );
 
   return (
     <Stack gap="md">
-      {managerCreateDragTemplate && managerCreateDragPreviewPoint ? (
-        <div
-          className="facility-calendar-create-drag-preview"
-          style={{
-            left: managerCreateDragPreviewPoint.clientX,
-            top: managerCreateDragPreviewPoint.clientY,
-          }}
-          aria-hidden="true"
-        >
-          <SharedCalendarEvent
-            title={managerCreateDragTemplate.title}
-            subtitle={managerCreateDragTemplate.subtitle}
-            meta={managerCreateDragTemplate.meta}
-            colorSeed={managerCreateDragTemplate.colorSeed}
-            colorReferenceList={fieldColorReferenceList}
-            colorMatchKey={selectedFieldIds[0] ?? undefined}
-            resourceColorMatchKeys={selectedFieldIds}
-            variant={managerCreateDragTemplate.variant}
-            draggable
-            selected
-          />
-        </div>
-      ) : null}
-      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div>
-          <Title order={3} mb={4}>
-            Facilities
-          </Title>
-          <Text c="dimmed">
-            {canManage
-              ? 'Group resources by physical place, then use the calendar to manage rental slots and pricing.'
-              : 'Choose a resource and drag the calendar to set your rental time.'}
-          </Text>
-        </div>
+      {renderCreateDragPreview()}
 
-        {canManage && facilityWorkspaceView === 'schedule' && (
-          <Group gap="xs" className="md:justify-end">
-            <Button
-              size="xs"
-              variant="light"
-              onClick={() => setFacilityWorkspaceView('details')}
-              disabled={managerCalendarDraftsSaving || managerCalendarPendingChangeCount > 0}
-            >
-              Facility details
-            </Button>
-            {managerCalendarEditMode ? (
-              <>
-                <Button
-                  size="xs"
-                  variant="default"
-                  onClick={undoLastManagerCalendarChange}
-                  disabled={managerCalendarDraftsSaving || !managerCalendarPendingChangeCount}
-                >
-                  Undo
-                </Button>
-                <Button
-                  size="xs"
-                  variant="default"
-                  onClick={handleCancelManagerCalendarEditMode}
-                  disabled={managerCalendarDraftsSaving}
-                >
-                  Discard changes
-                </Button>
-                <Button
-                  size="xs"
-                  onClick={() => void handleSaveManagerCalendarDrafts()}
-                  loading={managerCalendarDraftsSaving}
-                  disabled={!managerCalendarPendingChangeCount}
-                  data-testid="facility-calendar-save-drafts"
-                >
-                  {managerCalendarPendingChangeCount
-                    ? `Save changes (${managerCalendarPendingChangeCount})`
-                    : 'Save changes'}
-                </Button>
-              </>
-            ) : (
-              <Button
-                size="xs"
-                variant="light"
-                onClick={() => setManagerCalendarEditMode(true)}
-              >
-                Edit schedule
-              </Button>
-            )}
-          </Group>
-        )}
-      </div>
+      {renderHeading()}
 
       {orgError && (
         <Alert color="red" mb="md">
@@ -5114,318 +3869,15 @@ export default function FieldsTabContent({
         </Alert>
       )}
 
-      {!org ? (
-        <Paper withBorder radius="md" p="lg">
-          <Text c="dimmed">Organization details are unavailable.</Text>
-        </Paper>
-      ) : canManage && facilityWorkspaceView === 'details' ? (
-        <FacilityDetailsWorkspace
-          organization={org}
-          facilities={facilities}
-          fields={fields}
-          canManage={canManage}
-          onSwitchToSchedule={() => setFacilityWorkspaceView('schedule')}
-          onSaved={refreshOrganization}
-        />
-      ) : !(org.fields && org.fields.length) ? (
-        <Paper withBorder radius="md" p="lg">
-          <Stack gap="sm">
-            <Text c="dimmed">No resources available.</Text>
-            {canManage ? (
-              <Button
-                size="sm"
-                onClick={() => setFacilityWorkspaceView('details')}
-                style={{ alignSelf: 'flex-start' }}
-              >
-                Manage facilities
-              </Button>
-            ) : (
-              <Text size="sm" c="dimmed">
-                Sign in as the organization owner to add resources and rental slots.
-              </Text>
-            )}
-          </Stack>
-        </Paper>
-      ) : (
-        <Stack gap="md">
-          {canManage ? (
-            <div className="shared-calendar-layout">
-              <ManagerFacilityCalendarSidebar
-                facilityFilterOptions={facilityFilterOptions}
-                selectedFacilityFilterValue={selectedFacilityFilterValue}
-                onFacilityFilterChange={handleFacilityFilterChange}
-                calendarLayerOrder={CALENDAR_LAYER_ORDER}
-                calendarLayerLabels={CALENDAR_LAYER_LABELS}
-                calendarLayerColors={CALENDAR_LAYER_COLORS}
-                calendarLayerCounts={calendarLayerCounts}
-                activeCalendarLayerSet={activeCalendarLayerSet}
-                allCalendarLayersSelected={allCalendarLayersSelected}
-                onSelectAllCalendarLayers={() => setCalendarLayerFilters(CALENDAR_LAYER_ORDER)}
-                onToggleCalendarLayer={toggleCalendarLayer}
-                editMode={managerCalendarEditMode}
-                createTemplates={MANAGER_CREATE_TEMPLATES}
-                selectedFieldIds={selectedFieldIds}
-                facilityFilteredFieldIds={facilityFilteredFieldIds}
-                fieldFilterItems={fieldFilterItems}
-                fieldColorReferenceList={fieldColorReferenceList}
-                createDragMode={managerCreateDragMode}
-                onCreatePointerDown={handleManagerCreatePointerDown}
-                onCreatePointerMove={handleManagerCreatePointerMove}
-                onCreatePointerUp={handleManagerCreatePointerUp}
-                onCreatePointerCancel={handleManagerCreatePointerCancel}
-                onSelectedFieldIdsChange={handleSelectedFieldIdsChange}
-              />
-              <Stack gap="sm" className="min-w-0">
-                {fieldCalendarNode}
-              </Stack>
-            </div>
-          ) : (
-            <PublicRentalSelectionsPanel
-              selections={rentalSelections}
-              validationByKey={rentalSelectionValidationByKey}
-              fields={fields}
-              facilityFieldsByFilterValue={facilityFieldsByFilterValue}
-              publicFacilityFilterOptions={publicFacilityFilterOptions}
-              allFacilitiesFilterValue={ALL_FACILITIES_FILTER_VALUE}
-              resolveSelectionDateRange={resolveSelectionDateRange}
-              getSelectionFacilityFilterValue={getSelectionFacilityFilterValue}
-              onAddSelection={handleAddRentalSelection}
-              onRemoveSelection={handleRemoveRentalSelection}
-              onSelectionFacilityChange={(selectionKey, normalizedValue) => {
-                const nextFieldIds = getPreferredFieldIdsForFacilityFilter(normalizedValue);
-                setSelectedFacilityFilterValue(normalizedValue);
-                setReadonlyVisibleFieldIds(nextFieldIds);
-                updateRentalSelection(selectionKey, (current) => ({
-                  ...current,
-                  scheduledFieldIds: nextFieldIds,
-                }));
-              }}
-              onSelectionFieldIdsChange={(selectionKey, nextValues) => {
-                updateRentalSelection(selectionKey, (current) => ({
-                  ...current,
-                  scheduledFieldIds: normalizeFieldIds(nextValues),
-                }));
-              }}
-              onSelectionRangeChange={(selectionKey, start, end) => {
-                updateRentalSelection(
-                  selectionKey,
-                  (current) => updateSelectionWithCalendarRange(current, start, end),
-                );
-              }}
-            />
-          )}
+      {renderWorkspaceContent()}
 
-          {!canManage && (
-            <div className="shared-calendar-layout">
-              <Stack gap="sm">
-                {currentUser ? (
-                  <Select
-                    label="Book rental as"
-                    data={hostSelectOptions}
-                    value={hostSelection}
-                    onChange={(value) => setHostSelection(value ?? 'self')}
-                    rightSection={hostOptionsLoading ? <Loader size="xs" /> : undefined}
-                    rightSectionWidth={hostOptionsLoading ? 36 : undefined}
-                    disabled={hostOptionsLoading && hostSelectOptions.length === 1}
-                    allowDeselect={false}
-                    size="sm"
-                  />
-                ) : null}
-                <Select
-                  label="Facility"
-                  data={publicFacilityFilterOptions}
-                  value={selectedFacilityFilterValue}
-                  onChange={handleFacilityFilterChange}
-                  allowDeselect={false}
-                  size="sm"
-                />
-                <FieldCalendarFilter
-                  items={fieldFilterItems}
-                  selectedIds={readonlyCalendarFieldIds}
-                  onSelectedIdsChange={handleReadonlyVisibleFieldIdsChange}
-                  colorReferenceList={fieldColorReferenceList}
-                  title="Resources"
-                  ariaLabel="Facility resources"
-                  searchPlaceholder="Search resources"
-                  searchAriaLabel="Search resources"
-                  emptyText="No resources match this facility."
-                />
-              </Stack>
-              <Stack gap="sm" className="min-w-0">
-                <Text size="sm" c="dimmed">
-                  Click empty time ranges in the calendar to add selections. Drag or resize a highlighted selection to update its date/time across selected resources.
-                </Text>
-                {fieldCalendarNode}
-                <Text size="sm" c={summaryColor}>
-                  {summaryText}
-                </Text>
-              </Stack>
-            </div>
-          )}
+      {renderStaffEditor()}
 
-          {!canManage && (
-            <Paper withBorder radius="md" p="sm">
-              <Stack gap="xs">
-                <Group justify="space-between" align="center">
-                  <Text fw={600} size="sm">Rental Total</Text>
-                  <Badge color={canReserveRentalResources ? 'teal' : 'red'} size="lg">
-                    {formatPrice(totalRentalCents)}
-                  </Badge>
-                </Group>
-                {rentalSelectionValidations.map((validation, index) => {
-                  const selectionRange = resolveSelectionDateRange(validation.selection);
-                  return (
-                    <Group key={validation.selection.key} justify="space-between" align="center">
-                      <Text size="sm">
-                        Selection {index + 1}: {selectionRange
-                          ? `${formatDisplayDateTime(selectionRange.start)} - ${formatDisplayDateTime(selectionRange.end)}`
-                          : 'Invalid date range'}
-                      </Text>
-                      <Badge color={validation.errors.length ? 'red' : 'teal'} variant="light">
-                        {formatPrice(validation.totalCents)}
-                      </Badge>
-                    </Group>
-                  );
-                })}
-              </Stack>
-            </Paper>
-          )}
+      {renderScopePrompt()}
 
-          <Group justify="flex-end" mt="md">
-            {showBackButton && (
-              <Button variant="default" onClick={() => router.push(backHref)}>
-                {backLabel}
-              </Button>
-            )}
-            {!canManage ? (
-              <Button disabled={!canReserveRentalResources || !currentUser} onClick={handleReserveResourcesClick}>
-                {primaryActionLabel}
-              </Button>
-            ) : null}
-          </Group>
-        </Stack>
-      )}
+      {renderDeleteConfirmation()}
 
-      <StaffTimeslotEditorModal
-        opened={staffTimeslotModalOpen}
-        mode={staffTimeslotMode}
-        error={staffTimeslotError}
-        selectedResourceLabel={selectedFields.length > 1
-          ? `${selectedFields.length} selected resources`
-          : selectedField
-            ? getFacilityScopedFieldDisplayName(selectedField)
-            : 'Selected resource'}
-        selectedRangeLabel={selection ? `${formatDisplayDateTime(selection.start)} - ${formatDisplayTime(selection.end)}` : 'Select a time range first.'}
-        isEditingManagerDraft={isEditingManagerDraft}
-        isEditingStaffAssignment={isEditingStaffAssignment}
-        isEditingChildStaffAssignment={isEditingChildStaffAssignment}
-        isAssigningStaffOccurrence={isAssigningStaffOccurrence}
-        assignedUserName={editingStaffAssignment?.userName ?? null}
-        facilityOptions={facilityFilterOptions}
-        facilityValue={staffTimeslotResourceFacilityValue}
-        onFacilityChange={handleStaffTimeslotFacilityChange}
-        resourceOptions={staffTimeslotResourceOptions}
-        selectedResourceIds={selectedFieldIds.filter((fieldId) => staffTimeslotResourceFields.some((field) => field.$id === fieldId))}
-        onResourceIdsChange={handleStaffTimeslotResourceChange}
-        userOptions={staffTimeslotUserOptions}
-        userId={staffTimeslotUserId}
-        onUserIdChange={setStaffTimeslotUserId}
-        usersLoading={staffScheduleLoading}
-        overrideAmount={staffTimeslotOverrideAmount}
-        onOverrideAmountChange={setStaffTimeslotOverrideAmount}
-        showRepeatControls={!isAssigningStaffOccurrence && !isEditingStaffAssignment}
-        repeating={staffTimeslotRepeating}
-        onRepeatingChange={(checked) => {
-          setStaffTimeslotRepeating(checked);
-          if (checked && staffTimeslotRepeatDays.length === 0 && selection) {
-            setStaffTimeslotRepeatDays([mondayDayOf(selection.start)]);
-          }
-        }}
-        repeatDays={staffTimeslotRepeatDays}
-        onRepeatDaysChange={setStaffTimeslotRepeatDays}
-        repeatDayOptions={STAFF_TIMESLOT_REPEAT_DAY_OPTIONS}
-        repeatEndDate={staffTimeslotRepeatEndDate}
-        onRepeatEndDateChange={(value) => setStaffTimeslotRepeatEndDate(coerceDatePickerValue(value))}
-        repeatMinDate={selection ? startOfDay(selection.start) : undefined}
-        notes={staffTimeslotNotes}
-        onNotesChange={setStaffTimeslotNotes}
-        submitting={staffTimeslotSubmitting}
-        deleting={staffTimeslotDeleting}
-        submitDisabled={staffTimeslotSubmitting || staffTimeslotDeleting || !selection || !selectedFields.length}
-        onClose={resetStaffTimeslotModalState}
-        onSubmit={() => void submitStaffTimeslot()}
-        onDeleteOpenAssignment={() => void requestDeleteOpenStaffAssignment()}
-        onUnassignChildAssignment={() => void unassignChildStaffAssignment()}
-        onDeleteAssignment={() => void deleteStaffAssignment()}
-      />
-
-      <StaffAssignmentScopePromptModal
-        opened={Boolean(staffAssignmentScopePrompt)}
-        kindLabel={staffAssignmentScopePrompt?.kindLabel}
-        staffName={staffAssignmentScopePrompt?.staffName ?? null}
-        occurrenceLabel={staffAssignmentScopePrompt?.occurrenceLabel ?? null}
-        onClose={() => setStaffAssignmentScopePrompt(null)}
-        onApplyScope={applyStaffAssignmentScopePrompt}
-      />
-
-      <OpenStaffDeleteConfirmationModal
-        opened={Boolean(openStaffDeleteConfirmation)}
-        title={openStaffDeletePlan?.parentAssignment.assignmentKind === 'OFFICIAL_SHIFT'
-          ? 'Delete open official shift'
-          : 'Delete open staff shift'}
-        hasPlan={Boolean(openStaffDeletePlan)}
-        canDeleteFollowing={openStaffDeletePlan ? staffAssignmentCanDeleteFollowing(openStaffDeletePlan.parentAssignment) : false}
-        scope={openStaffDeleteConfirmation?.scope ?? 'following'}
-        occurrenceLabel={openStaffDeletePlan
-          ? `${formatDisplayDateTime(openStaffDeletePlan.occurrenceStart)} - ${formatDisplayTime(openStaffDeletePlan.occurrenceEnd)}`
-          : ''}
-        showShortenedAssignmentWarning={Boolean(openStaffDeletePlan?.scope === 'following' && openStaffDeletePlan.shortenedAssignment)}
-        showDeletesParentWarning={Boolean(openStaffDeletePlan?.scope === 'following' && openStaffDeletePlan.deletesParent)}
-        childAssignments={openStaffDeletePlan?.childAssignments.map((assignment) => ({
-          id: assignment.id,
-          label: formatStaffAssignmentDeleteChildLabel(assignment),
-        })) ?? []}
-        onScopeChange={(scope) => setOpenStaffDeleteConfirmation((current) => (
-          current ? { ...current, scope } : current
-        ))}
-        onCancel={() => setOpenStaffDeleteConfirmation(null)}
-        onConfirm={() => void confirmOpenStaffAssignmentDelete()}
-      />
-
-      <CreateRentalSlotModal
-        opened={createRentalOpen}
-        onClose={() => {
-          setCreateRentalOpen(false);
-          setEditingRentalSlot(null);
-          setEditingRentalField(null);
-          setEditingManagerDraftId(null);
-          setRentalDraftRange(null);
-        }}
-        field={editingRentalField ?? selectedField}
-        selectedFields={!editingRentalSlot ? selectedFields : undefined}
-        slot={editingRentalSlot}
-        initialRange={editingRentalSlot ? null : rentalDraftRange}
-        onSubmitOverride={managerCalendarEditMode ? handleRentalSlotModalSubmit : undefined}
-        onDeleteOverride={managerCalendarEditMode ? handleRentalSlotModalDelete : undefined}
-        onSaved={async (updatedFields) => {
-          setOrg((prev) => {
-            if (!prev) return prev;
-            const prevFields = Array.isArray(prev.fields) ? prev.fields : [];
-            const updatedById = new Map(updatedFields.map((field) => [field.$id, field]));
-            const nextFields = prevFields.map((field) => {
-              const updatedField = updatedById.get(field.$id);
-              return updatedField
-                ? mergeFieldPreservingCalendarHydration(field, updatedField)
-                : field;
-            });
-            return { ...prev, fields: nextFields };
-          });
-          await refreshOrganization();
-        }}
-        organizationHasStripeAccount={organizationHasStripeAccount}
-        organizationId={organizationId}
-        fieldColorReferenceList={fieldColorReferenceList}
-      />
+      {renderRentalEditor()}
     </Stack>
   );
 }
