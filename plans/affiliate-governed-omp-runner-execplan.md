@@ -21,12 +21,12 @@ The operator selected OMP with two ChatGPT accounts. The governed affiliate work
 - [x] (2026-09-07) Pass TypeScript and all 440 tests across 15 focused suites. Targeted ESLint and helper/wizard syntax checks pass.
 - [x] Complete two direct device-code logins in the dedicated broker profile.
 - [x] Verify two healthy distinct accounts, broker-managed refresh, exact Luna catalog entry, and one bounded native inference.
-- [ ] Verify the workload runner and a real claim after separate workload approval.
+- [x] (2026-09-08) Verify the Linux workload runner and one completed OMP claim.
 - [x] (2026-09-07) Record conditional `AUTH SETUP` approval: after source review/checks, publish governed affiliate OMP images and start only the broker, gateway, and two temporary login helpers; keep existing Gateway/workers unchanged and do not restart mapping claim, RootRunner, or workload.
-- [ ] Obtain later separate approval for workload Linux/root-runner/canary deployment.
-- [ ] Deploy the approved images after a fresh preflight.
-- [ ] Run the one-job mapping and independent review canary. Preserve its receipts and hold.
-- [ ] Integrate and push the source changes. Update Issue 70 with measured results.
+- [x] Obtain explicit bounded workload approval for Gateway/runner replacement, Linux checks, mapper 1, and reviewer 1.
+- [x] (2026-09-08) Deploy the approved images after a fresh preflight.
+- [x] (2026-09-08) Run the one-job canary. Record its `CONTRACT_GAP` hold. No independent review job was created.
+- [x] Integrate and push the source changes. Update Issue 70 with measured results.
 ## Current approval record
 
 Conditional `AUTH SETUP` approval (recorded 2026-09-07): after source
@@ -37,6 +37,39 @@ mapping claim, RootRunner, or workload restart is authorized by this approval.
 Workload Linux/root-runner/canary deployment requires later separate approval.
 This is not authorization to start anything before the source review/checks
 pass.
+
+The operator subsequently approved the bounded workload canary: replace the
+governed affiliate Gateway and root runner with the published OMP images;
+run Linux containment checks; start only `mapping-producer-1` and
+`supply-reviewer-1` for Gateway job
+`d7a1fe71-c76e-4191-a3f3-610c737d683e`; then close admission and stop the
+canary workers. Preserve both prior failures and the legacy repair hold.
+No new source, activation, publication, automatic scraping, coverage,
+replenishment, site runtime, or mobile runtime change is authorized.
+
+Before admission, read-only checks confirmed this job was the sole claimable
+producer job. It was `RETRY_WAIT` with failure count 2 and no active claim.
+The root was generation 1, `PRE_MAPPED`, and held. The current 24-sport catalog
+matches the stored hash
+`e4c4adada1e0b73f071ff367713e3c0d777cf22df846618edda81e9e01059c66`.
+
+The published image's old probe used Bun as the privileged launcher. A real
+Linux comparison showed that Bun 1.3.14 `spawnSync` ignored its UID/GID
+options, while Node launched UID 1002/GID 1001 with zero capabilities.
+The probe source now uses Node, matching the actual production runner.
+The corrected probe was mounted read-only into disposable containers using
+the published image. Both producer and reviewer checks passed with
+`NoNewPrivs=1`, zero capabilities, sibling write denial, and reviewer-root
+write denial. A real pinned SDK constructor also passed under UID 1002.
+No sandbox policy was loosened. The published workload executables did not
+change; only the diagnostic probe was corrected.
+
+Prepared workload contract version 3 hashes to
+`15c37807d319b38b1c8558bfb3b1b84a16e5a85e4734aaf861d2f1259e4a7679`.
+The active Supply Contract remains version 1 with hash
+`c808492a7d60741b508978987441a0a31f59602a5e5321789d9865823f6098cf`.
+Preparation wrote private files only; it did not change the database or the
+canonical deployment environment.
 
 
 ## Surprises & Discoveries
@@ -74,7 +107,7 @@ Decision: Keep an invocation-local idempotency key for each identical operation.
 ## Outcomes & Retrospective
 
 
-The source is implemented, verified, reviewed, and pushed. Both approved auth services are healthy. Two distinct ChatGPT accounts passed provider health checks. A bounded native Luna request returned `OK`. The workload runtime and canary still require separate approval. No business worker was started and no mapping claim ran.
+The approved OMP runtime completed one real producer claim. Both evidence reads and the terminal submission succeeded. The result was `CONTRACT_GAP`, not a mapping package. The supplied catalog has no approved Track and Field mapping. The model also reported a missing citable source URL. No reviewer job was created. Admission is closed. Both canary workers and the root runner are stopped. The Gateway, model gateway, and auth broker remain healthy. The legacy repair hold and both prior failures remain unchanged. Two accounts passed health checks; account rotation was not measured.
 
 ## Context and Orientation
 
@@ -87,7 +120,7 @@ The working tree is `/Users/elesesy/StudioProjects/bracketiq-affiliate-collectio
 
 `apps/site/src/server/affiliateImports/agentGatewayContracts.ts` owns current role contracts, prompt hashes, claim schemas, terminal schemas, and execution classes. `apps/site/src/server/affiliateImports/affiliateFleetCutover.ts` and the preflight script verify the deployment. `apps/site/deploy/affiliate-governed/compose.yml` and its Dockerfiles define the private runtime. The existing Codex sandbox profiles enabled namespaces for bubblewrap. Reassess them for OMP; do not retain unnecessary namespace privileges only to preserve old hashes.
 
-The already admitted Gateway job is `d7a1fe71-c76e-4191-a3f3-610c737d683e`. Its legacy mapping job is `50957179-8e51-42f0-a0db-2fc4791bdc79`. Its Supply Source is `a8764a56-2da2-4382-82d1-eee317b05143`. The last recorded state is `RETRY_WAIT`, with two failed invocations, lifecycle generation 1, `PRE_MAPPED`, and `LEGACY_SPORT_REPAIR`. Admission is closed and canary workers are stopped. The prior admission report hash is `778e0233ecb85e4424c4238026511ef6f7bc6871fc8ffc045970ff1b345219b0`. Do not admit another source. Do not remove the hold.
+The admitted Gateway job is `d7a1fe71-c76e-4191-a3f3-610c737d683e`. Its legacy mapping job is `50957179-8e51-42f0-a0db-2fc4791bdc79`. Its Supply Source is `a8764a56-2da2-4382-82d1-eee317b05143`. The Gateway job is now `COMPLETED` with `CONTRACT_GAP` and two historical failures. The mapping job is `REVIEW_REQUIRED`. The root remains lifecycle generation 1, `PRE_MAPPED`, and held by `LEGACY_SPORT_REPAIR`. Admission is closed and canary workers are stopped. The prior admission report hash is `778e0233ecb85e4424c4238026511ef6f7bc6871fc8ffc045970ff1b345219b0`. Do not admit another source. Do not remove the hold.
 
 Production access uses `ssh bracketiq-prod`. The private deployment file is `/home/bracketiq/.config/bracketiq-affiliate-agents/governed-deployment.env`. Never print it. The production database remains on its private Docker network. The OMP broker and model gateway must not join that network.
 
@@ -241,7 +274,58 @@ probe was rejected before inference because its system prompt was a string;
 the corrected probe used the native array-of-strings context contract.
 One successful pool request does not prove rotation between both accounts.
 
-The existing BracketIQ Gateway remains healthy. Mapping workers, the root
-runner, coverage, and replenishment were not started or reconfigured.
-No new mapping claim ran. Workload, Linux runner, and canary actions still
-require separate current approval.
+At the auth-only checkpoint, the existing BracketIQ Gateway remained healthy.
+Mapping workers, the root runner, coverage, and replenishment had not started.
+The later bounded workload approval and its measured result follow.
+
+## Bounded workload checkpoint — 2026-09-08
+
+Fresh preflight passed at `2026-09-08T05:26:34.863Z`. It had no blockers
+or warnings. It counted 20 stopped legacy processes, zero running legacy
+processes, zero live claims, and zero unsafe containers. Its report hash is
+`4a6a8311f14a4812622b7dd6808c6b0abb8097ac157dea2cd557d2aa7461966b`.
+The private capture is in
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-workload-evidence-01`.
+
+The bounded deployment uses
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-workload.146c58cca.env`.
+The canonical `governed-deployment.env` remains unchanged. Only the Gateway,
+root runner, mapper 1, and reviewer 1 were recreated. Both exact worker
+readiness checks passed while admission was closed. The root runner reported
+UID 1002/GID 1001 for its child, private cgroups, and clean startup recovery.
+
+The operator opened one 300-second producer lease. It claimed only job
+`d7a1fe71-c76e-4191-a3f3-610c737d683e`. Claim
+`agw-claim-86a3a733-fd41-43b3-beb6-3583d6b5dfe5` ran from
+`2026-09-08T05:32:18.535Z` to `2026-09-08T05:33:04.489Z`.
+It used deployment contract 3, role contract 2, and prompt template 2.
+Its status is `COMPLETED`. It has no failure code.
+
+Two `READ_ARTIFACT` receipts succeeded. The terminal domain effect succeeded.
+The `SUBMIT_RESULT` receipt is
+`agw-receipt-88ab49ff-643d-46ab-ba36-878b6d2b7b4c`. The result hash is
+`20ac1e9270df39816e38bfd1d8625ba8700ae67805b44cd7d47232fe76efb6e7`.
+The result is `CONTRACT_GAP` in `MAPPING_EVIDENCE`. The stored evidence
+describes track-and-field events. The model requested an approved canonical
+sport mapping or an authenticated user decision. It also requested a
+citable source page URL. No package was validated or committed.
+
+No reviewer job was created, so no reviewer lease was opened. This verifies
+the real producer evidence-read and terminal-hold path. It does not verify
+package commit, independent package review, activation, or publication.
+Those paths remain outside this measured result.
+
+Final readback found zero active claims, zero supply targets, and an empty
+runner workspace volume. Admission is closed. Mapper 1, reviewer 1, and the
+root runner are stopped with restart policy `no`. The Gateway, model
+gateway, and auth broker are healthy. Dormant mapper 2, reviewer 2, coverage,
+readiness helper, and replenishment containers remain stopped on their
+previous images. The source still has `autoScrapeEnabled=false`. The root
+still has `isAutomationEnabled=false`, generation 1, and its repair hold.
+
+Do not retry or reset the completed job to bypass this contract gap.
+Resolve the sport decision and citation evidence through the governed
+process. Any further workload run needs new authorization and fresh
+preflight evidence. The corrected diagnostic probe passed real Linux
+containment checks and `node --check`. It is a source correction; the
+published image still contains the old diagnostic probe.

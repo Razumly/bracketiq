@@ -6,7 +6,7 @@ import {
 import { join } from 'node:path';
 
 if (process.getuid?.() !== 0) throw new Error('Run this probe as the isolated runner control UID.');
-if (!process.versions.bun) throw new Error('Run this probe with the pinned Bun runtime.');
+if (process.versions.bun) throw new Error('Run the control probe with Node, matching the production runner.');
 if (process.argv.slice(2).some((argument) => argument !== '--reviewer')) throw new Error('Unknown probe mode.');
 const readOnly = process.argv.includes('--reviewer');
 const root = '/workspaces';
@@ -68,7 +68,7 @@ try {
     'console.log(JSON.stringify({runtime:"bun",workspaceMode:readOnly?"READ_ONLY":"READ_WRITE",insideWrite:true,rootWriteDenied,outsideWriteDenied:denied,noNewPrivileges,noCapabilities}));',
     'if(!denied||!noNewPrivileges||!noCapabilities)process.exitCode=42;',
   ].join('');
-  const result = spawnSync(process.execPath, ['-e', program, outsideFile], options);
+  const result = spawnSync('/usr/local/bin/bun', ['-e', program, outsideFile], options);
   // This probe has no model credentials or production data. Its diagnostics are safe to display.
   if (result.stderr) process.stderr.write(result.stderr);
   if (result.stdout) process.stdout.write(result.stdout);
