@@ -28,7 +28,7 @@ describe("affiliate agent runner response protocol", () => {
     {
       kind: "ERROR",
       requestId: "correction-request",
-      message: "Schema corrections must be submitted by the Codex child through the gateway.",
+      message: "Schema corrections must be submitted by the child through the gateway.",
     },
     { kind: "TERMINATED", requestId: "termination-request" },
   ])("parses valid response %#", (response) => {

@@ -83,6 +83,26 @@ const contractSnapshot = {
   },
 };
 
+const networkAttachments = {
+  gateway: [{ name: 'affiliate_gateway_internal', id: 'a'.repeat(64) }],
+  modelAuth: [
+    { name: 'affiliate_model_auth_internal', id: 'b'.repeat(64) },
+    { name: 'affiliate_model_egress', id: 'c'.repeat(64) },
+  ],
+  modelClient: [
+    { name: 'affiliate_model_auth_internal', id: 'b'.repeat(64) },
+    { name: 'affiliate_model_client_internal', id: 'd'.repeat(64) },
+    { name: 'affiliate_model_egress', id: 'c'.repeat(64) },
+  ],
+  runner: [
+    { name: 'affiliate_gateway_internal', id: 'a'.repeat(64) },
+    { name: 'affiliate_model_client_internal', id: 'd'.repeat(64) },
+  ],
+  production: [{
+    name: 'bracketiq-production_backend',
+    id: 'e'.repeat(64),
+  }],
+} as const;
 const governedContainer = (id: string) => ({
   id,
   user: '1001:1001',
@@ -94,6 +114,7 @@ const governedContainer = (id: string) => ({
     'AFFILIATE_AGENT_WORKSPACE_SIGNING_KEY=redacted',
   ],
   networks: ['affiliate_gateway_internal'],
+  networkAttachments: networkAttachments.gateway,
   isNetworkInternal: true,
   capDrop: ['ALL'],
   capAdd: [],
@@ -114,11 +135,18 @@ const runnerContainer = {
     'AFFILIATE_AGENT_RUNNER_CHILD_GID=1001',
     'AFFILIATE_AGENT_RUNNER_CGROUP_RELATIVE_PATH=affiliate-agent-runner',
     'AFFILIATE_AGENT_GATEWAY_ADDRESS=http://gateway:8080',
-    'AFFILIATE_AGENT_CODEX_AUTH_SEED=/run/secrets/codex-auth.json',
-    'AFFILIATE_AGENT_CODEX_MODEL=gpt-5.6-luna',
+    'AFFILIATE_AGENT_MODEL_GATEWAY_ADDRESS=http://affiliate-model-gateway:4000',
+    'AFFILIATE_AGENT_MODEL_GATEWAY_TOKEN=<redacted>',
+    'AFFILIATE_AGENT_OMP_MODEL=openai-codex/gpt-5.6-luna',
   ],
-  volumes: ['/reviewed/auth.json:/run/secrets/codex-auth.json:ro'],
-  networks: ['affiliate_gateway_internal', 'affiliate_gateway_egress'],
+  mounts: [{
+    source: 'affiliate-governed-workspaces',
+    type: 'volume' as const,
+    target: '/workspaces',
+    readOnly: false,
+  }],
+  networks: ['affiliate_gateway_internal', 'affiliate_model_client_internal'],
+  networkAttachments: networkAttachments.runner,
   ipcMode: 'none',
   capAdd: ['CHOWN', 'DAC_OVERRIDE', 'FOWNER', 'KILL', 'SETGID', 'SETUID'],
   groupAdd: ['1001'],
@@ -205,6 +233,120 @@ const reviewedManifestFor = (
   reviewedAt: '2026-08-25T11:30:00.000Z',
   reviewedBy: 'cutover-reviewer',
 });
+const reviewedAgentImage = `ghcr.io/razumly/bracketiq-affiliate-governed@sha256:${'a'.repeat(64)}`;
+const reviewedAgentImageId = `sha256:${'b'.repeat(64)}`;
+const reviewedWorkspaceVolume = 'affiliate-governed-workspaces';
+const reviewedBrokerStateVolume = 'affiliate-model-auth-broker-state';
+const modelServiceBearerSources = {
+  broker: {
+    path: '/private/omp-auth-broker.token',
+    isRegularFile: true,
+    isSymlink: false,
+    uid: 0,
+    gid: 1003,
+    mode: '0640',
+    sizeBytes: 64,
+    sha256: 'c'.repeat(64),
+  },
+  gateway: {
+    path: '/private/omp-model-gateway.token',
+    isRegularFile: true,
+    isSymlink: false,
+    uid: 0,
+    gid: 1003,
+    mode: '0640',
+    sizeBytes: 64,
+    sha256: 'd'.repeat(64),
+  },
+} as const;
+const modelServiceContainer = (role: 'broker' | 'gateway') => {
+  const isBroker = role === 'broker';
+  const id = isBroker ? 'affiliate-model-auth-broker' : 'affiliate-model-gateway';
+  const containerId = isBroker ? '1'.repeat(64) : '2'.repeat(64);
+  const bearerSource = isBroker ? modelServiceBearerSources.broker : modelServiceBearerSources.gateway;
+  return {
+    id,
+    containerId,
+    image: reviewedAgentImage,
+    imageId: reviewedAgentImageId,
+    user: isBroker ? '1003:1003' : '1004:1004',
+    hasReadonlyRootFilesystem: true,
+    privileged: false,
+    tmpfs: isBroker
+      ? { '/tmp': 'rw,noexec,nosuid,nodev,size=256m' }
+      : {
+          '/tmp': 'rw,noexec,nosuid,nodev,size=256m',
+          '/var/lib/omp': 'rw,noexec,nosuid,nodev,size=512m,uid=1004,gid=1004,mode=0700',
+        },
+    environment: isBroker
+      ? [
+          'HOME=/var/lib/omp',
+          'NODE_ENV=production',
+          'NODE_VERSION=22.0.0',
+          'OMP_PROFILE=affiliate-model-auth-broker',
+          'PATH=/workspace/apps/site/node_modules/.bin:/usr/local/bin:/usr/bin:/bin',
+          'PI_CONFIG_DIR=.omp',
+          'YARN_VERSION=1.22.22',
+        ]
+      : [
+          'HOME=/var/lib/omp',
+          'NODE_ENV=production',
+          'NODE_VERSION=22.0.0',
+          'OMP_PROFILE=affiliate-model-gateway',
+          'PATH=/workspace/apps/site/node_modules/.bin:/usr/local/bin:/usr/bin:/bin',
+          'PI_CONFIG_DIR=.omp',
+          'YARN_VERSION=1.22.22',
+          'OMP_AUTH_BROKER_URL=http://affiliate-model-auth-broker:8765',
+        ],
+    entrypoint: [
+      '/usr/local/bin/prepare-omp-service',
+      isBroker ? 'broker' : 'gateway',
+    ],
+    command: isBroker
+      ? [
+          '/workspace/apps/site/node_modules/.bin/omp',
+          'auth-broker',
+          'serve',
+          '--bind=0.0.0.0:8765',
+        ]
+      : [
+          '/workspace/apps/site/node_modules/.bin/omp',
+          'auth-gateway',
+          'serve',
+          '--bind=0.0.0.0:4000',
+        ],
+    mounts: isBroker
+      ? [
+          { source: reviewedBrokerStateVolume, type: 'volume', target: '/var/lib/omp', readOnly: false },
+          { source: bearerSource.path, type: 'bind', target: '/run/secrets/affiliate-model-auth-broker-token', readOnly: true },
+        ]
+      : [
+          { source: modelServiceBearerSources.broker.path, type: 'bind', target: '/run/secrets/affiliate-model-auth-broker-token', readOnly: true },
+          { source: bearerSource.path, type: 'bind', target: '/run/secrets/affiliate-model-gateway-token', readOnly: true },
+        ],
+    networks: isBroker
+      ? ['affiliate_model_auth_internal', 'affiliate_model_egress']
+      : [
+          'affiliate_model_auth_internal',
+          'affiliate_model_client_internal',
+          'affiliate_model_egress',
+        ],
+    networkAttachments: isBroker ? networkAttachments.modelAuth : networkAttachments.modelClient,
+    internalNetworks: isBroker
+      ? ['affiliate_model_auth_internal']
+      : ['affiliate_model_auth_internal', 'affiliate_model_client_internal'],
+    exposedPorts: [isBroker ? '8765' : '4000'],
+    publishedPorts: [],
+    capDrop: ['ALL'],
+    capAdd: [],
+    groupAdd: isBroker ? [] : ['1003'],
+    securityOptions: ['no-new-privileges:true'],
+    status: 'created',
+    healthStatus: 'none',
+    restartPolicy: 'no',
+    hasProductionBackendAccess: false,
+  };
+};
 const preflightInput = (
   overrides: Partial<AffiliateCutoverPreflightInput> = {},
 ): AffiliateCutoverPreflightInput => ({
@@ -217,6 +359,32 @@ const preflightInput = (
   processInventoryCount: processInventory.length,
   legacyServiceUnits,
   reviewedAgentNetwork: 'affiliate_gateway_internal',
+  reviewedProductionBackendNetwork: 'bracketiq-production_backend',
+  reviewedProductionBackendNetworkId: networkAttachments.production[0].id,
+  productionDatabaseNetworkEvidence: {
+    containerId: 'f'.repeat(64),
+    networks: networkAttachments.production,
+  },
+  reviewedAgentImage,
+  reviewedAgentImageId,
+  reviewedBrokerStateVolume,
+  reviewedWorkspaceVolume,
+  brokerStateVolumeAttachments: [{
+    volumeName: reviewedBrokerStateVolume,
+    containerId: '1'.repeat(64),
+    serviceId: 'affiliate-model-auth-broker',
+    target: '/var/lib/omp',
+    readOnly: false,
+  }],
+  modelAuthBrokerBearerSource: modelServiceBearerSources.broker,
+  modelGatewayBearerSource: modelServiceBearerSources.gateway,
+  runnerModelGatewayBearerSha256: modelServiceBearerSources.gateway.sha256,
+  reviewedModelServiceState: 'STOPPED',
+  reviewedModelAuthNetwork: 'affiliate_model_auth_internal',
+  reviewedModelClientNetwork: 'affiliate_model_client_internal',
+  reviewedModelEgressNetwork: 'affiliate_model_egress',
+  modelAuthBrokerContainer: modelServiceContainer('broker'),
+  modelGatewayContainer: modelServiceContainer('gateway'),
   processInventory,
   controlPlaneProcesses,
   auxiliaryContainers,
@@ -1183,27 +1351,119 @@ describe('affiliate fleet cutover contracts', () => {
     ]));
     expect(report.counts.unsafeContainers).toBe(1);
   });
+  it('rejects model bearer handoff on supervisors and auxiliaries', () => {
+    const supervisorReport = buildAffiliateCutoverPreflightReport(preflightInput({
+      containers: preflightInput().containers.map((container) => (
+        container.id === 'mapper-1'
+          ? {
+              ...container,
+              environment: [
+                ...container.environment,
+                'AFFILIATE_AGENT_MODEL_GATEWAY_TOKEN=<redacted>',
+              ],
+            }
+          : container
+      )),
+    }));
+    const auxiliaryReport = buildAffiliateCutoverPreflightReport(preflightInput({
+      auxiliaryContainers: preflightInput().auxiliaryContainers.map((container) => (
+        container.id === 'affiliate-agent-downstream-ready'
+          ? {
+              ...container,
+              environment: [
+                ...container.environment,
+                'AFFILIATE_AGENT_MODEL_AUTH_BROKER_TOKEN=<redacted>',
+              ],
+            }
+          : container
+      )),
+    }));
+
+    for (const report of [supervisorReport, auxiliaryReport]) {
+      expect(report.blockingFindings).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          code: 'FORBIDDEN_AGENT_CREDENTIAL',
+          recordIds: expect.arrayContaining([
+            expect.stringMatching(/^AFFILIATE_AGENT_MODEL_(?:GATEWAY|AUTH_BROKER)_TOKEN$/),
+          ]),
+        }),
+      ]));
+    }
+  });
+  it('uses the reviewed model-client network throughout production preflight', () => {
+    const original = preflightInput();
+    const modelClientNetwork = 'deployment_specific_model_client';
+    const replaceNetwork = (network: string) => network === original.reviewedModelClientNetwork
+      ? modelClientNetwork
+      : network;
+    const report = buildAffiliateCutoverPreflightReport(preflightInput({
+      reviewedModelClientNetwork: modelClientNetwork,
+      runnerContainer: {
+        ...runnerContainer,
+        networks: runnerContainer.networks.map(replaceNetwork),
+        networkAttachments: runnerContainer.networkAttachments.map((network) => ({
+          ...network,
+          name: replaceNetwork(network.name),
+        })),
+      },
+      modelGatewayContainer: {
+        ...original.modelGatewayContainer,
+        networks: original.modelGatewayContainer.networks.map(replaceNetwork),
+        internalNetworks: original.modelGatewayContainer.internalNetworks.map(replaceNetwork),
+        networkAttachments: original.modelGatewayContainer.networkAttachments.map((network) => ({
+          ...network,
+          name: replaceNetwork(network.name),
+        })),
+      },
+    }));
+    expect(report.isReady).toBe(true);
+  });
   it('accepts the root runner only with its isolated child and private cgroup evidence', () => {
-    const inspection = inspectAffiliateAgentRunnerContainer(runnerContainer);
+    const inspection = inspectAffiliateAgentRunnerContainer(runnerContainer, 'affiliate_gateway_internal', 'affiliate_model_client_internal');
 
     expect(inspection.isSafe).toBe(true);
     expect(inspection.findings).toEqual([]);
   });
-  it('rejects a runner without the reviewed Codex egress network', () => {
+  it('rejects a runner without exactly the reviewed workspace volume mount', () => {
+    const inspection = inspectAffiliateAgentRunnerContainer({
+      ...runnerContainer,
+      mounts: [
+        ...runnerContainer.mounts,
+        { source: '/run/secrets/affiliate-model-gateway-token', type: 'bind', target: '/tmp/token', readOnly: true },
+      ],
+    }, 'affiliate_gateway_internal', 'affiliate_model_client_internal');
+
+    expect(inspection.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'RUNNER_OMP_HANDOFF' }),
+    ]));
+  });
+  it('rejects a runner without the reviewed OMP model-client network', () => {
     const inspection = inspectAffiliateAgentRunnerContainer({
       ...runnerContainer,
       networks: ['affiliate_gateway_internal'],
-    });
+    }, 'affiliate_gateway_internal', 'affiliate_model_client_internal');
 
     expect(inspection.findings).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'PRODUCTION_NETWORK_ACCESS' }),
+    ]));
+  });
+  it('rejects a runner without the reviewed OMP model handoff', () => {
+    const inspection = inspectAffiliateAgentRunnerContainer({
+      ...runnerContainer,
+      environment: runnerContainer.environment.filter(
+        (entry) => !entry.startsWith('AFFILIATE_AGENT_MODEL_GATEWAY_TOKEN='),
+      ),
+    }, 'affiliate_gateway_internal', 'affiliate_model_client_internal');
+
+    expect(inspection.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'RUNNER_OMP_HANDOFF' }),
     ]));
   });
   it('rejects a runner when supervisor and child UIDs collapse', () => {
     const inspection = inspectAffiliateAgentRunnerContainer({
       ...runnerContainer,
       supervisorUid: runnerContainer.childUid,
-    });
+    }, 'affiliate_gateway_internal', 'affiliate_model_client_internal');
 
     expect(inspection.findings).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'RUNNER_CHILD_IDENTITY' }),
@@ -1213,7 +1473,7 @@ describe('affiliate fleet cutover contracts', () => {
     const capabilityDrift = inspectAffiliateAgentRunnerContainer({
       ...runnerContainer,
       capAdd: [...runnerContainer.capAdd, 'SYS_ADMIN'],
-    });
+    }, 'affiliate_gateway_internal', 'affiliate_model_client_internal');
     expect(capabilityDrift.findings).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'RUNNER_CAPABILITY_BOUNDARY' }),
     ]));
@@ -1221,7 +1481,7 @@ describe('affiliate fleet cutover contracts', () => {
     const cgroupDrift = inspectAffiliateAgentRunnerContainer({
       ...runnerContainer,
       cgroupMountWritable: false,
-    });
+    }, 'affiliate_gateway_internal', 'affiliate_model_client_internal');
     expect(cgroupDrift.findings).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'RUNNER_FILESYSTEM_BOUNDARY' }),
     ]));
@@ -1233,7 +1493,7 @@ describe('affiliate fleet cutover contracts', () => {
         ...runnerContainer.tmpfs,
         '/tmp': 'rw,noexec,nosuid,nodev,size=256m,uid=0,gid=0,mode=0777',
       },
-    });
+    }, 'affiliate_gateway_internal', 'affiliate_model_client_internal');
 
     expect(inspection.findings).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'RUNNER_TMPFS_BOUNDARY' }),
@@ -1248,7 +1508,7 @@ describe('affiliate fleet cutover contracts', () => {
       securityOptions: runnerContainer.securityOptions.map((option) => (
         option.startsWith('seccomp=') ? 'seccomp={"defaultAction":"SCMP_ACT_ALLOW"}' : option
       )),
-    });
+    }, 'affiliate_gateway_internal', 'affiliate_model_client_internal');
     expect(widenedSeccomp.isSafe).toBe(false);
     expect(widenedSeccomp.findings.map((finding) => finding.code)).toContain('RUNNER_SECCOMP_PROFILE');
 
@@ -1257,22 +1517,38 @@ describe('affiliate fleet cutover contracts', () => {
       securityOptions: runnerContainer.securityOptions.map((option) => (
         option.startsWith('apparmor=') ? 'apparmor=unconfined' : option
       )),
-    });
+    }, 'affiliate_gateway_internal', 'affiliate_model_client_internal');
     expect(wrongAppArmorName.isSafe).toBe(false);
     expect(wrongAppArmorName.findings.map((finding) => finding.code)).toContain('RUNNER_APPARMOR_PROFILE');
 
     const wrongAppArmorHash = inspectAffiliateAgentRunnerContainer({
       ...runnerContainer,
       apparmorProfileSha256: '0'.repeat(64),
-    });
+    }, 'affiliate_gateway_internal', 'affiliate_model_client_internal');
     expect(wrongAppArmorHash.isSafe).toBe(false);
     expect(wrongAppArmorHash.findings.map((finding) => finding.code)).toContain('RUNNER_APPARMOR_CONTENT');
     const missingAppArmorHash = inspectAffiliateAgentRunnerContainer({
       ...runnerContainer,
       apparmorProfileSha256: undefined,
-    });
+    }, 'affiliate_gateway_internal', 'affiliate_model_client_internal');
     expect(missingAppArmorHash.isSafe).toBe(false);
     expect(missingAppArmorHash.findings.map((finding) => finding.code)).toContain('RUNNER_APPARMOR_CONTENT');
+  });
+  it('rejects production database network overlap with a model network identity', () => {
+    const report = buildAffiliateCutoverPreflightReport(preflightInput({
+      productionDatabaseNetworkEvidence: {
+        containerId: 'f'.repeat(64),
+        networks: [
+          ...networkAttachments.production,
+          networkAttachments.modelClient[1],
+        ],
+      },
+    }));
+
+    expect(report.isReady).toBe(false);
+    expect(report.blockingFindings.map((finding) => finding.code)).toEqual(expect.arrayContaining([
+      'MODEL_SERVICE_PRODUCTION_NETWORK_INTERSECTION',
+    ]));
   });
   it('blocks incomplete contract, stopped-fleet, worker, and container evidence', () => {
     const incompleteContract = {

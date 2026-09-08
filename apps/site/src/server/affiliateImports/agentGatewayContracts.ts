@@ -382,18 +382,17 @@ const identifierSchema = z.string().trim().min(1).max(200);
 const positiveIntegerSchema = z.number().int().positive();
 const sourceProfileSchema = z.enum(["CLUB", "EVENT", "RENTAL"]);
 
+export const AFFILIATE_AGENT_MAX_MANIFEST_CANONICAL_BYTES = 65_536 as const;
+export const AFFILIATE_AGENT_MAX_CLAIM_ENVELOPE_CANONICAL_BYTES = 65_536 as const;
+export const AFFILIATE_AGENT_MAX_ENVIRONMENT_VALUE_BYTES = 65_536 as const;
+export const AFFILIATE_AGENT_MAX_PROMPT_BYTES = 131_072 as const;
+export const AFFILIATE_AGENT_MAX_TERMINAL_RESULT_CANONICAL_BYTES = 65_536 as const;
+export const AFFILIATE_AGENT_MAX_TERMINAL_TRANSPORT_BYTES = 65_536 as const;
 export const AFFILIATE_AGENT_MAX_SET_ITEMS = 64 as const;
 export const AFFILIATE_AGENT_MAX_SET_CANONICAL_BYTES = 16_384 as const;
 export const AFFILIATE_AGENT_MAX_MANIFEST_ENTRIES = 64 as const;
-export const AFFILIATE_AGENT_MAX_MANIFEST_CANONICAL_BYTES = 65_536 as const;
-export const AFFILIATE_AGENT_MAX_CLAIM_ENVELOPE_CANONICAL_BYTES =
-  65_536 as const;
-export const AFFILIATE_AGENT_MAX_ENVIRONMENT_VALUE_BYTES = 65_536 as const;
-
 const MAX_DECLARATIVE_PACKAGE_FIELDS = 64 as const;
 const MAX_DECLARATIVE_PACKAGE_CANONICAL_BYTES = 65_536 as const;
-export const AFFILIATE_AGENT_MAX_TERMINAL_RESULT_CANONICAL_BYTES =
-  65_536 as const;
 const MAX_TERMINAL_RESULT_CANONICAL_BYTES =
   AFFILIATE_AGENT_MAX_TERMINAL_RESULT_CANONICAL_BYTES;
 const MAX_MANIFEST_ARTIFACT_BYTES = 8_388_608 as const;
@@ -712,6 +711,9 @@ export const AFFILIATE_AGENT_ROLES = [
 ] as const;
 
 export type AffiliateAgentRole = (typeof AFFILIATE_AGENT_ROLES)[number];
+export const AFFILIATE_AGENT_ROLE_CONTRACT_VERSION = 2 as const;
+export const AFFILIATE_AGENT_PROMPT_TEMPLATE_VERSION = 2 as const;
+
 const AFFILIATE_AGENT_TERMINAL_RESULT_PAYLOAD_SHAPES: Readonly<
   Record<AffiliateAgentRole, readonly string[]>
 > = {
@@ -746,7 +748,7 @@ const AFFILIATE_AGENT_TERMINAL_RESULT_PAYLOAD_SHAPES: Readonly<
 const terminalResultShapeForRole = (
   role: AffiliateAgentRole,
 ): readonly string[] => [
-  `{"schemaVersion":1,"jobId":"<claim jobId>","claimId":"<claim id>","claimGeneration":<claim generation>,"lifecycleGeneration":<claim lifecycle generation or null>,"deploymentContractVersion":<claim deployment contract version>,"deploymentContractHash":"<deployment contract hash>","supplyContractVersion":<claim supply contract version>,"supplyContractHash":"<claim supply contract hash>","roleContractVersion":<role contract version>,"roleContractHash":"<role contract hash>","promptTemplateVersion":<prompt template version>,"promptTemplateHash":"<prompt template hash>","workerId":"<claim workerId>","invocationId":"<claim invocationId>","reasonCodes":["<allowed reason code>"],"evidenceRefs":["<sorted unique evidence ref>"],"summary":"<non-empty summary>","role":"${role}","disposition":"<one listed terminal disposition>","payload":<payload shape below>}`,
+  `{"disposition":"<listed terminal disposition>","reasonCodes":["<allowed reason code>"],"evidenceRefs":["<sorted unique evidence ref>"],"summary":"<non-empty summary>","payload":<role-specific payload>}`,
   "Allowed reasonCodes: CONTRACT_REQUIREMENT_MISSING | EVIDENCE_VERIFIED | NO_QUALIFIED_ACTION | POLICY_CONFLICT | SCHEMA_VALIDATED | SOURCE_UNSUPPORTED | TARGET_INVALID.",
   "Use an empty reasonCodes array when no reason code applies; evidenceRefs are sorted unique identifiers.",
   "All result and payload objects are strict: add no fields beyond this shape.",
@@ -759,21 +761,21 @@ const ROLE_PROMPT_INSTRUCTIONS: Readonly<
   Record<AffiliateAgentRole, readonly string[]>
 > = {
   COVERAGE_PLANNER: [
-    "Read the claim envelope from the supplied environment.",
-    "Read the authority projection from the supplied environment.",
-    "Read only listed evidence refs through the gateway.",
+    "Use the inlined Authority Projection as the complete claim context; do not seek claim data elsewhere.",
+    "Use only the trusted OMP tools listed in the gateway protocol.",
+    "Read only listed evidence refs through read_artifact({evidenceRef}).",
     "Do not call discovery providers directly.",
     "Do not call capture providers directly.",
-    "Use only the non-terminal commands listed in the authority projection.",
-    "Return one evidence-backed terminal disposition.",
+    "Use execute_command({command}) only with a non-terminal command listed in the Authority Projection.",
+    "Return one evidence-backed terminal disposition through submit_result(...).",
     "Use only the listed terminal dispositions.",
     "Use a contract gap or no-action disposition when the evidence does not support work.",
     "Do not invent facts.",
   ],
   MAPPING_PRODUCER: [
-    "Read the claim envelope from the supplied environment.",
-    "Read the authority projection from the supplied environment.",
-    "Read only listed evidence refs through the gateway.",
+    "Use the inlined Authority Projection as the complete claim context; do not seek claim data elsewhere.",
+    "Use only the trusted OMP tools listed in the gateway protocol.",
+    "Read only listed evidence refs through read_artifact({evidenceRef}).",
     "Do not call providers directly.",
     "Do not mutate live mappings directly.",
     "Build only the closed declarative package shape defined by the mapping contract.",
@@ -783,65 +785,63 @@ const ROLE_PROMPT_INSTRUCTIONS: Readonly<
     "Use the explicit CONSTANT sportName field only when sportEvidence proves the exact canonical sport union.",
     "Include every sport citation's manifest evidence reference in package evidenceRefs.",
     "Use a sport-coded contract gap when a sport remains unresolved, unsupported, or needs an authenticated user decision.",
-    "Return one evidence-backed terminal disposition.",
+    "Use execute_command({command}) only with a non-terminal command listed in the Authority Projection.",
+    "Return one evidence-backed terminal disposition through submit_result(...).",
     "Use only the listed terminal dispositions.",
     "Never submit executable code.",
   ],
   SUPPLY_REVIEWER: [
-    "Read the claim envelope from the supplied environment.",
-    "Read the authority projection from the supplied environment.",
-    "Read the committed package through the gateway.",
-    "Read listed reviewer evidence through the gateway.",
+    "Use the inlined Authority Projection as the complete claim context; do not seek claim data elsewhere.",
+    "Use only read_artifact({evidenceRef}) and submit_result(...) for this read-only role.",
+    "Read the committed package through read_artifact({evidenceRef}).",
+    "Read listed reviewer evidence through read_artifact({evidenceRef}).",
     "Review the package.",
     "Do not edit the package.",
     "Do not reuse producer context.",
     "For a legacy sport repair, inspect the supplied catalog, sportEvidence, and original manifest-owned artifacts; never guess a sport surface.",
     "Do not approve or activate a package whose sport evidence is unresolved, unsupported, or based on an unauthenticated user decision.",
-    "Return one evidence-backed terminal disposition.",
+    "Return one evidence-backed terminal disposition through submit_result(...).",
     "Use only the listed terminal dispositions.",
     "Use human review or producer repair when the evidence does not support approval or activation.",
     "Do not invent authority.",
   ],
   HUMAN_DIRECTED_EXECUTOR: [
-    "Read the claim envelope from the supplied environment.",
-    "Read the authority projection from the supplied environment.",
-    "Read the listed human decision through the gateway.",
-    "Read reviewer evidence through the gateway.",
-    "Execute only the exact recorded lifecycle command.",
+    "Use the inlined Authority Projection as the complete claim context; do not seek claim data elsewhere.",
+    "Use only the trusted OMP tools listed in the gateway protocol.",
+    "Read the listed human decision through read_artifact({evidenceRef}).",
+    "Read reviewer evidence through read_artifact({evidenceRef}).",
+    "Execute only the exact recorded lifecycle command with execute_command({command}).",
     "Use the claim and decision evidence to identify the command.",
     "Verify the case ID, decision hash, and lifecycle command reference before execution.",
-    "Return one evidence-backed terminal disposition.",
+    "Return one evidence-backed terminal disposition through submit_result(...).",
     "Use only the listed terminal dispositions.",
     "Do not substitute a human decision.",
   ],
 };
 
-const AFFILIATE_AGENT_TERMINAL_REQUEST_SHAPE =
-  '{"kind":"SUBMIT_RESULT","idempotencyKey":"<new idempotency key>","authorization":<claim authorization object>,"result":<valid role-specific affiliate-agent/terminal-result@1 object>}' as const;
+
+
+const AFFILIATE_AGENT_SUBMIT_RESULT_INPUT_SHAPE =
+  '{"disposition":"<listed terminal disposition>","reasonCodes":["<allowed reason code>"],"evidenceRefs":["<sorted unique evidence ref>"],"summary":"<non-empty summary>","payload":<role-specific payload>}' as const;
 
 const PROMPT_GATEWAY_PROTOCOL = {
-  method: "POST" as const,
-  gatewayAddressEnvironment: "AFFILIATE_AGENT_GATEWAY_ADDRESS" as const,
-  gatewayPathPrefixEnvironment: "AFFILIATE_AGENT_GATEWAY_PATH_PREFIX" as const,
-  pathSuffix: "/perform" as const,
-  authorizationEnvironment: "AFFILIATE_AGENT_CLAIM_TOKEN" as const,
-  claimEnvelopeEnvironment: "AFFILIATE_AGENT_CLAIM_ENVELOPE" as const,
-  requestFields: [
-    "kind",
-    "idempotencyKey",
-    "authorization",
-    "evidenceRef",
-    "command",
-    "result",
+  trustedTools: [
+    "read_artifact",
+    "execute_command",
+    "submit_result",
+  ] as const,
+  toolInputShapes: [
+    '{"evidenceRef":"<listed evidence ref>","offset":<optional non-negative character offset>,"limit":<optional positive character limit>}',
+    '{"command":<role-permitted affiliate-agent command object>}',
+    AFFILIATE_AGENT_SUBMIT_RESULT_INPUT_SHAPE,
   ] as const,
   terminalResultSchema: "affiliate-agent/terminal-result@1" as const,
-  terminalRequestShape: AFFILIATE_AGENT_TERMINAL_REQUEST_SHAPE,
 } as const;
 
 
 
 export const AFFILIATE_AGENT_EXECUTION_CLASSES = [
-  "PRODUCTION_CODEX",
+  "PRODUCTION_OMP",
   "OFFLINE_OPEN_WEIGHT_EVALUATION",
 ] as const;
 
@@ -909,13 +909,17 @@ const affiliateAgentRetentionSchema = z
   })
   .strict();
 
+
+
+
+
 const affiliateAgentRoleContractObjectSchema = z
   .object({
     schemaVersion: z.literal(1),
     role: z.enum(AFFILIATE_AGENT_ROLES),
-    version: positiveIntegerSchema,
+    version: z.literal(AFFILIATE_AGENT_ROLE_CONTRACT_VERSION),
     hash: sha256Schema,
-    promptTemplateVersion: positiveIntegerSchema,
+    promptTemplateVersion: z.literal(AFFILIATE_AGENT_PROMPT_TEMPLATE_VERSION),
     promptTemplateHash: sha256Schema,
     inputSchemaId: z.enum([
       "affiliate-agent/coverage-planner-subject@1",
@@ -934,9 +938,10 @@ const affiliateAgentRoleContractObjectSchema = z
       affiliateAgentForbiddenEffectSchema,
     ),
     retention: affiliateAgentRetentionSchema,
-    executionClass: z.literal("PRODUCTION_CODEX"),
+    executionClass: z.literal("PRODUCTION_OMP"),
   })
   .strict();
+
 
 export type AffiliateAgentRoleContract = z.infer<
   typeof affiliateAgentRoleContractObjectSchema
@@ -953,7 +958,7 @@ export const affiliateAgentPromptTemplateSchema = z
   .object({
     schemaVersion: z.literal(1),
     role: z.enum(AFFILIATE_AGENT_ROLES),
-    version: positiveIntegerSchema,
+    version: z.literal(AFFILIATE_AGENT_PROMPT_TEMPLATE_VERSION),
     headingOrder: z.tuple([
       z.literal("AUTHORITY_PROJECTION"),
       z.literal("ROLE_INSTRUCTIONS"),
@@ -967,33 +972,29 @@ export const affiliateAgentPromptTemplateSchema = z
       .max(16),
     gatewayProtocol: z
       .object({
-        method: z.literal("POST"),
-        gatewayAddressEnvironment: z.literal("AFFILIATE_AGENT_GATEWAY_ADDRESS"),
-        gatewayPathPrefixEnvironment: z.literal("AFFILIATE_AGENT_GATEWAY_PATH_PREFIX"),
-        pathSuffix: z.literal("/perform"),
-        authorizationEnvironment: z.literal("AFFILIATE_AGENT_CLAIM_TOKEN"),
-        claimEnvelopeEnvironment: z.literal("AFFILIATE_AGENT_CLAIM_ENVELOPE"),
-        requestFields: z
-          .array(z.string().trim().min(1).max(100))
-          .min(1)
-          .max(16),
+        trustedTools: z.tuple([
+          z.literal("read_artifact"),
+          z.literal("execute_command"),
+          z.literal("submit_result"),
+        ]),
+        toolInputShapes: z.tuple([
+          z.literal(PROMPT_GATEWAY_PROTOCOL.toolInputShapes[0]),
+          z.literal(PROMPT_GATEWAY_PROTOCOL.toolInputShapes[1]),
+          z.literal(PROMPT_GATEWAY_PROTOCOL.toolInputShapes[2]),
+        ]),
         terminalResultSchema: z.literal("affiliate-agent/terminal-result@1"),
-
         terminalResultShape: z
           .array(z.string().trim().min(1).max(4_000))
           .min(1)
           .max(32),
-        terminalRequestShape: z.literal(
-          AFFILIATE_AGENT_TERMINAL_REQUEST_SHAPE,
-        ),
       })
       .strict(),
-
-    terminalCommand: z.literal("SUBMIT_TERMINAL_RESULT"),
+    terminalCommand: z.literal("submit_result"),
     hash: sha256Schema,
   })
   .strict()
   .superRefine(assertSelfHash);
+
 
 export type AffiliateAgentPromptTemplate = z.infer<
   typeof affiliateAgentPromptTemplateSchema
@@ -1005,7 +1006,7 @@ const createPromptTemplate = (
   const preimage = {
     schemaVersion: 1 as const,
     role,
-    version: 1,
+    version: AFFILIATE_AGENT_PROMPT_TEMPLATE_VERSION,
     headingOrder: ROLE_PROMPT_TEMPLATE_HEADING_ORDER,
     lineEnding: "LF" as const,
     roleInstructions: ROLE_PROMPT_INSTRUCTIONS[role],
@@ -1013,13 +1014,14 @@ const createPromptTemplate = (
       ...PROMPT_GATEWAY_PROTOCOL,
       terminalResultShape: terminalResultShapeForRole(role),
     },
-    terminalCommand: "SUBMIT_TERMINAL_RESULT" as const,
+    terminalCommand: "submit_result" as const,
   };
   return affiliateAgentPromptTemplateSchema.parse({
     ...preimage,
     hash: hashAffiliateAgentValue(preimage),
   });
 };
+
 
 export const AFFILIATE_AGENT_PROMPT_TEMPLATES: Readonly<
   Record<AffiliateAgentRole, AffiliateAgentPromptTemplate>
@@ -1146,9 +1148,6 @@ const AFFILIATE_AGENT_ROLE_CAPABILITIES: Readonly<
 export const affiliateAgentRoleContractSchema =
   affiliateAgentRoleContractObjectSchema.superRefine((contract, context) => {
     assertSelfHash(contract, context);
-    if (contract.version !== 1) {
-      return;
-    }
 
     const expectedCapabilities =
       AFFILIATE_AGENT_ROLE_CAPABILITIES[contract.role];
@@ -1166,7 +1165,7 @@ export const affiliateAgentRoleContractSchema =
       context.addIssue({
         code: z.ZodIssueCode.custom,
         message:
-          "Version-1 role capabilities must match the registered capability matrix.",
+          "Version-2 role capabilities must match the registered capability matrix.",
       });
     }
   });
@@ -1178,17 +1177,19 @@ const createRoleContract = (
   const input = {
     schemaVersion: 1 as const,
     role,
-    version: 1,
+    version: AFFILIATE_AGENT_ROLE_CONTRACT_VERSION,
     promptTemplateVersion: promptTemplate.version,
     promptTemplateHash: promptTemplate.hash,
     ...AFFILIATE_AGENT_ROLE_CAPABILITIES[role],
-    executionClass: "PRODUCTION_CODEX" as const,
+    executionClass: "PRODUCTION_OMP" as const,
   };
   return affiliateAgentRoleContractSchema.parse({
     ...input,
     hash: hashAffiliateAgentValue(input),
   });
 };
+
+
 
 export const AFFILIATE_AGENT_ROLE_CONTRACTS: Readonly<
   Record<AffiliateAgentRole, AffiliateAgentRoleContract>
@@ -1236,14 +1237,12 @@ export const affiliateAgentDeploymentContractSchema = z
         claimsPerInvocation: z.literal(1),
         hasFreshWorkspacePerClaim: z.literal(true),
         processCommand: z.tuple([
-          z.literal("codex"),
-          z.literal("exec"),
-          z.literal("--ephemeral"),
+          z.literal("affiliate-omp-agent"),
         ]),
         hasNestedGoal: z.literal(false),
         hasClaimLoop: z.literal(false),
         hasContextReuse: z.literal(false),
-        executionClass: z.literal("PRODUCTION_CODEX"),
+        executionClass: z.literal("PRODUCTION_OMP"),
         databaseRoles: z
           .object({
             gateway: z.literal("bracketiq_affiliate_gateway"),
@@ -1554,7 +1553,7 @@ const claimEnvelopeBase = {
   roleContractHash: sha256Schema,
   promptTemplateVersion: positiveIntegerSchema,
   promptTemplateHash: sha256Schema,
-  executionClass: z.literal("PRODUCTION_CODEX"),
+  executionClass: z.literal("PRODUCTION_OMP"),
   workerId: identifierSchema,
   invocationId: identifierSchema,
   workspaceId: identifierSchema,
@@ -2204,7 +2203,7 @@ export type AffiliateAgentPromptAuthorityProjection = {
   jobId: string;
   claimId: string;
   supplySourceId: string | null;
-  executionClass: "PRODUCTION_CODEX";
+  executionClass: "PRODUCTION_OMP";
   workerId: string;
   invocationId: string;
   workspaceId: string;
@@ -2219,7 +2218,7 @@ export type AffiliateAgentPromptAuthorityProjection = {
   promptTemplateVersion: number;
   promptTemplateHash: string;
   claimEnvelopeHash: string;
-  evidenceManifestHash: string;
+  evidenceManifest: AffiliateAgentEvidenceManifest;
   claimGeneration: number;
   lifecycleGeneration: number | null;
   subject: AffiliateAgentSubject;
@@ -2275,7 +2274,7 @@ export const projectAffiliateAgentPromptAuthority = (
     promptTemplateVersion: promptTemplate.version,
     promptTemplateHash: promptTemplate.hash,
     claimEnvelopeHash: hashAffiliateAgentValue(parsedClaimEnvelope),
-    evidenceManifestHash: parsedClaimEnvelope.evidenceManifest.hash,
+    evidenceManifest: parsedClaimEnvelope.evidenceManifest,
     claimGeneration: parsedClaimEnvelope.claimGeneration,
     lifecycleGeneration: parsedClaimEnvelope.lifecycleGeneration,
     subject: parsedClaimEnvelope.subject,
@@ -2324,15 +2323,20 @@ export const renderAffiliateAgentPrompt = (
     ),
     ...repairInstructions,
     "",
-    `Send ${promptTemplate.gatewayProtocol.method} JSON requests to the URL in ${promptTemplate.gatewayProtocol.gatewayAddressEnvironment}, using the path prefix in ${promptTemplate.gatewayProtocol.gatewayPathPrefixEnvironment} and appending ${promptTemplate.gatewayProtocol.pathSuffix}.`,
-    `Read each permitted artifact with a READ_ARTIFACT request before using it. Use EXECUTE_COMMAND only for a command listed in the authority projection.`,
-    `Each request must contain kind, a new idempotencyKey, authorization, and the field required by that kind: evidenceRef, command, or result.`,
-    `Set authorization.token from ${promptTemplate.gatewayProtocol.authorizationEnvironment}. Copy jobId, claimId, claimGeneration, lifecycleGeneration, role, workerId, invocationId, and supplyContractHash from the claim envelope.`,
-    `The terminal result must match ${promptTemplate.gatewayProtocol.terminalResultSchema} and the claim's role, hashes, identity, evidence refs, and listed disposition.`,
-    "Submit the terminal result directly to the gateway. If the gateway returns SCHEMA_CORRECTION_REQUIRED, use its correctionPrompt and submit a new idempotencyKey with the corrected result. Make at most three terminal submissions for this claim.",
-    "Do not return a plain terminal result to the supervisor. After the gateway returns TERMINAL_ACCEPTED or INVOCATION_FAILED, print exactly one JSON object with kind TERMINAL_SUBMISSION, the accepted submission idempotencyKey, and the submitted result.",
+    "## Trusted OMP Tools",
+    ...promptTemplate.gatewayProtocol.trustedTools.map(
+      (tool, index) =>
+        `${index + 1}. ${tool}(${promptTemplate.gatewayProtocol.toolInputShapes[index]})`,
+    ),
+    "Treat evidenceRef values as opaque: use only exact refs listed in Authority Projection.evidenceManifest and never derive, guess, or invent a ref.",
+    "When a command requires evidenceManifestHash, copy the exact value from Authority Projection.evidenceManifest.hash.",
+    "Use read_artifact only for evidence refs listed in the Authority Projection; when a text read returns nextOffset, request that offset to continue reading.",
+    "Use execute_command only with a non-terminal command listed in the Authority Projection.",
+    `The terminal result must match ${promptTemplate.gatewayProtocol.terminalResultSchema}; the trusted driver adds the claim's role, hashes, identity, and generation fields.`,
+    "If submit_result returns SCHEMA_CORRECTION_REQUIRED, apply its correctionPrompt and submit corrected model-authored fields in the same invocation. Make at most three submissions for this claim.",
+    "After submit_result returns TERMINAL_ACCEPTED or INVOCATION_FAILED, stop using tools; the trusted driver emits exactly one TERMINAL_SUBMISSION frame.",
     "",
     "## Completion",
-    `Submit one terminal result using the ${promptTemplate.terminalCommand} capability (not as the wire discriminator). Send exactly this JSON request shape to the gateway: ${promptTemplate.gatewayProtocol.terminalRequestShape}. The result value must match ${promptTemplate.gatewayProtocol.terminalResultSchema} and use this strict role-specific shape (use only a listed disposition; add no extra fields):\n${promptTemplate.gatewayProtocol.terminalResultShape.join("\n")}`,
+    `Use the ${promptTemplate.terminalCommand} tool for one evidence-backed terminal result (or a bounded correction retry). Its input must match this exact shape: ${AFFILIATE_AGENT_SUBMIT_RESULT_INPUT_SHAPE}. Use only a listed disposition and add no extra fields:\n${promptTemplate.gatewayProtocol.terminalResultShape.join("\n")}`,
   ].join("\n");
 };

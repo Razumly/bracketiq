@@ -131,6 +131,26 @@
       "path": "cutover-inventory.json"
     },
     {
+      "key": "ompModelServices",
+      "path": "omp-model-services.redacted.json"
+    },
+    {
+      "key": "ompBrokerVolumeAttachments",
+      "path": "omp-broker-volume-attachments.redacted.json"
+    },
+    {
+      "key": "productionDatabaseNetworkEvidence",
+      "path": "production-database-network-evidence.json"
+    },
+    {
+      "key": "reviewedWorkerNetworks",
+      "path": "reviewed-affiliate-worker-networks.json"
+    },
+    {
+      "key": "reviewedReplenishmentCapture",
+      "path": "reviewed-affiliate-replenishment.redacted.json"
+    },
+    {
       "key": "cutoverSession",
       "path": "cutover-session.json"
     },
@@ -356,6 +376,7 @@
     "canary-receipt.redacted.json",
     "canary-replay-receipt.redacted.json",
     "cutover-inventory.json",
+    "omp-model-services.redacted.json",
     "cutover-session.json",
     "dashboard-alert-delivery.json",
     "dashboard-provider-failure.json",
@@ -374,6 +395,11 @@
     "governed-restart-recovery.redacted.json",
     "invocation-retry.redacted.json",
     "lineage-chain.redacted.json",
+    "omp-bearer-sources.redacted.json",
+    "omp-broker-volume-attachments.redacted.json",
+    "production-database-network-evidence.json",
+    "reviewed-affiliate-worker-networks.json",
+    "reviewed-affiliate-replenishment.redacted.json",
     "portland-vancouver-cohort.json",
     "seattle-tacoma-cohort.json",
     "coverage-planner-identity.redacted.json",
@@ -405,5 +431,5 @@
     "schema-migration-status.txt",
     "stale-generation.redacted.json"
   ],
-  "pathsSha256": "34f0ef90505d430e5cee9ea5fa64e2f78253566fc01f931301bcc7259e0100c9"
+  "pathsSha256": "b6daba6b9afdcc7307c3c953f0d54587abea19a432edc6b07edaa436341ecf8b"
 }

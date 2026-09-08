@@ -282,11 +282,9 @@ describe("affiliate agent supervisor CLI", () => {
       },
     });
     try {
-      const gateway = new AffiliateAgentHttpGateway(
-        address,
-        new AbortController().signal,
-        "role-credential",
-      );
+      const gateway = new AffiliateAgentHttpGateway(address, {
+        roleCredential: "role-credential",
+      });
       const heartbeat = {
         kind: "HEARTBEAT",
         idempotencyKey: "heartbeat-1",
@@ -318,11 +316,9 @@ describe("affiliate agent supervisor CLI", () => {
       throw new Error("The test gateway did not expose a TCP address.");
     }
     try {
-      const gateway = new AffiliateAgentHttpGateway(
-        `http://127.0.0.1:${address.port}`,
-        new AbortController().signal,
-        "role-credential",
-      );
+      const gateway = new AffiliateAgentHttpGateway(`http://127.0.0.1:${address.port}`, {
+        roleCredential: "role-credential",
+      });
       await expect(
         gateway.heartbeatWorker({
           workerId: "mapping-producer-1",
@@ -349,11 +345,9 @@ describe("affiliate agent supervisor CLI", () => {
       },
     });
     try {
-      const gateway = new AffiliateAgentHttpGateway(
-        address,
-        new AbortController().signal,
-        "role-credential",
-      );
+      const gateway = new AffiliateAgentHttpGateway(address, {
+        roleCredential: "role-credential",
+      });
       const submitResult = {
         kind: "SUBMIT_RESULT",
         idempotencyKey: "submit-1",
@@ -408,11 +402,9 @@ describe("affiliate agent supervisor CLI", () => {
   ])("rejects invalid submit-result union member fields: %o", async (result) => {
     const { server, address } = await serverWithPayload({ result });
     try {
-      const gateway = new AffiliateAgentHttpGateway(
-        address,
-        new AbortController().signal,
-        "role-credential",
-      );
+      const gateway = new AffiliateAgentHttpGateway(address, {
+        roleCredential: "role-credential",
+      });
       const submitResult = {
         kind: "SUBMIT_RESULT",
         idempotencyKey: "submit-1",
@@ -433,13 +425,11 @@ describe("affiliate agent supervisor CLI", () => {
       result: { status: "open", open: false },
     });
     try {
-      const gateway = new AffiliateAgentHttpGateway(
-        address,
-        new AbortController().signal,
-        "role-credential",
-        "COVERAGE_PLANNER",
-        "worker-1",
-      );
+      const gateway = new AffiliateAgentHttpGateway(address, {
+        roleCredential: "role-credential",
+        workerRole: "COVERAGE_PLANNER",
+        workerId: "worker-1",
+      });
       await expect(gateway.isAdmissionOpen()).rejects.toMatchObject({
         code: "INTERNAL_ERROR",
         safeMessage: "The affiliate gateway returned an invalid response.",
@@ -470,7 +460,7 @@ describe("affiliate agent supervisor CLI", () => {
         roleContractHash: roleContract.hash,
         promptTemplateVersion: promptTemplate.version,
         promptTemplateHash: promptTemplate.hash,
-        executionClass: "PRODUCTION_CODEX" as const,
+        executionClass: "PRODUCTION_OMP" as const,
         workerId: "worker-1",
         invocationId: "invocation-1",
         workspaceId: "workspace-1",
@@ -497,11 +487,9 @@ describe("affiliate agent supervisor CLI", () => {
     };
     const { server, address } = await serverWithPayload({ result: grant });
     try {
-      const gateway = new AffiliateAgentHttpGateway(
-        address,
-        new AbortController().signal,
-        "role-credential",
-      );
+      const gateway = new AffiliateAgentHttpGateway(address, {
+        roleCredential: "role-credential",
+      });
       const request = {
         idempotencyKey: "claim-1",
         roleCredential: "role-credential",
@@ -512,7 +500,7 @@ describe("affiliate agent supervisor CLI", () => {
           schemaVersion: 1 as const,
           workspaceId: "workspace-1",
           mode: "READ_WRITE" as const,
-          executionClass: "PRODUCTION_CODEX" as const,
+          executionClass: "PRODUCTION_OMP" as const,
           workerId: "worker-2",
           invocationId: "invocation-1",
           issuedAt: "2026-08-30T00:00:00.000Z",
@@ -565,11 +553,9 @@ describe("affiliate agent supervisor CLI", () => {
     const previousToken = process.env.AFFILIATE_GATEWAY_OPERATOR_TOKEN;
     process.env.AFFILIATE_GATEWAY_OPERATOR_TOKEN = "operator-token";
     try {
-      const gateway = new AffiliateAgentHttpGateway(
-        `http://127.0.0.1:${address.port}`,
-        new AbortController().signal,
-        "role-credential",
-      );
+      const gateway = new AffiliateAgentHttpGateway(`http://127.0.0.1:${address.port}`, {
+        roleCredential: "role-credential",
+      });
       await gateway.haltAdmission();
       await expect(gateway.isAdmissionOpen()).resolves.toBe(false);
       expect(counts.close).toBe(2);
@@ -608,13 +594,12 @@ describe("affiliate agent supervisor CLI", () => {
     const shutdown = new AbortController();
     shutdown.abort();
     try {
-      const gateway = new AffiliateAgentHttpGateway(
-        `http://127.0.0.1:${address.port}`,
-        shutdown.signal,
-        "role-credential",
-        "COVERAGE_PLANNER",
-        "worker-1",
-      );
+      const gateway = new AffiliateAgentHttpGateway(`http://127.0.0.1:${address.port}`, {
+        shutdownSignal: shutdown.signal,
+        roleCredential: "role-credential",
+        workerRole: "COVERAGE_PLANNER",
+        workerId: "worker-1",
+      });
       await gateway.haltAdmission();
       await expect(gateway.isAdmissionOpen()).resolves.toBe(false);
       expect(counts).toEqual({ close: 1, status: 1 });
@@ -633,11 +618,9 @@ describe("affiliate agent supervisor CLI", () => {
       },
     });
     try {
-      const gateway = new AffiliateAgentHttpGateway(
-        address,
-        new AbortController().signal,
-        "role-credential",
-      );
+      const gateway = new AffiliateAgentHttpGateway(address, {
+        roleCredential: "role-credential",
+      });
       await expect(
         gateway.claim({} as unknown as AffiliateAgentClaimRequest),
       ).rejects.toMatchObject({
@@ -683,10 +666,8 @@ describe("affiliate agent supervisor CLI", () => {
       try {
         expect((await stat(root)).mode & 0o777).toBe(0o710);
         expect((await stat(workspace.path)).mode & 0o777).toBe(0o550);
-        expect((await stat(workspace.codexHome!)).mode & 0o777).toBe(0o770);
-        for (const name of [".git", ".agents"]) {
-          expect((await stat(join(workspace.path, name))).mode & 0o777).toBe(0o550);
-        }
+        expect((await stat(workspace.ompConfigRoot!)).mode & 0o777).toBe(0o770);
+        expect(await readdir(workspace.path)).toEqual([".omp"]);
       } finally {
         await manager.destroy(workspace.path);
       }
@@ -701,7 +682,7 @@ describe("affiliate agent supervisor CLI", () => {
     const root = await mkdtemp(join(tmpdir(), "affiliate-workspace-restart-"));
     const stalePath = join(root, "reviewer-1-invocation-old-ABC123");
     try {
-      await mkdir(join(stalePath, ".codex"), { recursive: true, mode: 0o770 });
+      await mkdir(join(stalePath, ".omp"), { recursive: true, mode: 0o770 });
       await chmod(stalePath, 0o550);
       const manager = createWorkspaceManager(root, Buffer.alloc(32, 1));
       await manager.recoverStale(staleRecoveryReservation);
@@ -724,7 +705,7 @@ describe("affiliate agent supervisor CLI", () => {
     const root = await mkdtemp(join(tmpdir(), "affiliate-workspace-cross-role-"));
     const stalePath = join(root, "producer-1-invocation-old-ABC123");
     try {
-      await mkdir(join(stalePath, ".codex"), { recursive: true, mode: 0o770 });
+      await mkdir(join(stalePath, ".omp"), { recursive: true, mode: 0o770 });
       await chmod(stalePath, 0o770);
       const manager = createWorkspaceManager(root, Buffer.alloc(32, 1));
       await manager.recoverStale(staleRecoveryReservation);

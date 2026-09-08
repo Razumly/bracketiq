@@ -19,6 +19,7 @@ import {
   type Stats,
 } from "node:fs";
 import {
+  AFFILIATE_AGENT_MAX_PROMPT_BYTES,
   AFFILIATE_AGENT_MAX_TERMINAL_RESULT_CANONICAL_BYTES,
   canonicalizeAffiliateAgentValue,
 } from "../src/server/affiliateImports/agentGatewayContracts";
@@ -41,8 +42,8 @@ import {
 
 const RUNNER_CGROUP_RELATIVE_PATH_ENV =
   "AFFILIATE_AGENT_RUNNER_CGROUP_RELATIVE_PATH";
-const RUNNER_CODEX_UID_ENV = "AFFILIATE_AGENT_RUNNER_CHILD_UID";
-const RUNNER_CODEX_GID_ENV = "AFFILIATE_AGENT_RUNNER_CHILD_GID";
+const RUNNER_CHILD_UID_ENV = "AFFILIATE_AGENT_RUNNER_CHILD_UID";
+const RUNNER_CHILD_GID_ENV = "AFFILIATE_AGENT_RUNNER_CHILD_GID";
 const RUNNER_SUPERVISOR_UID_ENV = "AFFILIATE_AGENT_UID";
 const RUNNER_CGROUP_RELATIVE_PATH = "affiliate-agent-runner";
 const RUNNER_CGROUP_MOUNT_PATH = "/sys/fs/cgroup";
@@ -242,7 +243,7 @@ const assertRunnerCgroupControlOwnership = (rootPath: string): void => {
   for (const file of ["cgroup.procs", "cgroup.kill"] as const) {
     const entry = lstatSync(cgroupFilePath(rootPath, file));
     if (entry.uid !== 0 || (entry.mode & 0o022) !== 0) {
-      throw new Error(`The runner cgroup ${file} is writable by the Codex child.`);
+      throw new Error(`The runner cgroup ${file} is writable by the child.`);
     }
   }
 };
@@ -382,8 +383,8 @@ const logRunnerCgroupEvidence = (
       uid: typeof process.getuid === "function" ? process.getuid() : null,
       gid: typeof process.getgid === "function" ? process.getgid() : null,
     },
-    codexSandbox: "distinct-child-uid",
-    codexIdentity: { uid: childUid, gid: childGid },
+    childSandbox: "distinct-child-uid",
+    childIdentity: { uid: childUid, gid: childGid },
     controlCapabilities: Object.keys(RUNNER_REQUIRED_CAPABILITIES).sort(),
     staleInvocationIds,
     staleInvocationCleanup: staleInvocationIds.map((id) => ({
@@ -487,8 +488,8 @@ export const AFFILIATE_AGENT_RUNNER_TERMINAL_SUBMISSION_FRAME_OVERHEAD_BYTES =
   }), "utf8") - Buffer.byteLength("null", "utf8");
 export const AFFILIATE_AGENT_RUNNER_MAX_CHILD_OUTPUT_BYTES =
   AFFILIATE_AGENT_MAX_TERMINAL_RESULT_CANONICAL_BYTES
-  + AFFILIATE_AGENT_RUNNER_TERMINAL_SUBMISSION_FRAME_OVERHEAD_BYTES
-  + 2;
+    + AFFILIATE_AGENT_RUNNER_TERMINAL_SUBMISSION_FRAME_OVERHEAD_BYTES
+    + 2;
 const MAX_CHILD_OUTPUT_BYTES = AFFILIATE_AGENT_RUNNER_MAX_CHILD_OUTPUT_BYTES;
 export const AFFILIATE_AGENT_RUNNER_MAX_STDERR_TAIL_BYTES = 8 * 1024;
 const MAX_STDERR_TAIL_BYTES = AFFILIATE_AGENT_RUNNER_MAX_STDERR_TAIL_BYTES;
@@ -534,7 +535,7 @@ const CHILD_FAILURE_SIGNATURES: ReadonlyArray<Readonly<{
     patterns: [
       /\b(?:user\s+)?namespace\b[\s\S]{0,120}\b(?:denied|not permitted|permission denied|operation not permitted|failed)\b/,
       /\b(?:sandbox|unshare)\b[\s\S]{0,120}\b(?:denied|not permitted|permission denied|operation not permitted|failed)\b/,
-      /\b(?:failed|unable|cannot|could not)\b[\s\S]{0,120}\b(?:sandbox|namespace|unshare)\b/,
+      /\b(?:failed|unable|cannot|could not)\b[\s\S]{0,80}\b(?:create|creating|initialize|initialise|enter|join|set up|setup|unshare)\b[\s\S]{0,80}\b(?:sandbox|namespace|unshare)\b/,
       /\b(?:operation not permitted|permission denied)\b[\s\S]{0,120}\b(?:sandbox|namespace|unshare)\b/,
     ],
   },
@@ -732,7 +733,6 @@ const CHILD_ENVIRONMENT_KEYS = new Set([
   "AFFILIATE_AGENT_GATEWAY_PATH_PREFIX",
   "AFFILIATE_AGENT_CLAIM_TOKEN",
   "AFFILIATE_AGENT_CLAIM_ENVELOPE",
-  "AFFILIATE_AGENT_PROMPT",
 ]);
 
 type RunnerEnvironment = Readonly<Record<string, string>>;
@@ -787,92 +787,15 @@ const requiredEnvironment = (name: string, fallback?: string): string => {
   return value;
 };
 
-const DEFAULT_CODEX_MODEL = "gpt-5.6-luna";
-const CODEX_AUTH_SEED_ENV = "AFFILIATE_AGENT_CODEX_AUTH_SEED";
-const CODEX_MODEL_ENV = "AFFILIATE_AGENT_CODEX_MODEL";
-const CODEX_AUTH_FILE_NAME = "auth.json";
 
-const requiredCodexAuthSeed = (seedPath: string): string => {
-  const resolvedPath = resolve(seedPath);
-  const entry = lstatSync(resolvedPath);
-  if (entry.isSymbolicLink() || !entry.isFile()) {
-    throw new Error("The Codex auth seed must be a regular file.");
-  }
-  const contents = readFileSync(resolvedPath, "utf8");
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(contents);
-  } catch {
-    throw new Error("The Codex auth seed must contain valid JSON.");
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("The Codex auth seed must contain a JSON object.");
-  }
-  const auth = parsed as Record<string, unknown>;
-  const tokens = auth.tokens && typeof auth.tokens === "object" && !Array.isArray(auth.tokens)
-    ? auth.tokens as Record<string, unknown>
-    : auth;
-  if (
-    auth.auth_mode !== "chatgpt"
-    || typeof tokens.access_token !== "string"
-    || !tokens.access_token.trim()
-    || typeof tokens.refresh_token !== "string"
-    || !tokens.refresh_token.trim()
-  ) {
-    throw new Error("The Codex auth seed must contain reviewed ChatGPT credentials.");
-  }
-  return resolvedPath;
-};
-
-export const seedCodexAuthForWorkspace = (
-  seedPath: string,
-  workspacePath: string,
-  childUid?: number,
-  childGid?: number,
-): string => {
-  const sourcePath = requiredCodexAuthSeed(seedPath);
-  const codexHome = join(resolve(workspacePath), ".codex");
-  const targetPath = join(codexHome, CODEX_AUTH_FILE_NAME);
-  let targetEntry: Stats | null = null;
-  try {
-    targetEntry = lstatSync(targetPath);
-  } catch (error) {
-    const errorCode = (
-      typeof error === "object"
-      && error !== null
-      && "code" in error
-      && typeof error.code === "string"
-    )
-      ? error.code
-      : undefined;
-    if (errorCode !== "ENOENT") throw error;
-  }
-  const sourceContents = readFileSync(sourcePath, "utf8");
-  if (targetEntry !== null) {
-    if (targetEntry.isSymbolicLink() || !targetEntry.isFile()) {
-      throw new Error("The workspace Codex auth file must be a regular file.");
-    }
-    if (readFileSync(targetPath, "utf8") !== sourceContents) {
-      throw new Error("The workspace Codex auth file does not match the reviewed seed.");
-    }
-    if (childUid !== undefined) chownSync(targetPath, childUid, childGid ?? -1);
-    chmodSync(targetPath, 0o600);
-    return targetPath;
-  }
-  writeFileSync(targetPath, sourceContents, {
-    encoding: "utf8",
-    mode: 0o600,
-    flag: "wx",
-  });
-  if (childUid !== undefined) chownSync(targetPath, childUid, childGid ?? -1);
-  chmodSync(targetPath, 0o600);
-  return targetPath;
-};
-
-const requiredCodexModel = (value: string): string => {
+const requiredOmpModel = (value: string): string => {
   const normalized = value.trim();
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/.test(normalized)) {
-    throw new Error("The Codex model must be a bounded identifier.");
+  if (
+    !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/.test(
+      normalized,
+    )
+  ) {
+    throw new Error("The OMP model must be a qualified provider/model identifier.");
   }
   return normalized;
 };
@@ -940,6 +863,13 @@ const boundedIdentifierFrom = (
 const stringFrom = (value: unknown): string | null => (
   typeof value === "string" && value.trim() ? value : null
 );
+const promptFrom = (value: unknown): string | null => {
+  const prompt = stringFrom(value);
+  return prompt !== null
+    && Buffer.byteLength(prompt, "utf8") <= AFFILIATE_AGENT_MAX_PROMPT_BYTES
+    ? prompt
+    : null;
+};
 
 const workspacePathFrom = (value: unknown): string | null => {
   const path = stringFrom(value);
@@ -970,28 +900,19 @@ const environmentFrom = (value: unknown): RunnerEnvironment | null => {
   return Object.fromEntries(entries) as RunnerEnvironment;
 };
 
-const codexArgumentsFor = (model: string): readonly string[] => [
-  "exec",
-  "--ephemeral",
-  "--skip-git-repo-check",
-  "--model",
-  model,
-  "--sandbox",
-  "workspace-write",
-  "-c",
-  "sandbox_workspace_write.network_access=true",
-  "-c",
-  "sandbox_workspace_write.exclude_slash_tmp=true",
-  "-",
-];
+const AFFILIATE_AGENT_CHILD_EXECUTABLE = "/usr/local/bin/affiliate-omp-agent";
+
+type RunnerModelConfiguration = Readonly<{
+  modelGatewayAddress: string;
+  modelGatewayToken: string;
+  ompModel: string;
+}>;
 
 const childLaunchFor = (
   containmentPath: string | null,
-  model: string,
 ): Readonly<{ command: string; args: readonly string[]; cgroupProcsPath?: string }> => {
-  const args = codexArgumentsFor(model);
   if (containmentPath === null) {
-    return { command: "codex", args };
+    return { command: AFFILIATE_AGENT_CHILD_EXECUTABLE, args: [] };
   }
   return {
     command: "sh",
@@ -1000,8 +921,7 @@ const childLaunchFor = (
       "-c",
       "IFS= read -r _; exec \"$@\"",
       "affiliate-agent-cgroup-wrapper",
-      "codex",
-      ...args,
+      AFFILIATE_AGENT_CHILD_EXECUTABLE,
     ],
     cgroupProcsPath: cgroupFilePath(containmentPath, "cgroup.procs"),
   };
@@ -1010,39 +930,55 @@ const childLaunchFor = (
 const childEnvironmentFor = (
   environment: RunnerEnvironment,
   workspacePath: string,
+  modelConfiguration: RunnerModelConfiguration,
 ): NodeJS.ProcessEnv => {
   const safeEnvironment = Object.fromEntries(
     Object.entries(environment).filter(([name]) => (
       name !== RUNNER_CGROUP_PATH_ENV
     )),
   );
-  const codexHome = join(workspacePath, ".codex");
+  const ompHome = join(workspacePath, ".omp");
+  const agentDirectory = join(ompHome, "agent");
   const temporaryDirectory = join(workspacePath, ".tmp");
   return {
     NODE_ENV: "production",
     PATH: CHILD_PATH,
-    HOME: codexHome,
-    CODEX_HOME: codexHome,
     LANG: "C.UTF-8",
     ...safeEnvironment,
+    HOME: ompHome,
+    PI_CONFIG_DIR: ".",
+    PI_CODING_AGENT_DIR: agentDirectory,
+    AFFILIATE_AGENT_MODEL_GATEWAY_ADDRESS: modelConfiguration.modelGatewayAddress,
+    AFFILIATE_AGENT_MODEL_GATEWAY_TOKEN: modelConfiguration.modelGatewayToken,
+    AFFILIATE_AGENT_OMP_MODEL: modelConfiguration.ompModel,
     TMPDIR: temporaryDirectory,
     TMP: temporaryDirectory,
     TEMP: temporaryDirectory,
   };
 };
-const ensureChildCodexHome = (
+
+const ensureChildPrivateHome = (
   workspacePath: string,
   childGid: number,
   supervisorUid: number,
 ): void => {
-  const codexHome = join(workspacePath, ".codex");
+  const ompHome = join(workspacePath, ".omp");
+  const agentDirectory = join(ompHome, "agent");
   const temporaryDirectory = join(workspacePath, ".tmp");
-  mkdirSync(codexHome, { recursive: true, mode: 0o770 });
-  const entry = lstatSync(codexHome);
-  if (entry.isSymbolicLink() || !entry.isDirectory()) {
-    throw new Error("The Codex home must be a workspace-owned directory.");
+  mkdirSync(ompHome, { recursive: true, mode: 0o770 });
+  const homeEntry = lstatSync(ompHome);
+  if (homeEntry.isSymbolicLink() || !homeEntry.isDirectory()) {
+    throw new Error("The OMP home must be a workspace-owned directory.");
   }
-  chmodSync(codexHome, 0o770);
+  chownSync(ompHome, supervisorUid, childGid);
+  chmodSync(ompHome, 0o770);
+  mkdirSync(agentDirectory, { recursive: true, mode: 0o770 });
+  const agentEntry = lstatSync(agentDirectory);
+  if (agentEntry.isSymbolicLink() || !agentEntry.isDirectory()) {
+    throw new Error("The OMP agent directory must be a workspace-owned directory.");
+  }
+  chownSync(agentDirectory, supervisorUid, childGid);
+  chmodSync(agentDirectory, 0o770);
   mkdirSync(temporaryDirectory, { recursive: true, mode: 0o770 });
   const temporaryEntry = lstatSync(temporaryDirectory);
   if (temporaryEntry.isSymbolicLink() || !temporaryEntry.isDirectory()) {
@@ -1128,6 +1064,10 @@ const terminalSubmissionRecordIsValid = (
 const terminalSubmissionFrom = (
   output: string,
 ): TerminalSubmissionOutput | null => {
+  if (
+    Buffer.byteLength(`${output.trim()}\n`, "utf8")
+      > MAX_CHILD_OUTPUT_BYTES
+  ) return null;
   try {
     const parsed: unknown = JSON.parse(output.trim());
     if (!terminalSubmissionRecordIsValid(parsed)) return null;
@@ -1344,7 +1284,7 @@ const handleChildSpawn = (state: ChildRuntimeState): void => {
   if (!isCurrentChild(state)) return;
   try {
     if (!state.child.stdin || state.child.stdin.destroyed) {
-      throw new Error("The Codex child stdin is unavailable.");
+      throw new Error("The child stdin is unavailable.");
     }
     state.child.stdin.write(state.prompt);
     state.child.stdin.end();
@@ -1352,7 +1292,7 @@ const handleChildSpawn = (state: ChildRuntimeState): void => {
   } catch (error) {
     publishChildStartFailure(
       state,
-      "The Codex child could not receive its prompt.",
+      "The child could not receive its prompt.",
       error,
     );
   }
@@ -1395,8 +1335,13 @@ const childExitEventFor = (
   exitCode: number | null,
   output: string,
   hasOutputOverflow: boolean,
+  allowTerminalSubmission = false,
 ): AffiliateAgentProcessEvent => {
-  if (hasOutputOverflow || exitCode !== 0 || !output.trim()) {
+  if (
+    hasOutputOverflow
+    || (!allowTerminalSubmission && exitCode !== 0)
+    || !output.trim()
+  ) {
     return { kind: "EXIT", exitCode: exitCode ?? 1 };
   }
   const submission = terminalSubmissionFrom(output);
@@ -1413,8 +1358,6 @@ const handleChildClose = (
   exitCode: number | null,
 ): void => {
   state.childClosed.resolve();
-  if (!isCurrentChild(state)) return;
-  if (state.active.pendingExitReason === "TIMEOUT") return;
   if (state.hasPublishedStartFailure || state.hasOutputDecodeError) {
     publishChildFailureDiagnostic(state, exitCode ?? state.child.exitCode ?? 1);
     publishContainedChildExit(state, { kind: "EXIT", exitCode: 1 });
@@ -1432,6 +1375,7 @@ const handleChildClose = (
     exitCode,
     state.output,
     state.hasOutputOverflow,
+    state.active.pendingExitReason === "TIMEOUT",
   );
   if (event.kind === "EXIT") {
     publishChildFailureDiagnostic(state, event.exitCode);
@@ -1443,13 +1387,13 @@ const attachChildRuntime = (state: ChildRuntimeState): void => {
   state.child.stdin?.once("error", (error) => {
     publishChildStartFailure(
       state,
-      "The Codex child could not receive its prompt.",
+      "The child could not receive its prompt.",
       error,
     );
   });
   state.child.once("spawn", () => handleChildSpawn(state));
   state.child.once("error", (error) => {
-    publishChildStartFailure(state, "The Codex child could not be started.", error);
+    publishChildStartFailure(state, "The child could not be started.", error);
   });
   state.child.stderr?.on("data", (chunk: Buffer | string) => {
     appendChildStderr(state, chunk);
@@ -1474,16 +1418,17 @@ const releaseChildCgroupGate = (
 ): void => {
   if (launch.cgroupProcsPath === undefined) return;
   if (child.pid === undefined) {
-    throw new Error("The Codex child did not expose a pid for cgroup membership.");
+    throw new Error("The child did not expose a pid for cgroup membership.");
   }
   writeFileSync(launch.cgroupProcsPath, `${child.pid}\n`, "utf8");
   if (!child.stdin || child.stdin.destroyed || !child.stdin.write("\n")) {
-    throw new Error("The Codex child cgroup gate could not be released.");
+    throw new Error("The child cgroup gate could not be released.");
   }
 };
 
 const childSpawnOptionsFor = (
   active: ActiveInvocation,
+  modelConfiguration: RunnerModelConfiguration,
   childUid: number | undefined,
   childGid: number | undefined,
 ): SpawnOptions => ({
@@ -1491,6 +1436,7 @@ const childSpawnOptionsFor = (
   env: childEnvironmentFor(
     active.environment,
     active.workspacePath,
+    modelConfiguration,
   ),
   detached: process.platform !== "win32",
   ...(childUid === undefined ? {} : { uid: childUid }),
@@ -1509,8 +1455,7 @@ const cleanupFailedChildSpawn = (
 
 const spawnChildProcess = (
   active: ActiveInvocation,
-  codexAuthSeedPath: string | undefined,
-  codexModel: string,
+  modelConfiguration: RunnerModelConfiguration,
   spawnProcess: typeof spawn,
   containment: RunnerContainment | undefined,
   childUid: number | undefined,
@@ -1519,25 +1464,18 @@ const spawnChildProcess = (
 ): SpawnedChild => {
   const containmentPath = containment?.createInvocationPath() ?? null;
   active.containmentPath = containmentPath;
-  const launch = childLaunchFor(containmentPath, codexModel);
+  const launch = childLaunchFor(containmentPath);
   let child: ChildProcess | null = null;
   try {
     if (containment !== undefined) {
-      ensureChildCodexHome(active.workspacePath, childGid!, supervisorUid!);
-    }
-    if (codexAuthSeedPath !== undefined) {
-      seedCodexAuthForWorkspace(
-        codexAuthSeedPath,
-        active.workspacePath,
-        childUid,
-        childGid,
-      );
+      ensureChildPrivateHome(active.workspacePath, childGid!, supervisorUid!);
     }
     child = spawnProcess(
       launch.command,
       launch.args,
       childSpawnOptionsFor(
         active,
+        modelConfiguration,
         childUid,
         childGid,
       ),
@@ -1547,15 +1485,14 @@ const spawnChildProcess = (
     cleanupFailedChildSpawn(active, child, containment, containmentPath);
     throw error;
   }
-  if (child === null) throw new Error("The Codex child was not created.");
+  if (child === null) throw new Error("The child was not created.");
   return { child, containmentPath };
 };
 const spawnChild = (
   active: ActiveInvocation,
   prompt: string,
   eventRequestId: string,
-  codexAuthSeedPath: string | undefined,
-  codexModel: string,
+  modelConfiguration: RunnerModelConfiguration,
   spawnProcess: typeof spawn = spawn,
   startedRequestId = eventRequestId,
   containment?: RunnerContainment,
@@ -1564,7 +1501,7 @@ const spawnChild = (
   supervisorUid?: number,
 ): void => {
   if (active.child !== null) {
-    throw new Error("The affiliate agent runner already owns a Codex child.");
+    throw new Error("The affiliate agent runner already owns a child.");
   }
   if (
     containment !== undefined
@@ -1578,8 +1515,7 @@ const spawnChild = (
   active.childClose = childClosed.promise;
   const { child, containmentPath } = spawnChildProcess(
     active,
-    codexAuthSeedPath,
-    codexModel,
+    modelConfiguration,
     spawnProcess,
     containment,
     childUid,
@@ -1671,7 +1607,7 @@ const launchRequestFieldsFrom = (
   record: Record<string, unknown>,
 ): LaunchRequestFields | null => {
   const reservationId = requestIdFrom(record.reservationId);
-  const prompt = stringFrom(record.prompt);
+  const prompt = promptFrom(record.prompt);
   const workerId = boundedIdentifierFrom(
     record.workerId,
     AFFILIATE_AGENT_WORKER_ID_MAX_LENGTH,
@@ -1803,7 +1739,7 @@ const correctionRequestFrom = (
     "signature",
     "correctionPrompt",
   ])) return null;
-  const correctionPrompt = stringFrom(record.correctionPrompt);
+  const correctionPrompt = promptFrom(record.correctionPrompt);
   return correctionPrompt
     ? { kind: "CORRECTION", ...metadata, correctionPrompt }
     : null;
@@ -2538,7 +2474,7 @@ const scheduleInvocationDeadline = (
     void waitForContainedExit(context.containment, active, active.child, true).then(async (childExited) => {
       if (!childExited) {
         context.onFatal?.(
-          new Error("The Codex child did not exit before the invocation deadline."),
+          new Error("The child did not exit before the invocation deadline."),
         );
         active.socket.destroy();
         return;
@@ -2717,7 +2653,7 @@ const prepareRunnerSocket = async (
   throwIfRunnerStartupAborted(signal);
 };
 
-export type RunnerServerContext = Readonly<{
+export type RunnerServerContext = RunnerModelConfiguration & Readonly<{
   activeInvocations: Set<ActiveInvocation>;
   activeReservations: Set<ActiveReservation>;
   connections: Set<Socket>;
@@ -2725,8 +2661,6 @@ export type RunnerServerContext = Readonly<{
   cleanupPromises?: Set<Promise<void>>;
   seenRequestIds: Map<string, number>;
   protocolPublicKeys: ReadonlyMap<string, KeyObject>;
-  codexAuthSeedPath?: string;
-  codexModel?: string;
   childUid?: number;
   childGid?: number;
   supervisorUid?: number;
@@ -3006,8 +2940,11 @@ const handleLaunchRequest = (
       active,
       request.prompt,
       request.requestId,
-      context.codexAuthSeedPath,
-      context.codexModel ?? DEFAULT_CODEX_MODEL,
+      {
+        modelGatewayAddress: context.modelGatewayAddress,
+        modelGatewayToken: context.modelGatewayToken,
+        ompModel: context.ompModel,
+      },
       context.spawnProcess,
       request.requestId,
       context.containment,
@@ -3023,7 +2960,7 @@ const handleLaunchRequest = (
     send(state.socket, {
       kind: "ERROR",
       requestId: request.requestId,
-      message: "The Codex child could not be started.",
+      message: "The child could not be started.",
     });
     // Keep the reservation and no-child invocation bound until the supervisor
     // receives TERMINATED and RELEASED, so cleanup remains authoritative.
@@ -3039,7 +2976,7 @@ const handleCorrectionRequest = (
   send(state.socket, {
     kind: "ERROR",
     requestId: request.requestId,
-    message: "Schema corrections must be submitted by the Codex child through the gateway.",
+    message: "Schema corrections must be submitted by the child through the gateway.",
   });
   return true;
 };
@@ -3063,7 +3000,7 @@ const terminateInvocation = async (
       request.kind === "FORCE_TERMINATE",
     );
     if (!childExited) {
-      throw new Error("The Codex child did not exit before the termination deadline.");
+      throw new Error("The child did not exit before the termination deadline.");
     }
   }
   clearInvocationProcessTracker(active);
@@ -3128,7 +3065,7 @@ const handleRunnerRequest = async (
     send(state.socket, {
       kind: "ERROR",
       requestId: request.requestId,
-      message: "The affiliate agent runner could not terminate the Codex child.",
+      message: "The affiliate agent runner could not terminate the child.",
     });
     state.socket.destroy();
     return false;
@@ -3231,7 +3168,7 @@ const cleanupActiveRunnerConnection = async (
     reportRunnerCleanupFailure(
       state,
       context,
-      "The Codex child could not be contained after runner disconnect.",
+      "The child could not be contained after runner disconnect.",
     );
     return false;
   }
@@ -3239,7 +3176,7 @@ const cleanupActiveRunnerConnection = async (
     reportRunnerCleanupFailure(
       state,
       context,
-      "The Codex invocation containment remained non-empty after runner disconnect.",
+      "The child invocation containment remained non-empty after runner disconnect.",
     );
     return false;
   }
@@ -3323,8 +3260,9 @@ export const configureRunnerConnection = (
 type RunnerStartupConfig = Readonly<{
   socketPath: string;
   protocolPublicKeys: ReadonlyMap<string, KeyObject>;
-  codexAuthSeedPath: string;
-  codexModel: string;
+  modelGatewayAddress: string;
+  modelGatewayToken: string;
+  ompModel: string;
   maxConcurrentInvocations: number;
   childUid: number;
   childGid: number;
@@ -3340,11 +3278,14 @@ const runnerStartupConfig = (): RunnerStartupConfig => {
   const protocolPublicKeys = parseRunnerPublicKeys(
     requiredEnvironment("AFFILIATE_AGENT_RUNNER_PROTOCOL_PUBLIC_KEYS"),
   );
-  const codexAuthSeedPath = requiredCodexAuthSeed(
-    requiredEnvironment(CODEX_AUTH_SEED_ENV),
+  const modelGatewayAddress = requiredEnvironment(
+    "AFFILIATE_AGENT_MODEL_GATEWAY_ADDRESS",
   );
-  const codexModel = requiredCodexModel(
-    requiredEnvironment(CODEX_MODEL_ENV),
+  const modelGatewayToken = requiredEnvironment(
+    "AFFILIATE_AGENT_MODEL_GATEWAY_TOKEN",
+  );
+  const ompModel = requiredOmpModel(
+    requiredEnvironment("AFFILIATE_AGENT_OMP_MODEL"),
   );
   const maxConcurrentInvocations = Number(
     process.env.AFFILIATE_AGENT_MAX_CONCURRENT_INVOCATIONS ?? "1",
@@ -3357,19 +3298,20 @@ const runnerStartupConfig = (): RunnerStartupConfig => {
   }
   assertRunnerCapabilities();
   assertRunnerPrivateTemporaryMounts();
-  const childUid = requiredChildId(RUNNER_CODEX_UID_ENV);
-  const childGid = requiredChildId(RUNNER_CODEX_GID_ENV);
+  const childUid = requiredChildId(RUNNER_CHILD_UID_ENV);
+  const childGid = requiredChildId(RUNNER_CHILD_GID_ENV);
   const supervisorUid = requiredChildId(RUNNER_SUPERVISOR_UID_ENV);
   if (childUid === supervisorUid) {
-    throw new Error("The Codex child identity must differ from the supervisor workspace identity.");
+    throw new Error("The child identity must differ from the supervisor workspace identity.");
   }
   const cgroupRelativePath = requiredEnvironment(RUNNER_CGROUP_RELATIVE_PATH_ENV);
   assertPrivateRunnerCgroupNamespace();
   return {
     socketPath,
     protocolPublicKeys,
-    codexAuthSeedPath,
-    codexModel,
+    modelGatewayAddress,
+    modelGatewayToken,
+    ompModel,
     maxConcurrentInvocations,
     childUid,
     childGid,
@@ -3382,8 +3324,9 @@ const run = async (): Promise<void> => {
   const {
     socketPath,
     protocolPublicKeys,
-    codexAuthSeedPath,
-    codexModel,
+    modelGatewayAddress,
+    modelGatewayToken,
+    ompModel,
     maxConcurrentInvocations,
     childUid,
     childGid,
@@ -3441,7 +3384,7 @@ const run = async (): Promise<void> => {
         stoppingChildren.push(
           waitForContainedExit(containment, invocation, child, false).then((childExited) => {
             if (!childExited) {
-              throw new Error("The Codex child did not exit during runner shutdown.");
+              throw new Error("The child did not exit during runner shutdown.");
             }
             clearInvocationProcessTracker(invocation);
             destroyInvocationContainment(containment as RunnerContainment, invocation);
@@ -3544,8 +3487,9 @@ const run = async (): Promise<void> => {
       childGid,
       supervisorUid,
       protocolPublicKeys,
-      codexAuthSeedPath,
-      codexModel,
+      modelGatewayAddress,
+      modelGatewayToken,
+      ompModel,
       maxConcurrentInvocations,
       spawnProcess: spawn,
       destroyWorkspace: async (workspacePath) => {

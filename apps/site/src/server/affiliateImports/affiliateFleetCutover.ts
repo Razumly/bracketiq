@@ -4,9 +4,14 @@ import {
   normalizeAffiliateSupplyIdentity,
   type AffiliateSupplyLifecycleStage,
 } from './affiliateSupplyLifecycle';
-export const AFFILIATE_RUNNER_SECCOMP_SHA256 = '624a3cdf758efb74cd6de9c956ac344d99bf2255a5fc1e4bdf8df91a3550bf7a';
-export const AFFILIATE_RUNNER_APPARMOR_SHA256 = '19d5f94168ee26a8107fb75e391fe08003457734c2394829c4b6c25bc63f28ee';
+export const AFFILIATE_RUNNER_SECCOMP_SHA256 = '063576adf7edd62c0cc3b8ff86ffa8648af0ef92dead1a5c9cdcb5242193afec';
+export const AFFILIATE_RUNNER_APPARMOR_SHA256 = '5a5e577f07e697534913e8d4f9c47b30709bac0411109c9bec540153e42278c5';
 export const AFFILIATE_RUNNER_APPARMOR_PROFILE = 'bracketiq-affiliate-runner';
+export const AFFILIATE_MODEL_AUTH_NETWORK = 'affiliate_model_auth_internal';
+export const AFFILIATE_MODEL_CLIENT_NETWORK = 'affiliate_model_client_internal';
+export const AFFILIATE_MODEL_EGRESS_NETWORK = 'affiliate_model_egress';
+export const AFFILIATE_MODEL_AUTH_BROKER_ID = 'affiliate-model-auth-broker';
+export const AFFILIATE_MODEL_GATEWAY_ID = 'affiliate-model-gateway';
 
 
 export const AFFILIATE_GOVERNED_SUPERVISOR_COUNTS = Object.freeze({
@@ -24,6 +29,10 @@ export const AFFILIATE_GOVERNED_PREFLIGHT_CONTROL_PLANE_IDS = Object.freeze([
   'affiliate-agent-runner',
   'affiliate-agent-downstream-ready',
   'affiliate-replenishment-controller',
+] as const);
+export const AFFILIATE_GOVERNED_MODEL_SERVICE_IDS = Object.freeze([
+  AFFILIATE_MODEL_AUTH_BROKER_ID,
+  AFFILIATE_MODEL_GATEWAY_ID,
 ] as const);
 export const AFFILIATE_GOVERNED_AUXILIARY_CONTAINER_IDS = Object.freeze([
   'affiliate-agent-downstream-ready',
@@ -2126,6 +2135,43 @@ const affiliateCutoverProcessHashKey = (
 
 
 
+export type AffiliateDockerNetworkAttachment = Readonly<{
+  name: string;
+  id: string;
+}>;
+
+export type AffiliateProductionDatabaseNetworkEvidence = Readonly<{
+  containerId: string;
+  networks: readonly AffiliateDockerNetworkAttachment[];
+}>;
+
+export type AffiliateModelServiceMount = Readonly<{
+  source: string;
+  type: 'bind' | 'volume' | 'tmpfs';
+  target: string;
+  readOnly: boolean;
+}>;
+
+export type AffiliateModelBearerSource = Readonly<{
+  path: string;
+  isRegularFile: boolean;
+  isSymlink: boolean;
+  uid: number;
+  gid: number;
+  mode: string;
+  sizeBytes: number;
+  /** SHA-256 of the UTF-8 JavaScript-trimmed effective bearer value. */
+  sha256: string;
+}>;
+
+export type AffiliateBrokerStateVolumeAttachment = Readonly<{
+  volumeName: string;
+  containerId: string;
+  serviceId: string;
+  target: string;
+  readOnly: boolean;
+}>;
+
 export type AffiliateAgentContainerInput = Readonly<{
   id: string;
   name?: string;
@@ -2134,8 +2180,9 @@ export type AffiliateAgentContainerInput = Readonly<{
   privileged?: boolean;
   tmpfs?: Readonly<Record<string, string>>;
   environment?: readonly string[] | Readonly<Record<string, string>>;
-  volumes?: readonly string[];
+  mounts?: readonly AffiliateModelServiceMount[];
   networks?: readonly string[];
+  networkAttachments?: readonly AffiliateDockerNetworkAttachment[];
   isNetworkInternal?: boolean;
   capDrop?: readonly string[];
   capAdd?: readonly string[];
@@ -2149,6 +2196,33 @@ export type AffiliateAgentContainerInput = Readonly<{
   supervisorUid?: number;
   securityOptions?: readonly string[];
   apparmorProfileSha256?: string;
+}>;
+export type AffiliateModelServiceContainerInput = Readonly<{
+  id: string;
+  containerId: string;
+  image: string;
+  imageId: string;
+  user: string;
+  hasReadonlyRootFilesystem: boolean;
+  privileged: boolean;
+  tmpfs: Readonly<Record<string, string>>;
+  environment: readonly string[] | Readonly<Record<string, string>>;
+  entrypoint: readonly string[];
+  command: readonly string[];
+  mounts: readonly AffiliateModelServiceMount[];
+  networks: readonly string[];
+  networkAttachments: readonly AffiliateDockerNetworkAttachment[];
+  internalNetworks: readonly string[];
+  exposedPorts: readonly string[];
+  publishedPorts: readonly string[];
+  capDrop: readonly string[];
+  capAdd: readonly string[];
+  groupAdd: readonly string[];
+  securityOptions: readonly string[];
+  status: string;
+  healthStatus: string;
+  restartPolicy: string;
+  hasProductionBackendAccess: boolean;
 }>;
 
 export type AffiliateAgentContainerInspection = Readonly<{
@@ -2185,10 +2259,28 @@ export type AffiliateCutoverPreflightInput = Readonly<{
     isGatewayAllowedToWriteProductionDatabase: boolean;
   }>;
   reviewedAgentNetwork: string;
+  reviewedProductionBackendNetwork: string;
+  reviewedProductionBackendNetworkId: string;
+  productionDatabaseNetworkEvidence: AffiliateProductionDatabaseNetworkEvidence;
+  reviewedModelAuthNetwork: string;
+  reviewedModelClientNetwork: string;
+  reviewedModelEgressNetwork: string;
+  reviewedAgentImage: string;
+  reviewedAgentImageId: string;
+  reviewedBrokerStateVolume: string;
+  reviewedWorkspaceVolume: string;
+  brokerStateVolumeAttachments: readonly AffiliateBrokerStateVolumeAttachment[];
+  modelAuthBrokerBearerSource: AffiliateModelBearerSource;
+  modelGatewayBearerSource: AffiliateModelBearerSource;
+  runnerModelGatewayBearerSha256: string;
+  reviewedModelServiceState: 'STOPPED' | 'RUNNING';
+  modelAuthBrokerContainer: AffiliateModelServiceContainerInput;
+  modelGatewayContainer: AffiliateModelServiceContainerInput;
   runnerContainer: AffiliateAgentContainerInput;
   containers: readonly AffiliateAgentContainerInput[];
   auxiliaryContainers: readonly AffiliateAgentContainerInput[];
 }>;
+
 
 
 export type AffiliateCutoverPreflightReport = Readonly<{
@@ -2255,6 +2347,7 @@ const forbiddenContainerEnvironmentFindings = (
   environment: readonly string[],
   options: Readonly<{
     allowReviewedModelCredential?: boolean;
+    allowReviewedModelGatewayHandoff?: boolean;
     allowReviewedRunnerProtocolPrivateKey?: boolean;
     allowReviewedReplenishmentToken?: boolean;
   }>,
@@ -2263,6 +2356,11 @@ const forbiddenContainerEnvironmentFindings = (
   const forbiddenName = /(?:DATABASE_URL|DIRECT_URL|PGHOST|PGPORT|PGDATABASE|PGUSER|PGPASSWORD|PGSSLMODE|MYSQL_HOST|MYSQL_PORT|MYSQL_DATABASE|MYSQL_USER|MYSQL_PASSWORD|MYSQL_ROOT_PASSWORD|REDIS_URL|DO_SPACES|AFFILIATE_GATEWAY_SPACES_|AWS_ACCESS|AWS_SECRET|GITHUB_TOKEN|SCRAPINGDOG|FIRECRAWL|SMTP|STRIPE|JWT_SECRET|NEXTAUTH|PRISMA|REPOSITORY_GIT|PRODUCTION_BACKEND|MODEL_CREDENTIAL|OPENAI_API_KEY|ANTHROPIC_API_KEY|GOOGLE_API_KEY|GEMINI_API_KEY|AZURE_OPENAI|COHERE_API_KEY|MISTRAL_API_KEY|TOGETHER_API_KEY|GROQ_API_KEY|DEEPSEEK_API_KEY|AFFILIATE_GATEWAY_OPERATOR_TOKEN|AFFILIATE_AGENT_TOKEN_SIGNING_KEY|AFFILIATE_OPERATIONAL_ALERT_WEBHOOK_URL|AFFILIATE_AGENT_DEPLOYMENT_CONTRACT_JSON|AFFILIATE_AGENT_PREFLIGHT_REPORT_JSON|AFFILIATE_MAPPING_PRODUCER_[12]_CREDENTIAL|AFFILIATE_SUPPLY_REVIEWER_[12]_CREDENTIAL|AFFILIATE_COVERAGE_PLANNER_CREDENTIAL|AFFILIATE_HUMAN_DIRECTED_EXECUTOR_CREDENTIAL|AFFILIATE_AGENT_SUPERVISOR_HALT_CREDENTIAL|AFFILIATE_AGENT_RUNNER_PROTOCOL_PRIVATE_KEY)/i;
   const allowedModelCredential = options.allowReviewedModelCredential === true
     ? /^AFFILIATE_AGENT_MODEL_CREDENTIAL$/i
+    : null;
+  const modelGatewayHandoffName = /^AFFILIATE_AGENT_MODEL_GATEWAY_TOKEN$/i;
+  const modelAuthBrokerHandoffName = /^AFFILIATE_AGENT_MODEL_AUTH_BROKER_TOKEN$/i;
+  const allowedModelGatewayHandoff = options.allowReviewedModelGatewayHandoff === true
+    ? modelGatewayHandoffName
     : null;
   const forbidden = environment
     .map((entry) => ({ entry, key: entry.split('=', 1)[0] }))
@@ -2273,6 +2371,10 @@ const forbiddenContainerEnvironmentFindings = (
           options.allowReviewedRunnerProtocolPrivateKey === true
           && key.toUpperCase() === 'AFFILIATE_AGENT_RUNNER_PROTOCOL_PRIVATE_KEY'
         ))
+      || (
+        (modelGatewayHandoffName.test(key) || modelAuthBrokerHandoffName.test(key))
+        && !(allowedModelGatewayHandoff?.test(key) ?? false)
+      )
       || forbiddenEnvironment.test(entry)
       || (
         upper(key) === AFFILIATE_REPLENISHMENT_TOKEN_KEY
@@ -2538,6 +2640,653 @@ const sameStringValues = (
   values: readonly string[],
   expected: readonly string[],
 ): boolean => JSON.stringify(values) === JSON.stringify(expected);
+export const AFFILIATE_MODEL_GATEWAY_ADDRESS = 'http://affiliate-model-gateway:4000';
+const AFFILIATE_MODEL_AUTH_BROKER_ADDRESS = 'http://affiliate-model-auth-broker:8765';
+const MODEL_SERVICE_PATH = '/workspace/apps/site/node_modules/.bin:/usr/local/bin:/usr/bin:/bin';
+const MODEL_SERVICE_BEARER_MAX_BYTES = 64 * 1024;
+const MODEL_SERVICE_TMPFS = {
+  broker: {
+    '/tmp': 'rw,noexec,nosuid,nodev,size=256m',
+  },
+  gateway: {
+    '/tmp': 'rw,noexec,nosuid,nodev,size=256m',
+    '/var/lib/omp': 'rw,noexec,nosuid,nodev,size=512m,uid=1004,gid=1004,mode=0700',
+  },
+} as const;
+const MODEL_AUTH_BROKER_CREDENTIAL_MOUNT = '/run/secrets/affiliate-model-auth-broker-token';
+const MODEL_GATEWAY_BROKER_CREDENTIAL_MOUNT = '/run/secrets/affiliate-model-auth-broker-token';
+const MODEL_GATEWAY_CREDENTIAL_MOUNT = '/run/secrets/affiliate-model-gateway-token';
+const MODEL_AUTH_BROKER_ENTRYPOINT = [
+  '/usr/local/bin/prepare-omp-service',
+  'broker',
+] as const;
+const MODEL_GATEWAY_ENTRYPOINT = [
+  '/usr/local/bin/prepare-omp-service',
+  'gateway',
+] as const;
+const MODEL_AUTH_BROKER_COMMAND = [
+  '/workspace/apps/site/node_modules/.bin/omp',
+  'auth-broker',
+  'serve',
+  '--bind=0.0.0.0:8765',
+] as const;
+const MODEL_GATEWAY_COMMAND = [
+  '/workspace/apps/site/node_modules/.bin/omp',
+  'auth-gateway',
+  'serve',
+  '--bind=0.0.0.0:4000',
+] as const;
+
+const modelServiceFinding = (
+  input: AffiliateModelServiceContainerInput,
+  code: string,
+  detail: string,
+  resolution: string,
+): AffiliateCutoverFinding => finding(
+  code,
+  'BLOCKING',
+  detail,
+  [input.id],
+  resolution,
+);
+
+const modelServiceEnvironment = (
+  input: AffiliateModelServiceContainerInput,
+): Record<string, string> => Object.fromEntries(environmentEntries(input.environment).map((entry) => {
+  const separator = entry.indexOf('=');
+  return [separator < 0 ? entry : entry.slice(0, separator), separator < 0 ? '' : entry.slice(separator + 1)];
+}));
+
+const modelServiceEnvironmentIsReviewed = (
+  input: AffiliateModelServiceContainerInput,
+  profile: string,
+  isGateway: boolean,
+): boolean => {
+  const entries = environmentEntries(input.environment);
+  const keys = entries.map((entry) => entry.split('=', 1)[0]);
+  const environment = modelServiceEnvironment(input);
+  const expectedKeys = [
+    'HOME',
+    'NODE_ENV',
+    'NODE_VERSION',
+    'OMP_PROFILE',
+    'PATH',
+    'PI_CONFIG_DIR',
+    'YARN_VERSION',
+    ...(isGateway ? ['OMP_AUTH_BROKER_URL'] : []),
+  ];
+  return new Set(keys).size === keys.length
+    && sameStringValues(keys.sort(), expectedKeys.sort())
+    && environment.HOME === '/var/lib/omp'
+    && environment.NODE_ENV === 'production'
+    && /^\d+\.\d+\.\d+$/.test(environment.NODE_VERSION ?? '')
+    && environment.OMP_PROFILE === profile
+    && environment.PATH === MODEL_SERVICE_PATH
+    && environment.PI_CONFIG_DIR === '.omp'
+    && /^\d+\.\d+\.\d+$/.test(environment.YARN_VERSION ?? '')
+    && (!isGateway || environment.OMP_AUTH_BROKER_URL === AFFILIATE_MODEL_AUTH_BROKER_ADDRESS);
+};
+
+const normalizedBearerMode = (mode: unknown): string => String(mode ?? '')
+  .trim()
+  .replace(/^0+([0-7]+)$/, '$1');
+
+const modelBearerSourceIsReviewed = (
+  source: AffiliateModelBearerSource,
+): boolean => Boolean(
+  source
+  && stringValue(source.path)
+  && source.isRegularFile === true
+  && source.isSymlink === false
+  && source.uid === 0
+  && source.gid === 1003
+  && normalizedBearerMode(source.mode) === '640'
+  && Number.isInteger(source.sizeBytes)
+  && source.sizeBytes > 0
+  && source.sizeBytes <= MODEL_SERVICE_BEARER_MAX_BYTES
+  && isSha256Hash(source.sha256),
+);
+
+const normalizedModelMounts = (
+  mounts: readonly AffiliateModelServiceMount[],
+): Array<{ source: string; type: string; target: string; readOnly: boolean }> => mounts
+  .map((mount) => ({
+    source: stringValue(mount.source) ?? '',
+    type: upper(mount.type),
+    target: stringValue(mount.target) ?? '',
+    readOnly: mount.readOnly === true,
+  }))
+  .sort((left, right) => canonicalCompare(
+    `${left.target}:${left.type}:${left.source}:${left.readOnly}`,
+    `${right.target}:${right.type}:${right.source}:${right.readOnly}`,
+  ));
+const normalizedNetworkAttachments = (
+  attachments: readonly AffiliateDockerNetworkAttachment[] | undefined,
+): Array<{ name: string; id: string }> => (attachments ?? [])
+  .map((attachment) => ({
+    name: stringValue(attachment?.name) ?? '',
+    id: stringValue(attachment?.id) ?? '',
+  }))
+  .sort((left, right) => canonicalCompare(
+    `${left.name}:${left.id}`,
+    `${right.name}:${right.id}`,
+  ));
+
+const networkAttachmentEvidenceIsReviewed = (
+  input: Pick<AffiliateAgentContainerInput, 'networks' | 'networkAttachments'>,
+): boolean => {
+  const networks = (input.networks ?? [])
+    .map((network) => stringValue(network) ?? '')
+    .sort(canonicalCompare);
+  const attachments = normalizedNetworkAttachments(input.networkAttachments);
+  return attachments.length > 0
+    && attachments.every((attachment) => (
+      Boolean(attachment.name)
+      && /^[a-f0-9]{64}$/i.test(attachment.id)
+    ))
+    && new Set(attachments.map((attachment) => attachment.name)).size === attachments.length
+    && new Set(attachments.map((attachment) => attachment.id)).size === attachments.length
+    && JSON.stringify(networks)
+      === JSON.stringify(attachments.map((attachment) => attachment.name).sort(canonicalCompare));
+};
+
+
+const modelServiceMountsHaveReviewedShape = (
+  mounts: unknown,
+): mounts is readonly AffiliateModelServiceMount[] => (
+  Array.isArray(mounts)
+  && mounts.every((mount) => {
+    if (!mount || typeof mount !== 'object') return false;
+    const value = mount as Record<string, unknown>;
+    return Object.keys(value).sort().join('\0') === ['readOnly', 'source', 'target', 'type'].join('\0')
+      && typeof value.source === 'string'
+      && typeof value.type === 'string'
+      && ['bind', 'volume', 'tmpfs'].includes(value.type)
+      && typeof value.target === 'string'
+      && typeof value.readOnly === 'boolean';
+  })
+);
+
+const modelServiceTmpfsIsReviewed = (
+  input: AffiliateModelServiceContainerInput,
+  isBroker: boolean,
+): boolean => JSON.stringify(normalizedTmpfs(input.tmpfs))
+  === JSON.stringify(normalizedTmpfs(MODEL_SERVICE_TMPFS[isBroker ? 'broker' : 'gateway']));
+
+const modelServiceMountsAreReviewed = (
+  input: AffiliateModelServiceContainerInput,
+  isBroker: boolean,
+  reviewedBrokerStateVolume: string,
+  brokerBearerSource: AffiliateModelBearerSource,
+  gatewayBearerSource: AffiliateModelBearerSource,
+): boolean => {
+  if (!modelServiceMountsHaveReviewedShape(input.mounts)) return false;
+  const expected = isBroker
+    ? [
+        {
+          source: reviewedBrokerStateVolume,
+          type: 'VOLUME',
+          target: '/var/lib/omp',
+          readOnly: false,
+        },
+        {
+          source: brokerBearerSource.path,
+          type: 'BIND',
+          target: MODEL_AUTH_BROKER_CREDENTIAL_MOUNT,
+          readOnly: true,
+        },
+      ]
+    : [
+        {
+          source: brokerBearerSource.path,
+          type: 'BIND',
+          target: MODEL_AUTH_BROKER_CREDENTIAL_MOUNT,
+          readOnly: true,
+        },
+        {
+          source: gatewayBearerSource.path,
+          type: 'BIND',
+          target: MODEL_GATEWAY_CREDENTIAL_MOUNT,
+          readOnly: true,
+        },
+      ];
+  const actual = normalizedModelMounts(input.mounts);
+  const actualNonTmpfs = actual.filter((mount) => mount.type !== 'TMPFS');
+  const actualTmpfs = actual.filter((mount) => mount.type === 'TMPFS');
+  const expectedNormalized = expected
+    .map((mount) => ({
+      source: mount.source,
+      type: mount.type,
+      target: mount.target,
+      readOnly: mount.readOnly,
+    }))
+    .sort((left, right) => canonicalCompare(
+      `${left.target}:${left.type}:${left.source}:${left.readOnly}`,
+      `${right.target}:${right.type}:${right.source}:${right.readOnly}`,
+    ));
+  const expectedTmpfs = normalizedTmpfs(MODEL_SERVICE_TMPFS[isBroker ? 'broker' : 'gateway'])
+    .map(([target]) => ({
+      source: '',
+      type: 'TMPFS',
+      target,
+      readOnly: false,
+    }));
+  return JSON.stringify(actualNonTmpfs) === JSON.stringify(expectedNormalized)
+    && (
+      actualTmpfs.length === 0
+      || JSON.stringify(actualTmpfs) === JSON.stringify(expectedTmpfs)
+    );
+};
+
+const modelServiceStatusIsReviewed = (
+  input: AffiliateModelServiceContainerInput,
+  reviewedModelServiceState: 'STOPPED' | 'RUNNING',
+): boolean => {
+  const status = upper(input.status);
+  const healthStatus = upper(input.healthStatus);
+  const restartPolicy = String(input.restartPolicy ?? '').trim().toLowerCase();
+  return restartPolicy === 'no'
+    && (reviewedModelServiceState === 'STOPPED'
+      ? ['CREATED', 'EXITED'].includes(status)
+      : status === 'RUNNING' && healthStatus === 'HEALTHY');
+};
+
+type AffiliateModelServiceInspectionOptions = Readonly<{
+  expectedId: string;
+  reviewedAgentImage: string;
+  reviewedAgentImageId: string;
+  reviewedProductionBackendNetwork: string;
+  reviewedBrokerStateVolume: string;
+  brokerBearerSource: AffiliateModelBearerSource;
+  gatewayBearerSource: AffiliateModelBearerSource;
+  reviewedModelServiceState: 'STOPPED' | 'RUNNING';
+}>;
+
+export const inspectAffiliateModelServiceContainer = (
+  input: AffiliateModelServiceContainerInput,
+  reviewedNetworks: Readonly<{
+    auth: string;
+    client: string;
+    egress: string;
+  }>,
+  options: AffiliateModelServiceInspectionOptions,
+): AffiliateAgentContainerInspection => {
+  const isBroker = options.expectedId === AFFILIATE_MODEL_AUTH_BROKER_ID;
+  const isGateway = options.expectedId === AFFILIATE_MODEL_GATEWAY_ID;
+  const expectedNetworks = isBroker
+    ? [reviewedNetworks.auth, reviewedNetworks.egress]
+    : [reviewedNetworks.auth, reviewedNetworks.client, reviewedNetworks.egress];
+  const expectedInternalNetworks = isBroker
+    ? [reviewedNetworks.auth]
+    : [reviewedNetworks.auth, reviewedNetworks.client];
+  const expectedExposedPorts = isBroker ? ['8765'] : ['4000'];
+  const expectedSupplementaryGroups = isBroker ? [] : ['1003'];
+  const expectedCommand = isBroker ? MODEL_AUTH_BROKER_COMMAND : MODEL_GATEWAY_COMMAND;
+  const expectedEntrypoint = isBroker ? MODEL_AUTH_BROKER_ENTRYPOINT : MODEL_GATEWAY_ENTRYPOINT;
+  const expectedUser = isBroker ? '1003:1003' : '1004:1004';
+  const expectedProfile = isBroker ? 'affiliate-model-auth-broker' : 'affiliate-model-gateway';
+  const findings: AffiliateCutoverFinding[] = [];
+  if (!isBroker && !isGateway) {
+    findings.push(modelServiceFinding(
+      input,
+      'MODEL_SERVICE_ID',
+      `The required model service slot ${options.expectedId} is not a reviewed broker or gateway identity.`,
+      `Inspect exactly ${AFFILIATE_MODEL_AUTH_BROKER_ID} and ${AFFILIATE_MODEL_GATEWAY_ID}.`,
+    ));
+  }
+  if (input.id !== options.expectedId) {
+    findings.push(modelServiceFinding(
+      input,
+      'MODEL_SERVICE_ID',
+      `The model service evidence identity ${input.id} does not match required slot ${options.expectedId}.`,
+      `Record ${options.expectedId} in this inventory slot and do not swap or duplicate model services.`,
+    ));
+  }
+  if (!/^[a-f0-9]{64}$/i.test(input.containerId)) {
+    findings.push(modelServiceFinding(
+      input,
+      'MODEL_SERVICE_CONTAINER_ID',
+      'The model service container identity is not a full Docker container ID.',
+      'Capture the exact 64-hex Docker container ID for each model service.',
+    ));
+  }
+  if (!/^.+@sha256:[a-f0-9]{64}$/i.test(input.image)
+    || !/^sha256:[a-f0-9]{64}$/i.test(input.imageId)) {
+    findings.push(modelServiceFinding(
+      input,
+      'MODEL_SERVICE_IMAGE_IMMUTABLE',
+      'The model service image reference or Docker config ID is missing a content digest.',
+      'Record the full registry image@sha256:<64 hex> and independent Docker config sha256:<64 hex>.',
+    ));
+  }
+  if (input.image !== options.reviewedAgentImage || input.imageId !== options.reviewedAgentImageId) {
+    findings.push(modelServiceFinding(
+      input,
+      'MODEL_SERVICE_IMAGE_REVIEW_MISMATCH',
+      'The model service image reference or Docker config ID does not match the independently reviewed agent image evidence.',
+      'Bind both model services to reviewedAgentImage and reviewedAgentImageId; do not derive one digest from the other.',
+    ));
+  }
+  const user = normalizedContainerUser(input.user);
+  if (input.user !== expectedUser || isRootContainerUser(user)) {
+    findings.push(modelServiceFinding(
+      input,
+      'MODEL_SERVICE_IDENTITY',
+      'The model service does not run under its reviewed non-root UID/GID.',
+      `Run the ${isBroker ? 'auth broker' : 'model gateway'} as ${expectedUser}.`,
+    ));
+  }
+  if (
+    input.hasReadonlyRootFilesystem !== true
+    || input.privileged !== false
+    || !sameStringValues(input.capDrop.map(upper).sort(), ['ALL'])
+    || input.capAdd.length !== 0
+    || !sameStringValues(input.groupAdd.map((group) => group.trim()).sort(), expectedSupplementaryGroups)
+    || !sameStringValues(input.securityOptions.map((option) => option.trim().toLowerCase()).sort(), ['no-new-privileges:true'])
+  ) {
+    findings.push(modelServiceFinding(
+      input,
+      'MODEL_SERVICE_PRIVILEGE',
+      'The model service does not prove a read-only, non-privileged, capability-reduced boundary.',
+      `Use read_only, privileged=false, cap_drop ALL, no added capabilities, and only the reviewed supplementary group ${expectedSupplementaryGroups.join(', ') || '(none)'}.`,
+    ));
+  }
+  if (
+    !sameStringValues([...input.networks].sort(), expectedNetworks.slice().sort())
+    || !sameStringValues([...input.internalNetworks].sort(), expectedInternalNetworks.slice().sort())
+    || input.networks.includes(options.reviewedProductionBackendNetwork)
+    || input.networks.includes('production_backend')
+    || input.networks.includes('gateway_internal')
+  ) {
+    findings.push(modelServiceFinding(
+      input,
+      'MODEL_SERVICE_NETWORK',
+      'The model service is not attached to exactly the reviewed private model networks or is attached to the actual production backend network.',
+      `Use only ${expectedNetworks.join(', ')} with internal networks ${expectedInternalNetworks.join(', ')} and no ${options.reviewedProductionBackendNetwork} attachment.`,
+    ));
+  }
+  if (input.hasProductionBackendAccess !== false) {
+    findings.push(modelServiceFinding(
+      input,
+      'MODEL_SERVICE_PRODUCTION_ACCESS',
+      'The model service reports production backend access.',
+      'Remove production backend network and database access from both OMP services.',
+    ));
+  }
+  if (input.publishedPorts.length !== 0 || !sameStringValues([...input.exposedPorts].sort(), expectedExposedPorts)) {
+    findings.push(modelServiceFinding(
+      input,
+      'MODEL_SERVICE_PORT_EXPOSURE',
+      'The model service exposes a public port or does not expose only its reviewed internal listener.',
+      `Publish no host ports and expose only ${expectedExposedPorts[0]} on the private service network.`,
+    ));
+  }
+  if (!modelServiceTmpfsIsReviewed(input, isBroker)) {
+    findings.push(modelServiceFinding(
+      input,
+      'MODEL_SERVICE_TMPFS',
+      'The model service temporary filesystems do not match the reviewed bounded writable noexec/nosuid/nodev layout.',
+      isBroker
+        ? 'Require only /tmp as a 256m writable noexec,nosuid,nodev tmpfs.'
+        : 'Require /tmp as 256m and /var/lib/omp as a 512m uid=1004,gid=1004,mode=0700 writable noexec,nosuid,nodev tmpfs.',
+    ));
+  }
+  if (!modelServiceMountsAreReviewed(
+    input,
+    isBroker,
+    options.reviewedBrokerStateVolume,
+    options.brokerBearerSource,
+    options.gatewayBearerSource,
+  )) {
+    findings.push(modelServiceFinding(
+      input,
+      'MODEL_SERVICE_MOUNTS',
+      'The model service mounts do not prove the reviewed structured source/type/target/readOnly credential and state boundaries.',
+      isBroker
+        ? 'Mount only the dedicated broker volume, broker bearer bind, and /tmp tmpfs; reject shared workspace or extra writable mounts.'
+        : 'Mount only the two read-only bearer binds and the /tmp and /var/lib/omp tmpfs filesystems; reject persistent mounts.',
+    ));
+  }
+  const ownBearerSource = isBroker ? options.brokerBearerSource : options.gatewayBearerSource;
+  if (!modelBearerSourceIsReviewed(ownBearerSource)) {
+    findings.push(modelServiceFinding(
+      input,
+      'MODEL_BEARER_SOURCE',
+      'The model bearer source is not proven to be a bounded root-owned regular non-symlink file with the reviewed group, mode, and fingerprint.',
+      'Capture the source path, regular-file and no-symlink evidence, uid=0, gid=1003, mode=0640, bounded size, and SHA-256 fingerprint without storing the bearer.',
+    ));
+  }
+  if (!modelServiceEnvironmentIsReviewed(input, expectedProfile, isGateway)) {
+    findings.push(modelServiceFinding(
+      input,
+      'MODEL_SERVICE_ENVIRONMENT',
+      'The model service effective image environment does not prove its isolated OMP profile or contains an unexpected setting.',
+      'Capture the full effective environment with HOME, PI_CONFIG_DIR, OMP_PROFILE, PATH, NODE_ENV, NODE_VERSION, YARN_VERSION, and only the reviewed gateway broker URL where required.',
+    ));
+  }
+  if (!sameStringValues([...input.entrypoint], [...expectedEntrypoint])) {
+    findings.push(modelServiceFinding(
+      input,
+      'MODEL_SERVICE_ENTRYPOINT',
+      'The model service entrypoint is not the reviewed role-specific bearer preparation command.',
+      `Use /usr/local/bin/prepare-omp-service ${isBroker ? 'broker' : 'gateway'} as the exact entrypoint.`,
+    ));
+  }
+  if (!sameStringValues([...input.command], [...expectedCommand])) {
+    findings.push(modelServiceFinding(
+      input,
+      'MODEL_SERVICE_COMMAND',
+      'The model service Cmd is not the reviewed pinned OMP auth service command.',
+      `Run the pinned OMP ${isBroker ? 'auth-broker' : 'auth-gateway'} serve command without a wrapper or alternate provider.`,
+    ));
+  }
+  if (!modelServiceStatusIsReviewed(input, options.reviewedModelServiceState)) {
+    findings.push(modelServiceFinding(
+      input,
+      'MODEL_SERVICE_LIFECYCLE',
+      options.reviewedModelServiceState === 'STOPPED'
+        ? 'The stopped model-service phase requires created or exited state and restart=no.'
+        : 'The running model-service phase requires running and healthy state with restart=no.',
+      options.reviewedModelServiceState === 'STOPPED'
+        ? 'Capture status=created or exited, health status evidence, and restartPolicy=no.'
+        : 'Capture status=running, healthStatus=healthy, and restartPolicy=no.',
+    ));
+  }
+  return {
+    id: input.id,
+    name: input.id,
+    isSafe: findings.length === 0,
+    findings,
+    inputHash: canonicalHash({
+      ...input,
+      expectedId: options.expectedId,
+      reviewedAgentImage: options.reviewedAgentImage,
+      reviewedAgentImageId: options.reviewedAgentImageId,
+      reviewedProductionBackendNetwork: options.reviewedProductionBackendNetwork,
+      reviewedBrokerStateVolume: options.reviewedBrokerStateVolume,
+      brokerBearerSource: options.brokerBearerSource,
+      gatewayBearerSource: options.gatewayBearerSource,
+      reviewedModelServiceState: options.reviewedModelServiceState,
+      environment: modelServiceEnvironment(input),
+      tmpfs: normalizedTmpfs(input.tmpfs),
+      entrypoint: [...input.entrypoint],
+      command: [...input.command],
+      mounts: normalizedModelMounts(input.mounts),
+      networks: [...input.networks].sort(),
+      networkAttachments: normalizedNetworkAttachments(input.networkAttachments),
+      internalNetworks: [...input.internalNetworks].sort(),
+      exposedPorts: [...input.exposedPorts].sort(),
+      publishedPorts: [...input.publishedPorts].sort(),
+      capDrop: input.capDrop.map(upper).sort(),
+      capAdd: input.capAdd.map(upper).sort(),
+      groupAdd: [...input.groupAdd].sort(),
+      securityOptions: [...input.securityOptions].sort(),
+    }),
+  };
+};
+const modelServicePairFindings = (
+  input: AffiliateCutoverPreflightInput,
+): AffiliateCutoverFinding[] => {
+  const findings: AffiliateCutoverFinding[] = [];
+  const broker = input.modelAuthBrokerContainer;
+  const gateway = input.modelGatewayContainer;
+  if (broker.id !== AFFILIATE_MODEL_AUTH_BROKER_ID || gateway.id !== AFFILIATE_MODEL_GATEWAY_ID) {
+    findings.push(finding(
+      'MODEL_SERVICE_SLOT_IDENTITY',
+      'BLOCKING',
+      'The model-service evidence slots must contain the exact broker and gateway service IDs.',
+      [broker.id, gateway.id].filter(Boolean),
+      `Bind modelAuthBrokerContainer to ${AFFILIATE_MODEL_AUTH_BROKER_ID} and modelGatewayContainer to ${AFFILIATE_MODEL_GATEWAY_ID}.`,
+    ));
+  }
+  if (broker.id === gateway.id) {
+    findings.push(finding(
+      'MODEL_SERVICE_SLOT_DUPLICATE',
+      'BLOCKING',
+      `The model-service evidence duplicates service identity ${broker.id}.`,
+      [broker.id],
+      'Capture one distinct broker row and one distinct gateway row in their required slots.',
+    ));
+  }
+  if (broker.containerId === gateway.containerId) {
+    findings.push(finding(
+      'MODEL_SERVICE_CONTAINER_DUPLICATE',
+      'BLOCKING',
+      'The broker and gateway evidence reuse one Docker container identity.',
+      [broker.containerId],
+      'Capture the actual distinct Docker container ID for each model service.',
+    ));
+  }
+  const reviewedNetworks = [
+    input.reviewedModelAuthNetwork,
+    input.reviewedModelClientNetwork,
+    input.reviewedModelEgressNetwork,
+    input.reviewedProductionBackendNetwork,
+  ];
+  if (
+    reviewedNetworks.some((network) => !stringValue(network))
+    || new Set(reviewedNetworks).size !== reviewedNetworks.length
+  ) {
+    findings.push(finding(
+      'MODEL_NETWORK_IDENTITY',
+      'BLOCKING',
+      'The reviewed model and production-backend network identities must be non-empty and distinct.',
+      reviewedNetworks,
+      'Capture the exact actual production-backend network and three distinct reviewed model network names.',
+    ));
+  }
+  if (!/^.+@sha256:[a-f0-9]{64}$/i.test(input.reviewedAgentImage)
+    || !/^sha256:[a-f0-9]{64}$/i.test(input.reviewedAgentImageId)) {
+    findings.push(finding(
+      'MODEL_REVIEWED_IMAGE_INVALID',
+      'BLOCKING',
+      'The reviewed agent image reference and independent Docker config ID must be immutable digest values.',
+      [input.reviewedAgentImage, input.reviewedAgentImageId].filter(Boolean),
+      'Record the full registry image@sha256 reference and separately captured Docker config sha256 ID.',
+    ));
+  }
+  if (!modelBearerSourceIsReviewed(input.modelAuthBrokerBearerSource)
+    || !modelBearerSourceIsReviewed(input.modelGatewayBearerSource)) {
+    findings.push(finding(
+      'MODEL_BEARER_SOURCE_INVALID',
+      'BLOCKING',
+      'Both reviewed model bearer source records must prove bounded root:1003 regular non-symlink files with mode 0640 and SHA-256 fingerprints.',
+      [
+        input.modelAuthBrokerBearerSource.path,
+        input.modelGatewayBearerSource.path,
+      ].filter(Boolean),
+      'Capture both bearer source records without retaining raw bearer values.',
+    ));
+  }
+  if (
+    input.modelAuthBrokerBearerSource.path === input.modelGatewayBearerSource.path
+    || input.modelAuthBrokerBearerSource.sha256.toLowerCase() === input.modelGatewayBearerSource.sha256.toLowerCase()
+  ) {
+    findings.push(finding(
+      'MODEL_BEARER_SOURCE_NOT_DISTINCT',
+      'BLOCKING',
+      'The broker and gateway bearer source identities and token fingerprints must be distinct.',
+      [
+        input.modelAuthBrokerBearerSource.path,
+        input.modelGatewayBearerSource.path,
+        input.modelAuthBrokerBearerSource.sha256,
+        input.modelGatewayBearerSource.sha256,
+      ].filter(Boolean),
+      'Provision two distinct bearer source files and capture different fingerprints.',
+    ));
+  }
+  if (
+    !isSha256Hash(input.runnerModelGatewayBearerSha256)
+    || input.runnerModelGatewayBearerSha256.toLowerCase()
+      !== input.modelGatewayBearerSource.sha256.toLowerCase()
+  ) {
+    findings.push(finding(
+      'RUNNER_MODEL_BEARER_MISMATCH',
+      'BLOCKING',
+      'The root runner model bearer fingerprint must equal the gateway bearer fingerprint and must not use the broker bearer.',
+      [input.runnerModelGatewayBearerSha256, input.modelGatewayBearerSource.sha256].filter(Boolean),
+      'Capture only the root runner model-gateway bearer SHA-256 and bind it to the gateway bearer source record.',
+    ));
+  }
+  if (
+    !stringValue(input.reviewedBrokerStateVolume)
+    || /(?:affiliate-governed-workspaces|(?:^|[/_-])workspaces?(?:[/_-]|$))/i.test(input.reviewedBrokerStateVolume)
+  ) {
+    findings.push(finding(
+      'BROKER_STATE_VOLUME_INVALID',
+      'BLOCKING',
+      'The reviewed broker state volume is missing or is the shared governed workspace volume.',
+      [input.reviewedBrokerStateVolume].filter(Boolean),
+      'Use a dedicated broker-only persistent state volume, never the shared workspace volume.',
+    ));
+  }
+  if (
+    !stringValue(input.reviewedWorkspaceVolume)
+    || input.reviewedWorkspaceVolume === input.reviewedBrokerStateVolume
+  ) {
+    findings.push(finding(
+      'WORKSPACE_VOLUME_INVALID',
+      'BLOCKING',
+      'The reviewed runner workspace volume must be present and distinct from the broker state volume.',
+      [input.reviewedWorkspaceVolume, input.reviewedBrokerStateVolume].filter(Boolean),
+      'Capture the exact named workspace volume and keep it separate from the dedicated broker state volume.',
+    ));
+  }
+  const attachments = input.brokerStateVolumeAttachments;
+  if (
+    attachments.length !== 1
+    || attachments.some((attachment) => (
+      !/^[a-f0-9]{64}$/i.test(attachment.containerId)
+      || attachment.volumeName !== input.reviewedBrokerStateVolume
+      || attachment.containerId !== broker.containerId
+      || attachment.serviceId !== AFFILIATE_MODEL_AUTH_BROKER_ID
+      || attachment.target !== '/var/lib/omp'
+      || attachment.readOnly !== false
+    ))
+  ) {
+    findings.push(finding(
+      'BROKER_STATE_VOLUME_ATTACHMENT',
+      'BLOCKING',
+      'Independent broker volume attachment evidence must show exactly one writable attachment by the actual broker container ID and no other consumer.',
+      attachments.flatMap((attachment) => [
+        attachment.volumeName,
+        attachment.containerId,
+        attachment.serviceId,
+      ]).filter(Boolean),
+      'Capture all consumers of the dedicated broker volume and retain exactly the broker container attachment at /var/lib/omp.',
+    ));
+  }
+  if (!['STOPPED', 'RUNNING'].includes(input.reviewedModelServiceState)) {
+    findings.push(finding(
+      'MODEL_SERVICE_REVIEWED_STATE',
+      'BLOCKING',
+      'The reviewed model-service lifecycle phase must be STOPPED or RUNNING.',
+      [String(input.reviewedModelServiceState)],
+      'Record the explicitly approved STOPPED or RUNNING model-service phase.',
+    ));
+  }
+  return findings;
+};
 
 
 const runnerIdentityFindings = (
@@ -2549,7 +3298,7 @@ const runnerIdentityFindings = (
     input,
     'RUNNER_CONTROL_IDENTITY',
     'The governed runner does not prove the root control identity 0:0.',
-    'Run only the runner control process as UID/GID 0:0 and keep the Codex child unprivileged.',
+    'Run only the runner control process as UID/GID 0:0 and keep the OMP child unprivileged.',
   )];
 };
 
@@ -2657,17 +3406,17 @@ const runnerCgroupFindings = (
 const runnerNetworkFindings = (
   input: AffiliateAgentContainerInput,
   expectedNetwork: string,
-  expectedEgressNetwork = 'affiliate_gateway_egress',
+  expectedModelClientNetwork: string,
 ): AffiliateCutoverFinding[] => {
   const networks = (input.networks ?? []).map((network) => stringValue(network) ?? '');
   const normalizedExpectedNetwork = stringValue(expectedNetwork) ?? '';
-  const normalizedEgressNetwork = stringValue(expectedEgressNetwork) ?? '';
+  const normalizedModelClientNetwork = stringValue(expectedModelClientNetwork) ?? '';
   const isRestricted = Boolean(
     normalizedExpectedNetwork
-    && normalizedEgressNetwork
+    && normalizedModelClientNetwork
     && networks.length === 2
     && networks.includes(normalizedExpectedNetwork)
-    && networks.includes(normalizedEgressNetwork)
+    && networks.includes(normalizedModelClientNetwork)
     && input.isNetworkInternal === true
   );
   return isRestricted
@@ -2675,33 +3424,69 @@ const runnerNetworkFindings = (
     : [finding(
         'PRODUCTION_NETWORK_ACCESS',
         'BLOCKING',
-        `The runner ${input.id} must use only the internal gateway and reviewed Codex egress networks.`,
-        [input.id, normalizedExpectedNetwork || '(missing-reviewed-network)', normalizedEgressNetwork || '(missing-reviewed-egress-network)', ...networks],
-        'Attach the runner only to the reviewed internal gateway and Codex egress networks.',
+        `The runner ${input.id} must use only the internal Agent Gateway and OMP model-client networks.`,
+        [input.id, normalizedExpectedNetwork || '(missing-reviewed-network)', normalizedModelClientNetwork || '(missing-reviewed-model-network)', ...networks],
+        'Attach the runner only to the reviewed internal Agent Gateway and OMP model-client networks; do not attach public egress.',
       )];
 };
 
-const runnerCodexHandoffFindings = (
+const normalizeAffiliateModelGatewayAddress = (value: unknown): string => {
+  const candidate = stringValue(value);
+  if (!candidate) return '';
+  try {
+    const parsed = new URL(candidate);
+    if (
+      parsed.protocol !== 'http:'
+      || parsed.hostname.toLowerCase() !== 'affiliate-model-gateway'
+      || parsed.port !== '4000'
+      || parsed.username
+      || parsed.password
+      || parsed.search
+      || parsed.hash
+      || !['', '/'].includes(parsed.pathname)
+    ) return '';
+    return AFFILIATE_MODEL_GATEWAY_ADDRESS;
+  } catch {
+    return '';
+  }
+};
+
+const runnerMountsAreReviewed = (
+  input: AffiliateAgentContainerInput,
+  reviewedWorkspaceVolume: string,
+): boolean => {
+  if (!modelServiceMountsHaveReviewedShape(input.mounts)) return false;
+  const actual = normalizedModelMounts(input.mounts ?? []);
+  return actual.length === 1
+    && actual[0]?.source === reviewedWorkspaceVolume
+    && actual[0]?.type === 'VOLUME'
+    && actual[0]?.target === '/workspaces'
+    && actual[0]?.readOnly === false;
+};
+
+const runnerOmpHandoffFindings = (
   input: AffiliateAgentContainerInput,
   environment: readonly string[],
+  reviewedWorkspaceVolume: string,
 ): AffiliateCutoverFinding[] => {
-  const hasAuthSeed = environment.some((entry) => (
-    upper(entry.split('=', 1)[0]) === 'AFFILIATE_AGENT_CODEX_AUTH_SEED'
-  ));
-  const hasModel = environment.some((entry) => (
-    upper(entry.split('=', 1)[0]) === 'AFFILIATE_AGENT_CODEX_MODEL'
-  ));
-  const hasAuthMount = (input.volumes ?? []).some((volume) => {
-    const parts = volume.split(':');
-    return parts[1] === '/run/secrets/codex-auth.json'
-      && parts[parts.length - 1] === 'ro';
-  });
-  if (hasAuthSeed && hasModel && hasAuthMount) return [];
+  const values: Record<string, string> = Object.fromEntries(environment.map((entry) => {
+    const separator = entry.indexOf('=');
+    return [separator < 0 ? entry : entry.slice(0, separator), separator < 0 ? '' : entry.slice(separator + 1)];
+  }));
+  const address = normalizeAffiliateModelGatewayAddress(values.AFFILIATE_AGENT_MODEL_GATEWAY_ADDRESS);
+  const token = values.AFFILIATE_AGENT_MODEL_GATEWAY_TOKEN?.trim() ?? '';
+  const model = values.AFFILIATE_AGENT_OMP_MODEL?.trim() ?? '';
+  if (
+    address === AFFILIATE_MODEL_GATEWAY_ADDRESS
+    && token === '<redacted>'
+    && model === 'openai-codex/gpt-5.6-luna'
+    && runnerMountsAreReviewed(input, reviewedWorkspaceVolume)
+  ) return [];
   return [runnerBoundaryFinding(
     input,
-    'RUNNER_CODEX_HANDOFF',
-    'The governed runner does not prove the reviewed Codex auth seed, model, and read-only auth mount.',
-    'Mount the reviewed auth.json read-only, set the Codex auth seed path, and set the reviewed Codex model.',
+    'RUNNER_OMP_HANDOFF',
+    'The governed runner does not prove the exact OMP model-gateway endpoint, redacted bearer handoff, explicit upstream model, and exclusive reviewed workspace volume mount.',
+    `Set AFFILIATE_AGENT_MODEL_GATEWAY_ADDRESS=${AFFILIATE_MODEL_GATEWAY_ADDRESS}, AFFILIATE_AGENT_MODEL_GATEWAY_TOKEN=<redacted>, and AFFILIATE_AGENT_OMP_MODEL=openai-codex/gpt-5.6-luna only on the root runner; mount only the reviewed volume at /workspaces and do not mount provider or credential files.`,
   )];
 };
 
@@ -2709,16 +3494,18 @@ const runnerContainmentFindings = (
   input: AffiliateAgentContainerInput,
   environment: readonly string[],
   expectedNetwork: string,
+  expectedModelClientNetwork: string,
+  reviewedWorkspaceVolume: string,
 ): AffiliateCutoverFinding[] => [
-  ...forbiddenContainerEnvironmentFindings(input, environment, {}),
-  ...runnerNetworkFindings(input, expectedNetwork),
+  ...forbiddenContainerEnvironmentFindings(input, environment, { allowReviewedModelGatewayHandoff: true }),
+  ...runnerNetworkFindings(input, expectedNetwork, expectedModelClientNetwork),
   ...runnerIdentityFindings(input),
   ...runnerFilesystemFindings(input),
   ...runnerProfileFindings(input),
   ...runnerCapabilityFindings(input),
   ...runnerChildIdentityFindings(input),
   ...runnerCgroupFindings(input),
-  ...runnerCodexHandoffFindings(input, environment),
+  ...runnerOmpHandoffFindings(input, environment, reviewedWorkspaceVolume),
 ];
 
 const auxiliaryIdentityFindings = (
@@ -2746,10 +3533,11 @@ const normalizedContainerInput = (
 ): Record<string, unknown> => {
   const normalized: Record<string, unknown> = {
     ...input,
+    environment: [...environment].sort(canonicalCompare),
     apparmorProfileSha256: stringValue(input.apparmorProfileSha256),
-    environment: [...environment].sort(),
-    volumes: [...(input.volumes ?? [])].sort(),
+    mounts: normalizedModelMounts(input.mounts ?? []),
     networks: [...(input.networks ?? [])].map((network) => stringValue(network) ?? '').sort(),
+    networkAttachments: normalizedNetworkAttachments(input.networkAttachments),
     capDrop: sortedUnique((input.capDrop ?? []).map(upper)),
     capAdd: sortedUnique((input.capAdd ?? []).map(upper)),
     groupAdd: sortedUnique((input.groupAdd ?? []).map((group) => group.trim())),
@@ -2797,10 +3585,18 @@ export const inspectAffiliateAgentContainer = (
 };
 export const inspectAffiliateAgentRunnerContainer = (
   input: AffiliateAgentContainerInput,
-  expectedNetwork = 'affiliate_gateway_internal',
+  expectedNetwork: string,
+  expectedModelClientNetwork: string,
+  reviewedWorkspaceVolume = 'affiliate-governed-workspaces',
 ): AffiliateAgentContainerInspection => {
   const environment = environmentEntries(input.environment);
-  const findings = runnerContainmentFindings(input, environment, expectedNetwork);
+  const findings = runnerContainmentFindings(
+    input,
+    environment,
+    expectedNetwork,
+    expectedModelClientNetwork,
+    reviewedWorkspaceVolume,
+  );
   return {
     id: input.id,
     name: stringValue(input.name),
@@ -3564,6 +4360,91 @@ const reviewedNetworkFinding = (
       ['reviewed-agent-network'],
       'Record the exact resolved internal gateway network name.',
     )];
+const productionDatabaseNetworkFindings = (
+  input: AffiliateCutoverPreflightInput,
+): AffiliateCutoverFinding[] => {
+  const evidence = input.productionDatabaseNetworkEvidence;
+  const rows = normalizedNetworkAttachments(evidence?.networks);
+  const databaseContainerId = stringValue(evidence?.containerId) ?? '';
+  const databaseNames = rows.map((row) => row.name);
+  const databaseIds = rows.map((row) => row.id);
+  const databaseEvidenceIsReviewed = Boolean(
+    /^[a-f0-9]{64}$/i.test(databaseContainerId)
+      && rows.length > 0
+      && rows.every((row) => (
+        Boolean(row.name) && /^[a-f0-9]{64}$/i.test(row.id)
+      ))
+      && new Set(databaseNames).size === rows.length
+      && new Set(databaseIds).size === rows.length,
+  );
+  const findings: AffiliateCutoverFinding[] = [];
+  if (!databaseEvidenceIsReviewed) {
+    findings.push(finding(
+      'PRODUCTION_DATABASE_NETWORK_EVIDENCE',
+      'BLOCKING',
+      'The production database network evidence must contain one full container ID and unique name/ID pairs captured from Docker.',
+      [databaseContainerId, ...databaseNames, ...databaseIds].filter(Boolean),
+      'Capture the production Postgres container ID and every attached network name and NetworkID from one Docker inspection.',
+    ));
+  }
+  const reviewedBackendName = stringValue(input.reviewedProductionBackendNetwork) ?? '';
+  const reviewedBackendId = stringValue(input.reviewedProductionBackendNetworkId) ?? '';
+  if (
+    !databaseEvidenceIsReviewed
+    || rows.filter((row) => row.name === reviewedBackendName && row.id === reviewedBackendId).length !== 1
+  ) {
+    findings.push(finding(
+      'PRODUCTION_BACKEND_NETWORK_IDENTITY',
+      'BLOCKING',
+      'The reviewed production-backend network name and ID must identify exactly one actual production database attachment.',
+      [reviewedBackendName, reviewedBackendId].filter(Boolean),
+      'Bind reviewedProductionBackendNetwork and reviewedProductionBackendNetworkId to the same captured production Postgres network row.',
+    ));
+  }
+  const inspectedContainers: Array<{
+    category: 'MODEL' | 'AGENT';
+    input: Pick<AffiliateAgentContainerInput, 'id' | 'networks' | 'networkAttachments'>;
+  }> = [
+    { category: 'MODEL', input: input.modelAuthBrokerContainer },
+    { category: 'MODEL', input: input.modelGatewayContainer },
+    ...(input.runnerContainer ? [{ category: 'AGENT' as const, input: input.runnerContainer }] : []),
+    ...input.containers.map((container) => ({ category: 'AGENT' as const, input: container })),
+    ...(input.auxiliaryContainers ?? []).map((container) => ({ category: 'AGENT' as const, input: container })),
+  ];
+  if (databaseEvidenceIsReviewed) {
+    for (const { category, input: container } of inspectedContainers) {
+      const attachmentRows = normalizedNetworkAttachments(container.networkAttachments);
+      if (!networkAttachmentEvidenceIsReviewed(container)) {
+        findings.push(finding(
+          'CONTAINER_NETWORK_IDENTITY_EVIDENCE',
+          'BLOCKING',
+          `Container ${container.id} does not provide unique full network name/ID attachments matching its actual network list.`,
+          [container.id, ...attachmentRows.flatMap((row) => [row.name, row.id])].filter(Boolean),
+          'Capture every container network name and NetworkID directly from Docker and keep the names aligned with the network list.',
+        ));
+        continue;
+      }
+      const sharedNames = attachmentRows
+        .map((row) => row.name)
+        .filter((name) => databaseNames.includes(name));
+      const sharedIds = attachmentRows
+        .map((row) => row.id)
+        .filter((id) => databaseIds.includes(id));
+      if (sharedNames.length || sharedIds.length) {
+        findings.push(finding(
+          category === 'MODEL'
+            ? 'MODEL_SERVICE_PRODUCTION_NETWORK_INTERSECTION'
+            : 'AGENT_PRODUCTION_NETWORK_INTERSECTION',
+          'BLOCKING',
+          `${category === 'MODEL' ? 'Model service' : 'Agent'} container ${container.id} shares a network name or ID with the production database.`,
+          [container.id, ...sharedNames, ...sharedIds].filter(Boolean),
+          'Remove the shared production database network attachment and recapture network names and IDs from Docker.',
+        ));
+      }
+    }
+  }
+  return findings;
+};
 
 const runnerAuthorityFinding = (
   runnerContainerId: string | null,
@@ -3777,6 +4658,8 @@ type PreflightInspectionData = {
   supervisor: AffiliateAgentContainerInspection[];
   runner: AffiliateAgentContainerInspection | null;
   auxiliary: AffiliateAgentContainerInspection[];
+  modelAuthBroker: AffiliateAgentContainerInspection;
+  modelGateway: AffiliateAgentContainerInspection;
   unsafe: AffiliateAgentContainerInspection[];
   unsafeCount: number;
 };
@@ -3801,16 +4684,56 @@ const preflightInspectionData = (
     inspectAffiliateAgentContainer(container, reviewedAgentNetwork)
   ));
   const runner = input.runnerContainer
-    ? inspectAffiliateAgentRunnerContainer(input.runnerContainer, reviewedAgentNetwork)
+    ? inspectAffiliateAgentRunnerContainer(
+        input.runnerContainer,
+        reviewedAgentNetwork,
+        input.reviewedModelClientNetwork,
+        input.reviewedWorkspaceVolume,
+      )
     : null;
   const auxiliary = (input.auxiliaryContainers ?? []).map((container) => (
     inspectAffiliateAuxiliaryContainer(container, reviewedAgentNetwork)
   ));
+  const reviewedModelNetworks = {
+    auth: input.reviewedModelAuthNetwork,
+    client: input.reviewedModelClientNetwork,
+    egress: input.reviewedModelEgressNetwork,
+  };
+  const modelAuthBroker = inspectAffiliateModelServiceContainer(
+    input.modelAuthBrokerContainer,
+    reviewedModelNetworks,
+    {
+      expectedId: AFFILIATE_MODEL_AUTH_BROKER_ID,
+      reviewedAgentImage: input.reviewedAgentImage,
+      reviewedAgentImageId: input.reviewedAgentImageId,
+      reviewedProductionBackendNetwork: input.reviewedProductionBackendNetwork,
+      reviewedBrokerStateVolume: input.reviewedBrokerStateVolume,
+      brokerBearerSource: input.modelAuthBrokerBearerSource,
+      gatewayBearerSource: input.modelGatewayBearerSource,
+      reviewedModelServiceState: input.reviewedModelServiceState,
+    },
+  );
+  const modelGateway = inspectAffiliateModelServiceContainer(
+    input.modelGatewayContainer,
+    reviewedModelNetworks,
+    {
+      expectedId: AFFILIATE_MODEL_GATEWAY_ID,
+      reviewedAgentImage: input.reviewedAgentImage,
+      reviewedAgentImageId: input.reviewedAgentImageId,
+      reviewedProductionBackendNetwork: input.reviewedProductionBackendNetwork,
+      reviewedBrokerStateVolume: input.reviewedBrokerStateVolume,
+      brokerBearerSource: input.modelAuthBrokerBearerSource,
+      gatewayBearerSource: input.modelGatewayBearerSource,
+      reviewedModelServiceState: input.reviewedModelServiceState,
+    },
+  );
   const unsafeSupervisor = supervisor.filter((inspection) => !inspection.isSafe);
   const unsafeAuxiliary = auxiliary.filter((inspection) => !inspection.isSafe);
   const unsafe = [
     ...unsafeSupervisor,
     ...unsafeAuxiliary,
+    ...(modelAuthBroker.isSafe ? [] : [modelAuthBroker]),
+    ...(modelGateway.isSafe ? [] : [modelGateway]),
     ...(runner && !runner.isSafe ? [runner] : []),
   ];
   const runnerUnsafe = isRunnerContainerUnsafe(runner, runnerContainerId, forbiddenRunnerEnvironment);
@@ -3818,6 +4741,8 @@ const preflightInspectionData = (
     supervisor,
     runner,
     auxiliary,
+    modelAuthBroker,
+    modelGateway,
     unsafe,
     unsafeCount: unsafe.length + (runnerUnsafe && runner?.isSafe !== false ? 1 : 0),
   };
@@ -3869,6 +4794,8 @@ const preflightBaseFindings = (
   ...contractSnapshotIntegrityFindings('OBSERVED', input.observed),
   ...contractMismatchFindings(input.expected, input.observed),
   ...reviewedNetworkFinding(reviewedAgentNetwork),
+  ...modelServicePairFindings(input),
+  ...productionDatabaseNetworkFindings(input),
   ...runnerIdentityFinding(runnerContainerId),
   ...runnerAuthorityFinding(runnerContainerId, forbiddenRunnerEnvironment),
   ...inventoryBindingFindings(data),
@@ -3929,10 +4856,29 @@ const preflightInputHash = (
   processInventoryArtifactId: data.processInventoryArtifactId,
   processInventoryHash: data.processInventoryHash,
   processInventoryCount: data.processInventoryCount,
-  processInventory: data.processes,
-  legacyServiceUnits: normalizedLegacyServiceUnits(input.legacyServiceUnits),
-  databasePermissions: input.databasePermissions,
   reviewedAgentNetwork,
+  reviewedWorkspaceVolume: input.reviewedWorkspaceVolume,
+  reviewedProductionBackendNetwork: input.reviewedProductionBackendNetwork,
+  reviewedProductionBackendNetworkId: input.reviewedProductionBackendNetworkId,
+  productionDatabaseNetworkEvidence: {
+    containerId: stringValue(input.productionDatabaseNetworkEvidence?.containerId) ?? '',
+    networks: normalizedNetworkAttachments(input.productionDatabaseNetworkEvidence?.networks),
+  },
+  reviewedAgentImage: input.reviewedAgentImage,
+  reviewedAgentImageId: input.reviewedAgentImageId,
+  reviewedBrokerStateVolume: input.reviewedBrokerStateVolume,
+  brokerStateVolumeAttachments: [...input.brokerStateVolumeAttachments]
+    .sort((left, right) => canonicalCompare(
+      `${left.containerId}:${left.serviceId}:${left.target}`,
+      `${right.containerId}:${right.serviceId}:${right.target}`,
+    )),
+  modelAuthBrokerBearerSource: input.modelAuthBrokerBearerSource,
+  modelGatewayBearerSource: input.modelGatewayBearerSource,
+  runnerModelGatewayBearerSha256: input.runnerModelGatewayBearerSha256,
+  reviewedModelServiceState: input.reviewedModelServiceState,
+  reviewedModelAuthNetwork: input.reviewedModelAuthNetwork,
+  reviewedModelClientNetwork: input.reviewedModelClientNetwork,
+  reviewedModelEgressNetwork: input.reviewedModelEgressNetwork,
   controlPlaneProcesses: (input.controlPlaneProcesses ?? [])
     .map((process) => ({
       id: stringValue(process?.id) ?? '',
@@ -3945,6 +4891,14 @@ const preflightInputHash = (
   runnerContainer: inspections.runner
     ? { id: inspections.runner.id, inputHash: inspections.runner.inputHash }
     : null,
+  modelAuthBroker: {
+    id: inspections.modelAuthBroker.id,
+    inputHash: inspections.modelAuthBroker.inputHash,
+  },
+  modelGateway: {
+    id: inspections.modelGateway.id,
+    inputHash: inspections.modelGateway.inputHash,
+  },
   containers: normalizedContainerInspections(inspections.supervisor),
   auxiliaryContainers: normalizedContainerInspections(inspections.auxiliary),
 });

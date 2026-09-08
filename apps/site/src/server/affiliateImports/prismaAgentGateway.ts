@@ -50,6 +50,8 @@ import type {
 } from "./agentGatewayAdapters";
 import { verifyAffiliateAgentLegacySportRepair } from "./agentGatewayAdapters";
 import {
+  AFFILIATE_AGENT_PROMPT_TEMPLATE_VERSION,
+  AFFILIATE_AGENT_ROLE_CONTRACT_VERSION,
   AFFILIATE_AGENT_PROMPT_TEMPLATES,
   AFFILIATE_AGENT_ROLE_CONTRACTS,
   AFFILIATE_AGENT_ROLES,
@@ -883,7 +885,7 @@ const claimRequestInputSchema = z
         schemaVersion: z.literal(1),
         workspaceId: gatewayIdentifierSchema,
         mode: z.enum(["READ_ONLY", "READ_WRITE"]),
-        executionClass: z.literal("PRODUCTION_CODEX"),
+        executionClass: z.literal("PRODUCTION_OMP"),
         workerId: gatewayIdentifierSchema,
         invocationId: gatewayIdentifierSchema,
         issuedAt: gatewayInputStringSchema,
@@ -988,11 +990,11 @@ const assertClaimRequestSemanticHints = (
   if (
     isGatewayRecord(attestation) &&
     "executionClass" in attestation &&
-    attestation.executionClass !== "PRODUCTION_CODEX"
+    attestation.executionClass !== "PRODUCTION_OMP"
   ) {
     throw gatewayError(
       "ROLE_NOT_ALLOWED",
-      "Offline evaluation cannot claim production Affiliate Agent work.",
+      "Only PRODUCTION_OMP claims may claim production Affiliate Agent work.",
     );
   }
 };
@@ -1057,8 +1059,12 @@ const parseSupportedContractBundle = (
   const bundle = parsed.data;
   const isSupported =
     bundle.deploymentContract.gatewayVersion === 1 &&
-    bundle.roleContracts.every((contract) => contract.version === 1) &&
-    bundle.promptTemplates.every((template) => template.version === 1);
+    bundle.roleContracts.every(
+      (contract) => contract.version === AFFILIATE_AGENT_ROLE_CONTRACT_VERSION,
+    ) &&
+    bundle.promptTemplates.every(
+      (template) => template.version === AFFILIATE_AGENT_PROMPT_TEMPLATE_VERSION,
+    );
   if (!isSupported) {
     throw gatewayError(
       "DEPLOYMENT_CONTRACT_STALE",
@@ -1146,10 +1152,10 @@ const assertClaimAttestationIdentity = (
       "The workspace attestation does not match the claim request.",
     );
   }
-  if (attestation.executionClass !== "PRODUCTION_CODEX") {
+  if (attestation.executionClass !== "PRODUCTION_OMP") {
     throw gatewayError(
       "ROLE_NOT_ALLOWED",
-      "Offline evaluation cannot claim production Affiliate Agent work.",
+      "Only PRODUCTION_OMP claims may claim production Affiliate Agent work.",
     );
   }
 };
@@ -2100,7 +2106,7 @@ const createClaimEnvelope = (
     promptTemplateVersion: roleContract.promptTemplateVersion,
     promptTemplateHash: roleContract.promptTemplateHash,
     role: input.role,
-    executionClass: "PRODUCTION_CODEX",
+    executionClass: "PRODUCTION_OMP",
     workerId: input.workerId,
     invocationId: input.invocationId,
     workspaceId: input.workspaceAttestation.workspaceId,
@@ -2914,10 +2920,12 @@ const assertClaimExpiryWindow = (
   now: Date,
   isPostEffectCompletionAllowed: boolean,
   isTrustedFailureRecording: boolean,
+  isTerminalReplay: boolean,
 ): void => {
   if (
     !isPostEffectCompletionAllowed &&
     !isTrustedFailureRecording &&
+    !isTerminalReplay &&
     claim.hardDeadlineAt < now
   ) {
     throw gatewayError(
@@ -2928,6 +2936,7 @@ const assertClaimExpiryWindow = (
   if (
     !isPostEffectCompletionAllowed &&
     !isTrustedFailureRecording &&
+    !isTerminalReplay &&
     claim.tokenExpiresAt <= now
   ) {
     throw gatewayError("TOKEN_EXPIRED", "The claim token has expired.");
@@ -2989,10 +2998,12 @@ const assertClaimLease = (
   now: Date,
   isPostEffectCompletionAllowed: boolean,
   isTrustedFailureRecording: boolean,
+  isTerminalReplay: boolean,
 ): void => {
   if (
     !isPostEffectCompletionAllowed &&
     !isTrustedFailureRecording &&
+    !isTerminalReplay &&
     claim.leaseExpiresAt <= now
   ) {
     throw gatewayError("LEASE_EXPIRED", "The claim lease has expired.");
@@ -3188,6 +3199,7 @@ const authorizeClaimOperation = async (
     now,
     isPostEffectCompletionAllowed,
     isTrustedFailureRecording,
+    isTerminalReplay,
   );
   assertClaimStatus(
     claim,
@@ -3199,6 +3211,7 @@ const authorizeClaimOperation = async (
     now,
     isPostEffectCompletionAllowed,
     isTrustedFailureRecording,
+    isTerminalReplay,
   );
   const { bundle, roleContract } = await loadAuthorizedContracts(
     dependencies,
@@ -3218,12 +3231,14 @@ const authorizeClaimOperation = async (
     authorizationNow,
     isPostEffectCompletionAllowed,
     isTrustedFailureRecording,
+    isTerminalReplay,
   );
   assertClaimLease(
     claim,
     authorizationNow,
     isPostEffectCompletionAllowed,
     isTrustedFailureRecording,
+    isTerminalReplay,
   );
   const job = await transaction.affiliateAgentGatewayJobs.findUnique({
     where: { id: claim.jobId },

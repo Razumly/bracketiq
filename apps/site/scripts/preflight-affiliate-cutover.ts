@@ -2,6 +2,8 @@ import { readFile, realpath, stat } from 'node:fs/promises';
 import { z } from 'zod';
 import {
   AFFILIATE_CUTOVER_PREFLIGHT_MAX_AGE_MS,
+  AFFILIATE_MODEL_AUTH_BROKER_ID,
+  AFFILIATE_MODEL_GATEWAY_ID,
   buildAffiliateCutoverPreflightReport,
   type AffiliateCutoverPreflightInput,
   type AffiliateCutoverPreflightReport,
@@ -100,6 +102,27 @@ const containerEnvironmentSchema = z.union([
   z.array(z.string()),
   z.record(z.string(), z.string()),
 ]);
+const dockerContainerIdSchema = z.string().regex(
+  /^[a-f0-9]{64}$/i,
+  'Expected a full 64-hex Docker container ID.',
+);
+const dockerNetworkAttachmentSchema = z.object({
+  name: nonEmptyStringSchema,
+  id: z.string().regex(
+    /^[a-f0-9]{64}$/i,
+    'Expected a full 64-hex Docker network ID.',
+  ),
+}).strict();
+const productionDatabaseNetworkEvidenceSchema = z.object({
+  containerId: dockerContainerIdSchema,
+  networks: z.array(dockerNetworkAttachmentSchema).min(1),
+}).strict();
+const modelServiceMountSchema = z.object({
+  source: z.string(),
+  type: z.enum(['bind', 'volume', 'tmpfs']),
+  target: nonEmptyStringSchema,
+  readOnly: z.boolean(),
+}).strict();
 const agentContainerSchema = z.object({
   id: nonEmptyStringSchema,
   name: nonEmptyStringSchema.optional(),
@@ -108,8 +131,9 @@ const agentContainerSchema = z.object({
   privileged: z.boolean(),
   tmpfs: z.record(z.string(), z.string()),
   environment: containerEnvironmentSchema,
-  volumes: z.array(nonEmptyStringSchema).optional(),
+  mounts: z.array(modelServiceMountSchema).optional(),
   networks: z.array(nonEmptyStringSchema),
+  networkAttachments: z.array(dockerNetworkAttachmentSchema).min(1),
   isNetworkInternal: z.boolean(),
   capDrop: z.array(nonEmptyStringSchema),
   capAdd: z.array(nonEmptyStringSchema),
@@ -122,6 +146,59 @@ const agentContainerSchema = z.object({
   supervisorUid: z.number().int().positive().optional(),
   securityOptions: z.array(nonEmptyStringSchema),
   apparmorProfileSha256: hashSchema.optional(),
+}).strict();
+const runnerContainerSchema = agentContainerSchema.extend({
+  mounts: z.array(modelServiceMountSchema),
+}).strict();
+const modelBearerSourceSchema = z.object({
+  path: nonEmptyStringSchema,
+  isRegularFile: z.literal(true),
+  isSymlink: z.literal(false),
+  uid: z.literal(0),
+  gid: z.literal(1003),
+  mode: z.string().regex(/^0?640$/, 'Expected source mode 0640.'),
+  sizeBytes: z.number().int().positive().max(64 * 1024),
+  sha256: hashSchema,
+}).strict();
+const modelServiceContainerSchema = z.object({
+  id: nonEmptyStringSchema,
+  containerId: dockerContainerIdSchema,
+  image: nonEmptyStringSchema,
+  imageId: z.string().regex(/^sha256:[a-f0-9]{64}$/i, 'Expected a Docker sha256 config ID.'),
+  user: nonEmptyStringSchema,
+  hasReadonlyRootFilesystem: z.boolean(),
+  privileged: z.boolean(),
+  tmpfs: z.record(z.string(), z.string()),
+  environment: containerEnvironmentSchema,
+  entrypoint: z.array(nonEmptyStringSchema),
+  command: z.array(nonEmptyStringSchema),
+  mounts: z.array(modelServiceMountSchema),
+  networks: z.array(nonEmptyStringSchema),
+  networkAttachments: z.array(dockerNetworkAttachmentSchema).min(1),
+  internalNetworks: z.array(nonEmptyStringSchema),
+  exposedPorts: z.array(nonEmptyStringSchema),
+  publishedPorts: z.array(nonEmptyStringSchema),
+  capDrop: z.array(nonEmptyStringSchema),
+  capAdd: z.array(nonEmptyStringSchema),
+  groupAdd: z.array(nonEmptyStringSchema),
+  securityOptions: z.array(nonEmptyStringSchema),
+  status: nonEmptyStringSchema,
+  healthStatus: nonEmptyStringSchema,
+  restartPolicy: nonEmptyStringSchema,
+  hasProductionBackendAccess: z.boolean(),
+}).strict();
+const modelAuthBrokerContainerSchema = modelServiceContainerSchema.extend({
+  id: z.literal(AFFILIATE_MODEL_AUTH_BROKER_ID),
+}).strict();
+const modelGatewayContainerSchema = modelServiceContainerSchema.extend({
+  id: z.literal(AFFILIATE_MODEL_GATEWAY_ID),
+}).strict();
+const brokerStateVolumeAttachmentSchema = z.object({
+  volumeName: nonEmptyStringSchema,
+  containerId: dockerContainerIdSchema,
+  serviceId: z.literal(AFFILIATE_MODEL_AUTH_BROKER_ID),
+  target: z.literal('/var/lib/omp'),
+  readOnly: z.literal(false),
 }).strict();
 const affiliateCutoverInventorySchema = z.object({
   now: isoTimestampSchema,
@@ -136,7 +213,27 @@ const affiliateCutoverInventorySchema = z.object({
   legacyClaims: z.array(legacyClaimSchema),
   databasePermissions: databasePermissionsSchema,
   reviewedAgentNetwork: nonEmptyStringSchema,
-  runnerContainer: agentContainerSchema,
+  reviewedProductionBackendNetwork: nonEmptyStringSchema,
+  reviewedProductionBackendNetworkId: z.string().regex(
+    /^[a-f0-9]{64}$/i,
+    'Expected a full 64-hex Docker network ID.',
+  ),
+  productionDatabaseNetworkEvidence: productionDatabaseNetworkEvidenceSchema,
+  reviewedModelAuthNetwork: nonEmptyStringSchema,
+  reviewedModelClientNetwork: nonEmptyStringSchema,
+  reviewedModelEgressNetwork: nonEmptyStringSchema,
+  reviewedAgentImage: nonEmptyStringSchema,
+  reviewedAgentImageId: z.string().regex(/^sha256:[a-f0-9]{64}$/i, 'Expected a Docker sha256 config ID.'),
+  reviewedBrokerStateVolume: nonEmptyStringSchema,
+  reviewedWorkspaceVolume: nonEmptyStringSchema,
+  brokerStateVolumeAttachments: z.array(brokerStateVolumeAttachmentSchema),
+  modelAuthBrokerBearerSource: modelBearerSourceSchema,
+  modelGatewayBearerSource: modelBearerSourceSchema,
+  runnerModelGatewayBearerSha256: hashSchema,
+  reviewedModelServiceState: z.enum(['STOPPED', 'RUNNING']),
+  runnerContainer: runnerContainerSchema,
+  modelAuthBrokerContainer: modelAuthBrokerContainerSchema,
+  modelGatewayContainer: modelGatewayContainerSchema,
   containers: z.array(agentContainerSchema),
   auxiliaryContainers: z.array(agentContainerSchema),
 }).strict();
@@ -393,8 +490,64 @@ const assertInventoryCaptureTime = (
     throw new Error('The cutover inventory now timestamp is older than the allowed preflight evidence age.');
   }
 };
+const assertRedactedRunnerModelBearer = (
+  environment: z.infer<typeof containerEnvironmentSchema>,
+): void => {
+  const entries = Array.isArray(environment)
+    ? environment
+    : Object.entries(environment).map(([key, value]) => `${key}=${value}`);
+  const tokenEntries = entries.filter((entry) => (
+    entry.split('=', 1)[0] === 'AFFILIATE_AGENT_MODEL_GATEWAY_TOKEN'
+  ));
+  if (tokenEntries.length !== 1 || tokenEntries[0]?.slice(tokenEntries[0].indexOf('=') + 1) !== '<redacted>') {
+    throw new Error(
+      'The cutover inventory must contain exactly one redacted AFFILIATE_AGENT_MODEL_GATEWAY_TOKEN runner value.',
+    );
+  }
+};
 
+
+const assertReviewedModelEnvironment = (
+  environment: z.infer<typeof containerEnvironmentSchema>,
+  label: string,
+  isGateway: boolean,
+): void => {
+  const entries = Array.isArray(environment)
+    ? environment
+    : Object.entries(environment).map(([key, value]) => `${key}=${value}`);
+  const values = Object.fromEntries(entries.map((entry) => {
+    const separator = entry.indexOf('=');
+    return [entry.slice(0, separator), entry.slice(separator + 1)];
+  }));
+  const expectedKeys = [
+    'HOME',
+    'NODE_ENV',
+    'NODE_VERSION',
+    'OMP_PROFILE',
+    'PATH',
+    'PI_CONFIG_DIR',
+    'YARN_VERSION',
+    ...(isGateway ? ['OMP_AUTH_BROKER_URL'] : []),
+  ];
+  const keys = entries.map((entry) => entry.split('=', 1)[0]);
+  if (
+    entries.some((entry) => !/^[A-Za-z_][A-Za-z0-9_]*=[^<\r\n]*$/.test(entry))
+    || new Set(keys).size !== keys.length
+    || JSON.stringify([...keys].sort()) !== JSON.stringify([...expectedKeys].sort())
+    || values.HOME !== '/var/lib/omp'
+    || values.NODE_ENV !== 'production'
+    || !/^\d+\.\d+\.\d+$/.test(values.NODE_VERSION ?? '')
+    || values.OMP_PROFILE !== (isGateway ? 'affiliate-model-gateway' : 'affiliate-model-auth-broker')
+    || values.PATH !== '/workspace/apps/site/node_modules/.bin:/usr/local/bin:/usr/bin:/bin'
+    || values.PI_CONFIG_DIR !== '.omp'
+    || !/^\d+\.\d+\.\d+$/.test(values.YARN_VERSION ?? '')
+    || (isGateway && values.OMP_AUTH_BROKER_URL !== 'http://affiliate-model-auth-broker:8765')
+  ) {
+    throw new Error(`${label} must contain only the reviewed safe effective OMP environment.`);
+  }
+};
 export const parseAffiliateCutoverInventory = (
+
   value: unknown,
   reviewedLegacyProcessManifest: AffiliateLegacyProcessManifest,
   executionNow: Date = new Date(),
@@ -402,6 +555,21 @@ export const parseAffiliateCutoverInventory = (
   const result = affiliateCutoverInventorySchema.safeParse(value);
   if (!result.success) throw formatInventorySchemaError(result.error);
   const inventory: AffiliateCutoverInventoryJson = result.data;
+  assertReviewedModelEnvironment(inventory.modelAuthBrokerContainer.environment, 'modelAuthBrokerContainer', false);
+  assertReviewedModelEnvironment(inventory.modelGatewayContainer.environment, 'modelGatewayContainer', true);
+  assertRedactedRunnerModelBearer(inventory.runnerContainer.environment);
+  const runnerMount = inventory.runnerContainer.mounts[0];
+  if (
+    inventory.runnerContainer.mounts.length !== 1
+    || runnerMount?.source !== inventory.reviewedWorkspaceVolume
+    || runnerMount?.type !== 'volume'
+    || runnerMount?.target !== '/workspaces'
+    || runnerMount?.readOnly !== false
+  ) {
+    throw new Error(
+      'The runner container must expose exactly the reviewed workspace volume at /workspaces as a writable volume mount.',
+    );
+  }
   assertInventoryCaptureTime(inventory.now, executionNow);
   return {
     ...inventory,

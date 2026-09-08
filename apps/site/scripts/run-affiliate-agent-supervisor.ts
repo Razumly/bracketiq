@@ -10,6 +10,7 @@ import type {
   AffiliateAgentClaimRequest,
   AffiliateAgentGateway,
   AffiliateAgentGatewayErrorCode,
+  AffiliateAgentGatewayRequestOptions,
   AffiliateAgentInvocationFailureCode,
   AffiliateAgentReconcileReport,
   AffiliateAgentReconcileRequest,
@@ -21,6 +22,7 @@ import {
   AFFILIATE_AGENT_WORKSPACE_ATTESTATION_LIFETIME_SECONDS,
 } from "../src/server/affiliateImports/agentGateway";
 import {
+  AFFILIATE_AGENT_MAX_PROMPT_BYTES,
   AFFILIATE_AGENT_ROLES,
   affiliateAgentClaimEnvelopeSchema,
   canonicalizeAffiliateAgentValue,
@@ -61,7 +63,7 @@ import { AffiliateAgentProcessCapacityError } from "../src/server/affiliateImpor
 const DEFAULT_IDLE_SECONDS = 30;
 const MAX_TIMER_SECONDS = 2_147_483;
 const DEFAULT_FAILURE_SECONDS = 30;
-const DEFAULT_GATEWAY_REQUEST_TIMEOUT_MILLISECONDS =
+const DEFAULT_WORKER_GATEWAY_REQUEST_TIMEOUT_MILLISECONDS =
   AFFILIATE_AGENT_RUNNER_RESERVATION_TIMEOUT_MILLISECONDS;
 const WORKSPACE_CLEANUP_TIMEOUT_MILLISECONDS = 30_000;
 const WORKSPACE_ROOT_MODE = 0o710;
@@ -657,24 +659,42 @@ type GatewayRequestCancellation = Readonly<{
   cleanup(): void;
 }>;
 
+type GatewayRequestCancellationOptions = Readonly<{
+  shutdownSignal?: AbortSignal;
+  signal?: AbortSignal;
+  deadlineAt?: number;
+  timeoutMilliseconds?: number | null;
+}>;
+
 const requestCancellationFor = (
-  shutdownSignal: AbortSignal | undefined,
+  input: GatewayRequestCancellationOptions = {},
 ): GatewayRequestCancellation => {
   const controller = new AbortController();
-  const finish = (): void => controller.abort();
-  const timeout = setTimeout(
-    finish,
-    DEFAULT_GATEWAY_REQUEST_TIMEOUT_MILLISECONDS,
+  const finish = (): void => {
+    if (!controller.signal.aborted) controller.abort();
+  };
+  const configuredTimeout = input.timeoutMilliseconds === null
+    ? Number.POSITIVE_INFINITY
+    : input.timeoutMilliseconds ?? DEFAULT_WORKER_GATEWAY_REQUEST_TIMEOUT_MILLISECONDS;
+  const deadlineTimeout = input.deadlineAt === undefined
+    ? Number.POSITIVE_INFINITY
+    : Math.max(0, input.deadlineAt - Date.now());
+  const timeoutMilliseconds = Math.min(configuredTimeout, deadlineTimeout);
+  let timeout: NodeJS.Timeout | undefined;
+  if (timeoutMilliseconds <= 0) finish();
+  else if (Number.isFinite(timeoutMilliseconds)) timeout = setTimeout(finish, timeoutMilliseconds);
+  const signals = [input.shutdownSignal, input.signal].filter(
+    (signal): signal is AbortSignal => signal !== undefined,
   );
-  if (shutdownSignal !== undefined) {
-    if (shutdownSignal.aborted) finish();
-    else shutdownSignal.addEventListener("abort", finish, { once: true });
+  for (const signal of signals) {
+    if (signal.aborted) finish();
+    else signal.addEventListener("abort", finish, { once: true });
   }
   return {
     signal: controller.signal,
     cleanup: () => {
       clearTimeout(timeout);
-      shutdownSignal?.removeEventListener("abort", finish);
+      for (const signal of signals) signal.removeEventListener("abort", finish);
     },
   };
 };
@@ -715,7 +735,7 @@ const gatewayAdmissionIsOpen = async (
   baseUrl: URL,
   operatorToken: string,
 ): Promise<boolean> => {
-  const cancellation = requestCancellationFor(undefined);
+  const cancellation = requestCancellationFor();
   try {
     const response = await fetch(
       new URL(gatewayPath("admission"), baseUrl),
@@ -745,7 +765,7 @@ const closeGatewayAdmission = async (
   baseUrl: URL,
   operatorToken: string,
 ): Promise<void> => {
-  const cancellation = requestCancellationFor(undefined);
+  const cancellation = requestCancellationFor();
   try {
     const response = await fetch(
       new URL(gatewayPath("admission/close"), baseUrl),
@@ -832,33 +852,63 @@ const decodeGatewayResponse = <T>(
   return decodeGatewayResult(payload.result) as T;
 };
 
+export type AffiliateAgentHttpGatewayOptions = Readonly<{
+  shutdownSignal?: AbortSignal;
+  roleCredential?: string | null;
+  workerRole?: AffiliateAgentRole;
+  workerId?: string;
+  claimDeadlineAt?: number;
+  requestTimeoutMilliseconds?: number | null;
+}>;
+
+type AffiliateAgentHttpRequestOptions = Readonly<{
+  headers?: Readonly<Record<string, string>>;
+  cancelOnShutdown?: boolean;
+  signal?: AbortSignal;
+  deadlineAt?: number;
+  validateResult: GatewayResultValidator;
+}>;
+
 export class AffiliateAgentHttpGateway implements AffiliateAgentGateway {
   private readonly baseUrl: URL;
-  private readonly shutdownSignal: AbortSignal;
-  private readonly roleCredential: string;
+  private readonly shutdownSignal: AbortSignal | undefined;
+  private readonly roleCredential: string | null;
   private readonly workerRole?: AffiliateAgentRole;
   private readonly workerId?: string;
+  private readonly claimDeadlineAt: number | undefined;
+  private readonly requestTimeoutMilliseconds: number | null;
 
   constructor(
     address: string,
-    shutdownSignal: AbortSignal,
-    roleCredential: string,
-    workerRole?: AffiliateAgentRole,
-    workerId?: string,
+    options: AffiliateAgentHttpGatewayOptions = {},
   ) {
     this.baseUrl = new URL(address);
     if (this.baseUrl.protocol !== "http:" && this.baseUrl.protocol !== "https:") {
       throw new Error("AFFILIATE_AGENT_GATEWAY_ADDRESS must use HTTP or HTTPS.");
     }
-    this.shutdownSignal = shutdownSignal;
-    this.roleCredential = roleCredential;
-    this.workerRole = workerRole;
-    this.workerId = workerId;
+    if (
+      options.claimDeadlineAt !== undefined
+      && !Number.isFinite(options.claimDeadlineAt)
+    ) {
+      throw new Error("The affiliate agent claim deadline must be finite.");
+    }
+    this.shutdownSignal = options.shutdownSignal;
+    this.roleCredential = options.roleCredential ?? null;
+    this.workerRole = options.workerRole;
+    this.workerId = options.workerId;
+    this.claimDeadlineAt = options.claimDeadlineAt;
+    this.requestTimeoutMilliseconds = options.requestTimeoutMilliseconds
+      ?? (options.claimDeadlineAt === undefined
+        ? DEFAULT_WORKER_GATEWAY_REQUEST_TIMEOUT_MILLISECONDS
+        : null);
   }
 
   async heartbeatWorker(
     input: Readonly<{ workerId: string; role: AffiliateAgentRole }>,
   ): Promise<void> {
+    if (!this.roleCredential) {
+      throw new Error("Worker heartbeats require a role credential.");
+    }
     await this.request(
       gatewayPath("worker/heartbeat"),
       {
@@ -866,22 +916,29 @@ export class AffiliateAgentHttpGateway implements AffiliateAgentGateway {
         role: input.role,
         roleCredential: this.roleCredential,
       },
-      undefined,
-      false,
-      isHeartbeatResponseResult,
+      {
+        cancelOnShutdown: false,
+        validateResult: isHeartbeatResponseResult,
+      },
     );
   }
-  private async request<T>(
 
+  private async request<T>(
     path: string,
     body: unknown,
-    headers: Readonly<Record<string, string>> | undefined,
-    cancelOnShutdown: boolean,
-    validateResult: GatewayResultValidator,
+    options: AffiliateAgentHttpRequestOptions,
   ): Promise<T> {
-    const cancellation = requestCancellationFor(
-      cancelOnShutdown ? this.shutdownSignal : undefined,
-    );
+    const deadlineAt = this.claimDeadlineAt === undefined
+      ? options.deadlineAt
+      : options.deadlineAt === undefined
+        ? this.claimDeadlineAt
+        : Math.min(this.claimDeadlineAt, options.deadlineAt);
+    const cancellation = requestCancellationFor({
+      shutdownSignal: options.cancelOnShutdown ? this.shutdownSignal : undefined,
+      signal: options.signal,
+      deadlineAt,
+      timeoutMilliseconds: this.requestTimeoutMilliseconds,
+    });
     try {
       const url = new URL(path, this.baseUrl);
       if (url.origin !== this.baseUrl.origin) {
@@ -891,33 +948,39 @@ export class AffiliateAgentHttpGateway implements AffiliateAgentGateway {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          ...headers,
+          ...options.headers,
         },
         body: JSON.stringify(body),
         signal: cancellation.signal,
       });
       const payloadValue = await gatewayResponsePayload(response);
-      return decodeGatewayResponse(response, payloadValue, validateResult);
+      return decodeGatewayResponse(response, payloadValue, options.validateResult);
     } finally {
       cancellation.cleanup();
     }
   }
 
-  claim(input: AffiliateAgentClaimRequest): Promise<AffiliateAgentClaimGrant | null> {
+  claim(
+    input: AffiliateAgentClaimRequest,
+    options?: AffiliateAgentGatewayRequestOptions,
+  ): Promise<AffiliateAgentClaimGrant | null> {
     return this.request<AffiliateAgentClaimGrant | null>(
       gatewayPath("claim"),
       input,
-      undefined,
-      false,
-      (value) => isClaimGrantForRequest(value, input),
+      {
+        signal: options?.signal,
+        deadlineAt: options?.deadlineAt,
+        validateResult: (value) => isClaimGrantForRequest(value, input),
+      },
     );
   }
+
   private workerRequest(): Readonly<{
     role: AffiliateAgentRole;
     workerId: string;
     roleCredential: string;
   }> {
-    if (!this.workerRole || !this.workerId) {
+    if (!this.workerRole || !this.workerId || !this.roleCredential) {
       throw new Error("Worker-safe gateway operations require a configured worker identity.");
     }
     return {
@@ -931,22 +994,25 @@ export class AffiliateAgentHttpGateway implements AffiliateAgentGateway {
     return this.request<WorkerReconcileResult>(
       gatewayPath("reconcile/worker"),
       this.workerRequest(),
-      undefined,
-      true,
-      isWorkerReconcileResult,
+      {
+        cancelOnShutdown: true,
+        validateResult: isWorkerReconcileResult,
+      },
     );
   }
 
-
   perform<T extends AffiliateAgentClaimOperation>(
     input: T,
+    options?: AffiliateAgentGatewayRequestOptions,
   ): Promise<AffiliateAgentClaimOperationResult<T>> {
     return this.request<AffiliateAgentClaimOperationResult<T>>(
       gatewayPath("perform"),
       input,
-      undefined,
-      false,
-      (value) => isClaimOperationResult(input.kind, value),
+      {
+        signal: options?.signal,
+        deadlineAt: options?.deadlineAt,
+        validateResult: (value) => isClaimOperationResult(input.kind, value),
+      },
     );
   }
 
@@ -957,9 +1023,11 @@ export class AffiliateAgentHttpGateway implements AffiliateAgentGateway {
     return this.request<AffiliateAgentReconcileReport>(
       gatewayPath("reconcile"),
       input ?? {},
-      { "x-affiliate-gateway-operator-token": operatorToken },
-      true,
-      isReconcileReport,
+      {
+        headers: { "x-affiliate-gateway-operator-token": operatorToken },
+        cancelOnShutdown: true,
+        validateResult: isReconcileReport,
+      },
     );
   }
 
@@ -975,21 +1043,27 @@ export class AffiliateAgentHttpGateway implements AffiliateAgentGateway {
     await this.request(
       gatewayPath("admission/supervisor/close"),
       this.workerAdmissionRequest(),
-      undefined,
-      false,
-      (value) => isAdmissionStatusResult(value) && value.status === "closed" && !value.open,
+      {
+        cancelOnShutdown: false,
+        validateResult: (value) => isAdmissionStatusResult(value)
+          && value.status === "closed"
+          && !value.open,
+      },
     );
   }
+
   private async workerAdmissionIsOpen(): Promise<boolean> {
     const result = await this.request<Readonly<{ status: "open" | "closed"; open: boolean }>>(
       gatewayPath("admission/worker/status"),
       this.workerAdmissionRequest(),
-      undefined,
-      false,
-      isAdmissionStatusResult,
+      {
+        cancelOnShutdown: false,
+        validateResult: isAdmissionStatusResult,
+      },
     );
     return result.open;
   }
+
   private async persistWorkerAdmissionHalt(): Promise<void> {
     let lastError: unknown = new Error("The gateway admission halt was not confirmed.");
     while (true) {
@@ -1032,22 +1106,25 @@ export class AffiliateAgentHttpGateway implements AffiliateAgentGateway {
         );
   }
 
-
-
   async reconcileInvocation(
     input: AffiliateAgentInvocationReconciliationRequest,
   ): Promise<AffiliateAgentInvocationReconciliationResult> {
     return this.request<AffiliateAgentInvocationReconciliationResult>(
       gatewayPath("reconcile/invocation"),
       input,
-      undefined,
-      false,
-      isInvocationReconciliationResult,
+      {
+        cancelOnShutdown: false,
+        validateResult: isInvocationReconciliationResult,
+      },
     );
   }
 
   async isDownstreamCapacityHealthy(): Promise<boolean> {
-    const cancellation = requestCancellationFor(this.shutdownSignal);
+    const cancellation = requestCancellationFor({
+      shutdownSignal: this.shutdownSignal,
+      timeoutMilliseconds: this.requestTimeoutMilliseconds,
+      deadlineAt: this.claimDeadlineAt,
+    });
     try {
       const response = await fetch(
         new URL(gatewayPath("readiness"), this.baseUrl),
@@ -1128,7 +1205,7 @@ const applyWorkspaceEntryPermissions = async (
   if (entryStats.isDirectory()) {
     await applyWorkspacePermissions(
       entryPath,
-      isReadOnly && entry.name.toString("utf8") === ".codex" ? "READ_WRITE" : mode,
+      isReadOnly && entry.name.toString("utf8") === ".omp" ? "READ_WRITE" : mode,
     );
     return;
   }
@@ -1280,17 +1357,11 @@ export const createWorkspaceManager = (
     const path = await mkdtemp(join(resolvedRoot, `${workspaceId}-`));
     try {
       await chmod(path, 0o770);
-      const codexHome = join(path, ".codex");
-      await mkdir(codexHome, { recursive: true, mode: 0o770 });
-      await chmod(codexHome, 0o770);
-      if (input.mode === "READ_ONLY") {
-        // Create Codex policy mount targets before locking the reviewer root.
-        for (const name of [".git", ".agents"]) {
-          await mkdir(join(path, name), { mode: 0o770 });
-        }
-      }
+      const ompConfigRoot = join(path, ".omp");
+      await mkdir(ompConfigRoot, { recursive: true, mode: 0o770 });
+      await chmod(ompConfigRoot, 0o770);
       await applyWorkspacePermissions(path, input.mode);
-      await chmod(codexHome, 0o770);
+      await chmod(ompConfigRoot, 0o770);
       const issuedAtDate = new Date(Date.now());
       const issuedAt = issuedAtDate.toISOString();
       const expiresAt = new Date(
@@ -1301,7 +1372,7 @@ export const createWorkspaceManager = (
         schemaVersion: 1 as const,
         workspaceId,
         mode: input.mode,
-        executionClass: "PRODUCTION_CODEX" as const,
+        executionClass: "PRODUCTION_OMP" as const,
         workerId,
         invocationId,
         issuedAt,
@@ -1309,7 +1380,7 @@ export const createWorkspaceManager = (
       } satisfies Omit<AffiliateAgentWorkspaceAttestation, "signature">;
       return {
         path,
-        codexHome,
+        ompConfigRoot,
         attestation: {
           ...unsignedAttestation,
           signature: workspaceSignatureFor(unsignedAttestation, signingKey),
@@ -1357,8 +1428,6 @@ const RUNNER_ENVIRONMENT_KEYS = new Set([
   "AFFILIATE_AGENT_GATEWAY_PATH_PREFIX",
   "AFFILIATE_AGENT_CLAIM_TOKEN",
   "AFFILIATE_AGENT_CLAIM_ENVELOPE",
-  "AFFILIATE_AGENT_PROMPT",
-  "CODEX_HOME",
 ]);
 
 type RunnerResponseWaiter = Readonly<{
@@ -1603,7 +1672,7 @@ class AffiliateAgentRunnerProcessSession implements AffiliateAgentProcessSession
 
   async send(_input: AffiliateAgentProcessInput): Promise<void> {
     throw new Error(
-      "Schema corrections must be submitted by the Codex child through the gateway.",
+      "Schema corrections must be submitted by the child through the gateway.",
     );
   }
 
@@ -2024,10 +2093,12 @@ const createSupervisorConfiguration = (
   const roleCredential = requiredEnvironment("AFFILIATE_AGENT_ROLE_CREDENTIAL");
   const gateway = new AffiliateAgentHttpGateway(
     requiredEnvironment("AFFILIATE_AGENT_GATEWAY_ADDRESS"),
-    shutdownSignal,
-    roleCredential,
-    role,
-    workerId,
+    {
+      shutdownSignal,
+      roleCredential,
+      workerRole: role,
+      workerId,
+    },
   );
   const runnerSocket = requiredEnvironment("AFFILIATE_AGENT_RUNNER_SOCKET");
   const runnerProtocolPrivateKey = parseRunnerPrivateKey(

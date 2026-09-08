@@ -233,11 +233,11 @@ const contractBundleFixture = (() => {
     expectedTopology: {
       claimsPerInvocation: 1,
       hasFreshWorkspacePerClaim: true,
-      processCommand: ["codex", "exec", "--ephemeral"],
+      processCommand: ["affiliate-omp-agent"],
       hasNestedGoal: false,
       hasClaimLoop: false,
       hasContextReuse: false,
-      executionClass: "PRODUCTION_CODEX",
+      executionClass: "PRODUCTION_OMP",
       databaseRoles: {
         gateway: "bracketiq_affiliate_gateway",
         lifecycleAuthority: "bracketiq_affiliate_lifecycle",
@@ -571,7 +571,7 @@ const seedCompletedReviewerForHuman = async (
     roleContractHash: roleContract.hash,
     promptTemplateVersion: promptTemplate.version,
     promptTemplateHash: promptTemplate.hash,
-    executionClass: "PRODUCTION_CODEX",
+    executionClass: "PRODUCTION_OMP",
     workerId,
     invocationId,
     workspaceId,
@@ -834,7 +834,7 @@ const requestFor = (
     schemaVersion: 1,
     workspaceId: `${RUN_PREFIX}-${label}-workspace`,
     mode: role === "SUPPLY_REVIEWER" ? "READ_ONLY" : "READ_WRITE",
-    executionClass: "PRODUCTION_CODEX",
+    executionClass: "PRODUCTION_OMP",
     workerId: `${RUN_PREFIX}-${label}-worker`,
     invocationId: `${RUN_PREFIX}-${label}-invocation`,
     issuedAt: new Date(now.getTime() - 60_000).toISOString(),
@@ -1059,7 +1059,7 @@ const createGatewayHarness = (
     identifiers,
     credentials: {
       verify: async ({ executionClass }) =>
-        executionClass === "PRODUCTION_CODEX",
+        executionClass === "PRODUCTION_OMP",
     },
     workspaces: { verify: async () => true },
     contracts: { loadActiveBundle: async () => activeBundle },
@@ -3028,7 +3028,7 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
             schemaVersion: 1 as const,
             workspaceId: `${RUN_PREFIX}-workspace-${workspaceSequence}`,
             mode,
-            executionClass: "PRODUCTION_CODEX" as const,
+            executionClass: "PRODUCTION_OMP" as const,
             workerId,
             invocationId,
             issuedAt: "2026-08-20T17:59:00.000Z",
@@ -3126,8 +3126,6 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
         "AFFILIATE_AGENT_CLAIM_TOKEN",
         "AFFILIATE_AGENT_GATEWAY_ADDRESS",
         "AFFILIATE_AGENT_GATEWAY_PATH_PREFIX",
-        "AFFILIATE_AGENT_PROMPT",
-        "CODEX_HOME",
       ]);
     }
     expect(

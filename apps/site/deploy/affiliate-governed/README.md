@@ -10,18 +10,18 @@ protected replenishment-controller cadence client:
   authenticated replenishment operation.
 
 Each worker uses one claim through the governed supervisor command. Supervisors
-attach only to `gateway_internal`. The root runner also joins `gateway_egress`
-for the reviewed Codex authentication path. Neither receives a production
-database URL, object-storage credential, provider credential, repository token,
-or backend network access.
+attach only to `gateway_internal`. The root runner also joins
+`model_client_internal`. It has no public egress or production backend route.
+Supervisors and the runner receive no production database, object-storage,
+capture-provider, repository, or OAuth credential.
 
-The runner enforces one active invocation. It is a root-only control process
-with no database, gateway, role, or supervisor-halt credential; it owns the
-private socket and cgroup teardown, then passes only the active invocation's
-model handoff to one fresh Codex child. The child runs as the reviewed agent
-UID/GID (`1002:1001`) and cannot control the root runner or its cgroup.
+The runner permits one active invocation. It owns the private socket and
+cgroup cleanup. It starts the fixed `affiliate-omp-agent` executable as
+`1002:1001`. The child receives one claim token and an OMP model gateway bearer.
+It receives no supervisor, operator, auth broker, or provider credential.
+The trusted OMP SDK driver exposes only claim-bound Gateway tools.
 
-The gateway joins three networks: `gateway_internal` for worker and cadence
+The BracketIQ Agent Gateway joins three networks: `gateway_internal` for worker and cadence
 client traffic, `production_backend` for the reviewed PostgreSQL service, and
 the separate `gateway_egress` network for reviewed object-storage and provider
 endpoints. The production Compose project owns `production_backend` as an
@@ -33,8 +33,8 @@ container-network visibility only. No service in this project publishes a host
 port.
 Obtain separate, current authorization from an authorized human immediately
 before each production state change. This includes each image publication,
-legacy-fleet stop, durable session or rollback record, APPLY, model-relay
-attachment, admission open or close, Compose start, stop, restart, or
+legacy-fleet stop, durable session or rollback record, APPLY, OMP service
+setup, admission open or close, Compose start, stop, restart, or
 restart-policy transition. Do not reuse an earlier authorization for a later
 command. Use the assigned operator ID.
 Do not put credentials in commands, reports, or shared logs.
@@ -99,7 +99,107 @@ denial evidence. If group roles were absent when migrations ran, provision the
 roles and apply the migration's conditional grants before the canary.
 
 
-## Runner sandbox profiles
+## Current OMP runtime
+
+Use `@oh-my-pi/pi-coding-agent@18.1.13` with the pinned Bun runtime in the
+governed Dockerfile. The production execution class is `PRODUCTION_OMP`.
+Current role and prompt contracts use version 2. Old deployment and preflight
+reports do not authorize this runtime.
+
+`affiliate-model-auth-broker` owns the private OAuth store for two ChatGPT
+accounts. Its exact container/service ID is `affiliate-model-auth-broker`; it
+runs as `1003:1003` on `model_auth_internal` and `model_egress`.
+`affiliate-model-gateway` has the exact ID `affiliate-model-gateway` and runs
+as `1004:1004` on the auth, model-client, and model-egress networks. Neither
+model service joins the reviewed production-backend network or publishes a
+host port. The broker state volume is a dedicated persistent volume with
+exactly one writable `/var/lib/omp` attachment by the broker's actual
+full-container ID. The gateway keeps `/var/lib/omp` on a `512m` private
+`uid=1004,gid=1004,mode=0700` tmpfs; both services use bounded
+`rw,noexec,nosuid,nodev` `/tmp` tmpfs.
+
+The reviewed inventory binds both model services to the same full
+`image@sha256:<64-hex>` registry reference and independently records the
+Docker config ID as `sha256:<64-hex>`. These are separate facts: never derive
+the config ID from the image reference or compare it with an OCI repository
+digest. Capture the actual production-backend network name separately from
+the three model network names.
+
+The two internal bearer source records must be distinct. Provision their host
+sources as `root:1003`, mode `0640`, regular non-symlink files, and capture
+their bounded `stat` sizes plus SHA-256 fingerprints of the effective UTF-8
+value after JavaScript `String.prototype.trim()`. A source containing only
+Unicode whitespace is unusable. Two files such as `shared-token\n` and
+`shared-token` have the same effective value and must be rejected as equal
+even though their raw bytes differ. The model gateway has supplementary group
+`1003`. Compose mounts these files under `/run/secrets`.
+The role-specific `/usr/local/bin/prepare-omp-service broker|gateway`
+entrypoint delegates validation and copying to the trusted Bun helper, which
+applies the same JavaScript trim semantics before copying only these internal
+bearer files into the owned OMP profile with mode `0600`. Do not rely on
+Compose file-secret UID or mode remapping. Do not copy OAuth tokens into
+runner workspaces or retain raw bearer values in inventory.
+
+The root runner requires the exact endpoint
+`http://affiliate-model-gateway:4000`, a redacted bearer handoff, and
+`AFFILIATE_AGENT_OMP_MODEL=openai-codex/gpt-5.6-luna`. Bind the recorded
+runner bearer SHA-256 to the gateway source fingerprint, never the broker
+fingerprint. Supervisors do not receive this bearer. The child uses
+`pi-native` transport and must find the exact qualified model in authenticated
+`/v1/models` before it sends a prompt. Model services use `OMP_PROFILE` and
+`PI_CONFIG_DIR`; do not add a `PI_PROFILE` compatibility alias.
+
+Use two fresh browser logins in the dedicated broker profile. Do not import
+the expired Codex seed or a personal OMP profile. Use a separate browser
+session for the second account. Verify two distinct, healthy
+`openai-codex` identities without printing tokens or publishing account
+identifiers. Native OMP account selection and cooldowns remain in the model
+gateway. Account-pool files are routing filters, not authorization controls.
+
+The driver creates a new in-memory session for each claim. It disables
+ambient tools, extensions, context discovery, MCP, LSP, memory, and unrelated
+background model work. Both active and registered tools must match the
+claim's tool set. `read_artifact` returns verified text pages or image
+evidence. `execute_command` exists only when the role permits a non-terminal
+command. `submit_result` binds claim identity and authorization in trusted
+code. It emits one terminal frame only after the Gateway accepts the result.
+The supervisor confirms that result through an idempotent replay.
+
+The OMP runner does not use Bubblewrap. The shipped runner profiles remove
+the Codex-specific namespace and mount allowances. Keep the private cgroup,
+fixed UID/GID, no-new-privileges, resource limits, read-only root filesystem,
+and bounded temporary filesystems. Run `verify-runner-sandbox.mjs` in both
+producer and `--reviewer` modes with the exact reviewed image and profiles
+before an approved canary. A reviewer root must remain read-only.
+
+Preflight requires independent model-service inventory slots with exact IDs,
+full container IDs, image reference/config-ID binding, effective allowlisted
+environment (`HOME`, `NODE_ENV`, `NODE_VERSION`, `OMP_PROFILE`, `PATH`,
+`PI_CONFIG_DIR`, and `YARN_VERSION`), role-specific entrypoint/Cmd,
+structured mount records, bearer-source records, lifecycle status, health,
+and `restartPolicy=no`. The explicitly reviewed model-service state is
+`STOPPED` (created/exited) or `RUNNING` (running and healthy); both require
+`restartPolicy=no`. Auth setup may be approved and running before business
+preflight, so do not infer a required stopped auth state from stopped
+business writers. Missing or swapped model-service evidence fails closed.
+Do not add fixed permission booleans as a substitute for inspection.
+
+Build from `apps/site`. Use the two governed Dockerfiles. Publish only after
+current release approval. Start only the named services covered by that
+approval. Keep coverage, replenishment, publication, and automatic scraping
+held during the one-job backlog repair canary.
+
+The live execution plan is
+`plans/affiliate-governed-omp-runner-execplan.md` at the repository root.
+It records the exact admitted job, verification, login steps, and current
+authorization state. Source configuration is not production proof.
+
+## Historical Codex commissioning reference
+
+The remaining command examples record the earlier Codex commissioning and
+cutover work. They are historical reference, not an OMP startup procedure.
+Do not execute them to configure or start the current fleet. Their old
+inventory shapes and authentication settings do not satisfy OMP preflight.
 
 The reviewed Linux x86 runner uses the pinned Codex CLI with Bubblewrap.
 Install `runner-seccomp.json` and the named `runner.apparmor` profile only after
@@ -357,8 +457,9 @@ Use `deployment.env.example` as the source when creating the file; the
 resulting `deployment.env` is ignored by git. Set the immutable gateway and
 worker image digests, operator token, dedicated supervisor-halt credential,
 token-signing/workspace keys, deployment contract JSON, token key version,
-preflight report JSON, Spaces settings, the reviewed Codex model and auth file,
-all five role credentials, and the existing workspace root. Keep
+preflight report JSON, Spaces settings, the reviewed OMP image reference and
+independent Docker config ID, the two distinct private model bearer source
+files, all five role credentials, and the existing workspace root. Keep
 `AFFILIATE_GATEWAY_DATABASE_URL` pointed at the reviewed
 `postgres` service on `bracketiq-production_backend`, with the URL-encoded
 runtime password and database name `bracketiq`. Keep
@@ -578,15 +679,17 @@ ID and the expected registry digest in `.RepoDigests`.
 
 
 
-The reviewed restart-policy contract has two explicit phases. Keep
-`AFFILIATE_AGENT_RESTART_POLICY=no` in the private `deployment.env` for stopped
-container creation and inspection. Change it to `unless-stopped` only after
-gateway health, worker readiness, and separate authorization; the same value
-is applied to the gateway, runner, all five supervisors, and the governed
-replenishment controller. The profiled `affiliate-agent-downstream-ready`
-helper is one-shot and remains `no`.
-Only `no` and `unless-stopped` are reviewed values; do not substitute
-`always`, `on-failure`, or another restart policy.
+The reviewed restart-policy contract has two explicit phases for the governed
+business services. Keep `AFFILIATE_AGENT_RESTART_POLICY=no` in the private
+`deployment.env` for stopped container creation and inspection. Change it to
+`unless-stopped` only after gateway health, worker readiness, and separate
+authorization; that value is applied to the BracketIQ `affiliate-gateway`,
+root runner, all five supervisors, and governed replenishment controller. The
+profiled `affiliate-agent-downstream-ready` helper is one-shot and remains
+`no`. Both OMP model services are explicitly pinned to `restart: "no"` and
+are never changed by this transition. Only `no` and `unless-stopped` are
+reviewed values; do not substitute `always`, `on-failure`, or another restart
+policy.
 The production PostgreSQL Compose project must already have its healthy
 `postgres` service on the private `bracketiq-production_backend` network. Do
 not add a PostgreSQL service or a published gateway port to this Compose
@@ -1940,12 +2043,42 @@ docker image inspect $REVIEWED_WORKER_IMAGE_IDS |
   jq -e 'map({imageId: .Id, repoDigests: (.RepoDigests // [])})' \
   > "$REVIEWED_WORKER_IMAGE_EVIDENCE"
 test -s "$REVIEWED_WORKER_IMAGE_EVIDENCE"
+export REVIEWED_WORKER_NETWORK_EVIDENCE=/path/to/affiliate-governed-private/reviewed-affiliate-worker-networks.json
+test ! -e "$REVIEWED_WORKER_NETWORK_EVIDENCE"
+REVIEWED_WORKER_NETWORK_IDS="$(
+  docker inspect $REVIEWED_WORKER_CONTAINER_IDS |
+    jq -r '.[].NetworkSettings.Networks[]?.NetworkID' | sort -u | paste -sd' '
+)"
+test -n "$REVIEWED_WORKER_NETWORK_IDS"
+docker network inspect $REVIEWED_WORKER_NETWORK_IDS |
+  jq -e 'map({id: .Id, name: .Name, internal: .Internal})' \
+  > "$REVIEWED_WORKER_NETWORK_EVIDENCE"
 docker inspect $REVIEWED_WORKER_CONTAINER_IDS |
+node -e '
+  const { createHash } = require("node:crypto");
+  let input = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", chunk => {
+    input += chunk;
+    if (Buffer.byteLength(input, "utf8") > 16777216) throw new Error("Container capture is too large.");
+  });
+  process.stdin.on("end", () => {
+    const rows = JSON.parse(input);
+    for (const row of rows) {
+      if (row.Config.Labels?.["com.docker.compose.service"] !== "affiliate-agent-runner") continue;
+      const prefix = "AFFILIATE_AGENT_MODEL_GATEWAY_TOKEN=";
+      const values = row.Config.Env.filter(entry => entry.startsWith(prefix));
+      if (values.length !== 1 || !values[0].slice(prefix.length).trim()) throw new Error("Runner bearer capture is invalid.");
+      row.modelGatewayBearerSha256 = createHash("sha256").update(values[0].slice(prefix.length).trim(), "utf8").digest("hex");
+      row.Config.Env = row.Config.Env.map(entry => entry.startsWith(prefix) ? prefix + "<redacted>" : entry);
+    }
+    process.stdout.write(JSON.stringify(rows));
+  });
+' |
 jq --slurpfile image_evidence "$REVIEWED_WORKER_IMAGE_EVIDENCE" \
-  --arg reviewed_network "$(
-  sed -n 's/^AFFILIATE_AGENT_GATEWAY_NETWORK=//p' \
-    /path/to/affiliate-governed-private/deployment.env
-)" '($image_evidence[0] | map({key: .imageId, value: .repoDigests}) | from_entries) as $repoDigestsByImageId
+  --slurpfile network_evidence "$REVIEWED_WORKER_NETWORK_EVIDENCE" \
+  '($image_evidence[0] | map({key: .imageId, value: .repoDigests}) | from_entries) as $repoDigestsByImageId
+| ($network_evidence[0] | map({key: .id, value: .internal}) | from_entries) as $internalById
 | map({
   id: .Id,
   name: (.Name | ltrimstr("/")),
@@ -1953,14 +2086,40 @@ jq --slurpfile image_evidence "$REVIEWED_WORKER_IMAGE_EVIDENCE" \
   image: .Config.Image,
   imageId: .Image,
   repoDigests: ($repoDigestsByImageId[.Image] // []),
+  modelGatewayBearerSha256: (.modelGatewayBearerSha256 // null),
   hasReadonlyRootFilesystem: .HostConfig.ReadonlyRootfs,
   privileged: (.HostConfig.Privileged // false),
   user: (.Config.User // null),
   cgroupNamespace: (.HostConfig.CgroupnsMode // null),
   ipcMode: (.HostConfig.IpcMode // null),
   tmpfs: (.HostConfig.Tmpfs // {}),
+  mounts: [
+    .Mounts[]?
+    | {
+        source: (
+          if ((.Type // "") | ascii_downcase) == "volume"
+          then (.Name // "")
+          else (.Source // "")
+          end
+        ),
+        type: ((.Type // "") | ascii_downcase),
+        target: (.Destination // ""),
+        readOnly: ((.RW // true) | not)
+      }
+  ],
   restartPolicy: (.HostConfig.RestartPolicy.Name // "no"),
-  environment: ([.Config.Env[]? | (split("=")[0] + "=<redacted>")]),
+  environment: ([
+    . as $container
+    | ($container.Config.Labels["com.docker.compose.service"] // "") as $service
+    | $container.Config.Env[]?
+    | split("=")[0] as $key
+    | if $service == "affiliate-agent-runner"
+      and ($key == "AFFILIATE_AGENT_MODEL_GATEWAY_ADDRESS"
+        or $key == "AFFILIATE_AGENT_OMP_MODEL")
+      then .
+      else ($key + "=<redacted>")
+      end
+  ]),
   childUid: ([.Config.Env[]?
     | select(startswith("AFFILIATE_AGENT_RUNNER_CHILD_UID="))
     | split("=")[1] | tonumber] | .[0] // null),
@@ -1974,8 +2133,15 @@ jq --slurpfile image_evidence "$REVIEWED_WORKER_IMAGE_EVIDENCE" \
     | select(startswith("AFFILIATE_AGENT_RUNNER_CGROUP_RELATIVE_PATH="))
     | split("=")[1]] | .[0] // null),
   networks: ([.NetworkSettings.Networks // {} | keys[]]),
-  isNetworkInternal: (([.NetworkSettings.Networks // {} | keys[]] | sort)
-    == [$reviewed_network]),
+  networkAttachments: ([
+    .NetworkSettings.Networks // {}
+    | to_entries[]
+    | {name: .key, id: .value.NetworkID}
+  ]),
+  isNetworkInternal: (
+    [.NetworkSettings.Networks[]?.NetworkID] as $ids
+    | ($ids | length) > 0 and all($ids[]; $internalById[.] == true)
+  ),
   capDrop: (.HostConfig.CapDrop // []),
   capAdd: (.HostConfig.CapAdd // []),
   groupAdd: (.HostConfig.GroupAdd // []),
@@ -2045,8 +2211,38 @@ def exact_tmpfs($path; $options):
 ' /path/to/affiliate-governed-private/reviewed-affiliate-workers.redacted.json
 jq -e 'all(.[]; (.environment | type) == "array")' \
   /path/to/affiliate-governed-private/reviewed-affiliate-workers.redacted.json
-jq -e '[.[]?.environment[]?] | all(test("^[^=]+=<redacted>$"))' \
-  /path/to/affiliate-governed-private/reviewed-affiliate-workers.redacted.json
+jq -e '[.[]?.environment[]?] | all(
+  test("^[^=]+=<redacted>$")
+  or . == "AFFILIATE_AGENT_MODEL_GATEWAY_ADDRESS=http://affiliate-model-gateway:4000"
+  or . == "AFFILIATE_AGENT_OMP_MODEL=openai-codex/gpt-5.6-luna"
+)' /path/to/affiliate-governed-private/reviewed-affiliate-workers.redacted.json
+export REVIEWED_WORKSPACE_VOLUME="$(
+  sed -n 's/^AFFILIATE_GOVERNED_WORKSPACE_VOLUME=//p' \
+    /path/to/affiliate-governed-private/deployment.env
+)"
+test -n "$REVIEWED_WORKSPACE_VOLUME"
+jq -e --arg workspace_volume "$REVIEWED_WORKSPACE_VOLUME" '
+  [.[] | select(.service == "affiliate-agent-runner")] | length == 1
+  and (.[0].environment
+    | index("AFFILIATE_AGENT_MODEL_GATEWAY_ADDRESS=http://affiliate-model-gateway:4000") != null)
+  and (.[0].environment
+    | index("AFFILIATE_AGENT_OMP_MODEL=openai-codex/gpt-5.6-luna") != null)
+  and (.[0].environment
+    | index("AFFILIATE_AGENT_MODEL_GATEWAY_TOKEN=<redacted>") != null)
+  and (.[0].mounts | length == 1)
+  and ((.[0].mounts[0] | keys | sort)
+    == ["readOnly", "source", "target", "type"])
+  and .[0].mounts[0].source == $workspace_volume
+  and .[0].mounts[0].type == "volume"
+  and .[0].mounts[0].target == "/workspaces"
+  and .[0].mounts[0].readOnly == false
+' /path/to/affiliate-governed-private/reviewed-affiliate-workers.redacted.json
+jq -e '
+  all(.[]; (.service == "affiliate-agent-runner")
+    or all(.environment[]?;
+      (startswith("AFFILIATE_AGENT_MODEL_GATEWAY_TOKEN=") | not)
+      and (startswith("AFFILIATE_AGENT_MODEL_AUTH_BROKER_TOKEN=") | not)))
+' /path/to/affiliate-governed-private/reviewed-affiliate-workers.redacted.json
 jq -e 'all(.[]; .restartPolicy == "no")' \
   /path/to/affiliate-governed-private/reviewed-affiliate-workers.redacted.json
 jq -e --arg expected "$REVIEWED_AGENT_IMAGE" \
@@ -2140,6 +2336,39 @@ docker inspect "$REPLENISHMENT_CONTAINER_ID" |
     ))
     | length == 1
   ' >/dev/null
+export REVIEWED_REPLENISHMENT_CAPTURE=/path/to/affiliate-governed-private/reviewed-affiliate-replenishment.redacted.json
+test ! -e "$REVIEWED_REPLENISHMENT_CAPTURE"
+docker inspect "$REPLENISHMENT_CONTAINER_ID" |
+  jq --slurpfile network_evidence "$REVIEWED_WORKER_NETWORK_EVIDENCE" '
+    ($network_evidence[0] | map({key: .id, value: .internal}) | from_entries) as $internalById
+    | map({
+        id: .Id,
+        name: (.Name | ltrimstr("/")),
+        service: .Config.Labels["com.docker.compose.service"],
+        user: .Config.User,
+        privileged: (.HostConfig.Privileged // false),
+        hasReadonlyRootFilesystem: .HostConfig.ReadonlyRootfs,
+        cgroupNamespace: (.HostConfig.CgroupnsMode // null),
+        ipcMode: (.HostConfig.IpcMode // null),
+        tmpfs: (.HostConfig.Tmpfs // {}),
+        environment: [.Config.Env[]? | split("=")[0] + "=<redacted>"],
+        mounts: [.Mounts[]? | {
+          source: (if .Type == "volume" then (.Name // "") else (.Source // "") end),
+          type: .Type, target: .Destination, readOnly: (.RW | not)
+        }],
+        networks: [.NetworkSettings.Networks // {} | keys[]],
+        networkAttachments: [.NetworkSettings.Networks // {} | to_entries[] | {name: .key, id: .value.NetworkID}],
+        isNetworkInternal: ([.NetworkSettings.Networks[]?.NetworkID] as $ids
+          | ($ids | length) > 0 and all($ids[]; $internalById[.] == true)),
+        capDrop: (.HostConfig.CapDrop // []),
+        capAdd: (.HostConfig.CapAdd // []),
+        groupAdd: (.HostConfig.GroupAdd // []),
+        securityOptions: (.HostConfig.SecurityOpt // [])
+      })
+  ' > "$REVIEWED_REPLENISHMENT_CAPTURE"
+test -s "$REVIEWED_REPLENISHMENT_CAPTURE"
+test ! -L "$REVIEWED_REPLENISHMENT_CAPTURE"
+```
 
 Retain this approved ID until the final all-container inspection. Remove it
 only after the ID is copied into the final reviewed container list.
@@ -2527,18 +2756,100 @@ jq -e '
   and (.isGatewayAllowedToWriteProductionDatabase | type == "boolean")
 ' "$DATABASE_PERMISSION_FLAGS_OUTPUT"
 ```
+Capture the production Postgres container's actual network graph from the same
+Docker daemon used for the model and worker inspections. Do not derive this
+evidence from `AFFILIATE_AGENT_PRODUCTION_BACKEND_NETWORK` or another
+configured name. The `postgres` Compose service label must resolve to exactly
+one full container ID:
+
+```text
+export OMP_PRODUCTION_DATABASE_CONTAINER_ID="$(
+  docker ps --no-trunc \
+    --filter label=com.docker.compose.service=postgres \
+    --format '{{.ID}}'
+)"
+test -n "$OMP_PRODUCTION_DATABASE_CONTAINER_ID"
+test "$(printf '%s\n' "$OMP_PRODUCTION_DATABASE_CONTAINER_ID" | awk 'NF { count += 1 } END { print count + 0 }')" = "1"
+printf '%s\n' "$OMP_PRODUCTION_DATABASE_CONTAINER_ID" |
+  awk 'NF == 1 && length($1) == 64 && $1 !~ /[^a-fA-F0-9]/ { found = 1 } END { exit found ? 0 : 1 }'
+export OMP_PRODUCTION_DATABASE_NETWORK_EVIDENCE=/path/to/affiliate-governed-private/production-database-network-evidence.json
+test ! -e "$OMP_PRODUCTION_DATABASE_NETWORK_EVIDENCE"
+docker inspect "$OMP_PRODUCTION_DATABASE_CONTAINER_ID" |
+  jq -e '
+    if length != 1 then error("expected one production Postgres inspection")
+    else .[0]
+    | {
+        containerId: .Id,
+        networks: [
+          .NetworkSettings.Networks // {}
+          | to_entries[]
+          | {name: .key, id: .value.NetworkID}
+        ]
+      }
+    | if (.containerId | test("^[a-fA-F0-9]{64}$"))
+      and (.networks | length > 0)
+      and all(.networks[]; (.name | type) == "string" and (.name | length) > 0)
+      and all(.networks[]; (.id | test("^[a-fA-F0-9]{64}$")))
+      and (([.networks[].name] | length) == ([.networks[].name] | unique | length))
+      and (([.networks[].id] | length) == ([.networks[].id] | unique | length))
+      then .
+      else error("invalid production Postgres network evidence")
+      end
+    end
+  ' > "$OMP_PRODUCTION_DATABASE_NETWORK_EVIDENCE"
+test -s "$OMP_PRODUCTION_DATABASE_NETWORK_EVIDENCE"
+test ! -L "$OMP_PRODUCTION_DATABASE_NETWORK_EVIDENCE"
+```
+
+Use the captured `containerId` and every `{name,id}` network attachment as
+`productionDatabaseNetworkEvidence`. Bind
+`reviewedProductionBackendNetwork` and
+`reviewedProductionBackendNetworkId` to one of those exact rows. The preflight
+also compares both names and IDs against each model, runner, and worker
+attachment, so stale names or a shared Docker network are blocking findings.
+
 Build `cutover-inventory.json` from the independent process source and the
-redacted host, database, contract, and container captures before binding the
-permission flags. Do not populate process rows from the reviewed legacy
-manifest. Have the second operator write:
+redacted host, database, contract, OMP model-service, and container captures
+before binding the permission flags. Do not populate process rows from the
+reviewed legacy manifest. Have the second operator write:
 
 - `reviewed-process-source.json`: a non-empty JSON array with exactly
   `id`, `kind`, `command`, and `status`, plus optional `role`, `workerId`, and
   `processClass` fields for each process;
 - `reviewed-inventory-values.json`: an object with exactly `now`, `expected`,
   `observed`, `controlPlaneProcesses`, `legacyServiceUnits`, `legacyClaims`,
-  `databasePermissions`, `reviewedAgentNetwork`, `runnerContainer`,
-  `containers`, and `auxiliaryContainers`.
+  `databasePermissions`, `reviewedAgentNetwork`,
+  `reviewedProductionBackendNetwork`, `reviewedProductionBackendNetworkId`,
+  `productionDatabaseNetworkEvidence`, `reviewedModelAuthNetwork`,
+  `reviewedModelClientNetwork`, `reviewedModelEgressNetwork`,
+  `reviewedAgentImage`, `reviewedAgentImageId`, `reviewedBrokerStateVolume`,
+  `runnerModelGatewayBearerSha256`,
+  `reviewedWorkspaceVolume`, `brokerStateVolumeAttachments`,
+  `modelAuthBrokerBearerSource`, `modelGatewayBearerSource`,
+  `reviewedModelServiceState`, `modelAuthBrokerContainer`,
+  `modelGatewayContainer`, `runnerContainer`, `containers`, and
+  `auxiliaryContainers`.
+  The model slots must contain the exact IDs `affiliate-model-auth-broker` and
+  `affiliate-model-gateway`; capture their full Docker container IDs,
+  immutable image reference, independent Docker config ID, effective
+  allowlisted environment, role-specific entrypoint/Cmd, structured
+  source/type/target/readOnly mounts, lifecycle status/health, and
+  `restartPolicy=no`. Record `STOPPED` only for created/exited services or
+  `RUNNING` only for running and healthy services. Auth setup may be running
+  before business preflight when separately approved; do not infer an auth
+  stop requirement from stopped business writers.
+  `reviewedAgentImage` is the full registry `image@sha256:<64-hex>` reference;
+  `reviewedAgentImageId` is the separate Docker `sha256:<64-hex>` config ID.
+  `brokerStateVolumeAttachments` must contain exactly one writable
+  `/var/lib/omp` attachment by the actual broker container ID. The
+  `productionDatabaseNetworkEvidence` object must contain the full production
+  Postgres container ID and every attached `{name,id}` pair captured from
+  Docker. Bind the reviewed production-backend name and ID to one exact pair,
+  and keep the evidence separate from all three model network names and IDs.
+  Each bearer source record contains only path, regular/no-symlink booleans,
+  uid/gid, mode `0640`, bounded size, and SHA-256; the broker and gateway
+  source paths and fingerprints must differ. The runner model bearer SHA must
+  equal the gateway source SHA.
   `controlPlaneProcesses` must contain exactly the four control-plane IDs
   `affiliate-gateway`, `affiliate-agent-runner`,
   `affiliate-agent-downstream-ready`, and
@@ -2548,11 +2859,223 @@ manifest. Have the second operator write:
   The auxiliary IDs are `affiliate-agent-downstream-ready` and
   `affiliate-replenishment-controller`.
 
-Use the exact nested shapes in `preflight-affiliate-cutover.ts`. Preserve only
-`KEY=<redacted>` environment entries in every container value; never put a
-secret in either source. The process source must contain every legacy process
-in the reviewed manifest with `kind: "LEGACY"`, matching `processClass`, and
-`status: "STOPPED"`, but must also be independently captured and reviewed.
+`tmpfs` options are read from `.HostConfig.Tmpfs`, and every actual `.Mounts`
+row is retained in the structured mount list, including engine-reported tmpfs
+rows. A legacy Compose capture may provide the required tmpfs map without
+duplicate rows; when Docker reports tmpfs rows, they must reconcile exactly
+with that map's required targets. Reject unknown, duplicate, conflicting, or
+shadowing tmpfs rows rather than filtering them out.
+Capture the model-service records independently before writing
+`reviewed-inventory-values.json`; do not infer them from Compose YAML. The
+following read-only capture shape retains the actual IDs, effective image
+configuration, lifecycle, and structured mounts while excluding bearer
+contents:
+
+```text
+export OMP_AUTH_BROKER_CONTAINER_ID="$(
+  docker compose --env-file /path/to/affiliate-governed-private/deployment.env \
+    -f compose.yml ps -aq affiliate-model-auth-broker
+)"
+export OMP_MODEL_GATEWAY_CONTAINER_ID="$(
+  docker compose --env-file /path/to/affiliate-governed-private/deployment.env \
+    -f compose.yml ps -aq affiliate-model-gateway
+)"
+test -n "$OMP_AUTH_BROKER_CONTAINER_ID"
+test -n "$OMP_MODEL_GATEWAY_CONTAINER_ID"
+test "$OMP_AUTH_BROKER_CONTAINER_ID" != "$OMP_MODEL_GATEWAY_CONTAINER_ID"
+export OMP_MODEL_SERVICE_CAPTURE=/path/to/affiliate-governed-private/omp-model-services.redacted.json
+test ! -e "$OMP_MODEL_SERVICE_CAPTURE"
+export OMP_MODEL_AUTH_NETWORK="$(
+  sed -n 's/^AFFILIATE_AGENT_MODEL_AUTH_NETWORK=//p' \
+    /path/to/affiliate-governed-private/deployment.env
+)"
+export OMP_MODEL_CLIENT_NETWORK="$(
+  sed -n 's/^AFFILIATE_AGENT_MODEL_CLIENT_NETWORK=//p' \
+    /path/to/affiliate-governed-private/deployment.env
+)"
+export OMP_MODEL_EGRESS_NETWORK="$(
+  sed -n 's/^AFFILIATE_AGENT_MODEL_EGRESS_NETWORK=//p' \
+    /path/to/affiliate-governed-private/deployment.env
+)"
+test -n "$OMP_MODEL_AUTH_NETWORK"
+test -n "$OMP_MODEL_CLIENT_NETWORK"
+test -n "$OMP_MODEL_EGRESS_NETWORK"
+export OMP_MODEL_INTERNAL_NETWORKS="$(
+  docker network inspect \
+    "$OMP_MODEL_AUTH_NETWORK" "$OMP_MODEL_CLIENT_NETWORK" "$OMP_MODEL_EGRESS_NETWORK" |
+    jq -c '[.[] | select(.Internal == true) | .Name]'
+)"
+test -n "$OMP_MODEL_INTERNAL_NETWORKS"
+test -s "$OMP_PRODUCTION_DATABASE_NETWORK_EVIDENCE"
+test ! -L "$OMP_PRODUCTION_DATABASE_NETWORK_EVIDENCE"
+docker inspect "$OMP_AUTH_BROKER_CONTAINER_ID" "$OMP_MODEL_GATEWAY_CONTAINER_ID" |
+  jq --slurpfile productionNetworkEvidence "$OMP_PRODUCTION_DATABASE_NETWORK_EVIDENCE" \
+    --argjson internalNetworks "$OMP_MODEL_INTERNAL_NETWORKS" '
+  map({
+    id: (.Config.Labels["com.docker.compose.service"] // ""),
+    containerId: .Id,
+    image: .Config.Image,
+    imageId: .Image,
+    user: (.Config.User // ""),
+    hasReadonlyRootFilesystem: (.HostConfig.ReadonlyRootfs // false),
+    privileged: (.HostConfig.Privileged // false),
+    tmpfs: (.HostConfig.Tmpfs // {}),
+    environment: [
+      .Config.Env[]?
+    ],
+    entrypoint: (.Config.Entrypoint // []),
+    command: (.Config.Cmd // []),
+    mounts: [
+      .Mounts[]?
+      | {
+          source: (
+            if ((.Type // "") | ascii_downcase) == "volume"
+            then (.Name // "")
+            else (.Source // "")
+            end
+          ),
+          type: ((.Type // "") | ascii_downcase),
+          target: (.Destination // ""),
+          readOnly: ((.RW // true) | not)
+        }
+    ],
+    networkAttachments: ([
+      .NetworkSettings.Networks // {}
+      | to_entries[]
+      | {name: .key, id: .value.NetworkID}
+    ]),
+    networks: ([.NetworkSettings.Networks // {} | keys[]]),
+    internalNetworks: (
+      [.NetworkSettings.Networks // {} | keys[]]
+      | map(select(. as $network | $internalNetworks | index($network) != null))
+    ),
+    exposedPorts: ([.Config.ExposedPorts // {} | keys[] | sub("/tcp$"; "")]),
+    publishedPorts: ([.HostConfig.PortBindings // {} | keys[]]),
+    capDrop: (.HostConfig.CapDrop // []),
+    capAdd: (.HostConfig.CapAdd // []),
+    groupAdd: (.HostConfig.GroupAdd // []),
+    securityOptions: (.HostConfig.SecurityOpt // []),
+    status: (.State.Status // "unknown"),
+    healthStatus: (.State.Health.Status // "none"),
+    restartPolicy: (.HostConfig.RestartPolicy.Name // "no"),
+    hasProductionBackendAccess: (
+      ([.NetworkSettings.Networks // {} | to_entries[] | {name: .key, id: .value.NetworkID}] as $attachments
+        | any($attachments[]; .name as $name | .id as $id
+          | any($productionNetworkEvidence[0].networks[]?;
+            .name == $name or .id == $id)))
+    )
+  })
+  | if length == 2
+    and ([.[].id] | sort) == ["affiliate-model-auth-broker", "affiliate-model-gateway"]
+    and all(.[].environment[]?;
+      (split("=")[0]) as $key
+      | [
+          "HOME",
+          "NODE_ENV",
+          "NODE_VERSION",
+          "OMP_PROFILE",
+          "PATH",
+          "PI_CONFIG_DIR",
+          "YARN_VERSION",
+          "OMP_AUTH_BROKER_URL"
+        ] | index($key) != null)
+    and all(.[].environment[]?; test("^[A-Za-z_][A-Za-z0-9_]*=[^<\\r\\n]*$"))
+    and all(.[].image; test("^.+@sha256:[a-fA-F0-9]{64}$"))
+    and all(.[].imageId; test("^sha256:[a-fA-F0-9]{64}$"))
+    then .
+    else error("invalid OMP model-service capture")
+    end
+  ' > "$OMP_MODEL_SERVICE_CAPTURE"
+test -s "$OMP_MODEL_SERVICE_CAPTURE"
+test ! -L "$OMP_MODEL_SERVICE_CAPTURE"
+```
+
+For each source path in `AFFILIATE_MODEL_AUTH_BROKER_TOKEN_FILE` and
+`AFFILIATE_MODEL_GATEWAY_TOKEN_FILE`, use the host Node preparation helper's
+same source checks: `stat` uid/gid/mode, regular non-symlink identity, bounded
+byte size, valid UTF-8, and a nonempty JavaScript `String.prototype.trim()`
+value. Record only the source metadata and SHA-256 of that normalized
+effective UTF-8 value, never the raw file hash or bearer text. Reject equal
+paths or equal normalized values before any profile copy, including a
+`shared-token\n` source paired with a `shared-token` source and any
+Unicode-whitespace-only source. Capture all consumers of
+`AFFILIATE_MODEL_AUTH_BROKER_STATE_VOLUME` with actual full container IDs;
+retain exactly the broker's writable `/var/lib/omp` attachment and no shared
+workspace consumer. Copy the resulting model rows and source metadata into
+the two model slots and fields listed above without copying raw bearer
+contents.
+Capture the two redacted source records with the same helper before writing
+the values file. The helper prints only metadata and the normalized-value
+fingerprint; it never prints bearer bytes. Pass source paths as arguments, not
+token contents:
+The host process must have read permission for the root-owned `0640` source
+files (normally run this capture as root via `sudo -n`); source paths are the
+only command-line arguments and bearer values must never appear in argv or
+logs.
+
+```text
+export OMP_BEARER_SOURCE_CAPTURE=/path/to/affiliate-governed-private/omp-bearer-sources.redacted.json
+export OMP_BEARER_PREPARATION_HELPER=/path/to/repository/apps/site/deploy/affiliate-governed/prepare-omp-bearers.mjs
+export OMP_AUTH_BROKER_TOKEN_SOURCE="$(
+  sed -n 's/^AFFILIATE_MODEL_AUTH_BROKER_TOKEN_FILE=//p' \
+    /path/to/affiliate-governed-private/deployment.env
+)"
+export OMP_MODEL_GATEWAY_TOKEN_SOURCE="$(
+  sed -n 's/^AFFILIATE_MODEL_GATEWAY_TOKEN_FILE=//p' \
+    /path/to/affiliate-governed-private/deployment.env
+)"
+test -n "$OMP_AUTH_BROKER_TOKEN_SOURCE"
+test -n "$OMP_MODEL_GATEWAY_TOKEN_SOURCE"
+test ! -e "$OMP_BEARER_SOURCE_CAPTURE"
+(umask 077; sudo -n node "$OMP_BEARER_PREPARATION_HELPER" capture \
+  "$OMP_AUTH_BROKER_TOKEN_SOURCE" "$OMP_MODEL_GATEWAY_TOKEN_SOURCE" \
+  > "$OMP_BEARER_SOURCE_CAPTURE")
+test -s "$OMP_BEARER_SOURCE_CAPTURE"
+test ! -L "$OMP_BEARER_SOURCE_CAPTURE"
+```
+
+Capture every container that references the broker volume, including stopped
+containers and containers outside this Compose project. Do not author the
+attachment list from only the two model-service rows.
+
+```text
+export OMP_BROKER_VOLUME_CAPTURE=/path/to/affiliate-governed-private/omp-broker-volume-attachments.redacted.json
+OMP_BROKER_STATE_VOLUME="$(
+  sed -n 's/^AFFILIATE_MODEL_AUTH_BROKER_STATE_VOLUME=//p' \
+    /path/to/affiliate-governed-private/deployment.env
+)"
+test -n "$OMP_BROKER_STATE_VOLUME"
+test ! -e "$OMP_BROKER_VOLUME_CAPTURE"
+OMP_BROKER_VOLUME_CONSUMERS="$(
+  docker ps -aq --no-trunc --filter "volume=$OMP_BROKER_STATE_VOLUME" | paste -sd' '
+)"
+test -n "$OMP_BROKER_VOLUME_CONSUMERS"
+docker inspect $OMP_BROKER_VOLUME_CONSUMERS |
+  jq --arg volume "$OMP_BROKER_STATE_VOLUME" '
+    [.[] as $container
+      | $container.Mounts[]?
+      | select(.Type == "volume" and .Name == $volume)
+      | {
+          volumeName: .Name,
+          containerId: $container.Id,
+          serviceId: ($container.Config.Labels["com.docker.compose.service"] // "UNMANAGED"),
+          target: .Destination,
+          readOnly: (.RW | not)
+        }]
+    | sort_by(.containerId, .target)
+  ' > "$OMP_BROKER_VOLUME_CAPTURE"
+test -s "$OMP_BROKER_VOLUME_CAPTURE"
+test ! -L "$OMP_BROKER_VOLUME_CAPTURE"
+```
+
+
+Use the exact nested shapes in `preflight-affiliate-cutover.ts`. Preserve
+only safe effective model environment entries and
+`KEY=<redacted>` entries for every other container value; never put a raw
+secret or bearer in either source. The process source must contain every
+legacy process in the reviewed manifest with `kind: "LEGACY"`, matching
+`processClass`, and `status: "STOPPED"`, but must also be independently
+captured and reviewed.
 Give the process source an artifact ID different from the manifest artifact ID.
 The command below validates the source boundaries, computes the canonical
 process hash and count, and creates the independent process artifact and
@@ -2564,8 +3087,12 @@ export REVIEWED_PROCESS_SOURCE=/path/to/affiliate-governed-private/reviewed-proc
 export REVIEWED_VALUES_SOURCE=/path/to/affiliate-governed-private/reviewed-inventory-values.json
 export REVIEWED_PROCESS_OUTPUT=/path/to/affiliate-governed-private/reviewed-process-inventory.json
 export CUTOVER_INVENTORY=/path/to/affiliate-governed-private/cutover-inventory.json
+export REVIEWED_WORKER_CAPTURE=/path/to/affiliate-governed-private/reviewed-affiliate-workers.redacted.json
 export PROCESS_INVENTORY_ARTIFACT_ID=observed-cutover-process-inventory-$(date -u '+%Y%m%dT%H%M%SZ')-$$
-for source_path in "$REVIEWED_MANIFEST" "$REVIEWED_PROCESS_SOURCE" "$REVIEWED_VALUES_SOURCE"; do
+for source_path in "$REVIEWED_MANIFEST" "$REVIEWED_PROCESS_SOURCE" "$REVIEWED_VALUES_SOURCE" \
+  "$REVIEWED_WORKER_CAPTURE" "$REVIEWED_REPLENISHMENT_CAPTURE" "$OMP_MODEL_SERVICE_CAPTURE" \
+  "$OMP_BEARER_SOURCE_CAPTURE" "$OMP_BROKER_VOLUME_CAPTURE" \
+  "$OMP_PRODUCTION_DATABASE_NETWORK_EVIDENCE"; do
   test -s "$source_path"
   test ! -L "$source_path"
 done
@@ -2577,6 +3104,7 @@ if ! (
   ./node_modules/.bin/tsx -e '
     import { readFile, writeFile } from "node:fs/promises";
     import { hashAffiliateCutoverProcessInventory } from "./src/server/affiliateImports/affiliateFleetCutover";
+    import { canonicalizeAffiliateAgentValue } from "./src/server/affiliateImports/agentGatewayContracts";
 
     const requiredPath = (name: string): string => {
       const value = process.env[name]?.trim();
@@ -2700,15 +3228,170 @@ if ! (
       "legacyClaims",
       "databasePermissions",
       "reviewedAgentNetwork",
+      "reviewedProductionBackendNetwork",
+      "reviewedProductionBackendNetworkId",
+      "productionDatabaseNetworkEvidence",
+      "reviewedModelAuthNetwork",
+      "reviewedModelClientNetwork",
+      "reviewedModelEgressNetwork",
+      "reviewedAgentImage",
+      "reviewedAgentImageId",
+      "reviewedBrokerStateVolume",
+      "brokerStateVolumeAttachments",
+      "reviewedWorkspaceVolume",
+      "modelAuthBrokerBearerSource",
+      "modelGatewayBearerSource",
+      "runnerModelGatewayBearerSha256",
+      "reviewedModelServiceState",
+      "modelAuthBrokerContainer",
+      "modelGatewayContainer",
       "runnerContainer",
       "containers",
       "auxiliaryContainers",
     ];
     assertExactKeys(values, valueKeys, "Reviewed inventory values");
+    const workerCapture = await readJson(requiredPath("REVIEWED_WORKER_CAPTURE"));
+    if (!Array.isArray(workerCapture)) throw new Error("Worker capture must be an array.");
+    const capturedRunners = workerCapture.filter((row) => isRecord(row) && row.service === "affiliate-agent-runner");
+    if (capturedRunners.length !== 1 || !isRecord(capturedRunners[0])) throw new Error("Exactly one captured runner is required.");
+    if (values.runnerModelGatewayBearerSha256 !== capturedRunners[0].modelGatewayBearerSha256) {
+      throw new Error("Runner bearer fingerprint must come from its actual effective environment.");
+    }
+    const modelCapture = await readJson(requiredPath("OMP_MODEL_SERVICE_CAPTURE"));
+    const bearerCapture = await readJson(requiredPath("OMP_BEARER_SOURCE_CAPTURE"));
+    const volumeCapture = await readJson(requiredPath("OMP_BROKER_VOLUME_CAPTURE"));
+    const databaseCapture = await readJson(requiredPath("OMP_PRODUCTION_DATABASE_NETWORK_EVIDENCE"));
+    if (!Array.isArray(modelCapture) || !Array.isArray(bearerCapture) || bearerCapture.length !== 2 || !Array.isArray(volumeCapture)) {
+      throw new Error("Complete independent model, bearer, and volume captures are required.");
+    }
+    const sameCapture = (left: unknown, right: unknown): boolean =>
+      canonicalizeAffiliateAgentValue(left) === canonicalizeAffiliateAgentValue(right);
+    for (const [field, id] of [
+      ["modelAuthBrokerContainer", "affiliate-model-auth-broker"],
+      ["modelGatewayContainer", "affiliate-model-gateway"],
+    ]) {
+      const rows = modelCapture.filter((row) => isRecord(row) && row.id === id);
+      if (rows.length !== 1 || !sameCapture(values[field], rows[0])) throw new Error(`${field} must match its actual capture.`);
+    }
+    if (!sameCapture(values.modelAuthBrokerBearerSource, bearerCapture[0])
+      || !sameCapture(values.modelGatewayBearerSource, bearerCapture[1])
+      || !sameCapture(values.productionDatabaseNetworkEvidence, databaseCapture)
+      || !sameCapture(
+        (values.brokerStateVolumeAttachments as unknown[]).map(canonicalizeAffiliateAgentValue).sort(),
+        volumeCapture.map(canonicalizeAffiliateAgentValue).sort(),
+      )) throw new Error("Reviewed OMP evidence must match every independent capture.");
+    const replenishmentCapture = await readJson(requiredPath("REVIEWED_REPLENISHMENT_CAPTURE"));
+    if (!Array.isArray(replenishmentCapture) || replenishmentCapture.length !== 1) {
+      throw new Error("Exactly one independent replenishment capture is required.");
+    }
+    const capturedContainers = [...workerCapture, ...replenishmentCapture];
+    const capturedByService = new Map<string, Record<string, unknown>>();
+    for (const row of capturedContainers) {
+      if (!isRecord(row) || typeof row.service !== "string" || capturedByService.has(row.service)) {
+        throw new Error("Captured container services must be present and unique.");
+      }
+      capturedByService.set(row.service, row);
+    }
+    const inspectedFields = [
+      "name", "user", "hasReadonlyRootFilesystem", "privileged", "tmpfs",
+      "environment", "mounts", "networks", "networkAttachments", "isNetworkInternal",
+      "capDrop", "capAdd", "groupAdd", "cgroupNamespace", "ipcMode", "securityOptions",
+    ];
+    const fieldCapture = (value: unknown): string => Array.isArray(value)
+      ? JSON.stringify(value.map(canonicalizeAffiliateAgentValue).sort())
+      : canonicalizeAffiliateAgentValue(value ?? null);
+    const bindCapturedContainer = (candidate: unknown, service: string): void => {
+      const captured = capturedByService.get(service);
+      if (!isRecord(candidate) || candidate.id !== service || !captured) {
+        throw new Error(`Missing exact captured service ${service}.`);
+      }
+      const fields = service === "affiliate-agent-runner"
+        ? [...inspectedFields, "cgroupRelativePath", "childUid", "childGid", "supervisorUid"]
+        : inspectedFields;
+      for (const field of fields) {
+        if (fieldCapture(candidate[field]) !== fieldCapture(captured[field])) {
+          throw new Error(`${service} ${field} must match the actual capture.`);
+        }
+      }
+    };
+    bindCapturedContainer(values.runnerContainer, "affiliate-agent-runner");
+    const workerServices = ["mapping-producer-1", "mapping-producer-2", "supply-reviewer-1", "supply-reviewer-2", "coverage-planner"];
+    const auxiliaryServices = ["affiliate-agent-downstream-ready", "affiliate-replenishment-controller"];
+    for (const [rows, services] of [
+      [values.containers, workerServices],
+      [values.auxiliaryContainers, auxiliaryServices],
+    ] as const) {
+      if (!Array.isArray(rows) || rows.length !== services.length) throw new Error("Captured container inventory is incomplete.");
+      for (const service of services) {
+        const matches = rows.filter((row) => isRecord(row) && row.id === service);
+        if (matches.length !== 1) throw new Error(`Missing or duplicate ${service}.`);
+        bindCapturedContainer(matches[0], service);
+      }
+    }
     assertString(values.now, "Reviewed inventory values now");
     assertString(values.reviewedAgentNetwork, "Reviewed inventory values reviewedAgentNetwork");
     for (const key of ["expected", "observed", "databasePermissions"]) {
       if (!isRecord(values[key])) throw new Error(`Reviewed inventory values ${key} must be an object.`);
+    }
+    for (const key of [
+      "reviewedAgentNetwork",
+      "reviewedProductionBackendNetwork",
+      "reviewedProductionBackendNetworkId",
+      "reviewedModelAuthNetwork",
+      "reviewedModelClientNetwork",
+      "reviewedModelEgressNetwork",
+      "reviewedAgentImage",
+      "reviewedAgentImageId",
+      "reviewedBrokerStateVolume",
+      "reviewedWorkspaceVolume",
+      "runnerModelGatewayBearerSha256",
+      "reviewedModelServiceState",
+    ]) {
+      assertString(values[key], `Reviewed inventory values ${key}`);
+    }
+    const productionNetworkEvidence = values.productionDatabaseNetworkEvidence;
+    if (
+      !isRecord(productionNetworkEvidence)
+      || Object.keys(productionNetworkEvidence).sort().join("\0") !== ["containerId", "networks"].join("\0")
+      || typeof productionNetworkEvidence.containerId !== "string"
+      || !/^[a-fA-F0-9]{64}$/.test(productionNetworkEvidence.containerId)
+      || !Array.isArray(productionNetworkEvidence.networks)
+      || productionNetworkEvidence.networks.length === 0
+      || productionNetworkEvidence.networks.some((network) => (
+        !isRecord(network)
+        || Object.keys(network).sort().join("\0") !== ["id", "name"].join("\0")
+        || typeof network.name !== "string"
+        || !network.name.trim()
+        || typeof network.id !== "string"
+        || !/^[a-fA-F0-9]{64}$/.test(network.id)
+      ))
+    ) {
+      throw new Error("productionDatabaseNetworkEvidence must contain the actual Postgres container and network name/ID records.");
+    }
+    const productionNetworkNames = productionNetworkEvidence.networks
+      .map((network) => String((network as Record<string, unknown>).name));
+    const productionNetworkIds = productionNetworkEvidence.networks
+      .map((network) => String((network as Record<string, unknown>).id));
+    if (
+      new Set(productionNetworkNames).size !== productionNetworkNames.length
+      || new Set(productionNetworkIds).size !== productionNetworkIds.length
+      || productionNetworkEvidence.networks.filter((network) => (
+        (network as Record<string, unknown>).name === values.reviewedProductionBackendNetwork
+        && (network as Record<string, unknown>).id === values.reviewedProductionBackendNetworkId
+      )).length !== 1
+    ) {
+      throw new Error("The reviewed production-backend name and ID must identify exactly one captured Postgres network attachment.");
+    }
+    for (const key of [
+      "modelAuthBrokerBearerSource",
+      "modelGatewayBearerSource",
+      "modelAuthBrokerContainer",
+      "modelGatewayContainer",
+    ]) {
+      if (!isRecord(values[key])) throw new Error(`Reviewed inventory values ${key} must be an object.`);
+    }
+    if (!Array.isArray(values.brokerStateVolumeAttachments)) {
+      throw new Error("Reviewed inventory values brokerStateVolumeAttachments must be an array.");
     }
     for (const key of ["controlPlaneProcesses", "legacyServiceUnits", "legacyClaims", "containers", "auxiliaryContainers"]) {
       if (!Array.isArray(values[key])) throw new Error(`Reviewed inventory values ${key} must be an array.`);
@@ -2743,6 +3426,179 @@ if ! (
         throw new Error(`${key} contract hashes must be objects.`);
       }
     }
+    const modelBearerAllowed = [
+      "path",
+      "isRegularFile",
+      "isSymlink",
+      "uid",
+      "gid",
+      "mode",
+      "sizeBytes",
+      "sha256",
+    ];
+    const assertModelBearerSource = (value: unknown, label: string): void => {
+      assertRequiredKeys(value, modelBearerAllowed, modelBearerAllowed, label);
+      if (!isRecord(value)) throw new Error(`${label} must be an object.`);
+      if (
+        typeof value.path !== "string"
+        || value.isRegularFile !== true
+        || value.isSymlink !== false
+        || value.uid !== 0
+        || value.gid !== 1003
+        || !/^0?640$/.test(String(value.mode))
+        || !Number.isInteger(value.sizeBytes)
+        || Number(value.sizeBytes) < 1
+        || Number(value.sizeBytes) > 64 * 1024
+        || !/^[a-fA-F0-9]{64}$/.test(String(value.sha256))
+      ) {
+        throw new Error(`${label} must prove a root:1003 regular non-symlink 0640 file with bounded metadata and a SHA-256 fingerprint of its normalized effective UTF-8 value.`);
+      }
+    };
+    const modelContainerAllowed = [
+      "id",
+      "containerId",
+      "image",
+      "imageId",
+      "user",
+      "hasReadonlyRootFilesystem",
+      "privileged",
+      "tmpfs",
+      "environment",
+      "entrypoint",
+      "command",
+      "mounts",
+      "networks",
+      "networkAttachments",
+      "internalNetworks",
+      "exposedPorts",
+      "publishedPorts",
+      "capDrop",
+      "capAdd",
+      "groupAdd",
+      "securityOptions",
+      "status",
+      "healthStatus",
+      "restartPolicy",
+      "hasProductionBackendAccess",
+    ];
+    const assertNetworkAttachments = (value: Record<string, unknown>, label: string): void => {
+      if (!Array.isArray(value.networkAttachments) || value.networkAttachments.some((attachment) => (
+        !isRecord(attachment)
+        || Object.keys(attachment).sort().join("\0") !== ["id", "name"].join("\0")
+        || typeof attachment.name !== "string"
+        || !attachment.name.trim()
+        || typeof attachment.id !== "string"
+        || !/^[a-fA-F0-9]{64}$/.test(attachment.id)
+      ))) {
+        throw new Error(`${label} networkAttachments must contain actual name/id records.`);
+      }
+      const attachmentNames = value.networkAttachments.map((attachment) => (
+        String((attachment as Record<string, unknown>).name)
+      )).sort();
+      const attachmentIds = value.networkAttachments.map((attachment) => (
+        String((attachment as Record<string, unknown>).id)
+      ));
+      const networkNames = (value.networks as unknown[]).map(String).sort();
+      if (
+        new Set(attachmentNames).size !== attachmentNames.length
+        || new Set(attachmentIds).size !== attachmentIds.length
+        || JSON.stringify(attachmentNames) !== JSON.stringify(networkNames)
+      ) {
+        throw new Error(`${label} networkAttachments must match every captured network name exactly once.`);
+      }
+    };
+    const assertModelContainer = (
+      value: unknown,
+      label: string,
+      expectedId: string,
+    ): void => {
+      assertRequiredKeys(value, modelContainerAllowed, modelContainerAllowed, label);
+      if (!isRecord(value)) throw new Error(`${label} must be an object.`);
+      if (value.id !== expectedId) throw new Error(`${label} must identify ${expectedId}.`);
+      if (!/^[a-fA-F0-9]{64}$/.test(String(value.containerId))) {
+        throw new Error(`${label} must include its full Docker container ID.`);
+      }
+      if (
+        typeof value.image !== "string"
+        || !/^.+@sha256:[a-fA-F0-9]{64}$/.test(value.image)
+        || !/^sha256:[a-fA-F0-9]{64}$/.test(String(value.imageId))
+      ) {
+        throw new Error(`${label} must include an immutable image reference and separate Docker config ID.`);
+      }
+      if (typeof value.user !== "string" || value.hasReadonlyRootFilesystem !== true || value.privileged !== false) {
+        throw new Error(`${label} must prove the reviewed non-root read-only boundary.`);
+      }
+      if (!isRecord(value.tmpfs) || Object.values(value.tmpfs).some((entry) => typeof entry !== "string")) {
+        throw new Error(`${label} tmpfs must be a string map.`);
+      }
+      if (!Array.isArray(value.environment) || value.environment.some(
+        (entry) => typeof entry !== "string"
+          || !/^[A-Za-z_][A-Za-z0-9_]*=[^<\r\n]*$/.test(entry)
+          || /^(?:AFFILIATE_AGENT_MODEL_GATEWAY_TOKEN|AFFILIATE_AGENT_MODEL_AUTH_BROKER_TOKEN|OMP_AUTH_BROKER_TOKEN)=/.test(entry),
+      )) {
+        throw new Error(`${label} environment must contain safe effective entries and no bearer value.`);
+      }
+      for (const key of ["entrypoint", "command", "networks", "internalNetworks", "exposedPorts", "publishedPorts", "capDrop", "capAdd", "groupAdd", "securityOptions"]) {
+        if (!Array.isArray(value[key]) || value[key].some((entry) => typeof entry !== "string")) {
+          throw new Error(`${label} ${key} must be a string array.`);
+        }
+      }
+      assertNetworkAttachments(value, label);
+      if (!Array.isArray(value.mounts) || value.mounts.some((mount) => (
+        !isRecord(mount)
+        || Object.keys(mount).sort().join("\0") !== ["readOnly", "source", "target", "type"].join("\0")
+        || typeof mount.source !== "string"
+        || !["bind", "volume", "tmpfs"].includes(String(mount.type))
+        || typeof mount.target !== "string"
+        || typeof mount.readOnly !== "boolean"
+      ))) {
+        throw new Error(`${label} mounts must contain structured source/type/target/readOnly records.`);
+      }
+      if (
+        typeof value.status !== "string"
+        || typeof value.healthStatus !== "string"
+        || value.restartPolicy !== "no"
+        || typeof value.hasProductionBackendAccess !== "boolean"
+      ) {
+        throw new Error(`${label} must include lifecycle and restart evidence.`);
+      }
+    };
+    assertModelContainer(values.modelAuthBrokerContainer, "modelAuthBrokerContainer", "affiliate-model-auth-broker");
+    assertModelContainer(values.modelGatewayContainer, "modelGatewayContainer", "affiliate-model-gateway");
+    if (
+      values.modelAuthBrokerBearerSource.path === values.modelGatewayBearerSource.path
+      || values.modelAuthBrokerBearerSource.sha256 === values.modelGatewayBearerSource.sha256
+      || values.runnerModelGatewayBearerSha256 !== values.modelGatewayBearerSource.sha256
+      || values.reviewedWorkspaceVolume === values.reviewedBrokerStateVolume
+      || !["STOPPED", "RUNNING"].includes(values.reviewedModelServiceState)
+      || values.modelAuthBrokerContainer.hasProductionBackendAccess !== false
+      || values.modelGatewayContainer.hasProductionBackendAccess !== false
+    ) {
+      throw new Error("OMP model slots must use distinct bearer evidence and workspace/state volumes, gateway-bound runner SHA, explicit lifecycle, and no backend access.");
+    }
+    assertExactKeys(
+      values.brokerStateVolumeAttachments[0],
+      ["volumeName", "containerId", "serviceId", "target", "readOnly"],
+      "brokerStateVolumeAttachments row 1",
+    );
+    if (
+      values.brokerStateVolumeAttachments.length !== 1
+      || values.brokerStateVolumeAttachments[0].volumeName !== values.reviewedBrokerStateVolume
+      || values.brokerStateVolumeAttachments[0].containerId !== values.modelAuthBrokerContainer.containerId
+      || values.brokerStateVolumeAttachments[0].serviceId !== "affiliate-model-auth-broker"
+      || values.brokerStateVolumeAttachments[0].target !== "/var/lib/omp"
+      || values.brokerStateVolumeAttachments[0].readOnly !== false
+    ) {
+      throw new Error("The dedicated broker state volume must have exactly one writable attachment by the actual broker container ID.");
+    }
+    if (new Set([
+      values.reviewedModelAuthNetwork,
+      values.reviewedModelClientNetwork,
+      values.reviewedModelEgressNetwork,
+      values.reviewedProductionBackendNetwork,
+    ]).size !== 4) {
+      throw new Error("The three model networks and actual production-backend network must be distinct.");
+    }
     const containerAllowed = [
       "id",
       "name",
@@ -2751,7 +3607,9 @@ if ! (
       "privileged",
       "tmpfs",
       "environment",
+      "mounts",
       "networks",
+      "networkAttachments",
       "isNetworkInternal",
       "capDrop",
       "capAdd",
@@ -2773,6 +3631,7 @@ if ! (
         "tmpfs",
         "environment",
         "networks",
+        "networkAttachments",
         "isNetworkInternal",
         "capDrop",
         "capAdd",
@@ -2782,7 +3641,7 @@ if ! (
         "securityOptions",
       ];
       if (label === "runnerContainer") {
-        required.push("cgroupRelativePath", "childUid", "childGid", "supervisorUid");
+        required.push("cgroupRelativePath", "childUid", "childGid", "supervisorUid", "mounts");
       }
       assertRequiredKeys(value, required, containerAllowed, label);
       if (!isRecord(value)) throw new Error(`${label} must be an object.`);
@@ -2803,13 +3662,39 @@ if ! (
           throw new Error(`${label} ${key} must be a string array.`);
         }
       }
+      assertNetworkAttachments(value, label);
       if (value.cgroupNamespace !== null) assertString(value.cgroupNamespace, `${label} cgroupNamespace`);
       if (value.ipcMode !== null) assertString(value.ipcMode, `${label} ipcMode`);
+      const safeRunnerEnvironment = [
+        "AFFILIATE_AGENT_MODEL_GATEWAY_ADDRESS=http://affiliate-model-gateway:4000",
+        "AFFILIATE_AGENT_OMP_MODEL=openai-codex/gpt-5.6-luna",
+      ];
       if (!Array.isArray(value.environment) || value.environment.some(
         (entry) => typeof entry !== "string"
-          || !/^[A-Za-z_][A-Za-z0-9_]*=<redacted>$/.test(entry),
+          || (!/^[A-Za-z_][A-Za-z0-9_]*=<redacted>$/.test(entry)
+            && !(label === "runnerContainer" && safeRunnerEnvironment.includes(entry))),
       )) {
-        throw new Error(`${label} environment must contain only KEY=<redacted> entries.`);
+        throw new Error(`${label} environment must contain redacted entries and only the reviewed runner endpoint/model values.`);
+      }
+      if (value.mounts !== undefined && (!Array.isArray(value.mounts) || value.mounts.some((mount) => (
+        !isRecord(mount)
+        || Object.keys(mount).sort().join("\0") !== ["readOnly", "source", "target", "type"].join("\0")
+        || typeof mount.source !== "string"
+        || !["bind", "volume", "tmpfs"].includes(mount.type)
+        || typeof mount.target !== "string"
+        || typeof mount.readOnly !== "boolean"
+      )))) {
+        throw new Error(`${label} mounts must contain structured source/type/target/readOnly records.`);
+      }
+      if (label === "runnerContainer" && (
+        !Array.isArray(value.mounts)
+        || value.mounts.length !== 1
+        || value.mounts[0].source !== values.reviewedWorkspaceVolume
+        || value.mounts[0].type !== "volume"
+        || value.mounts[0].target !== "/workspaces"
+        || value.mounts[0].readOnly !== false
+      )) {
+        throw new Error("runnerContainer must contain only the reviewed writable workspace volume at /workspaces.");
       }
       if (label === "runnerContainer") {
         assertString(value.cgroupRelativePath, `${label} cgroupRelativePath`);
@@ -3531,9 +4416,27 @@ from their own inspections, then projected into their dedicated inventory
 fields. The absent gateway is represented as a STOPPED control-plane process,
 not as a container row.
 
+This refresh must rebuild the complete inventory. Repeat the independent
+worker/network, model-service, normalized bearer-source, all-volume-consumer,
+and production-database network captures above with fresh uniquely named
+paths. Rebuild the reviewed values and the complete inventory through the
+same capture-binding builder. Preserve all structured mounts and network
+attachments. Do not copy OMP fields from the previous inventory or advance
+only its timestamp.
+
+Use `GATEWAY_REFRESH_COMPLETE_INVENTORY` as that builder's output. Use
+`GATEWAY_REFRESH_PROCESS_INVENTORY_OUTPUT` as its reviewed process source.
+Set its process artifact ID to `GATEWAY_REFRESH_PROCESS_INVENTORY_ARTIFACT_ID`.
+Its process hash and count must match the independently captured refresh
+values; changing only the artifact ID is not sufficient.
+The final step below accepts only this complete new output and fresh capture
+files. It does not merge selected fields into the old inventory.
+
 
 ```text
 export GATEWAY_REFRESH_TAG="$(date -u '+%Y%m%dT%H%M%SZ')-$$"
+export GATEWAY_REFRESH_CAPTURE_STARTED_AT="$(date -u '+%Y-%m-%dT%H:%M:%S.000Z')"
+export GATEWAY_REFRESH_COMPLETE_INVENTORY="/path/to/affiliate-governed-private/complete-cutover-inventory.${GATEWAY_REFRESH_TAG}.json"
 export GATEWAY_REFRESH_INVENTORY="/path/to/affiliate-governed-private/gateway-startup-inventory.${GATEWAY_REFRESH_TAG}.json"
 export GATEWAY_REFRESH_MANIFEST="/path/to/affiliate-governed-private/gateway-startup-process-manifest.${GATEWAY_REFRESH_TAG}.artifact.json"
 export GATEWAY_REFRESH_PREFLIGHT="/path/to/affiliate-governed-private/gateway-startup-preflight.${GATEWAY_REFRESH_TAG}.json"
@@ -3938,8 +4841,32 @@ gateway_refresh_inspect_set() {
         user: (.Config.User // null),
         cgroupNamespace: (.HostConfig.CgroupnsMode // null),
         tmpfs: (.HostConfig.Tmpfs // {}),
-        restartPolicy: (.HostConfig.RestartPolicy.Name // "no"),
-        environment: ([.Config.Env[]? | (split("=")[0] + "=<redacted>")]),
+        mounts: [
+          .Mounts[]?
+          | {
+              source: (
+                if ((.Type // "") | ascii_downcase) == "volume"
+                then (.Name // "")
+                else (.Source // "")
+                end
+              ),
+              type: ((.Type // "") | ascii_downcase),
+              target: (.Destination // ""),
+              readOnly: ((.RW // true) | not)
+            }
+        ],
+        environment: (
+          . as $container
+          | ($container.Config.Labels["com.docker.compose.service"] // "") as $service
+          | [$container.Config.Env[]?
+            | split("=")[0] as $key
+            | if $service == "affiliate-agent-runner"
+              and ($key == "AFFILIATE_AGENT_MODEL_GATEWAY_ADDRESS"
+                or $key == "AFFILIATE_AGENT_OMP_MODEL")
+              then .
+              else ($key + "=<redacted>")
+              end]
+        ),
         childUid: ([.Config.Env[]?
           | select(startswith("AFFILIATE_AGENT_RUNNER_CHILD_UID="))
           | split("=")[1] | tonumber] | .[0] // null),
@@ -3954,6 +4881,11 @@ gateway_refresh_inspect_set() {
           | split("=")[1]] | .[0] // null),
         ipcMode: (.HostConfig.IpcMode // null),
         networks: ([.NetworkSettings.Networks // {} | keys[]]),
+        networkAttachments: ([
+          .NetworkSettings.Networks // {}
+          | to_entries[]
+          | {name: .key, id: .value.NetworkID}
+        ]),
         isNetworkInternal: (([.NetworkSettings.Networks // {} | keys[]] | sort)
           == [$reviewed_network]),
         capDrop: (.HostConfig.CapDrop // []),
@@ -4021,6 +4953,33 @@ jq -e \
     and .privileged == false
   )
 ' "$GATEWAY_REFRESH_RUNNER_CONTAINER_OUTPUT"
+export GATEWAY_REFRESH_WORKSPACE_VOLUME="$(
+  sed -n 's/^AFFILIATE_GOVERNED_WORKSPACE_VOLUME=//p' \
+    /path/to/affiliate-governed-private/deployment.env
+)"
+test -n "$GATEWAY_REFRESH_WORKSPACE_VOLUME"
+jq -e --arg workspace_volume "$GATEWAY_REFRESH_WORKSPACE_VOLUME" '
+  length == 1
+  and (.[0].environment
+    | index("AFFILIATE_AGENT_MODEL_GATEWAY_ADDRESS=http://affiliate-model-gateway:4000") != null)
+  and (.[0].environment
+    | index("AFFILIATE_AGENT_OMP_MODEL=openai-codex/gpt-5.6-luna") != null)
+  and (.[0].environment
+    | index("AFFILIATE_AGENT_MODEL_GATEWAY_TOKEN=<redacted>") != null)
+  and (.[0].mounts | length == 1)
+  and ((.[0].mounts[0] | keys | sort)
+    == ["readOnly", "source", "target", "type"])
+  and .[0].mounts[0].source == $workspace_volume
+  and .[0].mounts[0].type == "volume"
+  and .[0].mounts[0].target == "/workspaces"
+  and .[0].mounts[0].readOnly == false
+' "$GATEWAY_REFRESH_RUNNER_CONTAINER_OUTPUT"
+jq -e -s '
+  all(add[]; all(.environment[]?;
+    (startswith("AFFILIATE_AGENT_MODEL_GATEWAY_TOKEN=") | not)
+    and (startswith("AFFILIATE_AGENT_MODEL_AUTH_BROKER_TOKEN=") | not)))
+' "$GATEWAY_REFRESH_SUPERVISOR_CONTAINER_OUTPUT" \
+  "$GATEWAY_REFRESH_AUXILIARY_CONTAINER_OUTPUT"
 jq -e \
   --arg agent "$REVIEWED_AGENT_IMAGE" \
   --arg agentId "$REVIEWED_AGENT_IMAGE_ID" \
@@ -4217,65 +5176,45 @@ jq -e '
     .isGatewayAllowedToWriteProductionDatabase
   ][]; type == "boolean")
 ' "$GATEWAY_REFRESH_PERMISSION_FLAGS_OUTPUT"
-if ! (
-  umask 077
-  set -o noclobber
-  jq --arg now "$(date -u '+%Y-%m-%dT%H:%M:%S.000Z')" \
-    --arg process_artifact "$GATEWAY_REFRESH_PROCESS_INVENTORY_ARTIFACT_ID" \
-    --arg process_hash "$GATEWAY_REFRESH_PROCESS_INVENTORY_HASH" \
-    --argjson process_count "$GATEWAY_REFRESH_PROCESS_INVENTORY_COUNT" \
-    --slurpfile process_inventory "$GATEWAY_REFRESH_PROCESS_INVENTORY_OUTPUT" \
-    --slurpfile unit_values "$GATEWAY_REFRESH_UNIT_VALUES_OUTPUT" \
-    --slurpfile claims "$GATEWAY_REFRESH_CLAIMS_OUTPUT" \
-    --slurpfile gateway "$GATEWAY_REFRESH_GATEWAY_CONTAINER_OUTPUT" \
-    --slurpfile runner "$GATEWAY_REFRESH_RUNNER_CONTAINER_OUTPUT" \
-    --slurpfile supervisors "$GATEWAY_REFRESH_CONTAINERS_OUTPUT" \
-    --slurpfile auxiliary "$GATEWAY_REFRESH_AUXILIARY_CONTAINER_OUTPUT" \
-    --slurpfile permission_flags "$GATEWAY_REFRESH_PERMISSION_FLAGS_OUTPUT" \
-    '
-    def control_plane_status:
-      if . == "created" then "STOPPED"
-      elif . == "exited" then "INACTIVE"
-      elif . == "running" then "RUNNING"
-      else error("unsupported Docker state: \(.)")
-      end;
-    ($runner[0]
-      | map({
-          id, name, user, privileged, hasReadonlyRootFilesystem,
-          cgroupNamespace, ipcMode, tmpfs, isNetworkInternal,
-          childUid, childGid, supervisorUid, environment, networks,
-          capDrop, capAdd, groupAdd, securityOptions
-        } | with_entries(select(.value != null)))
-      | .[0]) as $freshRunner
-    | ($auxiliary[0]
-      | map({
-          id: .service, name, user, privileged, hasReadonlyRootFilesystem,
-          cgroupNamespace, ipcMode, tmpfs, isNetworkInternal,
-          environment, networks, capDrop, capAdd, groupAdd, securityOptions
-        } | with_entries(select(.value != null)))) as $freshAuxiliaryContainers
-    | ([
-        {id: "affiliate-gateway", status: "STOPPED"},
-        ($runner[0][] | {id: .service, status: (.status | control_plane_status)}),
-        ($auxiliary[0][] | {id: .service, status: (.status | control_plane_status)})
-      ]) as $freshControlPlaneProcesses
-    | ($supervisors[0]) as $freshContainers
-    | .now = $now
-    | .processInventoryArtifactId = $process_artifact
-    | .processInventoryHash = $process_hash
-    | .processInventoryCount = $process_count
-    | .processInventory = $process_inventory[0]
-    | .controlPlaneProcesses = $freshControlPlaneProcesses
-    | .legacyServiceUnits = $unit_values[0]
-    | .legacyClaims = $claims[0]
-    | .databasePermissions = $permission_flags[0]
-    | .containers = $freshContainers
-    | .auxiliaryContainers = $freshAuxiliaryContainers
-    | .runnerContainer = $freshRunner
-    ' "$GATEWAY_STARTUP_INVENTORY" > "$GATEWAY_REFRESH_INVENTORY"
-); then
-  rm -f "$GATEWAY_REFRESH_INVENTORY"
-  exit 1
-fi
+# First repeat the complete capture and capture-binding builder above using
+# fresh paths. Its output is GATEWAY_REFRESH_COMPLETE_INVENTORY.
+node -e '
+  const { readFileSync, lstatSync, copyFileSync, constants } = require("node:fs");
+  const required = name => {
+    const value = process.env[name];
+    if (!value) throw new Error(`Missing ${name}.`);
+    return value;
+  };
+  const startedAt = Date.parse(required("GATEWAY_REFRESH_CAPTURE_STARTED_AT"));
+  if (!Number.isFinite(startedAt)) throw new Error("Invalid refresh start time.");
+  for (const name of [
+    "REVIEWED_WORKER_CAPTURE",
+    "REVIEWED_WORKER_NETWORK_EVIDENCE",
+    "REVIEWED_REPLENISHMENT_CAPTURE",
+    "OMP_MODEL_SERVICE_CAPTURE",
+    "OMP_BEARER_SOURCE_CAPTURE",
+    "OMP_BROKER_VOLUME_CAPTURE",
+    "OMP_PRODUCTION_DATABASE_NETWORK_EVIDENCE",
+    "REVIEWED_VALUES_SOURCE",
+    "GATEWAY_REFRESH_PROCESS_INVENTORY_OUTPUT",
+    "GATEWAY_REFRESH_COMPLETE_INVENTORY",
+  ]) {
+    const stat = lstatSync(required(name));
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size === 0 || stat.mtimeMs < startedAt) {
+      throw new Error(`${name} is not a fresh independent capture.`);
+    }
+  }
+  const source = required("GATEWAY_REFRESH_COMPLETE_INVENTORY");
+  const inventory = JSON.parse(readFileSync(source, "utf8"));
+  const capturedAt = Date.parse(inventory.now);
+  if (!Number.isFinite(capturedAt) || capturedAt < startedAt || capturedAt > Date.now()
+    || inventory.processInventoryArtifactId !== required("GATEWAY_REFRESH_PROCESS_INVENTORY_ARTIFACT_ID")
+    || inventory.processInventoryHash !== required("GATEWAY_REFRESH_PROCESS_INVENTORY_HASH")
+    || inventory.processInventoryCount !== Number(required("GATEWAY_REFRESH_PROCESS_INVENTORY_COUNT"))) {
+    throw new Error("The complete refresh inventory has stale or mismatched provenance.");
+  }
+  copyFileSync(source, required("GATEWAY_REFRESH_INVENTORY"), constants.COPYFILE_EXCL);
+'
 npm run --silent affiliate:cutover:manifest-hash -- \
   --manifest=/path/to/affiliate-governed-private/reviewed-legacy-process-manifest.json \
   --inventory="$GATEWAY_REFRESH_INVENTORY" \
@@ -4424,14 +5363,16 @@ jq --slurpfile image_evidence "$REVIEWED_CONTAINER_IMAGE_EVIDENCE" \
   status: (.State.Status // "unknown"),
   image: .Config.Image,
   imageId: .Image,
-  repoDigests: ($repoDigestsByImageId[.Image] // []),
-  command: (.Config.Cmd // []),
-  cgroupNamespace: (.HostConfig.CgroupnsMode // "default"),
-  ipcMode: (.HostConfig.IpcMode // "private"),
-  tmpfs: (.HostConfig.Tmpfs // {}),
   networks: ([.NetworkSettings.Networks // {} | keys[]]),
+  networkAttachments: ([
+    .NetworkSettings.Networks // {}
+    | to_entries[]
+    | {name: .key, id: .value.NetworkID}
+  ]),
   isNetworkInternal: (([.NetworkSettings.Networks // {} | keys[]] | sort)
     == [$reviewed_network]),
+  ipcMode: (.HostConfig.IpcMode // "private"),
+  tmpfs: (.HostConfig.Tmpfs // {}),
   privileged: (.HostConfig.Privileged // false),
   user: (.Config.User // null),
   restartPolicy: (.HostConfig.RestartPolicy.Name // "no"),
