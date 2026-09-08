@@ -36,7 +36,7 @@ enum class EventCheckoutAction(val buttonLabel: String, val explanation: String)
 data class EventCheckoutDocument(val key: String, val title: String, val signer: String, val complete: Boolean)
 
 internal fun checkoutReviewAction(action: JoinExecutionAction, isChild: Boolean): EventCheckoutAction {
-    if (isChild) return EventCheckoutAction.CHILD
+    if (isChild) return if (action == JoinExecutionAction.CREATE_PURCHASE_INTENT) EventCheckoutAction.PAYMENT else EventCheckoutAction.CHILD
     return when (action) {
         JoinExecutionAction.JOIN_DIRECTLY -> EventCheckoutAction.REGISTER
         JoinExecutionAction.CREATE_PURCHASE_INTENT -> EventCheckoutAction.PAYMENT

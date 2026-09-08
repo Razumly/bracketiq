@@ -917,7 +917,7 @@ class DefaultEventDetailComponent(
         isEventFull = { isEventFull.value },
         currentWeeklyOccurrenceSelection = ::currentWeeklyOccurrenceSelection,
         requireSelectedWeeklyOccurrence = ::requireSelectedWeeklyOccurrence,
-        loadJoinableChildren = registrationLifecycleHandler::loadJoinableChildren,
+        loadJoinableChildren = registrationLifecycleHandler::loadChildrenForRegistration,
         saveCurrentRegistrationProgress = registrationLifecycleHandler::saveCurrentRegistrationProgress,
         clearCurrentRegistrationProgress = registrationLifecycleHandler::clearCurrentRegistrationProgress,
         addCurrentUserToEventWithRegistrationAnswers =

@@ -28,6 +28,22 @@ import kotlin.test.assertTrue
 class EventRegistrationFlowCoordinatorTest {
 
     @Test
+    fun given_confirmed_answers_when_registrant_changes_then_require_new_answers() {
+        val coordinator = EventRegistrationFlowCoordinator()
+        coordinator.replaceRegistrationQuestions(listOf(question("q1", required = true)))
+        coordinator.selectCheckoutRegistrant("parent")
+        coordinator.ensureQuestionsAnswered("Junior Day") {}
+        coordinator.submitQuestionDialogAnswers(mapOf("q1" to "Parent answer"))
+        coordinator.selectCheckoutRegistrant("parent")
+        assertTrue(coordinator.ensureQuestionsAnswered("Junior Day") {})
+
+        coordinator.selectCheckoutRegistrant("child")
+        assertTrue(coordinator.answers.value.isEmpty())
+        assertFalse(coordinator.ensureQuestionsAnswered("Junior Day", "Avery Rivera") {})
+        assertEquals("Avery Rivera", coordinator.questionDialog.value?.registrantName)
+    }
+
+    @Test
     fun update_question_answer_trims_question_id_and_ignores_blank_ids() {
         val coordinator = EventRegistrationFlowCoordinator()
 

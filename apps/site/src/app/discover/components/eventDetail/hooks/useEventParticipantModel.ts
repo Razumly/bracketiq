@@ -29,6 +29,17 @@ type UseEventParticipantModelArgs = {
     canRegisterChild: boolean;
 };
 
+function childMeetsDivisionAge(childDob: Date, division: EventDivisionOption | null, reference: Date | null | undefined) {
+    if (!division) return true;
+    const eligibility = evaluateDivisionAgeEligibility({
+        dateOfBirth: childDob,
+        divisionTypeId: division.divisionTypeId,
+        sportInput: division.sportId ?? undefined,
+        referenceDate: reference ?? undefined,
+    });
+    return !eligibility.applies || eligibility.eligible !== false;
+}
+
 export function useEventParticipantModel({
     event,
     user,
@@ -48,15 +59,18 @@ export function useEventParticipantModel({
     selectedDivisionOption,
     canRegisterChild,
 }: UseEventParticipantModelArgs) {
-    const totalParticipants = isTeamSignup ? teams.length : players.length;
-    const participantCapacity = resolveEventParticipantCapacity(event);
-    const eventAtCapacity = participantCapacity > 0 && totalParticipants >= participantCapacity;
-    const spotsLeft = participantCapacity > 0
-        ? Math.max(0, participantCapacity - totalParticipants)
-        : 0;
-    const eventFillPercent = participantCapacity > 0
-        ? Math.min(100, Math.round((totalParticipants / participantCapacity) * 100))
-        : 0;
+    const { totalParticipants, participantCapacity, eventAtCapacity, spotsLeft, eventFillPercent } = useMemo(() => {
+        const totalParticipants = isTeamSignup ? teams.length : players.length;
+        const participantCapacity = resolveEventParticipantCapacity(event);
+        const eventAtCapacity = participantCapacity > 0 && totalParticipants >= participantCapacity;
+        const spotsLeft = participantCapacity > 0
+            ? Math.max(0, participantCapacity - totalParticipants)
+            : 0;
+        const eventFillPercent = participantCapacity > 0
+            ? Math.min(100, Math.round((totalParticipants / participantCapacity) * 100))
+            : 0;
+        return { totalParticipants, participantCapacity, eventAtCapacity, spotsLeft, eventFillPercent };
+    }, [event, isTeamSignup, players.length, teams.length]);
     const normalizedFreeAgentIds = useMemo(() => {
         const fromEvent = collectUniqueUserIds(event.freeAgentIds);
         const additionalFromProfiles = freeAgents
@@ -81,37 +95,30 @@ export function useEventParticipantModel({
         () => new Set(normalizedWaitlistIds),
         [normalizedWaitlistIds],
     );
-    const isUserRegistered = Boolean(user && (
-        (!isTeamSignup && (
-            players.some((player) => player.$id === user.$id)
-            || normalizedParticipantUserIds.includes(user.$id)
-        ))
-        || (isTeamSignup && teams.some((team) => (team.playerIds || []).includes(user.$id)))
-    ));
-    const isUserWaitlisted = Boolean(user && normalizedWaitlistIdSet.has(user.$id));
-    const isUserFreeAgent = Boolean(user && normalizedFreeAgentIdSet.has(user.$id));
+    const { isUserRegistered, isUserWaitlisted, isUserFreeAgent } = useMemo(() => {
+        const isUserRegistered = Boolean(user && (
+            (!isTeamSignup && (
+                players.some((player) => player.$id === user.$id)
+                || normalizedParticipantUserIds.includes(user.$id)
+            ))
+            || (isTeamSignup && teams.some((team) => (team.playerIds || []).includes(user.$id)))
+        ));
+        const isUserWaitlisted = Boolean(user && normalizedWaitlistIdSet.has(user.$id));
+        const isUserFreeAgent = Boolean(user && normalizedFreeAgentIdSet.has(user.$id));
+        return { isUserRegistered, isUserWaitlisted, isUserFreeAgent };
+    }, [isTeamSignup, normalizedFreeAgentIdSet, normalizedParticipantUserIds, normalizedWaitlistIdSet, players, teams, user]);
     const isChildEligible = useCallback((child: FamilyChild): boolean => {
         const childDob = parseDateValue(child.dateOfBirth ?? null);
         if (!childDob) {
             return false;
         }
         const childAgeAtEvent = calculateAgeOnDate(childDob, eventStartDate ?? new Date());
-        if (!Number.isFinite(childAgeAtEvent)) {
+        if (!Number.isFinite(childAgeAtEvent) || childAgeAtEvent < 0) {
             return false;
         }
-        if (hasAgeLimits) {
-            return isAgeWithinRange(childAgeAtEvent, eventMinAge, eventMaxAge);
-        }
-        if (isTeamSignup || !selectedDivisionOption) {
-            return true;
-        }
-        const divisionEligibility = evaluateDivisionAgeEligibility({
-            dateOfBirth: childDob,
-            divisionTypeId: selectedDivisionOption.divisionTypeId,
-            sportInput: selectedDivisionOption.sportId ?? undefined,
-            referenceDate: eventStartDate ?? undefined,
-        });
-        return !divisionEligibility.applies || divisionEligibility.eligible !== false;
+        if (hasAgeLimits && !isAgeWithinRange(childAgeAtEvent, eventMinAge, eventMaxAge)) return false;
+        if (isTeamSignup) return true;
+        return childMeetsDivisionAge(childDob, selectedDivisionOption, eventStartDate);
     }, [
         eventMaxAge,
         eventMinAge,
@@ -124,7 +131,6 @@ export function useEventParticipantModel({
         () => children.filter(isActiveFamilyChild),
         [children],
     );
-    const hasActiveChildren = activeChildren.length > 0;
     const childHasExistingEventState = useCallback((childId: string | null): boolean => Boolean(
         childId
         && (
@@ -137,14 +143,16 @@ export function useEventParticipantModel({
     const hasLinkedChildRefundTarget = activeChildren.some((child) => (
         childHasExistingEventState(normalizeUserId(child.userId))
     ));
-    const hasRefundTarget = Boolean(user && (
+    const hasRefundTarget = useMemo(() => Boolean(user && (
         isUserRegistered
         || isUserWaitlisted
         || isUserFreeAgent
         || hasLinkedChildRefundTarget
-    ));
-    const shouldShowChildRegistrationPanel = canRegisterChild
-        && (childrenLoading || Boolean(childrenError) || hasActiveChildren);
+    )), [hasLinkedChildRefundTarget, isUserFreeAgent, isUserRegistered, isUserWaitlisted, user]);
+    const shouldShowChildRegistrationPanel = useMemo(() => !isTeamSignup && canRegisterChild
+        && (childrenLoading || Boolean(childrenError) || activeChildren.some(isChildEligible)
+            || activeChildren.some((child) => childHasExistingEventState(normalizeUserId(child.userId)))),
+    [activeChildren, canRegisterChild, childHasExistingEventState, childrenError, childrenLoading, isChildEligible, isTeamSignup]);
     const childOptions = activeChildren.map((child) => {
         const name = `${child.firstName || ''} ${child.lastName || ''}`.trim() || 'Child';
         const childDob = parseDateValue(child.dateOfBirth ?? null);
@@ -174,13 +182,13 @@ export function useEventParticipantModel({
     const selectedChildIsWaitlisted = Boolean(
         selectedChildId && normalizedWaitlistIdSet.has(selectedChildId),
     );
-    const selectedChildIsRegistered = Boolean(
+    const selectedChildIsRegistered = useMemo(() => Boolean(
         selectedChildId
         && (
             players.some((participant) => participant.$id === selectedChildId)
             || normalizedParticipantUserIds.includes(selectedChildId)
         ),
-    );
+    ), [normalizedParticipantUserIds, players, selectedChildId]);
     const showChildRegistrationStatus = Boolean(
         selectedChildId && childRegistrationChildId === selectedChildId,
     );

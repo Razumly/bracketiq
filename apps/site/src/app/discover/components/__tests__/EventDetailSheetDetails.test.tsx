@@ -621,6 +621,7 @@ describe('EventDetailSheet details layout', () => {
 
     expect(screen.getByText('Selected weekly session')).toBeInTheDocument();
     expect(screen.getByText('Selected')).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: /^(Register|Continue registration)$/i }));
     expect(screen.getByRole('button', { name: /join event/i })).toBeInTheDocument();
     expect(screen.queryByText('No upcoming weekly sessions are available.')).not.toBeInTheDocument();
   });
@@ -710,6 +711,7 @@ describe('EventDetailSheet details layout', () => {
     });
 
     expect(screen.getByText('Selected weekly session')).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: /^(Register|Continue registration)$/i }));
     expect(screen.getByRole('button', { name: /unavailable/i })).toBeDisabled();
   });
 

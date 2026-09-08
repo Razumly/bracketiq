@@ -226,6 +226,14 @@ interface IEventRepository : IMVPRepository {
         joinWaitlist: Boolean = false,
         occurrence: EventOccurrenceSelection? = null,
     ): Result<ChildRegistrationResult>
+    suspend fun registerChildForEvent(
+        eventId: String,
+        childUserId: String,
+        joinWaitlist: Boolean,
+        occurrence: EventOccurrenceSelection?,
+        divisionId: String?,
+        answers: Map<String, String>,
+    ): Result<ChildRegistrationResult> = Result.failure(UnsupportedOperationException("Child registration selection is not supported."))
     suspend fun addTeamToEvent(
         event: Event,
         team: Team,

@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Alert, Button, Group, Modal, Stack, Text } from '@mantine/core';
+import { Alert, Button, Group, Stack, Text } from '@mantine/core';
 import TeamBuilderModal from '@/components/ui/TeamBuilderModal';
 import InvitePlayersModal from '@/app/teams/components/InvitePlayersModal';
 import { teamService } from '@/lib/teamService';
 import type { Event, Team, UserData } from '@/types';
 import type { useEventRegistrationProgress } from './useEventRegistrationProgress';
+import { CheckoutTeamEditor } from '../CheckoutTeamEditor';
+import { EventCheckoutModal } from '../EventCheckoutLayout';
 
 type Progress = ReturnType<typeof useEventRegistrationProgress>;
 
@@ -13,7 +15,7 @@ export function useEventSignupJourney({ event, user, progress, selectedTeamId }:
 }) {
     const [teamResult, setTeamResult] = useState<{ key: string; teams: Team[]; error: string | null } | null>(null);
     const [teamReload, setTeamReload] = useState(0);
-    const [mode, setMode] = useState<'idle' | 'team' | 'players'>('idle');
+    const [mode, setMode] = useState<'idle' | 'team' | 'players' | 'edit'>('idle');
     const [inviting, setInviting] = useState(false);
     const [dialogScope, setDialogScope] = useState(progress.progressKey);
     const eligibleIds = JSON.stringify(progress.state?.eligibleTeams.map((team) => team.id) ?? []);
@@ -93,6 +95,11 @@ export function useEventSignupJourney({ event, user, progress, selectedTeamId }:
     const draft = progress.state?.draft;
     const preparationStep = draft?.step === 'team' || draft?.step === 'players';
     const dialogs = <>
+        {mode === 'edit' && selectedTeam ? <CheckoutTeamEditor key={selectedTeam.$id} team={selectedTeam}
+            onClose={() => setMode('idle')} onSaved={(updated) => {
+                setTeams((current) => current.map((team) => team.$id === updated.$id ? updated : team));
+                setMode('idle');
+            }} /> : null}
         {user && draft?.teamCreationId ? <TeamBuilderModal
             isOpen={mode === 'team'} currentUser={user} eventId={event.$id}
             registrationDraft={{ eventId: event.$id, teamId: draft.teamCreationId, baseRevision: draft.revision,
@@ -100,7 +107,7 @@ export function useEventSignupJourney({ event, user, progress, selectedTeamId }:
             onTeamCreated={savedTeam}
             onClose={() => setMode((current) => current === 'team' ? 'idle' : current)}
         /> : null}
-        <Modal opened={mode === 'players' && !inviting} onClose={() => setMode('idle')}
+        <EventCheckoutModal step="Entry" opened={mode === 'players' && !inviting} onClose={() => setMode('idle')}
             title="Add players (optional)" centered zIndex={1900}>
             <Stack>
                 <Text>{selectedTeam?.name ?? 'Your Team'} is saved. You can add Players now or later.</Text>
@@ -111,7 +118,7 @@ export function useEventSignupJourney({ event, user, progress, selectedTeamId }:
                     <Button loading={progress.saving} onClick={() => { void continueToEvent(); }}>Continue to event</Button>
                 </Group>
             </Stack>
-        </Modal>
+        </EventCheckoutModal>
         {selectedTeam && inviting ? <InvitePlayersModal isOpen={true} team={selectedTeam}
             eventRegistration={{ eventId: event.$id, slotId: draft?.slotId, occurrenceDate: draft?.occurrenceDate }}
             onClose={() => setInviting(false)}
@@ -125,5 +132,6 @@ export function useEventSignupJourney({ event, user, progress, selectedTeamId }:
             }}
         /> : null}
     </>;
-    return { teams, loadingTeams, error, reload, createTeam, addPlayers, resumePreparation, preparationStep, dialogs };
+    return { teams, loadingTeams, error, reload, createTeam, addPlayers, editTeam: () => setMode('edit'),
+        dialogOpened: mode !== 'idle', resumePreparation, preparationStep, dialogs };
 }
