@@ -107,7 +107,7 @@ Decision: Keep an invocation-local idempotency key for each identical operation.
 ## Outcomes & Retrospective
 
 
-The approved OMP runtime completed one real producer claim. Both evidence reads and the terminal submission succeeded. The result was `CONTRACT_GAP`, not a mapping package. The supplied catalog has no approved Track and Field mapping. The model also reported a missing citable source URL. No reviewer job was created. Admission is closed. Both canary workers and the root runner are stopped. The Gateway, model gateway, and auth broker remain healthy. The legacy repair hold and both prior failures remain unchanged. Two accounts passed health checks; account rotation was not measured.
+The approved OMP runtime completed the initial canary and the later two-source trial without invocation failures. All three results were `CONTRACT_GAP`. No mapping package or independent reviewer job was produced. The two-source trial did not repair the records. Its old organization values and candidates remain unchanged. Admission is closed. Both trial workers and the root runner are stopped. The Gateway, model gateway, and auth broker remain healthy. Repair holds and prior history remain intact. Two accounts passed health checks; account rotation was not measured.
 
 ## Context and Orientation
 
@@ -329,3 +329,108 @@ process. Any further workload run needs new authorization and fresh
 preflight evidence. The corrected diagnostic probe passed real Linux
 containment checks and `node --check`. It is a source correction; the
 published image still contains the old diagnostic probe.
+
+## Two-source repair trial — 2026-09-08
+
+The operator approved a bounded trial for these existing mapping jobs:
+
+- USA Softball Academy Chicago:
+  `80d2c546-60dd-4773-80d5-bb73803884fd`.
+- Boomtown Athletics:
+  `9fdeacd3-1a91-416a-b0a7-9dfe940249aa`.
+
+The approval permits fresh preflight, a Gateway configuration refresh, and
+starting only the root runner, mapper 1, and reviewer 1. It permits mapping,
+independent review, and bounded producer repair for these two sources.
+Close admission and stop the trial workers and runner after the result.
+Publication, automatic scraping, coverage, and replenishment remain disabled.
+Do not change adjacent runtimes or the canonical deployment environment.
+
+The scoped admission preview found two eligible jobs and no held job.
+Both have stored HTML, Markdown, and source page URLs. No governed reviewer
+job exists, so both must enter through the mapper before independent review.
+The current model check found two healthy distinct accounts with broker-managed
+refresh. The authenticated catalog still exposes the exact Luna model.
+Private trial records use
+`/home/bracketiq/.config/bracketiq-affiliate-agents/omp-two-source-run-01`.
+
+The first fresh preflight correctly blocked the running Gateway. Main stopped
+only that Gateway for the approved refresh and captured all evidence again.
+The second capture passed with no blockers or warnings at
+`2026-09-08T17:11:27.564Z`. Its report hash is
+`9bd5e70ecd959fa3544b8ab98922d07f43a0530efe92731c4e62504643f5b4f8`.
+Its private directory is `omp-two-source-evidence-02`. The Gateway restarted
+healthy with this report. The workload contract and image digests did not change.
+
+The exact scoped admission report is
+`00e781d1278ad0bc2d9956f95a8ad35a04a9faba2368d4a92187f02b2a914195`.
+Gateway apply admitted only the two approved jobs. It created these lineages:
+
+- Softball: Gateway job `4ca0ad3c-b859-4640-8168-5978162591ff`,
+  root `155b4ca8-4d4b-4003-8e62-120a979556ab`.
+- Boomtown: Gateway job `a3e78509-c2e2-409c-80a3-02325359b290`,
+  root `c9a05d4c-ed7a-4809-b3f6-39f1af8f806e`.
+
+Both roots started at generation 1 with `LEGACY_SPORT_REPAIR` and automation
+disabled. Both exact worker readiness checks passed before the first lease.
+The baseline preserves each old sport value, candidate, approval, and repair
+history. Softball has a historical promoted CLUB candidate, but its organization
+is unlisted with both public surfaces disabled. The admission guard explicitly
+permits that private draft; this trial must not make it public.
+
+### Trial result
+
+Both producer claims completed without invocation failures. Neither produced
+a validated or committed package. No reviewer job was created, so no reviewer
+lease or producer-repair loop ran.
+
+Softball claim `agw-claim-c9ba2dd9-35cc-4306-a0f5-75d3b359d732` ran from
+`2026-09-08T17:13:16.042Z` to `2026-09-08T17:17:56.013Z`.
+Its `CONTRACT_GAP` receipt is
+`agw-receipt-69c115cf-830b-4448-b86e-f40f9d84a409`.
+Its result hash is
+`e54a6dbf160c8d33f6104ed30454fb759021bf3a19130edbbb69674b670207ce`.
+The model resolved `Softball` but reported a missing authorized `listUrlRef`
+and capture profile.
+
+Do not treat that report as proof of missing source data. Both referenced
+stored artifacts retain the correct `sourceUrl` and `finalUrl`. The claim
+contains their artifact references. The Gateway's package guard checks
+`listUrlRef` against claim evidence references. Its production adapter resolves
+the URL from the stored artifact metadata. The exact reason the model did
+not use this path remains unproven. Investigate the prompt/tool contract and
+the rejected package attempt before requesting another URL or a human sport
+decision. The terminal summary is not independent validation evidence.
+
+Boomtown claim `agw-claim-cb5d60b5-5022-4353-8665-af4d2aecc8be` ran from
+`2026-09-08T17:18:26.440Z` to `2026-09-08T17:21:47.379Z`.
+Its `CONTRACT_GAP` receipt is
+`agw-receipt-a7745e85-e319-4f25-8156-435fe056affa`.
+Its result hash is
+`7ec1e9aae71cf80fe9c8dde2f2e2f340699248b19c9615ba38b8508e919b5109`.
+The model reported that generic `Volleyball` evidence did not establish
+Indoor, Grass, or Beach Volleyball. Its terminal result supplied no evidence
+references. This is the model's hold decision, not an independent review.
+
+The trial recorded four successful artifact reads, seven heartbeats, two
+successful terminal domain effects, and two successful terminal submissions.
+It recorded no package validation or commit receipt. Both invocation failure
+counts remain zero.
+
+Final readback proves that source/intake identities, organization values,
+candidate values and counts, and all prior repair-history entries remain
+unchanged. Each mapping job is now `REVIEW_REQUIRED`. Each new root remains
+`PRE_MAPPED`, generation 1, with `LEGACY_SPORT_REPAIR`, automation disabled,
+and zero supply targets. No public surface was enabled.
+
+Admission is closed. Global active claims and claimable Gateway jobs are zero.
+Mapper 1, reviewer 1, and the root runner are stopped. Their restart policy is
+`no`. The runner workspace volume is empty. The Gateway, model gateway, and
+auth broker remain healthy. Adjacent runtimes were not changed.
+
+Private evidence includes `before-state.json`, `after-state.json`,
+`before-after-comparison.json`, `terminal-state.json`, `final-runtime.json`,
+and `softball-url-metadata.json`. The exact capture procedure is retained as
+`capture-preflight.py` in the private trial directory, mode `0600`, SHA256
+`d5004a550146492393227f6d19276863084d33c4d29e1744385e0cf3e39eef31`.
+Its retained report is historical evidence, not permission for another run.
