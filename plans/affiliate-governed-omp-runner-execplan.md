@@ -27,6 +27,11 @@ The operator selected OMP with two ChatGPT accounts. The governed affiliate work
 - [x] (2026-09-08) Deploy the approved images after a fresh preflight.
 - [x] (2026-09-08) Run the one-job canary. Record its `CONTRACT_GAP` hold. No independent review job was created.
 - [x] Integrate and push the source changes. Update Issue 70 with measured results.
+- [x] Expose immutable artifact URL metadata through the Gateway and OMP reader.
+- [x] Add URL-reference and sport-evidence instructions to the generated prompt.
+- [x] Require structured evidence for every legacy producer contract gap.
+- [x] Retain bounded, redacted command rejection diagnostics after successful claims.
+- [x] Run focused regressions and the recorded-evidence replay before source delivery.
 ## Current approval record
 
 Conditional `AUTH SETUP` approval (recorded 2026-09-07): after source
@@ -103,6 +108,24 @@ Decision: Expose only claim-bound Gateway operations as model tools. The trusted
 Decision: Preserve the existing two failed invocations and retry counter. Do not reset the job to hide Codex failures. Validate OMP before consuming another claim attempt. Date: 2026-09-07.
 
 Decision: Keep an invocation-local idempotency key for each identical operation. A declared schema correction releases only that terminal submission key. Reason: `OPERATION_IN_PROGRESS` must not cause a second external effect, while a new schema submission must not replay the previous correction. No automatic HTTP retry loop is added. Date: 2026-09-07.
+
+Decision (2026-09-08): Correct the source without changing production runtime
+state. The two-source diagnosis reproduced missing URL context and a false
+Boomtown sport hold. Add required nullable provenance URLs to the current
+artifact-read contract. Bump current role and prompt versions to 3. Preserve
+old claims as history; do not rewrite their hashes or retry them.
+
+Decision (2026-09-08): Require a structured sport assessment for every
+`LEGACY_SPORT_REPAIR` producer contract gap, regardless of its free-text
+description or generic reason code. A non-sport gap may carry verified resolved
+sports. An unresolved sport assessment must use the existing human-review
+verification rules. This avoids trying to classify free-form model prose.
+
+Decision (2026-09-08): Keep the isolated session and explicit tool allowlist.
+Put the relevant evidence rules in the generated production prompt rather than
+loading arbitrary repository context. Forward only bounded allowlisted command
+diagnostic fields from the child to the root runner's structured logger.
+Container log retention is not a permanent database audit.
 
 ## Outcomes & Retrospective
 
@@ -434,3 +457,76 @@ and `softball-url-metadata.json`. The exact capture procedure is retained as
 `capture-preflight.py` in the private trial directory, mode `0600`, SHA256
 `d5004a550146492393227f6d19276863084d33c4d29e1744385e0cf3e39eef31`.
 Its retained report is historical evidence, not permission for another run.
+
+## Source correction milestones
+
+First update `agentGateway.ts`, `prismaAgentGateway.ts`, the supervisor HTTP
+decoder, and `affiliateOmpGatewayTools.ts` so an artifact read exposes
+`sourceUrl` and `finalUrl` from immutable storage metadata. Both fields are
+required nullable strings. Preserve them through cached pages and image
+metadata without exceeding the existing serialized page limit. Missing
+metadata remains null; do not derive authority from links in page text.
+
+Next update the generated prompt and command schema descriptions in
+`agentGatewayContracts.ts`. Explain that `listUrlRef` names an authorized
+page artifact, not a raw URL, and that existing evidence does not require a
+capture profile. Explain evidence-backed sport surfaces, including an explicit
+indoor venue that hosts all of the source's volleyball. Do not use venue names
+or generic sport labels alone as proof. Require citation-owned sport
+assessments for legacy contract gaps. Keep role/prompt version changes aligned
+with current fixtures and deployment hash generation.
+
+Then close the generic-gap bypass in `verifyLegacySportRepairTerminal`.
+Use the existing correction budget and exact claim generation. Invalid
+assessments must not become completed results. Keep a valid non-sport gap
+possible after the sport has been resolved and verified.
+
+Finally add a narrow command-rejection diagnostic record for local schema
+errors and typed Gateway errors. The child writes it outside terminal stdout.
+The root validates field names, enum values, sizes, and record counts and
+binds identity from its trusted invocation. It must discard arbitrary text and
+never log input values, credentials, URLs, prompts, or raw error messages.
+Record diagnostics even if the invocation later submits a successful hold.
+
+Run focused Gateway, supervisor, OMP tool, and runner tests from `apps/site`.
+Run TypeScript once after all concurrent edits complete. Replay the private
+captured evidence through the actual updated OMP reader and require both
+provenance URLs plus the complete Boomtown indoor-venue evidence. Verify the
+legacy empty-evidence gap is rejected with correction feedback and a resolved
+sport/non-sport gap remains valid. Verify diagnostic bounds and redaction
+across split input chunks and successful child completion. Do not call a
+provider, restart a runtime, publish an image, or mutate production data.
+
+Revision note (2026-09-08): Extended this plan after source-correction approval.
+The measured trial results above remain historical evidence, not fixed data.
+
+## Source correction verification — 2026-09-08
+
+The current source implements all four corrections. Current role and prompt
+contracts are version 3. The generated instructions remain inside the existing
+16-entry and 1,000-character-per-entry bounds. They include evidence-backed
+surface rules and a complete sport-assessment shape without loading ambient
+skills or context files.
+
+The source passed 360 tests across 10 focused suites, TypeScript, and targeted
+ESLint. These suites cover Gateway state transitions, artifact receipt replay,
+generic-gap correction, wrong-owned evidence, catalog drift, resolved
+non-sport gaps, HTTP transport, OMP paging, and runner diagnostic redaction,
+bounds, split input, and successful completion. Database-backed integration
+tests were not run; their fixtures were updated and type-checked.
+
+The offline replay passed for the two real stored captures: four artifacts
+across 13 bounded pages retained both provenance URLs and all original text.
+The replay used the current contracts with offline authorization only. It
+made zero provider calls and zero production writes. This proves the repaired
+evidence interface, not a new successful production mapping decision.
+
+Integration checks found and corrected an overfull prompt template, missing
+fixture fields, and diagnostic typing/nullable parsing errors. The prompt
+bounds were preserved rather than relaxed. Historical receipt fields may be
+absent, but malformed stored URL values now fail integrity checks instead of
+silently becoming null. Independent review records are attached to Issue 70.
+
+No image was published, no runtime was restarted, and no completed job was
+reset or retried during this source correction. Deployment requires separate
+current authorization, matching version-3 contracts, and fresh preflight.

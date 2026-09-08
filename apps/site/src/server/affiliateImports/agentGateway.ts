@@ -144,6 +144,8 @@ export type AffiliateAgentArtifactReadResult = Readonly<{
   sha256: string;
   mimeType: string;
   byteSize: number;
+  sourceUrl: string | null;
+  finalUrl: string | null;
   bytes: Uint8Array;
 }>;
 

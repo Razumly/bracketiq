@@ -198,7 +198,8 @@ export const createAffiliateAgentGatewayArtifactStore = (
       bytes,
       mimeType,
       byteSize: bytes.length,
-      sourceUrl: sourceArtifact?.finalUrl ?? sourceArtifact?.sourceUrl ?? null,
+      sourceUrl: sourceArtifact?.sourceUrl ?? null,
+      finalUrl: sourceArtifact?.finalUrl ?? null,
     };
   },
 });

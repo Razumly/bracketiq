@@ -992,6 +992,7 @@ const createGatewayHarness = (
         mimeType: "text/markdown",
         byteSize: INPUT_BYTES.byteLength,
         sourceUrl: "https://evidence.example.test/database",
+        finalUrl: "https://evidence.example.test/database",
       })),
   };
   const storedObjects = new Map<
@@ -1420,6 +1421,8 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
       kind: "ARTIFACT_READ",
       evidenceRef: "input-evidence",
       byteSize: INPUT_BYTES.byteLength,
+      sourceUrl: "https://evidence.example.test/database",
+      finalUrl: "https://evidence.example.test/database",
     });
     expect(rejected?.reason).toMatchObject({
       code: "OPERATION_IN_PROGRESS",
@@ -1963,6 +1966,7 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
           mimeType: captureOutput.mimeType,
           byteSize: capturedBytes.byteLength,
           sourceUrl: "https://evidence.example.test/recovered",
+          finalUrl: "https://evidence.example.test/recovered",
         };
       },
     });
@@ -2118,6 +2122,7 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
         mimeType: "text/markdown",
         byteSize: INPUT_BYTES.byteLength,
         sourceUrl: "https://evidence.example.test/provider-lane-failure",
+        finalUrl: "https://evidence.example.test/provider-lane-failure",
       }),
     });
     const grant = await claimOrThrow(
@@ -2546,6 +2551,7 @@ describeDatabase("Affiliate Agent Gateway PostgreSQL authority", () => {
         mimeType: captureOutput.mimeType,
         byteSize: capturedBytes.byteLength,
         sourceUrl: "https://evidence.example.test/impossible",
+        finalUrl: "https://evidence.example.test/impossible",
       }),
     });
     const grant = await claimOrThrow(

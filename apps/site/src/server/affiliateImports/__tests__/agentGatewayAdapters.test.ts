@@ -6,6 +6,7 @@ import type { PrismaClient } from "@/generated/prisma/client";
 import type { StorageProvider } from "@/lib/storageProvider";
 
 import {
+  AFFILIATE_AGENT_ROLE_CONTRACTS,
   canonicalizeAffiliateAgentValue,
   hashAffiliateAgentValue,
   type AffiliateAgentClaimEnvelope,
@@ -289,6 +290,7 @@ const legacySportRepairFixture = () => {
       mimeType: "text/html",
       byteSize: bytes.byteLength,
       sourceUrl: "https://source.example/events",
+      finalUrl: "https://source.example/events",
       runId: "evidence-run-1",
       intakeId: "intake-1",
     })),
@@ -379,9 +381,9 @@ const legacyApprovalFixture = () => {
     deploymentContractHash: "1".repeat(64),
     supplyContractVersion: 1,
     supplyContractHash: "2".repeat(64),
-    roleContractVersion: 2,
     roleContractHash: "3".repeat(64),
-    promptTemplateVersion: 2,
+    roleContractVersion: AFFILIATE_AGENT_ROLE_CONTRACTS.MAPPING_PRODUCER.version,
+    promptTemplateVersion: AFFILIATE_AGENT_ROLE_CONTRACTS.MAPPING_PRODUCER.promptTemplateVersion,
     promptTemplateHash: "4".repeat(64),
     executionClass: "PRODUCTION_OMP" as const,
     workerId: "producer-worker-1",
@@ -427,9 +429,9 @@ const legacyApprovalFixture = () => {
     deploymentContractHash: "5".repeat(64),
     supplyContractVersion: 1,
     supplyContractHash: "6".repeat(64),
-    roleContractVersion: 2,
     roleContractHash: "7".repeat(64),
-    promptTemplateVersion: 2,
+    roleContractVersion: AFFILIATE_AGENT_ROLE_CONTRACTS.SUPPLY_REVIEWER.version,
+    promptTemplateVersion: AFFILIATE_AGENT_ROLE_CONTRACTS.SUPPLY_REVIEWER.promptTemplateVersion,
     promptTemplateHash: "8".repeat(64),
     executionClass: "PRODUCTION_OMP" as const,
     workerId: "reviewer-worker-repair-1",
@@ -468,6 +470,7 @@ const legacyApprovalFixture = () => {
         mimeType: "application/json",
         byteSize: packageBytes.byteLength,
         sourceUrl: null,
+        finalUrl: null,
       };
     }
     return {
@@ -475,6 +478,7 @@ const legacyApprovalFixture = () => {
       mimeType: "text/html",
       byteSize: listBytes.byteLength,
       sourceUrl: "https://source.example/events",
+      finalUrl: "https://source.example/events",
       runId: "evidence-run-1",
       intakeId: "intake-1",
     };
@@ -803,9 +807,9 @@ describe("production Affiliate Agent activation effect", () => {
       deploymentContractHash: "b".repeat(64),
       supplyContractVersion: 1,
       supplyContractHash: "c".repeat(64),
-      roleContractVersion: 2,
       roleContractHash: "d".repeat(64),
-      promptTemplateVersion: 2,
+      roleContractVersion: AFFILIATE_AGENT_ROLE_CONTRACTS.MAPPING_PRODUCER.version,
+      promptTemplateVersion: AFFILIATE_AGENT_ROLE_CONTRACTS.MAPPING_PRODUCER.promptTemplateVersion,
       promptTemplateHash: "e".repeat(64),
       executionClass: "PRODUCTION_OMP" as const,
       workerId: "producer-worker-1",
@@ -975,6 +979,7 @@ describe("production Affiliate Agent activation effect", () => {
           mimeType: "application/json",
           byteSize: bytes.byteLength,
           sourceUrl: null,
+          finalUrl: null,
         };
       }),
     };
@@ -1312,6 +1317,7 @@ describe("production Affiliate Agent capture adapter", () => {
         mimeType: string;
         byteSize: number;
         sourceUrl: string | null;
+        finalUrl: string | null;
       }>;
     }> = {
       readImmutable: async ({ fileId }) => {
@@ -1325,6 +1331,7 @@ describe("production Affiliate Agent capture adapter", () => {
           mimeType: fileId === "source-artifact" ? "text/html" : "application/json",
           byteSize: bytes.byteLength,
           sourceUrl: "https://evidence.example.test/events",
+          finalUrl: "https://evidence.example.test/events",
         };
       },
     };
@@ -1422,9 +1429,9 @@ describe("production Affiliate Agent capture adapter", () => {
       deploymentContractVersion: 1,
       deploymentContractHash: "d".repeat(64),
       supplyContractVersion: 1,
-      roleContractVersion: 2,
       roleContractHash: "e".repeat(64),
-      promptTemplateVersion: 2,
+      roleContractVersion: AFFILIATE_AGENT_ROLE_CONTRACTS.MAPPING_PRODUCER.version,
+      promptTemplateVersion: AFFILIATE_AGENT_ROLE_CONTRACTS.MAPPING_PRODUCER.promptTemplateVersion,
       promptTemplateHash: "f".repeat(64),
       role: "MAPPING_PRODUCER",
       subject: {

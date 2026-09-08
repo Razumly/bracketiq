@@ -15,6 +15,15 @@ import {
   hashAffiliateAgentValue,
   type AffiliateAgentClaimEnvelope,
 } from "./agentGatewayContracts";
+import {
+  AFFILIATE_AGENT_COMMAND_DIAGNOSTIC_MAX_RECORDS,
+  AFFILIATE_AGENT_COMMAND_DIAGNOSTIC_MAX_TOTAL_BYTES,
+  gatewayCommandRejectionDiagnosticFor,
+  localCommandRejectionDiagnosticFor,
+  serializeAffiliateAgentCommandRejectionDiagnostic,
+  type AffiliateAgentCommandRejectionDiagnostic,
+} from "./affiliateAgentCommandDiagnostics";
+
 
 export type AffiliateOmpTerminalFrame = Readonly<{
   kind: "TERMINAL_SUBMISSION";
@@ -141,14 +150,18 @@ type CachedTextArtifact = Readonly<{
   sha256: string;
   mimeType: string;
   byteSize: number;
+  sourceUrl: string | null;
+  finalUrl: string | null;
   text: string;
 }>;
+
 
 export const createAffiliateOmpGatewayTools = (input: Readonly<{
   claim: AffiliateAgentClaimEnvelope;
   token: string;
   gateway: Pick<AffiliateAgentGateway, "perform">;
   onTerminal(frame: AffiliateOmpTerminalFrame): void;
+  onCommandRejection?: (diagnostic: AffiliateAgentCommandRejectionDiagnostic) => void;
 }>) => {
   const claim = affiliateAgentClaimEnvelopeSchema.parse(input.claim);
   const authorization = authorizationFor(claim, input.token);
@@ -176,6 +189,36 @@ export const createAffiliateOmpGatewayTools = (input: Readonly<{
     operationKeys.set(identity, key);
     return key;
   };
+  let commandDiagnosticCount = 0;
+  let commandDiagnosticBytes = 0;
+  const reportCommandRejection = (
+    diagnostic: AffiliateAgentCommandRejectionDiagnostic,
+  ): void => {
+    if (
+      commandDiagnosticCount >= AFFILIATE_AGENT_COMMAND_DIAGNOSTIC_MAX_RECORDS
+      || input.onCommandRejection === undefined
+    ) return;
+    let serialized: string;
+    try {
+      serialized = serializeAffiliateAgentCommandRejectionDiagnostic(diagnostic);
+    } catch {
+      return;
+    }
+    const serializedBytes = Buffer.byteLength(`${serialized}\n`, "utf8");
+    if (
+      commandDiagnosticBytes > AFFILIATE_AGENT_COMMAND_DIAGNOSTIC_MAX_TOTAL_BYTES
+      || serializedBytes
+        > AFFILIATE_AGENT_COMMAND_DIAGNOSTIC_MAX_TOTAL_BYTES - commandDiagnosticBytes
+    ) return;
+    commandDiagnosticCount += 1;
+    commandDiagnosticBytes += serializedBytes;
+    try {
+      input.onCommandRejection(diagnostic);
+    } catch {
+      // A diagnostic sink must never affect the Gateway operation.
+    }
+  };
+
 
   const readArtifact: ToolDefinition = {
     name: "read_artifact",
@@ -210,7 +253,15 @@ export const createAffiliateOmpGatewayTools = (input: Readonly<{
           }
           return {
             content: [
-              { type: "text", text: JSON.stringify({ evidenceRef: artifact.evidenceRef, sha256: artifact.sha256 }) },
+              {
+                type: "text",
+                text: JSON.stringify({
+                  evidenceRef: artifact.evidenceRef,
+                  sha256: artifact.sha256,
+                  sourceUrl: artifact.sourceUrl ?? null,
+                  finalUrl: artifact.finalUrl ?? null,
+                }),
+              },
               { type: "image", data: Buffer.from(artifact.bytes).toString("base64"), mimeType },
             ],
             details: {},
@@ -224,6 +275,8 @@ export const createAffiliateOmpGatewayTools = (input: Readonly<{
           sha256: artifact.sha256,
           mimeType: artifact.mimeType,
           byteSize: artifact.byteSize,
+          sourceUrl: artifact.sourceUrl ?? null,
+          finalUrl: artifact.finalUrl ?? null,
           text: new TextDecoder("utf-8", { fatal: true }).decode(artifact.bytes),
         };
         cachedTextPages.length = 0;
@@ -244,6 +297,8 @@ export const createAffiliateOmpGatewayTools = (input: Readonly<{
         sha256: artifact.sha256,
         mimeType: artifact.mimeType,
         byteSize: artifact.byteSize,
+        sourceUrl: artifact.sourceUrl,
+        finalUrl: artifact.finalUrl,
         offset,
         nextOffset: boundaries[boundaryIndex],
         endOfArtifact: boundaries[boundaryIndex] === artifact.text.length,
@@ -334,7 +389,7 @@ export const createAffiliateOmpGatewayTools = (input: Readonly<{
     const parameters = z.object({ command: z.union(commandSchemas) }).strict();
     definitions.push({
       name: "execute_command",
-      description: "Execute one command allowed by this claim. Use the exact declarative command schema. Validate a package before committing its validation receipt. The trusted driver supplies authorization and idempotency keys.",
+      description: "Execute one command allowed by this claim. Use the exact declarative command schema. A package listUrlRef is an evidenceRef for an authorized list-page artifact, not a raw URL; use the artifact's sourceUrl/finalUrl metadata and do not request a new capture profile for existing evidence. Validate a package before committing its validation receipt. The trusted driver supplies authorization and idempotency keys.",
       parameters,
       async execute(value, signal) {
         const { command } = parameters.parse(value);
@@ -360,16 +415,36 @@ export const createAffiliateOmpGatewayTools = (input: Readonly<{
       let release!: () => void;
       pending = new Promise<void>((resolve) => { release = resolve; });
       await previous;
+      const isCommandExecution = name === "execute_command";
+      let commandForDiagnostic: unknown = null;
       try {
         if (signal?.aborted || isClosed) return textResult("The invocation is closed.", true);
         const definition = byName.get(name);
         if (!definition) return textResult("This tool is not permitted for the claim.", true);
         const parsed = definition.parameters.safeParse(value);
         if (!parsed.success) {
+          if (isCommandExecution) {
+            reportCommandRejection(localCommandRejectionDiagnosticFor({
+              command: value,
+              issues: parsed.error.issues,
+            }));
+          }
           return textResult({ issues: parsed.error.issues.map(({ path, message }) => ({ path, message })) }, true);
+        }
+        if (isCommandExecution && typeof parsed.data === "object" && parsed.data !== null) {
+          commandForDiagnostic = "command" in parsed.data ? parsed.data.command : null;
         }
         return await definition.execute(parsed.data, signal);
       } catch (error) {
+        if (isCommandExecution && error instanceof AffiliateAgentGatewayError) {
+          const diagnostic = gatewayCommandRejectionDiagnosticFor({
+            command: commandForDiagnostic,
+            errorCode: error.code,
+            safeMessage: error.safeMessage,
+            isRetryable: error.isRetryable,
+          });
+          if (diagnostic !== null) reportCommandRejection(diagnostic);
+        }
         const pendingSubmission = pendingTerminalSubmission;
         pendingTerminalSubmission = null;
         if (

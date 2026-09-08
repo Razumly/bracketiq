@@ -794,6 +794,75 @@ describe("executable affiliate agent runner boundary", () => {
     );
     expect(event).toEqual({ kind: "EXIT", exitCode: 7 });
   });
+  it("retains redacted command diagnostics through successful terminal completion", async () => {
+    const secret = "credential-secret-😀";
+    const diagnostic = JSON.stringify({
+      version: 1,
+      event: "affiliate-agent-command-rejection",
+      stage: "GATEWAY",
+      command: "VALIDATE_DECLARATIVE_PACKAGE",
+      errorCode: "COMMAND_NOT_PERMITTED",
+      reasonCode: "PACKAGE_SOURCE_MISMATCH",
+      issueCodes: [],
+      issuePaths: [],
+      isRetryable: false,
+      workerId: "child-forged-worker",
+      invocationId: "child-forged-invocation",
+      payload: secret,
+    });
+    const bytes = Buffer.from(`${diagnostic}\n`, "utf8");
+    const emojiOffset = bytes.indexOf(Buffer.from("😀", "utf8"));
+    if (emojiOffset < 1) throw new Error("Expected a UTF-8 diagnostic fixture.");
+    const logger = jest.spyOn(console, "info").mockImplementation(() => undefined);
+    try {
+      const terminal = JSON.stringify({
+        kind: "TERMINAL_SUBMISSION",
+        idempotencyKey: "child-terminal-key",
+        result: { disposition: "APPROVED" },
+      });
+      const { event } = await runSingleChildScenario(
+        terminal,
+        0,
+        (child) => {
+          child.stderr.emit("data", Buffer.from("{malformed\n", "utf8"));
+          child.stderr.emit("data", bytes.subarray(0, emojiOffset + 1));
+          child.stderr.emit("data", bytes.subarray(emojiOffset + 1));
+          for (let index = 0; index < 40; index += 1) {
+            child.stderr.emit("data", bytes);
+          }
+        },
+      );
+      expect(event).toEqual({
+        kind: "TERMINAL_SUBMISSION",
+        idempotencyKey: "child-terminal-key",
+        result: { disposition: "APPROVED" },
+      });
+      const commandLogs = logger.mock.calls
+        .map(([line]) => line)
+        .filter((line) => typeof line === "string" && line.includes("\"affiliate-agent-command-rejection\""));
+      expect(commandLogs).toHaveLength(32);
+      const logged = commandLogs[0];
+      expect(logged).toBeDefined();
+      const parsed = JSON.parse(String(logged)) as Record<string, unknown>;
+      expect(parsed).toMatchObject({
+        event: "affiliate-agent-command-rejection",
+        workerId: "worker-1",
+        invocationId: "invocation-1",
+        stage: "GATEWAY",
+        command: "VALIDATE_DECLARATIVE_PACKAGE",
+        errorCode: "COMMAND_NOT_PERMITTED",
+        reasonCode: "PACKAGE_SOURCE_MISMATCH",
+        issueCodes: [],
+        issuePaths: [],
+        isRetryable: false,
+      });
+      expect(String(logged)).not.toContain(secret);
+      expect(String(logged)).not.toContain("child-forged-worker");
+      expect(String(logged)).not.toContain("child-forged-invocation");
+    } finally {
+      logger.mockRestore();
+    }
+  });
 
   it("preserves a terminal frame emitted before deadline containment completes", async () => {
     jest.useFakeTimers({ now: new Date(STARTED_AT), doNotFake: ["queueMicrotask"] });

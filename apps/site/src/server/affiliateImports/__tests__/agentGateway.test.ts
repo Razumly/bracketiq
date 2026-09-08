@@ -22,6 +22,7 @@ import {
   canonicalizeAffiliateAgentValue,
   hashAffiliateAgentValue,
   renderAffiliateAgentPrompt,
+  type AffiliateAgentSportEvidence,
 } from "../agentGatewayContracts";
 import {
   AFFILIATE_AGENT_HARD_DEADLINE_SECONDS,
@@ -1478,6 +1479,7 @@ const createGatewayClaimHarness = (
     mimeType: "text/markdown",
     byteSize: artifactBytes.byteLength,
     sourceUrl: "https://evidence.example.test/page",
+    finalUrl: "https://evidence.example.test/page",
   };
   const state = {
     jobs: [
@@ -2444,6 +2446,157 @@ const coverageTerminalResultFor = (grant: AffiliateAgentClaimGrant) => ({
   summary: "No qualified action remains for this coverage cell.",
   payload: { basis: "NO_QUALIFIED_ACTION" as const },
 });
+
+type LegacySportCatalog = Readonly<{
+  sha256: string;
+  sports: readonly Readonly<{ id: string; name: string }>[];
+}>;
+
+type LegacySportProducerFixture = Readonly<{
+  request: AffiliateAgentClaimRequest;
+  sportEvidence: AffiliateAgentSportEvidence;
+  catalog: LegacySportCatalog;
+  setCurrentCatalog(value: LegacySportCatalog): void;
+}>;
+
+const configureLegacySportProducerScenario = (
+  harness: GatewayClaimHarness,
+): LegacySportProducerFixture => {
+  const artifactBytes = harness.artifactBytes;
+  const artifactSha256 = createHash("sha256").update(artifactBytes).digest("hex");
+  const catalog = buildAffiliateSportsCatalogSnapshot(
+    [{ id: "sport-basketball", name: "Basketball" }],
+    "2026-08-20T18:00:00.000Z",
+  );
+  const sportEvidence: AffiliateAgentSportEvidence = {
+    evidenceRunId: "legacy-evidence-run",
+    sportsCatalogSha256: catalog.sha256,
+    sportDeterminations: [{
+      sourceLabels: ["Basketball"],
+      status: "RESOLVED",
+      resolutionBasis: "SOURCE_EVIDENCE",
+      canonicalSportNames: ["Basketball"],
+      rationale: "The stored page identifies basketball.",
+      evidence: [{
+        artifactId: "file-evidence-1",
+        artifactSha256,
+        artifactKind: "PAGE_MARKDOWN",
+        pageUrl: "https://evidence.example.test/page",
+        excerpt: "verified gateway artifact",
+      }],
+    }],
+  };
+  const repairContext = {
+    kind: "LEGACY_SPORT_REPAIR" as const,
+    intakeId: "legacy-intake",
+    evidenceRunId: sportEvidence.evidenceRunId,
+    sportsCatalog: catalog,
+  };
+  const manifestPreimage = {
+    schemaVersion: 1 as const,
+    entries: [{
+      evidenceRef: "evidence-1",
+      kind: "PAGE_MARKDOWN" as const,
+      artifactId: "file-evidence-1",
+      sha256: artifactSha256,
+      mimeType: "text/markdown",
+      byteSize: artifactBytes.byteLength,
+      retention: "INDEFINITE" as const,
+    }],
+  };
+  Object.assign(harness.state.jobs[0], {
+    queue: "AFFILIATE_MAPPING",
+    lane: "MAPPING_PRODUCTION",
+    role: "MAPPING_PRODUCER",
+    subjectType: "MAPPING_PRODUCER",
+    subjectId: "mapping-job-1",
+    subjectJson: {
+      ...claimRoleFields.MAPPING_PRODUCER.subject,
+      repairContext,
+    },
+    evidenceManifestJson: {
+      ...manifestPreimage,
+      hash: hashAffiliateAgentValue(manifestPreimage),
+    },
+    supplySourceId: "supply-source-1",
+    expectedLifecycleGeneration: 7,
+  });
+  harness.setArtifactRead({
+    bytes: new Uint8Array(artifactBytes),
+    mimeType: "text/markdown",
+    byteSize: artifactBytes.byteLength,
+    sourceUrl: "https://evidence.example.test/page",
+    finalUrl: "https://evidence.example.test/page",
+    runId: sportEvidence.evidenceRunId,
+    intakeId: repairContext.intakeId,
+  });
+  let currentCatalog: LegacySportCatalog = catalog;
+  harness.setDomainDelegates({
+    sports: {
+      findMany: async () => currentCatalog.sports,
+    },
+  });
+  const request: AffiliateAgentClaimRequest = {
+    ...harness.request,
+    idempotencyKey: "legacy-sport-claim",
+    roleCredential: "mapping-role-credential",
+    role: "MAPPING_PRODUCER",
+    workerId: "legacy-sport-worker",
+    invocationId: "legacy-sport-invocation",
+    workspaceAttestation: {
+      ...harness.request.workspaceAttestation,
+      workspaceId: "legacy-sport-workspace",
+      workerId: "legacy-sport-worker",
+      invocationId: "legacy-sport-invocation",
+    },
+  };
+  return {
+    request,
+    sportEvidence,
+    catalog,
+    setCurrentCatalog: (value) => {
+      currentCatalog = value;
+    },
+  };
+};
+
+const legacySportContractGapResultFor = (
+  grant: AffiliateAgentClaimGrant,
+  sportEvidence?: AffiliateAgentSportEvidence,
+  overrides: Readonly<{
+    evidenceRefs?: readonly string[];
+    reasonCodes?: readonly string[];
+  }> = {},
+): Extract<AffiliateAgentClaimOperation, { kind: "SUBMIT_RESULT" }>["result"] => ({
+  schemaVersion: 1 as const,
+  jobId: grant.envelope.jobId,
+  claimId: grant.envelope.claimId,
+  claimGeneration: grant.envelope.claimGeneration,
+  lifecycleGeneration: grant.envelope.lifecycleGeneration,
+  deploymentContractVersion: grant.envelope.deploymentContractVersion,
+  deploymentContractHash: grant.envelope.deploymentContractHash,
+  supplyContractVersion: grant.envelope.supplyContractVersion,
+  supplyContractHash: grant.envelope.supplyContractHash,
+  roleContractVersion: grant.envelope.roleContractVersion,
+  roleContractHash: grant.envelope.roleContractHash,
+  promptTemplateVersion: grant.envelope.promptTemplateVersion,
+  promptTemplateHash: grant.envelope.promptTemplateHash,
+  workerId: grant.envelope.workerId,
+  invocationId: grant.envelope.invocationId,
+  role: "MAPPING_PRODUCER" as const,
+  disposition: "CONTRACT_GAP" as const,
+  reasonCodes: overrides.reasonCodes ?? ["CONTRACT_REQUIREMENT_MISSING"],
+  evidenceRefs: overrides.evidenceRefs ?? (sportEvidence ? ["evidence-1"] : []),
+  summary: "The mapping contract requires a bounded correction.",
+  payload: {
+    contractArea: "MAPPING_EVIDENCE" as const,
+    requestedChange: "Record the missing mapping evidence requirement.",
+    ...(sportEvidence === undefined ? {} : { sportEvidence }),
+  },
+} as unknown as Extract<
+  AffiliateAgentClaimOperation,
+  { kind: "SUBMIT_RESULT" }
+>["result"]);
 
 const gatewayOperationFor = (
   kind: AffiliateAgentClaimOperation["kind"],
@@ -4175,6 +4328,7 @@ describe("Prisma affiliate Agent Gateway", () => {
       mimeType: "text/markdown",
       byteSize: listBytes.byteLength,
       sourceUrl: "https://evidence.example.test/page",
+      finalUrl: "https://evidence.example.test/page",
     });
     const listManifestPreimage = {
       schemaVersion: 1 as const,
@@ -5047,6 +5201,174 @@ describe("Prisma affiliate Agent Gateway", () => {
     expect(Buffer.from(result.bytes)).toEqual(artifactBytes);
   });
 
+  it("replays immutable artifact provenance without deriving URLs from a later read", async () => {
+    const harness = createGatewayClaimHarness();
+    harness.setArtifactRead({
+      bytes: new Uint8Array(harness.artifactBytes),
+      mimeType: "text/markdown",
+      byteSize: harness.artifactBytes.byteLength,
+      sourceUrl: "https://evidence.example.test/requested",
+      finalUrl: "https://evidence.example.test/final",
+    });
+    const grant = await harness.gateway.claim(harness.request);
+    if (!grant) throw new Error("Expected one Coverage Planner claim.");
+    const operation = {
+      kind: "READ_ARTIFACT" as const,
+      idempotencyKey: "artifact-provenance-replay",
+      authorization: gatewayAuthorizationFor(grant),
+      evidenceRef: "evidence-1",
+    };
+    const initial = await harness.gateway.perform(operation);
+    expect(initial).toMatchObject({
+      sourceUrl: "https://evidence.example.test/requested",
+      finalUrl: "https://evidence.example.test/final",
+    });
+    harness.setArtifactRead({
+      bytes: new Uint8Array(harness.artifactBytes),
+      mimeType: "text/markdown",
+      byteSize: harness.artifactBytes.byteLength,
+      sourceUrl: "https://attacker.example.test/parsed-link",
+      finalUrl: "https://attacker.example.test/parsed-final",
+    });
+    await expect(harness.gateway.perform(operation)).resolves.toMatchObject({
+      sourceUrl: "https://evidence.example.test/requested",
+      finalUrl: "https://evidence.example.test/final",
+    });
+    const receipt = harness.state.receipts.find(
+      (candidate) => candidate.idempotencyKey === operation.idempotencyKey,
+    );
+    if (!receipt || typeof receipt.responseJson !== "object" || receipt.responseJson === null) {
+      throw new Error("Expected persisted artifact read metadata.");
+    }
+    delete (receipt.responseJson as Record<string, unknown>).sourceUrl;
+    delete (receipt.responseJson as Record<string, unknown>).finalUrl;
+    await expect(harness.gateway.perform(operation)).resolves.toMatchObject({
+      sourceUrl: null,
+      finalUrl: null,
+    });
+    (receipt.responseJson as Record<string, unknown>).sourceUrl = { token: "private-value" };
+    await expect(harness.gateway.perform(operation)).rejects.toMatchObject({
+      code: "ARTIFACT_INTEGRITY_FAILED",
+      safeMessage: "The stored artifact source URL is invalid.",
+    });
+  });
+
+  it("routes a generic legacy sport contract gap without evidence to bounded correction", async () => {
+    const harness = createGatewayClaimHarness();
+    const fixture = configureLegacySportProducerScenario(harness);
+    const grant = await harness.gateway.claim(fixture.request);
+    if (!grant) throw new Error("Expected one legacy sport producer claim.");
+    const outcome = await harness.gateway.perform({
+      kind: "SUBMIT_RESULT",
+      idempotencyKey: "legacy-sport-empty-gap",
+      authorization: gatewayAuthorizationFor(grant),
+      result: legacySportContractGapResultFor(grant),
+    });
+    expect(outcome).toMatchObject({
+      kind: "SCHEMA_CORRECTION_REQUIRED",
+      issues: expect.arrayContaining([
+        expect.objectContaining({
+          path: ["payload", "sportEvidence"],
+          message: expect.stringContaining("structured sportEvidence"),
+        }),
+        expect.objectContaining({
+          path: ["evidenceRefs"],
+          message: expect.stringContaining("every sport citation"),
+        }),
+      ]),
+    });
+    expect(harness.state.claims[0]).toMatchObject({
+      status: "ACTIVE",
+      schemaCorrectionCount: 1,
+      terminalReceiptId: null,
+    });
+    expect(harness.state.jobs[0]).toMatchObject({
+      status: "CLAIMED",
+      terminalReceiptId: null,
+      resultJson: null,
+    });
+  });
+
+  it("routes wrong-owned sport evidence and catalog drift to bounded correction", async () => {
+    for (const failure of ["WRONG_OWNED_EVIDENCE", "CATALOG_DRIFT"] as const) {
+      const harness = createGatewayClaimHarness();
+      const fixture = configureLegacySportProducerScenario(harness);
+      const grant = await harness.gateway.claim(fixture.request);
+      if (!grant) throw new Error("Expected one legacy sport producer claim.");
+      if (failure === "WRONG_OWNED_EVIDENCE") {
+        harness.setArtifactRead({
+          bytes: new Uint8Array(harness.artifactBytes),
+          mimeType: "text/markdown",
+          byteSize: harness.artifactBytes.byteLength,
+          sourceUrl: "https://evidence.example.test/page",
+          finalUrl: "https://evidence.example.test/page",
+          runId: "different-evidence-run",
+          intakeId: "legacy-intake",
+        });
+      } else {
+        fixture.setCurrentCatalog(buildAffiliateSportsCatalogSnapshot(
+          [{ id: "sport-indoor-soccer", name: "Indoor Soccer" }],
+          "2026-08-20T18:00:00.000Z",
+        ));
+      }
+      const outcome = await harness.gateway.perform({
+        kind: "SUBMIT_RESULT",
+        idempotencyKey: `legacy-sport-${failure.toLowerCase()}`,
+        authorization: gatewayAuthorizationFor(grant),
+        result: legacySportContractGapResultFor(
+          grant,
+          fixture.sportEvidence,
+        ),
+      });
+      expect(outcome).toMatchObject({
+        kind: "SCHEMA_CORRECTION_REQUIRED",
+        issues: expect.arrayContaining([
+          expect.objectContaining({
+            path: ["payload", "sportEvidence"],
+          }),
+        ]),
+      });
+      expect(harness.state.claims[0]).toMatchObject({
+        status: "ACTIVE",
+        schemaCorrectionCount: 1,
+      });
+      expect(harness.state.jobs[0]).toMatchObject({
+        status: "CLAIMED",
+        terminalReceiptId: null,
+      });
+    }
+  });
+
+  it("accepts a non-sport legacy contract gap after a resolved sport assessment", async () => {
+    const harness = createGatewayClaimHarness();
+    const fixture = configureLegacySportProducerScenario(harness);
+    const grant = await harness.gateway.claim(fixture.request);
+    if (!grant) throw new Error("Expected one legacy sport producer claim.");
+    await expect(
+      harness.gateway.perform({
+        kind: "SUBMIT_RESULT",
+        idempotencyKey: "legacy-sport-resolved-gap",
+        authorization: gatewayAuthorizationFor(grant),
+        result: legacySportContractGapResultFor(
+          grant,
+          fixture.sportEvidence,
+          { reasonCodes: ["CONTRACT_REQUIREMENT_MISSING"] },
+        ),
+      }),
+    ).resolves.toMatchObject({
+      kind: "TERMINAL_ACCEPTED",
+      disposition: "CONTRACT_GAP",
+    });
+    expect(harness.state.claims[0]).toMatchObject({
+      status: "COMPLETED",
+      terminalReceiptId: expect.any(String),
+    });
+    expect(harness.state.jobs[0]).toMatchObject({
+      status: "COMPLETED",
+      terminalDisposition: "CONTRACT_GAP",
+    });
+  });
+
   it("executes the one closed Coverage Planner command", async () => {
     const harness = createGatewayClaimHarness();
     const grant = await harness.gateway.claim(harness.request);
@@ -5609,6 +5931,7 @@ describe("Prisma affiliate Agent Gateway", () => {
       mimeType: oversizedMimeType,
       byteSize: externalHarness.artifactBytes.byteLength,
       sourceUrl: "https://evidence.example.test/page",
+      finalUrl: "https://evidence.example.test/page",
     });
     const externalGrant = await externalHarness.gateway.claim(
       externalHarness.request,
@@ -5862,24 +6185,28 @@ describe("Prisma affiliate Agent Gateway", () => {
         mimeType: "text/markdown",
         byteSize: Buffer.byteLength("tampered artifact"),
         sourceUrl: "https://evidence.example.test/page",
+        finalUrl: "https://evidence.example.test/page",
       },
       {
         bytes: new Uint8Array(verifiedBytes),
         mimeType: "text/html",
         byteSize: verifiedBytes.byteLength,
         sourceUrl: "https://evidence.example.test/page",
+        finalUrl: "https://evidence.example.test/page",
       },
       {
         bytes: new Uint8Array(verifiedBytes),
         mimeType: "text/markdown",
         byteSize: verifiedBytes.byteLength + 1,
         sourceUrl: "https://evidence.example.test/page",
+        finalUrl: "https://evidence.example.test/page",
       },
       {
         bytes: new Uint8Array(verifiedBytes),
         mimeType: "text/markdown",
         byteSize: verifiedBytes.byteLength,
         sourceUrl: "file:///private/evidence",
+        finalUrl: "https://evidence.example.test/page",
       },
     ];
 

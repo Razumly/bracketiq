@@ -12,6 +12,11 @@ import {
   renderAffiliateAgentPrompt,
 } from "../src/server/affiliateImports/agentGatewayContracts";
 import { createAffiliateOmpGatewayTools } from "../src/server/affiliateImports/affiliateOmpGatewayTools";
+import {
+  serializeAffiliateAgentCommandRejectionDiagnostic,
+  type AffiliateAgentCommandRejectionDiagnostic,
+} from "../src/server/affiliateImports/affiliateAgentCommandDiagnostics";
+
 
 const requiredEnvironment = (name: string): string => {
   const value = process.env[name];
@@ -42,6 +47,16 @@ const readPrompt = async (): Promise<string> => {
   }
   return new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks, size));
 };
+const emitCommandRejectionDiagnostic = (
+  diagnostic: AffiliateAgentCommandRejectionDiagnostic,
+): void => {
+  try {
+    process.stderr.write(`${serializeAffiliateAgentCommandRejectionDiagnostic(diagnostic)}\n`);
+  } catch {
+    // Diagnostics must not alter the terminal stdout protocol or invocation result.
+  }
+};
+
 
 const gatewayModelSchema = z.object({
   id: z.string(),
@@ -177,6 +192,7 @@ const run = async (): Promise<void> => {
         process.stdout.write(`${JSON.stringify(frame)}\n`);
         stop();
       },
+      onCommandRejection: emitCommandRejectionDiagnostic,
     });
     const customTools: CustomTool[] = bridge.definitions.map((definition) => ({
       name: definition.name,

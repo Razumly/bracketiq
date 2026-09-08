@@ -711,8 +711,8 @@ export const AFFILIATE_AGENT_ROLES = [
 ] as const;
 
 export type AffiliateAgentRole = (typeof AFFILIATE_AGENT_ROLES)[number];
-export const AFFILIATE_AGENT_ROLE_CONTRACT_VERSION = 2 as const;
-export const AFFILIATE_AGENT_PROMPT_TEMPLATE_VERSION = 2 as const;
+export const AFFILIATE_AGENT_ROLE_CONTRACT_VERSION = 3 as const;
+export const AFFILIATE_AGENT_PROMPT_TEMPLATE_VERSION = 3 as const;
 
 const AFFILIATE_AGENT_TERMINAL_RESULT_PAYLOAD_SHAPES: Readonly<
   Record<AffiliateAgentRole, readonly string[]>
@@ -728,7 +728,7 @@ const AFFILIATE_AGENT_TERMINAL_RESULT_PAYLOAD_SHAPES: Readonly<
     '- PACKAGE_COMMITTED: {"packageHash":"<sha256>","commitReceiptId":"<identifier>"}',
     '- BOUNDED_REPAIR_SUBMITTED: {"repairPass":<integer 1-3>,"packageHash":"<sha256>","commitReceiptId":"<identifier>"}',
     '- SOURCE_INCOMPATIBLE: {"incompatibilityCode":"<SOURCE_BLOCKED|SOURCE_POLICY_PROHIBITS_CAPTURE|UNSUPPORTED_LAYOUT>"}',
-    '- CONTRACT_GAP: {"contractArea":"<COVERAGE_APPLICABILITY|FRESHNESS|LIFECYCLE_EVIDENCE|MAPPING_EVIDENCE|SEARCH_STRATEGIES|SUPPLY_TARGETS_AND_MARKET_TIERS>","requestedChange":"<non-empty string>","sportEvidence":<optional legacy sport evidence>}',
+    '- CONTRACT_GAP: {"contractArea":"<COVERAGE_APPLICABILITY|FRESHNESS|LIFECYCLE_EVIDENCE|MAPPING_EVIDENCE|SEARCH_STRATEGIES|SUPPLY_TARGETS_AND_MARKET_TIERS>","requestedChange":"<non-empty string>","sportEvidence":<required for legacy sport repair; omit otherwise>}',
   ],
   SUPPLY_REVIEWER: [
     '- APPROVED: {"committedPackageHash":"<sha256>"}',
@@ -750,12 +750,23 @@ const terminalResultShapeForRole = (
 ): readonly string[] => [
   `{"disposition":"<listed terminal disposition>","reasonCodes":["<allowed reason code>"],"evidenceRefs":["<sorted unique evidence ref>"],"summary":"<non-empty summary>","payload":<role-specific payload>}`,
   "Allowed reasonCodes: CONTRACT_REQUIREMENT_MISSING | EVIDENCE_VERIFIED | NO_QUALIFIED_ACTION | POLICY_CONFLICT | SCHEMA_VALIDATED | SOURCE_UNSUPPORTED | TARGET_INVALID.",
+  ...(role === "MAPPING_PRODUCER"
+    ? ["Legacy sport gap reasonCodes also allow SPORT_BLACKLISTED | SPORT_NOT_IN_CATALOG | SPORT_VARIANT_UNRESOLVED. Use the code that matches each unresolved determination."]
+    : []),
   "Use an empty reasonCodes array when no reason code applies; evidenceRefs are sorted unique identifiers.",
   "All result and payload objects are strict: add no fields beyond this shape.",
   ...AFFILIATE_AGENT_TERMINAL_RESULT_PAYLOAD_SHAPES[role],
 ];
 
 
+
+const LEGACY_SPORT_EVIDENCE_INSTRUCTIONS = [
+  "For legacy sport repair, use only the injected sportsCatalog and claim-owned first-party artifacts. Read the complete relevant Markdown and any further HTML or image pages needed before declaring evidence missing. A source label need not literally equal a canonical variant name: resolve the variant when cited text explicitly establishes its surface or format and ties that setting to the activity.",
+  "Indoor, gym, or hard-court volleyball supports Indoor Volleyball; sand or beach volleyball supports Beach Volleyball; explicitly grass or outdoor-field volleyball supports Grass Volleyball. An explicit indoor facility with hardwood volleyball courts, together with a statement that the source's volleyball happens there, supports Indoor Volleyball. Cite both the venue description and the activity-to-venue link. A venue name, city, URL, or existing database sport value alone is not proof.",
+  "Explicit outdoor grass/field soccer supports Grass Soccer; indoor/arena/boarded-field soccer supports Indoor Soccer; futsal rules or a futsal court supports Futsal; sand/beach soccer supports Beach Soccer. Only generic Soccer or Volleyball without usable surface evidence remains VARIANT_UNRESOLVED. An evidenced sport absent from the exact catalog is UNSUPPORTED. Keep blacklisted activities excluded. Do not invent a variant, generic alias, or user decision.",
+  'sportEvidence has {"evidenceRunId":"<claim repairContext.evidenceRunId>","sportsCatalogSha256":"<claim catalog sha256>","sportDeterminations":[{"sourceLabels":["<exact source label>"],"status":"<RESOLVED|VARIANT_UNRESOLVED|UNSUPPORTED|BLACKLISTED>","resolutionBasis":"SOURCE_EVIDENCE","canonicalSportNames":["<exact catalog name; empty unless RESOLVED>"],"rationale":"<evidence-backed explanation>","evidence":[{"artifactId":"<manifest artifactId>","artifactSha256":"<manifest sha256>","artifactKind":"<PAGE_HTML|PAGE_MARKDOWN|PAGE_SCREENSHOT>","pageUrl":"<artifact finalUrl or sourceUrl>","excerpt":"<exact supporting source excerpt>"}]}]}.',
+  "Keep sourceLabels and canonicalSportNames sorted and unique. Order citations by artifactId, artifactSha256, artifactKind, pageUrl, and excerpt. Use the manifest's artifactId for citations and its evidenceRef for package or terminal evidenceRefs. Use only returned provenance URLs for pageUrl. Include the evidenceRef for every cited artifact. Never invent a citation, use another run, or claim USER_DECISION without an authenticated decision.",
+] as const;
 
 const ROLE_PROMPT_INSTRUCTIONS: Readonly<
   Record<AffiliateAgentRole, readonly string[]>
@@ -773,37 +784,25 @@ const ROLE_PROMPT_INSTRUCTIONS: Readonly<
     "Do not invent facts.",
   ],
   MAPPING_PRODUCER: [
-    "Use the inlined Authority Projection as the complete claim context; do not seek claim data elsewhere.",
-    "Use only the trusted OMP tools listed in the gateway protocol.",
-    "Read only listed evidence refs through read_artifact({evidenceRef}).",
-    "Do not call providers directly.",
-    "Do not mutate live mappings directly.",
-    "Build only the closed declarative package shape defined by the mapping contract.",
-    "Validate the package before you commit it.",
-    "Commit only the validated package receipt.",
-    "For a legacy sport repair, inspect the supplied catalog and original manifest-owned artifacts; never guess a sport surface or forge a citation.",
-    "Use the explicit CONSTANT sportName field only when sportEvidence proves the exact canonical sport union.",
-    "Include every sport citation's manifest evidence reference in package evidenceRefs.",
-    "Use a sport-coded contract gap when a sport remains unresolved, unsupported, or needs an authenticated user decision.",
+    "Use the inlined Authority Projection as the complete claim context. Use only the trusted OMP tools listed in the gateway protocol. Read listed evidence refs through read_artifact({evidenceRef}).",
+    "listUrlRef is the evidenceRef of the listed PAGE_HTML or PAGE_MARKDOWN artifact for the source listing page, not a raw URL and not its artifactId. The Gateway resolves that reference through the artifact's stored finalUrl or sourceUrl. Use the existing page artifact when it contains the needed evidence. Its listUrlRef does not require CAPTURE_CLAIM_URL or a captureProfileRef; those inputs are needed only for a separately authorized new capture.",
+    "Extract officialActionUrl from an evidenced link with an ATTRIBUTE selector and ABSOLUTE_URL transform. An outbound registration link in stored evidence does not require a new capture just to preserve that link.",
+    "Build only the closed declarative package shape defined by the mapping contract. Keep live mappings and provider access behind the Gateway. Never submit executable code.",
+    "Validate the package before you commit it. Commit only the validated package receipt.",
+    ...LEGACY_SPORT_EVIDENCE_INSTRUCTIONS,
+    "Use the explicit CONSTANT sportName field only when sportEvidence proves the exact canonical sport union. Include every sport citation's manifest evidence reference in package evidenceRefs.",
+    "Every legacy sport repair CONTRACT_GAP must include payload.sportEvidence and all cited evidenceRefs, even when reasonCodes are generic. A sport-related gap must use the matching SPORT_ reason codes. A non-sport gap may carry verified RESOLVED sports and explain the separate obstacle.",
+    "Do not claim the package is blocked only because a raw URL was rejected. Correct listUrlRef to the authorized page evidenceRef, follow bounded validation feedback, and submit only the remaining evidenced obstacle.",
     "Use execute_command({command}) only with a non-terminal command listed in the Authority Projection.",
-    "Return one evidence-backed terminal disposition through submit_result(...).",
-    "Use only the listed terminal dispositions.",
-    "Never submit executable code.",
+    "Return one evidence-backed terminal disposition through submit_result(...). Use only the listed terminal dispositions.",
   ],
   SUPPLY_REVIEWER: [
-    "Use the inlined Authority Projection as the complete claim context; do not seek claim data elsewhere.",
-    "Use only read_artifact({evidenceRef}) and submit_result(...) for this read-only role.",
-    "Read the committed package through read_artifact({evidenceRef}).",
-    "Read listed reviewer evidence through read_artifact({evidenceRef}).",
-    "Review the package.",
-    "Do not edit the package.",
-    "Do not reuse producer context.",
-    "For a legacy sport repair, inspect the supplied catalog, sportEvidence, and original manifest-owned artifacts; never guess a sport surface.",
+    "Use the inlined Authority Projection as the complete claim context. Use only read_artifact({evidenceRef}) and submit_result(...) for this read-only role.",
+    "Read the committed package and listed reviewer evidence through read_artifact({evidenceRef}).",
+    "Review the package without editing it or reusing producer context. For legacy sport repair, inspect the supplied catalog, sportEvidence, and original manifest-owned artifacts.",
+    ...LEGACY_SPORT_EVIDENCE_INSTRUCTIONS,
     "Do not approve or activate a package whose sport evidence is unresolved, unsupported, or based on an unauthenticated user decision.",
-    "Return one evidence-backed terminal disposition through submit_result(...).",
-    "Use only the listed terminal dispositions.",
-    "Use human review or producer repair when the evidence does not support approval or activation.",
-    "Do not invent authority.",
+    "Return one evidence-backed terminal disposition through submit_result(...). Use only the listed terminal dispositions. Use human review or producer repair when evidence does not support approval or activation. Do not invent authority.",
   ],
   HUMAN_DIRECTED_EXECUTOR: [
     "Use the inlined Authority Projection as the complete claim context; do not seek claim data elsewhere.",
@@ -1778,7 +1777,7 @@ export const affiliateAgentDeclarativePackageSchema = z
     schemaVersion: z.literal(1),
     supplySourceId: identifierSchema,
     listingKind: z.enum(["CLUB", "EVENT", "RENTAL"]),
-    listUrlRef: identifierSchema,
+    listUrlRef: identifierSchema.describe("The claim evidenceRef of the listing PAGE_HTML or PAGE_MARKDOWN artifact. The Gateway resolves its stored finalUrl/sourceUrl. Do not supply a raw URL or artifactId; existing stored evidence needs no capture profile."),
     itemSelector: z.string().trim().min(1).max(500),
     fields: z
       .array(affiliateAgentDeclarativePackageFieldSchema)

@@ -6,6 +6,7 @@ import {
   serializeAffiliateAgentRunnerChildFailureDiagnostic,
   type AffiliateAgentRunnerChildFailureDiagnostic,
 } from "../run-affiliate-agent-runner";
+import { gatewayCommandRejectionDiagnosticFor } from "../../src/server/affiliateImports/affiliateAgentCommandDiagnostics";
 
 describe("affiliate agent runner child diagnostics", () => {
   it.each([
@@ -55,5 +56,27 @@ describe("affiliate agent runner child diagnostics", () => {
     expect(diagnostic.stderrTailBytes).toBeLessThanOrEqual(
       AFFILIATE_AGENT_RUNNER_MAX_STDERR_TAIL_BYTES,
     );
+  });
+  it("maps only exact finite Gateway messages to reason codes", () => {
+    const packageMismatch = gatewayCommandRejectionDiagnosticFor({
+      command: {
+        type: "VALIDATE_DECLARATIVE_PACKAGE",
+        data: {},
+      },
+      errorCode: "COMMAND_NOT_PERMITTED",
+      safeMessage: "The package Supply Source does not match the claim.",
+      isRetryable: false,
+    });
+    expect(packageMismatch).toEqual(expect.objectContaining({
+      reasonCode: "PACKAGE_SOURCE_MISMATCH",
+    }));
+    const unknown = gatewayCommandRejectionDiagnosticFor({
+      command: { type: "VALIDATE_DECLARATIVE_PACKAGE", data: {} },
+      errorCode: "COMMAND_NOT_PERMITTED",
+      safeMessage: "unsafe secret-bearing detail",
+      isRetryable: false,
+    });
+    expect(unknown).toEqual(expect.objectContaining({ reasonCode: "UNKNOWN" }));
+    expect(JSON.stringify(unknown)).not.toContain("unsafe secret-bearing detail");
   });
 });

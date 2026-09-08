@@ -38,6 +38,14 @@ import {
   type AffiliateAgentRunnerRequest,
   type AffiliateAgentRunnerResponse,
 } from "../src/server/affiliateImports/affiliateAgentRunnerProtocol";
+import {
+  AFFILIATE_AGENT_COMMAND_DIAGNOSTIC_MAX_RECORD_BYTES,
+  AFFILIATE_AGENT_COMMAND_DIAGNOSTIC_MAX_RECORDS,
+  AFFILIATE_AGENT_COMMAND_DIAGNOSTIC_MAX_TOTAL_BYTES,
+  parseAffiliateAgentCommandRejectionDiagnostic,
+  type AffiliateAgentCommandRejectionDiagnostic,
+} from "../src/server/affiliateImports/affiliateAgentCommandDiagnostics";
+
 
 
 const RUNNER_CGROUP_RELATIVE_PATH_ENV =
@@ -746,6 +754,7 @@ type ActiveInvocation = Readonly<{
   requestId: string;
   reservationId: string;
   workerId: string;
+  invocationId: string;
   prompt: string;
   environment: RunnerEnvironment;
   workspacePath: string;
@@ -1090,6 +1099,11 @@ type ChildRuntimeState = {
   childClosed: Deferred<void>;
   childGeneration: number;
   decoder: TextDecoder;
+  diagnosticDecoder: TextDecoder;
+  diagnosticLineBuffer: string;
+  diagnosticDroppingLine: boolean;
+  diagnosticRecordCount: number;
+  diagnosticRecordBytes: number;
   output: string;
   stdoutBytes: number;
   stderrTail: Buffer;
@@ -1156,6 +1170,106 @@ const appendChildStderr = (
   const start = Math.max(0, combined.byteLength - MAX_STDERR_TAIL_BYTES);
   state.stderrTail = Buffer.from(combined.subarray(start));
 };
+const logAffiliateAgentCommandRejectionDiagnostic = (
+  active: ActiveInvocation,
+  diagnostic: AffiliateAgentCommandRejectionDiagnostic,
+): void => {
+  // Container logs retain these records after workspace cleanup.
+  // Their configured retention is not a permanent database audit.
+  try {
+    console.info(JSON.stringify({
+      event: diagnostic.event,
+      version: diagnostic.version,
+      workerId: active.workerId,
+      invocationId: active.invocationId,
+      stage: diagnostic.stage,
+      command: diagnostic.command,
+      errorCode: diagnostic.errorCode,
+      reasonCode: diagnostic.reasonCode,
+      issueCodes: diagnostic.issueCodes,
+      issuePaths: diagnostic.issuePaths,
+      isRetryable: diagnostic.isRetryable,
+    }));
+  } catch {
+    // Diagnostics must not change child containment or result authority.
+  }
+};
+
+const publishChildCommandRejectionDiagnostic = (
+  state: ChildRuntimeState,
+  line: string,
+): void => {
+  const recordBytes = Buffer.byteLength(line, "utf8");
+  const framedBytes = recordBytes + Buffer.byteLength("\n", "utf8");
+  if (
+    state.diagnosticRecordCount >= AFFILIATE_AGENT_COMMAND_DIAGNOSTIC_MAX_RECORDS
+    || recordBytes > AFFILIATE_AGENT_COMMAND_DIAGNOSTIC_MAX_RECORD_BYTES
+    || state.diagnosticRecordBytes
+      > AFFILIATE_AGENT_COMMAND_DIAGNOSTIC_MAX_TOTAL_BYTES - framedBytes
+  ) return;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line.trim());
+  } catch {
+    return;
+  }
+  const diagnostic = parseAffiliateAgentCommandRejectionDiagnostic(parsed);
+  if (diagnostic === null) return;
+  state.diagnosticRecordCount += 1;
+  state.diagnosticRecordBytes += framedBytes;
+  logAffiliateAgentCommandRejectionDiagnostic(state.active, diagnostic);
+};
+
+const processChildDiagnosticLines = (state: ChildRuntimeState): void => {
+  while (true) {
+    const newlineIndex = state.diagnosticLineBuffer.indexOf("\n");
+    if (newlineIndex < 0) break;
+    const line = state.diagnosticLineBuffer.slice(0, newlineIndex);
+    state.diagnosticLineBuffer = state.diagnosticLineBuffer.slice(newlineIndex + 1);
+    if (state.diagnosticDroppingLine) {
+      state.diagnosticDroppingLine = false;
+      continue;
+    }
+    publishChildCommandRejectionDiagnostic(state, line);
+  }
+  if (
+    Buffer.byteLength(state.diagnosticLineBuffer, "utf8")
+      > AFFILIATE_AGENT_COMMAND_DIAGNOSTIC_MAX_RECORD_BYTES
+  ) {
+    state.diagnosticLineBuffer = "";
+    state.diagnosticDroppingLine = true;
+  }
+};
+
+const appendChildCommandDiagnostics = (
+  state: ChildRuntimeState,
+  chunk: Buffer | string,
+): void => {
+  try {
+    const text = typeof chunk === "string"
+      ? chunk
+      : state.diagnosticDecoder.decode(chunk, { stream: true });
+    state.diagnosticLineBuffer += text;
+    processChildDiagnosticLines(state);
+  } catch {
+    // Malformed stderr is never allowed to affect the child result.
+    state.diagnosticLineBuffer = "";
+    state.diagnosticDroppingLine = true;
+    state.diagnosticDecoder = new TextDecoder("utf-8");
+  }
+};
+
+const flushChildCommandDiagnostics = (state: ChildRuntimeState): void => {
+  try {
+    const trailing = state.diagnosticDecoder.decode();
+    if (trailing) state.diagnosticLineBuffer += trailing;
+    processChildDiagnosticLines(state);
+  } catch {
+    state.diagnosticLineBuffer = "";
+    state.diagnosticDroppingLine = true;
+  }
+};
+
 
 const isCurrentChild = (state: ChildRuntimeState): boolean => (
   state.active.child === state.child
@@ -1357,6 +1471,7 @@ const handleChildClose = (
   state: ChildRuntimeState,
   exitCode: number | null,
 ): void => {
+  flushChildCommandDiagnostics(state);
   state.childClosed.resolve();
   if (state.hasPublishedStartFailure || state.hasOutputDecodeError) {
     publishChildFailureDiagnostic(state, exitCode ?? state.child.exitCode ?? 1);
@@ -1397,6 +1512,7 @@ const attachChildRuntime = (state: ChildRuntimeState): void => {
   });
   state.child.stderr?.on("data", (chunk: Buffer | string) => {
     appendChildStderr(state, chunk);
+    appendChildCommandDiagnostics(state, chunk);
   });
   state.child.stderr?.resume();
   state.child.stdout?.on("data", (chunk: Buffer | string) => {
@@ -1547,6 +1663,11 @@ const spawnChild = (
     childClosed,
     childGeneration,
     decoder: new TextDecoder("utf-8", { fatal: true }),
+    diagnosticDecoder: new TextDecoder("utf-8"),
+    diagnosticLineBuffer: "",
+    diagnosticDroppingLine: false,
+    diagnosticRecordCount: 0,
+    diagnosticRecordBytes: 0,
     output: "",
     stdoutBytes: 0,
     stderrTail: Buffer.alloc(0),

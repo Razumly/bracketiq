@@ -381,6 +381,8 @@ it("preserves Unicode across bounded evidence pages and refuses corrupt bytes", 
     sha256: evidenceHash,
     mimeType: "text/markdown",
     byteSize: evidence.byteLength,
+    sourceUrl: "https://evidence.example.test/requested",
+    finalUrl: "https://evidence.example.test/final",
     bytes: evidence,
   };
   const perform = jest.fn().mockResolvedValue(artifact);
@@ -388,8 +390,19 @@ it("preserves Unicode across bounded evidence pages and refuses corrupt bytes", 
     claim: claimFor("MAPPING_PRODUCER"), token: "private-claim-token", gateway: { perform }, onTerminal: jest.fn(),
   });
   const first = textValue(await tools.execute("read_artifact", { evidenceRef: "evidence-1", limit: 4 }));
+  expect(first.sourceUrl).toBe(artifact.sourceUrl);
+  expect(first.finalUrl).toBe(artifact.finalUrl);
+  const cached = textValue(await tools.execute("read_artifact", {
+    evidenceRef: "evidence-1",
+    limit: 4,
+  }));
+  expect(cached).toEqual(first);
   const second = textValue(await tools.execute("read_artifact", { evidenceRef: "evidence-1", offset: first.nextOffset, limit: 1 }));
   const third = textValue(await tools.execute("read_artifact", { evidenceRef: "evidence-1", offset: second.nextOffset }));
+  expect(second.sourceUrl).toBe(artifact.sourceUrl);
+  expect(second.finalUrl).toBe(artifact.finalUrl);
+  expect(third.sourceUrl).toBe(artifact.sourceUrl);
+  expect(third.finalUrl).toBe(artifact.finalUrl);
   expect(first.text + second.text + third.text).toBe(evidence.toString("utf8"));
   expect(third.endOfArtifact).toBe(true);
   const corrupt = createAffiliateOmpGatewayTools({
@@ -399,6 +412,58 @@ it("preserves Unicode across bounded evidence pages and refuses corrupt bytes", 
   });
   expect((await corrupt.execute("read_artifact", { evidenceRef: "evidence-1" })).isError).toBe(true);
   expect(corrupt.isClosed).toBe(true);
+});
+it("preserves immutable URL metadata in image evidence", async () => {
+  const imageBytes = Buffer.from([137, 80, 78, 71, 13, 10]);
+  const baseClaim = claimFor("MAPPING_PRODUCER");
+  const baseEntry = baseClaim.evidenceManifest.entries[0];
+  if (!baseEntry) throw new Error("Expected a fixture evidence entry.");
+  const manifestWithoutHash = {
+    schemaVersion: baseClaim.evidenceManifest.schemaVersion,
+    entries: [{
+      ...baseEntry,
+      kind: "PAGE_SCREENSHOT" as const,
+      sha256: createHash("sha256").update(imageBytes).digest("hex"),
+      mimeType: "image/png",
+      byteSize: imageBytes.byteLength,
+    }],
+  };
+  const claim = {
+    ...baseClaim,
+    evidenceManifest: {
+      ...manifestWithoutHash,
+      hash: hashAffiliateAgentValue(manifestWithoutHash),
+    },
+  };
+  const artifact = {
+    kind: "ARTIFACT_READ" as const,
+    receiptId: "image-receipt",
+    evidenceRef: "evidence-1",
+    sha256: manifestWithoutHash.entries[0]!.sha256,
+    mimeType: "image/png",
+    byteSize: imageBytes.byteLength,
+    sourceUrl: "https://evidence.example.test/screenshot",
+    finalUrl: "https://cdn.example.test/screenshot.png",
+    bytes: imageBytes,
+  };
+  const tools = createAffiliateOmpGatewayTools({
+    claim,
+    token: "private-claim-token",
+    gateway: { perform: jest.fn().mockResolvedValue(artifact) },
+    onTerminal: jest.fn(),
+  });
+  const result = await tools.execute("read_artifact", { evidenceRef: "evidence-1" });
+  expect(textValue(result)).toEqual({
+    evidenceRef: artifact.evidenceRef,
+    sha256: artifact.sha256,
+    sourceUrl: artifact.sourceUrl,
+    finalUrl: artifact.finalUrl,
+  });
+  expect(result.content[1]).toEqual({
+    type: "image",
+    data: imageBytes.toString("base64"),
+    mimeType: "image/png",
+  });
 });
 it("bounds serialized Unicode text pages while preserving the complete artifact", async () => {
   const largeText = "😀".repeat(40_000);
@@ -427,6 +492,8 @@ it("bounds serialized Unicode text pages while preserving the complete artifact"
     evidenceRef: "evidence-1",
     sha256: manifestWithoutHash.entries[0]!.sha256,
     mimeType: "text/markdown",
+    sourceUrl: "https://evidence.example.test/requested",
+    finalUrl: "https://evidence.example.test/final",
     byteSize: largeBytes.byteLength,
     bytes: largeBytes,
   };
@@ -482,4 +549,59 @@ it("reuses pending command authority instead of starting a duplicate effect", as
   const command = { command: { type: "CAPTURE_CLAIM_URL", data: { urlRef: "url-1", captureProfileRef: "profile-1" } } };
   expect(textValue(await tools.execute("execute_command", command)).code).toBe("OPERATION_IN_PROGRESS");
   expect(textValue(await tools.execute("execute_command", command)).kind).toBe("COMMAND_SUCCEEDED");
+});
+it("emits bounded redacted diagnostics for local and Gateway command rejection", async () => {
+  const secret = "https://secret.example/credential?token=not-a-log";
+  const diagnostics: Array<Record<string, unknown>> = [];
+  const perform = jest.fn().mockRejectedValue(new AffiliateAgentGatewayError({
+    code: "COMMAND_NOT_PERMITTED",
+    isRetryable: false,
+    safeMessage: `unsafe implementation detail ${secret}`,
+  }));
+  const tools = createAffiliateOmpGatewayTools({
+    claim: claimFor("MAPPING_PRODUCER"),
+    token: "private-claim-token",
+    gateway: { perform },
+    onTerminal: jest.fn(),
+    onCommandRejection: (diagnostic) => {
+      diagnostics.push(diagnostic);
+    },
+  });
+  const command = {
+    command: {
+      type: "CAPTURE_CLAIM_URL",
+      data: { urlRef: "url-1", captureProfileRef: "profile-1" },
+    },
+  };
+  expect((await tools.execute("execute_command", command)).isError).toBe(true);
+  expect((await tools.execute("execute_command", {
+    command: { type: "CAPTURE_CLAIM_URL", data: { urlRef: secret, captureProfileRef: "" } },
+  })).isError).toBe(true);
+  expect(diagnostics).toEqual([
+    expect.objectContaining({
+      version: 1,
+      event: "affiliate-agent-command-rejection",
+      stage: "GATEWAY",
+      command: "CAPTURE_CLAIM_URL",
+      errorCode: "COMMAND_NOT_PERMITTED",
+      issueCodes: [],
+      issuePaths: [],
+      isRetryable: false,
+    }),
+    expect.objectContaining({
+      stage: "LOCAL_SCHEMA",
+      command: "CAPTURE_CLAIM_URL",
+      errorCode: "COMMAND_SCHEMA_INVALID",
+      issueCodes: ["MISSING_VALUE"],
+      issuePaths: ["command.data.captureProfileRef"],
+    }),
+  ]);
+  expect(JSON.stringify(diagnostics)).not.toContain(secret);
+  for (let index = 0; index < 40; index += 1) {
+    await tools.execute("execute_command", {
+      command: { type: "CAPTURE_CLAIM_URL", data: { urlRef: secret, captureProfileRef: "" } },
+    });
+  }
+  expect(diagnostics.length).toBeLessThanOrEqual(32);
+  expect(Buffer.byteLength(JSON.stringify(diagnostics), "utf8")).toBeLessThanOrEqual(16 * 1_024);
 });

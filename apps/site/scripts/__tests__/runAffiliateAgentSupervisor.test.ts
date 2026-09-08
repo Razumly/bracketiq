@@ -79,6 +79,23 @@ const serverWithPayload = async (
   };
 };
 
+const artifactReadRequest = {
+  kind: "READ_ARTIFACT",
+  idempotencyKey: "read-artifact-1",
+  evidenceRef: "page-evidence",
+  authorization: {
+    token: "test-claim-token",
+    jobId: "job-1",
+    claimId: "claim-1",
+    claimGeneration: 1,
+    lifecycleGeneration: 1,
+    role: "MAPPING_PRODUCER",
+    workerId: "producer-1",
+    invocationId: "invocation-1",
+    supplyContractHash: "a".repeat(64),
+  },
+} satisfies AffiliateAgentClaimOperation;
+
 describe("affiliate agent supervisor CLI", () => {
   it("enters the main path when executed directly through tsx", () => {
     const result = runSupervisorCli();
@@ -298,6 +315,61 @@ describe("affiliate agent supervisor CLI", () => {
       await new Promise<void>((resolvePromise) => server.close(() => resolvePromise()));
     }
   });
+  it("reads provenance-bearing evidence for source-relative link resolution", async () => {
+    const bytes = Buffer.from("Stored source evidence.");
+    const { server, address } = await serverWithPayload({
+      result: {
+        kind: "ARTIFACT_READ",
+        receiptId: "receipt-1",
+        evidenceRef: "page-evidence",
+        sha256: "a".repeat(64),
+        mimeType: "text/markdown",
+        byteSize: bytes.length,
+        bytes: bytes.toString("base64"),
+        encoding: "base64",
+        sourceUrl: null,
+        finalUrl: "https://club.example/camps/chicago/",
+      },
+    });
+    try {
+      const gateway = new AffiliateAgentHttpGateway(address, {
+        roleCredential: "role-credential",
+      });
+      const artifact = await gateway.perform(artifactReadRequest);
+      expect(new URL("register", artifact.finalUrl ?? artifact.sourceUrl ?? "").href)
+        .toBe("https://club.example/camps/chicago/register");
+      expect(Buffer.from(artifact.bytes).toString("utf8")).toBe("Stored source evidence.");
+    } finally {
+      await new Promise<void>((resolvePromise) => server.close(() => resolvePromise()));
+    }
+  });
+
+  it("rejects legacy artifact responses that omit provenance fields", async () => {
+    const { server, address } = await serverWithPayload({
+      result: {
+        kind: "ARTIFACT_READ",
+        receiptId: "receipt-1",
+        evidenceRef: "page-evidence",
+        sha256: "a".repeat(64),
+        mimeType: "text/markdown",
+        byteSize: 0,
+        bytes: "",
+        encoding: "base64",
+      },
+    });
+    try {
+      const gateway = new AffiliateAgentHttpGateway(address, {
+        roleCredential: "role-credential",
+      });
+      await expect(gateway.perform(artifactReadRequest)).rejects.toMatchObject({
+        code: "INTERNAL_ERROR",
+        isRetryable: true,
+      });
+    } finally {
+      await new Promise<void>((resolvePromise) => server.close(() => resolvePromise()));
+    }
+  });
+
   it("maps the exact gateway Unauthorized response to a non-retryable credential error", async () => {
     const server = createHttpServer((_request, response) => {
       const body = JSON.stringify({ error: "Unauthorized." });

@@ -336,10 +336,13 @@ const isArtifactOperationResult = (value: JsonRecord): boolean => {
     "byteSize",
     "bytes",
     "encoding",
+    "sourceUrl",
+    "finalUrl",
   ])) return false;
   if (!hasNonEmptyStrings(value, ["evidenceRef", "sha256", "mimeType"])) {
     return false;
   }
+  if (!isNullableString(value.sourceUrl) || !isNullableString(value.finalUrl)) return false;
   if (value.encoding !== "base64" || !isBase64(value.bytes)) return false;
   return isNonNegativeInteger(value.byteSize)
     && Buffer.byteLength(value.bytes, "base64") === value.byteSize;

@@ -84,7 +84,11 @@ Repair claims carry a fresh sports catalog and an exact intake/run context.
 Evidence handles use `intake-artifact:<artifact-row-id>` so shared file bytes
 cannot substitute another capture run's provenance. The gateway verifies
 actual bytes, both captured URLs, run ownership, and catalog freshness.
-Sport-coded gaps use `CONTRACT_GAP` with verified `sportEvidence`.
+Every legacy producer `CONTRACT_GAP` requires verified `sportEvidence` and
+the manifest evidenceRef for each citation, including gaps with generic reason
+codes. Unresolved assessments require matching sport reason codes. A
+non-sport gap may carry verified resolved sports. Invalid assessments enter
+the bounded schema-correction path; they do not complete the job.
 Package validation and commit require the exact resolved sport union.
 
 Independent approval rechecks the committed evidence and catalog in the same
@@ -103,8 +107,9 @@ roles and apply the migration's conditional grants before the canary.
 
 Use `@oh-my-pi/pi-coding-agent@18.1.13` with the pinned Bun runtime in the
 governed Dockerfile. The production execution class is `PRODUCTION_OMP`.
-Current role and prompt contracts use version 2. Old deployment and preflight
-reports do not authorize this runtime.
+Current source role and prompt contracts use version 3. Deploy matching
+Gateway, supervisor, and runner code together with newly compiled contracts
+and fresh preflight evidence. Old reports do not authorize this correction.
 
 `affiliate-model-auth-broker` owns the private OAuth store for two ChatGPT
 accounts. Its exact container/service ID is `affiliate-model-auth-broker`; it
@@ -164,6 +169,32 @@ evidence. `execute_command` exists only when the role permits a non-terminal
 command. `submit_result` binds claim identity and authorization in trusted
 code. It emits one terminal frame only after the Gateway accepts the result.
 The supervisor confirms that result through an idempotent replay.
+
+Artifact reads include required nullable `sourceUrl` and `finalUrl` fields.
+They come from stored capture metadata and remain fixed on receipt replay.
+The OMP reader preserves them in text pages, cached pages, and image metadata.
+The text-page limit still includes all serialized metadata. Missing historical
+URL metadata remains null; the reader does not invent it from page links.
+For a declarative package, `listUrlRef` is the authorized page artifact's
+evidenceRef. It is not a raw URL or artifactId. Existing stored evidence does
+not require a new capture profile.
+
+The isolated worker does not load repository skills, rules, or context files.
+Its generated prompt contains the applicable URL-reference and sport-evidence
+rules. Change that prompt contract when those production rules change.
+An explicit indoor venue and a source-backed link between that venue and the
+volleyball activity can establish Indoor Volleyball without a literal
+canonical label. A venue name or generic sport word alone cannot.
+
+Command rejections produce `affiliate-agent-command-rejection` records in
+the root runner's structured logs. The child reports only allowlisted stages,
+commands, reason/error codes, issue codes, and field paths. The root binds
+worker and invocation identity from its trusted launch state. It enforces
+4 KiB per record, at most 32 records, and 16 KiB of framed records per child
+invocation. It does not forward raw stderr, input values, URLs, credentials,
+prompts, or raw error messages. These records survive workspace cleanup,
+including successful terminal completion. Retention follows the configured
+container log policy; this is not a permanent database audit.
 
 The OMP runner does not use Bubblewrap. The shipped runner profiles remove
 the Codex-specific namespace and mount allowances. Keep the private cgroup,

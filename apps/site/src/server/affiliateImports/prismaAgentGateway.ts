@@ -3603,31 +3603,33 @@ const assertArtifactContentIntegrity = (
   }
 };
 
-const assertSafeArtifactSourceUrl = (
-  sourceUrlValue: string | null,
+const assertSafeArtifactUrl = (
+  urlValue: string | null,
+  label: "source" | "final",
 ): void => {
-  if (sourceUrlValue === null) return;
-  let sourceUrl: URL;
+  if (urlValue === null) return;
+  let url: URL;
   try {
-    sourceUrl = new URL(sourceUrlValue);
+    url = new URL(urlValue);
   } catch {
     throw gatewayError(
       "ARTIFACT_INTEGRITY_FAILED",
-      "The artifact source URL is invalid.",
+      `The artifact ${label} URL is invalid.`,
     );
   }
   if (
-    !["http:", "https:"].includes(sourceUrl.protocol) ||
-    sourceUrl.username !== "" ||
-    sourceUrl.password !== "" ||
-    sourceUrlValue.length > 2_048
+    !["http:", "https:"].includes(url.protocol) ||
+    url.username !== "" ||
+    url.password !== "" ||
+    urlValue.length > 2_048
   ) {
     throw gatewayError(
       "ARTIFACT_INTEGRITY_FAILED",
-      "The artifact source URL is not safe.",
+      `The artifact ${label} URL is not safe.`,
     );
   }
 };
+
 
 const verifyArtifactRead = (
   artifact: Readonly<{
@@ -3640,10 +3642,42 @@ const verifyArtifactRead = (
     mimeType: string;
     byteSize: number;
     sourceUrl: string | null;
+    finalUrl?: string | null;
   }>,
 ): void => {
   assertArtifactContentIntegrity(artifact, read);
-  assertSafeArtifactSourceUrl(read.sourceUrl);
+  assertSafeArtifactUrl(read.sourceUrl, "source");
+  assertSafeArtifactUrl(read.finalUrl ?? null, "final");
+};
+
+const storedArtifactReadUrl = (
+  value: unknown,
+  label: "source" | "final",
+): string | null => {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string") {
+    throw gatewayError(
+      "ARTIFACT_INTEGRITY_FAILED",
+      `The stored artifact ${label} URL is invalid.`,
+    );
+  }
+  assertSafeArtifactUrl(value, label);
+  return value;
+};
+
+const artifactReadMetadataFromReceipt = (
+  response: Prisma.JsonValue | null,
+): Readonly<{ sourceUrl: string | null; finalUrl: string | null }> => {
+  if (!isGatewayRecord(response) || response.kind !== "ARTIFACT_READ") {
+    throw gatewayError(
+      "INTERNAL_ERROR",
+      "The stored artifact-read receipt is invalid.",
+    );
+  }
+  return {
+    sourceUrl: storedArtifactReadUrl(response.sourceUrl, "source"),
+    finalUrl: storedArtifactReadUrl(response.finalUrl, "final"),
+  };
 };
 
 const failArtifactReceipt = async (
@@ -3753,6 +3787,7 @@ const performArtifactRead = async (
           authorized,
           artifact,
           receiptId: existing.id,
+          replayResponseJson: existing.responseJson,
           isReplayed: true,
         };
       }
@@ -3797,7 +3832,13 @@ const performArtifactRead = async (
           retentionClass: "INDEFINITE",
         },
       });
-      return { authorized, artifact, receiptId, isReplayed: false };
+      return {
+        authorized,
+        artifact,
+        receiptId,
+        replayResponseJson: null,
+        isReplayed: false,
+      };
     },
     {
       code: "INTERNAL_ERROR",
@@ -3821,6 +3862,15 @@ const performArtifactRead = async (
       "The artifact could not be read safely.",
     );
   }
+  const replayMetadata = reserved.isReplayed
+    ? artifactReadMetadataFromReceipt(reserved.replayResponseJson)
+    : null;
+  const responseSourceUrl = reserved.isReplayed
+    ? replayMetadata!.sourceUrl
+    : read.sourceUrl;
+  const responseFinalUrl = reserved.isReplayed
+    ? replayMetadata!.finalUrl
+    : read.finalUrl ?? null;
 
   for (
     let attempt = 1;
@@ -3844,6 +3894,8 @@ const performArtifactRead = async (
             sha256: reserved.artifact.contentHash,
             mimeType: reserved.artifact.mimeType,
             byteSize: reserved.artifact.byteSize,
+            sourceUrl: read.sourceUrl,
+            finalUrl: read.finalUrl ?? null,
           };
           const completed =
             await transaction.affiliateAgentGatewayOperationReceipts.updateMany(
@@ -3933,6 +3985,8 @@ const performArtifactRead = async (
     sha256: reserved.artifact.contentHash,
     mimeType: reserved.artifact.mimeType,
     byteSize: reserved.artifact.byteSize,
+    sourceUrl: responseSourceUrl,
+    finalUrl: responseFinalUrl,
     bytes: read.bytes,
   };
 };
@@ -7125,6 +7179,35 @@ const schemaCorrectionIssues = [
     message: "The result does not match an allowed terminal schema.",
   },
 ] as const;
+
+const legacySportSchemaCorrectionIssues: AffiliateAgentSchemaCorrectionResult["issues"] = [
+  {
+    path: ["payload", "sportEvidence"],
+    code: "INVALID_VALUE",
+    message: "Legacy sport repair contract gaps require structured sportEvidence with manifest-owned citations.",
+  },
+  {
+    path: ["evidenceRefs"],
+    code: "INVALID_VALUE",
+    message: "Terminal evidenceRefs must include every sport citation's manifest evidenceRef.",
+  },
+];
+
+const terminalResultCorrectionIssuesFor = (
+  authorized: AuthorizedClaim,
+  result: unknown,
+): AffiliateAgentSchemaCorrectionResult["issues"] => {
+  if (
+    authorized.envelope.subject.type === "MAPPING_PRODUCER"
+    && authorized.envelope.subject.repairContext?.kind === "LEGACY_SPORT_REPAIR"
+    && isGatewayRecord(result)
+    && result.role === "MAPPING_PRODUCER"
+    && result.disposition === "CONTRACT_GAP"
+  ) {
+    return legacySportSchemaCorrectionIssues;
+  }
+  return schemaCorrectionIssues;
+};
 const INVOCATION_FAILURE_PENDING_EFFECT_MESSAGE =
   "The invocation failure has a pending external effect.";
 
@@ -9226,19 +9309,66 @@ const verifyLegacySportRepairTerminal = async (
     || result.role !== "MAPPING_PRODUCER"
     || result.disposition !== "CONTRACT_GAP"
   ) return;
-  if (!result.payload.sportEvidence && !result.reasonCodes.some((code) => code.startsWith("SPORT_"))) return;
-  if (!result.payload.sportEvidence) {
-    throw gatewayError("EVIDENCE_REFERENCE_NOT_PERMITTED", "Sport review requires claim-owned sport evidence.");
+  const sportEvidence = result.payload.sportEvidence;
+  if (!sportEvidence) {
+    throw gatewayError(
+      "EVIDENCE_REFERENCE_NOT_PERMITTED",
+      "Legacy sport repair contract gaps require structured sport evidence.",
+    );
   }
+  const resultEvidenceRefs = new Set(result.evidenceRefs);
+  for (const determination of sportEvidence.sportDeterminations) {
+    for (const citation of determination.evidence) {
+      const manifestEntry = authorized.envelope.evidenceManifest.entries.find(
+        (entry) =>
+          entry.artifactId === citation.artifactId
+          && entry.kind === citation.artifactKind,
+      );
+      if (!manifestEntry || !resultEvidenceRefs.has(manifestEntry.evidenceRef)) {
+        throw gatewayError(
+          "EVIDENCE_REFERENCE_NOT_PERMITTED",
+          "Legacy sport repair terminal evidenceRefs must include every cited manifest artifact.",
+        );
+      }
+    }
+  }
+  const reviewReady = (
+    sportEvidence.sportDeterminations.length > 0
+    && sportEvidence.sportDeterminations.every(
+      (determination) =>
+        determination.status === "RESOLVED"
+        || determination.status === "BLACKLISTED",
+    )
+    && sportEvidence.sportDeterminations.some(
+      (determination) => determination.status === "RESOLVED",
+    )
+  );
+  const observedSportNames = reviewReady
+    ? Array.from(
+        new Set(
+          sportEvidence.sportDeterminations.flatMap(
+            (determination) => determination.canonicalSportNames,
+          ),
+        ),
+      ).sort()
+    : undefined;
   await verifyAffiliateAgentLegacySportRepair({
     prisma: database,
     artifacts: dependencies.artifacts,
     claim: authorized.envelope,
-    sportEvidence: result.payload.sportEvidence,
-    resultKind: "HUMAN_REVIEW_REQUIRED",
+    sportEvidence,
+    resultKind: reviewReady ? "REVIEW_REQUIRED" : "HUMAN_REVIEW_REQUIRED",
     reasonCodes: result.reasonCodes,
+    ...(observedSportNames === undefined ? {} : { observedSportNames }),
   });
 };
+
+const isTerminalResultEvidenceCorrection = (
+  error: unknown,
+): boolean => (
+  error instanceof AffiliateAgentGatewayError
+  && error.code === "EVIDENCE_REFERENCE_NOT_PERMITTED"
+);
 
 const prepareTerminalResult = async (
   dependencies: AffiliateAgentGatewayDependencies,
@@ -9316,7 +9446,16 @@ const prepareTerminalResult = async (
     return { kind: "REPLAY", result: recoveredReplay };
   }
   if (parsedResult) {
-    await verifyLegacySportRepairTerminal(dependencies, dependencies.prisma, initialAuthorization, parsedResult);
+    try {
+      await verifyLegacySportRepairTerminal(
+        dependencies,
+        dependencies.prisma,
+        initialAuthorization,
+        parsedResult,
+      );
+    } catch (error) {
+      if (!isTerminalResultEvidenceCorrection(error)) throw error;
+    }
   }
   let reviewerTerminalEffectReceiptId: string | undefined;
   if (existing === null && parsedResult?.role === "SUPPLY_REVIEWER") {
@@ -9755,11 +9894,12 @@ const persistSchemaCorrection = async (
   requestHash: string,
   now: Date,
   submissionNumber: number,
+  correctionIssues: AffiliateAgentSchemaCorrectionResult["issues"] = schemaCorrectionIssues,
 ): Promise<AffiliateAgentSchemaCorrectionResult> => {
   const receiptId = dependencies.identifiers.create("receipt");
   const remainingSubmissions =
     AFFILIATE_AGENT_MAX_SCHEMA_CORRECTIONS - submissionNumber;
-  const issues = [...schemaCorrectionIssues];
+  const issues = [...correctionIssues];
   const correctionResult: AffiliateAgentSchemaCorrectionResult = {
     kind: "SCHEMA_CORRECTION_REQUIRED",
     receiptId,
@@ -9848,6 +9988,8 @@ const handleInvalidTerminalResult = async (
   input: Extract<AffiliateAgentClaimOperation, { kind: "SUBMIT_RESULT" }>,
   requestHash: string,
   now: Date,
+  correctionIssues: AffiliateAgentSchemaCorrectionResult["issues"] =
+    schemaCorrectionIssues,
 ): Promise<AffiliateAgentSchemaCorrectionResult | AffiliateAgentInvocationFailedResult> => {
   const submissionNumber = authorized.claim.schemaCorrectionCount + 1;
   assertSchemaCorrectionBudget(submissionNumber);
@@ -9870,6 +10012,7 @@ const handleInvalidTerminalResult = async (
     requestHash,
     now,
     submissionNumber,
+    correctionIssues,
   );
 };
 
@@ -12358,10 +12501,32 @@ const executePreparedTerminalResultTransaction = (
           preparation.input,
           preparation.requestHash,
           now,
+          terminalResultCorrectionIssuesFor(
+            authorized,
+            preparation.input.result,
+          ),
         );
       }
       validateTerminalResultScope(authorized, parsedResult.data);
-      await verifyLegacySportRepairTerminal(dependencies, transaction, authorized, parsedResult.data);
+      try {
+        await verifyLegacySportRepairTerminal(
+          dependencies,
+          transaction,
+          authorized,
+          parsedResult.data,
+        );
+      } catch (error) {
+        if (!isTerminalResultEvidenceCorrection(error)) throw error;
+        return handleInvalidTerminalResult(
+          transaction,
+          dependencies,
+          authorized,
+          preparation.input,
+          preparation.requestHash,
+          now,
+          terminalResultCorrectionIssuesFor(authorized, parsedResult.data),
+        );
+      }
       await assertReviewerTerminalEffectCompleted(
         transaction,
         authorized,

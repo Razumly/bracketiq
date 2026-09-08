@@ -33,7 +33,7 @@ const SUPERVISOR_HALT_CREDENTIAL = "supervisor-halt-credential-4f3a9e7c";
 const WORKER_ROLE_CREDENTIAL = "worker-role-credential-4f3a9e7c";
 const PATH_PREFIX = "/v1/affiliate-agent";
 describe("affiliate agent gateway artifact store", () => {
-  it("uses persisted gateway artifact MIME when local storage omits content type", async () => {
+  it("preserves stored MIME and distinct capture URLs for local artifacts", async () => {
     const bytes = Buffer.from("<html>captured</html>", "utf8");
     const gatewayArtifactFindFirst = jest.fn(async () => ({ mimeType: "text/html" }));
     const storage = {
@@ -44,7 +44,10 @@ describe("affiliate agent gateway artifact store", () => {
     const database = {
       file: { findMany: jest.fn(async () => []) },
       affiliateSourceIntakeArtifacts: {
-        findMany: jest.fn(async () => []),
+        findMany: jest.fn(async () => [{
+          sourceUrl: "https://official.example/events",
+          finalUrl: "https://official.example/calendar",
+        }]),
       },
       affiliateAgentGatewayArtifacts: {
         findFirst: gatewayArtifactFindFirst,
@@ -60,11 +63,8 @@ describe("affiliate agent gateway artifact store", () => {
       bytes,
       mimeType: "text/html",
       byteSize: bytes.byteLength,
-      sourceUrl: null,
-    });
-    expect(gatewayArtifactFindFirst).toHaveBeenCalledWith({
-      where: { fileId: "capture-artifact" },
-      select: { mimeType: true },
+      sourceUrl: "https://official.example/events",
+      finalUrl: "https://official.example/calendar",
     });
   });
 
