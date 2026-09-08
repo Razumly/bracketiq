@@ -102,6 +102,38 @@ Capture effective database permissions. Fixed booleans in an inventory are not
 denial evidence. If group roles were absent when migrations ran, provision the
 roles and apply the migration's conditional grants before the canary.
 
+### Linked retries after a runtime correction
+
+Use `POST /v1/affiliate-agent/legacy-repair/retry` with the same operator
+authentication. The request is explicit:
+
+    {"mode":"PREVIEW","gatewayJobIds":["<completed parent Gateway job ID>"],"reason":"<reviewed correction reason>"}
+
+The list contains one to twenty unique parent IDs. There is no queue-wide
+default selection. Review the complete report, then send the same IDs and
+reason with `"mode":"APPLY"` and its `expectedReportHash`.
+
+Only completed legacy producer `CONTRACT_GAP` parents are eligible. The
+parent claim, result hash, receipt, mapping/source/intake identity, capture
+run, pinned artifacts, root generation, and safety state must agree.
+The active deployment contract must differ from the parent's deployment.
+The new mapping pass is the parent's pass plus one, with a maximum of three.
+Historical results are not revalidated under newer sport-result semantics.
+Legacy null run/page root links are permitted only through the verified
+intake/run/pinned-artifact lineage; a non-null foreign root is rejected.
+
+Apply requires closed admission, no live claims, and fresh preflight.
+Every requested parent must be eligible. The single transaction creates new
+child Gateway jobs, queues the existing mapping jobs, and appends retry audit
+history. Old Gateway jobs, claims, results, receipts, and failure counts are
+not reset. Holds, publication flags, and scraping settings remain unchanged.
+
+The dedupe key is stable per parent Gateway job. A different deployment or
+reason cannot create another sibling. An exact apply replay returns the same
+child IDs in `appliedGatewayJobIds` with `writeCount: 0`. A later authorized
+retry must name the latest completed child, not reuse its ancestor.
+This route does not open a worker lease or start a service.
+
 
 ## Current OMP runtime
 

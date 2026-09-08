@@ -4,9 +4,10 @@ import { z } from 'zod';
 import {
   previewAffiliateLegacyRepairAdmission,
   applyAffiliateLegacyRepairAdmission,
+  previewAffiliateLegacyRepairRetry,
+  applyAffiliateLegacyRepairRetry,
   AffiliateLegacyRepairAdmissionError,
 } from '../src/server/affiliateImports/affiliateLegacyRepairAdmission';
-
 import {
   affiliateAgentContractBundleSchema,
   affiliateAgentDeploymentContractSchema,
@@ -626,6 +627,7 @@ const workerRequestAuthorized = async (
 
 export type AffiliateAgentGatewayHttpDependencies = Readonly<{
   legacyRepairAdmission?: (request: LegacyRepairAdmissionRequest) => Promise<unknown>;
+  legacyRepairRetry?: (request: LegacyRepairRetryRequest) => Promise<unknown>;
   gateway: AffiliateAgentGateway;
   replenishment: () => Promise<AffiliateGovernedReplenishmentControllerResult>;
   invocationReconciler: AffiliateAgentInvocationReconciler;
@@ -1106,6 +1108,39 @@ const legacyRepairAdmissionRequestSchema = z.object({
 });
 type LegacyRepairAdmissionRequest = z.infer<typeof legacyRepairAdmissionRequestSchema>;
 
+const legacyRepairRetryRequestSchema = z.object({
+  mode: z.enum(['PREVIEW', 'APPLY']),
+  gatewayJobIds: z.array(z.string().trim().min(1).max(200)).min(1).max(20),
+  reason: z.string().trim().min(1).max(1_000).refine(
+    (value) => Buffer.byteLength(value, 'utf8') <= 1_000,
+    'reason must not exceed 1,000 UTF-8 bytes.',
+  ),
+  expectedReportHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+}).strict().superRefine((value, context) => {
+  if (new Set(value.gatewayJobIds).size !== value.gatewayJobIds.length) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['gatewayJobIds'],
+      message: 'gatewayJobIds must be unique.',
+    });
+  }
+  if (value.mode === 'APPLY' && !value.expectedReportHash) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['expectedReportHash'],
+      message: 'Apply requires a reviewed report hash.',
+    });
+  }
+  if (value.mode === 'PREVIEW' && value.expectedReportHash !== undefined) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['expectedReportHash'],
+      message: 'Preview does not accept a reviewed report hash.',
+    });
+  }
+});
+export type LegacyRepairRetryRequest = z.infer<typeof legacyRepairRetryRequestSchema>;
+
 const handleLegacyRepairAdmissionRequest = async (
   request: IncomingMessage,
   httpRequest: AffiliateAgentGatewayHttpRequest,
@@ -1126,6 +1161,35 @@ const handleLegacyRepairAdmissionRequest = async (
   }
   try {
     sendGatewayResult(response, await input.legacyRepairAdmission(parsed.data));
+  } catch (error) {
+    if (!(error instanceof AffiliateLegacyRepairAdmissionError)) throw error;
+    sendJson(response, 409, {
+      error: { code: error.code, safeMessage: error.message, isRetryable: false, details: error.details },
+    });
+  }
+  return true;
+};
+
+const handleLegacyRepairRetryRequest = async (
+  request: IncomingMessage,
+  httpRequest: AffiliateAgentGatewayHttpRequest,
+  response: ServerResponse,
+  input: AffiliateAgentGatewayHttpDependencies,
+  body: unknown,
+): Promise<boolean> => {
+  if (httpRequest.route !== '/legacy-repair/retry') return false;
+  if (!authorizeOperatorRequest(request, response, input.operatorToken)) return true;
+  const parsed = legacyRepairRetryRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    sendJson(response, 400, { error: 'Invalid legacy repair retry request.' });
+    return true;
+  }
+  if (!input.legacyRepairRetry) {
+    sendJson(response, 503, { error: 'Legacy repair retry is unavailable.' });
+    return true;
+  }
+  try {
+    sendGatewayResult(response, await input.legacyRepairRetry(parsed.data));
   } catch (error) {
     if (!(error instanceof AffiliateLegacyRepairAdmissionError)) throw error;
     sendJson(response, 409, {
@@ -1191,6 +1255,7 @@ const handlePostRequest = async (
   if (await handleWorkerAdmissionStatusRequest(httpRequest, response, input, body)) return;
   if (await handleReplenishmentRequest(request, httpRequest, response, input)) return;
   if (await handleLegacyRepairAdmissionRequest(request, httpRequest, response, input, body)) return;
+  if (await handleLegacyRepairRetryRequest(request, httpRequest, response, input, body)) return;
   await handlePostRoute(request, httpRequest, response, input, body);
 };
 
@@ -1327,6 +1392,7 @@ export const createAffiliateAgentGatewayRequestHandler = (
 
 type AffiliateAgentGatewayRuntime = Readonly<{
   legacyRepairAdmission: (request: LegacyRepairAdmissionRequest) => Promise<unknown>;
+  legacyRepairRetry: (request: LegacyRepairRetryRequest) => Promise<unknown>;
   gateway: AffiliateAgentGateway;
   replenishment: () => Promise<AffiliateGovernedReplenishmentControllerResult>;
   invocationReconciler: AffiliateAgentInvocationReconciler;
@@ -1513,6 +1579,31 @@ const createGateway = async (): Promise<AffiliateAgentGatewayRuntime> => {
       const active = await loadActiveAffiliateSupplyContract({ db: database, rolloutCohort });
       assertStartupPreflight(active);
       return applyAffiliateLegacyRepairAdmission({
+        ...options,
+        expectedReportHash: request.expectedReportHash,
+        operatorId: 'affiliate-gateway-operator',
+      });
+    }),
+    legacyRepairRetry: (request) => admission.withClaim(async () => {
+      if (admission.isOpen()) {
+        throw new Error('Close claim admission before legacy repair retry.');
+      }
+      const bundle = await contracts.loadActiveBundle();
+      const options = {
+        prisma,
+        bundle,
+        gatewayJobIds: request.gatewayJobIds,
+        reason: request.reason,
+      };
+      if (request.mode === 'PREVIEW') {
+        return previewAffiliateLegacyRepairRetry(options);
+      }
+      if (!request.expectedReportHash) {
+        throw new Error('Legacy repair retry apply requires a reviewed hash.');
+      }
+      const active = await loadActiveAffiliateSupplyContract({ db: database, rolloutCohort });
+      assertStartupPreflight(active);
+      return applyAffiliateLegacyRepairRetry({
         ...options,
         expectedReportHash: request.expectedReportHash,
         operatorId: 'affiliate-gateway-operator',

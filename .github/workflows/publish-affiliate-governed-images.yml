@@ -64,6 +64,9 @@ jobs:
           file: ./apps/site/deploy/affiliate-governed/Dockerfile
           push: true
           tags: ghcr.io/razumly/bracketiq-affiliate-governed:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/Razumly/bracketiq
+            org.opencontainers.image.revision=${{ github.sha }}
           provenance: mode=max
           sbom: true
           cache-from: type=gha,scope=affiliate-governed
@@ -76,6 +79,9 @@ jobs:
           file: ./apps/site/deploy/affiliate-governed/Dockerfile.gateway
           push: true
           tags: ghcr.io/razumly/bracketiq-affiliate-gateway:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/Razumly/bracketiq
+            org.opencontainers.image.revision=${{ github.sha }}
           provenance: mode=max
           sbom: true
           cache-from: type=gha,scope=affiliate-gateway

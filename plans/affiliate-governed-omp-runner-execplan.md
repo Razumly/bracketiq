@@ -32,6 +32,10 @@ The operator selected OMP with two ChatGPT accounts. The governed affiliate work
 - [x] Require structured evidence for every legacy producer contract gap.
 - [x] Retain bounded, redacted command rejection diagnostics after successful claims.
 - [x] Run focused regressions and the recorded-evidence replay before source delivery.
+- [ ] Add and verify the guarded completed-hold retry operation.
+- [ ] Publish and deploy the reviewed retry-capable correction.
+- [ ] Run the two linked mapping attempts and required independent review.
+- [ ] Verify final records, close admission, and stop trial workers.
 ## Current approval record
 
 Conditional `AUTH SETUP` approval (recorded 2026-09-07): after source
@@ -557,3 +561,80 @@ value to a valid string before bridge validation.
 The focused suites also passed with `--detectOpenHandles`; that diagnostic
 run reported no retained handle. The source and review-fix records remain on
 Issue 70. Production records remain held and unchanged by this source work.
+
+## Approved deployment and linked retry
+
+The operator approved publication and deployment of the reviewed correction,
+followed by a bounded retry of the same Softball and Boomtown records.
+Publication and automatic scraping remain disabled. Main must close admission
+and stop mapper 1, reviewer 1, and the root runner after the trial.
+
+Read-only inspection found no supported Gateway operation for retrying a
+completed hold. The operator's approved sequence includes fixing that missing
+transition before running. Add an operator-only `/legacy-repair/retry` preview
+and apply operation. It takes explicit parent Gateway job IDs, a bounded
+reason, and a reviewed report hash for apply. It creates new child producer
+jobs rather than resetting completed jobs.
+
+The parent jobs are `4ca0ad3c-b859-4640-8168-5978162591ff` for Softball and
+`a3e78509-c2e2-409c-80a3-02325359b290` for Boomtown. Both still have completed
+`CONTRACT_GAP` results and zero invocation failures. Their mapping jobs are
+`REVIEW_REQUIRED`; their intakes are `READY_FOR_MAPPING`. Their roots remain
+`PRE_MAPPED`, generation 1, with `LEGACY_SPORT_REPAIR` and automation disabled.
+Both organizations remain unlisted with public surfaces disabled.
+
+The retry must bind each completed parent claim, result hash, terminal receipt,
+mapping/source/intake identity, evidence run, current catalog, and unchanged
+root generation. Require a changed deployment contract for the software
+correction. Increment the existing mapping pass and keep its maximum of three.
+Use one deduplicated child per parent. Preserve old Gateway jobs, claims,
+receipts, and failure history without modification. Queue the existing legacy
+mapping job and append retry audit history in the same serializable transaction
+as child creation. Reject active descendants, public or unsafe state, stale
+identity/evidence, exhausted passes, same deployment, and report drift.
+An exact apply replay returns the existing children with zero writes.
+
+Main will verify the new transition with focused regression tests and
+independent review. The publication workflow requires clean integration into
+`main` and successful site CI for the exact source commit. Publish that reviewed
+commit, not an earlier image that lacks the retry operation.
+
+Prepare a separate private deployment environment with the next deployment
+version and current role/prompt contracts. Capture fresh complete preflight
+evidence; do not restamp a historical report. Keep the canonical deployment
+environment and dormant workers unchanged. Inspect model-service image parity
+before runtime changes and obtain explicit approval for any additional named
+runtime that the current bounded scope does not cover.
+
+The image-parity check requires the auth broker and model gateway to use the
+same reviewed agent image as the new workers. The operator explicitly approved
+refreshing both named model services for this deployment. Preserve the existing
+two-account store, broker volume, profile identities, and bearer files. This
+does not authorize other workers, coverage, replenishment, publication, or
+automatic scraping.
+
+### Retry implementation verification
+
+The new retry path passed 380 tests across 11 focused suites, TypeScript,
+targeted ESLint, and the pinned SDK no-provider probe. A bundled read-only
+preview also ran against the actual held records. PostgreSQL reported
+`default_transaction_read_only=on` before the preview. Both parents were
+eligible for pass 2; two successive previews produced the same report hash.
+The preview made no application writes.
+
+That check exposed two legacy-data assumptions before publication. Old
+role/prompt-2 terminal gaps may lack `sportEvidence`; retry validation now
+checks their historical identity/hash/receipt rather than applying new result
+semantics retroactively. Captured runs and pages may have null root links
+because the original admission pins the selected artifacts but does not
+backfill every capture row. Null links remain valid through the verified
+intake/run/pinned-artifact lineage. Non-null foreign roots still fail.
+
+The new dedupe key is parent-stable. Versions, hashes, and reasons remain in
+the reviewed report and audit history rather than allowing another sibling
+under a different key. The version-4 contract derived from the actual existing
+bundle and current exports hashes to
+`613e2396cc076ac190405f286a7cf3125b0cffed1056b6988ddaf3ab05f8f68b`.
+Publication now supplies an OCI revision label on both images so fresh
+container evidence can bind the six refreshed services to the exact source
+commit. The five dormant services remain stopped and unchanged.

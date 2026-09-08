@@ -351,7 +351,11 @@ describe("affiliate agent gateway admission HTTP boundary", () => {
     reconcileInvocation: jest.fn(async () => ({ kind: "TERMINAL_ACCEPTED" as const })),
   } as unknown as AffiliateAgentInvocationReconciler;
   const legacyRepairAdmission = jest.fn(async () => ({ proposedWrites: [], reportHash: "a".repeat(64) }));
-
+  const legacyRepairRetry = jest.fn(async () => ({
+    requestedGatewayJobIds: ["gateway-parent-boomtown", "gateway-parent-softball"],
+    selectedGatewayJobIds: ["gateway-parent-boomtown", "gateway-parent-softball"],
+    reportHash: "a".repeat(64),
+  }));
   beforeEach(async () => {
     jest.clearAllMocks();
     readinessValue = false;
@@ -363,6 +367,7 @@ describe("affiliate agent gateway admission HTTP boundary", () => {
     ): Promise<AffiliateAgentClaimAdmissionDecision> => "READY");
     running = await startServer(createAffiliateAgentGatewayRequestHandler({
       legacyRepairAdmission,
+      legacyRepairRetry,
       replenishment: gateway.replenishment,
       gateway,
       invocationReconciler,
@@ -474,6 +479,68 @@ describe("affiliate agent gateway admission HTTP boundary", () => {
     ));
     const response = await request("/legacy-repair/admission", OPERATOR_TOKEN, "POST", {
       mode: "APPLY",
+      expectedReportHash: "a".repeat(64),
+    });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: { code: "ADMISSION_REPORT_DRIFT", isRetryable: false },
+    });
+  });
+
+  it("keeps bounded legacy repair retry operator-only and validates its reviewed input", async () => {
+    let response = await request("/legacy-repair/retry", WORKER_ROLE_CREDENTIAL, "POST", {
+      mode: "PREVIEW",
+      gatewayJobIds: ["gateway-parent-softball"],
+      reason: "authorized bounded retry",
+    });
+    expect(response.status).toBe(401);
+
+    response = await request("/legacy-repair/retry", OPERATOR_TOKEN, "POST", {
+      mode: "PREVIEW",
+      gatewayJobIds: ["gateway-parent-softball", "gateway-parent-softball"],
+      reason: "authorized bounded retry",
+    });
+    expect(response.status).toBe(400);
+
+    response = await request("/legacy-repair/retry", OPERATOR_TOKEN, "POST", {
+      mode: "PREVIEW",
+      gatewayJobIds: ["gateway-parent-softball"],
+      reason: "authorized bounded retry",
+      expectedReportHash: "a".repeat(64),
+    });
+    expect(response.status).toBe(400);
+
+    response = await request("/legacy-repair/retry", OPERATOR_TOKEN, "POST", {
+      mode: "APPLY",
+      gatewayJobIds: ["gateway-parent-softball"],
+      reason: "authorized bounded retry",
+    });
+    expect(response.status).toBe(400);
+    expect(legacyRepairRetry).not.toHaveBeenCalled();
+  });
+
+  it("dispatches a reviewed legacy repair retry and returns safe admission conflicts", async () => {
+    let response = await request("/legacy-repair/retry", OPERATOR_TOKEN, "POST", {
+      mode: "PREVIEW",
+      gatewayJobIds: ["gateway-parent-softball", "gateway-parent-boomtown"],
+      reason: "authorized bounded retry",
+    });
+    expect(response.status).toBe(200);
+    expect(legacyRepairRetry).toHaveBeenCalledWith({
+      mode: "PREVIEW",
+      gatewayJobIds: ["gateway-parent-softball", "gateway-parent-boomtown"],
+      reason: "authorized bounded retry",
+    });
+
+    legacyRepairRetry.mockRejectedValueOnce(new AffiliateLegacyRepairAdmissionError(
+      "ADMISSION_REPORT_DRIFT",
+      "The reviewed retry report no longer matches.",
+      { observedReportHash: "b".repeat(64) },
+    ));
+    response = await request("/legacy-repair/retry", OPERATOR_TOKEN, "POST", {
+      mode: "APPLY",
+      gatewayJobIds: ["gateway-parent-softball"],
+      reason: "authorized bounded retry",
       expectedReportHash: "a".repeat(64),
     });
     expect(response.status).toBe(409);
