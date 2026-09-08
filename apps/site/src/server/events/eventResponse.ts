@@ -4,12 +4,7 @@ import {
 } from '@/lib/divisionTypes';
 import { isGeneratedTournamentPoolRecord } from '@/server/events/tournamentPools';
 
-import {
-  LEGACY_OFFICIAL_SCHEDULING_MODE_BY_PRIORITY,
-  normalizeOfficialSchedulingMode,
-  normalizeStaffingPriority,
-  type StaffingPriority,
-} from '@/server/officials/config';
+import { normalizeStaffingPriority } from '@/server/officials/config';
 
 
 type EventResponseRecord = Record<string, unknown>;
@@ -70,16 +65,18 @@ export const normalizeEventStaffingResponse = <T extends EventResponseRecord>(
 ): T => {
   normalizeEventBracketCountsResponse(response);
   const record = response as EventResponseRecord;
+  if (
+    typeof record.isAutomatedScheduling !== 'boolean'
+    && typeof record.automatedScheduling === 'boolean'
+  ) {
+    record.isAutomatedScheduling = record.automatedScheduling;
+  }
+  delete record.automatedScheduling;
   const eventType = String(record.eventType ?? '').trim().toUpperCase();
-  const legacyMode = normalizeOfficialSchedulingMode(record.officialSchedulingMode);
-  const staffingPriority: StaffingPriority = eventType === 'TRYOUT'
+  const staffingPriority = eventType === 'TRYOUT'
     ? 'FULL_COVERAGE_WITH_CONFLICTS_ALLOWED'
-    : normalizeStaffingPriority(
-      record.staffingPriority,
-      legacyMode,
-    );
+    : normalizeStaffingPriority(record.staffingPriority);
   record.staffingPriority = staffingPriority;
-  record.officialSchedulingMode = LEGACY_OFFICIAL_SCHEDULING_MODE_BY_PRIORITY[staffingPriority];
   if (eventType === 'TRYOUT') {
     const sanitizeStaffInvites = (value: unknown): unknown => {
       if (!Array.isArray(value)) {
@@ -124,7 +121,7 @@ export const normalizeEventStaffingResponse = <T extends EventResponseRecord>(
     record.allowTemporaryMatchPlayers = false;
     record.autoCreatePointMatchIncidents = false;
   } else if (typeof record.doTeamsOfficiate !== 'boolean') {
-    record.doTeamsOfficiate = legacyMode === 'TEAM_STAFFING';
+    record.doTeamsOfficiate = false;
   }
   return response;
 };

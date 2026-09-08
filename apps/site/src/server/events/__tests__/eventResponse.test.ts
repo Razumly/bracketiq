@@ -7,7 +7,6 @@ describe("normalizeEventStaffingResponse", () => {
     const response = normalizeEventStaffingResponse({
       eventType: "TRYOUT",
       staffingPriority: "PER_EVENT",
-      officialSchedulingMode: "TEAM_STAFFING",
       officialPositions: [{ id: "position_1" }],
       officialIds: ["official_1"],
       eventOfficials: [{ id: "event_official_1" }],
@@ -29,7 +28,6 @@ describe("normalizeEventStaffingResponse", () => {
 
     expect(response).toEqual(expect.objectContaining({
       staffingPriority: "FULL_COVERAGE_WITH_CONFLICTS_ALLOWED",
-      officialSchedulingMode: "OFF",
       officialPositions: [],
       officialIds: [],
       eventOfficials: [],

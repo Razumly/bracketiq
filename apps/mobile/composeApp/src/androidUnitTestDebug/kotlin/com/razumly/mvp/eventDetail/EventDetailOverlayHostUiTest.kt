@@ -199,7 +199,7 @@ class EventDetailOverlayHostUiTest {
         composeRule.onNodeWithText(
             "Start: 1 Sep, 2026-10:00 AM · End: 1 Sep, 2026-11:00 AM",
         ).performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("Field: Court 1 (field-1)")
+        composeRule.onNodeWithText("Resource: Court 1 (field-1)")
             .performScrollTo()
             .assertIsDisplayed()
         composeRule.onNodeWithText(
@@ -215,7 +215,7 @@ class EventDetailOverlayHostUiTest {
         composeRule.onNodeWithText(
             "Start: 1 Sep, 2026-12:00 PM · End: 1 Sep, 2026-01:00 PM",
         ).performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("Field: Court 2 (field-2)")
+        composeRule.onNodeWithText("Resource: Court 2 (field-2)")
             .performScrollTo()
             .assertIsDisplayed()
         composeRule.onNodeWithText(

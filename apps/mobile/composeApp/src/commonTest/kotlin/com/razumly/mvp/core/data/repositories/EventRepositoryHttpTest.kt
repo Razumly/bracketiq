@@ -716,7 +716,7 @@ private inline fun <reified T> encodeMaintenanceResponse(value: T): String {
             key !in setOf(
                 "address",
                 "affiliateUrl",
-                "automatedScheduling",
+                "isAutomatedScheduling",
                 "registrationByDivisionType",
                 "timeZone",
             )
@@ -6056,7 +6056,7 @@ class EventRepositoryHttpTest {
                         ),
                     ),
                 ),
-                graph = EventEditorCreateProposalGraphDto(
+                graph = canonicalProposalGraph(EventEditorCreateProposalGraphDto(
                     event = EventApiDto(
                         id = eventId,
                         name = "Graph Tournament",
@@ -6079,7 +6079,7 @@ class EventRepositoryHttpTest {
                             division = "division-rebuilt",
                         ),
                     ),
-                ),
+                )),
             )
             val engine = MockEngine { request ->
                 assertEquals("/api/events/$eventId/editor", request.url.encodedPath)
@@ -6239,7 +6239,7 @@ class EventRepositoryHttpTest {
             hasScheduleProposalSupport = true,
         )
 
-        val graph = EventEditorCreateProposalGraphDto(
+        val graph = canonicalProposalGraph(EventEditorCreateProposalGraphDto(
             event = EventApiDto(
                 id = "event-proposed",
                 name = "Scheduled League",
@@ -6283,7 +6283,7 @@ class EventRepositoryHttpTest {
                     division = "division-1",
                 ),
             ),
-        )
+        ))
         val snapshot = EventEditorSnapshotDto(
             contractVersion = 3,
             draft = draft,
@@ -7393,3 +7393,236 @@ class EventRepositoryHttpTest {
         assertTrue(userDao.eventCrossRefs.isEmpty())
     }
 }
+private fun canonicalProposalGraph(
+    graph: EventEditorCreateProposalGraphDto,
+): EventEditorCreateProposalGraphDto {
+    val canonicalEvent = jsonMVP
+        .encodeToJsonElement(EventApiDto.serializer(), graph.event)
+        .jsonObject
+        .withMissing(
+            "id" to JsonPrimitive("event"),
+            "name" to JsonPrimitive("Event"),
+            "description" to JsonPrimitive(""),
+            "start" to JsonPrimitive("2026-01-01T00:00:00Z"),
+            "end" to JsonPrimitive("2026-01-01T01:00:00Z"),
+            "location" to JsonPrimitive(""),
+            "coordinates" to JsonNull,
+            "price" to JsonNull,
+            "minAge" to JsonNull,
+            "maxAge" to JsonNull,
+            "rating" to JsonNull,
+            "imageId" to JsonNull,
+            "hostId" to JsonNull,
+            "noFixedEndDateTime" to JsonPrimitive(false),
+            "scheduleEndConstraint" to JsonNull,
+            "generatedScheduleEnd" to JsonNull,
+            "state" to JsonPrimitive("UNPUBLISHED"),
+            "maxParticipants" to JsonPrimitive(0),
+            "teamSizeLimit" to JsonNull,
+            "restTimeMinutes" to JsonPrimitive(0),
+            "teamSignup" to JsonPrimitive(false),
+            "singleDivision" to JsonPrimitive(false),
+            "waitListIds" to JsonArray(emptyList()),
+            "freeAgentIds" to JsonArray(emptyList()),
+            "teamIds" to JsonArray(emptyList()),
+            "userIds" to JsonArray(emptyList()),
+            "fieldIds" to JsonArray(emptyList()),
+            "timeSlotIds" to JsonArray(emptyList()),
+            "officialIds" to JsonArray(emptyList()),
+            "staffingPriority" to JsonPrimitive("BEST_AVAILABLE_COVERAGE"),
+            "officialPositions" to JsonArray(emptyList()),
+            "eventOfficials" to JsonArray(emptyList()),
+            "matchRulesOverride" to JsonNull,
+            "autoCreatePointMatchIncidents" to JsonPrimitive(false),
+            "resolvedMatchRules" to JsonNull,
+            "cancellationRefundHours" to JsonNull,
+            "registrationCutoffHours" to JsonNull,
+            "seedColor" to JsonNull,
+            "eventType" to JsonPrimitive("EVENT"),
+            "sportIds" to JsonArray(emptyList()),
+            "leagueScoringConfigId" to JsonNull,
+            "organizationId" to JsonNull,
+            "requiredTemplateIds" to JsonArray(emptyList()),
+            "allowPaymentPlans" to JsonPrimitive(false),
+            "installmentCount" to JsonPrimitive(0),
+            "installmentDueDates" to JsonArray(emptyList()),
+            "installmentDueRelativeDays" to JsonArray(emptyList()),
+            "installmentAmounts" to JsonArray(emptyList()),
+            "allowTeamSplitDefault" to JsonPrimitive(false),
+            "splitLeaguePlayoffDivisions" to JsonPrimitive(false),
+            "divisions" to JsonArray(emptyList()),
+            "divisionDetails" to JsonArray(emptyList()),
+            "playoffDivisionDetails" to JsonArray(emptyList()),
+            "fields" to JsonArray(emptyList()),
+            "teams" to JsonArray(emptyList()),
+            "timeSlots" to JsonArray(emptyList()),
+            "officials" to JsonArray(emptyList()),
+        )
+        .toMutableMap()
+        .apply {
+            this["fields"] = JsonArray(getValue("fields").jsonArray.mapIndexed { index, field ->
+                field.jsonObject.withMissing(
+                    "id" to JsonPrimitive("field-$index"),
+                    "organizationId" to JsonNull,
+                    "divisions" to JsonArray(emptyList()),
+                    "name" to JsonPrimitive("Resource ${index + 1}"),
+                )
+            })
+            this["teams"] = JsonArray(getValue("teams").jsonArray.mapIndexed { index, team ->
+                team.jsonObject.withMissing(
+                    "id" to JsonPrimitive("team-$index"),
+                    "captainId" to JsonNull,
+                    "division" to JsonNull,
+                    "kind" to JsonNull,
+                    "name" to JsonPrimitive("Team ${index + 1}"),
+                    "playerIds" to JsonArray(emptyList()),
+                    "players" to JsonArray(emptyList()),
+                    "playerRegistrations" to JsonArray(emptyList()),
+                )
+            })
+            this["timeSlots"] = JsonArray(getValue("timeSlots").jsonArray.mapIndexed { index, slot ->
+                slot.jsonObject.withMissing(
+                    "id" to JsonPrimitive("slot-$index"),
+                    "dayOfWeek" to JsonPrimitive(0),
+                    "daysOfWeek" to JsonArray(listOf(JsonPrimitive(0))),
+                    "endDate" to JsonNull,
+                    "repeating" to JsonPrimitive(false),
+                    "startTimeMinutes" to JsonPrimitive(0),
+                    "endTimeMinutes" to JsonPrimitive(0),
+                    "price" to JsonNull,
+                    "scheduledFieldId" to JsonNull,
+                    "scheduledFieldIds" to JsonArray(emptyList()),
+                    "divisions" to JsonArray(emptyList()),
+                )
+            })
+            this["officials"] = JsonArray(getValue("officials").jsonArray.mapIndexed { index, official ->
+                official.jsonObject.withMissing("id" to JsonPrimitive("official-$index"))
+            })
+        }
+        .let(::JsonObject)
+        .onlyCanonicalGraphEventKeys()
+    val canonicalMatches = JsonArray(graph.matches.mapIndexed { index, match ->
+        jsonMVP
+            .encodeToJsonElement(MatchApiDto.serializer(), match)
+            .jsonObject
+            .withMissing(
+                "id" to JsonPrimitive("match-$index"),
+                "matchId" to JsonPrimitive(index + 1),
+                "eventId" to (canonicalEvent["id"] ?: JsonPrimitive("event")),
+                "start" to JsonNull,
+                "end" to JsonNull,
+                "locked" to JsonPrimitive(false),
+                "placementState" to JsonPrimitive("UNPLACED"),
+                "phase" to JsonPrimitive("POOL"),
+                "sourceDivisionId" to JsonNull,
+                "phaseDivisionId" to JsonNull,
+                "division" to JsonNull,
+                "fieldId" to JsonNull,
+                "team1Id" to JsonNull,
+                "team2Id" to JsonNull,
+                "team1Seed" to JsonNull,
+                "team2Seed" to JsonNull,
+                "status" to JsonPrimitive("SCHEDULED"),
+                "resultStatus" to JsonPrimitive("PENDING"),
+                "resultType" to JsonPrimitive("NONE"),
+                "actualStart" to JsonNull,
+                "actualEnd" to JsonNull,
+                "statusReason" to JsonNull,
+                "winnerEventTeamId" to JsonNull,
+                "segments" to JsonArray(emptyList()),
+                "incidents" to JsonArray(emptyList()),
+                "officialIds" to JsonArray(emptyList()),
+                "officialAssignments" to JsonArray(emptyList()),
+                "teamOfficialId" to JsonNull,
+                "teamOfficialSeed" to JsonNull,
+                "matchRulesSnapshot" to JsonNull,
+                "resolvedMatchRules" to JsonNull,
+                "team1Points" to JsonArray(emptyList()),
+                "team2Points" to JsonArray(emptyList()),
+                "losersBracket" to JsonPrimitive(false),
+                "winnerNextMatchId" to JsonNull,
+                "loserNextMatchId" to JsonNull,
+                "previousLeftId" to JsonNull,
+                "previousRightId" to JsonNull,
+                "side" to JsonNull,
+                "officialCheckedIn" to JsonPrimitive(false),
+                "team1" to JsonNull,
+                "team2" to JsonNull,
+                "teamOfficial" to JsonNull,
+                "official" to JsonNull,
+                "field" to JsonNull,
+            )
+            .let { base ->
+                base.toMutableMap().apply {
+                    val officialId = get("officialId")
+                        ?.takeUnless { it is JsonNull }
+                        ?.jsonPrimitive
+                        ?.content
+                    if (officialId != null && getValue("officialIds").jsonArray.isEmpty()) {
+                        this["officialIds"] = JsonArray(listOf(JsonObject(mapOf(
+                            "positionId" to JsonPrimitive("official"),
+                            "slotIndex" to JsonPrimitive(0),
+                            "holderType" to JsonPrimitive("OFFICIAL"),
+                            "userId" to JsonPrimitive(officialId),
+                            "eventOfficialId" to JsonNull,
+                            "checkedIn" to JsonPrimitive(false),
+                            "hasConflict" to JsonPrimitive(false),
+                        ))))
+                    }
+                }.let(::JsonObject).onlyCanonicalGraphMatchKeys()
+            }
+    })
+    return graph.copy(
+        canonicalGraph = EventEditorMaintenanceGraphDto(
+            event = graph.event,
+            matches = emptyList(),
+            rawEvent = canonicalEvent,
+            rawMatches = canonicalMatches.map { it.jsonObject },
+        ),
+    )
+}
+
+private fun JsonObject.withMissing(vararg fields: Pair<String, kotlinx.serialization.json.JsonElement>): JsonObject {
+    val result = toMutableMap()
+    fields.forEach { (key, field) ->
+        if (!result.containsKey(key)) result[key] = field
+    }
+    return JsonObject(result)
+}
+private fun JsonObject.onlyCanonicalGraphEventKeys(): JsonObject =
+    JsonObject(filterKeys {
+        it in setOf(
+            "id", "name", "description", "start", "end", "location", "coordinates", "price",
+            "minAge", "maxAge", "rating", "imageId", "hostId", "noFixedEndDateTime",
+            "scheduleEndConstraint", "generatedScheduleEnd", "state", "maxParticipants",
+            "teamSizeLimit", "restTimeMinutes", "teamSignup", "singleDivision", "waitListIds",
+            "freeAgentIds", "teamIds", "userIds", "fieldIds", "timeSlotIds", "officialIds",
+            "staffingPriority", "officialPositions", "eventOfficials", "matchRulesOverride",
+            "autoCreatePointMatchIncidents", "resolvedMatchRules", "cancellationRefundHours",
+            "registrationCutoffHours", "seedColor", "eventType", "sportIds",
+            "leagueScoringConfigId", "organizationId", "requiredTemplateIds", "allowPaymentPlans",
+            "installmentCount", "installmentDueDates", "installmentDueRelativeDays",
+            "installmentAmounts", "allowTeamSplitDefault", "splitLeaguePlayoffDivisions",
+            "divisions", "divisionDetails", "playoffDivisionDetails", "fields", "teams",
+            "timeSlots", "officials", "doubleElimination", "winnerSetCount", "loserSetCount",
+            "winnerBracketPointsToVictory", "loserBracketPointsToVictory", "prize", "fieldCount",
+            "matches", "usesSets", "matchDurationMinutes", "setDurationMinutes", "setsPerMatch",
+            "doTeamsOfficiate", "teamOfficialsMaySwap", "teamCheckInMode",
+            "teamCheckInOpenMinutesBefore", "allowMatchRosterEdits", "allowTemporaryMatchPlayers",
+            "gamesPerOpponent", "includePlayoffs", "playoffTeamCount", "pointsToVictory",
+        )
+    })
+
+private fun JsonObject.onlyCanonicalGraphMatchKeys(): JsonObject =
+    JsonObject(filterKeys {
+        it in setOf(
+            "id", "matchId", "eventId", "start", "end", "locked", "placementState", "phase",
+            "sourceDivisionId", "phaseDivisionId", "division", "fieldId", "team1Id", "team2Id",
+            "team1Seed", "team2Seed", "status", "resultStatus", "resultType", "actualStart",
+            "actualEnd", "statusReason", "winnerEventTeamId", "matchRulesSnapshot",
+            "resolvedMatchRules", "segments", "incidents", "officialIds", "officialAssignments",
+            "teamOfficialId", "teamOfficialSeed", "team1Points", "team2Points", "losersBracket",
+            "winnerNextMatchId", "loserNextMatchId", "previousLeftId", "previousRightId", "side",
+            "officialCheckedIn", "team1", "team2", "teamOfficial", "official", "field",
+        )
+    })

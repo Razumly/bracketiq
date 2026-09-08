@@ -176,7 +176,6 @@ export const loadEventScheduleState = async (
       "end",
       "scheduleEndConstraint",
       "generatedScheduleEnd",
-      "isAutomatedScheduling",
       "automatedScheduling",
       "timeSlotIds",
       "updatedAt",
@@ -1301,10 +1300,7 @@ export const buildEventEditorSnapshot = async (
       : {};
   const eventWithResources = {
     ...event,
-    isAutomatedScheduling:
-      typeof event.isAutomatedScheduling === "boolean"
-        ? event.isAutomatedScheduling
-        : event.automatedScheduling,
+    isAutomatedScheduling: event.automatedScheduling,
     ...resources,
     immutableFieldIds: Array.from(new Set([
       ...(Array.isArray(event.immutableFieldIds) ? event.immutableFieldIds : []),

@@ -20,7 +20,6 @@ import type {
 } from '@/types';
 import {
     isStaffingPriority,
-    normalizeOfficialSchedulingMode,
     normalizeStaffingPriority,
 } from '@/server/officials/config';
 
@@ -188,20 +187,8 @@ export const applyImmutableEventDefaults = ({
     const explicitStaffingPriority = typeof defaults.staffingPriority === 'string'
         ? defaults.staffingPriority.trim().toUpperCase()
         : null;
-    const hasExplicitStaffingPriority = isStaffingPriority(explicitStaffingPriority);
-    const hasLegacyOfficialSchedulingMode = defaults.officialSchedulingMode !== undefined;
-    if (hasExplicitStaffingPriority || hasLegacyOfficialSchedulingMode) {
-        next.staffingPriority = normalizeStaffingPriority(
-            explicitStaffingPriority,
-            defaults.officialSchedulingMode,
-        );
-    }
-    if (
-        !hasExplicitStaffingPriority
-        && hasLegacyOfficialSchedulingMode
-        && normalizeOfficialSchedulingMode(defaults.officialSchedulingMode) === 'TEAM_STAFFING'
-    ) {
-        next.doTeamsOfficiate = true;
+    if (isStaffingPriority(explicitStaffingPriority)) {
+        next.staffingPriority = normalizeStaffingPriority(explicitStaffingPriority);
     }
     if (typeof defaults.teamOfficialsMaySwap === 'boolean') {
         next.teamOfficialsMaySwap = next.doTeamsOfficiate

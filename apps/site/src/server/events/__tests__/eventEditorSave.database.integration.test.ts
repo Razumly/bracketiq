@@ -230,7 +230,6 @@ const createIssue95Fixture = async (
     requiredTemplateIds: [],
     eventOfficials: [],
     officialPositions: [],
-    officialSchedulingMode: "OFF",
     staffingPriority: "BEST_AVAILABLE_COVERAGE",
     assistantHostIds: [],
   };
@@ -1555,7 +1554,6 @@ type Issue34PersistedEvent = {
   teamSizeLimit: number;
   teamSignup: boolean | null;
   assistantHostIds: string[];
-  officialSchedulingMode: string;
   staffingPriority: string;
   doTeamsOfficiate: boolean | null;
   teamOfficialsMaySwap: boolean | null;

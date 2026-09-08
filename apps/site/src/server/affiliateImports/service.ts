@@ -29,7 +29,6 @@ import { syncEventTags } from "@/server/eventTags";
 import { downloadPublicRemoteImage } from "@/server/publicRemoteImage";
 import {
   isStaffingPriority,
-  normalizeStaffingPriority,
   STAFFING_PRIORITIES,
   type StaffingPriority,
 } from "@/server/officials/config";
@@ -104,7 +103,6 @@ type AffiliateCandidateRecord = AffiliateCandidateDateTimeInput & Readonly<{
   dedupeKey?: string | null;
   formatName?: string | null;
   staffingPriority?: unknown;
-  officialSchedulingMode?: unknown;
 }>;
 
 type AffiliateSourceCreateInput = {
@@ -204,13 +202,9 @@ const staffingPriorityFromAffiliateCandidate = (
   const canonicalValue =
     nullableString(candidate.staffingPriority)?.toUpperCase() ??
     nullableString(rawPayload.staffingPriority)?.toUpperCase();
-  if (isStaffingPriority(canonicalValue)) return canonicalValue;
-
-  const legacyMode =
-    candidate.officialSchedulingMode ?? rawPayload.officialSchedulingMode;
-  return legacyMode === undefined
-    ? "FULL_COVERAGE_WITH_CONFLICTS_ALLOWED"
-    : normalizeStaffingPriority(undefined, legacyMode);
+  return isStaffingPriority(canonicalValue)
+    ? canonicalValue
+    : "FULL_COVERAGE_WITH_CONFLICTS_ALLOWED";
 };
 
 const sleep = (milliseconds: number): Promise<void> =>
@@ -461,7 +455,6 @@ const candidatePersistencePayload = (
     ...recordValue(candidate.rawPayload),
   };
   if (candidate.listingKind === "EVENT") {
-    delete rawPayload.officialSchedulingMode;
     rawPayload.staffingPriority = staffingPriorityFromAffiliateCandidate(
       candidate as unknown as Record<string, unknown>,
     );

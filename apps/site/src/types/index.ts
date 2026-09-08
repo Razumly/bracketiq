@@ -1,9 +1,8 @@
 import type {
-  OfficialSchedulingMode,
   StaffingPriority,
 } from "@/server/officials/config";
 
-export type { OfficialSchedulingMode, StaffingPriority };
+export type { StaffingPriority };
 
 import { formatDisplayDate, formatDisplayTime, parseLocalDateTime } from '@/lib/dateUtils';
 import { normalizeEnumValue } from '@/lib/enumUtils';
@@ -945,7 +944,6 @@ export interface Event {
   fieldIds?: string[];
   timeSlotIds?: string[];
   officialIds?: string[];
-  officialSchedulingMode?: OfficialSchedulingMode;
   staffingPriority?: StaffingPriority;
   officialPositions?: EventOfficialPosition[];
   eventOfficials?: EventOfficial[];

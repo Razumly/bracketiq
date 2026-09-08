@@ -756,7 +756,6 @@ describe("upsertEventFromPayload", () => {
       parentEvent: null,
       officialIds: [],
       officialPositions: [],
-      officialSchedulingMode: "SCHEDULE",
       sportIds: ["sport_1"],
     });
     const payload = {
@@ -1558,7 +1557,6 @@ describe("upsertEventFromPayload", () => {
       organizationId: null,
       parentEvent: null,
       officialPositions: [],
-      officialSchedulingMode: "SCHEDULE",
       sportIds: ["sport_1"],
     });
     client.divisions.findMany.mockResolvedValue([
@@ -1666,7 +1664,6 @@ describe("upsertEventFromPayload", () => {
       organizationId: null,
       parentEvent: null,
       officialPositions: [],
-      officialSchedulingMode: "SCHEDULE",
       sportIds: ["sport_1"],
     });
     client.divisions.findMany.mockResolvedValue([
@@ -1768,7 +1765,6 @@ describe("upsertEventFromPayload", () => {
       organizationId: null,
       parentEvent: null,
       officialPositions: [],
-      officialSchedulingMode: "SCHEDULE",
       sportIds: ["sport_1"],
     });
     client.divisions.findMany.mockResolvedValue([
@@ -1830,7 +1826,6 @@ describe("upsertEventFromPayload", () => {
       organizationId: null,
       parentEvent: null,
       officialPositions: [],
-      officialSchedulingMode: "SCHEDULE",
       sportIds: ["sport_1"],
     });
     client.divisions.findMany.mockResolvedValue([
@@ -4049,7 +4044,6 @@ describe("upsertEventFromPayload", () => {
       }),
     );
     expect(eventUpsertArgs.create.officialIds).toBeUndefined();
-    expect(eventUpsertArgs.create).not.toHaveProperty("officialSchedulingMode");
     expect(eventUpsertArgs.update).toEqual(
       expect.objectContaining({
         staffingPriority: "FULL_COVERAGE_REQUIRED",
@@ -4057,7 +4051,6 @@ describe("upsertEventFromPayload", () => {
       }),
     );
     expect(eventUpsertArgs.update.officialIds).toBeUndefined();
-    expect(eventUpsertArgs.update).not.toHaveProperty("officialSchedulingMode");
     expect(client.eventOfficials.deleteMany).toHaveBeenCalledWith({
       where: { eventId: "event_1" },
     });
@@ -4135,36 +4128,6 @@ describe("upsertEventFromPayload", () => {
   });
 
 
-  it("maps explicit legacy intake mode while keeping canonical priority persisted", async () => {
-    const mockClient = createMockClient();
-    // The focused repository fake implements the delegates exercised by this upsert.
-    const client = mockClient as unknown as NonNullable<
-      Parameters<typeof upsertEventFromPayload>[1]
-    >;
-
-    await upsertEventFromPayload(
-      {
-        ...baseEventPayload(),
-        divisions: ["OPEN"],
-        officialSchedulingMode: "TEAM_STAFFING",
-      },
-      client,
-    );
-
-    const eventUpsertArgs = mockClient.events.upsert.mock.calls[0][0];
-    expect(eventUpsertArgs.create).toEqual(
-      expect.objectContaining({
-        officialSchedulingMode: "TEAM_STAFFING",
-        staffingPriority: "TEAM_COVERAGE_REQUIRED",
-      }),
-    );
-    expect(eventUpsertArgs.update).toEqual(
-      expect.objectContaining({
-        officialSchedulingMode: "TEAM_STAFFING",
-        staffingPriority: "TEAM_COVERAGE_REQUIRED",
-      }),
-    );
-  });
 
   it("persists event official rows when eventOfficials are supplied and legacy official ids are empty", async () => {
     const client = createMockClient();
@@ -4492,7 +4455,6 @@ describe("upsertEventFromPayload", () => {
       parentEvent: null,
       officialIds: [],
       officialPositions: [],
-      officialSchedulingMode: "SCHEDULE",
       sportIds: ["sport_1"],
       matchRulesOverride: existingMatchRulesOverride,
       autoCreatePointMatchIncidents: true,
@@ -4534,7 +4496,6 @@ describe("upsertEventFromPayload", () => {
       parentEvent: null,
       officialIds: [],
       officialPositions: [],
-      officialSchedulingMode: "SCHEDULE",
       sportIds: ["sport_existing"],
     });
     const { sportIds: _ignoredSportIds, ...basePayloadWithoutSports } =

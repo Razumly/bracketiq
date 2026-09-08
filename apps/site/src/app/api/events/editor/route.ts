@@ -43,10 +43,6 @@ import { isEventFieldConfigurationError } from "@/server/repositories/events";
 import { deliverEventStaffInvitesAfterCommit } from "@/server/events/eventStaffDelivery";
 import { loadCreateEventEditorSnapshot } from "@/server/events/eventEditorSnapshot";
 import {
-  serializeEventEditorSnapshot,
-  serializeEventEditorSnapshotEnvelope,
-} from "@/server/events/eventEditorWireCompatibility";
-import {
   EventCreateOperationConflictError,
   EventCreateOperationIncompleteError,
   EventCreateOperationPayloadMismatchError,
@@ -288,7 +284,7 @@ export async function GET(request: NextRequest) {
       {
         contractVersion: EVENT_EDITOR_CONTRACT_VERSION,
         createOperationId: createId(),
-        snapshot: serializeEventEditorSnapshot(snapshot),
+        snapshot,
       },
       { status: 200 },
     );
@@ -378,7 +374,7 @@ export async function POST(request: NextRequest) {
     const result = isScheduledProposal
       ? await createScheduleProposalFromEditor(session, command, createOptions)
       : await createEventEditor(session, command, createOptions);
-    return NextResponse.json(serializeEventEditorSnapshotEnvelope(result), {
+    return NextResponse.json(result, {
       status: result.status === "PROPOSED" ? 202 : 201,
     });
   } catch (error) {
@@ -465,7 +461,7 @@ export async function PUT(request: NextRequest) {
           },
         },
       );
-    return NextResponse.json(serializeEventEditorSnapshotEnvelope(result), {
+    return NextResponse.json(result, {
       status: 201,
     });
   } catch (error) {

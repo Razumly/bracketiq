@@ -109,7 +109,7 @@ const PUBLIC_EVENT_FIELDS = [
   'allowTeamSplitDefault', 'usesSets', 'setsPerMatch', 'pointsToVictory',
   'winBy', 'maxPoints', 'matchDurationMinutes', 'setDurationMinutes',
   'restTimeMinutes', 'matchRulesOverride', 'resolvedMatchRules',
-  'staffingPriority', 'officialSchedulingMode', 'teamCheckInMode', 'teamCheckInOpenMinutesBefore',
+  'staffingPriority', 'isAutomatedScheduling', 'teamCheckInMode', 'teamCheckInOpenMinutesBefore',
 ] as const;
 
 const toPublicEventResponse = (response: Record<string, unknown>): Record<string, unknown> => {

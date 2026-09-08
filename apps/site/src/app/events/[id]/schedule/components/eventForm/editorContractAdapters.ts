@@ -4,8 +4,6 @@ import { normalizeAutomatedSchedulingForEventType } from '@/lib/automatedSchedul
 import { GENERIC_RESOURCE_LABELS, getSportResourceLabels } from '@/lib/sportResourceLabels';
 import type { Event, EventOfficial, EventOfficialPosition, Field, TimeSlot } from '@/types';
 import {
-  isStaffingPriority,
-  normalizeOfficialSchedulingMode,
   normalizeStaffingPriority,
 } from '@/server/officials/config';
 import type { EventFormValues } from './formTypes';
@@ -141,7 +139,7 @@ const draftFromRecord = (
       && Boolean(nullableString(event.parentEvent));
     const isAutomatedScheduling = normalizeAutomatedSchedulingForEventType(
       normalizedEventType,
-      event.isAutomatedScheduling ?? event.automatedScheduling,
+      event.isAutomatedScheduling,
     );
     const start = asIsoDateTime(event.start, new Date(0).toISOString());
     const explicitScheduleEndConstraint = asIsoDateTime(event.scheduleEndConstraint, '') || null;
@@ -212,17 +210,10 @@ const draftFromRecord = (
   const { rawDivisionDetails, regularDivisionDetails, includePlayoffs, normalizedEventPlayoffTeamCount, normalizedEventMaxParticipants, rawTimeSlotIds } = divisionInputs();
   const staffInputs = () => {
     const eventId = nullableString(event.$id) ?? nullableString(event.id);
-    const explicitStaffingPriority = stringValue(event.staffingPriority).trim().toUpperCase();
-    const hasExplicitStaffingPriority = isStaffingPriority(explicitStaffingPriority);
-    const legacyOfficialSchedulingMode = normalizeOfficialSchedulingMode(event.officialSchedulingMode);
-    const staffingPriority = normalizeStaffingPriority(
-      explicitStaffingPriority,
-      legacyOfficialSchedulingMode,
-    );
+    const staffingPriority = normalizeStaffingPriority(event.staffingPriority);
     const doTeamsOfficiate = isTryoutEvent
       ? false
-      : booleanValue(event.doTeamsOfficiate)
-      || (!hasExplicitStaffingPriority && legacyOfficialSchedulingMode === 'TEAM_STAFFING');
+      : booleanValue(event.doTeamsOfficiate);
     const normalizedOfficialIds = stringArray(event.officialIds);
     const eventOfficials = objectArray(event.eventOfficials).length > 0
       ? objectArray(event.eventOfficials)

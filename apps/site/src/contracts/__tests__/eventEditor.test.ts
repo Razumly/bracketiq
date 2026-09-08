@@ -239,29 +239,6 @@ describe('event editor contracts', () => {
     }
   });
 
-  it('accepts a legacy scheduling mode and maps it to canonical staffing fields', () => {
-    const legacyStaff = Object.fromEntries(
-      Object.entries(draft.staff).filter(
-        ([key]) => key !== 'staffingPriority' && key !== 'doTeamsOfficiate',
-      ),
-    );
-    const parsed = createEventEditorCommandSchema.parse({
-      contractVersion: 3,
-      createOperationId: 'create-operation-legacy-mode',
-      expectedRevisions: expectedCreateRevisions,
-      draft: {
-        ...draft,
-        staff: {
-          ...legacyStaff,
-          officialSchedulingMode: 'TEAM_STAFFING',
-        },
-      },
-      completion: createOnlyCompletion,
-    });
-    expect(parsed.draft.staff.staffingPriority).toBe('TEAM_COVERAGE_REQUIRED');
-    expect(parsed.draft.staff.doTeamsOfficiate).toBe(true);
-    expect('officialSchedulingMode' in parsed.draft.staff).toBe(false);
-  });
 
   it('requires the bootstrap operation identity and preserves the selected start', () => {
     const parsed = eventEditorCreateBootstrapSchema.parse({
@@ -364,19 +341,6 @@ describe('event editor contracts', () => {
     })).toThrow();
   });
 
-  it('normalizes the legacy automated-scheduling key at the command boundary', () => {
-    const parsed = eventEditorDraftSchema.parse({
-      ...draft,
-      schedule: {
-        mode: 'FIXED_END',
-        endConstraint: '2026-09-01T18:00:00.000Z',
-        automatedScheduling: false,
-      },
-    });
-
-    expect(parsed.schedule.isAutomatedScheduling).toBe(false);
-    expect('automatedScheduling' in parsed.schedule).toBe(false);
-  });
 
   it.each([
     ['FREE', 0],

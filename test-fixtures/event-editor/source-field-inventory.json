@@ -987,7 +987,7 @@
       "language": "kotlin",
       "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt",
       "fields": [
-        {"declaration":"@OptIn(kotlinx.serialization.ExperimentalSerializationApi::class) @kotlinx.serialization.json.JsonNames(\"automatedScheduling\") val isAutomatedScheduling: Boolean = true","classification":"covered","reason":"The editor preserves this canonical value through the session mapper and wire fixtures."},
+        {"declaration":"val isAutomatedScheduling: Boolean = true","classification":"covered","reason":"The editor preserves this canonical value through the session mapper and wire fixtures."},
         {"declaration":"val endConstraint: String? = null","classification":"covered","reason":"The editor preserves this canonical value through the session mapper and wire fixtures."},
         {"declaration":"val generatedScheduleEnd: String? = null","classification":"covered","reason":"The editor preserves this canonical value through the session mapper and wire fixtures."},
         {"declaration":"val mode: String","classification":"covered","reason":"The editor preserves this canonical value through the session mapper and wire fixtures."}
@@ -2416,7 +2416,7 @@
       "language": "kotlin",
       "mobileOwner": "apps/mobile/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventCreate/DefaultCreateEventComponent.kt",
       "fields": [
-        {"declaration":"@SerialName(\"automatedScheduling\") val isAutomatedScheduling: Boolean? = null","classification":"server-owned","reason":"The server supplies this result or graph value. The editor retains the canonical graph before the Room projection."},
+        {"declaration":"val isAutomatedScheduling: Boolean? = null","classification":"server-owned","reason":"The server supplies this result or graph value. The editor retains the canonical graph before the Room projection."},
         {"declaration":"val address: String? = null","classification":"server-owned","reason":"The server supplies this result or graph value. The editor retains the canonical graph before the Room projection."},
         {"declaration":"val affiliateUrl: String? = null","classification":"server-owned","reason":"The server supplies this result or graph value. The editor retains the canonical graph before the Room projection."},
         {"declaration":"val allowMatchRosterEdits: Boolean? = null","classification":"server-owned","reason":"The server supplies this result or graph value. The editor retains the canonical graph before the Room projection."},

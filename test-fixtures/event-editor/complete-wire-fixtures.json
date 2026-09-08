@@ -8899,7 +8899,6 @@
             "officialIds": [
               "user-1"
             ],
-            "officialSchedulingMode": "SCHEDULE",
             "staffingPriority": "BEST_AVAILABLE_COVERAGE",
             "officialPositions": [
               {
@@ -10547,7 +10546,6 @@
             "officialIds": [
               "user-1"
             ],
-            "officialSchedulingMode": "SCHEDULE",
             "staffingPriority": "BEST_AVAILABLE_COVERAGE",
             "officialPositions": [
               {
@@ -10930,7 +10928,6 @@
             "officialIds": [
               "user-1"
             ],
-            "officialSchedulingMode": "SCHEDULE",
             "staffingPriority": "BEST_AVAILABLE_COVERAGE",
             "officialPositions": [
               {
@@ -11408,7 +11405,6 @@
             "officialIds": [
               "user-1"
             ],
-            "officialSchedulingMode": "SCHEDULE",
             "staffingPriority": "BEST_AVAILABLE_COVERAGE",
             "officialPositions": [
               {
@@ -13276,7 +13272,6 @@
             "officialIds": [
               "user-1"
             ],
-            "officialSchedulingMode": "SCHEDULE",
             "staffingPriority": "BEST_AVAILABLE_COVERAGE",
             "officialPositions": [
               {

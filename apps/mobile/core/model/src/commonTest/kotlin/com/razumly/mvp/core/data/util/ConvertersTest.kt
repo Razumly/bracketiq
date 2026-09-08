@@ -2,10 +2,12 @@ package com.razumly.mvp.core.data.util
 
 import kotlinx.serialization.SerializationException
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 
 class ConvertersTest {
+
     @Test
     fun malformed_json_throws_for_every_room_json_converter() {
         val converters = Converters()

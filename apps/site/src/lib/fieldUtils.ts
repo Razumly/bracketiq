@@ -39,7 +39,7 @@ const getFieldCreatedAtTime = (field?: FieldIdentity | null): number | null => {
 
 export const getFieldDisplayName = (
   field?: FieldIdentity | null,
-  fallback = 'Field',
+  fallback = 'Resource',
 ): string => {
   const name = normalizeText(field?.name);
   if (name) {
@@ -84,7 +84,7 @@ export const getFieldResolvedLocation = (
 
 export const getFacilityScopedFieldDisplayName = (
   field?: FieldIdentity | null,
-  fallback = 'Field',
+  fallback = 'Resource',
 ): string => {
   const fieldName = getFieldDisplayName(field, fallback);
   const facilityName = getFieldFacilityDisplayName(field);

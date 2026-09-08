@@ -3683,9 +3683,6 @@
                 "$ref": "#/$defs/__schema4"
               }
             },
-            "officialSchedulingMode": {
-              "type": "string"
-            },
             "staffingPriority": {
               "type": "string"
             },
@@ -4143,7 +4140,6 @@
             "fieldIds",
             "timeSlotIds",
             "officialIds",
-            "officialSchedulingMode",
             "staffingPriority",
             "officialPositions",
             "eventOfficials",

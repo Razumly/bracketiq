@@ -2421,7 +2421,7 @@ describe('league scheduling (time slots)', () => {
         }),
       ],
       doTeamsOfficiate: true,
-      officialSchedulingMode: 'TEAM_STAFFING',
+      staffingPriority: 'TEAM_COVERAGE_REQUIRED',
       gamesPerOpponent: 1,
       includePlayoffs: true,
       playoffTeamCount: 8,

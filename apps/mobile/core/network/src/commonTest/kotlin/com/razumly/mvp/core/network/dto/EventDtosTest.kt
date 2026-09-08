@@ -81,21 +81,6 @@ class EventDtosTest {
         assertFailsWith<IllegalArgumentException> { dto.toEventOrThrow() }
     }
 
-    @Test
-    fun given_obsolete_wire_mode_when_event_is_loaded_then_it_cannot_change_team_duties() {
-        val dto = com.razumly.mvp.core.util.jsonMVP.decodeFromString<EventApiDto>(
-            """{
-                "id":"event-cutover", "name":"Staffing", "hostId":"host-1",
-                "start":"2026-02-10T00:00:00Z", "end":"2026-02-10T01:00:00Z",
-                "officialSchedulingMode":"TEAM_STAFFING", "doTeamsOfficiate":false
-            }""",
-        )
-
-        val event = assertNotNull(dto.toEventOrNull())
-
-        assertEquals(StaffingPriority.BEST_AVAILABLE_COVERAGE, event.staffingPriority)
-        assertEquals(false, event.doTeamsOfficiate)
-    }
 
     @Test
     fun given_event_type_when_automated_scheduling_is_missing_then_dto_uses_event_type_default() {

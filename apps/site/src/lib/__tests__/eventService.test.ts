@@ -78,19 +78,6 @@ describe('eventService', () => {
     expect(event).not.toHaveProperty('officialSchedulingMode');
   });
 
-  it('maps a legacy stored staffing mode to canonical output without exposing the mode', async () => {
-    apiRequestMock.mockResolvedValue({
-      ...canonicalEventRow,
-      staffingPriority: null,
-      officialSchedulingMode: 'TEAM_STAFFING',
-    });
-
-    const event = await eventService.getEvent('evt_1');
-
-    expect(event?.staffingPriority).toBe('TEAM_COVERAGE_REQUIRED');
-    expect(event?.doTeamsOfficiate).toBe(true);
-    expect(event).not.toHaveProperty('officialSchedulingMode');
-  });
 
   it('preserves rental booking metadata for overlap-only field blockers', async () => {
     apiRequestMock.mockResolvedValue({

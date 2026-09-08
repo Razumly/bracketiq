@@ -36,7 +36,7 @@ const buildTeams = (count: number, division: Division) => {
   return teams;
 };
 
-const buildTournament = (mode: 'STAFFING' | 'TEAM_STAFFING' | 'SCHEDULE' | 'OFF') => {
+const buildTournament = () => {
   const division = buildDivision();
   const fields = {
     field_1: buildField('field_1', 1, division),
@@ -49,8 +49,8 @@ const buildTournament = (mode: 'STAFFING' | 'TEAM_STAFFING' | 'SCHEDULE' | 'OFF'
   });
 
   return new Tournament({
-    id: `tournament_${mode.toLowerCase()}`,
-    name: `Tournament ${mode}`,
+    id: 'tournament_canonical',
+    name: 'Tournament',
     start: new Date(2026, 0, 3, 9, 0, 0),
     end: new Date(2026, 0, 3, 13, 0, 0),
     maxParticipants: 4,
@@ -65,7 +65,7 @@ const buildTournament = (mode: 'STAFFING' | 'TEAM_STAFFING' | 'SCHEDULE' | 'OFF'
     usesSets: false,
     matchDurationMinutes: 60,
     restTimeMinutes: 0,
-    officialSchedulingMode: mode,
+    staffingPriority: 'BEST_AVAILABLE_COVERAGE',
     officialPositions: [
       { id: 'referee', name: 'Referee', count: 1, order: 0 },
     ],
@@ -173,200 +173,9 @@ const buildPlannerMatch = (
   team2,
 });
 
-const overlappingAssignments = (scheduled: ReturnType<typeof scheduleEvent>['event']) => {
-  const matches = Object.values(scheduled.matches).sort((left, right) => left.start.getTime() - right.start.getTime());
-  const conflicts: Array<[string, string]> = [];
-  for (let index = 0; index < matches.length; index += 1) {
-    for (let compareIndex = index + 1; compareIndex < matches.length; compareIndex += 1) {
-      const left = matches[index];
-      const right = matches[compareIndex];
-      if (left.end.getTime() <= right.start.getTime() || right.end.getTime() <= left.start.getTime()) {
-        continue;
-      }
-      const leftUsers = new Set(
-        left.officialAssignments.map((assignment) => assignment.userId).filter((userId) => typeof userId === 'string'),
-      );
-      const rightUsers = new Set(
-        right.officialAssignments.map((assignment) => assignment.userId).filter((userId) => typeof userId === 'string'),
-      );
-      for (const userId of leftUsers) {
-        if (rightUsers.has(userId)) {
-          conflicts.push([left.id, right.id]);
-        }
-      }
-    }
-  }
-  return conflicts;
-};
 
-describe('official staffing modes', () => {
-  it('legacy STAFFING serializes matches only when the same official identity would overlap', () => {
-    const tournament = buildTournament('STAFFING');
 
-    const scheduled = scheduleEvent({ event: tournament }, context).event as Tournament;
-    const firstRoundMatches = Object.values(scheduled.matches).filter((match) => match.winnerNextMatch);
-
-    expect(firstRoundMatches).toHaveLength(2);
-    expect(firstRoundMatches[0].end.getTime()).toBeLessThanOrEqual(firstRoundMatches[1].start.getTime());
-    expect(overlappingAssignments(scheduled)).toHaveLength(0);
-  });
-
-  it('TEAM_STAFFING enforces only team-official capacity', () => {
-    const division = buildDivision();
-    const fields = {
-      field_1: buildField('field_1', 1, division),
-      field_2: buildField('field_2', 2, division),
-    };
-    const official = new UserData({
-      id: 'official_1',
-      divisions: [division],
-      matches: [],
-    });
-    const tournament = new Tournament({
-      id: 'tournament_team_staffing',
-      name: 'Tournament Team Staffing',
-      start: new Date(2026, 0, 3, 9, 0, 0),
-      end: new Date(2026, 0, 3, 13, 0, 0),
-      maxParticipants: 4,
-      teamSignup: true,
-      eventType: 'TOURNAMENT',
-      teams: buildTeams(4, division),
-      divisions: [division],
-      fields,
-      officials: [official],
-      doTeamsOfficiate: false,
-      doubleElimination: false,
-      usesSets: false,
-      matchDurationMinutes: 60,
-      restTimeMinutes: 0,
-      officialSchedulingMode: 'TEAM_STAFFING',
-      officialPositions: [
-        { id: 'referee', name: 'Referee', count: 1, order: 0 },
-      ],
-      eventOfficials: [
-        {
-          id: 'event_official_1',
-          userId: official.id,
-          positionIds: ['referee'],
-          fieldIds: [],
-          isActive: true,
-        },
-      ],
-    });
-
-    const scheduled = scheduleEvent({ event: tournament }, context).event as Tournament;
-    const matches = Object.values(scheduled.matches);
-    const firstRoundMatches = matches
-      .filter((match) => match.winnerNextMatch && match.team1 && match.team2)
-      .sort((left, right) => left.start.getTime() - right.start.getTime());
-
-    expect(matches).toHaveLength(3);
-    expect(matches.every((match) => match.officialAssignments.length === 1)).toBe(true);
-    expect(firstRoundMatches).toHaveLength(2);
-    expect(firstRoundMatches.every((match) => Boolean(match.teamOfficial))).toBe(true);
-    expect(firstRoundMatches[0].end.getTime()).toBeLessThanOrEqual(firstRoundMatches[1].start.getTime());
-  });
-
-  it('legacy SCHEDULE preserves match timing and exposes unbound named slots when needed', () => {
-    const tournament = buildTournament('SCHEDULE');
-
-    const scheduled = scheduleEvent({ event: tournament }, context).event as Tournament;
-    const matches = Object.values(scheduled.matches);
-    const firstRoundMatches = matches.filter((match) => match.winnerNextMatch);
-
-    expect(firstRoundMatches).toHaveLength(2);
-    const distinctStartTimes = new Set(firstRoundMatches.map((match) => match.start.getTime()));
-    expect(distinctStartTimes.size).toBe(1);
-    expect(matches.every((match) => match.officialAssignments.length === 1)).toBe(true);
-    expect(matches.some((match) => match.officialAssignments[0].userId === null)).toBe(true);
-    expect(overlappingAssignments(scheduled)).toHaveLength(0);
-  });
-
-  it('SCHEDULE does not default omitted team officiating to on', () => {
-    const division = buildDivision();
-    const fields = {
-      field_1: buildField('field_1', 1, division),
-      field_2: buildField('field_2', 2, division),
-    };
-    const official = new UserData({
-      id: 'official_1',
-      divisions: [division],
-      matches: [],
-    });
-    const tournament = new Tournament({
-      id: 'tournament_schedule_omitted_team_officiating',
-      name: 'Tournament Schedule Omitted Team Officiating',
-      start: new Date(2026, 0, 3, 9, 0, 0),
-      end: new Date(2026, 0, 3, 13, 0, 0),
-      maxParticipants: 4,
-      teamSignup: true,
-      eventType: 'TOURNAMENT',
-      teams: buildTeams(4, division),
-      divisions: [division],
-      fields,
-      officials: [official],
-      doubleElimination: false,
-      usesSets: false,
-      matchDurationMinutes: 60,
-      restTimeMinutes: 0,
-      officialSchedulingMode: 'SCHEDULE',
-      officialPositions: [
-        { id: 'referee', name: 'Referee', count: 1, order: 0 },
-      ],
-      eventOfficials: [
-        {
-          id: 'event_official_1',
-          userId: official.id,
-          positionIds: ['referee'],
-          fieldIds: [],
-          isActive: true,
-        },
-      ],
-    });
-
-    expect(tournament.doTeamsOfficiate).toBe(false);
-
-    const scheduled = scheduleEvent({ event: tournament }, context).event as Tournament;
-    const firstRoundMatches = Object.values(scheduled.matches).filter((match) => match.winnerNextMatch);
-    const distinctStartTimes = new Set(firstRoundMatches.map((match) => match.start.getTime()));
-
-    expect(firstRoundMatches).toHaveLength(2);
-    expect(distinctStartTimes.size).toBe(1);
-    expect(firstRoundMatches.every((match) => !match.teamOfficial)).toBe(true);
-  });
-
-  it('legacy OFF normalizes to conflict-allowed named Official coverage', () => {
-    const tournament = buildTournament('OFF');
-    const teams = Object.values(tournament.teams);
-    const first = buildPlannerMatch(
-      'legacy_off_first',
-      tournament.divisions[0],
-      tournament.fields.field_1,
-      teams[0],
-      teams[1],
-      9,
-    );
-    const second = buildPlannerMatch(
-      'legacy_off_second',
-      tournament.divisions[0],
-      tournament.fields.field_2,
-      teams[2],
-      teams[3],
-      9,
-    );
-    const planner = new OfficialStaffingPlanner(tournament);
-
-    planner.assignMatches([second, first]);
-
-    expect(planner.priority).toBe('FULL_COVERAGE_WITH_CONFLICTS_ALLOWED');
-    expect(first.officialAssignments).toEqual([
-      expect.objectContaining({ userId: 'official_1', hasConflict: false }),
-    ]);
-    expect(second.officialAssignments).toEqual([
-      expect.objectContaining({ userId: 'official_1', hasConflict: true }),
-    ]);
-  });
-
+describe('canonical official staffing behavior', () => {
   it('balances exact position assignments across sequential matches', () => {
     const division = buildDivision();
     const field = buildField('field_1', 1, division);
@@ -390,7 +199,7 @@ describe('official staffing modes', () => {
       usesSets: false,
       matchDurationMinutes: 60,
       restTimeMinutes: 0,
-      officialSchedulingMode: 'SCHEDULE',
+      staffingPriority: 'BEST_AVAILABLE_COVERAGE',
       officialPositions: [
         { id: 'r1', name: 'R1', count: 1, order: 0 },
         { id: 'r2', name: 'R2', count: 1, order: 1 },
@@ -429,7 +238,7 @@ describe('official staffing modes', () => {
   });
 
   it('uses the configured match duration when a committed match is missing its end time', () => {
-    const tournament = buildTournament('SCHEDULE');
+    const tournament = buildTournament();
     const division = tournament.divisions[0];
     const field = tournament.fields.field_1;
     const teams = Object.values(tournament.teams);
@@ -456,7 +265,7 @@ describe('official staffing modes', () => {
   });
 
   it('honors the committed assignment buffer when evaluating the next official window', () => {
-    const tournament = buildTournament('SCHEDULE');
+    const tournament = buildTournament();
     const division = tournament.divisions[0];
     const field = tournament.fields.field_1;
     const teams = Object.values(tournament.teams);
@@ -496,7 +305,7 @@ describe('official staffing modes', () => {
     ]);
   });
 
-  it('SCHEDULE keeps assignable single-position officials when another slot has no candidates', () => {
+  it('best available coverage keeps assignable single-position officials when another slot has no candidates', () => {
     const division = buildDivision();
     const field = buildField('field_1', 1, division);
     const teams = Object.values(buildTeams(3, division));
@@ -519,7 +328,7 @@ describe('official staffing modes', () => {
       usesSets: false,
       matchDurationMinutes: 60,
       restTimeMinutes: 0,
-      officialSchedulingMode: 'SCHEDULE',
+      staffingPriority: 'BEST_AVAILABLE_COVERAGE',
       officialPositions: [
         { id: 'r1', name: 'R1', count: 1, order: 0 },
         { id: 'r2', name: 'R2', count: 1, order: 1 },
@@ -578,7 +387,7 @@ describe('official staffing modes', () => {
       usesSets: false,
       matchDurationMinutes: 60,
       restTimeMinutes: 0,
-      officialSchedulingMode: 'SCHEDULE',
+      staffingPriority: 'BEST_AVAILABLE_COVERAGE',
       officialPositions: [
         { id: 'r1', name: 'R1', count: 1, order: 0 },
         { id: 'r2', name: 'R2', count: 1, order: 1 },
@@ -612,14 +421,14 @@ describe('official staffing modes', () => {
     ]);
   });
 
-  it('legacy OFF maps to full coverage and still refuses one user for two positions in one match', () => {
+  it('full coverage refuses one user for two positions in one match', () => {
     const division = buildDivision();
     const field = buildField('field_1', 1, division);
     const teams = Object.values(buildTeams(3, division));
     const official = new UserData({ id: 'official_1', divisions: [division] });
     const tournament = new Tournament({
       id: 'planner_off_unique_user',
-      name: 'Planner OFF Uniqueness',
+      name: 'Planner Full Coverage Uniqueness',
       start: new Date(2026, 0, 3, 9, 0, 0),
       end: new Date(2026, 0, 3, 10, 0, 0),
       maxParticipants: 3,
@@ -634,7 +443,7 @@ describe('official staffing modes', () => {
       usesSets: false,
       matchDurationMinutes: 60,
       restTimeMinutes: 0,
-      officialSchedulingMode: 'OFF',
+      staffingPriority: 'FULL_COVERAGE_REQUIRED',
       officialPositions: [
         { id: 'r1', name: 'R1', count: 1, order: 0 },
         { id: 'r2', name: 'R2', count: 1, order: 1 },
@@ -689,7 +498,7 @@ describe('official staffing modes', () => {
       usesSets: false,
       matchDurationMinutes: 60,
       restTimeMinutes: 0,
-      officialSchedulingMode: 'SCHEDULE',
+      staffingPriority: 'BEST_AVAILABLE_COVERAGE',
       officialPositions: [{ id: 'referee', name: 'Referee', count: 1, order: 0 }],
       eventOfficials: [participantOfficial, unrelatedOfficial].map((official) => ({
         id: `event_${official.id}`,
@@ -769,7 +578,7 @@ describe('official staffing modes', () => {
       usesSets: false,
       matchDurationMinutes: 60,
       restTimeMinutes: 0,
-      officialSchedulingMode: 'SCHEDULE',
+      staffingPriority: 'BEST_AVAILABLE_COVERAGE',
       officialPositions: [{ id: 'referee', name: 'Referee', count: 1, order: 0 }],
       eventOfficials: [overlappingParticipant, unrelatedOfficial].map((official) => ({
         id: `event_${official.id}`,

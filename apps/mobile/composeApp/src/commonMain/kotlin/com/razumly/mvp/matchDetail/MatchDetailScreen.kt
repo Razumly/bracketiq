@@ -2192,7 +2192,7 @@ private fun MatchDetailBottomActions(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Warning,
-                        contentDescription = "Field differs from event location",
+                        contentDescription = "Resource differs from event location",
                         tint = MaterialTheme.colorScheme.error,
                     )
                     Text(

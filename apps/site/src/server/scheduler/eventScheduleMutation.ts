@@ -255,10 +255,7 @@ export const validateAndNormalizeSerializedGraph = (
   const staffingPriority: StaffingPriority =
     typeof graph.event.staffingPriority === "string" &&
     graph.event.staffingPriority.trim().length > 0
-      ? normalizeStaffingPriority(
-          graph.event.staffingPriority,
-          graph.event.officialSchedulingMode,
-        )
+      ? normalizeStaffingPriority(graph.event.staffingPriority)
       : "FULL_COVERAGE_REQUIRED";
   const staffingPolicy = getStaffingPriorityPolicy(staffingPriority);
 

@@ -162,8 +162,8 @@ describe('GET /api/events/[eventId]/participants', () => {
       parentEvent: null,
       timeSlotIds: [],
       divisions: [],
-      staffingPriority: null,
-      officialSchedulingMode: 'TEAM_STAFFING',
+      staffingPriority: 'TEAM_COVERAGE_REQUIRED',
+      doTeamsOfficiate: true,
     });
     buildEventParticipantSnapshotMock.mockResolvedValue({
       participants: { teamIds: [], userIds: ['user_1'], waitListIds: [], freeAgentIds: [], divisions: [] },
@@ -200,7 +200,6 @@ describe('GET /api/events/[eventId]/participants', () => {
       doTeamsOfficiate: true,
     }));
     expect(payload.event).not.toHaveProperty('$id');
-    expect(payload.event).toHaveProperty('officialSchedulingMode', 'TEAM_STAFFING');
     expect(canManageEventMock).not.toHaveBeenCalled();
     expect(buildEventParticipantSnapshotMock).toHaveBeenCalledWith(expect.objectContaining({
       includeRegistrations: false,

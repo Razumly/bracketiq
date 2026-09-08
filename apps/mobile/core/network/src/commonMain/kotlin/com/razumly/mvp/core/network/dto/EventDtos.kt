@@ -39,7 +39,6 @@ import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toInstant
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 import kotlin.native.ObjCName
@@ -107,7 +106,6 @@ data class EventApiDto(
     val noFixedEndDateTime: Boolean? = null,
     val scheduleEndConstraint: String? = null,
     val generatedScheduleEnd: String? = null,
-    @SerialName("automatedScheduling")
     val isAutomatedScheduling: Boolean? = null,
     val teamSignup: Boolean? = null,
     val singleDivision: Boolean? = null,

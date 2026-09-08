@@ -4896,7 +4896,7 @@ describe('League schedule page', () => {
     expect(eventService.proposeEventScheduleMaintenance).not.toHaveBeenCalled();
   });
 
-  it('shows create event failure details returned by the server', async () => {
+  it('shows create event failure details without an unscheduled recovery action', async () => {
     useSearchParamsMock.mockReturnValue({
       get: (key: string) => {
         if (key === 'create') return '1';
@@ -4987,7 +4987,7 @@ describe('League schedule page', () => {
     expect(await screen.findByText(/Selected resources and time range conflict/)).toBeInTheDocument();
     expect(screen.getByTestId('event-form')).toBeInTheDocument();
     expect(mockEventFormDraft?.name).toBe('Create Regular Event');
-    expect(await screen.findByRole('button', { name: 'Save as draft without a schedule' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save as draft without a schedule' })).not.toBeInTheDocument();
   });
   it('retries an unchanged create command with the same operation ID after the first response is lost', async () => {
     useSearchParamsMock.mockReturnValue({
@@ -5133,7 +5133,6 @@ describe('League schedule page', () => {
       }],
       timeSlotIds: ['slot_clinic'],
       requiredTemplateIds: ['template_host'],
-      officialSchedulingMode: 'OFF',
       teamOfficialsMaySwap: true,
       teamCheckInMode: 'EVENT',
       teamCheckInOpenMinutesBefore: 45,

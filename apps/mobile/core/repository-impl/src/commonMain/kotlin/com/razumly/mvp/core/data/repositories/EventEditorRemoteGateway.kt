@@ -1716,7 +1716,6 @@ private val MAINTENANCE_GRAPH_EVENT_REQUIRED_KEYS = setOf(
 )
 
 private val MAINTENANCE_GRAPH_EVENT_OPTIONAL_KEYS = setOf(
-    "officialSchedulingMode", // Accept the existing site response field without using it.
     "doubleElimination",
     "winnerSetCount",
     "loserSetCount",

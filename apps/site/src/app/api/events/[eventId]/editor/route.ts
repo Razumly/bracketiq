@@ -9,10 +9,6 @@ import { parseSaveEventEditorCommand } from "@/contracts/eventEditor";
 import { loadEventEditorSnapshot } from "@/server/events/eventEditorSnapshot";
 import { attachEventEditorRevisionBinding } from "@/server/events/eventEditorRevisionBinding";
 import {
-  serializeEventEditorSnapshot,
-  serializeEventEditorSnapshotEnvelope,
-} from "@/server/events/eventEditorWireCompatibility";
-import {
   EditorCapabilityError,
   EditorImmutableFieldError,
   EditorInputError,
@@ -169,10 +165,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
       await loadEventEditorSnapshot(eventId, { actor: session }),
       { actor: session },
     );
-    return NextResponse.json(
-      serializeEventEditorSnapshot(snapshot),
-      { status: 200 },
-    );
+    return NextResponse.json(snapshot, { status: 200 });
   } catch (error) {
     return errorResponse(error);
   }
@@ -212,10 +205,7 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
         actor: session,
       }),
     };
-    return NextResponse.json(
-      serializeEventEditorSnapshotEnvelope(resultWithBinding),
-      { status: 200 },
-    );
+    return NextResponse.json(resultWithBinding, { status: 200 });
   } catch (error) {
     return errorResponse(error);
   }

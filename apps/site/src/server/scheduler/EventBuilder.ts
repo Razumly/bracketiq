@@ -1775,7 +1775,6 @@ export class EventBuilder {
       usesSets: this.event.usesSets,
       setDurationMinutes:
         config.setDurationMinutes ?? this.event.setDurationMinutes,
-      officialSchedulingMode: this.event.officialSchedulingMode,
       staffingPriority: this.event.staffingPriority,
       officialPositions: this.event.officialPositions,
       matchRulesOverride: this.event.matchRulesOverride,
