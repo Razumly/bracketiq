@@ -362,7 +362,7 @@
     "react-big-calendar": "^1.19.4",
     "react-day-picker": "^9.11.2",
     "react-dom": "^19.2.4",
-    "react-hook-form": "^7.66.1",
+    "react-hook-form": "^7.87.0",
     "react-select": "^5.10.2",
     "react-time-picker": "^8.0.2",
     "react-timezone-select": "^3.2.8",
