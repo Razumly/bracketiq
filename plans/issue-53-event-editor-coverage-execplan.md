@@ -21,7 +21,9 @@ Issue #53 requires a shared field inventory and complete wire fixtures. A wire f
 - [x] (2026-09-07) Complete both independent review axes. Standards: no remaining findings. Spec: no remaining actionable findings.
 - [x] (2026-09-07) Pass the full Android checks with one Gradle worker: 2,016 tests pass and 17 are skipped. Android lint passes. The Create metadata Room regression and the existing Reflow client-to-site check pass.
 - [x] (2026-09-07) Pass the final `npx tsc --noEmit` check. Pass full-file lint for all nine changed site files against the issue base commit.
-- [ ] Run the full checks, review both axes, commit, and update GitHub.
+- [x] (2026-09-07) Complete the full site run: 900 suites pass, 33 fail, and seven are skipped. All 320 Event Editor checks pass. Rerun the twelve newly failed assertions: eleven pass; one complexity-policy subprocess still times out.
+- [x] (2026-09-07) Commit implementation and review fixes as `4101e96a2` and `d1dc46bb9`. Record validation in GitHub.
+- [ ] Run the native iOS fixture tests on macOS. Keep issue #53 open until this acceptance check passes.
 
 ## Context Boundary
 
@@ -77,11 +79,11 @@ Keep the inventory independent from production schemas. Tests may enumerate actu
 
 ## Outcomes & Retrospective
 
-Final validation is in progress. The guards and review exposed losses in Tryout invitations, fractional timed Match durations, Create revision fields, and Create graph metadata. No site HTTP field or contract version changed. No Room entity changed. No new application runtime was started. Native iOS execution remains in the macOS CI job because this host runs Windows.
+Implementation and local validation are complete. Native iOS validation remains pending. The guards and review exposed losses in Tryout invitations, fractional timed Match durations, Create revision fields, and Create graph metadata. No site HTTP field or contract version changed. No Room entity changed. No new application runtime was started. Native iOS execution remains in the macOS CI job because this host runs Windows.
 
 ## Artifacts and Notes
 
-The GitHub issue is https://github.com/Razumly/bracketiq/issues/53. Final evidence and commands will be recorded here.
+The GitHub issue is https://github.com/Razumly/bracketiq/issues/53. Local evidence is in `apps/site/test-results/issue-53-full-site.json`, `issue-53-isolated-rechecks.json`, and `issue-53-full-mobile-serial.txt`. The full site run passed 6,358 tests, failed 66 tests, and skipped 62 tests. All newly failed UI assertions passed in isolation. One new assertion in the existing failing complexity-policy suite still times out in its ESLint subprocess. Existing Windows shell/path, provider, fixture, and Jest discovery failures remain outside this issue. The database check still has the existing PRESERVE Playoff-count failure. These results do not constitute a clean full-suite pass.
 
 ## Interfaces and Dependencies
 
